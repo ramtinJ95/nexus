@@ -397,7 +397,7 @@ function smokeChecks(pins: ImageRecipe["pins"]): readonly SmokeCheck[] {
     {
       name: "user",
       argv: asUser("id; stat -c '%a %U' /usr/bin/sudo; sudo -n true && echo sudo ok; stat -c '%U %a' workspace; cat /proc/sys/kernel/hostname; getent hosts pylon; getent ahostsv4 pylon | head -n 1"),
-      expect: /^uid=1000\(user\) gid=1000\(user\) [^\n]*\n4755 root\nsudo ok\nuser 755\npylon\n::1\s+pylon\n127\.0\.1\.1\s+STREAM pylon\n$/,
+      expect: /^uid=1000\(user\) gid=1000\(user\) [^\n]*\n4755 root\nsudo ok\nuser 755\npylon\n::1\s+pylon\n127\.0\.[01]\.1\s+STREAM pylon\n$/,
     },
     {
       name: "versions",

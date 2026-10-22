@@ -5,5 +5,6 @@
 # keeps the name of the boot that made the checkpoint.
 printf 'pylon\n' > /etc/hostname
 # Both families, or a lookup that asks for IPv6 first falls through to Gondolin's DNS and gets a synthetic address.
+# glibc answers an IPv4 lookup of a ::1 entry with 127.0.0.1, so either loopback may come back for IPv4.
 printf '127.0.0.1\tlocalhost\n::1\tlocalhost ip6-localhost ip6-loopback\n127.0.1.1\tpylon\n::1\tpylon\n' > /etc/hosts
 printf 'pylon' > /proc/sys/kernel/hostname
