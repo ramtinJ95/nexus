@@ -1,0 +1,9 @@
+#!/bin/sh
+# Placeholder for the in-pylon nexus CLI (src/project.ts, PylonApiRequest). It only reports its version until
+# the CLI that calls the probe at NEXUS_API replaces it.
+version=0.0.0-placeholder
+case "${1:-}" in
+  --version|version) echo "nexus $version"; exit 0 ;;
+esac
+echo "nexus $version: '${1:-}' is not implemented in this image yet" >&2
+exit 64

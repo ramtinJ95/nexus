@@ -34,7 +34,10 @@ const { desired: _, ...pylon } = newPylonRecord({
 });
 const image: ImageManifest = {
   id: "img-000000000000", gondolinBuildId: "b1", builtOn: node, builtAt: "2027-01-01T00:00:00Z", sha256: "0".repeat(64),
-  pins: { debianDigest: "d", node: "24", claudeCode: "c", pi: "p", herdr: "h", gondolin: "0.13.0", alpineKernel: "k", dotfilesCommon: "f" },
+  pins: {
+    debianDigest: "d", node: "24", nodeSha256: "n", claudeCode: "c", pi: "p", herdr: "h", piEnv: "e", piEnvSha256: "s",
+    gondolin: "0.13.0", alpineKernel: "k", dotfilesCommon: "f",
+  },
 };
 
 // One directory for the file, so each test's registry is closed before it is removed.

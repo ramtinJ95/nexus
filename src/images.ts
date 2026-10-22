@@ -29,16 +29,25 @@ export type PortableArtifactId = Exclude<ArtifactId, CheckpointId>;
  * - Dockerfile, in layer order:
  *   1. debian:bookworm-slim pinned by digest (glibc, which Amp's image contract also requires).
  *   2. apt: bash, coreutils, util-linux, ca-certificates, git, python3, openssh-server (S2: enableSsh
- *      needs a real sshd), sudo, curl. The service is installed but not enabled.
+ *      needs a real sshd), openssh-client (git over Gondolin's SSH proxy), sudo, curl. The service is installed but not enabled. Also procps (enableSsh's
+ *      script runs ps), e2fsprogs (rootfs growth runs resize2fs), ripgrep and fd (pi cannot download them
+ *      through the allowlist), and xz-utils for the Node tarball.
  *   3. `user`, UID 1000, passwordless sudo, /home/user/workspace.
  *   4. Node from the checksum-verified official tarball into /usr/local.
  *   5. Claude Code and pi from npm, Herdr from its official installer into /usr/local/bin,
- *      `herdr integration install pi` as user, the in-pylon `nexus` CLI, pi-sandbox's `sandboxssh` helper,
- *      and a fallback copy of the common dotfiles layer.
- *   6. /etc/profile.d/00-nexus-base.sh: PATH with /usr/local/bin (Gondolin's exec PATH lacks it, S1) and
- *      NODE_EXTRA_CA_CERTS=/run/gondolin/ca-certificates.crt (the mitm CA is unreadable to user, S2).
- * - gondolin.json: distro alpine for the kernel and initramfs, oci.image = the Docker build, and
- *   postBuild.copy of the kernel module seed into /lib/modules (the S1 workaround).
+ *      `herdr integration install` for pi and Claude Code as user (the sessions stream reads harness session
+ *      IDs through them), the pi-env daemon at /usr/local/libexec/nexus/pi-env, the in-pylon `nexus` CLI, and
+ *      the fallback copy of the common dotfiles layer as a git repository at /opt/nexus/dotfiles, owned by
+ *      user, which boots clone and then fetch.
+ *      `gondolin build` itself installs the `sandboxssh` helper that pi-sandbox's shell needs.
+ * - gondolin.json: distro alpine for the kernel and initramfs, and env with PATH including /usr/local/bin
+ *   (Gondolin's exec PATH lacks it, S1) and NODE_EXTRA_CA_CERTS=/run/gondolin/ca-certificates.crt (the mitm
+ *   CA is unreadable to user, S2). Gondolin sources that env before sandboxd starts and from /etc/profile.d,
+ *   so execs and login shells both see it. buildImage adds oci.image = the Docker build, and postBuild.copy
+ *   of the kernel module seed into /lib/modules (the S1 workaround), and init.rootfsInitExtra.
+ * - rootfs-init-extra.sh: run as root by Gondolin's /init before sandboxd. It sets the hostname pylon and
+ *   writes /etc/hostname and /etc/hosts, because Gondolin sets no hostname and sudo warns without one.
+ * - pins.json: ImageRecipe.pins. Every other file except build.sh is in ImageRecipe.files.
  * Logins and secrets are never in the image.
  */
 export interface ImageRecipe {
@@ -46,9 +55,12 @@ export interface ImageRecipe {
   pins: {
     debianDigest: string;
     node: string; // "24.22.1"
+    nodeSha256: string; // of node-v<node>-linux-x64.tar.xz, from that release's SHASUMS256.txt
     claudeCode: string;
     pi: string;
     herdr: string;
+    piEnv: string; // the pi-env daemon, pinned to the harness's pi-env version
+    piEnvSha256: string; // of package/bin/pi-env-linux-x64/pi-env in that npm tarball
     gondolin: string; // "0.13.0". The module seed workaround is tied to it
     alpineKernel: string; // "6.18.58-0-virt". The seed must match exactly
     dotfilesCommon: string; // commit of the baked fallback layer
@@ -69,23 +81,10 @@ export interface ImageManifest {
   pins: ImageRecipe["pins"];
   builtOn: NodeName;
   builtAt: string;
-  sha256: string; // of the sparse archive peers fetch
+  sha256: string; // of the sparse archive peers fetch, imageArchive in image-build.ts
 }
 
-/** Runs on the image build node inside a build-image job. The build user needs Docker access. */
-export async function buildImage(recipe: ImageRecipe, outDir: string, signal: AbortSignal): Promise<ImageManifest> {
-  // TODO:
-  // 1. docker build the Dockerfile with a tag derived from the image ID.
-  // 2. Seed: copy Gondolin's cached Alpine module tree for pins.alpineKernel, keeping the absolute
-  //    vmlinuz link text. Fail with a clear error if the cached kernel version differs from the pin, because
-  //    the workaround breaks silently otherwise. Delete this step once Gondolin's kernel-modules copy sets
-  //    verbatimSymlinks (spikes/UPSTREAM-ISSUE-DRAFT.md).
-  // 3. gondolin build into outDir.partial.
-  // 4. Smoke boot: `id user`, versions of node, claude, pi and herdr, a Herdr server as user, and curl to an
-  //    allowed host through TLS interception. Any failure fails the job and publishes nothing.
-  // 5. Write manifest.json, then rename outDir.partial to outDir.
-  throw new Error("not implemented");
-}
+// buildImage, which runs on the image build node, lives in image-build.ts.
 
 /**
  * Where and when. Built only when a human runs `nexus image build`, on the node named by the control
