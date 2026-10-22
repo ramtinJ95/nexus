@@ -1,0 +1,174 @@
+/**
+ * The reconcile loop. It follows every node's observe stream, folds each event into the registry, and ticks
+ * every pylon on a node after each event and every 5 seconds.
+ *
+ * Each node has one pass at a time. A pass that is asked for while one runs is coalesced into a single
+ * pass after it, so no two ticks of the same pylon overlap and a slow probe holds up only its own node.
+ */
+import { setTimeout as delay } from "node:timers/promises";
+import { desiredPhase, type RegistryWrite } from "../reconcile.ts";
+import { tick, type TickContext } from "../tick.ts";
+import type { NodeName, NodeObservation, ProbeClient, ProbeError, ProbeEvent, PylonId, PylonObservation } from "../protocol.ts";
+import type { ArtifactId } from "../images.ts";
+import type { Registry, ThreadId } from "./registry.ts";
+
+/** reconcile.ts's ingest. `known` maps each registry pylon on the node to its last ingested observation. */
+export type Ingest = (event: ProbeEvent, node: NodeName, known: ReadonlyMap<PylonId, PylonObservation | "absent">, now: number) => readonly RegistryWrite[];
+
+export interface LoopOptions {
+  registry: Registry;
+  /** One client per registry node. */
+  probes: readonly ProbeClient[];
+  ingest: Ingest;
+  intervalMs?: number;
+  /** How long an observe link stays down before the node is recorded offline. */
+  offlineAfterMs?: number;
+  /**
+   * The probe sends a snapshot every 60 s, so a link quiet for longer is dead. A node that went to sleep
+   * sends no reset, and without this its stream would look open forever.
+   */
+  silenceMs?: number;
+  reconnectMs?: number;
+  log?: (message: string) => void;
+}
+
+export interface Loop {
+  /** Ticks every pylon on the node. Resolves once a pass that began after this call has finished. */
+  wake(node: NodeName): Promise<void>;
+  close(): Promise<void>;
+}
+
+interface Link {
+  probe: ProbeClient;
+  /** The planner acts on a node only while its observe stream is open. */
+  up: boolean;
+  pass: Promise<void> | null;
+  again: boolean;
+  offline: NodeJS.Timeout | null;
+}
+
+export function startLoop(options: LoopOptions): Loop {
+  const { registry, ingest } = options;
+  const intervalMs = options.intervalMs ?? 5_000;
+  const offlineAfterMs = options.offlineAfterMs ?? 30_000;
+  const reconnectMs = options.reconnectMs ?? 2_000;
+  const silenceMs = options.silenceMs ?? 90_000;
+  const log = options.log ?? ((message: string) => console.error(message));
+  const shutdown = new AbortController();
+
+  const links = new Map<NodeName, Link>();
+  for (const probe of options.probes) {
+    if (registry.node(probe.node) === undefined) throw new Error(`probe for ${probe.node}, which the registry does not know`);
+    links.set(probe.node, { probe, up: false, pass: null, again: false, offline: null });
+  }
+
+  const observation = (node: NodeName): NodeObservation | null => links.get(node)?.up ? registry.node(node)?.observation ?? null : null;
+
+  const holders = (from: NodeName) => (artifact: ArtifactId): readonly NodeName[] =>
+    [...links.keys()].filter((node) => node !== from && observation(node)?.artifacts.includes(artifact));
+
+  function artifactSha256(artifact: ArtifactId): string {
+    const image = artifact.startsWith("img-") ? registry.image(artifact as `img-${string}`) : undefined;
+    if (image === undefined) throw new Error(`the registry has no recorded sha256 for ${artifact}`);
+    return image.sha256;
+  }
+
+  async function pass(node: NodeName, link: Link) {
+    for (const stored of registry.pylonsOn(node)) {
+      const thread = registry.thread(stored.thread as ThreadId)!;
+      const pylon = { ...stored, desired: desiredPhase(thread, Date.now()) };
+      const ctx: TickContext = {
+        probe: link.probe,
+        observation: observation(node),
+        holders: holders(node),
+        artifactSha256,
+        save: (p) => registry.savePylon(p),
+      };
+      try {
+        const step = await tick(pylon, ctx);
+        if (step.kind === "fail" && stored.failed === null) log(`${pylon.pylonId}: the planner gave up: ${step.reason}`);
+      } catch (err) {
+        log(`${pylon.pylonId}: tick failed: ${(err as Error).message}`);
+      }
+    }
+  }
+
+  function wake(node: NodeName): Promise<void> {
+    const link = links.get(node);
+    if (link === undefined || shutdown.signal.aborted) return Promise.resolve();
+    link.again = true;
+    link.pass ??= (async () => {
+      try {
+        while (link.again && !shutdown.signal.aborted) {
+          link.again = false;
+          await pass(node, link);
+        }
+      } finally {
+        link.pass = null;
+      }
+    })();
+    return link.pass;
+  }
+
+  function linkDown(node: NodeName, link: Link) {
+    link.up = false;
+    link.offline ??= setTimeout(() => { link.offline = null; registry.markOffline(node); }, offlineAfterMs);
+  }
+
+  function linkUp(link: Link) {
+    link.up = true;
+    if (link.offline !== null) clearTimeout(link.offline);
+    link.offline = null;
+  }
+
+  async function follow(node: NodeName, link: Link) {
+    while (!shutdown.signal.aborted) {
+      const connection = new AbortController();
+      let silence = setTimeout(() => connection.abort(), silenceMs);
+      try {
+        for await (const event of link.probe.observe(AbortSignal.any([shutdown.signal, connection.signal]))) {
+          clearTimeout(silence);
+          silence = setTimeout(() => connection.abort(), silenceMs);
+          // The stored observation is the last one ingested, including the one from before a reconnect or a restart.
+          const last = registry.node(node)!.observation;
+          const known = new Map(registry.pylonsOn(node).map((p) => [p.pylonId, last?.pylons.find((o) => o.pylonId === p.pylonId) ?? "absent" as const]));
+          registry.ingested(merge(last, event), ingest(event, node, known, Date.now()));
+          if (event.type === "snapshot") linkUp(link);
+          void wake(node);
+        }
+      } catch (err) {
+        if (!shutdown.signal.aborted && !connection.signal.aborted && (err as ProbeError).code !== "unreachable") log(`${node}: observe failed: ${(err as Error).message}`);
+      } finally {
+        clearTimeout(silence);
+      }
+      if (shutdown.signal.aborted) return;
+      linkDown(node, link);
+      await delay(reconnectMs, undefined, { signal: shutdown.signal }).catch(() => undefined);
+    }
+  }
+
+  for (const [node, link] of links) linkDown(node, link);
+  const followers = [...links].map(([node, link]) => follow(node, link));
+  const timer = setInterval(() => { for (const node of links.keys()) void wake(node); }, intervalMs);
+
+  return {
+    wake,
+    async close() {
+      shutdown.abort();
+      clearInterval(timer);
+      for (const link of links.values()) if (link.offline !== null) clearTimeout(link.offline);
+      await Promise.all([...followers, ...[...links.values()].map((link) => link.pass)]);
+    },
+  };
+}
+
+/**
+ * The node's current state: a snapshot replaces it, and a pylon event updates its pylon. Job events stay out,
+ * because a job listed as finished promises that the pylons already show its result. ingest records them.
+ */
+function merge(last: NodeObservation | null, event: ProbeEvent): NodeObservation {
+  if (event.type === "snapshot") return event.observation;
+  if (last === null) throw new Error(`observe sent a ${event.type} event before its first snapshot`);
+  if (event.type !== "pylon") return last;
+  return { ...last, pylons: [...last.pylons.filter((p) => p.pylonId !== event.pylon.pylonId), event.pylon] };
+}

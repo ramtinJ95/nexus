@@ -174,7 +174,7 @@ export type RegistryWrite =
   | { record: "job"; status: JobStatus };
 type NodeCapacity = { memoryGiB: number; committedMemoryGiB: number; diskFreeGiB: number };
 
-export function ingest(event: ProbeEvent, previous: PylonObservation | "absent"): readonly RegistryWrite[] {
+export function ingest(event: ProbeEvent, node: NodeName, known: ReadonlyMap<PylonId, PylonObservation | "absent">, now: number): readonly RegistryWrite[] {
   // TODO: outputs are derived here, not reported by the probe as outputs:
   // branch with pushedAs -> "branch". Dirty tree -> "diff" (one per head). Ready preview -> "preview".
   // declaredOutputs -> as declared. Diff each observation against `previous`, so writes are idempotent upserts.

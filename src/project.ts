@@ -71,9 +71,13 @@ export const loginHosts: { readonly [K in LoginKind]: readonly string[] } = {
   chatgpt: ["auth.openai.com", "chatgpt.com", "api.openai.com"],
 };
 
+/** project.allowedHosts, plus loginHosts for project.logins, plus every SecretGrant host, sorted and deduped. */
 export function effectiveAllowedHosts(project: Project): readonly string[] {
-  // TODO: project.allowedHosts, plus loginHosts for project.logins, plus every SecretGrant host, sorted and deduped.
-  throw new Error("not implemented");
+  return [...new Set([
+    ...project.allowedHosts,
+    ...project.logins.flatMap((login) => loginHosts[login]),
+    ...project.secrets.flatMap((grant) => grant.hosts),
+  ])].sort();
 }
 
 // What a spawn carries, split by when it applies.
