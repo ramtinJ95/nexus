@@ -1,0 +1,139 @@
+:root {
+  --bg: #fbfbfa;
+  --fg: #1b1b1a;
+  --muted: #5d5d58;
+  --line: #deddd8;
+  --card: #ffffff;
+  --accent: #2456c9;
+  --ok: #17663a;
+  --ok-bg: #ddf3e4;
+  --busy: #7a4b00;
+  --busy-bg: #fdebc8;
+  --idle: #3c4a63;
+  --idle-bg: #e3e8f1;
+  --bad: #a3171d;
+  --bad-bg: #fbe0e0;
+  --muted-bg: #ecebe7;
+  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  line-height: 1.45;
+  color: var(--fg);
+  background: var(--bg);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #161615;
+    --fg: #ececea;
+    --muted: #a5a59f;
+    --line: #34342f;
+    --card: #1f1f1d;
+    --accent: #8fb0ff;
+    --ok: #8fe0ad;
+    --ok-bg: #173523;
+    --busy: #f5c76e;
+    --busy-bg: #3d2d0c;
+    --idle: #b9c6de;
+    --idle-bg: #262e3d;
+    --bad: #ff9c9c;
+    --bad-bg: #431b1b;
+    --muted-bg: #2b2b28;
+  }
+}
+
+* { box-sizing: border-box; }
+body { margin: 0; }
+main, .top nav, .refresh { max-width: 56rem; margin: 0 auto; padding: 0 1rem; }
+main { padding-bottom: 2rem; }
+main > .error { margin-top: 1rem; }
+
+a { color: var(--accent); }
+a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible {
+  outline: 3px solid var(--accent);
+  outline-offset: 2px;
+}
+code { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 0.9em; overflow-wrap: anywhere; }
+code.command { white-space: nowrap; }
+
+.top { border-bottom: 1px solid var(--line); background: var(--card); }
+.top nav { display: flex; align-items: center; justify-content: space-between; gap: 1rem; min-height: 3.25rem; }
+.brand { font-weight: 700; color: var(--fg); text-decoration: none; font-size: 1.1rem; }
+
+h1 { font-size: 1.5rem; margin: 1.25rem 0 0.5rem; overflow-wrap: anywhere; }
+h2 { font-size: 1.1rem; margin: 0; }
+section { margin-top: 1.5rem; }
+
+.section-head { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 0.5rem 1rem; }
+.meta { color: var(--muted); font-size: 0.9rem; margin: 0.25rem 0; }
+.empty { color: var(--muted); }
+.note { max-width: 56rem; margin: 1rem auto; padding: 0 1rem; color: var(--muted); }
+
+.threads, .rows { list-style: none; margin: 0.5rem 0 0; padding: 0; display: grid; gap: 0.5rem; }
+.thread, .rows li {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 0.75rem;
+}
+.thread .title { font-weight: 600; font-size: 1.05rem; overflow-wrap: anywhere; }
+.rows li { display: flex; flex-wrap: wrap; align-items: center; gap: 0.25rem 0.75rem; }
+.rows .name { font-weight: 600; }
+.rows a { overflow-wrap: anywhere; }
+
+.facts {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(8.5rem, 1fr));
+  gap: 0.5rem 1rem;
+  margin: 0.5rem 0 0;
+}
+.facts dt { color: var(--muted); font-size: 0.8rem; }
+.facts dd { margin: 0; }
+
+.badge {
+  display: inline-block;
+  padding: 0.05rem 0.5rem;
+  border-radius: 999px;
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+.tone-ok { color: var(--ok); background: var(--ok-bg); }
+.tone-busy { color: var(--busy); background: var(--busy-bg); }
+.tone-idle { color: var(--idle); background: var(--idle-bg); }
+.tone-bad { color: var(--bad); background: var(--bad-bg); }
+.tone-muted { color: var(--muted); background: var(--muted-bg); }
+
+.error { color: var(--bad); background: var(--bad-bg); padding: 0.5rem 0.75rem; border-radius: 6px; }
+
+button, .button {
+  font: inherit;
+  font-weight: 600;
+  min-height: 2.5rem;
+  padding: 0.4rem 0.9rem;
+  border-radius: 6px;
+  border: 1px solid var(--accent);
+  background: var(--accent);
+  color: var(--bg);
+  text-decoration: none;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+}
+button.danger { background: transparent; color: var(--bad); border-color: var(--bad); }
+button:disabled { opacity: 0.55; cursor: progress; }
+.actions { display: flex; gap: 0.5rem; }
+
+.form { display: grid; gap: 0.35rem; max-width: 32rem; }
+.form label { font-weight: 600; margin-top: 0.6rem; }
+.form input, .form select {
+  font: inherit;
+  width: 100%;
+  min-width: 0;
+  min-height: 2.5rem;
+  padding: 0.4rem 0.6rem;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--card);
+  color: var(--fg);
+}
+.form button { margin-top: 1rem; justify-self: start; }
+
+.refresh { color: var(--muted); font-size: 0.85rem; border-top: 1px solid var(--line); }

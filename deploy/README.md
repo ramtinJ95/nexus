@@ -1,0 +1,113 @@
+# Deploy Nexus on the home-lab nodes
+
+Each node runs a probe, which runs the pylon VMs. One machine, `rj-firebat`, also runs the control plane: the registry, the reconcile loop, the agent harness and the API. Both install from a checkout of this repository, as root, and both scripts are safe to rerun.
+
+## Install or upgrade a probe
+
+1. Copy a checkout to the node and run `sudo deploy/install-probe.sh` from it.
+2. On the first run, edit `/etc/nexus/probe.json` and `/etc/nexus/secrets.env`, then run the script again.
+
+The first run installs both files from `probe.example.json` and `secrets.example.env`, and leaves `nexus-probe.service` stopped until `probe.json` differs from the example. Later runs never overwrite either file. Restart the probe yourself after you edit them: `sudo systemctl restart nexus-probe`.
+
+The probe runs as the system user `nexus`. These are its paths:
+
+| Path | What it holds |
+| --- | --- |
+| `/etc/nexus/probe.json` | The config. `src/probe/config.ts` parses it. |
+| `/etc/nexus/secrets.env` | Secret values, `NAME=value` per line. Mode 0640, owner `root:nexus`. |
+| `/var/lib/nexus/pylons` | Pylon instances, their disks and checkpoints. |
+| `/var/lib/nexus/artifacts` | Images and templates. |
+| `/var/lib/nexus/preview-routes.json` | Which pylon each published preview port belongs to. |
+| `/opt/nexus/current` | The release the probe runs. |
+
+### Previews need the probe to be the tailscale operator
+
+A preview is a `tailscale serve --https=<port>` entry that the probe adds and removes. Only root and the operator user may change serve entries, so the script runs `tailscale set --operator=nexus` on every run. tailscaled has a single operator, so this takes operator rights from any other user on the node. Run `tailscale` commands that change serve or prefs with `sudo` afterwards.
+
+To turn previews on, keep the `previews` block of `probe.json`:
+
+```json
+"previews": { "gatewayPort": 7481 }
+```
+
+`gatewayPort` is the loopback port that every preview entry proxies to. Keep it fixed, because the probe recognizes its own serve entries by that port. Without the block, the probe publishes no previews, and a spawn that assigns one fails.
+
+With the block, the probe reads the node's MagicDNS name from `tailscale status --json` at startup, and each preview's `PUBLIC_URL` is `https://<that name>:<port>`. The probe refuses to start when the tailnet has MagicDNS turned off.
+
+### Clone over SSH
+
+To let pylons clone and push SSH remotes, add the node's git key to the backend in `probe.json`:
+
+```json
+"gitSsh": { "privateKeyFile": "/etc/nexus/git_ed25519", "knownHostsFile": "/etc/nexus/git_known_hosts" }
+```
+
+Make the key readable by `nexus` only: `chown nexus:nexus /etc/nexus/git_ed25519 && chmod 0400 /etc/nexus/git_ed25519`. The key never enters a pylon. Without `gitSsh`, the node boots only pylons whose repository and dotfiles URLs are HTTPS.
+
+## Install or upgrade the control plane
+
+1. On `rj-firebat`, run `sudo deploy/install-control.sh` from a checkout.
+2. On the first run, edit `/etc/nexus/control.json`.
+3. Sign the harness in with ChatGPT, as described in the next section.
+4. Run the script again. It starts `nexus-control.service`.
+
+The control plane runs as the system user `nexus-control`, apart from the probe's `nexus`, because it holds the model login. These are its paths:
+
+| Path | What it holds |
+| --- | --- |
+| `/etc/nexus/control.json` | The config. `src/control/main.ts` parses it. |
+| `/var/lib/nexus-control/registry.db` | The registry. |
+| `/var/lib/nexus-control/harness.sqlite` | The harness: every thread's conversation. |
+| `/var/lib/nexus-control/harness-credentials.json` | The harness's model login and installation ID. Mode 0600. |
+| `/opt/nexus/control-current` | The release the control plane runs, apart from the probe's link. |
+
+`control.json` names every node's probe, the tailnet nodes that may call the API (`callers`), the common dotfiles layer every new pylon pulls (`dotfiles`), and the model new threads start with (`harness.model`). Each probe's `auth.controlPlane` must be the control plane's own stable node ID, `self.tailnetNodeId`.
+
+### Sign the harness in
+
+The harness has its own ChatGPT login, kept apart from any interactive pi on the machine. Only one process may hold the credentials file, so stop the control plane first:
+
+```sh
+sudo systemctl stop nexus-control
+sudo -u nexus-control env PATH=/usr/local/bin:/usr/bin node /opt/nexus/control-current/src/control/login.ts /etc/nexus/control.json
+sudo systemctl start nexus-control
+```
+
+The login prints a URL to open in your browser. The browser's last step goes to port 1455 on `rj-firebat`, so on your laptop that page fails to load. Paste the address it ended on into the prompt. Alternatively, forward the port first with `ssh -L 1455:127.0.0.1:1455 rj-firebat`.
+
+## Run a first thread
+
+These steps check a fresh install with the real model. Run them on the control plane's machine, as a caller the API allows: the machine itself, `self.tailnetNodeId`. Set these first:
+
+```sh
+IP=<listen.host from control.json>
+A="http://$IP:7470/v1"
+IMG=<an image ID from the node's probe.json>
+```
+
+1. Sign the harness in, as the previous section describes, then start the control plane with `sudo systemctl start nexus-control`. `journalctl -u nexus-control -n 20` shows `nexus control plane: API on ...` and no `harness` errors.
+2. Record the image and make it current. The image's manifest is `image.json` in its directory on the node that holds it, here `infra-testbench`:
+
+   ```sh
+   ssh infra-testbench sudo cat /var/lib/nexus/artifacts/$IMG/image.json > image.json
+   curl -sS -H content-type:application/json --data @image.json $A/images
+   curl -sS -X PUT -H content-type:application/json -d "{\"image\":\"$IMG\"}" $A/images/current
+   ```
+
+3. Create a project and start a thread:
+
+   ```sh
+   curl -sS -H content-type:application/json -d '{"id":"spoon","repoUrl":"https://github.com/octocat/Spoon-Knife.git","defaultBranch":"main","defaultNode":"infra-testbench","resources":{"cpus":2,"memoryGiB":4,"diskGiB":10},"allowedHosts":[],"secrets":[],"logins":[],"preSetup":null}' $A/projects
+   T=$(curl -sS -H content-type:application/json -d '{"project":"spoon","title":"first thread"}' $A/threads | jq -r .id)
+   ```
+
+   Repeat `curl -sS $A/threads/$T | jq .pylon.actualState` until it prints `"running"`. A fresh boot clones and runs setup, which takes a few minutes.
+4. Prompt the agent and read its answer:
+
+   ```sh
+   curl -sS -H content-type:application/json -d '{"text":"Use the bash tool to run: uname -s; pwd; ls. Then report the output.","requestId":"msg:first-1"}' $A/threads/$T/messages
+   curl -sS $A/threads/$T/conversation | jq '.entries[] | select(.kind=="pi.tool-result")'
+   ```
+
+   The tool result contains `Linux`, `/home/user/workspace/repo` and `README.md`. When the answer is done, `curl -sS $A/threads/$T | jq .thread.agentTurnRunning` prints `false`.
+5. To remove the thread and its pylon, run `curl -sS -X DELETE -H content-type:application/json $A/threads/$T`.

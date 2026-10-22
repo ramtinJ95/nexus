@@ -182,7 +182,7 @@ test("actualState", () => {
   assert.equal(actualState(running(liveHash), pausing, true, false), "pausing");
   assert.equal(actualState(running(liveHash), null, true, false), "running");
   assert.equal(actualState(stopped(lastCheckpoint), null, true, false), "paused");
-  assert.equal(actualState("absent", null, true, false), "deleted");
+  assert.equal(actualState("absent", null, true, false), "absent");
   assert.equal(actualState(phase("booting"), null, true, false), "spawning");
 });
 

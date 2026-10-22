@@ -1,0 +1,36 @@
+# The Nexus control plane. deploy/install-control.sh installs this file as /etc/systemd/system/nexus-control.service.
+#
+# It runs as the system user `nexus-control`, apart from the probe's `nexus` user when both run on one machine:
+# the control plane holds the harness's model login, and the probe answers every tailnet caller. Its state is
+# /var/lib/nexus-control (its home): the registry, the harness's storage and the model login.
+#
+# The harness runs one bridge process per busy pylon (src/harness/bridge.ts). The default KillMode stops them
+# with the control plane, which ends each pylon's pi-env daemon and every command it started. After a restart,
+# a tool call that was running reports `interrupted` to the model.
+
+[Unit]
+Description=Nexus control plane (registry, reconcile loop, agent harness and API)
+Wants=network-online.target
+After=network-online.target tailscaled.service
+
+[Service]
+Type=simple
+User=nexus-control
+Group=nexus-control
+WorkingDirectory=/var/lib/nexus-control
+# The bridges start as this Node, so Node 26 must be in one of these directories.
+Environment=PATH=/usr/local/bin:/usr/bin
+ExecStart=/usr/bin/env node /opt/nexus/control-current/src/control/main.ts /etc/nexus/control.json
+TimeoutStopSec=30
+# The listen address exists only once tailscaled is up, so an early start fails and is retried.
+Restart=on-failure
+RestartSec=5
+UMask=0077
+NoNewPrivileges=yes
+ProtectSystem=strict
+ReadWritePaths=/var/lib/nexus-control
+ProtectHome=yes
+PrivateTmp=yes
+
+[Install]
+WantedBy=multi-user.target

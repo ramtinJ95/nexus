@@ -7,7 +7,7 @@ import { createServer, request } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { startProbe, type Probe, type ProbeOptions } from "./server.ts";
-import { connectProbe, jobDeadlineMs, type ByteStream, type Job, type JobEnvelope, type JobId, type JobStatus, type LiveHash, type NodeName, type PylonId, type StreamRequest, type TailnetNodeId } from "../protocol.ts";
+import { connectProbe, jobDeadlineMs, type ByteStream, type Job, type JobEnvelope, type JobId, type JobStatus, type LiveHash, type NodeName, type ProbeEvent, type PylonId, type StreamRequest, type TailnetNodeId } from "../protocol.ts";
 import { envelope } from "../reconcile.ts";
 import { processStream } from "../process-stream.ts";
 import type { BackendPylon, Guest, VmBackend } from "../backend.ts";
@@ -413,10 +413,10 @@ async function previewSetup(t: import("node:test").TestContext) {
   };
   const previews = { gatewayPort, routesFile: join(dir, "routes.json"), tailscale: tailscale.cli, get: viaGateway(() => `http://127.0.0.1:${gatewayPort}`).get };
   const open = () => setup(t, { backend, previews });
-  const run = async (client: ReturnType<typeof connectProbe>, job: Job) => {
+  const run = async (client: ReturnType<typeof connectProbe>, job: Job, state: JobStatus["state"] = "succeeded") => {
     const env = envelope(job, node, Date.now());
     await client.submit(env);
-    assert.equal((await finished(client, env.jobId)).state, "succeeded");
+    assert.equal((await finished(client, env.jobId)).state, state);
   };
   const visit = (httpsPort: number, headers: Record<string, string> = {}) => new Promise<{ status: number; type: string | undefined; body: string }>((resolve, reject) => {
     request({ host: "127.0.0.1", port: gatewayPort, headers: { host: `${nodeHost}:${httpsPort}`, ...headers } }, async (res) => {
@@ -425,7 +425,7 @@ async function previewSetup(t: import("node:test").TestContext) {
       resolve({ status: res.statusCode!, type: res.headers["content-type"], body });
     }).on("error", reject).end();
   });
-  return { tailscale, open, run, visit };
+  return { tailscale, open, run, visit, gatewayPort };
 }
 
 const withPreview = (id: PylonId, httpsPort: number): Job =>
@@ -440,7 +440,11 @@ test("spawn publishes its previews, a hit arrives on observe, pause keeps them a
   const abort = new AbortController();
   t.after(() => abort.abort());
   const events = client.observe(abort.signal)[Symbol.asyncIterator]();
-  assert.equal((await events.next()).value?.type, "snapshot");
+  const snapshot: ProbeEvent | undefined = (await events.next()).value;
+  assert.ok(snapshot?.type === "snapshot");
+  const observed = snapshot.observation.pylons.find((p) => p.pylonId === pylonId);
+  assert.ok(observed?.phase === "running");
+  assert.deepEqual(observed.previews, [{ service: "web", httpsPort: 10000, ready: true }], "observations report the published previews");
   assert.equal((await visit(10000, { "tailscale-user-login": "someone@example.com" })).status, 502, "the fake guest origin is not listening");
   const hit = (await events.next()).value;
   assert.ok(hit?.type === "preview-hit");
@@ -450,6 +454,27 @@ test("spawn publishes its previews, a hit arrives on observe, pause keeps them a
   assert.deepEqual(Object.keys(tailscale.entries()), ["10000"]);
   await run(client, { kind: "delete", pylonId });
   assert.deepEqual(tailscale.entries(), {});
+});
+
+test("observations report the previews of the pylon's last successful spawn, not of a spawn that failed", async (t) => {
+  const { tailscale, open, run, gatewayPort } = await previewSetup(t);
+  const { client } = await open();
+  const observedPreviews = async () => {
+    const abort = new AbortController();
+    const snapshot: ProbeEvent | undefined = (await client.observe(abort.signal)[Symbol.asyncIterator]().next()).value;
+    abort.abort();
+    assert.ok(snapshot?.type === "snapshot");
+    const observed = snapshot.observation.pylons.find((p) => p.pylonId === pylonId);
+    assert.ok(observed?.phase === "running");
+    return observed.previews;
+  };
+  await run(client, withPreview(pylonId, 10000));
+  tailscale.failOnce(`serve --bg --https=10001 http://127.0.0.1:${gatewayPort}`);
+  const both: Job = { ...spawnJob, live: { previews: [{ service: "web", httpsPort: 10000 }, { service: "api", httpsPort: 10001 }], overlay: [] }, liveHash: "hash-2" as LiveHash };
+  await run(client, both, "failed");
+  assert.deepEqual(await observedPreviews(), [{ service: "web", httpsPort: 10000, ready: true }]);
+  await run(client, both);
+  assert.deepEqual(await observedPreviews(), [{ service: "web", httpsPort: 10000, ready: true }, { service: "api", httpsPort: 10001, ready: true }]);
 });
 
 test("after a probe restart a paused pylon keeps its preview, and a hit gets the waking page and is reported", async (t) => {

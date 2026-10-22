@@ -5,8 +5,10 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { request } from "node:http";
 import { join } from "node:path";
-import { liveHashOf, startApi, type ThreadDetail } from "./api.ts";
+import { startApi, type ThreadDetail } from "./api.ts";
+import { fakeHarness } from "./fake-harness.ts";
 import { openRegistry, type Thread } from "./registry.ts";
+import { liveHashOf } from "../project.ts";
 import type { JobId, NodeName, TailnetNodeId } from "../protocol.ts";
 
 const node = "rj-firebat" as NodeName;
@@ -34,6 +36,7 @@ async function setup(t: import("node:test").TestContext) {
   registry.upsertNode({ name: node, tailnetHost: "rj-firebat.tail.ts.net", tailnetNodeId: "nFIREBAT" as TailnetNodeId });
   let caller: TailnetNodeId | null = laptop;
   const woken: NodeName[] = [];
+  const { harness, calls } = fakeHarness();
   const api = await startApi({
     registry, host: "127.0.0.1", port: 0,
     // Every loopback caller is whoever the test says. Tests never ask tailscaled.
@@ -41,6 +44,7 @@ async function setup(t: import("node:test").TestContext) {
     allowed: new Set([laptop]),
     hostnames: new Set(["127.0.0.1"]),
     dotfiles,
+    harness,
     wake: (n) => { woken.push(n); },
   });
   t.after(async () => {
@@ -63,7 +67,7 @@ async function setup(t: import("node:test").TestContext) {
       req.end(body === undefined ? undefined : typeof body === "string" ? body : JSON.stringify(body));
     });
   }
-  return { registry, call, woken, callAs(id: TailnetNodeId | null) { caller = id; } };
+  return { registry, call, woken, calls, callAs(id: TailnetNodeId | null) { caller = id; } };
 }
 
 async function withThread(t: import("node:test").TestContext) {
@@ -124,6 +128,8 @@ test("starting a thread creates its pylon, boots fresh from the current image, a
   assert.equal(thread.startedBy, laptop);
   assert.equal(thread.pylonId, `pylon-${thread.id}`);
   assert.ok(thread.pylonId.length <= 40);
+  assert.deepEqual(s.calls, [["start", { threadId: thread.id, pylonId: thread.pylonId }]]);
+  assert.equal(thread.conversationId, "1");
   assert.deepEqual(s.woken, [node]);
   assert.deepEqual((await s.call("GET", "/v1/threads")).body, [thread]);
   assert.deepEqual((await s.call("GET", "/v1/threads?project=acme")).body, [thread]);
@@ -150,7 +156,7 @@ test("thread detail derives the actual state from the node's last observation", 
   assert.deepEqual(await detail(), {
     thread,
     pylon: { id: thread.pylonId, node, actualState: "unknown", failed: null, observedAt: null },
-    sessions: [], previews: [], outputs: [],
+    sessions: [], previews: [], outputs: [], agent: { parkedTasks: 0 },
   });
 
   const capacity = { memoryGiB: 64, committedMemoryGiB: 0, diskFreeGiB: 100 };
@@ -188,18 +194,71 @@ test("archive, delete, and activity update the thread and wake its node", async 
 
   assert.equal((await s.call("POST", `/v1/threads/${thread.id}/activity`, { kind: "human" })).status, 204);
   assert.ok(s.registry.thread(thread.id)!.lastHumanActivityAt >= before);
-  assert.equal((await s.call("POST", `/v1/threads/${thread.id}/activity`, { kind: "agent", turnRunning: true })).status, 204);
-  const facts = s.registry.thread(thread.id)!;
-  assert.equal(facts.agentTurnRunning, true);
-  assert.ok(facts.lastAgentActivityAt >= before);
-  assert.equal((await s.call("POST", `/v1/threads/${thread.id}/activity`, { kind: "agent" })).status, 400);
+  assert.equal((await s.call("POST", `/v1/threads/${thread.id}/activity`, { kind: "agent", turnRunning: true })).status, 400, "agent activity comes from the harness");
 
   assert.equal((await s.call("POST", `/v1/threads/${thread.id}/archive`)).body.status, "archived");
   assert.equal(s.registry.thread(thread.id)!.status, "archived");
   assert.equal((await s.call("DELETE", `/v1/threads/${thread.id}`)).body.status, "deleted");
   assert.equal(s.registry.thread(thread.id)!.status, "deleted");
+  assert.deepEqual(s.calls.at(-1), ["delete", { threadId: thread.id, pylonId: thread.pylonId }]);
   assert.equal((await s.call("POST", `/v1/threads/${thread.id}/archive`)).status, 409);
-  assert.deepEqual(s.woken, [node, node, node, node]);
+  assert.equal((await s.call("GET", `/v1/threads/${thread.id}`)).body.agent, null);
+  assert.deepEqual(s.woken, [node, node, node]);
+});
+
+test("a message goes to the thread's conversation and counts as human activity", async (t) => {
+  const s = await withThread(t);
+  const { thread } = s;
+  s.woken.length = 0;
+  s.calls.length = 0;
+  const before = Date.now();
+
+  const sent = await s.call("POST", `/v1/threads/${thread.id}/messages`, { text: "run the tests", requestId: "msg:1" });
+  assert.deepEqual(sent, { status: 202, body: { submission: 7 } });
+  assert.ok(s.registry.thread(thread.id)!.lastHumanActivityAt >= before);
+  assert.deepEqual(s.woken, [node]);
+  assert.equal((await s.call("POST", `/v1/threads/${thread.id}/messages`, { text: "now", requestId: "msg:2", mode: "steer" })).status, 202);
+  assert.equal((await s.call("POST", `/v1/threads/${thread.id}/messages`, { text: "", requestId: "msg:3" })).status, 400);
+  assert.equal((await s.call("POST", `/v1/threads/${thread.id}/messages`, { text: "x" })).status, 400);
+  assert.equal((await s.call("POST", `/v1/threads/${thread.id}/abort`)).status, 204);
+  assert.equal((await s.call("POST", `/v1/threads/${thread.id}/retry`)).status, 204);
+  assert.deepEqual(await s.call("GET", `/v1/threads/${thread.id}/conversation`), { status: 200, body: { entries: ["the transcript"] } });
+  assert.deepEqual(s.calls, [
+    ["send", thread.id, "run the tests", "msg:1", "followUp"],
+    ["send", thread.id, "now", "msg:2", "steer"],
+    ["abort", thread.id],
+    ["retry", thread.id],
+    ["watch", thread.id],
+    ["unwatch", thread.id],
+  ]);
+});
+
+test("unarchiving makes an archived thread active, counts as human activity and wakes its node", async (t) => {
+  const s = await withThread(t);
+  const { thread } = s;
+  assert.equal((await s.call("POST", `/v1/threads/${thread.id}/unarchive`)).status, 409, "an active thread is not archived");
+  await s.call("POST", `/v1/threads/${thread.id}/archive`);
+  s.woken.length = 0;
+  const before = Date.now();
+  const res = await s.call("POST", `/v1/threads/${thread.id}/unarchive`);
+  assert.equal(res.status, 200);
+  assert.equal(res.body.status, "active");
+  assert.ok(res.body.lastHumanActivityAt >= before);
+  assert.deepEqual(s.woken, [node]);
+  assert.equal((await s.call("POST", `/v1/threads/${thread.id}/messages`, { text: "x", requestId: "msg:1" })).status, 202);
+});
+
+test("an archived thread takes no messages, and a deleted one has no conversation", async (t) => {
+  const s = await withThread(t);
+  const { thread } = s;
+  await s.call("POST", `/v1/threads/${thread.id}/archive`);
+  assert.equal((await s.call("POST", `/v1/threads/${thread.id}/messages`, { text: "x", requestId: "msg:1" })).status, 409);
+  assert.equal((await s.call("POST", `/v1/threads/${thread.id}/retry`)).status, 409);
+  assert.equal((await s.call("POST", `/v1/threads/${thread.id}/abort`)).status, 204);
+  assert.equal((await s.call("GET", `/v1/threads/${thread.id}/conversation`)).status, 200);
+  await s.call("DELETE", `/v1/threads/${thread.id}`);
+  assert.equal((await s.call("GET", `/v1/threads/${thread.id}/conversation`)).status, 409);
+  assert.equal((await s.call("POST", `/v1/threads/${thread.id}/abort`)).status, 409);
 });
 
 test("unknown threads, routes and methods get 404 and 405", async (t) => {

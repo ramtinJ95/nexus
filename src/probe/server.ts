@@ -85,6 +85,8 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
   const jobs = new Map<JobId, { status: JobStatus; finishedAt: number | null }>();
   const busy = new Map<Subject, JobId>();
   const liveHashes = new Map<PylonId, LiveHash>();
+  /** The previews of each pylon's last successful spawn in this process, which published and warmed them. */
+  const published = new Map<PylonId, Extract<Job, { kind: "spawn" }>["live"]["previews"]>();
   const observers = new Set<{ write(event: ProbeEvent): void; drop(err: Error): void }>();
   const runningJobs = new Set<Promise<void>>();
   const log = options.log ?? console.error;
@@ -129,7 +131,7 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
           pylonId, phase: "running", liveHash: liveHashes.get(pylonId) ?? null, bootedAt: p.bootedAt,
           bootedFrom: { image: p.image, checkpoint: p.checkpoint },
           // The other guest facts need guest operations, which this slice does not have.
-          services: [], previews: [], sessions: await sessions(pylonId), git: null, declaredOutputs: [], attachedClients: ptyStreams.get(pylonId) ?? 0,
+          services: [], previews: (published.get(pylonId) ?? []).map((preview) => ({ ...preview, ready: true })), sessions: await sessions(pylonId), git: null, declaredOutputs: [], attachedClients: ptyStreams.get(pylonId) ?? 0,
         };
     }
   }
@@ -167,11 +169,17 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
     const running: JobStatus = { ...base, state: "running", startedAt: new Date().toISOString() };
     busy.set(subject, jobId);
     setStatus(running, null);
-    if (job.kind === "pause" || job.kind === "delete") liveHashes.delete(job.pylonId);
+    if (job.kind === "pause" || job.kind === "delete") {
+      liveHashes.delete(job.pylonId);
+      published.delete(job.pylonId);
+    }
     const signal = AbortSignal.any([AbortSignal.timeout(deadlines[job.kind]), shutdown.signal]);
     const run = runJob(job, deps, signal).then(
       () => {
-        if (job.kind === "spawn") liveHashes.set(job.pylonId, job.liveHash);
+        if (job.kind === "spawn") {
+          liveHashes.set(job.pylonId, job.liveHash);
+          published.set(job.pylonId, job.live.previews);
+        }
         setStatus({ ...base, state: "succeeded", finishedAt: new Date().toISOString() }, Date.now());
       },
       (err: unknown) => {
