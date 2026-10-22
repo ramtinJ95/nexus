@@ -4,5 +4,6 @@
 # containers, so the image cannot ship them, and they are written here. A pylon resumed from a checkpoint
 # keeps the name of the boot that made the checkpoint.
 printf 'pylon\n' > /etc/hostname
-printf '127.0.0.1\tlocalhost\n::1\tlocalhost ip6-localhost ip6-loopback\n127.0.1.1\tpylon\n' > /etc/hosts
+# Both families, or a lookup that asks for IPv6 first falls through to Gondolin's DNS and gets a synthetic address.
+printf '127.0.0.1\tlocalhost\n::1\tlocalhost ip6-localhost ip6-loopback\n127.0.1.1\tpylon\n::1\tpylon\n' > /etc/hosts
 printf 'pylon' > /proc/sys/kernel/hostname
