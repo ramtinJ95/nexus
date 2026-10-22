@@ -45,7 +45,8 @@ export interface BackendPylon {
 /** Every call runs as `user`. */
 export interface Guest {
   exec(argv: readonly string[], opts: { cwd: string; timeoutMs: number }): Promise<{ exitCode: number | null; output: string; truncated: boolean }>;
-  stream(request: StreamRequest): Promise<ByteStream>;
+  /** Starts the process. A raw pipe's stream carries stdout only, and its stderr goes to `log`. */
+  stream(request: StreamRequest, log: (text: string) => void): Promise<ByteStream>;
   writeFiles(files: readonly OverlayFile[]): Promise<void>;
   services(op: "ensure" | "restart" | "stop" | "logs", name?: string, lines?: number): Promise<{ services: readonly { name: string; state: string; port: number }[]; logs?: string }>;
   /** Supervise a port that is already listening. Returns the service name it was registered under. */
