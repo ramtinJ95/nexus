@@ -1,19 +1,24 @@
 #!/usr/bin/env bash
 # Builds the pylon-vm slice test image on infra-testbench into ~/nexus-spikes/pylon-test-assets.
-# Run from anywhere on the node: bash images/pylon-test/build.sh
+# Run from anywhere on the node, after npm ci in this checkout: bash images/pylon-test/build.sh
 #
 # Kernel modules use the module-seed workaround from spikes/s1-module-seed.sh unchanged: the same seed,
 # the same postBuild.copy, the same Node 24 and Gondolin 0.13.0 under ~/nexus-spikes. Gondolin resolves
 # postBuild.copy against the config file's directory, so the config is written here with the seed's
-# absolute path. Docker: inventories before and after, everything created carries nexus.pylon-test=slice,
-# and only what this script created is removed: debian:bookworm-slim if it was absent before, and each build
-# cache entry whose ID was not in the before listing, pruned by ID.
+# absolute path. Its init.rootfsInitExtra is the base image's own rootfs-init-extra.sh, which sets the
+# hostname. Gondolin builds into $out.partial, restore-modes.ts runs buildImage's mode fix on that with this
+# checkout's Node and debugfs while the tag still exists, and only then is it renamed to $out.
+# Docker: inventories before and after, everything created carries nexus.pylon-test=slice, and only what
+# this script created is removed: debian:bookworm-slim if it was absent before, and each build cache entry
+# whose ID was not in the before listing, pruned by ID.
 set -euo pipefail
 export XDG_CACHE_HOME="$HOME/nexus-spikes/cache" npm_config_cache="$HOME/nexus-spikes/npm-cache" TMPDIR="$HOME/nexus-spikes/tmp"
 here="$(cd "$(dirname "$0")" && pwd)"
+repo="$(cd "$here/../.." && pwd)"
 spikes="$HOME/nexus-spikes"
 seed="$spikes/state/kernel-module-seed"
 out="$spikes/pylon-test-assets"
+partial="$out.partial"
 logs="$spikes/logs"
 tag=nexus-pylon-test:slice
 label=nexus.pylon-test=slice
@@ -23,6 +28,7 @@ ulimit -c 0
 test ! -e "$out" || { echo "$out already exists. Remove it to rebuild"; exit 1; }
 test "$(readlink "$seed/6.18.58-0-virt/vmlinuz")" = /boot/vmlinuz-virt
 mkdir -p "$logs" "$TMPDIR"
+rm -rf "$partial"
 
 docker images -q --no-trunc | sort -u > "$logs/pylon-test-images-before.txt"
 docker ps -a -q --no-trunc | sort -u > "$logs/pylon-test-containers-before.txt"
@@ -67,6 +73,7 @@ cat > "$config" <<EOF
     "pullPolicy": "never"
   },
   "rootfs": { "sizeMb": 6144 },
+  "init": { "rootfsInitExtra": "$repo/images/pylon/rootfs-init-extra.sh" },
   "postBuild": {
     "copy": [{ "src": "$seed", "dest": "/lib/modules" }]
   }
@@ -75,6 +82,8 @@ EOF
 
 cd "$spikes"
 TIMEFORMAT='BUILD_SECONDS=%3R'
-time timeout 240 tools/node-v24.22.1-linux-x64/bin/node node_modules/@earendil-works/gondolin/dist/bin/gondolin.js build --config "$config" --output "$out"
+time timeout 240 tools/node-v24.22.1-linux-x64/bin/node node_modules/@earendil-works/gondolin/dist/bin/gondolin.js build --config "$config" --output "$partial"
 rm "$config"
+node "$repo/images/pylon-test/restore-modes.ts" "$tag" "$partial" "$label"
+mv "$partial" "$out"
 cat "$out/manifest.json"
