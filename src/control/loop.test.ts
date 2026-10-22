@@ -7,9 +7,9 @@ import { join } from "node:path";
 import { startLoop, type Ingest, type Loop } from "./loop.ts";
 import { openRegistry, type Registry, type Thread, type ThreadId } from "./registry.ts";
 import { newPylonRecord } from "../tick.ts";
-import { envelope } from "../reconcile.ts";
+import { envelope, ingest as realIngest } from "../reconcile.ts";
 import type {
-  Job, JobEnvelope, JobId, JobStatus, LiveHash, NodeName, NodeObservation, ProbeClient, ProbeEvent, PylonId, PylonObservation, SubmitReply, TailnetNodeId,
+  Job, JobEnvelope, JobId, JobStatus, LiveHash, NodeName, NodeObservation, ProbeClient, ProbeEvent, PylonId, PylonObservation, SessionFact, SubmitReply, TailnetNodeId,
 } from "../protocol.ts";
 import type { ProjectId } from "../project.ts";
 import type { ImageId } from "../images.ts";
@@ -108,8 +108,16 @@ function fakeNode(options: { autoFinish: boolean }) {
     stream: () => Promise.reject(new Error("unused")),
   };
 
+  /** Changes a running pylon's sessions, and announces it with a snapshot as the probe does after a job. */
+  function setSessions(pylonId: PylonId, sessions: readonly SessionFact[]) {
+    const pylon = pylons.get(pylonId);
+    assert.ok(pylon?.phase === "running");
+    pylons.set(pylonId, { ...pylon, sessions });
+    emit({ type: "snapshot", observation: observation() });
+  }
+
   return {
-    probe, pylons, submitted, finish,
+    probe, pylons, submitted, finish, setSessions,
     running: () => [...jobs.values()].filter((j) => j.status.state === "running").map((j) => j.env.jobId),
     /** Drops every observe link and refuses calls until `reconnect`. */
     disconnect() { reachable = false; for (const push of streams) push(null); },
@@ -227,6 +235,30 @@ test("an unreachable node gets no jobs, is recorded offline after the grace peri
   await until("the pylon runs", () => fake.pylons.get(thread.pylonId)?.phase === "running");
   assert.equal(registry.node(node)?.state, "online");
   assert.deepEqual(fake.submitted.map((job) => job.kind), ["spawn"]);
+});
+
+test("with the real ingest, a pylon's sessions reach the registry and a working one keeps the pylon up", async (t) => {
+  const registry = openRegistry(tempDb());
+  const longAgo = Date.now() - 60 * 60_000;
+  const thread = seed(registry, { agentTurnRunning: true, lastAgentActivityAt: longAgo, lastHumanActivityAt: longAgo });
+  const fake = fakeNode({ autoFinish: true });
+  run(t, registry, fake.probe, { ingest: realIngest });
+  await until("the pylon runs", () => fake.pylons.get(thread.pylonId)?.phase === "running");
+
+  const working: SessionFact = { herdrPane: "p1", harness: "pi", harnessSessionId: "s.jsonl", status: "working" };
+  fake.setSessions(thread.pylonId, [working]);
+  await until("the session is recorded", () => registry.sessions(thread.pylonId).length === 1);
+  assert.deepEqual(registry.sessions(thread.pylonId), [{ pylon: thread.pylonId, ...working }]);
+  assert.ok(registry.thread(thread.id)!.lastAgentActivityAt > longAgo);
+
+  // The turn ends, but the working session counts as agent activity, so the pylon stays up.
+  registry.recordActivity(thread.id, { agentTurnRunning: false });
+  await new Promise((r) => setTimeout(r, 50));
+  assert.equal(fake.pylons.get(thread.pylonId)?.phase, "running");
+
+  fake.setSessions(thread.pylonId, []);
+  await until("the closed session is removed", () => registry.sessions(thread.pylonId).length === 0);
+  assert.deepEqual(registry.orphans(), []);
 });
 
 test("a node that goes quiet, as a sleeping one does, is treated as unreachable", async (t) => {
