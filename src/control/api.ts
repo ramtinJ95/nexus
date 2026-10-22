@@ -9,7 +9,7 @@ import { createHash, randomBytes } from "node:crypto";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { z } from "zod";
 import { actualState, type ActualState } from "../reconcile.ts";
-import { effectiveAllowedHosts, type LiveSpec, type Project, type ProjectId } from "../project.ts";
+import { effectiveAllowedHosts, type BootInputs, type LiveSpec, type Project, type ProjectId, type PylonOverlay } from "../project.ts";
 import type { LiveHash, NodeName, PylonId, TailnetNodeId } from "../protocol.ts";
 import type { ImageId, ImageManifest } from "../images.ts";
 import type { Whois } from "../tailscale.ts";
@@ -25,6 +25,8 @@ export interface ApiOptions {
   allowed: ReadonlySet<TailnetNodeId>;
   /** Names the API answers to in the Host header. Any other name is a DNS rebinding page on an allowed machine. */
   hostnames: ReadonlySet<string>;
+  /** The common dotfiles layer every new pylon pulls on boot. */
+  dotfiles: PylonOverlay["dotfiles"];
   /** Asks the loop for a pass over the node's pylons. */
   wake(node: NodeName): void;
 }
@@ -101,7 +103,7 @@ export function liveHashOf(live: LiveSpec): LiveHash {
 }
 
 export async function startApi(options: ApiOptions): Promise<Api> {
-  const { registry, whois, allowed, hostnames, wake } = options;
+  const { registry, whois, allowed, hostnames, dotfiles, wake } = options;
 
   function thread(id: string): Thread {
     const found = registry.thread(id as ThreadId);
@@ -141,13 +143,16 @@ export async function startApi(options: ApiOptions): Promise<Api> {
       // Starting a thread is human activity, so its pylon is wanted at once.
       agentTurnRunning: false, lastAgentActivityAt: 0, lastHumanActivityAt: now,
     };
+    const boot: Omit<BootInputs, "source"> = {
+      pylonId, image, resources: project.resources,
+      network: { allowedHosts: effectiveAllowedHosts(project), secrets: project.secrets },
+      repo: { url: project.repoUrl, checkout: { branch, commit: request.commit ?? `origin/${branch}` } },
+      // BootInputs gains `dotfiles` with the pylon-vm-boot stream. The spread compiles before that lands. Make it `dotfiles,` after.
+      ...{ dotfiles },
+    };
     const { desired: _, ...pylon } = newPylonRecord({
       thread: id, pylonId, node, desired: "running",
-      boot: {
-        pylonId, image, resources: project.resources,
-        network: { allowedHosts: effectiveAllowedHosts(project), secrets: project.secrets },
-        repo: { url: project.repoUrl, checkout: { branch, commit: request.commit ?? `origin/${branch}` } },
-      },
+      boot,
       firstBoot: { kind: "fresh", preSetup: project.preSetup },
       live,
       liveHash: liveHashOf(live),

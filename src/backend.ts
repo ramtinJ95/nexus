@@ -110,7 +110,7 @@ export async function runJob(job: Job, deps: ProbeDeps, signal: AbortSignal): Pr
         await deps.serve.converge(job.pylonId, job.live.previews, signal);
         return;
       case "pause":
-        await deps.serve.converge(job.pylonId, [], signal);
+        // Previews stay published, so a hit on a paused pylon reaches the gateway, which reports it and shows a waking page.
         await deps.backend.ensurePaused(job.pylonId, job.checkpoint, signal);
         return;
       case "delete":

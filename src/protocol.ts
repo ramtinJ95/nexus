@@ -150,7 +150,7 @@ export type ProbeEvent =
   | { type: "snapshot"; observation: NodeObservation } // on connect, then every 60 s as anti-entropy
   | { type: "pylon"; pylon: PylonObservation }
   | { type: "job"; status: JobStatus }
-  /** A preview was requested. If the pylon is stopped, the probe holds the request on a "waking" page and the control plane decides. */
+  /** A preview was requested. A paused pylon keeps its previews, so its browser gets a self-refreshing "waking" page while the control plane decides. */
   | { type: "preview-hit"; pylonId: PylonId; service: string; at: string; login: string | null };
 
 // Synchronous guest operations. They are not reconciled and not queued behind lifecycle jobs.
