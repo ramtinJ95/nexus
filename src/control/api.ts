@@ -15,6 +15,7 @@ import type { ImageId, ImageManifest } from "../images.ts";
 import type { Whois } from "../tailscale.ts";
 import { newPylonRecord } from "../tick.ts";
 import type { Output, Preview, Registry, Session, Thread, ThreadId } from "./registry.ts";
+import { dashboard } from "./dashboard.ts";
 
 export interface ApiOptions {
   registry: Registry;
@@ -179,6 +180,8 @@ export async function startApi(options: ApiOptions): Promise<Api> {
     };
   }
 
+  const page = dashboard({ registry, detail });
+
   function setStatus(t: Thread, status: "archived" | "deleted"): Thread {
     if (t.status === "deleted") throw new HttpError(409, `thread ${t.id} is deleted`);
     registry.setThreadStatus(t.id, status);
@@ -240,6 +243,8 @@ export async function startApi(options: ApiOptions): Promise<Api> {
 
     const url = new URL(req.url ?? "/", "http://nexus");
     const path = decodeURIComponent(url.pathname);
+    const view = req.method === "GET" ? page(path, url.searchParams) : undefined;
+    if (view !== undefined) return void res.writeHead(view.status, view.headers).end(view.body);
     const matches = routes.flatMap(([method, pattern, route]) => {
       const m = pattern.exec(path);
       return m === null ? [] : [{ method, m, route }];

@@ -137,11 +137,15 @@ export function requiredArtifacts(boot: BootInputs): readonly ArtifactId[] {
   return boot.source.kind === "template" ? [boot.image, boot.source.template] : [boot.image];
 }
 
-export type ActualState = "spawning" | "running" | "pausing" | "paused" | "deleting" | "deleted" | "failed" | "unknown";
+/**
+ * `absent` means only that the node does not have the pylon: not created yet, deleted, or lost. Nothing
+ * records a deletion, so the thread's status, not this state, says whether the pylon is gone for good.
+ */
+export type ActualState = "spawning" | "running" | "pausing" | "paused" | "deleting" | "absent" | "failed" | "unknown";
 
 const inFlightState: Partial<Record<Job["kind"], ActualState>> = { spawn: "spawning", pause: "pausing", delete: "deleting" };
 const observedState: { readonly [P in PylonObservation["phase"] | "absent"]: ActualState } = {
-  booting: "spawning", running: "running", stopping: "pausing", stopped: "paused", deleting: "deleting", absent: "deleted",
+  booting: "spawning", running: "running", stopping: "pausing", stopped: "paused", deleting: "deleting", absent: "absent",
   broken: "failed", // the backend says the VM was interrupted or failed. The planner pauses or fails it.
 };
 
