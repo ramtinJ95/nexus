@@ -103,6 +103,8 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
   }
 
   async function readSnapshot(): Promise<NodeObservation> {
+    // Jobs before pylons, so the pylons show the result of every job listed as finished. See NodeObservation.jobs.
+    const jobs = retainedJobs();
     const [pylons, artifacts, disk] = await Promise.all([backend.list(), backend.artifacts.list(), statfs("/")]);
     return {
       node,
@@ -111,7 +113,7 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
       // VmBackend does not report reserved memory yet.
       capacity: { memoryGiB: totalmem() / 2 ** 30, committedMemoryGiB: 0, diskFreeGiB: (disk.bavail * disk.bsize) / 2 ** 30 },
       artifacts,
-      jobs: retainedJobs(),
+      jobs,
       pylons: pylons.map(observation),
     };
   }
@@ -165,7 +167,7 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
   }
 
   async function observe(res: ServerResponse) {
-    // Events that arrive while the first snapshot is built go out after it, in order.
+    // Events that arrive while the first snapshot is built go out after it, in order, except older snapshots.
     const queued: ProbeEvent[] = [];
     let write = (event: ProbeEvent) => { queued.push(event); };
     const observer = { write: (event: ProbeEvent) => write(event), drop: (err: Error) => res.destroy(err) };
@@ -176,7 +178,8 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
     res.writeHead(200, { "content-type": "application/x-ndjson", "cache-control": "no-store" });
     res.write(encodeProbeEvent({ type: "snapshot", observation: first }));
     write = (event) => { res.write(encodeProbeEvent(event)); };
-    for (const event of queued) write(event);
+    // Reads run in order, so a queued snapshot was read before `first`. Sent after it, it would undo newer state.
+    for (const event of queued) if (event.type !== "snapshot") write(event);
   }
 
   async function authorized(req: IncomingMessage, route: keyof typeof routeAuth): Promise<boolean> {

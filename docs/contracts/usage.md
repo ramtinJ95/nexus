@@ -138,7 +138,7 @@ The recipe lives in this repo under `images/pylon/`. Its content hash is the ima
 ```ts
 const inputs = await mirror.setupInputs(project, thread.branch); // the control plane's bare mirror, no pylon booted
 const key = { project: project.id, image: settings.current, setupHash: setupHashOf(project, inputs) };
-const choice = chooseTemplate(project, key, registry.templates(project.id), thread.node, clock.now());
+const choice = chooseTemplate(project, key, { branch: thread.branch, commit: inputs.commit }, registry.templates(project.id), thread.node, clock.now());
 // reuse | build on thread.node | wait for a running build | fresh (boot the image, run setup inline) after a failed build
 ```
 
