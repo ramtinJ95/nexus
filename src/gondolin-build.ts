@@ -11,4 +11,7 @@ if (configFile === undefined || outputDir === undefined || workDir === undefined
   console.error("usage: node src/gondolin-build.ts <config.json> <output dir> <work dir>");
   process.exit(64);
 }
+// The OCI rootfs is extracted by a non-root tar, which applies the umask. A fixed one makes the bits it drops
+// exactly the ones image-build.ts lists and restores.
+process.umask(0o022);
 await buildAssets(parseBuildConfig(readFileSync(configFile, "utf8")), { outputDir, workDir });

@@ -10,13 +10,13 @@ import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { once } from "node:events";
 import { PassThrough, type Readable } from "node:stream";
-import { existsSync, readFileSync } from "node:fs";
+import { createReadStream, existsSync, readFileSync } from "node:fs";
 import { mkdir, readdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { dirname, join, relative, resolve, sep } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
-import { fileURLToPath } from "node:url";
-import { createHttpHooks, parseBuildConfig, VM, type AlpineConfig, type BuildConfig } from "@earendil-works/gondolin";
+import { fileURLToPath, pathToFileURL } from "node:url";
+import { createHttpHooks, parseBuildConfig, verifyAssets, VM, type AlpineConfig, type BuildConfig } from "@earendil-works/gondolin";
 import { z } from "zod";
 import { JobFailure } from "./backend.ts";
 import { imageIdOf, type ImageId, type ImageManifest, type ImageRecipe } from "./images.ts";
@@ -112,7 +112,12 @@ export function imageArchive(dir: string, signal?: AbortSignal): Readable {
  * 2. Seed: the Alpine module tree for pins.alpineKernel, absolute vmlinuz link included. A kernel that
  *    differs from the pin fails the job, because the workaround breaks silently otherwise.
  * 3. Gondolin's build into outDir.partial, then the Docker tag is removed.
- * 4. Smoke boot at 4 GiB (2 GiB hangs): plain exec PATH and CA, `user` with sudo, the pinned versions of
+ * 3a. Modes: Gondolin 0.13.0 extracts the OCI rootfs with a non-root `tar -xf`, which drops setuid, setgid
+ *    and sticky bits and applies the umask, and it restores only owners. The modes of every file and
+ *    directory with one of those bits are listed from the Docker image, written into rootfs.ext4 with
+ *    debugfs, read back, and Gondolin's manifest is updated for the changed rootfs. Delete this step, like
+ *    the seed, once the Gondolin pin moves to a release that keeps modes.
+ * 4. Smoke boot at 4 GiB (2 GiB hangs): plain exec PATH and CA, `user` with a setuid sudo, the pinned versions of
  *    node, claude, pi and herdr as user, sshd and sandboxssh, Herdr's pi integration, curl and Node fetch
  *    to an allowed host through TLS interception, and a Herdr server as user. Any failure is setup-failed
  *    and publishes nothing.
@@ -151,7 +156,10 @@ export async function buildImage(input: ImageRecipe, node: NodeName, out: string
 
   const args = Object.entries(dockerBuildArgs(recipe.pins)).flatMap(([name, value]) => ["--build-arg", `${name}=${value}`]);
   await run("docker", ["build", "--platform", "linux/amd64", "--label", `nexus.image=${id}`, "--tag", tag, ...args, context], signal);
+  let modes: readonly ModeFix[];
   try {
+    const listing = await run("docker", ["run", "--rm", "--network", "none", "--label", `nexus.image=${id}`, "--user", "0:0", "--entrypoint", "find", tag, ...modeListingArgs], signal);
+    modes = parseOrFail(() => parseModeListing(listing.stdout));
     // The S1 workaround. Delete this step once Gondolin's kernel-modules copy sets verbatimSymlinks
     // (spikes/UPSTREAM-ISSUE-DRAFT.md).
     await seedKernelModules(config.arch, alpine, recipe.pins.alpineKernel, scratch, seed, signal);
@@ -160,6 +168,7 @@ export async function buildImage(input: ImageRecipe, node: NodeName, out: string
     await run("docker", ["image", "rm", tag], AbortSignal.timeout(60_000))
       .catch((err: Error) => process.stderr.write(`buildImage could not remove ${tag}, so it stays in Docker: ${err.message}\n`));
   }
+  await restoreModes(partial, modes, scratch, signal);
   await rm(scratch, { recursive: true });
 
   // Nothing is published unless a pylon booted from these assets works.
@@ -228,9 +237,130 @@ async function seedKernelModules(arch: BuildConfig["arch"], alpine: SeedAlpine, 
   await rm(configFile);
 }
 
+const gondolinPackageJson = createRequire(import.meta.url).resolve("@earendil-works/gondolin/package.json");
+
 function gondolinVersion(): string {
-  const packageJson = createRequire(import.meta.url).resolve("@earendil-works/gondolin/package.json");
-  return (JSON.parse(readFileSync(packageJson, "utf8")) as { version: string }).version;
+  return (JSON.parse(readFileSync(gondolinPackageJson, "utf8")) as { version: string }).version;
+}
+
+/** A file or directory whose full permission bits the rootfs must get back. */
+export interface ModeFix {
+  path: string;
+  type: "f" | "d";
+  mode: number; // permission bits, at most 0o7777
+}
+
+/**
+ * find arguments that list, inside the Docker image and as root, since the image ends as user, every file and directory with a bit the non-root
+ * extraction loses: setuid, setgid, sticky, and group or other write, which gondolin-build.ts's 022 umask
+ * strips. Each line is `<f|d> <octal mode> <path>`.
+ */
+export const modeListingArgs = ["/", "-xdev", "(", "-type", "f", "-o", "-type", "d", ")", "-perm", "/7022", "-printf", "%y %m %p\\n"];
+
+/**
+ * Sorted by path. Debian with sudo always has setuid files, so a listing without one means the listing
+ * broke, and it throws rather than publish an image whose sudo cannot work.
+ */
+export function parseModeListing(listing: string): readonly ModeFix[] {
+  const fixes = listing.split("\n").filter((line) => line !== "").map((line): ModeFix => {
+    const match = /^([fd]) ([0-7]{1,4}) (\/[^\x00-\x1f\x7f]*)$/.exec(line);
+    if (match === null) throw new Error(`unexpected mode listing line ${JSON.stringify(line)}`);
+    return { type: match[1] as ModeFix["type"], mode: parseInt(match[2]!, 8), path: match[3]! };
+  });
+  if (!fixes.some((fix) => fix.type === "f" && (fix.mode & 0o6000) !== 0)) {
+    throw new Error("the image lists no setuid or setgid file, so the mode listing is broken");
+  }
+  return fixes.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
+}
+
+/** debugfs's command parser takes `""` inside quotes as a quote and has no other escapes. */
+const debugfsPath = (path: string): string => `"${path.replaceAll('"', '""')}"`;
+
+/** `sif <path> mode` takes the whole i_mode, so the file type bits go in too. */
+export function debugfsModeCommands(fixes: readonly ModeFix[]): string {
+  const typeBits = { f: 0o100000, d: 0o040000 } as const;
+  return fixes.map((fix) => `sif ${debugfsPath(fix.path)} mode 0${(typeBits[fix.type] | fix.mode).toString(8)}\n`).join("");
+}
+
+export function debugfsStatCommands(fixes: readonly ModeFix[]): string {
+  return fixes.map((fix) => `stat ${debugfsPath(fix.path)}\n`).join("");
+}
+
+/** debugfs -f echoes each command as `debugfs: <command>`, and stat prints `Mode:  04755` (permission bits). */
+export function parseDebugfsModes(output: string): ReadonlyMap<string, number> {
+  const modes = new Map<string, number>();
+  let path: string | null = null;
+  for (const line of output.split("\n")) {
+    const command = /^debugfs: stat "((?:[^"]|"")*)"$/.exec(line);
+    if (command !== null) {
+      path = command[1]!.replaceAll('""', '"');
+      continue;
+    }
+    const mode = /\bMode:\s+([0-7]+)/.exec(line);
+    if (path !== null && mode !== null) {
+      modes.set(path, parseInt(mode[1]!, 8));
+      path = null;
+    }
+  }
+  return modes;
+}
+
+/** One line per fix whose read-back mode differs or is missing. */
+export function modeMismatches(fixes: readonly ModeFix[], modes: ReadonlyMap<string, number>): readonly string[] {
+  return fixes.flatMap((fix) => {
+    const got = modes.get(fix.path);
+    return got === fix.mode ? [] : [`${fix.path}: want ${fix.mode.toString(8)}, got ${got === undefined ? "nothing" : got.toString(8)}`];
+  });
+}
+
+/** debugfs exits 0 on most errors and reports them on stderr, after its version banner. */
+export function debugfsErrors(stderr: string): readonly string[] {
+  return stderr.split("\n").filter((line) => line.trim() !== "" && !/^debugfs \d/.test(line));
+}
+
+function parseOrFail<T>(parse: () => T): T {
+  try {
+    return parse();
+  } catch (err) {
+    throw new JobFailure("backend", (err as Error).message);
+  }
+}
+
+async function restoreModes(assets: string, fixes: readonly ModeFix[], scratch: string, signal: AbortSignal): Promise<void> {
+  const manifestFile = join(assets, "manifest.json");
+  const manifest = JSON.parse(await readFile(manifestFile, "utf8")) as GondolinManifest;
+  const rootfs = join(assets, manifest.assets.rootfs);
+  const writes = join(scratch, "debugfs-modes.txt");
+  const reads = join(scratch, "debugfs-stat.txt");
+  await writeFile(writes, debugfsModeCommands(fixes));
+  await writeFile(reads, debugfsStatCommands(fixes));
+  const written = await run("debugfs", ["-w", "-f", writes, rootfs], signal);
+  const errors = debugfsErrors(written.stderr);
+  if (errors.length > 0) throw new JobFailure("backend", `debugfs could not restore modes in ${rootfs}`, errors.join("\n"));
+  const mismatches = modeMismatches(fixes, parseDebugfsModes((await run("debugfs", ["-f", reads, rootfs], signal)).stdout));
+  if (mismatches.length > 0) throw new JobFailure("backend", `${mismatches.length} modes did not stick in ${rootfs}`, mismatches.join("\n"));
+
+  // The rootfs changed, so Gondolin's checksum and its content-derived build ID are recomputed with its own function.
+  const { computeAssetBuildId } = (await import(pathToFileURL(join(dirname(gondolinPackageJson), "dist", "src", "assets.js")).href)) as {
+    computeAssetBuildId(input: { checksums: GondolinManifest["checksums"]; arch?: string }): string;
+  };
+  manifest.checksums.rootfs = await sha256File(rootfs);
+  manifest.buildId = computeAssetBuildId({ checksums: manifest.checksums, arch: manifest.config.arch });
+  await writeFile(manifestFile, `${JSON.stringify(manifest, null, 2)}\n`);
+  if (!verifyAssets(assets)) throw new JobFailure("backend", `Gondolin's manifest in ${assets} does not verify after the mode fix`);
+}
+
+interface GondolinManifest {
+  buildId?: string;
+  config: { arch: string };
+  assets: { rootfs: string };
+  checksums: { kernel: string; initramfs: string; rootfs: string; krunKernel?: string; krunInitrd?: string };
+}
+
+async function sha256File(path: string): Promise<string> {
+  const hash = createHash("sha256");
+  for await (const chunk of createReadStream(path)) hash.update(chunk as Buffer);
+  return hash.digest("hex");
 }
 
 const smokeHost = "api.anthropic.com";
@@ -250,7 +380,11 @@ const literal = (text: string): string => text.replace(/[.*+?^${}()|[\]\\]/g, "\
 function smokeChecks(pins: ImageRecipe["pins"]): readonly SmokeCheck[] {
   return [
     { name: "exec environment", argv: ["node", "-p", "`${process.version} ${process.env.NODE_EXTRA_CA_CERTS}`"], expect: new RegExp(`^v${literal(pins.node)} /run/gondolin/ca-certificates\\.crt\\n$`) },
-    { name: "user", argv: asUser("id; sudo -n true && echo sudo ok; stat -c '%U %a' workspace"), expect: /^uid=1000\(user\) gid=1000\(user\) [^\n]*\nsudo ok\nuser 755\n$/ },
+    {
+      name: "user",
+      argv: asUser("id; stat -c '%a %U' /usr/bin/sudo; sudo -n true && echo sudo ok; stat -c '%U %a' workspace"),
+      expect: /^uid=1000\(user\) gid=1000\(user\) [^\n]*\n4755 root\nsudo ok\nuser 755\n$/,
+    },
     {
       name: "versions",
       argv: asUser("node --version; claude --version; pi --version; herdr --version; nexus --version"),
@@ -328,7 +462,7 @@ const killGraceMs = 10_000;
  * Tees the command's output to this process's stderr for the build log, and keeps its tail for the JobFailure. An abort signals the whole process group, because Gondolin's build runs docker, mke2fs
  * and others as its own children, and rejects only once every process in the group is gone.
  */
-async function run(command: string, args: readonly string[], signal: AbortSignal): Promise<void> {
+async function run(command: string, args: readonly string[], signal: AbortSignal): Promise<{ stdout: string; stderr: string }> {
   signal.throwIfAborted();
   const child = spawn(command, args, { detached: true, stdio: ["ignore", "pipe", "pipe"] });
   const terminate = () => {
@@ -336,12 +470,15 @@ async function run(command: string, args: readonly string[], signal: AbortSignal
   };
   signal.addEventListener("abort", terminate, { once: true });
   let tail = "";
-  const keep = (chunk: Buffer) => {
-    process.stderr.write(chunk);
-    tail = (tail + chunk.toString("utf8")).slice(-logTailBytes);
-  };
-  child.stdout.on("data", keep);
-  child.stderr.on("data", keep);
+  const output = { stdout: "", stderr: "" };
+  for (const stream of ["stdout", "stderr"] as const) {
+    child[stream].setEncoding("utf8");
+    child[stream].on("data", (chunk: string) => {
+      process.stderr.write(chunk);
+      tail = (tail + chunk).slice(-logTailBytes);
+      output[stream] += chunk;
+    });
+  }
   let code: number | null;
   let killedBy: NodeJS.Signals | null;
   try {
@@ -354,6 +491,7 @@ async function run(command: string, args: readonly string[], signal: AbortSignal
     throw signal.reason;
   }
   if (code !== 0) throw new JobFailure("backend", `${command} ${args[0]} ${killedBy === null ? `exited ${code}` : `was killed by ${killedBy}`}`, tail);
+  return output;
 }
 
 /** False once no process is left in the group. */
