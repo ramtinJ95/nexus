@@ -8,7 +8,7 @@
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "test": "node --test src/reconcile.test.ts src/tailscale.test.ts src/sessions.test.ts src/probe/server.test.ts src/project.test.ts src/images.test.ts src/probe/config.test.ts src/control/registry.test.ts src/control/loop.test.ts src/control/api.test.ts src/probe/gateway.test.ts src/probe/serve.test.ts src/image-build.test.ts src/harness/credentials.test.ts src/harness/activity.test.ts src/pylon-vm-backend.test.ts src/pylon-vm/network.test.ts src/pylon-vm/runtime.test.ts",
+    "test": "node --test src/reconcile.test.ts src/tailscale.test.ts src/sessions.test.ts src/probe/server.test.ts src/project.test.ts src/images.test.ts src/probe/config.test.ts src/control/registry.test.ts src/control/loop.test.ts src/control/api.test.ts src/control/dashboard.test.ts src/probe/gateway.test.ts src/probe/serve.test.ts src/image-build.test.ts src/harness/credentials.test.ts src/harness/activity.test.ts src/pylon-vm-backend.test.ts src/pylon-vm/network.test.ts src/pylon-vm/runtime.test.ts",
     "test:slice": "node --test --test-timeout=600000 src/slice.test.ts",
     "test:harness": "node --test --test-timeout=600000 src/harness/slice.test.ts",
     "probe": "node src/probe/main.ts"
