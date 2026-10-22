@@ -13,7 +13,8 @@
  * The backend speaks its own types. Wire types from protocol.ts stop at runJob and runCommand.
  */
 import type { Readable } from "node:stream";
-import type { ByteStream, CommandResult, Job, JobErrorCode, PylonCommand, PylonId, StreamRequest } from "./protocol.ts";
+import type { ByteStream, CommandResult, Job, JobErrorCode, PylonCommand, PylonId, ServiceFact, StreamRequest } from "./protocol.ts";
+import { checkoutDir, closeSession, openSession } from "./sessions.ts";
 import type { BootInputs, LiveSpec, OverlayFile, PreviewAssignment } from "./project.ts";
 import type { ArtifactId, CheckpointId, ImageId, PortableArtifactId, TemplateBuildInputs, TemplateId } from "./images.ts";
 
@@ -47,7 +48,7 @@ export interface Guest {
   exec(argv: readonly string[], opts: { cwd: string; timeoutMs: number }): Promise<{ exitCode: number | null; output: string; truncated: boolean }>;
   stream(request: StreamRequest): Promise<ByteStream>;
   writeFiles(files: readonly OverlayFile[]): Promise<void>;
-  services(op: "ensure" | "restart" | "stop" | "logs", name?: string, lines?: number): Promise<{ services: readonly { name: string; state: string; port: number }[]; logs?: string }>;
+  services(op: "ensure" | "restart" | "stop" | "logs", name?: string, lines?: number): Promise<{ services: readonly ServiceFact[]; logs?: string }>;
   /** Supervise a port that is already listening. Returns the service name it was registered under. */
   linkPort(port: number, title?: string): Promise<string>;
   /** Plain-HTTP loopback origin that the probe's preview gateway forwards to. */
@@ -129,10 +130,24 @@ export async function runJob(job: Job, deps: ProbeDeps, signal: AbortSignal): Pr
   }
 }
 
+/** The caller has checked that the pylon runs. Sessions open in the checkout. */
 export async function runCommand(pylonId: PylonId, command: PylonCommand, deps: ProbeDeps): Promise<CommandResult> {
-  // TODO: open-session and close-session become guest execs of Herdr's CLI, following pi-shepherdr's
-  // launch.ts (start in a new tab, poll until ready, roll back on failure). exec and service map onto Guest.
-  throw new Error("not implemented");
+  const guest = deps.backend.guest(pylonId);
+  switch (command.kind) {
+    case "exec":
+      return { kind: "exec", ...await guest.exec(command.argv, { cwd: command.cwd, timeoutMs: command.timeoutMs }) };
+    case "open-session": {
+      const { harness, title, resume } = command;
+      return { kind: "open-session", herdrPane: await openSession(guest, { harness, title, cwd: checkoutDir, ...(resume === undefined ? {} : { resume }) }) };
+    }
+    case "close-session":
+      await closeSession(guest, command.herdrPane);
+      return { kind: "close-session" };
+    case "service": {
+      const { services, logs } = await guest.services(command.op, command.name, command.lines);
+      return { kind: "service", services, ...(logs === undefined ? {} : { logs }) };
+    }
+  }
 }
 
 // The pylon VM backend, createPylonVmBackend, lives in pylon-vm-backend.ts.
