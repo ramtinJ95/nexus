@@ -111,7 +111,12 @@ export interface NodeObservation {
   probeBootId: string;
   capacity: { memoryGiB: number; committedMemoryGiB: number; diskFreeGiB: number };
   artifacts: readonly ArtifactId[];
-  jobs: readonly JobStatus[]; // running jobs, plus results from the last 10 minutes
+  /**
+   * Running jobs, plus results from the last 10 minutes. Read before `pylons`, so `pylons` shows the result of
+   * every job listed here as finished. The planner relies on that: a job event can arrive before the snapshot
+   * that shows its result, and planning against the older snapshot would send the job again.
+   */
+  jobs: readonly JobStatus[];
   /** A pylon absent from this list does not exist on the node. A listed pylon the registry does not know is an orphan: shown, never deleted. */
   pylons: readonly PylonObservation[];
 }
