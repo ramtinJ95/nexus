@@ -38,7 +38,7 @@ const stopped = (checkpoint: CheckpointId | null): PylonObservation => ({ pylonI
 const broken: PylonObservation = { pylonId, phase: "broken", detail: "qcow2 header unreadable" };
 const phase = (p: "booting" | "stopping" | "deleting"): PylonObservation => ({ pylonId, phase: p });
 
-const fresh: PylonSource & { kind: "fresh" } = { kind: "fresh" };
+const fresh: PylonSource & { kind: "fresh" } = { kind: "fresh", preSetup: null };
 const fromTemplate: PylonSource & { kind: "template" } = { kind: "template", template };
 const spawn = (source: PylonSource): PlanStep => ({ kind: "submit", job: { kind: "spawn", pylonId, boot: { ...boot, source }, live, liveHash } });
 const pause: PlanStep = { kind: "submit", job: { kind: "pause", pylonId, checkpoint: nextCheckpoint } };

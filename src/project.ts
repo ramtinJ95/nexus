@@ -81,7 +81,7 @@ export function effectiveAllowedHosts(project: Project): readonly string[] {
 export type PylonSource =
   | { kind: "template"; template: TemplateId }
   | { kind: "resume"; checkpoint: CheckpointId } // the pylon's own disk on this node
-  | { kind: "fresh" }; // image only: clone, preSetup and .nexus/setup inline. Used when no template exists
+  | { kind: "fresh"; preSetup: Project["preSetup"] }; // image only: clone, preSetup and .nexus/setup inline. Used when no template exists
 
 /** Applied only when the VM boots. Changing these on a running pylon takes effect at its next wake. */
 export interface BootInputs {

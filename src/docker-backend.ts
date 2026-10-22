@@ -190,7 +190,31 @@ export function createDockerBackend(options: DockerBackendOptions): VmBackend {
     },
 
     buildTemplate() { return Promise.reject(new Error("the Docker backend does not build templates yet")); },
-    guest() { throw new Error("the Docker backend has no guest operations yet"); },
+    guest(pylonId) {
+      const notYet = (member: string) => () => { throw new Error(`the Docker backend has no Guest.${member} yet`); };
+      return {
+        // As root, unlike a pylon: the container image has no `user`.
+        async exec(argv, { cwd, timeoutMs }) {
+          // docker exec reports a missing or stopped container as an ordinary exit code 1.
+          const existing = await container(pylonId, AbortSignal.timeout(timeoutMs));
+          if (existing?.State.Status !== "running") throw new Error(`${pylonId} is not running`);
+          try {
+            const { stdout, stderr } = await execFileAsync("docker", ["exec", "--workdir", cwd, pylonId, ...argv], { timeout: timeoutMs, maxBuffer: 64 << 20 });
+            return { exitCode: 0, output: stdout + stderr, truncated: false };
+          } catch (err) {
+            const { code, killed, stdout = "", stderr = "" } = err as { code?: unknown; killed?: boolean; stdout?: string; stderr?: string };
+            if (killed) return { exitCode: null, output: stdout + stderr, truncated: false };
+            if (typeof code !== "number") throw err;
+            return { exitCode: code, output: stdout + stderr, truncated: false };
+          }
+        },
+        stream: notYet("stream"),
+        writeFiles: notYet("writeFiles"),
+        services: notYet("services"),
+        linkPort: notYet("linkPort"),
+        previewOrigin: notYet("previewOrigin"),
+      };
+    },
   };
 }
 

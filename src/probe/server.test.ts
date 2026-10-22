@@ -14,7 +14,7 @@ const probeNodeId = "nPROBE" as TailnetNodeId;
 const pylonId = "pylon-unit" as PylonId;
 const image: ImageId = "img-000000000000";
 const boot: BootInputs = {
-  pylonId, image, source: { kind: "fresh" },
+  pylonId, image, source: { kind: "fresh", preSetup: null },
   resources: { cpus: 1, memoryGiB: 1, diskGiB: 1 },
   network: { allowedHosts: [], secrets: [] },
   repo: { url: "git@example.com:r.git", checkout: { branch: "main", commit: "c0ffee" } },

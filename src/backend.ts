@@ -14,7 +14,7 @@
  */
 import type { Readable } from "node:stream";
 import type { ByteStream, CommandResult, Job, JobErrorCode, PylonCommand, PylonId, StreamRequest } from "./protocol.ts";
-import type { BootInputs, LiveSpec, OverlayFile, PreviewAssignment, ServicesFile } from "./project.ts";
+import type { BootInputs, LiveSpec, OverlayFile, PreviewAssignment } from "./project.ts";
 import type { ArtifactId, CheckpointId, ImageId, PortableArtifactId, TemplateBuildInputs, TemplateId } from "./images.ts";
 
 export interface VmBackend {
@@ -135,40 +135,25 @@ export async function runCommand(pylonId: PylonId, command: PylonCommand, deps: 
   throw new Error("not implemented");
 }
 
-// The pylon VM backend, a hard fork of pi-sandbox.
+// The pylon VM backend, createPylonVmBackend, lives in pylon-vm-backend.ts.
 
 /**
- * Nexus owns a hard fork of pi-sandbox (MIT) under packages/pylon-vm: its source copied in at a pinned
- * commit with its licence notice, trimmed to what Nexus uses, and not tracked against upstream. pi-sandbox
- * stays the reference to compare against. Kept from it: the detached controller per instance, the
- * checkpoint written to disk.next.qcow2 and renamed, template prepare and copy, the services supervisor
- * and the port linking behind previews. Deleted: the pi extension entry, the changelog tool, the YAML
- * config layer and `.sandbox.yaml`, and the hooks that run `.agents/*` as root from the workspace.
+ * It drives src/pylon-vm/, a hard fork of pi-sandbox (MIT) that Nexus owns and does not track upstream.
+ * src/pylon-vm/FORK.md names the upstream commit and every edit. pi-sandbox stays the reference to compare
+ * against. Kept from it: the detached controller per instance, the checkpoint written to disk.next.qcow2 and
+ * renamed, template prepare and copy, the services supervisor and the port linking behind previews.
  *
- * Changes the fork makes first:
- * 1. Config is a typed object from `toVmConfig`, not YAML read from the workspace.
- * 2. Secrets reach createHttpHooks from the probe's SecretSource, never from the instance record.
- * 3. Network policy, secrets and resources are inputs to every start, including a create from a template.
- *    Today the allowlist is frozen at create and a template's recorded config wins.
- * 4. A service's PUBLIC_URL is the URL the probe assigned, not a localhost preview.
- * 5. A host bridge: requests to http://nexus.pylon go to the probe's Unix socket with the instance name attached.
- * 6. Template and instance export and import as ArtifactStore archives.
- * 7. setup and resume run as `user`: clone or checkout over SSH, preSetup and `.nexus/setup` at template
- *    build, and `.nexus/resume` on every boot, followed by the dotfiles pull, the overlay and the session
- *    relaunch from ~/.nexus/sessions.json.
- * The image needs pi-sandbox's `sandboxssh` helper for `shell` and streams, so the fork keeps building it.
+ * Done: config is a typed object, and a fresh boot clones over HTTPS and runs preSetup and `.nexus/setup`
+ * as `user`. Still to change in the fork:
+ * 1. Secrets reach createHttpHooks from the probe's SecretSource, never from the instance record.
+ * 2. Network policy, secrets and resources are inputs to every start, including a create from a template.
+ *    Today they are fixed at create, and the backend refuses a wake whose inputs changed.
+ * 3. A service's PUBLIC_URL is the URL the probe assigned, not a localhost preview.
+ * 4. A host bridge: requests to http://nexus.pylon go to the probe's Unix socket with the instance name attached.
+ * 5. Template and instance export and import as ArtifactStore archives.
+ * 6. Checkout over SSH terminated on the host, the template build, and on every boot `.nexus/resume`, the
+ *    dotfiles pull, the overlay and the session relaunch from ~/.nexus/sessions.json.
+ * The image needs pi-sandbox's `sandboxssh` helper for `shell` and streams.
  */
-export function toVmConfig(boot: BootInputs, services: ServicesFile | null): unknown {
-  // TODO: workspace /home/user/workspace with the checkout in repo/. Services come from .nexus/services.yaml
-  // with cwd prefixed by `repo/`. `nexus services ensure` re-reads the guest copy of that file.
-  throw new Error("not implemented");
-}
-
-export function createPylonVmBackend(options: { stateRoot: string; artifactRoot: string; secrets: SecretSource }): VmBackend {
-  // TODO: call the fork's run(action) directly. Name = pylonId. Template name = template ID.
-  // ensureRunning: inspect. running -> apply live. stopped -> start. absent -> create { template } or { config }.
-  // "controller still starting" -> poll inspect until the deadline instead of failing.
-  throw new Error("not implemented");
-}
 
 // The Docker test double, createDockerBackend, lives in docker-backend.ts.

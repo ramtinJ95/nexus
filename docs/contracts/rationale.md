@@ -118,4 +118,4 @@ These need a spike or a source check:
 
 ## Next implementation step
 
-The first slice is done: `planPylon` with a table test, and a probe that runs spawn, pause and delete against the Docker backend end to end (`npm test`, `npm run test:slice`). Next, copy pi-sandbox into the repo as `pylon-vm` and make it pass the same slice test on `infra-testbench`.
+The first slice is done: `planPylon` with a table test, and a probe that runs spawn, pause and delete against the Docker backend end to end (`npm test`, `npm run test:slice`). The second slice is done too: `pylon-vm`, the pi-sandbox fork in `src/pylon-vm/`, passes the same slice test on `infra-testbench` with real Gondolin VMs. Next come the remaining fork changes listed in `src/backend.ts`.

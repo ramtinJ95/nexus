@@ -392,6 +392,7 @@ export function parseJobEnvelope(body: string): JobEnvelope {
       if (!string(boot.image, "job.boot.image").startsWith("img-")) throw new Error("job.boot.image is not an image ID");
       const source = record(boot.source, "job.boot.source");
       if (source.kind !== "template" && source.kind !== "resume" && source.kind !== "fresh") throw new Error("job.boot.source.kind is not template, resume or fresh");
+      if (source.kind === "fresh" && source.preSetup !== null) string(source.preSetup, "job.boot.source.preSetup");
       const live = record(job.live, "job.live");
       if (!Array.isArray(live.previews) || !Array.isArray(live.overlay)) throw new Error("job.live needs previews and overlay arrays");
       string(job.liveHash, "job.liveHash");
