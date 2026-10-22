@@ -8,8 +8,9 @@
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "test": "node --test src/reconcile.test.ts src/tailscale.test.ts src/probe/server.test.ts",
-    "test:slice": "node --test --test-timeout=600000 src/slice.test.ts"
+    "test": "node --test src/reconcile.test.ts src/tailscale.test.ts src/probe/server.test.ts src/probe/config.test.ts",
+    "test:slice": "node --test --test-timeout=600000 src/slice.test.ts",
+    "probe": "node src/probe/main.ts"
   },
   "devDependencies": {
     "@types/node": "^26.6.5",
