@@ -1,13 +1,16 @@
 import { access, readFile, rename } from "node:fs/promises";
 import { join, posix } from "node:path";
+import { VM, type VMOptions, VmCheckpoint } from "@earendil-works/gondolin";
+import type { Action, BootSpec, SandboxRecord } from "./contracts.ts";
 import {
-	createHttpHooks,
-	VM,
-	type VMOptions,
-	VmCheckpoint,
-} from "@earendil-works/gondolin";
-import { type Action, profiles, type SandboxRecord } from "./contracts.ts";
-import { checked, execute, guestExists, serviceRoot } from "./guest.ts";
+	checked,
+	execute,
+	guestExists,
+	serviceRoot,
+	stagingRoot,
+	writeFiles,
+} from "./guest.ts";
+import { networkOptions } from "./network.ts";
 import { openTerminal } from "./portals.ts";
 import { GuestProcesses } from "./processes.ts";
 import { GuestServices } from "./services.ts";
@@ -34,9 +37,11 @@ export class SandboxRuntime {
 		| "failed" = "starting";
 	private dir: string;
 	private record: SandboxRecord;
-	constructor(dir: string, record: SandboxRecord) {
+	private spec: BootSpec;
+	constructor(dir: string, record: SandboxRecord, spec: BootSpec) {
 		this.dir = dir;
 		this.record = record;
+		this.spec = spec;
 	}
 	async boot(
 		prepare: boolean,
@@ -45,7 +50,8 @@ export class SandboxRuntime {
 	): Promise<void> {
 		this.startupError = setupError;
 		const config = this.record.config;
-		const resources = config.resources ?? profiles[config.profile];
+		const { resources } = this.spec;
+		const { placeholders, ...network } = networkOptions(this.spec);
 		const options: VMOptions = {
 			cpus: resources.cpus,
 			memory: `${resources.memoryGiB}G`,
@@ -57,8 +63,7 @@ export class SandboxRuntime {
 				accel: process.platform === "darwin" ? "hvf" : "kvm",
 				...(config.image ? { imagePath: config.image } : {}),
 			},
-			httpHooks: createHttpHooks({ allowedHosts: config.network.allowedHosts })
-				.httpHooks,
+			...network,
 			env: {
 				HOME: "/root",
 				PATH: "/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
@@ -87,12 +92,41 @@ export class SandboxRuntime {
 		// files must never be mistaken for newly booted unrelated processes.
 		await checked(
 			vm,
-			`rm -f ${serviceRoot}/*.pid; rm -rf /var/lib/pi-sandbox/commands`,
+			`rm -f ${serviceRoot}/*.pid; rm -rf /var/lib/pi-sandbox/commands ${stagingRoot}`,
 		);
+		// Placeholders are new on every boot, and login shells, which every guest command runs through, read profile.d.
+		await writeFiles(vm, [
+			{
+				path: "/etc/profile.d/nexus-secrets.sh",
+				owner: "root",
+				mode: 0o644,
+				content: Object.entries(placeholders)
+					.map(([name, placeholder]) => `export ${name}=${q(placeholder)}\n`)
+					.join(""),
+			},
+			{
+				path: "/etc/ssh/ssh_config.d/nexus.conf",
+				owner: "root",
+				mode: 0o644,
+				content: guestSshConfig,
+			},
+			...this.spec.files,
+		]);
+		for (const hook of this.spec.hooks) {
+			const pid = await this.processes.launch(hook, "/", true, 120);
+			let result = await this.processes.status(pid, 60000);
+			while (result.running) {
+				console.log(result.output);
+				result = await this.processes.status(pid, 60000);
+			}
+			console.log(result.output);
+			if (result.exitCode !== 0) console.error(`Boot hook exited ${result.exitCode}`);
+		}
 		const configPath = posix.join(config.workspace, ".sandbox.yaml");
 		if (!(await guestExists(vm, configPath)))
 			await vm.fs.writeFile(configPath, JSON.stringify(config, null, 2));
-		if (fresh || !resume) {
+		const firstBoot = fresh || !resume;
+		if (firstBoot) {
 			this.startupError = undefined;
 			const setup = config.setup;
 			if (setup.length) {
@@ -123,7 +157,8 @@ export class SandboxRuntime {
 			await this.stop(true);
 			return;
 		}
-		const hooks = config.resume;
+		// Setup leaves the disk as resume would find it, so the boot that ran setup skips resume.
+		const hooks = firstBoot ? [] : config.resume;
 		if (hooks.length) {
 			const pid = await this.processes.launch(
 				hooks.map((cmd) => `/bin/sh -lc ${q(cmd)} || exit $?`).join("\n"),
@@ -169,8 +204,7 @@ export class SandboxRuntime {
 		return {
 			name: this.record.name,
 			state: this.state,
-			resources:
-				this.record.config.resources ?? profiles[this.record.config.profile],
+			resources: this.spec.resources,
 			diskGiB: this.record.config.diskGiB,
 			previews: this.managed?.urls() ?? {},
 			persistence: "disk-only",
@@ -310,11 +344,9 @@ export class SandboxRuntime {
 					truncated: result.truncated,
 				};
 			}
-			case "write":
-				await vm.fs.writeFile(action.path, action.content, {
-					signal: AbortSignal.timeout(10000),
-				});
-				return { path: action.path, bytes: Buffer.byteLength(action.content) };
+			case "write-files":
+				await writeFiles(vm, action.files);
+				return { paths: action.files.map((file) => file.path) };
 			case "services":
 				return this.managed!.operate(action.op, action.service);
 			case "service-start": {
@@ -369,6 +401,13 @@ export class SandboxRuntime {
 		await this.managed?.close();
 	}
 }
+
+/** Every SSH connection from the guest ends at Gondolin's proxy, which shows its own host key and checks the real one against the host's known_hosts. */
+const guestSshConfig = `Host *
+	StrictHostKeyChecking no
+	UserKnownHostsFile /dev/null
+	LogLevel ERROR
+`;
 
 export async function readIntent(dir: string): Promise<{
 	prepare: boolean;

@@ -1,6 +1,8 @@
+import { randomUUID } from "node:crypto";
+import { posix } from "node:path";
 import { Writable } from "node:stream";
 import type { VM } from "@earendil-works/gondolin";
-import { commandOutcomeSchema, type Service } from "./contracts.ts";
+import { commandOutcomeSchema, type GuestFile, type Service } from "./contracts.ts";
 import { shellQuote as q } from "./storage.ts";
 
 export async function execute(
@@ -80,6 +82,28 @@ export async function guestExists(vm: VM, path: string): Promise<boolean> {
 	return (await execute(vm, `test -e ${q(path)}`, "/", 3000)).exitCode === 0;
 }
 export const serviceRoot = "/var/lib/pi-sandbox/services";
+export const stagingRoot = "/var/lib/pi-sandbox/staging";
+/** Missing parent directories are made as the file's owner, so a user's file never lands in a directory only root can write. */
+export async function writeFiles(
+	vm: VM,
+	files: readonly GuestFile[],
+): Promise<void> {
+	if (files.length === 0) return;
+	const staging = `${stagingRoot}/${randomUUID()}`;
+	await checked(vm, `mkdir -p ${q(staging)}; chmod 700 ${q(staging)}`);
+	for (const [i, file] of files.entries())
+		await vm.fs.writeFile(`${staging}/${i}`, file.content);
+	const install = files.map((file, i) => {
+		const owner = q(file.owner);
+		const dir = q(posix.dirname(file.path));
+		const mkdir =
+			file.owner === "root"
+				? `mkdir -p ${dir}`
+				: `runuser -u ${owner} -- mkdir -p ${dir}`;
+		return `${mkdir} && install -o ${owner} -g "$(id -gn ${owner})" -m ${file.mode.toString(8)} ${q(`${staging}/${i}`)} ${q(file.path)}`;
+	});
+	await checked(vm, [...install, `rm -rf ${q(staging)}`].join(" &&\n"));
+}
 export async function serviceRunning(vm: VM, name: string): Promise<boolean> {
 	const result = await execute(
 		vm,

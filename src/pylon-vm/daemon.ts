@@ -1,19 +1,21 @@
-import { chmod, readFile, rm, writeFile } from "node:fs/promises";
+import { chmod, readFile, rm } from "node:fs/promises";
 import http from "node:http";
 import { join } from "node:path";
-import { actionSchema } from "./contracts.ts";
+import { text } from "node:stream/consumers";
+import { actionSchema, bootSchema } from "./contracts.ts";
 import { readIntent, SandboxRuntime } from "./runtime.ts";
-import { agentError, readRecord } from "./storage.ts";
+import { agentError, readRecord, saveJson } from "./storage.ts";
 
 async function main(): Promise<void> {
 	const dir = process.argv[2];
 	if (!dir) throw new Error("Instance directory required");
 	const record = await readRecord(dir);
 	const pidFile = join(dir, "controller.pid");
-	await writeFile(pidFile, String(process.pid), {
-		mode: 0o600,
-	});
-	const runtime = new SandboxRuntime(dir, record);
+	// Renamed in whole, because clients read it while the controller starts.
+	await saveJson(pidFile, process.pid);
+	// The launching client writes the boot spec, secrets included, to stdin and closes it.
+	const spec = bootSchema.parse(JSON.parse(await text(process.stdin)));
+	const runtime = new SandboxRuntime(dir, record, spec);
 	const intent = await readIntent(dir);
 	try {
 		await runtime.boot(intent.prepare, intent.fresh, intent.setupError);
@@ -76,7 +78,7 @@ async function main(): Promise<void> {
 					"exec-status",
 					"exec-kill",
 					"read",
-					"write",
+					"write-files",
 					"logs",
 				].includes(actionSchema.parse(JSON.parse(body)).action);
 			} catch {}

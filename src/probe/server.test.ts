@@ -18,6 +18,7 @@ const boot: BootInputs = {
   resources: { cpus: 1, memoryGiB: 1, diskGiB: 1 },
   network: { allowedHosts: [], secrets: [] },
   repo: { url: "git@example.com:r.git", checkout: { branch: "main", commit: "c0ffee" } },
+  dotfiles: { repo: "https://example.com/dotfiles.git", ref: "main" },
 };
 const spawnJob: Job = { kind: "spawn", pylonId, boot, live: { previews: [], overlay: [] }, liveHash: "hash-1" as LiveHash };
 
