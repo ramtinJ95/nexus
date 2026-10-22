@@ -251,6 +251,11 @@ test("ingest: changed and closed sessions, and a dirty tree at a new head", () =
   ] satisfies RegistryWrite[]);
 });
 
+test("ingest: sessions the probe could not read write nothing", () => {
+  const before = runningWith({ sessions: [working, idleShell] });
+  assert.deepEqual(ingest({ type: "pylon", pylon: runningWith({ sessions: null }) }, node, knows(before), now), []);
+});
+
 test("ingest: a pause closes every session and retracts no output", () => {
   const before = runningWith({ sessions: [idleShell], previews: [{ service: "web", httpsPort: 8443, ready: true }] });
   assert.deepEqual(ingest({ type: "pylon", pylon: phase("stopping") }, node, knows(before), now), [

@@ -167,8 +167,19 @@ export function startLoop(options: LoopOptions): Loop {
  * because a job listed as finished promises that the pylons already show its result. ingest records them.
  */
 function merge(last: NodeObservation | null, event: ProbeEvent): NodeObservation {
-  if (event.type === "snapshot") return event.observation;
+  if (event.type === "snapshot") return { ...event.observation, pylons: event.observation.pylons.map((p) => keepSessions(last, p)) };
   if (last === null) throw new Error(`observe sent a ${event.type} event before its first snapshot`);
   if (event.type !== "pylon") return last;
-  return { ...last, pylons: [...last.pylons.filter((p) => p.pylonId !== event.pylon.pylonId), event.pylon] };
+  return { ...last, pylons: [...last.pylons.filter((p) => p.pylonId !== event.pylon.pylonId), keepSessions(last, event.pylon)] };
+}
+
+/**
+ * Sessions the probe could not read have not changed as far as the registry knows, and the next diff needs
+ * the last list read. Only the stored copy is filled in. ingest gets the event as read, so a carried list
+ * is never agent activity.
+ */
+function keepSessions(last: NodeObservation | null, pylon: PylonObservation): PylonObservation {
+  if (pylon.phase !== "running" || pylon.sessions !== null) return pylon;
+  const previous = last?.pylons.find((p) => p.pylonId === pylon.pylonId);
+  return { ...pylon, sessions: previous?.phase === "running" ? previous.sessions : [] };
 }

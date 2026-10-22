@@ -109,7 +109,7 @@ function fakeNode(options: { autoFinish: boolean }) {
   };
 
   /** Changes a running pylon's sessions, and announces it with a snapshot as the probe does after a job. */
-  function setSessions(pylonId: PylonId, sessions: readonly SessionFact[]) {
+  function setSessions(pylonId: PylonId, sessions: readonly SessionFact[] | null) {
     const pylon = pylons.get(pylonId);
     assert.ok(pylon?.phase === "running");
     pylons.set(pylonId, { ...pylon, sessions });
@@ -257,9 +257,37 @@ test("with the real ingest, a pylon's sessions reach the registry and a working 
   await new Promise((r) => setTimeout(r, 50));
   assert.equal(fake.pylons.get(thread.pylonId)?.phase, "running");
 
+  // Sessions the probe could not read leave the registry as it was, and the next read is diffed against the last one.
+  fake.setSessions(thread.pylonId, null);
+  await new Promise((r) => setTimeout(r, 50));
+  assert.deepEqual(registry.sessions(thread.pylonId), [{ pylon: thread.pylonId, ...working }]);
+
   fake.setSessions(thread.pylonId, []);
   await until("the closed session is removed", () => registry.sessions(thread.pylonId).length === 0);
   assert.deepEqual(registry.orphans(), []);
+});
+
+test("with the real ingest, sessions the probe could not read record no agent activity", async (t) => {
+  const registry = openRegistry(tempDb());
+  const longAgo = Date.now() - 60 * 60_000;
+  const thread = seed(registry, { agentTurnRunning: true, lastAgentActivityAt: longAgo, lastHumanActivityAt: longAgo });
+  const fake = fakeNode({ autoFinish: true });
+  run(t, registry, fake.probe, { ingest: realIngest });
+  await until("the pylon runs", () => fake.pylons.get(thread.pylonId)?.phase === "running");
+
+  const working: SessionFact = { herdrPane: "p1", harness: "pi", harnessSessionId: "s.jsonl", status: "working" };
+  fake.setSessions(thread.pylonId, [working]);
+  await until("the working session counts as agent activity", () => registry.thread(thread.id)!.lastAgentActivityAt > longAgo);
+  const seen = registry.thread(thread.id)!.lastAgentActivityAt;
+
+  // The stored observation still lists the working session, but only a fresh read of it is activity.
+  for (let i = 0; i < 2; i++) {
+    fake.setSessions(thread.pylonId, null);
+    await new Promise((r) => setTimeout(r, 50));
+    assert.equal(registry.thread(thread.id)!.lastAgentActivityAt, seen);
+  }
+  fake.setSessions(thread.pylonId, [working]);
+  await until("a fresh read is activity again", () => registry.thread(thread.id)!.lastAgentActivityAt > seen);
 });
 
 test("a node that goes quiet, as a sleeping one does, is treated as unreachable", async (t) => {

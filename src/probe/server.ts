@@ -7,12 +7,13 @@ import { statfs } from "node:fs/promises";
 import { createServer, STATUS_CODES, type IncomingMessage, type ServerResponse } from "node:http";
 import { totalmem } from "node:os";
 import type { Duplex } from "node:stream";
-import { JobFailure, runJob, type BackendPylon, type ProbeDeps, type SecretSource, type VmBackend } from "../backend.ts";
+import { JobFailure, runCommand, runJob, type BackendPylon, type ProbeDeps, type SecretSource, type VmBackend } from "../backend.ts";
 import {
-  encodeProbeEvent, encodeSubmitReply, jobDeadlineMs, jobSubject, parseJobEnvelope, parseStreamRequest, routeAuth, serveByteStream, streamUpgradeResponse,
+  encodeProbeEvent, encodeSubmitReply, jobDeadlineMs, jobSubject, parseJobEnvelope, parsePylonCommand, parseStreamRequest, routeAuth, serveByteStream, streamUpgradeResponse,
   type Job, type JobEnvelope, type JobId, type JobStatus, type LiveHash, type NodeName, type NodeObservation,
-  type ProbeAuthConfig, type ProbeEvent, type PylonId, type PylonObservation, type Subject,
+  type ProbeAuthConfig, type ProbeEvent, type PylonCommand, type PylonId, type PylonObservation, type SessionFact, type Subject,
 } from "../protocol.ts";
+import { sessionFacts } from "../sessions.ts";
 import type { Whois } from "../tailscale.ts";
 import { startGateway } from "./gateway.ts";
 import { createTailscaleServe, readRoutes, type HttpsGet, type TailscaleCli } from "./serve.ts";
@@ -51,6 +52,8 @@ export interface Probe {
 const jobRetentionMs = 10 * 60_000;
 const snapshotIntervalMs = 60_000;
 const maxBodyBytes = 1 << 20;
+/** Short, because snapshots are read one at a time and a stuck guest would hold up every observer. */
+const sessionReadTimeoutMs = 3_000;
 
 /** A probe without a preview gateway. An empty set is already converged. */
 const noPreviews: ProbeDeps["serve"] = {
@@ -102,7 +105,19 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
     return [...jobs.values()].map((job) => job.status);
   }
 
-  function observation(p: BackendPylon): PylonObservation {
+  /**
+   * Costs one guest exec (`herdr api snapshot`) per running pylon per snapshot, so a snapshot waits for the
+   * slowest pylon, up to sessionReadTimeoutMs. A failed read reports null, never "no sessions".
+   */
+  async function sessions(pylonId: PylonId): Promise<readonly SessionFact[] | null> {
+    try {
+      return await sessionFacts(backend.guest(pylonId), sessionReadTimeoutMs);
+    } catch {
+      return null;
+    }
+  }
+
+  async function observation(p: BackendPylon): Promise<PylonObservation> {
     const { pylonId } = p;
     switch (p.vm) {
       case "booting": case "stopping": case "deleting": return { pylonId, phase: p.vm };
@@ -113,8 +128,8 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
         return {
           pylonId, phase: "running", liveHash: liveHashes.get(pylonId) ?? null, bootedAt: p.bootedAt,
           bootedFrom: { image: p.image, checkpoint: p.checkpoint },
-          // Guest facts need guest operations, which this slice does not have.
-          services: [], previews: [], sessions: [], git: null, declaredOutputs: [], attachedClients: ptyStreams.get(pylonId) ?? 0,
+          // The other guest facts need guest operations, which this slice does not have.
+          services: [], previews: [], sessions: await sessions(pylonId), git: null, declaredOutputs: [], attachedClients: ptyStreams.get(pylonId) ?? 0,
         };
     }
   }
@@ -142,7 +157,7 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
       capacity: { memoryGiB: totalmem() / 2 ** 30, committedMemoryGiB: 0, diskFreeGiB: (disk.bavail * disk.bsize) / 2 ** 30 },
       artifacts,
       jobs,
-      pylons: pylons.map(observation),
+      pylons: await Promise.all(pylons.map(observation)),
     };
   }
 
@@ -241,6 +256,19 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
       // whois is async, so the caller or the probe may be gone by now, and nothing would remove the observer.
       if (req.socket.destroyed || shutdown.signal.aborted) return;
       return observe(res);
+    }
+    const commandMatch = /^\/v1\/pylons\/([^/]+)\/commands$/.exec(path);
+    if (commandMatch && req.method === "POST") {
+      const pylonId = decodeURIComponent(commandMatch[1]!) as PylonId;
+      let command: PylonCommand;
+      try {
+        command = parsePylonCommand(await readBody(req));
+      } catch (err) {
+        return send(res, 400, (err as Error).message);
+      }
+      const pylon = (await backend.list()).find((p) => p.pylonId === pylonId);
+      if (pylon?.vm !== "running") return send(res, 409, `${pylonId} is ${pylon?.vm ?? "absent"}, not running`);
+      return send(res, 200, JSON.stringify(await runCommand(pylonId, command, deps)), "application/json");
     }
     if (route === "/v1/pylons" || route === "/v1/artifacts") return send(res, 501, `${route} is not implemented in this slice`);
     return send(res, 404, `no route ${req.method} ${path}`);

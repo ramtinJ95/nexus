@@ -183,6 +183,8 @@ type NodeCapacity = { memoryGiB: number; committedMemoryGiB: number; diskFreeGiB
  * - A snapshot is the whole node, so a known pylon it omits is ingested as "absent".
  * - Sessions and outputs are diffed against the previous observation. A pylon that is not running has no
  *   sessions, so a pause closes them all, and the wake that relaunches them reports their new panes.
+ *   Sessions the probe could not read (null) write nothing. loop.ts stores the last list read in their
+ *   place, so a null previous list means sessions that were never read, and there is nothing to retract.
  * - Outputs are derived here, not reported by the probe as outputs: a branch with pushedAs is "branch" with
  *   that ref, a dirty tree is "diff" with the head as ref (one per head), a ready preview is "preview" with
  *   the service as ref, and a declared output keeps its kind with its declaration id as ref. Outputs are
@@ -224,19 +226,21 @@ function pylonWrites(pylonId: PylonId, previous: PylonObservation | "absent", cu
   const after = factsOf(current);
   const writes: RegistryWrite[] = [];
 
-  const panes = new Map(before.sessions.map((s) => [s.herdrPane, s]));
-  for (const fact of after.sessions) {
-    if (!isDeepStrictEqual(panes.get(fact.herdrPane), fact)) writes.push({ record: "session", pylonId, herdrPane: fact.herdrPane, fact });
-    panes.delete(fact.herdrPane);
+  if (after.sessions !== null) {
+    const panes = new Map((before.sessions ?? []).map((s) => [s.herdrPane, s]));
+    for (const fact of after.sessions) {
+      if (!isDeepStrictEqual(panes.get(fact.herdrPane), fact)) writes.push({ record: "session", pylonId, herdrPane: fact.herdrPane, fact });
+      panes.delete(fact.herdrPane);
+    }
+    for (const herdrPane of panes.keys()) writes.push({ record: "session", pylonId, herdrPane, fact: null });
   }
-  for (const herdrPane of panes.keys()) writes.push({ record: "session", pylonId, herdrPane, fact: null });
 
   const had = new Set(outputsOf(before).map(({ kind, ref }) => `${kind} ${ref}`));
   for (const { kind, ref } of outputsOf(after)) {
     if (!had.has(`${kind} ${ref}`)) writes.push({ record: "output", pylonId, kind, ref });
   }
 
-  const agent = after.sessions.some((s) => s.status === "working") ? now : null;
+  const agent = after.sessions?.some((s) => s.status === "working") ? now : null;
   const human = after.attachedClients > 0 ? now : null;
   if (agent !== null || human !== null) writes.push({ record: "activity", pylonId, human, agent });
   return writes;

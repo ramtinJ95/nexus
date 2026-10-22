@@ -136,7 +136,7 @@ export interface RunningFacts {
   bootedFrom: { image: ImageId; checkpoint: CheckpointId | null };
   services: readonly ServiceFact[];
   previews: readonly { service: string; httpsPort: number; ready: boolean }[];
-  sessions: readonly SessionFact[];
+  sessions: readonly SessionFact[] | null; // null when Herdr could not be read. No Herdr server is an empty list
   git: GitFacts | null; // null until the first poll, or when the checkout is missing
   declaredOutputs: readonly DeclaredOutput[];
   /** Open streams with a pty, counted as human presence. A raw pipe is not counted: the harness keeps one open for as long as the pylon runs. */
@@ -144,7 +144,8 @@ export interface RunningFacts {
 }
 
 export interface ServiceFact { name: string; state: "starting" | "ready" | "failed" | "stopped"; port: number; declared: boolean; wantsPreview: boolean }
-export interface SessionFact { herdrPane: string; harness: SessionHarness; harnessSessionId: string | null; status: "working" | "idle" | "blocked" | "done" }
+/** `unknown` is Herdr's word for a pane it cannot classify, which every plain shell is. */
+export interface SessionFact { herdrPane: string; harness: SessionHarness; harnessSessionId: string | null; status: "working" | "idle" | "blocked" | "done" | "unknown" }
 export interface GitFacts { head: string; branch: string | null; dirty: boolean; branches: readonly { name: string; head: string; pushedAs: string | null }[] }
 export type DeclaredOutput =
   | { id: string; kind: "file"; path: string; title: string | null; sha256: string }
@@ -219,6 +220,8 @@ export type TailnetNodeId = Brand<string, "TailnetNodeId">;
 
 export const probePort = 7480;
 const requestTimeoutMs = 10_000;
+/** A command answers only when it is done: an exec of up to 60 s, or a session open that waits for its agent. */
+const commandTimeoutMs = 90_000;
 
 /**
  * `whois` defaults to the local tailscaled. Tests pass a fake one, and `port` exists so they can run
@@ -231,9 +234,9 @@ export function connectProbe(node: NodeName, tailnetHost: string, expected: Tail
   const agent = new Agent({ keepAlive: false });
 
   /** A silent socket for `requestTimeoutMs` fails the call as unreachable. Observe lifts the limit once its stream starts. */
-  function open(method: "GET" | "PUT", path: string, body: string | null, signal?: AbortSignal): Promise<IncomingMessage> {
+  function open(method: "GET" | "PUT" | "POST", path: string, body: string | null, signal?: AbortSignal, timeoutMs = requestTimeoutMs): Promise<IncomingMessage> {
     return new Promise((resolve, reject) => {
-      const req = request({ host: tailnetHost, port, method, path, agent, timeout: requestTimeoutMs, ...(signal ? { signal } : {}) }, (res) => {
+      const req = request({ host: tailnetHost, port, method, path, agent, timeout: timeoutMs, ...(signal ? { signal } : {}) }, (res) => {
         const { remoteAddress, remotePort } = res.socket;
         if (remoteAddress === undefined || remotePort === undefined) {
           res.destroy();
@@ -251,15 +254,15 @@ export function connectProbe(node: NodeName, tailnetHost: string, expected: Tail
           resolve(res);
         }, (err: unknown) => { res.destroy(); reject(err); });
       });
-      req.on("timeout", () => req.destroy(new Error(`no answer within ${requestTimeoutMs} ms`)));
+      req.on("timeout", () => req.destroy(new Error(`no answer within ${timeoutMs} ms`)));
       req.on("error", (err) => reject(signal?.aborted ? err : probeError("unreachable", `${node}: ${err.message}`)));
       if (body !== null) req.setHeader("content-type", "application/json");
       req.end(body ?? undefined);
     });
   }
 
-  async function call(method: "GET" | "PUT", path: string, body: string | null = null): Promise<{ status: number; body: string }> {
-    const res = await open(method, path, body);
+  async function call(method: "GET" | "PUT" | "POST", path: string, body: string | null = null, timeoutMs = requestTimeoutMs): Promise<{ status: number; body: string }> {
+    const res = await open(method, path, body, undefined, timeoutMs);
     try {
       return { status: res.statusCode ?? 0, body: await text(res) };
     } catch (err) {
@@ -293,7 +296,14 @@ export function connectProbe(node: NodeName, tailnetHost: string, expected: Tail
       res.socket.setTimeout(0);
       for await (const line of lines(res)) yield parseProbeEvent(line);
     },
-    command() { return Promise.reject(new Error("POST /v1/pylons/{id}/commands is not implemented in this slice")); },
+    /** Never retried: an exec or a session open is not safe to run twice. */
+    async command(pylonId, command) {
+      const path = `/v1/pylons/${encodeURIComponent(pylonId)}/commands`;
+      const res = await call("POST", path, JSON.stringify(command), commandTimeoutMs);
+      if (res.status === 409) throw probeError("not-running", `${node}: ${res.body}`);
+      if (res.status !== 200) throw new Error(`${node}: POST ${path}: HTTP ${res.status}: ${res.body}`);
+      return parseCommandResult(command, res.body);
+    },
     stream(pylonId, streamRequest) {
       const path = streamPath(pylonId, streamRequest);
       return new Promise((resolve, reject) => {
@@ -598,6 +608,50 @@ export function parseJobEnvelope(body: string): JobEnvelope {
     default: throw new Error(`unknown job kind ${JSON.stringify(job.kind)}`);
   }
   return env as unknown as JobEnvelope;
+}
+
+const harnesses: ReadonlySet<unknown> = new Set(["claude-code", "pi", "shell"] satisfies SessionHarness[]);
+const serviceOps: ReadonlySet<unknown> = new Set(["ensure", "restart", "stop", "logs"] satisfies Extract<PylonCommand, { kind: "service" }>["op"][]);
+
+/**
+ * The probe's side of POST /v1/pylons/{id}/commands. Throws with a message for a 400. A pylon that is
+ * not running gets a 409, which the client reports as not-running.
+ */
+export function parsePylonCommand(body: string): PylonCommand {
+  const c = record(JSON.parse(body), "command");
+  switch (c.kind) {
+    case "exec":
+      if (!Array.isArray(c.argv) || c.argv.length === 0) throw new Error("command.argv is not a non-empty array");
+      c.argv.forEach((arg, i) => { if (typeof arg !== "string") throw new Error(`command.argv[${i}] is not a string`); });
+      if (!string(c.cwd, "command.cwd").startsWith("/")) throw new Error("command.cwd is not an absolute path");
+      if (!Number.isInteger(c.timeoutMs) || (c.timeoutMs as number) < 1 || (c.timeoutMs as number) > 60_000) throw new Error("command.timeoutMs is not an integer from 1 to 60000");
+      break;
+    case "open-session":
+      if (!harnesses.has(c.harness)) throw new Error(`unknown harness ${JSON.stringify(c.harness)}`);
+      string(c.title, "command.title");
+      if (c.resume !== undefined) {
+        string(c.resume, "command.resume");
+        if (c.harness === "shell") throw new Error("a shell session has nothing to resume");
+      }
+      break;
+    case "close-session":
+      string(c.herdrPane, "command.herdrPane");
+      break;
+    case "service":
+      if (!serviceOps.has(c.op)) throw new Error(`unknown service op ${JSON.stringify(c.op)}`);
+      if (c.name !== undefined) string(c.name, "command.name");
+      if (c.lines !== undefined && (!Number.isInteger(c.lines) || (c.lines as number) < 1)) throw new Error("command.lines is not a positive integer");
+      break;
+    default: throw new Error(`unknown command kind ${JSON.stringify(c.kind)}`);
+  }
+  return c as unknown as PylonCommand;
+}
+
+function parseCommandResult(command: PylonCommand, body: string): CommandResult {
+  const r = record(JSON.parse(body), "command result");
+  if (r.kind !== command.kind) throw new Error(`a ${command.kind} command got a ${JSON.stringify(r.kind)} result`);
+  if (r.kind === "open-session") string(r.herdrPane, "result.herdrPane");
+  return r as unknown as CommandResult;
 }
 
 function parseJobStatus(value: unknown): JobStatus {

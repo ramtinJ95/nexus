@@ -14,6 +14,7 @@ import type { BackendPylon, Guest, VmBackend } from "../backend.ts";
 import { fakeTailscale, nodeHost, viaGateway } from "./fake-tailscale.ts";
 import type { BootInputs } from "../project.ts";
 import type { ImageId } from "../images.ts";
+import { fakeGuest, herdrError, herdrOk, herdrPane, herdrSnapshot } from "../fake-guest.ts";
 
 const node = "test-node" as NodeName;
 const controlPlane = "nCONTROL" as TailnetNodeId;
@@ -31,7 +32,7 @@ const boot: BootInputs = {
 const spawnJob: Job = { kind: "spawn", pylonId, boot, live: { previews: [], overlay: [] }, liveHash: "hash-1" as LiveHash };
 
 /** An in-memory backend. `gate` holds every lifecycle call until it is released or the job's signal aborts. */
-function fakeBackend() {
+function fakeBackend(guest: Guest | null = null) {
   const pylons = new Map<PylonId, BackendPylon>();
   let gate: PromiseWithResolvers<void> | null = null;
   const held = (signal: AbortSignal) => gate === null ? Promise.resolve() : new Promise<void>((resolve, reject) => {
@@ -53,7 +54,7 @@ function fakeBackend() {
     },
     async list() { return [...pylons.values()]; },
     buildTemplate: () => Promise.reject(new Error("unused")),
-    guest: () => { throw new Error("unused"); },
+    guest: () => { if (guest === null) throw new Error("this test has no guest"); return guest; },
     artifacts: {
       list: async () => [image],
       export: () => Promise.reject(new Error("unused")),
@@ -64,8 +65,8 @@ function fakeBackend() {
   return { backend, pylons, hold() { gate = Promise.withResolvers(); }, release() { gate?.resolve(); gate = null; } };
 }
 
-async function setup(t: import("node:test").TestContext, overrides: Partial<ProbeOptions> = {}) {
-  const fake = fakeBackend();
+async function setup(t: import("node:test").TestContext, overrides: Partial<ProbeOptions> = {}, guest: Guest | null = null) {
+  const fake = fakeBackend(guest);
   let caller: TailnetNodeId | null = controlPlane;
   const probe: Probe = await startProbe({
     node, host: "127.0.0.1", port: 0,
@@ -220,6 +221,84 @@ test("observe starts with a snapshot carrying the applied liveHash, and a new pr
     assert.ok(p?.phase === "running" && p.liveHash === null);
     break;
   }
+});
+
+async function running(client: ReturnType<typeof connectProbe>) {
+  const env = envelope(spawnJob, node, Date.now());
+  await client.submit(env);
+  assert.equal((await finished(client, env.jobId)).state, "succeeded");
+}
+
+test("commands run in a running pylon's guest and return its result", async (t) => {
+  const guest = fakeGuest((argv, herdr) => {
+    if (!herdr) return { exitCode: 0, output: `ran ${argv.join(" ")}` };
+    const sub = argv.slice(0, 2).join(" ");
+    if (sub === "workspace list") return herdrOk({ type: "workspace_list", workspaces: [] });
+    if (sub === "workspace create") return herdrOk({ type: "workspace_created", workspace: { workspace_id: "w1" }, tab: { tab_id: "w1:t1" }, root_pane: { pane_id: "w1:p1" } });
+    if (sub === "agent start") return herdrOk({ type: "agent_started", agent: {}, argv: [] });
+    if (sub === "pane close") return herdrError("pane_not_found");
+    throw new Error(`unscripted ${sub}`);
+  });
+  const { client } = await setup(t, {}, guest);
+  await running(client);
+
+  assert.deepEqual(await client.command(pylonId, { kind: "exec", argv: ["git", "status"], cwd: "/home/user/workspace/repo", timeoutMs: 5000 }),
+    { kind: "exec", exitCode: 0, output: "ran git status", truncated: false });
+  assert.deepEqual(await client.command(pylonId, { kind: "open-session", harness: "claude-code", title: "review" }), { kind: "open-session", herdrPane: "w1:p1" });
+  const create = guest.execs.find((a) => a[4] === "create")!;
+  assert.deepEqual(create.slice(5, 9), ["--cwd", "/home/user/workspace/repo", "--label", "review"], "sessions open in the checkout");
+  assert.deepEqual(await client.command(pylonId, { kind: "close-session", herdrPane: "w1:p1" }), { kind: "close-session" });
+});
+
+test("a command for a pylon that is not running is refused as not-running", async (t) => {
+  const guest = fakeGuest(() => { throw new Error("no exec expected"); });
+  const { client, fake } = await setup(t, {}, guest);
+  await assert.rejects(client.command(pylonId, { kind: "exec", argv: ["true"], cwd: "/", timeoutMs: 1000 }), { code: "not-running" });
+  fake.pylons.set(pylonId, { pylonId, vm: "stopped", checkpoint: "ckpt-unit-1", image, bootedAt: null });
+  await assert.rejects(client.command(pylonId, { kind: "close-session", herdrPane: "w1:p1" }), { code: "not-running" });
+  assert.deepEqual(guest.execs, []);
+});
+
+test("malformed commands get 400 and reach no guest", async (t) => {
+  const guest = fakeGuest(() => { throw new Error("no exec expected"); });
+  const { client, base } = await setup(t, {}, guest);
+  await running(client);
+  const post = (body: unknown) => fetch(`${base}/v1/pylons/${pylonId}/commands`, { method: "POST", body: JSON.stringify(body) }).then((r) => r.status);
+  assert.equal(await post({ kind: "exec", argv: ["sleep", "90"], cwd: "/", timeoutMs: 90_000 }), 400);
+  assert.equal(await post({ kind: "exec", argv: [], cwd: "/", timeoutMs: 1000 }), 400);
+  assert.equal(await post({ kind: "open-session", harness: "codex", title: "x" }), 400);
+  assert.equal(await post({ kind: "open-session", harness: "shell", title: "x", resume: "abc" }), 400);
+  assert.equal(await post({ kind: "reboot" }), 400);
+  assert.deepEqual(guest.execs, []);
+});
+
+test("a failing command rejects with the guest's error", async (t) => {
+  const guest = fakeGuest((_argv, herdr) => herdr ? herdrError("invalid_params", "pane w9:p9 is malformed") : { exitCode: 0, output: "" });
+  const { client } = await setup(t, {}, guest);
+  await running(client);
+  await assert.rejects(client.command(pylonId, { kind: "close-session", herdrPane: "w9:p9" }), /HTTP 500: herdr pane close: pane w9:p9 is malformed/);
+});
+
+test("observations carry session facts from Herdr, and null when Herdr cannot be read", async (t) => {
+  let readable = true;
+  const guest = fakeGuest((argv, herdr) => {
+    assert.ok(herdr && argv[0] === "api" && argv[1] === "snapshot", "observing runs only herdr api snapshot");
+    return readable
+      ? herdrOk(herdrSnapshot([{ id: "w1", label: "review" }], [herdrPane("w1:p1", "w1", "claude", "working", { kind: "id", value: "bd2c2d6b" })]))
+      : { exitCode: 1, output: "Error: exec failed" };
+  });
+  const { client } = await setup(t, {}, guest);
+  await running(client);
+
+  const sessionsSeen = async () => {
+    for await (const e of client.observe(AbortSignal.timeout(5000))) {
+      const p = e.type === "snapshot" ? e.observation.pylons[0] : assert.fail("the first event is a snapshot");
+      return p?.phase === "running" ? p.sessions : assert.fail("the pylon runs");
+    }
+  };
+  assert.deepEqual(await sessionsSeen(), [{ herdrPane: "w1:p1", harness: "claude-code", harnessSessionId: "bd2c2d6b", status: "working" }]);
+  readable = false;
+  assert.equal(await sessionsSeen(), null);
 });
 
 /** A running pylon whose guest runs each stream's argv as a local process, as docker exec or ssh would. */
