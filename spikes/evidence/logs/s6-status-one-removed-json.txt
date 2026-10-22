@@ -1,0 +1,56 @@
+{
+  "TCP": {
+    "10000": {
+      "HTTPS": true
+    },
+    "10002": {
+      "HTTPS": true
+    },
+    "18443": {
+      "HTTPS": true
+    },
+    "40000": {
+      "HTTPS": true
+    },
+    "8443": {
+      "HTTPS": true
+    }
+  },
+  "Web": {
+    "infra-testbench.example.ts.net:10000": {
+      "Handlers": {
+        "/": {
+          "Proxy": "http://127.0.0.1:18090"
+        }
+      }
+    },
+    "infra-testbench.example.ts.net:10002": {
+      "Handlers": {
+        "/": {
+          "Proxy": "http://127.0.0.1:18090"
+        }
+      }
+    },
+    "infra-testbench.example.ts.net:18443": {
+      "Handlers": {
+        "/": {
+          "Proxy": "http://127.0.0.1:18090"
+        }
+      }
+    },
+    "infra-testbench.example.ts.net:40000": {
+      "Handlers": {
+        "/": {
+          "Proxy": "http://127.0.0.1:18090"
+        }
+      }
+    },
+    "infra-testbench.example.ts.net:8443": {
+      "Handlers": {
+        "/": {
+          "Proxy": "http://127.0.0.1:18090"
+        }
+      }
+    }
+  }
+}

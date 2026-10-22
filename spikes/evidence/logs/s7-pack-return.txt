@@ -1,0 +1,35 @@
+917f03f49e8e96bf58bab506b111cc02fb1368877cc32507041a339edf01d0ab  amd.qcow2
+39a21190f1eb80fd557f5bac830b56edad768bad517a106562c59f6534558fbd  tokens.json
+image: amd.qcow2
+file format: qcow2
+virtual size: 6 GiB (6442450944 bytes)
+disk size: 1.95 MiB
+cluster_size: 65536
+backing file: /home/<redacted>/nexus-spikes/s7/assets/rootfs.ext4
+backing file format: raw
+Format specific information:
+    compat: 1.1
+    compression type: zlib
+    lazy refcounts: false
+    refcount bits: 16
+    corrupt: false
+    extended l2: false
+Child node '/file':
+    filename: amd.qcow2
+    protocol type: file
+    file length: 2 MiB (2097664 bytes)
+    disk size: 1.95 MiB
+
+image: /home/<redacted>/nexus-spikes/s7/assets/rootfs.ext4
+file format: raw
+virtual size: 6 GiB (6442450944 bytes)
+disk size: 118 MiB
+Child node '/file':
+    filename: /home/<redacted>/nexus-spikes/s7/assets/rootfs.ext4
+    protocol type: file
+    file length: 6 GiB (6442450944 bytes)
+    disk size: 118 MiB
+CHECKPOINT_LOGICAL_BYTES=2097440
+2039808	amd.qcow2
+TRANSFER_ARCHIVE_BYTES=86898
+5764ab6b67f3349979bde6d003e83ee6d2396fa430f90391b1d2f72bfc5eef16  return.tar.gz

@@ -1,0 +1,6 @@
+SCRATCH_QEMU=0
+SESSIONS=0
+NEXUS_SPIKES_ABSENT=yes
+qemu-base 11.1.1-1
+nodejs 26.8.1-2
+npm 12.0.2-1

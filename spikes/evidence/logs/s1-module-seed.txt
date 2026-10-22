@@ -1,0 +1,39 @@
+MODULE_SEED=6.18.58-0-virt; unchanged Alpine files, absolute link preserved
+Building guest assets for x86_64 (alpine)
+Rootfs source: OCI image debian:bookworm-slim
+Output directory: /home/ramtinj/nexus-spikes/state/debian-assets
+Work directory: /home/ramtinj/nexus-spikes/tmp/gondolin-build-sSllUL
+Building guest images...
+Extracting OCI rootfs from debian:bookworm-slim (docker)...
+Resolved OCI image debian:bookworm-slim -> debian@sha256:7ff6ba31527b9e336162fa061746c366c4b2032f4d2cff2078bea43f78efe3f8
+Creating OCI export container from debian:bookworm-slim
+Extracting Alpine minirootfs for initramfs...
+Installing initramfs packages: linux-virt
+[postBuild.copy] (1/1) /home/ramtinj/nexus-spikes/state/kernel-module-seed -> /lib/modules
+Creating rootfs ext4 image...
+Creating initramfs...
+Rootfs image written to /home/ramtinj/nexus-spikes/tmp/gondolin-build-sSllUL/rootfs.ext4
+Initramfs written to /home/ramtinj/nexus-spikes/tmp/gondolin-build-sSllUL/initramfs.cpio.lz4
+Fetching libkrunfw-compatible kernel...
+Downloading https://github.com/containers/libkrunfw/releases/download/v5.2.1/libkrunfw-prebuilt-x86_64.tgz
+No prebuilt libkrunfw archive for x86_64 (v5.2.1); falling back to shared archive
+Downloading https://github.com/containers/libkrunfw/releases/download/v5.2.1/libkrunfw-x86_64.tgz
+Extracting kernel from libkrunfw shared archive
+Cached libkrunfw kernel 8da419440ed6...
+Copying assets to output directory...
+Generating manifest...
+Build complete! Assets written to /home/ramtinj/nexus-spikes/state/debian-assets
+
+Build successful!
+  Build ID: 836cdc05-a609-5162-8f18-320834da7d20
+  Image object: /home/ramtinj/nexus-spikes/cache/gondolin/images/objects/836cdc05-a609-5162-8f18-320834da7d20
+  Output directory: /home/ramtinj/nexus-spikes/state/debian-assets
+  Manifest: /home/ramtinj/nexus-spikes/state/debian-assets/manifest.json
+
+To use this image:
+  gondolin bash --image 836cdc05-a609-5162-8f18-320834da7d20
+  gondolin image tag 836cdc05-a609-5162-8f18-320834da7d20 my-image:latest  # optional alias
+
+To use explicit asset paths:
+  GONDOLIN_GUEST_DIR=/home/ramtinj/nexus-spikes/state/debian-assets gondolin bash
+BUILD_SECONDS=35.131

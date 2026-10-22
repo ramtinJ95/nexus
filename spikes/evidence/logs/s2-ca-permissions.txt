@@ -1,0 +1,11 @@
+drwxr-xr-x 1 user user   4096 Oct 22 10:08 /etc/gondolin
+drwxr-xr-x 1 user user   4096 Oct 22 10:08 /etc/gondolin/mitm
+-rw-r--r-- 1 user user   1166 Oct 22 10:08 /etc/gondolin/mitm/ca.crt
+-rw-r--r-- 1 root root 224406 Oct 22 10:08 /run/gondolin/ca-certificates.crt
+sandboxfs /data fuse.sandboxfs rw,nosuid,nodev,relatime,user_id=0,group_id=0,default_permissions 0 0
+sandboxfs /etc/gondolin fuse.sandboxfs rw,nosuid,nodev,relatime,user_id=0,group_id=0,default_permissions 0 0
+sandboxfs /etc/gondolin/mitm fuse.sandboxfs rw,nosuid,nodev,relatime,user_id=0,group_id=0,default_permissions 0 0
+MITM_CA_USER_READ_EXIT=1
+RUNTIME_CA_USER_READ_EXIT=0
+  exit 0
+STOPPED_CHECKPOINT /home/ramtinj/nexus-spikes/state/s2-debian.qcow2

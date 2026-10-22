@@ -1,0 +1,14 @@
+Building guest assets for x86_64 (alpine)
+Rootfs source: OCI image debian:trixie-slim
+Output directory: /home/ramtinj/nexus-spikes/state/trixie-slim-platform-assets
+Work directory: /home/ramtinj/nexus-spikes/tmp/gondolin-build-pPgwtv
+Building guest images...
+Extracting OCI rootfs from debian:trixie-slim (docker)...
+Pulling OCI image debian:trixie-slim (linux/amd64) with docker
+Resolved OCI image debian:trixie-slim -> debian@sha256:62bd423aeee912639ca8ee681c2b762cb3e25137e0a92b20be455898a9f034ad
+Creating OCI export container from debian:trixie-slim
+Extracting Alpine minirootfs for initramfs...
+Installing initramfs packages: linux-virt
+Copying all kernel modules for 6.18.58-0-virt into rootfs
+terminate called after throwing an instance of 'std::filesystem::__cxx11::filesystem_error'
+  what():  filesystem error: status: Permission denied [/boot/vmlinuz-virt]

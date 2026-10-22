@@ -1,0 +1,74 @@
+S2_ALLOWLIST ["api.anthropic.com","claude.ai","claude.com","platform.claude.com","downloads.claude.ai","registry.npmjs.org"]
+S2_RESUME_FIRST_EXEC_MS=5537
+NONROOT_VERSIONS uid=1000(user) gid=1000(user) groups=1000(user)
+/home/user/workspace/repo
+Python 3.11.2
+GNU bash, version 5.2.15(1)-release (x86_64-pc-linux-gnu)
+v24.22.1
+2.1.308 (Claude Code)
+herdr 0.9.5
+glibc 2.36
+  exit 0
+HERDR_STATUS status: running
+version: 0.9.5
+endpoint_compatible: yes
+private_protocol: 22
+private_protocol_compatible: yes
+socket: /home/user/.config/herdr/sessions/nexus-spike/herdr.sock
+ 
+HERDR_READY_MS=127
+herdr server running; you can use any herdr CLI command in another terminal.
+api socket: /home/user/.config/herdr/sessions/nexus-spike/herdr.sock
+client socket: /home/user/.config/herdr/sessions/nexus-spike/herdr-client.sock
+logs: /home/user/.config/herdr/sessions/nexus-spike/herdr-server.log
+did you mean to open the Herdr TUI? run `herdr`; you do not need `herdr server`.
+HERDR_STOP   exit 0
+EGRESS_DENY herdr.dev
+EGRESS_ALLOW api.anthropic.com
+CURL_WITHOUT_EXTRA_CA_MS=375 EXIT=0
+HTTP/1.1 401 Unauthorized
+cf-cache-status: DYNAMIC
+cf-ray: a4e7ad6c68c27105-ARN
+content-security-policy: default-src 'none'; frame-ancestors 'none'
+content-type: application/json
+date: Thu, 22 Oct 2026 10:04:21 GMT
+request-id: req_011CgH5xNdQdgnWXncm8pQG3
+server: cloudflare
+strict-transport-security: max-age=31536000; includeSubDomains; preload
+vary: Accept-Encoding
+x-robots-tag: none
+x-should-retry: false
+connection: close
+transfer-encoding: chunked
+
+{"type":"error","error":{"type":"authentication_error","message":"x-api-key header is required"},"request_id":"req_011CgH5xNdQdgnWXncm8pQG3"}
+HTTP_STATUS=401
+ 
+CLAUDE_WITHOUT_EXTRA_CA_MS=2133 EXIT=1
+Not logged in · Please run /login
+ 
+CURL_WITH_EXTRA_CA_MS=329 EXIT=0
+HTTP/1.1 401 Unauthorized
+cf-cache-status: DYNAMIC
+cf-ray: a4e7ad7bfd6d9e07-ARN
+content-security-policy: default-src 'none'; frame-ancestors 'none'
+content-type: application/json
+date: Thu, 22 Oct 2026 10:04:24 GMT
+request-id: req_011CgH5xZGrxZvnMYDpbnyMJ
+server: cloudflare
+strict-transport-security: max-age=31536000; includeSubDomains; preload
+vary: Accept-Encoding
+x-robots-tag: none
+x-should-retry: false
+connection: close
+transfer-encoding: chunked
+
+{"type":"error","error":{"type":"authentication_error","message":"x-api-key header is required"},"request_id":"req_011CgH5xZGrxZvnMYDpbnyMJ"}
+HTTP_STATUS=401
+ 
+CLAUDE_WITH_EXTRA_CA_MS=1272 EXIT=1
+Not logged in · Please run /login
+ Warning: Ignoring extra certs from `/etc/gondolin/mitm/ca.crt`, load failed: Permission denied
+
+S1_NONROOT_HERDR_PASS S2_UNAUTHENTICATED_TLS_PASS
+S2_STOPPED_CHECKPOINT /home/ramtinj/nexus-spikes/state/s2-debian.qcow2

@@ -1,0 +1,13 @@
+1c94512e6e3f7d7a8803f4e090d436e7b69225a6fa003846c1d204f095ea273c  package.json
+047f267056a1f576ad15525788bac4f870fcf1bc4c43f1f256475c783edc5a45  package-lock.json
+npm warn deprecated node-domexception@1.0.0: Use your platform's native DOMException instead
+
+added 106 packages in 3s
+GONDOLIN_VERSION=0.13.0
+1c94512e6e3f7d7a8803f4e090d436e7b69225a6fa003846c1d204f095ea273c  package.json
+npm notice
+npm notice New minor version of npm available! 12.0.2 -> 12.2.1
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.1
+npm notice To update run: npm install -g npm@12.2.1
+npm notice
+047f267056a1f576ad15525788bac4f870fcf1bc4c43f1f256475c783edc5a45  package-lock.json

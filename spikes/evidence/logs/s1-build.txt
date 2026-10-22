@@ -1,0 +1,12 @@
+Building guest assets for x86_64 (alpine)
+Rootfs source: OCI image debian:bookworm-slim
+Output directory: /home/ramtinj/nexus-spikes/state/debian-assets
+Work directory: /home/ramtinj/nexus-spikes/tmp/gondolin-build-MUiRep
+Downloading sandbox helpers for x86_64 (gondolin:0.13.0)
+Building guest images...
+Downloading https://dl-cdn.alpinelinux.org/alpine/v3.23/releases/x86_64/alpine-minirootfs-3.23.0-x86_64.tar.gz
+Extracting OCI rootfs from debian:bookworm-slim (docker)...
+Build failed: Container command failed: docker create --platform linux/amd64 --pull=never debian:bookworm-slim true
+exit: 1
+permission denied while trying to connect to the docker API at unix:///var/run/docker.sock
+

@@ -1,0 +1,30 @@
+KERNEL=Linux 7.2.5-3-omarchy
+ARCH=x86_64
+CPU_MODEL=AMD Ryzen 7 255 w/ Radeon 780M Graphics
+CPU_FLAGS_SUMMARY=sse2 constant_tsc nonstop_tsc aes avx svm avx2 avx512f npt 
+USERNAME=<redacted>
+HOME=/home/<redacted>
+crw-rw-rw- 1 root kvm 10, 232 Oct 11 18:01 /dev/kvm
+KVM_RW=yes
+HOME_AVAILABLE_BYTES=971218989056
+
+docker=/usr/bin/docker
+node=absent
+qemu-img=absent
+qemu-system-x86_64=absent
+podman=absent
+DOCKER_SERVER_VERSION
+
+permission denied while trying to connect to the docker API at unix:///var/run/docker.sock
+DOCKER_VERSION_EXIT=1
+DOCKER_SOCKET
+srw-rw---- 1 root docker 0 Oct 11 18:01 /var/run/docker.sock
+DOCKER_SOCKET_RW=no
+DOCKER_GROUP_MEMBER=no
+DOCKER_IMAGE_IDS
+permission denied while trying to connect to the docker API at unix:///var/run/docker.sock
+DOCKER_IMAGES_EXIT=1
+DOCKER_CONTAINER_IDS
+permission denied while trying to connect to the docker API at unix:///var/run/docker.sock
+DOCKER_CONTAINERS_EXIT=1
+S7_ABSENT=yes

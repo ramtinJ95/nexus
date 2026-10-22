@@ -1,0 +1,17 @@
+BEFORE
+node ABSENT
+qemu-system-x86_64 ABSENT
+qemu-img ABSENT
+error: package 'qemu-base' was not found
+error: package 'nodejs' was not found
+error: package 'npm' was not found
+sudo: a password is required
+INSTALL_EXIT=1
+AFTER
+error: package 'qemu-base' was not found
+error: package 'nodejs' was not found
+error: package 'npm' was not found
+node ABSENT
+qemu-system-x86_64 ABSENT
+qemu-img ABSENT
+TRANSACTION_ADDED_OR_CHANGED

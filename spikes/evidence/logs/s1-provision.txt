@@ -1,0 +1,106 @@
+PROVISION_ALLOWLIST ["api.anthropic.com","claude.ai","claude.com","platform.claude.com","downloads.claude.ai","registry.npmjs.org","deb.debian.org","security.debian.org","nodejs.org","herdr.dev","github.com","release-assets.githubusercontent.com"]
+RESUME_FIRST_EXEC_MS=5154
+Linux (none) 6.18.58-0-virt #1-Alpine SMP PREEMPT_DYNAMIC 2026-10-21 13:45:15 x86_64 GNU/Linux
+PRETTY_NAME="Debian GNU/Linux 12 (bookworm)"
+NAME="Debian GNU/Linux"
+VERSION_ID="12"
+VERSION="12 (bookworm)"
+VERSION_CODENAME=bookworm
+ID=debian
+HOME_URL="https://www.debian.org/"
+SUPPORT_URL="https://www.debian.org/support"
+BUG_REPORT_URL="https://bugs.debian.org/"
+uid=0(root) gid=0(root) groups=0(root)
+ 
+GUEST_ROOT_PROVISION_START
+PRETTY_NAME="Debian GNU/Linux 12 (bookworm)"
+NAME="Debian GNU/Linux"
+VERSION_ID="12"
+VERSION="12 (bookworm)"
+VERSION_CODENAME=bookworm
+ID=debian
+HOME_URL="https://www.debian.org/"
+SUPPORT_URL="https://www.debian.org/support"
+BUG_REPORT_URL="https://bugs.debian.org/"
+uid=0(root) gid=0(root) groups=0(root)
+EGRESS_ALLOW deb.debian.org
+Hit:1 http://deb.debian.org/debian bookworm InRelease
+Hit:2 http://deb.debian.org/debian bookworm-updates InRelease
+Hit:3 http://deb.debian.org/debian-security bookworm-security InRelease
+Reading package lists...
+Reading package lists...
+Building dependency tree...
+Reading state information...
+ca-certificates is already the newest version (20250419~deb12u2).
+curl is already the newest version (7.88.1-10+deb12u15).
+bash is already the newest version (5.2.15-2+b13).
+python3 is already the newest version (3.11.2-1+b1).
+xz-utils is already the newest version (5.4.1-1+deb12u2).
+git is already the newest version (1:2.39.5-0+deb12u3).
+procps is already the newest version (2:4.0.2-3).
+openssh-client is already the newest version (1:9.2p1-2+deb12u10).
+util-linux is already the newest version (2.38.1-5+deb12u3).
+passwd is already the newest version (1:4.13+dfsg1-1+deb12u2).
+0 upgraded, 0 newly installed, 0 to remove and 0 not upgraded.
+EGRESS_ALLOW nodejs.org
+node-v24.22.1-linux-x64.tar.xz: OK
+drwxr-xr-x 1 user user   4096 Oct 22 10:03 /etc/gondolin
+drwxr-xr-x 1 user user   4096 Oct 22 10:03 /etc/gondolin/mitm
+-rw-r--r-- 1 user user   1166 Oct 22 10:03 /etc/gondolin/mitm/ca.crt
+drwxr-xr-x 2 root root     60 Oct 22 10:03 /run/gondolin
+-rw-r--r-- 1 root root 224406 Oct 22 10:03 /run/gondolin/ca-certificates.crt
+USER_MITM_CA_READABLE_EXIT=1
+USER_RUNTIME_CA_READABLE_EXIT=0
+EGRESS_ALLOW registry.npmjs.org
+
+added 2 packages in 8s
+npm warn install-scripts 1 package has install scripts not yet covered by allowScripts:
+npm warn install-scripts   @anthropic-ai/claude-code@2.1.308 (postinstall: node install.cjs)
+npm warn install-scripts
+npm warn install-scripts Run `npm install-scripts ls` to review, or `npm install-scripts approve <pkg>` to allow.
+EGRESS_ALLOW herdr.dev
+
+      ,ww
+     wWWWWWWW_)  herdr installer
+     `WWWWWW'    herdr.dev
+      II  II
+
+  [32m>[0m detected linux/x86_64
+  [32m>[0m fetching latest release manifest...
+  [32m>[0m downloading v0.9.5...
+EGRESS_ALLOW github.com
+EGRESS_ALLOW release-assets.githubusercontent.com
+  [32m>[0m installed herdr to /usr/local/bin/herdr
+
+  [32m>[0m ready. run 'herdr' to get started.
+
+GUEST_ROOT_PROVISION_COMPLETE
+NONROOT_VERIFICATION uid=1000(user) gid=1000(user) groups=1000(user)
+/home/user/workspace/repo
+Python 3.11.2
+GNU bash, version 5.2.15(1)-release (x86_64-pc-linux-gnu)
+v24.22.1
+2.1.308 (Claude Code)
+herdr 0.9.5
+Run or control the headless server
+
+Usage: herdr server [COMMAND]
+
+Commands:
+  stop                    Stop the running server
+  reload-config           Reload config in the running server
+  agent-manifests         Show active agent detection manifests
+  update-agent-manifests  Fetch and reload agent detection manifests
+  reload-agent-manifests  Reload local agent detection manifest overrides
+
+Are you an AI? Use these resources ONLY IF your task specifically asks you to:
+  Help a human understand or set up Herdr for the first time:
+    https://herdr.dev/agent-guide.md
+  Debug or investigate a problem with Herdr:
+    https://herdr.dev/llms.txt
+  Control Herdr panes, agents, or workspaces:
+    SKIP if a Herdr skill is already in your context. Otherwise run: herdr --skill
+
+  exit 0
+STOPPED_CHECKPOINT /home/ramtinj/nexus-spikes/state/s2-debian.qcow2 PROVISIONED_PENDING_HERDR_SERVER_CHECK
+PROVISION_TOTAL_MS=24215

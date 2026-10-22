@@ -1,0 +1,13 @@
+RESUME_FIRST_EXEC_MS=4881
+uid=1000(user) gid=1000(user) groups=1000(user)
+STOPPED_AND_SAVED=/home/ramtinj/nexus-spikes/state/s2-debian.qcow2
+file:///home/ramtinj/nexus-spikes/node_modules/@earendil-works/gondolin/dist/src/vm/core.js:596
+            throw new Error("sshd not available in guest image. Rebuild guest assets with openssh installed (default images should include it).");
+                  ^
+
+Error: sshd not available in guest image. Rebuild guest assets with openssh installed (default images should include it).
+    at VM.enableSsh (file:///home/ramtinj/nexus-spikes/node_modules/@earendil-works/gondolin/dist/src/vm/core.js:596:19)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async file:///home/ramtinj/nexus-spikes/s2-resume-login.mjs:17:12
+
+Node.js v26.8.1

@@ -1,0 +1,14 @@
+CACHED_ASSETS_COLD_BOOT_FIRST_EXEC_MS=3728
+file:///home/ramtinj/nexus-spikes/node_modules/@earendil-works/pi-ai/dist/utils/identity.js:118
+        getAuth: models.getAuth.bind(models),
+                                ^
+
+TypeError: Cannot read properties of undefined (reading 'bind')
+    at withClientIdentity (file:///home/ramtinj/nexus-spikes/node_modules/@earendil-works/pi-ai/dist/utils/identity.js:118:33)
+    at currentModels (file:///home/ramtinj/nexus-spikes/node_modules/@earendil-works/pi-durable/dist/harness/harness.js:96:21)
+    at new HarnessImpl (file:///home/ramtinj/nexus-spikes/node_modules/@earendil-works/pi-durable/dist/harness/harness.js:129:21)
+    at Object.open (file:///home/ramtinj/nexus-spikes/node_modules/@earendil-works/pi-durable/dist/harness/harness.js:384:25)
+    at file:///home/ramtinj/nexus-spikes/s3-harness.mjs:47:27
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+
+Node.js v26.8.1

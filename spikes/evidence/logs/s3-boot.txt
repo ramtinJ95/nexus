@@ -1,0 +1,10 @@
+FIRST_EXEC_MS=13854
+Linux (none) 6.18.58-0-virt #1-Alpine SMP PREEMPT_DYNAMIC 2026-10-21 13:45:15 x86_64 Linux
+NAME="Alpine Linux"
+ID=alpine
+VERSION_ID=3.23.7
+PRETTY_NAME="Alpine Linux v3.23"
+HOME_URL="https://alpinelinux.org/"
+BUG_REPORT_URL="https://gitlab.alpinelinux.org/alpine/aports/-/issues"
+/usr/bin/python3
+  exitCode 0

@@ -1,0 +1,13 @@
+v26.8.1
+QEMU emulator version 11.1.1
+Copyright (c) 2003-2026 Fabrice Bellard and the QEMU Project developers
+qemu-img version 11.1.1
+Copyright (c) 2003-2026 Fabrice Bellard and the QEMU Project developers
+HOST_CPU=Intel(R) Core(TM) i9-9880H CPU @ 2.30GHz
+Linux 7.2.9-arch1-Watanare-T2-1-t2
+TMP_ENTRIES=0
+S7_QEMU_COUNT=0
+state/debian-assets/initramfs.cpio.lz4: OK
+state/debian-assets/krun-empty-initrd: OK
+state/debian-assets/krun-kernel: OK
+state/debian-assets/manifest.json: OK

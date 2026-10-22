@@ -1,0 +1,5 @@
+{"runtime":"v26.8.1","status":null,"signal":"SIGABRT"}
+terminate called after throwing an instance of 'std::filesystem::__cxx11::filesystem_error'
+  what():  filesystem error: status: Permission denied [/home/ramtinj/nexus-spikes/tmp/cp-isolated-jb2z0X/denied/kernel]
+
+ISOLATED_REPRO_CONFIRMED_NO_HOST_BOOT_DEPENDENCY

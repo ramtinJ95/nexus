@@ -1,0 +1,41 @@
+27c023f19ee6cacf4c60d3ba04f11a3145df1fc5fbc8b69340640177ae73d280  assets/initramfs.cpio.lz4
+d994915f6fa1020492aaf3e154e89c3fac9c32eed94c28aaf20f9e1c9a5d5650  assets/krun-empty-initrd
+8da419440ed6e47e33014a76810656fb2533323a7b7ff85ca2d2397640dac5ef  assets/krun-kernel
+4e15f71cfe1df2f9b9cbdb3bcb79cf9b0855d4a136735cf5619ba86fb372ea91  assets/manifest.json
+cf92d9dac7ad083272b60e1f49db58ade378dfca1cf35917e749ef6782cf5f23  assets/rootfs.ext4
+456e0691f095285a82533cc6335280e4b4991d630c5292ddf15e6320e71971c9  assets/vmlinuz-virt
+b05078af0481ee0795592eefe0c26e8db4ec86954a1fd8e109633c980c13eefd  intel.qcow2
+039a3547e19079bf02c1f53f723cc45f35659093fd49df1e28933e5bc3975a1d  tokens.json
+image: intel.qcow2
+file format: qcow2
+virtual size: 6 GiB (6442450944 bytes)
+disk size: 1.82 MiB
+cluster_size: 65536
+backing file: /home/<redacted>/nexus-spikes/s7/assets/rootfs.ext4
+backing file format: raw
+Format specific information:
+    compat: 1.1
+    compression type: zlib
+    lazy refcounts: false
+    refcount bits: 16
+    corrupt: false
+    extended l2: false
+Child node '/file':
+    filename: intel.qcow2
+    protocol type: file
+    file length: 1.88 MiB (1966592 bytes)
+    disk size: 1.82 MiB
+
+image: /home/<redacted>/nexus-spikes/s7/assets/rootfs.ext4
+file format: raw
+virtual size: 6 GiB (6442450944 bytes)
+disk size: 213 MiB
+Child node '/file':
+    filename: /home/<redacted>/nexus-spikes/s7/assets/rootfs.ext4
+    protocol type: file
+    file length: 6 GiB (6442450944 bytes)
+    disk size: 213 MiB
+CHECKPOINT_LOGICAL_BYTES=1966372
+1908736	intel.qcow2
+TRANSFER_ARCHIVE_BYTES=111001577
+ba6934c9a3da0bacbcc1d0d72502016135d3e77a5d8411ebe0691ec33dc82f48  forward.tar.gz

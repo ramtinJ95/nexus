@@ -1,0 +1,127 @@
+Wrote to /home/ramtinj/nexus-spikes/package.json:
+
+{
+  "name": "nexus-spikes",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "type": "commonjs"
+}
+
+
+npm warn deprecated node-domexception@1.0.0: Use your platform's native DOMException instead
+
+added 106 packages, and audited 107 packages in 11s
+
+5 packages are looking for funding
+  run `npm fund` for details
+
+2 high severity vulnerabilities
+
+To address all issues (including breaking changes), run:
+  npm audit fix --force
+
+Run `npm audit` for details.
+npm warn install-scripts 4 packages had install scripts blocked because they are not covered by allowScripts:
+npm warn install-scripts   ssh2@1.17.0 (install: node install.js)
+npm warn install-scripts   @google/genai@2.21.0 (preinstall: echo 'preinstall: no-op')
+npm warn install-scripts   protobufjs@7.6.6 (postinstall: node scripts/postinstall)
+npm warn install-scripts   cpu-features@0.0.10 (install: node buildcheck.js > buildcheck.gypi && node-gyp rebuild)
+npm warn install-scripts
+npm warn install-scripts Run `npm install-scripts ls` to review, or `npm install-scripts approve <pkg>` to allow.
+nexus-spikes@1.0.0 /home/ramtinj/nexus-spikes
++-- @earendil-works/gondolin@0.13.0
++-- @earendil-works/pi-durable@1.4.0
+`-- @earendil-works/pi-env@1.4.0
+
+
+--- Gondolin files ---
+node_modules/@earendil-works/gondolin/LICENSE
+node_modules/@earendil-works/gondolin/package.json
+node_modules/@earendil-works/gondolin/README.md
+
+--- Env and durable files ---
+node_modules/@earendil-works/pi-env/dist/connection.js
+node_modules/@earendil-works/pi-env/dist/errors.js
+node_modules/@earendil-works/pi-env/dist/index.js
+node_modules/@earendil-works/pi-env/dist/list-files.js
+node_modules/@earendil-works/pi-env/dist/remote-env.js
+node_modules/@earendil-works/pi-env/dist/ssh.js
+node_modules/@earendil-works/pi-env/dist/terminal.js
+node_modules/@earendil-works/pi-env/dist/watch.js
+node_modules/@earendil-works/pi-env/dist/connection.d.ts.map
+node_modules/@earendil-works/pi-env/dist/connection.js.map
+node_modules/@earendil-works/pi-env/dist/errors.d.ts.map
+node_modules/@earendil-works/pi-env/dist/errors.js.map
+node_modules/@earendil-works/pi-env/dist/index.d.ts.map
+node_modules/@earendil-works/pi-env/dist/index.js.map
+node_modules/@earendil-works/pi-env/dist/list-files.d.ts.map
+node_modules/@earendil-works/pi-env/dist/list-files.js.map
+node_modules/@earendil-works/pi-env/dist/remote-env.d.ts.map
+node_modules/@earendil-works/pi-env/dist/remote-env.js.map
+node_modules/@earendil-works/pi-env/dist/ssh.d.ts.map
+node_modules/@earendil-works/pi-env/dist/ssh.js.map
+node_modules/@earendil-works/pi-env/dist/terminal.d.ts.map
+node_modules/@earendil-works/pi-env/dist/terminal.js.map
+node_modules/@earendil-works/pi-env/dist/watch.d.ts.map
+node_modules/@earendil-works/pi-env/dist/watch.js.map
+node_modules/@earendil-works/pi-env/dist/connection.d.ts
+node_modules/@earendil-works/pi-env/dist/errors.d.ts
+node_modules/@earendil-works/pi-env/dist/index.d.ts
+node_modules/@earendil-works/pi-env/dist/list-files.d.ts
+node_modules/@earendil-works/pi-env/dist/remote-env.d.ts
+node_modules/@earendil-works/pi-env/dist/ssh.d.ts
+node_modules/@earendil-works/pi-env/dist/terminal.d.ts
+node_modules/@earendil-works/pi-env/dist/watch.d.ts
+node_modules/@earendil-works/pi-env/package.json
+node_modules/@earendil-works/pi-env/CHANGELOG.md
+node_modules/@earendil-works/pi-env/docs/protocol.md
+node_modules/@earendil-works/pi-env/docs/semantics.md
+node_modules/@earendil-works/pi-env/README.md
+node_modules/@earendil-works/pi-durable/dist/documents.js
+node_modules/@earendil-works/pi-durable/dist/entries.js
+node_modules/@earendil-works/pi-durable/dist/errors.js
+node_modules/@earendil-works/pi-durable/dist/ids.js
+node_modules/@earendil-works/pi-durable/dist/index.js
+node_modules/@earendil-works/pi-durable/dist/search.js
+node_modules/@earendil-works/pi-durable/dist/tasks.js
+node_modules/@earendil-works/pi-durable/dist/timers.js
+node_modules/@earendil-works/pi-durable/dist/truncate.js
+node_modules/@earendil-works/pi-durable/dist/types.js
+node_modules/@earendil-works/pi-durable/dist/documents.d.ts.map
+node_modules/@earendil-works/pi-durable/dist/documents.js.map
+node_modules/@earendil-works/pi-durable/dist/entries.d.ts.map
+node_modules/@earendil-works/pi-durable/dist/entries.js.map
+node_modules/@earendil-works/pi-durable/dist/errors.d.ts.map
+node_modules/@earendil-works/pi-durable/dist/errors.js.map
+node_modules/@earendil-works/pi-durable/dist/ids.d.ts.map
+node_modules/@earendil-works/pi-durable/dist/ids.js.map
+node_modules/@earendil-works/pi-durable/dist/index.d.ts.map
+node_modules/@earendil-works/pi-durable/dist/index.js.map
+node_modules/@earendil-works/pi-durable/dist/search.d.ts.map
+node_modules/@earendil-works/pi-durable/dist/search.js.map
+node_modules/@earendil-works/pi-durable/dist/tasks.d.ts.map
+node_modules/@earendil-works/pi-durable/dist/tasks.js.map
+node_modules/@earendil-works/pi-durable/dist/timers.d.ts.map
+node_modules/@earendil-works/pi-durable/dist/timers.js.map
+node_modules/@earendil-works/pi-durable/dist/truncate.d.ts.map
+node_modules/@earendil-works/pi-durable/dist/truncate.js.map
+node_modules/@earendil-works/pi-durable/dist/types.d.ts.map
+node_modules/@earendil-works/pi-durable/dist/types.js.map
+node_modules/@earendil-works/pi-durable/dist/documents.d.ts
+node_modules/@earendil-works/pi-durable/dist/entries.d.ts
+node_modules/@earendil-works/pi-durable/dist/errors.d.ts
+node_modules/@earendil-works/pi-durable/dist/ids.d.ts
+node_modules/@earendil-works/pi-durable/dist/index.d.ts
+node_modules/@earendil-works/pi-durable/dist/search.d.ts
+node_modules/@earendil-works/pi-durable/dist/tasks.d.ts
+node_modules/@earendil-works/pi-durable/dist/timers.d.ts
+node_modules/@earendil-works/pi-durable/dist/truncate.d.ts
+node_modules/@earendil-works/pi-durable/dist/types.d.ts
+node_modules/@earendil-works/pi-durable/package.json
+node_modules/@earendil-works/pi-durable/CHANGELOG.md
+node_modules/@earendil-works/pi-durable/README.md

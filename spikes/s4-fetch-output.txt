@@ -1,0 +1,3 @@
+curl: (28) SSL connection timeout
+
+HTTP_STATUS=000 TOTAL_SECONDS=15.004937

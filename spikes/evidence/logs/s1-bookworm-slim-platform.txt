@@ -1,0 +1,13 @@
+Building guest assets for x86_64 (alpine)
+Rootfs source: OCI image debian:bookworm-slim
+Output directory: /home/ramtinj/nexus-spikes/state/bookworm-slim-platform-assets
+Work directory: /home/ramtinj/nexus-spikes/tmp/gondolin-build-Qfswxl
+Building guest images...
+Extracting OCI rootfs from debian:bookworm-slim (docker)...
+Resolved OCI image debian:bookworm-slim -> debian@sha256:7ff6ba31527b9e336162fa061746c366c4b2032f4d2cff2078bea43f78efe3f8
+Creating OCI export container from debian:bookworm-slim
+Extracting Alpine minirootfs for initramfs...
+Installing initramfs packages: linux-virt
+Copying all kernel modules for 6.18.58-0-virt into rootfs
+terminate called after throwing an instance of 'std::filesystem::__cxx11::filesystem_error'
+  what():  filesystem error: status: Permission denied [/boot/vmlinuz-virt]

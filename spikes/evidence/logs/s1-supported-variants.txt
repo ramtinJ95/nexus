@@ -1,0 +1,46 @@
+{"name":"bookworm-slim-platform","image":"debian:bookworm-slim","seconds":7.277,"status":null,"signal":"SIGABRT"}
+Resolved OCI image debian:bookworm-slim -> debian@sha256:7ff6ba31527b9e336162fa061746c366c4b2032f4d2cff2078bea43f78efe3f8
+Creating OCI export container from debian:bookworm-slim
+Extracting Alpine minirootfs for initramfs...
+Installing initramfs packages: linux-virt
+Copying all kernel modules for 6.18.58-0-virt into rootfs
+terminate called after throwing an instance of 'std::filesystem::__cxx11::filesystem_error'
+  what():  filesystem error: status: Permission denied [/boot/vmlinuz-virt]
+
+{"name":"bookworm-platform","image":"debian:bookworm","seconds":15.779,"status":null,"signal":"SIGABRT"}
+Resolved OCI image debian:bookworm -> debian@sha256:854dd8ab51d62866dbd8f5431d15ce77b12983a2a4a1e1fe43a2395dc7ef9f61
+Creating OCI export container from debian:bookworm
+Extracting Alpine minirootfs for initramfs...
+Installing initramfs packages: linux-virt
+Copying all kernel modules for 6.18.58-0-virt into rootfs
+terminate called after throwing an instance of 'std::filesystem::__cxx11::filesystem_error'
+  what():  filesystem error: status: Permission denied [/boot/vmlinuz-virt]
+
+{"name":"trixie-slim-platform","image":"debian:trixie-slim","seconds":12.855,"status":null,"signal":"SIGABRT"}
+Resolved OCI image debian:trixie-slim -> debian@sha256:62bd423aeee912639ca8ee681c2b762cb3e25137e0a92b20be455898a9f034ad
+Creating OCI export container from debian:trixie-slim
+Extracting Alpine minirootfs for initramfs...
+Installing initramfs packages: linux-virt
+Copying all kernel modules for 6.18.58-0-virt into rootfs
+terminate called after throwing an instance of 'std::filesystem::__cxx11::filesystem_error'
+  what():  filesystem error: status: Permission denied [/boot/vmlinuz-virt]
+
+{"name":"ubuntu2404-platform","image":"ubuntu:24.04","seconds":13.509,"status":null,"signal":"SIGABRT"}
+Resolved OCI image ubuntu:24.04 -> ubuntu@sha256:68ee22004a9109b44973313b02ff7b1de250f1de0f5ecb628d73f579aaff33ac
+Creating OCI export container from ubuntu:24.04
+Extracting Alpine minirootfs for initramfs...
+Installing initramfs packages: linux-virt
+Copying all kernel modules for 6.18.58-0-virt into rootfs
+terminate called after throwing an instance of 'std::filesystem::__cxx11::filesystem_error'
+  what():  filesystem error: status: Permission denied [/boot/vmlinuz-virt]
+
+{"name":"bookworm-slim-lts","image":"debian:bookworm-slim","seconds":41.472,"status":null,"signal":"SIGABRT"}
+Resolved OCI image debian:bookworm-slim -> debian@sha256:7ff6ba31527b9e336162fa061746c366c4b2032f4d2cff2078bea43f78efe3f8
+Creating OCI export container from debian:bookworm-slim
+Extracting Alpine minirootfs for initramfs...
+Installing initramfs packages: linux-lts
+Copying all kernel modules for 6.18.58-0-lts into rootfs
+terminate called after throwing an instance of 'std::filesystem::__cxx11::filesystem_error'
+  what():  filesystem error: status: Permission denied [/boot/vmlinuz-lts]
+
+TOTAL_CREATED_CONTAINER_IDS=10

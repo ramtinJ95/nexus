@@ -1,0 +1,7 @@
+state/debian-assets/initramfs.cpio.lz4: OK
+state/debian-assets/krun-empty-initrd: OK
+state/debian-assets/krun-kernel: OK
+state/debian-assets/manifest.json: OK
+state/debian-assets/rootfs.ext4: OK
+state/debian-assets/vmlinuz-virt: OK
+ORIGINAL_ASSETS_CHECK_EXIT=0

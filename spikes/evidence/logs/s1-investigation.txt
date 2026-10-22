@@ -1,0 +1,287 @@
+--- Host path metadata only ---
+drwx------ 6 root root 4096 Jan  1  1970 /boot
+ls: cannot access '/boot/vmlinuz-virt': Permission denied
+HOST_KERNEL_LOOKUP_EXIT=2 (permission denial cannot establish existence)
+--- Extracted roots and Alpine module links ---
+tmp/gondolin-build-8pByTJ
+drwxr-xr-x 1 ramtinj ramtinj   0 Jul  2 21:05 tmp/gondolin-build-8pByTJ/rootfs/boot
+lrwxrwxrwx 1 ramtinj ramtinj   7 Oct 20 23:32 tmp/gondolin-build-8pByTJ/rootfs/lib -> usr/lib
+drwxr-xr-x 1 ramtinj ramtinj 158 Oct 20 23:32 tmp/gondolin-build-8pByTJ/rootfs/usr/lib
+total 0
+drwxr-xr-x 1 ramtinj ramtinj   0 Jul  2 21:05 .
+drwxr-xr-x 1 ramtinj ramtinj 152 Oct 22 11:56 ..
+find: 'tmp/gondolin-build-8pByTJ/initramfs-root/lib/modules': No such file or directory
+tmp/gondolin-build-EnYl1r
+drwxr-xr-x 1 ramtinj ramtinj   0 Jul  2 21:05 tmp/gondolin-build-EnYl1r/rootfs/boot
+lrwxrwxrwx 1 ramtinj ramtinj   7 Oct 20 23:32 tmp/gondolin-build-EnYl1r/rootfs/lib -> usr/lib
+drwxr-xr-x 1 ramtinj ramtinj 172 Oct 22 11:56 tmp/gondolin-build-EnYl1r/rootfs/usr/lib
+total 0
+drwxr-xr-x 1 ramtinj ramtinj   0 Jul  2 21:05 .
+drwxr-xr-x 1 ramtinj ramtinj 160 Oct 22 11:56 ..
+tmp/gondolin-build-EnYl1r/initramfs-root/lib/modules/6.18.58-0-virt/vmlinuz -> /boot/vmlinuz-virt
+tmp/gondolin-build-MGLlg1
+drwxr-xr-x 1 ramtinj ramtinj   0 Jul  2 21:05 tmp/gondolin-build-MGLlg1/rootfs/boot
+lrwxrwxrwx 1 ramtinj ramtinj   7 Oct 20 23:32 tmp/gondolin-build-MGLlg1/rootfs/lib -> usr/lib
+drwxr-xr-x 1 ramtinj ramtinj 172 Oct 22 11:52 tmp/gondolin-build-MGLlg1/rootfs/usr/lib
+total 0
+drwxr-xr-x 1 ramtinj ramtinj   0 Jul  2 21:05 .
+drwxr-xr-x 1 ramtinj ramtinj 160 Oct 22 11:52 ..
+tmp/gondolin-build-MGLlg1/initramfs-root/lib/modules/6.18.58-0-virt/vmlinuz -> /boot/vmlinuz-virt
+tmp/gondolin-build-Qfswxl
+drwxr-xr-x 1 ramtinj ramtinj   0 Jul  2 21:05 tmp/gondolin-build-Qfswxl/rootfs/boot
+lrwxrwxrwx 1 ramtinj ramtinj   7 Oct 20 23:32 tmp/gondolin-build-Qfswxl/rootfs/lib -> usr/lib
+drwxr-xr-x 1 ramtinj ramtinj 172 Oct 22 11:55 tmp/gondolin-build-Qfswxl/rootfs/usr/lib
+total 0
+drwxr-xr-x 1 ramtinj ramtinj   0 Jul  2 21:05 .
+drwxr-xr-x 1 ramtinj ramtinj 160 Oct 22 11:55 ..
+tmp/gondolin-build-Qfswxl/initramfs-root/lib/modules/6.18.58-0-virt/vmlinuz -> /boot/vmlinuz-virt
+tmp/gondolin-build-Ru00bH
+drwxr-xr-x 1 ramtinj ramtinj   0 Jul  2 21:05 tmp/gondolin-build-Ru00bH/rootfs/boot
+lrwxrwxrwx 1 ramtinj ramtinj   7 Oct 20 23:32 tmp/gondolin-build-Ru00bH/rootfs/lib -> usr/lib
+drwxr-xr-x 1 ramtinj ramtinj 172 Oct 22 11:50 tmp/gondolin-build-Ru00bH/rootfs/usr/lib
+total 0
+drwxr-xr-x 1 ramtinj ramtinj   0 Jul  2 21:05 .
+drwxr-xr-x 1 ramtinj ramtinj 160 Oct 22 11:50 ..
+tmp/gondolin-build-Ru00bH/initramfs-root/lib/modules/6.18.58-0-virt/vmlinuz -> /boot/vmlinuz-virt
+tmp/gondolin-build-pPgwtv
+drwxr-xr-x 1 ramtinj ramtinj   0 Jul 17 19:05 tmp/gondolin-build-pPgwtv/rootfs/boot
+lrwxrwxrwx 1 ramtinj ramtinj   7 Jul 17 19:05 tmp/gondolin-build-pPgwtv/rootfs/lib -> usr/lib
+drwxr-xr-x 1 ramtinj ramtinj 148 Oct 22 11:56 tmp/gondolin-build-pPgwtv/rootfs/usr/lib
+total 0
+drwxr-xr-x 1 ramtinj ramtinj   0 Jul 17 19:05 .
+drwxr-xr-x 1 ramtinj ramtinj 160 Oct 22 11:56 ..
+tmp/gondolin-build-pPgwtv/initramfs-root/lib/modules/6.18.58-0-virt/vmlinuz -> /boot/vmlinuz-virt
+tmp/gondolin-build-yOnllu
+drwxr-xr-x 1 ramtinj ramtinj   0 Apr 22  2024 tmp/gondolin-build-yOnllu/rootfs/boot
+lrwxrwxrwx 1 ramtinj ramtinj   7 Apr 22  2024 tmp/gondolin-build-yOnllu/rootfs/lib -> usr/lib
+drwxr-xr-x 1 ramtinj ramtinj 172 Oct 22 11:56 tmp/gondolin-build-yOnllu/rootfs/usr/lib
+total 0
+drwxr-xr-x 1 ramtinj ramtinj   0 Apr 22  2024 .
+drwxr-xr-x 1 ramtinj ramtinj 160 Oct 22 11:56 ..
+tmp/gondolin-build-yOnllu/initramfs-root/lib/modules/6.18.58-0-virt/vmlinuz -> /boot/vmlinuz-virt
+--- Gondolin module-copy implementation ---
+     1	import fs from "node:fs";
+     2	import path from "node:path";
+     3	import { assertSafeWritePath, resolveWritePath } from "./rootfs.js";
+     4	const MODULE_FILE_SUFFIXES = [".ko", ".ko.gz", ".ko.xz", ".ko.zst"];
+     5	const REQUIRED_INITRAMFS_MODULES = ["virtio_blk", "ext4"];
+     6	export function syncKernelModules(rootfsDir, initramfsDir, log, options = {}) {
+     7	    const copyRootfsToInitramfs = options.copyRootfsToInitramfs ?? true;
+     8	    const rootfsModulesBase = resolveWritePath(path.join(rootfsDir, "lib/modules"), rootfsDir);
+     9	    const initramfsModulesBase = path.join(initramfsDir, "lib/modules");
+    10	    const rootfsVersions = listKernelModuleVersions(rootfsModulesBase);
+    11	    const initramfsVersions = listKernelModuleVersions(initramfsModulesBase);
+    12	    if (copyRootfsToInitramfs) {
+    13	        for (const kernelVersion of rootfsVersions) {
+    14	            const srcModules = path.join(rootfsModulesBase, kernelVersion);
+    15	            const dstModules = path.join(initramfsModulesBase, kernelVersion);
+    16	            log(`Copying kernel modules for ${kernelVersion} into initramfs`);
+    17	            copyInitramfsModules(srcModules, dstModules);
+    18	        }
+    19	    }
+    20	    const knownRootfsVersions = new Set(rootfsVersions);
+    21	    for (const kernelVersion of initramfsVersions) {
+    22	        if (knownRootfsVersions.has(kernelVersion)) {
+    23	            continue;
+    24	        }
+    25	        const srcModules = path.join(initramfsModulesBase, kernelVersion);
+    26	        const dstModules = path.join(rootfsModulesBase, kernelVersion);
+    27	        assertSafeWritePath(dstModules, rootfsDir);
+    28	        log(`Copying all kernel modules for ${kernelVersion} into rootfs`);
+    29	        copyAllKernelModules(srcModules, dstModules);
+    30	    }
+    31	}
+    32	function listKernelModuleVersions(modulesBase) {
+    33	    if (!fs.existsSync(modulesBase)) {
+    34	        return [];
+    35	    }
+    36	    return fs
+    37	        .readdirSync(modulesBase)
+    38	        .filter((entry) => fs
+    39	        .statSync(path.join(modulesBase, entry), {
+    40	        throwIfNoEntry: false,
+    41	    })
+    42	        ?.isDirectory())
+    43	        .sort();
+    44	}
+    45	function copyAllKernelModules(srcDir, dstDir) {
+    46	    if (!fs.existsSync(srcDir))
+    47	        return;
+    48	    fs.rmSync(dstDir, { recursive: true, force: true });
+    49	    fs.mkdirSync(path.dirname(dstDir), { recursive: true });
+    50	    fs.cpSync(srcDir, dstDir, { recursive: true, dereference: false });
+    51	}
+    52	function copyInitramfsModules(srcDir, dstDir) {
+    53	    if (!fs.existsSync(srcDir))
+    54	        return;
+    55	    const deps = readModuleDependencies(srcDir);
+--- Rootfs path containment ---
+     1	import fs from "node:fs";
+     2	import path from "node:path";
+     3	import { isPathWithin } from "../utils/path.js";
+     4	/** Check if any intermediate component of `target` (below `root`) is a symlink */
+     5	export function hasSymlinkComponent(target, root) {
+     6	    const rel = path.relative(root, target);
+     7	    if (rel === "." || rel === "")
+     8	        return false;
+     9	    let current = root;
+    10	    const parts = rel.split(path.sep);
+    11	    for (let i = 0; i < parts.length - 1; i++) {
+    12	        current = path.join(current, parts[i]);
+    13	        try {
+    14	            const stat = fs.lstatSync(current);
+    15	            if (stat.isSymbolicLink())
+    16	                return true;
+    17	        }
+    18	        catch {
+    19	            return false;
+    20	        }
+    21	    }
+    22	    return false;
+    23	}
+    24	/** Check whether a path entry exists without following the final symlink */
+    25	export function pathEntryExists(targetPath) {
+    26	    try {
+    27	        fs.lstatSync(targetPath);
+    28	        return true;
+    29	    }
+    30	    catch (err) {
+    31	        if (err?.code === "ENOENT" || err?.code === "ENOTDIR") {
+    32	            return false;
+    33	        }
+    34	        throw err;
+    35	    }
+    36	}
+    37	export function resolveWritePath(target, root) {
+    38	    const absTarget = path.resolve(target);
+    39	    const absRoot = path.resolve(root);
+    40	    if (!isPathWithin(absRoot, absTarget)) {
+    41	        throw new Error(`Refusing to write outside rootfs: ${absTarget}`);
+    42	    }
+    43	    const rel = path.relative(absRoot, absTarget);
+    44	    if (!rel || rel === ".") {
+    45	        return absRoot;
+    46	    }
+    47	    const parts = rel.split(path.sep);
+    48	    let current = absRoot;
+    49	    for (let idx = 0; idx < parts.length; idx++) {
+    50	        const next = path.join(current, parts[idx]);
+    51	        try {
+    52	            const stat = fs.lstatSync(next);
+    53	            if (!stat.isSymbolicLink()) {
+    54	                current = next;
+    55	                continue;
+    56	            }
+    57	            const linkTarget = fs.readlinkSync(next);
+    58	            const resolved = path.resolve(path.dirname(next), linkTarget);
+    59	            if (!isPathWithin(absRoot, resolved)) {
+    60	                throw new Error(`Refusing to write through symlinked path: ${absTarget}`);
+    61	            }
+    62	            current = resolved;
+    63	        }
+    64	        catch (err) {
+    65	            if (err?.code === "ENOENT") {
+    66	                return path.join(current, ...parts.slice(idx));
+    67	            }
+    68	            throw err;
+    69	        }
+    70	    }
+    71	    return current;
+    72	}
+    73	export function assertSafeWritePath(target, root) {
+    74	    const absTarget = path.resolve(target);
+    75	    const absRoot = path.resolve(root);
+    76	    if (!isPathWithin(absRoot, absTarget)) {
+    77	        throw new Error(`Refusing to write outside rootfs: ${absTarget}`);
+    78	    }
+    79	    if (hasSymlinkComponent(absTarget, absRoot)) {
+    80	        throw new Error(`Refusing to write through symlinked path: ${absTarget}`);
+    81	    }
+    82	    try {
+    83	        const stat = fs.lstatSync(absTarget);
+    84	        if (stat.isSymbolicLink()) {
+    85	            throw new Error(`Refusing to overwrite symlink path: ${absTarget}`);
+    86	        }
+    87	    }
+    88	    catch (err) {
+    89	        if (err?.code !== "ENOENT") {
+    90	            throw err;
+    91	        }
+    92	    }
+    93	}
+    94	export function hardenExtractedRootfs(rootfsDir) {
+    95	    const absRoot = path.resolve(rootfsDir);
+    96	    const stack = [absRoot];
+    97	    while (stack.length > 0) {
+    98	        const current = stack.pop();
+    99	        for (const entry of fs.readdirSync(current, { withFileTypes: true })) {
+   100	            const entryPath = path.join(current, entry.name);
+   101	            if (entry.isDirectory()) {
+   102	                stack.push(entryPath);
+   103	                continue;
+   104	            }
+   105	            if (entry.isSymbolicLink()) {
+   106	                hardenExtractedRootfsSymlink(entryPath, absRoot);
+   107	            }
+   108	        }
+   109	    }
+   110	}
+   111	function hardenExtractedRootfsSymlink(linkPath, rootfsDir) {
+   112	    const rawTarget = fs.readlinkSync(linkPath);
+   113	    const resolvedTarget = resolveRootfsSymlinkTarget(linkPath, rawTarget, rootfsDir);
+   114	    if (!isPathWithin(rootfsDir, resolvedTarget)) {
+   115	        throw new Error(`OCI rootfs contains symlink escaping the rootfs: ${linkPath} -> ${rawTarget}`);
+   116	    }
+   117	    if (path.isAbsolute(rawTarget)) {
+   118	        const normalizedTarget = path.relative(path.dirname(linkPath), resolvedTarget);
+   119	        fs.unlinkSync(linkPath);
+   120	        fs.symlinkSync(normalizedTarget || ".", linkPath);
+   121	    }
+   122	}
+   123	function resolveRootfsSymlinkTarget(linkPath, rawTarget, rootfsDir) {
+   124	    if (path.isAbsolute(rawTarget)) {
+   125	        return path.resolve(rootfsDir, `.${rawTarget}`);
+   126	    }
+   127	    return path.resolve(path.dirname(linkPath), rawTarget);
+   128	}
+   129	export function ensureRootfsShell(rootfsDir, ociImage, initramfsDir, log) {
+   130	    const shellPath = path.join(rootfsDir, "bin/sh");
+   131	    if (pathEntryExists(shellPath)) {
+   132	        return;
+   133	    }
+   134	    if (initramfsDir && bootstrapBusyboxShell(rootfsDir, initramfsDir, log)) {
+   135	        if (pathEntryExists(shellPath)) {
+   136	            return;
+   137	        }
+   138	    }
+   139	    if (ociImage) {
+   140	        throw new Error(`OCI rootfs image '${ociImage}' does not contain /bin/sh and busybox bootstrapping failed. ` +
+   141	            "Use an image with a POSIX shell or provide a rootfs that includes /bin/sh.");
+   142	    }
+   143	    throw new Error(`Rootfs is missing required shell at ${shellPath}`);
+   144	}
+   145	function bootstrapBusyboxShell(rootfsDir, initramfsDir, log) {
+   146	    const busyboxSourceCandidates = [
+   147	        path.join(initramfsDir, "bin/busybox"),
+   148	        path.join(initramfsDir, "usr/bin/busybox"),
+   149	    ];
+   150	    const busyboxSource = busyboxSourceCandidates.find((candidate) => fs.existsSync(candidate));
+   151	    if (!busyboxSource) {
+   152	        return false;
+   153	    }
+   154	    copyMuslRuntimeFromInitramfs(rootfsDir, initramfsDir);
+   155	    const busyboxDest = resolveWritePath(path.join(rootfsDir, "bin/busybox"), rootfsDir);
+   156	    fs.mkdirSync(path.dirname(busyboxDest), { recursive: true });
+   157	    fs.copyFileSync(busyboxSource, busyboxDest);
+   158	    fs.chmodSync(busyboxDest, 0o755);
+   159	    for (const relDir of ["bin", "sbin", "usr/bin", "usr/sbin"]) {
+   160	        const sourceDir = path.join(initramfsDir, relDir);
+--- Build-stage order ---
+node_modules/@earendil-works/gondolin/dist/src/build/alpine.js:11:import { applyPostBuildCopies } from "../alpine/post-build-copy.js";
+node_modules/@earendil-works/gondolin/dist/src/build/alpine.js:12:import { syncKernelModules } from "../alpine/kernel-modules.js";
+node_modules/@earendil-works/gondolin/dist/src/build/alpine.js:72:        applyPostBuildCopies(rootfsDir, postBuildCopy, log);
+node_modules/@earendil-works/gondolin/dist/src/build/alpine.js:109:    syncKernelModules(rootfsDir, initramfsDir, log, {
+node_modules/@earendil-works/gondolin/dist/src/alpine/kernel-modules.js:6:export function syncKernelModules(rootfsDir, initramfsDir, log, options = {}) {
+node_modules/@earendil-works/gondolin/dist/src/alpine/post-build-copy.js:5:export function applyPostBuildCopies(rootfsDir, entries, log) {
+--- strace availability ---
+strace not installed; not added

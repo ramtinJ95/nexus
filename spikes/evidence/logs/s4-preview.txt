@@ -1,0 +1,12 @@
+COLD_BOOT_FIRST_EXEC_MS=3590 Python 3.12.15
+
+Serving HTTP on 127.0.0.1 port 8080 (http://127.0.0.1:8080/) ...
+GUEST_REQUEST_HEADERS={"host": "127.0.0.1:18080", "x-forwarded-for": "127.0.0.1", "x-forwarded-proto": "http"}
+127.0.0.1 - - [22/Oct/2026 09:41:50] "GET / HTTP/1.1" 200 -
+INGRESS_READY http://127.0.0.1:18080 READY_MS=4931
+GUEST_REQUEST_HEADERS={"host": "infra-testbench.example.ts.net:8443", "tailscale-user-login": "<redacted>", "tailscale-user-name": "<redacted>", "tailscale-user-profile-pic": "<redacted>", "x-forwarded-for": "100.64.0.11, 127.0.0.1", "x-forwarded-proto": "http"}
+127.0.0.1 - - [22/Oct/2026 09:42:11] "GET / HTTP/1.1" 200 -
+GUEST_REQUEST_HEADERS={"host": "infra-testbench.example.ts.net:8443", "tailscale-user-login": "<redacted>", "tailscale-user-name": "<redacted>", "tailscale-user-profile-pic": "<redacted>", "x-forwarded-for": "100.64.0.12, 127.0.0.1", "x-forwarded-proto": "http"}
+127.0.0.1 - - [22/Oct/2026 09:42:11] "GET / HTTP/1.1" 200 -
+guest-server-closed: error server_shutdown: server is shutting down
+S4_VM_CLOSED

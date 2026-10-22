@@ -1,0 +1,102 @@
+CREATED_CONTAINERS=12 REMAINING_CREATED_CONTAINERS=0
+REMOVING_ONLY_OWN_IMAGE=debian:bookworm-slim
+Untagged: debian:bookworm-slim
+Deleted: sha256:7ff6ba31527b9e336162fa061746c366c4b2032f4d2cff2078bea43f78efe3f8
+REMOVING_ONLY_OWN_IMAGE=debian:bookworm
+Untagged: debian:bookworm
+Deleted: sha256:854dd8ab51d62866dbd8f5431d15ce77b12983a2a4a1e1fe43a2395dc7ef9f61
+REMOVING_ONLY_OWN_IMAGE=debian:trixie-slim
+Untagged: debian:trixie-slim
+Deleted: sha256:62bd423aeee912639ca8ee681c2b762cb3e25137e0a92b20be455898a9f034ad
+REMOVING_ONLY_OWN_IMAGE=ubuntu:24.04
+Untagged: ubuntu:24.04
+Deleted: sha256:68ee22004a9109b44973313b02ff7b1de250f1de0f5ecb628d73f579aaff33ac
+IMAGES_AFTER=18 CONTAINERS_AFTER=1 INVENTORY_RESTORED=true
+SCRATCH_GONDOLIN_SESSIONS=0
+SCRATCH_QEMU_PIDS=[]
+RETAINED_STOPPED_CHECKPOINT=/home/ramtinj/nexus-spikes/state/s2-debian.qcow2
+image: /home/ramtinj/nexus-spikes/state/s2-debian.qcow2
+file format: qcow2
+virtual size: 6 GiB (6442450944 bytes)
+disk size: 853 MiB
+cluster_size: 65536
+backing file: /home/ramtinj/nexus-spikes/state/debian-assets/rootfs.ext4
+backing file format: raw
+Format specific information:
+    compat: 1.1
+    compression type: zlib
+    lazy refcounts: false
+    refcount bits: 16
+    corrupt: false
+    extended l2: false
+Child node '/file':
+    filename: /home/ramtinj/nexus-spikes/state/s2-debian.qcow2
+    protocol type: file
+    file length: 853 MiB (894566912 bytes)
+    disk size: 853 MiB
+
+image: /home/ramtinj/nexus-spikes/state/debian-assets/rootfs.ext4
+file format: raw
+virtual size: 6 GiB (6442450944 bytes)
+disk size: 213 MiB
+Child node '/file':
+    filename: /home/ramtinj/nexus-spikes/state/debian-assets/rootfs.ext4
+    protocol type: file
+    file length: 6 GiB (6442450944 bytes)
+    disk size: 213 MiB
+
+REMAINING_TMP=["gondolin-ssh-aOuASB"]
+REMAINING_STATE=["debian-assets","kernel-module-seed","s12-created-containers.txt","s12-owned-images.json","s12-pulled-image.txt","s2-debian.qcow2","s2-known-hosts","s2-verified.json"]
+20K	/home/ramtinj/nexus-spikes/RESULTS.md
+1.6G	/home/ramtinj/nexus-spikes/cache
+316K	/home/ramtinj/nexus-spikes/logs
+8.0K	/home/ramtinj/nexus-spikes/logs-setup.txt
+160M	/home/ramtinj/nexus-spikes/node_modules
+91M	/home/ramtinj/nexus-spikes/npm-cache
+52K	/home/ramtinj/nexus-spikes/package-lock.json
+4.0K	/home/ramtinj/nexus-spikes/package.json
+4.0K	/home/ramtinj/nexus-spikes/s0-inspect.sh
+4.0K	/home/ramtinj/nexus-spikes/s0-setup.sh
+4.0K	/home/ramtinj/nexus-spikes/s1-bookworm-platform.json
+4.0K	/home/ramtinj/nexus-spikes/s1-bookworm-slim-lts.json
+4.0K	/home/ramtinj/nexus-spikes/s1-bookworm-slim-platform.json
+4.0K	/home/ramtinj/nexus-spikes/s1-build.sh
+4.0K	/home/ramtinj/nexus-spikes/s1-cp-isolated.mjs
+4.0K	/home/ramtinj/nexus-spikes/s1-cp-repro.mjs
+4.0K	/home/ramtinj/nexus-spikes/s1-cp-repro.sh
+4.0K	/home/ramtinj/nexus-spikes/s1-debian.json
+4.0K	/home/ramtinj/nexus-spikes/s1-guest-provision.sh
+4.0K	/home/ramtinj/nexus-spikes/s1-investigate.sh
+4.0K	/home/ramtinj/nexus-spikes/s1-live-inspect.sh
+4.0K	/home/ramtinj/nexus-spikes/s1-module-seed.json
+4.0K	/home/ramtinj/nexus-spikes/s1-module-seed.sh
+4.0K	/home/ramtinj/nexus-spikes/s1-node24-rebuild.sh
+4.0K	/home/ramtinj/nexus-spikes/s1-provision.mjs
+4.0K	/home/ramtinj/nexus-spikes/s1-rebuild.sh
+4.0K	/home/ramtinj/nexus-spikes/s1-supported-variants.mjs
+4.0K	/home/ramtinj/nexus-spikes/s1-supported-variants.sh
+4.0K	/home/ramtinj/nexus-spikes/s1-timed-recheck.sh
+4.0K	/home/ramtinj/nexus-spikes/s1-trixie-slim-platform.json
+4.0K	/home/ramtinj/nexus-spikes/s1-ubuntu2404-platform.json
+4.0K	/home/ramtinj/nexus-spikes/s12-cleanup.mjs
+4.0K	/home/ramtinj/nexus-spikes/s12-vm-options.mjs
+8.0K	/home/ramtinj/nexus-spikes/s2-check.mjs
+4.0K	/home/ramtinj/nexus-spikes/s2-install-ssh.mjs
+4.0K	/home/ramtinj/nexus-spikes/s2-resume-login.mjs
+4.0K	/home/ramtinj/nexus-spikes/s3-boot.mjs
+8.0K	/home/ramtinj/nexus-spikes/s3-env.mjs
+4.0K	/home/ramtinj/nexus-spikes/s3-harness.mjs
+4.0K	/home/ramtinj/nexus-spikes/s4-cleanup.sh
+4.0K	/home/ramtinj/nexus-spikes/s4-diagnose.sh
+4.0K	/home/ramtinj/nexus-spikes/s4-fetch-diagnostic.sh
+4.0K	/home/ramtinj/nexus-spikes/s4-fetch.sh
+4.0K	/home/ramtinj/nexus-spikes/s4-preview.mjs
+4.0K	/home/ramtinj/nexus-spikes/s4-serve.sh
+4.0K	/home/ramtinj/nexus-spikes/s4-sitecustomize.py
+4.0K	/home/ramtinj/nexus-spikes/s4-status.sh
+4.0K	/home/ramtinj/nexus-spikes/s9-cleanup.mjs
+4.0K	/home/ramtinj/nexus-spikes/s9-validate-local.sh
+1.2G	/home/ramtinj/nexus-spikes/state
+8.0K	/home/ramtinj/nexus-spikes/tmp
+235M	/home/ramtinj/nexus-spikes/tools
+TOTAL=3.2G	/home/ramtinj/nexus-spikes

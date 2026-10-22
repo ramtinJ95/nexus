@@ -1,0 +1,33 @@
+RESUME_FIRST_EXEC_MS=5383
+uid=1000(user) gid=1000(user) groups=1000(user)
+SSH_READY_USER=user LISTEN=127.0.0.1:36435
+SMOKE: shell only; no Claude/login/model call
+Warning: Permanently added '[127.0.0.1]:36435' (ED25519) to the list of known hosts.
+id
+pwd
+python3 --version
+node --version
+claude --version
+curl --max-time 20 -sS -o /dev/null -w "SHELL_HTTP_STATUS=%{http_code}\n" https://api.anthropic.com/v1/models
+echo NEXUS_S2_INTERACTIVE_USER_SHELL_OK
+exit
+bash-5.2$ id
+uid=1000(user) gid=1000(user) groups=1000(user)
+bash-5.2$ pwd
+/home/user/workspace/repo
+bash-5.2$ python3 --version
+Python 3.11.2
+bash-5.2$ node --version
+v24.22.1
+bash-5.2$ claude --version
+2.1.308 (Claude Code)
+bash-5.2$ <%{http_code}\n" https://api.anthropic.com/v1/models
+EGRESS_ALLOW api.anthropic.com
+SHELL_HTTP_STATUS=401
+bash-5.2$ echo NEXUS_S2_INTERACTIVE_USER_SHELL_OK
+NEXUS_S2_INTERACTIVE_USER_SHELL_OK
+bash-5.2$ exit
+exit
+Connection to 127.0.0.1 closed.
+S2_RESUME_INTERACTIVE_SHELL_SMOKE_PASS
+STOPPED_AND_SAVED=/home/ramtinj/nexus-spikes/state/s2-debian.qcow2

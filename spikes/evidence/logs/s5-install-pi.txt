@@ -1,0 +1,23 @@
+DENY_CALLBACK_UNAVAILABLE: Gondolin 0.13.0; no s5-blocked-hosts.log. EGRESS_DENY remains on stdout.
+RESUME_FIRST_EXEC_MS=5275
+uid=1000(user) gid=1000(user) groups=1000(user)
+v24.22.1
+11.19.1
+EGRESS_ALLOW registry.npmjs.org
+npm warn deprecated node-domexception@1.0.0: Use your platform's native DOMException instead
+
+added 119 packages in 22s
+
+9 packages are looking for funding
+  run `npm fund` for details
+npm warn install-scripts 2 packages have install scripts not yet covered by allowScripts:
+npm warn install-scripts   @google/genai@2.21.0 (preinstall: echo 'preinstall: no-op')
+npm warn install-scripts   protobufjs@7.6.6 (postinstall: node scripts/postinstall)
+npm warn install-scripts
+npm warn install-scripts Run `npm install -g --allow-scripts=@google/genai,protobufjs` to allow these scripts once, or `npm config set allow-scripts=@google/genai,protobufjs --location=user` to allow them for all global installs.
+LOGIN_PI_PATH=/home/user/.local/bin/pi
+PI_VERSION=1.4.0
+INSTALL_AND_VERIFY_MS=23651
+CHECKPOINT_MS=1501
+STOPPED_AND_SAVED=/home/ramtinj/nexus-spikes/state/s2-debian.qcow2
+TOTAL_MS=30428

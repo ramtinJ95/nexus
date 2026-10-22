@@ -1,0 +1,16 @@
+{
+  "name": "nexus-spikes",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "type": "commonjs",
+  "dependencies": {
+    "@earendil-works/gondolin": "0.13.0",
+    "@earendil-works/pi-durable": "1.4.0",
+    "@earendil-works/pi-env": "1.4.0"
+  }
+}

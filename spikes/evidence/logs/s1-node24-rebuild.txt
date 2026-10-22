@@ -1,0 +1,19 @@
+node-v24.22.1-linux-x64.tar.xz: OK
+v24.22.1
+Building guest assets for x86_64 (alpine)
+Rootfs source: OCI image debian:bookworm-slim
+Output directory: /home/ramtinj/nexus-spikes/state/debian-assets
+Work directory: /home/ramtinj/nexus-spikes/tmp/gondolin-build-MGLlg1
+Building guest images...
+Extracting OCI rootfs from debian:bookworm-slim (docker)...
+Resolved OCI image debian:bookworm-slim -> debian@sha256:7ff6ba31527b9e336162fa061746c366c4b2032f4d2cff2078bea43f78efe3f8
+Creating OCI export container from debian:bookworm-slim
+Extracting Alpine minirootfs for initramfs...
+Installing initramfs packages: linux-virt
+Copying all kernel modules for 6.18.58-0-virt into rootfs
+terminate called after throwing an instance of 'std::filesystem::__cxx11::filesystem_error'
+  what():  filesystem error: status: Permission denied [/boot/vmlinuz-virt]
+timeout: the monitored command dumped core
+s1-node24-rebuild.sh: line 30: 977040 Aborted                    timeout 1800 tools/node-v24.22.1-linux-x64/bin/node node_modules/@earendil-works/gondolin/dist/bin/gondolin.js build --config s1-debian.json --output state/debian-assets
+BUILD_SECONDS=8.025
+CREATED_CONTAINER_IDS=3

@@ -1,0 +1,14 @@
+Building guest assets for x86_64 (alpine)
+Rootfs source: OCI image ubuntu:24.04
+Output directory: /home/ramtinj/nexus-spikes/state/ubuntu2404-platform-assets
+Work directory: /home/ramtinj/nexus-spikes/tmp/gondolin-build-yOnllu
+Building guest images...
+Extracting OCI rootfs from ubuntu:24.04 (docker)...
+Pulling OCI image ubuntu:24.04 (linux/amd64) with docker
+Resolved OCI image ubuntu:24.04 -> ubuntu@sha256:68ee22004a9109b44973313b02ff7b1de250f1de0f5ecb628d73f579aaff33ac
+Creating OCI export container from ubuntu:24.04
+Extracting Alpine minirootfs for initramfs...
+Installing initramfs packages: linux-virt
+Copying all kernel modules for 6.18.58-0-virt into rootfs
+terminate called after throwing an instance of 'std::filesystem::__cxx11::filesystem_error'
+  what():  filesystem error: status: Permission denied [/boot/vmlinuz-virt]

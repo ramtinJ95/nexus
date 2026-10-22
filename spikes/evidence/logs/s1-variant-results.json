@@ -1,0 +1,37 @@
+[
+  {
+    "name": "bookworm-slim-platform",
+    "image": "debian:bookworm-slim",
+    "seconds": 7.277,
+    "status": null,
+    "signal": "SIGABRT"
+  },
+  {
+    "name": "bookworm-platform",
+    "image": "debian:bookworm",
+    "seconds": 15.779,
+    "status": null,
+    "signal": "SIGABRT"
+  },
+  {
+    "name": "trixie-slim-platform",
+    "image": "debian:trixie-slim",
+    "seconds": 12.855,
+    "status": null,
+    "signal": "SIGABRT"
+  },
+  {
+    "name": "ubuntu2404-platform",
+    "image": "ubuntu:24.04",
+    "seconds": 13.509,
+    "status": null,
+    "signal": "SIGABRT"
+  },
+  {
+    "name": "bookworm-slim-lts",
+    "image": "debian:bookworm-slim",
+    "seconds": 41.472,
+    "status": null,
+    "signal": "SIGABRT"
+  }
+]

@@ -1,0 +1,43 @@
+IMAGES_BEFORE_AFTER=18/18 CONTAINERS_BEFORE_AFTER=1/1
+CREATED_CONTAINER_FILTERED_COUNT=0; SCRATCH_QEMU=0; SESSIONS=0
+CHECKPOINT {"version":1,"name":"s2-debian","createdAt":"2026-10-22T10:09:00.684Z","diskFile":"s2-debian.qcow2","guestAssetBuildId":"836cdc05-a609-5162-8f18-320834da7d20","snapshotKind":"disk","createdWithVmm":"qemu","compatibleVmm":["qemu","krun"]}
+image: /home/ramtinj/nexus-spikes/state/s2-debian.qcow2
+file format: qcow2
+virtual size: 6 GiB (6442450944 bytes)
+disk size: 853 MiB
+cluster_size: 65536
+backing file: /home/ramtinj/nexus-spikes/state/debian-assets/rootfs.ext4
+backing file format: raw
+Format specific information:
+    compat: 1.1
+    compression type: zlib
+    lazy refcounts: false
+    refcount bits: 16
+    corrupt: false
+    extended l2: false
+Child node '/file':
+    filename: /home/ramtinj/nexus-spikes/state/s2-debian.qcow2
+    protocol type: file
+    file length: 853 MiB (894697984 bytes)
+    disk size: 853 MiB
+
+image: /home/ramtinj/nexus-spikes/state/debian-assets/rootfs.ext4
+file format: raw
+virtual size: 6 GiB (6442450944 bytes)
+disk size: 213 MiB
+Child node '/file':
+    filename: /home/ramtinj/nexus-spikes/state/debian-assets/rootfs.ext4
+    protocol type: file
+    file length: 6 GiB (6442450944 bytes)
+    disk size: 213 MiB
+
+TMP []
+STATE ["debian-assets","kernel-module-seed","s12-created-containers.txt","s12-owned-images.json","s12-pulled-image.txt","s2-debian.qcow2","s2-known-hosts","s2-verified.json"]
+1.2G	state
+1.6G	cache
+235M	tools
+160M	node_modules
+91M	npm-cache
+0	tmp
+
+TOTAL=3.2G	.

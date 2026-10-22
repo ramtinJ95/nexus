@@ -1,0 +1,7 @@
+Available within your tailnet:
+
+https://infra-testbench.example.ts.net:8443/
+|-- proxy http://127.0.0.1:18080
+
+Serve started and running in the background.
+To disable the proxy, run: tailscale serve --https=8443 off

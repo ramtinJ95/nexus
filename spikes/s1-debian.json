@@ -1,0 +1,6 @@
+{
+  "arch": "x86_64",
+  "distro": "alpine",
+  "oci": {"image": "debian:bookworm-slim", "runtime": "docker", "pullPolicy": "if-not-present"},
+  "rootfs": {"sizeMb": 6144}
+}

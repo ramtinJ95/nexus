@@ -1,0 +1,38 @@
+DENY_CALLBACK_UNAVAILABLE: Gondolin 0.13.0; no s5-blocked-hosts.log. EGRESS_DENY remains on stdout.
+RESUME_FIRST_EXEC_MS=5357
+uid=1000(user) gid=1000(user) groups=1000(user)
+SSH_READY_USER=user LISTEN=127.0.0.1:43089
+SMOKE: version + unauthenticated curl only; no login/model call
+Warning: Permanently added '[127.0.0.1]:43089' (ED25519) to the list of known hosts.
+set -e
+id
+pwd
+node --version
+npm --version
+printf "PI_VERSION="; pi --version
+curl --max-time 20 -sS -o /dev/null -w "CHATGPT_HTTP_STATUS=%{http_code}\n" https://chatgpt.com/backend-api/
+printf "NEXUS_S5_%s\n" INTERACTIVE_USER_SHELL_OK
+exit
+bash-5.2$ set -e
+bash-5.2$ id
+uid=1000(user) gid=1000(user) groups=1000(user)
+bash-5.2$ pwd
+/home/user/workspace/repo
+bash-5.2$ node --version
+v24.22.1
+bash-5.2$ npm --version
+11.19.1
+bash-5.2$ printf "PI_VERSION="; pi --version
+PI_VERSION=1.4.0
+bash-5.2$ <US=%{http_code}\n" https://chatgpt.com/backend-api/
+EGRESS_ALLOW chatgpt.com
+CHATGPT_HTTP_STATUS=404
+bash-5.2$ printf "NEXUS_S5_%s\n" INTERACTIVE_USER_SHELL_OK
+NEXUS_S5_INTERACTIVE_USER_SHELL_OK
+bash-5.2$ exit
+exit
+S5_RESUME_INTERACTIVE_SHELL_SMOKE_PASS
+Connection to 127.0.0.1 closed.
+CHECKPOINT_MS=1604
+STOPPED_AND_SAVED=/home/ramtinj/nexus-spikes/state/s2-debian.qcow2
+TOTAL_MS=9709

@@ -1,0 +1,33 @@
+STRAY_QEMU_KILLED []
+SCRATCH_GONDOLIN_SESSIONS []
+DOCKER: no successful pull/create; no image or container to remove
+S2_CHECKPOINT: absent (S1 blocked before image creation)
+SCRATCH_CONTENTS
+333M	/home/ramtinj/nexus-spikes/cache
+152K	/home/ramtinj/nexus-spikes/logs
+8.0K	/home/ramtinj/nexus-spikes/logs-setup.txt
+160M	/home/ramtinj/nexus-spikes/node_modules
+91M	/home/ramtinj/nexus-spikes/npm-cache
+52K	/home/ramtinj/nexus-spikes/package-lock.json
+4.0K	/home/ramtinj/nexus-spikes/package.json
+4.0K	/home/ramtinj/nexus-spikes/s0-inspect.sh
+4.0K	/home/ramtinj/nexus-spikes/s0-setup.sh
+4.0K	/home/ramtinj/nexus-spikes/s1-build.sh
+4.0K	/home/ramtinj/nexus-spikes/s1-debian.json
+4.0K	/home/ramtinj/nexus-spikes/s1-timed-recheck.sh
+4.0K	/home/ramtinj/nexus-spikes/s3-boot.mjs
+8.0K	/home/ramtinj/nexus-spikes/s3-env.mjs
+4.0K	/home/ramtinj/nexus-spikes/s3-harness.mjs
+4.0K	/home/ramtinj/nexus-spikes/s4-cleanup.sh
+4.0K	/home/ramtinj/nexus-spikes/s4-diagnose.sh
+4.0K	/home/ramtinj/nexus-spikes/s4-fetch-diagnostic.sh
+4.0K	/home/ramtinj/nexus-spikes/s4-fetch.sh
+4.0K	/home/ramtinj/nexus-spikes/s4-preview.mjs
+4.0K	/home/ramtinj/nexus-spikes/s4-serve.sh
+4.0K	/home/ramtinj/nexus-spikes/s4-sitecustomize.py
+4.0K	/home/ramtinj/nexus-spikes/s4-status.sh
+4.0K	/home/ramtinj/nexus-spikes/s9-cleanup.mjs
+0	/home/ramtinj/nexus-spikes/state
+0	/home/ramtinj/nexus-spikes/tmp
+TOTAL 583M	/home/ramtinj/nexus-spikes
+REMAINING_STATE_FILES []

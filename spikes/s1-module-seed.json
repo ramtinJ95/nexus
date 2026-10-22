@@ -1,0 +1,14 @@
+{
+  "arch": "x86_64",
+  "distro": "alpine",
+  "oci": {
+    "image": "debian:bookworm-slim",
+    "runtime": "docker",
+    "platform": "linux/amd64",
+    "pullPolicy": "never"
+  },
+  "rootfs": { "sizeMb": 6144 },
+  "postBuild": {
+    "copy": [{ "src": "state/kernel-module-seed", "dest": "/lib/modules" }]
+  }
+}

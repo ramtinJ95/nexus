@@ -1,0 +1,72 @@
+* Host localhost:1055 was resolved.
+* IPv6: ::1
+* IPv4: 127.0.0.1
+  % Total    % Received % Xferd  Average Speed   Time    Time     Time  Current
+                                 Dload  Upload   Total   Spent    Left  Speed
+  0     0    0     0    0     0      0      0 --:--:-- --:--:-- --:--:--     0*   Trying [::1]:1055...
+* connect to ::1 port 1055 from ::1 port 57661 failed: Connection refused
+*   Trying 127.0.0.1:1055...
+* Connected to localhost (127.0.0.1) port 1055
+* SOCKS5 connect to infra-testbench.example.ts.net:8443 (remotely resolved)
+  0     0    0     0    0     0      0      0 --:--:-- --:--:-- --:--:--     0* SOCKS5 request granted.
+* Connected to localhost (127.0.0.1) port 1055
+* ALPN: curl offers h2,http/1.1
+* (304) (OUT), TLS handshake, Client hello (1):
+} [338 bytes data]
+*  CAfile: /etc/ssl/cert.pem
+*  CApath: none
+* (304) (IN), TLS handshake, Server hello (2):
+{ [122 bytes data]
+* (304) (IN), TLS handshake, Unknown (8):
+{ [19 bytes data]
+* (304) (IN), TLS handshake, Certificate (11):
+{ [3453 bytes data]
+* (304) (IN), TLS handshake, CERT verify (15):
+{ [79 bytes data]
+* (304) (IN), TLS handshake, Finished (20):
+{ [36 bytes data]
+* (304) (OUT), TLS handshake, Finished (20):
+} [36 bytes data]
+* SSL connection using TLSv1.3 / AEAD-CHACHA20-POLY1305-SHA256 / [blank] / UNDEF
+* ALPN: server accepted h2
+* Server certificate:
+*  subject: CN=infra-testbench.example.ts.net
+*  start date: Oct 22 08:43:17 2026 GMT
+*  expire date: Jan 20 08:43:16 2027 GMT
+*  subjectAltName: host "infra-testbench.example.ts.net" matched cert's "infra-testbench.example.ts.net"
+*  issuer: C=US; O=Let's Encrypt; CN=YE1
+*  SSL certificate verify ok.
+* using HTTP/2
+* [HTTP/2] [1] OPENED stream for https://infra-testbench.example.ts.net:8443/
+* [HTTP/2] [1] [:method: GET]
+* [HTTP/2] [1] [:scheme: https]
+* [HTTP/2] [1] [:authority: infra-testbench.example.ts.net:8443]
+* [HTTP/2] [1] [:path: /]
+* [HTTP/2] [1] [user-agent: curl/8.7.1]
+* [HTTP/2] [1] [accept: */*]
+> GET / HTTP/2
+> Host: infra-testbench.example.ts.net:8443
+> User-Agent: curl/8.7.1
+> Accept: */*
+> 
+* Request completely sent off
+< HTTP/2 200 
+HTTP/2 200 
+< content-type: text/html
+content-type: text/html
+< date: Thu, 22 Oct 2026 09:42:11 GMT
+date: Thu, 22 Oct 2026 09:42:11 GMT
+< last-modified: Thu, 22 Oct 2026 09:41:48 GMT
+last-modified: Thu, 22 Oct 2026 09:41:48 GMT
+< server: SimpleHTTP/0.6 Python/3.12.15
+server: SimpleHTTP/0.6 Python/3.12.15
+< content-length: 28
+content-length: 28
+< 
+
+{ [28 bytes data]
+100    28  100    28    0     0     70      0 --:--:-- --:--:-- --:--:--    70
+* Connection #0 to host localhost left intact
+nexus-preview-from-gondolin
+
+HTTP_STATUS=200 TOTAL_SECONDS=0.398966

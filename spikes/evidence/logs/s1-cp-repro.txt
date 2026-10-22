@@ -1,0 +1,21 @@
+RUNTIME=node MODE=default
+{"node":"v26.8.1","mode":"default","dir":"/home/ramtinj/nexus-spikes/tmp/cp-repro-zNUPsg","link":"/boot/vmlinuz-virt"}
+terminate called after throwing an instance of 'std::filesystem::__cxx11::filesystem_error'
+  what():  filesystem error: status: Permission denied [/boot/vmlinuz-virt]
+s1-cp-repro.sh: line 7: 980104 Aborted                    (core dumped) "$runtime" s1-cp-repro.mjs "$mode"
+EXIT=134
+RUNTIME=node MODE=verbatim
+{"node":"v26.8.1","mode":"verbatim","dir":"/home/ramtinj/nexus-spikes/tmp/cp-repro-LIsDQK","link":"/boot/vmlinuz-virt"}
+COPIED_LINK=/boot/vmlinuz-virt
+EXIT=0
+RUNTIME=tools/node-v24.22.1-linux-x64/bin/node MODE=default
+{"node":"v24.22.1","mode":"default","dir":"/home/ramtinj/nexus-spikes/tmp/cp-repro-IcMjsp","link":"/boot/vmlinuz-virt"}
+terminate called after throwing an instance of 'std::filesystem::__cxx11::filesystem_error'
+  what():  filesystem error: status: Permission denied [/boot/vmlinuz-virt]
+s1-cp-repro.sh: line 7: 980125 Aborted                    (core dumped) "$runtime" s1-cp-repro.mjs "$mode"
+EXIT=134
+RUNTIME=tools/node-v24.22.1-linux-x64/bin/node MODE=verbatim
+{"node":"v24.22.1","mode":"verbatim","dir":"/home/ramtinj/nexus-spikes/tmp/cp-repro-ij9mqa","link":"/boot/vmlinuz-virt"}
+COPIED_LINK=/boot/vmlinuz-virt
+EXIT=0
+STRACE_UNAVAILABLE; not installed; no syscall-level write claim

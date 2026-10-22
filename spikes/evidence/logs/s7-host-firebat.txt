@@ -1,0 +1,9 @@
+v26.8.1
+QEMU emulator version 11.1.1
+Copyright (c) 2003-2026 Fabrice Bellard and the QEMU Project developers
+qemu-img version 11.1.1
+Copyright (c) 2003-2026 Fabrice Bellard and the QEMU Project developers
+HOST_CPU=AMD Ryzen 7 255 w/ Radeon 780M Graphics
+Linux 7.2.5-3-omarchy
+TMP_ENTRIES=1
+S7_QEMU_COUNT=0

@@ -1,0 +1,35 @@
+relocated-assets/initramfs.cpio.lz4: OK
+relocated-assets/krun-empty-initrd: OK
+relocated-assets/krun-kernel: OK
+relocated-assets/manifest.json: OK
+relocated-assets/rootfs.ext4: OK
+relocated-assets/vmlinuz-virt: OK
+image: amd.qcow2
+file format: qcow2
+virtual size: 6 GiB (6442450944 bytes)
+disk size: 1.95 MiB
+cluster_size: 65536
+backing file: /home/<redacted>/nexus-spikes/s7/relocated-assets/rootfs.ext4
+backing file format: raw
+Format specific information:
+    compat: 1.1
+    compression type: zlib
+    lazy refcounts: false
+    refcount bits: 16
+    corrupt: false
+    extended l2: false
+Child node '/file':
+    filename: amd.qcow2
+    protocol type: file
+    file length: 2 MiB (2097664 bytes)
+    disk size: 1.95 MiB
+
+image: /home/<redacted>/nexus-spikes/s7/relocated-assets/rootfs.ext4
+file format: raw
+virtual size: 6 GiB (6442450944 bytes)
+disk size: 118 MiB
+Child node '/file':
+    filename: /home/<redacted>/nexus-spikes/s7/relocated-assets/rootfs.ext4
+    protocol type: file
+    file length: 6 GiB (6442450944 bytes)
+    disk size: 118 MiB

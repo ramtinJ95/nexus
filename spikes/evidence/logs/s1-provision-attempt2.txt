@@ -1,0 +1,62 @@
+PROVISION_ALLOWLIST ["api.anthropic.com","claude.ai","claude.com","platform.claude.com","downloads.claude.ai","registry.npmjs.org","deb.debian.org","security.debian.org","nodejs.org","herdr.dev","github.com","release-assets.githubusercontent.com"]
+RESUME_FIRST_EXEC_MS=5513
+Linux (none) 6.18.58-0-virt #1-Alpine SMP PREEMPT_DYNAMIC 2026-10-21 13:45:15 x86_64 GNU/Linux
+PRETTY_NAME="Debian GNU/Linux 12 (bookworm)"
+NAME="Debian GNU/Linux"
+VERSION_ID="12"
+VERSION="12 (bookworm)"
+VERSION_CODENAME=bookworm
+ID=debian
+HOME_URL="https://www.debian.org/"
+SUPPORT_URL="https://www.debian.org/support"
+BUG_REPORT_URL="https://bugs.debian.org/"
+uid=0(root) gid=0(root) groups=0(root)
+ 
+GUEST_ROOT_PROVISION_START
+PRETTY_NAME="Debian GNU/Linux 12 (bookworm)"
+NAME="Debian GNU/Linux"
+VERSION_ID="12"
+VERSION="12 (bookworm)"
+VERSION_CODENAME=bookworm
+ID=debian
+HOME_URL="https://www.debian.org/"
+SUPPORT_URL="https://www.debian.org/support"
+BUG_REPORT_URL="https://bugs.debian.org/"
+uid=0(root) gid=0(root) groups=0(root)
+EGRESS_ALLOW deb.debian.org
+Hit:1 http://deb.debian.org/debian bookworm InRelease
+Hit:2 http://deb.debian.org/debian bookworm-updates InRelease
+Hit:3 http://deb.debian.org/debian-security bookworm-security InRelease
+Reading package lists...
+Reading package lists...
+Building dependency tree...
+Reading state information...
+ca-certificates is already the newest version (20250419~deb12u2).
+curl is already the newest version (7.88.1-10+deb12u15).
+bash is already the newest version (5.2.15-2+b13).
+python3 is already the newest version (3.11.2-1+b1).
+xz-utils is already the newest version (5.4.1-1+deb12u2).
+git is already the newest version (1:2.39.5-0+deb12u3).
+procps is already the newest version (2:4.0.2-3).
+openssh-client is already the newest version (1:9.2p1-2+deb12u10).
+util-linux is already the newest version (2.38.1-5+deb12u3).
+passwd is already the newest version (1:4.13+dfsg1-1+deb12u2).
+0 upgraded, 0 newly installed, 0 to remove and 0 not upgraded.
+EGRESS_ALLOW nodejs.org
+node-v24.22.1-linux-x64.tar.xz: OK
+Warning: Ignoring extra certs from `/etc/gondolin/mitm/ca.crt`, load failed: error:8000000D:system library::Permission denied
+npm error code SELF_SIGNED_CERT_IN_CHAIN
+npm error errno SELF_SIGNED_CERT_IN_CHAIN
+npm error request to https://registry.npmjs.org/@anthropic-ai%2fclaude-code failed, reason: self-signed certificate in certificate chain
+npm error A complete log of this run can be found in: /home/user/nexus-spikes/npm-cache/_logs/2026-10-22T10_01_21_163Z-debug-0.log
+STOPPED_CHECKPOINT /home/ramtinj/nexus-spikes/state/s2-debian.qcow2 INCOMPLETE_PROVISION
+PROVISION_TOTAL_MS=85121
+file:///home/ramtinj/nexus-spikes/s1-provision.mjs:16
+  if (run.exitCode) throw new Error(`Guest provision exit ${run.exitCode}`);
+                          ^
+
+Error: Guest provision exit 1
+    at file:///home/ramtinj/nexus-spikes/s1-provision.mjs:16:27
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+
+Node.js v26.8.1
