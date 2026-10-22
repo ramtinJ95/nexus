@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import { request } from "node:http";
 import { join } from "node:path";
 import { startApi } from "./api.ts";
+import { fakeHarness } from "./fake-harness.ts";
 import { openRegistry, type Thread } from "./registry.ts";
 import type { JobId, NodeName, PylonObservation, TailnetNodeId } from "../protocol.ts";
 
@@ -39,6 +40,7 @@ async function setup(t: TestContext) {
     allowed: new Set([laptop]),
     hostnames: new Set(["127.0.0.1"]),
     dotfiles: { repo: "git@github.com:ramtin/dotfiles.git", ref: "main" },
+    harness: fakeHarness().harness,
     wake: () => {},
   });
   t.after(async () => {

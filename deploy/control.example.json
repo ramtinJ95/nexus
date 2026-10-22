@@ -1,0 +1,16 @@
+{
+  "db": "/var/lib/nexus-control/registry.db",
+  "listen": { "host": "100.64.0.2", "port": 7470, "hostnames": ["rj-firebat", "rj-firebat.example.ts.net", "100.64.0.2"] },
+  "self": { "tailnetNodeId": "nControlPlaneCNTRL" },
+  "nodes": [
+    { "name": "rj-firebat", "tailnetHost": "rj-firebat.example.ts.net", "tailnetNodeId": "nControlPlaneCNTRL" },
+    { "name": "infra-testbench", "tailnetHost": "infra-testbench.example.ts.net", "tailnetNodeId": "nPeerProbeCNTRL" }
+  ],
+  "callers": ["nLaptopCNTRL"],
+  "dotfiles": { "repo": "https://github.com/example/dotfiles.git", "ref": "main" },
+  "harness": {
+    "storage": "/var/lib/nexus-control/harness.sqlite",
+    "credentials": "/var/lib/nexus-control/harness-credentials.json",
+    "model": { "provider": "openai", "modelId": "gpt-5.5" }
+  }
+}

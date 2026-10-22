@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { BACKGROUND_CONTEXT as context } from "@earendil-works/chord/context";
 import type { ConversationId, DocumentObserver, LiveState, TaskId } from "@earendil-works/pi-durable";
-import { trackActivity } from "./activity.ts";
+import { trackActivity, type AgentFacts } from "./activity.ts";
 
 const conversationId = 7 as ConversationId;
 const taskId = 42 as TaskId;
@@ -21,11 +21,13 @@ function fakeLive(initial: LiveState) {
   return { observer, change: (value: LiveState) => listener!(value) };
 }
 
+const ignore = { onChange: () => {} };
+
 test("a present run is a running turn, and each pi.live change is activity", async () => {
   let clock = 1000;
-  const activity = trackActivity(() => clock);
+  const activity = trackActivity({ ...ignore, now: () => clock });
   const live = fakeLive({});
-  await activity.track(live.observer, "t1", conversationId, context);
+  await activity.track(live.observer, "t1", conversationId, false, context);
   assert.deepEqual(activity.facts("t1"), { agentTurnRunning: false, lastAgentActivityAt: 0 });
   clock = 2000;
   await live.change(busy);
@@ -36,9 +38,9 @@ test("a present run is a running turn, and each pi.live change is activity", asy
 });
 
 test("a parked task stops its run counting as running until it is retried", async () => {
-  const activity = trackActivity();
+  const activity = trackActivity(ignore);
   const live = fakeLive(busy);
-  await activity.track(live.observer, "t1", conversationId, context);
+  await activity.track(live.observer, "t1", conversationId, false, context);
   assert.equal(activity.facts("t1").agentTurnRunning, true);
   activity.park(conversationId, taskId);
   await live.change(busy);
@@ -49,9 +51,9 @@ test("a parked task stops its run counting as running until it is retried", asyn
 });
 
 test("a run that ends drops its parked tasks", async () => {
-  const activity = trackActivity();
+  const activity = trackActivity(ignore);
   const live = fakeLive(busy);
-  await activity.track(live.observer, "t1", conversationId, context);
+  await activity.track(live.observer, "t1", conversationId, false, context);
   activity.park(conversationId, taskId);
   await live.change({});
   await live.change(busy);
@@ -60,5 +62,41 @@ test("a run that ends drops its parked tasks", async () => {
 });
 
 test("an unknown thread is an error, not an idle thread", () => {
-  assert.throws(() => trackActivity().facts("nope"), /tracks no thread nope/);
+  assert.throws(() => trackActivity(ignore).facts("nope"), /tracks no thread nope/);
+});
+
+test("each flip of a running turn is reported once, and the end of a run carries its time", async () => {
+  let clock = 1000;
+  const reports: [string, AgentFacts][] = [];
+  const activity = trackActivity({ onChange: (threadId, facts) => reports.push([threadId, facts]), now: () => clock });
+  const live = fakeLive(busy);
+  await activity.track(live.observer, "t1", conversationId, false, context);
+  clock = 2000;
+  await live.change(busy);
+  activity.park(conversationId, taskId);
+  activity.retried("t1");
+  clock = 3000;
+  await live.change({});
+  await live.change({});
+  assert.deepEqual(reports, [
+    ["t1", { agentTurnRunning: true, lastAgentActivityAt: 1000 }],
+    ["t1", { agentTurnRunning: false, lastAgentActivityAt: 2000 }],
+    ["t1", { agentTurnRunning: true, lastAgentActivityAt: 2000 }],
+    ["t1", { agentTurnRunning: false, lastAgentActivityAt: 3000 }],
+  ]);
+});
+
+test("a thread is reported at once only when the registry holds a different turn, as a change made now", async () => {
+  const reports: [string, AgentFacts][] = [];
+  const activity = trackActivity({ onChange: (threadId, facts) => reports.push([threadId, facts]), now: () => 5000 });
+  await activity.track(fakeLive(busy).observer, "t1", conversationId, true, context);
+  await activity.track(fakeLive({}).observer, "t2", 8 as ConversationId, true, context);
+  assert.deepEqual(reports, [["t2", { agentTurnRunning: false, lastAgentActivityAt: 5000 }]]);
+});
+
+test("an untracked thread is unknown again", async () => {
+  const activity = trackActivity(ignore);
+  await activity.track(fakeLive({}).observer, "t1", conversationId, false, context);
+  await activity.untrack("t1");
+  assert.throws(() => activity.facts("t1"), /tracks no thread t1/);
 });

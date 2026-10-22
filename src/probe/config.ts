@@ -1,6 +1,6 @@
 /**
- * The probe's node-local inputs: its config file (/etc/nexus/probe.json) and its secret file
- * (/etc/nexus/secrets.env). Both are parsed strictly here, at the boundary, so a typo fails the start
+ * The probe's node-local inputs: its config file (/etc/nexus/probe.json), its secret file
+ * (/etc/nexus/secrets.env) and its tailnet name. Both are parsed strictly here, at the boundary, so a typo fails the start
  * instead of surfacing as a refused caller or a missing secret on the first job.
  */
 import { open, readFile } from "node:fs/promises";
@@ -41,6 +41,13 @@ const configSchema = z.strictObject({
     z.strictObject({ kind: z.literal("docker"), images: z.record(imageId, z.string()), labels: z.record(z.string(), z.string()).default({}) }),
   ]),
   secretsFile: absolutePath,
+  /** Omitted: the probe publishes no previews, and a spawn that assigns one fails. */
+  previews: z.strictObject({
+    /** The gateway's loopback port. Keep it fixed: the serve entries that proxy to it are how the probe knows its own. */
+    gatewayPort: z.int().min(1).max(65535),
+    /** In the probe's state directory, so paused pylons keep their routes across restarts. */
+    routesFile: absolutePath.default("/var/lib/nexus/preview-routes.json"),
+  }).optional(),
 });
 
 export type ProbeConfig = z.infer<typeof configSchema>;
@@ -98,4 +105,18 @@ export async function readSecretsFile(path: string): Promise<SecretSource> {
   } finally {
     await file.close();
   }
+}
+
+const statusSchema = z.object({ Self: z.object({ DNSName: z.string() }) });
+
+/**
+ * The node's MagicDNS name from `tailscale status --json`, such as infra-testbench.example.ts.net. Previews are
+ * served under it, so a node without one cannot publish them.
+ */
+export function parseSelfDnsName(statusJson: string): string {
+  const result = statusSchema.safeParse(JSON.parse(statusJson));
+  if (!result.success) throw new Error(`tailscale status --json has no Self.DNSName:\n${z.prettifyError(result.error)}`);
+  const name = result.data.Self.DNSName.replace(/\.$/, "");
+  if (name === "") throw new Error("tailscale reports no MagicDNS name for this node, so previews have no host to be served under. Turn on MagicDNS for the tailnet");
+  return name;
 }

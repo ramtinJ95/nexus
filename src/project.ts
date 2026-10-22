@@ -9,9 +9,10 @@
  * - The control plane renders everything the agent sees about its pylon (the overlay) from records and
  *   ships it in the spawn job. The probe writes those files without reading them.
  */
+import { createHash } from "node:crypto";
 import { isScalar, parseDocument, visit } from "yaml";
 import { z } from "zod";
-import type { NodeName, PylonId } from "./protocol.ts";
+import type { LiveHash, NodeName, PylonId } from "./protocol.ts";
 import type { CheckpointId, ImageId, TemplateId } from "./images.ts";
 
 export type ProjectId = string & { readonly __project: unique symbol };
@@ -208,6 +209,14 @@ export interface LiveSpec {
   previews: readonly PreviewAssignment[];
   overlay: readonly OverlayFile[];
 }
+/** sha256 of the LiveSpec with sorted keys, so equal specs hash equally however they were built. */
+export function liveHashOf(live: LiveSpec): LiveHash {
+  const canonical = (value: unknown): unknown => typeof value !== "object" || value === null ? value
+    : Array.isArray(value) ? value.map(canonical)
+    : Object.fromEntries(Object.keys(value).sort().map((key) => [key, canonical((value as Record<string, unknown>)[key])]));
+  return createHash("sha256").update(JSON.stringify(canonical(live))).digest("hex") as LiveHash;
+}
+
 /** The control plane allocates https ports from a per-node range. The probe publishes them with `tailscale serve`. */
 export interface PreviewAssignment { service: ServiceName; httpsPort: number }
 export interface OverlayFile { path: `/${string}`; mode: 0o644 | 0o755; owner: "user" | "root"; content: string }

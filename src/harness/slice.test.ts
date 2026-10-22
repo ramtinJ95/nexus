@@ -146,7 +146,7 @@ async function until(what: string, check: () => Promise<boolean> | boolean, time
 
 test("a thread runs bash in its pylon, and a harness killed mid-tool reports the call as interrupted", async () => {
   const storagePath = join(dir, "harness.sqlite");
-  const options = { storagePath, models: scriptedModels(), model: scriptedModel, locator, tailscaled, log };
+  const options = { storagePath, models: scriptedModels(), model: scriptedModel, locator, tailscaled, log, deleted: [], onActivity: () => {} };
 
   const first = await openHarnessHost({ ...options, threads: [] });
   const conversationId = await first.startThread({ threadId, pylonId });
@@ -173,7 +173,7 @@ test("a thread runs bash in its pylon, and a harness killed mid-tool reports the
   await exited;
   await until("the killed harness's command is gone from the pylon", async () => (await inPylon('kill -0 "$(cat /tmp/killed-mid-tool.pid)"')).exitCode !== 0, 15_000);
 
-  const reopened = await openHarnessHost({ ...options, threads: [{ threadId, conversationId }] });
+  const reopened = await openHarnessHost({ ...options, threads: [{ threadId, conversationId, agentTurnRunning: false }] });
   try {
     await until("the resumed run ends", () => !reopened.activity.facts(threadId).agentTurnRunning);
     const after = toolResults(await transcript(reopened));
@@ -182,5 +182,23 @@ test("a thread runs bash in its pylon, and a harness killed mid-tool reports the
     assert.doesNotMatch(after[1]!, /connection lost/);
   } finally {
     await reopened.close();
+  }
+});
+
+test("deleting a thread stops its running tool in the pylon and forgets the thread", async () => {
+  const host = await openHarnessHost({
+    storagePath: join(dir, "harness-delete.sqlite"), models: scriptedModels(), model: scriptedModel, locator, tailscaled, log,
+    threads: [], deleted: [], onActivity: () => {},
+  });
+  try {
+    await host.startThread({ threadId, pylonId });
+    await host.send(threadId, "bash: echo $$ > /tmp/deleted-mid-tool.pid; exec sleep 600", "msg:deleted", "followUp");
+    await until("the tool's command runs in the pylon", async () => (await inPylon("cat /tmp/deleted-mid-tool.pid")).exitCode === 0);
+    await host.deleteThread({ threadId, pylonId });
+    await until("the deleted thread's command is gone from the pylon", async () => (await inPylon('kill -0 "$(cat /tmp/deleted-mid-tool.pid)"')).exitCode !== 0, 15_000);
+    assert.throws(() => host.activity.facts(threadId), /tracks no thread/);
+    await assert.rejects(host.send(threadId, "bash: true", "msg:after", "followUp"), /no conversation for thread/);
+  } finally {
+    await host.close();
   }
 });

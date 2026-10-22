@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { parseProbeConfig, parseSecretsEnv, readSecretsFile } from "./config.ts";
+import { parseProbeConfig, parseSecretsEnv, parseSelfDnsName, readSecretsFile } from "./config.ts";
 
 const deploy = new URL("../../deploy/", import.meta.url);
 
@@ -24,6 +24,13 @@ test("the shipped example config parses", async () => {
   const config = parseProbeConfig(await readFile(new URL("probe.example.json", deploy), "utf8"));
   assert.equal(config.backend.kind, "pylon-vm");
   assert.equal(config.listen.port, 7480);
+  assert.deepEqual(config.previews, { gatewayPort: 7481, routesFile: "/var/lib/nexus/preview-routes.json" });
+});
+
+test("previews are optional, and their routes file defaults to the probe's state directory", () => {
+  assert.equal(parseProbeConfig(JSON.stringify(valid)).previews, undefined);
+  assert.deepEqual(parseProbeConfig(withChange((c) => { c.previews = { gatewayPort: 9000 }; })).previews, { gatewayPort: 9000, routesFile: "/var/lib/nexus/preview-routes.json" });
+  assert.throws(() => parseProbeConfig(withChange((c) => { c.previews = { gatewayPort: 9000, routesFile: "routes.json" }; })), /absolute path/);
 });
 
 test("a config parses into probe options, with the probe port as the default", () => {
@@ -119,4 +126,10 @@ test("readSecretsFile refuses a file every user can reach and reads one they can
   await assert.rejects(readSecretsFile(join(dir, "absent.env")), { code: "ENOENT" });
   await mkdir(join(dir, "dir.env"), { mode: 0o700 });
   await assert.rejects(readSecretsFile(join(dir, "dir.env")), /is not a regular file/);
+});
+
+test("the node's tailnet name comes from tailscale status without its trailing dot", () => {
+  assert.equal(parseSelfDnsName(JSON.stringify({ Version: "1.90.0", Self: { ID: "n1", DNSName: "infra-testbench.example.ts.net." } })), "infra-testbench.example.ts.net");
+  assert.throws(() => parseSelfDnsName(JSON.stringify({ Self: { DNSName: "" } })), /no MagicDNS name/);
+  assert.throws(() => parseSelfDnsName(JSON.stringify({ BackendState: "Stopped" })), /no Self\.DNSName/);
 });
