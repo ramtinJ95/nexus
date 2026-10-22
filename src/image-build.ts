@@ -117,7 +117,8 @@ export function imageArchive(dir: string, signal?: AbortSignal): Readable {
  *    directory with one of those bits are listed from the Docker image, written into rootfs.ext4 with
  *    debugfs, read back, and Gondolin's manifest is updated for the changed rootfs. Delete this step, like
  *    the seed, once the Gondolin pin moves to a release that keeps modes.
- * 4. Smoke boot at 4 GiB (2 GiB hangs): plain exec PATH and CA, `user` with a setuid sudo, the pinned versions of
+ * 4. Smoke boot at 4 GiB (2 GiB hangs): plain exec PATH and CA, `user` with a setuid sudo that prints no
+ *    warning and the hostname pylon, which resolves through /etc/hosts, the pinned versions of
  *    node, claude, pi and herdr as user, sshd and sandboxssh, Herdr's pi integration, curl and Node fetch
  *    to an allowed host through TLS interception, and a Herdr server as user. Any failure is setup-failed
  *    and publishes nothing.
@@ -150,7 +151,7 @@ export async function buildImage(input: ImageRecipe, node: NodeName, out: string
   // The tag only lives until Gondolin has exported it.
   const tag = `nexus-pylon:${id}`;
   const seed = join(scratch, "kernel-module-seed");
-  const { config, alpine } = gondolinConfig(recipe, tag, seed);
+  const { config, alpine } = gondolinConfig(recipe, tag, seed, context);
   const configFile = join(scratch, "gondolin.json");
   await writeFile(configFile, JSON.stringify(config, null, 2));
 
@@ -193,19 +194,32 @@ type SeedAlpine = AlpineConfig & { kernelPackage: string };
 
 /**
  * The gondolin.json fields a recipe may set. The others name host paths (init scripts, sandbox helpers) that
- * Gondolin would read from the build node into the image, or belong to buildImage (postBuild).
+ * Gondolin would read from the build node into the image, or belong to buildImage (postBuild, and init, which
+ * buildImage points at the recipe's rootfs-init-extra.sh).
  */
 const recipeConfigKeys = new Set(["arch", "distro", "alpine", "oci", "rootfs", "env", "runtimeDefaults"]);
 
-/** gondolin.json plus what buildImage adds, oci.image and the seed copy, checked by Gondolin's own parser. */
-function gondolinConfig(recipe: ImageRecipe, image: string, seed: string): { config: BuildConfig; alpine: SeedAlpine } {
+/** The recipe's snippet that Gondolin's /init runs as root before sandboxd. */
+const rootfsInitExtra = "rootfs-init-extra.sh";
+
+/**
+ * gondolin.json plus what buildImage adds, checked by Gondolin's own parser: oci.image, the seed copy, and
+ * init.rootfsInitExtra as the recipe's copy of rootfs-init-extra.sh in `context`.
+ */
+function gondolinConfig(recipe: ImageRecipe, image: string, seed: string, context: string): { config: BuildConfig; alpine: SeedAlpine } {
+  recipeFile(recipe, rootfsInitExtra);
   try {
     const config = JSON.parse(recipeFile(recipe, "gondolin.json")) as Partial<BuildConfig>;
     const refused = Object.keys(config).filter((key) => !recipeConfigKeys.has(key));
     if (refused.length > 0) throw new Error(`it may not set ${refused.join(", ")}`);
     const alpine = config.alpine;
     if (alpine?.kernelPackage === undefined) throw new Error("it needs alpine.kernelPackage, which the module seed installs");
-    const full = parseBuildConfig(JSON.stringify({ ...config, oci: { ...config.oci, image }, postBuild: { copy: [{ src: seed, dest: "/lib/modules" }] } }));
+    const full = parseBuildConfig(JSON.stringify({
+      ...config,
+      oci: { ...config.oci, image },
+      postBuild: { copy: [{ src: seed, dest: "/lib/modules" }] },
+      init: { rootfsInitExtra: join(context, rootfsInitExtra) },
+    }));
     return { config: full, alpine: { ...alpine, kernelPackage: alpine.kernelPackage } };
   } catch (err) {
     if (err instanceof JobFailure) throw err;
@@ -382,8 +396,8 @@ function smokeChecks(pins: ImageRecipe["pins"]): readonly SmokeCheck[] {
     { name: "exec environment", argv: ["node", "-p", "`${process.version} ${process.env.NODE_EXTRA_CA_CERTS}`"], expect: new RegExp(`^v${literal(pins.node)} /run/gondolin/ca-certificates\\.crt\\n$`) },
     {
       name: "user",
-      argv: asUser("id; stat -c '%a %U' /usr/bin/sudo; sudo -n true && echo sudo ok; stat -c '%U %a' workspace"),
-      expect: /^uid=1000\(user\) gid=1000\(user\) [^\n]*\n4755 root\nsudo ok\nuser 755\n$/,
+      argv: asUser("id; stat -c '%a %U' /usr/bin/sudo; sudo -n true && echo sudo ok; stat -c '%U %a' workspace; cat /proc/sys/kernel/hostname; getent hosts pylon"),
+      expect: /^uid=1000\(user\) gid=1000\(user\) [^\n]*\n4755 root\nsudo ok\nuser 755\npylon\n127\.0\.1\.1\s+pylon\n$/,
     },
     {
       name: "versions",

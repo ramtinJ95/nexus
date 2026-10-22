@@ -42,7 +42,7 @@ test("the checked-in recipe loads, with pins.json as its pins and build.sh left 
   const recipe = await loadImageRecipe();
   const paths = recipe.files.map((f) => f.path);
   assert.deepEqual(recipe.pins, JSON.parse(await readFile(join(pylonRecipeDir, "pins.json"), "utf8")));
-  for (const path of ["Dockerfile", "gondolin.json", "nexus"]) assert.ok(paths.includes(path), `${path} is an image input`);
+  for (const path of ["Dockerfile", "gondolin.json", "nexus", "rootfs-init-extra.sh"]) assert.ok(paths.includes(path), `${path} is an image input`);
   assert.ok(!paths.includes("build.sh") && !paths.includes("pins.json"));
 });
 

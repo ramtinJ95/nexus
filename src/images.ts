@@ -44,7 +44,9 @@ export type PortableArtifactId = Exclude<ArtifactId, CheckpointId>;
  *   (Gondolin's exec PATH lacks it, S1) and NODE_EXTRA_CA_CERTS=/run/gondolin/ca-certificates.crt (the mitm
  *   CA is unreadable to user, S2). Gondolin sources that env before sandboxd starts and from /etc/profile.d,
  *   so execs and login shells both see it. buildImage adds oci.image = the Docker build, and postBuild.copy
- *   of the kernel module seed into /lib/modules (the S1 workaround).
+ *   of the kernel module seed into /lib/modules (the S1 workaround), and init.rootfsInitExtra.
+ * - rootfs-init-extra.sh: run as root by Gondolin's /init before sandboxd. It sets the hostname pylon and
+ *   writes /etc/hostname and /etc/hosts, because Gondolin sets no hostname and sudo warns without one.
  * - pins.json: ImageRecipe.pins. Every other file except build.sh is in ImageRecipe.files.
  * Logins and secrets are never in the image.
  */
