@@ -13,6 +13,8 @@ import {
   type ProbeAuthConfig, type ProbeEvent, type PylonId, type PylonObservation, type Subject,
 } from "../protocol.ts";
 import type { Whois } from "../tailscale.ts";
+import { startGateway } from "./gateway.ts";
+import { createTailscaleServe, readRoutes, type HttpsGet, type TailscaleCli } from "./serve.ts";
 
 export interface ProbeOptions {
   node: NodeName;
@@ -24,6 +26,16 @@ export interface ProbeOptions {
   backend: VmBackend;
   secrets: SecretSource;
   jobDeadlineMs?: { readonly [K in Job["kind"]]: number };
+  /** Omitted: the probe publishes no previews, and a spawn that assigns one fails. */
+  previews?: {
+    /** Keep it fixed across restarts. Serve entries that proxy to this loopback port are the probe's. */
+    gatewayPort: number;
+    /** A JSON file in the probe's state directory. It keeps paused pylons' routes across probe restarts. */
+    routesFile: string;
+    tailscale: TailscaleCli;
+    /** Tests only. The probe warms each new URL with fetch. */
+    get?: HttpsGet;
+  };
 }
 
 export interface Probe {
@@ -37,24 +49,33 @@ const jobRetentionMs = 10 * 60_000;
 const snapshotIntervalMs = 60_000;
 const maxBodyBytes = 1 << 20;
 
-/** This slice publishes no previews. An empty set is already converged. */
+/** A probe without a preview gateway. An empty set is already converged. */
 const noPreviews: ProbeDeps["serve"] = {
   async converge(_pylonId, previews) {
-    if (previews.length > 0) throw new JobFailure("invalid", "this slice does not publish previews yet");
+    if (previews.length > 0) throw new JobFailure("invalid", "this probe was started without a preview gateway");
   },
 };
 
 export async function startProbe(options: ProbeOptions): Promise<Probe> {
   const { node, backend, auth, whois } = options;
   const deadlines = options.jobDeadlineMs ?? jobDeadlineMs;
+  const bootId = randomUUID();
+  const shutdown = new AbortController();
+  const previews = options.previews === undefined ? null : {
+    ...options.previews,
+    gateway: await startGateway({
+      port: options.previews.gatewayPort,
+      routes: await readRoutes(options.previews.routesFile),
+      origin: ({ pylonId, service }) => backend.guest(pylonId).previewOrigin(service),
+      onHit: (hit) => emit({ type: "preview-hit", ...hit }),
+    }),
+  };
   const deps: ProbeDeps = {
     backend,
     secrets: options.secrets,
-    serve: noPreviews,
+    serve: previews === null ? noPreviews : createTailscaleServe({ cli: previews.tailscale, gateway: previews.gateway, routesFile: previews.routesFile, get: previews.get }),
     fetchPeer: () => Promise.reject(new Error("this slice does not fetch artifacts from peers yet")),
   };
-  const bootId = randomUUID();
-  const shutdown = new AbortController();
   const jobs = new Map<JobId, { status: JobStatus; finishedAt: number | null }>();
   const busy = new Map<Subject, JobId>();
   const liveHashes = new Map<PylonId, LiveHash>();
@@ -224,6 +245,9 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
   await new Promise<void>((resolve, reject) => {
     server.once("error", reject);
     server.listen(options.port, options.host, () => { server.off("error", reject); resolve(); });
+  }).catch(async (err: unknown) => {
+    await previews?.gateway.close(); // its port is fixed, so a retry in this process needs it free
+    throw err;
   });
   const address = server.address();
   if (address === null || typeof address === "string") throw new Error(`unexpected server address ${address}`);
@@ -236,7 +260,7 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
       const closed = new Promise<void>((resolve) => server.close(() => resolve()));
       server.closeAllConnections();
       await Promise.allSettled([...runningJobs]);
-      await closed;
+      await Promise.all([closed, previews?.gateway.close()]);
     },
   };
 }
