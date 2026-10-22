@@ -120,10 +120,9 @@ export function imageArchive(dir: string, signal?: AbortSignal): Readable {
  *    removed. Delete this step, like the seed, once the Gondolin pin moves to a release that keeps modes.
  * 4. Smoke boot at 4 GiB (2 GiB hangs): plain exec PATH and CA, `user` with a setuid sudo that prints no
  *    warning and the hostname pylon, which resolves through /etc/hosts, the pinned versions of
- *    node, claude, pi and herdr as user, sshd and sandboxssh, Herdr's pi integration, curl and Node fetch
- *    to an allowed host through TLS interception, tini reaping an orphan it adopts as subreaper, and a
- *    Herdr server as user. Any failure is setup-failed
- *    and publishes nothing.
+ *    node, claude, pi and herdr as user, sshd and sandboxssh, Herdr's pi integration with its own resume
+ *    turned off, curl and Node fetch to an allowed host through TLS interception, tini reaping an orphan it
+ *    adopts as subreaper, and a Herdr server as user. Any failure is setup-failed and publishes nothing.
  * 5. Write image.json, then rename outDir.partial to outDir.
  * A crash leaves only outDir.partial, which the next attempt removes. An existing outDir is the finished
  * image, because its ID names its inputs.
@@ -419,6 +418,11 @@ function smokeChecks(pins: ImageRecipe["pins"]): readonly SmokeCheck[] {
       name: "guest tools",
       argv: asUser("command -v ssh sshd sandboxssh rg fd; grep -c '^Include /etc/ssh/ssh_config.d/\\*.conf' /etc/ssh/ssh_config; herdr integration status | grep -E '^(pi|claude):'"),
       expect: /^\/usr\/bin\/ssh\n\/usr\/sbin\/sshd\n\/usr\/bin\/sandboxssh\n\/usr\/bin\/rg\n\/usr\/local\/bin\/fd\n1\npi: current[^\n]*\nclaude: current/,
+    },
+    {
+      name: "Herdr leaves resume to Nexus",
+      argv: asUser("cat ~/.config/herdr/config.toml"),
+      expect: /^\[session\]\nresume_agents_on_restore = false\n$/,
     },
     {
       // The subshell exits at once, so tini adopts its `sleep 0`. A second later tini's only child is sh, not
