@@ -72,5 +72,7 @@ RUN cd /opt/nexus/dotfiles \
  && git add -A \
  && GIT_AUTHOR_DATE=2000-01-01T00:00:00Z GIT_COMMITTER_DATE=2000-01-01T00:00:00Z \
     git -c user.name=nexus -c user.email=nexus@pylon commit -q -m "dotfiles common layer at ${DOTFILES_COMMIT}"
-RUN herdr integration install pi \
+# pi and Claude Code make their config directories on first run, and Herdr's installers refuse to run before that.
+RUN mkdir -p /home/user/.pi/agent/extensions /home/user/.claude \
+ && herdr integration install pi \
  && herdr integration install claude
