@@ -11,8 +11,9 @@
  *   know is an orphan. The dashboard lists it, and only a human deletes it.
  */
 import { randomUUID } from "node:crypto";
+import { isDeepStrictEqual } from "node:util";
 import { retryable } from "./protocol.ts";
-import type { Job, JobEnvelope, JobErrorCode, JobId, JobStatus, LiveHash, NodeName, ProbeEvent, PylonId, PylonObservation, SessionFact } from "./protocol.ts";
+import type { Job, JobEnvelope, JobErrorCode, JobId, JobStatus, LiveHash, NodeName, ProbeEvent, PylonId, PylonObservation, RunningFacts, SessionFact } from "./protocol.ts";
 import type { BootInputs, LiveSpec, PylonSource } from "./project.ts";
 import type { ArtifactId, CheckpointId } from "./images.ts";
 
@@ -174,9 +175,78 @@ export type RegistryWrite =
   | { record: "job"; status: JobStatus };
 type NodeCapacity = { memoryGiB: number; committedMemoryGiB: number; diskFreeGiB: number };
 
-export function ingest(event: ProbeEvent, previous: PylonObservation | "absent"): readonly RegistryWrite[] {
-  // TODO: outputs are derived here, not reported by the probe as outputs:
-  // branch with pushedAs -> "branch". Dirty tree -> "diff" (one per head). Ready preview -> "preview".
-  // declaredOutputs -> as declared. Diff each observation against `previous`, so writes are idempotent upserts.
-  throw new Error("not implemented");
+/**
+ * `node` is the probe the event came from. `known` maps each registry pylon on that node to the last
+ * observation ingested for it, or "absent". Every write is an upsert, so ingesting an event twice is harmless.
+ *
+ * - A pylon missing from `known` is an orphan, and nothing else is written for it, not even a preview hit.
+ * - A snapshot is the whole node, so a known pylon it omits is ingested as "absent".
+ * - Sessions and outputs are diffed against the previous observation. A pylon that is not running has no
+ *   sessions, so a pause closes them all, and the wake that relaunches them reports their new panes.
+ * - Outputs are derived here, not reported by the probe as outputs: a branch with pushedAs is "branch" with
+ *   that ref, a dirty tree is "diff" with the head as ref (one per head), a ready preview is "preview" with
+ *   the service as ref, and a declared output keeps its kind with its declaration id as ref. Outputs are
+ *   never retracted, so only new ones are written.
+ * - A working session is agent activity and an attached client is human activity, both at `now`, the time
+ *   the control plane received the event. A preview hit is human activity at its own time.
+ */
+export function ingest(event: ProbeEvent, node: NodeName, known: ReadonlyMap<PylonId, PylonObservation | "absent">, now: number): readonly RegistryWrite[] {
+  const observed = (pylon: PylonObservation): RegistryWrite[] => {
+    const previous = known.get(pylon.pylonId);
+    return previous === undefined ? [{ record: "orphan", node, pylonId: pylon.pylonId }] : pylonWrites(pylon.pylonId, previous, pylon, now);
+  };
+  switch (event.type) {
+    case "snapshot": {
+      const o = event.observation;
+      if (o.node !== node) throw new Error(`a snapshot from ${node}'s probe names node ${o.node}`);
+      const listed = new Set(o.pylons.map((p) => p.pylonId));
+      return [
+        { record: "node", node, state: "online", capacity: o.capacity },
+        ...o.jobs.map((status): RegistryWrite => ({ record: "job", status })),
+        ...o.pylons.flatMap(observed),
+        ...[...known].filter(([id]) => !listed.has(id)).flatMap(([id, previous]) => pylonWrites(id, previous, "absent", now)),
+      ];
+    }
+    case "pylon": return observed(event.pylon);
+    case "job": return [{ record: "job", status: event.status }];
+    case "preview-hit": return known.has(event.pylonId)
+      ? [{ record: "activity", pylonId: event.pylonId, human: Date.parse(event.at), agent: null }]
+      : [{ record: "orphan", node, pylonId: event.pylonId }];
+  }
+}
+
+type Facts = Pick<RunningFacts, "sessions" | "git" | "previews" | "declaredOutputs" | "attachedClients">;
+const notRunning: Facts = { sessions: [], git: null, previews: [], declaredOutputs: [], attachedClients: 0 };
+const factsOf = (o: PylonObservation | "absent"): Facts => o !== "absent" && o.phase === "running" ? o : notRunning;
+
+function pylonWrites(pylonId: PylonId, previous: PylonObservation | "absent", current: PylonObservation | "absent", now: number): RegistryWrite[] {
+  const before = factsOf(previous);
+  const after = factsOf(current);
+  const writes: RegistryWrite[] = [];
+
+  const panes = new Map(before.sessions.map((s) => [s.herdrPane, s]));
+  for (const fact of after.sessions) {
+    if (!isDeepStrictEqual(panes.get(fact.herdrPane), fact)) writes.push({ record: "session", pylonId, herdrPane: fact.herdrPane, fact });
+    panes.delete(fact.herdrPane);
+  }
+  for (const herdrPane of panes.keys()) writes.push({ record: "session", pylonId, herdrPane, fact: null });
+
+  const had = new Set(outputsOf(before).map(({ kind, ref }) => `${kind} ${ref}`));
+  for (const { kind, ref } of outputsOf(after)) {
+    if (!had.has(`${kind} ${ref}`)) writes.push({ record: "output", pylonId, kind, ref });
+  }
+
+  const agent = after.sessions.some((s) => s.status === "working") ? now : null;
+  const human = after.attachedClients > 0 ? now : null;
+  if (agent !== null || human !== null) writes.push({ record: "activity", pylonId, human, agent });
+  return writes;
+}
+
+function outputsOf(f: Facts): { kind: Extract<RegistryWrite, { record: "output" }>["kind"]; ref: string }[] {
+  return [
+    ...(f.git?.branches ?? []).flatMap((b) => b.pushedAs === null ? [] : [{ kind: "branch" as const, ref: b.pushedAs }]),
+    ...(f.git?.dirty ? [{ kind: "diff" as const, ref: f.git.head }] : []),
+    ...f.previews.filter((p) => p.ready).map((p) => ({ kind: "preview" as const, ref: p.service })),
+    ...f.declaredOutputs.map((d) => ({ kind: d.kind, ref: d.id })),
+  ];
 }

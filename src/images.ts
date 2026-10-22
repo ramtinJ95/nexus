@@ -5,12 +5,16 @@
  * built, where, and which node fetches what. Probes only build, serve, fetch and drop on command.
  * Dependencies run one way: a checkpoint or template depends on its image, never the reverse.
  */
+import { createHash } from "node:crypto";
+import { effectiveAllowedHosts, type BootInputs, type Project, type ProjectId, type ServicesFile } from "./project.ts";
 import type { NodeName } from "./protocol.ts";
-import type { Project, ProjectId, ServicesFile } from "./project.ts";
 
 /** img-<sha256 of the recipe>[:12]. The same inputs give the same ID, so a rebuild of unchanged inputs is a no-op. */
 export type ImageId = `img-${string}`;
-/** tpl-<sha256 of the TemplateKey>[:12]. */
+/**
+ * tpl-<sha256 of the TemplateKey and the build's start time in ms>[:12]. An ID names one build, not one key:
+ * the same key built twice gives two IDs, so a node's bytes under one ID never change.
+ */
 export type TemplateId = `tpl-${string}`;
 /** ckpt-<thread id>-<n>, minted by the control plane for each pause. */
 export type CheckpointId = `ckpt-${string}`;
@@ -51,8 +55,12 @@ export interface ImageRecipe {
   };
 }
 
+/** File order does not change the ID. Two files at one path are a broken recipe and throw. */
 export function imageIdOf(recipe: ImageRecipe): ImageId {
-  throw new Error("not implemented");
+  const files = [...recipe.files].sort((a, b) => compare(a.path, b.path));
+  const duplicate = files.find((file, i) => i > 0 && files[i - 1]!.path === file.path);
+  if (duplicate !== undefined) throw new Error(`the image recipe has two files at ${duplicate.path}`);
+  return `img-${sha256Of({ files, pins: recipe.pins }).slice(0, 12)}`;
 }
 
 export interface ImageManifest {
@@ -94,7 +102,8 @@ export interface ImageSettings { imageBuildNode: NodeName; current: ImageId }
  * A template is keyed on what changes setup's result. Unlike Amp, editing .nexus/setup produces a new
  * key, because with one user the edit is the moment the change should take effect. Like Amp, a template
  * is reused for at most 72 hours, which bounds drift in whatever setup fetched (lockfile changes do not
- * change the key).
+ * change the key). Records are matched by key. The same key built twice gives two IDs, so a node's bytes
+ * under one ID never change.
  */
 export interface TemplateKey {
   project: ProjectId;
@@ -114,14 +123,22 @@ export interface ProjectMirror {
   setupInputs(project: Project, ref: string): Promise<SetupInputs>;
 }
 
+/** sha256 of setupBlob, project.preSetup and effectiveAllowedHosts(project), since the hosts setup can reach change what it can install. */
 export function setupHashOf(project: Project, inputs: SetupInputs): string {
-  // TODO: sha256 of setupBlob, project.preSetup and effectiveAllowedHosts(project), since the hosts setup
-  // can reach change what it can install.
-  throw new Error("not implemented");
+  return sha256Of({ setupBlob: inputs.setupBlob, preSetup: project.preSetup, allowedHosts: effectiveAllowedHosts(project) });
 }
-export function templateIdOf(key: TemplateKey): TemplateId {
-  throw new Error("not implemented");
+export function templateIdOf(key: TemplateKey, startedAt: number): TemplateId {
+  return `tpl-${sha256Of({ project: key.project, image: key.image, setupHash: key.setupHash, startedAt }).slice(0, 12)}`;
 }
+
+/** Hex sha256 of canonical JSON: object keys sorted, so the same value always gives the same hash. */
+function sha256Of(value: unknown): string {
+  const canonical = JSON.stringify(value, (_key, v: unknown) => v !== null && typeof v === "object" && !Array.isArray(v)
+    ? Object.fromEntries(Object.entries(v).sort(([a], [b]) => compare(a, b)))
+    : v);
+  return createHash("sha256").update(canonical).digest("hex");
+}
+const compare = (a: string, b: string): number => a < b ? -1 : a > b ? 1 : 0;
 
 export interface TemplateBuildInputs {
   key: TemplateKey;
@@ -136,19 +153,46 @@ export type TemplateRecord =
   | { id: TemplateId; key: TemplateKey; state: "ready"; builtOn: NodeName; builtAt: number; commit: string }
   | { id: TemplateId; key: TemplateKey; state: "failed"; on: NodeName; failedAt: number; logTail: string };
 
+type ReadyTemplate = Extract<TemplateRecord, { state: "ready" }>;
+
 export type TemplateChoice =
   | { kind: "reuse"; template: TemplateId }
   | { kind: "build"; template: TemplateId; on: NodeName; inputs: TemplateBuildInputs }
   | { kind: "wait"; template: TemplateId } // another thread's build of this key is running
   | { kind: "fresh"; reason: string }; // the last build of this key failed: boot the image and run setup inline
 
-export function chooseTemplate(project: Project, key: TemplateKey, templates: readonly TemplateRecord[], targetNode: NodeName, now: number): TemplateChoice {
-  // TODO:
-  // ready with this key and builtAt within templateMaxAgeMs -> reuse, whichever node holds it
-  //   (planPylon fetches it to targetNode if needed: one LAN copy beats minutes of setup).
-  // building with this key -> wait. failed with this key -> fresh, with its log, so the thread's agent can see
-  //   and fix the failing setup. otherwise -> build on targetNode, so the first spawn copies nothing.
-  throw new Error("not implemented");
+/**
+ * Rules, first match wins:
+ * - ready with this key and built less than templateMaxAgeMs ago: reuse, whichever node holds it
+ *   (planPylon fetches it to targetNode if needed: one LAN copy beats minutes of setup).
+ * - building with this key: wait.
+ * - failed with this key: fresh, with its log, so the thread's agent can see and fix the failing setup.
+ * - otherwise: build on targetNode, so the first spawn copies nothing. The build checks out `checkout`,
+ *   the commit setupInputs resolved for the thread that asked, under a new ID minted from `now`.
+ * reuse and wait return the ID of the record they found.
+ */
+export function chooseTemplate(project: Project, key: TemplateKey, checkout: BootInputs["repo"]["checkout"], templates: readonly TemplateRecord[], targetNode: NodeName, now: number): TemplateChoice {
+  const records = templates.filter((t) => t.key.project === key.project && t.key.image === key.image && t.key.setupHash === key.setupHash);
+  const reusable = records
+    .filter((t): t is ReadyTemplate => t.state === "ready" && now - t.builtAt < templateMaxAgeMs)
+    .sort((a, b) => b.builtAt - a.builtAt)[0];
+  if (reusable !== undefined) return { kind: "reuse", template: reusable.id };
+  const building = records.find((t) => t.state === "building");
+  if (building !== undefined) return { kind: "wait", template: building.id };
+  const failed = records.find((t) => t.state === "failed");
+  if (failed !== undefined) return { kind: "fresh", reason: `the setup of template ${failed.id} failed on ${failed.on}:\n${failed.logTail}` };
+  return {
+    kind: "build",
+    template: templateIdOf(key, now),
+    on: targetNode,
+    inputs: {
+      key,
+      repo: { url: project.repoUrl, ...checkout },
+      preSetup: project.preSetup,
+      allowedHosts: effectiveAllowedHosts(project),
+      resources: project.resources,
+    },
+  };
 }
 
 /**
@@ -157,7 +201,28 @@ export function chooseTemplate(project: Project, key: TemplateKey, templates: re
  * no held template or checkpoint. The type cannot name a checkpoint. A wiped registry knows no templates,
  * so it may drop templates and images it does not know. ArtifactStore.drop refuses any image a local
  * checkpoint still needs, and the rest can be rebuilt.
+ *
+ * A building template and its image are kept, and a template whose only record is failed is garbage like one the registry does
+ * not know. A held template backs its image until it is dropped, even in this same pass, so an image goes
+ * on a later pass, after its templates. A checkpoint ID does not name its image, so this function cannot
+ * see that dependency, and ArtifactStore.drop's refusal enforces it.
  */
 export function garbage(held: readonly ArtifactId[], templates: readonly TemplateRecord[], images: ImageSettings, now: number): readonly PortableArtifactId[] {
-  throw new Error("not implemented");
+  const newestReady = new Map<ProjectId, ReadyTemplate>();
+  for (const t of templates) {
+    if (t.state !== "ready") continue;
+    const newest = newestReady.get(t.key.project);
+    if (newest === undefined || t.builtAt > newest.builtAt) newestReady.set(t.key.project, t);
+  }
+  const keepTemplate = (id: TemplateId): boolean => templates.some((t) => t.id === id && (
+    t.state === "building"
+    || (t.state === "ready" && (now - t.builtAt < templateMaxAgeMs || newestReady.get(t.key.project) === t))
+  ));
+  const heldTemplates = held.filter(isTemplateId);
+  const backsTemplate = (id: ImageId): boolean => templates.some((t) => t.key.image === id && (t.state === "building" || heldTemplates.includes(t.id)));
+  return held.filter((id): id is PortableArtifactId => isTemplateId(id)
+    ? !keepTemplate(id)
+    : isImageId(id) && id !== images.current && !backsTemplate(id));
 }
+const isTemplateId = (id: ArtifactId): id is TemplateId => id.startsWith("tpl-");
+const isImageId = (id: ArtifactId): id is ImageId => id.startsWith("img-");
