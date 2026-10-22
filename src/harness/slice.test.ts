@@ -82,6 +82,7 @@ before(async () => {
     resources: { cpus: 1, memoryGiB: 1, diskGiB: 1 },
     network: { allowedHosts: [], secrets: [] },
     repo: { url: "git@example.com:harness.git", checkout: { branch: "main", commit: "0000000" } },
+    dotfiles: { repo: "https://example.com/dotfiles.git", ref: "main" },
   }, { previews: [], overlay: [] }, AbortSignal.timeout(90_000));
 });
 
