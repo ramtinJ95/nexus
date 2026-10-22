@@ -21,6 +21,8 @@ const image = {
   pins: { debianDigest: "d", node: "24.22.1", claudeCode: "c", pi: "p", herdr: "h", gondolin: "0.13.0", alpineKernel: "k", dotfilesCommon: "f" },
 };
 
+const dotfiles = { repo: "git@github.com:ramtin/dotfiles.git", ref: "main" };
+
 const dir = await mkdtemp(join(tmpdir(), "nexus-api-"));
 after(() => rm(dir, { recursive: true }));
 
@@ -35,6 +37,7 @@ async function setup(t: import("node:test").TestContext) {
     whois: async () => caller,
     allowed: new Set([laptop]),
     hostnames: new Set(["127.0.0.1"]),
+    dotfiles,
     wake: (n) => { woken.push(n); },
   });
   t.after(async () => {
@@ -130,6 +133,7 @@ test("starting a thread creates its pylon, boots fresh from the current image, a
     pylonId: thread.pylonId, image: image.id, resources: project.resources,
     network: { allowedHosts: ["api.openai.com", "api.stripe.com", "auth.openai.com", "chatgpt.com", "registry.npmjs.org"], secrets: project.secrets },
     repo: { url: project.repoUrl, checkout: { branch: "main", commit: "origin/main" } },
+    dotfiles,
   });
   assert.equal(pylon.liveHash, liveHashOf({ previews: [], overlay: [] }));
   assert.equal(pylon.submitted, null);

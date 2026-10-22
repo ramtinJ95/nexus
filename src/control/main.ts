@@ -30,6 +30,8 @@ const configSchema = z.strictObject({
   })).min(1),
   /** Other tailnet nodes, such as your laptop and phone, whose callers may use the API. */
   callers: z.array(nodeId),
+  /** The common dotfiles layer every new pylon pulls on boot. */
+  dotfiles: z.strictObject({ repo: z.string().min(1), ref: z.string().min(1) }),
   tailscaledSocket: z.string().min(1).optional(),
 });
 export type ControlPlaneConfig = z.infer<typeof configSchema>;
@@ -55,6 +57,7 @@ async function main(configPath: string) {
     registry, whois, host: config.listen.host, port: config.listen.port,
     allowed: new Set([config.self.tailnetNodeId, ...config.callers] as TailnetNodeId[]),
     hostnames: new Set(config.listen.hostnames),
+    dotfiles: config.dotfiles,
     wake: (node) => { void loop.wake(node); },
   });
   console.error(`nexus control plane: API on ${config.listen.host}:${api.port}, following ${config.nodes.map((n) => n.name).join(", ")}`);
