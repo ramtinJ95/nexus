@@ -1,12 +1,13 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
-  actualState, backoffMs, desiredPhase, envelope, idlePolicy, planPylon, requiredArtifacts,
-  type ActivityFacts, type DesiredPhase, type PlanInput, type PlanStep,
+  actualState, backoffMs, desiredPhase, envelope, idlePolicy, ingest, planPylon, requiredArtifacts,
+  type ActivityFacts, type DesiredPhase, type PlanInput, type PlanStep, type RegistryWrite,
 } from "./reconcile.ts";
 import {
   encodeSubmitReply, jobSubject, parseSubmitReply,
-  type JobErrorCode, type JobId, type JobStatus, type LiveHash, type NodeName, type PylonId, type PylonObservation,
+  type JobErrorCode, type JobId, type JobStatus, type LiveHash, type NodeName, type NodeObservation, type PylonId, type PylonObservation,
+  type RunningFacts, type SessionFact,
 } from "./protocol.ts";
 import type { BootInputs, PylonSource } from "./project.ts";
 import type { ArtifactId, CheckpointId, ImageId, TemplateId } from "./images.ts";
@@ -206,4 +207,93 @@ test("submit replies round-trip through the wire encoding", () => {
     const { status: code, body } = encodeSubmitReply(reply);
     assert.deepEqual(parseSubmitReply(code, body), reply);
   }
+});
+
+const working: SessionFact = { herdrPane: "p1", harness: "claude-code", harnessSessionId: "s1", status: "working" };
+const idleShell: SessionFact = { herdrPane: "p2", harness: "shell", harnessSessionId: null, status: "idle" };
+const runningWith = (facts: Partial<RunningFacts>): PylonObservation => ({ ...running(liveHash), ...facts } as PylonObservation);
+const knows = (previous: PylonObservation | "absent" = "absent") => new Map([[pylonId, previous]]);
+
+test("ingest: a new running pylon writes its sessions, derived outputs and activity", () => {
+  const observed = runningWith({
+    sessions: [working, idleShell],
+    attachedClients: 1,
+    git: { head: "h1", branch: "feature", dirty: true, branches: [{ name: "feature", head: "h1", pushedAs: "origin/feature" }, { name: "local", head: "h0", pushedAs: null }] },
+    previews: [{ service: "web", httpsPort: 8443, ready: true }, { service: "api", httpsPort: 8444, ready: false }],
+    declaredOutputs: [{ id: "o1", kind: "file", path: "shot.png", title: "Shot", sha256: "s" }, { id: "o2", kind: "diff", base: "h0", sha256: "d", title: null }],
+  });
+  assert.deepEqual(ingest({ type: "pylon", pylon: observed }, node, knows(), now), [
+    { record: "session", pylonId, herdrPane: "p1", fact: working },
+    { record: "session", pylonId, herdrPane: "p2", fact: idleShell },
+    { record: "output", pylonId, kind: "branch", ref: "origin/feature" },
+    { record: "output", pylonId, kind: "diff", ref: "h1" },
+    { record: "output", pylonId, kind: "preview", ref: "web" },
+    { record: "output", pylonId, kind: "file", ref: "o1" },
+    { record: "output", pylonId, kind: "diff", ref: "o2" },
+    { record: "activity", pylonId, human: now, agent: now },
+  ] satisfies RegistryWrite[]);
+});
+
+test("ingest: an unchanged observation writes only the activity it still shows", () => {
+  const observed = runningWith({ sessions: [working], git: { head: "h1", branch: "main", dirty: true, branches: [] } });
+  assert.deepEqual(ingest({ type: "pylon", pylon: observed }, node, knows(observed), now), [{ record: "activity", pylonId, human: null, agent: now }]);
+  const quiet = runningWith({ sessions: [idleShell] });
+  assert.deepEqual(ingest({ type: "pylon", pylon: quiet }, node, knows(quiet), now), []);
+});
+
+test("ingest: changed and closed sessions, and a dirty tree at a new head", () => {
+  const before = runningWith({ sessions: [working, idleShell], git: { head: "h1", branch: "main", dirty: true, branches: [] } });
+  const after = runningWith({ sessions: [{ ...working, status: "done" }], git: { head: "h2", branch: "main", dirty: true, branches: [] } });
+  assert.deepEqual(ingest({ type: "pylon", pylon: after }, node, knows(before), now), [
+    { record: "session", pylonId, herdrPane: "p1", fact: { ...working, status: "done" } },
+    { record: "session", pylonId, herdrPane: "p2", fact: null },
+    { record: "output", pylonId, kind: "diff", ref: "h2" },
+  ] satisfies RegistryWrite[]);
+});
+
+test("ingest: a pause closes every session and retracts no output", () => {
+  const before = runningWith({ sessions: [idleShell], previews: [{ service: "web", httpsPort: 8443, ready: true }] });
+  assert.deepEqual(ingest({ type: "pylon", pylon: phase("stopping") }, node, knows(before), now), [
+    { record: "session", pylonId, herdrPane: "p2", fact: null },
+  ] satisfies RegistryWrite[]);
+});
+
+test("ingest: a pylon the registry does not know is an orphan, and nothing else", () => {
+  const stranger = { ...runningWith({ sessions: [working] }), pylonId: "pylon-x" as PylonId };
+  assert.deepEqual(ingest({ type: "pylon", pylon: stranger }, node, knows(), now), [{ record: "orphan", node, pylonId: "pylon-x" as PylonId }]);
+});
+
+test("ingest: a snapshot writes the node, its jobs, its pylons, and closes known pylons it omits", () => {
+  const status: JobStatus = { jobId: "j" as JobId, subject: pylonId, kind: "spawn", state: "running", startedAt: "2027-01-01T00:00:00Z" };
+  const gone = "pylon-gone" as PylonId;
+  const observation: NodeObservation = {
+    node, observedAt: "2027-01-01T00:00:00Z", probeBootId: "b1",
+    capacity: { memoryGiB: 64, committedMemoryGiB: 8, diskFreeGiB: 500 },
+    artifacts: [image], jobs: [status],
+    pylons: [runningWith({ attachedClients: 2 }), { pylonId: "pylon-x" as PylonId, phase: "booting" }],
+  };
+  const known = new Map<PylonId, PylonObservation | "absent">([[pylonId, "absent"], [gone, { ...runningWith({ sessions: [idleShell] }), pylonId: gone }]]);
+  assert.deepEqual(ingest({ type: "snapshot", observation }, node, known, now), [
+    { record: "node", node, state: "online", capacity: observation.capacity },
+    { record: "job", status },
+    { record: "activity", pylonId, human: now, agent: null },
+    { record: "orphan", node, pylonId: "pylon-x" as PylonId },
+    { record: "session", pylonId: gone, herdrPane: "p2", fact: null },
+  ] satisfies RegistryWrite[]);
+  assert.throws(() => ingest({ type: "snapshot", observation }, peer, known, now), /names node rj-firebat/);
+});
+
+test("ingest: job events and preview hits", () => {
+  const status: JobStatus = { jobId: "j" as JobId, subject: pylonId, kind: "pause", state: "succeeded", finishedAt: "2027-01-01T00:00:00Z" };
+  assert.deepEqual(ingest({ type: "job", status }, node, knows(), now), [{ record: "job", status }]);
+  assert.deepEqual(ingest({ type: "preview-hit", pylonId, service: "web", at: "2027-01-01T00:00:05Z", login: "ramtin" }, node, knows(), now), [
+    { record: "activity", pylonId, human: Date.parse("2027-01-01T00:00:05Z"), agent: null },
+  ]);
+});
+
+test("ingest: a preview hit for a pylon the registry does not know is an orphan, not activity", () => {
+  const stranger = "pylon-x" as PylonId;
+  assert.deepEqual(ingest({ type: "preview-hit", pylonId: stranger, service: "web", at: "2027-01-01T00:00:05Z", login: null }, node, knows(), now), [
+    { record: "orphan", node, pylonId: stranger },
+  ]);
 });

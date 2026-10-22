@@ -1,9 +1,17 @@
 import { test } from "node:test";
+import { connect } from "node:net";
 import assert from "node:assert/strict";
+import { once } from "node:events";
+import { mkdtemp, rm } from "node:fs/promises";
+import { createServer, request } from "node:http";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { startProbe, type Probe, type ProbeOptions } from "./server.ts";
-import { connectProbe, jobDeadlineMs, type Job, type JobEnvelope, type JobId, type JobStatus, type LiveHash, type NodeName, type PylonId, type TailnetNodeId } from "../protocol.ts";
+import { connectProbe, jobDeadlineMs, type ByteStream, type Job, type JobEnvelope, type JobId, type JobStatus, type LiveHash, type NodeName, type PylonId, type StreamRequest, type TailnetNodeId } from "../protocol.ts";
 import { envelope } from "../reconcile.ts";
-import type { BackendPylon, VmBackend } from "../backend.ts";
+import { processStream } from "../process-stream.ts";
+import type { BackendPylon, Guest, VmBackend } from "../backend.ts";
+import { fakeTailscale, nodeHost, viaGateway } from "./fake-tailscale.ts";
 import type { BootInputs } from "../project.ts";
 import type { ImageId } from "../images.ts";
 
@@ -212,4 +220,179 @@ test("observe starts with a snapshot carrying the applied liveHash, and a new pr
     assert.ok(p?.phase === "running" && p.liveHash === null);
     break;
   }
+});
+
+/** A running pylon whose guest runs each stream's argv as a local process, as docker exec or ssh would. */
+async function streaming(t: import("node:test").TestContext) {
+  const fake = fakeBackend();
+  const logged: string[] = [];
+  const guestStreams: ByteStream[] = [];
+  const guest = {
+    async stream(req: StreamRequest, log: (text: string) => void) {
+      const stream = processStream(req.argv[0]!, req.argv.slice(1), log);
+      guestStreams.push(stream);
+      return stream;
+    },
+  } as Partial<Guest> as Guest;
+  const ctx = await setup(t, { backend: { ...fake.backend, guest: () => guest }, log: (line) => logged.push(line) });
+  await fake.backend.ensureRunning(boot, { previews: [], overlay: [] }, AbortSignal.timeout(1000));
+  return { ...ctx, logged, guestStreams };
+}
+
+async function readAll(stream: ByteStream): Promise<string> {
+  const chunks: Uint8Array[] = [];
+  for await (const chunk of stream) chunks.push(chunk);
+  return Buffer.concat(chunks).toString("utf8");
+}
+
+test("a raw pipe carries stdout only, and its stderr goes to the probe's log", async (t) => {
+  const { client, logged } = await streaming(t);
+  const stream = await client.stream(pylonId, { pty: null, argv: ["sh", "-c", "printf out-bytes; printf err-bytes >&2; exit 3"] });
+  assert.equal(await readAll(stream), "out-bytes");
+  assert.deepEqual(await stream.done, { kind: "exited", code: 3 });
+  assert.ok(logged.some((line) => line.includes(pylonId) && line.includes("err-bytes")), JSON.stringify(logged));
+});
+
+test("stdin reaches the guest process, and close ends it", async (t) => {
+  const { client } = await streaming(t);
+  const stream = await client.stream(pylonId, { pty: null, argv: ["cat"] });
+  await stream.write(new TextEncoder().encode("hello through the probe"));
+  await stream.close();
+  assert.equal(await readAll(stream), "hello through the probe");
+  assert.deepEqual(await stream.done, { kind: "exited", code: 0 });
+});
+
+test("a process that closes its stdin still delivers its output and exit code", async (t) => {
+  const { client } = await streaming(t);
+  const stream = await client.stream(pylonId, { pty: null, argv: ["sh", "-c", "exec 0<&-; sleep 1; printf done; exit 7"] });
+  await new Promise((r) => setTimeout(r, 300));
+  await stream.write(new TextEncoder().encode("nobody reads this"));
+  assert.equal(await readAll(stream), "done");
+  assert.deepEqual(await stream.done, { kind: "exited", code: 7 });
+});
+
+test("a caller that resets its stream connection during whois does not take the probe down", async (t) => {
+  const entered = Promise.withResolvers<void>();
+  const release = Promise.withResolvers<void>();
+  const { client, probe } = await setup(t, {
+    whois: async () => { entered.resolve(); await release.promise; return controlPlane; },
+    log: () => undefined,
+  });
+  const socket = connect(probe.port, "127.0.0.1");
+  socket.write(`GET /v1/pylons/${pylonId}/stream?request=${encodeURIComponent(JSON.stringify({ pty: null, argv: ["true"] }))} HTTP/1.1\r\nhost: probe\r\nconnection: upgrade\r\nupgrade: nexus-stream\r\n\r\n`);
+  await entered.promise;
+  socket.resetAndDestroy();
+  await new Promise((r) => setTimeout(r, 50));
+  release.resolve();
+  await new Promise((r) => setTimeout(r, 50));
+  assert.equal(await client.job("after-reset" as JobId), "unknown", "the probe still answers");
+});
+
+test("a stream to a pylon that is not running is refused as not-running", async (t) => {
+  const { client } = await setup(t);
+  await assert.rejects(client.stream(pylonId, { pty: null, argv: ["true"] }), { code: "not-running" });
+});
+
+test("only streams with a pty count as attached clients", async (t) => {
+  const { client } = await streaming(t);
+  const raw = await client.stream(pylonId, { pty: null, argv: ["cat"] });
+  const pty = await client.stream(pylonId, { pty: { cols: 80, rows: 24 }, argv: ["cat"] });
+  for await (const e of client.observe(AbortSignal.timeout(5000))) {
+    const p = e.type === "snapshot" ? e.observation.pylons[0] : assert.fail(e.type);
+    assert.ok(p?.phase === "running" && p.attachedClients === 1, JSON.stringify(p));
+    break;
+  }
+  await raw.close();
+  await pty.close();
+  assert.deepEqual([await raw.done, await pty.done], [{ kind: "exited", code: 0 }, { kind: "exited", code: 0 }]);
+});
+
+test("a dropped connection is a lost stream, and the guest process's stdin ends", async (t) => {
+  const { client, probe, guestStreams } = await streaming(t);
+  const stream = await client.stream(pylonId, { pty: null, argv: ["cat"] });
+  await probe.close();
+  assert.deepEqual(await stream.done, { kind: "lost" });
+  assert.deepEqual(await guestStreams[0]!.done, { kind: "exited", code: 0 });
+});
+
+/** A fixed gateway port, as a real probe has, so a second probe in the same test recognizes the first one's entries. */
+async function previewSetup(t: import("node:test").TestContext) {
+  const dir = await mkdtemp(join(tmpdir(), "nexus-probe-"));
+  t.after(() => rm(dir, { recursive: true }));
+  const free = createServer().listen(0, "127.0.0.1");
+  await once(free, "listening");
+  const gatewayPort = (free.address() as { port: number }).port;
+  await new Promise((resolve) => free.close(resolve));
+  const tailscale = fakeTailscale();
+  const fake = fakeBackend();
+  const backend: VmBackend = {
+    ...fake.backend,
+    guest: (id) => {
+      if (fake.pylons.get(id)?.vm !== "running") throw new Error(`${id} is not running`);
+      return { previewOrigin: () => "http://127.0.0.1:9" } as unknown as Guest; // nothing listens there
+    },
+  };
+  const previews = { gatewayPort, routesFile: join(dir, "routes.json"), tailscale: tailscale.cli, get: viaGateway(() => `http://127.0.0.1:${gatewayPort}`).get };
+  const open = () => setup(t, { backend, previews });
+  const run = async (client: ReturnType<typeof connectProbe>, job: Job) => {
+    const env = envelope(job, node, Date.now());
+    await client.submit(env);
+    assert.equal((await finished(client, env.jobId)).state, "succeeded");
+  };
+  const visit = (httpsPort: number, headers: Record<string, string> = {}) => new Promise<{ status: number; type: string | undefined; body: string }>((resolve, reject) => {
+    request({ host: "127.0.0.1", port: gatewayPort, headers: { host: `${nodeHost}:${httpsPort}`, ...headers } }, async (res) => {
+      let body = "";
+      for await (const chunk of res) body += chunk;
+      resolve({ status: res.statusCode!, type: res.headers["content-type"], body });
+    }).on("error", reject).end();
+  });
+  return { tailscale, open, run, visit };
+}
+
+const withPreview = (id: PylonId, httpsPort: number): Job =>
+  ({ ...spawnJob, pylonId: id, boot: { ...boot, pylonId: id }, live: { previews: [{ service: "web", httpsPort }], overlay: [] } }) as Job;
+
+test("spawn publishes its previews, a hit arrives on observe, pause keeps them and delete unpublishes them", async (t) => {
+  const { tailscale, open, run, visit } = await previewSetup(t);
+  const { client } = await open();
+  await run(client, withPreview(pylonId, 10000));
+  assert.deepEqual(Object.keys(tailscale.entries()), ["10000"]);
+
+  const abort = new AbortController();
+  t.after(() => abort.abort());
+  const events = client.observe(abort.signal)[Symbol.asyncIterator]();
+  assert.equal((await events.next()).value?.type, "snapshot");
+  assert.equal((await visit(10000, { "tailscale-user-login": "someone@example.com" })).status, 502, "the fake guest origin is not listening");
+  const hit = (await events.next()).value;
+  assert.ok(hit?.type === "preview-hit");
+  assert.deepEqual({ pylonId: hit.pylonId, service: hit.service, login: hit.login }, { pylonId, service: "web", login: "someone@example.com" });
+
+  await run(client, { kind: "pause", pylonId, checkpoint: "ckpt-unit-1" });
+  assert.deepEqual(Object.keys(tailscale.entries()), ["10000"]);
+  await run(client, { kind: "delete", pylonId });
+  assert.deepEqual(tailscale.entries(), {});
+});
+
+test("after a probe restart a paused pylon keeps its preview, and a hit gets the waking page and is reported", async (t) => {
+  const { tailscale, open, run, visit } = await previewSetup(t);
+  const first = await open();
+  await run(first.client, withPreview(pylonId, 10000));
+  await run(first.client, { kind: "pause", pylonId, checkpoint: "ckpt-unit-1" });
+  await first.probe.close();
+
+  const { client } = await open();
+  // Another pylon's spawn sweeps entries the table does not map. The paused pylon's is on file, so it stays.
+  await run(client, withPreview("pylon-other" as PylonId, 10001));
+  assert.deepEqual(Object.keys(tailscale.entries()).sort(), ["10000", "10001"]);
+
+  const abort = new AbortController();
+  t.after(() => abort.abort());
+  const events = client.observe(abort.signal)[Symbol.asyncIterator]();
+  assert.equal((await events.next()).value?.type, "snapshot");
+  const page = await visit(10000, { accept: "text/html,application/xhtml+xml" });
+  assert.equal(page.status, 503);
+  assert.match(page.type ?? "", /^text\/html/);
+  assert.match(page.body, /http-equiv="refresh"/);
+  const hit = (await events.next()).value;
+  assert.ok(hit?.type === "preview-hit" && hit.pylonId === pylonId && hit.service === "web");
 });

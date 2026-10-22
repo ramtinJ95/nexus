@@ -27,7 +27,7 @@ import { run as pylonVm } from "./pylon-vm/client.ts";
 import { startProbe, type Probe } from "./probe/server.ts";
 import { connectProbe, type LiveHash, type NodeName, type ProbeClient, type PylonId, type TailnetNodeId } from "./protocol.ts";
 import { envelope, type PlanStep } from "./reconcile.ts";
-import { newPylonRecord, nextCheckpoint, tick, type PylonRecord } from "./tick.ts";
+import { newPylonRecord, nextCheckpoint, snapshot, tick, type PylonRecord } from "./tick.ts";
 import type { BackendPylon, Guest, SecretSource, VmBackend } from "./backend.ts";
 import type { BootInputs, OverlayFile } from "./project.ts";
 import type { CheckpointId, ImageId } from "./images.ts";
@@ -309,12 +309,23 @@ async function startTestProbe(b: VmBackend = backend) {
   client ??= connectProbe(node, "127.0.0.1", probeId, { port, whois: async () => probeId });
 }
 
+/** The record lives in memory, and one node means nothing can be fetched from a peer. */
+async function tickOnce(): Promise<PlanStep> {
+  return tick(pylon, {
+    probe: client,
+    observation: await snapshot(client),
+    holders: () => [],
+    artifactSha256: (id) => { throw new Error(`no node holds ${id}, so it has no recorded sha256`); },
+    save() {},
+  });
+}
+
 /** Ticks until the planner says done. Returns every step, so tests can see what was sent. */
 async function converge(timeoutMs = fixture.convergeMs): Promise<PlanStep[]> {
   const steps: PlanStep[] = [];
   const deadline = Date.now() + timeoutMs;
   for (;;) {
-    const step = await tick(pylon, client);
+    const step = await tickOnce();
     steps.push(step);
     if (step.kind === "done") return steps;
     if (step.kind === "fail") throw new Error(`planner gave up: ${step.reason}`);
@@ -426,7 +437,7 @@ test("a probe killed during a pause: the next ticks finish the pause", async () 
   });
   pylon.desired = "paused";
   const checkpoint = nextCheckpoint(pylon);
-  const first = await tick(pylon, client);
+  const first = await tickOnce();
   assert.ok(first.kind === "submit" && first.job.kind === "pause");
   await stopped.promise;
   await probe.close();

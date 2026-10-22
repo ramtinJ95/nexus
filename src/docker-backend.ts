@@ -7,6 +7,7 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { JobFailure, type ArtifactStore, type BackendPylon, type VmBackend } from "./backend.ts";
+import { processStream } from "./process-stream.ts";
 import type { PylonId } from "./protocol.ts";
 import type { ArtifactId, CheckpointId, ImageId } from "./images.ts";
 
@@ -208,7 +209,12 @@ export function createDockerBackend(options: DockerBackendOptions): VmBackend {
             return { exitCode: code, output: stdout + stderr, truncated: false };
           }
         },
-        stream: notYet("stream"),
+        async stream(request, log) {
+          if (request.pty !== null) throw new Error("the Docker backend has no pty streams");
+          const existing = await container(pylonId, AbortSignal.timeout(30_000));
+          if (existing?.State.Status !== "running") throw new Error(`${pylonId} is not running`);
+          return processStream("docker", ["exec", "--interactive", pylonId, ...request.argv], log);
+        },
         writeFiles: notYet("writeFiles"),
         services: notYet("services"),
         linkPort: notYet("linkPort"),
