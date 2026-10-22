@@ -82,8 +82,8 @@ const imageSchema = z.strictObject({
   id: z.string().regex(/^img-[0-9a-f]{12}$/).transform((id) => id as ImageId),
   gondolinBuildId: z.string().min(1),
   pins: z.strictObject({
-    debianDigest: z.string(), node: z.string(), claudeCode: z.string(), pi: z.string(), herdr: z.string(),
-    gondolin: z.string(), alpineKernel: z.string(), dotfilesCommon: z.string(),
+    debianDigest: z.string(), node: z.string(), nodeSha256: z.string(), claudeCode: z.string(), pi: z.string(), herdr: z.string(),
+    piEnv: z.string(), piEnvSha256: z.string(), gondolin: z.string(), alpineKernel: z.string(), dotfilesCommon: z.string(),
   }),
   builtOn: z.string().min(1).transform((node) => node as NodeName),
   builtAt: z.string().min(1),

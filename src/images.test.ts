@@ -15,8 +15,8 @@ const peer = "infra-testbench" as NodeName;
 const recipe: ImageRecipe = {
   files: [{ path: "Dockerfile", content: "FROM debian" }, { path: "gondolin.json", content: "{}" }],
   pins: {
-    debianDigest: "sha256:d", node: "24.22.1", claudeCode: "2.0.0", pi: "1.4.0", herdr: "0.5.0",
-    gondolin: "0.13.0", alpineKernel: "6.18.58-0-virt", dotfilesCommon: "abc",
+    debianDigest: "sha256:d", node: "24.22.1", nodeSha256: "n", claudeCode: "2.0.0", pi: "1.4.0", herdr: "0.5.0",
+    piEnv: "0.1.0", piEnvSha256: "e", gondolin: "0.13.0", alpineKernel: "6.18.58-0-virt", dotfilesCommon: "abc",
   },
 };
 
