@@ -173,7 +173,11 @@ function merge(last: NodeObservation | null, event: ProbeEvent): NodeObservation
   return { ...last, pylons: [...last.pylons.filter((p) => p.pylonId !== event.pylon.pylonId), keepSessions(last, event.pylon)] };
 }
 
-/** Sessions the probe could not read have not changed as far as the registry knows, and the next diff needs the last list read. */
+/**
+ * Sessions the probe could not read have not changed as far as the registry knows, and the next diff needs
+ * the last list read. Only the stored copy is filled in. ingest gets the event as read, so a carried list
+ * is never agent activity.
+ */
 function keepSessions(last: NodeObservation | null, pylon: PylonObservation): PylonObservation {
   if (pylon.phase !== "running" || pylon.sessions !== null) return pylon;
   const previous = last?.pylons.find((p) => p.pylonId === pylon.pylonId);

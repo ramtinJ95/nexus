@@ -68,11 +68,19 @@ export interface SessionRecord {
   harnessSessionId: string | null;
 }
 
-interface SessionsFile { version: 1; recordedAt: string; sessions: readonly SessionRecord[] }
+/**
+ * A session the last relaunch did not bring back. It stays in the file, through any number of records,
+ * until a relaunch brings it back. When the relaunch left it in a pane, such as a restored shell its agent
+ * would not start in, `record.herdrPane` is that pane and the record stands for it, so closing the pane is
+ * what drops the session. With no pane left there is nothing to close.
+ */
+interface FailedRecord { record: SessionRecord; inPane: boolean; message: string }
+
+interface SessionsFile { version: 1; recordedAt: string; sessions: readonly SessionRecord[]; failed: readonly FailedRecord[] }
 
 export type RelaunchOutcome =
   | { record: SessionRecord; result: "present" | "relaunched"; herdrPane: string }
-  | { record: SessionRecord; result: "failed"; message: string };
+  | { record: SessionRecord; result: "failed"; herdrPane: string | null; message: string };
 
 /** A Herdr CLI error. `code` is Herdr's, such as `pane_not_found`, `server_not_running` or `agent_not_ready`. */
 export class HerdrError extends Error {
@@ -159,37 +167,49 @@ export async function sessionFacts(guest: Guest, timeoutMs = callTimeoutMs): Pro
 }
 
 /**
- * Writes every open session to ~/.nexus/sessions.json, before the disk checkpoint. With no Herdr server
- * the file is left as it is and this returns null: a server that never came up after the last wake must
- * not erase the sessions that wake failed to relaunch.
+ * Writes every open session to ~/.nexus/sessions.json, before the disk checkpoint, and returns every
+ * session a relaunch would bring back. Sessions the last relaunch failed to bring back are kept, except
+ * one whose pane has since closed. With no Herdr server the file is left as it is and this returns null:
+ * a server that never came up after the last wake must not erase the sessions that wake failed to relaunch.
  */
 export async function recordSessions(guest: Guest): Promise<readonly SessionRecord[] | null> {
   const panes = await livePanes(guest).catch(noServer(null));
   if (panes === null) return null;
-  const sessions = panes.map(({ herdrPane, harness, title, cwd, harnessSessionId }): SessionRecord => ({ herdrPane, harness, title, cwd, harnessSessionId }));
-  const file: SessionsFile = { version: 1, recordedAt: new Date().toISOString(), sessions };
-  await guest.writeFiles([{ path: sessionsFile, mode: 0o644, owner: "user", content: JSON.stringify(file, null, 2) + "\n" }]);
-  return sessions;
+  const live = new Set(panes.map((p) => p.herdrPane));
+  const failed = ((await readSessionsFile(guest))?.failed ?? []).filter((f) => !f.inPane || live.has(f.record.herdrPane));
+  const standsFor = new Set(failed.flatMap((f) => f.inPane ? [f.record.herdrPane] : []));
+  const sessions = panes.filter((p) => !standsFor.has(p.herdrPane))
+    .map(({ herdrPane, harness, title, cwd, harnessSessionId }): SessionRecord => ({ herdrPane, harness, title, cwd, harnessSessionId }));
+  await writeSessionsFile(guest, { version: 1, recordedAt: new Date().toISOString(), sessions, failed });
+  return [...sessions, ...failed.map((f) => f.record)];
 }
 
 /**
  * On wake: start Herdr, then bring back each recorded session that is not already live, into its prompt.
  * Running it again converges: each live pane answers for at most one record, so neither Herdr's own
- * restore nor an earlier relaunch is opened twice. One failure does not stop the rest.
+ * restore nor an earlier relaunch is opened twice. One failure does not stop the rest, and the sessions
+ * file is rewritten with each session's pane and with the failures, so a later record keeps them.
  */
 export async function relaunchSessions(guest: Guest): Promise<readonly RelaunchOutcome[]> {
-  const records = await readSessionsFile(guest);
+  const file = await readSessionsFile(guest);
+  if (file === null) return [];
+  const records = [...file.sessions, ...file.failed.map((f) => f.record)];
   if (records.length === 0) return [];
   await ensureServer(guest);
   const unclaimed = await livePanes(guest);
   const recordedIds = new Set(records.flatMap((r) => r.harnessSessionId ?? []));
+  // A pane whose agent reports another session is that session, not this one. A record with no ID can take
+  // a pane whose ID no record has, such as the one an earlier relaunch of it started.
+  const sameSession = (r: SessionRecord, p: LivePane) => p.harnessSessionId === null || p.harnessSessionId === r.harnessSessionId
+    || (r.harnessSessionId === null && !recordedIds.has(p.harnessSessionId));
   // In order of confidence. Each pass gives every unmatched record the first unclaimed pane it accepts.
   const matchers: ((r: SessionRecord, p: LivePane) => boolean)[] = [
     (r, p) => r.harnessSessionId !== null && p.harnessSessionId === r.harnessSessionId,
     // Herdr restored the pane in place. A plain shell there means it restored the layout but not the agent.
-    (r, p) => p.herdrPane === r.herdrPane && p.title === r.title && (p.harness === r.harness || p.harness === "shell"),
-    // An earlier relaunch, or an agent that has not reported a session yet, under a new pane ID.
-    (r, p) => p.harness === r.harness && p.title === r.title && (p.harnessSessionId === null || !recordedIds.has(p.harnessSessionId)),
+    (r, p) => p.herdrPane === r.herdrPane && p.title === r.title && (p.harness === r.harness || p.harness === "shell") && sameSession(r, p),
+    // An earlier relaunch, or an agent that has not reported a session yet, under a new pane ID. Shells have
+    // no session to tell them apart, so a shell also needs its cwd.
+    (r, p) => p.harness === r.harness && p.title === r.title && sameSession(r, p) && (r.harness !== "shell" || p.cwd === r.cwd),
   ];
   const claimed = new Map<SessionRecord, LivePane>();
   for (const matches of matchers) {
@@ -217,9 +237,16 @@ export async function relaunchSessions(guest: Guest): Promise<readonly RelaunchO
         outcomes.push({ record: r, result: "relaunched", herdrPane });
       }
     } catch (err) {
-      outcomes.push({ record: r, result: "failed", message: (err as Error).message });
+      outcomes.push({ record: r, result: "failed", herdrPane: pane?.herdrPane ?? null, message: (err as Error).message });
     }
   }
+  // Each record now names the pane it is in, so a failure is not recorded a second time as the shell it left.
+  await writeSessionsFile(guest, {
+    ...file,
+    sessions: outcomes.flatMap((o) => o.result === "failed" ? [] : [{ ...o.record, herdrPane: o.herdrPane }]),
+    failed: outcomes.flatMap((o): FailedRecord[] => o.result !== "failed" ? []
+      : [{ record: { ...o.record, herdrPane: o.herdrPane ?? o.record.herdrPane }, inPane: o.herdrPane !== null, message: o.message }]),
+  });
   return outcomes;
 }
 
@@ -299,23 +326,38 @@ async function livePanes(guest: Guest, timeoutMs = callTimeoutMs): Promise<LiveP
 }
 
 /** A missing file means a pylon that has never paused, so there is nothing to relaunch. */
-async function readSessionsFile(guest: Guest): Promise<readonly SessionRecord[]> {
+async function readSessionsFile(guest: Guest): Promise<SessionsFile | null> {
   const { exitCode, output } = await guest.exec(["sh", "-c", 'test -e "$0" || exit 3; exec cat -- "$0"', sessionsFile], { cwd: home, timeoutMs: callTimeoutMs });
-  if (exitCode === 3) return [];
+  if (exitCode === 3) return null;
   if (exitCode !== 0) throw new Error(`reading ${sessionsFile} failed with exit ${exitCode}: ${output}`);
   const file = record(JSON.parse(output), sessionsFile);
   if (file.version !== 1) throw new Error(`${sessionsFile} has unknown version ${JSON.stringify(file.version)}`);
-  return array(file.sessions, "sessions").map((value): SessionRecord => {
-    const r = record(value, "session record");
-    if (typeof r.harness !== "string" || !(r.harness in agents)) throw new Error(`${sessionsFile} names unknown harness ${JSON.stringify(r.harness)}`);
-    return {
-      herdrPane: string(r.herdrPane, "herdrPane"),
-      harness: r.harness as SessionHarness,
-      title: string(r.title, "title"),
-      cwd: string(r.cwd, "cwd"),
-      harnessSessionId: nullableString(r.harnessSessionId, "harnessSessionId"),
-    };
-  });
+  return {
+    version: 1,
+    recordedAt: string(file.recordedAt, "recordedAt"),
+    sessions: array(file.sessions, "sessions").map(sessionRecord),
+    failed: array(file.failed, "failed").map((value): FailedRecord => {
+      const f = record(value, "failed record");
+      if (typeof f.inPane !== "boolean") throw new Error(`${sessionsFile} has a failed record without inPane`);
+      return { record: sessionRecord(f.record), inPane: f.inPane, message: string(f.message, "message") };
+    }),
+  };
+}
+
+function sessionRecord(value: unknown): SessionRecord {
+  const r = record(value, "session record");
+  if (typeof r.harness !== "string" || !(r.harness in agents)) throw new Error(`${sessionsFile} names unknown harness ${JSON.stringify(r.harness)}`);
+  return {
+    herdrPane: string(r.herdrPane, "herdrPane"),
+    harness: r.harness as SessionHarness,
+    title: string(r.title, "title"),
+    cwd: string(r.cwd, "cwd"),
+    harnessSessionId: nullableString(r.harnessSessionId, "harnessSessionId"),
+  };
+}
+
+async function writeSessionsFile(guest: Guest, file: SessionsFile): Promise<void> {
+  await guest.writeFiles([{ path: sessionsFile, mode: 0o644, owner: "user", content: JSON.stringify(file, null, 2) + "\n" }]);
 }
 
 /**

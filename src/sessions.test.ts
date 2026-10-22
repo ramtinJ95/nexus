@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { closeSession, openSession, recordSessions, relaunchSessions, sessionFacts, sessionsFile, type SessionRecord } from "./sessions.ts";
+import { closeSession, openSession, recordSessions, relaunchSessions, sessionFacts, sessionsFile, type RelaunchOutcome, type SessionRecord } from "./sessions.ts";
 import { fakeGuest, herdrError, herdrOk, herdrPane, herdrSnapshot, type ExecReply } from "./fake-guest.ts";
 
 const created = (workspace: string, pane: string) => herdrOk({ type: "workspace_created", workspace: { workspace_id: workspace, label: "x" }, tab: { tab_id: `${workspace}:t1` }, root_pane: { pane_id: pane } });
@@ -22,6 +22,7 @@ const transcriptLookup = (argv: readonly string[], exists: boolean): ExecReply |
  */
 function herdrUp(overrides: Record<string, (argv: readonly string[]) => ExecReply> = {}, transcripts = true) {
   return fakeGuest((argv, herdr) => {
+    if (!herdr && argv.at(-1) === sessionsFile) return { exitCode: 3, output: "" };
     if (!herdr) return transcriptLookup(argv, transcripts) ?? assert.fail(`unexpected exec ${argv.join(" ")}`);
     const sub = argv.slice(0, 2).join(" ");
     const override = overrides[sub];
@@ -176,7 +177,7 @@ function withSessionsFile(records: readonly SessionRecord[] | null, herdr: (argv
     const lookup = transcriptLookup(argv, true);
     if (lookup) return lookup;
     assert.equal(argv.at(-1), sessionsFile);
-    return records === null ? { exitCode: 3, output: "" } : { exitCode: 0, output: JSON.stringify({ version: 1, recordedAt: "2027-01-01T00:00:00Z", sessions: records }) };
+    return records === null ? { exitCode: 3, output: "" } : { exitCode: 0, output: JSON.stringify({ version: 1, recordedAt: "2027-01-01T00:00:00Z", sessions: records, failed: [] }) };
   });
 }
 
@@ -266,30 +267,118 @@ test("pi run by node counts as running from its script's name", async () => {
   assert.deepEqual((await relaunchSessions(guest)).map((o) => o.result), ["present"]);
 });
 
+interface FakePane { workspace: string; label: string; pane: string; cwd: string; argv: readonly string[]; agent: string | null; session: { kind: "id" | "path"; value: string } | null }
+
+/**
+ * A pylon whose Herdr and sessions file change as the calls under test act on them. A workspace create
+ * adds a shell pane, an agent start runs the agent there and reports its session, a close removes panes,
+ * and the sessions file reads back what was last written. `refuse` can fail an agent start.
+ */
+function pylon(records: readonly SessionRecord[], panes: FakePane[], refuse: (argv: readonly string[]) => ExecReply | undefined = () => undefined) {
+  let next = 20;
+  const flag = (argv: readonly string[], name: string) => argv[argv.indexOf(name) + 1]!;
+  const guest = fakeGuest((argv, herdr) => {
+    if (!herdr && argv.at(-1) === sessionsFile) {
+      const last = guest.written.findLast((f) => f.path === sessionsFile)?.content;
+      return { exitCode: 0, output: last ?? JSON.stringify({ version: 1, recordedAt: "2027-01-01T00:00:00Z", sessions: records, failed: [] }) };
+    }
+    if (!herdr) return transcriptLookup(argv, true) ?? assert.fail(`unexpected exec ${argv.join(" ")}`);
+    const sub = argv.slice(0, 2).join(" ");
+    const pane = (id: string) => panes.find((p) => p.pane === id) ?? assert.fail(`no pane ${id}`);
+    switch (sub) {
+      case "workspace list": return herdrOk({ type: "workspace_list", workspaces: [] });
+      case "api snapshot": return herdrOk(herdrSnapshot(
+        panes.map((p) => ({ id: p.workspace, label: p.label })),
+        panes.map((p) => herdrPane(p.pane, p.workspace, p.agent, p.agent === null ? "unknown" : "idle", p.session, p.cwd)),
+      ));
+      case "pane process-info": return processInfo({ [argv[3]!]: pane(argv[3]!).argv })(argv);
+      case "workspace create": {
+        const workspace = `w${next++}`;
+        panes.push({ workspace, label: flag(argv, "--label"), pane: `${workspace}:p1`, cwd: flag(argv, "--cwd"), argv: ["-bash"], agent: null, session: null });
+        return created(workspace, `${workspace}:p1`);
+      }
+      case "agent start": {
+        const refused = refuse(argv);
+        if (refused) return refused;
+        const p = pane(flag(argv, "--pane"));
+        const args = argv.slice(argv.indexOf("--") + 1);
+        p.agent = flag(argv, "--kind");
+        p.argv = [p.agent, ...args];
+        p.session = { kind: args[0] === "--session" ? "path" : "id", value: args[1]! };
+        return agentStarted;
+      }
+      case "workspace close":
+        panes.splice(0, panes.length, ...panes.filter((p) => p.workspace !== argv[2]));
+        return herdrOk({ type: "ok" });
+      case "pane close":
+        panes.splice(0, panes.length, ...panes.filter((p) => p.pane !== argv[2]));
+        return herdrOk({ type: "ok" });
+      case "pane read": return herdrOk({ type: "pane_read", read: { text: "user@pylon:~$ " } });
+    }
+    throw new Error(`unscripted herdr ${argv.join(" ")}`);
+  });
+  return guest;
+}
+
+const shellPane = (workspace: string, label: string, cwd: string): FakePane => ({ workspace, label, pane: `${workspace}:p1`, cwd, argv: ["-bash"], agent: null, session: null });
+const claudePane = (workspace: string, label: string, id: string): FakePane =>
+  ({ workspace, label, pane: `${workspace}:p1`, cwd: "/home/user", argv: ["claude", "--resume", id], agent: "claude", session: { kind: "id", value: id } });
+const placed = (outcomes: readonly RelaunchOutcome[]) => outcomes.map((o) => [o.record.title, o.result, "herdrPane" in o ? o.herdrPane : null]);
+
 test("relaunching twice opens nothing new, and sessions that share a title keep their own panes", async () => {
   const records: SessionRecord[] = [
     { herdrPane: "w1:p1", harness: "claude-code", title: "review", cwd: "/home/user", harnessSessionId: "aaaa" },
     { herdrPane: "w2:p1", harness: "claude-code", title: "review", cwd: "/home/user", harnessSessionId: "bbbb" },
     { herdrPane: "w3:p1", harness: "shell", title: "sh", cwd: "/home/user", harnessSessionId: null },
   ];
-  // The first relaunch already brought back "bbbb" and the shell, under new pane IDs. "aaaa" is still missing.
-  const live = herdrSnapshot(
-    [{ id: "w7", label: "review" }, { id: "w8", label: "sh" }],
-    [herdrPane("w7:p1", "w7", "claude", "idle", { kind: "id", value: "bbbb" }), herdrPane("w8:p1", "w8", null, "unknown")],
-  );
-  const guest = withSessionsFile(records, (argv) => {
-    const sub = argv.slice(0, 2).join(" ");
-    if (sub === "workspace list") return herdrOk({ type: "workspace_list", workspaces: [] });
-    if (sub === "api snapshot") return herdrOk(live);
-    if (sub === "pane process-info") return processInfo({ "w7:p1": ["claude", "--resume", "bbbb"] })(argv);
-    if (sub === "workspace create") return created("w9", "w9:p1");
-    if (sub === "agent start") return agentStarted;
-    throw new Error(`unscripted ${sub}`);
-  });
-  assert.deepEqual((await relaunchSessions(guest)).map((o) => [o.record.harnessSessionId, o.result, "herdrPane" in o ? o.herdrPane : null]), [
-    ["aaaa", "relaunched", "w9:p1"],
-    ["bbbb", "present", "w7:p1"],
-    [null, "present", "w8:p1"],
+  const guest = pylon(records, [claudePane("w7", "review", "bbbb")]);
+  assert.deepEqual(placed(await relaunchSessions(guest)), [["review", "relaunched", "w20:p1"], ["review", "present", "w7:p1"], ["sh", "relaunched", "w21:p1"]]);
+  assert.deepEqual(placed(await relaunchSessions(guest)), [["review", "present", "w20:p1"], ["review", "present", "w7:p1"], ["sh", "present", "w21:p1"]]);
+  assert.equal(guest.herdrCalls().filter((c) => c === "workspace create").length, 2);
+});
+
+test("an agent reporting another session is not the recorded one, even under the same title", async () => {
+  const records: SessionRecord[] = [{ herdrPane: "w1:p1", harness: "claude-code", title: "review", cwd: "/home/user", harnessSessionId: "aaaa" }];
+  const guest = pylon(records, [claudePane("w5", "review", "bbbb")]);
+  assert.deepEqual(placed(await relaunchSessions(guest)), [["review", "relaunched", "w20:p1"]]);
+  assert.deepEqual(guest.execs.find((a) => a[3] === "agent")!.slice(6, 10), ["--kind", "claude", "--pane", "w20:p1"]);
+});
+
+test("shells that share a title are told apart by their cwd", async () => {
+  const records: SessionRecord[] = [
+    { herdrPane: "w1:p1", harness: "shell", title: "sh", cwd: "/a", harnessSessionId: null },
+    { herdrPane: "w2:p1", harness: "shell", title: "sh", cwd: "/b", harnessSessionId: null },
+  ];
+  // An earlier relaunch brought back /b under a new pane, and /a failed.
+  const guest = pylon(records, [shellPane("w8", "sh", "/b")]);
+  assert.deepEqual(placed(await relaunchSessions(guest)), [["sh", "relaunched", "w20:p1"], ["sh", "present", "w8:p1"]]);
+  assert.deepEqual(guest.execs.filter((a) => a[4] === "create").map((a) => a[6]), ["/a"]);
+});
+
+test("a session whose relaunch failed is recorded until a relaunch brings it back", async () => {
+  const records: SessionRecord[] = [
+    { herdrPane: "w1:p1", harness: "claude-code", title: "review", cwd: "/home/user", harnessSessionId: "aaaa" },
+    { herdrPane: "w2:p1", harness: "shell", title: "sh", cwd: "/home/user", harnessSessionId: null },
+  ];
+  let refusing = true;
+  const guest = pylon(records, [], () => refusing ? herdrError("timeout", "the agent did not start") : undefined);
+  assert.deepEqual(placed(await relaunchSessions(guest)), [["review", "failed", null], ["sh", "relaunched", "w21:p1"]]);
+  assert.deepEqual(await recordSessions(guest), [
+    { herdrPane: "w21:p1", harness: "shell", title: "sh", cwd: "/home/user", harnessSessionId: null },
+    records[0],
   ]);
-  assert.equal(guest.herdrCalls().filter((c) => c === "workspace create").length, 1);
+  refusing = false;
+  assert.deepEqual(placed(await relaunchSessions(guest)), [["sh", "present", "w21:p1"], ["review", "relaunched", "w22:p1"]]);
+  assert.deepEqual((await recordSessions(guest))!.map((r) => r.herdrPane), ["w21:p1", "w22:p1"]);
+  assert.deepEqual(JSON.parse(guest.written.at(-1)!.content).failed, []);
+});
+
+test("a failure left in its restored pane stands for that pane until the pane is closed", async () => {
+  const records: SessionRecord[] = [{ herdrPane: "w1:p1", harness: "claude-code", title: "review", cwd: "/home/user", harnessSessionId: "aaaa" }];
+  const guest = pylon(records, [shellPane("w1", "review", "/home/user")], () => herdrError("timeout", "the agent did not start"));
+  assert.deepEqual(placed(await relaunchSessions(guest)), [["review", "failed", "w1:p1"]]);
+  // Recorded as the Claude it should be, not as the shell it is.
+  assert.deepEqual(await recordSessions(guest), records);
+  await closeSession(guest, "w1:p1");
+  assert.deepEqual(await recordSessions(guest), []);
 });
