@@ -4,11 +4,12 @@
  */
 import { randomUUID } from "node:crypto";
 import { statfs } from "node:fs/promises";
-import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+import { createServer, STATUS_CODES, type IncomingMessage, type ServerResponse } from "node:http";
 import { totalmem } from "node:os";
+import type { Duplex } from "node:stream";
 import { JobFailure, runJob, type BackendPylon, type ProbeDeps, type SecretSource, type VmBackend } from "../backend.ts";
 import {
-  encodeProbeEvent, encodeSubmitReply, jobDeadlineMs, jobSubject, parseJobEnvelope, routeAuth,
+  encodeProbeEvent, encodeSubmitReply, jobDeadlineMs, jobSubject, parseJobEnvelope, parseStreamRequest, routeAuth, serveByteStream, streamUpgradeResponse,
   type Job, type JobEnvelope, type JobId, type JobStatus, type LiveHash, type NodeName, type NodeObservation,
   type ProbeAuthConfig, type ProbeEvent, type PylonId, type PylonObservation, type Subject,
 } from "../protocol.ts";
@@ -26,6 +27,8 @@ export interface ProbeOptions {
   backend: VmBackend;
   secrets: SecretSource;
   jobDeadlineMs?: { readonly [K in Job["kind"]]: number };
+  /** The probe's log, which also receives the stderr of raw pipes. Default console.error. */
+  log?: (message: string) => void;
   /** Omitted: the probe publishes no previews, and a spawn that assigns one fails. */
   previews?: {
     /** Keep it fixed across restarts. Serve entries that proxy to this loopback port are the probe's. */
@@ -81,6 +84,10 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
   const liveHashes = new Map<PylonId, LiveHash>();
   const observers = new Set<{ write(event: ProbeEvent): void; drop(err: Error): void }>();
   const runningJobs = new Set<Promise<void>>();
+  const log = options.log ?? console.error;
+  /** Upgraded sockets, which the HTTP server no longer tracks, so close() ends them itself. */
+  const streamSockets = new Set<Duplex>();
+  const ptyStreams = new Map<PylonId, number>();
 
   const emit = (event: ProbeEvent) => { if (!shutdown.signal.aborted) for (const observer of observers) observer.write(event); };
 
@@ -107,7 +114,7 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
           pylonId, phase: "running", liveHash: liveHashes.get(pylonId) ?? null, bootedAt: p.bootedAt,
           bootedFrom: { image: p.image, checkpoint: p.checkpoint },
           // Guest facts need guest operations, which this slice does not have.
-          services: [], previews: [], sessions: [], git: null, declaredOutputs: [], attachedClients: 0,
+          services: [], previews: [], sessions: [], git: null, declaredOutputs: [], attachedClients: ptyStreams.get(pylonId) ?? 0,
         };
     }
   }
@@ -239,10 +246,50 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
     return send(res, 404, `no route ${req.method} ${path}`);
   }
 
+  /** GET /v1/pylons/{id}/stream. The guest process starts before the 101, so a pylon that cannot run it gets an HTTP error instead. */
+  async function stream(req: IncomingMessage, socket: Duplex, head: Buffer) {
+    const url = new URL(req.url ?? "/", "http://probe");
+    if (!url.pathname.startsWith("/v1/pylons/")) return refuse(socket, 404, `no upgrade route ${url.pathname}`);
+    if (!await authorized(req, "/v1/pylons")) return refuse(socket, 403, "caller is not the tailnet node this route allows");
+    let parsed: ReturnType<typeof parseStreamRequest>;
+    try {
+      parsed = parseStreamRequest(req.headers.upgrade, url);
+    } catch (err) {
+      return refuse(socket, 400, (err as Error).message);
+    }
+    if (parsed === null) return refuse(socket, 404, `no upgrade route ${url.pathname} for ${req.headers.upgrade}`);
+    const { pylonId, request } = parsed;
+    if ((await backend.list()).find((p) => p.pylonId === pylonId)?.vm !== "running") return refuse(socket, 409, `${pylonId} is not running`);
+    if (socket.destroyed || shutdown.signal.aborted) return;
+    const guest = await backend.guest(pylonId).stream(request, (text) => log(`${pylonId} stream ${request.argv[0]}: ${text.trimEnd()}`));
+    socket.write(streamUpgradeResponse);
+    const pty = request.pty !== null;
+    if (pty) ptyStreams.set(pylonId, (ptyStreams.get(pylonId) ?? 0) + 1);
+    try {
+      await serveByteStream(socket, head, guest);
+    } finally {
+      if (pty) {
+        const left = ptyStreams.get(pylonId)! - 1;
+        if (left === 0) ptyStreams.delete(pylonId);
+        else ptyStreams.set(pylonId, left);
+      }
+    }
+  }
+
   const server = createServer((req, res) => {
     handle(req, res).catch((err: unknown) => {
       if (res.headersSent) return res.destroy(err as Error);
       send(res, 500, (err as Error).message);
+    });
+  });
+  server.on("upgrade", (req: IncomingMessage, socket: Duplex, head: Buffer) => {
+    // Node hands over an upgraded socket without its error handler, and a reset during whois would crash the probe.
+    socket.on("error", (err) => log(`stream ${req.url}: ${err.message}`));
+    streamSockets.add(socket);
+    socket.on("close", () => streamSockets.delete(socket));
+    stream(req, socket, head).catch((err: unknown) => {
+      log(`stream ${req.url}: ${(err as Error).message}`);
+      refuse(socket, 502, (err as Error).message);
     });
   });
   await new Promise<void>((resolve, reject) => {
@@ -262,10 +309,17 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
       shutdown.abort(new Error("probe closed"));
       const closed = new Promise<void>((resolve) => server.close(() => resolve()));
       server.closeAllConnections();
+      for (const socket of streamSockets) socket.destroy();
       await Promise.allSettled([...runningJobs]);
       await Promise.all([closed, previews?.gateway.close()]);
     },
   };
+}
+
+/** An HTTP error on a socket that asked to upgrade, which has no ServerResponse. Does nothing once the socket is gone. */
+function refuse(socket: Duplex, status: number, body: string) {
+  if (socket.destroyed) return;
+  socket.end(`HTTP/1.1 ${status} ${STATUS_CODES[status]}\r\ncontent-type: text/plain; charset=utf-8\r\ncontent-length: ${Buffer.byteLength(body)}\r\nconnection: close\r\n\r\n${body}`);
 }
 
 function send(res: ServerResponse, status: number, body: string, contentType = "text/plain; charset=utf-8") {
