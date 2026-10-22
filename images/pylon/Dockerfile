@@ -9,11 +9,13 @@ FROM debian:bookworm-slim@${DEBIAN_DIGEST}
 # gets its own from enableSsh's ssh-keygen -A. openssh-client is for git over Gondolin's SSH proxy, and the
 # boot path adds its config under the stock ssh_config's Include of /etc/ssh/ssh_config.d. procps gives
 # enableSsh's script `ps`, e2fsprogs gives Gondolin resize2fs for rootfs growth, and ripgrep and fd are
-# installed because pi's own download of them cannot pass the allowlist. xz-utils unpacks Node.
+# installed because pi's own download of them cannot pass the allowlist. xz-utils unpacks Node. Gondolin's
+# /init execs sandboxd as PID 1, which does not reap the orphans it adopts, so long-lived process trees such
+# as the Herdr server run under `tini -s --`, which reaps everything under them.
 RUN apt-get update \
  && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
       bash coreutils util-linux ca-certificates git python3 openssh-server openssh-client sudo curl \
-      procps e2fsprogs ripgrep fd-find xz-utils \
+      procps e2fsprogs ripgrep fd-find xz-utils tini \
  && rm -rf /var/lib/apt/lists/* /etc/ssh/ssh_host_* \
  && ln -s /usr/bin/fdfind /usr/local/bin/fd
 

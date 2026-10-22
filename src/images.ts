@@ -31,7 +31,8 @@ export type PortableArtifactId = Exclude<ArtifactId, CheckpointId>;
  *   2. apt: bash, coreutils, util-linux, ca-certificates, git, python3, openssh-server (S2: enableSsh
  *      needs a real sshd), openssh-client (git over Gondolin's SSH proxy), sudo, curl. The service is installed but not enabled. Also procps (enableSsh's
  *      script runs ps), e2fsprogs (rootfs growth runs resize2fs), ripgrep and fd (pi cannot download them
- *      through the allowlist), and xz-utils for the Node tarball.
+ *      through the allowlist), xz-utils for the Node tarball, and tini: sandboxd is PID 1 and does not reap
+ *      the orphans it adopts, so long-lived trees such as the Herdr server run under `tini -s --`.
  *   3. `user`, UID 1000, passwordless sudo, /home/user/workspace.
  *   4. Node from the checksum-verified official tarball into /usr/local.
  *   5. Claude Code and pi from npm, Herdr from its official installer into /usr/local/bin,
