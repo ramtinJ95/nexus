@@ -78,3 +78,8 @@ RUN cd /opt/nexus/dotfiles \
 RUN mkdir -p /home/user/.pi/agent/extensions /home/user/.claude \
  && herdr integration install pi \
  && herdr integration install claude
+# Nexus relaunches each pane's agent on wake (src/sessions.ts) and checks that it runs. Herdr's own resume on
+# restore would start it first, and when that start fails, as `claude --resume` does for a session never
+# prompted, Herdr still reports the agent as running.
+RUN mkdir -p /home/user/.config/herdr \
+ && printf '[session]\nresume_agents_on_restore = false\n' > /home/user/.config/herdr/config.toml
