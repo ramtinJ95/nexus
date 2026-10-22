@@ -1,0 +1,20 @@
+{
+  "arch": "x86_64",
+  "distro": "alpine",
+  "alpine": {
+    "version": "3.23.0",
+    "kernelPackage": "linux-virt",
+    "kernelImage": "vmlinuz-virt"
+  },
+  "oci": {
+    "runtime": "docker",
+    "platform": "linux/amd64",
+    "pullPolicy": "never"
+  },
+  "rootfs": { "sizeMb": 6144 },
+  "env": {
+    "PATH": "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+    "NODE_EXTRA_CA_CERTS": "/run/gondolin/ca-certificates.crt",
+    "DISABLE_AUTOUPDATER": "1"
+  }
+}

@@ -1,0 +1,111 @@
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
+import { existsSync } from "node:fs";
+import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { JobFailure } from "./backend.ts";
+import { buildImage, imageArchive, loadImageRecipe, pylonRecipeDir } from "./image-build.ts";
+import type { ImageRecipe } from "./images.ts";
+import type { NodeName } from "./protocol.ts";
+
+const pins: ImageRecipe["pins"] = {
+  debianDigest: `sha256:${"a".repeat(64)}`,
+  node: "24.22.1",
+  nodeSha256: "b".repeat(64),
+  claudeCode: "2.1.308",
+  pi: "1.4.0",
+  herdr: "0.9.5",
+  piEnv: "1.4.0",
+  piEnvSha256: "c".repeat(64),
+  gondolin: "0.13.0",
+  alpineKernel: "6.18.58-0-virt",
+  dotfilesCommon: "placeholder",
+};
+
+async function recipeDir(t: { after(fn: () => Promise<void>): void }, files: Record<string, string>): Promise<string> {
+  const dir = await mkdtemp(join(tmpdir(), "nexus-recipe-"));
+  t.after(() => rm(dir, { recursive: true }));
+  for (const [path, content] of Object.entries(files)) {
+    await mkdir(join(dir, path, ".."), { recursive: true });
+    await writeFile(join(dir, path), content);
+  }
+  return dir;
+}
+
+test("the checked-in recipe loads, with pins.json as its pins and build.sh left out", async () => {
+  const recipe = await loadImageRecipe();
+  const paths = recipe.files.map((f) => f.path);
+  assert.deepEqual(recipe.pins, JSON.parse(await readFile(join(pylonRecipeDir, "pins.json"), "utf8")));
+  for (const path of ["Dockerfile", "gondolin.json", "nexus"]) assert.ok(paths.includes(path), `${path} is an image input`);
+  assert.ok(!paths.includes("build.sh") && !paths.includes("pins.json"));
+});
+
+test("a recipe is every file under its directory, nested ones by posix path, sorted", async (t) => {
+  const dir = await recipeDir(t, {
+    "pins.json": JSON.stringify(pins),
+    "build.sh": "echo runner",
+    "nexus": "#!/bin/sh\n",
+    "dotfiles-common/pi/AGENTS.md": "pi rules",
+    "Dockerfile": "FROM scratch\n",
+  });
+  assert.deepEqual(await loadImageRecipe(dir), {
+    files: [
+      { path: "Dockerfile", content: "FROM scratch\n" },
+      { path: "dotfiles-common/pi/AGENTS.md", content: "pi rules" },
+      { path: "nexus", content: "#!/bin/sh\n" },
+    ],
+    pins,
+  });
+});
+
+test("loading refuses pins with a missing or unknown field, a bad digest, and a symlink in the recipe", async (t) => {
+  const { herdr: _, ...missing } = pins;
+  for (const bad of [missing, { ...pins, extra: "1" }, { ...pins, debianDigest: "bookworm-slim" }]) {
+    await assert.rejects(loadImageRecipe(await recipeDir(t, { "pins.json": JSON.stringify(bad) })));
+  }
+  const dir = await recipeDir(t, { "pins.json": JSON.stringify(pins), "Dockerfile": "" });
+  await symlink("Dockerfile", join(dir, "Containerfile"));
+  await assert.rejects(loadImageRecipe(dir), /Containerfile .* is not a regular file/);
+});
+
+test("buildImage refuses a recipe from a job whose paths or pins are unsafe, before it writes anything", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "nexus-image-out-"));
+  t.after(() => rm(root, { recursive: true }));
+  const outDir = join(root, "img-000000000000");
+  const node = "infra-testbench" as NodeName;
+  const bad: readonly ImageRecipe[] = [
+    { files: [{ path: "../escape", content: "" }], pins },
+    { files: [{ path: "/etc/passwd", content: "" }], pins },
+    { files: [{ path: "a//b", content: "" }], pins },
+    { files: [], pins: { ...pins, nodeSha256: "not-a-digest" } },
+  ];
+  for (const recipe of bad) {
+    await assert.rejects(buildImage(recipe, node, outDir, AbortSignal.timeout(5_000)), (err) => err instanceof JobFailure && err.code === "invalid");
+  }
+  assert.ok(!existsSync(`${outDir}.partial`) && !existsSync(join(root, "escape")));
+});
+
+const gnuTar = spawnSync("tar", ["--version"], { encoding: "utf8" }).stdout?.includes("GNU tar") === true;
+
+test("the image archive is byte-stable across copies and leaves image.json out", { skip: !gnuTar && "needs GNU tar" }, async (t) => {
+  const digest = async (dir: string) => {
+    const hash = createHash("sha256");
+    for await (const chunk of imageArchive(dir)) hash.update(chunk as Buffer);
+    return hash.digest("hex");
+  };
+  const a = await recipeDir(t, { "manifest.json": "{}", "rootfs.ext4": "root", "image.json": "first" });
+  await new Promise((resolve) => setTimeout(resolve, 1100));
+  const b = await recipeDir(t, { "rootfs.ext4": "root", "image.json": "second", "manifest.json": "{}" });
+  assert.equal(await digest(a), await digest(b));
+  await writeFile(join(b, "rootfs.ext4"), "changed");
+  assert.notEqual(await digest(a), await digest(b));
+});
+
+test("the image archive stream errors when tar fails", async () => {
+  await assert.rejects(async () => {
+    for await (const _ of imageArchive(join(tmpdir(), "nexus-no-such-image"))) { /* drain */ }
+  }, /tar exited/);
+});
