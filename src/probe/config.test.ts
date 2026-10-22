@@ -39,6 +39,13 @@ test("any spelling of a tailnet address is a listen host", () => {
   }
 });
 
+test("the pylon-vm backend takes an optional git SSH key, at absolute paths", () => {
+  const gitSsh = { privateKeyFile: "/etc/nexus/git_ed25519", knownHostsFile: "/etc/nexus/known_hosts" };
+  const config = parseProbeConfig(withChange((c) => { c.backend.gitSsh = gitSsh; }));
+  assert.deepEqual(config.backend, { ...valid.backend, gitSsh });
+  assert.throws(() => parseProbeConfig(withChange((c) => { c.backend.gitSsh = { ...gitSsh, privateKeyFile: "git_ed25519" }; })));
+});
+
 test("the docker backend takes image tags and optional labels", () => {
   const config = parseProbeConfig(withChange((c) => { c.backend = { kind: "docker", images: { "img-000000000000": "nexus-pylon-test:slice" } }; }));
   assert.deepEqual(config.backend, { kind: "docker", images: { "img-000000000000": "nexus-pylon-test:slice" }, labels: {} });

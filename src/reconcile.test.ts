@@ -28,6 +28,7 @@ const boot: Omit<BootInputs, "source"> = {
   resources: { cpus: 2, memoryGiB: 4, diskGiB: 10 },
   network: { allowedHosts: [], secrets: [] },
   repo: { url: "git@example.com:r.git", checkout: { branch: "main", commit: "c0ffee" } },
+  dotfiles: { repo: "https://example.com/dotfiles.git", ref: "main" },
 };
 const live = { previews: [], overlay: [] };
 

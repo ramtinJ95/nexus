@@ -43,13 +43,6 @@ const previewSchema = z.union([
 		description: previewText.optional(),
 	}),
 ]);
-export const profiles = {
-	tiny: { cpus: 1, memoryGiB: 2 },
-	small: { cpus: 2, memoryGiB: 4 },
-	medium: { cpus: 4, memoryGiB: 8 },
-	large: { cpus: 8, memoryGiB: 16 },
-	xlarge: { cpus: 16, memoryGiB: 32 },
-} as const;
 const serviceSchema = z.strictObject({
 	command: z.string().min(1),
 	cwd,
@@ -93,23 +86,11 @@ const serviceSchema = z.strictObject({
 export const configSchema = z
 	.strictObject({
 		version: z.literal(1).default(1),
-		profile: z
-			.enum(["tiny", "small", "medium", "large", "xlarge"])
-			.default("small"),
-		resources: z
-			.strictObject({
-				cpus: z.number().int().positive(),
-				memoryGiB: z.number().positive(),
-			})
-			.optional(),
 		diskGiB: z.number().int().min(2).default(60),
 		image: z.string().min(1).optional(),
 		workspace: guestPath.default("/workspace"),
 		setup: z.array(z.string().min(1)).default([]),
 		resume: z.array(z.string().min(1)).default([]),
-		network: z
-			.strictObject({ allowedHosts: z.array(z.string().min(1)).default([]) })
-			.default({ allowedHosts: [] }),
 		services: z.record(serviceName, serviceSchema).default({}),
 	})
 	.refine(
@@ -121,6 +102,61 @@ export const configSchema = z
 	);
 export type SandboxConfig = z.infer<typeof configSchema>;
 export type Service = z.infer<typeof serviceSchema>;
+const text1MiB = z
+	.string()
+	.max(1048576)
+	.refine((s) => Buffer.byteLength(s) <= 1048576, "Text exceeds 1 MiB");
+const userName = z.string().regex(/^[a-z_][a-z0-9_-]{0,31}$/);
+export const guestFileSchema = z.strictObject({
+	path: guestPath,
+	owner: userName,
+	mode: z.number().int().min(0).max(0o7777),
+	content: text1MiB,
+});
+export type GuestFile = z.infer<typeof guestFileSchema>;
+const hostPattern = z.string().min(1);
+/**
+ * What one boot applies, given to every create, prepare and start. It holds secret values, so it is never
+ * stored: the client hands it to the controller on its stdin, and the controller keeps it in memory.
+ */
+export const bootSchema = z.strictObject({
+	resources: z.strictObject({
+		cpus: z.number().int().positive(),
+		memoryGiB: z.number().positive(),
+	}),
+	allowedHosts: z.array(hostPattern),
+	/**
+	 * Keyed by the guest env name. A value is substituted only in requests to its own hosts, and is never
+	 * written into the guest. A host that echoes it back in a response still shows it to the guest.
+	 */
+	secrets: z.record(
+		z.string().regex(/^[A-Za-z_][A-Za-z0-9_]*$/),
+		z.strictObject({ hosts: z.array(hostPattern).min(1), value: z.string().min(1) }),
+	),
+	/** Git over SSH, terminated on the host. Only fetch and push of these repositories are let through. */
+	ssh: z
+		.strictObject({
+			privateKey: z.string().min(1),
+			knownHostsFile: z.string().startsWith("/"),
+			remotes: z
+				.array(
+					z.strictObject({
+						host: z.string().regex(/^[a-z0-9.-]+$/),
+						port: z.number().int().min(1).max(65535),
+						username: userName,
+						/** The path as git sends it to the server, which is how the URL spells it. */
+						repo: z.string().min(1),
+					}),
+				)
+				.min(1),
+		})
+		.nullable(),
+	/** Written before the hooks, on every boot. */
+	files: z.array(guestFileSchema),
+	/** Run on every boot, before setup or resume. Each waits to completion. A failure is logged, not fatal. */
+	hooks: z.array(z.string().min(1)),
+});
+export type BootSpec = z.infer<typeof bootSchema>;
 export const commandOutcomeSchema = z.discriminatedUnion("state", [
 	z.strictObject({ state: z.literal("exited"), exitCode: z.number().int() }),
 	z.strictObject({ state: z.literal("timed-out") }),
@@ -137,6 +173,7 @@ export const actionSchema = z.discriminatedUnion("action", [
 		action: z.literal("prepare"),
 		...identity,
 		config: configSchema,
+		boot: bootSchema,
 		labels,
 	}),
 	z
@@ -145,13 +182,15 @@ export const actionSchema = z.discriminatedUnion("action", [
 			...identity,
 			config: configSchema.optional(),
 			template: nameSchema.optional(),
+			boot: bootSchema,
 			labels,
 		})
 		.refine(
 			(a) => Number(!!a.config) + Number(!!a.template) === 1,
 			"Supply config or template",
 		),
-	z.strictObject({ action: z.enum(["start", "stop", "inspect"]), ...identity }),
+	z.strictObject({ action: z.literal("start"), ...identity, boot: bootSchema }),
+	z.strictObject({ action: z.enum(["stop", "inspect"]), ...identity }),
 	z.strictObject({
 		action: z.literal("shell"),
 		...identity,
@@ -186,13 +225,9 @@ export const actionSchema = z.discriminatedUnion("action", [
 	}),
 	z.strictObject({ action: z.literal("read"), ...identity, path: guestPath }),
 	z.strictObject({
-		action: z.literal("write"),
+		action: z.literal("write-files"),
 		...identity,
-		path: guestPath,
-		content: z
-			.string()
-			.max(1048576)
-			.refine((s) => Buffer.byteLength(s) <= 1048576, "Text exceeds 1 MiB"),
+		files: z.array(guestFileSchema).max(64),
 	}),
 	z.strictObject({
 		action: z.literal("services"),

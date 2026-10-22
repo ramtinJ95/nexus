@@ -27,6 +27,7 @@ const { desired: _, ...pylon } = newPylonRecord({
   boot: {
     pylonId, image: "img-000000000000", resources: project.resources, network: { allowedHosts: ["a.example"], secrets: [] },
     repo: { url: project.repoUrl, checkout: { branch: "main", commit: "origin/main" } },
+    dotfiles: { repo: "https://example.com/dotfiles.git", ref: "main" },
   },
   firstBoot: { kind: "fresh", preSetup: null },
   live: { previews: [], overlay: [] },

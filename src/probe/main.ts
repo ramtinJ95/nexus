@@ -11,18 +11,23 @@
 import { createDockerBackend } from "../docker-backend.ts";
 import { createPylonVmBackend } from "../pylon-vm-backend.ts";
 import { localApiWhois } from "../tailscale.ts";
-import { readProbeConfig, readSecretsFile } from "./config.ts";
+import { readProbeConfig, readSecretsFile, type ProbeConfig } from "./config.ts";
 import { startProbe } from "./server.ts";
 
 const config = await readProbeConfig(process.argv[2] ?? "/etc/nexus/probe.json");
+// One source, so the probe's pre-boot check and the VMs see the same values.
+const secrets = await readSecretsFile(config.secretsFile);
+function pylonVm({ gitSsh, ...backend }: Extract<ProbeConfig["backend"], { kind: "pylon-vm" }>) {
+  return createPylonVmBackend({ ...backend, secrets, ...(gitSsh === undefined ? {} : { gitSsh }) });
+}
 const probe = await startProbe({
   node: config.node,
   host: config.listen.host,
   port: config.listen.port,
   auth: config.auth,
   whois: localApiWhois(),
-  backend: config.backend.kind === "pylon-vm" ? createPylonVmBackend(config.backend) : createDockerBackend(config.backend),
-  secrets: await readSecretsFile(config.secretsFile),
+  backend: config.backend.kind === "pylon-vm" ? pylonVm(config.backend) : createDockerBackend(config.backend),
+  secrets,
 });
 console.log(`probe ${config.node} listening on ${config.listen.host}:${probe.port} as boot ${probe.bootId}, ${config.backend.kind} backend`);
 

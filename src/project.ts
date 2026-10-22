@@ -200,6 +200,7 @@ export interface BootInputs {
   resources: Project["resources"];
   network: { allowedHosts: readonly string[]; secrets: readonly SecretGrant[] };
   repo: { url: string; checkout: { branch: string; commit: string } }; // checked out on template and fresh boots only
+  dotfiles: PylonOverlay["dotfiles"]; // pulled on every boot
 }
 
 /** Applied on every spawn, including to a running pylon. Hashed into LiveHash. */

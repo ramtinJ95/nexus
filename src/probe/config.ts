@@ -34,6 +34,8 @@ const configSchema = z.strictObject({
       stateRoot: absolutePath,
       /** Gondolin asset directories, at the same path on every node (see ArtifactStore). */
       images: z.record(imageId, absolutePath),
+      /** Omitted: pylons can clone only over HTTPS. The key file is readable by the probe's user only. */
+      gitSsh: z.strictObject({ privateKeyFile: absolutePath, knownHostsFile: absolutePath }).optional(),
     }),
     /** Local development only: Docker containers stand in for pylon VMs. */
     z.strictObject({ kind: z.literal("docker"), images: z.record(imageId, z.string()), labels: z.record(z.string(), z.string()).default({}) }),

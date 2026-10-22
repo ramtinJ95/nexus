@@ -11,7 +11,8 @@ import { createHash } from "node:crypto";
 import { once } from "node:events";
 import { PassThrough, type Readable } from "node:stream";
 import { createReadStream, existsSync, readFileSync } from "node:fs";
-import { mkdir, readdir, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { createRequire } from "node:module";
 import { dirname, join, relative, resolve, sep } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
@@ -111,12 +112,12 @@ export function imageArchive(dir: string, signal?: AbortSignal): Readable {
  * 1. docker build the Dockerfile, tagged nexus-pylon:<image ID>, with the pins as build args.
  * 2. Seed: the Alpine module tree for pins.alpineKernel, absolute vmlinuz link included. A kernel that
  *    differs from the pin fails the job, because the workaround breaks silently otherwise.
- * 3. Gondolin's build into outDir.partial, then the Docker tag is removed.
- * 3a. Modes: Gondolin 0.13.0 extracts the OCI rootfs with a non-root `tar -xf`, which drops setuid, setgid
+ * 3. Gondolin's build into outDir.partial.
+ * 3a. Modes (restoreModes): Gondolin 0.13.0 extracts the OCI rootfs with a non-root `tar -xf`, which drops setuid, setgid
  *    and sticky bits and applies the umask, and it restores only owners. The modes of every file and
  *    directory with one of those bits are listed from the Docker image, written into rootfs.ext4 with
- *    debugfs, read back, and Gondolin's manifest is updated for the changed rootfs. Delete this step, like
- *    the seed, once the Gondolin pin moves to a release that keeps modes.
+ *    debugfs, read back, and Gondolin's manifest is updated for the changed rootfs. Then the Docker tag is
+ *    removed. Delete this step, like the seed, once the Gondolin pin moves to a release that keeps modes.
  * 4. Smoke boot at 4 GiB (2 GiB hangs): plain exec PATH and CA, `user` with a setuid sudo that prints no
  *    warning and the hostname pylon, which resolves through /etc/hosts, the pinned versions of
  *    node, claude, pi and herdr as user, sshd and sandboxssh, Herdr's pi integration, curl and Node fetch
@@ -149,7 +150,7 @@ export async function buildImage(input: ImageRecipe, node: NodeName, out: string
     await mkdir(dirname(join(context, file.path)), { recursive: true });
     await writeFile(join(context, file.path), file.content);
   }
-  // The tag only lives until Gondolin has exported it.
+  // The tag only lives until the modes are listed from it.
   const tag = `nexus-pylon:${id}`;
   const seed = join(scratch, "kernel-module-seed");
   const { config, alpine } = gondolinConfig(recipe, tag, seed, context);
@@ -158,19 +159,16 @@ export async function buildImage(input: ImageRecipe, node: NodeName, out: string
 
   const args = Object.entries(dockerBuildArgs(recipe.pins)).flatMap(([name, value]) => ["--build-arg", `${name}=${value}`]);
   await run("docker", ["build", "--platform", "linux/amd64", "--label", `nexus.image=${id}`, "--tag", tag, ...args, context], signal);
-  let modes: readonly ModeFix[];
   try {
-    const listing = await run("docker", ["run", "--rm", "--network", "none", "--label", `nexus.image=${id}`, "--user", "0:0", "--entrypoint", "find", tag, ...modeListingArgs], signal);
-    modes = parseOrFail(() => parseModeListing(listing.stdout));
     // The S1 workaround. Delete this step once Gondolin's kernel-modules copy sets verbatimSymlinks
     // (spikes/UPSTREAM-ISSUE-DRAFT.md).
     await seedKernelModules(config.arch, alpine, recipe.pins.alpineKernel, scratch, seed, signal);
     await run(process.execPath, [gondolinBuild, configFile, partial, join(scratch, "gondolin-work")], signal);
+    await restoreModes(tag, partial, `nexus.image=${id}`, signal);
   } finally {
     await run("docker", ["image", "rm", tag], AbortSignal.timeout(60_000))
       .catch((err: Error) => process.stderr.write(`buildImage could not remove ${tag}, so it stays in Docker: ${err.message}\n`));
   }
-  await restoreModes(partial, modes, scratch, signal);
   await rm(scratch, { recursive: true });
 
   // Nothing is published unless a pylon booted from these assets works.
@@ -341,19 +339,31 @@ function parseOrFail<T>(parse: () => T): T {
   }
 }
 
-async function restoreModes(assets: string, fixes: readonly ModeFix[], scratch: string, signal: AbortSignal): Promise<void> {
+/**
+ * Gives the rootfs of the Gondolin build in `assets` back the modes its extraction lost (buildImage's step
+ * 3a), for any build from the Docker image `tag`, which must still exist. The modes are listed as root in a
+ * container labelled `label`, written with debugfs and read back, and Gondolin's manifest is updated.
+ */
+export async function restoreModes(tag: string, assets: string, label: string, signal: AbortSignal): Promise<void> {
+  const listing = await run("docker", ["run", "--rm", "--network", "none", "--label", label, "--user", "0:0", "--entrypoint", "find", tag, ...modeListingArgs], signal);
+  const fixes = parseOrFail(() => parseModeListing(listing.stdout));
   const manifestFile = join(assets, "manifest.json");
   const manifest = JSON.parse(await readFile(manifestFile, "utf8")) as GondolinManifest;
   const rootfs = join(assets, manifest.assets.rootfs);
-  const writes = join(scratch, "debugfs-modes.txt");
-  const reads = join(scratch, "debugfs-stat.txt");
-  await writeFile(writes, debugfsModeCommands(fixes));
-  await writeFile(reads, debugfsStatCommands(fixes));
-  const written = await run("debugfs", ["-w", "-f", writes, rootfs], signal);
-  const errors = debugfsErrors(written.stderr);
-  if (errors.length > 0) throw new JobFailure("backend", `debugfs could not restore modes in ${rootfs}`, errors.join("\n"));
-  const mismatches = modeMismatches(fixes, parseDebugfsModes((await run("debugfs", ["-f", reads, rootfs], signal)).stdout));
-  if (mismatches.length > 0) throw new JobFailure("backend", `${mismatches.length} modes did not stick in ${rootfs}`, mismatches.join("\n"));
+  const scratch = await mkdtemp(join(tmpdir(), "nexus-modes-"));
+  try {
+    const writes = join(scratch, "debugfs-modes.txt");
+    const reads = join(scratch, "debugfs-stat.txt");
+    await writeFile(writes, debugfsModeCommands(fixes));
+    await writeFile(reads, debugfsStatCommands(fixes));
+    const written = await run("debugfs", ["-w", "-f", writes, rootfs], signal);
+    const errors = debugfsErrors(written.stderr);
+    if (errors.length > 0) throw new JobFailure("backend", `debugfs could not restore modes in ${rootfs}`, errors.join("\n"));
+    const mismatches = modeMismatches(fixes, parseDebugfsModes((await run("debugfs", ["-f", reads, rootfs], signal)).stdout));
+    if (mismatches.length > 0) throw new JobFailure("backend", `${mismatches.length} modes did not stick in ${rootfs}`, mismatches.join("\n"));
+  } finally {
+    await rm(scratch, { recursive: true });
+  }
 
   // The rootfs changed, so Gondolin's checksum and its content-derived build ID are recomputed with its own function.
   const { computeAssetBuildId } = (await import(pathToFileURL(join(dirname(gondolinPackageJson), "dist", "src", "assets.js")).href)) as {

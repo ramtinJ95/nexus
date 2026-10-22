@@ -147,8 +147,7 @@ export async function startApi(options: ApiOptions): Promise<Api> {
       pylonId, image, resources: project.resources,
       network: { allowedHosts: effectiveAllowedHosts(project), secrets: project.secrets },
       repo: { url: project.repoUrl, checkout: { branch, commit: request.commit ?? `origin/${branch}` } },
-      // BootInputs gains `dotfiles` with the pylon-vm-boot stream. The spread compiles before that lands. Make it `dotfiles,` after.
-      ...{ dotfiles },
+      dotfiles,
     };
     const { desired: _, ...pylon } = newPylonRecord({
       thread: id, pylonId, node, desired: "running",
