@@ -1,0 +1,40 @@
+# The Nexus probe. deploy/install-probe.sh installs this file as /etc/systemd/system/nexus-probe.service.
+#
+# It runs as the dedicated system user `nexus`, not a login user. The probe answers on the tailnet, so a
+# compromise should reach the pylon state under /var/lib/nexus (its home) and nothing of a person's account.
+# `nexus` is in the `kvm` group for QEMU and reads /etc/nexus/secrets.env (root:nexus, 0640) through its group.
+#
+# Each pylon VM runs under a detached controller that the probe starts. The controller has its own session,
+# but it is still in this unit's cgroup, and systemd's default KillMode=control-group would send SIGTERM to
+# every controller on stop or restart, which stops every VM. KillMode=process signals the probe alone, so
+# stopping, restarting or crashing the probe leaves every pylon running. systemd then logs the controllers
+# as left-over processes on the next start, which is expected. Never `systemctl kill` this unit: it signals
+# the whole cgroup by default.
+#
+# No mount-namespace hardening (PrivateTmp, ProtectSystem and the like): each start of the unit makes a new
+# namespace, and controllers that outlive a probe would stay in the old one.
+
+[Unit]
+Description=Nexus probe (pylon lifecycle jobs on this node)
+Wants=network-online.target
+After=network-online.target tailscaled.service
+
+[Service]
+Type=simple
+User=nexus
+Group=nexus
+SupplementaryGroups=kvm
+WorkingDirectory=/var/lib/nexus
+# Controllers start as `node` from this PATH, so Node 26 must be in one of these directories.
+Environment=PATH=/usr/local/bin:/usr/bin
+ExecStart=/usr/bin/env node /opt/nexus/current/src/probe/main.ts /etc/nexus/probe.json
+KillMode=process
+TimeoutStopSec=30
+# The listen address exists only once tailscaled is up, so an early start fails and is retried.
+Restart=on-failure
+RestartSec=5
+UMask=0077
+NoNewPrivileges=yes
+
+[Install]
+WantedBy=multi-user.target
