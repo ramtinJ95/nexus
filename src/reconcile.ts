@@ -1,0 +1,182 @@
+/**
+ * The control plane's lifecycle policy, as pure functions. The shell around it (the registry, the tick
+ * loop, the probe clients) only feeds facts in and sends the returned job out.
+ *
+ * Single sources of truth:
+ * - The desired phase is derived from the thread and its activity on every tick. It is never stored, so
+ *   nothing can forget to update it. A wake is just new activity.
+ * - The actual state shown in the dashboard is derived from the last observation and the job in flight.
+ * - Drift between a running pylon and its LiveSpec is detected by hash, not by a generation counter.
+ * - The planner runs only for pylons in the registry. A pylon a node reports that the registry does not
+ *   know is an orphan. The dashboard lists it, and only a human deletes it.
+ */
+import { randomUUID } from "node:crypto";
+import { retryable } from "./protocol.ts";
+import type { Job, JobEnvelope, JobErrorCode, JobId, JobStatus, LiveHash, NodeName, ProbeEvent, PylonId, PylonObservation, SessionFact } from "./protocol.ts";
+import type { BootInputs, LiveSpec, PylonSource } from "./project.ts";
+import type { ArtifactId, CheckpointId } from "./images.ts";
+
+export type ThreadStatus = "active" | "idle" | "archived" | "deleted";
+export type DesiredPhase = "running" | "paused" | "deleted";
+
+export interface ActivityFacts {
+  status: ThreadStatus;
+  agentTurnRunning: boolean; // the pi-durable turn for this thread, known locally
+  lastAgentActivityAt: number; // pi-durable turns, and any observed session in `working`
+  lastHumanActivityAt: number; // messages, attached terminals, preview hits, dashboard opens
+}
+
+/** Amp's numbers. */
+export const idlePolicy = { agentIdleMs: 5 * 60_000, humanIdleMs: 20 * 60_000 } as const;
+
+export function desiredPhase(a: ActivityFacts, now: number): DesiredPhase {
+  if (a.status === "deleted") return "deleted";
+  if (a.status === "archived") return "paused";
+  // A preview hit on a paused pylon updates lastHumanActivityAt, which is what wakes it.
+  const busy = a.agentTurnRunning
+    || now - a.lastAgentActivityAt < idlePolicy.agentIdleMs
+    || now - a.lastHumanActivityAt < idlePolicy.humanIdleMs;
+  return busy ? "running" : "paused";
+}
+
+export interface PlanInput {
+  pylonId: PylonId;
+  node: NodeName;
+  nodeOnline: boolean;
+  desired: DesiredPhase;
+  /** Everything a boot needs except its source, which the planner picks from the observation. */
+  boot: Omit<BootInputs, "source">;
+  firstBoot: Extract<PylonSource, { kind: "template" | "fresh" }>;
+  live: LiveSpec;
+  liveHash: LiveHash;
+  nextCheckpoint: CheckpointId; // minted by the registry, used only if this step is a pause
+  observed: PylonObservation | "absent";
+  nodeArtifacts: ReadonlySet<ArtifactId>;
+  inFlight: JobStatus | null; // for this pylon, or for an artifact this pylon is waiting on
+  attempts: { count: number; lastFailedAt: number | null; lastCode: JobErrorCode | null };
+  /** Online nodes other than `node` that hold the artifact. */
+  holders(artifact: ArtifactId): readonly NodeName[];
+  /** The registry's recorded archive hash, which fetch-artifact verifies the copy against. */
+  artifactSha256(artifact: ArtifactId): string;
+}
+
+export type PlanStep =
+  | { kind: "done" }
+  | { kind: "wait"; reason: "node-offline" | "in-flight" | "backoff" | "transitioning" }
+  | { kind: "submit"; job: Job }
+  | { kind: "fail"; reason: string }; // the registry marks the pylon failed until a human retries
+
+export const maxAttempts = 5;
+const backoffScheduleMs = [5_000, 15_000, 45_000, 120_000, 120_000] as const;
+/** Wait after the `attempt`th consecutive failure, counting from 1. */
+export function backoffMs(attempt: number): number {
+  if (!Number.isInteger(attempt) || attempt < 1) throw new RangeError(`attempt must be a positive integer, got ${attempt}`);
+  return backoffScheduleMs[Math.min(attempt, backoffScheduleMs.length) - 1]!;
+}
+
+/** A rule returns null when it does not apply. planPylon returns the first step a rule gives, in this order. */
+type Rule = (input: PlanInput, now: number) => PlanStep | null;
+
+const done: PlanStep = { kind: "done" };
+const wait = (reason: Extract<PlanStep, { kind: "wait" }>["reason"]): PlanStep => ({ kind: "wait", reason });
+const submit = (job: Job): PlanStep => ({ kind: "submit", job });
+const fail = (reason: string): PlanStep => ({ kind: "fail", reason });
+
+function bootSource(input: PlanInput): PylonSource {
+  const o = input.observed;
+  return o !== "absent" && o.phase === "stopped" && o.checkpoint !== null ? { kind: "resume", checkpoint: o.checkpoint } : input.firstBoot;
+}
+
+const planRules: readonly Rule[] = [
+  // 1. Nothing moves to another node on its own, because the disk lives there.
+  (i) => i.nodeOnline ? null : wait("node-offline"),
+  // 2.
+  (i) => i.inFlight?.state === "running" ? wait("in-flight") : null,
+  // 3. Delete ignores the attempt budget.
+  (i) => i.desired !== "deleted" ? null : i.observed === "absent" ? done : submit({ kind: "delete", pylonId: i.pylonId }),
+  // 4.
+  ({ attempts: a }) => a.lastCode !== null && !retryable[a.lastCode] ? fail(`last job failed with ${a.lastCode}, which is not retryable`) : null,
+  ({ attempts: a }) => a.count >= maxAttempts ? fail(`gave up after ${a.count} failed attempts, the last with ${a.lastCode ?? "no code"}`) : null,
+  ({ attempts: a }, now) => a.count > 0 && a.lastFailedAt !== null && now < a.lastFailedAt + backoffMs(a.count) ? wait("backoff") : null,
+  // 5.
+  ({ observed: o }) => o !== "absent" && (o.phase === "booting" || o.phase === "stopping" || o.phase === "deleting") ? wait("transitioning") : null,
+  // 6.
+  (i) => {
+    if (i.desired !== "paused") return null;
+    if (i.observed === "absent" || i.observed.phase === "stopped") return done;
+    return submit({ kind: "pause", pylonId: i.pylonId, checkpoint: i.nextCheckpoint });
+  },
+  // 7a. A broken disk is never booted over or replaced on its own.
+  ({ observed: o }) => o !== "absent" && o.phase === "broken" ? fail(`pylon is broken: ${o.detail}`) : null,
+  // 7b. Templates are built before planPylon runs. See chooseTemplate in images.ts.
+  // A running VM ignores its boot inputs, so it needs no artifacts, even after its template is collected.
+  (i) => {
+    if (i.observed !== "absent" && i.observed.phase === "running") return null;
+    const missing = requiredArtifacts({ ...i.boot, source: bootSource(i) }).find((id) => !i.nodeArtifacts.has(id));
+    if (missing === undefined) return null;
+    const from = i.holders(missing)[0];
+    if (from === undefined) return fail(`artifact-missing: no online node holds ${missing}`);
+    return submit({ kind: "fetch-artifact", artifact: missing, from, sha256: i.artifactSha256(missing) });
+  },
+  // 7c.
+  ({ observed: o, liveHash }) => o !== "absent" && o.phase === "running" && o.liveHash === liveHash ? done : null,
+  (i) => submit({ kind: "spawn", pylonId: i.pylonId, boot: { ...i.boot, source: bootSource(i) }, live: i.live, liveHash: i.liveHash }),
+];
+
+export function planPylon(input: PlanInput, now: number): PlanStep {
+  for (const rule of planRules) {
+    const step = rule(input, now);
+    if (step !== null) return step;
+  }
+  throw new Error("unreachable: the last plan rule always returns a step");
+}
+
+/** The image first, because a template or checkpoint is an overlay on it. */
+export function requiredArtifacts(boot: BootInputs): readonly ArtifactId[] {
+  return boot.source.kind === "template" ? [boot.image, boot.source.template] : [boot.image];
+}
+
+export type ActualState = "spawning" | "running" | "pausing" | "paused" | "deleting" | "deleted" | "failed" | "unknown";
+
+const inFlightState: Partial<Record<Job["kind"], ActualState>> = { spawn: "spawning", pause: "pausing", delete: "deleting" };
+const observedState: { readonly [P in PylonObservation["phase"] | "absent"]: ActualState } = {
+  booting: "spawning", running: "running", stopping: "pausing", stopped: "paused", deleting: "deleting", absent: "deleted",
+  broken: "failed", // the backend says the VM was interrupted or failed. The planner pauses or fails it.
+};
+
+/** What the data model calls Pylon.actualState, computed rather than stored. */
+export function actualState(observed: PylonObservation | "absent", inFlight: JobStatus | null, nodeOnline: boolean, gaveUp: boolean): ActualState {
+  // Offline shows the last observation in the dashboard, marked stale.
+  if (!nodeOnline) return "unknown";
+  if (gaveUp) return "failed";
+  const fromJob = inFlight?.state === "running" ? inFlightState[inFlight.kind] : undefined;
+  return fromJob ?? observedState[observed === "absent" ? "absent" : observed.phase];
+}
+
+export const envelopeTtlMs = 30_000;
+export function envelope(job: Job, node: NodeName, now: number): JobEnvelope {
+  return {
+    jobId: randomUUID() as JobId,
+    node,
+    issuedAt: new Date(now).toISOString(),
+    notAfter: new Date(now + envelopeTtlMs).toISOString(),
+    job,
+  };
+}
+
+/** Record writes derived from one probe event. The control plane is the only writer of every record. */
+export type RegistryWrite =
+  | { record: "node"; node: NodeName; state: "online" | "offline"; capacity: NodeCapacity }
+  | { record: "session"; pylonId: PylonId; herdrPane: string; fact: SessionFact | null } // null: the pane is gone. Adopts panes opened by hand in Herdr
+  | { record: "output"; pylonId: PylonId; kind: "branch" | "diff" | "preview" | "file"; ref: string }
+  | { record: "activity"; pylonId: PylonId; human: number | null; agent: number | null }
+  | { record: "orphan"; node: NodeName; pylonId: PylonId }
+  | { record: "job"; status: JobStatus };
+type NodeCapacity = { memoryGiB: number; committedMemoryGiB: number; diskFreeGiB: number };
+
+export function ingest(event: ProbeEvent, previous: PylonObservation | "absent"): readonly RegistryWrite[] {
+  // TODO: outputs are derived here, not reported by the probe as outputs:
+  // branch with pushedAs -> "branch". Dirty tree -> "diff" (one per head). Ready preview -> "preview".
+  // declaredOutputs -> as declared. Diff each observation against `previous`, so writes are idempotent upserts.
+  throw new Error("not implemented");
+}
