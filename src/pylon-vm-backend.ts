@@ -31,7 +31,12 @@ export interface PylonVmBackendOptions {
   stateRoot: string;
   /** The Gondolin asset directory (manifest.json, kernel, initramfs, rootfs) that each image ID names. */
   images: Readonly<Record<ImageId, string>>;
-  /** Read at every boot and handed to the instance's controller on its stdin, so no value is written to the instance directory. */
+  /**
+   * Read at every boot and handed to the instance's controller on its stdin, so no value is written to the
+   * instance directory, the controller's log or the guest. The guest sees placeholders, which the host swaps
+   * for values only in requests to the grant's hosts. A granted host that echoes a credential back in its
+   * response still shows the value to the guest, so grant only hosts that do not reflect credentials.
+   */
   secrets: SecretSource;
   /**
    * The node's git SSH identity, for SSH repository and dotfiles URLs. Gondolin terminates the guest's SSH on
@@ -80,12 +85,15 @@ const asUser = (script: string, cwd: string) => `runuser -l user -c ${q(`cd ${q(
 
 type SshRemote = NonNullable<BootSpec["ssh"]>["remotes"][number];
 
-/** `[user@]host:path` (git's scp-like form: a colon before any slash), `ssh://[user@]host[:port]/path`, or HTTPS. */
+/**
+ * `[user@]host:path` (git's scp-like form: a colon before any slash), `ssh://[user@]host[:port]/path`, or HTTPS.
+ * The path is kept as git sends it: git percent-decodes an ssh:// path and drops its slash before `~`.
+ */
 function sshRemoteOf(url: string): SshRemote | null {
   if (url.startsWith("https://")) return null;
   if (url.startsWith("ssh://")) {
     const u = new URL(url);
-    return { host: u.hostname.toLowerCase(), port: u.port === "" ? 22 : Number(u.port), username: decodeURIComponent(u.username) || "git", repo: decodeURIComponent(u.pathname) };
+    return { host: u.hostname.toLowerCase(), port: u.port === "" ? 22 : Number(u.port), username: decodeURIComponent(u.username) || "git", repo: decodeURIComponent(u.pathname).replace(/^\/~/, "~") };
   }
   const scp = /^(?:([^@/:]+)@)?([^@/:]+):(?!\/\/)(.+)$/.exec(url);
   if (scp === null) throw new JobFailure("invalid", `${url} is neither an SSH nor an HTTPS git URL`);
@@ -107,7 +115,7 @@ function checkSshRemotes(pylonId: PylonId, remotes: readonly SshRemote[]): void 
 /**
  * Every boot, as user, before setup or resume. A failed or slow pull keeps what the disk has, which is the
  * image's baked copy until a pull succeeds. Then the layer's install runs and Herdr's integrations are
- * reinstalled. Each outcome is one `dotfiles:` or `herdr:` line in the controller log, and none fails the
+ * reinstalled. Each step's outcome (pull, install, Herdr) is one `dotfiles:` or `herdr:` line in the controller log, and none fails the
  * boot. The fetch has its own limit, so the fork's 120 s hook deadline never cuts off what follows it.
  */
 function dotfilesPull({ repo, ref }: BootInputs["dotfiles"]): string {
@@ -118,7 +126,9 @@ function dotfilesPull({ repo, ref }: BootInputs["dotfiles"]): string {
     `then echo ${q(`dotfiles: pulled ${repo} ${ref} at`)} "${at}"`,
     `else echo ${q(`dotfiles: the pull of ${repo} ${ref} failed, keeping`)} "${at}"`,
     "fi",
-    `if test -x ${dotfilesDir}/install; then cd ${dotfilesDir} && ./install; fi`,
+    `if ! test -x ${dotfilesDir}/install; then echo 'dotfiles: no install script'`,
+    `elif (cd ${dotfilesDir} && ./install); then echo 'dotfiles: installed'`,
+    `else echo "dotfiles: install exited $?"; fi`,
     // The layer's install may replace ~/.claude and ~/.pi/agent files that hold Herdr's hooks, which report session IDs.
     "if ! command -v herdr >/dev/null; then echo 'herdr: not installed, integrations skipped'",
     "elif herdr integration install pi && herdr integration install claude; then echo 'herdr: reinstalled the pi and claude integrations'",

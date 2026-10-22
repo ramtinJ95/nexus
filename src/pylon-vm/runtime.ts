@@ -16,6 +16,36 @@ import { GuestProcesses } from "./processes.ts";
 import { GuestServices } from "./services.ts";
 import { existsError, shellQuote as q, saveJson } from "./storage.ts";
 
+/**
+ * Logs a resume's output and then one `resume:` line with its outcome, however long it runs. A failed resume
+ * does not fail the boot, so that an agent can still fix the script. Waits at most `waitMs`, and true means
+ * the resume is still running and is followed to its end in the background.
+ */
+export async function reportResume(
+	processes: Pick<GuestProcesses, "status">,
+	pid: string,
+	waitMs: number,
+	log: (line: string) => void,
+): Promise<boolean> {
+	const follow = async (timeoutMs: number) => {
+		const result = await processes.status(pid, timeoutMs);
+		if (result.output) log(result.output);
+		if (result.running) return true;
+		const code = result.exitCode!;
+		// The process supervisor reports a death by signal N as 128 + N.
+		log(`resume: exited ${code}${code > 128 ? ` (signal ${code - 128})` : ""}`);
+		return false;
+	};
+	if (!(await follow(waitMs))) return false;
+	log(`resume: continues in the background as ${pid}`);
+	void (async () => {
+		while (await follow(60000));
+	})().catch((error: unknown) =>
+		log(`resume: no outcome, because ${error instanceof Error ? error.message : String(error)}`),
+	);
+	return true;
+}
+
 export class SandboxRuntime {
 	private vm: VM | undefined;
 	private processes: GuestProcesses | undefined;
@@ -164,13 +194,8 @@ export class SandboxRuntime {
 				hooks.map((cmd) => `/bin/sh -lc ${q(cmd)} || exit $?`).join("\n"),
 				config.workspace,
 			);
-			const result = await this.processes.status(pid, 10000);
-			console.log(result.output);
-			if (result.running) {
+			if (await reportResume(this.processes, pid, 10000, console.log))
 				this.resumePid = pid;
-				console.log(`Resume continues in background: ${pid}`);
-			} else if (result.exitCode !== 0)
-				console.error(`Resume exited ${result.exitCode}`);
 		}
 		this.managed = new GuestServices(
 			vm,

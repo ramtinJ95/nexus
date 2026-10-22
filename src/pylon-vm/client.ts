@@ -20,6 +20,7 @@ import {
 	replySchema,
 	statusSchema,
 } from "./contracts.ts";
+import { alive, publishIdentity, readIdentity } from "./identity.ts";
 import {
 	directory,
 	existsError,
@@ -90,38 +91,13 @@ async function reachable(
 		throw error;
 	}
 }
-const controllerAlive = (dir: string) => pidAlive(join(dir, "controller.pid"));
+const controllerAlive = (dir: string) => published(join(dir, "controller.pid"));
 /** A client that holds the launch lock is still to start the controller, or waits for it to come up. */
-const launching = (dir: string) => pidAlive(join(dir, "launch.lock", "owner"));
-/** A missing PID file means the process has not published itself yet, or is gone. */
-async function pidAlive(file: string): Promise<boolean> {
-	try {
-		const raw = await readFile(file, "utf8");
-		let pid: number;
-		try {
-			const saved = JSON.parse(raw);
-			// Also accept PID records written by the unpublished identity experiment.
-			pid = typeof saved === "number" ? saved : saved?.pid;
-		} catch {
-			throw new Error(
-				`Sandbox process identity in ${file} is invalid. Inspect controller logs before retrying`,
-			);
-		}
-		if (!Number.isSafeInteger(pid) || pid <= 0)
-			throw new Error(
-				`Sandbox process identity in ${file} is invalid. Inspect controller logs before retrying`,
-			);
-		try {
-			process.kill(pid, 0);
-			return true;
-		} catch (error) {
-			if (existsError(error, "ESRCH")) return false;
-			throw error;
-		}
-	} catch (error) {
-		if (existsError(error, "ENOENT")) return false;
-		throw error;
-	}
+const launching = (dir: string) => published(join(dir, "launch.lock", "owner"));
+/** A missing identity file means the process has not published itself yet, or is gone. */
+async function published(file: string): Promise<boolean> {
+	const identity = await readIdentity(file);
+	return identity !== null && (await alive(identity));
 }
 /** An instance whose controller already runs keeps the spec it booted with. */
 async function launch(
@@ -175,19 +151,15 @@ async function launch(
 			);
 		}
 		try {
-			const owner = Number(await readFile(join(lock, "owner"), "utf8"));
-			if (!Number.isSafeInteger(owner) || owner <= 0)
+			const owner = await readIdentity(join(lock, "owner"));
+			if (owner === null)
 				throw new Error(
 					"Sandbox start ownership is unavailable. Read controller logs before retrying",
 				);
-			try {
-				process.kill(owner, 0);
+			if (await alive(owner))
 				throw new Error(
 					"Sandbox start is already in progress. Retry inspect shortly",
 				);
-			} catch (ownerError) {
-				if (!existsError(ownerError, "ESRCH")) throw ownerError;
-			}
 			if (await controllerAlive(dir))
 				throw new Error(
 					"Sandbox controller is still starting. Retry inspect shortly",
@@ -199,7 +171,7 @@ async function launch(
 		}
 	}
 	try {
-		await saveJson(join(lock, "owner"), process.pid);
+		await publishIdentity(join(lock, "owner"));
 		await saveJson(join(dir, "status.json"), { state: "starting", name });
 		await rm(join(dir, "control.sock"), { force: true });
 		const fd = openSync(join(dir, "controller.log"), "a", 0o600);

@@ -145,7 +145,8 @@ export async function runCommand(pylonId: PylonId, command: PylonCommand, deps: 
  * renamed, template prepare and copy, the services supervisor and the port linking behind previews.
  *
  * Done: config is a typed object, and a fresh boot clones and runs preSetup and `.nexus/setup` as `user`.
- * Secrets reach createHttpHooks from the probe's SecretSource, never from the instance record (change 1).
+ * Secrets reach createHttpHooks from the probe's SecretSource, never from the instance record, and are never
+ * written into the guest, though a granted host that echoes one back shows it to the guest (change 1).
  * Network policy, secrets and resources are inputs to every start, and only the image and the disk size are
  * fixed at create (change 2). Git over SSH is terminated on the host. Every boot writes the overlay and pulls
  * the dotfiles, every boot after the first runs `.nexus/resume`, and every spawn rewrites the overlay.

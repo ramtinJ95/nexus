@@ -125,7 +125,10 @@ export const bootSchema = z.strictObject({
 		memoryGiB: z.number().positive(),
 	}),
 	allowedHosts: z.array(hostPattern),
-	/** Keyed by the guest env name. A value is substituted only in requests to its own hosts. */
+	/**
+	 * Keyed by the guest env name. A value is substituted only in requests to its own hosts, and is never
+	 * written into the guest. A host that echoes it back in a response still shows it to the guest.
+	 */
 	secrets: z.record(
 		z.string().regex(/^[A-Za-z_][A-Za-z0-9_]*$/),
 		z.strictObject({ hosts: z.array(hostPattern).min(1), value: z.string().min(1) }),
@@ -141,6 +144,7 @@ export const bootSchema = z.strictObject({
 						host: z.string().regex(/^[a-z0-9.-]+$/),
 						port: z.number().int().min(1).max(65535),
 						username: userName,
+						/** The path as git sends it to the server, which is how the URL spells it. */
 						repo: z.string().min(1),
 					}),
 				)

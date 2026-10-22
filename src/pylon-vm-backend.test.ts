@@ -9,6 +9,7 @@ import { existsSync } from "node:fs";
 import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { createPylonVmBackend, type PylonVmBackendOptions } from "./pylon-vm-backend.ts";
+import { identityOf } from "./pylon-vm/identity.ts";
 import type { BootInputs } from "./project.ts";
 import type { PylonId } from "./protocol.ts";
 import type { ImageId } from "./images.ts";
@@ -154,8 +155,28 @@ test("a pylon whose controller has yet to publish its PID is booting while its l
   const { backend, instances } = await backendWith();
   const dir = await leftInstance(instances, "pylon-launching", "starting");
   await mkdir(join(dir, "launch.lock"));
-  await writeFile(join(dir, "launch.lock", "owner"), `${process.pid}\n`);
+  await writeFile(join(dir, "launch.lock", "owner"), JSON.stringify(await identityOf(process.pid)));
   assert.deepEqual((await backend.list()).map((p) => p.vm), ["booting"]);
   await rm(join(dir, "launch.lock"), { recursive: true });
   assert.deepEqual((await backend.list()).map((p) => p.vm), ["broken"]);
+});
+
+test("a PID handed out again, or one from an earlier boot of the host, is a dead controller and a dead launcher", async () => {
+  const { backend, instances } = await backendWith();
+  const live = (await identityOf(process.pid))!;
+  const reused = [{ ...live, start: "an earlier process" }, { ...live, boot: "an earlier host boot" }];
+  const running = await leftInstance(instances, "pylon-reused", "running");
+  await writeFile(join(running, "controller.pid"), JSON.stringify(live));
+  assert.deepEqual((await backend.list()).map((p) => p.vm), ["booting"], "the live identity is a controller still coming up");
+  for (const identity of reused) {
+    await writeFile(join(running, "controller.pid"), JSON.stringify(identity));
+    assert.deepEqual((await backend.list()).map((p) => p.vm), ["broken"]);
+  }
+  await rm(running, { recursive: true });
+  const starting = await leftInstance(instances, "pylon-relaunched", "starting");
+  await mkdir(join(starting, "launch.lock"));
+  for (const identity of reused) {
+    await writeFile(join(starting, "launch.lock", "owner"), JSON.stringify(identity));
+    assert.deepEqual((await backend.list()).map((p) => p.vm), ["broken"]);
+  }
 });

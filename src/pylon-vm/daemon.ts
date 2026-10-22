@@ -1,18 +1,18 @@
-import { chmod, readFile, rm } from "node:fs/promises";
+import { chmod, rm } from "node:fs/promises";
 import http from "node:http";
 import { join } from "node:path";
 import { text } from "node:stream/consumers";
 import { actionSchema, bootSchema } from "./contracts.ts";
 import { readIntent, SandboxRuntime } from "./runtime.ts";
-import { agentError, readRecord, saveJson } from "./storage.ts";
+import { publishIdentity, readIdentity } from "./identity.ts";
+import { agentError, readRecord } from "./storage.ts";
 
 async function main(): Promise<void> {
 	const dir = process.argv[2];
 	if (!dir) throw new Error("Instance directory required");
 	const record = await readRecord(dir);
 	const pidFile = join(dir, "controller.pid");
-	// Renamed in whole, because clients read it while the controller starts.
-	await saveJson(pidFile, process.pid);
+	await publishIdentity(pidFile);
 	// The launching client writes the boot spec, secrets included, to stdin and closes it.
 	const spec = bootSchema.parse(JSON.parse(await text(process.stdin)));
 	const runtime = new SandboxRuntime(dir, record, spec);
@@ -92,20 +92,11 @@ async function main(): Promise<void> {
 	});
 	await chmod(socket, 0o600);
 	server.once("close", () => {
-		void readFile(pidFile, "utf8")
-			.then(async (pid) => {
-				if (Number(pid) === process.pid) await rm(pidFile, { force: true });
+		void readIdentity(pidFile)
+			.then(async (identity) => {
+				if (identity?.pid === process.pid) await rm(pidFile, { force: true });
 			})
-			.catch((error: unknown) => {
-				if (
-					!(
-						error instanceof Error &&
-						"code" in error &&
-						error.code === "ENOENT"
-					)
-				)
-					console.error(error);
-			});
+			.catch((error: unknown) => console.error(error));
 	});
 	let ending = false;
 	const shutdown = () => {

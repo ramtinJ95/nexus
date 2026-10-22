@@ -231,6 +231,7 @@ function pylonVmFixture(): SliceFixture {
       assert.equal(baked.exitCode, 0, baked.output);
       assert.deepEqual(await sh(guest, "git -C .nexus/dotfiles rev-parse HEAD"), baked, "a failed dotfiles pull keeps the baked copy");
       assert.deepEqual(await sh(guest, "cat .nexus/dotfiles-installed"), baked, "the layer's install ran");
+      assert.match(await readFile(join(instanceDir, "controller.log"), "utf8"), /^dotfiles: installed$/m, "the install's outcome is logged");
 
       const placeholder = (await sh(guest, `printenv ${secret.name}`)).output.trim();
       assert.ok(placeholder !== "" && !placeholder.includes(secret.value), `the guest sees ${placeholder}`);
@@ -244,6 +245,7 @@ function pylonVmFixture(): SliceFixture {
     },
     async checkWake(guest) {
       assert.deepEqual(await sh(guest, "cat resume.log"), { exitCode: 0, output: "resumed\n", truncated: false }, "the wake ran .nexus/resume once");
+      assert.match(await readFile(join(instanceDir, "controller.log"), "utf8"), /^resume: exited 0$/m, "the resume's outcome is logged");
       assert.deepEqual(await sh(guest, "git -C .nexus/dotfiles rev-parse HEAD"), { exitCode: 0, output: `${repo.checkout.commit}\n`, truncated: false }, "the wake pulled the new dotfiles repo");
       const meminfo = await guest.exec(["grep", "MemTotal", "/proc/meminfo"], asUser);
       const memTotalGiB = Number(/MemTotal:\s+(\d+) kB/.exec(meminfo.output)?.[1]) / 2 ** 20;

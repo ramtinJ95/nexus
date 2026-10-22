@@ -53,18 +53,30 @@ test("SSH egress reaches only the remotes' hosts, each with the node's key and t
 	assert.equal(ssh?.knownHostsFile, "/etc/nexus/known_hosts");
 });
 
-test("SSH lets through only fetch and push of the remotes' repositories", async () => {
+test("SSH lets through only fetch and push of the remotes' repositories, as git spells the commands", async () => {
 	const policy = networkOptions(spec).ssh!.execPolicy!;
 	const decide = async (hostname: string, port: number, command: string) => {
 		const request: SshExecRequest = { hostname, port, guestUsername: "git", command, src: { ip: "10.0.2.15", port: 40000 } };
 		return (await policy(request)).allow;
 	};
 	assert.equal(await decide("github.com", 22, "git-upload-pack 'acme/web.git'"), true);
-	assert.equal(await decide("github.com", 22, "git-receive-pack '/acme/web'"), true);
-	assert.equal(await decide("git.example.com", 2222, "git-upload-pack '~/me/dotfiles.git'"), true);
-	assert.equal(await decide("github.com", 22, "git-upload-pack 'acme/other.git'"), false, "another repository");
-	assert.equal(await decide("github.com", 22, "git-upload-archive 'acme/web.git'"), false, "another git service");
-	assert.equal(await decide("github.com", 22, "sh -c id"), false, "not git");
+	assert.equal(await decide("github.com", 22, "git-receive-pack 'acme/web.git'"), true);
+	assert.equal(await decide("git.example.com", 2222, "git-upload-pack '/me/dotfiles'"), true);
+	// Gondolin forwards the command upstream as it is, so each of these could name another program or repository there.
+	for (const [command, why] of [
+		["/tmp/git-upload-pack 'acme/web.git'", "a program path the guest chose"],
+		["/usr/bin/git-upload-pack 'acme/web.git'", "any program path"],
+		["git-upload-pack acme/web.git", "an unquoted path"],
+		["git-upload-pack 'acme/web'", "the path without .git"],
+		["git-upload-pack '/acme/web.git'", "the path with a leading slash"],
+		["git-upload-pack '~/acme/web.git'", "the path under ~"],
+		["git-upload-pack 'acme/web.git/'", "the path with a trailing slash"],
+		["git-upload-pack 'acme/other.git'", "another repository"],
+		["git-upload-archive 'acme/web.git'", "another git service"],
+		["sh -c id", "not git"],
+	] as const) assert.equal(await decide("github.com", 22, command), false, why);
+	assert.equal(await decide("git.example.com", 2222, "git-upload-pack 'me/dotfiles'"), false, "the dotfiles path without its slash");
+	assert.equal(await decide("git.example.com", 2222, "git-upload-pack '/me/dotfiles.git'"), false, "the dotfiles path with .git");
 	assert.equal(await decide("github.com", 2222, "git-upload-pack 'acme/web.git'"), false, "another port");
 	assert.equal(await decide("git.example.com", 2222, "git-upload-pack 'acme/web.git'"), false, "the repository on another host");
 });
