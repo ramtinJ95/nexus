@@ -46,7 +46,8 @@ export interface BackendPylon {
 /** Every call runs as `user`. */
 export interface Guest {
   exec(argv: readonly string[], opts: { cwd: string; timeoutMs: number }): Promise<{ exitCode: number | null; output: string; truncated: boolean }>;
-  stream(request: StreamRequest): Promise<ByteStream>;
+  /** Starts the process. A raw pipe's stream carries stdout only, and its stderr goes to `log`. */
+  stream(request: StreamRequest, log: (text: string) => void): Promise<ByteStream>;
   writeFiles(files: readonly OverlayFile[]): Promise<void>;
   services(op: "ensure" | "restart" | "stop" | "logs", name?: string, lines?: number): Promise<{ services: readonly ServiceFact[]; logs?: string }>;
   /** Supervise a port that is already listening. Returns the service name it was registered under. */
@@ -111,7 +112,7 @@ export async function runJob(job: Job, deps: ProbeDeps, signal: AbortSignal): Pr
         await deps.serve.converge(job.pylonId, job.live.previews, signal);
         return;
       case "pause":
-        await deps.serve.converge(job.pylonId, [], signal);
+        // Previews stay published, so a hit on a paused pylon reaches the gateway, which reports it and shows a waking page.
         await deps.backend.ensurePaused(job.pylonId, job.checkpoint, signal);
         return;
       case "delete":
@@ -158,17 +159,18 @@ export async function runCommand(pylonId: PylonId, command: PylonCommand, deps: 
  * against. Kept from it: the detached controller per instance, the checkpoint written to disk.next.qcow2 and
  * renamed, template prepare and copy, the services supervisor and the port linking behind previews.
  *
- * Done: config is a typed object, and a fresh boot clones over HTTPS and runs preSetup and `.nexus/setup`
- * as `user`. Still to change in the fork:
- * 1. Secrets reach createHttpHooks from the probe's SecretSource, never from the instance record.
- * 2. Network policy, secrets and resources are inputs to every start, including a create from a template.
- *    Today they are fixed at create, and the backend refuses a wake whose inputs changed.
+ * Done: config is a typed object, and a fresh boot clones and runs preSetup and `.nexus/setup` as `user`.
+ * Secrets reach createHttpHooks from the probe's SecretSource, never from the instance record, and are never
+ * written into the guest, though a granted host that echoes one back shows it to the guest (change 1).
+ * Network policy, secrets and resources are inputs to every start, and only the image and the disk size are
+ * fixed at create (change 2). Git over SSH is terminated on the host. Every boot writes the overlay and pulls
+ * the dotfiles, every boot after the first runs `.nexus/resume`, and every spawn rewrites the overlay.
+ * Still to change in the fork:
  * 3. A service's PUBLIC_URL is the URL the probe assigned, not a localhost preview.
  * 4. A host bridge: requests to http://nexus.pylon go to the probe's Unix socket with the instance name attached.
  * 5. Template and instance export and import as ArtifactStore archives.
- * 6. Checkout over SSH terminated on the host, the template build, and on every boot `.nexus/resume`, the
- *    dotfiles pull, the overlay and the session relaunch from ~/.nexus/sessions.json.
- * The image needs pi-sandbox's `sandboxssh` helper for `shell` and streams.
+ * 6. The template build, booting from a template, and the session relaunch from ~/.nexus/sessions.json.
+ * The image needs pi-sandbox's `sandboxssh` helper for `shell` and streams, and openssh-client for git over SSH.
  */
 
 // The Docker test double, createDockerBackend, lives in docker-backend.ts.

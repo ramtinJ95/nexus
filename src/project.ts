@@ -9,6 +9,8 @@
  * - The control plane renders everything the agent sees about its pylon (the overlay) from records and
  *   ships it in the spawn job. The probe writes those files without reading them.
  */
+import { isScalar, parseDocument, visit } from "yaml";
+import { z } from "zod";
 import type { NodeName, PylonId } from "./protocol.ts";
 import type { CheckpointId, ImageId, TemplateId } from "./images.ts";
 
@@ -42,10 +44,113 @@ export interface PreviewLink { url: string; title: string; description?: string 
 /** Names `env` may not set. PUBLIC_URL is the https tailnet URL, because the guest sees x-forwarded-proto: http (S4). */
 export const managedEnv = ["PORT", "PUBLIC_URL"] as const; // plus every NEXUS_* name, such as NEXUS_THREAD_ID
 
+/**
+ * The boundary for .nexus/services.yaml: callers trust the result. Throws on a file over 1 MiB, duplicate
+ * keys, a key that is not a string (`1:` and `"1":` would collapse), more than 20 alias expansions, any field
+ * or value the schema does not allow, a duplicate fixed port, and an env value whose `${services.`
+ * reference is malformed, names a service without a preview, or closes a cycle.
+ * Every file it accepts is one the pi-sandbox-derived backend in src/pylon-vm/contracts.ts accepts, so this
+ * mirrors that schema's restrictions, its Amp-derived ones included. Omitted fields stay omitted: the
+ * defaults in ServiceDecl are applied where the service runs.
+ */
 export function parseServicesFile(yamlText: string): ServicesFile {
-  // TODO: strict YAML (unique keys, alias cap), schema check, reference cycle check. Boundary: callers trust the result.
-  throw new Error("not implemented");
+  if (Buffer.byteLength(yamlText) > maxServicesFileBytes) throw new Error(`invalid .nexus/services.yaml: larger than ${maxServicesFileBytes} bytes`);
+  const document = parseDocument(yamlText, { uniqueKeys: true });
+  if (document.errors.length > 0) throw new Error(`invalid .nexus/services.yaml: ${document.errors.map((e) => e.message).join("; ")}`);
+  visit(document, {
+    Pair(_, pair) {
+      if (!isScalar(pair.key) || typeof pair.key.value !== "string") throw new Error(`invalid .nexus/services.yaml: key ${String(pair.key)} is not a string`);
+    },
+  });
+  const parsed = servicesFileSchema.safeParse(document.toJS({ maxAliasCount: 20 }));
+  if (!parsed.success) throw new Error(`invalid .nexus/services.yaml:\n${z.prettifyError(parsed.error)}`);
+  // Zod types an optional field as `T | undefined`, but it never adds a key the file lacks.
+  return parsed.data as ServicesFile;
 }
+
+const maxServicesFileBytes = 1_048_576;
+const serviceName = z.string().regex(/^[a-z0-9][a-z0-9-]{0,31}$/);
+const isManaged = (name: string): boolean => (managedEnv as readonly string[]).includes(name) || name.startsWith("NEXUS_");
+// The name checks are on the record, not the key schema, because Zod reports a failed key only as "Invalid key in record".
+const env = z.record(z.string().regex(/^[A-Za-z_][A-Za-z0-9_]*$/), z.string()).superRefine((vars, ctx) => {
+  for (const name of Object.keys(vars)) {
+    if (isManaged(name)) ctx.addIssue({ code: "custom", path: [name], message: `${name} is managed by Nexus` });
+    // The backend refuses Amp's thread variable.
+    if (name === "AMP_THREAD_ID") ctx.addIssue({ code: "custom", path: [name], message: "AMP_THREAD_ID is not available" });
+  }
+});
+/** The backend refuses Amp's identity placeholder in any preview url, title or description. */
+const previewText = z.string().refine((s) => !s.includes("$AMP_USER_EMAIL"), "$AMP_USER_EMAIL is not available");
+/** A path on the service's own origin, or an absolute http(s) URL, as pi-sandbox allows. */
+const previewUrl = previewText.refine((s) => {
+  if (s.startsWith("/")) return !s.startsWith("//");
+  return URL.canParse(s) && ["http:", "https:"].includes(new URL(s).protocol);
+}, "must be a path starting with / or an http(s) URL");
+const previewLink = z.strictObject({ url: previewUrl, title: previewText.min(1), description: previewText.optional() });
+const serviceDecl = z.strictObject({
+  command: z.string().min(1),
+  cwd: z.string().refine((s) => !s.includes("\0") && !s.startsWith("/") && !s.split("/").includes(".."), "must be a path inside the repo").optional(),
+  port: z.int().min(1).max(65535).optional(),
+  env: env.optional(),
+  health: z.union([z.templateLiteral(["/", z.string()]), z.literal("process")]).optional(),
+  preview: z.union([
+    z.boolean(),
+    z.strictObject({ url: previewUrl.optional(), title: previewText.min(1).optional(), description: previewText.optional() }),
+  ]).optional(),
+  previews: z.array(z.union([previewLink, z.strictObject({ folder: z.string().min(1), links: z.array(previewLink).min(1) })]))
+    .refine((links) => {
+      const folders = links.flatMap((link) => "folder" in link ? [link.folder] : []);
+      return new Set(folders).size === folders.length;
+    }, "folder names must be unique")
+    .optional(),
+  platforms: z.array(z.enum(["linux", "darwin"])).min(1).optional(),
+  timeoutMs: z.int().min(100).max(120_000).optional(),
+});
+
+/** Matches every `${services.`. The group is set only for a whole reference, so a typo or a missing `}` cannot pass as a literal. */
+const serviceReference = /\$\{services\.(?:([a-z0-9][a-z0-9-]{0,31})\.publicURL\})?/g;
+const hasPreview = (decl: z.output<typeof serviceDecl>): boolean => Boolean(decl.preview) || (decl.previews?.length ?? 0) > 0;
+
+const servicesFileSchema = z.strictObject({ services: z.record(serviceName, serviceDecl) }).superRefine(({ services }, ctx) => {
+  const portOwner = new Map<number, string>();
+  for (const [name, decl] of Object.entries(services)) {
+    if (decl.port === undefined) continue;
+    const owner = portOwner.get(decl.port);
+    if (owner !== undefined) ctx.addIssue({ code: "custom", path: ["services", name, "port"], message: `port ${decl.port} is also fixed by ${owner}` });
+    portOwner.set(decl.port, name);
+  }
+
+  const dependencies = new Map<string, string[]>();
+  for (const [name, decl] of Object.entries(services)) {
+    const names: string[] = [];
+    for (const [key, value] of Object.entries(decl.env ?? {})) {
+      for (const [whole, target] of value.matchAll(serviceReference)) {
+        const path = ["services", name, "env", key];
+        if (target === undefined) ctx.addIssue({ code: "custom", path, message: `${JSON.stringify(value)} has a \${services. that is not a whole \${services.<name>.publicURL} reference` });
+        else if (services[target] === undefined || !hasPreview(services[target])) ctx.addIssue({ code: "custom", path, message: `${whole} names ${target}, which is not a declared service with a preview` });
+        else names.push(target);
+      }
+    }
+    dependencies.set(name, names);
+  }
+
+  // Depth-first search. A service met again while it is still on the stack closes a cycle.
+  const done = new Set<string>();
+  const stack: string[] = [];
+  const visit = (name: string): void => {
+    if (done.has(name)) return;
+    const at = stack.indexOf(name);
+    if (at !== -1) {
+      ctx.addIssue({ code: "custom", path: ["services", name, "env"], message: `publicURL references form a cycle: ${[...stack.slice(at), name].join(" -> ")}` });
+      return;
+    }
+    stack.push(name);
+    for (const next of dependencies.get(name)!) visit(next);
+    stack.pop();
+    done.add(name);
+  };
+  for (const name of dependencies.keys()) visit(name);
+});
 
 // The Project record, stored in Nexus.
 
@@ -71,9 +176,13 @@ export const loginHosts: { readonly [K in LoginKind]: readonly string[] } = {
   chatgpt: ["auth.openai.com", "chatgpt.com", "api.openai.com"],
 };
 
+/** project.allowedHosts, plus loginHosts for project.logins, plus every SecretGrant host, sorted and deduped. */
 export function effectiveAllowedHosts(project: Project): readonly string[] {
-  // TODO: project.allowedHosts, plus loginHosts for project.logins, plus every SecretGrant host, sorted and deduped.
-  throw new Error("not implemented");
+  return [...new Set([
+    ...project.allowedHosts,
+    ...project.logins.flatMap((login) => loginHosts[login]),
+    ...project.secrets.flatMap((grant) => grant.hosts),
+  ])].sort();
 }
 
 // What a spawn carries, split by when it applies.
@@ -91,6 +200,7 @@ export interface BootInputs {
   resources: Project["resources"];
   network: { allowedHosts: readonly string[]; secrets: readonly SecretGrant[] };
   repo: { url: string; checkout: { branch: string; commit: string } }; // checked out on template and fresh boots only
+  dotfiles: PylonOverlay["dotfiles"]; // pulled on every boot
 }
 
 /** Applied on every spawn, including to a running pylon. Hashed into LiveHash. */
@@ -127,7 +237,91 @@ export interface PylonOverlay {
  *   so the overlay never edits dotfiles.
  */
 export function renderOverlay(overlay: PylonOverlay): readonly OverlayFile[] {
-  throw new Error("not implemented");
+  const env = {
+    NEXUS_PYLON: "1",
+    NEXUS_PYLON_ID: overlay.pylonId,
+    NEXUS_THREAD_ID: overlay.threadId,
+    NEXUS_PROJECT: overlay.project,
+    NEXUS_NODE: overlay.node,
+    NEXUS_API: nexusApi,
+  };
+  const info = {
+    pylonId: overlay.pylonId,
+    threadId: overlay.threadId,
+    project: overlay.project,
+    node: overlay.node,
+    api: nexusApi,
+    allowedHosts: overlay.allowedHosts,
+    previews: overlay.previews,
+    logins: overlay.logins,
+    dotfiles: overlay.dotfiles,
+  };
+  return [
+    { path: "/etc/profile.d/nexus.sh", mode: 0o644, owner: "root", content: Object.entries(env).map(([name, value]) => `export ${name}=${shellQuote(value)}\n`).join("") },
+    { path: "/home/user/.nexus/pylon.json", mode: 0o644, owner: "user", content: JSON.stringify(info, null, 2) + "\n" },
+    { path: "/home/user/.nexus/PYLON.md", mode: 0o644, owner: "user", content: pylonGuide(overlay) },
+  ];
+}
+
+/** What NEXUS_API is set to. See PylonApiRequest. */
+export const nexusApi = "http://nexus.pylon";
+
+const shellQuote = (value: string): string => `'${value.replaceAll("'", `'\\''`)}'`;
+
+function pylonGuide(o: PylonOverlay): string {
+  const list = (items: readonly string[]): string => items.map((item) => `- ${item}\n`).join("");
+  const previews = o.previews.length === 0
+    ? "No previews are published yet. `nexus services ensure --json` starts the services in .nexus/services.yaml and prints their URLs, and `nexus preview <port>` publishes a port that is already listening.\n"
+    : `Each preview is reachable from the human's tailnet devices:\n\n${list(o.previews.map((p) => `${p.service}: ${p.url}`))}`;
+  const logins = o.logins.length === 0
+    ? "This project has no interactive logins.\n"
+    : `This project allows these logins: ${o.logins.join(", ")}. Sign in with the device-code flow, which shows a code to enter in a browser on another device. A browser-callback login fails, because its callback listens inside this pylon, where that browser cannot reach it.\n`;
+  return `# You are in a Nexus pylon
+
+This machine is a pylon, a microVM that Nexus runs for one thread. You run as \`user\`, who has passwordless sudo.
+
+- Thread: ${o.threadId}
+- Project: ${o.project}
+- Node: ${o.node}
+- Pylon: ${o.pylonId}
+
+\`nexus info --json\` prints these facts, and /home/user/.nexus/pylon.json holds them.
+
+## Network
+
+Only these hosts are reachable. Every other host is blocked, so an HTTP request to it gets \`403 blocked by policy\`. Ask the human to add a host to the project if you need one.
+
+${list(o.allowedHosts)}
+## Previews
+
+${previews}
+## Sleep
+
+Nexus pauses this pylon when the thread goes idle and wakes it on the next message, terminal attach or preview visit. A pause saves the disk and stops the VM, so only files on disk survive it. Processes, services and anything held in memory stop. On wake, Nexus runs .nexus/resume, starts the services again and relaunches the open sessions.
+
+## Outputs
+
+Nexus records pushed branches, an uncommitted working tree and ready previews as outputs on its own. Declare anything else:
+
+\`\`\`sh
+nexus output add file artifacts/screenshot.png --title "Checkout page"
+nexus output add diff                      # snapshot the working tree as a diff output
+nexus output list
+\`\`\`
+
+## Logins
+
+${logins}
+## Services
+
+\`\`\`sh
+nexus services ensure --json               # start what .nexus/services.yaml declares, wait for health and preview URLs
+nexus service logs web --lines 200
+nexus service restart web
+nexus service start storybook --command "pnpm storybook --port \\$PORT" --preview
+nexus preview 6006 --title Storybook       # publish a port that is already listening
+\`\`\`
+`;
 }
 
 // In-pylon commands. The `nexus` CLI in the image calls the probe at NEXUS_API.

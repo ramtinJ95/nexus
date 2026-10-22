@@ -10,11 +10,14 @@
  * - No job can drop a checkpoint. A checkpoint is the only copy of uncommitted work, so it is removed only
  *   by `delete` of its pylon, and the planner sends `delete` only for pylons the registry knows. A wiped
  *   registry therefore knows no pylons and deletes nothing.
- * - The wire encoding (JSON over HTTP, and newline-delimited JSON events on observe) is private to this
- *   module. Callers see the domain types below. The control plane reads through `parseProbeEvent` and
- *   `parseSubmitReply`, and the probe through `parseJobEnvelope`, `encodeSubmitReply` and `encodeProbeEvent`.
+ * - The wire encoding (JSON over HTTP, newline-delimited JSON events on observe, and frames on streams) is
+ *   private to this module. Callers see the domain types below. The control plane reads through
+ *   `parseProbeEvent` and `parseSubmitReply`, and the probe through `parseJobEnvelope`, `encodeSubmitReply`,
+ *   `encodeProbeEvent`, `parseStreamRequest` and `serveByteStream`.
  */
+import { once } from "node:events";
 import { Agent, request, type IncomingMessage } from "node:http";
+import { PassThrough, type Duplex } from "node:stream";
 import { setTimeout as delay } from "node:timers/promises";
 import { localApiWhois, type Whois } from "./tailscale.ts";
 import type { BootInputs, LiveSpec, SessionHarness } from "./project.ts";
@@ -111,7 +114,12 @@ export interface NodeObservation {
   probeBootId: string;
   capacity: { memoryGiB: number; committedMemoryGiB: number; diskFreeGiB: number };
   artifacts: readonly ArtifactId[];
-  jobs: readonly JobStatus[]; // running jobs, plus results from the last 10 minutes
+  /**
+   * Running jobs, plus results from the last 10 minutes. Read before `pylons`, so `pylons` shows the result of
+   * every job listed here as finished. The planner relies on that: a job event can arrive before the snapshot
+   * that shows its result, and planning against the older snapshot would send the job again.
+   */
+  jobs: readonly JobStatus[];
   /** A pylon absent from this list does not exist on the node. A listed pylon the registry does not know is an orphan: shown, never deleted. */
   pylons: readonly PylonObservation[];
 }
@@ -131,7 +139,8 @@ export interface RunningFacts {
   sessions: readonly SessionFact[] | null; // null when Herdr could not be read. No Herdr server is an empty list
   git: GitFacts | null; // null until the first poll, or when the checkout is missing
   declaredOutputs: readonly DeclaredOutput[];
-  attachedClients: number; // open terminal streams, counted as human presence
+  /** Open streams with a pty, counted as human presence. A raw pipe is not counted: the harness keeps one open for as long as the pylon runs. */
+  attachedClients: number;
 }
 
 export interface ServiceFact { name: string; state: "starting" | "ready" | "failed" | "stopped"; port: number; declared: boolean; wantsPreview: boolean }
@@ -146,7 +155,7 @@ export type ProbeEvent =
   | { type: "snapshot"; observation: NodeObservation } // on connect, then every 60 s as anti-entropy
   | { type: "pylon"; pylon: PylonObservation }
   | { type: "job"; status: JobStatus }
-  /** A preview was requested. If the pylon is stopped, the probe holds the request on a "waking" page and the control plane decides. */
+  /** A preview was requested. A paused pylon keeps its previews, so its browser gets a self-refreshing "waking" page while the control plane decides. */
   | { type: "preview-hit"; pylonId: PylonId; service: string; at: string; login: string | null };
 
 // Synchronous guest operations. They are not reconciled and not queued behind lifecycle jobs.
@@ -166,20 +175,28 @@ export type CommandResult =
   | { kind: "close-session" }
   | { kind: "service"; services: readonly ServiceFact[]; logs?: string };
 
+/**
+ * `pty: null` is a raw pipe, such as the pi-env daemon. Its stream carries the process's stdout only, and its
+ * stderr goes to the probe's log under the pylon's ID, so a diagnostic can never corrupt a framed protocol on
+ * stdout. A pty carries both, as a terminal does.
+ */
 export interface StreamRequest {
-  pty: { cols: number; rows: number } | null; // null for raw stdio, such as the pi-env daemon
+  pty: { cols: number; rows: number } | null;
   argv: readonly string[];
 }
 
 /**
- * A pipe runs at most once. If the connection drops, the guest process gets SIGHUP and `done` resolves
- * to `lost`, which pi-durable reports to the model as an interrupted tool. Dropping a pty only detaches,
- * and Herdr keeps the session.
+ * A pipe runs at most once. If the connection drops, the probe ends the guest process's stdin and `done`
+ * resolves to `lost`. The pi-env daemon then kills every command it started. A tool call whose pipe was lost
+ * fails with pi-env's "connection lost" error, which the model sees as an ordinary error result. pi-durable's
+ * `interrupted` result appears only when the harness process itself died mid-call. Dropping a pty only
+ * detaches, and Herdr keeps the session.
  */
 export type StreamEnd = { kind: "exited"; code: number } | { kind: "lost" };
 export interface ByteStream extends AsyncIterable<Uint8Array> {
   write(chunk: Uint8Array): Promise<void>;
   resize(cols: number, rows: number): void; // no-op without a pty
+  /** Ends the process's stdin. Its output keeps arriving until it exits. */
   close(): Promise<void>;
   readonly done: Promise<StreamEnd>;
 }
@@ -287,7 +304,40 @@ export function connectProbe(node: NodeName, tailnetHost: string, expected: Tail
       if (res.status !== 200) throw new Error(`${node}: POST ${path}: HTTP ${res.status}: ${res.body}`);
       return parseCommandResult(command, res.body);
     },
-    stream() { return Promise.reject(new Error("GET /v1/pylons/{id}/stream is not implemented in this slice")); },
+    stream(pylonId, streamRequest) {
+      const path = streamPath(pylonId, streamRequest);
+      return new Promise((resolve, reject) => {
+        const req = request({ host: tailnetHost, port, method: "GET", path, agent, timeout: requestTimeoutMs, headers: { connection: "upgrade", upgrade: streamProtocol } });
+        req.on("upgrade", (_res, socket, head) => {
+          // Node hands over an upgraded socket without its error handler. A reset ends the stream as lost.
+          socket.on("error", () => undefined);
+          const { remoteAddress, remotePort } = socket;
+          if (remoteAddress === undefined || remotePort === undefined) {
+            socket.destroy();
+            return reject(probeError("unreachable", `${node}: the stream closed before whois`));
+          }
+          whois(remoteAddress, remotePort).then((id) => {
+            if (id !== expected) {
+              socket.destroy();
+              return reject(probeError("forbidden", `${node}: ${remoteAddress}:${remotePort} is tailnet node ${id ?? "unknown"}, expected ${expected}`));
+            }
+            // pi-env pings every 5 s, but a terminal can be silent for hours.
+            socket.setTimeout(0);
+            resolve(clientByteStream(socket, head));
+          }, (err: unknown) => { socket.destroy(); reject(err); });
+        });
+        req.on("response", (res) => {
+          text(res).then((body) => reject(
+            res.statusCode === 409 ? probeError("not-running", `${node}: ${body}`)
+              : res.statusCode === 403 ? probeError("forbidden", `${node} refused this caller`)
+              : new Error(`${node}: GET ${path}: HTTP ${res.statusCode}: ${body}`),
+          ), reject);
+        });
+        req.on("timeout", () => req.destroy(new Error(`no answer within ${requestTimeoutMs} ms`)));
+        req.on("error", (err) => reject(probeError("unreachable", `${node}: ${err.message}`)));
+        req.end();
+      });
+    },
   };
 }
 
@@ -359,6 +409,144 @@ export function parseSubmitReply(status: number, body: string): SubmitReply {
   if (status === submitStatus.expired && reply.rejected === "expired") return { rejected: "expired" };
   if (status === submitStatus.invalid && reply.rejected === "invalid") return { rejected: "invalid", message: string(reply.message, "message") };
   throw new Error(`unexpected submit reply, HTTP ${status}: ${body}`);
+}
+
+/**
+ * GET /v1/pylons/{id}/stream?request=<StreamRequest JSON> upgrades the connection to `nexus-stream`, a
+ * sequence of frames: a type byte, a 4-byte big-endian length, then the payload. The control plane sends
+ * stdin, end of stdin and resizes. The probe sends output, then the exit code as its last frame. A
+ * connection that closes without an exit frame is a lost stream. The probe answers 409 instead of
+ * upgrading when the pylon is not running.
+ */
+const streamProtocol = "nexus-stream";
+const frameType = { data: 0, eof: 1, resize: 2, exit: 3 } as const;
+const maxFrameBytes = 16 << 20;
+
+function streamPath(pylonId: PylonId, req: StreamRequest): string {
+  return `/v1/pylons/${encodeURIComponent(pylonId)}/stream?request=${encodeURIComponent(JSON.stringify(req))}`;
+}
+
+/** The probe's side of the stream route: `null` unless the request asks to upgrade to `nexus-stream`. Throws with a message for a 400. */
+export function parseStreamRequest(upgrade: string | undefined, url: URL): { pylonId: PylonId; request: StreamRequest } | null {
+  const match = /^\/v1\/pylons\/([^/]+)\/stream$/.exec(url.pathname);
+  if (match === null || upgrade?.toLowerCase() !== streamProtocol) return null;
+  const req = record(JSON.parse(url.searchParams.get("request") ?? "null"), "stream request");
+  if (!Array.isArray(req.argv) || req.argv.length === 0 || !req.argv.every((a) => typeof a === "string")) throw new Error("stream request argv is not a non-empty string array");
+  if (req.pty !== null) {
+    const pty = record(req.pty, "stream request pty");
+    if (!Number.isInteger(pty.cols) || !Number.isInteger(pty.rows)) throw new Error("stream request pty needs whole cols and rows");
+  }
+  return { pylonId: decodeURIComponent(match[1]!) as PylonId, request: req as unknown as StreamRequest };
+}
+
+export const streamUpgradeResponse = `HTTP/1.1 101 Switching Protocols\r\nconnection: upgrade\r\nupgrade: ${streamProtocol}\r\n\r\n`;
+
+/**
+ * The probe's side of an upgraded stream: frames from the socket go into `stream`, and its output and exit code
+ * go back. When the socket drops first, the process's stdin ends. Resolves once both directions are done.
+ */
+export async function serveByteStream(socket: Duplex, head: Buffer, stream: ByteStream): Promise<void> {
+  const output = (async () => {
+    let linked = true;
+    // Output keeps being read after the link drops, so a process writing to a full pipe can still see its stdin end.
+    for await (const chunk of stream) if (linked) await send(socket, frame(frameType.data, chunk)).catch(() => { linked = false; });
+    const end = await stream.done;
+    if (end.kind === "exited" && linked) {
+      const code = Buffer.alloc(4);
+      code.writeInt32BE(end.code);
+      await send(socket, frame(frameType.exit, code)).catch(() => undefined);
+      socket.end();
+    } else {
+      socket.destroy();
+    }
+  })();
+  // A process can close its stdin and keep writing output, so a failed write drops input and keeps the socket:
+  // leaving the loop would destroy it, and the output and exit code with it.
+  let stdin = true;
+  try {
+    for await (const f of frames(socket, head)) {
+      if (f.type === frameType.data) {
+        if (stdin) await stream.write(f.payload).catch(() => { stdin = false; });
+      } else if (f.type === frameType.eof) {
+        await stream.close();
+      } else if (f.type === frameType.resize && f.payload.length === 4) {
+        stream.resize(f.payload.readUInt16BE(0), f.payload.readUInt16BE(2));
+      } else {
+        throw new Error(`unexpected stream frame type ${f.type}`);
+      }
+    }
+  } catch {
+    // The link broke or broke the protocol, so the input side is over.
+  }
+  await stream.close();
+  await output;
+}
+
+function clientByteStream(socket: Duplex, head: Buffer): ByteStream {
+  const output = new PassThrough();
+  const done = (async (): Promise<StreamEnd> => {
+    let code: number | null = null;
+    try {
+      for await (const f of frames(socket, head)) {
+        if (f.type === frameType.data) {
+          if (!output.write(f.payload)) await once(output, "drain");
+        } else if (f.type === frameType.exit && f.payload.length === 4) {
+          code = f.payload.readInt32BE(0);
+        } else {
+          throw new Error(`unexpected stream frame type ${f.type}`);
+        }
+      }
+    } catch {
+      // The link broke. Without an exit frame that is a lost stream.
+    } finally {
+      socket.destroy();
+      output.end();
+    }
+    return code === null ? { kind: "lost" } : { kind: "exited", code };
+  })();
+  return {
+    [Symbol.asyncIterator]: () => output[Symbol.asyncIterator]() as AsyncIterator<Uint8Array>,
+    write: (chunk) => send(socket, frame(frameType.data, chunk)),
+    resize(cols, rows) {
+      const size = Buffer.alloc(4);
+      size.writeUInt16BE(cols, 0);
+      size.writeUInt16BE(rows, 2);
+      socket.write(frame(frameType.resize, size));
+    },
+    close: () => send(socket, frame(frameType.eof, Buffer.alloc(0))),
+    done,
+  };
+}
+
+function frame(type: number, payload: Uint8Array): Buffer {
+  const header = Buffer.alloc(5);
+  header.writeUInt8(type, 0);
+  header.writeUInt32BE(payload.length, 1);
+  return Buffer.concat([header, payload]);
+}
+
+async function* frames(source: AsyncIterable<Buffer>, head: Buffer): AsyncGenerator<{ type: number; payload: Buffer }> {
+  let buffered = head;
+  function* complete() {
+    while (buffered.length >= 5) {
+      const length = buffered.readUInt32BE(1);
+      if (length > maxFrameBytes) throw new Error(`stream frame of ${length} bytes is over ${maxFrameBytes}`);
+      if (buffered.length < 5 + length) return;
+      yield { type: buffered[0]!, payload: buffered.subarray(5, 5 + length) };
+      buffered = buffered.subarray(5 + length);
+    }
+  }
+  yield* complete();
+  for await (const chunk of source) {
+    buffered = buffered.length === 0 ? chunk : Buffer.concat([buffered, chunk]);
+    yield* complete();
+  }
+  if (buffered.length > 0) throw new Error("the stream ended inside a frame");
+}
+
+/** Resolves once the bytes are handed to the kernel, which is the stream's backpressure. */
+function send(socket: Duplex, bytes: Buffer): Promise<void> {
+  return new Promise((resolve, reject) => { socket.write(bytes, (err) => err ? reject(err) : resolve()); });
 }
 
 /** One line of the observe stream, newline included. */

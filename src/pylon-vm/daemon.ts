@@ -1,8 +1,10 @@
-import { chmod, readFile, rm, writeFile } from "node:fs/promises";
+import { chmod, rm } from "node:fs/promises";
 import http from "node:http";
 import { join } from "node:path";
-import { actionSchema } from "./contracts.ts";
+import { text } from "node:stream/consumers";
+import { actionSchema, bootSchema } from "./contracts.ts";
 import { readIntent, SandboxRuntime } from "./runtime.ts";
+import { publishIdentity, readIdentity } from "./identity.ts";
 import { agentError, readRecord } from "./storage.ts";
 
 async function main(): Promise<void> {
@@ -10,10 +12,10 @@ async function main(): Promise<void> {
 	if (!dir) throw new Error("Instance directory required");
 	const record = await readRecord(dir);
 	const pidFile = join(dir, "controller.pid");
-	await writeFile(pidFile, String(process.pid), {
-		mode: 0o600,
-	});
-	const runtime = new SandboxRuntime(dir, record);
+	await publishIdentity(pidFile);
+	// The launching client writes the boot spec, secrets included, to stdin and closes it.
+	const spec = bootSchema.parse(JSON.parse(await text(process.stdin)));
+	const runtime = new SandboxRuntime(dir, record, spec);
 	const intent = await readIntent(dir);
 	try {
 		await runtime.boot(intent.prepare, intent.fresh, intent.setupError);
@@ -76,7 +78,7 @@ async function main(): Promise<void> {
 					"exec-status",
 					"exec-kill",
 					"read",
-					"write",
+					"write-files",
 					"logs",
 				].includes(actionSchema.parse(JSON.parse(body)).action);
 			} catch {}
@@ -90,20 +92,11 @@ async function main(): Promise<void> {
 	});
 	await chmod(socket, 0o600);
 	server.once("close", () => {
-		void readFile(pidFile, "utf8")
-			.then(async (pid) => {
-				if (Number(pid) === process.pid) await rm(pidFile, { force: true });
+		void readIdentity(pidFile)
+			.then(async (identity) => {
+				if (identity?.pid === process.pid) await rm(pidFile, { force: true });
 			})
-			.catch((error: unknown) => {
-				if (
-					!(
-						error instanceof Error &&
-						"code" in error &&
-						error.code === "ENOENT"
-					)
-				)
-					console.error(error);
-			});
+			.catch((error: unknown) => console.error(error));
 	});
 	let ending = false;
 	const shutdown = () => {

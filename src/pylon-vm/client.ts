@@ -7,7 +7,6 @@ import {
 	readFile,
 	rename,
 	rm,
-	writeFile,
 } from "node:fs/promises";
 import http from "node:http";
 import { join } from "node:path";
@@ -16,10 +15,12 @@ import { fileURLToPath } from "node:url";
 import {
 	type Action,
 	actionSchema,
+	type BootSpec,
 	inspectionSchema,
 	replySchema,
 	statusSchema,
 } from "./contracts.ts";
+import { alive, publishIdentity, readIdentity } from "./identity.ts";
 import {
 	directory,
 	existsError,
@@ -29,6 +30,9 @@ import {
 	saveJson,
 } from "./storage.ts";
 
+/** sun_path holds 104 bytes on macOS and 108 on Linux, including the terminating NUL. The shorter rules. */
+export const socketPathLimit = 104;
+export const controlSocket = (dir: string) => join(dir, "control.sock");
 function request(
 	dir: string,
 	action: Action,
@@ -87,38 +91,19 @@ async function reachable(
 		throw error;
 	}
 }
-async function controllerAlive(dir: string): Promise<boolean> {
-	try {
-		const raw = await readFile(join(dir, "controller.pid"), "utf8");
-		let pid: number;
-		try {
-			const saved = JSON.parse(raw);
-			// Also accept PID records written by the unpublished identity experiment.
-			pid = typeof saved === "number" ? saved : saved?.pid;
-		} catch {
-			throw new Error(
-				"Sandbox controller identity is invalid. Inspect its logs before retrying",
-			);
-		}
-		if (!Number.isSafeInteger(pid) || pid <= 0)
-			throw new Error(
-				"Sandbox controller identity is invalid. Inspect its logs before retrying",
-			);
-		try {
-			process.kill(pid, 0);
-			return true;
-		} catch (error) {
-			if (existsError(error, "ESRCH")) return false;
-			throw error;
-		}
-	} catch (error) {
-		if (existsError(error, "ENOENT")) return false;
-		throw error;
-	}
+const controllerAlive = (dir: string) => published(join(dir, "controller.pid"));
+/** A client that holds the launch lock is still to start the controller, or waits for it to come up. */
+const launching = (dir: string) => published(join(dir, "launch.lock", "owner"));
+/** A missing identity file means the process has not published itself yet, or is gone. */
+async function published(file: string): Promise<boolean> {
+	const identity = await readIdentity(file);
+	return identity !== null && (await alive(identity));
 }
+/** An instance whose controller already runs keeps the spec it booted with. */
 async function launch(
 	dir: string,
 	name: string,
+	spec: BootSpec,
 	signal?: AbortSignal,
 ): Promise<unknown> {
 	signal?.throwIfAborted();
@@ -128,7 +113,7 @@ async function launch(
 		throw new Error(
 			"Sandbox controller is still starting or unavailable. Read controller logs before retrying",
 		);
-	if (Buffer.byteLength(join(dir, "control.sock")) >= 104)
+	if (Buffer.byteLength(controlSocket(dir)) >= socketPathLimit)
 		throw new Error(
 			`Sandbox state path ${dir} is too long for a local control socket. Choose a shorter state root`,
 		);
@@ -166,19 +151,15 @@ async function launch(
 			);
 		}
 		try {
-			const owner = Number(await readFile(join(lock, "owner"), "utf8"));
-			if (!Number.isSafeInteger(owner) || owner <= 0)
+			const owner = await readIdentity(join(lock, "owner"));
+			if (owner === null)
 				throw new Error(
 					"Sandbox start ownership is unavailable. Read controller logs before retrying",
 				);
-			try {
-				process.kill(owner, 0);
+			if (await alive(owner))
 				throw new Error(
 					"Sandbox start is already in progress. Retry inspect shortly",
 				);
-			} catch (ownerError) {
-				if (!existsError(ownerError, "ESRCH")) throw ownerError;
-			}
 			if (await controllerAlive(dir))
 				throw new Error(
 					"Sandbox controller is still starting. Retry inspect shortly",
@@ -190,16 +171,17 @@ async function launch(
 		}
 	}
 	try {
-		await writeFile(join(lock, "owner"), String(process.pid), { mode: 0o600 });
+		await publishIdentity(join(lock, "owner"));
 		await saveJson(join(dir, "status.json"), { state: "starting", name });
 		await rm(join(dir, "control.sock"), { force: true });
 		const fd = openSync(join(dir, "controller.log"), "a", 0o600);
 		const env: NodeJS.ProcessEnv = {};
 		for (const key of ["PATH", "HOME", "XDG_CACHE_HOME", "TMPDIR"])
 			if (process.env[key]) env[key] = process.env[key];
+		// The spec carries secret values, so it goes over a pipe and never through the environment or a file.
 		const child = spawn("node", [daemonPath, dir], {
 			detached: true,
-			stdio: ["ignore", fd, fd],
+			stdio: ["pipe", fd, fd],
 			env,
 		});
 		closeSync(fd);
@@ -207,6 +189,10 @@ async function launch(
 		child.on("error", (error) => {
 			failure = error;
 		});
+		child.stdin!.on("error", (error) => {
+			failure = error;
+		});
+		child.stdin!.end(JSON.stringify(spec));
 		child.on("exit", (code) => {
 			failure = new Error(
 				`Sandbox controller exited (${code}). Inspect controller logs before retrying`,
@@ -297,7 +283,7 @@ async function create(
 		throw error;
 	}
 	try {
-		return await launch(dir, action.name, signal);
+		return await launch(dir, action.name, action.boot, signal);
 	} catch (error) {
 		if (signal?.aborted || action.action !== "prepare") throw error;
 		const log = await readLogTail(join(dir, "controller.log"), 20);
@@ -392,15 +378,29 @@ export async function run(
 			...(await readLogTail(join(dir, "controller.log"), action.lines)),
 		};
 	}
-	if (action.action === "start") return launch(dir, action.name, signal);
+	if (action.action === "start")
+		return launch(dir, action.name, action.boot, signal);
 	if (!(await reachable(dir, action.name))) {
-		if (action.action === "inspect" || action.action === "stop")
-			return offline(dir);
+		if (action.action === "stop") return settle(dir);
+		if (action.action === "inspect") return offline(dir);
 		throw new Error(`${action.name} is not running. Use start first`);
 	}
 	return request(dir, action, signal);
 }
-async function offline(dir: string): Promise<unknown> {
+/**
+ * Stop without a controller. An instance whose controller died settles as stopped on its last completed
+ * checkpoint, or on no disk, so its next start boots fresh. Booting it only to stop it again would need
+ * boot inputs and would give the same disk.
+ */
+async function settle(dir: string): Promise<unknown> {
+	const found = await offline(dir);
+	if (found.status.state !== "interrupted" && found.status.state !== "failed")
+		return found;
+	const status = statusSchema.parse({ name: found.name, state: "stopped" });
+	await saveJson(join(dir, "status.json"), status);
+	return { ...found, status };
+}
+async function offline(dir: string) {
 	const record = await readRecord(dir);
 	let status = statusSchema.parse({
 		name: record.name,
@@ -416,7 +416,10 @@ async function offline(dir: string): Promise<unknown> {
 		if (!existsError(error, "ENOENT")) throw error;
 	}
 	if (["starting", "running", "stopping"].includes(status.state)) {
-		const alive = await controllerAlive(dir);
+		// The launching client writes starting before the controller publishes its PID.
+		const alive =
+			(await controllerAlive(dir)) ||
+			(status.state === "starting" && (await launching(dir)));
 		status = {
 			...status,
 			state: alive ? "unavailable" : "interrupted",

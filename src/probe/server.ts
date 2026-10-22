@@ -4,16 +4,19 @@
  */
 import { randomUUID } from "node:crypto";
 import { statfs } from "node:fs/promises";
-import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+import { createServer, STATUS_CODES, type IncomingMessage, type ServerResponse } from "node:http";
 import { totalmem } from "node:os";
+import type { Duplex } from "node:stream";
 import { JobFailure, runCommand, runJob, type BackendPylon, type ProbeDeps, type SecretSource, type VmBackend } from "../backend.ts";
 import {
-  encodeProbeEvent, encodeSubmitReply, jobDeadlineMs, jobSubject, parseJobEnvelope, parsePylonCommand, routeAuth,
+  encodeProbeEvent, encodeSubmitReply, jobDeadlineMs, jobSubject, parseJobEnvelope, parsePylonCommand, parseStreamRequest, routeAuth, serveByteStream, streamUpgradeResponse,
   type Job, type JobEnvelope, type JobId, type JobStatus, type LiveHash, type NodeName, type NodeObservation,
   type ProbeAuthConfig, type ProbeEvent, type PylonCommand, type PylonId, type PylonObservation, type SessionFact, type Subject,
 } from "../protocol.ts";
 import { sessionFacts } from "../sessions.ts";
 import type { Whois } from "../tailscale.ts";
+import { startGateway } from "./gateway.ts";
+import { createTailscaleServe, readRoutes, type HttpsGet, type TailscaleCli } from "./serve.ts";
 
 export interface ProbeOptions {
   node: NodeName;
@@ -25,6 +28,18 @@ export interface ProbeOptions {
   backend: VmBackend;
   secrets: SecretSource;
   jobDeadlineMs?: { readonly [K in Job["kind"]]: number };
+  /** The probe's log, which also receives the stderr of raw pipes. Default console.error. */
+  log?: (message: string) => void;
+  /** Omitted: the probe publishes no previews, and a spawn that assigns one fails. */
+  previews?: {
+    /** Keep it fixed across restarts. Serve entries that proxy to this loopback port are the probe's. */
+    gatewayPort: number;
+    /** A JSON file in the probe's state directory. It keeps paused pylons' routes across probe restarts. */
+    routesFile: string;
+    tailscale: TailscaleCli;
+    /** Tests only. The probe warms each new URL with fetch. */
+    get?: HttpsGet;
+  };
 }
 
 export interface Probe {
@@ -40,29 +55,42 @@ const maxBodyBytes = 1 << 20;
 /** Short, because snapshots are read one at a time and a stuck guest would hold up every observer. */
 const sessionReadTimeoutMs = 3_000;
 
-/** This slice publishes no previews. An empty set is already converged. */
+/** A probe without a preview gateway. An empty set is already converged. */
 const noPreviews: ProbeDeps["serve"] = {
   async converge(_pylonId, previews) {
-    if (previews.length > 0) throw new JobFailure("invalid", "this slice does not publish previews yet");
+    if (previews.length > 0) throw new JobFailure("invalid", "this probe was started without a preview gateway");
   },
 };
 
 export async function startProbe(options: ProbeOptions): Promise<Probe> {
   const { node, backend, auth, whois } = options;
   const deadlines = options.jobDeadlineMs ?? jobDeadlineMs;
+  const bootId = randomUUID();
+  const shutdown = new AbortController();
+  const previews = options.previews === undefined ? null : {
+    ...options.previews,
+    gateway: await startGateway({
+      port: options.previews.gatewayPort,
+      routes: await readRoutes(options.previews.routesFile),
+      origin: ({ pylonId, service }) => backend.guest(pylonId).previewOrigin(service),
+      onHit: (hit) => emit({ type: "preview-hit", ...hit }),
+    }),
+  };
   const deps: ProbeDeps = {
     backend,
     secrets: options.secrets,
-    serve: noPreviews,
+    serve: previews === null ? noPreviews : createTailscaleServe({ cli: previews.tailscale, gateway: previews.gateway, routesFile: previews.routesFile, get: previews.get }),
     fetchPeer: () => Promise.reject(new Error("this slice does not fetch artifacts from peers yet")),
   };
-  const bootId = randomUUID();
-  const shutdown = new AbortController();
   const jobs = new Map<JobId, { status: JobStatus; finishedAt: number | null }>();
   const busy = new Map<Subject, JobId>();
   const liveHashes = new Map<PylonId, LiveHash>();
   const observers = new Set<{ write(event: ProbeEvent): void; drop(err: Error): void }>();
   const runningJobs = new Set<Promise<void>>();
+  const log = options.log ?? console.error;
+  /** Upgraded sockets, which the HTTP server no longer tracks, so close() ends them itself. */
+  const streamSockets = new Set<Duplex>();
+  const ptyStreams = new Map<PylonId, number>();
 
   const emit = (event: ProbeEvent) => { if (!shutdown.signal.aborted) for (const observer of observers) observer.write(event); };
 
@@ -100,8 +128,8 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
         return {
           pylonId, phase: "running", liveHash: liveHashes.get(pylonId) ?? null, bootedAt: p.bootedAt,
           bootedFrom: { image: p.image, checkpoint: p.checkpoint },
-          // The other guest facts need guest operations this slice does not have.
-          services: [], previews: [], sessions: await sessions(pylonId), git: null, declaredOutputs: [], attachedClients: 0,
+          // The other guest facts need guest operations, which this slice does not have.
+          services: [], previews: [], sessions: await sessions(pylonId), git: null, declaredOutputs: [], attachedClients: ptyStreams.get(pylonId) ?? 0,
         };
     }
   }
@@ -118,6 +146,8 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
   }
 
   async function readSnapshot(): Promise<NodeObservation> {
+    // Jobs before pylons, so the pylons show the result of every job listed as finished. See NodeObservation.jobs.
+    const jobs = retainedJobs();
     const [pylons, artifacts, disk] = await Promise.all([backend.list(), backend.artifacts.list(), statfs("/")]);
     return {
       node,
@@ -126,7 +156,7 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
       // VmBackend does not report reserved memory yet.
       capacity: { memoryGiB: totalmem() / 2 ** 30, committedMemoryGiB: 0, diskFreeGiB: (disk.bavail * disk.bsize) / 2 ** 30 },
       artifacts,
-      jobs: retainedJobs(),
+      jobs,
       pylons: await Promise.all(pylons.map(observation)),
     };
   }
@@ -180,7 +210,7 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
   }
 
   async function observe(res: ServerResponse) {
-    // Events that arrive while the first snapshot is built go out after it, in order.
+    // Events that arrive while the first snapshot is built go out after it, in order, except older snapshots.
     const queued: ProbeEvent[] = [];
     let write = (event: ProbeEvent) => { queued.push(event); };
     const observer = { write: (event: ProbeEvent) => write(event), drop: (err: Error) => res.destroy(err) };
@@ -191,7 +221,8 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
     res.writeHead(200, { "content-type": "application/x-ndjson", "cache-control": "no-store" });
     res.write(encodeProbeEvent({ type: "snapshot", observation: first }));
     write = (event) => { res.write(encodeProbeEvent(event)); };
-    for (const event of queued) write(event);
+    // Reads run in order, so a queued snapshot was read before `first`. Sent after it, it would undo newer state.
+    for (const event of queued) if (event.type !== "snapshot") write(event);
   }
 
   async function authorized(req: IncomingMessage, route: keyof typeof routeAuth): Promise<boolean> {
@@ -243,15 +274,58 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
     return send(res, 404, `no route ${req.method} ${path}`);
   }
 
+  /** GET /v1/pylons/{id}/stream. The guest process starts before the 101, so a pylon that cannot run it gets an HTTP error instead. */
+  async function stream(req: IncomingMessage, socket: Duplex, head: Buffer) {
+    const url = new URL(req.url ?? "/", "http://probe");
+    if (!url.pathname.startsWith("/v1/pylons/")) return refuse(socket, 404, `no upgrade route ${url.pathname}`);
+    if (!await authorized(req, "/v1/pylons")) return refuse(socket, 403, "caller is not the tailnet node this route allows");
+    let parsed: ReturnType<typeof parseStreamRequest>;
+    try {
+      parsed = parseStreamRequest(req.headers.upgrade, url);
+    } catch (err) {
+      return refuse(socket, 400, (err as Error).message);
+    }
+    if (parsed === null) return refuse(socket, 404, `no upgrade route ${url.pathname} for ${req.headers.upgrade}`);
+    const { pylonId, request } = parsed;
+    if ((await backend.list()).find((p) => p.pylonId === pylonId)?.vm !== "running") return refuse(socket, 409, `${pylonId} is not running`);
+    if (socket.destroyed || shutdown.signal.aborted) return;
+    const guest = await backend.guest(pylonId).stream(request, (text) => log(`${pylonId} stream ${request.argv[0]}: ${text.trimEnd()}`));
+    socket.write(streamUpgradeResponse);
+    const pty = request.pty !== null;
+    if (pty) ptyStreams.set(pylonId, (ptyStreams.get(pylonId) ?? 0) + 1);
+    try {
+      await serveByteStream(socket, head, guest);
+    } finally {
+      if (pty) {
+        const left = ptyStreams.get(pylonId)! - 1;
+        if (left === 0) ptyStreams.delete(pylonId);
+        else ptyStreams.set(pylonId, left);
+      }
+    }
+  }
+
   const server = createServer((req, res) => {
     handle(req, res).catch((err: unknown) => {
       if (res.headersSent) return res.destroy(err as Error);
       send(res, 500, (err as Error).message);
     });
   });
+  server.on("upgrade", (req: IncomingMessage, socket: Duplex, head: Buffer) => {
+    // Node hands over an upgraded socket without its error handler, and a reset during whois would crash the probe.
+    socket.on("error", (err) => log(`stream ${req.url}: ${err.message}`));
+    streamSockets.add(socket);
+    socket.on("close", () => streamSockets.delete(socket));
+    stream(req, socket, head).catch((err: unknown) => {
+      log(`stream ${req.url}: ${(err as Error).message}`);
+      refuse(socket, 502, (err as Error).message);
+    });
+  });
   await new Promise<void>((resolve, reject) => {
     server.once("error", reject);
     server.listen(options.port, options.host, () => { server.off("error", reject); resolve(); });
+  }).catch(async (err: unknown) => {
+    await previews?.gateway.close(); // its port is fixed, so a retry in this process needs it free
+    throw err;
   });
   const address = server.address();
   if (address === null || typeof address === "string") throw new Error(`unexpected server address ${address}`);
@@ -263,10 +337,17 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
       shutdown.abort(new Error("probe closed"));
       const closed = new Promise<void>((resolve) => server.close(() => resolve()));
       server.closeAllConnections();
+      for (const socket of streamSockets) socket.destroy();
       await Promise.allSettled([...runningJobs]);
-      await closed;
+      await Promise.all([closed, previews?.gateway.close()]);
     },
   };
+}
+
+/** An HTTP error on a socket that asked to upgrade, which has no ServerResponse. Does nothing once the socket is gone. */
+function refuse(socket: Duplex, status: number, body: string) {
+  if (socket.destroyed) return;
+  socket.end(`HTTP/1.1 ${status} ${STATUS_CODES[status]}\r\ncontent-type: text/plain; charset=utf-8\r\ncontent-length: ${Buffer.byteLength(body)}\r\nconnection: close\r\n\r\n${body}`);
 }
 
 function send(res: ServerResponse, status: number, body: string, contentType = "text/plain; charset=utf-8") {
