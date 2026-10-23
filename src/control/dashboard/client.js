@@ -141,6 +141,8 @@ const actions = {
   abort: (thread) => api("POST", `/v1/threads/${thread}/abort`),
   retry: (thread) => api("POST", `/v1/threads/${thread}/retry`),
   "retry-pylon": (thread) => api("POST", `/v1/threads/${thread}/pylon/retry`),
+  // Publishes the port. The next refresh shows its preview, which links once the node serves it.
+  "link-port": (thread, { port }) => api("POST", `/v1/threads/${thread}/previews`, { port: Number(port) }),
 };
 
 document.addEventListener("click", async (event) => {
@@ -151,7 +153,7 @@ document.addEventListener("click", async (event) => {
   button.disabled = true;
   setOpen(null);
   try {
-    await actions[action](thread);
+    await actions[action](thread, button.dataset);
     showError("action-error", null);
     await refreshAfter();
   } catch (err) {

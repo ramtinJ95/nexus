@@ -3,6 +3,7 @@ import { join, posix } from "node:path";
 import type { VM } from "@earendil-works/gondolin";
 import { parseDocument } from "yaml";
 import { z } from "zod";
+import { linkedName, reservedPorts } from "../project.ts";
 import { configSchema, type Service } from "./contracts.ts";
 import { checked, guestExists, serviceRunning, startService, stopService } from "./guest.ts";
 import { openPortal } from "./portals.ts";
@@ -31,9 +32,7 @@ export type ServiceFact = {
 	declared: boolean;
 	wantsPreview: boolean;
 };
-
-/** The name a port linked with `attach` is reported and previewed under. */
-export const linkedName = (port: number) => `port-${port}`;
+const linkedSchema = z.array(z.number().int().min(1).max(65535));
 
 /**
  * Supervises the services `configPath` declares, plus ad hoc ones, each as `user` from `root`. A service's
@@ -90,6 +89,16 @@ export class GuestServices {
 		} catch (error) {
 			if (!existsError(error, "ENOENT")) throw error;
 		}
+		// A linked port outlives the boot, because the control plane keeps its preview for the thread's life.
+		let linked: number[] = [];
+		try {
+			linked = linkedSchema.parse(JSON.parse(await readFile(join(this.dir, "linked.json"), "utf8")));
+		} catch (error) {
+			if (!existsError(error, "ENOENT")) throw error;
+		}
+		for (const port of linked)
+			this.attached.set(port, await openPortal(await this.ingress(), `/${linkedName(port)}`));
+		this.routes();
 	}
 	/** A repo without the file declares no services. */
 	private async declaredFile(): Promise<Record<string, Service>> {
@@ -242,6 +251,8 @@ export class GuestServices {
 	}
 	/** Previews a port that is already listening, unsupervised. Returns the name it is reported under. */
 	async attach(port: number): Promise<string> {
+		if (reservedPorts.has(port))
+			throw new Error(`Port ${port} is Nexus's own, so it cannot be previewed`);
 		const owner = [...this.entries].find(([, entry]) => entry.port === port);
 		if (owner) {
 			if (!owner[1].portal)
@@ -255,10 +266,15 @@ export class GuestServices {
 				`Service ${linkedName(port)} runs on another port, so port ${port} cannot be previewed under that name. Rename the service`,
 			);
 		if (!this.attached.has(port)) {
-			this.attached.set(
-				port,
-				await openPortal(await this.ingress(), `/${linkedName(port)}`),
-			);
+			// Saved before the port counts as attached, so a failed save leaves a retry to save it again.
+			const portal = await openPortal(await this.ingress(), `/${linkedName(port)}`);
+			try {
+				await saveJson(join(this.dir, "linked.json"), [...this.attached.keys(), port]);
+			} catch (error) {
+				await portal.close();
+				throw error;
+			}
+			this.attached.set(port, portal);
 			this.routes();
 		}
 		return linkedName(port);

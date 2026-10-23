@@ -187,6 +187,8 @@ export async function runCommand(pylonId: PylonId, command: PylonCommand, deps: 
       const { services, logs } = await guest.services(command.op, command.name, command.lines);
       return { kind: "service", services, ...(logs === undefined ? {} : { logs }) };
     }
+    case "link-port":
+      return { kind: "link-port", service: await guest.linkPort(command.port) };
   }
 }
 

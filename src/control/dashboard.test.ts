@@ -8,7 +8,7 @@ import { join } from "node:path";
 import { startApi } from "./api.ts";
 import { fakeHarness } from "./fake-harness.ts";
 import { openRegistry, type Thread } from "./registry.ts";
-import type { JobId, NodeName, PylonObservation, TailnetNodeId } from "../protocol.ts";
+import type { JobId, NodeName, PylonObservation, ServiceFact, TailnetNodeId } from "../protocol.ts";
 import type { AssistantMessage, Message, ToolCall } from "@earendil-works/pi-ai";
 
 const node = "rj-firebat" as NodeName;
@@ -44,6 +44,8 @@ async function setup(t: TestContext) {
     dotfiles: { repo: "git@github.com:ramtin/dotfiles.git", ref: "main" },
     harness: fake.harness,
     wake: () => {},
+    probes: new Map(),
+    previewPorts: { first: 10200, last: 10299 },
   });
   t.after(async () => {
     await api.close();
@@ -71,15 +73,19 @@ async function setup(t: TestContext) {
   }
   /** Reports the node online with these pylons running, as an ingested probe snapshot would. */
   function observe(...threads: Thread[]) {
+    observeWith({}, ...threads);
+  }
+  /** As observe, with these services and listening ports in every pylon. */
+  function observeWith(facts: { services?: ServiceFact[]; listening?: number[] }, ...threads: Thread[]) {
     registry.apply({ record: "node", node, state: "online", capacity });
     const pylons = threads.map((t): PylonObservation => ({
       pylonId: t.pylonId, phase: "running", liveHash: registry.pylon(t.pylonId)!.liveHash, bootedAt: "2027-01-01T00:00:00Z",
       bootedFrom: { image: image.id as `img-${string}`, checkpoint: null },
-      services: [], previews: [], sessions: [], git: null, declaredOutputs: [], attachedClients: 0,
+      services: facts.services ?? [], listening: (facts.listening ?? []).map((port) => ({ port })), previews: [], sessions: [], git: null, declaredOutputs: [], attachedClients: 0,
     }));
     registry.ingested({ node, observedAt: new Date().toISOString(), probeBootId: "b", capacity, artifacts: [], jobs: [], pylons, previewRoutes: [] }, []);
   }
-  return { registry, fake, call, start, observe, callAs(id: TailnetNodeId | null) { caller = id; } };
+  return { registry, fake, call, start, observe, observeWith, callAs(id: TailnetNodeId | null) { caller = id; } };
 }
 
 async function seeded(t: TestContext) {
@@ -250,40 +256,69 @@ test("the thread page shows its pylon, sessions with how to attach, previews as 
   assert.ok(!previews.includes(":8444/"), "a preview that is not ready has no link yet");
 
   const outputs = sectionOf(res.text, "outputs-h");
-  assert.equal(textOf(outputs), "Outputs 4 branch nexus/fix-checkout diff abc1234 file out-1 preview web ↗");
-  assert.match(outputs, /href="https:\/\/rj-firebat\.tail\.ts\.net:8443\/"[^>]*><code>web<\/code>/);
+  assert.equal(textOf(outputs), "Outputs 3 branch nexus/fix-checkout diff abc1234 file out-1", "web's preview is listed once, under Previews");
 
   const strip = textOf(res.text.split('id="strip"')[1]!.split("</div>")[0]!.replace(/^[^>]*>/, ""));
-  assert.equal(strip, "running · rj-firebat api, starting web ↗ 4 outputs", "the phone's strip names the pylon, each preview and the outputs");
+  assert.equal(strip, "running · rj-firebat api, starting web ↗ 3 outputs", "the phone's strip names the pylon, each preview and the outputs");
+
 
   assert.match(res.text, new RegExp(`<main[^>]* data-activity="${fix.id}"`), "an open thread page records the visit as human activity");
+
+  s.registry.releasePreviews(fix.pylonId);
+  const released = sectionOf((await s.call("GET", `/threads/${fix.id}`)).text, "outputs-h");
+  assert.equal(textOf(released), "Outputs 4 branch nexus/fix-checkout diff abc1234 file out-1 preview web", "a preview the control plane no longer has stays an output");
+});
+
+test("the inspector lists each listening port once: under Ports with an Open button until it has a preview, then under Previews", async (t) => {
+  const s = await seeded(t);
+  const fix = await s.start("acme", "Fix checkout");
+  const page = async () => {
+    const html = (await s.call("GET", `/threads/${fix.id}`)).text;
+    return { ports: sectionOf(html, "ports-h"), previews: textOf(sectionOf(html, "previews-h")) };
+  };
+  assert.equal(textOf((await page()).ports), "Ports 0 Ports show while the pylon runs.");
+  s.observeWith({ services: [{ name: "web", state: "ready", port: 5173, declared: true, wantsPreview: true }, { name: "db", state: "ready", port: 5432, declared: true, wantsPreview: false }], listening: [3000, 5173, 5432] }, fix);
+  s.registry.allocatePreviews(fix.pylonId, ["web"], { first: 8443, last: 8443 });
+  const before = await page();
+  assert.equal(textOf(before.ports), "Ports 2 3000 Open 5432 db", "web's port is under Previews, and db's has no preview to open");
+  assert.ok(before.ports.includes(`<button type="button" class="btn btn-xs" data-action="link-port" data-thread="${fix.id}" data-port="3000" aria-label="Open port 3000">Open</button>`), "a port no service owns offers to publish it");
+  assert.equal(before.previews, "Previews 1 web starting rj-firebat.tail.ts.net:8443");
+
+  // Opening 3000 links it, and the node's next read lists its service.
+  s.registry.allocatePreviews(fix.pylonId, ["web", "port-3000"], { first: 8443, last: 8444 });
+  s.observeWith({ services: [{ name: "web", state: "ready", port: 5173, declared: true, wantsPreview: true }, { name: "port-3000", state: "ready", port: 3000, declared: false, wantsPreview: true }], listening: [3000, 5173] }, fix);
+  const after = await page();
+  assert.equal(textOf(after.ports), "Ports 0 Every port that listens is under Previews. A server bound only to ::1 can't be previewed, so bind it to 0.0.0.0 or 127.0.0.1.");
+  assert.equal(after.previews, "Previews 2 port-3000 starting rj-firebat.tail.ts.net:8444 web starting rj-firebat.tail.ts.net:8443");
+
+  s.observeWith({ listening: [] }, fix);
+  assert.equal(textOf((await page()).ports), "Ports 0 Nothing listens yet. A server bound only to ::1 can't be previewed, so bind it to 0.0.0.0 or 127.0.0.1.");
 });
 
 test("a paused pylon's preview keeps its link, labelled paused, unless the thread is archived", async (t) => {
   const s = await seeded(t);
   const fix = await s.start("acme", "Fix checkout");
   s.registry.allocatePreviews(fix.pylonId, ["web"], { first: 8443, last: 8443 });
-  s.registry.apply({ record: "output", pylonId: fix.pylonId, kind: "preview", ref: "web" });
   s.observe(fix);
   const url = "https://rj-firebat.tail.ts.net:8443/";
   const previews = async () => {
     const html = (await s.call("GET", `/threads/${fix.id}`)).text;
     const section = sectionOf(html, "previews-h");
-    return { previews: textOf(section), linked: section.includes(`href="${url}"`), output: sectionOf(html, "outputs-h").includes(`href="${url}"`) };
+    return { previews: textOf(section), linked: section.includes(`href="${url}"`) };
   };
-  assert.deepEqual(await previews(), { previews: "Previews 1 web starting rj-firebat.tail.ts.net:8443", linked: false, output: false }, "a running pylon's preview that is not ready has no link yet");
+  assert.deepEqual(await previews(), { previews: "Previews 1 web starting rj-firebat.tail.ts.net:8443", linked: false }, "a running pylon's preview that is not ready has no link yet");
 
   s.registry.ingested({ node, observedAt: new Date().toISOString(), probeBootId: "b", capacity, artifacts: [], jobs: [], pylons: [{ pylonId: fix.pylonId, phase: "stopped", checkpoint: null }], previewRoutes: [] }, []);
-  assert.deepEqual(await previews(), { previews: "Previews 1 web paused Open ↗ rj-firebat.tail.ts.net:8443 Opening it wakes the pylon.", linked: true, output: true });
+  assert.deepEqual(await previews(), { previews: "Previews 1 web paused Open ↗ rj-firebat.tail.ts.net:8443 Opening it wakes the pylon.", linked: true });
 
   await s.call("POST", `/v1/threads/${fix.id}/archive`);
-  assert.deepEqual(await previews(), { previews: "Previews 1 web paused rj-firebat.tail.ts.net:8443 Unarchive the thread to open it.", linked: false, output: false }, "an archived thread's visit cannot wake its pylon");
+  assert.deepEqual(await previews(), { previews: "Previews 1 web paused rj-firebat.tail.ts.net:8443 Unarchive the thread to open it.", linked: false }, "an archived thread's visit cannot wake its pylon");
 
   // Right after the archive, before the pylon pauses, the preview still serves but is about to sleep for good.
   s.observe(fix);
   s.registry.apply({ record: "preview", pylonId: fix.pylonId, service: "web", httpsPort: 8443, ready: true });
   assert.match(textOf(sectionOf((await s.call("GET", `/threads/${fix.id}`)).text, "pylon-h")), /Observed running/);
-  assert.deepEqual(await previews(), { previews: "Previews 1 web paused rj-firebat.tail.ts.net:8443 Unarchive the thread to open it.", linked: false, output: false }, "an archived thread's running pylon offers no link");
+  assert.deepEqual(await previews(), { previews: "Previews 1 web paused rj-firebat.tail.ts.net:8443 Unarchive the thread to open it.", linked: false }, "an archived thread's running pylon offers no link");
 });
 
 test("tool calls are one-line rows where only failures and edits start open, with the exit code and the edit's diff", async (t) => {

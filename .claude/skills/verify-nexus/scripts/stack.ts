@@ -5,7 +5,7 @@
  * It composes the real parts the way src/control/thread-on-node.ts does: the control plane from
  * startControlPlane (registry, loop, pi-durable harness, API and dashboard) and a probe from startProbe with
  * the Docker backend. Only the production boundaries are doubles:
- * - tailscaled's LocalAPI is a Unix socket in the run directory. whois names 127.0.0.1:7480 as the probe and
+ * - tailscaled's LocalAPI is a Unix socket in a directory under /tmp, named in <runDir>/socket-dir. whois names 127.0.0.1:7480 as the probe and
  *   every other address as the control plane's own node, which the API allows, as for the CLI on rj-firebat.
  * - the model is the scripted one from src/harness/test-fixture.ts: `bash: <command>` runs one bash tool call.
  * - `tailscale serve` is src/probe/fake-tailscale.ts, so the Mac's work tailnet is never touched.
@@ -15,7 +15,7 @@
  * outlive it, as pylons outlive a probe. `verify-nexus down` removes them.
  */
 import { execFile } from "node:child_process";
-import { copyFile, mkdir, readFile, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { basename, join } from "node:path";
 import { promisify } from "node:util";
@@ -114,7 +114,11 @@ for (const signal of ["SIGTERM", "SIGINT"] as const) {
 
 await mkdir(runDir, { recursive: true });
 await buildImage();
-const socket = join(runDir, "tailscaled.sock");
+// Not in the run directory: a socket path must fit macOS's 104-byte sun_path, and a worktree's path can be too long.
+// verify-nexus down removes the directory.
+const socketDir = await mkdtemp("/tmp/nexus-verify-");
+await writeFile(join(runDir, "socket-dir"), `${socketDir}\n`);
+const socket = join(socketDir, "tailscaled.sock");
 const tailscaled = await fakeTailscaled(socket);
 closers.push(() => { tailscaled.close(); });
 const whois = localApiWhois(socket);

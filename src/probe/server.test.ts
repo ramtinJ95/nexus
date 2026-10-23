@@ -622,6 +622,68 @@ test("observations carry the supervisor's services, and null when it cannot be r
   assert.deepEqual(new Set(ops), new Set(["list"]), "observing starts and stops nothing");
 });
 
+/** /proc/net/tcp with these ports listening on 0.0.0.0. */
+const procTcp = (...ports: number[]) => [
+  "  sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode",
+  ...ports.map((port, i) => `   ${i}: 00000000:${port.toString(16).toUpperCase().padStart(4, "0")} 00000000:0000 0A 00000000:00000000 00:00000000 00000000  1000        0 ${2000 + i} 1 0000000000000000 100 0 0 10 0`),
+].join("\n");
+
+/** A guest whose only answers are /proc/net/tcp with `ports()`, Herdr with no server, and `linkPort`. */
+function listeningGuest(ports: () => number[], linked: number[] = []): Guest {
+  return {
+    ...fakeGuest((argv, herdr) => herdr ? herdrError("server_not_running")
+      : argv[0] === "sh" && argv[2]!.includes("/proc/net/tcp") ? { exitCode: 0, output: procTcp(...ports()) }
+      : { exitCode: 1, output: `unexpected ${argv.join(" ")}` }),
+    services: async () => ({ services: [] }),
+    async linkPort(port) {
+      linked.push(port);
+      return `port-${port}`;
+    },
+  };
+}
+
+const runningPylon = (e: ProbeEvent) => {
+  const p = e.type === "snapshot" ? e.observation.pylons.find((o) => o.pylonId === pylonId) : undefined;
+  return p?.phase === "running" ? p : undefined;
+};
+
+test("observations carry the ports the guest listens on, and one that starts listening between snapshots publishes a snapshot", async (t) => {
+  let ports = [5173];
+  const { client } = await setup(t, { listeningPollMs: 20 }, listeningGuest(() => ports));
+  const env = envelope(spawnJob, node, Date.now());
+  await client.submit(env);
+  await finished(client, env.jobId);
+  const abort = new AbortController();
+  t.after(() => abort.abort());
+  const events = client.observe(abort.signal)[Symbol.asyncIterator]();
+  assert.deepEqual(runningPylon((await events.next()).value)?.listening, [{ port: 5173 }]);
+  ports = [3000, 5173];
+  for (;;) {
+    const listening = runningPylon((await events.next()).value)?.listening;
+    if (listening === undefined) continue;
+    assert.deepEqual(listening, [{ port: 3000 }, { port: 5173 }]);
+    break;
+  }
+});
+
+test("a link-port command links the port in the guest, answers its service, and publishes a snapshot", async (t) => {
+  const linked: number[] = [];
+  const { client } = await setup(t, { listeningPollMs: 60_000 }, listeningGuest(() => [3000], linked));
+  const env = envelope(spawnJob, node, Date.now());
+  await client.submit(env);
+  await finished(client, env.jobId);
+  const abort = new AbortController();
+  t.after(() => abort.abort());
+  const events = client.observe(abort.signal)[Symbol.asyncIterator]();
+  assert.equal((await events.next()).value?.type, "snapshot");
+  assert.deepEqual(await client.command(pylonId, { kind: "link-port", port: 3000 }), { kind: "link-port", service: "port-3000" });
+  assert.deepEqual(linked, [3000]);
+  assert.equal((await events.next()).value?.type, "snapshot", "the control plane sees the new service without waiting a minute");
+  await assert.rejects(client.command(pylonId, { kind: "link-port", port: 0 }), /HTTP 400: command.port is not an integer from 1 to 65535/);
+  await assert.rejects(client.command(pylonId, { kind: "link-port", port: 22 }), /HTTP 400: command.port 22 is Nexus's own/);
+  assert.deepEqual(linked, [3000], "a refused port reaches no guest");
+});
+
 test("observations report the previews of the pylon's last successful spawn, not of a spawn that failed", async (t) => {
   const { tailscale, open, run, gatewayPort } = await previewSetup(t);
   const { client } = await open();

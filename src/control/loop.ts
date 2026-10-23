@@ -99,7 +99,7 @@ export function startLoop(options: LoopOptions): Loop {
 
   /** The pylon with the LiveSpec its records give now, saved if that changed. */
   function withLive(stored: StoredPylon, thread: Thread): StoredPylon {
-    const live = pylonLive(stored, registry.project(thread.project)!, registry.node(stored.node)!, registry.previews(stored.pylonId));
+    const live = pylonLive(stored, registry.project(thread.project)!, registry.previews(stored.pylonId));
     const liveHash = liveHashOf(live);
     if (liveHash === stored.liveHash) return stored;
     const updated = { ...stored, live, liveHash };
@@ -216,10 +216,11 @@ function merge(last: NodeObservation | null, event: ProbeEvent): NodeObservation
 }
 
 /**
- * Sessions or services the probe could not read have not changed as far as the registry knows, and the next
- * diff needs the last list read. Only the stored copy is filled in. ingest gets the event as read, so a
- * carried session list is never agent activity. Services with no earlier read stay null, because a pylon
- * whose services were never read has not shown that it has none.
+ * Sessions or services the probe could not read have not changed as far as the registry knows, and the next diff
+ * needs the last list read. Only the stored copy is filled in. ingest gets the event as read, so a carried session
+ * list is never agent activity. Services with no earlier read stay null, because a pylon whose services were never
+ * read has not shown that it has none. Listening ports are stored as read: nothing diffs them, and a port seen
+ * once may have closed since, so an unread list is reported as unknown.
  */
 function keepLastRead(last: NodeObservation | null, pylon: PylonObservation): PylonObservation {
   if (pylon.phase !== "running" || (pylon.sessions !== null && pylon.services !== null)) return pylon;

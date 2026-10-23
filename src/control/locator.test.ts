@@ -52,7 +52,7 @@ function observe(registry: ReturnType<typeof openRegistry>, pylon: PylonObservat
 
 const running: PylonObservation = {
   pylonId, phase: "running", liveHash: null, bootedAt: "2027-01-01T00:00:00Z", bootedFrom: { image: "img-000000000000", checkpoint: null },
-  services: [], previews: [], sessions: [], git: null, declaredOutputs: [], attachedClients: 0,
+  services: [], listening: [], previews: [], sessions: [], git: null, declaredOutputs: [], attachedClients: 0,
 };
 
 test("a pylon is located at its node's probe once the node reports it running", async (t) => {

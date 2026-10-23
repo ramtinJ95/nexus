@@ -13,11 +13,12 @@ import type { PortableArtifactId } from "../images.ts";
 import {
   artifactHeaders, encodeProbeEvent, encodeSubmitReply, fetchArtifact, jobDeadlineMs, probePort, jobSubject, parseJobEnvelope, parsePylonCommand, parseStreamRequest, routeAuth, serveByteStream, streamUpgradeResponse,
   type Job, type JobEnvelope, type JobId, type JobStatus, type LiveHash, type NodeName, type NodeObservation,
-  type DeclaredOutput, type ProbeAuthConfig, type ProbeEvent, type PylonCommand, type PylonId, type PylonObservation, type ServiceFact, type SessionFact, type Subject,
+  type DeclaredOutput, type ListeningFact, type ProbeAuthConfig, type ProbeEvent, type PylonCommand, type PylonId, type PylonObservation, type ServiceFact, type SessionFact, type Subject,
 } from "../protocol.ts";
 import { sessionFacts } from "../sessions.ts";
 import type { Whois } from "../tailscale.ts";
 import { listOutputs } from "../outputs.ts";
+import { listeningFacts } from "../listening.ts";
 import { startGateway } from "./gateway.ts";
 import { createPylonApi, type HostBridge } from "./pylon-api.ts";
 import { createTailscaleServe, parseServeStatus, readRoutes, type HttpsGet, type TailscaleCli } from "./serve.ts";
@@ -48,6 +49,8 @@ export interface ProbeOptions {
   peerAddress?: (node: NodeName) => { host: string; port: number };
   /** The backend's end of NEXUS_API, which the in-pylon `nexus` CLI calls. Omitted: those calls go unanswered. */
   hostBridge?: HostBridge;
+  /** How often each running pylon's listening ports are read for a change between snapshots. Default 10 s. */
+  listeningPollMs?: number;
 }
 
 export interface Probe {
@@ -105,6 +108,8 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
   /** Upgraded sockets, which the HTTP server no longer tracks, so close() ends them itself. */
   const streamSockets = new Set<Duplex>();
   const ptyStreams = new Map<PylonId, number>();
+  /** The listening ports each pylon's last observation reported, so a poll can tell when they changed. */
+  const reportedListening = new Map<PylonId, string>();
 
   const emit = (event: ProbeEvent) => { if (!shutdown.signal.aborted) for (const observer of observers) observer.write(event); };
   const api = createPylonApi({
@@ -157,6 +162,36 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
     }
   }
 
+  /** A failed read reports null, never "nothing listens". */
+  async function listening(pylonId: PylonId): Promise<readonly ListeningFact[] | null> {
+    try {
+      return await listeningFacts(backend.guest(pylonId), sessionReadTimeoutMs);
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * An app that starts or stops listening gives the probe no event, so every running pylon's ports are read again
+   * between snapshots, and a change publishes one. Without observers nobody would see it, so nothing is read.
+   */
+  let polling = false;
+  async function pollListening() {
+    if (polling || observers.size === 0) return;
+    polling = true;
+    try {
+      for (const p of await backend.list()) {
+        if (p.vm !== "running") continue;
+        const ports = await listening(p.pylonId);
+        if (ports !== null && JSON.stringify(ports) !== reportedListening.get(p.pylonId)) return void await publishSnapshot();
+      }
+    } catch (err) {
+      log(`listening ports: ${(err as Error).message}`);
+    } finally {
+      polling = false;
+    }
+  }
+
   /** Declared outputs only accumulate in the control plane, so a failed read reported as none loses nothing. `nexus output list` shows the failure. */
   async function declaredOutputs(pylonId: PylonId): Promise<readonly DeclaredOutput[]> {
     try {
@@ -174,14 +209,17 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
       case "broken":
         if (p.cause === undefined) throw new Error(`backend reports ${pylonId} broken with no cause`);
         return { pylonId, phase: "broken", detail: p.detail ?? "the backend gave no detail", cause: p.cause };
-      case "running":
+      case "running": {
         if (p.bootedAt === null) throw new Error(`backend reports ${pylonId} running with no boot time`);
+        const ports = await listening(pylonId);
+        if (ports !== null) reportedListening.set(pylonId, JSON.stringify(ports));
         return {
           pylonId, phase: "running", liveHash: liveHashes.get(pylonId) ?? null, bootedAt: p.bootedAt,
           bootedFrom: { image: p.image, checkpoint: p.checkpoint },
           // The other guest facts need guest operations, which this slice does not have.
-          services: await services(pylonId), previews: (published.get(pylonId) ?? []).map((preview) => ({ ...preview, ready: true })), sessions: await sessions(pylonId), git: null, declaredOutputs: await declaredOutputs(pylonId), attachedClients: ptyStreams.get(pylonId) ?? 0,
+          services: await services(pylonId), listening: ports, previews: (published.get(pylonId) ?? []).map((preview) => ({ ...preview, ready: true })), sessions: await sessions(pylonId), git: null, declaredOutputs: await declaredOutputs(pylonId), attachedClients: ptyStreams.get(pylonId) ?? 0,
         };
+      }
     }
   }
 
@@ -222,6 +260,7 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
     if (job.kind === "pause" || job.kind === "delete") {
       liveHashes.delete(job.pylonId);
       published.delete(job.pylonId);
+      reportedListening.delete(job.pylonId);
     }
     const signal = AbortSignal.any([AbortSignal.timeout(deadlines[job.kind]), shutdown.signal]);
     const run = runJob(job, deps, signal).then(
@@ -329,7 +368,10 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
       }
       const pylon = (await backend.list()).find((p) => p.pylonId === pylonId);
       if (pylon?.vm !== "running") return send(res, 409, `${pylonId} is ${pylon?.vm ?? "absent"}, not running`);
-      return send(res, 200, JSON.stringify(await runCommand(pylonId, command, deps)), "application/json");
+      const result = await runCommand(pylonId, command, deps);
+      // A linked port is a new service that wants a preview, which the control plane allocates once it sees it.
+      if (command.kind === "link-port") void publishSnapshot();
+      return send(res, 200, JSON.stringify(result), "application/json");
     }
     const artifactMatch = /^\/v1\/artifacts\/([^/]+)$/.exec(path);
     if (artifactMatch && req.method === "GET") {
@@ -411,12 +453,14 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
     await Promise.all([new Promise((resolve) => server.close(resolve)), previews?.gateway.close()]);
     throw err;
   });
+  const listeningTimer = setInterval(() => void pollListening(), options.listeningPollMs ?? 10_000);
 
   return {
     port: address.port,
     bootId,
     async close() {
       shutdown.abort(new Error("probe closed"));
+      clearInterval(listeningTimer);
       const closed = new Promise<void>((resolve) => server.close(() => resolve()));
       server.closeAllConnections();
       for (const socket of streamSockets) socket.destroy();

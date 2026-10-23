@@ -40,7 +40,8 @@ export interface Thread extends ActivityFacts {
 export type StoredPylon = Omit<PylonRecord, "desired">;
 
 export type Session = SessionFact & { pylon: PylonId };
-export interface Preview { pylon: PylonId; service: string; httpsPort: number; ready: boolean }
+/** `url` is what the data model calls a preview's URL, on its node's tailnet name. */
+export interface Preview { pylon: PylonId; service: string; httpsPort: number; ready: boolean; url: string }
 /** The https ports a node's previews are published on, both ends included. */
 export interface PortRange { first: number; last: number }
 export interface Output { thread: ThreadId; kind: Extract<RegistryWrite, { record: "output" }>["kind"]; ref: string }
@@ -242,7 +243,7 @@ export function openRegistry(path: string) {
     previewReady: db.prepare("UPDATE previews SET ready = ? WHERE pylon = ? AND service = ? AND https_port = ?"),
     deletePreviews: db.prepare("DELETE FROM previews WHERE pylon = ?"),
     portsOn: db.prepare("SELECT https_port FROM previews WHERE node = ?"),
-    previews: db.prepare("SELECT * FROM previews WHERE pylon = ? ORDER BY service"),
+    previews: db.prepare("SELECT previews.*, nodes.tailnet_host FROM previews JOIN nodes ON nodes.name = previews.node WHERE pylon = ? ORDER BY service"),
     insertOutput: db.prepare("INSERT INTO outputs (thread, kind, ref) VALUES (?, ?, ?) ON CONFLICT DO NOTHING"),
     outputs: db.prepare("SELECT * FROM outputs WHERE thread = ? ORDER BY kind, ref"),
     insertOrphan: db.prepare("INSERT INTO orphans (node, pylon_id) VALUES (?, ?) ON CONFLICT DO NOTHING"),
@@ -271,6 +272,7 @@ export function openRegistry(path: string) {
   function previews(pylon: PylonId): Preview[] {
     return (q.previews.all(pylon) as Row[]).map((r): Preview => ({
       pylon: r.pylon as PylonId, service: r.service as string, httpsPort: r.https_port as number, ready: r.ready === 1,
+      url: `https://${r.tailnet_host as string}:${r.https_port as number}/`,
     }));
   }
 

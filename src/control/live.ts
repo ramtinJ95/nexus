@@ -4,12 +4,9 @@
  * so a new preview port reaches the pylon, PUBLIC_URL and PYLON.md included, through the next spawn.
  */
 import { renderOverlay, type LiveSpec, type Project } from "../project.ts";
-import type { NodeRecord, Preview, StoredPylon } from "./registry.ts";
+import type { Preview, StoredPylon } from "./registry.ts";
 
-/** What the data model calls a preview's URL. */
-export const previewUrl = (node: Pick<NodeRecord, "tailnetHost">, httpsPort: number) => `https://${node.tailnetHost}:${httpsPort}/`;
-
-export function pylonLive(pylon: Pick<StoredPylon, "pylonId" | "thread" | "node" | "boot">, project: Project, node: Pick<NodeRecord, "tailnetHost">, previews: readonly Preview[]): LiveSpec {
+export function pylonLive(pylon: Pick<StoredPylon, "pylonId" | "thread" | "node" | "boot">, project: Project, previews: readonly Preview[]): LiveSpec {
   return {
     previews: previews.map(({ service, httpsPort }) => ({ service, httpsPort })),
     overlay: renderOverlay({
@@ -18,7 +15,7 @@ export function pylonLive(pylon: Pick<StoredPylon, "pylonId" | "thread" | "node"
       project: project.id,
       node: pylon.node,
       allowedHosts: pylon.boot.network.allowedHosts,
-      previews: previews.map((p) => ({ service: p.service, url: previewUrl(node, p.httpsPort) })),
+      previews: previews.map(({ service, url }) => ({ service, url })),
       logins: project.logins,
       dotfiles: pylon.boot.dotfiles,
     }),

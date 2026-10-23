@@ -149,6 +149,12 @@ down() {
   # One at a time, newest first, because removing a checkpoint can remove the untagged parent it was committed on.
   local image
   while image=$(docker images -q --filter "label=nexus.verify=$run" | head -1) && [ -n "$image" ]; do docker rmi --force "$image" > /dev/null; done
+  local sockets; sockets=$(cat "$dir/socket-dir" 2>/dev/null || true)
+  # Only the exact path mkdtemp gives, and only its one socket, so a bad socket-dir cannot remove anything else.
+  if [[ "$sockets" =~ ^/tmp/nexus-verify-[A-Za-z0-9]{6}$ ]]; then
+    rm -f "$sockets/tailscaled.sock"
+    rmdir "$sockets" || echo "verify-nexus: left $sockets, which holds more than the socket" >&2
+  fi
   rm -rf "$dir"
   rm -f "$current_file"
   echo "verify-nexus: run $run is down. Evidence kept in $(evidence_dir "$run")"

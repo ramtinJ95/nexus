@@ -23,7 +23,7 @@ This skill never drives the home-lab deployment on `rj-firebat` and `infra-testb
 
 Isolation: one stack per machine. The control plane reaches probes only on port 7480, and containers keep the bridge port they booted with, so all four ports are fixed: 7470 API, 7480 probe, 7481 preview gateway, 7482 in-pylon CLI bridge. `up` refuses to start while any of them is taken or a previous run was not cleaned up. Never drive a stack this skill did not start. If `doctor` fails on a stack you did not start, stop and report it rather than killing it.
 
-All state lives under `<repo>/.verify/nexus/`, which `.gitignore` ignores. A run's scratch state is in `runs/<run>/`, including `stack.log`, the registry, the harness storage and the fake tailscaled socket. Its evidence is in `evidence/<run>/`. `current` names the run that is up.
+All state lives under `<repo>/.verify/nexus/`, which `.gitignore` ignores. A run's scratch state is in `runs/<run>/`, including `stack.log`, the registry and the harness storage. The fake tailscaled socket is in a `/tmp/nexus-verify-*` directory instead, which `socket-dir` names, because a socket path in a long worktree path would pass macOS's 104-byte limit. `down` removes it. A run's evidence is in `evidence/<run>/`. `current` names the run that is up.
 
 ## Launch
 
@@ -97,7 +97,7 @@ $V down
 
 - closes the run's browser session;
 - removes the containers and images labelled `nexus.verify=<run>`: pylons, checkpoints, templates and the pylon image;
-- deletes `runs/<run>/`.
+- deletes the run's socket directory under `/tmp` and `runs/<run>/`.
 
 It keeps `evidence/<run>/` and copies `stack.log` into it first. It never kills by process name, and it leaves the `node:24-bookworm-slim` base image cached. Run it after every attempt, including failed ones, so the next `up` finds its ports free.
 

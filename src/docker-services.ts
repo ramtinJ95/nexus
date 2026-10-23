@@ -3,16 +3,16 @@
  * It reads the checkout's .nexus/services.yaml with the contract's parser and runs each declared service in
  * the container, as root like every Docker exec, under a restart loop in its own process group. A service
  * gets PORT and, once a preview is assigned, its PUBLIC_URL. A container's ports reach the host only where
- * `docker run` published them, so every service must fix its port in `publishedPorts`. Ad hoc services and
- * linked ports are not supported.
+ * `docker run` published them, so every service must fix its port in `publishedPorts`, and only those ports can
+ * be linked. Ad hoc services are not supported.
  *
- * Which services run, which were stopped on purpose, and the env each started with are in the container.
+ * Which services run, which were stopped on purpose, the env each started with and the linked ports are in the container.
  * The last URLs, start failures and published ports are in the probe's memory, so a probe restart forgets
  * them until the next spawn, which the planner sends after one.
  */
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { parseServicesFile, type ServiceDecl, type ServiceName } from "./project.ts";
+import { linkedName, parseServicesFile, type ServiceDecl, type ServiceName } from "./project.ts";
 import type { ServiceFact } from "./protocol.ts";
 import { checkoutDir } from "./sessions.ts";
 
@@ -32,6 +32,7 @@ interface Known {
   failures: Map<ServiceName, string>;
   /** Container port to the loopback port Docker published it on. */
   hostPorts: Map<number, number>;
+  linked: Set<number>;
 }
 
 /** Runs a script in the container. A nonzero exit is a result, not an error. */
@@ -76,13 +77,23 @@ export function dockerServices() {
     return declared;
   }
 
+  /** One port per line, so a checkpoint keeps them. */
+  const linkedFile = `${root}/linked`;
+  async function linked(container: string): Promise<Set<number>> {
+    const { output } = await inContainer(container, `cat ${linkedFile} 2>/dev/null || true`);
+    return new Set(output.split("\n").filter((line) => line !== "").map(Number));
+  }
+
+  const listening = async (container: string, port: number) =>
+    (await inContainer(container, `exec bash -c 'exec 3<>"/dev/tcp/127.0.0.1/$0"' "$1"`, [String(port)])).code === 0;
+
   const running = async (container: string, name: string) =>
     (await inContainer(container, `p=$(cat ${root}/"$1".pid 2>/dev/null) && kill -0 "$p" 2>/dev/null`, [name])).code === 0;
 
   async function healthy(container: string, k: Known, name: string): Promise<boolean> {
     const decl = k.declared[name]!;
     if (decl.health === "process") return running(container, name);
-    if ((await inContainer(container, `exec bash -c 'exec 3<>"/dev/tcp/127.0.0.1/$0"' "$1"`, [String(decl.port)])).code !== 0) return false;
+    if (!await listening(container, decl.port)) return false;
     if (decl.health === undefined) return true;
     try {
       const res = await fetch(`http://127.0.0.1:${k.hostPorts.get(decl.port)}${decl.health}`, { signal: AbortSignal.timeout(2000), redirect: "manual" });
@@ -178,7 +189,7 @@ export function dockerServices() {
         if (m) hostPorts.set(Number(m[1]), Number(m[2]));
       }
       const previous = known.get(container);
-      const k: Known = { declared: await declarations(container), urls, failures: previous?.failures ?? new Map(), hostPorts };
+      const k: Known = { declared: await declarations(container), urls, failures: previous?.failures ?? new Map(), hostPorts, linked: await linked(container) };
       known.set(container, k);
       if (booted) {
         await checked(container, `rm -f ${root}/*.pid ${root}/*.stopped`);
@@ -212,7 +223,26 @@ export function dockerServices() {
         if (op === "stop") await checked(container, `mkdir -p ${root} && touch ${root}/"$1".stopped`, [n]);
         else await start(container, k, n);
       }
-      return facts(container, k, names);
+      const linkedFacts = name !== undefined ? [] : await Promise.all([...k.linked].map(async (port): Promise<ServiceFact> => ({
+        name: linkedName(port), state: await listening(container, port) ? "ready" : "stopped", port, declared: false, wantsPreview: true,
+      })));
+      return [...await facts(container, k, names), ...linkedFacts];
+    },
+
+    /** As the pylon VM's attach: a port a declared service owns is previewed under that service. */
+    async link(container: string, port: number): Promise<ServiceName> {
+      const k = state(container);
+      const owner = Object.entries(k.declared).find(([, decl]) => decl.port === port);
+      if (owner !== undefined) {
+        if (!wantsPreview(owner[1])) throw new Error(`Port ${port} belongs to service ${owner[0]}, which has no preview. Declare one in ${servicesFile}`);
+        return owner[0];
+      }
+      if (!k.hostPorts.has(port)) throw new Error(`the Docker backend links only the ports docker run published, ${publishedPorts.first} to ${publishedPorts.last}, and ${port} is not one`);
+      if (!k.linked.has(port)) {
+        await checked(container, `mkdir -p ${root} && echo "$1" >> ${linkedFile}`, [String(port)]);
+        k.linked.add(port);
+      }
+      return linkedName(port);
     },
 
     async logs(container: string, name: string, lines = 100): Promise<{ services: ServiceFact[]; logs: string }> {
@@ -224,9 +254,10 @@ export function dockerServices() {
     origin(container: string, service: string): `http://127.0.0.1:${number}` {
       const k = state(container);
       const decl = k.declared[service];
-      if (decl === undefined || !wantsPreview(decl)) throw new Error(`${container} has no preview of ${service}`);
-      const hostPort = k.hostPorts.get(decl.port);
-      if (hostPort === undefined) throw new Error(`Docker published no loopback port for ${service}'s port ${decl.port} in ${container}`);
+      const port = decl !== undefined && wantsPreview(decl) ? decl.port : [...k.linked].find((p) => linkedName(p) === service);
+      if (port === undefined) throw new Error(`${container} has no preview of ${service}`);
+      const hostPort = k.hostPorts.get(port);
+      if (hostPort === undefined) throw new Error(`Docker published no loopback port for ${service}'s port ${port} in ${container}`);
       return `http://127.0.0.1:${hostPort}`;
     },
 

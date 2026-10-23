@@ -12,13 +12,13 @@ import { randomBytes } from "node:crypto";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { z } from "zod";
 import { actualState, desiredPhase, retryRefusal, type ActualState, type DesiredPhase } from "../reconcile.ts";
-import { effectiveAllowedHosts, gitUrl, liveHashOf, withHttpsHosts, type BootInputs, type Project, type ProjectId, type PylonOverlay } from "../project.ts";
-import type { NodeName, PylonId, TailnetNodeId } from "../protocol.ts";
+import { effectiveAllowedHosts, gitUrl, linkedName, liveHashOf, reservedPorts, withHttpsHosts, type BootInputs, type Project, type ProjectId, type PylonOverlay } from "../project.ts";
+import type { CommandResult, NodeName, ProbeClient, ProbeError, PylonId, TailnetNodeId } from "../protocol.ts";
 import type { HarnessHost } from "../harness/host.ts";
 import type { ImageId, ImageManifest } from "../images.ts";
 import type { Whois } from "../tailscale.ts";
 import { newPylonRecord } from "../tick.ts";
-import type { NodeRecord, Output, Preview, Registry, Session, Thread, ThreadId } from "./registry.ts";
+import type { NodeRecord, Output, PortRange, Preview, Registry, Session, Thread, ThreadId } from "./registry.ts";
 import { dashboard } from "./dashboard.ts";
 import { pylonLive } from "./live.ts";
 import { herdrSession } from "../sessions.ts";
@@ -37,6 +37,10 @@ export interface ApiOptions {
   harness: ThreadHarness;
   /** Asks the loop for a pass over the node's pylons. */
   wake(node: NodeName): void;
+  /** One client per registry node, for the guest commands a human asks for. */
+  probes: ReadonlyMap<NodeName, Pick<ProbeClient, "command">>;
+  /** The https ports each node's previews are allocated from, the loop's range. */
+  previewPorts: PortRange;
 }
 
 export type ThreadHarness = Pick<HarnessHost, "startThread" | "send" | "abort" | "retry" | "watch" | "deleteThread" | "activity">;
@@ -57,12 +61,23 @@ export interface ThreadDetail {
   };
   sessions: readonly Session[];
   previews: readonly Preview[];
+  /**
+   * The TCP ports the pylon listens on that a preview can reach, as its node last reported them, in order. Empty
+   * while the pylon is not running, and null when its node could not read them.
+   */
+  ports: readonly ListeningPort[] | null;
   outputs: readonly Output[];
   /** The command that attaches to the pylon's Herdr sessions from a shell in the pylon. */
   attach: string;
   /** Null for a thread that has no conversation. A parked task holds the run until it is retried. */
   agent: { parkedTasks: number } | null;
 }
+
+/**
+ * `service` is the service the port belongs to: declared, ad hoc, or `port-<port>` once it is linked. `preview` is
+ * that service's preview, or null while it has none, which `POST /v1/threads/<id>/previews` gives it.
+ */
+export interface ListeningPort { port: number; service: string | null; preview: Preview | null }
 
 /** A thread as the list reports it, with what the planner wants of its pylon and what its node last reported. */
 export type ThreadRow = Thread & { desired: DesiredPhase; pylon: Pick<ThreadDetail["pylon"], "node" | "actualState" | "failed"> };
@@ -120,12 +135,13 @@ const imageSchema = z.strictObject({
   sha256: z.string().regex(/^[0-9a-f]{64}$/),
 });
 const currentImageSchema = z.strictObject({ image: z.string().min(1) });
+const previewSchema = z.strictObject({ port: z.int().min(1).max(65535).refine((port) => !reservedPorts.has(port), "is Nexus's own") });
 
 /** `pylon-<id>` must fit in 40 characters. */
 const newThreadId = () => `th-${randomBytes(6).toString("hex")}` as ThreadId;
 
 export async function startApi(options: ApiOptions): Promise<Api> {
-  const { registry, whois, allowed, hostnames, dotfiles, harness, wake } = options;
+  const { registry, whois, allowed, hostnames, dotfiles, harness, wake, probes, previewPorts } = options;
 
   function thread(id: string): Thread {
     const found = registry.thread(id as ThreadId);
@@ -189,7 +205,7 @@ export async function startApi(options: ApiOptions): Promise<Api> {
       dotfiles,
     };
     // Ports are allocated once the pylon reports the services that want a preview.
-    const live = pylonLive({ pylonId, thread: id, node, boot }, project, registry.node(node)!, []);
+    const live = pylonLive({ pylonId, thread: id, node, boot }, project, []);
     const { desired: _, ...pylon } = newPylonRecord({
       thread: id, pylonId, node, desired: "running",
       boot,
@@ -221,6 +237,20 @@ export async function startApi(options: ApiOptions): Promise<Api> {
     };
   }
 
+  function portsOf(pylonId: PylonId, previews: readonly Preview[]): ThreadDetail["ports"] {
+    const observed = observedPylon(pylonId);
+    if (observed === "absent" || observed.phase !== "running") return [];
+    // An observation stored before the field existed has none.
+    const listening = observed.listening ?? null;
+    if (listening === null) return null;
+    return listening.map(({ port }) => {
+      // A port linked a moment ago has its preview before the node's next read lists its service.
+      const service = observed.services?.find((s) => s.port === port)?.name
+        ?? (previews.some((p) => p.service === linkedName(port)) ? linkedName(port) : null);
+      return { port, service, preview: previews.find((p) => p.service === service) ?? null };
+    });
+  }
+
   function row(t: Thread): ThreadRow {
     const { node, actualState, failed } = pylonOf(t);
     return { ...t, desired: desiredPhase(t, Date.now()), pylon: { node, actualState, failed } };
@@ -228,12 +258,14 @@ export async function startApi(options: ApiOptions): Promise<Api> {
 
   function detail(t: Thread): ThreadDetail {
     const pylon = registry.pylon(t.pylonId)!;
+    const previews = registry.previews(pylon.pylonId);
     return {
       thread: t,
       desired: desiredPhase(t, Date.now()),
       pylon: pylonOf(t),
       sessions: registry.sessions(pylon.pylonId),
-      previews: registry.previews(pylon.pylonId),
+      previews,
+      ports: portsOf(pylon.pylonId, previews),
       outputs: registry.outputs(t.id),
       attach: `herdr --session ${herdrSession}`,
       agent: t.conversationId === null || t.status === "deleted" ? null : { parkedTasks: harness.activity.parked(t.id).length },
@@ -293,6 +325,40 @@ export async function startApi(options: ApiOptions): Promise<Api> {
     return { submission: submission.id };
   }
 
+  /**
+   * Links the port in the pylon, then gives its service an https port at once, as the loop would at the next
+   * observation, so the reply names the URL. The URL serves once the loop's next spawn publishes it, which `ready`
+   * reports. Linking a port again answers its preview again. Asking is human activity, as a message is.
+   */
+  async function linkPort(t: Thread, body: unknown): Promise<Preview> {
+    const { port } = parse(previewSchema, body);
+    if (t.status === "deleted" || t.status === "archived") throw new HttpError(409, `thread ${t.id} is ${t.status}, so its pylon stays paused`);
+    const pylon = registry.pylon(t.pylonId)!;
+    const probe = probes.get(pylon.node);
+    if (probe === undefined) throw new HttpError(503, `no probe is configured for ${pylon.node}`);
+    registry.recordActivity(t.id, { human: Date.now() });
+    wake(pylon.node);
+    let service: string;
+    try {
+      // The client checks that the result is the command's kind.
+      ({ service } = await probe.command(pylon.pylonId, { kind: "link-port", port }) as Extract<CommandResult, { kind: "link-port" }>);
+    } catch (err) {
+      const code = (err as Partial<ProbeError>).code;
+      if (code === "not-running") throw new HttpError(409, `pylon ${pylon.pylonId} is not running yet. This request wakes it, so ask again once it runs`);
+      if (code === "unreachable") throw new HttpError(503, (err as Error).message);
+      throw err;
+    }
+    // A delete that landed meanwhile may have released the pylon's ports already.
+    if (registry.thread(t.id)!.status === "deleted") throw new HttpError(409, `thread ${t.id} is deleted`);
+    try {
+      registry.allocatePreviews(pylon.pylonId, [service], previewPorts);
+    } catch (err) {
+      throw new HttpError(503, (err as Error).message);
+    }
+    wake(pylon.node);
+    return registry.previews(pylon.pylonId).find((p) => p.service === service)!;
+  }
+
   async function conversation(t: Thread) {
     const watch = await harness.watch(t.id);
     try {
@@ -339,6 +405,10 @@ export async function startApi(options: ApiOptions): Promise<Api> {
     ["POST", /^\/v1\/threads\/([^/]+)\/abort$/, async (m) => { await harness.abort(conversing(thread(m[1]!)).id); return noContent; }],
     ["POST", /^\/v1\/threads\/([^/]+)\/retry$/, async (m) => { await harness.retry(runnable(thread(m[1]!)).id); return noContent; }],
     ["POST", /^\/v1\/threads\/([^/]+)\/pylon\/retry$/, (m) => { retryPylon(thread(m[1]!)); return noContent; }],
+    ["POST", /^\/v1\/threads\/([^/]+)\/previews$/, async (m, r) => {
+      const body = await r.body();
+      return ok(await linkPort(thread(m[1]!), body));
+    }],
     ["GET", /^\/v1\/threads\/([^/]+)\/conversation$/, async (m) => ok(await conversation(conversing(thread(m[1]!))))],
     ["POST", /^\/v1\/images$/, async (_, r) => created(recordImage(await r.body()))],
     ["PUT", /^\/v1\/images\/current$/, async (_, r) => { setCurrentImage(await r.body()); return noContent; }],
