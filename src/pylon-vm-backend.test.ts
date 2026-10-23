@@ -14,7 +14,7 @@ import { PassThrough, Readable } from "node:stream";
 import { createPylonVmBackend, type PylonVmBackendOptions } from "./pylon-vm-backend.ts";
 import { identityOf } from "./pylon-vm/identity.ts";
 import type { BootInputs } from "./project.ts";
-import type { PylonId } from "./protocol.ts";
+import type { BrokenCause, PylonId } from "./protocol.ts";
 import type { ImageId, TemplateBuildInputs, TemplateId, TemplateManifest } from "./images.ts";
 import type { ProjectId } from "./project.ts";
 
@@ -208,7 +208,7 @@ test("a stopped pylon keeps its disk size and its image", async () => {
 test("pausing a pylon whose controller died settles it on its last disk without booting it", async () => {
   const { backend, instances } = await backendWith();
   await leftInstance(instances, "pylon-dead", "running");
-  assert.deepEqual((await backend.list()).map((p) => [p.pylonId, p.vm]), [["pylon-dead", "broken"]]);
+  assert.deepEqual((await backend.list()).map((p) => [p.pylonId, p.vm, p.cause]), [["pylon-dead", "broken", "controller"]]);
   await backend.ensurePaused("pylon-dead" as PylonId, "ckpt-dead-1", signal());
   const [pylon] = await backend.list();
   assert.equal(pylon?.vm, "stopped");
@@ -445,14 +445,16 @@ test("an image is not dropped while a template over it is copied in, and a templ
 
 type StartupFailure = { kind: "setup" | "services"; message: string };
 
-/** A controller that answers on the instance's socket that its VM runs with these startup failures. */
+/** A controller that answers on the instance's socket that its VM runs with these startup failures. Returns every action but inspect. */
 async function failedController(t: import("node:test").TestContext, dir: string, failures: StartupFailure[], setupRecorded: boolean | undefined) {
   const status = { state: "running", startupError: failures.map((f) => f.message).join("\n"), startupFailures: failures, ...(setupRecorded === undefined ? {} : { setupRecorded }) };
+  const actions: Record<string, unknown>[] = [];
   const server = createServer((req, res) => {
     let body = "";
     req.on("data", (chunk: Buffer) => { body += chunk.toString("utf8"); });
     req.on("end", () => {
       const action = JSON.parse(body) as { action: string; name: string };
+      if (action.action !== "inspect") actions.push(action);
       const result = action.action === "inspect"
         ? { name: action.name, labels: { "nexus.image": image }, status: { name: action.name, ...status } }
         : { name: action.name, state: "destroyed" };
@@ -461,6 +463,7 @@ async function failedController(t: import("node:test").TestContext, dir: string,
   });
   await new Promise<void>((resolve) => server.listen(join(dir, "control.sock"), resolve));
   t.after(() => server.close());
+  return actions;
 }
 
 const checkoutFailed: StartupFailure = { kind: "setup", message: "Setup exited 128. Read controller logs. No prepared template was published" };
@@ -478,21 +481,86 @@ test("a template pylon whose checkout failed on a disk that never finished setup
   assert.equal(existsSync(dir), false, "the next spawn boots from the template again");
 });
 
+test("a fresh pylon whose setup failed before its first checkpoint is removed, and the failure stays final", async (t) => {
+  const { backend, instances } = await backendWith();
+  const dir = await leftInstance(instances, "pylon-nosetup", "running");
+  await writeFile(join(dir, "controller.log"), "fatal: repository 'https://github.com/ramtinJ95/missing.git/' not found\n");
+  await failedController(t, dir, [checkoutFailed], false);
+  assert.deepEqual((await backend.list()).map((p) => [p.vm, p.cause]), [["broken", "setup"]]);
+  await assert.rejects(backend.ensureRunning(bootOf("pylon-nosetup"), live, signal()), (err: Error & { code?: string; logTail?: string }) =>
+    err.code === "setup-failed" && /Setup exited 128.*had no checkpoint, so it was removed, and a retry boots the pylon fresh/.test(err.message) && err.logTail?.includes("repository 'https://github.com/ramtinJ95/missing.git/' not found") === true);
+  assert.equal(existsSync(dir), false, "a retry finds the pylon absent and boots it fresh, running setup again");
+});
+
 test("every other startup failure is final, carries the controller log's tail, and keeps the pylon, the user's work on it included", async (t) => {
   const { backend, instances } = await backendWith();
-  const kept: [string, boolean, StartupFailure[], boolean | undefined, RegExp][] = [
-    ["a project's failed setup on a fresh boot", false, [checkoutFailed], false, /Setup exited 128/],
-    ["a service that failed on a template pylon woken from its checkpoint", true, [serviceFailed], true, /Service web was not ready/],
-    ["a setup failure on a template pylon whose disk finished setup once", true, [checkoutFailed], true, /Setup exited 128/],
-    ["a service that failed after the checkout of a template boot", true, [serviceFailed], false, /Service web was not ready/],
-    ["a template pylon whose controller does not report setupRecorded", true, [checkoutFailed], undefined, /Setup exited 128/],
+  const kept: [string, boolean, StartupFailure[], boolean | undefined, RegExp, BrokenCause][] = [
+    ["a project's failed setup recorded on a disk that has a checkpoint", false, [checkoutFailed], true, /Setup exited 128/, "saved-setup"],
+    ["a service that failed on a fresh pylon's first boot", false, [serviceFailed], false, /Service web was not ready/, "services"],
+    ["a service that failed on a template pylon woken from its checkpoint", true, [serviceFailed], true, /Service web was not ready/, "services"],
+    ["a setup failure on a template pylon whose disk finished setup once", true, [checkoutFailed], true, /Setup exited 128/, "saved-setup"],
+    ["a service that failed after the checkout of a template boot", true, [serviceFailed], false, /Service web was not ready/, "services"],
+    ["a template pylon whose controller does not report setupRecorded", true, [checkoutFailed], undefined, /Setup exited 128/, "setup"],
+    ["a setup failure on a disk that has a checkpoint but did not hold the failure when it booted", false, [checkoutFailed], false, /Setup exited 128/, "saved-setup"],
   ];
-  for (const [i, [what, retrySetup, failures, setupRecorded, message]] of kept.entries()) {
+  for (const [i, [what, retrySetup, failures, setupRecorded, message, cause]] of kept.entries()) {
     const pylonId = `pylon-kept-${i}`;
     const dir = await leftInstance(instances, pylonId, "running", 8, retrySetup);
+    if (i === 0 || i === 6) await writeFile(join(dir, "disk.qcow2"), "a completed stop's disk");
     await writeFile(join(dir, "controller.log"), "npm ERR! 404 left-pad\n");
     await failedController(t, dir, failures, setupRecorded);
     await assert.rejects(backend.ensureRunning(retrySetup ? fromTemplate(pylonId) : bootOf(pylonId), live, signal()), { code: "setup-failed", message, logTail: /npm ERR! 404 left-pad/ }, what);
     assert.equal(existsSync(dir), true, what);
+    const listed = (await backend.list()).find((p) => p.pylonId === pylonId);
+    assert.deepEqual([listed?.vm, listed?.cause], ["broken", cause], what);
   }
+});
+
+test("pausing a VM whose setup failed before its first checkpoint removes it, so its next boot runs setup again", async (t) => {
+  const { backend, instances } = await backendWith();
+  const dir = await leftInstance(instances, "pylon-pausefresh", "running");
+  const actions = await failedController(t, dir, [checkoutFailed], false);
+  await backend.ensurePaused("pylon-pausefresh" as PylonId, "ckpt-pausefresh-1", signal());
+  assert.deepEqual(actions.map((a) => a.action), ["destroy"], "the guest records no sessions and the disk is not saved");
+  assert.equal(existsSync(dir), false);
+  assert.deepEqual(await backend.list(), [], "the pylon reads absent, and the planner spawns it fresh");
+});
+
+test("a VM whose setup failed on a disk that has a checkpoint is not paused, so the failure is never saved", async (t) => {
+  const { backend, instances } = await backendWith();
+  const dir = await leftInstance(instances, "pylon-pausesaved", "running");
+  await writeFile(join(dir, "disk.qcow2"), "the last completed disk");
+  await writeFile(join(dir, "nexus-checkpoint.json"), JSON.stringify({ checkpoint: "ckpt-pausesaved-1" }));
+  const actions = await failedController(t, dir, [checkoutFailed], true);
+  assert.deepEqual((await backend.list()).map((p) => [p.vm, p.cause]), [["broken", "saved-setup"]], "the planner refuses it, and never asks for this pause");
+  await assert.rejects(backend.ensurePaused("pylon-pausesaved" as PylonId, "ckpt-pausesaved-2", signal()), { code: "setup-failed", message: /A pause would save the failed setup onto its disk, so it is not paused\. Start again from the project/ });
+  assert.deepEqual(actions, [], "nothing was stopped, recorded or removed");
+  assert.equal(await readFile(join(dir, "disk.qcow2"), "utf8"), "the last completed disk");
+  assert.deepEqual(JSON.parse(await readFile(join(dir, "nexus-checkpoint.json"), "utf8")), { checkpoint: "ckpt-pausesaved-1" });
+});
+
+test("a VM whose controller predates startupFailures is broken for an unknown reason and is not paused", async (t) => {
+  const { backend, instances } = await backendWith();
+  const dir = await leftInstance(instances, "pylon-legacy", "running");
+  // Such a controller reports only the startupError, which may be a setup that failed partway.
+  const status = { state: "running", startupError: "Setup exited 128. Read controller logs" };
+  const actions: Record<string, unknown>[] = [];
+  const server = createServer((req, res) => {
+    let body = "";
+    req.on("data", (chunk: Buffer) => { body += chunk.toString("utf8"); });
+    req.on("end", () => {
+      const action = JSON.parse(body) as { action: string; name: string };
+      if (action.action !== "inspect") actions.push(action);
+      res.end(JSON.stringify(action.action === "inspect"
+        ? { ok: true, result: { name: action.name, labels: { "nexus.image": image }, status: { name: action.name, ...status } } }
+        : { ok: false, error: `the fake has no ${action.action}` }));
+    });
+  });
+  await new Promise<void>((resolve) => server.listen(join(dir, "control.sock"), resolve));
+  t.after(() => server.close());
+  assert.deepEqual((await backend.list()).map((p) => [p.vm, p.cause]), [["broken", "unknown"]], "the planner refuses it, and never asks for this pause");
+  await assert.rejects(backend.ensurePaused("pylon-legacy" as PylonId, "ckpt-legacy-1", signal()), { code: "setup-failed", message: /does not say whether setup failed.*so it is not paused\. Start again from the project/ });
+  assert.deepEqual(actions, [], "nothing was stopped, recorded or removed");
+  assert.equal(existsSync(join(dir, "disk.qcow2")), false);
+  assert.equal(existsSync(join(dir, "nexus-checkpoint.json")), false);
 });

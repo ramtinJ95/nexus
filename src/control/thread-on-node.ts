@@ -7,20 +7,23 @@
  * no model login is needed. It drives the node's running probe only through the control plane's HTTP API:
  * start a thread, run a tool in its pylon, have the agent declare a service with a preview, fetch the preview's
  * https URL from this node, archive the thread so the pylon pauses, unarchive it so the pylon wakes, runs a second
- * tool and serves the preview on the same URL, then delete it. The probe's auth.controlPlane must be this node's own
+ * tool and serves the preview on the same URL, then delete it. A second thread, on a repository that does not exist,
+ * fails setup, which removes its instance, and a human retry boots it fresh and runs a second setup job, which fails again. The probe's auth.controlPlane must be this node's own
  * stable node ID, and its config must set `previews`. With holdSeconds it prints the preview URL and holds that long,
  * so another tailnet device can open it. Deleting the thread must leave `tailscale serve` as the check found it.
  */
 import assert from "node:assert/strict";
+import { randomBytes } from "node:crypto";
 import { lookup } from "node:dns/promises";
 import { mkdtemp, rm, stat } from "node:fs/promises";
 import { request } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { setTimeout as delay } from "node:timers/promises";
 import { z } from "zod";
 import { artifactDirectory, tarCodec } from "../artifacts.ts";
-import { isImageId, probePort } from "../protocol.ts";
+import { isImageId, probePort, type JobStatus } from "../protocol.ts";
 import { scriptedModel, scriptedModels } from "../harness/test-fixture.ts";
 import { parseSelfDnsName, readProbeConfig } from "../probe/config.ts";
 import { tailscaleCli } from "../probe/serve.ts";
@@ -29,6 +32,7 @@ import { defaultPreviewPorts, startControlPlane, type ControlPlaneConfig } from 
 
 const probeConfig = await readProbeConfig(process.argv[2] ?? "/etc/nexus/probe.json");
 if (probeConfig.backend.kind !== "pylon-vm") throw new Error(`the probe runs the ${probeConfig.backend.kind} backend. This check is for pylon-vm`);
+const { stateRoot } = probeConfig.backend;
 const store = artifactDirectory(probeConfig.backend.artifacts, tarCodec);
 const images = (await store.list()).filter(isImageId);
 const image = process.argv[3] ?? (images.length === 1 ? images[0] : undefined);
@@ -188,6 +192,103 @@ async function openPreview(token: string): Promise<{ url: string; httpsPort: num
   return { url, httpsPort: preview.httpsPort };
 }
 
+/** Deletes the thread, then waits for its pylon to be absent and its instance directory to be gone. Returns that directory. */
+async function deleteThread(pylonId: string): Promise<string> {
+  await expect(200, "DELETE", `/threads/${threadId}`);
+  deleted = true;
+  const instance = join(stateRoot, "instances", pylonId);
+  await reaches("absent", 5 * 60_000);
+  await until(`${instance} is gone`, 60_000, () => stat(instance).then(() => undefined, (err: NodeJS.ErrnoException) => {
+    if (err.code === "ENOENT") return true;
+    throw err;
+  }));
+  return instance;
+}
+
+/** The registry row's planner state and the last job the probe reported for the pylon, which ThreadDetail does not carry. */
+function plannerState(pylonId: string) {
+  const db = new DatabaseSync(config.db, { readOnly: true });
+  try {
+    const pylon = db.prepare("SELECT failed, attempts, retrying FROM pylons WHERE id = ?").get(pylonId) as { failed: string | null; attempts: string; retrying: number };
+    const job = db.prepare("SELECT status FROM jobs WHERE subject = ?").get(pylonId) as { status: string } | undefined;
+    return {
+      failed: pylon.failed,
+      attempts: JSON.parse(pylon.attempts) as { count: number; last: { at: number; code: string } | null },
+      retrying: pylon.retrying === 1,
+      job: job === undefined ? null : JSON.parse(job.status) as JobStatus,
+    };
+  } finally {
+    db.close();
+  }
+}
+
+/** Whether the path exists, for an instance directory the backend should have removed. */
+const exists = (path: string) => stat(path).then(() => true, (err: NodeJS.ErrnoException) => {
+  if (err.code === "ENOENT") return false;
+  throw err;
+});
+
+/**
+ * A project whose repository does not exist fails its fresh pylon's setup, which the planner does not retry. The
+ * node removes the instance, because it holds no work. A human retry must make the planner boot the pylon fresh and
+ * run a second setup job, which fails the same way.
+ */
+async function checkFailedSetupRetry() {
+  const repo = `https://github.com/ramtinJ95/nexus-missing-${randomBytes(6).toString("hex")}.git`;
+  await expect(201, "POST", "/projects", {
+    id: "node-check-missing", repoUrl: repo, defaultBranch: "main", defaultNode: probeConfig.node,
+    resources: { cpus: 2, memoryGiB: 4, diskGiB: 10 }, allowedHosts: [], secrets: [], logins: [], preSetup: null,
+  });
+  const thread = await expect(201, "POST", "/threads", { project: "node-check-missing", title: "missing repo" });
+  threadId = thread.id;
+  deleted = false;
+  const instance = join(stateRoot, "instances", thread.pylonId);
+  pass(`start thread ${threadId} on ${repo}, which does not exist`);
+  // While the first boot is on its way, so nothing can have failed yet.
+  const early = await call("POST", `/threads/${threadId}/pylon/retry`);
+  assert.equal(early.status, 409, `a retry before the pylon failed: ${JSON.stringify(early.body)}`);
+  pass("a retry of a pylon that has not failed is refused with 409");
+
+  const first = await until("the planner gives up on the pylon", 10 * 60_000, async () => {
+    const state = plannerState(thread.pylonId);
+    return state.failed !== null ? state : undefined;
+  });
+  assert.ok(first.job?.kind === "spawn" && first.job.state === "failed" && first.job.code === "setup-failed", `the first spawn fails setup: ${JSON.stringify(first.job)}`);
+  assert.equal(first.attempts.count, 1);
+  assert.match(first.failed!, /had no checkpoint, so it was removed, and a retry boots the pylon fresh/);
+  assert.equal(await exists(instance), false, `${instance} was removed`);
+  assert.equal((await detail()).pylon.actualState, "failed");
+  pass(`the planner gives up after spawn ${first.job.jobId} fails setup, and the node removed ${instance}: ${first.failed!.split("\n")[0]}`);
+
+  const page = await threadPage();
+  assertIncludes(page, `<button type="button" class="btn" id="retry-pylon" data-action="retry-pylon" data-thread="${threadId}">Retry</button>`, "Start again</button>", "fatal:");
+  pass("the thread page shows the setup output, and offers Retry next to Start again");
+
+  await expect(204, "POST", `/threads/${threadId}/pylon/retry`);
+  const cleared = plannerState(thread.pylonId);
+  assert.deepEqual([cleared.failed, cleared.attempts, cleared.retrying], [null, { count: 0, last: null }, true], "the retry clears the verdict and the attempts");
+  const again = await call("POST", `/threads/${threadId}/pylon/retry`);
+  assert.equal(again.status, 409, `a retry of a pylon that has not failed since: ${JSON.stringify(again.body)}`);
+  pass("the retry clears the verdict and the attempts, and a second retry before a new failure is refused with 409");
+
+  const states = new Set<string>();
+  const second = await until("the planner gives up after a second setup job", 10 * 60_000, async () => {
+    states.add((await detail()).pylon.actualState);
+    const state = plannerState(thread.pylonId);
+    return state.failed !== null ? state : undefined;
+  });
+  assert.ok(states.has("spawning"), `the pylon spawned again after the retry: it was ${[...states].join(", ")}`);
+  assert.ok(second.job?.kind === "spawn" && second.job.jobId !== first.job.jobId, `a second spawn ran: ${JSON.stringify(second.job)}`);
+  assert.ok(second.job.state === "failed" && second.job.code === "setup-failed", `the second spawn fails setup: ${JSON.stringify(second.job)}`);
+  assert.equal(second.attempts.count, 1, "the attempts climb again from 0");
+  assert.ok(second.attempts.last!.at > first.attempts.last!.at, "the verdict is the second job's");
+  assert.match(second.failed!, /^last job failed with setup-failed/);
+  assert.equal(second.retrying, false);
+  pass(`after the retry the pylon was ${[...states].join(", then ")}, and spawn ${second.job.jobId} failed setup again: ${second.failed!.split("\n")[0]}`);
+
+  pass(`deleting the failed thread removes ${await deleteThread(thread.pylonId)}`);
+}
+
 let verdict = "FAIL";
 try {
   await expect(201, "POST", "/images", manifest);
@@ -253,21 +354,15 @@ try {
   assert.equal(woken.url, preview.url, "the preview keeps its URL across the pause");
   pass(`after the wake the service is served again at ${woken.url}`);
 
-  await expect(200, "DELETE", `/threads/${threadId}`);
-  deleted = true;
-  const instance = join(probeConfig.backend.stateRoot, "instances", thread.pylonId);
-  await reaches("absent", 5 * 60_000);
-  await until(`${instance} is gone`, 60_000, () => stat(instance).then(() => undefined, (err: NodeJS.ErrnoException) => {
-    if (err.code === "ENOENT") return true;
-    throw err;
-  }));
-  pass(`deleting the thread removes ${instance}`);
+  pass(`deleting the thread removes ${await deleteThread(thread.pylonId)}`);
 
   const serveAfter = await serveStatus();
   console.log(`tailscale serve status after: ${JSON.stringify(serveAfter)}`);
   assert.deepEqual(serveAfter, serveBefore, "deleting the thread leaves tailscale serve as the check found it");
   await until("the deleted thread's port is released", 30_000, async () => (await detail()).previews.length === 0 ? true : undefined);
   pass("tailscale serve is as the check found it, and the port is released");
+
+  await checkFailedSetupRetry();
   verdict = "PASS";
 } catch (err) {
   console.error(`FAIL ${(err as Error).message}`);

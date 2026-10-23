@@ -517,11 +517,14 @@ function runBar(t: Thread, run: Run, now: number): Html {
 function composer(d: ThreadDetail, run: Run, model: string | null): Html {
   const { thread: t } = d;
   if (t.status === "deleted" || t.conversationId === null) return html``;
-  // Only the planner giving up is final. A pylon the probe reports broken may still be paused and resumed.
+  // Only the planner giving up holds the pylon until a human acts. A pylon the probe reports broken may still be paused and resumed.
   if (d.pylon.failed !== null) {
-    return html`<div class="note-box failed-box" role="alert"><p>The planner gave up on this thread's pylon, so its agent cannot run tools and the thread takes no messages. Nothing restarts a failed pylon, so delete the thread or start again from the same project.</p>
+    const refused = d.pylon.retryRefused !== null;
+    return html`<div class="note-box failed-box" role="alert"><p>The planner gave up on this thread's pylon, so its agent cannot run tools and the thread takes no messages. ${refused
+      ? `${d.pylon.retryRefused}.`
+      : "Fix the cause, such as the project's git access, and retry, or start again from the same project. A retry runs setup again on a new pylon whose setup failed, and resumes a broken pylon from its newest disk."}</p>
 <pre class="diag">${d.pylon.failed}</pre>
-<button type="button" class="btn" data-start="${t.project}" data-title="${t.title}">Start again</button></div>`;
+<div class="failed-actions">${!refused && html`<button type="button" class="btn" id="retry-pylon" data-action="retry-pylon" data-thread="${t.id}">Retry</button>`}<button type="button" class="btn" data-start="${t.project}" data-title="${t.title}">Start again</button></div></div>`;
   }
   if (t.status === "archived") return html`<p class="note-box">An archived thread takes no messages, because its pylon stays paused. Unarchive the thread to send one.</p>`;
   const queue = run.kind !== "idle";

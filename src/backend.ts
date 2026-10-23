@@ -13,7 +13,7 @@
  * The backend speaks its own types. Wire types from protocol.ts stop at runJob and runCommand.
  */
 import type { Readable } from "node:stream";
-import type { ArtifactCopy, ByteStream, CommandResult, Job, JobErrorCode, NodeName, PylonCommand, PylonId, ServiceFact, StreamRequest } from "./protocol.ts";
+import type { ArtifactCopy, BrokenCause, ByteStream, CommandResult, Job, JobErrorCode, NodeName, PylonCommand, PylonId, ServiceFact, StreamRequest } from "./protocol.ts";
 import { checkoutDir, closeSession, openSession } from "./sessions.ts";
 import type { BootInputs, LiveSpec, OverlayFile, PreviewAssignment, ServiceDecl, ServiceName } from "./project.ts";
 import type { ArtifactId, ArtifactManifest, CheckpointId, ImageId, ImageRecipe, PortableArtifactId, TemplateBuildInputs, TemplateId } from "./images.ts";
@@ -21,7 +21,10 @@ import type { ArtifactId, ArtifactManifest, CheckpointId, ImageId, ImageRecipe, 
 export interface VmBackend {
   /** Boot from `boot.source` unless already running, then apply `live`. Converges from any partial state. */
   ensureRunning(boot: BootInputs, live: LiveSpec, signal: AbortSignal): Promise<void>;
-  /** Record sessions, stop services, close terminals, checkpoint the disk, stop the VM. Already stopped: no-op. */
+  /**
+   * Record sessions, stop services, close terminals, checkpoint the disk, stop the VM. Already stopped: no-op. A disk
+   * with a failed setup is never checkpointed: a VM with no checkpoint is removed, and one with a checkpoint is refused.
+   */
   ensurePaused(pylonId: PylonId, checkpoint: CheckpointId, signal: AbortSignal): Promise<void>;
   /** Remove the VM, its disk and its logs. Already absent: no-op. */
   ensureDeleted(pylonId: PylonId, signal: AbortSignal): Promise<void>;
@@ -43,6 +46,8 @@ export interface BackendPylon {
   image: ImageId; // the image the disk is an overlay on. Observations report it as bootedFrom.image
   bootedAt: string | null; // set while the VM runs
   detail?: string;
+  /** Set exactly when `vm` is broken. `unknown` when the backend cannot tell why. */
+  cause?: BrokenCause | "unknown";
 }
 
 /** Every call runs as `user`. */
