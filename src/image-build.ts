@@ -102,10 +102,11 @@ function dockerBuildArgs(pins: ImageRecipe["pins"]): Record<string, string> {
  *    debugfs, read back, and Gondolin's manifest is updated for the changed rootfs. Then the Docker tag is
  *    removed. Delete this step, like the seed, once the Gondolin pin moves to a release that keeps modes.
  * 4. Smoke boot at 4 GiB (2 GiB hangs): plain exec PATH and CA, `user` with a setuid sudo that prints no
- *    warning and the hostname pylon, which resolves through /etc/hosts, the pinned versions of
- *    node, claude, pi and herdr as user, sshd and sandboxssh, Herdr's pi integration with its own resume
- *    turned off, curl and Node fetch to an allowed host through TLS interception, tini reaping an orphan it
- *    adopts as subreaper, and a Herdr server as user. Any failure is setup-failed and publishes nothing.
+ *    warning and the hostname pylon, which resolves through /etc/hosts, the exact pinned versions of node,
+ *    claude, pi, herdr and pi-env and the nexus CLI's declared version as user, sshd and sandboxssh, Herdr's
+ *    pi integration with its own resume turned off, curl and Node fetch to an allowed host through TLS
+ *    interception, tini reaping an orphan it adopts as subreaper, and a Herdr server as user. Any failure is
+ *    setup-failed and publishes nothing.
  * 5. Write image.json, then rename outDir.partial to outDir.
  * A crash leaves only outDir.partial, which the next attempt removes. An existing outDir is the finished
  * image, because its ID names its inputs.
@@ -113,6 +114,7 @@ function dockerBuildArgs(pins: ImageRecipe["pins"]): Record<string, string> {
 export async function buildImage(input: ImageRecipe, node: NodeName, out: string, signal: AbortSignal): Promise<ImageManifest> {
   const outDir = resolve(out);
   const recipe = parseRecipe(input);
+  const checks = smokeChecks(recipe);
   const id = imageIdOf(recipe);
   const done = join(outDir, imageManifestFile);
   if (existsSync(done)) {
@@ -154,7 +156,7 @@ export async function buildImage(input: ImageRecipe, node: NodeName, out: string
   await rm(scratch, { recursive: true });
 
   // Nothing is published unless a pylon booted from these assets works.
-  await smokeBoot(partial, recipe.pins, id, signal);
+  await smokeBoot(partial, checks, id, signal);
 
   const gondolinManifest = JSON.parse(await readFile(join(partial, "manifest.json"), "utf8")) as { buildId?: string };
   if (gondolinManifest.buildId === undefined) throw new JobFailure("backend", `Gondolin wrote no buildId into ${partial}/manifest.json`);
@@ -373,18 +375,40 @@ async function sha256File(path: string): Promise<string> {
 const smokeHost = "api.anthropic.com";
 const smokeSession = "nexus-smoke";
 
-interface SmokeCheck {
+export interface SmokeCheck {
   name: string;
   argv: readonly string[];
-  /** Matched against stdout and stderr together, after a zero exit. */
-  expect: RegExp;
+  /** Stdout and stderr together after a zero exit: exactly this string, or matching this pattern. */
+  expect: string | RegExp;
 }
 
 const asUser = (script: string): readonly string[] => ["runuser", "-l", "user", "-c", `exec 2>&1; ${script}`];
 const literal = (text: string): string => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
+/** The nexus CLI has no pin. Its script declares the version that `nexus --version` prints. */
+function nexusCliVersion(recipe: ImageRecipe): string {
+  const declared = /^const version = "(\d+\.\d+\.\d+)";$/m.exec(recipeFile(recipe, "nexus"));
+  if (declared === null) throw new JobFailure("invalid", 'the recipe\'s nexus script declares no `const version = "X.Y.Z";`');
+  return declared[1]!;
+}
+
+/** Each tool's whole `--version` output for its pin, in the format that tool prints it. */
+function versionChecks(recipe: ImageRecipe): SmokeCheck[] {
+  const { pins } = recipe;
+  const versions: [tool: string, command: string, output: string][] = [
+    ["node", "node", `v${pins.node}`],
+    ["claude", "claude", `${pins.claudeCode} (Claude Code)`],
+    ["pi", "pi", pins.pi],
+    ["herdr", "herdr", `herdr ${pins.herdr}`],
+    ["pi-env", "/usr/local/libexec/nexus/pi-env", `pi-env ${pins.piEnv}`],
+    ["nexus", "nexus", `nexus ${nexusCliVersion(recipe)}`],
+  ];
+  return versions.map(([tool, command, output]) => ({ name: `${tool} version`, argv: asUser(`${command} --version`), expect: `${output}\n` }));
+}
+
 /** Plain execs run with sandboxd's environment, and `runuser -l` gives the login shell that SSH and Herdr panes get. */
-function smokeChecks(pins: ImageRecipe["pins"]): readonly SmokeCheck[] {
+export function smokeChecks(recipe: ImageRecipe): readonly SmokeCheck[] {
+  const { pins } = recipe;
   return [
     { name: "exec environment", argv: ["node", "-p", "`${process.version} ${process.env.NODE_EXTRA_CA_CERTS}`"], expect: new RegExp(`^v${literal(pins.node)} /run/gondolin/ca-certificates\\.crt\\n$`) },
     {
@@ -392,11 +416,7 @@ function smokeChecks(pins: ImageRecipe["pins"]): readonly SmokeCheck[] {
       argv: asUser("id; stat -c '%a %U' /usr/bin/sudo; sudo -n true && echo sudo ok; stat -c '%U %a' workspace; cat /proc/sys/kernel/hostname; getent hosts pylon; getent ahostsv4 pylon | head -n 1"),
       expect: /^uid=1000\(user\) gid=1000\(user\) [^\n]*\n4755 root\nsudo ok\nuser 755\npylon\n::1\s+pylon\n127\.0\.[01]\.1\s+STREAM pylon\n$/,
     },
-    {
-      name: "versions",
-      argv: asUser("node --version; claude --version; pi --version; herdr --version; nexus --version"),
-      expect: new RegExp(`^v${literal(pins.node)}\\n${literal(pins.claudeCode)} \\(Claude Code\\)\\n${literal(pins.pi)}\\nherdr ${literal(pins.herdr)}\\nnexus \\S+\\n$`),
-    },
+    ...versionChecks(recipe),
     {
       name: "guest tools",
       argv: asUser("command -v ssh sshd sandboxssh rg fd; grep -c '^Include /etc/ssh/ssh_config.d/\\*.conf' /etc/ssh/ssh_config; herdr integration status | grep -E '^(pi|claude):'"),
@@ -422,8 +442,8 @@ function smokeChecks(pins: ImageRecipe["pins"]): readonly SmokeCheck[] {
     {
       // The harness starts the daemon this way, through a login shell, and reads its sync line.
       name: "pi-env daemon",
-      argv: asUser("/usr/local/libexec/nexus/pi-env --version && bash -lc 'exec /usr/local/libexec/nexus/pi-env \"$@\"' pi-env serve --token 00ff </dev/null"),
-      expect: new RegExp(`^pi-env ${literal(pins.piEnv)}\\nPI-ENV 00ff\\n`),
+      argv: asUser("bash -lc 'exec /usr/local/libexec/nexus/pi-env \"$@\"' pi-env serve --token 00ff </dev/null"),
+      expect: /^PI-ENV 00ff\n/,
     },
     {
       name: "TLS through Gondolin's interception",
@@ -433,7 +453,16 @@ function smokeChecks(pins: ImageRecipe["pins"]): readonly SmokeCheck[] {
   ];
 }
 
-async function smokeBoot(assets: string, pins: ImageRecipe["pins"], id: ImageId, signal: AbortSignal): Promise<void> {
+/** Why the check failed on this result, or undefined when it passed. */
+export function smokeFailure(check: SmokeCheck, exitCode: number, output: string): string | undefined {
+  if (exitCode !== 0) return `exited ${exitCode}`;
+  if (typeof check.expect === "string") {
+    return output === check.expect ? undefined : `expected ${JSON.stringify(check.expect)}, got ${JSON.stringify(output)}`;
+  }
+  return check.expect.test(output) ? undefined : `output does not match ${check.expect}`;
+}
+
+async function smokeBoot(assets: string, checks: readonly SmokeCheck[], id: ImageId, signal: AbortSignal): Promise<void> {
   const fail = (check: string, message: string, log = ""): never => {
     throw new JobFailure("setup-failed", `smoke boot of ${id}: ${check}: ${message}`, log);
   };
@@ -452,10 +481,10 @@ async function smokeBoot(assets: string, pins: ImageRecipe["pins"], id: ImageId,
       const result = await vm.exec([...argv], { signal: AbortSignal.any([signal, AbortSignal.timeout(120_000)]) });
       return { exitCode: result.exitCode, output: result.stdout + result.stderr };
     };
-    for (const check of smokeChecks(pins)) {
+    for (const check of checks) {
       const { exitCode, output } = await exec(check.argv);
-      if (exitCode !== 0) fail(check.name, `exited ${exitCode}`, output);
-      if (!check.expect.test(output)) fail(check.name, `output does not match ${check.expect}`, output);
+      const failure = smokeFailure(check, exitCode, output);
+      if (failure !== undefined) fail(check.name, failure, output);
     }
 
     const server = vm.exec([...asUser(`exec herdr --session ${smokeSession} server`)], { signal: AbortSignal.any([signal, stopServer.signal]) });
