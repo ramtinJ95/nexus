@@ -17,7 +17,7 @@ A probe serves HTTP on its tailnet address, port 7480. Tailnet identity is the o
 | `GET /v1/observe` (NDJSON stream) | Control plane (`rj-firebat`) | A snapshot of the node, then events |
 | `POST /v1/pylons/{id}/commands` | Control plane (`rj-firebat`) | Synchronous guest commands: exec, open or close a session, service operations |
 | `GET /v1/pylons/{id}/stream` (WebSocket) | Control plane (`rj-firebat`) | A byte stream into the pylon, for terminal attach and the harness channel |
-| `GET /v1/artifacts/{artifactId}` | The other probe | Probe-to-probe copies of images, templates and checkpoints |
+| `GET /v1/artifacts/{artifactId}?sha256=` | The other probe | Probe-to-probe copies of images and templates: the manifest in a header, then the archive, which the fetching probe verifies before use. A probe holding other bytes under the ID refuses with 409 and its reason, before it sends any. A checkpoint stays on its node |
 
 Lifecycle jobs are Amp's `spawn`, `pause` and `delete`, plus `build-image`, `build-template`, `fetch-artifact` and `drop-artifact`. A job expires 30 seconds after it was issued if the probe has not accepted it. Once accepted, it has a fixed deadline: 5 minutes for Amp's three, and 30 minutes for builds and copies. The probe runs at most one job per subject (a pylon or an artifact) and answers `busy` to a second one. `drop-artifact` cannot name a checkpoint.
 

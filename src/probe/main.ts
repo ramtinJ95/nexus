@@ -25,13 +25,16 @@ const previewHost = config.previews === undefined ? {} : { previewHost: parseSel
 function pylonVm({ gitSsh, ...backend }: Extract<ProbeConfig["backend"], { kind: "pylon-vm" }>) {
   return createPylonVmBackend({ ...backend, secrets, ...previewHost, ...(gitSsh === undefined ? {} : { gitSsh }) });
 }
+function docker({ artifacts, ...backend }: Extract<ProbeConfig["backend"], { kind: "docker" }>) {
+  return createDockerBackend({ ...backend, ...previewHost, ...(artifacts === undefined ? {} : { artifacts }) });
+}
 const probe = await startProbe({
   node: config.node,
   host: config.listen.host,
   port: config.listen.port,
   auth: config.auth,
   whois: localApiWhois(),
-  backend: config.backend.kind === "pylon-vm" ? pylonVm(config.backend) : createDockerBackend({ ...config.backend, ...previewHost }),
+  backend: config.backend.kind === "pylon-vm" ? pylonVm(config.backend) : docker(config.backend),
   secrets,
   ...(config.previews === undefined ? {} : { previews: { ...config.previews, tailscale } }),
 });

@@ -8,15 +8,14 @@
  * start a thread, run a tool in its pylon, archive it so the pylon pauses, unarchive it so the pylon wakes and
  * runs a second tool, then delete it. The probe's auth.controlPlane must be this node's own stable node ID.
  */
-import { mkdtemp, readFile, rm, stat } from "node:fs/promises";
+import { mkdtemp, rm, stat } from "node:fs/promises";
 import { request } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { z } from "zod";
-import { imageManifestFile } from "../image-build.ts";
-import type { ImageId } from "../images.ts";
-import { probePort } from "../protocol.ts";
+import { artifactDirectory, tarCodec } from "../artifacts.ts";
+import { isImageId, probePort } from "../protocol.ts";
 import { scriptedModel, scriptedModels } from "../harness/test-fixture.ts";
 import { readProbeConfig } from "../probe/config.ts";
 import { tailscaleCli } from "../probe/serve.ts";
@@ -25,14 +24,15 @@ import { startControlPlane, type ControlPlaneConfig } from "./main.ts";
 
 const probeConfig = await readProbeConfig(process.argv[2] ?? "/etc/nexus/probe.json");
 if (probeConfig.backend.kind !== "pylon-vm") throw new Error(`the probe runs the ${probeConfig.backend.kind} backend. This check is for pylon-vm`);
-const images = probeConfig.backend.images;
-const image = (process.argv[3] ?? (Object.keys(images).length === 1 ? Object.keys(images)[0] : undefined)) as ImageId | undefined;
-if (image === undefined || images[image] === undefined) throw new Error(`name one of the probe's images: ${Object.keys(images).join(", ")}`);
+const store = artifactDirectory(probeConfig.backend.artifacts, tarCodec);
+const images = (await store.list()).filter(isImageId);
+const image = process.argv[3] ?? (images.length === 1 ? images[0] : undefined);
+if (!isImageId(image) || !images.includes(image)) throw new Error(`name one of the images in ${store.root}: ${images.join(", ")}`);
 if (probeConfig.listen.port !== probePort) throw new Error(`the probe listens on port ${probeConfig.listen.port}, and the control plane reaches probes on ${probePort} only`);
 const status = z.object({ Self: z.object({ ID: z.string() }) }).parse(JSON.parse(await tailscaleCli()(["status", "--json"], AbortSignal.timeout(30_000))));
 const self = status.Self.ID;
 if (probeConfig.auth.controlPlane !== self) throw new Error(`set auth.controlPlane in the probe's config to this node's ID ${self} (it is ${probeConfig.auth.controlPlane}), then restart the probe`);
-const manifest = JSON.parse(await readFile(join(images[image], imageManifestFile), "utf8")) as unknown;
+const manifest = await store.manifest(image);
 
 const dir = await mkdtemp(join(tmpdir(), "nexus-thread-on-node-"));
 const host = probeConfig.listen.host;

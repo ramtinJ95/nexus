@@ -5,7 +5,7 @@
  */
 import { open, readFile } from "node:fs/promises";
 import { BlockList, isIPv6 } from "node:net";
-import { isAbsolute } from "node:path";
+import { basename, dirname, isAbsolute } from "node:path";
 import { z } from "zod";
 import type { SecretSource } from "../backend.ts";
 import type { ImageId } from "../images.ts";
@@ -21,6 +21,23 @@ tailnet.addSubnet("fd7a:115c:a1e0::", 48, "ipv6");
 
 const imageId = z.custom<ImageId>((v) => typeof v === "string" && /^img-[0-9a-f]{12}$/.test(v), "must be an image ID, such as img-000000000000");
 
+/**
+ * Before the artifact store, a pylon-vm backend named each image's directory in `images`, and each was
+ * <store>/<image ID>. A config in that form is read as `artifacts`, the store its images share, so a deployed
+ * probe.json keeps working. One whose images are anywhere else is refused with what to write instead.
+ */
+function imagesAsStore(backend: unknown, ctx: z.RefinementCtx): unknown {
+  if (typeof backend !== "object" || backend === null || !("images" in backend) || "artifacts" in backend || (backend as { kind?: unknown }).kind !== "pylon-vm") return backend;
+  const { images, ...rest } = backend as { images: unknown };
+  const dirs = typeof images === "object" && images !== null ? Object.entries(images) : [];
+  const stores = new Set(dirs.map(([id, dir]) => typeof dir === "string" && isAbsolute(dir) && basename(dir) === id ? dirname(dir) : ""));
+  if (stores.size !== 1 || stores.has("")) {
+    ctx.addIssue({ code: "custom", message: `backend.images is the form from before the artifact store. Replace it with "artifacts": the directory that holds each image as <artifacts>/<image ID>` });
+    return z.NEVER;
+  }
+  return { ...rest, artifacts: [...stores][0] };
+}
+
 const configSchema = z.strictObject({
   node: nodeName,
   listen: z.strictObject({
@@ -28,18 +45,18 @@ const configSchema = z.strictObject({
     port: z.int().min(1).max(65535).default(probePort),
   }),
   auth: z.strictObject({ controlPlane: tailnetNodeId, peers: z.array(tailnetNodeId) }) satisfies z.ZodType<ProbeAuthConfig>,
-  backend: z.discriminatedUnion("kind", [
+  backend: z.preprocess(imagesAsStore, z.discriminatedUnion("kind", [
     z.strictObject({
       kind: z.literal("pylon-vm"),
       stateRoot: absolutePath,
-      /** Gondolin asset directories, at the same path on every node (see ArtifactStore). */
-      images: z.record(imageId, absolutePath),
+      /** The artifact store of images and templates, at the same path on every node (see ArtifactStore). */
+      artifacts: absolutePath,
       /** Omitted: pylons can clone only over HTTPS. The key file is readable by the probe's user only. */
       gitSsh: z.strictObject({ privateKeyFile: absolutePath, knownHostsFile: absolutePath }).optional(),
     }),
-    /** Local development only: Docker containers stand in for pylon VMs. */
-    z.strictObject({ kind: z.literal("docker"), images: z.record(imageId, z.string()), labels: z.record(z.string(), z.string()).default({}) }),
-  ]),
+    /** Local development only: Docker containers stand in for pylon VMs. Without `artifacts` it builds and holds no templates. */
+    z.strictObject({ kind: z.literal("docker"), images: z.record(imageId, z.string()), labels: z.record(z.string(), z.string()).default({}), artifacts: absolutePath.optional() }),
+  ])),
   secretsFile: absolutePath,
   /** Omitted: the probe publishes no previews, and a spawn that assigns one fails. */
   previews: z.strictObject({

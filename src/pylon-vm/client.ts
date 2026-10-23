@@ -1,6 +1,7 @@
 import { execFileSync, spawn } from "node:child_process";
 import { closeSync, existsSync, openSync } from "node:fs";
 import {
+	constants,
 	copyFile,
 	mkdir,
 	readdir,
@@ -236,19 +237,7 @@ async function create(
 ): Promise<unknown> {
 	const kind = action.action === "prepare" ? "templates" : "instances";
 	const dir = directory(root, kind, action.name);
-	const template = action.action === "create" ? action.template : undefined;
-	const source = template ? directory(root, "templates", template) : undefined;
-	if (source) {
-		const status = statusSchema.parse(
-			JSON.parse(await readFile(join(source, "status.json"), "utf8")),
-		);
-		if (status.state !== "prepared")
-			throw new Error(
-				`Template ${template} is not prepared. Use list with kind templates to inspect preparation before creating an instance`,
-			);
-	}
-	const config = source ? (await readRecord(source)).config : action.config;
-	if (!config) throw new Error("Supply config or template");
+	const disk = action.action === "create" ? action.disk : undefined;
 	await privateDirectory(join(root, kind));
 	if (existsSync(dir))
 		throw new Error(
@@ -262,17 +251,14 @@ async function create(
 		await saveJson(join(staging, "record.json"), {
 			version: 1,
 			name: action.name,
-			config,
+			config: action.config,
 			createdAt: new Date().toISOString(),
-			...(template ? { template } : {}),
 			labels: action.labels,
 		});
-		if (source)
-			await copyFile(join(source, "disk.qcow2"), join(staging, "disk.qcow2"));
-		await saveJson(join(staging, "intent.json"), {
-			prepare: kind === "templates",
-			fresh: !source,
-		});
+		// A reflink where the filesystem has them, so a large template disk costs no copy.
+		if (disk)
+			await copyFile(disk, join(staging, "disk.qcow2"), constants.COPYFILE_FICLONE);
+		await saveJson(join(staging, "intent.json"), { prepare: kind === "templates" });
 		await rename(staging, dir);
 	} catch (error) {
 		await rm(staging, { recursive: true, force: true });
@@ -432,7 +418,6 @@ async function offline(dir: string) {
 	return {
 		name: record.name,
 		createdAt: record.createdAt,
-		template: record.template,
 		labels: record.labels,
 		workspace: record.config.workspace,
 		status,

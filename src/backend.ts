@@ -13,10 +13,10 @@
  * The backend speaks its own types. Wire types from protocol.ts stop at runJob and runCommand.
  */
 import type { Readable } from "node:stream";
-import type { ByteStream, CommandResult, Job, JobErrorCode, PylonCommand, PylonId, ServiceFact, StreamRequest } from "./protocol.ts";
+import type { ArtifactCopy, ByteStream, CommandResult, Job, JobErrorCode, NodeName, PylonCommand, PylonId, ServiceFact, StreamRequest } from "./protocol.ts";
 import { checkoutDir, closeSession, openSession } from "./sessions.ts";
 import type { BootInputs, LiveSpec, OverlayFile, PreviewAssignment } from "./project.ts";
-import type { ArtifactId, CheckpointId, ImageId, PortableArtifactId, TemplateBuildInputs, TemplateId } from "./images.ts";
+import type { ArtifactId, ArtifactManifest, CheckpointId, ImageId, ImageRecipe, PortableArtifactId, TemplateBuildInputs, TemplateId } from "./images.ts";
 
 export interface VmBackend {
   /** Boot from `boot.source` unless already running, then apply `live`. Converges from any partial state. */
@@ -25,8 +25,10 @@ export interface VmBackend {
   ensurePaused(pylonId: PylonId, checkpoint: CheckpointId, signal: AbortSignal): Promise<void>;
   /** Remove the VM, its disk and its logs. Already absent: no-op. */
   ensureDeleted(pylonId: PylonId, signal: AbortSignal): Promise<void>;
-  /** Boot the image, clone, preSetup, `.nexus/setup` as user, stop, publish. A setup failure publishes nothing. */
+  /** Boot the image, clone, preSetup, `.nexus/setup` as user, stop, publish. A setup failure publishes nothing. Published already: no-op. */
   buildTemplate(template: TemplateId, inputs: TemplateBuildInputs, signal: AbortSignal): Promise<void>;
+  /** buildImage in image-build.ts, into the artifact store under `image`, which must be the recipe's ID. Built already: no-op. */
+  buildImage(image: ImageId, recipe: ImageRecipe, node: NodeName, signal: AbortSignal): Promise<void>;
   /** Cheap, with no guest exec. The probe layers guest facts (git, sessions, previews) on top. */
   list(): Promise<readonly BackendPylon[]>;
   /** Rejects with not-running unless the pylon is running. */
@@ -59,14 +61,17 @@ export interface Guest {
 /**
  * Immutable directories under /var/lib/nexus/artifacts/<id>/ with a manifest, at the same path on every
  * node, because checkpoints and templates are qcow2 overlays whose backing file is the image's rootfs.
- * A checkpoint holds the pylon's Claude and pi logins, so it is only ever exported to a peer probe.
+ * Only images and templates move between nodes (artifacts.ts). A checkpoint holds the pylon's Claude and pi
+ * logins and stays in its pylon's instance on its own node.
  */
 export interface ArtifactStore {
   list(): Promise<readonly ArtifactId[]>;
-  /** Sparse-aware archive stream for a peer's GET /v1/artifacts/{id}. A paused pylon's disk exports as its checkpoint. */
-  export(id: ArtifactId): Promise<{ stream: Readable; sha256: string }>;
-  /** Write to <id>.partial, verify sha256, rename. A crash leaves only a .partial, which the next import removes. */
-  import(id: ArtifactId, stream: Readable, sha256: string): Promise<void>;
+  /** The manifest of an image or template this node holds, or null. */
+  manifest(id: PortableArtifactId): Promise<ArtifactManifest | null>;
+  /** The sparse archive a peer's GET /v1/artifacts/{id} streams, and the manifest whose sha256 it hashes to. */
+  export(id: PortableArtifactId): Promise<{ manifest: ArtifactManifest; stream: Readable }>;
+  /** Stage the whole stream in <id>.partial, verify it against manifest.sha256, then rename it in. A crash leaves only a .partial, which the next import removes. */
+  import(manifest: ArtifactManifest, stream: Readable, signal: AbortSignal): Promise<void>;
   /** Refuses while a VM, template or checkpoint on this node still depends on it. Checkpoints are not droppable. */
   drop(id: PortableArtifactId): Promise<void>;
 }
@@ -75,10 +80,12 @@ export interface ArtifactStore {
 export interface SecretSource { value(name: string): string | undefined }
 
 export interface ProbeDeps {
+  node: NodeName;
   backend: VmBackend;
   secrets: SecretSource;
   serve: TailscaleServe;
-  fetchPeer(from: string, artifact: ArtifactId): Promise<Readable>;
+  /** GET /v1/artifacts/{id} on the peer probe. The stream is unverified until ArtifactStore.import checks it. */
+  fetchPeer(from: NodeName, artifact: PortableArtifactId, sha256: string, signal: AbortSignal): Promise<ArtifactCopy>;
 }
 
 /** Owns `tailscale serve --bg --https=<port>` entries. One gateway port on loopback routes by the Host header's port. */
@@ -119,8 +126,32 @@ export async function runJob(job: Job, deps: ProbeDeps, signal: AbortSignal): Pr
         await deps.serve.converge(job.pylonId, [], signal);
         await deps.backend.ensureDeleted(job.pylonId, signal);
         return;
-      case "build-image": case "build-template": case "fetch-artifact": case "drop-artifact":
-        throw new JobFailure("invalid", `${job.kind} jobs are not implemented in this slice yet. It runs only spawn, pause and delete`);
+      case "build-image":
+        await deps.backend.buildImage(job.image, job.recipe, deps.node, signal);
+        return;
+      case "build-template":
+        await deps.backend.buildTemplate(job.template, job.inputs, signal);
+        return;
+      case "fetch-artifact": {
+        if (job.artifact.startsWith("ckpt-")) throw new JobFailure("invalid", `${job.artifact} is a checkpoint, and a checkpoint never leaves its node`);
+        const artifact = job.artifact as PortableArtifactId;
+        const held = await deps.backend.artifacts.manifest(artifact);
+        if (held !== null) {
+          if (held.sha256 !== job.sha256) throw new JobFailure("invalid", `this node holds ${artifact} with sha256 ${held.sha256}, and the job asks for ${job.sha256}`);
+          return;
+        }
+        const copy = await deps.fetchPeer(job.from, artifact, job.sha256, signal);
+        if ("refused" in copy) throw new JobFailure("invalid", `${job.from} refuses the copy: ${copy.refused}`);
+        if (copy.manifest.id !== artifact || copy.manifest.sha256 !== job.sha256) {
+          copy.stream.destroy();
+          throw new JobFailure("invalid", `${job.from} offers ${copy.manifest.id} with sha256 ${copy.manifest.sha256}, and the job asks for ${artifact} with ${job.sha256}`);
+        }
+        await deps.backend.artifacts.import(copy.manifest, copy.stream, signal);
+        return;
+      }
+      case "drop-artifact":
+        await deps.backend.artifacts.drop(job.artifact);
+        return;
     }
   } catch (err) {
     if (err instanceof JobFailure) throw err;
@@ -165,11 +196,14 @@ export async function runCommand(pylonId: PylonId, command: PylonCommand, deps: 
  * Network policy, secrets and resources are inputs to every start, and only the image and the disk size are
  * fixed at create (change 2). Git over SSH is terminated on the host. Every boot writes the overlay and pulls
  * the dotfiles, every boot after the first runs `.nexus/resume`, and every spawn rewrites the overlay.
+ * A template is the fork's prepare published into the artifact store (pylon-vm-templates.ts). A pylon booted
+ * from one copies its disk in, and its first boot checks out the pylon's own commit and runs `.nexus/resume`.
+ * Images and templates move between nodes as verified ArtifactStore archives (artifacts.ts).
  * Still to change in the fork:
  * 3. A service's PUBLIC_URL is the URL the probe assigned, not a localhost preview.
  * 4. A host bridge: requests to http://nexus.pylon go to the probe's Unix socket with the instance name attached.
- * 5. Template and instance export and import as ArtifactStore archives.
- * 6. The template build, booting from a template, and the session relaunch from ~/.nexus/sessions.json.
+ * 5. Instance export and import, for moving a paused pylon's checkpoint to another node.
+ * 6. The session relaunch from ~/.nexus/sessions.json.
  * The image needs pi-sandbox's `sandboxssh` helper for `shell` and streams, and openssh-client for git over SSH.
  */
 

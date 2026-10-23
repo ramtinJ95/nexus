@@ -4,7 +4,7 @@
  *
  * - Docker (the default), against the local Docker. Everything it creates carries the label
  *   nexus.test=<run>, and cleanup removes only that.
- * - pylon-vm, when NEXUS_SLICE_BACKEND=pylon-vm, with NEXUS_PYLON_VM_IMAGE=<Gondolin assets dir> and
+ * - pylon-vm, when NEXUS_SLICE_BACKEND=pylon-vm, with NEXUS_PYLON_VM_IMAGE=<an image's directory in an artifact store> and
  *   NEXUS_PYLON_VM_STATE=<state root>, and optionally NEXUS_PYLON_VM_MEMORY_GIB (default 4). It boots a
  *   Gondolin VM, clones a small public repo over HTTPS, and destroys the instance at the end. With
  *   NEXUS_PYLON_VM_GIT_SSH_KEY=<private key file> (and NEXUS_PYLON_VM_KNOWN_HOSTS, default ~/.ssh/known_hosts)
@@ -19,7 +19,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import { readdir, readFile, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { promisify } from "node:util";
 import { createDockerBackend } from "./docker-backend.ts";
 import { createPylonVmBackend } from "./pylon-vm-backend.ts";
@@ -35,7 +35,6 @@ import type { CheckpointId, ImageId } from "./images.ts";
 const execFileAsync = promisify(execFile);
 
 const run = randomUUID().slice(0, 8);
-const image: ImageId = "img-slicetest0000";
 const node = "slice-node" as NodeName;
 const controlPlaneId = "nSLICECONTROL" as TailnetNodeId;
 const probeId = "nSLICEPROBE" as TailnetNodeId;
@@ -44,6 +43,7 @@ const pylonId = `pylon-${thread}` as PylonId;
 
 interface SliceFixture {
   backend: VmBackend;
+  image: ImageId;
   /** The node's secret file, shared by the probe and the backend as on a real node. */
   secrets: SecretSource;
   boot: Omit<BootInputs, "source" | "pylonId" | "image">;
@@ -80,8 +80,10 @@ function dockerFixture(): SliceFixture {
   const testLabel = `nexus.test=slice-${run}`;
   const containers = async () => (await docker("ps", "-a", "-q", "--filter", `label=nexus.pylon=${pylonId}`, "--filter", `label=${testLabel}`)).split("\n").filter(Boolean);
   const checkpointImage = async (checkpoint: string) => docker("images", "-q", "--filter", `label=nexus.pylon=${pylonId}`, "--filter", `label=nexus.checkpoint=${checkpoint}`, "--filter", `label=${testLabel}`);
+  const image: ImageId = "img-slicetest0000";
   return {
     backend: createDockerBackend({ images: { [image]: baseImage }, labels: { "nexus.test": `slice-${run}` } }),
+    image,
     secrets: { value: () => undefined },
     boot: {
       resources: { cpus: 1, memoryGiB: 1, diskGiB: 1 },
@@ -190,7 +192,8 @@ function pylonVmFixture(): SliceFixture {
   };
   const secrets: SecretSource = { value: (name) => name === secret.name ? secret.value : undefined };
   return {
-    backend: createPylonVmBackend({ stateRoot, images: { [image]: assets }, secrets, ...(gitSsh === undefined ? {} : { gitSsh }) }),
+    backend: createPylonVmBackend({ stateRoot, artifacts: dirname(assets), secrets, ...(gitSsh === undefined ? {} : { gitSsh }) }),
+    image: basename(assets) as ImageId,
     secrets,
     boot: {
       resources: { cpus: 2, memoryGiB, diskGiB: 8 },
@@ -213,7 +216,7 @@ function pylonVmFixture(): SliceFixture {
     marker: "/home/user/workspace/marker",
     cwd: "/home/user/workspace",
     async setUp() {
-      assert.ok(existsSync(join(assets, "manifest.json")), `${assets} is not a Gondolin assets directory`);
+      assert.ok(existsSync(join(assets, "manifest.json")) && existsSync(join(assets, "image.json")), `${assets} is not a published image: it needs Gondolin's manifest.json and Nexus's image.json`);
     },
     async checkFreshBoot(guest) {
       const opts = { cwd: "/home/user/workspace/repo", timeoutMs: 30_000 };
@@ -288,7 +291,7 @@ const backend = fixture.backend;
 const pylon: PylonRecord = newPylonRecord({
   thread, pylonId, node,
   desired: "running",
-  boot: { pylonId, image, ...fixture.boot },
+  boot: { pylonId, image: fixture.image, ...fixture.boot },
   firstBoot: { kind: "fresh", preSetup: fixture.preSetup },
   live: { previews: [], overlay: fixture.overlay?.(1) ?? [] },
   liveHash: "live-slice-1" as LiveHash,

@@ -11,7 +11,7 @@ const valid = {
   node: "infra-testbench",
   listen: { host: "100.64.0.7" },
   auth: { controlPlane: "nControl1CNTRL", peers: ["nPeer1CNTRL"] },
-  backend: { kind: "pylon-vm", stateRoot: "/var/lib/nexus/pylons", images: { "img-000000000000": "/var/lib/nexus/artifacts/img-000000000000" } },
+  backend: { kind: "pylon-vm", stateRoot: "/var/lib/nexus/pylons", artifacts: "/var/lib/nexus/artifacts" },
   secretsFile: "/etc/nexus/secrets.env",
 };
 const withChange = (change: (config: any) => void) => {
@@ -58,6 +58,21 @@ test("the docker backend takes image tags and optional labels", () => {
   assert.deepEqual(config.backend, { kind: "docker", images: { "img-000000000000": "nexus-pylon-test:slice" }, labels: {} });
 });
 
+test("a pylon-vm config from before the artifact store is read as the store its images share, or refused with the fix", () => {
+  // /etc/nexus/probe.json on infra-testbench, as main's example installed it.
+  const deployed = withChange((c) => { c.backend = { kind: "pylon-vm", stateRoot: "/var/lib/nexus/pylons", images: { "img-000000000001": "/var/lib/nexus/artifacts/img-000000000001" } }; });
+  assert.deepEqual(parseProbeConfig(deployed).backend, { kind: "pylon-vm", stateRoot: "/var/lib/nexus/pylons", artifacts: "/var/lib/nexus/artifacts" });
+  const refused = [
+    { "img-000000000001": "/srv/images/img-000000000001", "img-000000000002": "/var/lib/nexus/artifacts/img-000000000002" },
+    { "img-000000000001": "/var/lib/nexus/artifacts/rootfs" },
+    {},
+  ];
+  for (const images of refused) {
+    assert.throws(() => parseProbeConfig(withChange((c) => { c.backend = { kind: "pylon-vm", stateRoot: "/var/lib/nexus/pylons", images }; })),
+      /backend\.images[\s\S]*Replace it with "artifacts"/, JSON.stringify(images));
+  }
+});
+
 test("a config with a mistake is refused, naming the field", () => {
   const cases: [string, (c: any) => void, RegExp][] = [
     ["an unknown key", (c) => { c.secretFile = c.secretsFile; }, /secretFile/],
@@ -67,8 +82,8 @@ test("a config with a mistake is refused, naming the field", () => {
       [`${host} as the listen host`, (c) => { c.listen.host = host; }, /listen\.host/]),
     ["a hostname as the listen host", (c) => { c.listen.host = "infra-testbench"; }, /listen\.host/],
     ["a relative state root", (c) => { c.backend.stateRoot = "pylons"; }, /backend\.stateRoot/],
-    ["a relative asset directory", (c) => { c.backend.images = { "img-000000000000": "assets" }; }, /backend\.images/],
-    ["a key that is not an image ID", (c) => { c.backend.images = { debian: "/var/lib/nexus/artifacts/debian" }; }, /backend\.images/],
+    ["a relative artifact store", (c) => { c.backend.artifacts = "artifacts"; }, /backend\.artifacts/],
+    ["a key that is not an image ID", (c) => { c.backend = { kind: "docker", images: { debian: "debian:bookworm-slim" } }; }, /backend\.images/],
     ["an unknown backend", (c) => { c.backend = { kind: "firecracker" }; }, /backend\.kind/],
     ["a field from the other backend", (c) => { c.backend.labels = {}; }, /labels/],
     ["a missing secrets file", (c) => { delete c.secretsFile; }, /secretsFile/],

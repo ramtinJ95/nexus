@@ -82,7 +82,7 @@ export interface ImageManifest {
   pins: ImageRecipe["pins"];
   builtOn: NodeName;
   builtAt: string;
-  sha256: string; // of the sparse archive peers fetch, imageArchive in image-build.ts
+  sha256: string; // of the sparse archive peers fetch, artifactArchive in artifacts.ts
 }
 
 // buildImage, which runs on the image build node, lives in image-build.ts.
@@ -154,6 +154,20 @@ export type TemplateRecord =
   | { id: TemplateId; key: TemplateKey; state: "failed"; on: NodeName; failedAt: number; logTail: string };
 
 type ReadyTemplate = Extract<TemplateRecord, { state: "ready" }>;
+
+/**
+ * template.json in a template's artifact directory, written when its build publishes. The control plane's
+ * ready TemplateRecord is its copy, and sha256 is what fetch-artifact verifies a copy against.
+ */
+export interface TemplateManifest {
+  id: TemplateId;
+  key: TemplateKey;
+  commit: string; // the checkout setup ran on. A pylon booted from the template checks out its own commit
+  builtAt: string;
+  sha256: string; // of the archive peers fetch, artifactArchive in artifacts.ts
+}
+/** What a peer sends ahead of an artifact's archive. A checkpoint has none, because it never leaves its node. */
+export type ArtifactManifest = ImageManifest | TemplateManifest;
 
 export type TemplateChoice =
   | { kind: "reuse"; template: TemplateId }

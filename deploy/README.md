@@ -16,7 +16,7 @@ The probe runs as the system user `nexus`. These are its paths:
 | `/etc/nexus/probe.json` | The config. `src/probe/config.ts` parses it. |
 | `/etc/nexus/secrets.env` | Secret values, `NAME=value` per line. Mode 0640, owner `root:nexus`. |
 | `/var/lib/nexus/pylons` | Pylon instances, their disks and checkpoints. |
-| `/var/lib/nexus/artifacts` | Images and templates. |
+| `/var/lib/nexus/artifacts` | Images and templates, one directory per ID, which `backend.artifacts` in `probe.json` names. A `probe.json` from before the store, with a `backend.images` map of `<store>/<image ID>` directories, is read as that store. |
 | `/var/lib/nexus/preview-routes.json` | Which pylon each published preview port belongs to. |
 | `/opt/nexus/current` | The release the probe runs. |
 
@@ -82,7 +82,7 @@ These steps check a fresh install with the real model. Run them on the control p
 ```sh
 IP=<listen.host from control.json>
 A="http://$IP:7470/v1"
-IMG=<an image ID from the node's probe.json>
+IMG=<an image ID in the node's /var/lib/nexus/artifacts>
 ```
 
 1. Sign the harness in, as the previous section describes, then start the control plane with `sudo systemctl start nexus-control`. `journalctl -u nexus-control -n 20` shows `nexus control plane: API on ...` and no `harness` errors.
