@@ -1,0 +1,166 @@
+#!/usr/bin/env bash
+# Verification scaffolding for Nexus: one local stack (scripts/stack.ts) and the drivers that record evidence.
+#   verify-nexus up                          start the stack, wait until a thread can start, print the run
+#   verify-nexus doctor                      read-only: is the current run's stack worth driving?
+#   verify-nexus cli <step> -- <nexus args>  run the Mac nexus CLI against the stack, record cmd/stdout/stderr/exit
+#   verify-nexus browser <step> -- <args>    run playwright-cli in the run's browser session, from the evidence dir
+#   verify-nexus pylon <step> <thread> -- <cmd...>  run a command in the thread's pylon container, recorded
+#   verify-nexus evidence                    print the current run's evidence directory
+#   verify-nexus down                        stop what this run started, keep the evidence
+set -euo pipefail
+
+skill_dir=$(cd "$(dirname "$(realpath "$0")")/.." && pwd)
+repo=$(cd "$skill_dir/../../.." && pwd)
+base="$repo/.verify/nexus"
+current_file="$base/current"
+ports=(7470 7480 7481 7482)
+
+die() { echo "verify-nexus: $*" >&2; exit 1; }
+current_run() { [ -f "$current_file" ] || die "no current run. Start one with: verify-nexus up"; cat "$current_file"; }
+run_dir() { echo "$base/runs/$1"; }
+evidence_dir() { echo "$base/evidence/$1"; }
+state() { node -e 'const s=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8")); console.log(s[process.argv[2]] ?? "")' "$(run_dir "$1")/state.json" "$2"; }
+# Our stack process only: the pid must still run stack.ts for this run directory.
+ours() { local pid=$1 dir=$2; ps -o command= -p "$pid" 2>/dev/null | grep -qF "stack.ts $dir"; }
+# Empty when nothing listens. lsof exits 1 then, which must not end the script.
+listener() { { lsof -nP -iTCP:"$1" -sTCP:LISTEN -t 2>/dev/null || true; } | head -1; }
+
+# Each recorded step gets a sequence number, so the evidence reads in the order it was taken.
+record() {
+  local run=$1 step=$2; shift 2
+  local dir; dir=$(evidence_dir "$run")
+  mkdir -p "$dir"
+  local n; n=$(find "$dir" -maxdepth 1 -name '*.cmd' | wc -l | tr -d ' ')
+  local stem; stem="$dir/$(printf '%02d' $((n + 1)))-$step"
+  printf '%q ' "$@" > "$stem.cmd"; echo >> "$stem.cmd"
+  local code=0
+  "$@" > "$stem.stdout" 2> "$stem.stderr" || code=$?
+  echo "$code" > "$stem.exit"
+  cat "$stem.stdout"; cat "$stem.stderr" >&2
+  echo "verify-nexus: $step exited $code, recorded as $stem.*" >&2
+  return "$code"
+}
+
+up() {
+  if [ -f "$current_file" ]; then
+    local old; old=$(cat "$current_file")
+    local pid; pid=$(state "$old" pid 2>/dev/null || true)
+    if [ -n "$pid" ] && ours "$pid" "$(run_dir "$old")"; then die "run $old is still up (pid $pid). Drive it, or stop it with: verify-nexus down"; fi
+    die "run $old was not cleaned up. Run: verify-nexus down"
+  fi
+  local run; run=$(date +%Y%m%d-%H%M%S)-$(openssl rand -hex 2)
+  mkdir -p "$base"
+  # The claim on the stack: noclobber makes it atomic, so a second `up` racing this one stops here.
+  ( set -C; echo "$run" > "$current_file" ) 2> /dev/null || die "another verify-nexus up claimed the stack first, as run $(cat "$current_file")"
+  release() { rm -f "$current_file"; die "$@"; }
+  for p in "${ports[@]}"; do
+    local holder; holder=$(listener "$p")
+    [ -z "$holder" ] || release "port $p is taken by pid $holder ($(ps -o command= -p "$holder")). This stack needs 127.0.0.1:${ports[*]} and runs one at a time"
+  done
+  docker info --format '{{.ServerVersion}}' > /dev/null || release "Docker is not reachable. Start Docker Desktop"
+  [ -d "$repo/node_modules" ] || release "no node_modules in $repo. Run npm ci there"
+  local dir; dir=$(run_dir "$run")
+  mkdir -p "$dir" "$(evidence_dir "$run")"
+  # In its own session, so the caller's shell, its process group and its hangup never reach the stack.
+  local pid
+  pid=$(node -e '
+    const { openSync } = require("node:fs");
+    const [stack, dir] = process.argv.slice(1);
+    const out = openSync(`${dir}/stack.log`, "a");
+    const child = require("node:child_process").spawn(process.execPath, [stack, dir], { detached: true, stdio: ["ignore", out, out] });
+    console.log(child.pid);
+    child.unref();
+  ' "$skill_dir/scripts/stack.ts" "$dir")
+  echo "$pid" > "$dir/pid"
+  echo "verify-nexus: run $run, pid $pid, log $dir/stack.log. The first run builds the pylon image and can take minutes" >&2
+  local deadline=$((SECONDS + 900))
+  until [ -f "$dir/state.json" ]; do
+    if ! kill -0 "$pid" 2>/dev/null; then
+      [ -d "$dir" ] || die "verify-nexus down stopped run $run before it was ready. Its log is in $(evidence_dir "$run")"
+      tail -30 "$dir/stack.log" >&2; die "the stack exited before it was ready. Clean up with: verify-nexus down"
+    fi
+    [ $SECONDS -lt $deadline ] || { tail -30 "$dir/stack.log" >&2; die "not ready after 15 minutes. Clean up with: verify-nexus down"; }
+    sleep 2
+  done
+  cp "$dir/state.json" "$(evidence_dir "$run")/stack-state.json"
+  echo "verify-nexus: ready. API and dashboard at $(state "$run" api), evidence in $(evidence_dir "$run")"
+}
+
+doctor() {
+  local run; run=$(current_run)
+  local dir; dir=$(run_dir "$run")
+  local failed=0
+  check() { if eval "$2"; then echo "ok    $1"; else echo "FAIL  $1"; failed=1; fi; }
+  check "run $run has a state file" "[ -f '$dir/state.json' ]"
+  [ $failed -eq 0 ] || { echo "verify-nexus: the stack never got ready. Read $dir/stack.log, then verify-nexus down" >&2; return 1; }
+  local pid api tag revision label
+  pid=$(state "$run" pid); api=$(state "$run" api); tag=$(state "$run" dockerTag); revision=$(state "$run" revision); label=$(state "$run" label)
+  check "pid $pid is this run's stack.ts" "ours $pid '$dir'"
+  for p in "${ports[@]}"; do check "port $p is held by pid $pid" "[ \"\$(listener $p)\" = $pid ]"; done
+  local head; head=$(git -C "$repo" rev-parse --short HEAD)
+  check "stack revision $revision is the checkout's HEAD $head" "[ '${revision%-dirty}' = '$head' ]"
+  check "Docker answers and holds $tag" "[ -n \"\$(docker images -q $tag)\" ]"
+  check "the API allows this machine and verify-node is online" "NEXUS_URL=$api NEXUS_SOCKS=none node '$repo/src/cli/nexus.ts' nodes --json | grep -q '\"state\": \"online\"'"
+  echo "pylons of this run: $(docker ps -a --filter "label=$label" --format '{{.Names}}:{{.Status}}' | tr '\n' ' ')"
+  [ "${revision%-dirty}" = "$revision" ] || echo "note  the stack started from a checkout with uncommitted changes"
+  return $failed
+}
+
+cli() {
+  local run; run=$(current_run)
+  local step=${1:?usage: verify-nexus cli <step> -- <nexus args>}; shift
+  [ "${1:-}" = "--" ] && shift
+  record "$run" "$step" env "NEXUS_URL=$(state "$run" api)" NEXUS_SOCKS=none node "$repo/src/cli/nexus.ts" "$@"
+}
+
+browser() {
+  local run; run=$(current_run)
+  local step=${1:?usage: verify-nexus browser <step> -- <playwright-cli args>}; shift
+  [ "${1:-}" = "--" ] && shift
+  # From the evidence directory, so screenshots and snapshots saved by relative --filename land with the rest.
+  (cd "$(evidence_dir "$run")" && record "$run" "$step" playwright-cli "-s=nexus-verify-$run" "$@")
+}
+
+pylon() {
+  local run; run=$(current_run)
+  local step=${1:?usage: verify-nexus pylon <step> <thread> -- <cmd...>} thread=${2:?thread ID}; shift 2
+  [ "${1:-}" = "--" ] && shift
+  record "$run" "$step" docker exec --workdir /home/user/workspace/repo "pylon-$thread" "$@"
+}
+
+down() {
+  [ -f "$current_file" ] || { echo "verify-nexus: no current run, nothing to stop"; return 0; }
+  local run; run=$(cat "$current_file")
+  local dir; dir=$(run_dir "$run")
+  local pid; pid=$(cat "$dir/pid" 2>/dev/null || true)
+  if [ -n "$pid" ] && ours "$pid" "$dir"; then
+    kill -TERM "$pid"
+    for _ in $(seq 30); do kill -0 "$pid" 2>/dev/null || break; sleep 1; done
+    if kill -0 "$pid" 2>/dev/null; then echo "verify-nexus: pid $pid ignored SIGTERM for 30 s, killing it" >&2; kill -KILL "$pid"; fi
+  fi
+  # The log is evidence too. If it cannot be kept, stop before anything is deleted.
+  if [ -f "$dir/stack.log" ]; then
+    mkdir -p "$(evidence_dir "$run")"
+    cp "$dir/stack.log" "$(evidence_dir "$run")/stack.log" || die "could not copy $dir/stack.log into the evidence. Nothing was removed. Free the space or fix the permissions, then run down again"
+  fi
+  playwright-cli "-s=nexus-verify-$run" close > /dev/null 2>&1 || true
+  local containers; containers=$(docker ps -a -q --filter "label=nexus.verify=$run")
+  [ -z "$containers" ] || echo "$containers" | xargs docker rm --force > /dev/null
+  # One at a time, newest first, because removing a checkpoint can remove the untagged parent it was committed on.
+  local image
+  while image=$(docker images -q --filter "label=nexus.verify=$run" | head -1) && [ -n "$image" ]; do docker rmi --force "$image" > /dev/null; done
+  rm -rf "$dir"
+  rm -f "$current_file"
+  echo "verify-nexus: run $run is down. Evidence kept in $(evidence_dir "$run")"
+}
+
+case "${1:-}" in
+  up) up ;;
+  doctor) doctor ;;
+  cli) shift; cli "$@" ;;
+  browser) shift; browser "$@" ;;
+  pylon) shift; pylon "$@" ;;
+  evidence) evidence_dir "$(current_run)" ;;
+  down) down ;;
+  *) sed -n '2,9p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 64 ;;
+esac

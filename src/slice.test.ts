@@ -123,7 +123,11 @@ function dockerFixture(): SliceFixture {
     },
     wake: () => ({}),
     preSetup: null,
-    overlay: null,
+    overlay: (version) => [
+      { path: "/home/user/.nexus/PYLON.md", mode: 0o644, owner: "user", content: `slice ${run} overlay ${version}\n` },
+      { path: "/home/user/.nexus/bin/slice-hello", mode: 0o755, owner: "user", content: "#!/bin/sh\necho hello\n" },
+      { path: "/etc/profile.d/nexus.sh", mode: 0o644, owner: "root", content: `export NEXUS_PYLON_ID=${pylonId}\n` },
+    ],
     convergeMs: 90_000,
     marker: "/root/marker",
     cwd: "/",
@@ -152,9 +156,22 @@ function dockerFixture(): SliceFixture {
         await rm(dir, { recursive: true, force: true });
       }
     },
-    async checkFreshBoot() {},
+    async checkFreshBoot(guest) {
+      await this.checkOverlay(guest, 1);
+    },
     async checkWake() {},
-    async checkOverlay() {},
+    // Docker execs are not login shells, so the profile.d file is read by hand.
+    async checkOverlay(guest, version) {
+      const sh = (script: string) => guest.exec(["sh", "-c", script], { cwd: "/home/user", timeoutMs: 30_000 });
+      assert.deepEqual(await sh("stat -c '%U %a %n' .nexus/PYLON.md .nexus/bin .nexus/bin/slice-hello /etc/profile.d/nexus.sh"), {
+        exitCode: 0,
+        output: "user 644 .nexus/PYLON.md\nuser 755 .nexus/bin\nuser 755 .nexus/bin/slice-hello\nroot 644 /etc/profile.d/nexus.sh\n",
+        truncated: false,
+      });
+      assert.deepEqual(await sh(". /etc/profile.d/nexus.sh && cat .nexus/PYLON.md && .nexus/bin/slice-hello && echo $NEXUS_PYLON_ID"), {
+        exitCode: 0, output: `slice ${run} overlay ${version}\nhello\n${pylonId}\n`, truncated: false,
+      });
+    },
     // The pause dies after `docker stop` and before `docker commit`.
     async partialPause() {
       await docker("stop", pylonId);

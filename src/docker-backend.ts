@@ -18,6 +18,7 @@ import { JobFailure, type ArtifactStore, type BackendPylon, type Guest, type VmB
 import { dockerBridgeRunArgs } from "./docker-host-bridge.ts";
 import { dockerServices, publishedPorts } from "./docker-services.ts";
 import { processStream } from "./process-stream.ts";
+import type { OverlayFile } from "./project.ts";
 import type { PylonId } from "./protocol.ts";
 import type { ArtifactId, CheckpointId, ImageId, PortableArtifactId, TemplateId } from "./images.ts";
 import { publicUrls } from "./public-urls.ts";
@@ -30,7 +31,7 @@ const savedImage = "image.tar";
 const setupLimitMs = 20 * 60_000;
 
 export interface DockerBackendOptions {
-  /** The local Docker image that stands in for each Nexus image. The backend never pulls. */
+  /** The local Docker image that stands in for each Nexus image. The backend never pulls. An image booted with an overlay needs a `user`, who owns its home files. */
   images: Readonly<Record<ImageId, string>>;
   /** Put on every container and checkpoint image this backend creates, and required of everything it lists or removes. */
   labels?: Readonly<Record<string, string>>;
@@ -136,10 +137,12 @@ export function createDockerBackend(options: DockerBackendOptions): VmBackend {
   const relaunchMark = "/var/lib/nexus/relaunch";
   const markRelaunch = (pylonId: PylonId) => docker(["exec", pylonId, "sh", "-c", 'mkdir -p "${1%/*}" && touch "$1"', "sh", relaunchMark]);
 
-  /** Applies the live spec's URLs to the services, and relaunches the sessions of a boot from an existing disk. */
-  async function afterBoot(pylonId: PylonId, urls: Record<string, string>, disk: "fresh" | "existing" | "running"): Promise<void> {
+  /** Writes the overlay, applies the live spec's URLs to the services, and relaunches the sessions of a boot from an existing disk. */
+  async function afterBoot(pylonId: PylonId, overlay: readonly OverlayFile[], urls: Record<string, string>, disk: "fresh" | "existing" | "running"): Promise<void> {
     // A checkpoint carries the mark from its pause. A container stopped some other way gets it here.
     if (disk === "existing") await markRelaunch(pylonId);
+    // Before the services and sessions start, as in a pylon, so both read this spawn's files.
+    await guest(pylonId).writeFiles(overlay);
     await services.apply(pylonId, urls, disk !== "running");
     if (await docker(["exec", pylonId, "sh", "-c", 'test -e "$1" && echo marked || true', "sh", relaunchMark]) !== "marked") return;
     await relaunchAfterWake(guest(pylonId), containerLog(pylonId));
@@ -247,14 +250,13 @@ export function createDockerBackend(options: DockerBackendOptions): VmBackend {
     artifacts,
 
     async ensureRunning(boot, live, signal) {
-      if (live.overlay.length > 0) throw new JobFailure("invalid", "the Docker backend does not write overlay files yet");
       const urls = publicUrls(boot.pylonId, live.previews, options.previewHost);
       const existing = await container(boot.pylonId, signal);
-      if (existing?.State.Status === "running") return afterBoot(boot.pylonId, urls, "running");
+      if (existing?.State.Status === "running") return afterBoot(boot.pylonId, live.overlay, urls, "running");
       // A container that exists holds the newest disk, newer than any checkpoint, so it is started as it is.
       if (existing !== null) {
         await docker(["start", existing.Id], signal);
-        return afterBoot(boot.pylonId, urls, "existing");
+        return afterBoot(boot.pylonId, live.overlay, urls, "existing");
       }
       let from: string;
       let bootedFrom: CheckpointId | null = null;
@@ -282,7 +284,7 @@ export function createDockerBackend(options: DockerBackendOptions): VmBackend {
         ...(options.hostBridgePort === undefined ? [] : dockerBridgeRunArgs(options.hostBridgePort)),
         from, "sleep", "infinity",
       ], signal);
-      await afterBoot(boot.pylonId, urls, bootedFrom === null ? "fresh" : "existing");
+      await afterBoot(boot.pylonId, live.overlay, urls, bootedFrom === null ? "fresh" : "existing");
     },
 
     async ensurePaused(pylonId, checkpoint, signal) {
