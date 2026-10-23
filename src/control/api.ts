@@ -18,7 +18,7 @@ import type { HarnessHost } from "../harness/host.ts";
 import type { ImageId, ImageManifest } from "../images.ts";
 import type { Whois } from "../tailscale.ts";
 import { newPylonRecord } from "../tick.ts";
-import type { Output, Preview, Registry, Session, Thread, ThreadId } from "./registry.ts";
+import type { NodeRecord, Output, Preview, Registry, Session, Thread, ThreadId } from "./registry.ts";
 import { dashboard } from "./dashboard.ts";
 import { pylonLive } from "./live.ts";
 
@@ -58,6 +58,9 @@ export interface ThreadDetail {
   /** Null for a thread that has no conversation. A parked task holds the run until it is retried. */
   agent: { parkedTasks: number } | null;
 }
+
+/** A node without its probe's latest observation, which thread detail already reports per pylon. */
+export type NodeSummary = Omit<NodeRecord, "observation"> & { observedAt: string | null };
 
 class HttpError extends Error {
   readonly status: number;
@@ -301,6 +304,7 @@ export async function startApi(options: ApiOptions): Promise<Api> {
   const routes: readonly [string, RegExp, Route][] = [
     ["GET", /^\/v1\/projects$/, () => ok(registry.projects())],
     ["POST", /^\/v1\/projects$/, async (_, r) => created(createProject(await r.body()))],
+    ["GET", /^\/v1\/nodes$/, () => ok(registry.nodes().map(({ observation, ...n }): NodeSummary => ({ ...n, observedAt: observation?.observedAt ?? null })))],
     ["GET", /^\/v1\/threads$/, (_, r) => ok(registry.threads((r.query.get("project") ?? undefined) as ProjectId | undefined))],
     ["POST", /^\/v1\/threads$/, async (_, r) => created(await startThread(await r.body(), r.caller))],
     ["GET", /^\/v1\/threads\/([^/]+)$/, (m) => ok(detail(thread(m[1]!)))],

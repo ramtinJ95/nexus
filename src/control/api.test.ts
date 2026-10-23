@@ -112,6 +112,16 @@ test("projects are created, listed, and checked", async (t) => {
   assert.equal((await s.call("POST", "/v1/projects", { ...project, id: "other", repoUrl: "https://" })).status, 400, "a pylon's allowlist needs the host of an HTTPS repo");
 });
 
+test("nodes are listed with their state and capacity, without the observation", async (t) => {
+  const s = await setup(t);
+  const offline = { name: node, tailnetHost: "rj-firebat.tail.ts.net", tailnetNodeId: "nFIREBAT", state: "offline", capacity: null, observedAt: null };
+  assert.deepEqual(await s.call("GET", "/v1/nodes"), { status: 200, body: [offline] });
+  const capacity = { memoryGiB: 64, committedMemoryGiB: 0, diskFreeGiB: 100 };
+  s.registry.apply({ record: "node", node, state: "online", capacity });
+  s.registry.ingested({ node, observedAt: "2027-01-01T00:01:00Z", probeBootId: "b", capacity, artifacts: [], jobs: [], pylons: [], previewRoutes: [] }, []);
+  assert.deepEqual((await s.call("GET", "/v1/nodes")).body, [{ ...offline, state: "online", capacity, observedAt: "2027-01-01T00:01:00Z" }]);
+});
+
 test("a thread cannot start before an image is current", async (t) => {
   const s = await setup(t);
   await s.call("POST", "/v1/projects", project);
