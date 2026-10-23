@@ -18,6 +18,7 @@ const spec: BootSpec = {
 	},
 	files: [],
 	hooks: [],
+	publicUrls: {},
 	hostBridge: "/var/lib/nexus/pylons/host-bridge.sock",
 };
 

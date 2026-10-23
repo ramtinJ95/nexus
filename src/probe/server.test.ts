@@ -8,7 +8,7 @@ import { Readable } from "node:stream";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { startProbe, type Probe, type ProbeOptions } from "./server.ts";
-import { connectProbe, fetchArtifact, jobDeadlineMs, type ByteStream, type DeclaredOutput, type Job, type JobEnvelope, type JobId, type JobStatus, type LiveHash, type NodeName, type ProbeEvent, type PylonId, type StreamRequest, type TailnetNodeId } from "../protocol.ts";
+import { connectProbe, fetchArtifact, jobDeadlineMs, type ByteStream, type DeclaredOutput, type Job, type JobEnvelope, type JobId, type JobStatus, type LiveHash, type NodeName, type ProbeEvent, type PylonId, type ServiceFact, type StreamRequest, type TailnetNodeId } from "../protocol.ts";
 import { envelope } from "../reconcile.ts";
 import { processStream } from "../process-stream.ts";
 import type { BackendPylon, Guest, VmBackend } from "../backend.ts";
@@ -528,7 +528,7 @@ test("a dropped connection is a lost stream, and the guest process's stdin ends"
 });
 
 /** A fixed gateway port, as a real probe has, so a second probe in the same test recognizes the first one's entries. */
-async function previewSetup(t: import("node:test").TestContext) {
+async function previewSetup(t: import("node:test").TestContext, services: Guest["services"] = () => Promise.reject(new Error("unused"))) {
   const dir = await mkdtemp(join(tmpdir(), "nexus-probe-"));
   t.after(() => rm(dir, { recursive: true }));
   const free = createServer().listen(0, "127.0.0.1");
@@ -541,11 +541,12 @@ async function previewSetup(t: import("node:test").TestContext) {
     ...fake.backend,
     guest: (id) => {
       if (fake.pylons.get(id)?.vm !== "running") throw new Error(`${id} is not running`);
-      return { previewOrigin: () => "http://127.0.0.1:9" } as unknown as Guest; // nothing listens there
+      return { previewOrigin: () => "http://127.0.0.1:9", services } as unknown as Guest; // nothing listens there
     },
   };
+  const logged: string[] = [];
   const previews = { gatewayPort, routesFile: join(dir, "routes.json"), tailscale: tailscale.cli, get: viaGateway(() => `http://127.0.0.1:${gatewayPort}`).get };
-  const open = () => setup(t, { backend, previews });
+  const open = () => setup(t, { backend, previews, log: (line) => logged.push(line) });
   const run = async (client: ReturnType<typeof connectProbe>, job: Job, state: JobStatus["state"] = "succeeded") => {
     const env = envelope(job, node, Date.now());
     await client.submit(env);
@@ -558,7 +559,7 @@ async function previewSetup(t: import("node:test").TestContext) {
       resolve({ status: res.statusCode!, type: res.headers["content-type"], body });
     }).on("error", reject).end();
   });
-  return { tailscale, open, run, visit, gatewayPort };
+  return { tailscale, open, run, visit, gatewayPort, logged };
 }
 
 const withPreview = (id: PylonId, httpsPort: number): Job =>
@@ -587,6 +588,29 @@ test("spawn publishes its previews, a hit arrives on observe, pause keeps them a
   assert.deepEqual(Object.keys(tailscale.entries()), ["10000"]);
   await run(client, { kind: "delete", pylonId });
   assert.deepEqual(tailscale.entries(), {});
+});
+
+test("observations carry the supervisor's services, and null when it cannot be read", async (t) => {
+  let web: ServiceFact | Error = { name: "web", state: "ready", port: 3000, declared: true, wantsPreview: true };
+  const ops: string[] = [];
+  const { open, run, logged } = await previewSetup(t, async (op) => {
+    ops.push(op);
+    if (web instanceof Error) throw web;
+    return { services: [web] };
+  });
+  const { client } = await open();
+  await run(client, withPreview(pylonId, 10000));
+  const seen = async () => {
+    for await (const e of client.observe(AbortSignal.timeout(5000))) {
+      const p = e.type === "snapshot" ? e.observation.pylons[0] : assert.fail("the first event is a snapshot");
+      return p?.phase === "running" ? p.services : assert.fail("the pylon runs");
+    }
+  };
+  assert.deepEqual(await seen(), [web]);
+  web = new Error("the controller is gone");
+  assert.equal(await seen(), null);
+  assert.ok(logged.includes(`${pylonId} services: the controller is gone`));
+  assert.deepEqual(new Set(ops), new Set(["list"]), "observing starts and stops nothing");
 });
 
 test("observations report the previews of the pylon's last successful spawn, not of a spawn that failed", async (t) => {

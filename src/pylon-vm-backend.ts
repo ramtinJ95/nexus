@@ -22,9 +22,12 @@ import type { BootInputs, LiveSpec } from "./project.ts";
 import { isImageId, isTemplateId, type PylonId } from "./protocol.ts";
 import { imageIdOf, type ArtifactId, type CheckpointId, type ImageId, type PortableArtifactId, type TemplateId, type TemplateManifest } from "./images.ts";
 import * as templates from "./pylon-vm-templates.ts";
+import { publicUrls } from "./public-urls.ts";
+import { recordBeforePause, relaunchAfterWake } from "./session-wake.ts";
 import { controlSocket, run, socketPathLimit } from "./pylon-vm/client.ts";
 import { statusSchema, type BootSpec, type SandboxConfig } from "./pylon-vm/contracts.ts";
 import { hostBridgeSocket } from "./pylon-vm/host-bridge.ts";
+import { asUser, controllerLog, pylonGuest } from "./pylon-vm/pylon-guest.ts";
 import { directory, existsError, readRecord, saveJson, shellQuote as q } from "./pylon-vm/storage.ts";
 
 export interface PylonVmBackendOptions {
@@ -53,6 +56,8 @@ export interface PylonVmBackendOptions {
    * remotes, and only to fetch from and push to them.
    */
   gitSsh?: { privateKeyFile: string; knownHostsFile: string };
+  /** The node's tailnet DNS name, which previews are published on. Each previewed service's PUBLIC_URL is on it. */
+  previewHost?: string;
 }
 
 const workspace = "/home/user/workspace";
@@ -70,15 +75,9 @@ const maxPylonIdLength = 40;
 
 const instanceSchema = z.object({ name: z.string(), labels: z.record(z.string(), z.string()), status: statusSchema });
 type Instance = z.infer<typeof instanceSchema>;
-const execReplySchema = z.object({
-  pid: z.string(),
-  running: z.boolean(),
-  output: z.string(),
-  exitCode: z.number().int().optional(),
-  truncated: z.boolean().optional(),
-});
 const checkpointId = z.custom<CheckpointId>((v) => typeof v === "string" && v.startsWith("ckpt-"));
-const sidecarSchema = z.strictObject({ checkpoint: checkpointId.nullable(), pausing: checkpointId.optional() });
+/** `relaunch` is set before a boot from the instance's own disk and cleared once its sessions are relaunched. */
+const sidecarSchema = z.strictObject({ checkpoint: checkpointId.nullable(), pausing: checkpointId.optional(), relaunch: z.literal(true).optional() });
 type Sidecar = z.infer<typeof sidecarSchema>;
 
 /** The pi-sandbox instance name rule. Pylon IDs are kept within it (see PylonId). */
@@ -86,9 +85,6 @@ function instanceName(pylonId: PylonId): string {
   if (!new RegExp(`^[a-z][a-z0-9-]{0,${maxPylonIdLength - 1}}$`).test(pylonId)) throw new JobFailure("invalid", `pylon ID ${pylonId} is not a valid pylon-vm instance name`);
   return pylonId;
 }
-
-/** A login shell as `user`, in `cwd`. The fork runs guest commands as root. */
-const asUser = (script: string, cwd: string) => `runuser -l user -c ${q(`cd ${q(cwd)} && ${script}`)}`;
 
 type SshRemote = NonNullable<BootSpec["ssh"]>["remotes"][number];
 
@@ -254,6 +250,7 @@ export function createPylonVmBackend(options: PylonVmBackendOptions): VmBackend 
       ssh: await gitSshOf(boot.pylonId, remotes),
       files: [...live.overlay],
       hooks: [dotfilesPull(boot.dotfiles)],
+      publicUrls: publicUrls(boot.pylonId, live.previews, options.previewHost),
       hostBridge: hostBridgeSocket(options.stateRoot),
     };
   }
@@ -414,16 +411,27 @@ export function createPylonVmBackend(options: PylonVmBackendOptions): VmBackend 
           continue;
         }
         switch (instance.status.state) {
-          case "running":
+          case "running": {
             if (instance.status.startupError !== undefined) throw await setupFailure(pylonId, instance.status);
-            // A boot wrote the overlay before its hooks ran. A running VM gets it again in case it changed.
+            // A boot wrote the overlay and started the services before its hooks ran. A running VM gets both
+            // again in case they changed, and a changed URL restarts the services it reaches.
             await sandbox({ action: "write-files", name, files: live.overlay }, signal);
+            await sandbox({ action: "public-urls", name, urls: publicUrls(pylonId, live.previews, options.previewHost) }, signal);
+            const sidecar = await readSidecar(pylonId);
+            if (sidecar.relaunch) {
+              await relaunchAfterWake(pylonGuest(pylonId, instanceDir(pylonId), sandbox), controllerLog(instanceDir(pylonId)));
+              await writeSidecar(pylonId, { checkpoint: sidecar.checkpoint });
+            }
             return;
+          }
           // The instance holds the pylon's newest disk whatever the boot source says, so it is started as it is.
+          // Its sessions file is on that disk, so the boot is marked for a relaunch, which a later spawn finishes
+          // if this probe dies first.
           case "stopped": case "interrupted": case "failed": {
             await refuseFixedChanges(bootInputs, instance);
             const spec = await bootSpec(bootInputs, live);
             await settleSidecar(pylonId, instance.status.state === "stopped");
+            await writeSidecar(pylonId, { checkpoint: (await readSidecar(pylonId)).checkpoint, relaunch: true });
             await boot(pylonId, () => sandbox({ action: "start", name, boot: spec }, signal), signal);
             continue;
           }
@@ -438,6 +446,8 @@ export function createPylonVmBackend(options: PylonVmBackendOptions): VmBackend 
       for (let instance = await settled(pylonId, signal); instance?.status.state !== "stopped"; instance = await settled(pylonId, signal)) {
         if (instance === null) return;
         signal.throwIfAborted();
+        // While the guest still runs, so the checkpoint carries the record. A dead controller's disk keeps its last one.
+        if (instance.status.state === "running") await recordBeforePause(pylonGuest(pylonId, instanceDir(pylonId), sandbox), controllerLog(instanceDir(pylonId)));
         await writeSidecar(pylonId, { checkpoint: (await readSidecar(pylonId)).checkpoint, pausing: checkpoint });
         switch (instance.status.state) {
           // A running VM checkpoints its disk. One whose controller died settles on its last completed checkpoint.
@@ -471,7 +481,7 @@ export function createPylonVmBackend(options: PylonVmBackendOptions): VmBackend 
       await holding([key.image], async () => templates.buildTemplate(stateRoot, store, {
         config: { version: 1, diskGiB: resources.diskGiB, image: assetsOf(key.image), workspace, setup: setupCommands(repo.url, repo, inputs.preSetup), retrySetup: false, resume: [], services: {} },
         // No secrets and no overlay during setup, so a template never holds either. No pylon owns the build, so nexus.pylon is blocked like any unlisted host.
-        boot: { resources: { cpus: resources.cpus, memoryGiB: resources.memoryGiB }, allowedHosts: [...inputs.allowedHosts], secrets: {}, ssh: await gitSshOf(template, remote === null ? [] : [remote]), files: [], hooks: [], hostBridge: null },
+        boot: { resources: { cpus: resources.cpus, memoryGiB: resources.memoryGiB }, allowedHosts: [...inputs.allowedHosts], secrets: {}, ssh: await gitSshOf(template, remote === null ? [] : [remote]), files: [], hooks: [], publicUrls: {}, hostBridge: null },
         manifest: { id: template, key, commit: repo.commit },
       }, signal));
     },
@@ -482,36 +492,8 @@ export function createPylonVmBackend(options: PylonVmBackendOptions): VmBackend 
     },
 
     guest(pylonId): Guest {
-      const name = instanceName(pylonId);
-      const notYet = (member: string) => () => { throw new Error(`the pylon VM backend has no Guest.${member} yet`); };
-      return {
-        async exec(argv, { cwd, timeoutMs }) {
-          const deadline = Date.now() + timeoutMs;
-          // The fork waits at most 60 s per call, and a wait never kills the command.
-          const wait = () => Math.max(0, Math.min(60_000, deadline - Date.now()));
-          const cmd = asUser(argv.map(q).join(" "), cwd);
-          let reply = execReplySchema.parse(await sandbox({ action: "exec", name, cmd, cwd: "/", timeoutMs: wait() }));
-          let output = reply.output;
-          while (reply.running) {
-            if (Date.now() >= deadline) {
-              await sandbox({ action: "exec-kill", name, pid: reply.pid });
-              return { exitCode: null, output, truncated: reply.truncated ?? false };
-            }
-            reply = execReplySchema.parse(await sandbox({ action: "exec-status", name, pid: reply.pid, timeoutMs: wait() }));
-            output += reply.output;
-          }
-          if (reply.exitCode === undefined) throw new Error(`exec in ${pylonId} finished without an exit code`);
-          return { exitCode: reply.exitCode, output, truncated: reply.truncated ?? false };
-        },
-        stream: notYet("stream"),
-        async writeFiles(files) {
-          await sandbox({ action: "write-files", name, files });
-        },
-        services: notYet("services"),
-        startService: notYet("startService"),
-        linkPort: notYet("linkPort"),
-        previewOrigin: notYet("previewOrigin"),
-      };
+      instanceName(pylonId);
+      return pylonGuest(pylonId, instanceDir(pylonId), sandbox);
     },
   };
 }

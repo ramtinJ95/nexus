@@ -157,6 +157,8 @@ export const bootSchema = z.strictObject({
 	files: z.array(guestFileSchema),
 	/** Run on every boot, before setup or resume. Each waits to completion. A failure is logged, not fatal. */
 	hooks: z.array(z.string().min(1)),
+	/** Each service's PUBLIC_URL, the https address the probe publishes it at. A service without one has no PUBLIC_URL. */
+	publicUrls: z.record(serviceName, z.url({ protocol: /^https$/ })),
 	/** The probe's socket, which the guest's requests to http://nexus.pylon are forwarded to (host-bridge.ts). Null for a template build, which no pylon owns. */
 	hostBridge: z.string().startsWith("/").nullable(),
 });
@@ -242,6 +244,11 @@ export const actionSchema = z.discriminatedUnion("action", [
 		title: previewText.optional(),
 		description: previewText.optional(),
 		...serviceSchema.shape,
+	}),
+	z.strictObject({
+		action: z.literal("public-urls"),
+		...identity,
+		urls: bootSchema.shape.publicUrls,
 	}),
 	z.strictObject({
 		action: z.literal("preview"),

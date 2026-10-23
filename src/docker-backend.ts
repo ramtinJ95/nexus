@@ -1,23 +1,27 @@
 /**
  * The Docker test double for VmBackend, after Amp's Docker provider example. A pylon is a container named
- * after its ID running `sleep infinity` under --init. Pause stops it, commits it to a checkpoint image and
- * removes it. Resume runs from that image. Everything it reports comes from Docker labels, so a probe
- * restart loses nothing.
+ * after its ID running `sleep infinity` under --init. Pause records its sessions, stops it, commits it to a
+ * checkpoint image and removes it. Resume runs from that image and relaunches the sessions. Everything it
+ * reports comes from Docker labels, so a probe restart loses nothing. Its services are the exception: see
+ * docker-services.ts.
  *
  * A template is a Docker image committed from a build container, and its artifact is that image's
  * `docker save` archive in the artifact store, so templates move between probes as they do between nodes. A
  * template that arrived as an archive is loaded into Docker on its first boot. The double clones nothing: its
  * setup is the project's preSetup, run as root in the build container.
  */
-import { execFile } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { artifactDirectory, fileCodec, type ArtifactDirectory } from "./artifacts.ts";
-import { JobFailure, type ArtifactStore, type BackendPylon, type VmBackend } from "./backend.ts";
+import { JobFailure, type ArtifactStore, type BackendPylon, type Guest, type VmBackend } from "./backend.ts";
 import { dockerBridgeRunArgs } from "./docker-host-bridge.ts";
+import { dockerServices, publishedPorts } from "./docker-services.ts";
 import { processStream } from "./process-stream.ts";
 import type { PylonId } from "./protocol.ts";
 import type { ArtifactId, CheckpointId, ImageId, PortableArtifactId, TemplateId } from "./images.ts";
+import { publicUrls } from "./public-urls.ts";
+import { recordBeforePause, relaunchAfterWake, type PylonLog } from "./session-wake.ts";
 
 const execFileAsync = promisify(execFile);
 
@@ -30,6 +34,8 @@ export interface DockerBackendOptions {
   images: Readonly<Record<ImageId, string>>;
   /** Put on every container and checkpoint image this backend creates, and required of everything it lists or removes. */
   labels?: Readonly<Record<string, string>>;
+  /** The host previews are published on, which each previewed service's PUBLIC_URL names. */
+  previewHost?: string;
   /** The artifact store for templates. Omitted: the backend builds, boots and holds no templates. */
   artifacts?: string;
   /** Gives each new container a NEXUS_API that dockerHostBridge(port) answers. Omitted: containers have no NEXUS_API. */
@@ -55,6 +61,18 @@ export function createDockerBackend(options: DockerBackendOptions): VmBackend {
    * The signal is checked before each call, never passed to the CLI: killing the CLI does not stop the
    * daemon's operation, so the job would end and free its subject while Docker was still stopping or committing.
    */
+  async function dockerWithInput(args: readonly string[], input: string): Promise<void> {
+    const child = spawn("docker", args, { stdio: ["pipe", "ignore", "pipe"] });
+    let stderr = "";
+    child.stderr.setEncoding("utf8").on("data", (text: string) => { stderr += text; });
+    // A docker exec that exits before reading its input breaks the pipe, which its exit code then explains.
+    let broken: Error | undefined;
+    child.stdin.on("error", (err) => { broken = err; }).end(input);
+    const code = await new Promise<number | null>((resolve, reject) => child.on("error", reject).on("close", resolve));
+    if (code !== 0) throw new Error(`docker ${args.slice(0, 3).join(" ")}: exited ${code}: ${stderr.trim()}`);
+    if (broken) throw new Error(`docker ${args.slice(0, 3).join(" ")}: its input broke off: ${broken.message}`);
+  }
+
   async function docker(args: readonly string[], signal?: AbortSignal): Promise<string> {
     signal?.throwIfAborted();
     try {
@@ -103,7 +121,72 @@ export function createDockerBackend(options: DockerBackendOptions): VmBackend {
     return (await docker(["images", "-q", "--filter", `reference=${ref}`], signal)) !== "";
   }
 
+  const services = dockerServices();
   const checkpointRef = (pylonId: PylonId, checkpoint: CheckpointId) => `nexus-checkpoint/${pylonId}:${checkpoint}`;
+
+  /** The container's own log, `docker logs`, by way of the init process's stdout. */
+  const containerLog = (pylonId: PylonId): PylonLog => async (line) => {
+    await docker(["exec", pylonId, "sh", "-c", 'printf "%s\\n" "$1" > /proc/1/fd/1', "sh", line]);
+  };
+
+  /**
+   * Set on a disk whose sessions are to be relaunched, and cleared once they are. It is on the disk, so a
+   * probe that dies before the relaunch finishes leaves it for the next spawn.
+   */
+  const relaunchMark = "/var/lib/nexus/relaunch";
+  const markRelaunch = (pylonId: PylonId) => docker(["exec", pylonId, "sh", "-c", 'mkdir -p "${1%/*}" && touch "$1"', "sh", relaunchMark]);
+
+  /** Applies the live spec's URLs to the services, and relaunches the sessions of a boot from an existing disk. */
+  async function afterBoot(pylonId: PylonId, urls: Record<string, string>, disk: "fresh" | "existing" | "running"): Promise<void> {
+    // A checkpoint carries the mark from its pause. A container stopped some other way gets it here.
+    if (disk === "existing") await markRelaunch(pylonId);
+    await services.apply(pylonId, urls, disk !== "running");
+    if (await docker(["exec", pylonId, "sh", "-c", 'test -e "$1" && echo marked || true', "sh", relaunchMark]) !== "marked") return;
+    await relaunchAfterWake(guest(pylonId), containerLog(pylonId));
+    await docker(["exec", pylonId, "rm", "-f", relaunchMark]);
+  }
+
+  function guest(pylonId: PylonId): Guest {
+    const notYet = (member: string) => () => { throw new Error(`the Docker backend has no Guest.${member} yet`); };
+    return {
+      // As root, unlike a pylon: a container image need not have a `user`.
+      async exec(argv, { cwd, timeoutMs }) {
+        // docker exec reports a missing or stopped container as an ordinary exit code 1.
+        const existing = await container(pylonId, AbortSignal.timeout(timeoutMs));
+        if (existing?.State.Status !== "running") throw new Error(`${pylonId} is not running`);
+        return execIn(pylonId, cwd, argv, timeoutMs);
+      },
+      async stream(request, log) {
+        if (request.pty !== null) throw new Error("the Docker backend has no pty streams");
+        const existing = await container(pylonId, AbortSignal.timeout(30_000));
+        if (existing?.State.Status !== "running") throw new Error(`${pylonId} is not running`);
+        return processStream("docker", ["exec", "--interactive", pylonId, ...request.argv], log);
+      },
+      /** Each file through stdin. Missing parents are made as the file's owner, as in a pylon. */
+      async writeFiles(files) {
+        for (const file of files) {
+          await dockerWithInput(["exec", "--interactive", pylonId, "sh", "-c", [
+            'dir=$(dirname "$1")',
+            'if [ "$2" = root ]; then mkdir -p "$dir"; else runuser -u "$2" -- mkdir -p "$dir"; fi',
+            'cat > "$1.nexus-write"',
+            'install -o "$2" -g "$(id -gn "$2")" -m "$3" "$1.nexus-write" "$1"',
+            'rm -f "$1.nexus-write"',
+          ].join(" && "), "sh", file.path, file.owner, file.mode.toString(8)], file.content);
+        }
+      },
+      async services(op, name, lines) {
+        if (op === "logs") {
+          if (name === undefined) throw new Error("service logs needs the service's name");
+          return services.logs(pylonId, name, lines);
+        }
+        return { services: await services.operate(pylonId, op, name) };
+      },
+      startService: notYet("startService"),
+      linkPort: notYet("linkPort"),
+      previewOrigin: (service) => services.origin(pylonId, service),
+    };
+  }
+
   const templateRef = (template: TemplateId) => `nexus-template:${template}`;
   const labelsOf = (info: { Config: { Labels: Record<string, string> | null } }) => info.Config.Labels ?? {};
 
@@ -165,12 +248,13 @@ export function createDockerBackend(options: DockerBackendOptions): VmBackend {
 
     async ensureRunning(boot, live, signal) {
       if (live.overlay.length > 0) throw new JobFailure("invalid", "the Docker backend does not write overlay files yet");
+      const urls = publicUrls(boot.pylonId, live.previews, options.previewHost);
       const existing = await container(boot.pylonId, signal);
-      if (existing?.State.Status === "running") return;
+      if (existing?.State.Status === "running") return afterBoot(boot.pylonId, urls, "running");
       // A container that exists holds the newest disk, newer than any checkpoint, so it is started as it is.
       if (existing !== null) {
         await docker(["start", existing.Id], signal);
-        return;
+        return afterBoot(boot.pylonId, urls, "existing");
       }
       let from: string;
       let bootedFrom: CheckpointId | null = null;
@@ -194,15 +278,21 @@ export function createDockerBackend(options: DockerBackendOptions): VmBackend {
         "--label", `${label.image}=${boot.image}`,
         "--label", `${label.bootedFrom}=${bootedFrom ?? ""}`,
         ...scope.flatMap(([k, v]) => ["--label", `${k}=${v}`]),
+        "--publish", `127.0.0.1::${publishedPorts.first}-${publishedPorts.last}`,
         ...(options.hostBridgePort === undefined ? [] : dockerBridgeRunArgs(options.hostBridgePort)),
         from, "sleep", "infinity",
       ], signal);
+      await afterBoot(boot.pylonId, urls, bootedFrom === null ? "fresh" : "existing");
     },
 
     async ensurePaused(pylonId, checkpoint, signal) {
       const existing = await container(pylonId, signal);
       // No container: only checkpoints remain, or nothing does. Both are already paused.
       if (existing === null) return;
+      if (existing.State.Status === "running") {
+        await recordBeforePause(guest(pylonId), containerLog(pylonId));
+        await markRelaunch(pylonId);
+      }
       await docker(["stop", existing.Id], signal);
       const labels = { ...labelsOf(existing), [label.checkpoint]: checkpoint };
       await docker([
@@ -211,9 +301,12 @@ export function createDockerBackend(options: DockerBackendOptions): VmBackend {
         existing.Id, checkpointRef(pylonId, checkpoint),
       ], signal);
       await docker(["rm", existing.Id], signal);
+      // Only now, because snapshots read the services of a container for as long as it runs.
+      services.forget(pylonId);
     },
 
     async ensureDeleted(pylonId, signal) {
+      services.forget(pylonId);
       const existing = await container(pylonId, signal);
       if (existing !== null) await docker(["rm", "--force", existing.Id], signal);
       // Newest first, one at a time, because removing a checkpoint can also remove the untagged parent it was committed on.
@@ -270,29 +363,7 @@ export function createDockerBackend(options: DockerBackendOptions): VmBackend {
       );
     },
     buildImage(image) { return Promise.reject(new JobFailure("invalid", `the Docker backend uses configured Docker images and builds none, so it cannot build ${image}`)); },
-    guest(pylonId) {
-      const notYet = (member: string) => () => { throw new Error(`the Docker backend has no Guest.${member} yet`); };
-      return {
-        // As root, unlike a pylon: the container image has no `user`.
-        async exec(argv, { cwd, timeoutMs }) {
-          // docker exec reports a missing or stopped container as an ordinary exit code 1.
-          const existing = await container(pylonId, AbortSignal.timeout(timeoutMs));
-          if (existing?.State.Status !== "running") throw new Error(`${pylonId} is not running`);
-          return execIn(pylonId, cwd, argv, timeoutMs);
-        },
-        async stream(request, log) {
-          if (request.pty !== null) throw new Error("the Docker backend has no pty streams");
-          const existing = await container(pylonId, AbortSignal.timeout(30_000));
-          if (existing?.State.Status !== "running") throw new Error(`${pylonId} is not running`);
-          return processStream("docker", ["exec", "--interactive", pylonId, ...request.argv], log);
-        },
-        writeFiles: notYet("writeFiles"),
-        services: notYet("services"),
-        startService: notYet("startService"),
-        linkPort: notYet("linkPort"),
-        previewOrigin: notYet("previewOrigin"),
-      };
-    },
+    guest,
   };
 }
 

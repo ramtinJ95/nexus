@@ -13,7 +13,7 @@ import type { PortableArtifactId } from "../images.ts";
 import {
   artifactHeaders, encodeProbeEvent, encodeSubmitReply, fetchArtifact, jobDeadlineMs, probePort, jobSubject, parseJobEnvelope, parsePylonCommand, parseStreamRequest, routeAuth, serveByteStream, streamUpgradeResponse,
   type Job, type JobEnvelope, type JobId, type JobStatus, type LiveHash, type NodeName, type NodeObservation,
-  type DeclaredOutput, type ProbeAuthConfig, type ProbeEvent, type PylonCommand, type PylonId, type PylonObservation, type SessionFact, type Subject,
+  type DeclaredOutput, type ProbeAuthConfig, type ProbeEvent, type PylonCommand, type PylonId, type PylonObservation, type ServiceFact, type SessionFact, type Subject,
 } from "../protocol.ts";
 import { sessionFacts } from "../sessions.ts";
 import type { Whois } from "../tailscale.ts";
@@ -62,6 +62,8 @@ const snapshotIntervalMs = 60_000;
 const maxBodyBytes = 1 << 20;
 /** Short, because snapshots are read one at a time and a stuck guest would hold up every observer. */
 const sessionReadTimeoutMs = 3_000;
+/** Longer, because a pylon's supervisor checks each service's health to answer. */
+const serviceReadTimeoutMs = 5_000;
 
 /** A probe without a preview gateway. An empty set is already converged. */
 const noPreviews: ProbeDeps["serve"] = {
@@ -139,6 +141,22 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
     }
   }
 
+  /** A failed or late read reports null, never "no services", and is logged. */
+  async function services(pylonId: PylonId): Promise<readonly ServiceFact[] | null> {
+    let timer: NodeJS.Timeout | undefined;
+    const late = new Promise<never>((_, reject) => {
+      timer = setTimeout(() => reject(new Error(`no answer within ${serviceReadTimeoutMs} ms`)), serviceReadTimeoutMs);
+    });
+    try {
+      return (await Promise.race([backend.guest(pylonId).services("list"), late])).services;
+    } catch (err) {
+      log(`${pylonId} services: ${(err as Error).message}`);
+      return null;
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
   /** Declared outputs only accumulate in the control plane, so a failed read reported as none loses nothing. `nexus output list` shows the failure. */
   async function declaredOutputs(pylonId: PylonId): Promise<readonly DeclaredOutput[]> {
     try {
@@ -160,7 +178,7 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
           pylonId, phase: "running", liveHash: liveHashes.get(pylonId) ?? null, bootedAt: p.bootedAt,
           bootedFrom: { image: p.image, checkpoint: p.checkpoint },
           // The other guest facts need guest operations, which this slice does not have.
-          services: [], previews: (published.get(pylonId) ?? []).map((preview) => ({ ...preview, ready: true })), sessions: await sessions(pylonId), git: null, declaredOutputs: await declaredOutputs(pylonId), attachedClients: ptyStreams.get(pylonId) ?? 0,
+          services: await services(pylonId), previews: (published.get(pylonId) ?? []).map((preview) => ({ ...preview, ready: true })), sessions: await sessions(pylonId), git: null, declaredOutputs: await declaredOutputs(pylonId), attachedClients: ptyStreams.get(pylonId) ?? 0,
         };
     }
   }

@@ -4,18 +4,16 @@ import type { VM } from "@earendil-works/gondolin";
 import { parseDocument } from "yaml";
 import { z } from "zod";
 import { configSchema, type Service } from "./contracts.ts";
-import { checked, serviceRunning, startService, stopService } from "./guest.ts";
+import { checked, guestExists, serviceRunning, startService, stopService } from "./guest.ts";
 import { openPortal } from "./portals.ts";
 import { existsError, shellQuote as q, saveJson } from "./storage.ts";
 
 const reference = /\$\{services\.([a-z0-9][a-z0-9-]{0,31})\.publicURL\}/g;
-type Links = Service["previews"];
 type Entry = {
 	service: Service;
 	declared: boolean;
 	port: number;
 	portal: Awaited<ReturnType<typeof openPortal>> | undefined;
-	links: Links;
 };
 const assignmentsSchema = z.record(
 	z.string(),
@@ -25,6 +23,23 @@ const assignmentsSchema = z.record(
 	}),
 );
 
+/** One service as Nexus reports it, ServiceFact in src/protocol.ts. */
+export type ServiceFact = {
+	name: string;
+	state: "starting" | "ready" | "failed" | "stopped";
+	port: number;
+	declared: boolean;
+	wantsPreview: boolean;
+};
+
+/** The name a port linked with `attach` is reported and previewed under. */
+export const linkedName = (port: number) => `port-${port}`;
+
+/**
+ * Supervises the services `configPath` declares, plus ad hoc ones, each as `user` from `root`. A service's
+ * PUBLIC_URL, and any `${services.<name>.publicURL}` naming it, is the https address the probe publishes it
+ * at, not its loopback portal. The portal is only the origin the probe's preview gateway forwards to.
+ */
 export class GuestServices {
 	private entries = new Map<string, Entry>();
 	private assignments: z.infer<typeof assignmentsSchema> = {};
@@ -33,15 +48,30 @@ export class GuestServices {
 	private attached = new Map<number, Awaited<ReturnType<typeof openPortal>>>();
 	private adHocConfig: Record<string, Service> = {};
 	private declaredNames = new Set<string>();
+	/** What each service was last started with, as envKey gives it. A stop removes it. */
+	private wanted = new Map<string, string>();
+	/** Why the last start of a service failed. Cleared by the next start that succeeds, or a stop. */
+	private failures = new Map<string, string>();
 	private vm: VM;
 	private dir: string;
 	readonly configPath: string;
-	private workspace: string;
-	constructor(vm: VM, dir: string, configPath: string, workspace: string) {
+	private root: string;
+	private user: string;
+	private publicUrls: Record<string, string>;
+	constructor(
+		vm: VM,
+		dir: string,
+		configPath: string,
+		root: string,
+		user: string,
+		publicUrls: Record<string, string>,
+	) {
 		this.vm = vm;
 		this.dir = dir;
 		this.configPath = configPath;
-		this.workspace = workspace;
+		this.root = root;
+		this.user = user;
+		this.publicUrls = publicUrls;
 	}
 	async initialize(): Promise<void> {
 		try {
@@ -61,7 +91,9 @@ export class GuestServices {
 			if (!existsError(error, "ENOENT")) throw error;
 		}
 	}
-	private async declarations(): Promise<Record<string, Service>> {
+	/** A repo without the file declares no services. */
+	private async declaredFile(): Promise<Record<string, Service>> {
+		if (!(await guestExists(this.vm, this.configPath))) return {};
 		if ((await this.vm.fs.stat(this.configPath)).size > 1048576)
 			throw new Error("Service YAML exceeds 1 MiB");
 		const text = await this.vm.fs.readFile(this.configPath, {
@@ -72,9 +104,10 @@ export class GuestServices {
 		const document = parseDocument(text, { uniqueKeys: true });
 		if (document.errors.length)
 			throw new Error(`Invalid service YAML: ${document.errors[0]?.message}`);
-		const services = configSchema.parse(
-			document.toJS({ maxAliasCount: 20 }),
-		).services;
+		return configSchema.parse(document.toJS({ maxAliasCount: 20 })).services;
+	}
+	private async declarations(): Promise<Record<string, Service>> {
+		const services = await this.declaredFile();
 		this.declaredNames = new Set(Object.keys(services));
 		let promoted = false;
 		for (const name of this.declaredNames) {
@@ -133,6 +166,13 @@ export class GuestServices {
 		for (const name of names) visit(name);
 		return ordered;
 	}
+	private async ingress(): Promise<URL> {
+		if (!this.base)
+			this.base = (
+				await this.vm.enableIngress({ listenHost: "127.0.0.1", listenPort: 0 })
+			).url;
+		return new URL(this.base);
+	}
 	private async configure(
 		name: string,
 		service: Service,
@@ -165,44 +205,18 @@ export class GuestServices {
 		for (const [other, assignment] of Object.entries(this.assignments))
 			if (other !== name && assignment.port === port)
 				throw new Error(`Service port ${port} is already assigned to ${other}`);
+		for (const linked of this.attached.keys())
+			if (linked !== port && linkedName(linked) === name)
+				throw new Error(`Service ${name} has the name linked port ${linked} is previewed under. Rename it`);
 		let portal = current?.portal;
-		const hasLinks = !!service.preview || service.previews.length > 0;
-		if (!this.base)
-			this.base = (
-				await this.vm.enableIngress({ listenHost: "127.0.0.1", listenPort: 0 })
-			).url;
-		if (hasLinks && !portal)
-			portal = await openPortal(
-				new URL(this.base),
-				`/${name}`,
-				this.assignments[name]?.portalPort,
-			);
-		if (!hasLinks && portal) {
+		const base = await this.ingress();
+		if (wantsPreview(service) && !portal)
+			portal = await openPortal(base, `/${name}`, this.assignments[name]?.portalPort);
+		if (!wantsPreview(service) && portal) {
 			await portal.close();
 			portal = undefined;
 		}
-		const links: Links = [
-			...(service.preview
-				? [
-						typeof service.preview === "boolean"
-							? { url: "/", title: name }
-							: { ...service.preview, title: service.preview.title ?? name },
-					]
-				: []),
-			...service.previews,
-		];
-		const publicLinks = links.map((link) =>
-			"folder" in link
-				? {
-						...link,
-						links: link.links.map((item) => ({
-							...item,
-							url: new URL(item.url, portal?.url).href,
-						})),
-					}
-				: { ...link, url: new URL(link.url, portal?.url).href },
-		);
-		const entry = { service, declared, port, portal, links: publicLinks };
+		const entry = { service, declared, port, portal };
 		this.entries.set(name, entry);
 		this.assignments[name] = {
 			port,
@@ -220,48 +234,46 @@ export class GuestServices {
 				stripPrefix: true,
 			})),
 			...[...this.attached.keys()].map((port) => ({
-				prefix: `/port-${port}/`,
+				prefix: `/${linkedName(port)}/`,
 				port,
 				stripPrefix: true,
 			})),
 		]);
 	}
-	async attach(
-		port: number,
-		title?: string,
-		description?: string,
-	): Promise<unknown> {
-		let portal =
-			[...this.entries.values()].find((entry) => entry.port === port)?.portal ??
-			this.attached.get(port);
-		if (!portal) {
-			if (!this.base)
-				this.base = (
-					await this.vm.enableIngress({
-						listenHost: "127.0.0.1",
-						listenPort: 0,
-					})
-				).url;
-			portal = await openPortal(new URL(this.base), `/port-${port}`);
-			this.attached.set(port, portal);
+	/** Previews a port that is already listening, unsupervised. Returns the name it is reported under. */
+	async attach(port: number): Promise<string> {
+		const owner = [...this.entries].find(([, entry]) => entry.port === port);
+		if (owner) {
+			if (!owner[1].portal)
+				throw new Error(
+					`Port ${port} belongs to service ${owner[0]}, which has no preview. Declare one in ${this.configPath}`,
+				);
+			return owner[0];
+		}
+		if (this.entries.has(linkedName(port)))
+			throw new Error(
+				`Service ${linkedName(port)} runs on another port, so port ${port} cannot be previewed under that name. Rename the service`,
+			);
+		if (!this.attached.has(port)) {
+			this.attached.set(
+				port,
+				await openPortal(await this.ingress(), `/${linkedName(port)}`),
+			);
 			this.routes();
 		}
-		return {
-			port,
-			url: portal.url,
-			title: title ?? `Port ${port}`,
-			...(description ? { description } : {}),
-			supervised: false,
-		};
+		return linkedName(port);
+	}
+	private async listening(port: number): Promise<boolean> {
+		const listening = await checked(
+			this.vm,
+			`python3 -c ${q("import socket,sys; s=socket.socket(); s.settimeout(1); print(s.connect_ex(('127.0.0.1',int(sys.argv[1])))==0); s.close()")} ${port}`,
+		);
+		return listening.trim() === "True";
 	}
 	private async healthy(name: string, entry: Entry): Promise<boolean> {
 		if (entry.service.health === "process")
 			return serviceRunning(this.vm, name);
-		const listening = await checked(
-			this.vm,
-			`python3 -c ${q("import socket,sys; s=socket.socket(); s.settimeout(1); print(s.connect_ex(('127.0.0.1',int(sys.argv[1])))==0); s.close()")} ${entry.port}`,
-		);
-		if (listening.trim() !== "True") return false;
+		if (!(await this.listening(entry.port))) return false;
 		if (!entry.service.health) return true;
 		try {
 			const response = await fetch(
@@ -274,48 +286,90 @@ export class GuestServices {
 			return false;
 		}
 	}
-	private async start(
-		name: string,
-		entry: Entry,
-		timeoutMs: number,
-	): Promise<void> {
+	/** The env and PUBLIC_URL a start gives the service. Throws while a URL it needs is unassigned. */
+	private environment(name: string, entry: Entry): { env: Record<string, string>; url: string | undefined } {
 		const env = Object.fromEntries(
 			Object.entries(entry.service.env).map(([key, value]) => [
 				key,
 				value.replace(reference, (_match, dependency: string) => {
-					const url = this.entries.get(dependency)?.portal?.url;
+					const url = this.publicUrls[dependency];
 					if (!url)
 						throw new Error(
-							`Service ${dependency} has no public URL. Ensure its preview first`,
+							`Service ${name} needs the public URL of ${dependency}, which has no preview assigned yet. It starts once one is`,
 						);
 					return url;
 				}),
 			]),
 		);
-		await startService(
-			this.vm,
-			name,
-			{
-				...entry.service,
-				cwd: posix.resolve(this.workspace, entry.service.cwd),
-				port: entry.port,
-				env,
-			},
-			entry.portal?.url,
-		);
-		const deadline = Date.now() + timeoutMs;
-		while (!(await this.healthy(name, entry))) {
-			if (Date.now() >= deadline)
-				throw new Error(
-					`Service ${name} started but is not responding. Its configured links are not proof of readiness. Read logs, then restart or stop it`,
-				);
-			await new Promise((accept) => setTimeout(accept, 200));
+		return { env, url: this.publicUrls[name] };
+	}
+	private envKey(name: string, entry: Entry): string {
+		try {
+			return JSON.stringify(this.environment(name, entry));
+		} catch (error) {
+			return `unresolved: ${(error as Error).message}`;
+		}
+	}
+	/** A failure is recorded and logged, not thrown, so one service never stops the others or the boot. */
+	private async start(
+		name: string,
+		entry: Entry,
+		timeoutMs: number,
+	): Promise<void> {
+		this.wanted.set(name, this.envKey(name, entry));
+		try {
+			const { env, url } = this.environment(name, entry);
+			await startService(
+				this.vm,
+				name,
+				{
+					...entry.service,
+					cwd: posix.resolve(this.root, entry.service.cwd),
+					// The supervisor loop runs as root and keeps the service's process group. runuser without
+					// --login keeps PORT, PUBLIC_URL and the env, and the login shell adds the user's profile.
+					command: `runuser -u ${q(this.user)} -- /bin/sh -lc ${q(entry.service.command)}`,
+					port: entry.port,
+					env,
+				},
+				url,
+			);
+			const deadline = Date.now() + timeoutMs;
+			while (!(await this.healthy(name, entry))) {
+				if (Date.now() >= deadline)
+					throw new Error(
+						`Service ${name} started but is not responding. Read logs, then restart or stop it`,
+					);
+				await new Promise((accept) => setTimeout(accept, 200));
+			}
+			this.failures.delete(name);
+		} catch (error) {
+			const message = error instanceof Error ? error.message : String(error);
+			this.failures.set(name, message);
+			console.log(`services: ${name} failed: ${message}`);
+		}
+	}
+	private async stop(name: string): Promise<void> {
+		await stopService(this.vm, name);
+		this.wanted.delete(name);
+		this.failures.delete(name);
+	}
+	/**
+	 * Restarts each service that was asked to run and whose env the new URLs change, such as one that started
+	 * before its preview was assigned. A service stopped on purpose stays stopped.
+	 */
+	async setPublicUrls(urls: Record<string, string>): Promise<void> {
+		this.publicUrls = urls;
+		for (const [name, entry] of this.entries) {
+			const before = this.wanted.get(name);
+			if (before === undefined || before === this.envKey(name, entry)) continue;
+			await stopService(this.vm, name);
+			await this.start(name, entry, entry.service.timeoutMs);
 		}
 	}
 	async operate(
 		op: "ensure" | "status" | "restart" | "stop",
 		selected?: string,
-	): Promise<unknown> {
+	): Promise<ServiceFact[]> {
 		const config = op === "stop" ? {} : await this.declarations();
 		if (selected && !config[selected] && !this.entries.has(selected))
 			throw new Error(`Unknown service ${selected}. Edit ${this.configPath}`);
@@ -329,7 +383,7 @@ export class GuestServices {
 			}
 			for (const [name, entry] of this.entries) {
 				if (entry.declared && (!config[name] || !this.eligible(config[name]))) {
-					await stopService(this.vm, name);
+					await this.stop(name);
 					await entry.portal?.close();
 					this.entries.delete(name);
 					delete this.assignments[name];
@@ -364,24 +418,45 @@ export class GuestServices {
 				await this.start(name, entry, entry.service.timeoutMs);
 			}
 		} else if (op === "stop")
-			for (const name of names) await stopService(this.vm, name);
-		return Promise.all(
-			names.map(async (name) => {
+			for (const name of names) await this.stop(name);
+		// Only a configured service has a port. A declared one that no ensure has reached yet is not reported.
+		const facts = await Promise.all(
+			names.flatMap((name) => {
 				const entry = this.entries.get(name);
-				return {
-					name,
-					declared: entry?.declared ?? this.declaredNames.has(name),
-					running: await serviceRunning(this.vm, name),
-					responding:
-						op !== "stop" && !!entry && (await this.healthy(name, entry)),
-					port: entry?.port ?? config[name]?.port,
-					preview: entry?.portal?.url,
-					links: entry?.links ?? [],
-				};
+				return entry ? [this.fact(name, entry)] : [];
 			}),
 		);
+		if (selected) return facts;
+		return [...facts, ...(await Promise.all([...this.attached.keys()].map((port) => this.linkedFact(port))))];
 	}
-	async adHoc(name: string, service: Service): Promise<unknown> {
+	private async fact(name: string, entry: Entry): Promise<ServiceFact> {
+		const running = await serviceRunning(this.vm, name);
+		const state =
+			running && (await this.healthy(name, entry))
+				? "ready"
+				: this.failures.has(name)
+					? "failed"
+					: running
+						? "starting"
+						: "stopped";
+		return {
+			name,
+			state,
+			port: entry.port,
+			declared: entry.declared,
+			wantsPreview: wantsPreview(entry.service),
+		};
+	}
+	private async linkedFact(port: number): Promise<ServiceFact> {
+		return {
+			name: linkedName(port),
+			state: (await this.listening(port)) ? "ready" : "stopped",
+			port,
+			declared: false,
+			wantsPreview: true,
+		};
+	}
+	async adHoc(name: string, service: Service): Promise<ServiceFact[]> {
 		const config = await this.declarations();
 		if (this.declaredNames.has(name))
 			throw new Error(
@@ -390,8 +465,7 @@ export class GuestServices {
 		if (this.entries.has(name) || this.adHocConfig[name])
 			throw new Error(`Service ${name} already exists. Use services restart`);
 		if (!this.eligible(service))
-			return { name, skipped: "Service excludes the Linux guest" };
-		this.order({ ...config, [name]: service }, [name]);
+			throw new Error(`Service ${name} excludes the Linux guest`);
 		for (const dependency of this.order({ ...config, [name]: service }, [
 			name,
 		]).filter((key) => key !== name))
@@ -402,12 +476,14 @@ export class GuestServices {
 		await this.start(name, entry, 60000);
 		return this.operate("status", name);
 	}
+	/** The loopback origin of every preview, keyed by the name it is reported under. */
 	urls(): Record<string, string> {
-		return Object.fromEntries(
-			[...this.entries].flatMap(([name, entry]) =>
+		return Object.fromEntries([
+			...[...this.entries].flatMap(([name, entry]) =>
 				entry.portal ? [[name, entry.portal.url]] : [],
 			),
-		);
+			...[...this.attached].map(([port, portal]) => [linkedName(port), portal.url]),
+		]);
 	}
 	names(): string[] {
 		return [...this.entries.keys()];
@@ -424,3 +500,5 @@ export class GuestServices {
 		for (const name of this.entries.keys()) await stopService(this.vm, name);
 	}
 }
+
+const wantsPreview = (service: Service) => !!service.preview || service.previews.length > 0;

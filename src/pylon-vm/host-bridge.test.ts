@@ -59,7 +59,7 @@ test("with no probe listening, the guest gets a 503 that says so", async (t) => 
 
 test("the VM's hooks answer the bridge host though no allowlist names it, and still refuse every other unlisted host", async (t) => {
   const { socket, calls } = await probeSide(t);
-  const spec: BootSpec = { resources: { cpus: 1, memoryGiB: 3 }, allowedHosts: ["github.com"], secrets: {}, ssh: null, files: [], hooks: [], hostBridge: socket };
+  const spec: BootSpec = { resources: { cpus: 1, memoryGiB: 3 }, allowedHosts: ["github.com"], secrets: {}, ssh: null, files: [], hooks: [], publicUrls: {}, hostBridge: socket };
   const { httpHooks } = networkOptions(spec, "pylon-t1");
   const reply = await httpHooks!.onRequest!(post(`${nexusApi}/v1/request`));
   assert.ok(reply instanceof Response);

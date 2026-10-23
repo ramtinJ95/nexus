@@ -134,7 +134,7 @@ export interface RunningFacts {
   liveHash: LiveHash | null; // null until the probe has applied a LiveSpec since its own start
   bootedAt: string;
   bootedFrom: { image: ImageId; checkpoint: CheckpointId | null };
-  services: readonly ServiceFact[];
+  services: readonly ServiceFact[] | null; // null when the supervisor could not be read
   previews: readonly { service: string; httpsPort: number; ready: boolean }[];
   sessions: readonly SessionFact[] | null; // null when Herdr could not be read. No Herdr server is an empty list
   git: GitFacts | null; // null until the first poll, or when the checkout is missing

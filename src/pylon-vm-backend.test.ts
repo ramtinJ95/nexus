@@ -7,9 +7,9 @@ import { after, test } from "node:test";
 import assert from "node:assert/strict";
 import { existsSync } from "node:fs";
 import { spawnSync } from "node:child_process";
-import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { chmod, mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
+import { join } from "node:path";
 import { PassThrough, Readable } from "node:stream";
 import { createPylonVmBackend, type PylonVmBackendOptions } from "./pylon-vm-backend.ts";
 import { identityOf } from "./pylon-vm/identity.ts";
@@ -92,6 +92,35 @@ async function leftInstance(instances: string, pylonId: string, state: "stopped"
 }
 
 const signal = () => AbortSignal.timeout(10_000);
+
+/**
+ * A controller on the instance's control socket, as daemon.ts listens, answering each action from `answer`.
+ * It always answers inspect with the instance in `state.current`.
+ */
+async function fakeController(dir: string, pylonId: string, answer: (action: Record<string, unknown>) => unknown = () => assert.fail("unexpected action")) {
+  const state = { current: "running" };
+  const actions: Record<string, unknown>[] = [];
+  const server = createServer(async (req, res) => {
+    let body = "";
+    for await (const chunk of req) body += chunk;
+    const action = JSON.parse(body) as Record<string, unknown>;
+    try {
+      const result = action.action === "inspect"
+        ? { name: pylonId, labels: { "nexus.image": image }, status: { name: pylonId, state: state.current } }
+        : (actions.push(action), await answer(action));
+      res.end(JSON.stringify({ ok: true, result }));
+    } catch (err) {
+      res.end(JSON.stringify({ ok: false, error: (err as Error).message }));
+    }
+  });
+  await new Promise<void>((resolve) => server.listen(join(dir, "control.sock"), resolve));
+  after(() => new Promise<void>((resolve) => server.close(() => resolve())));
+  return { state, actions };
+}
+
+/** The reply to an exec that finished, as the fork's process supervisor gives it. */
+const finished = (exitCode: number, output = "") => ({ pid: "00000000-0000-4000-8000-000000000000", running: false, output, exitCode, truncated: false });
+const herdrNoServer = JSON.stringify({ id: "cli:x", error: { code: "server_not_running", message: "no server" } }) + "\n";
 
 test("a state root too long for a pylon's control socket is refused when the backend is created", () => {
   const stateRoot = `/var/lib/${"n".repeat(40)}`;
@@ -215,6 +244,123 @@ test("a PID handed out again, or one from an earlier boot of the host, is a dead
     await writeFile(join(starting, "launch.lock", "owner"), JSON.stringify(identity));
     assert.deepEqual((await backend.list()).map((p) => p.vm), ["broken"]);
   }
+});
+
+test("a spawn with previews on a node without a preview host fails as invalid and creates nothing", async () => {
+  const { backend, instances } = await backendWith();
+  await assert.rejects(backend.ensureRunning(bootOf("pylon-nohost"), { previews: [{ service: "web", httpsPort: 10100 }], overlay: [] }, signal()), { code: "invalid", message: /no previewHost/ });
+  assert.equal(existsSync(join(instances, "pylon-nohost")), false);
+});
+
+test("a preview origin is the loopback portal the controller reports, and a paused or absent pylon has none", async () => {
+  const { backend, instances } = await backendWith();
+  const dir = await leftInstance(instances, "pylon-origin", "running");
+  const status = (state: string) => writeFile(join(dir, "status.json"), JSON.stringify({ name: "pylon-origin", state, previews: { web: "http://127.0.0.1:40001", "port-6006": "http://127.0.0.1:40002" } }));
+  await status("running");
+  const guest = backend.guest("pylon-origin" as PylonId);
+  assert.equal(guest.previewOrigin("web"), "http://127.0.0.1:40001");
+  assert.equal(guest.previewOrigin("port-6006"), "http://127.0.0.1:40002");
+  assert.throws(() => guest.previewOrigin("api"), /pylon-origin has no preview of api/);
+  await status("stopped");
+  assert.throws(() => guest.previewOrigin("web"), /pylon-origin is stopped/);
+  assert.throws(() => backend.guest("pylon-absent" as PylonId).previewOrigin("web"), /pylon-absent is not on this node/);
+});
+
+test("a raw stream runs its argv unchanged over SSH to the forwarder the controller hands out, stdout only", async (t) => {
+  const { backend, instances } = await backendWith();
+  const dir = await leftInstance(instances, "pylon-ssh-stream", "running");
+  const { actions } = await fakeController(dir, "pylon-ssh-stream", (action) => {
+    assert.equal(action.action, "shell");
+    return { name: "pylon-ssh-stream", access: { user: "user", port: 40022, identityFile: "/run/keys/id" }, command: "ssh ...", handoff: "" };
+  });
+  // Stands in for OpenSSH: records its arguments, then runs the remote command through a shell, as sshd does.
+  const bin = join(scratch, "bin");
+  await mkdir(bin, { recursive: true });
+  await writeFile(join(bin, "ssh"), `#!/bin/sh\nprintf '%s\\n' "$@" > ${join(scratch, "ssh-args")}\nwhile [ "$1" != -- ]; do shift; done\nexec sh -c "$2"\n`);
+  await chmod(join(bin, "ssh"), 0o755);
+  const path = process.env.PATH;
+  process.env.PATH = `${bin}:${path}`;
+  t.after(() => { process.env.PATH = path; });
+
+  const logs: string[] = [];
+  const guest = backend.guest("pylon-ssh-stream" as PylonId);
+  const stream = await guest.stream({ pty: null, argv: ["sh", "-c", 'printf "%s|" "$@"; printf err >&2; exit 3', "sh", "a b", "it's", "$HOME", "*"] }, (text) => logs.push(text));
+  await stream.close();
+  let out = "";
+  for await (const chunk of stream) out += Buffer.from(chunk).toString();
+  assert.equal(out, "a b|it's|$HOME|*|");
+  assert.deepEqual(await stream.done, { kind: "exited", code: 3 });
+  assert.equal(logs.join(""), "err");
+  const args = (await readFile(join(scratch, "ssh-args"), "utf8")).split("\n");
+  assert.deepEqual([args[args.indexOf("-p") + 1], args[args.indexOf("-i") + 1], args[args.indexOf("--") - 1]], ["40022", "/run/keys/id", "user@127.0.0.1"]);
+  assert.deepEqual(actions.map((a) => [a.action, a.user]), [["shell", "user"]]);
+  await assert.rejects(guest.stream({ pty: { cols: 80, rows: 24 }, argv: ["bash"] }, () => {}), /raw pipes only/);
+});
+
+test("service facts come from the controller's supervisor, a list starts nothing, and logs name one service", async () => {
+  const { backend, instances } = await backendWith();
+  const dir = await leftInstance(instances, "pylon-svc", "running");
+  const web = { name: "web", state: "ready", port: 8000, declared: true, wantsPreview: true };
+  const { actions } = await fakeController(dir, "pylon-svc", (action) => {
+    if (action.action === "services" || action.action === "service-start") return [web];
+    if (action.action === "logs") return { exitCode: 0, output: "listening on 8000\n", truncated: false };
+    if (action.action === "preview") return { service: "port-6006" };
+    return assert.fail(`unexpected ${action.action}`);
+  });
+  const guest = backend.guest("pylon-svc" as PylonId);
+  assert.deepEqual(await guest.services("ensure"), { services: [web] });
+  assert.deepEqual(await guest.services("list"), { services: [web] });
+  assert.deepEqual(await guest.services("logs", "web", 50), { services: [web], logs: "listening on 8000\n" });
+  assert.equal(await guest.linkPort(6006, "Storybook"), "port-6006");
+  assert.deepEqual(await guest.startService("web", { command: "npm run dev", port: 8000, preview: true }), [web]);
+  assert.deepEqual(actions.map(({ name: _, ...a }) => a), [
+    { action: "services", op: "ensure" },
+    { action: "services", op: "status" },
+    { action: "logs", service: "web", lines: 50 },
+    { action: "services", op: "status", service: "web" },
+    { action: "preview", port: 6006, title: "Storybook" },
+    { action: "service-start", service: "web", command: "npm run dev", cwd: ".", port: 8000, env: {}, preview: true, previews: [], timeoutMs: 30000 },
+  ]);
+});
+
+test("a pause records the sessions while the guest runs, before it stops the VM, and logs the outcome", async () => {
+  const { backend, instances } = await backendWith();
+  const dir = await leftInstance(instances, "pylon-rec", "running");
+  await writeFile(join(dir, "controller.log"), "");
+  const controller = await fakeController(dir, "pylon-rec", (action) => {
+    if (action.action === "exec") return finished(1, herdrNoServer);
+    if (action.action === "stop") {
+      controller.state.current = "stopped";
+      return { name: "pylon-rec", state: "stopped" };
+    }
+    return assert.fail(`unexpected ${action.action}`);
+  });
+  await backend.ensurePaused("pylon-rec" as PylonId, "ckpt-rec-1", signal());
+  assert.deepEqual(controller.actions.map((a) => a.action), ["exec", "stop"]);
+  assert.match(String(controller.actions[0]!.cmd).replace(/['\\]/g, ""), /^runuser -l user -c cd \/home\/user && herdr --session nexus api snapshot$/);
+  assert.equal(await readFile(join(dir, "controller.log"), "utf8"), "sessions: no Herdr server runs, so the last record stands\n");
+  assert.deepEqual((await backend.list()).map((p) => [p.vm, p.checkpoint]), [["stopped", "ckpt-rec-1"]]);
+});
+
+test("a spawn of a running pylon applies the preview URLs, and finishes a relaunch a wake left pending, once", async () => {
+  const { backend, instances } = await backendWith({ previewHost: "node.example.ts.net" });
+  const dir = await leftInstance(instances, "pylon-wake", "running");
+  await writeFile(join(dir, "nexus-checkpoint.json"), JSON.stringify({ checkpoint: "ckpt-wake-1", relaunch: true }));
+  const { actions } = await fakeController(dir, "pylon-wake", (action) => {
+    if (action.action === "write-files" || action.action === "public-urls") return {};
+    // The sessions file is missing: this pylon was paused with nothing open.
+    if (action.action === "exec") return finished(3);
+    return assert.fail(`unexpected ${action.action}`);
+  });
+  const previews = { previews: [{ service: "web", httpsPort: 10100 }], overlay: [] };
+  await backend.ensureRunning(bootOf("pylon-wake"), previews, signal());
+  assert.deepEqual(actions.map((a) => a.action), ["write-files", "public-urls", "exec"]);
+  assert.deepEqual(actions[1]!.urls, { web: "https://node.example.ts.net:10100" });
+  assert.match(String(actions[2]!.cmd), /\.nexus\/sessions\.json/);
+  assert.deepEqual(JSON.parse(await readFile(join(dir, "nexus-checkpoint.json"), "utf8")), { checkpoint: "ckpt-wake-1" });
+
+  await backend.ensureRunning(bootOf("pylon-wake"), previews, signal());
+  assert.deepEqual(actions.map((a) => a.action), ["write-files", "public-urls", "exec", "write-files", "public-urls"], "the relaunch ran once");
 });
 
 test("a pylon boots only from a template on this node that is a disk over its own image", async () => {

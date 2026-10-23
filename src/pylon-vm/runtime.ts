@@ -46,6 +46,28 @@ export async function reportResume(
 	return true;
 }
 
+/** The guest user that services and streams run as. */
+const guestUser = "user";
+/**
+ * Nexus clones the repo into `repo` under the workspace (pylon-vm-backend.ts), and the repo declares its
+ * services in .nexus/services.yaml, whose `cwd` values are relative to the repo root.
+ */
+const repoRoot = (workspace: string) => posix.join(workspace, "repo");
+const servicesFile = (workspace: string) => posix.join(repoRoot(workspace), ".nexus/services.yaml");
+
+/** An SSH forwarder on the host's loopback that logs in to the guest as `user` with `identityFile`. */
+type SshAccess = { user: string; port: number; identityFile: string };
+
+/**
+ * A guest action that reached a controller between boots, such as a probe snapshot's read that raced a
+ * stop. The caller retries once the instance runs, so it is a deferral, not a failure of the controller.
+ */
+export class NotRunning extends Error {
+	constructor(state: string, action: string) {
+		super(`Sandbox is ${state}, so ${action} waits until it runs again`);
+	}
+}
+
 export class SandboxRuntime {
 	private vm: VM | undefined;
 	private processes: GuestProcesses | undefined;
@@ -62,7 +84,7 @@ export class SandboxRuntime {
 	private bootedAt: string | undefined;
 	private recovery: string | undefined;
 	private terminal:
-		| { user: string; command: string; close(): Promise<void> }
+		| { user: string; command: string; access: SshAccess; close(): Promise<void> }
 		| undefined;
 	private state:
 		| "starting"
@@ -154,9 +176,6 @@ export class SandboxRuntime {
 			console.log(result.output);
 			if (result.exitCode !== 0) console.error(`Boot hook exited ${result.exitCode}`);
 		}
-		const configPath = posix.join(config.workspace, ".sandbox.yaml");
-		if (!(await guestExists(vm, configPath)))
-			await vm.fs.writeFile(configPath, JSON.stringify(config, null, 2));
 		const marker =
 			resume && (await guestExists(vm, setupMarker))
 				? await vm.fs.readFile(setupMarker, { encoding: "utf8" })
@@ -205,12 +224,15 @@ export class SandboxRuntime {
 		this.managed = new GuestServices(
 			vm,
 			this.dir,
-			configPath,
-			config.workspace,
+			servicesFile(config.workspace),
+			repoRoot(config.workspace),
+			guestUser,
+			this.spec.publicUrls,
 		);
 		await this.managed.initialize();
 		this.state = "running";
 		await this.persistStatus();
+		// As with resume, a service that fails is logged and reported, and does not fail the boot.
 		try {
 			await this.managed.operate("ensure");
 		} catch (error) {
@@ -243,6 +265,13 @@ export class SandboxRuntime {
 	}
 	private async persistStatus(): Promise<void> {
 		await saveJson(join(this.dir, "status.json"), this.status());
+	}
+	private async persisting<T>(operation: Promise<T>): Promise<T> {
+		try {
+			return await operation;
+		} finally {
+			await this.persistStatus();
+		}
 	}
 	beginShutdown(): void {
 		if (this.state === "running") this.state = "stopping";
@@ -290,7 +319,7 @@ export class SandboxRuntime {
 				createdAt: this.record.createdAt,
 				labels: this.record.labels,
 				workspace: this.record.config.workspace,
-				configPath: posix.join(this.record.config.workspace, ".sandbox.yaml"),
+				configPath: servicesFile(this.record.config.workspace),
 				status: this.status(),
 				connected: true,
 				services: this.managed?.names() ?? [],
@@ -305,11 +334,8 @@ export class SandboxRuntime {
 			this.vm = undefined;
 			return { name: this.record.name, state: "destroyed" };
 		}
+		if (this.state !== "running") throw new NotRunning(this.state, action.action);
 		const vm = this.requireVm();
-		if (this.state !== "running")
-			throw new Error(
-				"Sandbox is stopping. Wait for stop to complete, then use start",
-			);
 		switch (action.action) {
 			case "shell": {
 				if (this.terminal && this.terminal.user !== action.user)
@@ -329,6 +355,7 @@ export class SandboxRuntime {
 					const terminal = await openTerminal(ssh.port);
 					this.terminal = {
 						user: action.user,
+						access: { user: action.user, port: terminal.port, identityFile: ssh.identityFile },
 						command: `ssh -p ${terminal.port} -i ${q(ssh.identityFile)} -o ForwardAgent=no -o ClearAllForwardings=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null ${action.user}@127.0.0.1`,
 						close: async () => {
 							await terminal.close();
@@ -338,6 +365,7 @@ export class SandboxRuntime {
 				}
 				return {
 					name: this.record.name,
+					access: this.terminal.access,
 					command: this.terminal.command,
 					handoff:
 						"Run this command in a terminal on this host to access the guest. No host credentials were copied",
@@ -373,8 +401,13 @@ export class SandboxRuntime {
 			case "write-files":
 				await writeFiles(vm, action.files);
 				return { paths: action.files.map((file) => file.path) };
+			// The status file carries each preview's origin, which the probe reads without asking the controller.
 			case "services":
-				return this.managed!.operate(action.op, action.service);
+				return this.persisting(this.managed!.operate(action.op, action.service));
+			case "public-urls":
+				return this.persisting(
+					this.managed!.setPublicUrls(action.urls).then(() => ({ urls: action.urls })),
+				);
 			case "service-start": {
 				const {
 					action: _action,
@@ -392,13 +425,11 @@ export class SandboxRuntime {
 						...(title ? { title } : {}),
 						...(description ? { description } : {}),
 					};
-				return this.managed!.adHoc(service, definition);
+				return this.persisting(this.managed!.adHoc(service, definition));
 			}
 			case "preview":
-				return this.managed!.attach(
-					action.port,
-					action.title,
-					action.description,
+				return this.persisting(
+					this.managed!.attach(action.port).then((service) => ({ service })),
 				);
 			case "logs": {
 				if (!action.service || !this.managed?.names().includes(action.service))
