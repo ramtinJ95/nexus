@@ -4,17 +4,20 @@ import assert from "node:assert/strict";
 import { once } from "node:events";
 import { mkdtemp, rm } from "node:fs/promises";
 import { createServer, request } from "node:http";
+import { Readable } from "node:stream";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { startProbe, type Probe, type ProbeOptions } from "./server.ts";
-import { connectProbe, jobDeadlineMs, type ByteStream, type Job, type JobEnvelope, type JobId, type JobStatus, type LiveHash, type NodeName, type PylonId, type StreamRequest, type TailnetNodeId } from "../protocol.ts";
+import { connectProbe, fetchArtifact, jobDeadlineMs, type ByteStream, type DeclaredOutput, type Job, type JobEnvelope, type JobId, type JobStatus, type LiveHash, type NodeName, type ProbeEvent, type PylonId, type StreamRequest, type TailnetNodeId } from "../protocol.ts";
 import { envelope } from "../reconcile.ts";
 import { processStream } from "../process-stream.ts";
 import type { BackendPylon, Guest, VmBackend } from "../backend.ts";
 import { fakeTailscale, nodeHost, viaGateway } from "./fake-tailscale.ts";
-import type { BootInputs } from "../project.ts";
-import type { ImageId } from "../images.ts";
+import type { BootInputs, ProjectId } from "../project.ts";
+import type { ArtifactId, ArtifactManifest, ImageId, PortableArtifactId, TemplateId, TemplateManifest } from "../images.ts";
 import { fakeGuest, herdrError, herdrOk, herdrPane, herdrSnapshot } from "../fake-guest.ts";
+import { outputsDir } from "../outputs.ts";
+import type { HostBridge, HostBridgeAnswer } from "./pylon-api.ts";
 
 const node = "test-node" as NodeName;
 const controlPlane = "nCONTROL" as TailnetNodeId;
@@ -30,10 +33,17 @@ const boot: BootInputs = {
   dotfiles: { repo: "https://example.com/dotfiles.git", ref: "main" },
 };
 const spawnJob: Job = { kind: "spawn", pylonId, boot, live: { previews: [], overlay: [] }, liveHash: "hash-1" as LiveHash };
+const template: TemplateId = "tpl-000000000000";
+const templateManifest = (sha256: string): TemplateManifest => ({
+  id: template, key: { project: "p" as ProjectId, image, setupHash: "h" }, commit: "c0ffee", builtAt: "2027-01-01T00:00:00.000Z", sha256,
+});
 
 /** An in-memory backend. `gate` holds every lifecycle call until it is released or the job's signal aborts. */
 function fakeBackend(guest: Guest | null = null) {
   const pylons = new Map<PylonId, BackendPylon>();
+  const calls: string[] = [];
+  const offered = new Map<PortableArtifactId, { manifest: ArtifactManifest; body: string }>();
+  const imported = new Map<PortableArtifactId, { manifest: ArtifactManifest; body: string }>();
   let gate: PromiseWithResolvers<void> | null = null;
   const held = (signal: AbortSignal) => gate === null ? Promise.resolve() : new Promise<void>((resolve, reject) => {
     gate!.promise.then(resolve);
@@ -53,16 +63,25 @@ function fakeBackend(guest: Guest | null = null) {
       pylons.delete(id);
     },
     async list() { return [...pylons.values()]; },
-    buildTemplate: () => Promise.reject(new Error("unused")),
+    async buildTemplate(id) { calls.push(`build-template ${id}`); },
+    async buildImage(id, _recipe, on) { calls.push(`build-image ${id} on ${on}`); },
     guest: () => { if (guest === null) throw new Error("this test has no guest"); return guest; },
     artifacts: {
-      list: async () => [image],
-      export: () => Promise.reject(new Error("unused")),
-      import: () => Promise.reject(new Error("unused")),
-      drop: () => Promise.reject(new Error("unused")),
+      list: async () => [image, ...offered.keys(), ...imported.keys()],
+      manifest: async (id) => imported.get(id)?.manifest ?? offered.get(id)?.manifest ?? null,
+      async export(id) {
+        const held = offered.get(id) ?? assert.fail(`export of ${id}, which the fake does not hold`);
+        return { manifest: held.manifest, stream: Readable.from([Buffer.from(held.body)]) };
+      },
+      async import(manifest, stream) { imported.set(manifest.id, { manifest, body: Buffer.concat(await stream.toArray()).toString() }); },
+      async drop(id) { calls.push(`drop ${id}`); },
     },
   };
-  return { backend, pylons, hold() { gate = Promise.withResolvers(); }, release() { gate?.resolve(); gate = null; } };
+  return {
+    backend, pylons, calls, imported,
+    offer(manifest: ArtifactManifest, body: string) { offered.set(manifest.id, { manifest, body }); },
+    hold() { gate = Promise.withResolvers(); }, release() { gate?.resolve(); gate = null; },
+  };
 }
 
 async function setup(t: import("node:test").TestContext, overrides: Partial<ProbeOptions> = {}, guest: Guest | null = null) {
@@ -98,7 +117,8 @@ test("callers that are not the configured node get 403", async (t) => {
   callAs(peer);
   assert.equal((await fetch(`${base}/v1/jobs/x`)).status, 403);
   assert.equal((await fetch(`${base}/v1/observe`)).status, 403);
-  assert.equal((await fetch(`${base}/v1/artifacts/img-1`)).status, 501, "a peer may reach the artifacts route, which this slice does not implement");
+  assert.equal((await fetch(`${base}/v1/artifacts/img-1`)).status, 400, "a fetch names the sha256 it wants");
+  assert.equal((await fetch(`${base}/v1/artifacts/img-1?sha256=${"0".repeat(64)}`)).status, 404, "a peer may reach the artifacts route, and this node holds no img-1");
   callAs(controlPlane);
   assert.equal((await fetch(`${base}/v1/artifacts/img-1`)).status, 403);
   assert.equal((await fetch(`${base}/v1/jobs/x`)).status, 404);
@@ -153,14 +173,84 @@ test("malformed envelopes and envelopes for another node are invalid", async (t)
   assert.equal(((await res.json()) as { rejected: string }).rejected, "invalid");
 });
 
-test("jobs this slice does not run fail with invalid", async (t) => {
-  const { client } = await setup(t);
-  const env: JobEnvelope = envelope({ kind: "drop-artifact", artifact: image }, node, Date.now());
-  assert.ok("accepted" in await client.submit(env));
-  const status = await finished(client, env.jobId);
-  assert.equal(status.state, "failed");
-  assert.ok(status.state === "failed" && status.code === "invalid");
-  assert.match(status.state === "failed" ? status.message : "", /not implemented in this slice/);
+test("build and drop jobs reach the backend, and one that names a checkpoint or a path is refused at the door", async (t) => {
+  const { client, fake } = await setup(t);
+  const recipe = { files: [], pins: {} } as unknown as Extract<Job, { kind: "build-image" }>["recipe"];
+  const inputs = { key: templateManifest("0".repeat(64)).key } as Extract<Job, { kind: "build-template" }>["inputs"];
+  for (const job of [{ kind: "drop-artifact", artifact: image }, { kind: "build-template", template, inputs }, { kind: "build-image", image, recipe }] satisfies Job[]) {
+    const env: JobEnvelope = envelope(job, node, Date.now());
+    assert.ok("accepted" in await client.submit(env));
+    assert.equal((await finished(client, env.jobId)).state, "succeeded", job.kind);
+  }
+  assert.deepEqual(fake.calls, [`drop ${image}`, `build-template ${template}`, `build-image ${image} on ${node}`]);
+  const checkpoint = envelope({ kind: "drop-artifact", artifact: "ckpt-unit-1" } as unknown as Job, node, Date.now());
+  assert.deepEqual(await client.submit(checkpoint), { rejected: "invalid", message: "job.artifact is not an image or template ID, and no job drops a checkpoint" });
+  const outside = [
+    { kind: "drop-artifact", artifact: "tpl-x/../../pylons" },
+    { kind: "fetch-artifact", artifact: "img-x/..", from: node, sha256: "0".repeat(64) },
+    { kind: "build-template", template: "tpl-..", inputs },
+    { kind: "build-image", image: "img-a/b", recipe },
+    { ...spawnJob, boot: { ...spawnJob.boot, source: { kind: "template", template: "tpl-../../x" } } },
+  ];
+  for (const job of outside) {
+    const reply = await client.submit(envelope(job as unknown as Job, node, Date.now()));
+    assert.ok("rejected" in reply && reply.rejected === "invalid" && / is not an? (image or template|template|image|artifact) ID/.test(reply.message ?? ""), JSON.stringify(reply));
+  }
+  assert.equal(fake.calls.length, 3, "nothing outside the store reached the backend");
+});
+
+test("a peer probe fetches an artifact as its manifest in a header and its archive as the body, and other bytes are refused unsent", async (t) => {
+  const logged: string[] = [];
+  const { probe, fake, callAs } = await setup(t, { log: (line) => logged.push(line) });
+  const manifest = templateManifest("a".repeat(64));
+  fake.offer(manifest, "archive bytes");
+  const fetchAs = (answering: TailnetNodeId, artifact: PortableArtifactId = template, sha256 = manifest.sha256) =>
+    fetchArtifact({ host: "127.0.0.1", port: probe.port }, artifact, sha256, { whois: async () => answering, peers: [probeNodeId] }, AbortSignal.timeout(5_000));
+  callAs(peer);
+  const copy = await fetchAs(probeNodeId);
+  assert.ok("manifest" in copy);
+  assert.deepEqual(copy.manifest, manifest);
+  assert.equal(Buffer.concat(await copy.stream.toArray()).toString(), "archive bytes");
+  const refusal = `this node holds ${template} with sha256 ${"a".repeat(64)}, and the fetch asks for ${"f".repeat(64)}`;
+  assert.deepEqual(await fetchAs(probeNodeId, template, "f".repeat(64)), { refused: refusal });
+  assert.deepEqual(logged.filter((line) => line.startsWith("artifact ")), [`artifact ${template}: refused a copy: ${refusal}`], "a refusal is logged with its reason, and no copy broke off");
+  await assert.rejects(fetchAs("nOTHER" as TailnetNodeId), { code: "forbidden" }, "the fetching probe checks who answered");
+  await assert.rejects(fetchAs(probeNodeId, "tpl-ffffffffffff"), /HTTP 404: this node holds no image or template tpl-ffffffffffff/);
+  callAs(controlPlane);
+  await assert.rejects(fetchAs(probeNodeId), /HTTP 403/, "only a peer probe may copy artifacts");
+});
+
+test("fetch-artifact imports from the peer probe, and refuses a copy whose sha256 differs from the job's", async (t) => {
+  const source = fakeBackend();
+  const peerNode = "peer-node" as NodeName;
+  const holder = await startProbe({
+    node: peerNode, host: "127.0.0.1", port: 0, auth: { controlPlane, peers: [probeNodeId] }, whois: async () => probeNodeId,
+    backend: source.backend, secrets: { value: () => undefined }, log: () => undefined,
+  });
+  t.after(() => holder.close());
+  const manifest = templateManifest("b".repeat(64));
+  source.offer(manifest, "template bytes");
+  const { client, fake } = await setup(t, {
+    peerAddress: (from) => { assert.equal(from, peerNode); return { host: "127.0.0.1", port: holder.port }; },
+    // The holder answers as the configured peer, and every other caller is the control plane.
+    whois: async (_address, port) => port === holder.port ? peer : controlPlane,
+  });
+  const fetchWith = async (sha256: string, artifact: ArtifactId = template) => {
+    const env = envelope({ kind: "fetch-artifact", artifact, from: peerNode, sha256 }, node, Date.now());
+    await client.submit(env);
+    return finished(client, env.jobId);
+  };
+  const refused = await fetchWith("c".repeat(64));
+  assert.ok(refused.state === "failed" && refused.code === "invalid" && /peer-node refuses the copy: this node holds tpl-000000000000 with sha256 b{64}, and the fetch asks for c{64}/.test(refused.message), JSON.stringify(refused));
+  assert.equal(fake.imported.size, 0);
+  assert.equal((await fetchWith(manifest.sha256)).state, "succeeded");
+  assert.deepEqual(fake.imported.get(template), { manifest, body: "template bytes" });
+  await holder.close();
+  assert.equal((await fetchWith(manifest.sha256)).state, "succeeded", "a held artifact is not fetched again");
+  const differs = await fetchWith("e".repeat(64));
+  assert.ok(differs.state === "failed" && differs.code === "invalid" && /holds tpl-000000000000 with sha256 b{64}, and the job asks for e{64}/.test(differs.message), JSON.stringify(differs));
+  const checkpoint = await fetchWith("d".repeat(64), "ckpt-unit-1");
+  assert.ok(checkpoint.state === "failed" && checkpoint.code === "invalid", JSON.stringify(checkpoint));
 });
 
 test("a job past its deadline fails with deadline", async (t) => {
@@ -282,7 +372,8 @@ test("a failing command rejects with the guest's error", async (t) => {
 test("observations carry session facts from Herdr, and null when Herdr cannot be read", async (t) => {
   let readable = true;
   const guest = fakeGuest((argv, herdr) => {
-    assert.ok(herdr && argv[0] === "api" && argv[1] === "snapshot", "observing runs only herdr api snapshot");
+    if (!herdr && argv[2]?.includes(outputsDir)) return { exitCode: 0, output: "" };
+    assert.ok(herdr && argv[0] === "api" && argv[1] === "snapshot", "observing runs only herdr api snapshot and the outputs listing");
     return readable
       ? herdrOk(herdrSnapshot([{ id: "w1", label: "review" }], [herdrPane("w1:p1", "w1", "claude", "working", { kind: "id", value: "bd2c2d6b" })]))
       : { exitCode: 1, output: "Error: exec failed" };
@@ -299,6 +390,48 @@ test("observations carry session facts from Herdr, and null when Herdr cannot be
   assert.deepEqual(await sessionsSeen(), [{ herdrPane: "w1:p1", harness: "claude-code", harnessSessionId: "bd2c2d6b", status: "working" }]);
   readable = false;
   assert.equal(await sessionsSeen(), null);
+});
+
+test("NEXUS_API calls reach the API as the pylon the bridge named, get the URL once a spawn publishes the preview, and end with the probe", async (t) => {
+  const bridge: { answer?: HostBridgeAnswer; closed: boolean } = { closed: false };
+  const hostBridge: HostBridge = async (answer) => {
+    bridge.answer = answer;
+    return { async close() { bridge.closed = true; } };
+  };
+  const dir = await mkdtemp(join(tmpdir(), "nexus-probe-"));
+  t.after(() => rm(dir, { recursive: true }));
+  const free = createServer().listen(0, "127.0.0.1");
+  await once(free, "listening");
+  const gatewayPort = (free.address() as { port: number }).port;
+  await new Promise((resolve) => free.close(resolve));
+  const fake = fakeBackend();
+  const guest = { ...fakeGuest(() => ({ exitCode: 1, output: "unused" })), linkPort: async () => "web", previewOrigin: () => "http://127.0.0.1:9" as const };
+  const previews = { gatewayPort, routesFile: join(dir, "routes.json"), tailscale: fakeTailscale().cli, get: viaGateway(() => `http://127.0.0.1:${gatewayPort}`).get };
+  const { client, probe } = await setup(t, { backend: { ...fake.backend, guest: () => guest }, previews, hostBridge });
+  assert.ok(bridge.answer, "the probe started its bridge");
+  const preview = bridge.answer(pylonId, JSON.stringify({ op: "preview", port: 3000 }));
+  const env = envelope({ ...spawnJob, live: { previews: [{ service: "web", httpsPort: 10101 }], overlay: [] } }, node, Date.now());
+  await client.submit(env);
+  assert.equal((await finished(client, env.jobId)).state, "succeeded");
+  assert.deepEqual(await preview, { status: 200, body: JSON.stringify({ service: "web", port: 3000, url: `https://${nodeHost}:10101/` }) });
+  await probe.close();
+  assert.ok(bridge.closed, "closing the probe closed its bridge");
+});
+
+test("observations carry the pylon's declared outputs", async (t) => {
+  const output: DeclaredOutput = { id: "out-1-00000000", kind: "diff", base: "c".repeat(40), sha256: "0".repeat(64), title: null };
+  const guest = fakeGuest((argv, herdr) => {
+    if (herdr) return herdrOk(herdrSnapshot([], []));
+    assert.ok(argv[2]?.includes(outputsDir));
+    return { exitCode: 0, output: `${output.id}.json\t${JSON.stringify(output)}\n` };
+  });
+  const { client } = await setup(t, {}, guest);
+  await running(client);
+  for await (const e of client.observe(AbortSignal.timeout(5000))) {
+    const p = e.type === "snapshot" ? e.observation.pylons[0] : assert.fail("the first event is a snapshot");
+    assert.deepEqual(p?.phase === "running" ? p.declaredOutputs : assert.fail("the pylon runs"), [output]);
+    break;
+  }
 });
 
 /** A running pylon whose guest runs each stream's argv as a local process, as docker exec or ssh would. */
@@ -413,10 +546,10 @@ async function previewSetup(t: import("node:test").TestContext) {
   };
   const previews = { gatewayPort, routesFile: join(dir, "routes.json"), tailscale: tailscale.cli, get: viaGateway(() => `http://127.0.0.1:${gatewayPort}`).get };
   const open = () => setup(t, { backend, previews });
-  const run = async (client: ReturnType<typeof connectProbe>, job: Job) => {
+  const run = async (client: ReturnType<typeof connectProbe>, job: Job, state: JobStatus["state"] = "succeeded") => {
     const env = envelope(job, node, Date.now());
     await client.submit(env);
-    assert.equal((await finished(client, env.jobId)).state, "succeeded");
+    assert.equal((await finished(client, env.jobId)).state, state);
   };
   const visit = (httpsPort: number, headers: Record<string, string> = {}) => new Promise<{ status: number; type: string | undefined; body: string }>((resolve, reject) => {
     request({ host: "127.0.0.1", port: gatewayPort, headers: { host: `${nodeHost}:${httpsPort}`, ...headers } }, async (res) => {
@@ -425,7 +558,7 @@ async function previewSetup(t: import("node:test").TestContext) {
       resolve({ status: res.statusCode!, type: res.headers["content-type"], body });
     }).on("error", reject).end();
   });
-  return { tailscale, open, run, visit };
+  return { tailscale, open, run, visit, gatewayPort };
 }
 
 const withPreview = (id: PylonId, httpsPort: number): Job =>
@@ -440,7 +573,11 @@ test("spawn publishes its previews, a hit arrives on observe, pause keeps them a
   const abort = new AbortController();
   t.after(() => abort.abort());
   const events = client.observe(abort.signal)[Symbol.asyncIterator]();
-  assert.equal((await events.next()).value?.type, "snapshot");
+  const snapshot: ProbeEvent | undefined = (await events.next()).value;
+  assert.ok(snapshot?.type === "snapshot");
+  const observed = snapshot.observation.pylons.find((p) => p.pylonId === pylonId);
+  assert.ok(observed?.phase === "running");
+  assert.deepEqual(observed.previews, [{ service: "web", httpsPort: 10000, ready: true }], "observations report the published previews");
   assert.equal((await visit(10000, { "tailscale-user-login": "someone@example.com" })).status, 502, "the fake guest origin is not listening");
   const hit = (await events.next()).value;
   assert.ok(hit?.type === "preview-hit");
@@ -450,6 +587,27 @@ test("spawn publishes its previews, a hit arrives on observe, pause keeps them a
   assert.deepEqual(Object.keys(tailscale.entries()), ["10000"]);
   await run(client, { kind: "delete", pylonId });
   assert.deepEqual(tailscale.entries(), {});
+});
+
+test("observations report the previews of the pylon's last successful spawn, not of a spawn that failed", async (t) => {
+  const { tailscale, open, run, gatewayPort } = await previewSetup(t);
+  const { client } = await open();
+  const observedPreviews = async () => {
+    const abort = new AbortController();
+    const snapshot: ProbeEvent | undefined = (await client.observe(abort.signal)[Symbol.asyncIterator]().next()).value;
+    abort.abort();
+    assert.ok(snapshot?.type === "snapshot");
+    const observed = snapshot.observation.pylons.find((p) => p.pylonId === pylonId);
+    assert.ok(observed?.phase === "running");
+    return observed.previews;
+  };
+  await run(client, withPreview(pylonId, 10000));
+  tailscale.failOnce(`serve --bg --https=10001 http://127.0.0.1:${gatewayPort}`);
+  const both: Job = { ...spawnJob, live: { previews: [{ service: "web", httpsPort: 10000 }, { service: "api", httpsPort: 10001 }], overlay: [] }, liveHash: "hash-2" as LiveHash };
+  await run(client, both, "failed");
+  assert.deepEqual(await observedPreviews(), [{ service: "web", httpsPort: 10000, ready: true }]);
+  await run(client, both);
+  assert.deepEqual(await observedPreviews(), [{ service: "web", httpsPort: 10000, ready: true }, { service: "api", httpsPort: 10001, ready: true }]);
 });
 
 test("after a probe restart a paused pylon keeps its preview, and a hit gets the waking page and is reported", async (t) => {

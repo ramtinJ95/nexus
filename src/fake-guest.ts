@@ -32,6 +32,7 @@ export function fakeGuest(script: (argv: readonly string[], herdr: boolean) => E
     async writeFiles(files) { written.push(...files); },
     stream: () => Promise.reject(new Error("unused")),
     services: () => Promise.reject(new Error("unused")),
+    startService: () => Promise.reject(new Error("unused")),
     linkPort: () => Promise.reject(new Error("unused")),
     previewOrigin: () => { throw new Error("unused"); },
   };

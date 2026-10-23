@@ -3,23 +3,37 @@
  * after its ID running `sleep infinity` under --init. Pause stops it, commits it to a checkpoint image and
  * removes it. Resume runs from that image. Everything it reports comes from Docker labels, so a probe
  * restart loses nothing.
+ *
+ * A template is a Docker image committed from a build container, and its artifact is that image's
+ * `docker save` archive in the artifact store, so templates move between probes as they do between nodes. A
+ * template that arrived as an archive is loaded into Docker on its first boot. The double clones nothing: its
+ * setup is the project's preSetup, run as root in the build container.
  */
 import { execFile } from "node:child_process";
+import { join } from "node:path";
 import { promisify } from "node:util";
+import { artifactDirectory, fileCodec, type ArtifactDirectory } from "./artifacts.ts";
 import { JobFailure, type ArtifactStore, type BackendPylon, type VmBackend } from "./backend.ts";
+import { dockerBridgeRunArgs } from "./docker-host-bridge.ts";
 import { processStream } from "./process-stream.ts";
 import type { PylonId } from "./protocol.ts";
-import type { ArtifactId, CheckpointId, ImageId } from "./images.ts";
+import type { ArtifactId, CheckpointId, ImageId, PortableArtifactId, TemplateId } from "./images.ts";
 
 const execFileAsync = promisify(execFile);
 
-const label = { pylon: "nexus.pylon", image: "nexus.image", bootedFrom: "nexus.booted-from", checkpoint: "nexus.checkpoint" } as const;
+const label = { pylon: "nexus.pylon", image: "nexus.image", bootedFrom: "nexus.booted-from", checkpoint: "nexus.checkpoint", templateBuild: "nexus.template-build" } as const;
+const savedImage = "image.tar";
+const setupLimitMs = 20 * 60_000;
 
 export interface DockerBackendOptions {
   /** The local Docker image that stands in for each Nexus image. The backend never pulls. */
   images: Readonly<Record<ImageId, string>>;
   /** Put on every container and checkpoint image this backend creates, and required of everything it lists or removes. */
   labels?: Readonly<Record<string, string>>;
+  /** The artifact store for templates. Omitted: the backend builds, boots and holds no templates. */
+  artifacts?: string;
+  /** Gives each new container a NEXUS_API that dockerHostBridge(port) answers. Omitted: containers have no NEXUS_API. */
+  hostBridgePort?: number;
 }
 
 interface ContainerInfo {
@@ -90,17 +104,60 @@ export function createDockerBackend(options: DockerBackendOptions): VmBackend {
   }
 
   const checkpointRef = (pylonId: PylonId, checkpoint: CheckpointId) => `nexus-checkpoint/${pylonId}:${checkpoint}`;
+  const templateRef = (template: TemplateId) => `nexus-template:${template}`;
   const labelsOf = (info: { Config: { Labels: Record<string, string> | null } }) => info.Config.Labels ?? {};
+
+  const store: ArtifactDirectory | null = options.artifacts === undefined ? null : artifactDirectory(options.artifacts, fileCodec(savedImage));
+  function templates(): ArtifactDirectory {
+    if (store === null) throw new JobFailure("invalid", "this Docker backend has no artifact store, so it has no templates");
+    return store;
+  }
+  /** Docker images stand in for Nexus images and are configured per node, so only templates move or go. */
+  function templateId(id: PortableArtifactId): TemplateId {
+    if (!id.startsWith("tpl-")) throw new JobFailure("invalid", `the Docker backend's images are configured Docker images, so ${id} is neither copied nor dropped`);
+    return id as TemplateId;
+  }
+
+  async function imageRef(image: ImageId, signal?: AbortSignal): Promise<string> {
+    const ref = options.images[image];
+    if (ref === undefined) throw new JobFailure("artifact-missing", `no Docker image stands in for ${image}`);
+    if (!await imagePresent(ref, signal)) throw new JobFailure("artifact-missing", `Docker image ${ref} for ${image} is not on this node`);
+    return ref;
+  }
+
+  /** A template that arrived as an archive is loaded on its first boot. */
+  async function templateImage(template: TemplateId, image: ImageId, signal: AbortSignal): Promise<string> {
+    const manifest = await templates().manifest(template);
+    if (manifest === null) throw new JobFailure("artifact-missing", `template ${template} is not on this node`);
+    if (manifest.key.image !== image) throw new JobFailure("invalid", `template ${template} was built on ${manifest.key.image}, and the pylon boots ${image}`);
+    const ref = templateRef(template);
+    if (!await imagePresent(ref, signal)) await docker(["load", "--input", join(templates().path(template), savedImage)], signal);
+    return ref;
+  }
+
+  async function removeContainer(name: string): Promise<void> {
+    const ids = await docker(["ps", "-a", "-q", "--filter", `name=^${name}$`]);
+    if (ids !== "") await docker(["rm", "--force", ...ids.split("\n")]);
+  }
 
   const artifacts: ArtifactStore = {
     async list() {
       const images = await Promise.all(Object.entries(options.images).map(async ([id, ref]) => await imagePresent(ref) ? id as ImageId : null));
       const checkpoints = (await checkpointImages(null)).map((img) => labelsOf(img)[label.checkpoint] as CheckpointId);
-      return [...images.filter((id): id is ImageId => id !== null), ...new Set(checkpoints)] satisfies ArtifactId[];
+      return [...images.filter((id): id is ImageId => id !== null), ...await store?.list() ?? [], ...new Set(checkpoints)] satisfies ArtifactId[];
     },
-    export() { return Promise.reject(new Error("the Docker backend does not export artifacts")); },
-    import() { return Promise.reject(new Error("the Docker backend does not import artifacts")); },
-    drop() { return Promise.reject(new Error("the Docker backend does not drop artifacts")); },
+    manifest: (id) => templates().manifest(templateId(id)),
+    export: (id) => templates().export(templateId(id)),
+    import(manifest, stream, signal) {
+      templateId(manifest.id);
+      return templates().import(manifest, stream, signal);
+    },
+    // Pylons booted from the template keep its layers, so nothing on the node depends on its tag.
+    async drop(id) {
+      const template = templateId(id);
+      await templates().drop(template, []);
+      if (await imagePresent(templateRef(template))) await docker(["rmi", "--force", templateRef(template)]);
+    },
   };
 
   return {
@@ -124,15 +181,12 @@ export function createDockerBackend(options: DockerBackendOptions): VmBackend {
           if (!await imagePresent(from, signal)) throw new JobFailure("artifact-missing", `checkpoint ${boot.source.checkpoint} of ${boot.pylonId} is not on this node`);
           break;
         }
-        case "fresh": {
-          const ref = options.images[boot.image];
-          if (ref === undefined) throw new JobFailure("artifact-missing", `no Docker image stands in for ${boot.image}`);
-          if (!await imagePresent(ref, signal)) throw new JobFailure("artifact-missing", `Docker image ${ref} for ${boot.image} is not on this node`);
-          from = ref;
+        case "fresh":
+          from = await imageRef(boot.image, signal);
           break;
-        }
         case "template":
-          throw new JobFailure("invalid", "the Docker backend does not boot from templates yet");
+          from = await templateImage(boot.source.template, boot.image, signal);
+          break;
       }
       await docker([
         "run", "--detach", "--init", "--pull", "never", "--name", boot.pylonId,
@@ -140,6 +194,7 @@ export function createDockerBackend(options: DockerBackendOptions): VmBackend {
         "--label", `${label.image}=${boot.image}`,
         "--label", `${label.bootedFrom}=${bootedFrom ?? ""}`,
         ...scope.flatMap(([k, v]) => ["--label", `${k}=${v}`]),
+        ...(options.hostBridgePort === undefined ? [] : dockerBridgeRunArgs(options.hostBridgePort)),
         from, "sleep", "infinity",
       ], signal);
     },
@@ -190,7 +245,31 @@ export function createDockerBackend(options: DockerBackendOptions): VmBackend {
       return [...pylons.values()];
     },
 
-    buildTemplate() { return Promise.reject(new Error("the Docker backend does not build templates yet")); },
+    async buildTemplate(template, inputs, signal) {
+      const store = templates();
+      if (await store.manifest(template) !== null) return;
+      const from = await imageRef(inputs.key.image, signal);
+      const build = `nexus-build-${template}`;
+      // What an earlier, interrupted build left is started over.
+      await removeContainer(build);
+      await docker(["run", "--detach", "--init", "--pull", "never", "--name", build, "--label", `${label.templateBuild}=${template}`, ...scope.flatMap(([k, v]) => ["--label", `${k}=${v}`]), from, "sleep", "infinity"], signal);
+      try {
+        if (inputs.preSetup !== null) {
+          const setup = await execIn(build, "/", ["sh", "-c", inputs.preSetup], setupLimitMs);
+          if (setup.exitCode !== 0) throw new JobFailure("setup-failed", `the setup of template ${template} ${setup.exitCode === null ? "passed its 20-minute limit" : `exited ${setup.exitCode}`}`, setup.output.slice(-4096));
+        }
+        await docker(["stop", build], signal);
+        await docker(["commit", build, templateRef(template)], signal);
+      } finally {
+        await removeContainer(build);
+      }
+      await store.publish(
+        { id: template, key: inputs.key, commit: inputs.repo.commit, builtAt: new Date().toISOString() },
+        async (dir) => { await docker(["save", "--output", join(dir, savedImage), templateRef(template)], signal); },
+        signal,
+      );
+    },
+    buildImage(image) { return Promise.reject(new JobFailure("invalid", `the Docker backend uses configured Docker images and builds none, so it cannot build ${image}`)); },
     guest(pylonId) {
       const notYet = (member: string) => () => { throw new Error(`the Docker backend has no Guest.${member} yet`); };
       return {
@@ -199,15 +278,7 @@ export function createDockerBackend(options: DockerBackendOptions): VmBackend {
           // docker exec reports a missing or stopped container as an ordinary exit code 1.
           const existing = await container(pylonId, AbortSignal.timeout(timeoutMs));
           if (existing?.State.Status !== "running") throw new Error(`${pylonId} is not running`);
-          try {
-            const { stdout, stderr } = await execFileAsync("docker", ["exec", "--workdir", cwd, pylonId, ...argv], { timeout: timeoutMs, maxBuffer: 64 << 20 });
-            return { exitCode: 0, output: stdout + stderr, truncated: false };
-          } catch (err) {
-            const { code, killed, stdout = "", stderr = "" } = err as { code?: unknown; killed?: boolean; stdout?: string; stderr?: string };
-            if (killed) return { exitCode: null, output: stdout + stderr, truncated: false };
-            if (typeof code !== "number") throw err;
-            return { exitCode: code, output: stdout + stderr, truncated: false };
-          }
+          return execIn(pylonId, cwd, argv, timeoutMs);
         },
         async stream(request, log) {
           if (request.pty !== null) throw new Error("the Docker backend has no pty streams");
@@ -217,11 +288,25 @@ export function createDockerBackend(options: DockerBackendOptions): VmBackend {
         },
         writeFiles: notYet("writeFiles"),
         services: notYet("services"),
+        startService: notYet("startService"),
         linkPort: notYet("linkPort"),
         previewOrigin: notYet("previewOrigin"),
       };
     },
   };
+}
+
+/** A timeout reports exitCode null, as a pylon's exec does. */
+async function execIn(container: string, cwd: string, argv: readonly string[], timeoutMs: number): Promise<{ exitCode: number | null; output: string; truncated: boolean }> {
+  try {
+    const { stdout, stderr } = await execFileAsync("docker", ["exec", "--workdir", cwd, container, ...argv], { timeout: timeoutMs, maxBuffer: 64 << 20 });
+    return { exitCode: 0, output: stdout + stderr, truncated: false };
+  } catch (err) {
+    const { code, killed, stdout = "", stderr = "" } = err as { code?: unknown; killed?: boolean; stdout?: string; stderr?: string };
+    if (killed) return { exitCode: null, output: stdout + stderr, truncated: false };
+    if (typeof code !== "number") throw err;
+    return { exitCode: code, output: stdout + stderr, truncated: false };
+  }
 }
 
 /**

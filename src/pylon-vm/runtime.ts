@@ -50,7 +50,14 @@ export class SandboxRuntime {
 	private vm: VM | undefined;
 	private processes: GuestProcesses | undefined;
 	private managed: GuestServices | undefined;
-	private startupError: string | undefined;
+	private failures: { kind: "setup" | "services"; message: string }[] = [];
+	private setupRecorded = false;
+	private get startupError(): string | undefined {
+		return this.failures.length ? this.failures.map((f) => f.message).join("\n") : undefined;
+	}
+	private get setupError(): string | undefined {
+		return this.failures.find((f) => f.kind === "setup")?.message;
+	}
 	private resumePid: string | undefined;
 	private bootedAt: string | undefined;
 	private recovery: string | undefined;
@@ -73,15 +80,10 @@ export class SandboxRuntime {
 		this.record = record;
 		this.spec = spec;
 	}
-	async boot(
-		prepare: boolean,
-		fresh: boolean,
-		setupError?: string,
-	): Promise<void> {
-		this.startupError = setupError;
+	async boot(prepare: boolean, setupRan?: SetupRun): Promise<void> {
 		const config = this.record.config;
 		const { resources } = this.spec;
-		const { placeholders, ...network } = networkOptions(this.spec);
+		const { placeholders, ...network } = networkOptions(this.spec, this.record.name);
 		const options: VMOptions = {
 			cpus: resources.cpus,
 			memory: `${resources.memoryGiB}G`,
@@ -155,9 +157,15 @@ export class SandboxRuntime {
 		const configPath = posix.join(config.workspace, ".sandbox.yaml");
 		if (!(await guestExists(vm, configPath)))
 			await vm.fs.writeFile(configPath, JSON.stringify(config, null, 2));
-		const firstBoot = fresh || !resume;
-		if (firstBoot) {
-			this.startupError = undefined;
+		const marker =
+			resume && (await guestExists(vm, setupMarker))
+				? await vm.fs.readFile(setupMarker, { encoding: "utf8" })
+				: null;
+		const { done, mark } = setupState(resume, marker, this.record, setupRan);
+		this.setupRecorded = done !== null;
+		this.failures = done?.setupError ? [{ kind: "setup", message: done.setupError }] : [];
+		if (mark) await this.recordSetup(vm);
+		if (done === null) {
 			const setup = config.setup;
 			if (setup.length) {
 				const pid = await this.processes.launch(
@@ -173,22 +181,19 @@ export class SandboxRuntime {
 				}
 				console.log(result.output);
 				if (result.exitCode !== 0) {
-					this.startupError = `Setup exited ${result.exitCode}. Read controller logs. No prepared template was published`;
-					if (prepare) throw new Error(this.startupError);
+					this.failures.push({ kind: "setup", message: `Setup exited ${result.exitCode}. Read controller logs. No prepared template was published` });
+					if (prepare) throw new Error(this.setupError);
 				}
 			}
-			await saveJson(join(this.dir, "intent.json"), {
-				prepare,
-				fresh: false,
-				...(this.startupError ? { setupError: this.startupError } : {}),
-			});
+			if (this.setupError === undefined || !config.retrySetup) await this.recordSetup(vm);
 		}
 		if (prepare) {
 			await this.stop(true);
 			return;
 		}
-		// Setup leaves the disk as resume would find it, so the boot that ran setup skips resume.
-		const hooks = firstBoot ? [] : config.resume;
+		// Every boot from a disk runs resume, a template's first boot after its setup too. A boot from no disk ran
+		// the whole setup, which leaves its processes running as resume would start them, so it skips resume.
+		const hooks = resume ? config.resume : [];
 		if (hooks.length) {
 			const pid = await this.processes.launch(
 				hooks.map((cmd) => `/bin/sh -lc ${q(cmd)} || exit $?`).join("\n"),
@@ -209,14 +214,10 @@ export class SandboxRuntime {
 		try {
 			await this.managed.operate("ensure");
 		} catch (error) {
-			this.startupError = [
-				this.startupError,
-				error instanceof Error
-					? error.message
-					: "Service readiness failed. Read service logs",
-			]
-				.filter(Boolean)
-				.join("\n");
+			this.failures.push({
+				kind: "services",
+				message: error instanceof Error ? error.message : "Service readiness failed. Read service logs",
+			});
 			console.error(error);
 		}
 		await this.persistStatus();
@@ -234,7 +235,8 @@ export class SandboxRuntime {
 			previews: this.managed?.urls() ?? {},
 			persistence: "disk-only",
 			...(this.bootedAt ? { bootedAt: this.bootedAt } : {}),
-			...(this.startupError ? { startupError: this.startupError } : {}),
+			...(this.failures.length ? { startupError: this.startupError, startupFailures: this.failures } : {}),
+			setupRecorded: this.setupRecorded,
 			...(this.resumePid ? { resumePid: this.resumePid } : {}),
 			...(this.recovery ? { recovery: this.recovery } : {}),
 		};
@@ -286,7 +288,6 @@ export class SandboxRuntime {
 			return {
 				name: this.record.name,
 				createdAt: this.record.createdAt,
-				template: this.record.template,
 				labels: this.record.labels,
 				workspace: this.record.config.workspace,
 				configPath: posix.join(this.record.config.workspace, ".sandbox.yaml"),
@@ -413,6 +414,10 @@ export class SandboxRuntime {
 				throw new Error("Action unavailable on a running instance");
 		}
 	}
+	private async recordSetup(vm: VM): Promise<void> {
+		await checked(vm, `mkdir -p ${q(posix.dirname(setupMarker))}`);
+		await vm.fs.writeFile(setupMarker, setupMarkerOf(this.record, this.setupError));
+	}
 	async fail(error: unknown): Promise<void> {
 		console.error(error);
 		this.state = "failed";
@@ -434,17 +439,46 @@ const guestSshConfig = `Host *
 	LogLevel ERROR
 `;
 
-export async function readIntent(dir: string): Promise<{
-	prepare: boolean;
-	fresh: boolean;
-	setupError?: string | undefined;
-}> {
+/**
+ * Whether setup ran on a disk is written on the disk, so it holds exactly when the disk holds setup's work: a
+ * controller that died before its first checkpoint boots the older disk and runs setup again, and one that died
+ * just after it does not. The marker names the instance, because a template's disk carries its build's marker,
+ * and a pylon booted from it still runs its own setup.
+ */
+const setupMarker = "/var/lib/pi-sandbox/setup.json";
+export function setupMarkerOf(record: SandboxRecord, setupError: string | undefined): string {
+	return JSON.stringify({ instance: record.name, createdAt: record.createdAt, ...(setupError ? { setupError } : {}) });
+}
+/** A setup that ran, and how it failed if it did. */
+export type SetupRun = { setupError?: string };
+/** null when this instance's setup has not run on the disk. */
+export function setupOnDisk(marker: string | null, record: SandboxRecord): SetupRun | null {
+	if (marker === null) return null;
+	const ran = JSON.parse(marker) as { instance: string; createdAt: string; setupError?: string };
+	if (ran.instance !== record.name || ran.createdAt !== record.createdAt) return null;
+	return ran.setupError === undefined ? {} : { setupError: ran.setupError };
+}
+/**
+ * Whether a boot runs setup (`done` null), and whether it writes the marker. An instance created before setup
+ * was recorded on its disk keeps what its intent said, `setupRan`, and the boot writes the marker its disk lacks,
+ * which the next checkpoint keeps. A boot from no disk always runs setup, as it did then.
+ */
+export function setupState(disk: boolean, marker: string | null, record: SandboxRecord, setupRan: SetupRun | undefined): { done: SetupRun | null; mark: boolean } {
+	if (!disk) return { done: null, mark: false };
+	const onDisk = setupOnDisk(marker, record);
+	if (onDisk !== null || setupRan === undefined) return { done: onDisk, mark: false };
+	return { done: setupRan, mark: true };
+}
+
+export async function readIntent(dir: string): Promise<{ prepare: boolean; setupRan?: SetupRun }> {
 	const { z } = await import("zod");
-	return z
-		.strictObject({
-			prepare: z.boolean(),
-			fresh: z.boolean(),
-			setupError: z.string().optional(),
-		})
+	const intent = z
+		.union([
+			z.strictObject({ prepare: z.boolean() }),
+			// Written before setup was recorded on the disk: fresh is false once setup ran, with its error if it failed.
+			z.strictObject({ prepare: z.boolean(), fresh: z.boolean(), setupError: z.string().optional() }),
+		])
 		.parse(JSON.parse(await readFile(join(dir, "intent.json"), "utf8")));
+	if (!("fresh" in intent) || intent.fresh) return { prepare: intent.prepare };
+	return { prepare: intent.prepare, setupRan: intent.setupError === undefined ? {} : { setupError: intent.setupError } };
 }

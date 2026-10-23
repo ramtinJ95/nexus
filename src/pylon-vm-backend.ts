@@ -15,12 +15,16 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { z } from "zod";
+import { artifactDirectory, manifestFiles, tarCodec } from "./artifacts.ts";
 import { JobFailure, type ArtifactStore, type BackendPylon, type Guest, type SecretSource, type VmBackend } from "./backend.ts";
+import { buildImage as buildPylonImage } from "./image-build.ts";
 import type { BootInputs, LiveSpec } from "./project.ts";
-import type { PylonId } from "./protocol.ts";
-import type { ArtifactId, CheckpointId, ImageId } from "./images.ts";
+import { isImageId, isTemplateId, type PylonId } from "./protocol.ts";
+import { imageIdOf, type ArtifactId, type CheckpointId, type ImageId, type PortableArtifactId, type TemplateId, type TemplateManifest } from "./images.ts";
+import * as templates from "./pylon-vm-templates.ts";
 import { controlSocket, run, socketPathLimit } from "./pylon-vm/client.ts";
 import { statusSchema, type BootSpec, type SandboxConfig } from "./pylon-vm/contracts.ts";
+import { hostBridgeSocket } from "./pylon-vm/host-bridge.ts";
 import { directory, existsError, readRecord, saveJson, shellQuote as q } from "./pylon-vm/storage.ts";
 
 export interface PylonVmBackendOptions {
@@ -29,8 +33,11 @@ export interface PylonVmBackendOptions {
    * 39 bytes long (checked at creation). /var/lib/nexus/pylons gives an 85-byte socket path at most.
    */
   stateRoot: string;
-  /** The Gondolin asset directory (manifest.json, kernel, initramfs, rootfs) that each image ID names. */
-  images: Readonly<Record<ImageId, string>>;
+  /**
+   * The artifact store (artifacts.ts), at the same path on every node. Each image is <artifacts>/<image ID>/, a
+   * Gondolin asset directory with its image.json, and each template is <artifacts>/<template ID>/.
+   */
+  artifacts: string;
   /**
    * Read at every boot and handed to the instance's controller on its stdin, so no value is written to the
    * instance directory, the controller's log or the guest. The guest sees placeholders, which the host swaps
@@ -104,11 +111,11 @@ function sshRemoteOf(url: string): SshRemote | null {
  * Gondolin holds one credential per host and port, and its git command parser fails closed on a repository
  * path without an owner (`org/repo`), so both are refused here instead of failing later inside the guest.
  */
-function checkSshRemotes(pylonId: PylonId, remotes: readonly SshRemote[]): void {
+function checkSshRemotes(subject: string, remotes: readonly SshRemote[]): void {
   for (const r of remotes) {
-    if (!r.repo.replace(/^(?:~\/|\/)+/, "").includes("/")) throw new JobFailure("invalid", `${pylonId}: ${r.host}:${r.repo} has no owner in its path, and git over SSH takes only owner/name paths`);
+    if (!r.repo.replace(/^(?:~\/|\/)+/, "").includes("/")) throw new JobFailure("invalid", `${subject}: ${r.host}:${r.repo} has no owner in its path, and git over SSH takes only owner/name paths`);
     const other = remotes.find((o) => o.host === r.host && o.port === r.port && o.username !== r.username);
-    if (other !== undefined) throw new JobFailure("invalid", `${pylonId}: ${r.host}:${r.port} is used as ${r.username} and as ${other.username}, and one node key logs in as one user per host`);
+    if (other !== undefined) throw new JobFailure("invalid", `${subject}: ${r.host}:${r.port} is used as ${r.username} and as ${other.username}, and one node key logs in as one user per host`);
   }
 }
 
@@ -136,15 +143,19 @@ function dotfilesPull({ repo, ref }: BootInputs["dotfiles"]): string {
   ].join("\n"), "/home/user");
 }
 
-/** Runs as root from the workspace once, inside the instance's controller, on a fresh disk. 20-minute limit. */
-function setupCommands(boot: BootInputs, preSetup: string | null): string[] {
-  const { url, checkout } = boot.repo;
+/** Runs as root from the workspace once, inside the instance's or template build's controller, on a fresh disk. 20-minute limit. */
+function setupCommands(url: string, checkout: BootInputs["repo"]["checkout"], preSetup: string | null): string[] {
   return [
     `chown user:user ${q(workspace)}`,
     asUser(`git clone --no-checkout ${q(url)} ${q(repoDir)} && git -C ${q(repoDir)} checkout -B ${q(checkout.branch)} ${q(checkout.commit)}`, workspace),
     ...(preSetup === null ? [] : [asUser(`bash -c ${q(preSetup)}`, repoDir)]),
     asUser("if test -e .nexus/setup; then ./.nexus/setup; fi", repoDir),
   ];
+}
+
+/** The setup of a pylon booted from a template, run once: the template's clone moves to the pylon's remote and commit. */
+function checkoutCommands({ url, checkout }: BootInputs["repo"]): string[] {
+  return [asUser(`git remote set-url origin ${q(url)} && git fetch --quiet origin && git checkout --quiet -B ${q(checkout.branch)} ${q(checkout.commit)}`, repoDir)];
 }
 
 export function createPylonVmBackend(options: PylonVmBackendOptions): VmBackend {
@@ -154,6 +165,21 @@ export function createPylonVmBackend(options: PylonVmBackendOptions): VmBackend 
     throw new Error(`state root ${stateRoot} is too long: a pylon's control socket would be ${Buffer.byteLength(longest)} bytes, and a Unix socket path must stay under ${socketPathLimit}`);
   }
   const sandbox = (action: Record<string, unknown>, signal?: AbortSignal) => run(stateRoot, action, signal);
+  const store = artifactDirectory(options.artifacts, tarCodec);
+  // A create, a template build or a template import depends on its image, and a create on its template, before
+  // its instance, build or manifest is there for drop to see. Jobs on different subjects run at once, so the two sides shut each other out here.
+  const using = new Map<PortableArtifactId, number>();
+  const dropping = new Set<PortableArtifactId>();
+  async function holding<T>(ids: PortableArtifactId[], work: () => Promise<T>): Promise<T> {
+    const gone = ids.find((id) => dropping.has(id));
+    if (gone !== undefined) throw new JobFailure("artifact-missing", `${gone} is being dropped from this node`);
+    for (const id of ids) using.set(id, (using.get(id) ?? 0) + 1);
+    try {
+      return await work();
+    } finally {
+      for (const id of ids) using.set(id, using.get(id)! - 1);
+    }
+  }
   const instanceDir = (pylonId: PylonId) => directory(stateRoot, "instances", pylonId);
 
   async function inspect(pylonId: PylonId): Promise<Instance | null> {
@@ -188,24 +214,24 @@ export function createPylonVmBackend(options: PylonVmBackendOptions): VmBackend 
     if (pausing !== undefined) await writeSidecar(pylonId, { checkpoint: stopped ? pausing : checkpoint });
   }
 
-  function assetsOf(boot: BootInputs): string {
-    const assets = options.images[boot.image];
-    if (assets === undefined) throw new JobFailure("artifact-missing", `no Gondolin assets are configured for ${boot.image}`);
-    if (!existsSync(join(assets, "manifest.json"))) throw new JobFailure("artifact-missing", `${assets} holds no Gondolin image for ${boot.image}`);
+  /** A published image only. Gondolin checks the assets themselves when it boots them. */
+  function assetsOf(image: ImageId): string {
+    const assets = store.path(image);
+    if (!existsSync(join(assets, manifestFiles.image))) throw new JobFailure("artifact-missing", `${image} is not in this node's artifact store ${options.artifacts}`);
     return assets;
   }
 
-  async function gitSshOf(pylonId: PylonId, remotes: SshRemote[]): Promise<BootSpec["ssh"]> {
+  async function gitSshOf(subject: string, remotes: SshRemote[]): Promise<BootSpec["ssh"]> {
     if (remotes.length === 0) return null;
-    checkSshRemotes(pylonId, remotes);
+    checkSshRemotes(subject, remotes);
     const { gitSsh } = options;
     const named = remotes.map((r) => `${r.host}:${r.repo}`).join(", ");
-    if (gitSsh === undefined) throw new JobFailure("secret-missing", `${pylonId} uses ${named} over SSH, and this node has no git SSH key`);
-    if (!existsSync(gitSsh.knownHostsFile)) throw new JobFailure("secret-missing", `${pylonId} uses ${named} over SSH, and this node's known_hosts file ${gitSsh.knownHostsFile} is missing`);
+    if (gitSsh === undefined) throw new JobFailure("secret-missing", `${subject} uses ${named} over SSH, and this node has no git SSH key`);
+    if (!existsSync(gitSsh.knownHostsFile)) throw new JobFailure("secret-missing", `${subject} uses ${named} over SSH, and this node's known_hosts file ${gitSsh.knownHostsFile} is missing`);
     try {
       return { privateKey: await readFile(gitSsh.privateKeyFile, "utf8"), knownHostsFile: gitSsh.knownHostsFile, remotes };
     } catch (err) {
-      throw new JobFailure("secret-missing", `${pylonId} uses ${named} over SSH, and this node's git SSH key ${gitSsh.privateKeyFile} is unreadable: ${(err as Error).message}`);
+      throw new JobFailure("secret-missing", `${subject} uses ${named} over SSH, and this node's git SSH key ${gitSsh.privateKeyFile} is unreadable: ${(err as Error).message}`);
     }
   }
 
@@ -228,32 +254,58 @@ export function createPylonVmBackend(options: PylonVmBackendOptions): VmBackend 
       ssh: await gitSshOf(boot.pylonId, remotes),
       files: [...live.overlay],
       hooks: [dotfilesPull(boot.dotfiles)],
+      hostBridge: hostBridgeSocket(options.stateRoot),
     };
   }
 
   async function create(boot: BootInputs, live: LiveSpec, signal: AbortSignal): Promise<void> {
-    let preSetup: string | null;
-    switch (boot.source.kind) {
-      case "resume":
-        throw new JobFailure("artifact-missing", `checkpoint ${boot.source.checkpoint} of ${boot.pylonId} is not on this node`);
-      case "template":
-        throw new JobFailure("invalid", "the pylon VM backend does not boot from templates: not implemented yet");
-      case "fresh":
-        preSetup = boot.source.preSetup;
-        break;
-    }
-    const config: SandboxConfig = {
-      version: 1,
-      diskGiB: boot.resources.diskGiB,
-      image: assetsOf(boot),
-      workspace,
-      setup: setupCommands(boot, preSetup),
-      // The fork runs resume on every boot that did not run setup.
-      resume: [asUser("if test -e .nexus/resume; then ./.nexus/resume; fi", repoDir)],
-      services: {},
-    };
-    const spec = await bootSpec(boot, live);
-    await sandbox({ action: "create", name: instanceName(boot.pylonId), config, boot: spec, labels: { [imageLabel]: boot.image } }, signal);
+    const needs: PortableArtifactId[] = boot.source.kind === "template" ? [boot.image, boot.source.template] : [boot.image];
+    await holding(needs, async () => {
+      let setup: string[];
+      let disk: string | undefined;
+      switch (boot.source.kind) {
+        case "resume":
+          throw new JobFailure("artifact-missing", `checkpoint ${boot.source.checkpoint} of ${boot.pylonId} is not on this node`);
+        case "template":
+          disk = await templates.templateDisk(store, boot.source.template, boot.image);
+          setup = checkoutCommands(boot.repo);
+          break;
+        case "fresh":
+          setup = setupCommands(boot.repo.url, boot.repo.checkout, boot.source.preSetup);
+          break;
+      }
+      const config: SandboxConfig = {
+        version: 1,
+        diskGiB: boot.resources.diskGiB,
+        image: assetsOf(boot.image),
+        workspace,
+        setup,
+        retrySetup: boot.source.kind === "template",
+        // The fork runs resume on every boot from a disk: each wake, and a template boot after its checkout.
+        resume: [asUser("if test -e .nexus/resume; then ./.nexus/resume; fi", repoDir)],
+        services: {},
+      };
+      const spec = await bootSpec(boot, live);
+      await sandbox({ action: "create", name: instanceName(boot.pylonId), config, ...(disk === undefined ? {} : { disk }), boot: spec, labels: { [imageLabel]: boot.image } }, signal);
+    });
+  }
+
+  /**
+   * What a pylon running with a startupError fails its job with. A template boot's setup is only Nexus's
+   * checkout (retrySetup), which fails for reasons that pass, such as a fetch during an outage. When that
+   * checkout is what failed, on a disk that has never finished setup, no agent has run on the pylon and nothing
+   * on it is the user's: the instance is removed and the job's retry boots from the template again. Every other
+   * failure is final and the instance stays: a project's setup, a service, or a disk that finished setup once.
+   */
+  async function setupFailure(pylonId: PylonId, status: Instance["status"]): Promise<JobFailure> {
+    const startupError = status.startupError ?? "";
+    const { config } = await readRecord(instanceDir(pylonId));
+    const checkoutFailed = config.retrySetup && status.setupRecorded === false && status.startupFailures?.some((f) => f.kind === "setup") === true;
+    if (!checkoutFailed) return new JobFailure("setup-failed", `${pylonId}: ${startupError}`);
+    const log = await templates.controllerLogTail(instanceDir(pylonId));
+    const name = instanceName(pylonId);
+    await sandbox({ action: "destroy", kind: "instances", name, confirm: name });
+    return new JobFailure("backend", `${pylonId} could not check out its commit on its template's disk, so it was removed and boots from the template again: ${startupError}`, log);
   }
 
   /** CPUs, memory, the allowlist, secrets and SSH remotes apply at every boot. The image and the disk size are fixed at create. */
@@ -311,14 +363,41 @@ export function createPylonVmBackend(options: PylonVmBackendOptions): VmBackend 
 
   const artifacts: ArtifactStore = {
     async list() {
-      const images = Object.entries(options.images).flatMap(([id, assets]) => existsSync(join(assets, "manifest.json")) ? [id as ImageId] : []);
       // A running pylon's disk has moved on from the checkpoint it booted from, so only stopped disks count.
       const checkpoints = (await list()).flatMap((p) => p.vm === "stopped" && p.checkpoint !== null ? [p.checkpoint] : []);
-      return [...images, ...checkpoints] satisfies ArtifactId[];
+      return [...await store.list(), ...checkpoints] satisfies ArtifactId[];
     },
-    export() { return Promise.reject(new Error("the pylon VM backend does not export artifacts yet")); },
-    import() { return Promise.reject(new Error("the pylon VM backend does not import artifacts yet")); },
-    drop() { return Promise.reject(new Error("the pylon VM backend does not drop artifacts yet")); },
+    manifest: (id) => store.manifest(id),
+    export: (id) => store.export(id),
+    // A template is a disk over its image, so its image is held until the template is published, where drop sees it.
+    async import(manifest, stream, signal) {
+      if (!isTemplateId(manifest.id)) return store.import(manifest, stream, signal);
+      const { image } = (manifest as TemplateManifest).key;
+      try {
+        await holding([image], async () => {
+          assetsOf(image);
+          await store.import(manifest, stream, signal);
+        });
+      } finally {
+        stream.destroy(); // a copy refused before it was read still holds its connection to the peer
+      }
+    },
+    async drop(id) {
+      if ((using.get(id) ?? 0) > 0) throw new JobFailure("invalid", `${id} is still needed by a pylon or template that is being created or copied in`);
+      dropping.add(id);
+      try {
+        if (!isImageId(id)) return await store.drop(id, []);
+        // Pylons and templates are qcow2 overlays on the image's rootfs. A checkpoint is its stopped pylon's disk.
+        const held = await Promise.all((await store.list()).filter(isTemplateId).map((t) => store.manifest(t)));
+        await store.drop(id, [
+          ...(await list()).filter((p) => p.image === id).map((p) => `pylon ${p.pylonId}`),
+          ...held.flatMap((t) => t?.key.image === id ? [`template ${t.id}`] : []),
+          ...await templates.buildsFrom(stateRoot, id),
+        ]);
+      } finally {
+        dropping.delete(id);
+      }
+    },
   };
 
   return {
@@ -336,7 +415,7 @@ export function createPylonVmBackend(options: PylonVmBackendOptions): VmBackend 
         }
         switch (instance.status.state) {
           case "running":
-            if (instance.status.startupError !== undefined) throw new JobFailure("setup-failed", `${pylonId}: ${instance.status.startupError}`);
+            if (instance.status.startupError !== undefined) throw await setupFailure(pylonId, instance.status);
             // A boot wrote the overlay before its hooks ran. A running VM gets it again in case it changed.
             await sandbox({ action: "write-files", name, files: live.overlay }, signal);
             return;
@@ -385,7 +464,22 @@ export function createPylonVmBackend(options: PylonVmBackendOptions): VmBackend 
       await sandbox({ action: "destroy", kind: "instances", name, confirm: name });
     },
 
-    buildTemplate() { return Promise.reject(new Error("the pylon VM backend does not build templates yet")); },
+    async buildTemplate(template, inputs, signal) {
+      const { key, repo, resources } = inputs;
+      if (resources.memoryGiB < minMemoryGiB) throw new JobFailure("invalid", `template ${template} asks for ${resources.memoryGiB} GiB, but pylon VMs need at least ${minMemoryGiB} GiB`);
+      const remote = sshRemoteOf(repo.url);
+      await holding([key.image], async () => templates.buildTemplate(stateRoot, store, {
+        config: { version: 1, diskGiB: resources.diskGiB, image: assetsOf(key.image), workspace, setup: setupCommands(repo.url, repo, inputs.preSetup), retrySetup: false, resume: [], services: {} },
+        // No secrets and no overlay during setup, so a template never holds either. No pylon owns the build, so nexus.pylon is blocked like any unlisted host.
+        boot: { resources: { cpus: resources.cpus, memoryGiB: resources.memoryGiB }, allowedHosts: [...inputs.allowedHosts], secrets: {}, ssh: await gitSshOf(template, remote === null ? [] : [remote]), files: [], hooks: [], hostBridge: null },
+        manifest: { id: template, key, commit: repo.commit },
+      }, signal));
+    },
+
+    async buildImage(image, recipe, node, signal) {
+      if (imageIdOf(recipe) !== image) throw new JobFailure("invalid", `the recipe is image ${imageIdOf(recipe)}, not ${image}`);
+      await buildPylonImage(recipe, node, store.path(image), signal);
+    },
 
     guest(pylonId): Guest {
       const name = instanceName(pylonId);
@@ -414,6 +508,7 @@ export function createPylonVmBackend(options: PylonVmBackendOptions): VmBackend 
           await sandbox({ action: "write-files", name, files });
         },
         services: notYet("services"),
+        startService: notYet("startService"),
         linkPort: notYet("linkPort"),
         previewOrigin: notYet("previewOrigin"),
       };

@@ -1,20 +1,25 @@
 /**
  * The control plane's HTTP API for the dashboard and the CLI. JSON in and out.
  *
+ * Each thread's agent is a conversation in the control plane's harness. The API creates it with the thread,
+ * forwards messages, aborts and retries to it, and serves its view.
+ *
  * Like the probe, it trusts tailnet identity: each caller's stable node ID, from tailscaled's whois, must be
  * on the allowlist. The API writes only what a human asks for. Every change that can move a pylon
  * wakes the loop for its node, so a start or a dashboard visit acts within one pass rather than 5 seconds.
  */
-import { createHash, randomBytes } from "node:crypto";
+import { randomBytes } from "node:crypto";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { z } from "zod";
 import { actualState, type ActualState } from "../reconcile.ts";
-import { effectiveAllowedHosts, type BootInputs, type LiveSpec, type Project, type ProjectId, type PylonOverlay } from "../project.ts";
-import type { LiveHash, NodeName, PylonId, TailnetNodeId } from "../protocol.ts";
+import { effectiveAllowedHosts, liveHashOf, type BootInputs, type LiveSpec, type Project, type ProjectId, type PylonOverlay } from "../project.ts";
+import type { NodeName, PylonId, TailnetNodeId } from "../protocol.ts";
+import type { HarnessHost } from "../harness/host.ts";
 import type { ImageId, ImageManifest } from "../images.ts";
 import type { Whois } from "../tailscale.ts";
 import { newPylonRecord } from "../tick.ts";
 import type { Output, Preview, Registry, Session, Thread, ThreadId } from "./registry.ts";
+import { dashboard } from "./dashboard.ts";
 
 export interface ApiOptions {
   registry: Registry;
@@ -27,9 +32,12 @@ export interface ApiOptions {
   hostnames: ReadonlySet<string>;
   /** The common dotfiles layer every new pylon pulls on boot. */
   dotfiles: PylonOverlay["dotfiles"];
+  harness: ThreadHarness;
   /** Asks the loop for a pass over the node's pylons. */
   wake(node: NodeName): void;
 }
+
+export type ThreadHarness = Pick<HarnessHost, "startThread" | "send" | "abort" | "retry" | "watch" | "deleteThread" | "activity">;
 
 export interface Api {
   readonly port: number;
@@ -42,6 +50,8 @@ export interface ThreadDetail {
   sessions: readonly Session[];
   previews: readonly Preview[];
   outputs: readonly Output[];
+  /** Null for a thread that has no conversation. A parked task holds the run until it is retried. */
+  agent: { parkedTasks: number } | null;
 }
 
 class HttpError extends Error {
@@ -73,11 +83,15 @@ const startSchema = z.strictObject({
   /** Until the control plane mirrors repos, the caller may pin a commit. The default is the branch tip at clone time. */
   commit: z.string().min(1).optional(),
 });
-const activitySchema = z.discriminatedUnion("kind", [
-  z.strictObject({ kind: z.literal("human") }),
-  // Fed by hand until pi-durable runs threads on the control plane.
-  z.strictObject({ kind: z.literal("agent"), turnRunning: z.boolean() }),
-]);
+// Agent activity comes from the harness.
+const activitySchema = z.strictObject({ kind: z.literal("human") });
+const messageSchema = z.strictObject({
+  text: z.string().min(1),
+  /** Minted by the client per message, such as msg:<uuid>. A retry with the same ID is the same message. */
+  requestId: z.string().min(1),
+  /** followUp waits for the current run. steer joins it after its current tool round. */
+  mode: z.enum(["followUp", "steer"]).default("followUp"),
+});
 const imageSchema = z.strictObject({
   id: z.string().regex(/^img-[0-9a-f]{12}$/).transform((id) => id as ImageId),
   gondolinBuildId: z.string().min(1),
@@ -94,16 +108,8 @@ const currentImageSchema = z.strictObject({ image: z.string().min(1) });
 /** `pylon-<id>` must fit in 40 characters. */
 const newThreadId = () => `th-${randomBytes(6).toString("hex")}` as ThreadId;
 
-/** sha256 of the LiveSpec with sorted keys, so equal specs hash equally however they were built. */
-export function liveHashOf(live: LiveSpec): LiveHash {
-  const canonical = (value: unknown): unknown => typeof value !== "object" || value === null ? value
-    : Array.isArray(value) ? value.map(canonical)
-    : Object.fromEntries(Object.keys(value).sort().map((key) => [key, canonical((value as Record<string, unknown>)[key])]));
-  return createHash("sha256").update(JSON.stringify(canonical(live))).digest("hex") as LiveHash;
-}
-
 export async function startApi(options: ApiOptions): Promise<Api> {
-  const { registry, whois, allowed, hostnames, dotfiles, wake } = options;
+  const { registry, whois, allowed, hostnames, dotfiles, harness, wake } = options;
 
   function thread(id: string): Thread {
     const found = registry.thread(id as ThreadId);
@@ -123,8 +129,24 @@ export async function startApi(options: ApiOptions): Promise<Api> {
     return project;
   }
 
-  /** Templates come later, so every pylon boots fresh from the current image and runs setup inline. */
-  function startThread(body: unknown, caller: TailnetNodeId): Thread {
+  /** Threads from before the harness ran on the control plane have no conversation, and a deleted thread's is gone. */
+  function conversing(t: Thread): Thread {
+    if (t.status === "deleted") throw new HttpError(409, `thread ${t.id} is deleted`);
+    if (t.conversationId === null) throw new HttpError(409, `thread ${t.id} has no conversation`);
+    return t;
+  }
+
+  /** An archived thread's pylon stays paused, so its agent could not run a tool. */
+  function runnable(t: Thread): Thread {
+    if (t.status === "archived") throw new HttpError(409, `thread ${t.id} is archived`);
+    return conversing(t);
+  }
+
+  /**
+   * Templates come later, so every pylon boots fresh from the current image and runs setup inline. The
+   * conversation is created before the registry row, as HarnessHost.startThread requires.
+   */
+  async function startThread(body: unknown, caller: TailnetNodeId): Promise<Thread> {
     const request = parse(startSchema, body);
     const project = registry.project(request.project as ProjectId);
     if (project === undefined) throw new HttpError(404, `no project ${request.project}`);
@@ -138,8 +160,9 @@ export async function startApi(options: ApiOptions): Promise<Api> {
     const pylonId = `pylon-${id}` as PylonId;
     const branch = request.branch ?? project.defaultBranch;
     const live: LiveSpec = { previews: [], overlay: [] };
+    const conversationId = await harness.startThread({ threadId: id, pylonId });
     const t: Thread = {
-      id, title: request.title, project: project.id, pylonId, status: "active", conversationId: null, startedBy: caller, createdAt: now,
+      id, title: request.title, project: project.id, pylonId, status: "active", conversationId: String(conversationId), startedBy: caller, createdAt: now,
       // Starting a thread is human activity, so its pylon is wanted at once.
       agentTurnRunning: false, lastAgentActivityAt: 0, lastHumanActivityAt: now,
     };
@@ -176,22 +199,52 @@ export async function startApi(options: ApiOptions): Promise<Api> {
       sessions: registry.sessions(pylon.pylonId),
       previews: registry.previews(pylon.pylonId),
       outputs: registry.outputs(t.id),
+      agent: t.conversationId === null || t.status === "deleted" ? null : { parkedTasks: harness.activity.parked(t.id).length },
     };
   }
 
-  function setStatus(t: Thread, status: "archived" | "deleted"): Thread {
+  const page = dashboard({ registry, detail });
+
+  async function setStatus(t: Thread, status: "archived" | "deleted"): Promise<Thread> {
     if (t.status === "deleted") throw new HttpError(409, `thread ${t.id} is deleted`);
     registry.setThreadStatus(t.id, status);
     wakeThread(t);
+    // After the status, so the run's wait for a pylon ends: the locator refuses a deleted thread's pylon.
+    if (status === "deleted" && t.conversationId !== null) await harness.deleteThread({ threadId: t.id, pylonId: t.pylonId });
     return { ...t, status };
   }
 
-  function recordActivity(t: Thread, body: unknown) {
-    const activity = parse(activitySchema, body);
-    const now = Date.now();
-    if (activity.kind === "human") registry.recordActivity(t.id, { human: now });
-    else registry.recordActivity(t.id, { agent: now, agentTurnRunning: activity.turnRunning });
+  /** Activity never unarchives a thread, because opening its page is activity too. */
+  function unarchive(t: Thread): Thread {
+    if (t.status !== "archived") throw new HttpError(409, `thread ${t.id} is ${t.status}, not archived`);
+    registry.setThreadStatus(t.id, "active");
+    registry.recordActivity(t.id, { human: Date.now() });
     wakeThread(t);
+    return registry.thread(t.id)!;
+  }
+
+  function recordActivity(t: Thread, body: unknown) {
+    parse(activitySchema, body);
+    registry.recordActivity(t.id, { human: Date.now() });
+    wakeThread(t);
+  }
+
+  /** A message is human activity, so the pylon wakes while the model answers. */
+  async function sendMessage(t: Thread, body: unknown) {
+    const message = parse(messageSchema, body);
+    registry.recordActivity(t.id, { human: Date.now() });
+    wakeThread(t);
+    const submission = await harness.send(t.id, message.text, message.requestId, message.mode);
+    return { submission: submission.id };
+  }
+
+  async function conversation(t: Thread) {
+    const watch = await harness.watch(t.id);
+    try {
+      return watch.value;
+    } finally {
+      await watch.stop();
+    }
   }
 
   function recordImage(body: unknown): ImageManifest {
@@ -216,11 +269,20 @@ export async function startApi(options: ApiOptions): Promise<Api> {
     ["GET", /^\/v1\/projects$/, () => ok(registry.projects())],
     ["POST", /^\/v1\/projects$/, async (_, r) => created(createProject(await r.body()))],
     ["GET", /^\/v1\/threads$/, (_, r) => ok(registry.threads((r.query.get("project") ?? undefined) as ProjectId | undefined))],
-    ["POST", /^\/v1\/threads$/, async (_, r) => created(startThread(await r.body(), r.caller))],
+    ["POST", /^\/v1\/threads$/, async (_, r) => created(await startThread(await r.body(), r.caller))],
     ["GET", /^\/v1\/threads\/([^/]+)$/, (m) => ok(detail(thread(m[1]!)))],
-    ["DELETE", /^\/v1\/threads\/([^/]+)$/, (m) => ok(setStatus(thread(m[1]!), "deleted"))],
-    ["POST", /^\/v1\/threads\/([^/]+)\/archive$/, (m) => ok(setStatus(thread(m[1]!), "archived"))],
+    ["DELETE", /^\/v1\/threads\/([^/]+)$/, async (m) => ok(await setStatus(thread(m[1]!), "deleted"))],
+    ["POST", /^\/v1\/threads\/([^/]+)\/archive$/, async (m) => ok(await setStatus(thread(m[1]!), "archived"))],
+    ["POST", /^\/v1\/threads\/([^/]+)\/unarchive$/, (m) => ok(unarchive(thread(m[1]!)))],
     ["POST", /^\/v1\/threads\/([^/]+)\/activity$/, async (m, r) => { recordActivity(thread(m[1]!), await r.body()); return noContent; }],
+    // The body first, so the thread's status is read after the last await before the message is submitted.
+    ["POST", /^\/v1\/threads\/([^/]+)\/messages$/, async (m, r) => {
+      const body = await r.body();
+      return { status: 202, body: await sendMessage(runnable(thread(m[1]!)), body) };
+    }],
+    ["POST", /^\/v1\/threads\/([^/]+)\/abort$/, async (m) => { await harness.abort(conversing(thread(m[1]!)).id); return noContent; }],
+    ["POST", /^\/v1\/threads\/([^/]+)\/retry$/, async (m) => { await harness.retry(runnable(thread(m[1]!)).id); return noContent; }],
+    ["GET", /^\/v1\/threads\/([^/]+)\/conversation$/, async (m) => ok(await conversation(conversing(thread(m[1]!))))],
     ["POST", /^\/v1\/images$/, async (_, r) => created(recordImage(await r.body()))],
     ["PUT", /^\/v1\/images\/current$/, async (_, r) => { setCurrentImage(await r.body()); return noContent; }],
   ];
@@ -240,6 +302,8 @@ export async function startApi(options: ApiOptions): Promise<Api> {
 
     const url = new URL(req.url ?? "/", "http://nexus");
     const path = decodeURIComponent(url.pathname);
+    const view = req.method === "GET" ? page(path, url.searchParams) : undefined;
+    if (view !== undefined) return void res.writeHead(view.status, view.headers).end(view.body);
     const matches = routes.flatMap(([method, pattern, route]) => {
       const m = pattern.exec(path);
       return m === null ? [] : [{ method, m, route }];
