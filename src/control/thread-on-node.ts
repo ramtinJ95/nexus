@@ -137,9 +137,9 @@ function threadPage(): Promise<string> {
   });
 }
 function conversationSection(html: string): string {
-  const section = html.split("<section").find((chunk) => chunk.includes(">Conversation</h2>"));
-  if (section === undefined) throw new Error(`the thread page has no Conversation section: ${html}`);
-  return section.split("</section>")[0]!;
+  const conversation = html.split('id="convo"')[1]?.split('<div class="dock">')[0];
+  if (conversation === undefined) throw new Error(`the thread page has no conversation: ${html}`);
+  return conversation;
 }
 
 function assertIncludes(text: string, ...parts: string[]) {
@@ -209,11 +209,11 @@ try {
 
   const conversation = conversationSection(await threadPage());
   const escapedCommand = "uname -s; pwd; ls; echo kept-across-pause &gt; /home/user/.node-check";
-  const tool = conversation.split('<li class="tool">')[1]?.split("</li>")[0];
-  if (tool === undefined) throw new Error(`the Conversation section has no tool row: ${conversation}`);
-  if (conversation.includes("kept-across-pause > ")) throw new Error(`the Conversation section shows the command unescaped: ${conversation}`);
+  const tool = conversation.split('<details class="tool')[1]?.split("</details>")[0];
+  if (tool === undefined) throw new Error(`the conversation has no tool row: ${conversation}`);
+  if (conversation.includes("kept-across-pause > ")) throw new Error(`the conversation shows the command unescaped: ${conversation}`);
   assertIncludes(conversation, `<div class="text">bash: ${escapedCommand}</div>`);
-  assertIncludes(tool, '<span class="tool-name">bash</span>', `<code>${escapedCommand}</code>`, '<pre class="output">', "Linux", "README.md");
+  assertIncludes(tool, '<span class="t-name">bash</span>', `<span class="t-subj">${escapedCommand}</span>`, '<pre class="t-out">', "Linux", "README.md");
   pass("the thread page renders the real conversation: the message, a bash row and its output, escaped");
   const token = `preview-check-${threadId}`;
   await runTool("msg:node-check-preview", declarePreview(token));
