@@ -7,6 +7,7 @@ import { readFile } from "node:fs/promises";
 import { isAbsolute } from "node:path";
 import { z } from "zod";
 import { connectProbe, type NodeName, type TailnetNodeId } from "../protocol.ts";
+import { gitUrl } from "../project.ts";
 import { ingest } from "../reconcile.ts";
 import { linuxTailscaledSocket, localApiWhois } from "../tailscale.ts";
 import type { Models } from "@earendil-works/pi-ai/models";
@@ -38,7 +39,7 @@ const configSchema = z.strictObject({
   /** Other tailnet nodes, such as your laptop and phone, whose callers may use the API. */
   callers: z.array(nodeId),
   /** The common dotfiles layer every new pylon pulls on boot. */
-  dotfiles: z.strictObject({ repo: z.string().min(1), ref: z.string().min(1) }),
+  dotfiles: z.strictObject({ repo: gitUrl, ref: z.string().min(1) }),
   harness: z.strictObject({
     /** pi-durable's storage, such as /var/lib/nexus-control/harness.sqlite. Only this process may open it. */
     storage: absolutePath,

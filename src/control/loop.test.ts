@@ -9,7 +9,7 @@ import { openRegistry, type Registry, type Thread, type ThreadId } from "./regis
 import { newPylonRecord } from "../tick.ts";
 import { envelope, ingest as realIngest } from "../reconcile.ts";
 import type {
-  Job, JobEnvelope, JobId, JobStatus, LiveHash, NodeName, NodeObservation, ProbeClient, ProbeEvent, PylonId, PylonObservation, RunningFacts, ServiceFact, SessionFact, SubmitReply, TailnetNodeId,
+  Job, JobEnvelope, JobErrorCode, JobId, JobStatus, LiveHash, NodeName, NodeObservation, ProbeClient, ProbeEvent, PylonId, PylonObservation, RunningFacts, ServiceFact, SessionFact, SubmitReply, TailnetNodeId,
 } from "../protocol.ts";
 import type { ProjectId } from "../project.ts";
 import type { ImageId } from "../images.ts";
@@ -50,11 +50,13 @@ function fakeNode(options: { autoFinish: boolean }) {
     }
   }
 
-  function finish(jobId: JobId) {
+  /** Ends a running job, as a success that applies it or as a failure that changes nothing. */
+  function finish(jobId: JobId, failure?: { code: JobErrorCode; message: string; logTail: string }) {
     const entry = jobs.get(jobId)!;
     assert.equal(entry.status.state, "running");
-    apply(entry.env.job);
-    entry.status = { jobId, subject: entry.status.subject, kind: entry.status.kind, state: "succeeded", finishedAt: new Date().toISOString() };
+    const ended = { jobId, subject: entry.status.subject, kind: entry.status.kind, finishedAt: new Date().toISOString() };
+    if (failure === undefined) apply(entry.env.job);
+    entry.status = failure === undefined ? { ...ended, state: "succeeded" } : { ...ended, state: "failed", ...failure };
     emit({ type: "job", status: entry.status });
     setTimeout(() => emit({ type: "snapshot", observation: observation() }), 20);
   }
@@ -171,10 +173,10 @@ function seed(registry: Registry, activity: Partial<Pick<Thread, "agentTurnRunni
   return thread;
 }
 
-function run(t: import("node:test").TestContext, registry: Registry, probe: ProbeClient, overrides: { offlineAfterMs?: number; silenceMs?: number; ingest?: Ingest } = {}): Loop {
+function run(t: import("node:test").TestContext, registry: Registry, probe: ProbeClient, overrides: { offlineAfterMs?: number; silenceMs?: number; ingest?: Ingest; log?: (line: string) => void } = {}): Loop {
   const loop = startLoop({
     registry, probes: [probe], ingest: overrides.ingest ?? ingest, intervalMs: 10, reconnectMs: 10,
-    offlineAfterMs: overrides.offlineAfterMs ?? 30_000, silenceMs: overrides.silenceMs ?? 30_000, log: assert.fail,
+    offlineAfterMs: overrides.offlineAfterMs ?? 30_000, silenceMs: overrides.silenceMs ?? 30_000, log: overrides.log ?? assert.fail,
   });
   t.after(async () => {
     await loop.close();
@@ -207,6 +209,28 @@ test("a thread's pylon follows its thread: spawn, pause on archive, resume on ac
   const resume = fake.submitted[2]!;
   assert.ok(resume.kind === "spawn" && resume.boot.source.kind === "resume");
   assert.equal(resume.boot.source.checkpoint, `ckpt-${thread.id}-1`);
+});
+
+test("a job that fails for good gives up with the probe's message and the end of its log", async (t) => {
+  const registry = openRegistry(tempDb());
+  const thread = seed(registry);
+  const fake = fakeNode({ autoFinish: false });
+  const logged: string[] = [];
+  run(t, registry, fake.probe, { log: (line) => logged.push(line) });
+  await until("the spawn runs", () => fake.running().length === 1);
+
+  const setupLines = Array.from({ length: 30 }, (_, i) => `setup line ${i}`);
+  const fatal = "fatal: unable to access 'https://github.com/octocat/Spoon-Knife.git/': The requested URL returned error: 403";
+  fake.finish(fake.running()[0]!, { code: "setup-failed", message: `  ${thread.pylonId}: Setup exited 128. Read controller logs\n`, logTail: `${[...setupLines, fatal].join("\n")}\n\n` });
+  await until("the planner gives up", () => registry.pylon(thread.pylonId)?.failed !== null);
+
+  const failed = registry.pylon(thread.pylonId)!.failed;
+  assert.equal(failed, [
+    `last job failed with setup-failed, which is not retryable: ${thread.pylonId}: Setup exited 128. Read controller logs`,
+    ...setupLines.slice(-19), fatal,
+  ].join("\n"));
+  assert.deepEqual(logged, [`${thread.pylonId}: the planner gave up: ${failed}`]);
+  assert.deepEqual(fake.submitted.map((job) => job.kind), ["spawn"], "a setup failure is not retried");
 });
 
 test("a pylon pauses once its agent turn ends and nobody has used it for a while", async (t) => {

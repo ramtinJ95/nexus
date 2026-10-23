@@ -478,7 +478,7 @@ test("a template pylon whose checkout failed on a disk that never finished setup
   assert.equal(existsSync(dir), false, "the next spawn boots from the template again");
 });
 
-test("every other startup failure is final and keeps the pylon, the user's work on it included", async (t) => {
+test("every other startup failure is final, carries the controller log's tail, and keeps the pylon, the user's work on it included", async (t) => {
   const { backend, instances } = await backendWith();
   const kept: [string, boolean, StartupFailure[], boolean | undefined, RegExp][] = [
     ["a project's failed setup on a fresh boot", false, [checkoutFailed], false, /Setup exited 128/],
@@ -490,8 +490,9 @@ test("every other startup failure is final and keeps the pylon, the user's work 
   for (const [i, [what, retrySetup, failures, setupRecorded, message]] of kept.entries()) {
     const pylonId = `pylon-kept-${i}`;
     const dir = await leftInstance(instances, pylonId, "running", 8, retrySetup);
+    await writeFile(join(dir, "controller.log"), "npm ERR! 404 left-pad\n");
     await failedController(t, dir, failures, setupRecorded);
-    await assert.rejects(backend.ensureRunning(retrySetup ? fromTemplate(pylonId) : bootOf(pylonId), live, signal()), { code: "setup-failed", message }, what);
+    await assert.rejects(backend.ensureRunning(retrySetup ? fromTemplate(pylonId) : bootOf(pylonId), live, signal()), { code: "setup-failed", message, logTail: /npm ERR! 404 left-pad/ }, what);
     assert.equal(existsSync(dir), true, what);
   }
 });

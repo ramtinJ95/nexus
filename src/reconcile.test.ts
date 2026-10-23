@@ -85,8 +85,8 @@ const rows: Record<string, Row> = {
   "delete ignores the attempt budget": { desired: "deleted", observed: stopped(lastCheckpoint), inFlight: null, attempts: [5, 1_000, "setup-failed"], online: true, present: imageOnly, expect: del },
   "delete does not wait for a transition": { desired: "deleted", observed: phase("stopping"), inFlight: null, attempts: none, online: true, present: imageOnly, expect: del },
   // 4
-  "a non-retryable code fails": { desired: "running", observed: "absent", inFlight: null, attempts: [1, 60_000, "setup-failed"], online: true, present: imageOnly, expect: { kind: "fail", reason: "last job failed with setup-failed, which is not retryable" } },
-  "five failed attempts fail": { desired: "running", observed: "absent", inFlight: null, attempts: [5, 600_000, "backend"], online: true, present: imageOnly, expect: { kind: "fail", reason: "gave up after 5 failed attempts, the last with backend" } },
+  "a non-retryable code fails": { desired: "running", observed: "absent", inFlight: null, attempts: [1, 60_000, "setup-failed"], online: true, present: imageOnly, expect: { kind: "fail", reason: "last job failed with setup-failed, which is not retryable: the probe's setup-failed message" } },
+  "five failed attempts fail": { desired: "running", observed: "absent", inFlight: null, attempts: [5, 600_000, "backend"], online: true, present: imageOnly, expect: { kind: "fail", reason: "gave up after 5 failed attempts, the last with backend: the probe's backend message" } },
   "backoff waits": { desired: "running", observed: "absent", inFlight: null, attempts: [2, 10_000, "backend"], online: true, present: imageOnly, expect: wait("backoff") },
   "an elapsed backoff retries": { desired: "running", observed: "absent", inFlight: null, attempts: [1, 5_000, "deadline"], online: true, present: imageOnly, expect: spawn(fresh) },
   "backoff also holds a pause": { desired: "paused", observed: running(liveHash), inFlight: null, attempts: [3, 44_000, "checkpoint-failed"], online: true, present: imageOnly, expect: wait("backoff") },
@@ -136,7 +136,7 @@ function input(row: Row): PlanInput {
     observed: row.observed,
     nodeArtifacts: new Set(row.present),
     inFlight: row.inFlight === null ? null : jobInFlight(row.inFlight),
-    attempts: { count, lastFailedAt: failedAgo === null ? null : now - failedAgo, lastCode },
+    attempts: { count, last: lastCode === null ? null : { at: now - failedAgo!, code: lastCode, message: `the probe's ${lastCode} message` } },
     holders: (id) => row.holders?.[id] ?? [],
     artifactSha256: (id) => `sha-${id}`,
   };

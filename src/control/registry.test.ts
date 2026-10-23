@@ -60,7 +60,7 @@ test("records survive closing and reopening the file", async (t) => {
   const submitted: StoredPylon = {
     ...pylon, pauses: 2, failed: null,
     submitted: { jobId: "j1" as JobId, node, issuedAt: "2027-01-01T00:00:00.000Z", notAfter: "2027-01-01T00:00:30.000Z", job: { kind: "delete", pylonId } },
-    attempts: { count: 1, lastFailedAt: 5, lastCode: "backend" },
+    attempts: { count: 1, last: { at: 5, code: "backend", message: "pylon-th-1: the controller exited" } },
   };
   first.savePylon(submitted);
   first.saveImage(image);
@@ -170,6 +170,29 @@ test("a job's result is not undone by an older report of it running", async (t) 
   assert.equal(registry.job(pylonId)?.state, "succeeded");
   registry.apply(job("j2", "running"));
   assert.deepEqual(registry.job(pylonId), job("j2", "running").status);
+});
+
+test("a registry from before failure messages keeps its pylons' attempts", async (t) => {
+  const { DatabaseSync } = await import("node:sqlite");
+  /** A file at schema version 1, whose pylon's attempts are in the old shape. */
+  const atVersion1 = (attempts: unknown): string => {
+    const path = tempDb();
+    seeded(path).close();
+    const db = new DatabaseSync(path);
+    db.prepare("UPDATE pylons SET attempts = ?").run(JSON.stringify(attempts));
+    db.exec("PRAGMA user_version = 1");
+    db.close();
+    return path;
+  };
+  const reopened = (path: string) => {
+    const registry = openRegistry(path);
+    t.after(() => registry.close());
+    return registry.pylon(pylonId)!.attempts;
+  };
+  assert.deepEqual(reopened(atVersion1({ count: 0, lastFailedAt: null, lastCode: null })), { count: 0, last: null });
+  assert.deepEqual(reopened(atVersion1({ count: 2, lastFailedAt: 5, lastCode: "backend" })), {
+    count: 2, last: { at: 5, code: "backend", message: "recorded before the registry kept failure messages" },
+  });
 });
 
 test("a registry from a newer control plane is refused", async (t) => {

@@ -298,8 +298,9 @@ export function createPylonVmBackend(options: PylonVmBackendOptions): VmBackend 
     const startupError = status.startupError ?? "";
     const { config } = await readRecord(instanceDir(pylonId));
     const checkoutFailed = config.retrySetup && status.setupRecorded === false && status.startupFailures?.some((f) => f.kind === "setup") === true;
-    if (!checkoutFailed) return new JobFailure("setup-failed", `${pylonId}: ${startupError}`);
+    // The startupError only points at the controller log, which holds what setup printed, so the log travels with the failure.
     const log = await templates.controllerLogTail(instanceDir(pylonId));
+    if (!checkoutFailed) return new JobFailure("setup-failed", `${pylonId}: ${startupError}`, log);
     const name = instanceName(pylonId);
     await sandbox({ action: "destroy", kind: "instances", name, confirm: name });
     return new JobFailure("backend", `${pylonId} could not check out its commit on its template's disk, so it was removed and boots from the template again: ${startupError}`, log);

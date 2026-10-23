@@ -101,7 +101,7 @@ section { margin-top: 1.5rem; }
 .tone-bad { color: var(--bad); background: var(--bad-bg); }
 .tone-muted { color: var(--muted); background: var(--muted-bg); }
 
-.error { color: var(--bad); background: var(--bad-bg); padding: 0.5rem 0.75rem; border-radius: 6px; }
+.error { color: var(--bad); background: var(--bad-bg); padding: 0.5rem 0.75rem; border-radius: 6px; white-space: pre-wrap; overflow-wrap: anywhere; }
 
 button, .button {
   font: inherit;

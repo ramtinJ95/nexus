@@ -31,7 +31,7 @@ const dotfiles = { repo: "git@github.com:ramtin/dotfiles.git", ref: "main" };
 const dir = await mkdtemp(join(tmpdir(), "nexus-api-"));
 after(() => rm(dir, { recursive: true }));
 
-async function setup(t: import("node:test").TestContext) {
+async function setup(t: import("node:test").TestContext, options: { dotfiles?: typeof dotfiles } = {}) {
   const registry = openRegistry(join(dir, `${randomUUID()}.db`));
   registry.upsertNode({ name: node, tailnetHost: "rj-firebat.tail.ts.net", tailnetNodeId: "nFIREBAT" as TailnetNodeId });
   let caller: TailnetNodeId | null = laptop;
@@ -43,7 +43,7 @@ async function setup(t: import("node:test").TestContext) {
     whois: async () => caller,
     allowed: new Set([laptop]),
     hostnames: new Set(["127.0.0.1"]),
-    dotfiles,
+    dotfiles: options.dotfiles ?? dotfiles,
     harness,
     wake: (n) => { woken.push(n); },
   });
@@ -70,9 +70,9 @@ async function setup(t: import("node:test").TestContext) {
   return { registry, call, woken, calls, callAs(id: TailnetNodeId | null) { caller = id; } };
 }
 
-async function withThread(t: import("node:test").TestContext) {
-  const s = await setup(t);
-  assert.equal((await s.call("POST", "/v1/projects", project)).status, 201);
+async function withThread(t: import("node:test").TestContext, options: { project?: typeof project; dotfiles?: typeof dotfiles } = {}) {
+  const s = await setup(t, options);
+  assert.equal((await s.call("POST", "/v1/projects", options.project ?? project)).status, 201);
   assert.equal((await s.call("POST", "/v1/images", image)).status, 201);
   assert.equal((await s.call("PUT", "/v1/images/current", { image: image.id })).status, 204);
   const started = await s.call("POST", "/v1/threads", { project: "acme", title: "Fix checkout" });
@@ -109,6 +109,7 @@ test("projects are created, listed, and checked", async (t) => {
   assert.equal((await s.call("POST", "/v1/projects", { ...project, id: "other", defaultNode: "nowhere" })).status, 400);
   assert.equal((await s.call("POST", "/v1/projects", { ...project, id: "other", resources: { cpus: 0, memoryGiB: 4, diskGiB: 10 } })).status, 400);
   assert.equal((await s.call("POST", "/v1/projects", { ...project, id: "other", extra: true })).status, 400);
+  assert.equal((await s.call("POST", "/v1/projects", { ...project, id: "other", repoUrl: "https://" })).status, 400, "a pylon's allowlist needs the host of an HTTPS repo");
 });
 
 test("a thread cannot start before an image is current", async (t) => {
@@ -148,6 +149,14 @@ test("starting a thread creates its pylon, boots fresh from the current image, a
   assert.equal(pylon.submitted, null);
 });
 
+test("a pylon's allowlist reaches its project's HTTPS repo host and the HTTPS dotfiles host", async (t) => {
+  const s = await withThread(t, {
+    project: { ...project, repoUrl: "https://github.com/octocat/Spoon-Knife.git", allowedHosts: [], secrets: [], logins: [] },
+    dotfiles: { repo: "https://gitlab.example.com/ramtin/dotfiles.git", ref: "main" },
+  });
+  assert.deepEqual(s.registry.pylon(s.thread.pylonId)!.boot.network.allowedHosts, ["github.com", "gitlab.example.com"]);
+});
+
 test("thread detail derives the actual state from the node's last observation", async (t) => {
   const s = await withThread(t);
   const { thread } = s;
@@ -184,6 +193,25 @@ test("thread detail derives the actual state from the node's last observation", 
   assert.equal((await detail()).pylon.actualState, "running");
   s.registry.markOffline(node);
   assert.equal((await detail()).pylon.actualState, "unknown");
+});
+
+test("a failed pylon shows failed with its reason until its thread is deleted, and then shows the delete", async (t) => {
+  const s = await withThread(t);
+  const { thread } = s;
+  const detail = async () => (await s.call("GET", `/v1/threads/${thread.id}`)).body as ThreadDetail;
+  const capacity = { memoryGiB: 64, committedMemoryGiB: 0, diskFreeGiB: 100 };
+  s.registry.apply({ record: "node", node, state: "online", capacity });
+  const reason = "last job failed with setup-failed, which is not retryable: pylon-x: Setup exited 128\nfatal: unable to access";
+  s.registry.savePylon({ ...s.registry.pylon(thread.pylonId)!, failed: reason });
+  assert.deepEqual((await detail()).pylon, { id: thread.pylonId, node, actualState: "failed", failed: reason, observedAt: null });
+
+  await s.call("DELETE", `/v1/threads/${thread.id}`);
+  const del = { jobId: "job-del" as JobId, subject: thread.pylonId, kind: "delete" as const };
+  s.registry.apply({ record: "job", status: { ...del, state: "running", startedAt: "2027-01-01T00:00:00Z" } });
+  assert.equal((await detail()).pylon.actualState, "deleting");
+  s.registry.apply({ record: "job", status: { ...del, state: "succeeded", finishedAt: "2027-01-01T00:00:05Z" } });
+  s.registry.ingested({ node, observedAt: "2027-01-01T00:00:06Z", probeBootId: "b", capacity, artifacts: [], jobs: [], pylons: [] }, []);
+  assert.deepEqual((await detail()).pylon, { id: thread.pylonId, node, actualState: "absent", failed: reason, observedAt: "2027-01-01T00:00:06Z" });
 });
 
 test("archive, delete, and activity update the thread and wake its node", async (t) => {

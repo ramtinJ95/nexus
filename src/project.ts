@@ -158,7 +158,7 @@ const servicesFileSchema = z.strictObject({ services: z.record(serviceName, serv
 
 export interface Project {
   id: ProjectId;
-  repoUrl: string; // SSH. Git over SSH is terminated on the host, and the key never enters a pylon
+  repoUrl: string; // SSH or HTTPS. Git over SSH is terminated on the host, and the key never enters a pylon
   defaultBranch: string;
   defaultNode: NodeName;
   resources: { cpus: number; memoryGiB: number; diskGiB: number };
@@ -178,13 +178,26 @@ export const loginHosts: { readonly [K in LoginKind]: readonly string[] } = {
   chatgpt: ["auth.openai.com", "chatgpt.com", "api.openai.com"],
 };
 
-/** project.allowedHosts, plus loginHosts for project.logins, plus every SecretGrant host, sorted and deduped. */
+/**
+ * project.allowedHosts, plus the host of an HTTPS repoUrl, plus loginHosts for project.logins, plus every
+ * SecretGrant host, sorted and deduped. Setup clones the repo through the allowlist, so a project always
+ * reaches its own HTTPS host. An SSH repoUrl adds nothing: SSH egress reaches only the pylon's own remotes.
+ */
 export function effectiveAllowedHosts(project: Project): readonly string[] {
-  return [...new Set([
+  return withHttpsHosts([
     ...project.allowedHosts,
     ...project.logins.flatMap((login) => loginHosts[login]),
     ...project.secrets.flatMap((grant) => grant.hosts),
-  ])].sort();
+  ], [project.repoUrl]);
+}
+
+/** A repo or dotfiles URL as Nexus accepts it, so withHttpsHosts can read the host of any HTTPS one. */
+export const gitUrl = z.string().min(1).refine((url) => !url.startsWith("https://") || URL.canParse(url), "an https:// git URL must be a valid URL");
+
+/** `hosts` plus the host of each HTTPS git URL in `urls`, sorted and deduped. */
+export function withHttpsHosts(hosts: readonly string[], urls: readonly string[]): readonly string[] {
+  const httpsHosts = urls.flatMap((url) => url.startsWith("https://") ? [new URL(url).hostname] : []);
+  return [...new Set([...hosts, ...httpsHosts])].sort();
 }
 
 // What a spawn carries, split by when it applies.
