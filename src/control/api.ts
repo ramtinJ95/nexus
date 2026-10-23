@@ -208,7 +208,7 @@ export async function startApi(options: ApiOptions): Promise<Api> {
     };
   }
 
-  const page = dashboard({ registry, detail });
+  const page = dashboard({ registry, detail, conversation });
 
   async function setStatus(t: Thread, status: "archived" | "deleted"): Promise<Thread> {
     if (t.status === "deleted") throw new HttpError(409, `thread ${t.id} is deleted`);
@@ -307,7 +307,7 @@ export async function startApi(options: ApiOptions): Promise<Api> {
 
     const url = new URL(req.url ?? "/", "http://nexus");
     const path = decodeURIComponent(url.pathname);
-    const view = req.method === "GET" ? page(path, url.searchParams) : undefined;
+    const view = req.method === "GET" ? await page(path, url.searchParams) : undefined;
     if (view !== undefined) return void res.writeHead(view.status, view.headers).end(view.body);
     const matches = routes.flatMap(([method, pattern, route]) => {
       const m = pattern.exec(path);

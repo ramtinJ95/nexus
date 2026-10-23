@@ -9,6 +9,7 @@ import { startApi } from "./api.ts";
 import { fakeHarness } from "./fake-harness.ts";
 import { openRegistry, type Thread } from "./registry.ts";
 import type { JobId, NodeName, PylonObservation, TailnetNodeId } from "../protocol.ts";
+import type { AssistantMessage, Message } from "@earendil-works/pi-ai";
 
 const node = "rj-firebat" as NodeName;
 const laptop = "nLAPTOP" as TailnetNodeId;
@@ -34,13 +35,14 @@ async function setup(t: TestContext) {
   const registry = openRegistry(join(dir, `${randomUUID()}.db`));
   registry.upsertNode({ name: node, tailnetHost: "rj-firebat.tail.ts.net", tailnetNodeId: "nFIREBAT" as TailnetNodeId });
   let caller: TailnetNodeId | null = laptop;
+  const fake = fakeHarness();
   const api = await startApi({
     registry, host: "127.0.0.1", port: 0,
     whois: async () => caller,
     allowed: new Set([laptop]),
     hostnames: new Set(["127.0.0.1"]),
     dotfiles: { repo: "git@github.com:ramtin/dotfiles.git", ref: "main" },
-    harness: fakeHarness().harness,
+    harness: fake.harness,
     wake: () => {},
   });
   t.after(async () => {
@@ -77,7 +79,7 @@ async function setup(t: TestContext) {
     }));
     registry.ingested({ node, observedAt: new Date().toISOString(), probeBootId: "b", capacity, artifacts: [], jobs: [], pylons }, []);
   }
-  return { registry, call, start, observe, callAs(id: TailnetNodeId | null) { caller = id; } };
+  return { registry, fake, call, start, observe, callAs(id: TailnetNodeId | null) { caller = id; } };
 }
 
 async function seeded(t: TestContext) {
@@ -99,6 +101,24 @@ function rowOf(html: string, thread: Thread): string {
   const row = html.split('<li class="thread">').find((chunk) => chunk.includes(`href="/threads/${thread.id}"`));
   assert.ok(row !== undefined, `no row for ${thread.id}`);
   return textOf(row.split("</li>")[0]!);
+}
+
+const assistant = (content: AssistantMessage["content"], stopReason: AssistantMessage["stopReason"] = "stop", errorMessage?: string): Message => ({
+  role: "assistant", content, stopReason, ...(errorMessage === undefined ? {} : { errorMessage }), api: "x", provider: "x", model: "x", timestamp: 0,
+  usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
+});
+const bash = (id: string, command: string) => ({ type: "toolCall" as const, id, name: "bash", arguments: { command } });
+const result = (toolCallId: string, text: string, isError = false): Message => ({
+  role: "toolResult", toolCallId, toolName: "bash", content: [{ type: "text", text }], isError, timestamp: 0,
+});
+
+/** Each row of a thread page's conversation as a reader sees it, and which tool calls start open. */
+function conversationOf(html: string) {
+  const list = sectionOf(html, "Conversation").split('<ol class="conversation">')[1]?.split("</ol>")[0] ?? "";
+  return {
+    rows: list.split(/<li class="/).slice(1).map((row) => textOf(`<li class="${row}`)),
+    open: [...list.matchAll(/<details id="tool-([^"]*)"( open)?>/g)].map((m) => [m[1], m[2] !== undefined]),
+  };
 }
 
 /** The section under the heading `name` on a thread page. */
@@ -196,29 +216,182 @@ test("the thread page shows its pylon, sessions with how to attach, previews as 
   assert.match(res.text, new RegExp(`<main[^>]* data-activity="${fix.id}"`), "an open thread page records the visit as human activity");
 });
 
-test("archived and deleted threads drop the actions that no longer apply and stop recording visits", async (t) => {
+test("a paused pylon's preview keeps its link, labelled paused, unless the thread is archived", async (t) => {
   const s = await seeded(t);
   const fix = await s.start("acme", "Fix checkout");
-  const buttons = async () => {
+  s.registry.allocatePreviews(fix.pylonId, ["web"], { first: 8443, last: 8443 });
+  s.registry.apply({ record: "output", pylonId: fix.pylonId, kind: "preview", ref: "web" });
+  s.observe(fix);
+  const url = "https://rj-firebat.tail.ts.net:8443/";
+  const previews = async () => {
     const html = (await s.call("GET", `/threads/${fix.id}`)).text;
-    return { actions: [...html.matchAll(/data-action="([a-z]+)"/g)].map((m) => m[1]), visit: html.includes("data-activity=") };
+    return { previews: textOf(`<section${sectionOf(html, "Previews")}`), linked: sectionOf(html, "Previews").includes(`href="${url}"`), output: sectionOf(html, "Outputs").includes(`href="${url}"`) };
   };
-  assert.deepEqual(await buttons(), { actions: ["archive", "delete"], visit: true });
+  assert.deepEqual(await previews(), { previews: "Previews web starting", linked: false, output: false }, "a running pylon's preview that is not ready has no link yet");
+
+  s.registry.ingested({ node, observedAt: new Date().toISOString(), probeBootId: "b", capacity, artifacts: [], jobs: [], pylons: [{ pylonId: fix.pylonId, phase: "stopped", checkpoint: null }] }, []);
+  assert.deepEqual(await previews(), { previews: `Previews web ${url} paused Opening it wakes the pylon.`, linked: true, output: true });
+
   await s.call("POST", `/v1/threads/${fix.id}/archive`);
-  assert.deepEqual(await buttons(), { actions: ["delete"], visit: false });
+  assert.deepEqual(await previews(), { previews: "Previews web paused Unarchive the thread to open it.", linked: false, output: false }, "an archived thread's visit cannot wake its pylon");
+
+  // Right after the archive, before the pylon pauses, the preview still serves but is about to sleep for good.
+  s.observe(fix);
+  s.registry.apply({ record: "preview", pylonId: fix.pylonId, service: "web", httpsPort: 8443, ready: true });
+  assert.match(textOf(sectionOf((await s.call("GET", `/threads/${fix.id}`)).text, "Pylon")), /Observed running/);
+  assert.deepEqual(await previews(), { previews: "Previews web paused Unarchive the thread to open it.", linked: false, output: false }, "an archived thread's running pylon offers no link");
+});
+
+test("the thread page shows the conversation, with each tool call's result and long output collapsed", async (t) => {
+  const s = await seeded(t);
+  const fix = await s.start("acme", "Fix checkout");
+  const long = Array.from({ length: 40 }, (_, i) => `ok ${i + 1} test`).join("\n");
+  s.fake.transcript(fix.id).messages.push(
+    { role: "user", content: "Run the tests", timestamp: 0 },
+    assistant([{ type: "thinking", thinking: "not shown" }, { type: "text", text: "Running them." }, bash("c1", "npm test")]),
+    result("c1", long),
+    assistant([bash("c2", "git status")]),
+    result("c2", "fatal: not a git repository\n", true),
+    assistant([{ type: "toolCall", id: "c3", name: "edit", arguments: { path: "src/a.ts", edits: [{ oldText: "a", newText: "b" }] } }], "aborted"),
+    assistant([], "error", "rate limited"),
+    { role: "user", content: [{ type: "text", text: "Look at this " }, { type: "image", data: "", mimeType: "image/png" }], timestamp: 0 },
+    assistant([{ type: "text", text: "All 40 pass." }]),
+  );
+
+  const { rows, open } = conversationOf((await s.call("GET", `/threads/${fix.id}`)).text);
+  assert.deepEqual(rows, [
+    "You Run the tests",
+    "Agent Running them.",
+    `bash npm test 40 lines ${long.replace(/\n/g, " ")}`,
+    "bash git status failed 1 line fatal: not a git repository",
+    `edit src/a.ts no result { "edits": [ { "oldText": "a", "newText": "b" } ] } No output.`,
+    "Aborted.",
+    "The model failed: rate limited",
+    "You Look at this [image/png image]",
+    "Agent All 40 pass.",
+  ]);
+  assert.deepEqual(open, [["c1", false], ["c2", true], ["c3", false]], "long output starts collapsed");
+});
+
+test("a running turn shows its tool's output so far, the partial answer and queued messages", async (t) => {
+  const s = await seeded(t);
+  const fix = await s.start("acme", "Fix checkout");
+  const transcript = s.fake.transcript(fix.id);
+  transcript.messages.push({ role: "user", content: "Build it", timestamp: 0 }, assistant([bash("c1", "npm run build")], "toolUse"));
+  transcript.docs["pi.live"] = {
+    run: { taskId: 1, inputs: [1] },
+    tools: [{ callId: "c1", name: "bash", status: "running", output: "compiling\n" }],
+    generation: { attempt: 2, message: assistant([{ type: "text", text: "Half an ans" }], "pending") as never, retry: { at: 0, error: "overloaded" } },
+  };
+  transcript.docs["pi.inbox"] = { items: [{ id: 2, mode: "followUp", content: "then deploy" }, { id: 3, mode: "write", entry: {} }] };
+
+  const html = (await s.call("GET", `/threads/${fix.id}`)).text;
+  const { rows, open } = conversationOf(html);
+  assert.deepEqual(rows, [
+    "You Build it",
+    "bash npm run build running 1 line compiling",
+    "Agent Half an ans",
+    "The model request failed and will be retried: overloaded",
+    "You queued then deploy",
+  ]);
+  assert.deepEqual(open, [["c1", true]]);
+  assert.match(textOf(sectionOf(html, "Conversation")), /The agent is working\. Message the agent It waits for the agent's current run\. Send/);
+});
+
+test("each thread state offers only the actions and prompt box that apply", async (t) => {
+  const s = await seeded(t);
+  const fix = await s.start("acme", "Fix checkout");
+  const state = async () => {
+    const html = (await s.call("GET", `/threads/${fix.id}`)).text;
+    const conversation = textOf(`<section${sectionOf(html, "Conversation")}`);
+    return {
+      actions: [...html.matchAll(/data-action="([a-z]+)"/g)].map((m) => m[1]),
+      prompt: html.includes('<form id="prompt"'),
+      running: conversation.includes("The agent is working."),
+      visit: html.includes("data-activity="),
+      conversation,
+    };
+  };
+
+  assert.deepEqual(await state(), { actions: ["archive", "delete"], prompt: true, running: false, visit: true, conversation: "Conversation No messages yet. Message the agent Send" });
+
+  s.fake.transcript(fix.id).docs["pi.live"] = { run: { taskId: 1, inputs: [1] } };
+  const running = await state();
+  assert.deepEqual(running.actions, ["archive", "delete", "abort"]);
+  assert.ok(running.prompt && running.running);
+
+  // The harness reports a parked run as no running turn, so its pylon may sleep. It can still be aborted.
+  s.fake.park(fix.id, 2);
+  const parked = await state();
+  assert.deepEqual(parked.actions, ["archive", "delete", "abort", "retry"]);
+  assert.ok(parked.prompt && !parked.running, "a parked run is not shown as working");
+  assert.match(parked.conversation, /2 tasks hit the restart limit and hold the run\. Retry runs them again\./);
+
+  await s.call("POST", `/v1/threads/${fix.id}/archive`);
+  const archived = await state();
+  assert.deepEqual(archived.actions, ["unarchive", "delete", "abort"], "an archived thread can still abort, but not retry");
+  assert.ok(!archived.prompt && !archived.visit);
+  assert.match(archived.conversation, /An archived thread takes no messages, because its pylon stays paused\. Unarchive the thread to send one\./);
+  assert.match(archived.conversation, /Unarchive the thread to retry them\./);
+
+  await s.call("POST", `/v1/threads/${fix.id}/unarchive`);
+  assert.deepEqual((await state()).actions, ["archive", "delete", "abort", "retry"]);
+
   await s.call("DELETE", `/v1/threads/${fix.id}`);
-  assert.deepEqual(await buttons(), { actions: [], visit: false });
+  s.fake.calls.length = 0;
+  assert.deepEqual(await state(), {
+    actions: [], prompt: false, running: false, visit: false, conversation: "Conversation The thread is deleted, so its conversation is gone.",
+  });
+  assert.deepEqual(s.fake.calls, [], "a deleted thread's conversation is not read");
+});
+
+test("a thread deleted while its conversation is read shows no conversation", async (t) => {
+  const s = await seeded(t);
+  const fix = await s.start("acme", "Fix checkout");
+  s.fake.transcript(fix.id).messages.push({ role: "user", content: "secret plan", timestamp: 0 });
+  s.fake.transcript(fix.id).docs["pi.live"] = { run: { taskId: 1, inputs: [1] } };
+  const watch = s.fake.harness.watch;
+  s.fake.harness.watch = async (threadId) => {
+    const view = await watch(threadId);
+    s.registry.setThreadStatus(fix.id, "deleted");
+    return view;
+  };
+  const html = (await s.call("GET", `/threads/${fix.id}`)).text;
+  assert.equal(textOf(`<section${sectionOf(html, "Conversation")}`), "Conversation The thread is deleted, so its conversation is gone.");
+});
+
+test("a conversation that cannot be read says why, and the rest of the page still renders", async (t) => {
+  const s = await seeded(t);
+  const fix = await s.start("acme", "Fix checkout");
+  s.fake.harness.watch = async () => { throw new Error("the harness has no conversation for thread x"); };
+  const res = await s.call("GET", `/threads/${fix.id}`);
+  assert.equal(res.status, 200);
+  assert.match(textOf(sectionOf(res.text, "Conversation")), /The conversation could not be read: the harness has no conversation for thread x/);
+  assert.match(textOf(sectionOf(res.text, "Pylon")), /Desired running/);
 });
 
 test("strings from humans and probes are escaped, never markup", async (t) => {
   const s = await seeded(t);
   const evil = await s.start("acme", `<img src=x onerror="alert(1)">`);
   s.registry.apply({ record: "output", pylonId: evil.pylonId, kind: "branch", ref: `"><script>alert(2)</script>` });
+  const transcript = s.fake.transcript(evil.id);
+  transcript.messages.push(
+    { role: "user", content: "<script>alert(3)</script>", timestamp: 0 },
+    assistant([
+      { type: "text", text: "<script>alert(4)</script>" },
+      { type: "toolCall", id: `"><script>alert(5)</script>`, name: "<script>alert(6)</script>", arguments: { command: "</code><script>alert(7)</script>", x: "<script>alert(8)</script>" } },
+    ]),
+    { ...result(`"><script>alert(5)</script>`, "<script>alert(9)</script>"), toolName: "<script>alert(6)</script>" } as Message,
+  );
+  transcript.docs["pi.inbox"] = { items: [{ id: 1, mode: "followUp", content: "<script>alert(10)</script>" }] };
   for (const path of ["/", `/threads/${evil.id}`]) {
     const { text } = await s.call("GET", path);
     assert.ok(!text.includes("<img src=x") && !text.includes("<script>alert"), `${path} renders the strings as text`);
     assert.ok(textOf(text).includes(`<img src=x onerror="alert(1)">`), `${path} still shows the title`);
   }
+  const page = textOf((await s.call("GET", `/threads/${evil.id}`)).text);
+  // alert(5) is the call's ID, which is only an attribute.
+  for (const i of [3, 4, 6, 7, 8, 9, 10]) assert.ok(page.includes(`<script>alert(${i})</script>`), `the conversation shows alert(${i}) as text`);
 });
 
 test("an unknown thread page is a 404 page", async (t) => {

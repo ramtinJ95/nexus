@@ -123,6 +123,25 @@ async function runTool(requestId: string, command: string): Promise<string> {
 }
 const toolResults = (view: { entries: readonly { kind: string }[] }) => view.entries.filter((e) => e.kind === "pi.tool-result").map((e) => JSON.stringify(e));
 
+/** The dashboard's thread page, which the API serves outside /v1 under the same host check. */
+function threadPage(): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const req = request({ host, port: controlPlane.port, method: "GET", path: `/threads/${threadId}`, headers: { host: `${host}:${controlPlane.port}` } }, (res) => {
+      let text = "";
+      res.setEncoding("utf8");
+      res.on("data", (chunk: string) => { text += chunk; });
+      res.on("end", () => res.statusCode === 200 ? resolve(text) : reject(new Error(`GET /threads/${threadId}: HTTP ${res.statusCode}: ${text}`)));
+    });
+    req.on("error", reject);
+    req.end();
+  });
+}
+function conversationSection(html: string): string {
+  const section = html.split("<section").find((chunk) => chunk.includes(">Conversation</h2>"));
+  if (section === undefined) throw new Error(`the thread page has no Conversation section: ${html}`);
+  return section.split("</section>")[0]!;
+}
+
 function assertIncludes(text: string, ...parts: string[]) {
   for (const part of parts) if (!text.includes(part)) throw new Error(`the tool result lacks ${part}: ${text}`);
 }
@@ -188,6 +207,14 @@ try {
   assertIncludes(first, "Linux", "/home/user/workspace/repo", "README.md");
   pass("the agent runs bash in the pylon: Linux, /home/user/workspace/repo, README.md");
 
+  const conversation = conversationSection(await threadPage());
+  const escapedCommand = "uname -s; pwd; ls; echo kept-across-pause &gt; /home/user/.node-check";
+  const tool = conversation.split('<li class="tool">')[1]?.split("</li>")[0];
+  if (tool === undefined) throw new Error(`the Conversation section has no tool row: ${conversation}`);
+  if (conversation.includes("kept-across-pause > ")) throw new Error(`the Conversation section shows the command unescaped: ${conversation}`);
+  assertIncludes(conversation, `<div class="text">bash: ${escapedCommand}</div>`);
+  assertIncludes(tool, '<span class="tool-name">bash</span>', `<code>${escapedCommand}</code>`, '<pre class="output">', "Linux", "README.md");
+  pass("the thread page renders the real conversation: the message, a bash row and its output, escaped");
   const token = `preview-check-${threadId}`;
   await runTool("msg:node-check-preview", declarePreview(token));
   const preview = await openPreview(token);
@@ -204,6 +231,10 @@ try {
   await reaches("paused", 5 * 60_000);
   pass("archiving pauses the pylon");
 
+  const archivedPage = await threadPage();
+  assertIncludes(archivedPage, 'data-action="unarchive"', "An archived thread takes no messages, because its pylon stays paused.");
+  if (archivedPage.includes('<form id="prompt"')) throw new Error("the archived thread page still offers the prompt box");
+  pass("the archived thread page offers Unarchive and says why it takes no messages");
   // An archived thread stays paused whatever the activity, so this visit cannot wake it.
   const asleep = await fetch(preview.url, { signal: AbortSignal.timeout(30_000) });
   assert.equal(asleep.status, 503, `a paused pylon's preview answers with the waking page: ${await asleep.text()}`);
