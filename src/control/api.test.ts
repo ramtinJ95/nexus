@@ -5,7 +5,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { request } from "node:http";
 import { join } from "node:path";
-import { startApi, type ThreadDetail } from "./api.ts";
+import { startApi, type ThreadDetail, type ThreadRow } from "./api.ts";
 import { fakeHarness } from "./fake-harness.ts";
 import { openRegistry, type Thread } from "./registry.ts";
 import { liveHashOf } from "../project.ts";
@@ -142,8 +142,9 @@ test("starting a thread creates its pylon, boots fresh from the current image, a
   assert.deepEqual(s.calls, [["start", { threadId: thread.id, pylonId: thread.pylonId }]]);
   assert.equal(thread.conversationId, "1");
   assert.deepEqual(s.woken, [node]);
-  assert.deepEqual((await s.call("GET", "/v1/threads")).body, [thread]);
-  assert.deepEqual((await s.call("GET", "/v1/threads?project=acme")).body, [thread]);
+  const row = { ...thread, desired: "running", pylon: { node, actualState: "unknown", failed: null } };
+  assert.deepEqual((await s.call("GET", "/v1/threads")).body, [row]);
+  assert.deepEqual((await s.call("GET", "/v1/threads?project=acme")).body, [row]);
   assert.deepEqual((await s.call("GET", "/v1/threads?project=other")).body, []);
 
   const pylon = s.registry.pylon(thread.pylonId)!;
@@ -180,6 +181,7 @@ test("thread detail derives the actual state from the node's last observation", 
 
   assert.deepEqual(await detail(), {
     thread,
+    desired: "running",
     pylon: { id: thread.pylonId, node, actualState: "unknown", failed: null, observedAt: null, retryRefused: null },
     sessions: [], previews: [], outputs: [], agent: { parkedTasks: 0 },
   });
@@ -221,6 +223,8 @@ test("a failed pylon shows failed with its reason until its thread is deleted, a
   const reason = "last job failed with setup-failed, which is not retryable: pylon-x: Setup exited 128\nfatal: unable to access";
   s.registry.savePylon({ ...s.registry.pylon(thread.pylonId)!, failed: reason });
   assert.deepEqual((await detail()).pylon, { id: thread.pylonId, node, actualState: "failed", failed: reason, observedAt: null, retryRefused: null });
+  const [row] = (await s.call("GET", "/v1/threads")).body as ThreadRow[];
+  assert.deepEqual([row!.desired, row!.pylon], [(await detail()).desired, { node, actualState: "failed", failed: reason }], "the list reports the pylon as its detail does");
 
   await s.call("DELETE", `/v1/threads/${thread.id}`);
   const del = { jobId: "job-del" as JobId, subject: thread.pylonId, kind: "delete" as const };

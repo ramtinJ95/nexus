@@ -11,7 +11,7 @@
 import { randomBytes } from "node:crypto";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { z } from "zod";
-import { actualState, retryRefusal, type ActualState } from "../reconcile.ts";
+import { actualState, desiredPhase, retryRefusal, type ActualState, type DesiredPhase } from "../reconcile.ts";
 import { effectiveAllowedHosts, gitUrl, liveHashOf, withHttpsHosts, type BootInputs, type Project, type ProjectId, type PylonOverlay } from "../project.ts";
 import type { NodeName, PylonId, TailnetNodeId } from "../protocol.ts";
 import type { HarnessHost } from "../harness/host.ts";
@@ -47,6 +47,8 @@ export interface Api {
 
 export interface ThreadDetail {
   thread: Thread;
+  /** What the planner wants of the pylon now, from the thread's status and activity. */
+  desired: DesiredPhase;
   pylon: {
     id: PylonId; node: NodeName; actualState: ActualState; failed: string | null; observedAt: string | null;
     /** Why a retry of the pylon, as its node last reported it, cannot help. Null when a retry can. */
@@ -58,6 +60,9 @@ export interface ThreadDetail {
   /** Null for a thread that has no conversation. A parked task holds the run until it is retried. */
   agent: { parkedTasks: number } | null;
 }
+
+/** A thread as the list reports it, with what the planner wants of its pylon and what its node last reported. */
+export type ThreadRow = Thread & { desired: DesiredPhase; pylon: Pick<ThreadDetail["pylon"], "node" | "actualState" | "failed"> };
 
 /** A node without its probe's latest observation, which thread detail already reports per pylon. */
 export type NodeSummary = Omit<NodeRecord, "observation"> & { observedAt: string | null };
@@ -200,20 +205,30 @@ export async function startApi(options: ApiOptions): Promise<Api> {
     return node.observation?.pylons.find((p) => p.pylonId === pylonId) ?? "absent";
   }
 
-  function detail(t: Thread): ThreadDetail {
+  function pylonOf(t: Thread): ThreadDetail["pylon"] {
     const pylon = registry.pylon(t.pylonId)!;
     const node = registry.node(pylon.node)!;
-    const observation = node.observation;
     const observed = observedPylon(pylon.pylonId);
     const inFlight = registry.job(pylon.pylonId) ?? null;
     // The planner deletes a failed pylon all the same, so a deleted thread's pylon shows the delete.
     const gaveUp = pylon.failed !== null && t.status !== "deleted";
     return {
+      id: pylon.pylonId, node: pylon.node, failed: pylon.failed, observedAt: node.observation?.observedAt ?? null,
+      actualState: actualState(observed, inFlight, node.state === "online", gaveUp), retryRefused: retryRefusal(observed),
+    };
+  }
+
+  function row(t: Thread): ThreadRow {
+    const { node, actualState, failed } = pylonOf(t);
+    return { ...t, desired: desiredPhase(t, Date.now()), pylon: { node, actualState, failed } };
+  }
+
+  function detail(t: Thread): ThreadDetail {
+    const pylon = registry.pylon(t.pylonId)!;
+    return {
       thread: t,
-      pylon: {
-        id: pylon.pylonId, node: pylon.node, failed: pylon.failed, observedAt: observation?.observedAt ?? null,
-        actualState: actualState(observed, inFlight, node.state === "online", gaveUp), retryRefused: retryRefusal(observed),
-      },
+      desired: desiredPhase(t, Date.now()),
+      pylon: pylonOf(t),
       sessions: registry.sessions(pylon.pylonId),
       previews: registry.previews(pylon.pylonId),
       outputs: registry.outputs(t.id),
@@ -305,7 +320,7 @@ export async function startApi(options: ApiOptions): Promise<Api> {
     ["GET", /^\/v1\/projects$/, () => ok(registry.projects())],
     ["POST", /^\/v1\/projects$/, async (_, r) => created(createProject(await r.body()))],
     ["GET", /^\/v1\/nodes$/, () => ok(registry.nodes().map(({ observation, ...n }): NodeSummary => ({ ...n, observedAt: observation?.observedAt ?? null })))],
-    ["GET", /^\/v1\/threads$/, (_, r) => ok(registry.threads((r.query.get("project") ?? undefined) as ProjectId | undefined))],
+    ["GET", /^\/v1\/threads$/, (_, r) => ok(registry.threads((r.query.get("project") ?? undefined) as ProjectId | undefined).map(row))],
     ["POST", /^\/v1\/threads$/, async (_, r) => created(await startThread(await r.body(), r.caller))],
     ["GET", /^\/v1\/threads\/([^/]+)$/, (m) => ok(detail(thread(m[1]!)))],
     ["DELETE", /^\/v1\/threads\/([^/]+)$/, async (m) => ok(await setStatus(thread(m[1]!), "deleted"))],

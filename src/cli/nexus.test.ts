@@ -137,7 +137,8 @@ test("the CLI runs a thread's life through the SOCKS proxy, and --json prints th
   const stable = ({ lastHumanActivityAt: _, ...rest }: Thread) => rest;
   assert.deepEqual(stable(s.registry.thread(thread.id)!), stable(thread));
   assert.deepEqual(s.fake.calls.at(-1)?.slice(0, 3), ["send", thread.id, "\n  Fix the build  \nand run the tests"]);
-  assert.deepEqual((await s.json(["threads"])).map(stable), [stable(thread)]);
+  assert.deepEqual((await s.json(["threads"])).map(stable), [{ ...stable(thread), desired: "running", pylon: { node, actualState: "unknown", failed: null } }],
+    "a row carries what the planner wants of the pylon and what its node last reported");
   assert.deepEqual(await s.json(["threads", "--project", "other"]), []);
 
   assert.deepEqual(await s.json(["send", thread.id, "now", "the", "lint"]), { submission: 7 });
@@ -149,6 +150,7 @@ test("the CLI runs a thread's life through the SOCKS proxy, and --json prints th
 
   const shown = await s.json(["show", thread.id]);
   assert.equal(shown.thread.id, thread.id);
+  assert.equal(shown.desired, "running", "a thread with fresh human activity wants its pylon running");
   assert.deepEqual(shown.pylon, { id: thread.pylonId, node, actualState: "unknown", failed: null, observedAt: null, retryRefused: null });
   assert.deepEqual((await s.json(["conversation", thread.id])).entries.map((e: { id: number }) => e.id), [1, 2, 3]);
   const human = await s.nexus(["conversation", thread.id]);
@@ -251,6 +253,8 @@ test("watch prints the backlog, then each new entry and state change, and ends w
   assert.deepEqual([first.type, first.entries.map((e: any) => [e.entry.id, e.entry.kind, e.text])], ["reset", [[1, "pi.user", "> hi"]]], "the first poll prints the context whole");
   const state = { type: "state", thread: thread.id, status: "active", run: "idle", parkedTasks: 0, queued: 0, pylon: "unknown", failed: null };
   assert.deepEqual(await watch.next(), state);
+  const quiet = { type: "live", thread: thread.id, queued: [], tools: [], partial: null, retry: null };
+  assert.deepEqual(await watch.next(), quiet, "the run in flight follows the first state");
 
   s.fake.transcript(thread.id).messages.push({
     role: "assistant", content: [{ type: "text", text: "On it." }, { type: "toolCall", id: "c1", name: "bash", arguments: { command: "npm test" } }],
@@ -259,9 +263,16 @@ test("watch prints the backlog, then each new entry and state change, and ends w
   const answer = await watch.next();
   assert.deepEqual([answer.type, answer.entry.id, answer.text], ["entry", 2, 'On it.\n[tool] bash {"command":"npm test"}']);
 
-  s.fake.transcript(thread.id).docs["pi.live"] = { run: { taskId: 1, inputs: [] } };
-  s.fake.transcript(thread.id).docs["pi.inbox"] = { items: [{ id: 9, mode: "followUp", content: "and then?" }] };
+  s.fake.transcript(thread.id).docs["pi.live"] = {
+    run: { taskId: 1, inputs: [] },
+    tools: [{ callId: "c1", status: "running", output: "PASS 3/9" }, { callId: "c0", status: "done", output: "old" }],
+    generation: { message: { role: "assistant", content: [{ type: "text", text: "Tests are " }, { type: "text", text: "running." }] }, retry: { error: "overloaded" } },
+  };
+  s.fake.transcript(thread.id).docs["pi.inbox"] = { items: [{ id: 9, mode: "followUp", content: "and then?" }, { id: 10, mode: "write", content: "x" }] };
   assert.deepEqual(await watch.next(), { ...state, run: "working", queued: 1 });
+  assert.deepEqual(await watch.next(), {
+    ...quiet, queued: ["and then?"], tools: [{ callId: "c1", output: "PASS 3/9" }], partial: "Tests are running.", retry: "overloaded",
+  }, "live carries the queued texts, the running tools' output, the streaming answer and a pending retry");
 
   await s.json(["delete", thread.id]);
   assert.deepEqual(await watch.next(), { ...state, run: "idle", status: "deleted", queued: 0 }, "a deleted thread has no conversation to be busy");
@@ -303,6 +314,7 @@ test("watch prints the whole context again when it changes other than by an appe
   const ids = (event: any) => [event.type, event.entries?.map((e: any) => e.entry.id) ?? event.entry.id];
   assert.deepEqual(ids(await watch.next()), ["reset", [1, 2]]);
   assert.equal((await watch.next()).type, "state");
+  assert.equal((await watch.next()).type, "live");
 
   // A new head marker leads the active context, ahead of entries older than itself.
   transcript.entries = [userEntry(12, "summary"), userEntry(10, "one")];

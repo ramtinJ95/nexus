@@ -35,8 +35,8 @@ With `--json`, a command prints one JSON value on stdout, pretty-printed. The va
 
 | Command | Route | `--json` prints |
 |---|---|---|
-| `threads [--project P] [--all]` | `GET /v1/threads[?project=P]` | `Thread[]`. Deleted threads are left out unless `--all` is given |
-| `show <thread>` | `GET /v1/threads/<thread>` | `ThreadDetail` |
+| `threads [--project P] [--all]` | `GET /v1/threads[?project=P]` | `ThreadRow[]`: each `Thread` with `desired` and `pylon: { node, actualState, failed }`, as in `ThreadDetail`. Deleted threads are left out unless `--all` is given |
+| `show <thread>` | `GET /v1/threads/<thread>` | `ThreadDetail`. Its `desired` is what the planner wants of the pylon now: `running`, `paused` or `deleted` |
 | `conversation <thread>` | `GET /v1/threads/<thread>/conversation` | `ConversationView` |
 | `start --project P [--title T] [--message M] [--node N] [--branch B] [--commit C]` | `POST /v1/threads`, then `POST .../messages` when `--message` is given | `Thread`, the thread that was started |
 | `send <thread> <text...> [--steer] [--request-id ID]` | `POST /v1/threads/<thread>/messages` | `{ "submission": number }` |
@@ -90,6 +90,8 @@ type WatchEvent =
   | { type: "state"; thread: string; status: "active" | "idle" | "archived" | "deleted";
       run: "idle" | "working" | "parked"; parkedTasks: number; queued: number;
       pylon: ActualState; failed: string | null }
+  | { type: "live"; thread: string; queued: string[]; tools: { callId: string; output: string }[];
+      partial: string | null; retry: string | null }
   | { type: "error"; thread: string; kind: "unreachable" | "failed"; message: string };
 ```
 
@@ -101,6 +103,7 @@ The stream follows these rules:
 - `text` is the CLI's plain rendering of an entry's messages. It is empty for an entry with no model message, which a consumer can skip. `entry` is the entry exactly as the conversation route serves it.
 - While a thread has no conversation, such as after its delete, the context last printed stands and no `reset` comes.
 - `state` comes after the first `reset`, and again whenever any field changes. `run` is `working` while the agent's run is busy. It is `parked` while tasks that hit the restart limit hold the run, which `nexus retry` clears. `queued` counts messages that wait for the run to finish. `pylon` and `failed` are the pylon's `actualState` and `failed` from `ThreadDetail`.
+- `live` comes after the first `state`, and again whenever any field changes. It is what the run in flight shows before it is committed to the context: `queued` holds the text of each message waiting to join the run, `tools` the output so far of each tool call still running, keyed by the `toolCall` part's `id` in the entries (a call whose result the entries already hold is done, whatever `tools` says), `partial` the text of the answer streaming now, and `retry` the error of a model request waiting to be retried. A quiet thread's `live` is `{ queued: [], tools: [], partial: null, retry: null }`. Only `--json` prints it.
 - `error` reports that the control plane is unreachable or failing. The watch keeps polling. An outage prints one `error` per distinct message. The next successful poll prints `state` again, which means the control plane is back.
 - The stream ends with exit code 0 after the `state` whose `status` is `deleted`, or at SIGINT, SIGTERM or SIGHUP, or when the reader closes the pipe, or when the process that started it has exited, noticed at the end of the poll and interval under way, so a consumer killed outright leaves no watch behind. An unknown thread exits 4, and a refusal exits 3, with the usual stderr line.
-- Partial output while an answer streams is not reported yet. A consumer must ignore event types and fields it does not know, so that later versions can add them.
+- A consumer must ignore event types and fields it does not know, so that later versions can add them.

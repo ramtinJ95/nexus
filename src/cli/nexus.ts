@@ -12,7 +12,7 @@ import { parseArgs, type ParseArgsOptionsConfig } from "node:util";
 import { z } from "zod";
 import type { ImageContent, Message, TextContent } from "@earendil-works/pi-ai";
 import type { ConversationView, EntryRecord, InboxState, LiveState } from "@earendil-works/pi-durable";
-import type { NodeSummary, ThreadDetail } from "../control/api.ts";
+import type { NodeSummary, ThreadDetail, ThreadRow } from "../control/api.ts";
 import type { Thread } from "../control/registry.ts";
 import type { Project } from "../project.ts";
 import type { ActualState } from "../reconcile.ts";
@@ -122,7 +122,7 @@ function detailText({ thread: t, pylon: p, agent, sessions, previews, outputs }:
   ].join("\n");
 }
 
-const threadRow = (t: Thread) => [t.id, t.status, t.agentTurnRunning ? "working" : "-", t.project, ago(t.createdAt), t.title];
+const threadRow = (t: ThreadRow) => [t.id, t.status, t.agentTurnRunning ? "working" : "-", `pylon ${t.pylon.actualState}`, t.project, ago(t.createdAt), t.title];
 
 /** The first line of a message, as the title of the thread it starts. */
 const titleOf = (message: string) => clip(message.split("\n").find((line) => line.trim() !== "")?.trim() ?? message, 80);
@@ -162,12 +162,26 @@ export interface WatchState {
   pylon: ActualState;
   failed: string | null;
 }
+/** What watch reports of the run in flight, as one event whenever any of it changes. */
+export interface WatchLive {
+  type: "live";
+  thread: string;
+  /** The text of each message waiting for the current run to finish. */
+  queued: string[];
+  /** The output so far of each tool call still running, by the toolCall's id in the entries. */
+  tools: { callId: string; output: string }[];
+  /** The answer streaming now, its text parts joined. */
+  partial: string | null;
+  /** The error of a model request waiting to be retried. */
+  retry: string | null;
+}
 /** An entry with the CLI's plain rendering of its messages. */
 export interface RenderedEntry { entry: EntryRecord; text: string }
 export type WatchEvent =
   | { type: "reset"; thread: string; entries: RenderedEntry[] }
   | { type: "entry"; thread: string } & RenderedEntry
   | WatchState
+  | WatchLive
   | { type: "error"; thread: string; kind: "unreachable" | "failed"; message: string };
 
 function stateOf(d: ThreadDetail, view: ConversationView | null): WatchState {
@@ -176,6 +190,17 @@ function stateOf(d: ThreadDetail, view: ConversationView | null): WatchState {
     type: "state", thread: d.thread.id, status: d.thread.status,
     run: parkedTasks > 0 ? "parked" : view !== null && busy(view) ? "working" : "idle",
     parkedTasks, queued: view === null ? 0 : queuedTexts(view).length, pylon: d.pylon.actualState, failed: d.pylon.failed,
+  };
+}
+
+function liveOf(id: string, view: ConversationView | null): WatchLive {
+  const live = view?.docs["pi.live"] as LiveState | undefined;
+  const generation = live?.generation;
+  const partial = generation?.message?.content.flatMap((part) => part.type === "text" ? [part.text] : []).join("") ?? "";
+  return {
+    type: "live", thread: id, queued: view === null ? [] : queuedTexts(view),
+    tools: (live?.tools ?? []).flatMap((slot) => slot.status === "running" ? [{ callId: slot.callId, output: slot.output ?? "" }] : []),
+    partial: partial === "" ? null : partial, retry: generation?.retry?.error ?? null,
   };
 }
 
@@ -210,6 +235,7 @@ async function watch(api: Api, id: string, intervalMs: number, json: boolean): P
   /** The IDs of the active context as last printed, or null before the first print. */
   let printed: number[] | null = null;
   let shown: string | null = null;
+  let liveShown: string | null = null;
   let failing: string | null = null;
   for (;;) {
     try {
@@ -238,6 +264,11 @@ async function watch(api: Api, id: string, intervalMs: number, json: boolean): P
       // After an outage the state is printed again, which tells the consumer the control plane is back.
       if (key !== shown || failing !== null) emit(state, stateText(state));
       shown = key;
+      // The text stream already says what the state does of the run, so only JSON carries it.
+      const live = liveOf(id, view);
+      const liveKey = JSON.stringify(live);
+      if (liveKey !== liveShown) emit(live, "");
+      liveShown = liveKey;
       failing = null;
       if (d.thread.status === "deleted") return;
     } catch (err) {
@@ -256,7 +287,7 @@ const commands: Readonly<Record<string, Command>> = {
     options: { project: { type: "string" }, all: { type: "boolean" } },
     async run(api, _, v) {
       const project = str(v, "project");
-      const threads = await api("GET", `/v1/threads${project === undefined ? "" : `?project=${encodeURIComponent(project)}`}`) as Thread[];
+      const threads = await api("GET", `/v1/threads${project === undefined ? "" : `?project=${encodeURIComponent(project)}`}`) as ThreadRow[];
       const shown = v.all === true ? threads : threads.filter((t) => t.status !== "deleted");
       return { json: shown, text: shown.length === 0 ? "No threads." : table(shown.map(threadRow)) };
     },
