@@ -20,6 +20,10 @@ import { openRegistry, type Thread, type ThreadId } from "./registry.ts";
 
 const nodeId = z.string().regex(/^n[A-Za-z0-9]+$/, "a Tailscale stable node ID, such as nAbC123CNTRL");
 const absolutePath = z.string().refine(isAbsolute, "must be an absolute path");
+const port = z.int().min(1).max(65_535);
+
+/** Clear of the probe's port and its gateway's, 7480 and 7481 by default. */
+export const defaultPreviewPorts = { first: 10200, last: 10999 } as const;
 
 const configSchema = z.strictObject({
   db: z.string().min(1),
@@ -49,6 +53,10 @@ const configSchema = z.strictObject({
     model: z.strictObject({ provider: z.string().min(1), modelId: z.string().min(1) }),
   }),
   tailscaledSocket: z.string().min(1).optional(),
+  /** The https ports previews are published on. Each node gives a port to one pylon at a time. */
+  previewPorts: z.strictObject({ first: port, last: port })
+    .refine((range) => range.first <= range.last, "first must not be above last")
+    .default(defaultPreviewPorts),
 });
 export type ControlPlaneConfig = z.infer<typeof configSchema>;
 
@@ -82,7 +90,7 @@ export async function startControlPlane(config: ControlPlaneConfig, models: Mode
     registry.upsertNode({ name: node.name as NodeName, tailnetHost: node.tailnetHost, tailnetNodeId: node.tailnetNodeId as TailnetNodeId });
   }
   const probes = config.nodes.map((n) => connectProbe(n.name as NodeName, n.tailnetHost, n.tailnetNodeId as TailnetNodeId, { whois }));
-  const loop = startLoop({ registry, probes, ingest });
+  const loop = startLoop({ registry, probes, ingest, previewPorts: config.previewPorts });
   const wakeThread = (t: Thread) => { void loop.wake(registry.pylon(t.pylonId)!.node); };
 
   const conversing = registry.threads().filter((t) => t.conversationId !== null);

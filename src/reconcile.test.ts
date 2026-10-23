@@ -230,6 +230,7 @@ test("ingest: a new running pylon writes its sessions, derived outputs and activ
     { record: "output", pylonId, kind: "preview", ref: "web" },
     { record: "output", pylonId, kind: "file", ref: "o1" },
     { record: "output", pylonId, kind: "diff", ref: "o2" },
+    { record: "preview", pylonId, service: "web", httpsPort: 8443, ready: true },
     { record: "activity", pylonId, human: now, agent: now },
   ] satisfies RegistryWrite[]);
 });
@@ -256,10 +257,22 @@ test("ingest: sessions the probe could not read write nothing", () => {
   assert.deepEqual(ingest({ type: "pylon", pylon: runningWith({ sessions: null }) }, node, knows(before), now), []);
 });
 
-test("ingest: a pause closes every session and retracts no output", () => {
+test("ingest: a pause closes every session, makes its previews not ready, and retracts no output", () => {
   const before = runningWith({ sessions: [idleShell], previews: [{ service: "web", httpsPort: 8443, ready: true }] });
   assert.deepEqual(ingest({ type: "pylon", pylon: phase("stopping") }, node, knows(before), now), [
     { record: "session", pylonId, herdrPane: "p2", fact: null },
+    { record: "preview", pylonId, service: "web", httpsPort: 8443, ready: false },
+  ] satisfies RegistryWrite[]);
+});
+
+test("ingest: a preview is ready while the running pylon reports it ready on its port", () => {
+  const web = { service: "web", httpsPort: 8443 };
+  const before = runningWith({ previews: [{ ...web, ready: true }, { service: "api", httpsPort: 8444, ready: false }] });
+  assert.deepEqual(ingest({ type: "pylon", pylon: before }, node, knows(before), now), [], "an unchanged report writes nothing");
+  assert.deepEqual(ingest({ type: "pylon", pylon: runningWith({ previews: [{ service: "api", httpsPort: 8444, ready: true }] }) }, node, knows(before), now), [
+    { record: "output", pylonId, kind: "preview", ref: "api" },
+    { record: "preview", pylonId, service: "api", httpsPort: 8444, ready: true },
+    { record: "preview", pylonId, ...web, ready: false },
   ] satisfies RegistryWrite[]);
 });
 
