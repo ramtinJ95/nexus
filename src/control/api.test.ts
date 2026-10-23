@@ -183,7 +183,7 @@ test("thread detail derives the actual state from the node's last observation", 
     thread,
     desired: "running",
     pylon: { id: thread.pylonId, node, actualState: "unknown", failed: null, observedAt: null, retryRefused: null },
-    sessions: [], previews: [], outputs: [], agent: { parkedTasks: 0 },
+    sessions: [], previews: [], outputs: [], attach: "herdr --session nexus", agent: { parkedTasks: 0 },
   });
 
   const capacity = { memoryGiB: 64, committedMemoryGiB: 0, diskFreeGiB: 100 };

@@ -21,6 +21,7 @@ import { newPylonRecord } from "../tick.ts";
 import type { NodeRecord, Output, Preview, Registry, Session, Thread, ThreadId } from "./registry.ts";
 import { dashboard } from "./dashboard.ts";
 import { pylonLive } from "./live.ts";
+import { herdrSession } from "../sessions.ts";
 
 export interface ApiOptions {
   registry: Registry;
@@ -57,6 +58,8 @@ export interface ThreadDetail {
   sessions: readonly Session[];
   previews: readonly Preview[];
   outputs: readonly Output[];
+  /** The command that attaches to the pylon's Herdr sessions from a shell in the pylon. */
+  attach: string;
   /** Null for a thread that has no conversation. A parked task holds the run until it is retried. */
   agent: { parkedTasks: number } | null;
 }
@@ -232,6 +235,7 @@ export async function startApi(options: ApiOptions): Promise<Api> {
       sessions: registry.sessions(pylon.pylonId),
       previews: registry.previews(pylon.pylonId),
       outputs: registry.outputs(t.id),
+      attach: `herdr --session ${herdrSession}`,
       agent: t.conversationId === null || t.status === "deleted" ? null : { parkedTasks: harness.activity.parked(t.id).length },
     };
   }

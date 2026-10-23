@@ -36,7 +36,7 @@ With `--json`, a command prints one JSON value on stdout, pretty-printed. The va
 | Command | Route | `--json` prints |
 |---|---|---|
 | `threads [--project P] [--all]` | `GET /v1/threads[?project=P]` | `ThreadRow[]`: each `Thread` with `desired` and `pylon: { node, actualState, failed }`, as in `ThreadDetail`. Deleted threads are left out unless `--all` is given |
-| `show <thread>` | `GET /v1/threads/<thread>` | `ThreadDetail`. Its `desired` is what the planner wants of the pylon now: `running`, `paused` or `deleted` |
+| `show <thread>` | `GET /v1/threads/<thread>` | `ThreadDetail`. Its `desired` is what the planner wants of the pylon now: `running`, `paused` or `deleted`. Its `attach` is the command that attaches to the pylon's Herdr sessions from a shell in the pylon |
 | `conversation <thread>` | `GET /v1/threads/<thread>/conversation` | `ConversationView` |
 | `start --project P [--title T] [--message M] [--node N] [--branch B] [--commit C]` | `POST /v1/threads`, then `POST .../messages` when `--message` is given | `Thread`, the thread that was started |
 | `send <thread> <text...> [--steer] [--request-id ID]` | `POST /v1/threads/<thread>/messages` | `{ "submission": number }` |
