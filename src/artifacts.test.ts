@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdir, mkdtemp, open, readdir, rm, truncate, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, open, readdir, rm, truncate, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Readable } from "node:stream";
@@ -149,6 +149,19 @@ test("the archive is byte-stable across copies and leaves the manifest out", { s
   assert.equal(await digest(artifactArchive(a, "image.json")), await digest(artifactArchive(b, "image.json")));
   await writeFile(join(b, "rootfs.ext4"), "changed");
   assert.notEqual(await digest(artifactArchive(a, "image.json")), await digest(artifactArchive(b, "image.json")));
+});
+
+test("the archive does not depend on the permissions the store gave the directory or its files, only on what is executable", { skip: !gnuTar && "needs GNU tar" }, async (t) => {
+  const dirWith = async (dirMode: number, fileMode: number) => {
+    const dir = await scratch(t);
+    await writeFile(join(dir, "rootfs.ext4"), "root", { mode: fileMode });
+    await chmod(join(dir, "rootfs.ext4"), fileMode);
+    await chmod(dir, dirMode);
+    return dir;
+  };
+  const built = await digest(artifactArchive(await dirWith(0o755, 0o644), "image.json"));
+  assert.equal(await digest(artifactArchive(await dirWith(0o700, 0o600), "image.json")), built);
+  assert.notEqual(await digest(artifactArchive(await dirWith(0o755, 0o755), "image.json")), built);
 });
 
 test("the archive stream errors when tar fails", async () => {

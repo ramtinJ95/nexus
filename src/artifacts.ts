@@ -30,10 +30,13 @@ const manifestFileOf = (id: PortableArtifactId) => id.startsWith("img-") ? manif
 /**
  * The sparse archive peers fetch: every file of an artifact directory except its manifest, as a byte-stable
  * GNU tar. The manifest's sha256 is the digest of this stream, so an image's archive must stay byte for byte
- * what buildImage hashed. The stream errors if tar fails, and destroying it stops tar.
+ * what buildImage hashed. Modes are normalized, so a directory moved into the store with other permissions
+ * still archives to its hash: everything is readable by all and writable by its owner, and only directories and
+ * files that were executable by anyone are executable. Setuid, setgid and sticky bits pass through as they are.
+ * The stream errors if tar fails, and destroying it stops tar.
  */
 export function artifactArchive(dir: string, manifest: string, signal?: AbortSignal): Readable {
-  const args = ["--create", "--file=-", "--sparse", "--format=gnu", "--sort=name", "--mtime=@0", "--owner=0", "--group=0", "--numeric-owner", `--exclude=./${manifest}`, "-C", dir, "."];
+  const args = ["--create", "--file=-", "--sparse", "--format=gnu", "--sort=name", "--mtime=@0", "--owner=0", "--group=0", "--numeric-owner", "--mode=u+rwX,go+rX,go-w", `--exclude=./${manifest}`, "-C", dir, "."];
   const tar = spawn("tar", args, { stdio: ["ignore", "pipe", "pipe"], ...(signal === undefined ? {} : { signal }) });
   const archive = new PassThrough();
   let stderr = "";
@@ -53,7 +56,7 @@ export interface ArtifactCodec {
   unpack(archive: string, dir: string): Promise<void>;
 }
 
-/** GNU tar, for Gondolin images and templates. Modes are kept exactly, so a node that imported an artifact archives it to the same bytes. */
+/** GNU tar, for Gondolin images and templates. The archived modes are extracted as they are, so a node that imported an artifact archives it to the same bytes. */
 export const tarCodec: ArtifactCodec = {
   pack: artifactArchive,
   async unpack(archive, dir) {
