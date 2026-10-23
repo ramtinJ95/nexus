@@ -54,12 +54,16 @@ export interface PlanInput {
   observed: PylonObservation | "absent";
   nodeArtifacts: ReadonlySet<ArtifactId>;
   inFlight: JobStatus | null; // for this pylon, or for an artifact this pylon is waiting on
-  attempts: { count: number; lastFailedAt: number | null; lastCode: JobErrorCode | null };
+  /** Consecutive failed jobs, and the last one's. A success clears both. */
+  attempts: { count: number; last: FailedAttempt | null };
   /** Online nodes other than `node` that hold the artifact. */
   holders(artifact: ArtifactId): readonly NodeName[];
   /** The registry's recorded archive hash, which fetch-artifact verifies the copy against. */
   artifactSha256(artifact: ArtifactId): string;
 }
+
+/** `message` is the job's message and the end of its log, bounded by failureMessage in tick.ts. */
+export interface FailedAttempt { at: number; code: JobErrorCode; message: string }
 
 export type PlanStep =
   | { kind: "done" }
@@ -96,9 +100,9 @@ const planRules: readonly Rule[] = [
   // 3. Delete ignores the attempt budget.
   (i) => i.desired !== "deleted" ? null : i.observed === "absent" ? done : submit({ kind: "delete", pylonId: i.pylonId }),
   // 4.
-  ({ attempts: a }) => a.lastCode !== null && !retryable[a.lastCode] ? fail(`last job failed with ${a.lastCode}, which is not retryable`) : null,
-  ({ attempts: a }) => a.count >= maxAttempts ? fail(`gave up after ${a.count} failed attempts, the last with ${a.lastCode ?? "no code"}`) : null,
-  ({ attempts: a }, now) => a.count > 0 && a.lastFailedAt !== null && now < a.lastFailedAt + backoffMs(a.count) ? wait("backoff") : null,
+  ({ attempts: { last } }) => last !== null && !retryable[last.code] ? fail(`last job failed with ${last.code}, which is not retryable: ${last.message}`) : null,
+  ({ attempts: { count, last } }) => last !== null && count >= maxAttempts ? fail(`gave up after ${count} failed attempts, the last with ${last.code}: ${last.message}`) : null,
+  ({ attempts: { count, last } }, now) => last !== null && now < last.at + backoffMs(count) ? wait("backoff") : null,
   // 5.
   ({ observed: o }) => o !== "absent" && (o.phase === "booting" || o.phase === "stopping" || o.phase === "deleting") ? wait("transitioning") : null,
   // 6.

@@ -57,6 +57,7 @@ test("setupHashOf changes with .nexus/setup, preSetup and the effective allowlis
     setupHashOf({ ...project, preSetup: "apt-get install -y jq" }, inputs),
     setupHashOf({ ...project, logins: ["claude"] }, inputs),
     setupHashOf({ ...project, secrets: [{ name: "K", hosts: ["api.stripe.com"] }] }, inputs),
+    setupHashOf({ ...project, repoUrl: "https://github.com/ramtin/acme-web.git" }, inputs),
   ]) assert.notEqual(changed, hash);
 });
 
@@ -119,6 +120,11 @@ test("chooseTemplate builds with the effective allowlist, so setup can reach log
   const choice = chooseTemplate(withLogin, key, checkout, [], node, now);
   assert.equal(choice.kind, "build");
   assert.deepEqual(choice.kind === "build" && choice.inputs.allowedHosts, ["api.openai.com", "api.stripe.com", "auth.openai.com", "chatgpt.com", "registry.npmjs.org"]);
+});
+
+test("chooseTemplate builds with the host of an HTTPS repo on the allowlist, so setup can clone it", () => {
+  const choice = chooseTemplate({ ...project, repoUrl: "https://github.com/ramtin/acme-web.git" }, key, checkout, [], node, now);
+  assert.deepEqual(choice.kind === "build" && choice.inputs.allowedHosts, ["github.com", "registry.npmjs.org"]);
 });
 
 test("garbage drops aged templates that are not their project's newest ready one, and images nothing held needs", () => {

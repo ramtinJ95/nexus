@@ -196,6 +196,13 @@ test("effectiveAllowedHosts joins project hosts, login hosts and secret hosts, s
   assert.deepEqual(effectiveAllowedHosts({ ...project, allowedHosts: [], secrets: [], logins: [] }), []);
 });
 
+test("effectiveAllowedHosts lets a project reach its own HTTPS repo host, and adds nothing for an SSH one", () => {
+  const bare = { ...project, allowedHosts: [], secrets: [], logins: [] };
+  assert.deepEqual(effectiveAllowedHosts({ ...bare, repoUrl: "https://github.com/octocat/Spoon-Knife.git" }), ["github.com"]);
+  assert.deepEqual(effectiveAllowedHosts({ ...bare, repoUrl: "https://Git.Example.com:8443/acme/web.git", allowedHosts: ["git.example.com"] }), ["git.example.com"]);
+  assert.deepEqual(effectiveAllowedHosts({ ...bare, repoUrl: "ssh://git@github.com/acme/web.git" }), []);
+});
+
 const overlay: PylonOverlay = {
   pylonId: "pylon-t1" as PylonId,
   threadId: "t1",

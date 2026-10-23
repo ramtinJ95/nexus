@@ -3,7 +3,7 @@
  * the node's latest observation, and submits it. The caller owns where the record lives: the control
  * plane's loop saves it to the registry, and the slice test keeps it in memory.
  */
-import { envelope, planPylon, type DesiredPhase, type PlanInput, type PlanStep } from "./reconcile.ts";
+import { envelope, planPylon, type DesiredPhase, type FailedAttempt, type PlanInput, type PlanStep } from "./reconcile.ts";
 import type { JobEnvelope, JobStatus, NodeObservation, ProbeClient, ProbeError } from "./protocol.ts";
 import type { CheckpointId } from "./images.ts";
 
@@ -27,7 +27,7 @@ export interface PylonRecord {
 }
 
 export function newPylonRecord(fields: Omit<PylonRecord, "pauses" | "submitted" | "attempts" | "failed">): PylonRecord {
-  return { ...fields, pauses: 0, submitted: null, attempts: { count: 0, lastFailedAt: null, lastCode: null }, failed: null };
+  return { ...fields, pauses: 0, submitted: null, attempts: { count: 0, last: null }, failed: null };
 }
 
 export const nextCheckpoint = (pylon: PylonRecord): CheckpointId => `ckpt-${pylon.thread}-${pylon.pauses + 1}`;
@@ -92,7 +92,7 @@ export async function tick(pylon: PylonRecord, ctx: TickContext): Promise<PlanSt
   const reply = await probe.submit(env);
   if ("accepted" in reply) return step;
   pylon.submitted = null;
-  if (reply.rejected === "invalid") pylon.attempts = failedAttempt(pylon, "invalid");
+  if (reply.rejected === "invalid") pylon.attempts = failedAttempt(pylon, "invalid", failureMessage(reply.message, ""));
   // busy and expired wait for the next tick.
   ctx.save(pylon);
   return step;
@@ -122,16 +122,29 @@ async function settle(pylon: PylonRecord, probe: ProbeClient, observation: NodeO
   if (listed === undefined) return "wait";
   pylon.submitted = null;
   if (status.state === "failed") {
-    pylon.attempts = failedAttempt(pylon, status.code);
+    pylon.attempts = failedAttempt(pylon, status.code, failureMessage(status.message, status.logTail));
     return null;
   }
-  pylon.attempts = { count: 0, lastFailedAt: null, lastCode: null };
+  pylon.attempts = { count: 0, last: null };
   if (status.kind === "pause") pylon.pauses += 1;
   return null;
 }
 
-function failedAttempt(pylon: PylonRecord, code: NonNullable<PylonRecord["attempts"]["lastCode"]>): PylonRecord["attempts"] {
-  return { count: pylon.attempts.count + 1, lastFailedAt: Date.now(), lastCode: code };
+function failedAttempt(pylon: PylonRecord, code: FailedAttempt["code"], message: string): PylonRecord["attempts"] {
+  return { count: pylon.attempts.count + 1, last: { at: Date.now(), code, message } };
+}
+
+const maxMessageChars = 500;
+const maxLogLines = 20;
+const maxLogChars = 1_500;
+
+/**
+ * A failed job's message and the last lines of its log, trimmed and bounded. The record carries it into
+ * the planner's reason, so the API, the dashboard and the loop's log say why without the probe's logs.
+ */
+function failureMessage(message: string, logTail: string): string {
+  const log = logTail.trim().split("\n").slice(-maxLogLines).join("\n").slice(-maxLogChars);
+  return [message.trim().slice(0, maxMessageChars), log].filter((part) => part !== "").join("\n");
 }
 
 /** One snapshot from a new observe stream, whose first event is always a snapshot. Null when the probe is unreachable. */

@@ -87,9 +87,10 @@ function pass(step: string) {
 let threadId: string | undefined;
 let deleted = false;
 const detail = async () => await expect(200, "GET", `/threads/${threadId}`) as ThreadDetail;
+/** The planner deletes a failed pylon all the same, so a deleted thread's wait ignores an earlier failure. */
 const reaches = (state: string, timeoutMs: number) => until(`the pylon is ${state}`, timeoutMs, async () => {
   const d = await detail();
-  if (d.pylon.failed !== null) throw new Error(`the planner gave up on the pylon: ${d.pylon.failed}`);
+  if (d.pylon.failed !== null && d.thread.status !== "deleted") throw new Error(`the planner gave up on the pylon: ${d.pylon.failed}`);
   return d.pylon.actualState === state ? d : undefined;
 });
 
@@ -150,6 +151,11 @@ try {
   verdict = "PASS";
 } catch (err) {
   console.error(`FAIL ${(err as Error).message}`);
+  if (threadId !== undefined) {
+    await detail().then((d) => console.error(`pylon: ${JSON.stringify(d.pylon, null, 2)}`), (detailErr: unknown) => {
+      console.error(`could not read the thread detail: ${(detailErr as Error).message}`);
+    });
+  }
 } finally {
   if (threadId !== undefined && !deleted) {
     await call("DELETE", `/threads/${threadId}`).then(() => reaches("absent", 5 * 60_000)).catch((err: unknown) => {

@@ -12,7 +12,7 @@ import { randomBytes } from "node:crypto";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { z } from "zod";
 import { actualState, type ActualState } from "../reconcile.ts";
-import { effectiveAllowedHosts, liveHashOf, type BootInputs, type LiveSpec, type Project, type ProjectId, type PylonOverlay } from "../project.ts";
+import { effectiveAllowedHosts, gitUrl, liveHashOf, withHttpsHosts, type BootInputs, type LiveSpec, type Project, type ProjectId, type PylonOverlay } from "../project.ts";
 import type { NodeName, PylonId, TailnetNodeId } from "../protocol.ts";
 import type { HarnessHost } from "../harness/host.ts";
 import type { ImageId, ImageManifest } from "../images.ts";
@@ -66,7 +66,7 @@ const name = z.string().regex(/^[a-z0-9][a-z0-9-]{0,62}$/);
 const host = z.string().min(1);
 const projectSchema = z.strictObject({
   id: name.transform((id) => id as ProjectId),
-  repoUrl: z.string().min(1),
+  repoUrl: gitUrl,
   defaultBranch: z.string().min(1),
   defaultNode: z.string().min(1).transform((node) => node as NodeName),
   resources: z.strictObject({ cpus: z.int().positive(), memoryGiB: z.int().positive(), diskGiB: z.int().positive() }),
@@ -168,7 +168,8 @@ export async function startApi(options: ApiOptions): Promise<Api> {
     };
     const boot: Omit<BootInputs, "source"> = {
       pylonId, image, resources: project.resources,
-      network: { allowedHosts: effectiveAllowedHosts(project), secrets: project.secrets },
+      // Every boot pulls the dotfiles through the allowlist. A template build pulls none, so their host stays out of the setup hash.
+      network: { allowedHosts: withHttpsHosts(effectiveAllowedHosts(project), [dotfiles.repo]), secrets: project.secrets },
       repo: { url: project.repoUrl, checkout: { branch, commit: request.commit ?? `origin/${branch}` } },
       dotfiles,
     };
@@ -190,11 +191,13 @@ export async function startApi(options: ApiOptions): Promise<Api> {
     const observation = node.observation;
     const observed = observation?.pylons.find((p) => p.pylonId === pylon.pylonId) ?? "absent";
     const inFlight = registry.job(pylon.pylonId) ?? null;
+    // The planner deletes a failed pylon all the same, so a deleted thread's pylon shows the delete.
+    const gaveUp = pylon.failed !== null && t.status !== "deleted";
     return {
       thread: t,
       pylon: {
         id: pylon.pylonId, node: pylon.node, failed: pylon.failed, observedAt: observation?.observedAt ?? null,
-        actualState: actualState(observed, inFlight, node.state === "online", pylon.failed !== null),
+        actualState: actualState(observed, inFlight, node.state === "online", gaveUp),
       },
       sessions: registry.sessions(pylon.pylonId),
       previews: registry.previews(pylon.pylonId),

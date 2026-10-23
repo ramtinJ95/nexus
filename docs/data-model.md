@@ -28,6 +28,7 @@ One setting sits beside the records: `current`, the image every new pylon uses. 
 - `Node.state` is `online` or `offline`. A node that is asleep or powered off is `offline`. That is not an error.
 - `Project.secrets` holds names and the hosts each value may be sent to. The values live only in each node's secret file.
 - `Project.logins` is a list of `claude` and `chatgpt`. Each adds the hosts its login needs to the allowlist.
+- The allowlist also holds the host of an HTTPS `repoUrl`, so setup can clone the repo. A pylon's allowlist adds the host of an HTTPS dotfiles repo, which every boot pulls. SSH remotes need no entry, because SSH reaches only the pylon's own remotes.
 - `Template.key` is the project, the image, and a hash of `.nexus/setup`, `preSetup` and the allowlist. A template is reused for at most 72 hours.
 - `Template.state` is `building`, `ready`, or `failed`.
 - `Session.harness` is `claude-code`, `pi`, or `shell`.
@@ -60,7 +61,7 @@ The actual state comes from the probe's last observation and the job in flight:
 | `paused` | Only the checkpoint exists |
 | `deleting` | A `delete` job is removing the disk and logs |
 | `absent` | The node does not have the pylon. It is not created yet, it was deleted, or it was lost. The thread's status tells which. The dashboard shows it as "not on its node" |
-| `failed` | The planner gave up after a job failure it cannot retry, or after 5 attempts. The probe keeps the logs, and a human retries |
+| `failed` | The planner gave up after a job failure it cannot retry, or after 5 attempts. The reason names the last job's code, its message and the end of its log. A human retries. A deleted thread's pylon shows its delete instead |
 | `unknown` | The node is offline. The dashboard shows the last observation, marked stale |
 
 ## Reconciling desired and actual state

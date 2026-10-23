@@ -113,6 +113,17 @@ const migrations: readonly string[] = [
   CREATE TABLE templates (id TEXT PRIMARY KEY, project TEXT NOT NULL, record TEXT NOT NULL) STRICT;
   CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL) STRICT;
   `,
+  // A pylon's attempts carry the last failure's message. Failures recorded before kept only their code.
+  `
+  UPDATE pylons SET attempts = json_object(
+    'count', json_extract(attempts, '$.count'),
+    'last', json(CASE WHEN json_extract(attempts, '$.lastCode') IS NULL THEN NULL ELSE json_object(
+      'at', json_extract(attempts, '$.lastFailedAt'),
+      'code', json_extract(attempts, '$.lastCode'),
+      'message', 'recorded before the registry kept failure messages'
+    ) END)
+  );
+  `,
 ];
 
 type Row = Record<string, unknown>;
