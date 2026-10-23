@@ -1,9 +1,13 @@
 // The dashboard's only script. Pages are rendered on the server. This file sends actions and messages to the
-// JSON API, records a visit as human activity, and polls the page to swap in a fresh `#live` region.
+// JSON API, records a visit as human activity, opens the start dialog and the phone's panels, and polls the
+// page to swap in each `data-live` region that changed.
 "use strict";
 
 const main = document.querySelector("main");
 const pollMs = Number(main?.dataset.pollMs);
+const scroller = document.getElementById("scroll");
+const dialog = document.getElementById("start-dialog");
+const filter = document.getElementById("filter");
 
 /** Sends JSON as the API requires, and throws the API's error message. */
 async function api(method, path, body) {
@@ -29,6 +33,47 @@ const focusKey = (el) => el.id !== "" ? `#${CSS.escape(el.id)}`
   : el instanceof HTMLAnchorElement ? `a[href="${CSS.escape(el.getAttribute("href"))}"]`
   : null;
 
+/** The same format as the server's clock(). */
+function clock(ms) {
+  const s = Math.max(0, Math.floor(ms / 1000));
+  return s < 60 ? `${s}s` : s < 3600 ? `${Math.floor(s / 60)}m ${s % 60}s` : `${Math.floor(s / 3600)}h ${Math.floor((s % 3600) / 60)}m`;
+}
+function tick() {
+  for (const time of document.querySelectorAll("time[data-since]")) time.textContent = clock(Date.now() - Number(time.dataset.since));
+}
+
+// What the server last sent for each region. Comparing against it rather than the live DOM means a tool the
+// reader opened or the ticking run clock is not a change, so an unchanged region is never swapped.
+const comparable = (html) => html.replace(/(<time data-since="\d+">)[^<]*/g, "$1");
+const served = new Map([...document.querySelectorAll("[data-live]")].map((el) => [el.id, comparable(el.innerHTML)]));
+// The folds the reader opened or closed. The rest follow the server, so a fold that opened for a running step
+// closes once the step is done.
+const toggled = new Map();
+document.addEventListener("click", (event) => {
+  const details = event.target instanceof Element ? event.target.closest("summary")?.parentElement : null;
+  if (details instanceof HTMLDetailsElement && details.id !== "") toggled.set(details.id, !details.open);
+});
+
+const atBottom = (el) => el.scrollHeight - el.scrollTop - el.clientHeight < 48;
+/**
+ * The conversation only grows, so its n-th block is the same block after a swap. Keeping the first visible
+ * block where it was holds the reader's place while a fold above it opens or closes.
+ */
+function anchor() {
+  if (scroller === null) return () => {};
+  if (atBottom(scroller)) return () => { scroller.scrollTop = scroller.scrollHeight; };
+  const convo = document.getElementById("convo");
+  const top = scroller.getBoundingClientRect().top;
+  const blocks = [...(convo?.children ?? [])];
+  const index = blocks.findIndex((b) => b.getBoundingClientRect().bottom > top);
+  if (index === -1) return () => {};
+  const offset = blocks[index].getBoundingClientRect().top;
+  return () => {
+    const block = document.getElementById("convo")?.children[index];
+    if (block !== undefined) scroller.scrollTop += block.getBoundingClientRect().top - offset;
+  };
+}
+
 let refreshing = null;
 async function refresh() {
   const state = document.getElementById("refresh-state");
@@ -37,26 +82,36 @@ async function refresh() {
     const res = await fetch(location.href, { headers: { accept: "text/html" }, cache: "no-store", signal: AbortSignal.timeout(pollMs * 2) });
     if (!res.ok) throw new Error(`the control plane answered ${res.status}`);
     const next = new DOMParser().parseFromString(await res.text(), "text/html");
-    const fresh = next.getElementById("live");
-    const live = document.getElementById("live");
-    if (fresh !== null && live !== null && fresh.innerHTML !== live.innerHTML) {
-      // The region holds buttons, links, the prompt box and tool output, so keep focus, the draft and what the
-      // reader opened or closed after the swap.
-      const focused = live.contains(document.activeElement) ? focusKey(document.activeElement) : null;
-      const draft = live.querySelector("#prompt-text");
-      const opened = new Map([...live.querySelectorAll("details[id]")].map((d) => [d.id, d.open]));
-      live.replaceWith(fresh);
-      const prompt = fresh.querySelector("#prompt-text");
-      if (draft !== null && prompt !== null) {
-        prompt.value = draft.value;
-        prompt.setSelectionRange(draft.selectionStart, draft.selectionEnd);
+    const changed = [...next.querySelectorAll("[data-live]")]
+      .map((fresh) => [document.getElementById(fresh.id), fresh, comparable(fresh.innerHTML)])
+      .filter(([el, fresh, html]) => el !== null && served.get(fresh.id) !== html);
+    if (changed.length > 0) {
+      // Regions hold buttons, links, the prompt box and tool output, so keep focus, the draft, what the reader
+      // opened or closed, and their place in the conversation across the swap.
+      const focused = changed.some(([el]) => el.contains(document.activeElement)) ? focusKey(document.activeElement) : null;
+      const draft = document.getElementById("prompt-text");
+      const saved = draft === null ? null : { value: draft.value, start: draft.selectionStart, end: draft.selectionEnd };
+      const start = startState();
+      const restoreScroll = anchor();
+      for (const [el, fresh, html] of changed) {
+        el.innerHTML = fresh.innerHTML;
+        served.set(fresh.id, html);
       }
-      for (const d of fresh.querySelectorAll("details[id]")) d.open = opened.get(d.id) ?? d.open;
-      const send = fresh.querySelector("#send");
+      const prompt = document.getElementById("prompt-text");
+      if (saved !== null && prompt !== null && prompt !== draft) {
+        prompt.value = saved.value;
+        prompt.setSelectionRange(saved.start, saved.end);
+      }
+      restoreStart(start);
+      for (const d of document.querySelectorAll("details[id]")) if (toggled.has(d.id)) d.open = toggled.get(d.id);
+      const send = document.getElementById("send");
       if (send !== null) send.disabled = outgoing?.inFlight === true;
-      if (focused !== null) document.querySelector(focused)?.focus();
-      document.title = next.title;
+      if (focused !== null) document.querySelector(focused)?.focus({ preventScroll: true });
+      restoreScroll();
+      applyFilter();
+      tick();
     }
+    document.title = next.title;
     // An archived or deleted thread stops counting visits, so follow the fresh page.
     const activity = next.querySelector("main")?.dataset.activity;
     if (activity === undefined) delete main.dataset.activity;
@@ -93,6 +148,7 @@ document.addEventListener("click", async (event) => {
   const { action, thread, title } = button.dataset;
   if (action === "delete" && !confirm(`Delete "${title}"? Its pylon and disk are removed.`)) return;
   button.disabled = true;
+  setOpen(null);
   try {
     await actions[action](thread);
     showError("action-error", null);
@@ -119,6 +175,7 @@ document.addEventListener("submit", async (event) => {
   outgoing.inFlight = true;
   form.querySelector("#send").disabled = true;
   try {
+    // A busy run queues the message as a follow-up, which is the API's default.
     await api("POST", `/v1/threads/${form.dataset.thread}/messages`, { text, requestId: outgoing.requestId });
     outgoing = null;
     // The poll may have swapped in a new prompt box meanwhile, or none if the thread was archived. Text typed
@@ -127,6 +184,7 @@ document.addEventListener("submit", async (event) => {
     if (prompt?.value === text) prompt.value = "";
     showError("action-error", null);
     await refreshAfter();
+    if (scroller !== null) scroller.scrollTop = scroller.scrollHeight;
   } catch (err) {
     outgoing.inFlight = false;
     showError("action-error", new Error(`The message was not sent: ${err.message}`));
@@ -136,22 +194,166 @@ document.addEventListener("submit", async (event) => {
   }
 });
 
-document.getElementById("start")?.addEventListener("submit", async (event) => {
+/** The phone's thread list, inspector or thread actions, one at a time. */
+function setOpen(panel) {
+  if (panel === null) delete document.body.dataset.open;
+  else document.body.dataset.open = panel;
+}
+document.addEventListener("click", (event) => {
+  const target = event.target instanceof Element ? event.target : null;
+  const opener = target?.closest("[data-open]");
+  if (opener !== null && opener !== undefined) {
+    setOpen(document.body.dataset.open === opener.dataset.open ? null : opener.dataset.open);
+    return;
+  }
+  const closer = target?.closest("[data-close]");
+  if (closer === null || closer === undefined) return;
+  if (dialog?.contains(closer)) dialog.close();
+  else setOpen(null);
+});
+
+function updateStartHint() {
+  const form = document.getElementById("start");
+  const project = form?.querySelector("input[name=project]:checked");
+  if (form === null || project === null || project === undefined) return;
+  const node = form.elements.node.value || project.dataset.node;
+  const branch = form.elements.branch.value || project.dataset.branch;
+  form.querySelector("#start-node option[value='']").textContent = `${project.dataset.node} (project default)`;
+  form.elements.branch.placeholder = project.dataset.branch;
+  const hint = document.getElementById("start-hint");
+  const tag = (name, text) => Object.assign(document.createElement(name), { textContent: text });
+  const image = hint.dataset.image;
+  hint.replaceChildren("Boots a pylon on ", tag("b", node), ...(image === "" ? [] : [" from image ", tag("code", image)]), " and checks out ", tag("code", branch), ".");
+}
+
+const projectRadios = () => [...document.querySelectorAll("#start input[name=project]")];
+
+/** Picks the project, or says it is not offered and picks none, so the thread cannot start on another repo. */
+function selectProject(project) {
+  const radio = projectRadios().find((r) => r.value === project);
+  for (const r of projectRadios()) r.checked = r === radio;
+  showError("start-error", radio === undefined ? new Error(`Project ${project} is not offered here yet. Reload the page to see it.`) : null);
+  updateStartHint();
+}
+
+async function openStart(project, title) {
+  if (dialog === null) return;
+  setOpen(null);
+  if (!dialog.open) dialog.showModal();
+  if (project) {
+    // The dialog's projects refresh with the page, so a project added since the last poll may be on its way.
+    if (!projectRadios().some((r) => r.value === project)) await refreshAfter();
+    selectProject(project);
+  }
+  const input = document.getElementById("start-title");
+  if (title && input !== null) input.value = title;
+  updateStartHint();
+}
+document.addEventListener("click", (event) => {
+  const link = event.target instanceof Element ? event.target.closest("[data-start]") : null;
+  if (link === null || dialog === null) return;
   event.preventDefault();
-  const form = event.currentTarget;
-  const submit = form.querySelector("button[type=submit]");
+  void openStart(link.dataset.start, link.dataset.title);
+});
+dialog?.addEventListener("close", () => {
+  if (location.pathname === "/threads/new") history.replaceState(null, "", "/");
+});
+document.addEventListener("input", (event) => {
+  if (event.target instanceof Element && event.target.closest("#start") !== null) updateStartHint();
+});
+
+/** What the reader entered in the start dialog, which a refresh of its projects and nodes must keep. */
+function startState() {
+  const form = document.getElementById("start");
+  if (form === null) return null;
+  const project = form.querySelector("input[name=project]:checked")?.value ?? null;
+  return { form, project, title: form.elements.title.value, node: form.elements.node.value, branch: form.elements.branch.value };
+}
+function restoreStart(saved) {
+  const form = document.getElementById("start");
+  if (saved === null || form === null || form === saved.form) return;
+  form.elements.title.value = saved.title;
+  form.elements.branch.value = saved.branch;
+  if ([...form.elements.node.options].some((o) => o.value === saved.node)) form.elements.node.value = saved.node;
+  if (saved.project !== null) selectProject(saved.project);
+  form.querySelector("button[type=submit]").disabled = starting;
+}
+
+// ⌘↵ submits as well as the button, so a second press while the first is in flight must not start a second thread.
+let starting = false;
+document.addEventListener("submit", async (event) => {
+  if (event.target.id !== "start") return;
+  event.preventDefault();
+  if (starting) return;
+  starting = true;
+  const form = event.target;
   // Empty optional fields mean the project's defaults, which the API applies when the field is absent.
   const body = Object.fromEntries([...new FormData(form)].filter(([, value]) => value !== ""));
-  submit.disabled = true;
+  form.querySelector("button[type=submit]").disabled = true;
   try {
     const thread = await api("POST", "/v1/threads", body);
     location.assign(`/threads/${thread.id}`);
   } catch (err) {
+    starting = false;
     showError("start-error", err);
-    submit.disabled = false;
+    const submit = document.querySelector("#start button[type=submit]");
+    if (submit !== null) submit.disabled = false;
   }
 });
 
+const typing = (el) => el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement || el instanceof HTMLSelectElement || el?.isContentEditable === true;
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
+    const form = event.target instanceof Element ? event.target.closest("#prompt, #start") : null;
+    if (form === null) return;
+    event.preventDefault();
+    form.requestSubmit();
+  } else if (event.key === "Escape" && document.body.dataset.open !== undefined) {
+    setOpen(null);
+  } else if (event.key === "n" && !event.metaKey && !event.ctrlKey && !event.altKey && !typing(event.target) && dialog?.open === false) {
+    // Browsers keep ⌘N for a new window, so the shortcut is the bare key.
+    event.preventDefault();
+    openStart(null);
+  }
+});
+
+// A filter shows the archived threads it matches, and folds them away again once it is cleared.
+const openedByFilter = new Set();
+function applyFilter() {
+  const query = filter?.value.trim().toLowerCase() ?? "";
+  for (const group of document.querySelectorAll("#side-threads .group")) {
+    for (const row of group.querySelectorAll("li")) {
+      row.hidden = query !== "" && !row.querySelector(".row-title").textContent.toLowerCase().includes(query);
+    }
+    for (const fold of group.querySelectorAll("details.archived")) {
+      const matched = query !== "" && fold.querySelector("li:not([hidden])") !== null;
+      if (matched && !fold.open) { fold.open = true; openedByFilter.add(fold.id); }
+      if (!matched && openedByFilter.delete(fold.id)) fold.open = false;
+    }
+    group.hidden = query !== "" && group.querySelector("li:not([hidden])") === null;
+  }
+}
+filter?.addEventListener("input", applyFilter);
+
+document.addEventListener("click", (event) => {
+  const button = event.target instanceof Element ? event.target.closest("button[data-copy]") : null;
+  if (button === null) return;
+  const range = document.createRange();
+  range.selectNodeContents(document.getElementById(button.dataset.copy));
+  const selection = getSelection();
+  selection.removeAllRanges();
+  selection.addRange(range);
+  // navigator.clipboard needs a secure context too. A failed copy leaves the text selected to copy by hand.
+  const copied = document.execCommand("copy");
+  if (copied) selection.removeAllRanges();
+  button.textContent = copied ? "Copied" : "Selected";
+  setTimeout(() => { button.textContent = "Copy"; }, 1500);
+});
+
+if (scroller !== null) scroller.scrollTop = scroller.scrollHeight;
+document.querySelector(".row.active")?.scrollIntoView({ block: "nearest" });
+if (dialog?.dataset.autoopen !== undefined) void openStart(null);
+setInterval(tick, 1000);
 if (pollMs > 0) {
   setInterval(() => { if (document.visibilityState === "visible") void refreshNow(); }, pollMs);
 }
