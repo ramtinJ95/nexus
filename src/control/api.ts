@@ -12,7 +12,7 @@ import { randomBytes } from "node:crypto";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { z } from "zod";
 import { actualState, type ActualState } from "../reconcile.ts";
-import { effectiveAllowedHosts, gitUrl, liveHashOf, withHttpsHosts, type BootInputs, type LiveSpec, type Project, type ProjectId, type PylonOverlay } from "../project.ts";
+import { effectiveAllowedHosts, gitUrl, liveHashOf, withHttpsHosts, type BootInputs, type Project, type ProjectId, type PylonOverlay } from "../project.ts";
 import type { NodeName, PylonId, TailnetNodeId } from "../protocol.ts";
 import type { HarnessHost } from "../harness/host.ts";
 import type { ImageId, ImageManifest } from "../images.ts";
@@ -20,6 +20,7 @@ import type { Whois } from "../tailscale.ts";
 import { newPylonRecord } from "../tick.ts";
 import type { Output, Preview, Registry, Session, Thread, ThreadId } from "./registry.ts";
 import { dashboard } from "./dashboard.ts";
+import { pylonLive } from "./live.ts";
 
 export interface ApiOptions {
   registry: Registry;
@@ -159,7 +160,6 @@ export async function startApi(options: ApiOptions): Promise<Api> {
     const id = newThreadId();
     const pylonId = `pylon-${id}` as PylonId;
     const branch = request.branch ?? project.defaultBranch;
-    const live: LiveSpec = { previews: [], overlay: [] };
     const conversationId = await harness.startThread({ threadId: id, pylonId });
     const t: Thread = {
       id, title: request.title, project: project.id, pylonId, status: "active", conversationId: String(conversationId), startedBy: caller, createdAt: now,
@@ -173,6 +173,8 @@ export async function startApi(options: ApiOptions): Promise<Api> {
       repo: { url: project.repoUrl, checkout: { branch, commit: request.commit ?? `origin/${branch}` } },
       dotfiles,
     };
+    // Ports are allocated once the pylon reports the services that want a preview.
+    const live = pylonLive({ pylonId, thread: id, node, boot }, project, registry.node(node)!, []);
     const { desired: _, ...pylon } = newPylonRecord({
       thread: id, pylonId, node, desired: "running",
       boot,

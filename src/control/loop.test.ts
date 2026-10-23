@@ -5,26 +5,31 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { startLoop, type Ingest, type Loop } from "./loop.ts";
-import { openRegistry, type Registry, type Thread, type ThreadId } from "./registry.ts";
+import { openRegistry, type PortRange, type Registry, type Thread, type ThreadId } from "./registry.ts";
 import { newPylonRecord } from "../tick.ts";
 import { envelope, ingest as realIngest } from "../reconcile.ts";
 import type {
   Job, JobEnvelope, JobErrorCode, JobId, JobStatus, LiveHash, NodeName, NodeObservation, ProbeClient, ProbeEvent, PylonId, PylonObservation, RunningFacts, ServiceFact, SessionFact, SubmitReply, TailnetNodeId,
 } from "../protocol.ts";
-import type { ProjectId } from "../project.ts";
+import { liveHashOf, type LiveSpec, type ProjectId } from "../project.ts";
 import type { ImageId } from "../images.ts";
 
-const node = "rj-firebat" as NodeName;
+const firebat = "rj-firebat" as NodeName;
+const node = firebat;
 const image: ImageId = "img-000000000000";
+const previewPorts: PortRange = { first: 10200, last: 10209 };
 
 /**
  * A node as its probe presents it. Jobs run until `finish` unless `autoFinish` is set. Like the real probe, a
  * finished job is announced by a job event first and by a fresh snapshot a moment later.
  */
-function fakeNode(options: { autoFinish: boolean }) {
+function fakeNode(options: { autoFinish: boolean; node?: NodeName }) {
+  const node = options.node ?? firebat;
   const pylons = new Map<PylonId, PylonObservation>();
   const jobs = new Map<JobId, { env: JobEnvelope; status: JobStatus }>();
   const submitted: Job[] = [];
+  /** Each pylon's LiveSpec as its last spawn applied it. */
+  const lives = new Map<PylonId, LiveSpec>();
   const streams = new Set<(event: ProbeEvent | null) => void>();
   let reachable = true;
 
@@ -37,13 +42,18 @@ function fakeNode(options: { autoFinish: boolean }) {
 
   function apply(job: Job) {
     switch (job.kind) {
-      case "spawn":
-        pylons.set(job.pylonId, {
+      case "spawn": {
+        // Like the probe, a spawn of a running pylon applies only its LiveSpec, and every spawn publishes the previews.
+        const was = pylons.get(job.pylonId);
+        const previews = job.live.previews.map((p) => ({ ...p, ready: true }));
+        pylons.set(job.pylonId, was?.phase === "running" ? { ...was, liveHash: job.liveHash, previews } : {
           pylonId: job.pylonId, phase: "running", liveHash: job.liveHash, bootedAt: new Date().toISOString(),
           bootedFrom: { image, checkpoint: job.boot.source.kind === "resume" ? job.boot.source.checkpoint : null },
-          services: [], previews: [], sessions: [], git: null, declaredOutputs: [], attachedClients: 0,
+          services: [], previews, sessions: [], git: null, declaredOutputs: [], attachedClients: 0,
         });
+        lives.set(job.pylonId, job.live);
         return;
+      }
       case "pause": pylons.set(job.pylonId, { pylonId: job.pylonId, phase: "stopped", checkpoint: job.checkpoint }); return;
       case "delete": pylons.delete(job.pylonId); return;
       default: throw new Error(`the fake node runs no ${job.kind} jobs`);
@@ -120,7 +130,7 @@ function fakeNode(options: { autoFinish: boolean }) {
   const setSessions = (pylonId: PylonId, sessions: readonly SessionFact[] | null) => setFacts(pylonId, { sessions });
 
   return {
-    probe, pylons, submitted, finish, setSessions, setServices: (pylonId: PylonId, services: readonly ServiceFact[] | null) => setFacts(pylonId, { services }),
+    probe, pylons, submitted, lives, finish, setSessions, setServices: (pylonId: PylonId, services: readonly ServiceFact[] | null) => setFacts(pylonId, { services }),
     running: () => [...jobs.values()].filter((j) => j.status.state === "running").map((j) => j.env.jobId),
     /** Drops every observe link and refuses calls until `reconnect`. */
     disconnect() { reachable = false; for (const push of streams) push(null); },
@@ -147,8 +157,8 @@ after(() => rm(dir, { recursive: true }));
 const tempDb = () => join(dir, `${randomUUID()}.db`);
 
 function seed(registry: Registry, activity: Partial<Pick<Thread, "agentTurnRunning" | "lastAgentActivityAt" | "lastHumanActivityAt">> = {}): Thread {
-  registry.upsertNode({ name: node, tailnetHost: "127.0.0.1", tailnetNodeId: "nFIREBAT" as TailnetNodeId });
-  registry.createProject({
+  registry.upsertNode({ name: node, tailnetHost: "rj-firebat.tail.ts.net", tailnetNodeId: "nFIREBAT" as TailnetNodeId });
+  if (registry.project("acme" as ProjectId) === undefined) registry.createProject({
     id: "acme" as ProjectId, repoUrl: "git@example.com:acme.git", defaultBranch: "main", defaultNode: node,
     resources: { cpus: 2, memoryGiB: 4, diskGiB: 10 }, allowedHosts: [], secrets: [], logins: [], preSetup: null,
   });
@@ -173,9 +183,9 @@ function seed(registry: Registry, activity: Partial<Pick<Thread, "agentTurnRunni
   return thread;
 }
 
-function run(t: import("node:test").TestContext, registry: Registry, probe: ProbeClient, overrides: { offlineAfterMs?: number; silenceMs?: number; ingest?: Ingest; log?: (line: string) => void } = {}): Loop {
+function run(t: import("node:test").TestContext, registry: Registry, probe: ProbeClient, overrides: { offlineAfterMs?: number; silenceMs?: number; ingest?: Ingest; previewPorts?: PortRange; log?: (line: string) => void } = {}): Loop {
   const loop = startLoop({
-    registry, probes: [probe], ingest: overrides.ingest ?? ingest, intervalMs: 10, reconnectMs: 10,
+    registry, probes: [probe], ingest: overrides.ingest ?? ingest, previewPorts: overrides.previewPorts ?? previewPorts, intervalMs: 10, reconnectMs: 10,
     offlineAfterMs: overrides.offlineAfterMs ?? 30_000, silenceMs: overrides.silenceMs ?? 30_000, log: overrides.log ?? assert.fail,
   });
   t.after(async () => {
@@ -382,7 +392,7 @@ test("a job in flight survives a control-plane restart: the new process asks the
 
   const before = openRegistry(path);
   const thread = seed(before);
-  const first = startLoop({ registry: before, probes: [fake.probe], ingest, intervalMs: 10, reconnectMs: 10, log: assert.fail });
+  const first = startLoop({ registry: before, probes: [fake.probe], ingest, previewPorts, intervalMs: 10, reconnectMs: 10, log: assert.fail });
   await until("the spawn is accepted", () => fake.running().length === 1);
   await first.close();
   before.close();
@@ -422,4 +432,118 @@ test("an envelope saved by a control plane that died mid-submit holds the pylon 
   await until("the pylon runs", () => fake.pylons.get(thread.pylonId)?.phase === "running");
   assert.deepEqual(fake.submitted.map((job) => job.kind), ["spawn"]);
   assert.equal(registry.pylon(thread.pylonId)?.attempts.count, 0);
+});
+
+const web: ServiceFact = { name: "web", state: "ready", port: 8000, declared: true, wantsPreview: true };
+const overlayFile = (live: LiveSpec | undefined, path: string) => live?.overlay.find((f) => f.path === path)?.content ?? "";
+const previewsIn = (live: LiveSpec | undefined) => JSON.parse(overlayFile(live, "/home/user/.nexus/pylon.json")).previews;
+
+test("a service that wants a preview gets a port, and the next spawn publishes it with an overlay that names its URL", async (t) => {
+  const registry = openRegistry(tempDb());
+  const thread = seed(registry);
+  const fake = fakeNode({ autoFinish: true });
+  run(t, registry, fake.probe, { ingest: realIngest });
+  await until("the pylon runs", () => fake.pylons.get(thread.pylonId)?.phase === "running");
+  assert.deepEqual(previewsIn(fake.lives.get(thread.pylonId)), [], "the first spawn already carries the overlay");
+
+  const worker: ServiceFact = { name: "worker", state: "ready", port: 9000, declared: true, wantsPreview: false };
+  fake.setServices(thread.pylonId, [web, worker]);
+  await until("the preview is ready", () => registry.previews(thread.pylonId).some((p) => p.ready));
+
+  assert.deepEqual(registry.previews(thread.pylonId), [{ pylon: thread.pylonId, service: "web", httpsPort: 10200, ready: true }]);
+  const live = fake.lives.get(thread.pylonId);
+  assert.deepEqual(live?.previews, [{ service: "web", httpsPort: 10200 }]);
+  assert.deepEqual(previewsIn(live), [{ service: "web", url: "https://rj-firebat.tail.ts.net:10200/" }]);
+  assert.match(overlayFile(live, "/home/user/.nexus/PYLON.md"), /- web: https:\/\/rj-firebat\.tail\.ts\.net:10200\//);
+  assert.equal(registry.pylon(thread.pylonId)?.liveHash, liveHashOf(live!));
+  assert.deepEqual(fake.submitted.map((job) => job.kind), ["spawn", "spawn"], "the running pylon gets the new LiveSpec in a second spawn");
+  assert.deepEqual(registry.outputs(thread.id).filter((o) => o.kind === "preview"), [{ thread: thread.id, kind: "preview", ref: "web" }]);
+});
+
+test("preview ports are unique on a node and keep their port across pause, a control-plane restart and wake", async (t) => {
+  const path = tempDb();
+  const fake = fakeNode({ autoFinish: true });
+  const before = openRegistry(path);
+  const a = seed(before);
+  const b = seed(before);
+  const first = startLoop({ registry: before, probes: [fake.probe], ingest: realIngest, previewPorts, intervalMs: 10, reconnectMs: 10, log: assert.fail });
+  await until("both pylons run", () => [a, b].every((th) => fake.pylons.get(th.pylonId)?.phase === "running"));
+  fake.setServices(a.pylonId, [web]);
+  await until("a's preview is ready", () => before.previews(a.pylonId)[0]?.ready === true);
+  fake.setServices(b.pylonId, [web]);
+  await until("b's preview is ready", () => before.previews(b.pylonId)[0]?.ready === true);
+  assert.deepEqual([a, b].map((th) => fake.lives.get(th.pylonId)?.previews), [[{ service: "web", httpsPort: 10200 }], [{ service: "web", httpsPort: 10201 }]]);
+
+  before.setThreadStatus(a.id, "archived");
+  await until("a is paused", () => fake.pylons.get(a.pylonId)?.phase === "stopped");
+  await until("a's preview is not ready", () => before.previews(a.pylonId)[0]?.ready === false);
+  await first.close();
+  before.close();
+
+  const after = openRegistry(path);
+  run(t, after, fake.probe, { ingest: realIngest });
+  assert.deepEqual(after.previews(a.pylonId), [{ pylon: a.pylonId, service: "web", httpsPort: 10200, ready: false }]);
+  after.setThreadStatus(a.id, "active");
+  after.recordActivity(a.id, { human: Date.now() });
+  await until("a's preview is ready again", () => after.previews(a.pylonId)[0]?.ready === true);
+  const wake = fake.submitted.at(-1)!;
+  assert.ok(wake.kind === "spawn" && wake.boot.source.kind === "resume", "the wake resumes a from its checkpoint");
+  assert.deepEqual(wake.live.previews, [{ service: "web", httpsPort: 10200 }], "the wake publishes the same port, though a reports no services yet");
+});
+
+test("a deleted thread's ports go back only once its node no longer has the pylon", async (t) => {
+  const registry = openRegistry(tempDb());
+  const thread = seed(registry);
+  const fake = fakeNode({ autoFinish: false });
+  const finishNext = async (kind: Job["kind"]) => {
+    await until(`a ${kind} job runs`, () => fake.running().length === 1 && fake.submitted.at(-1)?.kind === kind);
+    fake.finish(fake.running()[0]!);
+  };
+  run(t, registry, fake.probe, { ingest: realIngest });
+  await finishNext("spawn");
+  await until("the pylon runs", () => fake.pylons.get(thread.pylonId)?.phase === "running");
+  fake.setServices(thread.pylonId, [web]);
+  await finishNext("spawn");
+  await until("the preview is ready", () => registry.previews(thread.pylonId)[0]?.ready === true);
+
+  registry.setThreadStatus(thread.id, "deleted");
+  await until("the delete runs", () => fake.running().length === 1 && fake.submitted.at(-1)?.kind === "delete");
+  assert.deepEqual(registry.previews(thread.pylonId).map((p) => p.httpsPort), [10200], "the port is held while the node may still serve it");
+  fake.finish(fake.running()[0]!);
+  await until("the port is released", () => registry.previews(thread.pylonId).length === 0);
+});
+
+test("a used-up port range is logged, and the services that got a port are still published", async (t) => {
+  const registry = openRegistry(tempDb());
+  const thread = seed(registry);
+  const fake = fakeNode({ autoFinish: true });
+  const logged: string[] = [];
+  run(t, registry, fake.probe, { ingest: realIngest, previewPorts: { first: 10200, last: 10200 }, log: (line) => logged.push(line) });
+  await until("the pylon runs", () => fake.pylons.get(thread.pylonId)?.phase === "running");
+  fake.setServices(thread.pylonId, [web, { ...web, name: "api", port: 8001 }]);
+  await until("web is published", () => registry.previews(thread.pylonId)[0]?.ready === true);
+  assert.deepEqual(fake.lives.get(thread.pylonId)?.previews, [{ service: "web", httpsPort: 10200 }]);
+  assert.ok(logged.includes(`${thread.pylonId}: no https port is free for the preview of api: pylons on ${node} hold every port from 10200 to 10200`), logged.join("\n"));
+});
+
+test("a node reporting a pylon the registry places on another node gets no ports for it", async (t) => {
+  const registry = openRegistry(tempDb());
+  const thread = seed(registry);
+  const peer = "infra-testbench" as NodeName;
+  registry.upsertNode({ name: peer, tailnetHost: "infra-testbench.tail.ts.net", tailnetNodeId: "nTESTBENCH" as TailnetNodeId });
+  const home = fakeNode({ autoFinish: true });
+  const elsewhere = fakeNode({ autoFinish: true, node: peer });
+  const loop = startLoop({ registry, probes: [home.probe, elsewhere.probe], ingest: realIngest, previewPorts, intervalMs: 10, reconnectMs: 10, log: assert.fail });
+  t.after(async () => {
+    await loop.close();
+    registry.close();
+  });
+  await until("the pylon runs on its node", () => home.pylons.get(thread.pylonId)?.phase === "running");
+
+  elsewhere.pylons.set(thread.pylonId, { ...home.pylons.get(thread.pylonId)!, services: [] } as PylonObservation);
+  elsewhere.setServices(thread.pylonId, [web]);
+  await until("the copy is recorded as an orphan", () => registry.orphans().some((o) => o.node === peer));
+  await loop.wake(firebat);
+  assert.deepEqual(registry.previews(thread.pylonId), []);
+  assert.deepEqual(home.submitted.map((job) => job.kind), ["spawn"]);
 });
