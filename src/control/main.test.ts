@@ -7,7 +7,7 @@ const example = await readFile(new URL("../../deploy/control.example.json", impo
 
 test("the shipped example config parses", () => {
   const config = parseConfig(example);
-  assert.deepEqual(config.harness.model, { provider: "openai", modelId: "gpt-5.5" });
+  assert.deepEqual(config.harness.model, { provider: "openai", modelId: "gpt-6-astra" });
   assert.deepEqual(config.dotfiles, { repo: "https://github.com/example/dotfiles.git", ref: "main" });
 });
 

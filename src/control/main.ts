@@ -49,7 +49,7 @@ const configSchema = z.strictObject({
     storage: absolutePath,
     /** The model login and the device ID, such as /var/lib/nexus-control/harness-credentials.json. */
     credentials: absolutePath,
-    /** The model new threads start with, such as { "provider": "openai", "modelId": "gpt-5.5" }. */
+    /** The model new threads start with, such as { "provider": "openai", "modelId": "gpt-6-astra" }. */
     model: z.strictObject({ provider: z.string().min(1), modelId: z.string().min(1) }),
   }),
   tailscaledSocket: z.string().min(1).optional(),
