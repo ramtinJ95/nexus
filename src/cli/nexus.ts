@@ -190,7 +190,7 @@ function stateText(s: WatchState): string {
  * context whole, a later one that only appends prints each new entry, and any other change prints it whole again.
  * Then the thread's state when it changed. An unreachable or failing control plane is reported once and polled
  * through, so a live pane survives a restart of the control plane. Ends after the state that says the thread is
- * deleted.
+ * deleted, or once the process that started it is gone.
  */
 async function watch(api: Api, id: string, intervalMs: number, json: boolean): Promise<void> {
   for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"] as const) process.once(signal, () => process.exit(0));
@@ -199,6 +199,8 @@ async function watch(api: Api, id: string, intervalMs: number, json: boolean): P
     if (err.code !== "EPIPE") throw err;
     process.exit(0);
   });
+  // A consumer killed outright never closes the pipe, and an idle thread prints nothing that would find it closed.
+  const parent = process.ppid;
   const emit = (event: WatchEvent, text: string) => {
     if (json) process.stdout.write(`${JSON.stringify(event)}\n`);
     else if (text !== "") process.stdout.write(`${text}\n`);
@@ -244,6 +246,7 @@ async function watch(api: Api, id: string, intervalMs: number, json: boolean): P
       failing = err.message;
     }
     await sleep(intervalMs);
+    if (process.ppid !== parent) return;
   }
 }
 
