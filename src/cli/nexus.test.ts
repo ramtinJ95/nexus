@@ -18,7 +18,7 @@ import { fakeHarness } from "../control/fake-harness.ts";
 import { openRegistry, type Thread } from "../control/registry.ts";
 import type { ImageId, ImageManifest } from "../images.ts";
 import type { Project, ProjectId } from "../project.ts";
-import type { NodeName, TailnetNodeId } from "../protocol.ts";
+import type { NodeName, PylonCommand, PylonId, ServiceFact, TailnetNodeId } from "../protocol.ts";
 
 const cli = fileURLToPath(new URL("./nexus.ts", import.meta.url));
 const node = "rj-firebat" as NodeName;
@@ -93,7 +93,8 @@ async function setup(t: TestContext) {
   const api = await startApi({
     registry, host: "127.0.0.1", port: 0, whois: async () => caller, allowed: new Set([laptop]),
     hostnames: new Set([apiName, "127.0.0.1"]), dotfiles: { repo: "https://github.com/ramtin/dotfiles.git", ref: "main" },
-    harness: fake.harness, wake: () => {},
+    harness: fake.harness, wake: () => {}, previewPorts: { first: 10200, last: 10299 },
+    probes: new Map([[node, { command: async (_pylonId: PylonId, command: PylonCommand) => ({ kind: "link-port" as const, service: `port-${(command as { port: number }).port}` }) }]]),
   });
   t.after(async () => {
     await api.close();
@@ -243,6 +244,39 @@ function watchLines(t: TestContext, s: Awaited<ReturnType<typeof setup>>, args: 
   };
 }
 
+/** Reports the node online with the thread's pylon running these services and listening on these ports. */
+function observeRunning(s: Awaited<ReturnType<typeof setup>>, thread: Thread, services: ServiceFact[], ports: number[]) {
+  const capacity = { memoryGiB: 64, committedMemoryGiB: 0, diskFreeGiB: 100 };
+  s.registry.apply({ record: "node", node, state: "online", capacity });
+  s.registry.ingested({
+    node, observedAt: new Date().toISOString(), probeBootId: "b", capacity, artifacts: [], jobs: [], previewRoutes: [],
+    pylons: [{
+      pylonId: thread.pylonId, phase: "running", liveHash: s.registry.pylon(thread.pylonId)!.liveHash, bootedAt: "2027-01-01T00:00:00Z",
+      bootedFrom: { image: image.id, checkpoint: null }, services, listening: ports.map((port) => ({ port })), previews: [], sessions: [], git: null, declaredOutputs: [], attachedClients: 0,
+    }],
+  }, []);
+}
+
+test("ports lists what the pylon listens on, and preview publishes one and waits until it is served", async (t) => {
+  const s = await setup(t);
+  const thread: Thread = await s.json(["start", "--project", "acme", "--title", "ports"]);
+  assert.deepEqual(await s.json(["ports", thread.id]), [], "a pylon that does not run listens on nothing");
+  observeRunning(s, thread, [], [3000]);
+  assert.deepEqual(await s.json(["ports", thread.id]), [{ port: 3000, service: null, preview: null }]);
+  assert.equal((await s.nexus(["ports", thread.id])).stdout, `3000  -  -\n\`nexus preview ${thread.id} <port>\` publishes a port.\n`);
+
+  const preview = { pylon: thread.pylonId, service: "port-3000", httpsPort: 10200, ready: false, url: "https://rj-firebat.tail.ts.net:10200/" };
+  assert.deepEqual(await s.json(["preview", thread.id, "3000"]), preview, "the reply names the URL before it is served");
+  const waiting = s.json(["preview", thread.id, "3000", "--wait"]);
+  await new Promise((r) => setTimeout(r, 1500)); // the wait polls a published preview that is not served yet
+  observeRunning(s, thread, [{ name: "port-3000", state: "ready", port: 3000, declared: false, wantsPreview: true }], [3000]);
+  s.registry.apply({ record: "preview", pylonId: thread.pylonId, service: "port-3000", httpsPort: 10200, ready: true });
+  assert.deepEqual(await waiting, { ...preview, ready: true });
+  assert.equal((await s.nexus(["preview", thread.id, "3000", "--wait"])).stdout, `${preview.url}\n`);
+  assert.equal((await s.nexus(["ports", thread.id])).stdout, `3000  port-3000  ${preview.url}\n`);
+  assert.equal((await s.nexus(["preview", thread.id, "http"])).code, 64);
+});
+
 test("watch prints the backlog, then each new entry and state change, and ends when the thread is deleted", async (t) => {
   const s = await setup(t);
   const thread: Thread = await s.json(["start", "--project", "acme", "--message", "hi"]);
@@ -251,7 +285,7 @@ test("watch prints the backlog, then each new entry and state change, and ends w
 
   const first = await watch.next();
   assert.deepEqual([first.type, first.entries.map((e: any) => [e.entry.id, e.entry.kind, e.text])], ["reset", [[1, "pi.user", "> hi"]]], "the first poll prints the context whole");
-  const state = { type: "state", thread: thread.id, status: "active", run: "idle", parkedTasks: 0, queued: 0, pylon: "unknown", failed: null };
+  const state = { type: "state", thread: thread.id, status: "active", run: "idle", parkedTasks: 0, queued: 0, pylon: "unknown", failed: null, ports: [] };
   assert.deepEqual(await watch.next(), state);
   const quiet = { type: "live", thread: thread.id, queued: [], tools: [], partial: null, retry: null };
   assert.deepEqual(await watch.next(), quiet, "the run in flight follows the first state");

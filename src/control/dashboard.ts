@@ -17,7 +17,6 @@ import { desiredPhase, type ActualState, type DesiredPhase } from "../reconcile.
 import type { SessionFact } from "../protocol.ts";
 import type { SessionHarness } from "../project.ts";
 import type { ThreadDetail } from "./api.ts";
-import { previewUrl } from "./live.ts";
 import type { NodeRecord, Output, Preview, Registry, Thread, ThreadId } from "./registry.ts";
 
 export interface DashboardOptions {
@@ -342,7 +341,7 @@ function threadPage(c: Context, d: ThreadDetail, node: NodeRecord, view: Convers
 <span class="chip chip-${tone}">${dot(tone)}<span class="chip-label">${label}</span></span>
 ${actions.length > 0 && html`<div class="bar-actions" id="thread-actions">${actions}</div><button type="button" class="icon-btn more" data-open="actions" aria-label="Thread actions" aria-controls="thread-actions">⋯</button>`}
 </header>
-<div class="strip" id="strip" data-live>${strip(d, node)}</div>
+<div class="strip" id="strip" data-live>${strip(d)}</div>
 <div class="scroll" id="scroll"><div class="convo" id="convo" data-live>
 <p class="convo-meta"><code>${t.id}</code> · started ${ago(t.createdAt, c.now)}${read !== null && modelOf(read) !== null && html` · ${modelOf(read)}`}</p>
 ${view === null ? html`<p class="empty">${t.status === "deleted" ? "The thread is deleted, so its conversation is gone." : "This thread has no agent conversation."}</p>`
@@ -359,24 +358,36 @@ ${view === null ? html`<p class="empty">${t.status === "deleted" ? "The thread i
   });
 }
 
+/** Gondolin's ingress connects only to the pylon's 127.0.0.1, so a server bound only to ::1 is neither listed nor reachable. */
+const unreachableHint = "A server bound only to ::1 can't be previewed, so bind it to 0.0.0.0 or 127.0.0.1.";
+
+/**
+ * Each preview is listed once, under Previews, so the outputs leave out those it lists. A preview output stays for
+ * one the control plane no longer has.
+ */
+const outputsOf = (d: ThreadDetail) => d.outputs.filter((o) => o.kind !== "preview" || !d.previews.some((p) => p.service === o.ref));
+
 /** The phone's stand-in for the inspector: the pylon, each preview as a link where it has one, and the outputs. */
-function strip(d: ThreadDetail, node: NodeRecord): Html {
+function strip(d: ThreadDetail): Html {
+  const outputs = outputsOf(d).length;
   const [label, tone] = actualBadge[d.pylon.actualState];
   return html`<button type="button" class="mini" data-open="inspect">${dot(tone)}${label} · ${d.pylon.node}</button>
 ${d.previews.map((p) => {
   const look = previewLook[previewState(d, p)];
   return look.linked
-    ? html`<a class="mini mini-${look.tone}" href="${previewUrl(node, p.httpsPort)}" target="_blank" rel="noopener">${p.service}${look.label !== null && `, ${look.label}`} ↗</a>`
+    ? html`<a class="mini mini-${look.tone}" href="${p.url}" target="_blank" rel="noopener">${p.service}${look.label !== null && `, ${look.label}`} ↗</a>`
     : html`<span class="mini mini-${look.tone}">${p.service}, ${look.label}</span>`;
 })}
-<button type="button" class="mini" data-open="inspect">${d.outputs.length} ${d.outputs.length === 1 ? "output" : "outputs"}</button>`;
+<button type="button" class="mini" data-open="inspect">${outputs} ${outputs === 1 ? "output" : "outputs"}</button>`;
 }
 
 function inspector(d: ThreadDetail, node: NodeRecord, now: number): Html {
   const { thread: t, pylon } = d;
   const desired = desiredPhase(t, now);
-  const previewOf = new Map(d.previews.map((p) => [p.service, p]));
-  const host = (port: number) => previewUrl(node, port).replace(/^https:\/\//, "").replace(/\/$/, "");
+  const outputs = outputsOf(d);
+  // A port with a preview is listed under Previews. Ports lists the rest, which are published only when someone opens one.
+  const unpublished = d.ports?.filter((l) => l.preview === null) ?? null;
+  const host = (url: string) => url.replace(/^https:\/\//, "").replace(/\/$/, "");
   const count = (n: number) => html`<span class="count">${n}</span>`;
   return html`<aside class="inspect" id="inspect" data-live aria-label="Pylon details">
 <button type="button" class="icon-btn inspect-close" data-close aria-label="Close details">✕</button>
@@ -396,17 +407,24 @@ ${pylon.failed !== null && html`<p class="error">The planner gave up: ${pylon.fa
 ${d.previews.length === 0 ? html`<p class="empty">No previews.</p>` : html`<ul class="list">${d.previews.map((p) => {
   const look = previewLook[previewState(d, p)];
   return html`<li class="pv pv-${look.tone}">
-<div class="pv-top">${dot(look.tone)}<span class="pv-name">${p.service}</span>${look.label !== null && html`<span class="pv-note">${look.label}</span>`}${look.linked && html`<a class="btn btn-xs" href="${previewUrl(node, p.httpsPort)}" target="_blank" rel="noopener" aria-label="Open ${p.service}">Open ↗</a>`}</div>
-<div class="pv-url">${host(p.httpsPort)}</div>
+<div class="pv-top">${dot(look.tone)}<span class="pv-name">${p.service}</span>${look.label !== null && html`<span class="pv-note">${look.label}</span>`}${look.linked && html`<a class="btn btn-xs" href="${p.url}" target="_blank" rel="noopener" aria-label="Open ${p.service}">Open ↗</a>`}</div>
+<div class="pv-url">${host(p.url)}</div>
 ${look.hint !== null && html`<div class="pv-hint">${look.hint}</div>`}
 </li>`;
 })}</ul>`}
 </section>
-<section aria-labelledby="outputs-h"><h2 id="outputs-h">Outputs ${count(d.outputs.length)}</h2>
-${d.outputs.length === 0 ? html`<p class="empty">No outputs yet.</p>` : html`<ul class="list outs">${d.outputs.map((o) => {
-  const preview = o.kind === "preview" ? previewOf.get(o.ref) : undefined;
-  return html`<li><span class="o-kind">${outputLabel[o.kind]}</span>${preview !== undefined && previewLook[previewState(d, preview)].linked ? html`<a href="${previewUrl(node, preview.httpsPort)}" target="_blank" rel="noopener"><code>${o.ref}</code> ↗</a>` : html`<code>${o.ref}</code>`}</li>`;
-})}</ul>`}
+<section aria-labelledby="ports-h"><h2 id="ports-h">Ports ${count(unpublished?.length ?? 0)}</h2>
+${unpublished === null ? html`<p class="empty">The pylon's ports could not be read.</p>`
+  : unpublished.length > 0 ? html`<ul class="list">${unpublished.map((l) => html`<li class="pv pv-muted">
+<div class="pv-top">${dot("muted")}<span class="pv-name">${l.port}</span>${l.service === null
+  ? html`<button type="button" class="btn btn-xs" data-action="link-port" data-thread="${t.id}" data-port="${l.port}" aria-label="Open port ${l.port}">Open</button>`
+  : html`<span class="pv-note">${l.service}</span>`}</div>
+</li>`)}</ul>`
+  : pylon.actualState !== "running" ? html`<p class="empty">Ports show while the pylon runs.</p>`
+  : html`<p class="empty">${d.ports?.length === 0 ? "Nothing listens yet." : "Every port that listens is under Previews."} ${unreachableHint}</p>`}
+</section>
+<section aria-labelledby="outputs-h"><h2 id="outputs-h">Outputs ${count(outputs.length)}</h2>
+${outputs.length === 0 ? html`<p class="empty">No outputs yet.</p>` : html`<ul class="list outs">${outputs.map((o) => html`<li><span class="o-kind">${outputLabel[o.kind]}</span><code>${o.ref}</code></li>`)}</ul>`}
 </section>
 <section aria-labelledby="sessions-h"><h2 id="sessions-h">Sessions ${count(d.sessions.length)}</h2>
 ${d.sessions.length === 0 ? html`<p class="empty">No sessions.</p>` : html`<ul class="list outs">${d.sessions.map((s) => html`<li>

@@ -6,8 +6,9 @@
  * them) over a temporary directory. Its harness uses the scripted model from src/harness/test-fixture.ts, so
  * no model login is needed. It drives the node's running probe only through the control plane's HTTP API:
  * start a thread, run a tool in its pylon, have the agent declare a service with a preview, fetch the preview's
- * https URL from this node, archive the thread so the pylon pauses, unarchive it so the pylon wakes, runs a second
- * tool and serves the preview on the same URL, then delete it. A second thread, on a repository that does not exist,
+ * https URL from this node, have the agent start an unsupervised server that the thread's ports list, link that port
+ * as a human would and fetch its preview, archive the thread so the pylon pauses, unarchive it so the pylon wakes,
+ * runs a second tool and serves both previews on the same URLs once the agent starts the server again, then delete it. A second thread, on a repository that does not exist,
  * fails setup, which removes its instance, and a human retry boots it fresh and runs a second setup job, which fails again. The probe's auth.controlPlane must be this node's own
  * stable node ID, and its config must set `previews`. With holdSeconds it prints the preview URL and holds that long,
  * so another tailnet device can open it. Deleting the thread must leave `tailscale serve` as the check found it.
@@ -192,6 +193,32 @@ async function openPreview(token: string): Promise<{ url: string; httpsPort: num
   return { url, httpsPort: preview.httpsPort };
 }
 
+const linkedPort = 3456;
+/** Unique to this run, so an answer holding it came from the server this check started, whatever the repo holds. */
+const marker = `nexus-proof-${randomBytes(6).toString("hex")}`;
+/**
+ * Serves a directory that holds only the marker file, written again at each start because /tmp may not outlive
+ * a pause. Detached, because the agent's bash call ends before the server does.
+ */
+const startServer = `mkdir -p /tmp/node-check-http && echo ${marker} > /tmp/node-check-http/nexus-proof.txt && cd /tmp/node-check-http && setsid nohup python3 -m http.server ${linkedPort} </dev/null >/tmp/node-check-http.log 2>&1 & sleep 1; echo started`;
+
+/** Fetches the marker through a linked port's preview URL from this node until the server answers with it. */
+async function fetchMarker(url: string): Promise<void> {
+  const file = new URL("nexus-proof.txt", url).href;
+  let last = "no answer yet";
+  await until(`${file} answers with the marker`, 2 * 60_000, async () => {
+    try {
+      const res = await fetch(file, { signal: AbortSignal.timeout(15_000) });
+      const text = await res.text();
+      last = `HTTP ${res.status}: ${text.slice(0, 200)}`;
+      return res.status === 200 && text.trim() === marker ? true : undefined;
+    } catch (err) {
+      last = (err as Error).message;
+      return undefined;
+    }
+  }).catch((err: Error) => { throw new Error(`${err.message}. Last answer: ${last}`); });
+}
+
 /** Deletes the thread, then waits for its pylon to be absent and its instance directory to be gone. Returns that directory. */
 async function deleteThread(pylonId: string): Promise<string> {
   await expect(200, "DELETE", `/threads/${threadId}`);
@@ -301,8 +328,10 @@ try {
   threadId = thread.id;
   pass(`start thread ${threadId} on ${probeConfig.node} from ${image}`);
 
-  await reaches("running", 10 * 60_000);
+  const booted = await reaches("running", 10 * 60_000);
   pass("the pylon boots and runs");
+  const quiet = await until("the node reports the pylon's ports", 60_000, async () => (await detail()).ports ?? undefined);
+  pass(`a fresh pylon lists these ports, which should be none of Nexus's own: ${JSON.stringify(quiet)} (observed ${booted.pylon.observedAt})`);
 
   const first = await runTool("msg:node-check-1", "uname -s; pwd; ls; echo kept-across-pause > /home/user/.node-check");
   assertIncludes(first, "Linux", "/home/user/workspace/repo", "README.md");
@@ -323,8 +352,23 @@ try {
   const info = await runTool("msg:node-check-info", `nexus info --json | python3 -c 'import json, sys; print("info", json.load(sys.stdin)["previews"])'; grep -F web: /home/user/.nexus/PYLON.md`);
   assertIncludes(info, `info [{'service': 'web', 'url': '${preview.url}'}]`, `- web: ${preview.url}`);
   pass("pylon.json and PYLON.md name the preview URL");
+
+  await runTool("msg:node-check-server", startServer);
+  const listed = await until(`the thread's ports list ${linkedPort}`, 60_000, async () => (await detail()).ports?.find((l) => l.port === linkedPort));
+  assert.deepEqual(listed, { port: linkedPort, service: null, preview: null }, "an unpublished listening port has no service and no preview");
+  const ports = (await detail()).ports!;
+  assert.ok(ports.some((l) => l.service === "web" && l.preview?.url === preview.url), `the declared service's port carries its preview: ${JSON.stringify(ports)}`);
+  pass(`the thread's ports list ${linkedPort} unpublished, and web's port with its preview: ${JSON.stringify(ports)}`);
+  const linked = await expect(200, "POST", `/threads/${threadId}/previews`, { port: linkedPort }) as ThreadDetail["previews"][number];
+  assert.equal(linked.service, `port-${linkedPort}`);
+  assert.equal(linked.url, `https://${dnsName}:${linked.httpsPort}/`, "the reply names the URL at once");
+  assert.deepEqual(await expect(200, "POST", `/threads/${threadId}/previews`, { port: linkedPort }), linked, "linking again answers the same preview");
+  pass(`linking ${linkedPort} answers ${linked.url} at once, and again the same`);
+  await until(`the preview of ${linkedPort} is ready`, 3 * 60_000, async () => (await detail()).ports?.find((l) => l.port === linkedPort)?.preview?.ready || undefined);
+  await fetchMarker(linked.url);
+  pass(`the linked port is served at ${linked.url}, fetched from this node`);
   if (holdMs > 0) {
-    console.log(`OPEN ${preview.url} from another tailnet device. Holding ${holdMs / 1000} s`);
+    console.log(`OPEN ${preview.url} and ${linked.url} from another tailnet device. Holding ${holdMs / 1000} s`);
     await delay(holdMs);
   }
 
@@ -353,6 +397,12 @@ try {
   const woken = await openPreview(token);
   assert.equal(woken.url, preview.url, "the preview keeps its URL across the pause");
   pass(`after the wake the service is served again at ${woken.url}`);
+
+  // The wake lost the unsupervised server with the VM's memory, and the pylon must still route its preview.
+  await runTool("msg:node-check-server-again", startServer);
+  await fetchMarker(linked.url);
+  assert.deepEqual((await detail()).previews.find((p) => p.service === `port-${linkedPort}`)?.url, linked.url, "the linked preview keeps its URL across the pause");
+  pass(`after the wake and a restart of the server, the linked port is served again at ${linked.url}`);
 
   pass(`deleting the thread removes ${await deleteThread(thread.pylonId)}`);
 

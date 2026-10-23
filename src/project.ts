@@ -29,6 +29,13 @@ export interface ServicesFile {
   services: Record<ServiceName, ServiceDecl>;
 }
 export type ServiceName = string; // /^[a-z0-9][a-z0-9-]{0,31}$/
+/** The name a port linked with `nexus preview <port>` is reported and previewed under. */
+export const linkedName = (port: number): ServiceName => `port-${port}`;
+/**
+ * Nexus's own listeners in every pylon: the sshd that Gondolin's enableSsh starts for streams and terminals. They
+ * are never reported as listening, and never linked.
+ */
+export const reservedPorts: ReadonlySet<number> = new Set([22]);
 export interface ServiceDecl {
   command: string; // foreground, run as `user` through a login shell
   cwd?: string; // relative to the repo root, default "."

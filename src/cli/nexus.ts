@@ -12,13 +12,13 @@ import { parseArgs, type ParseArgsOptionsConfig } from "node:util";
 import { z } from "zod";
 import type { ImageContent, Message, TextContent } from "@earendil-works/pi-ai";
 import type { ConversationView, EntryRecord, InboxState, LiveState } from "@earendil-works/pi-durable";
-import type { NodeSummary, ThreadDetail, ThreadRow } from "../control/api.ts";
-import type { Thread } from "../control/registry.ts";
+import type { ListeningPort, NodeSummary, ThreadDetail, ThreadRow } from "../control/api.ts";
+import type { Preview, Thread } from "../control/registry.ts";
 import type { Project } from "../project.ts";
 import type { ActualState } from "../reconcile.ts";
 import { call, CliError, exitCodes, type Endpoint, type HostPort } from "./transport.ts";
 
-const version = "0.1.0";
+const version = "0.2.0";
 const defaults = { url: "http://rj-firebat.tailc817d3.ts.net:7470", socks: "localhost:1055" };
 const configFile = () => join(homedir(), ".config", "nexus", "cli.json");
 
@@ -26,6 +26,8 @@ const usage = `nexus ${version}, the Nexus control plane from this Mac
 
   nexus threads [--project P] [--all]          threads, without deleted ones unless --all
   nexus show <thread>                          a thread with its pylon, sessions, previews and outputs
+  nexus ports <thread>                         the TCP ports the pylon listens on, and each one's preview
+  nexus preview <thread> <port> [--wait]       publish a port as a preview, and print its URL
   nexus conversation <thread>                  the agent's transcript
   nexus start --project P [--title T] [--message M] [--node N] [--branch B] [--commit C]
   nexus send <thread> <text...> [--steer] [--request-id ID]
@@ -106,7 +108,7 @@ function conversationText(view: ConversationView): string {
   return parts.length === 0 ? "No messages yet." : parts.join("\n\n");
 }
 
-function detailText({ thread: t, pylon: p, agent, sessions, previews, outputs }: ThreadDetail): string {
+function detailText({ thread: t, pylon: p, agent, sessions, previews, ports, outputs }: ThreadDetail): string {
   const observed = p.observedAt === null ? "" : `, observed ${ago(Date.parse(p.observedAt))}`;
   return [
     `${t.id}  ${t.title}`,
@@ -117,9 +119,36 @@ function detailText({ thread: t, pylon: p, agent, sessions, previews, outputs }:
     ...p.retryRefused === null ? [] : [`retry refused: ${p.retryRefused}`],
     ...(agent?.parkedTasks ?? 0) === 0 ? [] : [`parked tasks: ${agent!.parkedTasks}. \`nexus retry ${t.id}\` runs them again`],
     ...sessions.map((s) => `session: ${s.harness} in pane ${s.herdrPane}, ${s.status}`),
-    ...previews.map((v) => `preview: ${v.service} on https port ${v.httpsPort}${v.ready ? "" : ", not ready"}`),
+    ...previews.map((v) => `preview: ${v.service} at ${v.url}${v.ready ? "" : ", not ready"}`),
+    ...(ports ?? []).map((l) => `port: ${l.port}${l.service === null ? "" : `, service ${l.service}`}${l.preview === null ? "" : `, previewed at ${l.preview.url}`}`),
     ...outputs.map((o) => `output: ${o.kind} ${o.ref}`),
   ].join("\n");
+}
+
+function portsText(ports: ThreadDetail["ports"], id: string): string {
+  if (ports === null) return "The pylon's listening ports could not be read.";
+  if (ports.length === 0) return "No listening ports. A server bound only to ::1 can't be previewed, so bind it to 0.0.0.0 or 127.0.0.1.";
+  return [
+    table(ports.map((l) => [String(l.port), l.service ?? "-", l.preview === null ? "-" : `${l.preview.url}${l.preview.ready ? "" : " (not served yet)"}`])),
+    ...ports.some((l) => l.preview === null) ? [`\`nexus preview ${id} <port>\` publishes a port.`] : [],
+  ].join("\n");
+}
+
+const waitMs = 120_000;
+const waitPollMs = 1_000;
+
+/** Polls the thread until its node reports the port listening and its preview published and warmed. */
+async function served(api: Api, id: string, port: number): Promise<Preview> {
+  const deadline = Date.now() + waitMs;
+  for (;;) {
+    const d = await api("GET", thread(id)) as ThreadDetail;
+    const preview = d.ports?.find((l) => l.port === port)?.preview;
+    if (preview?.ready === true) return preview;
+    if (Date.now() >= deadline) {
+      throw new CliError("failed", `port ${port} of ${id} was not served within ${waitMs / 1000} s. \`nexus ports ${id}\` shows whether it listens and whether its preview is published`);
+    }
+    await sleep(waitPollMs);
+  }
 }
 
 const threadRow = (t: ThreadRow) => [t.id, t.status, t.agentTurnRunning ? "working" : "-", `pylon ${t.pylon.actualState}`, t.project, ago(t.createdAt), t.title];
@@ -161,6 +190,8 @@ export interface WatchState {
   queued: number;
   pylon: ActualState;
   failed: string | null;
+  /** ThreadDetail's ports. */
+  ports: ThreadDetail["ports"];
 }
 /** What watch reports of the run in flight, as one event whenever any of it changes. */
 export interface WatchLive {
@@ -189,7 +220,7 @@ function stateOf(d: ThreadDetail, view: ConversationView | null): WatchState {
   return {
     type: "state", thread: d.thread.id, status: d.thread.status,
     run: parkedTasks > 0 ? "parked" : view !== null && busy(view) ? "working" : "idle",
-    parkedTasks, queued: view === null ? 0 : queuedTexts(view).length, pylon: d.pylon.actualState, failed: d.pylon.failed,
+    parkedTasks, queued: view === null ? 0 : queuedTexts(view).length, pylon: d.pylon.actualState, failed: d.pylon.failed, ports: d.ports,
   };
 }
 
@@ -206,7 +237,8 @@ function liveOf(id: string, view: ConversationView | null): WatchLive {
 
 function stateText(s: WatchState): string {
   const run = s.run === "working" ? ", agent working" : s.run === "parked" ? `, ${s.parkedTasks} parked tasks hold the run` : "";
-  return `-- ${s.status}, pylon ${s.pylon}${s.failed === null ? "" : ` (${s.failed})`}${run}${s.queued === 0 ? "" : `, ${s.queued} queued`}`;
+  const ports = (s.ports ?? []).map((l: ListeningPort) => l.preview?.ready === true ? `${l.port} at ${l.preview.url}` : String(l.port));
+  return `-- ${s.status}, pylon ${s.pylon}${s.failed === null ? "" : ` (${s.failed})`}${run}${s.queued === 0 ? "" : `, ${s.queued} queued`}${ports.length === 0 ? "" : `, listening on ${ports.join(", ")}`}`;
 }
 
 /**
@@ -297,6 +329,24 @@ const commands: Readonly<Record<string, Command>> = {
     async run(api, [id]) {
       const d = await api("GET", thread(id!)) as ThreadDetail;
       return { json: d, text: detailText(d) };
+    },
+  },
+  ports: {
+    args: [1, 1],
+    async run(api, [id]) {
+      const d = await api("GET", thread(id!)) as ThreadDetail;
+      return { json: d.ports, text: portsText(d.ports, id!) };
+    },
+  },
+  preview: {
+    args: [2, 2],
+    options: { wait: { type: "boolean" } },
+    async run(api, [id, given], v) {
+      const port = Number(given);
+      if (!Number.isInteger(port) || port < 1 || port > 65535) throw new CliError("invalid", `the port must be a whole number from 1 to 65535, got ${given}`);
+      const linked = await api("POST", `${thread(id!)}/previews`, { port }) as Preview;
+      const preview = v.wait === true ? await served(api, id!, port) : linked;
+      return { json: preview, text: preview.ready ? preview.url : `${preview.url} (not served yet. \`--wait\` waits until it is)` };
     },
   },
   conversation: {

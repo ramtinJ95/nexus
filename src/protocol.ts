@@ -20,7 +20,7 @@ import { Agent, request, type IncomingMessage } from "node:http";
 import { PassThrough, type Duplex, type Readable } from "node:stream";
 import { setTimeout as delay } from "node:timers/promises";
 import { localApiWhois, type Whois } from "./tailscale.ts";
-import type { BootInputs, LiveSpec, SessionHarness } from "./project.ts";
+import { reservedPorts, type BootInputs, type LiveSpec, type SessionHarness } from "./project.ts";
 import type { ArtifactManifest, CheckpointId, ImageId, ImageRecipe, PortableArtifactId, ArtifactId, TemplateBuildInputs, TemplateId } from "./images.ts";
 
 declare const brand: unique symbol;
@@ -156,6 +156,8 @@ export interface RunningFacts {
   bootedAt: string;
   bootedFrom: { image: ImageId; checkpoint: CheckpointId | null };
   services: readonly ServiceFact[] | null; // null when the supervisor could not be read
+  /** TCP ports the guest listens on that a preview can reach, whether or not one does. Null when they could not be read. */
+  listening: readonly ListeningFact[] | null;
   previews: readonly { service: string; httpsPort: number; ready: boolean }[];
   sessions: readonly SessionFact[] | null; // null when Herdr could not be read. No Herdr server is an empty list
   git: GitFacts | null; // null until the first poll, or when the checkout is missing
@@ -165,6 +167,7 @@ export interface RunningFacts {
 }
 
 export interface ServiceFact { name: string; state: "starting" | "ready" | "failed" | "stopped"; port: number; declared: boolean; wantsPreview: boolean }
+export interface ListeningFact { port: number }
 /** `unknown` is Herdr's word for a pane it cannot classify, which every plain shell is. */
 export interface SessionFact { herdrPane: string; harness: SessionHarness; harnessSessionId: string | null; status: "working" | "idle" | "blocked" | "done" | "unknown" }
 export interface GitFacts { head: string; branch: string | null; dirty: boolean; branches: readonly { name: string; head: string; pushedAs: string | null }[] }
@@ -188,13 +191,17 @@ export type PylonCommand =
   | { kind: "exec"; argv: readonly string[]; cwd: string; timeoutMs: number }
   | { kind: "open-session"; harness: SessionHarness; title: string; resume?: string }
   | { kind: "close-session"; herdrPane: string }
-  | { kind: "service"; op: "ensure" | "restart" | "stop" | "logs"; name?: string; lines?: number };
+  | { kind: "service"; op: "ensure" | "restart" | "stop" | "logs"; name?: string; lines?: number }
+  /** Previews a port that already listens, or will, as `nexus preview <port>` in the pylon does. Safe to repeat. */
+  | { kind: "link-port"; port: number };
 
 export type CommandResult =
   | { kind: "exec"; exitCode: number | null; output: string; truncated: boolean }
   | { kind: "open-session"; herdrPane: string }
   | { kind: "close-session" }
-  | { kind: "service"; services: readonly ServiceFact[]; logs?: string };
+  | { kind: "service"; services: readonly ServiceFact[]; logs?: string }
+  /** The service the port is previewed under: `port-<port>`, or the service that already owns the port. */
+  | { kind: "link-port"; service: string };
 
 /**
  * `pty: null` is a raw pipe, such as the pi-env daemon. Its stream carries the process's stdout only, and its
@@ -683,6 +690,10 @@ export function parsePylonCommand(body: string): PylonCommand {
       if (c.name !== undefined) string(c.name, "command.name");
       if (c.lines !== undefined && (!Number.isInteger(c.lines) || (c.lines as number) < 1)) throw new Error("command.lines is not a positive integer");
       break;
+    case "link-port":
+      if (!Number.isInteger(c.port) || (c.port as number) < 1 || (c.port as number) > 65535) throw new Error("command.port is not an integer from 1 to 65535");
+      if (reservedPorts.has(c.port as number)) throw new Error(`command.port ${c.port as number} is Nexus's own`);
+      break;
     default: throw new Error(`unknown command kind ${JSON.stringify(c.kind)}`);
   }
   return c as unknown as PylonCommand;
@@ -692,6 +703,7 @@ function parseCommandResult(command: PylonCommand, body: string): CommandResult 
   const r = record(JSON.parse(body), "command result");
   if (r.kind !== command.kind) throw new Error(`a ${command.kind} command got a ${JSON.stringify(r.kind)} result`);
   if (r.kind === "open-session") string(r.herdrPane, "result.herdrPane");
+  if (r.kind === "link-port") string(r.service, "result.service");
   return r as unknown as CommandResult;
 }
 
@@ -711,6 +723,7 @@ function parsePylonObservation(value: unknown): PylonObservation {
   string(p.pylonId, "pylon.pylonId");
   if (!pylonPhases.has(p.phase)) throw new Error(`unknown pylon phase ${JSON.stringify(p.phase)}`);
   if (p.phase === "broken" && !brokenCauses.has(p.cause)) p.cause = "unknown";
+  if (p.phase === "running") p.listening ??= null; // from a probe older than the field
   return p as unknown as PylonObservation;
 }
 

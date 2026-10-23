@@ -34,7 +34,7 @@ const live = { previews: [], overlay: [] };
 
 const running = (hash: LiveHash | null): PylonObservation => ({
   pylonId, phase: "running", liveHash: hash, bootedAt: "2027-01-01T00:00:00Z", bootedFrom: { image, checkpoint: null },
-  services: [], previews: [], sessions: [], git: null, declaredOutputs: [], attachedClients: 0,
+  services: [], listening: [], previews: [], sessions: [], git: null, declaredOutputs: [], attachedClients: 0,
 });
 const stopped = (checkpoint: CheckpointId | null): PylonObservation => ({ pylonId, phase: "stopped", checkpoint });
 const broken: PylonObservation = { pylonId, phase: "broken", detail: "qcow2 header unreadable", cause: "controller" };

@@ -185,7 +185,7 @@ export function createDockerBackend(options: DockerBackendOptions): VmBackend {
         return { services: await services.operate(pylonId, op, name) };
       },
       startService: notYet("startService"),
-      linkPort: notYet("linkPort"),
+      linkPort: (port) => services.link(pylonId, port),
       previewOrigin: (service) => services.origin(pylonId, service),
     };
   }

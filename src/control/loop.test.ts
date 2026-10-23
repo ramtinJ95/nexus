@@ -9,7 +9,7 @@ import { openRegistry, type PortRange, type Registry, type Thread, type ThreadId
 import { newPylonRecord } from "../tick.ts";
 import { envelope, ingest as realIngest } from "../reconcile.ts";
 import type {
-  BrokenCause, Job, JobEnvelope, JobErrorCode, JobId, JobStatus, LiveHash, NodeName, NodeObservation, PreviewRouteFact, ProbeClient, ProbeEvent, PylonId, PylonObservation, RunningFacts, ServiceFact, SessionFact, SubmitReply, TailnetNodeId,
+  BrokenCause, Job, JobEnvelope, JobErrorCode, JobId, JobStatus, ListeningFact, LiveHash, NodeName, NodeObservation, PreviewRouteFact, ProbeClient, ProbeEvent, PylonId, PylonObservation, RunningFacts, ServiceFact, SessionFact, SubmitReply, TailnetNodeId,
 } from "../protocol.ts";
 import { liveHashOf, type LiveSpec, type ProjectId } from "../project.ts";
 import type { CheckpointId, ImageId } from "../images.ts";
@@ -63,7 +63,7 @@ function fakeNode(options: { autoFinish: boolean; node?: NodeName; reportsRoutes
         pylons.set(job.pylonId, was?.phase === "running" ? { ...was, liveHash: job.liveHash, previews } : {
           pylonId: job.pylonId, phase: "running", liveHash: job.liveHash, bootedAt: new Date().toISOString(),
           bootedFrom: { image, checkpoint: job.boot.source.kind === "resume" ? job.boot.source.checkpoint : null },
-          services: [], previews, sessions: [], git: null, declaredOutputs: [], attachedClients: 0,
+          services: [], listening: [], previews, sessions: [], git: null, declaredOutputs: [], attachedClients: 0,
         });
         lives.set(job.pylonId, job.live);
         unroute(job.pylonId);
@@ -167,7 +167,7 @@ function fakeNode(options: { autoFinish: boolean; node?: NodeName; reportsRoutes
   };
 
   /** Changes a running pylon's guest facts, and announces it with a snapshot as the probe does after a job. */
-  function setFacts(pylonId: PylonId, facts: Partial<Pick<RunningFacts, "sessions" | "services">>) {
+  function setFacts(pylonId: PylonId, facts: Partial<Pick<RunningFacts, "sessions" | "services" | "listening">>) {
     const pylon = pylons.get(pylonId);
     assert.ok(pylon?.phase === "running");
     pylons.set(pylonId, { ...pylon, ...facts });
@@ -188,6 +188,7 @@ function fakeNode(options: { autoFinish: boolean; node?: NodeName; reportsRoutes
 
   return {
     probe, pylons, submitted, lives, routes, finish, setSessions, breakPylon, stopOnFailedSetup, setServices: (pylonId: PylonId, services: readonly ServiceFact[] | null) => setFacts(pylonId, { services }),
+    setListening: (pylonId: PylonId, listening: readonly ListeningFact[] | null) => setFacts(pylonId, { listening }),
     /** Sends a snapshot of the node as it is, after a test changed it by hand. */
     announce: () => emit({ type: "snapshot", observation: observation() }),
     running: () => [...jobs.values()].filter((j) => j.status.state === "running").map((j) => j.env.jobId),
@@ -602,6 +603,22 @@ test("services the probe could not read change nothing: the next diff sees the l
   assert.deepEqual(seen.slice(-3).map((s) => s.before), [[web], [web], [web]], "a null read is diffed as the list read before it, never as none");
 });
 
+test("listening ports the probe could not read are stored as unknown, not as the ports read before", async (t) => {
+  const registry = openRegistry(tempDb());
+  const thread = seed(registry);
+  const fake = fakeNode({ autoFinish: true });
+  run(t, registry, fake.probe);
+  await until("the pylon runs", () => fake.pylons.get(thread.pylonId)?.phase === "running");
+  const stored = () => {
+    const pylon = registry.node(node)!.observation?.pylons.find((p) => p.pylonId === thread.pylonId);
+    return pylon?.phase === "running" ? pylon.listening : undefined;
+  };
+  fake.setListening(thread.pylonId, [{ port: 3000 }]);
+  await until("port 3000 is stored", () => JSON.stringify(stored()) === JSON.stringify([{ port: 3000 }]));
+  fake.setListening(thread.pylonId, null);
+  await until("the unread ports are stored as unknown", () => stored() === null);
+});
+
 test("a node that goes quiet, as a sleeping one does, is treated as unreachable", async (t) => {
   const registry = openRegistry(tempDb());
   seed(registry);
@@ -704,7 +721,7 @@ test("a service that wants a preview gets a port, and the next spawn publishes i
   fake.setServices(thread.pylonId, [web, worker]);
   await until("the preview is ready", () => registry.previews(thread.pylonId).some((p) => p.ready));
 
-  assert.deepEqual(registry.previews(thread.pylonId), [{ pylon: thread.pylonId, service: "web", httpsPort: 10200, ready: true }]);
+  assert.deepEqual(registry.previews(thread.pylonId), [{ pylon: thread.pylonId, service: "web", httpsPort: 10200, ready: true, url: "https://rj-firebat.tail.ts.net:10200/" }]);
   const live = fake.lives.get(thread.pylonId);
   assert.deepEqual(live?.previews, [{ service: "web", httpsPort: 10200 }]);
   assert.deepEqual(previewsIn(live), [{ service: "web", url: "https://rj-firebat.tail.ts.net:10200/" }]);
@@ -736,7 +753,7 @@ test("preview ports are unique on a node and keep their port across pause, a con
 
   const after = openRegistry(path);
   run(t, after, fake.probe, { ingest: realIngest });
-  assert.deepEqual(after.previews(a.pylonId), [{ pylon: a.pylonId, service: "web", httpsPort: 10200, ready: false }]);
+  assert.deepEqual(after.previews(a.pylonId), [{ pylon: a.pylonId, service: "web", httpsPort: 10200, ready: false, url: "https://rj-firebat.tail.ts.net:10200/" }]);
   after.setThreadStatus(a.id, "active");
   after.recordActivity(a.id, { human: Date.now() });
   await until("a's preview is ready again", () => after.previews(a.pylonId)[0]?.ready === true);

@@ -15,7 +15,7 @@ A probe serves HTTP on its tailnet address, port 7480. Tailnet identity is the o
 | `PUT /v1/jobs/{jobId}` | Control plane (`rj-firebat`) | Submit one lifecycle job. Safe to repeat with the same `jobId` |
 | `GET /v1/jobs/{jobId}` | Control plane (`rj-firebat`) | Read a job's status, or 404 after a probe restart |
 | `GET /v1/observe` (NDJSON stream) | Control plane (`rj-firebat`) | A snapshot of the node, then events |
-| `POST /v1/pylons/{id}/commands` | Control plane (`rj-firebat`) | Synchronous guest commands: exec, open or close a session, service operations |
+| `POST /v1/pylons/{id}/commands` | Control plane (`rj-firebat`) | Synchronous guest commands: exec, open or close a session, service operations, linking a listening port as a preview |
 | `GET /v1/pylons/{id}/stream` (WebSocket) | Control plane (`rj-firebat`) | A byte stream into the pylon, for terminal attach and the harness channel |
 | `GET /v1/artifacts/{artifactId}?sha256=` | The other probe | Probe-to-probe copies of images and templates: the manifest in a header, then the archive, which the fetching probe verifies before use. A probe holding other bytes under the ID refuses with 409 and its reason, before it sends any. A checkpoint stays on its node |
 

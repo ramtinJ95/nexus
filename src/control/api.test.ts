@@ -9,7 +9,7 @@ import { startApi, type ThreadDetail, type ThreadRow } from "./api.ts";
 import { fakeHarness } from "./fake-harness.ts";
 import { openRegistry, type Thread } from "./registry.ts";
 import { liveHashOf } from "../project.ts";
-import type { JobId, NodeName, TailnetNodeId } from "../protocol.ts";
+import type { CommandResult, JobId, NodeName, PylonCommand, PylonId, ServiceFact, TailnetNodeId } from "../protocol.ts";
 
 const node = "rj-firebat" as NodeName;
 const laptop = "nLAPTOP" as TailnetNodeId;
@@ -37,6 +37,12 @@ async function setup(t: import("node:test").TestContext, options: { dotfiles?: t
   let caller: TailnetNodeId | null = laptop;
   const woken: NodeName[] = [];
   const { harness, calls } = fakeHarness();
+  const commands: [PylonId, PylonCommand][] = [];
+  /** What the node's probe answers a guest command with. Tests replace it. */
+  let answer = async (command: PylonCommand): Promise<CommandResult> => {
+    if (command.kind !== "link-port") throw new Error(`unexpected ${command.kind} command`);
+    return { kind: "link-port", service: `port-${command.port}` };
+  };
   const api = await startApi({
     registry, host: "127.0.0.1", port: 0,
     // Every loopback caller is whoever the test says. Tests never ask tailscaled.
@@ -46,6 +52,8 @@ async function setup(t: import("node:test").TestContext, options: { dotfiles?: t
     dotfiles: options.dotfiles ?? dotfiles,
     harness,
     wake: (n) => { woken.push(n); },
+    probes: new Map([[node, { command: (pylonId: PylonId, command: PylonCommand) => { commands.push([pylonId, command]); return answer(command); } }]]),
+    previewPorts: { first: 10200, last: 10299 },
   });
   t.after(async () => {
     await api.close();
@@ -67,7 +75,11 @@ async function setup(t: import("node:test").TestContext, options: { dotfiles?: t
       req.end(body === undefined ? undefined : typeof body === "string" ? body : JSON.stringify(body));
     });
   }
-  return { registry, call, woken, calls, callAs(id: TailnetNodeId | null) { caller = id; } };
+  return {
+    registry, call, woken, calls, commands,
+    callAs(id: TailnetNodeId | null) { caller = id; },
+    probeAnswers(next: typeof answer) { answer = next; },
+  };
 }
 
 async function withThread(t: import("node:test").TestContext, options: { project?: typeof project; dotfiles?: typeof dotfiles } = {}) {
@@ -183,7 +195,7 @@ test("thread detail derives the actual state from the node's last observation", 
     thread,
     desired: "running",
     pylon: { id: thread.pylonId, node, actualState: "unknown", failed: null, observedAt: null, retryRefused: null },
-    sessions: [], previews: [], outputs: [], attach: "herdr --session nexus", agent: { parkedTasks: 0 },
+    sessions: [], previews: [], ports: [], outputs: [], attach: "herdr --session nexus", agent: { parkedTasks: 0 },
   });
 
   const capacity = { memoryGiB: 64, committedMemoryGiB: 0, diskFreeGiB: 100 };
@@ -191,7 +203,7 @@ test("thread detail derives the actual state from the node's last observation", 
   const pylon = s.registry.pylon(thread.pylonId)!;
   const running = {
     pylonId: thread.pylonId, phase: "running" as const, liveHash: pylon.liveHash, bootedAt: "2027-01-01T00:00:00Z", bootedFrom: { image: image.id as `img-${string}`, checkpoint: null },
-    services: [], previews: [], sessions: [], git: null, declaredOutputs: [], attachedClients: 0,
+    services: [], listening: [], previews: [], sessions: [], git: null, declaredOutputs: [], attachedClients: 0,
   };
   s.registry.ingested({ node, observedAt: "2027-01-01T00:01:00Z", probeBootId: "b", capacity, artifacts: [], jobs: [], pylons: [running], previewRoutes: [] }, []);
   const pause = { jobId: "job-1" as JobId, subject: thread.pylonId, kind: "pause" as const };
@@ -206,12 +218,87 @@ test("thread detail derives the actual state from the node's last observation", 
   assert.equal(d.pylon.observedAt, "2027-01-01T00:01:00Z");
   assert.deepEqual(d.sessions, [{ pylon: thread.pylonId, herdrPane: "p1", harness: "pi", harnessSessionId: null, status: "idle" }]);
   assert.deepEqual(d.outputs, [{ thread: thread.id, kind: "branch", ref: "nexus/fix" }]);
-  assert.deepEqual(d.previews, [{ pylon: thread.pylonId, service: "web", httpsPort: 8443, ready: true }]);
+  assert.deepEqual(d.previews, [{ pylon: thread.pylonId, service: "web", httpsPort: 8443, ready: true, url: "https://rj-firebat.tail.ts.net:8443/" }]);
 
   s.registry.apply({ record: "job", status: { ...pause, state: "succeeded", finishedAt: "2027-01-01T00:01:30Z" } });
   assert.equal((await detail()).pylon.actualState, "running");
   s.registry.markOffline(node);
   assert.equal((await detail()).pylon.actualState, "unknown");
+});
+
+/** Reports the node online with the thread's pylon running these services and listening on these ports. */
+function observeRunning(s: Awaited<ReturnType<typeof withThread>>, facts: { services?: ServiceFact[]; listening?: { port: number }[] | null }) {
+  const capacity = { memoryGiB: 64, committedMemoryGiB: 0, diskFreeGiB: 100 };
+  s.registry.apply({ record: "node", node, state: "online", capacity });
+  const running = {
+    pylonId: s.thread.pylonId, phase: "running" as const, liveHash: s.registry.pylon(s.thread.pylonId)!.liveHash, bootedAt: "2027-01-01T00:00:00Z",
+    bootedFrom: { image: image.id as `img-${string}`, checkpoint: null },
+    services: facts.services ?? [], listening: facts.listening === undefined ? [] : facts.listening, previews: [], sessions: [], git: null, declaredOutputs: [], attachedClients: 0,
+  };
+  s.registry.ingested({ node, observedAt: new Date().toISOString(), probeBootId: "b", capacity, artifacts: [], jobs: [], pylons: [running], previewRoutes: [] }, []);
+}
+
+test("thread detail lists the pylon's listening ports with the service and preview of each", async (t) => {
+  const s = await withThread(t);
+  const ports = async () => ((await s.call("GET", `/v1/threads/${s.thread.id}`)).body as ThreadDetail).ports;
+  const web: ServiceFact = { name: "web", state: "ready", port: 5173, declared: true, wantsPreview: true };
+  const api: ServiceFact = { name: "api", state: "ready", port: 8080, declared: true, wantsPreview: false };
+  observeRunning(s, { services: [web, api], listening: [{ port: 3000 }, { port: 5173 }, { port: 8080 }] });
+  s.registry.allocatePreviews(s.thread.pylonId, ["web"], { first: 10200, last: 10299 });
+  assert.deepEqual(await ports(), [
+    { port: 3000, service: null, preview: null },
+    { port: 5173, service: "web", preview: { pylon: s.thread.pylonId, service: "web", httpsPort: 10200, ready: false, url: "https://rj-firebat.tail.ts.net:10200/" } },
+    { port: 8080, service: "api", preview: null },
+  ]);
+  observeRunning(s, { listening: null });
+  assert.equal(await ports(), null, "ports the node could not read are unknown, not none");
+  s.registry.ingested({ ...s.registry.node(node)!.observation!, pylons: [{ pylonId: s.thread.pylonId, phase: "stopped", checkpoint: null }] }, []);
+  assert.deepEqual(await ports(), [], "nothing listens in a stopped pylon");
+});
+
+test("linking a port goes through the node's probe, gives it an https port at once, and counts as human activity", async (t) => {
+  const s = await withThread(t);
+  s.registry.recordActivity(s.thread.id, { human: 1 });
+  s.woken.length = 0;
+  const linked = await s.call("POST", `/v1/threads/${s.thread.id}/previews`, { port: 3000 });
+  const preview = { pylon: s.thread.pylonId, service: "port-3000", httpsPort: 10200, ready: false, url: "https://rj-firebat.tail.ts.net:10200/" };
+  assert.deepEqual(linked, { status: 200, body: preview });
+  assert.deepEqual(s.commands, [[s.thread.pylonId, { kind: "link-port", port: 3000 }]]);
+  assert.ok(s.registry.thread(s.thread.id)!.lastHumanActivityAt > 1);
+  assert.ok(s.woken.includes(node), "the loop publishes the new port at its next pass");
+  assert.deepEqual(await s.call("POST", `/v1/threads/${s.thread.id}/previews`, { port: 3000 }), { status: 200, body: preview }, "linking again answers the same preview");
+  observeRunning(s, { services: [], listening: [{ port: 3000 }] });
+  assert.deepEqual(((await s.call("GET", `/v1/threads/${s.thread.id}`)).body as ThreadDetail).ports, [{ port: 3000, service: "port-3000", preview }], "the port has its preview before the node lists its service");
+  observeRunning(s, { services: [{ name: "port-3000", state: "ready", port: 3000, declared: false, wantsPreview: true }], listening: [{ port: 3000 }] });
+  assert.deepEqual(((await s.call("GET", `/v1/threads/${s.thread.id}`)).body as ThreadDetail).ports, [{ port: 3000, service: "port-3000", preview }]);
+
+  // A port a declared service owns is previewed under that service.
+  s.probeAnswers(async () => ({ kind: "link-port", service: "web" }));
+  assert.equal((await s.call("POST", `/v1/threads/${s.thread.id}/previews`, { port: 5173 })).body.service, "web");
+  assert.equal((await s.call("POST", `/v1/threads/${s.thread.id}/previews`, { port: 70000 })).status, 400);
+  const commands = s.commands.length;
+  const reserved = await s.call("POST", `/v1/threads/${s.thread.id}/previews`, { port: 22 });
+  assert.equal(reserved.status, 400);
+  assert.match(reserved.body.error, /is Nexus's own/);
+  assert.equal(s.commands.length, commands, "a reserved port never reaches the probe");
+  assert.equal((await s.call("POST", `/v1/threads/${s.thread.id}/previews`, { port: 3000, title: "App" })).status, 400, "a preview has no title");
+});
+
+test("linking a port of a pylon that is not running, or of an archived or deleted thread, is refused with 409", async (t) => {
+  const s = await withThread(t);
+  s.probeAnswers(async () => { throw Object.assign(new Error("rj-firebat: pylon-x is stopped, not running"), { code: "not-running" }); });
+  const paused = await s.call("POST", `/v1/threads/${s.thread.id}/previews`, { port: 3000 });
+  assert.equal(paused.status, 409);
+  assert.match(paused.body.error, /is not running yet. This request wakes it/);
+  s.probeAnswers(async () => { throw Object.assign(new Error("rj-firebat: connect ECONNREFUSED"), { code: "unreachable" }); });
+  assert.equal((await s.call("POST", `/v1/threads/${s.thread.id}/previews`, { port: 3000 })).status, 503);
+  assert.equal((await s.call("POST", `/v1/threads/${s.thread.id}/archive`)).status, 200);
+  s.commands.length = 0;
+  assert.equal((await s.call("POST", `/v1/threads/${s.thread.id}/previews`, { port: 3000 })).status, 409);
+  assert.equal((await s.call("DELETE", `/v1/threads/${s.thread.id}`)).status, 200);
+  assert.equal((await s.call("POST", `/v1/threads/${s.thread.id}/previews`, { port: 3000 })).status, 409);
+  assert.deepEqual(s.commands, [], "an archived or deleted thread's probe is never asked");
+  assert.deepEqual(s.registry.previews(s.thread.pylonId), []);
 });
 
 test("a failed pylon shows failed with its reason until its thread is deleted, and then shows the delete", async (t) => {

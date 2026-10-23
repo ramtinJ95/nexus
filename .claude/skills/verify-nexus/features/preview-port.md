@@ -1,0 +1,42 @@
+# Preview a listening port
+
+A thread lists the TCP ports that something in its pylon listens on, whether or not the agent declared them. Opening one publishes it as a preview with its own https URL, which stays the thread's across pauses. A process the agent started by hand does not survive a pause, so after a wake the URL answers again once the agent starts it again.
+
+## Sub-features
+
+- `ports-cli` lists a port the agent's process listens on, with no service and no preview.
+- `preview-cli` publishes the port with `nexus preview`, names the URL at once, and with `--wait` prints it once it is served.
+- `preview-serve` fetches the URL through the probe's preview gateway and gets the process's answer.
+- `preview-wake` keeps the URL across an archive and unarchive, and serves it again once the process runs again.
+- `ports-ui` lists the port in the thread page's Ports section and publishes it with its `Open` button, which moves it under Previews.
+
+## How to get to it (user POV)
+
+- Run `nexus ports <thread>` and `nexus preview <thread> <port> [--wait]` in a terminal.
+- Open the thread page, `/threads/<id>`, and find the port under Ports in the inspector. On a narrow window, open the inspector with the pylon button in the strip.
+
+## Driving it with verify-nexus
+
+Preconditions:
+
+- The baseline from the index holds.
+- Thread `T` was started with `$V cli ports-start -- start --project spoon --title "ports: proof" --json`, and its pylon is `running`.
+- `SERVER` is a server on a published port, detached so it outlives the tool call: `setsid nohup node -e "require('http').createServer((q, r) => r.end('ports-proof')).listen(8001)" </dev/null >/tmp/ports-proof.log 2>&1 & sleep 1; echo started`.
+
+- **Start the process.** Run `$V cli ports-serve -- send $T "bash: $SERVER" --json`, then poll `conversation $T --json` until a `pi.tool-result` holds `started`.
+- **Listed.** Repeat `$V cli ports-cli -- ports $T --json` every 5 s, for up to 1 minute, until it holds `{"port": 8001, "service": null, "preview": null}`.
+- **Publish.** Run `$V cli preview-cli -- preview $T 8001 --json`. Exit 0. The `Preview` has `service` `port-8001`, an `httpsPort` from 10200, and `url` `https://127.0.0.1:<httpsPort>/`. Then run `$V cli preview-wait -- preview $T 8001 --wait --json`, which exits 0 with the same preview and `ready` true.
+- **Served.** Fetch it through the gateway, as tailscale serve would: `curl -sS -H "Host: 127.0.0.1:<httpsPort>" http://127.0.0.1:7481/ > "$($V evidence)/preview-serve.txt"`. The file reads `ports-proof`.
+- **Across a wake.** Run `archive $T --json`, poll `show` until `.pylon.actualState` is `paused`, then `unarchive $T --json` and poll until it is `running`. `show $T --json` still lists the preview with the same `url`. Send `bash: $SERVER` again, then repeat the curl into `preview-wake.txt`, which reads `ports-proof`.
+- **Dashboard.** Start a second server on 8002 the same way, with `8001` replaced by `8002` in `SERVER`.
+  - Run `$V browser ports-ui-open -- goto http://127.0.0.1:7470/threads/$T`. Within two polls the Ports section lists `8002` with an `Open` button. Capture `snapshot --filename ports-ui-before.md`.
+  - Run `$V browser ports-ui-click -- click 'role=button[name="Open port 8002"]'`.
+  - Within a few polls 8002 leaves Ports, and Previews lists `port-8002` with a link named `Open port-8002`, whose `href` is the `url` that `ports $T --json` reports for 8002. Each port shows once in the inspector: 8001 and 8002 only under Previews, and neither under Outputs. Capture `snapshot --filename ports-ui-after.md` and `screenshot --filename ports-ui-after.png`.
+- **Proof.** The recorded `ports-cli`, `preview-cli`, `preview-wait`, `preview-serve.txt`, the `show` after the wake, `preview-wake.txt`, and the two dashboard snapshots with the screenshot.
+
+## Gotchas
+
+- The Docker double links only the ports its `docker run` published, 8000 to 8007. Any other port is refused with exit code 1, so a recipe on port 3000 fails here but works in a real pylon.
+- Ports are read every 10 s, so a fresh server shows up to about 10 s later. Poll, don't sleep.
+- The stack's `tailscale serve` is a fake, and the node's tailnet name is `127.0.0.1`. A URL here proves the gateway's routing, not a real MagicDNS certificate or the tailnet.
+- The pause loses the process with the container's memory, as on a real pylon. Before the agent starts it again, the gateway reaches the published port but nothing answers behind it, so the URL gives an error rather than `ports-proof`.

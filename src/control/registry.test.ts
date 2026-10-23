@@ -305,7 +305,7 @@ test("a registry from before node-unique preview ports keeps its previews", asyn
 
   const registry = openRegistry(path);
   t.after(() => registry.close());
-  assert.deepEqual(registry.previews(pylonId), [{ pylon: pylonId, service: "web", httpsPort: 10200, ready: true }]);
+  assert.deepEqual(registry.previews(pylonId), [{ pylon: pylonId, service: "web", httpsPort: 10200, ready: true, url: "https://rj-firebat.tail.ts.net:10200/" }]);
   registry.allocatePreviews(addPylon(registry, "th-2"), ["web"], ports);
   assert.deepEqual(portsOf(registry, "pylon-th-2" as PylonId), ["web 10201"]);
 });

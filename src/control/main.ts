@@ -119,6 +119,8 @@ export async function startControlPlane(config: ControlPlaneConfig, models: Mode
     dotfiles: config.dotfiles,
     harness,
     wake: (node) => { void loop.wake(node); },
+    probes: new Map(probes.map((probe) => [probe.node, probe])),
+    previewPorts: config.previewPorts,
   });
   console.error(`nexus control plane: API on ${config.listen.host}:${api.port}, following ${config.nodes.map((n) => n.name).join(", ")}`);
 
