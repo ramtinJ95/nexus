@@ -1,0 +1,106 @@
+# The Mac nexus CLI
+
+`nexus` runs on a Mac and drives the control plane's API: list threads, start one, message it, watch it, and archive or delete it. People use it at a shell. The Claude Code mod and the pi extension shell out to it, so this page is their contract. The code is [`src/cli/nexus.ts`](../src/cli/nexus.ts), and its transport is [`src/cli/transport.ts`](../src/cli/transport.ts). This page describes version 0.1.0, which `nexus --version` prints.
+
+This is a different program from the `nexus` inside a pylon ([`images/pylon/nexus`](../images/pylon/nexus)), which talks to its own node's probe.
+
+## Install
+
+From the root of a checkout that has `node_modules`, with Node 26 or newer on `PATH`:
+
+```sh
+ln -sf "$PWD/deploy/mac/nexus" ~/.local/bin/nexus
+```
+
+The shim follows its symlink back to the checkout and runs `node src/cli/nexus.ts`.
+
+## Where it connects
+
+The Mac reaches the home tailnet only through ts-home's userspace tailscaled, which serves a SOCKS5 proxy on `localhost:1055`. Every request opens a SOCKS5 CONNECT to the control plane and sends HTTP through it. The proxy resolves the name, because only it knows MagicDNS. The API allows this Mac by its tailnet node, so the CLI sends no token.
+
+Two settings choose the endpoint. For each one, the first of these that is set wins:
+
+| Setting | Flag | Environment | `~/.config/nexus/cli.json` | Default |
+|---|---|---|---|---|
+| Control plane URL, `http://` only | `--url` | `NEXUS_URL` | `"url"` | `http://rj-firebat.tailc817d3.ts.net:7470` |
+| SOCKS5 proxy, `HOST:PORT`, or `none` to connect directly | `--socks` | `NEXUS_SOCKS` | `"socks"` | `localhost:1055` |
+
+An empty environment variable counts as unset. The config file is a JSON object with only those two optional keys. Any other key fails the command with exit code 64.
+
+## Commands
+
+Every command takes `--json`, `--url` and `--socks`. `<thread>` is a thread ID such as `th-0123456789ab`.
+
+With `--json`, a command prints one JSON value on stdout, pretty-printed. The value is the API's reply, apart from the exceptions noted in the table. Without `--json`, output is plain text for people. Its format is not part of this contract.
+
+| Command | Route | `--json` prints |
+|---|---|---|
+| `threads [--project P] [--all]` | `GET /v1/threads[?project=P]` | `Thread[]`. Deleted threads are left out unless `--all` is given |
+| `show <thread>` | `GET /v1/threads/<thread>` | `ThreadDetail` |
+| `conversation <thread>` | `GET /v1/threads/<thread>/conversation` | `ConversationView` |
+| `start --project P [--title T] [--message M] [--node N] [--branch B] [--commit C]` | `POST /v1/threads`, then `POST .../messages` when `--message` is given | `Thread`, the thread that was started |
+| `send <thread> <text...> [--steer] [--request-id ID]` | `POST /v1/threads/<thread>/messages` | `{ "submission": number }` |
+| `watch <thread> [--interval MS]` | Polls `GET /v1/threads/<thread>` and its conversation | A stream of JSON lines, described below |
+| `abort <thread>` | `POST /v1/threads/<thread>/abort` | `null` |
+| `retry <thread>` | `POST /v1/threads/<thread>/retry` | `null` |
+| `retry-pylon <thread>` | `POST /v1/threads/<thread>/pylon/retry` | `null` |
+| `wake <thread>` | `POST /v1/threads/<thread>/activity` with `{"kind":"human"}` | `null` |
+| `archive <thread>` | `POST /v1/threads/<thread>/archive` | `Thread` |
+| `unarchive <thread>` | `POST /v1/threads/<thread>/unarchive` | `Thread` |
+| `delete <thread>` | `DELETE /v1/threads/<thread>` | `Thread`, with status `deleted` |
+| `projects` | `GET /v1/projects` | `Project[]` |
+| `nodes` | `GET /v1/nodes` | `NodeSummary[]` |
+
+These commands need more explanation:
+
+- `start` without `--title` takes the title from the first non-empty line of `--message`, cut to 80 characters. It needs at least one of the two. If the thread starts but its first message fails, the command fails with the message's exit code, and the error names the thread that was started.
+- `send` joins its words with single spaces. By default the message is a follow-up, so a busy run takes it after its current turn. With `--steer`, the message joins the current run after its current tool round. The API treats a second send with the same `--request-id` as the same message. A caller that retries a send should pass its own request ID, such as `msg:<uuid>`. Without one, each run mints a new ID.
+- `retry` runs a conversation's parked tasks again. `retry-pylon` clears a failed pylon so that the planner boots it again.
+- `wake` records human activity, so a paused pylon is wanted running.
+
+The shapes are TypeScript types. `Thread` is in [`src/control/registry.ts`](../src/control/registry.ts). `ThreadDetail` and `NodeSummary` are in [`src/control/api.ts`](../src/control/api.ts). `Project` is in [`src/project.ts`](../src/project.ts). `ConversationView`, `EntryRecord`, `LiveState` and `InboxState` come from `@earendil-works/pi-durable`. Times in `Thread` are Unix milliseconds, and the observation times are ISO strings. A consumer must ignore fields it does not know.
+
+The control plane serves the routes for creating projects and recording images too. The CLI leaves them out, because only release tooling uses them.
+
+## Failures
+
+A failed command prints nothing on stdout and exits with one of these codes:
+
+| Exit | Kind | Meaning |
+|---|---|---|
+| 0 | | Success |
+| 1 | `failed` | The API answered 5xx or something unexpected |
+| 2 | `unreachable` | No reply. The proxy is down, the node is offline, the control plane is not running, or 30 seconds passed with no data from the proxy or the API |
+| 3 | `refused` | 403 or 415. The API does not allow this machine, or a request check failed |
+| 4 | `not-found` | 404. No such thread or project |
+| 5 | `conflict` | 409. The thread's state forbids the action, for example a message to an archived thread |
+| 64 | `invalid` | Bad flags or arguments, a config file that cannot be read or parsed, or a 400 or 413 from the API |
+
+Without `--json`, stderr gets one line, `nexus: <message>`. With `--json`, stderr gets one JSON line, `{"error": string, "kind": Kind, "status": number | null}`. `status` is the API's HTTP status, or null when there was no reply. When nothing listens on the proxy, the message says so and points to `ts-home status`.
+
+## The watch stream
+
+`nexus watch <thread> --json` polls the thread every `--interval` milliseconds, 2000 by default, and prints one compact JSON object per line. Each object has a `type` and the `thread` ID.
+
+```ts
+type RenderedEntry = { entry: EntryRecord; text: string };
+type WatchEvent =
+  | { type: "reset"; thread: string; entries: RenderedEntry[] }
+  | { type: "entry"; thread: string; entry: EntryRecord; text: string }
+  | { type: "state"; thread: string; status: "active" | "idle" | "archived" | "deleted";
+      run: "idle" | "working" | "parked"; parkedTasks: number; queued: number;
+      pylon: ActualState; failed: string | null }
+  | { type: "error"; thread: string; kind: "unreachable" | "failed"; message: string };
+```
+
+The stream follows these rules:
+
+- The conversation route serves pi-durable's active context, not the full history. The context is a list of entries, and a new head marker, a compaction or a delete can reorder it or drop entries from it. Do not assume that IDs increase along the list, or that an entry stays in it.
+- `reset` carries the whole active context, in the order the route serves it. A consumer replaces everything it shows with this list. A watch prints a `reset` before any `entry` or `state`, at its first successful poll, so a consumer that restarts the watch starts from a fresh snapshot. There is no resume from an entry ID. Later, a `reset` comes whenever the context changes in any way other than new entries at its end.
+- `entry` is one entry appended to the end of the context last printed. Within one watch, each appended entry is printed once.
+- `text` is the CLI's plain rendering of an entry's messages. It is empty for an entry with no model message, which a consumer can skip. `entry` is the entry exactly as the conversation route serves it.
+- While a thread has no conversation, such as after its delete, the context last printed stands and no `reset` comes.
+- `state` comes after the first `reset`, and again whenever any field changes. `run` is `working` while the agent's run is busy. It is `parked` while tasks that hit the restart limit hold the run, which `nexus retry` clears. `queued` counts messages that wait for the run to finish. `pylon` and `failed` are the pylon's `actualState` and `failed` from `ThreadDetail`.
+- `error` reports that the control plane is unreachable or failing. The watch keeps polling. An outage prints one `error` per distinct message. The next successful poll prints `state` again, which means the control plane is back.
+- The stream ends with exit code 0 after the `state` whose `status` is `deleted`, or at SIGINT, SIGTERM or SIGHUP, or when the reader closes the pipe. An unknown thread exits 4, and a refusal exits 3, with the usual stderr line.
+- Partial output while an answer streams is not reported yet. A consumer must ignore event types and fields it does not know, so that later versions can add them.

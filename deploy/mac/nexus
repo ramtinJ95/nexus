@@ -1,0 +1,4 @@
+#!/bin/sh
+# Runs the Mac nexus CLI from the checkout this file lives in. Installed as a symlink, so it follows its own real path.
+here=$(dirname "$(realpath "$0")")
+exec node "$here/../../src/cli/nexus.ts" "$@"

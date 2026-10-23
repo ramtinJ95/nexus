@@ -5,7 +5,7 @@
  */
 import assert from "node:assert/strict";
 import type { Message } from "@earendil-works/pi-ai";
-import type { ConversationView, JsonObject } from "@earendil-works/pi-durable";
+import type { ConversationView, EntryRecord, JsonObject } from "@earendil-works/pi-durable";
 import type { ConversationId } from "../harness/host.ts";
 import type { ThreadHarness } from "./api.ts";
 
@@ -13,6 +13,8 @@ export interface FakeTranscript {
   messages: Message[];
   /** Such as `pi.live` and `pi.inbox`. */
   docs: Record<string, JsonObject>;
+  /** Served instead of one entry per message, as an active context after a new head or a compaction is. */
+  entries?: EntryRecord[];
 }
 
 export function fakeHarness() {
@@ -26,10 +28,10 @@ export function fakeHarness() {
     return found;
   };
   const view = (threadId: string): ConversationView => {
-    const { id, messages, docs } = transcript(threadId);
+    const { id, messages, docs, entries } = transcript(threadId);
     return {
       conversation: { id },
-      entries: messages.map((message, i) => ({ id: i + 1, conversationId: id, kind: `pi.${message.role}`, model: [message] })),
+      entries: entries ?? messages.map((message, i) => ({ id: i + 1, conversationId: id, kind: `pi.${message.role}`, model: [message] })),
       docs,
     } as never;
   };
