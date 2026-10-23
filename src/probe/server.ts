@@ -207,6 +207,7 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
       artifacts,
       jobs,
       pylons: await Promise.all(pylons.map(observation)),
+      previewRoutes: previews === null ? [] : [...previews.gateway.routes].map(([httpsPort, route]) => ({ httpsPort, ...route })),
     };
   }
 

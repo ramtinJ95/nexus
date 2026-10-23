@@ -72,6 +72,7 @@ export async function tick(pylon: PylonRecord, ctx: TickContext): Promise<PlanSt
     liveHash: pylon.liveHash,
     nextCheckpoint: nextCheckpoint(pylon),
     observed: observation?.pylons.find((p) => p.pylonId === pylon.pylonId) ?? "absent",
+    previewsRouted: observation?.previewRoutes?.some((r) => r.pylonId === pylon.pylonId) ?? false,
     nodeArtifacts: new Set(observation?.artifacts ?? []),
     inFlight,
     attempts: pylon.attempts,

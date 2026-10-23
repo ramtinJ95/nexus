@@ -579,15 +579,24 @@ test("spawn publishes its previews, a hit arrives on observe, pause keeps them a
   const observed = snapshot.observation.pylons.find((p) => p.pylonId === pylonId);
   assert.ok(observed?.phase === "running");
   assert.deepEqual(observed.previews, [{ service: "web", httpsPort: 10000, ready: true }], "observations report the published previews");
+  assert.deepEqual(snapshot.observation.previewRoutes, [{ httpsPort: 10000, pylonId, service: "web" }], "and the node's routes");
   assert.equal((await visit(10000, { "tailscale-user-login": "someone@example.com" })).status, 502, "the fake guest origin is not listening");
   const hit = (await events.next()).value;
   assert.ok(hit?.type === "preview-hit");
   assert.deepEqual({ pylonId: hit.pylonId, service: hit.service, login: hit.login }, { pylonId, service: "web", login: "someone@example.com" });
 
+  const routesAfter = async (kind: Job["kind"]) => {
+    for (;;) {
+      const event: ProbeEvent | undefined = (await events.next()).value;
+      if (event?.type === "snapshot" && event.observation.jobs.some((j) => j.kind === kind && j.state === "succeeded")) return event.observation.previewRoutes;
+    }
+  };
   await run(client, { kind: "pause", pylonId, checkpoint: "ckpt-unit-1" });
   assert.deepEqual(Object.keys(tailscale.entries()), ["10000"]);
+  assert.deepEqual(await routesAfter("pause"), [{ httpsPort: 10000, pylonId, service: "web" }], "a paused pylon keeps its route");
   await run(client, { kind: "delete", pylonId });
   assert.deepEqual(tailscale.entries(), {});
+  assert.deepEqual(await routesAfter("delete"), []);
 });
 
 test("observations carry the supervisor's services, and null when it cannot be read", async (t) => {

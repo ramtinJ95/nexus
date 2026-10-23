@@ -7,7 +7,8 @@
  *
  * Previews: each ingested event gives every service a running pylon wants previewed a port from `previewPorts`.
  * Each pass renders the pylon's LiveSpec from its records before its tick, so a new port changes the liveHash and
- * the planner sends it in a spawn. The ports go back once the pylon of a deleted thread is gone from its node.
+ * the planner sends it in a spawn. The ports go back once its node neither has the pylon of a deleted thread nor routes
+ * a preview to it.
  */
 import { setTimeout as delay } from "node:timers/promises";
 import { desiredPhase, type RegistryWrite } from "../reconcile.ts";
@@ -121,7 +122,7 @@ export function startLoop(options: LoopOptions): Loop {
       try {
         const step = await tick(pylon, ctx);
         if (step.kind === "fail" && stored.failed === null) log(`${pylon.pylonId}: the planner gave up: ${step.reason}`);
-        // Done for a deleted thread means its node no longer has the pylon, so nothing serves the ports.
+        // Done for a deleted thread means its node neither has the pylon nor routes a port to it, so nothing serves the ports.
         if (pylon.desired === "deleted" && step.kind === "done") registry.releasePreviews(pylon.pylonId);
       } catch (err) {
         log(`${pylon.pylonId}: tick failed: ${(err as Error).message}`);

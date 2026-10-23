@@ -52,6 +52,8 @@ export interface PlanInput {
   liveHash: LiveHash;
   nextCheckpoint: CheckpointId; // minted by the registry, used only if this step is a pause
   observed: PylonObservation | "absent";
+  /** The node's gateway routes a preview port to the pylon. A paused pylon keeps its routes, and only a delete removes them. */
+  previewsRouted: boolean;
   nodeArtifacts: ReadonlySet<ArtifactId>;
   inFlight: JobStatus | null; // for this pylon, or for an artifact this pylon is waiting on
   /** Consecutive failed jobs, and the last one's. A success clears both. */
@@ -97,8 +99,8 @@ const planRules: readonly Rule[] = [
   (i) => i.nodeOnline ? null : wait("node-offline"),
   // 2.
   (i) => i.inFlight?.state === "running" ? wait("in-flight") : null,
-  // 3. Delete ignores the attempt budget.
-  (i) => i.desired !== "deleted" ? null : i.observed === "absent" ? done : submit({ kind: "delete", pylonId: i.pylonId }),
+  // 3. Delete ignores the attempt budget. A pylon removed by hand is absent but may still have previews published.
+  (i) => i.desired !== "deleted" ? null : i.observed === "absent" && !i.previewsRouted ? done : submit({ kind: "delete", pylonId: i.pylonId }),
   // 4.
   ({ attempts: { last } }) => last !== null && !retryable[last.code] ? fail(`last job failed with ${last.code}, which is not retryable: ${last.message}`) : null,
   ({ attempts: { count, last } }) => last !== null && count >= maxAttempts ? fail(`gave up after ${count} failed attempts, the last with ${last.code}: ${last.message}`) : null,

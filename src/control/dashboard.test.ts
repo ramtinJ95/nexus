@@ -77,7 +77,7 @@ async function setup(t: TestContext) {
       bootedFrom: { image: image.id as `img-${string}`, checkpoint: null },
       services: [], previews: [], sessions: [], git: null, declaredOutputs: [], attachedClients: 0,
     }));
-    registry.ingested({ node, observedAt: new Date().toISOString(), probeBootId: "b", capacity, artifacts: [], jobs: [], pylons }, []);
+    registry.ingested({ node, observedAt: new Date().toISOString(), probeBootId: "b", capacity, artifacts: [], jobs: [], pylons, previewRoutes: [] }, []);
   }
   return { registry, fake, call, start, observe, callAs(id: TailnetNodeId | null) { caller = id; } };
 }
@@ -273,7 +273,7 @@ test("a paused pylon's preview keeps its link, labelled paused, unless the threa
   };
   assert.deepEqual(await previews(), { previews: "Previews 1 web starting rj-firebat.tail.ts.net:8443", linked: false, output: false }, "a running pylon's preview that is not ready has no link yet");
 
-  s.registry.ingested({ node, observedAt: new Date().toISOString(), probeBootId: "b", capacity, artifacts: [], jobs: [], pylons: [{ pylonId: fix.pylonId, phase: "stopped", checkpoint: null }] }, []);
+  s.registry.ingested({ node, observedAt: new Date().toISOString(), probeBootId: "b", capacity, artifacts: [], jobs: [], pylons: [{ pylonId: fix.pylonId, phase: "stopped", checkpoint: null }], previewRoutes: [] }, []);
   assert.deepEqual(await previews(), { previews: "Previews 1 web paused Open ↗ rj-firebat.tail.ts.net:8443 Opening it wakes the pylon.", linked: true, output: true });
 
   await s.call("POST", `/v1/threads/${fix.id}/archive`);
@@ -423,7 +423,7 @@ test("a paused pylon's prompt box says a message wakes it", async (t) => {
   const s = await seeded(t);
   const fix = await s.start("acme", "Fix checkout");
   s.observe(fix);
-  s.registry.ingested({ node, observedAt: new Date().toISOString(), probeBootId: "b", capacity, artifacts: [], jobs: [], pylons: [{ pylonId: fix.pylonId, phase: "stopped", checkpoint: null }] }, []);
+  s.registry.ingested({ node, observedAt: new Date().toISOString(), probeBootId: "b", capacity, artifacts: [], jobs: [], pylons: [{ pylonId: fix.pylonId, phase: "stopped", checkpoint: null }], previewRoutes: [] }, []);
   assert.equal(conversationOf((await s.call("GET", `/threads/${fix.id}`)).text).dock, "The pylon is paused. Sending a message wakes it. ⌘↵ to send Send");
 });
 
