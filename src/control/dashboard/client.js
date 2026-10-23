@@ -1,5 +1,5 @@
-// The dashboard's only script. Pages are rendered on the server. This file sends actions to the JSON API,
-// records a visit as human activity, and polls the page to swap in a fresh `#live` region.
+// The dashboard's only script. Pages are rendered on the server. This file sends actions and messages to the
+// JSON API, records a visit as human activity, and polls the page to swap in a fresh `#live` region.
 "use strict";
 
 const main = document.querySelector("main");
@@ -40,9 +40,20 @@ async function refresh() {
     const fresh = next.getElementById("live");
     const live = document.getElementById("live");
     if (fresh !== null && live !== null && fresh.innerHTML !== live.innerHTML) {
-      // The region holds buttons and links, so keep focus on the same one after the swap.
+      // The region holds buttons, links, the prompt box and tool output, so keep focus, the draft and what the
+      // reader opened or closed after the swap.
       const focused = live.contains(document.activeElement) ? focusKey(document.activeElement) : null;
+      const draft = live.querySelector("#prompt-text");
+      const opened = new Map([...live.querySelectorAll("details[id]")].map((d) => [d.id, d.open]));
       live.replaceWith(fresh);
+      const prompt = fresh.querySelector("#prompt-text");
+      if (draft !== null && prompt !== null) {
+        prompt.value = draft.value;
+        prompt.setSelectionRange(draft.selectionStart, draft.selectionEnd);
+      }
+      for (const d of fresh.querySelectorAll("details[id]")) d.open = opened.get(d.id) ?? d.open;
+      const send = fresh.querySelector("#send");
+      if (send !== null) send.disabled = outgoing?.inFlight === true;
       if (focused !== null) document.querySelector(focused)?.focus();
       document.title = next.title;
     }
@@ -56,6 +67,8 @@ async function refresh() {
   }
 }
 const refreshNow = () => (refreshing ??= refresh().finally(() => { refreshing = null; }));
+/** A refresh that starts after an action, so the page shows its effect. One already in flight may predate it. */
+const refreshAfter = async () => { await refreshing; await refreshNow(); };
 
 function recordVisit() {
   const thread = main?.dataset.activity;
@@ -66,6 +79,14 @@ function recordVisit() {
   });
 }
 
+const actions = {
+  archive: (thread) => api("POST", `/v1/threads/${thread}/archive`),
+  unarchive: (thread) => api("POST", `/v1/threads/${thread}/unarchive`),
+  delete: (thread) => api("DELETE", `/v1/threads/${thread}`),
+  abort: (thread) => api("POST", `/v1/threads/${thread}/abort`),
+  retry: (thread) => api("POST", `/v1/threads/${thread}/retry`),
+};
+
 document.addEventListener("click", async (event) => {
   const button = event.target instanceof Element ? event.target.closest("button[data-action]") : null;
   if (button === null) return;
@@ -73,13 +94,45 @@ document.addEventListener("click", async (event) => {
   if (action === "delete" && !confirm(`Delete "${title}"? Its pylon and disk are removed.`)) return;
   button.disabled = true;
   try {
-    if (action === "archive") await api("POST", `/v1/threads/${thread}/archive`);
-    if (action === "delete") await api("DELETE", `/v1/threads/${thread}`);
+    await actions[action](thread);
     showError("action-error", null);
-    await refreshNow();
+    await refreshAfter();
   } catch (err) {
     showError("action-error", err);
     button.disabled = false;
+  }
+});
+
+// crypto.randomUUID needs a secure context, and the dashboard is plain HTTP on the tailnet.
+const newRequestId = () => `msg:${[...crypto.getRandomValues(new Uint8Array(16))].map((b) => b.toString(16).padStart(2, "0")).join("")}`;
+
+// The last message sent. Sending the same text again after a failure reuses its request ID, so a send whose
+// reply was lost is not posted twice. One send at a time, so a second one cannot take the first one's ID.
+let outgoing = null;
+document.addEventListener("submit", async (event) => {
+  if (event.target.id !== "prompt") return;
+  event.preventDefault();
+  if (outgoing?.inFlight) return;
+  const form = event.target;
+  const text = form.elements.text.value;
+  if (outgoing?.text !== text) outgoing = { text, requestId: newRequestId() };
+  outgoing.inFlight = true;
+  form.querySelector("#send").disabled = true;
+  try {
+    await api("POST", `/v1/threads/${form.dataset.thread}/messages`, { text, requestId: outgoing.requestId });
+    outgoing = null;
+    // The poll may have swapped in a new prompt box meanwhile, or none if the thread was archived. Text typed
+    // since the send is the next message, so it stays.
+    const prompt = document.getElementById("prompt-text");
+    if (prompt?.value === text) prompt.value = "";
+    showError("action-error", null);
+    await refreshAfter();
+  } catch (err) {
+    outgoing.inFlight = false;
+    showError("action-error", new Error(`The message was not sent: ${err.message}`));
+  } finally {
+    const send = document.getElementById("send");
+    if (send !== null) send.disabled = false;
   }
 });
 

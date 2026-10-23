@@ -257,7 +257,9 @@ test("a message goes to the thread's conversation and counts as human activity",
   assert.equal((await s.call("POST", `/v1/threads/${thread.id}/messages`, { text: "x" })).status, 400);
   assert.equal((await s.call("POST", `/v1/threads/${thread.id}/abort`)).status, 204);
   assert.equal((await s.call("POST", `/v1/threads/${thread.id}/retry`)).status, 204);
-  assert.deepEqual(await s.call("GET", `/v1/threads/${thread.id}/conversation`), { status: 200, body: { entries: ["the transcript"] } });
+  const view = await s.call("GET", `/v1/threads/${thread.id}/conversation`);
+  assert.equal(view.status, 200);
+  assert.deepEqual(view.body.entries.map((e: any) => e.model[0].content), ["run the tests", "now"]);
   assert.deepEqual(s.calls, [
     ["send", thread.id, "run the tests", "msg:1", "followUp"],
     ["send", thread.id, "now", "msg:2", "steer"],
