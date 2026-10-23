@@ -13,7 +13,8 @@ import type { SessionFact } from "../protocol.ts";
 import type { SessionHarness } from "../project.ts";
 import { herdrSession } from "../sessions.ts";
 import type { ThreadDetail } from "./api.ts";
-import type { NodeRecord, Output, Preview, Registry, Thread, ThreadId } from "./registry.ts";
+import { previewUrl } from "./live.ts";
+import type { NodeRecord, Output, Registry, Thread, ThreadId } from "./registry.ts";
 
 export interface DashboardOptions {
   registry: Registry;
@@ -119,7 +120,6 @@ function ago(at: number, now: number): Html {
   return html`<time datetime="${iso}" title="${iso}">${label}</time>`;
 }
 
-const previewUrl = (node: NodeRecord, preview: Preview) => `https://${node.tailnetHost}:${preview.httpsPort}/`;
 
 function layout(title: string, body: Html, attrs: { thread?: ThreadId; live: boolean }): Html {
   return html`<!doctype html>
@@ -225,7 +225,7 @@ ${d.sessions.length === 0 ? html`<p class="empty">No sessions.</p>` : html`<ul c
 <h2 id="previews-h">Previews</h2>
 ${d.previews.length === 0 ? html`<p class="empty">No previews.</p>` : html`<ul class="rows">${d.previews.map((p) => html`<li>
 <span class="name">${p.service}</span>
-${p.ready ? html`<a href="${previewUrl(node, p)}" target="_blank" rel="noopener">${previewUrl(node, p)}</a>` : badge("starting", "busy")}
+${p.ready ? html`<a href="${previewUrl(node, p.httpsPort)}" target="_blank" rel="noopener">${previewUrl(node, p.httpsPort)}</a>` : badge("starting", "busy")}
 </li>`)}</ul>`}
 </section>
 
@@ -233,7 +233,7 @@ ${p.ready ? html`<a href="${previewUrl(node, p)}" target="_blank" rel="noopener"
 <h2 id="outputs-h">Outputs</h2>
 ${d.outputs.length === 0 ? html`<p class="empty">No outputs yet.</p>` : html`<ul class="rows">${d.outputs.map((o) => {
   const preview = o.kind === "preview" ? previewOf.get(o.ref) : undefined;
-  return html`<li><span class="name">${outputLabel[o.kind]}</span> ${preview?.ready ? html`<a href="${previewUrl(node, preview)}" target="_blank" rel="noopener">${o.ref}</a>` : html`<code>${o.ref}</code>`}</li>`;
+  return html`<li><span class="name">${outputLabel[o.kind]}</span> ${preview?.ready ? html`<a href="${previewUrl(node, preview.httpsPort)}" target="_blank" rel="noopener">${o.ref}</a>` : html`<code>${o.ref}</code>`}</li>`;
 })}</ul>`}
 </section>
 

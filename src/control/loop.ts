@@ -4,13 +4,19 @@
  *
  * Each node has one pass at a time. A pass that is asked for while one runs is coalesced into a single
  * pass after it, so no two ticks of the same pylon overlap and a slow probe holds up only its own node.
+ *
+ * Previews: each ingested event gives every service a running pylon wants previewed a port from `previewPorts`.
+ * Each pass renders the pylon's LiveSpec from its records before its tick, so a new port changes the liveHash and
+ * the planner sends it in a spawn. The ports go back once the pylon of a deleted thread is gone from its node.
  */
 import { setTimeout as delay } from "node:timers/promises";
 import { desiredPhase, type RegistryWrite } from "../reconcile.ts";
+import { liveHashOf } from "../project.ts";
 import { tick, type TickContext } from "../tick.ts";
 import type { NodeName, NodeObservation, ProbeClient, ProbeError, ProbeEvent, PylonId, PylonObservation } from "../protocol.ts";
 import type { ArtifactId } from "../images.ts";
-import type { Registry, ThreadId } from "./registry.ts";
+import { pylonLive } from "./live.ts";
+import type { PortRange, Registry, StoredPylon, Thread, ThreadId } from "./registry.ts";
 
 /** reconcile.ts's ingest. `known` maps each registry pylon on the node to its last ingested observation. */
 export type Ingest = (event: ProbeEvent, node: NodeName, known: ReadonlyMap<PylonId, PylonObservation | "absent">, now: number) => readonly RegistryWrite[];
@@ -20,6 +26,8 @@ export interface LoopOptions {
   /** One client per registry node. */
   probes: readonly ProbeClient[];
   ingest: Ingest;
+  /** The https ports each node's previews are allocated from. */
+  previewPorts: PortRange;
   intervalMs?: number;
   /** How long an observe link stays down before the node is recorded offline. */
   offlineAfterMs?: number;
@@ -48,7 +56,7 @@ interface Link {
 }
 
 export function startLoop(options: LoopOptions): Loop {
-  const { registry, ingest } = options;
+  const { registry, ingest, previewPorts } = options;
   const intervalMs = options.intervalMs ?? 5_000;
   const offlineAfterMs = options.offlineAfterMs ?? 30_000;
   const reconnectMs = options.reconnectMs ?? 2_000;
@@ -73,9 +81,35 @@ export function startLoop(options: LoopOptions): Loop {
     return image.sha256;
   }
 
+  /** A port, once allocated, stays the pylon's while its thread lives, so its URL survives pauses and restarts. */
+  function allocatePreviews(observation: NodeObservation) {
+    for (const observed of observation.pylons) {
+      if (observed.phase !== "running" || observed.services === null) continue;
+      const pylon = registry.pylon(observed.pylonId);
+      // A pylon reported by a node the registry does not place it on is an orphan there.
+      if (pylon?.node !== observation.node || registry.thread(pylon.thread as ThreadId)!.status === "deleted") continue;
+      try {
+        registry.allocatePreviews(pylon.pylonId, observed.services.filter((s) => s.wantsPreview).map((s) => s.name), previewPorts);
+      } catch (err) {
+        log(`${pylon.pylonId}: ${(err as Error).message}`);
+      }
+    }
+  }
+
+  /** The pylon with the LiveSpec its records give now, saved if that changed. */
+  function withLive(stored: StoredPylon, thread: Thread): StoredPylon {
+    const live = pylonLive(stored, registry.project(thread.project)!, registry.node(stored.node)!, registry.previews(stored.pylonId));
+    const liveHash = liveHashOf(live);
+    if (liveHash === stored.liveHash) return stored;
+    const updated = { ...stored, live, liveHash };
+    registry.savePylon(updated);
+    return updated;
+  }
+
   async function pass(node: NodeName, link: Link) {
-    for (const stored of registry.pylonsOn(node)) {
-      const thread = registry.thread(stored.thread as ThreadId)!;
+    for (const found of registry.pylonsOn(node)) {
+      const thread = registry.thread(found.thread as ThreadId)!;
+      const stored = withLive(found, thread);
       const pylon = { ...stored, desired: desiredPhase(thread, Date.now()) };
       const ctx: TickContext = {
         probe: link.probe,
@@ -87,6 +121,8 @@ export function startLoop(options: LoopOptions): Loop {
       try {
         const step = await tick(pylon, ctx);
         if (step.kind === "fail" && stored.failed === null) log(`${pylon.pylonId}: the planner gave up: ${step.reason}`);
+        // Done for a deleted thread means its node no longer has the pylon, so nothing serves the ports.
+        if (pylon.desired === "deleted" && step.kind === "done") registry.releasePreviews(pylon.pylonId);
       } catch (err) {
         log(`${pylon.pylonId}: tick failed: ${(err as Error).message}`);
       }
@@ -132,7 +168,9 @@ export function startLoop(options: LoopOptions): Loop {
           // The stored observation is the last one ingested, including the one from before a reconnect or a restart.
           const last = registry.node(node)!.observation;
           const known = new Map(registry.pylonsOn(node).map((p) => [p.pylonId, last?.pylons.find((o) => o.pylonId === p.pylonId) ?? "absent" as const]));
-          registry.ingested(merge(last, event), ingest(event, node, known, Date.now()));
+          const current = merge(last, event);
+          registry.ingested(current, ingest(event, node, known, Date.now()));
+          allocatePreviews(current);
           if (event.type === "snapshot") linkUp(link);
           void wake(node);
         }

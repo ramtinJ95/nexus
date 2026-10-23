@@ -41,6 +41,8 @@ export type StoredPylon = Omit<PylonRecord, "desired">;
 
 export type Session = SessionFact & { pylon: PylonId };
 export interface Preview { pylon: PylonId; service: string; httpsPort: number; ready: boolean }
+/** The https ports a node's previews are published on, both ends included. */
+export interface PortRange { first: number; last: number }
 export interface Output { thread: ThreadId; kind: Extract<RegistryWrite, { record: "output" }>["kind"]; ref: string }
 export interface Orphan { node: NodeName; pylonId: PylonId }
 
@@ -123,6 +125,22 @@ const migrations: readonly string[] = [
       'message', 'recorded before the registry kept failure messages'
     ) END)
   );
+  `,
+  // A preview's https port is unique on its node, so each row carries the node its pylon runs on.
+  `
+  CREATE TABLE node_previews (
+    pylon TEXT NOT NULL REFERENCES pylons (id),
+    node TEXT NOT NULL REFERENCES nodes (name),
+    service TEXT NOT NULL,
+    https_port INTEGER NOT NULL,
+    ready INTEGER NOT NULL,
+    PRIMARY KEY (pylon, service),
+    UNIQUE (node, https_port)
+  ) STRICT;
+  INSERT INTO node_previews SELECT previews.pylon, pylons.node, previews.service, previews.https_port, previews.ready
+    FROM previews JOIN pylons ON pylons.id = previews.pylon;
+  DROP TABLE previews;
+  ALTER TABLE node_previews RENAME TO previews;
   `,
 ];
 
@@ -214,8 +232,10 @@ export function openRegistry(path: string) {
       ON CONFLICT (pylon, herdr_pane) DO UPDATE SET harness = excluded.harness, harness_session_id = excluded.harness_session_id, status = excluded.status`),
     deleteSession: db.prepare("DELETE FROM sessions WHERE pylon = ? AND herdr_pane = ?"),
     sessions: db.prepare("SELECT * FROM sessions WHERE pylon = ? ORDER BY herdr_pane"),
-    upsertPreview: db.prepare(`INSERT INTO previews (pylon, service, https_port, ready) VALUES (?, ?, ?, ?)
-      ON CONFLICT (pylon, service) DO UPDATE SET https_port = excluded.https_port, ready = excluded.ready`),
+    insertPreview: db.prepare("INSERT INTO previews (pylon, node, service, https_port, ready) SELECT id, node, ?, ?, 0 FROM pylons WHERE id = ?"),
+    previewReady: db.prepare("UPDATE previews SET ready = ? WHERE pylon = ? AND service = ? AND https_port = ?"),
+    deletePreviews: db.prepare("DELETE FROM previews WHERE pylon = ?"),
+    portsOn: db.prepare("SELECT https_port FROM previews WHERE node = ?"),
     previews: db.prepare("SELECT * FROM previews WHERE pylon = ? ORDER BY service"),
     insertOutput: db.prepare("INSERT INTO outputs (thread, kind, ref) VALUES (?, ?, ?) ON CONFLICT DO NOTHING"),
     outputs: db.prepare("SELECT * FROM outputs WHERE thread = ? ORDER BY kind, ref"),
@@ -240,6 +260,12 @@ export function openRegistry(path: string) {
     $boot: JSON.stringify(p.boot), $firstBoot: JSON.stringify(p.firstBoot), $live: JSON.stringify(p.live), $liveHash: p.liveHash,
     $pauses: p.pauses, $submitted: p.submitted === null ? null : JSON.stringify(p.submitted), $attempts: JSON.stringify(p.attempts), $failed: p.failed,
   });
+
+  function previews(pylon: PylonId): Preview[] {
+    return (q.previews.all(pylon) as Row[]).map((r): Preview => ({
+      pylon: r.pylon as PylonId, service: r.service as string, httpsPort: r.https_port as number, ready: r.ready === 1,
+    }));
+  }
 
   function threadOfPylon(pylonId: PylonId): ThreadId | undefined {
     return (q.threadOfPylon.get(pylonId) as Row | undefined)?.thread as ThreadId | undefined;
@@ -304,11 +330,28 @@ export function openRegistry(path: string) {
       pylon: r.pylon as PylonId, herdrPane: r.herdr_pane as string, harness: r.harness as Session["harness"],
       harnessSessionId: r.harness_session_id as string | null, status: r.status as Session["status"],
     })),
-    /** The control plane allocates preview ports. Observations report when each is ready. */
-    savePreview(preview: Preview) { q.upsertPreview.run(preview.pylon, preview.service, preview.httpsPort, preview.ready ? 1 : 0); },
-    previews: (pylon: PylonId) => (q.previews.all(pylon) as Row[]).map((r): Preview => ({
-      pylon: r.pylon as PylonId, service: r.service as string, httpsPort: r.https_port as number, ready: r.ready === 1,
-    })),
+    /**
+     * Gives each of `services` that has no preview yet the lowest port in `range` that no pylon on the pylon's node
+     * holds. A service keeps its port until releasePreviews, so its URL survives pauses and restarts, and asking
+     * again changes nothing. Throws when the range is used up, after allocating the services before it.
+     */
+    allocatePreviews(pylonId: PylonId, services: readonly string[], range: PortRange) {
+      const node = (q.pylon.get(pylonId) as Row | undefined)?.node as NodeName | undefined;
+      if (node === undefined) throw new Error(`no pylon ${pylonId} to allocate previews for`);
+      const held = new Set(previews(pylonId).map((p) => p.service));
+      for (const service of services) {
+        if (held.has(service)) continue;
+        const taken = new Set((q.portsOn.all(node) as Row[]).map((r) => r.https_port as number));
+        let port = range.first;
+        while (port <= range.last && taken.has(port)) port++;
+        if (port > range.last) throw new Error(`no https port is free for the preview of ${service}: pylons on ${node} hold every port from ${range.first} to ${range.last}`);
+        q.insertPreview.run(service, port, pylonId);
+        held.add(service);
+      }
+    },
+    /** Frees a deleted pylon's ports for other pylons on its node. */
+    releasePreviews(pylonId: PylonId) { q.deletePreviews.run(pylonId); },
+    previews,
     outputs: (thread: ThreadId) => (q.outputs.all(thread) as Row[]).map((r): Output => ({
       thread: r.thread as ThreadId, kind: r.kind as Output["kind"], ref: r.ref as string,
     })),
@@ -371,6 +414,10 @@ export function openRegistry(path: string) {
         if (write.agent !== null) q.agentActivity.run(write.agent, thread);
         return;
       }
+      case "preview":
+        // A port the control plane no longer assigns, such as a released one, has no row to mark.
+        q.previewReady.run(write.ready ? 1 : 0, write.pylonId, write.service, write.httpsPort);
+        return;
       case "orphan":
         q.insertOrphan.run(write.node, write.pylonId);
         return;

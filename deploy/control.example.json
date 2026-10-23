@@ -12,5 +12,6 @@
     "storage": "/var/lib/nexus-control/harness.sqlite",
     "credentials": "/var/lib/nexus-control/harness-credentials.json",
     "model": { "provider": "openai", "modelId": "gpt-5.5" }
-  }
+  },
+  "previewPorts": { "first": 10200, "last": 10999 }
 }

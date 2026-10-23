@@ -166,8 +166,8 @@ test("the thread page shows its pylon, sessions with how to attach, previews as 
   pane("w1:p1", "claude-code", "working", "5f0c");
   pane("w2:p1", "pi", "idle", "/home/user/.pi/sessions/a.jsonl");
   pane("w3:p1", "shell", "idle");
-  s.registry.savePreview({ pylon: fix.pylonId, service: "web", httpsPort: 8443, ready: true });
-  s.registry.savePreview({ pylon: fix.pylonId, service: "api", httpsPort: 8444, ready: false });
+  s.registry.allocatePreviews(fix.pylonId, ["web", "api"], { first: 8443, last: 8444 });
+  s.registry.apply({ record: "preview", pylonId: fix.pylonId, service: "web", httpsPort: 8443, ready: true });
   for (const [kind, ref] of [["branch", "nexus/fix-checkout"], ["diff", "abc1234"], ["preview", "web"], ["file", "out-1"]] as const) {
     s.registry.apply({ record: "output", pylonId: fix.pylonId, kind, ref });
   }

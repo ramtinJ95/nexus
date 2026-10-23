@@ -178,6 +178,7 @@ export type RegistryWrite =
   | { record: "node"; node: NodeName; state: "online" | "offline"; capacity: NodeCapacity }
   | { record: "session"; pylonId: PylonId; herdrPane: string; fact: SessionFact | null } // null: the pane is gone. Adopts panes opened by hand in Herdr
   | { record: "output"; pylonId: PylonId; kind: "branch" | "diff" | "preview" | "file"; ref: string }
+  | { record: "preview"; pylonId: PylonId; service: string; httpsPort: number; ready: boolean }
   | { record: "activity"; pylonId: PylonId; human: number | null; agent: number | null }
   | { record: "orphan"; node: NodeName; pylonId: PylonId }
   | { record: "job"; status: JobStatus };
@@ -197,6 +198,8 @@ type NodeCapacity = { memoryGiB: number; committedMemoryGiB: number; diskFreeGiB
  *   that ref, a dirty tree is "diff" with the head as ref (one per head), a ready preview is "preview" with
  *   the service as ref, and a declared output keeps its kind with its declaration id as ref. Outputs are
  *   never retracted, so only new ones are written.
+ * - A preview is ready while a running pylon reports it published and warmed on its port. It stops being ready
+ *   when the report drops it or the pylon stops running.
  * - A working session is agent activity and an attached client is human activity, both at `now`, the time
  *   the control plane received the event. A preview hit is human activity at its own time.
  */
@@ -248,11 +251,18 @@ function pylonWrites(pylonId: PylonId, previous: PylonObservation | "absent", cu
     if (!had.has(`${kind} ${ref}`)) writes.push({ record: "output", pylonId, kind, ref });
   }
 
+  const wasReady = readyPreviews(before);
+  const isReady = readyPreviews(after);
+  for (const [key, p] of isReady) if (!wasReady.has(key)) writes.push({ record: "preview", pylonId, ...p, ready: true });
+  for (const [key, p] of wasReady) if (!isReady.has(key)) writes.push({ record: "preview", pylonId, ...p, ready: false });
+
   const agent = after.sessions?.some((s) => s.status === "working") ? now : null;
   const human = after.attachedClients > 0 ? now : null;
   if (agent !== null || human !== null) writes.push({ record: "activity", pylonId, human, agent });
   return writes;
 }
+
+const readyPreviews = (f: Facts) => new Map(f.previews.filter((p) => p.ready).map(({ service, httpsPort }) => [`${service} ${httpsPort}`, { service, httpsPort }]));
 
 function outputsOf(f: Facts): { kind: Extract<RegistryWrite, { record: "output" }>["kind"]; ref: string }[] {
   return [

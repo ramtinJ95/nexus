@@ -203,3 +203,79 @@ test("a registry from a newer control plane is refused", async (t) => {
   db.close();
   assert.throws(() => openRegistry(path), /schema version 99/);
 });
+
+/** Another thread's pylon on `on`, for tests that need neighbours. */
+function addPylon(registry: ReturnType<typeof openRegistry>, id: string, on: NodeName = node): PylonId {
+  const other = `pylon-${id}` as PylonId;
+  registry.createThread({ ...thread, id: id as ThreadId, pylonId: other }, { ...pylon, thread: id, pylonId: other, node: on, boot: { ...pylon.boot, pylonId: other } });
+  return other;
+}
+const ports = { first: 10200, last: 10209 };
+const portsOf = (registry: ReturnType<typeof openRegistry>, of: PylonId) => registry.previews(of).map((p) => `${p.service} ${p.httpsPort}`);
+
+test("preview ports are unique on a node, survive reopening the file, and asking again changes nothing", async (t) => {
+  const path = tempDb();
+  const first = seeded(path);
+  const peer = "infra-testbench" as NodeName;
+  first.upsertNode({ name: peer, tailnetHost: "infra-testbench.tail.ts.net", tailnetNodeId: "nTESTBENCH" as TailnetNodeId });
+  const neighbour = addPylon(first, "th-2");
+  const elsewhere = addPylon(first, "th-3", peer);
+  first.allocatePreviews(pylonId, ["web", "api"], ports);
+  first.allocatePreviews(neighbour, ["web"], ports);
+  first.allocatePreviews(elsewhere, ["web"], ports);
+  first.allocatePreviews(pylonId, ["api", "web", "docs"], ports);
+  first.close();
+
+  const second = openRegistry(path);
+  t.after(() => second.close());
+  assert.deepEqual(portsOf(second, pylonId), ["api 10201", "docs 10203", "web 10200"]);
+  assert.deepEqual(portsOf(second, neighbour), ["web 10202"]);
+  assert.deepEqual(portsOf(second, elsewhere), ["web 10200"], "another node has its own ports");
+  assert.ok(second.previews(pylonId).every((p) => !p.ready), "a new port is not ready until the probe reports it");
+});
+
+test("a used-up port range fails naming the range, after allocating the services that fit", async (t) => {
+  const registry = seeded(tempDb());
+  t.after(() => registry.close());
+  const neighbour = addPylon(registry, "th-2");
+  registry.allocatePreviews(neighbour, ["web"], { first: 10200, last: 10201 });
+  assert.throws(() => registry.allocatePreviews(pylonId, ["web", "api"], { first: 10200, last: 10201 }),
+    /no https port is free for the preview of api: pylons on rj-firebat hold every port from 10200 to 10201/);
+  assert.deepEqual(portsOf(registry, pylonId), ["web 10201"]);
+});
+
+test("released ports go to the next pylon that asks, and readiness marks only the port a pylon holds", async (t) => {
+  const registry = seeded(tempDb());
+  t.after(() => registry.close());
+  registry.allocatePreviews(pylonId, ["web"], ports);
+  registry.apply({ record: "preview", pylonId, service: "web", httpsPort: 10299, ready: true });
+  assert.equal(registry.previews(pylonId)[0]!.ready, false);
+  registry.apply({ record: "preview", pylonId, service: "web", httpsPort: 10200, ready: true });
+  assert.equal(registry.previews(pylonId)[0]!.ready, true);
+
+  registry.releasePreviews(pylonId);
+  assert.deepEqual(registry.previews(pylonId), []);
+  registry.apply({ record: "preview", pylonId, service: "web", httpsPort: 10200, ready: true });
+  assert.deepEqual(registry.previews(pylonId), [], "a late report for a released port records nothing");
+  const next = addPylon(registry, "th-2");
+  registry.allocatePreviews(next, ["web"], ports);
+  assert.deepEqual(portsOf(registry, next), ["web 10200"]);
+});
+
+test("a registry from before node-unique preview ports keeps its previews", async (t) => {
+  const { DatabaseSync } = await import("node:sqlite");
+  const path = tempDb();
+  seeded(path).close();
+  const db = new DatabaseSync(path);
+  db.exec(`DROP TABLE previews;
+    CREATE TABLE previews (pylon TEXT NOT NULL REFERENCES pylons (id), service TEXT NOT NULL, https_port INTEGER NOT NULL, ready INTEGER NOT NULL, PRIMARY KEY (pylon, service)) STRICT;
+    PRAGMA user_version = 2;`);
+  db.prepare("INSERT INTO previews VALUES (?, 'web', 10200, 1)").run(pylonId);
+  db.close();
+
+  const registry = openRegistry(path);
+  t.after(() => registry.close());
+  assert.deepEqual(registry.previews(pylonId), [{ pylon: pylonId, service: "web", httpsPort: 10200, ready: true }]);
+  registry.allocatePreviews(addPylon(registry, "th-2"), ["web"], ports);
+  assert.deepEqual(portsOf(registry, "pylon-th-2" as PylonId), ["web 10201"]);
+});

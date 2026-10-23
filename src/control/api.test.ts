@@ -145,7 +145,13 @@ test("starting a thread creates its pylon, boots fresh from the current image, a
     repo: { url: project.repoUrl, checkout: { branch: "main", commit: "origin/main" } },
     dotfiles,
   });
-  assert.equal(pylon.liveHash, liveHashOf({ previews: [], overlay: [] }));
+  assert.deepEqual(pylon.live.previews, [], "ports are allocated once the pylon reports services that want them");
+  assert.deepEqual(pylon.live.overlay.map((f) => f.path), ["/etc/profile.d/nexus.sh", "/home/user/.nexus/pylon.json", "/home/user/.nexus/PYLON.md"]);
+  assert.deepEqual(JSON.parse(pylon.live.overlay[1]!.content), {
+    pylonId: thread.pylonId, threadId: thread.id, project: "acme", node, api: "http://nexus.pylon",
+    allowedHosts: pylon.boot.network.allowedHosts, previews: [], logins: ["chatgpt"], dotfiles,
+  });
+  assert.equal(pylon.liveHash, liveHashOf(pylon.live));
   assert.equal(pylon.submitted, null);
 });
 
@@ -180,7 +186,8 @@ test("thread detail derives the actual state from the node's last observation", 
   s.registry.apply({ record: "job", status: { ...pause, state: "running", startedAt: "2027-01-01T00:00:59Z" } });
   s.registry.apply({ record: "session", pylonId: thread.pylonId, herdrPane: "p1", fact: { herdrPane: "p1", harness: "pi", harnessSessionId: null, status: "idle" } });
   s.registry.apply({ record: "output", pylonId: thread.pylonId, kind: "branch", ref: "nexus/fix" });
-  s.registry.savePreview({ pylon: thread.pylonId, service: "web", httpsPort: 8443, ready: true });
+  s.registry.allocatePreviews(thread.pylonId, ["web"], { first: 8443, last: 8443 });
+  s.registry.apply({ record: "preview", pylonId: thread.pylonId, service: "web", httpsPort: 8443, ready: true });
 
   const d = await detail();
   assert.equal(d.pylon.actualState, "pausing");

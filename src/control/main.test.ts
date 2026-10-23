@@ -16,3 +16,10 @@ test("a config without the harness, or with a relative harness path, is refused"
   assert.throws(() => parseConfig(JSON.stringify(rest)), /harness/);
   assert.throws(() => parseConfig(JSON.stringify({ ...rest, harness: { ...harness, storage: "harness.sqlite" } })), /absolute path/);
 });
+
+test("preview ports default to 10200 to 10999, and a range that ends before it starts is refused", () => {
+  const { previewPorts, ...rest } = JSON.parse(example);
+  assert.deepEqual(previewPorts, { first: 10200, last: 10999 });
+  assert.deepEqual(parseConfig(JSON.stringify(rest)).previewPorts, { first: 10200, last: 10999 });
+  assert.throws(() => parseConfig(JSON.stringify({ ...rest, previewPorts: { first: 10300, last: 10200 } })), /first must not be above last/);
+});
