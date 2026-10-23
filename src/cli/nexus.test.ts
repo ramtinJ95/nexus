@@ -7,7 +7,7 @@ import assert from "node:assert/strict";
 import { execFile, spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { once } from "node:events";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { connect, createServer, type Server } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -266,6 +266,29 @@ test("watch prints the backlog, then each new entry and state change, and ends w
   await s.json(["delete", thread.id]);
   assert.deepEqual(await watch.next(), { ...state, run: "idle", status: "deleted", queued: 0 }, "a deleted thread has no conversation to be busy");
   assert.deepEqual(await exited, [0, null]);
+});
+
+test("a watch whose consumer is killed outright exits, though an idle thread never writes to the dead pipe", async (t) => {
+  const s = await setup(t);
+  const thread: Thread = await s.json(["start", "--project", "acme", "--title", "idle"]);
+  const out = join(await mkdtemp(join(tmpdir(), "nexus-orphan-")), "watch.jsonl");
+  // The shell starts the watch with its output in a file, so killing the shell leaves no pipe for the watch to find closed.
+  const sh = spawn("sh", ["-c", `"$0" "$1" watch "$2" --json --interval 50 > "$3" 2>&1 & echo $!; wait`, process.execPath, cli, thread.id, out], { env: s.env() });
+  t.after(() => { sh.kill("SIGKILL"); });
+  const [pidLine] = await once(sh.stdout, "data") as [Buffer];
+  const pid = Number(pidLine.toString().trim());
+  t.after(() => { try { process.kill(pid); } catch {} });
+  const alive = () => { try { process.kill(pid, 0); return true; } catch { return false; } };
+  for (let i = 0; !(await readFile(out, "utf8").catch(() => "")).includes('"type":"state"'); i++) {
+    assert.ok(i < 200, "the watch printed the thread's state");
+    await new Promise((r) => setTimeout(r, 50));
+  }
+  sh.kill("SIGKILL");
+  await once(sh, "exit");
+  for (let i = 0; alive(); i++) {
+    assert.ok(i < 100, "the orphaned watch exited");
+    await new Promise((r) => setTimeout(r, 50));
+  }
 });
 
 /** An entry as pi-durable serves it, holding one user message. */
