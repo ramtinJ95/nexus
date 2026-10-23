@@ -17,11 +17,11 @@
  */
 import { once } from "node:events";
 import { Agent, request, type IncomingMessage } from "node:http";
-import { PassThrough, type Duplex } from "node:stream";
+import { PassThrough, type Duplex, type Readable } from "node:stream";
 import { setTimeout as delay } from "node:timers/promises";
 import { localApiWhois, type Whois } from "./tailscale.ts";
 import type { BootInputs, LiveSpec, SessionHarness } from "./project.ts";
-import type { CheckpointId, ImageId, ImageRecipe, PortableArtifactId, ArtifactId, TemplateBuildInputs, TemplateId } from "./images.ts";
+import type { ArtifactManifest, CheckpointId, ImageId, ImageRecipe, PortableArtifactId, ArtifactId, TemplateBuildInputs, TemplateId } from "./images.ts";
 
 declare const brand: unique symbol;
 type Brand<T, B extends string> = T & { readonly [brand]: B };
@@ -134,7 +134,7 @@ export interface RunningFacts {
   liveHash: LiveHash | null; // null until the probe has applied a LiveSpec since its own start
   bootedAt: string;
   bootedFrom: { image: ImageId; checkpoint: CheckpointId | null };
-  services: readonly ServiceFact[];
+  services: readonly ServiceFact[] | null; // null when the supervisor could not be read
   previews: readonly { service: string; httpsPort: number; ready: boolean }[];
   sessions: readonly SessionFact[] | null; // null when Herdr could not be read. No Herdr server is an empty list
   git: GitFacts | null; // null until the first poll, or when the checkout is missing
@@ -587,9 +587,10 @@ export function parseJobEnvelope(body: string): JobEnvelope {
       const pylonId = string(job.pylonId, "job.pylonId");
       const boot = record(job.boot, "job.boot");
       if (boot.pylonId !== pylonId) throw new Error("job.boot.pylonId differs from job.pylonId");
-      if (!string(boot.image, "job.boot.image").startsWith("img-")) throw new Error("job.boot.image is not an image ID");
+      if (!isImageId(string(boot.image, "job.boot.image"))) throw new Error("job.boot.image is not an image ID");
       const source = record(boot.source, "job.boot.source");
       if (source.kind !== "template" && source.kind !== "resume" && source.kind !== "fresh") throw new Error("job.boot.source.kind is not template, resume or fresh");
+      if (source.kind === "template" && !isTemplateId(string(source.template, "job.boot.source.template"))) throw new Error("job.boot.source.template is not a template ID");
       if (source.kind === "fresh" && source.preSetup !== null) string(source.preSetup, "job.boot.source.preSetup");
       const live = record(job.live, "job.live");
       if (!Array.isArray(live.previews) || !Array.isArray(live.overlay)) throw new Error("job.live needs previews and overlay arrays");
@@ -603,7 +604,24 @@ export function parseJobEnvelope(body: string): JobEnvelope {
     case "delete":
       string(job.pylonId, "job.pylonId");
       break;
-    case "build-image": case "build-template": case "fetch-artifact": case "drop-artifact":
+    case "build-image":
+      if (!isImageId(string(job.image, "job.image"))) throw new Error("job.image is not an image ID");
+      record(job.recipe, "job.recipe");
+      break;
+    case "build-template":
+      if (!isTemplateId(string(job.template, "job.template"))) throw new Error("job.template is not a template ID");
+      record(job.inputs, "job.inputs");
+      break;
+    case "fetch-artifact": {
+      // A checkpoint passes, for runJob to refuse with its reason.
+      const artifact = string(job.artifact, "job.artifact");
+      if (!isImageId(artifact) && !isTemplateId(artifact) && !artifact.startsWith("ckpt-")) throw new Error("job.artifact is not an artifact ID");
+      string(job.from, "job.from");
+      if (!/^[0-9a-f]{64}$/.test(string(job.sha256, "job.sha256"))) throw new Error("job.sha256 is not a hex sha256");
+      break;
+    }
+    case "drop-artifact":
+      if (!isPortableArtifactId(string(job.artifact, "job.artifact"))) throw new Error("job.artifact is not an image or template ID, and no job drops a checkpoint");
       break;
     default: throw new Error(`unknown job kind ${JSON.stringify(job.kind)}`);
   }
@@ -670,6 +688,87 @@ function parsePylonObservation(value: unknown): PylonObservation {
   string(p.pylonId, "pylon.pylonId");
   if (!pylonPhases.has(p.phase)) throw new Error(`unknown pylon phase ${JSON.stringify(p.phase)}`);
   return p as unknown as PylonObservation;
+}
+
+// Probe-to-probe artifact copies: GET /v1/artifacts/{id} answers with the manifest in a header and the archive as the body.
+
+const manifestHeader = "x-nexus-manifest";
+/** A copy that sends nothing for this long has broken off. tar can be slow to start on a large sparse file. */
+const artifactIdleMs = 60_000;
+
+/** The probe's side of GET /v1/artifacts/{id}: the headers ahead of the archive. */
+export function artifactHeaders(manifest: ArtifactManifest): Record<string, string> {
+  return { "content-type": "application/octet-stream", [manifestHeader]: Buffer.from(JSON.stringify(manifest)).toString("base64url") };
+}
+
+/** A peer's copy of an artifact, or why the peer refused it: it holds another sha256 under that ID. */
+export type ArtifactCopy = { manifest: ArtifactManifest; stream: Readable } | { refused: string };
+
+/**
+ * fetch-artifact's side: GET /v1/artifacts/{id}?sha256= from a peer probe, which whois must name as one of
+ * `peers`. A peer that holds other bytes under the ID refuses before it sends any. The stream is unverified:
+ * ArtifactStore.import checks it against the manifest's sha256 before anything uses it.
+ */
+export function fetchArtifact(peer: { host: string; port: number }, artifact: PortableArtifactId, sha256: string, check: { whois: Whois; peers: readonly TailnetNodeId[] }, signal: AbortSignal): Promise<ArtifactCopy> {
+  const path = `/v1/artifacts/${encodeURIComponent(artifact)}?sha256=${encodeURIComponent(sha256)}`;
+  const where = `${peer.host}:${peer.port}`;
+  return new Promise((resolve, reject) => {
+    const req = request({ host: peer.host, port: peer.port, method: "GET", path, agent: false, timeout: artifactIdleMs, signal }, (res) => {
+      const { remoteAddress, remotePort } = res.socket;
+      if (remoteAddress === undefined || remotePort === undefined) {
+        res.destroy();
+        return reject(probeError("unreachable", `${where}: the connection closed before whois`));
+      }
+      check.whois(remoteAddress, remotePort).then((id) => {
+        if (id === null || !check.peers.includes(id)) {
+          res.destroy();
+          return reject(probeError("forbidden", `${where} is tailnet node ${id ?? "unknown"}, which is not a configured peer`));
+        }
+        if (res.statusCode === 409) return text(res).then((refused) => resolve({ refused }), reject);
+        if (res.statusCode !== 200) return text(res).then((body) => reject(new Error(`${where}: GET ${path}: HTTP ${res.statusCode}: ${body}`)), reject);
+        let manifest: ArtifactManifest;
+        try {
+          manifest = parseArtifactManifest(JSON.parse(Buffer.from(String(res.headers[manifestHeader]), "base64url").toString("utf8")));
+        } catch (err) {
+          res.destroy();
+          return reject(new Error(`${where}: GET ${path} sent no readable manifest: ${(err as Error).message}`));
+        }
+        resolve({ manifest, stream: res });
+      }, (err: unknown) => { res.destroy(); reject(err); });
+    });
+    req.on("timeout", () => req.destroy(new Error(`${where} sent nothing for ${artifactIdleMs} ms`)));
+    req.on("error", (err) => reject(signal.aborted ? err : probeError("unreachable", `${where}: ${err.message}`)));
+    req.end();
+  });
+}
+
+/**
+ * Image and template IDs as the control plane mints them, a kind and a few lowercase letters or digits. They
+ * name directories in a node's artifact store, so an ID with a separator or a dot is refused before it is used.
+ */
+export const isImageId = (id: unknown): id is ImageId => typeof id === "string" && /^img-[a-z0-9]{1,40}$/.test(id);
+export const isTemplateId = (id: unknown): id is TemplateId => typeof id === "string" && /^tpl-[a-z0-9]{1,40}$/.test(id);
+export const isPortableArtifactId = (id: unknown): id is PortableArtifactId => isImageId(id) || isTemplateId(id);
+
+/** A manifest from a peer's header or from an artifact directory. */
+export function parseArtifactManifest(value: unknown): ArtifactManifest {
+  const m = record(value, "artifact manifest");
+  const id = string(m.id, "manifest.id");
+  if (!/^[0-9a-f]{64}$/.test(string(m.sha256, "manifest.sha256"))) throw new Error("manifest.sha256 is not a hex sha256");
+  string(m.builtAt, "manifest.builtAt");
+  if (isImageId(id)) {
+    string(m.gondolinBuildId, "manifest.gondolinBuildId");
+    string(m.builtOn, "manifest.builtOn");
+    record(m.pins, "manifest.pins");
+  } else if (isTemplateId(id)) {
+    const key = record(m.key, "manifest.key");
+    for (const field of ["project", "image", "setupHash"] as const) string(key[field], `manifest.key.${field}`);
+    if (!isImageId(key.image)) throw new Error("manifest.key.image is not an image ID");
+    string(m.commit, "manifest.commit");
+  } else {
+    throw new Error(`manifest.id ${id} is neither an image nor a template`);
+  }
+  return m as unknown as ArtifactManifest;
 }
 
 function record(value: unknown, what: string): Record<string, unknown> {

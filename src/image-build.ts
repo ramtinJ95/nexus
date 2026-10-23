@@ -9,7 +9,6 @@
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { once } from "node:events";
-import { PassThrough, type Readable } from "node:stream";
 import { createReadStream, existsSync, readFileSync } from "node:fs";
 import { mkdir, mkdtemp, readdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -19,13 +18,14 @@ import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { createHttpHooks, parseBuildConfig, verifyAssets, VM, type AlpineConfig, type BuildConfig } from "@earendil-works/gondolin";
 import { z } from "zod";
+import { artifactArchive, manifestFiles } from "./artifacts.ts";
 import { JobFailure } from "./backend.ts";
 import { imageIdOf, type ImageId, type ImageManifest, type ImageRecipe } from "./images.ts";
 import type { NodeName } from "./protocol.ts";
 
 export const pylonRecipeDir = fileURLToPath(new URL("../images/pylon/", import.meta.url));
 const gondolinBuild = fileURLToPath(new URL("./gondolin-build.ts", import.meta.url));
-export const imageManifestFile = "image.json";
+const imageManifestFile = manifestFiles.image;
 
 /** build.sh only runs a build. pins.json becomes ImageRecipe.pins. */
 const notRecipeFiles = new Set(["build.sh", "pins.json"]);
@@ -88,23 +88,6 @@ function dockerBuildArgs(pins: ImageRecipe["pins"]): Record<string, string> {
     PI_ENV_SHA256: pins.piEnvSha256,
     DOTFILES_COMMIT: pins.dotfilesCommon,
   };
-}
-
-/**
- * The sparse archive peers fetch: every file of the image directory except image.json, which holds its
- * sha256, as a byte-stable GNU tar. ImageManifest.sha256 is the digest of this stream, so ArtifactStore.export
- * must reuse it byte for byte. The stream errors if tar fails.
- */
-export function imageArchive(dir: string, signal?: AbortSignal): Readable {
-  const args = ["--create", "--file=-", "--sparse", "--format=gnu", "--sort=name", "--mtime=@0", "--owner=0", "--group=0", "--numeric-owner", `--exclude=./${imageManifestFile}`, "-C", dir, "."];
-  const tar = spawn("tar", args, { stdio: ["ignore", "pipe", "pipe"], ...(signal === undefined ? {} : { signal }) });
-  const archive = new PassThrough();
-  let stderr = "";
-  tar.stderr.on("data", (chunk: Buffer) => { stderr += chunk.toString("utf8"); });
-  tar.stdout.pipe(archive, { end: false });
-  tar.on("error", (err) => archive.destroy(err));
-  tar.on("close", (code) => code === 0 ? archive.end() : archive.destroy(new Error(`tar exited ${code} archiving ${dir}: ${stderr.trim()}`)));
-  return archive;
 }
 
 /**
@@ -557,7 +540,7 @@ async function reapGroup(pid: number, command: string): Promise<void> {
 async function sha256Of(dir: string, signal: AbortSignal): Promise<string> {
   const hash = createHash("sha256");
   try {
-    for await (const chunk of imageArchive(dir, signal)) hash.update(chunk as Buffer);
+    for await (const chunk of artifactArchive(dir, imageManifestFile, signal)) hash.update(chunk as Buffer);
   } catch (err) {
     if (signal.aborted) throw signal.reason;
     throw new JobFailure("backend", (err as Error).message);

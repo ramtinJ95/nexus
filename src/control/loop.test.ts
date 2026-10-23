@@ -9,7 +9,7 @@ import { openRegistry, type Registry, type Thread, type ThreadId } from "./regis
 import { newPylonRecord } from "../tick.ts";
 import { envelope, ingest as realIngest } from "../reconcile.ts";
 import type {
-  Job, JobEnvelope, JobId, JobStatus, LiveHash, NodeName, NodeObservation, ProbeClient, ProbeEvent, PylonId, PylonObservation, SessionFact, SubmitReply, TailnetNodeId,
+  Job, JobEnvelope, JobId, JobStatus, LiveHash, NodeName, NodeObservation, ProbeClient, ProbeEvent, PylonId, PylonObservation, RunningFacts, ServiceFact, SessionFact, SubmitReply, TailnetNodeId,
 } from "../protocol.ts";
 import type { ProjectId } from "../project.ts";
 import type { ImageId } from "../images.ts";
@@ -108,16 +108,17 @@ function fakeNode(options: { autoFinish: boolean }) {
     stream: () => Promise.reject(new Error("unused")),
   };
 
-  /** Changes a running pylon's sessions, and announces it with a snapshot as the probe does after a job. */
-  function setSessions(pylonId: PylonId, sessions: readonly SessionFact[] | null) {
+  /** Changes a running pylon's guest facts, and announces it with a snapshot as the probe does after a job. */
+  function setFacts(pylonId: PylonId, facts: Partial<Pick<RunningFacts, "sessions" | "services">>) {
     const pylon = pylons.get(pylonId);
     assert.ok(pylon?.phase === "running");
-    pylons.set(pylonId, { ...pylon, sessions });
+    pylons.set(pylonId, { ...pylon, ...facts });
     emit({ type: "snapshot", observation: observation() });
   }
+  const setSessions = (pylonId: PylonId, sessions: readonly SessionFact[] | null) => setFacts(pylonId, { sessions });
 
   return {
-    probe, pylons, submitted, finish, setSessions,
+    probe, pylons, submitted, finish, setSessions, setServices: (pylonId: PylonId, services: readonly ServiceFact[] | null) => setFacts(pylonId, { services }),
     running: () => [...jobs.values()].filter((j) => j.status.state === "running").map((j) => j.env.jobId),
     /** Drops every observe link and refuses calls until `reconnect`. */
     disconnect() { reachable = false; for (const push of streams) push(null); },
@@ -288,6 +289,29 @@ test("with the real ingest, sessions the probe could not read record no agent ac
   }
   fake.setSessions(thread.pylonId, [working]);
   await until("a fresh read is activity again", () => registry.thread(thread.id)!.lastAgentActivityAt > seen);
+});
+
+test("services the probe could not read change nothing: the next diff sees the last list read", async (t) => {
+  const registry = openRegistry(tempDb());
+  const thread = seed(registry);
+  const fake = fakeNode({ autoFinish: true });
+  const servicesOf = (o: PylonObservation | "absent" | undefined) => o !== undefined && o !== "absent" && o.phase === "running" ? o.services : undefined;
+  /** Per snapshot, the services read, and those of the last observation it is diffed against. */
+  const seen: { read: readonly ServiceFact[] | null | undefined; before: readonly ServiceFact[] | null | undefined }[] = [];
+  run(t, registry, fake.probe, {
+    ingest: (event, eventNode, known, now) => {
+      if (event.type === "snapshot") {
+        seen.push({ read: servicesOf(event.observation.pylons.find((p) => p.pylonId === thread.pylonId)), before: servicesOf(known.get(thread.pylonId)) });
+      }
+      return ingest(event, eventNode, known, now);
+    },
+  });
+  await until("the pylon runs", () => fake.pylons.get(thread.pylonId)?.phase === "running");
+  const web: ServiceFact = { name: "web", state: "ready", port: 8000, declared: true, wantsPreview: true };
+  for (const services of [[web], null, null, [web]]) fake.setServices(thread.pylonId, services);
+  const reads = () => seen.map((s) => s.read);
+  await until("the last read is ingested", () => JSON.stringify(reads().slice(-4)) === JSON.stringify([[web], null, null, [web]]));
+  assert.deepEqual(seen.slice(-3).map((s) => s.before), [[web], [web], [web]], "a null read is diffed as the list read before it, never as none");
 });
 
 test("a node that goes quiet, as a sleeping one does, is treated as unreachable", async (t) => {

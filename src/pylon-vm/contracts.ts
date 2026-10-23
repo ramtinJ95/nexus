@@ -90,6 +90,8 @@ export const configSchema = z
 		image: z.string().min(1).optional(),
 		workspace: guestPath.default("/workspace"),
 		setup: z.array(z.string().min(1)).default([]),
+		/** A failed setup is not recorded on the disk, so every boot of it runs setup again until one succeeds. For a setup that is safe to rerun. */
+		retrySetup: z.boolean().default(false),
 		resume: z.array(z.string().min(1)).default([]),
 		services: z.record(serviceName, serviceSchema).default({}),
 	})
@@ -155,6 +157,10 @@ export const bootSchema = z.strictObject({
 	files: z.array(guestFileSchema),
 	/** Run on every boot, before setup or resume. Each waits to completion. A failure is logged, not fatal. */
 	hooks: z.array(z.string().min(1)),
+	/** Each service's PUBLIC_URL, the https address the probe publishes it at. A service without one has no PUBLIC_URL. */
+	publicUrls: z.record(serviceName, z.url({ protocol: /^https$/ })),
+	/** The probe's socket, which the guest's requests to http://nexus.pylon are forwarded to (host-bridge.ts). Null for a template build, which no pylon owns. */
+	hostBridge: z.string().startsWith("/").nullable(),
 });
 export type BootSpec = z.infer<typeof bootSchema>;
 export const commandOutcomeSchema = z.discriminatedUnion("state", [
@@ -176,19 +182,15 @@ export const actionSchema = z.discriminatedUnion("action", [
 		boot: bootSchema,
 		labels,
 	}),
-	z
-		.strictObject({
-			action: z.literal("create"),
-			...identity,
-			config: configSchema.optional(),
-			template: nameSchema.optional(),
-			boot: bootSchema,
-			labels,
-		})
-		.refine(
-			(a) => Number(!!a.config) + Number(!!a.template) === 1,
-			"Supply config or template",
-		),
+	z.strictObject({
+		action: z.literal("create"),
+		...identity,
+		config: configSchema,
+		/** A prepared template's disk, copied in as the instance's disk. Its first boot then runs setup on it, and resume. */
+		disk: guestPath.optional(),
+		boot: bootSchema,
+		labels,
+	}),
 	z.strictObject({ action: z.literal("start"), ...identity, boot: bootSchema }),
 	z.strictObject({ action: z.enum(["stop", "inspect"]), ...identity }),
 	z.strictObject({
@@ -244,6 +246,11 @@ export const actionSchema = z.discriminatedUnion("action", [
 		...serviceSchema.shape,
 	}),
 	z.strictObject({
+		action: z.literal("public-urls"),
+		...identity,
+		urls: bootSchema.shape.publicUrls,
+	}),
+	z.strictObject({
 		action: z.literal("preview"),
 		...identity,
 		port: z.number().int().min(1).max(65535),
@@ -263,7 +270,6 @@ export const recordSchema = z.strictObject({
 	name: nameSchema,
 	config: configSchema,
 	createdAt: z.string(),
-	template: nameSchema.optional(),
 	labels,
 });
 export type SandboxRecord = z.infer<typeof recordSchema>;
@@ -285,6 +291,12 @@ export const statusSchema = z.strictObject({
 	persistence: z.literal("disk-only").optional(),
 	bootedAt: z.string().optional(),
 	startupError: z.string().optional(),
+	/** What startupError joins, step by step: the setup that ran on this boot or that its disk recorded, then the services. */
+	startupFailures: z
+		.array(z.strictObject({ kind: z.enum(["setup", "services"]), message: z.string() }))
+		.optional(),
+	/** Whether the disk held this instance's finished setup when it booted. Absent from controllers that predate it. */
+	setupRecorded: z.boolean().optional(),
 	resumePid: z
 		.union([z.string().uuid(), z.number().int().positive()])
 		.optional(),

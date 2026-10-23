@@ -3,7 +3,7 @@ import http from "node:http";
 import { join } from "node:path";
 import { text } from "node:stream/consumers";
 import { actionSchema, bootSchema } from "./contracts.ts";
-import { readIntent, SandboxRuntime } from "./runtime.ts";
+import { NotRunning, readIntent, SandboxRuntime } from "./runtime.ts";
 import { publishIdentity, readIdentity } from "./identity.ts";
 import { agentError, readRecord } from "./storage.ts";
 
@@ -16,16 +16,18 @@ async function main(): Promise<void> {
 	// The launching client writes the boot spec, secrets included, to stdin and closes it.
 	const spec = bootSchema.parse(JSON.parse(await text(process.stdin)));
 	const runtime = new SandboxRuntime(dir, record, spec);
-	const intent = await readIntent(dir);
+	let prepare = false;
 	try {
-		await runtime.boot(intent.prepare, intent.fresh, intent.setupError);
+		const intent = await readIntent(dir);
+		prepare = intent.prepare;
+		await runtime.boot(intent.prepare, intent.setupRan);
 	} catch (error) {
 		await runtime.fail(error);
 		await rm(pidFile, { force: true });
 		process.exitCode = 1;
 		return;
 	}
-	if (intent.prepare) {
+	if (prepare) {
 		await rm(pidFile, { force: true });
 		return;
 	}
@@ -51,7 +53,8 @@ async function main(): Promise<void> {
 						await rm(socket, { force: true });
 					}
 				} catch (error) {
-					console.error(error);
+					if (error instanceof NotRunning) console.error(`deferred: ${error.message}`);
+					else console.error(error);
 					const failure = agentError(error);
 					if (runtime.retired) {
 						server.close();

@@ -1,17 +1,24 @@
 /**
- * The control plane process: `node src/control/main.ts <config.json>`. It opens the registry, follows
- * every configured node's probe, and serves the API until SIGINT or SIGTERM.
+ * The control plane process: `node src/control/main.ts <config.json>`, run by deploy/nexus-control.service.
+ * It opens the registry, follows every configured node's probe, runs every thread's agent in the harness, and
+ * serves the API until SIGINT or SIGTERM.
  */
 import { readFile } from "node:fs/promises";
+import { isAbsolute } from "node:path";
 import { z } from "zod";
 import { connectProbe, type NodeName, type TailnetNodeId } from "../protocol.ts";
 import { ingest } from "../reconcile.ts";
-import { localApiWhois } from "../tailscale.ts";
+import { linuxTailscaledSocket, localApiWhois } from "../tailscale.ts";
+import type { Models } from "@earendil-works/pi-ai/models";
+import { harnessModels, openCredentials } from "../harness/credentials.ts";
+import { openHarnessHost, type ConversationId } from "../harness/host.ts";
 import { startApi } from "./api.ts";
+import { registryLocator } from "./locator.ts";
 import { startLoop } from "./loop.ts";
-import { openRegistry } from "./registry.ts";
+import { openRegistry, type Thread, type ThreadId } from "./registry.ts";
 
 const nodeId = z.string().regex(/^n[A-Za-z0-9]+$/, "a Tailscale stable node ID, such as nAbC123CNTRL");
+const absolutePath = z.string().refine(isAbsolute, "must be an absolute path");
 
 const configSchema = z.strictObject({
   db: z.string().min(1),
@@ -32,9 +39,25 @@ const configSchema = z.strictObject({
   callers: z.array(nodeId),
   /** The common dotfiles layer every new pylon pulls on boot. */
   dotfiles: z.strictObject({ repo: z.string().min(1), ref: z.string().min(1) }),
+  harness: z.strictObject({
+    /** pi-durable's storage, such as /var/lib/nexus-control/harness.sqlite. Only this process may open it. */
+    storage: absolutePath,
+    /** The model login and the device ID, such as /var/lib/nexus-control/harness-credentials.json. */
+    credentials: absolutePath,
+    /** The model new threads start with, such as { "provider": "openai", "modelId": "gpt-5.5" }. */
+    model: z.strictObject({ provider: z.string().min(1), modelId: z.string().min(1) }),
+  }),
   tailscaledSocket: z.string().min(1).optional(),
 });
 export type ControlPlaneConfig = z.infer<typeof configSchema>;
+
+export async function readConfig(path: string): Promise<ControlPlaneConfig> {
+  try {
+    return parseConfig(await readFile(path, "utf8"));
+  } catch (err) {
+    throw new Error(`${path}: ${(err as Error).message}`);
+  }
+}
 
 export function parseConfig(text: string): ControlPlaneConfig {
   const result = configSchema.safeParse(JSON.parse(text));
@@ -44,31 +67,68 @@ export function parseConfig(text: string): ControlPlaneConfig {
   return result.data;
 }
 
-async function main(configPath: string) {
-  const config = parseConfig(await readFile(configPath, "utf8"));
-  const whois = localApiWhois(config.tailscaledSocket);
+export interface ControlPlane {
+  readonly port: number;
+  close(): Promise<void>;
+}
+
+/** Everything but the model login, so src/control/thread-on-node.ts runs this same wiring with a scripted model. */
+export async function startControlPlane(config: ControlPlaneConfig, models: Models): Promise<ControlPlane> {
+  const tailscaled = config.tailscaledSocket ?? linuxTailscaledSocket;
+  const whois = localApiWhois(tailscaled);
   const registry = openRegistry(config.db);
   for (const node of config.nodes) {
     registry.upsertNode({ name: node.name as NodeName, tailnetHost: node.tailnetHost, tailnetNodeId: node.tailnetNodeId as TailnetNodeId });
   }
   const probes = config.nodes.map((n) => connectProbe(n.name as NodeName, n.tailnetHost, n.tailnetNodeId as TailnetNodeId, { whois }));
   const loop = startLoop({ registry, probes, ingest });
+  const wakeThread = (t: Thread) => { void loop.wake(registry.pylon(t.pylonId)!.node); };
+
+  const conversing = registry.threads().filter((t) => t.conversationId !== null);
+  const conversationOf = (t: Thread) => Number(t.conversationId) as ConversationId;
+  const harness = await openHarnessHost({
+    storagePath: config.harness.storage,
+    models,
+    model: config.harness.model,
+    locator: registryLocator(registry),
+    tailscaled,
+    threads: conversing.filter((t) => t.status !== "deleted").map((t) => ({ threadId: t.id, conversationId: conversationOf(t), agentTurnRunning: t.agentTurnRunning })),
+    deleted: conversing.filter((t) => t.status === "deleted").map(conversationOf),
+    // The registry row is what the planner and the dashboard read.
+    onActivity(threadId, facts) {
+      const t = registry.thread(threadId as ThreadId)!;
+      registry.recordActivity(t.id, { agent: facts.lastAgentActivityAt, agentTurnRunning: facts.agentTurnRunning });
+      wakeThread(t);
+    },
+    log: (message) => console.error(message),
+  });
+
   const api = await startApi({
     registry, whois, host: config.listen.host, port: config.listen.port,
     allowed: new Set([config.self.tailnetNodeId, ...config.callers] as TailnetNodeId[]),
     hostnames: new Set(config.listen.hostnames),
     dotfiles: config.dotfiles,
+    harness,
     wake: (node) => { void loop.wake(node); },
   });
   console.error(`nexus control plane: API on ${config.listen.host}:${api.port}, following ${config.nodes.map((n) => n.name).join(", ")}`);
 
-  const stop = async () => {
-    await api.close();
-    await loop.close();
-    registry.close();
+  return {
+    port: api.port,
+    async close() {
+      await api.close();
+      await harness.close();
+      await loop.close();
+      registry.close();
+    },
   };
+}
+
+async function main(configPath: string) {
+  const config = await readConfig(configPath);
+  const controlPlane = await startControlPlane(config, harnessModels(await openCredentials(config.harness.credentials)));
   for (const signal of ["SIGINT", "SIGTERM"] as const) {
-    process.once(signal, () => { stop().then(() => process.exit(0), (err: unknown) => { console.error(err); process.exit(1); }); });
+    process.once(signal, () => { controlPlane.close().then(() => process.exit(0), (err: unknown) => { console.error(err); process.exit(1); }); });
   }
 }
 

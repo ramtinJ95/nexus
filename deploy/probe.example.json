@@ -5,7 +5,8 @@
   "backend": {
     "kind": "pylon-vm",
     "stateRoot": "/var/lib/nexus/pylons",
-    "images": { "img-000000000000": "/var/lib/nexus/artifacts/img-000000000000" }
+    "artifacts": "/var/lib/nexus/artifacts"
   },
-  "secretsFile": "/etc/nexus/secrets.env"
+  "secretsFile": "/etc/nexus/secrets.env",
+  "previews": { "gatewayPort": 7481 }
 }

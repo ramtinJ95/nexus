@@ -1,6 +1,10 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { reportResume } from "./runtime.ts";
+import type { SandboxRecord } from "./contracts.ts";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { readIntent, reportResume, setupMarkerOf, setupOnDisk, setupState } from "./runtime.ts";
 
 type Status = Awaited<ReturnType<Parameters<typeof reportResume>[0]["status"]>>;
 
@@ -44,4 +48,39 @@ test("a resume whose outcome is lost says so", async () => {
 	assert.equal(await run(), true);
 	await settled;
 	assert.deepEqual(lines, ["resume: continues in the background as p1", "resume: no outcome, because Sandbox is not running"]);
+});
+
+test("setup reruns unless the disk holds this instance's own finished setup", () => {
+	const record = { name: "pylon-a", createdAt: "2027-01-01T00:00:00.000Z" } as SandboxRecord;
+	const build = { name: "tpl-0123456789ab", createdAt: "2026-12-31T00:00:00.000Z" } as SandboxRecord;
+	// A controller killed after its first checkpoint and before anything else: the disk alone says setup ran.
+	assert.deepEqual(setupOnDisk(setupMarkerOf(record, undefined), record), {});
+	assert.deepEqual(setupOnDisk(setupMarkerOf(record, "Setup exited 3"), record), { setupError: "Setup exited 3" });
+	// Killed before it: the disk is the one setup ran on, a template's or none.
+	assert.equal(setupOnDisk(setupMarkerOf(build, undefined), record), null, "a template's disk carries its build's setup, not the pylon's");
+	assert.equal(setupOnDisk(null, record), null);
+	assert.equal(setupOnDisk(setupMarkerOf({ ...record, createdAt: "2027-02-01T00:00:00.000Z" }, undefined), record), null, "an instance of the same name created again");
+});
+
+test("an instance whose intent predates the disk marker boots as its intent said, and its disk is marked", async (t) => {
+	const dir = await mkdtemp(join(tmpdir(), "nexus-intent-"));
+	t.after(() => rm(dir, { recursive: true, force: true }));
+	const intentOf = async (intent: object) => {
+		await writeFile(join(dir, "intent.json"), JSON.stringify(intent));
+		return readIntent(dir);
+	};
+	const record = { name: "pylon-old", createdAt: "2026-10-01T00:00:00.000Z" } as SandboxRecord;
+	// A pylon main created and checkpointed after its setup: before the marker, this boot would rerun setup over its checkout.
+	const ran = await intentOf({ prepare: false, fresh: false });
+	assert.deepEqual(ran, { prepare: false, setupRan: {} });
+	assert.deepEqual(setupState(true, null, record, ran.setupRan), { done: {}, mark: true });
+	const failed = await intentOf({ prepare: false, fresh: false, setupError: "Setup exited 1" });
+	assert.deepEqual(setupState(true, null, record, failed.setupRan), { done: { setupError: "Setup exited 1" }, mark: true });
+	// Setup had not run, or a boot from no disk, which ran setup then too.
+	assert.deepEqual(setupState(true, null, record, (await intentOf({ prepare: false, fresh: true })).setupRan), { done: null, mark: false });
+	assert.deepEqual(setupState(false, null, record, ran.setupRan), { done: null, mark: false });
+	// Once a checkpoint holds the marker, the disk answers.
+	assert.deepEqual(setupState(true, setupMarkerOf(record, undefined), record, ran.setupRan), { done: {}, mark: false });
+	assert.deepEqual(await intentOf({ prepare: true }), { prepare: true });
+	await assert.rejects(intentOf({ prepare: false, fresh: "yes" }));
 });
