@@ -122,7 +122,16 @@ export interface NodeObservation {
   jobs: readonly JobStatus[];
   /** A pylon absent from this list does not exist on the node. A listed pylon the registry does not know is an orphan: shown, never deleted. */
   pylons: readonly PylonObservation[];
+  /**
+   * The https ports the probe's gateway routes, each to a pylon's service. A paused pylon keeps its routes. The
+   * control plane gives none of these ports to another preview, whether or not the registry holds it. Null from a
+   * probe older than this field, whose routes are unknown: allocation then goes by the registry alone, and a deleted
+   * pylon the node reports absent counts as gone.
+   */
+  previewRoutes: readonly PreviewRouteFact[] | null;
 }
+
+export interface PreviewRouteFact { httpsPort: number; pylonId: PylonId; service: string }
 
 export type PylonObservation =
   | { pylonId: PylonId; phase: "booting" | "stopping" | "deleting" }
@@ -562,6 +571,8 @@ export function parseProbeEvent(frame: string): ProbeEvent {
       for (const key of ["artifacts", "jobs", "pylons"] as const) {
         if (!Array.isArray(o[key])) throw new Error(`observation.${key} is not an array`);
       }
+      o.previewRoutes ??= null;
+      if (o.previewRoutes !== null && !Array.isArray(o.previewRoutes)) throw new Error("observation.previewRoutes is not an array");
       (o.jobs as unknown[]).forEach(parseJobStatus);
       (o.pylons as unknown[]).forEach(parsePylonObservation);
       return event as ProbeEvent;

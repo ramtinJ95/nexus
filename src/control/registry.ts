@@ -332,19 +332,22 @@ export function openRegistry(path: string) {
     })),
     /**
      * Gives each of `services` that has no preview yet the lowest port in `range` that no pylon on the pylon's node
-     * holds. A service keeps its port until releasePreviews, so its URL survives pauses and restarts, and asking
-     * again changes nothing. Throws when the range is used up, after allocating the services before it.
+     * holds and that the node's last observation does not route. A port the node routes without a row here is left
+     * from records that were lost, so handing it out would publish two previews on one URL. A service keeps its port
+     * until releasePreviews, so its URL survives pauses and restarts, and asking again changes nothing. Throws when
+     * the range is used up, after allocating the services before it.
      */
     allocatePreviews(pylonId: PylonId, services: readonly string[], range: PortRange) {
       const node = (q.pylon.get(pylonId) as Row | undefined)?.node as NodeName | undefined;
       if (node === undefined) throw new Error(`no pylon ${pylonId} to allocate previews for`);
+      const routed = (jsonOrNull<NodeObservation>((q.node.get(node) as Row).observation)?.previewRoutes ?? []).map((r) => r.httpsPort);
       const held = new Set(previews(pylonId).map((p) => p.service));
       for (const service of services) {
         if (held.has(service)) continue;
-        const taken = new Set((q.portsOn.all(node) as Row[]).map((r) => r.https_port as number));
+        const taken = new Set([...routed, ...(q.portsOn.all(node) as Row[]).map((r) => r.https_port as number)]);
         let port = range.first;
         while (port <= range.last && taken.has(port)) port++;
-        if (port > range.last) throw new Error(`no https port is free for the preview of ${service}: pylons on ${node} hold every port from ${range.first} to ${range.last}`);
+        if (port > range.last) throw new Error(`no https port is free for the preview of ${service}: pylons on ${node} hold or ${node} serves every port from ${range.first} to ${range.last}`);
         q.insertPreview.run(service, port, pylonId);
         held.add(service);
       }

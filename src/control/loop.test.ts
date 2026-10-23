@@ -9,7 +9,7 @@ import { openRegistry, type PortRange, type Registry, type Thread, type ThreadId
 import { newPylonRecord } from "../tick.ts";
 import { envelope, ingest as realIngest } from "../reconcile.ts";
 import type {
-  Job, JobEnvelope, JobErrorCode, JobId, JobStatus, LiveHash, NodeName, NodeObservation, ProbeClient, ProbeEvent, PylonId, PylonObservation, RunningFacts, ServiceFact, SessionFact, SubmitReply, TailnetNodeId,
+  Job, JobEnvelope, JobErrorCode, JobId, JobStatus, LiveHash, NodeName, NodeObservation, PreviewRouteFact, ProbeClient, ProbeEvent, PylonId, PylonObservation, RunningFacts, ServiceFact, SessionFact, SubmitReply, TailnetNodeId,
 } from "../protocol.ts";
 import { liveHashOf, type LiveSpec, type ProjectId } from "../project.ts";
 import type { ImageId } from "../images.ts";
@@ -23,21 +23,24 @@ const previewPorts: PortRange = { first: 10200, last: 10209 };
  * A node as its probe presents it. Jobs run until `finish` unless `autoFinish` is set. Like the real probe, a
  * finished job is announced by a job event first and by a fresh snapshot a moment later.
  */
-function fakeNode(options: { autoFinish: boolean; node?: NodeName }) {
+function fakeNode(options: { autoFinish: boolean; node?: NodeName; reportsRoutes?: boolean }) {
   const node = options.node ?? firebat;
   const pylons = new Map<PylonId, PylonObservation>();
   const jobs = new Map<JobId, { env: JobEnvelope; status: JobStatus }>();
   const submitted: Job[] = [];
   /** Each pylon's LiveSpec as its last spawn applied it. */
   const lives = new Map<PylonId, LiveSpec>();
+  /** The gateway's route table: a spawn routes its previews, a pause keeps them and a delete drops them. */
+  const routes = new Map<number, PreviewRouteFact>();
   const streams = new Set<(event: ProbeEvent | null) => void>();
   let reachable = true;
 
   const observation = (): NodeObservation => ({
     node, observedAt: new Date().toISOString(), probeBootId: "boot-1",
     capacity: { memoryGiB: 64, committedMemoryGiB: 0, diskFreeGiB: 100 },
-    artifacts: [image], jobs: [...jobs.values()].map((j) => j.status), pylons: [...pylons.values()],
+    artifacts: [image], jobs: [...jobs.values()].map((j) => j.status), pylons: [...pylons.values()], previewRoutes: options.reportsRoutes === false ? null : [...routes.values()],
   });
+  const unroute = (pylonId: PylonId) => { for (const [port, route] of routes) if (route.pylonId === pylonId) routes.delete(port); };
   const emit = (event: ProbeEvent) => { for (const push of streams) push(event); };
 
   function apply(job: Job) {
@@ -52,10 +55,15 @@ function fakeNode(options: { autoFinish: boolean; node?: NodeName }) {
           services: [], previews, sessions: [], git: null, declaredOutputs: [], attachedClients: 0,
         });
         lives.set(job.pylonId, job.live);
+        unroute(job.pylonId);
+        for (const { service, httpsPort } of job.live.previews) routes.set(httpsPort, { httpsPort, pylonId: job.pylonId, service });
         return;
       }
       case "pause": pylons.set(job.pylonId, { pylonId: job.pylonId, phase: "stopped", checkpoint: job.checkpoint }); return;
-      case "delete": pylons.delete(job.pylonId); return;
+      case "delete":
+        unroute(job.pylonId);
+        pylons.delete(job.pylonId);
+        return;
       default: throw new Error(`the fake node runs no ${job.kind} jobs`);
     }
   }
@@ -130,7 +138,9 @@ function fakeNode(options: { autoFinish: boolean; node?: NodeName }) {
   const setSessions = (pylonId: PylonId, sessions: readonly SessionFact[] | null) => setFacts(pylonId, { sessions });
 
   return {
-    probe, pylons, submitted, lives, finish, setSessions, setServices: (pylonId: PylonId, services: readonly ServiceFact[] | null) => setFacts(pylonId, { services }),
+    probe, pylons, submitted, lives, routes, finish, setSessions, setServices: (pylonId: PylonId, services: readonly ServiceFact[] | null) => setFacts(pylonId, { services }),
+    /** Sends a snapshot of the node as it is, after a test changed it by hand. */
+    announce: () => emit({ type: "snapshot", observation: observation() }),
     running: () => [...jobs.values()].filter((j) => j.status.state === "running").map((j) => j.env.jobId),
     /** Drops every observe link and refuses calls until `reconnect`. */
     disconnect() { reachable = false; for (const push of streams) push(null); },
@@ -513,6 +523,71 @@ test("a deleted thread's ports go back only once its node no longer has the pylo
   await until("the port is released", () => registry.previews(thread.pylonId).length === 0);
 });
 
+test("a port the node still serves for a pylon the registry lost goes to no new preview, and its route is left alone", async (t) => {
+  const registry = openRegistry(tempDb());
+  const thread = seed(registry);
+  const fake = fakeNode({ autoFinish: true });
+  const lost = "pylon-th-lost" as PylonId;
+  fake.pylons.set(lost, { pylonId: lost, phase: "stopped", checkpoint: null });
+  fake.routes.set(10200, { httpsPort: 10200, pylonId: lost, service: "web" });
+  run(t, registry, fake.probe, { ingest: realIngest });
+  await until("the pylon runs", () => fake.pylons.get(thread.pylonId)?.phase === "running");
+  fake.setServices(thread.pylonId, [web]);
+  await until("web is published", () => registry.previews(thread.pylonId)[0]?.ready === true);
+  assert.deepEqual(fake.lives.get(thread.pylonId)?.previews, [{ service: "web", httpsPort: 10201 }]);
+  assert.deepEqual(fake.routes.get(10200), { httpsPort: 10200, pylonId: lost, service: "web" });
+  assert.ok(!fake.submitted.some((job) => "pylonId" in job && job.pylonId === lost), "the planner sends nothing for a pylon it does not know");
+});
+
+test("a deleted thread whose pylon was removed by hand gets a delete that unpublishes its previews, and only then its ports back", async (t) => {
+  const registry = openRegistry(tempDb());
+  const thread = seed(registry);
+  const fake = fakeNode({ autoFinish: false });
+  const finishNext = async (kind: Job["kind"]) => {
+    await until(`a ${kind} job runs`, () => fake.running().length === 1 && fake.submitted.at(-1)?.kind === kind);
+    fake.finish(fake.running()[0]!);
+  };
+  run(t, registry, fake.probe, { ingest: realIngest });
+  await finishNext("spawn");
+  await until("the pylon runs", () => fake.pylons.get(thread.pylonId)?.phase === "running");
+  fake.setServices(thread.pylonId, [web]);
+  await finishNext("spawn");
+  await until("the preview is ready", () => registry.previews(thread.pylonId)[0]?.ready === true);
+  registry.setThreadStatus(thread.id, "archived");
+  await finishNext("pause");
+  await until("the pylon is paused", () => fake.pylons.get(thread.pylonId)?.phase === "stopped");
+
+  fake.pylons.delete(thread.pylonId);
+  fake.announce();
+  registry.setThreadStatus(thread.id, "deleted");
+  await until("a delete runs for the absent pylon", () => fake.running().length === 1 && fake.submitted.at(-1)?.kind === "delete");
+  assert.deepEqual(registry.previews(thread.pylonId).map((p) => p.httpsPort), [10200], "the port is held while the node still routes it");
+  fake.finish(fake.running()[0]!);
+  await until("the port is released", () => registry.previews(thread.pylonId).length === 0);
+  assert.deepEqual([...fake.routes.keys()], []);
+  const deletes = () => fake.submitted.filter((job) => job.kind === "delete").length;
+  const sent = deletes();
+  await new Promise((resolve) => setTimeout(resolve, 100));
+  assert.equal(deletes(), sent, "once the node has neither the pylon nor its routes, no delete follows");
+});
+
+test("a probe that reports no routes still gets planned for, with ports allocated by the registry alone", async (t) => {
+  const registry = openRegistry(tempDb());
+  const thread = seed(registry);
+  const fake = fakeNode({ autoFinish: true, reportsRoutes: false });
+  run(t, registry, fake.probe, { ingest: realIngest });
+  await until("the pylon runs", () => fake.pylons.get(thread.pylonId)?.phase === "running");
+  fake.setServices(thread.pylonId, [web]);
+  await until("web is published", () => registry.previews(thread.pylonId)[0]?.ready === true);
+  assert.deepEqual(fake.lives.get(thread.pylonId)?.previews, [{ service: "web", httpsPort: 10200 }]);
+
+  fake.pylons.delete(thread.pylonId);
+  fake.announce();
+  registry.setThreadStatus(thread.id, "deleted");
+  await until("the port is released", () => registry.previews(thread.pylonId).length === 0);
+  assert.ok(!fake.submitted.some((job) => job.kind === "delete"), "with its routes unknown, an absent pylon of a deleted thread is gone, as before");
+});
+
 test("a used-up port range is logged, and the services that got a port are still published", async (t) => {
   const registry = openRegistry(tempDb());
   const thread = seed(registry);
@@ -523,7 +598,7 @@ test("a used-up port range is logged, and the services that got a port are still
   fake.setServices(thread.pylonId, [web, { ...web, name: "api", port: 8001 }]);
   await until("web is published", () => registry.previews(thread.pylonId)[0]?.ready === true);
   assert.deepEqual(fake.lives.get(thread.pylonId)?.previews, [{ service: "web", httpsPort: 10200 }]);
-  assert.ok(logged.includes(`${thread.pylonId}: no https port is free for the preview of api: pylons on ${node} hold every port from 10200 to 10200`), logged.join("\n"));
+  assert.ok(logged.includes(`${thread.pylonId}: no https port is free for the preview of api: pylons on ${node} hold or ${node} serves every port from 10200 to 10200`), logged.join("\n"));
 });
 
 test("a node reporting a pylon the registry places on another node gets no ports for it", async (t) => {

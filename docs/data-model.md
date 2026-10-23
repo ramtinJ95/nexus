@@ -15,7 +15,7 @@ The control plane writes every record. Probes send facts in observations, and th
 | Thread | `id`, `title`, `project`, `status`, `conversationId`, `pylonId`, `startedBy` | You, and the harness |
 | Pylon | `id`, `thread`, `node`, `template` | Thread start |
 | Session | `pylon`, `herdrPane`, `harness`, `harnessSessionId`, `status` | Observations. Panes opened by hand in Herdr are adopted |
-| Preview | `pylon`, `service`, `httpsPort` | The control plane allocates the port. Observations report when it is ready |
+| Preview | `pylon`, `service`, `httpsPort` | The control plane allocates the port, never one its node's probe still routes. Observations report when it is ready |
 | Output | `thread`, `kind`, `ref` | Observations, including outputs the agent declares with `nexus output add` |
 | Orphan | `node`, `pylonId` | Observations of a pylon the registry does not know. Only you delete it |
 
@@ -66,4 +66,4 @@ The actual state comes from the probe's last observation and the job in flight:
 
 ## Reconciling desired and actual state
 
-On every observation and every 5 seconds, the control plane's planner compares each pylon's desired phase with what its probe reports. It sends the probe only the next job that closes the difference. Every job gives the same end state when it runs twice, or after an earlier run stopped partway. A checkpoint is removed only by `delete` of a pylon the registry knows, so a wiped registry never deletes a pylon's disk.
+On every observation and every 5 seconds, the control plane's planner compares each pylon's desired phase with what its probe reports. It sends the probe only the next job that closes the difference. Every job gives the same end state when it runs twice, or after an earlier run stopped partway. A deleted thread's pylon is gone once its node has neither the VM nor a preview routed to it, so a pylon whose VM was removed by hand still gets a `delete` that unpublishes its previews. A checkpoint is removed only by `delete` of a pylon the registry knows, so a wiped registry never deletes a pylon's disk.

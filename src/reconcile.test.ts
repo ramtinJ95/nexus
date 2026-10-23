@@ -5,8 +5,8 @@ import {
   type ActivityFacts, type DesiredPhase, type PlanInput, type PlanStep, type RegistryWrite,
 } from "./reconcile.ts";
 import {
-  encodeSubmitReply, jobSubject, parseSubmitReply,
-  type JobErrorCode, type JobId, type JobStatus, type LiveHash, type NodeName, type NodeObservation, type PylonId, type PylonObservation,
+  encodeProbeEvent, encodeSubmitReply, jobSubject, parseProbeEvent, parseSubmitReply,
+  type JobErrorCode, type JobId, type JobStatus, type LiveHash, type NodeName, type NodeObservation, type ProbeEvent, type PylonId, type PylonObservation,
   type RunningFacts, type SessionFact,
 } from "./protocol.ts";
 import type { BootInputs, PylonSource } from "./project.ts";
@@ -67,6 +67,7 @@ interface Row {
   expect: PlanStep;
   firstBoot?: typeof fresh | typeof fromTemplate;
   holders?: Partial<Record<ArtifactId, readonly NodeName[]>>;
+  previewsRouted?: boolean;
 }
 
 const none: Attempts = [0, null, null];
@@ -81,6 +82,7 @@ const rows: Record<string, Row> = {
   "a finished job does not block": { desired: "running", observed: running(liveHash), inFlight: "succeeded", attempts: none, online: true, present: imageOnly, expect: done },
   // 3
   "delete of an absent pylon is done": { desired: "deleted", observed: "absent", inFlight: null, attempts: none, online: true, present: [], expect: done },
+  "delete of an absent pylon whose previews the node still routes submits delete": { desired: "deleted", observed: "absent", previewsRouted: true, inFlight: null, attempts: none, online: true, present: [], expect: del },
   "delete of a running pylon submits delete": { desired: "deleted", observed: running(liveHash), inFlight: null, attempts: none, online: true, present: imageOnly, expect: del },
   "delete ignores the attempt budget": { desired: "deleted", observed: stopped(lastCheckpoint), inFlight: null, attempts: [5, 1_000, "setup-failed"], online: true, present: imageOnly, expect: del },
   "delete does not wait for a transition": { desired: "deleted", observed: phase("stopping"), inFlight: null, attempts: none, online: true, present: imageOnly, expect: del },
@@ -96,6 +98,7 @@ const rows: Record<string, Row> = {
   "deleting waits": { desired: "paused", observed: phase("deleting"), inFlight: null, attempts: none, online: true, present: imageOnly, expect: wait("transitioning") },
   // 6
   "paused and absent is done": { desired: "paused", observed: "absent", inFlight: null, attempts: none, online: true, present: [], expect: done },
+  "paused and absent is done though the node still routes its previews": { desired: "paused", observed: "absent", previewsRouted: true, inFlight: null, attempts: none, online: true, present: [], expect: done },
   "paused and stopped is done": { desired: "paused", observed: stopped(lastCheckpoint), inFlight: null, attempts: none, online: true, present: imageOnly, expect: done },
   "paused and running submits pause": { desired: "paused", observed: running(liveHash), inFlight: null, attempts: none, online: true, present: imageOnly, expect: pause },
   "paused and broken submits pause": { desired: "paused", observed: broken, inFlight: null, attempts: none, online: true, present: imageOnly, expect: pause },
@@ -134,6 +137,7 @@ function input(row: Row): PlanInput {
     desired: row.desired,
     firstBoot: row.firstBoot ?? fresh,
     observed: row.observed,
+    previewsRouted: row.previewsRouted ?? false,
     nodeArtifacts: new Set(row.present),
     inFlight: row.inFlight === null ? null : jobInFlight(row.inFlight),
     attempts: { count, last: lastCode === null ? null : { at: now - failedAgo!, code: lastCode, message: `the probe's ${lastCode} message` } },
@@ -207,6 +211,17 @@ test("submit replies round-trip through the wire encoding", () => {
     const { status: code, body } = encodeSubmitReply(reply);
     assert.deepEqual(parseSubmitReply(code, body), reply);
   }
+});
+
+test("a snapshot from a probe older than route reporting parses with its routes unknown", () => {
+  const observation = { node, observedAt: "2027-01-01T00:00:00Z", probeBootId: "b", capacity: { memoryGiB: 64, committedMemoryGiB: 0, diskFreeGiB: 100 }, artifacts: [], jobs: [], pylons: [] };
+  const old = parseProbeEvent(encodeProbeEvent({ type: "snapshot", observation } as unknown as ProbeEvent));
+  assert.ok(old.type === "snapshot" && old.observation.previewRoutes === null);
+  const routes = [{ httpsPort: 10200, pylonId, service: "web" }];
+  const current = parseProbeEvent(encodeProbeEvent({ type: "snapshot", observation: { ...observation, previewRoutes: routes } }));
+  assert.ok(current.type === "snapshot" && current.observation.previewRoutes !== null);
+  assert.deepEqual(current.observation.previewRoutes, routes);
+  assert.throws(() => parseProbeEvent(encodeProbeEvent({ type: "snapshot", observation: { ...observation, previewRoutes: {} } } as unknown as ProbeEvent)), /previewRoutes is not an array/);
 });
 
 const working: SessionFact = { herdrPane: "p1", harness: "claude-code", harnessSessionId: "s1", status: "working" };
@@ -289,6 +304,7 @@ test("ingest: a snapshot writes the node, its jobs, its pylons, and closes known
     capacity: { memoryGiB: 64, committedMemoryGiB: 8, diskFreeGiB: 500 },
     artifacts: [image], jobs: [status],
     pylons: [runningWith({ attachedClients: 2 }), { pylonId: "pylon-x" as PylonId, phase: "booting" }],
+    previewRoutes: [],
   };
   const known = new Map<PylonId, PylonObservation | "absent">([[pylonId, "absent"], [gone, { ...runningWith({ sessions: [idleShell] }), pylonId: gone }]]);
   assert.deepEqual(ingest({ type: "snapshot", observation }, node, known, now), [
