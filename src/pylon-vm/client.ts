@@ -1,4 +1,5 @@
 import { execFileSync, spawn } from "node:child_process";
+import { createHash } from "node:crypto";
 import { closeSync, existsSync, openSync } from "node:fs";
 import {
 	constants,
@@ -100,8 +101,12 @@ async function published(file: string): Promise<boolean> {
 	const identity = await readIdentity(file);
 	return identity !== null && (await alive(identity));
 }
+/** Short, because the instance directory's path would push Gondolin's socket paths past their limit. */
+const scratchDirectory = (root: string, dir: string) =>
+	join(root, "tmp", createHash("sha256").update(dir).digest("hex").slice(0, 12));
 /** An instance whose controller already runs keeps the spec it booted with. */
 async function launch(
+	root: string,
 	dir: string,
 	name: string,
 	spec: BootSpec,
@@ -175,10 +180,16 @@ async function launch(
 		await publishIdentity(join(lock, "owner"));
 		await saveJson(join(dir, "status.json"), { state: "starting", name });
 		await rm(join(dir, "control.sock"), { force: true });
-		const fd = openSync(join(dir, "controller.log"), "a", 0o600);
 		const env: NodeJS.ProcessEnv = {};
-		for (const key of ["PATH", "HOME", "XDG_CACHE_HOME", "TMPDIR"])
+		for (const key of ["PATH", "HOME", "XDG_CACHE_HOME"])
 			if (process.env[key]) env[key] = process.env[key];
+		// Gondolin puts the running disk's overlay and its sockets in the temporary directory. The system one is
+		// often a tmpfs, where every byte a pylon writes to its disk would take host memory until the next pause.
+		// No controller runs here now, so whatever a crashed one left in it is garbage.
+		env.TMPDIR = scratchDirectory(root, dir);
+		await rm(env.TMPDIR, { recursive: true, force: true });
+		await privateDirectory(env.TMPDIR);
+		const fd = openSync(join(dir, "controller.log"), "a", 0o600);
 		// The spec carries secret values, so it goes over a pipe and never through the environment or a file.
 		const child = spawn("node", [daemonPath, dir], {
 			detached: true,
@@ -269,7 +280,7 @@ async function create(
 		throw error;
 	}
 	try {
-		return await launch(dir, action.name, action.boot, signal);
+		return await launch(root, dir, action.name, action.boot, signal);
 	} catch (error) {
 		if (signal?.aborted || action.action !== "prepare") throw error;
 		const log = await readLogTail(join(dir, "controller.log"), 20);
@@ -351,6 +362,7 @@ export async function run(
 			await rename(dir, doomed);
 		}
 		await rm(doomed, { recursive: true, force: true });
+		await rm(scratchDirectory(root, dir), { recursive: true, force: true });
 		await rm(join(root, kind, `.${action.name}.creating`), {
 			recursive: true,
 			force: true,
@@ -365,7 +377,7 @@ export async function run(
 		};
 	}
 	if (action.action === "start")
-		return launch(dir, action.name, action.boot, signal);
+		return launch(root, dir, action.name, action.boot, signal);
 	if (!(await reachable(dir, action.name))) {
 		if (action.action === "stop") return settle(dir);
 		if (action.action === "inspect") return offline(dir);
