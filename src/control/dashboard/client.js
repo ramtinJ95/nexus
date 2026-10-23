@@ -140,6 +140,7 @@ const actions = {
   delete: (thread) => api("DELETE", `/v1/threads/${thread}`),
   abort: (thread) => api("POST", `/v1/threads/${thread}/abort`),
   retry: (thread) => api("POST", `/v1/threads/${thread}/retry`),
+  "retry-pylon": (thread) => api("POST", `/v1/threads/${thread}/pylon/retry`),
 };
 
 document.addEventListener("click", async (event) => {

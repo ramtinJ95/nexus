@@ -170,7 +170,7 @@ test("thread detail derives the actual state from the node's last observation", 
 
   assert.deepEqual(await detail(), {
     thread,
-    pylon: { id: thread.pylonId, node, actualState: "unknown", failed: null, observedAt: null },
+    pylon: { id: thread.pylonId, node, actualState: "unknown", failed: null, observedAt: null, retryRefused: null },
     sessions: [], previews: [], outputs: [], agent: { parkedTasks: 0 },
   });
 
@@ -210,7 +210,7 @@ test("a failed pylon shows failed with its reason until its thread is deleted, a
   s.registry.apply({ record: "node", node, state: "online", capacity });
   const reason = "last job failed with setup-failed, which is not retryable: pylon-x: Setup exited 128\nfatal: unable to access";
   s.registry.savePylon({ ...s.registry.pylon(thread.pylonId)!, failed: reason });
-  assert.deepEqual((await detail()).pylon, { id: thread.pylonId, node, actualState: "failed", failed: reason, observedAt: null });
+  assert.deepEqual((await detail()).pylon, { id: thread.pylonId, node, actualState: "failed", failed: reason, observedAt: null, retryRefused: null });
 
   await s.call("DELETE", `/v1/threads/${thread.id}`);
   const del = { jobId: "job-del" as JobId, subject: thread.pylonId, kind: "delete" as const };
@@ -218,7 +218,81 @@ test("a failed pylon shows failed with its reason until its thread is deleted, a
   assert.equal((await detail()).pylon.actualState, "deleting");
   s.registry.apply({ record: "job", status: { ...del, state: "succeeded", finishedAt: "2027-01-01T00:00:05Z" } });
   s.registry.ingested({ node, observedAt: "2027-01-01T00:00:06Z", probeBootId: "b", capacity, artifacts: [], jobs: [], pylons: [], previewRoutes: [] }, []);
-  assert.deepEqual((await detail()).pylon, { id: thread.pylonId, node, actualState: "absent", failed: reason, observedAt: "2027-01-01T00:00:06Z" });
+  assert.deepEqual((await detail()).pylon, { id: thread.pylonId, node, actualState: "absent", failed: reason, observedAt: "2027-01-01T00:00:06Z", retryRefused: null });
+});
+
+test("retrying a failed pylon clears the planner's verdict and its attempts, marks the retry, counts as human activity and wakes its node", async (t) => {
+  const s = await withThread(t);
+  const { thread } = s;
+  const retry = (headers: Record<string, string> = {}) => s.call("POST", `/v1/threads/${thread.id}/pylon/retry`, undefined, headers);
+  assert.equal((await retry()).status, 409, "a pylon that has not failed has nothing to retry");
+
+  const failed = {
+    ...s.registry.pylon(thread.pylonId)!,
+    attempts: { count: 1, last: { at: 1, code: "setup-failed" as const, message: "fatal: could not read from remote repository" } },
+    failed: "last job failed with setup-failed, which is not retryable: fatal: could not read from remote repository",
+  };
+  s.registry.savePylon(failed);
+  assert.equal((await retry({ "content-type": "text/plain" })).status, 415);
+  assert.equal((await retry({ host: "evil.example" })).status, 403);
+  s.callAs("nSTRANGER" as TailnetNodeId);
+  assert.equal((await retry()).status, 403);
+  s.callAs(laptop);
+  assert.deepEqual(s.registry.pylon(thread.pylonId), failed, "a refused retry leaves the pylon failed");
+
+  s.woken.length = 0;
+  const before = Date.now();
+  assert.equal((await retry()).status, 204, "a human may retry a failure the planner would not");
+  assert.deepEqual(s.registry.pylon(thread.pylonId), { ...failed, attempts: { count: 0, last: null }, failed: null, retrying: true });
+  assert.ok(s.registry.thread(thread.id)!.lastHumanActivityAt >= before, "the pylon is wanted at once");
+  assert.deepEqual(s.woken, [node]);
+  assert.equal((await s.call("GET", `/v1/threads/${thread.id}`)).body.pylon.failed, null);
+  assert.equal((await retry()).status, 409, "a second retry finds nothing to clear");
+});
+
+test("a pylon whose disk holds a failed setup cannot be retried, and its detail says why", async (t) => {
+  const s = await withThread(t);
+  const { thread } = s;
+  const capacity = { memoryGiB: 64, committedMemoryGiB: 0, diskFreeGiB: 100 };
+  s.registry.apply({ record: "node", node, state: "online", capacity });
+  const broken = (cause: "setup" | "saved-setup" | "services") => s.registry.ingested({
+    node, observedAt: "2027-01-01T00:01:00Z", probeBootId: "b", capacity, artifacts: [], jobs: [],
+    pylons: [{ pylonId: thread.pylonId, phase: "broken", detail: "Setup exited 128. Read controller logs", cause }], previewRoutes: [],
+  }, []);
+  broken("saved-setup");
+  s.registry.savePylon({ ...s.registry.pylon(thread.pylonId)!, failed: "pylon is broken: Setup exited 128. Read controller logs" });
+  const refusal = "Its disk holds the failed setup, and every boot of that disk fails the same way, so a retry cannot help. Start again from the project";
+  assert.equal((await s.call("GET", `/v1/threads/${thread.id}`)).body.pylon.retryRefused, refusal);
+  const res = await s.call("POST", `/v1/threads/${thread.id}/pylon/retry`);
+  assert.deepEqual(res, { status: 409, body: { error: `pylon ${thread.pylonId} cannot be retried. ${refusal}` } });
+  assert.notEqual(s.registry.pylon(thread.pylonId)!.failed, null, "a refused retry leaves the verdict");
+
+  broken("services");
+  assert.equal((await s.call("GET", `/v1/threads/${thread.id}`)).body.pylon.retryRefused, null);
+  assert.equal((await s.call("POST", `/v1/threads/${thread.id}/pylon/retry`)).status, 204, "a service that failed may start on the next boot");
+
+  broken("setup");
+  s.registry.savePylon({ ...s.registry.pylon(thread.pylonId)!, failed: "pylon is broken: Setup exited 128. Read controller logs" });
+  assert.equal((await s.call("GET", `/v1/threads/${thread.id}`)).body.pylon.retryRefused, null);
+  assert.equal((await s.call("POST", `/v1/threads/${thread.id}/pylon/retry`)).status, 204, "the pause removes a VM whose setup failed on this boot, so setup runs again");
+});
+
+test("an archived thread's failed pylon can be retried and stays archived, and a deleted thread's cannot", async (t) => {
+  const s = await withThread(t);
+  const { thread } = s;
+  const fail = () => s.registry.savePylon({ ...s.registry.pylon(thread.pylonId)!, failed: "gave up after 5 failed attempts" });
+  await s.call("POST", `/v1/threads/${thread.id}/archive`);
+  fail();
+  assert.equal((await s.call("POST", `/v1/threads/${thread.id}/pylon/retry`)).status, 204);
+  assert.equal(s.registry.pylon(thread.pylonId)!.failed, null);
+  assert.equal(s.registry.thread(thread.id)!.status, "archived", "a retry settles the pylon rather than unarchiving it");
+
+  fail();
+  await s.call("DELETE", `/v1/threads/${thread.id}`);
+  const res = await s.call("POST", `/v1/threads/${thread.id}/pylon/retry`);
+  assert.equal(res.status, 409);
+  assert.match(res.body.error, /is deleted/);
+  assert.equal((await s.call("POST", "/v1/threads/th-missing/pylon/retry")).status, 404);
 });
 
 test("archive, delete, and activity update the thread and wake its node", async (t) => {

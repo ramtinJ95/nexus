@@ -136,8 +136,20 @@ export interface PreviewRouteFact { httpsPort: number; pylonId: PylonId; service
 export type PylonObservation =
   | { pylonId: PylonId; phase: "booting" | "stopping" | "deleting" }
   | { pylonId: PylonId; phase: "stopped"; checkpoint: CheckpointId | null }
-  | { pylonId: PylonId; phase: "broken"; detail: string } // the backend reports it interrupted or failed
+  | { pylonId: PylonId; phase: "broken"; detail: string; cause: BrokenCause | "unknown" } // the backend reports it interrupted or failed
   | ({ pylonId: PylonId; phase: "running" } & RunningFacts);
+
+/**
+ * Why a pylon is broken. `setup`: its VM runs with a setup that failed on this boot, and it has no completed checkpoint.
+ * Only the running disk holds the failure, and a pause removes the VM, so the next boot runs setup again.
+ * `saved-setup`: its VM booted from a disk that already held a failed setup, or has a completed checkpoint a pause
+ * would save the failure onto, so every boot of that disk would fail the same way. `services`: its VM runs, but a
+ * declared service did not start. `controller`: the VM stopped outside a completed pause, and its disk is its last
+ * checkpoint.
+ */
+export type BrokenCause = "setup" | "saved-setup" | "services" | "controller";
+/** `unknown`: a backend that cannot tell why, or a cause this control plane does not know, or none, from a probe older or newer than it. */
+const brokenCauses: ReadonlySet<unknown> = new Set(["setup", "saved-setup", "services", "controller", "unknown"] satisfies (BrokenCause | "unknown")[]);
 
 export interface RunningFacts {
   liveHash: LiveHash | null; // null until the probe has applied a LiveSpec since its own start
@@ -698,6 +710,7 @@ function parsePylonObservation(value: unknown): PylonObservation {
   const p = record(value, "pylon observation");
   string(p.pylonId, "pylon.pylonId");
   if (!pylonPhases.has(p.phase)) throw new Error(`unknown pylon phase ${JSON.stringify(p.phase)}`);
+  if (p.phase === "broken" && !brokenCauses.has(p.cause)) p.cause = "unknown";
   return p as unknown as PylonObservation;
 }
 

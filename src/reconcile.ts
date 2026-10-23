@@ -58,6 +58,8 @@ export interface PlanInput {
   inFlight: JobStatus | null; // for this pylon, or for an artifact this pylon is waiting on
   /** Consecutive failed jobs, and the last one's. A success clears both. */
   attempts: { count: number; last: FailedAttempt | null };
+  /** A human retried the pylon after the planner gave up, and no job has succeeded nor the planner finished or given up since. */
+  retrying: boolean;
   /** Online nodes other than `node` that hold the artifact. */
   holders(artifact: ArtifactId): readonly NodeName[];
   /** The registry's recorded archive hash, which fetch-artifact verifies the copy against. */
@@ -107,14 +109,23 @@ const planRules: readonly Rule[] = [
   ({ attempts: { count, last } }, now) => last !== null && now < last.at + backoffMs(count) ? wait("backoff") : null,
   // 5.
   ({ observed: o }) => o !== "absent" && (o.phase === "booting" || o.phase === "stopping" || o.phase === "deleting") ? wait("transitioning") : null,
-  // 6.
+  // 6. A broken pylon that retryRefusal refuses is never paused either, because the pause could save what broke it.
   (i) => {
     if (i.desired !== "paused") return null;
     if (i.observed === "absent" || i.observed.phase === "stopped") return done;
+    const refused = retryRefusal(i.observed);
+    if (i.observed.phase === "broken" && refused !== null) return brokenFailure(i.observed, refused);
     return submit({ kind: "pause", pylonId: i.pylonId, checkpoint: i.nextCheckpoint });
   },
-  // 7a. A broken disk is never booted over or replaced on its own.
-  ({ observed: o }) => o !== "absent" && o.phase === "broken" ? fail(`pylon is broken: ${o.detail}`) : null,
+  // 7a. A broken disk is never booted over or replaced on its own. After a human retry it is paused as 6 pauses an idle
+  // one: the pause settles it on its newest disk and discards the broken VM, and the next spawn resumes that disk. A VM
+  // whose setup failed on this boot is removed by the pause, as it has no checkpoint, so the next spawn boots fresh.
+  (i) => {
+    if (i.observed === "absent" || i.observed.phase !== "broken") return null;
+    const refused = retryRefusal(i.observed);
+    if (!i.retrying || refused !== null) return brokenFailure(i.observed, refused);
+    return submit({ kind: "pause", pylonId: i.pylonId, checkpoint: i.nextCheckpoint });
+  },
   // 7b. Templates are built before planPylon runs. See chooseTemplate in images.ts.
   // A running VM ignores its boot inputs, so it needs no artifacts, even after its template is collected.
   (i) => {
@@ -129,6 +140,22 @@ const planRules: readonly Rule[] = [
   ({ observed: o, liveHash }) => o !== "absent" && o.phase === "running" && o.liveHash === liveHash ? done : null,
   (i) => submit({ kind: "spawn", pylonId: i.pylonId, boot: { ...i.boot, source: bootSource(i) }, live: i.live, liveHash: i.liveHash }),
 ];
+
+/**
+ * Why a human retry of a pylon observed this way cannot help, or null when it can. A disk that holds a failed setup
+ * would fail its resume the same way, and a cause this control plane does not know gives it nothing to decide on.
+ */
+export function retryRefusal(observed: PylonObservation | "absent"): string | null {
+  if (observed === "absent" || observed.phase !== "broken") return null;
+  switch (observed.cause) {
+    case "saved-setup": return "Its disk holds the failed setup, and every boot of that disk fails the same way, so a retry cannot help. Start again from the project";
+    case "unknown": return "The node did not say why the pylon broke in a way this control plane understands. Upgrade Nexus on the node and the control plane, or start again from the project";
+    default: return null;
+  }
+}
+
+const brokenFailure = (observed: Extract<PylonObservation, { phase: "broken" }>, refused: string | null): PlanStep =>
+  fail(`pylon is broken: ${observed.detail}${refused === null ? "" : `. ${refused}`}`);
 
 export function planPylon(input: PlanInput, now: number): PlanStep {
   for (const rule of planRules) {

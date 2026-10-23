@@ -180,7 +180,7 @@ test("a registry from before failure messages keeps its pylons' attempts", async
     seeded(path).close();
     const db = new DatabaseSync(path);
     db.prepare("UPDATE pylons SET attempts = ?").run(JSON.stringify(attempts));
-    db.exec("PRAGMA user_version = 1");
+    db.exec("ALTER TABLE pylons DROP COLUMN retrying; PRAGMA user_version = 1");
     db.close();
     return path;
   };
@@ -193,6 +193,25 @@ test("a registry from before failure messages keeps its pylons' attempts", async
   assert.deepEqual(reopened(atVersion1({ count: 2, lastFailedAt: 5, lastCode: "backend" })), {
     count: 2, last: { at: 5, code: "backend", message: "recorded before the registry kept failure messages" },
   });
+});
+
+test("a registry from before pylon retries opens with no retry under way, and a retry marks only a failed pylon", async (t) => {
+  const { DatabaseSync } = await import("node:sqlite");
+  const path = tempDb();
+  seeded(path).close();
+  const db = new DatabaseSync(path);
+  db.exec("ALTER TABLE pylons DROP COLUMN retrying; PRAGMA user_version = 3");
+  db.close();
+  const registry = openRegistry(path);
+  t.after(() => registry.close());
+  assert.equal(registry.pylon(pylonId)!.retrying, false);
+
+  assert.equal(registry.retryPylon(pylonId), false, "a pylon that has not failed is left as it is");
+  const failed = { ...registry.pylon(pylonId)!, failed: "gave up", attempts: { count: 5, last: { at: 5, code: "backend" as const, message: "m" } } };
+  registry.savePylon(failed);
+  assert.equal(registry.retryPylon(pylonId), true);
+  assert.deepEqual(registry.pylon(pylonId), { ...failed, failed: null, attempts: { count: 0, last: null }, retrying: true });
+  assert.equal(registry.retryPylon(pylonId), false, "a second retry finds nothing to clear");
 });
 
 test("a registry from a newer control plane is refused", async (t) => {
@@ -279,6 +298,7 @@ test("a registry from before node-unique preview ports keeps its previews", asyn
   const db = new DatabaseSync(path);
   db.exec(`DROP TABLE previews;
     CREATE TABLE previews (pylon TEXT NOT NULL REFERENCES pylons (id), service TEXT NOT NULL, https_port INTEGER NOT NULL, ready INTEGER NOT NULL, PRIMARY KEY (pylon, service)) STRICT;
+    ALTER TABLE pylons DROP COLUMN retrying;
     PRAGMA user_version = 2;`);
   db.prepare("INSERT INTO previews VALUES (?, 'web', 10200, 1)").run(pylonId);
   db.close();

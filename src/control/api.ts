@@ -11,7 +11,7 @@
 import { randomBytes } from "node:crypto";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { z } from "zod";
-import { actualState, type ActualState } from "../reconcile.ts";
+import { actualState, retryRefusal, type ActualState } from "../reconcile.ts";
 import { effectiveAllowedHosts, gitUrl, liveHashOf, withHttpsHosts, type BootInputs, type Project, type ProjectId, type PylonOverlay } from "../project.ts";
 import type { NodeName, PylonId, TailnetNodeId } from "../protocol.ts";
 import type { HarnessHost } from "../harness/host.ts";
@@ -47,7 +47,11 @@ export interface Api {
 
 export interface ThreadDetail {
   thread: Thread;
-  pylon: { id: PylonId; node: NodeName; actualState: ActualState; failed: string | null; observedAt: string | null };
+  pylon: {
+    id: PylonId; node: NodeName; actualState: ActualState; failed: string | null; observedAt: string | null;
+    /** Why a retry of the pylon, as its node last reported it, cannot help. Null when a retry can. */
+    retryRefused: string | null;
+  };
   sessions: readonly Session[];
   previews: readonly Preview[];
   outputs: readonly Output[];
@@ -187,11 +191,17 @@ export async function startApi(options: ApiOptions): Promise<Api> {
     return t;
   }
 
+  /** The pylon as its node's last observation reports it. */
+  function observedPylon(pylonId: PylonId) {
+    const node = registry.node(registry.pylon(pylonId)!.node)!;
+    return node.observation?.pylons.find((p) => p.pylonId === pylonId) ?? "absent";
+  }
+
   function detail(t: Thread): ThreadDetail {
     const pylon = registry.pylon(t.pylonId)!;
     const node = registry.node(pylon.node)!;
     const observation = node.observation;
-    const observed = observation?.pylons.find((p) => p.pylonId === pylon.pylonId) ?? "absent";
+    const observed = observedPylon(pylon.pylonId);
     const inFlight = registry.job(pylon.pylonId) ?? null;
     // The planner deletes a failed pylon all the same, so a deleted thread's pylon shows the delete.
     const gaveUp = pylon.failed !== null && t.status !== "deleted";
@@ -199,7 +209,7 @@ export async function startApi(options: ApiOptions): Promise<Api> {
       thread: t,
       pylon: {
         id: pylon.pylonId, node: pylon.node, failed: pylon.failed, observedAt: observation?.observedAt ?? null,
-        actualState: actualState(observed, inFlight, node.state === "online", gaveUp),
+        actualState: actualState(observed, inFlight, node.state === "online", gaveUp), retryRefused: retryRefusal(observed),
       },
       sessions: registry.sessions(pylon.pylonId),
       previews: registry.previews(pylon.pylonId),
@@ -226,6 +236,24 @@ export async function startApi(options: ApiOptions): Promise<Api> {
     registry.recordActivity(t.id, { human: Date.now() });
     wakeThread(t);
     return registry.thread(t.id)!;
+  }
+
+  /**
+   * Clears the planner's verdict and the attempt count, so the next pass plans the pylon afresh. A human retries
+   * on purpose, so a failure the planner may not retry is cleared too, such as setup that failed on git access
+   * the user has since fixed. A fresh pylon whose setup failed has no instance left, so it boots fresh and runs
+   * setup again. A broken one is paused onto its newest disk and resumed (planner rule 7a), unless that disk
+   * records a failed setup, which every resume repeats. The retry is human activity, so the pylon is wanted at once.
+   * An archived thread's pylon stays paused, so its retry only settles the pylon. A deleted thread's pylon is
+   * deleted all the same.
+   */
+  function retryPylon(t: Thread) {
+    if (t.status === "deleted") throw new HttpError(409, `thread ${t.id} is deleted`);
+    const refused = retryRefusal(observedPylon(t.pylonId));
+    if (refused !== null) throw new HttpError(409, `pylon ${t.pylonId} cannot be retried. ${refused}`);
+    if (!registry.retryPylon(t.pylonId)) throw new HttpError(409, `pylon ${t.pylonId} has not failed`);
+    registry.recordActivity(t.id, { human: Date.now() });
+    wakeThread(t);
   }
 
   function recordActivity(t: Thread, body: unknown) {
@@ -287,6 +315,7 @@ export async function startApi(options: ApiOptions): Promise<Api> {
     }],
     ["POST", /^\/v1\/threads\/([^/]+)\/abort$/, async (m) => { await harness.abort(conversing(thread(m[1]!)).id); return noContent; }],
     ["POST", /^\/v1\/threads\/([^/]+)\/retry$/, async (m) => { await harness.retry(runnable(thread(m[1]!)).id); return noContent; }],
+    ["POST", /^\/v1\/threads\/([^/]+)\/pylon\/retry$/, (m) => { retryPylon(thread(m[1]!)); return noContent; }],
     ["GET", /^\/v1\/threads\/([^/]+)\/conversation$/, async (m) => ok(await conversation(conversing(thread(m[1]!))))],
     ["POST", /^\/v1\/images$/, async (_, r) => created(recordImage(await r.body()))],
     ["PUT", /^\/v1\/images\/current$/, async (_, r) => { setCurrentImage(await r.body()); return noContent; }],

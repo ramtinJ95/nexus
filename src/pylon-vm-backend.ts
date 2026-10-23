@@ -79,6 +79,9 @@ const checkpointId = z.custom<CheckpointId>((v) => typeof v === "string" && v.st
 /** `relaunch` is set before a boot from the instance's own disk and cleared once its sessions are relaunched. */
 const sidecarSchema = z.strictObject({ checkpoint: checkpointId.nullable(), pausing: checkpointId.optional(), relaunch: z.literal(true).optional() });
 type Sidecar = z.infer<typeof sidecarSchema>;
+const setupFailed = (status: Instance["status"]) => status.startupFailures?.some((f) => f.kind === "setup") === true;
+/** A controller older than startupFailures reports only the startupError, so whether setup failed is unknown. */
+const failureUnknown = (status: Instance["status"]) => status.startupError !== undefined && status.startupFailures === undefined;
 
 /** The pi-sandbox instance name rule. Pylon IDs are kept within it (see PylonId). */
 function instanceName(pylonId: PylonId): string {
@@ -177,6 +180,8 @@ export function createPylonVmBackend(options: PylonVmBackendOptions): VmBackend 
     }
   }
   const instanceDir = (pylonId: PylonId) => directory(stateRoot, "instances", pylonId);
+  // The controller writes disk.qcow2 only when a stop completes, so without it the VM booted from no disk and nothing was saved.
+  const hasCheckpoint = (pylonId: PylonId) => existsSync(join(instanceDir(pylonId), "disk.qcow2"));
 
   async function inspect(pylonId: PylonId): Promise<Instance | null> {
     const name = instanceName(pylonId);
@@ -288,21 +293,26 @@ export function createPylonVmBackend(options: PylonVmBackendOptions): VmBackend 
   }
 
   /**
-   * What a pylon running with a startupError fails its job with. A template boot's setup is only Nexus's
-   * checkout (retrySetup), which fails for reasons that pass, such as a fetch during an outage. When that
-   * checkout is what failed, on a disk that has never finished setup, no agent has run on the pylon and nothing
-   * on it is the user's: the instance is removed and the job's retry boots from the template again. Every other
-   * failure is final and the instance stays: a project's setup, a service, or a disk that finished setup once.
+   * What a pylon running with a startupError fails its job with. In two cases no agent has run on the pylon and
+   * nothing on it is the user's, so the instance is removed:
+   * - A template boot's setup is only Nexus's checkout (retrySetup), which fails for reasons that pass, such as a
+   *   fetch during an outage. When that checkout failed on a disk that has never finished setup, the job's retry
+   *   boots from the template again.
+   * - A fresh boot's setup failed before the pylon's first checkpoint. The disk records the failed setup, so only a
+   *   new instance runs setup again. The failure stays final, and a human retry boots the pylon fresh.
+   * Every other failure is final and the instance stays: a service, or a disk that has a checkpoint or finished setup once.
    */
   async function setupFailure(pylonId: PylonId, status: Instance["status"]): Promise<JobFailure> {
     const startupError = status.startupError ?? "";
     const { config } = await readRecord(instanceDir(pylonId));
-    const checkoutFailed = config.retrySetup && status.setupRecorded === false && status.startupFailures?.some((f) => f.kind === "setup") === true;
+    const checkoutFailed = config.retrySetup && status.setupRecorded === false && setupFailed(status);
+    const freshFailed = !config.retrySetup && setupFailed(status) && !hasCheckpoint(pylonId);
     // The startupError only points at the controller log, which holds what setup printed, so the log travels with the failure.
     const log = await templates.controllerLogTail(instanceDir(pylonId));
-    if (!checkoutFailed) return new JobFailure("setup-failed", `${pylonId}: ${startupError}`, log);
+    if (!checkoutFailed && !freshFailed) return new JobFailure("setup-failed", `${pylonId}: ${startupError}`, log);
     const name = instanceName(pylonId);
     await sandbox({ action: "destroy", kind: "instances", name, confirm: name });
+    if (freshFailed) return new JobFailure("setup-failed", `${pylonId}: ${startupError}. Its instance had no checkpoint, so it was removed, and a retry boots the pylon fresh`, log);
     return new JobFailure("backend", `${pylonId} could not check out its commit on its template's disk, so it was removed and boots from the template again: ${startupError}`, log);
   }
 
@@ -327,16 +337,20 @@ export function createPylonVmBackend(options: PylonVmBackendOptions): VmBackend 
     }
   }
 
-  function vmState(instance: Instance): Pick<BackendPylon, "vm" | "detail"> {
+  function vmState(instance: Instance): Pick<BackendPylon, "vm" | "detail" | "cause"> {
     const { status } = instance;
     switch (status.state) {
       case "starting": case "unavailable": return { vm: "booting" };
       case "running":
-        return status.startupError === undefined ? { vm: "running" } : { vm: "broken", detail: status.startupError };
+        if (status.startupError === undefined) return { vm: "running" };
+        if (failureUnknown(status)) return { vm: "broken", detail: status.startupError, cause: "unknown" };
+        if (!setupFailed(status)) return { vm: "broken", detail: status.startupError, cause: "services" };
+        // A pause would save the failure onto the completed disk, so one there counts as saved too.
+        return { vm: "broken", detail: status.startupError, cause: status.setupRecorded === true || hasCheckpoint(instance.name as PylonId) ? "saved-setup" : "setup" };
       case "stopping": return { vm: "stopping" };
       case "stopped": return { vm: "stopped" };
-      case "interrupted": return { vm: "broken", detail: status.recovery ?? "the controller exited without completing a stop" };
-      case "failed": return { vm: "broken", detail: "the controller failed to boot the VM. Read controller.log in the instance directory" };
+      case "interrupted": return { vm: "broken", detail: status.recovery ?? "the controller exited without completing a stop", cause: "controller" };
+      case "failed": return { vm: "broken", detail: "the controller failed to boot the VM. Read controller.log in the instance directory", cause: "controller" };
       case "prepared": throw new Error(`instance ${instance.name} is a prepared template, which is never a pylon`);
     }
   }
@@ -447,6 +461,16 @@ export function createPylonVmBackend(options: PylonVmBackendOptions): VmBackend 
       for (let instance = await settled(pylonId, signal); instance?.status.state !== "stopped"; instance = await settled(pylonId, signal)) {
         if (instance === null) return;
         signal.throwIfAborted();
+        // A disk with a failed setup is never saved. Without a completed checkpoint nothing on the pylon is the user's, so the
+        // instance is removed and its next boot runs setup again. With one, the planner never pauses it (see retryRefusal).
+        if (instance.status.state === "running" && failureUnknown(instance.status)) {
+          throw new JobFailure("setup-failed", `${pylonId}: ${instance.status.startupError}. Its controller does not say whether setup failed, and a pause could save a failed setup onto its disk, so it is not paused. Start again from the project`);
+        }
+        if (instance.status.state === "running" && setupFailed(instance.status)) {
+          if (hasCheckpoint(pylonId)) throw new JobFailure("setup-failed", `${pylonId}: ${instance.status.startupError}. A pause would save the failed setup onto its disk, so it is not paused. Start again from the project`);
+          await sandbox({ action: "destroy", kind: "instances", name, confirm: name });
+          return;
+        }
         // While the guest still runs, so the checkpoint carries the record. A dead controller's disk keeps its last one.
         if (instance.status.state === "running") await recordBeforePause(pylonGuest(pylonId, instanceDir(pylonId), sandbox), controllerLog(instanceDir(pylonId)));
         await writeSidecar(pylonId, { checkpoint: (await readSidecar(pylonId)).checkpoint, pausing: checkpoint });

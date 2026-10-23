@@ -22,12 +22,17 @@ export interface PylonRecord {
   /** Saved before it is sent, so a control plane that restarts mid-submit still asks the probe about it. */
   submitted: JobEnvelope | null;
   attempts: PlanInput["attempts"];
-  /** Set when the planner gives up. Only a human clears it. */
+  /** Set when the planner gives up. Only a human clears it, through the API's pylon retry. */
   failed: string | null;
+  /**
+   * Set by the API's pylon retry. Cleared when a job succeeds or the planner finishes or gives up, so one retry
+   * settles a broken instance at most once, and a later breakage still waits for a human.
+   */
+  retrying: PlanInput["retrying"];
 }
 
-export function newPylonRecord(fields: Omit<PylonRecord, "pauses" | "submitted" | "attempts" | "failed">): PylonRecord {
-  return { ...fields, pauses: 0, submitted: null, attempts: { count: 0, last: null }, failed: null };
+export function newPylonRecord(fields: Omit<PylonRecord, "pauses" | "submitted" | "attempts" | "failed" | "retrying">): PylonRecord {
+  return { ...fields, pauses: 0, submitted: null, attempts: { count: 0, last: null }, failed: null, retrying: false };
 }
 
 export const nextCheckpoint = (pylon: PylonRecord): CheckpointId => `ckpt-${pylon.thread}-${pylon.pauses + 1}`;
@@ -76,12 +81,18 @@ export async function tick(pylon: PylonRecord, ctx: TickContext): Promise<PlanSt
     nodeArtifacts: new Set(observation?.artifacts ?? []),
     inFlight,
     attempts: pylon.attempts,
+    retrying: pylon.retrying,
     holders: ctx.holders,
     artifactSha256: ctx.artifactSha256,
   }, Date.now());
 
   if (step.kind === "fail") {
     pylon.failed = step.reason;
+    pylon.retrying = false;
+    ctx.save(pylon);
+  }
+  if (step.kind === "done" && pylon.retrying) {
+    pylon.retrying = false;
     ctx.save(pylon);
   }
   if (step.kind !== "submit") return step;
@@ -127,6 +138,7 @@ async function settle(pylon: PylonRecord, probe: ProbeClient, observation: NodeO
     return null;
   }
   pylon.attempts = { count: 0, last: null };
+  pylon.retrying = false;
   if (status.kind === "pause") pylon.pauses += 1;
   return null;
 }

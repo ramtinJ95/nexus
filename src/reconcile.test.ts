@@ -37,7 +37,10 @@ const running = (hash: LiveHash | null): PylonObservation => ({
   services: [], previews: [], sessions: [], git: null, declaredOutputs: [], attachedClients: 0,
 });
 const stopped = (checkpoint: CheckpointId | null): PylonObservation => ({ pylonId, phase: "stopped", checkpoint });
-const broken: PylonObservation = { pylonId, phase: "broken", detail: "qcow2 header unreadable" };
+const broken: PylonObservation = { pylonId, phase: "broken", detail: "qcow2 header unreadable", cause: "controller" };
+const brokenSetup: PylonObservation = { pylonId, phase: "broken", detail: "Setup exited 128. Read controller logs", cause: "setup" };
+const brokenSavedSetup: PylonObservation = { ...brokenSetup, cause: "saved-setup" };
+const brokenUnknown: PylonObservation = { ...broken, cause: "unknown" };
 const phase = (p: "booting" | "stopping" | "deleting"): PylonObservation => ({ pylonId, phase: p });
 
 const fresh: PylonSource & { kind: "fresh" } = { kind: "fresh", preSetup: null };
@@ -68,6 +71,8 @@ interface Row {
   firstBoot?: typeof fresh | typeof fromTemplate;
   holders?: Partial<Record<ArtifactId, readonly NodeName[]>>;
   previewsRouted?: boolean;
+  /** A human retried the pylon. */
+  retrying?: boolean;
 }
 
 const none: Attempts = [0, null, null];
@@ -102,10 +107,19 @@ const rows: Record<string, Row> = {
   "paused and stopped is done": { desired: "paused", observed: stopped(lastCheckpoint), inFlight: null, attempts: none, online: true, present: imageOnly, expect: done },
   "paused and running submits pause": { desired: "paused", observed: running(liveHash), inFlight: null, attempts: none, online: true, present: imageOnly, expect: pause },
   "paused and broken submits pause": { desired: "paused", observed: broken, inFlight: null, attempts: none, online: true, present: imageOnly, expect: pause },
+  "paused and broken by a setup that failed on this boot submits pause, which removes the VM": { desired: "paused", observed: brokenSetup, inFlight: null, attempts: none, online: true, present: imageOnly, expect: pause },
+  "paused and broken with a saved setup fails, since a pause would save the failure": { desired: "paused", observed: brokenSavedSetup, inFlight: null, attempts: none, online: true, present: imageOnly, expect: { kind: "fail", reason: "pylon is broken: Setup exited 128. Read controller logs. Its disk holds the failed setup, and every boot of that disk fails the same way, so a retry cannot help. Start again from the project" } },
+  "paused and broken for a reason the node did not say fails rather than pausing": { desired: "paused", observed: brokenUnknown, inFlight: null, attempts: none, online: true, present: imageOnly, expect: { kind: "fail", reason: "pylon is broken: qcow2 header unreadable. The node did not say why the pylon broke in a way this control plane understands. Upgrade Nexus on the node and the control plane, or start again from the project" } },
   // 7a
   "running and stopped resumes from the checkpoint": { desired: "running", observed: stopped(lastCheckpoint), inFlight: null, attempts: none, online: true, present: imageOnly, expect: spawn({ kind: "resume", checkpoint: lastCheckpoint }) },
   "running and stopped without a checkpoint boots the first source": { desired: "running", observed: stopped(null), inFlight: null, attempts: none, online: true, present: imageOnly, expect: spawn(fresh) },
   "running and broken fails, never booting over the disk": { desired: "running", observed: broken, inFlight: null, attempts: none, online: true, present: imageOnly, expect: { kind: "fail", reason: "pylon is broken: qcow2 header unreadable" } },
+  "a retried broken pylon pauses, to resume its newest disk": { desired: "running", observed: broken, inFlight: null, attempts: none, online: true, present: imageOnly, retrying: true, expect: pause },
+  "a retried pylon whose setup failed on this boot pauses, which removes the VM and its failure": { desired: "running", observed: brokenSetup, inFlight: null, attempts: none, online: true, present: imageOnly, retrying: true, expect: pause },
+  "a retried pylon whose disk holds a failed setup fails, since a resume would fail the same way": { desired: "running", observed: brokenSavedSetup, inFlight: null, attempts: none, online: true, present: imageOnly, retrying: true, expect: { kind: "fail", reason: "pylon is broken: Setup exited 128. Read controller logs. Its disk holds the failed setup, and every boot of that disk fails the same way, so a retry cannot help. Start again from the project" } },
+  "a retried pylon that is not broken plans as usual": { desired: "running", observed: "absent", inFlight: null, attempts: none, online: true, present: imageOnly, retrying: true, expect: spawn(fresh) },
+  "a retried pylon whose probe cannot say why it broke fails, never pausing it": { desired: "running", observed: brokenUnknown, inFlight: null, attempts: none, online: true, present: imageOnly, retrying: true, expect: { kind: "fail", reason: "pylon is broken: qcow2 header unreadable. The node did not say why the pylon broke in a way this control plane understands. Upgrade Nexus on the node and the control plane, or start again from the project" } },
+  "a retried broken pylon still waits out its backoff": { desired: "running", observed: broken, inFlight: null, attempts: [1, 1_000, "backend"], online: true, present: imageOnly, retrying: true, expect: wait("backoff") },
   // 7b
   "a missing image is fetched before the template, from the first holder": {
     desired: "running", observed: "absent", inFlight: null, attempts: none, online: true, present: [], firstBoot: fromTemplate,
@@ -141,6 +155,7 @@ function input(row: Row): PlanInput {
     nodeArtifacts: new Set(row.present),
     inFlight: row.inFlight === null ? null : jobInFlight(row.inFlight),
     attempts: { count, last: lastCode === null ? null : { at: now - failedAgo!, code: lastCode, message: `the probe's ${lastCode} message` } },
+    retrying: row.retrying ?? false,
     holders: (id) => row.holders?.[id] ?? [],
     artifactSha256: (id) => `sha-${id}`,
   };
@@ -222,6 +237,19 @@ test("a snapshot from a probe older than route reporting parses with its routes 
   assert.ok(current.type === "snapshot" && current.observation.previewRoutes !== null);
   assert.deepEqual(current.observation.previewRoutes, routes);
   assert.throws(() => parseProbeEvent(encodeProbeEvent({ type: "snapshot", observation: { ...observation, previewRoutes: {} } } as unknown as ProbeEvent)), /previewRoutes is not an array/);
+});
+
+test("a broken pylon whose cause is missing, as from an older probe, or one this control plane does not know parses with its cause unknown", () => {
+  const snapshot = (pylon: Record<string, unknown>) => encodeProbeEvent({ type: "snapshot", observation: {
+    node, observedAt: "2027-01-01T00:00:00Z", probeBootId: "b", capacity: { memoryGiB: 64, committedMemoryGiB: 0, diskFreeGiB: 100 }, artifacts: [], jobs: [], pylons: [pylon], previewRoutes: [],
+  } } as unknown as ProbeEvent);
+  const old = parseProbeEvent(snapshot({ pylonId, phase: "broken", detail: "Setup exited 128. Read controller logs" }));
+  assert.ok(old.type === "snapshot");
+  assert.deepEqual(old.observation.pylons, [{ pylonId, phase: "broken", detail: "Setup exited 128. Read controller logs", cause: "unknown" }]);
+  const current = parseProbeEvent(snapshot({ pylonId, phase: "broken", detail: "Setup exited 128. Read controller logs", cause: "saved-setup" }));
+  assert.ok(current.type === "snapshot" && current.observation.pylons[0]?.phase === "broken" && current.observation.pylons[0].cause === "saved-setup");
+  const newer = parseProbeEvent(snapshot({ pylonId, phase: "broken", detail: "x", cause: "cosmic-ray" }));
+  assert.ok(newer.type === "snapshot" && newer.observation.pylons[0]?.phase === "broken" && newer.observation.pylons[0].cause === "unknown");
 });
 
 const working: SessionFact = { herdrPane: "p1", harness: "claude-code", harnessSessionId: "s1", status: "working" };

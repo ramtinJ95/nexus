@@ -385,11 +385,11 @@ async function execIn(container: string, cwd: string, argv: readonly string[], t
  * removed it: a probe that died mid-pause or mid-boot, or a Docker restart. It reports as broken, so a desired
  * pause finishes the job and a desired run waits for a human, as for a VM the backend saw fail.
  */
-function containerState(c: ContainerInfo): Pick<BackendPylon, "vm" | "detail"> {
+function containerState(c: ContainerInfo): Pick<BackendPylon, "vm" | "detail" | "cause"> {
   switch (c.State.Status) {
     case "running": return { vm: "running" };
     case "restarting": return { vm: "booting" };
     case "removing": return { vm: "deleting" };
-    default: return { vm: "broken", detail: `container is ${c.State.Status} (exit code ${c.State.ExitCode}) outside a completed pause` };
+    default: return { vm: "broken", detail: `container is ${c.State.Status} (exit code ${c.State.ExitCode}) outside a completed pause`, cause: "controller" };
   }
 }

@@ -142,6 +142,10 @@ const migrations: readonly string[] = [
   DROP TABLE previews;
   ALTER TABLE node_previews RENAME TO previews;
   `,
+  // A human retry of a failed pylon, which lets the planner settle a broken instance once.
+  `
+  ALTER TABLE pylons ADD COLUMN retrying INTEGER NOT NULL DEFAULT 0;
+  `,
 ];
 
 type Row = Record<string, unknown>;
@@ -188,6 +192,7 @@ function pylonRow(r: Row): StoredPylon {
     submitted: jsonOrNull(r.submitted),
     attempts: json(r.attempts),
     failed: r.failed as string | null,
+    retrying: r.retrying === 1,
   };
 }
 
@@ -222,10 +227,11 @@ export function openRegistry(path: string) {
     humanActivity: db.prepare("UPDATE threads SET last_human_activity_at = max(last_human_activity_at, ?) WHERE id = ?"),
     agentActivity: db.prepare("UPDATE threads SET last_agent_activity_at = max(last_agent_activity_at, ?) WHERE id = ?"),
     agentTurn: db.prepare("UPDATE threads SET agent_turn_running = ? WHERE id = ?"),
-    insertPylon: db.prepare(`INSERT INTO pylons (id, thread, node, boot, first_boot, live, live_hash, pauses, submitted, attempts, failed)
-      VALUES ($id, $thread, $node, $boot, $firstBoot, $live, $liveHash, $pauses, $submitted, $attempts, $failed)`),
+    insertPylon: db.prepare(`INSERT INTO pylons (id, thread, node, boot, first_boot, live, live_hash, pauses, submitted, attempts, failed, retrying)
+      VALUES ($id, $thread, $node, $boot, $firstBoot, $live, $liveHash, $pauses, $submitted, $attempts, $failed, $retrying)`),
     updatePylon: db.prepare(`UPDATE pylons SET thread = $thread, node = $node, boot = $boot, first_boot = $firstBoot, live = $live,
-      live_hash = $liveHash, pauses = $pauses, submitted = $submitted, attempts = $attempts, failed = $failed WHERE id = $id`),
+      live_hash = $liveHash, pauses = $pauses, submitted = $submitted, attempts = $attempts, failed = $failed, retrying = $retrying WHERE id = $id`),
+    retryPylon: db.prepare(`UPDATE pylons SET failed = NULL, attempts = '{"count":0,"last":null}', retrying = 1 WHERE id = ? AND failed IS NOT NULL`),
     pylon: db.prepare("SELECT * FROM pylons WHERE id = ?"),
     pylonsOn: db.prepare("SELECT * FROM pylons WHERE node = ? ORDER BY id"),
     upsertSession: db.prepare(`INSERT INTO sessions (pylon, herdr_pane, harness, harness_session_id, status) VALUES (?, ?, ?, ?, ?)
@@ -259,6 +265,7 @@ export function openRegistry(path: string) {
     $id: p.pylonId, $thread: p.thread, $node: p.node,
     $boot: JSON.stringify(p.boot), $firstBoot: JSON.stringify(p.firstBoot), $live: JSON.stringify(p.live), $liveHash: p.liveHash,
     $pauses: p.pauses, $submitted: p.submitted === null ? null : JSON.stringify(p.submitted), $attempts: JSON.stringify(p.attempts), $failed: p.failed,
+    $retrying: p.retrying ? 1 : 0,
   });
 
   function previews(pylon: PylonId): Preview[] {
@@ -325,6 +332,8 @@ export function openRegistry(path: string) {
       const { changes } = q.updatePylon.run(pylonParams(pylon));
       if (changes !== 1) throw new Error(`no pylon ${pylon.pylonId} to save`);
     },
+    /** Clears a failed pylon's verdict and attempts, and marks a human retry. False when the pylon has not failed. */
+    retryPylon: (pylonId: PylonId): boolean => q.retryPylon.run(pylonId).changes === 1,
 
     sessions: (pylon: PylonId) => (q.sessions.all(pylon) as Row[]).map((r): Session => ({
       pylon: r.pylon as PylonId, herdrPane: r.herdr_pane as string, harness: r.harness as Session["harness"],

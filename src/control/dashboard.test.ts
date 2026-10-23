@@ -478,7 +478,7 @@ test("strings from humans and probes are escaped, never markup", async (t) => {
   for (const i of [3, 4, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]) assert.ok(page.includes(`<script>alert(${i})</script>`), `the conversation shows alert(${i}) as text`);
 });
 
-test("a failed pylon's thread offers no prompt box, but says why and how to start again", async (t) => {
+test("a failed pylon's thread offers no prompt box, but says why and offers a retry or a fresh start", async (t) => {
   const s = await seeded(t);
   const fix = await s.start("acme", "Fix checkout");
   const reason = "last job failed with setup-failed, which is not retryable: Setup exited 128\nfatal: <unable> to access";
@@ -486,8 +486,26 @@ test("a failed pylon's thread offers no prompt box, but says why and how to star
   s.fake.park(fix.id, 1);
   const html = (await s.call("GET", `/threads/${fix.id}`)).text;
   assert.ok(!html.includes('<form id="prompt"'), "a failed pylon cannot serve a message");
-  assert.equal(conversationOf(html).dock, `1 task hit the restart limit and hold the run. Retry runs them again. Retry The planner gave up on this thread's pylon, so its agent cannot run tools and the thread takes no messages. Nothing restarts a failed pylon, so delete the thread or start again from the same project. ${reason.replace("\n", " ")} Start again`);
+  assert.equal(conversationOf(html).dock, `1 task hit the restart limit and hold the run. Retry runs them again. Retry The planner gave up on this thread's pylon, so its agent cannot run tools and the thread takes no messages. Fix the cause, such as the project's git access, and retry, or start again from the same project. A retry runs setup again on a new pylon whose setup failed, and resumes a broken pylon from its newest disk. ${reason.replace("\n", " ")} Retry Start again`);
+  assert.ok(html.includes(`<button type="button" class="btn" id="retry-pylon" data-action="retry-pylon" data-thread="${fix.id}">Retry</button>`), "the retry goes through the client's action handler, which disables it while it is sent");
   assert.match(html, /<button type="button" class="btn" data-start="acme" data-title="Fix checkout">Start again<\/button>/, "starting again opens the dialog on the same project and title");
+
+  assert.equal((await s.call("POST", `/v1/threads/${fix.id}/pylon/retry`)).status, 204);
+  const retried = (await s.call("GET", `/threads/${fix.id}`)).text;
+  assert.ok(retried.includes('<form id="prompt"') && !retried.includes('id="retry-pylon"'), "a retried pylon takes messages again");
+});
+
+test("a failed pylon whose disk holds a failed setup offers no retry, and says to start again", async (t) => {
+  const s = await seeded(t);
+  const fix = await s.start("acme", "Fix checkout");
+  s.registry.ingested({
+    node, observedAt: new Date().toISOString(), probeBootId: "b", capacity: { memoryGiB: 64, committedMemoryGiB: 0, diskFreeGiB: 100 }, artifacts: [], jobs: [],
+    pylons: [{ pylonId: fix.pylonId, phase: "broken", detail: "Setup exited 128. Read controller logs", cause: "saved-setup" }], previewRoutes: [],
+  }, []);
+  s.registry.savePylon({ ...s.registry.pylon(fix.pylonId)!, failed: "pylon is broken: Setup exited 128. Read controller logs" });
+  const html = (await s.call("GET", `/threads/${fix.id}`)).text;
+  assert.ok(!html.includes('id="retry-pylon"'), "a retry could not help");
+  assert.match(conversationOf(html).dock, /Its disk holds the failed setup, and every boot of that disk fails the same way, so a retry cannot help\. Start again from the project\. .* Start again$/);
 });
 
 test("a tool call's expanded body shows its whole command, path or pattern", async (t) => {

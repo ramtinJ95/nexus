@@ -171,7 +171,9 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
     switch (p.vm) {
       case "booting": case "stopping": case "deleting": return { pylonId, phase: p.vm };
       case "stopped": return { pylonId, phase: "stopped", checkpoint: p.checkpoint };
-      case "broken": return { pylonId, phase: "broken", detail: p.detail ?? "the backend gave no detail" };
+      case "broken":
+        if (p.cause === undefined) throw new Error(`backend reports ${pylonId} broken with no cause`);
+        return { pylonId, phase: "broken", detail: p.detail ?? "the backend gave no detail", cause: p.cause };
       case "running":
         if (p.bootedAt === null) throw new Error(`backend reports ${pylonId} running with no boot time`);
         return {

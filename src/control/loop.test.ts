@@ -9,10 +9,10 @@ import { openRegistry, type PortRange, type Registry, type Thread, type ThreadId
 import { newPylonRecord } from "../tick.ts";
 import { envelope, ingest as realIngest } from "../reconcile.ts";
 import type {
-  Job, JobEnvelope, JobErrorCode, JobId, JobStatus, LiveHash, NodeName, NodeObservation, PreviewRouteFact, ProbeClient, ProbeEvent, PylonId, PylonObservation, RunningFacts, ServiceFact, SessionFact, SubmitReply, TailnetNodeId,
+  BrokenCause, Job, JobEnvelope, JobErrorCode, JobId, JobStatus, LiveHash, NodeName, NodeObservation, PreviewRouteFact, ProbeClient, ProbeEvent, PylonId, PylonObservation, RunningFacts, ServiceFact, SessionFact, SubmitReply, TailnetNodeId,
 } from "../protocol.ts";
 import { liveHashOf, type LiveSpec, type ProjectId } from "../project.ts";
-import type { ImageId } from "../images.ts";
+import type { CheckpointId, ImageId } from "../images.ts";
 
 const firebat = "rj-firebat" as NodeName;
 const node = firebat;
@@ -43,9 +43,20 @@ function fakeNode(options: { autoFinish: boolean; node?: NodeName; reportsRoutes
   const unroute = (pylonId: PylonId) => { for (const [port, route] of routes) if (route.pylonId === pylonId) routes.delete(port); };
   const emit = (event: ProbeEvent) => { for (const push of streams) push(event); };
 
-  function apply(job: Job) {
+  /** Each pylon's last completed checkpoint. */
+  const saved = new Map<PylonId, CheckpointId>();
+  /** Checkpoints whose disk records a failed setup, which every boot of that disk reports again, as on pylon-vm. */
+  const failedSetupDisks = new Set<CheckpointId>();
+  type Failure = { code: JobErrorCode; message: string; logTail: string; broken?: { detail: string; cause: BrokenCause } };
+
+  /** Applies a job that ran, or returns how it failed. */
+  function apply(job: Job): Failure | undefined {
     switch (job.kind) {
       case "spawn": {
+        if (job.boot.source.kind === "resume" && failedSetupDisks.has(job.boot.source.checkpoint)) {
+          const detail = "Setup exited 128. Read controller logs";
+          return { code: "setup-failed", message: `${job.pylonId}: ${detail}`, logTail: "fatal: repository not found", broken: { detail, cause: "saved-setup" } };
+        }
         // Like the probe, a spawn of a running pylon applies only its LiveSpec, and every spawn publishes the previews.
         const was = pylons.get(job.pylonId);
         const previews = job.live.previews.map((p) => ({ ...p, ready: true }));
@@ -59,31 +70,58 @@ function fakeNode(options: { autoFinish: boolean; node?: NodeName; reportsRoutes
         for (const { service, httpsPort } of job.live.previews) routes.set(httpsPort, { httpsPort, pylonId: job.pylonId, service });
         return;
       }
-      case "pause": pylons.set(job.pylonId, { pylonId: job.pylonId, phase: "stopped", checkpoint: job.checkpoint }); return;
+      case "pause": {
+        // As on pylon-vm, a failed setup is never saved: a VM with no checkpoint is removed, and one with a checkpoint,
+        // which it reports as saved-setup, is refused.
+        const was = pylons.get(job.pylonId);
+        if (was?.phase === "broken" && was.cause === "saved-setup") return { code: "setup-failed", message: `${job.pylonId}: a pause would save the failed setup onto its disk`, logTail: "" };
+        if (was?.phase === "broken" && was.cause === "setup") {
+          assert.equal(saved.get(job.pylonId), undefined, "pylon-vm reports a failed setup on a disk with a checkpoint as saved-setup");
+          pylons.delete(job.pylonId);
+          return;
+        }
+        saved.set(job.pylonId, job.checkpoint);
+        pylons.set(job.pylonId, { pylonId: job.pylonId, phase: "stopped", checkpoint: job.checkpoint });
+        return;
+      }
       case "delete":
         unroute(job.pylonId);
+        saved.delete(job.pylonId);
         pylons.delete(job.pylonId);
         return;
       default: throw new Error(`the fake node runs no ${job.kind} jobs`);
     }
   }
 
-  /** Ends a running job, as a success that applies it or as a failure that changes nothing. */
-  function finish(jobId: JobId, failure?: { code: JobErrorCode; message: string; logTail: string }) {
+  /**
+   * Ends a running job, as a success that applies it, unless the node's state fails it, or as a failure that changes
+   * nothing. A failure with `broken` leaves its pylon broken, as pylon-vm leaves a VM whose boot failed running with
+   * its startupError.
+   */
+  function finish(jobId: JobId, given?: Failure) {
     const entry = jobs.get(jobId)!;
     assert.equal(entry.status.state, "running");
     const ended = { jobId, subject: entry.status.subject, kind: entry.status.kind, finishedAt: new Date().toISOString() };
-    if (failure === undefined) apply(entry.env.job);
-    entry.status = failure === undefined ? { ...ended, state: "succeeded" } : { ...ended, state: "failed", ...failure };
+    const failure = given ?? apply(entry.env.job);
+    if (failure === undefined) {
+      entry.status = { ...ended, state: "succeeded" };
+    } else {
+      const { broken, ...failed } = failure;
+      const pylonId = entry.status.subject as PylonId;
+      if (broken !== undefined) pylons.set(pylonId, { pylonId, phase: "broken", ...broken });
+      entry.status = { ...ended, state: "failed", ...failed };
+    }
     emit({ type: "job", status: entry.status });
     setTimeout(() => emit({ type: "snapshot", observation: observation() }), 20);
   }
 
   const unreachable = () => Object.assign(new Error(`${node} is unreachable`), { code: "unreachable" });
 
+  let held: Promise<void> | null = null;
   const probe: ProbeClient = {
     node,
     async submit(env): Promise<SubmitReply> {
+      if (held !== null) await held;
       if (!reachable) throw unreachable();
       const known = jobs.get(env.jobId);
       if (known) return { accepted: known.status };
@@ -136,12 +174,29 @@ function fakeNode(options: { autoFinish: boolean; node?: NodeName; reportsRoutes
     emit({ type: "snapshot", observation: observation() });
   }
   const setSessions = (pylonId: PylonId, sessions: readonly SessionFact[] | null) => setFacts(pylonId, { sessions });
+  /** The VM fails on its own, as when its controller dies, and the probe reports it with a snapshot. */
+  function breakPylon(pylonId: PylonId, detail: string, cause: BrokenCause = "controller") {
+    pylons.set(pylonId, { pylonId, phase: "broken", detail, cause });
+    emit({ type: "snapshot", observation: observation() });
+  }
+  /** Stops the pylon on a checkpoint that holds a failed setup, as a pause by a backend older than the cause did. */
+  function stopOnFailedSetup(pylonId: PylonId, checkpoint: CheckpointId) {
+    saved.set(pylonId, checkpoint);
+    failedSetupDisks.add(checkpoint);
+    pylons.set(pylonId, { pylonId, phase: "stopped", checkpoint });
+  }
 
   return {
-    probe, pylons, submitted, lives, routes, finish, setSessions, setServices: (pylonId: PylonId, services: readonly ServiceFact[] | null) => setFacts(pylonId, { services }),
+    probe, pylons, submitted, lives, routes, finish, setSessions, breakPylon, stopOnFailedSetup, setServices: (pylonId: PylonId, services: readonly ServiceFact[] | null) => setFacts(pylonId, { services }),
     /** Sends a snapshot of the node as it is, after a test changed it by hand. */
     announce: () => emit({ type: "snapshot", observation: observation() }),
     running: () => [...jobs.values()].filter((j) => j.status.state === "running").map((j) => j.env.jobId),
+    /** Holds every submit until the returned release is called, so a test can act while a pass waits on the probe. */
+    holdSubmits(): () => void {
+      let release!: () => void;
+      held = new Promise((resolve) => { release = resolve; });
+      return () => { held = null; release(); };
+    },
     /** Drops every observe link and refuses calls until `reconnect`. */
     disconnect() { reachable = false; for (const push of streams) push(null); },
     reconnect() { reachable = true; },
@@ -251,6 +306,195 @@ test("a job that fails for good gives up with the probe's message and the end of
   ].join("\n"));
   assert.deepEqual(logged, [`${thread.pylonId}: the planner gave up: ${failed}`]);
   assert.deepEqual(fake.submitted.map((job) => job.kind), ["spawn"], "a setup failure is not retried");
+});
+
+const kinds = (jobs: readonly Job[]) => jobs.map((job) => job.kind === "spawn" ? `spawn ${job.boot.source.kind}` : job.kind);
+/** As pylon-vm fails a fresh boot's setup: the instance, which holds no work, is removed. */
+const setupFailed = (pylonId: PylonId, run: number) => ({ code: "setup-failed" as const, message: `${pylonId}: Setup exited 128 (run ${run})`, logTail: "fatal: repository not found" });
+/** As pylon-vm fails a resume whose service did not start: the VM stays, broken. */
+const serviceFailed = (pylonId: PylonId) => ({
+  code: "setup-failed" as const, message: `${pylonId}: Service web was not ready within 30 s`, logTail: "", broken: { detail: "Service web was not ready within 30 s", cause: "services" as const },
+});
+
+test("a human retry of a pylon whose fresh setup failed spawns it fresh again, and the new setup's failure is the verdict", async (t) => {
+  const registry = openRegistry(tempDb());
+  const thread = seed(registry);
+  const fake = fakeNode({ autoFinish: false });
+  const loop = run(t, registry, fake.probe, { log: () => {} });
+  await until("the spawn runs", () => fake.running().length === 1);
+  fake.finish(fake.running()[0]!, setupFailed(thread.pylonId, 1));
+  await until("the planner gives up", () => registry.pylon(thread.pylonId)?.failed !== null);
+  assert.equal(fake.pylons.has(thread.pylonId), false, "the node removed the instance, as pylon-vm does");
+
+  assert.equal(registry.retryPylon(thread.pylonId), true);
+  assert.equal(registry.pylon(thread.pylonId)!.retrying, true);
+  void loop.wake(node);
+  await until("a fresh spawn runs", () => fake.running().length === 1 && fake.submitted.length === 2);
+  assert.deepEqual(kinds(fake.submitted), ["spawn fresh", "spawn fresh"], "the new instance runs setup again");
+  fake.finish(fake.running()[0]!, setupFailed(thread.pylonId, 2));
+  await until("the planner gives up again", () => registry.pylon(thread.pylonId)?.failed !== null);
+  const again = registry.pylon(thread.pylonId)!;
+  assert.match(again.failed!, /^last job failed with setup-failed, which is not retryable: .*\(run 2\)/);
+  assert.equal(again.attempts.count, 1);
+  assert.equal(again.retrying, false);
+});
+
+test("a human retry of a pylon broken after a resume pauses it onto its newest disk and resumes that", async (t) => {
+  const registry = openRegistry(tempDb());
+  const thread = seed(registry);
+  const fake = fakeNode({ autoFinish: false });
+  const loop = run(t, registry, fake.probe, { log: () => {} });
+  const next = async (what: string) => {
+    await until(what, () => fake.running().length === 1);
+    return fake.running()[0]!;
+  };
+  fake.finish(await next("the first spawn runs"));
+  registry.setThreadStatus(thread.id, "archived");
+  fake.finish(await next("the pause runs"));
+  await until("the pause is folded in", () => registry.pylon(thread.pylonId)?.pauses === 1);
+  registry.setThreadStatus(thread.id, "active");
+  registry.recordActivity(thread.id, { human: Date.now() });
+  fake.finish(await next("the resume runs"), serviceFailed(thread.pylonId));
+  await until("the planner gives up", () => registry.pylon(thread.pylonId)?.failed !== null);
+
+  assert.equal(registry.retryPylon(thread.pylonId), true);
+  void loop.wake(node);
+  fake.finish(await next("the retry's pause runs"));
+  fake.finish(await next("the resume after it runs"));
+  await until("the pylon runs", () => fake.pylons.get(thread.pylonId)?.phase === "running");
+  assert.deepEqual(kinds(fake.submitted), ["spawn fresh", "pause", "spawn resume", "pause", "spawn resume"], "the disk is never deleted");
+  const resumed = fake.submitted.at(-1)!;
+  assert.ok(resumed.kind === "spawn" && resumed.boot.source.kind === "resume");
+  assert.equal(resumed.boot.source.checkpoint, `ckpt-${thread.id}-2`);
+  assert.deepEqual(registry.pylon(thread.pylonId)!.failed, null);
+});
+
+test("a broken pylon nobody retried is never replaced, even after an earlier retry", async (t) => {
+  const registry = openRegistry(tempDb());
+  const thread = seed(registry);
+  const fake = fakeNode({ autoFinish: false });
+  const loop = run(t, registry, fake.probe, { log: () => {} });
+  await until("the spawn runs", () => fake.running().length === 1);
+  fake.finish(fake.running()[0]!, setupFailed(thread.pylonId, 1));
+  await until("the planner gives up", () => registry.pylon(thread.pylonId)?.failed !== null);
+  registry.retryPylon(thread.pylonId);
+  void loop.wake(node);
+  await until("the fresh spawn runs", () => fake.running().length === 1 && fake.submitted.length === 2);
+  fake.finish(fake.running()[0]!);
+  await until("the pylon runs", () => fake.pylons.get(thread.pylonId)?.phase === "running");
+  await until("the spawn's success uses up the retry", () => registry.pylon(thread.pylonId)?.retrying === false);
+
+  fake.breakPylon(thread.pylonId, "the controller exited without completing a stop");
+  await until("the planner gives up", () => registry.pylon(thread.pylonId)?.failed !== null);
+  assert.equal(registry.pylon(thread.pylonId)!.failed, "pylon is broken: the controller exited without completing a stop");
+  assert.deepEqual(kinds(fake.submitted), ["spawn fresh", "spawn fresh"]);
+});
+
+test("a retry never deletes a pylon whose checkpoint the registry did not count", async (t) => {
+  const registry = openRegistry(tempDb());
+  const thread = seed(registry);
+  const fake = fakeNode({ autoFinish: false });
+  const loop = run(t, registry, fake.probe, { log: () => {} });
+  const next = async (what: string) => {
+    await until(what, () => fake.running().length === 1);
+    return fake.running()[0]!;
+  };
+  fake.finish(await next("the first spawn runs"));
+  registry.setThreadStatus(thread.id, "archived");
+  fake.finish(await next("the pause runs"));
+  await until("the pause is folded in", () => registry.pylon(thread.pylonId)?.pauses === 1);
+  // A probe restart that lost the pause's result: settle drops an unknown envelope without counting the pause.
+  registry.savePylon({ ...registry.pylon(thread.pylonId)!, pauses: 0 });
+  registry.setThreadStatus(thread.id, "active");
+  registry.recordActivity(thread.id, { human: Date.now() });
+  fake.finish(await next("the resume of the checkpoint runs"), serviceFailed(thread.pylonId));
+  await until("the planner gives up", () => registry.pylon(thread.pylonId)?.failed !== null);
+
+  registry.retryPylon(thread.pylonId);
+  void loop.wake(node);
+  fake.finish(await next("the retry's pause runs"));
+  fake.finish(await next("the resume after it runs"));
+  await until("the pylon runs", () => fake.pylons.get(thread.pylonId)?.phase === "running");
+  assert.deepEqual(kinds(fake.submitted), ["spawn fresh", "pause", "spawn resume", "pause", "spawn resume"], "nothing deletes the disk with the user's work");
+});
+
+test("a retry of a pylon left broken by a fresh setup, as an older backend left it, removes it with a pause and spawns it fresh", async (t) => {
+  const registry = openRegistry(tempDb());
+  const thread = seed(registry);
+  const fake = fakeNode({ autoFinish: false });
+  // The older backend kept the VM whose first boot's setup failed, so the planner gave up on the broken pylon.
+  fake.breakPylon(thread.pylonId, "Setup exited 128. Read controller logs", "setup");
+  const loop = run(t, registry, fake.probe, { log: () => {} });
+  await until("the planner gives up", () => registry.pylon(thread.pylonId)?.failed !== null);
+  assert.equal(registry.pylon(thread.pylonId)!.failed, "pylon is broken: Setup exited 128. Read controller logs");
+
+  assert.equal(registry.retryPylon(thread.pylonId), true);
+  void loop.wake(node);
+  await until("the retry's pause runs", () => fake.running().length === 1);
+  fake.finish(fake.running()[0]!);
+  await until("a fresh spawn runs", () => fake.running().length === 1 && fake.submitted.length === 2);
+  assert.equal(fake.pylons.has(thread.pylonId), false, "the pause removed the VM, whose disk had no checkpoint");
+  fake.finish(fake.running()[0]!, setupFailed(thread.pylonId, 2));
+  await until("the planner gives up again", () => registry.pylon(thread.pylonId)?.failed !== null);
+  assert.deepEqual(kinds(fake.submitted), ["pause", "spawn fresh"], "the new instance runs setup again");
+  assert.match(registry.pylon(thread.pylonId)!.failed!, /^last job failed with setup-failed, which is not retryable: .*\(run 2\)/);
+});
+
+test("an idle pylon whose fresh setup failed is removed by its pause, so its wake runs setup again", async (t) => {
+  const registry = openRegistry(tempDb());
+  const thread = seed(registry);
+  registry.setThreadStatus(thread.id, "archived");
+  const fake = fakeNode({ autoFinish: false });
+  // A probe that died between the setup failure and the instance's removal, so the planner sees only the broken pylon.
+  fake.breakPylon(thread.pylonId, "Setup exited 128. Read controller logs", "setup");
+  run(t, registry, fake.probe, { log: () => {} });
+  await until("the idle broken pylon's pause runs", () => fake.running().length === 1);
+  fake.finish(fake.running()[0]!);
+  await until("the pause is folded in", () => registry.pylon(thread.pylonId)?.pauses === 1);
+  assert.equal(fake.pylons.has(thread.pylonId), false, "no checkpoint holds the failed setup");
+  registry.setThreadStatus(thread.id, "active");
+  registry.recordActivity(thread.id, { human: Date.now() });
+  await until("the wake spawns", () => fake.submitted.length === 2);
+  assert.deepEqual(kinds(fake.submitted), ["pause", "spawn fresh"]);
+});
+
+test("a retry of a pylon whose checkpoint holds a failed setup boots nothing again, and says to start again", async (t) => {
+  const registry = openRegistry(tempDb());
+  const thread = seed(registry);
+  const fake = fakeNode({ autoFinish: false });
+  fake.stopOnFailedSetup(thread.pylonId, `ckpt-${thread.id}-1`);
+  const loop = run(t, registry, fake.probe, { log: () => {} });
+  await until("the resume runs", () => fake.running().length === 1);
+  fake.finish(fake.running()[0]!);
+  await until("the planner gives up", () => registry.pylon(thread.pylonId)?.failed !== null);
+  assert.match(registry.pylon(thread.pylonId)!.failed!, /^last job failed with setup-failed/);
+  assert.deepEqual(fake.pylons.get(thread.pylonId), { pylonId: thread.pylonId, phase: "broken", detail: "Setup exited 128. Read controller logs", cause: "saved-setup" }, "the checkpoint replays its failed setup");
+
+  registry.retryPylon(thread.pylonId);
+  void loop.wake(node);
+  await until("the planner gives up again", () => registry.pylon(thread.pylonId)?.failed !== null);
+  assert.equal(registry.pylon(thread.pylonId)!.failed, "pylon is broken: Setup exited 128. Read controller logs. Its disk holds the failed setup, and every boot of that disk fails the same way, so a retry cannot help. Start again from the project");
+  assert.deepEqual(kinds(fake.submitted), ["spawn resume"], "no pause and resume of the poisoned disk");
+});
+
+test("a retry made while a pass waits on the probe for another pylon is not undone by that pass", async (t) => {
+  const registry = openRegistry(tempDb());
+  const [first, second] = [seed(registry), seed(registry)].sort((a, b) => a.pylonId.localeCompare(b.pylonId));
+  // The pass ticks the first pylon, whose spawn waits on the probe, before it reaches the failed second one.
+  registry.savePylon({ ...registry.pylon(second!.pylonId)!, failed: "gave up after 5 failed attempts", attempts: { count: 5, last: { at: 1, code: "backend", message: "boot failed" } } });
+  const fake = fakeNode({ autoFinish: false });
+  const release = fake.holdSubmits();
+  run(t, registry, fake.probe, { log: () => {} });
+  await until("the first pylon's tick waits on its submit", () => registry.pylon(first!.pylonId)?.submitted !== null);
+
+  assert.equal(registry.retryPylon(second!.pylonId), true);
+  // A preview changes the second pylon's LiveSpec, so its tick saves the record before planning.
+  registry.allocatePreviews(second!.pylonId, ["web"], previewPorts);
+  release();
+  await until("the second pylon spawns", () => fake.submitted.some((job) => job.kind === "spawn" && job.pylonId === second!.pylonId));
+  const retried = registry.pylon(second!.pylonId)!;
+  assert.equal(retried.failed, null);
+  assert.equal(retried.live.previews.length, 1);
 });
 
 test("a pylon pauses once its agent turn ends and nobody has used it for a while", async (t) => {
