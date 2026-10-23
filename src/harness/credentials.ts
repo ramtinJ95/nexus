@@ -11,7 +11,9 @@ import { randomUUID } from "node:crypto";
 import { open, readFile, rename } from "node:fs/promises";
 import { dirname } from "node:path";
 import { z } from "zod";
-import type { Credential, CredentialStore } from "@earendil-works/pi-ai";
+import type { AuthInteraction, Credential, CredentialStore } from "@earendil-works/pi-ai";
+import { createModels, type MutableModels } from "@earendil-works/pi-ai/models";
+import { openaiProvider } from "@earendil-works/pi-ai/providers/openai";
 
 const fileSchema = z.strictObject({
   /** Sent to OpenAI as the agent host ID at login, so it must never change. */
@@ -24,6 +26,21 @@ export interface HarnessCredentials {
   store: CredentialStore;
   /** For pi-ai's `LoginOptions.getDeviceId`. */
   deviceId: string;
+}
+
+/** The models the harness may use: OpenAI, through Sign in with ChatGPT or an API key, from these credentials. */
+export function harnessModels(credentials: HarnessCredentials): MutableModels {
+  const models = createModels({ credentials: credentials.store });
+  models.setProvider(openaiProvider());
+  return models;
+}
+
+/**
+ * Sign in with ChatGPT, stored in the credentials. The browser's callback goes to port 1455 of the machine that
+ * runs this, so from another machine paste the redirect URL into the `manual_code` prompt instead.
+ */
+export async function loginChatGpt(models: MutableModels, credentials: HarnessCredentials, interaction: AuthInteraction): Promise<void> {
+  await models.login("openai", "oauth", interaction, { getDeviceId: () => credentials.deviceId, agentName: "Nexus" });
 }
 
 /** Creates the file with a new device ID when it is absent. A file that does not parse fails the open. */

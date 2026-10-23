@@ -65,7 +65,9 @@ if (import.meta.main) {
     model: scriptedModel,
     locator: { awaitRunning: async () => args.probe },
     tailscaled: args.tailscaled,
-    threads: [{ threadId: args.threadId, conversationId: args.conversationId }],
+    threads: [{ threadId: args.threadId, conversationId: args.conversationId, agentTurnRunning: false }],
+    deleted: [],
+    onActivity: () => {},
     log: (message) => console.error(message),
   });
   await host.send(args.threadId, `bash: ${args.command}`, "msg:killed-mid-tool", "followUp");

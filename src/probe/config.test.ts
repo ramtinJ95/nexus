@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { parseProbeConfig, parseSecretsEnv, readSecretsFile } from "./config.ts";
+import { parseProbeConfig, parseSecretsEnv, parseSelfDnsName, readSecretsFile } from "./config.ts";
 
 const deploy = new URL("../../deploy/", import.meta.url);
 
@@ -11,7 +11,7 @@ const valid = {
   node: "infra-testbench",
   listen: { host: "100.64.0.7" },
   auth: { controlPlane: "nControl1CNTRL", peers: ["nPeer1CNTRL"] },
-  backend: { kind: "pylon-vm", stateRoot: "/var/lib/nexus/pylons", images: { "img-000000000000": "/var/lib/nexus/artifacts/img-000000000000" } },
+  backend: { kind: "pylon-vm", stateRoot: "/var/lib/nexus/pylons", artifacts: "/var/lib/nexus/artifacts" },
   secretsFile: "/etc/nexus/secrets.env",
 };
 const withChange = (change: (config: any) => void) => {
@@ -24,6 +24,13 @@ test("the shipped example config parses", async () => {
   const config = parseProbeConfig(await readFile(new URL("probe.example.json", deploy), "utf8"));
   assert.equal(config.backend.kind, "pylon-vm");
   assert.equal(config.listen.port, 7480);
+  assert.deepEqual(config.previews, { gatewayPort: 7481, routesFile: "/var/lib/nexus/preview-routes.json" });
+});
+
+test("previews are optional, and their routes file defaults to the probe's state directory", () => {
+  assert.equal(parseProbeConfig(JSON.stringify(valid)).previews, undefined);
+  assert.deepEqual(parseProbeConfig(withChange((c) => { c.previews = { gatewayPort: 9000 }; })).previews, { gatewayPort: 9000, routesFile: "/var/lib/nexus/preview-routes.json" });
+  assert.throws(() => parseProbeConfig(withChange((c) => { c.previews = { gatewayPort: 9000, routesFile: "routes.json" }; })), /absolute path/);
 });
 
 test("a config parses into probe options, with the probe port as the default", () => {
@@ -51,6 +58,21 @@ test("the docker backend takes image tags and optional labels", () => {
   assert.deepEqual(config.backend, { kind: "docker", images: { "img-000000000000": "nexus-pylon-test:slice" }, labels: {} });
 });
 
+test("a pylon-vm config from before the artifact store is read as the store its images share, or refused with the fix", () => {
+  // /etc/nexus/probe.json on infra-testbench, as main's example installed it.
+  const deployed = withChange((c) => { c.backend = { kind: "pylon-vm", stateRoot: "/var/lib/nexus/pylons", images: { "img-000000000001": "/var/lib/nexus/artifacts/img-000000000001" } }; });
+  assert.deepEqual(parseProbeConfig(deployed).backend, { kind: "pylon-vm", stateRoot: "/var/lib/nexus/pylons", artifacts: "/var/lib/nexus/artifacts" });
+  const refused = [
+    { "img-000000000001": "/srv/images/img-000000000001", "img-000000000002": "/var/lib/nexus/artifacts/img-000000000002" },
+    { "img-000000000001": "/var/lib/nexus/artifacts/rootfs" },
+    {},
+  ];
+  for (const images of refused) {
+    assert.throws(() => parseProbeConfig(withChange((c) => { c.backend = { kind: "pylon-vm", stateRoot: "/var/lib/nexus/pylons", images }; })),
+      /backend\.images[\s\S]*Replace it with "artifacts"/, JSON.stringify(images));
+  }
+});
+
 test("a config with a mistake is refused, naming the field", () => {
   const cases: [string, (c: any) => void, RegExp][] = [
     ["an unknown key", (c) => { c.secretFile = c.secretsFile; }, /secretFile/],
@@ -60,8 +82,8 @@ test("a config with a mistake is refused, naming the field", () => {
       [`${host} as the listen host`, (c) => { c.listen.host = host; }, /listen\.host/]),
     ["a hostname as the listen host", (c) => { c.listen.host = "infra-testbench"; }, /listen\.host/],
     ["a relative state root", (c) => { c.backend.stateRoot = "pylons"; }, /backend\.stateRoot/],
-    ["a relative asset directory", (c) => { c.backend.images = { "img-000000000000": "assets" }; }, /backend\.images/],
-    ["a key that is not an image ID", (c) => { c.backend.images = { debian: "/var/lib/nexus/artifacts/debian" }; }, /backend\.images/],
+    ["a relative artifact store", (c) => { c.backend.artifacts = "artifacts"; }, /backend\.artifacts/],
+    ["a key that is not an image ID", (c) => { c.backend = { kind: "docker", images: { debian: "debian:bookworm-slim" } }; }, /backend\.images/],
     ["an unknown backend", (c) => { c.backend = { kind: "firecracker" }; }, /backend\.kind/],
     ["a field from the other backend", (c) => { c.backend.labels = {}; }, /labels/],
     ["a missing secrets file", (c) => { delete c.secretsFile; }, /secretsFile/],
@@ -119,4 +141,10 @@ test("readSecretsFile refuses a file every user can reach and reads one they can
   await assert.rejects(readSecretsFile(join(dir, "absent.env")), { code: "ENOENT" });
   await mkdir(join(dir, "dir.env"), { mode: 0o700 });
   await assert.rejects(readSecretsFile(join(dir, "dir.env")), /is not a regular file/);
+});
+
+test("the node's tailnet name comes from tailscale status without its trailing dot", () => {
+  assert.equal(parseSelfDnsName(JSON.stringify({ Version: "1.90.0", Self: { ID: "n1", DNSName: "infra-testbench.example.ts.net." } })), "infra-testbench.example.ts.net");
+  assert.throws(() => parseSelfDnsName(JSON.stringify({ Self: { DNSName: "" } })), /no MagicDNS name/);
+  assert.throws(() => parseSelfDnsName(JSON.stringify({ BackendState: "Stopped" })), /no Self\.DNSName/);
 });

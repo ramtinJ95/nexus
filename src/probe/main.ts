@@ -11,14 +11,22 @@
 import { createDockerBackend } from "../docker-backend.ts";
 import { createPylonVmBackend } from "../pylon-vm-backend.ts";
 import { localApiWhois } from "../tailscale.ts";
-import { readProbeConfig, readSecretsFile, type ProbeConfig } from "./config.ts";
+import { parseSelfDnsName, readProbeConfig, readSecretsFile, type ProbeConfig } from "./config.ts";
+import { tailscaleCli } from "./serve.ts";
 import { startProbe } from "./server.ts";
 
 const config = await readProbeConfig(process.argv[2] ?? "/etc/nexus/probe.json");
 // One source, so the probe's pre-boot check and the VMs see the same values.
 const secrets = await readSecretsFile(config.secretsFile);
+// `tailscale serve` as the probe's user needs `tailscale set --operator=nexus`, which deploy/install-probe.sh runs.
+const tailscale = tailscaleCli();
+// Read from tailscale rather than configured, so a preview URL always names the node the probe runs on.
+const previewHost = config.previews === undefined ? {} : { previewHost: parseSelfDnsName(await tailscale(["status", "--json"], AbortSignal.timeout(30_000))) };
 function pylonVm({ gitSsh, ...backend }: Extract<ProbeConfig["backend"], { kind: "pylon-vm" }>) {
-  return createPylonVmBackend({ ...backend, secrets, ...(gitSsh === undefined ? {} : { gitSsh }) });
+  return createPylonVmBackend({ ...backend, secrets, ...previewHost, ...(gitSsh === undefined ? {} : { gitSsh }) });
+}
+function docker({ artifacts, ...backend }: Extract<ProbeConfig["backend"], { kind: "docker" }>) {
+  return createDockerBackend({ ...backend, ...previewHost, ...(artifacts === undefined ? {} : { artifacts }) });
 }
 const probe = await startProbe({
   node: config.node,
@@ -26,8 +34,9 @@ const probe = await startProbe({
   port: config.listen.port,
   auth: config.auth,
   whois: localApiWhois(),
-  backend: config.backend.kind === "pylon-vm" ? pylonVm(config.backend) : createDockerBackend(config.backend),
+  backend: config.backend.kind === "pylon-vm" ? pylonVm(config.backend) : docker(config.backend),
   secrets,
+  ...(config.previews === undefined ? {} : { previews: { ...config.previews, tailscale } }),
 });
 console.log(`probe ${config.node} listening on ${config.listen.host}:${probe.port} as boot ${probe.bootId}, ${config.backend.kind} backend`);
 

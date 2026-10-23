@@ -59,7 +59,7 @@ The actual state comes from the probe's last observation and the job in flight:
 | `pausing` | A `pause` job is recording sessions, stopping services, and writing the checkpoint |
 | `paused` | Only the checkpoint exists |
 | `deleting` | A `delete` job is removing the disk and logs |
-| `deleted` | Nothing remains |
+| `absent` | The node does not have the pylon. It is not created yet, it was deleted, or it was lost. The thread's status tells which. The dashboard shows it as "not on its node" |
 | `failed` | The planner gave up after a job failure it cannot retry, or after 5 attempts. The probe keeps the logs, and a human retries |
 | `unknown` | The node is offline. The dashboard shows the last observation, marked stale |
 
