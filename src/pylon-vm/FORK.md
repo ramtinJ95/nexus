@@ -8,7 +8,7 @@ This directory is a fork of pi-sandbox, MIT-licensed, by Igor Warzocha. Its lice
 
 Nexus owns this code and does not track upstream. pi-sandbox stays the reference to compare designs against. The pi extension entry (`index.ts`) and the changelog tool (`changelog.ts`) were not copied.
 
-Nexus calls it only through `run` in `client.ts`, from `src/pylon-vm-backend.ts` and `src/pylon-vm-templates.ts`. Changes from upstream:
+Nexus calls it only through `run` in `client.ts`, from `src/pylon-vm-backend.ts` and `src/pylon-vm-templates.ts`. The probe's end of the host bridge (`src/probe/pylon-api.ts`) takes its socket path and header name from `host-bridge.ts`. Changes from upstream:
 
 - The controller is started from `daemon.ts` with Node's type stripping, so there is no `dist/` build.
 - `run` takes the state root as an argument instead of reading `PI_SANDBOX_HOME`.
@@ -29,3 +29,4 @@ Nexus calls it only through `run` in `client.ts`, from `src/pylon-vm-backend.ts`
 - `write` is replaced by `write-files`, which writes several files with owner and mode and makes missing parent directories as the owner.
 - `stop` of an instance whose controller died (`interrupted` or `failed`) settles it as `stopped` on its last completed checkpoint, or on no disk, so the next start boots fresh. Upstream returns its offline status and leaves it for a `start`.
 - The controller's `controller.pid` and the launch lock's `owner` hold a process identity (`identity.ts`): the PID, the process's start time and the host's boot ID, from `/proc` on Linux and `ps` and `sysctl` on macOS. A process is alive only while all three match, so a reused PID or one from before a host reboot reads as dead. Each file is written to a temporary file and renamed in, so a client never reads one half-written. Upstream records only the PID. An instance in `starting` whose controller has not published its PID yet is `unavailable` while the launching client lives, instead of `interrupted`.
+- Every boot's HTTP hooks answer `http://nexus.pylon`, the guest's NEXUS_API, from the probe (`host-bridge.ts`). Gondolin runs the `onRequest` hook before its allowlist and IP checks, and a Response it returns short-circuits both, so the host needs no allowlist entry and never resolves. The controller forwards the method, path, body and content type to the probe's socket, `host-bridge.sock` in the state root (the boot spec's `hostBridge`), with the instance name in `x-nexus-pylon`, and drops every guest header, so the guest holds no token and cannot name another pylon. With a custom `onRequest`, Gondolin skips its pre-body policy check and applies the allowlist after the hooks instead, so a request to a blocked host is refused after its body is read rather than before.

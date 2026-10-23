@@ -15,7 +15,7 @@
 import type { Readable } from "node:stream";
 import type { ArtifactCopy, ByteStream, CommandResult, Job, JobErrorCode, NodeName, PylonCommand, PylonId, ServiceFact, StreamRequest } from "./protocol.ts";
 import { checkoutDir, closeSession, openSession } from "./sessions.ts";
-import type { BootInputs, LiveSpec, OverlayFile, PreviewAssignment } from "./project.ts";
+import type { BootInputs, LiveSpec, OverlayFile, PreviewAssignment, ServiceDecl, ServiceName } from "./project.ts";
 import type { ArtifactId, ArtifactManifest, CheckpointId, ImageId, ImageRecipe, PortableArtifactId, TemplateBuildInputs, TemplateId } from "./images.ts";
 
 export interface VmBackend {
@@ -51,7 +51,10 @@ export interface Guest {
   /** Starts the process. A raw pipe's stream carries stdout only, and its stderr goes to `log`. */
   stream(request: StreamRequest, log: (text: string) => void): Promise<ByteStream>;
   writeFiles(files: readonly OverlayFile[]): Promise<void>;
-  services(op: "ensure" | "restart" | "stop" | "logs", name?: string, lines?: number): Promise<{ services: readonly ServiceFact[]; logs?: string }>;
+  /** `list` starts and stops nothing. */
+  services(op: "ensure" | "list" | "restart" | "stop" | "logs", name?: string, lines?: number): Promise<{ services: readonly ServiceFact[]; logs?: string }>;
+  /** Start an ad hoc service. Rejects a name .nexus/services.yaml declares. Returns the service's facts. */
+  startService(name: ServiceName, decl: ServiceDecl): Promise<readonly ServiceFact[]>;
   /** Supervise a port that is already listening. Returns the service name it was registered under. */
   linkPort(port: number, title?: string): Promise<string>;
   /** Plain-HTTP loopback origin that the probe's preview gateway forwards to. */
@@ -199,9 +202,9 @@ export async function runCommand(pylonId: PylonId, command: PylonCommand, deps: 
  * A template is the fork's prepare published into the artifact store (pylon-vm-templates.ts). A pylon booted
  * from one copies its disk in, and its first boot checks out the pylon's own commit and runs `.nexus/resume`.
  * Images and templates move between nodes as verified ArtifactStore archives (artifacts.ts).
+ * Requests to http://nexus.pylon go to the probe's Unix socket with the instance name attached (change 4).
  * Still to change in the fork:
  * 3. A service's PUBLIC_URL is the URL the probe assigned, not a localhost preview.
- * 4. A host bridge: requests to http://nexus.pylon go to the probe's Unix socket with the instance name attached.
  * 5. Instance export and import, for moving a paused pylon's checkpoint to another node.
  * 6. The session relaunch from ~/.nexus/sessions.json.
  * The image needs pi-sandbox's `sandboxssh` helper for `shell` and streams, and openssh-client for git over SSH.

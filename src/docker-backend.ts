@@ -14,6 +14,7 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 import { artifactDirectory, fileCodec, type ArtifactDirectory } from "./artifacts.ts";
 import { JobFailure, type ArtifactStore, type BackendPylon, type VmBackend } from "./backend.ts";
+import { dockerBridgeRunArgs } from "./docker-host-bridge.ts";
 import { processStream } from "./process-stream.ts";
 import type { PylonId } from "./protocol.ts";
 import type { ArtifactId, CheckpointId, ImageId, PortableArtifactId, TemplateId } from "./images.ts";
@@ -31,6 +32,8 @@ export interface DockerBackendOptions {
   labels?: Readonly<Record<string, string>>;
   /** The artifact store for templates. Omitted: the backend builds, boots and holds no templates. */
   artifacts?: string;
+  /** Gives each new container a NEXUS_API that dockerHostBridge(port) answers. Omitted: containers have no NEXUS_API. */
+  hostBridgePort?: number;
 }
 
 interface ContainerInfo {
@@ -191,6 +194,7 @@ export function createDockerBackend(options: DockerBackendOptions): VmBackend {
         "--label", `${label.image}=${boot.image}`,
         "--label", `${label.bootedFrom}=${bootedFrom ?? ""}`,
         ...scope.flatMap(([k, v]) => ["--label", `${k}=${v}`]),
+        ...(options.hostBridgePort === undefined ? [] : dockerBridgeRunArgs(options.hostBridgePort)),
         from, "sleep", "infinity",
       ], signal);
     },
@@ -284,6 +288,7 @@ export function createDockerBackend(options: DockerBackendOptions): VmBackend {
         },
         writeFiles: notYet("writeFiles"),
         services: notYet("services"),
+        startService: notYet("startService"),
         linkPort: notYet("linkPort"),
         previewOrigin: notYet("previewOrigin"),
       };

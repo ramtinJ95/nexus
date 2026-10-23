@@ -83,7 +83,7 @@ export class SandboxRuntime {
 	async boot(prepare: boolean, setupRan?: SetupRun): Promise<void> {
 		const config = this.record.config;
 		const { resources } = this.spec;
-		const { placeholders, ...network } = networkOptions(this.spec);
+		const { placeholders, ...network } = networkOptions(this.spec, this.record.name);
 		const options: VMOptions = {
 			cpus: resources.cpus,
 			memory: `${resources.memoryGiB}G`,

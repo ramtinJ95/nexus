@@ -13,12 +13,14 @@ import type { PortableArtifactId } from "../images.ts";
 import {
   artifactHeaders, encodeProbeEvent, encodeSubmitReply, fetchArtifact, jobDeadlineMs, probePort, jobSubject, parseJobEnvelope, parsePylonCommand, parseStreamRequest, routeAuth, serveByteStream, streamUpgradeResponse,
   type Job, type JobEnvelope, type JobId, type JobStatus, type LiveHash, type NodeName, type NodeObservation,
-  type ProbeAuthConfig, type ProbeEvent, type PylonCommand, type PylonId, type PylonObservation, type SessionFact, type Subject,
+  type DeclaredOutput, type ProbeAuthConfig, type ProbeEvent, type PylonCommand, type PylonId, type PylonObservation, type SessionFact, type Subject,
 } from "../protocol.ts";
 import { sessionFacts } from "../sessions.ts";
 import type { Whois } from "../tailscale.ts";
+import { listOutputs } from "../outputs.ts";
 import { startGateway } from "./gateway.ts";
-import { createTailscaleServe, readRoutes, type HttpsGet, type TailscaleCli } from "./serve.ts";
+import { createPylonApi, type HostBridge } from "./pylon-api.ts";
+import { createTailscaleServe, parseServeStatus, readRoutes, type HttpsGet, type TailscaleCli } from "./serve.ts";
 
 export interface ProbeOptions {
   node: NodeName;
@@ -44,6 +46,8 @@ export interface ProbeOptions {
   };
   /** Tests only. A peer probe is its tailnet machine name on probePort. */
   peerAddress?: (node: NodeName) => { host: string; port: number };
+  /** The backend's end of NEXUS_API, which the in-pylon `nexus` CLI calls. Omitted: those calls go unanswered. */
+  hostBridge?: HostBridge;
 }
 
 export interface Probe {
@@ -101,6 +105,16 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
   const ptyStreams = new Map<PylonId, number>();
 
   const emit = (event: ProbeEvent) => { if (!shutdown.signal.aborted) for (const observer of observers) observer.write(event); };
+  const api = createPylonApi({
+    guest: (pylonId) => backend.guest(pylonId),
+    published: (pylonId) => published.get(pylonId) ?? [],
+    changed: () => void publishSnapshot(),
+    async previewUrl(httpsPort) {
+      if (previews === null) return null;
+      const served = parseServeStatus(await previews.tailscale(["serve", "status", "--json"], shutdown.signal), previews.gateway.origin).get(httpsPort);
+      return served?.kind === "nexus" ? served.url : null;
+    },
+  });
 
   function setStatus(status: JobStatus, finishedAt: number | null) {
     jobs.set(status.jobId, { status, finishedAt });
@@ -125,6 +139,15 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
     }
   }
 
+  /** Declared outputs only accumulate in the control plane, so a failed read reported as none loses nothing. `nexus output list` shows the failure. */
+  async function declaredOutputs(pylonId: PylonId): Promise<readonly DeclaredOutput[]> {
+    try {
+      return await listOutputs(backend.guest(pylonId), sessionReadTimeoutMs);
+    } catch {
+      return [];
+    }
+  }
+
   async function observation(p: BackendPylon): Promise<PylonObservation> {
     const { pylonId } = p;
     switch (p.vm) {
@@ -137,7 +160,7 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
           pylonId, phase: "running", liveHash: liveHashes.get(pylonId) ?? null, bootedAt: p.bootedAt,
           bootedFrom: { image: p.image, checkpoint: p.checkpoint },
           // The other guest facts need guest operations, which this slice does not have.
-          services: [], previews: (published.get(pylonId) ?? []).map((preview) => ({ ...preview, ready: true })), sessions: await sessions(pylonId), git: null, declaredOutputs: [], attachedClients: ptyStreams.get(pylonId) ?? 0,
+          services: [], previews: (published.get(pylonId) ?? []).map((preview) => ({ ...preview, ready: true })), sessions: await sessions(pylonId), git: null, declaredOutputs: await declaredOutputs(pylonId), attachedClients: ptyStreams.get(pylonId) ?? 0,
         };
     }
   }
@@ -185,6 +208,7 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
         if (job.kind === "spawn") {
           liveHashes.set(job.pylonId, job.liveHash);
           published.set(job.pylonId, job.live.previews);
+          api.republished();
         }
         setStatus({ ...base, state: "succeeded", finishedAt: new Date().toISOString() }, Date.now());
       },
@@ -195,14 +219,16 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
     ).finally(() => {
       busy.delete(subject);
       runningJobs.delete(run);
-    }).then(() => {
-      // A full snapshot rather than a pylon event, because a pylon event cannot say that a pylon is gone.
-      if (observers.size === 0 || shutdown.signal.aborted) return;
-      // Observers that cannot get the new state lose their link, so they reconnect for a fresh snapshot.
-      return snapshot().then((observation) => emit({ type: "snapshot", observation }), (err: Error) => { for (const o of observers) o.drop(err); });
-    });
+    }).then(publishSnapshot);
     runningJobs.add(run);
     return running;
+  }
+
+  /** A full snapshot rather than a pylon event, because a pylon event cannot say that a pylon is gone. */
+  function publishSnapshot(): Promise<void> | undefined {
+    if (observers.size === 0 || shutdown.signal.aborted) return;
+    // Observers that cannot get the new state lose their link, so they reconnect for a fresh snapshot.
+    return snapshot().then((observation) => emit({ type: "snapshot", observation }), (err: Error) => { for (const o of observers) o.drop(err); });
   }
 
   function submit(jobId: JobId, body: string) {
@@ -360,6 +386,10 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
   });
   const address = server.address();
   if (address === null || typeof address === "string") throw new Error(`unexpected server address ${address}`);
+  const bridge = await options.hostBridge?.(api.answer).catch(async (err: unknown) => {
+    await Promise.all([new Promise((resolve) => server.close(resolve)), previews?.gateway.close()]);
+    throw err;
+  });
 
   return {
     port: address.port,
@@ -370,7 +400,7 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
       server.closeAllConnections();
       for (const socket of streamSockets) socket.destroy();
       await Promise.allSettled([...runningJobs]);
-      await Promise.all([closed, previews?.gateway.close()]);
+      await Promise.all([closed, previews?.gateway.close(), bridge?.close()]);
     },
   };
 }

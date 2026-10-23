@@ -88,7 +88,8 @@ const previewUrl = previewText.refine((s) => {
   return URL.canParse(s) && ["http:", "https:"].includes(new URL(s).protocol);
 }, "must be a path starting with / or an http(s) URL");
 const previewLink = z.strictObject({ url: previewUrl, title: previewText.min(1), description: previewText.optional() });
-const serviceDecl = z.strictObject({
+/** One service as the services file declares it. The in-pylon API parses `service-start` with it too. */
+export const serviceDecl = z.strictObject({
   command: z.string().min(1),
   cwd: z.string().refine((s) => !s.includes("\0") && !s.startsWith("/") && !s.split("/").includes(".."), "must be a path inside the repo").optional(),
   port: z.int().min(1).max(65535).optional(),

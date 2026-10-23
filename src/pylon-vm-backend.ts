@@ -24,6 +24,7 @@ import { imageIdOf, type ArtifactId, type CheckpointId, type ImageId, type Porta
 import * as templates from "./pylon-vm-templates.ts";
 import { controlSocket, run, socketPathLimit } from "./pylon-vm/client.ts";
 import { statusSchema, type BootSpec, type SandboxConfig } from "./pylon-vm/contracts.ts";
+import { hostBridgeSocket } from "./pylon-vm/host-bridge.ts";
 import { directory, existsError, readRecord, saveJson, shellQuote as q } from "./pylon-vm/storage.ts";
 
 export interface PylonVmBackendOptions {
@@ -253,6 +254,7 @@ export function createPylonVmBackend(options: PylonVmBackendOptions): VmBackend 
       ssh: await gitSshOf(boot.pylonId, remotes),
       files: [...live.overlay],
       hooks: [dotfilesPull(boot.dotfiles)],
+      hostBridge: hostBridgeSocket(options.stateRoot),
     };
   }
 
@@ -468,8 +470,8 @@ export function createPylonVmBackend(options: PylonVmBackendOptions): VmBackend 
       const remote = sshRemoteOf(repo.url);
       await holding([key.image], async () => templates.buildTemplate(stateRoot, store, {
         config: { version: 1, diskGiB: resources.diskGiB, image: assetsOf(key.image), workspace, setup: setupCommands(repo.url, repo, inputs.preSetup), retrySetup: false, resume: [], services: {} },
-        // No secrets and no overlay during setup, so a template never holds either.
-        boot: { resources: { cpus: resources.cpus, memoryGiB: resources.memoryGiB }, allowedHosts: [...inputs.allowedHosts], secrets: {}, ssh: await gitSshOf(template, remote === null ? [] : [remote]), files: [], hooks: [] },
+        // No secrets and no overlay during setup, so a template never holds either. No pylon owns the build, so nexus.pylon is blocked like any unlisted host.
+        boot: { resources: { cpus: resources.cpus, memoryGiB: resources.memoryGiB }, allowedHosts: [...inputs.allowedHosts], secrets: {}, ssh: await gitSshOf(template, remote === null ? [] : [remote]), files: [], hooks: [], hostBridge: null },
         manifest: { id: template, key, commit: repo.commit },
       }, signal));
     },
@@ -506,6 +508,7 @@ export function createPylonVmBackend(options: PylonVmBackendOptions): VmBackend 
           await sandbox({ action: "write-files", name, files });
         },
         services: notYet("services"),
+        startService: notYet("startService"),
         linkPort: notYet("linkPort"),
         previewOrigin: notYet("previewOrigin"),
       };

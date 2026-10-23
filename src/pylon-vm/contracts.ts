@@ -157,6 +157,8 @@ export const bootSchema = z.strictObject({
 	files: z.array(guestFileSchema),
 	/** Run on every boot, before setup or resume. Each waits to completion. A failure is logged, not fatal. */
 	hooks: z.array(z.string().min(1)),
+	/** The probe's socket, which the guest's requests to http://nexus.pylon are forwarded to (host-bridge.ts). Null for a template build, which no pylon owns. */
+	hostBridge: z.string().startsWith("/").nullable(),
 });
 export type BootSpec = z.infer<typeof bootSchema>;
 export const commandOutcomeSchema = z.discriminatedUnion("state", [

@@ -11,6 +11,8 @@
  *   it clones the same repo over SSH instead, through Gondolin's SSH termination on the host, so the key
  *   must be one GitHub accepts. Its secret checks send a fake secret to postman-echo.com, which echoes it,
  *   and call api.github.com, which only the wake allows.
+ *
+ * Both run the in-pylon `nexus` CLI from images/pylon/nexus inside the pylon, through the backend's host bridge.
  */
 import { after, before, test } from "node:test";
 import assert from "node:assert/strict";
@@ -19,17 +21,19 @@ import { createHash, randomUUID } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import { readdir, readFile, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
-import { basename, dirname, join } from "node:path";
+import { basename, dirname, join, posix } from "node:path";
 import { promisify } from "node:util";
 import { createDockerBackend } from "./docker-backend.ts";
+import { dockerHostBridge } from "./docker-host-bridge.ts";
 import { createPylonVmBackend } from "./pylon-vm-backend.ts";
 import { run as pylonVm } from "./pylon-vm/client.ts";
 import { startProbe, type Probe } from "./probe/server.ts";
-import { connectProbe, type LiveHash, type NodeName, type ProbeClient, type PylonId, type TailnetNodeId } from "./protocol.ts";
+import { pylonInfoFile, pylonVmHostBridge, type HostBridge } from "./probe/pylon-api.ts";
+import { connectProbe, type DeclaredOutput, type LiveHash, type NodeName, type ProbeClient, type PylonId, type TailnetNodeId } from "./protocol.ts";
 import { envelope, type PlanStep } from "./reconcile.ts";
 import { newPylonRecord, nextCheckpoint, snapshot, tick, type PylonRecord } from "./tick.ts";
 import type { BackendPylon, Guest, SecretSource, VmBackend } from "./backend.ts";
-import type { BootInputs, OverlayFile } from "./project.ts";
+import { renderOverlay, type BootInputs, type OverlayFile, type ProjectId } from "./project.ts";
 import type { CheckpointId, ImageId } from "./images.ts";
 
 const execFileAsync = promisify(execFile);
@@ -40,10 +44,14 @@ const controlPlaneId = "nSLICECONTROL" as TailnetNodeId;
 const probeId = "nSLICEPROBE" as TailnetNodeId;
 const thread = `slice-${run}`;
 const pylonId = `pylon-${thread}` as PylonId;
+const cli = new URL("../images/pylon/nexus", import.meta.url).pathname;
 
 interface SliceFixture {
   backend: VmBackend;
   image: ImageId;
+  hostBridge: HostBridge;
+  /** Puts this checkout's CLI and the given pylon.json into the running pylon, whatever its image has. */
+  installCli(pylonJson: string): Promise<void>;
   /** The node's secret file, shared by the probe and the backend as on a real node. */
   secrets: SecretSource;
   boot: Omit<BootInputs, "source" | "pylonId" | "image">;
@@ -76,14 +84,23 @@ interface SliceFixture {
 
 function dockerFixture(): SliceFixture {
   const docker = async (...args: string[]) => (await execFileAsync("docker", args)).stdout.trim();
-  const baseImage = "debian:bookworm-slim";
+  // Node, for the in-pylon CLI.
+  const baseImage = "node:24-bookworm-slim";
+  const labels = { "nexus.test": `slice-${run}` };
   const testLabel = `nexus.test=slice-${run}`;
+  // Fixed for the run, because each container's NEXUS_API names it and the probe restarts.
+  const bridgePort = 20_000 + Math.floor(Math.random() * 10_000);
   const containers = async () => (await docker("ps", "-a", "-q", "--filter", `label=nexus.pylon=${pylonId}`, "--filter", `label=${testLabel}`)).split("\n").filter(Boolean);
   const checkpointImage = async (checkpoint: string) => docker("images", "-q", "--filter", `label=nexus.pylon=${pylonId}`, "--filter", `label=nexus.checkpoint=${checkpoint}`, "--filter", `label=${testLabel}`);
   const image: ImageId = "img-slicetest0000";
   return {
-    backend: createDockerBackend({ images: { [image]: baseImage }, labels: { "nexus.test": `slice-${run}` } }),
+    backend: createDockerBackend({ images: { [image]: baseImage }, labels, hostBridgePort: bridgePort }),
     image,
+    hostBridge: dockerHostBridge(bridgePort, labels),
+    async installCli(pylonJson) {
+      await docker("cp", cli, `${pylonId}:/usr/local/bin/nexus`);
+      await docker("exec", pylonId, "sh", "-c", `mkdir -p /home/user/.nexus && printf '%s' "$1" > ${pylonInfoFile}`, "sh", pylonJson);
+    },
     secrets: { value: () => undefined },
     boot: {
       resources: { cpus: 1, memoryGiB: 1, diskGiB: 1 },
@@ -194,6 +211,13 @@ function pylonVmFixture(): SliceFixture {
   return {
     backend: createPylonVmBackend({ stateRoot, artifacts: dirname(assets), secrets, ...(gitSsh === undefined ? {} : { gitSsh }) }),
     image: basename(assets) as ImageId,
+    hostBridge: pylonVmHostBridge(stateRoot),
+    async installCli(pylonJson) {
+      await this.backend.guest(pylonId).writeFiles([
+        { path: "/usr/local/bin/nexus", mode: 0o755, owner: "root", content: readFileSync(cli, "utf8") },
+        { path: pylonInfoFile, mode: 0o644, owner: "user", content: pylonJson },
+      ]);
+    },
     secrets,
     boot: {
       resources: { cpus: 2, memoryGiB, diskGiB: 8 },
@@ -309,6 +333,7 @@ async function startTestProbe(b: VmBackend = backend) {
     whois: async () => controlPlaneId,
     backend: b,
     secrets: fixture.secrets,
+    hostBridge: fixture.hostBridge,
   });
   port = probe.port;
   client ??= connectProbe(node, "127.0.0.1", probeId, { port, whois: async () => probeId });
@@ -406,6 +431,30 @@ test("running again: resumes from the checkpoint with the marker intact and the 
   assert.equal(p.checkpoint, `ckpt-${thread}-1`);
   assert.deepEqual(await inGuest(`cat ${fixture.marker}`), { exitCode: 0, output: `${run}\n`, truncated: false });
   await fixture.checkWake(backend.guest(pylonId));
+});
+
+test("the in-pylon CLI reaches the probe through the host bridge, and a declared output reaches the observation", async () => {
+  const pylonJson = renderOverlay({
+    pylonId, threadId: thread, project: "slice" as ProjectId, node, allowedHosts: [], previews: [], logins: [],
+    dotfiles: { repo: "https://example.com/dotfiles.git", ref: "main" },
+  }).find((f) => f.path === pylonInfoFile)!.content;
+  await fixture.installCli(pylonJson);
+  const nexus = async (...args: string[]) => {
+    const { exitCode, output } = await backend.guest(pylonId).exec(["nexus", ...args, "--json"], { cwd: fixture.cwd, timeoutMs: 30_000 });
+    assert.equal(exitCode, 0, `nexus ${args.join(" ")}: ${output}`);
+    return JSON.parse(output) as unknown;
+  };
+  assert.deepEqual(await nexus("info"), JSON.parse(pylonJson));
+  // A guest that names another pylon in the bridge's own header is still answered as itself.
+  const spoofed = `fetch((process.env.NEXUS_API || "http://nexus.pylon") + "/v1/request", { method: "POST", headers: { "x-nexus-pylon": "pylon-other", "content-type": "application/json" }, body: JSON.stringify({ op: "info" }) }).then(async (r) => console.log(r.status, (await r.json()).pylonId))`;
+  assert.deepEqual(await backend.guest(pylonId).exec(["node", "-e", spoofed], { cwd: fixture.cwd, timeoutMs: 30_000 }), { exitCode: 0, output: `200 ${pylonId}\n`, truncated: false });
+  assert.deepEqual(await inGuest(`printf 'shot' > ${fixture.cwd}/shot.txt`), { exitCode: 0, output: "", truncated: false });
+  const { output } = await nexus("output", "add", "file", "shot.txt", "--title", "Shot") as { output: DeclaredOutput };
+  assert.deepEqual(output, { id: output.id, kind: "file", path: posix.join(fixture.cwd, "shot.txt"), title: "Shot", sha256: createHash("sha256").update("shot").digest("hex") });
+  assert.deepEqual(await nexus("output", "list"), { outputs: [output] });
+  const observed = (await snapshot(client))?.pylons.find((p) => p.pylonId === pylonId);
+  assert.ok(observed?.phase === "running");
+  assert.deepEqual(observed.declaredOutputs, [output]);
 });
 
 test("a probe restart makes the planner re-send spawn, which leaves the running VM alone", async () => {

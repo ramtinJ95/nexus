@@ -5,6 +5,7 @@ import {
 	type VMOptions,
 } from "@earendil-works/gondolin";
 import type { BootSpec } from "./contracts.ts";
+import { hostBridgeHook } from "./host-bridge.ts";
 
 type Remote = NonNullable<BootSpec["ssh"]>["remotes"][number];
 
@@ -16,10 +17,12 @@ type Remote = NonNullable<BootSpec["ssh"]>["remotes"][number];
  */
 export function networkOptions(
 	spec: BootSpec,
+	instance: string,
 ): Pick<VMOptions, "httpHooks" | "ssh"> & { placeholders: Record<string, string> } {
 	const { httpHooks, env } = createHttpHooks({
 		allowedHosts: spec.allowedHosts,
 		secrets: spec.secrets,
+		...(spec.hostBridge === null ? {} : { onRequest: hostBridgeHook(spec.hostBridge, instance) }),
 	});
 	if (spec.ssh === null) return { httpHooks, placeholders: env };
 	const { privateKey, knownHostsFile, remotes } = spec.ssh;

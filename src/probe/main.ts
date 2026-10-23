@@ -12,6 +12,7 @@ import { createDockerBackend } from "../docker-backend.ts";
 import { createPylonVmBackend } from "../pylon-vm-backend.ts";
 import { localApiWhois } from "../tailscale.ts";
 import { parseSelfDnsName, readProbeConfig, readSecretsFile, type ProbeConfig } from "./config.ts";
+import { pylonVmHostBridge } from "./pylon-api.ts";
 import { tailscaleCli } from "./serve.ts";
 import { startProbe } from "./server.ts";
 
@@ -37,6 +38,8 @@ const probe = await startProbe({
   backend: config.backend.kind === "pylon-vm" ? pylonVm(config.backend) : docker(config.backend),
   secrets,
   ...(config.previews === undefined ? {} : { previews: { ...config.previews, tailscale } }),
+  // The Docker backend's bridge needs a fixed port, which this config does not have, so a Docker probe leaves NEXUS_API unanswered.
+  ...(config.backend.kind === "pylon-vm" ? { hostBridge: pylonVmHostBridge(config.backend.stateRoot) } : {}),
 });
 console.log(`probe ${config.node} listening on ${config.listen.host}:${probe.port} as boot ${probe.bootId}, ${config.backend.kind} backend`);
 

@@ -8,7 +8,7 @@ import { Readable } from "node:stream";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { startProbe, type Probe, type ProbeOptions } from "./server.ts";
-import { connectProbe, fetchArtifact, jobDeadlineMs, type ByteStream, type Job, type JobEnvelope, type JobId, type JobStatus, type LiveHash, type NodeName, type ProbeEvent, type PylonId, type StreamRequest, type TailnetNodeId } from "../protocol.ts";
+import { connectProbe, fetchArtifact, jobDeadlineMs, type ByteStream, type DeclaredOutput, type Job, type JobEnvelope, type JobId, type JobStatus, type LiveHash, type NodeName, type ProbeEvent, type PylonId, type StreamRequest, type TailnetNodeId } from "../protocol.ts";
 import { envelope } from "../reconcile.ts";
 import { processStream } from "../process-stream.ts";
 import type { BackendPylon, Guest, VmBackend } from "../backend.ts";
@@ -16,6 +16,8 @@ import { fakeTailscale, nodeHost, viaGateway } from "./fake-tailscale.ts";
 import type { BootInputs, ProjectId } from "../project.ts";
 import type { ArtifactId, ArtifactManifest, ImageId, PortableArtifactId, TemplateId, TemplateManifest } from "../images.ts";
 import { fakeGuest, herdrError, herdrOk, herdrPane, herdrSnapshot } from "../fake-guest.ts";
+import { outputsDir } from "../outputs.ts";
+import type { HostBridge, HostBridgeAnswer } from "./pylon-api.ts";
 
 const node = "test-node" as NodeName;
 const controlPlane = "nCONTROL" as TailnetNodeId;
@@ -370,7 +372,8 @@ test("a failing command rejects with the guest's error", async (t) => {
 test("observations carry session facts from Herdr, and null when Herdr cannot be read", async (t) => {
   let readable = true;
   const guest = fakeGuest((argv, herdr) => {
-    assert.ok(herdr && argv[0] === "api" && argv[1] === "snapshot", "observing runs only herdr api snapshot");
+    if (!herdr && argv[2]?.includes(outputsDir)) return { exitCode: 0, output: "" };
+    assert.ok(herdr && argv[0] === "api" && argv[1] === "snapshot", "observing runs only herdr api snapshot and the outputs listing");
     return readable
       ? herdrOk(herdrSnapshot([{ id: "w1", label: "review" }], [herdrPane("w1:p1", "w1", "claude", "working", { kind: "id", value: "bd2c2d6b" })]))
       : { exitCode: 1, output: "Error: exec failed" };
@@ -387,6 +390,48 @@ test("observations carry session facts from Herdr, and null when Herdr cannot be
   assert.deepEqual(await sessionsSeen(), [{ herdrPane: "w1:p1", harness: "claude-code", harnessSessionId: "bd2c2d6b", status: "working" }]);
   readable = false;
   assert.equal(await sessionsSeen(), null);
+});
+
+test("NEXUS_API calls reach the API as the pylon the bridge named, get the URL once a spawn publishes the preview, and end with the probe", async (t) => {
+  const bridge: { answer?: HostBridgeAnswer; closed: boolean } = { closed: false };
+  const hostBridge: HostBridge = async (answer) => {
+    bridge.answer = answer;
+    return { async close() { bridge.closed = true; } };
+  };
+  const dir = await mkdtemp(join(tmpdir(), "nexus-probe-"));
+  t.after(() => rm(dir, { recursive: true }));
+  const free = createServer().listen(0, "127.0.0.1");
+  await once(free, "listening");
+  const gatewayPort = (free.address() as { port: number }).port;
+  await new Promise((resolve) => free.close(resolve));
+  const fake = fakeBackend();
+  const guest = { ...fakeGuest(() => ({ exitCode: 1, output: "unused" })), linkPort: async () => "web", previewOrigin: () => "http://127.0.0.1:9" as const };
+  const previews = { gatewayPort, routesFile: join(dir, "routes.json"), tailscale: fakeTailscale().cli, get: viaGateway(() => `http://127.0.0.1:${gatewayPort}`).get };
+  const { client, probe } = await setup(t, { backend: { ...fake.backend, guest: () => guest }, previews, hostBridge });
+  assert.ok(bridge.answer, "the probe started its bridge");
+  const preview = bridge.answer(pylonId, JSON.stringify({ op: "preview", port: 3000 }));
+  const env = envelope({ ...spawnJob, live: { previews: [{ service: "web", httpsPort: 10101 }], overlay: [] } }, node, Date.now());
+  await client.submit(env);
+  assert.equal((await finished(client, env.jobId)).state, "succeeded");
+  assert.deepEqual(await preview, { status: 200, body: JSON.stringify({ service: "web", port: 3000, url: `https://${nodeHost}:10101/` }) });
+  await probe.close();
+  assert.ok(bridge.closed, "closing the probe closed its bridge");
+});
+
+test("observations carry the pylon's declared outputs", async (t) => {
+  const output: DeclaredOutput = { id: "out-1-00000000", kind: "diff", base: "c".repeat(40), sha256: "0".repeat(64), title: null };
+  const guest = fakeGuest((argv, herdr) => {
+    if (herdr) return herdrOk(herdrSnapshot([], []));
+    assert.ok(argv[2]?.includes(outputsDir));
+    return { exitCode: 0, output: `${output.id}.json\t${JSON.stringify(output)}\n` };
+  });
+  const { client } = await setup(t, {}, guest);
+  await running(client);
+  for await (const e of client.observe(AbortSignal.timeout(5000))) {
+    const p = e.type === "snapshot" ? e.observation.pylons[0] : assert.fail("the first event is a snapshot");
+    assert.deepEqual(p?.phase === "running" ? p.declaredOutputs : assert.fail("the pylon runs"), [output]);
+    break;
+  }
 });
 
 /** A running pylon whose guest runs each stream's argv as a local process, as docker exec or ssh would. */
