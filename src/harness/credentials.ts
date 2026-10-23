@@ -12,8 +12,10 @@ import { open, readFile, rename } from "node:fs/promises";
 import { dirname } from "node:path";
 import { z } from "zod";
 import type { AuthInteraction, Credential, CredentialStore } from "@earendil-works/pi-ai";
-import { createModels, type MutableModels } from "@earendil-works/pi-ai/models";
+import { createModels, type Models, type MutableModels } from "@earendil-works/pi-ai/models";
 import { openaiProvider } from "@earendil-works/pi-ai/providers/openai";
+import { OPENAI_CODEX_MODELS } from "@earendil-works/pi-ai/providers/openai-codex.models";
+import type { ModelRef } from "@earendil-works/pi-durable";
 
 const fileSchema = z.strictObject({
   /** Sent to OpenAI as the agent host ID at login, so it must never change. */
@@ -28,11 +30,35 @@ export interface HarnessCredentials {
   deviceId: string;
 }
 
+/**
+ * Sign in with ChatGPT reaches only the models ChatGPT offers through Codex, and OpenAI refuses any other at the
+ * first request. pi-ai's openai provider lists the API's whole catalog for either login, so its legacy Codex
+ * provider's catalog, which is the ChatGPT subscription's, names them. Asking OpenAI instead takes a request.
+ */
+const chatGptModelIds: ReadonlySet<string> = new Set(Object.values(OPENAI_CODEX_MODELS).map((model) => model.id));
+
 /** The models the harness may use: OpenAI, through Sign in with ChatGPT or an API key, from these credentials. */
 export function harnessModels(credentials: HarnessCredentials): MutableModels {
   const models = createModels({ credentials: credentials.store });
-  models.setProvider(openaiProvider());
+  models.setProvider({
+    ...openaiProvider(),
+    filterModels: (all, credential) => credential?.type === "oauth" ? all.filter((model) => chatGptModelIds.has(model.id)) : all,
+  });
   return models;
+}
+
+/**
+ * Throws unless the harness's login reaches `model`, naming the models it does reach. Otherwise the control
+ * plane starts, and every thread fails at its first turn. It reads only the stored login, so it costs no request.
+ */
+export async function requireModel(models: Models, model: ModelRef): Promise<void> {
+  if (models.getProvider(model.provider) === undefined) {
+    throw new Error(`harness.model names provider ${model.provider}, but the harness has only ${models.getProviders().map((p) => p.id).join(", ")}`);
+  }
+  const available = (await models.getAvailable(model.provider)).map((m) => m.id);
+  if (available.includes(model.modelId)) return;
+  if (available.length === 0) throw new Error(`the harness is not signed in to ${model.provider}, so it has no model. Sign it in with src/control/login.ts`);
+  throw new Error(`harness.model ${model.modelId} is not offered to the harness's ${model.provider} login. It offers ${available.toSorted().join(", ")}`);
 }
 
 /**

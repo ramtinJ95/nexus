@@ -11,7 +11,7 @@ import { gitUrl } from "../project.ts";
 import { ingest } from "../reconcile.ts";
 import { linuxTailscaledSocket, localApiWhois } from "../tailscale.ts";
 import type { Models } from "@earendil-works/pi-ai/models";
-import { harnessModels, openCredentials } from "../harness/credentials.ts";
+import { harnessModels, openCredentials, requireModel } from "../harness/credentials.ts";
 import { openHarnessHost, type ConversationId } from "../harness/host.ts";
 import { startApi } from "./api.ts";
 import { registryLocator } from "./locator.ts";
@@ -135,7 +135,9 @@ export async function startControlPlane(config: ControlPlaneConfig, models: Mode
 
 async function main(configPath: string) {
   const config = await readConfig(configPath);
-  const controlPlane = await startControlPlane(config, harnessModels(await openCredentials(config.harness.credentials)));
+  const models = harnessModels(await openCredentials(config.harness.credentials));
+  await requireModel(models, config.harness.model);
+  const controlPlane = await startControlPlane(config, models);
   for (const signal of ["SIGINT", "SIGTERM"] as const) {
     process.once(signal, () => { controlPlane.close().then(() => process.exit(0), (err: unknown) => { console.error(err); process.exit(1); }); });
   }

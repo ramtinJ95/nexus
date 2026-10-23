@@ -4,7 +4,7 @@ import { mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promise
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Credential } from "@earendil-works/pi-ai";
-import { openCredentials } from "./credentials.ts";
+import { harnessModels, openCredentials, requireModel } from "./credentials.ts";
 
 async function credentialsPath(t: import("node:test").TestContext): Promise<string> {
   const dir = await mkdtemp(join(tmpdir(), "nexus-credentials-"));
@@ -85,4 +85,33 @@ test("a file that does not parse fails the open instead of minting a new device 
   const path = await credentialsPath(t);
   await writeFile(path, JSON.stringify({ deviceId: "not-a-uuid", credentials: {} }));
   await assert.rejects(openCredentials(path), /harness-credentials\.json/);
+});
+
+const chatGptModels = "gpt-5.6-luna, gpt-5.6-sol, gpt-5.6-terra, gpt-6-astra, gpt-6-luna, gpt-6-sol, gpt-6.1-sol";
+
+test("a ChatGPT login offers only the models ChatGPT offers through Codex, and the error lists them", async (t) => {
+  const credentials = await openCredentials(await credentialsPath(t));
+  await credentials.store.modify("openai", async () => oauth("a"));
+  const models = harnessModels(credentials);
+  await requireModel(models, { provider: "openai", modelId: "gpt-6-astra" });
+  await assert.rejects(requireModel(models, { provider: "openai", modelId: "gpt-5.5" }), {
+    message: `harness.model gpt-5.5 is not offered to the harness's openai login. It offers ${chatGptModels}`,
+  });
+});
+
+test("an API key offers the API's whole catalog, but no model it lacks", async (t) => {
+  const credentials = await openCredentials(await credentialsPath(t));
+  await credentials.store.modify("openai", async () => ({ type: "api_key", key: "sk-test" }));
+  const models = harnessModels(credentials);
+  await requireModel(models, { provider: "openai", modelId: "gpt-5.5" });
+  await assert.rejects(requireModel(models, { provider: "openai", modelId: "gpt-5.5-typo" }), /gpt-5\.5-typo is not offered .* It offers .*gpt-5\.5, /);
+});
+
+test("a harness that is not signed in, or a provider it does not have, has no model", async (t) => {
+  const key = process.env.OPENAI_API_KEY;
+  delete process.env.OPENAI_API_KEY;
+  t.after(() => { if (key !== undefined) process.env.OPENAI_API_KEY = key; });
+  const models = harnessModels(await openCredentials(await credentialsPath(t)));
+  await assert.rejects(requireModel(models, { provider: "openai", modelId: "gpt-6-astra" }), /not signed in to openai.*login\.ts/);
+  await assert.rejects(requireModel(models, { provider: "openai-codex", modelId: "gpt-6-astra" }), /names provider openai-codex, but the harness has only openai/);
 });

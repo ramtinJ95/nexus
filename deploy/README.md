@@ -65,7 +65,7 @@ The control plane runs as the system user `nexus-control`, apart from the probe'
 
 ### Sign the harness in
 
-The harness has its own ChatGPT login, kept apart from any interactive pi on the machine. A ChatGPT login reaches only the models ChatGPT offers through Codex, such as `gpt-6-astra`, so `harness.model` in `control.json` must name one of them. Any other model, such as `gpt-5.5`, fails each agent turn with a 400 that the thread page shows. Only one process may hold the credentials file, so stop the control plane first:
+The harness has its own ChatGPT login, kept apart from any interactive pi on the machine. A ChatGPT login reaches only the models ChatGPT offers through Codex, such as `gpt-6-astra`, so `harness.model` in `control.json` must name one of them. The control plane refuses to start with any other model, such as `gpt-5.5`, or before the harness is signed in, and its error in `journalctl -u nexus-control` lists the models the login offers. Only one process may hold the credentials file, so stop the control plane first:
 
 ```sh
 sudo systemctl stop nexus-control
