@@ -1,5 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -7,7 +8,7 @@ import { join } from "node:path";
 import { JobFailure } from "./backend.ts";
 import {
   buildImage, debugfsErrors, debugfsModeCommands, debugfsStatCommands, loadImageRecipe, modeMismatches,
-  parseDebugfsModes, parseModeListing, pylonRecipeDir,
+  parseDebugfsModes, parseModeListing, pylonRecipeDir, smokeChecks, smokeFailure,
 } from "./image-build.ts";
 import type { ImageRecipe } from "./images.ts";
 import type { NodeName } from "./protocol.ts";
@@ -72,7 +73,7 @@ test("loading refuses pins with a missing or unknown field, a bad digest, and a 
   await assert.rejects(loadImageRecipe(dir), /Containerfile .* is not a regular file/);
 });
 
-test("buildImage refuses a recipe from a job whose paths or pins are unsafe, before it writes anything", async (t) => {
+test("buildImage refuses a recipe from a job whose paths, pins or nexus script are unsafe, before it writes anything", async (t) => {
   const root = await mkdtemp(join(tmpdir(), "nexus-image-out-"));
   t.after(() => rm(root, { recursive: true }));
   const outDir = join(root, "img-000000000000");
@@ -82,11 +83,36 @@ test("buildImage refuses a recipe from a job whose paths or pins are unsafe, bef
     { files: [{ path: "/etc/passwd", content: "" }], pins },
     { files: [{ path: "a//b", content: "" }], pins },
     { files: [], pins: { ...pins, nodeSha256: "not-a-digest" } },
+    { files: [{ path: "nexus", content: '#!/usr/bin/env node\nconst version = "dev";\n' }], pins },
   ];
   for (const recipe of bad) {
     await assert.rejects(buildImage(recipe, node, outDir, AbortSignal.timeout(5_000)), (err) => err instanceof JobFailure && err.code === "invalid");
   }
   assert.ok(!existsSync(`${outDir}.partial`) && !existsSync(join(root, "escape")));
+});
+
+test("the smoke boot expects each tool's exact pinned version, and whatever the recipe's nexus CLI prints", async () => {
+  const recipe = await loadImageRecipe();
+  const versions = Object.fromEntries(smokeChecks(recipe).filter((c) => c.name.endsWith(" version")).map((c) => [c.name, c.expect]));
+  assert.deepEqual(versions, {
+    "node version": `v${recipe.pins.node}\n`,
+    "claude version": `${recipe.pins.claudeCode} (Claude Code)\n`,
+    "pi version": `${recipe.pins.pi}\n`,
+    "herdr version": `herdr ${recipe.pins.herdr}\n`,
+    "pi-env version": `pi-env ${recipe.pins.piEnv}\n`,
+    "nexus version": execFileSync(process.execPath, [join(pylonRecipeDir, "nexus"), "--version"], { encoding: "utf8" }),
+  });
+});
+
+test("a version check fails on any other version, naming the expected and actual output", () => {
+  const checks = smokeChecks({ files: [{ path: "nexus", content: 'const version = "0.7.3";\n' }], pins });
+  const check = (name: string) => checks.find((c) => c.name === name)!;
+  assert.equal(smokeFailure(check("claude version"), 0, "2.1.308 (Claude Code)\n"), undefined);
+  assert.equal(smokeFailure(check("claude version"), 0, "2.1.309 (Claude Code)\n"), 'expected "2.1.308 (Claude Code)\\n", got "2.1.309 (Claude Code)\\n"');
+  assert.equal(smokeFailure(check("nexus version"), 0, "nexus 0.7.3\n"), undefined);
+  assert.equal(smokeFailure(check("nexus version"), 0, "nexus 0.1.0\n"), 'expected "nexus 0.7.3\\n", got "nexus 0.1.0\\n"');
+  assert.equal(smokeFailure(check("node version"), 0, "v24.22.10\n"), 'expected "v24.22.1\\n", got "v24.22.10\\n"');
+  assert.equal(smokeFailure(check("pi version"), 127, "-bash: pi: command not found\n"), "exited 127");
 });
 
 test("the mode listing parses into sorted fixes, and one without a setuid or setgid file is refused", () => {
