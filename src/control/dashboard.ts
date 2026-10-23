@@ -16,7 +16,6 @@ import type { ConversationView, InboxState, LiveState } from "@earendil-works/pi
 import { desiredPhase, type ActualState, type DesiredPhase } from "../reconcile.ts";
 import type { SessionFact } from "../protocol.ts";
 import type { SessionHarness } from "../project.ts";
-import { herdrSession } from "../sessions.ts";
 import type { ThreadDetail } from "./api.ts";
 import { previewUrl } from "./live.ts";
 import type { NodeRecord, Output, Preview, Registry, Thread, ThreadId } from "./registry.ts";
@@ -415,7 +414,7 @@ ${d.sessions.length === 0 ? html`<p class="empty">No sessions.</p>` : html`<ul c
 ${s.harnessSessionId !== null && html`<code class="dim sid" title="${s.harnessSessionId}">session ${s.harnessSessionId}</code>`}
 </li>`)}</ul>`}
 <p class="attach-h">Attach from a shell in the pylon</p>
-<div class="attach"><code id="attach-command">herdr --session ${herdrSession}</code><button type="button" class="btn btn-xs" data-copy="attach-command">Copy</button></div>
+<div class="attach"><code id="attach-command">${d.attach}</code><button type="button" class="btn btn-xs" data-copy="attach-command">Copy</button></div>
 </section>
 </aside>`;
 }
