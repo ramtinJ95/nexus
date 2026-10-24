@@ -2,7 +2,9 @@ import { test } from "node:test";
 import { connect } from "node:net";
 import assert from "node:assert/strict";
 import { once } from "node:events";
-import { mkdtemp, rm } from "node:fs/promises";
+import { execFile } from "node:child_process";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { promisify } from "node:util";
 import { createServer, request } from "node:http";
 import { Readable } from "node:stream";
 import { tmpdir } from "node:os";
@@ -17,6 +19,7 @@ import type { BootInputs, ProjectId } from "../project.ts";
 import type { ArtifactId, ArtifactManifest, ImageId, PortableArtifactId, TemplateId, TemplateManifest } from "../images.ts";
 import { fakeGuest, herdrError, herdrOk, herdrPane, herdrSnapshot } from "../fake-guest.ts";
 import { outputsDir } from "../outputs.ts";
+import { checkoutReader } from "../checkout-files.ts";
 import type { HostBridge, HostBridgeAnswer } from "./pylon-api.ts";
 
 const node = "test-node" as NodeName;
@@ -473,6 +476,17 @@ test("stdin reaches the guest process, and close ends it", async (t) => {
   await stream.close();
   assert.equal(await readAll(stream), "hello through the probe");
   assert.deepEqual(await stream.done, { kind: "exited", code: 0 });
+});
+
+test("a checkout read fits the probe's stream request and comes back through it", async (t) => {
+  const { client } = await streaming(t);
+  const repo = await mkdtemp(join(tmpdir(), "nexus-probe-checkout-"));
+  t.after(() => rm(repo, { recursive: true }));
+  await writeFile(join(repo, "app.txt"), "one\n");
+  await promisify(execFile)("git", ["-C", repo, "init", "-q"]);
+  const reader = checkoutReader((request) => client.stream(pylonId, request), repo);
+  assert.deepEqual(await reader.list(""), { path: "", entries: [{ name: ".git", kind: "dir", size: null }, { name: "app.txt", kind: "file", size: 4 }], truncated: false });
+  assert.equal((await reader.read("app.txt")).toString(), "one\n");
 });
 
 test("a process that closes its stdin still delivers its output and exit code", async (t) => {
