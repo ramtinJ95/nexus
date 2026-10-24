@@ -193,7 +193,7 @@ test("the sidebar lists every project's threads with their state, folds the arch
     const sidebar = sidebarOf((await s.call("GET", path)).text);
     // Threads started in the same millisecond have no order between them.
     assert.deepEqual(sidebar.rows.toSorted(), ["agent working Write docs now", "archived Old spike now", "deleted Gone now", "running Fix checkout now"], `${path} lists the threads`);
-    assert.match(sidebar.text, /^acme 1 Fix checkout now 1 archived, 1 deleted (Gone now Old spike now|Old spike now Gone now) beta 1 Write docs now$/);
+    assert.match(sidebar.text, /^acme main Fix checkout now 1 archived, 1 deleted (Gone now Old spike now|Old spike now Gone now) beta main Write docs now$/);
   }
   const page = (await s.call("GET", `/threads/${fix.id}`)).text;
   assert.equal(sidebarOf(page).active, fix.id);
@@ -263,7 +263,7 @@ test("the thread page shows its pylon, sessions with how to attach, previews as 
   assert.equal(textOf(outputs), "Outputs 3 branch nexus/fix-checkout diff abc1234 file out-1", "web's preview is listed once, under Previews");
 
   const strip = textOf(res.text.split('id="strip"')[1]!.split("</div>")[0]!.replace(/^[^>]*>/, ""));
-  assert.equal(strip, "running · rj-firebat api, starting web ↗ 3 outputs", "the phone's strip names the pylon, each preview and the outputs");
+  assert.equal(strip, "running · rj-firebat api, starting web ↗ Changes 3 outputs", "the phone's strip names the pylon, each preview, the changes and the outputs");
 
 
   assert.match(res.text, new RegExp(`<main[^>]* data-activity="${fix.id}"`), "an open thread page records the visit as human activity");
@@ -271,6 +271,19 @@ test("the thread page shows its pylon, sessions with how to attach, previews as 
   s.registry.releasePreviews(fix.pylonId);
   const released = sectionOf((await s.call("GET", `/threads/${fix.id}`)).text, "outputs-h");
   assert.equal(textOf(released), "Outputs 4 branch nexus/fix-checkout diff abc1234 file out-1 preview web", "a preview the control plane no longer has stays an output");
+});
+
+test("the inspector's tabs pick the changes, the previews or the pylon, and the changes are the client's to read", async (t) => {
+  const s = await seeded(t);
+  const fix = await s.start("acme", "Fix checkout");
+  s.observe(fix);
+  const page = (await s.call("GET", `/threads/${fix.id}`)).text;
+  assert.deepEqual([...page.matchAll(/<input type="radio" name="pane" value="([a-z]+)"( checked)?>/g)].map((m) => [m[1], m[2] !== undefined]), [["changes", true], ["previews", false], ["pylon", false]], "the changes are picked first");
+  const regions = page.split('<div class="pane-live" id="inspect" data-live>')[1]!.split("</aside>")[0]!;
+  assert.ok(regions.includes('id="pane-previews"') && regions.includes('id="pane-pylon"'), "the previews and the pylon refresh with the page");
+  assert.ok(!regions.includes('id="pane-changes"') && page.includes(`<section class="ipane" id="pane-changes" aria-labelledby="changes-h" data-thread="${fix.id}">`), "no refresh replaces what the client read");
+  assert.match(page, /<div id="facts" data-live hidden><span data-pylon="running" data-turn="false" data-agent-at="0" data-thread-status="(active|idle)"><\/span><\/div>/, "the client learns when the pylon runs and a turn ends");
+  assert.match(page, /<div class="tabs" id="tabs" role="tablist" aria-label="Open views" data-thread="[^"]+"><button type="button" class="tab active" role="tab" aria-selected="true" aria-controls="scroll" data-tab="convo">.*Fix checkout<\/span><\/button><\/div>/, "the conversation is the first tab");
 });
 
 test("the inspector lists each listening port once: under Ports with an Open button until it has a preview, then under Previews", async (t) => {
@@ -343,17 +356,17 @@ test("a published preview whose service failed shows failed, with why and no lin
     return { previews: textOf(section), strip, linked: section.includes(`href="${url}"`) };
   };
   s.observeWith({ services: [web("ready")], listening: [8003] }, fix);
-  assert.deepEqual(await page(), { previews: "Previews 1 web Open ↗ rj-firebat.tail.ts.net:8443", strip: "running · rj-firebat web ↗ 0 outputs", linked: true });
+  assert.deepEqual(await page(), { previews: "Previews 1 web Open ↗ rj-firebat.tail.ts.net:8443", strip: "running · rj-firebat web ↗ Changes 0 outputs", linked: true });
 
   s.observeWith({ services: [web("failed")] }, fix);
   assert.deepEqual(await page(), {
     previews: "Previews 1 web failed rj-firebat.tail.ts.net:8443 the service web failed. `nexus service logs web` in the pylon shows why",
-    strip: "running · rj-firebat web, failed 0 outputs",
+    strip: "running · rj-firebat web, failed Changes 0 outputs",
     linked: false,
   }, "the gateway can only answer 502 for it");
 });
 
-test("tool calls are one-line rows where only failures and edits start open, with the exit code and the edit's diff", async (t) => {
+test("a run of tool calls folds into a line that says what it did, over rows where only failures and edits start open", async (t) => {
   const s = await seeded(t);
   const fix = await s.start("acme", "Fix checkout");
   const long = Array.from({ length: 40 }, (_, i) => `ok ${i + 1} test`).join("\n");
@@ -375,8 +388,10 @@ test("tool calls are one-line rows where only failures and edits start open, wit
   assert.deepEqual(rows, [
     "You Run the tests",
     "Running them with npm test .",
+    "Ran a command ›",
     `› bash npm test 40 lines ✓ npm test ${long.replace(/\n/g, " ")}`,
     "One more.",
+    "Ran a command, edited a file, read a file 1 failed ›",
     "› bash git status 2 lines exit 128 git status fatal: not a git repository Command exited with code 128",
     "› edit src/a.ts +1 −2 ✓ src/a.ts − const a = 1; − const b = 2; + const a = 2;",
     `› read src/b.ts no result src/b.ts { "offset": 10 } No output.`,
@@ -385,10 +400,10 @@ test("tool calls are one-line rows where only failures and edits start open, wit
     "You Look at this [image/png image]",
     "All 40 pass.",
   ]);
-  assert.deepEqual(open, [["tool-c1", false], ["tool-c2", true], ["tool-c3", true], ["tool-c4", false]], "only the failure and the edit start open");
+  assert.deepEqual(open, [["steps-c1", false], ["tool-c1", false], ["steps-c2", true], ["tool-c2", true], ["tool-c3", true], ["tool-c4", false]], "only a fold with a failure, the failure and the edit start open");
 });
 
-test("a long run of tool calls folds into one line that names its steps, and opens itself for a failure", async (t) => {
+test("a fold counts each kind of call, a file once however often it is read, and opens itself for a failure", async (t) => {
   const s = await seeded(t);
   const fix = await s.start("acme", "Fix checkout");
   const transcript = s.fake.transcript(fix.id);
@@ -400,11 +415,12 @@ test("a long run of tool calls folds into one line that names its steps, and ope
   transcript.messages.push(assistant([{ type: "text", text: "Now the rest." }, bash("c1", "ls"), bash("c2", "pwd"), bash("c3", "id")]), result("c1", "a"), result("c2", "b"), result("c3", "c"));
 
   const { rows, open } = conversationOf((await s.call("GET", `/threads/${fix.id}`)).text);
-  assert.equal(rows[1], "› 5 steps · read total.ts, searched applyCoupon, ran npm test, read cart.ts");
-  assert.equal(rows[8], "› 5 steps · read total.ts, searched applyCoupon, ran npm test, read cart.ts · 1 failed");
+  assert.equal(rows[1], "Read 2 files, searched, ran 2 commands ›");
+  assert.equal(rows[8], "Read 2 files, searched, ran 2 commands 1 failed ›");
   assert.equal(rows[14], "Now the rest.");
-  assert.equal(rows[15], "› bash ls 1 line ✓ ls a", "three calls in a row stay as rows");
-  assert.deepEqual(open.filter(([id]) => String(id).startsWith("steps-")), [["steps-a1", false], ["steps-b1", true]], "a fold with a failure starts open");
+  assert.equal(rows[15], "Ran 3 commands ›");
+  assert.equal(rows[16], "› bash ls 1 line ✓ ls a");
+  assert.deepEqual(open.filter(([id]) => String(id).startsWith("steps-")), [["steps-a1", false], ["steps-b1", true], ["steps-c1", false]], "a fold with a failure starts open");
   assert.deepEqual(open.filter(([id]) => ["tool-b4", "tool-a4"].includes(String(id))), [["tool-a4", false], ["tool-b4", true]]);
 });
 
@@ -424,12 +440,13 @@ test("a running turn shows its tool's output so far, the partial answer, queued 
   const { rows, open, dock } = conversationOf(html);
   assert.deepEqual(rows, [
     "You Build it",
+    "Ran a command 1 running ›",
     "› bash npm run build 1 line running npm run build compiling",
     "Half an ans",
     "! The model request failed and will be retried: overloaded",
     "You queued, sends after this run then deploy",
   ]);
-  assert.deepEqual(open, [["tool-c1", true]]);
+  assert.deepEqual(open, [["steps-c1", true], ["tool-c1", true]]);
   assert.match(dock, /^The agent is working\. 1m 1[2-3]s · 1 tool this turn · new messages queue Abort gpt-test ⌘↵ to queue Queue$/);
   assert.match(html, /placeholder="Queue a follow-up…"/);
 });
@@ -451,7 +468,7 @@ test("a thread page's stream sends its conversation, then only the text that gre
   const stream = s.events(`/threads/${fix.id}/stream`);
   const first = await stream.next();
   assert.ok(page.includes(`data-stream="/threads/${fix.id}/stream">${first.convo}</div></div>`), "the first event is the region the page holds");
-  assert.deepEqual(conversationOf(`<div id="convo" ${first.convo}<div class="dock"></main>`).rows.slice(1), ["› bash npm run build 1 line running npm run build compiling", "Hal"]);
+  assert.deepEqual(conversationOf(`<div id="convo" ${first.convo}<div class="dock"></main>`).rows.slice(1), ["Ran a command 1 running ›", "› bash npm run build 1 line running npm run build compiling", "Hal"]);
 
   transcript.docs["pi.live"] = live("Half an <answer>", "compiling\nlinking\n");
   s.fake.commit(fix.id);
@@ -465,7 +482,7 @@ test("a thread page's stream sends its conversation, then only the text that gre
   transcript.docs["pi.live"] = {};
   s.fake.commit(fix.id);
   const done = await stream.next();
-  assert.deepEqual(conversationOf(`<div id="convo" ${done.convo}<div class="dock"></main>`).rows.slice(1), ["› bash npm run build 1 line ✓ npm run build built", "Built."], "a finished call and a committed answer send the region whole");
+  assert.deepEqual(conversationOf(`<div id="convo" ${done.convo}<div class="dock"></main>`).rows.slice(1), ["Ran a command ›", "› bash npm run build 1 line ✓ npm run build built", "Built."], "a finished call and a committed answer send the region whole");
   assert.doesNotMatch(done.convo, /data-grow/);
   stream.close();
 });
@@ -620,7 +637,8 @@ test("a tool call's expanded body shows its whole command, path or pattern", asy
   const body = (id: string) => /<pre class="t-full">([^<]*)<\/pre>/.exec(html.split(`id="tool-${id}"`)[1]!)![1]!;
   assert.equal(body("c1"), command.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;"), "the multiline command is whole and escaped");
   assert.equal(body("c2"), "a|b&lt;c&gt;");
-  assert.equal(conversationOf(html).rows[1], `› grep a|b<c> 1 line ✓ a|b<c> { "path": "src" } src/a.ts:1`);
+  assert.equal(conversationOf(html).rows[0], "Ran a command, searched ›");
+  assert.equal(conversationOf(html).rows[2], `› grep a|b<c> 1 line ✓ a|b<c> { "path": "src" } src/a.ts:1`);
 });
 
 test("the start dialog's projects refresh with the page, so a project added elsewhere can be picked", async (t) => {
@@ -691,7 +709,7 @@ test("the new-project form adds the project nexus project add would, and the API
   const added = await add("acme", node);
   assert.equal(added.status, 201, added.text);
   assert.deepEqual(JSON.parse(added.text), project("acme"), "the same project as the CLI's defaults");
-  assert.equal(sidebarOf((await s.call("GET", "/")).text).text, "acme 0", "the sidebar lists it");
+  assert.equal(sidebarOf((await s.call("GET", "/")).text).text, "acme main", "the sidebar lists it with its branch");
 
   const refusal = (res: Reply) => [res.status, (JSON.parse(res.text) as { error: string }).error];
   assert.deepEqual(refusal(await add("acme", node)), [409, "project acme exists"]);
