@@ -20,7 +20,7 @@ import { effectiveAllowedHosts, gitUrl, linkedName, liveHashOf, reservedPorts, w
 import type { CommandResult, NodeName, ProbeClient, ProbeError, PylonCommand, PylonId, TailnetNodeId } from "../protocol.ts";
 import type { ConversationView, ConversationWatch, EntryRecord, JsonObject } from "@earendil-works/pi-durable";
 import type { HarnessHost } from "../harness/host.ts";
-import type { ImageId, ImageManifest } from "../images.ts";
+import { pinsSchema, type ImageId, type ImageManifest } from "../images.ts";
 import type { Whois } from "../tailscale.ts";
 import { newPylonRecord } from "../tick.ts";
 import type { NodeRecord, Output, PortRange, Preview, Registry, Session, Thread, ThreadId } from "./registry.ts";
@@ -172,10 +172,7 @@ const messageSchema = z.strictObject({
 const imageSchema = z.strictObject({
   id: z.string().regex(/^img-[0-9a-f]{12}$/).transform((id) => id as ImageId),
   gondolinBuildId: z.string().min(1),
-  pins: z.strictObject({
-    debianDigest: z.string(), node: z.string(), nodeSha256: z.string(), claudeCode: z.string(), pi: z.string(), herdr: z.string(),
-    piEnv: z.string(), piEnvSha256: z.string(), gondolin: z.string(), alpineKernel: z.string(), dotfilesCommon: z.string(),
-  }),
+  pins: pinsSchema,
   builtOn: z.string().min(1).transform((node) => node as NodeName),
   builtAt: z.string().min(1),
   sha256: z.string().regex(/^[0-9a-f]{64}$/),

@@ -42,7 +42,10 @@ const post = async (method: string, path: string, body: unknown) => {
 const image = "img-0123456789ab";
 await post("POST", "/v1/images", {
   id: image, gondolinBuildId: "b1", builtOn: online, builtAt: "2027-01-01T00:00:00Z", sha256: "a".repeat(64),
-  pins: { debianDigest: "d", node: "24.22.1", nodeSha256: "n", claudeCode: "c", pi: "p", herdr: "h", piEnv: "e", piEnvSha256: "s", gondolin: "0.13.0", alpineKernel: "k", dotfilesCommon: "f" },
+  pins: {
+    debianDigest: `sha256:${"d".repeat(64)}`, node: "24.22.1", nodeSha256: "e".repeat(64), claudeCode: "c", pi: "p", herdr: "h", piEnv: "e",
+    piEnvSha256: "f".repeat(64), gondolin: "0.13.0", alpineKernel: "k", dotfilesCommon: "f", gh: "2.103.2", ghSha256: "a".repeat(64),
+  },
 });
 await post("PUT", "/v1/images/current", { image });
 

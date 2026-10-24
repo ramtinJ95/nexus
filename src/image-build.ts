@@ -20,7 +20,7 @@ import { createHttpHooks, parseBuildConfig, verifyAssets, VM, type AlpineConfig,
 import { z } from "zod";
 import { artifactArchive, manifestFiles } from "./artifacts.ts";
 import { JobFailure } from "./backend.ts";
-import { imageIdOf, type ImageId, type ImageManifest, type ImageRecipe } from "./images.ts";
+import { imageIdOf, pinsSchema, type ImageId, type ImageManifest, type ImageRecipe } from "./images.ts";
 import type { NodeName } from "./protocol.ts";
 
 export const pylonRecipeDir = fileURLToPath(new URL("../images/pylon/", import.meta.url));
@@ -29,20 +29,6 @@ const imageManifestFile = manifestFiles.image;
 
 /** build.sh only runs a build. pins.json becomes ImageRecipe.pins. */
 const notRecipeFiles = new Set(["build.sh", "pins.json"]);
-
-const pinsSchema = z.strictObject({
-  debianDigest: z.string().regex(/^sha256:[0-9a-f]{64}$/),
-  node: z.string().regex(/^\d+\.\d+\.\d+$/),
-  nodeSha256: z.string().regex(/^[0-9a-f]{64}$/),
-  claudeCode: z.string().min(1),
-  pi: z.string().min(1),
-  herdr: z.string().min(1),
-  piEnv: z.string().min(1),
-  piEnvSha256: z.string().regex(/^[0-9a-f]{64}$/),
-  gondolin: z.string().min(1),
-  alpineKernel: z.string().min(1),
-  dotfilesCommon: z.string().min(1),
-}) satisfies z.ZodType<ImageRecipe["pins"]>;
 
 /** Every file under `dir` except build.sh, sorted by path, and pins.json parsed. */
 export async function loadImageRecipe(dir: string = pylonRecipeDir): Promise<ImageRecipe> {
@@ -87,6 +73,8 @@ function dockerBuildArgs(pins: ImageRecipe["pins"]): Record<string, string> {
     PI_ENV_VERSION: pins.piEnv,
     PI_ENV_SHA256: pins.piEnvSha256,
     DOTFILES_COMMIT: pins.dotfilesCommon,
+    GH_VERSION: pins.gh,
+    GH_SHA256: pins.ghSha256,
   };
 }
 
@@ -104,8 +92,8 @@ function dockerBuildArgs(pins: ImageRecipe["pins"]): Record<string, string> {
  * 4. Smoke boot at 4 GiB (2 GiB hangs): plain exec PATH and CA, `user` with a setuid sudo that prints no
  *    warning and the hostname pylon, which resolves through /etc/hosts, the exact pinned versions of node,
  *    claude, pi, herdr and pi-env and the nexus CLI's declared version as user, sshd and sandboxssh, Herdr's
- *    pi integration with its own resume turned off, curl and Node fetch to an allowed host through TLS
- *    interception, tini reaping an orphan it adopts as subreaper, and a Herdr server as user. Any failure is
+ *    pi integration with its own resume turned off, gh at its pin answering git's credential requests from
+ *    GH_TOKEN, curl and Node fetch to an allowed host through TLS interception, tini reaping an orphan it adopts as subreaper, and a Herdr server as user. Any failure is
  *    setup-failed and publishes nothing.
  * 5. Write image.json, then rename outDir.partial to outDir.
  * A crash leaves only outDir.partial, which the next attempt removes. An existing outDir is the finished
@@ -421,6 +409,12 @@ export function smokeChecks(recipe: ImageRecipe): readonly SmokeCheck[] {
       name: "guest tools",
       argv: asUser("command -v ssh sshd sandboxssh rg fd; grep -c '^Include /etc/ssh/ssh_config.d/\\*.conf' /etc/ssh/ssh_config; herdr integration status | grep -E '^(pi|claude):'"),
       expect: /^\/usr\/bin\/ssh\n\/usr\/sbin\/sshd\n\/usr\/bin\/sandboxssh\n\/usr\/bin\/rg\n\/usr\/local\/bin\/fd\n1\npi: current[^\n]*\nclaude: current/,
+    },
+    {
+      // gh's version line carries a release date that the pin does not know. The token is read when git asks.
+      name: "gh and git credentials",
+      argv: asUser("gh --version | head -n 1; printf 'protocol=https\\nhost=github.com\\n\\n' | GIT_TERMINAL_PROMPT=0 GH_TOKEN=nexus-smoke git credential fill"),
+      expect: new RegExp(`^gh version ${literal(pins.gh)} \\(\\d{4}-\\d{2}-\\d{2}\\)\\n(?:[^\\n]*\\n)*password=nexus-smoke\\n$`),
     },
     {
       name: "Herdr leaves resume to Nexus",
