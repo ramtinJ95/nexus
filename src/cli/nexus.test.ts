@@ -93,7 +93,10 @@ async function setup(t: TestContext) {
   let caller: TailnetNodeId = laptop;
   /** What the node's probe answers a guest command with. Tests replace it. */
   let answer = async (command: PylonCommand): Promise<CommandResult> =>
-    command.kind === "unlink-port" ? { kind: "unlink-port", refused: null } : { kind: "link-port", service: `port-${(command as { port: number }).port}` };
+    command.kind === "unlink-port" ? { kind: "unlink-port", refused: null }
+    : command.kind === "open-session" ? { kind: "open-session", herdrPane: "w1:p1" }
+    : command.kind === "close-session" ? { kind: "close-session" }
+    : { kind: "link-port", service: `port-${(command as { port: number }).port}` };
   const commands: PylonCommand[] = [];
   const fake = fakeHarness();
   const options = (port: number) => ({
@@ -427,6 +430,72 @@ test("unpreview unpublishes a port, waits for a paused pylon to run, and fails w
   await fails(["unpreview", thread.id, "3000"], 5);
   await s.json(["delete", thread.id]);
   await fails(["unpreview", thread.id, "3000"], 5);
+});
+
+test("session open opens Claude Code by default, waits for a paused pylon, and session close closes a pane", async (t) => {
+  const s = await setup(t);
+  const thread: Thread = await s.json(["start", "--project", "acme", "--title", "sessions"]);
+  assert.deepEqual(await s.json(["session", "open", thread.id]), { herdrPane: "w1:p1", harness: "claude-code", title: "claude-code" });
+  assert.equal((await s.nexus(["session", "open", thread.id, "--harness", "pi", "--title", "plan"])).stdout,
+    `Opened pi session "plan" in pane w1:p1 of ${thread.id}. \`nexus attach ${thread.id}\` attaches to it.\n`);
+  assert.deepEqual(s.commands, [{ kind: "open-session", harness: "claude-code", title: "claude-code" }, { kind: "open-session", harness: "pi", title: "plan" }]);
+
+  let refusals = 2;
+  s.probeAnswers(async () => {
+    if (refusals-- > 0) throw Object.assign(new Error("rj-firebat: pylon-x is stopped, not running"), { code: "not-running" });
+    return { kind: "close-session" };
+  });
+  s.commands.length = 0;
+  assert.equal(await s.json(["session", "close", thread.id, "w1:p1"]), null, "a paused pylon is woken and asked again until it runs");
+  assert.deepEqual(s.commands, Array(3).fill({ kind: "close-session", herdrPane: "w1:p1" }));
+
+  assert.equal((await s.nexus(["session", "open", thread.id, "--harness", "codex"])).code, 64);
+  assert.equal((await s.nexus(["session", "close", thread.id])).code, 64);
+  await s.json(["archive", thread.id]);
+  s.commands.length = 0;
+  const archived = await s.nexus(["session", "open", thread.id]);
+  assert.equal(archived.code, 5);
+  assert.match(archived.stderr, /is archived, so its pylon stays paused/);
+  assert.deepEqual(s.commands, []);
+});
+
+test("attach wakes the pylon, waits until it runs, and runs ssh to its node through the CLI's proxy, or the configured command", async (t) => {
+  const s = await setup(t);
+  const bin = join(s.home, "bin");
+  await mkdir(bin);
+  const ran = join(s.home, "ran");
+  // A fake ssh that records its arguments, one to a line.
+  await writeFile(join(bin, "ssh"), `#!/bin/sh\nprintf '%s\\n' "$@" > '${ran}'\n`, { mode: 0o755 });
+  const path = { PATH: `${bin}:${process.env.PATH}` };
+  const thread: Thread = await s.json(["start", "--project", "acme", "--title", "attach"]);
+  await new Promise((resolve) => setTimeout(resolve, 5));
+  const before = Date.now();
+
+  const attaching = s.nexus(["attach", thread.id], path);
+  await new Promise((resolve) => setTimeout(resolve, 1500));
+  assert.ok(s.registry.thread(thread.id)!.lastHumanActivityAt >= before, "attaching is human activity, which wakes the pylon");
+  observeRunning(s, thread, [], []);
+  const attached = await attaching;
+  assert.equal(attached.code, 0, attached.stderr);
+  assert.deepEqual((await readFile(ran, "utf8")).trimEnd().split("\n"),
+    ["-t", "-o", `ProxyCommand=nc -X 5 -x 127.0.0.1:${s.proxy.port} %h %p`, "rj-firebat.tail.ts.net", "nexus-attach", thread.pylonId]);
+
+  assert.equal((await s.nexus(["attach", thread.id, "--socks", "none"], path)).code, 0);
+  assert.deepEqual((await readFile(ran, "utf8")).trimEnd().split("\n"), ["-t", "rj-firebat.tail.ts.net", "nexus-attach", thread.pylonId], "without a proxy, plain ssh");
+
+  const custom = `printf '%s %s %s %s' "$NEXUS_THREAD" "$NEXUS_PYLON" "$NEXUS_NODE" "$NEXUS_NODE_HOST" > '${ran}'`;
+  assert.equal((await s.nexus(["attach", thread.id], { ...path, NEXUS_ATTACH: custom })).code, 0);
+  assert.equal(await readFile(ran, "utf8"), `${thread.id} ${thread.pylonId} rj-firebat rj-firebat.tail.ts.net`);
+  await mkdir(join(s.home, ".config", "nexus"), { recursive: true });
+  await writeFile(join(s.home, ".config", "nexus", "cli.json"), JSON.stringify({ attach: "exit 3" }));
+  const failed = await s.nexus(["attach", thread.id], path);
+  assert.equal(failed.code, 1, "the config's command runs, and its failure is the CLI's");
+  assert.match(failed.stderr, /attaching to th-[0-9a-f]+ on rj-firebat failed: sh exited 3/);
+
+  await s.json(["archive", thread.id]);
+  const archived = await s.nexus(["attach", thread.id], path);
+  assert.equal(archived.code, 5);
+  assert.match(archived.stderr, /is archived, so its pylon stays paused. `nexus unarchive/);
 });
 
 test("watch prints the backlog, then each new entry and state change, and ends when the thread is deleted", async (t) => {

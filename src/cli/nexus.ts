@@ -3,6 +3,7 @@
  * integrations, which shell out to it. docs/cli.md is the contract: the commands, their JSON, the exit codes and
  * the watch stream. --json prints the API's reply as it is, except where docs/cli.md says otherwise.
  */
+import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { homedir } from "node:os";
@@ -12,13 +13,13 @@ import { parseArgs, type ParseArgsOptionsConfig } from "node:util";
 import { z } from "zod";
 import type { ImageContent, Message, TextContent } from "@earendil-works/pi-ai";
 import type { ConversationView, EntryRecord, InboxState, LiveState } from "@earendil-works/pi-durable";
-import type { ListeningPort, NodeSummary, ThreadDetail, ThreadRow, ViewFrame } from "../control/api.ts";
+import type { ListeningPort, NodeSummary, OpenedSession, ThreadDetail, ThreadRow, ViewFrame } from "../control/api.ts";
 import type { Preview, Thread } from "../control/registry.ts";
 import type { Project } from "../project.ts";
 import type { ActualState } from "../reconcile.ts";
 import { call, CliError, exitCodes, follow, type Endpoint, type HostPort } from "./transport.ts";
 
-const version = "0.4.0";
+const version = "0.5.0";
 const defaults = { url: "http://rj-firebat.tailc817d3.ts.net:7470", socks: "localhost:1055" };
 const configFile = () => join(homedir(), ".config", "nexus", "cli.json");
 
@@ -30,6 +31,9 @@ const usage = `nexus ${version}, the Nexus control plane from this Mac
   nexus preview <thread> <port> [--wait]       publish a port as a preview, and print its URL
   nexus unpreview <thread> <port>              stop publishing a port that preview published
   nexus conversation <thread>                  the agent's transcript
+  nexus session open <thread> [--harness claude-code|pi|shell] [--title T]
+  nexus session close <thread> <pane>
+  nexus attach <thread>                        a terminal on the pylon's Herdr sessions, over ssh to its node
   nexus start --project P [--title T] [--message M] [--node N] [--branch B] [--commit C]
   nexus send <thread> <text...> [--steer] [--request-id ID]
   nexus watch <thread> [--interval MS]
@@ -43,6 +47,7 @@ const usage = `nexus ${version}, the Nexus control plane from this Mac
 
 Every command takes --json, --url URL and --socks HOST:PORT|none. The URL and proxy come from those flags,
 then NEXUS_URL and NEXUS_SOCKS, then ${configFile()}, then ${defaults.url} through ${defaults.socks}.
+attach runs ssh to the node through the same proxy, or NEXUS_ATTACH, or the config's "attach", with sh.
 `;
 
 type Values = Record<string, string | boolean | string[] | undefined>;
@@ -51,11 +56,17 @@ type Api = (method: string, path: string, body?: unknown) => Promise<unknown>;
 type Follow = (path: string, onEvent: (data: unknown) => void, signal: AbortSignal) => Promise<void>;
 /** What a command prints: its JSON for --json, its text otherwise. */
 interface Result { json: unknown; text: string }
+/** What a command that runs a program on this Mac, as attach does, needs beyond the API. */
+interface Local {
+  socks: HostPort | null;
+  /** The attach command that replaces ssh's, run with sh. */
+  attach: string | null;
+}
 interface Command {
   args: readonly [min: number, max: number];
   options?: ParseArgsOptionsConfig;
   /** Nothing when the command printed its own output, as watch does. */
-  run(api: Api, args: readonly string[], values: Values, follow: Follow): Promise<Result | void>;
+  run(api: Api, args: readonly string[], values: Values, follow: Follow, local: Local): Promise<Result | void>;
 }
 
 const str = (v: Values, key: string) => v[key] as string | undefined;
@@ -170,23 +181,54 @@ async function served(api: Api, id: string, port: number): Promise<Preview> {
 }
 
 /**
- * Unlinking needs the pylon running. Each try is human activity, so the first wakes a paused pylon, and a 409 is
- * tried again once a second until the pylon runs, unless the thread is archived or deleted.
+ * Sends a request that needs the pylon running, such as an unlink or a session open. Each try is human activity, so
+ * the first wakes a paused pylon, and a 409 is tried again once a second until the pylon runs, unless the thread is
+ * archived or deleted. `undone` says what the failure after the wait leaves undone.
  */
-async function unpublish(api: Api, id: string, port: number): Promise<void> {
+async function whenRunning<T>(api: Api, id: string, send: () => Promise<T>, undone: string): Promise<T> {
   const deadline = Date.now() + waitMs;
   for (;;) {
     try {
-      await api("DELETE", `${thread(id)}/previews/${port}`, {});
-      return;
+      return await send();
     } catch (err) {
       if (!(err instanceof CliError) || err.kind !== "conflict") throw err;
       const { status } = (await api("GET", thread(id)) as ThreadDetail).thread;
       if (status === "archived" || status === "deleted") throw err;
-      if (Date.now() >= deadline) throw new CliError("failed", `the pylon of ${id} did not run within ${waitMs / 1000} s, so port ${port} is still published. ${err.message}`);
+      if (Date.now() >= deadline) throw new CliError("failed", `the pylon of ${id} did not run within ${waitMs / 1000} s, so ${undone}. ${err.message}`);
     }
     await sleep(waitPollMs);
   }
+}
+
+/**
+ * Wakes the pylon and waits until it runs, then runs ssh to its node with a terminal, or the configured attach
+ * command, and returns once the person detaches. Recording activity first counts the attach as human presence
+ * until the node's next read, which counts the attached terminal itself.
+ */
+async function attach(api: Api, id: string, local: Local): Promise<void> {
+  const deadline = Date.now() + waitMs;
+  let d = await api("GET", thread(id)) as ThreadDetail;
+  // An archived thread's pylon pauses even while a terminal is attached.
+  if (d.thread.status === "archived") throw new CliError("conflict", `thread ${id} is archived, so its pylon stays paused. \`nexus unarchive ${id}\` wakes it`);
+  if (d.thread.status === "deleted") throw new CliError("conflict", `thread ${id} is deleted`);
+  await api("POST", `${thread(id)}/activity`, { kind: "human" });
+  while (d.pylon.actualState !== "running") {
+    if (d.pylon.actualState === "failed") throw new CliError("failed", `the pylon of ${id} failed: ${d.pylon.failed ?? "no reason given"}`);
+    if (Date.now() >= deadline) throw new CliError("failed", `the pylon of ${id} did not run within ${waitMs / 1000} s. It is ${d.pylon.actualState}`);
+    await sleep(waitPollMs);
+    d = await api("GET", thread(id)) as ThreadDetail;
+  }
+  const { id: pylon, node } = d.pylon;
+  const host = (await api("GET", "/v1/nodes") as NodeSummary[]).find((n) => n.name === node)?.tailnetHost;
+  if (host === undefined) throw new CliError("failed", `the control plane lists no node ${node}`);
+  const [command, args] = local.attach !== null ? ["sh", ["-c", local.attach]]
+    : ["ssh", ["-t", ...local.socks === null ? [] : ["-o", `ProxyCommand=nc -X 5 -x ${local.socks.host}:${local.socks.port} %h %p`], host, "nexus-attach", pylon]];
+  const code = await new Promise<number>((resolve, reject) => {
+    const child = spawn(command, args, { stdio: "inherit", env: { ...process.env, NEXUS_THREAD: id, NEXUS_PYLON: pylon, NEXUS_NODE: node, NEXUS_NODE_HOST: host } });
+    child.once("error", (err) => reject(new CliError("failed", `${command} could not start: ${err.message}`)));
+    child.once("exit", (exit) => resolve(exit ?? 1));
+  });
+  if (code !== 0) throw new CliError("failed", `attaching to ${id} on ${node} failed: ${command} exited ${code}`);
 }
 
 const threadRow = (t: ThreadRow) => [t.id, t.status, t.agentTurnRunning ? "working" : "-", `pylon ${t.pylon.actualState}`, t.project, ago(t.createdAt), t.title];
@@ -447,7 +489,7 @@ const commands: Readonly<Record<string, Command>> = {
     args: [2, 2],
     async run(api, [id, given]) {
       const port = portArg(given!);
-      await unpublish(api, id!, port);
+      await whenRunning(api, id!, () => api("DELETE", `${thread(id!)}/previews/${port}`, {}), `port ${port} is still published`);
       return { json: null, text: `Unpublished port ${port} of ${id}.` };
     },
   },
@@ -456,6 +498,28 @@ const commands: Readonly<Record<string, Command>> = {
     async run(api, [id]) {
       const view = await api("GET", `${thread(id!)}/conversation`) as ConversationView;
       return { json: view, text: conversationText(view) };
+    },
+  },
+  "session open": {
+    args: [1, 1],
+    options: { harness: { type: "string" }, title: { type: "string" } },
+    async run(api, [id], v) {
+      const body = Object.fromEntries((["harness", "title"] as const).flatMap((key) => v[key] === undefined ? [] : [[key, v[key]]]));
+      const opened = await whenRunning(api, id!, () => api("POST", `${thread(id!)}/sessions`, body), "no session was opened") as OpenedSession;
+      return { json: opened, text: `Opened ${opened.harness} session ${JSON.stringify(opened.title)} in pane ${opened.herdrPane} of ${id}. \`nexus attach ${id}\` attaches to it.` };
+    },
+  },
+  "session close": {
+    args: [2, 2],
+    async run(api, [id, pane]) {
+      await whenRunning(api, id!, () => api("DELETE", `${thread(id!)}/sessions/${encodeURIComponent(pane!)}`, {}), `pane ${pane} is still open`);
+      return { json: null, text: `Closed pane ${pane} of ${id}.` };
+    },
+  },
+  attach: {
+    args: [1, 1],
+    async run(api, [id], _, __, local) {
+      await attach(api, id!, local);
     },
   },
   start: {
@@ -542,7 +606,7 @@ const commands: Readonly<Record<string, Command>> = {
   },
 };
 
-const configSchema = z.strictObject({ url: z.string().optional(), socks: z.string().optional() });
+const configSchema = z.strictObject({ url: z.string().optional(), socks: z.string().optional(), attach: z.string().optional() });
 
 async function readConfig(file: string): Promise<z.infer<typeof configSchema>> {
   let text: string;
@@ -564,9 +628,10 @@ async function readConfig(file: string): Promise<z.infer<typeof configSchema>> {
 }
 
 /** Each setting from its flag, then the environment, then the config file, then the default. */
-async function endpoint(v: Values): Promise<Endpoint> {
+async function settings(v: Values): Promise<{ endpoint: Endpoint; attach: string | null }> {
   const config = await readConfig(configFile());
   const env = (name: string) => process.env[name] || undefined;
+  const attach = env("NEXUS_ATTACH") ?? config.attach ?? null;
   const url = str(v, "url") ?? env("NEXUS_URL") ?? config.url ?? defaults.url;
   const socks = str(v, "socks") ?? env("NEXUS_SOCKS") ?? config.socks ?? defaults.socks;
   let parsed: URL;
@@ -576,7 +641,7 @@ async function endpoint(v: Values): Promise<Endpoint> {
     throw new CliError("invalid", `the control plane URL ${url} is not a URL`);
   }
   if (parsed.protocol !== "http:") throw new CliError("invalid", `the control plane URL ${url} must be http://, which is what the API serves on the tailnet`);
-  return { url: parsed, socks: socks === "none" ? null : hostPort(socks) };
+  return { endpoint: { url: parsed, socks: socks === "none" ? null : hostPort(socks) }, attach };
 }
 
 function hostPort(value: string): HostPort {
@@ -588,7 +653,7 @@ function hostPort(value: string): HostPort {
 const globalOptions: ParseArgsOptionsConfig = { json: { type: "boolean" }, url: { type: "string" }, socks: { type: "string" } };
 
 async function run(argv: readonly string[]): Promise<void> {
-  // `project add` is the one command of two words.
+  // `project add` and `session open` and `close` are the commands of two words.
   const twoWords = Object.hasOwn(commands, `${argv[0]} ${argv[1]}`);
   const name = twoWords ? `${argv[0]} ${argv[1]}` : argv[0];
   const rest = argv.slice(twoWords ? 2 : 1);
@@ -605,9 +670,9 @@ async function run(argv: readonly string[]): Promise<void> {
   if (positionals.length < min || positionals.length > max) {
     throw new CliError("invalid", `${name} takes ${min === max ? min : max === Infinity ? `at least ${min}` : `${min} to ${max}`} argument${max === 1 ? "" : "s"}, got ${positionals.length}`);
   }
-  const target = await endpoint(values);
+  const { endpoint: target, attach } = await settings(values);
   const result = await command.run((method, path, body) => call(target, method, path, body), positionals, values,
-    (path, onEvent, signal) => follow(target, path, onEvent, signal));
+    (path, onEvent, signal) => follow(target, path, onEvent, signal), { socks: target.socks, attach });
   if (result !== undefined) process.stdout.write(`${values.json === true ? JSON.stringify(result.json, null, 2) : result.text}\n`);
 }
 
