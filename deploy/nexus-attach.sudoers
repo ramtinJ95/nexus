@@ -1,0 +1,4 @@
+# Installed by deploy/install-probe.sh as /etc/sudoers.d/nexus-attach. Members of nexus-attach may run
+# nexus-attach as the probe's user, which alone may use the pylons' control sockets. Add a person with
+# `sudo usermod --append --groups nexus-attach <user>`.
+%nexus-attach ALL=(nexus) NOPASSWD: /usr/local/bin/nexus-attach
