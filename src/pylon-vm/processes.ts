@@ -89,8 +89,11 @@ export class GuestProcesses {
 		}
 	>();
 	private vm: VM;
-	constructor(vm: VM) {
+	/** Aborted when the controller stops, which ends every status wait and file operation so the stop can settle it (runtime.ts). */
+	private stopping: AbortSignal;
+	constructor(vm: VM, stopping: AbortSignal) {
 		this.vm = vm;
+		this.stopping = stopping;
 	}
 	async launch(
 		cmd: string,
@@ -101,7 +104,7 @@ export class GuestProcesses {
 		const handle = randomUUID();
 		const path = `${root}/${handle}`;
 		await checked(this.vm, `mkdir -p ${q(path)}; chmod 700 ${q(path)}`);
-		await this.vm.fs.writeFile(`${path}/worker.py`, worker);
+		await this.vm.fs.writeFile(`${path}/worker.py`, worker, { signal: this.stopping });
 		await checked(
 			this.vm,
 			`python3 -c ${q("import subprocess,sys; subprocess.Popen(sys.argv[1:],stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,start_new_session=True)")} python3 ${q(`${path}/worker.py`)} ${q(cmd)} ${q(cwd)} ${q(path)} ${q(String(cleanup))} ${q(String(deadlineSeconds))}`,
@@ -111,6 +114,7 @@ export class GuestProcesses {
 			if (await guestExists(this.vm, `${path}/done`)) {
 				const output = await this.vm.fs.readFile(`${path}/output`, {
 					encoding: "utf8",
+					signal: this.stopping,
 				});
 				await checked(this.vm, `rm -rf ${q(path)}`);
 				throw new Error(`Guest command could not start: ${output}`);
@@ -125,7 +129,7 @@ export class GuestProcesses {
 			.int()
 			.positive()
 			.parse(
-				Number(await this.vm.fs.readFile(`${path}/pid`, { encoding: "utf8" })),
+				Number(await this.vm.fs.readFile(`${path}/pid`, { encoding: "utf8", signal: this.stopping })),
 			);
 		this.commands.set(handle, {
 			path,
@@ -173,6 +177,7 @@ export class GuestProcesses {
 			return { pid, running: false, output: "", ...command.final };
 		const deadline = Date.now() + timeoutMs;
 		while (true) {
+			this.stopping.throwIfAborted();
 			if (this.commands.get(pid) !== command)
 				throw new Error(
 					"Command status expired. Completed handles retain status for 128 commands",
@@ -202,12 +207,13 @@ export class GuestProcesses {
 							JSON.parse(
 								await this.vm.fs.readFile(`${command.path}/done`, {
 									encoding: "utf8",
+									signal: this.stopping,
 								}),
 							),
 						)
 					: undefined;
 				const bytes = (await guestExists(this.vm, `${command.path}/output`))
-					? Buffer.from(await this.vm.fs.readFile(`${command.path}/output`))
+					? Buffer.from(await this.vm.fs.readFile(`${command.path}/output`, { signal: this.stopping }))
 					: Buffer.alloc(0);
 				let output =
 					bytes.length > command.offset
@@ -249,7 +255,7 @@ export class GuestProcesses {
 			.catch(() => {})
 			.then(async () => {
 				if (command.final) return { pid, killRequested: false, running: false };
-				await this.vm.fs.writeFile(`${command.path}/kill`, "kill\n");
+				await this.vm.fs.writeFile(`${command.path}/kill`, "kill\n", { signal: this.stopping });
 				return { pid, killRequested: true };
 			});
 		command.cursor = kill;

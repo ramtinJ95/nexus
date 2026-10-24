@@ -87,12 +87,13 @@ export const stagingRoot = "/var/lib/pi-sandbox/staging";
 export async function writeFiles(
 	vm: VM,
 	files: readonly GuestFile[],
+	signal: AbortSignal,
 ): Promise<void> {
 	if (files.length === 0) return;
 	const staging = `${stagingRoot}/${randomUUID()}`;
 	await checked(vm, `mkdir -p ${q(staging)}; chmod 700 ${q(staging)}`);
 	for (const [i, file] of files.entries())
-		await vm.fs.writeFile(`${staging}/${i}`, file.content);
+		await vm.fs.writeFile(`${staging}/${i}`, file.content, { signal });
 	const install = files.map((file, i) => {
 		const owner = q(file.owner);
 		const dir = q(posix.dirname(file.path));

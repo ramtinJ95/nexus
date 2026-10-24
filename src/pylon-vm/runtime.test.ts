@@ -1,10 +1,12 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import type { SandboxRecord } from "./contracts.ts";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import type { Action, BootSpec, SandboxRecord } from "./contracts.ts";
+import { access, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { setTimeout as delay } from "node:timers/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { readIntent, reportResume, setupMarkerOf, setupOnDisk, setupState } from "./runtime.ts";
+import { fakeVm, type WritePhase } from "./fake-vm.ts";
+import { readIntent, reportResume, SandboxRuntime, setupMarkerOf, setupOnDisk, setupState } from "./runtime.ts";
 
 type Status = Awaited<ReturnType<Parameters<typeof reportResume>[0]["status"]>>;
 
@@ -83,4 +85,110 @@ test("an instance whose intent predates the disk marker boots as its intent said
 	assert.deepEqual(setupState(true, setupMarkerOf(record, undefined), record, ran.setupRan), { done: {}, mark: false });
 	assert.deepEqual(await intentOf({ prepare: true }), { prepare: true });
 	await assert.rejects(intentOf({ prepare: false, fresh: "yes" }));
+});
+
+/** A running instance on a fake VM whose file writes to paths `holds` names hold in `phase`. */
+async function runningOnAFakeVm(t: { after(fn: () => Promise<void>): void }, holds: RegExp, phase: WritePhase) {
+	const dir = await mkdtemp(join(tmpdir(), "runtime-stop-"));
+	t.after(() => rm(dir, { recursive: true, force: true }));
+	const fake = fakeVm((path) => (holds.test(path) ? phase : undefined));
+	const record = { name: "pylon-a", createdAt: "2027-01-01T00:00:00.000Z", config: { diskGiB: 8, workspace: "/workspace" } } as SandboxRecord;
+	const spec = { resources: { cpus: 2, memoryGiB: 4 } } as BootSpec;
+	return { dir, fake, runtime: new SandboxRuntime(dir, record, spec, { vm: fake.vm, settleMs: 300 }) };
+}
+const staged = /^\/var\/lib\/pi-sandbox\/staging\//;
+const file = { path: "/home/user/notes.md", owner: "user", mode: 0o644, content: "notes\n" };
+const writeFiles = { action: "write-files", name: "pylon-a", files: [file] } as Action;
+const settles = (work: Promise<unknown>, ms: number) =>
+	Promise.race([work.then(() => "settled", () => "settled"), delay(ms, "still waiting")]);
+
+test("a stop refuses a file write still waiting for its turn, and then checkpoints", async (t) => {
+	const { dir, fake, runtime } = await runningOnAFakeVm(t, staged, "queued");
+	const writing = runtime.handle(writeFiles);
+	void writing.catch(() => {});
+	await fake.holding("/0");
+	assert.equal(((await runtime.stop()) as { state: string }).state, "stopped");
+	await assert.rejects(writing, /operation aborted/, "the write-files was refused, so none of its files were installed");
+	assert.equal(fake.checkpoints.length, 1);
+	await access(join(dir, "disk.qcow2"));
+});
+
+test("a stop refuses a file write still sending its data, and then checkpoints", async (t) => {
+	const { fake, runtime } = await runningOnAFakeVm(t, staged, "sending");
+	const writing = runtime.handle(writeFiles);
+	void writing.catch(() => {});
+	await fake.holding("/0");
+	assert.equal(((await runtime.stop()) as { state: string }).state, "stopped");
+	await assert.rejects(writing, /operation aborted/);
+	assert.equal(fake.checkpoints.length, 1);
+});
+
+test("a stop whose file write is answered within the wait checkpoints with the write installed", async (t) => {
+	const { fake, runtime } = await runningOnAFakeVm(t, staged, "answering");
+	const writing = runtime.handle(writeFiles);
+	void writing.catch(() => {});
+	await fake.holding("/0");
+	const stop = runtime.stop();
+	fake.answer();
+	assert.equal(((await stop) as { state: string }).state, "stopped");
+	assert.deepEqual(await writing, { paths: ["/home/user/notes.md"] });
+	assert.equal(fake.checkpoints.length, 1);
+});
+
+test("a stop never checkpoints under a file write that still awaits the guest's answer, and closes the VM", async (t) => {
+	const { fake, runtime } = await runningOnAFakeVm(t, staged, "answering");
+	const writing = runtime.handle(writeFiles);
+	void writing.catch(() => {});
+	await fake.holding("/0");
+	await assert.rejects(runtime.stop(), /Stop failed before its checkpoint completed/);
+	assert.deepEqual(fake.checkpoints, [], "a checkpoint would keep a half-installed write");
+	assert.deepEqual(fake.closed, ["vm"]);
+	await assert.rejects(writing, /sandbox closed/, "the close ended the write, so its request does not hang");
+});
+
+test("a stop under a command's kill write that holds the file slot closes the VM at its deadline, not behind the write", async (t) => {
+	const { fake, runtime } = await runningOnAFakeVm(t, /\/kill$/, "answering");
+	const { pid } = (await runtime.handle({ action: "exec", name: "pylon-a", cmd: "sleep 600", timeoutMs: 0 } as Action)) as { pid: string };
+	const killing = runtime.handle({ action: "exec-kill", name: "pylon-a", pid } as Action);
+	void killing.catch(() => {});
+	await fake.holding("/kill");
+	const stop = runtime.stop();
+	void stop.catch(() => {});
+	assert.equal(await settles(stop, 2_000), "settled", "the stop's guest commands queued behind the write, for up to 40 s each");
+	await assert.rejects(stop, /Stop failed before its checkpoint completed/);
+	assert.deepEqual(fake.checkpoints, []);
+	await assert.rejects(killing, /sandbox closed/);
+});
+
+/** Opens the guest terminal, a real listener on the host, and closes it after the test even when the code under test does not. */
+async function openTerminal(runtime: SandboxRuntime, t: { after(fn: () => Promise<void>): void }) {
+	await runtime.handle({ action: "shell", name: "pylon-a", user: "user" } as Action);
+	t.after(async () => void (await runtime.handle({ action: "destroy", name: "pylon-a", confirm: "pylon-a" } as Action)));
+}
+
+test("a stop that closes the VM at its deadline first closes the guest terminal, which the VM's close would wait on", async (t) => {
+	const { fake, runtime } = await runningOnAFakeVm(t, staged, "answering");
+	await openTerminal(runtime, t);
+	const writing = runtime.handle(writeFiles);
+	void writing.catch(() => {});
+	await fake.holding("/0");
+	await assert.rejects(runtime.stop(), /Stop failed before its checkpoint completed/);
+	assert.deepEqual(fake.closed, ["ssh", "vm"]);
+});
+
+test("a stop whose status cannot be saved still closes the guest terminal before the VM", async (t) => {
+	const { dir, fake, runtime } = await runningOnAFakeVm(t, staged, "answering");
+	await openTerminal(runtime, t);
+	// Renaming the saved status onto a directory fails, as a full disk would.
+	await mkdir(join(dir, "status.json"));
+	await assert.rejects(runtime.stop(), /Stop failed before its checkpoint completed/);
+	assert.deepEqual(fake.closed, ["ssh", "vm"]);
+});
+
+test("a failed controller whose status cannot be saved still closes the guest terminal and the VM", async (t) => {
+	const { dir, fake, runtime } = await runningOnAFakeVm(t, staged, "answering");
+	await openTerminal(runtime, t);
+	await mkdir(join(dir, "status.json"));
+	await assert.rejects(runtime.fail(new Error("the guest stopped answering")));
+	assert.deepEqual(fake.closed, ["ssh", "vm"]);
 });
