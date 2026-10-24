@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { openRegistry, type StoredPylon, type Thread, type ThreadId } from "./registry.ts";
 import { newPylonRecord } from "../tick.ts";
-import type { JobId, LiveHash, NodeName, NodeObservation, PylonId, TailnetNodeId } from "../protocol.ts";
+import type { JobId, LiveHash, NodeName, NodeObservation, PylonId, ServiceFact, TailnetNodeId } from "../protocol.ts";
 import type { ProjectId, RemoteProject } from "../project.ts";
 import type { ImageManifest, TemplateRecord } from "../images.ts";
 
@@ -297,7 +297,7 @@ test("released ports go to the next pylon that asks, and readiness marks only th
   assert.deepEqual(portsOf(registry, next), ["web 10200"]);
 });
 
-test("a published preview is not ready while its running pylon reports its service failed", async (t) => {
+test("a published preview is ready only while its running pylon reports its service ready, or does not list it", async (t) => {
   const registry = seeded(tempDb());
   t.after(() => registry.close());
   registry.allocatePreviews(pylonId, ["api", "web"], ports);
@@ -307,9 +307,12 @@ test("a published preview is not ready while its running pylon reports its servi
     node, observedAt: "2027-01-01T00:00:00Z", probeBootId: "b", capacity: { memoryGiB: 64, committedMemoryGiB: 8, diskFreeGiB: 400 },
     artifacts: [], jobs: [], pylons: [observed], previewRoutes: [],
   }, []);
-  const running = (webState: "ready" | "failed") => observe({
+  const running = (webState: ServiceFact["state"] | null) => observe({
     pylonId, phase: "running", liveHash: null, bootedAt: "2027-01-01T00:00:00Z", bootedFrom: { image: image.id, checkpoint: null },
-    services: [{ name: "api", state: "ready", port: 8080, declared: true, wantsPreview: true }, { name: "web", state: webState, port: 8003, declared: true, wantsPreview: true }],
+    services: [
+      { name: "api", state: "ready", port: 8080, declared: true, wantsPreview: true },
+      ...webState === null ? [] : [{ name: "web", state: webState, port: 8003, declared: true, wantsPreview: true }],
+    ],
     listening: [], previews: [], sessions: [], git: null, declaredOutputs: [], attachedClients: 0,
   });
   const states = () => registry.previews(pylonId).map((p) => [p.service, p.ready, p.failed]);
@@ -318,6 +321,12 @@ test("a published preview is not ready while its running pylon reports its servi
   assert.deepEqual(states(), [["api", true, null], ["web", false, "the service web failed. `nexus service logs web` in the pylon shows why"]]);
   running("ready");
   assert.deepEqual(states(), [["api", true, null], ["web", true, null]], "a restarted service's preview is ready again");
+  running("starting");
+  assert.deepEqual(states(), [["api", true, null], ["web", false, null]], "a starting service's URL answers 502 until it is ready");
+  running("stopped");
+  assert.deepEqual(states(), [["api", true, null], ["web", false, null]]);
+  running(null);
+  assert.deepEqual(states(), [["api", true, null], ["web", true, null]], "a service the read does not list is ready once published");
   running("failed");
   observe({ pylonId, phase: "stopped", checkpoint: null });
   assert.deepEqual(states(), [["api", true, null], ["web", true, null]], "a stopped pylon's services are not known to have failed");

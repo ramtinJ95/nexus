@@ -337,7 +337,7 @@ const shellQuote = (value: string): string => `'${value.replaceAll("'", `'\\''`)
 function pylonGuide(o: PylonOverlay): string {
   const list = (items: readonly string[]): string => items.map((item) => `- ${item}\n`).join("");
   const previews = o.previews.length === 0
-    ? "No previews are published yet. `nexus services ensure --json` starts the services in .nexus/services.yaml and prints their URLs, and `nexus preview <port>` publishes a port that is already listening.\n"
+    ? "No previews are published yet. Nexus starts the services .nexus/services.yaml declares and publishes their previews on its own, `nexus services ensure --json` starts them now and prints the URLs, and `nexus preview <port>` publishes a port that is already listening.\n"
     : `Each preview is reachable from the human's tailnet devices:\n\n${list(o.previews.map((p) => `${p.service}: ${p.url}`))}`;
   const logins = o.logins.length === 0
     ? "This project has no interactive logins.\n"
@@ -387,8 +387,10 @@ nexus output list
 ${logins}
 ## Services
 
+Nexus starts each service .nexus/services.yaml declares, one you add within seconds and one with a preview once its URL is assigned. A running service keeps its command and env until \`nexus service restart\`.
+
 \`\`\`sh
-nexus services ensure --json               # start what .nexus/services.yaml declares, wait for health and preview URLs
+nexus services ensure --json               # start them now, wait for health and preview URLs
 nexus service logs web --lines 200
 nexus service restart web
 nexus service start storybook --command "pnpm storybook --port \\$PORT" --preview

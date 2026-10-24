@@ -13,6 +13,7 @@ import { join } from "node:path";
 import { PassThrough, Readable } from "node:stream";
 import { createPylonVmBackend, type PylonVmBackendOptions } from "./pylon-vm-backend.ts";
 import { identityOf } from "./pylon-vm/identity.ts";
+import { pylonGuest } from "./pylon-vm/pylon-guest.ts";
 import type { BootInputs } from "./project.ts";
 import type { BrokenCause, PylonId } from "./protocol.ts";
 import type { ImageId, TemplateBuildInputs, TemplateId, TemplateManifest } from "./images.ts";
@@ -320,6 +321,33 @@ test("service facts come from the controller's supervisor, a list starts nothing
     { action: "services", op: "status", service: "web" },
     { action: "preview", port: 6006, title: "Storybook" },
     { action: "service-start", service: "web", command: "npm run dev", cwd: ".", port: 8000, env: {}, preview: true, previews: [], timeoutMs: 30000 },
+  ]);
+});
+
+test("ensure, restart and service-start answer once each service they were answered about is ready or failed, from status reads, and a list does not wait", async () => {
+  const fact = (name: string, state: string) => ({ name, state, port: name === "api" ? 8001 : 8000, declared: true, wantsPreview: true });
+  const actions: Record<string, unknown>[] = [];
+  let reads: [string, string][] = [];
+  const guest = pylonGuest("pylon-wait" as PylonId, scratch, async ({ name: _, ...action }) => {
+    actions.push(action);
+    // Every status lists every service and a linked port, which a wait leaves out.
+    if (action.op === "status") return [...reads.shift()!.map((state, i) => fact(["api", "web"][i]!, state)), fact("port-6006", "ready")];
+    // An ensure or restart of web answers about the api it references too.
+    return action.action === "service-start" ? [fact("web", "starting")] : [fact("api", "starting"), fact("web", "starting")];
+  });
+  reads = [["starting", "starting"], ["failed", "ready"]];
+  assert.deepEqual(await guest.services("ensure"), { services: [fact("api", "failed"), fact("web", "ready")] });
+  reads = [["starting", "ready"], ["ready", "ready"]];
+  assert.deepEqual(await guest.services("restart", "web"), { services: [fact("api", "ready"), fact("web", "ready")] }, "the dependency is waited for after web is ready");
+  reads = [["ready", "failed"]];
+  assert.deepEqual(await guest.startService("web", { command: "serve", port: 8000, preview: true }), [fact("web", "failed")]);
+  reads = [["starting", "starting"]];
+  assert.equal((await guest.services("list")).services[0]!.state, "starting");
+  assert.deepEqual(actions.map((a) => [a.action, a.op ?? null, a.service ?? null]), [
+    ["services", "ensure", null], ["services", "status", null], ["services", "status", null],
+    ["services", "restart", "web"], ["services", "status", null], ["services", "status", null],
+    ["service-start", null, "web"], ["services", "status", null],
+    ["services", "status", null],
   ]);
 });
 

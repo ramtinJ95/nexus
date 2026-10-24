@@ -49,8 +49,15 @@ export class GuestServices {
 	private declaredNames = new Set<string>();
 	/** What each service was last started with, as envKey gives it. A stop removes it. */
 	private wanted = new Map<string, string>();
-	/** Why the last start of a service failed. Cleared by the next start that succeeds, or a stop. */
+	/** Why the last start of a service failed. Cleared by the next start, or a stop. */
 	private failures = new Map<string, string>();
+	/** Services stopped on purpose, which a new public URL does not start. A start clears it. */
+	private held = new Set<string>();
+	/**
+	 * The start whose readiness is being watched, per service. A later start, a stop or a close replaces or drops it,
+	 * which ends that watch without a verdict.
+	 */
+	private watches = new Map<string, object>();
 	private vm: VM;
 	private dir: string;
 	readonly configPath: string;
@@ -348,13 +355,22 @@ export class GuestServices {
 			return `unresolved: ${(error as Error).message}`;
 		}
 	}
-	/** A failure is recorded and logged, not thrown, so one service never stops the others or the boot. */
+	/**
+	 * Launches the service and returns without waiting for it to answer: its readiness is watched in the background,
+	 * and it fails once `timeoutMs` passes without health. Every caller holds the controller's lifecycle queue, which a
+	 * health wait would hold for as long. A failure is recorded and logged, not thrown, so one service never stops the
+	 * others or the boot.
+	 */
 	private async start(
 		name: string,
 		entry: Entry,
 		timeoutMs: number,
 	): Promise<void> {
 		this.wanted.set(name, this.envKey(name, entry));
+		this.held.delete(name);
+		this.failures.delete(name);
+		const watch = {};
+		this.watches.set(name, watch);
 		try {
 			const { env, url } = this.environment(name, entry);
 			await startService(
@@ -371,36 +387,55 @@ export class GuestServices {
 				},
 				url,
 			);
-			const deadline = Date.now() + timeoutMs;
-			while (!(await this.healthy(name, entry))) {
+		} catch (error) {
+			this.watches.delete(name);
+			this.failed(name, error);
+			return;
+		}
+		void this.watch(name, entry, watch, Date.now() + timeoutMs);
+	}
+	private async watch(name: string, entry: Entry, watch: object, deadline: number): Promise<void> {
+		const current = () => this.watches.get(name) === watch;
+		try {
+			while (current() && !(await this.healthy(name, entry))) {
 				if (Date.now() >= deadline)
 					throw new Error(
 						`Service ${name} started but is not responding. Read logs, then restart or stop it`,
 					);
 				await new Promise((accept) => setTimeout(accept, 200));
 			}
-			this.failures.delete(name);
 		} catch (error) {
-			const message = error instanceof Error ? error.message : String(error);
-			this.failures.set(name, message);
-			console.log(`services: ${name} failed: ${message}`);
+			if (current()) this.failed(name, error);
+		} finally {
+			if (current()) this.watches.delete(name);
 		}
 	}
+	private failed(name: string, error: unknown): void {
+		const message = error instanceof Error ? error.message : String(error);
+		this.failures.set(name, message);
+		console.log(`services: ${name} failed: ${message}`);
+	}
 	private async stop(name: string): Promise<void> {
+		this.watches.delete(name);
 		await stopService(this.vm, name);
 		this.wanted.delete(name);
 		this.failures.delete(name);
 	}
 	/**
 	 * Restarts each service that was asked to run and whose env the new URLs change, such as one that started
-	 * before its preview was assigned. A service stopped on purpose stays stopped.
+	 * before its preview was assigned, and starts each declared one that has not been, such as one declared while
+	 * the pylon ran, which waited for its preview's URL. A service stopped on purpose stays stopped.
 	 */
 	async setPublicUrls(urls: Record<string, string>): Promise<void> {
 		this.publicUrls = urls;
 		for (const [name, entry] of this.entries) {
 			const before = this.wanted.get(name);
-			if (before === undefined || before === this.envKey(name, entry)) continue;
-			await stopService(this.vm, name);
+			if (before === undefined) {
+				if (!entry.declared || this.held.has(name)) continue;
+			} else {
+				if (before === this.envKey(name, entry)) continue;
+				await stopService(this.vm, name);
+			}
 			await this.start(name, entry, entry.service.timeoutMs);
 		}
 	}
@@ -424,6 +459,7 @@ export class GuestServices {
 					await this.stop(name);
 					await entry.portal?.close();
 					this.entries.delete(name);
+					this.held.delete(name);
 					delete this.assignments[name];
 				}
 			}
@@ -456,8 +492,19 @@ export class GuestServices {
 				await this.start(name, entry, entry.service.timeoutMs);
 			}
 		} else if (op === "stop")
-			for (const name of names) await this.stop(name);
-		// Only a configured service has a port. A declared one that no ensure has reached yet is not reported.
+			for (const name of names) {
+				await this.stop(name);
+				this.held.add(name);
+			}
+		else
+			for (const name of names) {
+				if (this.entries.has(name) || !this.declaredNames.has(name)) continue;
+				// A service declared since the last ensure gets its port, route and portal now, so it is reported and
+				// its preview can be assigned. One with a preview starts once its URL arrives (setPublicUrls). One
+				// without needs nothing more, and no spawn would follow to start it, so it starts here.
+				const entry = await this.configure(name, config[name]!, true);
+				if (!wantsPreview(entry.service)) await this.start(name, entry, entry.service.timeoutMs);
+			}
 		const facts = await Promise.all(
 			names.flatMap((name) => {
 				const entry = this.entries.get(name);
@@ -467,6 +514,7 @@ export class GuestServices {
 		if (selected) return facts;
 		return [...facts, ...(await Promise.all([...this.attached.keys()].map((port) => this.linkedFact(port))))];
 	}
+	/** A start that is being watched is starting even once its process has exited, until its watch fails it. */
 	private async fact(name: string, entry: Entry): Promise<ServiceFact> {
 		const running = await serviceRunning(this.vm, name);
 		const state =
@@ -474,7 +522,7 @@ export class GuestServices {
 				? "ready"
 				: this.failures.has(name)
 					? "failed"
-					: running
+					: running || this.watches.has(name)
 						? "starting"
 						: "stopped";
 		return {
@@ -527,6 +575,7 @@ export class GuestServices {
 		return [...this.entries.keys()];
 	}
 	async close(): Promise<void> {
+		this.watches.clear();
 		for (const entry of this.entries.values()) {
 			await entry.portal?.close();
 			entry.portal = undefined;

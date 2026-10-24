@@ -5,6 +5,7 @@
  */
 import { readFileSync } from "node:fs";
 import { appendFile } from "node:fs/promises";
+import { setTimeout as delay } from "node:timers/promises";
 import { join } from "node:path";
 import { z } from "zod";
 import type { Guest } from "../backend.ts";
@@ -59,10 +60,32 @@ const logsReplySchema = z.object({ output: z.string() });
 const linkReplySchema = z.object({ service: z.string() });
 const unlinkReplySchema = z.object({ refused: z.string().nullable() });
 const loopback = /^http:\/\/127\.0\.0\.1:\d+$/;
+/**
+ * How long ensure, restart and service-start wait for the services they started: the longest `timeoutMs` a
+ * service may declare (contracts.ts), and a margin for its last health check. The controller fails each start
+ * that outlasts its own timeout, so a service still starting after this went unhealthy after it was ready.
+ */
+const readyWaitMs = 130_000;
+const readyPollMs = 250;
 
 /** `run` sends an action to the instance's controller, and `dir` is the instance directory. */
 export function pylonGuest(pylonId: PylonId, dir: string, run: (action: Record<string, unknown>) => Promise<unknown>): Guest {
 	const name = pylonId;
+	/**
+	 * The controller only launches a service and watches its readiness itself, so that no health wait holds its
+	 * lifecycle queue. A caller of ensure, restart or service-start still gets each service it was answered about,
+	 * the dependencies an ensure of one service started included, ready or failed, from status reads that queue
+	 * between other actions.
+	 */
+	async function ready(facts: z.infer<typeof factsSchema>) {
+		const started = new Set(facts.map((fact) => fact.name));
+		const deadline = Date.now() + readyWaitMs;
+		while (facts.some((fact) => fact.state === "starting") && Date.now() < deadline) {
+			await delay(readyPollMs);
+			facts = factsSchema.parse(await run({ action: "services", name, op: "status" })).filter((fact) => started.has(fact.name));
+		}
+		return facts;
+	}
 	return {
 		async exec(argv, { cwd, timeoutMs }) {
 			const deadline = Date.now() + timeoutMs;
@@ -104,7 +127,8 @@ export function pylonGuest(pylonId: PylonId, dir: string, run: (action: Record<s
 		async services(op, service, lines) {
 			if (op !== "logs") {
 				const forkOp = op === "list" ? "status" : op;
-				return { services: factsSchema.parse(await run({ action: "services", name, op: forkOp, ...(service === undefined ? {} : { service }) })) };
+				const facts = factsSchema.parse(await run({ action: "services", name, op: forkOp, ...(service === undefined ? {} : { service }) }));
+				return { services: op === "ensure" || op === "restart" ? await ready(facts) : facts };
 			}
 			if (service === undefined) throw new Error("service logs needs the service's name");
 			const { output } = logsReplySchema.parse(await run({ action: "logs", name, service, ...(lines === undefined ? {} : { lines }) }));
@@ -112,7 +136,7 @@ export function pylonGuest(pylonId: PylonId, dir: string, run: (action: Record<s
 		},
 
 		async startService(service, decl) {
-			return factsSchema.parse(await run({ action: "service-start", name, service, ...decl }));
+			return ready(factsSchema.parse(await run({ action: "service-start", name, service, ...decl })));
 		},
 
 		async linkPort(port, title) {
