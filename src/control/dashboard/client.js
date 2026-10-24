@@ -1,7 +1,8 @@
 // The dashboard's only script. Pages are rendered on the server. This file sends actions, messages and new projects
 // to the JSON API, records a visit as human activity, opens the start and new-project dialogs and the phone's panels,
 // and polls the page to swap in each `data-live` region that changed. A thread page also follows its stream, which
-// sends the conversation region as the run streams.
+// sends the conversation region as the run streams, and reads its checkout's changes into the inspector, opening
+// each changed file's diff as a tab beside the conversation.
 "use strict";
 
 const main = document.querySelector("main");
@@ -51,9 +52,18 @@ const served = new Map([...document.querySelectorAll("[data-live]")].map((el) =>
 // The folds the reader opened or closed. The rest follow the server, so a fold that opened for a running step
 // closes once the step is done.
 const toggled = new Map();
+// The projects the reader folded in the sidebar stay folded on every page.
+const foldedKey = "nexus.folded";
+const folded = new Set(JSON.parse(localStorage.getItem(foldedKey) ?? "[]"));
+for (const id of folded) toggled.set(id, false);
 document.addEventListener("click", (event) => {
   const details = event.target instanceof Element ? event.target.closest("summary")?.parentElement : null;
-  if (details instanceof HTMLDetailsElement && details.id !== "") toggled.set(details.id, !details.open);
+  if (!(details instanceof HTMLDetailsElement) || details.id === "") return;
+  toggled.set(details.id, !details.open);
+  if (!details.classList.contains("group")) return;
+  if (details.open) folded.add(details.id);
+  else folded.delete(details.id);
+  localStorage.setItem(foldedKey, JSON.stringify([...folded]));
 });
 
 const atBottom = (el) => el.scrollHeight - el.scrollTop - el.clientHeight < 48;
@@ -106,6 +116,7 @@ function swap(regions) {
   restoreScroll();
   applyFilter();
   tick();
+  noticeFacts();
 }
 
 // While the stream is open it alone writes the conversation, so a poll that started before a frame cannot put
@@ -267,6 +278,7 @@ document.addEventListener("click", (event) => {
   const opener = target?.closest("[data-open]");
   if (opener !== null && opener !== undefined) {
     setOpen(document.body.dataset.open === opener.dataset.open ? null : opener.dataset.open);
+    if (opener.dataset.pane !== undefined) pickPane(opener.dataset.pane);
     return;
   }
   const closer = target?.closest("[data-close]");
@@ -444,7 +456,8 @@ document.addEventListener("keydown", (event) => {
   }
 });
 
-// A filter shows the archived threads it matches, and folds them away again once it is cleared.
+// A filter shows the threads it matches in folded projects and archived folds, and folds them away again once it
+// is cleared.
 const openedByFilter = new Set();
 function applyFilter() {
   const query = filter?.value.trim().toLowerCase() ?? "";
@@ -452,7 +465,7 @@ function applyFilter() {
     for (const row of group.querySelectorAll("li")) {
       row.hidden = query !== "" && !row.querySelector(".row-title").textContent.toLowerCase().includes(query);
     }
-    for (const fold of group.querySelectorAll("details.archived")) {
+    for (const fold of [group, ...group.querySelectorAll("details.archived")]) {
       const matched = query !== "" && fold.querySelector("li:not([hidden])") !== null;
       if (matched && !fold.open) { fold.open = true; openedByFilter.add(fold.id); }
       if (!matched && openedByFilter.delete(fold.id)) fold.open = false;
@@ -477,6 +490,365 @@ document.addEventListener("click", (event) => {
   setTimeout(() => { button.textContent = "Copy"; }, 1500);
 });
 
+// The inspector's tab the reader picked last, on every thread page.
+const paneKey = "nexus.pane";
+function pickPane(pane) {
+  const radio = document.querySelector(`.seg-bar input[value="${CSS.escape(pane)}"]`);
+  if (radio === null) return;
+  radio.checked = true;
+  localStorage.setItem(paneKey, pane);
+}
+document.addEventListener("change", (event) => {
+  if (event.target instanceof HTMLInputElement && event.target.matches(".seg-bar input")) localStorage.setItem(paneKey, event.target.value);
+});
+
+/** Markup built from the pylon's checkout. Its paths and diffs are the guest's, so they only ever go in as text. */
+function el(tag, props = {}, ...children) {
+  const node = Object.assign(document.createElement(tag), props);
+  node.append(...present(children));
+  return node;
+}
+/** The children that are there, so a child given as `cond && el(...)` is left out rather than written as "false". */
+const present = (children) => children.filter((c) => c !== null && c !== false && c !== undefined);
+// A template's icons are in its content, outside the document.
+const iconOf = (name) => document.getElementById("icons").content.querySelector(`.i-${name}`).cloneNode(true);
+const statusLetter = { added: "A", modified: "M", deleted: "D", renamed: "R", copied: "C", typechange: "T" };
+const badge = (status) => el("span", { className: `badge badge-${status}`, title: status, textContent: statusLetter[status] });
+/** +12 −3, or nothing for a binary file. */
+const counts = (additions, deletions) => additions === null ? el("span", { className: "dim small", textContent: "binary" })
+  : el("span", { className: "lines" }, el("span", { className: "add", textContent: `+${additions}` }), " ", el("span", { className: "del", textContent: `−${deletions}` }));
+
+// A thread page's checkout: the changes in the inspector, and the diff tabs beside the conversation. Each read
+// reaches into the pylon and wakes it if it sleeps, so the changes are read when the pylon runs and a turn of its
+// agent ends, when the reader asks, and never on a paused pylon unless the reader says to wake it.
+const changesPane = document.getElementById("pane-changes");
+const thread = changesPane?.dataset.thread;
+const baseKey = "nexus.base";
+const checkout = {
+  base: localStorage.getItem(baseKey) === "head" ? "head" : "start",
+  /** The last reply, kept so a fold the reader closed and the open tabs survive a read. */
+  changes: null,
+  /** Whether the reader asked to wake a paused pylon to read it, so the read happens once it runs. */
+  wanted: false,
+  /** Tree folders the reader closed. */
+  closed: new Set(),
+  facts: null,
+};
+const factsNow = () => {
+  const span = document.querySelector("#facts span");
+  return span === null ? null : { pylon: span.dataset.pylon, turn: span.dataset.turn === "true", agentAt: span.dataset.agentAt, status: span.dataset.threadStatus };
+};
+const baseLabel = () => checkout.base === "head" ? "Since the last commit" : "Since the pylon booted";
+
+function showChanges(...nodes) {
+  document.getElementById("changes-body")?.replaceChildren(...present(nodes));
+}
+
+/** Why the changes cannot be read now, with a button to wake the pylon when that is what it takes. */
+function changesUnreadable(facts) {
+  if (facts.status === "deleted") return showChanges(el("p", { className: "empty", textContent: "The thread is deleted, so its checkout is gone." }));
+  if (facts.status === "archived") return showChanges(el("p", { className: "empty", textContent: "An archived thread's pylon stays paused, so its changes can't be read. Unarchive the thread to read them." }));
+  if (checkout.wanted) return showChanges(el("p", { className: "empty", textContent: "Waking the pylon. Its changes show once it runs." }));
+  const wake = el("button", { type: "button", className: "btn btn-xs", textContent: "Wake and read" });
+  wake.addEventListener("click", () => { void readChanges(true); });
+  showChanges(el("p", { className: "empty", textContent: `The pylon is ${facts.pylon}. Reading its changes wakes it.` }), wake);
+}
+
+const canRead = (facts) => facts.pylon === "running" && (facts.status === "active" || facts.status === "idle");
+
+let reading = null;
+/**
+ * Reads the changes into the inspector. A paused pylon is read only when the reader asked to wake it, and then
+ * again once the page shows it running, as the first read only wakes it.
+ */
+async function readChanges(wake = false) {
+  const facts = factsNow();
+  if (thread === undefined || facts === null) return;
+  if (facts.status !== "active" && facts.status !== "idle") return changesUnreadable(facts);
+  if (facts.pylon !== "running") {
+    if (!wake && !checkout.wanted) return changesUnreadable(facts);
+    checkout.wanted = true;
+  }
+  if (reading !== null) return reading;
+  const base = checkout.base;
+  if (checkout.changes === null) showChanges(el("p", { className: "empty", textContent: facts.pylon === "running" ? "Reading the changes…" : "Waking the pylon…" }));
+  reading = (async () => {
+    try {
+      const changes = await api("GET", `/v1/threads/${thread}/changes?base=${base}`);
+      checkout.wanted = false;
+      if (base !== checkout.base) return;
+      checkout.changes = changes;
+      // An open tab takes the file's new counts, and keeps its place when the file is no longer changed.
+      openTabs = openTabs.map((tab) => changes.files.find((f) => f.path === tab.path) ?? tab);
+      renderChanges();
+      renderTabs();
+      if (activeTab !== null) void readDiff(activeTab);
+    } catch (err) {
+      if (base !== checkout.base) return;
+      // A paused pylon answers 409 while the read wakes it.
+      if (err.status === 409 && checkout.wanted && factsNow()?.pylon !== "running") return changesUnreadable(factsNow());
+      checkout.changes = null;
+      showChanges(el("p", { className: "error", textContent: err.message }));
+    } finally {
+      reading = null;
+    }
+  })();
+  await reading;
+  // The reader switched the base while the read was out, so the switch's read runs now.
+  if (base !== checkout.base) return readChanges();
+}
+
+/** A tree of the changed files, with each folder that holds only one folder merged into it, as src/checkout. */
+function treeOf(files) {
+  const root = { dirs: new Map(), files: [] };
+  for (const file of files) {
+    const parts = file.path.split("/");
+    let dir = root;
+    for (const part of parts.slice(0, -1)) {
+      if (!dir.dirs.has(part)) dir.dirs.set(part, { dirs: new Map(), files: [] });
+      dir = dir.dirs.get(part);
+    }
+    dir.files.push({ name: parts.at(-1), file });
+  }
+  const merged = (name, dir) => {
+    while (dir.files.length === 0 && dir.dirs.size === 1) {
+      const [[child, inner]] = dir.dirs;
+      name = `${name}/${child}`;
+      dir = inner;
+    }
+    return [name, dir];
+  };
+  return { root, merged };
+}
+
+function renderChanges() {
+  const { files, truncated, base } = checkout.changes;
+  const added = files.reduce((n, f) => n + (f.additions ?? 0), 0);
+  const deleted = files.reduce((n, f) => n + (f.deletions ?? 0), 0);
+  document.getElementById("changes-base").textContent = `${baseLabel()}, ${base.commit.slice(0, 7)}`;
+  if (files.length === 0) {
+    return showChanges(el("p", { className: "empty", textContent: checkout.base === "head" ? "No uncommitted changes." : "Nothing has changed since the pylon booted." }));
+  }
+  const { root, merged } = treeOf(files);
+  const branch = (dir, path) => {
+    const items = [];
+    for (const [part, inner] of [...dir.dirs].sort(([a], [b]) => a.localeCompare(b))) {
+      const [name, deepest] = merged(part, inner);
+      const at = path === "" ? name : `${path}/${name}`;
+      const fold = el("details", { className: "tree-dir", open: !checkout.closed.has(at) },
+        el("summary", {}, iconOf("chevron"), iconOf("folder"), el("span", { className: "tree-name", textContent: name })),
+        branch(deepest, at));
+      fold.addEventListener("toggle", () => { if (fold.open) checkout.closed.delete(at); else checkout.closed.add(at); });
+      items.push(fold);
+    }
+    for (const { name, file } of dir.files.sort((a, b) => a.name.localeCompare(b.name))) {
+      const open = el("button", {
+        type: "button", className: `tree-file${activeTab === file.path ? " active" : ""}`,
+        title: file.oldPath === null ? file.path : `${file.path}, ${file.status} from ${file.oldPath}`,
+      }, badge(file.status), el("span", { className: "tree-name", textContent: name }), counts(file.additions, file.deletions));
+      open.dataset.path = file.path;
+      open.addEventListener("click", () => openFile(file));
+      items.push(open);
+    }
+    return el("div", { className: "tree-level" }, ...items);
+  };
+  showChanges(
+    el("div", { className: "ch-sum" }, el("span", { textContent: `${files.length} ${files.length === 1 ? "file" : "files"}` }), counts(added, deleted)),
+    el("div", { className: "tree" }, branch(root, "")),
+    truncated && el("p", { className: "dim small", textContent: `Showing the first ${files.length} files.` }),
+  );
+}
+
+/**
+ * Reads again when the pylon starts running, and when its agent was active since the last look and no turn is
+ * running now, so a turn that began and ended between two polls is read too.
+ */
+function noticeFacts() {
+  const before = checkout.facts;
+  const now = factsNow();
+  checkout.facts = now;
+  if (now === null || before === null) return;
+  const started = now.pylon === "running" && before.pylon !== "running";
+  const agentDone = !now.turn && (before.turn || now.agentAt !== before.agentAt);
+  if ((started && (checkout.wanted || checkout.changes === null)) || (agentDone && canRead(now))) void readChanges();
+  else if (!canRead(now) && checkout.changes === null) changesUnreadable(now);
+}
+
+if (changesPane !== null) {
+  const head = document.getElementById("changes-head");
+  head.checked = checkout.base === "head";
+  document.getElementById("changes-base").textContent = baseLabel();
+  head.addEventListener("change", () => {
+    checkout.base = head.checked ? "head" : "start";
+    localStorage.setItem(baseKey, checkout.base);
+    checkout.changes = null;
+    document.getElementById("changes-base").textContent = baseLabel();
+    void readChanges();
+  });
+  document.getElementById("changes-reload").addEventListener("click", () => { void readChanges(true); });
+}
+
+// The tabs beside the conversation: one per changed file the reader opened, kept for the tab's session.
+// `activeTab` is the open file's path, or null for the conversation.
+const tabsBar = document.getElementById("tabs");
+const fileView = document.getElementById("file-view");
+const tabsKey = `nexus.tabs.${thread}`;
+const maxTabs = 8;
+let openTabs = JSON.parse(sessionStorage.getItem(tabsKey) ?? "[]");
+let activeTab = null;
+
+function saveTabs() {
+  sessionStorage.setItem(tabsKey, JSON.stringify(openTabs));
+}
+
+/** Draws the file tabs again, keeping focus on the control that had it, or on the tab that took its place. */
+function renderTabs() {
+  if (tabsBar === null) return;
+  const focused = tabsBar.contains(document.activeElement) ? document.activeElement.dataset.key : undefined;
+  const convoTab = tabsBar.querySelector('[data-tab="convo"]');
+  convoTab.classList.toggle("active", activeTab === null);
+  convoTab.setAttribute("aria-selected", String(activeTab === null));
+  convoTab.dataset.key = "convo";
+  const fileTabs = openTabs.map((file) => {
+    const active = activeTab === file.path;
+    const pick = el("button", { type: "button", className: "tab-pick", title: file.path }, badge(file.status), el("span", { className: "tab-name", textContent: file.path.split("/").at(-1) }));
+    pick.setAttribute("role", "tab");
+    pick.setAttribute("aria-selected", String(active));
+    pick.setAttribute("aria-controls", "file-view");
+    pick.dataset.key = `pick:${file.path}`;
+    pick.addEventListener("click", () => showTab(file.path));
+    const close = el("button", { type: "button", className: "tab-close", textContent: "×", title: "Close" });
+    close.setAttribute("aria-label", `Close ${file.path}`);
+    close.dataset.key = `close:${file.path}`;
+    close.addEventListener("click", () => closeTab(file.path));
+    return el("div", { className: `tab tab-file${active ? " active" : ""}` }, pick, close);
+  });
+  tabsBar.replaceChildren(convoTab, ...fileTabs);
+  for (const button of document.querySelectorAll(".tree-file")) button.classList.toggle("active", button.dataset.path === activeTab);
+  if (focused === undefined) return;
+  const controls = [...tabsBar.querySelectorAll("[data-key]")];
+  const replacement = activeTab === null ? "convo" : `pick:${activeTab}`;
+  (controls.find((b) => b.dataset.key === focused) ?? controls.find((b) => b.dataset.key === replacement))?.focus();
+}
+
+function showTab(path) {
+  activeTab = path;
+  main.dataset.view = path === null ? "convo" : "file";
+  scroller.hidden = path !== null;
+  fileView.hidden = path === null;
+  renderTabs();
+  if (path !== null) void readDiff(path);
+}
+
+function openFile(file) {
+  const at = openTabs.findIndex((f) => f.path === file.path);
+  if (at === -1) openTabs = [...openTabs, file].slice(-maxTabs);
+  else openTabs[at] = file;
+  saveTabs();
+  showTab(file.path);
+}
+
+function closeTab(path) {
+  openTabs = openTabs.filter((f) => f.path !== path);
+  saveTabs();
+  if (activeTab === path) showTab(openTabs.at(-1)?.path ?? null);
+  else renderTabs();
+}
+
+tabsBar?.querySelector('[data-tab="convo"]').addEventListener("click", () => showTab(null));
+
+/** A diff this long is shown up to here, so a huge one does not stall the page. */
+const maxDiffRows = 20_000;
+/** What a diff says of a file beyond its lines, such as a rename or a new mode. */
+const metaLine = /^(old mode|new mode|new file mode|deleted file mode|similarity index|rename from|rename to|copy from|copy to) /;
+
+/**
+ * The rows of a unified diff, each with the new file's line number, or none for a removed line, and the lines
+ * that say what changed beyond the lines.
+ */
+function parseDiff(text) {
+  const rows = [];
+  const meta = [];
+  let next = 0;
+  let inHunk = false;
+  for (const line of text.split("\n")) {
+    if (rows.length >= maxDiffRows) break;
+    if (line.startsWith("diff --git ")) { inHunk = false; continue; }
+    const hunk = /^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@(.*)$/.exec(line);
+    if (hunk !== null) {
+      next = Number(hunk[1]);
+      inHunk = true;
+      rows.push(el("div", { className: "dl dl-hunk" }, el("span", { className: "ln", textContent: "⋯" }), el("span", { className: "sg" }), el("span", { className: "code", textContent: hunk[2].trim() })));
+      continue;
+    }
+    if (!inHunk) {
+      if (metaLine.test(line)) meta.push(line);
+      continue;
+    }
+    if (line === "" || line[0] === "\\") continue;
+    const kind = line[0] === "+" ? "add" : line[0] === "-" ? "del" : "ctx";
+    rows.push(el("div", { className: `dl dl-${kind}` },
+      el("span", { className: "ln", textContent: kind === "del" ? "" : String(next) }),
+      el("span", { className: "sg", textContent: kind === "add" ? "+" : kind === "del" ? "−" : "" }),
+      el("span", { className: "code", textContent: line.slice(1) })));
+    if (kind !== "del") next += 1;
+  }
+  return { rows, meta, cut: rows.length >= maxDiffRows };
+}
+
+let diffRead = 0;
+async function readDiff(path) {
+  const file = openTabs.find((f) => f.path === path);
+  if (file === undefined || fileView === null) return;
+  const read = ++diffRead;
+  const head = el("header", { className: "fv-head" }, badge(file.status), el("span", { className: "fv-path", textContent: file.path }),
+    el("span", { className: "dim small", textContent: checkout.base === "head" ? "vs last commit" : "vs boot" }), counts(file.additions, file.deletions));
+  // A diff reaches into the pylon as the changes do, so a paused one is woken only when the reader says to, and
+  // the read of the changes that wakes it reads the open diff again.
+  const facts = factsNow();
+  if (!canRead(facts)) {
+    const open = facts.status === "active" || facts.status === "idle";
+    const wake = el("button", { type: "button", className: "btn btn-xs", textContent: "Wake and read" });
+    wake.addEventListener("click", () => {
+      void readChanges(true);
+      void readDiff(path);
+    });
+    return fileView.replaceChildren(head, el("div", { className: "fv-note" },
+      el("p", { className: "empty", textContent: !open ? "The pylon stays paused, so the diff can't be read." : checkout.wanted ? "Waking the pylon. The diff shows once it runs." : `The pylon is ${facts.pylon}. Reading the diff wakes it.` }),
+      open && !checkout.wanted && wake));
+  }
+  if (fileView.dataset.path !== path || fileView.querySelector(".diff-view") === null) fileView.replaceChildren(head, el("p", { className: "empty fv-note", textContent: "Reading the diff…" }));
+  fileView.dataset.path = path;
+  // A renamed file's old path goes too, or the diff shows it as added.
+  const query = [file.path, ...(file.oldPath === null ? [] : [file.oldPath])].map((p) => `&path=${encodeURIComponent(p)}`).join("");
+  try {
+    const { diff, truncated } = await api("GET", `/v1/threads/${thread}/diff?base=${checkout.base}${query}`);
+    if (read !== diffRead) return;
+    const { rows, meta, cut } = parseDiff(diff);
+    const view = el("div", { className: "diff-view" });
+    // One at a time: a long diff has more rows than a call can take as arguments.
+    for (const row of rows) view.append(row);
+    const binary = /^Binary files /m.test(diff);
+    fileView.replaceChildren(...present([head,
+      meta.length > 0 && el("div", { className: "fv-meta dim small" }, ...meta.map((line) => el("div", { textContent: line }))),
+      rows.length > 0 ? view
+        : el("p", { className: "empty fv-note", textContent: binary ? "The file is binary, so there is no diff to show." : meta.length > 0 ? "No lines changed." : "The file has no changes now." }),
+      (truncated || cut) && el("p", { className: "dim small fv-note", textContent: "The diff is cut short here, because the whole of it is too long to show." })]));
+  } catch (err) {
+    if (read !== diffRead) return;
+    fileView.replaceChildren(head, el("p", { className: "error fv-note", textContent: err.message }));
+  }
+}
+
+for (const d of document.querySelectorAll("details[id]")) if (toggled.has(d.id)) d.open = toggled.get(d.id);
+const savedPane = localStorage.getItem(paneKey);
+if (savedPane !== null) pickPane(savedPane);
+if (changesPane !== null) {
+  checkout.facts = factsNow();
+  renderTabs();
+  if (canRead(checkout.facts)) void readChanges();
+  else changesUnreadable(checkout.facts);
+}
 if (scroller !== null) scroller.scrollTop = scroller.scrollHeight;
 document.querySelector(".row.active")?.scrollIntoView({ block: "nearest" });
 follow(document.getElementById("convo")?.dataset.stream);
@@ -496,4 +868,6 @@ document.addEventListener("visibilitychange", () => {
   recordVisit();
   follow(document.getElementById("convo")?.dataset.stream);
   if (pollMs > 0) void refreshNow();
+  // The visit wakes the pylon anyway, so a running one is worth reading again on return.
+  if (changesPane !== null && canRead(factsNow())) void readChanges();
 });

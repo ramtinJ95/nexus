@@ -2,15 +2,17 @@
  * The dashboard: server-rendered HTML pages for the control plane, served behind the API's own checks. A page
  * reads the registry the way the JSON API does, so the sidebar, the thread page and `GET /v1/threads/<id>` agree.
  *
- * Every page is the same console: threads by project on the left, the page in the middle, and on a thread page
- * its pylon, previews, outputs and sessions on the right. Starting a thread and adding a project are dialogs every
- * page carries.
+ * Every page is the same console, laid out after Jetline's: threads by project on the left, the page in the middle,
+ * and on a thread page an inspector on the right whose tabs show the checkout's changes, the previews and ports, and
+ * the pylon with its outputs and sessions. A thread page's middle has tabs too: the conversation, and a diff for
+ * each changed file opened from the inspector. Starting a thread and adding a project are dialogs every page carries.
  *
  * Every action goes through the JSON API from `dashboard/client.js`, because the API refuses state changes
  * without a JSON content type and an HTML form cannot send one. The client polls each page and swaps the regions
  * marked `data-live` that changed. A thread page also opens its stream, which sends the conversation region as the
  * run streams: whole when its shape changed, or else only the parts that grow in place, the partial answer and
- * each running tool.
+ * each running tool. The changes and the diffs are read by the client from the JSON API, because each read reaches
+ * into the pylon and counts as a human's visit, so they are read when asked for rather than with every poll.
  */
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
@@ -133,6 +135,23 @@ const dot = (tone: Tone, label?: string) => label === undefined
   : html`<span class="dot dot-${tone}" role="img" aria-label="${label}" title="${label}"></span>`;
 const state = (label: string, tone: Tone) => html`<span class="state">${dot(tone)}${label}</span>`;
 
+/** Line icons on a 16-unit grid, drawn in the text's colour. client.js clones them from the page's `#icons`. */
+const iconPaths = {
+  folder: "M2 4.5A1.5 1.5 0 0 1 3.5 3h3l1.5 1.5h4.5A1.5 1.5 0 0 1 14 6v5.5a1.5 1.5 0 0 1-1.5 1.5h-9A1.5 1.5 0 0 1 2 11.5z",
+  branch: "M5 2.5v11M5 13.5a1.5 1.5 0 1 0 0-.01M11 2.5a1.5 1.5 0 1 0 0 .01M11 4v1.5a3 3 0 0 1-3 3H5",
+  chevron: "M6 4l4 4-4 4",
+  chat: "M3 4.5A1.5 1.5 0 0 1 4.5 3h7A1.5 1.5 0 0 1 13 4.5v5a1.5 1.5 0 0 1-1.5 1.5H7l-3 2.5V11h.5A1.5 1.5 0 0 1 3 9.5z",
+  changes: "M8 2.5v6M5 5.5h6M5 12.5h6",
+  globe: "M8 2a6 6 0 1 0 0 12A6 6 0 0 0 8 2M2 8h12M8 2c-2 2-2 10 0 12M8 2c2 2 2 10 0 12",
+  server: "M3 3h10v4H3zM3 9h10v4H3zM5.5 5h.01M5.5 11h.01",
+  plus: "M8 3v10M3 8h10",
+  up: "M8 13V3M4 7l4-4 4 4",
+} as const;
+type IconName = keyof typeof iconPaths;
+const icon = (name: IconName) => html`<svg class="i i-${name}" viewBox="0 0 16 16" aria-hidden="true"><path d="${iconPaths[name]}"/></svg>`;
+/** Text a screen reader says that the page shows another way, such as with an icon or a bubble's side. */
+const unseen = (text: string) => html`<span class="vh">${text}</span>`;
+
 /** What a thread is doing, most urgent first: the agent mid-turn hides a running pylon, never a failed one. */
 function threadState({ thread: t, pylon }: ThreadDetail): [label: string, tone: Tone] {
   if (t.status === "archived" || t.status === "deleted") return [t.status, "muted"];
@@ -182,7 +201,7 @@ function layout(c: Context, page: Shell): Html {
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="color-scheme" content="dark">
+<meta name="color-scheme" content="light dark">
 <title>${page.title} · Nexus</title>
 <link rel="icon" href="${assetUrl("favicon.svg")}" type="image/svg+xml">
 <link rel="stylesheet" href="${assetUrl("style.css")}">
@@ -198,6 +217,7 @@ ${page.inspector}
 </div>
 <p id="refresh-state" class="refresh-state" role="status"></p>
 <div class="scrim" data-close aria-hidden="true"></div>
+<template id="icons">${(Object.keys(iconPaths) as IconName[]).map(icon)}</template>
 ${startDialog(c, page.start)}
 ${projectDialog(c, page.addProject === true)}
 <noscript><p class="noscript">Adding projects, starting, archiving and deleting threads, sending messages and live updates need JavaScript.</p></noscript>
@@ -221,9 +241,10 @@ function closedLabel(threads: readonly Thread[]): string {
 
 function sidebar(c: Context, active: ThreadId | undefined): Html {
   const projects = c.registry.projects();
+  // A thread works in its own checkout, as a Jetline workspace does, so its row shows a branch with its state as a badge.
   const row = (t: Thread) => {
     const [label, tone] = threadState(c.detail(t));
-    return html`<li><a class="row${t.id === active && " active"}" href="/threads/${t.id}"${t.id === active && html` aria-current="page"`}>${dot(tone, label)}<span class="row-title">${t.title}</span><span class="row-at">${span(lastActive(t), c.now) ?? "now"}</span></a></li>`;
+    return html`<li><a class="row${t.id === active && " active"}" href="/threads/${t.id}"${t.id === active && html` aria-current="page"`}><span class="row-icon">${icon("branch")}${dot(tone, label)}</span><span class="row-title">${t.title}</span><span class="row-at">${span(lastActive(t), c.now) ?? "now"}</span></a></li>`;
   };
   return html`<aside class="side" aria-label="Threads">
 <div class="side-head"><a class="brand" href="/"><span class="brand-mark" aria-hidden="true">◆</span>nexus</a><a class="btn btn-new" href="/threads/new" data-start>New thread<kbd>N</kbd></a></div>
@@ -231,15 +252,17 @@ function sidebar(c: Context, active: ThreadId | undefined): Html {
 <nav class="groups" id="side-threads" data-live aria-label="Threads by project">
 ${projects.length === 0 ? html`<p class="empty side-empty">No projects yet.</p>` : projects.map((p) => {
   const { open, closed } = threadsOf(c, p.id);
-  return html`<section class="group" aria-labelledby="group-${p.id}">
-<h2 class="group-h" id="group-${p.id}"><span>${p.id}</span><span class="count">${open.length}</span></h2>
+  // A project folds like a folder. client.js remembers which ones the reader folded.
+  return html`<details class="group" id="group-${p.id}" open>
+<summary class="group-h">${icon("chevron")}${icon("folder")}<span class="group-name"><span>${p.id}</span><span class="group-branch">${p.defaultBranch}</span></span></summary>
+<a class="group-new" href="/threads/new?project=${encodeURIComponent(p.id)}" data-start="${p.id}" aria-label="New thread in ${p.id}" title="New thread in ${p.id}">${icon("plus")}</a>
 ${open.length > 0 && html`<ul>${open.map(row)}</ul>`}
 ${closed.length > 0 && html`<details class="archived" id="archived-${p.id}"${closed.some((t) => t.id === active) && " open"}><summary>${closedLabel(closed)}</summary><ul>${closed.map(row)}</ul></details>`}
-</section>`;
+</details>`;
 })}
 </nav>
-<a class="btn btn-ghost side-add" href="/projects/new" data-new-project>New project</a>
-<div class="nodes" id="side-nodes" data-live aria-label="Nodes">${c.registry.nodes().map((n) => html`<span>${dot(n.state === "online" ? "ok" : "muted")}${n.name}${n.state === "offline" && html`<em>offline</em>`}</span>`)}</div>
+<div class="nodes" id="side-nodes" data-live aria-label="Nodes"><h2>Nodes</h2>${c.registry.nodes().map((n) => html`<span>${icon("server")}${n.name}${dot(n.state === "online" ? "ok" : "muted")}${n.state === "offline" && html`<em>offline</em>`}</span>`)}</div>
+<a class="btn side-add" href="/projects/new" data-new-project>New project</a>
 </aside>`;
 }
 
@@ -398,8 +421,11 @@ function threadPage(c: Context, d: ThreadDetail, node: NodeRecord, view: Convers
 <span class="chip chip-${tone}">${dot(tone)}<span class="chip-label">${label}</span></span>
 ${actions.length > 0 && html`<div class="bar-actions" id="thread-actions">${actions}</div><button type="button" class="icon-btn more" data-open="actions" aria-label="Thread actions" aria-controls="thread-actions">⋯</button>`}
 </header>
+<div class="tabs" id="tabs" role="tablist" aria-label="Open views" data-thread="${t.id}"><button type="button" class="tab active" role="tab" aria-selected="true" aria-controls="scroll" data-tab="convo">${icon("chat")}<span class="tab-name">${t.title}</span></button></div>
 <div class="strip" id="strip" data-live>${strip(d)}</div>
-<div class="scroll" id="scroll"><div class="convo" id="convo" data-live${t.conversationId !== null && t.status !== "deleted" && html` data-stream="/threads/${t.id}/stream"`}>${convo(t, view, items, c.now)}</div></div>
+<div id="facts" data-live hidden>${facts(d)}</div>
+<div class="scroll" id="scroll" role="tabpanel"><div class="convo" id="convo" data-live${t.conversationId !== null && t.status !== "deleted" && html` data-stream="/threads/${t.id}/stream"`}>${convo(t, view, items, c.now)}</div></div>
+<section class="file-view" id="file-view" role="tabpanel" aria-label="File diff" hidden></section>
 <div class="dock">
 <p id="action-error" class="error" role="alert" hidden></p>
 <div id="run" data-live>${runBar(t, run, c.now)}</div>
@@ -464,22 +490,55 @@ export function liveFrames(t: Thread, now: () => number = Date.now): (view: Conv
   };
 }
 
+/**
+ * What client.js reads to decide when to read the checkout's changes: once the pylon runs, and again when its
+ * agent was active and no turn runs, as that is when the checkout has changed. The agent's last activity catches a
+ * turn that began and ended between two polls.
+ */
+function facts({ thread: t, pylon }: ThreadDetail): Html {
+  return html`<span data-pylon="${pylon.actualState}" data-turn="${String(t.agentTurnRunning)}" data-agent-at="${t.lastAgentActivityAt}" data-thread-status="${t.status}"></span>`;
+}
+
 /** The phone's stand-in for the inspector: the pylon, each preview as a link where it has one, and the outputs. */
 function strip(d: ThreadDetail): Html {
   const outputs = outputsOf(d).length;
   const [label, tone] = actualBadge[d.pylon.actualState];
-  return html`<button type="button" class="mini" data-open="inspect">${dot(tone)}${label} · ${d.pylon.node}</button>
+  return html`<button type="button" class="mini" data-open="inspect" data-pane="pylon">${dot(tone)}${label} · ${d.pylon.node}</button>
 ${d.previews.map((p) => {
   const look = lookOf(d, p);
   return look.linked
     ? html`<a class="mini mini-${look.tone}" href="${p.url}" target="_blank" rel="noopener">${p.service}${look.label !== null && `, ${look.label}`} ↗</a>`
     : html`<span class="mini mini-${look.tone}">${p.service}, ${look.label}</span>`;
 })}
-<button type="button" class="mini" data-open="inspect">${outputs} ${outputs === 1 ? "output" : "outputs"}</button>`;
+<button type="button" class="mini" data-open="inspect" data-pane="changes">Changes</button>
+<button type="button" class="mini" data-open="inspect" data-pane="pylon">${outputs} ${outputs === 1 ? "output" : "outputs"}</button>`;
 }
 
+const panes = [["changes", "Changes", "changes"], ["previews", "Previews", "globe"], ["pylon", "Pylon", "server"]] as const;
+
+/**
+ * The inspector's tabs are radios, so the one picked stays picked while the regions under it are swapped, and
+ * shows its pane without a script. The Changes pane is filled by client.js, so it is outside every live region.
+ */
 function inspector(d: ThreadDetail, node: NodeRecord, now: number): Html {
+  // The Previews tab counts what its pane lists: the previews and the ports without one.
+  const listed = d.previews.length + (d.ports?.filter((l) => l.preview === null).length ?? 0);
+  return html`<aside class="inspect" aria-label="Thread details">
+<button type="button" class="icon-btn inspect-close" data-close aria-label="Close details">✕</button>
+<div class="seg-bar" role="radiogroup" aria-label="Inspector">${panes.map(([pane, label, glyph]) => html`<label class="seg-tab"><input type="radio" name="pane" value="${pane}"${pane === "changes" && " checked"}>${icon(glyph)}<span class="seg-label">${label}</span>${pane === "previews" && html`<span class="count" id="count-previews" data-live>${listed}</span>`}</label>`)}</div>
+<section class="ipane" id="pane-changes" aria-labelledby="changes-h" data-thread="${d.thread.id}">
+<h2 id="changes-h" class="vh">Changes</h2>
+<div class="ch-head"><label class="switch"><input type="checkbox" id="changes-head"><span class="switch-label">Only uncommitted</span></label><button type="button" class="icon-btn" id="changes-reload" aria-label="Read the changes again" title="Read the changes again">↻</button></div>
+<p class="ch-base dim small" id="changes-base">Since the pylon booted</p>
+<div id="changes-body"><p class="empty">The changes show once the page's script loads.</p></div>
+</section>
+<div class="pane-live" id="inspect" data-live>${inspectorPanes(d, node, now)}</div>
+</aside>`;
+}
+
+function inspectorPanes(d: ThreadDetail, node: NodeRecord, now: number): Html {
   const { thread: t, pylon } = d;
+  const count = (n: number) => html`<span class="count">${n}</span>`;
   const desired = desiredPhase(t, now);
   const outputs = outputsOf(d);
   // A port with a preview is listed under Previews. Ports lists the rest, which are published only when someone opens one.
@@ -487,21 +546,7 @@ function inspector(d: ThreadDetail, node: NodeRecord, now: number): Html {
   const host = (url: string) => url.replace(/^https:\/\//, "").replace(/\/$/, "");
   // Only a linked port's preview can be unpublished. A service's preview is part of its declaration.
   const open = t.status === "active" || t.status === "idle";
-  const count = (n: number) => html`<span class="count">${n}</span>`;
-  return html`<aside class="inspect" id="inspect" data-live aria-label="Pylon details">
-<button type="button" class="icon-btn inspect-close" data-close aria-label="Close details">✕</button>
-<section aria-labelledby="pylon-h"><h2 id="pylon-h">Pylon</h2>
-<dl class="kv">
-<dt>Desired</dt><dd>${state(desired, desiredTone[desired])}</dd>
-<dt>Observed</dt><dd>${state(...actualBadge[pylon.actualState])}</dd>
-<dt>Node</dt><dd>${pylon.node}${node.state === "offline" && html` <span class="tag">offline</span>`}</dd>
-<dt>Last seen</dt><dd>${pylon.observedAt === null ? "never" : ago(Date.parse(pylon.observedAt), now)}${node.state === "offline" && pylon.observedAt !== null && " (stale)"}</dd>
-<dt>Human</dt><dd>${ago(t.lastHumanActivityAt, now)}</dd>
-<dt>Agent</dt><dd>${t.agentTurnRunning ? "turn running" : ago(t.lastAgentActivityAt, now)}</dd>
-</dl>
-<code class="id">${pylon.id}</code>
-${pylon.failed !== null && html`<p class="error">The planner gave up: ${pylon.failed}</p>`}
-</section>
+  return html`<div class="ipane" id="pane-previews">
 <section aria-labelledby="previews-h"><h2 id="previews-h">Previews ${count(d.previews.length)}</h2>
 ${d.previews.length === 0 ? html`<p class="empty">No previews.</p>` : html`<ul class="list">${d.previews.map((p) => {
   const look = lookOf(d, p);
@@ -522,6 +567,20 @@ ${unpublished === null ? html`<p class="empty">The pylon's ports could not be re
   : pylon.actualState !== "running" ? html`<p class="empty">Ports show while the pylon runs.</p>`
   : html`<p class="empty">${d.ports?.length === 0 ? "Nothing listens yet." : "Every port that listens is under Previews."} ${unreachableHint}</p>`}
 </section>
+</div>
+<div class="ipane" id="pane-pylon">
+<section aria-labelledby="pylon-h"><h2 id="pylon-h">Pylon</h2>
+<dl class="kv">
+<dt>Desired</dt><dd>${state(desired, desiredTone[desired])}</dd>
+<dt>Observed</dt><dd>${state(...actualBadge[pylon.actualState])}</dd>
+<dt>Node</dt><dd>${pylon.node}${node.state === "offline" && html` <span class="tag">offline</span>`}</dd>
+<dt>Last seen</dt><dd>${pylon.observedAt === null ? "never" : ago(Date.parse(pylon.observedAt), now)}${node.state === "offline" && pylon.observedAt !== null && " (stale)"}</dd>
+<dt>Human</dt><dd>${ago(t.lastHumanActivityAt, now)}</dd>
+<dt>Agent</dt><dd>${t.agentTurnRunning ? "turn running" : ago(t.lastAgentActivityAt, now)}</dd>
+</dl>
+<code class="id">${pylon.id}</code>
+${pylon.failed !== null && html`<p class="error">The planner gave up: ${pylon.failed}</p>`}
+</section>
 <section aria-labelledby="outputs-h"><h2 id="outputs-h">Outputs ${count(outputs.length)}</h2>
 ${outputs.length === 0 ? html`<p class="empty">No outputs yet.</p>` : html`<ul class="list outs">${outputs.map((o) => html`<li><span class="o-kind">${outputLabel[o.kind]}</span><code>${o.ref}</code></li>`)}</ul>`}
 </section>
@@ -533,7 +592,7 @@ ${s.harnessSessionId !== null && html`<code class="dim sid" title="${s.harnessSe
 <p class="attach-h">Attach from a shell in the pylon</p>
 <div class="attach"><code id="attach-command">${d.attach}</code><button type="button" class="btn btn-xs" data-copy="attach-command">Copy</button></div>
 </section>
-</aside>`;
+</div>`;
 }
 
 /** One row of the conversation. A tool call carries its result, which the transcript holds in a later entry. */
@@ -648,13 +707,10 @@ function composer(d: ThreadDetail, run: Run, model: string | null): Html {
 ${d.pylon.actualState === "paused" && html`<p class="comp-note">The pylon is paused. Sending a message wakes it.</p>`}
 <div class="comp-box">
 <textarea id="prompt-text" name="text" rows="2" required aria-label="Message the agent" placeholder="${queue ? "Queue a follow-up…" : "Message the agent…"}"></textarea>
-<div class="comp-foot">${model !== null && html`<span class="chip chip-model">${model}</span>`}<span class="dim small keys">⌘↵ to ${queue ? "queue" : "send"}</span><button type="submit" class="btn btn-primary" id="send">${queue ? "Queue" : "Send"}</button></div>
+<div class="comp-foot">${model !== null && html`<span class="chip chip-model">${model}</span>`}<span class="dim small keys">⌘↵ to ${queue ? "queue" : "send"}</span><button type="submit" class="send" id="send" title="${queue ? "Queue" : "Send"}">${icon("up")}${unseen(queue ? "Queue" : "Send")}</button></div>
 </div>
 </form>`;
 }
-
-/** A run of tool calls this long folds into one line, so a busy turn does not bury the answer around it. */
-const foldAt = 4;
 
 type Block = Exclude<Item, ToolItem> | { kind: "tools"; tools: ToolItem[] };
 function blocks(items: readonly Item[]): Block[] {
@@ -670,12 +726,12 @@ function blocks(items: readonly Item[]): Block[] {
 
 function blockView(block: Block): Html {
   switch (block.kind) {
-    case "user": return html`<div class="msg user${block.queued && " queued"}"><div class="msg-who">You${block.queued && html`<span class="chip chip-queued">queued, sends after this run</span>`}</div><div class="text">${prose(block.text)}</div></div>`;
+    case "user": return html`<div class="msg user${block.queued && " queued"}">${unseen("You")}${block.queued && html`<div class="msg-who"><span class="chip chip-queued">queued, sends after this run</span></div>`}<div class="text">${prose(block.text)}</div></div>`;
     case "agent": return block.streaming
       ? html`<div class="msg agent streaming"><div class="text" data-grow>${grows(html`${prose(block.text)}<span class="caret" aria-hidden="true"></span>`)}</div></div>`
       : html`<div class="msg agent"><div class="text">${prose(block.text)}</div></div>`;
     case "notice": return html`<p class="notice notice-${block.tone}"><span class="notice-mark" aria-hidden="true">!</span>${block.text}</p>`;
-    case "tools": return block.tools.length >= foldAt ? stepsView(block.tools) : html`<div class="tools">${block.tools.map(toolView)}</div>`;
+    case "tools": return stepsView(block.tools);
   }
 }
 
@@ -742,23 +798,45 @@ ${(diff === null || bad) && (output === "" ? html`<p class="t-empty">${running ?
 </details>`;
 }
 
-const verbs: Record<string, string> = { read: "read", bash: "ran", edit: "edited", write: "wrote", grep: "searched", find: "found", ls: "listed" };
-/** A step as the fold names it: read total.ts, ran npm test. */
-function stepName({ call }: ToolItem): string {
-  const subject = subjectOf(call);
-  const short = subject === undefined ? ""
-    : subject.key === "command" ? subject.value.trim().split(/\s+/).slice(0, 2).join(" ")
-    : subject.key === "path" ? subject.value.split("/").at(-1)!
-    : subject.value;
-  return `${verbs[call.name] ?? call.name} ${short}`.trim();
+/** How a fold says what a kind of call did, once and many times. A call to another tool is named as it is. */
+const doings: Record<string, readonly [one: string, many: (n: number) => string]> = {
+  read: ["read a file", (n) => `read ${n} files`],
+  bash: ["ran a command", (n) => `ran ${n} commands`],
+  edit: ["edited a file", (n) => `edited ${n} files`],
+  write: ["wrote a file", (n) => `wrote ${n} files`],
+  grep: ["searched", (n) => `searched ${n} times`],
+  find: ["looked for files", (n) => `looked for files ${n} times`],
+  ls: ["listed a folder", (n) => `listed ${n} folders`],
+};
+
+/**
+ * What a run of calls did, as Jetline says it: Read 2 files, ran a command. Calls on the same path count once, so
+ * three edits to one file are one edited file.
+ */
+function stepsSummary(tools: readonly ToolItem[]): string {
+  const done = new Map<string, Set<string>>();
+  for (const { call } of tools) {
+    const path = call.arguments.path;
+    const seen = done.get(call.name) ?? new Set<string>();
+    seen.add(["read", "edit", "write", "ls"].includes(call.name) && typeof path === "string" ? path : call.id);
+    done.set(call.name, seen);
+  }
+  const said = [...done].map(([name, seen]) => {
+    const [one, many] = doings[name] ?? [`used ${name}`, (n: number) => `used ${name} ${n} times`];
+    return seen.size === 1 ? one : many(seen.size);
+  }).join(", ");
+  return said.charAt(0).toUpperCase() + said.slice(1);
 }
 
-/** The fold opens itself when a step failed or is still running, which is when the reader needs to see it. */
+/**
+ * Every run of calls folds into one line, so a busy turn does not bury the answer around it. The fold opens
+ * itself when a call failed or is still running, which is when the reader needs to see it.
+ */
 function stepsView(tools: readonly ToolItem[]): Html {
   const bad = tools.filter(failed).length;
   const running = tools.filter((t) => t.result.state === "running").length;
-  return html`<details class="steps" id="steps-${tools[0]!.call.id}"${(bad > 0 || running > 0) && " open"}>
-<summary><span class="chev" aria-hidden="true">›</span><span class="s-count">${tools.length} steps</span><span class="sep" aria-hidden="true">·</span><span class="s-names">${[...new Set(tools.map(stepName))].join(", ")}</span>${bad > 0 && html`<span class="sep" aria-hidden="true">·</span><span class="s-bad">${bad} failed</span>`}${running > 0 && html`<span class="sep" aria-hidden="true">·</span><span class="s-run">${running} running</span>`}</summary>
+  return html`<details class="steps${bad > 0 && " has-bad"}" id="steps-${tools[0]!.call.id}"${(bad > 0 || running > 0) && " open"}>
+<summary><span class="s-names">${stepsSummary(tools)}</span>${bad > 0 && html`<span class="s-bad">${bad} failed</span>`}${running > 0 && html`<span class="s-run"><span class="spin" aria-hidden="true"></span>${running} running</span>`}<span class="chev" aria-hidden="true">›</span></summary>
 <div class="tools">${tools.map(toolView)}</div>
 </details>`;
 }
