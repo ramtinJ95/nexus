@@ -28,7 +28,10 @@ export async function recordBeforePause(guest: Guest, log: PylonLog): Promise<re
   return recorded?.map(({ id, herdrPane, harness, harnessSessionId, title }) => ({ id, herdrPane, harness, harnessSessionId, title })) ?? null;
 }
 
-/** After a boot from an existing disk. Returns the outcomes, also logged. A failed relaunch as a whole is an empty list. */
+/**
+ * After a boot from an existing disk. Returns the outcomes, also logged. A sessions file that cannot be read or
+ * written is an empty list, and the file stays as it was.
+ */
 export async function relaunchAfterWake(guest: Guest, log: PylonLog): Promise<readonly RelaunchOutcome[]> {
   let outcomes: readonly RelaunchOutcome[];
   try {

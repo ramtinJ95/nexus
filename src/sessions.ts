@@ -243,15 +243,23 @@ export async function recordSessions(guest: Guest): Promise<readonly RecordedSes
  * On wake: start Herdr, then bring back each recorded session that is not already live, into its prompt.
  * Running it again converges: each live pane answers for at most one record, so neither Herdr's own
  * restore nor an earlier relaunch is opened twice. One failure does not stop the rest, and the sessions
- * file is rewritten with each session's pane and with the failures, so a later record keeps them.
+ * file is rewritten with each session's pane and with the failures, so a later record keeps them. A Herdr that
+ * does not start fails every session, for its reason.
  */
 export async function relaunchSessions(guest: Guest): Promise<readonly RelaunchOutcome[]> {
   const file = await readSessionsFile(guest);
   if (file === null) return [];
   const records = [...file.sessions, ...file.failed.map((f) => f.record)];
   if (records.length === 0) return [];
-  await ensureServer(guest);
-  const unclaimed = await livePanes(guest);
+  let unclaimed: LivePane[];
+  try {
+    await ensureServer(guest);
+    unclaimed = await livePanes(guest);
+  } catch (err) {
+    const outcomes = records.map((record): RelaunchOutcome => ({ record, result: "failed", herdrPane: null, message: (err as Error).message }));
+    await recordOutcomes(guest, file, outcomes);
+    return outcomes;
+  }
   const recordedIds = new Set(records.flatMap((r) => r.harnessSessionId ?? []));
   // A pane whose agent reports another session is that session, not this one. A record with no ID can take
   // a pane whose ID no record has, such as the one an earlier relaunch of it started.
@@ -295,14 +303,18 @@ export async function relaunchSessions(guest: Guest): Promise<readonly RelaunchO
       outcomes.push({ record: r, result: "failed", herdrPane: pane?.herdrPane ?? null, message: (err as Error).message });
     }
   }
-  // Each record now names the pane it is in, so a failure is not recorded a second time as the shell it left.
+  await recordOutcomes(guest, file, outcomes);
+  return outcomes;
+}
+
+/** Each record now names the pane it is in, so a failure is not recorded a second time as the shell it left. */
+async function recordOutcomes(guest: Guest, file: SessionsFile, outcomes: readonly RelaunchOutcome[]): Promise<void> {
   await writeSessionsFile(guest, {
     ...file,
     sessions: outcomes.flatMap((o) => o.result === "failed" ? [] : [{ ...o.record, herdrPane: o.herdrPane }]),
     failed: outcomes.flatMap((o): FailedRecord[] => o.result !== "failed" ? []
       : [{ record: { ...o.record, herdrPane: o.herdrPane ?? o.record.herdrPane }, inPane: o.herdrPane !== null, message: o.message }]),
   });
-  return outcomes;
 }
 
 /** Whether a foreground process in the pane is the agent's executable, which Herdr names its agent kind after. */
