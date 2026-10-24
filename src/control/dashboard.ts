@@ -245,7 +245,7 @@ function startDialog(c: Context, start: Shell["start"]): Html {
   return html`<dialog id="start-dialog" class="modal" aria-labelledby="start-h"${start !== undefined && " data-autoopen"}>
 <header><h2 id="start-h">Start a thread</h2><button type="button" class="icon-btn" data-close aria-label="Close">✕</button></header>
 <div id="start-body" data-live>
-${chosen === undefined ? html`<p class="empty modal-empty">No projects yet. Add one with <code>POST /v1/projects</code>.</p>` : html`<form id="start" class="form">
+${chosen === undefined ? html`<p class="empty modal-empty">No projects yet. Add one with <code>nexus project add</code>.</p>` : html`<form id="start" class="form">
 ${image === null && html`<p class="error">No image is current yet, so a new pylon has nothing to boot.</p>`}
 <label for="start-title">Title</label>
 <input id="start-title" name="title" required autocomplete="off" placeholder="What should this thread do?" autofocus>
@@ -292,7 +292,7 @@ function home(c: Context, start: Shell["start"]): Html {
     start,
     main: html`<header class="bar"><button type="button" class="icon-btn menu" data-open="side" aria-label="Threads">☰</button><div class="crumb"><h1>Threads</h1></div><div class="bar-end"><a class="btn btn-new phone-only" href="/threads/new" data-start>New thread</a></div></header>
 <div class="scroll"><div class="page" id="overview" data-live>
-${projects.length === 0 ? html`<p class="empty">No projects yet. Add one with <code>POST /v1/projects</code>.</p>` : projects.map((p) => {
+${projects.length === 0 ? html`<p class="empty">No projects yet. Add one with <code>nexus project add</code>.</p>` : projects.map((p) => {
   const { open, closed } = threadsOf(c, p.id);
   return html`<section aria-labelledby="project-${p.id}">
 <div class="ov-head"><h2 id="project-${p.id}">${p.id}</h2><code class="dim">${p.repoUrl}</code><a class="btn btn-xs" href="/threads/new?project=${encodeURIComponent(p.id)}" data-start="${p.id}">New thread</a></div>

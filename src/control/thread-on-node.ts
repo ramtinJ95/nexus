@@ -5,7 +5,7 @@
  * It starts a control plane in this process (registry, loop, harness and API, as src/control/main.ts wires
  * them) over a temporary directory. Its harness uses the scripted model from src/harness/test-fixture.ts, so
  * no model login is needed. It drives the node's running probe only through the control plane's HTTP API:
- * start a thread, run a tool in its pylon, follow a streamed answer with the real CLI's `nexus watch --json` and keep that
+ * add the thread's project with the real CLI's `nexus project add`, start a thread, run a tool in its pylon, follow a streamed answer with the real CLI's `nexus watch --json` and keep that
  * watch open past the CLI's idle timeout, have the agent declare a service with a preview, fetch the preview's
  * https URL from this node, have the agent start an unsupervised server that the thread's ports list, link that port
  * as a human would and fetch its preview, archive the thread so the pylon pauses, unarchive it so the pylon wakes,
@@ -481,14 +481,33 @@ async function checkFailedSetupRetry() {
   pass(`deleting the failed thread removes ${await deleteThread(thread.pylonId)}`);
 }
 
+/**
+ * The thread's project comes from the real CLI's `project add`, as the Claude mod and the pi extension add one, with
+ * the CLI's defaults. Adding it again is a conflict, and leaving out --node names this node.
+ */
+async function addProject() {
+  const repoUrl = "https://github.com/octocat/Spoon-Knife.git";
+  const added = await nexus("project", "add", "node-check", repoUrl, "--node", probeConfig.node, "--json");
+  assert.equal(added.code, 0, added.stderr);
+  const expected = {
+    id: "node-check", repoUrl, defaultBranch: "main", defaultNode: probeConfig.node,
+    resources: { cpus: 2, memoryGiB: 4, diskGiB: 10 }, allowedHosts: [], secrets: [], logins: [], preSetup: null,
+  };
+  assert.deepEqual(JSON.parse(added.stdout), expected);
+  assert.deepEqual(await expect(200, "GET", "/projects"), [expected]);
+  pass(`nexus project add created node-check on ${probeConfig.node} with the CLI's defaults: ${added.stdout.replace(/\s+/g, " ")}`);
+  const again = await nexus("project", "add", "node-check", repoUrl, "--node", probeConfig.node, "--json");
+  assert.deepEqual([again.code, JSON.parse(again.stderr)], [5, { error: "project node-check exists", kind: "conflict", status: 409 }]);
+  const unnamed = await nexus("project", "add", "node-check-2", repoUrl, "--json");
+  assert.deepEqual([unnamed.code, JSON.parse(unnamed.stderr)], [64, { error: `project add needs --node, one of ${probeConfig.node}`, kind: "invalid", status: null }]);
+  pass(`adding node-check again exits 5, and leaving out --node exits 64 naming ${probeConfig.node}`);
+}
+
 let verdict = "FAIL";
 try {
   await expect(201, "POST", "/images", manifest);
   await expect(204, "PUT", "/images/current", { image });
-  await expect(201, "POST", "/projects", {
-    id: "node-check", repoUrl: "https://github.com/octocat/Spoon-Knife.git", defaultBranch: "main", defaultNode: probeConfig.node,
-    resources: { cpus: 2, memoryGiB: 4, diskGiB: 10 }, allowedHosts: [], secrets: [], logins: [], preSetup: null,
-  });
+  await addProject();
   const thread = await expect(201, "POST", "/threads", { project: "node-check", title: "thread on node" });
   threadId = thread.id;
   pass(`start thread ${threadId} on ${probeConfig.node} from ${image}`);

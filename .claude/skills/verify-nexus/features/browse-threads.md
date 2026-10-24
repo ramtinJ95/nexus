@@ -24,7 +24,7 @@ Preconditions:
 
 - **List threads.** Run `$V cli browse-threads -- threads --json`. It holds rows for `TA` and `TB`. Each row has `desired` `running` and `pylon.actualState` `running`, on node `verify-node`.
 - **One project.** Run `$V cli browse-project -- threads --project spoon --json`, which returns the same rows. Then run `$V cli browse-project-none -- threads --project nope --json`. Exit 0, and stdout is `[]`.
-- **Projects and nodes.** `$V cli browse-projects -- projects --json` returns one project, `spoon`. `$V cli browse-nodes -- nodes --json` returns `verify-node` with `state` `online` and a recent `observedAt`.
+- **Projects and nodes.** `$V cli browse-projects -- projects --json` returns one project, `spoon`, unless [Add a project](./add-project.md) ran earlier in this run. `$V cli browse-nodes -- nodes --json` returns `verify-node` with `state` `online` and a recent `observedAt`.
 - **Dashboard overview.** Run `$V browser browse-ui-open -- goto http://127.0.0.1:7470/`. The `spoon` section's table lists `browse: alpha` and `browse: beta`, and the observed column reads `running`. Capture with `snapshot --filename browse-ui.md` and `screenshot --filename browse-ui.png`.
 - **Filter.** Run `$V browser browse-ui-filter -- fill "role=searchbox[name=\"Filter threads\"]" "alpha"`. The sidebar's `Threads by project` list shows `browse: alpha` and hides `browse: beta`. Capture `snapshot --filename browse-filter.md`.
 - **Open from the list.** Run `$V browser browse-ui-pick -- click "role=link[name=\"browse: alpha\"]"`. The URL is `/threads/$TA`.
