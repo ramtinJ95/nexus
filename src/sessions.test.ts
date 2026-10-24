@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { closeSession, openSession, recordSessions, relaunchSessions, sessionFacts, sessionsFile, type RelaunchOutcome, type SessionRecord } from "./sessions.ts";
+import { attachedTerminals, attachScript, closeSession, openSession, recordSessions, relaunchSessions, sessionFacts, sessionsFile, type RelaunchOutcome, type SessionRecord } from "./sessions.ts";
 import { fakeGuest, herdrError, herdrOk, herdrPane, herdrSnapshot, type ExecReply } from "./fake-guest.ts";
 
 const created = (workspace: string, pane: string) => herdrOk({ type: "workspace_created", workspace: { workspace_id: workspace, label: "x" }, tab: { tab_id: `${workspace}:t1` }, root_pane: { pane_id: pane } });
@@ -114,9 +114,7 @@ test("opening a session starts a detached Herdr server when none runs", async ()
   let running = false;
   const guest = fakeGuest((argv, herdr) => {
     if (!herdr) {
-      assert.equal(argv[0], "sh");
-      assert.match(argv[2]!, /setsid -f tini -s -- herdr --session "\$0" server <\/dev\/null >\/dev\/null 2>&1/);
-      assert.equal(argv[3], "nexus");
+      assert.deepEqual(argv, ["sh", "-c", "setsid -f tini -s -- herdr --session nexus server </dev/null >/dev/null 2>&1"]);
       running = true;
       return { exitCode: 0, output: "" };
     }
@@ -431,4 +429,21 @@ test("a failure left in its restored pane stands for that pane until the pane is
   assert.deepEqual(await recordSessions(guest), records);
   await closeSession(guest, "w1:p1");
   assert.deepEqual(await recordSessions(guest), []);
+});
+
+test("attached terminals are the guest's Herdr clients of the session, and an unreadable guest counts none", async () => {
+  const counting = (reply: ExecReply) => fakeGuest((argv, herdr) => {
+    assert.ok(!herdr);
+    assert.deepEqual(argv, ["pgrep", "-c", "-x", "-f", "herdr --session nexus"], "a client's whole command line, so the server and Herdr's own subcommands are left out");
+    return reply;
+  });
+  assert.equal(await attachedTerminals(counting({ exitCode: 0, output: "2\n" })), 2);
+  assert.equal(await attachedTerminals(counting({ exitCode: 1, output: "0\n" })), 0);
+  assert.equal(await attachedTerminals(counting({ exitCode: 127, output: "sh: pgrep: not found" })), 0);
+  assert.equal(await attachedTerminals(counting({ exitCode: null, output: "" })), 0);
+});
+
+test("an attached terminal is a client with exactly the command line attachedTerminals counts, after a server like a session open's", () => {
+  assert.match(attachScript, /exec herdr --session nexus$/);
+  assert.ok(attachScript.includes("setsid -f tini -s -- herdr --session nexus server </dev/null >/dev/null 2>&1"));
 });

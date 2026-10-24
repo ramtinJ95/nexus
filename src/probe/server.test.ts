@@ -373,7 +373,8 @@ test("observations carry session facts from Herdr, and null when Herdr cannot be
   let readable = true;
   const guest = fakeGuest((argv, herdr) => {
     if (!herdr && argv[2]?.includes(outputsDir)) return { exitCode: 0, output: "" };
-    assert.ok(herdr && argv[0] === "api" && argv[1] === "snapshot", "observing runs only herdr api snapshot and the outputs listing");
+    if (!herdr && argv[0] === "pgrep") return { exitCode: 1, output: "0\n" };
+    assert.ok(herdr && argv[0] === "api" && argv[1] === "snapshot", "observing runs only herdr api snapshot, the outputs listing and the count of attached terminals");
     return readable
       ? herdrOk(herdrSnapshot([{ id: "w1", label: "review" }], [herdrPane("w1:p1", "w1", "claude", "working", { kind: "id", value: "bd2c2d6b" })]))
       : { exitCode: 1, output: "Error: exec failed" };
@@ -517,6 +518,18 @@ test("only streams with a pty count as attached clients", async (t) => {
   await raw.close();
   await pty.close();
   assert.deepEqual([await raw.done, await pty.done], [{ kind: "exited", code: 0 }, { kind: "exited", code: 0 }]);
+});
+
+test("terminals attached to Herdr in the guest, such as nexus attach, count as attached clients", async (t) => {
+  const guest = fakeGuest((argv, herdr) => herdr ? herdrError("server_not_running")
+    : argv[0] === "pgrep" ? { exitCode: 0, output: "2\n" } : { exitCode: 0, output: "" });
+  const { client } = await setup(t, {}, guest);
+  await running(client);
+  for await (const e of client.observe(AbortSignal.timeout(5000))) {
+    const p = e.type === "snapshot" ? e.observation.pylons[0] : assert.fail(e.type);
+    assert.ok(p?.phase === "running" && p.attachedClients === 2, JSON.stringify(p));
+    break;
+  }
 });
 
 test("a dropped connection is a lost stream, and the guest process's stdin ends", async (t) => {

@@ -16,7 +16,7 @@ import {
   type DeclaredOutput, type ListeningFact, type ProbeAuthConfig, type ProbeEvent, type PylonCommand, type PylonId, type PylonObservation, type ServiceFact, type SessionFact, type Subject,
 } from "../protocol.ts";
 import type { ServiceName } from "../project.ts";
-import { sessionFacts } from "../sessions.ts";
+import { attachedTerminals, sessionFacts } from "../sessions.ts";
 import type { Whois } from "../tailscale.ts";
 import { listOutputs } from "../outputs.ts";
 import { listeningFacts } from "../listening.ts";
@@ -256,7 +256,8 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
           pylonId, phase: "running", liveHash: liveHashes.get(pylonId) ?? null, bootedAt: p.bootedAt,
           bootedFrom: { image: p.image, checkpoint: p.checkpoint },
           // The other guest facts need guest operations, which this slice does not have.
-          services: await services(pylonId), listening: ports, previews: (published.get(pylonId) ?? []).map((preview) => ({ ...preview, ready: true })), sessions: await sessions(pylonId), git: null, declaredOutputs: await declaredOutputs(pylonId), attachedClients: ptyStreams.get(pylonId) ?? 0,
+          services: await services(pylonId), listening: ports, previews: (published.get(pylonId) ?? []).map((preview) => ({ ...preview, ready: true })), sessions: await sessions(pylonId), git: null, declaredOutputs: await declaredOutputs(pylonId),
+          attachedClients: (ptyStreams.get(pylonId) ?? 0) + await attachedTerminals(backend.guest(pylonId), sessionReadTimeoutMs),
         };
       }
     }

@@ -295,13 +295,39 @@ async function launchedClaudeSession(guest: Guest, pane: string): Promise<string
   return null;
 }
 
+/**
+ * setsid detaches the server from the exec, and the redirects let the exec return without waiting on its output.
+ * PID 1 in a pylon is Gondolin's sandboxd, which never reaps the orphans it adopts, so an agent whose pane
+ * shell exits first would stay a zombie. tini -s is the subreaper for everything under Herdr instead. It
+ * is unconditional because the base image guarantees /usr/bin/tini.
+ */
+const startServer = `setsid -f tini -s -- herdr --session ${herdrSession} server </dev/null >/dev/null 2>&1`;
+
+/**
+ * The shell command a human's terminal runs in the pylon to attach to its Herdr session. With no server yet, it
+ * starts one as a session open does, so the server outlives the terminal and runs under tini, and waits for it.
+ * `herdr --session nexus` is the whole command line of each attached client, which attachedTerminals counts.
+ */
+export const attachScript = `herdr --session ${herdrSession} workspace list >/dev/null 2>&1 || { ${startServer}; i=0; until herdr --session ${herdrSession} workspace list >/dev/null 2>&1; do i=$((i + 1)); [ $i -lt ${serverStartMs / 100} ] || break; sleep 0.1; done; }; exec herdr --session ${herdrSession}`;
+
+/**
+ * How many terminals are attached to the pylon's Herdr session, such as `nexus attach` from a Mac, which count as
+ * a human's presence. Zero when the guest cannot be read, so a failed read never keeps a pylon awake.
+ */
+export async function attachedTerminals(guest: Guest, timeoutMs = callTimeoutMs): Promise<number> {
+  try {
+    // pgrep prints the count, 0 included, and exits 1 when it is 0.
+    const { exitCode, output } = await guest.exec(["pgrep", "-c", "-x", "-f", `herdr --session ${herdrSession}`], { cwd: home, timeoutMs });
+    const count = Number(output.trim());
+    return (exitCode === 0 || exitCode === 1) && Number.isInteger(count) ? count : 0;
+  } catch {
+    return 0;
+  }
+}
+
 async function ensureServer(guest: Guest): Promise<void> {
   if (await serverRunning(guest)) return;
-  // setsid detaches the server from the exec, and the redirects let the exec return without waiting on its output.
-  // PID 1 in a pylon is Gondolin's sandboxd, which never reaps the orphans it adopts, so an agent whose pane
-  // shell exits first would stay a zombie. tini -s is the subreaper for everything under Herdr instead. It
-  // is unconditional because the base image guarantees /usr/bin/tini.
-  const start = await guest.exec(["sh", "-c", 'setsid -f tini -s -- herdr --session "$0" server </dev/null >/dev/null 2>&1', herdrSession], { cwd: home, timeoutMs: callTimeoutMs });
+  const start = await guest.exec(["sh", "-c", startServer], { cwd: home, timeoutMs: callTimeoutMs });
   if (start.exitCode !== 0) throw new Error(`starting the Herdr server failed with exit ${start.exitCode}: ${start.output}`);
   const deadline = Date.now() + serverStartMs;
   while (!await serverRunning(guest)) {

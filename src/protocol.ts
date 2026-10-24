@@ -162,7 +162,11 @@ export interface RunningFacts {
   sessions: readonly SessionFact[] | null; // null when Herdr could not be read. No Herdr server is an empty list
   git: GitFacts | null; // null until the first poll, or when the checkout is missing
   declaredOutputs: readonly DeclaredOutput[];
-  /** Open streams with a pty, counted as human presence. A raw pipe is not counted: the harness keeps one open for as long as the pylon runs. */
+  /**
+   * Terminals attached to the pylon, counted as human presence: open streams with a pty, and terminals attached to
+   * its Herdr session in the guest, such as `nexus attach`. A raw pipe is not counted: the harness keeps one open
+   * for as long as the pylon runs.
+   */
   attachedClients: number;
 }
 
