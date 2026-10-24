@@ -6,7 +6,7 @@ import { dirname, join } from "node:path";
 import {
   agentSetupManifest, formatAgentSetup, installedLayout, parseAgentSetup, type AgentSetup, type InstalledAgentSetup,
 } from "../images/pylon/agent-setup/manifest.ts";
-import { installMismatches } from "../images/pylon/agent-setup/install.ts";
+import { installedPackage, installMismatches } from "../images/pylon/agent-setup/install.ts";
 import { httpsRemote, leaveOuts, parseLeaveOut, planAgentSetup, readPiSetup, type Capture, type LeaveOut, type MacSetup, type PluginFiles } from "./agent-setup.ts";
 import { pylonRecipeDir } from "./image-build.ts";
 
@@ -425,4 +425,27 @@ test("pi skills: a -path entry is matched as pi matches it, from the root pi fou
   // pi 1.4.0's own resolver, run on this home, loads herdr and both: teach is excluded relative to ~/.agents, and a
   // skill linked into both roots is decided by its ~/.pi/agent/skills link, which pi finds first.
   assert.deepEqual(setup.skills, [{ path: "skills/both", for: ["pi"] }, { path: "skills/herdr", for: ["pi"] }]);
+});
+
+test("the install check names a local pi package whose directory, declared resources or skills' SKILL.md files are missing", async () => {
+  const agentDir = await mkdtemp(join(tmpdir(), "agent-setup-pi-"));
+  const write = async (path: string, content: string) => {
+    await mkdir(dirname(join(agentDir, path)), { recursive: true });
+    await writeFile(join(agentDir, path), content);
+  };
+  await write("packages/viz/package.json", JSON.stringify({ pi: { skills: ["./skills"] } }));
+  await write("packages/viz/skills/viz/SKILL.md", "viz");
+  await write("packages/bare/package.json", JSON.stringify({ pi: { skills: ["./skills"] } }));
+  await write("packages/bare/skills/viz/README.md", "no SKILL.md");
+  await write("packages/unbuilt/package.json", JSON.stringify({ pi: { extensions: ["./dist/index.js"] } }));
+  const expected = installedLayout(parseAgentSetup(json({
+    ...small,
+    pi: { ...small.pi, packages: ["viz", "gone", "bare", "unbuilt"].map((name) => ({ kind: "local", path: `pi/${name}` })) },
+  })));
+  const actual = { ...expected, piPackages: await Promise.all(expected.piPackages.map((entry) => installedPackage(entry, agentDir))) };
+  assert.deepEqual(installMismatches(expected, actual).filter((line) => line.startsWith("missing")), [
+    "missing pi package packages/gone",
+    "missing pi package packages/bare",
+    "missing pi package packages/unbuilt",
+  ]);
 });
