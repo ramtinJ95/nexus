@@ -483,6 +483,8 @@ export class SandboxRuntime {
 				return this.persisting(
 					this.managed!.attach(action.port).then((service) => ({ service })),
 				);
+			case "unpreview":
+				return this.persisting(this.managed!.detach(action.port).then((refused) => ({ refused })));
 			case "logs": {
 				if (!action.service || !this.managed?.names().includes(action.service))
 					throw new Error("Choose a started service for guest logs");

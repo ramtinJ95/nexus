@@ -18,7 +18,7 @@ import type { Project } from "../project.ts";
 import type { ActualState } from "../reconcile.ts";
 import { call, CliError, exitCodes, follow, type Endpoint, type HostPort } from "./transport.ts";
 
-const version = "0.2.0";
+const version = "0.3.0";
 const defaults = { url: "http://rj-firebat.tailc817d3.ts.net:7470", socks: "localhost:1055" };
 const configFile = () => join(homedir(), ".config", "nexus", "cli.json");
 
@@ -28,6 +28,7 @@ const usage = `nexus ${version}, the Nexus control plane from this Mac
   nexus show <thread>                          a thread with its pylon, sessions, previews and outputs
   nexus ports <thread>                         the TCP ports the pylon listens on, and each one's preview
   nexus preview <thread> <port> [--wait]       publish a port as a preview, and print its URL
+  nexus unpreview <thread> <port>              stop publishing a port that preview published
   nexus conversation <thread>                  the agent's transcript
   nexus start --project P [--title T] [--message M] [--node N] [--branch B] [--commit C]
   nexus send <thread> <text...> [--steer] [--request-id ID]
@@ -139,6 +140,12 @@ function portsText(ports: ThreadDetail["ports"], id: string): string {
   ].join("\n");
 }
 
+function portArg(given: string): number {
+  const port = Number(given);
+  if (!Number.isInteger(port) || port < 1 || port > 65535) throw new CliError("invalid", `the port must be a whole number from 1 to 65535, got ${given}`);
+  return port;
+}
+
 const waitMs = 120_000;
 const waitPollMs = 1_000;
 
@@ -151,6 +158,26 @@ async function served(api: Api, id: string, port: number): Promise<Preview> {
     if (preview?.ready === true) return preview;
     if (Date.now() >= deadline) {
       throw new CliError("failed", `port ${port} of ${id} was not served within ${waitMs / 1000} s. \`nexus ports ${id}\` shows whether it listens and whether its preview is published`);
+    }
+    await sleep(waitPollMs);
+  }
+}
+
+/**
+ * Unlinking needs the pylon running. Each try is human activity, so the first wakes a paused pylon, and a 409 is
+ * tried again once a second until the pylon runs, unless the thread is archived or deleted.
+ */
+async function unpublish(api: Api, id: string, port: number): Promise<void> {
+  const deadline = Date.now() + waitMs;
+  for (;;) {
+    try {
+      await api("DELETE", `${thread(id)}/previews/${port}`, {});
+      return;
+    } catch (err) {
+      if (!(err instanceof CliError) || err.kind !== "conflict") throw err;
+      const { status } = (await api("GET", thread(id)) as ThreadDetail).thread;
+      if (status === "archived" || status === "deleted") throw err;
+      if (Date.now() >= deadline) throw new CliError("failed", `the pylon of ${id} did not run within ${waitMs / 1000} s, so port ${port} is still published. ${err.message}`);
     }
     await sleep(waitPollMs);
   }
@@ -404,11 +431,18 @@ const commands: Readonly<Record<string, Command>> = {
     args: [2, 2],
     options: { wait: { type: "boolean" } },
     async run(api, [id, given], v) {
-      const port = Number(given);
-      if (!Number.isInteger(port) || port < 1 || port > 65535) throw new CliError("invalid", `the port must be a whole number from 1 to 65535, got ${given}`);
+      const port = portArg(given!);
       const linked = await api("POST", `${thread(id!)}/previews`, { port }) as Preview;
       const preview = v.wait === true ? await served(api, id!, port) : linked;
       return { json: preview, text: preview.ready ? preview.url : `${preview.url} (not served yet. \`--wait\` waits until it is)` };
+    },
+  },
+  unpreview: {
+    args: [2, 2],
+    async run(api, [id, given]) {
+      const port = portArg(given!);
+      await unpublish(api, id!, port);
+      return { json: null, text: `Unpublished port ${port} of ${id}.` };
     },
   },
   conversation: {

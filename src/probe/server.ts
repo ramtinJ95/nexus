@@ -15,6 +15,7 @@ import {
   type Job, type JobEnvelope, type JobId, type JobStatus, type LiveHash, type NodeName, type NodeObservation,
   type DeclaredOutput, type ListeningFact, type ProbeAuthConfig, type ProbeEvent, type PylonCommand, type PylonId, type PylonObservation, type ServiceFact, type SessionFact, type Subject,
 } from "../protocol.ts";
+import type { ServiceName } from "../project.ts";
 import { sessionFacts } from "../sessions.ts";
 import type { Whois } from "../tailscale.ts";
 import { listOutputs } from "../outputs.ts";
@@ -73,6 +74,7 @@ const noPreviews: ProbeDeps["serve"] = {
   async converge(_pylonId, previews) {
     if (previews.length > 0) throw new JobFailure("invalid", "this probe was started without a preview gateway");
   },
+  async withdraw() {},
 };
 
 export async function startProbe(options: ProbeOptions): Promise<Probe> {
@@ -90,18 +92,48 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
       onHit: (hit) => emit({ type: "preview-hit", ...hit }),
     }),
   };
+  const liveHashes = new Map<PylonId, LiveHash>();
+  /** The previews of each pylon's last successful spawn in this process, which published and warmed them. */
+  const published = new Map<PylonId, Extract<Job, { kind: "spawn" }>["live"]["previews"]>();
+  /**
+   * Each pylon's services that were unlinked and not linked again. No spawn routes them: one that carries them was
+   * planned before the unlink, whenever it reaches the probe.
+   */
+  const unlinked = new Map<PylonId, Set<ServiceName>>();
+  /** Bumped when a pylon's routes stop matching a spawn's live spec, so a spawn in flight across it does not count as applied. */
+  const diverged = new Map<PylonId, number>();
+  const diverge = (pylonId: PylonId) => diverged.set(pylonId, (diverged.get(pylonId) ?? 0) + 1);
+  const relinked = (pylonId: PylonId, service: ServiceName) => unlinked.get(pylonId)?.delete(service);
+  const serve = previews === null ? noPreviews : createTailscaleServe({ cli: previews.tailscale, gateway: previews.gateway, routesFile: previews.routesFile, get: previews.get });
   const deps: ProbeDeps = {
     backend,
     secrets: options.secrets,
-    serve: previews === null ? noPreviews : createTailscaleServe({ cli: previews.tailscale, gateway: previews.gateway, routesFile: previews.routesFile, get: previews.get }),
+    serve: {
+      converge(pylonId, assigned, signal) {
+        const gone = unlinked.get(pylonId);
+        const routed = assigned.filter((p) => !gone?.has(p.service));
+        if (routed.length < assigned.length) diverge(pylonId);
+        return serve.converge(pylonId, routed, signal);
+      },
+      // The pylon no longer has what its last spawn applied, so the planner spawns again. A port linked again before
+      // a snapshot saw it unlinked gets its route back that way, as its registry row and live hash did not change.
+      // Recorded first, so a converge that starts while the route is withdrawn leaves the service out.
+      async withdraw(pylonId, service) {
+        let gone = unlinked.get(pylonId);
+        if (gone === undefined) unlinked.set(pylonId, gone = new Set());
+        gone.add(service);
+        diverge(pylonId);
+        await serve.withdraw(pylonId, service);
+        liveHashes.delete(pylonId);
+        const kept = published.get(pylonId)?.filter((p) => p.service !== service);
+        if (kept !== undefined) published.set(pylonId, kept);
+      },
+    },
     node,
     fetchPeer: (from, artifact, sha256, signal) => fetchArtifact(peerAddress(from), artifact, sha256, { whois, peers: auth.peers }, signal),
   };
   const jobs = new Map<JobId, { status: JobStatus; finishedAt: number | null }>();
   const busy = new Map<Subject, JobId>();
-  const liveHashes = new Map<PylonId, LiveHash>();
-  /** The previews of each pylon's last successful spawn in this process, which published and warmed them. */
-  const published = new Map<PylonId, Extract<Job, { kind: "spawn" }>["live"]["previews"]>();
   const observers = new Set<{ write(event: ProbeEvent): void; drop(err: Error): void }>();
   const runningJobs = new Set<Promise<void>>();
   const log = options.log ?? console.error;
@@ -116,6 +148,8 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
     guest: (pylonId) => backend.guest(pylonId),
     published: (pylonId) => published.get(pylonId) ?? [],
     changed: () => void publishSnapshot(),
+    withdraw: (pylonId, service) => deps.serve.withdraw(pylonId, service),
+    linked: relinked,
     async previewUrl(httpsPort) {
       if (previews === null) return null;
       const served = parseServeStatus(await previews.tailscale(["serve", "status", "--json"], shutdown.signal), previews.gateway.origin).get(httpsPort);
@@ -152,8 +186,13 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
     const late = new Promise<never>((_, reject) => {
       timer = setTimeout(() => reject(new Error(`no answer within ${serviceReadTimeoutMs} ms`)), serviceReadTimeoutMs);
     });
+    const since = diverged.get(pylonId);
     try {
-      return (await Promise.race([backend.guest(pylonId).services("list"), late])).services;
+      const facts = (await Promise.race([backend.guest(pylonId).services("list"), late])).services;
+      // A service that wants a preview under an unlinked name, linked again or declared, may be routed again. Not
+      // from a read that a withdraw overlapped, which may predate the unlink.
+      if (diverged.get(pylonId) === since) for (const fact of facts) if (fact.wantsPreview) relinked(pylonId, fact.name);
+      return facts;
     } catch (err) {
       log(`${pylonId} services: ${(err as Error).message}`);
       return null;
@@ -229,7 +268,16 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
    */
   let snapshots: Promise<unknown> = Promise.resolve();
   function snapshot(): Promise<NodeObservation> {
-    const next = snapshots.then(readSnapshot);
+    return betweenReads(readSnapshot);
+  }
+
+  /**
+   * Runs `work` in the read queue, so no read overlaps it, and each read queued before it is published before it
+   * starts. A link or unlink runs here: the control plane writes its preview as soon as the command answers, and a
+   * read from before the command, published after that, would undo the write until the next read.
+   */
+  function betweenReads<T>(work: () => Promise<T>): Promise<T> {
+    const next = snapshots.then(work);
     snapshots = next.catch(() => undefined); // the caller handles the error. The queue only needs to move on
     return next;
   }
@@ -261,11 +309,18 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
       liveHashes.delete(job.pylonId);
       published.delete(job.pylonId);
       reportedListening.delete(job.pylonId);
+      // The counter outlives a pause, so a services read that a withdraw and then a pause overlapped still sees a change.
+      if (job.kind === "delete") {
+        diverged.delete(job.pylonId);
+        unlinked.delete(job.pylonId);
+      }
     }
     const signal = AbortSignal.any([AbortSignal.timeout(deadlines[job.kind]), shutdown.signal]);
+    const seen = job.kind === "spawn" ? diverged.get(job.pylonId) : undefined;
     const run = runJob(job, deps, signal).then(
       () => {
-        if (job.kind === "spawn") {
+        // A withdraw while it ran may have come after its converge, so the planner spawns again.
+        if (job.kind === "spawn" && diverged.get(job.pylonId) === seen) {
           liveHashes.set(job.pylonId, job.liveHash);
           published.set(job.pylonId, job.live.previews);
           api.republished();
@@ -368,9 +423,11 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
       }
       const pylon = (await backend.list()).find((p) => p.pylonId === pylonId);
       if (pylon?.vm !== "running") return send(res, 409, `${pylonId} is ${pylon?.vm ?? "absent"}, not running`);
-      const result = await runCommand(pylonId, command, deps);
-      // A linked port is a new service that wants a preview, which the control plane allocates once it sees it.
-      if (command.kind === "link-port") void publishSnapshot();
+      const links = command.kind === "link-port" || command.kind === "unlink-port";
+      const result = await (links ? betweenReads(() => runCommand(pylonId, command, deps)) : runCommand(pylonId, command, deps));
+      if (result.kind === "link-port") relinked(pylonId, result.service);
+      // A linked port is a new service that wants a preview, and an unlinked one a service gone, which the control plane sees in the next read.
+      if (links) void publishSnapshot();
       return send(res, 200, JSON.stringify(result), "application/json");
     }
     const artifactMatch = /^\/v1\/artifacts\/([^/]+)$/.exec(path);

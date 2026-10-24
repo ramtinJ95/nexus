@@ -5,7 +5,7 @@
 import { resolve } from "node:path";
 import { parseArgs } from "node:util";
 
-const version = "0.1.0";
+const version = "0.2.0";
 const api = process.env.NEXUS_API || "http://nexus.pylon";
 
 const usage = `nexus ${version}, the Nexus pylon CLI
@@ -18,6 +18,7 @@ const usage = `nexus ${version}, the Nexus pylon CLI
   nexus service start <name> --command CMD [--port N] [--cwd DIR] [--health PATH|process]
                       [--env NAME=VALUE]... [--preview] [--title T] [--description D] [--timeout-ms N]
   nexus preview <port> [--title T]               publish a port that is already listening
+  nexus unpreview <port>                         stop publishing a port that preview published
   nexus output add file <path> [--title T]       declare a file as an output of this thread
   nexus output add diff [--title T]              snapshot the working tree as a diff output
   nexus output list
@@ -111,6 +112,11 @@ const commands = {
       console.error(`nexus: ${pending(r.service)}`);
       return `${r.service}\t${r.port}\t-`;
     },
+  },
+  unpreview: {
+    args: 1,
+    request: ([port]) => ({ op: "unpreview", port: int(port, "the port") }),
+    print: (r) => `Unpublished port ${r.port}. Its URL stops once Nexus publishes the previews without it, within seconds`,
   },
   "output add file": {
     args: 1,

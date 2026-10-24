@@ -15,7 +15,7 @@
 import type { Readable } from "node:stream";
 import type { ArtifactCopy, BrokenCause, ByteStream, CommandResult, Job, JobErrorCode, NodeName, PylonCommand, PylonId, ServiceFact, StreamRequest } from "./protocol.ts";
 import { checkoutDir, closeSession, openSession } from "./sessions.ts";
-import type { BootInputs, LiveSpec, OverlayFile, PreviewAssignment, ServiceDecl, ServiceName } from "./project.ts";
+import { linkedName, type BootInputs, type LiveSpec, type OverlayFile, type PreviewAssignment, type ServiceDecl, type ServiceName } from "./project.ts";
 import type { ArtifactId, ArtifactManifest, CheckpointId, ImageId, ImageRecipe, PortableArtifactId, TemplateBuildInputs, TemplateId } from "./images.ts";
 
 export interface VmBackend {
@@ -62,6 +62,11 @@ export interface Guest {
   startService(name: ServiceName, decl: ServiceDecl): Promise<readonly ServiceFact[]>;
   /** Supervise a port that is already listening. Returns the service name it was registered under. */
   linkPort(port: number, title?: string): Promise<string>;
+  /**
+   * Stop previewing a port linkPort linked. A port not linked is left as it is. Returns why it refused, for a port a
+   * service's preview owns, or null.
+   */
+  unlinkPort(port: number): Promise<string | null>;
   /** Plain-HTTP loopback origin that the probe's preview gateway forwards to. */
   previewOrigin(service: string): `http://127.0.0.1:${number}`;
 }
@@ -100,6 +105,8 @@ export interface ProbeDeps {
 export interface TailscaleServe {
   /** Publish exactly these for this pylon and remove its others, then GET each until it answers (S4: the first TLS request can hang). */
   converge(pylonId: PylonId, previews: readonly PreviewAssignment[], signal: AbortSignal): Promise<void>;
+  /** Stops routing the service's https port now, so it answers 404 until a converge removes its serve entry. */
+  withdraw(pylonId: PylonId, service: ServiceName): Promise<void>;
 }
 
 export class JobFailure extends Error {
@@ -189,6 +196,11 @@ export async function runCommand(pylonId: PylonId, command: PylonCommand, deps: 
     }
     case "link-port":
       return { kind: "link-port", service: await guest.linkPort(command.port) };
+    case "unlink-port": {
+      const refused = await guest.unlinkPort(command.port);
+      if (refused === null) await deps.serve.withdraw(pylonId, linkedName(command.port));
+      return { kind: "unlink-port", refused };
+    }
   }
 }
 

@@ -42,8 +42,9 @@ async function setup(t: import("node:test").TestContext, options: { dotfiles?: t
   const commands: [PylonId, PylonCommand][] = [];
   /** What the node's probe answers a guest command with. Tests replace it. */
   let answer = async (command: PylonCommand): Promise<CommandResult> => {
-    if (command.kind !== "link-port") throw new Error(`unexpected ${command.kind} command`);
-    return { kind: "link-port", service: `port-${command.port}` };
+    if (command.kind === "link-port") return { kind: "link-port", service: `port-${command.port}` };
+    if (command.kind === "unlink-port") return { kind: "unlink-port", refused: null };
+    throw new Error(`unexpected ${command.kind} command`);
   };
   const api = await startApi({
     registry, host: "127.0.0.1", port: 0,
@@ -64,10 +65,12 @@ async function setup(t: import("node:test").TestContext, options: { dotfiles?: t
   });
   /** Sends JSON as the dashboard and CLI do. `headers` overrides any header, so tests can pose as a browser page. */
   function call(method: string, path: string, body?: unknown, headers: Record<string, string> = {}): Promise<{ status: number; body: any }> {
+    const payload = body === undefined ? undefined : typeof body === "string" ? body : JSON.stringify(body);
     return new Promise((resolve, reject) => {
       const req = request({
         host: "127.0.0.1", port: api.port, method, path,
-        headers: { host: `127.0.0.1:${api.port}`, ...(method === "GET" ? {} : { "content-type": "application/json" }), ...headers },
+        // As fetch and the CLI do. Node frames a DELETE's body only with an explicit length.
+        headers: { host: `127.0.0.1:${api.port}`, ...(method === "GET" ? {} : { "content-type": "application/json" }), ...(payload === undefined ? {} : { "content-length": String(Buffer.byteLength(payload)) }), ...headers },
       }, (res) => {
         let text = "";
         res.setEncoding("utf8");
@@ -75,7 +78,7 @@ async function setup(t: import("node:test").TestContext, options: { dotfiles?: t
         res.on("end", () => resolve({ status: res.statusCode!, body: text === "" ? null : JSON.parse(text) }));
       });
       req.on("error", reject);
-      req.end(body === undefined ? undefined : typeof body === "string" ? body : JSON.stringify(body));
+      req.end(payload);
     });
   }
   return {
@@ -303,6 +306,57 @@ test("linking a port of a pylon that is not running, or of an archived or delete
   assert.equal((await s.call("POST", `/v1/threads/${s.thread.id}/previews`, { port: 3000 })).status, 409);
   assert.deepEqual(s.commands, [], "an archived or deleted thread's probe is never asked");
   assert.deepEqual(s.registry.previews(s.thread.pylonId), []);
+});
+
+test("unpublishing a linked port goes through the node's probe, drops its preview at once, counts as human activity, and is safe to repeat", async (t) => {
+  const s = await withThread(t);
+  const detail = async () => (await s.call("GET", `/v1/threads/${s.thread.id}`)).body as ThreadDetail;
+  const linked = (await s.call("POST", `/v1/threads/${s.thread.id}/previews`, { port: 3000 })).body;
+  // The node's last read still lists the port's service, as it does until its next read.
+  observeRunning(s, { services: [{ name: "port-3000", state: "ready", port: 3000, declared: false, wantsPreview: true }], listening: [{ port: 3000 }] });
+  s.registry.recordActivity(s.thread.id, { human: 1 });
+  s.woken.length = 0;
+  s.commands.length = 0;
+  assert.deepEqual(await s.call("DELETE", `/v1/threads/${s.thread.id}/previews/3000`, {}), { status: 204, body: null });
+  assert.deepEqual(s.commands, [[s.thread.pylonId, { kind: "unlink-port", port: 3000 }]]);
+  assert.deepEqual((await detail()).previews, []);
+  assert.deepEqual((await detail()).ports, [{ port: 3000, service: "port-3000", preview: null }], "the port is listed again, without a preview");
+  assert.ok(s.registry.thread(s.thread.id)!.lastHumanActivityAt > 1);
+  assert.ok(s.woken.includes(node), "the loop publishes the previews without it at its next pass");
+  assert.deepEqual(await s.call("DELETE", `/v1/threads/${s.thread.id}/previews/3000`, {}), { status: 204, body: null }, "unpublishing again succeeds");
+  assert.equal(s.commands.length, 2, "and asks the pylon again, which knows whether the port is linked");
+  assert.deepEqual((await s.call("POST", `/v1/threads/${s.thread.id}/previews`, { port: 3000 })).body, linked, "the port can be published again, on the port it freed");
+
+  // The pylon refuses a port a service's preview owns, and its reason, which names the service, is the whole error.
+  s.registry.allocatePreviews(s.thread.pylonId, ["web"], { first: 10200, last: 10299 });
+  const reason = "Port 5173 is the preview of service web, not a linked port. Remove the preview from /home/user/workspace/repo/.nexus/services.yaml to unpublish it";
+  s.probeAnswers(async () => ({ kind: "unlink-port", refused: reason }));
+  assert.deepEqual(await s.call("DELETE", `/v1/threads/${s.thread.id}/previews/5173`, {}), { status: 422, body: { error: reason } });
+  assert.deepEqual((await detail()).previews.map((p) => p.service), ["port-3000", "web"], "a refused unlink keeps every preview");
+
+  s.commands.length = 0;
+  for (const port of ["abc", "0", "70000", "22"]) assert.equal((await s.call("DELETE", `/v1/threads/${s.thread.id}/previews/${port}`, {})).status, 400, port);
+  assert.deepEqual(s.commands, [], "a bad or reserved port never reaches the probe");
+});
+
+test("unpublishing a port of a pylon that is not running, or of an archived or deleted thread, is refused with 409", async (t) => {
+  const s = await withThread(t);
+  await s.call("POST", `/v1/threads/${s.thread.id}/previews`, { port: 3000 });
+  s.probeAnswers(async () => { throw Object.assign(new Error("rj-firebat: pylon-x is stopped, not running"), { code: "not-running" }); });
+  s.woken.length = 0;
+  const paused = await s.call("DELETE", `/v1/threads/${s.thread.id}/previews/3000`, {});
+  assert.equal(paused.status, 409);
+  assert.match(paused.body.error, /is not running yet. This request wakes it/);
+  assert.ok(s.woken.includes(node), "the request wakes the pylon");
+  assert.deepEqual(s.registry.previews(s.thread.pylonId).map((p) => p.service), ["port-3000"], "the preview stays until the pylon unlinks the port");
+  s.probeAnswers(async () => { throw Object.assign(new Error("rj-firebat: connect ECONNREFUSED"), { code: "unreachable" }); });
+  assert.equal((await s.call("DELETE", `/v1/threads/${s.thread.id}/previews/3000`, {})).status, 503);
+  assert.equal((await s.call("POST", `/v1/threads/${s.thread.id}/archive`)).status, 200);
+  s.commands.length = 0;
+  assert.equal((await s.call("DELETE", `/v1/threads/${s.thread.id}/previews/3000`, {})).status, 409);
+  assert.equal((await s.call("DELETE", `/v1/threads/${s.thread.id}`)).status, 200);
+  assert.equal((await s.call("DELETE", `/v1/threads/${s.thread.id}/previews/3000`, {})).status, 409);
+  assert.deepEqual(s.commands, [], "an archived or deleted thread's probe is never asked");
 });
 
 test("a failed pylon shows failed with its reason until its thread is deleted, and then shows the delete", async (t) => {

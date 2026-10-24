@@ -117,6 +117,7 @@ nexus service logs web --lines 200
 nexus service restart web
 nexus service start storybook --command "pnpm storybook --port \$PORT" --preview
 nexus preview 6006 --title Storybook       # publish a port that is already listening
+nexus unpreview 6006                       # stop publishing it
 nexus output add file artifacts/screenshot.png --title "Checkout page"
 nexus output add diff                      # snapshot the working tree as a diff output
 ```

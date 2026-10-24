@@ -293,10 +293,14 @@ test("the inspector lists each listening port once: under Ports with an Open but
   s.observeWith({ services: [{ name: "web", state: "ready", port: 5173, declared: true, wantsPreview: true }, { name: "port-3000", state: "ready", port: 3000, declared: false, wantsPreview: true }], listening: [3000, 5173] }, fix);
   const after = await page();
   assert.equal(textOf(after.ports), "Ports 0 Every port that listens is under Previews. A server bound only to ::1 can't be previewed, so bind it to 0.0.0.0 or 127.0.0.1.");
-  assert.equal(after.previews, "Previews 2 port-3000 starting rj-firebat.tail.ts.net:8444 web starting rj-firebat.tail.ts.net:8443");
+  assert.equal(after.previews, "Previews 2 port-3000 starting Unpublish rj-firebat.tail.ts.net:8444 web starting rj-firebat.tail.ts.net:8443", "only the linked port's preview can be unpublished");
+  const unpublish = `<button type="button" class="btn btn-xs btn-ghost" data-action="unpublish" data-thread="${fix.id}" data-port="3000" aria-label="Unpublish port-3000">Unpublish</button>`;
+  assert.ok(sectionOf((await s.call("GET", `/threads/${fix.id}`)).text, "previews-h").includes(unpublish));
 
   s.observeWith({ listening: [] }, fix);
   assert.equal(textOf((await page()).ports), "Ports 0 Nothing listens yet. A server bound only to ::1 can't be previewed, so bind it to 0.0.0.0 or 127.0.0.1.");
+  await s.call("POST", `/v1/threads/${fix.id}/archive`);
+  assert.ok(!(await page()).previews.includes("Unpublish"), "an archived thread's previews cannot be unpublished");
 });
 
 test("a paused pylon's preview keeps its link, labelled paused, unless the thread is archived", async (t) => {

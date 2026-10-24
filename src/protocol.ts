@@ -48,7 +48,7 @@ export type Job =
  * spawn means "make this pylon run and look like `live`". It is Amp's spawn plus wake plus "re-apply the
  * live spec". If the VM already runs, `boot` is ignored and only `live` is applied (previews published,
  * overlay files written). That is how a probe restart heals: its observations report `liveHash: null`,
- * so the planner sends spawn again.
+ * so the planner sends spawn again. Unlinking a port withdraws its preview route at once and heals the same way.
  *
  * pause records the open Herdr sessions in /home/user/.nexus/sessions.json, stops services, writes the
  * disk checkpoint and stops the VM. The session list is on the disk, so the checkpoint carries it and a
@@ -152,7 +152,7 @@ export type BrokenCause = "setup" | "saved-setup" | "services" | "controller";
 const brokenCauses: ReadonlySet<unknown> = new Set(["setup", "saved-setup", "services", "controller", "unknown"] satisfies (BrokenCause | "unknown")[]);
 
 export interface RunningFacts {
-  liveHash: LiveHash | null; // null until the probe has applied a LiveSpec since its own start
+  liveHash: LiveHash | null; // null until the probe has applied a LiveSpec since its own start or its last withdrawn preview route
   bootedAt: string;
   bootedFrom: { image: ImageId; checkpoint: CheckpointId | null };
   services: readonly ServiceFact[] | null; // null when the supervisor could not be read
@@ -193,7 +193,9 @@ export type PylonCommand =
   | { kind: "close-session"; herdrPane: string }
   | { kind: "service"; op: "ensure" | "restart" | "stop" | "logs"; name?: string; lines?: number }
   /** Previews a port that already listens, or will, as `nexus preview <port>` in the pylon does. Safe to repeat. */
-  | { kind: "link-port"; port: number };
+  | { kind: "link-port"; port: number }
+  /** Stops previewing a linked port. A port not linked succeeds, and a port a service's preview owns is refused. Safe to repeat. */
+  | { kind: "unlink-port"; port: number };
 
 export type CommandResult =
   | { kind: "exec"; exitCode: number | null; output: string; truncated: boolean }
@@ -201,7 +203,9 @@ export type CommandResult =
   | { kind: "close-session" }
   | { kind: "service"; services: readonly ServiceFact[]; logs?: string }
   /** The service the port is previewed under: `port-<port>`, or the service that already owns the port. */
-  | { kind: "link-port"; service: string };
+  | { kind: "link-port"; service: string }
+  /** `refused` says why the pylon left a port a service's preview owns, for a person to read. Null once the port is not linked. */
+  | { kind: "unlink-port"; refused: string | null };
 
 /**
  * `pty: null` is a raw pipe, such as the pi-env daemon. Its stream carries the process's stdout only, and its
@@ -691,6 +695,7 @@ export function parsePylonCommand(body: string): PylonCommand {
       if (c.lines !== undefined && (!Number.isInteger(c.lines) || (c.lines as number) < 1)) throw new Error("command.lines is not a positive integer");
       break;
     case "link-port":
+    case "unlink-port":
       if (!Number.isInteger(c.port) || (c.port as number) < 1 || (c.port as number) > 65535) throw new Error("command.port is not an integer from 1 to 65535");
       if (reservedPorts.has(c.port as number)) throw new Error(`command.port ${c.port as number} is Nexus's own`);
       break;
@@ -704,6 +709,7 @@ function parseCommandResult(command: PylonCommand, body: string): CommandResult 
   if (r.kind !== command.kind) throw new Error(`a ${command.kind} command got a ${JSON.stringify(r.kind)} result`);
   if (r.kind === "open-session") string(r.herdrPane, "result.herdrPane");
   if (r.kind === "link-port") string(r.service, "result.service");
+  if (r.kind === "unlink-port" && r.refused !== null) string(r.refused, "result.refused");
   return r as unknown as CommandResult;
 }
 

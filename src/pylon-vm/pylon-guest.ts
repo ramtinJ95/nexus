@@ -43,6 +43,7 @@ const factsSchema = z.array(z.strictObject({
 }));
 const logsReplySchema = z.object({ output: z.string() });
 const linkReplySchema = z.object({ service: z.string() });
+const unlinkReplySchema = z.object({ refused: z.string().nullable() });
 const loopback = /^http:\/\/127\.0\.0\.1:\d+$/;
 
 /** `run` sends an action to the instance's controller, and `dir` is the instance directory. */
@@ -107,6 +108,10 @@ export function pylonGuest(pylonId: PylonId, dir: string, run: (action: Record<s
 
 		async linkPort(port, title) {
 			return linkReplySchema.parse(await run({ action: "preview", name, port, ...(title === undefined ? {} : { title }) })).service;
+		},
+
+		async unlinkPort(port) {
+			return unlinkReplySchema.parse(await run({ action: "unpreview", name, port })).refused;
 		},
 
 		previewOrigin(service) {

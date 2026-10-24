@@ -541,7 +541,7 @@ async function previewSetup(t: import("node:test").TestContext, services: Guest[
     ...fake.backend,
     guest: (id) => {
       if (fake.pylons.get(id)?.vm !== "running") throw new Error(`${id} is not running`);
-      return { previewOrigin: () => "http://127.0.0.1:9", services } as unknown as Guest; // nothing listens there
+      return { previewOrigin: () => "http://127.0.0.1:9", services, linkPort: async (port: number) => `port-${port}`, unlinkPort: async () => null } as unknown as Guest; // nothing listens there
     },
   };
   const logged: string[] = [];
@@ -559,7 +559,7 @@ async function previewSetup(t: import("node:test").TestContext, services: Guest[
       resolve({ status: res.statusCode!, type: res.headers["content-type"], body });
     }).on("error", reject).end();
   });
-  return { tailscale, open, run, visit, gatewayPort, logged };
+  return { tailscale, open, run, visit, gatewayPort, logged, fake };
 }
 
 const withPreview = (id: PylonId, httpsPort: number): Job =>
@@ -684,6 +684,62 @@ test("a link-port command links the port in the guest, answers its service, and 
   assert.deepEqual(linked, [3000], "a refused port reaches no guest");
 });
 
+test("an unlink-port command waits for a read in flight, which is published before it answers, and the next read leaves the port out", async (t) => {
+  let ports = [3000];
+  let linked = [3000];
+  let gate: PromiseWithResolvers<void> | null = null;
+  let reads = 0;
+  const guest: Guest = {
+    ...listeningGuest(() => ports),
+    async services() {
+      reads++;
+      await gate?.promise;
+      return { services: linked.map((port): ServiceFact => ({ name: `port-${port}`, state: "ready", port, declared: false, wantsPreview: true })) };
+    },
+    async unlinkPort(port) {
+      // A pylon's unlink is a controller round trip, long after the read published before it reached the control plane.
+      await until("the read in flight reaches the observer", () => seen.length === 2);
+      linked = linked.filter((p) => p !== port);
+      return null;
+    },
+  };
+  const { client } = await setup(t, { listeningPollMs: 20 }, guest);
+  const env = envelope(spawnJob, node, Date.now());
+  await client.submit(env);
+  await finished(client, env.jobId);
+  const abort = new AbortController();
+  t.after(() => abort.abort());
+  const seen: string[] = [];
+  void (async () => {
+    for await (const event of client.observe(abort.signal)) {
+      const services = runningPylon(event)?.services;
+      if (services) seen.push(`read ${services.map((s) => s.name).join(" ") || "none"}`);
+    }
+  })().catch(() => undefined);
+  const until = async (what: string, predicate: () => boolean) => {
+    for (const deadline = Date.now() + 3_000; !predicate();) {
+      if (Date.now() > deadline) throw new Error(`timed out waiting until ${what}`);
+      await new Promise((r) => setTimeout(r, 5));
+    }
+  };
+  await until("the first snapshot arrives", () => seen.length === 1);
+
+  gate = Promise.withResolvers();
+  const before = reads;
+  ports = [3000, 5173];
+  await until("a read is in flight", () => reads > before);
+  const reply = client.command(pylonId, { kind: "unlink-port", port: 3000 }).then((result) => { seen.push("reply"); return result; });
+  await new Promise((r) => setTimeout(r, 50));
+  assert.deepEqual(linked, [3000], "the unlink waits for the read in flight");
+  gate.resolve();
+  gate = null;
+  assert.deepEqual(await reply, { kind: "unlink-port", refused: null });
+  assert.deepEqual(linked, []);
+  await until("the next read is published", () => seen.at(-1) === "read none");
+  assert.deepEqual(seen, ["read port-3000", "read port-3000", "reply", "read none"]);
+  await assert.rejects(client.command(pylonId, { kind: "unlink-port", port: 22 }), /HTTP 400: command.port 22 is Nexus's own/);
+});
+
 test("observations report the previews of the pylon's last successful spawn, not of a spawn that failed", async (t) => {
   const { tailscale, open, run, gatewayPort } = await previewSetup(t);
   const { client } = await open();
@@ -703,6 +759,106 @@ test("observations report the previews of the pylon's last successful spawn, not
   assert.deepEqual(await observedPreviews(), [{ service: "web", httpsPort: 10000, ready: true }]);
   await run(client, both);
   assert.deepEqual(await observedPreviews(), [{ service: "web", httpsPort: 10000, ready: true }, { service: "api", httpsPort: 10001, ready: true }]);
+});
+
+test("an unlinked port's route is withdrawn at once, and the pylon counts as unapplied until a spawn that started after it", async (t) => {
+  const { open, run, visit, fake } = await previewSetup(t);
+  const { client } = await open();
+  const linked: Job = { ...spawnJob, live: { previews: [{ service: "web", httpsPort: 10000 }, { service: "port-3000", httpsPort: 10001 }], overlay: [] } };
+  const observed = async () => {
+    const abort = new AbortController();
+    const snapshot: ProbeEvent | undefined = (await client.observe(abort.signal)[Symbol.asyncIterator]().next()).value;
+    abort.abort();
+    assert.ok(snapshot?.type === "snapshot");
+    const pylon = snapshot.observation.pylons.find((p) => p.pylonId === pylonId);
+    assert.ok(pylon?.phase === "running");
+    return { liveHash: pylon.liveHash, previews: pylon.previews.map((p) => p.service) };
+  };
+  await run(client, linked);
+  assert.equal((await visit(10001)).status, 502, "routed to the guest, where nothing listens");
+
+  // A spawn of the same live spec in flight, as when the port is linked again before a snapshot reads the gap.
+  fake.hold();
+  const inFlight = envelope(linked, node, Date.now());
+  await client.submit(inFlight);
+  assert.deepEqual(await client.command(pylonId, { kind: "unlink-port", port: 3000 }), { kind: "unlink-port", refused: null });
+  assert.equal((await visit(10001)).status, 404);
+  assert.deepEqual(await observed(), { liveHash: null, previews: ["web"] }, "the planner sees the pylon unapplied, so it spawns again");
+  fake.release();
+  assert.equal((await finished(client, inFlight.jobId)).state, "succeeded");
+  assert.deepEqual(await observed(), { liveHash: null, previews: ["web"] }, "a spawn that started before the withdraw does not count as applied");
+});
+
+test("a spawn planned before an unlink that reaches the probe after it leaves the port unrouted, until the port is linked again", async (t) => {
+  const { open, run, visit } = await previewSetup(t);
+  const { client } = await open();
+  const linked: Job = { ...spawnJob, live: { previews: [{ service: "web", httpsPort: 10000 }, { service: "port-3000", httpsPort: 10001 }], overlay: [] } };
+  const observed = async () => {
+    const abort = new AbortController();
+    const snapshot: ProbeEvent | undefined = (await client.observe(abort.signal)[Symbol.asyncIterator]().next()).value;
+    abort.abort();
+    assert.ok(snapshot?.type === "snapshot");
+    const pylon = snapshot.observation.pylons.find((p) => p.pylonId === pylonId);
+    assert.ok(pylon?.phase === "running");
+    return { liveHash: pylon.liveHash, previews: pylon.previews.map((p) => p.service), routes: snapshot.observation.previewRoutes?.map((r) => r.service) };
+  };
+  await run(client, linked);
+  assert.deepEqual(await client.command(pylonId, { kind: "unlink-port", port: 3000 }), { kind: "unlink-port", refused: null });
+
+  await run(client, linked);
+  assert.equal((await visit(10001)).status, 404);
+  assert.deepEqual(await observed(), { liveHash: null, previews: ["web"], routes: ["web"] }, "it does not count as applied, so the planner spawns again");
+
+  assert.deepEqual(await client.command(pylonId, { kind: "link-port", port: 3000 }), { kind: "link-port", service: "port-3000" });
+  await run(client, linked);
+  assert.equal((await visit(10001)).status, 502, "linking it again is what lets a spawn route it");
+  assert.deepEqual(await observed(), { liveHash: "hash-1", previews: ["web", "port-3000"], routes: ["web", "port-3000"] });
+});
+
+test("a spawn that started before an unlink leaves the unlinked port unrouted, so a pause right after keeps no route to it", async (t) => {
+  const { tailscale, open, run, visit, fake } = await previewSetup(t);
+  const { client } = await open();
+  const linked: Job = { ...spawnJob, live: { previews: [{ service: "web", httpsPort: 10000 }, { service: "port-3000", httpsPort: 10001 }], overlay: [] } };
+  await run(client, linked);
+  fake.hold();
+  const stale = envelope(linked, node, Date.now());
+  await client.submit(stale);
+  assert.deepEqual(await client.command(pylonId, { kind: "unlink-port", port: 3000 }), { kind: "unlink-port", refused: null });
+  fake.release();
+  assert.equal((await finished(client, stale.jobId)).state, "succeeded");
+  assert.equal((await visit(10001)).status, 404, "the stale spawn's converge left the withdrawn port out");
+  assert.deepEqual(Object.keys(tailscale.entries()), ["10000"]);
+
+  await run(client, { kind: "pause", pylonId, checkpoint: "ckpt-unit-1" });
+  const abort = new AbortController();
+  const snapshot: ProbeEvent | undefined = (await client.observe(abort.signal)[Symbol.asyncIterator]().next()).value;
+  abort.abort();
+  assert.ok(snapshot?.type === "snapshot");
+  assert.deepEqual(snapshot.observation.previewRoutes, [{ httpsPort: 10000, pylonId, service: "web" }], "the paused pylon keeps only web's route");
+});
+
+test("a service declared under an unlinked port's name with a preview is routed again once a read shows it", async (t) => {
+  let facts: ServiceFact[] = [];
+  const { open, run, visit } = await previewSetup(t, async () => ({ services: facts }));
+  const { client } = await open();
+  const linked: Job = { ...spawnJob, live: { previews: [{ service: "web", httpsPort: 10000 }, { service: "port-3000", httpsPort: 10001 }], overlay: [] } };
+  const observedHash = async () => {
+    const abort = new AbortController();
+    const snapshot: ProbeEvent | undefined = (await client.observe(abort.signal)[Symbol.asyncIterator]().next()).value;
+    abort.abort();
+    assert.ok(snapshot?.type === "snapshot");
+    const pylon = snapshot.observation.pylons.find((p) => p.pylonId === pylonId);
+    assert.ok(pylon?.phase === "running");
+    return pylon.liveHash;
+  };
+  await run(client, linked);
+  assert.deepEqual(await client.command(pylonId, { kind: "unlink-port", port: 3000 }), { kind: "unlink-port", refused: null });
+  facts = [{ name: "port-3000", state: "ready", port: 4000, declared: true, wantsPreview: true }];
+  assert.equal(await observedHash(), null);
+
+  await run(client, linked);
+  assert.equal((await visit(10001)).status, 502, "routed to the declared service");
+  assert.equal(await observedHash(), "hash-1");
 });
 
 test("after a probe restart a paused pylon keeps its preview, and a hit gets the waking page and is reported", async (t) => {

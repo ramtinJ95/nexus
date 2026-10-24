@@ -5,7 +5,7 @@
  * in a request is the guest's, so it is parsed here.
  *
  * A reply is the CLI's --json output. An error is plain text: 400 for a request this API does not take, 409 for an
- * output the agent can fix, such as a missing file, and 500 for a failed guest operation, whose message the
+ * output or a port the agent can fix, such as a missing file or a port a service's preview owns, and 500 for a failed guest operation, whose message the
  * guest's own refusals (an unknown service, a declared name given to `service start`) come through in.
  */
 import { chmod, rm } from "node:fs/promises";
@@ -13,7 +13,7 @@ import { createServer, type IncomingMessage } from "node:http";
 import { z } from "zod";
 import type { Guest } from "../backend.ts";
 import { addOutput, listOutputs, OutputRefused } from "../outputs.ts";
-import { serviceDecl, type PreviewAssignment, type PylonApiRequest, type ServiceName } from "../project.ts";
+import { linkedName, serviceDecl, type PreviewAssignment, type PylonApiRequest, type ServiceName } from "../project.ts";
 import type { DeclaredOutput, PylonId, ServiceFact } from "../protocol.ts";
 import { bridgePylonHeader, hostBridgeSocket } from "../pylon-vm/host-bridge.ts";
 import { privateDirectory } from "../pylon-vm/storage.ts";
@@ -43,6 +43,8 @@ export interface PylonApiReplies {
   "service-start": { services: readonly ServiceView[] };
   /** `url` is null when no preview was published within the wait. The service stays linked, and a later `services list` shows the URL. */
   preview: { service: ServiceName; port: number; url: string | null };
+  /** The control plane drops the preview once it sees the port unlinked, and its URL stops at its next spawn. */
+  unpreview: { port: number };
   "output-add": { output: DeclaredOutput };
   "output-list": { outputs: readonly DeclaredOutput[] };
 }
@@ -61,6 +63,10 @@ export interface PylonApiDeps {
   changed(): void;
   /** The URL tailscale serves for an https port, or null when it serves none. */
   previewUrl(httpsPort: number): Promise<string | null>;
+  /** Stops routing an unlinked port's preview now (TailscaleServe.withdraw). */
+  withdraw(pylonId: PylonId, service: ServiceName): Promise<void>;
+  /** A port was linked, so spawns may route its service again after a withdraw. */
+  linked(pylonId: PylonId, service: ServiceName): void;
   /** How long `services ensure`, `service start` and `preview` wait for a URL. Default 30 s. */
   previewWaitMs?: number;
 }
@@ -72,6 +78,8 @@ export interface PylonApi {
 }
 
 class Invalid extends Error {}
+/** A request the pylon turns down for a reason the agent can act on, such as a port a service's preview owns. */
+class Refused extends Error {}
 
 const serviceName = z.string().regex(/^[a-z0-9][a-z0-9-]{0,31}$/);
 const requestSchema = z.discriminatedUnion("op", [
@@ -81,6 +89,7 @@ const requestSchema = z.discriminatedUnion("op", [
   z.strictObject({ op: z.literal("service-logs"), name: serviceName, lines: z.int().min(1).max(500) }),
   z.strictObject({ op: z.literal("service-start"), name: serviceName, decl: serviceDecl }),
   z.strictObject({ op: z.literal("preview"), port: z.int().min(1).max(65535), title: z.string().min(1).optional() }),
+  z.strictObject({ op: z.literal("unpreview"), port: z.int().min(1).max(65535) }),
   z.strictObject({
     op: z.literal("output-add"),
     output: z.discriminatedUnion("kind", [
@@ -174,10 +183,17 @@ export function createPylonApi(deps: PylonApiDeps): PylonApi {
       }
       case "preview": {
         const service = await guest.linkPort(request.port, request.title);
+        deps.linked(pylonId, service);
         deps.changed();
         const found = await urls(pylonId, [service], waitMs);
         return { service, port: request.port, url: found.get(service) ?? null };
       }
+      case "unpreview":
+        const refused = await guest.unlinkPort(request.port);
+        if (refused !== null) throw new Refused(refused);
+        await deps.withdraw(pylonId, linkedName(request.port));
+        deps.changed();
+        return { port: request.port };
       case "output-add": {
         const output = await addOutput(guest, request.output);
         deps.changed();
@@ -194,7 +210,7 @@ export function createPylonApi(deps: PylonApiDeps): PylonApi {
         return { status: 200, body: JSON.stringify(await handle(pylonId, parseRequest(body))) };
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
-        return { status: err instanceof Invalid ? 400 : err instanceof OutputRefused ? 409 : 500, body: message };
+        return { status: err instanceof Invalid ? 400 : err instanceof OutputRefused || err instanceof Refused ? 409 : 500, body: message };
       }
     },
     republished() {

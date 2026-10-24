@@ -5,14 +5,15 @@
  * Each node has one pass at a time. A pass that is asked for while one runs is coalesced into a single
  * pass after it, so no two ticks of the same pylon overlap and a slow probe holds up only its own node.
  *
- * Previews: each ingested event gives every service a running pylon wants previewed a port from `previewPorts`.
+ * Previews: each ingested event gives every service a running pylon wants previewed a port from `previewPorts`,
+ * and drops the preview of each port the pylon no longer links.
  * Each pass renders the pylon's LiveSpec from its records before its tick, so a new port changes the liveHash and
  * the planner sends it in a spawn. The ports go back once its node neither has the pylon of a deleted thread nor routes
  * a preview to it.
  */
 import { setTimeout as delay } from "node:timers/promises";
 import { desiredPhase, type RegistryWrite } from "../reconcile.ts";
-import { liveHashOf } from "../project.ts";
+import { linkedPort, liveHashOf } from "../project.ts";
 import { tick, type TickContext } from "../tick.ts";
 import type { NodeName, NodeObservation, ProbeClient, ProbeError, ProbeEvent, PylonId, PylonObservation } from "../protocol.ts";
 import type { ArtifactId } from "../images.ts";
@@ -82,15 +83,24 @@ export function startLoop(options: LoopOptions): Loop {
     return image.sha256;
   }
 
-  /** A port, once allocated, stays the pylon's while its thread lives, so its URL survives pauses and restarts. */
-  function allocatePreviews(observation: NodeObservation) {
-    for (const observed of observation.pylons) {
+  /**
+   * A port, once allocated, stays the pylon's while its thread lives, so its URL survives pauses and restarts. A
+   * linked port's preview lasts only while the pylon links the port, so it goes once a read of the pylon's services
+   * leaves it out. Only the lists `pylons` read count, never one carried from an earlier read: that could still
+   * list a port unlinked since.
+   */
+  function reconcilePreviews(node: NodeName, pylons: readonly PylonObservation[]) {
+    for (const observed of pylons) {
       if (observed.phase !== "running" || observed.services === null) continue;
       const pylon = registry.pylon(observed.pylonId);
       // A pylon reported by a node the registry does not place it on is an orphan there.
-      if (pylon?.node !== observation.node || registry.thread(pylon.thread as ThreadId)!.status === "deleted") continue;
+      if (pylon?.node !== node || registry.thread(pylon.thread as ThreadId)!.status === "deleted") continue;
+      const services = observed.services;
+      for (const { service } of registry.previews(pylon.pylonId)) {
+        if (linkedPort(service) !== null && !services.some((s) => s.name === service)) registry.releasePreview(pylon.pylonId, service);
+      }
       try {
-        registry.allocatePreviews(pylon.pylonId, observed.services.filter((s) => s.wantsPreview).map((s) => s.name), previewPorts);
+        registry.allocatePreviews(pylon.pylonId, services.filter((s) => s.wantsPreview).map((s) => s.name), previewPorts);
       } catch (err) {
         log(`${pylon.pylonId}: ${(err as Error).message}`);
       }
@@ -174,7 +184,7 @@ export function startLoop(options: LoopOptions): Loop {
           const known = new Map(registry.pylonsOn(node).map((p) => [p.pylonId, last?.pylons.find((o) => o.pylonId === p.pylonId) ?? "absent" as const]));
           const current = merge(last, event);
           registry.ingested(current, ingest(event, node, known, Date.now()));
-          allocatePreviews(current);
+          reconcilePreviews(node, event.type === "snapshot" ? event.observation.pylons : event.type === "pylon" ? [event.pylon] : []);
           if (event.type === "snapshot") linkUp(link);
           void wake(node);
         }

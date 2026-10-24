@@ -19,7 +19,7 @@ async function api(method, path, body) {
   });
   const text = await res.text();
   const reply = text === "" ? null : JSON.parse(text);
-  if (!res.ok) throw new Error(reply?.error ?? `${method} ${path} failed with ${res.status}`);
+  if (!res.ok) throw Object.assign(new Error(reply?.error ?? `${method} ${path} failed with ${res.status}`), { status: res.status });
   return reply;
 }
 
@@ -187,6 +187,21 @@ const actions = {
   "retry-pylon": (thread) => api("POST", `/v1/threads/${thread}/pylon/retry`),
   // Publishes the port. The next refresh shows its preview, which links once the node serves it.
   "link-port": (thread, { port }) => api("POST", `/v1/threads/${thread}/previews`, { port: Number(port) }),
+  // As `nexus unpreview`: the first try wakes a paused pylon, and a 409 is tried again once a second until it runs,
+  // unless the thread is archived or deleted.
+  async unpublish(thread, { port }) {
+    const deadline = Date.now() + 120_000;
+    for (;;) {
+      try {
+        return await api("DELETE", `/v1/threads/${thread}/previews/${port}`, {});
+      } catch (err) {
+        if (err.status !== 409 || Date.now() >= deadline) throw err;
+        const { status } = (await api("GET", `/v1/threads/${thread}`)).thread;
+        if (status === "archived" || status === "deleted") throw err;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+    }
+  },
 };
 
 document.addEventListener("click", async (event) => {

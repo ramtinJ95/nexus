@@ -7,8 +7,8 @@
  *   and a wanted port held by anything else fails the job. So the gateway port must stay fixed across restarts.
  * - Which pylon an entry belongs to is the gateway's route table. Every converge writes it to the routes file and
  *   the probe loads it at start, because a paused pylon keeps its previews and is not re-spawned after a probe
- *   restart. An entry of Nexus's that the table does not map is left from a converge that stopped between adding
- *   it and writing the file, and any converge removes it.
+ *   restart. An entry of Nexus's that the table does not map was withdrawn, or is left from a converge that stopped
+ *   between adding it and writing the file, and any converge removes it.
  *
  * The serve config is one object per node, so converges change it one at a time. Warming runs outside that.
  */
@@ -63,9 +63,9 @@ export function createTailscaleServe(options: {
   async function apply(pylonId: PylonId, previews: readonly PreviewAssignment[], signal: AbortSignal): Promise<Map<number, string>> {
     signal.throwIfAborted();
     const listeners = await status(signal);
-    const { add, remove } = planServe(pylonId, previews, listeners, gateway.routes);
+    const { add, remove, taken } = planServe(pylonId, previews, listeners, gateway.routes);
     try {
-      for (const { service, httpsPort } of previews) gateway.routes.set(httpsPort, { pylonId, service });
+      // Before a taken port fails the job, so two pylons that each want a port the other still routes do not both wait.
       for (const port of remove) {
         await cli(["serve", `--https=${port}`, "off"], signal);
         gateway.routes.delete(port);
@@ -73,6 +73,11 @@ export function createTailscaleServe(options: {
       for (const [port, route] of gateway.routes) {
         if (route.pylonId === pylonId && !previews.some((p) => p.httpsPort === port)) gateway.routes.delete(port);
       }
+      // A spawn that carries a port its pylon has since released, which another pylon now holds. Retried, the
+      // pylon's next spawn carries its current previews.
+      const [first] = taken;
+      if (first !== undefined) throw new JobFailure("backend", `https port ${first.port} routes to ${first.owner}, so it cannot also route to ${pylonId}`);
+      for (const { service, httpsPort } of previews) gateway.routes.set(httpsPort, { pylonId, service });
       for (const port of add) await cli(["serve", "--bg", `--https=${port}`, gateway.origin], signal);
     } finally {
       await writeRoutes(options.routesFile, gateway.routes);
@@ -110,6 +115,18 @@ export function createTailscaleServe(options: {
       changes = next.catch(() => undefined); // the caller handles the error. The queue only needs to move on
       const urls = await next;
       await Promise.all(previews.map((p) => warmUp(urls.get(p.httpsPort)!, `${pylonId}/${p.service}`, signal)));
+    },
+    async withdraw(pylonId, service) {
+      // The entry is then Nexus's and unmapped, which the next converge of any pylon removes. Written even when the
+      // table no longer maps it, because an earlier withdraw may have failed to write.
+      const next = changes.then(async () => {
+        for (const [port, route] of gateway.routes) {
+          if (route.pylonId === pylonId && route.service === service) gateway.routes.delete(port);
+        }
+        await writeRoutes(options.routesFile, gateway.routes);
+      });
+      changes = next.catch(() => undefined);
+      await next;
     },
   };
 }
@@ -162,22 +179,25 @@ export function parseServeStatus(json: string, gatewayOrigin: string): Map<numbe
 
 /**
  * The serve changes that make `pylonId` publish exactly `previews`: drop its other entries and every entry of
- * Nexus's that no pylon owns, and add the wanted ports that have none. A wanted port that another pylon's entry
- * holds is taken over as it is, since only the control plane allocates ports.
+ * Nexus's that no pylon owns, and add the wanted ports that have none. `taken` lists the wanted ports another
+ * pylon's route holds, which the converge refuses after it drops the entries.
  */
 export function planServe(
   pylonId: PylonId,
   previews: readonly PreviewAssignment[],
   listeners: ReadonlyMap<number, Listener>,
   routes: ReadonlyMap<number, { pylonId: PylonId }>,
-): { add: number[]; remove: number[] } {
+): { add: number[]; remove: number[]; taken: { port: number; owner: PylonId }[] } {
   const wanted = new Set(previews.map((p) => p.httpsPort));
   if (wanted.size !== previews.length) throw new JobFailure("invalid", `${pylonId} was assigned the same https port twice`);
   const add: number[] = [];
+  const taken: { port: number; owner: PylonId }[] = [];
   for (const port of wanted) {
     const listener = listeners.get(port);
     if (listener?.kind === "other") throw new JobFailure("invalid", `https port ${port} is already served by something other than the Nexus gateway`);
-    if (listener === undefined) add.push(port);
+    const owner = routes.get(port)?.pylonId;
+    if (owner !== undefined && owner !== pylonId) taken.push({ port, owner });
+    else if (listener === undefined) add.push(port);
   }
   const remove: number[] = [];
   for (const [port, listener] of listeners) {
@@ -185,5 +205,5 @@ export function planServe(
     const owner = routes.get(port)?.pylonId;
     if (owner === undefined || owner === pylonId) remove.push(port);
   }
-  return { add, remove };
+  return { add, remove, taken };
 }

@@ -9,7 +9,9 @@
  * watch open past the CLI's idle timeout, have the agent declare a service with a preview, fetch the preview's
  * https URL from this node, have the agent start an unsupervised server that the thread's ports list, link that port
  * as a human would and fetch its preview, archive the thread so the pylon pauses, unarchive it so the pylon wakes,
- * runs a second tool and serves both previews on the same URLs once the agent starts the server again, then delete it. A second thread, on a repository that does not exist,
+ * runs a second tool and serves both previews on the same URLs once the agent starts the server again, unpublish the
+ * linked port with the real CLI and check it stays unpublished across a second pause and wake and a restart of this
+ * control plane, publish it again, then delete it. A second thread, on a repository that does not exist,
  * fails setup, which removes its instance, and a human retry boots it fresh and runs a second setup job, which fails again. The probe's auth.controlPlane must be this node's own
  * stable node ID, and its config must set `previews`. With holdSeconds it prints the preview URL and holds that long,
  * so another tailnet device can open it. Deleting the thread must leave `tailscale serve` as the check found it.
@@ -18,8 +20,9 @@ import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { lookup } from "node:dns/promises";
-import { mkdtemp, rm, stat } from "node:fs/promises";
+import { mkdtemp, readFile, rm, stat } from "node:fs/promises";
 import { request } from "node:http";
+import { request as httpsRequest } from "node:https";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
@@ -73,7 +76,7 @@ const config: ControlPlaneConfig = {
   harness: { storage: join(dir, "harness.sqlite"), credentials: join(dir, "unused-credentials.json"), model: scriptedModel },
   previewPorts: defaultPreviewPorts,
 };
-const controlPlane = await startControlPlane(config, scriptedModels());
+let controlPlane = await startControlPlane(config, scriptedModels());
 
 function call(method: string, path: string, body?: unknown): Promise<{ status: number; body: any }> {
   return new Promise((resolve, reject) => {
@@ -156,9 +159,22 @@ function conversationSection(html: string): string {
  * pi extension do, and asks for an answer that streams for `seconds`. It must reach the watch as several live events
  * a second. The watch then stays open, quiet, past the CLI's 30 s idle timeout, which the API's ping must hold off.
  */
+const cli = fileURLToPath(new URL("../cli/nexus.ts", import.meta.url));
+
+/** Runs the real CLI against this check's control plane, directly on the tailnet. */
+function nexus(...args: string[]): Promise<{ code: number | null; stdout: string; stderr: string }> {
+  return new Promise((resolve) => {
+    const child = spawn(process.execPath, [cli, ...args, "--url", `http://${host}:${controlPlane.port}`, "--socks", "none"], { stdio: ["ignore", "pipe", "pipe"] });
+    let stdout = "";
+    let stderr = "";
+    child.stdout.setEncoding("utf8").on("data", (chunk: string) => { stdout += chunk; });
+    child.stderr.setEncoding("utf8").on("data", (chunk: string) => { stderr += chunk; });
+    child.on("exit", (code) => resolve({ code, stdout, stderr }));
+  });
+}
+
 async function checkStreamedAnswer(seconds: number, quietMs: number) {
   const words = Math.round((seconds * 1000) / streamedWordMs);
-  const cli = fileURLToPath(new URL("../cli/nexus.ts", import.meta.url));
   const watch = spawn(process.execPath, [cli, "watch", threadId!, "--json", "--url", `http://${host}:${controlPlane.port}`, "--socks", "none"], { stdio: ["ignore", "pipe", "pipe"] });
   let stderr = "";
   watch.stderr.setEncoding("utf8").on("data", (chunk: string) => { stderr += chunk; });
@@ -271,6 +287,100 @@ async function fetchMarker(url: string): Promise<void> {
       return undefined;
     }
   }).catch((err: Error) => { throw new Error(`${err.message}. Last answer: ${last}`); });
+}
+
+/**
+ * One GET over a new connection, as `HTTP <status>: <body>` or `no connection: <error>`. fetch reuses kept-alive
+ * connections, and one tailscaled accepted while it served the port can outlive serve's entry for it.
+ */
+function dial(url: string): Promise<string> {
+  return new Promise((resolve) => {
+    const req = httpsRequest(url, { agent: false, timeout: 15_000 }, (res) => {
+      let body = "";
+      res.setEncoding("utf8");
+      res.on("data", (chunk: string) => { body += chunk; });
+      res.on("end", () => resolve(`HTTP ${res.statusCode}: ${body.slice(0, 200)}`));
+      res.on("error", (err) => resolve(`HTTP ${res.statusCode}, then ${err.message}`));
+    });
+    req.on("timeout", () => req.destroy(new Error("no answer within 15 s")));
+    req.on("error", (err: NodeJS.ErrnoException) => resolve(`no connection: ${err.code === undefined ? "" : `${err.code} `}${err.message}`));
+    req.end();
+  });
+}
+
+const served = async (httpsPort: number) => Object.keys((await serveStatus() as { TCP?: Record<string, unknown> }).TCP ?? {}).includes(String(httpsPort));
+
+/**
+ * Unpublishes the linked port with the real CLI while its server answers, and checks what the CLI's contract promises:
+ * the app stops answering on its URL at once, tailscale stops serving the URL within seconds, the port is listed
+ * again without a preview, a second unpublish succeeds, and web's port is refused. The port then stays unpublished
+ * across a pause and wake and a restart of the control plane, and publishing it again serves it.
+ */
+async function checkUnpublish(pylonId: string, linked: { url: string; httpsPort: number }, webPort: number) {
+  const service = `port-${linkedPort}`;
+  // The server started again a moment ago, and the node reports a new listener within its 10 s poll. Until then the
+  // ports list leaves the port out, published or not.
+  await until(`the thread's ports list ${linkedPort} with its preview`, 60_000, async () => (await detail()).ports?.find((l) => l.port === linkedPort && l.preview?.service === service));
+  const unpublished = await nexus("unpreview", threadId!, String(linkedPort), "--json");
+  const returned = performance.now();
+  assert.deepEqual([unpublished.code, unpublished.stdout.trim()], [0, "null"], `unpreview exits 0 and prints null: ${unpublished.stderr}`);
+  const after = await detail();
+  assert.equal(after.previews.find((p) => p.service === service), undefined, "the thread's previews leave the port out at once");
+  const listed = after.ports?.find((l) => l.port === linkedPort);
+  assert.ok(listed !== undefined && listed.preview === null, `the port is listed again without a preview: ${JSON.stringify(after.ports)}`);
+  const file = new URL("nexus-proof.txt", linked.url).href;
+  const right = await dial(file);
+  // The gateway's own 404, or no connection once serve has already dropped the port.
+  assert.match(right, /^HTTP 404: no preview is published on |^no connection/, `the gateway stops routing the URL before unpreview returns: ${right}`);
+  pass(`unpreview exits 0 and prints null, the port is listed again with preview null, and ${file} answers right after with ${right}`);
+
+  // Every poll's https ports, so a failure shows whether serve dropped the port at all.
+  const polls: string[] = [];
+  const dropped = await until(`tailscale serve no longer serves ${linked.httpsPort}`, 60_000, async () => {
+    const ports = Object.keys((await serveStatus() as { TCP?: Record<string, unknown> }).TCP ?? {});
+    const at = Math.round(performance.now() - returned);
+    polls.push(`${at} ms: ${ports.join(",") || "none"}`);
+    return ports.includes(String(linked.httpsPort)) ? undefined : at;
+  }).catch((err: Error) => { throw new Error(`${err.message}. tailscale serve's https ports at each poll: ${polls.join("; ")}`); });
+  console.log(`tailscale serve's https ports at each poll after unpreview: ${polls.join("; ")}`);
+  const gone = await dial(file);
+  const pooled = await fetch(file, { signal: AbortSignal.timeout(15_000) }).then(async (res) => `HTTP ${res.status}: ${(await res.text()).slice(0, 200)}`, (err: Error) => `no connection: ${(err.cause as Error | undefined)?.message ?? err.message}`);
+  assert.match(gone, /^no connection/, `a new connection to a URL tailscale no longer serves is refused, but it got ${gone}, and fetch, which may reuse a connection, got ${pooled}`);
+  pass(`tailscale serve dropped ${linked.httpsPort} ${dropped} ms after unpreview returned. A new connection to ${file} then gets ${gone}, and fetch, which may reuse a connection, gets ${pooled}`);
+
+  const again = await nexus("unpreview", threadId!, String(linkedPort), "--json");
+  assert.deepEqual([again.code, again.stdout.trim()], [0, "null"], `a second unpreview succeeds: ${again.stderr}`);
+  const owned = await nexus("unpreview", threadId!, String(webPort));
+  assert.equal(owned.code, 1, `unpreview of web's port exits 1: ${owned.stderr}`);
+  assert.match(owned.stderr, new RegExp(`^nexus: Port ${webPort} is the preview of service web, not a linked port\\. Remove the preview from \\S+ to unpublish it\\n$`), "the refusal is the pylon's reason alone, naming the service");
+  assert.ok((await detail()).previews.some((p) => p.service === "web"), "the refused unpreview keeps web's preview");
+  pass(`a second unpreview exits 0, and unpreview of web's port ${webPort} exits 1 with: ${owned.stderr.trim()}`);
+
+  const linkedFile = join(stateRoot, "instances", pylonId, "linked.json");
+  await expect(200, "POST", `/threads/${threadId}/archive`);
+  await reaches("paused", 5 * 60_000);
+  await expect(200, "POST", `/threads/${threadId}/unarchive`);
+  await reaches("running", 5 * 60_000);
+  await controlPlane.close();
+  controlPlane = await startControlPlane(config, scriptedModels());
+  await runTool("msg:node-check-server-unpublished", startServer);
+  await until(`the woken pylon's ports list ${linkedPort}`, 60_000, async () => (await detail()).ports?.find((l) => l.port === linkedPort));
+  // Long enough for several of the loop's passes and the probe's reads of the pylon's services.
+  await delay(30_000);
+  const woken = await detail();
+  assert.equal(woken.previews.find((p) => p.service === service), undefined, `the port stays unpublished across the pause and the restart: ${JSON.stringify(woken.previews)}`);
+  assert.deepEqual(woken.ports?.find((l) => l.port === linkedPort), { port: linkedPort, service: null, preview: null });
+  assert.equal(await served(linked.httpsPort), false, `tailscale serve does not serve ${linked.httpsPort} again`);
+  const saved = JSON.parse(await readFile(linkedFile, "utf8")) as unknown;
+  assert.deepEqual(saved, [], `${linkedFile} holds no linked port`);
+  pass(`after a pause, a wake and a control-plane restart, ${linkedPort} listens with preview null, tailscale serve leaves ${linked.httpsPort} out, and ${linkedFile} is ${JSON.stringify(saved)}`);
+
+  const republished = await nexus("preview", threadId!, String(linkedPort), "--wait", "--json");
+  assert.equal(republished.code, 0, `preview --wait publishes the port again: ${republished.stderr}`);
+  const preview = JSON.parse(republished.stdout) as ThreadDetail["previews"][number];
+  assert.deepEqual([preview.service, preview.ready], [service, true]);
+  await fetchMarker(preview.url);
+  pass(`publishing ${linkedPort} again serves it at ${preview.url}${preview.url === linked.url ? ", its old URL" : `, not its old ${linked.url}`}`);
 }
 
 /** Deletes the thread, then waits for its pylon to be absent and its instance directory to be gone. Returns that directory. */
@@ -418,7 +528,9 @@ try {
   const linked = await expect(200, "POST", `/threads/${threadId}/previews`, { port: linkedPort }) as ThreadDetail["previews"][number];
   assert.equal(linked.service, `port-${linkedPort}`);
   assert.equal(linked.url, `https://${dnsName}:${linked.httpsPort}/`, "the reply names the URL at once");
-  assert.deepEqual(await expect(200, "POST", `/threads/${threadId}/previews`, { port: linkedPort }), linked, "linking again answers the same preview");
+  const again = await expect(200, "POST", `/threads/${threadId}/previews`, { port: linkedPort }) as ThreadDetail["previews"][number];
+  // The first link's spawn may have published the preview by now, so only ready may differ.
+  assert.deepEqual({ ...again, ready: linked.ready }, linked, "linking again answers the same preview");
   pass(`linking ${linkedPort} answers ${linked.url} at once, and again the same`);
   await until(`the preview of ${linkedPort} is ready`, 3 * 60_000, async () => (await detail()).ports?.find((l) => l.port === linkedPort)?.preview?.ready || undefined);
   await fetchMarker(linked.url);
@@ -459,6 +571,10 @@ try {
   await fetchMarker(linked.url);
   assert.deepEqual((await detail()).previews.find((p) => p.service === `port-${linkedPort}`)?.url, linked.url, "the linked preview keeps its URL across the pause");
   pass(`after the wake and a restart of the server, the linked port is served again at ${linked.url}`);
+
+  const webPort = (await detail()).ports?.find((l) => l.service === "web")?.port;
+  assert.ok(webPort !== undefined, "web's port is listed");
+  await checkUnpublish(thread.pylonId, linked, webPort);
 
   pass(`deleting the thread removes ${await deleteThread(thread.pylonId)}`);
 

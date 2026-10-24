@@ -31,6 +31,11 @@ export interface ServicesFile {
 export type ServiceName = string; // /^[a-z0-9][a-z0-9-]{0,31}$/
 /** The name a port linked with `nexus preview <port>` is reported and previewed under. */
 export const linkedName = (port: number): ServiceName => `port-${port}`;
+/** The port of a service named as linkedName names one, or null for any other name. */
+export function linkedPort(service: ServiceName): number | null {
+  const m = /^port-([1-9]\d{0,4})$/.exec(service);
+  return m === null ? null : Number(m[1]);
+}
 /**
  * Nexus's own listeners in every pylon: the sshd that Gondolin's enableSsh starts for streams and terminals. They
  * are never reported as listening, and never linked.
@@ -350,6 +355,7 @@ nexus service logs web --lines 200
 nexus service restart web
 nexus service start storybook --command "pnpm storybook --port \\$PORT" --preview
 nexus preview 6006 --title Storybook       # publish a port that is already listening
+nexus unpreview 6006                       # stop publishing it
 \`\`\`
 `;
 }
@@ -369,6 +375,7 @@ export type PylonApiRequest =
   | { op: "service-logs"; name: ServiceName; lines: number }
   | { op: "service-start"; name: ServiceName; decl: ServiceDecl } // ad hoc. Rejects declared names
   | { op: "preview"; port: number; title?: string }
+  | { op: "unpreview"; port: number }
   | { op: "output-add"; output: { kind: "file"; path: string; title?: string } | { kind: "diff"; title?: string } }
   | { op: "output-list" };
 

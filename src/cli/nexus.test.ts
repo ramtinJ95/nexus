@@ -18,7 +18,7 @@ import { fakeHarness } from "../control/fake-harness.ts";
 import { openRegistry, type Thread } from "../control/registry.ts";
 import type { ImageId, ImageManifest } from "../images.ts";
 import type { Project, ProjectId } from "../project.ts";
-import type { NodeName, PylonCommand, PylonId, ServiceFact, TailnetNodeId } from "../protocol.ts";
+import type { CommandResult, NodeName, PylonCommand, PylonId, ServiceFact, TailnetNodeId } from "../protocol.ts";
 import { CliError, follow } from "./transport.ts";
 
 const cli = fileURLToPath(new URL("./nexus.ts", import.meta.url));
@@ -90,12 +90,16 @@ async function setup(t: TestContext) {
   registry.saveImage(image);
   registry.setCurrentImage(image.id);
   let caller: TailnetNodeId = laptop;
+  /** What the node's probe answers a guest command with. Tests replace it. */
+  let answer = async (command: PylonCommand): Promise<CommandResult> =>
+    command.kind === "unlink-port" ? { kind: "unlink-port", refused: null } : { kind: "link-port", service: `port-${(command as { port: number }).port}` };
+  const commands: PylonCommand[] = [];
   const fake = fakeHarness();
   const options = (port: number) => ({
     registry, host: "127.0.0.1", port, whois: async () => caller, allowed: new Set([laptop]),
     hostnames: new Set([apiName, "127.0.0.1"]), dotfiles: { repo: "https://github.com/ramtin/dotfiles.git", ref: "main" },
     harness: fake.harness, wake: () => {}, previewPorts: { first: 10200, last: 10299 },
-    probes: new Map([[node, { command: async (_pylonId: PylonId, command: PylonCommand) => ({ kind: "link-port" as const, service: `port-${(command as { port: number }).port}` }) }]]),
+    probes: new Map([[node, { command: (_pylonId: PylonId, command: PylonCommand) => { commands.push(command); return answer(command); } }]]),
   });
   let api = await startApi(options(0));
   t.after(async () => {
@@ -123,8 +127,9 @@ async function setup(t: TestContext) {
     return JSON.parse(res.stdout);
   }
   return {
-    registry, fake, proxy, home, api, env, nexus, json,
+    registry, fake, proxy, home, api, env, nexus, json, commands,
     callAs(id: TailnetNodeId) { caller = id; },
+    probeAnswers(next: typeof answer) { answer = next; },
     localUrl: `http://127.0.0.1:${api.port}`,
     /** Stops the control plane, which drops every connection, and returns a function that starts it again on its port. */
     async stop() {
@@ -283,6 +288,48 @@ test("ports lists what the pylon listens on, and preview publishes one and waits
   assert.equal((await s.nexus(["preview", thread.id, "3000", "--wait"])).stdout, `${preview.url}\n`);
   assert.equal((await s.nexus(["ports", thread.id])).stdout, `3000  port-3000  ${preview.url}\n`);
   assert.equal((await s.nexus(["preview", thread.id, "http"])).code, 64);
+});
+
+test("unpreview unpublishes a port, waits for a paused pylon to run, and fails with the contract's exit codes", async (t) => {
+  const s = await setup(t);
+  const thread: Thread = await s.json(["start", "--project", "acme", "--title", "unpreview"]);
+  observeRunning(s, thread, [], [3000]);
+  const preview = await s.json(["preview", thread.id, "3000"]);
+  assert.equal(await s.json(["unpreview", thread.id, "3000"]), null);
+  assert.deepEqual(await s.json(["ports", thread.id]), [{ port: 3000, service: null, preview: null }]);
+  assert.equal(await s.json(["unpreview", thread.id, "3000"]), null, "a port with no linked preview succeeds");
+  assert.equal((await s.nexus(["unpreview", thread.id, "3000"])).stdout, `Unpublished port 3000 of ${thread.id}.\n`);
+  assert.deepEqual(await s.json(["preview", thread.id, "3000"]), preview, "the port can be published again");
+
+  let refusals = 2;
+  s.probeAnswers(async (command) => {
+    if (refusals-- > 0) throw Object.assign(new Error("rj-firebat: pylon-x is stopped, not running"), { code: "not-running" });
+    return { kind: "unlink-port", refused: null };
+  });
+  s.commands.length = 0;
+  assert.equal(await s.json(["unpreview", thread.id, "3000"]), null, "a paused pylon is woken and asked again until it runs");
+  assert.deepEqual(s.commands, Array(3).fill({ kind: "unlink-port", port: 3000 }));
+
+  const fails = async (args: string[], code: number) => {
+    const res = await s.nexus([...args, "--json"]);
+    assert.equal(res.code, code, `${args.join(" ")}: ${res.stderr}`);
+    assert.equal(res.stdout, "");
+    return JSON.parse(res.stderr) as { error: string; kind: string; status: number | null };
+  };
+  const reason = "Port 5173 is the preview of service web, not a linked port. Remove the preview from /home/user/workspace/repo/.nexus/services.yaml to unpublish it";
+  s.probeAnswers(async () => ({ kind: "unlink-port", refused: reason }));
+  s.commands.length = 0;
+  assert.deepEqual(await fails(["unpreview", thread.id, "5173"], 1), { error: reason, kind: "failed", status: 422 }, "the refusal is the pylon's reason alone, and is not tried again");
+  assert.equal(s.commands.length, 1);
+  s.probeAnswers(async () => { throw Object.assign(new Error("rj-firebat: connect ECONNREFUSED"), { code: "unreachable" }); });
+  await fails(["unpreview", thread.id, "3000"], 1);
+  s.commands.length = 0;
+  for (const port of ["http", "0", "70000"]) await fails(["unpreview", thread.id, port], 64);
+  assert.deepEqual(s.commands, [], "a bad port never reaches the API");
+  await s.json(["archive", thread.id]);
+  await fails(["unpreview", thread.id, "3000"], 5);
+  await s.json(["delete", thread.id]);
+  await fails(["unpreview", thread.id, "3000"], 5);
 });
 
 test("watch prints the backlog, then each new entry and state change, and ends when the thread is deleted", async (t) => {
