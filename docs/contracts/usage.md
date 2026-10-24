@@ -106,6 +106,30 @@ await nexus.projects.create({
 
 Secret values never reach the control plane or a template. Each node holds them in its own secret file. A pylon sees a placeholder.
 
+A scratch project has no repository. Its threads start from `git init` on `defaultBranch`, and a GitHub grant lets the agent publish what it makes:
+
+```ts
+await nexus.projects.create({
+  id: "sketchpad",
+  repoUrl: null, // scratch: nothing is cloned, and nothing is kept once a thread is deleted
+  defaultBranch: "main", // the empty repository's first branch
+  defaultNode: "infra-testbench",
+  resources: { cpus: 2, memoryGiB: 4, diskGiB: 10 },
+  allowedHosts: [],
+  secrets: [githubTokenGrant], // GH_TOKEN to api.github.com and github.com
+  logins: ["claude"],
+  preSetup: null,
+});
+```
+
+Starting a thread decides its repository once and freezes it into the pylon's boot:
+
+```ts
+const repo: RepoInit = hasRemote(project)
+  ? { kind: "clone", url: project.repoUrl, checkout: { branch, commit: request.commit ?? `origin/${branch}` } }
+  : { kind: "empty", branch }; // a commit asked of a scratch project is a 400
+```
+
 ### Inside a pylon
 
 The agent finds `NEXUS_PYLON_ID` in its environment and `~/.nexus/PYLON.md` imported by its Claude Code and pi instructions. The image wires the import: `~/.claude/CLAUDE.md` holds `@~/.nexus/PYLON.md`, and `~/.pi/agent/AGENTS.md` is a link to it, because pi's instructions have no import. That file names the thread, the reachable hosts, each preview URL and these commands:
@@ -123,6 +147,18 @@ nexus output add diff                      # snapshot the working tree as a diff
 ```
 
 Branches, pushed branches, dirty trees and running previews become outputs without any command.
+
+In a scratch pylon, PYLON.md also says how to commit and publish. With the GitHub grant, the agent runs:
+
+```sh
+cd ~/workspace/repo                        # `git init` on main: no commits, no remote
+git config --global user.name "$(gh api user --jq .login)"
+git config --global user.email "$(gh api user --jq '"\(.id)+\(.login)@users.noreply.github.com"')"
+git add -A && git commit -m "feat: first version"
+gh repo create <owner>/<name> --private --source . --remote origin --push
+git push                                   # later pushes: git asks gh for the token, which reads this boot's GH_TOKEN
+nexus output add diff                      # works before the first commit too: the diff is against the empty tree
+```
 
 ## Contract 3. Template images
 
@@ -158,6 +194,8 @@ Wrote nothing: 3 problems above.
 Commit and push the manifest, then build the image as [the deploy guide](../../deploy/README.md) describes. The build fetches what the manifest pins, installs it as `user`, and fails on any difference from the manifest. Its smoke boot checks the installed setup against the manifest in the recipe and starts pi offline to prove every extension loads. Pylons start pi with `PI_OFFLINE=1` and Claude Code without its official marketplace, because neither can reach the network to update. The review-pane mod's review command needs Neovim 0.10 or later, so the image pins a Neovim release in `pins.json` and the smoke boot checks its version. The exa extensions need a project that grants `EXA_API_KEY` to `api.exa.ai`.
 
 ### Call site: starting a thread picks or builds a template
+
+Templates mirror a remote, so only a `RemoteProject` (a project whose `repoUrl` is not null) has one. A scratch project's threads always boot fresh.
 
 ```ts
 const inputs = await mirror.setupInputs(project, thread.branch); // the control plane's bare mirror, no pylon booted
