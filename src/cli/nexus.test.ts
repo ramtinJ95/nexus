@@ -485,10 +485,15 @@ test("attach wakes the pylon, waits until it runs, and runs ssh to its node thro
   assert.equal(direct.code, 0, direct.stderr);
   assert.deepEqual((await readFile(ran, "utf8")).trimEnd().split("\n"), ["-t", "rj-firebat.tail.ts.net", "nexus-attach", thread.pylonId], "without a proxy, plain ssh");
 
+  await mkdir(join(s.home, ".config", "nexus"), { recursive: true });
+  await writeFile(join(s.home, ".config", "nexus", "cli.json"), JSON.stringify({ ssh: { "rj-firebat": "ramtinj@rj-firebat", "other-node": "other" } }));
+  assert.equal((await s.nexus(["attach", thread.id], path)).code, 0);
+  assert.deepEqual((await readFile(ran, "utf8")).trimEnd().split("\n"),
+    ["-t", "-o", `ProxyCommand=nc -X 5 -x 127.0.0.1:${s.proxy.port} %h %p`, "ramtinj@rj-firebat", "nexus-attach", thread.pylonId], "the config's destination for the node, through the same proxy");
+
   const custom = `printf '%s %s %s %s' "$NEXUS_THREAD" "$NEXUS_PYLON" "$NEXUS_NODE" "$NEXUS_NODE_HOST" > '${ran}'`;
   assert.equal((await s.nexus(["attach", thread.id], { ...path, NEXUS_ATTACH: custom })).code, 0);
-  assert.equal(await readFile(ran, "utf8"), `${thread.id} ${thread.pylonId} rj-firebat rj-firebat.tail.ts.net`);
-  await mkdir(join(s.home, ".config", "nexus"), { recursive: true });
+  assert.equal(await readFile(ran, "utf8"), `${thread.id} ${thread.pylonId} rj-firebat rj-firebat.tail.ts.net`, "NEXUS_ATTACH wins over the config's ssh destination");
   await writeFile(join(s.home, ".config", "nexus", "cli.json"), JSON.stringify({ attach: "exit 3" }));
   const failed = await s.nexus(["attach", thread.id], path);
   assert.equal(failed.code, 1, "the config's command runs, and its failure is the CLI's");
@@ -497,7 +502,10 @@ test("attach wakes the pylon, waits until it runs, and runs ssh to its node thro
   await writeFile(join(bin, "ssh"), "#!/bin/sh\nexit 255\n", { mode: 0o755 });
   const unreachable = await s.nexus(["attach", thread.id], path);
   assert.equal(unreachable.code, 1);
-  assert.match(unreachable.stderr, /ssh to rj-firebat\.tail\.ts\.net exited 255. To reach the node another way, set NEXUS_ATTACH/, "a failed ssh names the escape hatch");
+  assert.match(unreachable.stderr, /ssh to rj-firebat\.tail\.ts\.net exited 255. To reach the node as another user or through an ssh alias, set "ssh": \{"rj-firebat": "<user@host or alias>"\} in .*cli\.json, or set NEXUS_ATTACH/, "a failed ssh names both escape hatches");
+  await writeFile(join(s.home, ".config", "nexus", "cli.json"), JSON.stringify({ ssh: { "rj-firebat": "-oProxyCommand=evil" } }));
+  assert.equal((await s.nexus(["attach", thread.id], path)).code, 64, "a destination that ssh would read as an option is refused");
+  await writeFile(join(s.home, ".config", "nexus", "cli.json"), "{}");
 
   await s.json(["archive", thread.id]);
   const archived = await s.nexus(["attach", thread.id], path);

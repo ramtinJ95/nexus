@@ -47,7 +47,8 @@ const usage = `nexus ${version}, the Nexus control plane from this Mac
 
 Every command takes --json, --url URL and --socks HOST:PORT|none. The URL and proxy come from those flags,
 then NEXUS_URL and NEXUS_SOCKS, then ${configFile()}, then ${defaults.url} through ${defaults.socks}.
-attach runs ssh to the node through the same proxy, or NEXUS_ATTACH, or the config's "attach", with sh.
+attach runs ssh to the node, or to the config's "ssh" destination for it, through the same proxy, or else
+NEXUS_ATTACH, or the config's "attach", with sh.
 `;
 
 type Values = Record<string, string | boolean | string[] | undefined>;
@@ -62,6 +63,8 @@ interface Local {
   socks: HostPort | null;
   /** The attach command that replaces ssh's, run with sh. */
   attach: string | null;
+  /** ssh's destination for each node named here, such as `user@host` or an ssh config alias, instead of its tailnetHost. */
+  ssh: Readonly<Record<string, string>>;
 }
 interface Command {
   args: readonly [min: number, max: number];
@@ -224,15 +227,17 @@ async function attach(api: Api, id: string, local: Local): Promise<void> {
   const { id: pylon, node } = d.pylon;
   const host = (await api("GET", "/v1/nodes") as NodeSummary[]).find((n) => n.name === node)?.tailnetHost;
   if (host === undefined) throw new CliError("failed", `the control plane lists no node ${node}`);
+  const destination = local.ssh[node] ?? host;
   const [command, args] = local.attach !== null ? ["sh", ["-c", local.attach]]
-    : ["ssh", ["-t", ...local.socks === null ? [] : ["-o", `ProxyCommand=nc -X 5 -x ${local.socks.host}:${local.socks.port} %h %p`], host, "nexus-attach", pylon]];
+    : ["ssh", ["-t", ...local.socks === null ? [] : ["-o", `ProxyCommand=nc -X 5 -x ${local.socks.host}:${local.socks.port} %h %p`], destination, "nexus-attach", pylon]];
   const code = await new Promise<number>((resolve, reject) => {
     const child = spawn(command, args, { stdio: "inherit", env: { ...process.env, NEXUS_THREAD: id, NEXUS_PYLON: pylon, NEXUS_NODE: node, NEXUS_NODE_HOST: host } });
     child.once("error", (err) => reject(new CliError("failed", `${command} could not start: ${err.message}`)));
     child.once("exit", (exit) => resolve(exit ?? 1));
   });
   if (code !== 0) {
-    const how = local.attach === null ? `ssh to ${host} exited ${code}. To reach the node another way, set NEXUS_ATTACH, as docs/cli.md describes`
+    const how = local.attach === null
+      ? `ssh to ${destination} exited ${code}. To reach the node as another user or through an ssh alias, set "ssh": {"${node}": "<user@host or alias>"} in ${configFile()}, or set NEXUS_ATTACH, as docs/cli.md describes`
       : `the attach command from NEXUS_ATTACH or the config exited ${code}`;
     throw new CliError("failed", `attaching to ${id} on ${node} failed: ${how}`);
   }
@@ -614,7 +619,11 @@ const commands: Readonly<Record<string, Command>> = {
   },
 };
 
-const configSchema = z.strictObject({ url: z.string().optional(), socks: z.string().optional(), attach: z.string().optional() });
+const configSchema = z.strictObject({
+  url: z.string().optional(), socks: z.string().optional(), attach: z.string().optional(),
+  // A destination is one ssh argument, never an option.
+  ssh: z.record(z.string(), z.string().regex(/^[^-\s]\S*$/, "must be an ssh destination such as user@host or an alias")).optional(),
+});
 
 async function readConfig(file: string): Promise<z.infer<typeof configSchema>> {
   let text: string;
@@ -636,7 +645,7 @@ async function readConfig(file: string): Promise<z.infer<typeof configSchema>> {
 }
 
 /** Each setting from its flag, then the environment, then the config file, then the default. */
-async function settings(v: Values): Promise<{ endpoint: Endpoint; attach: string | null }> {
+async function settings(v: Values): Promise<{ endpoint: Endpoint } & Omit<Local, "socks">> {
   const config = await readConfig(configFile());
   const env = (name: string) => process.env[name] || undefined;
   const attach = env("NEXUS_ATTACH") ?? config.attach ?? null;
@@ -649,7 +658,7 @@ async function settings(v: Values): Promise<{ endpoint: Endpoint; attach: string
     throw new CliError("invalid", `the control plane URL ${url} is not a URL`);
   }
   if (parsed.protocol !== "http:") throw new CliError("invalid", `the control plane URL ${url} must be http://, which is what the API serves on the tailnet`);
-  return { endpoint: { url: parsed, socks: socks === "none" ? null : hostPort(socks) }, attach };
+  return { endpoint: { url: parsed, socks: socks === "none" ? null : hostPort(socks) }, attach, ssh: config.ssh ?? {} };
 }
 
 function hostPort(value: string): HostPort {
@@ -678,9 +687,9 @@ async function run(argv: readonly string[]): Promise<void> {
   if (positionals.length < min || positionals.length > max) {
     throw new CliError("invalid", `${name} takes ${min === max ? min : max === Infinity ? `at least ${min}` : `${min} to ${max}`} argument${max === 1 ? "" : "s"}, got ${positionals.length}`);
   }
-  const { endpoint: target, attach } = await settings(values);
+  const { endpoint: target, attach, ssh } = await settings(values);
   const result = await command.run((method, path, body, idleMs) => call(target, method, path, body, idleMs), positionals, values,
-    (path, onEvent, signal) => follow(target, path, onEvent, signal), { socks: target.socks, attach });
+    (path, onEvent, signal) => follow(target, path, onEvent, signal), { socks: target.socks, attach, ssh });
   if (result !== undefined) process.stdout.write(`${values.json === true ? JSON.stringify(result.json, null, 2) : result.text}\n`);
 }
 
