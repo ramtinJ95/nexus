@@ -407,15 +407,15 @@ test("show reports a published preview whose service failed as not ready, and wh
   assert.deepEqual((await s.json(["show", thread.id])).previews, [preview], "a restarted service's preview is ready again");
 });
 
-test("a preview from a control plane older than Preview.failed reads as not failed", async (t) => {
+test("a preview from a control plane older than Preview.failed reads as not failed, and a session older than Session.state as running", async (t) => {
   const s = await setup(t);
-  // That control plane's shapes: a Preview with no `failed`.
+  // That control plane's shapes: a Preview with no `failed`, and a Session with no `id`, `state` or `message`.
   const web = { pylon: "pylon-th-old", service: "web", httpsPort: 10200, ready: true, url: "https://rj-firebat.tail.ts.net:10200/" };
   const api = { ...web, service: "api", httpsPort: 10201, ready: false, url: "https://rj-firebat.tail.ts.net:10201/" };
   const detail = {
     thread: { id: "th-old", title: "old", project: "acme", status: "active", agentTurnRunning: false },
     pylon: { id: "pylon-th-old", node, actualState: "running", failed: null, observedAt: null, retryRefused: null },
-    sessions: [], previews: [api, web], ports: [{ port: 3000, service: "web", preview: web }, { port: 4000, service: "api", preview: api }], outputs: [], agent: null,
+    sessions: [{ pylon: "pylon-th-old", herdrPane: "w1:p1", harness: "pi", harnessSessionId: null, status: "idle", title: "plan" }], previews: [api, web], ports: [{ port: 3000, service: "web", preview: web }, { port: 4000, service: "api", preview: api }], outputs: [], agent: null,
   };
   const old = createHttpServer((req, res) => {
     res.setHeader("content-type", "application/json");
@@ -430,6 +430,7 @@ test("a preview from a control plane older than Preview.failed reads as not fail
   const shown = await run(["show", "th-old"]);
   assert.match(shown, /^preview: api at https:\/\/rj-firebat\.tail\.ts\.net:10201\/, not ready$/m);
   assert.match(shown, /^preview: web at https:\/\/rj-firebat\.tail\.ts\.net:10200\/$/m);
+  assert.match(shown, /^session: pi "plan" in pane w1:p1, idle$/m);
   assert.equal(await run(["ports", "th-old"]), `3000  web  ${web.url}\n4000  api  ${api.url} (not served yet)\n`);
   assert.equal(await run(["preview", "th-old", "3000"]), `${web.url}\n`);
 });

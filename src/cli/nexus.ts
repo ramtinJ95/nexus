@@ -163,9 +163,9 @@ function detailText({ thread: t, pylon: p, agent, sessions, previews, ports, out
     ...p.failed === null ? [] : [`failed: ${p.failed}`],
     ...p.retryRefused === null ? [] : [`retry refused: ${p.retryRefused}`],
     ...(agent?.parkedTasks ?? 0) === 0 ? [] : [`parked tasks: ${agent!.parkedTasks}. \`nexus retry ${t.id}\` runs them again`],
-    // A session in no pane is closed by its ID.
-    ...sessions.map((s) => `session: ${s.harness}${s.title === null ? "" : ` ${JSON.stringify(s.title)}`} ${s.herdrPane === null ? `as ${s.id}` : `in pane ${s.herdrPane}`}, ${s.state === "running" ? s.status
-      : s.state === "paused" ? `paused (resumes on ${t.status === "archived" ? "unarchive" : "wake"})` : `failed: ${s.message}`}`),
+    // A session in no pane is closed by its ID. A control plane older than `Session.state` sends none, and every session it lists runs.
+    ...sessions.map((s) => `session: ${s.harness}${s.title === null ? "" : ` ${JSON.stringify(s.title)}`} ${s.herdrPane === null ? `as ${s.id}` : `in pane ${s.herdrPane}`}, ${s.state === "paused" ? `paused (resumes on ${t.status === "archived" ? "unarchive" : "wake"})`
+      : s.state === "failed" ? `failed: ${s.message}` : s.status}`),
     ...previews.map((v) => `preview: ${v.service} at ${v.url}${failureOf(v) !== null ? `, not ready: ${failureOf(v)}` : v.ready ? "" : ", not ready"}`),
     ...(ports ?? []).map((l) => `port: ${l.port}${l.service === null ? "" : `, service ${l.service}`}${l.preview === null ? "" : `, previewed at ${l.preview.url}`}`),
     ...outputs.map((o) => `output: ${o.kind} ${o.ref}`),
