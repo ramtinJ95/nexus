@@ -215,7 +215,7 @@ test("thread detail derives the actual state from the node's last observation", 
   s.registry.ingested({ node, observedAt: "2027-01-01T00:01:00Z", probeBootId: "b", capacity, artifacts: [], jobs: [], pylons: [running], previewRoutes: [] }, []);
   const pause = { jobId: "job-1" as JobId, subject: thread.pylonId, kind: "pause" as const };
   s.registry.apply({ record: "job", status: { ...pause, state: "running", startedAt: "2027-01-01T00:00:59Z" } });
-  s.registry.apply({ record: "session", pylonId: thread.pylonId, herdrPane: "p1", fact: { herdrPane: "p1", harness: "pi", harnessSessionId: null, status: "idle" } });
+  s.registry.apply({ record: "session", pylonId: thread.pylonId, herdrPane: "p1", fact: { herdrPane: "p1", harness: "pi", harnessSessionId: null, status: "idle", title: "plan" } });
   s.registry.apply({ record: "output", pylonId: thread.pylonId, kind: "branch", ref: "nexus/fix" });
   s.registry.allocatePreviews(thread.pylonId, ["web"], { first: 8443, last: 8443 });
   s.registry.apply({ record: "preview", pylonId: thread.pylonId, service: "web", httpsPort: 8443, ready: true });
@@ -223,7 +223,7 @@ test("thread detail derives the actual state from the node's last observation", 
   const d = await detail();
   assert.equal(d.pylon.actualState, "pausing");
   assert.equal(d.pylon.observedAt, "2027-01-01T00:01:00Z");
-  assert.deepEqual(d.sessions, [{ pylon: thread.pylonId, herdrPane: "p1", harness: "pi", harnessSessionId: null, status: "idle" }]);
+  assert.deepEqual(d.sessions, [{ pylon: thread.pylonId, herdrPane: "p1", harness: "pi", harnessSessionId: null, status: "idle", title: "plan" }]);
   assert.deepEqual(d.outputs, [{ thread: thread.id, kind: "branch", ref: "nexus/fix" }]);
   assert.deepEqual(d.previews, [{ pylon: thread.pylonId, service: "web", httpsPort: 8443, ready: true, failed: null, url: "https://rj-firebat.tail.ts.net:8443/" }]);
 

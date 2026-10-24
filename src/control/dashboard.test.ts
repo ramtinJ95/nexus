@@ -231,9 +231,9 @@ test("the thread page shows its pylon, sessions with how to attach, previews as 
   const s = await seeded(t);
   const fix = await s.start("acme", "Fix checkout");
   s.observe(fix);
-  const pane = (herdrPane: string, harness: "claude-code" | "pi" | "shell", status: "working" | "idle", harnessSessionId: string | null = null) =>
-    s.registry.apply({ record: "session", pylonId: fix.pylonId, herdrPane, fact: { herdrPane, harness, harnessSessionId, status } });
-  pane("w1:p1", "claude-code", "working", "5f0c");
+  const pane = (herdrPane: string, harness: "claude-code" | "pi" | "shell", status: "working" | "idle", harnessSessionId: string | null = null, title?: string) =>
+    s.registry.apply({ record: "session", pylonId: fix.pylonId, herdrPane, fact: { herdrPane, harness, harnessSessionId, status, ...(title === undefined ? {} : { title }) } });
+  pane("w1:p1", "claude-code", "working", "5f0c", "review");
   pane("w2:p1", "pi", "idle", "/home/user/.pi/sessions/a.jsonl");
   pane("w3:p1", "shell", "idle");
   s.registry.allocatePreviews(fix.pylonId, ["web", "api"], { first: 8443, last: 8444 });
@@ -250,7 +250,7 @@ test("the thread page shows its pylon, sessions with how to attach, previews as 
 
   const sessions = textOf(sectionOf(res.text, "sessions-h"));
   assert.match(sessions, /^Sessions 3 /);
-  assert.match(sessions, /Claude Code working w1:p1 session 5f0c/);
+  assert.match(sessions, /Claude Code review working w1:p1 session 5f0c/);
   assert.match(sessions, /pi idle w2:p1 session \/home\/user\/\.pi\/sessions\/a\.jsonl/);
   assert.match(sessions, /Shell idle w3:p1 Attach from a shell in the pylon herdr --session nexus Copy$/);
 

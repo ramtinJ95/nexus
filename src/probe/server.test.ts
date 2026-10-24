@@ -387,7 +387,7 @@ test("observations carry session facts from Herdr, and null when Herdr cannot be
       return p?.phase === "running" ? p.sessions : assert.fail("the pylon runs");
     }
   };
-  assert.deepEqual(await sessionsSeen(), [{ herdrPane: "w1:p1", harness: "claude-code", harnessSessionId: "bd2c2d6b", status: "working" }]);
+  assert.deepEqual(await sessionsSeen(), [{ herdrPane: "w1:p1", harness: "claude-code", harnessSessionId: "bd2c2d6b", status: "working", title: "review" }]);
   readable = false;
   assert.equal(await sessionsSeen(), null);
 });

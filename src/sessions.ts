@@ -168,7 +168,7 @@ export async function closeSession(guest: Guest, herdrPane: string): Promise<voi
  */
 export async function sessionFacts(guest: Guest, timeoutMs = callTimeoutMs): Promise<readonly SessionFact[]> {
   const panes = await livePanes(guest, timeoutMs).catch(noServer([]));
-  return panes.map(({ herdrPane, harness, harnessSessionId, status }) => ({ herdrPane, harness, harnessSessionId, status }));
+  return panes.map(({ herdrPane, harness, harnessSessionId, status, title }) => ({ herdrPane, harness, harnessSessionId, status, title }));
 }
 
 /**

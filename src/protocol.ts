@@ -169,7 +169,11 @@ export interface RunningFacts {
 export interface ServiceFact { name: string; state: "starting" | "ready" | "failed" | "stopped"; port: number; declared: boolean; wantsPreview: boolean }
 export interface ListeningFact { port: number }
 /** `unknown` is Herdr's word for a pane it cannot classify, which every plain shell is. */
-export interface SessionFact { herdrPane: string; harness: SessionHarness; harnessSessionId: string | null; status: "working" | "idle" | "blocked" | "done" | "unknown" }
+export interface SessionFact {
+  herdrPane: string; harness: SessionHarness; harnessSessionId: string | null; status: "working" | "idle" | "blocked" | "done" | "unknown";
+  /** The session's title, its Herdr workspace's label. A probe from before titles were reported sends none. */
+  title?: string;
+}
 export interface GitFacts { head: string; branch: string | null; dirty: boolean; branches: readonly { name: string; head: string; pushedAs: string | null }[] }
 export type DeclaredOutput =
   | { id: string; kind: "file"; path: string; title: string | null; sha256: string }

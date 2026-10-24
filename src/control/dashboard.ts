@@ -521,7 +521,7 @@ ${outputs.length === 0 ? html`<p class="empty">No outputs yet.</p>` : html`<ul c
 </section>
 <section aria-labelledby="sessions-h"><h2 id="sessions-h">Sessions ${count(d.sessions.length)}</h2>
 ${d.sessions.length === 0 ? html`<p class="empty">No sessions.</p>` : html`<ul class="list outs">${d.sessions.map((s) => html`<li>
-<span class="o-kind">${harnessLabel[s.harness]}</span>${state(s.status, sessionTone[s.status])}<code class="dim pane">${s.herdrPane}</code>
+<span class="o-kind">${harnessLabel[s.harness]}</span>${s.title !== null && html`<span class="s-title">${s.title}</span>`}${state(s.status, sessionTone[s.status])}<code class="dim pane">${s.herdrPane}</code>
 ${s.harnessSessionId !== null && html`<code class="dim sid" title="${s.harnessSessionId}">session ${s.harnessSessionId}</code>`}
 </li>`)}</ul>`}
 <p class="attach-h">Attach from a shell in the pylon</p>

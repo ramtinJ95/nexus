@@ -127,7 +127,7 @@ test("ingest writes fold into records, and applying one twice changes nothing", 
 
   assert.equal(registry.node(node)?.state, "online");
   assert.deepEqual(registry.node(node)?.capacity, capacity);
-  assert.deepEqual(registry.sessions(pylonId), [{ pylon: pylonId, herdrPane: "p1", harness: "pi", harnessSessionId: "s.jsonl", status: "working" }]);
+  assert.deepEqual(registry.sessions(pylonId), [{ pylon: pylonId, herdrPane: "p1", harness: "pi", harnessSessionId: "s.jsonl", status: "working", title: null }]);
   assert.deepEqual(registry.outputs(threadId), [{ thread: threadId, kind: "branch", ref: "nexus/fix-it" }]);
   assert.deepEqual(registry.orphans(), [{ node, pylonId: "pylon-stray" }]);
 
@@ -180,7 +180,7 @@ test("a registry from before failure messages keeps its pylons' attempts", async
     seeded(path).close();
     const db = new DatabaseSync(path);
     db.prepare("UPDATE pylons SET attempts = ?").run(JSON.stringify(attempts));
-    db.exec("ALTER TABLE pylons DROP COLUMN retrying; PRAGMA user_version = 1");
+    db.exec("ALTER TABLE pylons DROP COLUMN retrying; ALTER TABLE sessions DROP COLUMN title; PRAGMA user_version = 1");
     db.close();
     return path;
   };
@@ -200,7 +200,7 @@ test("a registry from before pylon retries opens with no retry under way, and a 
   const path = tempDb();
   seeded(path).close();
   const db = new DatabaseSync(path);
-  db.exec("ALTER TABLE pylons DROP COLUMN retrying; PRAGMA user_version = 3");
+  db.exec("ALTER TABLE pylons DROP COLUMN retrying; ALTER TABLE sessions DROP COLUMN title; PRAGMA user_version = 3");
   db.close();
   const registry = openRegistry(path);
   t.after(() => registry.close());
@@ -332,6 +332,21 @@ test("a port the node routes is never handed out, though no row holds it", async
   assert.deepEqual(portsOf(registry, pylonId), ["api 10203", "web 10202"], "a route left to this pylon from a lost row is refused too");
 });
 
+test("a registry from before session titles keeps its sessions, untitled until they are observed again", async (t) => {
+  const { DatabaseSync } = await import("node:sqlite");
+  const path = tempDb();
+  seeded(path).close();
+  const db = new DatabaseSync(path);
+  db.exec("ALTER TABLE sessions DROP COLUMN title; PRAGMA user_version = 4");
+  db.prepare("INSERT INTO sessions VALUES (?, 'w1:p1', 'claude-code', NULL, 'idle')").run(pylonId);
+  db.close();
+  const registry = openRegistry(path);
+  t.after(() => registry.close());
+  assert.deepEqual(registry.sessions(pylonId), [{ pylon: pylonId, herdrPane: "w1:p1", harness: "claude-code", harnessSessionId: null, status: "idle", title: null }]);
+  registry.apply({ record: "session", pylonId, herdrPane: "w1:p1", fact: { herdrPane: "w1:p1", harness: "claude-code", harnessSessionId: "s", status: "idle", title: "review" } });
+  assert.equal(registry.sessions(pylonId)[0]!.title, "review");
+});
+
 test("a registry from before node-unique preview ports keeps its previews", async (t) => {
   const { DatabaseSync } = await import("node:sqlite");
   const path = tempDb();
@@ -340,6 +355,7 @@ test("a registry from before node-unique preview ports keeps its previews", asyn
   db.exec(`DROP TABLE previews;
     CREATE TABLE previews (pylon TEXT NOT NULL REFERENCES pylons (id), service TEXT NOT NULL, https_port INTEGER NOT NULL, ready INTEGER NOT NULL, PRIMARY KEY (pylon, service)) STRICT;
     ALTER TABLE pylons DROP COLUMN retrying;
+    ALTER TABLE sessions DROP COLUMN title;
     PRAGMA user_version = 2;`);
   db.prepare("INSERT INTO previews VALUES (?, 'web', 10200, 1)").run(pylonId);
   db.close();

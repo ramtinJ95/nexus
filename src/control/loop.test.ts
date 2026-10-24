@@ -536,7 +536,7 @@ test("with the real ingest, a pylon's sessions reach the registry and a working 
   run(t, registry, fake.probe, { ingest: realIngest });
   await until("the pylon runs", () => fake.pylons.get(thread.pylonId)?.phase === "running");
 
-  const working: SessionFact = { herdrPane: "p1", harness: "pi", harnessSessionId: "s.jsonl", status: "working" };
+  const working: SessionFact = { herdrPane: "p1", harness: "pi", harnessSessionId: "s.jsonl", status: "working", title: "plan" };
   fake.setSessions(thread.pylonId, [working]);
   await until("the session is recorded", () => registry.sessions(thread.pylonId).length === 1);
   assert.deepEqual(registry.sessions(thread.pylonId), [{ pylon: thread.pylonId, ...working }]);

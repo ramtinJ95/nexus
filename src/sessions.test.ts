@@ -147,13 +147,13 @@ const liveSnapshot = herdrSnapshot(
   ],
 );
 
-test("session facts map Herdr panes to harnesses, session IDs and statuses", async () => {
+test("session facts map Herdr panes to harnesses, session IDs, statuses and their workspace titles", async () => {
   const facts = await sessionFacts(herdrUp({ "api snapshot": () => herdrOk(liveSnapshot) }));
   assert.deepEqual(facts, [
-    { herdrPane: "w1:p1", harness: "claude-code", harnessSessionId: "bd2c2d6b", status: "working" },
-    { herdrPane: "w2:p1", harness: "pi", harnessSessionId: "/home/user/.pi/agent/sessions/s.jsonl", status: "blocked" },
-    { herdrPane: "w3:p1", harness: "shell", harnessSessionId: null, status: "unknown" },
-    { herdrPane: "w3:p2", harness: "shell", harnessSessionId: null, status: "idle" },
+    { herdrPane: "w1:p1", harness: "claude-code", harnessSessionId: "bd2c2d6b", status: "working", title: "review" },
+    { herdrPane: "w2:p1", harness: "pi", harnessSessionId: "/home/user/.pi/agent/sessions/s.jsonl", status: "blocked", title: "plan" },
+    { herdrPane: "w3:p1", harness: "shell", harnessSessionId: null, status: "unknown", title: "sh" },
+    { herdrPane: "w3:p2", harness: "shell", harnessSessionId: null, status: "idle", title: "sh" },
   ]);
 });
 
