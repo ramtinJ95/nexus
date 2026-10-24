@@ -1,13 +1,14 @@
-// The dashboard's only script. Pages are rendered on the server. This file sends actions and messages to the
-// JSON API, records a visit as human activity, opens the start dialog and the phone's panels, and polls the
-// page to swap in each `data-live` region that changed. A thread page also follows its stream, which sends the
-// conversation region as the run streams.
+// The dashboard's only script. Pages are rendered on the server. This file sends actions, messages and new projects
+// to the JSON API, records a visit as human activity, opens the start and new-project dialogs and the phone's panels,
+// and polls the page to swap in each `data-live` region that changed. A thread page also follows its stream, which
+// sends the conversation region as the run streams.
 "use strict";
 
 const main = document.querySelector("main");
 const pollMs = Number(main?.dataset.pollMs);
 const scroller = document.getElementById("scroll");
 const dialog = document.getElementById("start-dialog");
+const projectDialog = document.getElementById("project-dialog");
 const filter = document.getElementById("filter");
 
 /** Sends JSON as the API requires, and throws the API's error message. */
@@ -270,7 +271,8 @@ document.addEventListener("click", (event) => {
   }
   const closer = target?.closest("[data-close]");
   if (closer === null || closer === undefined) return;
-  if (dialog?.contains(closer)) dialog.close();
+  const modal = closer.closest("dialog");
+  if (modal !== null) modal.close();
   else setOpen(null);
 });
 
@@ -363,16 +365,62 @@ document.addEventListener("submit", async (event) => {
   }
 });
 
+function openProject() {
+  if (projectDialog === null) return;
+  setOpen(null);
+  // Offered from the start dialog when there is no project to start a thread on.
+  if (dialog?.open) dialog.close();
+  if (!projectDialog.open) projectDialog.showModal();
+}
+document.addEventListener("click", (event) => {
+  const link = event.target instanceof Element ? event.target.closest("[data-new-project]") : null;
+  if (link === null || projectDialog === null) return;
+  event.preventDefault();
+  openProject();
+});
+projectDialog?.addEventListener("close", () => {
+  if (location.pathname === "/projects/new") history.replaceState(null, "", "/");
+});
+
+// The project `nexus project add` sends without flags: the dialog's fields and the resources the form names. Once
+// added, the start dialog opens on it, as the dashboard's next step for a project is its first thread.
+let adding = false;
+document.addEventListener("submit", async (event) => {
+  if (event.target.id !== "project") return;
+  event.preventDefault();
+  if (adding) return;
+  adding = true;
+  const form = event.target;
+  const field = (name) => form.elements[name].value.trim();
+  const submit = form.querySelector("button[type=submit]");
+  submit.disabled = true;
+  try {
+    const project = await api("POST", "/v1/projects", {
+      id: field("id"), repoUrl: field("repoUrl"), defaultBranch: field("defaultBranch"), defaultNode: field("defaultNode"),
+      resources: JSON.parse(form.dataset.resources), allowedHosts: [], secrets: [], logins: [], preSetup: null,
+    });
+    form.reset();
+    showError("project-error", null);
+    projectDialog.close();
+    await openStart(project.id);
+  } catch (err) {
+    showError("project-error", err);
+  } finally {
+    adding = false;
+    submit.disabled = false;
+  }
+});
+
 const typing = (el) => el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement || el instanceof HTMLSelectElement || el?.isContentEditable === true;
 document.addEventListener("keydown", (event) => {
   if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
-    const form = event.target instanceof Element ? event.target.closest("#prompt, #start") : null;
+    const form = event.target instanceof Element ? event.target.closest("#prompt, #start, #project") : null;
     if (form === null) return;
     event.preventDefault();
     form.requestSubmit();
   } else if (event.key === "Escape" && document.body.dataset.open !== undefined) {
     setOpen(null);
-  } else if (event.key === "n" && !event.metaKey && !event.ctrlKey && !event.altKey && !typing(event.target) && dialog?.open === false) {
+  } else if (event.key === "n" && !event.metaKey && !event.ctrlKey && !event.altKey && !typing(event.target) && dialog !== null && document.querySelector("dialog[open]") === null) {
     // Browsers keep ⌘N for a new window, so the shortcut is the bare key.
     event.preventDefault();
     openStart(null);
@@ -416,6 +464,7 @@ if (scroller !== null) scroller.scrollTop = scroller.scrollHeight;
 document.querySelector(".row.active")?.scrollIntoView({ block: "nearest" });
 follow(document.getElementById("convo")?.dataset.stream);
 if (dialog?.dataset.autoopen !== undefined) void openStart(null);
+if (projectDialog?.dataset.autoopen !== undefined) openProject();
 setInterval(tick, 1000);
 if (pollMs > 0) {
   setInterval(() => { if (document.visibilityState === "visible") void refreshNow(); }, pollMs);
