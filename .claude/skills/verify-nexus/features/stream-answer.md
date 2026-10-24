@@ -22,10 +22,11 @@ Preconditions:
 - Thread `T` was started with `$V cli stream-start -- start --project spoon --title "stream: proof" --json`, and `$V cli stream-pre-show -- show $T --json` reads `.pylon.actualState` `running`.
 - `E=$($V evidence)`.
 
-- **Watch.** Before the send, start the watch in the background and stamp each line with the time it arrived:
-  `node src/cli/nexus.ts watch $T --json --url http://127.0.0.1:7470 --socks none | perl -MTime::HiRes=time -ne 'BEGIN{$|=1} printf "%.3f %s", time, $_' > "$E/stream-watch.jsonl" &`.
-- **Send.** Run `$V browser stream-ui-open -- goto http://127.0.0.1:7470/threads/$T`, then `$V browser stream-ui-fill -- fill "#prompt-text" "stream: 2500"` and `$V browser stream-ui-send -- click "#send"`. The answer takes 50 s. Two seconds later type a draft with `$V browser stream-ui-draft -- fill "#prompt-text" "a draft typed while it streams"`.
-- **Page stream open.** Four seconds after the send, run `$V browser stream-ui-open-check -- eval '() => (streaming() && frames > 0 ? "PASS" : "FAIL") + " readyState " + stream?.readyState + " after " + frames + " frames"'`. Stdout holds `PASS`.
+- **Watch.** Before the send, start the watch as a background command whose own shell stays alive until the watch ends, and stamp each line with the time it arrived. In an agent harness, run this as one background command, such as a Bash call run in the background, and keep its pid:
+  `node src/cli/nexus.ts watch $T --json --url http://127.0.0.1:7470 --socks none | perl -MTime::HiRes=time -ne 'BEGIN{$|=1} printf "%.3f %s", time, $_' > "$E/stream-watch.jsonl" & wait`.
+  The file soon holds a `reset`, a `state` and a `live` with `partial` null.
+- **Send.** Run `$V browser stream-ui-open -- goto http://127.0.0.1:7470/threads/$T`, then `$V browser stream-ui-fill -- fill "#prompt-text" "stream: 4000"` and `$V browser stream-ui-send -- click "#send"`. The answer takes 80 s. Two seconds later type a draft with `$V browser stream-ui-draft -- fill "#prompt-text" "a draft typed while it streams"`.
+- **Page stream open.** Four seconds after the send, run `$V browser stream-ui-open-check -- eval '() => (streaming() && document.querySelector("#convo [data-grow]") ? "PASS" : "FAIL") + " readyState " + stream?.readyState + " after " + frames + " frames"'`. Stdout holds `PASS`. The growing slot proves the stream carries the answer, not only the page's first frame.
 - **Scroll hold.** Ten seconds after the send, scroll up:
   - Run `$V browser stream-hold-set -- eval '() => { const room = scroller.scrollHeight - scroller.clientHeight; if (room < 300) return "FAIL only " + room + "px to scroll"; scroller.scrollTop = room - 250; window.verifyHold = { top: scroller.scrollTop, height: scroller.scrollHeight }; return "PASS held at " + scroller.scrollTop + " of " + scroller.scrollHeight; }'`.
   - Four seconds later run `$V browser stream-hold-check -- eval '() => { const h = window.verifyHold; const grew = scroller.scrollHeight - h.height; return (Math.abs(scroller.scrollTop - h.top) < 1 && grew > 0 ? "PASS" : "FAIL") + " scrollTop " + h.top + " became " + scroller.scrollTop + " while the page grew " + grew + "px"; }'`, and `$V browser stream-hold-shot -- screenshot --filename stream-hold.png`.
@@ -37,15 +38,16 @@ Preconditions:
   - Run `$V browser stream-show -- eval '() => { delete document.visibilityState; document.dispatchEvent(new Event("visibilitychange")); return stream !== window.verifyFirst ? "PASS opened a new stream" : "FAIL no new stream"; }'`, and two seconds later `$V browser stream-shown-check -- eval '() => (streaming() && frames > window.verifyFrames ? "PASS" : "FAIL") + " readyState " + stream.readyState + ", " + (frames - window.verifyFrames) + " frames since"'`.
   - Each `eval` prints `PASS`.
 - **Grows in place.** Take `$V browser stream-ui-shot-<i> -- screenshot --filename stream-<i>.png` every 4 s for five shots. Each shows the answer longer than the one before, and the composer still holds the draft.
-- **Done.** Once `$V cli stream-show -- show $T --json` reads `.thread.agentTurnRunning` `false`, take `$V browser stream-ui-done -- screenshot --filename stream-done.png` and `snapshot --filename stream-done.md`, then stop the watch with `kill %1`.
-- **Live rate.** In `$E/stream-watch.jsonl`, the `live` events with a `partial` come at 3 or more a second, with no gap of 1 s or more, each `partial` a longer prefix of `word0 word1 ...`. The `pi.assistant` `entry` holds all 2500 words, and it comes before the `live` whose `partial` is `null`.
+- **Done.** Once `$V cli stream-show -- show $T --json` reads `.thread.agentTurnRunning` `false`, take `$V browser stream-ui-done -- screenshot --filename stream-done.png` and `$V browser stream-ui-done-snap -- snapshot --filename stream-done.md`. The answer ends in `word3999` and the composer still holds the draft. Then stop the watch's background command by killing its process group.
+- **Live rate.** In `$E/stream-watch.jsonl`, the `live` events with a `partial` come at 3 or more a second, with no gap of 1 s or more, each `partial` a longer prefix of `word0 word1 ...`. The `pi.assistant` `entry` holds all 4000 words, and it comes before the `live` whose `partial` is `null`.
 - **Proof.** `stream-watch.jsonl` with the rate and gaps worked out from it, every `eval` step's stdout, `stream-hold.png`, the five `stream-<i>.png`, `stream-done.png` and `stream-done.md`.
 
 ## Gotchas
 
 - Start the watch before the send. A watch started later misses the first `live` events, and its rate covers only part of the answer.
-- `watch` runs until it is stopped, so it runs outside `$V cli`, which records a command only when it exits.
+- `watch` ends on a deleted thread, a closed pipe, or when its parent process exits, which it checks after each poll. A watch left behind with a trailing `&` by a shell that then returns has lost its parent: one ran 30 s and stopped before the answer ended. Keep its shell alive with `& wait` in a background command.
+- The watch runs outside `$V cli`. `$V cli` writes stdout to its file as the command runs, but echoes it and writes `.exit` only when the command ends, and the file has no timestamps.
 - The `eval` steps read the dashboard script's top-level `stream`, `frames`, `streaming` and `scroller`. Renaming any of them in `src/control/dashboard/client.js` breaks these steps.
 - Headless Chromium keeps every tab visible, so a second tab does not hide the first. The hidden step overrides `document.visibilityState` on the page and dispatches `visibilitychange`, and `delete document.visibilityState` restores it.
 - The page's stream proves the browser let go of its stream. That the control plane then frees the stream's watch is covered by the API's tests, not by this recipe.
-- Only a `stream: <n>` message streams. Its answer is `word0 word1 ...`, one word every 20 ms, so `stream: 2500` takes 50 s, long enough for every step above.
+- Only a `stream: <n>` message streams. Its answer is `word0 word1 ...`, one word every 20 ms, so `stream: 4000` takes 80 s, long enough for every step above. `stream: 2500` ended before the last two of the five shots.

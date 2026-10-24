@@ -7,12 +7,15 @@ This directory is the maintained source for verifying what a Nexus user can do w
 - Run from the repo root with `V=.claude/skills/verify-nexus/scripts/verify-nexus`.
 - `$V up` printed `ready`, and `$V doctor` exits 0 for the current run. Never drive a stack that `$V up` did not start in this run.
 - The seed is in place: project `spoon` on node `verify-node`, current image `img-0000000000aa`, and nothing else. `up` refuses to report ready without it, and the evidence's `stack-state.json` records it.
-- Threads persist for the life of a run. A feature that needs a fresh thread starts its own, and each title says which feature made it.
+- Threads persist for the life of a run. A feature that needs a fresh thread starts its own right before it checks it, and each title says which feature made it. A thread pauses after 20 minutes without human activity, so an older thread no longer reads `running`.
+- The browser session is open: run `$V browser open -- open http://127.0.0.1:7470/` once per run. Every other `$V browser` step fails with `The browser '…' is not open` until then.
+- [Add a project](./add-project.md) adds projects that cannot be removed. After it, `projects` lists five and the start dialog opens on `quill`. The recipes allow for that, but a run that needs the seed alone runs it last.
 - The model is scripted. A message that starts with `bash: ` runs that command as one bash tool call in the pylon, then answers `scripted answer after toolResult`. A message `stream: <n>` gets an answer of n words that streams one word every 20 ms. Any other message gets `scripted answer after user`.
 
 ## Driving conventions
 
-- Run the Mac CLI through `$V cli <step> -- <nexus args> --json`. Assert on the JSON, never on the plain-text output, which `docs/cli.md` leaves out of the contract.
+- Run the Mac CLI through `$V cli <step> -- <nexus args> --json`. Assert on the JSON, never on the plain-text output, which `docs/cli.md` leaves out of the contract. Stdout is indented JSON and stderr is one compact line, such as `{"error":"…","kind":"conflict","status":409}`, so parse both rather than matching text.
+- A command that has to outlive its shell call, such as `watch`, runs in the same shell as the steps around it, or as a background command whose shell stays alive. `watch` ends when its parent process exits.
 - Run the dashboard through `$V browser <step> -- <playwright-cli args>`. Open the session once with `$V browser open -- open http://127.0.0.1:7470/`. Prefer element IDs and roles from the dashboard (`#start-title`, `#prompt-text`, `#send`, `#archive`, `#unarchive`, `#delete`, `role=link[name="<title>"]`) over snapshot refs, which change with every render.
 - Pylon state converges on the loop's 5 s tick, and the dashboard refetches every 5 s. Poll `show`, or repeat a `snapshot`, every 3 to 5 s with a deadline, usually 2 minutes, instead of sleeping a fixed time.
 - A bare command in a recipe, such as `show $T --json`, means `$V cli <step> -- show $T --json`. Name the step after the feature ID.
