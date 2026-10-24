@@ -625,7 +625,9 @@ function renderChanges() {
   const { files, truncated, base } = checkout.changes;
   const added = files.reduce((n, f) => n + (f.additions ?? 0), 0);
   const deleted = files.reduce((n, f) => n + (f.deletions ?? 0), 0);
-  document.getElementById("changes-base").textContent = `${baseLabel()}, ${base.commit.slice(0, 7)}`;
+  // The base is the empty tree before a checkout's first commit, and at the start of a scratch project's pylon.
+  const commit = base.commit === null ? (checkout.base === "head" ? "no commit yet" : "an empty repository") : base.commit.slice(0, 7);
+  document.getElementById("changes-base").textContent = `${baseLabel()}, ${commit}`;
   if (files.length === 0) {
     return showChanges(el("p", { className: "empty", textContent: checkout.base === "head" ? "No uncommitted changes." : "Nothing has changed since the pylon booted." }));
   }
