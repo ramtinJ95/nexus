@@ -44,6 +44,9 @@ function request(
 		const req = http.request(
 			{
 				socketPath: join(dir, "control.sock"),
+				// A stopping controller stops listening, but a connection with a request in flight stays open. Pooled,
+				// it would reach the stopped controller after its socket is gone and keep it, and its controller.pid, alive.
+				agent: false,
 				method: "POST",
 				path: "/",
 				signal: signal ?? AbortSignal.timeout(180000),
