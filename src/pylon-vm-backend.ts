@@ -152,12 +152,24 @@ const recordBase = (repo: string) => `git -C ${q(repo)} update-ref refs/nexus/ba
 function setupCommands(repo: RepoInit, preSetup: string | null): string[] {
   return [
     `chown user:user ${q(workspace)}`,
-    asUser(repo.kind === "clone"
-      ? `git clone --no-checkout ${q(repo.url)} ${q(repoDir)} && git -C ${q(repoDir)} checkout -B ${q(repo.checkout.branch)} ${q(repo.checkout.commit)} && ${recordBase(repoDir)}`
-      : `git init --quiet --initial-branch=${q(repo.branch)} ${q(repoDir)}`, workspace),
+    asUser(repoInitCommand(repo), workspace),
     ...(preSetup === null ? [] : [asUser(`bash -c ${q(preSetup)}`, repoDir)]),
     asUser("if test -e .nexus/setup; then ./.nexus/setup; fi", repoDir),
   ];
+}
+
+function repoInitCommand(repo: RepoInit): string {
+  switch (repo.kind) {
+    case "clone": return `git clone --no-checkout ${q(repo.url)} ${q(repoDir)} && git -C ${q(repoDir)} checkout -B ${q(repo.checkout.branch)} ${q(repo.checkout.commit)} && ${recordBase(repoDir)}`;
+    case "empty": return `git init --quiet --initial-branch=${q(repo.branch)} ${q(repoDir)}`;
+  }
+}
+
+function bootRemotes(repo: RepoInit): string[] {
+  switch (repo.kind) {
+    case "clone": return [repo.url];
+    case "empty": return [];
+  }
 }
 
 /** The setup of a pylon booted from a template, run once: the template's clone moves to the pylon's remote and commit. */
@@ -256,7 +268,7 @@ export function createPylonVmBackend(options: PylonVmBackendOptions): VmBackend 
       secrets[grant.name] = { hosts: [...grant.hosts], value };
     }
     // A scratch pylon has no remote of its own, so a repository it creates later is reached over HTTPS only.
-    const remotes = [...(boot.repo.kind === "clone" ? [boot.repo.url] : []), boot.dotfiles.repo].flatMap((url) => sshRemoteOf(url) ?? []);
+    const remotes = [...bootRemotes(boot.repo), boot.dotfiles.repo].flatMap((url) => sshRemoteOf(url) ?? []);
     return {
       resources: { cpus: boot.resources.cpus, memoryGiB: boot.resources.memoryGiB },
       allowedHosts: [...boot.network.allowedHosts],
@@ -278,9 +290,12 @@ export function createPylonVmBackend(options: PylonVmBackendOptions): VmBackend 
         case "resume":
           throw new JobFailure("artifact-missing", `checkpoint ${boot.source.checkpoint} of ${boot.pylonId} is not on this node`);
         case "template":
-          if (boot.repo.kind !== "clone") throw new JobFailure("invalid", `${boot.pylonId} boots from template ${boot.source.template}, but its project is scratch, which has no template`);
-          disk = await templates.templateDisk(store, boot.source.template, boot.image);
-          setup = checkoutCommands(boot.repo);
+          switch (boot.repo.kind) {
+            case "empty": throw new JobFailure("invalid", `${boot.pylonId} boots from template ${boot.source.template}, but its project is scratch, which has no template`);
+            case "clone":
+              disk = await templates.templateDisk(store, boot.source.template, boot.image);
+              setup = checkoutCommands(boot.repo);
+          }
           break;
         case "fresh":
           setup = setupCommands(boot.repo, boot.source.preSetup);

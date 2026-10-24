@@ -2,6 +2,8 @@
 
 Each node runs a probe, which runs the pylon VMs. One machine, `rj-firebat`, also runs the control plane: the registry, the reconcile loop, the agent harness and the API. Both install from a checkout of this repository, as root, and both scripts are safe to rerun.
 
+Upgrade the control plane before the probes. A probe refuses a spawn from a control plane older than itself and says the control plane needs upgrading, while an older probe still runs projects that clone a repository for an upgraded control plane. A probe from before scratch projects cannot start one, so create scratch projects only after every probe is upgraded.
+
 ## Install or upgrade a probe
 
 1. Copy a checkout to the node and run `sudo deploy/install-probe.sh` from it.
