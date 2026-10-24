@@ -14,7 +14,7 @@ A user sends a thread's agent a message. The agent runs tools inside the thread'
 
 - Run `nexus send <thread> <text...>` in a terminal, with `--steer` to join a busy run, or `--request-id <ID>` to make a retry safe.
 - Read the result with `nexus conversation <thread>`, or follow it with `nexus watch <thread>`.
-- Type into `Message the agent` on the thread page, `/threads/<id>`, and choose `Send` or press `⌘↵`.
+- Type into `Message the agent` on the thread page, `/threads/<id>`, and choose `Send` or press `⌘↵` or `Ctrl↵`. While a run is busy the button reads `Queue` and the field `Queue a follow-up…`, and the message waits for the run.
 
 ## Driving it with verify-nexus
 
@@ -23,17 +23,18 @@ Preconditions:
 - The baseline from the index holds.
 - Thread `T` was started with `$V cli msg-start -- start --project spoon --title "msg: proof" --json`, and `$V cli msg-pre-show -- show $T --json` reads `.pylon.actualState` `running`.
 
-- **CLI send.** Ask for a file and its listing. Run `$V cli msg-cli-send -- send $T "bash: echo msg-proof > proof.txt && ls" --request-id msg:proof-1 --json`. Exit 0, and stdout is `{"submission": <n>}`.
+- **CLI send.** Ask for a file and its listing. Run `$V cli msg-cli-send -- send $T "bash: echo msg-proof > proof.txt && ls" --request-id msg:proof-1 --json`. Exit 0, and stdout's `.submission` is a number. Stdout is indented JSON, so read it with `jq`, not as a string.
 - **Conversation.** Read the turn. Repeat `$V cli msg-conversation -- conversation $T --json` every 3 s, for up to 30 s, until the entries end in a `pi.assistant` entry whose text is `scripted answer after toolResult`. Before it, in order, are a `pi.user` entry with the sent text, a `pi.assistant` entry with a `toolCall` whose `name` is `bash` and whose `arguments.command` is the sent command, and a `pi.tool-result` entry whose text contains `proof.txt` and `README.md`.
 - **Disk.** Confirm the side effect. Run `$V pylon msg-disk $T -- cat proof.txt`. Stdout is `msg-proof`.
-- **Run settled.** Run `$V cli msg-show -- show $T --json`. `.thread.agentTurnRunning` is `false`.
-- **Dedupe.** Resend the same message with the same ID. Run `$V cli msg-dedupe -- send $T "bash: echo msg-proof > proof.txt && ls" --request-id msg:proof-1 --json`. Exit 0, and stdout is the same `{"submission": <n>}` as the first send. Then `$V cli msg-dedupe-conversation -- conversation $T --json` holds exactly one `pi.user` entry with that text and one `toolCall` for it.
+- **Run settled.** Repeat `$V cli msg-show -- show $T --json` until `.thread.agentTurnRunning` is `false`, for up to 30 s.
+- **Dedupe.** Resend the same message with the same ID. Run `$V cli msg-dedupe -- send $T "bash: echo msg-proof > proof.txt && ls" --request-id msg:proof-1 --json`. Exit 0, and `.submission` is the same number as the first send. Then `$V cli msg-dedupe-conversation -- conversation $T --json` holds exactly one `pi.user` entry with that text and one `toolCall` for it.
 - **Dashboard send.** Send from the thread page:
   - Run `$V browser msg-ui-open -- goto http://127.0.0.1:7470/threads/$T`.
   - Run `$V browser msg-ui-fill -- fill "#prompt-text" "bash: echo from-ui >> proof.txt"`.
   - Run `$V browser msg-ui-send -- click "#send"`.
   - Repeat `$V browser msg-ui-snap -- snapshot --filename msg-ui.md` every 5 s, for up to 30 s, until the snapshot shows the `bash: echo from-ui >> proof.txt` message, a `bash echo from-ui >> proof.txt ✓` tool row, and a later `scripted answer after toolResult`. Then run `$V browser msg-ui-shot -- screenshot --filename msg-ui.png`.
-  - Confirm from the other views: `$V pylon msg-ui-disk $T -- cat proof.txt` prints `msg-proof`, then `from-ui`, and `$V cli msg-ui-conversation -- conversation $T --json` holds the dashboard's message as a `pi.user` entry, followed by its `toolCall` and a final `scripted answer after toolResult`.
+  - Send by keyboard: `$V browser msg-ui-kbd-fill -- fill "#prompt-text" "bash: echo from-kbd >> proof.txt"`, then `$V browser msg-ui-kbd -- press Meta+Enter`. The message and its answer appear as above.
+  - Confirm from the other views: `$V pylon msg-ui-disk $T -- cat proof.txt` prints `msg-proof`, `from-ui` and `from-kbd`, and `$V cli msg-ui-conversation -- conversation $T --json` holds the dashboard's message as a `pi.user` entry, followed by its `toolCall` and a final `scripted answer after toolResult`.
 - **Proof.** The recorded `msg-cli-send`, the final `msg-conversation`, `msg-disk`, `msg-dedupe` with `msg-dedupe-conversation`, `msg-ui-conversation`, `msg-ui.md`, `msg-ui.png` and `msg-ui-disk`.
 
 ## Gotchas

@@ -7,7 +7,8 @@
  * the Docker backend. Only the production boundaries are doubles:
  * - tailscaled's LocalAPI is a Unix socket in a directory under /tmp, named in <runDir>/socket-dir. whois names 127.0.0.1:7480 as the probe and
  *   every other address as the control plane's own node, which the API allows, as for the CLI on rj-firebat.
- * - the model is the scripted one from src/harness/test-fixture.ts: `bash: <command>` runs one bash tool call.
+ * - the model is the scripted one from src/harness/test-fixture.ts: `bash: <command>` runs one bash tool call, and
+ *   `stream: <n>` streams an answer of n words.
  * - `tailscale serve` is src/probe/fake-tailscale.ts, so the Mac's work tailnet is never touched.
  *
  * Everything Docker holds for the run carries the label nexus.verify=<run>. The process writes <runDir>/state.json

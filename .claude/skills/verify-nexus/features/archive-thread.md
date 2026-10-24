@@ -20,24 +20,27 @@ Preconditions:
 
 - The baseline from the index holds.
 - Thread `T` was started with `$V cli archive-start -- start --project spoon --title "archive: proof" --json`, and its pylon is `running`.
-- Its disk holds a marker written by the agent: `$V cli archive-mark -- send $T "bash: echo before-archive > marker.txt" --json`, and `$V pylon archive-mark-disk $T -- cat marker.txt` prints `before-archive`.
+- Its disk holds a marker written by the agent: `$V cli archive-mark -- send $T "bash: echo before-archive > marker.txt" --json`. `send` returns before the tool runs, so poll `conversation $T --json` until it ends in `scripted answer after toolResult`. Then `$V pylon archive-mark-disk $T -- cat marker.txt` prints `before-archive`.
 
 - **Archive.** Run `$V cli archive-cli -- archive $T --json`. Exit 0, and the returned `Thread` has `status` `archived`.
 - **Paused.** Repeat `$V cli archive-show -- show $T --json` every 5 s, for up to 2 minutes, until `.pylon.actualState` is `paused`. `.desired` is `paused`.
-- **Checkpoint, no VM.** Run `docker ps -a --filter label=nexus.pylon=pylon-$T --format '{{.Names}}'`, which prints nothing. Run `docker images --filter label=nexus.pylon=pylon-$T --format '{{.Repository}}:{{.Tag}}'`, which prints one `nexus-checkpoint/pylon-$T:<checkpoint>`. Save both outputs to the evidence directory: `> "$($V evidence)/archive-docker.txt"`.
-- **Refused message.** Run `$V cli archive-refuse -- send $T "bash: echo should-not-run" --json`. Exit 5. Stderr is a JSON line with `"kind": "conflict"` and `"status": 409`.
-- **Unarchive.** Run `$V cli unarchive-cli -- unarchive $T --json`. Exit 0, and `status` is `active`. Poll `show` until `.pylon.actualState` is `running`.
+- **Checkpoint, no VM.** Run `{ docker ps -a --filter label=nexus.pylon=pylon-$T --format '{{.Names}}'; docker images --filter label=nexus.pylon=pylon-$T --format '{{.Repository}}:{{.Tag}}'; } > "$($V evidence)/archive-docker.txt"`. The file holds no container name and exactly one `nexus-checkpoint/pylon-$T:<checkpoint>`.
+- **Refused message.** Run `$V cli archive-refuse -- send $T "bash: echo should-not-run" --json`. Exit 5, and stderr is `{"error":"thread <T> is archived","kind":"conflict","status":409}`.
+- **Wake and archive again.** `$V cli archive-wake -- wake $T --json` exits 0, and `show $T --json` still reads `archived` and `paused`. `$V cli archive-again -- archive $T --json` exits 0 with `status` `archived`.
+- **Unarchive.** Run `$V cli unarchive-cli -- unarchive $T --json`. Exit 0, and `status` is `active`. Poll `show` until `.pylon.actualState` is `running`. A second `$V cli unarchive-twice -- unarchive $T --json` exits 5 with stderr `{"error":"thread <T> is active, not archived","kind":"conflict","status":409}`.
 - **Disk survived.** Run `$V pylon unarchive-disk $T -- cat marker.txt`, which prints `before-archive`. Then send `bash: cat marker.txt` with `$V cli unarchive-send` and read `conversation`. The new `pi.tool-result` contains `before-archive`.
 - **Dashboard.** Repeat archive and unarchive from the page:
   - Run `$V browser archive-ui-open -- goto http://127.0.0.1:7470/threads/$T`, then `$V browser archive-ui-click -- click "#archive"`.
-  - Within two polls, about 10 s, the header shows `Unarchive` and the thread's tag reads `archived`. Capture it with `snapshot --filename archive-ui.md` and `screenshot --filename archive-ui.png`.
-  - Run `$V browser unarchive-ui-click -- click "#unarchive"`.
+  - Within two polls, about 10 s, the header shows `Unarchive`, and its status chip (`.chip-label`) reads `archived`. The composer is replaced by `An archived thread takes no messages, because its pylon stays paused. Unarchive the thread to send one.`, and the sidebar folds the thread under `1 archived`. Capture it with `snapshot --filename archive-ui.md` and `screenshot --filename archive-ui.png`.
+  - Once `show $T --json` reads `paused`, the step above's Docker command lists two checkpoints, one for each pause.
+  - Run `$V browser unarchive-ui-click -- click "#unarchive"`. Within two polls `Archive` and the composer are back. Capture `snapshot --filename unarchive-ui.md` and `screenshot --filename unarchive-ui.png`.
   - Confirm both through `show $T --json` after each click.
-- **Proof.** The recorded `archive-cli`, the `archive-show` that reads `paused`, `archive-docker.txt`, `archive-refuse`, `unarchive-cli`, `unarchive-disk`, and `archive-ui.md` with `archive-ui.png`.
+  - On a narrow window, run `resize 600 900`, then `click "role=button[name=\"Thread actions\"]"`. The opened menu holds `Archive` and `Delete`. `resize 1280 800` restores the layout.
+- **Proof.** The recorded `archive-cli`, the `archive-show` that reads `paused`, `archive-docker.txt`, `archive-refuse`, `unarchive-cli`, `unarchive-disk`, `archive-ui.md` with `archive-ui.png`, and `unarchive-ui.md` with `unarchive-ui.png`.
 
 ## Gotchas
 
-- Docker's pause is `docker stop` plus `docker commit`, so running processes and memory are lost, as on a real pylon. Prove survival with a file, not a process.
-- Unarchiving is the only path that wakes an archived thread. `nexus wake` and opening the thread page record activity but never unarchive it.
-- Each archive adds a checkpoint image. `$V down` removes them by the run's label, but a run that archives many threads holds their layers until then.
+- Docker's pause records the Herdr sessions, then runs `docker stop`, `docker commit` and `docker rm`, so running processes and memory are lost, as on a real pylon. Prove survival with a file, not a process.
+- Unarchiving is the only path that wakes an archived thread. `nexus wake` records activity but never unarchives it, and opening an archived thread's page records no activity at all.
+- Each pause adds a checkpoint image, including the idle pause after 20 minutes without human activity, and a wake keeps the old ones. Only delete or `$V down` removes them, so a run that archives many threads holds their layers until then.
 - `actualState` passes through `pausing` and `spawning`. Assert only the settled `paused` and `running`.
