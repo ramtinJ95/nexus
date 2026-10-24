@@ -216,6 +216,7 @@ a.link { color: var(--accent); }
 .pv-name { font-weight: 600; font-size: 12.5px; }
 .pv-note { font-size: 11px; color: var(--text-3); }
 .pv-busy .pv-note { color: var(--warn); }
+.pv-bad .pv-note { color: var(--bad); }
 .pv-top .btn, .pv-top .pv-note:last-child { margin-left: auto; }
 .pv-top .btn + .btn { margin-left: 0; }
 .pv-url { font: 11px var(--mono); color: var(--text-3); margin-top: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -301,6 +302,7 @@ a.link { color: var(--accent); }
   .mini { flex: none; display: inline-flex; align-items: center; gap: 6px; font: 500 12.5px/1 var(--sans); padding: 7px 11px; border-radius: 999px; border: 1px solid var(--line); background: var(--raised); color: var(--text-2); cursor: pointer; white-space: nowrap; }
   .mini-ok { color: #bbf7d0; border-color: rgba(74, 222, 128, 0.3); }
   .mini-busy { color: #fde68a; border-color: rgba(251, 191, 36, 0.3); border-style: dashed; }
+  .mini-bad { color: #fecaca; border-color: rgba(248, 113, 113, 0.35); }
 
   .convo { padding: 14px 14px 20px; gap: 12px; }
   .convo-meta { display: none; }

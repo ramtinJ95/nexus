@@ -347,20 +347,28 @@ ${closed.length > 0 && html`<details class="ov-closed" id="closed-${p.id}"><summ
 
 /**
  * A paused pylon's preview keeps its link, because a visit wakes the pylon. An archived thread's pylon is
- * paused or about to be, and stays so whatever the visit, so its preview would only show the waking page.
+ * paused or about to be, and stays so whatever the visit, so its preview would only show the waking page. A
+ * failed service's preview has no link, because the gateway can only answer 502 for it.
  */
-type PreviewState = "ready" | "starting" | "paused" | "archived";
+type PreviewState = "ready" | "starting" | "failed" | "paused" | "archived";
 function previewState(d: ThreadDetail, p: Preview): PreviewState {
   if (d.thread.status === "archived") return "archived";
   if (d.pylon.actualState === "paused") return "paused";
+  if (p.failed !== null) return "failed";
   return p.ready ? "ready" : "starting";
 }
 const previewLook: Record<PreviewState, { linked: boolean; label: string | null; tone: Tone; hint: string | null }> = {
   ready: { linked: true, label: null, tone: "ok", hint: null },
   starting: { linked: false, label: "starting", tone: "busy", hint: null },
+  failed: { linked: false, label: "failed", tone: "bad", hint: null }, // lookOf gives it the preview's own reason
   paused: { linked: true, label: "paused", tone: "idle", hint: "Opening it wakes the pylon." },
   archived: { linked: false, label: "paused", tone: "idle", hint: "Unarchive the thread to open it." },
 };
+/** The preview's look, with its service's failure as a failed preview's hint. */
+function lookOf(d: ThreadDetail, p: Preview) {
+  const state = previewState(d, p);
+  return state === "failed" ? { ...previewLook.failed, hint: p.failed } : previewLook[state];
+}
 
 function threadPage(c: Context, d: ThreadDetail, node: NodeRecord, view: ConversationView | Error | null): Html {
   const { thread: t } = d;
@@ -456,7 +464,7 @@ function strip(d: ThreadDetail): Html {
   const [label, tone] = actualBadge[d.pylon.actualState];
   return html`<button type="button" class="mini" data-open="inspect">${dot(tone)}${label} · ${d.pylon.node}</button>
 ${d.previews.map((p) => {
-  const look = previewLook[previewState(d, p)];
+  const look = lookOf(d, p);
   return look.linked
     ? html`<a class="mini mini-${look.tone}" href="${p.url}" target="_blank" rel="noopener">${p.service}${look.label !== null && `, ${look.label}`} ↗</a>`
     : html`<span class="mini mini-${look.tone}">${p.service}, ${look.label}</span>`;
@@ -490,7 +498,7 @@ ${pylon.failed !== null && html`<p class="error">The planner gave up: ${pylon.fa
 </section>
 <section aria-labelledby="previews-h"><h2 id="previews-h">Previews ${count(d.previews.length)}</h2>
 ${d.previews.length === 0 ? html`<p class="empty">No previews.</p>` : html`<ul class="list">${d.previews.map((p) => {
-  const look = previewLook[previewState(d, p)];
+  const look = lookOf(d, p);
   return html`<li class="pv pv-${look.tone}">
 <div class="pv-top">${dot(look.tone)}<span class="pv-name">${p.service}</span>${look.label !== null && html`<span class="pv-note">${look.label}</span>`}${look.linked && html`<a class="btn btn-xs" href="${p.url}" target="_blank" rel="noopener" aria-label="Open ${p.service}">Open ↗</a>`}${open && linkedPort(p.service) !== null && html`<button type="button" class="btn btn-xs btn-ghost" data-action="unpublish" data-thread="${t.id}" data-port="${linkedPort(p.service)}" aria-label="Unpublish ${p.service}">Unpublish</button>`}</div>
 <div class="pv-url">${host(p.url)}</div>
