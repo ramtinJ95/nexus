@@ -13,13 +13,16 @@ import { connect, createServer, type Server } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
+import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
 import { startApi } from "../control/api.ts";
 import { fakeHarness } from "../control/fake-harness.ts";
 import { openRegistry, type Thread } from "../control/registry.ts";
 import type { ImageId, ImageManifest } from "../images.ts";
 import type { Project, ProjectId } from "../project.ts";
-import type { CommandResult, NodeName, PylonCommand, PylonId, ServiceFact, TailnetNodeId } from "../protocol.ts";
+import { processStream } from "../process-stream.ts";
+import type { ByteStream, CommandResult, NodeName, PylonCommand, PylonId, ServiceFact, StreamRequest, TailnetNodeId } from "../protocol.ts";
+import { checkoutDir } from "../sessions.ts";
 import { CliError, follow } from "./transport.ts";
 
 const cli = fileURLToPath(new URL("./nexus.ts", import.meta.url));
@@ -98,12 +101,17 @@ async function setup(t: TestContext) {
     : command.kind === "close-session" ? { kind: "close-session" }
     : { kind: "link-port", service: `port-${(command as { port: number }).port}` };
   const commands: PylonCommand[] = [];
+  /** What the node's probe opens a pipe to. Tests replace it. */
+  let pipe = async (request: StreamRequest): Promise<ByteStream> => { throw new Error(`unexpected stream ${request.argv[0]}`); };
   const fake = fakeHarness();
   const options = (port: number) => ({
     registry, host: "127.0.0.1", port, whois: async () => caller, allowed: new Set([laptop]),
     hostnames: new Set([apiName, "127.0.0.1"]), dotfiles: { repo: "https://github.com/ramtin/dotfiles.git", ref: "main" },
     harness: fake.harness, wake: () => {}, previewPorts: { first: 10200, last: 10299 },
-    probes: new Map([[node, { command: (_pylonId: PylonId, command: PylonCommand) => { commands.push(command); return answer(command); } }]]),
+    probes: new Map([[node, {
+      command: (_pylonId: PylonId, command: PylonCommand) => { commands.push(command); return answer(command); },
+      stream: (_pylonId: PylonId, request: StreamRequest) => pipe(request),
+    }]]),
   });
   let api = await startApi(options(0));
   t.after(async () => {
@@ -134,6 +142,7 @@ async function setup(t: TestContext) {
     registry, fake, proxy, home, api, env, nexus, json, commands,
     callAs(id: TailnetNodeId) { caller = id; },
     probeAnswers(next: typeof answer) { answer = next; },
+    probePipes(next: typeof pipe) { pipe = next; },
     localUrl: `http://127.0.0.1:${api.port}`,
     /** Stops the control plane, which drops every connection, and returns a function that starts it again on its port. */
     async stop() {
@@ -388,6 +397,57 @@ test("a preview from a control plane older than Preview.failed reads as not fail
   assert.match(shown, /^preview: web at https:\/\/rj-firebat\.tail\.ts\.net:10200\/$/m);
   assert.equal(await run(["ports", "th-old"]), `3000  web  ${web.url}\n4000  api  ${api.url} (not served yet)\n`);
   assert.equal(await run(["preview", "th-old", "3000"]), `${web.url}\n`);
+});
+
+test("files, changes and diff read the pylon's checkout, and wait for a paused pylon to run", async (t) => {
+  const s = await setup(t);
+  const thread: Thread = await s.json(["start", "--project", "acme", "--title", "checkout"]);
+  const repo = await mkdtemp(join(tmpdir(), "nexus-cli-checkout-"));
+  t.after(() => rm(repo, { recursive: true }));
+  const git = (...args: string[]) => promisify(execFile)("git", ["-C", repo, "-c", "user.name=t", "-c", "user.email=t@t", ...args]);
+  // Enough lines stay the same that the renamed file is still similar enough for git to call it a rename.
+  const kept = "keep\n".repeat(4);
+  await writeFile(join(repo, "app.txt"), `one\n${kept}`);
+  await git("init", "-q");
+  await git("add", "-A");
+  await git("commit", "-q", "-m", "first");
+  await git("update-ref", "refs/nexus/base", "HEAD");
+  const base = (await git("rev-parse", "HEAD")).stdout.trim();
+  await writeFile(join(repo, "app.txt"), `two\n${kept}`);
+  await git("commit", "-q", "-am", "agent work");
+  await git("mv", "app.txt", "main.txt");
+  await mkdir(join(repo, "src"));
+  await writeFile(join(repo, "src", "x.ts"), "x\n");
+  let refusals = 2;
+  s.probePipes(async ({ argv }) => {
+    if (refusals-- > 0) throw Object.assign(new Error("rj-firebat: pylon-x is stopped, not running"), { code: "not-running" });
+    return processStream(argv[0]!, argv.slice(1).map((arg) => arg === checkoutDir ? repo : arg), () => {});
+  });
+
+  const listed = await s.nexus(["files", thread.id]);
+  assert.equal(listed.code, 0, listed.stderr);
+  assert.equal(listed.stdout, ".git/\nmain.txt  24\nsrc/\n", "a paused pylon is woken and asked again until it runs");
+  assert.deepEqual((await s.json(["files", thread.id, "src"])).entries, [{ name: "x.ts", kind: "file", size: 2 }]);
+
+  assert.equal((await s.nexus(["changes", thread.id])).stdout, [
+    `Changes since the commit the pylon booted at, ${base.slice(0, 12)}:`,
+    "renamed  +1 -1  main.txt (from app.txt)",
+    "added    +1 -0  src/x.ts",
+    "",
+  ].join("\n"));
+  const uncommitted = await s.json(["changes", thread.id, "--uncommitted"]);
+  assert.equal(uncommitted.base.kind, "head");
+  assert.deepEqual(uncommitted.files.map((f: { path: string; status: string }) => [f.status, f.path]), [["renamed", "main.txt"], ["added", "src/x.ts"]]);
+
+  const diff = await s.nexus(["diff", thread.id, "src/x.ts"]);
+  assert.equal(diff.stdout, "diff --git a/src/x.ts b/src/x.ts\nnew file mode 100644\nindex 0000000..587be6b\n--- /dev/null\n+++ b/src/x.ts\n@@ -0,0 +1 @@\n+x\n");
+  assert.equal((await s.nexus(["diff", thread.id, "nothing-here"])).stdout, "No changes.\n");
+  const renamed = await s.json(["diff", thread.id, "--uncommitted", "app.txt", "main.txt"]);
+  assert.match(renamed.diff, /rename from app.txt\nrename to main.txt/, "a rename shows as one when both paths are named");
+
+  const missing = await s.nexus(["files", thread.id, "nope", "--json"]);
+  assert.equal(missing.code, 4);
+  assert.match(JSON.parse(missing.stderr).error, /nope does not exist/);
 });
 
 test("unpreview unpublishes a port, waits for a paused pylon to run, and fails with the contract's exit codes", async (t) => {

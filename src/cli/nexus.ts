@@ -15,11 +15,12 @@ import type { ImageContent, Message, TextContent } from "@earendil-works/pi-ai";
 import type { ConversationView, EntryRecord, InboxState, LiveState } from "@earendil-works/pi-durable";
 import type { ListeningPort, NodeSummary, OpenedSession, ThreadDetail, ThreadRow, ViewFrame } from "../control/api.ts";
 import type { Preview, Thread } from "../control/registry.ts";
+import type { Changes, Diff, Listing } from "../checkout-files.ts";
 import type { Project } from "../project.ts";
 import type { ActualState } from "../reconcile.ts";
 import { call, CliError, exitCodes, follow, type Endpoint, type HostPort } from "./transport.ts";
 
-const version = "0.5.0";
+const version = "0.6.0";
 const defaults = { url: "http://rj-firebat.tailc817d3.ts.net:7470", socks: "localhost:1055" };
 const configFile = () => join(homedir(), ".config", "nexus", "cli.json");
 
@@ -30,6 +31,9 @@ const usage = `nexus ${version}, the Nexus control plane from this Mac
   nexus ports <thread>                         the TCP ports the pylon listens on, and each one's preview
   nexus preview <thread> <port> [--wait]       publish a port as a preview, and print its URL
   nexus unpreview <thread> <port>              stop publishing a port that preview published
+  nexus files <thread> [path]                  a directory of the pylon's checkout
+  nexus changes <thread> [--uncommitted]       the files changed since the pylon booted, or since HEAD
+  nexus diff <thread> [path...] [--uncommitted]
   nexus conversation <thread>                  the agent's transcript
   nexus session open <thread> [--harness claude-code|pi|shell] [--title T]
   nexus session close <thread> <pane>
@@ -165,6 +169,30 @@ function portArg(given: string): number {
   const port = Number(given);
   if (!Number.isInteger(port) || port < 1 || port > 65535) throw new CliError("invalid", `the port must be a whole number from 1 to 65535, got ${given}`);
   return port;
+}
+
+/** A diff of a large tree can take the pylon a while. */
+const checkoutReadMs = 120_000;
+const baseQuery = (v: Values) => v.uncommitted === true ? "base=head" : "base=start";
+
+function listingText(l: Listing): string {
+  const where = l.path === "" ? "the checkout" : l.path;
+  if (l.entries.length === 0) return `${where} is empty.`;
+  return [
+    // A directory has no size, so its padding is trimmed.
+    table(l.entries.map((e) => [e.kind === "dir" ? `${e.name}/` : e.kind === "symlink" ? `${e.name}@` : e.name, e.size === null ? "" : String(e.size)])).replace(/ +$/gm, ""),
+    ...l.truncated ? [`Only the first ${l.entries.length} entries of ${where} are listed.`] : [],
+  ].join("\n");
+}
+
+function changesText(c: Changes): string {
+  const since = `${c.base.kind === "start" ? "the commit the pylon booted at" : "HEAD"}, ${c.base.commit.slice(0, 12)}`;
+  if (c.files.length === 0) return `No changes since ${since}.`;
+  return [
+    `Changes since ${since}:`,
+    table(c.files.map((f) => [f.status, f.additions === null ? "binary" : `+${f.additions} -${f.deletions}`, f.oldPath === null ? f.path : `${f.path} (from ${f.oldPath})`])),
+    ...c.truncated ? [`Only the first ${c.files.length} files are listed.`] : [],
+  ].join("\n");
 }
 
 const waitMs = 120_000;
@@ -503,6 +531,31 @@ const commands: Readonly<Record<string, Command>> = {
       const port = portArg(given!);
       await whenRunning(api, id!, () => api("DELETE", `${thread(id!)}/previews/${port}`, {}), `port ${port} is still published`);
       return { json: null, text: `Unpublished port ${port} of ${id}.` };
+    },
+  },
+  files: {
+    args: [1, 2],
+    async run(api, [id, path = ""]) {
+      const l = await whenRunning(api, id!, () => api("GET", `${thread(id!)}/files?path=${encodeURIComponent(path)}`, undefined, checkoutReadMs), "nothing was listed") as Listing;
+      return { json: l, text: listingText(l) };
+    },
+  },
+  changes: {
+    args: [1, 1],
+    options: { uncommitted: { type: "boolean" } },
+    async run(api, [id], v) {
+      const c = await whenRunning(api, id!, () => api("GET", `${thread(id!)}/changes?${baseQuery(v)}`, undefined, checkoutReadMs), "no changes were read") as Changes;
+      return { json: c, text: changesText(c) };
+    },
+  },
+  diff: {
+    args: [1, Infinity],
+    options: { uncommitted: { type: "boolean" } },
+    async run(api, [id, ...paths], v) {
+      const query = [baseQuery(v), ...paths.map((p) => `path=${encodeURIComponent(p)}`)].join("&");
+      const d = await whenRunning(api, id!, () => api("GET", `${thread(id!)}/diff?${query}`, undefined, checkoutReadMs), "no diff was read") as Diff;
+      const text = d.diff === "" ? "No changes." : d.diff.replace(/\n$/, "");
+      return { json: d, text: d.truncated ? `${text}\n[The diff stops here, at its 4 MiB limit. Name paths to see the rest.]` : text };
     },
   },
   conversation: {
