@@ -614,6 +614,66 @@ test("the start dialog's projects refresh with the page, so a project added else
   assert.match(await region("/threads/th-missing"), /Project acme git@example\.com:acme\.git beta git@example\.com:beta\.git Node/);
 });
 
+test("with no projects, the overview, the sidebar and the start dialog each offer a new project", async (t) => {
+  const s = await setup(t);
+  const page = (await s.call("GET", "/")).text;
+  const offers = (html: string) => [...html.matchAll(/<a class="[^"]*" href="\/projects\/new" data-new-project>([^<]*)<\/a>/g)].map((m) => m[1]);
+  const overview = page.split('id="overview"')[1]!.split("</main>")[0]!;
+  assert.match(textOf(overview.replace(/^[^>]*>/, "")), /^No projects yet\. A project names the repository its threads clone and the node they run on\. New project$/);
+  assert.deepEqual(offers(overview), ["New project"]);
+  assert.deepEqual(offers(page.split('<header class="bar">')[1]!.split("</header>")[0]!), ["New project"], "the overview's bar offers one");
+  assert.deepEqual(offers(page.split('<aside class="side"')[1]!.split("</aside>")[0]!), ["New project"], "the sidebar offers one under its projects");
+  const start = page.split('<div id="start-body" data-live>')[1]!.split("</dialog>")[0]!;
+  assert.equal(textOf(start), "No projects yet, so there is no repository to start a thread on. New project");
+  assert.deepEqual(offers(start), ["New project"], "the start dialog offers one instead of a form");
+
+  await s.call("POST", "/v1/projects", project("acme"));
+  const later = (await s.call("GET", "/")).text;
+  assert.deepEqual(offers(later.split('id="overview"')[1]!.split("</main>")[0]!), [], "the overview lists the projects instead");
+  assert.equal(offers(later).length, 2, "the bar and the sidebar still offer one");
+});
+
+test("/projects/new opens the new-project dialog with the fields of nexus project add and its defaults", async (t) => {
+  const s = await setup(t);
+  // Nodes are listed by name, so the online one comes after the offline rj-firebat.
+  const tower = "tower" as NodeName;
+  s.registry.upsertNode({ name: tower, tailnetHost: "tower.tail.ts.net", tailnetNodeId: "nTOWER" as TailnetNodeId });
+  s.registry.apply({ record: "node", node: tower, state: "online", capacity });
+  const dialogOf = (html: string) => html.split('<dialog id="project-dialog"')[1]!.split("</dialog>")[0]!;
+
+  const page = (await s.call("GET", "/projects/new")).text;
+  assert.match(page, /<title>New project · Nexus<\/title>/);
+  const dialog = dialogOf(page);
+  assert.match(dialog, /^[^>]* data-autoopen>/, "/projects/new opens the dialog");
+  assert.doesNotMatch(dialogOf((await s.call("GET", "/")).text), /^[^>]* data-autoopen>/, "the dialog stays closed until asked for");
+  const fields = [...dialog.matchAll(/<label for="([^"]+)">([^<]+)<\/label>\s*(?:<(?:input|select) id="\1" name="([^"]+)"([^>]*)>)/g)]
+    .map((m) => [m[2], m[3], /required/.test(m[4]!), /value="([^"]*)"/.exec(m[4]!)?.[1] ?? null]);
+  assert.deepEqual(fields, [["ID", "id", true, null], ["Repository URL", "repoUrl", true, null], ["Node", "defaultNode", false, null], ["Branch", "defaultBranch", true, "main"]]);
+  assert.deepEqual([...dialog.matchAll(/<option value="([^"]*)"( selected)?>([^<]*)</g)].map((m) => [m[1], m[2] !== undefined, m[3]]),
+    [[node, false, `${node}, offline`], [tower, true, tower]], "the node defaults to the first one online");
+  assert.match(textOf(dialog), /Each pylon gets 2 CPUs, 4 GiB of memory and 10 GiB of disk\. nexus project add can set those, allowed hosts and logins\./);
+  assert.match(dialog, /<p id="project-error" class="error" role="alert" hidden><\/p>/, "the dialog has a place for the API's refusal");
+});
+
+test("the new-project form adds the project nexus project add would, and the API's refusal is its message", async (t) => {
+  const s = await setup(t);
+  const form = /<form id="project" class="form" data-resources="([^"]*)">/.exec((await s.call("GET", "/")).text);
+  assert.ok(form !== null);
+  // The body client.js sends: the dialog's four fields and the form's resources.
+  const add = (id: string, defaultNode: string) => s.call("POST", "/v1/projects", {
+    id, repoUrl: `git@example.com:${id}.git`, defaultBranch: "main", defaultNode,
+    resources: JSON.parse(form[1]!.replace(/&quot;/g, '"')), allowedHosts: [], secrets: [], logins: [], preSetup: null,
+  });
+  const added = await add("acme", node);
+  assert.equal(added.status, 201, added.text);
+  assert.deepEqual(JSON.parse(added.text), project("acme"), "the same project as the CLI's defaults");
+  assert.equal(sidebarOf((await s.call("GET", "/")).text).text, "acme 0", "the sidebar lists it");
+
+  const refusal = (res: Reply) => [res.status, (JSON.parse(res.text) as { error: string }).error];
+  assert.deepEqual(refusal(await add("acme", node)), [409, "project acme exists"]);
+  assert.deepEqual(refusal(await add("beta", "nowhere")), [400, "no node nowhere"]);
+});
+
 test("every page has somewhere to say a refresh failed", async (t) => {
   const s = await seeded(t);
   const fix = await s.start("acme", "Fix checkout");

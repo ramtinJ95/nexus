@@ -3,7 +3,8 @@
  * reads the registry the way the JSON API does, so the sidebar, the thread page and `GET /v1/threads/<id>` agree.
  *
  * Every page is the same console: threads by project on the left, the page in the middle, and on a thread page
- * its pylon, previews, outputs and sessions on the right. Starting a thread is a dialog every page carries.
+ * its pylon, previews, outputs and sessions on the right. Starting a thread and adding a project are dialogs every
+ * page carries.
  *
  * Every action goes through the JSON API from `dashboard/client.js`, because the API refuses state changes
  * without a JSON content type and an HTML form cannot send one. The client polls each page and swaps the regions
@@ -50,8 +51,9 @@ export function dashboard(options: DashboardOptions): (path: string, query: URLS
   }
 
   const pages: readonly [RegExp, (m: RegExpExecArray, query: URLSearchParams) => Page | Promise<Page>][] = [
-    [/^\/$/, () => ok(home(context(), undefined))],
-    [/^\/threads\/new$/, (_, query) => ok(home(context(), { project: query.get("project") }))],
+    [/^\/$/, () => ok(home(context(), {}))],
+    [/^\/threads\/new$/, (_, query) => ok(home(context(), { start: { project: query.get("project") } }))],
+    [/^\/projects\/new$/, () => ok(home(context(), { addProject: true }))],
     [/^\/threads\/([^/]+)$/, async (m) => {
       const thread = registry.thread(m[1]! as ThreadId);
       if (thread === undefined) return { ...ok(notFound(context(), `No thread ${m[1]!}.`)), status: 404 };
@@ -170,6 +172,8 @@ interface Shell {
   activity?: ThreadId;
   /** Opens the start dialog on load, for /threads/new. */
   start?: { project: string | null } | undefined;
+  /** Opens the new-project dialog on load, for /projects/new. */
+  addProject?: boolean | undefined;
 }
 
 function layout(c: Context, page: Shell): Html {
@@ -195,7 +199,8 @@ ${page.inspector}
 <p id="refresh-state" class="refresh-state" role="status"></p>
 <div class="scrim" data-close aria-hidden="true"></div>
 ${startDialog(c, page.start)}
-<noscript><p class="noscript">Starting, archiving and deleting threads, sending messages and live updates need JavaScript.</p></noscript>
+${projectDialog(c, page.addProject === true)}
+<noscript><p class="noscript">Adding projects, starting, archiving and deleting threads, sending messages and live updates need JavaScript.</p></noscript>
 </body>
 </html>
 `;
@@ -233,6 +238,7 @@ ${closed.length > 0 && html`<details class="archived" id="archived-${p.id}"${clo
 </section>`;
 })}
 </nav>
+<a class="btn btn-ghost side-add" href="/projects/new" data-new-project>New project</a>
 <div class="nodes" id="side-nodes" data-live aria-label="Nodes">${c.registry.nodes().map((n) => html`<span>${dot(n.state === "online" ? "ok" : "muted")}${n.name}${n.state === "offline" && html`<em>offline</em>`}</span>`)}</div>
 </aside>`;
 }
@@ -245,7 +251,7 @@ function startDialog(c: Context, start: Shell["start"]): Html {
   return html`<dialog id="start-dialog" class="modal" aria-labelledby="start-h"${start !== undefined && " data-autoopen"}>
 <header><h2 id="start-h">Start a thread</h2><button type="button" class="icon-btn" data-close aria-label="Close">✕</button></header>
 <div id="start-body" data-live>
-${chosen === undefined ? html`<p class="empty modal-empty">No projects yet. Add one with <code>nexus project add</code>.</p>` : html`<form id="start" class="form">
+${chosen === undefined ? html`<div class="modal-empty"><p class="empty">No projects yet, so there is no repository to start a thread on.</p>${newProjectButton}</div>` : html`<form id="start" class="form">
 ${image === null && html`<p class="error">No image is current yet, so a new pylon has nothing to boot.</p>`}
 <label for="start-title">Title</label>
 <input id="start-title" name="title" required autocomplete="off" placeholder="What should this thread do?" autofocus>
@@ -267,8 +273,43 @@ ${nodes.map((n) => html`<option value="${n.name}">${n.name}${n.state === "offlin
 </dialog>`;
 }
 
+const newProjectButton = html`<a class="btn btn-primary" href="/projects/new" data-new-project>New project</a>`;
+
+/** What a new project gets beyond the dialog's fields, the same as `nexus project add` without its flags. */
+const newProjectResources = { cpus: 2, memoryGiB: 4, diskGiB: 10 };
+
+/**
+ * The fields `nexus project add` asks for. The node is one of the known nodes, the first online one unless changed,
+ * and the API's own checks, such as for an ID that exists, answer in the dialog. Nodes come from the control plane's
+ * config and change only with a restart, so the dialog is not refreshed with the page, and its default is the node
+ * that was online when the page loaded.
+ */
+function projectDialog(c: Context, open: boolean): Html {
+  const nodes = c.registry.nodes();
+  const chosen = nodes.find((n) => n.state === "online") ?? nodes[0];
+  const { cpus, memoryGiB, diskGiB } = newProjectResources;
+  return html`<dialog id="project-dialog" class="modal" aria-labelledby="project-h"${open && " data-autoopen"}>
+<header><h2 id="project-h">New project</h2><button type="button" class="icon-btn" data-close aria-label="Close">✕</button></header>
+${chosen === undefined ? html`<p class="empty modal-empty">No nodes yet, so a project has nowhere to run.</p>` : html`<form id="project" class="form" data-resources="${JSON.stringify(newProjectResources)}">
+<label for="project-id">ID</label>
+<input id="project-id" name="id" required autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="my-app" autofocus>
+<label for="project-repo">Repository URL</label>
+<input id="project-repo" name="repoUrl" required autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="git@github.com:you/my-app.git">
+<div class="two">
+<div><label for="project-node">Node</label><select id="project-node" name="defaultNode">
+${nodes.map((n) => html`<option value="${n.name}"${n === chosen && " selected"}>${n.name}${n.state === "offline" && ", offline"}</option>`)}
+</select></div>
+<div><label for="project-branch">Branch</label><input id="project-branch" name="defaultBranch" required autocomplete="off" autocapitalize="off" spellcheck="false" value="main"></div>
+</div>
+<p class="hint">Threads clone the repository at this branch and boot on this node unless they pick another. Each pylon gets ${cpus} CPUs, ${memoryGiB} GiB of memory and ${diskGiB} GiB of disk. <code>nexus project add</code> can set those, allowed hosts and logins.</p>
+<p id="project-error" class="error" role="alert" hidden></p>
+<footer><button type="button" class="btn btn-ghost" data-close>Cancel</button><button type="submit" class="btn btn-primary">Add project<kbd>⌘↵</kbd></button></footer>
+</form>`}
+</dialog>`;
+}
+
 /** Every open thread with what its pylon is asked to be and is, for the desk and for the phone's thread list. */
-function home(c: Context, start: Shell["start"]): Html {
+function home(c: Context, dialogs: Pick<Shell, "start" | "addProject">): Html {
   const projects = c.registry.projects();
   const nodes = new Map(c.registry.nodes().map((n) => [n.name, n]));
   const table = (threads: readonly Thread[]) => html`<table class="ov">
@@ -288,11 +329,11 @@ function home(c: Context, start: Shell["start"]): Html {
 })}</tbody>
 </table>`;
   return layout(c, {
-    title: start === undefined ? "Threads" : "Start a thread",
-    start,
-    main: html`<header class="bar"><button type="button" class="icon-btn menu" data-open="side" aria-label="Threads">☰</button><div class="crumb"><h1>Threads</h1></div><div class="bar-end"><a class="btn btn-new phone-only" href="/threads/new" data-start>New thread</a></div></header>
+    title: dialogs.start !== undefined ? "Start a thread" : dialogs.addProject === true ? "New project" : "Threads",
+    ...dialogs,
+    main: html`<header class="bar"><button type="button" class="icon-btn menu" data-open="side" aria-label="Threads">☰</button><div class="crumb"><h1>Threads</h1></div><div class="bar-end"><a class="btn btn-ghost" href="/projects/new" data-new-project>New project</a><a class="btn btn-new phone-only" href="/threads/new" data-start>New thread</a></div></header>
 <div class="scroll"><div class="page" id="overview" data-live>
-${projects.length === 0 ? html`<p class="empty">No projects yet. Add one with <code>nexus project add</code>.</p>` : projects.map((p) => {
+${projects.length === 0 ? html`<div class="first-project"><p class="empty">No projects yet. A project names the repository its threads clone and the node they run on.</p>${newProjectButton}</div>` : projects.map((p) => {
   const { open, closed } = threadsOf(c, p.id);
   return html`<section aria-labelledby="project-${p.id}">
 <div class="ov-head"><h2 id="project-${p.id}">${p.id}</h2><code class="dim">${p.repoUrl}</code><a class="btn btn-xs" href="/threads/new?project=${encodeURIComponent(p.id)}" data-start="${p.id}">New thread</a></div>

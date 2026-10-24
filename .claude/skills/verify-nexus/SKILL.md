@@ -64,7 +64,7 @@ Every driver records evidence. Each call writes `NN-<step>.cmd`, `.stdout`, `.st
   $V cli show -- show th-0123456789ab --json
   ```
 
-- **Dashboard.** `$V browser <step> -- <playwright-cli args>` runs the global `playwright-cli` in the browser session `nexus-verify-<run>`, from the evidence directory, so a relative `--filename` saves into it. Open the session first with `$V browser open -- open http://127.0.0.1:7470/`. Targets are Playwright selectors. Prefer the dashboard's stable handles: `#start-dialog`, `#start-title`, `#prompt-text`, `#send`, `#archive`, `#unarchive`, `#delete`, and `role=link[name="<thread title>"]`. Take `snapshot` before clicking by ref. The page polls every 5 s, so wait for the state you need rather than sleeping a fixed time.
+- **Dashboard.** `$V browser <step> -- <playwright-cli args>` runs the global `playwright-cli` in the browser session `nexus-verify-<run>`, from the evidence directory, so a relative `--filename` saves into it. Open the session first with `$V browser open -- open http://127.0.0.1:7470/`. Targets are Playwright selectors. Prefer the dashboard's stable handles: `#start-dialog`, `#start-title`, `#project-dialog`, `#project-id`, `#project-repo`, `#prompt-text`, `#send`, `#archive`, `#unarchive`, `#delete`, and `role=link[name="<thread title>"]`. Take `snapshot` before clicking by ref. The page polls every 5 s, so wait for the state you need rather than sleeping a fixed time.
 
   ```sh
   $V browser home -- open http://127.0.0.1:7470/
@@ -104,4 +104,5 @@ It keeps `evidence/<run>/` and copies `stack.log` into it first. It never kills 
 ## Helpers
 
 - `scripts/verify-nexus` is the entry point for everything above. Run it with no arguments for usage.
+- `scripts/new-project-shots.ts` drives the dashboard's New project flow against its own throwaway control plane with no projects, which the seeded stack cannot show, and asserts each step before its screenshot. Run it with `node .claude/skills/verify-nexus/scripts/new-project-shots.ts`. It needs port 7490 free, local port binding and `playwright-cli`, but not Docker.
 - `scripts/stack.ts` is the stack process. `up` starts it, so don't run it by hand. To typecheck it after editing, run `npx tsc -p .claude/skills/verify-nexus/scripts/tsconfig.json`.
