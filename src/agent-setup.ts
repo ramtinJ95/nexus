@@ -108,7 +108,7 @@ const pluginMarkers = new Set([".in_use", ".orphaned_at"]);
  * - its marketplace is not a GitHub repo, or its HEAD is not shown to be on GitHub, or the plugin's installed copy
  *   differs from its directory at the marketplace's HEAD (Claude's .in_use and .orphaned_at markers aside): the fix
  *   is `claude plugin update <id>` on the Mac, then capture again;
- * - it is a pi package source other than npm: or a local path, or an npm package with no installed version;
+ * - it is a pi package source other than npm: or a local path that exists, or an npm package with no installed version;
  * - it is a pi `skills` setting other than a `-path` exclusion, which the capture does not reproduce;
  * - its name differs from its directory's name, which is the name the image installs it under;
  * - two shipped skills, extensions or local packages share a name, or anything else the manifest parser refuses.
@@ -218,7 +218,7 @@ export function planAgentSetup(mac: MacSetup, rules: readonly LeaveOut[]): Captu
     } else if (local !== undefined) {
       const path = inDotfiles("pi package", entry, local, false);
       if (path !== null) packages.push({ kind: "local", path });
-    } else problems.push(`pi package ${entry}: only npm: and local packages are captured`);
+    } else problems.push(`pi package ${entry}: only npm: packages and local paths that exist are captured`);
   }
 
   const localPaths = new Set(mac.pi.localPackages.values());
@@ -429,8 +429,10 @@ export async function readMacSetup(home: string): Promise<MacSetup> {
 export async function readPiSetup(home: string): Promise<MacSetup["pi"]> {
   const piAgent = join(home, ".pi", "agent");
   const piSettings = await readJson(join(piAgent, "settings.json"), piSettingsSchema);
+  /** A settings path as pi resolves it: ~ is the home, and a relative path is under ~/.pi/agent. */
+  const settingPath = (path: string) => resolve(piAgent, path.trim().replace(/^~(?=\/|$)/, home));
   const resolveSetting = async (path: string) => {
-    const absolute = resolve(piAgent, path.replace(/^~(?=\/|$)/, home));
+    const absolute = settingPath(path);
     return existsSync(absolute) ? realpath(absolute) : absolute;
   };
   const npmVersions = new Map<string, string>();
@@ -440,8 +442,8 @@ export async function readPiSetup(home: string): Promise<MacSetup["pi"]> {
     if (name !== null) {
       const packageJson = join(piAgent, "npm", "node_modules", name, "package.json");
       if (existsSync(packageJson)) npmVersions.set(name, (await readJson(packageJson, z.object({ version: z.string() }))).version);
-    } else if (!/^[a-z+]+:/.test(entry) && existsSync(resolve(piAgent, entry))) {
-      localPackages.set(entry, await resolveSetting(entry));
+    } else if (!/^[a-z+]+:/.test(entry) && existsSync(settingPath(entry))) {
+      localPackages.set(entry, await realpath(settingPath(entry)));
     }
   }
   const extensionsDir = join(piAgent, "extensions");
