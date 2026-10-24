@@ -9,7 +9,7 @@ A user sends a thread's agent a message. The agent runs tools inside the thread'
 - `msg-disk` leaves the tool call's file on the pylon's disk.
 - `msg-dedupe` takes a resend with the same `--request-id` as the same message.
 - `msg-ui` sends from the dashboard's composer and shows the turn on the thread page, with its tool calls folded under `Ran a command`.
-- `msg-busy` queues a follow-up from the composer while a run is busy, and joins a busy run with `--steer`.
+- `msg-busy` shows the composer in its queue mode while a run is busy, and joins a busy run with `--steer`. Submitting a queued follow-up from the composer is not driven.
 
 ## How to get to it (user POV)
 

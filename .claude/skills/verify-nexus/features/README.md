@@ -47,7 +47,7 @@ Keep implementation details out of the map. Name only user paths, stable handles
 
 - [Add a project](./add-project.md) covers CLI `project add` with its defaults and flags, scratch projects and secret grants, the dashboard's New project dialog with its scratch and GitHub access choices, the added project in `projects`, a thread that boots on it, and the conflict and invalid exits.
 - [Start a thread](./start-thread.md) covers the CLI `start` with its node and branch options, the dashboard's start dialog and its entry points, title rules, and a booted pylon with its overlay.
-- [Message the agent](./message-agent.md) covers CLI `send` and `conversation`, the dashboard composer with its folded tool calls, queueing and steering a busy run, request-ID deduplication, and a tool call's effect on the pylon's disk.
+- [Message the agent](./message-agent.md) covers CLI `send` and `conversation`, the dashboard composer with its folded tool calls, the composer's queue mode and steering a busy run, request-ID deduplication, and a tool call's effect on the pylon's disk.
 - [Archive and unarchive](./archive-thread.md) covers pausing a thread's pylon to a checkpoint, refusing messages while it is archived, and waking it with its disk intact.
 - [Delete a thread](./delete-thread.md) covers CLI and dashboard delete, a `watch` that ends on deletion, and the removal of the pylon and its checkpoints.
 - [Browse threads](./browse-threads.md) covers `threads`, `projects`, `nodes`, the dashboard overview, the sidebar's project folders, nodes and filter, and the CLI's not-found, invalid and unreachable exits.
