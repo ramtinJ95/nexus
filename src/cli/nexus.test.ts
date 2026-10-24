@@ -100,7 +100,7 @@ async function setup(t: TestContext) {
   let answer = async (command: PylonCommand): Promise<CommandResult> =>
     command.kind === "unlink-port" ? { kind: "unlink-port", refused: null }
     : command.kind === "open-session" ? { kind: "open-session", herdrPane: "w1:p1" }
-    : command.kind === "close-session" ? { kind: "close-session" }
+    : command.kind === "close-session" ? { kind: "close-session", outcome: "closed" }
     : { kind: "link-port", service: `port-${(command as { port: number }).port}` };
   const commands: PylonCommand[] = [];
   /** What the node's probe opens a pipe to. Tests replace it. */
@@ -417,15 +417,15 @@ test("show reports a published preview whose service is starting as not ready, a
   assert.deepEqual((await s.json(["show", thread.id])).previews, [preview], "a restarted service's preview is ready again");
 });
 
-test("a preview from a control plane older than Preview.failed reads as not failed", async (t) => {
+test("a preview from a control plane older than Preview.failed reads as not failed, and a session older than Session.state as running", async (t) => {
   const s = await setup(t);
-  // That control plane's shapes: a Preview with no `failed`.
+  // That control plane's shapes: a Preview with no `failed`, and a Session with no `id`, `state` or `message`.
   const web = { pylon: "pylon-th-old", service: "web", httpsPort: 10200, ready: true, url: "https://rj-firebat.tail.ts.net:10200/" };
   const api = { ...web, service: "api", httpsPort: 10201, ready: false, url: "https://rj-firebat.tail.ts.net:10201/" };
   const detail = {
     thread: { id: "th-old", title: "old", project: "acme", status: "active", agentTurnRunning: false },
     pylon: { id: "pylon-th-old", node, actualState: "running", failed: null, observedAt: null, retryRefused: null },
-    sessions: [], previews: [api, web], ports: [{ port: 3000, service: "web", preview: web }, { port: 4000, service: "api", preview: api }], outputs: [], agent: null,
+    sessions: [{ pylon: "pylon-th-old", herdrPane: "w1:p1", harness: "pi", harnessSessionId: null, status: "idle", title: "plan" }], previews: [api, web], ports: [{ port: 3000, service: "web", preview: web }, { port: 4000, service: "api", preview: api }], outputs: [], agent: null,
   };
   const old = createHttpServer((req, res) => {
     res.setHeader("content-type", "application/json");
@@ -440,6 +440,7 @@ test("a preview from a control plane older than Preview.failed reads as not fail
   const shown = await run(["show", "th-old"]);
   assert.match(shown, /^preview: api at https:\/\/rj-firebat\.tail\.ts\.net:10201\/, not ready$/m);
   assert.match(shown, /^preview: web at https:\/\/rj-firebat\.tail\.ts\.net:10200\/$/m);
+  assert.match(shown, /^session: pi "plan" in pane w1:p1, idle$/m);
   assert.equal(await run(["ports", "th-old"]), `3000  web  ${web.url}\n4000  api  ${api.url} (not served yet)\n`);
   assert.equal(await run(["preview", "th-old", "3000"]), `${web.url}\n`);
 });
@@ -568,7 +569,7 @@ test("unpreview unpublishes a port, waits for a paused pylon to run, and fails w
   await fails(["unpreview", thread.id, "3000"], 5);
 });
 
-test("session open opens Claude Code by default, waits for a paused pylon, and session close closes a pane", async (t) => {
+test("session open opens Claude Code by default, waits for a paused pylon, and session close closes a pane or says why not", async (t) => {
   const s = await setup(t);
   const thread: Thread = await s.json(["start", "--project", "acme", "--title", "sessions"]);
   assert.deepEqual(await s.json(["session", "open", thread.id]), { herdrPane: "w1:p1", harness: "claude-code", title: "claude-code" });
@@ -576,14 +577,38 @@ test("session open opens Claude Code by default, waits for a paused pylon, and s
     `Opened pi session "plan" in pane w1:p1 of ${thread.id}. \`nexus attach ${thread.id}\` attaches to it.\n`);
   assert.deepEqual(s.commands, [{ kind: "open-session", harness: "claude-code", title: "claude-code" }, { kind: "open-session", harness: "pi", title: "plan" }]);
 
-  let refusals = 2;
-  s.probeAnswers(async () => {
-    if (refusals-- > 0) throw Object.assign(new Error("rj-firebat: pylon-x is stopped, not running"), { code: "not-running" });
-    return { kind: "close-session" };
-  });
   s.commands.length = 0;
-  assert.equal(await s.json(["session", "close", thread.id, "w1:p1"]), null, "a paused pylon is woken and asked again until it runs");
-  assert.deepEqual(s.commands, Array(3).fill({ kind: "close-session", herdrPane: "w1:p1" }));
+  assert.equal((await s.nexus(["session", "close", thread.id, "w1:p1"])).stdout, `Closed session w1:p1 of ${thread.id}.\n`);
+  assert.deepEqual(s.commands, [{ kind: "close-session", herdrPane: "w1:p1" }]);
+
+  // Not asked again: after the wake the pane may name another session.
+  s.probeAnswers(async () => { throw Object.assign(new Error("rj-firebat: pylon-x is stopped, not running"), { code: "not-running" }); });
+  s.commands.length = 0;
+  const waking = await s.nexus(["session", "close", thread.id, "w1:p1"]);
+  assert.equal(waking.code, 5);
+  assert.match(waking.stderr, /is not running yet. This request wakes it/);
+  assert.equal(s.commands.length, 1);
+  s.probeAnswers(async () => ({ kind: "close-session", outcome: "not-open" }));
+  const stale = await s.nexus(["session", "close", thread.id, "w1:p1"]);
+  assert.equal(stale.code, 4);
+  assert.match(stale.stderr, /no session is open in pane w1:p1 .* A wake may have moved it/);
+
+  // A paused session is refused at once, and its pylon is not asked.
+  s.registry.apply({ record: "sessions", pylonId: thread.pylonId, sessions: [
+    { id: "w1:p1", state: "paused", herdrPane: "w1:p1", harness: "claude-code", harnessSessionId: null, title: "review", status: null, message: null },
+    { id: "failed-0123456789ab", state: "failed", herdrPane: null, harness: "pi", harnessSessionId: null, title: "plan", status: null, message: "pi exited 1" },
+  ] });
+  s.commands.length = 0;
+  const paused = await s.nexus(["session", "close", thread.id, "w1:p1"]);
+  assert.equal(paused.code, 5);
+  assert.match(paused.stderr, /session w1:p1 is paused with its pylon and resumes when its pylon wakes/);
+  assert.deepEqual(s.commands, []);
+  const shown = (await s.nexus(["show", thread.id])).stdout;
+  assert.match(shown, /^session: claude-code "review" in pane w1:p1, paused \(resumes on wake\)$/m);
+  assert.match(shown, /^session: pi "plan" as failed-0123456789ab, failed: pi exited 1$/m);
+  s.probeAnswers(async () => ({ kind: "drop-failed-session", dropped: true }));
+  assert.equal((await s.nexus(["session", "close", thread.id, "failed-0123456789ab"])).code, 0);
+  assert.deepEqual(s.commands, [{ kind: "drop-failed-session", id: "failed-0123456789ab" }]);
 
   assert.equal((await s.nexus(["session", "open", thread.id, "--harness", "codex"])).code, 64);
   assert.equal((await s.nexus(["session", "close", thread.id])).code, 64);
@@ -593,6 +618,7 @@ test("session open opens Claude Code by default, waits for a paused pylon, and s
   assert.equal(archived.code, 5);
   assert.match(archived.stderr, /is archived, so its pylon stays paused/);
   assert.deepEqual(s.commands, []);
+  assert.match((await s.nexus(["show", thread.id])).stdout, /^session: claude-code "review" in pane w1:p1, paused \(resumes on unarchive\)$/m);
 });
 
 test("attach wakes the pylon, waits until it runs, and runs ssh to its node through the CLI's proxy, or the configured command", async (t) => {

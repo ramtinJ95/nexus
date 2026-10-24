@@ -2,12 +2,12 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   actualState, backoffMs, desiredPhase, envelope, idlePolicy, ingest, planPylon, requiredArtifacts,
-  type ActivityFacts, type DesiredPhase, type PlanInput, type PlanStep, type RegistryWrite,
+  type ActivityFacts, type DesiredPhase, type PlanInput, type PlanStep, type RegistryWrite, type SessionRow,
 } from "./reconcile.ts";
 import {
   encodeProbeEvent, encodeSubmitReply, jobSubject, parseJobEnvelope, parseProbeEvent, parseSubmitReply,
   type JobErrorCode, type JobId, type JobStatus, type LiveHash, type NodeName, type NodeObservation, type ProbeEvent, type PylonId, type PylonObservation,
-  type RunningFacts, type SessionFact,
+  type PausedSession, type RunningFacts, type SessionFact,
 } from "./protocol.ts";
 import type { BootInputs, PylonSource } from "./project.ts";
 import type { ArtifactId, CheckpointId, ImageId, TemplateId } from "./images.ts";
@@ -36,7 +36,7 @@ const running = (hash: LiveHash | null): PylonObservation => ({
   pylonId, phase: "running", liveHash: hash, bootedAt: "2027-01-01T00:00:00Z", bootedFrom: { image, checkpoint: null },
   services: [], listening: [], previews: [], sessions: [], git: null, declaredOutputs: [], attachedClients: 0,
 });
-const stopped = (checkpoint: CheckpointId | null): PylonObservation => ({ pylonId, phase: "stopped", checkpoint });
+const stopped = (checkpoint: CheckpointId | null, sessions: readonly PausedSession[] | null = null): PylonObservation => ({ pylonId, phase: "stopped", checkpoint, sessions });
 const broken: PylonObservation = { pylonId, phase: "broken", detail: "qcow2 header unreadable", cause: "controller" };
 const brokenSetup: PylonObservation = { pylonId, phase: "broken", detail: "Setup exited 128. Read controller logs", cause: "setup" };
 const brokenSavedSetup: PylonObservation = { ...brokenSetup, cause: "saved-setup" };
@@ -265,8 +265,25 @@ test("a broken pylon whose cause is missing, as from an older probe, or one this
   assert.ok(newer.type === "snapshot" && newer.observation.pylons[0]?.phase === "broken" && newer.observation.pylons[0].cause === "unknown");
 });
 
-const working: SessionFact = { herdrPane: "p1", harness: "claude-code", harnessSessionId: "s1", status: "working" };
-const idleShell: SessionFact = { herdrPane: "p2", harness: "shell", harnessSessionId: null, status: "idle" };
+test("a stopped pylon parses with the sessions its pause recorded, or null from a probe older than the field", () => {
+  const event = (pylon: Record<string, unknown>) => parseProbeEvent(JSON.stringify({ type: "pylon", pylon }));
+  const recorded = [{ id: "failed-0123456789ab", herdrPane: null, harness: "pi", harnessSessionId: null, title: "plan" }];
+  assert.deepEqual(event({ pylonId, phase: "stopped", checkpoint: lastCheckpoint, sessions: recorded }), { type: "pylon", pylon: { pylonId, phase: "stopped", checkpoint: lastCheckpoint, sessions: recorded } });
+  assert.deepEqual(event({ pylonId, phase: "stopped", checkpoint: lastCheckpoint }), { type: "pylon", pylon: { pylonId, phase: "stopped", checkpoint: lastCheckpoint, sessions: null } });
+});
+
+test("sessions from a probe older than session states parse as running in their panes", () => {
+  const old = parseProbeEvent(JSON.stringify({ type: "pylon", pylon: { ...running(liveHash), sessions: [{ herdrPane: "w1:p1", harness: "shell", harnessSessionId: null, status: "idle" }] } }));
+  assert.ok(old.type === "pylon" && old.pylon.phase === "running");
+  assert.deepEqual(old.pylon.sessions, [{ id: "w1:p1", state: "running", herdrPane: "w1:p1", harness: "shell", harnessSessionId: null, status: "idle" }]);
+});
+
+const working: SessionFact = { id: "w1:p1", state: "running", herdrPane: "w1:p1", harness: "claude-code", harnessSessionId: "s1", status: "working", title: "review" };
+const idleShell: SessionFact = { id: "w2:p1", state: "running", herdrPane: "w2:p1", harness: "shell", harnessSessionId: null, status: "idle" };
+const workingRow: SessionRow = { id: "w1:p1", state: "running", herdrPane: "w1:p1", harness: "claude-code", harnessSessionId: "s1", title: "review", status: "working", message: null };
+const idleShellRow: SessionRow = { id: "w2:p1", state: "running", herdrPane: "w2:p1", harness: "shell", harnessSessionId: null, title: null, status: "idle", message: null };
+const pausedReview: PausedSession = { id: "w1:p1", herdrPane: "w1:p1", harness: "claude-code", harnessSessionId: "s1", title: "review" };
+const pausedReviewRow: SessionRow = { ...pausedReview, state: "paused", status: null, message: null };
 const runningWith = (facts: Partial<RunningFacts>): PylonObservation => ({ ...running(liveHash), ...facts } as PylonObservation);
 const knows = (previous: PylonObservation | "absent" = "absent") => new Map([[pylonId, previous]]);
 
@@ -279,8 +296,7 @@ test("ingest: a new running pylon writes its sessions, derived outputs and activ
     declaredOutputs: [{ id: "o1", kind: "file", path: "shot.png", title: "Shot", sha256: "s" }, { id: "o2", kind: "diff", base: "h0", sha256: "d", title: null }],
   });
   assert.deepEqual(ingest({ type: "pylon", pylon: observed }, node, knows(), now), [
-    { record: "session", pylonId, herdrPane: "p1", fact: working },
-    { record: "session", pylonId, herdrPane: "p2", fact: idleShell },
+    { record: "sessions", pylonId, sessions: [workingRow, idleShellRow] },
     { record: "output", pylonId, kind: "branch", ref: "origin/feature" },
     { record: "output", pylonId, kind: "diff", ref: "h1" },
     { record: "output", pylonId, kind: "preview", ref: "web" },
@@ -302,8 +318,7 @@ test("ingest: changed and closed sessions, and a dirty tree at a new head", () =
   const before = runningWith({ sessions: [working, idleShell], git: { head: "h1", branch: "main", dirty: true, branches: [] } });
   const after = runningWith({ sessions: [{ ...working, status: "done" }], git: { head: "h2", branch: "main", dirty: true, branches: [] } });
   assert.deepEqual(ingest({ type: "pylon", pylon: after }, node, knows(before), now), [
-    { record: "session", pylonId, herdrPane: "p1", fact: { ...working, status: "done" } },
-    { record: "session", pylonId, herdrPane: "p2", fact: null },
+    { record: "sessions", pylonId, sessions: [{ ...workingRow, status: "done" }] },
     { record: "output", pylonId, kind: "diff", ref: "h2" },
   ] satisfies RegistryWrite[]);
 });
@@ -313,12 +328,58 @@ test("ingest: sessions the probe could not read write nothing", () => {
   assert.deepEqual(ingest({ type: "pylon", pylon: runningWith({ sessions: null }) }, node, knows(before), now), []);
 });
 
-test("ingest: a pause closes every session, makes its previews not ready, and retracts no output", () => {
+test("ingest: a pausing pylon keeps its sessions, makes its previews not ready, and retracts no output", () => {
   const before = runningWith({ sessions: [idleShell], previews: [{ service: "web", httpsPort: 8443, ready: true }] });
   assert.deepEqual(ingest({ type: "pylon", pylon: phase("stopping") }, node, knows(before), now), [
-    { record: "session", pylonId, herdrPane: "p2", fact: null },
     { record: "preview", pylonId, service: "web", httpsPort: 8443, ready: false },
   ] satisfies RegistryWrite[]);
+  const sessionWrites = (pylon: PylonObservation) => ingest({ type: "pylon", pylon }, node, knows(before), now).filter((w) => w.record.startsWith("session"));
+  for (const p of ["booting", "deleting"] as const) assert.deepEqual(sessionWrites(phase(p)), [], `${p} writes no sessions`);
+  assert.deepEqual(sessionWrites(broken), [], "a broken pylon writes no sessions either");
+});
+
+test("ingest: a stopped pylon lists what its pause recorded as paused, under the IDs they ran under", () => {
+  const paneless: PausedSession = { id: "failed-0123456789ab", herdrPane: null, harness: "pi", harnessSessionId: "/s.jsonl", title: "plan" };
+  assert.deepEqual(ingest({ type: "pylon", pylon: stopped(lastCheckpoint, [pausedReview, paneless]) }, node, knows(phase("stopping")), now), [
+    { record: "sessions", pylonId, sessions: [pausedReviewRow, { ...paneless, state: "paused", status: null, message: null }] },
+  ] satisfies RegistryWrite[]);
+  const after = stopped(lastCheckpoint, [pausedReview]);
+  assert.deepEqual(ingest({ type: "pylon", pylon: after }, node, knows(after), now), [], "the same list again writes nothing");
+});
+
+test("ingest: a stopped pylon that says nothing of its sessions pauses every session it had", () => {
+  assert.deepEqual(ingest({ type: "pylon", pylon: stopped(lastCheckpoint) }, node, knows(phase("stopping")), now), [{ record: "sessions-paused", pylonId }]);
+  assert.deepEqual(ingest({ type: "pylon", pylon: stopped(lastCheckpoint) }, node, knows(stopped(lastCheckpoint)), now), []);
+  // Stored before stopped observations had the field.
+  const older = { pylonId, phase: "stopped", checkpoint: lastCheckpoint } as PylonObservation;
+  assert.deepEqual(ingest({ type: "pylon", pylon: older }, node, knows(phase("stopping")), now), [{ record: "sessions-paused", pylonId }]);
+});
+
+test("ingest: an unlisted pylon's list is written though the previous observation has the same one, and only a list is", () => {
+  const paused = stopped(lastCheckpoint, [pausedReview]);
+  assert.deepEqual(ingest({ type: "pylon", pylon: paused }, node, knows(paused), now), []);
+  assert.deepEqual(ingest({ type: "pylon", pylon: paused }, node, knows(paused), now, new Set([pylonId])), [{ record: "sessions", pylonId, sessions: [pausedReviewRow] }]);
+  assert.deepEqual(ingest({ type: "pylon", pylon: phase("booting") }, node, knows(paused), now, new Set([pylonId])), [], "a pylon that says nothing writes nothing");
+});
+
+test("ingest: the first list after a wake replaces the paused sessions with their panes, and reports a failed one as failed", () => {
+  const moved: SessionFact = { ...working, id: "w3:p1", herdrPane: "w3:p1", status: "idle" };
+  const failed: SessionFact = { id: "failed-0123456789ab", state: "failed", herdrPane: null, harness: "pi", harnessSessionId: "/s.jsonl", status: "unknown", title: "plan", message: "pi exited 1" };
+  assert.deepEqual(ingest({ type: "pylon", pylon: phase("booting") }, node, knows(stopped(lastCheckpoint, [pausedReview])), now), []);
+  assert.deepEqual(ingest({ type: "pylon", pylon: runningWith({ sessions: [moved, failed] }) }, node, knows(phase("booting")), now), [
+    { record: "sessions", pylonId, sessions: [
+      { ...workingRow, id: "w3:p1", herdrPane: "w3:p1", status: "idle" },
+      { id: "failed-0123456789ab", state: "failed", herdrPane: null, harness: "pi", harnessSessionId: "/s.jsonl", title: "plan", status: null, message: "pi exited 1" },
+    ] },
+  ] satisfies RegistryWrite[]);
+  assert.deepEqual(ingest({ type: "pylon", pylon: runningWith({ sessions: null }) }, node, knows(phase("booting")), now), [], "an unread list leaves the paused rows");
+});
+
+test("ingest: a deleted pylon drops its sessions", () => {
+  assert.deepEqual(ingest({ type: "snapshot", observation: {
+    node, observedAt: "2027-01-01T00:00:00Z", probeBootId: "b1", capacity: { memoryGiB: 64, committedMemoryGiB: 8, diskFreeGiB: 500 },
+    artifacts: [], jobs: [], pylons: [], previewRoutes: [],
+  } }, node, knows(phase("deleting")), now).filter((w) => w.record === "sessions"), [{ record: "sessions", pylonId, sessions: [] }]);
 });
 
 test("ingest: a preview is ready while the running pylon reports it ready on its port", () => {
@@ -353,7 +414,7 @@ test("ingest: a snapshot writes the node, its jobs, its pylons, and closes known
     { record: "job", status },
     { record: "activity", pylonId, human: now, agent: null },
     { record: "orphan", node, pylonId: "pylon-x" as PylonId },
-    { record: "session", pylonId: gone, herdrPane: "p2", fact: null },
+    { record: "sessions", pylonId: gone, sessions: [] },
   ] satisfies RegistryWrite[]);
   assert.throws(() => ingest({ type: "snapshot", observation }, peer, known, now), /names node rj-firebat/);
 });

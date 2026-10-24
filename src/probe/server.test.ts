@@ -19,6 +19,7 @@ import type { BootInputs, ProjectId } from "../project.ts";
 import type { ArtifactId, ArtifactManifest, ImageId, PortableArtifactId, TemplateId, TemplateManifest } from "../images.ts";
 import { fakeGuest, herdrError, herdrOk, herdrPane, herdrSnapshot } from "../fake-guest.ts";
 import { outputsDir } from "../outputs.ts";
+import { sessionsFile } from "../sessions.ts";
 import { checkoutReader } from "../checkout-files.ts";
 import type { HostBridge, HostBridgeAnswer } from "./pylon-api.ts";
 
@@ -59,7 +60,7 @@ function fakeBackend(guest: Guest | null = null) {
     },
     async ensurePaused(id, checkpoint, signal) {
       await held(signal);
-      pylons.set(id, { pylonId: id, vm: "stopped", checkpoint, image, bootedAt: null });
+      pylons.set(id, { pylonId: id, vm: "stopped", checkpoint, image, bootedAt: null, sessions: null });
     },
     async ensureDeleted(id, signal) {
       await held(signal);
@@ -340,14 +341,14 @@ test("commands run in a running pylon's guest and return its result", async (t) 
   assert.deepEqual(await client.command(pylonId, { kind: "open-session", harness: "claude-code", title: "review" }), { kind: "open-session", herdrPane: "w1:p1" });
   const create = guest.execs.find((a) => a[4] === "create")!;
   assert.deepEqual(create.slice(5, 9), ["--cwd", "/home/user/workspace/repo", "--label", "review"], "sessions open in the checkout");
-  assert.deepEqual(await client.command(pylonId, { kind: "close-session", herdrPane: "w1:p1" }), { kind: "close-session" });
+  assert.deepEqual(await client.command(pylonId, { kind: "close-session", herdrPane: "w1:p1" }), { kind: "close-session", outcome: "not-open" }, "a pane that is not open is not reported closed");
 });
 
 test("a command for a pylon that is not running is refused as not-running", async (t) => {
   const guest = fakeGuest(() => { throw new Error("no exec expected"); });
   const { client, fake } = await setup(t, {}, guest);
   await assert.rejects(client.command(pylonId, { kind: "exec", argv: ["true"], cwd: "/", timeoutMs: 1000 }), { code: "not-running" });
-  fake.pylons.set(pylonId, { pylonId, vm: "stopped", checkpoint: "ckpt-unit-1", image, bootedAt: null });
+  fake.pylons.set(pylonId, { pylonId, vm: "stopped", checkpoint: "ckpt-unit-1", image, bootedAt: null, sessions: null });
   await assert.rejects(client.command(pylonId, { kind: "close-session", herdrPane: "w1:p1" }), { code: "not-running" });
   assert.deepEqual(guest.execs, []);
 });
@@ -361,6 +362,9 @@ test("malformed commands get 400 and reach no guest", async (t) => {
   assert.equal(await post({ kind: "exec", argv: [], cwd: "/", timeoutMs: 1000 }), 400);
   assert.equal(await post({ kind: "open-session", harness: "codex", title: "x" }), 400);
   assert.equal(await post({ kind: "open-session", harness: "shell", title: "x", resume: "abc" }), 400);
+  assert.equal(await post({ kind: "drop-failed-session" }), 400);
+  assert.equal(await post({ kind: "close-session", herdrPane: "w1:p1", session: { harness: "codex", harnessSessionId: null, title: null } }), 400);
+  assert.equal(await post({ kind: "close-session", herdrPane: "w1:p1", session: { harness: "pi", title: null } }), 400);
   assert.equal(await post({ kind: "reboot" }), 400);
   assert.deepEqual(guest.execs, []);
 });
@@ -377,7 +381,8 @@ test("observations carry session facts from Herdr, and null when Herdr cannot be
   const guest = fakeGuest((argv, herdr) => {
     if (!herdr && argv[2]?.includes(outputsDir)) return { exitCode: 0, output: "" };
     if (!herdr && argv[0] === "pgrep") return { exitCode: 1, output: "0\n" };
-    assert.ok(herdr && argv[0] === "api" && argv[1] === "snapshot", "observing runs only herdr api snapshot, the outputs listing and the count of attached terminals");
+    if (!herdr && argv.at(-1) === sessionsFile) return { exitCode: 3, output: "" }; // never paused, so no failed sessions
+    assert.ok(herdr && argv[0] === "api" && argv[1] === "snapshot", "observing runs only herdr api snapshot, the sessions file read, the outputs listing and the count of attached terminals");
     return readable
       ? herdrOk(herdrSnapshot([{ id: "w1", label: "review" }], [herdrPane("w1:p1", "w1", "claude", "working", { kind: "id", value: "bd2c2d6b" })]))
       : { exitCode: 1, output: "Error: exec failed" };
@@ -391,9 +396,21 @@ test("observations carry session facts from Herdr, and null when Herdr cannot be
       return p?.phase === "running" ? p.sessions : assert.fail("the pylon runs");
     }
   };
-  assert.deepEqual(await sessionsSeen(), [{ herdrPane: "w1:p1", harness: "claude-code", harnessSessionId: "bd2c2d6b", status: "working", title: "review" }]);
+  assert.deepEqual(await sessionsSeen(), [{ id: "w1:p1", state: "running", herdrPane: "w1:p1", harness: "claude-code", harnessSessionId: "bd2c2d6b", status: "working", title: "review" }]);
   readable = false;
   assert.equal(await sessionsSeen(), null);
+});
+
+test("a stopped pylon's observation carries the sessions its backend kept from the pause", async (t) => {
+  const { client, fake } = await setup(t, {}, fakeGuest(() => { throw new Error("a stopped pylon has no guest"); }));
+  const recorded = [{ id: "w1:p1", herdrPane: "w1:p1", harness: "claude-code" as const, harnessSessionId: "bd2c2d6b", title: "review" }];
+  const seen = async () => {
+    for await (const e of client.observe(AbortSignal.timeout(5000))) return e.type === "snapshot" ? e.observation.pylons[0] : assert.fail("the first event is a snapshot");
+  };
+  fake.pylons.set(pylonId, { pylonId, vm: "stopped", checkpoint: "ckpt-unit-1", image, bootedAt: null, sessions: recorded });
+  assert.deepEqual(await seen(), { pylonId, phase: "stopped", checkpoint: "ckpt-unit-1", sessions: recorded });
+  fake.pylons.set(pylonId, { pylonId, vm: "stopped", checkpoint: "ckpt-unit-1", image, bootedAt: null, sessions: null });
+  assert.deepEqual(await seen(), { pylonId, phase: "stopped", checkpoint: "ckpt-unit-1", sessions: null });
 });
 
 test("NEXUS_API calls reach the API as the pylon the bridge named, get the URL once a spawn publishes the preview, and end with the probe", async (t) => {
@@ -735,6 +752,7 @@ test("a link-port command links the port in the guest, answers its service, and 
 test("opening or closing a session publishes a snapshot that lists the change", async (t) => {
   let panes: ReturnType<typeof herdrPane>[] = [];
   const guest = fakeGuest((argv, herdr) => {
+    if (!herdr && argv.at(-1) === sessionsFile) return { exitCode: 3, output: "" };
     if (!herdr) return { exitCode: 0, output: "" };
     const sub = argv.slice(0, 2).join(" ");
     if (sub === "api snapshot") return herdrOk(herdrSnapshot([{ id: "w1", label: "review" }], panes));

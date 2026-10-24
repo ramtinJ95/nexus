@@ -6,23 +6,32 @@
  * pause records it again and the next wake retries it.
  */
 import type { Guest } from "./backend.ts";
+import type { PausedSession } from "./protocol.ts";
 import { recordSessions, relaunchSessions, type RelaunchOutcome } from "./sessions.ts";
 
 /** Appends one line to the pylon's log: the controller log of a pylon VM, the container log under Docker. */
 export type PylonLog = (line: string) => Promise<void>;
 
-/** Before the checkpoint, while the guest still runs. */
-export async function recordBeforePause(guest: Guest, log: PylonLog): Promise<void> {
+/**
+ * Before the checkpoint, while the guest still runs. Returns what the wake brings back, for the backend to keep beside
+ * the checkpoint, or null when nothing was recorded and only the checkpoint knows.
+ */
+export async function recordBeforePause(guest: Guest, log: PylonLog): Promise<readonly PausedSession[] | null> {
   let recorded: Awaited<ReturnType<typeof recordSessions>>;
   try {
     recorded = await recordSessions(guest);
   } catch (err) {
-    return log(`sessions: recording failed, so the wake relaunches what the last record holds: ${(err as Error).message}`);
+    await log(`sessions: recording failed, so the wake relaunches what the last record holds: ${(err as Error).message}`);
+    return null;
   }
   await log(recorded === null ? "sessions: no Herdr server runs, so the last record stands" : `sessions: recorded ${recorded.length} for the wake`);
+  return recorded?.map(({ id, herdrPane, harness, harnessSessionId, title }) => ({ id, herdrPane, harness, harnessSessionId, title })) ?? null;
 }
 
-/** After a boot from an existing disk. Returns the outcomes, also logged. A failed relaunch as a whole is an empty list. */
+/**
+ * After a boot from an existing disk. Returns the outcomes, also logged. A sessions file that cannot be read or
+ * written is an empty list, and the file stays as it was.
+ */
 export async function relaunchAfterWake(guest: Guest, log: PylonLog): Promise<readonly RelaunchOutcome[]> {
   let outcomes: readonly RelaunchOutcome[];
   try {

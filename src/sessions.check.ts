@@ -21,7 +21,7 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import type { Guest } from "./backend.ts";
 import type { SessionFact } from "./protocol.ts";
-import { closeSession, herdrSession, openSession, recordSessions, relaunchSessions, sessionFacts, type RelaunchOutcome, type SessionRecord } from "./sessions.ts";
+import { closeSession, herdrSession, openSession, recordSessions, relaunchSessions, sessionFacts, type RecordedSession, type RelaunchOutcome, type SessionRecord } from "./sessions.ts";
 
 const cwd = "/home/user";
 const shellCwd = "/home/user/check-shell-cwd";
@@ -61,7 +61,7 @@ function stepRelaunch(name: string, outcomes: readonly RelaunchOutcome[]): void 
 async function settledFacts(panes: readonly string[]): Promise<readonly SessionFact[]> {
   let facts = await sessionFacts(guest);
   for (let deadline = Date.now() + 30_000; Date.now() < deadline; facts = await sessionFacts(guest)) {
-    const mine = facts.filter((f) => panes.includes(f.herdrPane));
+    const mine = facts.filter((f) => f.herdrPane !== null && panes.includes(f.herdrPane));
     if (mine.length === panes.length && mine.every((f) => f.harness === "shell" || f.harnessSessionId !== null)) break;
     await sleep(500);
   }
@@ -118,7 +118,7 @@ async function stopServer(stage: string, panes: readonly string[]): Promise<void
   assert.deepEqual(remaining(), [], `${stage}: stopping the server ends and reaps every pane's processes`);
 }
 
-function assertResumed(stage: string, recorded: readonly SessionRecord[], facts: readonly SessionFact[]): void {
+function assertResumed(stage: string, recorded: readonly RecordedSession[], facts: readonly SessionFact[]): void {
   for (const r of recorded) {
     if (r.harnessSessionId === null || unpromptedTitles.includes(r.title)) continue;
     assert.ok(facts.some((f) => f.harness === r.harness && f.harnessSessionId === r.harnessSessionId), `${stage}: ${r.title} came back as its own ${r.harness} session`);
@@ -215,7 +215,7 @@ async function piWrites(stage: string, title: string, pane: string, file: string
 }
 
 /** At record time an unprompted session must still have no session file, or its stage tests nothing. */
-function expectNoSessionFiles(stage: string, records: readonly SessionRecord[]): void {
+function expectNoSessionFiles(stage: string, records: readonly RecordedSession[]): void {
   for (const r of records) {
     if (!unpromptedTitles.includes(r.title) || r.harnessSessionId === null) continue;
     const files = sessionFiles(r.harness, r.harnessSessionId);
@@ -225,7 +225,7 @@ function expectNoSessionFiles(stage: string, records: readonly SessionRecord[]):
 }
 
 /** A stop can let an agent write its session file as it exits. A pylon stopped hard leaves none, so remove it. */
-function dropAppearedSessionFiles(stage: string, records: readonly SessionRecord[]): void {
+function dropAppearedSessionFiles(stage: string, records: readonly RecordedSession[]): void {
   step(`${stage}_TRANSCRIPTS_BEFORE_RELAUNCH`, transcripts());
   for (const r of records) {
     if (!unpromptedTitles.includes(r.title) || r.harnessSessionId === null) continue;
@@ -310,7 +310,7 @@ for (const [harness, title] of [["claude-code", unprompted.claude], ["pi", unpro
   if (harness === "claude-code" && !brokenByRestore.has(title)) continue;
   // Every pane left under its title, including a restored shell that a failed relaunch leaves behind.
   for (const r of (await recordSessions(guest)) ?? []) {
-    if (r.title !== title) continue;
+    if (r.title !== title || r.herdrPane === null) continue;
     await closeSession(guest, r.herdrPane);
     if (restoredPanes.includes(r.herdrPane)) restoredPanes.splice(restoredPanes.indexOf(r.herdrPane), 1);
   }
@@ -355,7 +355,7 @@ for (const o of freshAgain) if (o.result !== "failed") await closeSession(guest,
 await closeSession(guest, "w999:p999");
 const closed = await sessionFacts(guest);
 step("FACTS_AFTER_CLOSE", closed);
-assert.deepEqual(closed.filter((f) => freshPanes.includes(f.herdrPane)), [], "closed sessions are gone");
+assert.deepEqual(closed.filter((f) => f.herdrPane !== null && freshPanes.includes(f.herdrPane)), [], "closed sessions are gone");
 step("FINDINGS", findings);
 assert.deepEqual(findings, [], "after both wakes every agent pane runs its agent, resumed with the right flag");
 console.log("SESSIONS_CHECK_PASS");

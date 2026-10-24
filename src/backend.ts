@@ -13,8 +13,8 @@
  * The backend speaks its own types. Wire types from protocol.ts stop at runJob and runCommand.
  */
 import type { Readable } from "node:stream";
-import type { ArtifactCopy, BrokenCause, ByteStream, CommandResult, Job, JobErrorCode, NodeName, PylonCommand, PylonId, ServiceFact, StreamRequest } from "./protocol.ts";
-import { checkoutDir, closeSession, openSession } from "./sessions.ts";
+import type { ArtifactCopy, BrokenCause, ByteStream, CommandResult, Job, JobErrorCode, NodeName, PausedSession, PylonCommand, PylonId, ServiceFact, StreamRequest } from "./protocol.ts";
+import { checkoutDir, closeSession, dropFailedSession, openSession } from "./sessions.ts";
 import { linkedName, type BootInputs, type LiveSpec, type OverlayFile, type PreviewAssignment, type ServiceDecl, type ServiceName } from "./project.ts";
 import type { ArtifactId, ArtifactManifest, CheckpointId, ImageId, ImageRecipe, PortableArtifactId, TemplateBuildInputs, TemplateId } from "./images.ts";
 
@@ -48,6 +48,11 @@ export interface BackendPylon {
   detail?: string;
   /** Set exactly when `vm` is broken. `unknown` when the backend cannot tell why. */
   cause?: BrokenCause | "unknown";
+  /**
+   * Set exactly when `vm` is stopped: the sessions its last pause recorded, which the backend keeps beside the
+   * checkpoint because the checkpoint cannot be read while paused. Null when that pause recorded none.
+   */
+  sessions?: readonly PausedSession[] | null;
 }
 
 /** Every call runs as `user`. */
@@ -188,8 +193,9 @@ export async function runCommand(pylonId: PylonId, command: PylonCommand, deps: 
       return { kind: "open-session", herdrPane: await openSession(guest, { harness, title, cwd: checkoutDir, ...(resume === undefined ? {} : { resume }) }) };
     }
     case "close-session":
-      await closeSession(guest, command.herdrPane);
-      return { kind: "close-session" };
+      return { kind: "close-session", outcome: await closeSession(guest, command.herdrPane, command.session) };
+    case "drop-failed-session":
+      return { kind: "drop-failed-session", dropped: await dropFailedSession(guest, command.id) };
     case "service": {
       const { services, logs } = await guest.services(command.op, command.name, command.lines);
       return { kind: "service", services, ...(logs === undefined ? {} : { logs }) };

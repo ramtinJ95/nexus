@@ -12,10 +12,11 @@ import { readEvents } from "./event-reader.ts";
 import { fakeHarness } from "./fake-harness.ts";
 import { openRegistry, type Thread } from "./registry.ts";
 import { githubTokenGrant, liveHashOf } from "../project.ts";
+import { ingest } from "../reconcile.ts";
 import { processStream } from "../process-stream.ts";
 import { repoInitCommand } from "../pylon-vm-backend.ts";
 import { checkoutDir } from "../sessions.ts";
-import type { ByteStream, CommandResult, JobId, NodeName, PylonCommand, PylonId, ServiceFact, StreamRequest, TailnetNodeId } from "../protocol.ts";
+import type { ByteStream, CommandResult, JobId, NodeName, PausedSession, PylonCommand, PylonId, ServiceFact, StreamRequest, TailnetNodeId } from "../protocol.ts";
 
 const node = "rj-firebat" as NodeName;
 const laptop = "nLAPTOP" as TailnetNodeId;
@@ -51,7 +52,8 @@ async function setup(t: import("node:test").TestContext, options: { dotfiles?: t
     if (command.kind === "link-port") return { kind: "link-port", service: `port-${command.port}` };
     if (command.kind === "unlink-port") return { kind: "unlink-port", refused: null };
     if (command.kind === "open-session") return { kind: "open-session", herdrPane: "w1:p1" };
-    if (command.kind === "close-session") return { kind: "close-session" };
+    if (command.kind === "close-session") return { kind: "close-session", outcome: "closed" };
+    if (command.kind === "drop-failed-session") return { kind: "drop-failed-session", dropped: true };
     throw new Error(`unexpected ${command.kind} command`);
   };
   const streams: [PylonId, StreamRequest][] = [];
@@ -276,7 +278,7 @@ test("thread detail derives the actual state from the node's last observation", 
   s.registry.ingested({ node, observedAt: "2027-01-01T00:01:00Z", probeBootId: "b", capacity, artifacts: [], jobs: [], pylons: [running], previewRoutes: [] }, []);
   const pause = { jobId: "job-1" as JobId, subject: thread.pylonId, kind: "pause" as const };
   s.registry.apply({ record: "job", status: { ...pause, state: "running", startedAt: "2027-01-01T00:00:59Z" } });
-  s.registry.apply({ record: "session", pylonId: thread.pylonId, herdrPane: "p1", fact: { herdrPane: "p1", harness: "pi", harnessSessionId: null, status: "idle", title: "plan" } });
+  s.registry.apply({ record: "sessions", pylonId: thread.pylonId, sessions: [{ id: "p1", state: "running", herdrPane: "p1", harness: "pi", harnessSessionId: null, status: "idle", title: "plan", message: null }] });
   s.registry.apply({ record: "output", pylonId: thread.pylonId, kind: "branch", ref: "nexus/fix" });
   s.registry.allocatePreviews(thread.pylonId, ["web"], { first: 8443, last: 8443 });
   s.registry.apply({ record: "preview", pylonId: thread.pylonId, service: "web", httpsPort: 8443, ready: true });
@@ -284,7 +286,7 @@ test("thread detail derives the actual state from the node's last observation", 
   const d = await detail();
   assert.equal(d.pylon.actualState, "pausing");
   assert.equal(d.pylon.observedAt, "2027-01-01T00:01:00Z");
-  assert.deepEqual(d.sessions, [{ pylon: thread.pylonId, herdrPane: "p1", harness: "pi", harnessSessionId: null, status: "idle", title: "plan" }]);
+  assert.deepEqual(d.sessions, [{ pylon: thread.pylonId, id: "p1", state: "running", herdrPane: "p1", harness: "pi", harnessSessionId: null, status: "idle", title: "plan", message: null }]);
   assert.deepEqual(d.outputs, [{ thread: thread.id, kind: "branch", ref: "nexus/fix" }]);
   assert.deepEqual(d.previews, [{ pylon: thread.pylonId, service: "web", httpsPort: 8443, ready: true, failed: null, url: "https://rj-firebat.tail.ts.net:8443/" }]);
 
@@ -320,7 +322,7 @@ test("thread detail lists the pylon's listening ports with the service and previ
   ]);
   observeRunning(s, { listening: null });
   assert.equal(await ports(), null, "ports the node could not read are unknown, not none");
-  s.registry.ingested({ ...s.registry.node(node)!.observation!, pylons: [{ pylonId: s.thread.pylonId, phase: "stopped", checkpoint: null }] }, []);
+  s.registry.ingested({ ...s.registry.node(node)!.observation!, pylons: [{ pylonId: s.thread.pylonId, phase: "stopped", checkpoint: null, sessions: null }] }, []);
   assert.deepEqual(await ports(), [], "nothing listens in a stopped pylon");
 });
 
@@ -578,10 +580,80 @@ test("reading the checkout of a pylon that is not running wakes it and is refuse
   assert.deepEqual(s.streams, []);
 });
 
-test("closing a session goes through the node's probe, which treats a pane already gone as closed", async (t) => {
+test("closing a session goes through the node's probe, and a pane that is not open, such as one from before a wake, is a 404", async (t) => {
   const s = await withThread(t);
   assert.deepEqual(await s.call("DELETE", `/v1/threads/${s.thread.id}/sessions/${encodeURIComponent("w1:p1")}`, {}), { status: 204, body: null });
   assert.deepEqual(s.commands, [[s.thread.pylonId, { kind: "close-session", herdrPane: "w1:p1" }]]);
+  s.probeAnswers(async () => ({ kind: "close-session", outcome: "not-open" }));
+  const stale = await s.call("DELETE", `/v1/threads/${s.thread.id}/sessions/${encodeURIComponent("w1:p1")}`, {});
+  assert.equal(stale.status, 404);
+  assert.match(stale.body.error, /no session is open in pane w1:p1 .* A wake may have moved it/);
+});
+
+test("closing a listed session names it, and a pane that runs another session now is a 404 that leaves it open", async (t) => {
+  const s = await withThread(t);
+  s.registry.apply({ record: "sessions", pylonId: s.thread.pylonId, sessions: [
+    { id: "w1:p1", state: "running", herdrPane: "w1:p1", harness: "claude-code", harnessSessionId: "s1", title: "review", status: "idle", message: null },
+  ] });
+  s.probeAnswers(async () => ({ kind: "close-session", outcome: "moved" }));
+  const moved = await s.call("DELETE", `/v1/threads/${s.thread.id}/sessions/${encodeURIComponent("w1:p1")}`, {});
+  assert.deepEqual(s.commands, [[s.thread.pylonId, { kind: "close-session", herdrPane: "w1:p1", session: { harness: "claude-code", harnessSessionId: "s1", title: "review" } }]]);
+  assert.equal(moved.status, 404);
+  assert.match(moved.body.error, /pane w1:p1 of pylon \S+ runs another session now, so it was left open. A wake moved session w1:p1 to another pane/);
+});
+
+/** Records the thread's pylon stopped with these sessions, as the loop would from the node's observation. */
+function observeStopped(s: Awaited<ReturnType<typeof withThread>>, sessions: readonly PausedSession[]) {
+  const capacity = { memoryGiB: 64, committedMemoryGiB: 0, diskFreeGiB: 100 };
+  s.registry.apply({ record: "node", node, state: "online", capacity });
+  const stopped = { pylonId: s.thread.pylonId, phase: "stopped" as const, checkpoint: null, sessions };
+  s.registry.ingested({ node, observedAt: new Date().toISOString(), probeBootId: "b", capacity, artifacts: [], jobs: [], pylons: [stopped], previewRoutes: [] },
+    ingest({ type: "pylon", pylon: stopped }, node, new Map([[s.thread.pylonId, "absent"]]), Date.now()));
+}
+
+const pausedReview: PausedSession = { id: "w1:p1", herdrPane: "w1:p1", harness: "claude-code", harnessSessionId: "s1", title: "review" };
+
+test("an idle-paused or archived thread lists the sessions its wake brings back, as paused", async (t) => {
+  const s = await withThread(t);
+  s.registry.apply({ record: "sessions", pylonId: s.thread.pylonId, sessions: [{ ...pausedReview, herdrPane: "w1:p1", state: "running", status: "working", message: null }] });
+  observeStopped(s, [pausedReview]);
+  const sessions = async () => ((await s.call("GET", `/v1/threads/${s.thread.id}`)).body as ThreadDetail).sessions;
+  const paused = [{ pylon: s.thread.pylonId, ...pausedReview, state: "paused", status: "working", message: null }];
+  assert.deepEqual(await sessions(), paused);
+  assert.equal((await s.call("POST", `/v1/threads/${s.thread.id}/archive`)).status, 200);
+  assert.deepEqual(await sessions(), paused);
+});
+
+test("closing a paused session is refused with 409 without asking the probe or waking the pylon", async (t) => {
+  const s = await withThread(t);
+  observeStopped(s, [pausedReview]);
+  // Timestamps only move forward, so this is the thread's start.
+  const human = s.registry.thread(s.thread.id)!.lastHumanActivityAt;
+  s.woken.length = 0;
+  const idle = await s.call("DELETE", `/v1/threads/${s.thread.id}/sessions/${encodeURIComponent("w1:p1")}`, {});
+  assert.equal(idle.status, 409);
+  assert.match(idle.body.error, /session w1:p1 is paused with its pylon and resumes when its pylon wakes. Close it once it runs/);
+  assert.deepEqual(s.woken, []);
+  assert.equal((await s.call("POST", `/v1/threads/${s.thread.id}/archive`)).status, 200);
+  s.woken.length = 0;
+  const archived = await s.call("DELETE", `/v1/threads/${s.thread.id}/sessions/${encodeURIComponent("w1:p1")}`, {});
+  assert.equal(archived.status, 409);
+  assert.match(archived.body.error, /resumes when `nexus unarchive .*` wakes its pylon/);
+  assert.deepEqual(s.commands, []);
+  assert.deepEqual(s.woken, []);
+  assert.equal(s.registry.thread(s.thread.id)!.lastHumanActivityAt, human, "a refused close is not activity");
+});
+
+test("closing a failed session in no pane drops it from the pylon, by its ID", async (t) => {
+  const s = await withThread(t);
+  const id = "failed-0123456789ab";
+  s.registry.apply({ record: "sessions", pylonId: s.thread.pylonId, sessions: [
+    { id, state: "failed", herdrPane: null, harness: "pi", harnessSessionId: null, title: "plan", status: null, message: "pi exited 1" },
+  ] });
+  assert.deepEqual(await s.call("DELETE", `/v1/threads/${s.thread.id}/sessions/${id}`, {}), { status: 204, body: null });
+  assert.deepEqual(s.commands, [[s.thread.pylonId, { kind: "drop-failed-session", id }]]);
+  s.probeAnswers(async () => ({ kind: "drop-failed-session", dropped: false }));
+  assert.equal((await s.call("DELETE", `/v1/threads/${s.thread.id}/sessions/${id}`, {})).status, 404);
 });
 
 test("a session of a pylon that is not running, or of an archived or deleted thread, is refused with 409", async (t) => {

@@ -16,6 +16,7 @@ import { identityOf } from "./pylon-vm/identity.ts";
 import { pylonGuest } from "./pylon-vm/pylon-guest.ts";
 import type { BootInputs } from "./project.ts";
 import type { BrokenCause, PylonId } from "./protocol.ts";
+import { herdrOk, herdrPane, herdrSnapshot } from "./fake-guest.ts";
 import type { ImageId, TemplateBuildInputs, TemplateId, TemplateManifest } from "./images.ts";
 import type { ProjectId } from "./project.ts";
 
@@ -370,10 +371,39 @@ test("a pause records the sessions while the guest runs, before it stops the VM,
   assert.deepEqual((await backend.list()).map((p) => [p.vm, p.checkpoint]), [["stopped", "ckpt-rec-1"]]);
 });
 
+test("a pause keeps what it recorded beside the checkpoint, which the stopped pylon reports", async () => {
+  const { backend, instances } = await backendWith();
+  const dir = await leftInstance(instances, "pylon-kept", "running");
+  await writeFile(join(dir, "controller.log"), "");
+  const snapshot = herdrSnapshot([{ id: "w1", label: "sh" }], [herdrPane("w1:p1", "w1", null, "idle")]);
+  const controller = await fakeController(dir, "pylon-kept", (action) => {
+    if (action.action === "exec") return String(action.cmd).replace(/['\\]/g, "").includes("api snapshot") ? finished(0, herdrOk(snapshot).output) : finished(3); // no sessions file yet
+    if (action.action === "write-files") return {};
+    if (action.action === "stop") {
+      controller.state.current = "stopped";
+      return { name: "pylon-kept", state: "stopped" };
+    }
+    return assert.fail(`unexpected ${action.action}`);
+  });
+  assert.equal((await backend.list())[0]!.sessions, undefined, "a running pylon's sessions come from its guest");
+  await backend.ensurePaused("pylon-kept" as PylonId, "ckpt-kept-1", signal());
+  const recorded = [{ id: "w1:p1", herdrPane: "w1:p1", harness: "shell", harnessSessionId: null, title: "sh" }];
+  assert.deepEqual(JSON.parse(await readFile(join(dir, "nexus-checkpoint.json"), "utf8")), { checkpoint: "ckpt-kept-1", sessions: recorded });
+  assert.deepEqual((await backend.list()).map((p) => [p.vm, p.checkpoint, p.sessions]), [["stopped", "ckpt-kept-1", recorded]]);
+});
+
+test("a stopped pylon whose pause recorded nothing reports null", async () => {
+  const { backend, instances } = await backendWith();
+  const dir = await leftInstance(instances, "pylon-none", "stopped");
+  await writeFile(join(dir, "nexus-checkpoint.json"), JSON.stringify({ checkpoint: "ckpt-none-1" }));
+  assert.deepEqual((await backend.list()).map((p) => [p.vm, p.sessions]), [["stopped", null]]);
+});
+
 test("a spawn of a running pylon applies the preview URLs, and finishes a relaunch a wake left pending, once", async () => {
   const { backend, instances } = await backendWith({ previewHost: "node.example.ts.net" });
   const dir = await leftInstance(instances, "pylon-wake", "running");
-  await writeFile(join(dir, "nexus-checkpoint.json"), JSON.stringify({ checkpoint: "ckpt-wake-1", relaunch: true }));
+  const paused = [{ id: "w1:p1", herdrPane: "w1:p1", harness: "shell", harnessSessionId: null, title: "sh" }];
+  await writeFile(join(dir, "nexus-checkpoint.json"), JSON.stringify({ checkpoint: "ckpt-wake-1", relaunch: true, sessions: paused }));
   const { actions } = await fakeController(dir, "pylon-wake", (action) => {
     if (action.action === "write-files" || action.action === "public-urls") return {};
     // The sessions file is missing: this pylon was paused with nothing open.
@@ -385,7 +415,7 @@ test("a spawn of a running pylon applies the preview URLs, and finishes a relaun
   assert.deepEqual(actions.map((a) => a.action), ["write-files", "public-urls", "exec"]);
   assert.deepEqual(actions[1]!.urls, { web: "https://node.example.ts.net:10100" });
   assert.match(String(actions[2]!.cmd), /\.nexus\/sessions\.json/);
-  assert.deepEqual(JSON.parse(await readFile(join(dir, "nexus-checkpoint.json"), "utf8")), { checkpoint: "ckpt-wake-1" });
+  assert.deepEqual(JSON.parse(await readFile(join(dir, "nexus-checkpoint.json"), "utf8")), { checkpoint: "ckpt-wake-1" }, "the relaunch drops the paused list too");
 
   await backend.ensureRunning(bootOf("pylon-wake"), previews, signal());
   assert.deepEqual(actions.map((a) => a.action), ["write-files", "public-urls", "exec", "write-files", "public-urls"], "the relaunch ran once");

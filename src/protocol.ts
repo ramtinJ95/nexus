@@ -52,7 +52,8 @@ export type Job =
  *
  * pause records the open Herdr sessions in /home/user/.nexus/sessions.json, stops services, writes the
  * disk checkpoint and stops the VM. The session list is on the disk, so the checkpoint carries it and a
- * session opened a second before the pause is still relaunched. delete removes the VM, its checkpoint,
+ * session opened a second before the pause is still relaunched. The backend keeps a copy of the list beside the
+ * checkpoint, which the stopped pylon's observation reports. delete removes the VM, its checkpoint,
  * and its previews. Deleting an absent pylon succeeds.
  */
 export const jobDeadlineMs: { readonly [K in Job["kind"]]: number } = {
@@ -135,7 +136,12 @@ export interface PreviewRouteFact { httpsPort: number; pylonId: PylonId; service
 
 export type PylonObservation =
   | { pylonId: PylonId; phase: "booting" | "stopping" | "deleting" }
-  | { pylonId: PylonId; phase: "stopped"; checkpoint: CheckpointId | null }
+  /**
+   * `sessions`: what the wake brings back, as the pause recorded it. Null when the pause recorded nothing, such as with
+   * no Herdr server, or the pylon stopped without a pause, or from a probe older than the field. The wake then
+   * relaunches what an earlier record holds, which only the checkpoint knows.
+   */
+  | { pylonId: PylonId; phase: "stopped"; checkpoint: CheckpointId | null; sessions: readonly PausedSession[] | null }
   | { pylonId: PylonId; phase: "broken"; detail: string; cause: BrokenCause | "unknown" } // the backend reports it interrupted or failed
   | ({ pylonId: PylonId; phase: "running" } & RunningFacts);
 
@@ -173,11 +179,26 @@ export interface RunningFacts {
 export interface ServiceFact { name: string; state: "starting" | "ready" | "failed" | "stopped"; port: number; declared: boolean; wantsPreview: boolean }
 export interface ListeningFact { port: number }
 /** `unknown` is Herdr's word for a pane it cannot classify, which every plain shell is. */
-export interface SessionFact {
-  herdrPane: string; harness: SessionHarness; harnessSessionId: string | null; status: "working" | "idle" | "blocked" | "done" | "unknown";
-  /** The session's title, its Herdr workspace's label. A probe from before titles were reported sends none. */
-  title?: string;
-}
+export type HerdrStatus = "working" | "idle" | "blocked" | "done" | "unknown";
+/**
+ * A session in a running pylon. `id` names it: its Herdr pane, or `failed-` and a hash of its record for a session
+ * the last wake left in no pane (sessions.ts). `failed` is one the last wake did not bring back, which the next wake
+ * tries again: `message` says why, and `herdrPane` is the pane it left behind, such as a shell its agent would not
+ * start in, or null. `status` is Herdr's for the pane, unknown with none: a control plane older than session states
+ * stores one for every session. It cannot store a session in no pane, so the control plane is upgraded before the
+ * probes (deploy/README.md).
+ */
+export type SessionFact =
+  | {
+    id: string; state: "running"; herdrPane: string; harness: SessionHarness; harnessSessionId: string | null; status: HerdrStatus;
+    /** The session's title, its Herdr workspace's label. A probe from before titles were reported sends none. */
+    title?: string;
+  }
+  | { id: string; state: "failed"; herdrPane: string | null; harness: SessionHarness; harnessSessionId: string | null; status: HerdrStatus; title: string; message: string };
+/** What tells sessions apart. `title` is null where it is not known, as from a probe before titles were reported. */
+export interface SessionIdentity { harness: SessionHarness; harnessSessionId: string | null; title: string | null }
+/** A session a stopped pylon's wake brings back, under the `id` it had while the pylon ran. */
+export interface PausedSession { id: string; herdrPane: string | null; harness: SessionHarness; harnessSessionId: string | null; title: string }
 export interface GitFacts { head: string; branch: string | null; dirty: boolean; branches: readonly { name: string; head: string; pushedAs: string | null }[] }
 export type DeclaredOutput =
   | { id: string; kind: "file"; path: string; title: string | null; sha256: string }
@@ -199,7 +220,13 @@ export type PylonCommand =
   /** When the timeout passes, the probe calls pi-sandbox's exec-kill and returns exitCode null. Timeout at most 60 s. */
   | { kind: "exec"; argv: readonly string[]; cwd: string; timeoutMs: number }
   | { kind: "open-session"; harness: SessionHarness; title: string; resume?: string }
-  | { kind: "close-session"; herdrPane: string }
+  /**
+   * `session` is who the control plane last saw in the pane, so a pane a wake has since given to another session is
+   * left open. None for a pane no observation has listed yet, such as one opened a moment ago.
+   */
+  | { kind: "close-session"; herdrPane: string; session?: SessionIdentity }
+  /** Forgets a failed session the last wake left in no pane, so no wake tries it again. */
+  | { kind: "drop-failed-session"; id: string }
   | { kind: "service"; op: "ensure" | "restart" | "stop" | "logs"; name?: string; lines?: number }
   /** Previews a port that already listens, or will, as `nexus preview <port>` in the pylon does. Safe to repeat. */
   | { kind: "link-port"; port: number }
@@ -209,7 +236,13 @@ export type PylonCommand =
 export type CommandResult =
   | { kind: "exec"; exitCode: number | null; output: string; truncated: boolean }
   | { kind: "open-session"; herdrPane: string }
-  | { kind: "close-session" }
+  /**
+   * `not-open`: no such pane is open. `moved`: the pane runs another session than the command names, such as one a wake
+   * put there after moving the named one. Both leave every pane as it was. A probe older than the field sends none.
+   */
+  | { kind: "close-session"; outcome: "closed" | "not-open" | "moved" }
+  /** `dropped` is false when the pylon holds no such failed session. */
+  | { kind: "drop-failed-session"; dropped: boolean }
   | { kind: "service"; services: readonly ServiceFact[]; logs?: string }
   /** The service the port is previewed under: `port-<port>`, or the service that already owns the port. */
   | { kind: "link-port"; service: string }
@@ -710,8 +743,17 @@ export function parsePylonCommand(body: string): PylonCommand {
         if (c.harness === "shell") throw new Error("a shell session has nothing to resume");
       }
       break;
-    case "close-session":
+    case "close-session": {
       string(c.herdrPane, "command.herdrPane");
+      if (c.session === undefined) break;
+      const s = record(c.session, "command.session");
+      if (!harnesses.has(s.harness)) throw new Error(`unknown harness ${JSON.stringify(s.harness)}`);
+      if (s.harnessSessionId !== null) string(s.harnessSessionId, "command.session.harnessSessionId");
+      if (s.title !== null) string(s.title, "command.session.title");
+      break;
+    }
+    case "drop-failed-session":
+      string(c.id, "command.id");
       break;
     case "service":
       if (!serviceOps.has(c.op)) throw new Error(`unknown service op ${JSON.stringify(c.op)}`);
@@ -728,10 +770,16 @@ export function parsePylonCommand(body: string): PylonCommand {
   return c as unknown as PylonCommand;
 }
 
+const closeOutcomes: ReadonlySet<unknown> = new Set(["closed", "not-open", "moved"] satisfies Extract<CommandResult, { kind: "close-session" }>["outcome"][]);
 function parseCommandResult(command: PylonCommand, body: string): CommandResult {
   const r = record(JSON.parse(body), "command result");
   if (r.kind !== command.kind) throw new Error(`a ${command.kind} command got a ${JSON.stringify(r.kind)} result`);
   if (r.kind === "open-session") string(r.herdrPane, "result.herdrPane");
+  if (r.kind === "close-session") {
+    r.outcome ??= "closed"; // from a probe that reported every close as done
+    if (!closeOutcomes.has(r.outcome)) throw new Error(`unknown close outcome ${JSON.stringify(r.outcome)}`);
+  }
+  if (r.kind === "drop-failed-session" && typeof r.dropped !== "boolean") throw new Error("result.dropped is not a boolean");
   if (r.kind === "link-port") string(r.service, "result.service");
   if (r.kind === "unlink-port" && r.refused !== null) string(r.refused, "result.refused");
   return r as unknown as CommandResult;
@@ -753,7 +801,12 @@ function parsePylonObservation(value: unknown): PylonObservation {
   string(p.pylonId, "pylon.pylonId");
   if (!pylonPhases.has(p.phase)) throw new Error(`unknown pylon phase ${JSON.stringify(p.phase)}`);
   if (p.phase === "broken" && !brokenCauses.has(p.cause)) p.cause = "unknown";
-  if (p.phase === "running") p.listening ??= null; // from a probe older than the field
+  if (p.phase === "running") {
+    p.listening ??= null; // from a probe older than the field
+    // From a probe older than session states, which reported only sessions in panes.
+    if (Array.isArray(p.sessions)) for (const s of p.sessions as Record<string, unknown>[]) if (s.state === undefined) Object.assign(s, { state: "running", id: s.herdrPane });
+  }
+  if (p.phase === "stopped") p.sessions ??= null; // from a probe older than the field
   return p as unknown as PylonObservation;
 }
 

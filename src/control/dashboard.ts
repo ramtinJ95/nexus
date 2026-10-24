@@ -19,7 +19,7 @@ import { readFileSync } from "node:fs";
 import type { AssistantMessage, ImageContent, TextContent, ToolCall, UserMessage } from "@earendil-works/pi-ai";
 import type { ConversationView, InboxState, LiveState } from "@earendil-works/pi-durable";
 import { desiredPhase, type ActualState, type DesiredPhase } from "../reconcile.ts";
-import type { SessionFact } from "../protocol.ts";
+import type { HerdrStatus } from "../protocol.ts";
 import { githubTokenGrant, linkedPort, type SessionHarness } from "../project.ts";
 import type { ThreadDetail } from "./api.ts";
 import type { NodeRecord, Output, Preview, Registry, Thread, ThreadId } from "./registry.ts";
@@ -125,7 +125,7 @@ const actualBadge: Record<ActualState, [label: string, tone: Tone]> = {
   paused: ["paused", "idle"], absent: ["not on its node", "muted"], failed: ["failed", "bad"], unknown: ["unknown", "muted"],
 };
 const desiredTone: Record<DesiredPhase, Tone> = { running: "ok", paused: "idle", deleted: "muted" };
-const sessionTone: Record<SessionFact["status"], Tone> = { working: "work", idle: "idle", blocked: "bad", done: "ok", unknown: "muted" };
+const sessionTone: Record<HerdrStatus, Tone> = { working: "work", idle: "idle", blocked: "bad", done: "ok", unknown: "muted" };
 const harnessLabel: Record<SessionHarness, string> = { "claude-code": "Claude Code", pi: "pi", shell: "Shell" };
 const outputLabel: Record<Output["kind"], string> = { branch: "branch", diff: "diff", preview: "preview", file: "file" };
 
@@ -586,8 +586,11 @@ ${outputs.length === 0 ? html`<p class="empty">No outputs yet.</p>` : html`<ul c
 </section>
 <section aria-labelledby="sessions-h"><h2 id="sessions-h">Sessions ${count(d.sessions.length)}</h2>
 ${d.sessions.length === 0 ? html`<p class="empty">No sessions.</p>` : html`<ul class="list outs">${d.sessions.map((s) => html`<li>
-<span class="o-kind">${harnessLabel[s.harness]}</span>${s.title !== null && html`<span class="s-title">${s.title}</span>`}${state(s.status, sessionTone[s.status])}<code class="dim pane">${s.herdrPane}</code>
+<span class="o-kind">${harnessLabel[s.harness]}</span>${s.title !== null && html`<span class="s-title">${s.title}</span>`}${s.state === "running" ? state(s.status, sessionTone[s.status])
+  : s.state === "paused" ? state(t.status === "archived" ? "paused, resumes on unarchive" : "paused, resumes on wake", "idle")
+  : state("failed", "bad")}${s.herdrPane !== null && html`<code class="dim pane">${s.herdrPane}</code>`}
 ${s.harnessSessionId !== null && html`<code class="dim sid" title="${s.harnessSessionId}">session ${s.harnessSessionId}</code>`}
+${s.state === "failed" && html`<p class="error s-why">It did not come back from the last wake, which the next tries again: ${s.message}</p>`}
 </li>`)}</ul>`}
 <p class="attach-h">Attach from a shell in the pylon</p>
 <div class="attach"><code id="attach-command">${d.attach}</code><button type="button" class="btn btn-xs" data-copy="attach-command">Copy</button></div>

@@ -7,8 +7,8 @@
  */
 import { DatabaseSync } from "node:sqlite";
 import type { ActivityFacts, RegistryWrite, ThreadStatus } from "../reconcile.ts";
-import type { JobStatus, NodeName, NodeObservation, PylonId, SessionFact, Subject, TailnetNodeId } from "../protocol.ts";
-import type { Project, ProjectId } from "../project.ts";
+import type { HerdrStatus, JobStatus, NodeName, NodeObservation, PylonId, Subject, TailnetNodeId } from "../protocol.ts";
+import type { Project, ProjectId, SessionHarness } from "../project.ts";
 import type { ImageId, ImageManifest, TemplateRecord } from "../images.ts";
 import type { PylonRecord } from "../tick.ts";
 
@@ -39,8 +39,16 @@ export interface Thread extends ActivityFacts {
 /** What the registry keeps of a pylon. The desired phase is derived from its thread on every tick. */
 export type StoredPylon = Omit<PylonRecord, "desired">;
 
-/** `title` is null for a session last observed from a probe that did not report titles. */
-export type Session = Omit<SessionFact, "title"> & { pylon: PylonId; title: string | null };
+/**
+ * A session of a pylon. `id` names it, and is what closes it: its Herdr pane, or `failed-` and a hash for a failed
+ * session in no pane. A `paused` session comes back when its pylon wakes. A `failed` one did not come back from the
+ * last wake, `message` says why, and the next wake tries it again. `status` is the Herdr status it had when last
+ * read running, `unknown` if never. `title` is null for a session last observed from a probe that did not report titles.
+ */
+export type Session = { pylon: PylonId; id: string; harness: SessionHarness; harnessSessionId: string | null; title: string | null; status: HerdrStatus } & (
+  | { state: "running"; herdrPane: string; message: null }
+  | { state: "paused"; herdrPane: string | null; message: null }
+  | { state: "failed"; herdrPane: string | null; message: string });
 /**
  * `url` is what the data model calls a preview's URL, on its node's tailnet name. `failed` says why the preview
  * cannot answer while its node's last observation reports its service failed, and null otherwise. `ready` is true
@@ -165,6 +173,28 @@ const migrations: readonly string[] = [
   UPDATE pylons SET submitted = json_set(submitted, '$.job.boot.repo.kind', 'clone')
     WHERE submitted IS NOT NULL AND json_extract(submitted, '$.job.kind') = 'spawn';
   `,
+  // A paused pylon's sessions keep their rows, and a session its last wake failed to bring back has one, which may
+  // have no pane, so a session is keyed by its ID. Every session recorded before was running in its pane.
+  `
+  CREATE TABLE pylon_sessions (
+    pylon TEXT NOT NULL REFERENCES pylons (id),
+    id TEXT NOT NULL,
+    herdr_pane TEXT,
+    harness TEXT NOT NULL,
+    harness_session_id TEXT,
+    status TEXT NOT NULL,
+    title TEXT,
+    state TEXT NOT NULL DEFAULT 'running' CHECK (state IN ('running', 'paused', 'failed')),
+    message TEXT,
+    PRIMARY KEY (pylon, id),
+    CHECK ((state = 'failed') = (message IS NOT NULL)),
+    CHECK (state <> 'running' OR herdr_pane IS NOT NULL)
+  ) STRICT;
+  INSERT INTO pylon_sessions (pylon, id, herdr_pane, harness, harness_session_id, status, title)
+    SELECT pylon, herdr_pane, herdr_pane, harness, harness_session_id, status, title FROM sessions;
+  DROP TABLE sessions;
+  ALTER TABLE pylon_sessions RENAME TO sessions;
+  `,
 ];
 
 type Row = Record<string, unknown>;
@@ -196,6 +226,15 @@ function threadRow(r: Row): Thread {
     lastAgentActivityAt: r.last_agent_activity_at as number,
     lastHumanActivityAt: r.last_human_activity_at as number,
   };
+}
+
+/** The table's checks hold each state to its fields. */
+function sessionRow(r: Row): Session {
+  return {
+    pylon: r.pylon as PylonId, id: r.id as string, herdrPane: r.herdr_pane as string | null, harness: r.harness as SessionHarness,
+    harnessSessionId: r.harness_session_id as string | null, title: r.title as string | null, status: r.status as HerdrStatus,
+    state: r.state as Session["state"], message: r.message as string | null,
+  } as Session;
 }
 
 function pylonRow(r: Row): StoredPylon {
@@ -253,10 +292,15 @@ export function openRegistry(path: string) {
     retryPylon: db.prepare(`UPDATE pylons SET failed = NULL, attempts = '{"count":0,"last":null}', retrying = 1 WHERE id = ? AND failed IS NOT NULL`),
     pylon: db.prepare("SELECT * FROM pylons WHERE id = ?"),
     pylonsOn: db.prepare("SELECT * FROM pylons WHERE node = ? ORDER BY id"),
-    upsertSession: db.prepare(`INSERT INTO sessions (pylon, herdr_pane, harness, harness_session_id, status, title) VALUES (?, ?, ?, ?, ?, ?)
-      ON CONFLICT (pylon, herdr_pane) DO UPDATE SET harness = excluded.harness, harness_session_id = excluded.harness_session_id, status = excluded.status, title = excluded.title`),
-    deleteSession: db.prepare("DELETE FROM sessions WHERE pylon = ? AND herdr_pane = ?"),
-    sessions: db.prepare("SELECT * FROM sessions WHERE pylon = ? ORDER BY herdr_pane"),
+    // A null status keeps the one the row has.
+    upsertSession: db.prepare(`INSERT INTO sessions (pylon, id, herdr_pane, harness, harness_session_id, status, title, state, message)
+      VALUES ($pylon, $id, $herdrPane, $harness, $harnessSessionId, coalesce($status, 'unknown'), $title, $state, $message)
+      ON CONFLICT (pylon, id) DO UPDATE SET herdr_pane = excluded.herdr_pane, harness = excluded.harness, harness_session_id = excluded.harness_session_id,
+      status = coalesce($status, sessions.status), title = excluded.title, state = excluded.state, message = excluded.message`),
+    deleteSession: db.prepare("DELETE FROM sessions WHERE pylon = ? AND id = ?"),
+    pauseSessions: db.prepare("UPDATE sessions SET state = 'paused', message = NULL WHERE pylon = ?"),
+    sessions: db.prepare("SELECT * FROM sessions WHERE pylon = ? ORDER BY id"),
+    session: db.prepare("SELECT * FROM sessions WHERE pylon = ? AND id = ?"),
     insertPreview: db.prepare("INSERT INTO previews (pylon, node, service, https_port, ready) SELECT id, node, ?, ?, 0 FROM pylons WHERE id = ?"),
     previewReady: db.prepare("UPDATE previews SET ready = ? WHERE pylon = ? AND service = ? AND https_port = ?"),
     deletePreviews: db.prepare("DELETE FROM previews WHERE pylon = ?"),
@@ -367,10 +411,11 @@ export function openRegistry(path: string) {
     /** Clears a failed pylon's verdict and attempts, and marks a human retry. False when the pylon has not failed. */
     retryPylon: (pylonId: PylonId): boolean => q.retryPylon.run(pylonId).changes === 1,
 
-    sessions: (pylon: PylonId) => (q.sessions.all(pylon) as Row[]).map((r): Session => ({
-      pylon: r.pylon as PylonId, herdrPane: r.herdr_pane as string, harness: r.harness as Session["harness"],
-      harnessSessionId: r.harness_session_id as string | null, status: r.status as Session["status"], title: r.title as string | null,
-    })),
+    sessions: (pylon: PylonId) => (q.sessions.all(pylon) as Row[]).map(sessionRow),
+    session(pylon: PylonId, id: string): Session | undefined {
+      const row = q.session.get(pylon, id) as Row | undefined;
+      return row && sessionRow(row);
+    },
     /**
      * Gives each of `services` that has no preview yet the lowest port in `range` that no pylon on the pylon's node
      * holds and that the node's last observation does not route. A port the node routes without a row here is left
@@ -444,9 +489,19 @@ export function openRegistry(path: string) {
       case "node":
         q.nodeFacts.run(write.state, JSON.stringify(write.capacity), write.node);
         return;
-      case "session":
-        if (write.fact === null) q.deleteSession.run(write.pylonId, write.herdrPane);
-        else q.upsertSession.run(write.pylonId, write.herdrPane, write.fact.harness, write.fact.harnessSessionId, write.fact.status, write.fact.title ?? null);
+      case "sessions": {
+        const listed = new Set(write.sessions.map((s) => s.id));
+        for (const r of q.sessions.all(write.pylonId) as Row[]) if (!listed.has(r.id as string)) q.deleteSession.run(write.pylonId, r.id as string);
+        for (const s of write.sessions) {
+          q.upsertSession.run({
+            $pylon: write.pylonId, $id: s.id, $herdrPane: s.herdrPane, $harness: s.harness, $harnessSessionId: s.harnessSessionId,
+            $status: s.status, $title: s.title, $state: s.state, $message: s.message,
+          });
+        }
+        return;
+      }
+      case "sessions-paused":
+        q.pauseSessions.run(write.pylonId);
         return;
       case "output": {
         const thread = threadOfPylon(write.pylonId);

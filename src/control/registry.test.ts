@@ -117,9 +117,11 @@ test("ingest writes fold into records, and applying one twice changes nothing", 
   const capacity = { memoryGiB: 64, committedMemoryGiB: 8, diskFreeGiB: 400 };
   const writes = [
     { record: "node", node, state: "online", capacity },
-    { record: "session", pylonId, herdrPane: "p1", fact: { herdrPane: "p1", harness: "pi", harnessSessionId: "s.jsonl", status: "working" } },
-    { record: "session", pylonId, herdrPane: "p2", fact: { herdrPane: "p2", harness: "shell", harnessSessionId: null, status: "idle" } },
-    { record: "session", pylonId, herdrPane: "p2", fact: null },
+    { record: "sessions", pylonId, sessions: [
+      { id: "p1", state: "running", herdrPane: "p1", harness: "pi", harnessSessionId: "s.jsonl", title: null, status: "working", message: null },
+      { id: "p2", state: "running", herdrPane: "p2", harness: "shell", harnessSessionId: null, title: null, status: "idle", message: null },
+    ] },
+    { record: "sessions", pylonId, sessions: [{ id: "p1", state: "running", herdrPane: "p1", harness: "pi", harnessSessionId: "s.jsonl", title: null, status: "working", message: null }] },
     { record: "output", pylonId, kind: "branch", ref: "nexus/fix-it" },
     { record: "orphan", node, pylonId: "pylon-stray" as PylonId },
     { record: "job", status: { jobId: "j" as JobId, subject: pylonId, kind: "spawn", state: "running", startedAt: "2027-01-01T00:00:00Z" } },
@@ -128,7 +130,7 @@ test("ingest writes fold into records, and applying one twice changes nothing", 
 
   assert.equal(registry.node(node)?.state, "online");
   assert.deepEqual(registry.node(node)?.capacity, capacity);
-  assert.deepEqual(registry.sessions(pylonId), [{ pylon: pylonId, herdrPane: "p1", harness: "pi", harnessSessionId: "s.jsonl", status: "working", title: null }]);
+  assert.deepEqual(registry.sessions(pylonId), [{ pylon: pylonId, id: "p1", state: "running", herdrPane: "p1", harness: "pi", harnessSessionId: "s.jsonl", status: "working", title: null, message: null }]);
   assert.deepEqual(registry.outputs(threadId), [{ thread: threadId, kind: "branch", ref: "nexus/fix-it" }]);
   assert.deepEqual(registry.orphans(), [{ node, pylonId: "pylon-stray" }]);
 
@@ -145,14 +147,43 @@ test("an observation is stored only together with the writes derived from it", a
   assert.deepEqual(registry.node(node)?.observation, first);
 
   const second = { ...first, observedAt: "2027-01-01T00:01:00Z" };
-  const fact = { herdrPane: "p1", harness: "pi", harnessSessionId: null, status: "working" } as const;
+  const sessions = [{ id: "p1", state: "running", herdrPane: "p1", harness: "pi", harnessSessionId: null, title: null, status: "working", message: null }] as const;
   // The second write names a pylon the registry does not have, so it fails, and the first must not land either.
   assert.throws(() => registry.ingested(second, [
-    { record: "session", pylonId, herdrPane: "p1", fact },
-    { record: "session", pylonId: "pylon-unknown" as PylonId, herdrPane: "p1", fact },
+    { record: "sessions", pylonId, sessions },
+    { record: "sessions", pylonId: "pylon-unknown" as PylonId, sessions },
   ]));
   assert.deepEqual(registry.node(node)?.observation, first);
   assert.deepEqual(registry.sessions(pylonId), []);
+});
+
+test("a paused pylon's sessions keep their rows and last status, and the first list after its wake replaces them", async (t) => {
+  const registry = seeded(tempDb());
+  t.after(() => registry.close());
+  const review = { id: "w1:p1", herdrPane: "w1:p1", harness: "claude-code", harnessSessionId: "s1", title: "review" } as const;
+  const plan = { id: "failed-0123456789ab", herdrPane: null, harness: "pi", harnessSessionId: null, title: "plan" } as const;
+  registry.apply({ record: "sessions", pylonId, sessions: [{ ...review, state: "running", status: "working", message: null }] });
+  registry.apply({ record: "sessions", pylonId, sessions: [{ ...review, state: "paused", status: null, message: null }, { ...plan, state: "paused", status: null, message: null }] });
+  assert.deepEqual(registry.sessions(pylonId), [
+    { pylon: pylonId, ...plan, state: "paused", status: "unknown", message: null },
+    { pylon: pylonId, ...review, state: "paused", status: "working", message: null },
+  ], "a paused row keeps the status it last ran with, and one never seen running has none");
+  assert.deepEqual(registry.session(pylonId, "w1:p1"), { pylon: pylonId, ...review, state: "paused", status: "working", message: null });
+  assert.equal(registry.session(pylonId, "w9:p9"), undefined);
+
+  registry.apply({ record: "sessions", pylonId, sessions: [
+    { ...review, id: "w3:p1", herdrPane: "w3:p1", state: "running", status: "idle", message: null },
+    { ...plan, state: "failed", status: null, message: "pi exited 1" },
+  ] });
+  assert.deepEqual(registry.sessions(pylonId), [
+    { pylon: pylonId, ...plan, state: "failed", status: "unknown", message: "pi exited 1" },
+    { pylon: pylonId, ...review, id: "w3:p1", herdrPane: "w3:p1", state: "running", status: "idle", message: null },
+  ], "the pre-pause pane is gone and the failed session says why");
+
+  registry.apply({ record: "sessions-paused", pylonId });
+  assert.deepEqual(registry.sessions(pylonId).map((s) => [s.id, s.state, s.message]), [["failed-0123456789ab", "paused", null], ["w3:p1", "paused", null]]);
+  registry.apply({ record: "sessions", pylonId, sessions: [] });
+  assert.deepEqual(registry.sessions(pylonId), [], "a deleted pylon drops its rows");
 });
 
 test("a job's result is not undone by an older report of it running", async (t) => {
@@ -173,6 +204,10 @@ test("a job's result is not undone by an older report of it running", async (t) 
   assert.deepEqual(registry.job(pylonId), job("j2", "running").status);
 });
 
+/** The sessions table as the first schema made it. */
+const untitledSessions = `DROP TABLE sessions; CREATE TABLE sessions (pylon TEXT NOT NULL REFERENCES pylons (id), herdr_pane TEXT NOT NULL,
+  harness TEXT NOT NULL, harness_session_id TEXT, status TEXT NOT NULL, PRIMARY KEY (pylon, herdr_pane)) STRICT;`;
+
 test("a registry from before failure messages keeps its pylons' attempts", async (t) => {
   const { DatabaseSync } = await import("node:sqlite");
   /** A file at schema version 1, whose pylon's attempts are in the old shape. */
@@ -181,7 +216,7 @@ test("a registry from before failure messages keeps its pylons' attempts", async
     seeded(path).close();
     const db = new DatabaseSync(path);
     db.prepare("UPDATE pylons SET attempts = ?").run(JSON.stringify(attempts));
-    db.exec("ALTER TABLE pylons DROP COLUMN retrying; ALTER TABLE sessions DROP COLUMN title; PRAGMA user_version = 1");
+    db.exec(`ALTER TABLE pylons DROP COLUMN retrying; ${untitledSessions} PRAGMA user_version = 1`);
     db.close();
     return path;
   };
@@ -201,7 +236,7 @@ test("a registry from before pylon retries opens with no retry under way, and a 
   const path = tempDb();
   seeded(path).close();
   const db = new DatabaseSync(path);
-  db.exec("ALTER TABLE pylons DROP COLUMN retrying; ALTER TABLE sessions DROP COLUMN title; PRAGMA user_version = 3");
+  db.exec(`ALTER TABLE pylons DROP COLUMN retrying; ${untitledSessions} PRAGMA user_version = 3`);
   db.close();
   const registry = openRegistry(path);
   t.after(() => registry.close());
@@ -328,7 +363,7 @@ test("a published preview is ready only while its running pylon reports its serv
   running(null);
   assert.deepEqual(states(), [["api", true, null], ["web", true, null]], "a service the read does not list is ready once published");
   running("failed");
-  observe({ pylonId, phase: "stopped", checkpoint: null });
+  observe({ pylonId, phase: "stopped", checkpoint: null, sessions: null });
   assert.deepEqual(states(), [["api", true, null], ["web", true, null]], "a stopped pylon's services are not known to have failed");
 });
 
@@ -347,13 +382,13 @@ test("a registry from before session titles keeps its sessions, untitled until t
   const path = tempDb();
   seeded(path).close();
   const db = new DatabaseSync(path);
-  db.exec("ALTER TABLE sessions DROP COLUMN title; PRAGMA user_version = 4");
+  db.exec(`${untitledSessions} PRAGMA user_version = 4`);
   db.prepare("INSERT INTO sessions VALUES (?, 'w1:p1', 'claude-code', NULL, 'idle')").run(pylonId);
   db.close();
   const registry = openRegistry(path);
   t.after(() => registry.close());
-  assert.deepEqual(registry.sessions(pylonId), [{ pylon: pylonId, herdrPane: "w1:p1", harness: "claude-code", harnessSessionId: null, status: "idle", title: null }]);
-  registry.apply({ record: "session", pylonId, herdrPane: "w1:p1", fact: { herdrPane: "w1:p1", harness: "claude-code", harnessSessionId: "s", status: "idle", title: "review" } });
+  assert.deepEqual(registry.sessions(pylonId), [{ pylon: pylonId, id: "w1:p1", state: "running", herdrPane: "w1:p1", harness: "claude-code", harnessSessionId: null, status: "idle", title: null, message: null }]);
+  registry.apply({ record: "sessions", pylonId, sessions: [{ id: "w1:p1", state: "running", herdrPane: "w1:p1", harness: "claude-code", harnessSessionId: "s", status: "idle", title: "review", message: null }] });
   assert.equal(registry.sessions(pylonId)[0]!.title, "review");
 });
 
@@ -380,6 +415,22 @@ test("a registry from before repository kinds reads every stored repo, booted or
   assert.deepEqual(registry.pylon(deleting), deletion);
 });
 
+test("a registry from before session states keeps its sessions as running in their panes, and holds each state to its fields", async (t) => {
+  const { DatabaseSync } = await import("node:sqlite");
+  const path = tempDb();
+  seeded(path).close();
+  const db = new DatabaseSync(path);
+  db.exec(`${untitledSessions} ALTER TABLE sessions ADD COLUMN title TEXT; PRAGMA user_version = 6`);
+  db.prepare("INSERT INTO sessions VALUES (?, 'w1:p1', 'pi', 's.jsonl', 'working', 'plan')").run(pylonId);
+  db.close();
+  const registry = openRegistry(path);
+  t.after(() => registry.close());
+  assert.deepEqual(registry.sessions(pylonId), [{ pylon: pylonId, id: "w1:p1", state: "running", herdrPane: "w1:p1", harness: "pi", harnessSessionId: "s.jsonl", status: "working", title: "plan", message: null }]);
+  const row = { id: "x", herdrPane: null, harness: "pi", harnessSessionId: null, title: null, status: null } as const;
+  assert.throws(() => registry.apply({ record: "sessions", pylonId, sessions: [{ ...row, state: "failed", message: null } as never] }), /CHECK constraint/);
+  assert.throws(() => registry.apply({ record: "sessions", pylonId, sessions: [{ ...row, state: "running", status: "idle", message: null } as never] }), /CHECK constraint/);
+});
+
 test("a registry from before node-unique preview ports keeps its previews", async (t) => {
   const { DatabaseSync } = await import("node:sqlite");
   const path = tempDb();
@@ -388,7 +439,7 @@ test("a registry from before node-unique preview ports keeps its previews", asyn
   db.exec(`DROP TABLE previews;
     CREATE TABLE previews (pylon TEXT NOT NULL REFERENCES pylons (id), service TEXT NOT NULL, https_port INTEGER NOT NULL, ready INTEGER NOT NULL, PRIMARY KEY (pylon, service)) STRICT;
     ALTER TABLE pylons DROP COLUMN retrying;
-    ALTER TABLE sessions DROP COLUMN title;
+    ${untitledSessions}
     PRAGMA user_version = 2;`);
   db.prepare("INSERT INTO previews VALUES (?, 'web', 10200, 1)").run(pylonId);
   db.close();

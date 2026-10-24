@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { fakeGuest, herdrError, herdrOk, herdrPane, herdrSnapshot, type ExecReply } from "./fake-guest.ts";
 import { recordBeforePause, relaunchAfterWake } from "./session-wake.ts";
-import { sessionsFile, type SessionRecord } from "./sessions.ts";
+import { sessionFacts, sessionsFile, type SessionRecord } from "./sessions.ts";
 
 function logged() {
   const lines: string[] = [];
@@ -40,32 +40,49 @@ test("a wake logs each session's outcome, and one that does not come back fails 
   assert.deepEqual(file.failed.map((f: { record: SessionRecord }) => f.record.title), ["broken"], "the sessions file keeps it for the next wake");
 });
 
-test("a wake whose Herdr server never answers logs it and still succeeds", async () => {
-  const guest = withRecords([shell], (sub) => {
-    if (sub === "workspace list") return herdrError("server_not_running");
-    throw new Error(`unscripted ${sub}`);
-  }, () => ({ exitCode: 127, output: "tini: not found" })); // the detached server start
+test("a wake whose Herdr server does not start still succeeds, and its pylon lists every session as failed for the reason", async () => {
+  const guest = fakeGuest((argv, isHerdr) => {
+    if (isHerdr) return herdrError("server_not_running");
+    if (argv.at(-1) !== sessionsFile) return { exitCode: 127, output: "tini: not found" }; // the detached server start
+    const last = guest.written.findLast((f) => f.path === sessionsFile)?.content;
+    return { exitCode: 0, output: last ?? JSON.stringify({ version: 1, recordedAt: "2027-01-01T00:00:00Z", sessions: [shell], failed: [] }) };
+  });
   const { lines, log } = logged();
-  assert.deepEqual(await relaunchAfterWake(guest, log), []);
-  assert.equal(lines.length, 1);
-  assert.match(lines[0]!, /^sessions: the relaunch failed, and the sessions file keeps every session for the next wake: starting the Herdr server failed with exit 127: tini: not found$/);
-  assert.deepEqual(guest.written, [], "the sessions file is left as it was");
+  const why = "starting the Herdr server failed with exit 127: tini: not found";
+  assert.deepEqual(await relaunchAfterWake(guest, log), [{ record: shell, result: "failed", herdrPane: null, message: why }]);
+  assert.deepEqual(lines, [`sessions: "sh" (shell) did not come back: ${why}`]);
+  const [fact] = await sessionFacts(guest);
+  assert.ok(fact?.state === "failed");
+  assert.deepEqual({ ...fact, id: fact.id.slice(0, 7) }, { id: "failed-", state: "failed", herdrPane: null, harness: "shell", harnessSessionId: null, status: "unknown", title: "sh", message: why });
+  assert.deepEqual(await relaunchAfterWake(guest, log), [{ record: shell, result: "failed", herdrPane: null, message: why }], "the next wake tries it again");
 });
 
-test("a pause logs what it recorded, and one that cannot record still pauses", async () => {
+test("a wake whose sessions file cannot be read logs it and leaves the file as it was", async () => {
+  const guest = fakeGuest((argv, isHerdr) => {
+    assert.ok(!isHerdr, "nothing is relaunched");
+    assert.equal(argv.at(-1), sessionsFile);
+    return { exitCode: 1, output: "cat: Input/output error" };
+  });
+  const { lines, log } = logged();
+  assert.deepEqual(await relaunchAfterWake(guest, log), []);
+  assert.deepEqual(lines, [`sessions: the relaunch failed, and the sessions file keeps every session for the next wake: reading ${sessionsFile} failed with exit 1: cat: Input/output error`]);
+  assert.deepEqual(guest.written, []);
+});
+
+test("a pause logs what it recorded and returns it for the backend to keep, and one that cannot record still pauses", async () => {
   const up = fakeGuest((argv, isHerdr) => {
     if (!isHerdr) return { exitCode: 3, output: "" }; // no sessions file yet
     return herdrOk(herdrSnapshot([{ id: "w1", label: "sh" }], [herdrPane("w1:p1", "w1", null, "unknown")]));
   });
   const recorded = logged();
-  await recordBeforePause(up, recorded.log);
+  assert.deepEqual(await recordBeforePause(up, recorded.log), [{ id: "w1:p1", herdrPane: "w1:p1", harness: "shell", harnessSessionId: null, title: "sh" }]);
   assert.deepEqual(recorded.lines, ["sessions: recorded 1 for the wake"]);
 
   const none = logged();
-  await recordBeforePause(fakeGuest(() => herdrError("server_not_running")), none.log);
+  assert.equal(await recordBeforePause(fakeGuest(() => herdrError("server_not_running")), none.log), null);
   assert.deepEqual(none.lines, ["sessions: no Herdr server runs, so the last record stands"]);
 
   const missing = logged();
-  await recordBeforePause(fakeGuest(() => ({ exitCode: 127, output: "sh: herdr: not found\n" })), missing.log);
+  assert.equal(await recordBeforePause(fakeGuest(() => ({ exitCode: 127, output: "sh: herdr: not found\n" })), missing.log), null);
   assert.deepEqual(missing.lines, ["sessions: recording failed, so the wake relaunches what the last record holds: herdr api snapshot exited 127 without a JSON reply: sh: herdr: not found\n"]);
 });

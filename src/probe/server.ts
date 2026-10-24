@@ -262,7 +262,9 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
     const { pylonId } = p;
     switch (p.vm) {
       case "booting": case "stopping": case "deleting": return { pylonId, phase: p.vm };
-      case "stopped": return { pylonId, phase: "stopped", checkpoint: p.checkpoint };
+      case "stopped":
+        if (p.sessions === undefined) throw new Error(`backend reports ${pylonId} stopped without saying what its pause recorded`);
+        return { pylonId, phase: "stopped", checkpoint: p.checkpoint, sessions: p.sessions };
       case "broken":
         if (p.cause === undefined) throw new Error(`backend reports ${pylonId} broken with no cause`);
         return { pylonId, phase: "broken", detail: p.detail ?? "the backend gave no detail", cause: p.cause };
