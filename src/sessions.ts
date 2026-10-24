@@ -205,13 +205,14 @@ export async function sessionFacts(guest: Guest, timeoutMs = callTimeoutMs): Pro
   const [panes, file] = await Promise.all([livePanes(guest, timeoutMs).catch(noServer([])), readSessionsFile(guest, timeoutMs)]);
   const failed = standing(file, panes);
   const standsFor = new Set(failed.flatMap((f) => f.inPane ? [f.record.herdrPane] : []));
+  const statusOf = new Map(panes.map((p) => [p.herdrPane, p.status]));
   return [
     ...panes.filter((p) => !standsFor.has(p.herdrPane)).map(({ herdrPane, harness, harnessSessionId, status, title }): SessionFact => ({
       id: herdrPane, state: "running", herdrPane, harness, harnessSessionId, status, title,
     })),
     ...failed.map((f): SessionFact => ({
-      id: idOf(f), state: "failed", herdrPane: f.inPane ? f.record.herdrPane : null,
-      harness: f.record.harness, harnessSessionId: f.record.harnessSessionId, title: f.record.title, message: f.message,
+      id: idOf(f), state: "failed", herdrPane: f.inPane ? f.record.herdrPane : null, harness: f.record.harness, harnessSessionId: f.record.harnessSessionId,
+      status: f.inPane ? statusOf.get(f.record.herdrPane)! : "unknown", title: f.record.title, message: f.message,
     })),
   ];
 }

@@ -184,7 +184,9 @@ export type HerdrStatus = "working" | "idle" | "blocked" | "done" | "unknown";
  * A session in a running pylon. `id` names it: its Herdr pane, or `failed-` and a hash of its record for a session
  * the last wake left in no pane (sessions.ts). `failed` is one the last wake did not bring back, which the next wake
  * tries again: `message` says why, and `herdrPane` is the pane it left behind, such as a shell its agent would not
- * start in, or null.
+ * start in, or null. `status` is Herdr's for the pane, unknown with none: a control plane older than session states
+ * stores one for every session. It cannot store a session in no pane, so the control plane is upgraded before the
+ * probes (deploy/README.md).
  */
 export type SessionFact =
   | {
@@ -192,7 +194,7 @@ export type SessionFact =
     /** The session's title, its Herdr workspace's label. A probe from before titles were reported sends none. */
     title?: string;
   }
-  | { id: string; state: "failed"; herdrPane: string | null; harness: SessionHarness; harnessSessionId: string | null; title: string; message: string };
+  | { id: string; state: "failed"; herdrPane: string | null; harness: SessionHarness; harnessSessionId: string | null; status: HerdrStatus; title: string; message: string };
 /** A session a stopped pylon's wake brings back, under the `id` it had while the pylon ran. */
 export interface PausedSession { id: string; herdrPane: string | null; harness: SessionHarness; harnessSessionId: string | null; title: string }
 export interface GitFacts { head: string; branch: string | null; dirty: boolean; branches: readonly { name: string; head: string; pushedAs: string | null }[] }

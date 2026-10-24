@@ -420,8 +420,8 @@ test("a session whose relaunch failed is recorded until a relaunch brings it bac
     { ...records[0], id, herdrPane: null },
   ]);
   assert.deepEqual((await sessionFacts(guest)).at(-1), {
-    id, state: "failed", herdrPane: null, harness: "claude-code", harnessSessionId: "aaaa", title: "review", message: "herdr agent start: the agent did not start. The pane showed:\nuser@pylon:~$",
-  }, "a running pylon reports it, under the ID its pause records it by");
+    id, state: "failed", herdrPane: null, harness: "claude-code", harnessSessionId: "aaaa", status: "unknown", title: "review", message: "herdr agent start: the agent did not start. The pane showed:\nuser@pylon:~$",
+  }, "a running pylon reports it, under the ID its pause records it by, with the status a control plane older than session states stores");
   assert.equal((await recordSessions(guest))![1]!.id, id, "the ID holds from one record to the next");
   refusing = false;
   assert.deepEqual(placed(await relaunchSessions(guest)), [["sh", "present", "w21:p1"], ["review", "relaunched", "w22:p1"]]);
@@ -435,7 +435,7 @@ test("a failure left in its restored pane stands for that pane until the pane is
   assert.deepEqual(placed(await relaunchSessions(guest)), [["review", "failed", "w1:p1"]]);
   // Recorded and reported as the Claude it should be, not as the shell it is.
   assert.deepEqual(await recordSessions(guest), [{ ...records[0], id: "w1:p1" }]);
-  assert.deepEqual((await sessionFacts(guest)).map((f) => [f.id, f.state, f.herdrPane, f.harness]), [["w1:p1", "failed", "w1:p1", "claude-code"]]);
+  assert.deepEqual((await sessionFacts(guest)).map((f) => [f.id, f.state, f.herdrPane, f.harness, f.status]), [["w1:p1", "failed", "w1:p1", "claude-code", "unknown"]], "with its pane's status");
   assert.equal(await closeSession(guest, "w1:p1"), true);
   assert.deepEqual(await recordSessions(guest), []);
   assert.deepEqual(await sessionFacts(guest), []);
