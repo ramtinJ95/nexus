@@ -43,9 +43,14 @@ function open(endpoint: Endpoint): Promise<Socket> {
   return endpoint.socks === null ? direct(target) : tunnel(endpoint.socks, target);
 }
 
-/** Sends JSON as the API requires and returns its JSON reply, or null for an empty one. */
-export async function call(endpoint: Endpoint, method: string, path: string, body?: unknown): Promise<unknown> {
-  const { status, text } = await exchange(await open(endpoint), endpoint.url.host, method, path, body);
+/**
+ * Sends JSON as the API requires and returns its JSON reply, or null for an empty one. A request the API answers
+ * only once its work is done, such as a session open that waits for its agent, passes a longer `idleMs`.
+ */
+export async function call(endpoint: Endpoint, method: string, path: string, body?: unknown, idleMs = idleTimeoutMs): Promise<unknown> {
+  const socket = await open(endpoint);
+  socket.setTimeout(idleMs);
+  const { status, text } = await exchange(socket, endpoint.url.host, method, path, body);
   return reply(method, path, status, text);
 }
 
@@ -142,7 +147,7 @@ const lost = (host: string, err: Error) => err instanceof CliError ? err : new C
 const reason = (err: Error) => err instanceof AggregateError ? err.errors.map((e: Error) => e.message).join(", ") : err.message;
 
 function withIdleTimeout(socket: Socket, what: string): Socket {
-  socket.setTimeout(idleTimeoutMs, () => socket.destroy(new CliError("unreachable", `${what} sent nothing for ${idleTimeoutMs / 1000}s`)));
+  socket.setTimeout(idleTimeoutMs, () => socket.destroy(new CliError("unreachable", `${what} sent nothing for ${socket.timeout! / 1000}s`)));
   return socket;
 }
 

@@ -51,7 +51,8 @@ attach runs ssh to the node through the same proxy, or NEXUS_ATTACH, or the conf
 `;
 
 type Values = Record<string, string | boolean | string[] | undefined>;
-type Api = (method: string, path: string, body?: unknown) => Promise<unknown>;
+/** `idleMs` is how long the reply may take, 30 s by default. */
+type Api = (method: string, path: string, body?: unknown, idleMs?: number) => Promise<unknown>;
 /** Follows one of the API's event streams until it ends or `signal` aborts it. */
 type Follow = (path: string, onEvent: (data: unknown) => void, signal: AbortSignal) => Promise<void>;
 /** What a command prints: its JSON for --json, its text otherwise. */
@@ -164,6 +165,8 @@ function portArg(given: string): number {
 }
 
 const waitMs = 120_000;
+/** Longer than the probe takes to answer a command, at most 90 s. */
+const sessionOpenMs = 120_000;
 const waitPollMs = 1_000;
 
 /** Polls the thread until its node reports the port listening and its preview published and warmed. */
@@ -505,7 +508,8 @@ const commands: Readonly<Record<string, Command>> = {
     options: { harness: { type: "string" }, title: { type: "string" } },
     async run(api, [id], v) {
       const body = Object.fromEntries((["harness", "title"] as const).flatMap((key) => v[key] === undefined ? [] : [[key, v[key]]]));
-      const opened = await whenRunning(api, id!, () => api("POST", `${thread(id!)}/sessions`, body), "no session was opened") as OpenedSession;
+      // The API answers once the agent is ready or waits for its human, which can take a minute.
+      const opened = await whenRunning(api, id!, () => api("POST", `${thread(id!)}/sessions`, body, sessionOpenMs), "no session was opened") as OpenedSession;
       return { json: opened, text: `Opened ${opened.harness} session ${JSON.stringify(opened.title)} in pane ${opened.herdrPane} of ${id}. \`nexus attach ${id}\` attaches to it.` };
     },
   },
@@ -671,7 +675,7 @@ async function run(argv: readonly string[]): Promise<void> {
     throw new CliError("invalid", `${name} takes ${min === max ? min : max === Infinity ? `at least ${min}` : `${min} to ${max}`} argument${max === 1 ? "" : "s"}, got ${positionals.length}`);
   }
   const { endpoint: target, attach } = await settings(values);
-  const result = await command.run((method, path, body) => call(target, method, path, body), positionals, values,
+  const result = await command.run((method, path, body, idleMs) => call(target, method, path, body, idleMs), positionals, values,
     (path, onEvent, signal) => follow(target, path, onEvent, signal), { socks: target.socks, attach });
   if (result !== undefined) process.stdout.write(`${values.json === true ? JSON.stringify(result.json, null, 2) : result.text}\n`);
 }
