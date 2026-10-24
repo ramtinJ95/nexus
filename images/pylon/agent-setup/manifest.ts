@@ -31,7 +31,7 @@ export interface AgentSetup {
   };
   pi: {
     packages: readonly PiPackage[];
-    /** Copied into ~/.pi/agent/extensions, which pi auto-loads: a .ts or .js file or a directory with an index file. */
+    /** Copied into ~/.pi/agent/extensions, which pi auto-loads: a .ts or .js file, or a directory with a package.json pi.extensions file or an index file. */
     extensions: readonly DotfilesPath[];
   };
   /** Each skill directory once. Copied to ~/.claude/skills/<name> for claude and ~/.agents/skills/<name> for pi. */
