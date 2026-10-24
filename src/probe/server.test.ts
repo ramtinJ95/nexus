@@ -684,6 +684,41 @@ test("a link-port command links the port in the guest, answers its service, and 
   assert.deepEqual(linked, [3000], "a refused port reaches no guest");
 });
 
+test("opening or closing a session publishes a snapshot that lists the change", async (t) => {
+  let panes: ReturnType<typeof herdrPane>[] = [];
+  const guest = fakeGuest((argv, herdr) => {
+    if (!herdr) return { exitCode: 0, output: "" };
+    const sub = argv.slice(0, 2).join(" ");
+    if (sub === "api snapshot") return herdrOk(herdrSnapshot([{ id: "w1", label: "review" }], panes));
+    if (sub === "workspace list") return herdrOk({ type: "workspace_list", workspaces: [] });
+    if (sub === "workspace create") {
+      panes = [herdrPane("w1:p1", "w1", "claude", "blocked")];
+      return herdrOk({ type: "workspace_created", workspace: { workspace_id: "w1" }, tab: { tab_id: "w1:t1" }, root_pane: { pane_id: "w1:p1" } });
+    }
+    if (sub === "agent start") return herdrError("agent_not_ready", "waiting at login");
+    if (sub === "pane close") {
+      panes = [];
+      return herdrOk({ type: "ok" });
+    }
+    throw new Error(`unscripted ${sub}`);
+  });
+  const { client } = await setup(t, {}, guest);
+  await running(client);
+  const abort = new AbortController();
+  t.after(() => abort.abort());
+  const events = client.observe(abort.signal)[Symbol.asyncIterator]();
+  assert.equal((await events.next()).value?.type, "snapshot");
+  const sessions = async () => {
+    const e = (await events.next()).value;
+    const p = e?.type === "snapshot" ? e.observation.pylons[0] : assert.fail(`a snapshot, not ${e?.type}`);
+    return p?.phase === "running" ? p.sessions?.map((f: { title?: string }) => f.title) : assert.fail("the pylon runs");
+  };
+  await client.command(pylonId, { kind: "open-session", harness: "claude-code", title: "review" });
+  assert.deepEqual(await sessions(), ["review"], "the control plane sees the new session without waiting a minute");
+  await client.command(pylonId, { kind: "close-session", herdrPane: "w1:p1" });
+  assert.deepEqual(await sessions(), []);
+});
+
 test("an unlink-port command waits for a read in flight, which is published before it answers, and the next read leaves the port out", async (t) => {
   let ports = [3000];
   let linked = [3000];

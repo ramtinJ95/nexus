@@ -44,6 +44,8 @@ async function setup(t: import("node:test").TestContext, options: { dotfiles?: t
   let answer = async (command: PylonCommand): Promise<CommandResult> => {
     if (command.kind === "link-port") return { kind: "link-port", service: `port-${command.port}` };
     if (command.kind === "unlink-port") return { kind: "unlink-port", refused: null };
+    if (command.kind === "open-session") return { kind: "open-session", herdrPane: "w1:p1" };
+    if (command.kind === "close-session") return { kind: "close-session" };
     throw new Error(`unexpected ${command.kind} command`);
   };
   const api = await startApi({
@@ -356,6 +358,52 @@ test("unpublishing a port of a pylon that is not running, or of an archived or d
   assert.equal((await s.call("DELETE", `/v1/threads/${s.thread.id}/previews/3000`, {})).status, 409);
   assert.equal((await s.call("DELETE", `/v1/threads/${s.thread.id}`)).status, 200);
   assert.equal((await s.call("DELETE", `/v1/threads/${s.thread.id}/previews/3000`, {})).status, 409);
+  assert.deepEqual(s.commands, [], "an archived or deleted thread's probe is never asked");
+});
+
+test("opening a session goes through the node's probe, defaults to Claude Code titled by its harness, and counts as human activity", async (t) => {
+  const s = await withThread(t);
+  s.registry.recordActivity(s.thread.id, { human: 1 });
+  s.woken.length = 0;
+  assert.deepEqual(await s.call("POST", `/v1/threads/${s.thread.id}/sessions`, {}), { status: 201, body: { herdrPane: "w1:p1", harness: "claude-code", title: "claude-code" } });
+  assert.deepEqual(await s.call("POST", `/v1/threads/${s.thread.id}/sessions`, { harness: "pi", title: " plan " }), { status: 201, body: { herdrPane: "w1:p1", harness: "pi", title: "plan" } });
+  assert.deepEqual(s.commands, [
+    [s.thread.pylonId, { kind: "open-session", harness: "claude-code", title: "claude-code" }],
+    [s.thread.pylonId, { kind: "open-session", harness: "pi", title: "plan" }],
+  ]);
+  assert.ok(s.registry.thread(s.thread.id)!.lastHumanActivityAt > 1);
+  assert.ok(s.woken.includes(node));
+
+  s.commands.length = 0;
+  for (const body of [{ harness: "codex" }, { title: "" }, { title: "x".repeat(81) }, { resume: "bd2c2d6b" }]) {
+    assert.equal((await s.call("POST", `/v1/threads/${s.thread.id}/sessions`, body)).status, 400, JSON.stringify(body));
+  }
+  assert.deepEqual(s.commands, [], "a bad request never reaches the probe");
+});
+
+test("closing a session goes through the node's probe, which treats a pane already gone as closed", async (t) => {
+  const s = await withThread(t);
+  assert.deepEqual(await s.call("DELETE", `/v1/threads/${s.thread.id}/sessions/${encodeURIComponent("w1:p1")}`, {}), { status: 204, body: null });
+  assert.deepEqual(s.commands, [[s.thread.pylonId, { kind: "close-session", herdrPane: "w1:p1" }]]);
+});
+
+test("a session of a pylon that is not running, or of an archived or deleted thread, is refused with 409", async (t) => {
+  const s = await withThread(t);
+  s.probeAnswers(async () => { throw Object.assign(new Error("rj-firebat: pylon-x is stopped, not running"), { code: "not-running" }); });
+  s.woken.length = 0;
+  const paused = await s.call("POST", `/v1/threads/${s.thread.id}/sessions`, { harness: "claude-code" });
+  assert.equal(paused.status, 409);
+  assert.match(paused.body.error, /is not running yet. This request wakes it/);
+  assert.ok(s.woken.includes(node), "the request wakes the pylon");
+  assert.equal((await s.call("DELETE", `/v1/threads/${s.thread.id}/sessions/w1:p1`, {})).status, 409);
+  assert.equal((await s.call("POST", `/v1/threads/${s.thread.id}/archive`)).status, 200);
+  s.commands.length = 0;
+  const archived = await s.call("POST", `/v1/threads/${s.thread.id}/sessions`, {});
+  assert.equal(archived.status, 409);
+  assert.match(archived.body.error, /is archived, so its pylon stays paused/);
+  assert.equal((await s.call("DELETE", `/v1/threads/${s.thread.id}/sessions/w1:p1`, {})).status, 409);
+  assert.equal((await s.call("DELETE", `/v1/threads/${s.thread.id}`)).status, 200);
+  assert.equal((await s.call("POST", `/v1/threads/${s.thread.id}/sessions`, {})).status, 409);
   assert.deepEqual(s.commands, [], "an archived or deleted thread's probe is never asked");
 });
 
