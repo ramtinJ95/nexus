@@ -221,7 +221,10 @@ function assertIncludes(text: string, ...parts: string[]) {
   for (const part of parts) if (!text.includes(part)) throw new Error(`the tool result lacks ${part}: ${text}`);
 }
 
-/** A service the agent declares in .nexus/services.yaml. It answers with a token and the PUBLIC_URL it was given. */
+/**
+ * Services the agent declares in .nexus/services.yaml, which Nexus starts with no command: web, which answers with a
+ * token and the PUBLIC_URL it was given, and worker, which has no preview.
+ */
 function declarePreview(token: string): string {
   return `mkdir -p .nexus && cat > .nexus/services.yaml <<'YAML'
 services:
@@ -229,6 +232,9 @@ services:
     command: python3 -u .nexus/preview-check.py
     preview: true
     health: /
+  worker:
+    command: python3 -u -m http.server ${workerPort} --directory .nexus
+    port: ${workerPort}
 YAML
 cat > .nexus/preview-check.py <<'PY'
 import http.server, json, os
@@ -237,9 +243,9 @@ class H(http.server.BaseHTTPRequestHandler):
         b = json.dumps({"token": "${token}", "publicUrl": os.environ.get("PUBLIC_URL")}).encode()
         self.send_response(200); self.send_header("content-type", "application/json"); self.send_header("content-length", str(len(b))); self.end_headers(); self.wfile.write(b)
 http.server.ThreadingHTTPServer(("", int(os.environ["PORT"])), H).serve_forever()
-PY
-nexus services ensure --json`;
+PY`;
 }
+const workerPort = 3458;
 
 /** Waits for the thread's preview of web to be ready, then fetches its URL from this node until the service answers. */
 async function openPreview(token: string): Promise<{ url: string; httpsPort: number }> {
@@ -251,7 +257,7 @@ async function openPreview(token: string): Promise<{ url: string; httpsPort: num
       const res = await fetch(url, { signal: AbortSignal.timeout(15_000) });
       const text = await res.text();
       last = `HTTP ${res.status}: ${text.slice(0, 200)}`;
-      // Until the port is assigned the service runs without PUBLIC_URL, and the assignment restarts it.
+      // A service started before its port was assigned runs without PUBLIC_URL, and the assignment restarts it.
       const json = res.status === 200 && text.includes(token) ? JSON.parse(text) as { publicUrl: unknown } : undefined;
       return json?.publicUrl === null ? undefined : json;
     } catch (err) {
@@ -534,6 +540,9 @@ try {
   await runTool("msg:node-check-preview", declarePreview(token));
   const preview = await openPreview(token);
   pass(`the declared service is served at ${preview.url}, fetched from this node`);
+  const worker = await until(`the declared worker listens on ${workerPort}`, 2 * 60_000, async () => (await detail()).ports?.find((l) => l.port === workerPort && l.service === "worker"));
+  assert.deepEqual(worker, { port: workerPort, service: "worker", preview: null }, "a declared service without a preview runs with no preview");
+  pass(`the declared service without a preview started with no command, listening on ${workerPort}`);
   const info = await runTool("msg:node-check-info", `nexus info --json | python3 -c 'import json, sys; print("info", json.load(sys.stdin)["previews"])'; grep -F web: /home/user/.nexus/PYLON.md`);
   assertIncludes(info, `info [{'service': 'web', 'url': '${preview.url}'}]`, `- web: ${preview.url}`);
   pass("pylon.json and PYLON.md name the preview URL");

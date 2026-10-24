@@ -159,8 +159,7 @@ class H(http.server.BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200); self.send_header("content-length", "0"); self.end_headers()
 http.server.ThreadingHTTPServer(("", int(os.environ["PORT"])), H).serve_forever()
-PY
-nexus services ensure --json`;
+PY`;
 
 async function until<T>(what: string, timeoutMs: number, check: () => Promise<T | undefined>): Promise<T> {
   const deadline = Date.now() + timeoutMs;
