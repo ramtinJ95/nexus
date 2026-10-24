@@ -11,6 +11,7 @@ import {
   parseDebugfsModes, parseModeListing, pylonRecipeDir, smokeChecks, smokeFailure,
 } from "./image-build.ts";
 import type { ImageRecipe } from "./images.ts";
+import { agentSetupManifest, installedLayout, parseAgentSetup } from "../images/pylon/agent-setup/manifest.ts";
 import type { NodeName } from "./protocol.ts";
 
 const pins: ImageRecipe["pins"] = {
@@ -28,6 +29,7 @@ const pins: ImageRecipe["pins"] = {
   gh: "2.103.2",
   ghSha256: "d".repeat(64),
 };
+const manifest = { path: agentSetupManifest, content: await readFile(join(pylonRecipeDir, agentSetupManifest), "utf8") };
 
 async function recipeDir(t: { after(fn: () => Promise<void>): void }, files: Record<string, string>): Promise<string> {
   const dir = await mkdtemp(join(tmpdir(), "nexus-recipe-"));
@@ -75,7 +77,7 @@ test("loading refuses pins with a missing or unknown field, a bad digest, and a 
   await assert.rejects(loadImageRecipe(dir), /Containerfile .* is not a regular file/);
 });
 
-test("buildImage refuses a recipe from a job whose paths, pins or nexus script are unsafe, before it writes anything", async (t) => {
+test("buildImage refuses a recipe from a job whose paths, pins, nexus script or agent setup manifest are unsafe, before it writes anything", async (t) => {
   const root = await mkdtemp(join(tmpdir(), "nexus-image-out-"));
   t.after(() => rm(root, { recursive: true }));
   const outDir = join(root, "img-000000000000");
@@ -85,8 +87,10 @@ test("buildImage refuses a recipe from a job whose paths, pins or nexus script a
     { files: [{ path: "/etc/passwd", content: "" }], pins },
     { files: [{ path: "a//b", content: "" }], pins },
     { files: [], pins: { ...pins, nodeSha256: "not-a-digest" } },
-    { files: [], pins: { ...pins, gh: "latest" } },
-    { files: [{ path: "nexus", content: '#!/usr/bin/env node\nconst version = "dev";\n' }], pins },
+    { files: [manifest], pins: { ...pins, gh: "latest" } },
+    { files: [manifest, { path: "nexus", content: '#!/usr/bin/env node\nconst version = "dev";\n' }], pins },
+    { files: [{ path: "nexus", content: 'const version = "0.7.3";\n' }], pins },
+    { files: [{ ...manifest, content: manifest.content.replace(/"commit":"([0-9a-f]{7})[0-9a-f]+"/, '"commit":"$1"') }], pins },
   ];
   for (const recipe of bad) {
     await assert.rejects(buildImage(recipe, node, outDir, AbortSignal.timeout(5_000)), (err) => err instanceof JobFailure && err.code === "invalid");
@@ -108,7 +112,7 @@ test("the smoke boot expects each tool's exact pinned version, and whatever the 
 });
 
 test("a version check fails on any other version, naming the expected and actual output", () => {
-  const checks = smokeChecks({ files: [{ path: "nexus", content: 'const version = "0.7.3";\n' }], pins });
+  const checks = smokeChecks({ files: [{ path: "nexus", content: 'const version = "0.7.3";\n' }, manifest], pins });
   const check = (name: string) => checks.find((c) => c.name === name)!;
   assert.equal(smokeFailure(check("claude version"), 0, "2.1.308 (Claude Code)\n"), undefined);
   assert.equal(smokeFailure(check("claude version"), 0, "2.1.309 (Claude Code)\n"), 'expected "2.1.308 (Claude Code)\\n", got "2.1.309 (Claude Code)\\n"');
@@ -116,6 +120,32 @@ test("a version check fails on any other version, naming the expected and actual
   assert.equal(smokeFailure(check("nexus version"), 0, "nexus 0.1.0\n"), 'expected "nexus 0.7.3\\n", got "nexus 0.1.0\\n"');
   assert.equal(smokeFailure(check("node version"), 0, "v24.22.10\n"), 'expected "v24.22.1\\n", got "v24.22.10\\n"');
   assert.equal(smokeFailure(check("pi version"), 127, "-bash: pi: command not found\n"), "exited 127");
+});
+
+test("the smoke boot checks the agent setup against the layout derived from the recipe's own manifest", async () => {
+  const recipe = await loadImageRecipe();
+  const check = smokeChecks(recipe).find((c) => c.name === "agent setup")!;
+  const expected = installedLayout(parseAgentSetup(manifest.content));
+  assert.ok(check.argv.at(-1)!.includes(` check '${JSON.stringify(expected)}'`), "the installer's check gets the derived layout");
+  assert.equal(check.expect, "ok\n");
+  assert.ok(expected.plugins.length > 0 && expected.claudeSkills.length > 0 && expected.piPackages.length > 0, "the checked-in setup ships something");
+
+  const changed = { ...manifest, content: manifest.content.replace('"version":"0.2.11"', '"version":"0.2.12"') };
+  const other = smokeChecks({ ...recipe, files: [...recipe.files.filter((f) => f.path !== agentSetupManifest), changed] }).find((c) => c.name === "agent setup")!;
+  assert.ok(other.argv.at(-1)!.includes("notes-compaction@claude-mods 0.2.12 enabled") && !other.argv.at(-1)!.includes("0.2.11"));
+});
+
+test("a recipe without an agent setup manifest has no smoke checks", () => {
+  assert.throws(() => smokeChecks({ files: [{ path: "nexus", content: 'const version = "0.7.3";\n' }], pins }), (err) => err instanceof JobFailure && err.code === "invalid");
+});
+
+test("the smoke boot expects the offline switches in every exec, and the PYLON.md import and link", async () => {
+  const checks = smokeChecks({ ...(await loadImageRecipe()), pins });
+  const check = (name: string) => checks.find((c) => c.name === name)!;
+  assert.equal(smokeFailure(check("exec environment"), 0, "v24.22.1 /run/gondolin/ca-certificates.crt 1 1\n"), undefined);
+  assert.notEqual(smokeFailure(check("exec environment"), 0, "v24.22.1 /run/gondolin/ca-certificates.crt undefined 1\n"), undefined);
+  assert.equal(smokeFailure(check("pylon guide"), 0, "@~/.nexus/PYLON.md\n/home/user/.nexus/PYLON.md\n"), undefined);
+  assert.notEqual(smokeFailure(check("pylon guide"), 0, "@~/.nexus/PYLON.md\n"), undefined);
 });
 
 test("the smoke boot expects gh at its pin, answering git's credential request with GH_TOKEN", async () => {

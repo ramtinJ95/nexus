@@ -44,9 +44,13 @@ export type PortableArtifactId = Exclude<ArtifactId, CheckpointId>;
  *      `gondolin build` itself installs the `sandboxssh` helper that pi-sandbox's shell needs.
  *   6. gh from its checksum-verified release tarball, set in /etc/gitconfig as git's credential helper for
  *      https://github.com, so a GH_TOKEN grant pushes over HTTPS.
+ *   7. The agent setup in agent-setup/manifest.json (images/pylon/agent-setup/manifest.ts), installed as user by
+ *      agent-setup/install.ts, then Herdr's integrations, then ~/.claude/CLAUDE.md importing ~/.nexus/PYLON.md and
+ *      ~/.pi/agent/AGENTS.md linking to it.
  * - gondolin.json: distro alpine for the kernel and initramfs, and env with PATH including /usr/local/bin
- *   (Gondolin's exec PATH lacks it, S1) and NODE_EXTRA_CA_CERTS=/run/gondolin/ca-certificates.crt (the mitm
- *   CA is unreadable to user, S2). Gondolin sources that env before sandboxd starts and from /etc/profile.d,
+ *   (Gondolin's exec PATH lacks it, S1), NODE_EXTRA_CA_CERTS=/run/gondolin/ca-certificates.crt (the mitm
+ *   CA is unreadable to user, S2), and PI_OFFLINE and CLAUDE_CODE_DISABLE_OFFICIAL_MARKETPLACE_AUTOINSTALL,
+ *   since pi's update checks and Claude Code's official marketplace cannot pass the allowlist. Gondolin sources that env before sandboxd starts and from /etc/profile.d,
  *   so execs and login shells both see it. buildImage adds oci.image = the Docker build, and postBuild.copy
  *   of the kernel module seed into /lib/modules (the S1 workaround), and init.rootfsInitExtra.
  * - rootfs-init-extra.sh: run as root by Gondolin's /init before sandboxd. It sets the hostname pylon and
