@@ -9,7 +9,7 @@ import { randomUUID } from "node:crypto";
 import { once } from "node:events";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { createServer as createHttpServer } from "node:http";
-import { connect, createServer, type Server } from "node:net";
+import { connect, createServer, type Server, type Socket } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
@@ -24,7 +24,7 @@ import { processStream } from "../process-stream.ts";
 import { repoInitCommand } from "../pylon-vm-backend.ts";
 import type { ByteStream, CommandResult, NodeName, PylonCommand, PylonId, ServiceFact, StreamRequest, TailnetNodeId } from "../protocol.ts";
 import { checkoutDir } from "../sessions.ts";
-import { CliError, follow } from "./transport.ts";
+import { call, CliError, follow } from "./transport.ts";
 
 const cli = fileURLToPath(new URL("./nexus.ts", import.meta.url));
 const node = "rj-firebat" as NodeName;
@@ -849,6 +849,23 @@ test("a stream refused with a reply cut off mid-body fails as unreachable rather
   const port = await listening(t, server);
   await assert.rejects(follow({ url: new URL(`http://127.0.0.1:${port}`), socks: null }, "/v1/threads/th-x/events", () => {}, new AbortController().signal),
     (err) => err instanceof CliError && err.kind === "unreachable");
+});
+
+test("an API that stays silent behind a working proxy is named as the culprit, not the proxy", { timeout: 5_000 }, async (t) => {
+  const held = new Set<Socket>();
+  const silent = createServer((socket) => {
+    socket.on("error", () => {});
+    held.add(socket);
+  });
+  const port = await listening(t, silent);
+  const proxy = await socksProxy(t);
+  try {
+    await assert.rejects(call({ url: new URL(`http://${apiName}:${port}`), socks: { host: "127.0.0.1", port: proxy.port } }, "DELETE", "/v1/threads/th-x/previews/8003", undefined, 200),
+      (err) => err instanceof CliError && err.kind === "unreachable" && err.message === `the control plane at ${apiName}:${port} sent nothing for 0.2s`);
+  } finally {
+    // The proxy keeps its leg to the silent server open after the CLI gives up, which would hold the server's close.
+    for (const socket of held) socket.destroy();
+  }
 });
 
 test("a config file that cannot be read fails as invalid, in JSON under --json", async (t) => {
