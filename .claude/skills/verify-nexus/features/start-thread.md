@@ -6,15 +6,18 @@ Starting a thread creates its conversation and a fresh pylon on the project's no
 
 - `start-cli` starts a thread from the terminal and prints the new `Thread`.
 - `start-cli-message` starts a thread and sends its first message in one command, taking the title from that message.
-- `start-ui` starts a thread from the dashboard's start dialog and lands on the thread page.
+- `start-options` starts a thread on a named node and branch.
+- `start-ui` starts a thread from the dashboard's start dialog, whose hint names the node, the image and the branch, and lands on the thread page.
 - `start-boot` boots the thread's pylon to `running`, with `pylon.json` naming the thread.
-- `start-refused` rejects an unknown project or a start with neither a title nor a message.
+- `start-refused` rejects an unknown project, an unknown node, a start with no project, and a start with neither a title nor a message.
 
 ## How to get to it (user POV)
 
-- Run `nexus start --project <P> --title <T>` in a terminal.
+- Run `nexus start --project <P> --title <T>` in a terminal, with `--node`, `--branch` and `--commit` to override the project's defaults. A scratch project refuses `--commit` (see [Add a project](./add-project.md)).
 - Run `nexus start --project <P> --message <M>`, which titles the thread after the first non-empty line of `M`, trimmed and cut to 80 characters plus `...`.
-- Choose `New thread` in the dashboard's sidebar or on a project's overview row, press `n` on any page, or open `/threads/new`, or `/threads/new?project=<P>` to choose the project.
+- Choose `New thread` in the dashboard's sidebar, the `+` that shows when the pointer is over a project in the sidebar, or `New thread` in a project's section header on the overview. Or press `n` on any page, or open `/threads/new`, or `/threads/new?project=<P>` to choose the project.
+- The dialog asks for the title, the project, the node and the branch. Its hint reads `Boots a pylon on <node> from image <image> and checks out <branch>.`
+- A thread whose pylon failed offers `Start again` on its page, which opens the dialog with its title filled in.
 
 ## Driving it with verify-nexus
 
@@ -27,21 +30,24 @@ Preconditions:
 - **Overlay in the pylon.** Check what the boot wrote. Run `$V pylon start-overlay $T1 -- cat /home/user/.nexus/pylon.json`. The JSON's `threadId` is `$T1` and its `project` is `spoon`.
 - **Start with a message.** Run `$V cli start-cli-message -- start --project spoon --message "bash: echo started-with-message" --json`. Exit 0, and the `title` is `bash: echo started-with-message`. Keep its `id` as `T2`. After the pylon runs, `$V cli start-msg-conversation -- conversation $T2 --json` holds a `pi.tool-result` entry whose text contains `started-with-message`.
 - **Long first line.** Run `$V cli start-long -- start --project spoon --message "$(printf '\n\n%s\nsecond line' "$(printf 'x%.0s' $(seq 100))")" --json`. The `title` is the 100-character line cut to its first 80 characters plus `...`.
+- **Node and branch.** `$V cli start-options -- start --project spoon --title "start: branch" --node verify-node --branch main --json` exits 0 with `project` `spoon`.
 - **Dashboard start.** Open the dialog and submit it:
-  - Each entry point opens the dialog, checked with `$V browser <step> -- eval "() => document.getElementById('start-dialog').open"` and closed again with `press Escape`: `click "aside .side-head [data-start]"` in the sidebar, `click "[data-start=spoon]"` on the overview, which also checks `spoon`, and `press n` with the focus outside any field. `press N` leaves the dialog closed.
-  - Run `$V browser start-ui-open -- goto "http://127.0.0.1:7470/threads/new?project=spoon"`. The `Start a thread` dialog is open, with `spoon` checked under `Project`.
+  - Each entry point opens the dialog, checked with `$V browser <step> -- eval "() => document.getElementById('start-dialog').open"` and closed again with `press Escape`: `click "aside .side-head [data-start]"` in the sidebar, `click "#overview [data-start=spoon]"` on the overview, which also checks `spoon`, `hover "#group-spoon > summary"` then `click "#group-spoon .group-new"` in the sidebar, which also checks `spoon`, and `press n` with the focus outside any field. `press N` leaves the dialog closed.
+  - Run `$V browser start-ui-open -- goto "http://127.0.0.1:7470/threads/new?project=spoon"`. The `Start a thread` dialog is open, with `spoon` checked under `Project`, and the page's title is `Start a thread · Nexus`. `eval "() => document.getElementById('start-hint').textContent"` prints `Boots a pylon on verify-node from image img-0000000000aa and checks out main.`
   - Run `$V browser start-ui-title -- fill "#start-title" "start: ui"`.
   - Run `$V browser start-ui-submit -- click "#start button[type=submit]"`. The page moves to `/threads/th-…`, and its header shows `start: ui`.
   - Capture the page with `$V browser start-ui-snap -- snapshot --filename start-ui.md` and `$V browser start-ui-shot -- screenshot --filename start-ui.png`.
   - Confirm the thread from the CLI: `$V cli start-ui-list -- threads --project spoon --json` has a row titled `start: ui`.
-- **Refusals.** Run `$V cli start-unknown -- start --project nope --title x --json`, which exits 4 with stderr `{"error":"no project nope","kind":"not-found","status":404}`. Run `$V cli start-untitled -- start --project spoon --json`, which exits 64 before any request with stderr `{"error":"start needs --title or --message","kind":"invalid","status":null}`.
-- **Proof.** The recorded `start-cli`, the `start-show` that reads `running`, `start-overlay`, `start-cli-message` with its conversation, `start-long`, the entry-point checks, `start-ui.md`, `start-ui.png`, `start-ui-list`, and the two refusals.
+- **Refusals.** Run `$V cli start-unknown -- start --project nope --title x --json`, which exits 4 with stderr `{"error":"no project nope","kind":"not-found","status":404}`. Run `$V cli start-untitled -- start --project spoon --json`, which exits 64 before any request with stderr `{"error":"start needs --title or --message","kind":"invalid","status":null}`. `$V cli start-bad-node -- start --project spoon --title x --node nope --json` exits 64 with `{"error":"no node nope","kind":"invalid","status":400}`, and `$V cli start-no-project -- start --title x --json` exits 64 before any request with `{"error":"start needs --project","kind":"invalid","status":null}`.
+- **Proof.** The recorded `start-cli`, the `start-show` that reads `running`, `start-overlay`, `start-cli-message` with its conversation, `start-long`, `start-options`, the entry-point checks, the hint, `start-ui.md`, `start-ui.png`, `start-ui-list`, and the four refusals.
 
 ## Gotchas
 
 - A thread's `id` exists before its pylon does. `actualState` reads `absent` or `spawning` for the first few seconds, so poll rather than asserting the first `show`.
 - The scripted model treats a message that does not start with `bash: ` as plain text, so `start-cli-message` needs the prefix to produce a tool call.
 - The stack's pylons run `sleep infinity` under Docker and never clone. The Spoon-Knife URL only labels the project. A fresh pylon's checkout is the image's one-commit repo, not Spoon-Knife.
+- A bare `[data-start=spoon]` matches both the overview's `New thread` and the sidebar's hidden `+`, so Playwright refuses it as ambiguous. Scope it to `#overview`.
+- `Start again` needs a failed pylon, which this recipe never makes, so it stays unverified.
 - The shortcut is the bare lowercase `n`. `N`, a modifier, a focused text field or an open dialog leaves it doing nothing.
 - `/threads/new` without `?project=` checks the first project by ID. After [Add a project](./add-project.md) that is `quill`, not `spoon`.
 - Each started thread holds a container until `$V down` or its delete, so starting many threads in one run costs memory on Docker Desktop.

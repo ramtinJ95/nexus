@@ -83,7 +83,7 @@ const read = `() => {
     startOpen: document.getElementById("start-dialog").open,
     startEmpty: document.querySelector("#start-body [data-new-project]") !== null,
     checked: document.querySelector("#start input[name=project]:checked")?.value ?? null,
-    sidebar: [...document.querySelectorAll("#side-threads .group-h span:first-child")].map((s) => s.textContent),
+    sidebar: [...document.querySelectorAll("#side-threads .group-name > span:first-child")].map((s) => s.textContent),
   });
 }`;
 async function view(): Promise<View> {

@@ -113,12 +113,21 @@ cli() {
   record "$run" "$step" env "NEXUS_URL=$(state "$run" api)" NEXUS_SOCKS=none node "$repo/src/cli/nexus.ts" "$@"
 }
 
+# playwright-cli exits 0 when an action fails, and prints the failure under `### Error`, so that output fails the step.
+playwright_cli() {
+  local out code=0
+  out=$(playwright-cli "$@") || code=$?
+  printf '%s\n' "$out"
+  if [ "$code" -eq 0 ] && grep -q '^### Error' <<< "$out"; then code=1; fi
+  return "$code"
+}
+
 browser() {
   local run; run=$(current_run)
   local step=${1:?usage: verify-nexus browser <step> -- <playwright-cli args>}; shift
   [ "${1:-}" = "--" ] && shift
   # From the evidence directory, so screenshots and snapshots saved by relative --filename land with the rest.
-  (cd "$(evidence_dir "$run")" && record "$run" "$step" playwright-cli "-s=nexus-verify-$run" "$@")
+  (cd "$(evidence_dir "$run")" && record "$run" "$step" playwright_cli "-s=nexus-verify-$run" "$@")
 }
 
 pylon() {

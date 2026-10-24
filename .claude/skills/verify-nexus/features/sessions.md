@@ -6,6 +6,8 @@ A thread's pylon runs Herdr, and each session is a Herdr workspace with a harnes
 
 - `sessions-open` opens a shell session with a title, and prints its pane, harness and title.
 - `sessions-show` lists the open session in `show` with its title.
+- `sessions-ui` lists the session under the thread page's Pylon tab, with the in-pylon attach command and its `Copy` button.
+- `sessions-refused` refuses a harness Nexus does not know.
 - `sessions-wake` keeps the session, with its title, across an archive and an unarchive.
 - `sessions-paused` lists the session as paused while the thread is archived, and refuses to close it without waking the pylon.
 - `sessions-close` closes the session's pane, and closing it again fails, because the pane is not open.
@@ -15,10 +17,10 @@ A thread's pylon runs Herdr, and each session is a Herdr workspace with a harnes
 
 ## How to get to it (user POV)
 
-- Run `nexus session open <thread> [--harness claude-code|pi|shell] [--title T]` and `nexus session close <thread> <pane|id>` in a terminal.
+- Run `nexus session open <thread> [--harness claude-code|pi|shell] [--title T]` and `nexus session close <thread> <pane|id>` in a terminal. The harness defaults to `claude-code`, and the title to the harness's name.
 - Run `nexus show <thread>`, whose `sessions` list each session with its harness, title, pane, and status or state: `paused (resumes on wake)`, `paused (resumes on unarchive)` or `failed: <why>`.
 - Run `nexus attach <thread>`. On the home lab it runs `ssh -t <node> nexus-attach <pylon>`. Here, with no node to ssh to, it runs the command in `NEXUS_ATTACH` with `sh -c`.
-- The dashboard's thread page lists sessions under `Sessions` with their titles, a `paused, resumes on wake` or `paused, resumes on unarchive` state for a paused one and `failed` with why for a failed one, and offers no open, close or attach yet.
+- The thread page's inspector lists sessions under `Sessions` in its `Pylon` tab, each with its harness, title, status and pane, a `paused, resumes on wake` or `paused, resumes on unarchive` state for a paused one, and `failed` with why for a failed one. Below them, `Attach from a shell in the pylon` shows `herdr --session nexus` with a `Copy` button. The page offers no open, close or Mac attach yet.
 
 ## Driving it with verify-nexus
 
@@ -31,6 +33,8 @@ Preconditions:
 - **Open.** Run `$V cli sessions-open -- session open $T --harness shell --title "sessions: sh" --json`. Exit 0, and stdout is `{"herdrPane": "<pane>", "harness": "shell", "title": "sessions: sh"}`. Keep `<pane>` as `P`.
 - **Show.** Poll `$V cli sessions-show -- show $T --json` every 3 s, for up to 30 s, until `.sessions` has one entry. It has `id` and `herdrPane` `P`, `state` `running`, `message` null, `harness` `shell`, `title` `sessions: sh`, `harnessSessionId` null, and `status` `unknown` or `idle`. The node reads sessions again right after an open, so it usually shows on the first poll.
 - **Herdr side effect.** Run `$V pylon sessions-herdr $T -- herdr --session nexus workspace list`. Its JSON reply lists a workspace whose `label` is `sessions: sh`.
+- **Dashboard.** Run `$V browser sessions-ui-open -- goto http://127.0.0.1:7470/threads/$T`, then `$V browser sessions-ui-tab -- click 'label.seg-tab:has(input[value="pylon"])'`. The tab shows the heading `Sessions 1`, a row with `Shell`, `sessions: sh`, its status and `P`, and `Attach from a shell in the pylon` with `herdr --session nexus` and a `Copy` button. Capture `snapshot --filename sessions-ui.md` and `screenshot --filename sessions-ui.png`.
+- **Unknown harness.** `$V cli sessions-bad-harness -- session open $T --harness codex --json` exits 64 with `kind` `invalid` and `status` 400, and its `error` names `claude-code`, `pi` and `shell`.
 - **Attach resolution, environment.** Run `NEXUS_ATTACH='printf "%s %s %s %s\n" "$NEXUS_THREAD" "$NEXUS_PYLON" "$NEXUS_NODE" "$NEXUS_NODE_HOST"' $V cli sessions-attach-env -- attach $T`. Exit 0, and stdout is `<T> pylon-<T> verify-node 127.0.0.1`. This proves that `attach` found the running pylon, its node and the node's `tailnetHost`, and handed them to the attach command. It does not prove ssh, `nexus-attach` or a terminal.
 - **Attach resolution, Herdr.** Run `NEXUS_ATTACH='docker exec $NEXUS_PYLON herdr --session nexus workspace list' $V cli sessions-attach-resolve -- attach $T`. Exit 0, and stdout is Herdr's JSON reply listing the workspace `sessions: sh`. This proves the resolved names reach the pylon's container and its Herdr session, without a pty. The interactive form is `NEXUS_ATTACH='docker exec -it $NEXUS_PYLON herdr --session nexus' nexus attach $T`, which the next step drives.
 - **Attach with a pty.** This step is optional. Herdr refuses a terminal of zero size (`herdr: cannot attach without a usable terminal: terminal reported a zero-sized grid`), so a tool shell's background `script` with stdin from `/dev/null` does not work. Run the attach in a terminal you can type into and that has a size, such as a Herdr or tmux pane, with stdin left alone:
@@ -56,11 +60,11 @@ Preconditions:
   - `$V cli sessions-archived-close -- session close $T "$P" --json` exits 5. Its stderr is `{"error":"session <P> is paused with its pylon and resumes when \`nexus unarchive <T>\` wakes its pylon. Close it once it runs","kind":"conflict","status":409}`, and `show` still reads `paused`.
 - **Survives the wake.** Run `$V cli sessions-unarchive -- unarchive $T --json`, and poll `show` until `.pylon.actualState` is `running` and `.sessions` has an entry titled `sessions: sh` whose `state` is `running`, and no `paused` entry. Its `herdrPane` may differ from `P`. Keep it as `P2`. Run `docker logs pylon-$T 2>&1 | grep 'sessions:' > "$($V evidence)/sessions-wake-log.txt"`. The file holds a line for `"sessions: sh" (shell)`, either `was already running in <pane>` or `relaunched … in <pane>`.
 - **Close.** Run `$V cli sessions-close -- session close $T "$P2" --json`. Exit 0, and stdout is `null`. Poll `show` until `.sessions` is `[]`. Then `$V cli sessions-close-again -- session close $T "$P2" --json` exits 4, and its stderr's `error` starts with `no session is open in pane <P2>`: a pane that is not open is never reported closed, because after a wake it may name another session.
-- **Proof.** The recorded `sessions-open`, the `sessions-show` that lists the title, `sessions-herdr`, `sessions-attach-env`, `sessions-attach-resolve`, `sessions-attached` and `sessions-detached` if the pty step ran, `sessions-archived-open`, `sessions-archived-attach`, `sessions-archived-show` and `sessions-archived-close`, the `show` after `sessions-unarchive` that lists the title, `sessions-wake-log.txt`, `sessions-close`, the `show` with no sessions, and `sessions-close-again`.
+- **Proof.** The recorded `sessions-open`, the `sessions-show` that lists the title, `sessions-herdr`, `sessions-ui.md` with `sessions-ui.png`, `sessions-bad-harness`, `sessions-attach-env`, `sessions-attach-resolve`, `sessions-attached` and `sessions-detached` if the pty step ran, `sessions-archived-open`, `sessions-archived-attach`, `sessions-archived-show` and `sessions-archived-close`, the `show` after `sessions-unarchive` that lists the title, `sessions-wake-log.txt`, `sessions-close`, the `show` with no sessions, and `sessions-close-again`.
 
 ## Gotchas
 
-- The stack's pylon image has neither Claude Code nor pi, so only `--harness shell` opens here. `--harness claude-code`, its `/login` and its resume after a wake are proven only on a real node.
+- The stack's pylon image has neither Claude Code nor pi, so only `--harness shell` opens here. `--harness claude-code`, its `/login` and its resume after a wake are proven only on a real node. Always pass `--harness shell`, because the default is `claude-code`. A Claude Code open exits 1 with `status` 500, `herdr agent start: timed out waiting for agent startup`, and the pane's `/bin/sh: 1: claude: not found`. It can leave a pane behind that `show` lists as harness `shell` titled `claude-code`, so close it with `session close` before asserting on `.sessions`.
 - Neither ssh nor `nexus-attach` runs here. Nothing in this stack proves the default attach path, Tailscale SSH, ts-home's SOCKS proxy or the node's sudo rule.
 - `$V cli` passes the caller's environment through, so set `NEXUS_ATTACH` in front of `$V`, as the steps do. A `NEXUS_ATTACH` left exported changes every later `attach` in the same shell.
 - Docker's pause stops and removes the container, so the log of the pause, with its `sessions: recorded` line, goes with it. Only the wake's line survives in the new container's log.

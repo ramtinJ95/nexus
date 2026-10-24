@@ -70,7 +70,8 @@ async function buildImage() {
     `RUN useradd --create-home --shell /bin/bash user && install -d -o user -g user /home/user/workspace ${pylonRepoPath}`,
     // Docker execs run as root, unlike a pylon's, so git must accept the checkout that `user` owns.
     "RUN git config --system --add safe.directory '*'",
-    `RUN git init --quiet --initial-branch=main ${pylonRepoPath} && printf '# verify-nexus\\n' > ${pylonRepoPath}/README.md && git -C ${pylonRepoPath} -c user.name=verify -c user.email=verify@invalid add README.md && git -C ${pylonRepoPath} -c user.name=verify -c user.email=verify@invalid commit --quiet -m init`,
+    // refs/nexus/base is what a pylon booted at, which a pylon-vm records on its first boot and the Docker backend never does.
+    `RUN git init --quiet --initial-branch=main ${pylonRepoPath} && printf '# verify-nexus\\n' > ${pylonRepoPath}/README.md && git -C ${pylonRepoPath} -c user.name=verify -c user.email=verify@invalid add README.md && git -C ${pylonRepoPath} -c user.name=verify -c user.email=verify@invalid commit --quiet -m init && git -C ${pylonRepoPath} update-ref refs/nexus/base HEAD`,
     "ARG HERDR_VERSION",
     'RUN curl -fsSL https://herdr.dev/install.sh -o /tmp/herdr-install.sh && HERDR_INSTALL_DIR=/usr/local/bin sh /tmp/herdr-install.sh && rm /tmp/herdr-install.sh && test "$(herdr --version)" = "herdr ${HERDR_VERSION}"',
     "RUN mkdir -p /root/.config/herdr && printf '[session]\\nresume_agents_on_restore = false\\n' > /root/.config/herdr/config.toml",

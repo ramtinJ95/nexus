@@ -8,7 +8,7 @@ A thread lists the TCP ports that something in its pylon listens on, whether or 
 - `preview-cli` publishes the port with `nexus preview`, names the URL at once, and with `--wait` prints it once it is served.
 - `preview-serve` fetches the URL through the probe's preview gateway and gets the process's answer.
 - `preview-wake` keeps the URL across an archive and unarchive, and serves it again once the process runs again.
-- `ports-ui` lists the port in the thread page's Ports section and publishes it with its `Open` button, which moves it under Previews.
+- `ports-ui` lists the port under Ports in the thread page's Previews tab and publishes it with its `Open` button, which moves it under Previews.
 - `unpreview-cli` unpublishes the port with `nexus unpreview`, which prints `null`, lists the port again with `preview` null, and succeeds again when repeated.
 - `unpreview-closed` gets the gateway's own 404 instead of the process's answer once `unpreview` returns. On a real node the serve entry goes a few seconds later and new connections are refused, which this stack cannot show.
 - `unpreview-refused` refuses the port of a declared service's preview with exit code 1, naming the service.
@@ -19,7 +19,7 @@ A thread lists the TCP ports that something in its pylon listens on, whether or 
 ## How to get to it (user POV)
 
 - Run `nexus ports <thread>`, `nexus preview <thread> <port> [--wait]` and `nexus unpreview <thread> <port>` in a terminal.
-- Open the thread page, `/threads/<id>`, and find the port under Ports in the inspector, or under Previews with its `Unpublish` button once it is published. On a narrow window, open the inspector with the pylon button in the strip.
+- Open the thread page, `/threads/<id>`, choose the inspector's `Previews` tab, and find the port under Ports, or under Previews with its `Unpublish` button once it is published. The tab's count adds the previews to the ports without one. Outputs are under the `Pylon` tab.
 
 ## Driving it with verify-nexus
 
@@ -35,13 +35,14 @@ Preconditions:
 - **Served.** Fetch it through the gateway, as tailscale serve would: `curl -sS -H "Host: 127.0.0.1:<httpsPort>" http://127.0.0.1:7481/ > "$($V evidence)/preview-serve.txt"`. The file reads `ports-proof`.
 - **Across a wake.** Run `archive $T --json`, poll `show` until `.pylon.actualState` is `paused`, then `unarchive $T --json` and poll until it is `running`. `show $T --json` still lists the preview with the same `url`. Send `bash: $SERVER` again, then repeat the curl into `preview-wake.txt`, which reads `ports-proof`.
 - **Dashboard.** Start a second server on 8002 the same way, with `8001` replaced by `8002` in `SERVER`.
-  - Run `$V browser ports-ui-open -- goto http://127.0.0.1:7470/threads/$T`. Within two polls the Ports section lists `8002` with an `Open` button. Capture `snapshot --filename ports-ui-before.md`.
+  - Run `$V browser ports-ui-open -- goto http://127.0.0.1:7470/threads/$T`, then `$V browser ports-ui-tab -- click 'label.seg-tab:has(input[value="previews"])'`. Within two polls the Ports section lists `8002` with an `Open` button. Capture `snapshot --filename ports-ui-before.md`.
   - Run `$V browser ports-ui-click -- click 'role=button[name="Open port 8002"]'`.
-  - Within a few polls 8002 leaves Ports, and Previews lists `port-8002` with a link named `Open port-8002`, whose `href` is the `url` that `ports $T --json` reports for 8002. Each port shows once in the inspector: 8001 and 8002 only under Previews, and neither under Outputs. Capture `snapshot --filename ports-ui-after.md` and `screenshot --filename ports-ui-after.png`.
+  - Within a few polls 8002 leaves Ports, and Previews lists `port-8002` with a link named `Open port-8002`, whose `href` is the `url` that `ports $T --json` reports for 8002. 8001 and 8002 show only under Previews. Capture `snapshot --filename ports-ui-after.md` and `screenshot --filename ports-ui-after.png`.
+  - Run `$V browser ports-ui-pylon -- click 'label.seg-tab:has(input[value="pylon"])'` and `snapshot --filename ports-ui-outputs.md`. Outputs reads `No outputs yet.`, so neither port shows there. Select the Previews tab again.
 - **Unpublish.** With the process on 8001 running again after the wake, run `$V cli unpreview-cli -- unpreview $T 8001 --json`. Exit 0, and stdout is `null`. At once, `show $T --json` lists no preview of `port-8001`, and `ports $T --json` has 8001 with `preview` null. Its `service` can still read `port-8001` until the node's next report, so don't assert it.
 - **Closed.** Repeat the curl with `-w '%{http_code}'` into `unpreview-closed.txt` right after: the answer is 404 `no preview is published on ...`, the gateway's own, never `ports-proof`.
 - **Again.** Run `$V cli unpreview-again -- unpreview $T 8001 --json`. Exit 0, and stdout is `null`.
-- **Dashboard unpublish.** Within two polls of the thread page, Previews lists `port-8002` with a button named `Unpublish port-8002`, and `port-8001` is gone. Capture `snapshot --filename unpreview-ui-before.md`, run `$V browser unpreview-ui-click -- click 'role=button[name="Unpublish port-8002"]'`, and within a few polls 8002 leaves Previews and Ports lists it again with its `Open` button. Capture `snapshot --filename unpreview-ui-after.md` and `screenshot --filename unpreview-ui-after.png`. Then `ports $T --json` has 8002 with `preview` null.
+- **Dashboard unpublish.** Within two polls of the thread page, Previews lists `port-8002` with a button named `Unpublish port-8002`, and `port-8001` is gone. Capture `snapshot --filename unpreview-ui-before.md`, run `$V browser unpreview-ui-click -- click 'role=button[name="Unpublish port-8002"]'`, and within a few polls 8002 leaves Previews and Ports lists it again with its `Open` button. The first poll can list it with the note `port-8002` and no button, until the node's next report. Capture `snapshot --filename unpreview-ui-after.md` and `screenshot --filename unpreview-ui-after.png`. Then `ports $T --json` has 8002 with `preview` null.
 - **Across a wake.** Archive and unarchive `T` as above, then send `bash: $SERVER` again. `ports $T --json` has 8001 with `preview` null, `show $T --json` lists no `port-8001`, and the curl from **Closed** still gets 404, into `unpreview-wake.txt`.
 - **Publish again.** Run `$V cli unpreview-republish -- preview $T 8001 --wait --json`. Exit 0 with `ready` true. Curl its `httpsPort` into `unpreview-republish.txt`, which reads `ports-proof`.
 - **Refused edges.** `$V cli ports-bad -- preview $T 3000 --json` exits 1, because the Docker pylon publishes only 8000 to 8007. `$V cli ports-reserved -- preview $T 22 --json` exits 64 with `kind` `invalid` and `status` 400.
@@ -51,6 +52,7 @@ Preconditions:
 ## Gotchas
 
 - The Docker double links only the ports its `docker run` published, 8000 to 8007. Any other port is refused with exit code 1, so a recipe on port 3000 fails here but works in a real pylon.
+- The inspector shows one tab at a time and remembers it across pages, so select the Previews tab after each `goto`, unless the page already shows it. `role=radio[name="Previews"]` does not match, because the tab's name includes its count, such as `Previews 2`.
 - Ports are read every 10 s, so a fresh server shows up to about 10 s later. Poll, don't sleep.
 - The stack's `tailscale serve` is a fake, and the node's tailnet name is `127.0.0.1`. A URL here proves the gateway's routing, not a real MagicDNS certificate or the tailnet.
 - The curl goes straight to the gateway on port 7481, with no tailscale listener in front, and the fake `tailscale serve` edits only its own config file. So a closed preview here answers the gateway's 404 for good. On a real node, the gateway answers 404 until the loop's next pass removes the serve entry, and a new connection is refused after that.
