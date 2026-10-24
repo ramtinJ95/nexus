@@ -514,6 +514,7 @@ export class GuestServices {
 		if (selected) return facts;
 		return [...facts, ...(await Promise.all([...this.attached.keys()].map((port) => this.linkedFact(port))))];
 	}
+	/** A start that is being watched is starting even once its process has exited, until its watch fails it. */
 	private async fact(name: string, entry: Entry): Promise<ServiceFact> {
 		const running = await serviceRunning(this.vm, name);
 		const state =
@@ -521,7 +522,7 @@ export class GuestServices {
 				? "ready"
 				: this.failures.has(name)
 					? "failed"
-					: running
+					: running || this.watches.has(name)
 						? "starting"
 						: "stopped";
 		return {

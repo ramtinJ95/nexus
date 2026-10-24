@@ -73,14 +73,16 @@ export function pylonGuest(pylonId: PylonId, dir: string, run: (action: Record<s
 	const name = pylonId;
 	/**
 	 * The controller only launches a service and watches its readiness itself, so that no health wait holds its
-	 * lifecycle queue. A caller of ensure, restart or service-start still gets each service ready or failed, from
-	 * status reads that queue between other actions.
+	 * lifecycle queue. A caller of ensure, restart or service-start still gets each service it was answered about,
+	 * the dependencies an ensure of one service started included, ready or failed, from status reads that queue
+	 * between other actions.
 	 */
-	async function ready(facts: z.infer<typeof factsSchema>, service: string | undefined) {
+	async function ready(facts: z.infer<typeof factsSchema>) {
+		const started = new Set(facts.map((fact) => fact.name));
 		const deadline = Date.now() + readyWaitMs;
 		while (facts.some((fact) => fact.state === "starting") && Date.now() < deadline) {
 			await delay(readyPollMs);
-			facts = factsSchema.parse(await run({ action: "services", name, op: "status", ...(service === undefined ? {} : { service }) }));
+			facts = factsSchema.parse(await run({ action: "services", name, op: "status" })).filter((fact) => started.has(fact.name));
 		}
 		return facts;
 	}
@@ -126,7 +128,7 @@ export function pylonGuest(pylonId: PylonId, dir: string, run: (action: Record<s
 			if (op !== "logs") {
 				const forkOp = op === "list" ? "status" : op;
 				const facts = factsSchema.parse(await run({ action: "services", name, op: forkOp, ...(service === undefined ? {} : { service }) }));
-				return { services: op === "ensure" || op === "restart" ? await ready(facts, service) : facts };
+				return { services: op === "ensure" || op === "restart" ? await ready(facts) : facts };
 			}
 			if (service === undefined) throw new Error("service logs needs the service's name");
 			const { output } = logsReplySchema.parse(await run({ action: "logs", name, service, ...(lines === undefined ? {} : { lines }) }));
@@ -134,7 +136,7 @@ export function pylonGuest(pylonId: PylonId, dir: string, run: (action: Record<s
 		},
 
 		async startService(service, decl) {
-			return ready(factsSchema.parse(await run({ action: "service-start", name, service, ...decl })), service);
+			return ready(factsSchema.parse(await run({ action: "service-start", name, service, ...decl })));
 		},
 
 		async linkPort(port, title) {

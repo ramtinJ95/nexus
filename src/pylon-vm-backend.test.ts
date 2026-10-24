@@ -324,27 +324,29 @@ test("service facts come from the controller's supervisor, a list starts nothing
   ]);
 });
 
-test("ensure, restart and service-start answer once each service they started is ready or failed, reading status between other actions, and a list does not wait", async () => {
-  const fact = (state: string) => ({ name: "web", state, port: 8000, declared: true, wantsPreview: true });
+test("ensure, restart and service-start answer once each service they were answered about is ready or failed, from status reads, and a list does not wait", async () => {
+  const fact = (name: string, state: string) => ({ name, state, port: name === "api" ? 8001 : 8000, declared: true, wantsPreview: true });
   const actions: Record<string, unknown>[] = [];
-  let reads: string[] = [];
+  let reads: [string, string][] = [];
   const guest = pylonGuest("pylon-wait" as PylonId, scratch, async ({ name: _, ...action }) => {
     actions.push(action);
-    if (action.op === "status") return [fact(reads.shift()!)];
-    return [fact("starting")];
+    // Every status lists every service and a linked port, which a wait leaves out.
+    if (action.op === "status") return [...reads.shift()!.map((state, i) => fact(["api", "web"][i]!, state)), fact("port-6006", "ready")];
+    // An ensure or restart of web answers about the api it references too.
+    return action.action === "service-start" ? [fact("web", "starting")] : [fact("api", "starting"), fact("web", "starting")];
   });
-  reads = ["starting", "failed"];
-  assert.deepEqual(await guest.services("ensure"), { services: [fact("failed")] });
-  reads = ["ready"];
-  assert.deepEqual(await guest.services("restart", "web"), { services: [fact("ready")] });
-  reads = ["failed"];
-  assert.deepEqual(await guest.startService("web", { command: "serve", port: 8000, preview: true }), [fact("failed")]);
-  reads = ["starting"];
-  assert.deepEqual(await guest.services("list"), { services: [fact("starting")] });
+  reads = [["starting", "starting"], ["failed", "ready"]];
+  assert.deepEqual(await guest.services("ensure"), { services: [fact("api", "failed"), fact("web", "ready")] });
+  reads = [["starting", "ready"], ["ready", "ready"]];
+  assert.deepEqual(await guest.services("restart", "web"), { services: [fact("api", "ready"), fact("web", "ready")] }, "the dependency is waited for after web is ready");
+  reads = [["ready", "failed"]];
+  assert.deepEqual(await guest.startService("web", { command: "serve", port: 8000, preview: true }), [fact("web", "failed")]);
+  reads = [["starting", "starting"]];
+  assert.equal((await guest.services("list")).services[0]!.state, "starting");
   assert.deepEqual(actions.map((a) => [a.action, a.op ?? null, a.service ?? null]), [
     ["services", "ensure", null], ["services", "status", null], ["services", "status", null],
-    ["services", "restart", "web"], ["services", "status", "web"],
-    ["service-start", null, "web"], ["services", "status", "web"],
+    ["services", "restart", "web"], ["services", "status", null], ["services", "status", null],
+    ["service-start", null, "web"], ["services", "status", null],
     ["services", "status", null],
   ]);
 });

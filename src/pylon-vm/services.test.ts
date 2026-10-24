@@ -12,15 +12,16 @@ import { GuestServices } from "./services.ts";
 
 /**
  * A VM whose ingress is never dialled here, and the prefixes of the routes last set on it. Its guest has the services
- * file `file` holds, none while undefined, and runs a service from its launch until its stop. Every port listens
- * while `listening` holds, every new port asked for is the next from 41000, and every other command succeeds.
+ * file `file` holds, none while undefined, and runs a service from its launch until its stop, unless `exits` holds,
+ * as for a service whose cwd is missing. Every port listens while `listening` holds, every new port asked for is the
+ * next from 41000, and every other command succeeds.
  */
 function fakeVm() {
 	const routes: string[][] = [];
 	const running = new Set<string>();
 	const launches: string[] = [];
 	const scripts = new Map<string, string>();
-	const guest = { file: undefined as string | undefined, listening: true };
+	const guest = { file: undefined as string | undefined, listening: true, exits: false };
 	let nextPort = 41000;
 	const service = (command: string) => /services\/([a-z0-9-]+)\.pid/.exec(command)![1]!;
 	const vm = {
@@ -39,7 +40,7 @@ function fakeVm() {
 			else if (command.startsWith("test -f")) exitCode = running.has(service(command)) ? 0 : 1;
 			else if (command.startsWith("if test -f")) running.delete(service(command));
 			else if (command.startsWith("setsid")) {
-				running.add(service(command));
+				if (!guest.exits) running.add(service(command));
 				launches.push(service(command));
 			}
 			return { exitCode: 0, stderr: JSON.stringify({ state: "exited", exitCode }) };
@@ -225,6 +226,23 @@ test("a start does not wait for health: ensure and new URLs return at once, the 
 	assert.deepEqual(logged.mock.calls.map((call) => call.arguments[0]), [
 		"services: web failed: Service web started but is not responding. Read logs, then restart or stop it",
 	], "the restart's start replaced the first's watch, so it fails once");
+});
+
+test("a start whose process exits at once is starting until its timeout fails it, not stopped", async (t) => {
+	const root = await mkdtemp(join(tmpdir(), "nexus-services-"));
+	t.after(() => rm(root, { recursive: true, force: true }));
+	t.mock.method(console, "log", () => {});
+	const guest = fakeVm();
+	guest.guest.listening = false;
+	guest.guest.exits = true;
+	guest.guest.file = declared("  web:\n    command: serve\n    cwd: missing\n    port: 3000\n    timeoutMs: 500\n");
+	const services = new GuestServices(guest.vm, root, configPath, "/workspace/repo", "agent", {});
+	t.after(() => services.close());
+	await services.initialize();
+	assert.deepEqual((await services.operate("ensure")).map((f) => f.state), ["starting"]);
+	await until(services, "web", "failed");
+	await services.operate("stop", "web");
+	assert.equal((await services.operate("status"))[0]!.state, "stopped");
 });
 
 test("an unpreview sent to the controller during an ensure of a service that never answers is answered at once", async (t) => {
