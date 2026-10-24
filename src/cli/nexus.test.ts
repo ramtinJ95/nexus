@@ -8,6 +8,7 @@ import { execFile, spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { once } from "node:events";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { createServer as createHttpServer } from "node:http";
 import { connect, createServer, type Server } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -352,6 +353,33 @@ test("show reports a published preview whose service failed as not ready, and wh
 
   observeRunning(s, thread, [web("ready")], [8003]);
   assert.deepEqual((await s.json(["show", thread.id])).previews, [preview], "a restarted service's preview is ready again");
+});
+
+test("a preview from a control plane older than Preview.failed reads as not failed", async (t) => {
+  const s = await setup(t);
+  // That control plane's shapes: a Preview with no `failed`.
+  const web = { pylon: "pylon-th-old", service: "web", httpsPort: 10200, ready: true, url: "https://rj-firebat.tail.ts.net:10200/" };
+  const api = { ...web, service: "api", httpsPort: 10201, ready: false, url: "https://rj-firebat.tail.ts.net:10201/" };
+  const detail = {
+    thread: { id: "th-old", title: "old", project: "acme", status: "active", agentTurnRunning: false },
+    pylon: { id: "pylon-th-old", node, actualState: "running", failed: null, observedAt: null, retryRefused: null },
+    sessions: [], previews: [api, web], ports: [{ port: 3000, service: "web", preview: web }, { port: 4000, service: "api", preview: api }], outputs: [], agent: null,
+  };
+  const old = createHttpServer((req, res) => {
+    res.setHeader("content-type", "application/json");
+    res.end(JSON.stringify(req.method === "POST" ? web : detail));
+  });
+  const overrides = { NEXUS_URL: `http://${apiName}:${await listening(t, old)}` };
+  const run = async (args: string[]) => {
+    const res = await s.nexus(args, overrides);
+    assert.equal(res.code, 0, res.stderr);
+    return res.stdout;
+  };
+  const shown = await run(["show", "th-old"]);
+  assert.match(shown, /^preview: api at https:\/\/rj-firebat\.tail\.ts\.net:10201\/, not ready$/m);
+  assert.match(shown, /^preview: web at https:\/\/rj-firebat\.tail\.ts\.net:10200\/$/m);
+  assert.equal(await run(["ports", "th-old"]), `3000  web  ${web.url}\n4000  api  ${api.url} (not served yet)\n`);
+  assert.equal(await run(["preview", "th-old", "3000"]), `${web.url}\n`);
 });
 
 test("unpreview unpublishes a port, waits for a paused pylon to run, and fails with the contract's exit codes", async (t) => {

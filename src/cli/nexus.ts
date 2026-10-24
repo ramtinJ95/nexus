@@ -81,6 +81,8 @@ function table(rows: readonly (readonly string[])[]): string {
   return rows.map((r) => r.map((cell, i) => i === r.length - 1 ? cell : cell.padEnd(widths[i]!)).join("  ")).join("\n");
 }
 
+/** Why the preview's service failed, or null. A control plane older than `Preview.failed` sends none, which is no failure. */
+const failureOf = (p: Preview): string | null => p.failed ?? null;
 const clip = (text: string, max: number) => text.length <= max ? text : `${text.slice(0, max)}...`;
 const contentText = (content: string | readonly (TextContent | ImageContent)[]) => typeof content === "string" ? content
   : content.map((part) => part.type === "text" ? part.text : `[${part.mimeType} image]`).join("");
@@ -129,7 +131,7 @@ function detailText({ thread: t, pylon: p, agent, sessions, previews, ports, out
     ...p.retryRefused === null ? [] : [`retry refused: ${p.retryRefused}`],
     ...(agent?.parkedTasks ?? 0) === 0 ? [] : [`parked tasks: ${agent!.parkedTasks}. \`nexus retry ${t.id}\` runs them again`],
     ...sessions.map((s) => `session: ${s.harness} in pane ${s.herdrPane}, ${s.status}`),
-    ...previews.map((v) => `preview: ${v.service} at ${v.url}${v.failed !== null ? `, not ready: ${v.failed}` : v.ready ? "" : ", not ready"}`),
+    ...previews.map((v) => `preview: ${v.service} at ${v.url}${failureOf(v) !== null ? `, not ready: ${failureOf(v)}` : v.ready ? "" : ", not ready"}`),
     ...(ports ?? []).map((l) => `port: ${l.port}${l.service === null ? "" : `, service ${l.service}`}${l.preview === null ? "" : `, previewed at ${l.preview.url}`}`),
     ...outputs.map((o) => `output: ${o.kind} ${o.ref}`),
   ].join("\n");
@@ -139,7 +141,7 @@ function portsText(ports: ThreadDetail["ports"], id: string): string {
   if (ports === null) return "The pylon's listening ports could not be read.";
   if (ports.length === 0) return "No listening ports. A server bound only to ::1 can't be previewed, so bind it to 0.0.0.0 or 127.0.0.1.";
   return [
-    table(ports.map((l) => [String(l.port), l.service ?? "-", l.preview === null ? "-" : `${l.preview.url}${l.preview.failed !== null ? " (its service failed)" : l.preview.ready ? "" : " (not served yet)"}`])),
+    table(ports.map((l) => [String(l.port), l.service ?? "-", l.preview === null ? "-" : `${l.preview.url}${failureOf(l.preview) !== null ? " (its service failed)" : l.preview.ready ? "" : " (not served yet)"}`])),
     ...ports.some((l) => l.preview === null) ? [`\`nexus preview ${id} <port>\` publishes a port.`] : [],
   ].join("\n");
 }
@@ -438,7 +440,7 @@ const commands: Readonly<Record<string, Command>> = {
       const port = portArg(given!);
       const linked = await api("POST", `${thread(id!)}/previews`, { port }) as Preview;
       const preview = v.wait === true ? await served(api, id!, port) : linked;
-      return { json: preview, text: preview.failed !== null ? `${preview.url} (not ready: ${preview.failed})` : preview.ready ? preview.url : `${preview.url} (not served yet. \`--wait\` waits until it is)` };
+      return { json: preview, text: failureOf(preview) !== null ? `${preview.url} (not ready: ${failureOf(preview)})` : preview.ready ? preview.url : `${preview.url} (not served yet. \`--wait\` waits until it is)` };
     },
   },
   unpreview: {
