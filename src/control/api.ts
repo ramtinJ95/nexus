@@ -16,7 +16,7 @@ import { randomBytes } from "node:crypto";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { z } from "zod";
 import { actualState, desiredPhase, retryRefusal, type ActualState, type DesiredPhase } from "../reconcile.ts";
-import { effectiveAllowedHosts, gitUrl, linkedName, liveHashOf, reservedPorts, withHttpsHosts, type BootInputs, type Project, type ProjectId, type PylonOverlay } from "../project.ts";
+import { effectiveAllowedHosts, gitUrl, linkedName, liveHashOf, reservedPorts, withHttpsHosts, type BootInputs, type Project, type ProjectId, type PylonOverlay, type SessionHarness } from "../project.ts";
 import type { CommandResult, NodeName, ProbeClient, ProbeError, PylonCommand, PylonId, TailnetNodeId } from "../protocol.ts";
 import type { ConversationView, ConversationWatch, EntryRecord, JsonObject } from "@earendil-works/pi-durable";
 import type { HarnessHost } from "../harness/host.ts";
@@ -49,6 +49,9 @@ export interface ApiOptions {
   /** How long a stream's client may leave what was sent unread before it is dropped. 30 s by default. */
   streamStallMs?: number;
 }
+
+/** A session `POST /v1/threads/<id>/sessions` opened. Its observed state shows in ThreadDetail.sessions. */
+export interface OpenedSession { herdrPane: string; harness: SessionHarness; title: string }
 
 export type ThreadHarness = Pick<HarnessHost, "startThread" | "send" | "abort" | "retry" | "watch" | "deleteThread" | "activity">;
 
@@ -179,6 +182,11 @@ const imageSchema = z.strictObject({
 });
 const currentImageSchema = z.strictObject({ image: z.string().min(1) });
 const previewSchema = z.strictObject({ port: z.int().min(1).max(65535).refine((port) => !reservedPorts.has(port), "is Nexus's own") });
+const sessionSchema = z.strictObject({
+  harness: z.enum(["claude-code", "pi", "shell"]).default("claude-code"),
+  /** The Herdr workspace's label. The harness's name by default. */
+  title: z.string().trim().min(1).max(80).optional(),
+});
 
 /** `pylon-<id>` must fit in 40 characters. */
 const newThreadId = () => `th-${randomBytes(6).toString("hex")}` as ThreadId;
@@ -450,10 +458,11 @@ export async function startApi(options: ApiOptions): Promise<Api> {
   }
 
   /**
-   * Runs a link or an unlink in the thread's pylon. Asking is human activity, as a message is, so a paused pylon is
-   * woken, but the command itself needs the pylon running and is refused with a 409 until it is.
+   * Runs a command a human asked for in the thread's pylon, such as a link or a session open. Asking is human
+   * activity, as a message is, so a paused pylon is woken, but the command itself needs the pylon running and is
+   * refused with a 409 until it is.
    */
-  async function portCommand<K extends "link-port" | "unlink-port">(t: Thread, command: Extract<PylonCommand, { kind: K }>): Promise<Extract<CommandResult, { kind: K }>> {
+  async function pylonCommand<K extends "link-port" | "unlink-port" | "open-session" | "close-session">(t: Thread, command: Extract<PylonCommand, { kind: K }>): Promise<Extract<CommandResult, { kind: K }>> {
     if (t.status === "deleted" || t.status === "archived") throw new HttpError(409, `thread ${t.id} is ${t.status}, so its pylon stays paused`);
     const pylon = registry.pylon(t.pylonId)!;
     const probe = probes.get(pylon.node);
@@ -482,7 +491,7 @@ export async function startApi(options: ApiOptions): Promise<Api> {
    */
   async function linkPort(t: Thread, body: unknown): Promise<Preview> {
     const { port } = parse(previewSchema, body);
-    const { service } = await portCommand(t, { kind: "link-port", port });
+    const { service } = await pylonCommand(t, { kind: "link-port", port });
     try {
       registry.allocatePreviews(t.pylonId, [service], previewPorts);
     } catch (err) {
@@ -499,10 +508,21 @@ export async function startApi(options: ApiOptions): Promise<Api> {
    * waiting cannot change it, and the CLI and dashboard try a 409 again.
    */
   async function unlinkPort(t: Thread, port: number): Promise<void> {
-    const { refused } = await portCommand(t, { kind: "unlink-port", port });
+    const { refused } = await pylonCommand(t, { kind: "unlink-port", port });
     if (refused !== null) throw new HttpError(422, refused);
     registry.releasePreview(t.pylonId, linkedName(port));
     wakeThread(t);
+  }
+
+  /**
+   * Opens a Herdr session in the pylon's checkout, with the harness's agent in it, and answers once the agent is
+   * ready or waits for its human, such as at Claude Code's login. The node publishes its sessions again at once,
+   * so ThreadDetail lists it within moments.
+   */
+  async function openSession(t: Thread, body: unknown): Promise<OpenedSession> {
+    const { harness, title = harness } = parse(sessionSchema, body);
+    const { herdrPane } = await pylonCommand(t, { kind: "open-session", harness, title });
+    return { herdrPane, harness, title };
   }
 
   async function conversation(t: Thread) {
@@ -558,6 +578,15 @@ export async function startApi(options: ApiOptions): Promise<Api> {
     ["DELETE", /^\/v1\/threads\/([^/]+)\/previews\/([^/]+)$/, async (m) => {
       const { port } = parse(previewSchema, { port: /^\d+$/.test(m[2]!) ? Number(m[2]) : m[2] });
       await unlinkPort(thread(m[1]!), port);
+      return noContent;
+    }],
+    ["POST", /^\/v1\/threads\/([^/]+)\/sessions$/, async (m, r) => {
+      const body = await r.body();
+      return created(await openSession(thread(m[1]!), body));
+    }],
+    // A pane that is already closed succeeds.
+    ["DELETE", /^\/v1\/threads\/([^/]+)\/sessions\/([^/]+)$/, async (m) => {
+      await pylonCommand(thread(m[1]!), { kind: "close-session", herdrPane: m[2]! });
       return noContent;
     }],
     ["GET", /^\/v1\/threads\/([^/]+)\/conversation$/, async (m) => ok(await conversation(conversing(thread(m[1]!))))],

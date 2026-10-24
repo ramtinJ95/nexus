@@ -39,7 +39,8 @@ export interface Thread extends ActivityFacts {
 /** What the registry keeps of a pylon. The desired phase is derived from its thread on every tick. */
 export type StoredPylon = Omit<PylonRecord, "desired">;
 
-export type Session = SessionFact & { pylon: PylonId };
+/** `title` is null for a session last observed from a probe that did not report titles. */
+export type Session = Omit<SessionFact, "title"> & { pylon: PylonId; title: string | null };
 /**
  * `url` is what the data model calls a preview's URL, on its node's tailnet name. `failed` says why the preview
  * cannot answer while its node's last observation reports its service failed, and null otherwise. `ready` is false
@@ -151,6 +152,10 @@ const migrations: readonly string[] = [
   `
   ALTER TABLE pylons ADD COLUMN retrying INTEGER NOT NULL DEFAULT 0;
   `,
+  // A session's title, so a human can tell its sessions apart. Sessions observed before keep none until the next observation.
+  `
+  ALTER TABLE sessions ADD COLUMN title TEXT;
+  `,
 ];
 
 type Row = Record<string, unknown>;
@@ -239,8 +244,8 @@ export function openRegistry(path: string) {
     retryPylon: db.prepare(`UPDATE pylons SET failed = NULL, attempts = '{"count":0,"last":null}', retrying = 1 WHERE id = ? AND failed IS NOT NULL`),
     pylon: db.prepare("SELECT * FROM pylons WHERE id = ?"),
     pylonsOn: db.prepare("SELECT * FROM pylons WHERE node = ? ORDER BY id"),
-    upsertSession: db.prepare(`INSERT INTO sessions (pylon, herdr_pane, harness, harness_session_id, status) VALUES (?, ?, ?, ?, ?)
-      ON CONFLICT (pylon, herdr_pane) DO UPDATE SET harness = excluded.harness, harness_session_id = excluded.harness_session_id, status = excluded.status`),
+    upsertSession: db.prepare(`INSERT INTO sessions (pylon, herdr_pane, harness, harness_session_id, status, title) VALUES (?, ?, ?, ?, ?, ?)
+      ON CONFLICT (pylon, herdr_pane) DO UPDATE SET harness = excluded.harness, harness_session_id = excluded.harness_session_id, status = excluded.status, title = excluded.title`),
     deleteSession: db.prepare("DELETE FROM sessions WHERE pylon = ? AND herdr_pane = ?"),
     sessions: db.prepare("SELECT * FROM sessions WHERE pylon = ? ORDER BY herdr_pane"),
     insertPreview: db.prepare("INSERT INTO previews (pylon, node, service, https_port, ready) SELECT id, node, ?, ?, 0 FROM pylons WHERE id = ?"),
@@ -353,7 +358,7 @@ export function openRegistry(path: string) {
 
     sessions: (pylon: PylonId) => (q.sessions.all(pylon) as Row[]).map((r): Session => ({
       pylon: r.pylon as PylonId, herdrPane: r.herdr_pane as string, harness: r.harness as Session["harness"],
-      harnessSessionId: r.harness_session_id as string | null, status: r.status as Session["status"],
+      harnessSessionId: r.harness_session_id as string | null, status: r.status as Session["status"], title: r.title as string | null,
     })),
     /**
      * Gives each of `services` that has no preview yet the lowest port in `range` that no pylon on the pylon's node
@@ -430,7 +435,7 @@ export function openRegistry(path: string) {
         return;
       case "session":
         if (write.fact === null) q.deleteSession.run(write.pylonId, write.herdrPane);
-        else q.upsertSession.run(write.pylonId, write.herdrPane, write.fact.harness, write.fact.harnessSessionId, write.fact.status);
+        else q.upsertSession.run(write.pylonId, write.herdrPane, write.fact.harness, write.fact.harnessSessionId, write.fact.status, write.fact.title ?? null);
         return;
       case "output": {
         const thread = threadOfPylon(write.pylonId);

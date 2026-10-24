@@ -51,6 +51,7 @@ Keep implementation details out of the map. Name only user paths, stable handles
 - [Delete a thread](./delete-thread.md) covers CLI and dashboard delete, a `watch` that ends on deletion, and the removal of the pylon and its checkpoints.
 - [Browse threads](./browse-threads.md) covers `threads`, `projects`, `nodes`, the dashboard overview and sidebar filter, and the CLI's not-found and invalid exits.
 - [Preview a listening port](./preview-port.md) covers CLI `ports`, `preview --wait` and `unpreview`, the dashboard's Ports section with its `Open` button and the `Unpublish` button under Previews, fetching the preview through the gateway, keeping its URL across a wake, and keeping an unpublished port unpublished across one.
+- [Herdr sessions and attach](./sessions.md) covers `session open` with a title, `show` listing it, the session surviving an archive and an unarchive, `session close` and its repeat, `attach` through `NEXUS_ATTACH` with and without a pty, and the archived thread's refusals.
 - [Stream an answer](./stream-answer.md) covers `watch --json` printing an answer as it is written, the thread page growing it in place, a reader's scroll position while it grows, and a hidden tab letting go of its stream.
 
-Not yet mapped: declared previews and outputs. Both need the in-pylon `nexus` CLI, which cannot reach the probe from a Docker pylon (see [Message the agent](./message-agent.md) Gotchas). Herdr sessions, `retry`, `retry-pylon`, `abort` and `wake` are also unmapped.
+Not yet mapped: declared previews and outputs. Both need the in-pylon `nexus` CLI, which cannot reach the probe from a Docker pylon (see [Message the agent](./message-agent.md) Gotchas). `retry`, `retry-pylon`, `abort` and `wake` are also unmapped.

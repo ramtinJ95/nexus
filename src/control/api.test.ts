@@ -44,6 +44,8 @@ async function setup(t: import("node:test").TestContext, options: { dotfiles?: t
   let answer = async (command: PylonCommand): Promise<CommandResult> => {
     if (command.kind === "link-port") return { kind: "link-port", service: `port-${command.port}` };
     if (command.kind === "unlink-port") return { kind: "unlink-port", refused: null };
+    if (command.kind === "open-session") return { kind: "open-session", herdrPane: "w1:p1" };
+    if (command.kind === "close-session") return { kind: "close-session" };
     throw new Error(`unexpected ${command.kind} command`);
   };
   const api = await startApi({
@@ -215,7 +217,7 @@ test("thread detail derives the actual state from the node's last observation", 
   s.registry.ingested({ node, observedAt: "2027-01-01T00:01:00Z", probeBootId: "b", capacity, artifacts: [], jobs: [], pylons: [running], previewRoutes: [] }, []);
   const pause = { jobId: "job-1" as JobId, subject: thread.pylonId, kind: "pause" as const };
   s.registry.apply({ record: "job", status: { ...pause, state: "running", startedAt: "2027-01-01T00:00:59Z" } });
-  s.registry.apply({ record: "session", pylonId: thread.pylonId, herdrPane: "p1", fact: { herdrPane: "p1", harness: "pi", harnessSessionId: null, status: "idle" } });
+  s.registry.apply({ record: "session", pylonId: thread.pylonId, herdrPane: "p1", fact: { herdrPane: "p1", harness: "pi", harnessSessionId: null, status: "idle", title: "plan" } });
   s.registry.apply({ record: "output", pylonId: thread.pylonId, kind: "branch", ref: "nexus/fix" });
   s.registry.allocatePreviews(thread.pylonId, ["web"], { first: 8443, last: 8443 });
   s.registry.apply({ record: "preview", pylonId: thread.pylonId, service: "web", httpsPort: 8443, ready: true });
@@ -223,7 +225,7 @@ test("thread detail derives the actual state from the node's last observation", 
   const d = await detail();
   assert.equal(d.pylon.actualState, "pausing");
   assert.equal(d.pylon.observedAt, "2027-01-01T00:01:00Z");
-  assert.deepEqual(d.sessions, [{ pylon: thread.pylonId, herdrPane: "p1", harness: "pi", harnessSessionId: null, status: "idle" }]);
+  assert.deepEqual(d.sessions, [{ pylon: thread.pylonId, herdrPane: "p1", harness: "pi", harnessSessionId: null, status: "idle", title: "plan" }]);
   assert.deepEqual(d.outputs, [{ thread: thread.id, kind: "branch", ref: "nexus/fix" }]);
   assert.deepEqual(d.previews, [{ pylon: thread.pylonId, service: "web", httpsPort: 8443, ready: true, failed: null, url: "https://rj-firebat.tail.ts.net:8443/" }]);
 
@@ -356,6 +358,52 @@ test("unpublishing a port of a pylon that is not running, or of an archived or d
   assert.equal((await s.call("DELETE", `/v1/threads/${s.thread.id}/previews/3000`, {})).status, 409);
   assert.equal((await s.call("DELETE", `/v1/threads/${s.thread.id}`)).status, 200);
   assert.equal((await s.call("DELETE", `/v1/threads/${s.thread.id}/previews/3000`, {})).status, 409);
+  assert.deepEqual(s.commands, [], "an archived or deleted thread's probe is never asked");
+});
+
+test("opening a session goes through the node's probe, defaults to Claude Code titled by its harness, and counts as human activity", async (t) => {
+  const s = await withThread(t);
+  s.registry.recordActivity(s.thread.id, { human: 1 });
+  s.woken.length = 0;
+  assert.deepEqual(await s.call("POST", `/v1/threads/${s.thread.id}/sessions`, {}), { status: 201, body: { herdrPane: "w1:p1", harness: "claude-code", title: "claude-code" } });
+  assert.deepEqual(await s.call("POST", `/v1/threads/${s.thread.id}/sessions`, { harness: "pi", title: " plan " }), { status: 201, body: { herdrPane: "w1:p1", harness: "pi", title: "plan" } });
+  assert.deepEqual(s.commands, [
+    [s.thread.pylonId, { kind: "open-session", harness: "claude-code", title: "claude-code" }],
+    [s.thread.pylonId, { kind: "open-session", harness: "pi", title: "plan" }],
+  ]);
+  assert.ok(s.registry.thread(s.thread.id)!.lastHumanActivityAt > 1);
+  assert.ok(s.woken.includes(node));
+
+  s.commands.length = 0;
+  for (const body of [{ harness: "codex" }, { title: "" }, { title: "x".repeat(81) }, { resume: "bd2c2d6b" }]) {
+    assert.equal((await s.call("POST", `/v1/threads/${s.thread.id}/sessions`, body)).status, 400, JSON.stringify(body));
+  }
+  assert.deepEqual(s.commands, [], "a bad request never reaches the probe");
+});
+
+test("closing a session goes through the node's probe, which treats a pane already gone as closed", async (t) => {
+  const s = await withThread(t);
+  assert.deepEqual(await s.call("DELETE", `/v1/threads/${s.thread.id}/sessions/${encodeURIComponent("w1:p1")}`, {}), { status: 204, body: null });
+  assert.deepEqual(s.commands, [[s.thread.pylonId, { kind: "close-session", herdrPane: "w1:p1" }]]);
+});
+
+test("a session of a pylon that is not running, or of an archived or deleted thread, is refused with 409", async (t) => {
+  const s = await withThread(t);
+  s.probeAnswers(async () => { throw Object.assign(new Error("rj-firebat: pylon-x is stopped, not running"), { code: "not-running" }); });
+  s.woken.length = 0;
+  const paused = await s.call("POST", `/v1/threads/${s.thread.id}/sessions`, { harness: "claude-code" });
+  assert.equal(paused.status, 409);
+  assert.match(paused.body.error, /is not running yet. This request wakes it/);
+  assert.ok(s.woken.includes(node), "the request wakes the pylon");
+  assert.equal((await s.call("DELETE", `/v1/threads/${s.thread.id}/sessions/w1:p1`, {})).status, 409);
+  assert.equal((await s.call("POST", `/v1/threads/${s.thread.id}/archive`)).status, 200);
+  s.commands.length = 0;
+  const archived = await s.call("POST", `/v1/threads/${s.thread.id}/sessions`, {});
+  assert.equal(archived.status, 409);
+  assert.match(archived.body.error, /is archived, so its pylon stays paused/);
+  assert.equal((await s.call("DELETE", `/v1/threads/${s.thread.id}/sessions/w1:p1`, {})).status, 409);
+  assert.equal((await s.call("DELETE", `/v1/threads/${s.thread.id}`)).status, 200);
+  assert.equal((await s.call("POST", `/v1/threads/${s.thread.id}/sessions`, {})).status, 409);
   assert.deepEqual(s.commands, [], "an archived or deleted thread's probe is never asked");
 });
 

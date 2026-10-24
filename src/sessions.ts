@@ -31,14 +31,18 @@ const serverStartMs = 5_000;
 const paneBusyRetryMs = 3_000;
 
 /**
- * The agent each harness starts in its pane: Herdr's agent kind, and the launch arguments that resume a
- * harness session ID. A shell is the pane's own login shell, so it starts nothing and resumes nothing.
+ * The agent each harness starts in its pane: Herdr's agent kind, the launch arguments that resume a harness
+ * session ID, and those of a fresh start. A shell is the pane's own login shell, so it starts nothing and
+ * resumes nothing.
  */
-const agents: { readonly [H in SessionHarness]: { kind: string; resume(guest: Guest, id: string): Promise<readonly string[]> } | null } = {
-  "claude-code": { kind: "claude", resume: claudeResume },
+const agents: { readonly [H in SessionHarness]: { kind: string; resume(guest: Guest, id: string): Promise<readonly string[]>; fresh(): readonly string[] } | null } = {
+  // Herdr learns a Claude Code session's ID from Claude's SessionStart hook, which does not run while Claude
+  // waits at its login or trust screen, nor again once the human is past it. So every Claude Code start
+  // names its ID, and recordSessions reads it back from the pane's command line when Herdr has none.
+  "claude-code": { kind: "claude", resume: claudeResume, fresh: () => ["--session-id", randomUUID()] },
   // pi 1.4.0 opens a missing --session path as a new session that it first writes there on its first
-  // message, so unlike a Claude Code ID the path needs no check.
-  pi: { kind: "pi", resume: async (_guest, sessionFile) => ["--session", sessionFile] },
+  // message, so unlike a Claude Code ID the path needs no check. pi reports its session file at once.
+  pi: { kind: "pi", resume: async (_guest, sessionFile) => ["--session", sessionFile], fresh: () => [] },
   shell: null,
 };
 
@@ -115,7 +119,8 @@ async function startHarness(guest: Guest, pane: string, harness: SessionHarness,
   const agent = agents[harness];
   if (agent === null) return;
   const argv = ["agent", "start", `nx-${randomUUID().slice(0, 8)}`, "--kind", agent.kind, "--pane", pane, "--timeout", String(agentStartTimeoutMs)];
-  if (resume !== undefined) argv.push("--", ...await agent.resume(guest, resume));
+  const args = resume === undefined ? agent.fresh() : await agent.resume(guest, resume);
+  if (args.length > 0) argv.push("--", ...args);
   const busyUntil = Date.now() + paneBusyRetryMs;
   for (;;) {
     try {
@@ -163,7 +168,7 @@ export async function closeSession(guest: Guest, herdrPane: string): Promise<voi
  */
 export async function sessionFacts(guest: Guest, timeoutMs = callTimeoutMs): Promise<readonly SessionFact[]> {
   const panes = await livePanes(guest, timeoutMs).catch(noServer([]));
-  return panes.map(({ herdrPane, harness, harnessSessionId, status }) => ({ herdrPane, harness, harnessSessionId, status }));
+  return panes.map(({ herdrPane, harness, harnessSessionId, status, title }) => ({ herdrPane, harness, harnessSessionId, status, title }));
 }
 
 /**
@@ -178,8 +183,11 @@ export async function recordSessions(guest: Guest): Promise<readonly SessionReco
   const live = new Set(panes.map((p) => p.herdrPane));
   const failed = ((await readSessionsFile(guest))?.failed ?? []).filter((f) => !f.inPane || live.has(f.record.herdrPane));
   const standsFor = new Set(failed.flatMap((f) => f.inPane ? [f.record.herdrPane] : []));
-  const sessions = panes.filter((p) => !standsFor.has(p.herdrPane))
-    .map(({ herdrPane, harness, title, cwd, harnessSessionId }): SessionRecord => ({ herdrPane, harness, title, cwd, harnessSessionId }));
+  const sessions = await Promise.all(panes.filter((p) => !standsFor.has(p.herdrPane))
+    .map(async ({ herdrPane, harness, title, cwd, harnessSessionId }): Promise<SessionRecord> => ({
+      herdrPane, harness, title, cwd,
+      harnessSessionId: harnessSessionId ?? (harness === "claude-code" ? await launchedClaudeSession(guest, herdrPane) : null),
+    })));
   await writeSessionsFile(guest, { version: 1, recordedAt: new Date().toISOString(), sessions, failed });
   return [...sessions, ...failed.map((f) => f.record)];
 }
@@ -252,22 +260,73 @@ export async function relaunchSessions(guest: Guest): Promise<readonly RelaunchO
 
 /** Whether a foreground process in the pane is the agent's executable, which Herdr names its agent kind after. */
 async function runsAgent(guest: Guest, pane: string, kind: string): Promise<boolean> {
+  return (await agentProcesses(guest, pane, kind)).length > 0;
+}
+
+/** The argv of each foreground process in the pane that is the agent's executable. */
+async function agentProcesses(guest: Guest, pane: string, kind: string): Promise<readonly (readonly unknown[])[]> {
   const info = record(record(await herdr(guest, ["pane", "process-info", "--pane", pane]), "pane process-info").process_info, "process_info");
-  return array(info.foreground_processes ?? [], "foreground_processes").some((value) => {
+  return array(info.foreground_processes ?? [], "foreground_processes").flatMap((value) => {
     const p = record(value, "foreground process");
-    const argv = Array.isArray(p.argv) ? p.argv : [p.argv0, p.name];
+    const argv: readonly unknown[] = Array.isArray(p.argv) ? p.argv : [p.argv0, p.name];
     // An agent run by node, such as pi, shows its script as the second argument.
-    return argv.slice(0, 2).some((arg) => typeof arg === "string" && arg.split("/").at(-1) === kind);
+    return argv.slice(0, 2).some((arg) => typeof arg === "string" && arg.split("/").at(-1) === kind) ? [argv] : [];
   });
+}
+
+/**
+ * The session ID a Claude Code pane was started under, `--session-id <id>` or `--resume <id>` on its command
+ * line, for a pane Herdr reports no ID for. Null when its Claude was started without one, such as by hand, or
+ * when the pane closed meanwhile.
+ */
+async function launchedClaudeSession(guest: Guest, pane: string): Promise<string | null> {
+  let processes: Awaited<ReturnType<typeof agentProcesses>>;
+  try {
+    processes = await agentProcesses(guest, pane, agents["claude-code"]!.kind);
+  } catch (err) {
+    if (err instanceof HerdrError && err.code === "pane_not_found") return null;
+    throw err;
+  }
+  for (const argv of processes) {
+    const i = argv.findIndex((arg) => arg === "--session-id" || arg === "--resume");
+    const id = i === -1 ? undefined : argv[i + 1];
+    if (typeof id === "string" && id !== "" && !id.startsWith("-")) return id;
+  }
+  return null;
+}
+
+/**
+ * setsid detaches the server from the exec, and the redirects let the exec return without waiting on its output.
+ * PID 1 in a pylon is Gondolin's sandboxd, which never reaps the orphans it adopts, so an agent whose pane
+ * shell exits first would stay a zombie. tini -s is the subreaper for everything under Herdr instead. It
+ * is unconditional because the base image guarantees /usr/bin/tini.
+ */
+const startServer = `setsid -f tini -s -- herdr --session ${herdrSession} server </dev/null >/dev/null 2>&1`;
+
+/**
+ * The shell command a human's terminal runs in the pylon to attach to its Herdr session. With no server yet, it
+ * starts one as a session open does, so the server outlives the terminal and runs under tini, and waits for it.
+ * `herdr --session nexus` is the whole command line of each attached client, which attachedTerminals counts.
+ */
+export const attachScript = `herdr --session ${herdrSession} workspace list >/dev/null 2>&1 || { ${startServer}; i=0; until herdr --session ${herdrSession} workspace list >/dev/null 2>&1; do i=$((i + 1)); [ $i -lt ${serverStartMs / 100} ] || break; sleep 0.1; done; }; exec herdr --session ${herdrSession}`;
+
+/**
+ * How many terminals are attached to the pylon's Herdr session, such as `nexus attach` from a Mac, which count as
+ * a human's presence. Rejects when the guest cannot be counted, so the caller decides what that means.
+ */
+export async function attachedTerminals(guest: Guest, timeoutMs = callTimeoutMs): Promise<number> {
+  const { exitCode, output } = await guest.exec(["pgrep", "-c", "-x", "-f", `herdr --session ${herdrSession}`], { cwd: home, timeoutMs });
+  // pgrep prints the count, 0 included, and exits 1 when it is 0.
+  const count = Number(output.trim());
+  if ((exitCode !== 0 && exitCode !== 1) || output.trim() === "" || !Number.isInteger(count)) {
+    throw new Error(`counting attached terminals: pgrep exited ${exitCode}: ${output.trim().slice(-200)}`);
+  }
+  return count;
 }
 
 async function ensureServer(guest: Guest): Promise<void> {
   if (await serverRunning(guest)) return;
-  // setsid detaches the server from the exec, and the redirects let the exec return without waiting on its output.
-  // PID 1 in a pylon is Gondolin's sandboxd, which never reaps the orphans it adopts, so an agent whose pane
-  // shell exits first would stay a zombie. tini -s is the subreaper for everything under Herdr instead. It
-  // is unconditional because the base image guarantees /usr/bin/tini.
-  const start = await guest.exec(["sh", "-c", 'setsid -f tini -s -- herdr --session "$0" server </dev/null >/dev/null 2>&1', herdrSession], { cwd: home, timeoutMs: callTimeoutMs });
+  const start = await guest.exec(["sh", "-c", startServer], { cwd: home, timeoutMs: callTimeoutMs });
   if (start.exitCode !== 0) throw new Error(`starting the Herdr server failed with exit ${start.exitCode}: ${start.output}`);
   const deadline = Date.now() + serverStartMs;
   while (!await serverRunning(guest)) {

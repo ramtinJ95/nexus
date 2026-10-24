@@ -1,6 +1,6 @@
 # The Mac nexus CLI
 
-`nexus` runs on a Mac and drives the control plane's API: add projects, list threads, start one, message it, watch it, and archive or delete it. People use it at a shell. The Claude Code mod and the pi extension shell out to it, so this page is their contract. The code is [`src/cli/nexus.ts`](../src/cli/nexus.ts), and its transport is [`src/cli/transport.ts`](../src/cli/transport.ts). This page describes version 0.4.0, which `nexus --version` prints. Version 0.4.0 added `project add` and its route, `POST /v1/projects`. Version 0.3.0 added `unpreview` and its route, `DELETE /v1/threads/<thread>/previews/<port>`. Version 0.2.0 added `ports`, `preview`, `Preview.url`, `ThreadDetail.ports` and the `ports` of a watch `state`.
+`nexus` runs on a Mac and drives the control plane's API: add projects, list threads, start one, message it, watch it, and archive or delete it. People use it at a shell. The Claude Code mod and the pi extension shell out to it, so this page is their contract. The code is [`src/cli/nexus.ts`](../src/cli/nexus.ts), and its transport is [`src/cli/transport.ts`](../src/cli/transport.ts). This page describes version 0.5.0, which `nexus --version` prints. Version 0.5.0 added `session open`, `session close` and `attach`, the routes `POST /v1/threads/<thread>/sessions` and `DELETE /v1/threads/<thread>/sessions/<pane>`, `OpenedSession`, `Session.title`, `Preview.failed`, and the attach settings: `NEXUS_ATTACH`, and `"ssh"` and `"attach"` in the config file. Version 0.4.0 added `project add` and its route, `POST /v1/projects`. Version 0.3.0 added `unpreview` and its route, `DELETE /v1/threads/<thread>/previews/<port>`. Version 0.2.0 added `ports`, `preview`, `Preview.url`, `ThreadDetail.ports` and the `ports` of a watch `state`.
 
 This is a different program from the `nexus` inside a pylon ([`images/pylon/nexus`](../images/pylon/nexus)), which talks to its own node's probe.
 
@@ -25,7 +25,31 @@ Two settings choose the endpoint. For each one, the first of these that is set w
 | Control plane URL, `http://` only | `--url` | `NEXUS_URL` | `"url"` | `http://rj-firebat.tailc817d3.ts.net:7470` |
 | SOCKS5 proxy, `HOST:PORT`, or `none` to connect directly | `--socks` | `NEXUS_SOCKS` | `"socks"` | `localhost:1055` |
 
-An empty environment variable counts as unset. The config file is a JSON object with only those two optional keys. Any other key fails the command with exit code 64.
+An empty environment variable counts as unset. The config file is a JSON object with only those two optional keys and `"ssh"` and `"attach"`, described next. Any other key fails the command with exit code 64.
+
+### Reaching a node for `attach`
+
+`attach` opens a terminal on a pylon, which only its node reaches, so it runs `ssh` to that node. It finds the node in the thread's `pylon.node`, and the node's MagicDNS name in its `tailnetHost` from `GET /v1/nodes`. By default it runs:
+
+```sh
+ssh -t -o 'ProxyCommand=nc -X 5 -x <proxy> %h %p' <tailnetHost> nexus-attach <pylon>
+```
+
+`<proxy>` is the CLI's SOCKS5 proxy, from the table above, and with `--socks none` the `ProxyCommand` is left out. The SSH user, keys and any other options come from your `~/.ssh/config`, which can match the node's MagicDNS name.
+
+When your account on a node has another name, or your ssh config knows the node by an alias, give `attach` the node's destination in `~/.config/nexus/cli.json`. `"ssh"` maps a node's name, as `nexus nodes` lists it, to the destination ssh connects to in place of its `tailnetHost`, such as `user@host` or an alias. It still goes through the proxy. A destination that starts with `-` or holds a space fails every command with exit code 64. For example:
+
+```json
+{ "ssh": { "rj-firebat": "ramtinj@rj-firebat.tailc817d3.ts.net" } }
+``` A node with Tailscale SSH may ask you to approve the login in a browser first. `nexus-attach` is installed on every node by `deploy/install-probe.sh`.
+
+To reach a node any other way, set `NEXUS_ATTACH` or `"attach"` in `~/.config/nexus/cli.json`, in that order. Either one wins over `"ssh"`. It is a command that `attach` runs with `sh -c` instead of ssh, with `NEXUS_THREAD`, `NEXUS_PYLON`, `NEXUS_NODE` and `NEXUS_NODE_HOST` in its environment. For example:
+
+```sh
+NEXUS_ATTACH='ssh -t home-$NEXUS_NODE nexus-attach $NEXUS_PYLON' nexus attach th-0123456789ab
+# A Docker pylon on this Mac, such as the verify-nexus stack's:
+NEXUS_ATTACH='docker exec -it $NEXUS_PYLON herdr --session nexus' nexus attach th-0123456789ab
+```
 
 ## Commands
 
@@ -41,6 +65,9 @@ With `--json`, a command prints one JSON value on stdout, pretty-printed. The va
 | `preview <thread> <port> [--wait]` | `POST /v1/threads/<thread>/previews` with `{"port": number}`, then with `--wait` polls `GET /v1/threads/<thread>` | `Preview`, the port's preview |
 | `unpreview <thread> <port>` | `DELETE /v1/threads/<thread>/previews/<port>` with `{}` and its `content-length`, which answers 204. Node's `http` module frames a DELETE's body only with an explicit length. While the pylon is not running, it tries again once a second | `null` |
 | `conversation <thread>` | `GET /v1/threads/<thread>/conversation` | `ConversationView` |
+| `session open <thread> [--harness claude-code\|pi\|shell] [--title T]` | `POST /v1/threads/<thread>/sessions` with `{"harness"?: string, "title"?: string}`, which answers 201. While the pylon is not running, it tries again once a second | `OpenedSession`, the session it opened |
+| `session close <thread> <pane>` | `DELETE /v1/threads/<thread>/sessions/<pane>` with `{}`, which answers 204. While the pylon is not running, it tries again once a second | `null` |
+| `attach <thread>` | `GET /v1/threads/<thread>`, `POST .../activity` and `GET /v1/nodes`, then `ssh` to the pylon's node | Nothing. The terminal is the session's |
 | `start --project P [--title T] [--message M] [--node N] [--branch B] [--commit C]` | `POST /v1/threads`, then `POST .../messages` when `--message` is given | `Thread`, the thread that was started |
 | `send <thread> <text...> [--steer] [--request-id ID]` | `POST /v1/threads/<thread>/messages` | `{ "submission": number }` |
 | `watch <thread> [--interval MS]` | Follows `GET /v1/threads/<thread>/events` and polls `GET /v1/threads/<thread>` | A stream of JSON lines, described below |
@@ -60,6 +87,10 @@ These commands need more explanation:
 - `start` without `--title` takes the title from the first non-empty line of `--message`, trimmed. A line longer than 80 characters keeps its first 80 and gets `...` appended, so such a title is 83 characters. It needs at least one of the two. If the thread starts but its first message fails, the command fails with the message's exit code, and the error names the thread that was started.
 - `send` joins its words with single spaces. By default the message is a follow-up, so a busy run takes it after its current turn. With `--steer`, the message joins the current run after its current tool round. The API treats a second send with the same `--request-id` as the same message. A caller that retries a send should pass its own request ID, such as `msg:<uuid>`. Without one, each run mints a new ID.
 - `project add` adds a project whose threads clone `<repo-url>` and boot on node `N` unless `start --node` picks another. It sends this `Project`: `defaultBranch` is `--branch`, or `main`. `resources` is `{ cpus, memoryGiB, diskGiB }` from `--cpus`, `--memory` and `--disk`, or 2, 4 and 10. `allowedHosts` holds each `--allow-host`, and `logins` each `--login`, in the order given. `secrets` is `[]` and `preSetup` is null, which only the API can set. Without `--json` it prints `Added project <id> (<repo-url>) on <node>`. `--node` is required, and without it the command fails with exit code 64 before it sends any request. `nexus nodes` lists the nodes. A project that exists fails with exit code 5. A node the control plane does not know, an ID that is not lowercase letters, digits and hyphens starting with a letter or digit, up to 63 characters, an `https://` URL that does not parse, or a login other than `claude` or `chatgpt` fails with exit code 64. The API accepts any other non-empty `<repo-url>`, such as an SSH one. A project cannot be changed or removed from the CLI.
+- `session open` opens a session in the pylon: a Herdr workspace in the checkout, `/home/user/workspace/repo`, labelled with the title, with the harness's agent in it. The harness is `claude-code` by default, and the title is the harness's name by default, at most 80 characters. The command returns once the agent is ready or waits for its human, such as Claude Code at its login or trust screen, so a session that needs `/login` opens and waits for it. Starting an agent can take most of a minute, so the command waits up to 120 seconds for the reply, rather than the usual 30. Opening is human activity, so a paused pylon is woken, and the command tries again once a second until the pylon runs, failing with exit code 1 after 120 seconds. An archived or deleted thread fails with exit code 5, a harness other than the three with exit code 64, and a node the control plane cannot reach with exit code 1. The session is listed in the thread's `sessions` within moments, because the node reads its sessions again at once. Without `--json` it prints `Opened <harness> session "<title>" in pane <pane> of <thread>.` and how to attach.
+- `session close` closes a session's pane, which ends its agent. `<pane>` is a `herdrPane` from the thread's `sessions`. A pane that is already closed succeeds. It wakes a paused pylon and waits as `session open` does.
+- `attach` gives this terminal to the pylon's Herdr session, `herdr --session nexus`, in which every session is a workspace, until you detach from Herdr. It needs a terminal. It records human activity, which wakes a paused pylon, polls once a second until the pylon runs, and then runs `ssh` to the pylon's node, as [Reaching a node for `attach`](#reaching-a-node-for-attach) describes. An archived or deleted thread fails with exit code 5 before anything else, a failed pylon with exit code 1, and a pylon that does not run within 120 seconds with exit code 1. When ssh or the configured command exits with any code other than 0, `attach` fails with exit code 1, and a failed ssh's message points to `"ssh"` and `NEXUS_ATTACH`. On the node, `nexus-attach` asks the pylon's controller for the guest's sshd and connects to it as `user`, or uses `docker exec` for a Docker pylon. If no Herdr server runs yet, it starts one as `session open` does. While a terminal stays attached, the pylon counts a human as present, so the 20 minutes without a human that pause a pylon do not run out. Close the terminal, or detach from Herdr, to let the pylon pause. An archived thread's pylon pauses all the same, which ends the terminal.
+- To log Claude Code in, run `nexus session open <thread>`, then `nexus attach <thread>`, pick the session's workspace in Herdr, and type `/login` in Claude Code. The project's threads need `claude` among its `logins`, which only a new project can have: `nexus project add ... --login claude`. Pick the device-code or paste login, because a browser callback cannot reach the pylon. The login lives on the pylon's disk, so it survives pauses but not the thread. Every Claude Code session starts with a session ID of its own, so after an archive and an unarchive it comes back with `claude --resume <id>` and its conversation, whether or not it was logged in when it opened.
 - `retry` runs a conversation's parked tasks again. `retry-pylon` clears a failed pylon so that the planner boots it again.
 - `wake` records human activity, so a paused pylon is wanted running.
 - `ports` lists the TCP ports that something in the pylon listens on and that a preview can reach, as the pylon's node last reported them. The node reads them every 10 seconds, so a server the agent just started shows within about that long. A port is listed whether or not it has a preview, and whatever started it: a declared service, an ad hoc one, or a process the agent ran itself. Nexus's own listeners, today only sshd on port 22, are left out. "A preview can reach" means bound to 127.0.0.1, 0.0.0.0 or `::`, or to the IPv4-mapped form of 127.0.0.1 or 0.0.0.0, because the preview connects to the pylon's 127.0.0.1. A server bound only to `::1` or to another loopback address such as 127.0.0.2 is not listed, and cannot be previewed: Gondolin's ingress always connects over IPv4 to 127.0.0.1, and offers no way to choose another address. This catches dev servers that bind `localhost` where it resolves to `::1` first, as Vite and other Node servers can on Node 17 and later. Bind such a server to 0.0.0.0 or 127.0.0.1, for example `vite --host 127.0.0.1`. When `ports` lists no port, its text output gives this advice.
@@ -70,11 +101,20 @@ These commands need more explanation:
 - `unpreview` needs the pylon running, because the pylon holds the link. Unpublishing is human activity, so the first try wakes a paused pylon, and the command tries again once a second until the pylon runs. It fails with exit code 1 after 120 seconds.
 - Once `unpreview` exits 0, nothing reaches the app through the URL: the node's preview gateway has stopped routing it and answers 404 `no preview is published on <host>` itself, to a browser too. Tailscale stops serving the URL, after which a new connection to it is refused, only once the control plane's next pass publishes the previews without it, usually within a few seconds. The command does not wait for that pass.
 
-The shapes are TypeScript types. `Thread` and `Preview` are in [`src/control/registry.ts`](../src/control/registry.ts). `ThreadDetail`, `ListeningPort` and `NodeSummary` are in [`src/control/api.ts`](../src/control/api.ts). `Project` is in [`src/project.ts`](../src/project.ts). `ConversationView`, `EntryRecord`, `LiveState` and `InboxState` come from `@earendil-works/pi-durable`. Times in `Thread` are Unix milliseconds, and the observation times are ISO strings. A consumer must ignore fields it does not know.
+The shapes are TypeScript types. `Thread`, `Session` and `Preview` are in [`src/control/registry.ts`](../src/control/registry.ts). `ThreadDetail`, `ListeningPort`, `OpenedSession` and `NodeSummary` are in [`src/control/api.ts`](../src/control/api.ts). `Project` is in [`src/project.ts`](../src/project.ts). `ConversationView`, `EntryRecord`, `LiveState` and `InboxState` come from `@earendil-works/pi-durable`. Times in `Thread` are Unix milliseconds, and the observation times are ISO strings. A consumer must ignore fields it does not know.
 
-The previews and ports in `ThreadDetail` have these shapes:
+The sessions, previews and ports in `ThreadDetail` have these shapes:
 
 ```ts
+type Session = {
+  pylon: string;                       // the pylon's ID
+  herdrPane: string;                   // the session's pane, which session close takes
+  harness: "claude-code" | "pi" | "shell";  // an agent Nexus does not start, such as one run by hand, reads as shell
+  harnessSessionId: string | null;     // the Claude Code session ID or the pi session file, which a wake resumes
+  status: "working" | "idle" | "blocked" | "done" | "unknown";
+  title: string | null;                // the session's title, its Herdr workspace's label. null when last observed by a probe from before 0.5.0
+};
+type OpenedSession = { herdrPane: string; harness: "claude-code" | "pi" | "shell"; title: string };  // what session open prints
 type Preview = {
   pylon: string;      // the pylon's ID
   service: string;    // the service it previews: a declared or ad hoc service, or port-<port> for a linked port
@@ -89,6 +129,7 @@ type ListeningPort = {
   preview: Preview | null;   // that service's preview, or null while it has none
 };
 // In ThreadDetail:
+//   sessions: Session[]               every Herdr pane in the pylon, as its node last reported it
 //   previews: Preview[]               every preview of the thread, served or not, listening or not
 //   ports: ListeningPort[] | null     in port order. [] while the pylon is not running. null while its node could not read them
 ```

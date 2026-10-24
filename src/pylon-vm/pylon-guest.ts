@@ -33,7 +33,21 @@ const execReplySchema = z.object({
 	exitCode: z.number().int().optional(),
 	truncated: z.boolean().optional(),
 });
-const shellReplySchema = z.object({ access: z.strictObject({ user: z.string(), port: z.number().int(), identityFile: z.string() }) });
+/** The controller's answer to the `shell` action: the guest's sshd on a loopback port, and the key it lets in. */
+export const shellReplySchema = z.object({ access: z.strictObject({ user: z.string(), port: z.number().int(), identityFile: z.string() }) });
+
+/**
+ * ssh's arguments for the guest's sshd up to its remote command. Without a terminal, -T. With one, -t, and escapes
+ * off, so the person at it cannot reach ssh's command line, which could forward ports as the probe's user.
+ */
+export function guestSsh({ access }: z.infer<typeof shellReplySchema>, terminal: boolean): string[] {
+	return [
+		"-F", "none", ...terminal ? ["-t", "-e", "none"] : ["-T"], "-p", String(access.port), "-i", access.identityFile,
+		"-o", "BatchMode=yes", "-o", "IdentitiesOnly=yes", "-o", "StrictHostKeyChecking=no", "-o", "UserKnownHostsFile=/dev/null",
+		"-o", "LogLevel=ERROR", "-o", "ConnectTimeout=15", "-o", "ForwardAgent=no", "-o", "ClearAllForwardings=yes",
+		`${access.user}@127.0.0.1`,
+	];
+}
 const factsSchema = z.array(z.strictObject({
 	name: z.string(),
 	state: z.enum(["starting", "ready", "failed", "stopped"]),
@@ -79,13 +93,8 @@ export function pylonGuest(pylonId: PylonId, dir: string, run: (action: Record<s
 		async stream(request, log) {
 			// OpenSSH sends a window change only when its own terminal resizes, and the probe has no terminal.
 			if (request.pty !== null) throw new Error(`${pylonId}: pylon VM streams carry raw pipes only, because nothing could resize a pty`);
-			const { access } = shellReplySchema.parse(await run({ action: "shell", name, user: "user" }));
-			return processStream("ssh", [
-				"-F", "none", "-T", "-p", String(access.port), "-i", access.identityFile,
-				"-o", "BatchMode=yes", "-o", "IdentitiesOnly=yes", "-o", "StrictHostKeyChecking=no", "-o", "UserKnownHostsFile=/dev/null",
-				"-o", "LogLevel=ERROR", "-o", "ConnectTimeout=15", "-o", "ForwardAgent=no", "-o", "ClearAllForwardings=yes",
-				`${access.user}@127.0.0.1`, "--", remoteCommand(request.argv),
-			], log);
+			const shell = shellReplySchema.parse(await run({ action: "shell", name, user: "user" }));
+			return processStream("ssh", [...guestSsh(shell, false), "--", remoteCommand(request.argv)], log);
 		},
 
 		async writeFiles(files) {

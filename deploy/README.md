@@ -19,6 +19,8 @@ The probe runs as the system user `nexus`. These are its paths:
 | `/var/lib/nexus/artifacts` | Images and templates, one directory per ID, which `backend.artifacts` in `probe.json` names. A `probe.json` from before the store, with a `backend.images` map of `<store>/<image ID>` directories, is read as that store. |
 | `/var/lib/nexus/preview-routes.json` | Which pylon each published preview port belongs to. |
 | `/opt/nexus/current` | The release the probe runs. |
+| `/usr/local/bin/nexus-attach` | Attaches a terminal to a pylon's Herdr session. See [Attach from a Mac](#attach-from-a-mac). |
+| `/etc/sudoers.d/nexus-attach` | Lets the group `nexus-attach` run `nexus-attach` as `nexus`. |
 
 ### Previews need the probe to be the tailscale operator
 
@@ -43,6 +45,10 @@ To let pylons clone and push SSH remotes, add the node's git key to the backend 
 ```
 
 Make the key readable by `nexus` only: `chown nexus:nexus /etc/nexus/git_ed25519 && chmod 0400 /etc/nexus/git_ed25519`. The key never enters a pylon. Without `gitSsh`, the node boots only pylons whose repository and dotfiles URLs are HTTPS.
+
+### Attach from a Mac
+
+`nexus attach <thread>` on a Mac runs `ssh -t <node> nexus-attach <pylon>`, which gives the terminal to the pylon's Herdr session (see `docs/cli.md`). The script installs `/usr/local/bin/nexus-attach` from `deploy/nexus-attach`. Only `nexus` may use the pylons' control sockets under `/var/lib/nexus/pylons`, so `nexus-attach` runs itself as `nexus` through sudo, and `/etc/sudoers.d/nexus-attach` lets the group `nexus-attach` do that without a password. The script creates the group and adds the user who ran it with sudo, and prints that it did. Add anyone else with `sudo usermod --append --groups nexus-attach <user>`. Group membership applies from a user's next login. Each `nexus attach` is a new ssh login, so it works at once, but a shell that was already open on the node does not have the group until you log in again. Don't add them to the group `nexus`, which reads `secrets.env`.
 
 ## Install or upgrade the control plane
 

@@ -162,14 +162,22 @@ export interface RunningFacts {
   sessions: readonly SessionFact[] | null; // null when Herdr could not be read. No Herdr server is an empty list
   git: GitFacts | null; // null until the first poll, or when the checkout is missing
   declaredOutputs: readonly DeclaredOutput[];
-  /** Open streams with a pty, counted as human presence. A raw pipe is not counted: the harness keeps one open for as long as the pylon runs. */
+  /**
+   * Terminals attached to the pylon, counted as human presence: open streams with a pty, and terminals attached to
+   * its Herdr session in the guest, such as `nexus attach`. A raw pipe is not counted: the harness keeps one open
+   * for as long as the pylon runs.
+   */
   attachedClients: number;
 }
 
 export interface ServiceFact { name: string; state: "starting" | "ready" | "failed" | "stopped"; port: number; declared: boolean; wantsPreview: boolean }
 export interface ListeningFact { port: number }
 /** `unknown` is Herdr's word for a pane it cannot classify, which every plain shell is. */
-export interface SessionFact { herdrPane: string; harness: SessionHarness; harnessSessionId: string | null; status: "working" | "idle" | "blocked" | "done" | "unknown" }
+export interface SessionFact {
+  herdrPane: string; harness: SessionHarness; harnessSessionId: string | null; status: "working" | "idle" | "blocked" | "done" | "unknown";
+  /** The session's title, its Herdr workspace's label. A probe from before titles were reported sends none. */
+  title?: string;
+}
 export interface GitFacts { head: string; branch: string | null; dirty: boolean; branches: readonly { name: string; head: string; pushedAs: string | null }[] }
 export type DeclaredOutput =
   | { id: string; kind: "file"; path: string; title: string | null; sha256: string }

@@ -1,0 +1,13 @@
+#!/bin/sh
+# nexus-attach <pylon>: gives this terminal to the pylon's Herdr session, until you detach. deploy/install-probe.sh
+# installs it as /usr/local/bin/nexus-attach, and `nexus attach <thread>` on a Mac runs it over `ssh -t`.
+#
+# Only the probe's user `nexus` may use the pylons' control sockets, so it runs itself again as `nexus` through
+# sudo. /etc/sudoers.d/nexus-attach lets the group `nexus-attach` do that without a password. It runs
+# src/probe/attach.ts from the release the probe runs, which checks the pylon ID and takes nothing else.
+set -eu
+if [ "$(id -un)" != nexus ]; then
+  exec sudo -H -u nexus /usr/local/bin/nexus-attach "$@"
+fi
+export PATH=/usr/local/bin:/usr/bin
+exec node /opt/nexus/current/src/probe/attach.ts /etc/nexus/probe.json "$@"

@@ -373,7 +373,8 @@ test("observations carry session facts from Herdr, and null when Herdr cannot be
   let readable = true;
   const guest = fakeGuest((argv, herdr) => {
     if (!herdr && argv[2]?.includes(outputsDir)) return { exitCode: 0, output: "" };
-    assert.ok(herdr && argv[0] === "api" && argv[1] === "snapshot", "observing runs only herdr api snapshot and the outputs listing");
+    if (!herdr && argv[0] === "pgrep") return { exitCode: 1, output: "0\n" };
+    assert.ok(herdr && argv[0] === "api" && argv[1] === "snapshot", "observing runs only herdr api snapshot, the outputs listing and the count of attached terminals");
     return readable
       ? herdrOk(herdrSnapshot([{ id: "w1", label: "review" }], [herdrPane("w1:p1", "w1", "claude", "working", { kind: "id", value: "bd2c2d6b" })]))
       : { exitCode: 1, output: "Error: exec failed" };
@@ -387,7 +388,7 @@ test("observations carry session facts from Herdr, and null when Herdr cannot be
       return p?.phase === "running" ? p.sessions : assert.fail("the pylon runs");
     }
   };
-  assert.deepEqual(await sessionsSeen(), [{ herdrPane: "w1:p1", harness: "claude-code", harnessSessionId: "bd2c2d6b", status: "working" }]);
+  assert.deepEqual(await sessionsSeen(), [{ herdrPane: "w1:p1", harness: "claude-code", harnessSessionId: "bd2c2d6b", status: "working", title: "review" }]);
   readable = false;
   assert.equal(await sessionsSeen(), null);
 });
@@ -517,6 +518,39 @@ test("only streams with a pty count as attached clients", async (t) => {
   await raw.close();
   await pty.close();
   assert.deepEqual([await raw.done, await pty.done], [{ kind: "exited", code: 0 }, { kind: "exited", code: 0 }]);
+});
+
+test("terminals attached to Herdr in the guest, such as nexus attach, count as attached clients", async (t) => {
+  const guest = fakeGuest((argv, herdr) => herdr ? herdrError("server_not_running")
+    : argv[0] === "pgrep" ? { exitCode: 0, output: "2\n" } : { exitCode: 0, output: "" });
+  const { client } = await setup(t, {}, guest);
+  await running(client);
+  for await (const e of client.observe(AbortSignal.timeout(5000))) {
+    const p = e.type === "snapshot" ? e.observation.pylons[0] : assert.fail(e.type);
+    assert.ok(p?.phase === "running" && p.attachedClients === 2, JSON.stringify(p));
+    break;
+  }
+});
+
+test("a count of attached terminals that fails reads as none, is logged once, and fails nothing else of the observation", async (t) => {
+  const logged: string[] = [];
+  let counted = false;
+  const guest = fakeGuest((argv, herdr) => herdr ? herdrError("server_not_running")
+    : argv[0] === "pgrep" ? (counted ? { exitCode: 0, output: "1\n" } : { exitCode: 127, output: "sh: pgrep: not found" }) : { exitCode: 0, output: "" });
+  const { client } = await setup(t, { log: (line) => logged.push(line) }, guest);
+  await running(client);
+  const attachedClients = async () => {
+    for await (const e of client.observe(AbortSignal.timeout(5000))) {
+      const p = e.type === "snapshot" ? e.observation.pylons[0] : assert.fail(e.type);
+      return p?.phase === "running" ? p.attachedClients : assert.fail(JSON.stringify(p));
+    }
+  };
+  assert.equal(await attachedClients(), 0);
+  assert.equal(await attachedClients(), 0);
+  assert.equal(logged.filter((line) => line.includes("attached terminals")).length, 1, logged.join("\n"));
+  assert.match(logged.find((line) => line.includes("attached terminals"))!, /pgrep exited 127: sh: pgrep: not found. They count as none until a count succeeds/);
+  counted = true;
+  assert.equal(await attachedClients(), 1, "a count that succeeds again is reported");
 });
 
 test("a dropped connection is a lost stream, and the guest process's stdin ends", async (t) => {
@@ -682,6 +716,41 @@ test("a link-port command links the port in the guest, answers its service, and 
   await assert.rejects(client.command(pylonId, { kind: "link-port", port: 0 }), /HTTP 400: command.port is not an integer from 1 to 65535/);
   await assert.rejects(client.command(pylonId, { kind: "link-port", port: 22 }), /HTTP 400: command.port 22 is Nexus's own/);
   assert.deepEqual(linked, [3000], "a refused port reaches no guest");
+});
+
+test("opening or closing a session publishes a snapshot that lists the change", async (t) => {
+  let panes: ReturnType<typeof herdrPane>[] = [];
+  const guest = fakeGuest((argv, herdr) => {
+    if (!herdr) return { exitCode: 0, output: "" };
+    const sub = argv.slice(0, 2).join(" ");
+    if (sub === "api snapshot") return herdrOk(herdrSnapshot([{ id: "w1", label: "review" }], panes));
+    if (sub === "workspace list") return herdrOk({ type: "workspace_list", workspaces: [] });
+    if (sub === "workspace create") {
+      panes = [herdrPane("w1:p1", "w1", "claude", "blocked")];
+      return herdrOk({ type: "workspace_created", workspace: { workspace_id: "w1" }, tab: { tab_id: "w1:t1" }, root_pane: { pane_id: "w1:p1" } });
+    }
+    if (sub === "agent start") return herdrError("agent_not_ready", "waiting at login");
+    if (sub === "pane close") {
+      panes = [];
+      return herdrOk({ type: "ok" });
+    }
+    throw new Error(`unscripted ${sub}`);
+  });
+  const { client } = await setup(t, {}, guest);
+  await running(client);
+  const abort = new AbortController();
+  t.after(() => abort.abort());
+  const events = client.observe(abort.signal)[Symbol.asyncIterator]();
+  assert.equal((await events.next()).value?.type, "snapshot");
+  const sessions = async () => {
+    const e = (await events.next()).value;
+    const p = e?.type === "snapshot" ? e.observation.pylons[0] : assert.fail(`a snapshot, not ${e?.type}`);
+    return p?.phase === "running" ? p.sessions?.map((f: { title?: string }) => f.title) : assert.fail("the pylon runs");
+  };
+  await client.command(pylonId, { kind: "open-session", harness: "claude-code", title: "review" });
+  assert.deepEqual(await sessions(), ["review"], "the control plane sees the new session without waiting a minute");
+  await client.command(pylonId, { kind: "close-session", herdrPane: "w1:p1" });
+  assert.deepEqual(await sessions(), []);
 });
 
 test("an unlink-port command waits for a read in flight, which is published before it answers, and the next read leaves the port out", async (t) => {

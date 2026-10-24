@@ -184,7 +184,11 @@ export interface Project {
 export interface SecretGrant { name: string; hosts: readonly string[] }
 export type LoginKind = "claude" | "chatgpt";
 
-/** One table of the hosts each interactive login needs. Evidence: S2 and S5. */
+/**
+ * One table of the hosts each interactive login needs. Evidence: S2 and S5, and for Claude Code the required hosts
+ * that code.claude.com/docs/en/network-config lists for a claude.ai login. platform.claude.com takes the OAuth
+ * token exchange and refresh too. Its optional hosts are left out, such as Datadog telemetry and claude.ai connectors.
+ */
 export const loginHosts: { readonly [K in LoginKind]: readonly string[] } = {
   claude: ["api.anthropic.com", "claude.ai", "claude.com", "platform.claude.com", "downloads.claude.ai"],
   chatgpt: ["auth.openai.com", "chatgpt.com", "api.openai.com"],
