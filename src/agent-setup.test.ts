@@ -301,6 +301,15 @@ test("pi packages: only npm with an installed version or a local path in the dot
   ]);
 });
 
+test("a pi package leave-out names the npm package, so a settings entry that pins a version is left out too", () => {
+  const mac = thisMac();
+  const pinned = { ...mac, pi: { ...mac.pi, packages: mac.pi.packages.map((p) => (p === "npm:@ramtinj95/pi-nexus" ? "npm:@ramtinj95/pi-nexus@0.5.0" : p)) } };
+  const { setup, leftOut, notes } = captured(plan(pinned));
+  assert.ok(!setup.pi.packages.some((p) => p.kind === "npm" && p.name === "@ramtinj95/pi-nexus"), "pi-nexus is not shipped");
+  assert.ok(leftOut.some((rule) => rule.kind === "pi-package" && rule.name === "npm:@ramtinj95/pi-nexus"));
+  assert.ok(!notes.some((note) => note.includes("pi-nexus")), notes.join("\n"));
+});
+
 test("two shipped skills with one name are refused, since the image installs each under its name", () => {
   const mac = thisMac();
   const twin = { ...mac, pi: { ...mac.pi, skills: [...mac.pi.skills, skill(claudeSkills, "grok")] } };
