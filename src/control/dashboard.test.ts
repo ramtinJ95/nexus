@@ -331,7 +331,7 @@ test("a paused pylon's preview keeps its link, labelled paused, unless the threa
   assert.deepEqual(await previews(), { previews: "Previews 1 web paused rj-firebat.tail.ts.net:8443 Unarchive the thread to open it.", linked: false }, "an archived thread's running pylon offers no link");
 });
 
-test("a published preview whose service failed shows failed, with why and no link", async (t) => {
+test("a published preview whose service is starting shows starting and one whose service failed shows failed, with why, neither with a link", async (t) => {
   const s = await seeded(t);
   const fix = await s.start("acme", "Fix checkout");
   const web = (state: ServiceFact["state"]): ServiceFact => ({ name: "web", state, port: 8003, declared: true, wantsPreview: true });
@@ -346,6 +346,9 @@ test("a published preview whose service failed shows failed, with why and no lin
   };
   s.observeWith({ services: [web("ready")], listening: [8003] }, fix);
   assert.deepEqual(await page(), { previews: "Previews 1 web Open ↗ rj-firebat.tail.ts.net:8443", strip: "running · rj-firebat web ↗ 0 outputs", linked: true });
+
+  s.observeWith({ services: [web("starting")] }, fix);
+  assert.deepEqual(await page(), { previews: "Previews 1 web starting rj-firebat.tail.ts.net:8443", strip: "running · rj-firebat web, starting 0 outputs", linked: false }, "its URL answers 502 until the service is ready");
 
   s.observeWith({ services: [web("failed")] }, fix);
   assert.deepEqual(await page(), {

@@ -383,7 +383,7 @@ test("ports lists what the pylon listens on, and preview publishes one and waits
   assert.equal((await s.nexus(["preview", thread.id, "http"])).code, 64);
 });
 
-test("show reports a published preview whose service failed as not ready, and why", async (t) => {
+test("show reports a published preview whose service is starting as not ready, and one whose service failed as not ready, and why", async (t) => {
   const s = await setup(t);
   const thread: Thread = await s.json(["start", "--project", "acme", "--title", "failed web"]);
   const web = (state: ServiceFact["state"]): ServiceFact => ({ name: "web", state, port: 8003, declared: true, wantsPreview: true });
@@ -392,6 +392,16 @@ test("show reports a published preview whose service failed as not ready, and wh
   s.registry.apply({ record: "preview", pylonId: thread.pylonId, service: "web", httpsPort: 10200, ready: true });
   const preview = { pylon: thread.pylonId, service: "web", httpsPort: 10200, ready: true, failed: null, url: "https://rj-firebat.tail.ts.net:10200/" };
   assert.deepEqual((await s.json(["show", thread.id])).previews, [preview]);
+
+  observeRunning(s, thread, [web("starting")], [8003]);
+  assert.deepEqual((await s.json(["show", thread.id])).previews, [{ ...preview, ready: false }], "the node publishes it, but it answers 502 until the service is ready");
+  assert.match((await s.nexus(["show", thread.id])).stdout, new RegExp(`^preview: web at ${preview.url}, not ready$`, "m"));
+  assert.equal((await s.nexus(["ports", thread.id])).stdout, `8003  web  ${preview.url} (not served yet)\n`);
+  s.probeAnswers(async () => ({ kind: "link-port", service: "web" })); // a port a declared service owns is previewed under it
+  const waiting = s.json(["preview", thread.id, "8003", "--wait"]);
+  await new Promise((r) => setTimeout(r, 1500)); // the wait polls while the service starts
+  observeRunning(s, thread, [web("ready")], [8003]);
+  assert.deepEqual(await waiting, preview, "--wait returns once the service is ready");
 
   observeRunning(s, thread, [web("failed")], []);
   const failed = "the service web failed. `nexus service logs web` in the pylon shows why";
