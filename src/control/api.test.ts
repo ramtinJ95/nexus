@@ -9,7 +9,7 @@ import { maxStreams, startApi, type ThreadDetail, type ThreadRow } from "./api.t
 import { readEvents } from "./event-reader.ts";
 import { fakeHarness } from "./fake-harness.ts";
 import { openRegistry, type Thread } from "./registry.ts";
-import { liveHashOf } from "../project.ts";
+import { githubTokenGrant, liveHashOf } from "../project.ts";
 import type { CommandResult, JobId, NodeName, PylonCommand, PylonId, ServiceFact, TailnetNodeId } from "../protocol.ts";
 
 const node = "rj-firebat" as NodeName;
@@ -185,7 +185,7 @@ test("starting a thread creates its pylon, boots fresh from the current image, a
   assert.deepEqual(pylon.boot, {
     pylonId: thread.pylonId, image: image.id, resources: project.resources,
     network: { allowedHosts: ["api.openai.com", "api.stripe.com", "auth.openai.com", "chatgpt.com", "registry.npmjs.org"], secrets: project.secrets },
-    repo: { url: project.repoUrl, checkout: { branch: "main", commit: "origin/main" } },
+    repo: { kind: "clone", url: project.repoUrl, checkout: { branch: "main", commit: "origin/main" } },
     dotfiles,
   });
   assert.deepEqual(pylon.live.previews, [], "ports are allocated once the pylon reports services that want them");
@@ -196,6 +196,32 @@ test("starting a thread creates its pylon, boots fresh from the current image, a
   });
   assert.equal(pylon.liveHash, liveHashOf(pylon.live));
   assert.equal(pylon.submitted, null);
+});
+
+test("a scratch project has no repository, and each of its threads starts an empty one on its branch", async (t) => {
+  const s = await setup(t);
+  const scratch = { ...project, id: "sketch", repoUrl: null, allowedHosts: [], logins: [], secrets: [githubTokenGrant] };
+  assert.deepEqual(await s.call("POST", "/v1/projects", scratch), { status: 201, body: scratch });
+  assert.deepEqual((await s.call("GET", "/v1/projects")).body, [scratch]);
+  assert.equal((await s.call("POST", "/v1/projects", { ...scratch, id: "empty-url", repoUrl: "" })).status, 400, "only null makes a scratch project");
+  assert.equal((await s.call("POST", "/v1/images", image)).status, 201);
+  assert.equal((await s.call("PUT", "/v1/images/current", { image: image.id })).status, 204);
+
+  const started = await s.call("POST", "/v1/threads", { project: "sketch", title: "Sketch" });
+  assert.equal(started.status, 201, JSON.stringify(started.body));
+  const pylon = s.registry.pylon(started.body.pylonId)!;
+  assert.deepEqual(pylon.boot.repo, { kind: "empty", branch: "main" });
+  assert.deepEqual(pylon.boot.network, { allowedHosts: ["api.github.com", "github.com"], secrets: [githubTokenGrant] }, "the grant opens GitHub, and no repo host joins");
+  assert.match(pylon.live.overlay[2]!.content, /new repository on branch main with no commits and no remote/);
+
+  const trunk = await s.call("POST", "/v1/threads", { project: "sketch", title: "Trunk", branch: "trunk" });
+  assert.deepEqual(s.registry.pylon(trunk.body.pylonId)!.boot.repo, { kind: "empty", branch: "trunk" });
+
+  const pinned = await s.call("POST", "/v1/threads", { project: "sketch", title: "Pinned", commit: "abc123" });
+  assert.equal(pinned.status, 400);
+  assert.match(pinned.body.error, /sketch is a scratch project, so it has no commit to check out/);
+  assert.equal(s.registry.threads("sketch" as Thread["project"]).length, 2, "no thread was created");
+  assert.equal(s.calls.length, 2, "no conversation was started");
 });
 
 test("a pylon's allowlist reaches its project's HTTPS repo host and the HTTPS dotfiles host", async (t) => {

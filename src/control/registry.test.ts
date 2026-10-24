@@ -7,13 +7,13 @@ import { join } from "node:path";
 import { openRegistry, type StoredPylon, type Thread, type ThreadId } from "./registry.ts";
 import { newPylonRecord } from "../tick.ts";
 import type { JobId, LiveHash, NodeName, NodeObservation, PylonId, TailnetNodeId } from "../protocol.ts";
-import type { Project, ProjectId } from "../project.ts";
+import type { ProjectId, RemoteProject } from "../project.ts";
 import type { ImageManifest, TemplateRecord } from "../images.ts";
 
 const node = "rj-firebat" as NodeName;
 const threadId = "th-1" as ThreadId;
 const pylonId = "pylon-th-1" as PylonId;
-const project: Project = {
+const project: RemoteProject = {
   id: "acme" as ProjectId, repoUrl: "git@example.com:acme.git", defaultBranch: "main", defaultNode: node,
   resources: { cpus: 2, memoryGiB: 4, diskGiB: 10 }, allowedHosts: ["registry.npmjs.org"],
   secrets: [{ name: "TOKEN", hosts: ["api.example.com"] }], logins: ["chatgpt"], preSetup: null,
@@ -26,7 +26,7 @@ const { desired: _, ...pylon } = newPylonRecord({
   thread: threadId, pylonId, node, desired: "running",
   boot: {
     pylonId, image: "img-000000000000", resources: project.resources, network: { allowedHosts: ["a.example"], secrets: [] },
-    repo: { url: project.repoUrl, checkout: { branch: "main", commit: "origin/main" } },
+    repo: { kind: "clone", url: project.repoUrl, checkout: { branch: "main", commit: "origin/main" } },
     dotfiles: { repo: "https://example.com/dotfiles.git", ref: "main" },
   },
   firstBoot: { kind: "fresh", preSetup: null },
@@ -346,6 +346,29 @@ test("a registry from before session titles keeps its sessions, untitled until t
   assert.deepEqual(registry.sessions(pylonId), [{ pylon: pylonId, herdrPane: "w1:p1", harness: "claude-code", harnessSessionId: null, status: "idle", title: null }]);
   registry.apply({ record: "session", pylonId, herdrPane: "w1:p1", fact: { herdrPane: "w1:p1", harness: "claude-code", harnessSessionId: "s", status: "idle", title: "review" } });
   assert.equal(registry.sessions(pylonId)[0]!.title, "review");
+});
+
+test("a registry from before repository kinds reads every stored repo, booted or submitted, as a clone", async (t) => {
+  const { DatabaseSync } = await import("node:sqlite");
+  const path = tempDb();
+  const first = seeded(path);
+  const envelope = { jobId: "j1" as JobId, node, issuedAt: "2027-01-01T00:00:00.000Z", notAfter: "2027-01-01T00:00:30.000Z" };
+  const spawning: StoredPylon = { ...pylon, submitted: { ...envelope, job: { kind: "spawn", pylonId, boot: { ...pylon.boot, source: pylon.firstBoot }, live: pylon.live, liveHash: pylon.liveHash } } };
+  first.savePylon(spawning);
+  const deleting = addPylon(first, "th-2");
+  const deletion: StoredPylon = { ...first.pylon(deleting)!, submitted: { ...envelope, jobId: "j2" as JobId, job: { kind: "delete", pylonId: deleting } } };
+  first.savePylon(deletion);
+  first.close();
+  const db = new DatabaseSync(path);
+  db.exec(`UPDATE pylons SET boot = json_remove(boot, '$.repo.kind'), submitted = CASE WHEN json_extract(submitted, '$.job.kind') = 'spawn'
+    THEN json_remove(submitted, '$.job.boot.repo.kind') ELSE submitted END; PRAGMA user_version = 5`);
+  assert.equal((db.prepare("SELECT count(*) AS n FROM pylons WHERE boot LIKE '%\"kind\":\"clone\"%' OR submitted LIKE '%\"clone\"%'").get() as { n: number }).n, 0, "the old shape has no kind");
+  db.close();
+
+  const registry = openRegistry(path);
+  t.after(() => registry.close());
+  assert.deepEqual(registry.pylon(pylonId), spawning);
+  assert.deepEqual(registry.pylon(deleting), deletion);
 });
 
 test("a registry from before node-unique preview ports keeps its previews", async (t) => {

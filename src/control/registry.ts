@@ -156,6 +156,13 @@ const migrations: readonly string[] = [
   `
   ALTER TABLE sessions ADD COLUMN title TEXT;
   `,
+  // BootInputs.repo became RepoInit. Every stored repo was a clone, which is the old shape plus its kind, in a
+  // pylon's boot and in a spawn it has submitted, which a retry sends again.
+  `
+  UPDATE pylons SET boot = json_set(boot, '$.repo.kind', 'clone');
+  UPDATE pylons SET submitted = json_set(submitted, '$.job.boot.repo.kind', 'clone')
+    WHERE submitted IS NOT NULL AND json_extract(submitted, '$.job.kind') = 'spawn';
+  `,
 ];
 
 type Row = Record<string, unknown>;

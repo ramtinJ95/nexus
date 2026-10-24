@@ -75,7 +75,7 @@ function bootOf(pylonId: string, changes: Partial<BootInputs> = {}): BootInputs 
     source: { kind: "fresh", preSetup: null },
     resources: { cpus: 2, memoryGiB: 4, diskGiB: 8 },
     network: { allowedHosts: ["github.com"], secrets: [] },
-    repo: { url: "https://github.com/octocat/Hello-World.git", checkout: { branch: "master", commit: "7fd1a60b01f91b314f59955a4e4d4e80d8edf11d" } },
+    repo: { kind: "clone", url: "https://github.com/octocat/Hello-World.git", checkout: { branch: "master", commit: "7fd1a60b01f91b314f59955a4e4d4e80d8edf11d" } },
     dotfiles: { repo: "https://github.com/octocat/Spoon-Knife.git", ref: "main" },
     ...changes,
   };
@@ -130,7 +130,7 @@ test("a state root too long for a pylon's control socket is refused when the bac
 
 test("an SSH repo on a node without a git SSH key fails as secret-missing and creates nothing", async () => {
   const { backend, instances } = await backendWith();
-  const boot = bootOf("pylon-ssh", { repo: { url: "git@github.com:acme/web.git", checkout: { branch: "main", commit: "c0ffee" } } });
+  const boot = bootOf("pylon-ssh", { repo: { kind: "clone", url: "git@github.com:acme/web.git", checkout: { branch: "main", commit: "c0ffee" } } });
   await assert.rejects(backend.ensureRunning(boot, live, signal()), { code: "secret-missing", message: /github\.com:acme\/web\.git over SSH, and this node has no git SSH key/ });
   assert.equal(existsSync(join(instances, "pylon-ssh")), false);
 });
@@ -148,8 +148,8 @@ test("SSH remotes Gondolin cannot serve are refused before any boot", async () =
   await writeFile(keyFile, "not a real key\n");
   const { backend } = await backendWith({ gitSsh: { privateKeyFile: keyFile, knownHostsFile: keyFile } });
   const checkout = { branch: "main", commit: "c0ffee" };
-  await assert.rejects(backend.ensureRunning(bootOf("pylon-flat", { repo: { url: "git@git.example.com:web.git", checkout } }), live, signal()), { code: "invalid", message: /has no owner in its path/ });
-  const twoUsers = bootOf("pylon-users", { repo: { url: "alice@git.example.com:acme/web.git", checkout }, dotfiles: { repo: "bob@git.example.com:bob/dotfiles.git", ref: "main" } });
+  await assert.rejects(backend.ensureRunning(bootOf("pylon-flat", { repo: { kind: "clone", url: "git@git.example.com:web.git", checkout } }), live, signal()), { code: "invalid", message: /has no owner in its path/ });
+  const twoUsers = bootOf("pylon-users", { repo: { kind: "clone", url: "alice@git.example.com:acme/web.git", checkout }, dotfiles: { repo: "bob@git.example.com:bob/dotfiles.git", ref: "main" } });
   await assert.rejects(backend.ensureRunning(twoUsers, live, signal()), { code: "invalid", message: /used as alice and as bob/ });
 });
 
@@ -164,7 +164,7 @@ test("the git SSH key and secret values reach the controller but never the insta
   const boot = bootOf("pylon-key", {
     resources: { cpus: 3, memoryGiB: 5, diskGiB: 8 },
     network: { allowedHosts: ["api.stripe.com"], secrets: [{ name: "STRIPE_KEY", hosts: ["api.stripe.com"] }] },
-    repo: { url: "git@github.com:acme/web.git", checkout: { branch: "main", commit: "c0ffee" } },
+    repo: { kind: "clone", url: "git@github.com:acme/web.git", checkout: { branch: "main", commit: "c0ffee" } },
   });
   // The assets are a bare manifest, so the controller fails once it reaches Gondolin.
   await assert.rejects(backend.ensureRunning(boot, live, AbortSignal.timeout(60_000)));
@@ -186,7 +186,7 @@ test("a secret grant whose value this node lacks fails as secret-missing", async
 
 test("a repo URL that is neither SSH nor HTTPS is invalid", async () => {
   const { backend } = await backendWith();
-  const boot = bootOf("pylon-url", { repo: { url: "file:///srv/repo.git", checkout: { branch: "main", commit: "c0ffee" } } });
+  const boot = bootOf("pylon-url", { repo: { kind: "clone", url: "file:///srv/repo.git", checkout: { branch: "main", commit: "c0ffee" } } });
   await assert.rejects(backend.ensureRunning(boot, live, signal()), { code: "invalid", message: /neither an SSH nor an HTTPS git URL/ });
 });
 
@@ -388,6 +388,34 @@ test("a template boot copies the template's disk in and sets up only the pylon's
   assert.equal(record.config.retrySetup, true, "a failed checkout is not kept on the disk");
   assert.match(record.config.setup[0], /git remote set-url origin .*Hello-World\.git.* && git fetch --quiet origin && git checkout --quiet -B .*master.* .*7fd1a60b/);
   assert.deepEqual(JSON.parse(await readFile(join(dir, "intent.json"), "utf8")), { prepare: false });
+});
+
+test("a scratch pylon's setup initializes an empty repository on its branch and fetches nothing", async () => {
+  const { backend, instances } = await backendWith();
+  const boot = bootOf("pylon-scratch", { source: { kind: "fresh", preSetup: "echo pre-setup" }, repo: { kind: "empty", branch: "trunk" } });
+  // No git SSH key on this node, and the HTTPS dotfiles need none, so the boot reaches the controller, which fails at Gondolin.
+  await assert.rejects(backend.ensureRunning(boot, live, AbortSignal.timeout(60_000)));
+  const { config } = JSON.parse(await readFile(join(instances, "pylon-scratch", "record.json"), "utf8"));
+  assert.equal(config.setup.length, 4);
+  assert.match(config.setup[0], /^chown user:user /);
+  assert.match(config.setup[1], /git init --quiet --initial-branch=.*trunk.* .*\/home\/user\/workspace\/repo/);
+  assert.match(config.setup[2], /echo pre-setup/);
+  assert.match(config.setup[3], /\.nexus\/setup/);
+  assert.ok(config.setup.every((command: string) => !/clone|fetch/.test(command)), "nothing is fetched");
+});
+
+test("a scratch pylon's only SSH remote is its dotfiles repository", async () => {
+  const { backend } = await backendWith();
+  const boot = bootOf("pylon-scratch-ssh", { repo: { kind: "empty", branch: "main" }, dotfiles: { repo: "git@git.example.com:me/dotfiles.git", ref: "main" } });
+  await assert.rejects(backend.ensureRunning(boot, live, signal()), { code: "secret-missing", message: "pylon-scratch-ssh uses git.example.com:me/dotfiles.git over SSH, and this node has no git SSH key" });
+});
+
+test("a template boot of a scratch pylon is invalid and creates nothing", async () => {
+  const { backend, instances } = await backendWith();
+  await publishedTemplate("tpl-scratch00000", image);
+  const boot = bootOf("pylon-scratch-tpl", { source: { kind: "template", template: "tpl-scratch00000" }, repo: { kind: "empty", branch: "main" } });
+  await assert.rejects(backend.ensureRunning(boot, live, signal()), { code: "invalid", message: /pylon-scratch-tpl boots from template tpl-scratch00000, but its project is scratch/ });
+  assert.equal(existsSync(join(instances, "pylon-scratch-tpl")), false);
 });
 
 test("a template build on an image this node lacks is artifact-missing, and one under 3 GiB is invalid", async () => {

@@ -18,7 +18,7 @@ import { z } from "zod";
 import { artifactDirectory, manifestFiles, tarCodec } from "./artifacts.ts";
 import { JobFailure, type ArtifactStore, type BackendPylon, type Guest, type SecretSource, type VmBackend } from "./backend.ts";
 import { buildImage as buildPylonImage } from "./image-build.ts";
-import type { BootInputs, LiveSpec } from "./project.ts";
+import type { BootInputs, CloneRepo, LiveSpec, RepoInit } from "./project.ts";
 import { isImageId, isTemplateId, type PylonId } from "./protocol.ts";
 import { imageIdOf, type ArtifactId, type CheckpointId, type ImageId, type PortableArtifactId, type TemplateId, type TemplateManifest } from "./images.ts";
 import * as templates from "./pylon-vm-templates.ts";
@@ -142,18 +142,23 @@ function dotfilesPull({ repo, ref }: BootInputs["dotfiles"]): string {
   ].join("\n"), "/home/user");
 }
 
-/** Runs as root from the workspace once, inside the instance's or template build's controller, on a fresh disk. 20-minute limit. */
-function setupCommands(url: string, checkout: BootInputs["repo"]["checkout"], preSetup: string | null): string[] {
+/**
+ * Runs as root from the workspace once, inside the instance's or template build's controller, on a fresh disk. 20-minute limit.
+ * A clone fetches and checks out. An empty repository is only initialized, so a scratch pylon fetches nothing.
+ */
+function setupCommands(repo: RepoInit, preSetup: string | null): string[] {
   return [
     `chown user:user ${q(workspace)}`,
-    asUser(`git clone --no-checkout ${q(url)} ${q(repoDir)} && git -C ${q(repoDir)} checkout -B ${q(checkout.branch)} ${q(checkout.commit)}`, workspace),
+    asUser(repo.kind === "clone"
+      ? `git clone --no-checkout ${q(repo.url)} ${q(repoDir)} && git -C ${q(repoDir)} checkout -B ${q(repo.checkout.branch)} ${q(repo.checkout.commit)}`
+      : `git init --quiet --initial-branch=${q(repo.branch)} ${q(repoDir)}`, workspace),
     ...(preSetup === null ? [] : [asUser(`bash -c ${q(preSetup)}`, repoDir)]),
     asUser("if test -e .nexus/setup; then ./.nexus/setup; fi", repoDir),
   ];
 }
 
 /** The setup of a pylon booted from a template, run once: the template's clone moves to the pylon's remote and commit. */
-function checkoutCommands({ url, checkout }: BootInputs["repo"]): string[] {
+function checkoutCommands({ url, checkout }: CloneRepo): string[] {
   return [asUser(`git remote set-url origin ${q(url)} && git fetch --quiet origin && git checkout --quiet -B ${q(checkout.branch)} ${q(checkout.commit)}`, repoDir)];
 }
 
@@ -247,7 +252,8 @@ export function createPylonVmBackend(options: PylonVmBackendOptions): VmBackend 
       if (value === undefined) throw new JobFailure("secret-missing", `secret ${grant.name} is not in this node's secret file`);
       secrets[grant.name] = { hosts: [...grant.hosts], value };
     }
-    const remotes = [boot.repo.url, boot.dotfiles.repo].flatMap((url) => sshRemoteOf(url) ?? []);
+    // A scratch pylon has no remote of its own, so a repository it creates later is reached over HTTPS only.
+    const remotes = [...(boot.repo.kind === "clone" ? [boot.repo.url] : []), boot.dotfiles.repo].flatMap((url) => sshRemoteOf(url) ?? []);
     return {
       resources: { cpus: boot.resources.cpus, memoryGiB: boot.resources.memoryGiB },
       allowedHosts: [...boot.network.allowedHosts],
@@ -269,11 +275,12 @@ export function createPylonVmBackend(options: PylonVmBackendOptions): VmBackend 
         case "resume":
           throw new JobFailure("artifact-missing", `checkpoint ${boot.source.checkpoint} of ${boot.pylonId} is not on this node`);
         case "template":
+          if (boot.repo.kind !== "clone") throw new JobFailure("invalid", `${boot.pylonId} boots from template ${boot.source.template}, but its project is scratch, which has no template`);
           disk = await templates.templateDisk(store, boot.source.template, boot.image);
           setup = checkoutCommands(boot.repo);
           break;
         case "fresh":
-          setup = setupCommands(boot.repo.url, boot.repo.checkout, boot.source.preSetup);
+          setup = setupCommands(boot.repo, boot.source.preSetup);
           break;
       }
       const config: SandboxConfig = {
@@ -504,7 +511,7 @@ export function createPylonVmBackend(options: PylonVmBackendOptions): VmBackend 
       if (resources.memoryGiB < minMemoryGiB) throw new JobFailure("invalid", `template ${template} asks for ${resources.memoryGiB} GiB, but pylon VMs need at least ${minMemoryGiB} GiB`);
       const remote = sshRemoteOf(repo.url);
       await holding([key.image], async () => templates.buildTemplate(stateRoot, store, {
-        config: { version: 1, diskGiB: resources.diskGiB, image: assetsOf(key.image), workspace, setup: setupCommands(repo.url, repo, inputs.preSetup), retrySetup: false, resume: [], services: {} },
+        config: { version: 1, diskGiB: resources.diskGiB, image: assetsOf(key.image), workspace, setup: setupCommands({ kind: "clone", url: repo.url, checkout: { branch: repo.branch, commit: repo.commit } }, inputs.preSetup), retrySetup: false, resume: [], services: {} },
         // No secrets and no overlay during setup, so a template never holds either. No pylon owns the build, so nexus.pylon is blocked like any unlisted host.
         boot: { resources: { cpus: resources.cpus, memoryGiB: resources.memoryGiB }, allowedHosts: [...inputs.allowedHosts], secrets: {}, ssh: await gitSshOf(template, remote === null ? [] : [remote]), files: [], hooks: [], publicUrls: {}, hostBridge: null },
         manifest: { id: template, key, commit: repo.commit },

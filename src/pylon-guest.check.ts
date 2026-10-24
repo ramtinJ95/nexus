@@ -77,7 +77,7 @@ const boot: BootInputs = {
   resources: { cpus: 2, memoryGiB: 4, diskGiB: 8 },
   // The hosts a project with a Claude login gets, which Claude Code needs to start at all.
   network: { allowedHosts: ["github.com", ...harnesses.includes("claude-code") ? loginHosts.claude : []], secrets: [] },
-  repo: { url: "https://github.com/octocat/Hello-World.git", checkout: { branch: "master", commit: "7fd1a60b01f91b314f59955a4e4d4e80d8edf11d" } },
+  repo: { kind: "clone", url: "https://github.com/octocat/Hello-World.git", checkout: { branch: "master", commit: "7fd1a60b01f91b314f59955a4e4d4e80d8edf11d" } },
   dotfiles: { repo: "https://dotfiles.invalid/common.git", ref: "main" },
 };
 const web = { service: "web", httpsPort: 10100 };
