@@ -62,10 +62,11 @@ async function buildImage() {
   await mkdir(dir, { recursive: true });
   await copyFile(packagedDaemon({ platform: "linux", arch: daemonArch }), join(dir, "pi-env"));
   await copyFile(join(repoRoot, "images/pylon/nexus"), join(dir, "nexus"));
-  // The slice test's image, plus the harness's daemon, the in-pylon CLI and git, so `git status` outputs read a checkout.
+  // The slice test's image, plus the harness's daemon, the in-pylon CLI and git, so `git status` outputs read a checkout,
+  // and procps, whose pgrep counts the terminals attached to Herdr.
   await writeFile(join(dir, "Dockerfile"), [
     "FROM node:24-bookworm-slim",
-    "RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends ca-certificates curl tini python3 git && rm -rf /var/lib/apt/lists/*",
+    "RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends ca-certificates curl tini python3 git procps && rm -rf /var/lib/apt/lists/*",
     `RUN useradd --create-home --shell /bin/bash user && install -d -o user -g user /home/user/workspace ${pylonRepoPath}`,
     // Docker execs run as root, unlike a pylon's, so git must accept the checkout that `user` owns.
     "RUN git config --system --add safe.directory '*'",
