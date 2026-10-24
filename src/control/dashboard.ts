@@ -6,8 +6,10 @@
  * its pylon, previews, outputs and sessions on the right. Starting a thread is a dialog every page carries.
  *
  * Every action goes through the JSON API from `dashboard/client.js`, because the API refuses state changes
- * without a JSON content type and an HTML form cannot send one. The control plane has no event stream for
- * browsers yet, so the client polls each page and swaps the regions marked `data-live` that changed.
+ * without a JSON content type and an HTML form cannot send one. The client polls each page and swaps the regions
+ * marked `data-live` that changed. A thread page also opens its stream, which sends the conversation region as the
+ * run streams: whole when its shape changed, or else only the parts that grow in place, the partial answer and
+ * each running tool.
  */
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
@@ -342,13 +344,7 @@ function threadPage(c: Context, d: ThreadDetail, node: NodeRecord, view: Convers
 ${actions.length > 0 && html`<div class="bar-actions" id="thread-actions">${actions}</div><button type="button" class="icon-btn more" data-open="actions" aria-label="Thread actions" aria-controls="thread-actions">⋯</button>`}
 </header>
 <div class="strip" id="strip" data-live>${strip(d)}</div>
-<div class="scroll" id="scroll"><div class="convo" id="convo" data-live>
-<p class="convo-meta"><code>${t.id}</code> · started ${ago(t.createdAt, c.now)}${read !== null && modelOf(read) !== null && html` · ${modelOf(read)}`}</p>
-${view === null ? html`<p class="empty">${t.status === "deleted" ? "The thread is deleted, so its conversation is gone." : "This thread has no agent conversation."}</p>`
-  : view instanceof Error ? html`<p class="error">The conversation could not be read: ${view.message}</p>`
-  : items.length === 0 ? html`<p class="empty">No messages yet.</p>`
-  : blocks(items).map(blockView)}
-</div></div>
+<div class="scroll" id="scroll"><div class="convo" id="convo" data-live${t.conversationId !== null && t.status !== "deleted" && html` data-stream="/threads/${t.id}/stream"`}>${convo(t, view, items, c.now)}</div></div>
 <div class="dock">
 <p id="action-error" class="error" role="alert" hidden></p>
 <div id="run" data-live>${runBar(t, run, c.now)}</div>
@@ -366,6 +362,52 @@ const unreachableHint = "A server bound only to ::1 can't be previewed, so bind 
  * one the control plane no longer has.
  */
 const outputsOf = (d: ThreadDetail) => d.outputs.filter((o) => o.kind !== "preview" || !d.previews.some((p) => p.service === o.ref));
+
+/** The inside of the conversation region, which the page's stream sends again whenever it changed. */
+function convo(t: Thread, view: ConversationView | Error | null, items: readonly Item[], now: number): Html {
+  const read = view === null || view instanceof Error ? null : view;
+  return html`
+<p class="convo-meta"><code>${t.id}</code> · started ${ago(t.createdAt, now)}${read !== null && modelOf(read) !== null && html` · ${modelOf(read)}`}</p>
+${view === null ? html`<p class="empty">${t.status === "deleted" ? "The thread is deleted, so its conversation is gone." : "This thread has no agent conversation."}</p>`
+  : view instanceof Error ? html`<p class="error">The conversation could not be read: ${view.message}</p>`
+  : items.length === 0 ? html`<p class="empty">No messages yet.</p>`
+  : blocks(items).map(blockView)}
+`;
+}
+
+/**
+ * One event of a thread page's stream: the conversation region's inside, or the new inside of each part that grew,
+ * by its place among the region's `data-grow` elements.
+ */
+export type LiveFrame = { convo: string } | { grow: [index: number, inside: string][] };
+
+/**
+ * The inside of a `data-grow` element, which grows in place while the run streams. Every string in a page is
+ * escaped, so no text can forge the comments that bound it.
+ */
+const grows = (inside: Part) => html`<!--grow-->${inside}<!--/grow-->`;
+const grown = /<!--grow-->([\s\S]*?)<!--\/grow-->/g;
+
+/**
+ * The frames of one reader of a thread page's stream. The conversation region goes whole whenever anything but
+ * its growing parts changed, such as a new entry or a tool call that finished, and otherwise only the parts that
+ * grew. Each frame is the change since the one this reader got last, so a reader that fell behind skips ahead.
+ */
+export function liveFrames(t: Thread, now: () => number = Date.now): (view: ConversationView) => LiveFrame | null {
+  let shape: string | null = null;
+  let parts: string[] = [];
+  return (view) => {
+    const region = convo(t, view, conversationItems(view), now()).text;
+    const next = [...region.matchAll(grown)].map((m) => m[1]!);
+    const nextShape = region.replace(grown, "<!--grow-->");
+    const grew = next.flatMap((inside, i): [number, string][] => inside === parts[i] ? [] : [[i, inside]]);
+    const changed = nextShape !== shape;
+    shape = nextShape;
+    parts = next;
+    if (changed) return { convo: region };
+    return grew.length === 0 ? null : { grow: grew };
+  };
+}
 
 /** The phone's stand-in for the inspector: the pylon, each preview as a link where it has one, and the outputs. */
 function strip(d: ThreadDetail): Html {
@@ -572,7 +614,9 @@ function blocks(items: readonly Item[]): Block[] {
 function blockView(block: Block): Html {
   switch (block.kind) {
     case "user": return html`<div class="msg user${block.queued && " queued"}"><div class="msg-who">You${block.queued && html`<span class="chip chip-queued">queued, sends after this run</span>`}</div><div class="text">${prose(block.text)}</div></div>`;
-    case "agent": return html`<div class="msg agent${block.streaming && " streaming"}"><div class="text">${prose(block.text)}${block.streaming && html`<span class="caret" aria-hidden="true"></span>`}</div></div>`;
+    case "agent": return block.streaming
+      ? html`<div class="msg agent streaming"><div class="text" data-grow>${grows(html`${prose(block.text)}<span class="caret" aria-hidden="true"></span>`)}</div></div>`
+      : html`<div class="msg agent"><div class="text">${prose(block.text)}</div></div>`;
     case "notice": return html`<p class="notice notice-${block.tone}"><span class="notice-mark" aria-hidden="true">!</span>${block.text}</p>`;
     case "tools": return block.tools.length >= foldAt ? stepsView(block.tools) : html`<div class="tools">${block.tools.map(toolView)}</div>`;
   }
@@ -621,19 +665,23 @@ function toolView(tool: ToolItem): Html {
   const output = result.state === "none" ? "" : result.output;
   const lines = output === "" ? 0 : output.trimEnd().split("\n").length;
   const bad = failed(tool);
+  const running = result.state === "running";
   // Only what needs a look starts open: a failure, an edit's diff and a call still running.
-  const open = bad || diff !== null || result.state === "running";
+  const open = bad || diff !== null || running;
   const added = diff?.lines.filter(([sign]) => sign === "+").length ?? 0;
-  const status = result.state === "running" ? html`<span class="t-status run">running</span>`
+  // A running call's line count and output grow in place, so a reader scrolled in its output keeps their place.
+  const grow = (inside: Part) => running ? grows(inside) : inside;
+  const meta = diff !== null ? html`<span class="add">+${added}</span> <span class="del">−${diff.lines.length - added}</span>` : lines > 0 && `${lines} ${lines === 1 ? "line" : "lines"}`;
+  const status = running ? html`<span class="t-status run">running</span>`
     : result.state === "none" ? html`<span class="t-status none">no result</span>`
     : result.isError ? html`<span class="t-status bad">${exitCode(output) === undefined ? "failed" : `exit ${exitCode(output)}`}</span>`
     : html`<span class="t-status ok" title="succeeded">✓</span>`;
-  return html`<details class="tool${bad && " failed"}${result.state === "running" && " running"}" id="tool-${call.id}"${open && " open"}>
-<summary><span class="chev" aria-hidden="true">›</span><span class="t-name">${call.name}</span><span class="t-subj">${subject?.value}</span><span class="t-meta">${diff !== null ? html`<span class="add">+${added}</span> <span class="del">−${diff.lines.length - added}</span>` : lines > 0 && `${lines} ${lines === 1 ? "line" : "lines"}`}</span>${status}</summary>
+  return html`<details class="tool${bad && " failed"}${running && " running"}" id="tool-${call.id}"${open && " open"}>
+<summary><span class="chev" aria-hidden="true">›</span><span class="t-name">${call.name}</span><span class="t-subj">${subject?.value}</span><span class="t-meta"${running && " data-grow"}>${grow(meta)}</span>${status}</summary>
 ${subject !== undefined && html`<pre class="t-full">${subject.value}</pre>`}
 ${Object.keys(rest).length > 0 && html`<pre class="t-args">${JSON.stringify(rest, null, 2)}</pre>`}
 ${diff !== null && html`<pre class="t-out diff">${diff.lines.map(([sign, line]) => html`<span class="d d-${sign === "+" ? "add" : "del"}">${sign === "+" ? "+" : "−"} ${line}</span>`)}</pre>`}
-${(diff === null || bad) && (output === "" ? html`<p class="t-empty">${result.state === "running" ? "No output yet." : "No output."}</p>` : html`<pre class="t-out">${output}</pre>`)}
+${(diff === null || bad) && (output === "" ? html`<p class="t-empty">${running ? "No output yet." : "No output."}</p>` : html`<pre class="t-out"${running && " data-grow"}>${grow(output)}</pre>`)}
 </details>`;
 }
 

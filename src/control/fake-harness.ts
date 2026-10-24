@@ -2,10 +2,13 @@
  * Test support: a ThreadHarness that records each call the API makes, for API tests that run without
  * pi-durable. Conversation IDs count from 1. Each thread's transcript is a list of pi-ai messages that a sent
  * message joins and a test appends to, served in pi-durable's view shape with one message per entry.
+ *
+ * A watch sees a change once it is committed: a sent message commits itself, and a test that changes a
+ * transcript calls `commit`. As in pi-durable, a committed view shares each part the commit left alone.
  */
 import assert from "node:assert/strict";
 import type { Message } from "@earendil-works/pi-ai";
-import type { ConversationView, EntryRecord, JsonObject } from "@earendil-works/pi-durable";
+import type { ConversationView, EntryRecord, JsonObject, WatchEnd } from "@earendil-works/pi-durable";
 import type { ConversationId } from "../harness/host.ts";
 import type { ThreadHarness } from "./api.ts";
 
@@ -22,6 +25,9 @@ export function fakeHarness() {
   let conversations = 0;
   const parked = new Map<string, number>();
   const transcripts = new Map<string, FakeTranscript & { id: ConversationId }>();
+  const committed = new Map<string, ConversationView>();
+  const watchers = new Map<string, Set<(view: ConversationView) => void>>();
+  let held: Promise<void> | null = null;
   const transcript = (threadId: string) => {
     const found = transcripts.get(threadId);
     assert.ok(found !== undefined, `the fake harness has no conversation for thread ${threadId}`);
@@ -29,11 +35,19 @@ export function fakeHarness() {
   };
   const view = (threadId: string): ConversationView => {
     const { id, messages, docs, entries } = transcript(threadId);
-    return {
+    const before = committed.get(threadId);
+    const fresh = entries ?? messages.map((message, i) => ({ id: i + 1, conversationId: id, kind: `pi.${message.role}`, model: [message] }));
+    const next = {
       conversation: { id },
-      entries: entries ?? messages.map((message, i) => ({ id: i + 1, conversationId: id, kind: `pi.${message.role}`, model: [message] })),
-      docs,
-    } as never;
+      entries: before !== undefined && JSON.stringify(before.entries) === JSON.stringify(fresh) ? before.entries : fresh,
+      docs: { ...docs },
+    } as never as ConversationView;
+    committed.set(threadId, next);
+    return next;
+  };
+  const commit = (threadId: string) => {
+    const next = view(threadId);
+    for (const listener of watchers.get(threadId) ?? []) listener(next);
   };
   const harness: ThreadHarness = {
     async startThread(thread) {
@@ -45,13 +59,30 @@ export function fakeHarness() {
     async send(...args) {
       calls.push(["send", ...args]);
       transcript(args[0]).messages.push({ role: "user", content: args[1], timestamp: Date.now() });
+      commit(args[0]);
       return { id: 7 } as never;
     },
     async abort(threadId) { calls.push(["abort", threadId]); },
     async retry(threadId) { calls.push(["retry", threadId]); },
     async watch(threadId) {
       calls.push(["watch", threadId]);
-      return { value: view(threadId), stop: async () => { calls.push(["unwatch", threadId]); } } as never;
+      await held;
+      const closed = Promise.withResolvers<WatchEnd>();
+      const listeners = watchers.get(threadId) ?? new Set();
+      watchers.set(threadId, listeners);
+      let deliver = (_: ConversationView) => {};
+      const listener = (next: ConversationView) => deliver(next);
+      listeners.add(listener);
+      return {
+        value: view(threadId),
+        start(onCommit) { deliver = (next) => void onCommit(next, [], {} as never); },
+        closed: closed.promise,
+        async stop() {
+          if (listeners.delete(listener)) calls.push(["unwatch", threadId]);
+          closed.resolve({ reason: "stopped" });
+          return closed.promise;
+        },
+      };
     },
     async deleteThread(thread) { calls.push(["delete", thread]); },
     activity: { facts: () => assert.fail("the API reads agent facts from the registry"), parked: (threadId) => Array.from({ length: parked.get(threadId) ?? 0 }, (_, i) => i + 1) as never },
@@ -59,6 +90,16 @@ export function fakeHarness() {
   return {
     harness, calls,
     transcript: transcript as (threadId: string) => FakeTranscript,
+    /** Publishes the transcript as it is now to the thread's watches. */
+    commit,
+    /** Makes each watch wait to open until the returned function is called. */
+    holdWatches() {
+      const gate = Promise.withResolvers<void>();
+      held = gate.promise;
+      return () => { held = null; gate.resolve(); };
+    },
+    /** How many watches of the thread are open. */
+    watching: (threadId: string) => watchers.get(threadId)?.size ?? 0,
     /** Makes the thread's run hold this many tasks the restart limit parked. */
     park(threadId: string, tasks: number) { parked.set(threadId, tasks); },
   };

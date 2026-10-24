@@ -19,6 +19,7 @@ import { openRegistry, type Thread } from "../control/registry.ts";
 import type { ImageId, ImageManifest } from "../images.ts";
 import type { Project, ProjectId } from "../project.ts";
 import type { NodeName, PylonCommand, PylonId, ServiceFact, TailnetNodeId } from "../protocol.ts";
+import { CliError, follow } from "./transport.ts";
 
 const cli = fileURLToPath(new URL("./nexus.ts", import.meta.url));
 const node = "rj-firebat" as NodeName;
@@ -90,12 +91,13 @@ async function setup(t: TestContext) {
   registry.setCurrentImage(image.id);
   let caller: TailnetNodeId = laptop;
   const fake = fakeHarness();
-  const api = await startApi({
-    registry, host: "127.0.0.1", port: 0, whois: async () => caller, allowed: new Set([laptop]),
+  const options = (port: number) => ({
+    registry, host: "127.0.0.1", port, whois: async () => caller, allowed: new Set([laptop]),
     hostnames: new Set([apiName, "127.0.0.1"]), dotfiles: { repo: "https://github.com/ramtin/dotfiles.git", ref: "main" },
     harness: fake.harness, wake: () => {}, previewPorts: { first: 10200, last: 10299 },
     probes: new Map([[node, { command: async (_pylonId: PylonId, command: PylonCommand) => ({ kind: "link-port" as const, service: `port-${(command as { port: number }).port}` }) }]]),
   });
+  let api = await startApi(options(0));
   t.after(async () => {
     await api.close();
     registry.close();
@@ -124,6 +126,12 @@ async function setup(t: TestContext) {
     registry, fake, proxy, home, api, env, nexus, json,
     callAs(id: TailnetNodeId) { caller = id; },
     localUrl: `http://127.0.0.1:${api.port}`,
+    /** Stops the control plane, which drops every connection, and returns a function that starts it again on its port. */
+    async stop() {
+      const { port } = api;
+      await api.close();
+      return async () => { api = await startApi(options(port)); };
+    },
   };
 }
 
@@ -227,8 +235,8 @@ test("the URL and the proxy come from the flags, then the environment, then the 
 });
 
 /** The JSON lines a watch prints, one at a time. */
-function watchLines(t: TestContext, s: Awaited<ReturnType<typeof setup>>, args: readonly string[]) {
-  const child = spawn(process.execPath, [cli, "watch", ...args, "--json", "--interval", "50"], { env: s.env() });
+function watchLines(t: TestContext, s: Awaited<ReturnType<typeof setup>>, args: readonly string[], interval = 50) {
+  const child = spawn(process.execPath, [cli, "watch", ...args, "--json", "--interval", String(interval)], { env: s.env() });
   t.after(() => { child.kill(); });
   let stderr = "";
   child.stderr.on("data", (chunk) => { stderr += chunk; });
@@ -294,6 +302,7 @@ test("watch prints the backlog, then each new entry and state change, and ends w
     role: "assistant", content: [{ type: "text", text: "On it." }, { type: "toolCall", id: "c1", name: "bash", arguments: { command: "npm test" } }],
     stopReason: "toolUse", timestamp: Date.now(),
   } as never);
+  s.fake.commit(thread.id);
   const answer = await watch.next();
   assert.deepEqual([answer.type, answer.entry.id, answer.text], ["entry", 2, 'On it.\n[tool] bash {"command":"npm test"}']);
 
@@ -303,6 +312,7 @@ test("watch prints the backlog, then each new entry and state change, and ends w
     generation: { message: { role: "assistant", content: [{ type: "text", text: "Tests are " }, { type: "text", text: "running." }] }, retry: { error: "overloaded" } },
   };
   s.fake.transcript(thread.id).docs["pi.inbox"] = { items: [{ id: 9, mode: "followUp", content: "and then?" }, { id: 10, mode: "write", content: "x" }] };
+  s.fake.commit(thread.id);
   assert.deepEqual(await watch.next(), { ...state, run: "working", queued: 1 });
   assert.deepEqual(await watch.next(), {
     ...quiet, queued: ["and then?"], tools: [{ callId: "c1", output: "PASS 3/9" }], partial: "Tests are running.", retry: "overloaded",
@@ -352,17 +362,103 @@ test("watch prints the whole context again when it changes other than by an appe
 
   // A new head marker leads the active context, ahead of entries older than itself.
   transcript.entries = [userEntry(12, "summary"), userEntry(10, "one")];
+  s.fake.commit(thread.id);
   const reordered = await watch.next();
   assert.deepEqual(ids(reordered), ["reset", [12, 10]]);
   assert.deepEqual(reordered.entries.map((e: any) => e.text), ["> summary", "> one"]);
   transcript.entries = [...transcript.entries, userEntry(14, "three")];
+  s.fake.commit(thread.id);
   assert.deepEqual(ids(await watch.next()), ["entry", 14], "an append to the new context is one entry");
 
   // A compaction drops what it summarized.
   transcript.entries = [userEntry(15, "compacted"), userEntry(14, "three")];
+  s.fake.commit(thread.id);
   assert.deepEqual(ids(await watch.next()), ["reset", [15, 14]]);
   transcript.entries = [userEntry(15, "compacted")];
+  s.fake.commit(thread.id);
   assert.deepEqual(ids(await watch.next()), ["reset", [15]], "a context that lost its last entry is printed whole");
+});
+
+/** The run in flight with this partial answer, as pi-durable's live document holds it. */
+const streaming = (partial: string) => ({ run: { taskId: 1, inputs: [] }, tools: [], generation: { message: { role: "assistant", content: [{ type: "text", text: partial }] } } });
+
+test("watch prints each commit of the run as it streams, between polls, and an answer's entry before the live event that drops it", async (t) => {
+  const s = await setup(t);
+  const thread: Thread = await s.json(["start", "--project", "acme", "--message", "hi"]);
+  // One poll in the whole test, so everything after the first prints comes from the stream.
+  const watch = watchLines(t, s, [thread.id], 600_000);
+  assert.equal((await watch.next()).type, "reset");
+  assert.equal((await watch.next()).type, "state");
+  assert.equal((await watch.next()).partial, null);
+
+  const transcript = s.fake.transcript(thread.id);
+  transcript.docs["pi.live"] = streaming("The");
+  s.fake.commit(thread.id);
+  assert.deepEqual(await watch.next(), { type: "state", thread: thread.id, status: "active", run: "working", parkedTasks: 0, queued: 0, pylon: "unknown", failed: null, ports: [] });
+  assert.equal((await watch.next()).partial, "The");
+  for (const partial of ["The build", "The build passes", "The build passes."]) {
+    transcript.docs["pi.live"] = streaming(partial);
+    s.fake.commit(thread.id);
+    assert.deepEqual(await watch.next(), { type: "live", thread: thread.id, queued: [], tools: [], partial, retry: null }, "each commit of the partial is one live event");
+  }
+
+  // pi-durable commits the answer and clears the live document together.
+  transcript.messages.push({ role: "assistant", content: [{ type: "text", text: "The build passes." }], stopReason: "stop", timestamp: Date.now() } as never);
+  transcript.docs["pi.live"] = {};
+  s.fake.commit(thread.id);
+  const answer = await watch.next();
+  assert.deepEqual([answer.type, answer.text], ["entry", "The build passes."]);
+  assert.equal((await watch.next()).run, "idle");
+  assert.equal((await watch.next()).partial, null, "the partial goes once its entry is printed");
+});
+
+test("watch opens a dropped stream again, reports the outage once, and prints the state again when the control plane is back", async (t) => {
+  const s = await setup(t);
+  const thread: Thread = await s.json(["start", "--project", "acme", "--message", "hi"]);
+  const watch = watchLines(t, s, [thread.id]);
+  assert.equal((await watch.next()).type, "reset");
+  const state = await watch.next();
+  assert.equal((await watch.next()).type, "live");
+  assert.equal(s.fake.watching(thread.id), 1);
+
+  const restart = await s.stop();
+  const errors = [await watch.next()];
+  // The poll and the stream both retry while it is down, every 50 ms.
+  await new Promise((resolve) => setTimeout(resolve, 500));
+  await restart();
+  let back = await watch.next();
+  for (; back.type === "error"; back = await watch.next()) errors.push(back);
+  assert.ok(errors.every((e) => e.type === "error" && e.kind === "unreachable"), JSON.stringify(errors));
+  assert.equal(new Set(errors.map((e) => e.message)).size, errors.length, "each message is reported once, whichever source failed with it");
+  assert.deepEqual(back, state, "the state again says the control plane is back");
+
+  s.fake.transcript(thread.id).docs["pi.live"] = streaming("Back");
+  s.fake.commit(thread.id);
+  assert.equal((await watch.next()).run, "working");
+  assert.equal((await watch.next()).partial, "Back", "the stream follows the control plane that came back");
+  assert.equal(s.fake.watching(thread.id), 1, "the old stream's watch stopped when its connection dropped");
+});
+
+test("watch ends with the API's exit code when it refuses the stream", async (t) => {
+  const s = await setup(t);
+  const thread: Thread = await s.json(["start", "--project", "acme", "--title", "x"]);
+  s.callAs("nSTRANGER" as TailnetNodeId);
+  const res = await s.nexus(["watch", thread.id, "--json", "--interval", "50"]);
+  assert.equal(res.code, 3, res.stderr);
+  assert.equal(JSON.parse(res.stderr).kind, "refused");
+});
+
+test("a stream refused with a reply cut off mid-body fails as unreachable rather than hanging", { timeout: 5_000 }, async (t) => {
+  const server = createServer((socket) => {
+    socket.on("error", () => {});
+    socket.once("data", () => {
+      socket.write('HTTP/1.1 503 Service Unavailable\r\ncontent-type: application/json\r\ncontent-length: 100\r\n\r\n{"err');
+      setTimeout(() => socket.destroy(), 20);
+    });
+  });
+  const port = await listening(t, server);
+  await assert.rejects(follow({ url: new URL(`http://127.0.0.1:${port}`), socks: null }, "/v1/threads/th-x/events", () => {}, new AbortController().signal),
+    (err) => err instanceof CliError && err.kind === "unreachable");
 });
 
 test("a config file that cannot be read fails as invalid, in JSON under --json", async (t) => {
