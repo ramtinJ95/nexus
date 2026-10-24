@@ -36,7 +36,7 @@ const usage = `nexus ${version}, the Nexus control plane from this Mac
   nexus diff <thread> [path...] [--uncommitted]
   nexus conversation <thread>                  the agent's transcript
   nexus session open <thread> [--harness claude-code|pi|shell] [--title T]
-  nexus session close <thread> <pane>
+  nexus session close <thread> <pane|id>       a session in no pane by its ID, which \`nexus show\` gives
   nexus attach <thread>                        a terminal on the pylon's Herdr sessions, over ssh to its node
   nexus start --project P [--title T] [--message M] [--node N] [--branch B] [--commit C]
   nexus send <thread> <text...> [--steer] [--request-id ID]
@@ -163,7 +163,9 @@ function detailText({ thread: t, pylon: p, agent, sessions, previews, ports, out
     ...p.failed === null ? [] : [`failed: ${p.failed}`],
     ...p.retryRefused === null ? [] : [`retry refused: ${p.retryRefused}`],
     ...(agent?.parkedTasks ?? 0) === 0 ? [] : [`parked tasks: ${agent!.parkedTasks}. \`nexus retry ${t.id}\` runs them again`],
-    ...sessions.map((s) => `session: ${s.harness}${s.title === null ? "" : ` ${JSON.stringify(s.title)}`} in pane ${s.herdrPane}, ${s.status}`),
+    // A session in no pane is closed by its ID.
+    ...sessions.map((s) => `session: ${s.harness}${s.title === null ? "" : ` ${JSON.stringify(s.title)}`} ${s.herdrPane === null ? `as ${s.id}` : `in pane ${s.herdrPane}`}, ${s.state === "running" ? s.status
+      : s.state === "paused" ? `paused (resumes on ${t.status === "archived" ? "unarchive" : "wake"})` : `failed: ${s.message}`}`),
     ...previews.map((v) => `preview: ${v.service} at ${v.url}${failureOf(v) !== null ? `, not ready: ${failureOf(v)}` : v.ready ? "" : ", not ready"}`),
     ...(ports ?? []).map((l) => `port: ${l.port}${l.service === null ? "" : `, service ${l.service}`}${l.preview === null ? "" : `, previewed at ${l.preview.url}`}`),
     ...outputs.map((o) => `output: ${o.kind} ${o.ref}`),
@@ -592,11 +594,13 @@ const commands: Readonly<Record<string, Command>> = {
       return { json: opened, text: `Opened ${opened.harness} session ${JSON.stringify(opened.title)} in pane ${opened.herdrPane} of ${id}. \`nexus attach ${id}\` attaches to it.` };
     },
   },
+  // Not tried again on a 409: a paused session comes back with its pylon's wake, and a pane asked for before the wake
+  // may name another session after it.
   "session close": {
     args: [2, 2],
-    async run(api, [id, pane]) {
-      await whenRunning(api, id!, () => api("DELETE", `${thread(id!)}/sessions/${encodeURIComponent(pane!)}`, {}), `pane ${pane} is still open`);
-      return { json: null, text: `Closed pane ${pane} of ${id}.` };
+    async run(api, [id, session]) {
+      await api("DELETE", `${thread(id!)}/sessions/${encodeURIComponent(session!)}`, {});
+      return { json: null, text: `Closed session ${session} of ${id}.` };
     },
   },
   attach: {

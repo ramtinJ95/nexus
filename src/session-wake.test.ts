@@ -52,20 +52,20 @@ test("a wake whose Herdr server never answers logs it and still succeeds", async
   assert.deepEqual(guest.written, [], "the sessions file is left as it was");
 });
 
-test("a pause logs what it recorded, and one that cannot record still pauses", async () => {
+test("a pause logs what it recorded and returns it for the backend to keep, and one that cannot record still pauses", async () => {
   const up = fakeGuest((argv, isHerdr) => {
     if (!isHerdr) return { exitCode: 3, output: "" }; // no sessions file yet
     return herdrOk(herdrSnapshot([{ id: "w1", label: "sh" }], [herdrPane("w1:p1", "w1", null, "unknown")]));
   });
   const recorded = logged();
-  await recordBeforePause(up, recorded.log);
+  assert.deepEqual(await recordBeforePause(up, recorded.log), [{ id: "w1:p1", herdrPane: "w1:p1", harness: "shell", harnessSessionId: null, title: "sh" }]);
   assert.deepEqual(recorded.lines, ["sessions: recorded 1 for the wake"]);
 
   const none = logged();
-  await recordBeforePause(fakeGuest(() => herdrError("server_not_running")), none.log);
+  assert.equal(await recordBeforePause(fakeGuest(() => herdrError("server_not_running")), none.log), null);
   assert.deepEqual(none.lines, ["sessions: no Herdr server runs, so the last record stands"]);
 
   const missing = logged();
-  await recordBeforePause(fakeGuest(() => ({ exitCode: 127, output: "sh: herdr: not found\n" })), missing.log);
+  assert.equal(await recordBeforePause(fakeGuest(() => ({ exitCode: 127, output: "sh: herdr: not found\n" })), missing.log), null);
   assert.deepEqual(missing.lines, ["sessions: recording failed, so the wake relaunches what the last record holds: herdr api snapshot exited 127 without a JSON reply: sh: herdr: not found\n"]);
 });

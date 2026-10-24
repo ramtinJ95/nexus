@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { attachedTerminals, attachScript, closeSession, openSession, recordSessions, relaunchSessions, sessionFacts, sessionsFile, type RelaunchOutcome, type SessionRecord } from "./sessions.ts";
+import { attachedTerminals, attachScript, closeSession, dropFailedSession, openSession, recordSessions, relaunchSessions, sessionFacts, sessionsFile, type RelaunchOutcome, type SessionRecord } from "./sessions.ts";
 import { fakeGuest, herdrError, herdrOk, herdrPane, herdrSnapshot, type ExecReply } from "./fake-guest.ts";
 
 const created = (workspace: string, pane: string) => herdrOk({ type: "workspace_created", workspace: { workspace_id: workspace, label: "x" }, tab: { tab_id: `${workspace}:t1` }, root_pane: { pane_id: pane } });
@@ -126,11 +126,11 @@ test("opening a session starts a detached Herdr server when none runs", async ()
   assert.deepEqual(guest.herdrCalls(), ["workspace list", "workspace list", "workspace create"]);
 });
 
-test("closing a pane that is gone, or with no server, succeeds; other errors reject", async () => {
-  await closeSession(herdrUp({ "pane close": () => herdrError("pane_not_found") }), "w1:p1");
-  await closeSession(herdrUp({ "pane close": () => herdrError("server_not_running") }), "w1:p1");
+test("closing a pane that is gone, or with no server, closes nothing and says so; other errors reject", async () => {
+  assert.equal(await closeSession(herdrUp({ "pane close": () => herdrError("pane_not_found") }), "w1:p1"), false);
+  assert.equal(await closeSession(herdrUp({ "pane close": () => herdrError("server_not_running") }), "w1:p1"), false);
   const closed = herdrUp({ "pane close": () => herdrOk({ type: "ok" }) });
-  await closeSession(closed, "w2:p1");
+  assert.equal(await closeSession(closed, "w2:p1"), true);
   assert.deepEqual(closed.execs[0]!.slice(3), ["pane", "close", "w2:p1"]);
   await assert.rejects(closeSession(herdrUp({ "pane close": () => herdrError("invalid_params", "bad pane") }), "x"), /bad pane/);
 });
@@ -148,10 +148,10 @@ const liveSnapshot = herdrSnapshot(
 test("session facts map Herdr panes to harnesses, session IDs, statuses and their workspace titles", async () => {
   const facts = await sessionFacts(herdrUp({ "api snapshot": () => herdrOk(liveSnapshot) }));
   assert.deepEqual(facts, [
-    { herdrPane: "w1:p1", harness: "claude-code", harnessSessionId: "bd2c2d6b", status: "working", title: "review" },
-    { herdrPane: "w2:p1", harness: "pi", harnessSessionId: "/home/user/.pi/agent/sessions/s.jsonl", status: "blocked", title: "plan" },
-    { herdrPane: "w3:p1", harness: "shell", harnessSessionId: null, status: "unknown", title: "sh" },
-    { herdrPane: "w3:p2", harness: "shell", harnessSessionId: null, status: "idle", title: "sh" },
+    { id: "w1:p1", state: "running", herdrPane: "w1:p1", harness: "claude-code", harnessSessionId: "bd2c2d6b", status: "working", title: "review" },
+    { id: "w2:p1", state: "running", herdrPane: "w2:p1", harness: "pi", harnessSessionId: "/home/user/.pi/agent/sessions/s.jsonl", status: "blocked", title: "plan" },
+    { id: "w3:p1", state: "running", herdrPane: "w3:p1", harness: "shell", harnessSessionId: null, status: "unknown", title: "sh" },
+    { id: "w3:p2", state: "running", herdrPane: "w3:p2", harness: "shell", harnessSessionId: null, status: "idle", title: "sh" },
   ]);
 });
 
@@ -170,7 +170,7 @@ test("recording writes every open session to the sessions file", async () => {
   assert.equal(file.owner, "user");
   const content = JSON.parse(file.content);
   assert.equal(content.version, 1);
-  assert.deepEqual(content.sessions, records);
+  assert.deepEqual(records, content.sessions.map((r: SessionRecord) => ({ ...r, id: r.herdrPane })), "each is reported under its pane");
   assert.deepEqual(content.sessions.slice(0, 3), [
     { herdrPane: "w1:p1", harness: "claude-code", title: "review", cwd: "/home/user/workspace/repo", harnessSessionId: "bd2c2d6b" },
     { herdrPane: "w2:p1", harness: "pi", title: "plan", cwd: "/home/user/app", harnessSessionId: "/home/user/.pi/agent/sessions/s.jsonl" },
@@ -411,10 +411,18 @@ test("a session whose relaunch failed is recorded until a relaunch brings it bac
   let refusing = true;
   const guest = pylon(records, [], () => refusing ? herdrError("timeout", "the agent did not start") : undefined);
   assert.deepEqual(placed(await relaunchSessions(guest)), [["review", "failed", null], ["sh", "relaunched", "w21:p1"]]);
-  assert.deepEqual(await recordSessions(guest), [
-    { herdrPane: "w21:p1", harness: "shell", title: "sh", cwd: "/home/user", harnessSessionId: null },
-    records[0],
+  const recorded = (await recordSessions(guest))!;
+  // With no pane, it is named by a hash of its record, which a later Herdr pane cannot share.
+  const id = recorded[1]!.id;
+  assert.match(id, /^failed-[0-9a-f]{12}$/);
+  assert.deepEqual(recorded, [
+    { id: "w21:p1", herdrPane: "w21:p1", harness: "shell", title: "sh", cwd: "/home/user", harnessSessionId: null },
+    { ...records[0], id, herdrPane: null },
   ]);
+  assert.deepEqual((await sessionFacts(guest)).at(-1), {
+    id, state: "failed", herdrPane: null, harness: "claude-code", harnessSessionId: "aaaa", title: "review", message: "herdr agent start: the agent did not start. The pane showed:\nuser@pylon:~$",
+  }, "a running pylon reports it, under the ID its pause records it by");
+  assert.equal((await recordSessions(guest))![1]!.id, id, "the ID holds from one record to the next");
   refusing = false;
   assert.deepEqual(placed(await relaunchSessions(guest)), [["sh", "present", "w21:p1"], ["review", "relaunched", "w22:p1"]]);
   assert.deepEqual((await recordSessions(guest))!.map((r) => r.herdrPane), ["w21:p1", "w22:p1"]);
@@ -425,10 +433,26 @@ test("a failure left in its restored pane stands for that pane until the pane is
   const records: SessionRecord[] = [{ herdrPane: "w1:p1", harness: "claude-code", title: "review", cwd: "/home/user", harnessSessionId: "aaaa" }];
   const guest = pylon(records, [shellPane("w1", "review", "/home/user")], () => herdrError("timeout", "the agent did not start"));
   assert.deepEqual(placed(await relaunchSessions(guest)), [["review", "failed", "w1:p1"]]);
-  // Recorded as the Claude it should be, not as the shell it is.
-  assert.deepEqual(await recordSessions(guest), records);
-  await closeSession(guest, "w1:p1");
+  // Recorded and reported as the Claude it should be, not as the shell it is.
+  assert.deepEqual(await recordSessions(guest), [{ ...records[0], id: "w1:p1" }]);
+  assert.deepEqual((await sessionFacts(guest)).map((f) => [f.id, f.state, f.herdrPane, f.harness]), [["w1:p1", "failed", "w1:p1", "claude-code"]]);
+  assert.equal(await closeSession(guest, "w1:p1"), true);
   assert.deepEqual(await recordSessions(guest), []);
+  assert.deepEqual(await sessionFacts(guest), []);
+});
+
+test("dropping a failed session in no pane removes it from the sessions file, so no wake tries it again", async () => {
+  const records: SessionRecord[] = [{ herdrPane: "w1:p1", harness: "pi", title: "plan", cwd: "/home/user", harnessSessionId: "/s.jsonl" }];
+  const guest = pylon(records, [], () => herdrError("timeout", "the agent did not start"));
+  assert.deepEqual(placed(await relaunchSessions(guest)), [["plan", "failed", null]]);
+  const [failed] = await sessionFacts(guest);
+  assert.ok(failed?.state === "failed");
+  assert.equal(await dropFailedSession(guest, "w1:p1"), false, "a pane ID does not name it");
+  assert.equal(await dropFailedSession(guest, failed.id), true);
+  assert.deepEqual(JSON.parse(guest.written.at(-1)!.content).failed, []);
+  assert.deepEqual(await sessionFacts(guest), []);
+  assert.deepEqual(await relaunchSessions(guest), []);
+  assert.equal(await dropFailedSession(guest, failed.id), false, "dropping it again finds nothing");
 });
 
 test("attached terminals are the guest's Herdr clients of the session, and a guest that cannot be counted rejects", async () => {

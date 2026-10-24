@@ -13,8 +13,8 @@
 import { randomUUID } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
 import { retryable } from "./protocol.ts";
-import type { Job, JobEnvelope, JobErrorCode, JobId, JobStatus, LiveHash, NodeName, ProbeEvent, PylonId, PylonObservation, RunningFacts, SessionFact } from "./protocol.ts";
-import type { BootInputs, LiveSpec, PylonSource } from "./project.ts";
+import type { HerdrStatus, Job, JobEnvelope, JobErrorCode, JobId, JobStatus, LiveHash, NodeName, PausedSession, ProbeEvent, PylonId, PylonObservation, RunningFacts, SessionFact } from "./protocol.ts";
+import type { BootInputs, LiveSpec, PylonSource, SessionHarness } from "./project.ts";
 import type { ArtifactId, CheckpointId } from "./images.ts";
 
 export type ThreadStatus = "active" | "idle" | "archived" | "deleted";
@@ -205,7 +205,10 @@ export function envelope(job: Job, node: NodeName, now: number): JobEnvelope {
 /** Record writes derived from one probe event. The control plane is the only writer of every record. */
 export type RegistryWrite =
   | { record: "node"; node: NodeName; state: "online" | "offline"; capacity: NodeCapacity }
-  | { record: "session"; pylonId: PylonId; herdrPane: string; fact: SessionFact | null } // null: the pane is gone. Adopts panes opened by hand in Herdr
+  /** The pylon's whole list: a session it does not list is gone. Adopts panes opened by hand in Herdr. */
+  | { record: "sessions"; pylonId: PylonId; sessions: readonly SessionRow[] }
+  /** The pylon paused without saying what its wake brings back, so every session it had is paused. */
+  | { record: "sessions-paused"; pylonId: PylonId }
   | { record: "output"; pylonId: PylonId; kind: "branch" | "diff" | "preview" | "file"; ref: string }
   | { record: "preview"; pylonId: PylonId; service: string; httpsPort: number; ready: boolean }
   | { record: "activity"; pylonId: PylonId; human: number | null; agent: number | null }
@@ -214,16 +217,28 @@ export type RegistryWrite =
 type NodeCapacity = { memoryGiB: number; committedMemoryGiB: number; diskFreeGiB: number };
 
 /**
+ * A session as the registry keeps it, but its pylon: running in a pane, paused with its pylon, or failed to come back
+ * from the last wake (SessionFact). `status` is null where the observation has none, so the row keeps the Herdr
+ * status it last had.
+ */
+export type SessionRow = { id: string; harness: SessionHarness; harnessSessionId: string | null; title: string | null } & (
+  | { state: "running"; herdrPane: string; status: HerdrStatus; message: null }
+  | { state: "paused"; herdrPane: string | null; status: null; message: null }
+  | { state: "failed"; herdrPane: string | null; status: null; message: string });
+
+/**
  * `node` is the probe the event came from. `known` maps each registry pylon on that node to the last
  * observation ingested for it, or "absent". Every write is an upsert, so ingesting an event twice is harmless.
  *
  * - A pylon missing from `known` is an orphan, and nothing else is written for it, not even a preview hit.
  * - A snapshot is the whole node, so a known pylon it omits is ingested as "absent".
- * - Sessions and outputs are diffed against the previous observation. A pylon that is not running has no
- *   sessions, so a pause closes them all, and the wake that relaunches them reports their new panes.
- *   Sessions the probe could not read (null) write nothing. loop.ts stores the last list read in their
- *   place, so a null previous list means sessions that were never read, and there is nothing to retract.
- * - Outputs are derived here, not reported by the probe as outputs: a branch with pushedAs is "branch" with
+ * - Sessions are written as the pylon's whole list whenever it differs from the previous observation's. A running
+ *   pylon lists its panes and the sessions its last wake failed to bring back. A stopped one lists, as paused, what
+ *   its pause recorded, under the IDs they ran under, or says nothing (null), and then every session it had is
+ *   paused. A booting, stopping, deleting or broken pylon says nothing, so its rows stand until the next list: the
+ *   first one after a wake replaces the paused sessions with their new panes. An absent pylon has none. Running
+ *   sessions the probe could not read (null) write nothing, and loop.ts stores the last list read in their place.
+ * - Outputs are diffed against the previous observation, and derived here, not reported by the probe as outputs: a branch with pushedAs is "branch" with
  *   that ref, a dirty tree is "diff" with the head as ref (one per head), a ready preview is "preview" with
  *   the service as ref, and a declared output keeps its kind with its declaration id as ref. Outputs are
  *   never retracted, so only new ones are written.
@@ -261,18 +276,31 @@ type Facts = Pick<RunningFacts, "sessions" | "git" | "previews" | "declaredOutpu
 const notRunning: Facts = { sessions: [], git: null, previews: [], declaredOutputs: [], attachedClients: 0 };
 const factsOf = (o: PylonObservation | "absent"): Facts => o !== "absent" && o.phase === "running" ? o : notRunning;
 
+/** The pylon's sessions as the observation says, `paused` for a stopped pylon that says nothing, and null when it says nothing. */
+function sessionsOf(o: PylonObservation | "absent"): readonly SessionRow[] | "paused" | null {
+  if (o === "absent") return [];
+  const common = (s: SessionFact | PausedSession) => ({ id: s.id, harness: s.harness, harnessSessionId: s.harnessSessionId, title: s.title ?? null });
+  switch (o.phase) {
+    case "running": return o.sessions?.map((s): SessionRow => s.state === "failed"
+      ? { ...common(s), state: "failed", herdrPane: s.herdrPane, status: null, message: s.message }
+      : { ...common(s), state: "running", herdrPane: s.herdrPane, status: s.status, message: null }) ?? null;
+    case "stopped": {
+      // An observation stored before the field existed has none.
+      const paused = o.sessions ?? null;
+      return paused === null ? "paused" : paused.map((s): SessionRow => ({ ...common(s), state: "paused", herdrPane: s.herdrPane, status: null, message: null }));
+    }
+    default: return null;
+  }
+}
+
 function pylonWrites(pylonId: PylonId, previous: PylonObservation | "absent", current: PylonObservation | "absent", now: number): RegistryWrite[] {
   const before = factsOf(previous);
   const after = factsOf(current);
   const writes: RegistryWrite[] = [];
 
-  if (after.sessions !== null) {
-    const panes = new Map((before.sessions ?? []).map((s) => [s.herdrPane, s]));
-    for (const fact of after.sessions) {
-      if (!isDeepStrictEqual(panes.get(fact.herdrPane), fact)) writes.push({ record: "session", pylonId, herdrPane: fact.herdrPane, fact });
-      panes.delete(fact.herdrPane);
-    }
-    for (const herdrPane of panes.keys()) writes.push({ record: "session", pylonId, herdrPane, fact: null });
+  const sessions = sessionsOf(current);
+  if (sessions !== null && !isDeepStrictEqual(sessionsOf(previous), sessions)) {
+    writes.push(sessions === "paused" ? { record: "sessions-paused", pylonId } : { record: "sessions", pylonId, sessions });
   }
 
   const had = new Set(outputsOf(before).map(({ kind, ref }) => `${kind} ${ref}`));
@@ -285,7 +313,7 @@ function pylonWrites(pylonId: PylonId, previous: PylonObservation | "absent", cu
   for (const [key, p] of isReady) if (!wasReady.has(key)) writes.push({ record: "preview", pylonId, ...p, ready: true });
   for (const [key, p] of wasReady) if (!isReady.has(key)) writes.push({ record: "preview", pylonId, ...p, ready: false });
 
-  const agent = after.sessions?.some((s) => s.status === "working") ? now : null;
+  const agent = after.sessions?.some((s) => s.state === "running" && s.status === "working") ? now : null;
   const human = after.attachedClients > 0 ? now : null;
   if (agent !== null || human !== null) writes.push({ record: "activity", pylonId, human, agent });
   return writes;

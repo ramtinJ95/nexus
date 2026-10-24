@@ -228,13 +228,14 @@ function merge(last: NodeObservation | null, event: ProbeEvent): NodeObservation
 /**
  * Sessions or services the probe could not read have not changed as far as the registry knows, and the next diff
  * needs the last list read. Only the stored copy is filled in. ingest gets the event as read, so a carried session
- * list is never agent activity. Services with no earlier read stay null, because a pylon whose services were never
- * read has not shown that it has none. Listening ports are stored as read: nothing diffs them, and a port seen
+ * list is never agent activity. Either with no earlier read since the pylon last ran stays null: a pylon whose services
+ * were never read has not shown that it has none, and sessions not yet read after a wake are still the paused ones,
+ * which the first list read replaces. Listening ports are stored as read: nothing diffs them, and a port seen
  * once may have closed since, so an unread list is reported as unknown.
  */
 function keepLastRead(last: NodeObservation | null, pylon: PylonObservation): PylonObservation {
   if (pylon.phase !== "running" || (pylon.sessions !== null && pylon.services !== null)) return pylon;
   const previous = last?.pylons.find((p) => p.pylonId === pylon.pylonId);
   const before = previous?.phase === "running" ? previous : null;
-  return { ...pylon, sessions: pylon.sessions ?? before?.sessions ?? [], services: pylon.services ?? before?.services ?? null };
+  return { ...pylon, sessions: pylon.sessions ?? before?.sessions ?? null, services: pylon.services ?? before?.services ?? null };
 }

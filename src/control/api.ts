@@ -498,7 +498,7 @@ export async function startApi(options: ApiOptions): Promise<Api> {
     return result;
   }
 
-  async function pylonCommand<K extends "link-port" | "unlink-port" | "open-session" | "close-session">(t: Thread, command: Extract<PylonCommand, { kind: K }>): Promise<Extract<CommandResult, { kind: K }>> {
+  async function pylonCommand<K extends "link-port" | "unlink-port" | "open-session" | "close-session" | "drop-failed-session">(t: Thread, command: Extract<PylonCommand, { kind: K }>): Promise<Extract<CommandResult, { kind: K }>> {
     // The client checks that the result is the command's kind.
     return await inPylon(t, (probe, pylonId) => probe.command(pylonId, command)) as Extract<CommandResult, { kind: K }>;
   }
@@ -552,6 +552,27 @@ export async function startApi(options: ApiOptions): Promise<Api> {
     const { harness, title = harness } = parse(sessionSchema, body);
     const { herdrPane } = await pylonCommand(t, { kind: "open-session", harness, title });
     return { herdrPane, harness, title };
+  }
+
+  /**
+   * Closes a session by its ID. A paused one is refused without waking its pylon, since the wake brings it back and
+   * it closes once it runs. A failed one in no pane is forgotten, so no wake tries it again. Any other ID is a pane,
+   * perhaps one opened a moment ago that no observation lists yet. A pane that is not open is a 404, never a success:
+   * a caller may hold a pane from before a wake that brought its session back in another one.
+   */
+  async function closeSession(t: Thread, id: string): Promise<void> {
+    const session = registry.session(t.pylonId, id);
+    if (session?.state === "paused" && t.status !== "deleted") {
+      const resumes = t.status === "archived" ? `when \`nexus unarchive ${t.id}\` wakes its pylon` : "when its pylon wakes";
+      throw new HttpError(409, `session ${id} is paused with its pylon and resumes ${resumes}. Close it once it runs`);
+    }
+    if (session?.state === "failed" && session.herdrPane === null) {
+      const { dropped } = await pylonCommand(t, { kind: "drop-failed-session", id });
+      if (!dropped) throw new HttpError(404, `pylon ${t.pylonId} holds no failed session ${id}`);
+      return;
+    }
+    const { closed } = await pylonCommand(t, { kind: "close-session", herdrPane: id });
+    if (!closed) throw new HttpError(404, `no session is open in pane ${id} of pylon ${t.pylonId}. A wake may have moved it to another pane, which the thread's sessions list`);
   }
 
   async function conversation(t: Thread) {
@@ -614,9 +635,8 @@ export async function startApi(options: ApiOptions): Promise<Api> {
       const body = await r.body();
       return created(await openSession(thread(m[1]!), body));
     }],
-    // A pane that is already closed succeeds.
     ["DELETE", /^\/v1\/threads\/([^/]+)\/sessions\/([^/]+)$/, async (m) => {
-      await pylonCommand(thread(m[1]!), { kind: "close-session", herdrPane: m[2]! });
+      await closeSession(thread(m[1]!), m[2]!);
       return noContent;
     }],
     ["GET", /^\/v1\/threads\/([^/]+)\/files$/, async (m, r) => {

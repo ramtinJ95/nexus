@@ -63,7 +63,8 @@ function fakeNode(options: { autoFinish: boolean; node?: NodeName; reportsRoutes
         pylons.set(job.pylonId, was?.phase === "running" ? { ...was, liveHash: job.liveHash, previews } : {
           pylonId: job.pylonId, phase: "running", liveHash: job.liveHash, bootedAt: new Date().toISOString(),
           bootedFrom: { image, checkpoint: job.boot.source.kind === "resume" ? job.boot.source.checkpoint : null },
-          services: [], listening: [], previews, sessions: [], git: null, declaredOutputs: [], attachedClients: 0,
+          // A woken pylon's sessions are read only once its relaunch has run.
+          services: [], listening: [], previews, sessions: job.boot.source.kind === "resume" ? null : [], git: null, declaredOutputs: [], attachedClients: 0,
         });
         lives.set(job.pylonId, job.live);
         unroute(job.pylonId);
@@ -81,7 +82,11 @@ function fakeNode(options: { autoFinish: boolean; node?: NodeName; reportsRoutes
           return;
         }
         saved.set(job.pylonId, job.checkpoint);
-        pylons.set(job.pylonId, { pylonId: job.pylonId, phase: "stopped", checkpoint: job.checkpoint });
+        // As the backends do, the pause records the running sessions, and the stopped pylon reports them under the same IDs.
+        const sessions = was?.phase === "running" && was.sessions !== null
+          ? was.sessions.map(({ id, herdrPane, harness, harnessSessionId, title }) => ({ id, herdrPane, harness, harnessSessionId, title: title ?? "untitled" }))
+          : null;
+        pylons.set(job.pylonId, { pylonId: job.pylonId, phase: "stopped", checkpoint: job.checkpoint, sessions });
         return;
       }
       case "delete":
@@ -183,7 +188,7 @@ function fakeNode(options: { autoFinish: boolean; node?: NodeName; reportsRoutes
   function stopOnFailedSetup(pylonId: PylonId, checkpoint: CheckpointId) {
     saved.set(pylonId, checkpoint);
     failedSetupDisks.add(checkpoint);
-    pylons.set(pylonId, { pylonId, phase: "stopped", checkpoint });
+    pylons.set(pylonId, { pylonId, phase: "stopped", checkpoint, sessions: null });
   }
 
   return {
@@ -536,10 +541,10 @@ test("with the real ingest, a pylon's sessions reach the registry and a working 
   run(t, registry, fake.probe, { ingest: realIngest });
   await until("the pylon runs", () => fake.pylons.get(thread.pylonId)?.phase === "running");
 
-  const working: SessionFact = { herdrPane: "p1", harness: "pi", harnessSessionId: "s.jsonl", status: "working", title: "plan" };
+  const working: SessionFact = { id: "p1", state: "running", herdrPane: "p1", harness: "pi", harnessSessionId: "s.jsonl", status: "working", title: "plan" };
   fake.setSessions(thread.pylonId, [working]);
   await until("the session is recorded", () => registry.sessions(thread.pylonId).length === 1);
-  assert.deepEqual(registry.sessions(thread.pylonId), [{ pylon: thread.pylonId, ...working }]);
+  assert.deepEqual(registry.sessions(thread.pylonId), [{ pylon: thread.pylonId, ...working, message: null }]);
   assert.ok(registry.thread(thread.id)!.lastAgentActivityAt > longAgo);
 
   // The turn ends, but the working session counts as agent activity, so the pylon stays up.
@@ -550,11 +555,39 @@ test("with the real ingest, a pylon's sessions reach the registry and a working 
   // Sessions the probe could not read leave the registry as it was, and the next read is diffed against the last one.
   fake.setSessions(thread.pylonId, null);
   await new Promise((r) => setTimeout(r, 50));
-  assert.deepEqual(registry.sessions(thread.pylonId), [{ pylon: thread.pylonId, ...working }]);
+  assert.deepEqual(registry.sessions(thread.pylonId), [{ pylon: thread.pylonId, ...working, message: null }]);
 
   fake.setSessions(thread.pylonId, []);
   await until("the closed session is removed", () => registry.sessions(thread.pylonId).length === 0);
   assert.deepEqual(registry.orphans(), []);
+});
+
+test("with the real ingest, a paused pylon lists its sessions as paused until the wake's first read replaces them", async (t) => {
+  const registry = openRegistry(tempDb());
+  const thread = seed(registry);
+  const fake = fakeNode({ autoFinish: true });
+  run(t, registry, fake.probe, { ingest: realIngest });
+  await until("the pylon runs", () => fake.pylons.get(thread.pylonId)?.phase === "running");
+  const review: SessionFact = { id: "w1:p1", state: "running", herdrPane: "w1:p1", harness: "claude-code", harnessSessionId: "s1", status: "working", title: "review" };
+  fake.setSessions(thread.pylonId, [review]);
+  await until("the session is recorded", () => registry.sessions(thread.pylonId).length === 1);
+
+  registry.setThreadStatus(thread.id, "archived");
+  await until("the pause is folded in", () => registry.pylon(thread.pylonId)?.pauses === 1 && registry.sessions(thread.pylonId)[0]?.state === "paused");
+  assert.deepEqual(registry.sessions(thread.pylonId), [{ pylon: thread.pylonId, ...review, state: "paused", message: null }], "it keeps its pane and its last status");
+
+  registry.setThreadStatus(thread.id, "active");
+  registry.recordActivity(thread.id, { human: Date.now() });
+  await until("the pylon runs again", () => registry.node(node)!.observation?.pylons.find((p) => p.pylonId === thread.pylonId)?.phase === "running");
+  // Its sessions are not read yet, so the stored observation knows none, and the paused rows stand.
+  const stored = registry.node(node)!.observation!.pylons.find((p) => p.pylonId === thread.pylonId);
+  assert.ok(stored?.phase === "running" && stored.sessions === null);
+  assert.deepEqual(registry.sessions(thread.pylonId).map((s) => [s.id, s.state]), [["w1:p1", "paused"]]);
+
+  const moved: SessionFact = { ...review, id: "w3:p1", herdrPane: "w3:p1", status: "idle" };
+  fake.setSessions(thread.pylonId, [moved]);
+  await until("the relaunched session replaces the paused one", () => registry.sessions(thread.pylonId)[0]?.id === "w3:p1");
+  assert.deepEqual(registry.sessions(thread.pylonId), [{ pylon: thread.pylonId, ...moved, message: null }]);
 });
 
 test("with the real ingest, sessions the probe could not read record no agent activity", async (t) => {
@@ -565,7 +598,7 @@ test("with the real ingest, sessions the probe could not read record no agent ac
   run(t, registry, fake.probe, { ingest: realIngest });
   await until("the pylon runs", () => fake.pylons.get(thread.pylonId)?.phase === "running");
 
-  const working: SessionFact = { herdrPane: "p1", harness: "pi", harnessSessionId: "s.jsonl", status: "working" };
+  const working: SessionFact = { id: "p1", state: "running", herdrPane: "p1", harness: "pi", harnessSessionId: "s.jsonl", status: "working" };
   fake.setSessions(thread.pylonId, [working]);
   await until("the working session counts as agent activity", () => registry.thread(thread.id)!.lastAgentActivityAt > longAgo);
   const seen = registry.thread(thread.id)!.lastAgentActivityAt;
@@ -814,7 +847,7 @@ test("a port the node still serves for a pylon the registry lost goes to no new 
   const thread = seed(registry);
   const fake = fakeNode({ autoFinish: true });
   const lost = "pylon-th-lost" as PylonId;
-  fake.pylons.set(lost, { pylonId: lost, phase: "stopped", checkpoint: null });
+  fake.pylons.set(lost, { pylonId: lost, phase: "stopped", checkpoint: null, sessions: null });
   fake.routes.set(10200, { httpsPort: 10200, pylonId: lost, service: "web" });
   run(t, registry, fake.probe, { ingest: realIngest });
   await until("the pylon runs", () => fake.pylons.get(thread.pylonId)?.phase === "running");

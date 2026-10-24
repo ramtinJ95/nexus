@@ -14,9 +14,9 @@
  * Herdr still reports as Claude. The relaunch is the only thing that starts agents, and it fills in only
  * what is missing, so it converges whatever Herdr restored first.
  */
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import type { Guest } from "./backend.ts";
-import type { SessionFact } from "./protocol.ts";
+import type { HerdrStatus, PausedSession, SessionFact } from "./protocol.ts";
 import type { SessionHarness } from "./project.ts";
 
 export const herdrSession = "nexus";
@@ -72,13 +72,33 @@ export interface SessionRecord {
   harnessSessionId: string | null;
 }
 
+/** A session as recordSessions reports it: what a wake brings back, and where. */
+export type RecordedSession = PausedSession & { cwd: string };
+
 /**
  * A session the last relaunch did not bring back. It stays in the file, through any number of records,
  * until a relaunch brings it back. When the relaunch left it in a pane, such as a restored shell its agent
  * would not start in, `record.herdrPane` is that pane and the record stands for it, so closing the pane is
- * what drops the session. With no pane left there is nothing to close.
+ * what drops the session. One in no pane is dropped by its ID (dropFailedSession).
  */
 interface FailedRecord { record: SessionRecord; inPane: boolean; message: string }
+
+/**
+ * What names a session to the control plane: its pane, or for a failed session in no pane, a hash of its record. A
+ * relaunch that fails again keeps the record as it was, so the ID holds from one wake to the next. The record's own
+ * pane ID will not do: Herdr numbers panes by workspace (`w1:p1`), so a later session can be given it again.
+ */
+function idOf(f: FailedRecord): string {
+  if (f.inPane) return f.record.herdrPane;
+  const { herdrPane, harness, title, cwd, harnessSessionId } = f.record;
+  return `failed-${createHash("sha256").update(JSON.stringify([herdrPane, harness, title, cwd, harnessSessionId])).digest("hex").slice(0, 12)}`;
+}
+
+/** The failed records that still stand for a session: every one in no pane, and each in a pane that is still open. */
+function standing(file: SessionsFile | null, live: readonly LivePane[]): FailedRecord[] {
+  const panes = new Set(live.map((p) => p.herdrPane));
+  return (file?.failed ?? []).filter((f) => !f.inPane || panes.has(f.record.herdrPane));
+}
 
 interface SessionsFile { version: 1; recordedAt: string; sessions: readonly SessionRecord[]; failed: readonly FailedRecord[] }
 
@@ -152,36 +172,61 @@ async function screen(guest: Guest, pane: string): Promise<string> {
   }
 }
 
-/** Closing a pane that is already gone, or with no Herdr server at all, succeeds. */
-export async function closeSession(guest: Guest, herdrPane: string): Promise<void> {
+/**
+ * False when the pane is not open, or no Herdr server runs: a caller holding a pane ID from before a wake must not
+ * read that as its session closed, since the wake may have brought the session back in another pane.
+ */
+export async function closeSession(guest: Guest, herdrPane: string): Promise<boolean> {
   try {
     await herdr(guest, ["pane", "close", herdrPane]);
+    return true;
   } catch (err) {
-    if (err instanceof HerdrError && (err.code === "pane_not_found" || err.code === "server_not_running")) return;
+    if (err instanceof HerdrError && (err.code === "pane_not_found" || err.code === "server_not_running")) return false;
     throw err;
   }
 }
 
+/** Forgets a failed session in no pane, by its ID, so no wake tries it again. False when the file holds no such session. */
+export async function dropFailedSession(guest: Guest, id: string): Promise<boolean> {
+  const file = await readSessionsFile(guest);
+  if (file === null) return false;
+  const failed = file.failed.filter((f) => f.inPane || idOf(f) !== id);
+  if (failed.length === file.failed.length) return false;
+  await writeSessionsFile(guest, { ...file, failed });
+  return true;
+}
+
 /**
- * The facts an observation carries, from one `herdr api snapshot` exec. No Herdr server means no
- * sessions. Any other failure rejects, so the caller can tell "none" from "unknown".
+ * The facts an observation carries: each open pane, from one `herdr api snapshot` exec, and each session the last
+ * wake failed to bring back, from the sessions file. A pane a failed record stands for is that failed session. No
+ * Herdr server means no panes. Any other failure rejects, so the caller can tell "none" from "unknown".
  */
 export async function sessionFacts(guest: Guest, timeoutMs = callTimeoutMs): Promise<readonly SessionFact[]> {
-  const panes = await livePanes(guest, timeoutMs).catch(noServer([]));
-  return panes.map(({ herdrPane, harness, harnessSessionId, status, title }) => ({ herdrPane, harness, harnessSessionId, status, title }));
+  const [panes, file] = await Promise.all([livePanes(guest, timeoutMs).catch(noServer([])), readSessionsFile(guest, timeoutMs)]);
+  const failed = standing(file, panes);
+  const standsFor = new Set(failed.flatMap((f) => f.inPane ? [f.record.herdrPane] : []));
+  return [
+    ...panes.filter((p) => !standsFor.has(p.herdrPane)).map(({ herdrPane, harness, harnessSessionId, status, title }): SessionFact => ({
+      id: herdrPane, state: "running", herdrPane, harness, harnessSessionId, status, title,
+    })),
+    ...failed.map((f): SessionFact => ({
+      id: idOf(f), state: "failed", herdrPane: f.inPane ? f.record.herdrPane : null,
+      harness: f.record.harness, harnessSessionId: f.record.harnessSessionId, title: f.record.title, message: f.message,
+    })),
+  ];
 }
 
 /**
  * Writes every open session to ~/.nexus/sessions.json, before the disk checkpoint, and returns every
- * session a relaunch would bring back. Sessions the last relaunch failed to bring back are kept, except
- * one whose pane has since closed. With no Herdr server the file is left as it is and this returns null:
- * a server that never came up after the last wake must not erase the sessions that wake failed to relaunch.
+ * session a relaunch would bring back, under the IDs sessionFacts gave them. Sessions the last relaunch failed
+ * to bring back are kept, except one whose pane has since closed. With no Herdr server the file is left as it is
+ * and this returns null: a server that never came up after the last wake must not erase the sessions that wake
+ * failed to relaunch.
  */
-export async function recordSessions(guest: Guest): Promise<readonly SessionRecord[] | null> {
+export async function recordSessions(guest: Guest): Promise<readonly RecordedSession[] | null> {
   const panes = await livePanes(guest).catch(noServer(null));
   if (panes === null) return null;
-  const live = new Set(panes.map((p) => p.herdrPane));
-  const failed = ((await readSessionsFile(guest))?.failed ?? []).filter((f) => !f.inPane || live.has(f.record.herdrPane));
+  const failed = standing(await readSessionsFile(guest), panes);
   const standsFor = new Set(failed.flatMap((f) => f.inPane ? [f.record.herdrPane] : []));
   const sessions = await Promise.all(panes.filter((p) => !standsFor.has(p.herdrPane))
     .map(async ({ herdrPane, harness, title, cwd, harnessSessionId }): Promise<SessionRecord> => ({
@@ -189,7 +234,8 @@ export async function recordSessions(guest: Guest): Promise<readonly SessionReco
       harnessSessionId: harnessSessionId ?? (harness === "claude-code" ? await launchedClaudeSession(guest, herdrPane) : null),
     })));
   await writeSessionsFile(guest, { version: 1, recordedAt: new Date().toISOString(), sessions, failed });
-  return [...sessions, ...failed.map((f) => f.record)];
+  const recorded = (r: SessionRecord, id: string, inPane: boolean): RecordedSession => ({ ...r, id, herdrPane: inPane ? r.herdrPane : null });
+  return [...sessions.map((r) => recorded(r, r.herdrPane, true)), ...failed.map((f) => recorded(f.record, idOf(f), f.inPane))];
 }
 
 /**
@@ -353,10 +399,10 @@ interface LivePane {
   title: string;
   cwd: string;
   harnessSessionId: string | null;
-  status: SessionFact["status"];
+  status: HerdrStatus;
 }
 
-const statuses: ReadonlySet<unknown> = new Set(["working", "idle", "blocked", "done", "unknown"] satisfies SessionFact["status"][]);
+const statuses: ReadonlySet<unknown> = new Set(["working", "idle", "blocked", "done", "unknown"] satisfies HerdrStatus[]);
 
 async function livePanes(guest: Guest, timeoutMs = callTimeoutMs): Promise<LivePane[]> {
   const snapshot = record(record(await herdr(guest, ["api", "snapshot"], timeoutMs), "api snapshot").snapshot, "api snapshot .snapshot");
@@ -379,14 +425,14 @@ async function livePanes(guest: Guest, timeoutMs = callTimeoutMs): Promise<LiveP
       title,
       cwd: nullableString(pane.foreground_cwd, "foreground_cwd") ?? nullableString(pane.cwd, "cwd") ?? checkoutDir,
       harnessSessionId: harness !== "shell" && session !== null && session.agent === agent ? string(session.value, "agent_session.value") : null,
-      status: pane.agent_status as SessionFact["status"],
+      status: pane.agent_status as HerdrStatus,
     };
   });
 }
 
 /** A missing file means a pylon that has never paused, so there is nothing to relaunch. */
-async function readSessionsFile(guest: Guest): Promise<SessionsFile | null> {
-  const { exitCode, output } = await guest.exec(["sh", "-c", 'test -e "$0" || exit 3; exec cat -- "$0"', sessionsFile], { cwd: home, timeoutMs: callTimeoutMs });
+async function readSessionsFile(guest: Guest, timeoutMs = callTimeoutMs): Promise<SessionsFile | null> {
+  const { exitCode, output } = await guest.exec(["sh", "-c", 'test -e "$0" || exit 3; exec cat -- "$0"', sessionsFile], { cwd: home, timeoutMs });
   if (exitCode === 3) return null;
   if (exitCode !== 0) throw new Error(`reading ${sessionsFile} failed with exit ${exitCode}: ${output}`);
   const file = record(JSON.parse(output), sessionsFile);

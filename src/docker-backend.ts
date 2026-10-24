@@ -19,14 +19,15 @@ import { dockerBridgeRunArgs } from "./docker-host-bridge.ts";
 import { dockerServices, publishedPorts } from "./docker-services.ts";
 import { processStream } from "./process-stream.ts";
 import type { OverlayFile } from "./project.ts";
-import type { PylonId } from "./protocol.ts";
+import type { PausedSession, PylonId } from "./protocol.ts";
 import type { ArtifactId, CheckpointId, ImageId, PortableArtifactId, TemplateId } from "./images.ts";
 import { publicUrls } from "./public-urls.ts";
 import { recordBeforePause, relaunchAfterWake, type PylonLog } from "./session-wake.ts";
 
 const execFileAsync = promisify(execFile);
 
-const label = { pylon: "nexus.pylon", image: "nexus.image", bootedFrom: "nexus.booted-from", checkpoint: "nexus.checkpoint", templateBuild: "nexus.template-build" } as const;
+/** `sessions` on a checkpoint is what its pause recorded, as base64url JSON, or empty when it recorded none. */
+const label = { pylon: "nexus.pylon", image: "nexus.image", bootedFrom: "nexus.booted-from", checkpoint: "nexus.checkpoint", sessions: "nexus.sessions", templateBuild: "nexus.template-build" } as const;
 const savedImage = "image.tar";
 const setupLimitMs = 20 * 60_000;
 
@@ -292,12 +293,15 @@ export function createDockerBackend(options: DockerBackendOptions): VmBackend {
       const existing = await container(pylonId, signal);
       // No container: only checkpoints remain, or nothing does. Both are already paused.
       if (existing === null) return;
+      let recorded: readonly PausedSession[] | null = null;
       if (existing.State.Status === "running") {
-        await recordBeforePause(guest(pylonId), containerLog(pylonId));
+        recorded = await recordBeforePause(guest(pylonId), containerLog(pylonId));
         await markRelaunch(pylonId);
       }
       await docker(["stop", existing.Id], signal);
-      const labels = { ...labelsOf(existing), [label.checkpoint]: checkpoint };
+      // Set either way, because a container booted from a checkpoint carries that checkpoint's labels.
+      const sessions = recorded === null ? "" : Buffer.from(JSON.stringify(recorded)).toString("base64url");
+      const labels = { ...labelsOf(existing), [label.checkpoint]: checkpoint, [label.sessions]: sessions };
       await docker([
         "commit",
         ...Object.entries(labels).flatMap(([k, v]) => ["--change", `LABEL ${k}="${v}"`]),
@@ -336,7 +340,11 @@ export function createDockerBackend(options: DockerBackendOptions): VmBackend {
         const labels = labelsOf(img);
         const pylonId = labels[label.pylon] as PylonId;
         if (pylons.has(pylonId)) continue;
-        pylons.set(pylonId, { pylonId, vm: "stopped", checkpoint: labels[label.checkpoint] as CheckpointId, image: labels[label.image] as ImageId, bootedAt: null });
+        const sessions = labels[label.sessions] ?? "";
+        pylons.set(pylonId, {
+          pylonId, vm: "stopped", checkpoint: labels[label.checkpoint] as CheckpointId, image: labels[label.image] as ImageId, bootedAt: null,
+          sessions: sessions === "" ? null : JSON.parse(Buffer.from(sessions, "base64url").toString("utf8")) as PausedSession[],
+        });
       }
       return [...pylons.values()];
     },

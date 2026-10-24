@@ -229,15 +229,37 @@ test("an offline node shows its pylons as unknown, and the last observation as s
   assert.match(pylon, /Observed unknown Node rj-firebat offline Last seen just now \(stale\)/);
 });
 
+test("the thread page shows a paused session as resuming on wake, or on unarchive, and a failed one with why", async (t) => {
+  const s = await seeded(t);
+  const fix = await s.start("acme", "Fix checkout");
+  s.observe(fix);
+  s.registry.apply({ record: "sessions", pylonId: fix.pylonId, sessions: [
+    { id: "w1:p1", state: "paused", herdrPane: "w1:p1", harness: "claude-code", harnessSessionId: null, title: "review", status: null, message: null },
+    { id: "failed-0123456789ab", state: "failed", herdrPane: null, harness: "pi", harnessSessionId: null, title: "plan", status: null, message: "pi exited 1" },
+  ] });
+  const sessions = async () => {
+    const section = sectionOf((await s.call("GET", `/threads/${fix.id}`)).text, "sessions-h");
+    return { section, text: textOf(section) };
+  };
+  const shown = await sessions();
+  assert.match(shown.text, /Claude Code review paused, resumes on wake w1:p1/);
+  assert.match(shown.text, /pi plan failed It did not come back from the last wake, which the next tries again: pi exited 1/);
+  assert.ok(!shown.section.includes("failed-0123456789ab"), "a session in no pane shows no pane");
+  assert.equal((await s.call("POST", `/v1/threads/${fix.id}/archive`)).status, 200);
+  assert.match((await sessions()).text, /Claude Code review paused, resumes on unarchive w1:p1/);
+});
+
 test("the thread page shows its pylon, sessions with how to attach, previews as tailnet links, and outputs", async (t) => {
   const s = await seeded(t);
   const fix = await s.start("acme", "Fix checkout");
   s.observe(fix);
-  const pane = (herdrPane: string, harness: "claude-code" | "pi" | "shell", status: "working" | "idle", harnessSessionId: string | null = null, title?: string) =>
-    s.registry.apply({ record: "session", pylonId: fix.pylonId, herdrPane, fact: { herdrPane, harness, harnessSessionId, status, ...(title === undefined ? {} : { title }) } });
-  pane("w1:p1", "claude-code", "working", "5f0c", "review");
-  pane("w2:p1", "pi", "idle", "/home/user/.pi/sessions/a.jsonl");
-  pane("w3:p1", "shell", "idle");
+  const pane = (herdrPane: string, harness: "claude-code" | "pi" | "shell", status: "working" | "idle", harnessSessionId: string | null = null, title: string | null = null) =>
+    ({ id: herdrPane, state: "running", herdrPane, harness, harnessSessionId, status, title, message: null }) as const;
+  s.registry.apply({ record: "sessions", pylonId: fix.pylonId, sessions: [
+    pane("w1:p1", "claude-code", "working", "5f0c", "review"),
+    pane("w2:p1", "pi", "idle", "/home/user/.pi/sessions/a.jsonl"),
+    pane("w3:p1", "shell", "idle"),
+  ] });
   s.registry.allocatePreviews(fix.pylonId, ["web", "api"], { first: 8443, last: 8444 });
   s.registry.apply({ record: "preview", pylonId: fix.pylonId, service: "web", httpsPort: 8443, ready: true });
   for (const [kind, ref] of [["branch", "nexus/fix-checkout"], ["diff", "abc1234"], ["preview", "web"], ["file", "out-1"]] as const) {
@@ -318,7 +340,7 @@ test("a paused pylon's preview keeps its link, labelled paused, unless the threa
   };
   assert.deepEqual(await previews(), { previews: "Previews 1 web starting rj-firebat.tail.ts.net:8443", linked: false }, "a running pylon's preview that is not ready has no link yet");
 
-  s.registry.ingested({ node, observedAt: new Date().toISOString(), probeBootId: "b", capacity, artifacts: [], jobs: [], pylons: [{ pylonId: fix.pylonId, phase: "stopped", checkpoint: null }], previewRoutes: [] }, []);
+  s.registry.ingested({ node, observedAt: new Date().toISOString(), probeBootId: "b", capacity, artifacts: [], jobs: [], pylons: [{ pylonId: fix.pylonId, phase: "stopped", checkpoint: null, sessions: null }], previewRoutes: [] }, []);
   assert.deepEqual(await previews(), { previews: "Previews 1 web paused Open ↗ rj-firebat.tail.ts.net:8443 Opening it wakes the pylon.", linked: true });
 
   await s.call("POST", `/v1/threads/${fix.id}/archive`);
@@ -528,7 +550,7 @@ test("a paused pylon's prompt box says a message wakes it", async (t) => {
   const s = await seeded(t);
   const fix = await s.start("acme", "Fix checkout");
   s.observe(fix);
-  s.registry.ingested({ node, observedAt: new Date().toISOString(), probeBootId: "b", capacity, artifacts: [], jobs: [], pylons: [{ pylonId: fix.pylonId, phase: "stopped", checkpoint: null }], previewRoutes: [] }, []);
+  s.registry.ingested({ node, observedAt: new Date().toISOString(), probeBootId: "b", capacity, artifacts: [], jobs: [], pylons: [{ pylonId: fix.pylonId, phase: "stopped", checkpoint: null, sessions: null }], previewRoutes: [] }, []);
   assert.equal(conversationOf((await s.call("GET", `/threads/${fix.id}`)).text).dock, "The pylon is paused. Sending a message wakes it. ⌘↵ to send Send");
 });
 
