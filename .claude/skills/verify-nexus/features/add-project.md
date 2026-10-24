@@ -8,7 +8,7 @@ A user adds a project from the terminal, naming its repository and its node. The
 - `project-flags` adds a project with every flag set, repeated flags included.
 - `project-list` lists the added projects alongside the seed.
 - `project-thread` starts a thread on an added project, and its pylon runs.
-- `project-refused` maps an existing ID to exit 5, an unknown node to exit 64, and a missing `--node` to exit 64 naming the nodes.
+- `project-refused` maps an existing ID to exit 5, an unknown node to exit 64, and a missing `--node` to exit 64.
 
 ## How to get to it (user POV)
 
@@ -30,12 +30,12 @@ Preconditions:
 - **Refusals.**
   - `$V cli project-exists -- project add quill https://github.com/octocat/Hello-World.git --node verify-node --json` exits 5 with `"kind": "conflict"`, `"status": 409` and `"error": "project quill exists"`.
   - `$V cli project-no-node -- project add quill-x https://github.com/octocat/Hello-World.git --node nowhere --json` exits 64 with `"kind": "invalid"`, `"status": 400` and `"error": "no node nowhere"`.
-  - `$V cli project-missing-node -- project add quill-x https://github.com/octocat/Hello-World.git --json` exits 64 with `"kind": "invalid"`, `"status": null` and `"error": "project add needs --node, one of verify-node"`.
+  - `$V cli project-missing-node -- project add quill-x https://github.com/octocat/Hello-World.git --json` exits 64 with `"kind": "invalid"`, `"status": null` and `"error": "project add needs --node. Run nexus nodes to list them"`.
   - `$V cli project-after -- projects --json` still lists four projects, so no refusal created one.
 - **Proof.** The recorded `project-cli`, `project-flags`, `project-text`, `project-list`, the `project-thread-show` that reads `running`, `project-overlay`, the three refusals and `project-after`.
 
 ## Gotchas
 
 - Projects cannot be removed, so after this feature `projects` lists four, and [Browse threads](./browse-threads.md)'s `browse-projects` no longer returns `spoon` alone. Run Browse threads first, or expect the `quill` projects there.
-- The stack's pylons never clone, so the repository URL only labels the project, and an SSH URL such as `git@github.com:…` boots the same as an HTTPS one. Resources are not enforced by the Docker backend either. A real node's clone and memory are proven by `src/control/thread-on-node.ts`, not here.
+- The stack's pylons never clone, so the repository URL only labels the project, and an SSH URL such as `git@github.com:…` boots the same as an HTTPS one. The Docker backend does not enforce resources either. A real node's clone is proven by `src/control/thread-on-node.ts`, not here. Neither proves that a pylon gets the project's memory or CPUs.
 - Start the thread on `quill`, not `quill-flags`. Its logins and allowed hosts change nothing in a Docker pylon, which has no network policy.

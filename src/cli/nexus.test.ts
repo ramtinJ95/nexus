@@ -273,15 +273,15 @@ test("project add creates a project with the contract's defaults or its flags, a
   await fails(["project", "add", "other", "https://", "--node", node], 64, { kind: "invalid", status: 400 });
   await fails(["project", "add", "other", repo, "--node", node, "--login", "gemini"], 64, { kind: "invalid", status: 400 });
   await fails(["project", "add", "other", repo, "--node", node, "--cpus", "two"], 64, { kind: "invalid", status: null, error: "--cpus takes a whole number, got two" });
-  await fails(["project", "add", "other", repo], 64, { kind: "invalid", status: null, error: `project add needs --node, one of ${node}` });
-  await fails(["project", "add", "other", repo], 64, { kind: "invalid", status: null, error: "project add needs --node" },
-    { NEXUS_SOCKS: `127.0.0.1:${await closedPort()}` });
+  await fails(["project", "add", "other", repo], 64, { kind: "invalid", status: null, error: "project add needs --node. Run nexus nodes to list them" });
+  await fails(["project", "add", "other", repo], 64, { kind: "invalid", status: null, error: "project add needs --node. Run nexus nodes to list them" },
+    { NEXUS_SOCKS: `127.0.0.1:${await closedPort()}` }); // with no proxy too, because it sends no request
   await fails(["project", "add", "other"], 64, { kind: "invalid", status: null, error: "project add takes 2 arguments, got 1" });
   await fails(["project", "other"], 64, { kind: "invalid", status: null, error: "unknown command project" });
   assert.deepEqual(s.registry.projects().map((p) => p.id).toSorted(), ["acme", "custom", "hello"], "no refused project was created");
 
   const human = await s.nexus(["project", "add", "other", repo]);
-  assert.deepEqual([human.code, human.stderr], [64, `nexus: project add needs --node, one of ${node}. Run nexus --help for usage\n`]);
+  assert.deepEqual([human.code, human.stderr], [64, "nexus: project add needs --node. Run nexus nodes to list them. Run nexus --help for usage\n"]);
 });
 
 /** The JSON lines a watch prints, one at a time. */

@@ -483,7 +483,7 @@ async function checkFailedSetupRetry() {
 
 /**
  * The thread's project comes from the real CLI's `project add`, as the Claude mod and the pi extension add one, with
- * the CLI's defaults. Adding it again is a conflict, and leaving out --node names this node.
+ * the CLI's defaults. Adding it again is a conflict, and leaving out --node is a usage error.
  */
 async function addProject() {
   const repoUrl = "https://github.com/octocat/Spoon-Knife.git";
@@ -499,8 +499,8 @@ async function addProject() {
   const again = await nexus("project", "add", "node-check", repoUrl, "--node", probeConfig.node, "--json");
   assert.deepEqual([again.code, JSON.parse(again.stderr)], [5, { error: "project node-check exists", kind: "conflict", status: 409 }]);
   const unnamed = await nexus("project", "add", "node-check-2", repoUrl, "--json");
-  assert.deepEqual([unnamed.code, JSON.parse(unnamed.stderr)], [64, { error: `project add needs --node, one of ${probeConfig.node}`, kind: "invalid", status: null }]);
-  pass(`adding node-check again exits 5, and leaving out --node exits 64 naming ${probeConfig.node}`);
+  assert.deepEqual([unnamed.code, JSON.parse(unnamed.stderr)], [64, { error: "project add needs --node. Run nexus nodes to list them", kind: "invalid", status: null }]);
+  pass(`adding node-check again exits 5, and leaving out --node exits 64`);
 }
 
 let verdict = "FAIL";

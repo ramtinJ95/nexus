@@ -406,17 +406,6 @@ async function watch(api: Api, follow: Follow, id: string, intervalMs: number, j
   }
 }
 
-/** The nodes to name in a usage error. Only a hint, so a control plane that cannot list them leaves it out. */
-async function nodeChoices(api: Api): Promise<string> {
-  try {
-    const nodes = await api("GET", "/v1/nodes") as NodeSummary[];
-    return nodes.length === 0 ? ", but the control plane has no nodes" : `, one of ${nodes.map((n) => n.name).join(", ")}`;
-  } catch (err) {
-    if (err instanceof CliError) return "";
-    throw err;
-  }
-}
-
 const commands: Readonly<Record<string, Command>> = {
   threads: {
     args: [0, 0],
@@ -528,7 +517,7 @@ const commands: Readonly<Record<string, Command>> = {
     async run(api, [id, repoUrl], v) {
       const resources = { cpus: int(str(v, "cpus"), "--cpus", 2), memoryGiB: int(str(v, "memory"), "--memory", 4), diskGiB: int(str(v, "disk"), "--disk", 10) };
       const node = str(v, "node");
-      if (node === undefined) throw new CliError("invalid", `project add needs --node${await nodeChoices(api)}`);
+      if (node === undefined) throw new CliError("invalid", "project add needs --node. Run nexus nodes to list them");
       const p = await api("POST", "/v1/projects", {
         id, repoUrl, defaultBranch: str(v, "branch") ?? "main", defaultNode: node, resources,
         allowedHosts: strs(v, "allow-host"), secrets: [], logins: strs(v, "login"), preSetup: null,
