@@ -383,7 +383,7 @@ test("a published preview whose service is starting shows starting and one whose
   assert.deepEqual(await page(), { previews: "Previews 1 web Open ↗ rj-firebat.tail.ts.net:8443", strip: "running · rj-firebat web ↗ Changes 0 outputs", linked: true });
 
   s.observeWith({ services: [web("starting")] }, fix);
-  assert.deepEqual(await page(), { previews: "Previews 1 web starting rj-firebat.tail.ts.net:8443", strip: "running · rj-firebat web, starting 0 outputs", linked: false }, "its URL answers 502 until the service is ready");
+  assert.deepEqual(await page(), { previews: "Previews 1 web starting rj-firebat.tail.ts.net:8443", strip: "running · rj-firebat web, starting Changes 0 outputs", linked: false }, "its URL answers 502 until the service is ready");
 
   s.observeWith({ services: [web("failed")] }, fix);
   assert.deepEqual(await page(), {
