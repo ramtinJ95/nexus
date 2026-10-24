@@ -411,6 +411,22 @@ export async function readMacSetup(home: string): Promise<MacSetup> {
     })()];
   }));
 
+  const version = async (command: string) => (await output(command, ["--version"])).trim().split(" ")[0]!;
+  return {
+    dotfiles: { root, url, commit, onOrigin: await onOrigin(root, url, commit), tracked, changed },
+    claude: {
+      plugins: plugins.sort((a, b) => (a.id < b.id ? -1 : 1)),
+      marketplaces,
+      skills: await skillsIn(join(claudeDir, "skills")),
+      skillsOff: new Set(Object.entries(claudeSettings.skillOverrides).filter(([, v]) => v === "off").map(([k]) => k)),
+    },
+    pi: await readPiSetup(home),
+    versions: { claudeCode: await version("claude"), pi: await version("pi") },
+  };
+}
+
+/** The pi part of the reader. It reads only files under `home`: pi's settings, its npm installs and what it discovers. */
+export async function readPiSetup(home: string): Promise<MacSetup["pi"]> {
   const piAgent = join(home, ".pi", "agent");
   const piSettings = await readJson(join(piAgent, "settings.json"), piSettingsSchema);
   const resolveSetting = async (path: string) => {
@@ -439,24 +455,13 @@ export async function readMacSetup(home: string): Promise<MacSetup> {
   const piSkills = [...await skillsIn(join(home, ".agents", "skills")), ...await skillsIn(join(piAgent, "skills"))]
     .filter((skill, i, all) => all.findIndex((s) => s.realPath === skill.realPath) === i);
 
-  const version = async (command: string) => (await output(command, ["--version"])).trim().split(" ")[0]!;
   return {
-    dotfiles: { root, url, commit, onOrigin: await onOrigin(root, url, commit), tracked, changed },
-    claude: {
-      plugins: plugins.sort((a, b) => (a.id < b.id ? -1 : 1)),
-      marketplaces,
-      skills: await skillsIn(join(claudeDir, "skills")),
-      skillsOff: new Set(Object.entries(claudeSettings.skillOverrides).filter(([, v]) => v === "off").map(([k]) => k)),
-    },
-    pi: {
-      packages: piSettings.packages,
-      npmVersions,
-      localPackages,
-      extensions,
-      skills: piSkills,
-      skillSettings: await Promise.all(piSettings.skills.map(async (entry) => ({ entry, realPath: await resolveSetting(entry.replace(/^[-+!]/, "")) }))),
-    },
-    versions: { claudeCode: await version("claude"), pi: await version("pi") },
+    packages: piSettings.packages,
+    npmVersions,
+    localPackages,
+    extensions,
+    skills: piSkills,
+    skillSettings: await Promise.all(piSettings.skills.map(async (entry) => ({ entry, realPath: await resolveSetting(entry.replace(/^[-+!]/, "")) }))),
   };
 }
 
