@@ -2,7 +2,7 @@
 
 Nexus runs coding agents inside microVMs on your own Linux machines. Each microVM is called a pylon. Nexus is modelled on Amp Orbs: you start a thread, a fresh pylon boots with the repository and tools ready, and the agent keeps working after your laptop sleeps. You come back later to steer it, open previews of the running app, and collect what it produced.
 
-Status: the first end-to-end slice is built and runs on `infra-testbench`. A thread starts through the control plane API, its pylon boots from a template, the agent runs tools in it, and a declared service is served as a preview on the tailnet. Archiving pauses the pylon, and unarchiving wakes it with its disk and sessions intact. `src/control/thread-on-node.ts` checks that path on a node. `rj-firebat` has not run a thread yet, and Claude Code logged in inside a pylon is untested. The record shapes live in [the data model reference](data-model.md). The probe, project config and template image contracts live in [contracts](contracts/rationale.md).
+Status: the first end-to-end slice is built and runs on `infra-testbench`. A thread starts through the control plane API, its pylon boots from a template, the agent runs tools in it, and a declared service is served as a preview on the tailnet. Archiving pauses the pylon, and unarchiving wakes it with its disk and sessions intact. `src/control/thread-on-node.ts` checks that path on a node. `rj-firebat` has not run a thread yet. `nexus session open` and `nexus attach` give a Mac a Claude Code session in a pylon to `/login` in, but a logged-in Claude Code inside a pylon, and its resume after a wake, are not yet proven on a node. The record shapes live in [the data model reference](data-model.md). The probe, project config and template image contracts live in [contracts](contracts/rationale.md).
 
 ## Nexus copies Amp's split between the agent loop and the machine
 
@@ -39,7 +39,7 @@ A Claude Code session is a session inside a thread, not a separate kind of threa
 ## Lifecycle follows Amp
 
 - Starting a thread spawns a fresh pylon from the project's template on a node. `rj-firebat` is the default node.
-- A pylon sleeps when its agents are idle and nobody has used it for a while. Amp uses 5 minutes of agent idleness and 20 minutes without a human. Nexus starts with the same numbers.
+- A pylon sleeps when its agents are idle and nobody has used it for a while. Amp uses 5 minutes of agent idleness and 20 minutes without a human. Nexus starts with the same numbers. A terminal attached to the pylon's Herdr session, such as `nexus attach`, counts as a human for as long as it stays attached, because the probe counts the guest's Herdr clients in every observation.
 - Sleep is a disk checkpoint. The VM stops and memory is lost.
 - Waking boots the pylon from its checkpoint, restarts services, runs `.nexus/resume`, and relaunches every recorded Herdr session into its prompt. Claude Code runs `claude --resume <session id>` and finds its transcript on disk. The command that was running at sleep time shows as cut off.
 - Archiving a thread puts its pylon to sleep at once. Deleting a thread deletes its pylon.
@@ -52,7 +52,7 @@ Pylons are owned by threads only. Named pylons that outlive a thread are deferre
 - Gondolin blocks all outbound traffic except HTTP, TLS, and SSH to allowed hosts. Each project lists its allowed hosts.
 - Model credentials for pi-durable threads stay on the control plane.
 - Tool credentials, such as a GitHub token, stay on the node. Gondolin substitutes a placeholder in outbound HTTP headers for allowed hosts only. Git over SSH is terminated on the host, so the private key never enters a pylon.
-- Interactive Claude Code and Codex sessions need a `/login` inside the pylon for now. Claude Code's Remote Control, which lets you steer from the phone, needs a claude.ai login and does not work with a long-lived setup token. Because pylons are thread-owned, every new thread that uses these tools needs a new login. A shared credential service is deferred.
+- Interactive Claude Code and Codex sessions need a `/login` inside the pylon for now. `nexus session open` opens a Claude Code session and `nexus attach` gives a Mac terminal on it. The project needs `logins: ["claude"]`, whose hosts (`src/project.ts`) cover Claude Code's own list of required hosts for a claude.ai login, including `platform.claude.com`, where OAuth tokens are refreshed. The optional hosts are left out: `sso.claude.com` for organizations with SSO, `mcp-proxy.anthropic.com` for claude.ai connectors, `raw.githubusercontent.com` for the changelog, and Datadog telemetry. Claude Code's Remote Control, which lets you steer from the phone, needs a claude.ai login and does not work with a long-lived setup token. Because pylons are thread-owned, every new thread that uses these tools needs a new login. A shared credential service is deferred.
 - Templates never contain secrets.
 
 ## Configuration

@@ -14,7 +14,7 @@ The control plane writes every record. Probes send facts in observations, and th
 | Template | `id`, `key`, `state`, `node`, `builtAt` | The results of `build-template` jobs |
 | Thread | `id`, `title`, `project`, `status`, `conversationId`, `pylonId`, `startedBy` | You, and the harness |
 | Pylon | `id`, `thread`, `node`, `template` | Thread start |
-| Session | `pylon`, `herdrPane`, `harness`, `harnessSessionId`, `status` | Observations. Panes opened by hand in Herdr are adopted |
+| Session | `pylon`, `herdrPane`, `harness`, `harnessSessionId`, `status`, `title` | Observations. Panes opened by hand in Herdr are adopted |
 | Preview | `pylon`, `service`, `httpsPort` | The control plane allocates the port, never one its node's probe still routes. Observations report when it is ready |
 | Output | `thread`, `kind`, `ref` | Observations, including outputs the agent declares with `nexus output add` |
 | Orphan | `node`, `pylonId` | Observations of a pylon the registry does not know. Only you delete it |
@@ -32,7 +32,8 @@ One setting sits beside the records: `current`, the image every new pylon uses. 
 - `Template.key` is the project, the image, and a hash of `.nexus/setup`, `preSetup` and the allowlist. A template is reused for at most 72 hours.
 - `Template.state` is `building`, `ready`, or `failed`.
 - `Session.harness` is `claude-code`, `pi`, or `shell`.
-- `Session.harnessSessionId` is the Claude Code session ID or the pi session file. Waking uses it to relaunch the session into its prompt. The pylon also keeps the list on its own disk, in `~/.nexus/sessions.json`.
+- `Session.harnessSessionId` is the Claude Code session ID or the pi session file. Waking uses it to relaunch the session into its prompt. The pylon also keeps the list on its own disk, in `~/.nexus/sessions.json`. Herdr learns a Claude Code session's ID from Claude's SessionStart hook, which does not run while Claude waits at its login or trust screen. So Nexus starts every Claude Code session with `--session-id <uuid>`, and the record before a pause reads the ID from the pane's command line when Herdr has none. A session logged in with `/login` after it opened therefore resumes its conversation on wake.
+- `Session.title` is the label of the session's Herdr workspace, which `nexus session open --title` sets. It is null for a session last observed by a probe from before titles were reported.
 - `Session.status` is `working`, `idle`, `blocked`, or `done`.
 - A preview's URL is `https://<node tailnet name>:<httpsPort>/`. The API reports it as the preview's `url`, so clients never build it.
 - A preview's service is a declared or ad hoc service, or `port-<port>` for a port linked with `nexus preview`, from inside the pylon or from the Mac. A linked port stays linked across pauses until `nexus unpreview` unlinks it, from inside the pylon or from the Mac, and its preview lasts as long. A declared or ad hoc service's preview lasts for the thread's life.
