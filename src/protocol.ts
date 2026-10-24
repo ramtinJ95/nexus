@@ -635,6 +635,21 @@ export function parseJobEnvelope(body: string): JobEnvelope {
       if (source.kind !== "template" && source.kind !== "resume" && source.kind !== "fresh") throw new Error("job.boot.source.kind is not template, resume or fresh");
       if (source.kind === "template" && !isTemplateId(string(source.template, "job.boot.source.template"))) throw new Error("job.boot.source.template is not a template ID");
       if (source.kind === "fresh" && source.preSetup !== null) string(source.preSetup, "job.boot.source.preSetup");
+      const repo = record(boot.repo, "job.boot.repo");
+      switch (repo.kind) {
+        case "clone": {
+          string(repo.url, "job.boot.repo.url");
+          const checkout = record(repo.checkout, "job.boot.repo.checkout");
+          string(checkout.branch, "job.boot.repo.checkout.branch");
+          string(checkout.commit, "job.boot.repo.checkout.commit");
+          break;
+        }
+        case "empty":
+          string(repo.branch, "job.boot.repo.branch");
+          break;
+        case undefined: throw new Error("job.boot.repo has no kind, so the control plane that sent it is older than this probe. Upgrade the control plane, then its probes");
+        default: throw new Error("job.boot.repo.kind is not clone or empty");
+      }
       const live = record(job.live, "job.live");
       if (!Array.isArray(live.previews) || !Array.isArray(live.overlay)) throw new Error("job.live needs previews and overlay arrays");
       string(job.liveHash, "job.liveHash");

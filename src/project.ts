@@ -401,9 +401,6 @@ nexus unpreview 6006                       # stop publishing it
 /** Where the checkout came from, how to set a git author, which no pylon has, and how to publish with a GitHub grant. */
 function repositorySection(o: PylonOverlay): string {
   const github = o.secrets.some((grant) => grant.name === githubTokenGrant.name);
-  const origin = o.repo.kind === "clone"
-    ? `/home/user/workspace/repo is a clone of ${o.repo.url}, on branch ${o.repo.checkout.branch} from ${o.repo.checkout.commit}.`
-    : `/home/user/workspace/repo is a new repository on branch ${o.repo.branch} with no commits and no remote. Nothing in this pylon is kept when the thread is deleted, so publish anything worth keeping.`;
   const author = github
     ? `Git has no author here. Commit as the GitHub account that owns GH_TOKEN:
 
@@ -413,15 +410,25 @@ git config --global user.email "$(gh api user --jq '"\\(.id)+\\(.login)@users.no
 \`\`\``
     : "Git has no author here. Before your first commit, ask the human which name and email to commit as, and set them with `git config --global user.name` and `git config --global user.email`.";
   const token = "`gh` reads GH_TOKEN, and git over HTTPS asks `gh` for it on each push, so never store the token: no `gh auth login`, no credential store. Use HTTPS remotes, because git over SSH reaches only the remotes this pylon booted with.";
-  const publish = o.repo.kind === "clone" ? (github ? [token] : [])
-    : github ? [`${token} To publish this repository:
+  let origin: string;
+  let publish: string[];
+  switch (o.repo.kind) {
+    case "clone":
+      origin = `/home/user/workspace/repo is a clone of ${o.repo.url}, on branch ${o.repo.checkout.branch} from ${o.repo.checkout.commit}.`;
+      publish = github ? [token] : [];
+      break;
+    case "empty":
+      origin = `/home/user/workspace/repo is a new repository on branch ${o.repo.branch} with no commits and no remote. Nothing in this pylon is kept when the thread is deleted, so publish anything worth keeping.`;
+      publish = github ? [`${token} To publish this repository:
 
 \`\`\`sh
 git add -A && git commit -m "feat: first version"
 gh repo create <owner>/<name> --private --source . --remote origin --push
 git push                                   # every later push
 \`\`\``]
-    : [`This project has no GitHub token, and a project's secrets are fixed when it is created. To publish from a pylon, ask the human for a project with GitHub access: \`nexus project add <id> --scratch --secret ${githubTokenGrant.name}:${githubTokenGrant.hosts.join(",")}\`.`];
+        : [`This project has no GitHub token, and a project's secrets are fixed when it is created. To publish from a pylon, ask the human for a project with GitHub access: \`nexus project add <id> --scratch --secret ${githubTokenGrant.name}:${githubTokenGrant.hosts.join(",")}\`.`];
+      break;
+  }
   return `## Repository\n\n${[origin, author, ...publish].join("\n\n")}\n`;
 }
 
