@@ -136,7 +136,7 @@ The agent finds `NEXUS_PYLON_ID` in its environment and `~/.nexus/PYLON.md` impo
 
 ```sh
 nexus info --json                          # pylon, thread, node, previews, allowed hosts
-nexus services ensure --json               # start what .nexus/services.yaml declares, wait for health and preview URLs
+nexus services ensure --json               # start what .nexus/services.yaml declares now, wait for health and preview URLs
 nexus service logs web --lines 200
 nexus service restart web
 nexus service start storybook --command "pnpm storybook --port \$PORT" --preview
@@ -145,6 +145,8 @@ nexus unpreview 6006                       # stop publishing it
 nexus output add file artifacts/screenshot.png --title "Checkout page"
 nexus output add diff                      # snapshot the working tree as a diff output
 ```
+
+Nexus starts each declared service on its own: at every boot and wake, and within about 10 s of the node's next read for one added while the pylon runs, a service with a preview once its URL is assigned. `nexus services ensure` is for starting now and waiting for health. A running service keeps the command and env it started with until `nexus service restart`, and a service removed from the file keeps running until an ensure or restart prunes it.
 
 Branches, pushed branches, dirty trees and running previews become outputs without any command.
 
