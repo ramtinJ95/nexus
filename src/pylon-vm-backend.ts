@@ -142,11 +142,14 @@ function dotfilesPull({ repo, ref }: BootInputs["dotfiles"]): string {
   ].join("\n"), "/home/user");
 }
 
+/** Records the commit the pylon booted at, which the Changes view diffs against (checkout-files.ts). */
+const recordBase = (repo: string) => `git -C ${q(repo)} update-ref refs/nexus/base HEAD`;
+
 /** Runs as root from the workspace once, inside the instance's or template build's controller, on a fresh disk. 20-minute limit. */
 function setupCommands(url: string, checkout: BootInputs["repo"]["checkout"], preSetup: string | null): string[] {
   return [
     `chown user:user ${q(workspace)}`,
-    asUser(`git clone --no-checkout ${q(url)} ${q(repoDir)} && git -C ${q(repoDir)} checkout -B ${q(checkout.branch)} ${q(checkout.commit)}`, workspace),
+    asUser(`git clone --no-checkout ${q(url)} ${q(repoDir)} && git -C ${q(repoDir)} checkout -B ${q(checkout.branch)} ${q(checkout.commit)} && ${recordBase(repoDir)}`, workspace),
     ...(preSetup === null ? [] : [asUser(`bash -c ${q(preSetup)}`, repoDir)]),
     asUser("if test -e .nexus/setup; then ./.nexus/setup; fi", repoDir),
   ];
@@ -154,7 +157,7 @@ function setupCommands(url: string, checkout: BootInputs["repo"]["checkout"], pr
 
 /** The setup of a pylon booted from a template, run once: the template's clone moves to the pylon's remote and commit. */
 function checkoutCommands({ url, checkout }: BootInputs["repo"]): string[] {
-  return [asUser(`git remote set-url origin ${q(url)} && git fetch --quiet origin && git checkout --quiet -B ${q(checkout.branch)} ${q(checkout.commit)}`, repoDir)];
+  return [asUser(`git remote set-url origin ${q(url)} && git fetch --quiet origin && git checkout --quiet -B ${q(checkout.branch)} ${q(checkout.commit)} && ${recordBase(repoDir)}`, repoDir)];
 }
 
 export function createPylonVmBackend(options: PylonVmBackendOptions): VmBackend {
