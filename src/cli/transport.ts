@@ -38,20 +38,80 @@ const idleTimeoutMs = 30_000;
 
 const statusKinds: Readonly<Record<number, ErrorKind>> = { 400: "invalid", 413: "invalid", 403: "refused", 415: "refused", 404: "not-found", 409: "conflict" };
 
+function open(endpoint: Endpoint): Promise<Socket> {
+  const target: HostPort = { host: endpoint.url.hostname, port: Number(endpoint.url.port || 80) };
+  return endpoint.socks === null ? direct(target) : tunnel(endpoint.socks, target);
+}
+
 /** Sends JSON as the API requires and returns its JSON reply, or null for an empty one. */
 export async function call(endpoint: Endpoint, method: string, path: string, body?: unknown): Promise<unknown> {
-  const target: HostPort = { host: endpoint.url.hostname, port: Number(endpoint.url.port || 80) };
-  const socket = endpoint.socks === null ? await direct(target) : await tunnel(endpoint.socks, target);
-  const { status, text } = await exchange(socket, endpoint.url.host, method, path, body);
-  let reply: unknown = null;
+  const { status, text } = await exchange(await open(endpoint), endpoint.url.host, method, path, body);
+  return reply(method, path, status, text);
+}
+
+function reply(method: string, path: string, status: number, text: string): unknown {
+  let parsed: unknown = null;
   try {
-    if (text !== "") reply = JSON.parse(text);
+    if (text !== "") parsed = JSON.parse(text);
   } catch {
     throw new CliError("failed", `${method} ${path} answered ${status} with a body that is not JSON`, status);
   }
-  if (status >= 200 && status < 300) return reply;
-  const message = (reply as { error?: unknown } | null)?.error;
+  if (status >= 200 && status < 300) return parsed;
+  const message = (parsed as { error?: unknown } | null)?.error;
   throw new CliError(statusKinds[status] ?? "failed", typeof message === "string" ? message : `${method} ${path} failed with ${status}`, status);
+}
+
+/**
+ * Follows a server-sent event stream, handing `onEvent` each event's data as JSON. Resolves when the API ends the
+ * stream or `signal` aborts it, and rejects as `call` does when the API refuses it or the connection fails. The
+ * API pings a quiet stream, so the idle timeout still catches a link that hangs.
+ */
+export async function follow(endpoint: Endpoint, path: string, onEvent: (data: unknown) => void, signal: AbortSignal): Promise<void> {
+  const socket = await open(endpoint);
+  const host = endpoint.url.host;
+  return new Promise((resolve, reject) => {
+    const failed = (err: Error) => signal.aborted ? resolve() : reject(lost(host, err));
+    const req = request({ method: "GET", path, createConnection: () => socket, signal, headers: { host, accept: "text/event-stream" } }, (res) => {
+      res.setEncoding("utf8");
+      // Before the status is read, so a refusal cut off mid-body fails too.
+      res.on("error", failed);
+      if (res.statusCode !== 200) {
+        let text = "";
+        res.on("data", (chunk: string) => { text += chunk; });
+        res.on("end", () => {
+          try {
+            reply("GET", path, res.statusCode!, text);
+            reject(new CliError("failed", `GET ${path} answered ${res.statusCode} rather than a stream`, res.statusCode!));
+          } catch (err) {
+            reject(err);
+          }
+        });
+        return;
+      }
+      let pending = "";
+      let data: string[] = [];
+      res.on("data", (chunk: string) => {
+        const lines = (pending + chunk).split("\n");
+        pending = lines.pop()!;
+        for (const line of lines.map((l) => l.replace(/\r$/, ""))) {
+          // Comments, such as the API's pings, and fields the CLI has no use for are skipped.
+          if (line.startsWith("data:")) data.push(line.slice(5).replace(/^ /, ""));
+          if (line !== "" || data.length === 0) continue;
+          let event: unknown;
+          try {
+            event = JSON.parse(data.join("\n"));
+          } catch {
+            return void req.destroy(new CliError("failed", `GET ${path} sent an event that is not JSON`));
+          }
+          data = [];
+          onEvent(event);
+        }
+      });
+      res.on("end", () => resolve());
+    });
+    req.on("error", failed);
+    req.end();
+  });
 }
 
 function exchange(socket: Socket, host: string, method: string, path: string, body: unknown): Promise<{ status: number; text: string }> {

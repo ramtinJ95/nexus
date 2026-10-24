@@ -5,7 +5,8 @@
  * It starts a control plane in this process (registry, loop, harness and API, as src/control/main.ts wires
  * them) over a temporary directory. Its harness uses the scripted model from src/harness/test-fixture.ts, so
  * no model login is needed. It drives the node's running probe only through the control plane's HTTP API:
- * start a thread, run a tool in its pylon, have the agent declare a service with a preview, fetch the preview's
+ * start a thread, run a tool in its pylon, follow a streamed answer with the real CLI's `nexus watch --json` and keep that
+ * watch open past the CLI's idle timeout, have the agent declare a service with a preview, fetch the preview's
  * https URL from this node, have the agent start an unsupervised server that the thread's ports list, link that port
  * as a human would and fetch its preview, archive the thread so the pylon pauses, unarchive it so the pylon wakes,
  * runs a second tool and serves both previews on the same URLs once the agent starts the server again, then delete it. A second thread, on a repository that does not exist,
@@ -14,21 +15,24 @@
  * so another tailnet device can open it. Deleting the thread must leave `tailscale serve` as the check found it.
  */
 import assert from "node:assert/strict";
+import { spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { lookup } from "node:dns/promises";
 import { mkdtemp, rm, stat } from "node:fs/promises";
 import { request } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { createInterface } from "node:readline";
 import { DatabaseSync } from "node:sqlite";
 import { setTimeout as delay } from "node:timers/promises";
+import { fileURLToPath } from "node:url";
 import { z } from "zod";
 import { artifactDirectory, tarCodec } from "../artifacts.ts";
 import { isImageId, probePort, type JobStatus } from "../protocol.ts";
-import { scriptedModel, scriptedModels } from "../harness/test-fixture.ts";
+import { scriptedModel, scriptedModels, streamedAnswer, streamedWordMs } from "../harness/test-fixture.ts";
 import { parseSelfDnsName, readProbeConfig } from "../probe/config.ts";
 import { tailscaleCli } from "../probe/serve.ts";
-import type { ThreadDetail } from "./api.ts";
+import type { ThreadDetail, ThreadRow } from "./api.ts";
 import { defaultPreviewPorts, startControlPlane, type ControlPlaneConfig } from "./main.ts";
 
 const probeConfig = await readProbeConfig(process.argv[2] ?? "/etc/nexus/probe.json");
@@ -147,6 +151,56 @@ function conversationSection(html: string): string {
   return conversation;
 }
 
+/**
+ * Follows the thread with the real CLI's watch over the control plane's tailnet address, as the Claude mod and the
+ * pi extension do, and asks for an answer that streams for `seconds`. It must reach the watch as several live events
+ * a second. The watch then stays open, quiet, past the CLI's 30 s idle timeout, which the API's ping must hold off.
+ */
+async function checkStreamedAnswer(seconds: number, quietMs: number) {
+  const words = Math.round((seconds * 1000) / streamedWordMs);
+  const cli = fileURLToPath(new URL("../cli/nexus.ts", import.meta.url));
+  const watch = spawn(process.execPath, [cli, "watch", threadId!, "--json", "--url", `http://${host}:${controlPlane.port}`, "--socks", "none"], { stdio: ["ignore", "pipe", "pipe"] });
+  let stderr = "";
+  watch.stderr.setEncoding("utf8").on("data", (chunk: string) => { stderr += chunk; });
+  const exited = new Promise<number | null>((resolve) => watch.on("exit", resolve));
+  const lines: { at: number; event: any }[] = [];
+  createInterface({ input: watch.stdout }).on("line", (line) => lines.push({ at: performance.now(), event: JSON.parse(line) }));
+  let code: number | null;
+  try {
+    await until("the watch prints its first live event", 30_000, async () => lines.some((l) => l.event.type === "live") || undefined);
+    const sent = performance.now();
+    await expect(202, "POST", `/threads/${threadId}/messages`, { text: `stream: ${words}`, requestId: "msg:node-check-stream" });
+    const entry = await until("the streamed answer's entry is printed", seconds * 1000 + 60_000, async () => lines.find((l) => l.event.type === "entry" && l.event.entry.kind === "pi.assistant"));
+    const cleared = await until("the live event that drops the partial is printed", 30_000, async () => lines.find((l) => l.at >= entry.at && l.event.type === "live" && l.event.partial === null));
+    assert.equal(entry.event.text, streamedAnswer(words), "the entry holds the whole answer");
+    assert.ok(lines.indexOf(entry) < lines.indexOf(cleared), "the answer's entry comes before the live event that drops its partial");
+    const lives = lines.filter((l) => l.event.type === "live" && l.event.partial !== null);
+    for (const [i, l] of lives.entries()) assert.ok(streamedAnswer(words).startsWith(l.event.partial) && l.event.partial.length > (lives[i - 1]?.event.partial.length ?? 0), "each partial is a longer prefix of the answer");
+    const span = (lives.at(-1)!.at - lives[0]!.at) / 1000;
+    const gaps = lives.slice(1).map((l, i) => l.at - lives[i]!.at);
+    const rate = (lives.length - 1) / span;
+    const median = Math.round(gaps.toSorted((a, b) => a - b)[gaps.length >> 1]!);
+    const first = Math.round(lives[0]!.at - sent);
+    // An answer held back until it ends would also come as many close events, all at its end.
+    assert.ok(first < 2000, `the first partial comes soon after the send: ${first} ms`);
+    assert.ok(span >= 0.8 * seconds, `the partials span most of the answer's ${seconds} s: ${span.toFixed(1)} s`);
+    assert.ok(rate >= 3, `several live events a second: ${rate.toFixed(1)}`);
+    assert.ok(Math.max(...gaps) < 1000, `no gap of a poll's length: ${Math.round(Math.max(...gaps))} ms`);
+    pass(`the watch printed the answer of ${words} words as ${lives.length} live events over ${span.toFixed(1)} s from ${first} ms after the send, ${rate.toFixed(1)} a second, gaps median ${median} ms and max ${Math.round(Math.max(...gaps))} ms, then its entry`);
+
+    const quiet = lines.length;
+    const held = await Promise.race([delay(quietMs, true), exited.then(() => false)]);
+    assert.ok(held, `the watch exited while quiet: ${stderr}`);
+    const errors = lines.slice(quiet).filter((l) => l.event.type === "error");
+    assert.deepEqual(errors, [], "a quiet watch keeps its stream");
+    pass(`the quiet watch stayed open ${quietMs / 1000} s with no error, past the CLI's 30 s idle timeout`);
+  } finally {
+    watch.kill("SIGTERM");
+    code = await exited;
+  }
+  assert.equal(code, 0, `the watch exits 0 at SIGTERM: ${stderr}`);
+}
+
 function assertIncludes(text: string, ...parts: string[]) {
   for (const part of parts) if (!text.includes(part)) throw new Error(`the tool result lacks ${part}: ${text}`);
 }
@@ -236,13 +290,14 @@ async function deleteThread(pylonId: string): Promise<string> {
 function plannerState(pylonId: string) {
   const db = new DatabaseSync(config.db, { readOnly: true });
   try {
-    const pylon = db.prepare("SELECT failed, attempts, retrying FROM pylons WHERE id = ?").get(pylonId) as { failed: string | null; attempts: string; retrying: number };
+    const pylon = db.prepare("SELECT failed, attempts, retrying, submitted FROM pylons WHERE id = ?").get(pylonId) as { failed: string | null; attempts: string; retrying: number; submitted: string | null };
     const job = db.prepare("SELECT status FROM jobs WHERE subject = ?").get(pylonId) as { status: string } | undefined;
     return {
       failed: pylon.failed,
       attempts: JSON.parse(pylon.attempts) as { count: number; last: { at: number; code: string } | null },
       retrying: pylon.retrying === 1,
       job: job === undefined ? null : JSON.parse(job.status) as JobStatus,
+      submitted: pylon.submitted === null ? null : JSON.parse(pylon.submitted) as unknown,
     };
   } finally {
     db.close();
@@ -345,6 +400,7 @@ try {
   assertIncludes(conversation, `<div class="text">bash: ${escapedCommand}</div>`);
   assertIncludes(tool, '<span class="t-name">bash</span>', `<span class="t-subj">${escapedCommand}</span>`, '<pre class="t-out">', "Linux", "README.md");
   pass("the thread page renders the real conversation: the message, a bash row and its output, escaped");
+  await checkStreamedAnswer(30, 45_000);
   const token = `preview-check-${threadId}`;
   await runTool("msg:node-check-preview", declarePreview(token));
   const preview = await openPreview(token);
@@ -417,7 +473,11 @@ try {
 } catch (err) {
   console.error(`FAIL ${(err as Error).message}`);
   if (threadId !== undefined) {
-    await detail().then((d) => console.error(`pylon: ${JSON.stringify(d.pylon, null, 2)}`), (detailErr: unknown) => {
+    await detail().then(async (d) => {
+      console.error(`pylon: ${JSON.stringify(d.pylon, null, 2)}`);
+      const row = (await expect(200, "GET", "/threads") as ThreadRow[]).find((r) => r.id === threadId);
+      console.error(`planner: ${JSON.stringify({ status: row?.status, desired: row?.desired, ...plannerState(d.pylon.id) }, null, 2)}`);
+    }, (detailErr: unknown) => {
       console.error(`could not read the thread detail: ${(detailErr as Error).message}`);
     });
   }

@@ -1,6 +1,7 @@
 // The dashboard's only script. Pages are rendered on the server. This file sends actions and messages to the
 // JSON API, records a visit as human activity, opens the start dialog and the phone's panels, and polls the
-// page to swap in each `data-live` region that changed.
+// page to swap in each `data-live` region that changed. A thread page also follows its stream, which sends the
+// conversation region as the run streams.
 "use strict";
 
 const main = document.querySelector("main");
@@ -74,43 +75,86 @@ function anchor() {
   };
 }
 
+/**
+ * Swaps in each region whose inside, as the browser serializes it, differs from what the server last sent for it.
+ * Regions hold buttons, links, the prompt box and tool output, so focus, the draft, what the reader opened or
+ * closed, and their place in the conversation survive the swap.
+ */
+function swap(regions) {
+  const changed = regions.map(([el, html]) => [el, html, comparable(html)]).filter(([el, , key]) => el !== null && served.get(el.id) !== key);
+  if (changed.length === 0) return;
+  const focused = changed.some(([el]) => el.contains(document.activeElement)) ? focusKey(document.activeElement) : null;
+  const draft = document.getElementById("prompt-text");
+  const saved = draft === null ? null : { value: draft.value, start: draft.selectionStart, end: draft.selectionEnd };
+  const start = startState();
+  const restoreScroll = anchor();
+  for (const [el, html, key] of changed) {
+    el.innerHTML = html;
+    served.set(el.id, key);
+  }
+  const prompt = document.getElementById("prompt-text");
+  if (saved !== null && prompt !== null && prompt !== draft) {
+    prompt.value = saved.value;
+    prompt.setSelectionRange(saved.start, saved.end);
+  }
+  restoreStart(start);
+  for (const d of document.querySelectorAll("details[id]")) if (toggled.has(d.id)) d.open = toggled.get(d.id);
+  const send = document.getElementById("send");
+  if (send !== null) send.disabled = outgoing?.inFlight === true;
+  if (focused !== null) document.querySelector(focused)?.focus({ preventScroll: true });
+  restoreScroll();
+  applyFilter();
+  tick();
+}
+
+// While the stream is open it alone writes the conversation, so a poll that started before a frame cannot put
+// older text back. Its frames come in order: the region whole, then the parts that grew since.
+let stream = null;
+let frames = 0;
+const streaming = () => stream?.readyState === EventSource.OPEN;
+function follow(url) {
+  // A hidden page keeps none of the control plane's few streams, even when a refresh it began finishes later.
+  if (url === undefined || document.visibilityState !== "visible" || (stream !== null && stream.readyState !== EventSource.CLOSED)) return;
+  // EventSource reconnects by itself after a dropped connection. A refused one is closed for good, so the next
+  // poll opens another.
+  stream = new EventSource(url);
+  stream.addEventListener("message", (event) => {
+    frames += 1;
+    const frame = JSON.parse(event.data);
+    const convo = document.getElementById("convo");
+    if (convo === null) return;
+    if (frame.convo !== undefined) {
+      // Parsed and serialized as the poll's regions are, so an unchanged region compares equal.
+      const fresh = document.createElement("template");
+      fresh.innerHTML = frame.convo;
+      return swap([[convo, fresh.innerHTML]]);
+    }
+    const slots = convo.querySelectorAll("[data-grow]");
+    const restoreScroll = anchor();
+    for (const [i, inside] of frame.grow) {
+      const slot = slots[i];
+      if (slot === undefined) continue;
+      // A running tool's output scrolls by itself. A reader at its end follows it, as at the conversation's end.
+      const stick = atBottom(slot);
+      slot.innerHTML = inside;
+      if (stick) slot.scrollTop = slot.scrollHeight;
+    }
+    restoreScroll();
+  });
+}
+
 let refreshing = null;
 async function refresh() {
   const state = document.getElementById("refresh-state");
   try {
+    const seen = frames;
     // A link that stalls mid-body would otherwise hold the refresh lock forever.
     const res = await fetch(location.href, { headers: { accept: "text/html" }, cache: "no-store", signal: AbortSignal.timeout(pollMs * 2) });
     if (!res.ok) throw new Error(`the control plane answered ${res.status}`);
     const next = new DOMParser().parseFromString(await res.text(), "text/html");
-    const changed = [...next.querySelectorAll("[data-live]")]
-      .map((fresh) => [document.getElementById(fresh.id), fresh, comparable(fresh.innerHTML)])
-      .filter(([el, fresh, html]) => el !== null && served.get(fresh.id) !== html);
-    if (changed.length > 0) {
-      // Regions hold buttons, links, the prompt box and tool output, so keep focus, the draft, what the reader
-      // opened or closed, and their place in the conversation across the swap.
-      const focused = changed.some(([el]) => el.contains(document.activeElement)) ? focusKey(document.activeElement) : null;
-      const draft = document.getElementById("prompt-text");
-      const saved = draft === null ? null : { value: draft.value, start: draft.selectionStart, end: draft.selectionEnd };
-      const start = startState();
-      const restoreScroll = anchor();
-      for (const [el, fresh, html] of changed) {
-        el.innerHTML = fresh.innerHTML;
-        served.set(fresh.id, html);
-      }
-      const prompt = document.getElementById("prompt-text");
-      if (saved !== null && prompt !== null && prompt !== draft) {
-        prompt.value = saved.value;
-        prompt.setSelectionRange(saved.start, saved.end);
-      }
-      restoreStart(start);
-      for (const d of document.querySelectorAll("details[id]")) if (toggled.has(d.id)) d.open = toggled.get(d.id);
-      const send = document.getElementById("send");
-      if (send !== null) send.disabled = outgoing?.inFlight === true;
-      if (focused !== null) document.querySelector(focused)?.focus({ preventScroll: true });
-      restoreScroll();
-      applyFilter();
-      tick();
-    }
+    const followed = streaming() || frames !== seen;
+    swap([...next.querySelectorAll("[data-live]")].filter((fresh) => !(followed && fresh.id === "convo")).map((fresh) => [document.getElementById(fresh.id), fresh.innerHTML]));
+    follow(next.getElementById("convo")?.dataset.stream);
     document.title = next.title;
     // An archived or deleted thread stops counting visits, so follow the fresh page.
     const activity = next.querySelector("main")?.dataset.activity;
@@ -355,6 +399,7 @@ document.addEventListener("click", (event) => {
 
 if (scroller !== null) scroller.scrollTop = scroller.scrollHeight;
 document.querySelector(".row.active")?.scrollIntoView({ block: "nearest" });
+follow(document.getElementById("convo")?.dataset.stream);
 if (dialog?.dataset.autoopen !== undefined) void openStart(null);
 setInterval(tick, 1000);
 if (pollMs > 0) {
@@ -362,7 +407,12 @@ if (pollMs > 0) {
 }
 recordVisit();
 document.addEventListener("visibilitychange", () => {
-  if (document.visibilityState !== "visible") return;
+  // The first frame on return is the region whole.
+  if (document.visibilityState !== "visible") {
+    stream?.close();
+    return;
+  }
   recordVisit();
+  follow(document.getElementById("convo")?.dataset.stream);
   if (pollMs > 0) void refreshNow();
 });

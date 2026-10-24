@@ -17,7 +17,7 @@ This skill never drives the home-lab deployment on `rj-firebat` and `infra-testb
 - A real probe comes from `startProbe`, on `127.0.0.1:7480`, with the Docker backend (`src/docker-backend.ts`). Each pylon is a container named `pylon-<thread>`, built from an image the stack builds: Node 24, git, Herdr, the pi-env daemon and the in-pylon CLI.
 - Only the production boundaries are replaced:
   - tailscaled's whois is a fake LocalAPI socket. It names port 7480 as the probe and every other caller as the control plane's own node, which the API allows.
-  - The model is scripted (`src/harness/test-fixture.ts`). A message `bash: <command>` makes exactly one bash tool call in the pylon, then the answer `scripted answer after toolResult`. Any other message gets `scripted answer after user`.
+  - The model is scripted (`src/harness/test-fixture.ts`). A message `bash: <command>` makes exactly one bash tool call in the pylon, then the answer `scripted answer after toolResult`. A message `stream: <n>` gets the answer `word0 word1 ...` of n words, written one word every 20 ms, so it streams as a real model's does. Any other message gets `scripted answer after user`.
   - `tailscale serve` is `src/probe/fake-tailscale.ts`, so the Mac's work tailnet is never touched.
 - Seed data, created through the API: image `img-0000000000aa` made current, node `verify-node`, and project `spoon` (Spoon-Knife on `main`, 1 CPU, 1 GiB).
 

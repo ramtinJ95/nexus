@@ -12,11 +12,11 @@ import { parseArgs, type ParseArgsOptionsConfig } from "node:util";
 import { z } from "zod";
 import type { ImageContent, Message, TextContent } from "@earendil-works/pi-ai";
 import type { ConversationView, EntryRecord, InboxState, LiveState } from "@earendil-works/pi-durable";
-import type { ListeningPort, NodeSummary, ThreadDetail, ThreadRow } from "../control/api.ts";
+import type { ListeningPort, NodeSummary, ThreadDetail, ThreadRow, ViewFrame } from "../control/api.ts";
 import type { Preview, Thread } from "../control/registry.ts";
 import type { Project } from "../project.ts";
 import type { ActualState } from "../reconcile.ts";
-import { call, CliError, exitCodes, type Endpoint, type HostPort } from "./transport.ts";
+import { call, CliError, exitCodes, follow, type Endpoint, type HostPort } from "./transport.ts";
 
 const version = "0.2.0";
 const defaults = { url: "http://rj-firebat.tailc817d3.ts.net:7470", socks: "localhost:1055" };
@@ -44,13 +44,15 @@ then NEXUS_URL and NEXUS_SOCKS, then ${configFile()}, then ${defaults.url} throu
 
 type Values = Record<string, string | boolean | undefined>;
 type Api = (method: string, path: string, body?: unknown) => Promise<unknown>;
+/** Follows one of the API's event streams until it ends or `signal` aborts it. */
+type Follow = (path: string, onEvent: (data: unknown) => void, signal: AbortSignal) => Promise<void>;
 /** What a command prints: its JSON for --json, its text otherwise. */
 interface Result { json: unknown; text: string }
 interface Command {
   args: readonly [min: number, max: number];
   options?: ParseArgsOptionsConfig;
   /** Nothing when the command printed its own output, as watch does. */
-  run(api: Api, args: readonly string[], values: Values): Promise<Result | void>;
+  run(api: Api, args: readonly string[], values: Values, follow: Follow): Promise<Result | void>;
 }
 
 const str = (v: Values, key: string) => v[key] as string | undefined;
@@ -95,9 +97,12 @@ function messageText(message: Message): string {
 /** Empty for an entry that holds no model message, such as the head marker. */
 const entryText = (entry: EntryRecord) => (entry.model ?? []).map(messageText).filter((text) => text !== "").join("\n");
 
-const queuedTexts = (view: ConversationView) => ((view.docs["pi.inbox"] as InboxState | undefined)?.items ?? [])
+/** What watch and the CLI's renderings read of a conversation. */
+type View = Pick<ConversationView, "entries" | "docs">;
+
+const queuedTexts = (view: View) => ((view.docs["pi.inbox"] as InboxState | undefined)?.items ?? [])
   .flatMap((item) => item.mode === "write" ? [] : [contentText(item.content as string | (TextContent | ImageContent)[])]);
-const busy = (view: ConversationView) => (view.docs["pi.live"] as LiveState | undefined)?.run !== undefined;
+const busy = (view: View) => (view.docs["pi.live"] as LiveState | undefined)?.run !== undefined;
 
 function conversationText(view: ConversationView): string {
   const parts = [
@@ -215,7 +220,7 @@ export type WatchEvent =
   | WatchLive
   | { type: "error"; thread: string; kind: "unreachable" | "failed"; message: string };
 
-function stateOf(d: ThreadDetail, view: ConversationView | null): WatchState {
+function stateOf(d: ThreadDetail, view: View | null): WatchState {
   const parkedTasks = d.agent?.parkedTasks ?? 0;
   return {
     type: "state", thread: d.thread.id, status: d.thread.status,
@@ -224,7 +229,7 @@ function stateOf(d: ThreadDetail, view: ConversationView | null): WatchState {
   };
 }
 
-function liveOf(id: string, view: ConversationView | null): WatchLive {
+function liveOf(id: string, view: View | null): WatchLive {
   const live = view?.docs["pi.live"] as LiveState | undefined;
   const generation = live?.generation;
   const partial = generation?.message?.content.flatMap((part) => part.type === "text" ? [part.text] : []).join("") ?? "";
@@ -242,14 +247,16 @@ function stateText(s: WatchState): string {
 }
 
 /**
- * Polls the thread and its conversation. The conversation route serves pi-durable's active context, not the full
- * history: a new head marker, a compaction or a delete can reorder or drop entries. So the first poll prints the
- * context whole, a later one that only appends prints each new entry, and any other change prints it whole again.
- * Then the thread's state when it changed. An unreachable or failing control plane is reported once and polled
- * through, so a live pane survives a restart of the control plane. Ends after the state that says the thread is
- * deleted, or once the process that started it is gone.
+ * Follows the thread's conversation as the API streams it, and polls the thread. The conversation is pi-durable's
+ * active context, not the full history: a new head marker, a compaction or a delete can reorder or drop entries.
+ * So the first print shows the context whole, a later one that only appends prints each new entry, and any other
+ * change prints it whole again. Then the thread's state and the run in flight, when they changed. Every print
+ * comes from the latest of both sources, so an answer's entry is printed before the live event that drops its
+ * partial. An unreachable or failing control plane is reported once and retried through, so a live pane survives
+ * a restart of the control plane. Ends after the state that says the thread is deleted, or once the process that
+ * started it is gone.
  */
-async function watch(api: Api, id: string, intervalMs: number, json: boolean): Promise<void> {
+async function watch(api: Api, follow: Follow, id: string, intervalMs: number, json: boolean): Promise<void> {
   for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"] as const) process.once(signal, () => process.exit(0));
   // A consumer that closes the pipe is done reading.
   process.stdout.on("error", (err: NodeJS.ErrnoException) => {
@@ -268,48 +275,103 @@ async function watch(api: Api, id: string, intervalMs: number, json: boolean): P
   let printed: number[] | null = null;
   let shown: string | null = null;
   let liveShown: string | null = null;
-  let failing: string | null = null;
-  for (;;) {
-    try {
-      const d = await api("GET", thread(id)) as ThreadDetail;
-      // A thread deleted between the two reads has no conversation. The next poll sees the delete.
-      const view = d.agent === null ? null : await (api("GET", `${thread(id)}/conversation`) as Promise<ConversationView>)
-        .catch((err: unknown) => { if (err instanceof CliError && err.kind === "conflict") return null; throw err; });
-      // Without a conversation, the entries last printed stand. The first poll prints an empty context.
-      const entries: readonly EntryRecord[] | null = view?.entries ?? (printed === null ? [] : null);
-      if (entries !== null) {
-        const before = printed;
-        const appended = before !== null && entries.length >= before.length && before.every((entryId, i) => entries[i]!.id === entryId);
-        if (appended) {
-          for (const entry of entries.slice(before.length)) {
-            const e = rendered(entry);
-            emit({ type: "entry", thread: id, ...e }, e.text);
-          }
-        } else {
-          const all = entries.map(rendered);
-          emit({ type: "reset", thread: id, entries: all }, before === null ? joined(all) : `-- The conversation was rewritten. It now reads:\n${joined(all)}`);
+  /** The thread as last polled, and its conversation as last streamed. */
+  let detail: ThreadDetail | null = null;
+  let streamed: View | null = null;
+  /** What each source failed with last, while it fails. After an outage the state is printed again. */
+  const failing = new Map<"poll" | "stream", string>();
+  let recovered = false;
+  const failed = (source: "poll" | "stream", err: unknown) => {
+    if (!(err instanceof CliError) || (err.kind !== "unreachable" && err.kind !== "failed")) throw err;
+    if (![...failing.values()].includes(err.message)) emit({ type: "error", thread: id, kind: err.kind, message: err.message }, `-- ${err.message}. Retrying`);
+    failing.set(source, err.message);
+  };
+  const succeeded = (source: "poll" | "stream") => {
+    if (failing.delete(source) && failing.size === 0) recovered = true;
+  };
+
+  function print() {
+    const d = detail;
+    // A thread with a conversation waits for its first frame.
+    if (d === null || (d.agent !== null && streamed === null)) return;
+    const view = d.agent === null ? null : streamed;
+    // Without a conversation, the entries last printed stand. The first print shows an empty context.
+    const entries: readonly EntryRecord[] | null = view?.entries ?? (printed === null ? [] : null);
+    if (entries !== null) {
+      const before = printed;
+      const appended = before !== null && entries.length >= before.length && before.every((entryId, i) => entries[i]!.id === entryId);
+      if (appended) {
+        for (const entry of entries.slice(before.length)) {
+          const e = rendered(entry);
+          emit({ type: "entry", thread: id, ...e }, e.text);
         }
-        printed = entries.map((e) => e.id);
+      } else {
+        const all = entries.map(rendered);
+        emit({ type: "reset", thread: id, entries: all }, before === null ? joined(all) : `-- The conversation was rewritten. It now reads:\n${joined(all)}`);
       }
-      const state = stateOf(d, view);
-      const key = JSON.stringify(state);
-      // After an outage the state is printed again, which tells the consumer the control plane is back.
-      if (key !== shown || failing !== null) emit(state, stateText(state));
-      shown = key;
-      // The text stream already says what the state does of the run, so only JSON carries it.
-      const live = liveOf(id, view);
-      const liveKey = JSON.stringify(live);
-      if (liveKey !== liveShown) emit(live, "");
-      liveShown = liveKey;
-      failing = null;
-      if (d.thread.status === "deleted") return;
-    } catch (err) {
-      if (!(err instanceof CliError) || (err.kind !== "unreachable" && err.kind !== "failed")) throw err;
-      if (failing !== err.message) emit({ type: "error", thread: id, kind: err.kind, message: err.message }, `-- ${err.message}. Retrying`);
-      failing = err.message;
+      printed = entries.map((e) => e.id);
     }
-    await sleep(intervalMs);
-    if (process.ppid !== parent) return;
+    const state = stateOf(d, view);
+    const key = JSON.stringify(state);
+    // After an outage the state is printed again, which tells the consumer the control plane is back.
+    if (key !== shown || recovered) emit(state, stateText(state));
+    shown = key;
+    recovered = false;
+    // The text stream already says what the state does of the run, so only JSON carries it.
+    const live = liveOf(id, view);
+    const liveKey = JSON.stringify(live);
+    if (liveKey !== liveShown) emit(live, "");
+    liveShown = liveKey;
+  }
+
+  const stop = new AbortController();
+  /**
+   * Each connection's first frame is the whole view, and each later one replaces what changed. A dropped stream
+   * is opened again after 100 ms, doubling up to the poll interval, and from 100 ms again once a frame arrives.
+   * A thread without a conversation, or a deleted one, refuses the stream, and never streams again.
+   */
+  async function stream() {
+    for (let attempt = 0; !stop.signal.aborted; attempt++) {
+      let first = true;
+      try {
+        await follow(`${thread(id)}/events`, (data) => {
+          const frame = data as ViewFrame;
+          const docs = { ...first ? {} : streamed!.docs, ...frame.docs };
+          for (const [kind, doc] of Object.entries(docs)) if (doc === null) delete docs[kind];
+          streamed = { entries: frame.entries ?? streamed!.entries, docs: docs as View["docs"] };
+          first = false;
+          attempt = 0;
+          succeeded("stream");
+          print();
+        }, stop.signal);
+      } catch (err) {
+        if (err instanceof CliError && err.kind === "conflict") return;
+        failed("stream", err);
+      }
+      await sleep(Math.min(100 * 2 ** attempt, intervalMs), undefined, { signal: stop.signal }).catch(() => {});
+    }
+  }
+  async function poll() {
+    while (!stop.signal.aborted) {
+      try {
+        detail = await api("GET", thread(id)) as ThreadDetail;
+        succeeded("poll");
+        print();
+        if (detail.thread.status === "deleted") return;
+      } catch (err) {
+        failed("poll", err);
+      }
+      await sleep(intervalMs, undefined, { signal: stop.signal }).catch(() => {});
+      if (process.ppid !== parent) return;
+    }
+  }
+  // Only the poll ends the watch. The stream stops early for a thread without a conversation, which leaves the
+  // watch running, or with a failure such as a refusal, which ends it.
+  const streaming = stream();
+  try {
+    await Promise.race([poll(), streaming.then(() => new Promise<never>(() => {}))]);
+  } finally {
+    stop.abort();
   }
 }
 
@@ -388,10 +450,10 @@ const commands: Readonly<Record<string, Command>> = {
   watch: {
     args: [1, 1],
     options: { interval: { type: "string" } },
-    async run(api, [id], v) {
+    async run(api, [id], v, follow) {
       const interval = int(str(v, "interval"), "--interval", 2000);
       if (interval === 0) throw new CliError("invalid", "--interval must be above 0");
-      await watch(api, id!, interval, v.json === true);
+      await watch(api, follow, id!, interval, v.json === true);
     },
   },
   abort: action("abort", "Aborted the run of"),
@@ -484,7 +546,8 @@ async function run(argv: readonly string[]): Promise<void> {
     throw new CliError("invalid", `${name} takes ${min === max ? min : max === Infinity ? `at least ${min}` : `${min} to ${max}`} argument${max === 1 ? "" : "s"}, got ${positionals.length}`);
   }
   const target = await endpoint(values);
-  const result = await command.run((method, path, body) => call(target, method, path, body), positionals, values);
+  const result = await command.run((method, path, body) => call(target, method, path, body), positionals, values,
+    (path, onEvent, signal) => follow(target, path, onEvent, signal));
   if (result !== undefined) process.stdout.write(`${values.json === true ? JSON.stringify(result.json, null, 2) : result.text}\n`);
 }
 

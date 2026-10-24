@@ -5,7 +5,8 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { request } from "node:http";
 import { join } from "node:path";
-import { startApi, type ThreadDetail, type ThreadRow } from "./api.ts";
+import { maxStreams, startApi, type ThreadDetail, type ThreadRow } from "./api.ts";
+import { readEvents } from "./event-reader.ts";
 import { fakeHarness } from "./fake-harness.ts";
 import { openRegistry, type Thread } from "./registry.ts";
 import { liveHashOf } from "../project.ts";
@@ -31,12 +32,13 @@ const dotfiles = { repo: "git@github.com:ramtin/dotfiles.git", ref: "main" };
 const dir = await mkdtemp(join(tmpdir(), "nexus-api-"));
 after(() => rm(dir, { recursive: true }));
 
-async function setup(t: import("node:test").TestContext, options: { dotfiles?: typeof dotfiles } = {}) {
+async function setup(t: import("node:test").TestContext, options: { dotfiles?: typeof dotfiles; streamStallMs?: number } = {}) {
   const registry = openRegistry(join(dir, `${randomUUID()}.db`));
   registry.upsertNode({ name: node, tailnetHost: "rj-firebat.tail.ts.net", tailnetNodeId: "nFIREBAT" as TailnetNodeId });
   let caller: TailnetNodeId | null = laptop;
   const woken: NodeName[] = [];
-  const { harness, calls } = fakeHarness();
+  const fake = fakeHarness();
+  const { harness, calls } = fake;
   const commands: [PylonId, PylonCommand][] = [];
   /** What the node's probe answers a guest command with. Tests replace it. */
   let answer = async (command: PylonCommand): Promise<CommandResult> => {
@@ -54,6 +56,7 @@ async function setup(t: import("node:test").TestContext, options: { dotfiles?: t
     wake: (n) => { woken.push(n); },
     probes: new Map([[node, { command: (pylonId: PylonId, command: PylonCommand) => { commands.push([pylonId, command]); return answer(command); } }]]),
     previewPorts: { first: 10200, last: 10299 },
+    ...options.streamStallMs === undefined ? {} : { streamStallMs: options.streamStallMs },
   });
   t.after(async () => {
     await api.close();
@@ -76,13 +79,14 @@ async function setup(t: import("node:test").TestContext, options: { dotfiles?: t
     });
   }
   return {
-    registry, call, woken, calls, commands,
+    registry, call, woken, calls, commands, fake,
     callAs(id: TailnetNodeId | null) { caller = id; },
     probeAnswers(next: typeof answer) { answer = next; },
+    events: (path: string) => readEvents(api.port, path),
   };
 }
 
-async function withThread(t: import("node:test").TestContext, options: { project?: typeof project; dotfiles?: typeof dotfiles } = {}) {
+async function withThread(t: import("node:test").TestContext, options: { project?: typeof project; dotfiles?: typeof dotfiles; streamStallMs?: number } = {}) {
   const s = await setup(t, options);
   assert.equal((await s.call("POST", "/v1/projects", options.project ?? project)).status, 201);
   assert.equal((await s.call("POST", "/v1/images", image)).status, 201);
@@ -443,6 +447,150 @@ test("a message goes to the thread's conversation and counts as human activity",
     ["watch", thread.id],
     ["unwatch", thread.id],
   ]);
+});
+
+/** Polls until `done` holds, for up to 5 s. */
+async function until(done: () => boolean, what: string) {
+  for (let i = 0; !done(); i++) {
+    assert.ok(i < 100, what);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+}
+
+test("a thread's event stream sends the whole view, then each part a commit changed, and stops its watch when the client leaves", async (t) => {
+  const s = await withThread(t);
+  const { thread, fake } = s;
+  const transcript = fake.transcript(thread.id);
+  transcript.docs["pi.inbox"] = { items: [] };
+  const stream = s.events(`/v1/threads/${thread.id}/events`);
+  const res = await stream.response;
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.headers["content-type"], "text/event-stream");
+  assert.deepEqual(await stream.next(), { entries: [], docs: { "pi.inbox": { items: [] } } }, "the first event is the whole view");
+
+  transcript.docs["pi.live"] = { run: { taskId: 1, inputs: [] }, generation: { message: { role: "assistant", content: [{ type: "text", text: "Hal" }] } } };
+  fake.commit(thread.id);
+  assert.deepEqual(await stream.next(), { docs: { "pi.live": transcript.docs["pi.live"] } }, "a commit to the live document sends only it, whole");
+  transcript.docs["pi.live"] = { run: { taskId: 1, inputs: [] }, generation: { message: { role: "assistant", content: [{ type: "text", text: "Half" }] } } };
+  fake.commit(thread.id);
+  assert.equal((await stream.next()).docs["pi.live"].generation.message.content[0].text, "Half", "the partial is a snapshot, not a delta");
+
+  assert.equal((await s.call("POST", `/v1/threads/${thread.id}/messages`, { text: "and then?", requestId: "msg:1" })).status, 202);
+  const appended = await stream.next();
+  assert.deepEqual(Object.keys(appended), ["entries"]);
+  assert.deepEqual(appended.entries.map((e: any) => e.model[0].content), ["and then?"]);
+  delete transcript.docs["pi.live"];
+  fake.commit(thread.id);
+  assert.deepEqual(await stream.next(), { docs: { "pi.live": null } }, "a document that is gone is null");
+
+  assert.equal(fake.watching(thread.id), 1);
+  stream.close();
+  await until(() => fake.watching(thread.id) === 0, "the stream's watch stopped when its client left");
+  assert.deepEqual(s.calls.filter(([call]) => call === "watch" || call === "unwatch"), [["watch", thread.id], ["unwatch", thread.id]]);
+});
+
+test("a client that reads slowly gets the latest view in fewer events, and never holds the harness up", async (t) => {
+  const s = await withThread(t);
+  const { thread, fake } = s;
+  const transcript = fake.transcript(thread.id);
+  const stream = s.events(`/v1/threads/${thread.id}/events`);
+  await stream.next();
+  stream.pause();
+  const commits = 40;
+  // Each commit a megabyte, so the paused client's socket fills after a few.
+  for (let i = 1; i <= commits; i++) {
+    transcript.docs["pi.live"] = { seq: i, output: "x".repeat(1 << 20) };
+    fake.commit(thread.id);
+    await new Promise((resolve) => setImmediate(resolve));
+  }
+  stream.resume();
+  const seen: number[] = [];
+  while (seen.at(-1) !== commits) seen.push((await stream.next()).docs["pi.live"].seq);
+  assert.ok(seen.length < commits, `the backed-up events were merged: ${seen.length} events for ${commits} commits`);
+  assert.deepEqual(seen, [...seen].sort((a, b) => a - b), "events stay in commit order");
+  stream.close();
+});
+
+test("a thread's streams end when it is deleted, and a deleted thread, a stranger or one stream too many is refused", async (t) => {
+  const s = await withThread(t);
+  const { thread, fake } = s;
+  s.callAs("nSTRANGER" as TailnetNodeId);
+  assert.equal((await s.events(`/v1/threads/${thread.id}/events`).response).statusCode, 403);
+  s.callAs(laptop);
+  assert.equal((await s.call("POST", `/v1/threads/${thread.id}/events`)).status, 405);
+
+  const open = Array.from({ length: maxStreams }, () => s.events(`/v1/threads/${thread.id}/events`));
+  for (const stream of open) await stream.next();
+  const extra = await s.events(`/v1/threads/${thread.id}/events`).response;
+  assert.equal(extra.statusCode, 503, "past the most streams the control plane serves");
+  open.pop()!.close();
+  await until(() => fake.watching(thread.id) === maxStreams - 1, "a closed stream frees its place");
+  const page = s.events(`/threads/${thread.id}/stream`);
+  assert.ok((await page.next()).convo !== undefined, "the dashboard's stream counts against the same limit");
+  open.push(page);
+
+  assert.equal((await s.call("DELETE", `/v1/threads/${thread.id}`)).status, 200);
+  await Promise.all(open.map((stream) => stream.ended));
+  await until(() => fake.watching(thread.id) === 0, "every stream of the deleted thread stopped its watch");
+  assert.equal((await s.events(`/v1/threads/${thread.id}/events`).response).statusCode, 409);
+  assert.equal((await s.events("/v1/threads/th-missing/events").response).statusCode, 404);
+});
+
+/** Backs up a paused client's socket with ten commits of a megabyte each. */
+async function backUp(s: Awaited<ReturnType<typeof withThread>>) {
+  const transcript = s.fake.transcript(s.thread.id);
+  for (let i = 0; i < 10; i++) {
+    transcript.docs["pi.live"] = { seq: i, output: "x".repeat(1 << 20) };
+    s.fake.commit(s.thread.id);
+    await new Promise((resolve) => setImmediate(resolve));
+  }
+}
+
+test("a client that stops reading is dropped after the stall limit, with its watch and its place", async (t) => {
+  const s = await withThread(t, { streamStallMs: 300 });
+  const { thread, fake } = s;
+  const stream = s.events(`/v1/threads/${thread.id}/events`);
+  await stream.next();
+  stream.pause();
+  await backUp(s);
+  assert.equal(fake.watching(thread.id), 1, "a slow client is not dropped at once");
+  await until(() => fake.watching(thread.id) === 0, "the dropped stream stopped its watch");
+  stream.resume();
+  assert.equal(await stream.ended, "dropped");
+  const again = s.events(`/v1/threads/${thread.id}/events`);
+  assert.ok((await again.next()).entries !== undefined, "a client that still listens connects again and gets the whole view");
+  again.close();
+});
+
+test("deleting a thread whose client stopped reading frees the stream at once, writes nothing after the end, and drops the client", async (t) => {
+  const s = await withThread(t, { streamStallMs: 300 });
+  const { thread, fake } = s;
+  const transcript = fake.transcript(thread.id);
+  const stream = s.events(`/v1/threads/${thread.id}/events`);
+  await stream.next();
+  stream.pause();
+  await backUp(s);
+  assert.equal((await s.call("DELETE", `/v1/threads/${thread.id}`)).status, 200);
+  transcript.docs["pi.live"] = { seq: 10 };
+  fake.commit(thread.id);
+  assert.equal(fake.watching(thread.id), 0, "the delete stopped the watch at once, though the client has not read the end yet");
+  await new Promise((resolve) => setTimeout(resolve, 600));
+  stream.resume();
+  assert.equal(await stream.ended, "dropped", "a client that never read up to the end was dropped after the stall limit");
+  assert.equal((await s.call("GET", "/v1/projects")).status, 200, "the control plane is still up");
+});
+
+test("a stream whose thread is deleted while its watch opens stops that watch", async (t) => {
+  const s = await withThread(t);
+  const { thread, fake } = s;
+  const release = fake.holdWatches();
+  const stream = s.events(`/v1/threads/${thread.id}/events`);
+  await until(() => s.calls.some(([call]) => call === "watch"), "the stream asked for its watch");
+  assert.equal((await s.call("DELETE", `/v1/threads/${thread.id}`)).status, 200);
+  release();
+  await stream.ended;
+  await until(() => fake.watching(thread.id) === 0, "the watch that opened after the delete was stopped");
+  assert.deepEqual(s.calls.filter(([call]) => call === "watch" || call === "unwatch"), [["watch", thread.id], ["unwatch", thread.id]]);
 });
 
 test("unarchiving makes an archived thread active, counts as human activity and wakes its node", async (t) => {

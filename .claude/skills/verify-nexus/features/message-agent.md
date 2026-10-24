@@ -40,7 +40,7 @@ Preconditions:
 
 - Tool calls run as root through Docker, so `~` is `/root`, not `/home/user`. The overlay files are under `/home/user/.nexus`, and the working directory is `/home/user/workspace/repo`. A real pylon runs them as `user`.
 - `NEXUS_API` in a login shell is `http://nexus.pylon`, from the overlay's `/etc/profile.d/nexus.sh`. Nothing in a Docker pylon resolves that name, so an agent's in-pylon `nexus` command fails here, though it works on a Gondolin pylon. Don't map outputs or previews through this stack until that is solved.
-- Only messages that start with `bash: ` make a tool call. The scripted model has no streaming, so `watch --json` never shows a `partial`.
+- Only messages that start with `bash: ` make a tool call. Only a `stream: <n>` message streams, so only its answer shows a `partial` in `watch --json` and grows in place on the thread page.
 - The conversation route serves the active context, not the full history. Find entries by kind and text, not by position or ID order. A `pi.system` entry with no text and the tool definitions sits between the first `pi.user` and its answer. Skip it.
 - A command with no output, such as `echo x >> file`, gives a `pi.tool-result` with empty `content` and `isError: false`. Prove that kind of call through the disk.
 - A send to an archived thread exits 5 with `"kind": "conflict"`. That case belongs to [Archive and unarchive](./archive-thread.md).

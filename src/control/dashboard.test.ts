@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import { request } from "node:http";
 import { join } from "node:path";
 import { startApi } from "./api.ts";
+import { readEvents } from "./event-reader.ts";
 import { fakeHarness } from "./fake-harness.ts";
 import { openRegistry, type Thread } from "./registry.ts";
 import type { JobId, NodeName, PylonObservation, ServiceFact, TailnetNodeId } from "../protocol.ts";
@@ -85,7 +86,10 @@ async function setup(t: TestContext) {
     }));
     registry.ingested({ node, observedAt: new Date().toISOString(), probeBootId: "b", capacity, artifacts: [], jobs: [], pylons, previewRoutes: [] }, []);
   }
-  return { registry, fake, call, start, observe, observeWith, callAs(id: TailnetNodeId | null) { caller = id; } };
+  return {
+    registry, fake, call, start, observe, observeWith, callAs(id: TailnetNodeId | null) { caller = id; },
+    events: (path: string) => readEvents(api.port, path),
+  };
 }
 
 async function seeded(t: TestContext) {
@@ -400,6 +404,42 @@ test("a running turn shows its tool's output so far, the partial answer, queued 
   assert.deepEqual(open, [["tool-c1", true]]);
   assert.match(dock, /^The agent is working\. 1m 1[2-3]s · 1 tool this turn · new messages queue Abort gpt-test ⌘↵ to queue Queue$/);
   assert.match(html, /placeholder="Queue a follow-up…"/);
+});
+
+test("a thread page's stream sends its conversation, then only the text that grew, and the conversation again when its shape changes", async (t) => {
+  const s = await seeded(t);
+  const fix = await s.start("acme", "Fix checkout");
+  const transcript = s.fake.transcript(fix.id);
+  transcript.messages.push({ role: "user", content: "Build it", timestamp: Date.now() }, assistant([bash("c1", "npm run build")], "toolUse"));
+  const live = (partial: string, output: string) => ({
+    run: { taskId: 1, inputs: [1] },
+    tools: [{ callId: "c1", name: "bash", status: "running", output }],
+    generation: { attempt: 1, message: assistant([{ type: "text", text: partial }], "pending") as never },
+  });
+  transcript.docs["pi.live"] = live("Hal", "compiling\n");
+  const page = (await s.call("GET", `/threads/${fix.id}`)).text;
+  assert.match(page, new RegExp(`<div class="convo" id="convo" data-live data-stream="/threads/${fix.id}/stream">`));
+
+  const stream = s.events(`/threads/${fix.id}/stream`);
+  const first = await stream.next();
+  assert.ok(page.includes(`data-stream="/threads/${fix.id}/stream">${first.convo}</div></div>`), "the first event is the region the page holds");
+  assert.deepEqual(conversationOf(`<div id="convo" ${first.convo}<div class="dock"></main>`).rows.slice(1), ["› bash npm run build 1 line running npm run build compiling", "Hal"]);
+
+  transcript.docs["pi.live"] = live("Half an <answer>", "compiling\nlinking\n");
+  s.fake.commit(fix.id);
+  assert.deepEqual(await stream.next(), { grow: [[0, "2 lines"], [1, "compiling\nlinking\n"], [2, 'Half an &lt;answer&gt;<span class="caret" aria-hidden="true"></span>']] },
+    "the line count, the output and the answer grow in place, escaped as the page escapes them");
+  transcript.docs["pi.live"] = live("Half an <answer> and more", "compiling\nlinking\n");
+  s.fake.commit(fix.id);
+  assert.deepEqual(await stream.next(), { grow: [[2, 'Half an &lt;answer&gt; and more<span class="caret" aria-hidden="true"></span>']] }, "only the parts that grew");
+
+  transcript.messages.push(result("c1", "built"), assistant([{ type: "text", text: "Built." }]));
+  transcript.docs["pi.live"] = {};
+  s.fake.commit(fix.id);
+  const done = await stream.next();
+  assert.deepEqual(conversationOf(`<div id="convo" ${done.convo}<div class="dock"></main>`).rows.slice(1), ["› bash npm run build 1 line ✓ npm run build built", "Built."], "a finished call and a committed answer send the region whole");
+  assert.doesNotMatch(done.convo, /data-grow/);
+  stream.close();
 });
 
 test("each thread state offers only the actions and prompt box that apply", async (t) => {

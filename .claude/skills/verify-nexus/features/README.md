@@ -8,7 +8,7 @@ This directory is the maintained source for verifying what a Nexus user can do w
 - `$V up` printed `ready`, and `$V doctor` exits 0 for the current run. Never drive a stack that `$V up` did not start in this run.
 - The seed is in place: project `spoon` on node `verify-node`, current image `img-0000000000aa`, and nothing else. `up` refuses to report ready without it, and the evidence's `stack-state.json` records it.
 - Threads persist for the life of a run. A feature that needs a fresh thread starts its own, and each title says which feature made it.
-- The model is scripted. A message that starts with `bash: ` runs that command as one bash tool call in the pylon, then answers `scripted answer after toolResult`. Any other message gets `scripted answer after user`.
+- The model is scripted. A message that starts with `bash: ` runs that command as one bash tool call in the pylon, then answers `scripted answer after toolResult`. A message `stream: <n>` gets an answer of n words that streams one word every 20 ms. Any other message gets `scripted answer after user`.
 
 ## Driving conventions
 
@@ -47,5 +47,6 @@ Keep implementation details out of the map. Name only user paths, stable handles
 - [Delete a thread](./delete-thread.md) covers CLI and dashboard delete, a `watch` that ends on deletion, and the removal of the pylon and its checkpoints.
 - [Browse threads](./browse-threads.md) covers `threads`, `projects`, `nodes`, the dashboard overview and sidebar filter, and the CLI's not-found and invalid exits.
 - [Preview a listening port](./preview-port.md) covers CLI `ports` and `preview --wait`, the dashboard's Ports section and its `Open` button, fetching the preview through the gateway, and keeping its URL across a wake.
+- [Stream an answer](./stream-answer.md) covers `watch --json` printing an answer as it is written, the thread page growing it in place, a reader's scroll position while it grows, and a hidden tab letting go of its stream.
 
 Not yet mapped: declared previews and outputs. Both need the in-pylon `nexus` CLI, which cannot reach the probe from a Docker pylon (see [Message the agent](./message-agent.md) Gotchas). Herdr sessions, `retry`, `retry-pylon`, `abort` and `wake` are also unmapped.

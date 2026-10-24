@@ -4,6 +4,10 @@
  * Each thread's agent is a conversation in the control plane's harness. The API creates it with the thread,
  * forwards messages, aborts and retries to it, and serves its view.
  *
+ * A thread's conversation also streams, as server-sent events: its view for the CLI, and the thread page's
+ * conversation for the dashboard. Each stream holds one watch on the harness and sends what changed since its
+ * last event, so a slow client gets fewer, larger events and never holds the harness up.
+ *
  * Like the probe, it trusts tailnet identity: each caller's stable node ID, from tailscaled's whois, must be
  * on the allowlist. The API writes only what a human asks for. Every change that can move a pylon
  * wakes the loop for its node, so a start or a dashboard visit acts within one pass rather than 5 seconds.
@@ -14,12 +18,13 @@ import { z } from "zod";
 import { actualState, desiredPhase, retryRefusal, type ActualState, type DesiredPhase } from "../reconcile.ts";
 import { effectiveAllowedHosts, gitUrl, linkedName, liveHashOf, reservedPorts, withHttpsHosts, type BootInputs, type Project, type ProjectId, type PylonOverlay } from "../project.ts";
 import type { CommandResult, NodeName, ProbeClient, ProbeError, PylonId, TailnetNodeId } from "../protocol.ts";
+import type { ConversationView, ConversationWatch, EntryRecord, JsonObject } from "@earendil-works/pi-durable";
 import type { HarnessHost } from "../harness/host.ts";
 import type { ImageId, ImageManifest } from "../images.ts";
 import type { Whois } from "../tailscale.ts";
 import { newPylonRecord } from "../tick.ts";
 import type { NodeRecord, Output, PortRange, Preview, Registry, Session, Thread, ThreadId } from "./registry.ts";
-import { dashboard } from "./dashboard.ts";
+import { dashboard, liveFrames } from "./dashboard.ts";
 import { pylonLive } from "./live.ts";
 import { herdrSession } from "../sessions.ts";
 
@@ -41,6 +46,8 @@ export interface ApiOptions {
   probes: ReadonlyMap<NodeName, Pick<ProbeClient, "command">>;
   /** The https ports each node's previews are allocated from, the loop's range. */
   previewPorts: PortRange;
+  /** How long a stream's client may leave what was sent unread before it is dropped. 30 s by default. */
+  streamStallMs?: number;
 }
 
 export type ThreadHarness = Pick<HarnessHost, "startThread" | "send" | "abort" | "retry" | "watch" | "deleteThread" | "activity">;
@@ -81,6 +88,42 @@ export interface ListeningPort { port: number; service: string | null; preview: 
 
 /** A thread as the list reports it, with what the planner wants of its pylon and what its node last reported. */
 export type ThreadRow = Thread & { desired: DesiredPhase; pylon: Pick<ThreadDetail["pylon"], "node" | "actualState" | "failed"> };
+
+/**
+ * One event of `GET /v1/threads/:id/events`. The first carries the whole view. Each later one carries what changed
+ * since the one before, each part whole: the active context when any entry changed, and each document that changed,
+ * or null for one that is gone.
+ */
+export interface ViewFrame {
+  entries?: readonly EntryRecord[];
+  docs?: Record<string, JsonObject | null>;
+}
+
+/** Maps each committed view to what one client has not seen yet, or null when nothing it shows changed. */
+export type Frames = (view: ConversationView) => unknown;
+
+/** The frames of one client of a thread's event stream. pi-durable's views share every part a commit left alone. */
+export function viewFrames(): Frames {
+  let sent: ConversationView | null = null;
+  return (view) => {
+    const kinds = new Set([...Object.keys(view.docs), ...Object.keys(sent?.docs ?? {})]);
+    const docs = Object.fromEntries([...kinds].flatMap((kind) => view.docs[kind] === sent?.docs[kind] ? [] : [[kind, view.docs[kind] ?? null]]));
+    const frame: ViewFrame = {
+      ...view.entries === sent?.entries ? {} : { entries: view.entries },
+      ...Object.keys(docs).length === 0 ? {} : { docs },
+    };
+    sent = view;
+    return Object.keys(frame).length === 0 ? null : frame;
+  };
+}
+
+/** Streams open at once, across threads and callers. Each holds a harness watch and renders on every commit. */
+export const maxStreams = 16;
+/**
+ * Under the CLI's 30 s idle timeout, so a quiet thread's stream stays open. Each ping renders the latest view again
+ * first, so what a frame shows of the time, such as how long ago the thread started, stays true.
+ */
+const pingMs = 15_000;
 
 /** A node without its probe's latest observation, which thread detail already reports per pylon. */
 export type NodeSummary = Omit<NodeRecord, "observation"> & { observedAt: string | null };
@@ -141,7 +184,7 @@ const previewSchema = z.strictObject({ port: z.int().min(1).max(65535).refine((p
 const newThreadId = () => `th-${randomBytes(6).toString("hex")}` as ThreadId;
 
 export async function startApi(options: ApiOptions): Promise<Api> {
-  const { registry, whois, allowed, hostnames, dotfiles, harness, wake, probes, previewPorts } = options;
+  const { registry, whois, allowed, hostnames, dotfiles, harness, wake, probes, previewPorts, streamStallMs = 30_000 } = options;
 
   function thread(id: string): Thread {
     const found = registry.thread(id as ThreadId);
@@ -274,10 +317,91 @@ export async function startApi(options: ApiOptions): Promise<Api> {
 
   const page = dashboard({ registry, detail, conversation });
 
+  /** Each open stream's thread and how to end it, so a delete ends its thread's streams. */
+  const open = new Set<{ thread: ThreadId; end(): void }>();
+
+  /**
+   * Sends `frames` of each commit to the thread's conversation as server-sent events. A client that reads slowly
+   * leaves bytes in the socket: until it drains, commits only replace the view to send, and the next event carries
+   * everything since the last one. So the harness's listener never waits on a client. A client that leaves bytes
+   * unread for `streamStallMs` is dropped, and one that still listens connects again.
+   */
+  async function stream(res: ServerResponse, t: Thread, frames: Frames) {
+    if (open.size >= maxStreams) throw new HttpError(503, `${maxStreams} streams are open, the most this control plane serves at once`);
+    let watch: ConversationWatch | null = null;
+    let ping: NodeJS.Timeout | undefined;
+    let stalled: NodeJS.Timeout | undefined;
+    let ended = false;
+    const stall = () => { stalled ??= setTimeout(() => res.destroy(), streamStallMs); };
+    const send = (text: string) => { if (!res.write(text)) stall(); };
+    /**
+     * Once, whichever comes first: the client leaves, the thread is deleted, or the harness ends the watch. The
+     * watch, the ping and the stream's place go at once. The response ends once the client reads what it holds,
+     * or is dropped after the stall limit.
+     */
+    const end = () => {
+      if (ended) return;
+      ended = true;
+      open.delete(handle);
+      clearInterval(ping);
+      void watch?.stop();
+      res.end();
+      if (!res.closed) stall();
+    };
+    const handle = { thread: t.id, end };
+    open.add(handle);
+    res.on("close", () => {
+      clearTimeout(stalled);
+      end();
+    });
+    try {
+      watch = await harness.watch(t.id);
+    } catch (err) {
+      // The error reply ends the response.
+      ended = true;
+      open.delete(handle);
+      throw err;
+    }
+    if (ended) return void watch.stop();
+    let latest = watch.value;
+    /** Whether bytes are on their way, so the stream needs no ping. A view that cannot be rendered ends the stream. */
+    const flush = () => {
+      if (ended || res.writableNeedDrain) return true;
+      let frame: unknown;
+      try {
+        frame = frames(latest);
+      } catch (err) {
+        res.destroy(err as Error);
+        return true;
+      }
+      if (frame !== null) send(`data: ${JSON.stringify(frame)}\n\n`);
+      return frame !== null;
+    };
+    res.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-store" });
+    flush();
+    res.on("drain", () => {
+      clearTimeout(stalled);
+      stalled = undefined;
+      flush();
+    });
+    ping = setInterval(() => { if (!flush()) send(": ping\n\n"); }, pingMs);
+    watch.start(async (view) => {
+      latest = view;
+      flush();
+    });
+    void watch.closed.then(end);
+  }
+
+  const streams: readonly [RegExp, (t: Thread) => Frames][] = [
+    [/^\/v1\/threads\/([^/]+)\/events$/, () => viewFrames()],
+    [/^\/threads\/([^/]+)\/stream$/, (t) => liveFrames(t)],
+  ];
+
   async function setStatus(t: Thread, status: "archived" | "deleted"): Promise<Thread> {
     if (t.status === "deleted") throw new HttpError(409, `thread ${t.id} is deleted`);
     registry.setThreadStatus(t.id, status);
     wakeThread(t);
+    if (status === "deleted") for (const s of open) if (s.thread === t.id) s.end();
     // After the status, so the run's wait for a pylon ends: the locator refuses a deleted thread's pylon.
     if (status === "deleted" && t.conversationId !== null) await harness.deleteThread({ threadId: t.id, pylonId: t.pylonId });
     return { ...t, status };
@@ -431,6 +555,13 @@ export async function startApi(options: ApiOptions): Promise<Api> {
     const path = decodeURIComponent(url.pathname);
     const view = req.method === "GET" ? await page(path, url.searchParams) : undefined;
     if (view !== undefined) return void res.writeHead(view.status, view.headers).end(view.body);
+    for (const [pattern, frames] of streams) {
+      const m = pattern.exec(path);
+      if (m === null) continue;
+      if (req.method !== "GET") throw new HttpError(405, `${req.method} is not allowed on ${path}`);
+      const t = conversing(thread(m[1]!));
+      return stream(res, t, frames(t));
+    }
     const matches = routes.flatMap(([method, pattern, route]) => {
       const m = pattern.exec(path);
       return m === null ? [] : [{ method, m, route }];
