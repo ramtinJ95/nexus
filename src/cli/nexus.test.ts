@@ -490,7 +490,12 @@ test("attach wakes the pylon, waits until it runs, and runs ssh to its node thro
   await writeFile(join(s.home, ".config", "nexus", "cli.json"), JSON.stringify({ attach: "exit 3" }));
   const failed = await s.nexus(["attach", thread.id], path);
   assert.equal(failed.code, 1, "the config's command runs, and its failure is the CLI's");
-  assert.match(failed.stderr, /attaching to th-[0-9a-f]+ on rj-firebat failed: sh exited 3/);
+  assert.match(failed.stderr, /attaching to th-[0-9a-f]+ on rj-firebat failed: the attach command from NEXUS_ATTACH or the config exited 3/);
+  await writeFile(join(s.home, ".config", "nexus", "cli.json"), "{}");
+  await writeFile(join(bin, "ssh"), "#!/bin/sh\nexit 255\n", { mode: 0o755 });
+  const unreachable = await s.nexus(["attach", thread.id], path);
+  assert.equal(unreachable.code, 1);
+  assert.match(unreachable.stderr, /ssh to rj-firebat\.tail\.ts\.net exited 255. To reach the node another way, set NEXUS_ATTACH/, "a failed ssh names the escape hatch");
 
   await s.json(["archive", thread.id]);
   const archived = await s.nexus(["attach", thread.id], path);

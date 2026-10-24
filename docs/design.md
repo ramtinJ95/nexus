@@ -39,7 +39,7 @@ A Claude Code session is a session inside a thread, not a separate kind of threa
 ## Lifecycle follows Amp
 
 - Starting a thread spawns a fresh pylon from the project's template on a node. `rj-firebat` is the default node.
-- A pylon sleeps when its agents are idle and nobody has used it for a while. Amp uses 5 minutes of agent idleness and 20 minutes without a human. Nexus starts with the same numbers. A terminal attached to the pylon's Herdr session, such as `nexus attach`, counts as a human for as long as it stays attached, because the probe counts the guest's Herdr clients in every observation.
+- A pylon sleeps when its agents are idle and nobody has used it for a while. Amp uses 5 minutes of agent idleness and 20 minutes without a human. Nexus starts with the same numbers. A terminal attached to the pylon's Herdr session, such as `nexus attach`, counts as a human for as long as it stays attached, because the probe counts the guest's Herdr clients in every observation. Close the terminal to let the pylon pause.
 - Sleep is a disk checkpoint. The VM stops and memory is lost.
 - Waking boots the pylon from its checkpoint, restarts services, runs `.nexus/resume`, and relaunches every recorded Herdr session into its prompt. Claude Code runs `claude --resume <session id>` and finds its transcript on disk. The command that was running at sleep time shows as cut off.
 - Archiving a thread puts its pylon to sleep at once. Deleting a thread deletes its pylon.

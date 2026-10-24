@@ -231,7 +231,11 @@ async function attach(api: Api, id: string, local: Local): Promise<void> {
     child.once("error", (err) => reject(new CliError("failed", `${command} could not start: ${err.message}`)));
     child.once("exit", (exit) => resolve(exit ?? 1));
   });
-  if (code !== 0) throw new CliError("failed", `attaching to ${id} on ${node} failed: ${command} exited ${code}`);
+  if (code !== 0) {
+    const how = local.attach === null ? `ssh to ${host} exited ${code}. To reach the node another way, set NEXUS_ATTACH, as docs/cli.md describes`
+      : `the attach command from NEXUS_ATTACH or the config exited ${code}`;
+    throw new CliError("failed", `attaching to ${id} on ${node} failed: ${how}`);
+  }
 }
 
 const threadRow = (t: ThreadRow) => [t.id, t.status, t.agentTurnRunning ? "working" : "-", `pylon ${t.pylon.actualState}`, t.project, ago(t.createdAt), t.title];

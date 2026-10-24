@@ -48,7 +48,7 @@ Make the key readable by `nexus` only: `chown nexus:nexus /etc/nexus/git_ed25519
 
 ### Attach from a Mac
 
-`nexus attach <thread>` on a Mac runs `ssh -t <node> nexus-attach <pylon>`, which gives the terminal to the pylon's Herdr session (see `docs/cli.md`). The script installs `/usr/local/bin/nexus-attach` from `deploy/nexus-attach`. Only `nexus` may use the pylons' control sockets under `/var/lib/nexus/pylons`, so `nexus-attach` runs itself as `nexus` through sudo, and `/etc/sudoers.d/nexus-attach` lets the group `nexus-attach` do that without a password. The script creates the group and adds the user who ran it with sudo. Add anyone else with `sudo usermod --append --groups nexus-attach <user>`. Don't add them to the group `nexus`, which reads `secrets.env`.
+`nexus attach <thread>` on a Mac runs `ssh -t <node> nexus-attach <pylon>`, which gives the terminal to the pylon's Herdr session (see `docs/cli.md`). The script installs `/usr/local/bin/nexus-attach` from `deploy/nexus-attach`. Only `nexus` may use the pylons' control sockets under `/var/lib/nexus/pylons`, so `nexus-attach` runs itself as `nexus` through sudo, and `/etc/sudoers.d/nexus-attach` lets the group `nexus-attach` do that without a password. The script creates the group and adds the user who ran it with sudo, and prints that it did. Add anyone else with `sudo usermod --append --groups nexus-attach <user>`. Group membership applies from a user's next login. Each `nexus attach` is a new ssh login, so it works at once, but a shell that was already open on the node does not have the group until you log in again. Don't add them to the group `nexus`, which reads `secrets.env`.
 
 ## Install or upgrade the control plane
 
