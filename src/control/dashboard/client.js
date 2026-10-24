@@ -229,7 +229,7 @@ const newRequestId = () => `msg:${[...crypto.getRandomValues(new Uint8Array(16))
 // reply was lost is not posted twice. One send at a time, so a second one cannot take the first one's ID.
 let outgoing = null;
 document.addEventListener("submit", async (event) => {
-  if (event.target.id !== "prompt") return;
+  if (!event.target.matches("#prompt")) return;
   event.preventDefault();
   if (outgoing?.inFlight) return;
   const form = event.target;
@@ -346,7 +346,7 @@ function restoreStart(saved) {
 // ⌘↵ submits as well as the button, so a second press while the first is in flight must not start a second thread.
 let starting = false;
 document.addEventListener("submit", async (event) => {
-  if (event.target.id !== "start") return;
+  if (!event.target.matches("#start")) return;
   event.preventDefault();
   if (starting) return;
   starting = true;
@@ -386,7 +386,8 @@ projectDialog?.addEventListener("close", () => {
 // added, the start dialog opens on it, as the dashboard's next step for a project is its first thread.
 let adding = false;
 document.addEventListener("submit", async (event) => {
-  if (event.target.id !== "project") return;
+  // Not event.target.id: a form's field named "id" shadows its id.
+  if (!event.target.matches("#project")) return;
   event.preventDefault();
   if (adding) return;
   adding = true;

@@ -104,4 +104,5 @@ It keeps `evidence/<run>/` and copies `stack.log` into it first. It never kills 
 ## Helpers
 
 - `scripts/verify-nexus` is the entry point for everything above. Run it with no arguments for usage.
+- `scripts/new-project-shots.ts` drives the dashboard's New project flow against its own throwaway control plane with no projects, which the seeded stack cannot show, and asserts each step before its screenshot. Run it with `node .claude/skills/verify-nexus/scripts/new-project-shots.ts`. It needs port 7490 free, local port binding and `playwright-cli`, but not Docker.
 - `scripts/stack.ts` is the stack process. `up` starts it, so don't run it by hand. To typecheck it after editing, run `npx tsc -p .claude/skills/verify-nexus/scripts/tsconfig.json`.
