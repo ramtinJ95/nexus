@@ -239,6 +239,51 @@ test("the URL and the proxy come from the flags, then the environment, then the 
   assert.match(bad.stderr, /cli\.json is not a CLI config/);
 });
 
+test("project add creates a project with the contract's defaults or its flags, and maps the API's refusals", async (t) => {
+  const s = await setup(t);
+  const repo = "https://github.com/octocat/Hello-World.git";
+  const added = await s.nexus(["project", "add", "hello", repo, "--node", node]);
+  assert.deepEqual([added.code, added.stdout, added.stderr], [0, `Added project hello (${repo}) on ${node}\n`, ""]);
+  assert.deepEqual(s.registry.project("hello" as ProjectId), {
+    id: "hello", repoUrl: repo, defaultBranch: "main", defaultNode: node,
+    resources: { cpus: 2, memoryGiB: 4, diskGiB: 10 }, allowedHosts: [], secrets: [], logins: [], preSetup: null,
+  }, "an unflagged project gets main, 2 CPUs, 4 GiB of memory and 10 GiB of disk");
+
+  const custom = await s.json([
+    "project", "add", "custom", "git@github.com:octocat/Spoon-Knife.git", "--node", node, "--branch", "dev", "--cpus", "4", "--memory", "8", "--disk", "20",
+    "--allow-host", "registry.npmjs.org", "--login", "claude", "--allow-host", "api.stripe.com", "--login", "chatgpt",
+  ]);
+  assert.deepEqual(custom, {
+    id: "custom", repoUrl: "git@github.com:octocat/Spoon-Knife.git", defaultBranch: "dev", defaultNode: node,
+    resources: { cpus: 4, memoryGiB: 8, diskGiB: 20 }, allowedHosts: ["registry.npmjs.org", "api.stripe.com"], secrets: [], logins: ["claude", "chatgpt"], preSetup: null,
+  }, "--json prints the created project, with each repeated flag's values in order");
+  assert.deepEqual(s.registry.project("custom" as ProjectId), custom);
+  assert.deepEqual((await s.json(["projects"])).map((p: Project) => p.id).toSorted(), ["acme", "custom", "hello"]);
+
+  const fails = async (args: readonly string[], code: number, error: Record<string, unknown>, overrides?: Record<string, string>) => {
+    const res = await s.nexus([...args, "--json"], overrides);
+    assert.equal(res.code, code, `${args.join(" ")}: ${res.stderr}`);
+    assert.equal(res.stdout, "");
+    const reported = JSON.parse(res.stderr);
+    assert.deepEqual(Object.fromEntries(Object.keys(error).map((k) => [k, reported[k]])), error);
+  };
+  await fails(["project", "add", "hello", repo, "--node", node], 5, { kind: "conflict", status: 409, error: "project hello exists" });
+  await fails(["project", "add", "other", repo, "--node", "nowhere"], 64, { kind: "invalid", status: 400, error: "no node nowhere" });
+  await fails(["project", "add", "Not_An_Id", repo, "--node", node], 64, { kind: "invalid", status: 400 });
+  await fails(["project", "add", "other", "https://", "--node", node], 64, { kind: "invalid", status: 400 });
+  await fails(["project", "add", "other", repo, "--node", node, "--login", "gemini"], 64, { kind: "invalid", status: 400 });
+  await fails(["project", "add", "other", repo, "--node", node, "--cpus", "two"], 64, { kind: "invalid", status: null, error: "--cpus takes a whole number, got two" });
+  await fails(["project", "add", "other", repo], 64, { kind: "invalid", status: null, error: "project add needs --node. Run nexus nodes to list them" });
+  await fails(["project", "add", "other", repo], 64, { kind: "invalid", status: null, error: "project add needs --node. Run nexus nodes to list them" },
+    { NEXUS_SOCKS: `127.0.0.1:${await closedPort()}` }); // with no proxy too, because it sends no request
+  await fails(["project", "add", "other"], 64, { kind: "invalid", status: null, error: "project add takes 2 arguments, got 1" });
+  await fails(["project", "other"], 64, { kind: "invalid", status: null, error: "unknown command project" });
+  assert.deepEqual(s.registry.projects().map((p) => p.id).toSorted(), ["acme", "custom", "hello"], "no refused project was created");
+
+  const human = await s.nexus(["project", "add", "other", repo]);
+  assert.deepEqual([human.code, human.stderr], [64, "nexus: project add needs --node. Run nexus nodes to list them. Run nexus --help for usage\n"]);
+});
+
 /** The JSON lines a watch prints, one at a time. */
 function watchLines(t: TestContext, s: Awaited<ReturnType<typeof setup>>, args: readonly string[], interval = 50) {
   const child = spawn(process.execPath, [cli, "watch", ...args, "--json", "--interval", String(interval)], { env: s.env() });

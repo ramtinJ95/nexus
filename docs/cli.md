@@ -1,6 +1,6 @@
 # The Mac nexus CLI
 
-`nexus` runs on a Mac and drives the control plane's API: list threads, start one, message it, watch it, and archive or delete it. People use it at a shell. The Claude Code mod and the pi extension shell out to it, so this page is their contract. The code is [`src/cli/nexus.ts`](../src/cli/nexus.ts), and its transport is [`src/cli/transport.ts`](../src/cli/transport.ts). This page describes version 0.3.0, which `nexus --version` prints. Version 0.3.0 added `unpreview` and its route, `DELETE /v1/threads/<thread>/previews/<port>`. Version 0.2.0 added `ports`, `preview`, `Preview.url`, `ThreadDetail.ports` and the `ports` of a watch `state`.
+`nexus` runs on a Mac and drives the control plane's API: add projects, list threads, start one, message it, watch it, and archive or delete it. People use it at a shell. The Claude Code mod and the pi extension shell out to it, so this page is their contract. The code is [`src/cli/nexus.ts`](../src/cli/nexus.ts), and its transport is [`src/cli/transport.ts`](../src/cli/transport.ts). This page describes version 0.4.0, which `nexus --version` prints. Version 0.4.0 added `project add` and its route, `POST /v1/projects`. Version 0.3.0 added `unpreview` and its route, `DELETE /v1/threads/<thread>/previews/<port>`. Version 0.2.0 added `ports`, `preview`, `Preview.url`, `ThreadDetail.ports` and the `ports` of a watch `state`.
 
 This is a different program from the `nexus` inside a pylon ([`images/pylon/nexus`](../images/pylon/nexus)), which talks to its own node's probe.
 
@@ -52,12 +52,14 @@ With `--json`, a command prints one JSON value on stdout, pretty-printed. The va
 | `unarchive <thread>` | `POST /v1/threads/<thread>/unarchive` | `Thread` |
 | `delete <thread>` | `DELETE /v1/threads/<thread>` | `Thread`, with status `deleted` |
 | `projects` | `GET /v1/projects` | `Project[]` |
+| `project add <id> <repo-url> --node N [--branch B] [--cpus n] [--memory GiB] [--disk GiB] [--allow-host HOST]... [--login claude\|chatgpt]...` | `POST /v1/projects` | `Project`, the project that was added |
 | `nodes` | `GET /v1/nodes` | `NodeSummary[]` |
 
 These commands need more explanation:
 
 - `start` without `--title` takes the title from the first non-empty line of `--message`, cut to 80 characters. It needs at least one of the two. If the thread starts but its first message fails, the command fails with the message's exit code, and the error names the thread that was started.
 - `send` joins its words with single spaces. By default the message is a follow-up, so a busy run takes it after its current turn. With `--steer`, the message joins the current run after its current tool round. The API treats a second send with the same `--request-id` as the same message. A caller that retries a send should pass its own request ID, such as `msg:<uuid>`. Without one, each run mints a new ID.
+- `project add` adds a project whose threads clone `<repo-url>` and boot on node `N` unless `start --node` picks another. It sends this `Project`: `defaultBranch` is `--branch`, or `main`. `resources` is `{ cpus, memoryGiB, diskGiB }` from `--cpus`, `--memory` and `--disk`, or 2, 4 and 10. `allowedHosts` holds each `--allow-host`, and `logins` each `--login`, in the order given. `secrets` is `[]` and `preSetup` is null, which only the API can set. Without `--json` it prints `Added project <id> (<repo-url>) on <node>`. `--node` is required, and without it the command fails with exit code 64 before it sends any request. `nexus nodes` lists the nodes. A project that exists fails with exit code 5. A node the control plane does not know, an ID that is not lowercase letters, digits and hyphens starting with a letter or digit, up to 63 characters, an `https://` URL that does not parse, or a login other than `claude` or `chatgpt` fails with exit code 64. The API accepts any other non-empty `<repo-url>`, such as an SSH one. A project cannot be changed or removed from the CLI.
 - `retry` runs a conversation's parked tasks again. `retry-pylon` clears a failed pylon so that the planner boots it again.
 - `wake` records human activity, so a paused pylon is wanted running.
 - `ports` lists the TCP ports that something in the pylon listens on and that a preview can reach, as the pylon's node last reported them. The node reads them every 10 seconds, so a server the agent just started shows within about that long. A port is listed whether or not it has a preview, and whatever started it: a declared service, an ad hoc one, or a process the agent ran itself. Nexus's own listeners, today only sshd on port 22, are left out. "A preview can reach" means bound to 127.0.0.1, 0.0.0.0 or `::`, or to the IPv4-mapped form of 127.0.0.1 or 0.0.0.0, because the preview connects to the pylon's 127.0.0.1. A server bound only to `::1` or to another loopback address such as 127.0.0.2 is not listed, and cannot be previewed: Gondolin's ingress always connects over IPv4 to 127.0.0.1, and offers no way to choose another address. This catches dev servers that bind `localhost` where it resolves to `::1` first, as Vite and other Node servers can on Node 17 and later. Bind such a server to 0.0.0.0 or 127.0.0.1, for example `vite --host 127.0.0.1`. When `ports` lists no port, its text output gives this advice.
@@ -89,7 +91,7 @@ type ListeningPort = {
 //   ports: ListeningPort[] | null     in port order. [] while the pylon is not running. null while its node could not read them
 ```
 
-The control plane serves the routes for creating projects and recording images too. The CLI leaves them out, because only release tooling uses them.
+The control plane serves the routes for recording images too. The CLI leaves them out, because only release tooling uses them.
 
 ## Failures
 
@@ -102,7 +104,7 @@ A failed command prints nothing on stdout and exits with one of these codes:
 | 2 | `unreachable` | No reply. The proxy is down, the node is offline, the control plane is not running, or 30 seconds passed with no data from the proxy or the API |
 | 3 | `refused` | 403 or 415. The API does not allow this machine, or a request check failed |
 | 4 | `not-found` | 404. No such thread or project |
-| 5 | `conflict` | 409. The thread's state forbids the action, for example a message to an archived thread |
+| 5 | `conflict` | 409. The thread's state forbids the action, for example a message to an archived thread, or a project with that ID exists |
 | 64 | `invalid` | Bad flags or arguments, a config file that cannot be read or parsed, or a 400 or 413 from the API |
 
 Without `--json`, stderr gets one line, `nexus: <message>`. With `--json`, stderr gets one JSON line, `{"error": string, "kind": Kind, "status": number | null}`. `status` is the API's HTTP status, or null when there was no reply. When nothing listens on the proxy, the message says so and points to `ts-home status`.

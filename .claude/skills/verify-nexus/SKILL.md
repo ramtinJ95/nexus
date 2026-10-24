@@ -5,7 +5,7 @@ description: Drive a local Nexus stack (control plane, probe, Docker pylons) thr
 
 # Verify Nexus
 
-Nexus runs coding agents in microVMs called pylons. A thread is one pi-durable conversation plus one pylon. People use it through the Mac `nexus` CLI (`src/cli/nexus.ts`, contract in `docs/cli.md`) and the dashboard that the control plane serves at `/`. Both sit on the JSON API in `src/control/api.ts`. The other surfaces are not mapped here: the in-pylon `nexus` CLI (`images/pylon/nexus`), the probe's HTTP API, and the release routes `POST /v1/projects`, `POST /v1/images` and `PUT /v1/images/current`.
+Nexus runs coding agents in microVMs called pylons. A thread is one pi-durable conversation plus one pylon. People use it through the Mac `nexus` CLI (`src/cli/nexus.ts`, contract in `docs/cli.md`) and the dashboard that the control plane serves at `/`. Both sit on the JSON API in `src/control/api.ts`. The other surfaces are not mapped here: the in-pylon `nexus` CLI (`images/pylon/nexus`), the probe's HTTP API, and the release routes `POST /v1/images` and `PUT /v1/images/current`.
 
 This skill never drives the home-lab deployment on `rj-firebat` and `infra-testbench`. That deployment is the user's real instance. It also sits on the home tailnet, which this machine reaches only through ts-home. Every recipe here runs against a local stack that the skill starts and stops itself.
 

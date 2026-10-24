@@ -18,7 +18,7 @@ import type { Project } from "../project.ts";
 import type { ActualState } from "../reconcile.ts";
 import { call, CliError, exitCodes, follow, type Endpoint, type HostPort } from "./transport.ts";
 
-const version = "0.3.0";
+const version = "0.4.0";
 const defaults = { url: "http://rj-firebat.tailc817d3.ts.net:7470", socks: "localhost:1055" };
 const configFile = () => join(homedir(), ".config", "nexus", "cli.json");
 
@@ -36,6 +36,8 @@ const usage = `nexus ${version}, the Nexus control plane from this Mac
   nexus abort|retry|retry-pylon|wake <thread>
   nexus archive|unarchive|delete <thread>
   nexus projects
+  nexus project add <id> <repo-url> --node N [--branch B] [--cpus n] [--memory GiB] [--disk GiB]
+                    [--allow-host HOST]... [--login claude|chatgpt]...
   nexus nodes
   nexus --version
 
@@ -43,7 +45,7 @@ Every command takes --json, --url URL and --socks HOST:PORT|none. The URL and pr
 then NEXUS_URL and NEXUS_SOCKS, then ${configFile()}, then ${defaults.url} through ${defaults.socks}.
 `;
 
-type Values = Record<string, string | boolean | undefined>;
+type Values = Record<string, string | boolean | string[] | undefined>;
 type Api = (method: string, path: string, body?: unknown) => Promise<unknown>;
 /** Follows one of the API's event streams until it ends or `signal` aborts it. */
 type Follow = (path: string, onEvent: (data: unknown) => void, signal: AbortSignal) => Promise<void>;
@@ -57,6 +59,8 @@ interface Command {
 }
 
 const str = (v: Values, key: string) => v[key] as string | undefined;
+/** A flag given any number of times. */
+const strs = (v: Values, key: string) => (v[key] as string[] | undefined) ?? [];
 const thread = (id: string) => `/v1/threads/${encodeURIComponent(id)}`;
 
 function int(value: string | undefined, flag: string, fallback: number): number {
@@ -504,6 +508,23 @@ const commands: Readonly<Record<string, Command>> = {
       return { json: projects, text: projects.length === 0 ? "No projects." : table(projects.map((p) => [p.id, `node ${p.defaultNode}`, `branch ${p.defaultBranch}`, p.repoUrl])) };
     },
   },
+  "project add": {
+    args: [2, 2],
+    options: {
+      node: { type: "string" }, branch: { type: "string" }, cpus: { type: "string" }, memory: { type: "string" }, disk: { type: "string" },
+      "allow-host": { type: "string", multiple: true }, login: { type: "string", multiple: true },
+    },
+    async run(api, [id, repoUrl], v) {
+      const resources = { cpus: int(str(v, "cpus"), "--cpus", 2), memoryGiB: int(str(v, "memory"), "--memory", 4), diskGiB: int(str(v, "disk"), "--disk", 10) };
+      const node = str(v, "node");
+      if (node === undefined) throw new CliError("invalid", "project add needs --node. Run nexus nodes to list them");
+      const p = await api("POST", "/v1/projects", {
+        id, repoUrl, defaultBranch: str(v, "branch") ?? "main", defaultNode: node, resources,
+        allowedHosts: strs(v, "allow-host"), secrets: [], logins: strs(v, "login"), preSetup: null,
+      }) as Project;
+      return { json: p, text: `Added project ${p.id} (${p.repoUrl}) on ${p.defaultNode}` };
+    },
+  },
   nodes: {
     args: [0, 0],
     async run(api) {
@@ -565,7 +586,10 @@ function hostPort(value: string): HostPort {
 const globalOptions: ParseArgsOptionsConfig = { json: { type: "boolean" }, url: { type: "string" }, socks: { type: "string" } };
 
 async function run(argv: readonly string[]): Promise<void> {
-  const [name, ...rest] = argv;
+  // `project add` is the one command of two words.
+  const twoWords = Object.hasOwn(commands, `${argv[0]} ${argv[1]}`);
+  const name = twoWords ? `${argv[0]} ${argv[1]}` : argv[0];
+  const rest = argv.slice(twoWords ? 2 : 1);
   const command = Object.hasOwn(commands, name!) ? commands[name!]! : undefined;
   if (command === undefined) throw new CliError("invalid", argv.length === 0 ? "no command given" : `unknown command ${name}`);
   let parsed: { values: Values; positionals: string[] };
