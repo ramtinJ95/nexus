@@ -38,9 +38,12 @@ const idleTimeoutMs = 30_000;
 
 const statusKinds: Readonly<Record<number, ErrorKind>> = { 400: "invalid", 413: "invalid", 403: "refused", 415: "refused", 404: "not-found", 409: "conflict" };
 
-function open(endpoint: Endpoint): Promise<Socket> {
+async function open(endpoint: Endpoint, idleMs = idleTimeoutMs): Promise<Socket> {
   const target: HostPort = { host: endpoint.url.hostname, port: Number(endpoint.url.port || 80) };
-  return endpoint.socks === null ? direct(target) : tunnel(endpoint.socks, target);
+  const socket = await (endpoint.socks === null ? direct(target) : tunnel(endpoint.socks, target));
+  // Once connected, a silence is the API's, such as a command queued behind a slow one in its pylon, not the proxy's.
+  socket.removeAllListeners("timeout");
+  return withIdleTimeout(socket, `the control plane at ${endpoint.url.host}`, idleMs);
 }
 
 /**
@@ -48,8 +51,7 @@ function open(endpoint: Endpoint): Promise<Socket> {
  * only once its work is done, such as a session open that waits for its agent, passes a longer `idleMs`.
  */
 export async function call(endpoint: Endpoint, method: string, path: string, body?: unknown, idleMs = idleTimeoutMs): Promise<unknown> {
-  const socket = await open(endpoint);
-  socket.setTimeout(idleMs);
+  const socket = await open(endpoint, idleMs);
   const { status, text } = await exchange(socket, endpoint.url.host, method, path, body);
   return reply(method, path, status, text);
 }
@@ -146,8 +148,8 @@ const lost = (host: string, err: Error) => err instanceof CliError ? err : new C
 /** A name with both an IPv6 and an IPv4 address fails with one error per address and no message of its own. */
 const reason = (err: Error) => err instanceof AggregateError ? err.errors.map((e: Error) => e.message).join(", ") : err.message;
 
-function withIdleTimeout(socket: Socket, what: string): Socket {
-  socket.setTimeout(idleTimeoutMs, () => socket.destroy(new CliError("unreachable", `${what} sent nothing for ${socket.timeout! / 1000}s`)));
+function withIdleTimeout(socket: Socket, what: string, ms = idleTimeoutMs): Socket {
+  socket.setTimeout(ms, () => socket.destroy(new CliError("unreachable", `${what} sent nothing for ${socket.timeout! / 1000}s`)));
   return socket;
 }
 
