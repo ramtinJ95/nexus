@@ -447,8 +447,10 @@ export function smokeChecks(recipe: ImageRecipe): readonly SmokeCheck[] {
       expect: "ok\n",
     },
     {
+      // Gondolin's rootfs copy rewrites the Dockerfile's absolute link as ../../.nexus/PYLON.md, so this checks
+      // where the link leads, not its text. PYLON.md itself appears only on spawn, hence -m.
       name: "pylon guide",
-      argv: asUser("cat ~/.claude/CLAUDE.md; readlink ~/.pi/agent/AGENTS.md"),
+      argv: asUser("cat ~/.claude/CLAUDE.md; realpath -m ~/.pi/agent/AGENTS.md"),
       expect: "@~/.nexus/PYLON.md\n/home/user/.nexus/PYLON.md\n",
     },
     {
