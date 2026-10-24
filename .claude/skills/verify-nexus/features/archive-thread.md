@@ -31,7 +31,7 @@ Preconditions:
 - **Disk survived.** Run `$V pylon unarchive-disk $T -- cat marker.txt`, which prints `before-archive`. Then send `bash: cat marker.txt` with `$V cli unarchive-send` and read `conversation`. The new `pi.tool-result` contains `before-archive`.
 - **Dashboard.** Repeat archive and unarchive from the page:
   - Run `$V browser archive-ui-open -- goto http://127.0.0.1:7470/threads/$T`, then `$V browser archive-ui-click -- click "#archive"`.
-  - Within two polls, about 10 s, the header shows `Unarchive`, and its status chip (`.chip-label`) reads `archived`. The composer is replaced by `An archived thread takes no messages, because its pylon stays paused. Unarchive the thread to send one.`, and the sidebar folds the thread under `1 archived`. Capture it with `snapshot --filename archive-ui.md` and `screenshot --filename archive-ui.png`.
+  - Within a few seconds, because the page reads again after the click, the header shows `Unarchive`, and its status chip (`.chip-label`) reads `archived`. The composer is replaced by `An archived thread takes no messages, because its pylon stays paused. Unarchive the thread to send one.`, and the sidebar folds the thread under the project's closed summary, `1 archived` when it is the project's only closed thread. Capture it with `snapshot --filename archive-ui.md` and `screenshot --filename archive-ui.png`.
   - Once `show $T --json` reads `paused`, the step above's Docker command lists two checkpoints, one for each pause.
   - Run `$V browser unarchive-ui-click -- click "#unarchive"`. Within two polls `Archive` and the composer are back. Capture `snapshot --filename unarchive-ui.md` and `screenshot --filename unarchive-ui.png`.
   - Confirm both through `show $T --json` after each click.
@@ -42,5 +42,7 @@ Preconditions:
 
 - Docker's pause records the Herdr sessions, then runs `docker stop`, `docker commit` and `docker rm`, so running processes and memory are lost, as on a real pylon. Prove survival with a file, not a process.
 - Unarchiving is the only path that wakes an archived thread. `nexus wake` records activity but never unarchives it, and opening an archived thread's page records no activity at all.
-- Each pause adds a checkpoint image, including the idle pause after 20 minutes without human activity, and a wake keeps the old ones. Only delete or `$V down` removes them, so a run that archives many threads holds their layers until then.
+- Each pause adds a checkpoint image, including the idle pause after 20 minutes without human activity and 5 without agent activity, and a wake keeps the old ones. Only delete or `$V down` removes them, so a run that archives many threads holds their layers until then.
+- The closed summary counts archived and deleted threads together, such as `2 archived, 1 deleted`, so its text depends on what ran earlier in the run.
+- The Changes tab keeps a tree it read before the archive. It shows `An archived thread's pylon stays paused, so its changes can't be read. Unarchive the thread to read them.` only after `#changes-reload` or a reload of the page.
 - `actualState` passes through `pausing` and `spawning`. Assert only the settled `paused` and `running`.

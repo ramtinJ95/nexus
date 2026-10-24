@@ -50,4 +50,6 @@ Preconditions:
 - The `eval` steps read the dashboard script's top-level `stream`, `frames`, `streaming` and `scroller`. Renaming any of them in `src/control/dashboard/client.js` breaks these steps.
 - Headless Chromium keeps every tab visible, so a second tab does not hide the first. The hidden step overrides `document.visibilityState` on the page and dispatches `visibilitychange`, and `delete document.visibilityState` restores it.
 - The page's stream proves the browser let go of its stream. That the control plane then frees the stream's watch is covered by the API's tests, not by this recipe.
+- Don't open a diff tab during the recipe. An open tab hides `#scroll` and the composer, so the scroll and draft steps fail.
+- Keep the watch's own background command as its only reader. A driver that reads the watch's pipe between browser commands stamps lines late and shows gaps that are not in the stream.
 - Only a `stream: <n>` message streams. Its answer is `word0 word1 ...`, one word every 20 ms, so `stream: 4000` takes 80 s, long enough for every step above. `stream: 2500` ended before the last two of the five shots.

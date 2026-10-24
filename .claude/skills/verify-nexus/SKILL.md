@@ -14,7 +14,7 @@ This skill never drives the home-lab deployment on `rj-firebat` and `infra-testb
 `scripts/verify-nexus up` starts one process, `scripts/stack.ts`. It uses the same wiring as `src/control/thread-on-node.ts`:
 
 - The real control plane comes from `startControlPlane`: the registry, the reconcile loop, the pi-durable harness, the API and the dashboard. It listens on `http://127.0.0.1:7470`.
-- A real probe comes from `startProbe`, on `127.0.0.1:7480`, with the Docker backend (`src/docker-backend.ts`). Each pylon is a container named `pylon-<thread>`, built from an image the stack builds: Node 24, git, Herdr, the pi-env daemon and the in-pylon CLI.
+- A real probe comes from `startProbe`, on `127.0.0.1:7480`, with the Docker backend (`src/docker-backend.ts`). Each pylon is a container named `pylon-<thread>`, built from an image the stack builds: Node 24, git, Herdr, the pi-env daemon, the in-pylon CLI and a one-commit checkout. The checkout carries `refs/nexus/base` at that commit, which a pylon-vm records on its first boot and the Docker backend never does.
 - Only the production boundaries are replaced:
   - tailscaled's whois is a fake LocalAPI socket. It names port 7480 as the probe and every other caller as the control plane's own node, which the API allows.
   - The model is scripted (`src/harness/test-fixture.ts`). A message `bash: <command>` makes exactly one bash tool call in the pylon, then the answer `scripted answer after toolResult`. A message `stream: <n>` gets the answer `word0 word1 ...` of n words, written one word every 20 ms, so it streams as a real model's does. Any other message gets `scripted answer after user`.
@@ -55,7 +55,7 @@ It also lists the run's pylon containers. Run it before driving, and again whene
 
 ## Drive
 
-Every driver records evidence. Each call writes `NN-<step>.cmd`, `.stdout`, `.stderr` and `.exit` into the run's evidence directory. Then it echoes stdout and stderr and exits with the command's own exit code. Give each step a short, unique name.
+Every driver records evidence. Each call writes `NN-<step>.cmd`, `.stdout`, `.stderr` and `.exit` into the run's evidence directory. Then it echoes stdout and stderr and exits with the command's own exit code. The one exception is `$V browser`: playwright-cli exits 0 when an action fails, so a step whose output reports `### Error` exits 1 and records 1. Give each step a short, unique name.
 
 - **Mac CLI**, which is the primary surface. `$V cli <step> -- <nexus args>` runs `node src/cli/nexus.ts` with `NEXUS_URL=http://127.0.0.1:7470` and `NEXUS_SOCKS=none`, which is the documented direct mode. Add `--json` for assertions. Stdout is then one JSON value, and on failure stderr is `{"error","kind","status"}`. Exit codes follow `docs/cli.md`: 0 for ok, 1 failed, 2 unreachable, 3 refused, 4 not-found, 5 conflict, 64 invalid.
 
@@ -64,7 +64,7 @@ Every driver records evidence. Each call writes `NN-<step>.cmd`, `.stdout`, `.st
   $V cli show -- show th-0123456789ab --json
   ```
 
-- **Dashboard.** `$V browser <step> -- <playwright-cli args>` runs the global `playwright-cli` in the browser session `nexus-verify-<run>`, from the evidence directory, so a relative `--filename` saves into it. Open the session first with `$V browser open -- open http://127.0.0.1:7470/`. Targets are Playwright selectors. Prefer the dashboard's stable handles: `#start-dialog`, `#start-title`, `#project-dialog`, `#project-id`, `#project-repo`, `#prompt-text`, `#send`, `#archive`, `#unarchive`, `#delete`, and `role=link[name="<thread title>"]`. Take `snapshot` before clicking by ref. The page polls every 5 s, so wait for the state you need rather than sleeping a fixed time.
+- **Dashboard.** `$V browser <step> -- <playwright-cli args>` runs the global `playwright-cli` in the browser session `nexus-verify-<run>`, from the evidence directory, so a relative `--filename` saves into it. Open the session first with `$V browser open -- open http://127.0.0.1:7470/`. Targets are Playwright selectors. Prefer the dashboard's stable handles: `#start-dialog`, `#start-title`, `#start-hint`, `#project-dialog`, `#project-id`, `#project-repo`, `#prompt-text`, `#send`, `#archive`, `#unarchive`, `#delete`, `#filter`, `#changes-base`, `#changes-reload`, and `role=link[name="<thread title>"]`. The thread page's inspector shows one tab at a time and remembers it, so select one with `click 'label.seg-tab:has(input[value="changes"])'`, or `previews` or `pylon`, before asserting on it. Take `snapshot` before clicking by ref. The page polls every 5 s, so wait for the state you need rather than sleeping a fixed time.
 
   ```sh
   $V browser home -- open http://127.0.0.1:7470/
