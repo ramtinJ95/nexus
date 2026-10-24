@@ -26,7 +26,8 @@ import { newPylonRecord } from "../tick.ts";
 import type { NodeRecord, Output, PortRange, Preview, Registry, Session, Thread, ThreadId } from "./registry.ts";
 import { dashboard, liveFrames } from "./dashboard.ts";
 import { pylonLive } from "./live.ts";
-import { herdrSession } from "../sessions.ts";
+import { checkoutDir, herdrSession } from "../sessions.ts";
+import { checkoutReader, CheckoutRefused, contentType, pathsFit, type CheckoutReader, type RefusalKind } from "../checkout-files.ts";
 
 export interface ApiOptions {
   registry: Registry;
@@ -42,8 +43,8 @@ export interface ApiOptions {
   harness: ThreadHarness;
   /** Asks the loop for a pass over the node's pylons. */
   wake(node: NodeName): void;
-  /** One client per registry node, for the guest commands a human asks for. */
-  probes: ReadonlyMap<NodeName, Pick<ProbeClient, "command">>;
+  /** One client per registry node, for the guest commands and checkout reads a human asks for. */
+  probes: ReadonlyMap<NodeName, Pick<ProbeClient, "command" | "stream">>;
   /** The https ports each node's previews are allocated from, the loop's range. */
   previewPorts: PortRange;
   /** How long a stream's client may leave what was sent unread before it is dropped. 30 s by default. */
@@ -187,6 +188,14 @@ const sessionSchema = z.strictObject({
   /** The Herdr workspace's label. The harness's name by default. */
   title: z.string().trim().min(1).max(80).optional(),
 });
+
+/** A path in the checkout, relative to it. Empty is the checkout itself. */
+const checkoutPath = z.string().refine((path) => !path.includes("\0"), "has a NUL byte").refine((path) => pathsFit([path]), "is too long");
+/** A diff's paths, which the probe's request must carry together. */
+const diffPaths = z.array(checkoutPath.min(1)).max(100).refine(pathsFit, "are too long together");
+const changesBaseSchema = z.enum(["start", "head"]).default("start");
+/** What each refusal of a checkout read answers. A missing base is a 422, not a 409, because waiting cannot change it. */
+const refusalStatus: Readonly<Record<RefusalKind, number>> = { missing: 404, outside: 400, kind: 400, large: 413, "no-base": 422, slow: 504, busy: 503, long: 400 };
 
 /** `pylon-<id>` must fit in 40 characters. */
 const newThreadId = () => `th-${randomBytes(6).toString("hex")}` as ThreadId;
@@ -458,30 +467,45 @@ export async function startApi(options: ApiOptions): Promise<Api> {
   }
 
   /**
-   * Runs a command a human asked for in the thread's pylon, such as a link or a session open. Asking is human
-   * activity, as a message is, so a paused pylon is woken, but the command itself needs the pylon running and is
-   * refused with a 409 until it is.
+   * Runs what a human asked for in the thread's pylon, such as a link, a session open or a checkout read. Asking is
+   * human activity, as a message is, so a paused pylon is woken, but the request itself needs the pylon running and
+   * is refused with a 409 until it is.
    */
-  async function pylonCommand<K extends "link-port" | "unlink-port" | "open-session" | "close-session">(t: Thread, command: Extract<PylonCommand, { kind: K }>): Promise<Extract<CommandResult, { kind: K }>> {
+  async function inPylon<T>(t: Thread, act: (probe: Pick<ProbeClient, "command" | "stream">, pylonId: PylonId) => Promise<T>): Promise<T> {
     if (t.status === "deleted" || t.status === "archived") throw new HttpError(409, `thread ${t.id} is ${t.status}, so its pylon stays paused`);
     const pylon = registry.pylon(t.pylonId)!;
     const probe = probes.get(pylon.node);
     if (probe === undefined) throw new HttpError(503, `no probe is configured for ${pylon.node}`);
     registry.recordActivity(t.id, { human: Date.now() });
     wake(pylon.node);
-    let result: CommandResult;
+    let result: T;
     try {
-      result = await probe.command(pylon.pylonId, command);
+      result = await act(probe, pylon.pylonId);
     } catch (err) {
       const code = (err as Partial<ProbeError>).code;
       if (code === "not-running") throw new HttpError(409, `pylon ${pylon.pylonId} is not running yet. This request wakes it, so ask again once it runs`);
       if (code === "unreachable") throw new HttpError(503, (err as Error).message);
+      if (err instanceof CheckoutRefused) throw new HttpError(refusalStatus[err.kind], err.message);
       throw err;
     }
     // A delete that landed meanwhile may have released the pylon's ports already.
     if (registry.thread(t.id)!.status === "deleted") throw new HttpError(409, `thread ${t.id} is deleted`);
+    return result;
+  }
+
+  async function pylonCommand<K extends "link-port" | "unlink-port" | "open-session" | "close-session">(t: Thread, command: Extract<PylonCommand, { kind: K }>): Promise<Extract<CommandResult, { kind: K }>> {
     // The client checks that the result is the command's kind.
-    return result as Extract<CommandResult, { kind: K }>;
+    return await inPylon(t, (probe, pylonId) => probe.command(pylonId, command)) as Extract<CommandResult, { kind: K }>;
+  }
+
+  /** Reads the pylon's checkout for the Files and Changes views, over one raw pipe per read. */
+  function inCheckout<T>(t: Thread, read: (checkout: CheckoutReader) => Promise<T>): Promise<T> {
+    return inPylon(t, (probe, pylonId) => read(checkoutReader((request) => probe.stream(pylonId, request), checkoutDir)));
+  }
+
+  async function checkoutFile(t: Thread, path: string): Promise<Reply> {
+    const content = await inCheckout(t, (c) => c.read(path));
+    return { status: 200, file: content, type: contentType(path, content) };
   }
 
   /**
@@ -546,7 +570,8 @@ export async function startApi(options: ApiOptions): Promise<Api> {
     registry.setCurrentImage(image as ImageId);
   }
 
-  type Reply = { status: number; body?: unknown };
+  /** A file is served as its bytes, everything else as JSON. */
+  type Reply = { status: number; body?: unknown; file?: never } | { status: number; file: Buffer; type: string };
   type Route = (match: RegExpExecArray, req: { query: URLSearchParams; body(): Promise<unknown>; caller: TailnetNodeId }) => Reply | Promise<Reply>;
   const ok = (body: unknown): Reply => ({ status: 200, body });
   const created = (body: unknown): Reply => ({ status: 201, body });
@@ -589,6 +614,21 @@ export async function startApi(options: ApiOptions): Promise<Api> {
       await pylonCommand(thread(m[1]!), { kind: "close-session", herdrPane: m[2]! });
       return noContent;
     }],
+    ["GET", /^\/v1\/threads\/([^/]+)\/files$/, async (m, r) => {
+      const path = parse(checkoutPath, r.query.get("path") ?? "");
+      return ok(await inCheckout(thread(m[1]!), (c) => c.list(path)));
+    }],
+    ["GET", /^\/v1\/threads\/([^/]+)\/files\/content$/, async (m, r) => checkoutFile(thread(m[1]!), parse(checkoutPath.min(1), r.query.get("path") ?? ""))],
+    ["GET", /^\/v1\/threads\/([^/]+)\/changes$/, async (m, r) => {
+      const base = parse(changesBaseSchema, r.query.get("base") ?? undefined);
+      return ok(await inCheckout(thread(m[1]!), (c) => c.changes(base)));
+    }],
+    // Each `path` is a pathspec, so a renamed file needs its old path too.
+    ["GET", /^\/v1\/threads\/([^/]+)\/diff$/, async (m, r) => {
+      const base = parse(changesBaseSchema, r.query.get("base") ?? undefined);
+      const paths = parse(diffPaths, r.query.getAll("path"));
+      return ok(await inCheckout(thread(m[1]!), (c) => c.diff(base, paths)));
+    }],
     ["GET", /^\/v1\/threads\/([^/]+)\/conversation$/, async (m) => ok(await conversation(conversing(thread(m[1]!))))],
     ["POST", /^\/v1\/images$/, async (_, r) => created(recordImage(await r.body()))],
     ["PUT", /^\/v1\/images\/current$/, async (_, r) => { setCurrentImage(await r.body()); return noContent; }],
@@ -626,7 +666,8 @@ export async function startApi(options: ApiOptions): Promise<Api> {
     const match = matches.find((r) => r.method === req.method);
     if (match === undefined) throw new HttpError(405, `${req.method} is not allowed on ${path}`);
     const reply = await match.route(match.m, { query: url.searchParams, caller, body: () => readJson(req) });
-    if (reply.body === undefined) res.writeHead(reply.status).end();
+    if (reply.file !== undefined) sendFile(res, reply.file, reply.type);
+    else if (reply.body === undefined) res.writeHead(reply.status).end();
     else send(res, reply.status, reply.body);
   }
 
@@ -672,6 +713,14 @@ async function readJson(req: IncomingMessage): Promise<unknown> {
   } catch (err) {
     throw new HttpError(400, `body is not JSON: ${(err as Error).message}`);
   }
+}
+
+/** The sandbox keeps a file that a browser opens anyway from running as a page of the API's origin. */
+function sendFile(res: ServerResponse, content: Buffer, type: string) {
+  res.writeHead(200, {
+    "content-type": type, "content-length": content.length, "cache-control": "no-store",
+    "x-content-type-options": "nosniff", "content-security-policy": "default-src 'none'; sandbox",
+  }).end(content);
 }
 
 function send(res: ServerResponse, status: number, body: unknown) {
