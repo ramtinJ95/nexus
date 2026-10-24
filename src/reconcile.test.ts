@@ -355,6 +355,13 @@ test("ingest: a stopped pylon that says nothing of its sessions pauses every ses
   assert.deepEqual(ingest({ type: "pylon", pylon: older }, node, knows(phase("stopping")), now), [{ record: "sessions-paused", pylonId }]);
 });
 
+test("ingest: an unlisted pylon's list is written though the previous observation has the same one, and only a list is", () => {
+  const paused = stopped(lastCheckpoint, [pausedReview]);
+  assert.deepEqual(ingest({ type: "pylon", pylon: paused }, node, knows(paused), now), []);
+  assert.deepEqual(ingest({ type: "pylon", pylon: paused }, node, knows(paused), now, new Set([pylonId])), [{ record: "sessions", pylonId, sessions: [pausedReviewRow] }]);
+  assert.deepEqual(ingest({ type: "pylon", pylon: phase("booting") }, node, knows(paused), now, new Set([pylonId])), [], "a pylon that says nothing writes nothing");
+});
+
 test("ingest: the first list after a wake replaces the paused sessions with their panes, and reports a failed one as failed", () => {
   const moved: SessionFact = { ...working, id: "w3:p1", herdrPane: "w3:p1", status: "idle" };
   const failed: SessionFact = { id: "failed-0123456789ab", state: "failed", herdrPane: null, harness: "pi", harnessSessionId: "/s.jsonl", status: "unknown", title: "plan", message: "pi exited 1" };

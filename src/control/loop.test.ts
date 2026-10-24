@@ -590,6 +590,29 @@ test("with the real ingest, a paused pylon lists its sessions as paused until th
   assert.deepEqual(registry.sessions(thread.pylonId), [{ pylon: thread.pylonId, ...moved, message: null }]);
 });
 
+test("a restarted control plane writes each pylon's session list on its first observation, though the stored one has the same list", async (t) => {
+  const path = tempDb();
+  const fake = fakeNode({ autoFinish: true });
+  const before = openRegistry(path);
+  const thread = seed(before);
+  const first = startLoop({ registry: before, probes: [fake.probe], ingest: realIngest, previewPorts, intervalMs: 10, reconnectMs: 10, log: assert.fail });
+  await until("the pylon runs", () => fake.pylons.get(thread.pylonId)?.phase === "running");
+  const review: SessionFact = { id: "w1:p1", state: "running", herdrPane: "w1:p1", harness: "claude-code", harnessSessionId: "s1", status: "idle", title: "review" };
+  fake.setSessions(thread.pylonId, [review]);
+  await until("the session is recorded", () => before.sessions(thread.pylonId).length === 1);
+  before.setThreadStatus(thread.id, "archived");
+  await until("the pause is folded in", () => before.pylon(thread.pylonId)?.pauses === 1 && before.sessions(thread.pylonId)[0]?.state === "paused");
+  await first.close();
+  // As a control plane from before paused sessions left it: the observation with the paused list, and no rows.
+  before.ingested(before.node(node)!.observation!, [{ record: "sessions", pylonId: thread.pylonId, sessions: [] }]);
+  before.close();
+
+  const after = openRegistry(path);
+  run(t, after, fake.probe, { ingest: realIngest });
+  await until("the paused list is written again", () => after.sessions(thread.pylonId).length === 1);
+  assert.deepEqual(after.sessions(thread.pylonId).map((s) => [s.id, s.state]), [["w1:p1", "paused"]]);
+});
+
 test("with the real ingest, sessions the probe could not read record no agent activity", async (t) => {
   const registry = openRegistry(tempDb());
   const longAgo = Date.now() - 60 * 60_000;
@@ -621,11 +644,11 @@ test("services the probe could not read change nothing: the next diff sees the l
   /** Per snapshot, the services read, and those of the last observation it is diffed against. */
   const seen: { read: readonly ServiceFact[] | null | undefined; before: readonly ServiceFact[] | null | undefined }[] = [];
   run(t, registry, fake.probe, {
-    ingest: (event, eventNode, known, now) => {
+    ingest: (event, eventNode, known, now, unlisted) => {
       if (event.type === "snapshot") {
         seen.push({ read: servicesOf(event.observation.pylons.find((p) => p.pylonId === thread.pylonId)), before: servicesOf(known.get(thread.pylonId)) });
       }
-      return ingest(event, eventNode, known, now);
+      return ingest(event, eventNode, known, now, unlisted);
     },
   });
   await until("the pylon runs", () => fake.pylons.get(thread.pylonId)?.phase === "running");
@@ -676,10 +699,10 @@ test("each snapshot is ingested against the last observation ingested for each k
   const fake = fakeNode({ autoFinish: true });
   const previous: string[][] = [];
   run(t, registry, fake.probe, {
-    ingest: (event, eventNode, known, now) => {
+    ingest: (event, eventNode, known, now, unlisted) => {
       assert.deepEqual([...known.keys()], [thread.pylonId]);
       if (event.type === "snapshot") previous.push([...known.values()].map((o) => o === "absent" ? "absent" : o.phase));
-      return ingest(event, eventNode, known, now);
+      return ingest(event, eventNode, known, now, unlisted);
     },
   });
   await until("the pylon runs", () => fake.pylons.get(thread.pylonId)?.phase === "running");

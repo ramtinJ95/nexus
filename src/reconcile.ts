@@ -232,7 +232,10 @@ export type SessionRow = { id: string; harness: SessionHarness; harnessSessionId
  *
  * - A pylon missing from `known` is an orphan, and nothing else is written for it, not even a preview hit.
  * - A snapshot is the whole node, so a known pylon it omits is ingested as "absent".
- * - Sessions are written as the pylon's whole list whenever it differs from the previous observation's. A running
+ * - Sessions are written as the pylon's whole list whenever it differs from the previous observation's, and whenever
+ *   the pylon is in `unlisted`, as loop.ts names each pylon whose list this control plane has not written since it
+ *   started. The previous observation may be one an older control plane stored, whose rows do not match it: one from
+ *   before paused sessions deleted a paused pylon's rows. A running
  *   pylon lists its panes and the sessions its last wake failed to bring back. A stopped one lists, as paused, what
  *   its pause recorded, under the IDs they ran under, or says nothing (null), and then every session it had is
  *   paused. A booting, stopping, deleting or broken pylon says nothing, so its rows stand until the next list: the
@@ -247,10 +250,10 @@ export type SessionRow = { id: string; harness: SessionHarness; harnessSessionId
  * - A working session is agent activity and an attached client is human activity, both at `now`, the time
  *   the control plane received the event. A preview hit is human activity at its own time.
  */
-export function ingest(event: ProbeEvent, node: NodeName, known: ReadonlyMap<PylonId, PylonObservation | "absent">, now: number): readonly RegistryWrite[] {
+export function ingest(event: ProbeEvent, node: NodeName, known: ReadonlyMap<PylonId, PylonObservation | "absent">, now: number, unlisted: ReadonlySet<PylonId> = new Set()): readonly RegistryWrite[] {
   const observed = (pylon: PylonObservation): RegistryWrite[] => {
     const previous = known.get(pylon.pylonId);
-    return previous === undefined ? [{ record: "orphan", node, pylonId: pylon.pylonId }] : pylonWrites(pylon.pylonId, previous, pylon, now);
+    return previous === undefined ? [{ record: "orphan", node, pylonId: pylon.pylonId }] : pylonWrites(pylon.pylonId, previous, pylon, now, unlisted.has(pylon.pylonId));
   };
   switch (event.type) {
     case "snapshot": {
@@ -261,7 +264,7 @@ export function ingest(event: ProbeEvent, node: NodeName, known: ReadonlyMap<Pyl
         { record: "node", node, state: "online", capacity: o.capacity },
         ...o.jobs.map((status): RegistryWrite => ({ record: "job", status })),
         ...o.pylons.flatMap(observed),
-        ...[...known].filter(([id]) => !listed.has(id)).flatMap(([id, previous]) => pylonWrites(id, previous, "absent", now)),
+        ...[...known].filter(([id]) => !listed.has(id)).flatMap(([id, previous]) => pylonWrites(id, previous, "absent", now, unlisted.has(id))),
       ];
     }
     case "pylon": return observed(event.pylon);
@@ -293,13 +296,13 @@ function sessionsOf(o: PylonObservation | "absent"): readonly SessionRow[] | "pa
   }
 }
 
-function pylonWrites(pylonId: PylonId, previous: PylonObservation | "absent", current: PylonObservation | "absent", now: number): RegistryWrite[] {
+function pylonWrites(pylonId: PylonId, previous: PylonObservation | "absent", current: PylonObservation | "absent", now: number, unlisted: boolean): RegistryWrite[] {
   const before = factsOf(previous);
   const after = factsOf(current);
   const writes: RegistryWrite[] = [];
 
   const sessions = sessionsOf(current);
-  if (sessions !== null && !isDeepStrictEqual(sessionsOf(previous), sessions)) {
+  if (sessions !== null && (unlisted || !isDeepStrictEqual(sessionsOf(previous), sessions))) {
     writes.push(sessions === "paused" ? { record: "sessions-paused", pylonId } : { record: "sessions", pylonId, sessions });
   }
 
