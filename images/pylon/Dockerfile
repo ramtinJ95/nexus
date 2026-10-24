@@ -70,6 +70,16 @@ RUN cd /tmp \
  && rm -r gh.tgz "gh_${GH_VERSION}_linux_amd64" \
  && git config --system credential.https://github.com.helper '!/usr/local/bin/gh auth git-credential'
 
+# Neovim for the review-pane mod, which needs 0.10 or later where bookworm ships 0.7. Its release tarball is
+# checked and unpacked into /usr/local like Node's, so nvim finds its runtime at ../share/nvim/runtime from its binary.
+ARG NEOVIM_VERSION
+ARG NEOVIM_SHA256
+RUN cd /tmp \
+ && curl -fsSLo nvim.tgz "https://github.com/neovim/neovim/releases/download/v${NEOVIM_VERSION}/nvim-linux-x86_64.tar.gz" \
+ && echo "${NEOVIM_SHA256}  nvim.tgz" | sha256sum -c - \
+ && tar -xzf nvim.tgz -C /usr/local --strip-components=1 --no-same-owner \
+ && rm nvim.tgz
+
 COPY --chmod=0755 nexus /usr/local/bin/nexus
 # The common dotfiles layer as a git repository, which the boot path clones into ~/.nexus/dotfiles and then
 # updates by fetch. It is owned by user because git refuses to clone a local repository another user owns.

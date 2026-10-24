@@ -155,7 +155,7 @@ When something would ship but the image build could not fetch exactly what this 
 Wrote nothing: 3 problems above.
 ```
 
-Commit and push the manifest, then build the image as [the deploy guide](../../deploy/README.md) describes. The build fetches what the manifest pins, installs it as `user`, and fails on any difference from the manifest. Its smoke boot checks the installed setup against the manifest in the recipe and starts pi offline to prove every extension loads. Pylons start pi with `PI_OFFLINE=1` and Claude Code without its official marketplace, because neither can reach the network to update. The review-pane mod is installed, but its review command needs Neovim 0.10 or later, which the image does not carry, and the exa extensions need a project that grants `EXA_API_KEY` to `api.exa.ai`.
+Commit and push the manifest, then build the image as [the deploy guide](../../deploy/README.md) describes. The build fetches what the manifest pins, installs it as `user`, and fails on any difference from the manifest. Its smoke boot checks the installed setup against the manifest in the recipe and starts pi offline to prove every extension loads. Pylons start pi with `PI_OFFLINE=1` and Claude Code without its official marketplace, because neither can reach the network to update. The review-pane mod's review command needs Neovim 0.10 or later, so the image pins a Neovim release in `pins.json` and the smoke boot checks its version. The exa extensions need a project that grants `EXA_API_KEY` to `api.exa.ai`.
 
 ### Call site: starting a thread picks or builds a template
 

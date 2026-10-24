@@ -90,6 +90,8 @@ function dockerBuildArgs(pins: ImageRecipe["pins"]): Record<string, string> {
     DOTFILES_COMMIT: pins.dotfilesCommon,
     GH_VERSION: pins.gh,
     GH_SHA256: pins.ghSha256,
+    NEOVIM_VERSION: pins.neovim,
+    NEOVIM_SHA256: pins.neovimSha256,
   };
 }
 
@@ -106,7 +108,7 @@ function dockerBuildArgs(pins: ImageRecipe["pins"]): Record<string, string> {
  *    removed. Delete this step, like the seed, once the Gondolin pin moves to a release that keeps modes.
  * 4. Smoke boot at 4 GiB (2 GiB hangs): plain exec PATH, CA and the offline switches for pi and Claude Code's
  *    official marketplace, `user` with a setuid sudo that prints no warning and the hostname pylon, which
- *    resolves through /etc/hosts, the exact pinned versions of node, claude, pi, herdr and pi-env and the nexus
+ *    resolves through /etc/hosts, the exact pinned versions of node, claude, pi, herdr, pi-env and nvim and the nexus
  *    CLI's declared version as user, sshd and sandboxssh, Herdr's pi integration with its own resume turned off,
  *    the agent setup installed exactly as the recipe's manifest says with pi loading every extension offline,
  *    the PYLON.md import for Claude Code and pi, gh at its pin answering git's credential requests from GH_TOKEN,
@@ -398,18 +400,22 @@ function nexusCliVersion(recipe: ImageRecipe): string {
   return declared[1]!;
 }
 
-/** Each tool's whole `--version` output for its pin, in the format that tool prints it. */
+/**
+ * Each tool's `--version` output for its pin, in the format that tool prints it. Neovim's is its first line,
+ * because the lines after it describe the build rather than the release.
+ */
 function versionChecks(recipe: ImageRecipe): SmokeCheck[] {
   const { pins } = recipe;
-  const versions: [tool: string, command: string, output: string][] = [
-    ["node", "node", `v${pins.node}`],
-    ["claude", "claude", `${pins.claudeCode} (Claude Code)`],
-    ["pi", "pi", pins.pi],
-    ["herdr", "herdr", `herdr ${pins.herdr}`],
-    ["pi-env", "/usr/local/libexec/nexus/pi-env", `pi-env ${pins.piEnv}`],
-    ["nexus", "nexus", `nexus ${nexusCliVersion(recipe)}`],
+  const versions: [tool: string, script: string, output: string][] = [
+    ["node", "node --version", `v${pins.node}`],
+    ["claude", "claude --version", `${pins.claudeCode} (Claude Code)`],
+    ["pi", "pi --version", pins.pi],
+    ["herdr", "herdr --version", `herdr ${pins.herdr}`],
+    ["pi-env", "/usr/local/libexec/nexus/pi-env --version", `pi-env ${pins.piEnv}`],
+    ["nexus", "nexus --version", `nexus ${nexusCliVersion(recipe)}`],
+    ["nvim", "nvim --version | head -n 1", `NVIM v${pins.neovim}`],
   ];
-  return versions.map(([tool, command, output]) => ({ name: `${tool} version`, argv: asUser(`${command} --version`), expect: `${output}\n` }));
+  return versions.map(([tool, script, output]) => ({ name: `${tool} version`, argv: asUser(script), expect: `${output}\n` }));
 }
 
 /** Plain execs run with sandboxd's environment, and `runuser -l` gives the login shell that SSH and Herdr panes get. */
