@@ -41,7 +41,7 @@ Keep implementation details out of the map. Name only user paths, stable handles
 
 ## Features
 
-- [Add a project](./add-project.md) covers CLI `project add` with its defaults and flags, the added project in `projects`, a thread that boots on it, and the conflict and invalid exits.
+- [Add a project](./add-project.md) covers CLI `project add` with its defaults and flags, the dashboard's New project dialog, the added project in `projects`, a thread that boots on it, and the conflict and invalid exits.
 - [Start a thread](./start-thread.md) covers the CLI `start`, the dashboard's start dialog, title rules, and a booted pylon with its overlay.
 - [Message the agent](./message-agent.md) covers CLI `send` and `conversation`, the dashboard composer, request-ID deduplication, and a tool call's effect on the pylon's disk.
 - [Archive and unarchive](./archive-thread.md) covers pausing a thread's pylon to a checkpoint, refusing messages while it is archived, and waking it with its disk intact.

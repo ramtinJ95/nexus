@@ -1,6 +1,6 @@
 # Add a project
 
-A user adds a project from the terminal, naming its repository and its node. The project then shows in `projects`, and a thread started on it boots a pylon on that node like any other.
+A user adds a project from the terminal or the dashboard, naming its repository and its node. The project then shows in `projects` and the dashboard, and a thread started on it boots a pylon on that node like any other.
 
 ## Sub-features
 
@@ -9,18 +9,21 @@ A user adds a project from the terminal, naming its repository and its node. The
 - `project-list` lists the added projects alongside the seed.
 - `project-thread` starts a thread on an added project, and its pylon runs.
 - `project-refused` maps an existing ID to exit 5, an unknown node to exit 64, and a missing `--node` to exit 64.
+- `project-ui` adds a project from the dashboard's New project dialog with the same defaults as the CLI, then opens the start dialog on it.
+- `project-ui-refused` shows the API's message in the dialog for an ID that exists.
 
 ## How to get to it (user POV)
 
 - Run `nexus project add <id> <repo-url> --node <N>` in a terminal, with `--branch`, `--cpus`, `--memory`, `--disk`, `--allow-host` and `--login` to override the defaults.
-- The dashboard has no way to add a project. With no projects, it points to `nexus project add`.
+- Choose `New project` in the dashboard's sidebar, under the projects, or in the overview's header, or open `/projects/new`. With no projects, the overview and the start dialog offer `New project` in place of their lists.
+- The dialog asks for the ID, the repository URL, the node, which defaults to the first online one, and the branch, which defaults to `main`. Other settings need the CLI.
 
 ## Driving it with verify-nexus
 
 Preconditions:
 
 - The baseline from the index holds.
-- No project named `quill` or `quill-flags` exists in this run. Projects cannot be removed, so this feature runs once per run.
+- No project named `quill`, `quill-flags`, `quill-text` or `quill-ui` exists in this run. Projects cannot be removed, so this feature runs once per run.
 
 - **CLI add with defaults.** Run `$V cli project-cli -- project add quill https://github.com/octocat/Hello-World.git --node verify-node --json`. Exit 0. Stdout is a `Project` with `id` `quill`, `defaultBranch` `main`, `defaultNode` `verify-node`, `resources` `{"cpus": 2, "memoryGiB": 4, "diskGiB": 10}`, `allowedHosts` `[]`, `secrets` `[]`, `logins` `[]` and `preSetup` null.
 - **CLI add with flags.** Run `$V cli project-flags -- project add quill-flags git@github.com:octocat/Spoon-Knife.git --node verify-node --branch dev --cpus 1 --memory 1 --disk 1 --allow-host registry.npmjs.org --allow-host api.stripe.com --login claude --login chatgpt --json`. Exit 0. `defaultBranch` is `dev`, `resources` is `{"cpus": 1, "memoryGiB": 1, "diskGiB": 1}`, `allowedHosts` is `["registry.npmjs.org", "api.stripe.com"]` and `logins` is `["claude", "chatgpt"]`.
@@ -32,10 +35,20 @@ Preconditions:
   - `$V cli project-no-node -- project add quill-x https://github.com/octocat/Hello-World.git --node nowhere --json` exits 64 with `"kind": "invalid"`, `"status": 400` and `"error": "no node nowhere"`.
   - `$V cli project-missing-node -- project add quill-x https://github.com/octocat/Hello-World.git --json` exits 64 with `"kind": "invalid"`, `"status": null` and `"error": "project add needs --node. Run nexus nodes to list them"`.
   - `$V cli project-after -- projects --json` still lists four projects, so no refusal created one.
-- **Proof.** The recorded `project-cli`, `project-flags`, `project-text`, `project-list`, the `project-thread-show` that reads `running`, `project-overlay`, the three refusals and `project-after`.
+- **Dashboard add.** Open the dialog and submit it:
+  - Run `$V browser project-ui-open -- goto http://127.0.0.1:7470/projects/new`. The `New project` dialog is open, with `verify-node` chosen under `Node` and `main` under `Branch`.
+  - Run `$V browser project-ui-id -- fill "#project-id" "quill-ui"` and `$V browser project-ui-repo -- fill "#project-repo" "https://github.com/octocat/Hello-World.git"`.
+  - Run `$V browser project-ui-submit -- click "#project button[type=submit]"`. The `New project` dialog closes and the `Start a thread` dialog opens with `quill-ui` checked under `Project`. The sidebar and the overview list `quill-ui`.
+  - Capture it with `$V browser project-ui-snap -- snapshot --filename project-ui.md` and `$V browser project-ui-shot -- screenshot --filename project-ui.png`.
+  - Confirm from the CLI: in `$V cli project-ui-list -- projects --json`, the `quill-ui` entry equals the `project-cli` reply apart from its `id`.
+- **Dashboard refusal.** Run `$V browser project-ui-again -- goto http://127.0.0.1:7470/projects/new`, fill `#project-id` with `quill` and `#project-repo` with any URL, and click `#project button[type=submit]`. The dialog stays open, and `#project-error` reads `project quill exists`. Capture `snapshot --filename project-ui-refused.md` and `screenshot --filename project-ui-refused.png`.
+- **Proof.** The recorded `project-cli`, `project-flags`, `project-text`, `project-list`, the `project-thread-show` that reads `running`, `project-overlay`, the three refusals and `project-after`, then `project-ui.md`, `project-ui.png`, `project-ui-list`, `project-ui-refused.md` and `project-ui-refused.png`.
 
 ## Gotchas
 
 - Projects cannot be removed, so after this feature `projects` lists four, and [Browse threads](./browse-threads.md)'s `browse-projects` no longer returns `spoon` alone. Run Browse threads first, or expect the `quill` projects there.
 - The stack's pylons never clone, so the repository URL only labels the project, and an SSH URL such as `git@github.com:…` boots the same as an HTTPS one. The Docker backend does not enforce resources either. A real node's clone is proven by `src/control/thread-on-node.ts`, not here. Neither proves that a pylon gets the project's memory or CPUs.
+- Run the dashboard steps after `project-after`, which counts four projects.
+- The seed always has `spoon`, so this stack cannot show the dashboard's empty states.
+- The dialog's nodes are those of the page it opened on. A node that came online since then is not the default until the page reloads.
 - Start the thread on `quill`, not `quill-flags`. Its logins and allowed hosts change nothing in a Docker pylon, which has no network policy.

@@ -64,7 +64,7 @@ Every driver records evidence. Each call writes `NN-<step>.cmd`, `.stdout`, `.st
   $V cli show -- show th-0123456789ab --json
   ```
 
-- **Dashboard.** `$V browser <step> -- <playwright-cli args>` runs the global `playwright-cli` in the browser session `nexus-verify-<run>`, from the evidence directory, so a relative `--filename` saves into it. Open the session first with `$V browser open -- open http://127.0.0.1:7470/`. Targets are Playwright selectors. Prefer the dashboard's stable handles: `#start-dialog`, `#start-title`, `#prompt-text`, `#send`, `#archive`, `#unarchive`, `#delete`, and `role=link[name="<thread title>"]`. Take `snapshot` before clicking by ref. The page polls every 5 s, so wait for the state you need rather than sleeping a fixed time.
+- **Dashboard.** `$V browser <step> -- <playwright-cli args>` runs the global `playwright-cli` in the browser session `nexus-verify-<run>`, from the evidence directory, so a relative `--filename` saves into it. Open the session first with `$V browser open -- open http://127.0.0.1:7470/`. Targets are Playwright selectors. Prefer the dashboard's stable handles: `#start-dialog`, `#start-title`, `#project-dialog`, `#project-id`, `#project-repo`, `#prompt-text`, `#send`, `#archive`, `#unarchive`, `#delete`, and `role=link[name="<thread title>"]`. Take `snapshot` before clicking by ref. The page polls every 5 s, so wait for the state you need rather than sleeping a fixed time.
 
   ```sh
   $V browser home -- open http://127.0.0.1:7470/
