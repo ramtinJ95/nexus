@@ -159,8 +159,11 @@ function thisMac(): MacSetup {
         extension("atuin.ts", true), extension("herdr-agent-state.ts", true), extension("pi-better-openai-lite", false),
         extension("pi-vim", true), extension("pi-visualize-code-changes", false), extension("silly-messages.ts", true),
       ],
-      skills: [skill(agentSkills, "anki-cards"), skill(agentSkills, "grok"), skill(agentSkills, "herdr"), skill(agentSkills, "teach")],
-      skillSettings: [{ entry: "-skills/teach/SKILL.md", realPath: `${root}/${agentSkills}/teach/SKILL.md` }],
+      skills: [
+        { ...skill(agentSkills, "anki-cards"), loads: true }, { ...skill(agentSkills, "grok"), loads: true },
+        { ...skill(agentSkills, "herdr"), loads: true }, { ...skill(agentSkills, "teach"), loads: false },
+      ],
+      skillSettings: ["-skills/teach/SKILL.md"],
     },
     versions: { claudeCode: "2.1.310", pi: "1.4.0" },
   };
@@ -272,15 +275,10 @@ test("a plugin whose marketplace cannot be fetched from GitHub at its HEAD is re
   assert.match(problemsOf(plan(moved)).join("\n"), /claude plugin gone@claude-mods: marketplace claude-mods at bbbbbbb does not list it/);
 });
 
-test("pi skills: a -path exclusion keeps a skill from pi, and any other skills setting is refused", () => {
+test("pi skills: a skill pi does not load goes to Claude Code only, and any skills setting but a -path one is refused", () => {
   const mac = thisMac();
-  const teach = captured(plan(mac)).setup.skills.find((s) => s.path.endsWith("/teach"));
-  assert.deepEqual(teach?.for, ["claude"]);
-  const byDir = { ...mac, pi: { ...mac.pi, skillSettings: [{ entry: "-~/.agents/skills/teach", realPath: `${root}/${agentSkills}/teach` }] } };
-  assert.deepEqual(captured(plan(byDir)).setup.skills.find((s) => s.path.endsWith("/teach"))?.for, ["claude"]);
-  const none = { ...mac, pi: { ...mac.pi, skillSettings: [] } };
-  assert.deepEqual(captured(plan(none)).setup.skills.find((s) => s.path.endsWith("/teach"))?.for, ["claude", "pi"]);
-  const glob = { ...mac, pi: { ...mac.pi, skillSettings: [{ entry: "!skills/**", realPath: `${root}/x` }] } };
+  assert.deepEqual(captured(plan(mac)).setup.skills.find((s) => s.path.endsWith("/teach"))?.for, ["claude"]);
+  const glob = { ...mac, pi: { ...mac.pi, skillSettings: ["!skills/**"] } };
   assert.deepEqual(problemsOf(plan(glob)), ['pi skills setting "!skills/**": only -path exclusions are captured']);
 });
 
@@ -313,7 +311,7 @@ test("a pi package leave-out names the npm package, so a settings entry that pin
 
 test("two shipped skills with one name are refused, since the image installs each under its name", () => {
   const mac = thisMac();
-  const twin = { ...mac, pi: { ...mac.pi, skills: [...mac.pi.skills, skill(claudeSkills, "grok")] } };
+  const twin = { ...mac, pi: { ...mac.pi, skills: [...mac.pi.skills, { ...skill(claudeSkills, "grok"), loads: true }] } };
   const withTwin = { ...twin, dotfiles: { ...twin.dotfiles, tracked: new Set([...mac.dotfiles.tracked, `${claudeSkills}/grok/SKILL.md`]) } };
   assert.match(problemsOf(plan(withTwin)).join("\n"), /skills: two entries with skill name grok/);
   const renamed = { ...mac, claude: { ...mac.claude, skills: [...mac.claude.skills, { name: "teacher", realPath: `${root}/${agentSkills}/teach` }] } };
@@ -408,4 +406,23 @@ test("an extension directory with a package.json pi cannot read loads only throu
   }));
   assert.deepEqual(setup.pi.extensions, ["ext/broken-indexed"]);
   assert.deepEqual(leftOut.filter((rule) => rule.kind === "pi-extension").map((rule) => rule.name), ["broken"]);
+});
+
+test("pi skills: a -path entry is matched as pi matches it, from the root pi found the skill in, links unresolved", async () => {
+  const { setup } = captured(await piCapture({
+    ".pi/agent/settings.json": piSettings({ skills: ["-skills/teach/SKILL.md", "-~/.pi/agent/skills/linked", "-~/.agents/skills/both"] }),
+    ".agents/skills/teach": { link: "../../dotfiles/skills/teach" },
+    ".agents/skills/herdr": { link: "../../dotfiles/skills/herdr" },
+    ".agents/skills/linked": { link: "../../dotfiles/skills/linked" },
+    ".agents/skills/both": { link: "../../dotfiles/skills/both" },
+    ".pi/agent/skills/linked": { link: "../../../dotfiles/skills/linked" },
+    ".pi/agent/skills/both": { link: "../../../dotfiles/skills/both" },
+    "dotfiles/skills/teach/SKILL.md": "teach",
+    "dotfiles/skills/herdr/SKILL.md": "herdr",
+    "dotfiles/skills/linked/SKILL.md": "linked",
+    "dotfiles/skills/both/SKILL.md": "both",
+  }));
+  // pi 1.4.0's own resolver, run on this home, loads herdr and both: teach is excluded relative to ~/.agents, and a
+  // skill linked into both roots is decided by its ~/.pi/agent/skills link, which pi finds first.
+  assert.deepEqual(setup.skills, [{ path: "skills/both", for: ["pi"] }, { path: "skills/herdr", for: ["pi"] }]);
 });

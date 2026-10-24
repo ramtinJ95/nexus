@@ -69,10 +69,15 @@ export interface MacSetup {
      * that exists, or one with an index.ts or index.js.
      */
     extensions: readonly { name: string; realPath: string; loads: boolean }[];
-    /** ~/.agents/skills and ~/.pi/agent/skills entries that hold a SKILL.md, deduped by realPath. */
-    skills: readonly { name: string; realPath: string }[];
-    /** settings.json `skills`, each entry with its path, after any +, - or ! prefix, resolved from ~/.pi/agent. */
-    skillSettings: readonly { entry: string; realPath: string }[];
+    /**
+     * ~/.pi/agent/skills and ~/.agents/skills entries that hold a SKILL.md, each realPath once, where pi finds it first,
+     * ~/.pi/agent/skills before ~/.agents/skills. loads: no `-` entry of skillSettings names that place the way pi
+     * matches one: as the directory or its SKILL.md, links unresolved, absolute or relative to its root's parent,
+     * ~/.pi/agent or ~/.agents.
+     */
+    skills: readonly { name: string; realPath: string; loads: boolean }[];
+    /** settings.json `skills`, as written. */
+    skillSettings: readonly string[];
   };
   /** For the version skew note only. */
   versions: { claudeCode: string; pi: string };
@@ -117,10 +122,10 @@ const pluginMarkers = new Set([".in_use", ".orphaned_at"]);
  * - its name differs from its directory's name, which is the name the image installs it under;
  * - two shipped skills, extensions or local packages share a name, or anything else the manifest parser refuses.
  * An extension entry that is also a local package ships once, as the package. Any other entry pi loads nothing from is
- * not a capability on this Mac, so it comes back as a leave-out saying so. A skill goes to Claude Code when ~/.claude/skills has it and
- * skillOverrides does not turn it off, and to pi when ~/.agents/skills or ~/.pi/agent/skills has it and no `-path`
- * exclusion names it. A pi-package leave-out npm:<name> matches that package whatever version its entry pins. A
- * leave-out that matches nothing comes back as a note, so a stale entry is visible without blocking a capture.
+ * not a capability on this Mac, so it comes back as a leave-out saying so. A skill goes to Claude Code when
+ * ~/.claude/skills has it and skillOverrides does not turn it off, and to pi when pi loads it from ~/.pi/agent/skills or
+ * ~/.agents/skills. A pi-package leave-out npm:<name> matches that package whatever version its entry pins. A leave-out
+ * that matches nothing comes back as a note, so a stale entry is visible without blocking a capture.
  */
 export function planAgentSetup(mac: MacSetup, rules: readonly LeaveOut[]): Capture {
   const problems: string[] = [];
@@ -185,11 +190,9 @@ export function planAgentSetup(mac: MacSetup, rules: readonly LeaveOut[]): Captu
     }
   }
 
-  const exclusions = mac.pi.skillSettings.flatMap(({ entry, realPath }) => {
-    if (entry.startsWith("-")) return [realPath];
-    problems.push(`pi skills setting ${JSON.stringify(entry)}: only -path exclusions are captured`);
-    return [];
-  });
+  for (const entry of mac.pi.skillSettings) {
+    if (!entry.startsWith("-")) problems.push(`pi skills setting ${JSON.stringify(entry)}: only -path exclusions are captured`);
+  }
   const skillHarnesses = new Map<string, { names: Set<string>; for: Set<Harness> }>();
   const addSkill = (harness: Harness, { name, realPath }: { name: string; realPath: string }) => {
     const entry = skillHarnesses.get(realPath) ?? { names: new Set<string>(), for: new Set<Harness>() };
@@ -198,9 +201,7 @@ export function planAgentSetup(mac: MacSetup, rules: readonly LeaveOut[]): Captu
     skillHarnesses.set(realPath, entry);
   };
   for (const skill of mac.claude.skills) if (!mac.claude.skillsOff.has(skill.name)) addSkill("claude", skill);
-  for (const skill of mac.pi.skills) {
-    if (!exclusions.some((path) => path === skill.realPath || path === join(skill.realPath, "SKILL.md"))) addSkill("pi", skill);
-  }
+  for (const skill of mac.pi.skills) if (skill.loads) addSkill("pi", skill);
   const skills: AgentSetup["skills"][number][] = [];
   for (const [realPath, { names, for: harnesses }] of skillHarnesses) {
     const kept = [...names].filter((name) => !leftOut("skill", name));
@@ -453,10 +454,6 @@ export async function readPiSetup(home: string): Promise<MacSetup["pi"]> {
   const piSettings = await readJson(join(piAgent, "settings.json"), piSettingsSchema);
   /** A settings path as pi resolves it: ~ is the home, and a relative path is under ~/.pi/agent. */
   const settingPath = (path: string) => resolve(piAgent, path.trim().replace(/^~(?=\/|$)/, home));
-  const resolveSetting = async (path: string) => {
-    const absolute = settingPath(path);
-    return existsSync(absolute) ? realpath(absolute) : absolute;
-  };
   const npmVersions = new Map<string, string>();
   const localPackages = new Map<string, string>();
   for (const entry of piSettings.packages) {
@@ -474,7 +471,17 @@ export async function readPiSetup(home: string): Promise<MacSetup["pi"]> {
     const realPath = await realpath(join(extensionsDir, name));
     return { name, realPath, loads: (await stat(realPath)).isDirectory() ? await directoryLoads(realPath) : /\.[tj]s$/.test(name) };
   }));
-  const piSkills = [...await skillsIn(join(home, ".agents", "skills")), ...await skillsIn(join(piAgent, "skills"))]
+  const excluded = piSettings.skills.filter((entry) => entry.startsWith("-")).map((entry) => {
+    const path = entry.slice(1).replace(/^\.\//, "");
+    return path === "~" ? home : path.startsWith("~/") ? join(home, path.slice(2)) : path;
+  });
+  const piSkills = (await Promise.all([piAgent, join(home, ".agents")].map(async (root) =>
+    (await skillsIn(join(root, "skills"))).map((skill) => {
+      const dir = join(root, "skills", skill.name);
+      const forms = [dir, join(dir, "SKILL.md")].flatMap((path) => [path, relative(root, path)]);
+      return { ...skill, loads: !excluded.some((path) => forms.includes(path)) };
+    }))))
+    .flat()
     .filter((skill, i, all) => all.findIndex((s) => s.realPath === skill.realPath) === i);
 
   return {
@@ -483,7 +490,7 @@ export async function readPiSetup(home: string): Promise<MacSetup["pi"]> {
     localPackages,
     extensions,
     skills: piSkills,
-    skillSettings: await Promise.all(piSettings.skills.map(async (entry) => ({ entry, realPath: await resolveSetting(entry.replace(/^[-+!]/, "")) }))),
+    skillSettings: piSettings.skills,
   };
 }
 
