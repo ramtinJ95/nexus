@@ -154,6 +154,52 @@ async function until(services: GuestServices, name: string, state: string) {
 	}
 }
 
+test("a service declared with a preview while the pylon runs is reported with its port, route and portal, and starts once its URL is assigned, unless stopped", async (t) => {
+	const root = await mkdtemp(join(tmpdir(), "nexus-services-"));
+	t.after(() => rm(root, { recursive: true, force: true }));
+	const guest = fakeVm();
+	const services = new GuestServices(guest.vm, root, configPath, "/workspace/repo", "agent", {});
+	t.after(() => services.close());
+	await services.initialize();
+	guest.guest.file = declared("  web:\n    command: serve\n    preview: true\n  finder:\n    command: open .\n    preview: true\n    platforms: [darwin]\n");
+	const web = { name: "web", state: "stopped", port: 41000, declared: true, wantsPreview: true };
+	assert.deepEqual(await services.operate("status"), [web], "a service the Linux guest excludes is not reported");
+	assert.deepEqual([guest.routes.at(-1), Object.keys(services.urls())], [["/web/"], ["web"]]);
+	assert.deepEqual(await services.operate("status"), [web], "the port sticks");
+	assert.deepEqual(JSON.parse(await readFile(join(root, "services.json"), "utf8")).web.port, 41000);
+	assert.deepEqual(guest.launches, [], "it waits for its preview's URL");
+
+	await services.setPublicUrls({ web: "https://node.example:10100" });
+	assert.deepEqual(guest.launches, ["web"]);
+	assert.match(guest.scripts.get("web")!, /^export PUBLIC_URL='https:\/\/node\.example:10100'$/m);
+	await until(services, "web", "ready");
+
+	await services.operate("stop", "web");
+	await services.setPublicUrls({ web: "https://node.example:10101" });
+	assert.deepEqual(guest.launches, ["web"], "a service stopped on purpose stays stopped");
+	assert.deepEqual(await services.operate("status"), [web]);
+	await services.operate("ensure");
+	assert.deepEqual(guest.launches, ["web", "web"], "ensure starts it again");
+});
+
+test("a service declared without a preview while the pylon runs starts when a status first reports it, and only then", async (t) => {
+	const root = await mkdtemp(join(tmpdir(), "nexus-services-"));
+	t.after(() => rm(root, { recursive: true, force: true }));
+	const guest = fakeVm();
+	const services = new GuestServices(guest.vm, root, configPath, "/workspace/repo", "agent", {});
+	t.after(() => services.close());
+	await services.initialize();
+	await services.operate("ensure");
+	guest.guest.file = declared("  worker:\n    command: work\n    health: process\n");
+	await services.operate("status");
+	assert.deepEqual(guest.launches, ["worker"]);
+	await until(services, "worker", "ready");
+	await services.operate("stop", "worker");
+	await services.operate("status");
+	await services.setPublicUrls({});
+	assert.deepEqual(guest.launches, ["worker"], "a status or new URLs do not start it again once stopped");
+});
+
 test("a start does not wait for health: ensure and new URLs return at once, the service is starting, and it fails after its timeout", async (t) => {
 	const root = await mkdtemp(join(tmpdir(), "nexus-services-"));
 	t.after(() => rm(root, { recursive: true, force: true }));

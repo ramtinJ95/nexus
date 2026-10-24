@@ -51,6 +51,8 @@ export class GuestServices {
 	private wanted = new Map<string, string>();
 	/** Why the last start of a service failed. Cleared by the next start, or a stop. */
 	private failures = new Map<string, string>();
+	/** Services stopped on purpose, which a new public URL does not start. A start clears it. */
+	private held = new Set<string>();
 	/**
 	 * The start whose readiness is being watched, per service. A later start, a stop or a close replaces or drops it,
 	 * which ends that watch without a verdict.
@@ -365,6 +367,7 @@ export class GuestServices {
 		timeoutMs: number,
 	): Promise<void> {
 		this.wanted.set(name, this.envKey(name, entry));
+		this.held.delete(name);
 		this.failures.delete(name);
 		const watch = {};
 		this.watches.set(name, watch);
@@ -420,14 +423,19 @@ export class GuestServices {
 	}
 	/**
 	 * Restarts each service that was asked to run and whose env the new URLs change, such as one that started
-	 * before its preview was assigned. A service stopped on purpose stays stopped.
+	 * before its preview was assigned, and starts each declared one that has not been, such as one declared while
+	 * the pylon ran, which waited for its preview's URL. A service stopped on purpose stays stopped.
 	 */
 	async setPublicUrls(urls: Record<string, string>): Promise<void> {
 		this.publicUrls = urls;
 		for (const [name, entry] of this.entries) {
 			const before = this.wanted.get(name);
-			if (before === undefined || before === this.envKey(name, entry)) continue;
-			await stopService(this.vm, name);
+			if (before === undefined) {
+				if (!entry.declared || this.held.has(name)) continue;
+			} else {
+				if (before === this.envKey(name, entry)) continue;
+				await stopService(this.vm, name);
+			}
 			await this.start(name, entry, entry.service.timeoutMs);
 		}
 	}
@@ -451,6 +459,7 @@ export class GuestServices {
 					await this.stop(name);
 					await entry.portal?.close();
 					this.entries.delete(name);
+					this.held.delete(name);
 					delete this.assignments[name];
 				}
 			}
@@ -483,8 +492,19 @@ export class GuestServices {
 				await this.start(name, entry, entry.service.timeoutMs);
 			}
 		} else if (op === "stop")
-			for (const name of names) await this.stop(name);
-		// Only a configured service has a port. A declared one that no ensure has reached yet is not reported.
+			for (const name of names) {
+				await this.stop(name);
+				this.held.add(name);
+			}
+		else
+			for (const name of names) {
+				if (this.entries.has(name) || !this.declaredNames.has(name)) continue;
+				// A service declared since the last ensure gets its port, route and portal now, so it is reported and
+				// its preview can be assigned. One with a preview starts once its URL arrives (setPublicUrls). One
+				// without needs nothing more, and no spawn would follow to start it, so it starts here.
+				const entry = await this.configure(name, config[name]!, true);
+				if (!wantsPreview(entry.service)) await this.start(name, entry, entry.service.timeoutMs);
+			}
 		const facts = await Promise.all(
 			names.flatMap((name) => {
 				const entry = this.entries.get(name);

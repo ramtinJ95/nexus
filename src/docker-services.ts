@@ -33,6 +33,8 @@ interface Known {
   /** Container port to the loopback port Docker published it on. */
   hostPorts: Map<number, number>;
   linked: Set<number>;
+  /** The declared services the last spawn or operation saw. One declared since then is new to `operate`. */
+  seen: Set<ServiceName>;
 }
 
 /** Runs a script in the container. A nonzero exit is a result, not an error. */
@@ -189,7 +191,8 @@ export function dockerServices() {
         if (m) hostPorts.set(Number(m[1]), Number(m[2]));
       }
       const previous = known.get(container);
-      const k: Known = { declared: await declarations(container), urls, failures: previous?.failures ?? new Map(), hostPorts, linked: await linked(container) };
+      const declared = await declarations(container);
+      const k: Known = { declared, urls, failures: previous?.failures ?? new Map(), hostPorts, linked: await linked(container), seen: new Set(Object.keys(declared)) };
       known.set(container, k);
       if (booted) {
         await checked(container, `rm -f ${root}/*.pid ${root}/*.stopped`);
@@ -217,7 +220,13 @@ export function dockerServices() {
     async operate(container: string, op: "ensure" | "list" | "restart" | "stop", name?: string): Promise<ServiceFact[]> {
       const k = state(container);
       k.declared = await declarations(container);
+      const fresh = Object.keys(k.declared).filter((n) => !k.seen.has(n));
+      for (const n of fresh) k.seen.add(n);
       const names = selection(k, name);
+      // As in the pylon VM's supervisor: a service declared since the last spawn without a preview starts when a
+      // list first sees it, because no spawn follows it. One with a preview starts at the spawn its preview causes.
+      // Not awaited, so that a list never waits for health.
+      if (op === "list") for (const n of fresh) if (!wantsPreview(k.declared[n]!)) void start(container, k, n);
       for (const n of op === "list" ? [] : names) {
         if (op !== "ensure") await stop(container, k, n);
         if (op === "stop") await checked(container, `mkdir -p ${root} && touch ${root}/"$1".stopped`, [n]);

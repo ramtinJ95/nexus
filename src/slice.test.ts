@@ -34,7 +34,7 @@ import { run as pylonVm } from "./pylon-vm/client.ts";
 import { startProbe, type Probe } from "./probe/server.ts";
 import { fakeTailscale, nodeHost, viaGateway } from "./probe/fake-tailscale.ts";
 import { pylonInfoFile, pylonVmHostBridge, type HostBridge } from "./probe/pylon-api.ts";
-import { connectProbe, type DeclaredOutput, type LiveHash, type NodeName, type ProbeClient, type PylonId, type TailnetNodeId } from "./protocol.ts";
+import { connectProbe, type DeclaredOutput, type LiveHash, type NodeName, type ProbeClient, type PylonId, type ServiceFact, type TailnetNodeId } from "./protocol.ts";
 import { envelope, type PlanStep } from "./reconcile.ts";
 import { newPylonRecord, nextCheckpoint, snapshot, tick, type PylonRecord } from "./tick.ts";
 import type { BackendPylon, Guest, SecretSource, VmBackend } from "./backend.ts";
@@ -523,6 +523,19 @@ test("a declared service with a preview runs with its https PUBLIC_URL and answe
   const observed = (await snapshot(client))?.pylons.find((p) => p.pylonId === pylonId);
   assert.ok(observed?.phase === "running");
   assert.deepEqual(observed.services, [{ name: "web", state: "ready", port: 8000, declared: true, wantsPreview: true }], "the observation reports the service");
+});
+
+test("a service declared without a preview while the pylon runs starts with no command, from the node's next read", async () => {
+  const worker = "  worker:\n    command: sleep infinity\n    port: 8001\n    health: process\n";
+  await backend.guest(pylonId).writeFiles([{ ...serviceFiles[0]!, content: serviceFiles[0]!.content + worker }]);
+  const deadline = Date.now() + 30_000;
+  let facts: readonly ServiceFact[] = [];
+  while (!facts.some((f) => f.name === "worker" && f.state === "ready")) {
+    if (Date.now() > deadline) assert.fail(`worker did not start: ${JSON.stringify(facts)}`);
+    facts = (await backend.guest(pylonId).services("list")).services;
+    await new Promise((r) => setTimeout(r, 500));
+  }
+  assert.deepEqual(facts.find((f) => f.name === "worker"), { name: "worker", state: "ready", port: 8001, declared: true, wantsPreview: false });
 });
 
 test("the same envelope twice gives the same status back", async () => {
