@@ -13,6 +13,7 @@ import { join } from "node:path";
 import { PassThrough, Readable } from "node:stream";
 import { createPylonVmBackend, type PylonVmBackendOptions } from "./pylon-vm-backend.ts";
 import { identityOf } from "./pylon-vm/identity.ts";
+import { pylonGuest } from "./pylon-vm/pylon-guest.ts";
 import type { BootInputs } from "./project.ts";
 import type { BrokenCause, PylonId } from "./protocol.ts";
 import type { ImageId, TemplateBuildInputs, TemplateId, TemplateManifest } from "./images.ts";
@@ -320,6 +321,31 @@ test("service facts come from the controller's supervisor, a list starts nothing
     { action: "services", op: "status", service: "web" },
     { action: "preview", port: 6006, title: "Storybook" },
     { action: "service-start", service: "web", command: "npm run dev", cwd: ".", port: 8000, env: {}, preview: true, previews: [], timeoutMs: 30000 },
+  ]);
+});
+
+test("ensure, restart and service-start answer once each service they started is ready or failed, reading status between other actions, and a list does not wait", async () => {
+  const fact = (state: string) => ({ name: "web", state, port: 8000, declared: true, wantsPreview: true });
+  const actions: Record<string, unknown>[] = [];
+  let reads: string[] = [];
+  const guest = pylonGuest("pylon-wait" as PylonId, scratch, async ({ name: _, ...action }) => {
+    actions.push(action);
+    if (action.op === "status") return [fact(reads.shift()!)];
+    return [fact("starting")];
+  });
+  reads = ["starting", "failed"];
+  assert.deepEqual(await guest.services("ensure"), { services: [fact("failed")] });
+  reads = ["ready"];
+  assert.deepEqual(await guest.services("restart", "web"), { services: [fact("ready")] });
+  reads = ["failed"];
+  assert.deepEqual(await guest.startService("web", { command: "serve", port: 8000, preview: true }), [fact("failed")]);
+  reads = ["starting"];
+  assert.deepEqual(await guest.services("list"), { services: [fact("starting")] });
+  assert.deepEqual(actions.map((a) => [a.action, a.op ?? null, a.service ?? null]), [
+    ["services", "ensure", null], ["services", "status", null], ["services", "status", null],
+    ["services", "restart", "web"], ["services", "status", "web"],
+    ["service-start", null, "web"], ["services", "status", "web"],
+    ["services", "status", null],
   ]);
 });
 

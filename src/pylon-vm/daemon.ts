@@ -3,7 +3,7 @@ import http from "node:http";
 import { join } from "node:path";
 import { text } from "node:stream/consumers";
 import { actionSchema, bootSchema } from "./contracts.ts";
-import { NotRunning, readIntent, SandboxRuntime } from "./runtime.ts";
+import { lifecycleQueue, NotRunning, readIntent, runsBesideQueue, SandboxRuntime } from "./runtime.ts";
 import { publishIdentity, readIdentity } from "./identity.ts";
 import { agentError, readRecord } from "./storage.ts";
 
@@ -31,7 +31,7 @@ async function main(): Promise<void> {
 		await rm(pidFile, { force: true });
 		return;
 	}
-	let queue: Promise<unknown> = Promise.resolve();
+	const queue = lifecycleQueue();
 	const socket = join(dir, "control.sock");
 	const server = http.createServer((req, res) => {
 		let body = "";
@@ -72,21 +72,12 @@ async function main(): Promise<void> {
 					);
 				}
 			};
-			// Process waits and cancellation must not occupy the lifecycle queue.
-			let inspect = false;
+			let beside = false;
 			try {
-				inspect = [
-					"inspect",
-					"exec",
-					"exec-status",
-					"exec-kill",
-					"read",
-					"write-files",
-					"logs",
-				].includes(actionSchema.parse(JSON.parse(body)).action);
+				beside = runsBesideQueue(actionSchema.parse(JSON.parse(body)).action);
 			} catch {}
-			if (inspect) void handle();
-			else queue = queue.catch(() => {}).then(handle);
+			if (beside) void handle();
+			else void queue.run(handle);
 		});
 	});
 	await new Promise<void>((accept, reject) => {
@@ -106,9 +97,8 @@ async function main(): Promise<void> {
 		if (ending) return;
 		ending = true;
 		runtime.beginShutdown();
-		queue = queue
-			.catch(() => {})
-			.then(async () => {
+		void queue
+			.run(async () => {
 				await runtime.stop();
 				server.close();
 				await rm(socket, { force: true });

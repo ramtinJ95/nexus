@@ -47,6 +47,25 @@ export async function reportResume(
 	return true;
 }
 
+/** Actions that wait on a process or only read, which run beside the lifecycle queue so that they never wait behind it. */
+const besideQueue = new Set(["inspect", "exec", "exec-status", "exec-kill", "read", "write-files", "logs"]);
+export const runsBesideQueue = (action: string) => besideQueue.has(action);
+
+/**
+ * The controller's lifecycle queue. Every other action runs on it, one at a time and in order, so that none races
+ * another's changes to the VM or its services. A failed action does not stop the next.
+ */
+export function lifecycleQueue() {
+	let queue: Promise<unknown> = Promise.resolve();
+	return {
+		run<T>(work: () => Promise<T>): Promise<T> {
+			const next = queue.catch(() => {}).then(work);
+			queue = next;
+			return next;
+		},
+	};
+}
+
 /** The guest user that services and streams run as. */
 const guestUser = "user";
 /**
@@ -108,8 +127,8 @@ export class SandboxRuntime {
 	private dir: string;
 	private record: SandboxRecord;
 	private spec: BootSpec;
-	/** `running` adopts a VM that already runs instead of booting one, so a test can stop it. */
-	constructor(dir: string, record: SandboxRecord, spec: BootSpec, running?: { vm: VM; settleMs: number }) {
+	/** `running` adopts a VM that already runs, and its services, instead of booting one, so a test can drive it. */
+	constructor(dir: string, record: SandboxRecord, spec: BootSpec, running?: { vm: VM; settleMs: number; services?: GuestServices }) {
 		this.dir = dir;
 		this.record = record;
 		this.spec = spec;
@@ -117,6 +136,7 @@ export class SandboxRuntime {
 			this.vm = running.vm;
 			this.processes = new GuestProcesses(running.vm, this.stopping.signal);
 			this.settleMs = running.settleMs;
+			this.managed = running.services;
 			this.state = "running";
 		}
 	}

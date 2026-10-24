@@ -49,8 +49,13 @@ export class GuestServices {
 	private declaredNames = new Set<string>();
 	/** What each service was last started with, as envKey gives it. A stop removes it. */
 	private wanted = new Map<string, string>();
-	/** Why the last start of a service failed. Cleared by the next start that succeeds, or a stop. */
+	/** Why the last start of a service failed. Cleared by the next start, or a stop. */
 	private failures = new Map<string, string>();
+	/**
+	 * The start whose readiness is being watched, per service. A later start, a stop or a close replaces or drops it,
+	 * which ends that watch without a verdict.
+	 */
+	private watches = new Map<string, object>();
 	private vm: VM;
 	private dir: string;
 	readonly configPath: string;
@@ -348,13 +353,21 @@ export class GuestServices {
 			return `unresolved: ${(error as Error).message}`;
 		}
 	}
-	/** A failure is recorded and logged, not thrown, so one service never stops the others or the boot. */
+	/**
+	 * Launches the service and returns without waiting for it to answer: its readiness is watched in the background,
+	 * and it fails once `timeoutMs` passes without health. Every caller holds the controller's lifecycle queue, which a
+	 * health wait would hold for as long. A failure is recorded and logged, not thrown, so one service never stops the
+	 * others or the boot.
+	 */
 	private async start(
 		name: string,
 		entry: Entry,
 		timeoutMs: number,
 	): Promise<void> {
 		this.wanted.set(name, this.envKey(name, entry));
+		this.failures.delete(name);
+		const watch = {};
+		this.watches.set(name, watch);
 		try {
 			const { env, url } = this.environment(name, entry);
 			await startService(
@@ -371,22 +384,36 @@ export class GuestServices {
 				},
 				url,
 			);
-			const deadline = Date.now() + timeoutMs;
-			while (!(await this.healthy(name, entry))) {
+		} catch (error) {
+			this.watches.delete(name);
+			this.failed(name, error);
+			return;
+		}
+		void this.watch(name, entry, watch, Date.now() + timeoutMs);
+	}
+	private async watch(name: string, entry: Entry, watch: object, deadline: number): Promise<void> {
+		const current = () => this.watches.get(name) === watch;
+		try {
+			while (current() && !(await this.healthy(name, entry))) {
 				if (Date.now() >= deadline)
 					throw new Error(
 						`Service ${name} started but is not responding. Read logs, then restart or stop it`,
 					);
 				await new Promise((accept) => setTimeout(accept, 200));
 			}
-			this.failures.delete(name);
 		} catch (error) {
-			const message = error instanceof Error ? error.message : String(error);
-			this.failures.set(name, message);
-			console.log(`services: ${name} failed: ${message}`);
+			if (current()) this.failed(name, error);
+		} finally {
+			if (current()) this.watches.delete(name);
 		}
 	}
+	private failed(name: string, error: unknown): void {
+		const message = error instanceof Error ? error.message : String(error);
+		this.failures.set(name, message);
+		console.log(`services: ${name} failed: ${message}`);
+	}
 	private async stop(name: string): Promise<void> {
+		this.watches.delete(name);
 		await stopService(this.vm, name);
 		this.wanted.delete(name);
 		this.failures.delete(name);
@@ -527,6 +554,7 @@ export class GuestServices {
 		return [...this.entries.keys()];
 	}
 	async close(): Promise<void> {
+		this.watches.clear();
 		for (const entry of this.entries.values()) {
 			await entry.portal?.close();
 			entry.portal = undefined;
