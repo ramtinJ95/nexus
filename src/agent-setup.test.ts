@@ -1,12 +1,13 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
-import { join } from "node:path";
+import { mkdir, mkdtemp, readFile, realpath, symlink, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
 import {
   agentSetupManifest, formatAgentSetup, installedLayout, parseAgentSetup, type AgentSetup, type InstalledAgentSetup,
 } from "../images/pylon/agent-setup/manifest.ts";
 import { installMismatches } from "../images/pylon/agent-setup/install.ts";
-import { httpsRemote, leaveOuts, parseLeaveOut, planAgentSetup, type Capture, type LeaveOut, type MacSetup, type PluginFiles } from "./agent-setup.ts";
+import { httpsRemote, leaveOuts, parseLeaveOut, planAgentSetup, readPiSetup, type Capture, type LeaveOut, type MacSetup, type PluginFiles } from "./agent-setup.ts";
 import { pylonRecipeDir } from "./image-build.ts";
 
 const checkedIn = await readFile(join(pylonRecipeDir, agentSetupManifest), "utf8");
@@ -296,7 +297,7 @@ test("pi packages: only npm with an installed version or a local path in the dot
   assert.ok(!setup.pi.extensions.some((path) => path.endsWith("/pi-visualize-code-changes")));
   const sources = { ...mac, pi: { ...mac.pi, packages: [...mac.pi.packages, "git:github.com/me/pi-x", "npm:@me/never-installed"] } };
   assert.deepEqual(problemsOf(plan(sources)), [
-    "pi package git:github.com/me/pi-x: only npm: and local packages are captured",
+    "pi package git:github.com/me/pi-x: only npm: packages and local paths that exist are captured",
     "pi package npm:@me/never-installed: no version of @me/never-installed is installed under ~/.pi/agent/npm",
   ]);
 });
@@ -341,4 +342,36 @@ test("git remotes read as the https URL the image build fetches", () => {
   assert.equal(httpsRemote("ssh://git@github.com/ramtinJ95/dotfiles.git"), "https://github.com/ramtinJ95/dotfiles");
   assert.equal(httpsRemote("https://github.com/ramtinJ95/dotfiles.git"), "https://github.com/ramtinJ95/dotfiles");
   assert.throws(() => httpsRemote("/srv/git/dotfiles"));
+});
+
+/**
+ * A scratch home for the pi reader: a path ending in / is a directory, a { link } value a symlink, anything else a
+ * file. Its dotfiles/ directory stands in for the dotfiles repo, with every file in it committed.
+ */
+async function piCapture(files: Record<string, string | { link: string }>): Promise<Capture> {
+  const home = await realpath(await mkdtemp(join(tmpdir(), "agent-setup-home-")));
+  for (const [path, content] of Object.entries(files)) {
+    const full = join(home, path);
+    await mkdir(path.endsWith("/") ? full : dirname(full), { recursive: true });
+    if (typeof content === "object") await symlink(content.link, full);
+    else if (!path.endsWith("/")) await writeFile(full, content);
+  }
+  const tracked = Object.keys(files).filter((path) => path.startsWith("dotfiles/") && !path.endsWith("/")).map((path) => path.slice("dotfiles/".length));
+  const mac = thisMac();
+  return planAgentSetup({
+    ...mac,
+    dotfiles: { ...mac.dotfiles, root: join(home, "dotfiles"), tracked: new Set(tracked), changed: new Set() },
+    claude: { plugins: [], marketplaces: [], skills: [], skillsOff: new Set() },
+    pi: await readPiSetup(home),
+  }, leaveOuts);
+}
+const piSettings = (settings: object) => JSON.stringify(settings);
+
+test("a local pi package written with ~ is read from the home, as pi resolves it", async () => {
+  const { setup } = captured(await piCapture({
+    ".pi/agent/settings.json": piSettings({ packages: ["~/dotfiles/pkgs/viz"] }),
+    "dotfiles/pkgs/viz/package.json": JSON.stringify({ pi: { skills: ["./skills"] } }),
+    "dotfiles/pkgs/viz/skills/viz/SKILL.md": "viz",
+  }));
+  assert.deepEqual(setup.pi.packages, [{ kind: "local", path: "pkgs/viz" }]);
 });
