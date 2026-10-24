@@ -31,7 +31,7 @@ import { startProbe, type Probe } from "./probe/server.ts";
 import { connectProbe, type Job, type JobStatus, type LiveHash, type NodeName, type ProbeClient, type PylonId, type TailnetNodeId } from "./protocol.ts";
 import { envelope } from "./reconcile.ts";
 import { templateIdOf, type CheckpointId, type ImageId, type TemplateBuildInputs, type TemplateId, type TemplateManifest } from "./images.ts";
-import type { BootInputs, ProjectId } from "./project.ts";
+import type { BootInputs, Checkout, ProjectId } from "./project.ts";
 import type { Guest, VmBackend } from "./backend.ts";
 
 const execFileAsync = promisify(execFile);
@@ -49,7 +49,7 @@ interface TemplateFixture {
   stores: Record<Side, string>;
   repo: TemplateBuildInputs["repo"];
   /** The pylon booted from the template checks out this, not the template's commit. */
-  checkout: BootInputs["repo"]["checkout"];
+  checkout: Checkout;
   resources: BootInputs["resources"];
   allowedHosts: readonly string[];
   /** Leaves `run` in marker, where a guest exec as the pylon's user reads it. */
@@ -247,7 +247,7 @@ function spawn(side: Side, template: TemplateId, source: BootInputs["source"] = 
   const boot: BootInputs = {
     pylonId: pylons[side], image: fixture.image, source, resources: fixture.resources,
     network: { allowedHosts: fixture.allowedHosts, secrets: [] },
-    repo: { url: fixture.repo.url, checkout: fixture.checkout },
+    repo: { kind: "clone", url: fixture.repo.url, checkout: fixture.checkout },
     dotfiles: { repo: "https://dotfiles.invalid/common.git", ref: "main" },
   };
   return { kind: "spawn", pylonId: pylons[side], boot, live: { previews: [], overlay: [] }, liveHash: `tslice-${side}` as LiveHash };

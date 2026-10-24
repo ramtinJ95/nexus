@@ -18,6 +18,8 @@ export function pylonLive(pylon: Pick<StoredPylon, "pylonId" | "thread" | "node"
       previews: previews.map(({ service, url }) => ({ service, url })),
       logins: project.logins,
       dotfiles: pylon.boot.dotfiles,
+      repo: pylon.boot.repo,
+      secrets: pylon.boot.network.secrets,
     }),
   };
 }

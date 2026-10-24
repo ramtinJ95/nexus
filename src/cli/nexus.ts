@@ -637,7 +637,7 @@ const commands: Readonly<Record<string, Command>> = {
     args: [0, 0],
     async run(api) {
       const projects = await api("GET", "/v1/projects") as Project[];
-      return { json: projects, text: projects.length === 0 ? "No projects." : table(projects.map((p) => [p.id, `node ${p.defaultNode}`, `branch ${p.defaultBranch}`, p.repoUrl])) };
+      return { json: projects, text: projects.length === 0 ? "No projects." : table(projects.map((p) => [p.id, `node ${p.defaultNode}`, `branch ${p.defaultBranch}`, p.repoUrl ?? "scratch"])) };
     },
   },
   "project add": {

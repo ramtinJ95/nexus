@@ -10,7 +10,7 @@ const pylonId = "pylon-t1" as PylonId;
 const overlay: PylonOverlay = {
   pylonId, threadId: "t1", project: "acme" as ProjectId, node: "infra-testbench" as NodeName,
   allowedHosts: ["github.com"], previews: [{ service: "web", url: "https://infra-testbench.tail0.ts.net:10101/" }],
-  logins: ["claude"], dotfiles: { repo: "https://example.com/dotfiles.git", ref: "main" },
+  logins: ["claude"], dotfiles: { repo: "https://example.com/dotfiles.git", ref: "main" }, repo: { kind: "empty", branch: "main" }, secrets: [],
 };
 const pylonJson = renderOverlay(overlay).find((f) => f.path === pylonInfoFile)!.content;
 const fact = (name: string, wantsPreview: boolean): ServiceFact => ({ name, state: "ready", port: 3000, declared: true, wantsPreview });

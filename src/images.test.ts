@@ -4,7 +4,7 @@ import {
   chooseTemplate, garbage, imageIdOf, setupHashOf, templateIdOf, templateMaxAgeMs,
   type ArtifactId, type CheckpointId, type ImageId, type ImageRecipe, type SetupInputs, type TemplateKey, type TemplateRecord,
 } from "./images.ts";
-import type { Project, ProjectId } from "./project.ts";
+import type { ProjectId, RemoteProject } from "./project.ts";
 import type { NodeName } from "./protocol.ts";
 
 const now = 1_800_000_000_000;
@@ -34,7 +34,7 @@ test("imageIdOf refuses a recipe with two files at one path", () => {
   assert.throws(() => imageIdOf({ ...recipe, files: [...recipe.files, { path: "Dockerfile", content: "" }] }), /two files at Dockerfile/);
 });
 
-const project: Project = {
+const project: RemoteProject = {
   id: "acme-web" as ProjectId,
   repoUrl: "git@github.com:ramtin/acme-web.git",
   defaultBranch: "main",
