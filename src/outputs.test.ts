@@ -81,6 +81,34 @@ test("a diff of a clean tree is refused", async (t) => {
   assert.deepEqual(await listOutputs(guest), []);
 });
 
+test("a diff output before the first commit is against the empty tree, and applies to an empty directory", async (t) => {
+  const { guest, at } = await localGuest(t);
+  const dir = at(repo);
+  await mkdir(join(dir, "src"), { recursive: true });
+  await run("git", ["init", "-q", "--initial-branch=main", dir]);
+  await writeFile(join(dir, "README.md"), "# sketch\n");
+  await writeFile(join(dir, "src", "main.go"), "package main\n");
+  const output = await addOutput(guest, { kind: "diff", title: "First version" });
+  assert.ok(output.kind === "diff");
+  assert.equal(output.base, "4b825dc642cb6eb9a060e54bf8d69288fbee4904", "git's empty tree");
+  assert.equal((await run("git", ["-C", dir, "status", "--porcelain"])).stdout, "?? README.md\n?? src/\n", "the agent's index is unchanged");
+
+  const empty = await mkdtemp(join(tmpdir(), "nexus-apply-"));
+  t.after(() => rm(empty, { recursive: true }));
+  await run("git", ["apply", at(`${outputsDir}/${output.id}.diff`)], { cwd: empty });
+  assert.equal(await readFile(join(empty, "README.md"), "utf8"), "# sketch\n");
+  assert.equal(await readFile(join(empty, "src", "main.go"), "utf8"), "package main\n");
+  assert.deepEqual(await listOutputs(guest), [output]);
+});
+
+test("a diff of a repository with no commits and no files is refused", async (t) => {
+  const { guest, at } = await localGuest(t);
+  await mkdir(at(repo), { recursive: true });
+  await run("git", ["init", "-q", at(repo)]);
+  await assert.rejects(addOutput(guest, { kind: "diff" }), (err) => err instanceof OutputRefused && /the repository has no commits and no files/.test(err.message));
+  assert.deepEqual(await listOutputs(guest), []);
+});
+
 test("outputs list in the order they were declared", async (t) => {
   const { guest, at } = await localGuest(t);
   await mkdir(at(repo), { recursive: true });

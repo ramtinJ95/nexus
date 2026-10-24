@@ -15,11 +15,11 @@ import type { ImageContent, Message, TextContent } from "@earendil-works/pi-ai";
 import type { ConversationView, EntryRecord, InboxState, LiveState } from "@earendil-works/pi-durable";
 import type { ListeningPort, NodeSummary, OpenedSession, ThreadDetail, ThreadRow, ViewFrame } from "../control/api.ts";
 import type { Preview, Thread } from "../control/registry.ts";
-import type { Project } from "../project.ts";
+import type { Project, SecretGrant } from "../project.ts";
 import type { ActualState } from "../reconcile.ts";
 import { call, CliError, exitCodes, follow, type Endpoint, type HostPort } from "./transport.ts";
 
-const version = "0.5.0";
+const version = "0.6.0";
 const defaults = { url: "http://rj-firebat.tailc817d3.ts.net:7470", socks: "localhost:1055" };
 const configFile = () => join(homedir(), ".config", "nexus", "cli.json");
 
@@ -40,8 +40,8 @@ const usage = `nexus ${version}, the Nexus control plane from this Mac
   nexus abort|retry|retry-pylon|wake <thread>
   nexus archive|unarchive|delete <thread>
   nexus projects
-  nexus project add <id> <repo-url> --node N [--branch B] [--cpus n] [--memory GiB] [--disk GiB]
-                    [--allow-host HOST]... [--login claude|chatgpt]...
+  nexus project add <id> (<repo-url> | --scratch) --node N [--branch B] [--cpus n] [--memory GiB] [--disk GiB]
+                    [--allow-host HOST]... [--login claude|chatgpt]... [--secret NAME:HOST[,HOST]...]...
   nexus nodes
   nexus --version
 
@@ -77,6 +77,20 @@ const str = (v: Values, key: string) => v[key] as string | undefined;
 /** A flag given any number of times. */
 const strs = (v: Values, key: string) => (v[key] as string[] | undefined) ?? [];
 const thread = (id: string) => `/v1/threads/${encodeURIComponent(id)}`;
+
+const hostname = /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)+$/;
+/**
+ * `NAME:HOST[,HOST...]`, such as GH_TOKEN:api.github.com,github.com. A value pasted by mistake, as in NAME=value,
+ * fails the name or host check, so it never reaches the API, and the error does not repeat it.
+ */
+function secretGrantOf(flag: string): SecretGrant {
+  const m = /^([A-Z_][A-Z0-9_]*):(.+)$/.exec(flag);
+  const hosts = m === null ? [] : m[2]!.split(",");
+  if (m === null || !hosts.every((host) => hostname.test(host))) {
+    throw new CliError("invalid", "--secret takes NAME:HOST[,HOST...], an upper-case name and lower-case hostnames, such as GH_TOKEN:api.github.com,github.com. The value stays in each node's secret file");
+  }
+  return { name: m[1]!, hosts };
+}
 
 function int(value: string | undefined, flag: string, fallback: number): number {
   if (value === undefined) return fallback;
@@ -584,24 +598,29 @@ const commands: Readonly<Record<string, Command>> = {
     args: [0, 0],
     async run(api) {
       const projects = await api("GET", "/v1/projects") as Project[];
-      return { json: projects, text: projects.length === 0 ? "No projects." : table(projects.map((p) => [p.id, `node ${p.defaultNode}`, `branch ${p.defaultBranch}`, p.repoUrl])) };
+      return { json: projects, text: projects.length === 0 ? "No projects." : table(projects.map((p) => [p.id, `node ${p.defaultNode}`, `branch ${p.defaultBranch}`, p.repoUrl ?? "scratch"])) };
     },
   },
   "project add": {
-    args: [2, 2],
+    args: [1, 2],
     options: {
       node: { type: "string" }, branch: { type: "string" }, cpus: { type: "string" }, memory: { type: "string" }, disk: { type: "string" },
-      "allow-host": { type: "string", multiple: true }, login: { type: "string", multiple: true },
+      "allow-host": { type: "string", multiple: true }, login: { type: "string", multiple: true }, secret: { type: "string", multiple: true },
+      scratch: { type: "boolean" },
     },
-    async run(api, [id, repoUrl], v) {
+    async run(api, [id, url], v) {
+      // A project cannot be changed or removed, so a forgotten URL must not quietly make a scratch project.
+      if ((url === undefined) === (v.scratch !== true)) throw new CliError("invalid", "project add takes a <repo-url> or --scratch, and not both");
+      const repoUrl = url ?? null;
       const resources = { cpus: int(str(v, "cpus"), "--cpus", 2), memoryGiB: int(str(v, "memory"), "--memory", 4), diskGiB: int(str(v, "disk"), "--disk", 10) };
+      const secrets = strs(v, "secret").map(secretGrantOf);
       const node = str(v, "node");
       if (node === undefined) throw new CliError("invalid", "project add needs --node. Run nexus nodes to list them");
       const p = await api("POST", "/v1/projects", {
         id, repoUrl, defaultBranch: str(v, "branch") ?? "main", defaultNode: node, resources,
-        allowedHosts: strs(v, "allow-host"), secrets: [], logins: strs(v, "login"), preSetup: null,
+        allowedHosts: strs(v, "allow-host"), secrets, logins: strs(v, "login"), preSetup: null,
       }) as Project;
-      return { json: p, text: `Added project ${p.id} (${p.repoUrl}) on ${p.defaultNode}` };
+      return { json: p, text: p.repoUrl === null ? `Added scratch project ${p.id} on ${p.defaultNode}` : `Added project ${p.id} (${p.repoUrl}) on ${p.defaultNode}` };
     },
   },
   nodes: {

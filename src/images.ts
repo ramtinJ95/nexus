@@ -7,7 +7,7 @@
  */
 import { createHash } from "node:crypto";
 import { z } from "zod";
-import { effectiveAllowedHosts, type BootInputs, type Project, type ProjectId, type ServicesFile } from "./project.ts";
+import { effectiveAllowedHosts, type Checkout, type Project, type ProjectId, type RemoteProject, type ServicesFile } from "./project.ts";
 import type { NodeName } from "./protocol.ts";
 
 /** img-<sha256 of the recipe>[:12]. The same inputs give the same ID, so a rebuild of unchanged inputs is a no-op. */
@@ -151,7 +151,7 @@ export interface SetupInputs {
 }
 export interface ProjectMirror {
   /** git fetch, then read blobs at the resolved commit. */
-  setupInputs(project: Project, ref: string): Promise<SetupInputs>;
+  setupInputs(project: RemoteProject, ref: string): Promise<SetupInputs>;
 }
 
 /** sha256 of setupBlob, project.preSetup and effectiveAllowedHosts(project), since the hosts setup can reach change what it can install. */
@@ -216,7 +216,7 @@ export type TemplateChoice =
  *   the commit setupInputs resolved for the thread that asked, under a new ID minted from `now`.
  * reuse and wait return the ID of the record they found.
  */
-export function chooseTemplate(project: Project, key: TemplateKey, checkout: BootInputs["repo"]["checkout"], templates: readonly TemplateRecord[], targetNode: NodeName, now: number): TemplateChoice {
+export function chooseTemplate(project: RemoteProject, key: TemplateKey, checkout: Checkout, templates: readonly TemplateRecord[], targetNode: NodeName, now: number): TemplateChoice {
   const records = templates.filter((t) => t.key.project === key.project && t.key.image === key.image && t.key.setupHash === key.setupHash);
   const reusable = records
     .filter((t): t is ReadyTemplate => t.state === "ready" && now - t.builtAt < templateMaxAgeMs)

@@ -287,7 +287,8 @@ function updateStartHint() {
   const hint = document.getElementById("start-hint");
   const tag = (name, text) => Object.assign(document.createElement(name), { textContent: text });
   const image = hint.dataset.image;
-  hint.replaceChildren("Boots a pylon on ", tag("b", node), ...(image === "" ? [] : [" from image ", tag("code", image)]), " and checks out ", tag("code", branch), ".");
+  const repo = project.dataset.scratch === undefined ? " and checks out " : " and starts an empty repository on ";
+  hint.replaceChildren("Boots a pylon on ", tag("b", node), ...(image === "" ? [] : [" from image ", tag("code", image)]), repo, tag("code", branch), ".");
 }
 
 const projectRadios = () => [...document.querySelectorAll("#start input[name=project]")];
@@ -382,8 +383,21 @@ projectDialog?.addEventListener("close", () => {
   if (location.pathname === "/projects/new") history.replaceState(null, "", "/");
 });
 
-// The project `nexus project add` sends without flags: the dialog's fields and the resources the form names. Once
-// added, the start dialog opens on it, as the dashboard's next step for a project is its first thread.
+/** A scratch project has no URL to ask for, and its branch is the empty repository's first. */
+function syncRepoKind(form) {
+  const scratch = form.elements.repoKind.value === "scratch";
+  const url = form.elements.repoUrl;
+  url.disabled = scratch;
+  url.hidden = scratch;
+  form.querySelector("label[for=project-repo]").hidden = scratch;
+  form.querySelector("label[for=project-branch]").textContent = scratch ? "Initial branch" : "Branch";
+}
+document.addEventListener("change", (event) => {
+  if (event.target instanceof HTMLInputElement && event.target.name === "repoKind" && event.target.form?.matches("#project")) syncRepoKind(event.target.form);
+});
+
+// The project `nexus project add` sends: the dialog's fields, the resources the form names, and the GitHub grant
+// when asked for. Once added, the start dialog opens on it, as the dashboard's next step for a project is its first thread.
 let adding = false;
 document.addEventListener("submit", async (event) => {
   // Not event.target.id: a form's field named "id" shadows its id.
@@ -397,10 +411,12 @@ document.addEventListener("submit", async (event) => {
   submit.disabled = true;
   try {
     const project = await api("POST", "/v1/projects", {
-      id: field("id"), repoUrl: field("repoUrl"), defaultBranch: field("defaultBranch"), defaultNode: field("defaultNode"),
-      resources: JSON.parse(form.dataset.resources), allowedHosts: [], secrets: [], logins: [], preSetup: null,
+      id: field("id"), repoUrl: form.elements.repoKind.value === "scratch" ? null : field("repoUrl"), defaultBranch: field("defaultBranch"), defaultNode: field("defaultNode"),
+      resources: JSON.parse(form.dataset.resources), allowedHosts: [], secrets: form.elements.github.checked ? [JSON.parse(form.dataset.githubGrant)] : [],
+      logins: [], preSetup: null,
     });
     form.reset();
+    syncRepoKind(form);
     showError("project-error", null);
     projectDialog.close();
     await openStart(project.id);

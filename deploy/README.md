@@ -2,6 +2,8 @@
 
 Each node runs a probe, which runs the pylon VMs. One machine, `rj-firebat`, also runs the control plane: the registry, the reconcile loop, the agent harness and the API. Both install from a checkout of this repository, as root, and both scripts are safe to rerun.
 
+Upgrade the control plane before the probes. A probe refuses a spawn from a control plane older than itself and says the control plane needs upgrading, while an older probe still runs projects that clone a repository for an upgraded control plane. A probe from before scratch projects cannot start one, so create scratch projects only after every probe is upgraded.
+
 ## Install or upgrade a probe
 
 1. Copy a checkout to the node and run `sudo deploy/install-probe.sh` from it.
@@ -21,6 +23,17 @@ The probe runs as the system user `nexus`. These are its paths:
 | `/opt/nexus/current` | The release the probe runs. |
 | `/usr/local/bin/nexus-attach` | Attaches a terminal to a pylon's Herdr session. See [Attach from a Mac](#attach-from-a-mac). |
 | `/etc/sudoers.d/nexus-attach` | Lets the group `nexus-attach` run `nexus-attach` as `nexus`. |
+
+### GitHub access for a project's agents
+
+A project that grants `GH_TOKEN` to `api.github.com` and `github.com`, as `nexus project add --secret GH_TOKEN:api.github.com,github.com` and the dashboard's GitHub access do, lets its agents create GitHub repositories with `gh` and push to them over HTTPS. This is how a scratch project's work is kept. Add the token to `/etc/nexus/secrets.env` on every node that runs the project's threads, and restart the probe:
+
+```sh
+echo 'GH_TOKEN=github_pat_...' | sudo tee -a /etc/nexus/secrets.env
+sudo systemctl restart nexus-probe
+```
+
+Use a fine-grained personal access token whose repository access is all repositories, because the repositories it pushes to do not exist yet, with two repository permissions: Administration read and write, to create repositories, and Contents read and write, to push. The token never enters a pylon. The pylon's `GH_TOKEN` is a placeholder that Gondolin swaps for the value only in requests to the granted hosts. A pylon whose project grants `GH_TOKEN` fails to boot with `secret-missing` on a node that lacks it. The pylon image ships `gh` as git's credential helper for github.com.
 
 ### Previews need the probe to be the tailscale operator
 

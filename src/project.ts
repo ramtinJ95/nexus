@@ -170,7 +170,13 @@ const servicesFileSchema = z.strictObject({ services: z.record(serviceName, serv
 
 export interface Project {
   id: ProjectId;
-  repoUrl: string; // SSH or HTTPS. Git over SSH is terminated on the host, and the key never enters a pylon
+  /**
+   * SSH or HTTPS, or null for a scratch project: its pylons start from `git init` on defaultBranch, nothing is
+   * fetched, and nothing is kept once the thread is deleted unless the agent pushed it somewhere. Git over SSH is
+   * terminated on the host, and the key never enters a pylon.
+   */
+  repoUrl: string | null;
+  /** The branch threads check out, or the first branch of a scratch project's empty repository. */
   defaultBranch: string;
   defaultNode: NodeName;
   resources: { cpus: number; memoryGiB: number; diskGiB: number };
@@ -180,8 +186,13 @@ export interface Project {
   /** A script stored in Nexus, not the repo. It runs as user before .nexus/setup, so a project can be set up without a commit. */
   preSetup: string | null;
 }
+/** Templates mirror a remote, so they take a project that has one. */
+export type RemoteProject = Project & { repoUrl: string };
+export const hasRemote = (project: Project): project is RemoteProject => project.repoUrl !== null;
 /** A secret is a name plus the hosts it may be sent to. The value lives in each node's secret file. */
 export interface SecretGrant { name: string; hosts: readonly string[] }
+/** The grant `gh`, and git through gh's credential helper, need to create GitHub repositories and push to them. */
+export const githubTokenGrant: SecretGrant = { name: "GH_TOKEN", hosts: ["api.github.com", "github.com"] };
 export type LoginKind = "claude" | "chatgpt";
 
 /**
@@ -198,13 +209,14 @@ export const loginHosts: { readonly [K in LoginKind]: readonly string[] } = {
  * project.allowedHosts, plus the host of an HTTPS repoUrl, plus loginHosts for project.logins, plus every
  * SecretGrant host, sorted and deduped. Setup clones the repo through the allowlist, so a project always
  * reaches its own HTTPS host. An SSH repoUrl adds nothing: SSH egress reaches only the pylon's own remotes.
+ * A scratch project adds nothing either.
  */
 export function effectiveAllowedHosts(project: Project): readonly string[] {
   return withHttpsHosts([
     ...project.allowedHosts,
     ...project.logins.flatMap((login) => loginHosts[login]),
     ...project.secrets.flatMap((grant) => grant.hosts),
-  ], [project.repoUrl]);
+  ], project.repoUrl === null ? [] : [project.repoUrl]);
 }
 
 /** A repo or dotfiles URL as Nexus accepts it, so withHttpsHosts can read the host of any HTTPS one. */
@@ -221,7 +233,17 @@ export function withHttpsHosts(hosts: readonly string[], urls: readonly string[]
 export type PylonSource =
   | { kind: "template"; template: TemplateId }
   | { kind: "resume"; checkpoint: CheckpointId } // the pylon's own disk on this node
-  | { kind: "fresh"; preSetup: Project["preSetup"] }; // image only: clone, preSetup and .nexus/setup inline. Used when no template exists
+  | { kind: "fresh"; preSetup: Project["preSetup"] }; // image only: clone or init, preSetup and .nexus/setup inline. Used when no template exists
+
+export interface Checkout { branch: string; commit: string }
+/**
+ * What a fresh or template boot puts at /home/user/workspace/repo, decided once when the thread starts. An empty
+ * repository has a branch and no commit, so "check out a commit of a repo that has none" cannot be written down.
+ */
+export type RepoInit =
+  | { kind: "clone"; url: string; checkout: Checkout }
+  | { kind: "empty"; branch: string };
+export type CloneRepo = Extract<RepoInit, { kind: "clone" }>;
 
 /** Applied only when the VM boots. Changing these on a running pylon takes effect at its next wake. */
 export interface BootInputs {
@@ -230,7 +252,7 @@ export interface BootInputs {
   source: PylonSource;
   resources: Project["resources"];
   network: { allowedHosts: readonly string[]; secrets: readonly SecretGrant[] };
-  repo: { url: string; checkout: { branch: string; commit: string } }; // checked out on template and fresh boots only
+  repo: RepoInit; // set up on template and fresh boots only
   dotfiles: PylonOverlay["dotfiles"]; // pulled on every boot
 }
 
@@ -263,14 +285,19 @@ export interface PylonOverlay {
   logins: readonly LoginKind[];
   /** The common dotfiles layer. Every boot pulls it before relaunching sessions. The image bakes a fallback copy. */
   dotfiles: { repo: string; ref: string };
+  /** The pylon's frozen BootInputs.repo, so the guide describes this checkout. */
+  repo: RepoInit;
+  /** Names and hosts, never values, so the guide can say what each token is for. From BootInputs.network.secrets. */
+  secrets: readonly SecretGrant[];
 }
 
 /**
  * Renders three files:
  * - /etc/profile.d/nexus.sh: NEXUS_PYLON=1, NEXUS_PYLON_ID, NEXUS_THREAD_ID, NEXUS_PROJECT, NEXUS_NODE, NEXUS_API.
  * - /home/user/.nexus/pylon.json: the same facts for `nexus info --json`.
- * - /home/user/.nexus/PYLON.md: prose for the agent. It is in a pylon, which hosts it can reach and that
- *   everything else is blocked, its preview URLs, that work survives sleep only on disk, how to declare
+ * - /home/user/.nexus/PYLON.md: prose for the agent. It is in a pylon, where its repository came from and how to
+ *   commit and publish from it, which hosts it can reach and that everything else is blocked, the names and hosts
+ *   of its secrets, its preview URLs, that work survives sleep only on disk, how to declare
  *   outputs, and that logins use the device-code flow (S5: the browser callback listens inside the guest).
  *   The image imports this file from ~/.claude/CLAUDE.md and links it as ~/.pi/agent/AGENTS.md, so the
  *   overlay never edits dotfiles.
@@ -315,6 +342,12 @@ function pylonGuide(o: PylonOverlay): string {
   const logins = o.logins.length === 0
     ? "This project has no interactive logins.\n"
     : `This project allows these logins: ${o.logins.join(", ")}. Sign in with the device-code flow, which shows a code to enter in a browser on another device. A browser-callback login fails, because its callback listens inside this pylon, where that browser cannot reach it.\n`;
+  const secrets = o.secrets.length === 0 ? "" : `## Secrets
+
+Login shells have these variables. Each holds a placeholder that is swapped for the real value only in requests to the hosts listed, and the placeholder changes on every boot, so never write one into a file, a git config or a remote URL.
+
+${list(o.secrets.map((grant) => `${grant.name}: ${grant.hosts.join(", ")}`))}
+`;
   return `# You are in a Nexus pylon
 
 This machine is a pylon, a microVM that Nexus runs for one thread. You run as \`user\`, who has passwordless sudo.
@@ -326,12 +359,13 @@ This machine is a pylon, a microVM that Nexus runs for one thread. You run as \`
 
 \`nexus info --json\` prints these facts, and /home/user/.nexus/pylon.json holds them.
 
+${repositorySection(o)}
 ## Network
 
 Only these hosts are reachable. Every other host is blocked, so an HTTP request to it gets \`403 blocked by policy\`. Ask the human to add a host to the project if you need one.
 
 ${list(o.allowedHosts)}
-## Previews
+${secrets}## Previews
 
 ${previews}
 ## Sleep
@@ -362,6 +396,40 @@ nexus preview 6006 --title Storybook       # publish a port that is already list
 nexus unpreview 6006                       # stop publishing it
 \`\`\`
 `;
+}
+
+/** Where the checkout came from, how to set a git author, which no pylon has, and how to publish with a GitHub grant. */
+function repositorySection(o: PylonOverlay): string {
+  const github = o.secrets.some((grant) => grant.name === githubTokenGrant.name);
+  const author = github
+    ? `Git has no author here. Commit as the GitHub account that owns GH_TOKEN:
+
+\`\`\`sh
+git config --global user.name "$(gh api user --jq .login)"
+git config --global user.email "$(gh api user --jq '"\\(.id)+\\(.login)@users.noreply.github.com"')"
+\`\`\``
+    : "Git has no author here. Before your first commit, ask the human which name and email to commit as, and set them with `git config --global user.name` and `git config --global user.email`.";
+  const token = "`gh` reads GH_TOKEN, and git over HTTPS asks `gh` for it on each push, so never store the token: no `gh auth login`, no credential store. Use HTTPS remotes, because git over SSH reaches only the remotes this pylon booted with.";
+  let origin: string;
+  let publish: string[];
+  switch (o.repo.kind) {
+    case "clone":
+      origin = `/home/user/workspace/repo is a clone of ${o.repo.url}, on branch ${o.repo.checkout.branch} from ${o.repo.checkout.commit}.`;
+      publish = github ? [token] : [];
+      break;
+    case "empty":
+      origin = `/home/user/workspace/repo is a new repository on branch ${o.repo.branch} with no commits and no remote. Nothing in this pylon is kept when the thread is deleted, so publish anything worth keeping.`;
+      publish = github ? [`${token} To publish this repository:
+
+\`\`\`sh
+git add -A && git commit -m "feat: first version"
+gh repo create <owner>/<name> --private --source . --remote origin --push
+git push                                   # every later push
+\`\`\``]
+        : [`This project has no GitHub token, and a project's secrets are fixed when it is created. To publish from a pylon, ask the human for a project with GitHub access: \`nexus project add <id> --scratch --secret ${githubTokenGrant.name}:${githubTokenGrant.hosts.join(",")}\`.`];
+      break;
+  }
+  return `## Repository\n\n${[origin, author, ...publish].join("\n\n")}\n`;
 }
 
 // In-pylon commands. The `nexus` CLI in the image calls the probe at NEXUS_API.
