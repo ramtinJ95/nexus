@@ -7,9 +7,9 @@
  */
 import { execFile } from "node:child_process";
 import { existsSync } from "node:fs";
-import { cp, mkdir, mkdtemp, readdir, readFile, rm } from "node:fs/promises";
+import { cp, mkdir, mkdtemp, readdir, readFile, rm, stat } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, relative, resolve } from "node:path";
 import { promisify } from "node:util";
 import { basename, installedLayout, parseAgentSetup, type AgentSetup, type Commit, type Harness, type InstalledAgentSetup } from "./manifest.ts";
 
@@ -102,7 +102,7 @@ async function observe(): Promise<InstalledAgentSetup> {
     claudeSkills: await skillNames(skillDirs.claude),
     piSkills: await skillNames(skillDirs.pi),
     piExtensions: existsSync(piExtensions) ? (await readdir(piExtensions)).sort() : [],
-    piPackages: await Promise.all((settings.packages ?? []).map(installedPackage)),
+    piPackages: await Promise.all((settings.packages ?? []).map((entry) => installedPackage(entry))),
   };
 }
 
@@ -112,13 +112,51 @@ async function skillNames(dir: string): Promise<string[]> {
   return (await readdir(dir)).map((name) => (existsSync(join(dir, name, "SKILL.md")) ? name : `${name} (no SKILL.md)`)).sort();
 }
 
-/** A settings entry as written, unless it pins an npm version other than the one installed. */
-async function installedPackage(entry: string): Promise<string> {
-  const npm = /^npm:(@?[^@]+)@(.+)$/.exec(entry);
-  if (npm === null) return entry;
-  const packageJson = join(piAgent, "npm", "node_modules", npm[1]!, "package.json");
-  const installed = existsSync(packageJson) ? (JSON.parse(await readFile(packageJson, "utf8")) as { version: string }).version : "nothing";
-  return installed === npm[2] ? entry : `${entry} (installed ${installed})`;
+/**
+ * A settings entry as written, unless what it names is not all there: an npm package pinned at a version other than
+ * the one installed, or a local package with something missing (localPackageGaps). pi skips both without a word.
+ */
+export async function installedPackage(entry: string, agentDir = piAgent): Promise<string> {
+  if (/^[a-z+]+:/.test(entry)) {
+    const npm = /^npm:(@?[^@]+)@(.+)$/.exec(entry);
+    if (npm === null) return entry;
+    const packageJson = join(agentDir, "npm", "node_modules", npm[1]!, "package.json");
+    const installed = existsSync(packageJson) ? (JSON.parse(await readFile(packageJson, "utf8")) as { version: string }).version : "nothing";
+    return installed === npm[2] ? entry : `${entry} (installed ${installed})`;
+  }
+  const gaps = await localPackageGaps(resolve(agentDir, entry.replace(/^~(?=\/|$)/, home)));
+  return gaps.length === 0 ? entry : `${entry} (missing ${gaps.join(", ")})`;
+}
+
+const piResourceTypes = ["extensions", "skills", "prompts", "themes"] as const;
+
+/**
+ * What the local package at `dir` lacks: the directory, a path its package.json `pi` field declares (or, with no `pi`
+ * field, an index.ts or index.js when it has none of pi's conventional resource directories), or the SKILL.md of a
+ * directory under a skills path, which the image's skill directories need too.
+ */
+async function localPackageGaps(dir: string): Promise<string[]> {
+  if (!existsSync(dir)) return ["its directory"];
+  const pi = await readFile(join(dir, "package.json"), "utf8")
+    .then((text) => (JSON.parse(text) as { pi?: Partial<Record<string, unknown>> }).pi)
+    .catch(() => undefined);
+  const declared = piResourceTypes.flatMap((type) => {
+    const entries = pi === undefined ? (existsSync(join(dir, type)) ? [type] : []) : pi[type];
+    const paths = Array.isArray(entries) ? entries.filter((e): e is string => typeof e === "string" && !/^[-+!]|[*?]/.test(e)) : [];
+    return paths.map((path) => ({ type, path: resolve(dir, path) }));
+  });
+  if (declared.length === 0 && pi === undefined) return existsSync(join(dir, "index.ts")) || existsSync(join(dir, "index.js")) ? [] : ["index.ts"];
+  const gaps: string[] = [];
+  for (const { type, path } of declared) {
+    if (!existsSync(path)) gaps.push(relative(dir, path));
+    else if (type === "skills" && (await stat(path)).isDirectory() && !existsSync(join(path, "SKILL.md"))) {
+      for (const skill of await readdir(path, { withFileTypes: true })) {
+        const skillMd = join(path, skill.name, "SKILL.md");
+        if (skill.isDirectory() && !skill.name.startsWith(".") && !existsSync(skillMd)) gaps.push(relative(dir, skillMd));
+      }
+    }
+  }
+  return gaps;
 }
 
 /**

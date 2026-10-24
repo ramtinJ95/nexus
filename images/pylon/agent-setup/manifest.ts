@@ -152,7 +152,7 @@ export interface InstalledAgentSetup {
   piSkills: readonly string[];
   /** Entries under ~/.pi/agent/extensions, Herdr's herdr-agent-state.ts included, sorted. */
   piExtensions: readonly string[];
-  /** ~/.pi/agent/settings.json `packages` as pi install writes them, in order, each npm one at its installed version. */
+  /** ~/.pi/agent/settings.json `packages` as pi install writes them, in order, each npm one at its installed version and each local one with all it declares. */
   piPackages: readonly string[];
 }
 
