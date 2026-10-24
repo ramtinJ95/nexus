@@ -26,9 +26,11 @@ One setting sits beside the records: `current`, the image every new pylon uses. 
 - A pylon `id` is `pylon-<thread id>`, at most 40 characters.
 - `Node.tailnetNodeId` is Tailscale's stable node ID. Probes compare callers against it.
 - `Node.state` is `online` or `offline`. A node that is asleep or powered off is `offline`. That is not an error.
-- `Project.secrets` holds names and the hosts each value may be sent to. The values live only in each node's secret file.
+- `Project.repoUrl` is an SSH or HTTPS git URL, or null for a scratch project. A scratch project's pylons start from `git init` on the branch, fetch nothing, and keep nothing once the thread is deleted, so their agents publish what is worth keeping. A scratch project never has a template.
+- A pylon's repository is fixed when its thread starts: a clone of `repoUrl` at the branch, or at `start --commit`, or an empty repository on the branch. Its boot records which, so a pylon keeps the repository it started with.
+- `Project.secrets` holds names and the hosts each value may be sent to. The values live only in each node's secret file. A `GH_TOKEN` granted to `api.github.com` and `github.com`, which the dashboard's GitHub access sets, lets the project's agents create GitHub repositories with `gh` and push to them over HTTPS.
 - `Project.logins` is a list of `claude` and `chatgpt`. Each adds the hosts its login needs to the allowlist.
-- The allowlist also holds the host of an HTTPS `repoUrl`, so setup can clone the repo. A pylon's allowlist adds the host of an HTTPS dotfiles repo, which every boot pulls. SSH remotes need no entry, because SSH reaches only the pylon's own remotes.
+- The allowlist also holds the host of an HTTPS `repoUrl`, so setup can clone the repo, and every host a secret is granted to. A pylon's allowlist adds the host of an HTTPS dotfiles repo, which every boot pulls. SSH remotes need no entry, because SSH reaches only the pylon's own remotes: its repo's and its dotfiles'. A repository created inside a pylon is never one of them, so it is pushed over HTTPS.
 - `Template.key` is the project, the image, and a hash of `.nexus/setup`, `preSetup` and the allowlist. A template is reused for at most 72 hours.
 - `Template.state` is `building`, `ready`, or `failed`.
 - `Session.harness` is `claude-code`, `pi`, or `shell`.
@@ -38,7 +40,7 @@ One setting sits beside the records: `current`, the image every new pylon uses. 
 - A preview's URL is `https://<node tailnet name>:<httpsPort>/`. The API reports it as the preview's `url`, so clients never build it.
 - A preview's service is a declared or ad hoc service, or `port-<port>` for a port linked with `nexus preview`, from inside the pylon or from the Mac. A linked port stays linked across pauses until `nexus unpreview` unlinks it, from inside the pylon or from the Mac, and its preview lasts as long. A declared or ad hoc service's preview lasts for the thread's life.
 - A thread's listening ports are not a record. Each running pylon's observation carries them, and the API joins each with the service that owns its port and that service's preview.
-- `Output.kind` is `branch`, `diff`, `preview`, or `file`.
+- `Output.kind` is `branch`, `diff`, `preview`, or `file`. A declared diff output's base is HEAD's commit, or the empty tree before the repository's first commit.
 
 ## Pylon states
 
