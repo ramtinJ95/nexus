@@ -67,6 +67,21 @@ test("a Claude Code session never prompted has no transcript, so it starts fresh
   assert.deepEqual(guest.execs.find((a) => a[3] === "agent")!.slice(-2), ["--session-id", "d778fc1b"]);
 });
 
+test("a fresh Claude Code session starts under an ID of its own, and a fresh pi or resumed session gets no extra arguments", async () => {
+  const claude = herdrUp();
+  await openSession(claude, { harness: "claude-code", title: "review", cwd: "/home/user" });
+  const start = claude.execs.find((a) => a[3] === "agent")!;
+  assert.deepEqual(start.slice(-3, -1), ["--", "--session-id"]);
+  assert.match(start.at(-1)!, /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
+  const again = herdrUp();
+  await openSession(again, { harness: "claude-code", title: "review", cwd: "/home/user" });
+  assert.notEqual(again.execs.find((a) => a[3] === "agent")!.at(-1), start.at(-1), "each start names a new ID");
+
+  const pi = herdrUp();
+  await openSession(pi, { harness: "pi", title: "plan", cwd: "/home/user" });
+  assert.deepEqual(pi.execs.find((a) => a[3] === "agent")!.slice(6), ["--kind", "pi", "--pane", "w1:p1", "--timeout", "30000"]);
+});
+
 test("a harness that fails to start rolls its workspace back, and the failure shows the pane's screen", async () => {
   const guest = herdrUp({
     "agent start": () => herdrError("timeout", "timed out waiting for agent"),
@@ -163,6 +178,41 @@ test("recording writes every open session to the sessions file", async () => {
     { herdrPane: "w2:p1", harness: "pi", title: "plan", cwd: "/home/user/app", harnessSessionId: "/home/user/.pi/agent/sessions/s.jsonl" },
     { herdrPane: "w3:p1", harness: "shell", title: "sh", cwd: "/home/user/workspace/repo", harnessSessionId: null },
   ]);
+});
+
+test("a Claude Code pane Herdr has no ID for, such as one logged in after its start, is recorded under the ID it was started with", async () => {
+  const snapshot = herdrSnapshot(
+    [{ id: "w1", label: "login" }, { id: "w2", label: "resumed" }, { id: "w3", label: "by hand" }, { id: "w4", label: "gone" }],
+    [
+      herdrPane("w1:p1", "w1", "claude", "blocked"),
+      herdrPane("w2:p1", "w2", "claude", "idle"),
+      herdrPane("w3:p1", "w3", "claude", "idle"),
+      herdrPane("w4:p1", "w4", "claude", "idle"),
+    ],
+  );
+  const guest = herdrUp({
+    "api snapshot": () => herdrOk(snapshot),
+    "pane process-info": (argv) => argv[3] === "w4:p1" ? herdrError("pane_not_found") : processInfo({
+      "w1:p1": ["claude", "--session-id", "0b5e3a52-5d0f-4c1e-9a43-1f2a6c7d8e90"],
+      // An npm install runs Claude Code's script under node.
+      "w2:p1": ["node", "/usr/local/bin/claude", "--resume", "bd2c2d6b"],
+      "w3:p1": ["claude"],
+    })(argv),
+  });
+  const records = await recordSessions(guest);
+  assert.deepEqual(records!.map((r) => [r.title, r.harnessSessionId]), [
+    ["login", "0b5e3a52-5d0f-4c1e-9a43-1f2a6c7d8e90"],
+    ["resumed", "bd2c2d6b"],
+    ["by hand", null],
+    ["gone", null],
+  ]);
+});
+
+test("Herdr's own report of a Claude Code session wins over its command line, which a /clear outdates", async () => {
+  const snapshot = herdrSnapshot([{ id: "w1", label: "review" }], [herdrPane("w1:p1", "w1", "claude", "idle", { kind: "id", value: "after-clear" })]);
+  const guest = herdrUp({ "api snapshot": () => herdrOk(snapshot) });
+  assert.deepEqual((await recordSessions(guest))!.map((r) => r.harnessSessionId), ["after-clear"]);
+  assert.ok(!guest.herdrCalls().includes("pane process-info"), "a reported ID needs no command line");
 });
 
 test("recording with no Herdr server leaves the last sessions file in place", async () => {
