@@ -32,22 +32,21 @@ Preconditions:
 - **Herdr side effect.** Run `$V pylon sessions-herdr $T -- herdr --session nexus workspace list`. Its JSON reply lists a workspace whose `label` is `sessions: sh`.
 - **Attach resolution, environment.** Run `NEXUS_ATTACH='printf "%s %s %s %s\n" "$NEXUS_THREAD" "$NEXUS_PYLON" "$NEXUS_NODE" "$NEXUS_NODE_HOST"' $V cli sessions-attach-env -- attach $T`. Exit 0, and stdout is `<T> pylon-<T> verify-node 127.0.0.1`. This proves that `attach` found the running pylon, its node and the node's `tailnetHost`, and handed them to the attach command. It does not prove ssh, `nexus-attach` or a terminal.
 - **Attach resolution, Herdr.** Run `NEXUS_ATTACH='docker exec $NEXUS_PYLON herdr --session nexus workspace list' $V cli sessions-attach-resolve -- attach $T`. Exit 0, and stdout is Herdr's JSON reply listing the workspace `sessions: sh`. This proves the resolved names reach the pylon's container and its Herdr session, without a pty. The interactive form is `NEXUS_ATTACH='docker exec -it $NEXUS_PYLON herdr --session nexus' nexus attach $T`, which the next step drives.
-- **Attach with a pty.** This step is optional, because it needs `script` to give the command a pseudo-terminal. Run it in one shell:
+- **Attach with a pty.** This step is optional. Herdr refuses a terminal of zero size (`herdr: cannot attach without a usable terminal: terminal reported a zero-sized grid`), so a tool shell's background `script` with stdin from `/dev/null` does not work. Run the attach in a terminal you can type into and that has a size, such as a Herdr or tmux pane, with stdin left alone:
 
   ```sh
+  stty rows 24 cols 100
   E=$($V evidence)
-  NEXUS_ATTACH='docker exec -it $NEXUS_PYLON herdr --session nexus' NEXUS_URL=http://127.0.0.1:7470 NEXUS_SOCKS=none \
-    script -q "$E/sessions-attach-pty.typescript" node src/cli/nexus.ts attach $T </dev/null & ATTACH=$!
-  sleep 5
-  $V pylon sessions-attached $T -- pgrep -c -x -f 'herdr --session nexus'
-  kill $ATTACH; sleep 2
-  $V pylon sessions-detached $T -- pgrep -c -x -f 'herdr --session nexus'
+  echo $$ > "$E/sessions-attach-pty.pid"
+  export NEXUS_ATTACH='docker exec -it $NEXUS_PYLON herdr --session nexus' NEXUS_URL=http://127.0.0.1:7470 NEXUS_SOCKS=none
+  exec script -q "$E/sessions-attach-pty.typescript" node src/cli/nexus.ts attach $T
   ```
 
-  - While attached, `sessions-attached` prints `1`: one Herdr client whose command line the probe counts as an attached terminal, which is what keeps a pylon awake.
-  - After the kill, `sessions-detached` should print `0`, with pgrep exiting 1. If it prints `1`, Docker left the Herdr client running after its terminal went away. Report that as a finding: here it keeps the pylon awake until the container stops. On a real node, sshd hangs up the session's processes when ssh disconnects, which this stack does not show.
+  - Herdr may first show its onboarding screen in the new terminal. Send it one Enter.
+  - From another shell, run `$V pylon sessions-attached $T -- pgrep -c -x -f 'herdr --session nexus'`. It prints `1`: one Herdr client whose command line the probe counts as an attached terminal, which is what keeps a pylon awake.
+  - Kill the recorded process, `kill "$(cat "$($V evidence)/sessions-attach-pty.pid")"`, wait 2 s, and run `$V pylon sessions-detached $T -- pgrep -c -x -f 'herdr --session nexus'`. In this stack it still prints `1`, and pgrep exits 0. That is the expected Docker result, not a failure: Docker leaves the Herdr client running in the container after its terminal goes away, so the pylon would count a human until the container stops. The next step's archive stops it. A real node's sshd hangs up the session's processes when ssh disconnects, which this stack does not show.
   - `sessions-attach-pty.typescript` holds Herdr's screen, with the workspace `sessions: sh`.
-  - If `script` fails without a terminal of its own, report `sessions-attach-pty` as not driven, with its error. Never report it as verified through `sessions-attach-resolve`.
+  - If you have no sized terminal to run it in, report `sessions-attach-pty` as not driven, with the error. Never report it as verified through `sessions-attach-resolve`.
 - **Archived thread refuses.** Run `$V cli sessions-archive -- archive $T --json` and poll `show` until `.pylon.actualState` is `paused`. Then:
   - `$V cli sessions-archived-open -- session open $T --harness shell --json` exits 5. Its stderr is `{"error":"thread <T> is archived, so its pylon stays paused","kind":"conflict","status":409}`.
   - `$V cli sessions-archived-attach -- attach $T --json`, with `NEXUS_ATTACH` set as in the environment step, exits 5. Its stderr's `error` starts with `thread <T> is archived, so its pylon stays paused`, its `status` is null, and stdout is empty, so the attach command never ran.
@@ -63,4 +62,4 @@ Preconditions:
 - `$V cli` passes the caller's environment through, so set `NEXUS_ATTACH` in front of `$V`, as the steps do. A `NEXUS_ATTACH` left exported changes every later `attach` in the same shell.
 - Docker's pause stops and removes the container, so the log of the pause, with its `sessions: recorded` line, goes with it. Only the wake's line survives in the new container's log.
 - Docker pylons run Herdr as root, unlike a real pylon's `user`. The attach command therefore runs `docker exec` without `-u`.
-- A terminal left attached counts a human as present, so the pylon never pauses for idleness while it stays. Kill the pty step's process before you move on.
+- A terminal left attached counts a human as present, so the pylon never pauses for idleness while it stays. In this stack even a killed `docker exec -it` leaves its Herdr client behind, so run the pty step right before the archive, which stops the container.
