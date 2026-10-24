@@ -19,7 +19,7 @@ const helper = readFileSync(new URL("./checkout-files.py", import.meta.url), "ut
 /** Opens a raw pipe to a process in the pylon. */
 export type OpenPipe = (request: StreamRequest) => Promise<ByteStream>;
 
-/** `start` is the commit the pylon booted at, which its first boot records as refs/nexus/base. */
+/** `start` is what the pylon booted at, which its first boot records as refs/nexus/base. */
 export type ChangesBase = "start" | "head";
 
 export const maxFileBytes = 10 << 20;
@@ -55,7 +55,11 @@ export class CheckoutRefused extends Error {
 const refusalSchema = z.strictObject({ refused: z.enum(refusalKinds), message: z.string() });
 const entrySchema = z.strictObject({ name: z.string().min(1), kind: z.enum(["file", "dir", "symlink", "other"]), size: z.number().int().nonnegative().nullable() });
 const listingSchema = z.strictObject({ path: z.string(), entries: z.array(entrySchema).max(2000), truncated: z.boolean() });
-const baseSchema = z.strictObject({ kind: z.enum(["start", "head"]), commit: z.string().regex(/^[0-9a-f]{40,64}$/) });
+const baseSchema = z.strictObject({
+  kind: z.enum(["start", "head"]),
+  /** Null where the base is the empty tree: HEAD before the first commit, and the start of a pylon that booted an empty repository. */
+  commit: z.string().regex(/^[0-9a-f]{40,64}$/).nullable(),
+});
 const changedSchema = z.strictObject({
   path: z.string().min(1),
   oldPath: z.string().min(1).nullable(),

@@ -21,6 +21,7 @@ import { openRegistry, type Thread } from "../control/registry.ts";
 import type { ImageId, ImageManifest } from "../images.ts";
 import type { Project, ProjectId } from "../project.ts";
 import { processStream } from "../process-stream.ts";
+import { repoInitCommand } from "../pylon-vm-backend.ts";
 import type { ByteStream, CommandResult, NodeName, PylonCommand, PylonId, ServiceFact, StreamRequest, TailnetNodeId } from "../protocol.ts";
 import { checkoutDir } from "../sessions.ts";
 import { CliError, follow } from "./transport.ts";
@@ -482,6 +483,37 @@ test("files, changes and diff read the pylon's checkout, and wait for a paused p
   const missing = await s.nexus(["files", thread.id, "nope", "--json"]);
   assert.equal(missing.code, 4);
   assert.match(JSON.parse(missing.stderr).error, /nope does not exist/);
+});
+
+test("changes and diff of a scratch thread are against the empty tree, before its first commit and after", async (t) => {
+  const s = await setup(t);
+  const thread: Thread = await s.json(["start", "--project", "acme", "--title", "scratch"]);
+  const scratch = await mkdtemp(join(tmpdir(), "nexus-cli-scratch-"));
+  t.after(() => rm(scratch, { recursive: true }));
+  const repo = join(scratch, "repo");
+  await promisify(execFile)("sh", ["-c", repoInitCommand({ kind: "empty", branch: "main" }, repo)]);
+  const git = (...args: string[]) => promisify(execFile)("git", ["-C", repo, "-c", "user.name=t", "-c", "user.email=t@t", ...args]);
+  s.probePipes(async ({ argv }) => processStream(argv[0]!, argv.slice(1).map((arg) => arg === checkoutDir ? repo : arg), () => {}));
+  const output = async (args: string[]) => {
+    const res = await s.nexus(args);
+    assert.equal(res.code, 0, res.stderr);
+    return res.stdout;
+  };
+  await writeFile(join(repo, "README.md"), "# sketch\n");
+
+  const sinceBoot = "Changes since the pylon booted an empty repository:\nadded  +1 -0  README.md\n";
+  assert.equal(await output(["changes", thread.id]), sinceBoot);
+  assert.equal(await output(["changes", thread.id, "--uncommitted"]), "Changes since HEAD, which names no commit yet:\nadded  +1 -0  README.md\n");
+  const firstDiff = await output(["diff", thread.id]);
+  assert.match(firstDiff, /^diff --git a\/README.md b\/README.md\nnew file mode 100644\n[^]*\n\+# sketch\n$/);
+  assert.equal(await output(["diff", thread.id, "--uncommitted"]), firstDiff);
+
+  await git("add", "-A");
+  await git("commit", "-q", "-m", "first");
+  const head = (await git("rev-parse", "HEAD")).stdout.trim();
+  assert.equal(await output(["changes", thread.id]), sinceBoot, "the agent's commit is a change since the start too");
+  assert.equal(await output(["diff", thread.id]), firstDiff);
+  assert.equal(await output(["changes", thread.id, "--uncommitted"]), `No changes since HEAD, ${head.slice(0, 12)}.\n`);
 });
 
 test("unpreview unpublishes a port, waits for a paused pylon to run, and fails with the contract's exit codes", async (t) => {

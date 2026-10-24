@@ -200,7 +200,10 @@ function listingText(l: Listing): string {
 }
 
 function changesText(c: Changes): string {
-  const since = `${c.base.kind === "start" ? "the commit the pylon booted at" : "HEAD"}, ${c.base.commit.slice(0, 12)}`;
+  const { kind, commit } = c.base;
+  const since = kind === "start"
+    ? commit === null ? "the pylon booted an empty repository" : `the commit the pylon booted at, ${commit.slice(0, 12)}`
+    : commit === null ? "HEAD, which names no commit yet" : `HEAD, ${commit.slice(0, 12)}`;
   if (c.files.length === 0) return `No changes since ${since}.`;
   return [
     `Changes since ${since}:`,

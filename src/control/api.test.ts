@@ -13,6 +13,7 @@ import { fakeHarness } from "./fake-harness.ts";
 import { openRegistry, type Thread } from "./registry.ts";
 import { githubTokenGrant, liveHashOf } from "../project.ts";
 import { processStream } from "../process-stream.ts";
+import { repoInitCommand } from "../pylon-vm-backend.ts";
 import { checkoutDir } from "../sessions.ts";
 import type { ByteStream, CommandResult, JobId, NodeName, PylonCommand, PylonId, ServiceFact, StreamRequest, TailnetNodeId } from "../protocol.ts";
 
@@ -498,6 +499,46 @@ test("a thread's files and changes are read from its checkout through its node's
   assert.ok(s.streams.every(([pylon, request]) => pylon === s.thread.pylonId && request.pty === null));
   assert.ok(s.registry.thread(id)!.lastHumanActivityAt > 1);
   assert.ok(s.woken.includes(node));
+});
+
+test("a scratch thread's changes and diff are against the empty tree, before its first commit and after", async (t) => {
+  const s = await withThread(t);
+  const scratch = await mkdtemp(join(tmpdir(), "nexus-api-scratch-"));
+  t.after(() => rm(scratch, { recursive: true }));
+  const repo = join(scratch, "repo");
+  await git("sh", ["-c", repoInitCommand({ kind: "empty", branch: "main" }, repo)]);
+  const run = (...args: string[]) => git("git", ["-C", repo, "-c", "user.name=t", "-c", "user.email=t@t", ...args]);
+  s.probePipes(async ({ argv }) => processStream(argv[0]!, argv.slice(1).map((arg) => arg === checkoutDir ? repo : arg), () => {}));
+  const id = s.thread.id;
+  const added = (path: string, additions: number) => ({ path, oldPath: null, status: "added", additions, deletions: 0 });
+  await mkdir(join(repo, "src"));
+  await writeFile(join(repo, "README.md"), "# sketch\n");
+  await writeFile(join(repo, "src", "main.go"), "package main\n");
+
+  for (const kind of ["start", "head"]) {
+    assert.deepEqual(await s.call("GET", `/v1/threads/${id}/changes?base=${kind}`), {
+      status: 200,
+      body: { base: { kind, commit: null }, files: [added("README.md", 1), added("src/main.go", 1)], truncated: false },
+    }, kind);
+  }
+  const diff = await s.call("GET", `/v1/threads/${id}/diff?path=README.md`);
+  assert.equal(diff.status, 200);
+  assert.deepEqual(diff.body.base, { kind: "start", commit: null });
+  assert.match(diff.body.diff, /^diff --git a\/README.md b\/README.md\nnew file mode 100644\n[^]*--- \/dev\/null\n\+\+\+ b\/README.md\n@@ -0,0 \+1 @@\n\+# sketch\n$/);
+
+  await run("add", "-A");
+  await run("commit", "-q", "-m", "first");
+  const head = (await run("rev-parse", "HEAD")).stdout.trim();
+  await writeFile(join(repo, "README.md"), "# sketch\nmore\n");
+  await writeFile(join(repo, "notes.txt"), "later\n");
+  assert.deepEqual(await s.call("GET", `/v1/threads/${id}/changes`), {
+    status: 200,
+    body: { base: { kind: "start", commit: null }, files: [added("README.md", 2), added("notes.txt", 1), added("src/main.go", 1)], truncated: false },
+  }, "the agent's commit is a change since the start too");
+  assert.deepEqual(await s.call("GET", `/v1/threads/${id}/changes?base=head`), {
+    status: 200,
+    body: { base: { kind: "head", commit: head }, files: [{ path: "README.md", oldPath: null, status: "modified", additions: 1, deletions: 0 }, added("notes.txt", 1)], truncated: false },
+  });
 });
 
 test("a checkout read the pylon refuses answers its status, and a bad request never reaches the probe", async (t) => {

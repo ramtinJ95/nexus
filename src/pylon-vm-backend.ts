@@ -142,8 +142,11 @@ function dotfilesPull({ repo, ref }: BootInputs["dotfiles"]): string {
   ].join("\n"), "/home/user");
 }
 
-/** Records the commit the pylon booted at, which the Changes view diffs against (checkout-files.ts). */
-const recordBase = (repo: string) => `git -C ${q(repo)} update-ref refs/nexus/base HEAD`;
+/**
+ * Records what the pylon booted at as refs/nexus/base, which the Changes view diffs against (checkout-files.ts): the
+ * commit it checked out, or the empty tree of an empty repository, which has no commit.
+ */
+const recordBase = (repo: string, object: string) => `git -C ${q(repo)} update-ref refs/nexus/base ${object}`;
 
 /**
  * Runs as root from the workspace once, inside the instance's or template build's controller, on a fresh disk. 20-minute limit.
@@ -158,10 +161,11 @@ function setupCommands(repo: RepoInit, preSetup: string | null): string[] {
   ];
 }
 
-function repoInitCommand(repo: RepoInit): string {
+/** Makes the pylon's checkout at `dir` on its first boot. Tests run it to make a checkout as a pylon does. */
+export function repoInitCommand(repo: RepoInit, dir = repoDir): string {
   switch (repo.kind) {
-    case "clone": return `git clone --no-checkout ${q(repo.url)} ${q(repoDir)} && git -C ${q(repoDir)} checkout -B ${q(repo.checkout.branch)} ${q(repo.checkout.commit)} && ${recordBase(repoDir)}`;
-    case "empty": return `git init --quiet --initial-branch=${q(repo.branch)} ${q(repoDir)}`;
+    case "clone": return `git clone --no-checkout ${q(repo.url)} ${q(dir)} && git -C ${q(dir)} checkout -B ${q(repo.checkout.branch)} ${q(repo.checkout.commit)} && ${recordBase(dir, "HEAD")}`;
+    case "empty": return `git init --quiet --initial-branch=${q(repo.branch)} ${q(dir)} && ${recordBase(dir, `"$(git -C ${q(dir)} hash-object -t tree -w /dev/null)"`)}`;
   }
 }
 
@@ -174,7 +178,7 @@ function bootRemotes(repo: RepoInit): string[] {
 
 /** The setup of a pylon booted from a template, run once: the template's clone moves to the pylon's remote and commit. */
 function checkoutCommands({ url, checkout }: CloneRepo): string[] {
-  return [asUser(`git remote set-url origin ${q(url)} && git fetch --quiet origin && git checkout --quiet -B ${q(checkout.branch)} ${q(checkout.commit)} && ${recordBase(repoDir)}`, repoDir)];
+  return [asUser(`git remote set-url origin ${q(url)} && git fetch --quiet origin && git checkout --quiet -B ${q(checkout.branch)} ${q(checkout.commit)} && ${recordBase(repoDir, "HEAD")}`, repoDir)];
 }
 
 export function createPylonVmBackend(options: PylonVmBackendOptions): VmBackend {

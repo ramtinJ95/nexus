@@ -8,9 +8,10 @@
 #   read <path> <max>       the file's bytes, at most <max> of them
 #   changes <base>          the files that differ from <base>, as JSON
 #   diff <base> [path...]   the unified diff from <base>, as JSON
-# <base> is `start`, the commit the pylon booted at (refs/nexus/base), or `head`. Changes and diffs compare the
-# working tree, untracked files included and ignored ones left out, through a scratch index, so the agent's own
-# index is left alone.
+# <base> is `start`, what the pylon booted at (refs/nexus/base), or `head`. A base that names no commit is the
+# empty tree: HEAD before the first commit, and the start of a pylon that booted an empty repository. Changes and
+# diffs compare the working tree, untracked files included and ignored ones left out, through a scratch index, so
+# the agent's own index is left alone.
 #
 # Exit 0 is an answer. Exit 3 is a refusal the caller can act on, printed as {"refused": kind, "message": text}.
 # Any other exit is a failure, whose traceback goes to stderr, which the probe logs.
@@ -119,19 +120,28 @@ def git(root, args, env=None):
     return done.stdout
 
 
-def base_commit(root, base):
+def resolve(root, name):
+    found = subprocess.run(["git", "-C", root, "rev-parse", "--verify", "--quiet", name], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+    return found.stdout.decode().strip() if found.returncode == 0 else None
+
+
+def base_of(root, base):
+    """The tree-ish to compare with, and the commit it is, or None where the base is the empty tree."""
     if base == "head":
         ref = "HEAD"
     elif base == "start":
         ref = "refs/nexus/base"
     else:
         raise ValueError("unknown base %r" % base)
-    found = subprocess.run(["git", "-C", root, "rev-parse", "--verify", "--quiet", ref + "^{commit}"], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
-    if found.returncode != 0:
+    found = resolve(root, ref)
+    if found is None:
         if base == "start":
-            raise Refused("no-base", "the checkout has no refs/nexus/base, the commit its pylon booted at, because the pylon booted before Nexus recorded it. Ask for the changes since HEAD instead")
-        raise Refused("missing", "the checkout is not a git repository, or has no commit at HEAD")
-    return found.stdout.decode().strip()
+            raise Refused("no-base", "the checkout has no refs/nexus/base, what its pylon booted at, because the pylon booted before Nexus recorded it. Ask for the changes since HEAD instead")
+        if subprocess.run(["git", "-C", root, "rev-parse", "--git-dir"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode != 0:
+            raise Refused("missing", "the checkout is not a git repository")
+        # Before the first commit, HEAD names none.
+        found = git(root, ["hash-object", "-t", "tree", "/dev/null"]).decode().strip()
+    return found, resolve(root, found + "^{commit}")
 
 
 def scratch_env(root, scratch):
@@ -144,7 +154,7 @@ def scratch_env(root, scratch):
     if os.path.exists(real):
         shutil.copy2(real, index)
     else:
-        git(root, ["read-tree", "HEAD"], env)
+        git(root, ["read-tree", base_of(root, "head")[0]], env)
     git(root, ["add", "--all"], env)
     return env
 
@@ -154,11 +164,11 @@ STATUSES = {"A": "added", "M": "modified", "D": "deleted", "R": "renamed", "C": 
 
 
 def changes(root, base):
-    commit = base_commit(root, base)
+    tree, commit = base_of(root, base)
     with tempfile.TemporaryDirectory() as scratch:
         env = scratch_env(root, scratch)
-        status = git(root, DIFF_FLAGS + ["-z", "--name-status", commit], env).decode(errors="replace").split("\0")
-        counts = git(root, DIFF_FLAGS + ["-z", "--numstat", commit], env).decode(errors="replace").split("\0")
+        status = git(root, DIFF_FLAGS + ["-z", "--name-status", tree], env).decode(errors="replace").split("\0")
+        counts = git(root, DIFF_FLAGS + ["-z", "--numstat", tree], env).decode(errors="replace").split("\0")
     lines = {}
     i = 0
     while i < len(counts) and counts[i] != "":
@@ -187,12 +197,12 @@ def changes(root, base):
 
 
 def diff(root, base, paths):
-    commit = base_commit(root, base)
+    tree, commit = base_of(root, base)
     for path in paths:
         inside(root, path)
     with tempfile.TemporaryDirectory() as scratch:
         env = scratch_env(root, scratch)
-        command = git_command(root, DIFF_FLAGS + ["--src-prefix=a/", "--dst-prefix=b/", commit, "--"] + paths)
+        command = git_command(root, DIFF_FLAGS + ["--src-prefix=a/", "--dst-prefix=b/", tree, "--"] + paths)
         # stderr into a file, so git never waits on a full stderr pipe while its stdout is read.
         with open(os.path.join(scratch, "stderr"), "w+b") as err:
             proc = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=err, env=env)
