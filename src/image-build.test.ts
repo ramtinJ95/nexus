@@ -28,6 +28,8 @@ const pins: ImageRecipe["pins"] = {
   dotfilesCommon: "placeholder",
   gh: "2.103.2",
   ghSha256: "d".repeat(64),
+  neovim: "0.12.6",
+  neovimSha256: "e".repeat(64),
 };
 const manifest = { path: agentSetupManifest, content: await readFile(join(pylonRecipeDir, agentSetupManifest), "utf8") };
 
@@ -88,6 +90,7 @@ test("buildImage refuses a recipe from a job whose paths, pins, nexus script or 
     { files: [{ path: "a//b", content: "" }], pins },
     { files: [], pins: { ...pins, nodeSha256: "not-a-digest" } },
     { files: [manifest], pins: { ...pins, gh: "latest" } },
+    { files: [manifest], pins: { ...pins, neovim: "stable" } },
     { files: [manifest, { path: "nexus", content: '#!/usr/bin/env node\nconst version = "dev";\n' }], pins },
     { files: [{ path: "nexus", content: 'const version = "0.7.3";\n' }], pins },
     { files: [{ ...manifest, content: manifest.content.replace(/"commit":"([0-9a-f]{7})[0-9a-f]+"/, '"commit":"$1"') }], pins },
@@ -108,6 +111,7 @@ test("the smoke boot expects each tool's exact pinned version, and whatever the 
     "herdr version": `herdr ${recipe.pins.herdr}\n`,
     "pi-env version": `pi-env ${recipe.pins.piEnv}\n`,
     "nexus version": execFileSync(process.execPath, [join(pylonRecipeDir, "nexus"), "--version"], { encoding: "utf8" }),
+    "nvim version": `NVIM v${recipe.pins.neovim}\n`,
   });
 });
 
@@ -120,6 +124,8 @@ test("a version check fails on any other version, naming the expected and actual
   assert.equal(smokeFailure(check("nexus version"), 0, "nexus 0.1.0\n"), 'expected "nexus 0.7.3\\n", got "nexus 0.1.0\\n"');
   assert.equal(smokeFailure(check("node version"), 0, "v24.22.10\n"), 'expected "v24.22.1\\n", got "v24.22.10\\n"');
   assert.equal(smokeFailure(check("pi version"), 127, "-bash: pi: command not found\n"), "exited 127");
+  assert.equal(smokeFailure(check("nvim version"), 0, "NVIM v0.12.6\n"), undefined);
+  assert.equal(smokeFailure(check("nvim version"), 0, "NVIM v0.7.2\n"), 'expected "NVIM v0.12.6\\n", got "NVIM v0.7.2\\n"');
 });
 
 test("the smoke boot checks the agent setup against the layout derived from the recipe's own manifest", async () => {

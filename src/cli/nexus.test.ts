@@ -36,6 +36,7 @@ const image: ImageManifest = {
   pins: {
     debianDigest: "d", node: "24.22.1", nodeSha256: "n", claudeCode: "c", pi: "p", herdr: "h", piEnv: "e", piEnvSha256: "s",
     gondolin: "0.13.0", alpineKernel: "k", dotfilesCommon: "f", gh: "2.103.2", ghSha256: "a".repeat(64),
+    neovim: "0.12.6", neovimSha256: "b".repeat(64),
   },
 };
 

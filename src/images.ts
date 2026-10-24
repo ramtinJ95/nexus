@@ -43,7 +43,8 @@ export type PortableArtifactId = Exclude<ArtifactId, CheckpointId>;
  *      user, which boots clone and then fetch.
  *      `gondolin build` itself installs the `sandboxssh` helper that pi-sandbox's shell needs.
  *   6. gh from its checksum-verified release tarball, set in /etc/gitconfig as git's credential helper for
- *      https://github.com, so a GH_TOKEN grant pushes over HTTPS.
+ *      https://github.com, so a GH_TOKEN grant pushes over HTTPS, and Neovim from its checksum-verified release
+ *      tarball into /usr/local.
  *   7. The agent setup in agent-setup/manifest.json (images/pylon/agent-setup/manifest.ts), installed as user by
  *      agent-setup/install.ts, then Herdr's integrations, then ~/.claude/CLAUDE.md importing ~/.nexus/PYLON.md and
  *      ~/.pi/agent/AGENTS.md linking to it.
@@ -74,6 +75,8 @@ export interface ImageRecipe {
     dotfilesCommon: string; // commit of the baked fallback layer
     gh: string; // "2.103.2", the GitHub CLI release
     ghSha256: string; // of gh_<gh>_linux_amd64.tar.gz, from that release's checksums file
+    neovim: string; // "0.12.6". The review-pane Claude Code mod needs 0.10 or later, and bookworm ships 0.7
+    neovimSha256: string; // of nvim-linux-x86_64.tar.gz, that release asset's digest on GitHub
   };
 }
 
@@ -92,6 +95,8 @@ export const pinsSchema = z.strictObject({
   dotfilesCommon: z.string().min(1),
   gh: z.string().regex(/^\d+\.\d+\.\d+$/),
   ghSha256: z.string().regex(/^[0-9a-f]{64}$/),
+  neovim: z.string().regex(/^\d+\.\d+\.\d+$/),
+  neovimSha256: z.string().regex(/^[0-9a-f]{64}$/),
 }) satisfies z.ZodType<ImageRecipe["pins"]>;
 
 /** File order does not change the ID. Two files at one path are a broken recipe and throw. */

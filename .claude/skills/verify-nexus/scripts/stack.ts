@@ -158,6 +158,7 @@ const manifest: ImageManifest = {
   pins: {
     debianDigest: `sha256:${"0".repeat(64)}`, node: "0.0.0", nodeSha256: "0".repeat(64), claudeCode: "none", pi: "none", herdr: "pinned",
     piEnv: "packaged", piEnvSha256: "0".repeat(64), gondolin: "none", alpineKernel: "none", dotfilesCommon: "none", gh: "0.0.0", ghSha256: "0".repeat(64),
+    neovim: "0.0.0", neovimSha256: "0".repeat(64),
   },
 };
 const project: Project = {
