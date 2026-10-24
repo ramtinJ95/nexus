@@ -1,4 +1,5 @@
 import { access, readFile, rename } from "node:fs/promises";
+import { setTimeout as delay } from "node:timers/promises";
 import { join, posix } from "node:path";
 import { VM, type VMOptions, VmCheckpoint } from "@earendil-works/gondolin";
 import type { Action, BootSpec, SandboxRecord } from "./contracts.ts";
@@ -81,6 +82,16 @@ export class SandboxRuntime {
 		return this.failures.find((f) => f.kind === "setup")?.message;
 	}
 	private resumePid: string | undefined;
+	/**
+	 * Guest actions let in while the VM ran, by action name. They run beside the lifecycle queue (daemon.ts), so every
+	 * path that closes the VM starts with leaveRunning. Gondolin never answers a file operation that reaches a VM as
+	 * it closes, so an action closed under could hang until its client gave up.
+	 */
+	private admitted = new Map<Promise<unknown>, string>();
+	/** Aborted by leaveRunning. It ends the actions' waits and file operations. */
+	private stopping = new AbortController();
+	/** How long a stop waits for guest actions to settle before it closes the VM under them. */
+	private settleMs = 5000;
 	private bootedAt: string | undefined;
 	private recovery: string | undefined;
 	private terminal:
@@ -97,10 +108,17 @@ export class SandboxRuntime {
 	private dir: string;
 	private record: SandboxRecord;
 	private spec: BootSpec;
-	constructor(dir: string, record: SandboxRecord, spec: BootSpec) {
+	/** `running` adopts a VM that already runs instead of booting one, so a test can stop it. */
+	constructor(dir: string, record: SandboxRecord, spec: BootSpec, running?: { vm: VM; settleMs: number }) {
 		this.dir = dir;
 		this.record = record;
 		this.spec = spec;
+		if (running) {
+			this.vm = running.vm;
+			this.processes = new GuestProcesses(running.vm, this.stopping.signal);
+			this.settleMs = running.settleMs;
+			this.state = "running";
+		}
 	}
 	async boot(prepare: boolean, setupRan?: SetupRun): Promise<void> {
 		const config = this.record.config;
@@ -137,7 +155,7 @@ export class SandboxRuntime {
 		this.vm = vm;
 		await vm.start();
 		this.bootedAt = new Date().toISOString();
-		this.processes = new GuestProcesses(vm);
+		this.processes = new GuestProcesses(vm, this.stopping.signal);
 		// Disabling scratch tmpfs preserves HOME on disk. OCI images still need
 		// normal Unix temporary-directory permissions for unprivileged tools.
 		await checked(vm, "mkdir -p /tmp /var/tmp; chmod 1777 /tmp /var/tmp");
@@ -165,7 +183,7 @@ export class SandboxRuntime {
 				content: guestSshConfig,
 			},
 			...this.spec.files,
-		]);
+		], this.stopping.signal);
 		for (const hook of this.spec.hooks) {
 			const pid = await this.processes.launch(hook, "/", true, 120);
 			let result = await this.processes.status(pid, 60000);
@@ -280,12 +298,21 @@ export class SandboxRuntime {
 		if (this.state === "stopped" || this.state === "prepared")
 			return this.status();
 		const vm = this.requireVm();
-		this.state = "stopping";
+		const unsettled = await this.leaveRunning("stopping");
 		const next = join(this.dir, "disk.next.qcow2");
-		// Every step is inside the try: a failure before the checkpoint must not leave the controller in stopping.
+		// leaveRunning never throws, and every later step is inside the try: a failure before the checkpoint must not
+		// leave the controller in stopping.
 		try {
-			await this.persistStatus();
-			await this.closeAccess();
+			// The VM's close waits on the access it serves, such as a preview's open WebSocket, so access closes first.
+			try {
+				await this.persistStatus();
+			} finally {
+				await this.closeAccess();
+			}
+			// One may hold Gondolin's file slot, which every later guest command waits for, or be half done, such as a
+			// write-files half installed, which a checkpoint would keep.
+			if (unsettled.length > 0)
+				throw new Error(`Guest actions were still in flight ${this.settleMs} ms into the stop (${unsettled.join(", ")}), so the VM is not checkpointed`);
 			await this.managed?.stopAll();
 			await checked(vm, "sync");
 			await vm.checkpoint(next);
@@ -309,6 +336,23 @@ export class SandboxRuntime {
 		await this.persistStatus();
 		return this.status();
 	}
+	/**
+	 * The first step of every path that closes the VM: it refuses new guest actions and settles the admitted ones. It
+	 * never throws, and waits at most settleMs, since an action stuck in a guest call that ignores the abort, such as a
+	 * file write awaiting the guest's answer, must not keep the VM from closing. It returns the actions still in
+	 * flight then, which the VM closes under.
+	 */
+	private async leaveRunning(state: "stopping" | "failed"): Promise<string[]> {
+		this.state = state;
+		this.stopping.abort(new NotRunning(state, "the action"));
+		const inFlight = [...this.admitted.values()].join(", ") || "none";
+		console.error(`Sandbox is ${state} since ${new Date().toISOString()}, so it settles the guest actions in flight: ${inFlight}`);
+		const settled = Promise.allSettled(this.admitted.keys()).then(() => true);
+		if (await Promise.race([settled, delay(this.settleMs, false, { ref: false })])) return [];
+		const left = [...this.admitted.values()];
+		console.error(`Closing the VM under guest actions still in flight after ${this.settleMs} ms: ${left.join(", ")}`);
+		return left;
+	}
 	get retired(): boolean {
 		return this.state === "interrupted";
 	}
@@ -328,14 +372,22 @@ export class SandboxRuntime {
 		if (action.action === "destroy") {
 			if (action.confirm !== this.record.name)
 				throw new Error("confirm must match name");
-			this.state = "stopping";
+			await this.leaveRunning("stopping");
 			await this.closeAccess();
 			await this.vm?.close();
 			this.vm = undefined;
 			return { name: this.record.name, state: "destroyed" };
 		}
 		if (this.state !== "running") throw new NotRunning(this.state, action.action);
-		const vm = this.requireVm();
+		const work = this.guestAction(this.requireVm(), action);
+		this.admitted.set(work, action.action);
+		try {
+			return await work;
+		} finally {
+			this.admitted.delete(work);
+		}
+	}
+	private async guestAction(vm: VM, action: Action): Promise<unknown> {
 		switch (action.action) {
 			case "shell": {
 				if (this.terminal && this.terminal.user !== action.user)
@@ -399,7 +451,7 @@ export class SandboxRuntime {
 				};
 			}
 			case "write-files":
-				await writeFiles(vm, action.files);
+				await writeFiles(vm, action.files, this.stopping.signal);
 				return { paths: action.files.map((file) => file.path) };
 			// The status file carries each preview's origin, which the probe reads without asking the controller.
 			case "services":
@@ -451,10 +503,13 @@ export class SandboxRuntime {
 	}
 	async fail(error: unknown): Promise<void> {
 		console.error(error);
-		this.state = "failed";
-		await this.persistStatus();
-		await this.closeAccess();
-		await this.vm?.close();
+		await this.leaveRunning("failed");
+		try {
+			await this.persistStatus();
+		} finally {
+			await this.closeAccess();
+			await this.vm?.close();
+		}
 	}
 	private async closeAccess(): Promise<void> {
 		await this.terminal?.close();
