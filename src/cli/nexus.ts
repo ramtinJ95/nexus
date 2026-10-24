@@ -20,7 +20,7 @@ import type { Project, SecretGrant } from "../project.ts";
 import type { ActualState } from "../reconcile.ts";
 import { call, CliError, exitCodes, follow, type Endpoint, type HostPort } from "./transport.ts";
 
-const version = "0.7.0";
+const version = "0.8.0";
 const defaults = { url: "http://rj-firebat.tailc817d3.ts.net:7470", socks: "localhost:1055" };
 const configFile = () => join(homedir(), ".config", "nexus", "cli.json");
 
