@@ -157,7 +157,7 @@ function thisMac(): MacSetup {
       localPackages: new Map([["extensions/pi-visualize-code-changes", `${root}/${extensions}/pi-visualize-code-changes`]]),
       extensions: [
         extension("atuin.ts", true), extension("herdr-agent-state.ts", true), extension("pi-better-openai-lite", false),
-        extension("pi-vim", true), extension("pi-visualize-code-changes", true), extension("silly-messages.ts", true),
+        extension("pi-vim", true), extension("pi-visualize-code-changes", false), extension("silly-messages.ts", true),
       ],
       skills: [skill(agentSkills, "anki-cards"), skill(agentSkills, "grok"), skill(agentSkills, "herdr"), skill(agentSkills, "teach")],
       skillSettings: [{ entry: "-skills/teach/SKILL.md", realPath: `${root}/${agentSkills}/teach/SKILL.md` }],
@@ -205,7 +205,7 @@ test("the plan ships what the Mac runs and reports each settled leave-out, and a
   assert.deepEqual(setup, expected);
   assert.deepEqual(leftOut.map((rule) => `${rule.kind}:${rule.name}`), [
     "claude-plugin:nexus@claude-mods", "pi-package:npm:@ramtinj95/pi-nexus", "skill:anki-cards", "pi-extension:atuin.ts",
-    "pi-extension:herdr-agent-state.ts", "skill:ramtin-mode",
+    "pi-extension:herdr-agent-state.ts", "skill:ramtin-mode", "pi-extension:pi-better-openai-lite",
   ]);
   assert.deepEqual(notes, [
     "leave-out claude-plugin:shepherdr@claude-mods matches nothing on this Mac",
@@ -374,4 +374,38 @@ test("a local pi package written with ~ is read from the home, as pi resolves it
     "dotfiles/pkgs/viz/skills/viz/SKILL.md": "viz",
   }));
   assert.deepEqual(setup.pi.packages, [{ kind: "local", path: "pkgs/viz" }]);
+});
+
+test("pi extensions: an entry ships when pi loads it, and every other entry is listed as left out with the reason", async () => {
+  const { setup, leftOut } = captured(await piCapture({
+    ".pi/agent/settings.json": piSettings({ packages: ["extensions/viz"] }),
+    ".pi/agent/extensions": { link: "../../dotfiles/ext" },
+    "dotfiles/ext/one.ts": "",
+    "dotfiles/ext/by-index/index.ts": "",
+    "dotfiles/ext/by-manifest/package.json": JSON.stringify({ pi: { extensions: ["./main.ts"] } }),
+    "dotfiles/ext/by-manifest/main.ts": "",
+    "dotfiles/ext/viz/package.json": JSON.stringify({ pi: { skills: ["./skills"] } }),
+    "dotfiles/ext/viz/skills/viz/SKILL.md": "viz",
+    "dotfiles/ext/empty/": "",
+    "dotfiles/ext/unbuilt/package.json": JSON.stringify({ pi: { extensions: ["./dist/index.js"] } }),
+    "dotfiles/ext/notes.md": "",
+    "dotfiles/ext/.cache/": "",
+  }));
+  assert.deepEqual(setup.pi.extensions, ["ext/by-index", "ext/by-manifest", "ext/one.ts"]);
+  assert.deepEqual(setup.pi.packages, [{ kind: "local", path: "ext/viz" }]);
+  const nothing = leftOut.filter((rule) => rule.kind === "pi-extension");
+  assert.deepEqual(nothing.map((rule) => rule.name), ["empty", "notes.md", "unbuilt"]);
+  for (const rule of nothing) assert.match(rule.why, /pi loads nothing from it/);
+});
+
+test("an extension directory with a package.json pi cannot read loads only through its index", async () => {
+  const { setup, leftOut } = captured(await piCapture({
+    ".pi/agent/settings.json": piSettings({}),
+    ".pi/agent/extensions": { link: "../../dotfiles/ext" },
+    "dotfiles/ext/broken/package.json": "{",
+    "dotfiles/ext/broken-indexed/package.json": "{",
+    "dotfiles/ext/broken-indexed/index.js": "",
+  }));
+  assert.deepEqual(setup.pi.extensions, ["ext/broken-indexed"]);
+  assert.deepEqual(leftOut.filter((rule) => rule.kind === "pi-extension").map((rule) => rule.name), ["broken"]);
 });

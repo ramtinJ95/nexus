@@ -63,7 +63,11 @@ export interface MacSetup {
     npmVersions: ReadonlyMap<string, string>;
     /** A settings entry that is a local path, to its real path. */
     localPackages: ReadonlyMap<string, string>;
-    /** Entries of ~/.pi/agent/extensions. loads: a .ts or .js file, or a directory with an index.ts or index.js. */
+    /**
+     * Entries of ~/.pi/agent/extensions that pi discovers: all but dot entries and node_modules. loads: pi's
+     * auto-discovery loads it, being a .ts or .js file, or a directory whose package.json `pi.extensions` names a file
+     * that exists, or one with an index.ts or index.js.
+     */
     extensions: readonly { name: string; realPath: string; loads: boolean }[];
     /** ~/.agents/skills and ~/.pi/agent/skills entries that hold a SKILL.md, deduped by realPath. */
     skills: readonly { name: string; realPath: string }[];
@@ -112,8 +116,8 @@ const pluginMarkers = new Set([".in_use", ".orphaned_at"]);
  * - it is a pi `skills` setting other than a `-path` exclusion, which the capture does not reproduce;
  * - its name differs from its directory's name, which is the name the image installs it under;
  * - two shipped skills, extensions or local packages share a name, or anything else the manifest parser refuses.
- * An extension entry that loads nothing is not a capability and is skipped by definition, as is a directory that is
- * also a local package, which ships once, as the package. A skill goes to Claude Code when ~/.claude/skills has it and
+ * An extension entry that is also a local package ships once, as the package. Any other entry pi loads nothing from is
+ * not a capability on this Mac, so it comes back as a leave-out saying so. A skill goes to Claude Code when ~/.claude/skills has it and
  * skillOverrides does not turn it off, and to pi when ~/.agents/skills or ~/.pi/agent/skills has it and no `-path`
  * exclusion names it. A pi-package leave-out npm:<name> matches that package whatever version its entry pins. A
  * leave-out that matches nothing comes back as a note, so a stale entry is visible without blocking a capture.
@@ -223,8 +227,13 @@ export function planAgentSetup(mac: MacSetup, rules: readonly LeaveOut[]): Captu
 
   const localPaths = new Set(mac.pi.localPackages.values());
   const extensions: DotfilesPath[] = [];
+  const loadNothing: LeaveOut[] = [];
   for (const extension of mac.pi.extensions) {
-    if (!extension.loads || localPaths.has(extension.realPath) || leftOut("pi-extension", extension.name)) continue;
+    if (localPaths.has(extension.realPath) || leftOut("pi-extension", extension.name)) continue;
+    if (!extension.loads) {
+      loadNothing.push({ kind: "pi-extension", name: extension.name, why: loadsNothing });
+      continue;
+    }
     const path = inDotfiles("pi extension", extension.name, extension.realPath, true);
     if (path !== null) extensions.push(path);
   }
@@ -248,10 +257,12 @@ export function planAgentSetup(mac: MacSetup, rules: readonly LeaveOut[]): Captu
   return {
     kind: "captured",
     setup,
-    leftOut: rules.filter((rule) => matched.has(rule)),
+    leftOut: [...rules.filter((rule) => matched.has(rule)), ...loadNothing],
     notes: rules.filter((rule) => !matched.has(rule)).map((rule) => `leave-out ${rule.kind}:${rule.name} matches nothing on this Mac`),
   };
 }
+
+const loadsNothing = "pi loads nothing from it: it is not a .ts or .js file, nor a directory with a package.json pi.extensions file, index.ts or index.js";
 
 /** The package name of an npm: settings entry, whatever version it pins, as pi parses it; null for any other entry. */
 function npmName(entry: string): string | null {
@@ -425,6 +436,17 @@ export async function readMacSetup(home: string): Promise<MacSetup> {
   };
 }
 
+const piManifestSchema = z.object({ pi: z.object({ extensions: z.array(z.string()).catch([]) }) });
+
+/** Whether pi auto-loads the extension directory `dir`: its package.json `pi.extensions` names a file that exists, or it has an index.ts or index.js. */
+async function directoryLoads(dir: string): Promise<boolean> {
+  // pi reads a missing, unparsable or pi-less package.json as declaring no extensions.
+  const entries = await readFile(join(dir, "package.json"), "utf8")
+    .then((text) => piManifestSchema.parse(JSON.parse(text.replace(/^\uFEFF/, ""))).pi.extensions)
+    .catch(() => []);
+  return entries.some((entry) => existsSync(resolve(dir, entry))) || existsSync(join(dir, "index.ts")) || existsSync(join(dir, "index.js"));
+}
+
 /** The pi part of the reader. It reads only files under `home`: pi's settings, its npm installs and what it discovers. */
 export async function readPiSetup(home: string): Promise<MacSetup["pi"]> {
   const piAgent = join(home, ".pi", "agent");
@@ -447,12 +469,10 @@ export async function readPiSetup(home: string): Promise<MacSetup["pi"]> {
     }
   }
   const extensionsDir = join(piAgent, "extensions");
-  const extensions = await Promise.all((existsSync(extensionsDir) ? await readdir(extensionsDir) : []).sort().map(async (name) => {
+  const discovered = (existsSync(extensionsDir) ? await readdir(extensionsDir) : []).filter((name) => !name.startsWith(".") && name !== "node_modules");
+  const extensions = await Promise.all(discovered.sort().map(async (name) => {
     const realPath = await realpath(join(extensionsDir, name));
-    const loads = (await stat(realPath)).isDirectory()
-      ? existsSync(join(realPath, "index.ts")) || existsSync(join(realPath, "index.js"))
-      : /\.[tj]s$/.test(name);
-    return { name, realPath, loads };
+    return { name, realPath, loads: (await stat(realPath)).isDirectory() ? await directoryLoads(realPath) : /\.[tj]s$/.test(name) };
   }));
   const piSkills = [...await skillsIn(join(home, ".agents", "skills")), ...await skillsIn(join(piAgent, "skills"))]
     .filter((skill, i, all) => all.findIndex((s) => s.realPath === skill.realPath) === i);
