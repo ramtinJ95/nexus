@@ -351,6 +351,11 @@ test("show reports a published preview whose service failed as not ready, and wh
   assert.deepEqual((await s.json(["show", thread.id])).previews, [{ ...preview, ready: false, failed }], "the node still publishes it, but nothing answers");
   assert.match((await s.nexus(["show", thread.id])).stdout, new RegExp(`^preview: web at ${preview.url}, not ready: the service web failed\\. \`nexus service logs web\` in the pylon shows why$`, "m"));
 
+  // A service that listens but fails its health check is failed too.
+  observeRunning(s, thread, [web("failed")], [8003]);
+  assert.deepEqual(await s.json(["ports", thread.id]), [{ port: 8003, service: "web", preview: { ...preview, ready: false, failed } }]);
+  assert.equal((await s.nexus(["ports", thread.id])).stdout, `8003  web  ${preview.url} (its service failed)\n`);
+
   observeRunning(s, thread, [web("ready")], [8003]);
   assert.deepEqual((await s.json(["show", thread.id])).previews, [preview], "a restarted service's preview is ready again");
 });
