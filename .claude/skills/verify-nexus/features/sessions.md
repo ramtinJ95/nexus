@@ -7,17 +7,18 @@ A thread's pylon runs Herdr, and each session is a Herdr workspace with a harnes
 - `sessions-open` opens a shell session with a title, and prints its pane, harness and title.
 - `sessions-show` lists the open session in `show` with its title.
 - `sessions-wake` keeps the session, with its title, across an archive and an unarchive.
-- `sessions-close` closes the session's pane, and closing it again also succeeds.
+- `sessions-paused` lists the session as paused while the thread is archived, and refuses to close it without waking the pylon.
+- `sessions-close` closes the session's pane, and closing it again fails, because the pane is not open.
 - `sessions-archived` refuses to open a session, or to attach, while the thread is archived.
 - `sessions-attach-resolve` resolves the attach command: the thread's pylon, node and node host reach the configured attach command, which reaches the pylon's Herdr session.
 - `sessions-attach-pty` attaches a real terminal to the Herdr session and counts it as an attached terminal while it stays.
 
 ## How to get to it (user POV)
 
-- Run `nexus session open <thread> [--harness claude-code|pi|shell] [--title T]` and `nexus session close <thread> <pane>` in a terminal.
-- Run `nexus show <thread>`, whose `sessions` list each pane with its harness, status and title.
+- Run `nexus session open <thread> [--harness claude-code|pi|shell] [--title T]` and `nexus session close <thread> <pane|id>` in a terminal.
+- Run `nexus show <thread>`, whose `sessions` list each session with its harness, title, pane, and status or state: `paused (resumes on wake)`, `paused (resumes on unarchive)` or `failed: <why>`.
 - Run `nexus attach <thread>`. On the home lab it runs `ssh -t <node> nexus-attach <pylon>`. Here, with no node to ssh to, it runs the command in `NEXUS_ATTACH` with `sh -c`.
-- The dashboard's thread page lists sessions under `Sessions` with their titles, and offers no open, close or attach yet.
+- The dashboard's thread page lists sessions under `Sessions` with their titles, a `paused, resumes on wake` or `paused, resumes on unarchive` state for a paused one and `failed` with why for a failed one, and offers no open, close or attach yet.
 
 ## Driving it with verify-nexus
 
@@ -28,7 +29,7 @@ Preconditions:
 - `show $T --json` lists `.sessions` as `[]`. A fresh pylon has no Herdr server until a session opens.
 
 - **Open.** Run `$V cli sessions-open -- session open $T --harness shell --title "sessions: sh" --json`. Exit 0, and stdout is `{"herdrPane": "<pane>", "harness": "shell", "title": "sessions: sh"}`. Keep `<pane>` as `P`.
-- **Show.** Poll `$V cli sessions-show -- show $T --json` every 3 s, for up to 30 s, until `.sessions` has one entry. It has `herdrPane` `P`, `harness` `shell`, `title` `sessions: sh`, `harnessSessionId` null, and `status` `unknown` or `idle`. The node reads sessions again right after an open, so it usually shows on the first poll.
+- **Show.** Poll `$V cli sessions-show -- show $T --json` every 3 s, for up to 30 s, until `.sessions` has one entry. It has `id` and `herdrPane` `P`, `state` `running`, `message` null, `harness` `shell`, `title` `sessions: sh`, `harnessSessionId` null, and `status` `unknown` or `idle`. The node reads sessions again right after an open, so it usually shows on the first poll.
 - **Herdr side effect.** Run `$V pylon sessions-herdr $T -- herdr --session nexus workspace list`. Its JSON reply lists a workspace whose `label` is `sessions: sh`.
 - **Attach resolution, environment.** Run `NEXUS_ATTACH='printf "%s %s %s %s\n" "$NEXUS_THREAD" "$NEXUS_PYLON" "$NEXUS_NODE" "$NEXUS_NODE_HOST"' $V cli sessions-attach-env -- attach $T`. Exit 0, and stdout is `<T> pylon-<T> verify-node 127.0.0.1`. This proves that `attach` found the running pylon, its node and the node's `tailnetHost`, and handed them to the attach command. It does not prove ssh, `nexus-attach` or a terminal.
 - **Attach resolution, Herdr.** Run `NEXUS_ATTACH='docker exec $NEXUS_PYLON herdr --session nexus workspace list' $V cli sessions-attach-resolve -- attach $T`. Exit 0, and stdout is Herdr's JSON reply listing the workspace `sessions: sh`. This proves the resolved names reach the pylon's container and its Herdr session, without a pty. The interactive form is `NEXUS_ATTACH='docker exec -it $NEXUS_PYLON herdr --session nexus' nexus attach $T`, which the next step drives.
@@ -51,9 +52,11 @@ Preconditions:
   - `$V cli sessions-archived-open -- session open $T --harness shell --json` exits 5. Its stderr is `{"error":"thread <T> is archived, so its pylon stays paused","kind":"conflict","status":409}`.
   - `$V cli sessions-archived-attach -- attach $T --json`, with `NEXUS_ATTACH` set as in the environment step, exits 5. Its stderr's `error` starts with `thread <T> is archived, so its pylon stays paused`, its `status` is null, and stdout is empty, so the attach command never ran.
   - `show $T --json` still reads `archived` and `paused`.
-- **Survives the wake.** Run `$V cli sessions-unarchive -- unarchive $T --json`, and poll `show` until `.pylon.actualState` is `running` and `.sessions` has an entry titled `sessions: sh`. Its `herdrPane` may differ from `P`. Keep it as `P2`. Run `docker logs pylon-$T 2>&1 | grep 'sessions:' > "$($V evidence)/sessions-wake-log.txt"`. The file holds a line for `"sessions: sh" (shell)`, either `was already running in <pane>` or `relaunched … in <pane>`.
-- **Close.** Run `$V cli sessions-close -- session close $T "$P2" --json`. Exit 0, and stdout is `null`. Poll `show` until `.sessions` is `[]`. Then `$V cli sessions-close-again -- session close $T "$P2" --json` exits 0 with `null` too, because a pane that is already gone counts as closed.
-- **Proof.** The recorded `sessions-open`, the `sessions-show` that lists the title, `sessions-herdr`, `sessions-attach-env`, `sessions-attach-resolve`, `sessions-attached` and `sessions-detached` if the pty step ran, `sessions-archived-open`, `sessions-archived-attach`, the `show` after `sessions-unarchive` that lists the title, `sessions-wake-log.txt`, `sessions-close`, the `show` with no sessions, and `sessions-close-again`.
+  - **Paused session.** `$V cli sessions-archived-show -- show $T --json` lists `.sessions` as one entry with `id` and `herdrPane` `P`, `state` `paused`, `message` null and `title` `sessions: sh`: the pause recorded it, and the node reports it from the checkpoint's label. `show $T` without `--json` prints `session: shell "sessions: sh" in pane <P>, paused (resumes on unarchive)`.
+  - `$V cli sessions-archived-close -- session close $T "$P" --json` exits 5. Its stderr is `{"error":"session <P> is paused with its pylon and resumes when \`nexus unarchive <T>\` wakes its pylon. Close it once it runs","kind":"conflict","status":409}`, and `show` still reads `paused`.
+- **Survives the wake.** Run `$V cli sessions-unarchive -- unarchive $T --json`, and poll `show` until `.pylon.actualState` is `running` and `.sessions` has an entry titled `sessions: sh` whose `state` is `running`, and no `paused` entry. Its `herdrPane` may differ from `P`. Keep it as `P2`. Run `docker logs pylon-$T 2>&1 | grep 'sessions:' > "$($V evidence)/sessions-wake-log.txt"`. The file holds a line for `"sessions: sh" (shell)`, either `was already running in <pane>` or `relaunched … in <pane>`.
+- **Close.** Run `$V cli sessions-close -- session close $T "$P2" --json`. Exit 0, and stdout is `null`. Poll `show` until `.sessions` is `[]`. Then `$V cli sessions-close-again -- session close $T "$P2" --json` exits 4, and its stderr's `error` starts with `no session is open in pane <P2>`: a pane that is not open is never reported closed, because after a wake it may name another session.
+- **Proof.** The recorded `sessions-open`, the `sessions-show` that lists the title, `sessions-herdr`, `sessions-attach-env`, `sessions-attach-resolve`, `sessions-attached` and `sessions-detached` if the pty step ran, `sessions-archived-open`, `sessions-archived-attach`, `sessions-archived-show` and `sessions-archived-close`, the `show` after `sessions-unarchive` that lists the title, `sessions-wake-log.txt`, `sessions-close`, the `show` with no sessions, and `sessions-close-again`.
 
 ## Gotchas
 
