@@ -18,7 +18,7 @@ import type { AssistantMessage, ImageContent, TextContent, ToolCall, UserMessage
 import type { ConversationView, InboxState, LiveState } from "@earendil-works/pi-durable";
 import { desiredPhase, type ActualState, type DesiredPhase } from "../reconcile.ts";
 import type { SessionFact } from "../protocol.ts";
-import { linkedPort, type SessionHarness } from "../project.ts";
+import { githubTokenGrant, linkedPort, type SessionHarness } from "../project.ts";
 import type { ThreadDetail } from "./api.ts";
 import type { NodeRecord, Output, Preview, Registry, Thread, ThreadId } from "./registry.ts";
 
@@ -256,7 +256,7 @@ ${image === null && html`<p class="error">No image is current yet, so a new pylo
 <label for="start-title">Title</label>
 <input id="start-title" name="title" required autocomplete="off" placeholder="What should this thread do?" autofocus>
 <fieldset class="seg"><legend>Project</legend>
-${projects.map((p) => html`<label class="seg-opt"><input type="radio" name="project" required value="${p.id}" data-node="${p.defaultNode}" data-branch="${p.defaultBranch}"${p === chosen && " checked"}><span class="seg-name">${p.id}</span><span class="seg-repo">${p.repoUrl}</span></label>`)}
+${projects.map((p) => html`<label class="seg-opt"><input type="radio" name="project" required value="${p.id}" data-node="${p.defaultNode}" data-branch="${p.defaultBranch}"${p.repoUrl === null && " data-scratch"}${p === chosen && " checked"}><span class="seg-name">${p.id}</span><span class="seg-repo">${p.repoUrl ?? "scratch"}</span></label>`)}
 </fieldset>
 <div class="two">
 <div><label for="start-node">Node</label><select id="start-node" name="node">
@@ -265,7 +265,7 @@ ${nodes.map((n) => html`<option value="${n.name}">${n.name}${n.state === "offlin
 </select></div>
 <div><label for="start-branch">Branch</label><input id="start-branch" name="branch" autocomplete="off" placeholder="${chosen.defaultBranch}"></div>
 </div>
-<p class="hint" id="start-hint" data-image="${image ?? ""}">Boots a pylon on <b>${chosen.defaultNode}</b>${image !== null && html` from image <code>${image}</code>`} and checks out <code>${chosen.defaultBranch}</code>.</p>
+<p class="hint" id="start-hint" data-image="${image ?? ""}">Boots a pylon on <b>${chosen.defaultNode}</b>${image !== null && html` from image <code>${image}</code>`} and ${chosen.repoUrl === null ? "starts an empty repository on" : "checks out"} <code>${chosen.defaultBranch}</code>.</p>
 <p id="start-error" class="error" role="alert" hidden></p>
 <footer><button type="button" class="btn btn-ghost" data-close>Cancel</button><button type="submit" class="btn btn-primary">Start thread<kbd>⌘↵</kbd></button></footer>
 </form>`}
@@ -280,7 +280,8 @@ const newProjectResources = { cpus: 2, memoryGiB: 4, diskGiB: 10 };
 
 /**
  * The fields `nexus project add` asks for. The node is one of the known nodes, the first online one unless changed,
- * and the API's own checks, such as for an ID that exists, answer in the dialog. Nodes come from the control plane's
+ * and the API's own checks, such as for an ID that exists, answer in the dialog. GitHub access is the one secret
+ * grant the dialog offers, githubTokenGrant, which the form carries for client.js to send. Nodes come from the control plane's
  * config and change only with a restart, so the dialog is not refreshed with the page, and its default is the node
  * that was online when the page loaded.
  */
@@ -290,9 +291,13 @@ function projectDialog(c: Context, open: boolean): Html {
   const { cpus, memoryGiB, diskGiB } = newProjectResources;
   return html`<dialog id="project-dialog" class="modal" aria-labelledby="project-h"${open && " data-autoopen"}>
 <header><h2 id="project-h">New project</h2><button type="button" class="icon-btn" data-close aria-label="Close">✕</button></header>
-${chosen === undefined ? html`<p class="empty modal-empty">No nodes yet, so a project has nowhere to run.</p>` : html`<form id="project" class="form" data-resources="${JSON.stringify(newProjectResources)}">
+${chosen === undefined ? html`<p class="empty modal-empty">No nodes yet, so a project has nowhere to run.</p>` : html`<form id="project" class="form" data-resources="${JSON.stringify(newProjectResources)}" data-github-grant="${JSON.stringify(githubTokenGrant)}">
 <label for="project-id">ID</label>
 <input id="project-id" name="id" required autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="my-app" autofocus>
+<fieldset class="seg"><legend>Repository</legend>
+<label class="seg-opt"><input type="radio" name="repoKind" value="clone" checked><span class="seg-name">Clone a URL</span><span class="seg-repo">threads check out a branch</span></label>
+<label class="seg-opt"><input type="radio" name="repoKind" value="scratch"><span class="seg-name">Empty (scratch)</span><span class="seg-repo">git init, nothing kept</span></label>
+</fieldset>
 <label for="project-repo">Repository URL</label>
 <input id="project-repo" name="repoUrl" required autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="git@github.com:you/my-app.git">
 <div class="two">
@@ -301,7 +306,8 @@ ${nodes.map((n) => html`<option value="${n.name}"${n === chosen && " selected"}>
 </select></div>
 <div><label for="project-branch">Branch</label><input id="project-branch" name="defaultBranch" required autocomplete="off" autocapitalize="off" spellcheck="false" value="main"></div>
 </div>
-<p class="hint">Threads clone the repository at this branch and boot on this node unless they pick another. Each pylon gets ${cpus} CPUs, ${memoryGiB} GiB of memory and ${diskGiB} GiB of disk. <code>nexus project add</code> can set those, allowed hosts and logins.</p>
+<label class="check"><input type="checkbox" name="github"> GitHub access</label>
+<p class="hint">Threads clone the repository at this branch, or in a scratch project start an empty repository on it, and boot on this node unless they pick another. A scratch pylon keeps nothing once its thread is deleted, so its agent publishes what is worth keeping. GitHub access sends the node's <code>${githubTokenGrant.name}</code> to ${githubTokenGrant.hosts.join(" and ")}, so agents can create repositories and push. Each pylon gets ${cpus} CPUs, ${memoryGiB} GiB of memory and ${diskGiB} GiB of disk. <code>nexus project add</code> can set those, allowed hosts, logins and other secrets.</p>
 <p id="project-error" class="error" role="alert" hidden></p>
 <footer><button type="button" class="btn btn-ghost" data-close>Cancel</button><button type="submit" class="btn btn-primary">Add project<kbd>⌘↵</kbd></button></footer>
 </form>`}
@@ -336,7 +342,7 @@ function home(c: Context, dialogs: Pick<Shell, "start" | "addProject">): Html {
 ${projects.length === 0 ? html`<div class="first-project"><p class="empty">No projects yet. A project names the repository its threads clone and the node they run on.</p>${newProjectButton}</div>` : projects.map((p) => {
   const { open, closed } = threadsOf(c, p.id);
   return html`<section aria-labelledby="project-${p.id}">
-<div class="ov-head"><h2 id="project-${p.id}">${p.id}</h2><code class="dim">${p.repoUrl}</code><a class="btn btn-xs" href="/threads/new?project=${encodeURIComponent(p.id)}" data-start="${p.id}">New thread</a></div>
+<div class="ov-head"><h2 id="project-${p.id}">${p.id}</h2><code class="dim">${p.repoUrl ?? "scratch, no remote"}</code><a class="btn btn-xs" href="/threads/new?project=${encodeURIComponent(p.id)}" data-start="${p.id}">New thread</a></div>
 ${open.length === 0 ? html`<p class="empty">No open threads.</p>` : table(open)}
 ${closed.length > 0 && html`<details class="ov-closed" id="closed-${p.id}"><summary>${closedLabel(closed)}</summary>${table(closed)}</details>`}
 </section>`;
