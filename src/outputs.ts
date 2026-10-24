@@ -55,8 +55,9 @@ async function sh(guest: Guest, script: string, args: readonly string[], cwd: st
 
 /**
  * A file output records the file's path and its digest now. The file is not copied, so a later change shows as
- * a digest mismatch. A diff output snapshots the checkout against HEAD, untracked files included, through a
- * scratch index so the agent's own index is left alone. A clean tree is refused.
+ * a digest mismatch. A diff output snapshots the checkout against HEAD, or against the empty tree before the first
+ * commit, untracked files included, through a scratch index so the agent's own index is left alone. A clean tree
+ * is refused.
  */
 export async function addOutput(guest: Guest, declaration: OutputDeclaration): Promise<DeclaredOutput> {
   const listed = (await listOutputs(guest)).reduce((bytes, o) => bytes + listingBytes(o), 0);
@@ -75,11 +76,14 @@ export async function addOutput(guest: Guest, declaration: OutputDeclaration): P
       `mkdir -p ${outputsDir}`,
       `export GIT_INDEX_FILE="${outputsDir}/$1.index"`,
       'trap \'rm -f "$GIT_INDEX_FILE"\' EXIT',
-      "git read-tree HEAD && git add -A",
+      // Before the first commit, as in a scratch project, HEAD names nothing, so the base is the empty tree.
+      `if base=$(git rev-parse --quiet --verify 'HEAD^{commit}'); then empty="the working tree has no changes against HEAD"`,
+      `else base=$(git hash-object -t tree -w /dev/null); empty="the repository has no commits and no files"; fi`,
+      'git read-tree "$base" && git add -A',
       // The agent's git config must not change what the diff is, such as by coloring it or by mnemonic prefixes.
-      `git diff --cached --binary --no-color --no-ext-diff --no-textconv --src-prefix=a/ --dst-prefix=b/ HEAD > "${outputsDir}/$1.diff"`,
-      `if ! test -s "${outputsDir}/$1.diff"; then rm "${outputsDir}/$1.diff"; echo "the working tree has no changes against HEAD"; exit 3; fi`,
-      "git rev-parse HEAD",
+      `git diff --cached --binary --no-color --no-ext-diff --no-textconv --src-prefix=a/ --dst-prefix=b/ "$base" > "${outputsDir}/$1.diff"`,
+      `if ! test -s "${outputsDir}/$1.diff"; then rm "${outputsDir}/$1.diff"; echo "$empty"; exit 3; fi`,
+      'echo "$base"',
       `sha256sum < "${outputsDir}/$1.diff"`,
     ].join("\n"), [id], checkoutDir, diffTimeoutMs);
     if (diff.exitCode === 3) throw new OutputRefused(diff.output.trim());
