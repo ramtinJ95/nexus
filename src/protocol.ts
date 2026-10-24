@@ -181,6 +181,7 @@ export interface SessionFact {
 export interface GitFacts { head: string; branch: string | null; dirty: boolean; branches: readonly { name: string; head: string; pushedAs: string | null }[] }
 export type DeclaredOutput =
   | { id: string; kind: "file"; path: string; title: string | null; sha256: string }
+  /** base is HEAD's commit, or the empty tree's ID while the repository has no commit. The diff applies to base. */
   | { id: string; kind: "diff"; base: string; sha256: string; title: string | null };
 
 export type ProbeEvent =
