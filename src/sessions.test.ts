@@ -431,7 +431,7 @@ test("a failure left in its restored pane stands for that pane until the pane is
   assert.deepEqual(await recordSessions(guest), []);
 });
 
-test("attached terminals are the guest's Herdr clients of the session, and an unreadable guest counts none", async () => {
+test("attached terminals are the guest's Herdr clients of the session, and a guest that cannot be counted rejects", async () => {
   const counting = (reply: ExecReply) => fakeGuest((argv, herdr) => {
     assert.ok(!herdr);
     assert.deepEqual(argv, ["pgrep", "-c", "-x", "-f", "herdr --session nexus"], "a client's whole command line, so the server and Herdr's own subcommands are left out");
@@ -439,8 +439,8 @@ test("attached terminals are the guest's Herdr clients of the session, and an un
   });
   assert.equal(await attachedTerminals(counting({ exitCode: 0, output: "2\n" })), 2);
   assert.equal(await attachedTerminals(counting({ exitCode: 1, output: "0\n" })), 0);
-  assert.equal(await attachedTerminals(counting({ exitCode: 127, output: "sh: pgrep: not found" })), 0);
-  assert.equal(await attachedTerminals(counting({ exitCode: null, output: "" })), 0);
+  await assert.rejects(attachedTerminals(counting({ exitCode: 127, output: "sh: pgrep: not found" })), /pgrep exited 127: sh: pgrep: not found/);
+  await assert.rejects(attachedTerminals(counting({ exitCode: null, output: "" })), /pgrep exited null/);
 });
 
 test("an attached terminal is a client with exactly the command line attachedTerminals counts, after a server like a session open's", () => {

@@ -312,17 +312,16 @@ export const attachScript = `herdr --session ${herdrSession} workspace list >/de
 
 /**
  * How many terminals are attached to the pylon's Herdr session, such as `nexus attach` from a Mac, which count as
- * a human's presence. Zero when the guest cannot be read, so a failed read never keeps a pylon awake.
+ * a human's presence. Rejects when the guest cannot be counted, so the caller decides what that means.
  */
 export async function attachedTerminals(guest: Guest, timeoutMs = callTimeoutMs): Promise<number> {
-  try {
-    // pgrep prints the count, 0 included, and exits 1 when it is 0.
-    const { exitCode, output } = await guest.exec(["pgrep", "-c", "-x", "-f", `herdr --session ${herdrSession}`], { cwd: home, timeoutMs });
-    const count = Number(output.trim());
-    return (exitCode === 0 || exitCode === 1) && Number.isInteger(count) ? count : 0;
-  } catch {
-    return 0;
+  const { exitCode, output } = await guest.exec(["pgrep", "-c", "-x", "-f", `herdr --session ${herdrSession}`], { cwd: home, timeoutMs });
+  // pgrep prints the count, 0 included, and exits 1 when it is 0.
+  const count = Number(output.trim());
+  if ((exitCode !== 0 && exitCode !== 1) || output.trim() === "" || !Number.isInteger(count)) {
+    throw new Error(`counting attached terminals: pgrep exited ${exitCode}: ${output.trim().slice(-200)}`);
   }
+  return count;
 }
 
 async function ensureServer(guest: Guest): Promise<void> {

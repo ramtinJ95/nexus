@@ -180,6 +180,24 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
     }
   }
 
+  /** The pylons whose last count of attached terminals failed, so each failure is logged once, not on every read. */
+  const uncounted = new Set<PylonId>();
+  /**
+   * Terminals attached to the pylon's Herdr session. A count that fails reads as none, so it never keeps a pylon
+   * awake nor fails the rest of the observation. It is logged once, until a count succeeds again.
+   */
+  async function attached(pylonId: PylonId): Promise<number> {
+    try {
+      const count = await attachedTerminals(backend.guest(pylonId), sessionReadTimeoutMs);
+      uncounted.delete(pylonId);
+      return count;
+    } catch (err) {
+      if (!uncounted.has(pylonId)) log(`${pylonId} attached terminals: ${(err as Error).message}. They count as none until a count succeeds`);
+      uncounted.add(pylonId);
+      return 0;
+    }
+  }
+
   /** A failed or late read reports null, never "no services", and is logged. */
   async function services(pylonId: PylonId): Promise<readonly ServiceFact[] | null> {
     let timer: NodeJS.Timeout | undefined;
@@ -257,7 +275,7 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
           bootedFrom: { image: p.image, checkpoint: p.checkpoint },
           // The other guest facts need guest operations, which this slice does not have.
           services: await services(pylonId), listening: ports, previews: (published.get(pylonId) ?? []).map((preview) => ({ ...preview, ready: true })), sessions: await sessions(pylonId), git: null, declaredOutputs: await declaredOutputs(pylonId),
-          attachedClients: (ptyStreams.get(pylonId) ?? 0) + await attachedTerminals(backend.guest(pylonId), sessionReadTimeoutMs),
+          attachedClients: (ptyStreams.get(pylonId) ?? 0) + await attached(pylonId),
         };
       }
     }

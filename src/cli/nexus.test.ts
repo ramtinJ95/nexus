@@ -480,7 +480,9 @@ test("attach wakes the pylon, waits until it runs, and runs ssh to its node thro
   assert.deepEqual((await readFile(ran, "utf8")).trimEnd().split("\n"),
     ["-t", "-o", `ProxyCommand=nc -X 5 -x 127.0.0.1:${s.proxy.port} %h %p`, "rj-firebat.tail.ts.net", "nexus-attach", thread.pylonId]);
 
-  assert.equal((await s.nexus(["attach", thread.id, "--socks", "none"], path)).code, 0);
+  // Without the proxy only the API's loopback address reaches it.
+  const direct = await s.nexus(["attach", thread.id, "--socks", "none", "--url", s.localUrl], path);
+  assert.equal(direct.code, 0, direct.stderr);
   assert.deepEqual((await readFile(ran, "utf8")).trimEnd().split("\n"), ["-t", "rj-firebat.tail.ts.net", "nexus-attach", thread.pylonId], "without a proxy, plain ssh");
 
   const custom = `printf '%s %s %s %s' "$NEXUS_THREAD" "$NEXUS_PYLON" "$NEXUS_NODE" "$NEXUS_NODE_HOST" > '${ran}'`;

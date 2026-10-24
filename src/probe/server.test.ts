@@ -532,6 +532,27 @@ test("terminals attached to Herdr in the guest, such as nexus attach, count as a
   }
 });
 
+test("a count of attached terminals that fails reads as none, is logged once, and fails nothing else of the observation", async (t) => {
+  const logged: string[] = [];
+  let counted = false;
+  const guest = fakeGuest((argv, herdr) => herdr ? herdrError("server_not_running")
+    : argv[0] === "pgrep" ? (counted ? { exitCode: 0, output: "1\n" } : { exitCode: 127, output: "sh: pgrep: not found" }) : { exitCode: 0, output: "" });
+  const { client } = await setup(t, { log: (line) => logged.push(line) }, guest);
+  await running(client);
+  const attachedClients = async () => {
+    for await (const e of client.observe(AbortSignal.timeout(5000))) {
+      const p = e.type === "snapshot" ? e.observation.pylons[0] : assert.fail(e.type);
+      return p?.phase === "running" ? p.attachedClients : assert.fail(JSON.stringify(p));
+    }
+  };
+  assert.equal(await attachedClients(), 0);
+  assert.equal(await attachedClients(), 0);
+  assert.equal(logged.filter((line) => line.includes("attached terminals")).length, 1, logged.join("\n"));
+  assert.match(logged.find((line) => line.includes("attached terminals"))!, /pgrep exited 127: sh: pgrep: not found. They count as none until a count succeeds/);
+  counted = true;
+  assert.equal(await attachedClients(), 1, "a count that succeeds again is reported");
+});
+
 test("a dropped connection is a lost stream, and the guest process's stdin ends", async (t) => {
   const { client, probe, guestStreams } = await streaming(t);
   const stream = await client.stream(pylonId, { pty: null, argv: ["cat"] });
