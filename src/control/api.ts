@@ -16,7 +16,7 @@ import { randomBytes } from "node:crypto";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { z } from "zod";
 import { actualState, desiredPhase, retryRefusal, type ActualState, type DesiredPhase } from "../reconcile.ts";
-import { effectiveAllowedHosts, gitUrl, linkedName, liveHashOf, reservedPorts, withHttpsHosts, type BootInputs, type Project, type ProjectId, type PylonOverlay, type SessionHarness } from "../project.ts";
+import { effectiveAllowedHosts, gitUrl, hasRemote, linkedName, liveHashOf, reservedPorts, withHttpsHosts, type BootInputs, type Project, type ProjectId, type PylonOverlay, type RepoInit, type SessionHarness } from "../project.ts";
 import type { CommandResult, NodeName, ProbeClient, ProbeError, PylonCommand, PylonId, TailnetNodeId } from "../protocol.ts";
 import type { ConversationView, ConversationWatch, EntryRecord, JsonObject } from "@earendil-works/pi-durable";
 import type { HarnessHost } from "../harness/host.ts";
@@ -144,7 +144,7 @@ const name = z.string().regex(/^[a-z0-9][a-z0-9-]{0,62}$/);
 const host = z.string().min(1);
 const projectSchema = z.strictObject({
   id: name.transform((id) => id as ProjectId),
-  repoUrl: gitUrl,
+  repoUrl: gitUrl.nullable(),
   defaultBranch: z.string().min(1),
   defaultNode: z.string().min(1).transform((node) => node as NodeName),
   resources: z.strictObject({ cpus: z.int().positive(), memoryGiB: z.int().positive(), diskGiB: z.int().positive() }),
@@ -158,7 +158,10 @@ const startSchema = z.strictObject({
   title: z.string().min(1),
   node: z.string().min(1).optional(),
   branch: z.string().min(1).optional(),
-  /** Until the control plane mirrors repos, the caller may pin a commit. The default is the branch tip at clone time. */
+  /**
+   * Until the control plane mirrors repos, the caller may pin a commit. The default is the branch tip at clone time.
+   * A scratch project has none to pin.
+   */
   commit: z.string().min(1).optional(),
 });
 // Agent activity comes from the harness.
@@ -243,11 +246,16 @@ export async function startApi(options: ApiOptions): Promise<Api> {
     if (registry.node(node) === undefined) throw new HttpError(400, `no node ${node}`);
     const image = registry.currentImage();
     if (image === null) throw new HttpError(409, "no image is current yet, so a pylon has nothing to boot");
+    const branch = request.branch ?? project.defaultBranch;
+    if (!hasRemote(project) && request.commit !== undefined) throw new HttpError(400, `project ${project.id} is a scratch project, so it has no commit to check out`);
+    // The one place a thread's repository is decided. It is frozen into the pylon's boot.
+    const repo: RepoInit = hasRemote(project)
+      ? { kind: "clone", url: project.repoUrl, checkout: { branch, commit: request.commit ?? `origin/${branch}` } }
+      : { kind: "empty", branch };
 
     const now = Date.now();
     const id = newThreadId();
     const pylonId = `pylon-${id}` as PylonId;
-    const branch = request.branch ?? project.defaultBranch;
     const conversationId = await harness.startThread({ threadId: id, pylonId });
     const t: Thread = {
       id, title: request.title, project: project.id, pylonId, status: "active", conversationId: String(conversationId), startedBy: caller, createdAt: now,
@@ -258,7 +266,7 @@ export async function startApi(options: ApiOptions): Promise<Api> {
       pylonId, image, resources: project.resources,
       // Every boot pulls the dotfiles through the allowlist. A template build pulls none, so their host stays out of the setup hash.
       network: { allowedHosts: withHttpsHosts(effectiveAllowedHosts(project), [dotfiles.repo]), secrets: project.secrets },
-      repo: { url: project.repoUrl, checkout: { branch, commit: request.commit ?? `origin/${branch}` } },
+      repo,
       dotfiles,
     };
     // Ports are allocated once the pylon reports the services that want a preview.

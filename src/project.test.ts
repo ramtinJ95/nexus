@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { parseDocument } from "yaml";
 import { configSchema } from "./pylon-vm/contracts.ts";
-import { effectiveAllowedHosts, parseServicesFile, renderOverlay, type Project, type ProjectId, type PylonOverlay } from "./project.ts";
+import { effectiveAllowedHosts, githubTokenGrant, parseServicesFile, renderOverlay, type Project, type ProjectId, type PylonOverlay } from "./project.ts";
 import type { NodeName, PylonId } from "./protocol.ts";
 
 const usageExample = `
@@ -203,6 +203,12 @@ test("effectiveAllowedHosts lets a project reach its own HTTPS repo host, and ad
   assert.deepEqual(effectiveAllowedHosts({ ...bare, repoUrl: "ssh://git@github.com/acme/web.git" }), []);
 });
 
+test("effectiveAllowedHosts of a scratch project adds no repo host and keeps its grants' hosts", () => {
+  const scratch = { ...project, repoUrl: null, allowedHosts: [], logins: [] };
+  assert.deepEqual(effectiveAllowedHosts({ ...scratch, secrets: [] }), []);
+  assert.deepEqual(effectiveAllowedHosts({ ...scratch, secrets: [githubTokenGrant] }), ["api.github.com", "github.com"]);
+});
+
 const overlay: PylonOverlay = {
   pylonId: "pylon-t1" as PylonId,
   threadId: "t1",
@@ -212,6 +218,8 @@ const overlay: PylonOverlay = {
   previews: [{ service: "web", url: "https://rj-firebat.example.ts.net:8443/" }],
   logins: ["chatgpt"],
   dotfiles: { repo: "git@github.com:ramtin/dotfiles.git", ref: "abc123" },
+  repo: { kind: "clone", url: "git@github.com:ramtin/acme-web.git", checkout: { branch: "main", commit: "origin/main" } },
+  secrets: [],
 };
 
 test("renderOverlay renders the profile script, pylon.json and PYLON.md", () => {
@@ -263,4 +271,36 @@ test("PYLON.md tells the agent its hosts, previews, logins and how to declare ou
   assert.match(bare, /No previews are published yet/);
   assert.match(bare, /no interactive logins/);
   assert.doesNotMatch(bare, /device-code/);
+});
+
+test("PYLON.md of a scratch project with GitHub access says nothing is kept and how to commit as the token's owner and publish", () => {
+  const md = renderOverlay({ ...overlay, repo: { kind: "empty", branch: "trunk" }, secrets: [githubTokenGrant] })[2]!.content;
+  for (const fact of [
+    "new repository on branch trunk with no commits and no remote", "Nothing in this pylon is kept when the thread is deleted",
+    'git config --global user.name "$(gh api user --jq .login)"', "users.noreply.github.com",
+    "gh repo create <owner>/<name> --private --source . --remote origin --push", "Use HTTPS remotes",
+    "## Secrets", "- GH_TOKEN: api.github.com, github.com\n", "changes on every boot",
+  ]) assert.ok(md.includes(fact), `PYLON.md mentions ${JSON.stringify(fact)}`);
+  assert.doesNotMatch(md, /ask the human which name/);
+});
+
+test("PYLON.md of a scratch project without GitHub access says how to get it and to ask for a git author", () => {
+  const md = renderOverlay({ ...overlay, repo: { kind: "empty", branch: "main" } })[2]!.content;
+  assert.ok(md.includes("new repository on branch main with no commits and no remote"));
+  assert.ok(md.includes("--scratch --secret GH_TOKEN:api.github.com,github.com"), "names the grant to ask for");
+  assert.ok(md.includes("ask the human which name and email to commit as"));
+  assert.doesNotMatch(md, /gh repo create|## Secrets|gh api user/);
+});
+
+test("PYLON.md of a clone names its remote, and sets the git author from gh only with GitHub access", () => {
+  const md = renderOverlay(overlay)[2]!.content;
+  assert.ok(md.includes("is a clone of git@github.com:ramtin/acme-web.git, on branch main from origin/main"));
+  assert.ok(md.includes("ask the human which name and email to commit as"));
+  assert.doesNotMatch(md, /gh repo create|## Secrets|GH_TOKEN/);
+
+  const granted = renderOverlay({ ...overlay, secrets: [githubTokenGrant, { name: "STRIPE_KEY", hosts: ["api.stripe.com"] }] })[2]!.content;
+  for (const fact of ['git config --global user.name "$(gh api user --jq .login)"', "- GH_TOKEN: api.github.com, github.com\n", "- STRIPE_KEY: api.stripe.com\n"]) {
+    assert.ok(granted.includes(fact), `PYLON.md mentions ${JSON.stringify(fact)}`);
+  }
+  assert.doesNotMatch(granted, /gh repo create|ask the human which name/);
 });

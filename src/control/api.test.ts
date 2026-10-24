@@ -11,8 +11,9 @@ import { maxStreams, startApi, type ThreadDetail, type ThreadRow } from "./api.t
 import { readEvents } from "./event-reader.ts";
 import { fakeHarness } from "./fake-harness.ts";
 import { openRegistry, type Thread } from "./registry.ts";
-import { liveHashOf } from "../project.ts";
+import { githubTokenGrant, liveHashOf } from "../project.ts";
 import { processStream } from "../process-stream.ts";
+import { repoInitCommand } from "../pylon-vm-backend.ts";
 import { checkoutDir } from "../sessions.ts";
 import type { ByteStream, CommandResult, JobId, NodeName, PylonCommand, PylonId, ServiceFact, StreamRequest, TailnetNodeId } from "../protocol.ts";
 
@@ -206,7 +207,7 @@ test("starting a thread creates its pylon, boots fresh from the current image, a
   assert.deepEqual(pylon.boot, {
     pylonId: thread.pylonId, image: image.id, resources: project.resources,
     network: { allowedHosts: ["api.openai.com", "api.stripe.com", "auth.openai.com", "chatgpt.com", "registry.npmjs.org"], secrets: project.secrets },
-    repo: { url: project.repoUrl, checkout: { branch: "main", commit: "origin/main" } },
+    repo: { kind: "clone", url: project.repoUrl, checkout: { branch: "main", commit: "origin/main" } },
     dotfiles,
   });
   assert.deepEqual(pylon.live.previews, [], "ports are allocated once the pylon reports services that want them");
@@ -217,6 +218,32 @@ test("starting a thread creates its pylon, boots fresh from the current image, a
   });
   assert.equal(pylon.liveHash, liveHashOf(pylon.live));
   assert.equal(pylon.submitted, null);
+});
+
+test("a scratch project has no repository, and each of its threads starts an empty one on its branch", async (t) => {
+  const s = await setup(t);
+  const scratch = { ...project, id: "sketch", repoUrl: null, allowedHosts: [], logins: [], secrets: [githubTokenGrant] };
+  assert.deepEqual(await s.call("POST", "/v1/projects", scratch), { status: 201, body: scratch });
+  assert.deepEqual((await s.call("GET", "/v1/projects")).body, [scratch]);
+  assert.equal((await s.call("POST", "/v1/projects", { ...scratch, id: "empty-url", repoUrl: "" })).status, 400, "only null makes a scratch project");
+  assert.equal((await s.call("POST", "/v1/images", image)).status, 201);
+  assert.equal((await s.call("PUT", "/v1/images/current", { image: image.id })).status, 204);
+
+  const started = await s.call("POST", "/v1/threads", { project: "sketch", title: "Sketch" });
+  assert.equal(started.status, 201, JSON.stringify(started.body));
+  const pylon = s.registry.pylon(started.body.pylonId)!;
+  assert.deepEqual(pylon.boot.repo, { kind: "empty", branch: "main" });
+  assert.deepEqual(pylon.boot.network, { allowedHosts: ["api.github.com", "github.com"], secrets: [githubTokenGrant] }, "the grant opens GitHub, and no repo host joins");
+  assert.match(pylon.live.overlay[2]!.content, /new repository on branch main with no commits and no remote/);
+
+  const trunk = await s.call("POST", "/v1/threads", { project: "sketch", title: "Trunk", branch: "trunk" });
+  assert.deepEqual(s.registry.pylon(trunk.body.pylonId)!.boot.repo, { kind: "empty", branch: "trunk" });
+
+  const pinned = await s.call("POST", "/v1/threads", { project: "sketch", title: "Pinned", commit: "abc123" });
+  assert.equal(pinned.status, 400);
+  assert.match(pinned.body.error, /sketch is a scratch project, so it has no commit to check out/);
+  assert.equal(s.registry.threads("sketch" as Thread["project"]).length, 2, "no thread was created");
+  assert.equal(s.calls.length, 2, "no conversation was started");
 });
 
 test("a pylon's allowlist reaches its project's HTTPS repo host and the HTTPS dotfiles host", async (t) => {
@@ -472,6 +499,46 @@ test("a thread's files and changes are read from its checkout through its node's
   assert.ok(s.streams.every(([pylon, request]) => pylon === s.thread.pylonId && request.pty === null));
   assert.ok(s.registry.thread(id)!.lastHumanActivityAt > 1);
   assert.ok(s.woken.includes(node));
+});
+
+test("a scratch thread's changes and diff are against the empty tree, before its first commit and after", async (t) => {
+  const s = await withThread(t);
+  const scratch = await mkdtemp(join(tmpdir(), "nexus-api-scratch-"));
+  t.after(() => rm(scratch, { recursive: true }));
+  const repo = join(scratch, "repo");
+  await git("sh", ["-c", repoInitCommand({ kind: "empty", branch: "main" }, repo)]);
+  const run = (...args: string[]) => git("git", ["-C", repo, "-c", "user.name=t", "-c", "user.email=t@t", ...args]);
+  s.probePipes(async ({ argv }) => processStream(argv[0]!, argv.slice(1).map((arg) => arg === checkoutDir ? repo : arg), () => {}));
+  const id = s.thread.id;
+  const added = (path: string, additions: number) => ({ path, oldPath: null, status: "added", additions, deletions: 0 });
+  await mkdir(join(repo, "src"));
+  await writeFile(join(repo, "README.md"), "# sketch\n");
+  await writeFile(join(repo, "src", "main.go"), "package main\n");
+
+  for (const kind of ["start", "head"]) {
+    assert.deepEqual(await s.call("GET", `/v1/threads/${id}/changes?base=${kind}`), {
+      status: 200,
+      body: { base: { kind, commit: null }, files: [added("README.md", 1), added("src/main.go", 1)], truncated: false },
+    }, kind);
+  }
+  const diff = await s.call("GET", `/v1/threads/${id}/diff?path=README.md`);
+  assert.equal(diff.status, 200);
+  assert.deepEqual(diff.body.base, { kind: "start", commit: null });
+  assert.match(diff.body.diff, /^diff --git a\/README.md b\/README.md\nnew file mode 100644\n[^]*--- \/dev\/null\n\+\+\+ b\/README.md\n@@ -0,0 \+1 @@\n\+# sketch\n$/);
+
+  await run("add", "-A");
+  await run("commit", "-q", "-m", "first");
+  const head = (await run("rev-parse", "HEAD")).stdout.trim();
+  await writeFile(join(repo, "README.md"), "# sketch\nmore\n");
+  await writeFile(join(repo, "notes.txt"), "later\n");
+  assert.deepEqual(await s.call("GET", `/v1/threads/${id}/changes`), {
+    status: 200,
+    body: { base: { kind: "start", commit: null }, files: [added("README.md", 2), added("notes.txt", 1), added("src/main.go", 1)], truncated: false },
+  }, "the agent's commit is a change since the start too");
+  assert.deepEqual(await s.call("GET", `/v1/threads/${id}/changes?base=head`), {
+    status: 200,
+    body: { base: { kind: "head", commit: head }, files: [{ path: "README.md", oldPath: null, status: "modified", additions: 1, deletions: 0 }, added("notes.txt", 1)], truncated: false },
+  });
 });
 
 test("a checkout read the pylon refuses answers its status, and a bad request never reaches the probe", async (t) => {

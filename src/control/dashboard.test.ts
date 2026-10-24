@@ -10,6 +10,7 @@ import { readEvents } from "./event-reader.ts";
 import { fakeHarness } from "./fake-harness.ts";
 import { openRegistry, type Thread } from "./registry.ts";
 import type { JobId, NodeName, PylonObservation, ServiceFact, TailnetNodeId } from "../protocol.ts";
+import { githubTokenGrant } from "../project.ts";
 import type { AssistantMessage, Message, ToolCall } from "@earendil-works/pi-ai";
 
 const node = "rj-firebat" as NodeName;
@@ -676,13 +677,18 @@ test("/projects/new opens the new-project dialog with the fields of nexus projec
   assert.deepEqual(fields, [["ID", "id", true, null], ["Repository URL", "repoUrl", true, null], ["Node", "defaultNode", false, null], ["Branch", "defaultBranch", true, "main"]]);
   assert.deepEqual([...dialog.matchAll(/<option value="([^"]*)"( selected)?>([^<]*)</g)].map((m) => [m[1], m[2] !== undefined, m[3]]),
     [[node, false, `${node}, offline`], [tower, true, tower]], "the node defaults to the first one online");
-  assert.match(textOf(dialog), /Each pylon gets 2 CPUs, 4 GiB of memory and 10 GiB of disk\. nexus project add can set those, allowed hosts and logins\./);
+  assert.deepEqual([...dialog.matchAll(/<input type="radio" name="repoKind" value="([^"]*)"( checked)?>/g)].map((m) => [m[1], m[2] !== undefined]), [["clone", true], ["scratch", false]],
+    "the repository is cloned from a URL unless the project is scratch");
+  assert.match(dialog, /<label class="check"><input type="checkbox" name="github"> GitHub access<\/label>/, "GitHub access is off unless asked for");
+  assert.deepEqual(JSON.parse(/data-github-grant="([^"]*)"/.exec(dialog)![1]!.replace(/&quot;/g, '"')), githubTokenGrant);
+  assert.match(textOf(dialog), /GitHub access sends the node's GH_TOKEN to api\.github\.com and github\.com/);
+  assert.match(textOf(dialog), /Each pylon gets 2 CPUs, 4 GiB of memory and 10 GiB of disk\. nexus project add can set those, allowed hosts, logins and other secrets\./);
   assert.match(dialog, /<p id="project-error" class="error" role="alert" hidden><\/p>/, "the dialog has a place for the API's refusal");
 });
 
 test("the new-project form adds the project nexus project add would, and the API's refusal is its message", async (t) => {
   const s = await setup(t);
-  const form = /<form id="project" class="form" data-resources="([^"]*)">/.exec((await s.call("GET", "/")).text);
+  const form = /<form id="project" class="form" data-resources="([^"]*)" data-github-grant="([^"]*)">/.exec((await s.call("GET", "/")).text);
   assert.ok(form !== null);
   // The body client.js sends: the dialog's four fields and the form's resources.
   const add = (id: string, defaultNode: string) => s.call("POST", "/v1/projects", {
@@ -697,6 +703,23 @@ test("the new-project form adds the project nexus project add would, and the API
   const refusal = (res: Reply) => [res.status, (JSON.parse(res.text) as { error: string }).error];
   assert.deepEqual(refusal(await add("acme", node)), [409, "project acme exists"]);
   assert.deepEqual(refusal(await add("beta", "nowhere")), [400, "no node nowhere"]);
+
+  // What client.js sends for an empty repository with GitHub access: no URL, and the grant the form carries.
+  const scratch = { ...project("sketch"), repoUrl: null, secrets: [JSON.parse(form[2]!.replace(/&quot;/g, '"'))] };
+  const sketch = await s.call("POST", "/v1/projects", scratch);
+  assert.equal(sketch.status, 201, sketch.text);
+  assert.deepEqual(JSON.parse(sketch.text), { ...project("sketch"), repoUrl: null, secrets: [githubTokenGrant] });
+});
+
+test("a scratch project shows as scratch, and starting a thread on it starts an empty repository", async (t) => {
+  const s = await seeded(t);
+  assert.equal((await s.call("POST", "/v1/projects", { ...project("sketch"), repoUrl: null })).status, 201);
+  const page = (await s.call("GET", "/threads/new?project=sketch")).text;
+  const dialog = page.split('<dialog id="start-dialog"')[1]!.split("</dialog>")[0]!;
+  assert.deepEqual([...dialog.matchAll(/<input type="radio" name="project" required value="([^"]*)"[^>]*?( data-scratch)?( checked)?><span class="seg-name">[^<]*<\/span><span class="seg-repo">([^<]*)</g)].map((m) => [m[1], m[2] !== undefined, m[4]]),
+    [["acme", false, "git@example.com:acme.git"], ["beta", false, "git@example.com:beta.git"], ["sketch", true, "scratch"]]);
+  assert.match(textOf(dialog), new RegExp(`Boots a pylon on rj-firebat from image ${image.id} and starts an empty repository on main \\.`));
+  assert.match(textOf(sectionOf(page, "project-sketch")), /^sketch scratch, no remote New thread/);
 });
 
 test("every page has somewhere to say a refresh failed", async (t) => {

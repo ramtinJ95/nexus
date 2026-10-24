@@ -18,7 +18,7 @@ const cli = fileURLToPath(new URL("../images/pylon/nexus", import.meta.url));
 const pylonId = "pylon-t1" as PylonId;
 const pylonJson = renderOverlay({
   pylonId, threadId: "t1", project: "acme" as ProjectId, node: "infra-testbench" as NodeName, allowedHosts: ["github.com"],
-  previews: [], logins: [], dotfiles: { repo: "https://example.com/dotfiles.git", ref: "main" },
+  previews: [], logins: [], dotfiles: { repo: "https://example.com/dotfiles.git", ref: "main" }, repo: { kind: "empty", branch: "main" }, secrets: [],
 }).find((f) => f.path === pylonInfoFile)!.content;
 const web: ServiceFact = { name: "web", state: "ready", port: 3000, declared: true, wantsPreview: true };
 const output: DeclaredOutput = { id: "out-1-00000000", kind: "file", path: "/home/user/workspace/repo/shot.png", title: "Shot", sha256: "0".repeat(64) };

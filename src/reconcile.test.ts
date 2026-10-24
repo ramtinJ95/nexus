@@ -5,7 +5,7 @@ import {
   type ActivityFacts, type DesiredPhase, type PlanInput, type PlanStep, type RegistryWrite,
 } from "./reconcile.ts";
 import {
-  encodeProbeEvent, encodeSubmitReply, jobSubject, parseProbeEvent, parseSubmitReply,
+  encodeProbeEvent, encodeSubmitReply, jobSubject, parseJobEnvelope, parseProbeEvent, parseSubmitReply,
   type JobErrorCode, type JobId, type JobStatus, type LiveHash, type NodeName, type NodeObservation, type ProbeEvent, type PylonId, type PylonObservation,
   type RunningFacts, type SessionFact,
 } from "./protocol.ts";
@@ -27,7 +27,7 @@ const boot: Omit<BootInputs, "source"> = {
   image,
   resources: { cpus: 2, memoryGiB: 4, diskGiB: 10 },
   network: { allowedHosts: [], secrets: [] },
-  repo: { url: "git@example.com:r.git", checkout: { branch: "main", commit: "c0ffee" } },
+  repo: { kind: "clone", url: "git@example.com:r.git", checkout: { branch: "main", commit: "c0ffee" } },
   dotfiles: { repo: "https://example.com/dotfiles.git", ref: "main" },
 };
 const live = { previews: [], overlay: [] };
@@ -212,6 +212,19 @@ test("envelope expires 30 s after issue", () => {
   assert.equal(Date.parse(env.notAfter) - Date.parse(env.issuedAt), 30_000);
   assert.equal(Date.parse(env.issuedAt), now);
   assert.notEqual(envelope({ kind: "delete", pylonId }, node, now).jobId, env.jobId);
+});
+
+test("a probe takes a spawn whose repo is a clone or empty, and refuses one from a control plane older than scratch projects", () => {
+  const spawnBody = (repo: unknown) => JSON.stringify(envelope({ kind: "spawn", pylonId, boot: { ...boot, repo, source: { kind: "fresh", preSetup: null } } as BootInputs, live, liveHash }, node, now));
+  const clone = { kind: "clone", url: "git@example.com:r.git", checkout: { branch: "main", commit: "c0ffee" } };
+  assert.deepEqual(parseJobEnvelope(spawnBody(clone)).job, { kind: "spawn", pylonId, boot: { ...boot, repo: clone, source: { kind: "fresh", preSetup: null } }, live, liveHash });
+  const empty = { kind: "empty", branch: "main" };
+  const scratch = parseJobEnvelope(spawnBody(empty)).job;
+  assert.ok(scratch.kind === "spawn" && scratch.boot.repo.kind === "empty" && scratch.boot.repo.branch === "main");
+  assert.throws(() => parseJobEnvelope(spawnBody({ url: clone.url, checkout: clone.checkout })), { message: "job.boot.repo has no kind, so the control plane that sent it is older than this probe. Upgrade the control plane, then its probes" });
+  assert.throws(() => parseJobEnvelope(spawnBody({ kind: "fork", branch: "main" })), { message: "job.boot.repo.kind is not clone or empty" });
+  assert.throws(() => parseJobEnvelope(spawnBody({ kind: "empty" })), { message: "job.boot.repo.branch is not a non-empty string" });
+  assert.throws(() => parseJobEnvelope(spawnBody({ kind: "clone", url: clone.url })), { message: "job.boot.repo.checkout is not an object" });
 });
 
 test("jobSubject", () => {

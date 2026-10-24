@@ -38,7 +38,7 @@ import { connectProbe, type DeclaredOutput, type LiveHash, type NodeName, type P
 import { envelope, type PlanStep } from "./reconcile.ts";
 import { newPylonRecord, nextCheckpoint, snapshot, tick, type PylonRecord } from "./tick.ts";
 import type { BackendPylon, Guest, SecretSource, VmBackend } from "./backend.ts";
-import { loginHosts, renderOverlay, type BootInputs, type OverlayFile, type PreviewAssignment, type ProjectId, type SessionHarness } from "./project.ts";
+import { loginHosts, renderOverlay, type BootInputs, type CloneRepo, type OverlayFile, type PreviewAssignment, type ProjectId, type SessionHarness } from "./project.ts";
 import { checkoutDir, sessionFacts, sessionsFile } from "./sessions.ts";
 import type { CheckpointId, ImageId } from "./images.ts";
 
@@ -118,7 +118,7 @@ function dockerFixture(): SliceFixture {
     boot: {
       resources: { cpus: 1, memoryGiB: 1, diskGiB: 1 },
       network: { allowedHosts: [], secrets: [] },
-      repo: { url: "git@example.com:slice.git", checkout: { branch: "main", commit: "0000000" } },
+      repo: { kind: "clone", url: "git@example.com:slice.git", checkout: { branch: "main", commit: "0000000" } },
       dotfiles: { repo: "https://example.com/dotfiles.git", ref: "main" },
     },
     wake: () => ({}),
@@ -208,7 +208,8 @@ function pylonVmFixture(): SliceFixture {
   const instanceDir = join(instances, pylonId);
   const sshKey = process.env["NEXUS_PYLON_VM_GIT_SSH_KEY"];
   const gitSsh = sshKey === undefined ? undefined : { privateKeyFile: sshKey, knownHostsFile: process.env["NEXUS_PYLON_VM_KNOWN_HOSTS"] ?? join(homedir(), ".ssh", "known_hosts") };
-  const repo = {
+  const repo: CloneRepo = {
+    kind: "clone",
     url: gitSsh === undefined ? "https://github.com/octocat/Hello-World.git" : "git@github.com:octocat/Hello-World.git",
     checkout: { branch: "master", commit: "7fd1a60b01f91b314f59955a4e4d4e80d8edf11d" },
   };
@@ -579,7 +580,7 @@ test("the sessions open before the pause come back after the wake", { skip: fixt
 test("the in-pylon CLI reaches the probe through the host bridge, and a declared output reaches the observation", async () => {
   const pylonJson = renderOverlay({
     pylonId, threadId: thread, project: "slice" as ProjectId, node, allowedHosts: [], previews: [], logins: [],
-    dotfiles: { repo: "https://example.com/dotfiles.git", ref: "main" },
+    dotfiles: { repo: "https://example.com/dotfiles.git", ref: "main" }, repo: { kind: "empty", branch: "main" }, secrets: [],
   }).find((f) => f.path === pylonInfoFile)!.content;
   await fixture.installCli(pylonJson);
   const nexus = async (...args: string[]) => {

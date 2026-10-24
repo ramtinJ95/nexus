@@ -238,7 +238,7 @@ function seed(registry: Registry, activity: Partial<Pick<Thread, "agentTurnRunni
     thread: id, pylonId, node, desired: "running",
     boot: {
       pylonId, image, resources: { cpus: 2, memoryGiB: 4, diskGiB: 10 }, network: { allowedHosts: [], secrets: [] },
-      repo: { url: "git@example.com:acme.git", checkout: { branch: "main", commit: "origin/main" } },
+      repo: { kind: "clone", url: "git@example.com:acme.git", checkout: { branch: "main", commit: "origin/main" } },
       dotfiles: { repo: "https://example.com/dotfiles.git", ref: "main" },
     },
     firstBoot: { kind: "fresh", preSetup: null },

@@ -38,7 +38,7 @@ const boot = (source: BootInputs["source"]): BootInputs => ({
   pylonId, image, source,
   resources: { cpus: 2, memoryGiB, diskGiB: 8 },
   network: { allowedHosts: ["github.com"], secrets: [] },
-  repo: { url: "https://github.com/octocat/Hello-World.git", checkout: { branch: "master", commit: "7fd1a60b01f91b314f59955a4e4d4e80d8edf11d" } },
+  repo: { kind: "clone", url: "https://github.com/octocat/Hello-World.git", checkout: { branch: "master", commit: "7fd1a60b01f91b314f59955a4e4d4e80d8edf11d" } },
   dotfiles: { repo: "https://github.com/octocat/Spoon-Knife.git", ref: "main" },
 });
 const live = { previews: [], overlay: [] };

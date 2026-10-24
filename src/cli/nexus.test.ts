@@ -21,6 +21,7 @@ import { openRegistry, type Thread } from "../control/registry.ts";
 import type { ImageId, ImageManifest } from "../images.ts";
 import type { Project, ProjectId } from "../project.ts";
 import { processStream } from "../process-stream.ts";
+import { repoInitCommand } from "../pylon-vm-backend.ts";
 import type { ByteStream, CommandResult, NodeName, PylonCommand, PylonId, ServiceFact, StreamRequest, TailnetNodeId } from "../protocol.ts";
 import { checkoutDir } from "../sessions.ts";
 import { CliError, follow } from "./transport.ts";
@@ -290,12 +291,45 @@ test("project add creates a project with the contract's defaults or its flags, a
   await fails(["project", "add", "other", repo], 64, { kind: "invalid", status: null, error: "project add needs --node. Run nexus nodes to list them" });
   await fails(["project", "add", "other", repo], 64, { kind: "invalid", status: null, error: "project add needs --node. Run nexus nodes to list them" },
     { NEXUS_SOCKS: `127.0.0.1:${await closedPort()}` }); // with no proxy too, because it sends no request
-  await fails(["project", "add", "other"], 64, { kind: "invalid", status: null, error: "project add takes 2 arguments, got 1" });
+  await fails(["project", "add"], 64, { kind: "invalid", status: null, error: "project add takes 1 to 2 arguments, got 0" });
   await fails(["project", "other"], 64, { kind: "invalid", status: null, error: "unknown command project" });
   assert.deepEqual(s.registry.projects().map((p) => p.id).toSorted(), ["acme", "custom", "hello"], "no refused project was created");
 
   const human = await s.nexus(["project", "add", "other", repo]);
   assert.deepEqual([human.code, human.stderr], [64, "nexus: project add needs --node. Run nexus nodes to list them. Run nexus --help for usage\n"]);
+});
+
+test("project add --scratch makes a project with no repository, --secret grants each NAME:HOST in order, and start cannot pin its commit", async (t) => {
+  const s = await setup(t);
+  const added = await s.nexus(["project", "add", "sketch", "--scratch", "--node", node, "--secret", "GH_TOKEN:api.github.com,github.com", "--secret", "EXA_API_KEY:api.exa.ai"]);
+  assert.deepEqual([added.code, added.stdout, added.stderr], [0, `Added scratch project sketch on ${node}\n`, ""]);
+  assert.deepEqual(s.registry.project("sketch" as ProjectId), {
+    id: "sketch", repoUrl: null, defaultBranch: "main", defaultNode: node, resources: { cpus: 2, memoryGiB: 4, diskGiB: 10 }, allowedHosts: [],
+    secrets: [{ name: "GH_TOKEN", hosts: ["api.github.com", "github.com"] }, { name: "EXA_API_KEY", hosts: ["api.exa.ai"] }], logins: [], preSetup: null,
+  });
+  assert.match((await s.nexus(["projects"])).stdout, /^sketch +node rj-firebat +branch main +scratch$/m);
+
+  const pinned = await s.nexus(["start", "--project", "sketch", "--title", "x", "--commit", "abc123", "--json"]);
+  assert.equal(pinned.code, 64);
+  assert.deepEqual((({ kind, status, error }) => ({ kind, status, error }))(JSON.parse(pinned.stderr)), { kind: "invalid", status: 400, error: "project sketch is a scratch project, so it has no commit to check out" });
+
+  // Through a proxy nothing listens on, so each of these fails before it sends a request.
+  const offline = { NEXUS_SOCKS: `127.0.0.1:${await closedPort()}` };
+  const refused = async (args: readonly string[], error: string) => {
+    const res = await s.nexus(["project", "add", "other", ...args, "--node", node, "--json"], offline);
+    assert.deepEqual([res.code, res.stdout], [64, ""], `${args.join(" ")}: ${res.stderr}`);
+    assert.deepEqual((({ kind, status, error }) => ({ kind, status, error }))(JSON.parse(res.stderr)), { kind: "invalid", status: null, error }, args.join(" "));
+    return res.stderr;
+  };
+  const either = "project add takes a <repo-url> or --scratch, and not both";
+  await refused(["https://github.com/octocat/Hello-World.git", "--scratch"], either);
+  await refused([], either);
+  const grant = "--secret takes NAME:HOST[,HOST...], an upper-case name and lower-case hostnames, such as GH_TOKEN:api.github.com,github.com. The value stays in each node's secret file";
+  assert.doesNotMatch(await refused(["--scratch", "--secret", "GH_TOKEN=ghp_pastedbymistake"], grant), /ghp_pastedbymistake/, "a pasted token is not repeated");
+  for (const malformed of ["gh_token:github.com", "GH_TOKEN:", "GH_TOKEN:github.com,", "GH_TOKEN:ghp_pastedbymistake", "GH_TOKEN:GitHub.com"]) {
+    await refused(["--scratch", "--secret", malformed], grant);
+  }
+  assert.deepEqual(s.registry.projects().map((p) => p.id).toSorted(), ["acme", "sketch"], "no refused project was created");
 });
 
 /** The JSON lines a watch prints, one at a time. */
@@ -449,6 +483,37 @@ test("files, changes and diff read the pylon's checkout, and wait for a paused p
   const missing = await s.nexus(["files", thread.id, "nope", "--json"]);
   assert.equal(missing.code, 4);
   assert.match(JSON.parse(missing.stderr).error, /nope does not exist/);
+});
+
+test("changes and diff of a scratch thread are against the empty tree, before its first commit and after", async (t) => {
+  const s = await setup(t);
+  const thread: Thread = await s.json(["start", "--project", "acme", "--title", "scratch"]);
+  const scratch = await mkdtemp(join(tmpdir(), "nexus-cli-scratch-"));
+  t.after(() => rm(scratch, { recursive: true }));
+  const repo = join(scratch, "repo");
+  await promisify(execFile)("sh", ["-c", repoInitCommand({ kind: "empty", branch: "main" }, repo)]);
+  const git = (...args: string[]) => promisify(execFile)("git", ["-C", repo, "-c", "user.name=t", "-c", "user.email=t@t", ...args]);
+  s.probePipes(async ({ argv }) => processStream(argv[0]!, argv.slice(1).map((arg) => arg === checkoutDir ? repo : arg), () => {}));
+  const output = async (args: string[]) => {
+    const res = await s.nexus(args);
+    assert.equal(res.code, 0, res.stderr);
+    return res.stdout;
+  };
+  await writeFile(join(repo, "README.md"), "# sketch\n");
+
+  const sinceBoot = "Changes since the pylon booted an empty repository:\nadded  +1 -0  README.md\n";
+  assert.equal(await output(["changes", thread.id]), sinceBoot);
+  assert.equal(await output(["changes", thread.id, "--uncommitted"]), "Changes since HEAD, which names no commit yet:\nadded  +1 -0  README.md\n");
+  const firstDiff = await output(["diff", thread.id]);
+  assert.match(firstDiff, /^diff --git a\/README.md b\/README.md\nnew file mode 100644\n[^]*\n\+# sketch\n$/);
+  assert.equal(await output(["diff", thread.id, "--uncommitted"]), firstDiff);
+
+  await git("add", "-A");
+  await git("commit", "-q", "-m", "first");
+  const head = (await git("rev-parse", "HEAD")).stdout.trim();
+  assert.equal(await output(["changes", thread.id]), sinceBoot, "the agent's commit is a change since the start too");
+  assert.equal(await output(["diff", thread.id]), firstDiff);
+  assert.equal(await output(["changes", thread.id, "--uncommitted"]), `No changes since HEAD, ${head.slice(0, 12)}.\n`);
 });
 
 test("unpreview unpublishes a port, waits for a paused pylon to run, and fails with the contract's exit codes", async (t) => {
