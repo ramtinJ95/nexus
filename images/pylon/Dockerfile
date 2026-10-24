@@ -57,6 +57,29 @@ RUN curl -fsSL https://herdr.dev/install.sh -o /tmp/herdr-install.sh \
  && installed="$(herdr --version)" \
  && if [ "$installed" != "herdr ${HERDR_VERSION}" ]; then echo "Herdr's installer installed '$installed', but pins.json pins ${HERDR_VERSION}. Update the herdr pin" >&2; exit 1; fi
 
+# gh from its release tarball, checked like Node. git asks gh for github.com credentials, and gh reads GH_TOKEN
+# when git asks, so the placeholder that Gondolin mints on each boot is never stored. The helper lives in
+# /etc/gitconfig, which no dotfiles layer replaces.
+ARG GH_VERSION
+ARG GH_SHA256
+RUN cd /tmp \
+ && curl -fsSLo gh.tgz "https://github.com/cli/cli/releases/download/v${GH_VERSION}/gh_${GH_VERSION}_linux_amd64.tar.gz" \
+ && echo "${GH_SHA256}  gh.tgz" | sha256sum -c - \
+ && tar -xzf gh.tgz \
+ && install -m 0755 "gh_${GH_VERSION}_linux_amd64/bin/gh" /usr/local/bin/gh \
+ && rm -r gh.tgz "gh_${GH_VERSION}_linux_amd64" \
+ && git config --system credential.https://github.com.helper '!/usr/local/bin/gh auth git-credential'
+
+# Neovim for the review-pane mod, which needs 0.10 or later where bookworm ships 0.7. Its release tarball is
+# checked and unpacked into /usr/local like Node's, so nvim finds its runtime at ../share/nvim/runtime from its binary.
+ARG NEOVIM_VERSION
+ARG NEOVIM_SHA256
+RUN cd /tmp \
+ && curl -fsSLo nvim.tgz "https://github.com/neovim/neovim/releases/download/v${NEOVIM_VERSION}/nvim-linux-x86_64.tar.gz" \
+ && echo "${NEOVIM_SHA256}  nvim.tgz" | sha256sum -c - \
+ && tar -xzf nvim.tgz -C /usr/local --strip-components=1 --no-same-owner \
+ && rm nvim.tgz
+
 COPY --chmod=0755 nexus /usr/local/bin/nexus
 # The common dotfiles layer as a git repository, which the boot path clones into ~/.nexus/dotfiles and then
 # updates by fetch. It is owned by user because git refuses to clone a local repository another user owns.
@@ -74,10 +97,19 @@ RUN cd /opt/nexus/dotfiles \
  && git add -A \
  && GIT_AUTHOR_DATE=2000-01-01T00:00:00Z GIT_COMMITTER_DATE=2000-01-01T00:00:00Z \
     git -c user.name=nexus -c user.email=nexus@pylon commit -q -m "dotfiles common layer at ${DOTFILES_COMMIT}"
-# pi and Claude Code make their config directories on first run, and Herdr's installers refuse to run before that.
-RUN mkdir -p /home/user/.pi/agent/extensions /home/user/.claude \
- && herdr integration install pi \
- && herdr integration install claude
+# This Mac's Claude Code plugins, skills, pi packages and pi extensions, which src/agent-setup.ts captured into
+# agent-setup/manifest.json. The installer fetches and installs what the manifest pins, then runs Herdr's
+# integrations, the order every boot repeats, so Herdr's hook merges into the settings.json that the plugin
+# installs wrote. It fails the build on any difference from the manifest. pi and Claude Code make their config
+# directories on first run, and Herdr's installers refuse to run before that.
+COPY --chown=user:user agent-setup/ /opt/nexus/agent-setup/
+RUN mkdir -p /home/user/.pi/agent/extensions /home/user/.claude /home/user/.agents/skills \
+ && node /opt/nexus/agent-setup/install.ts \
+ && npm cache clean --force
+# The overlay writes ~/.nexus/PYLON.md on every spawn. Claude Code imports it, and pi, which has no import, reads
+# it through the link. A dotfiles layer that installs either file must keep this.
+RUN printf '@~/.nexus/PYLON.md\n' > /home/user/.claude/CLAUDE.md \
+ && ln -s /home/user/.nexus/PYLON.md /home/user/.pi/agent/AGENTS.md
 # Nexus relaunches each pane's agent on wake (src/sessions.ts) and checks that it runs. Herdr's own resume on
 # restore would start it first, and when that start fails, as `claude --resume` does for a session never
 # prompted, Herdr still reports the agent as running.

@@ -9,5 +9,9 @@
   "piEnvSha256": "46dde0e25b5cf1a327a10ddcb25f746f85b783492f5b225dfaa1a0d84cf5b56a",
   "gondolin": "0.13.0",
   "alpineKernel": "6.18.58-0-virt",
-  "dotfilesCommon": "placeholder"
+  "dotfilesCommon": "placeholder",
+  "gh": "2.103.2",
+  "ghSha256": "62ccf747115ddc61237efffdde66a3c8f70ba249433dc64f70801089b59c59c8",
+  "neovim": "0.12.6",
+  "neovimSha256": "474430d53e6264f6d6dd18db42d6dc9df3a1b56ca9e88a325bbf860e1a811d87"
 }

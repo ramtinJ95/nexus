@@ -1,0 +1,50 @@
+{
+  "dotfiles": {"url":"https://github.com/ramtinJ95/dotfiles","commit":"9ba7de9d525a918d4af189d55c57f59ba0de875d"},
+  "claude": {
+    "marketplaces": [
+      {"name":"claude-mods","url":"https://github.com/ramtinJ95/claude-mods","commit":"b97e1e322f7dc521dbe512e819fc54865d628ad2"},
+      {"name":"cursor-plugins","url":"https://github.com/cursor/plugins","commit":"9580c23696ac8d7abed0c166f2f9918800afb819"}
+    ],
+    "plugins": [
+      {"id":"notes-compaction@claude-mods","version":"0.2.11"},
+      {"id":"pstack@cursor-plugins","version":"0.15.32"},
+      {"id":"review-pane@claude-mods","version":"0.3.0"}
+    ]
+  },
+  "pi": {
+    "packages": [
+      {"kind":"npm","name":"@howaboua/pi-codex-conversion","version":"4.0.4"},
+      {"kind":"npm","name":"@howaboua/pi-auto-trees","version":"0.1.18"},
+      {"kind":"npm","name":"@howaboua/pi-subagent-review","version":"0.2.25"},
+      {"kind":"npm","name":"@howaboua/pi-ask","version":"0.0.16"},
+      {"kind":"npm","name":"@ramtinj95/pi-comment-editor","version":"2.0.1"},
+      {"kind":"local","path":"common-config/common-dotfiles/pi/.pi/agent/extensions/pi-visualize-code-changes"},
+      {"kind":"npm","name":"@ramtinj95/pi-mermaid-tui","version":"0.2.4"},
+      {"kind":"npm","name":"@howaboua/pi-gpt-switcher","version":"0.1.5"},
+      {"kind":"npm","name":"@ramtinj95/pi-claude-delegation","version":"0.2.0"},
+      {"kind":"npm","name":"@howaboua/pi-codex-web-run","version":"0.0.8"},
+      {"kind":"npm","name":"@howaboua/pi-codex-imagegen","version":"0.0.11"}
+    ],
+    "extensions": [
+      "common-config/common-dotfiles/pi/.pi/agent/extensions/exa-deep-research.ts",
+      "common-config/common-dotfiles/pi/.pi/agent/extensions/exa-web-search.ts",
+      "common-config/common-dotfiles/pi/.pi/agent/extensions/pi-vim",
+      "common-config/common-dotfiles/pi/.pi/agent/extensions/silly-messages.ts"
+    ]
+  },
+  "skills": [
+    {"path":"common-config/common-dotfiles/agents/.agents/skills/grill-me","for":["claude","pi"]},
+    {"path":"common-config/common-dotfiles/agents/.agents/skills/grilling","for":["claude","pi"]},
+    {"path":"common-config/common-dotfiles/agents/.agents/skills/grok","for":["pi"]},
+    {"path":"common-config/common-dotfiles/agents/.agents/skills/herdr","for":["claude","pi"]},
+    {"path":"common-config/common-dotfiles/agents/.agents/skills/pr-diary","for":["claude","pi"]},
+    {"path":"common-config/common-dotfiles/agents/.agents/skills/practice","for":["claude","pi"]},
+    {"path":"common-config/common-dotfiles/agents/.agents/skills/scribebase-article-ingest","for":["pi"]},
+    {"path":"common-config/common-dotfiles/agents/.agents/skills/scribebase-context","for":["claude","pi"]},
+    {"path":"common-config/common-dotfiles/agents/.agents/skills/scribebase-ingest","for":["pi"]},
+    {"path":"common-config/common-dotfiles/agents/.agents/skills/teach","for":["claude","pi"]},
+    {"path":"common-config/common-dotfiles/agents/.agents/skills/typesafe-ai","for":["claude","pi"]},
+    {"path":"common-config/common-dotfiles/agents/.agents/skills/writing-great-skills","for":["pi"]},
+    {"path":"mac-config/mac-dotfiles/claude/.claude/skills/show-me","for":["claude"]}
+  ]
+}

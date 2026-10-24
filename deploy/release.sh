@@ -24,7 +24,8 @@ install_release() {
   rm -rf "$prefix"/releases/.staging.*
   staging=$(mktemp -d "$prefix/releases/.staging.XXXXXX")
   trap 'rm -rf "$staging"' EXIT
-  tar -C "$repo" -cf - package.json package-lock.json tsconfig.json src | tar -C "$staging" --no-same-owner -xf -
+  # src/release.test.ts fails when src imports a file outside this list.
+  tar -C "$repo" -cf - package.json package-lock.json tsconfig.json src images/pylon/agent-setup/manifest.ts | tar -C "$staging" --no-same-owner -xf -
   release=$(cd "$staging" && find . -type f -print0 | LC_ALL=C sort -z | xargs -0 sha256sum | sha256sum | cut -c1-12)
   if [ -d "$prefix/releases/$release" ]; then
     echo "release $release is already installed"

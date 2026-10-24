@@ -81,6 +81,26 @@ sudo systemctl start nexus-control
 
 The login prints a URL to open in your browser. The browser's last step goes to port 1455 on `rj-firebat`, so on your laptop that page fails to load. Paste the address it ended on into the prompt. Alternatively, forward the port first with `ssh -L 1455:127.0.0.1:1455 rj-firebat`.
 
+## Build the pylon image
+
+The image bakes this Mac's Claude Code plugins, skills, pi packages and pi extensions, as `images/pylon/agent-setup/manifest.json` pins them. To refresh them, capture them on the Mac in the nexus checkout, then commit and push the manifest:
+
+```sh
+node src/agent-setup.ts --dry-run
+node src/agent-setup.ts
+git commit -m "chore(image): refresh the pylon agent setup" images/pylon/agent-setup/manifest.json && git push
+```
+
+The capture prints what ships and what it leaves out. When something cannot ship, such as a skill not committed and pushed in the dotfiles repo or a plugin older than its marketplace, it writes nothing and says how to fix each problem. `docs/contracts/usage.md` describes it.
+
+Then build on `infra-testbench`, from a checkout at the pushed commit with `npm ci` done:
+
+```sh
+git pull && bash images/pylon/build.sh
+```
+
+The build needs Docker and KVM, and its Docker step reaches GitHub and npm. When the smoke boot passes, it writes the image to `~/nexus-spikes/images/<image ID>` and prints its manifest, whose `id` is the image ID. A recipe that did not change gives the same ID, and the build returns at once.
+
 ## Run a first thread
 
 These steps check a fresh install with the real model. Run them on the control plane's machine, as a caller the API allows: the machine itself, `self.tailnetNodeId`. Set these first:
