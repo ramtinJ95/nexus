@@ -386,8 +386,19 @@ test("a template boot copies the template's disk in and sets up only the pylon's
   assert.equal(record.config.image, assets);
   assert.equal(record.config.setup.length, 1);
   assert.equal(record.config.retrySetup, true, "a failed checkout is not kept on the disk");
-  assert.match(record.config.setup[0], /git remote set-url origin .*Hello-World\.git.* && git fetch --quiet origin && git checkout --quiet -B .*master.* .*7fd1a60b/);
+  assert.match(record.config.setup[0], /git remote set-url origin .*Hello-World\.git.* && git fetch --quiet origin && git checkout --quiet -B .*master.* .*7fd1a60b.* && git -C .*\/home\/user\/workspace\/repo.* update-ref refs\/nexus\/base HEAD/);
+  assert.doesNotMatch(record.config.setup[0], / git update-ref/, "update-ref is git's own subcommand");
   assert.deepEqual(JSON.parse(await readFile(join(dir, "intent.json"), "utf8")), { prepare: false });
+});
+
+test("a fresh boot clones the pylon's commit and records it as the base its changes are diffed against", async () => {
+  const { backend, instances } = await backendWith();
+  // The assets are a bare manifest, so the controller fails once it reaches Gondolin.
+  await assert.rejects(backend.ensureRunning(bootOf("pylon-fresh"), live, AbortSignal.timeout(60_000)));
+  const record = JSON.parse(await readFile(join(instances, "pylon-fresh", "record.json"), "utf8"));
+  const clone = (record.config.setup as string[]).find((command) => command.includes("git clone"));
+  assert.match(clone!, /git clone --no-checkout .*Hello-World\.git.* && git -C .*repo.* checkout -B .*master.* .*7fd1a60b.* && git -C .*\/home\/user\/workspace\/repo.* update-ref refs\/nexus\/base HEAD/);
+  assert.doesNotMatch(clone!, / git update-ref/, "update-ref is git's own subcommand");
 });
 
 test("a template build on an image this node lacks is artifact-missing, and one under 3 GiB is invalid", async () => {

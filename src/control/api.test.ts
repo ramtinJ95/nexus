@@ -1,16 +1,20 @@
 import { after, test } from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { mkdtemp, rm } from "node:fs/promises";
+import { execFile } from "node:child_process";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { request } from "node:http";
 import { join } from "node:path";
+import { promisify } from "node:util";
 import { maxStreams, startApi, type ThreadDetail, type ThreadRow } from "./api.ts";
 import { readEvents } from "./event-reader.ts";
 import { fakeHarness } from "./fake-harness.ts";
 import { openRegistry, type Thread } from "./registry.ts";
 import { liveHashOf } from "../project.ts";
-import type { CommandResult, JobId, NodeName, PylonCommand, PylonId, ServiceFact, TailnetNodeId } from "../protocol.ts";
+import { processStream } from "../process-stream.ts";
+import { checkoutDir } from "../sessions.ts";
+import type { ByteStream, CommandResult, JobId, NodeName, PylonCommand, PylonId, ServiceFact, StreamRequest, TailnetNodeId } from "../protocol.ts";
 
 const node = "rj-firebat" as NodeName;
 const laptop = "nLAPTOP" as TailnetNodeId;
@@ -48,6 +52,9 @@ async function setup(t: import("node:test").TestContext, options: { dotfiles?: t
     if (command.kind === "close-session") return { kind: "close-session" };
     throw new Error(`unexpected ${command.kind} command`);
   };
+  const streams: [PylonId, StreamRequest][] = [];
+  /** What the node's probe opens a pipe to. Tests replace it. */
+  let pipe = async (request: StreamRequest): Promise<ByteStream> => { throw new Error(`unexpected stream ${request.argv[0]}`); };
   const api = await startApi({
     registry, host: "127.0.0.1", port: 0,
     // Every loopback caller is whoever the test says. Tests never ask tailscaled.
@@ -57,7 +64,10 @@ async function setup(t: import("node:test").TestContext, options: { dotfiles?: t
     dotfiles: options.dotfiles ?? dotfiles,
     harness,
     wake: (n) => { woken.push(n); },
-    probes: new Map([[node, { command: (pylonId: PylonId, command: PylonCommand) => { commands.push([pylonId, command]); return answer(command); } }]]),
+    probes: new Map([[node, {
+      command: (pylonId: PylonId, command: PylonCommand) => { commands.push([pylonId, command]); return answer(command); },
+      stream: (pylonId: PylonId, request: StreamRequest) => { streams.push([pylonId, request]); return pipe(request); },
+    }]]),
     previewPorts: { first: 10200, last: 10299 },
     ...options.streamStallMs === undefined ? {} : { streamStallMs: options.streamStallMs },
   });
@@ -83,10 +93,21 @@ async function setup(t: import("node:test").TestContext, options: { dotfiles?: t
       req.end(payload);
     });
   }
+  /** A GET whose body is kept as bytes, with the reply's headers. */
+  function raw(path: string): Promise<{ status: number; headers: import("node:http").IncomingHttpHeaders; body: Buffer }> {
+    return new Promise((resolve, reject) => {
+      request({ host: "127.0.0.1", port: api.port, method: "GET", path, headers: { host: `127.0.0.1:${api.port}` } }, (res) => {
+        const chunks: Buffer[] = [];
+        res.on("data", (chunk: Buffer) => chunks.push(chunk));
+        res.on("end", () => resolve({ status: res.statusCode!, headers: res.headers, body: Buffer.concat(chunks) }));
+      }).on("error", reject).end();
+    });
+  }
   return {
-    registry, call, woken, calls, commands, fake,
+    registry, call, raw, woken, calls, commands, streams, fake,
     callAs(id: TailnetNodeId | null) { caller = id; },
     probeAnswers(next: typeof answer) { answer = next; },
+    probePipes(next: typeof pipe) { pipe = next; },
     events: (path: string) => readEvents(api.port, path),
   };
 }
@@ -379,6 +400,104 @@ test("opening a session goes through the node's probe, defaults to Claude Code t
     assert.equal((await s.call("POST", `/v1/threads/${s.thread.id}/sessions`, body)).status, 400, JSON.stringify(body));
   }
   assert.deepEqual(s.commands, [], "a bad request never reaches the probe");
+});
+
+const git = promisify(execFile);
+
+/** A checkout on this machine whose first commit is refs/nexus/base, which the probe's pipes read in place of the pylon's. */
+async function localCheckout(t: import("node:test").TestContext, s: { probePipes(next: (request: StreamRequest) => Promise<ByteStream>): void }) {
+  const repo = await mkdtemp(join(tmpdir(), "nexus-api-checkout-"));
+  t.after(() => rm(repo, { recursive: true }));
+  const run = (...args: string[]) => git("git", ["-C", repo, "-c", "user.name=t", "-c", "user.email=t@t", ...args]);
+  await mkdir(join(repo, "src"));
+  await writeFile(join(repo, "src", "app.ts"), "export const a = 1;\n");
+  await run("init", "-q");
+  await run("add", "-A");
+  await run("commit", "-q", "-m", "first");
+  await run("update-ref", "refs/nexus/base", "HEAD");
+  const base = (await run("rev-parse", "HEAD")).stdout.trim();
+  s.probePipes(async ({ argv }) => processStream(argv[0]!, argv.slice(1).map((arg) => arg === checkoutDir ? repo : arg), () => {}));
+  return { repo, run, base };
+}
+
+test("a thread's files and changes are read from its checkout through its node's probe, and reading counts as human activity", async (t) => {
+  const s = await withThread(t);
+  const { repo, base } = await localCheckout(t, s);
+  await writeFile(join(repo, "src", "app.ts"), "export const a = 2;\n");
+  await writeFile(join(repo, "shot.png"), Buffer.from([0x89, 0x50, 0, 255]));
+  s.registry.recordActivity(s.thread.id, { human: 1 });
+  s.woken.length = 0;
+  const id = s.thread.id;
+
+  const root = await s.call("GET", `/v1/threads/${id}/files`);
+  assert.equal(root.status, 200);
+  assert.deepEqual(root.body.entries.filter((e: { name: string }) => e.name !== ".git"), [{ name: "shot.png", kind: "file", size: 4 }, { name: "src", kind: "dir", size: null }]);
+  assert.deepEqual((await s.call("GET", `/v1/threads/${id}/files?path=src`)).body, { path: "src", entries: [{ name: "app.ts", kind: "file", size: 20 }], truncated: false });
+
+  const shot = await s.raw(`/v1/threads/${id}/files/content?path=shot.png`);
+  assert.equal(shot.status, 200);
+  assert.deepEqual(shot.body, Buffer.from([0x89, 0x50, 0, 255]));
+  assert.equal(shot.headers["content-type"], "image/png");
+  assert.equal(shot.headers["x-content-type-options"], "nosniff");
+  assert.equal(shot.headers["content-security-policy"], "default-src 'none'; sandbox");
+  assert.equal((await s.raw(`/v1/threads/${id}/files/content?path=src%2Fapp.ts`)).body.toString(), "export const a = 2;\n");
+
+  assert.deepEqual(await s.call("GET", `/v1/threads/${id}/changes`), {
+    status: 200,
+    body: {
+      base: { kind: "start", commit: base },
+      files: [
+        { path: "shot.png", oldPath: null, status: "added", additions: null, deletions: null },
+        { path: "src/app.ts", oldPath: null, status: "modified", additions: 1, deletions: 1 },
+      ],
+      truncated: false,
+    },
+  });
+  const diff = await s.call("GET", `/v1/threads/${id}/diff?base=head&path=src%2Fapp.ts`);
+  assert.equal(diff.status, 200);
+  assert.equal(diff.body.base.kind, "head");
+  assert.match(diff.body.diff, /^diff --git a\/src\/app.ts b\/src\/app.ts\n[^]*-export const a = 1;\n\+export const a = 2;\n$/);
+
+  assert.ok(s.streams.every(([pylon, request]) => pylon === s.thread.pylonId && request.pty === null));
+  assert.ok(s.registry.thread(id)!.lastHumanActivityAt > 1);
+  assert.ok(s.woken.includes(node));
+});
+
+test("a checkout read the pylon refuses answers its status, and a bad request never reaches the probe", async (t) => {
+  const s = await withThread(t);
+  const { run } = await localCheckout(t, s);
+  const id = s.thread.id;
+  const refusal = async (path: string, status: number, message: RegExp) => {
+    const reply = await s.call("GET", path);
+    assert.equal(reply.status, status, path);
+    assert.match(reply.body.error, message, path);
+  };
+  await refusal(`/v1/threads/${id}/files?path=nope`, 404, /nope does not exist/);
+  await refusal(`/v1/threads/${id}/files/content?path=src`, 400, /src is not a file/);
+  await refusal(`/v1/threads/${id}/files?path=..%2F..`, 400, /outside the checkout/);
+  await run("update-ref", "-d", "refs/nexus/base");
+  await refusal(`/v1/threads/${id}/changes`, 422, /no refs\/nexus\/base/);
+  assert.equal((await s.call("GET", `/v1/threads/${id}/changes?base=head`)).status, 200);
+
+  s.streams.length = 0;
+  for (const path of [`/v1/threads/${id}/changes?base=main`, `/v1/threads/${id}/diff?base=tip`, `/v1/threads/${id}/files/content`, `/v1/threads/${id}/files/content?path=`, `/v1/threads/${id}/files?path=a%00b`, `/v1/threads/${id}/diff?${Array(100).fill(`path=${"p".repeat(154)}`).join("&")}`, `/v1/threads/${id}/files?path=${"%C3%A9".repeat(2000)}`]) {
+    assert.equal((await s.call("GET", path)).status, 400, path);
+  }
+  assert.deepEqual(s.streams, [], "a bad request never reaches the probe");
+});
+
+test("reading the checkout of a pylon that is not running wakes it and is refused with 409, and an archived thread's probe is never asked", async (t) => {
+  const s = await withThread(t);
+  s.probePipes(async () => { throw Object.assign(new Error("rj-firebat: pylon-x is stopped, not running"), { code: "not-running" }); });
+  s.woken.length = 0;
+  const paused = await s.call("GET", `/v1/threads/${s.thread.id}/changes`);
+  assert.equal(paused.status, 409);
+  assert.match(paused.body.error, /is not running yet. This request wakes it/);
+  assert.ok(s.woken.includes(node));
+  assert.equal((await s.call("POST", `/v1/threads/${s.thread.id}/archive`)).status, 200);
+  s.streams.length = 0;
+  assert.equal((await s.call("GET", `/v1/threads/${s.thread.id}/files`)).status, 409);
+  assert.deepEqual(s.streams, []);
 });
 
 test("closing a session goes through the node's probe, which treats a pane already gone as closed", async (t) => {
