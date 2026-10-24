@@ -242,6 +242,7 @@ export function openRegistry(path: string) {
     insertPreview: db.prepare("INSERT INTO previews (pylon, node, service, https_port, ready) SELECT id, node, ?, ?, 0 FROM pylons WHERE id = ?"),
     previewReady: db.prepare("UPDATE previews SET ready = ? WHERE pylon = ? AND service = ? AND https_port = ?"),
     deletePreviews: db.prepare("DELETE FROM previews WHERE pylon = ?"),
+    deletePreview: db.prepare("DELETE FROM previews WHERE pylon = ? AND service = ?"),
     portsOn: db.prepare("SELECT https_port FROM previews WHERE node = ?"),
     previews: db.prepare("SELECT previews.*, nodes.tailnet_host FROM previews JOIN nodes ON nodes.name = previews.node WHERE pylon = ? ORDER BY service"),
     insertOutput: db.prepare("INSERT INTO outputs (thread, kind, ref) VALUES (?, ?, ?) ON CONFLICT DO NOTHING"),
@@ -365,6 +366,8 @@ export function openRegistry(path: string) {
     },
     /** Frees a deleted pylon's ports for other pylons on its node. */
     releasePreviews(pylonId: PylonId) { q.deletePreviews.run(pylonId); },
+    /** Drops one service's preview, such as an unlinked port's, and frees its port. A service with none is left as it is. */
+    releasePreview(pylonId: PylonId, service: string) { q.deletePreview.run(pylonId, service); },
     previews,
     outputs: (thread: ThreadId) => (q.outputs.all(thread) as Row[]).map((r): Output => ({
       thread: r.thread as ThreadId, kind: r.kind as Output["kind"], ref: r.ref as string,

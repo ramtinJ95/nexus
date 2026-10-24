@@ -216,6 +216,7 @@ a.link { color: var(--accent); }
 .pv-note { font-size: 11px; color: var(--text-3); }
 .pv-busy .pv-note { color: var(--warn); }
 .pv-top .btn, .pv-top .pv-note:last-child { margin-left: auto; }
+.pv-top .btn + .btn { margin-left: 0; }
 .pv-url { font: 11px var(--mono); color: var(--text-3); margin-top: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .pv-hint { font-size: 11.5px; color: var(--text-2); margin-top: 4px; }
 .outs li { display: flex; align-items: center; gap: 8px; font-size: 12px; min-width: 0; flex-wrap: wrap; }

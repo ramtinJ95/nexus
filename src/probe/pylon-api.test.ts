@@ -19,6 +19,8 @@ const url = (port: number) => `https://infra-testbench.tail0.ts.net:${port}/`;
 /** The tailscale serve stand-in serves every port the test publishes. */
 function setup(guest: Partial<Guest>, deps: Partial<PylonApiDeps> = {}) {
   let changes = 0;
+  const withdrawn: string[] = [];
+  const relinked: string[] = [];
   const served = new Set<number>();
   let published: { service: string; httpsPort: number }[] = [];
   const base = fakeGuest((argv) => argv[0] === "cat" && argv[1] === pylonInfoFile ? { exitCode: 0, output: pylonJson } : { exitCode: 127, output: "unexpected" });
@@ -27,12 +29,16 @@ function setup(guest: Partial<Guest>, deps: Partial<PylonApiDeps> = {}) {
     published: () => published,
     changed: () => { changes++; },
     previewUrl: async (port) => served.has(port) ? url(port) : null,
+    async withdraw(_pylonId, service) { withdrawn.push(service); },
+    linked(_pylonId, service) { relinked.push(service); },
     previewWaitMs: 2_000,
     ...deps,
   });
   return {
     api,
     changes: () => changes,
+    withdrawn,
+    relinked,
     publish(previews: { service: string; httpsPort: number }[]) {
       for (const p of previews) served.add(p.httpsPort);
       published = previews;
@@ -72,6 +78,7 @@ test("preview links the port, reports the change at once, and answers with the U
   await new Promise((resolve) => setTimeout(resolve, 20));
   assert.deepEqual(linked, [[6006, "Storybook"]]);
   assert.equal(t.changes(), 1, "the control plane hears of the new service before the wait");
+  assert.deepEqual(t.relinked, ["storybook"], "spawns may route it again after an earlier unpreview");
   t.publish([{ service: "storybook", httpsPort: 10102 }]);
   assert.deepEqual(await reply, { status: 200, reply: { service: "storybook", port: 6006, url: url(10102) } });
 });
@@ -85,6 +92,18 @@ test("a preview published before the call answers at once", async () => {
   const t = setup({ linkPort: async () => "storybook" }, { previewWaitMs: 60_000 });
   t.publish([{ service: "storybook", httpsPort: 10102 }]);
   assert.deepEqual(await t.call({ op: "preview", port: 6006 }), { status: 200, reply: { service: "storybook", port: 6006, url: url(10102) } });
+});
+
+test("unpreview unlinks the port, withdraws its route and reports the change, and a refusal comes back as a 409 with the pylon's reason", async () => {
+  const unlinked: number[] = [];
+  const t = setup({ async unlinkPort(port) { unlinked.push(port); return null; } });
+  assert.deepEqual(await t.call({ op: "unpreview", port: 6006 }), { status: 200, reply: { port: 6006 } });
+  assert.deepEqual(unlinked, [6006]);
+  assert.equal(t.changes(), 1, "the control plane hears the port is gone, which drops its preview");
+  assert.deepEqual(t.withdrawn, ["port-6006"], "the gateway stops routing its URL before the reply");
+  const owned = setup({ unlinkPort: async () => "Port 3000 is the preview of service web, not a linked port" });
+  assert.deepEqual(await owned.call({ op: "unpreview", port: 3000 }), { status: 409, reply: "Port 3000 is the preview of service web, not a linked port" });
+  assert.deepEqual([owned.changes(), owned.withdrawn], [0, []]);
 });
 
 test("services ensure waits for the URL of every service that wants a preview", async () => {

@@ -245,6 +245,20 @@ export function dockerServices() {
       return linkedName(port);
     },
 
+    /** As the pylon VM's detach: a port that is not linked is left as it is, and a declared service's preview or name is refused, with why. */
+    async unlink(container: string, port: number): Promise<string | null> {
+      const k = state(container);
+      if (!k.linked.has(port)) {
+        const owner = Object.entries(k.declared).find(([, decl]) => decl.port === port && wantsPreview(decl));
+        if (owner !== undefined) return `Port ${port} is the preview of service ${owner[0]}, not a linked port. Remove the preview from ${servicesFile} to unpublish it`;
+        return k.declared[linkedName(port)] === undefined ? null : `Service ${linkedName(port)} is not a linked port, so port ${port} has no linked preview to unpublish. Rename the service`;
+      }
+      // printf with no ports writes one empty line, which `linked` skips.
+      await checked(container, `mkdir -p ${root} && printf '%s\\n' "$@" > ${linkedFile}`, [...k.linked].filter((p) => p !== port).map(String));
+      k.linked.delete(port);
+      return null;
+    },
+
     async logs(container: string, name: string, lines = 100): Promise<{ services: ServiceFact[]; logs: string }> {
       const k = state(container);
       const names = selection(k, name);

@@ -17,7 +17,7 @@ import type { AssistantMessage, ImageContent, TextContent, ToolCall, UserMessage
 import type { ConversationView, InboxState, LiveState } from "@earendil-works/pi-durable";
 import { desiredPhase, type ActualState, type DesiredPhase } from "../reconcile.ts";
 import type { SessionFact } from "../protocol.ts";
-import type { SessionHarness } from "../project.ts";
+import { linkedPort, type SessionHarness } from "../project.ts";
 import type { ThreadDetail } from "./api.ts";
 import type { NodeRecord, Output, Preview, Registry, Thread, ThreadId } from "./registry.ts";
 
@@ -430,6 +430,8 @@ function inspector(d: ThreadDetail, node: NodeRecord, now: number): Html {
   // A port with a preview is listed under Previews. Ports lists the rest, which are published only when someone opens one.
   const unpublished = d.ports?.filter((l) => l.preview === null) ?? null;
   const host = (url: string) => url.replace(/^https:\/\//, "").replace(/\/$/, "");
+  // Only a linked port's preview can be unpublished. A service's preview is part of its declaration.
+  const open = t.status === "active" || t.status === "idle";
   const count = (n: number) => html`<span class="count">${n}</span>`;
   return html`<aside class="inspect" id="inspect" data-live aria-label="Pylon details">
 <button type="button" class="icon-btn inspect-close" data-close aria-label="Close details">✕</button>
@@ -449,7 +451,7 @@ ${pylon.failed !== null && html`<p class="error">The planner gave up: ${pylon.fa
 ${d.previews.length === 0 ? html`<p class="empty">No previews.</p>` : html`<ul class="list">${d.previews.map((p) => {
   const look = previewLook[previewState(d, p)];
   return html`<li class="pv pv-${look.tone}">
-<div class="pv-top">${dot(look.tone)}<span class="pv-name">${p.service}</span>${look.label !== null && html`<span class="pv-note">${look.label}</span>`}${look.linked && html`<a class="btn btn-xs" href="${p.url}" target="_blank" rel="noopener" aria-label="Open ${p.service}">Open ↗</a>`}</div>
+<div class="pv-top">${dot(look.tone)}<span class="pv-name">${p.service}</span>${look.label !== null && html`<span class="pv-note">${look.label}</span>`}${look.linked && html`<a class="btn btn-xs" href="${p.url}" target="_blank" rel="noopener" aria-label="Open ${p.service}">Open ↗</a>`}${open && linkedPort(p.service) !== null && html`<button type="button" class="btn btn-xs btn-ghost" data-action="unpublish" data-thread="${t.id}" data-port="${linkedPort(p.service)}" aria-label="Unpublish ${p.service}">Unpublish</button>`}</div>
 <div class="pv-url">${host(p.url)}</div>
 ${look.hint !== null && html`<div class="pv-hint">${look.hint}</div>`}
 </li>`;

@@ -258,6 +258,11 @@ export const actionSchema = z.discriminatedUnion("action", [
 		description: z.string().optional(),
 	}),
 	z.strictObject({
+		action: z.literal("unpreview"),
+		...identity,
+		port: z.number().int().min(1).max(65535),
+	}),
+	z.strictObject({
 		action: z.literal("logs"),
 		...identity,
 		service: serviceName.optional(),

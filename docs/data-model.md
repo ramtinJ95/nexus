@@ -35,7 +35,7 @@ One setting sits beside the records: `current`, the image every new pylon uses. 
 - `Session.harnessSessionId` is the Claude Code session ID or the pi session file. Waking uses it to relaunch the session into its prompt. The pylon also keeps the list on its own disk, in `~/.nexus/sessions.json`.
 - `Session.status` is `working`, `idle`, `blocked`, or `done`.
 - A preview's URL is `https://<node tailnet name>:<httpsPort>/`. The API reports it as the preview's `url`, so clients never build it.
-- A preview's service is a declared or ad hoc service, or `port-<port>` for a port linked with `nexus preview`, from inside the pylon or from the Mac. A linked port stays linked for the thread's life, across pauses.
+- A preview's service is a declared or ad hoc service, or `port-<port>` for a port linked with `nexus preview`, from inside the pylon or from the Mac. A linked port stays linked across pauses until `nexus unpreview` unlinks it, from inside the pylon or from the Mac, and its preview lasts as long. A declared or ad hoc service's preview lasts for the thread's life.
 - A thread's listening ports are not a record. Each running pylon's observation carries them, and the API joins each with the service that owns its port and that service's preview.
 - `Output.kind` is `branch`, `diff`, `preview`, or `file`.
 

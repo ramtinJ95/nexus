@@ -17,7 +17,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import { z } from "zod";
 import { actualState, desiredPhase, retryRefusal, type ActualState, type DesiredPhase } from "../reconcile.ts";
 import { effectiveAllowedHosts, gitUrl, linkedName, liveHashOf, reservedPorts, withHttpsHosts, type BootInputs, type Project, type ProjectId, type PylonOverlay } from "../project.ts";
-import type { CommandResult, NodeName, ProbeClient, ProbeError, PylonId, TailnetNodeId } from "../protocol.ts";
+import type { CommandResult, NodeName, ProbeClient, ProbeError, PylonCommand, PylonId, TailnetNodeId } from "../protocol.ts";
 import type { ConversationView, ConversationWatch, EntryRecord, JsonObject } from "@earendil-works/pi-durable";
 import type { HarnessHost } from "../harness/host.ts";
 import type { ImageId, ImageManifest } from "../images.ts";
@@ -450,22 +450,19 @@ export async function startApi(options: ApiOptions): Promise<Api> {
   }
 
   /**
-   * Links the port in the pylon, then gives its service an https port at once, as the loop would at the next
-   * observation, so the reply names the URL. The URL serves once the loop's next spawn publishes it, which `ready`
-   * reports. Linking a port again answers its preview again. Asking is human activity, as a message is.
+   * Runs a link or an unlink in the thread's pylon. Asking is human activity, as a message is, so a paused pylon is
+   * woken, but the command itself needs the pylon running and is refused with a 409 until it is.
    */
-  async function linkPort(t: Thread, body: unknown): Promise<Preview> {
-    const { port } = parse(previewSchema, body);
+  async function portCommand<K extends "link-port" | "unlink-port">(t: Thread, command: Extract<PylonCommand, { kind: K }>): Promise<Extract<CommandResult, { kind: K }>> {
     if (t.status === "deleted" || t.status === "archived") throw new HttpError(409, `thread ${t.id} is ${t.status}, so its pylon stays paused`);
     const pylon = registry.pylon(t.pylonId)!;
     const probe = probes.get(pylon.node);
     if (probe === undefined) throw new HttpError(503, `no probe is configured for ${pylon.node}`);
     registry.recordActivity(t.id, { human: Date.now() });
     wake(pylon.node);
-    let service: string;
+    let result: CommandResult;
     try {
-      // The client checks that the result is the command's kind.
-      ({ service } = await probe.command(pylon.pylonId, { kind: "link-port", port }) as Extract<CommandResult, { kind: "link-port" }>);
+      result = await probe.command(pylon.pylonId, command);
     } catch (err) {
       const code = (err as Partial<ProbeError>).code;
       if (code === "not-running") throw new HttpError(409, `pylon ${pylon.pylonId} is not running yet. This request wakes it, so ask again once it runs`);
@@ -474,13 +471,38 @@ export async function startApi(options: ApiOptions): Promise<Api> {
     }
     // A delete that landed meanwhile may have released the pylon's ports already.
     if (registry.thread(t.id)!.status === "deleted") throw new HttpError(409, `thread ${t.id} is deleted`);
+    // The client checks that the result is the command's kind.
+    return result as Extract<CommandResult, { kind: K }>;
+  }
+
+  /**
+   * Links the port in the pylon, then gives its service an https port at once, as the loop would at the next
+   * observation, so the reply names the URL. The URL serves once the loop's next spawn publishes it, which `ready`
+   * reports. Linking a port again answers its preview again.
+   */
+  async function linkPort(t: Thread, body: unknown): Promise<Preview> {
+    const { port } = parse(previewSchema, body);
+    const { service } = await portCommand(t, { kind: "link-port", port });
     try {
-      registry.allocatePreviews(pylon.pylonId, [service], previewPorts);
+      registry.allocatePreviews(t.pylonId, [service], previewPorts);
     } catch (err) {
       throw new HttpError(503, (err as Error).message);
     }
-    wake(pylon.node);
-    return registry.previews(pylon.pylonId).find((p) => p.service === service)!;
+    wakeThread(t);
+    return registry.previews(t.pylonId).find((p) => p.service === service)!;
+  }
+
+  /**
+   * Unlinks the port in the pylon, which stops forwarding it at once, then drops its preview, as the loop would at
+   * the next observation. Tailscale stops serving the URL once the loop's next spawn publishes the previews without
+   * it. A port that is not linked succeeds. A port a service's preview owns is refused with a 422, not a 409, because
+   * waiting cannot change it, and the CLI and dashboard try a 409 again.
+   */
+  async function unlinkPort(t: Thread, port: number): Promise<void> {
+    const { refused } = await portCommand(t, { kind: "unlink-port", port });
+    if (refused !== null) throw new HttpError(422, refused);
+    registry.releasePreview(t.pylonId, linkedName(port));
+    wakeThread(t);
   }
 
   async function conversation(t: Thread) {
@@ -532,6 +554,11 @@ export async function startApi(options: ApiOptions): Promise<Api> {
     ["POST", /^\/v1\/threads\/([^/]+)\/previews$/, async (m, r) => {
       const body = await r.body();
       return ok(await linkPort(thread(m[1]!), body));
+    }],
+    ["DELETE", /^\/v1\/threads\/([^/]+)\/previews\/([^/]+)$/, async (m) => {
+      const { port } = parse(previewSchema, { port: /^\d+$/.test(m[2]!) ? Number(m[2]) : m[2] });
+      await unlinkPort(thread(m[1]!), port);
+      return noContent;
     }],
     ["GET", /^\/v1\/threads\/([^/]+)\/conversation$/, async (m) => ok(await conversation(conversing(thread(m[1]!))))],
     ["POST", /^\/v1\/images$/, async (_, r) => created(recordImage(await r.body()))],

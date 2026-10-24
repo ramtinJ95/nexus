@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { JobFailure } from "../backend.ts";
@@ -115,4 +115,59 @@ test("every converge writes the route table, a missing file reads as empty, and 
   assert.deepEqual(await readRoutes(routesFile), new Map([[10001, { pylonId: b, service: "api" }]]));
   await writeFile(routesFile, JSON.stringify({ 10001: "pylon-b" }));
   await assert.rejects(readRoutes(routesFile), /is not a list/);
+});
+
+test("withdraw stops routing a service's port at once, and the next converge of any pylon removes its entry", async (t) => {
+  const { gateway, tailscale, warm, serve, signal, routesFile } = await setup(t);
+  await serve.converge(a, [{ service: "web", httpsPort: 10000 }, { service: "port-6006", httpsPort: 10001 }], signal);
+  const unlinked = `https://${nodeHost}:10001/`;
+  assert.equal(await warm.get(unlinked, {}, signal), 503, "a routed port whose pylon has no origin gets the waking answer");
+
+  await serve.withdraw(a, "port-6006");
+  assert.equal(await warm.get(unlinked, {}, signal), 404);
+  assert.deepEqual(await readRoutes(routesFile), new Map([[10000, { pylonId: a, service: "web" }]]));
+  assert.deepEqual(tailscale.entries(), { 10000: gateway.origin, 10001: gateway.origin });
+  const before = tailscale.changes.length;
+  await serve.withdraw(a, "port-6006");
+  assert.equal(tailscale.changes.length, before);
+
+  await serve.converge(b, [{ service: "web", httpsPort: 10002 }], signal);
+  assert.deepEqual(tailscale.entries(), { 10000: gateway.origin, 10002: gateway.origin });
+});
+
+test("a spawn that carries a released port another pylon now holds fails, and leaves that pylon's route and entry alone", async (t) => {
+  const { gateway, tailscale, warm, serve, signal } = await setup(t);
+  const stale = [{ service: "web", httpsPort: 10000 }, { service: "port-6006", httpsPort: 10001 }];
+  await serve.converge(a, stale, signal);
+  await serve.withdraw(a, "port-6006");
+  await serve.converge(b, [{ service: "web", httpsPort: 10001 }], signal);
+
+  await assert.rejects(serve.converge(a, stale, signal), (err) => err instanceof JobFailure && err.code === "backend" && /10001 routes to pylon-b/.test(err.message));
+  await serve.converge(a, [{ service: "web", httpsPort: 10000 }], signal);
+  assert.deepEqual(gateway.routes.get(10001), { pylonId: b, service: "web" });
+  assert.deepEqual(tailscale.entries(), { 10000: gateway.origin, 10001: gateway.origin });
+  assert.equal(await warm.get(`https://${nodeHost}:10001/`, { "x-nexus-warm": "pylon-b/web" }, signal), 204);
+});
+
+test("two pylons that each want the port the other still routes drop their own first, so both converge on retry", async (t) => {
+  const { gateway, tailscale, serve, signal } = await setup(t);
+  await serve.converge(a, [{ service: "web", httpsPort: 10001 }], signal);
+  await serve.converge(b, [{ service: "web", httpsPort: 10002 }], signal);
+
+  await assert.rejects(serve.converge(a, [{ service: "web", httpsPort: 10002 }], signal), (err) => err instanceof JobFailure && err.code === "backend");
+  assert.deepEqual(tailscale.entries(), { 10002: gateway.origin }, "a's own obsolete entry went before its converge failed");
+  await serve.converge(b, [{ service: "web", httpsPort: 10001 }], signal);
+  await serve.converge(a, [{ service: "web", httpsPort: 10002 }], signal);
+  assert.deepEqual([gateway.routes.get(10001), gateway.routes.get(10002)], [{ pylonId: b, service: "web" }, { pylonId: a, service: "web" }]);
+});
+
+test("a withdraw whose write failed writes the table when it is asked again", async (t) => {
+  const { serve, signal, routesFile } = await setup(t);
+  await serve.converge(a, [{ service: "web", httpsPort: 10000 }, { service: "port-6006", httpsPort: 10001 }], signal);
+  // A directory where the write's temporary file goes makes the write fail.
+  await mkdir(`${routesFile}.tmp`);
+  await assert.rejects(serve.withdraw(a, "port-6006"), { code: "EISDIR" });
+  await rm(`${routesFile}.tmp`, { recursive: true });
+  await serve.withdraw(a, "port-6006");
+  assert.deepEqual(await readRoutes(routesFile), new Map([[10000, { pylonId: a, service: "web" }]]));
 });

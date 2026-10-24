@@ -279,6 +279,28 @@ export class GuestServices {
 		}
 		return linkedName(port);
 	}
+	/**
+	 * Stops previewing a port that attach linked. A port that is not linked is left as it is. Returns why it refused,
+	 * for a port a service's preview publishes, which only the service's declaration can drop, or a port whose linked
+	 * name a service holds, because the caller drops the preview of that name. Otherwise null.
+	 */
+	async detach(port: number): Promise<string | null> {
+		const portal = this.attached.get(port);
+		if (!portal) {
+			const owner = [...this.entries].find(([, entry]) => entry.port === port && entry.portal);
+			if (owner)
+				return `Port ${port} is the preview of service ${owner[0]}, not a linked port. ${owner[1].declared ? `Remove the preview from ${this.configPath} to unpublish it` : "An ad hoc service keeps its preview"}`;
+			return this.entries.has(linkedName(port))
+				? `Service ${linkedName(port)} is not a linked port, so port ${port} has no linked preview to unpublish. Rename the service`
+				: null;
+		}
+		// Saved before the port stops counting as attached, so a failed save leaves it linked and a retry saves it again.
+		await saveJson(join(this.dir, "linked.json"), [...this.attached.keys()].filter((linked) => linked !== port));
+		this.attached.delete(port);
+		this.routes();
+		await portal.close();
+		return null;
+	}
 	private async listening(port: number): Promise<boolean> {
 		const listening = await checked(
 			this.vm,

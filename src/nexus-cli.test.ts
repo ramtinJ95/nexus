@@ -45,11 +45,14 @@ async function probe(t: TestContext, guest: Partial<Guest> = {}) {
       async services(op, name, lines) { calls.push(["services", op, name, lines]); return { services: [web], logs: "line 1\nline 2\n" }; },
       async startService(name, decl) { calls.push(["startService", name, decl]); return [{ ...web, name, declared: false }]; },
       async linkPort(p, title) { calls.push(["linkPort", p, title]); return `port-${p}`; },
+      async unlinkPort(p) { calls.push(["unlinkPort", p]); return null; },
       ...guest,
     }),
     published: () => [],
     changed() {},
     previewUrl: async () => null,
+    async withdraw(_pylonId, service) { calls.push(["withdraw", service]); },
+    linked() {},
     previewWaitMs: 50,
   });
   const bridge = await listenHostBridge({ host: "127.0.0.1", port }, async (req) => req.url === "/token/v1/request" ? pylonId : null)(api.answer);
@@ -128,6 +131,17 @@ test("preview without a URL in time names the service, notes the wait, and exits
   assert.deepEqual(calls, [["linkPort", 6006, "Storybook"]]);
 });
 
+test("unpreview unlinks the port, and a port a service's preview owns is refused with the guest's message", async (t) => {
+  const { nexus, calls } = await probe(t);
+  const { code, stdout } = await nexus(["unpreview", "6006"]);
+  assert.equal(code, 0);
+  assert.match(stdout, /^Unpublished port 6006\./);
+  assert.deepEqual(JSON.parse((await nexus(["unpreview", "6006", "--json"])).stdout), { port: 6006 });
+  assert.deepEqual(calls, [["unlinkPort", 6006], ["withdraw", "port-6006"], ["unlinkPort", 6006], ["withdraw", "port-6006"]]);
+  const owned = await probe(t, { unlinkPort: async () => "Port 3000 is the preview of service web, not a linked port" });
+  assert.deepEqual(await owned.nexus(["unpreview", "3000"]), { code: 1, stdout: "", stderr: "nexus: Port 3000 is the preview of service web, not a linked port\n" });
+});
+
 test("a refused call prints the probe's message and exits 1", async (t) => {
   const { nexus } = await probe(t, { async services() { throw new Error("Unknown service nope"); } });
   assert.deepEqual(await nexus(["service", "restart", "nope"]), { code: 1, stdout: "", stderr: "nexus: Unknown service nope\n" });
@@ -135,7 +149,7 @@ test("a refused call prints the probe's message and exits 1", async (t) => {
 
 test("bad arguments exit 64 without calling the probe", async (t) => {
   const { nexus, calls } = await probe(t);
-  for (const args of [["preview", "abc"], ["service", "start", "x"], ["output", "add", "file"], ["info", "--bogus"], ["frobnicate"]]) {
+  for (const args of [["preview", "abc"], ["unpreview", "abc"], ["service", "start", "x"], ["output", "add", "file"], ["info", "--bogus"], ["frobnicate"]]) {
     const { code, stderr } = await nexus(args);
     assert.equal(code, 64, args.join(" "));
     assert.match(stderr, /Run nexus --help/);

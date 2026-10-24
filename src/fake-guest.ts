@@ -34,6 +34,7 @@ export function fakeGuest(script: (argv: readonly string[], herdr: boolean) => E
     services: () => Promise.reject(new Error("unused")),
     startService: () => Promise.reject(new Error("unused")),
     linkPort: () => Promise.reject(new Error("unused")),
+    unlinkPort: () => Promise.reject(new Error("unused")),
     previewOrigin: () => { throw new Error("unused"); },
   };
 }

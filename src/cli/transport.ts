@@ -115,11 +115,16 @@ export async function follow(endpoint: Endpoint, path: string, onEvent: (data: u
 }
 
 function exchange(socket: Socket, host: string, method: string, path: string, body: unknown): Promise<{ status: number; text: string }> {
+  const payload = body === undefined ? undefined : JSON.stringify(body);
   return new Promise((resolve, reject) => {
     const req = request({
       method, path, createConnection: () => socket,
-      // The API refuses a state change without a JSON content type, so a browser page cannot forge one.
-      headers: { host, ...(method === "GET" ? {} : { "content-type": "application/json" }) },
+      // The API refuses a state change without a JSON content type, so a browser page cannot forge one. Node frames a
+      // DELETE's body only with an explicit length, and without one the API reads it as a malformed next request.
+      headers: {
+        host, ...(method === "GET" ? {} : { "content-type": "application/json" }),
+        ...(payload === undefined ? {} : { "content-length": Buffer.byteLength(payload) }),
+      },
     }, (res) => {
       let text = "";
       res.setEncoding("utf8");
@@ -128,7 +133,7 @@ function exchange(socket: Socket, host: string, method: string, path: string, bo
       res.on("error", (err) => reject(lost(host, err)));
     });
     req.on("error", (err) => reject(lost(host, err)));
-    req.end(body === undefined ? undefined : JSON.stringify(body));
+    req.end(payload);
   });
 }
 

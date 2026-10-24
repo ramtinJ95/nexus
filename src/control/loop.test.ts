@@ -731,6 +731,31 @@ test("a service that wants a preview gets a port, and the next spawn publishes i
   assert.deepEqual(registry.outputs(thread.id).filter((o) => o.kind === "preview"), [{ thread: thread.id, kind: "preview", ref: "web" }]);
 });
 
+test("a linked port's preview goes once a read of the pylon's services leaves it out, and a read that failed changes nothing", async (t) => {
+  const registry = openRegistry(tempDb());
+  const thread = seed(registry);
+  const fake = fakeNode({ autoFinish: true });
+  run(t, registry, fake.probe, { ingest: realIngest });
+  await until("the pylon runs", () => fake.pylons.get(thread.pylonId)?.phase === "running");
+  const linked: ServiceFact = { name: "port-3000", state: "ready", port: 3000, declared: false, wantsPreview: true };
+  const services = () => registry.previews(thread.pylonId).map((p) => `${p.service} ${p.httpsPort}`);
+  const published = () => fake.lives.get(thread.pylonId)?.previews.map((p) => `${p.service} ${p.httpsPort}`);
+  fake.setServices(thread.pylonId, [web, linked]);
+  await until("both previews are ready", () => registry.previews(thread.pylonId).filter((p) => p.ready).length === 2);
+
+  fake.setServices(thread.pylonId, [web]);
+  await until("the next spawn publishes the previews without the port", () => JSON.stringify(published()) === JSON.stringify(["web 10200"]));
+  assert.deepEqual(services(), ["web 10200"], "a declared service keeps its preview");
+
+  fake.setServices(thread.pylonId, [web, linked]);
+  await until("the port is published again", () => registry.previews(thread.pylonId).filter((p) => p.ready).length === 2);
+  // As the API does once the pylon unlinks the port. A read that fails then carries the list read before the unlink.
+  registry.releasePreview(thread.pylonId, "port-3000");
+  fake.setServices(thread.pylonId, null);
+  await new Promise((r) => setTimeout(r, 50));
+  assert.deepEqual(services(), ["web 10200"], "a list carried from an earlier read gives no port back");
+});
+
 test("preview ports are unique on a node and keep their port across pause, a control-plane restart and wake", async (t) => {
   const path = tempDb();
   const fake = fakeNode({ autoFinish: true });

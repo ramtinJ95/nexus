@@ -263,6 +263,21 @@ test("a used-up port range fails naming the range, after allocating the services
   assert.deepEqual(portsOf(registry, pylonId), ["web 10201"]);
 });
 
+test("releasing one service's preview frees only its port, which the next service that asks gets", async (t) => {
+  const registry = seeded(tempDb());
+  t.after(() => registry.close());
+  const neighbour = addPylon(registry, "th-2");
+  registry.allocatePreviews(pylonId, ["web", "port-3000"], ports);
+  registry.allocatePreviews(neighbour, ["port-3000"], ports);
+  registry.releasePreview(pylonId, "port-3000");
+  assert.deepEqual(portsOf(registry, pylonId), ["web 10200"]);
+  assert.deepEqual(portsOf(registry, neighbour), ["port-3000 10202"], "another pylon's preview of the same name stays");
+  registry.releasePreview(pylonId, "port-3000");
+  assert.deepEqual(portsOf(registry, pylonId), ["web 10200"], "releasing again changes nothing");
+  registry.allocatePreviews(pylonId, ["port-4000"], ports);
+  assert.deepEqual(portsOf(registry, pylonId), ["port-4000 10201", "web 10200"]);
+});
+
 test("released ports go to the next pylon that asks, and readiness marks only the port a pylon holds", async (t) => {
   const registry = seeded(tempDb());
   t.after(() => registry.close());
