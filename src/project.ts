@@ -272,8 +272,8 @@ export interface PylonOverlay {
  * - /home/user/.nexus/PYLON.md: prose for the agent. It is in a pylon, which hosts it can reach and that
  *   everything else is blocked, its preview URLs, that work survives sleep only on disk, how to declare
  *   outputs, and that logins use the device-code flow (S5: the browser callback listens inside the guest).
- *   The common dotfiles layer imports this file from ~/.claude/CLAUDE.md and ~/.pi/agent/AGENTS.md,
- *   so the overlay never edits dotfiles.
+ *   The image imports this file from ~/.claude/CLAUDE.md and links it as ~/.pi/agent/AGENTS.md, so the
+ *   overlay never edits dotfiles.
  */
 export function renderOverlay(overlay: PylonOverlay): readonly OverlayFile[] {
   const env = {

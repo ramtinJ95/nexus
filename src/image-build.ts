@@ -18,9 +18,10 @@ import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { createHttpHooks, parseBuildConfig, verifyAssets, VM, type AlpineConfig, type BuildConfig } from "@earendil-works/gondolin";
 import { z } from "zod";
+import { agentSetupManifest, installedLayout, parseAgentSetup, type AgentSetup } from "../images/pylon/agent-setup/manifest.ts";
 import { artifactArchive, manifestFiles } from "./artifacts.ts";
 import { JobFailure } from "./backend.ts";
-import { imageIdOf, type ImageId, type ImageManifest, type ImageRecipe } from "./images.ts";
+import { imageIdOf, pinsSchema, type ImageId, type ImageManifest, type ImageRecipe } from "./images.ts";
 import type { NodeName } from "./protocol.ts";
 
 export const pylonRecipeDir = fileURLToPath(new URL("../images/pylon/", import.meta.url));
@@ -29,20 +30,6 @@ const imageManifestFile = manifestFiles.image;
 
 /** build.sh only runs a build. pins.json becomes ImageRecipe.pins. */
 const notRecipeFiles = new Set(["build.sh", "pins.json"]);
-
-const pinsSchema = z.strictObject({
-  debianDigest: z.string().regex(/^sha256:[0-9a-f]{64}$/),
-  node: z.string().regex(/^\d+\.\d+\.\d+$/),
-  nodeSha256: z.string().regex(/^[0-9a-f]{64}$/),
-  claudeCode: z.string().min(1),
-  pi: z.string().min(1),
-  herdr: z.string().min(1),
-  piEnv: z.string().min(1),
-  piEnvSha256: z.string().regex(/^[0-9a-f]{64}$/),
-  gondolin: z.string().min(1),
-  alpineKernel: z.string().min(1),
-  dotfilesCommon: z.string().min(1),
-}) satisfies z.ZodType<ImageRecipe["pins"]>;
 
 /** Every file under `dir` except build.sh, sorted by path, and pins.json parsed. */
 export async function loadImageRecipe(dir: string = pylonRecipeDir): Promise<ImageRecipe> {
@@ -57,7 +44,10 @@ export async function loadImageRecipe(dir: string = pylonRecipeDir): Promise<Ima
   return { files, pins: pinsSchema.parse(JSON.parse(await readFile(join(dir, "pins.json"), "utf8"))) };
 }
 
-/** The recipe arrives in a job, so its paths and pins are checked again before anything touches the disk. */
+/**
+ * The recipe arrives in a job, so its paths, pins and agent setup manifest are checked again before anything
+ * touches the disk.
+ */
 function parseRecipe(recipe: ImageRecipe): ImageRecipe {
   const pins = pinsSchema.safeParse(recipe.pins);
   if (!pins.success) throw new JobFailure("invalid", `recipe pins: ${z.prettifyError(pins.error)}`);
@@ -66,7 +56,18 @@ function parseRecipe(recipe: ImageRecipe): ImageRecipe {
       throw new JobFailure("invalid", `recipe file path ${JSON.stringify(path)} is not a plain relative path`);
     }
   }
+  agentSetupOf(recipe);
   return { files: recipe.files, pins: pins.data };
+}
+
+/** The recipe's agent setup, read by the parser the in-build installer runs. */
+function agentSetupOf(recipe: ImageRecipe): AgentSetup {
+  const json = recipeFile(recipe, agentSetupManifest);
+  try {
+    return parseAgentSetup(json);
+  } catch (err) {
+    throw new JobFailure("invalid", `the recipe's ${agentSetupManifest}: ${(err as Error).message}`);
+  }
 }
 
 function recipeFile(recipe: ImageRecipe, path: string): string {
@@ -87,6 +88,10 @@ function dockerBuildArgs(pins: ImageRecipe["pins"]): Record<string, string> {
     PI_ENV_VERSION: pins.piEnv,
     PI_ENV_SHA256: pins.piEnvSha256,
     DOTFILES_COMMIT: pins.dotfilesCommon,
+    GH_VERSION: pins.gh,
+    GH_SHA256: pins.ghSha256,
+    NEOVIM_VERSION: pins.neovim,
+    NEOVIM_SHA256: pins.neovimSha256,
   };
 }
 
@@ -101,12 +106,14 @@ function dockerBuildArgs(pins: ImageRecipe["pins"]): Record<string, string> {
  *    directory with one of those bits are listed from the Docker image, written into rootfs.ext4 with
  *    debugfs, read back, and Gondolin's manifest is updated for the changed rootfs. Then the Docker tag is
  *    removed. Delete this step, like the seed, once the Gondolin pin moves to a release that keeps modes.
- * 4. Smoke boot at 4 GiB (2 GiB hangs): plain exec PATH and CA, `user` with a setuid sudo that prints no
- *    warning and the hostname pylon, which resolves through /etc/hosts, the exact pinned versions of node,
- *    claude, pi, herdr and pi-env and the nexus CLI's declared version as user, sshd and sandboxssh, Herdr's
- *    pi integration with its own resume turned off, curl and Node fetch to an allowed host through TLS
- *    interception, tini reaping an orphan it adopts as subreaper, and a Herdr server as user. Any failure is
- *    setup-failed and publishes nothing.
+ * 4. Smoke boot at 4 GiB (2 GiB hangs): plain exec PATH, CA and the offline switches for pi and Claude Code's
+ *    official marketplace, `user` with a setuid sudo that prints no warning and the hostname pylon, which
+ *    resolves through /etc/hosts, the exact pinned versions of node, claude, pi, herdr, pi-env and nvim and the nexus
+ *    CLI's declared version as user, sshd and sandboxssh, Herdr's pi integration with its own resume turned off,
+ *    the agent setup installed exactly as the recipe's manifest says with pi loading every extension offline,
+ *    the PYLON.md import for Claude Code and pi, gh at its pin answering git's credential requests from GH_TOKEN,
+ *    curl and Node fetch to an allowed host through TLS interception, tini reaping an orphan it adopts as
+ *    subreaper, and a Herdr server as user. Any failure is setup-failed and publishes nothing.
  * 5. Write image.json, then rename outDir.partial to outDir.
  * A crash leaves only outDir.partial, which the next attempt removes. An existing outDir is the finished
  * image, because its ID names its inputs.
@@ -383,6 +390,7 @@ export interface SmokeCheck {
 }
 
 const asUser = (script: string): readonly string[] => ["runuser", "-l", "user", "-c", `exec 2>&1; ${script}`];
+const shellQuote = (text: string): string => `'${text.replaceAll("'", "'\\''")}'`;
 const literal = (text: string): string => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 /** The nexus CLI has no pin. Its script declares the version that `nexus --version` prints. */
@@ -392,25 +400,34 @@ function nexusCliVersion(recipe: ImageRecipe): string {
   return declared[1]!;
 }
 
-/** Each tool's whole `--version` output for its pin, in the format that tool prints it. */
+/**
+ * Each tool's `--version` output for its pin, in the format that tool prints it. Neovim's is its first line,
+ * because the lines after it describe the build rather than the release.
+ */
 function versionChecks(recipe: ImageRecipe): SmokeCheck[] {
   const { pins } = recipe;
-  const versions: [tool: string, command: string, output: string][] = [
-    ["node", "node", `v${pins.node}`],
-    ["claude", "claude", `${pins.claudeCode} (Claude Code)`],
-    ["pi", "pi", pins.pi],
-    ["herdr", "herdr", `herdr ${pins.herdr}`],
-    ["pi-env", "/usr/local/libexec/nexus/pi-env", `pi-env ${pins.piEnv}`],
-    ["nexus", "nexus", `nexus ${nexusCliVersion(recipe)}`],
+  const versions: [tool: string, script: string, output: string][] = [
+    ["node", "node --version", `v${pins.node}`],
+    ["claude", "claude --version", `${pins.claudeCode} (Claude Code)`],
+    ["pi", "pi --version", pins.pi],
+    ["herdr", "herdr --version", `herdr ${pins.herdr}`],
+    ["pi-env", "/usr/local/libexec/nexus/pi-env --version", `pi-env ${pins.piEnv}`],
+    ["nexus", "nexus --version", `nexus ${nexusCliVersion(recipe)}`],
+    ["nvim", "nvim --version | head -n 1", `NVIM v${pins.neovim}`],
   ];
-  return versions.map(([tool, command, output]) => ({ name: `${tool} version`, argv: asUser(`${command} --version`), expect: `${output}\n` }));
+  return versions.map(([tool, script, output]) => ({ name: `${tool} version`, argv: asUser(script), expect: `${output}\n` }));
 }
 
 /** Plain execs run with sandboxd's environment, and `runuser -l` gives the login shell that SSH and Herdr panes get. */
 export function smokeChecks(recipe: ImageRecipe): readonly SmokeCheck[] {
   const { pins } = recipe;
+  const agentSetup = installedLayout(agentSetupOf(recipe));
   return [
-    { name: "exec environment", argv: ["node", "-p", "`${process.version} ${process.env.NODE_EXTRA_CA_CERTS}`"], expect: new RegExp(`^v${literal(pins.node)} /run/gondolin/ca-certificates\\.crt\\n$`) },
+    {
+      name: "exec environment",
+      argv: ["node", "-p", "`${process.version} ${process.env.NODE_EXTRA_CA_CERTS} ${process.env.PI_OFFLINE} ${process.env.CLAUDE_CODE_DISABLE_OFFICIAL_MARKETPLACE_AUTOINSTALL}`"],
+      expect: new RegExp(`^v${literal(pins.node)} /run/gondolin/ca-certificates\\.crt 1 1\\n$`),
+    },
     {
       name: "user",
       argv: asUser("id; stat -c '%a %U' /usr/bin/sudo; sudo -n true && echo sudo ok; stat -c '%U %a' workspace; cat /proc/sys/kernel/hostname; getent hosts pylon; getent ahostsv4 pylon | head -n 1"),
@@ -421,6 +438,24 @@ export function smokeChecks(recipe: ImageRecipe): readonly SmokeCheck[] {
       name: "guest tools",
       argv: asUser("command -v ssh sshd sandboxssh rg fd; grep -c '^Include /etc/ssh/ssh_config.d/\\*.conf' /etc/ssh/ssh_config; herdr integration status | grep -E '^(pi|claude):'"),
       expect: /^\/usr\/bin\/ssh\n\/usr\/sbin\/sshd\n\/usr\/bin\/sandboxssh\n\/usr\/bin\/rg\n\/usr\/local\/bin\/fd\n1\npi: current[^\n]*\nclaude: current/,
+    },
+    {
+      // The check reruns Herdr's integrations first, as every boot does, so it proves that the settings.json they
+      // rewrite still holds the plugins. The layout comes from the recipe's manifest, not the copy in the image.
+      name: "agent setup",
+      argv: asUser(`node /opt/nexus/agent-setup/install.ts check ${shellQuote(JSON.stringify(agentSetup))}`),
+      expect: "ok\n",
+    },
+    {
+      name: "pylon guide",
+      argv: asUser("cat ~/.claude/CLAUDE.md; readlink ~/.pi/agent/AGENTS.md"),
+      expect: "@~/.nexus/PYLON.md\n/home/user/.nexus/PYLON.md\n",
+    },
+    {
+      // gh's version line carries a release date that the pin does not know. The token is read when git asks.
+      name: "gh and git credentials",
+      argv: asUser("gh --version | head -n 1; printf 'protocol=https\\nhost=github.com\\n\\n' | GIT_TERMINAL_PROMPT=0 GH_TOKEN=nexus-smoke git credential fill"),
+      expect: new RegExp(`^gh version ${literal(pins.gh)} \\(\\d{4}-\\d{2}-\\d{2}\\)\\n(?:[^\\n]*\\n)*password=nexus-smoke\\n$`),
     },
     {
       name: "Herdr leaves resume to Nexus",
