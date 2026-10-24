@@ -57,6 +57,19 @@ RUN curl -fsSL https://herdr.dev/install.sh -o /tmp/herdr-install.sh \
  && installed="$(herdr --version)" \
  && if [ "$installed" != "herdr ${HERDR_VERSION}" ]; then echo "Herdr's installer installed '$installed', but pins.json pins ${HERDR_VERSION}. Update the herdr pin" >&2; exit 1; fi
 
+# gh from its release tarball, checked like Node. git asks gh for github.com credentials, and gh reads GH_TOKEN
+# when git asks, so the placeholder that Gondolin mints on each boot is never stored. The helper lives in
+# /etc/gitconfig, which no dotfiles layer replaces.
+ARG GH_VERSION
+ARG GH_SHA256
+RUN cd /tmp \
+ && curl -fsSLo gh.tgz "https://github.com/cli/cli/releases/download/v${GH_VERSION}/gh_${GH_VERSION}_linux_amd64.tar.gz" \
+ && echo "${GH_SHA256}  gh.tgz" | sha256sum -c - \
+ && tar -xzf gh.tgz \
+ && install -m 0755 "gh_${GH_VERSION}_linux_amd64/bin/gh" /usr/local/bin/gh \
+ && rm -r gh.tgz "gh_${GH_VERSION}_linux_amd64" \
+ && git config --system credential.https://github.com.helper '!/usr/local/bin/gh auth git-credential'
+
 COPY --chmod=0755 nexus /usr/local/bin/nexus
 # The common dotfiles layer as a git repository, which the boot path clones into ~/.nexus/dotfiles and then
 # updates by fetch. It is owned by user because git refuses to clone a local repository another user owns.

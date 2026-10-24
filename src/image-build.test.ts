@@ -25,6 +25,8 @@ const pins: ImageRecipe["pins"] = {
   gondolin: "0.13.0",
   alpineKernel: "6.18.58-0-virt",
   dotfilesCommon: "placeholder",
+  gh: "2.103.2",
+  ghSha256: "d".repeat(64),
 };
 
 async function recipeDir(t: { after(fn: () => Promise<void>): void }, files: Record<string, string>): Promise<string> {
@@ -83,6 +85,7 @@ test("buildImage refuses a recipe from a job whose paths, pins or nexus script a
     { files: [{ path: "/etc/passwd", content: "" }], pins },
     { files: [{ path: "a//b", content: "" }], pins },
     { files: [], pins: { ...pins, nodeSha256: "not-a-digest" } },
+    { files: [], pins: { ...pins, gh: "latest" } },
     { files: [{ path: "nexus", content: '#!/usr/bin/env node\nconst version = "dev";\n' }], pins },
   ];
   for (const recipe of bad) {
@@ -113,6 +116,14 @@ test("a version check fails on any other version, naming the expected and actual
   assert.equal(smokeFailure(check("nexus version"), 0, "nexus 0.1.0\n"), 'expected "nexus 0.7.3\\n", got "nexus 0.1.0\\n"');
   assert.equal(smokeFailure(check("node version"), 0, "v24.22.10\n"), 'expected "v24.22.1\\n", got "v24.22.10\\n"');
   assert.equal(smokeFailure(check("pi version"), 127, "-bash: pi: command not found\n"), "exited 127");
+});
+
+test("the smoke boot expects gh at its pin, answering git's credential request with GH_TOKEN", async () => {
+  const gh = smokeChecks({ ...(await loadImageRecipe()), pins }).find((c) => c.name === "gh and git credentials")!;
+  const credential = "protocol=https\nhost=github.com\nusername=x-access-token\npassword=nexus-smoke\n";
+  assert.equal(smokeFailure(gh, 0, `gh version 2.103.2 (2026-10-23)\n${credential}`), undefined);
+  assert.notEqual(smokeFailure(gh, 0, `gh version 2.103.1 (2026-10-01)\n${credential}`), undefined);
+  assert.notEqual(smokeFailure(gh, 0, "gh version 2.103.2 (2026-10-23)\nprotocol=https\nhost=github.com\n"), undefined);
 });
 
 test("the mode listing parses into sorted fixes, and one without a setuid or setgid file is refused", () => {

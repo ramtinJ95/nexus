@@ -6,6 +6,7 @@
  * Dependencies run one way: a checkpoint or template depends on its image, never the reverse.
  */
 import { createHash } from "node:crypto";
+import { z } from "zod";
 import { effectiveAllowedHosts, type BootInputs, type Project, type ProjectId, type ServicesFile } from "./project.ts";
 import type { NodeName } from "./protocol.ts";
 
@@ -41,6 +42,8 @@ export type PortableArtifactId = Exclude<ArtifactId, CheckpointId>;
  *      the fallback copy of the common dotfiles layer as a git repository at /opt/nexus/dotfiles, owned by
  *      user, which boots clone and then fetch.
  *      `gondolin build` itself installs the `sandboxssh` helper that pi-sandbox's shell needs.
+ *   6. gh from its checksum-verified release tarball, set in /etc/gitconfig as git's credential helper for
+ *      https://github.com, so a GH_TOKEN grant pushes over HTTPS.
  * - gondolin.json: distro alpine for the kernel and initramfs, and env with PATH including /usr/local/bin
  *   (Gondolin's exec PATH lacks it, S1) and NODE_EXTRA_CA_CERTS=/run/gondolin/ca-certificates.crt (the mitm
  *   CA is unreadable to user, S2). Gondolin sources that env before sandboxd starts and from /etc/profile.d,
@@ -65,8 +68,27 @@ export interface ImageRecipe {
     gondolin: string; // "0.13.0". The module seed workaround is tied to it
     alpineKernel: string; // "6.18.58-0-virt". The seed must match exactly
     dotfilesCommon: string; // commit of the baked fallback layer
+    gh: string; // "2.103.2", the GitHub CLI release
+    ghSha256: string; // of gh_<gh>_linux_amd64.tar.gz, from that release's checksums file
   };
 }
+
+/** ImageRecipe.pins wherever pins arrive: pins.json, a build-image job's recipe, and POST /v1/images. */
+export const pinsSchema = z.strictObject({
+  debianDigest: z.string().regex(/^sha256:[0-9a-f]{64}$/),
+  node: z.string().regex(/^\d+\.\d+\.\d+$/),
+  nodeSha256: z.string().regex(/^[0-9a-f]{64}$/),
+  claudeCode: z.string().min(1),
+  pi: z.string().min(1),
+  herdr: z.string().min(1),
+  piEnv: z.string().min(1),
+  piEnvSha256: z.string().regex(/^[0-9a-f]{64}$/),
+  gondolin: z.string().min(1),
+  alpineKernel: z.string().min(1),
+  dotfilesCommon: z.string().min(1),
+  gh: z.string().regex(/^\d+\.\d+\.\d+$/),
+  ghSha256: z.string().regex(/^[0-9a-f]{64}$/),
+}) satisfies z.ZodType<ImageRecipe["pins"]>;
 
 /** File order does not change the ID. Two files at one path are a broken recipe and throw. */
 export function imageIdOf(recipe: ImageRecipe): ImageId {

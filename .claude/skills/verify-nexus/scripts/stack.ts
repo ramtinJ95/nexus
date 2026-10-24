@@ -156,8 +156,8 @@ closers.push(() => controlPlane.close());
 const manifest: ImageManifest = {
   id: imageId, gondolinBuildId: `docker:${tag}`, builtOn: node, builtAt: new Date().toISOString(), sha256: "0".repeat(64),
   pins: {
-    debianDigest: "docker", node: "24", nodeSha256: "docker", claudeCode: "none", pi: "none", herdr: "pinned", piEnv: "packaged", piEnvSha256: "docker",
-    gondolin: "none", alpineKernel: "none", dotfilesCommon: "none",
+    debianDigest: `sha256:${"0".repeat(64)}`, node: "0.0.0", nodeSha256: "0".repeat(64), claudeCode: "none", pi: "none", herdr: "pinned",
+    piEnv: "packaged", piEnvSha256: "0".repeat(64), gondolin: "none", alpineKernel: "none", dotfilesCommon: "none", gh: "0.0.0", ghSha256: "0".repeat(64),
   },
 };
 const project: Project = {
