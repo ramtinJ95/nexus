@@ -234,9 +234,22 @@ export async function recordSessions(guest: Guest): Promise<readonly RecordedSes
       herdrPane, harness, title, cwd,
       harnessSessionId: harnessSessionId ?? (harness === "claude-code" ? await launchedClaudeSession(guest, herdrPane) : null),
     })));
-  await writeSessionsFile(guest, { version: 1, recordedAt: new Date().toISOString(), sessions, failed });
+  const file: SessionsFile = { version: 1, recordedAt: new Date().toISOString(), sessions, failed };
+  await writeSessionsFile(guest, file);
+  return relaunchedFrom(file);
+}
+
+/**
+ * What a sessions file read from a stopped disk says its wake brings back, as recordSessions would have returned it,
+ * such as one whose pause stopped it and died before it could keep the list.
+ */
+export function pausedSessionsIn(text: string): readonly PausedSession[] {
+  return relaunchedFrom(parseSessionsFile(text)).map(({ cwd: _, ...session }) => session);
+}
+
+function relaunchedFrom(file: SessionsFile): RecordedSession[] {
   const recorded = (r: SessionRecord, id: string, inPane: boolean): RecordedSession => ({ ...r, id, herdrPane: inPane ? r.herdrPane : null });
-  return [...sessions.map((r) => recorded(r, r.herdrPane, true)), ...failed.map((f) => recorded(f.record, idOf(f), f.inPane))];
+  return [...file.sessions.map((r) => recorded(r, r.herdrPane, true)), ...file.failed.map((f) => recorded(f.record, idOf(f), f.inPane))];
 }
 
 /**
@@ -448,7 +461,11 @@ async function readSessionsFile(guest: Guest, timeoutMs = callTimeoutMs): Promis
   const { exitCode, output } = await guest.exec(["sh", "-c", 'test -e "$0" || exit 3; exec cat -- "$0"', sessionsFile], { cwd: home, timeoutMs });
   if (exitCode === 3) return null;
   if (exitCode !== 0) throw new Error(`reading ${sessionsFile} failed with exit ${exitCode}: ${output}`);
-  const file = record(JSON.parse(output), sessionsFile);
+  return parseSessionsFile(output);
+}
+
+function parseSessionsFile(text: string): SessionsFile {
+  const file = record(JSON.parse(text), sessionsFile);
   if (file.version !== 1) throw new Error(`${sessionsFile} has unknown version ${JSON.stringify(file.version)}`);
   return {
     version: 1,

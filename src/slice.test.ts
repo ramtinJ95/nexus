@@ -87,6 +87,8 @@ interface SliceFixture {
   partialPause(checkpoint: CheckpointId): Promise<void>;
   /** Whether the planner still sees a pause to finish after partialPause, or the backend already reports it paused. */
   partialPauseResubmits: boolean;
+  /** The harnesses the finished pause lists after partialPause, or null when the backend lists none: the VM fixture's records nothing. */
+  partialPauseSessions: readonly SessionHarness[] | null;
   /** No VM runs, and the disk the checkpoint names is stored. */
   assertStored(checkpoint: CheckpointId): Promise<void>;
   /** No VM, disk, checkpoint or controller of the pylon remains. */
@@ -178,6 +180,8 @@ function dockerFixture(): SliceFixture {
       assert.equal(await docker("inspect", "-f", "{{.State.Status}}", pylonId), "exited");
     },
     partialPauseResubmits: true,
+    // The pause reads them from the stopped container's sessions file, which the last wake's relaunch wrote.
+    partialPauseSessions: ["shell"],
     async assertStored(checkpoint) {
       assert.deepEqual(await containers(), []);
       assert.notEqual(await checkpointImage(checkpoint), "");
@@ -349,6 +353,7 @@ function pylonVmFixture(): SliceFixture {
       await pylonVm(stateRoot, { action: "stop", name: pylonId });
     },
     partialPauseResubmits: false,
+    partialPauseSessions: null,
     async assertStored() {
       assert.ok(existsSync(join(instanceDir, "disk.qcow2")), "the instance has no disk.qcow2");
       assert.equal(await controllers(), "", "a controller of the stopped instance still runs");
@@ -653,6 +658,7 @@ test("a probe killed during a pause: the next ticks finish the pause", async () 
   const steps = await converge();
   assert.deepEqual(submitted(steps), fixture.partialPauseResubmits ? ["pause"] : []);
   await assertPaused(checkpoint);
+  assert.deepEqual((await listed())?.sessions?.map((s) => s.harness) ?? null, fixture.partialPauseSessions);
 });
 
 test("deleted: nothing of the pylon remains", async () => {

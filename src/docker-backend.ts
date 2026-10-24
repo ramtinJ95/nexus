@@ -11,7 +11,9 @@
  * setup is the project's preSetup, run as root in the build container.
  */
 import { execFile, spawn } from "node:child_process";
-import { join } from "node:path";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { basename, join } from "node:path";
 import { promisify } from "node:util";
 import { artifactDirectory, fileCodec, type ArtifactDirectory } from "./artifacts.ts";
 import { JobFailure, type ArtifactStore, type BackendPylon, type Guest, type VmBackend } from "./backend.ts";
@@ -23,6 +25,7 @@ import type { PausedSession, PylonId } from "./protocol.ts";
 import type { ArtifactId, CheckpointId, ImageId, PortableArtifactId, TemplateId } from "./images.ts";
 import { publicUrls } from "./public-urls.ts";
 import { recordBeforePause, relaunchAfterWake, type PylonLog } from "./session-wake.ts";
+import { pausedSessionsIn, sessionsFile } from "./sessions.ts";
 
 const execFileAsync = promisify(execFile);
 
@@ -137,6 +140,20 @@ export function createDockerBackend(options: DockerBackendOptions): VmBackend {
    */
   const relaunchMark = "/var/lib/nexus/relaunch";
   const markRelaunch = (pylonId: PylonId) => docker(["exec", pylonId, "sh", "-c", 'mkdir -p "${1%/*}" && touch "$1"', "sh", relaunchMark]);
+
+  /** The sessions a stopped container's sessions file holds, by way of a host copy. None when it has no file. */
+  async function stoppedSessions(id: string, signal: AbortSignal): Promise<readonly PausedSession[]> {
+    const dir = await mkdtemp(join(tmpdir(), "nexus-sessions-"));
+    try {
+      await docker(["cp", `${id}:${sessionsFile}`, dir], signal);
+      return pausedSessionsIn(await readFile(join(dir, basename(sessionsFile)), "utf8"));
+    } catch (err) {
+      if (/Could not find the file/.test((err as Error).message)) return [];
+      throw err;
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  }
 
   /** Writes the overlay, applies the live spec's URLs to the services, and relaunches the sessions of a boot from an existing disk. */
   async function afterBoot(pylonId: PylonId, overlay: readonly OverlayFile[], urls: Record<string, string>, disk: "fresh" | "existing" | "running"): Promise<void> {
@@ -293,10 +310,13 @@ export function createDockerBackend(options: DockerBackendOptions): VmBackend {
       const existing = await container(pylonId, signal);
       // No container: only checkpoints remain, or nothing does. Both are already paused.
       if (existing === null) return;
-      let recorded: readonly PausedSession[] | null = null;
+      let recorded: readonly PausedSession[] | null;
       if (existing.State.Status === "running") {
         recorded = await recordBeforePause(guest(pylonId), containerLog(pylonId));
         await markRelaunch(pylonId);
+      } else {
+        // Such as a pause that died after its stop: the file on the disk is what the wake relaunches.
+        recorded = await stoppedSessions(existing.Id, signal);
       }
       await docker(["stop", existing.Id], signal);
       // Set either way, because a container booted from a checkpoint carries that checkpoint's labels.

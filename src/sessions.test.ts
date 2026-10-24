@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { attachedTerminals, attachScript, closeSession, dropFailedSession, openSession, recordSessions, relaunchSessions, sessionFacts, sessionsFile, type RelaunchOutcome, type SessionRecord } from "./sessions.ts";
+import { attachedTerminals, attachScript, closeSession, dropFailedSession, openSession, pausedSessionsIn, recordSessions, relaunchSessions, sessionFacts, sessionsFile, type RelaunchOutcome, type SessionRecord } from "./sessions.ts";
 import { fakeGuest, herdrError, herdrOk, herdrPane, herdrSnapshot, type ExecReply } from "./fake-guest.ts";
 
 const created = (workspace: string, pane: string) => herdrOk({ type: "workspace_created", workspace: { workspace_id: workspace, label: "x" }, tab: { tab_id: `${workspace}:t1` }, root_pane: { pane_id: pane } });
@@ -419,6 +419,7 @@ test("a session whose relaunch failed is recorded until a relaunch brings it bac
     { id: "w21:p1", herdrPane: "w21:p1", harness: "shell", title: "sh", cwd: "/home/user", harnessSessionId: null },
     { ...records[0], id, herdrPane: null },
   ]);
+  assert.deepEqual(pausedSessionsIn(guest.written.at(-1)!.content), recorded.map(({ cwd: _, ...s }) => s), "the file it wrote says the same, as a stopped disk's does");
   assert.deepEqual((await sessionFacts(guest)).at(-1), {
     id, state: "failed", herdrPane: null, harness: "claude-code", harnessSessionId: "aaaa", status: "unknown", title: "review", message: "herdr agent start: the agent did not start. The pane showed:\nuser@pylon:~$",
   }, "a running pylon reports it, under the ID its pause records it by, with the status a control plane older than session states stores");
