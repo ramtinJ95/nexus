@@ -87,10 +87,19 @@ RUN cd /opt/nexus/dotfiles \
  && git add -A \
  && GIT_AUTHOR_DATE=2000-01-01T00:00:00Z GIT_COMMITTER_DATE=2000-01-01T00:00:00Z \
     git -c user.name=nexus -c user.email=nexus@pylon commit -q -m "dotfiles common layer at ${DOTFILES_COMMIT}"
-# pi and Claude Code make their config directories on first run, and Herdr's installers refuse to run before that.
-RUN mkdir -p /home/user/.pi/agent/extensions /home/user/.claude \
- && herdr integration install pi \
- && herdr integration install claude
+# This Mac's Claude Code plugins, skills, pi packages and pi extensions, which src/agent-setup.ts captured into
+# agent-setup/manifest.json. The installer fetches and installs what the manifest pins, then runs Herdr's
+# integrations, the order every boot repeats, so Herdr's hook merges into the settings.json that the plugin
+# installs wrote. It fails the build on any difference from the manifest. pi and Claude Code make their config
+# directories on first run, and Herdr's installers refuse to run before that.
+COPY --chown=user:user agent-setup/ /opt/nexus/agent-setup/
+RUN mkdir -p /home/user/.pi/agent/extensions /home/user/.claude /home/user/.agents/skills \
+ && node /opt/nexus/agent-setup/install.ts \
+ && npm cache clean --force
+# The overlay writes ~/.nexus/PYLON.md on every spawn. Claude Code imports it, and pi, which has no import, reads
+# it through the link. A dotfiles layer that installs either file must keep this.
+RUN printf '@~/.nexus/PYLON.md\n' > /home/user/.claude/CLAUDE.md \
+ && ln -s /home/user/.nexus/PYLON.md /home/user/.pi/agent/AGENTS.md
 # Nexus relaunches each pane's agent on wake (src/sessions.ts) and checks that it runs. Herdr's own resume on
 # restore would start it first, and when that start fails, as `claude --resume` does for a session never
 # prompted, Herdr still reports the agent as running.
