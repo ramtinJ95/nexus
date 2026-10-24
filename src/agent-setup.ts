@@ -115,8 +115,8 @@ const pluginMarkers = new Set([".in_use", ".orphaned_at"]);
  * An extension entry that loads nothing is not a capability and is skipped by definition, as is a directory that is
  * also a local package, which ships once, as the package. A skill goes to Claude Code when ~/.claude/skills has it and
  * skillOverrides does not turn it off, and to pi when ~/.agents/skills or ~/.pi/agent/skills has it and no `-path`
- * exclusion names it. A leave-out that matches nothing comes back as a note, so a stale entry is visible without
- * blocking a capture.
+ * exclusion names it. A pi-package leave-out npm:<name> matches that package whatever version its entry pins. A
+ * leave-out that matches nothing comes back as a note, so a stale entry is visible without blocking a capture.
  */
 export function planAgentSetup(mac: MacSetup, rules: readonly LeaveOut[]): Capture {
   const problems: string[] = [];
@@ -208,10 +208,10 @@ export function planAgentSetup(mac: MacSetup, rules: readonly LeaveOut[]): Captu
 
   const packages: PiPackage[] = [];
   for (const entry of mac.pi.packages) {
-    if (leftOut("pi-package", entry)) continue;
+    const name = npmName(entry);
+    if (leftOut("pi-package", name === null ? entry : `npm:${name}`)) continue;
     const local = mac.pi.localPackages.get(entry);
-    if (entry.startsWith("npm:")) {
-      const name = /^npm:(@?[^@]+)/.exec(entry)![1]!;
+    if (name !== null) {
       const version = mac.pi.npmVersions.get(name);
       if (version === undefined) problems.push(`pi package ${entry}: no version of ${name} is installed under ~/.pi/agent/npm`);
       else packages.push({ kind: "npm", name, version });
@@ -251,6 +251,11 @@ export function planAgentSetup(mac: MacSetup, rules: readonly LeaveOut[]): Captu
     leftOut: rules.filter((rule) => matched.has(rule)),
     notes: rules.filter((rule) => !matched.has(rule)).map((rule) => `leave-out ${rule.kind}:${rule.name} matches nothing on this Mac`),
   };
+}
+
+/** The package name of an npm: settings entry, whatever version it pins, as pi parses it; null for any other entry. */
+function npmName(entry: string): string | null {
+  return /^npm:\s*(@?[^@]+)/.exec(entry)?.[1]?.trim() ?? null;
 }
 
 function samePluginFiles(installed: PluginFiles, atHead: PluginFiles): boolean {
@@ -415,10 +420,10 @@ export async function readMacSetup(home: string): Promise<MacSetup> {
   const npmVersions = new Map<string, string>();
   const localPackages = new Map<string, string>();
   for (const entry of piSettings.packages) {
-    const npm = /^npm:(@?[^@]+)/.exec(entry);
-    if (npm !== null) {
-      const packageJson = join(piAgent, "npm", "node_modules", npm[1]!, "package.json");
-      if (existsSync(packageJson)) npmVersions.set(npm[1]!, (await readJson(packageJson, z.object({ version: z.string() }))).version);
+    const name = npmName(entry);
+    if (name !== null) {
+      const packageJson = join(piAgent, "npm", "node_modules", name, "package.json");
+      if (existsSync(packageJson)) npmVersions.set(name, (await readJson(packageJson, z.object({ version: z.string() }))).version);
     } else if (!/^[a-z+]+:/.test(entry) && existsSync(resolve(piAgent, entry))) {
       localPackages.set(entry, await resolveSetting(entry));
     }
