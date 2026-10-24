@@ -721,7 +721,7 @@ test("a service that wants a preview gets a port, and the next spawn publishes i
   fake.setServices(thread.pylonId, [web, worker]);
   await until("the preview is ready", () => registry.previews(thread.pylonId).some((p) => p.ready));
 
-  assert.deepEqual(registry.previews(thread.pylonId), [{ pylon: thread.pylonId, service: "web", httpsPort: 10200, ready: true, url: "https://rj-firebat.tail.ts.net:10200/" }]);
+  assert.deepEqual(registry.previews(thread.pylonId), [{ pylon: thread.pylonId, service: "web", httpsPort: 10200, ready: true, failed: null, url: "https://rj-firebat.tail.ts.net:10200/" }]);
   const live = fake.lives.get(thread.pylonId);
   assert.deepEqual(live?.previews, [{ service: "web", httpsPort: 10200 }]);
   assert.deepEqual(previewsIn(live), [{ service: "web", url: "https://rj-firebat.tail.ts.net:10200/" }]);
@@ -778,7 +778,7 @@ test("preview ports are unique on a node and keep their port across pause, a con
 
   const after = openRegistry(path);
   run(t, after, fake.probe, { ingest: realIngest });
-  assert.deepEqual(after.previews(a.pylonId), [{ pylon: a.pylonId, service: "web", httpsPort: 10200, ready: false, url: "https://rj-firebat.tail.ts.net:10200/" }]);
+  assert.deepEqual(after.previews(a.pylonId), [{ pylon: a.pylonId, service: "web", httpsPort: 10200, ready: false, failed: null, url: "https://rj-firebat.tail.ts.net:10200/" }]);
   after.setThreadStatus(a.id, "active");
   after.recordActivity(a.id, { human: Date.now() });
   await until("a's preview is ready again", () => after.previews(a.pylonId)[0]?.ready === true);

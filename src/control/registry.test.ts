@@ -296,6 +296,32 @@ test("released ports go to the next pylon that asks, and readiness marks only th
   assert.deepEqual(portsOf(registry, next), ["web 10200"]);
 });
 
+test("a published preview is not ready while its running pylon reports its service failed", async (t) => {
+  const registry = seeded(tempDb());
+  t.after(() => registry.close());
+  registry.allocatePreviews(pylonId, ["api", "web"], ports);
+  registry.apply({ record: "preview", pylonId, service: "api", httpsPort: 10200, ready: true });
+  registry.apply({ record: "preview", pylonId, service: "web", httpsPort: 10201, ready: true });
+  const observe = (observed: NodeObservation["pylons"][number]) => registry.ingested({
+    node, observedAt: "2027-01-01T00:00:00Z", probeBootId: "b", capacity: { memoryGiB: 64, committedMemoryGiB: 8, diskFreeGiB: 400 },
+    artifacts: [], jobs: [], pylons: [observed], previewRoutes: [],
+  }, []);
+  const running = (webState: "ready" | "failed") => observe({
+    pylonId, phase: "running", liveHash: null, bootedAt: "2027-01-01T00:00:00Z", bootedFrom: { image: image.id, checkpoint: null },
+    services: [{ name: "api", state: "ready", port: 8080, declared: true, wantsPreview: true }, { name: "web", state: webState, port: 8003, declared: true, wantsPreview: true }],
+    listening: [], previews: [], sessions: [], git: null, declaredOutputs: [], attachedClients: 0,
+  });
+  const states = () => registry.previews(pylonId).map((p) => [p.service, p.ready, p.failed]);
+
+  running("failed");
+  assert.deepEqual(states(), [["api", true, null], ["web", false, "the service web failed. `nexus service logs web` in the pylon shows why"]]);
+  running("ready");
+  assert.deepEqual(states(), [["api", true, null], ["web", true, null]], "a restarted service's preview is ready again");
+  running("failed");
+  observe({ pylonId, phase: "stopped", checkpoint: null });
+  assert.deepEqual(states(), [["api", true, null], ["web", true, null]], "a stopped pylon's services are not known to have failed");
+});
+
 test("a port the node routes is never handed out, though no row holds it", async (t) => {
   const registry = seeded(tempDb());
   t.after(() => registry.close());
@@ -320,7 +346,7 @@ test("a registry from before node-unique preview ports keeps its previews", asyn
 
   const registry = openRegistry(path);
   t.after(() => registry.close());
-  assert.deepEqual(registry.previews(pylonId), [{ pylon: pylonId, service: "web", httpsPort: 10200, ready: true, url: "https://rj-firebat.tail.ts.net:10200/" }]);
+  assert.deepEqual(registry.previews(pylonId), [{ pylon: pylonId, service: "web", httpsPort: 10200, ready: true, failed: null, url: "https://rj-firebat.tail.ts.net:10200/" }]);
   registry.allocatePreviews(addPylon(registry, "th-2"), ["web"], ports);
   assert.deepEqual(portsOf(registry, "pylon-th-2" as PylonId), ["web 10201"]);
 });

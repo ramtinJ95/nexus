@@ -40,8 +40,12 @@ export interface Thread extends ActivityFacts {
 export type StoredPylon = Omit<PylonRecord, "desired">;
 
 export type Session = SessionFact & { pylon: PylonId };
-/** `url` is what the data model calls a preview's URL, on its node's tailnet name. */
-export interface Preview { pylon: PylonId; service: string; httpsPort: number; ready: boolean; url: string }
+/**
+ * `url` is what the data model calls a preview's URL, on its node's tailnet name. `failed` says why the preview
+ * cannot answer while its node's last observation reports its service failed, and null otherwise. `ready` is false
+ * while it is not null, though the node may still publish the URL.
+ */
+export interface Preview { pylon: PylonId; service: string; httpsPort: number; ready: boolean; failed: string | null; url: string }
 /** The https ports a node's previews are published on, both ends included. */
 export interface PortRange { first: number; last: number }
 export interface Output { thread: ThreadId; kind: Extract<RegistryWrite, { record: "output" }>["kind"]; ref: string }
@@ -271,10 +275,19 @@ export function openRegistry(path: string) {
   });
 
   function previews(pylon: PylonId): Preview[] {
-    return (q.previews.all(pylon) as Row[]).map((r): Preview => ({
-      pylon: r.pylon as PylonId, service: r.service as string, httpsPort: r.https_port as number, ready: r.ready === 1,
-      url: `https://${r.tailnet_host as string}:${r.https_port as number}/`,
-    }));
+    const rows = q.previews.all(pylon) as Row[];
+    if (rows.length === 0) return [];
+    // A pylon's previews are all on its node.
+    const observed = jsonOrNull<NodeObservation>((q.node.get(rows[0]!.node as string) as Row).observation)?.pylons.find((p) => p.pylonId === pylon);
+    const failed = new Set(observed?.phase === "running" ? (observed.services ?? []).filter((s) => s.state === "failed").map((s) => s.name) : []);
+    return rows.map((r): Preview => {
+      const service = r.service as string;
+      const why = failed.has(service) ? `the service ${service} failed. \`nexus service logs ${service}\` in the pylon shows why` : null;
+      return {
+        pylon: r.pylon as PylonId, service, httpsPort: r.https_port as number, ready: r.ready === 1 && why === null, failed: why,
+        url: `https://${r.tailnet_host as string}:${r.https_port as number}/`,
+      };
+    });
   }
 
   function threadOfPylon(pylonId: PylonId): ThreadId | undefined {

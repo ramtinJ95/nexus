@@ -329,6 +329,30 @@ test("a paused pylon's preview keeps its link, labelled paused, unless the threa
   assert.deepEqual(await previews(), { previews: "Previews 1 web paused rj-firebat.tail.ts.net:8443 Unarchive the thread to open it.", linked: false }, "an archived thread's running pylon offers no link");
 });
 
+test("a published preview whose service failed shows failed, with why and no link", async (t) => {
+  const s = await seeded(t);
+  const fix = await s.start("acme", "Fix checkout");
+  const web = (state: ServiceFact["state"]): ServiceFact => ({ name: "web", state, port: 8003, declared: true, wantsPreview: true });
+  s.registry.allocatePreviews(fix.pylonId, ["web"], { first: 8443, last: 8443 });
+  s.registry.apply({ record: "preview", pylonId: fix.pylonId, service: "web", httpsPort: 8443, ready: true });
+  const url = "https://rj-firebat.tail.ts.net:8443/";
+  const page = async () => {
+    const html = (await s.call("GET", `/threads/${fix.id}`)).text;
+    const section = sectionOf(html, "previews-h");
+    const strip = textOf(html.split('id="strip"')[1]!.split("</div>")[0]!.replace(/^[^>]*>/, ""));
+    return { previews: textOf(section), strip, linked: section.includes(`href="${url}"`) };
+  };
+  s.observeWith({ services: [web("ready")], listening: [8003] }, fix);
+  assert.deepEqual(await page(), { previews: "Previews 1 web Open ↗ rj-firebat.tail.ts.net:8443", strip: "running · rj-firebat web ↗ 0 outputs", linked: true });
+
+  s.observeWith({ services: [web("failed")] }, fix);
+  assert.deepEqual(await page(), {
+    previews: "Previews 1 web failed rj-firebat.tail.ts.net:8443 the service web failed. `nexus service logs web` in the pylon shows why",
+    strip: "running · rj-firebat web, failed 0 outputs",
+    linked: false,
+  }, "the gateway can only answer 502 for it");
+});
+
 test("tool calls are one-line rows where only failures and edits start open, with the exit code and the edit's diff", async (t) => {
   const s = await seeded(t);
   const fix = await s.start("acme", "Fix checkout");

@@ -323,7 +323,7 @@ test("ports lists what the pylon listens on, and preview publishes one and waits
   assert.deepEqual(await s.json(["ports", thread.id]), [{ port: 3000, service: null, preview: null }]);
   assert.equal((await s.nexus(["ports", thread.id])).stdout, `3000  -  -\n\`nexus preview ${thread.id} <port>\` publishes a port.\n`);
 
-  const preview = { pylon: thread.pylonId, service: "port-3000", httpsPort: 10200, ready: false, url: "https://rj-firebat.tail.ts.net:10200/" };
+  const preview = { pylon: thread.pylonId, service: "port-3000", httpsPort: 10200, ready: false, failed: null, url: "https://rj-firebat.tail.ts.net:10200/" };
   assert.deepEqual(await s.json(["preview", thread.id, "3000"]), preview, "the reply names the URL before it is served");
   const waiting = s.json(["preview", thread.id, "3000", "--wait"]);
   await new Promise((r) => setTimeout(r, 1500)); // the wait polls a published preview that is not served yet
@@ -333,6 +333,25 @@ test("ports lists what the pylon listens on, and preview publishes one and waits
   assert.equal((await s.nexus(["preview", thread.id, "3000", "--wait"])).stdout, `${preview.url}\n`);
   assert.equal((await s.nexus(["ports", thread.id])).stdout, `3000  port-3000  ${preview.url}\n`);
   assert.equal((await s.nexus(["preview", thread.id, "http"])).code, 64);
+});
+
+test("show reports a published preview whose service failed as not ready, and why", async (t) => {
+  const s = await setup(t);
+  const thread: Thread = await s.json(["start", "--project", "acme", "--title", "failed web"]);
+  const web = (state: ServiceFact["state"]): ServiceFact => ({ name: "web", state, port: 8003, declared: true, wantsPreview: true });
+  observeRunning(s, thread, [web("ready")], [8003]);
+  s.registry.allocatePreviews(thread.pylonId, ["web"], { first: 10200, last: 10299 });
+  s.registry.apply({ record: "preview", pylonId: thread.pylonId, service: "web", httpsPort: 10200, ready: true });
+  const preview = { pylon: thread.pylonId, service: "web", httpsPort: 10200, ready: true, failed: null, url: "https://rj-firebat.tail.ts.net:10200/" };
+  assert.deepEqual((await s.json(["show", thread.id])).previews, [preview]);
+
+  observeRunning(s, thread, [web("failed")], []);
+  const failed = "the service web failed. `nexus service logs web` in the pylon shows why";
+  assert.deepEqual((await s.json(["show", thread.id])).previews, [{ ...preview, ready: false, failed }], "the node still publishes it, but nothing answers");
+  assert.match((await s.nexus(["show", thread.id])).stdout, new RegExp(`^preview: web at ${preview.url}, not ready: the service web failed\\. \`nexus service logs web\` in the pylon shows why$`, "m"));
+
+  observeRunning(s, thread, [web("ready")], [8003]);
+  assert.deepEqual((await s.json(["show", thread.id])).previews, [preview], "a restarted service's preview is ready again");
 });
 
 test("unpreview unpublishes a port, waits for a paused pylon to run, and fails with the contract's exit codes", async (t) => {

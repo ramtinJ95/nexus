@@ -225,7 +225,7 @@ test("thread detail derives the actual state from the node's last observation", 
   assert.equal(d.pylon.observedAt, "2027-01-01T00:01:00Z");
   assert.deepEqual(d.sessions, [{ pylon: thread.pylonId, herdrPane: "p1", harness: "pi", harnessSessionId: null, status: "idle" }]);
   assert.deepEqual(d.outputs, [{ thread: thread.id, kind: "branch", ref: "nexus/fix" }]);
-  assert.deepEqual(d.previews, [{ pylon: thread.pylonId, service: "web", httpsPort: 8443, ready: true, url: "https://rj-firebat.tail.ts.net:8443/" }]);
+  assert.deepEqual(d.previews, [{ pylon: thread.pylonId, service: "web", httpsPort: 8443, ready: true, failed: null, url: "https://rj-firebat.tail.ts.net:8443/" }]);
 
   s.registry.apply({ record: "job", status: { ...pause, state: "succeeded", finishedAt: "2027-01-01T00:01:30Z" } });
   assert.equal((await detail()).pylon.actualState, "running");
@@ -254,7 +254,7 @@ test("thread detail lists the pylon's listening ports with the service and previ
   s.registry.allocatePreviews(s.thread.pylonId, ["web"], { first: 10200, last: 10299 });
   assert.deepEqual(await ports(), [
     { port: 3000, service: null, preview: null },
-    { port: 5173, service: "web", preview: { pylon: s.thread.pylonId, service: "web", httpsPort: 10200, ready: false, url: "https://rj-firebat.tail.ts.net:10200/" } },
+    { port: 5173, service: "web", preview: { pylon: s.thread.pylonId, service: "web", httpsPort: 10200, ready: false, failed: null, url: "https://rj-firebat.tail.ts.net:10200/" } },
     { port: 8080, service: "api", preview: null },
   ]);
   observeRunning(s, { listening: null });
@@ -268,7 +268,7 @@ test("linking a port goes through the node's probe, gives it an https port at on
   s.registry.recordActivity(s.thread.id, { human: 1 });
   s.woken.length = 0;
   const linked = await s.call("POST", `/v1/threads/${s.thread.id}/previews`, { port: 3000 });
-  const preview = { pylon: s.thread.pylonId, service: "port-3000", httpsPort: 10200, ready: false, url: "https://rj-firebat.tail.ts.net:10200/" };
+  const preview = { pylon: s.thread.pylonId, service: "port-3000", httpsPort: 10200, ready: false, failed: null, url: "https://rj-firebat.tail.ts.net:10200/" };
   assert.deepEqual(linked, { status: 200, body: preview });
   assert.deepEqual(s.commands, [[s.thread.pylonId, { kind: "link-port", port: 3000 }]]);
   assert.ok(s.registry.thread(s.thread.id)!.lastHumanActivityAt > 1);
