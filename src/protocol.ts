@@ -195,6 +195,8 @@ export type SessionFact =
     title?: string;
   }
   | { id: string; state: "failed"; herdrPane: string | null; harness: SessionHarness; harnessSessionId: string | null; status: HerdrStatus; title: string; message: string };
+/** What tells sessions apart. `title` is null where it is not known, as from a probe before titles were reported. */
+export interface SessionIdentity { harness: SessionHarness; harnessSessionId: string | null; title: string | null }
 /** A session a stopped pylon's wake brings back, under the `id` it had while the pylon ran. */
 export interface PausedSession { id: string; herdrPane: string | null; harness: SessionHarness; harnessSessionId: string | null; title: string }
 export interface GitFacts { head: string; branch: string | null; dirty: boolean; branches: readonly { name: string; head: string; pushedAs: string | null }[] }
@@ -218,7 +220,11 @@ export type PylonCommand =
   /** When the timeout passes, the probe calls pi-sandbox's exec-kill and returns exitCode null. Timeout at most 60 s. */
   | { kind: "exec"; argv: readonly string[]; cwd: string; timeoutMs: number }
   | { kind: "open-session"; harness: SessionHarness; title: string; resume?: string }
-  | { kind: "close-session"; herdrPane: string }
+  /**
+   * `session` is who the control plane last saw in the pane, so a pane a wake has since given to another session is
+   * left open. None for a pane no observation has listed yet, such as one opened a moment ago.
+   */
+  | { kind: "close-session"; herdrPane: string; session?: SessionIdentity }
   /** Forgets a failed session the last wake left in no pane, so no wake tries it again. */
   | { kind: "drop-failed-session"; id: string }
   | { kind: "service"; op: "ensure" | "restart" | "stop" | "logs"; name?: string; lines?: number }
@@ -230,8 +236,11 @@ export type PylonCommand =
 export type CommandResult =
   | { kind: "exec"; exitCode: number | null; output: string; truncated: boolean }
   | { kind: "open-session"; herdrPane: string }
-  /** `closed` is false when no such pane is open, such as one a wake has since moved. A probe older than the field sends none. */
-  | { kind: "close-session"; closed: boolean }
+  /**
+   * `not-open`: no such pane is open. `moved`: the pane runs another session than the command names, such as one a wake
+   * put there after moving the named one. Both leave every pane as it was. A probe older than the field sends none.
+   */
+  | { kind: "close-session"; outcome: "closed" | "not-open" | "moved" }
   /** `dropped` is false when the pylon holds no such failed session. */
   | { kind: "drop-failed-session"; dropped: boolean }
   | { kind: "service"; services: readonly ServiceFact[]; logs?: string }
@@ -734,9 +743,15 @@ export function parsePylonCommand(body: string): PylonCommand {
         if (c.harness === "shell") throw new Error("a shell session has nothing to resume");
       }
       break;
-    case "close-session":
+    case "close-session": {
       string(c.herdrPane, "command.herdrPane");
+      if (c.session === undefined) break;
+      const s = record(c.session, "command.session");
+      if (!harnesses.has(s.harness)) throw new Error(`unknown harness ${JSON.stringify(s.harness)}`);
+      if (s.harnessSessionId !== null) string(s.harnessSessionId, "command.session.harnessSessionId");
+      if (s.title !== null) string(s.title, "command.session.title");
       break;
+    }
     case "drop-failed-session":
       string(c.id, "command.id");
       break;
@@ -755,11 +770,15 @@ export function parsePylonCommand(body: string): PylonCommand {
   return c as unknown as PylonCommand;
 }
 
+const closeOutcomes: ReadonlySet<unknown> = new Set(["closed", "not-open", "moved"] satisfies Extract<CommandResult, { kind: "close-session" }>["outcome"][]);
 function parseCommandResult(command: PylonCommand, body: string): CommandResult {
   const r = record(JSON.parse(body), "command result");
   if (r.kind !== command.kind) throw new Error(`a ${command.kind} command got a ${JSON.stringify(r.kind)} result`);
   if (r.kind === "open-session") string(r.herdrPane, "result.herdrPane");
-  if (r.kind === "close-session") r.closed ??= true; // from a probe that reported every close as done
+  if (r.kind === "close-session") {
+    r.outcome ??= "closed"; // from a probe that reported every close as done
+    if (!closeOutcomes.has(r.outcome)) throw new Error(`unknown close outcome ${JSON.stringify(r.outcome)}`);
+  }
   if (r.kind === "drop-failed-session" && typeof r.dropped !== "boolean") throw new Error("result.dropped is not a boolean");
   if (r.kind === "link-port") string(r.service, "result.service");
   if (r.kind === "unlink-port" && r.refused !== null) string(r.refused, "result.refused");

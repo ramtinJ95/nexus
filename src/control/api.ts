@@ -557,8 +557,9 @@ export async function startApi(options: ApiOptions): Promise<Api> {
   /**
    * Closes a session by its ID. A paused one is refused without waking its pylon, since the wake brings it back and
    * it closes once it runs. A failed one in no pane is forgotten, so no wake tries it again. Any other ID is a pane,
-   * perhaps one opened a moment ago that no observation lists yet. A pane that is not open is a 404, never a success:
-   * a caller may hold a pane from before a wake that brought its session back in another one.
+   * perhaps one opened a moment ago that no observation lists yet. A pane that is not open, or that runs another
+   * session than the one listed there, is a 404, never a success: a caller may hold a pane from before a wake that
+   * brought its session back in another one, and gave this one to another session.
    */
   async function closeSession(t: Thread, id: string): Promise<void> {
     const session = registry.session(t.pylonId, id);
@@ -571,8 +572,10 @@ export async function startApi(options: ApiOptions): Promise<Api> {
       if (!dropped) throw new HttpError(404, `pylon ${t.pylonId} holds no failed session ${id}`);
       return;
     }
-    const { closed } = await pylonCommand(t, { kind: "close-session", herdrPane: id });
-    if (!closed) throw new HttpError(404, `no session is open in pane ${id} of pylon ${t.pylonId}. A wake may have moved it to another pane, which the thread's sessions list`);
+    const listed = session === undefined ? {} : { session: { harness: session.harness, harnessSessionId: session.harnessSessionId, title: session.title } };
+    const { outcome } = await pylonCommand(t, { kind: "close-session", herdrPane: id, ...listed });
+    if (outcome === "not-open") throw new HttpError(404, `no session is open in pane ${id} of pylon ${t.pylonId}. A wake may have moved it to another pane, which the thread's sessions list`);
+    if (outcome === "moved") throw new HttpError(404, `pane ${id} of pylon ${t.pylonId} runs another session now, so it was left open. A wake moved session ${id} to another pane, which the thread's sessions list`);
   }
 
   async function conversation(t: Thread) {

@@ -100,7 +100,7 @@ async function setup(t: TestContext) {
   let answer = async (command: PylonCommand): Promise<CommandResult> =>
     command.kind === "unlink-port" ? { kind: "unlink-port", refused: null }
     : command.kind === "open-session" ? { kind: "open-session", herdrPane: "w1:p1" }
-    : command.kind === "close-session" ? { kind: "close-session", closed: true }
+    : command.kind === "close-session" ? { kind: "close-session", outcome: "closed" }
     : { kind: "link-port", service: `port-${(command as { port: number }).port}` };
   const commands: PylonCommand[] = [];
   /** What the node's probe opens a pipe to. Tests replace it. */
@@ -577,7 +577,7 @@ test("session open opens Claude Code by default, waits for a paused pylon, and s
   assert.equal(waking.code, 5);
   assert.match(waking.stderr, /is not running yet. This request wakes it/);
   assert.equal(s.commands.length, 1);
-  s.probeAnswers(async () => ({ kind: "close-session", closed: false }));
+  s.probeAnswers(async () => ({ kind: "close-session", outcome: "not-open" }));
   const stale = await s.nexus(["session", "close", thread.id, "w1:p1"]);
   assert.equal(stale.code, 4);
   assert.match(stale.stderr, /no session is open in pane w1:p1 .* A wake may have moved it/);

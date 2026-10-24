@@ -127,10 +127,10 @@ test("opening a session starts a detached Herdr server when none runs", async ()
 });
 
 test("closing a pane that is gone, or with no server, closes nothing and says so; other errors reject", async () => {
-  assert.equal(await closeSession(herdrUp({ "pane close": () => herdrError("pane_not_found") }), "w1:p1"), false);
-  assert.equal(await closeSession(herdrUp({ "pane close": () => herdrError("server_not_running") }), "w1:p1"), false);
+  assert.equal(await closeSession(herdrUp({ "pane close": () => herdrError("pane_not_found") }), "w1:p1"), "not-open");
+  assert.equal(await closeSession(herdrUp({ "pane close": () => herdrError("server_not_running") }), "w1:p1"), "not-open");
   const closed = herdrUp({ "pane close": () => herdrOk({ type: "ok" }) });
-  assert.equal(await closeSession(closed, "w2:p1"), true);
+  assert.equal(await closeSession(closed, "w2:p1"), "closed");
   assert.deepEqual(closed.execs[0]!.slice(3), ["pane", "close", "w2:p1"]);
   await assert.rejects(closeSession(herdrUp({ "pane close": () => herdrError("invalid_params", "bad pane") }), "x"), /bad pane/);
 });
@@ -437,9 +437,22 @@ test("a failure left in its restored pane stands for that pane until the pane is
   // Recorded and reported as the Claude it should be, not as the shell it is.
   assert.deepEqual(await recordSessions(guest), [{ ...records[0], id: "w1:p1" }]);
   assert.deepEqual((await sessionFacts(guest)).map((f) => [f.id, f.state, f.herdrPane, f.harness, f.status]), [["w1:p1", "failed", "w1:p1", "claude-code", "unknown"]], "with its pane's status");
-  assert.equal(await closeSession(guest, "w1:p1"), true);
+  assert.equal(await closeSession(guest, "w1:p1", { harness: "claude-code", harnessSessionId: "aaaa", title: "review" }), "closed", "it is the session the failed record names");
   assert.deepEqual(await recordSessions(guest), []);
   assert.deepEqual(await sessionFacts(guest), []);
+});
+
+test("a close that names its session leaves a pane that runs another one open, such as one a wake gave that pane", async () => {
+  const guest = pylon([], [claudePane("w1", "review", "bbbb"), shellPane("w2", "sh", "/home/user")]);
+  const review = { harness: "claude-code", harnessSessionId: "aaaa", title: "review" } as const;
+  assert.equal(await closeSession(guest, "w1:p1", review), "moved");
+  assert.equal(await closeSession(guest, "w1:p1", { ...review, harness: "pi", harnessSessionId: "bbbb" }), "moved");
+  assert.equal(await closeSession(guest, "w1:p1", { ...review, harnessSessionId: "bbbb", title: "plan" }), "moved");
+  assert.equal(await closeSession(guest, "w9:p1", review), "not-open");
+  assert.deepEqual(guest.herdrCalls().filter((c) => c === "pane close"), [], "nothing was closed");
+  // What either side has not learned yet does not tell them apart.
+  assert.equal(await closeSession(guest, "w2:p1", { harness: "shell", harnessSessionId: null, title: null }), "closed");
+  assert.equal(await closeSession(guest, "w1:p1", { ...review, harnessSessionId: null }), "closed");
 });
 
 test("dropping a failed session in no pane removes it from the sessions file, so no wake tries it again", async () => {

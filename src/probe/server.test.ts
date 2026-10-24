@@ -341,7 +341,7 @@ test("commands run in a running pylon's guest and return its result", async (t) 
   assert.deepEqual(await client.command(pylonId, { kind: "open-session", harness: "claude-code", title: "review" }), { kind: "open-session", herdrPane: "w1:p1" });
   const create = guest.execs.find((a) => a[4] === "create")!;
   assert.deepEqual(create.slice(5, 9), ["--cwd", "/home/user/workspace/repo", "--label", "review"], "sessions open in the checkout");
-  assert.deepEqual(await client.command(pylonId, { kind: "close-session", herdrPane: "w1:p1" }), { kind: "close-session", closed: false }, "a pane that is not open is not reported closed");
+  assert.deepEqual(await client.command(pylonId, { kind: "close-session", herdrPane: "w1:p1" }), { kind: "close-session", outcome: "not-open" }, "a pane that is not open is not reported closed");
 });
 
 test("a command for a pylon that is not running is refused as not-running", async (t) => {
@@ -363,6 +363,8 @@ test("malformed commands get 400 and reach no guest", async (t) => {
   assert.equal(await post({ kind: "open-session", harness: "codex", title: "x" }), 400);
   assert.equal(await post({ kind: "open-session", harness: "shell", title: "x", resume: "abc" }), 400);
   assert.equal(await post({ kind: "drop-failed-session" }), 400);
+  assert.equal(await post({ kind: "close-session", herdrPane: "w1:p1", session: { harness: "codex", harnessSessionId: null, title: null } }), 400);
+  assert.equal(await post({ kind: "close-session", herdrPane: "w1:p1", session: { harness: "pi", title: null } }), 400);
   assert.equal(await post({ kind: "reboot" }), 400);
   assert.deepEqual(guest.execs, []);
 });

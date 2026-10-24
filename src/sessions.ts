@@ -16,7 +16,7 @@
  */
 import { createHash, randomUUID } from "node:crypto";
 import type { Guest } from "./backend.ts";
-import type { HerdrStatus, PausedSession, SessionFact } from "./protocol.ts";
+import type { HerdrStatus, PausedSession, SessionFact, SessionIdentity } from "./protocol.ts";
 import type { SessionHarness } from "./project.ts";
 
 export const herdrSession = "nexus";
@@ -173,15 +173,23 @@ async function screen(guest: Guest, pane: string): Promise<string> {
 }
 
 /**
- * False when the pane is not open, or no Herdr server runs: a caller holding a pane ID from before a wake must not
- * read that as its session closed, since the wake may have brought the session back in another pane.
+ * Closes the pane, unless it is not open, or no Herdr server runs, or `expected` names another session than the one
+ * sessionFacts reports there. A caller holding a pane ID from before a wake must not read any of those as its session
+ * closed, since the wake may have brought the session back in another pane, and given this one to another session.
  */
-export async function closeSession(guest: Guest, herdrPane: string): Promise<boolean> {
+export async function closeSession(guest: Guest, herdrPane: string, expected?: SessionIdentity): Promise<"closed" | "not-open" | "moved"> {
+  if (expected !== undefined) {
+    const there = (await sessionFacts(guest)).find((f) => f.herdrPane === herdrPane);
+    if (there === undefined) return "not-open";
+    // An ID or title either side has not learned yet, such as a Claude Code ID before its SessionStart hook, tells nothing.
+    const differ = (a: string | null | undefined, b: string | null) => a != null && b !== null && a !== b;
+    if (there.harness !== expected.harness || differ(there.harnessSessionId, expected.harnessSessionId) || differ(there.title, expected.title)) return "moved";
+  }
   try {
     await herdr(guest, ["pane", "close", herdrPane]);
-    return true;
+    return "closed";
   } catch (err) {
-    if (err instanceof HerdrError && (err.code === "pane_not_found" || err.code === "server_not_running")) return false;
+    if (err instanceof HerdrError && (err.code === "pane_not_found" || err.code === "server_not_running")) return "not-open";
     throw err;
   }
 }

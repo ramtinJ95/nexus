@@ -52,7 +52,7 @@ async function setup(t: import("node:test").TestContext, options: { dotfiles?: t
     if (command.kind === "link-port") return { kind: "link-port", service: `port-${command.port}` };
     if (command.kind === "unlink-port") return { kind: "unlink-port", refused: null };
     if (command.kind === "open-session") return { kind: "open-session", herdrPane: "w1:p1" };
-    if (command.kind === "close-session") return { kind: "close-session", closed: true };
+    if (command.kind === "close-session") return { kind: "close-session", outcome: "closed" };
     if (command.kind === "drop-failed-session") return { kind: "drop-failed-session", dropped: true };
     throw new Error(`unexpected ${command.kind} command`);
   };
@@ -584,10 +584,22 @@ test("closing a session goes through the node's probe, and a pane that is not op
   const s = await withThread(t);
   assert.deepEqual(await s.call("DELETE", `/v1/threads/${s.thread.id}/sessions/${encodeURIComponent("w1:p1")}`, {}), { status: 204, body: null });
   assert.deepEqual(s.commands, [[s.thread.pylonId, { kind: "close-session", herdrPane: "w1:p1" }]]);
-  s.probeAnswers(async () => ({ kind: "close-session", closed: false }));
+  s.probeAnswers(async () => ({ kind: "close-session", outcome: "not-open" }));
   const stale = await s.call("DELETE", `/v1/threads/${s.thread.id}/sessions/${encodeURIComponent("w1:p1")}`, {});
   assert.equal(stale.status, 404);
   assert.match(stale.body.error, /no session is open in pane w1:p1 .* A wake may have moved it/);
+});
+
+test("closing a listed session names it, and a pane that runs another session now is a 404 that leaves it open", async (t) => {
+  const s = await withThread(t);
+  s.registry.apply({ record: "sessions", pylonId: s.thread.pylonId, sessions: [
+    { id: "w1:p1", state: "running", herdrPane: "w1:p1", harness: "claude-code", harnessSessionId: "s1", title: "review", status: "idle", message: null },
+  ] });
+  s.probeAnswers(async () => ({ kind: "close-session", outcome: "moved" }));
+  const moved = await s.call("DELETE", `/v1/threads/${s.thread.id}/sessions/${encodeURIComponent("w1:p1")}`, {});
+  assert.deepEqual(s.commands, [[s.thread.pylonId, { kind: "close-session", herdrPane: "w1:p1", session: { harness: "claude-code", harnessSessionId: "s1", title: "review" } }]]);
+  assert.equal(moved.status, 404);
+  assert.match(moved.body.error, /pane w1:p1 of pylon \S+ runs another session now, so it was left open. A wake moved session w1:p1 to another pane/);
 });
 
 /** Records the thread's pylon stopped with these sessions, as the loop would from the node's observation. */

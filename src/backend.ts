@@ -193,7 +193,7 @@ export async function runCommand(pylonId: PylonId, command: PylonCommand, deps: 
       return { kind: "open-session", herdrPane: await openSession(guest, { harness, title, cwd: checkoutDir, ...(resume === undefined ? {} : { resume }) }) };
     }
     case "close-session":
-      return { kind: "close-session", closed: await closeSession(guest, command.herdrPane) };
+      return { kind: "close-session", outcome: await closeSession(guest, command.herdrPane, command.session) };
     case "drop-failed-session":
       return { kind: "drop-failed-session", dropped: await dropFailedSession(guest, command.id) };
     case "service": {
