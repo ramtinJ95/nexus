@@ -544,8 +544,13 @@ function showChanges(...nodes) {
   document.getElementById("changes-body")?.replaceChildren(...present(nodes));
 }
 
+/** An archived or deleted thread, whose pylon stays paused, so its checkout cannot be read. */
+const threadClosed = (facts) => facts.status !== "active" && facts.status !== "idle";
+
 /** Why the changes cannot be read now, with a button to wake the pylon when that is what it takes. */
 function changesUnreadable(facts) {
+  // A closed thread keeps no reply, so nothing shows its stale tree again and an unarchive's start reads anew.
+  if (threadClosed(facts)) checkout.changes = null;
   if (facts.status === "deleted") return showChanges(el("p", { className: "empty", textContent: "The thread is deleted, so its checkout is gone." }));
   if (facts.status === "archived") return showChanges(el("p", { className: "empty", textContent: "An archived thread's pylon stays paused, so its changes can't be read. Unarchive the thread to read them." }));
   if (checkout.wanted) return showChanges(el("p", { className: "empty", textContent: "Waking the pylon. Its changes show once it runs." }));
@@ -554,7 +559,7 @@ function changesUnreadable(facts) {
   showChanges(el("p", { className: "empty", textContent: `The pylon is ${facts.pylon}. Reading its changes wakes it.` }), wake);
 }
 
-const canRead = (facts) => facts.pylon === "running" && (facts.status === "active" || facts.status === "idle");
+const canRead = (facts) => facts.pylon === "running" && !threadClosed(facts);
 
 let reading = null;
 /**
@@ -564,7 +569,7 @@ let reading = null;
 async function readChanges(wake = false) {
   const facts = factsNow();
   if (thread === undefined || facts === null) return;
-  if (facts.status !== "active" && facts.status !== "idle") return changesUnreadable(facts);
+  if (threadClosed(facts)) return changesUnreadable(facts);
   if (facts.pylon !== "running") {
     if (!wake && !checkout.wanted) return changesUnreadable(facts);
     checkout.wanted = true;
@@ -577,6 +582,8 @@ async function readChanges(wake = false) {
       const changes = await api("GET", `/v1/threads/${thread}/changes?base=${base}`);
       checkout.wanted = false;
       if (base !== checkout.base) return;
+      // The thread closed while the read was out, so the reply is stale.
+      if (threadClosed(factsNow())) return changesUnreadable(factsNow());
       checkout.changes = changes;
       // An open tab takes the file's new counts, and keeps its place when the file is no longer changed.
       openTabs = openTabs.map((tab) => changes.files.find((f) => f.path === tab.path) ?? tab);
@@ -585,6 +592,8 @@ async function readChanges(wake = false) {
       if (activeTab !== null) void readDiff(activeTab);
     } catch (err) {
       if (base !== checkout.base) return;
+      // The thread closed while the read was out, so the closing, not the failure it caused, is what to show.
+      if (threadClosed(factsNow())) return changesUnreadable(factsNow());
       // A paused pylon answers 409 while the read wakes it.
       if (err.status === 409 && checkout.wanted && factsNow()?.pylon !== "running") return changesUnreadable(factsNow());
       checkout.changes = null;
@@ -673,7 +682,7 @@ function noticeFacts() {
   const started = now.pylon === "running" && before.pylon !== "running";
   const agentDone = !now.turn && (before.turn || now.agentAt !== before.agentAt);
   if ((started && (checkout.wanted || checkout.changes === null)) || (agentDone && canRead(now))) void readChanges();
-  else if (!canRead(now) && checkout.changes === null) changesUnreadable(now);
+  else if (!canRead(now) && (checkout.changes === null || threadClosed(now))) changesUnreadable(now);
 }
 
 if (changesPane !== null) {
@@ -809,7 +818,7 @@ async function readDiff(path) {
   // the read of the changes that wakes it reads the open diff again.
   const facts = factsNow();
   if (!canRead(facts)) {
-    const open = facts.status === "active" || facts.status === "idle";
+    const open = !threadClosed(facts);
     const wake = el("button", { type: "button", className: "btn btn-xs", textContent: "Wake and read" });
     wake.addEventListener("click", () => {
       void readChanges(true);
