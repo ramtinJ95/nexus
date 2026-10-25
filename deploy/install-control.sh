@@ -25,10 +25,12 @@ make_state nexus-control "$state"
 install -d -o root -g root -m 0755 "$etc"
 
 install_release "$repo"
-link_release "$prefix/control-current"
+[ "${NEXUS_PREPARE:-0}" = 1 ] || link_release "$prefix/control-current"
 
 [ -e "$etc/control.json" ] || install -o root -g root -m 0644 "$repo/deploy/control.example.json" "$etc/control.json"
 install_unit "$repo/deploy/nexus-control.service" nexus-control.service
+
+[ "${NEXUS_PREPARE:-0}" != 1 ] || exit 0
 
 if cmp -s "$repo/deploy/control.example.json" "$etc/control.json"; then
   echo "$etc/control.json is still the example. Edit it, sign the harness in with"
@@ -37,3 +39,5 @@ if cmp -s "$repo/deploy/control.example.json" "$etc/control.json"; then
   exit 0
 fi
 start_unit nexus-control.service "$prefix/control-active-release"
+
+bash "$repo/deploy/install-deployer.sh" control

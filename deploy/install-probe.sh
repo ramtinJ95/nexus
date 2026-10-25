@@ -31,7 +31,7 @@ tailscale set --operator=nexus
 install -d -o root -g root -m 0755 "$etc"
 
 install_release "$repo"
-link_release "$prefix/current"
+[ "${NEXUS_PREPARE:-0}" = 1 ] || link_release "$prefix/current"
 
 [ -e "$etc/probe.json" ] || install -o root -g root -m 0644 "$repo/deploy/probe.example.json" "$etc/probe.json"
 [ -e "$etc/secrets.env" ] || install -m 0640 "$repo/deploy/secrets.example.env" "$etc/secrets.env"
@@ -44,8 +44,12 @@ install_unit "$repo/deploy/nexus-probe.service" nexus-probe.service
 rm -f /usr/local/bin/nexus-attach /etc/sudoers.d/nexus-attach
 if getent group nexus-attach >/dev/null; then groupdel nexus-attach; fi
 
+[ "${NEXUS_PREPARE:-0}" != 1 ] || exit 0
+
 if cmp -s "$repo/deploy/probe.example.json" "$etc/probe.json"; then
   echo "$etc/probe.json is still the example. Edit it (and $etc/secrets.env), then rerun $0"
   exit 0
 fi
 start_unit nexus-probe.service "$prefix/active-release"
+
+bash "$repo/deploy/install-deployer.sh" probe

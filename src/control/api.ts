@@ -1,3 +1,4 @@
+import { runningCommit } from "../deploy/health.ts";
 import { canDeploy, commitSchema, isReporter, releaseView, reportSchema, resolveMain, type DeploymentOptions } from "./releases.ts";
 /**
  * The control plane's HTTP API for the dashboard and the CLI. JSON in and out.
@@ -739,6 +740,10 @@ export async function startApi(options: ApiOptions): Promise<Api> {
   }
 
   async function handle(req: IncomingMessage, res: ServerResponse) {
+    if (req.method === "GET" && req.url === "/v1/health" && req.socket.remoteAddress === req.socket.localAddress) {
+      res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ commit: runningCommit }));
+      return;
+    }
     const caller = await admit(req);
     if (req.method !== "GET" && req.headers["content-type"]?.split(";")[0]?.trim() !== "application/json") {
       throw new HttpError(415, "requests that change state must have content-type application/json");

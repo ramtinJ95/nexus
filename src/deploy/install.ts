@@ -39,6 +39,7 @@ export interface Transaction extends Attempt { previous: string; target: string 
 export interface InstallBoundary {
   /** Builds and performs upgrade steps without switching links or restarting services. */
   prepare(commit: string): Promise<string>;
+  activate?(role: Role): Promise<void>;
   restart(role: Role): Promise<void>;
   /** Must bound both the active-service check and API request, including its response body. */
   healthy(role: Role): Promise<boolean>;
@@ -93,6 +94,7 @@ export class ReleaseInstaller {
     const transaction = await this.record({ commit, previous, target, state: "installing", reason: null });
     try {
       await this.point(target);
+      await this.boundary.activate?.(this.role);
       await this.boundary.restart(this.role);
       if (!await this.boundary.healthy(this.role)) throw new Error("release health check failed");
       return await this.record({ ...transaction, state: "healthy" });
