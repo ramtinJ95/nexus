@@ -31,3 +31,12 @@ test("GitHub watching is opt-in and accepts only a token file path, never a toke
   assert.throws(() => parseConfig(JSON.stringify({ ...config, github: { tokenFile: "relative" } })), /absolute path/);
   assert.throws(() => parseConfig(JSON.stringify({ ...config, github: { token: "secret" } })), /invalid control plane config/);
 });
+
+test("git identity is optional and contains only a name and email", () => {
+  const { gitIdentity, ...config } = JSON.parse(example);
+  assert.deepEqual(parseConfig(example).gitIdentity, { name: "Example Person", email: "person@example.com" });
+  assert.equal(parseConfig(JSON.stringify(config)).gitIdentity, undefined);
+  for (const identity of [{ name: "", email: "person@example.com" }, { name: "Person", email: "not-email" }, { ...gitIdentity, token: "not-allowed" }, { name: "Person\nOther", email: "person@example.com" }]) {
+    assert.throws(() => parseConfig(JSON.stringify({ ...config, gitIdentity: identity })), /invalid control plane config/);
+  }
+});

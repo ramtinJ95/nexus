@@ -274,11 +274,11 @@ test("PYLON.md tells the agent its hosts, previews, logins and how to declare ou
   assert.doesNotMatch(bare, /device-code/);
 });
 
-test("PYLON.md of a scratch project with GitHub access says nothing is kept and how to commit as the token's owner and publish", () => {
+test("PYLON.md of a scratch project with GitHub access says nothing is kept and how to publish without inventing an author", () => {
   const md = renderOverlay({ ...overlay, repo: { kind: "empty", branch: "trunk" }, secrets: [githubTokenGrant] })[2]!.content;
   for (const fact of [
     "new repository on branch trunk with no commits and no remote", "Nothing in this pylon is kept when the thread is deleted",
-    'git config --global user.name "$(gh api user --jq .login)"', "users.noreply.github.com",
+    "Nexus has no git identity configured", "do not invent an identity",
     "gh repo create <owner>/<name> --private --source . --remote origin --push", "Use HTTPS remotes",
     "## Secrets", "- GH_TOKEN: api.github.com, github.com\n", "changes on every boot",
   ]) assert.ok(md.includes(fact), `PYLON.md mentions ${JSON.stringify(fact)}`);
@@ -289,18 +289,18 @@ test("PYLON.md of a scratch project without GitHub access says how to get it and
   const md = renderOverlay({ ...overlay, repo: { kind: "empty", branch: "main" } })[2]!.content;
   assert.ok(md.includes("new repository on branch main with no commits and no remote"));
   assert.ok(md.includes("--scratch --secret GH_TOKEN:api.github.com,github.com"), "names the grant to ask for");
-  assert.ok(md.includes("ask the human which name and email to commit as"));
+  assert.ok(md.includes("ask the human; do not invent an identity"));
   assert.doesNotMatch(md, /gh repo create|## Secrets|gh api user/);
 });
 
-test("PYLON.md of a clone names its remote, and sets the git author from gh only with GitHub access", () => {
+test("PYLON.md of a clone names its remote, and never infers an author from GitHub access", () => {
   const md = renderOverlay(overlay)[2]!.content;
   assert.ok(md.includes("is a clone of git@github.com:ramtin/acme-web.git, on branch main from origin/main"));
-  assert.ok(md.includes("ask the human which name and email to commit as"));
+  assert.ok(md.includes("ask the human; do not invent an identity"));
   assert.doesNotMatch(md, /gh repo create|## Secrets|GH_TOKEN/);
 
   const granted = renderOverlay({ ...overlay, secrets: [githubTokenGrant, { name: "STRIPE_KEY", hosts: ["api.stripe.com"] }] })[2]!.content;
-  for (const fact of ['git config --global user.name "$(gh api user --jq .login)"', "- GH_TOKEN: api.github.com, github.com\n", "- STRIPE_KEY: api.stripe.com\n"]) {
+  for (const fact of ["Nexus has no git identity configured", "- GH_TOKEN: api.github.com, github.com\n", "- STRIPE_KEY: api.stripe.com\n"]) {
     assert.ok(granted.includes(fact), `PYLON.md mentions ${JSON.stringify(fact)}`);
   }
   assert.doesNotMatch(granted, /gh repo create|ask the human which name/);
