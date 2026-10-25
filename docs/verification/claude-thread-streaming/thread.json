@@ -1,0 +1,46 @@
+{
+  "thread": {
+    "id": "th-50eb9d24c08f",
+    "title": "Quick verification task, keep it small: no subagents, no pull request, no review...",
+    "project": "words",
+    "pylonId": "pylon-th-50eb9d24c08f",
+    "status": "active",
+    "conversationId": null,
+    "startedBy": "nVERIFY",
+    "createdAt": 1792971218682,
+    "agentTurnRunning": false,
+    "lastAgentActivityAt": 0,
+    "lastHumanActivityAt": 1792971218727,
+    "seenAt": null,
+    "lastReplyAt": null
+  },
+  "claudeWorker": {
+    "model": "claude-opus-5-5",
+    "state": "pending"
+  },
+  "attention": null,
+  "seenAt": null,
+  "lastReplyAt": null,
+  "desired": "running",
+  "pylon": {
+    "grantsOutdated": false,
+    "id": "pylon-th-50eb9d24c08f",
+    "node": "verify-node",
+    "failed": null,
+    "observedAt": "2026-10-25T23:33:38.414Z",
+    "actualState": "absent",
+    "retryRefused": null
+  },
+  "sessions": [],
+  "previews": [],
+  "ports": [],
+  "outputs": [],
+  "prWatch": {
+    "enabled": false,
+    "stopped": false,
+    "error": null
+  },
+  "pullRequests": [],
+  "attach": "herdr --session nexus",
+  "agent": null
+}
