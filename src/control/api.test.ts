@@ -1216,6 +1216,19 @@ test("a closing API gives up on a terminal whose node stopped answering after 5 
   assert.equal(opened, 1, "no terminal opened for the upgrade that was still at whois");
 });
 
+test("a closing API drops an upgrade whose whois never returns after 5 s", async (t) => {
+  const s = await withThread(t, { attachTiming: fastAttach });
+  const release = s.holdWhois();
+  const stalled = attachTo(s.port, attachPathOf(s.thread.id)).then(() => "answered", () => "dropped");
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  const started = Date.now();
+  const closing = await Promise.race([s.close().then(() => "closed"), new Promise((resolve) => setTimeout(resolve, 8_000, "still closing"))]);
+  release();
+  assert.equal(closing, "closed");
+  assert.ok(Date.now() - started < 7_000, `close took ${Date.now() - started} ms`);
+  assert.equal(await stalled, "dropped", "the upgrade's socket was dropped, not answered");
+});
+
 test("a terminal takes a place among the streams", async (t) => {
   const s = await withThread(t, { attachTiming: fastAttach });
   const open = Array.from({ length: maxStreams }, () => s.events(`/v1/threads/${s.thread.id}/events`));

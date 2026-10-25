@@ -747,6 +747,11 @@ export async function startApi(options: ApiOptions): Promise<Api> {
   const attached = new Set<{ end(why: Ending): void; served: Promise<void> }>();
   /** Set by close(), so an upgrade still waiting on whois opens no terminal close() would miss. */
   let stopping = false;
+  /**
+   * Every upgraded socket until it closes, from the upgrade on: closeAllConnections does not reach them, and one still
+   * at whois has no WebSocket yet, so close() drops what is left of them itself.
+   */
+  const upgraded = new Set<Duplex>();
 
   /**
    * GET /v1/threads/<thread>/attach as a WebSocket. Every refusal is an HTTP reply before the 101, so a client maps it
@@ -803,6 +808,8 @@ export async function startApi(options: ApiOptions): Promise<Api> {
   server.on("upgrade", (req: IncomingMessage, socket: Duplex, head: Buffer) => {
     // Node hands over an upgraded socket without its error handler, and a reset before the 101 would crash the API.
     socket.on("error", () => undefined);
+    upgraded.add(socket);
+    socket.once("close", () => upgraded.delete(socket));
     upgrade(req, socket, head).catch((err: unknown) => refuseUpgrade(socket, err instanceof HttpError ? err.status : 500, (err as Error).message));
   });
   await new Promise<void>((resolve, reject) => {
@@ -819,9 +826,11 @@ export async function startApi(options: ApiOptions): Promise<Api> {
       const closed = new Promise<void>((resolve) => server.close(() => resolve()));
       server.closeAllConnections();
       for (const session of attached) session.end("stopping");
-      // Each hang-up waits for its node's probe, and a node that stopped answering would hold the close forever.
-      await Promise.race([Promise.all([...attached].map((session) => session.served)), sleep(5_000, undefined, { ref: false })]);
-      for (const ws of sockets.clients) ws.terminate();
+      // Each hang-up waits for its node's probe, and an upgrade still at admission for whois. A node that stopped
+      // answering, or a whois that never returns, would hold the close forever.
+      const ends = [...[...attached].map((session) => session.served), ...[...upgraded].map((socket) => new Promise((resolve) => socket.once("close", resolve)))];
+      await Promise.race([Promise.all(ends), sleep(5_000, undefined, { ref: false })]);
+      for (const socket of upgraded) socket.destroy();
       return closed;
     },
   };
