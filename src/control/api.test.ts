@@ -142,7 +142,7 @@ async function setup(t: import("node:test").TestContext, options: { deployment?:
   };
 }
 
-async function withThread(t: import("node:test").TestContext, options: { project?: typeof project; dotfiles?: typeof dotfiles; streamStallMs?: number; attachTiming?: AttachTiming } = {}) {
+async function withThread(t: import("node:test").TestContext, options: { deployment?: DeploymentOptions; project?: typeof project; dotfiles?: typeof dotfiles; streamStallMs?: number; attachTiming?: AttachTiming } = {}) {
   const s = await setup(t, options);
   assert.equal((await s.call("POST", "/v1/projects", options.project ?? project)).status, 201);
   assert.equal((await s.call("POST", "/v1/images", image)).status, 201);
@@ -1400,4 +1400,25 @@ test("a root-authenticated drain blocks every turn-entry route and can be releas
   s.callAs("nFIREBAT" as TailnetNodeId);
   await s.call("POST", "/v1/deployer/drain", { commit: deployCommit, release: true }, reporterHeaders);
   assert.equal(s.registry.drain(), null);
+});
+
+test("drain reads committed live and queued work rather than a lagging activity flag", async (t) => {
+  const s = await withThread(t, { deployment });
+  await s.call("PUT", "/v1/release", { commit: deployCommit });
+  s.callAs("nFIREBAT" as TailnetNodeId);
+  for (const docs of [{ "pi.live": { run: {} } }, { "pi.inbox": { items: [{ id: 1 }] } }]) {
+    s.fake.transcript(s.thread.id).docs = docs as never;
+    s.fake.commit(s.thread.id);
+    const result = await s.call("POST", "/v1/deployer/drain", { commit: deployCommit }, reporterHeaders);
+    assert.equal(result.body.idle, false);
+  }
+  s.fake.transcript(s.thread.id).docs = {};
+  s.fake.commit(s.thread.id);
+  assert.equal((await s.call("POST", "/v1/deployer/drain", { commit: deployCommit }, reporterHeaders)).body.idle, true);
+});
+
+test("expired drain leases no longer block callers", async (t) => {
+  const s = await withThread(t, { deployment });
+  s.registry.setDrain({ commit: deployCommit, expiresAt: Date.now() - 1 });
+  assert.equal((await s.call("POST", `/v1/threads/${s.thread.id}/messages`, { text: "hello", requestId: "after-drain" })).status, 202);
 });
