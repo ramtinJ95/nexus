@@ -939,3 +939,15 @@ test("seen and --unread share the API marker without waking an archived thread",
   assert.equal(await s.json(["seen", thread.id, "--unread"]), null);
   assert.deepEqual(s.registry.thread(thread.id), { ...before, seenAt: 999 });
 });
+
+test("seen encodes a thread ID so it cannot become an unarchive request", async (t) => {
+  const s = await setup(t);
+  const thread: Thread = await s.json(["start", "--project", "acme", "--title", "Stay archived"]);
+  await s.json(["archive", thread.id]);
+  const before = s.registry.thread(thread.id);
+  for (const flags of [[], ["--unread"]]) {
+    const result = await s.nexus(["seen", `${thread.id}/unarchive?`, ...flags, "--json"]);
+    assert.equal(result.code, 4, result.stderr);
+    assert.deepEqual(s.registry.thread(thread.id), before);
+  }
+});

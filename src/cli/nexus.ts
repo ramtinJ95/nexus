@@ -616,7 +616,7 @@ const commands: Readonly<Record<string, Command>> = {
     args: [1, 1],
     options: { unread: { type: "boolean" } },
     async run(api, [id], v) {
-      await api("POST", `/v1/threads/${id}/${v.unread ? "unseen" : "seen"}`, {});
+      await api("POST", `${thread(id!)}/${v.unread ? "unseen" : "seen"}`, {});
       return { json: null, text: `Marked ${id} ${v.unread ? "unread" : "seen"}.` };
     },
   },
