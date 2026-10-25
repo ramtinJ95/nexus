@@ -74,7 +74,7 @@ async function buildImage() {
     `RUN git init --quiet --initial-branch=main ${pylonRepoPath} && printf '# verify-nexus\\n' > ${pylonRepoPath}/README.md && git -C ${pylonRepoPath} -c user.name=verify -c user.email=verify@invalid add README.md && git -C ${pylonRepoPath} -c user.name=verify -c user.email=verify@invalid commit --quiet -m init && git -C ${pylonRepoPath} update-ref refs/nexus/base HEAD`,
     "ARG HERDR_VERSION",
     'RUN curl -fsSL https://herdr.dev/install.sh -o /tmp/herdr-install.sh && HERDR_INSTALL_DIR=/usr/local/bin sh /tmp/herdr-install.sh && rm /tmp/herdr-install.sh && test "$(herdr --version)" = "herdr ${HERDR_VERSION}"',
-    "RUN mkdir -p /root/.config/herdr && printf '[session]\\nresume_agents_on_restore = false\\n' > /root/.config/herdr/config.toml",
+    "RUN mkdir -p /root/.config/herdr && printf 'onboarding = false\\n\\n[session]\\nresume_agents_on_restore = false\\n' > /root/.config/herdr/config.toml",
     "COPY pi-env /usr/local/libexec/nexus/pi-env",
     "COPY nexus /usr/local/bin/nexus",
     "RUN chmod 0755 /usr/local/libexec/nexus/pi-env /usr/local/bin/nexus",

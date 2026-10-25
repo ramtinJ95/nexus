@@ -139,7 +139,6 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
   const log = options.log ?? console.error;
   /** Upgraded sockets, which the HTTP server no longer tracks, so close() ends them itself. */
   const streamSockets = new Set<Duplex>();
-  const ptyStreams = new Map<PylonId, number>();
   /** The listening ports each pylon's last observation reported, so a poll can tell when they changed. */
   const reportedListening = new Map<PylonId, string>();
 
@@ -277,7 +276,7 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
           bootedFrom: { image: p.image, checkpoint: p.checkpoint },
           // The other guest facts need guest operations, which this slice does not have.
           services: await services(pylonId), listening: ports, previews: (published.get(pylonId) ?? []).map((preview) => ({ ...preview, ready: true })), sessions: await sessions(pylonId), git: null, declaredOutputs: await declaredOutputs(pylonId),
-          attachedClients: (ptyStreams.get(pylonId) ?? 0) + await attached(pylonId),
+          attachedClients: await attached(pylonId),
         };
       }
     }
@@ -485,22 +484,12 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
       return refuse(socket, 400, (err as Error).message);
     }
     if (parsed === null) return refuse(socket, 404, `no upgrade route ${url.pathname} for ${req.headers.upgrade}`);
-    const { pylonId, request } = parsed;
+    const { pylonId, argv } = parsed;
     if ((await backend.list()).find((p) => p.pylonId === pylonId)?.vm !== "running") return refuse(socket, 409, `${pylonId} is not running`);
     if (socket.destroyed || shutdown.signal.aborted) return;
-    const guest = await backend.guest(pylonId).stream(request, (text) => log(`${pylonId} stream ${request.argv[0]}: ${text.trimEnd()}`));
+    const guest = await backend.guest(pylonId).stream(argv, (text) => log(`${pylonId} stream ${argv[0]}: ${text.trimEnd()}`));
     socket.write(streamUpgradeResponse);
-    const pty = request.pty !== null;
-    if (pty) ptyStreams.set(pylonId, (ptyStreams.get(pylonId) ?? 0) + 1);
-    try {
-      await serveByteStream(socket, head, guest);
-    } finally {
-      if (pty) {
-        const left = ptyStreams.get(pylonId)! - 1;
-        if (left === 0) ptyStreams.delete(pylonId);
-        else ptyStreams.set(pylonId, left);
-      }
-    }
+    await serveByteStream(socket, head, guest);
   }
 
   const server = createServer((req, res) => {

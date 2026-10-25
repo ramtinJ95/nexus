@@ -40,16 +40,9 @@ chmod 0640 "$etc/secrets.env"
 
 install_unit "$repo/deploy/nexus-probe.service" nexus-probe.service
 
-# `nexus attach` from a Mac runs nexus-attach over ssh, which runs as `nexus` through sudo for the group
-# nexus-attach. The person deploying is the one who attaches, so they join it. Others join with usermod.
-install -o root -g root -m 0755 "$repo/deploy/nexus-attach" /usr/local/bin/nexus-attach
-getent group nexus-attach >/dev/null || groupadd --system nexus-attach
-visudo -cqf "$repo/deploy/nexus-attach.sudoers" || fail "deploy/nexus-attach.sudoers does not parse"
-install -o root -g root -m 0440 "$repo/deploy/nexus-attach.sudoers" /etc/sudoers.d/nexus-attach
-if [ -n "${SUDO_USER:-}" ] && [ "$SUDO_USER" != root ] && ! id -nG "$SUDO_USER" | tr ' ' '\n' | grep -qx nexus-attach; then
-  usermod --append --groups nexus-attach "$SUDO_USER"
-  echo "added $SUDO_USER to nexus-attach, so they may run nexus-attach. It applies from their next login"
-fi
+# `nexus attach` goes through the control plane now. A sudo grant for the old node-side helper would outlive it.
+rm -f /usr/local/bin/nexus-attach /etc/sudoers.d/nexus-attach
+if getent group nexus-attach >/dev/null; then groupdel nexus-attach; fi
 
 if cmp -s "$repo/deploy/probe.example.json" "$etc/probe.json"; then
   echo "$etc/probe.json is still the example. Edit it (and $etc/secrets.env), then rerun $0"

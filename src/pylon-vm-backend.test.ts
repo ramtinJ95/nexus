@@ -286,7 +286,7 @@ test("a raw stream runs its argv unchanged over SSH to the forwarder the control
 
   const logs: string[] = [];
   const guest = backend.guest("pylon-ssh-stream" as PylonId);
-  const stream = await guest.stream({ pty: null, argv: ["sh", "-c", 'printf "%s|" "$@"; printf err >&2; exit 3', "sh", "a b", "it's", "$HOME", "*"] }, (text) => logs.push(text));
+  const stream = await guest.stream(["sh", "-c", 'printf "%s|" "$@"; printf err >&2; exit 3', "sh", "a b", "it's", "$HOME", "*"], (text) => logs.push(text));
   await stream.close();
   let out = "";
   for await (const chunk of stream) out += Buffer.from(chunk).toString();
@@ -296,7 +296,6 @@ test("a raw stream runs its argv unchanged over SSH to the forwarder the control
   const args = (await readFile(join(scratch, "ssh-args"), "utf8")).split("\n");
   assert.deepEqual([args[args.indexOf("-p") + 1], args[args.indexOf("-i") + 1], args[args.indexOf("--") - 1]], ["40022", "/run/keys/id", "user@127.0.0.1"]);
   assert.deepEqual(actions.map((a) => [a.action, a.user]), [["shell", "user"]]);
-  await assert.rejects(guest.stream({ pty: { cols: 80, rows: 24 }, argv: ["bash"] }, () => {}), /raw pipes only/);
 });
 
 test("service facts come from the controller's supervisor, a list starts nothing, and logs name one service", async () => {

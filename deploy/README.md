@@ -21,8 +21,6 @@ The probe runs as the system user `nexus`. These are its paths:
 | `/var/lib/nexus/artifacts` | Images and templates, one directory per ID, which `backend.artifacts` in `probe.json` names. A `probe.json` from before the store, with a `backend.images` map of `<store>/<image ID>` directories, is read as that store. |
 | `/var/lib/nexus/preview-routes.json` | Which pylon each published preview port belongs to. |
 | `/opt/nexus/current` | The release the probe runs. |
-| `/usr/local/bin/nexus-attach` | Attaches a terminal to a pylon's Herdr session. See [Attach from a Mac](#attach-from-a-mac). |
-| `/etc/sudoers.d/nexus-attach` | Lets the group `nexus-attach` run `nexus-attach` as `nexus`. |
 
 ### GitHub access for a project's agents
 
@@ -59,9 +57,11 @@ To let pylons clone and push SSH remotes, add the node's git key to the backend 
 
 Make the key readable by `nexus` only: `chown nexus:nexus /etc/nexus/git_ed25519 && chmod 0400 /etc/nexus/git_ed25519`. The key never enters a pylon. Without `gitSsh`, the node boots only pylons whose repository and dotfiles URLs are HTTPS.
 
-### Attach from a Mac
+### Attach goes through the control plane
 
-`nexus attach <thread>` on a Mac runs `ssh -t <node> nexus-attach <pylon>`, which gives the terminal to the pylon's Herdr session (see `docs/cli.md`). The script installs `/usr/local/bin/nexus-attach` from `deploy/nexus-attach`. Only `nexus` may use the pylons' control sockets under `/var/lib/nexus/pylons`, so `nexus-attach` runs itself as `nexus` through sudo, and `/etc/sudoers.d/nexus-attach` lets the group `nexus-attach` do that without a password. The script creates the group and adds the user who ran it with sudo, and prints that it did. Add anyone else with `sudo usermod --append --groups nexus-attach <user>`. Group membership applies from a user's next login. Each `nexus attach` is a new ssh login, so it works at once, but a shell that was already open on the node does not have the group until you log in again. Don't add them to the group `nexus`, which reads `secrets.env`.
+`nexus attach <thread>` reaches the pylon's Herdr session through the control plane's attach route, and the control plane runs Herdr's client on a pty in the pylon through the node's probe (see `docs/cli.md`). The node needs nothing for it, and nobody needs ssh access to the node. Before CLI 0.9.0, attach ran ssh to the node and a helper, `nexus-attach`, through a sudo rule for the group `nexus-attach`. The script removes the helper, the rule and the group on every run, because a sudo grant would outlive the helper it names.
+
+Upgrade the control plane before the CLI. An older control plane has no attach route, and `nexus attach` says to upgrade it. Any probe works, old or new.
 
 ## Install or upgrade the control plane
 

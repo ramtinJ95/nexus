@@ -8,13 +8,14 @@
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "test": "node --test src/listening.test.ts src/artifacts.test.ts src/reconcile.test.ts src/tailscale.test.ts src/sessions.test.ts src/probe/server.test.ts src/project.test.ts src/images.test.ts src/probe/config.test.ts src/control/registry.test.ts src/control/loop.test.ts src/control/api.test.ts src/control/dashboard.test.ts src/control/locator.test.ts src/control/main.test.ts src/probe/gateway.test.ts src/probe/serve.test.ts src/image-build.test.ts src/agent-setup.test.ts src/release.test.ts src/harness/credentials.test.ts src/harness/activity.test.ts src/pylon-vm-backend.test.ts src/pylon-vm/network.test.ts src/pylon-vm/services.test.ts src/pylon-vm/runtime.test.ts src/pylon-vm/processes.test.ts src/pylon-vm/relay.test.ts src/pylon-vm/client.test.ts src/session-wake.test.ts src/outputs.test.ts src/checkout-files.test.ts src/probe/pylon-api.test.ts src/pylon-vm/host-bridge.test.ts src/nexus-cli.test.ts src/cli/nexus.test.ts",
+    "test": "node --test src/listening.test.ts src/artifacts.test.ts src/reconcile.test.ts src/tailscale.test.ts src/sessions.test.ts src/probe/server.test.ts src/project.test.ts src/images.test.ts src/probe/config.test.ts src/control/registry.test.ts src/control/loop.test.ts src/control/api.test.ts src/control/attach.test.ts src/control/dashboard.test.ts src/control/locator.test.ts src/control/main.test.ts src/probe/gateway.test.ts src/probe/serve.test.ts src/image-build.test.ts src/agent-setup.test.ts src/release.test.ts src/harness/credentials.test.ts src/harness/activity.test.ts src/pylon-vm-backend.test.ts src/pylon-vm/network.test.ts src/pylon-vm/services.test.ts src/pylon-vm/runtime.test.ts src/pylon-vm/processes.test.ts src/pylon-vm/relay.test.ts src/pylon-vm/client.test.ts src/session-wake.test.ts src/outputs.test.ts src/checkout-files.test.ts src/guest-terminal.test.ts src/probe/pylon-api.test.ts src/pylon-vm/host-bridge.test.ts src/nexus-cli.test.ts src/cli/nexus.test.ts src/cli/attach.test.ts",
     "test:slice": "node --test --test-concurrency=1 --test-timeout=600000 src/slice.test.ts src/template-slice.test.ts",
     "test:harness": "node --test --test-timeout=600000 src/harness/slice.test.ts",
     "probe": "node src/probe/main.ts"
   },
   "devDependencies": {
     "@types/node": "^26.6.5",
+    "@types/ws": "^8.18.2",
     "typescript": "^7.0.2"
   },
   "dependencies": {
@@ -23,6 +24,7 @@
     "@earendil-works/pi-ai": "1.4.0",
     "@earendil-works/pi-durable": "1.4.0",
     "@earendil-works/pi-env": "1.4.0",
+    "ws": "8.22.0",
     "yaml": "2.9.1",
     "zod": "4.6.7"
   }

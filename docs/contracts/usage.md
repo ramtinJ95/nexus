@@ -16,7 +16,7 @@ A probe serves HTTP on its tailnet address, port 7480. Tailnet identity is the o
 | `GET /v1/jobs/{jobId}` | Control plane (`rj-firebat`) | Read a job's status, or 404 after a probe restart |
 | `GET /v1/observe` (NDJSON stream) | Control plane (`rj-firebat`) | A snapshot of the node, then events |
 | `POST /v1/pylons/{id}/commands` | Control plane (`rj-firebat`) | Synchronous guest commands: exec, open or close a session or drop a failed one, service operations, linking a listening port as a preview |
-| `GET /v1/pylons/{id}/stream` (WebSocket) | Control plane (`rj-firebat`) | A byte stream into the pylon, for terminal attach and the harness channel |
+| `GET /v1/pylons/{id}/stream` (WebSocket) | Control plane (`rj-firebat`) | A raw byte stream to a program in the pylon, for the harness channel and, through a pty relay, terminal attach |
 | `GET /v1/artifacts/{artifactId}?sha256=` | The other probe | Probe-to-probe copies of images and templates: the manifest in a header, then the archive, which the fetching probe verifies before use. A probe holding other bytes under the ID refuses with 409 and its reason, before it sends any. A checkpoint stays on its node |
 
 Lifecycle jobs are Amp's `spawn`, `pause` and `delete`, plus `build-image`, `build-template`, `fetch-artifact` and `drop-artifact`. A job expires 30 seconds after it was issued if the probe has not accepted it. Once accepted, it has a fixed deadline: 5 minutes for Amp's three, and 30 minutes for builds and copies. The probe runs at most one job per subject (a pylon or an artifact) and answers `busy` to a second one. `drop-artifact` cannot name a checkpoint.
@@ -43,13 +43,13 @@ for (const pylon of registry.livePylons()) {
 const pane = await probes.get(node).command(pylonId, {
   kind: "open-session", harness: "claude-code", title: "review",
 });
-const bytes = await probes.get(node).stream(pylonId, {
-  pty: { cols: 120, rows: 40 }, argv: ["herdr", "--session", "nexus"],
-});
-browserSocket.pipe(bytes).pipe(browserSocket);
+const terminal = await openTerminal(
+  (argv) => probes.get(node).stream(pylonId, argv), terminalSize(120, 40), "xterm-256color", ["herdr", "--session", "nexus"],
+);
+for await (const bytes of terminal) browserSocket.send(bytes);
 ```
 
-Every guest command and stream runs as `user`. A root command is `["sudo", ...]`. The harness channel uses the same `stream` call with `pty: null` and the pi-env remote daemon as `argv`. When the connection drops, `bytes.done` resolves to `lost`, and pi-durable reports the tool as interrupted.
+A stream is a raw pipe, with no pty. `openTerminal` (`src/guest-terminal.ts`) runs a small pty relay in the guest with `python3`, and frames keys and resizes on its stdin, so the probe and every backend stay unaware of terminals. The control plane's attach route (`src/control/attach.ts`) serves such a terminal to `nexus attach` as a WebSocket. Every guest command and stream runs as `user`. A root command is `["sudo", ...]`. The harness channel uses the same `stream` call with the pi-env remote daemon as `argv`. When the connection drops, `bytes.done` resolves to `lost`, and pi-durable reports the tool as interrupted.
 
 ### Call site: the probe running a job against its backend
 

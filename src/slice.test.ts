@@ -151,7 +151,7 @@ function dockerFixture(): SliceFixture {
           `RUN useradd --create-home --shell /bin/bash user && install -d -o user -g user /home/user/workspace ${checkoutDir}`,
           "ARG HERDR_VERSION",
           'RUN curl -fsSL https://herdr.dev/install.sh -o /tmp/herdr-install.sh && HERDR_INSTALL_DIR=/usr/local/bin sh /tmp/herdr-install.sh && rm /tmp/herdr-install.sh && test "$(herdr --version)" = "herdr ${HERDR_VERSION}"',
-          "RUN mkdir -p /root/.config/herdr && printf '[session]\\nresume_agents_on_restore = false\\n' > /root/.config/herdr/config.toml",
+          "RUN mkdir -p /root/.config/herdr && printf 'onboarding = false\\n\\n[session]\\nresume_agents_on_restore = false\\n' > /root/.config/herdr/config.toml",
         ].join("\n") + "\n");
         await docker("build", "--quiet", "--label", testLabel, "--build-arg", `HERDR_VERSION=${herdr}`, "--tag", tag, dir);
       } finally {

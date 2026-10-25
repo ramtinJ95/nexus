@@ -10,7 +10,7 @@ import { Readable } from "node:stream";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { startProbe, type Probe, type ProbeOptions } from "./server.ts";
-import { connectProbe, fetchArtifact, jobDeadlineMs, type ByteStream, type DeclaredOutput, type Job, type JobEnvelope, type JobId, type JobStatus, type LiveHash, type NodeName, type ProbeEvent, type PylonId, type ServiceFact, type StreamRequest, type TailnetNodeId } from "../protocol.ts";
+import { connectProbe, fetchArtifact, jobDeadlineMs, type ByteStream, type DeclaredOutput, type Job, type JobEnvelope, type JobId, type JobStatus, type LiveHash, type NodeName, type ProbeEvent, type PylonId, type ServiceFact, type TailnetNodeId } from "../protocol.ts";
 import { envelope } from "../reconcile.ts";
 import { processStream } from "../process-stream.ts";
 import type { BackendPylon, Guest, VmBackend } from "../backend.ts";
@@ -461,8 +461,8 @@ async function streaming(t: import("node:test").TestContext) {
   const logged: string[] = [];
   const guestStreams: ByteStream[] = [];
   const guest = {
-    async stream(req: StreamRequest, log: (text: string) => void) {
-      const stream = processStream(req.argv[0]!, req.argv.slice(1), log);
+    async stream(argv: readonly string[], log: (text: string) => void) {
+      const stream = processStream(argv[0]!, argv.slice(1), log);
       guestStreams.push(stream);
       return stream;
     },
@@ -480,7 +480,7 @@ async function readAll(stream: ByteStream): Promise<string> {
 
 test("a raw pipe carries stdout only, and its stderr goes to the probe's log", async (t) => {
   const { client, logged } = await streaming(t);
-  const stream = await client.stream(pylonId, { pty: null, argv: ["sh", "-c", "printf out-bytes; printf err-bytes >&2; exit 3"] });
+  const stream = await client.stream(pylonId, ["sh", "-c", "printf out-bytes; printf err-bytes >&2; exit 3"]);
   assert.equal(await readAll(stream), "out-bytes");
   assert.deepEqual(await stream.done, { kind: "exited", code: 3 });
   assert.ok(logged.some((line) => line.includes(pylonId) && line.includes("err-bytes")), JSON.stringify(logged));
@@ -488,7 +488,7 @@ test("a raw pipe carries stdout only, and its stderr goes to the probe's log", a
 
 test("stdin reaches the guest process, and close ends it", async (t) => {
   const { client } = await streaming(t);
-  const stream = await client.stream(pylonId, { pty: null, argv: ["cat"] });
+  const stream = await client.stream(pylonId, ["cat"]);
   await stream.write(new TextEncoder().encode("hello through the probe"));
   await stream.close();
   assert.equal(await readAll(stream), "hello through the probe");
@@ -508,7 +508,7 @@ test("a checkout read fits the probe's stream request and comes back through it"
 
 test("a process that closes its stdin still delivers its output and exit code", async (t) => {
   const { client } = await streaming(t);
-  const stream = await client.stream(pylonId, { pty: null, argv: ["sh", "-c", "exec 0<&-; sleep 1; printf done; exit 7"] });
+  const stream = await client.stream(pylonId, ["sh", "-c", "exec 0<&-; sleep 1; printf done; exit 7"]);
   await new Promise((r) => setTimeout(r, 300));
   await stream.write(new TextEncoder().encode("nobody reads this"));
   assert.equal(await readAll(stream), "done");
@@ -534,21 +534,23 @@ test("a caller that resets its stream connection during whois does not take the 
 
 test("a stream to a pylon that is not running is refused as not-running", async (t) => {
   const { client } = await setup(t);
-  await assert.rejects(client.stream(pylonId, { pty: null, argv: ["true"] }), { code: "not-running" });
+  await assert.rejects(client.stream(pylonId, ["true"]), { code: "not-running" });
 });
 
-test("only streams with a pty count as attached clients", async (t) => {
-  const { client } = await streaming(t);
-  const raw = await client.stream(pylonId, { pty: null, argv: ["cat"] });
-  const pty = await client.stream(pylonId, { pty: { cols: 80, rows: 24 }, argv: ["cat"] });
-  for await (const e of client.observe(AbortSignal.timeout(5000))) {
-    const p = e.type === "snapshot" ? e.observation.pylons[0] : assert.fail(e.type);
-    assert.ok(p?.phase === "running" && p.attachedClients === 1, JSON.stringify(p));
-    break;
-  }
-  await raw.close();
-  await pty.close();
-  assert.deepEqual([await raw.done, await pty.done], [{ kind: "exited", code: 0 }, { kind: "exited", code: 0 }]);
+test("a stream request with a pty is refused with 400, and one without the pty key is served", async (t) => {
+  const { probe, guestStreams } = await streaming(t);
+  const ask = async (request: unknown) => {
+    const socket = connect(probe.port, "127.0.0.1");
+    socket.write(`GET /v1/pylons/${pylonId}/stream?request=${encodeURIComponent(JSON.stringify(request))} HTTP/1.1\r\nhost: probe\r\nconnection: upgrade\r\nupgrade: nexus-stream\r\n\r\n`);
+    const [head] = await once(socket, "data") as [Buffer];
+    socket.destroy();
+    return head.toString();
+  };
+  const refused = await ask({ pty: { cols: 80, rows: 24 }, argv: ["cat"] });
+  assert.match(refused, /^HTTP\/1\.1 400 /);
+  assert.match(refused, /a stream request has no pty\. A terminal's pty is made in the guest, as guest-terminal\.ts does$/);
+  assert.equal(guestStreams.length, 0, "nothing started in the guest");
+  assert.match(await ask({ argv: ["true"] }), /^HTTP\/1\.1 101 /);
 });
 
 test("terminals attached to Herdr in the guest, such as nexus attach, count as attached clients", async (t) => {
@@ -586,7 +588,7 @@ test("a count of attached terminals that fails reads as none, is logged once, an
 
 test("a dropped connection is a lost stream, and the guest process's stdin ends", async (t) => {
   const { client, probe, guestStreams } = await streaming(t);
-  const stream = await client.stream(pylonId, { pty: null, argv: ["cat"] });
+  const stream = await client.stream(pylonId, ["cat"]);
   await probe.close();
   assert.deepEqual(await stream.done, { kind: "lost" });
   assert.deepEqual(await guestStreams[0]!.done, { kind: "exited", code: 0 });

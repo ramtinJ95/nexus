@@ -12,6 +12,7 @@ import { createServer as createHttpServer } from "node:http";
 import { connect, createServer, type Server, type Socket } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { PassThrough } from "node:stream";
 import { createInterface } from "node:readline";
 import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
@@ -20,9 +21,10 @@ import { fakeHarness } from "../control/fake-harness.ts";
 import { openRegistry, type Thread } from "../control/registry.ts";
 import type { ImageId, ImageManifest } from "../images.ts";
 import type { Project, ProjectId } from "../project.ts";
+import { openTerminal, terminalSize } from "../guest-terminal.ts";
 import { processStream } from "../process-stream.ts";
 import { repoInitCommand } from "../pylon-vm-backend.ts";
-import type { ByteStream, CommandResult, NodeName, PylonCommand, PylonId, ServiceFact, StreamRequest, TailnetNodeId } from "../protocol.ts";
+import type { ByteStream, CommandResult, NodeName, PylonCommand, PylonId, ServiceFact, StreamEnd, TailnetNodeId } from "../protocol.ts";
 import { checkoutDir } from "../sessions.ts";
 import { call, CliError, follow } from "./transport.ts";
 
@@ -104,7 +106,7 @@ async function setup(t: TestContext) {
     : { kind: "link-port", service: `port-${(command as { port: number }).port}` };
   const commands: PylonCommand[] = [];
   /** What the node's probe opens a pipe to. Tests replace it. */
-  let pipe = async (request: StreamRequest): Promise<ByteStream> => { throw new Error(`unexpected stream ${request.argv[0]}`); };
+  let pipe = async (argv: readonly string[]): Promise<ByteStream> => { throw new Error(`unexpected stream ${argv[0]}`); };
   const fake = fakeHarness();
   const options = (port: number) => ({
     registry, host: "127.0.0.1", port, whois: async () => caller, allowed: new Set([laptop]),
@@ -112,7 +114,7 @@ async function setup(t: TestContext) {
     harness: fake.harness, wake: () => {}, previewPorts: { first: 10200, last: 10299 },
     probes: new Map([[node, {
       command: (_pylonId: PylonId, command: PylonCommand) => { commands.push(command); return answer(command); },
-      stream: (_pylonId: PylonId, request: StreamRequest) => pipe(request),
+      stream: (_pylonId: PylonId, argv: readonly string[]) => pipe(argv),
     }]]),
   });
   let api = await startApi(options(0));
@@ -471,7 +473,7 @@ test("files, changes and diff read the pylon's checkout, and wait for a paused p
   await mkdir(join(repo, "src"));
   await writeFile(join(repo, "src", "x.ts"), "x\n");
   let refusals = 2;
-  s.probePipes(async ({ argv }) => {
+  s.probePipes(async (argv) => {
     if (refusals-- > 0) throw Object.assign(new Error("rj-firebat: pylon-x is stopped, not running"), { code: "not-running" });
     return processStream(argv[0]!, argv.slice(1).map((arg) => arg === checkoutDir ? repo : arg), () => {});
   });
@@ -510,7 +512,7 @@ test("changes and diff of a scratch thread are against the empty tree, before it
   const repo = join(scratch, "repo");
   await promisify(execFile)("sh", ["-c", repoInitCommand({ kind: "empty", branch: "main" }, repo)]);
   const git = (...args: string[]) => promisify(execFile)("git", ["-C", repo, "-c", "user.name=t", "-c", "user.email=t@t", ...args]);
-  s.probePipes(async ({ argv }) => processStream(argv[0]!, argv.slice(1).map((arg) => arg === checkoutDir ? repo : arg), () => {}));
+  s.probePipes(async (argv) => processStream(argv[0]!, argv.slice(1).map((arg) => arg === checkoutDir ? repo : arg), () => {}));
   const output = async (args: string[]) => {
     const res = await s.nexus(args);
     assert.equal(res.code, 0, res.stderr);
@@ -627,58 +629,86 @@ test("session open opens Claude Code by default, waits for a paused pylon, and s
   assert.match((await s.nexus(["show", thread.id])).stdout, /^session: claude-code "review" in pane w1:p1, paused \(resumes on unarchive\)$/m);
 });
 
-test("attach wakes the pylon, waits until it runs, and runs ssh to its node through the CLI's proxy, or the configured command", async (t) => {
+/** A pipe to the relay in the guest that prints Herdr's screen once its source is in, and exits 0 when its stdin ends. */
+function herdrPipe(): ByteStream {
+  const output = new PassThrough();
+  const end = Promise.withResolvers<StreamEnd>();
+  let printed = false;
+  return {
+    [Symbol.asyncIterator]: () => output[Symbol.asyncIterator](),
+    async write() {
+      if (printed) return;
+      printed = true;
+      output.write("herdr screen\r\n");
+      setTimeout(() => {
+        output.end();
+        end.resolve({ kind: "exited", code: 0 });
+      }, 50);
+    },
+    async close() {},
+    abort() {},
+    done: end.promise,
+  };
+}
+
+/** Runs the CLI in a terminal of its own, made as a pylon makes one, and returns its exit code and screen. */
+async function inTerminal(env: Record<string, string>, args: readonly string[]): Promise<{ code: number; screen: string }> {
+  const terminal = await openTerminal(async (argv) => processStream(argv[0]!, argv.slice(1), () => {}), terminalSize(100, 30), "xterm-256color",
+    ["env", ...Object.entries(env).map(([key, value]) => `${key}=${value}`), process.execPath, cli, ...args]);
+  let screen = "";
+  for await (const chunk of terminal) screen += Buffer.from(chunk).toString();
+  const end = await terminal.done;
+  return { code: end.kind === "exited" ? end.code : -1, screen };
+}
+
+test("attach gives this terminal to the pylon's Herdr session through the SOCKS proxy, and Herdr's exit 0 is the CLI's", async (t) => {
   const s = await setup(t);
-  const bin = join(s.home, "bin");
-  await mkdir(bin);
-  const ran = join(s.home, "ran");
-  // A fake ssh that records its arguments, one to a line.
-  await writeFile(join(bin, "ssh"), `#!/bin/sh\nprintf '%s\\n' "$@" > '${ran}'\n`, { mode: 0o755 });
-  const path = { PATH: `${bin}:${process.env.PATH}` };
   const thread: Thread = await s.json(["start", "--project", "acme", "--title", "attach"]);
-  await new Promise((resolve) => setTimeout(resolve, 5));
-  const before = Date.now();
-
-  const attaching = s.nexus(["attach", thread.id], path);
-  await new Promise((resolve) => setTimeout(resolve, 1500));
-  assert.ok(s.registry.thread(thread.id)!.lastHumanActivityAt >= before, "attaching is human activity, which wakes the pylon");
   observeRunning(s, thread, [], []);
-  const attached = await attaching;
-  assert.equal(attached.code, 0, attached.stderr);
-  assert.deepEqual((await readFile(ran, "utf8")).trimEnd().split("\n"),
-    ["-t", "-o", `ProxyCommand=nc -X 5 -x 127.0.0.1:${s.proxy.port} %h %p`, "rj-firebat.tail.ts.net", "nexus-attach", thread.pylonId]);
+  const argvs: (readonly string[])[] = [];
+  s.probePipes(async (argv) => {
+    argvs.push(argv);
+    return herdrPipe();
+  });
+  const before = Date.now();
+  const attached = await inTerminal(s.env(), ["attach", thread.id]);
+  assert.equal(attached.code, 0, attached.screen);
+  assert.match(attached.screen, /herdr screen/);
+  assert.deepEqual(argvs[0]!.slice(4, 7), ["100", "30", "xterm-256color"], "the terminal's size and TERM reached the pylon");
+  assert.ok(s.registry.thread(thread.id)!.lastHumanActivityAt >= before, "attaching is human activity");
+  assert.ok(s.proxy.connects.length > 0 && s.proxy.connects.every((c) => c === `${apiName}:${s.api.port}`), "through the proxy");
+});
 
-  // Without the proxy only the API's loopback address reaches it.
-  const direct = await s.nexus(["attach", thread.id, "--socks", "none", "--url", s.localUrl], path);
-  assert.equal(direct.code, 0, direct.stderr);
-  assert.deepEqual((await readFile(ran, "utf8")).trimEnd().split("\n"), ["-t", "rj-firebat.tail.ts.net", "nexus-attach", thread.pylonId], "without a proxy, plain ssh");
-
-  await mkdir(join(s.home, ".config", "nexus"), { recursive: true });
-  await writeFile(join(s.home, ".config", "nexus", "cli.json"), JSON.stringify({ ssh: { "rj-firebat": "ramtinj@rj-firebat", "other-node": "other" } }));
-  assert.equal((await s.nexus(["attach", thread.id], path)).code, 0);
-  assert.deepEqual((await readFile(ran, "utf8")).trimEnd().split("\n"),
-    ["-t", "-o", `ProxyCommand=nc -X 5 -x 127.0.0.1:${s.proxy.port} %h %p`, "ramtinj@rj-firebat", "nexus-attach", thread.pylonId], "the config's destination for the node, through the same proxy");
-
-  const custom = `printf '%s %s %s %s' "$NEXUS_THREAD" "$NEXUS_PYLON" "$NEXUS_NODE" "$NEXUS_NODE_HOST" > '${ran}'`;
-  assert.equal((await s.nexus(["attach", thread.id], { ...path, NEXUS_ATTACH: custom })).code, 0);
-  assert.equal(await readFile(ran, "utf8"), `${thread.id} ${thread.pylonId} rj-firebat rj-firebat.tail.ts.net`, "NEXUS_ATTACH wins over the config's ssh destination");
-  await writeFile(join(s.home, ".config", "nexus", "cli.json"), JSON.stringify({ attach: "exit 3" }));
-  const failed = await s.nexus(["attach", thread.id], path);
-  assert.equal(failed.code, 1, "the config's command runs, and its failure is the CLI's");
-  assert.match(failed.stderr, /attaching to th-[0-9a-f]+ on rj-firebat failed: the attach command from NEXUS_ATTACH or the config exited 3/);
-  await writeFile(join(s.home, ".config", "nexus", "cli.json"), "{}");
-  await writeFile(join(bin, "ssh"), "#!/bin/sh\nexit 255\n", { mode: 0o755 });
-  const unreachable = await s.nexus(["attach", thread.id], path);
-  assert.equal(unreachable.code, 1);
-  assert.match(unreachable.stderr, /ssh to rj-firebat\.tail\.ts\.net exited 255. To reach the node as another user or through an ssh alias, set "ssh": \{"rj-firebat": "<user@host or alias>"\} in .*cli\.json, or set NEXUS_ATTACH/, "a failed ssh names both escape hatches");
-  await writeFile(join(s.home, ".config", "nexus", "cli.json"), JSON.stringify({ ssh: { "rj-firebat": "-oProxyCommand=evil" } }));
-  assert.equal((await s.nexus(["attach", thread.id], path)).code, 64, "a destination that ssh would read as an option is refused");
-  await writeFile(join(s.home, ".config", "nexus", "cli.json"), "{}");
-
+test("attach to an archived thread exits 5, without a terminal 64, and against a control plane without the route says to upgrade it", async (t) => {
+  const s = await setup(t);
+  const thread: Thread = await s.json(["start", "--project", "acme", "--title", "attach"]);
   await s.json(["archive", thread.id]);
-  const archived = await s.nexus(["attach", thread.id], path);
-  assert.equal(archived.code, 5);
-  assert.match(archived.stderr, /is archived, so its pylon stays paused. `nexus unarchive/);
+  const archived = await inTerminal(s.env(), ["attach", thread.id]);
+  assert.equal(archived.code, 5, archived.screen);
+  assert.match(archived.screen, /is archived, so its pylon stays paused/);
+
+  const piped = await s.nexus(["attach", thread.id]);
+  assert.equal(piped.code, 64);
+  assert.match(piped.stderr, /attach needs a terminal/);
+
+  // As a control plane before the route answers any path it does not know.
+  const old = createHttpServer((req, res) => {
+    res.writeHead(404, { "content-type": "application/json" }).end(JSON.stringify({ error: `no route ${new URL(req.url!, "http://x").pathname}` }));
+  });
+  const port = await listening(t, old);
+  const upgrade = await inTerminal(s.env({ NEXUS_URL: `http://127.0.0.1:${port}`, NEXUS_SOCKS: "none" }), ["attach", thread.id]);
+  assert.equal(upgrade.code, 1, upgrade.screen);
+  assert.match(upgrade.screen, new RegExp(`the control plane at 127\\.0\\.0\\.1:${port} has no attach route\\. Upgrade it, as deploy/README\\.md describes`));
+});
+
+test("a config that still holds the ssh attach settings runs every command, and attach names them once", async (t) => {
+  const s = await setup(t);
+  await mkdir(join(s.home, ".config", "nexus"), { recursive: true });
+  await writeFile(join(s.home, ".config", "nexus", "cli.json"), JSON.stringify({ ssh: { "rj-firebat": "rj-firebat" }, attach: "ssh -t x" }));
+  const projects = await s.nexus(["projects"]);
+  assert.deepEqual([projects.code, projects.stderr], [0, ""], "no other command mentions them");
+  const attach = await s.nexus(["attach", "th-0123456789ab"], { NEXUS_ATTACH: "ssh -t y" });
+  assert.match(attach.stderr, /^nexus: attach ignores "ssh" in .*cli\.json and "attach" in .*cli\.json and NEXUS_ATTACH now that it goes through the control plane\. Remove them\n/);
 });
 
 test("watch prints the backlog, then each new entry and state change, and ends when the thread is deleted", async (t) => {

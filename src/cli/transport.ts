@@ -6,6 +6,7 @@
  */
 import { request } from "node:http";
 import { connect, type Socket } from "node:net";
+import { WebSocket } from "ws";
 
 /** Every way a command fails. Each has its own exit code, so a caller can tell them apart without parsing text. */
 export type ErrorKind = "failed" | "unreachable" | "refused" | "not-found" | "conflict" | "invalid";
@@ -118,6 +119,51 @@ export async function follow(endpoint: Endpoint, path: string, onEvent: (data: u
     });
     req.on("error", failed);
     req.end();
+  });
+}
+
+/**
+ * Opens a WebSocket to the API over the same direct or SOCKS connection as `call`, paused until the caller resumes
+ * it. A refused handshake rejects as `call` does. A 404 that names no route is a control plane older than the route.
+ * The server's pings keep the idle timeout from firing, so a link that hangs still fails, and the socket's own
+ * error, such as that timeout, is what the WebSocket's `error` event carries.
+ */
+export async function upgrade(endpoint: Endpoint, path: string): Promise<WebSocket> {
+  const socket = await open(endpoint);
+  const host = endpoint.url.host;
+  let failure: Error | null = null;
+  socket.on("error", (err) => { failure ??= err; });
+  return new Promise((resolve, reject) => {
+    const ws = new WebSocket(`ws://${host}${path}`, { createConnection: () => socket, perMessageDeflate: false });
+    // ws reports a failed handshake as its own error, and the socket's, kept above, says why.
+    const failed = (err: Error) => reject(lost(host, failure ?? err));
+    ws.on("error", failed);
+    ws.once("unexpected-response", (_req, res) => {
+      let text = "";
+      res.setEncoding("utf8");
+      res.on("data", (chunk: string) => { text += chunk; });
+      res.on("error", failed);
+      res.on("end", () => {
+        socket.destroy();
+        try {
+          reply("GET", path, res.statusCode!, text);
+          reject(new CliError("failed", `GET ${path} answered ${res.statusCode} rather than a WebSocket`, res.statusCode!));
+        } catch (err) {
+          reject((err as CliError).status === 404 && (err as Error).message.startsWith("no route ")
+            ? new CliError("failed", `the control plane at ${host} has no attach route. Upgrade it, as deploy/README.md describes`, 404)
+            : err);
+        }
+      });
+    });
+    ws.once("open", () => {
+      ws.off("error", failed);
+      // Until the caller listens, so a message that came with the 101 waits for it. The caller resumes it.
+      ws.pause();
+      // ws turns the socket's timeout off once the handshake is done.
+      socket.setTimeout(idleTimeoutMs);
+      socket.on("error", (err) => ws.emit("error", lost(host, err)));
+      resolve(ws);
+    });
   });
 }
 

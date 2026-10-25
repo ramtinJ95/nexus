@@ -3,7 +3,6 @@
  * integrations, which shell out to it. docs/cli.md is the contract: the commands, their JSON, the exit codes and
  * the watch stream. --json prints the API's reply as it is, except where docs/cli.md says otherwise.
  */
-import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { homedir } from "node:os";
@@ -18,9 +17,11 @@ import type { Preview, Thread } from "../control/registry.ts";
 import type { Changes, Diff, Listing } from "../checkout-files.ts";
 import type { Project, SecretGrant } from "../project.ts";
 import type { ActualState } from "../reconcile.ts";
-import { call, CliError, exitCodes, follow, type Endpoint, type HostPort } from "./transport.ts";
+import type { WebSocket } from "ws";
+import { attachTerminal, processTty } from "./attach.ts";
+import { call, CliError, exitCodes, follow, upgrade, type Endpoint, type HostPort } from "./transport.ts";
 
-const version = "0.8.0";
+const version = "0.9.0";
 const defaults = { url: "http://rj-firebat.tailc817d3.ts.net:7470", socks: "localhost:1055" };
 const configFile = () => join(homedir(), ".config", "nexus", "cli.json");
 
@@ -37,7 +38,7 @@ const usage = `nexus ${version}, the Nexus control plane from this Mac
   nexus conversation <thread>                  the agent's transcript
   nexus session open <thread> [--harness claude-code|pi|shell] [--title T]
   nexus session close <thread> <pane|id>       a session in no pane by its ID, which \`nexus show\` gives
-  nexus attach <thread>                        a terminal on the pylon's Herdr sessions, over ssh to its node
+  nexus attach <thread>                        this terminal on the pylon's Herdr sessions, through the control plane
   nexus start --project P [--title T] [--message M] [--node N] [--branch B] [--commit C]
   nexus send <thread> <text...> [--steer] [--request-id ID]
   nexus watch <thread> [--interval MS]
@@ -51,8 +52,6 @@ const usage = `nexus ${version}, the Nexus control plane from this Mac
 
 Every command takes --json, --url URL and --socks HOST:PORT|none. The URL and proxy come from those flags,
 then NEXUS_URL and NEXUS_SOCKS, then ${configFile()}, then ${defaults.url} through ${defaults.socks}.
-attach runs ssh to the node, or to the config's "ssh" destination for it, through the same proxy, or else
-NEXUS_ATTACH, or the config's "attach", with sh.
 `;
 
 type Values = Record<string, string | boolean | string[] | undefined>;
@@ -62,13 +61,12 @@ type Api = (method: string, path: string, body?: unknown, idleMs?: number) => Pr
 type Follow = (path: string, onEvent: (data: unknown) => void, signal: AbortSignal) => Promise<void>;
 /** What a command prints: its JSON for --json, its text otherwise. */
 interface Result { json: unknown; text: string }
-/** What a command that runs a program on this Mac, as attach does, needs beyond the API. */
+/** What attach needs beyond the API. */
 interface Local {
-  socks: HostPort | null;
-  /** The attach command that replaces ssh's, run with sh. */
-  attach: string | null;
-  /** ssh's destination for each node named here, such as `user@host` or an ssh config alias, instead of its tailnetHost. */
-  ssh: Readonly<Record<string, string>>;
+  /** A WebSocket to the API, over the same connection as every call. */
+  connect(path: string): Promise<WebSocket>;
+  /** The settings for attach over ssh that are set, which attach names once, because they do nothing now. */
+  retired: readonly string[];
 }
 interface Command {
   args: readonly [min: number, max: number];
@@ -251,43 +249,6 @@ async function whenRunning<T>(api: Api, id: string, send: () => Promise<T>, undo
       if (Date.now() >= deadline) throw new CliError("failed", `the pylon of ${id} did not run within ${waitMs / 1000} s, so ${undone}. ${err.message}`);
     }
     await sleep(waitPollMs);
-  }
-}
-
-/**
- * Wakes the pylon and waits until it runs, then runs ssh to its node with a terminal, or the configured attach
- * command, and returns once the person detaches. Recording activity first counts the attach as human presence
- * until the node's next read, which counts the attached terminal itself.
- */
-async function attach(api: Api, id: string, local: Local): Promise<void> {
-  const deadline = Date.now() + waitMs;
-  let d = await api("GET", thread(id)) as ThreadDetail;
-  // An archived thread's pylon pauses even while a terminal is attached.
-  if (d.thread.status === "archived") throw new CliError("conflict", `thread ${id} is archived, so its pylon stays paused. \`nexus unarchive ${id}\` wakes it`);
-  if (d.thread.status === "deleted") throw new CliError("conflict", `thread ${id} is deleted`);
-  await api("POST", `${thread(id)}/activity`, { kind: "human" });
-  while (d.pylon.actualState !== "running") {
-    if (d.pylon.actualState === "failed") throw new CliError("failed", `the pylon of ${id} failed: ${d.pylon.failed ?? "no reason given"}`);
-    if (Date.now() >= deadline) throw new CliError("failed", `the pylon of ${id} did not run within ${waitMs / 1000} s. It is ${d.pylon.actualState}`);
-    await sleep(waitPollMs);
-    d = await api("GET", thread(id)) as ThreadDetail;
-  }
-  const { id: pylon, node } = d.pylon;
-  const host = (await api("GET", "/v1/nodes") as NodeSummary[]).find((n) => n.name === node)?.tailnetHost;
-  if (host === undefined) throw new CliError("failed", `the control plane lists no node ${node}`);
-  const destination = local.ssh[node] ?? host;
-  const [command, args] = local.attach !== null ? ["sh", ["-c", local.attach]]
-    : ["ssh", ["-t", ...local.socks === null ? [] : ["-o", `ProxyCommand=nc -X 5 -x ${local.socks.host}:${local.socks.port} %h %p`], destination, "nexus-attach", pylon]];
-  const code = await new Promise<number>((resolve, reject) => {
-    const child = spawn(command, args, { stdio: "inherit", env: { ...process.env, NEXUS_THREAD: id, NEXUS_PYLON: pylon, NEXUS_NODE: node, NEXUS_NODE_HOST: host } });
-    child.once("error", (err) => reject(new CliError("failed", `${command} could not start: ${err.message}`)));
-    child.once("exit", (exit) => resolve(exit ?? 1));
-  });
-  if (code !== 0) {
-    const how = local.attach === null
-      ? `ssh to ${destination} exited ${code}. To reach the node as another user or through an ssh alias, set "ssh": {"${node}": "<user@host or alias>"} in ${configFile()}, or set NEXUS_ATTACH, as docs/cli.md describes`
-      : `the attach command from NEXUS_ATTACH or the config exited ${code}`;
-    throw new CliError("failed", `attaching to ${id} on ${node} failed: ${how}`);
   }
 }
 
@@ -606,8 +567,10 @@ const commands: Readonly<Record<string, Command>> = {
   },
   attach: {
     args: [1, 1],
-    async run(api, [id], _, __, local) {
-      await attach(api, id!, local);
+    async run(_api, [id], _values, _follow, local) {
+      const { retired } = local;
+      if (retired.length > 0) process.stderr.write(`nexus: attach ignores ${retired.join(" and ")} now that it goes through the control plane. Remove ${retired.length === 1 ? "it" : "them"}\n`);
+      await attachTerminal(local.connect, id!, processTty());
     },
   },
   start: {
@@ -699,10 +662,14 @@ const commands: Readonly<Record<string, Command>> = {
   },
 };
 
+/**
+ * Keys that CLIs before 0.9.0 read for attach over ssh. They still parse, so a config that has them keeps working,
+ * and attach names the ones that are set.
+ */
+const retiredKeys = ["ssh", "attach"] as const;
 const configSchema = z.strictObject({
-  url: z.string().optional(), socks: z.string().optional(), attach: z.string().optional(),
-  // A destination is one ssh argument, never an option.
-  ssh: z.record(z.string(), z.string().regex(/^[^-\s]\S*$/, "must be an ssh destination such as user@host or an alias")).optional(),
+  url: z.string().optional(), socks: z.string().optional(),
+  ...Object.fromEntries(retiredKeys.map((key) => [key, z.unknown().optional()])) as Record<(typeof retiredKeys)[number], z.ZodOptional<z.ZodUnknown>>,
 });
 
 async function readConfig(file: string): Promise<z.infer<typeof configSchema>> {
@@ -725,10 +692,13 @@ async function readConfig(file: string): Promise<z.infer<typeof configSchema>> {
 }
 
 /** Each setting from its flag, then the environment, then the config file, then the default. */
-async function settings(v: Values): Promise<{ endpoint: Endpoint } & Omit<Local, "socks">> {
+async function settings(v: Values): Promise<{ endpoint: Endpoint; retired: string[] }> {
   const config = await readConfig(configFile());
   const env = (name: string) => process.env[name] || undefined;
-  const attach = env("NEXUS_ATTACH") ?? config.attach ?? null;
+  const retired = [
+    ...retiredKeys.filter((key) => config[key] !== undefined).map((key) => `"${key}" in ${configFile()}`),
+    ...env("NEXUS_ATTACH") === undefined ? [] : ["NEXUS_ATTACH"],
+  ];
   const url = str(v, "url") ?? env("NEXUS_URL") ?? config.url ?? defaults.url;
   const socks = str(v, "socks") ?? env("NEXUS_SOCKS") ?? config.socks ?? defaults.socks;
   let parsed: URL;
@@ -738,7 +708,7 @@ async function settings(v: Values): Promise<{ endpoint: Endpoint } & Omit<Local,
     throw new CliError("invalid", `the control plane URL ${url} is not a URL`);
   }
   if (parsed.protocol !== "http:") throw new CliError("invalid", `the control plane URL ${url} must be http://, which is what the API serves on the tailnet`);
-  return { endpoint: { url: parsed, socks: socks === "none" ? null : hostPort(socks) }, attach, ssh: config.ssh ?? {} };
+  return { endpoint: { url: parsed, socks: socks === "none" ? null : hostPort(socks) }, retired };
 }
 
 function hostPort(value: string): HostPort {
@@ -767,9 +737,9 @@ async function run(argv: readonly string[]): Promise<void> {
   if (positionals.length < min || positionals.length > max) {
     throw new CliError("invalid", `${name} takes ${min === max ? min : max === Infinity ? `at least ${min}` : `${min} to ${max}`} argument${max === 1 ? "" : "s"}, got ${positionals.length}`);
   }
-  const { endpoint: target, attach, ssh } = await settings(values);
+  const { endpoint: target, retired } = await settings(values);
   const result = await command.run((method, path, body, idleMs) => call(target, method, path, body, idleMs), positionals, values,
-    (path, onEvent, signal) => follow(target, path, onEvent, signal), { socks: target.socks, attach, ssh });
+    (path, onEvent, signal) => follow(target, path, onEvent, signal), { connect: (path) => upgrade(target, path), retired });
   if (result !== undefined) process.stdout.write(`${values.json === true ? JSON.stringify(result.json, null, 2) : result.text}\n`);
 }
 

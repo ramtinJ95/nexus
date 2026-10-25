@@ -36,7 +36,7 @@ const client = connectProbe(target.node, target.host, target.nodeId, { port: tar
 
 let stream: ByteStream;
 try {
-  stream = await client.stream(pylonId as PylonId, { pty: null, argv: [...daemon, ...serveArgs] });
+  stream = await client.stream(pylonId as PylonId, [...daemon, ...serveArgs]);
 } catch (err) {
   process.stderr.write(`bridge: ${pylonId} on ${target.node}: ${(err as Error).message}\n`);
   process.exit(1);

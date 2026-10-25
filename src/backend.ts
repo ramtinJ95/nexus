@@ -13,7 +13,7 @@
  * The backend speaks its own types. Wire types from protocol.ts stop at runJob and runCommand.
  */
 import type { Readable } from "node:stream";
-import type { ArtifactCopy, BrokenCause, ByteStream, CommandResult, Job, JobErrorCode, NodeName, PausedSession, PylonCommand, PylonId, ServiceFact, StreamRequest } from "./protocol.ts";
+import type { ArtifactCopy, BrokenCause, ByteStream, CommandResult, Job, JobErrorCode, NodeName, PausedSession, PylonCommand, PylonId, ServiceFact } from "./protocol.ts";
 import { checkoutDir, closeSession, dropFailedSession, openSession } from "./sessions.ts";
 import { linkedName, type BootInputs, type LiveSpec, type OverlayFile, type PreviewAssignment, type ServiceDecl, type ServiceName } from "./project.ts";
 import type { ArtifactId, ArtifactManifest, CheckpointId, ImageId, ImageRecipe, PortableArtifactId, TemplateBuildInputs, TemplateId } from "./images.ts";
@@ -58,8 +58,8 @@ export interface BackendPylon {
 /** Every call runs as `user`. */
 export interface Guest {
   exec(argv: readonly string[], opts: { cwd: string; timeoutMs: number }): Promise<{ exitCode: number | null; output: string; truncated: boolean }>;
-  /** Starts the process. A raw pipe's stream carries stdout only, and its stderr goes to `log`. */
-  stream(request: StreamRequest, log: (text: string) => void): Promise<ByteStream>;
+  /** Starts the process on a raw pipe. Its stream carries stdout only, and its stderr goes to `log`. */
+  stream(argv: readonly string[], log: (text: string) => void): Promise<ByteStream>;
   writeFiles(files: readonly OverlayFile[]): Promise<void>;
   /** `list` starts and stops nothing. */
   services(op: "ensure" | "list" | "restart" | "stop" | "logs", name?: string, lines?: number): Promise<{ services: readonly ServiceFact[]; logs?: string }>;

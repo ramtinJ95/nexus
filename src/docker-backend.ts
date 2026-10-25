@@ -177,11 +177,10 @@ export function createDockerBackend(options: DockerBackendOptions): VmBackend {
         if (existing?.State.Status !== "running") throw new Error(`${pylonId} is not running`);
         return execIn(pylonId, cwd, argv, timeoutMs);
       },
-      async stream(request, log) {
-        if (request.pty !== null) throw new Error("the Docker backend has no pty streams");
+      async stream(argv, log) {
         const existing = await container(pylonId, AbortSignal.timeout(30_000));
         if (existing?.State.Status !== "running") throw new Error(`${pylonId} is not running`);
-        return processStream("docker", ["exec", "--interactive", pylonId, ...request.argv], log);
+        return processStream("docker", ["exec", "--interactive", pylonId, ...argv], log);
       },
       /** Each file through stdin. Missing parents are made as the file's owner, as in a pylon. */
       async writeFiles(files) {

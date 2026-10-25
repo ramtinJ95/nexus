@@ -22,11 +22,13 @@ export function processStream(file: string, args: readonly string[], log: (text:
   return {
     [Symbol.asyncIterator]: () => child.stdout[Symbol.asyncIterator]() as AsyncIterator<Uint8Array>,
     write: (chunk) => new Promise((resolve, reject) => { child.stdin.write(chunk, (err) => err ? reject(err) : resolve()); }),
-    resize() {},
     async close() {
       // end()'s own callback never runs on a stdin that a write after exit already destroyed.
       child.stdin.end();
       await finished(child.stdin).catch(() => undefined);
+    },
+    abort() {
+      child.kill("SIGKILL");
     },
     done,
   };

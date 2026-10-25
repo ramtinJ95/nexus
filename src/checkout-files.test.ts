@@ -9,19 +9,19 @@ import { setFlagsFromString } from "node:v8";
 import { runInNewContext } from "node:vm";
 import { checkoutReader, CheckoutRefused, contentType, maxFileBytes, maxOpenPipes, pathsFit, type OpenPipe } from "./checkout-files.ts";
 import { processStream } from "./process-stream.ts";
-import type { ByteStream, StreamEnd, StreamRequest } from "./protocol.ts";
+import type { ByteStream, StreamEnd } from "./protocol.ts";
 
 const run = promisify(execFile);
 
 /** Each pipe runs the helper on this machine, as a pylon would over its raw pipe. */
-function localPipes(): { open: OpenPipe; requests: StreamRequest[]; stderr: string[] } {
-  const requests: StreamRequest[] = [];
+function localPipes(): { open: OpenPipe; requests: (readonly string[])[]; stderr: string[] } {
+  const requests: (readonly string[])[] = [];
   const stderr: string[] = [];
   return {
     requests, stderr,
-    open: async (request) => {
-      requests.push(request);
-      return processStream(request.argv[0]!, request.argv.slice(1), (text) => { stderr.push(text); });
+    open: async (argv) => {
+      requests.push(argv);
+      return processStream(argv[0]!, argv.slice(1), (text) => { stderr.push(text); });
     },
   };
 }
@@ -60,7 +60,7 @@ test("a listing gives each entry's kind and a file's size, sorted by name, and t
   ]);
   assert.deepEqual(await c.reader.list("src/"), { path: "src", entries: [{ name: "old.ts", kind: "file", size: 400 }], truncated: false });
   // The helper goes in on stdin, so the request, which the probe takes in its URL, stays short.
-  assert.deepEqual(c.requests[0], { pty: null, argv: ["python3", "-", c.dir, "list", ""] });
+  assert.deepEqual(c.requests[0], ["python3", "-", c.dir, "list", ""]);
 });
 
 test("a path that leaves the checkout is refused, through .. or through a symlink", async (t) => {
@@ -233,8 +233,8 @@ test("a read abandoned at its deadline lets go of what it already holds, though 
       await done;
     },
     write: async () => {},
-    resize() {},
     close: async () => {},
+    abort: () => {},
     done,
   };
   await assert.rejects(checkoutReader(async () => stalled, "/repo", 50).changes("head"), refused("slow", /within 0.05 s/));

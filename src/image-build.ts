@@ -460,9 +460,9 @@ export function smokeChecks(recipe: ImageRecipe): readonly SmokeCheck[] {
       expect: new RegExp(`^gh version ${literal(pins.gh)} \\(\\d{4}-\\d{2}-\\d{2}\\)\\n(?:[^\\n]*\\n)*password=nexus-smoke\\n$`),
     },
     {
-      name: "Herdr leaves resume to Nexus",
+      name: "Herdr leaves resume to Nexus and skips onboarding",
       argv: asUser("cat ~/.config/herdr/config.toml"),
-      expect: /^\[session\]\nresume_agents_on_restore = false\n$/,
+      expect: /^onboarding = false\n\n\[session\]\nresume_agents_on_restore = false\n$/,
     },
     {
       // The subshell exits at once, so tini adopts its `sleep 0`. A second later tini's only child is sh, not

@@ -112,6 +112,7 @@ RUN printf '@~/.nexus/PYLON.md\n' > /home/user/.claude/CLAUDE.md \
  && ln -s /home/user/.nexus/PYLON.md /home/user/.pi/agent/AGENTS.md
 # Nexus relaunches each pane's agent on wake (src/sessions.ts) and checks that it runs. Herdr's own resume on
 # restore would start it first, and when that start fails, as `claude --resume` does for a session never
-# prompted, Herdr still reports the agent as running.
+# prompted, Herdr still reports the agent as running. Without `onboarding = false`, Herdr's first-run dialog covers
+# the session on the first attach to every new pylon.
 RUN mkdir -p /home/user/.config/herdr \
- && printf '[session]\nresume_agents_on_restore = false\n' > /home/user/.config/herdr/config.toml
+ && printf 'onboarding = false\n\n[session]\nresume_agents_on_restore = false\n' > /home/user/.config/herdr/config.toml

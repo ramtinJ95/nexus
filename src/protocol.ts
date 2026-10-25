@@ -168,11 +168,7 @@ export interface RunningFacts {
   sessions: readonly SessionFact[] | null; // null when Herdr could not be read. No Herdr server is an empty list
   git: GitFacts | null; // null until the first poll, or when the checkout is missing
   declaredOutputs: readonly DeclaredOutput[];
-  /**
-   * Terminals attached to the pylon, counted as human presence: open streams with a pty, and terminals attached to
-   * its Herdr session in the guest, such as `nexus attach`. A raw pipe is not counted: the harness keeps one open
-   * for as long as the pylon runs.
-   */
+  /** The Herdr clients attached to the pylon's session, such as `nexus attach`, counted as human presence. */
   attachedClients: number;
 }
 
@@ -254,28 +250,23 @@ export type CommandResult =
   | { kind: "unlink-port"; refused: string | null };
 
 /**
- * `pty: null` is a raw pipe, such as the pi-env daemon. Its stream carries the process's stdout only, and its
- * stderr goes to the probe's log under the pylon's ID, so a diagnostic can never corrupt a framed protocol on
- * stdout. A pty carries both, as a terminal does.
- */
-export interface StreamRequest {
-  pty: { cols: number; rows: number } | null;
-  argv: readonly string[];
-}
-
-/**
+ * A stream is a raw pipe to a process in the guest, such as the pi-env daemon. It carries the process's stdout
+ * only, and its stderr goes to the probe's log under the pylon's ID, so a diagnostic can never corrupt a framed
+ * protocol on stdout. A terminal is a program on a pipe too: guest-terminal.ts makes its pty in the guest.
+ *
  * A pipe runs at most once. If the connection drops, the probe ends the guest process's stdin and `done`
  * resolves to `lost`. The pi-env daemon then kills every command it started. A tool call whose pipe was lost
  * fails with pi-env's "connection lost" error, which the model sees as an ordinary error result. pi-durable's
- * `interrupted` result appears only when the harness process itself died mid-call. Dropping a pty only
- * detaches, and Herdr keeps the session.
+ * `interrupted` result appears only when the harness process itself died mid-call. A terminal's relay hangs up
+ * when its stdin ends, so Herdr's client detaches and the session stays.
  */
 export type StreamEnd = { kind: "exited"; code: number } | { kind: "lost" };
 export interface ByteStream extends AsyncIterable<Uint8Array> {
   write(chunk: Uint8Array): Promise<void>;
-  resize(cols: number, rows: number): void; // no-op without a pty
   /** Ends the process's stdin. Its output keeps arriving until it exits. */
   close(): Promise<void>;
+  /** Drops the stream at once, without waiting for the process, as for a node that stopped answering. `done` follows. */
+  abort(): void;
   readonly done: Promise<StreamEnd>;
 }
 
@@ -290,7 +281,7 @@ export interface ProbeClient {
   /** Ends when the link drops. The registry marks the node offline after 30 s without a reconnect. */
   observe(signal: AbortSignal): AsyncIterable<ProbeEvent>;
   command(pylonId: PylonId, command: PylonCommand): Promise<CommandResult>;
-  stream(pylonId: PylonId, request: StreamRequest): Promise<ByteStream>;
+  stream(pylonId: PylonId, argv: readonly string[]): Promise<ByteStream>;
 }
 
 /** Tailscale's stable node ID, as LocalAPI whois reports it. It survives renames and address changes. */
@@ -382,8 +373,8 @@ export function connectProbe(node: NodeName, tailnetHost: string, expected: Tail
       if (res.status !== 200) throw new Error(`${node}: POST ${path}: HTTP ${res.status}: ${res.body}`);
       return parseCommandResult(command, res.body);
     },
-    stream(pylonId, streamRequest) {
-      const path = streamPath(pylonId, streamRequest);
+    stream(pylonId, argv) {
+      const path = streamPath(pylonId, argv);
       return new Promise((resolve, reject) => {
         const req = request({ host: tailnetHost, port, method: "GET", path, agent, timeout: requestTimeoutMs, headers: { connection: "upgrade", upgrade: streamProtocol } });
         req.on("upgrade", (_res, socket, head) => {
@@ -490,31 +481,29 @@ export function parseSubmitReply(status: number, body: string): SubmitReply {
 }
 
 /**
- * GET /v1/pylons/{id}/stream?request=<StreamRequest JSON> upgrades the connection to `nexus-stream`, a
- * sequence of frames: a type byte, a 4-byte big-endian length, then the payload. The control plane sends
- * stdin, end of stdin and resizes. The probe sends output, then the exit code as its last frame. A
- * connection that closes without an exit frame is a lost stream. The probe answers 409 instead of
- * upgrading when the pylon is not running.
+ * GET /v1/pylons/{id}/stream?request={"argv": [...]} upgrades the connection to `nexus-stream`, a sequence of
+ * frames: a type byte, a 4-byte big-endian length, then the payload. The control plane sends stdin and end of
+ * stdin. The probe sends output, then the exit code as its last frame. A connection that closes without an exit
+ * frame is a lost stream. The probe answers 409 instead of upgrading when the pylon is not running.
  */
 const streamProtocol = "nexus-stream";
-const frameType = { data: 0, eof: 1, resize: 2, exit: 3 } as const;
+// 2 was a resize, which nothing sends since streams lost their pty, so the other numbers stay as older peers know them.
+const frameType = { data: 0, eof: 1, exit: 3 } as const;
 const maxFrameBytes = 16 << 20;
 
-function streamPath(pylonId: PylonId, req: StreamRequest): string {
-  return `/v1/pylons/${encodeURIComponent(pylonId)}/stream?request=${encodeURIComponent(JSON.stringify(req))}`;
+function streamPath(pylonId: PylonId, argv: readonly string[]): string {
+  // Probes older than raw-pipe-only streams require the `pty` key. It can go once every node runs a newer probe.
+  return `/v1/pylons/${encodeURIComponent(pylonId)}/stream?request=${encodeURIComponent(JSON.stringify({ pty: null, argv }))}`;
 }
 
 /** The probe's side of the stream route: `null` unless the request asks to upgrade to `nexus-stream`. Throws with a message for a 400. */
-export function parseStreamRequest(upgrade: string | undefined, url: URL): { pylonId: PylonId; request: StreamRequest } | null {
+export function parseStreamRequest(upgrade: string | undefined, url: URL): { pylonId: PylonId; argv: readonly string[] } | null {
   const match = /^\/v1\/pylons\/([^/]+)\/stream$/.exec(url.pathname);
   if (match === null || upgrade?.toLowerCase() !== streamProtocol) return null;
   const req = record(JSON.parse(url.searchParams.get("request") ?? "null"), "stream request");
   if (!Array.isArray(req.argv) || req.argv.length === 0 || !req.argv.every((a) => typeof a === "string")) throw new Error("stream request argv is not a non-empty string array");
-  if (req.pty !== null) {
-    const pty = record(req.pty, "stream request pty");
-    if (!Number.isInteger(pty.cols) || !Number.isInteger(pty.rows)) throw new Error("stream request pty needs whole cols and rows");
-  }
-  return { pylonId: decodeURIComponent(match[1]!) as PylonId, request: req as unknown as StreamRequest };
+  if (req.pty !== undefined && req.pty !== null) throw new Error("streams are raw pipes only, so a stream request has no pty. A terminal's pty is made in the guest, as guest-terminal.ts does");
+  return { pylonId: decodeURIComponent(match[1]!) as PylonId, argv: req.argv as string[] };
 }
 
 export const streamUpgradeResponse = `HTTP/1.1 101 Switching Protocols\r\nconnection: upgrade\r\nupgrade: ${streamProtocol}\r\n\r\n`;
@@ -547,8 +536,6 @@ export async function serveByteStream(socket: Duplex, head: Buffer, stream: Byte
         if (stdin) await stream.write(f.payload).catch(() => { stdin = false; });
       } else if (f.type === frameType.eof) {
         await stream.close();
-      } else if (f.type === frameType.resize && f.payload.length === 4) {
-        stream.resize(f.payload.readUInt16BE(0), f.payload.readUInt16BE(2));
       } else {
         throw new Error(`unexpected stream frame type ${f.type}`);
       }
@@ -585,13 +572,8 @@ function clientByteStream(socket: Duplex, head: Buffer): ByteStream {
   return {
     [Symbol.asyncIterator]: () => output[Symbol.asyncIterator]() as AsyncIterator<Uint8Array>,
     write: (chunk) => send(socket, frame(frameType.data, chunk)),
-    resize(cols, rows) {
-      const size = Buffer.alloc(4);
-      size.writeUInt16BE(cols, 0);
-      size.writeUInt16BE(rows, 2);
-      socket.write(frame(frameType.resize, size));
-    },
     close: () => send(socket, frame(frameType.eof, Buffer.alloc(0))),
+    abort: () => socket.destroy(),
     done,
   };
 }
