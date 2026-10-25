@@ -176,7 +176,7 @@ async function startHarness(guest: Guest, pane: string, harness: SessionHarness,
       if (harness === "claude-code") {
         const running = await runsAgent(guest, pane, "claude").catch(() => null);
         if (running === true) return;
-        if (running === null) throw new ClaudeLaunchStalled(`Claude launch stalled: ${(err as Error).message}; attach before starting another session`);
+        if (running === null) throw new ClaudeLaunchStalled(`Claude launch stalled: ${(err as Error).message}; attach before starting another session`, pane);
       }
       // A rollback closes the pane, so its screen, such as the harness's own error, goes into the failure.
       throw new Error(`${(err as Error).message}. The pane showed:\n${await screen(guest, pane)}`, { cause: err });
@@ -188,11 +188,17 @@ async function startHarness(guest: Guest, pane: string, harness: SessionHarness,
       const panes = await livePanes(guest).catch(() => []);
       if (panes.some((p) => p.herdrPane === pane && p.status === "working")) return;
     }
-    if (submitted.exitCode !== 0) throw new ClaudeLaunchStalled(`Claude launch stalled: no UserPromptSubmit within 30 seconds; attach before starting another session. The pane showed:\n${await screen(guest, pane)}`);
+    if (submitted.exitCode !== 0) throw new ClaudeLaunchStalled(`Claude launch stalled: no UserPromptSubmit within 30 seconds; attach before starting another session. The pane showed:\n${await screen(guest, pane)}`, pane);
   }
 }
 
-export class ClaudeLaunchStalled extends Error {}
+export class ClaudeLaunchStalled extends Error {
+  readonly herdrPane: string;
+  constructor(message: string, herdrPane: string) {
+    super(message);
+    this.herdrPane = herdrPane;
+  }
+}
 
 /** Diagnostic only, so it never throws over the failure it explains. */
 async function screen(guest: Guest, pane: string): Promise<string> {
@@ -356,7 +362,7 @@ export async function relaunchSessions(guest: Guest): Promise<readonly RelaunchO
         outcomes.push({ record: r, result: "relaunched", herdrPane });
       }
     } catch (err) {
-      outcomes.push({ record: r, result: "failed", herdrPane: pane?.herdrPane ?? null, message: (err as Error).message });
+      outcomes.push({ record: r, result: "failed", herdrPane: err instanceof ClaudeLaunchStalled ? err.herdrPane : pane?.herdrPane ?? null, message: (err as Error).message });
     }
   }
   await recordOutcomes(guest, file, outcomes);

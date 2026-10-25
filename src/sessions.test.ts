@@ -637,3 +637,28 @@ test("an explicit Claude model is recorded and passed on checkpoint relaunch", a
   const recorded = await recordSessions(guest);
   assert.equal(recorded![0]!.model, "custom-model");
 });
+
+test("a stalled relaunch keeps its new pane attached to the failure across record and relaunch", async () => {
+  const records: SessionRecord[] = [{ herdrPane: "w1:p1", harness: "claude-code", title: "review", cwd: "/home/user", harnessSessionId: "aaaa" }];
+  const panes: FakePane[] = [];
+  const guest = pylon(records, panes);
+  const exec = guest.exec;
+  let unavailable = true;
+  guest.exec = async (argv, options) => {
+    if (unavailable && argv[3] === "pane" && argv[4] === "process-info") throw new Error("process info unavailable");
+    const reply = await exec(argv, options);
+    if (unavailable && argv[3] === "agent" && argv[4] === "start") return { ...herdrError("timeout", "timed out waiting for agent startup"), truncated: false };
+    return reply;
+  };
+  assert.deepEqual(placed(await relaunchSessions(guest)), [["review", "failed", "w20:p1"]]);
+  assert.equal(panes.length, 1, "the uncertain launch leaves its new pane open");
+  unavailable = false;
+  assert.deepEqual((await recordSessions(guest))!.map((r) => [r.harnessSessionId, r.herdrPane]), [["aaaa", "w20:p1"]]);
+  assert.deepEqual(placed(await relaunchSessions(guest)), [["review", "present", "w20:p1"]]);
+  assert.equal(guest.herdrCalls().filter((c) => c === "agent start").length, 1, "the recovered live session is not started twice");
+  assert.equal(panes.length, 1);
+  const file = JSON.parse(guest.written.findLast((f) => f.path === sessionsFile)!.content);
+  assert.equal(file.sessions.length, 1);
+  assert.equal(file.sessions[0].harnessSessionId, "aaaa");
+  assert.deepEqual(file.failed, [], "the recovered pane supersedes the failure");
+});
