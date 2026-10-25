@@ -204,7 +204,9 @@ try {
 
   await detach("attach", attached);
 
-  // Detached, the same wait must not move it, which shows the advance above came from the terminal.
+  // Detached, the same wait must not move it, which shows the advance above came from the terminal. An observation
+  // read just before the detach can still land, so it settles first.
+  await sleep(10_000);
   const idleBefore = (await show("detached-before")).thread.lastHumanActivityAt;
   await sleep(75_000);
   const idleAfter = (await show("detached-after")).thread.lastHumanActivityAt;
