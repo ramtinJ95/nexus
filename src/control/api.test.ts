@@ -1492,3 +1492,16 @@ test("pylon boot inherits the person's identity and a project can override or cl
     assert.ok(pylon.live.overlay[2]!.content.includes((identity ?? gitIdentity).email));
   }
 });
+
+test("partial resource patches merge atomically without resetting another edit", async (t) => {
+  const s = await withThread(t);
+  const edits = await Promise.all([
+    s.call("PATCH", "/v1/projects/acme", { resources: { cpus: 4 } }),
+    s.call("PATCH", "/v1/projects/acme", { resources: { memoryGiB: 8 } }),
+  ]);
+  for (const result of edits) assert.equal(result.status, 200);
+  assert.deepEqual(s.registry.project(project.id as ProjectId)!.resources, { ...project.resources, cpus: 4, memoryGiB: 8 });
+  const before = s.registry.project(project.id as ProjectId);
+  assert.equal((await s.call("PATCH", "/v1/projects/acme", { resources: { cpus: 16 }, defaultNode: "missing" })).status, 400);
+  assert.deepEqual(s.registry.project(project.id as ProjectId), before, "a refused edit rolls back every field");
+});

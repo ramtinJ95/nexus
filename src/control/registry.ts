@@ -408,6 +408,15 @@ export function openRegistry(path: string) {
     /** The loop marks a node offline when its observe link stays down. Every other node fact comes through apply. */
     markOffline(name: NodeName) { q.nodeState.run("offline", name); },
 
+    editProject(id: ProjectId, edit: (stored: Project) => Project): Project | undefined {
+      return transaction(() => {
+        const row = q.project.get(id) as Row | undefined;
+        if (row === undefined) return undefined;
+        const project = edit(json<Project>(row.record));
+        db.prepare("UPDATE projects SET record = ? WHERE id = ?").run(JSON.stringify(project), id);
+        return project;
+      });
+    },
     updateProject(project: Project) { db.prepare("UPDATE projects SET record = ? WHERE id = ?").run(JSON.stringify(project), project.id); },
     createProject(project: Project) { q.insertProject.run(project.id, JSON.stringify(project)); },
     projects: () => (q.projects.all() as Row[]).map((r) => json<Project>(r.record)),

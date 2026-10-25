@@ -691,12 +691,11 @@ const commands: Readonly<Record<string, Command>> = {
       for (const [flag, field] of [["node", "defaultNode"], ["branch", "defaultBranch"]] as const) {
         if (v[flag] !== undefined) patch[field] = str(v, flag);
       }
-      if (["cpus", "memory", "disk"].some((flag) => v[flag] !== undefined)) {
-        const projects = await api("GET", "/v1/projects") as Project[];
-        const previous = projects.find((p) => p.id === id);
-        if (previous === undefined) throw new CliError("not-found", `no project ${id}`);
-        patch.resources = { cpus: int(str(v, "cpus"), "--cpus", previous.resources.cpus), memoryGiB: int(str(v, "memory"), "--memory", previous.resources.memoryGiB), diskGiB: int(str(v, "disk"), "--disk", previous.resources.diskGiB) };
+      const resources: Partial<Project["resources"]> = {};
+      for (const [flag, field] of [["cpus", "cpus"], ["memory", "memoryGiB"], ["disk", "diskGiB"]] as const) {
+        if (v[flag] !== undefined) resources[field] = int(str(v, flag), `--${flag}`, 0);
       }
+      if (Object.keys(resources).length > 0) patch.resources = resources;
       for (const [flag, clear, field] of [["allow-host", "clear-hosts", "allowedHosts"], ["login", "clear-logins", "logins"], ["secret", "clear-secrets", "secrets"]] as const) {
         if (v[clear] && v[flag] !== undefined) throw new CliError("invalid", `--${clear} conflicts with --${flag}`);
         if (v[clear] || v[flag] !== undefined) patch[field] = flag === "secret" ? strs(v, flag).map(secretGrantOf) : strs(v, flag);

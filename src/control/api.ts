@@ -180,7 +180,7 @@ const projectSchema = z.strictObject({
   preSetup: z.string().nullable(),
   gitIdentity: gitIdentitySchema.nullable().optional(),
 });
-const projectEditSchema = projectSchema.omit({ id: true, repoUrl: true, preSetup: true }).partial();
+const projectEditSchema = projectSchema.omit({ id: true, repoUrl: true, preSetup: true }).extend({ resources: projectSchema.shape.resources.partial() }).partial();
 const startSchema = z.strictObject({
   project: z.string().min(1),
   title: z.string().min(1),
@@ -675,11 +675,12 @@ export async function startApi(options: ApiOptions): Promise<Api> {
   const routes: readonly [string, RegExp, Route][] = [
     ["PATCH", /^\/v1\/projects\/([^/]+)$/, async ([, id], r) => {
       const patch = parse(projectEditSchema, await r.body());
-      const previous = registry.project(id as ProjectId);
-      if (previous === undefined) throw new HttpError(404, `no project ${id}`);
-      const project: Project = parse(projectSchema, { ...previous, ...patch });
-      if (registry.node(project.defaultNode) === undefined) throw new HttpError(400, `no node ${project.defaultNode}`);
-      registry.updateProject(project);
+      const project = registry.editProject(id as ProjectId, (previous) => {
+        const updated: Project = parse(projectSchema, { ...previous, ...patch, resources: { ...previous.resources, ...patch.resources } });
+        if (registry.node(updated.defaultNode) === undefined) throw new HttpError(400, `no node ${updated.defaultNode}`);
+        return updated;
+      });
+      if (project === undefined) throw new HttpError(404, `no project ${id}`);
       return ok(project);
     }],
     ["GET", /^\/v1\/projects$/, () => ok(registry.projects())],

@@ -1014,3 +1014,17 @@ test("project edit replaces supplied grants and preserves omitted settings", asy
   assert.deepEqual(JSON.parse(cleared.stdout).secrets, []);
   assert.equal(JSON.parse(cleared.stdout).gitIdentity, null);
 });
+
+test("concurrent project edits preserve independently changed resources", async (t) => {
+  const s = await setup(t);
+  assert.equal((await s.nexus(["project", "add", "concurrent", "--scratch", "--node", node, "--cpus", "1", "--memory", "1", "--disk", "10"])).code, 0);
+  const before = s.proxy.connects.length;
+  const edits = await Promise.all([
+    s.nexus(["project", "edit", "concurrent", "--cpus", "4"]),
+    s.nexus(["project", "edit", "concurrent", "--memory", "8"]),
+  ]);
+  for (const result of edits) assert.equal(result.code, 0, result.stderr);
+  assert.equal(s.proxy.connects.length - before, 2, "each edit sends only its PATCH, without reading the project first");
+  const projects = await s.json(["projects"]);
+  assert.deepEqual(projects.find((p: Project) => p.id === "concurrent").resources, { cpus: 4, memoryGiB: 8, diskGiB: 10 });
+});
