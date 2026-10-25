@@ -55,6 +55,7 @@ const factsSchema = z.array(z.strictObject({
 	port: z.number().int(),
 	declared: z.boolean(),
 	wantsPreview: z.boolean(),
+	unrouted: z.string().exactOptional(),
 }));
 const logsReplySchema = z.object({ output: z.string() });
 const linkReplySchema = z.object({ service: z.string() });

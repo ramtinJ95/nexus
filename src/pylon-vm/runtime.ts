@@ -14,6 +14,7 @@ import {
 import { networkOptions } from "./network.ts";
 import { openTerminal } from "./portals.ts";
 import { GuestProcesses } from "./processes.ts";
+import { startRelay } from "./relay.ts";
 import { GuestServices } from "./services.ts";
 import { existsError, shellQuote as q, saveJson } from "./storage.ts";
 
@@ -186,6 +187,8 @@ export class SandboxRuntime {
 			vm,
 			`rm -f ${serviceRoot}/*.pid; rm -rf /var/lib/pi-sandbox/commands ${stagingRoot}`,
 		);
+		// Before the services, whose routes all point at the relay.
+		await startRelay(vm);
 		// Placeholders are new on every boot, and login shells, which every guest command runs through, read profile.d.
 		await writeFiles(vm, [
 			{

@@ -435,9 +435,6 @@ ${actions.length > 0 && html`<div class="bar-actions" id="thread-actions">${acti
   });
 }
 
-/** Gondolin's ingress connects only to the pylon's 127.0.0.1, so a server bound only to ::1 is neither listed nor reachable. */
-const unreachableHint = "A server bound only to ::1 can't be previewed, so bind it to 0.0.0.0 or 127.0.0.1.";
-
 /**
  * Each preview is listed once, under Previews, so the outputs leave out those it lists. A preview output stays for
  * one the control plane no longer has.
@@ -565,7 +562,7 @@ ${unpublished === null ? html`<p class="empty">The pylon's ports could not be re
   : html`<span class="pv-note">${l.service}</span>`}</div>
 </li>`)}</ul>`
   : pylon.actualState !== "running" ? html`<p class="empty">Ports show while the pylon runs.</p>`
-  : html`<p class="empty">${d.ports?.length === 0 ? "Nothing listens yet." : "Every port that listens is under Previews."} ${unreachableHint}</p>`}
+  : html`<p class="empty">${d.ports?.length === 0 ? "Nothing listens yet." : "Every port that listens is under Previews."}</p>`}
 </section>
 </div>
 <div class="ipane" id="pane-pylon">

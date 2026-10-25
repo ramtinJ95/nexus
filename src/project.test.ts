@@ -73,6 +73,7 @@ const rejects: Record<string, [yaml: string, message: RegExp]> = {
   "PORT in env": ["services:\n  a: { command: x, env: { PORT: '1' } }\n", /PORT is managed/],
   "PUBLIC_URL in env": ["services:\n  a: { command: x, env: { PUBLIC_URL: u } }\n", /PUBLIC_URL is managed/],
   "a NEXUS_ name in env": ["services:\n  a: { command: x, env: { NEXUS_THREAD_ID: t } }\n", /NEXUS_THREAD_ID is managed/],
+  "a fixed port that is Nexus's own": ["services:\n  a: { command: x, port: 750 }\n", /is Nexus's own: sshd's 22, or the preview relay's 700 to 799/],
   "duplicate fixed ports": ["services:\n  a: { command: x, port: 3000 }\n  b: { command: y, port: 3000 }\n", /port 3000 is also fixed by a/],
   "a reference to an unknown service": ["services:\n  a: { command: x, env: { U: '${services.b.publicURL}' } }\n", /names b, which is not a declared service with a preview/],
   "a reference to a service without a preview": ["services:\n  a: { command: x, env: { U: '${services.b.publicURL}' } }\n  b: { command: y }\n", /names b/],

@@ -1,23 +1,45 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { VM } from "@earendil-works/gondolin";
+import { execFile } from "node:child_process";
+import { createServer as createHttpServer, type Server } from "node:http";
+import { createServer as createTcpServer } from "node:net";
 import type { Writable } from "node:stream";
 import { setTimeout as delay } from "node:timers/promises";
 import { configSchema, type BootSpec, type SandboxRecord } from "./contracts.ts";
 import { lifecycleQueue, SandboxRuntime } from "./runtime.ts";
-import { GuestServices } from "./services.ts";
+import { answersScript, GuestServices } from "./services.ts";
 
 /**
- * A VM whose ingress is never dialled here, and the prefixes of the routes last set on it. Its guest has the services
+ * A VM whose ingress is never dialled here, the prefixes of the routes set on it and the port each points at, and the
+ * relay maps written to its guest, with `events` recording both in order. Its guest has the services
  * file `file` holds, none while undefined, and runs a service from its launch until its stop, unless `exits` holds,
  * as for a service whose cwd is missing. Every port listens while `listening` holds, every new port asked for is the
- * next from 41000, and every other command succeeds.
+ * next from 41000, and every other command succeeds. Its relay applies each map as it is written, unless `relay.held`
+ * holds, until `relay.apply()`, and cannot listen on the relay ports `relay.unbindable` names.
  */
 function fakeVm() {
 	const routes: string[][] = [];
+	const targets: Record<string, number>[] = [];
+	const relayMaps: Record<string, number>[] = [];
+	const events: string[] = [];
+	const relay = {
+		held: false,
+		unbindable: new Map<number, string>(),
+		map: { generation: 0, relays: {} as Record<string, number> },
+		status: undefined as string | undefined,
+		apply() {
+			const relays = Object.entries(relay.map.relays);
+			relay.status = JSON.stringify({
+				generation: relay.map.generation,
+				bound: Object.fromEntries(relays.filter(([listen]) => !relay.unbindable.has(Number(listen)))),
+				failed: Object.fromEntries(relays.flatMap(([listen]) => relay.unbindable.has(Number(listen)) ? [[listen, relay.unbindable.get(Number(listen))!]] : [])),
+			});
+		},
+	};
 	const running = new Set<string>();
 	const launches: string[] = [];
 	const scripts = new Map<string, string>();
@@ -28,13 +50,23 @@ function fakeVm() {
 		async enableIngress() {
 			return { url: "http://127.0.0.1:9/" };
 		},
-		setIngressRoutes(set: { prefix: string }[]) {
+		setIngressRoutes(set: { prefix: string; port: number }[]) {
 			routes.push(set.map((route) => route.prefix));
+			targets.push(Object.fromEntries(set.map((route) => [route.prefix, route.port])));
+			events.push(`route ${JSON.stringify(targets.at(-1))}`);
 		},
 		async exec(argv: string[], options: { stdout: Writable }) {
 			const command = argv[3]!;
 			let exitCode = 0;
-			if (command.startsWith("test -e")) exitCode = guest.file === undefined ? 1 : 0;
+			const relayMap = /relays\.json\.new' && mv /.test(command) ? /printf '%s' '([^']*)'/.exec(command) : null;
+			if (relayMap) {
+				relay.map = JSON.parse(relayMap[1]!);
+				relayMaps.push(relay.map.relays);
+				events.push(`map ${JSON.stringify(relay.map.relays)}`);
+				if (!relay.held) relay.apply();
+			}
+			if (command.startsWith("cat ") && command.includes("relay-status.json")) options.stdout.write(relay.status ?? "");
+			else if (command.startsWith("test -e")) exitCode = guest.file === undefined ? 1 : 0;
 			else if (command.includes("connect_ex")) options.stdout.write(guest.listening ? "True\n" : "False\n");
 			else if (command.includes("getsockname")) options.stdout.write(`${nextPort++}\n`);
 			else if (command.startsWith("test -f")) exitCode = running.has(service(command)) ? 0 : 1;
@@ -57,8 +89,163 @@ function fakeVm() {
 			},
 		},
 	};
-	return { vm: vm as unknown as VM, routes, running, launches, scripts, guest };
+	return { vm: vm as unknown as VM, routes, targets, relayMaps, events, relay, running, launches, scripts, guest };
 }
+
+test("every route points at a relay port of Nexus's own, which the relay map carries to the routed port, a port keeps its relay port while it stays routed, and a freed one is taken again first", async (t) => {
+	const dir = await mkdtemp(join(tmpdir(), "nexus-services-"));
+	t.after(() => rm(dir, { recursive: true, force: true }));
+	const fake = fakeVm();
+	const services = new GuestServices(fake.vm, dir, "/workspace/repo/.nexus/services.yaml", "/workspace/repo", "agent", {});
+	t.after(() => services.close());
+	await services.attach(3000);
+	await services.attach(3001);
+	assert.deepEqual(fake.targets.at(-1), { "/port-3000/": 700, "/port-3001/": 701 });
+	assert.deepEqual(fake.relayMaps.at(-1), { 700: 3000, 701: 3001 });
+	await services.detach(3000);
+	assert.deepEqual(fake.targets.at(-1), { "/port-3001/": 701 }, "3001 keeps its relay port");
+	assert.deepEqual(fake.relayMaps.at(-1), { 701: 3001 });
+	const written = fake.relayMaps.length;
+	await services.attach(3001);
+	assert.equal(fake.relayMaps.length, written, "an unchanged map is not written again");
+	await services.attach(3002);
+	assert.deepEqual(fake.relayMaps.at(-1), { 700: 3002, 701: 3001 }, "the lowest free relay port, since its route waits for the relay to confirm it");
+	assert.deepEqual(fake.targets.at(-1), { "/port-3001/": 701, "/port-3002/": 700 });
+	await assert.rejects(services.attach(700), { message: /^Port 700 is Nexus's own/ }, "a relay port is never previewed itself");
+});
+
+test("a route is set only once the relay confirms its relay port carries to its port, and a dropped route goes before the relay hears its relay port is free", async (t) => {
+	const dir = await mkdtemp(join(tmpdir(), "nexus-services-"));
+	t.after(() => rm(dir, { recursive: true, force: true }));
+	const fake = fakeVm();
+	const services = new GuestServices(fake.vm, dir, configPath, "/workspace/repo", "agent", {});
+	t.after(() => services.close());
+	fake.relay.held = true;
+	const attaching = services.attach(3000);
+	while (fake.relayMaps.length === 0) await delay(10);
+	await delay(300);
+	assert.deepEqual(fake.events, ["route {}", 'map {"700":3000}'], "nothing is routed while the relay has not applied the map");
+	fake.relay.apply();
+	await attaching;
+	assert.deepEqual(fake.events.at(-1), 'route {"/port-3000/":700}');
+
+	fake.relay.held = false;
+	fake.events.length = 0;
+	await services.detach(3000);
+	await services.attach(3001);
+	assert.deepEqual(fake.events, ["route {}", "map {}", 'map {"700":3001}', 'route {"/port-3001/":700}'], "700 leaves the ingress before the relay drops it, and is routed again only once the relay carries it to 3001");
+});
+
+test("a status asked while the relay has not confirmed a preview waits for it, and reports the preview unrouted only once the wait gives up", async (t) => {
+	const dir = await mkdtemp(join(tmpdir(), "nexus-services-"));
+	t.after(() => rm(dir, { recursive: true, force: true }));
+	const fake = fakeVm();
+	const services = new GuestServices(fake.vm, dir, configPath, "/workspace/repo", "agent", {});
+	t.after(() => services.close());
+	const fact = { name: "port-3000", state: "ready", port: 3000, declared: false, wantsPreview: true };
+	fake.relay.held = true;
+	const attaching = services.attach(3000);
+	while (fake.relayMaps.length === 0) await delay(10);
+	const began = Date.now();
+	assert.deepEqual(await services.operate("status"), [{
+		...fact,
+		unrouted: "the relay did not confirm its relay port 127.0.0.1:700 within 5 s. Read /var/lib/pi-sandbox/relay.log in the pylon",
+	}], "never an unrouted preview while the relay may still confirm it");
+	assert.ok(Date.now() - began >= 4500, "the status waited out the relay");
+	await attaching;
+	fake.relay.apply();
+	assert.deepEqual(await services.operate("status"), [fact], "a late confirmation routes it");
+	assert.deepEqual(fake.targets.at(-1), { "/port-3000/": 700 });
+});
+
+test("a relay port the relay cannot listen on is never routed, and its preview says why until the relay can", async (t) => {
+	const dir = await mkdtemp(join(tmpdir(), "nexus-services-"));
+	t.after(() => rm(dir, { recursive: true, force: true }));
+	const fake = fakeVm();
+	const services = new GuestServices(fake.vm, dir, configPath, "/workspace/repo", "agent", {});
+	t.after(() => services.close());
+	fake.relay.unbindable.set(700, "[Errno 98] Address already in use");
+	await services.attach(3000);
+	assert.deepEqual(fake.targets.at(-1), {}, "something else holds 700, so the ingress must not reach it");
+	assert.deepEqual(await services.operate("status"), [{
+		name: "port-3000", state: "ready", port: 3000, declared: false, wantsPreview: true,
+		unrouted: "the relay cannot listen on its relay port 127.0.0.1:700: [Errno 98] Address already in use",
+	}]);
+	fake.relay.unbindable.clear();
+	fake.relay.apply();
+	assert.deepEqual(await services.operate("status"), [{ name: "port-3000", state: "ready", port: 3000, declared: false, wantsPreview: true }], "a status reads the relay's again");
+	assert.deepEqual(fake.targets.at(-1), { "/port-3000/": 700 });
+});
+
+test("a declaration that fixes one of Nexus's ports is refused, and a service without a preview takes no route", async (t) => {
+	const root = await mkdtemp(join(tmpdir(), "nexus-services-"));
+	t.after(() => rm(root, { recursive: true, force: true }));
+	const fake = fakeVm();
+	fake.guest.file = declared("  web:\n    command: serve\n    port: 700\n    preview: true\n");
+	const services = new GuestServices(fake.vm, root, configPath, "/workspace/repo", "agent", {});
+	t.after(() => services.close());
+	await services.initialize();
+	await assert.rejects(services.operate("ensure"), /is Nexus's own: sshd's 22, or the preview relay's 700 to 799/);
+	assert.deepEqual(fake.launches, []);
+	assert.throws(() => configSchema.parse({ services: { api: { command: "serve", port: 22 } } }), /is Nexus's own/, "nor can an ad hoc service, whose start the same schema parses");
+	fake.guest.file = declared("  web:\n    command: serve\n    port: 3000\n    preview: true\n  worker:\n    command: work\n    port: 3001\n");
+	await services.operate("ensure");
+	assert.deepEqual(fake.targets.at(-1), { "/web/": 700 }, "worker has no preview, so it needs no relay port");
+});
+
+test("a wake drops restored ports that are Nexus's own and routes the rest, rather than failing", async (t) => {
+	const root = await mkdtemp(join(tmpdir(), "nexus-services-"));
+	t.after(() => rm(root, { recursive: true, force: true }));
+	const logged = t.mock.method(console, "log", () => {});
+	await writeFile(join(root, "linked.json"), JSON.stringify([700, 3000]));
+	await writeFile(join(root, "adhoc.json"), JSON.stringify({ api: { command: "serve", port: 22 }, jobs: { command: "work" } }));
+	await writeFile(join(root, "services.json"), JSON.stringify({ old: { port: 750 } }));
+	const fake = fakeVm();
+	const services = new GuestServices(fake.vm, root, configPath, "/workspace/repo", "agent", {});
+	t.after(() => services.close());
+	await services.initialize();
+	assert.deepEqual(fake.targets.at(-1), { "/port-3000/": 700 });
+	assert.deepEqual(logged.mock.calls.map((call) => call.arguments[0]), [
+		"services: old's saved port 750 is Nexus's own: sshd's 22, or the preview relay's 700 to 799, so it gets another",
+		"services: ad hoc service api is not restored: services.api.port is Nexus's own: sshd's 22, or the preview relay's 700 to 799",
+		"services: linked port 700 is Nexus's own: sshd's 22, or the preview relay's 700 to 799, so it is not routed",
+	]);
+});
+
+test("a port past the relay's 100 is refused before anything is saved, and a wake that restores more than 100 routes 100 and still runs", async (t) => {
+	const root = await mkdtemp(join(tmpdir(), "nexus-services-"));
+	t.after(() => rm(root, { recursive: true, force: true }));
+	const logged = t.mock.method(console, "log", () => {});
+	const fake = fakeVm();
+	const services = new GuestServices(fake.vm, root, configPath, "/workspace/repo", "agent", {});
+	t.after(() => services.close());
+	for (let port = 3000; port < 3100; port++) await services.attach(port);
+	const full = /because every relay port from 700 to 799 serves another preview\. Unpublish one first/;
+	await assert.rejects(services.attach(3100), { message: new RegExp(`^Port 3100 cannot be previewed, ${full.source}`) });
+	assert.equal(JSON.parse(await readFile(join(root, "linked.json"), "utf8")).length, 100, "3100 was not saved");
+	assert.equal(Object.keys(fake.targets.at(-1)!).length, 100);
+	fake.guest.file = declared("  web:\n    command: serve\n    port: 3200\n    preview: true\n");
+	await assert.rejects(services.operate("ensure"), { message: new RegExp(`^Port 3200 cannot be previewed, ${full.source}`) });
+	assert.equal(JSON.parse(await readFile(join(root, "services.json"), "utf8")).web, undefined, "web was not saved");
+	await services.close();
+
+	await writeFile(join(root, "linked.json"), JSON.stringify(Array.from({ length: 101 }, (_, i) => 3000 + i)));
+	const woken = fakeVm();
+	const again = new GuestServices(woken.vm, root, configPath, "/workspace/repo", "agent", {});
+	t.after(() => again.close());
+	await again.initialize();
+	assert.equal(Object.keys(woken.targets.at(-1)!).length, 100);
+	assert.equal(woken.targets.at(-1)!["/port-3100/"], undefined);
+	assert.ok(logged.mock.calls.some((call) => call.arguments[0] === "services: port 3100 is not routed, because every relay port from 700 to 799 serves another preview"));
+	assert.equal(
+		(await again.operate("status")).find((fact) => fact.port === 3100)?.unrouted,
+		"the preview has no relay port, because every relay port from 700 to 799 serves another preview. Unpublish another preview to free one",
+		"its URL would answer 404, so it is not ready",
+	);
+	await again.detach(3000);
+	assert.equal(woken.targets.at(-1)!["/port-3100/"], 700, "it takes the next relay port freed");
+	assert.equal((await again.operate("status")).find((fact) => fact.port === 3100)?.unrouted, undefined);
+});
 
 test("a reserved port is refused, and a linked port is saved before it is acknowledged, so a retry after a failed save saves it, and a fresh boot routes it again", async (t) => {
 	const root = await mkdtemp(join(tmpdir(), "nexus-services-"));
@@ -127,7 +314,7 @@ test("a port a service's preview owns is refused, naming the service, and stays 
 	assert.equal(await services.detach(3000), "Port 3000 is the preview of service web, not a linked port. An ad hoc service keeps its preview");
 	assert.deepEqual(Object.keys(services.urls()), ["web"]);
 	assert.equal(await services.detach(3001), null);
-	assert.deepEqual(routes.at(-1), ["/web/", "/worker/"], "a service's port without a preview has nothing to unlink");
+	assert.deepEqual(routes.at(-1), ["/web/"], "a service's port without a preview has nothing to unlink, nor a route");
 });
 
 test("a port whose linked name a service holds is refused, so its caller leaves that service's preview alone", async (t) => {
@@ -265,4 +452,58 @@ test("an unpreview sent to the controller during an ensure of a service that nev
 	assert.deepEqual(((await ensure) as { state: string }[]).map((f) => f.state), ["starting"]);
 	assert.deepEqual(await unpreview, { refused: "Port 3000 is the preview of service web, not a linked port. Remove the preview from /workspace/repo/.nexus/services.yaml to unpublish it" });
 	assert.ok(Date.now() - began < 5000, "neither waited for the service's 30 s timeout");
+});
+
+/** What the guest's health check prints for the port, and the path if given, and how long it took. */
+function answers(port: number, path?: string): Promise<{ answer: string; ms: number }> {
+	const began = Date.now();
+	return new Promise((accept, reject) =>
+		execFile("python3", ["-c", answersScript, String(port), ...(path === undefined ? [] : [path])], (error, stdout) =>
+			error ? reject(error) : accept({ answer: stdout.trim(), ms: Date.now() - began })),
+	);
+}
+/** Answers 200, 302 or 503 by path, and 421 to a Host that is not its own address, as Vite's host check would. */
+async function healthServer(host: string): Promise<Server & { port: number; hosts: string[] }> {
+	const hosts: string[] = [];
+	const server = createHttpServer((req, res) => {
+		hosts.push(req.headers.host ?? "");
+		const own = host.includes(":") ? `[${host}]:${port}` : `${host}:${port}`;
+		res.statusCode = req.headers.host !== own ? 421 : req.url === "/ok" ? 200 : req.url === "/moved" ? 302 : 503;
+		res.end();
+	});
+	await new Promise<void>((accept, reject) => server.once("error", reject).listen(0, host, accept));
+	const port = (server.address() as { port: number }).port;
+	return Object.assign(server, { port, hosts });
+}
+
+test("the health check asks the port itself on 127.0.0.1 or else ::1, as its own Host, wants a 2xx or 3xx, and gives up after 2 s in all", async (t) => {
+	const v6 = await healthServer("::1");
+	const v4 = await healthServer("127.0.0.1");
+	// Sends its status line a byte at a time, each well within a socket timeout, and never finishes.
+	const trickle = createTcpServer((socket) => {
+		const bytes = Buffer.from("HTTP/1.1 200 OK\r\nX-Slow: " + "y".repeat(100));
+		let sent = 0;
+		const timer = setInterval(() => sent < bytes.length ? socket.write(bytes.subarray(sent, ++sent)) : socket.end(), 300);
+		socket.on("close", () => clearInterval(timer)).on("error", () => {});
+	});
+	await new Promise<void>((accept) => trickle.listen(0, "127.0.0.1", accept));
+	t.after(() => {
+		v6.close();
+		v4.close();
+		trickle.close();
+	});
+	const slow = (trickle.address() as { port: number }).port;
+
+	assert.equal((await answers(v6.port)).answer, "True", "a port on ::1 alone listens");
+	assert.equal((await answers(v6.port, "/ok")).answer, "True");
+	assert.equal((await answers(v6.port, "/moved")).answer, "True", "a redirect is not followed, and counts as healthy");
+	assert.equal((await answers(v6.port, "/down")).answer, "False");
+	assert.deepEqual(new Set(v6.hosts), new Set([`[::1]:${v6.port}`]), "it asked ::1 as its own Host");
+	assert.equal((await answers(v4.port, "/ok")).answer, "True");
+	assert.deepEqual(new Set(v4.hosts), new Set([`127.0.0.1:${v4.port}`]));
+	const { answer, ms } = await answers(slow, "/");
+	assert.equal(answer, "False", "a response that trickles in is not healthy");
+	assert.ok(ms < 3500, `it gave up after 2 s, not each socket read's, but took ${ms} ms`);
+	v6.close();
+	assert.equal((await answers(v6.port)).answer, "False", "a port nothing listens on does not");
 });

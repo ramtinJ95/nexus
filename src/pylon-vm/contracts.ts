@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { reservedPortMessage, reservedPorts } from "../project.ts";
 
 const nameSchema = z.string().regex(/^[a-z][a-z0-9-]{0,39}$/);
 const guestPath = z
@@ -46,7 +47,7 @@ const previewSchema = z.union([
 const serviceSchema = z.strictObject({
 	command: z.string().min(1),
 	cwd,
-	port: z.number().int().min(1).max(65535).optional(),
+	port: z.number().int().min(1).max(65535).refine((port) => !reservedPorts.has(port), reservedPortMessage).optional(),
 	env: z
 		.record(z.string().regex(/^[A-Za-z_][A-Za-z0-9_]*$/), z.string())
 		.default({})
