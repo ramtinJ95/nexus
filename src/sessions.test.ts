@@ -1,3 +1,4 @@
+import { seedClaudeState } from "./claude-state.ts";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { attachedTerminals, attachScript, closeSession, dropFailedSession, openSession, pausedSessionsIn, recordSessions, relaunchSessions, sessionFacts, sessionsFile, type RelaunchOutcome, type SessionRecord } from "./sessions.ts";
@@ -20,8 +21,10 @@ const transcriptLookup = (argv: readonly string[], exists: boolean): ExecReply |
  * A Herdr server that is up, with `overrides` keyed by subcommand such as "agent start". Claude Code
  * transcripts exist unless `transcripts` is false.
  */
-function herdrUp(overrides: Record<string, (argv: readonly string[]) => ExecReply> = {}, transcripts = true) {
+function herdrUp(overrides: Record<string, (argv: readonly string[]) => ExecReply> = {}, transcripts = true, submitted = true) {
   return fakeGuest((argv, herdr) => {
+    if (argv[2] === seedClaudeState) return { exitCode: 0, output: "" };
+    if (!herdr && argv[3] === "claude-submitted") return { exitCode: submitted ? 0 : 1, output: "" };
     if (!herdr && argv.at(-1) === sessionsFile) return { exitCode: 3, output: "" };
     if (!herdr) return transcriptLookup(argv, transcripts) ?? assert.fail(`unexpected exec ${argv.join(" ")}`);
     const sub = argv.slice(0, 2).join(" ");
@@ -113,6 +116,7 @@ test("a pane whose shell is still starting is retried until the agent starts", a
 test("opening a session starts a detached Herdr server when none runs", async () => {
   let running = false;
   const guest = fakeGuest((argv, herdr) => {
+    if (argv[2] === seedClaudeState) return { exitCode: 0, output: "" };
     if (!herdr) {
       assert.deepEqual(argv, ["sh", "-c", "setsid -f tini -s -- herdr --session nexus server </dev/null >/dev/null 2>&1"]);
       running = true;
@@ -221,6 +225,7 @@ test("recording with no Herdr server leaves the last sessions file in place", as
 
 function withSessionsFile(records: readonly SessionRecord[] | null, herdr: (argv: readonly string[]) => ExecReply) {
   return fakeGuest((argv, isHerdr) => {
+    if (argv[2] === seedClaudeState) return { exitCode: 0, output: "" };
     if (isHerdr) return herdr(argv);
     const lookup = transcriptLookup(argv, true);
     if (lookup) return lookup;
@@ -326,6 +331,7 @@ function pylon(records: readonly SessionRecord[], panes: FakePane[], refuse: (ar
   let next = 20;
   const flag = (argv: readonly string[], name: string) => argv[argv.indexOf(name) + 1]!;
   const guest = fakeGuest((argv, herdr) => {
+    if (argv[2] === seedClaudeState) return { exitCode: 0, output: "" };
     if (!herdr && argv.at(-1) === sessionsFile) {
       const last = guest.written.findLast((f) => f.path === sessionsFile)?.content;
       return { exitCode: 0, output: last ?? JSON.stringify({ version: 1, recordedAt: "2027-01-01T00:00:00Z", sessions: records, failed: [] }) };
@@ -471,6 +477,7 @@ test("dropping a failed session in no pane removes it from the sessions file, so
 
 test("attached terminals are the guest's Herdr clients of the session, and a guest that cannot be counted rejects", async () => {
   const counting = (reply: ExecReply) => fakeGuest((argv, herdr) => {
+    if (argv[2] === seedClaudeState) return { exitCode: 0, output: "" };
     assert.ok(!herdr);
     assert.deepEqual(argv, ["pgrep", "-c", "-x", "-f", "herdr --session nexus"], "a client's whole command line, so the server and Herdr's own subcommands are left out");
     return reply;
@@ -491,6 +498,33 @@ test("a worker's initial slash prompt is one literal Claude argument, not termin
   const prompt = '/poteto-mode fix "quotes" and $(not-a-shell-command)\nthen test';
   await openSession(guest, { harness: "claude-code", title: "worker", cwd: "/home/user/workspace/repo", prompt });
   const start = guest.execs.find((a) => a[3] === "agent")!;
-  assert.deepEqual(start.slice(-3), ["--permission-mode", "bypassPermissions", prompt]);
+  assert.deepEqual(start.slice(-5, -3), ["--permission-mode", "bypassPermissions"]);
+  assert.equal(start.at(-1), prompt);
+  assert.ok(guest.execs.some((a) => a[3] === "claude-submitted"));
   assert.equal(guest.execs.some((a) => a.includes("send-text") || a.includes("send-keys")), false);
+});
+
+
+test("a worker without prompt submission stalls and leaves its visible pane for takeover", async () => {
+  const guest = herdrUp({ "pane read": () => herdrOk({ read: { text: "Choose the text style" } }) }, true, false);
+  await assert.rejects(openSession(guest, { harness: "claude-code", title: "worker", cwd: "/home/user/workspace/repo", prompt: "hello" }), /Claude launch stalled.*Choose the text style/s);
+  assert.equal(guest.herdrCalls().includes("workspace close"), false);
+  assert.equal(guest.herdrCalls().filter((c) => c === "agent start").length, 1);
+});
+
+test("Claude user state merges onboarding, trust and bypass acceptance without losing login or hooks", async (t) => {
+  const { mkdtemp, mkdir, writeFile, readFile, rm } = await import("node:fs/promises");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const { execFileSync } = await import("node:child_process");
+  const home = await mkdtemp(join(tmpdir(), "nexus-claude-state-"));
+  t.after(() => rm(home, { recursive: true, force: true }));
+  await mkdir(join(home, ".claude"));
+  const original = { oauthAccount: { accountUuid: "keep" }, projects: { [home]: { allowedTools: ["Read"] }, "/elsewhere": { hasTrustDialogAccepted: false } } };
+  const settings = { theme: "light", hooks: { Stop: [{ hooks: [{ command: "keep" }] }] }, enabledPlugins: { pstack: true } };
+  await writeFile(join(home, ".claude.json"), JSON.stringify(original));
+  await writeFile(join(home, ".claude/settings.json"), JSON.stringify(settings));
+  for (let i = 0; i < 2; i++) execFileSync("node", ["-e", seedClaudeState, home], { env: { ...process.env, HOME: home } });
+  assert.deepEqual(JSON.parse(await readFile(join(home, ".claude.json"), "utf8")), { ...original, hasCompletedOnboarding: true, projects: { ...original.projects, [home]: { allowedTools: ["Read"], hasTrustDialogAccepted: true } } });
+  assert.deepEqual(JSON.parse(await readFile(join(home, ".claude/settings.json"), "utf8")), { ...settings, skipDangerousModePermissionPrompt: true });
 });

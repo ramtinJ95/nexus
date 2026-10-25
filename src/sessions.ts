@@ -15,6 +15,7 @@
  * what is missing, so it converges whatever Herdr restored first.
  */
 import { createHash, randomUUID } from "node:crypto";
+import { seedClaudeState } from "./claude-state.ts";
 import type { Guest } from "./backend.ts";
 import type { HerdrStatus, PausedSession, SessionFact, SessionIdentity } from "./protocol.ts";
 import type { SessionHarness } from "./project.ts";
@@ -122,8 +123,9 @@ export async function openSession(guest: Guest, session: { harness: SessionHarne
   const workspaceId = string(record(created.workspace, "workspace create .workspace").workspace_id, "workspace_id");
   const pane = string(record(created.root_pane, "workspace create .root_pane").pane_id, "pane_id");
   try {
-    await startHarness(guest, pane, session.harness, session.resume, session.prompt);
+    await startHarness(guest, pane, session.harness, session.resume, session.prompt, session.cwd);
   } catch (err) {
+    if (err instanceof ClaudeLaunchStalled) throw err;
     try {
       await herdr(guest, ["workspace", "close", workspaceId]);
     } catch (cleanup) {
@@ -135,24 +137,33 @@ export async function openSession(guest: Guest, session: { harness: SessionHarne
 }
 
 /** Starts the harness's agent in a pane at its shell prompt, and returns once Herdr reports it ready. */
-async function startHarness(guest: Guest, pane: string, harness: SessionHarness, resume: string | undefined, prompt?: string): Promise<void> {
+async function startHarness(guest: Guest, pane: string, harness: SessionHarness, resume: string | undefined, prompt?: string, cwd = checkoutDir): Promise<void> {
   const agent = agents[harness];
   if (agent === null) return;
+  if (harness === "claude-code") {
+    const seeded = await guest.exec(["node", "-e", seedClaudeState, cwd], { cwd: home, timeoutMs: callTimeoutMs });
+    if (seeded.exitCode !== 0) throw new Error(`seeding Claude state failed: ${seeded.output}`);
+  }
+  const receipt = `${home}/.nexus/claude-submitted-${randomUUID()}`;
   const argv = ["agent", "start", `nx-${randomUUID().slice(0, 8)}`, "--kind", agent.kind, "--pane", pane, "--timeout", String(agentStartTimeoutMs)];
   const args = resume === undefined ? agent.fresh() : await agent.resume(guest, resume);
   const launch = [...args];
   if (harness === "claude-code") launch.push("--permission-mode", "bypassPermissions");
+  if (harness === "claude-code" && prompt !== undefined) {
+    const command = `mkdir -p ${home}/.nexus && touch ${receipt}`;
+    launch.push("--settings", JSON.stringify({ hooks: { UserPromptSubmit: [{ hooks: [{ type: "command", command }] }] } }));
+  }
   if (prompt !== undefined) launch.push(prompt);
   if (launch.length > 0) argv.push("--", ...launch);
   const busyUntil = Date.now() + paneBusyRetryMs;
   for (;;) {
     try {
       await herdr(guest, argv, agentStartTimeoutMs + callTimeoutMs);
-      return;
+      break;
     } catch (err) {
       // Blocked at startup, such as Claude Code asking whether to trust the folder: the session is open
       // and waits for its human, who answers it in the terminal.
-      if (err instanceof HerdrError && err.code === "agent_not_ready") return;
+      if (err instanceof HerdrError && err.code === "agent_not_ready") break;
       if (err instanceof HerdrError && err.code === "agent_pane_busy" && Date.now() < busyUntil) {
         await new Promise((resolve) => setTimeout(resolve, 100));
         continue;
@@ -161,7 +172,13 @@ async function startHarness(guest: Guest, pane: string, harness: SessionHarness,
       throw new Error(`${(err as Error).message}. The pane showed:\n${await screen(guest, pane)}`, { cause: err });
     }
   }
+  if (harness === "claude-code" && prompt !== undefined) {
+    const submitted = await guest.exec(["sh", "-c", 'i=0; until test -f "$1"; do i=$((i+1)); test "$i" -lt 300 || exit 1; sleep 0.1; done; rm -f "$1"', "claude-submitted", receipt], { cwd: home, timeoutMs: 35_000 });
+    if (submitted.exitCode !== 0) throw new ClaudeLaunchStalled(`Claude launch stalled: no UserPromptSubmit within 30 seconds; attach before starting another session. The pane showed:\n${await screen(guest, pane)}`);
+  }
 }
+
+export class ClaudeLaunchStalled extends Error {}
 
 /** Diagnostic only, so it never throws over the failure it explains. */
 async function screen(guest: Guest, pane: string): Promise<string> {
@@ -169,7 +186,7 @@ async function screen(guest: Guest, pane: string): Promise<string> {
     const { output } = await guest.exec(["herdr", "--session", herdrSession, "pane", "read", pane, "--source", "recent-unwrapped", "--lines", "20"], { cwd: home, timeoutMs: callTimeoutMs });
     const line = output.trimEnd().split("\n").findLast((l) => l.startsWith("{"));
     const text: unknown = line === undefined ? undefined : JSON.parse(line).result?.read?.text;
-    return typeof text === "string" ? text.trimEnd() : output.trimEnd();
+    return typeof text === "string" ? text.trimEnd().slice(-8192) : output.trimEnd().slice(-8192);
   } catch (err) {
     return `(the pane could not be read: ${(err as Error).message})`;
   }
@@ -317,7 +334,7 @@ export async function relaunchSessions(guest: Guest): Promise<readonly RelaunchO
       if (pane && (agent === null ? pane.harness === "shell" : await runsAgent(guest, pane.herdrPane, agent.kind))) {
         outcomes.push({ record: r, result: "present", herdrPane: pane.herdrPane });
       } else if (pane) {
-        await startHarness(guest, pane.herdrPane, r.harness, resume);
+        await startHarness(guest, pane.herdrPane, r.harness, resume, undefined, r.cwd);
         outcomes.push({ record: r, result: "relaunched", herdrPane: pane.herdrPane });
       } else {
         const herdrPane = await openSession(guest, { harness: r.harness, title: r.title, cwd: r.cwd, ...(resume === undefined ? {} : { resume }) });
