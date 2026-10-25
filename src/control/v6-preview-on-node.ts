@@ -118,13 +118,19 @@ const reaches = (state: string, timeoutMs: number) => until(`the pylon is ${stat
   return d.pylon.actualState === state ? d : undefined;
 });
 
-/** Sends `bash: <command>`, which the scripted model turns into one bash call, and returns that call's result. */
+const stepLimitS = 90;
+/**
+ * Sends `bash: <command>`, which the scripted model turns into one bash call, and returns that call's result. The
+ * command runs under `timeout`, so one that hangs ends the agent's turn after stepLimitS and fails the check by name.
+ */
 async function runTool(requestId: string, command: string): Promise<string> {
   const results = async () => ((await expect(200, "GET", `/threads/${threadId}/conversation`)).entries as { kind: string }[]).filter((e) => e.kind === "pi.tool-result").map((e) => JSON.stringify(e));
   const seen = (await results()).length;
-  await expect(202, "POST", `/threads/${threadId}/messages`, { text: `bash: ${command}`, requestId });
-  const result = await until("the tool result is in the conversation", 6 * 60_000, async () => (await results())[seen]);
+  const bounded = `timeout ${stepLimitS} bash -c '${command.replaceAll("'", "'\\''")}'; code=$?; if [ $code = 124 ]; then echo "STEP TIMED OUT"; fi`;
+  await expect(202, "POST", `/threads/${threadId}/messages`, { text: `bash: ${bounded}`, requestId });
+  const result = await until(`the result of ${requestId} is in the conversation`, (stepLimitS + 60) * 1000, async () => (await results())[seen]);
   await until("the run ends", 60_000, async () => (await detail()).thread.agentTurnRunning ? undefined : true);
+  if (result.includes("STEP TIMED OUT")) throw new Error(`${requestId} ran past ${stepLimitS} s: ${result}`);
   return result;
 }
 
@@ -155,12 +161,19 @@ const startServers = [
   "sleep 2; echo started",
 ].join("\n");
 /** Stops the ::1 server and binds its port on 0.0.0.0 as soon as it is gone, printing the bind's outcome. */
+/** The kernel's LISTEN entry for [::1]:port in /proc/net/tcp6, as listening.ts reads it. */
+const v6Listener = (port: number) => `00000000000000000000000001000000:${port.toString(16).toUpperCase().padStart(4, "0")} [0-9A-F]+:[0-9A-F]{4} 0A `;
+/**
+ * Stops the ::1 server and binds its port on 0.0.0.0 as soon as its ::1 listener is gone, printing the bind's outcome.
+ * It waits on the listener, not the process, which may linger as a zombie nothing reaps.
+ */
 const moveServer = [
-  "pid=$(cat /tmp/v6.pid); kill $pid; while kill -0 $pid 2>/dev/null; do sleep 0.05; done",
+  "kill $(cat /tmp/v6.pid)",
+  `for i in $(seq 1 100); do grep -Eq '${v6Listener(v6.port)}' /proc/net/tcp6 || break; sleep 0.1; done`,
+  `if grep -Eq '${v6Listener(v6.port)}' /proc/net/tcp6; then echo "the ::1 listener on ${v6.port} is still up 10 s after its kill"; exit 1; fi`,
   `setsid nohup node -e "require('http').createServer((q,r)=>r.end('moved-ok')).listen(${v6.port},'0.0.0.0',()=>console.log('bound 0.0.0.0')).on('error',(e)=>console.log('bind failed '+e.code))" </dev/null >/tmp/moved.log 2>&1 &`,
   "sleep 2; cat /tmp/moved.log",
 ].join("\n");
-/** A declared service that listens on ::1 only, delayS seconds after each start, with a health check through its route. */
 /**
  * Two declared services without previews that listen only on ::1. slow6 listens delayS seconds after each start, and
  * has a health path. gone6 listens at its first start only, and has the default health, a connection.
