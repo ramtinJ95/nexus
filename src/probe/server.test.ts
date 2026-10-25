@@ -10,8 +10,8 @@ import { Readable } from "node:stream";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { startProbe, type Probe, type ProbeOptions } from "./server.ts";
-import { connectProbe, fetchArtifact, jobDeadlineMs, type ByteStream, type DeclaredOutput, type Job, type JobEnvelope, type JobId, type JobStatus, type LiveHash, type NodeName, type ProbeEvent, type PylonId, type ServiceFact, type TailnetNodeId } from "../protocol.ts";
-import { envelope } from "../reconcile.ts";
+import { connectProbe, fetchArtifact, jobDeadlineMs, type ByteStream, type DeclaredOutput, type GitFacts, type Job, type JobEnvelope, type JobId, type JobStatus, type LiveHash, type NodeName, type ProbeEvent, type PylonId, type ServiceFact, type TailnetNodeId } from "../protocol.ts";
+import { envelope, ingest } from "../reconcile.ts";
 import { processStream } from "../process-stream.ts";
 import type { BackendPylon, Guest, VmBackend } from "../backend.ts";
 import { fakeTailscale, nodeHost, viaGateway } from "./fake-tailscale.ts";
@@ -986,4 +986,152 @@ test("after a probe restart a paused pylon keeps its preview, and a hit gets the
   assert.match(page.body, /http-equiv="refresh"/);
   const hit = (await events.next()).value;
   assert.ok(hit?.type === "preview-hit" && hit.pylonId === pylonId && hit.service === "web");
+});
+
+test("probe git observations derive pushed-branch outputs and bound reads across snapshots and failures", async (t) => {
+  let now = Date.now();
+  t.mock.method(Date, "now", () => now);
+  let reads = 0;
+  let readable = true;
+  const facts: GitFacts = { head: "a".repeat(40), branch: "agent-deploys", dirty: true, branches: [{ name: "agent-deploys", head: "a".repeat(40), pushedAs: "origin/agent-deploys" }] };
+  const guest = fakeGuest((argv, herdr) => {
+    if (argv[0] === "python3" && argv[2]?.includes("for-each-ref")) {
+      reads++;
+      return readable ? { exitCode: 0, output: JSON.stringify(facts) } : { exitCode: null, output: "" };
+    }
+    if (herdr) return herdrOk(herdrSnapshot([], []));
+    if (argv.at(-1) === sessionsFile) return { exitCode: 3, output: "" };
+    if (argv[2]?.includes(outputsDir)) return { exitCode: 0, output: "" };
+    return { exitCode: 1, output: "" };
+  });
+  const logged: string[] = [];
+  const { client, fake } = await setup(t, { log: (line) => logged.push(line) }, guest);
+  fake.pylons.set(pylonId, { pylonId, vm: "running", checkpoint: null, image, bootedAt: "2027-01-01T00:00:00Z" });
+  const snapshot = async () => {
+    for await (const event of client.observe(AbortSignal.timeout(5000))) {
+      assert.equal(event.type, "snapshot");
+      if (event.type === "snapshot") return event;
+    }
+    return assert.fail("missing snapshot");
+  };
+  const first = await snapshot();
+  const p = first.observation.pylons[0]!;
+  assert.ok(p.phase === "running");
+  assert.deepEqual(p.git, facts);
+  assert.equal(reads, 1);
+  const outputs = ingest(first, node, new Map([[pylonId, "absent"]]), now).filter((w) => w.record === "output");
+  assert.deepEqual(outputs, [
+    { record: "output", pylonId, kind: "branch", ref: "origin/agent-deploys" },
+    { record: "output", pylonId, kind: "diff", ref: facts.head },
+  ]);
+  await snapshot();
+  assert.equal(reads, 1, "reconnecting observers reuse the same bounded read");
+  readable = false;
+  now += 60_000;
+  const failed = (await snapshot()).observation.pylons[0]!;
+  assert.ok(failed.phase === "running");
+  assert.equal(failed.git, null);
+  assert.deepEqual(failed.sessions, []);
+  await snapshot();
+  assert.equal(reads, 2, "failures are cached too");
+  now += 60_000;
+  await snapshot();
+  assert.equal(reads, 3);
+  assert.equal(logged.filter((line) => line.includes(" git:")).length, 1, "persistent failures log only once");
+  fake.pylons.set(pylonId, { pylonId, vm: "stopped", checkpoint: null, image, bootedAt: null, sessions: null });
+  await snapshot();
+  assert.equal(reads, 3, "paused pylons are not read or woken");
+  readable = true;
+  fake.pylons.set(pylonId, { pylonId, vm: "running", checkpoint: null, image, bootedAt: "2027-01-01T00:01:00Z" });
+  const resumed = (await snapshot()).observation.pylons[0]!;
+  assert.ok(resumed.phase === "running");
+  assert.deepEqual(resumed.git, facts);
+  assert.equal(reads, 4, "a wake invalidates the cache");
+  now += 60_000;
+  readable = false;
+  await snapshot();
+  assert.equal(logged.filter((line) => line.includes(" git:")).length, 2, "a recovered read allows a later failure to be logged");
+});
+
+test("stalled controller RPCs cannot hold healthy pylon facts or pile up behind later snapshots", async (t) => {
+  const stalled = "pylon-stalled" as PylonId;
+  const gitStalled = "pylon-git-stalled" as PylonId;
+  const facts: GitFacts = { head: "a".repeat(40), branch: "main", dirty: false, branches: [] };
+  const healthy = fakeGuest((argv, herdr) => {
+    if (argv[0] === "python3") return { exitCode: 0, output: JSON.stringify(facts) };
+    if (herdr) return herdrOk(herdrSnapshot([], []));
+    if (argv.at(-1) === sessionsFile) return { exitCode: 3, output: "" };
+    if (argv[0] === "pgrep") return { exitCode: 1, output: "0\n" };
+    return { exitCode: 0, output: "" };
+  });
+  healthy.services = async () => ({ services: [] });
+  const gate = Promise.withResolvers<void>();
+  t.after(() => gate.resolve());
+  let blockedCalls = 0;
+  let gitCalls = 0;
+  let recovering = false;
+  const blocked: Guest = {
+    ...healthy,
+    async exec(argv, opts) { blockedCalls++; await gate.promise; return healthy.exec(argv, opts); },
+    async services() { blockedCalls++; await gate.promise; return { services: [] }; },
+  };
+  const gitBlocked: Guest = {
+    ...healthy,
+    async exec(argv, opts) {
+      if (argv[0] === "python3") { gitCalls++; await gate.promise; }
+      return healthy.exec(argv, opts);
+    },
+  };
+  const fake = fakeBackend();
+  for (const id of [pylonId, stalled, gitStalled]) fake.pylons.set(id, { pylonId: id, vm: "running", checkpoint: null, image, bootedAt: "2027-01-01T00:00:00Z" });
+  const { client } = await setup(t, {
+    backend: { ...fake.backend, guest: (id) => recovering ? healthy : id === stalled ? blocked : id === gitStalled ? gitBlocked : healthy },
+    listeningPollMs: 60_000, log: () => {},
+  });
+  const snapshot = async () => {
+    for await (const event of client.observe(AbortSignal.timeout(8000))) {
+      assert.ok(event.type === "snapshot");
+      return event.observation.pylons;
+    }
+    return assert.fail("missing snapshot");
+  };
+  const started = performance.now();
+  const first = await snapshot();
+  assert.ok(performance.now() - started < 7500, "all fact deadlines run in parallel, not sequentially or for 180 seconds");
+  const good = first.find((p) => p.pylonId === pylonId)!;
+  assert.ok(good.phase === "running");
+  assert.deepEqual(good.git, facts);
+  const bad = first.find((p) => p.pylonId === stalled)!;
+  assert.ok(bad.phase === "running");
+  assert.equal(bad.git, null);
+  assert.equal(bad.services, null);
+  assert.equal(bad.sessions, null);
+  const partial = first.find((p) => p.pylonId === gitStalled)!;
+  assert.ok(partial.phase === "running");
+  assert.equal(partial.git, null);
+  assert.deepEqual(partial.sessions, []);
+  assert.deepEqual(partial.services, []);
+  assert.equal(blockedCalls, 7);
+  assert.equal(gitCalls, 1);
+  // Expire the Git cache and change the healthy facts while the underlying RPCs are still stuck.
+  t.mock.method(Date, "now", () => Date.parse("2099-01-01T00:00:00Z"));
+  facts.dirty = true;
+  const secondStart = performance.now();
+  const second = await snapshot();
+  assert.ok(performance.now() - secondStart < 2000, "a later snapshot is not queued behind timed-out controller calls");
+  const next = second.find((p) => p.pylonId === pylonId)!;
+  assert.ok(next.phase === "running");
+  assert.equal(next.git?.dirty, true);
+  assert.equal(blockedCalls, 7);
+  assert.equal(gitCalls, 1, "even an expired Git cache cannot start another outstanding controller RPC");
+  gate.resolve();
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  const late = (await snapshot()).find((p) => p.pylonId === gitStalled)!;
+  assert.ok(late.phase === "running");
+  assert.equal(late.git, null, "late replies do not overwrite the timed-out snapshot or its cache");
+  recovering = true;
+  fake.pylons.set(stalled, { ...fake.pylons.get(stalled)!, bootedAt: "2027-01-01T00:01:00Z" });
+  const recovered = (await snapshot()).find((p) => p.pylonId === stalled)!;
+  assert.ok(recovered.phase === "running");
+  assert.deepEqual(recovered.git, facts);
 });

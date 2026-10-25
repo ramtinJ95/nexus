@@ -14,13 +14,14 @@ import type { PortableArtifactId } from "../images.ts";
 import {
   artifactHeaders, encodeProbeEvent, encodeSubmitReply, fetchArtifact, jobDeadlineMs, probePort, jobSubject, parseJobEnvelope, parsePylonCommand, parseStreamRequest, routeAuth, serveByteStream, streamUpgradeResponse,
   type Job, type JobEnvelope, type JobId, type JobStatus, type LiveHash, type NodeName, type NodeObservation,
-  type DeclaredOutput, type ListeningFact, type ProbeAuthConfig, type ProbeEvent, type PylonCommand, type PylonId, type PylonObservation, type ServiceFact, type SessionFact, type Subject,
+  type DeclaredOutput, type GitFacts, type ListeningFact, type ProbeAuthConfig, type ProbeEvent, type PylonCommand, type PylonId, type PylonObservation, type ServiceFact, type SessionFact, type Subject,
 } from "../protocol.ts";
 import type { ServiceName } from "../project.ts";
 import { attachedTerminals, sessionFacts } from "../sessions.ts";
 import type { Whois } from "../tailscale.ts";
 import { listOutputs } from "../outputs.ts";
 import { listeningFacts } from "../listening.ts";
+import { gitFacts } from "../git-facts.ts";
 import { startGateway } from "./gateway.ts";
 import { createPylonApi, type HostBridge } from "./pylon-api.ts";
 import { createTailscaleServe, parseServeStatus, readRoutes, type HttpsGet, type TailscaleCli } from "./serve.ts";
@@ -69,6 +70,7 @@ const maxBodyBytes = 1 << 20;
 const sessionReadTimeoutMs = 3_000;
 /** Longer, because a pylon's supervisor checks each service's health to answer. */
 const serviceReadTimeoutMs = 5_000;
+const gitPollMs = 60_000;
 
 /** A probe without a preview gateway. An empty set is already converged. */
 const noPreviews: ProbeDeps["serve"] = {
@@ -168,13 +170,31 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
     return [...jobs.values()].map((job) => job.status);
   }
 
+  // Keep timed-out reads registered until the controller answers, so later snapshots cannot pile up RPCs.
+  const factReads = new Map<string, Promise<unknown>>();
+  async function readFact<T>(pylonId: PylonId, kind: string, timeoutMs: number, read: () => Promise<T>): Promise<T> {
+    const key = `${pylonId}:${kind}`;
+    if (factReads.has(key)) throw new Error(`${kind} read is still outstanding`);
+    const pending = Promise.resolve().then(read);
+    factReads.set(key, pending);
+    void pending.then(() => factReads.delete(key), () => factReads.delete(key));
+    let timer: NodeJS.Timeout | undefined;
+    try {
+      return await Promise.race([pending, new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new Error(`${kind} read exceeded ${timeoutMs} ms`)), timeoutMs);
+      })]);
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
   /**
    * Costs one guest exec (`herdr api snapshot`) per running pylon per snapshot, so a snapshot waits for the
    * slowest pylon, up to sessionReadTimeoutMs. A failed read reports null, never "no sessions".
    */
   async function sessions(pylonId: PylonId): Promise<readonly SessionFact[] | null> {
     try {
-      return await sessionFacts(backend.guest(pylonId), sessionReadTimeoutMs);
+      return await readFact(pylonId, "sessions", sessionReadTimeoutMs, () => sessionFacts(backend.guest(pylonId), sessionReadTimeoutMs));
     } catch {
       return null;
     }
@@ -188,7 +208,7 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
    */
   async function attached(pylonId: PylonId): Promise<number> {
     try {
-      const count = await attachedTerminals(backend.guest(pylonId), sessionReadTimeoutMs);
+      const count = await readFact(pylonId, "attached", sessionReadTimeoutMs, () => attachedTerminals(backend.guest(pylonId), sessionReadTimeoutMs));
       uncounted.delete(pylonId);
       return count;
     } catch (err) {
@@ -200,13 +220,9 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
 
   /** A failed or late read reports null, never "no services", and is logged. */
   async function services(pylonId: PylonId): Promise<readonly ServiceFact[] | null> {
-    let timer: NodeJS.Timeout | undefined;
-    const late = new Promise<never>((_, reject) => {
-      timer = setTimeout(() => reject(new Error(`no answer within ${serviceReadTimeoutMs} ms`)), serviceReadTimeoutMs);
-    });
     const since = diverged.get(pylonId);
     try {
-      const facts = (await Promise.race([backend.guest(pylonId).services("list"), late])).services;
+      const facts = (await readFact(pylonId, "services", serviceReadTimeoutMs, () => backend.guest(pylonId).services("list"))).services;
       // A service that wants a preview under an unlinked name, linked again or declared, may be routed again. Not
       // from a read that a withdraw overlapped, which may predate the unlink.
       if (diverged.get(pylonId) === since) for (const fact of facts) if (fact.wantsPreview) relinked(pylonId, fact.name);
@@ -214,15 +230,13 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
     } catch (err) {
       log(`${pylonId} services: ${(err as Error).message}`);
       return null;
-    } finally {
-      clearTimeout(timer);
     }
   }
 
   /** A failed read reports null, never "nothing listens". */
   async function listening(pylonId: PylonId): Promise<readonly ListeningFact[] | null> {
     try {
-      return await listeningFacts(backend.guest(pylonId), sessionReadTimeoutMs);
+      return await readFact(pylonId, "listening", sessionReadTimeoutMs, () => listeningFacts(backend.guest(pylonId), sessionReadTimeoutMs));
     } catch {
       return null;
     }
@@ -237,11 +251,11 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
     if (polling || observers.size === 0) return;
     polling = true;
     try {
-      for (const p of await backend.list()) {
-        if (p.vm !== "running") continue;
+      const changed = await Promise.all((await backend.list()).filter((p) => p.vm === "running").map(async (p) => {
         const ports = await listening(p.pylonId);
-        if (ports !== null && JSON.stringify(ports) !== reportedListening.get(p.pylonId)) return void await publishSnapshot();
-      }
+        return ports !== null && JSON.stringify(ports) !== reportedListening.get(p.pylonId);
+      }));
+      if (changed.some(Boolean)) await publishSnapshot();
     } catch (err) {
       log(`listening ports: ${(err as Error).message}`);
     } finally {
@@ -252,14 +266,33 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
   /** Declared outputs only accumulate in the control plane, so a failed read reported as none loses nothing. `nexus output list` shows the failure. */
   async function declaredOutputs(pylonId: PylonId): Promise<readonly DeclaredOutput[]> {
     try {
-      return await listOutputs(backend.guest(pylonId), sessionReadTimeoutMs);
+      return await readFact(pylonId, "outputs", sessionReadTimeoutMs, () => listOutputs(backend.guest(pylonId), sessionReadTimeoutMs));
     } catch {
       return [];
     }
   }
 
+  const gitReads = new Map<PylonId, { bootedAt: string; at: number; facts: GitFacts | null }>();
+  const unreadGit = new Set<PylonId>();
+  async function git(pylonId: PylonId, bootedAt: string): Promise<GitFacts | null> {
+    const previous = gitReads.get(pylonId);
+    const at = Date.now();
+    if (previous?.bootedAt === bootedAt && at - previous.at < gitPollMs) return previous.facts;
+    let facts: GitFacts | null = null;
+    try {
+      facts = await readFact(pylonId, "git", sessionReadTimeoutMs, () => gitFacts(backend.guest(pylonId)));
+      unreadGit.delete(pylonId);
+    } catch {
+      if (!unreadGit.has(pylonId)) log(`${pylonId} git: checkout facts unavailable; retrying on the next git poll`);
+      unreadGit.add(pylonId);
+    }
+    gitReads.set(pylonId, { bootedAt, at, facts });
+    return facts;
+  }
+
   async function observation(p: BackendPylon): Promise<PylonObservation> {
     const { pylonId } = p;
+    if (p.vm !== "running") gitReads.delete(pylonId);
     switch (p.vm) {
       case "booting": case "stopping": case "deleting": return { pylonId, phase: p.vm };
       case "stopped":
@@ -270,14 +303,15 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
         return { pylonId, phase: "broken", detail: p.detail ?? "the backend gave no detail", cause: p.cause };
       case "running": {
         if (p.bootedAt === null) throw new Error(`backend reports ${pylonId} running with no boot time`);
-        const ports = await listening(pylonId);
+        const [ports, serviceFacts, sessionFacts, checkout, outputs, attachedClients] = await Promise.all([
+          listening(pylonId), services(pylonId), sessions(pylonId), git(pylonId, p.bootedAt), declaredOutputs(pylonId), attached(pylonId),
+        ]);
         if (ports !== null) reportedListening.set(pylonId, JSON.stringify(ports));
         return {
           pylonId, phase: "running", liveHash: liveHashes.get(pylonId) ?? null, bootedAt: p.bootedAt,
           bootedFrom: { image: p.image, checkpoint: p.checkpoint },
-          // The other guest facts need guest operations, which this slice does not have.
-          services: await services(pylonId), listening: ports, previews: (published.get(pylonId) ?? []).map((preview) => ({ ...preview, ready: true })), sessions: await sessions(pylonId), git: null, declaredOutputs: await declaredOutputs(pylonId),
-          attachedClients: await attached(pylonId),
+          services: serviceFacts, listening: ports, previews: (published.get(pylonId) ?? []).map((preview) => ({ ...preview, ready: true })), sessions: sessionFacts, git: checkout, declaredOutputs: outputs,
+          attachedClients,
         };
       }
     }
@@ -307,6 +341,9 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
     // Jobs before pylons, so the pylons show the result of every job listed as finished. See NodeObservation.jobs.
     const jobs = retainedJobs();
     const [pylons, artifacts, disk] = await Promise.all([backend.list(), backend.artifacts.list(), statfs("/")]);
+    const present = new Set(pylons.map((p) => p.pylonId));
+    for (const id of gitReads.keys()) if (!present.has(id)) gitReads.delete(id);
+    for (const id of unreadGit) if (!present.has(id)) unreadGit.delete(id);
     return {
       node,
       observedAt: new Date().toISOString(),
