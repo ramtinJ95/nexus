@@ -8,11 +8,13 @@ Several items copy ideas from [t3code](https://github.com/pingdotgg/t3code), whi
 
 Nexus threads are building these, one pull request each. They are dogfooding Nexus.
 
+- **Pull request watch that sees real branches.** Pull request watch shipped, but the probe never reported a pylon's git branches, so it found no pull requests in production. The probe now observes each running pylon's branches, including ones pushed without an upstream ([nexus#69](https://github.com/ramtinJ95/nexus/pull/69)).
 
 ## Next
 
 These start once the work above has landed.
 
+- **The Claude Code mod wakes its session when a thread needs it.** A thread that finishes, fails or waits on the person wakes the Claude Code session that started it or watches it, the way shepherdr reports a worker's result. Today a coordinator chat hears nothing when a thread goes idle, so finished work waited unseen for an hour on 2026-10-25. pi-nexus could do the same for pi.
 - **The clients use the attention status, the seen marker and the latest-turn base.** The mod and pi-nexus drop their own seen stores (the mod's store and `pi-nexus/viewed.json`) and read the control plane's fields instead.
 - **Dashboard polish.** A live "working 1m 03s" clock on running rows. Rows that don't need you dimmed. Tool calls in the conversation grouped into summaries such as "Ran 3 commands, changed 2 files".
 - **Syntax-highlighted diffs.** The dashboard renders its diffs with Pierre's diff library, [`@pierre/diffs`](https://www.npmjs.com/package/@pierre/diffs), which t3code's web app also uses, so changed code gets proper syntax highlighting instead of today's plain lines. Check its licence before adding it.
