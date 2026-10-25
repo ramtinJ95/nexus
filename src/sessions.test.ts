@@ -741,9 +741,10 @@ test("a message reaches Claude's prompt exactly, typed in chunks of at most 64 c
   assert.deepEqual(await sendToClaude(w.guest, { session, text }), { outcome: "sent", herdrPane: "w1:p1", resumed: false });
   const calls = w.herdrCalls();
   const chunks = calls.slice(0, -1).map((call) => {
-    assert.deepEqual(call.slice(0, 6), ["--session", "nexus", "pane", "send-text", "w1:p1", "--"]);
-    assert.equal(call.length, 7);
-    return call[6]!;
+    // Herdr types every argument after the pane, so a chunk is the only one.
+    assert.deepEqual(call.slice(0, 5), ["--session", "nexus", "pane", "send-text", "w1:p1"]);
+    assert.equal(call.length, 6);
+    return call[5]!;
   });
   assert.equal(chunks.join(""), text, "the chunks put together are the message");
   assert.ok(chunks.length > 2);

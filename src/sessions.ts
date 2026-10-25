@@ -285,14 +285,17 @@ const claudeReadyPollMs = 250;
 const typeTimeoutMs = 30_000;
 
 /**
- * Pane ID, then one argument per chunk. Arguments reach Herdr unparsed, so quotes, backticks and `$` are text, and
- * `--` keeps a chunk that starts with `-` from reading as a flag. It stops at the first failure and says how far it got.
+ * Pane ID, then one argument per chunk. Arguments reach Herdr unparsed, so quotes, backticks and `$` are text. Herdr
+ * 0.9.5 types every argument after the pane, `--` and a leading `-` included, joined by spaces, so each chunk is
+ * exactly one argument. Claude reads an Enter that follows a burst of input as a newline in it, so the Enter waits.
+ * It stops at the first failure and says how far it got.
  */
 const typeChunks = `pane=$1; shift; i=0
 for chunk; do
-  out=$(herdr --session ${herdrSession} pane send-text "$pane" -- "$chunk" 2>&1) || { printf '%s\\n' "$out"; echo "typed $i of $# chunks"; exit 1; }
+  out=$(herdr --session ${herdrSession} pane send-text "$pane" "$chunk" 2>&1) || { printf '%s\\n' "$out"; echo "typed $i of $# chunks"; exit 1; }
   i=$((i+1))
 done
+sleep 0.5
 out=$(herdr --session ${herdrSession} pane send-keys "$pane" Enter 2>&1) || { printf '%s\\n' "$out"; echo "typed all $# chunks but not the Enter that submits them"; exit 1; }`;
 
 /**
