@@ -417,6 +417,43 @@ test("a message for a Claude session is typed into its pane, and the result says
   await assert.rejects(client.command(pylonId, { kind: "send-claude", session, text: "a\tb" }), /HTTP 400: .*Replace tabs with spaces/);
 });
 
+test("two messages for one Claude session run one after the other, so the session opens once and their typing never overlaps", async (t) => {
+  const session = "0b5e3a52-5d0f-4c1e-9a43-1f2a6c7d8e90";
+  let panes: ReturnType<typeof herdrPane>[] = [];
+  const base = fakeGuest((argv, herdr) => {
+    if (!herdr) return argv[3] === "claude-type" || argv[0] === "node" || argv[0] === "sh" ? { exitCode: argv.at(-1) === sessionsFile ? 3 : 0, output: "" } : assert.fail(`unexpected exec ${argv.join(" ")}`);
+    const sub = argv.slice(0, 2).join(" ");
+    if (sub === "api snapshot") return herdrOk(herdrSnapshot([{ id: "w1", label: "Claude Code" }], panes));
+    if (sub === "workspace list") return herdrOk({ type: "workspace_list", workspaces: [] });
+    if (sub === "workspace create") return herdrOk({ type: "workspace_created", workspace: { workspace_id: "w1" }, tab: { tab_id: "w1:t1" }, root_pane: { pane_id: "w1:p1" } });
+    if (sub === "pane process-info") return herdrOk({ type: "pane_process_info", process_info: { pane_id: "w1:p1", shell_pid: 100, foreground_processes: [{ pid: 101, name: "claude", argv: ["claude", "--session-id", session] }] } });
+    if (sub === "agent start") {
+      panes = [herdrPane("w1:p1", "w1", "claude", "idle", { kind: "id", value: session })];
+      return herdrOk({ type: "agent_started", agent: {}, argv: [] });
+    }
+    throw new Error(`unscripted ${sub}`);
+  });
+  let typing = 0;
+  const typed: string[] = [];
+  const guest: Guest = {
+    ...base,
+    async exec(argv, options) {
+      if (argv[3] !== "claude-type") return base.exec(argv, options);
+      assert.equal(typing++, 0, "no message is typed while another is");
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      typed.push(argv[5]!);
+      typing--;
+      return base.exec(argv, options);
+    },
+  };
+  const { client } = await setup(t, {}, guest);
+  await running(client);
+  const sends = await Promise.all(["first", "second"].map((text) => client.command(pylonId, { kind: "send-claude", session, text })));
+  assert.deepEqual(sends.map((r) => r.kind === "send-claude" && r.resumed), [true, false], "the second message finds the session the first resumed");
+  assert.equal(base.herdrCalls().filter((c) => c === "workspace create").length, 1);
+  assert.deepEqual(typed, ["first", "second"]);
+});
+
 test("a failing command rejects with the guest's error", async (t) => {
   const guest = fakeGuest((_argv, herdr) => herdr ? herdrError("invalid_params", "pane w9:p9 is malformed") : { exitCode: 0, output: "" });
   const { client } = await setup(t, {}, guest);
