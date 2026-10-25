@@ -10,14 +10,19 @@ def expired(signum, frame):
 
 
 signal.signal(signal.SIGALRM, expired)
+signal.signal(signal.SIGTERM, expired)
 signal.setitimer(signal.ITIMER_REAL, 2.5)
 os.environ["GIT_OPTIONAL_LOCKS"] = "0"
+os.environ["GIT_NO_LAZY_FETCH"] = "1"
+# Also refuse transports on Git versions that predate GIT_NO_LAZY_FETCH.
+os.environ["GIT_ALLOW_PROTOCOL"] = ""
+os.environ["GIT_TERMINAL_PROMPT"] = "0"
 
 
-def git(*args, allowed=(0,), dirty=False):
+def git(*args, allowed=(0,), dirty=False, raw=False):
     process = subprocess.Popen(
         ["git", "-c", "core.fsmonitor=false", *args],
-        stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+        stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, start_new_session=True,
     )
     try:
         output = process.stdout.read(1 if dirty else 256 * 1024 + 1)
@@ -27,10 +32,12 @@ def git(*args, allowed=(0,), dirty=False):
             raise ValueError("git observation exceeds the read limit")
         if process.wait() not in allowed:
             raise ValueError("git observation command failed")
-        return False if dirty else output.decode("utf-8").rstrip("\n")
+        return False if dirty else output.decode("utf-8") if raw else output.decode("utf-8").removesuffix("\n")
     finally:
-        if process.poll() is None:
-            process.kill()
+        try:
+            os.killpg(process.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
         process.wait()
         process.stdout.close()
 
@@ -38,15 +45,15 @@ def git(*args, allowed=(0,), dirty=False):
 def observe():
     if git("rev-parse", "--is-inside-work-tree") != "true":
         raise ValueError("checkout is not a working tree")
-    branch = git("symbolic-ref", "--quiet", "--short", "HEAD", allowed=(0, 1)) or None
+    branch = git("symbolic-ref", "--quiet", "HEAD", allowed=(0, 1)).removeprefix("refs/heads/") or None
     head = git("rev-parse", "--verify", "--quiet", "HEAD", allowed=(0, 1))
     if not head:
         head = git("hash-object", "-t", "tree", "--stdin")
-    refs = git("for-each-ref", "--count=1001", "--format=%(refname)%09%(objectname)%09%(upstream)%09%(symref)", "refs/heads/", "refs/remotes/")
-    rows = [line.split("\t") for line in refs.splitlines()]
+    refs = git("for-each-ref", "--count=1001", "--format=%(refname)%00%(objectname)%00%(upstream)%00%(symref)%00", "refs/heads/", "refs/remotes/", raw=True)
+    rows = [record.split("\0") for record in refs.split("\0\n")[:-1]]
     if len(rows) > 1000:
         raise ValueError("git observation exceeds 1000 refs")
-    remotes = git("remote").splitlines()
+    remotes = git("remote").split("\n")
     published = {row[0] for row in rows if row[0].startswith("refs/remotes/") and not row[3]}
     branches = []
     for ref, commit, upstream, symref in rows:

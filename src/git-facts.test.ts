@@ -1,7 +1,7 @@
 import { test, type TestContext } from "node:test";
 import assert from "node:assert/strict";
-import { execFile } from "node:child_process";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { execFile, type ExecFileOptions } from "node:child_process";
+import { chmod, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
@@ -9,7 +9,9 @@ import { fakeGuest } from "./fake-guest.ts";
 import { gitFacts } from "./git-facts.ts";
 import { checkoutDir } from "./sessions.ts";
 
-const run = promisify(execFile);
+const exec = promisify(execFile);
+const gitEnv = { ...process.env, GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_NOSYSTEM: "1" };
+const run = (file: string, args: readonly string[], options: ExecFileOptions = {}) => exec(file, args, { ...options, env: { ...gitEnv, ...options.env }, encoding: "utf8" });
 async function checkout(t: TestContext) {
   const dir = await mkdtemp(join(tmpdir(), "nexus-git-facts-"));
   t.after(() => rm(dir, { recursive: true, force: true }));
@@ -128,5 +130,73 @@ test("too many refs and missing repositories fail rather than emitting partial f
 test("failed, timed out, truncated and invalid guest replies are rejected", async () => {
   for (const reply of [{ exitCode: null, output: "" }, { exitCode: 1, output: "" }, { exitCode: 0, output: "{}" }, { exitCode: 0, output: "bad JSON" }, { exitCode: 0, output: "", truncated: true }, { exitCode: 0, output: "x".repeat(65536) }]) {
     await assert.rejects(gitFacts(fakeGuest(() => reply)));
+  }
+});
+
+test("branch names are unambiguous beside a same-named tag and preserve Unicode line separators", async (t) => {
+  const s = await checkout(t);
+  const head = await s.commit();
+  await s.git("tag", "main");
+  assert.equal((await gitFacts(s.guest)).branch, "main");
+  const branch = "topic/line\u2028separator";
+  const remote = "remote\u2028name";
+  await s.git("checkout", "-qb", branch);
+  await s.git("remote", "add", remote, "https://example.com/repo.git");
+  await s.git("update-ref", `refs/remotes/${remote}/${branch}`, head);
+  const facts = await gitFacts(s.guest);
+  assert.equal(facts.branch, branch);
+  assert.deepEqual(facts.branches.find((b) => b.name === branch), { name: branch, head, pushedAs: `${remote}/${branch}` });
+});
+
+test("a missing promisor tree cannot trigger a lazy fetch during observation", async (t) => {
+  const s = await checkout(t);
+  await writeFile(join(s.dir, "file"), "content");
+  await s.commit();
+  const marker = join(s.dir, "fetched");
+  await s.git("remote", "add", "origin", `ext::sh -c touch% ${marker}`);
+  await s.git("config", "remote.origin.promisor", "true");
+  await s.git("config", "remote.origin.partialclonefilter", "blob:none");
+  await s.git("config", "protocol.ext.allow", "always");
+  const tree = (await s.git("rev-parse", "HEAD^{tree}")).stdout.trim();
+  await rm(join(s.dir, ".git", "objects", tree.slice(0, 2), tree.slice(2)));
+  await assert.rejects(s.git("status", "--porcelain"));
+  assert.equal(await readFile(marker, "utf8"), "", "ordinary status attempted the promisor transport");
+  await rm(marker);
+  await assert.rejects(gitFacts(s.guest), /could not be read/);
+  await assert.rejects(readFile(marker), { code: "ENOENT" });
+});
+
+test("the helper deadline kills a slow clean filter and its children on every poll", async (t) => {
+  const s = await checkout(t);
+  await writeFile(join(s.dir, "file.txt"), "initial\n");
+  await writeFile(join(s.dir, ".gitattributes"), "*.txt filter=slow\n");
+  await s.commit();
+  const script = join(s.dir, ".git", "slow-filter");
+  const pids = join(s.dir, ".git", "filter-pids");
+  await writeFile(script, `#!/bin/sh\necho $$ >> '${pids}'\nsleep 30 &\necho $! >> '${pids}'\nwait\n`);
+  await chmod(script, 0o700);
+  await s.git("config", "filter.slow.clean", script);
+  await s.git("config", "filter.slow.required", "true");
+  await writeFile(join(s.dir, "file.txt"), "changed\n");
+  const running = async (pid: number) => {
+    try {
+      process.kill(pid, 0);
+      const stat = await readFile(`/proc/${pid}/stat`, "utf8");
+      return !/[ZX]/.test(stat.slice(stat.lastIndexOf(")") + 2, stat.lastIndexOf(")") + 3));
+    } catch { return false; }
+  };
+  t.after(async () => {
+    for (const pid of (await readFile(pids, "utf8").catch(() => "")).trim().split("\n").map(Number)) {
+      if (pid > 0 && await running(pid)) process.kill(pid, "SIGKILL");
+    }
+  });
+  for (let i = 1; i <= 2; i++) {
+    await assert.rejects(gitFacts(s.guest), /could not be read/);
+    const ids = (await readFile(pids, "utf8")).trim().split("\n").map(Number);
+    assert.equal(ids.length, i * 2, "the clean filter really ran and spawned a child");
+    for (let retry = 0; (await Promise.all(ids.map(running))).some(Boolean); retry++) {
+      assert.ok(retry < 50, "no filter process may outlive the helper");
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
   }
 });
