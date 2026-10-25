@@ -286,6 +286,8 @@ ${image === null && html`<p class="error">No image is current yet, so a new pylo
 <input id="start-title" name="title" required autocomplete="off" placeholder="What should this thread do?" autofocus>
 <label for="start-claude">Claude Code first prompt (optional)</label>
 <textarea id="start-claude" name="claude" placeholder="/poteto-mode &lt;task&gt;"></textarea>
+<label for="start-model">Claude model (optional; claude-opus-5-5)</label>
+<input id="start-model" name="model" placeholder="claude-opus-5-5">
 <fieldset class="seg"><legend>Project</legend>
 ${projects.map((p) => html`<label class="seg-opt"><input type="radio" name="project" required value="${p.id}" data-node="${p.defaultNode}" data-branch="${p.defaultBranch}"${p.repoUrl === null && " data-scratch"}${p === chosen && " checked"}><span class="seg-name">${p.id}</span><span class="seg-repo">${p.repoUrl ?? "scratch"}</span></label>`)}
 </fieldset>
@@ -591,6 +593,7 @@ ${!d.prWatch?.enabled ? html`<p class="empty">PR watch: off (no control-plane Gi
 ${(d.pullRequests ?? []).map((pr) => html`<p><a href="${pr.url}" target="_blank" rel="noreferrer">PR #${pr.number}: ${pr.title}</a> — ${pr.state}, checks ${pr.checks}, review ${pr.review}</p>`)}
 ${outputs.length === 0 ? html`<p class="empty">No other outputs yet.</p>` : html`<ul class="list outs">${outputs.map((o) => html`<li><span class="o-kind">${outputLabel[o.kind]}</span><code>${o.ref}</code></li>`)}</ul>`}
 </section>
+${d.claudeWorker === undefined ? "" : html`<section><h2>Claude worker</h2><p>${d.claudeWorker.state} · ${d.claudeWorker.model ?? "unknown"}</p>${d.claudeWorker.message === undefined ? "" : html`<pre>${d.claudeWorker.message}</pre>`}</section>`}
 <section aria-labelledby="sessions-h"><h2 id="sessions-h">Sessions ${count(d.sessions.length)}</h2>
 ${d.sessions.length === 0 ? html`<p class="empty">No sessions.</p>` : html`<ul class="list outs">${d.sessions.map((s) => html`<li>
 <span class="o-kind">${harnessLabel[s.harness]}</span>${s.title !== null && html`<span class="s-title">${s.title}</span>`}${s.state === "running" ? state(s.status, sessionTone[s.status])

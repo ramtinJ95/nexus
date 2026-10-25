@@ -1,6 +1,6 @@
 # The Mac nexus CLI
 
-`nexus` runs on a Mac and drives the control plane's API: add projects, list threads, start one, message it, watch it, and archive or delete it. People use it at a shell. The Claude Code mod and the pi extension shell out to it, so this page is their contract. The code is [`src/cli/nexus.ts`](../src/cli/nexus.ts), and its transport is [`src/cli/transport.ts`](../src/cli/transport.ts). This page describes version 0.15.1, which `nexus --version` prints. Version 0.15.1 exposes stalled Claude worker launches, with pane diagnostics in `claudeWorker.message`. Version 0.15.0 added the resumable event stream and Claude Code thread workers. Version 0.14.0 added human-only project editing and a stale-grants warning. Version 0.13.0 added `deploy`, `release`, and waiting for fleet release health. Version 0.12.0 added PR-watch metadata and pull-request outputs to `show` (see [Pull requests](#pull-requests-0120)). Version 0.11.0 added Latest turn to dashboard Changes, `--turn` to `nexus changes` and `nexus diff`, and API `base=turn` with turn metadata and failures. Version 0.10.0 added shared `seenAt`, `lastReplyAt` and `attention` to thread rows and detail, and `seen <thread> [--unread]`, so clients no longer need their own seen stores. Version 0.9.0 made `attach` go through the control plane, over the attach route `GET /v1/threads/<thread>/attach`, a WebSocket, instead of ssh to the pylon's node, and retired its settings: `NEXUS_ATTACH`, and `"ssh"` and `"attach"` in the config file. An older control plane has no such route, and `attach` says to upgrade it. In 0.9.0, `Preview.failed` and `ready` also cover a preview whose port has no route into the pylon, and `ports` prints why a preview is not ready. Version 0.8.0 added `Session.id`, `Session.state` and `Session.message`, so a paused pylon lists the sessions its wake brings back and a session its last wake failed to bring back shows why, and `session close` now takes a session's ID, refuses a paused session, fails on a pane that is not open or that runs another session than the one listed there, and no longer tries again. Version 0.7.0 added scratch projects, whose `Project.repoUrl` is null, `project add --scratch` and `--secret`, and a null `Base.commit` where the base is the empty tree. Version 0.6.0 added `files`, `changes` and `diff`, their routes `GET /v1/threads/<thread>/files`, `GET /v1/threads/<thread>/changes` and `GET /v1/threads/<thread>/diff`, `Listing`, `Changes` and `Diff`, and the route `GET /v1/threads/<thread>/files/content`, which the CLI does not use. Version 0.5.0 added `session open`, `session close` and `attach`, the routes `POST /v1/threads/<thread>/sessions` and `DELETE /v1/threads/<thread>/sessions/<pane>`, `OpenedSession`, `Session.title`, `Preview.failed`, and the attach settings: `NEXUS_ATTACH`, and `"ssh"` and `"attach"` in the config file. Version 0.4.0 added `project add` and its route, `POST /v1/projects`. Version 0.3.0 added `unpreview` and its route, `DELETE /v1/threads/<thread>/previews/<port>`. Version 0.2.0 added `ports`, `preview`, `Preview.url`, `ThreadDetail.ports` and the `ports` of a watch `state`.
+`nexus` runs on a Mac and drives the control plane's API: add projects, list threads, start one, message it, watch it, and archive or delete it. People use it at a shell. The Claude Code mod and the pi extension shell out to it, so this page is their contract. The code is [`src/cli/nexus.ts`](../src/cli/nexus.ts), and its transport is [`src/cli/transport.ts`](../src/cli/transport.ts). This page describes version 0.16.0, which `nexus --version` prints. Version 0.16.0 adds `start --claude --model`, defaults Claude to Opus 5.5, disables commit/PR attribution, and preserves busy launches across Herdr readiness timeouts. `show` reports the worker model and launch diagnostic. Version 0.15.1 exposes stalled Claude worker launches, with pane diagnostics in `claudeWorker.message`. Version 0.15.0 added the resumable event stream and Claude Code thread workers. Version 0.14.0 added human-only project editing and a stale-grants warning. Version 0.13.0 added `deploy`, `release`, and waiting for fleet release health. Version 0.12.0 added PR-watch metadata and pull-request outputs to `show` (see [Pull requests](#pull-requests-0120)). Version 0.11.0 added Latest turn to dashboard Changes, `--turn` to `nexus changes` and `nexus diff`, and API `base=turn` with turn metadata and failures. Version 0.10.0 added shared `seenAt`, `lastReplyAt` and `attention` to thread rows and detail, and `seen <thread> [--unread]`, so clients no longer need their own seen stores. Version 0.9.0 made `attach` go through the control plane, over the attach route `GET /v1/threads/<thread>/attach`, a WebSocket, instead of ssh to the pylon's node, and retired its settings: `NEXUS_ATTACH`, and `"ssh"` and `"attach"` in the config file. An older control plane has no such route, and `attach` says to upgrade it. In 0.9.0, `Preview.failed` and `ready` also cover a preview whose port has no route into the pylon, and `ports` prints why a preview is not ready. Version 0.8.0 added `Session.id`, `Session.state` and `Session.message`, so a paused pylon lists the sessions its wake brings back and a session its last wake failed to bring back shows why, and `session close` now takes a session's ID, refuses a paused session, fails on a pane that is not open or that runs another session than the one listed there, and no longer tries again. Version 0.7.0 added scratch projects, whose `Project.repoUrl` is null, `project add --scratch` and `--secret`, and a null `Base.commit` where the base is the empty tree. Version 0.6.0 added `files`, `changes` and `diff`, their routes `GET /v1/threads/<thread>/files`, `GET /v1/threads/<thread>/changes` and `GET /v1/threads/<thread>/diff`, `Listing`, `Changes` and `Diff`, and the route `GET /v1/threads/<thread>/files/content`, which the CLI does not use. Version 0.5.0 added `session open`, `session close` and `attach`, the routes `POST /v1/threads/<thread>/sessions` and `DELETE /v1/threads/<thread>/sessions/<pane>`, `OpenedSession`, `Session.title`, `Preview.failed`, and the attach settings: `NEXUS_ATTACH`, and `"ssh"` and `"attach"` in the config file. Version 0.4.0 added `project add` and its route, `POST /v1/projects`. Version 0.3.0 added `unpreview` and its route, `DELETE /v1/threads/<thread>/previews/<port>`. Version 0.2.0 added `ports`, `preview`, `Preview.url`, `ThreadDetail.ports` and the `ports` of a watch `state`.
 
 This is a different program from the `nexus` inside a pylon ([`images/pylon/nexus`](../images/pylon/nexus)), which talks to its own node's probe.
 
@@ -322,7 +322,7 @@ No agent-facing edit tool is added. Editing grants is a human action through the
 ## Event stream and Claude workers (0.15.0)
 
 ```sh
-nexus start --project P --claude '/poteto-mode implement the task and test it'
+nexus start --project P --claude '/poteto-mode implement the task and test it' [--model ID]
 nexus attach <thread>
 nexus events [--follow] [--since ID] [--thread T] [--project P] [--kind K]... [--json]
 ```
@@ -344,9 +344,10 @@ Without that grant, the existing `/login` workflow still applies. The pstack
 plugin must be present in the image's captured agent setup.
 
 Use `show --json` to inspect `claudeWorker.state` and its optional failure `message`.
-`started` means the initial prompt reached UserPromptSubmit, not task completion.
+`started` means the launch reached UserPromptSubmit (or a live Claude is observed
+working), not task completion.
 Nexus waits up to 30 seconds after Herdr startup for a launch-specific local hook
-receipt. No receipt means `stalled`, with the last 20 pane lines (up to 8 KiB) in
+receipt. No receipt or live busy-process evidence means `stalled`, with the last 20 pane lines (up to 8 KiB) in
 the message and a `thread.failed` event. Attention is `failed`, ahead of other
 attention values. The pane stays open for attach; no automatic resubmission occurs. A late
 turn-started report from this launch's session changes it to `started` and clears
@@ -427,3 +428,24 @@ working sessions or resume waiting sessions when stamped later than the waiting
 event; they never create sessions or revive ended ones. Hooks capture
 `--at` before detaching their sender; control rejects older per-session reports.
 This orders delivery without trusting a pylon timestamp to keep its lease alive.
+
+### Claude model and launch safety (0.16.0)
+
+Claude sessions default to `claude-opus-5-5`. `start --claude PROMPT --model ID`
+selects a model for that thread; the API accepts `model` alongside `claude`, and
+the dashboard start form offers the same optional field. `--model` without
+`--claude` is rejected. Nexus records the requested model, not a claim about a
+provider's routing; old workers without a recorded model show unknown.
+Explicit overrides survive checkpoint relaunches. Subscription/model refusals
+remain visible in the pane; Nexus does not silently choose a cheaper model.
+
+Herdr readiness timeouts do not kill a submitted first prompt. A local launch
+receipt, or a live Claude process with working status, proves startup. Uncertain
+first-prompt launches leave the pane open with stalled attention and a diagnostic;
+attach before starting another session. No automatic resubmission occurs.
+A matching late submission report clears failure; the old diagnostic remains in
+history. A launch command error after a reported submission emits no false
+`thread.failed`. `show` (text and JSON) and the dashboard expose the same current
+worker state, model and diagnostic; session lists remain observed facts, not
+invented sessions. All Nexus launches merge Claude's native empty commit and PR
+attribution settings, preserving unrelated settings and hooks.

@@ -222,7 +222,7 @@ export type ProbeEvent =
 export type PylonCommand =
   /** When the timeout passes, the probe calls pi-sandbox's exec-kill and returns exitCode null. Timeout at most 60 s. */
   | { kind: "exec"; argv: readonly string[]; cwd: string; timeoutMs: number }
-  | { kind: "open-session"; harness: SessionHarness; title: string; resume?: string; prompt?: string }
+  | { kind: "open-session"; harness: SessionHarness; title: string; resume?: string; prompt?: string; model?: string }
   /**
    * `session` is who the control plane last saw in the pane, so a pane a wake has since given to another session is
    * left open. None for a pane no observation has listed yet, such as one opened a moment ago.
@@ -735,6 +735,7 @@ export function parsePylonCommand(body: string): PylonCommand {
     case "open-session":
       if (!harnesses.has(c.harness)) throw new Error(`unknown harness ${JSON.stringify(c.harness)}`);
       string(c.title, "command.title");
+      if (c.model !== undefined && (c.harness !== "claude-code" || string(c.model, "command.model").length > 200)) throw new Error("invalid Claude model");
       if (c.prompt !== undefined && (c.harness !== "claude-code" || string(c.prompt, "command.prompt").length > 16_384)) throw new Error("invalid Claude prompt");
       if (c.resume !== undefined) {
         string(c.resume, "command.resume");

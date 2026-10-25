@@ -41,6 +41,8 @@ merge(path.join(home, '.claude.json'), state => {
 });
 merge(path.join(home, '.claude/settings.json'), state => {
   state.theme ??= 'dark';
+  state.model = 'claude-opus-5-5';
+  state.attribution = { ...state.attribution, commit: '', pr: '' };
   state.skipDangerousModePermissionPrompt = true;
 });
 `;

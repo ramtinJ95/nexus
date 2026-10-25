@@ -223,6 +223,8 @@ const migrations: readonly string[] = [
    CREATE TABLE session_order_floor (thread TEXT PRIMARY KEY, at INTEGER NOT NULL) STRICT;`,
   `ALTER TABLE claude_workers ADD COLUMN message TEXT;`,
   `ALTER TABLE claude_workers ADD COLUMN session TEXT;`,
+  `ALTER TABLE claude_workers ADD COLUMN model TEXT;
+   UPDATE claude_workers SET model = 'claude-opus-5-5' WHERE state = 'pending';`,
 ];
 
 type Row = Record<string, unknown>;
@@ -467,13 +469,13 @@ export function openRegistry(path: string, clock = Date.now) {
         updateAttention(id);
       });
     },
-    claudeWorker(thread: ThreadId): { prompt: string; state: string; message?: string } | undefined {
-      const row = db.prepare("SELECT prompt, state, message FROM claude_workers WHERE thread = ?").get(thread);
-      return row === undefined ? undefined : { prompt: row.prompt as string, state: row.state as string, ...(row.message == null ? {} : { message: row.message as string }) };
+    claudeWorker(thread: ThreadId): { prompt: string; state: string; model: string | null; message?: string } | undefined {
+      const row = db.prepare("SELECT prompt, state, message, model FROM claude_workers WHERE thread = ?").get(thread);
+      return row === undefined ? undefined : { model: row.model as string | null, prompt: row.prompt as string, state: row.state as string, ...(row.message == null ? {} : { message: row.message as string }) };
     },
     setClaudeWorker(thread: ThreadId, prompt: string, state: string, message?: string, session?: string) {
       transaction(() => {
-        db.prepare("INSERT INTO claude_workers VALUES (?, ?, ?, ?, ?) ON CONFLICT(thread) DO UPDATE SET state = excluded.state, message = excluded.message, session = coalesce(excluded.session, claude_workers.session)").run(thread, prompt, state, message ?? null, session ?? null);
+        db.prepare("INSERT INTO claude_workers (thread, prompt, state, message, session, model) VALUES (?, ?, ?, ?, ?, 'claude-opus-5-5') ON CONFLICT(thread) DO UPDATE SET state = excluded.state, message = excluded.message, session = coalesce(excluded.session, claude_workers.session)").run(thread, prompt, state, message ?? null, session ?? null);
         updateAttention(thread);
       });
     },
@@ -502,7 +504,7 @@ export function openRegistry(path: string, clock = Date.now) {
           if (state !== "session.turn-started" && state !== "session.waiting") return;
         }
         if (event.kind === "session.turn-started" && event.session !== undefined) {
-          db.prepare("UPDATE claude_workers SET state = 'started', message = NULL WHERE thread = ? AND session = ? AND state IN ('starting', 'stalled')").run(thread, event.session);
+          db.prepare("UPDATE claude_workers SET state = 'started', message = NULL WHERE thread = ? AND session = ? AND state IN ('starting', 'stalled', 'failed')").run(thread, event.session);
         }
         db.prepare("INSERT INTO session_order VALUES (?, ?, ?, ?) ON CONFLICT(thread, session) DO UPDATE SET at = excluded.at, kind = excluded.kind").run(thread, session, at, event.kind);
         // Keep tombstones after activity rows end, with a floor guarding reports older than evicted cursors.
@@ -587,13 +589,13 @@ export function openRegistry(path: string, clock = Date.now) {
     },
 
     /** A thread and its pylon are created together, because a thread always has exactly one pylon. */
-    createThread(thread: Omit<Thread, "seenAt" | "lastReplyAt">, pylon: StoredPylon, claudePrompt?: string) {
+    createThread(thread: Omit<Thread, "seenAt" | "lastReplyAt">, pylon: StoredPylon, claudePrompt?: string, model = "claude-opus-5-5") {
       if (pylon.pylonId !== thread.pylonId || pylon.thread !== thread.id) throw new Error(`pylon ${pylon.pylonId} does not belong to thread ${thread.id}`);
       transaction(() => {
         q.insertThread.run(thread.id, thread.title, thread.project, thread.status, thread.conversationId, thread.startedBy, thread.createdAt,
           thread.agentTurnRunning ? 1 : 0, thread.lastAgentActivityAt, thread.lastHumanActivityAt);
         q.insertPylon.run(pylonParams(pylon));
-        if (claudePrompt !== undefined) db.prepare("INSERT INTO claude_workers (thread, prompt, state) VALUES (?, ?, 'pending')").run(thread.id, claudePrompt);
+        if (claudePrompt !== undefined) db.prepare("INSERT INTO claude_workers (thread, prompt, state, model) VALUES (?, ?, 'pending', ?)").run(thread.id, claudePrompt, model);
       });
     },
     threads: (project?: ProjectId) => ((project === undefined ? q.threads.all() : q.threadsOf.all(project)) as Row[]).map(withSessions),

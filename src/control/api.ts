@@ -88,7 +88,7 @@ export interface Api {
 }
 
 export interface ThreadDetail {
-  claudeWorker?: { state: string; message?: string };
+  claudeWorker?: { model: string | null; state: string; message?: string };
   attention: Attention;
   seenAt: number | null;
   lastReplyAt: number | null;
@@ -204,6 +204,7 @@ const projectSchema = z.strictObject({
 });
 const projectEditSchema = projectSchema.omit({ id: true, repoUrl: true, preSetup: true }).extend({ resources: projectSchema.shape.resources.partial() }).partial();
 const startSchema = z.strictObject({
+  model: z.string().trim().min(1).max(200).optional(),
   claude: z.string().trim().min(1).max(16_384).optional(),
   project: z.string().min(1),
   title: z.string().min(1),
@@ -292,6 +293,7 @@ export async function startApi(options: ApiOptions): Promise<Api> {
    */
   async function startThread(body: unknown, caller: TailnetNodeId): Promise<Thread> {
     const request = parse(startSchema, body);
+    if (request.model !== undefined && request.claude === undefined) throw new HttpError(400, "model requires claude");
     const claudePrompt = request.claude === undefined ? undefined : /^\/poteto-mode(?:\s|$)/.test(request.claude) ? request.claude : `/poteto-mode ${request.claude}`;
     if (claudePrompt !== undefined && claudePrompt.length > 16_384) throw new HttpError(400, "Claude prompt including /poteto-mode exceeds 16384 characters");
     const project = registry.project(request.project as ProjectId);
@@ -333,7 +335,7 @@ export async function startApi(options: ApiOptions): Promise<Api> {
       live,
       liveHash: liveHashOf(live),
     });
-    registry.createThread(t, pylon, claudePrompt);
+    registry.createThread(t, pylon, claudePrompt, request.model);
     wake(node);
     return t;
   }
@@ -392,7 +394,7 @@ export async function startApi(options: ApiOptions): Promise<Api> {
     const worker = registry.claudeWorker(t.id);
     return {
       thread: t,
-      ...(worker === undefined ? {} : { claudeWorker: { state: worker.state, ...(worker.message === undefined ? {} : { message: worker.message }) } }),
+      ...(worker === undefined ? {} : { claudeWorker: { model: worker.model, state: worker.state, ...(worker.message === undefined ? {} : { message: worker.message }) } }),
       attention: attention(t), seenAt: t.seenAt, lastReplyAt: t.lastReplyAt,
       desired: desiredPhase(t, Date.now()),
       pylon: pylonOf(t),

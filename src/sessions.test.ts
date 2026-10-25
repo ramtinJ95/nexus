@@ -34,6 +34,7 @@ function herdrUp(overrides: Record<string, (argv: readonly string[]) => ExecRepl
     if (sub === "workspace create") return created("w1", "w1:p1");
     if (sub === "agent start") return agentStarted;
     if (sub === "workspace close") return herdrOk({ type: "ok" });
+    if (sub === "pane process-info") return processInfo({})(argv);
     if (sub === "pane read") return herdrOk({ type: "pane_read", read: { text: "user@pylon:~$ " } });
     throw new Error(`unscripted herdr ${argv.join(" ")}`);
   });
@@ -214,7 +215,7 @@ test("Herdr's own report of a Claude Code session wins over its command line, wh
   const snapshot = herdrSnapshot([{ id: "w1", label: "review" }], [herdrPane("w1:p1", "w1", "claude", "idle", { kind: "id", value: "after-clear" })]);
   const guest = herdrUp({ "api snapshot": () => herdrOk(snapshot) });
   assert.deepEqual((await recordSessions(guest))!.map((r) => r.harnessSessionId), ["after-clear"]);
-  assert.ok(!guest.herdrCalls().includes("pane process-info"), "a reported ID needs no command line");
+  assert.equal(guest.herdrCalls().filter((c) => c === "pane process-info").length, 1, "only the explicit model is read from the command line");
 });
 
 test("recording with no Herdr server leaves the last sessions file in place", async () => {
@@ -523,12 +524,12 @@ test("Claude user state merges onboarding, trust and bypass acceptance without l
   t.after(() => rm(home, { recursive: true, force: true }));
   await mkdir(join(home, ".claude"));
   const original = { oauthAccount: { accountUuid: "keep" }, projects: { [checkout]: { allowedTools: ["Read"] }, "/elsewhere": { hasTrustDialogAccepted: false } } };
-  const settings = { theme: "light", hooks: { Stop: [{ hooks: [{ command: "keep" }] }] }, enabledPlugins: { pstack: true } };
+  const settings = { theme: "light", model: "claude-sonnet-5-5", attribution: { commit: "old trailer", pr: "old footer", extra: "keep" }, hooks: { Stop: [{ hooks: [{ command: "keep" }] }] }, enabledPlugins: { pstack: true } };
   await writeFile(join(home, ".claude.json"), JSON.stringify(original));
   await writeFile(join(home, ".claude/settings.json"), JSON.stringify(settings));
   for (let i = 0; i < 2; i++) execFileSync("node", ["-e", seedClaudeState, checkout], { env: { ...process.env, HOME: home } });
   assert.deepEqual(JSON.parse(await readFile(join(home, ".claude.json"), "utf8")), { ...original, hasCompletedOnboarding: true, projects: { ...original.projects, [checkout]: { allowedTools: ["Read"], hasTrustDialogAccepted: true } } });
-  assert.deepEqual(JSON.parse(await readFile(join(home, ".claude/settings.json"), "utf8")), { ...settings, skipDangerousModePermissionPrompt: true });
+  assert.deepEqual(JSON.parse(await readFile(join(home, ".claude/settings.json"), "utf8")), { ...settings, model: "claude-opus-5-5", attribution: { commit: "", pr: "", extra: "keep" }, skipDangerousModePermissionPrompt: true });
 });
 
 test("Claude seeding remerges concurrent updates, preserves modes and writes nothing once seeded", async (t) => {
@@ -595,4 +596,69 @@ test("resuming a pane at root or HOME seeds only the pylon checkout", async () =
     assert.equal((await relaunchSessions(guest))[0]!.result, "relaunched");
     assert.deepEqual(guest.execs.filter((argv) => argv[2] === seedClaudeState).map((argv) => argv[3]), ["/home/user/workspace/repo"]);
   }
+});
+
+
+test("a readiness timeout after submission is started and never closes the busy pane", async () => {
+  const guest = herdrUp({ "agent start": () => herdrError("timeout", "timed out waiting for agent startup") });
+  assert.equal(await openSession(guest, { harness: "claude-code", title: "worker", cwd: "/home/user/workspace/repo", prompt: "work", model: "custom-model" }), "w1:p1");
+  assert.equal(guest.herdrCalls().includes("workspace close"), false);
+  assert.equal(guest.herdrCalls().filter((c) => c === "agent start").length, 1);
+  const start = guest.execs.find((a) => a[3] === "agent")!;
+  assert.equal(start[start.indexOf("--model") + 1], "custom-model");
+});
+
+test("a lost receipt with a running busy Claude also preserves the launch", async () => {
+  const guest = herdrUp({
+    "agent start": () => herdrError("timeout", "timed out waiting for agent startup"),
+    "pane process-info": processInfo({ "w1:p1": ["claude"] }),
+    "api snapshot": () => herdrOk(herdrSnapshot([{ id: "w1", label: "worker" }], [herdrPane("w1:p1", "w1", "claude", "working")])),
+  }, true, false);
+  assert.equal(await openSession(guest, { harness: "claude-code", title: "worker", cwd: "/home/user/workspace/repo", prompt: "work" }), "w1:p1");
+  assert.equal(guest.herdrCalls().includes("workspace close"), false);
+});
+
+test("a receipt read failure preserves the pane rather than rolling back uncertain work", async () => {
+  const base = herdrUp();
+  const guest = { ...base, exec: async (...args: Parameters<typeof base.exec>) => {
+    if (args[0][3] === "claude-submitted") throw new Error("guest disconnected");
+    return base.exec(...args);
+  } };
+  await assert.rejects(openSession(guest, { harness: "claude-code", title: "worker", cwd: "/home/user/workspace/repo", prompt: "work" }), /Claude launch stalled/);
+  assert.equal(base.herdrCalls().includes("workspace close"), false);
+});
+
+test("an explicit Claude model is recorded and passed on checkpoint relaunch", async () => {
+  const records: SessionRecord[] = [{ herdrPane: "w1:p1", harness: "claude-code", title: "review", cwd: "/home/user", harnessSessionId: "aaaa", model: "custom-model" }];
+  const guest = pylon(records, []);
+  await relaunchSessions(guest);
+  const start = guest.execs.find((a) => a[3] === "agent" && a[4] === "start")!;
+  assert.equal(start[start.indexOf("--model") + 1], "custom-model");
+  const recorded = await recordSessions(guest);
+  assert.equal(recorded![0]!.model, "custom-model");
+});
+
+test("a stalled relaunch keeps its new pane attached to the failure across record and relaunch", async () => {
+  const records: SessionRecord[] = [{ herdrPane: "w1:p1", harness: "claude-code", title: "review", cwd: "/home/user", harnessSessionId: "aaaa" }];
+  const panes: FakePane[] = [];
+  const guest = pylon(records, panes);
+  const exec = guest.exec;
+  let unavailable = true;
+  guest.exec = async (argv, options) => {
+    if (unavailable && argv[3] === "pane" && argv[4] === "process-info") throw new Error("process info unavailable");
+    const reply = await exec(argv, options);
+    if (unavailable && argv[3] === "agent" && argv[4] === "start") return { ...herdrError("timeout", "timed out waiting for agent startup"), truncated: false };
+    return reply;
+  };
+  assert.deepEqual(placed(await relaunchSessions(guest)), [["review", "failed", "w20:p1"]]);
+  assert.equal(panes.length, 1, "the uncertain launch leaves its new pane open");
+  unavailable = false;
+  assert.deepEqual((await recordSessions(guest))!.map((r) => [r.harnessSessionId, r.herdrPane]), [["aaaa", "w20:p1"]]);
+  assert.deepEqual(placed(await relaunchSessions(guest)), [["review", "present", "w20:p1"]]);
+  assert.equal(guest.herdrCalls().filter((c) => c === "agent start").length, 1, "the recovered live session is not started twice");
+  assert.equal(panes.length, 1);
+  const file = JSON.parse(guest.written.findLast((f) => f.path === sessionsFile)!.content);
+  assert.equal(file.sessions.length, 1);
+  assert.equal(file.sessions[0].harnessSessionId, "aaaa");
+  assert.deepEqual(file.failed, [], "the recovered pane supersedes the failure");
 });

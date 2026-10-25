@@ -1,0 +1,40 @@
+
+ ▐▛███▛█   Claude Code v2.1.308
+▝▜██████▀  Opus 5.5 · Claude API
+ ▝▝   ▝▝   /tmp/nexus-launch-repo
+
+  Get to finished work sooner with Opus 5.5. Switch anytime with /model.
+
+❯ Perform exactly 15 sequential Bash tool calls. In each run sleep 4; echo step-N with the appropriate N. Do not
+  combine calls, do not background them. After all 15 say done.
+
+● Sleeping then printing step-5
+  ⎿  $ sleep 4; echo step-5
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+✻ Flambéing… (29s · ↓ 363 tokens)
+
+───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+❯ 
+───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  ⏵⏵ bypass permissions on (shift+tab to cycle) · esc to interrupt

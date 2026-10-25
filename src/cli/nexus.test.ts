@@ -984,7 +984,7 @@ test("show prints PR metadata and one disabled-watch notice without waking the p
 
 test("deploy and release use the shared release view and wait for both roles", async (t) => {
   const s = await setup(t);
-  assert.equal((await s.nexus(["--version"])).stdout.trim(), "nexus 0.15.1");
+  assert.equal((await s.nexus(["--version"])).stdout.trim(), "nexus 0.16.0");
   assert.equal((await s.nexus(["deploy", "bad"])).code, 64);
   const requested = await s.json(["deploy", "main"]);
   assert.equal(requested.desired.commit, "a".repeat(40));
@@ -1063,7 +1063,7 @@ test("start --claude queues a poteto worker without sending a harness message", 
   const s = await setup(t);
   const thread = await s.json(["start", "--project", "acme", "--claude", "/poteto-mode fix it"]);
   assert.equal(thread.conversationId, null);
-  assert.deepEqual(s.registry.claudeWorker(thread.id), { prompt: "/poteto-mode fix it", state: "pending" });
+  assert.deepEqual(s.registry.claudeWorker(thread.id), { model: "claude-opus-5-5", prompt: "/poteto-mode fix it", state: "pending" });
   assert.equal((await s.nexus(["start", "--project", "acme", "--claude", "fix", "--message", "also fix"])).code, 64);
 });
 
@@ -1175,4 +1175,21 @@ test("a dropped SSE connection cannot reconnect around a blocked consumer", asyn
   release.resolve();
   await reading;
   assert.equal(settled, true);
+});
+
+test("show exposes the registry's failed worker and its selected model", async (t) => {
+  const s = await setup(t);
+  const thread = await s.json(["start", "--project", "acme", "--claude", "fix it", "--model", "claude-sonnet-5-5"]);
+  const message = "Claude launch did not complete: agent executable missing";
+  s.registry.setClaudeWorker(thread.id, "/poteto-mode fix it", "failed", message);
+  s.registry.appendEvent("thread.failed", thread.id, { message });
+  const detail = await s.json(["show", thread.id]);
+  assert.deepEqual(detail.claudeWorker, { state: "failed", model: "claude-sonnet-5-5", message });
+  assert.equal(detail.attention, "failed");
+  assert.deepEqual(detail.sessions, []);
+  const text = (await s.nexus(["show", thread.id])).stdout;
+  assert.match(text, /Claude worker: failed, model claude-sonnet-5-5/);
+  assert.ok(text.includes(message));
+  assert.equal(s.registry.events().filter((e) => e.kind === "thread.failed").at(-1)?.payload.message, detail.claudeWorker.message);
+  assert.equal((await s.nexus(["start", "--project", "acme", "--title", "no worker", "--model", "x"])).code, 64);
 });

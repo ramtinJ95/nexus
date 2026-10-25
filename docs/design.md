@@ -191,10 +191,14 @@ write is needed, re-read before rename and re-merge changed content, up to five
 attempts; fail rather than replacing a repeatedly changing file. Trust only the
 pylon checkout, never a restored pane cwd, root or HOME. Theme and bypass acceptance live in settings.json on Claude
 2.1.308, while onboarding and project trust live in .claude.json.
-A worker is started only after a launch-specific UserPromptSubmit hook writes a
+A worker is normally started after a launch-specific UserPromptSubmit hook writes a
 local receipt. This avoids depending on best-effort network event delivery and
 cannot confuse another session's event with the worker's first submission.
-After Herdr startup, allow 30 seconds for the receipt. Missing proof leaves the
+Herdr 0.9.5 offers only an interactive-readiness wait, not a submission wait.
+Even when that wait errors, allow 30 seconds for the receipt. A live Claude
+process plus working status is fallback startup evidence. Never roll back an
+uncertain first-prompt launch: retaining an empty pane is safer than killing work.
+For unprompted launches, close only after confirming no Claude process runs. Missing proof leaves the
 pane open and records stalled state, pane text, thread.failed and failed attention.
 The launch fence still forbids automatic retries, including after interruption.
 Persist its session ID before launch so a late turn-started report can clear
@@ -220,3 +224,19 @@ every retained payload. Id-only keep-alives carry the scanned watermark past
 skipped records. The CLI consumes those without printing them and waits for
 stdout drain before reading more response data or advancing its cursor. Network
 failure cannot start another reader around a pending output write.
+
+### Claude launch policy (0.16.0)
+
+Before every start/resume, merge `model: "claude-opus-5-5"` and
+`attribution: { commit: "", pr: "" }` into Claude settings, retaining unrelated
+keys, hooks and permissions. A per-thread model is passed explicitly with
+`--model`, recorded in the registry, and saved from argv when checkpointing.
+Claude 2.1.308 was verified with an actual local commit, a no-network `gh pr
+create` shim and model usage responses; captures are in
+`docs/verification/claude-worker-launch/`. This token can use Opus 5.5.
+
+Submission evidence wins over a later launch RPC error. Only genuine unresolved
+launches publish failure, using the same message stored on the worker. Matching
+late submission reports recover failed as well as stalled launches. Neither
+recovery nor restart resubmits a first prompt. Views render these registry facts
+rather than interpreting historical failure events as current failure.

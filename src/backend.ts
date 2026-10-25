@@ -189,8 +189,8 @@ export async function runCommand(pylonId: PylonId, command: PylonCommand, deps: 
     case "exec":
       return { kind: "exec", ...await guest.exec(command.argv, { cwd: command.cwd, timeoutMs: command.timeoutMs }) };
     case "open-session": {
-      const { harness, title, resume, prompt } = command;
-      return { kind: "open-session", herdrPane: await openSession(guest, { harness, title, cwd: checkoutDir, ...(prompt === undefined ? {} : { prompt }), ...(resume === undefined ? {} : { resume }) }) };
+      const { harness, title, resume, prompt, model } = command;
+      return { kind: "open-session", herdrPane: await openSession(guest, { harness, title, cwd: checkoutDir, ...(model === undefined ? {} : { model }), ...(prompt === undefined ? {} : { prompt }), ...(resume === undefined ? {} : { resume }) }) };
     }
     case "close-session":
       return { kind: "close-session", outcome: await closeSession(guest, command.herdrPane, command.session) };
