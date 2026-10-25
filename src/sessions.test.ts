@@ -523,12 +523,12 @@ test("Claude user state merges onboarding, trust and bypass acceptance without l
   t.after(() => rm(home, { recursive: true, force: true }));
   await mkdir(join(home, ".claude"));
   const original = { oauthAccount: { accountUuid: "keep" }, projects: { [checkout]: { allowedTools: ["Read"] }, "/elsewhere": { hasTrustDialogAccepted: false } } };
-  const settings = { theme: "light", hooks: { Stop: [{ hooks: [{ command: "keep" }] }] }, enabledPlugins: { pstack: true } };
+  const settings = { theme: "light", model: "claude-sonnet-5-5", attribution: { commit: "old trailer", pr: "old footer", extra: "keep" }, hooks: { Stop: [{ hooks: [{ command: "keep" }] }] }, enabledPlugins: { pstack: true } };
   await writeFile(join(home, ".claude.json"), JSON.stringify(original));
   await writeFile(join(home, ".claude/settings.json"), JSON.stringify(settings));
   for (let i = 0; i < 2; i++) execFileSync("node", ["-e", seedClaudeState, checkout], { env: { ...process.env, HOME: home } });
   assert.deepEqual(JSON.parse(await readFile(join(home, ".claude.json"), "utf8")), { ...original, hasCompletedOnboarding: true, projects: { ...original.projects, [checkout]: { allowedTools: ["Read"], hasTrustDialogAccepted: true } } });
-  assert.deepEqual(JSON.parse(await readFile(join(home, ".claude/settings.json"), "utf8")), { ...settings, skipDangerousModePermissionPrompt: true });
+  assert.deepEqual(JSON.parse(await readFile(join(home, ".claude/settings.json"), "utf8")), { ...settings, model: "claude-opus-5-5", attribution: { commit: "", pr: "", extra: "keep" }, skipDangerousModePermissionPrompt: true });
 });
 
 test("Claude seeding remerges concurrent updates, preserves modes and writes nothing once seeded", async (t) => {
