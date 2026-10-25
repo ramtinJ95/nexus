@@ -27,6 +27,9 @@ export function processStream(file: string, args: readonly string[], log: (text:
       child.stdin.end();
       await finished(child.stdin).catch(() => undefined);
     },
+    abort() {
+      child.kill("SIGKILL");
+    },
     done,
   };
 }

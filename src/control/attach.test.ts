@@ -10,29 +10,41 @@ import { terminalSize, type Terminal } from "../guest-terminal.ts";
 import type { StreamEnd } from "../protocol.ts";
 import { serveAttach, type AttachTiming, type Ending, type Look, type PylonDoor } from "./attach.ts";
 
-const fast: AttachTiming = { pingMs: 60_000, waitMs: 5_000, pollMs: 10 };
+const fast: AttachTiming = { pingMs: 60_000, waitMs: 5_000, pollMs: 10, hangUpMs: 5_000 };
 const opening: AttachRequest = { size: terminalSize(100, 30), term: "xterm-256color" };
 
-/** A program on a pty, scripted by the test. A hang-up ends it with `onHangUp`'s code, as Herdr detaching exits 0. */
+/**
+ * A program on a pty, scripted by the test. A hang-up ends it with `onHangUp`'s code, as Herdr detaching exits 0, and
+ * with `null` never does, as on a node that stopped answering. Each write waits for `taking`.
+ */
 function fakeTerminal(onHangUp: StreamEnd | null = { kind: "exited", code: 0 }) {
   const output = new PassThrough();
   const end = Promise.withResolvers<StreamEnd>();
   const calls: unknown[][] = [];
+  const keys = { taking: Promise.resolve(), taken: 0 };
   const finish = (how: StreamEnd) => {
     output.end();
     end.resolve(how);
   };
   const terminal: Terminal = {
     [Symbol.asyncIterator]: () => output[Symbol.asyncIterator](),
-    async write(keys) { calls.push(["keys", Buffer.from(keys).toString()]); },
+    async write(chunk) {
+      await keys.taking;
+      keys.taken += chunk.length;
+      calls.push(chunk.length < 1024 ? ["keys", Buffer.from(chunk).toString()] : ["paste", chunk[0], chunk.length]);
+    },
     async resize(size) { calls.push(["resize", size.cols, size.rows]); },
     async hangUp() {
       calls.push(["hangUp"]);
       if (onHangUp !== null) setTimeout(() => finish(onHangUp), 20);
     },
+    abort() {
+      calls.push(["abort"]);
+      finish({ kind: "lost" });
+    },
     done: end.promise,
   };
-  return { terminal, calls, print: (text: string) => output.write(text), exit: (code: number) => finish({ kind: "exited", code }), lose: () => finish({ kind: "lost" }) };
+  return { terminal, calls, keys, print: (text: string) => output.write(text), exit: (code: number) => finish({ kind: "exited", code }), lose: () => finish({ kind: "lost" }) };
 }
 
 /** A thread whose pylon the test moves, and whose node opens `opens` in turn: a terminal, or a ProbeError code. */
@@ -179,6 +191,16 @@ test("a client that leaves hangs the terminal up and waits for the program to ex
   await a.served;
   assert.deepEqual(program.calls, [["hangUp"]]);
   assert.deepEqual(await program.terminal.done, { kind: "exited", code: 0 }, "serveAttach resolved only after the program exited");
+});
+
+test("a terminal that does not end after its hang-up is dropped after hangUpMs, so a silent node cannot keep the attach", async () => {
+  const program = fakeTerminal(null);
+  const a = await attach(fakeDoor([program]).door, { timing: { ...fast, hangUpMs: 100 } });
+  await a.messages(1);
+  a.client.close();
+  assert.equal(await Promise.race([a.served.then(() => "served"), sleep(2_000, "still serving")]), "served");
+  assert.deepEqual(program.calls, [["hangUp"], ["abort"]]);
+  assert.deepEqual(await program.terminal.done, { kind: "lost" });
 });
 
 test("a client that stops answering pings is dropped, which hangs up", async () => {

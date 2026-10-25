@@ -1033,7 +1033,7 @@ test("unknown threads, routes and methods get 404 and 405", async (t) => {
   assert.equal((await s.call("POST", "/v1/projects", "{not json")).status, 400);
 });
 
-const fastAttach: AttachTiming = { pingMs: 60_000, waitMs: 5_000, pollMs: 20 };
+const fastAttach: AttachTiming = { pingMs: 60_000, waitMs: 5_000, pollMs: 20, hangUpMs: 5_000 };
 
 /**
  * Asks for a terminal as the CLI does, with no Origin unless `headers` gives one. Resolves with the open socket and
@@ -1076,6 +1076,10 @@ function fakePipe() {
     [Symbol.asyncIterator]: () => output[Symbol.asyncIterator](),
     async write(chunk) { stdin.push(Buffer.from(chunk)); },
     async close() { setTimeout(() => exit(0), 10); },
+    abort() {
+      output.end();
+      end.resolve({ kind: "lost" });
+    },
     done: end.promise,
   };
   return { stream, stdin: () => Buffer.concat(stdin), print: (text: string) => output.write(text), exit };

@@ -234,6 +234,7 @@ test("a read abandoned at its deadline lets go of what it already holds, though 
     },
     write: async () => {},
     close: async () => {},
+    abort: () => {},
     done,
   };
   await assert.rejects(checkoutReader(async () => stalled, "/repo", 50).changes("head"), refused("slow", /within 0.05 s/));

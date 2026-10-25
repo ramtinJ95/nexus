@@ -43,6 +43,8 @@ export interface Terminal extends AsyncIterable<Uint8Array> {
   resize(size: TerminalSize): Promise<void>;
   /** Ends the relay's stdin, which hangs up the terminal. Output keeps arriving until the program exits. Safe to repeat. */
   hangUp(): Promise<void>;
+  /** Drops the pipe without waiting for the relay, as for a node that stopped answering. The relay hangs up when its stdin ends. */
+  abort(): void;
   readonly done: Promise<StreamEnd>;
 }
 
@@ -66,6 +68,7 @@ export async function openTerminal(open: (argv: readonly string[]) => Promise<By
       return stream.write(frame(frameType.resize, payload));
     },
     hangUp: () => hungUp ??= stream.close(),
+    abort: () => stream.abort(),
     done: stream.done,
   };
 }

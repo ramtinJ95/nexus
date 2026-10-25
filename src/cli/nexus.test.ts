@@ -646,6 +646,7 @@ function herdrPipe(): ByteStream {
       }, 50);
     },
     async close() {},
+    abort() {},
     done: end.promise,
   };
 }

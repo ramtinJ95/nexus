@@ -5,13 +5,14 @@
  * Waiting, each try records human activity and wakes the node, as a CLI command that needs the pylon running does,
  * so a paused pylon wakes on attach. Attached, the probe's count of Herdr clients keeps the human present. Every end
  * hangs the terminal up, which detaches Herdr's client and keeps its session, and waits for the guest's process to
- * exit, so nothing is left running in the pylon once serveAttach resolves.
+ * exit, so nothing is left running in the pylon once serveAttach resolves. A node that does not let it exit within
+ * hangUpMs has its stream dropped, which frees the stream's slot and hangs the relay up from the probe's side.
  */
 import { setTimeout as sleep } from "node:timers/promises";
 import type { WebSocket } from "ws";
 import { encodeMessage, parseClientMessage, type AttachErrorKind, type AttachRequest, type ServerMessage } from "../attach-wire.ts";
 import type { Terminal } from "../guest-terminal.ts";
-import type { ProbeError } from "../protocol.ts";
+import type { ProbeError, StreamEnd } from "../protocol.ts";
 import type { ActualState } from "../reconcile.ts";
 
 export interface AttachError { kind: AttachErrorKind; message: string }
@@ -36,8 +37,10 @@ export interface AttachTiming {
   /** How long the pylon has to run. */
   waitMs: number;
   pollMs: number;
+  /** How long a hung-up terminal has to end before its stream is dropped. */
+  hangUpMs: number;
 }
-export const attachTiming: AttachTiming = { pingMs: 15_000, waitMs: 120_000, pollMs: 1_000 };
+export const attachTiming: AttachTiming = { pingMs: 15_000, waitMs: 120_000, pollMs: 1_000, hangUpMs: 10_000 };
 
 /**
  * Serves one attach until it ends, and never rejects. Each end is one final message and a close, unless the client
@@ -110,9 +113,7 @@ export async function serveAttach(ws: WebSocket, door: PylonDoor, opening: Attac
     })();
     await Promise.race([opened.done, aborted(ended)]);
     const endedFirst = ended.aborted;
-    if (endedFirst) await hangUp(opened);
-    await output;
-    const end = await opened.done;
+    const end = endedFirst ? await letGo(opened, output) : await output.then(() => opened.done);
     await input;
     if (endedFirst) return await finish(left.signal.aborted ? null : { type: "error", ...endedBy() }, closeCode());
     if (end.kind === "exited" && end.code === 0) return await finish({ type: "exit", code: 0 });
@@ -128,8 +129,8 @@ export async function serveAttach(ws: WebSocket, door: PylonDoor, opening: Attac
       },
     });
   } catch (err) {
-    // Nothing above throws on purpose, so the terminal is only hung up here, not waited for.
-    if (terminal !== null) await hangUp(terminal);
+    // Nothing above throws on purpose, so the terminal is only dropped here, not waited for.
+    terminal?.abort();
     await finish({ type: "error", kind: "failed", message: (err as Error).message });
   } finally {
     clearInterval(ping);
@@ -151,9 +152,7 @@ export async function serveAttach(ws: WebSocket, door: PylonDoor, opening: Attac
         const opened = await door.open(asked);
         if (!ended.aborted) return { kind: "opened", terminal: opened, asked };
         // The client left, or the thread was deleted, while it opened.
-        await hangUp(opened);
-        for await (const _ of opened) { /* drained, so the relay can exit */ }
-        await opened.done;
+        await letGo(opened, (async () => { for await (const _ of opened) { /* drained, so the relay can exit */ } })());
         return { kind: "ended" };
       } catch (err) {
         const code = (err as Partial<ProbeError>).code;
@@ -167,6 +166,20 @@ export async function serveAttach(ws: WebSocket, door: PylonDoor, opening: Attac
       }
       await sleep(timing.pollMs, undefined, { signal: ended }).catch(() => undefined);
     }
+  }
+
+  /** Hangs the terminal up and waits for its output to drain and the program to end, or drops it past hangUpMs. */
+  async function letGo(t: Terminal, drained: Promise<void>): Promise<StreamEnd> {
+    const over = (async () => {
+      await hangUp(t);
+      await drained;
+      return await t.done;
+    })();
+    const end = await Promise.race([over, sleep(timing.hangUpMs, null, { ref: false })]);
+    if (end !== null) return end;
+    t.abort();
+    await drained;
+    return await t.done;
   }
 }
 

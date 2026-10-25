@@ -265,6 +265,8 @@ export interface ByteStream extends AsyncIterable<Uint8Array> {
   write(chunk: Uint8Array): Promise<void>;
   /** Ends the process's stdin. Its output keeps arriving until it exits. */
   close(): Promise<void>;
+  /** Drops the stream at once, without waiting for the process, as for a node that stopped answering. `done` follows. */
+  abort(): void;
   readonly done: Promise<StreamEnd>;
 }
 
@@ -571,6 +573,7 @@ function clientByteStream(socket: Duplex, head: Buffer): ByteStream {
     [Symbol.asyncIterator]: () => output[Symbol.asyncIterator]() as AsyncIterator<Uint8Array>,
     write: (chunk) => send(socket, frame(frameType.data, chunk)),
     close: () => send(socket, frame(frameType.eof, Buffer.alloc(0))),
+    abort: () => socket.destroy(),
     done,
   };
 }
