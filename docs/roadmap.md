@@ -10,6 +10,7 @@ Nexus threads are building these, one pull request each. They are dogfooding Nex
 
 - **A "Latest turn" base in Changes.** A snapshot per turn, kept as a hidden git ref, shows what the agent's last turn changed, beside "since the pylon booted" and "uncommitted".
 - **Pull request watch.** The control plane links a thread's pushed branch to its open pull request and polls it. It wakes the agent when checks fail, someone comments or reviews, or the branch conflicts. It stops on merge or close, or after 10 wakes in a row that brought only comments.
+- **Deploys that agents can run.** `nexus deploy <commit>` records the release Nexus should run, and a small root deployer on each node pulls it. It ships only commits on `main`, upgrades the control plane before the probes, waits for running turns, and rolls itself back when the health check fails. Only nodes listed in `control.json` may deploy, never agents inside pylons. Installing the deployer takes sudo once per node. After that, no deploy needs a password or SSH.
 
 ## Next
 
