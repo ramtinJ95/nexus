@@ -86,7 +86,7 @@ services:
       API_URL: ${services.api.publicURL}
 ```
 
-The schema starts from pi-sandbox's `services` schema. `PUBLIC_URL` is the `https://` tailnet address of the preview. `PORT`, `PUBLIC_URL` and every `NEXUS_*` name are managed.
+The schema starts from pi-sandbox's `services` schema. `PUBLIC_URL` is the `https://` tailnet address of the preview. `PORT`, `PUBLIC_URL` and every `NEXUS_*` name are managed. A fixed `port` may not be one of Nexus's own, 22 for sshd or 700 to 799 for the preview relay, and a file that fixes one is refused whole, as one with a duplicate fixed port is.
 
 ### In Nexus
 
