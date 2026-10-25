@@ -145,34 +145,42 @@ async function startHarness(guest: Guest, pane: string, harness: SessionHarness,
     const seeded = await guest.exec(["node", "-e", seedClaudeState, checkoutDir], { cwd: home, timeoutMs: callTimeoutMs });
     if (seeded.exitCode !== 0) throw new Error(`seeding Claude state failed: ${seeded.output}`);
   }
-  const receipt = `${home}/.nexus/claude-submitted-${randomUUID()}`;
-  const argv = ["agent", "start", `nx-${randomUUID().slice(0, 8)}`, "--kind", agent.kind, "--pane", pane, "--timeout", String(agentStartTimeoutMs)];
   const args = resume === undefined ? agent.fresh() : await agent.resume(guest, resume);
   const launch = [...args];
   if (harness === "claude-code" && model !== undefined) launch.push("--model", model);
   if (harness === "claude-code") launch.push("--permission-mode", "bypassPermissions");
   if (harness === "claude-code" && prompt !== undefined) {
+    const receipt = `${home}/.nexus/claude-submitted-${randomUUID()}`;
     const command = `mkdir -p ${home}/.nexus && touch ${receipt}`;
-    launch.push("--settings", JSON.stringify({ hooks: { UserPromptSubmit: [{ hooks: [{ type: "command", command }] }] } }));
+    launch.push("--settings", JSON.stringify({ hooks: { UserPromptSubmit: [{ hooks: [{ type: "command", command }] }] } }), prompt);
+    // Herdr 0.9.5's agent start refuses an argument holding a newline or another control character, as a multi-line
+    // prompt does, so this launch types its own command. Once typed, any error is as uncertain as a readiness timeout:
+    // the receipt decides, and the pane and the submission fence stay.
+    const typed = await herdr(guest, ["pane", "run", pane, [agent.kind, ...launch].map(shellWord).join(" ")]).then(() => "", (err: Error) => ` after ${err.message}`);
+    const submitted = await guest.exec(["sh", "-c", 'i=0; until test -f "$1"; do i=$((i+1)); test "$i" -lt 300 || exit 1; sleep 0.1; done; rm -f "$1"', "claude-submitted", receipt], { cwd: home, timeoutMs: 35_000 }).catch(() => ({ exitCode: null }));
+    if (submitted.exitCode !== 0 && await runsAgent(guest, pane, "claude").catch(() => false)) {
+      const panes = await livePanes(guest).catch(() => []);
+      if (panes.some((p) => p.herdrPane === pane && p.status === "working")) return;
+    }
+    if (submitted.exitCode !== 0) throw new ClaudeLaunchStalled(`Claude launch stalled: no UserPromptSubmit within 30 seconds${typed}; attach before starting another session. The pane showed:\n${await screen(guest, pane)}`, pane);
+    return;
   }
   if (prompt !== undefined) launch.push(prompt);
+  const argv = ["agent", "start", `nx-${randomUUID().slice(0, 8)}`, "--kind", agent.kind, "--pane", pane, "--timeout", String(agentStartTimeoutMs)];
   if (launch.length > 0) argv.push("--", ...launch);
   const busyUntil = Date.now() + paneBusyRetryMs;
   for (;;) {
     try {
       await herdr(guest, argv, agentStartTimeoutMs + callTimeoutMs);
-      break;
+      return;
     } catch (err) {
       // Blocked at startup, such as Claude Code asking whether to trust the folder: the session is open
       // and waits for its human, who answers it in the terminal.
-      if (err instanceof HerdrError && err.code === "agent_not_ready") break;
+      if (err instanceof HerdrError && err.code === "agent_not_ready") return;
       if (err instanceof HerdrError && err.code === "agent_pane_busy" && Date.now() < busyUntil) {
         await new Promise((resolve) => setTimeout(resolve, 100));
         continue;
       }
-      // Readiness is not submission: a first prompt can keep Claude busy past Herdr's deadline.
-      // Once the command was sent, uncertainty must preserve the pane and the submission fence.
-      if (harness === "claude-code" && prompt !== undefined) break;
       if (harness === "claude-code") {
         const running = await runsAgent(guest, pane, "claude").catch(() => null);
         if (running === true) return;
@@ -182,14 +190,14 @@ async function startHarness(guest: Guest, pane: string, harness: SessionHarness,
       throw new Error(`${(err as Error).message}. The pane showed:\n${await screen(guest, pane)}`, { cause: err });
     }
   }
-  if (harness === "claude-code" && prompt !== undefined) {
-    const submitted = await guest.exec(["sh", "-c", 'i=0; until test -f "$1"; do i=$((i+1)); test "$i" -lt 300 || exit 1; sleep 0.1; done; rm -f "$1"', "claude-submitted", receipt], { cwd: home, timeoutMs: 35_000 }).catch(() => ({ exitCode: null }));
-    if (submitted.exitCode !== 0 && await runsAgent(guest, pane, "claude").catch(() => false)) {
-      const panes = await livePanes(guest).catch(() => []);
-      if (panes.some((p) => p.herdrPane === pane && p.status === "working")) return;
-    }
-    if (submitted.exitCode !== 0) throw new ClaudeLaunchStalled(`Claude launch stalled: no UserPromptSubmit within 30 seconds; attach before starting another session. The pane showed:\n${await screen(guest, pane)}`, pane);
-  }
+}
+
+/**
+ * `arg` as one bash word, typed into the pane's shell. ANSI-C quoting spells control characters, `'` and `!` as
+ * escapes, so the typed line holds nothing the terminal, readline or history expansion acts on.
+ */
+function shellWord(arg: string): string {
+  return `$'${arg.replace(/[\\'!\x00-\x1f\x7f]/g, (c) => c === "\\" ? "\\\\" : `\\x${c.charCodeAt(0).toString(16).padStart(2, "0")}`)}'`;
 }
 
 export class ClaudeLaunchStalled extends Error {
@@ -566,6 +574,8 @@ async function herdr(guest: Guest, args: readonly string[], timeoutMs = callTime
   const { exitCode, output } = await guest.exec(["herdr", "--session", herdrSession, ...args], { cwd: home, timeoutMs });
   if (exitCode === null) throw new Error(`${what} did not finish within ${timeoutMs} ms`);
   const line = output.trimEnd().split("\n").findLast((l) => l.startsWith("{"));
+  // `pane run` succeeds silently.
+  if (line === undefined && exitCode === 0 && output.trim() === "") return undefined;
   if (line === undefined) throw new Error(`${what} exited ${exitCode} without a JSON reply: ${output.slice(-500)}`);
   const reply = record(JSON.parse(line), `${what} reply`);
   if (reply.error !== undefined) {

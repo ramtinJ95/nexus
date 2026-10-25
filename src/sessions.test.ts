@@ -33,6 +33,7 @@ function herdrUp(overrides: Record<string, (argv: readonly string[]) => ExecRepl
     if (sub === "workspace list") return herdrOk({ type: "workspace_list", workspaces: [] });
     if (sub === "workspace create") return created("w1", "w1:p1");
     if (sub === "agent start") return agentStarted;
+    if (sub === "pane run") return { exitCode: 0, output: "" };
     if (sub === "workspace close") return herdrOk({ type: "ok" });
     if (sub === "pane process-info") return processInfo({})(argv);
     if (sub === "pane read") return herdrOk({ type: "pane_read", read: { text: "user@pylon:~$ " } });
@@ -494,23 +495,29 @@ test("an attached terminal is a client with exactly the command line attachedTer
   assert.ok(attachScript.includes("setsid -f tini -s -- herdr --session nexus server </dev/null >/dev/null 2>&1"));
 });
 
-test("a worker's initial slash prompt is one literal Claude argument, not terminal input", async () => {
+test("a worker's first prompt reaches Claude as one exact argument through the pane's interactive bash", async () => {
+  const { execFileSync } = await import("node:child_process");
   const guest = herdrUp();
-  const prompt = '/poteto-mode fix "quotes" and $(not-a-shell-command)\nthen test';
-  await openSession(guest, { harness: "claude-code", title: "worker", cwd: "/home/user/workspace/repo", prompt });
-  const start = guest.execs.find((a) => a[3] === "agent")!;
-  assert.deepEqual(start.slice(-5, -3), ["--permission-mode", "bypassPermissions"]);
-  assert.equal(start.at(-1), prompt);
+  const prompt = "/poteto-mode fix \"quotes\" and 'single' and `ticks` and $(not-a-shell-command) $HOME !! \\n\nthen\ttest\r\n\n  ünïcode\n";
+  await openSession(guest, { harness: "claude-code", title: "worker", cwd: "/home/user/workspace/repo", prompt, model: "claude-opus-5-5" });
+  assert.equal(guest.herdrCalls().includes("agent start"), false);
+  const command = guest.execs.find((a) => a[3] === "pane" && a[4] === "run")!.at(-1)!;
+  assert.doesNotMatch(command, /[\x00-\x1f\x7f]/, "nothing in the typed line is a key the terminal or readline acts on");
+  const typed = `claude() { printf '%s\\0' "$@"; }\n${command}\n`;
+  const argv = execFileSync("bash", ["--norc", "--noprofile", "-i"], { input: typed, encoding: "utf8", stdio: ["pipe", "pipe", "ignore"] }).split("\0").slice(0, -1);
+  assert.deepEqual(argv.slice(0, 1), ["--session-id"]);
+  assert.deepEqual(argv.slice(2, 7), ["--model", "claude-opus-5-5", "--permission-mode", "bypassPermissions", "--settings"]);
+  assert.match(JSON.parse(argv[7]!).hooks.UserPromptSubmit[0].hooks[0].command, /^mkdir -p \/home\/user\/\.nexus && touch \/home\/user\/\.nexus\/claude-submitted-/);
+  assert.equal(argv[8], prompt);
+  assert.equal(argv.length, 9);
   assert.ok(guest.execs.some((a) => a[3] === "claude-submitted"));
-  assert.equal(guest.execs.some((a) => a.includes("send-text") || a.includes("send-keys")), false);
 });
-
 
 test("a worker without prompt submission stalls and leaves its visible pane for takeover", async () => {
   const guest = herdrUp({ "pane read": () => herdrOk({ read: { text: "Choose the text style" } }) }, true, false);
   await assert.rejects(openSession(guest, { harness: "claude-code", title: "worker", cwd: "/home/user/workspace/repo", prompt: "hello" }), /Claude launch stalled.*Choose the text style/s);
   assert.equal(guest.herdrCalls().includes("workspace close"), false);
-  assert.equal(guest.herdrCalls().filter((c) => c === "agent start").length, 1);
+  assert.equal(guest.herdrCalls().filter((c) => c === "pane run").length, 1);
 });
 
 test("Claude user state merges onboarding, trust and bypass acceptance without losing login or hooks", async (t) => {
@@ -599,18 +606,17 @@ test("resuming a pane at root or HOME seeds only the pylon checkout", async () =
 });
 
 
-test("a readiness timeout after submission is started and never closes the busy pane", async () => {
-  const guest = herdrUp({ "agent start": () => herdrError("timeout", "timed out waiting for agent startup") });
+test("an error typing the launch is uncertain, so its receipt starts the worker and the pane is never closed", async () => {
+  const guest = herdrUp({ "pane run": () => herdrError("timeout", "timed out") });
   assert.equal(await openSession(guest, { harness: "claude-code", title: "worker", cwd: "/home/user/workspace/repo", prompt: "work", model: "custom-model" }), "w1:p1");
   assert.equal(guest.herdrCalls().includes("workspace close"), false);
-  assert.equal(guest.herdrCalls().filter((c) => c === "agent start").length, 1);
-  const start = guest.execs.find((a) => a[3] === "agent")!;
-  assert.equal(start[start.indexOf("--model") + 1], "custom-model");
+  assert.equal(guest.herdrCalls().filter((c) => c === "pane run").length, 1);
+  assert.match(guest.execs.find((a) => a[3] === "pane" && a[4] === "run")!.at(-1)!, / \$'--model' \$'custom-model' /);
 });
 
 test("a lost receipt with a running busy Claude also preserves the launch", async () => {
   const guest = herdrUp({
-    "agent start": () => herdrError("timeout", "timed out waiting for agent startup"),
+    "pane run": () => herdrError("timeout", "timed out"),
     "pane process-info": processInfo({ "w1:p1": ["claude"] }),
     "api snapshot": () => herdrOk(herdrSnapshot([{ id: "w1", label: "worker" }], [herdrPane("w1:p1", "w1", "claude", "working")])),
   }, true, false);

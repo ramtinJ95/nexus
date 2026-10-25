@@ -218,7 +218,8 @@ rejects very delayed reports rather than allowing an old start to resurrect a
 turn, without unbounded tombstones. Thread deletion removes both cursor tables;
 archived/deleted threads ignore session reports.
 
-`claude_workers` holds a thread's first prompt and launch state: `pending`,
+`claude_workers` holds a thread's first prompt, trimmed and with `/poteto-mode`
+added unless present, which Claude receives exactly, newlines and quotes included, and its launch state: `pending`,
 `starting`, `started`, `stalled`, or `failed`, plus an optional failure message. It is created atomically with the thread. A
 Claude-worker thread has no control-plane harness conversation. Its pending
 launch runs after its pylon is observed running. `starting` is written before the
@@ -226,7 +227,7 @@ non-idempotent open command: after an interrupted launch, Nexus reports failure
 rather than risking a second submission. Inspect with `attach` before opening
 another session. `started` means the initial prompt reached a launch-specific UserPromptSubmit
 hook, or a live Claude process is observed working, not task success. Without
-either proof within 30 seconds after Herdr startup, the launch is `stalled`; the pane remains open. `ThreadDetail.claudeWorker` exposes
+either proof within 30 seconds after its launch command is typed, the launch is `stalled`; the pane remains open. `ThreadDetail.claudeWorker` exposes
 `state`, nullable `model` and optional `message`, including the last 20 visible pane lines (at most
 8 KiB). The same diagnostic appears in `thread.failed`; stalled and failed
 workers both have `failed` attention. The worker's launch session ID is persisted
