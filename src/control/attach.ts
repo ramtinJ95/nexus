@@ -8,14 +8,15 @@
  * exit, so nothing is left running in the pylon once serveAttach resolves. A node that does not let it exit within
  * hangUpMs has its stream dropped, which frees the stream's slot and hangs the relay up from the probe's side.
  *
- * Keys wait in order for the relay to take them. Past maxQueuedKeys the socket stops being read until they drain, so
- * a pylon that takes no keys holds a bounded amount of them here. A paused socket answers no pings either, so one
+ * Keys wait in order for the relay to take them, and a resize waits among them, as the latest size alone. Past
+ * maxQueuedKeys bytes or maxQueuedWrites writes the socket stops being read until they drain, so a pylon that takes
+ * no keys holds a bounded amount of them here. A paused socket answers no pings either, so one
  * that stays paused is dropped like a silent client.
  */
 import { setTimeout as sleep } from "node:timers/promises";
 import type { WebSocket } from "ws";
 import { encodeMessage, parseClientMessage, type AttachErrorKind, type AttachRequest, type ServerMessage } from "../attach-wire.ts";
-import type { Terminal } from "../guest-terminal.ts";
+import type { Terminal, TerminalSize } from "../guest-terminal.ts";
 import type { ProbeError, StreamEnd } from "../protocol.ts";
 import type { ActualState } from "../reconcile.ts";
 
@@ -47,6 +48,7 @@ export interface AttachTiming {
 export const attachTiming: AttachTiming = { pingMs: 15_000, waitMs: 120_000, pollMs: 1_000, hangUpMs: 10_000 };
 
 export const maxQueuedKeys = 1 << 20;
+export const maxQueuedWrites = 1024;
 
 /**
  * Serves one attach until it ends, and never rejects. Each end is one final message and a close, unless the client
@@ -55,9 +57,30 @@ export const maxQueuedKeys = 1 << 20;
 export async function serveAttach(ws: WebSocket, door: PylonDoor, opening: AttachRequest, signal: AbortSignal, timing = attachTiming): Promise<void> {
   let request = opening;
   let terminal: Terminal | null = null;
-  /** Keys and resizes in the order they came. A write fails only once the relay is gone, which `done` reports. */
+  /** Writes to the terminal, one at a time. A write fails only once the relay is gone, which `done` reports. */
   let input = Promise.resolve();
-  let queued = 0;
+  let queuedBytes = 0;
+  let queuedWrites = 0;
+  const enqueue = (bytes: number, write: () => Promise<void>) => {
+    queuedBytes += bytes;
+    queuedWrites++;
+    if (queuedBytes > maxQueuedKeys || queuedWrites > maxQueuedWrites) ws.pause();
+    input = input.then(write).catch(() => undefined).finally(() => {
+      queuedBytes -= bytes;
+      queuedWrites--;
+      if (queuedBytes <= maxQueuedKeys && queuedWrites <= maxQueuedWrites && ws.isPaused) ws.resume();
+    });
+  };
+  /** The size the queued resize applies, or null when none is queued. */
+  let resizing: TerminalSize | null = null;
+  const resize = (t: Terminal, size: TerminalSize) => {
+    if (resizing === null) enqueue(0, () => {
+      const latest = resizing!;
+      resizing = null;
+      return t.resize(latest);
+    });
+    resizing = size;
+  };
   const left = new AbortController();
   const ended = AbortSignal.any([signal, left.signal]);
   // ws closes the link after an error, and the close hangs up.
@@ -75,13 +98,9 @@ export async function serveAttach(ws: WebSocket, door: PylonDoor, opening: Attac
     if (binary) {
       // Keys before `attached` have no terminal to go to. ws hands binary over as one Buffer.
       const keys = data as Buffer;
-      if (terminal === null) return;
-      queued += keys.length;
-      if (queued > maxQueuedKeys) ws.pause();
-      input = input.then(() => terminal!.write(keys)).catch(() => undefined).finally(() => {
-        queued -= keys.length;
-        if (queued <= maxQueuedKeys && ws.isPaused) ws.resume();
-      });
+      if (terminal === null || keys.length === 0) return;
+      const to = terminal;
+      enqueue(keys.length, () => to.write(keys));
       return;
     }
     let message: ReturnType<typeof parseClientMessage>;
@@ -95,7 +114,7 @@ export async function serveAttach(ws: WebSocket, door: PylonDoor, opening: Attac
     if (message === null) return;
     const { size } = message;
     if (terminal === null) request = { ...request, size };
-    else input = input.then(() => terminal!.resize(size)).catch(() => undefined);
+    else resize(terminal, size);
   });
 
   const send = (message: ServerMessage) => new Promise<void>((resolve) => { ws.send(encodeMessage(message), () => resolve()); });
@@ -116,7 +135,7 @@ export async function serveAttach(ws: WebSocket, door: PylonDoor, opening: Attac
     terminal = opened;
     // A resize that came while the terminal opened.
     const latest = request;
-    if (latest !== waited.asked) input = input.then(() => opened.resize(latest.size)).catch(() => undefined);
+    if (latest !== waited.asked) resize(opened, latest.size);
     await send({ type: "attached" });
     const output = (async () => {
       // Read to the end even once nobody listens, because the relay blocks on a full stdout.

@@ -8,7 +8,7 @@ import { WebSocket, WebSocketServer, type ClientOptions } from "ws";
 import { encodeMessage, type AttachRequest } from "../attach-wire.ts";
 import { terminalSize, type Terminal } from "../guest-terminal.ts";
 import type { StreamEnd } from "../protocol.ts";
-import { maxQueuedKeys, serveAttach, type AttachTiming, type Ending, type Look, type PylonDoor } from "./attach.ts";
+import { maxQueuedKeys, maxQueuedWrites, serveAttach, type AttachTiming, type Ending, type Look, type PylonDoor } from "./attach.ts";
 
 const fast: AttachTiming = { pingMs: 60_000, waitMs: 5_000, pollMs: 10, hangUpMs: 5_000 };
 const opening: AttachRequest = { size: terminalSize(100, 30), term: "xterm-256color" };
@@ -217,6 +217,32 @@ test("keys the pylon does not take stop the socket being read once they pass max
   taking.resolve();
   for (const deadline = Date.now() + 5_000; program.keys.taken < chunks * chunk && Date.now() < deadline;) await sleep(20);
   assert.deepEqual(program.calls, Array.from({ length: chunks }, (_, i) => ["paste", i, chunk]));
+  program.exit(0);
+  await a.served;
+});
+
+test("empty key messages are dropped, queued resizes collapse to the latest, and past maxQueuedWrites writes the socket stops being read", async () => {
+  const program = fakeTerminal();
+  const taking = Promise.withResolvers<void>();
+  program.keys.taking = taking.promise;
+  const a = await attach(fakeDoor([program]).door);
+  await a.messages(1);
+  a.client.send(Buffer.from("a"));
+  for (let i = 0; i < 1000; i++) {
+    a.client.send(Buffer.alloc(0));
+    a.client.send(encodeMessage({ type: "resize", size: terminalSize(80 + i % 50, 24) }));
+  }
+  a.client.send(encodeMessage({ type: "resize", size: terminalSize(132, 50) }));
+  // Each is a 7-byte frame, and a few times maxQueuedWrites of them.
+  const keys = 40 * maxQueuedWrites;
+  for (let i = 0; i < keys; i++) a.client.send(Buffer.from("k"));
+  await sleep(200);
+  assert.ok(a.client.bufferedAmount > keys * 7 / 2, `the control plane read all but ${a.client.bufferedAmount} bytes`);
+  taking.resolve();
+  for (const deadline = Date.now() + 5_000; program.keys.taken < 1 + keys && Date.now() < deadline;) await sleep(20);
+  assert.deepEqual(program.calls.filter(([kind]) => kind === "resize"), [["resize", 132, 50]]);
+  assert.deepEqual(program.calls.filter(([kind, text]) => kind === "keys" && text === ""), []);
+  assert.equal(program.keys.taken, 1 + keys);
   program.exit(0);
   await a.served;
 });
