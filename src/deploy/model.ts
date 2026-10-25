@@ -13,7 +13,7 @@ export interface ReleaseView {
   desired: DesiredRelease | null;
   nodes: ReleaseReport[];
 }
-export interface Drain { commit: string; expiresAt: number }
+export interface Drain { commit: string; expiresAt: number; locked?: boolean }
 
 export function releaseOutcome(view: ReleaseView, commit: string, now = Date.now()): "pending" | "healthy" | "failed" | "superseded" {
   if (view.desired?.commit !== commit) return "superseded";

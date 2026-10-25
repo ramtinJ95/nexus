@@ -1380,6 +1380,8 @@ test("pylon traffic under its host identity cannot deploy even if that identity 
   s.callAs("nFIREBAT" as TailnetNodeId);
   assert.equal((await s.call("PUT", "/v1/release", { commit: deployCommit }, { "x-forwarded-for": "nLAPTOP", ...reporterHeaders })).status, 403);
   assert.equal((await s.call("GET", "/v1/deployer/release")).status, 403);
+  assert.equal((await s.call("GET", "/v1/%64eployer/release")).status, 403);
+  assert.equal((await s.call("POST", "/v1/%64eployer/drain", { commit: deployCommit })).status, 403);
   assert.equal((await s.call("GET", "/v1/deployer/release", undefined, reporterHeaders)).status, 200);
   s.callAs(null);
   assert.equal((await s.call("PUT", "/v1/release", { commit: deployCommit }, reporterHeaders)).status, 403);
@@ -1421,4 +1423,35 @@ test("expired drain leases no longer block callers", async (t) => {
   const s = await withThread(t, { deployment });
   s.registry.setDrain({ commit: deployCommit, expiresAt: Date.now() - 1 });
   assert.equal((await s.call("POST", `/v1/threads/${s.thread.id}/messages`, { text: "hello", requestId: "after-drain" })).status, 202);
+});
+
+test("drain cannot declare idle while a previously admitted message is still entering the harness", async (t) => {
+  const s = await withThread(t, { deployment });
+  await s.call("PUT", "/v1/release", { commit: deployCommit });
+  const entering = Promise.withResolvers<void>();
+  const finish = Promise.withResolvers<void>();
+  const send = s.fake.harness.send;
+  s.fake.harness.send = async (...args) => { entering.resolve(); await finish.promise; return send(...args); };
+  const sending = s.call("POST", `/v1/threads/${s.thread.id}/messages`, { text: "hello", requestId: "entering-drain" });
+  await entering.promise;
+  s.callAs("nFIREBAT" as TailnetNodeId);
+  try {
+    assert.equal((await s.call("POST", "/v1/deployer/drain", { commit: deployCommit }, reporterHeaders)).body.idle, false);
+  } finally { finish.resolve(); }
+  assert.equal((await sending).status, 202);
+  assert.equal((await s.call("POST", "/v1/deployer/drain", { commit: deployCommit }, reporterHeaders)).body.idle, true);
+});
+
+test("the final idle fence holds across lease expiry until rollback or success releases it", async (t) => {
+  const s = await setup(t, { deployment });
+  await s.call("PUT", "/v1/release", { commit: deployCommit });
+  s.callAs("nFIREBAT" as TailnetNodeId);
+  assert.equal((await s.call("POST", "/v1/deployer/drain", { commit: deployCommit, hold: true }, reporterHeaders)).body.idle, true);
+  assert.equal(s.registry.drain()!.locked, true);
+  s.registry.setDrain({ ...s.registry.drain()!, expiresAt: 0 });
+  s.callAs(laptop);
+  assert.equal((await s.call("POST", "/v1/threads", {})).status, 409);
+  s.callAs("nFIREBAT" as TailnetNodeId);
+  await s.call("POST", "/v1/deployer/drain", { commit: deployCommit, release: true }, reporterHeaders);
+  assert.equal(s.registry.drain(), null);
 });

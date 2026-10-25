@@ -39,6 +39,7 @@ export interface Transaction extends Attempt { previous: string; target: string 
 export interface InstallBoundary {
   /** Builds and performs upgrade steps without switching links or restarting services. */
   prepare(commit: string): Promise<string>;
+  beforeSwitch?(): Promise<void>;
   activate?(role: Role): Promise<void>;
   restart(role: Role): Promise<void>;
   /** Must bound both the active-service check and API request, including its response body. */
@@ -91,6 +92,7 @@ export class ReleaseInstaller {
     // Automatic deployment needs a bootstrapped, recoverable release.
     const previous = await readlink(this.link);
     const target = await this.boundary.prepare(commit);
+    await this.boundary.beforeSwitch?.();
     const transaction = await this.record({ commit, previous, target, state: "installing", reason: null });
     try {
       await this.point(target);

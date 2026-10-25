@@ -87,7 +87,7 @@ export async function reconcileRole(role: Role, config: WorkerConfig, api: Api, 
     const value = { role, commit: await commitAt(link), target, state, reason, observedAt: Date.now() };
     await atomicJson(reportPath, value);
     const { observedAt: _, ...wire } = value;
-    await api("report", wire);
+    await api("report", wire).catch(() => { console.error(`could not report ${role} release; retained locally for the next poll`); });
   };
   let desired: string | null = null;
   let renewal: NodeJS.Timeout | undefined;
@@ -102,6 +102,9 @@ export async function reconcileRole(role: Role, config: WorkerConfig, api: Api, 
       await copyFile(unit, savedUnit);
       await run("env", [`NEXUS_COMMIT=${commit}`, "bash", "-c", '. "$1/deploy/release.sh"; install_release "$1"', "build", repo], repo);
       return `releases/${commit}`;
+    },
+    async beforeSwitch() {
+      if (role === "control" && !(await api("drain", { commit: desired, hold: true })).idle) throw new Error("agent turn entered after the drain lease expired; refusing restart");
     },
     async activate() {
       const view = await api("release") as ReleaseView;
@@ -133,6 +136,7 @@ export async function reconcileRole(role: Role, config: WorkerConfig, api: Api, 
   const prior = await jsonFile<ReleaseReport | null>(reportPath, null);
   if (desired !== null && prior?.target === desired && (prior.state === "failed" || prior.state === "rolled-back")) {
     await report(prior.state, desired, prior.reason);
+    if (role === "control") await api("drain", { commit: desired, release: true }).catch(() => {});
     return;
   }
   const current = { commit: await commitAt(link), healthy: await healthy() };
@@ -141,6 +145,7 @@ export async function reconcileRole(role: Role, config: WorkerConfig, api: Api, 
   const step = planDeploy({ desired: view.desired, role, current, control: observedControl, attempt: null, turnRunning: false, drainStartedAt: null, drainTimeoutMs: config.drainTimeoutMs, now: Date.now() });
   if (step.kind === "idle" || step.kind === "healthy") {
     await report(current.healthy ? "healthy" : "failed", desired, current.healthy ? null : "running release is not healthy");
+    if (role === "control" && desired !== null) await api("drain", { commit: desired, release: true }).catch(() => {});
     return;
   }
   if (step.kind !== "install") { await report("waiting-for-control", desired); return; }
@@ -149,9 +154,10 @@ export async function reconcileRole(role: Role, config: WorkerConfig, api: Api, 
       const start = Date.now();
       while (true) {
         const status = await drain();
-        if (status.idle) break;
+        const next = planDeploy({ desired: view.desired, role, current, control: observedControl, attempt: null, turnRunning: !status.idle, drainStartedAt: start, drainTimeoutMs: config.drainTimeoutMs, now: Date.now() });
+        if (next.kind === "install") break;
+        if (next.kind === "stop") throw new Error(next.reason);
         await report("waiting-for-idle", desired);
-        if (Date.now() - start >= config.drainTimeoutMs) throw new Error("agent turn still running at drain timeout");
         await sleep(1000);
       }
       renewal = setInterval(() => { void drain().catch(() => { drainLost = true; }); }, 20_000);

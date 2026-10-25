@@ -121,7 +121,7 @@ export async function startControlPlane(config: ControlPlaneConfig, models: Mode
     log: (message) => console.error(message),
   });
 
-  const gate = turnGate(() => (registry.drain()?.expiresAt ?? 0) > Date.now());
+  const gate = turnGate(() => registry.drain()?.locked === true || (registry.drain()?.expiresAt ?? 0) > Date.now());
   const harness: typeof rawHarness = {
     ...rawHarness,
     startThread: (...args) => gate.run(() => rawHarness.startThread(...args)),

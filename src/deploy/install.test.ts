@@ -113,3 +113,12 @@ test("git accepts merged commits, refuses a fetched non-main commit, and rejects
     await assert.rejects(checkoutMerged(clone, revision, async () => { assert.fail("git must not run"); }), /full lower-case commit hash/);
   }
 });
+
+test("a failed final idle fence never switches or restarts the running release", async (t) => {
+  const { prefix, boundary, installer, calls } = await fixture(t);
+  boundary.beforeSwitch = async () => { throw new Error("new turn entered after lease expiry"); };
+  await assert.rejects(installer.install(commit), /new turn entered/);
+  assert.equal(await readlink(join(prefix, "control-current")), "releases/old");
+  assert.deepEqual(calls, [`prepare:${commit}`]);
+  assert.equal(await installer.observed(), null);
+});

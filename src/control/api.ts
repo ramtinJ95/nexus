@@ -648,7 +648,7 @@ export async function startApi(options: ApiOptions): Promise<Api> {
   const noContent: Reply = { status: 204 };
 
   let startingTurns = 0;
-  const draining = () => (registry.drain()?.expiresAt ?? 0) > Date.now();
+  const draining = () => registry.drain()?.locked === true || (registry.drain()?.expiresAt ?? 0) > Date.now();
   async function turnsRunning(): Promise<boolean> {
     if (startingTurns > 0 || options.turnsStarting?.()) return true;
     for (const t of registry.threads()) {
@@ -729,7 +729,7 @@ export async function startApi(options: ApiOptions): Promise<Api> {
   async function admit(req: IncomingMessage): Promise<TailnetNodeId> {
     const { remoteAddress, remotePort } = req.socket;
     const caller = remoteAddress === undefined || remotePort === undefined ? null : await whois(remoteAddress, remotePort);
-    const workerRoute = new URL(req.url ?? "/", "http://nexus").pathname.startsWith("/v1/deployer/");
+    const workerRoute = decodeURIComponent(new URL(req.url ?? "/", "http://nexus").pathname).startsWith("/v1/deployer/");
     if (caller === null || (workerRoute
       ? !isReporter(registry, options.deployment, caller, req.headers.authorization)
       : !allowed.has(caller))) throw new HttpError(403, "caller is not a tailnet node this control plane allows");
@@ -773,10 +773,12 @@ export async function startApi(options: ApiOptions): Promise<Api> {
       }
       if (path === "/v1/deployer/drain" && req.method === "POST") {
         if (caller !== options.deployment?.self) throw new HttpError(403, "only the control node drains");
-        const body = parse(z.strictObject({ commit: commitSchema, release: z.boolean().optional() }), await readJson(req));
+        const body = parse(z.strictObject({ commit: commitSchema, release: z.boolean().optional(), hold: z.boolean().optional() }), await readJson(req));
         if (body.commit !== registry.desiredRelease()?.commit) throw new HttpError(409, "release was superseded");
-        registry.setDrain(body.release ? null : { commit: body.commit, expiresAt: Date.now() + 120_000 });
-        return send(res, 200, { idle: body.release ? false : !await turnsRunning(), expiresAt: registry.drain()?.expiresAt ?? null });
+        registry.setDrain(body.release ? null : { commit: body.commit, expiresAt: Date.now() + 120_000, locked: registry.drain()?.locked ?? false });
+        const idle = body.release ? false : !await turnsRunning();
+        if (body.hold && idle) registry.setDrain({ commit: body.commit, expiresAt: Date.now() + 120_000, locked: true });
+        return send(res, 200, { idle, expiresAt: registry.drain()?.expiresAt ?? null });
       }
       throw new HttpError(404, `no deployer route ${path}`);
     }
