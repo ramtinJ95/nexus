@@ -136,8 +136,8 @@ past matching records they have not consumed.
 | Kind | Meaning and payload |
 |---|---|
 | `session.turn-started` | Claude submitted a prompt; optional `session` and `message` |
-| `session.heartbeat` | A throttled PostToolUse hook confirms activity; optional `session` and `message` |
-| `session.turn-ended` | Claude's Stop hook ran; optional `session` and `message` |
+| `session.heartbeat` | A throttled PostToolUse hook, or a Stop hook while background subagents run, confirms activity; optional `session` and `message` |
+| `session.turn-ended` | Claude's Stop hook ran with no background subagent running; optional `session` and `message` |
 | `session.waiting` | Claude notified that input is needed; optional `session` and `message` |
 | `session.ended` | Claude's SessionEnd hook ran; optional `session` and `message` |
 | `thread.turn-ended` | The control-plane harness completed a turn |
@@ -185,6 +185,13 @@ expires. A single operation that produces no hook reports for 30 minutes has no
 proof of continuing activity and also expires; no timer guesses that it is busy.
 Herdr's cached Claude status cannot renew the lease. Other harness sessions retain
 their existing observation-based activity rules.
+
+A Stop hook whose `background_tasks` lists a `subagent` with status `running`
+reports `session.heartbeat` through the same throttle, so the turn is not ended
+and records no reply. A subagent's tool hooks report under the main session's ID
+and renew the same lease. The turn Claude starts when the last subagent finishes
+ends it. Background `shell` tasks do not count. There is no subagent record: a
+subagent that never finishes lets the lease expire like any other silent turn.
 
 `Thread.sessionTurnRunning` and `sessionWaiting` are optional current facts;
 `sessionActiveUntil` lets the pure planner enforce expiry even on an older read.

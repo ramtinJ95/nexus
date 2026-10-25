@@ -79,6 +79,18 @@ test("parallel tool hooks share a throttled heartbeat, and refresh after five mi
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
+test("a turn end with a background subagent still running reports a heartbeat, and background shells do not count", async () => {
+  const { reportedKind } = await import("../images/pylon/nexus-heartbeat.ts");
+  const subagent = { id: "ac4719df54252d254", type: "subagent", status: "running", agent_type: "general-purpose" };
+  const shell = { id: "bq5q9o836", type: "shell", status: "running", command: "sleep 90" };
+  assert.equal(reportedKind("session.turn-ended", { background_tasks: [shell, subagent] }), "session.heartbeat");
+  assert.equal(reportedKind("session.turn-ended", { background_tasks: [shell] }), "session.turn-ended");
+  assert.equal(reportedKind("session.turn-ended", { background_tasks: [{ ...subagent, status: "completed" }] }), "session.turn-ended");
+  assert.equal(reportedKind("session.turn-ended", { background_tasks: [] }), "session.turn-ended");
+  assert.equal(reportedKind("session.turn-ended", {}), "session.turn-ended", "a Claude without the field ends turns as before");
+  assert.equal(reportedKind("session.ended", { background_tasks: [subagent] }), "session.ended");
+});
+
 test("filtered reads advance the scanned watermark through retention rollover", () => {
   const registry = openRegistry(":memory:");
   try {

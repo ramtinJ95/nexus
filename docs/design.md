@@ -116,6 +116,7 @@ A persistent drain lease blocks API and background PR-watch turn entry, and coun
 | Date | Decision |
 |---|---|
 | 2026-10-26 | Dashboard terminates TLS directly on 7443 with tailscaled cert-only access and renewal; TCP-peer whois remains the only caller identity. No dashboard Serve entry: a Unix target would require local-admin rights for the probe’s later preview writes. HTTP starts independently of certificate availability; HTTPS retries failures and reports its state in health. HTTP clients stay unchanged |
+| 2026-10-25 | A Claude turn that ends with background subagents running stays working until the turn after its last subagent ends, judged by the Stop hook from Claude's own task list |
 | 2026-10-25 | A retained cursor-based event stream is shared by every session; opt-in Claude Code workers run `/poteto-mode` inside pylons and report lifecycle through bounded, non-blocking hooks |
 | 2026-10-23 | Root release reconciliation uses direct tailnet plus root-token polling, external-node-only deployers, control-first activation, a conservative drain barrier and a fixed recovery supervisor |
 | 2026-10-22 | The probe, project config and template image contracts in `contracts/` are agreed |
@@ -218,6 +219,20 @@ Waiting persists without refreshing activity. Hook timestamps and bounded durabl
 ordering cursors reject stale reports after an end; heartbeats renew existing
 working leases or resume waiting sessions when newer than their waiting event. A waiting or ended turn returns to the normal
 idle policy; seen remains unrelated to activity.
+
+A main turn can end while background subagents keep working, as `/poteto-mode`
+does when it delegates. Claude 2.1.308's Stop hook input lists them in
+`background_tasks`, and Claude starts a new turn, with a `<task-notification>`
+prompt, as each one finishes. So a Stop hook that lists a running subagent
+reports a heartbeat, not a turn end. The session stays working, keeps its pylon
+awake and gets no reply until the Stop of the turn that follows its last
+subagent. Subagent tool hooks carry the main session ID, so their heartbeats
+renew its lease. SubagentStart and SubagentStop are not used: Claude's own list
+cannot miss a start, and SubagentStop also fires for internal helper agents that
+never started one. Background shells do not count, because a dev server would
+hold the session working until its lease ran out. A subagent that dies without a
+finish leaves no follow-up turn, and the lease expires as for any silent turn.
+Captures are in `docs/verification/claude-background-subagents/`.
 
 Filtered stream reads use indexed registry columns, not decoding then filtering
 every retained payload. Id-only keep-alives carry the scanned watermark past
