@@ -24,7 +24,7 @@ import type { WebSocket } from "ws";
 import { attachTerminal, processTty } from "./attach.ts";
 import { call, CliError, exitCodes, follow, upgrade, type Endpoint, type HostPort } from "./transport.ts";
 
-const version = "0.16.0";
+const version = "0.16.1";
 const defaults = { url: "http://rj-firebat.tailc817d3.ts.net:7470", socks: "localhost:1055" };
 const configFile = () => join(homedir(), ".config", "nexus", "cli.json");
 
@@ -849,7 +849,18 @@ function hostPort(value: string): HostPort {
   return { host: m[1]!, port: Number(m[2]) };
 }
 
-const globalOptions: ParseArgsOptionsConfig = { json: { type: "boolean" }, url: { type: "string" }, socks: { type: "string" } };
+const globalOptions: ParseArgsOptionsConfig = {
+  json: { type: "boolean" }, url: { type: "string" }, socks: { type: "string" }, help: { type: "boolean", short: "h" },
+};
+
+/** The entries of `usage` that name the command: `abort|retry <thread>` names abort and retry, `project edit <id>` names project edit. */
+function usageOf(name: string): string {
+  const entries = usage.match(/^  nexus .*(?:\n {4}.*)*/gm) ?? [];
+  return `${entries.filter((entry) => {
+    const [, first, second] = entry.trim().split(/\s+/);
+    return first!.split("|").includes(name) || `${first} ${second}` === name;
+  }).join("\n")}\n`;
+}
 
 async function run(argv: readonly string[]): Promise<void> {
   // `project add` and `session open` and `close` are the commands of two words.
@@ -865,6 +876,10 @@ async function run(argv: readonly string[]): Promise<void> {
     throw new CliError("invalid", (err as Error).message);
   }
   const { values, positionals } = parsed;
+  if (values.help === true) {
+    process.stdout.write(usageOf(name!));
+    return;
+  }
   const [min, max] = command.args;
   if (positionals.length < min || positionals.length > max) {
     throw new CliError("invalid", `${name} takes ${min === max ? min : max === Infinity ? `at least ${min}` : `${min} to ${max}`} argument${max === 1 ? "" : "s"}, got ${positionals.length}`);
