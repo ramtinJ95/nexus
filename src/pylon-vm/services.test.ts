@@ -74,6 +74,7 @@ test("every route points at a relay port of Nexus's own, which the relay map car
 	t.after(() => rm(dir, { recursive: true, force: true }));
 	const fake = fakeVm();
 	const services = new GuestServices(fake.vm, dir, "/workspace/repo/.nexus/services.yaml", "/workspace/repo", "agent", {});
+	t.after(() => services.close());
 	await services.attach(3000);
 	await services.attach(3001);
 	assert.deepEqual(fake.targets.at(-1), { "/port-3000/": 700, "/port-3001/": 701 });
@@ -86,8 +87,7 @@ test("every route points at a relay port of Nexus's own, which the relay map car
 	assert.equal(fake.relayMaps.length, written, "an unchanged map is not written again");
 	await services.attach(3002);
 	assert.deepEqual(fake.relayMaps.at(-1), { 701: 3001, 702: 3002 }, "700 is not taken again while another is free, because the relay may still forward it to 3000");
-	await assert.rejects(services.attach(700), /Port 700 is Nexus's own/, "a relay port is never previewed itself");
-	await services.close();
+	await assert.rejects(services.attach(700), { message: /^Port 700 is Nexus's own/ }, "a relay port is never previewed itself");
 });
 
 test("a declaration that fixes one of Nexus's ports is refused, and a service without a preview takes no route", async (t) => {
@@ -131,13 +131,14 @@ test("a port past the relay's 100 is refused before anything is saved, and a wak
 	const logged = t.mock.method(console, "log", () => {});
 	const fake = fakeVm();
 	const services = new GuestServices(fake.vm, root, configPath, "/workspace/repo", "agent", {});
+	t.after(() => services.close());
 	for (let port = 3000; port < 3100; port++) await services.attach(port);
 	const full = /because every relay port from 700 to 799 serves another preview\. Unpublish one first/;
-	await assert.rejects(services.attach(3100), new RegExp(`^Port 3100 cannot be previewed, ${full.source}`));
+	await assert.rejects(services.attach(3100), { message: new RegExp(`^Port 3100 cannot be previewed, ${full.source}`) });
 	assert.equal(JSON.parse(await readFile(join(root, "linked.json"), "utf8")).length, 100, "3100 was not saved");
 	assert.equal(Object.keys(fake.targets.at(-1)!).length, 100);
 	fake.guest.file = declared("  web:\n    command: serve\n    port: 3200\n    preview: true\n");
-	await assert.rejects(services.operate("ensure"), new RegExp(`^Port 3200 cannot be previewed, ${full.source}`));
+	await assert.rejects(services.operate("ensure"), { message: new RegExp(`^Port 3200 cannot be previewed, ${full.source}`) });
 	assert.equal(JSON.parse(await readFile(join(root, "services.json"), "utf8")).web, undefined, "web was not saved");
 	await services.close();
 
