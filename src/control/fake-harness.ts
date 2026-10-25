@@ -50,6 +50,7 @@ export function fakeHarness() {
     for (const listener of watchers.get(threadId) ?? []) listener(next);
   };
   const harness: ThreadHarness = {
+    latestTurn: async () => null,
     async startThread(thread) {
       calls.push(["start", thread]);
       const id = ++conversations as ConversationId;

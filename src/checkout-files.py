@@ -4,11 +4,12 @@
 # It must run on Python 3.9, which the Mac's tests run it with.
 #
 # Ops, each printing to stdout:
+#   snapshot <turn>        capture the working tree once for this durable run
 #   list <path>             the directory's entries, as JSON
 #   read <path> <max>       the file's bytes, at most <max> of them
 #   changes <base>          the files that differ from <base>, as JSON
 #   diff <base> [path...]   the unified diff from <base>, as JSON
-# <base> is `start`, what the pylon booted at (refs/nexus/base), or `head`. A base that names no commit is the
+# <base> is `start`, what the pylon booted at (refs/nexus/base), or `head`, or `turn` (the latest reply's start). Internal `turn:<id>` reads also verify the run ID. A base that names no commit is the
 # empty tree: HEAD before the first commit, and the start of a pylon that booted an empty repository. Changes and
 # diffs compare the working tree, untracked files included and ignored ones left out, through a scratch index, so
 # the agent's own index is left alone.
@@ -18,6 +19,7 @@
 import json
 import os
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
@@ -45,6 +47,14 @@ def main(argv):
         answer(listing(root, args[0]))
     elif op == "read":
         sys.stdout.buffer.write(read(root, args[0], int(args[1])))
+    elif op == "snapshot":
+        def expired(signum, frame):
+            raise subprocess.TimeoutExpired("turn snapshot", 60)
+        signal.signal(signal.SIGALRM, expired)
+        signal.alarm(60)
+        snapshot(root, args[0])
+        signal.alarm(0)
+        answer({})
     elif op == "changes":
         answer(changes(root, args[0]))
     elif op == "diff":
@@ -127,14 +137,23 @@ def resolve(root, name):
 
 def base_of(root, base):
     """The tree-ish to compare with, and the commit it is, or None where the base is the empty tree."""
+    expected = base.split(":", 1)[1] if base.startswith("turn:") else None
+    base = base.split(":", 1)[0]
     if base == "head":
         ref = "HEAD"
+    elif base == "turn":
+        ref = "refs/nexus/turn"
     elif base == "start":
         ref = "refs/nexus/base"
     else:
         raise ValueError("unknown base %r" % base)
     found = resolve(root, ref)
+    if base == "turn" and found is not None and expected is not None:
+        if git(root, ["show", "-s", "--format=%s", found]).decode().strip() != "Nexus turn " + expected:
+            found = None
     if found is None:
+        if base == "turn":
+            raise Refused("no-base", "the checkout has no latest-turn snapshot: no turn has been captured yet, or its snapshot failed. Start another agent turn or ask for changes since HEAD instead")
         if base == "start":
             raise Refused("no-base", "the checkout has no refs/nexus/base, what its pylon booted at, because the pylon booted before Nexus recorded it. Ask for the changes since HEAD instead")
         if subprocess.run(["git", "-C", root, "rev-parse", "--git-dir"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode != 0:
@@ -157,6 +176,25 @@ def scratch_env(root, scratch):
         git(root, ["read-tree", base_of(root, "head")[0]], env)
     git(root, ["add", "--all"], env)
     return env
+
+
+def snapshot(root, turn):
+    marker = os.path.join(root, git(root, ["rev-parse", "--git-path", "nexus-turn"]).decode().strip())
+    if os.path.exists(marker):
+        with open(marker) as f:
+            if f.read() == turn:
+                return
+    # Invalidate first: a failed attempt must not show the preceding turn's changes.
+    git(root, ["update-ref", "-d", "refs/nexus/turn"])
+    with open(marker, "w") as f:
+        f.write(turn)
+    with tempfile.TemporaryDirectory() as scratch:
+        env = scratch_env(root, scratch)
+        tree = git(root, ["write-tree"], env).decode().strip()
+        env.update(GIT_AUTHOR_NAME="Nexus", GIT_AUTHOR_EMAIL="nexus@localhost",
+                   GIT_COMMITTER_NAME="Nexus", GIT_COMMITTER_EMAIL="nexus@localhost")
+        commit = git(root, ["commit-tree", tree, "-m", "Nexus turn " + turn], env).decode().strip()
+        git(root, ["update-ref", "refs/nexus/turn", commit])
 
 
 DIFF_FLAGS = ["diff", "--cached", "--no-color", "--no-ext-diff", "--no-textconv", "--find-renames", "--no-relative"]
@@ -193,7 +231,7 @@ def changes(root, base):
             i += 2
         added, deleted = lines.get(path, (None, None))
         files.append({"path": path, "oldPath": old, "status": STATUSES[letter], "additions": added, "deletions": deleted})
-    return {"base": {"kind": base, "commit": commit}, "files": files[:MAX_FILES], "truncated": len(files) > MAX_FILES}
+    return {"base": {"kind": base.split(":", 1)[0], "commit": commit}, "files": files[:MAX_FILES], "truncated": len(files) > MAX_FILES}
 
 
 def diff(root, base, paths):
@@ -228,7 +266,7 @@ def diff(root, base, paths):
     if truncated:
         # Whole lines only.
         text = text[: text.rfind(b"\n", 0, MAX_DIFF_BYTES) + 1]
-    return {"base": {"kind": base, "commit": commit}, "diff": text.decode(errors="replace"), "truncated": truncated}
+    return {"base": {"kind": base.split(":", 1)[0], "commit": commit}, "diff": text.decode(errors="replace"), "truncated": truncated}
 
 
 try:

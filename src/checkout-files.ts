@@ -1,6 +1,6 @@
 /**
  * The Files and Changes views of a pylon's checkout: directory listings, file contents, the files that changed since
- * the pylon booted or since HEAD, and their diff. checkout-files.py does the reading in the guest, over one raw pipe
+ * the pylon booted, since HEAD or since the latest turn began, and their diff. checkout-files.py does the reading in the guest, over one raw pipe
  * per request, because every pylon image has Python 3 and a guest exec returns at most 64 KiB. The helper goes in on
  * stdin, because the probe takes a stream's argv in its request's URL, whose length is limited.
  *
@@ -20,7 +20,7 @@ const helper = readFileSync(new URL("./checkout-files.py", import.meta.url), "ut
 export type OpenPipe = (argv: readonly string[]) => Promise<ByteStream>;
 
 /** `start` is what the pylon booted at, which its first boot records as refs/nexus/base. */
-export type ChangesBase = "start" | "head";
+export type ChangesBase = "start" | "head" | "turn";
 
 export const maxFileBytes = 10 << 20;
 /** The helper's caps are 2000 entries, 3000 files and 4 MiB of diff. A JSON reply within them stays far below this. */
@@ -56,7 +56,7 @@ const refusalSchema = z.strictObject({ refused: z.enum(refusalKinds), message: z
 const entrySchema = z.strictObject({ name: z.string().min(1), kind: z.enum(["file", "dir", "symlink", "other"]), size: z.number().int().nonnegative().nullable() });
 const listingSchema = z.strictObject({ path: z.string(), entries: z.array(entrySchema).max(2000), truncated: z.boolean() });
 const baseSchema = z.strictObject({
-  kind: z.enum(["start", "head"]),
+  kind: z.enum(["start", "head", "turn"]),
   /** Null where the base is the empty tree: HEAD before the first commit, and the start of a pylon that booted an empty repository. */
   commit: z.string().regex(/^[0-9a-f]{40,64}$/).nullable(),
 });
@@ -78,6 +78,8 @@ export type ChangedFile = z.infer<typeof changedSchema>;
 export type Diff = z.infer<typeof diffSchema>;
 
 export interface CheckoutReader {
+  /** Captures once per durable run. A failed attempt invalidates the previous snapshot. */
+  snapshot(turn: string): Promise<void>;
   list(path: string): Promise<Listing>;
   /** At most maxFileBytes. A larger file is refused as `large`. */
   read(path: string): Promise<Buffer>;
@@ -86,7 +88,7 @@ export interface CheckoutReader {
   diff(base: ChangesBase, paths: readonly string[]): Promise<Diff>;
 }
 
-export function checkoutReader(open: OpenPipe, checkout: string, deadlineMs = readDeadlineMs): CheckoutReader {
+export function checkoutReader(open: OpenPipe, checkout: string, deadlineMs = readDeadlineMs, expectedTurn?: string | null): CheckoutReader {
   async function run(paths: readonly string[], args: readonly string[]): Promise<Buffer> {
     if (!pathsFit(paths)) throw new CheckoutRefused("long", "the paths are too long together for one read");
     if (openPipes >= maxOpenPipes) throw new CheckoutRefused("busy", `${maxOpenPipes} checkout reads are still open, some from pylons that did not finish theirs. Try again later`);
@@ -137,11 +139,13 @@ export function checkoutReader(open: OpenPipe, checkout: string, deadlineMs = re
     return out;
   }
   const json = async <T>(schema: z.ZodType<T>, paths: readonly string[], args: readonly string[]): Promise<T> => parsed(schema, await run(paths, args));
+  const scoped = (base: ChangesBase) => base === "turn" && expectedTurn !== undefined ? `turn:${expectedTurn ?? "missing"}` : base;
   return {
+    snapshot: async (turn) => { await run([], ["snapshot", turn]); },
     list: (path) => json(listingSchema, [path], ["list", path]),
     read: (path) => run([path], ["read", path, String(maxFileBytes)]),
-    changes: (base) => json(changesSchema, [], ["changes", base]),
-    diff: (base, paths) => json(diffSchema, paths, ["diff", base, ...paths]),
+    changes: (base) => json(changesSchema, [], ["changes", scoped(base)]),
+    diff: (base, paths) => json(diffSchema, paths, ["diff", scoped(base), ...paths]),
   };
 }
 

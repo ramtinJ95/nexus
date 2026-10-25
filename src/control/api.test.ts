@@ -1,4 +1,5 @@
 import { attentionOf } from "./attention.ts";
+import { checkoutReader } from "../checkout-files.ts";
 import { after, test } from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
@@ -1326,4 +1327,25 @@ test("seen is bounded by the rendered reply, not a newer reply discovered by att
   }
   assert.equal(s.registry.thread(id)!.lastHumanActivityAt, human);
   assert.deepEqual(s.woken, []);
+});
+
+test("latest-turn API reads include commits and uncommitted work, and refuse missing or stale snapshots", async (t) => {
+  const s = await withThread(t);
+  const { repo, run } = await localCheckout(t, s);
+  s.fake.harness.latestTurn = async () => "42";
+  const route = `/v1/threads/${s.thread.id}`;
+  assert.equal((await s.call("GET", `${route}/changes?base=turn`)).status, 422);
+  await checkoutReader(async (argv) => processStream(argv[0]!, argv.slice(1), () => {}), repo).snapshot("42");
+  await writeFile(join(repo, "src/app.ts"), "committed\n");
+  await run("commit", "-qam", "work");
+  await writeFile(join(repo, "new.txt"), "untracked\n");
+  const changes = await s.call("GET", `${route}/changes?base=turn`);
+  assert.equal(changes.status, 200);
+  assert.equal(changes.body.base.kind, "turn");
+  assert.deepEqual(changes.body.files.map((f: { path: string }) => f.path), ["new.txt", "src/app.ts"]);
+  const diff = await s.call("GET", `${route}/diff?base=turn&path=new.txt`);
+  assert.deepEqual(diff.body.base, changes.body.base);
+  assert.match(diff.body.diff, /\+untracked/);
+  s.fake.harness.latestTurn = async () => "43";
+  assert.equal((await s.call("GET", `${route}/diff?base=turn`)).status, 422);
 });

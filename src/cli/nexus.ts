@@ -21,7 +21,7 @@ import type { WebSocket } from "ws";
 import { attachTerminal, processTty } from "./attach.ts";
 import { call, CliError, exitCodes, follow, upgrade, type Endpoint, type HostPort } from "./transport.ts";
 
-const version = "0.10.0";
+const version = "0.11.0";
 const defaults = { url: "http://rj-firebat.tailc817d3.ts.net:7470", socks: "localhost:1055" };
 const configFile = () => join(homedir(), ".config", "nexus", "cli.json");
 
@@ -33,8 +33,8 @@ const usage = `nexus ${version}, the Nexus control plane from this Mac
   nexus preview <thread> <port> [--wait]       publish a port as a preview, and print its URL
   nexus unpreview <thread> <port>              stop publishing a port that preview published
   nexus files <thread> [path]                  a directory of the pylon's checkout
-  nexus changes <thread> [--uncommitted]       the files changed since the pylon booted, or since HEAD
-  nexus diff <thread> [path...] [--uncommitted]
+  nexus changes <thread> [--uncommitted | --turn]       the files changed since boot, HEAD, or the latest turn
+  nexus diff <thread> [path...] [--uncommitted | --turn]
   nexus conversation <thread>                  the agent's transcript
   nexus session open <thread> [--harness claude-code|pi|shell] [--title T]
   nexus session close <thread> <pane|id>       a session in no pane by its ID, which \`nexus show\` gives
@@ -188,7 +188,10 @@ function portArg(given: string): number {
 
 /** A diff of a large tree can take the pylon a while. */
 const checkoutReadMs = 120_000;
-const baseQuery = (v: Values) => v.uncommitted === true ? "base=head" : "base=start";
+const baseQuery = (v: Values) => {
+  if (v.uncommitted === true && v.turn === true) throw new CliError("invalid", "--turn and --uncommitted cannot be used together");
+  return v.turn === true ? "base=turn" : v.uncommitted === true ? "base=head" : "base=start";
+};
 
 function listingText(l: Listing): string {
   const where = l.path === "" ? "the checkout" : l.path;
@@ -202,7 +205,7 @@ function listingText(l: Listing): string {
 
 function changesText(c: Changes): string {
   const { kind, commit } = c.base;
-  const since = kind === "start"
+  const since = kind === "turn" ? `the latest turn began, ${commit?.slice(0, 12)}` : kind === "start"
     ? commit === null ? "the pylon booted an empty repository" : `the commit the pylon booted at, ${commit.slice(0, 12)}`
     : commit === null ? "HEAD, which names no commit yet" : `HEAD, ${commit.slice(0, 12)}`;
   if (c.files.length === 0) return `No changes since ${since}.`;
@@ -524,7 +527,7 @@ const commands: Readonly<Record<string, Command>> = {
   },
   changes: {
     args: [1, 1],
-    options: { uncommitted: { type: "boolean" } },
+    options: { uncommitted: { type: "boolean" }, turn: { type: "boolean" } },
     async run(api, [id], v) {
       const c = await whenRunning(api, id!, () => api("GET", `${thread(id!)}/changes?${baseQuery(v)}`, undefined, checkoutReadMs), "no changes were read") as Changes;
       return { json: c, text: changesText(c) };
@@ -532,7 +535,7 @@ const commands: Readonly<Record<string, Command>> = {
   },
   diff: {
     args: [1, Infinity],
-    options: { uncommitted: { type: "boolean" } },
+    options: { uncommitted: { type: "boolean" }, turn: { type: "boolean" } },
     async run(api, [id, ...paths], v) {
       const query = [baseQuery(v), ...paths.map((p) => `path=${encodeURIComponent(p)}`)].join("&");
       const d = await whenRunning(api, id!, () => api("GET", `${thread(id!)}/diff?${query}`, undefined, checkoutReadMs), "no diff was read") as Diff;

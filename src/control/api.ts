@@ -66,7 +66,7 @@ export interface ApiOptions {
 /** A session `POST /v1/threads/<id>/sessions` opened. Its observed state shows in ThreadDetail.sessions. */
 export interface OpenedSession { herdrPane: string; harness: SessionHarness; title: string }
 
-export type ThreadHarness = Pick<HarnessHost, "startThread" | "send" | "abort" | "retry" | "watch" | "deleteThread" | "activity">;
+export type ThreadHarness = Pick<HarnessHost, "startThread" | "send" | "abort" | "retry" | "watch" | "deleteThread" | "activity" | "latestTurn">;
 
 export interface Api {
   readonly port: number;
@@ -209,7 +209,7 @@ const sessionSchema = z.strictObject({
 const checkoutPath = z.string().refine((path) => !path.includes("\0"), "has a NUL byte").refine((path) => pathsFit([path]), "is too long");
 /** A diff's paths, which the probe's request must carry together. */
 const diffPaths = z.array(checkoutPath.min(1)).max(100).refine(pathsFit, "are too long together");
-const changesBaseSchema = z.enum(["start", "head"]).default("start");
+const changesBaseSchema = z.enum(["start", "head", "turn"]).default("start");
 /** What each refusal of a checkout read answers. A missing base is a 422, not a 409, because waiting cannot change it. */
 const refusalStatus: Readonly<Record<RefusalKind, number>> = { missing: 404, outside: 400, kind: 400, large: 413, "no-base": 422, slow: 504, busy: 503, long: 400 };
 
@@ -532,8 +532,9 @@ export async function startApi(options: ApiOptions): Promise<Api> {
   }
 
   /** Reads the pylon's checkout for the Files and Changes views, over one raw pipe per read. */
-  function inCheckout<T>(t: Thread, read: (checkout: CheckoutReader) => Promise<T>): Promise<T> {
-    return inPylon(t, (probe, pylonId) => read(checkoutReader((argv) => probe.stream(pylonId, argv), checkoutDir)));
+  async function inCheckout<T>(t: Thread, read: (checkout: CheckoutReader) => Promise<T>): Promise<T> {
+    const turn = await harness.latestTurn(t.id);
+    return inPylon(t, (probe, pylonId) => read(checkoutReader((argv) => probe.stream(pylonId, argv), checkoutDir, undefined, turn)));
   }
 
   async function checkoutFile(t: Thread, path: string): Promise<Reply> {

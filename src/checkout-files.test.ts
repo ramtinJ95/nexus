@@ -268,3 +268,71 @@ test("only raster images keep their type, so a repository's HTML or SVG is never
   assert.equal(contentType("blob", Buffer.from([0x61, 0, 0x62])), "application/octet-stream");
   assert.equal(contentType("latin1.txt", Buffer.from([0x68, 0xe9])), "application/octet-stream");
 });
+
+test("a turn snapshot captures staged, unstaged and untracked files without changing HEAD or the index", async (t) => {
+  const c = await checkout(t);
+  await writeFile(join(c.dir, "app.txt"), "staged\n");
+  await c.git("add", "app.txt");
+  await writeFile(join(c.dir, "app.txt"), "unstaged\n");
+  await writeFile(join(c.dir, "new.txt"), "untracked\n");
+  const index = await readFile(join(c.dir, ".git/index"));
+  await c.reader.snapshot("turn-1");
+  const commit = (await c.git("rev-parse", "refs/nexus/turn")).trim();
+  assert.equal(await c.git("show", `${commit}:app.txt`), "unstaged\n");
+  assert.equal(await c.git("show", `${commit}:new.txt`), "untracked\n");
+  assert.deepEqual(await readFile(join(c.dir, ".git/index")), index);
+  assert.equal((await c.git("rev-parse", "HEAD")).trim(), c.base);
+  assert.deepEqual((await c.reader.changes("turn")).files, []);
+  await writeFile(join(c.dir, "app.txt"), "reply\n");
+  await c.git("commit", "-qam", "reply");
+  await writeFile(join(c.dir, "later.txt"), "later\n");
+  await c.reader.snapshot("turn-1");
+  const changes = await c.reader.changes("turn");
+  assert.deepEqual(changes.base, { kind: "turn", commit });
+  assert.deepEqual(changes.files.map((f) => f.path), ["app.txt", "later.txt"]);
+  const diff = await c.reader.diff("turn", ["app.txt"]);
+  assert.deepEqual(diff.base, changes.base);
+  assert.match(diff.diff, /-unstaged\n\+reply/);
+  await c.reader.snapshot("turn-2");
+  assert.deepEqual((await c.reader.changes("turn")).files, []);
+});
+
+test("latest turn refuses an older pylon and a failed snapshot invalidates its previous base", async (t) => {
+  const c = await checkout(t);
+  await assert.rejects(c.reader.changes("turn"), refused("no-base", /no latest-turn snapshot/));
+  await assert.rejects(c.reader.diff("turn", []), refused("no-base", /no latest-turn snapshot/));
+  await c.reader.snapshot("one");
+  await writeFile(join(c.dir, ".git/index"), "broken index");
+  await assert.rejects(c.reader.snapshot("two"));
+  await assert.rejects(c.reader.changes("turn"), refused("no-base", /snapshot failed/));
+  await c.reader.snapshot("two");
+  await assert.rejects(c.reader.diff("turn", []), refused("no-base", /snapshot failed/));
+});
+
+test("a turn snapshot works before a scratch repository's first commit", async (t) => {
+  const c = await checkout(t);
+  await rm(join(c.dir, ".git"), { recursive: true });
+  await c.git("init", "-q");
+  await c.reader.snapshot("empty");
+  await assert.rejects(c.git("rev-parse", "HEAD"));
+  await assert.rejects(readFile(join(c.dir, ".git/index")), { code: "ENOENT" });
+  assert.deepEqual((await c.reader.changes("turn")).files, []);
+  await writeFile(join(c.dir, "fresh.txt"), "fresh\n");
+  assert.deepEqual((await c.reader.changes("turn")).files.map((f) => f.path), ["fresh.txt"]);
+});
+
+
+test("a wholly empty scratch checkout has a non-null turn base and no changes", async (t) => {
+  const c = await checkout(t);
+  await rm(c.dir, { recursive: true });
+  await mkdir(c.dir);
+  await c.git("init", "-q");
+  await c.reader.snapshot("first");
+  const changes = await c.reader.changes("turn");
+  assert.equal(changes.base.kind, "turn");
+  assert.match(changes.base.commit!, /^[a-f0-9]{40}$/);
+  assert.deepEqual(changes.files, []);
+  assert.equal((await c.reader.diff("turn", [])).diff, "");
+  await assert.rejects(c.git("rev-parse", "HEAD"));
+  await assert.rejects(readFile(join(c.dir, ".git/index")), { code: "ENOENT" });
+});
