@@ -115,8 +115,10 @@ export async function serveAttach(ws: WebSocket, door: PylonDoor, opening: Attac
     const end = await opened.done;
     await input;
     if (endedFirst) return await finish(left.signal.aborted ? null : { type: "error", ...endedBy() }, closeCode());
-    if (end.kind === "exited") return await finish({ type: "exit", code: end.code });
+    if (end.kind === "exited" && end.code === 0) return await finish({ type: "exit", code: 0 });
+    // An archive pauses the pylon under the terminal, which a pylon VM's ssh reports as its own exit 255.
     const look = door.look();
+    if (look.kind !== "over" && end.kind === "exited") return await finish({ type: "exit", code: end.code });
     await finish({
       type: "error",
       ...look.kind === "over" ? look.error : {

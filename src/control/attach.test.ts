@@ -207,6 +207,22 @@ test("a lost terminal is unreachable, and a conflict when the thread was archive
   archived.lose();
   await b.closed;
   assert.deepEqual(b.received.at(-1), { type: "error", kind: "conflict", message: "thread th-0123456789ab is archived, so its pylon stays paused" });
+
+  const paused = fakeTerminal();
+  const sshDoor = fakeDoor([paused]);
+  const c = await attach(sshDoor.door);
+  await c.messages(1);
+  sshDoor.state.look = { kind: "over", error: { kind: "conflict", message: "thread th-0123456789ab is archived, so its pylon stays paused" } };
+  paused.exit(255);
+  await c.closed;
+  assert.deepEqual(c.received.at(-1), { type: "error", kind: "conflict", message: "thread th-0123456789ab is archived, so its pylon stays paused" }, "a pylon VM's ssh exits 255 when the archive pauses it");
+
+  const crashed = fakeTerminal();
+  const d = await attach(fakeDoor([crashed]).door);
+  await d.messages(1);
+  crashed.exit(3);
+  await d.closed;
+  assert.deepEqual(d.received.at(-1), { type: "exit", code: 3 }, "on a thread that is still active, any other exit is the program's");
 });
 
 test("a delete ends the attach as a conflict, and a stopping control plane closes it with 1001", async () => {

@@ -18,6 +18,7 @@
 import { randomBytes } from "node:crypto";
 import { createServer, STATUS_CODES, type IncomingMessage, type ServerResponse } from "node:http";
 import type { Duplex } from "node:stream";
+import { setTimeout as sleep } from "node:timers/promises";
 import { WebSocketServer, type WebSocket } from "ws";
 import { z } from "zod";
 import { actualState, desiredPhase, retryRefusal, type ActualState, type DesiredPhase } from "../reconcile.ts";
@@ -813,7 +814,8 @@ export async function startApi(options: ApiOptions): Promise<Api> {
       const closed = new Promise<void>((resolve) => server.close(() => resolve()));
       server.closeAllConnections();
       for (const session of attached) session.end("stopping");
-      await Promise.all([...attached].map((session) => session.served));
+      // Each hang-up waits for its node's probe, and a node that stopped answering would hold the close forever.
+      await Promise.race([Promise.all([...attached].map((session) => session.served)), sleep(5_000, undefined, { ref: false })]);
       return closed;
     },
   };
