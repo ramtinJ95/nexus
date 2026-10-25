@@ -1,3 +1,4 @@
+import { eventCursor, eventKinds, type EventFilter } from "../events.ts";
 import { DeployDraining } from "./drain.ts";
 import { runningCommit } from "../deploy/health.ts";
 import { canDeploy, commitSchema, isReporter, releaseView, reportSchema, resolveMain, type DeploymentOptions } from "./releases.ts";
@@ -827,6 +828,46 @@ export async function startApi(options: ApiOptions): Promise<Api> {
         return send(res, 200, { idle, expiresAt: registry.drain()?.expiresAt ?? null });
       }
       throw new HttpError(404, `no deployer route ${path}`);
+    }
+    if (path === "/v1/events" && req.method === "GET") {
+      const query = url.searchParams;
+      let since = query.get("since") ?? "0";
+      try { eventCursor(since); } catch { throw new HttpError(400, "invalid event cursor"); }
+      const kinds = query.getAll("kind");
+      if (kinds.some((k) => !(eventKinds as readonly string[]).includes(k))) throw new HttpError(400, "unknown event kind");
+      const filter: EventFilter = { kinds, ...(query.has("thread") ? { thread: query.get("thread")! } : {}), ...(query.has("project") ? { project: query.get("project")! } : {}) };
+      const read = () => {
+        try { return registry.events(since, filter); }
+        catch (err) { throw new HttpError(409, (err as Error).message); }
+      };
+      const first = read();
+      if (query.get("follow") !== "true") return send(res, 200, first);
+      if (open.size >= maxStreams) throw new HttpError(503, "too many streams");
+      res.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-store" });
+      let blocked = false;
+      let stall: ReturnType<typeof setTimeout> | undefined;
+      const write = (text: string) => {
+        if (!res.write(text)) {
+          blocked = true;
+          stall ??= setTimeout(() => res.destroy(), streamStallMs);
+        }
+      };
+      const flush = (events = read()) => {
+        for (const event of events) {
+          write(`id: ${event.id}\ndata: ${JSON.stringify(event)}\n\n`);
+          since = event.id;
+          if (blocked) break;
+        }
+      };
+      res.on("drain", () => { blocked = false; clearTimeout(stall); stall = undefined; });
+      const timer = setInterval(() => {
+        if (blocked) return;
+        try { flush(); if (!blocked) write(": ping\n\n"); }
+        catch { res.destroy(); }
+      }, 1000);
+      res.once("close", () => { clearInterval(timer); clearTimeout(stall); });
+      flush(first);
+      return;
     }
     const view = req.method === "GET" ? await page(path, url.searchParams) : undefined;
     if (view !== undefined) return void res.writeHead(view.status, view.headers).end(view.body);

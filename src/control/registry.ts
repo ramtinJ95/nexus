@@ -1,3 +1,4 @@
+import { eventCursor, matchesEvent, type EventFilter, type EventKind, type NexusEvent } from "../events.ts";
 import type { DesiredRelease } from "../deploy/plan.ts";
 import type { Drain, ReleaseReport } from "../deploy/model.ts";
 /**
@@ -204,6 +205,7 @@ const migrations: readonly string[] = [
    ALTER TABLE threads ADD COLUMN last_reply_at INTEGER;`,
   `CREATE TABLE pr_watches (thread TEXT PRIMARY KEY REFERENCES threads (id), record TEXT NOT NULL) STRICT;`,
   `CREATE TABLE release_reports (node TEXT NOT NULL, role TEXT NOT NULL, record TEXT NOT NULL, PRIMARY KEY (node, role)) STRICT;`,
+  `CREATE TABLE events (id INTEGER PRIMARY KEY AUTOINCREMENT, time INTEGER NOT NULL, thread TEXT, project TEXT, kind TEXT NOT NULL, payload TEXT NOT NULL) STRICT;`,
 ];
 
 type Row = Record<string, unknown>;
@@ -368,8 +370,28 @@ export function openRegistry(path: string) {
     return (q.threadOfPylon.get(pylonId) as Row | undefined)?.thread as ThreadId | undefined;
   }
 
+  function appendEvent(kind: EventKind, thread: ThreadId | null, payload: Record<string, unknown>, time = Date.now()): NexusEvent {
+    return transaction(() => {
+      const project = thread === null ? null : (q.thread.get(thread)?.project as string | undefined) ?? null;
+      const result = db.prepare("INSERT INTO events (time, thread, project, kind, payload) VALUES (?, ?, ?, ?, ?)").run(time, thread, project, kind, JSON.stringify(payload));
+      const id = Number(result.lastInsertRowid);
+      db.prepare("DELETE FROM events WHERE id <= ?").run(id - 10_000);
+      return { id: String(id), time, thread, project, kind, payload };
+    });
+  }
+
   return {
     close() { db.close(); },
+    appendEvent,
+    events(since = "0", filter: EventFilter = {}): NexusEvent[] {
+      const cursor = eventCursor(since);
+      const oldest = db.prepare("SELECT min(id) AS id FROM events").get()?.id as number | null;
+      if (cursor !== 0 && oldest !== null && cursor < oldest - 1) throw new Error("event cursor expired; retained events cannot fill the gap");
+      return db.prepare("SELECT * FROM events WHERE id > ? ORDER BY id").all(cursor).map((r): NexusEvent => ({
+        id: String(r.id), time: r.time as number, thread: r.thread as string | null, project: r.project as string | null,
+        kind: r.kind as EventKind, payload: json<Record<string, unknown>>(r.payload),
+      })).filter((e) => matchesEvent(e, filter));
+    },
     prWatch(thread: ThreadId): PrWatchState | null {
       const row = db.prepare("SELECT record FROM pr_watches WHERE thread = ?").get(thread) as Row | undefined;
       return row ? json<PrWatchState>(row.record) : null;

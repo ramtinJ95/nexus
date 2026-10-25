@@ -1,3 +1,4 @@
+import type { NexusEvent } from "../events.ts";
 import { releaseOutcome, type ReleaseView } from "../deploy/model.ts";
 /**
  * The Mac's nexus CLI: the control plane's API as commands, for a human at a shell and for the Claude Code and pi
@@ -28,6 +29,7 @@ const configFile = () => join(homedir(), ".config", "nexus", "cli.json");
 
 const usage = `nexus ${version}, the Nexus control plane from this Mac
 
+  nexus events [--follow] [--since ID] [--thread T] [--project P] [--kind K]...
   nexus threads [--project P] [--all]          threads, without deleted ones unless --all
   nexus show <thread>                          a thread with its pylon, sessions, previews and outputs
   nexus ports <thread>                         the TCP ports the pylon listens on, and each one's preview
@@ -490,6 +492,38 @@ function releaseText(view: ReleaseView): string {
 }
 
 const commands: Readonly<Record<string, Command>> = {
+  events: {
+    args: [0, 0],
+    options: { follow: { type: "boolean" }, since: { type: "string" }, thread: { type: "string" }, project: { type: "string" }, kind: { type: "string", multiple: true } },
+    async run(api, _, v, follow) {
+      const query = new URLSearchParams();
+      for (const key of ["since", "thread", "project"]) if (str(v, key) !== undefined) query.set(key, str(v, key)!);
+      for (const kind of strs(v, "kind")) query.append("kind", kind);
+      const print = (event: NexusEvent) => {
+        console.log(v.json ? JSON.stringify(event) : `${event.id} ${new Date(event.time).toISOString()} ${event.thread ?? "-"} ${event.kind} ${JSON.stringify(event.payload)}`);
+        query.set("since", event.id);
+      };
+      if (v.follow !== true) {
+        for (const event of await api("GET", `/v1/events?${query}`) as NexusEvent[]) print(event);
+        return;
+      }
+      query.set("follow", "true");
+      const stop = new AbortController();
+      const end = () => stop.abort();
+      const signals = ["SIGINT", "SIGTERM", "SIGHUP"] as const;
+      for (const signal of signals) process.once(signal, end);
+      try {
+        while (!stop.signal.aborted) {
+          try { await follow(`/v1/events?${query}`, (data) => print(data as NexusEvent), stop.signal); }
+          catch (err) {
+            if (err instanceof CliError && err.kind !== "unreachable" && err.kind !== "failed") throw err;
+            if (!stop.signal.aborted) console.error(`nexus: ${(err as Error).message}; reconnecting`);
+          }
+          await sleep(1000, undefined, { signal: stop.signal }).catch(() => undefined);
+        }
+      } finally { for (const signal of signals) process.removeListener(signal, end); }
+    },
+  },
   release: {
     args: [0, 0],
     async run(api) {
