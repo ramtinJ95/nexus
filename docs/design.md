@@ -116,6 +116,8 @@ A persistent drain lease blocks API and background PR-watch turn entry, and coun
 | Date | Decision |
 |---|---|
 | 2026-10-26 | Dashboard terminates TLS directly on 7443 with tailscaled cert-only access and renewal; TCP-peer whois remains the only caller identity. No dashboard Serve entry: a Unix target would require local-admin rights for the probe’s later preview writes. HTTP starts independently of certificate availability; HTTPS retries failures and reports its state in health. HTTP clients stay unchanged |
+| 2026-10-25 | A prompted Claude launch types its own bash-quoted command, because Herdr refuses multi-line agent arguments |
+| 2026-10-25 | A Claude turn that ends with background subagents running stays working until the turn after its last subagent ends, judged by the Stop hook from Claude's own task list |
 | 2026-10-25 | A retained cursor-based event stream is shared by every session; opt-in Claude Code workers run `/poteto-mode` inside pylons and report lifecycle through bounded, non-blocking hooks |
 | 2026-10-23 | Root release reconciliation uses direct tailnet plus root-token polling, external-node-only deployers, control-first activation, a conservative drain barrier and a fixed recovery supervisor |
 | 2026-10-22 | The probe, project config and template image contracts in `contracts/` are agreed |
@@ -180,6 +182,14 @@ Claude workers run inside the pylon, not in the Nexus harness. Thread creation
 persists a first prompt; reconciliation opens a Herdr Claude session when the
 pylon runs. The initial argument preserves the prompt literally and avoids a
 terminal-readiness/keystroke race. `/poteto-mode` is added unless already present.
+Herdr 0.9.5's `agent start` refuses an argument holding a newline, tab or other
+control character, so a multi-line prompt never reached Claude and the launch
+stalled at the shell prompt. A prompted launch therefore types its own command
+with `herdr pane run`, each argument a bash ANSI-C quoted word. Control
+characters, `'` and `!` are escapes, so the typed line holds nothing the terminal,
+readline or history expansion acts on, and Claude receives the exact text. A NUL
+cannot be an argument, so the API refuses a prompt with one. Unprompted and
+resumed sessions still use `agent start` and its readiness wait.
 An uncertain launch is not retried automatically, since starting two coding
 agents is worse than asking the person to inspect a possibly started session.
 The sandbox justifies bypassed permission prompts, including on resume. Existing
@@ -194,8 +204,9 @@ pylon checkout, never a restored pane cwd, root or HOME. Theme and bypass accept
 A worker is normally started after a launch-specific UserPromptSubmit hook writes a
 local receipt. This avoids depending on best-effort network event delivery and
 cannot confuse another session's event with the worker's first submission.
-Herdr 0.9.5 offers only an interactive-readiness wait, not a submission wait.
-Even when that wait errors, allow 30 seconds for the receipt. A live Claude
+Herdr 0.9.5 offers only an interactive-readiness wait, not a submission wait,
+and a prompted launch does not use it. Even when typing the command errors, allow
+30 seconds for the receipt. A live Claude
 process plus working status is fallback startup evidence. Never roll back an
 uncertain first-prompt launch: retaining an empty pane is safer than killing work.
 For unprompted launches, close only after confirming no Claude process runs. Missing proof leaves the
@@ -218,6 +229,20 @@ Waiting persists without refreshing activity. Hook timestamps and bounded durabl
 ordering cursors reject stale reports after an end; heartbeats renew existing
 working leases or resume waiting sessions when newer than their waiting event. A waiting or ended turn returns to the normal
 idle policy; seen remains unrelated to activity.
+
+A main turn can end while background subagents keep working, as `/poteto-mode`
+does when it delegates. Claude 2.1.308's Stop hook input lists them in
+`background_tasks`, and Claude starts a new turn, with a `<task-notification>`
+prompt, as each one finishes. So a Stop hook that lists a running subagent
+reports a heartbeat, not a turn end. The session stays working, keeps its pylon
+awake and gets no reply until the Stop of the turn that follows its last
+subagent. Subagent tool hooks carry the main session ID, so their heartbeats
+renew its lease. SubagentStart and SubagentStop are not used: Claude's own list
+cannot miss a start, and SubagentStop also fires for internal helper agents that
+never started one. Background shells do not count, because a dev server would
+hold the session working until its lease ran out. A subagent that dies without a
+finish leaves no follow-up turn, and the lease expires as for any silent turn.
+Captures are in `docs/verification/claude-background-subagents/`.
 
 Filtered stream reads use indexed registry columns, not decoding then filtering
 every retained payload. Id-only keep-alives carry the scanned watermark past

@@ -713,6 +713,84 @@ test("a newer heartbeat resumes waiting with a fresh lease, while older or equal
   assert.equal(desiredPhase(registry.thread(threadId)!, now), "running", "the renewed lease outlasts ordinary idle grace");
 });
 
+/**
+ * Claude's hooks for one session, as the image's hook reports them: a Stop hook's input decides whether its turn
+ * ended. Each report is stamped a second after the last.
+ */
+async function claudeHooks(registry: ReturnType<typeof seeded>, clock: { now: number }) {
+  const { reportedKind } = await import("../../images/pylon/nexus-heartbeat.ts");
+  let sequence = 0;
+  return (kind: import("../events.ts").PylonEvent["kind"], input: { background_tasks?: unknown } = {}, at = (clock.now += 1000)) => registry.reportSession(node, {
+    sequence: ++sequence, time: clock.now, pylon: pylonId, event: { kind: reportedKind(kind, input) as typeof kind, session: "c1", at },
+  });
+}
+const backgroundSubagent = { id: "ac4719df54252d254", type: "subagent", status: "running", agent_type: "poteto-agent" };
+
+test("a main turn that ends while a background subagent runs stays working until the turn its finish starts ends", async (t) => {
+  const { desiredPhase } = await import("../reconcile.ts");
+  const clock = { now: 10_000_000 };
+  const registry = seeded(tempDb(), () => clock.now);
+  t.after(() => registry.close());
+  const hook = await claudeHooks(registry, clock);
+  const attention = () => registry.events("0", { kinds: ["attention.changed"] }).at(-1)!.payload.attention;
+  hook("session.turn-started");
+  hook("session.turn-ended", { background_tasks: [backgroundSubagent] });
+  for (let i = 0; i < 12; i++) {
+    clock.now += 5 * 60_000;
+    hook("session.heartbeat");
+    registry.pruneSessions();
+  }
+  const working = registry.thread(threadId)!;
+  assert.equal(working.sessionTurnRunning, true, "the subagent's tool heartbeats renew the lease for an hour");
+  assert.equal(working.lastReplyAt, null);
+  assert.equal(attention(), "working");
+  assert.equal(desiredPhase(working, clock.now + 25 * 60_000), "running");
+  hook("session.turn-started");
+  hook("session.turn-ended", { background_tasks: [] });
+  const ended = registry.thread(threadId)!;
+  assert.equal(ended.sessionTurnRunning, undefined);
+  assert.ok(ended.lastReplyAt);
+  assert.equal(attention(), "reply");
+  assert.equal(registry.events("0", { kinds: ["session.turn-ended"] }).length, 1);
+});
+
+test("a background subagent that never reports its finish expires with the session's lease, without a reply", async (t) => {
+  const { desiredPhase } = await import("../reconcile.ts");
+  const { sessionActivityTtlMs } = await import("../events.ts");
+  const clock = { now: 10_000_000 };
+  const registry = seeded(tempDb(), () => clock.now);
+  t.after(() => registry.close());
+  const hook = await claudeHooks(registry, clock);
+  hook("session.turn-started");
+  hook("session.turn-ended", { background_tasks: [backgroundSubagent] });
+  hook("session.heartbeat");
+  clock.now += sessionActivityTtlMs;
+  registry.pruneSessions();
+  const expired = registry.thread(threadId)!;
+  assert.equal(expired.sessionTurnRunning, undefined);
+  assert.equal(expired.lastReplyAt, null);
+  assert.equal(desiredPhase(expired, clock.now), "paused");
+  assert.equal(registry.events("0", { kinds: ["attention.changed"] }).at(-1)!.payload.attention, null);
+});
+
+test("a late background subagent report after its session ended changes nothing", async (t) => {
+  const clock = { now: 10_000_000 };
+  const registry = seeded(tempDb(), () => clock.now);
+  t.after(() => registry.close());
+  const hook = await claudeHooks(registry, clock);
+  const start = clock.now;
+  hook("session.turn-started", {}, start);
+  hook("session.turn-ended", { background_tasks: [backgroundSubagent] }, start + 1000);
+  hook("session.ended", {}, start + 3000);
+  const ended = registry.thread(threadId)!;
+  const count = registry.events().length;
+  hook("session.heartbeat", {}, start + 2000);
+  hook("session.heartbeat", {}, start + 4000);
+  hook("session.turn-ended", { background_tasks: [backgroundSubagent] }, start + 5000);
+  assert.equal(registry.events().length, count, "stale and inactive reports have no side effects");
+  assert.deepEqual(registry.thread(threadId), ended);
+});
+
 test("only the stalled worker's launch session restores normal reply and seen attention", (t) => {
   const path = tempDb();
   const first = seeded(path);

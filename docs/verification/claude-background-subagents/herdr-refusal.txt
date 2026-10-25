@@ -1,0 +1,20 @@
+$ herdr --version
+herdr 0.9.5
+
+$ herdr agent start <name> --kind claude --pane wD:p1 --timeout 5000 -- single\ line\ with\ \"quotes\"\ \`ticks\`\ \$HOME
+{"error":{"code":"timeout","message":"timed out waiting for agent startup"},"id":"cli:agent:start"}
+
+$ herdr agent start <name> --kind claude --pane wD:p1 --timeout 5000 -- $'two\nlines'
+{"error":{"code":"invalid_agent_argument","message":"agent arguments cannot be encoded safely for the target shell"},"id":"cli:agent:start"}
+
+$ herdr agent start <name> --kind claude --pane wD:p1 --timeout 5000 -- $'a\ttab'
+{"error":{"code":"invalid_agent_argument","message":"agent arguments cannot be encoded safely for the target shell"},"id":"cli:agent:start"}
+
+$ herdr agent start <name> --kind claude --pane wD:p1 --timeout 5000 -- $'a\rcarriage return'
+{"error":{"code":"invalid_agent_argument","message":"agent arguments cannot be encoded safely for the target shell"},"id":"cli:agent:start"}
+
+The pane runs a stand-in claude that records its argv and never reports ready, so the single-line start
+times out after typing its command. The argv it received:
+[
+ "single line with \"quotes\" `ticks` $HOME"
+]

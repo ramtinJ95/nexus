@@ -1713,6 +1713,10 @@ test("a Claude worker start stores its first prompt without starting a harness c
   assert.equal(started.body.conversationId, null);
   assert.deepEqual(s.registry.claudeWorker(started.body.id), { model: "claude-opus-5-5", prompt: "/poteto-mode fix the bug", state: "pending" });
   assert.equal((await s.call("GET", `/v1/threads/${started.body.id}`)).body.claudeWorker.state, "pending");
+  const brief = "fix the bug:\n\t- keep \"quotes\", `ticks` and $HOME\n\nthen test";
+  const multiLine = await s.call("POST", "/v1/threads", { project: "acme", title: "Claude worker", claude: brief });
+  assert.equal(s.registry.claudeWorker(multiLine.body.id)!.prompt, `/poteto-mode ${brief}`);
+  assert.equal((await s.call("POST", "/v1/threads", { project: "acme", title: "Claude worker", claude: "a\0b" })).status, 400);
 });
 
 test("a quiet filtered stream scans past unrelated events and survives retention rollover", async (t) => {

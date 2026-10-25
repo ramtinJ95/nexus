@@ -332,7 +332,8 @@ the Nexus harness. It is mutually exclusive with `--message`; the prompt supplie
 the default title. A prompt not already beginning with `/poteto-mode` is prefixed
 with it. The API accepts the same optional `claude` string on `POST /v1/threads`,
 and the dashboard's start form has a first-prompt field. Empty means the existing
-harness workflow. API prompts are at most 16,384 characters.
+harness workflow. API prompts are at most 16,384 characters, may span lines and
+hold any characters but NUL, and reach Claude exactly after trimming.
 
 Starting returns the thread while its pylon boots. Nexus opens the worker once
 it is running. The first prompt is a literal initial Claude argument, not terminal
@@ -346,7 +347,7 @@ plugin must be present in the image's captured agent setup.
 Use `show --json` to inspect `claudeWorker.state` and its optional failure `message`.
 `started` means the launch reached UserPromptSubmit (or a live Claude is observed
 working), not task completion.
-Nexus waits up to 30 seconds after Herdr startup for a launch-specific local hook
+Nexus waits up to 30 seconds after typing the launch command for a launch-specific local hook
 receipt. No receipt or live busy-process evidence means `stalled`, with the last 20 pane lines (up to 8 KiB) in
 the message and a `thread.failed` event. Attention is `failed`, ahead of other
 attention values. The pane stays open for attach; no automatic resubmission occurs. A late

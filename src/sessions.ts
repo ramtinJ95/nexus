@@ -30,6 +30,7 @@ const agentStartTimeoutMs = 30_000;
 const serverStartMs = 5_000;
 /** pi-shepherdr's launch.ts: a new pane's shell can still be starting when the first agent start lands. */
 const paneBusyRetryMs = 3_000;
+const shellPromptMs = 10_000;
 
 /**
  * The agent each harness starts in its pane: Herdr's agent kind, the launch arguments that resume a harness
@@ -145,34 +146,43 @@ async function startHarness(guest: Guest, pane: string, harness: SessionHarness,
     const seeded = await guest.exec(["node", "-e", seedClaudeState, checkoutDir], { cwd: home, timeoutMs: callTimeoutMs });
     if (seeded.exitCode !== 0) throw new Error(`seeding Claude state failed: ${seeded.output}`);
   }
-  const receipt = `${home}/.nexus/claude-submitted-${randomUUID()}`;
-  const argv = ["agent", "start", `nx-${randomUUID().slice(0, 8)}`, "--kind", agent.kind, "--pane", pane, "--timeout", String(agentStartTimeoutMs)];
   const args = resume === undefined ? agent.fresh() : await agent.resume(guest, resume);
   const launch = [...args];
   if (harness === "claude-code" && model !== undefined) launch.push("--model", model);
   if (harness === "claude-code") launch.push("--permission-mode", "bypassPermissions");
   if (harness === "claude-code" && prompt !== undefined) {
+    const receipt = `${home}/.nexus/claude-submitted-${randomUUID()}`;
     const command = `mkdir -p ${home}/.nexus && touch ${receipt}`;
-    launch.push("--settings", JSON.stringify({ hooks: { UserPromptSubmit: [{ hooks: [{ type: "command", command }] }] } }));
+    launch.push("--settings", JSON.stringify({ hooks: { UserPromptSubmit: [{ hooks: [{ type: "command", command }] }] } }), prompt);
+    await awaitShellPrompt(guest, pane);
+    // Herdr 0.9.5's agent start refuses an argument holding a newline or another control character, as a multi-line
+    // prompt does, so this launch types its own command. Once typed, any error is as uncertain as a readiness timeout:
+    // the receipt decides, and the pane and the submission fence stay.
+    const typed = await herdr(guest, ["pane", "run", pane, [agent.kind, ...launch].map(shellWord).join(" ")]).then(() => "", (err: Error) => ` after ${err.message}`);
+    const submitted = await guest.exec(["sh", "-c", 'i=0; until test -f "$1"; do i=$((i+1)); test "$i" -lt 300 || exit 1; sleep 0.1; done; rm -f "$1"', "claude-submitted", receipt], { cwd: home, timeoutMs: 35_000 }).catch(() => ({ exitCode: null }));
+    if (submitted.exitCode !== 0 && await runsAgent(guest, pane, "claude").catch(() => false)) {
+      const panes = await livePanes(guest).catch(() => []);
+      if (panes.some((p) => p.herdrPane === pane && p.status === "working")) return;
+    }
+    if (submitted.exitCode !== 0) throw new ClaudeLaunchStalled(`Claude launch stalled: no UserPromptSubmit within 30 seconds${typed}; attach before starting another session. The pane showed:\n${await screen(guest, pane)}`, pane);
+    return;
   }
   if (prompt !== undefined) launch.push(prompt);
+  const argv = ["agent", "start", `nx-${randomUUID().slice(0, 8)}`, "--kind", agent.kind, "--pane", pane, "--timeout", String(agentStartTimeoutMs)];
   if (launch.length > 0) argv.push("--", ...launch);
   const busyUntil = Date.now() + paneBusyRetryMs;
   for (;;) {
     try {
       await herdr(guest, argv, agentStartTimeoutMs + callTimeoutMs);
-      break;
+      return;
     } catch (err) {
       // Blocked at startup, such as Claude Code asking whether to trust the folder: the session is open
       // and waits for its human, who answers it in the terminal.
-      if (err instanceof HerdrError && err.code === "agent_not_ready") break;
+      if (err instanceof HerdrError && err.code === "agent_not_ready") return;
       if (err instanceof HerdrError && err.code === "agent_pane_busy" && Date.now() < busyUntil) {
         await new Promise((resolve) => setTimeout(resolve, 100));
         continue;
       }
-      // Readiness is not submission: a first prompt can keep Claude busy past Herdr's deadline.
-      // Once the command was sent, uncertainty must preserve the pane and the submission fence.
-      if (harness === "claude-code" && prompt !== undefined) break;
       if (harness === "claude-code") {
         const running = await runsAgent(guest, pane, "claude").catch(() => null);
         if (running === true) return;
@@ -182,14 +192,30 @@ async function startHarness(guest: Guest, pane: string, harness: SessionHarness,
       throw new Error(`${(err as Error).message}. The pane showed:\n${await screen(guest, pane)}`, { cause: err });
     }
   }
-  if (harness === "claude-code" && prompt !== undefined) {
-    const submitted = await guest.exec(["sh", "-c", 'i=0; until test -f "$1"; do i=$((i+1)); test "$i" -lt 300 || exit 1; sleep 0.1; done; rm -f "$1"', "claude-submitted", receipt], { cwd: home, timeoutMs: 35_000 }).catch(() => ({ exitCode: null }));
-    if (submitted.exitCode !== 0 && await runsAgent(guest, pane, "claude").catch(() => false)) {
-      const panes = await livePanes(guest).catch(() => []);
-      if (panes.some((p) => p.herdrPane === pane && p.status === "working")) return;
-    }
-    if (submitted.exitCode !== 0) throw new ClaudeLaunchStalled(`Claude launch stalled: no UserPromptSubmit within 30 seconds; attach before starting another session. The pane showed:\n${await screen(guest, pane)}`, pane);
-  }
+}
+
+/**
+ * Waits until the pane's shell reads a line with readline: its process group holds the terminal, which is out of
+ * canonical mode. Before that, as while bash runs its startup files, the terminal's line discipline holds typed input
+ * and drops a line past its 4 KB limit, as a long first prompt makes. Throws before anything is typed, so the caller
+ * can roll the pane back.
+ */
+async function awaitShellPrompt(guest: Guest, pane: string): Promise<void> {
+  const shell = record(record(await herdr(guest, ["pane", "process-info", "--pane", pane]), "pane process-info").process_info, "process_info").shell_pid;
+  if (typeof shell !== "number") throw new Error(`Herdr pane ${pane} reports no shell_pid`);
+  const ready = await guest.exec(["sh", "-c", shellPrompt, "shell-ready", String(shell)], { cwd: home, timeoutMs: shellPromptMs + callTimeoutMs });
+  if (ready.exitCode !== 0) throw new Error(`the pane's shell did not reach an idle prompt within ${shellPromptMs / 1000} seconds, so the Claude launch was not typed. The pane showed:\n${await screen(guest, pane)}`);
+}
+
+/** Polls `$1`, the shell's PID: field 8 of its stat is the terminal's foreground process group. */
+const shellPrompt = `pid=$1; i=0; until s=$(cat /proc/$pid/stat) && set -- \${s##*) } && test "$6" = "$pid" && stty -a -F /proc/$pid/fd/0 | grep -q -- -icanon; do i=$((i+1)); test "$i" -lt ${shellPromptMs / 100} || exit 1; sleep 0.1; done`;
+
+/**
+ * `arg` as one bash word, typed into the pane's shell. ANSI-C quoting spells control characters, `'` and `!` as
+ * escapes, so the typed line holds nothing the terminal, readline or history expansion acts on.
+ */
+function shellWord(arg: string): string {
+  return `$'${arg.replace(/[\\'!\x00-\x1f\x7f]/g, (c) => c === "\\" ? "\\\\" : `\\x${c.charCodeAt(0).toString(16).padStart(2, "0")}`)}'`;
 }
 
 export class ClaudeLaunchStalled extends Error {
@@ -566,6 +592,8 @@ async function herdr(guest: Guest, args: readonly string[], timeoutMs = callTime
   const { exitCode, output } = await guest.exec(["herdr", "--session", herdrSession, ...args], { cwd: home, timeoutMs });
   if (exitCode === null) throw new Error(`${what} did not finish within ${timeoutMs} ms`);
   const line = output.trimEnd().split("\n").findLast((l) => l.startsWith("{"));
+  // `pane run` succeeds silently.
+  if (line === undefined && exitCode === 0 && output.trim() === "") return undefined;
   if (line === undefined) throw new Error(`${what} exited ${exitCode} without a JSON reply: ${output.slice(-500)}`);
   const reply = record(JSON.parse(line), `${what} reply`);
   if (reply.error !== undefined) {

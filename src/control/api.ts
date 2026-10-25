@@ -205,7 +205,7 @@ const projectSchema = z.strictObject({
 const projectEditSchema = projectSchema.omit({ id: true, repoUrl: true, preSetup: true }).extend({ resources: projectSchema.shape.resources.partial() }).partial();
 const startSchema = z.strictObject({
   model: z.string().trim().min(1).max(200).optional(),
-  claude: z.string().trim().min(1).max(16_384).optional(),
+  claude: z.string().trim().min(1).max(16_384).refine((prompt) => !prompt.includes("\0"), "a Claude prompt cannot hold a NUL character, which no command-line argument can").optional(),
   project: z.string().min(1),
   title: z.string().min(1),
   node: z.string().min(1).optional(),

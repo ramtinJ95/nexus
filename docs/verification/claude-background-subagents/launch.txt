@@ -1,0 +1,18 @@
+first prompt: 5227 bytes, 48 lines; bash startup sleeps 0 s
+started at 2026-10-25T21:36:30.760Z
+waiting for the shell's prompt from 2026-10-25T21:36:30.794Z
+typed 6564 bytes at 2026-10-25T21:36:30.798Z
+openSession returned w9:p1 2026-10-25T21:36:31.917Z
+UserPromptSubmit prompt is the exact first prompt: true
+  Line 42 has "double quotes", 'single quotes', `backticks`, $HOME, $(echo no), ${PATH}, !!, a backslash \n and a tab:
+     here.
+  Last line.
+
+● received
+
+✻ Baked for 2s · done 9:36 PM
+                                                                                                   ◐ medium · /effort
+───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+❯ 
+───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  ⏵⏵ bypass permissions on (shift+tab to cycle) · ← for agents

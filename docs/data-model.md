@@ -136,8 +136,8 @@ past matching records they have not consumed.
 | Kind | Meaning and payload |
 |---|---|
 | `session.turn-started` | Claude submitted a prompt; optional `session` and `message` |
-| `session.heartbeat` | A throttled PostToolUse hook confirms activity; optional `session` and `message` |
-| `session.turn-ended` | Claude's Stop hook ran; optional `session` and `message` |
+| `session.heartbeat` | A throttled PostToolUse hook, or a Stop hook while background subagents run, confirms activity; optional `session` and `message` |
+| `session.turn-ended` | Claude's Stop hook ran with no background subagent running; optional `session` and `message` |
 | `session.waiting` | Claude notified that input is needed; optional `session` and `message` |
 | `session.ended` | Claude's SessionEnd hook ran; optional `session` and `message` |
 | `thread.turn-ended` | The control-plane harness completed a turn |
@@ -186,6 +186,13 @@ proof of continuing activity and also expires; no timer guesses that it is busy.
 Herdr's cached Claude status cannot renew the lease. Other harness sessions retain
 their existing observation-based activity rules.
 
+A Stop hook whose `background_tasks` lists a `subagent` with status `running`
+reports `session.heartbeat` through the same throttle, so the turn is not ended
+and records no reply. A subagent's tool hooks report under the main session's ID
+and renew the same lease. The turn Claude starts when the last subagent finishes
+ends it. Background `shell` tasks do not count. There is no subagent record: a
+subagent that never finishes lets the lease expire like any other silent turn.
+
 `Thread.sessionTurnRunning` and `sessionWaiting` are optional current facts;
 `sessionActiveUntil` lets the pure planner enforce expiry even on an older read.
 After expiry or an ended/waiting turn, normal agent and human idle rules apply.
@@ -211,7 +218,8 @@ rejects very delayed reports rather than allowing an old start to resurrect a
 turn, without unbounded tombstones. Thread deletion removes both cursor tables;
 archived/deleted threads ignore session reports.
 
-`claude_workers` holds a thread's first prompt and launch state: `pending`,
+`claude_workers` holds a thread's first prompt, trimmed and with `/poteto-mode`
+added unless present, which Claude receives exactly, newlines and quotes included, and its launch state: `pending`,
 `starting`, `started`, `stalled`, or `failed`, plus an optional failure message. It is created atomically with the thread. A
 Claude-worker thread has no control-plane harness conversation. Its pending
 launch runs after its pylon is observed running. `starting` is written before the
@@ -219,7 +227,7 @@ non-idempotent open command: after an interrupted launch, Nexus reports failure
 rather than risking a second submission. Inspect with `attach` before opening
 another session. `started` means the initial prompt reached a launch-specific UserPromptSubmit
 hook, or a live Claude process is observed working, not task success. Without
-either proof within 30 seconds after Herdr startup, the launch is `stalled`; the pane remains open. `ThreadDetail.claudeWorker` exposes
+either proof within 30 seconds after its launch command is typed, the launch is `stalled`; the pane remains open. `ThreadDetail.claudeWorker` exposes
 `state`, nullable `model` and optional `message`, including the last 20 visible pane lines (at most
 8 KiB). The same diagnostic appears in `thread.failed`; stalled and failed
 workers both have `failed` attention. The worker's launch session ID is persisted
