@@ -1006,7 +1006,7 @@ test("a queued Claude worker launches once after its pylon runs", async (t) => {
   const loop = run(t, registry, probe);
   await until("worker started", () => registry.claudeWorker(thread.id)?.state === "started");
   await loop.wake(node);
-  assert.deepEqual(commands, [{ kind: "open-session", harness: "claude-code", title: "t", resume: (commands[0] as { resume: string }).resume, prompt: "/poteto-mode implement it" }]);
+  assert.deepEqual(commands, [{ kind: "open-session", harness: "claude-code", title: "t", resume: (commands[0] as { resume: string }).resume, prompt: "/poteto-mode implement it", model: "claude-opus-5-5" }]);
 });
 
 test("a stalled Claude launch reports its screen and failed attention without resubmitting", async (t) => {
@@ -1026,4 +1026,26 @@ test("a stalled Claude launch reports its screen and failed attention without re
   assert.match(registry.claudeWorker(thread.id)!.message!, /Choose the text style/);
   assert.ok(registry.events().some((e) => e.kind === "thread.failed" && String(e.payload.message).includes("Choose the text style")));
   assert.ok(registry.events().some((e) => e.kind === "attention.changed" && e.payload.attention === "failed"));
+});
+
+test("a submission receipt wins over a late launch error without a contradictory failed event", async (t) => {
+  const registry = openRegistry(tempDb());
+  const thread = seed(registry);
+  registry.setClaudeWorker(thread.id, "hello", "pending");
+  const fake = fakeNode({ autoFinish: true });
+  let launches = 0;
+  const probe: ProbeClient = { ...fake.probe, command: async (_pylon, command) => {
+    assert.equal(command.kind, "open-session");
+    if (command.kind !== "open-session") throw new Error("wrong command");
+    launches++;
+    registry.reportSession(node, { sequence: 1, pylon: thread.pylonId, time: Date.now(), event: { kind: "session.turn-started", session: command.resume! } });
+    throw new Error("Herdr timed out waiting for readiness");
+  } };
+  const loop = run(t, registry, probe);
+  await until("worker submitted", () => registry.claudeWorker(thread.id)?.state === "started");
+  await loop.wake(node);
+  assert.equal(launches, 1);
+  assert.equal(registry.claudeWorker(thread.id)!.message, undefined);
+  assert.equal(registry.events().some((e) => e.kind === "thread.failed"), false);
+  assert.equal(registry.events().filter((e) => e.kind === "attention.changed").at(-1)?.payload.attention, "working");
 });

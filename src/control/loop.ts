@@ -150,19 +150,22 @@ export function startLoop(options: LoopOptions): Loop {
       try {
         const worker = registry.claudeWorker(thread.id);
         if (worker?.state === "starting") {
-          registry.setClaudeWorker(thread.id, worker.prompt, "failed");
-          registry.appendEvent("thread.failed", thread.id, { message: "Claude launch was interrupted; attach to check before starting another session" });
+          const message = "Claude launch was interrupted; attach to check before starting another session";
+          registry.setClaudeWorker(thread.id, worker.prompt, "failed", message);
+          registry.appendEvent("thread.failed", thread.id, { message });
         }
         if (worker?.state === "pending" && thread.status === "active" && observation(node)?.pylons.some((p) => p.pylonId === pylonId && p.phase === "running")) {
           // Fence the non-idempotent launch before sending: an interrupted reply must never submit the task twice.
           const session = randomUUID();
           registry.setClaudeWorker(thread.id, worker.prompt, "starting", undefined, session);
           try {
-            await link.probe.command(pylonId, { kind: "open-session", harness: "claude-code", title: thread.title.slice(0, 80), resume: session, prompt: worker.prompt });
+            await link.probe.command(pylonId, { kind: "open-session", harness: "claude-code", title: thread.title.slice(0, 80), resume: session, prompt: worker.prompt, model: worker.model ?? "claude-opus-5-5" });
             registry.setClaudeWorker(thread.id, worker.prompt, "started");
           } catch (err) {
-            if (registry.claudeWorker(thread.id)?.state !== "started") registry.setClaudeWorker(thread.id, worker.prompt, (err as Error).message.includes("Claude launch stalled") ? "stalled" : "failed", (err as Error).message);
-            registry.appendEvent("thread.failed", thread.id, { message: `Claude launch did not complete; attach to check before starting another session: ${(err as Error).message}` });
+            if (registry.claudeWorker(thread.id)?.state === "started") continue;
+            const message = `Claude launch did not complete; attach to check before starting another session: ${(err as Error).message}`;
+            registry.setClaudeWorker(thread.id, worker.prompt, message.includes("Claude launch stalled") ? "stalled" : "failed", message);
+            registry.appendEvent("thread.failed", thread.id, { message });
             throw err;
           }
         }

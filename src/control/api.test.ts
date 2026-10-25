@@ -1711,7 +1711,7 @@ test("a Claude worker start stores its first prompt without starting a harness c
   const started = await s.call("POST", "/v1/threads", { project: "acme", title: "Claude worker", claude: "fix the bug" });
   assert.equal(started.status, 201);
   assert.equal(started.body.conversationId, null);
-  assert.deepEqual(s.registry.claudeWorker(started.body.id), { prompt: "/poteto-mode fix the bug", state: "pending" });
+  assert.deepEqual(s.registry.claudeWorker(started.body.id), { model: "claude-opus-5-5", prompt: "/poteto-mode fix the bug", state: "pending" });
   assert.equal((await s.call("GET", `/v1/threads/${started.body.id}`)).body.claudeWorker.state, "pending");
 });
 

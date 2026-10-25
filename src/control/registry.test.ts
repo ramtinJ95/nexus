@@ -733,7 +733,7 @@ test("only the stalled worker's launch session restores normal reply and seen at
   assert.equal(attention(), "failed");
   report("session.ended", "another-session");
   report("session.turn-started", "launch-session");
-  assert.deepEqual(registry.claudeWorker(threadId), { prompt: "hello", state: "started" });
+  assert.deepEqual(registry.claudeWorker(threadId), { model: "claude-opus-5-5", prompt: "hello", state: "started" });
   assert.equal(attention(), "working");
   report("session.turn-ended", "launch-session");
   assert.equal(attention(), "reply");
