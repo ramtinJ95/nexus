@@ -19,7 +19,7 @@ import type { AttachTiming } from "./attach.ts";
 import { readEvents } from "./event-reader.ts";
 import { fakeHarness } from "./fake-harness.ts";
 import { openRegistry, type Thread } from "./registry.ts";
-import { githubTokenGrant, liveHashOf } from "../project.ts";
+import { githubTokenGrant, liveHashOf, type ProjectId } from "../project.ts";
 import { ingest } from "../reconcile.ts";
 import { processStream } from "../process-stream.ts";
 import { repoInitCommand } from "../pylon-vm-backend.ts";
@@ -49,7 +49,7 @@ const dotfiles = { repo: "git@github.com:ramtin/dotfiles.git", ref: "main" };
 const dir = await mkdtemp(join(tmpdir(), "nexus-api-"));
 after(() => rm(dir, { recursive: true }));
 
-async function setup(t: import("node:test").TestContext, options: { deployment?: DeploymentOptions; dotfiles?: typeof dotfiles; streamStallMs?: number; attachTiming?: AttachTiming } = {}) {
+async function setup(t: import("node:test").TestContext, options: { gitIdentity?: { name: string; email: string }; deployment?: DeploymentOptions; dotfiles?: typeof dotfiles; streamStallMs?: number; attachTiming?: AttachTiming } = {}) {
   const registry = openRegistry(join(dir, `${randomUUID()}.db`));
   registry.upsertNode({ name: node, tailnetHost: "rj-firebat.tail.ts.net", tailnetNodeId: "nFIREBAT" as TailnetNodeId });
   let caller: TailnetNodeId | null = laptop;
@@ -82,6 +82,7 @@ async function setup(t: import("node:test").TestContext, options: { deployment?:
     ...(options.deployment === undefined ? {} : { deployment: options.deployment }),
     hostnames: new Set(["127.0.0.1"]),
     dotfiles: options.dotfiles ?? dotfiles,
+    gitIdentity: options.gitIdentity,
     harness,
     wake: (n) => { woken.push(n); },
     probes: new Map([[node, {
@@ -142,7 +143,7 @@ async function setup(t: import("node:test").TestContext, options: { deployment?:
   };
 }
 
-async function withThread(t: import("node:test").TestContext, options: { deployment?: DeploymentOptions; project?: typeof project; dotfiles?: typeof dotfiles; streamStallMs?: number; attachTiming?: AttachTiming } = {}) {
+async function withThread(t: import("node:test").TestContext, options: { gitIdentity?: { name: string; email: string }; deployment?: DeploymentOptions; project?: typeof project; dotfiles?: typeof dotfiles; streamStallMs?: number; attachTiming?: AttachTiming } = {}) {
   const s = await setup(t, options);
   assert.equal((await s.call("POST", "/v1/projects", options.project ?? project)).status, 201);
   assert.equal((await s.call("POST", "/v1/images", image)).status, 201);
@@ -291,7 +292,7 @@ test("thread detail derives the actual state from the node's last observation", 
     thread,
     attention: null, seenAt: null, lastReplyAt: null,
     desired: "running",
-    pylon: { id: thread.pylonId, node, actualState: "unknown", failed: null, observedAt: null, retryRefused: null },
+    pylon: { grantsOutdated: false, id: thread.pylonId, node, actualState: "unknown", failed: null, observedAt: null, retryRefused: null },
     sessions: [], previews: [], ports: [], outputs: [], prWatch: { enabled: false, stopped: false, error: null }, pullRequests: [], attach: "herdr --session nexus", agent: { parkedTasks: 0 },
   });
 
@@ -722,7 +723,7 @@ test("a failed pylon shows failed with its reason until its thread is deleted, a
   s.registry.apply({ record: "node", node, state: "online", capacity });
   const reason = "last job failed with setup-failed, which is not retryable: pylon-x: Setup exited 128\nfatal: unable to access";
   s.registry.savePylon({ ...s.registry.pylon(thread.pylonId)!, failed: reason });
-  assert.deepEqual((await detail()).pylon, { id: thread.pylonId, node, actualState: "failed", failed: reason, observedAt: null, retryRefused: null });
+  assert.deepEqual((await detail()).pylon, { grantsOutdated: false, id: thread.pylonId, node, actualState: "failed", failed: reason, observedAt: null, retryRefused: null });
   const [row] = (await s.call("GET", "/v1/threads")).body as ThreadRow[];
   assert.deepEqual([row!.desired, row!.pylon], [(await detail()).desired, { node, actualState: "failed", failed: reason }], "the list reports the pylon as its detail does");
 
@@ -732,7 +733,7 @@ test("a failed pylon shows failed with its reason until its thread is deleted, a
   assert.equal((await detail()).pylon.actualState, "deleting");
   s.registry.apply({ record: "job", status: { ...del, state: "succeeded", finishedAt: "2027-01-01T00:00:05Z" } });
   s.registry.ingested({ node, observedAt: "2027-01-01T00:00:06Z", probeBootId: "b", capacity, artifacts: [], jobs: [], pylons: [], previewRoutes: [] }, []);
-  assert.deepEqual((await detail()).pylon, { id: thread.pylonId, node, actualState: "absent", failed: reason, observedAt: "2027-01-01T00:00:06Z", retryRefused: null });
+  assert.deepEqual((await detail()).pylon, { grantsOutdated: false, id: thread.pylonId, node, actualState: "absent", failed: reason, observedAt: "2027-01-01T00:00:06Z", retryRefused: null });
 });
 
 test("retrying a failed pylon clears the planner's verdict and its attempts, marks the retry, counts as human activity and wakes its node", async (t) => {
@@ -1454,4 +1455,115 @@ test("the final idle fence holds across lease expiry until rollback or success r
   s.callAs("nFIREBAT" as TailnetNodeId);
   await s.call("POST", "/v1/deployer/drain", { commit: deployCommit, release: true }, reporterHeaders);
   assert.equal(s.registry.drain(), null);
+});
+
+test("project edits validate before saving, flag older grants, and leave checkpoint boots unchanged", async (t) => {
+  const s = await withThread(t);
+  const before = s.registry.pylon(s.thread.pylonId)!.boot;
+  const secrets = [...project.secrets, { name: "CLAUDE_CODE_OAUTH_TOKEN", hosts: ["api.anthropic.com"] }];
+  const edited = await s.call("PATCH", "/v1/projects/acme", { secrets, logins: ["claude"] });
+  assert.equal(edited.status, 200);
+  assert.deepEqual(edited.body.secrets, secrets);
+  assert.equal((await s.call("GET", `/v1/threads/${s.thread.id}`)).body.pylon.grantsOutdated, true);
+  await s.call("POST", `/v1/threads/${s.thread.id}/archive`);
+  await s.call("POST", `/v1/threads/${s.thread.id}/unarchive`);
+  assert.deepEqual(s.registry.pylon(s.thread.pylonId)!.boot, before);
+  const next = await s.call("POST", "/v1/threads", { project: "acme", title: "New grants" });
+  assert.deepEqual(s.registry.pylon(next.body.pylonId)!.boot.network.secrets, secrets);
+  for (const patch of [{ id: "other" }, { repoUrl: "https://example.com/new" }, { defaultNode: "missing" }, { resources: { cpus: 0, memoryGiB: 4, diskGiB: 10 } }, { secrets: [{ name: "TOKEN", hosts: [] }] }, { secrets: [{ name: "TOKEN", hosts: ["*.example.com"] }] }]) {
+    assert.equal((await s.call("PATCH", "/v1/projects/acme", patch)).status, 400);
+    assert.deepEqual(s.registry.project(project.id as ProjectId), edited.body);
+  }
+  assert.equal((await s.call("PATCH", "/v1/projects/missing", {})).status, 404);
+  s.callAs("nSTRANGER" as TailnetNodeId);
+  assert.equal((await s.call("PATCH", "/v1/projects/acme", { secrets: [] })).status, 403);
+});
+
+test("pylon boot inherits the person's identity and a project can override or clear it", async (t) => {
+  const gitIdentity = { name: "Example Person", email: "person@example.com" };
+  const s = await withThread(t, { gitIdentity });
+  assert.deepEqual(s.registry.pylon(s.thread.pylonId)!.boot.gitIdentity, gitIdentity);
+  const override = { name: "Work Person", email: "work@example.com" };
+  for (const identity of [override, null]) {
+    assert.equal((await s.call("PATCH", "/v1/projects/acme", { gitIdentity: identity })).status, 200);
+    const next = await s.call("POST", "/v1/threads", { project: "acme", title: "Identity" });
+    const pylon = s.registry.pylon(next.body.pylonId)!;
+    assert.deepEqual(pylon.boot.gitIdentity, identity ?? gitIdentity);
+    assert.ok(pylon.live.overlay[2]!.content.includes((identity ?? gitIdentity).email));
+  }
+});
+
+test("partial resource patches merge atomically without resetting another edit", async (t) => {
+  const s = await withThread(t);
+  const edits = await Promise.all([
+    s.call("PATCH", "/v1/projects/acme", { resources: { cpus: 4 } }),
+    s.call("PATCH", "/v1/projects/acme", { resources: { memoryGiB: 8 } }),
+  ]);
+  for (const result of edits) assert.equal(result.status, 200);
+  assert.deepEqual(s.registry.project(project.id as ProjectId)!.resources, { ...project.resources, cpus: 4, memoryGiB: 8 });
+  const before = s.registry.project(project.id as ProjectId);
+  assert.equal((await s.call("PATCH", "/v1/projects/acme", { resources: { cpus: 16 }, defaultNode: "missing" })).status, 400);
+  assert.deepEqual(s.registry.project(project.id as ProjectId), before, "a refused edit rolls back every field");
+});
+
+test("grant comparison ignores order and duplicates but detects changed access", async (t) => {
+  const original = {
+    ...project,
+    allowedHosts: ["registry.npmjs.org", "example.com"],
+    logins: ["claude", "chatgpt"],
+    secrets: [
+      { name: "GH_TOKEN", hosts: ["api.github.com", "github.com"] },
+      { name: "STRIPE_KEY", hosts: ["api.stripe.com", "files.stripe.com"] },
+    ],
+  };
+  const s = await withThread(t, { project: original });
+  const outdated = async () => (await s.call("GET", `/v1/threads/${s.thread.id}`)).body.pylon.grantsOutdated;
+  assert.equal(await outdated(), false);
+  const pylon = s.registry.pylon(s.thread.pylonId)!;
+  s.registry.savePylon({ ...pylon, boot: { ...pylon.boot, network: { ...pylon.boot.network, allowedHosts: [...pylon.boot.network.allowedHosts].reverse() } } });
+  const reordered = {
+    allowedHosts: [...original.allowedHosts].reverse(),
+    logins: [...original.logins].reverse(),
+    secrets: [...original.secrets].reverse().map((grant) => ({ ...grant, hosts: [...grant.hosts].reverse() })),
+  };
+  assert.equal((await s.call("PATCH", "/v1/projects/acme", reordered)).status, 200);
+  assert.equal(await outdated(), false);
+  assert.equal((await s.call("PATCH", "/v1/projects/acme", {
+    allowedHosts: [...reordered.allowedHosts, ...reordered.allowedHosts],
+    logins: [...reordered.logins, ...reordered.logins],
+    secrets: reordered.secrets.map((grant) => ({ ...grant, hosts: [...grant.hosts, ...grant.hosts] })),
+  })).status, 200);
+  assert.equal(await outdated(), false);
+  for (const changed of [
+    { secrets: [original.secrets[0]] },
+    { secrets: [{ ...original.secrets[0], hosts: ["github.com"] }, original.secrets[1]] },
+    { allowedHosts: ["another.example.com"] },
+    { logins: ["claude"] },
+  ]) {
+    assert.equal((await s.call("PATCH", "/v1/projects/acme", { ...reordered, ...changed })).status, 200);
+    assert.equal(await outdated(), true);
+  }
+});
+
+test("project add and edit refuse duplicate secret names instead of merging their grants", async (t) => {
+  const s = await withThread(t);
+  const before = s.registry.project(project.id as ProjectId);
+  for (const hosts of [["b.example"], ["a.example"]]) {
+    const secrets = [{ name: "TOKEN", hosts: ["a.example"] }, { name: "TOKEN", hosts }];
+    const added = await s.call("POST", "/v1/projects", { ...project, id: "duplicate", secrets });
+    assert.equal(added.status, 400);
+    assert.match(added.body.error, /duplicate secret names: list all of a secret's hosts in one grant/);
+    assert.equal(s.registry.project("duplicate" as ProjectId), undefined);
+    const edited = await s.call("PATCH", "/v1/projects/acme", { secrets, resources: { cpus: 16 } });
+    assert.equal(edited.status, 400);
+    assert.match(edited.body.error, /duplicate secret names: list all of a secret's hosts in one grant/);
+    assert.deepEqual(s.registry.project(project.id as ProjectId), before);
+  }
+  const secrets = [{ name: "TOKEN", hosts: ["a.example", "b.example"] }];
+  const added = await s.call("POST", "/v1/projects", { ...project, id: "combined", secrets });
+  assert.equal(added.status, 201);
+  assert.deepEqual(added.body.secrets, secrets);
+  const edited = await s.call("PATCH", "/v1/projects/acme", { secrets });
+  assert.equal(edited.status, 200);
+  assert.deepEqual(edited.body.secrets, secrets);
 });

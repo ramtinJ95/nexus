@@ -289,7 +289,9 @@ export function createPylonVmBackend(options: PylonVmBackendOptions): VmBackend 
       secrets,
       ssh: await gitSshOf(boot.pylonId, remotes),
       files: [...live.overlay],
-      hooks: [dotfilesPull(boot.dotfiles)],
+      hooks: [dotfilesPull(boot.dotfiles), ...(boot.gitIdentity === undefined ? [] : [asUser(
+        `git config --global user.name ${q(boot.gitIdentity.name)} && git config --global user.email ${q(boot.gitIdentity.email)}`, "/home/user"),
+      ])],
       publicUrls: publicUrls(boot.pylonId, live.previews, options.previewHost),
       hostBridge: hostBridgeSocket(options.stateRoot),
     };

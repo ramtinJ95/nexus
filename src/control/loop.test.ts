@@ -255,8 +255,9 @@ function seed(registry: Registry, activity: Partial<Pick<Thread, "agentTurnRunni
   return thread;
 }
 
-function run(t: import("node:test").TestContext, registry: Registry, probe: ProbeClient, overrides: { offlineAfterMs?: number; silenceMs?: number; ingest?: Ingest; previewPorts?: PortRange; log?: (line: string) => void } = {}): Loop {
+function run(t: import("node:test").TestContext, registry: Registry, probe: ProbeClient, overrides: { gitIdentity?: { name: string; email: string }; offlineAfterMs?: number; silenceMs?: number; ingest?: Ingest; previewPorts?: PortRange; log?: (line: string) => void } = {}): Loop {
   const loop = startLoop({
+    gitIdentity: overrides.gitIdentity,
     registry, probes: [probe], ingest: overrides.ingest ?? ingest, previewPorts: overrides.previewPorts ?? previewPorts, intervalMs: 10, reconnectMs: 10,
     offlineAfterMs: overrides.offlineAfterMs ?? 30_000, silenceMs: overrides.silenceMs ?? 30_000, log: overrides.log ?? assert.fail,
   });
@@ -964,4 +965,28 @@ test("a node reporting a pylon the registry places on another node gets no ports
   await loop.wake(firebat);
   assert.deepEqual(registry.previews(thread.pylonId), []);
   assert.deepEqual(home.submitted.map((job) => job.kind), ["spawn"]);
+});
+
+test("every new boot takes the configured git identity, but a checkpoint keeps its original grants", async (t) => {
+  const registry = openRegistry(tempDb());
+  const thread = seed(registry);
+  const fake = fakeNode({ autoFinish: true });
+  const gitIdentity = { name: "Example Person", email: "person@example.com" };
+  run(t, registry, fake.probe, { gitIdentity });
+  await until("the pylon runs", () => fake.pylons.get(thread.pylonId)?.phase === "running");
+  const fresh = fake.submitted.find((job) => job.kind === "spawn")!;
+  assert.ok(fresh.kind === "spawn");
+  assert.deepEqual(fresh.boot.gitIdentity, gitIdentity);
+  const override = { name: "Work Person", email: "work@example.com" };
+  registry.updateProject({ ...registry.project(thread.project)!, gitIdentity: override, secrets: [{ name: "CLAUDE_CODE_OAUTH_TOKEN", hosts: ["api.anthropic.com"] }], logins: ["claude"] });
+  assert.deepEqual(registry.pylon(thread.pylonId)!.boot.gitIdentity, gitIdentity, "a running pylon keeps its boot identity");
+  registry.setThreadStatus(thread.id, "archived");
+  await until("the pause is folded in", () => registry.pylon(thread.pylonId)?.pauses === 1);
+  registry.setThreadStatus(thread.id, "active");
+  registry.recordActivity(thread.id, { human: Date.now() });
+  await until("the pylon runs again", () => fake.pylons.get(thread.pylonId)?.phase === "running");
+  const resume = fake.submitted.findLast((job) => job.kind === "spawn")!;
+  assert.ok(resume.kind === "spawn" && resume.boot.source.kind === "resume");
+  assert.deepEqual(resume.boot.gitIdentity, override);
+  assert.deepEqual(resume.boot.network, fresh.boot.network);
 });

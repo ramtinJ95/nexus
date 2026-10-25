@@ -184,7 +184,7 @@ test("the CLI runs a thread's life through the SOCKS proxy, and --json prints th
   const shown = await s.json(["show", thread.id]);
   assert.equal(shown.thread.id, thread.id);
   assert.equal(shown.desired, "running", "a thread with fresh human activity wants its pylon running");
-  assert.deepEqual(shown.pylon, { id: thread.pylonId, node, actualState: "unknown", failed: null, observedAt: null, retryRefused: null });
+  assert.deepEqual(shown.pylon, { grantsOutdated: false, id: thread.pylonId, node, actualState: "unknown", failed: null, observedAt: null, retryRefused: null });
   assert.deepEqual((await s.json(["conversation", thread.id])).entries.map((e: { id: number }) => e.id), [1, 2, 3]);
   const human = await s.nexus(["conversation", thread.id]);
   assert.equal(human.stdout, "> \n>   Fix the build  \n> and run the tests\n\n> now the lint\n\n> stop that\n");
@@ -984,7 +984,7 @@ test("show prints PR metadata and one disabled-watch notice without waking the p
 
 test("deploy and release use the shared release view and wait for both roles", async (t) => {
   const s = await setup(t);
-  assert.equal((await s.nexus(["--version"])).stdout.trim(), "nexus 0.13.0");
+  assert.equal((await s.nexus(["--version"])).stdout.trim(), "nexus 0.14.0");
   assert.equal((await s.nexus(["deploy", "bad"])).code, 64);
   const requested = await s.json(["deploy", "main"]);
   assert.equal(requested.desired.commit, "a".repeat(40));
@@ -996,4 +996,56 @@ test("deploy and release use the shared release view and wait for both roles", a
   const failed = await s.nexus(["deploy", "main", "--wait", "--json"]);
   assert.equal(failed.code, 1);
   assert.match(failed.stderr, /failed to bind/);
+});
+
+test("project edit replaces supplied grants and preserves omitted settings", async (t) => {
+  const repo = "https://github.com/example/repo.git";
+  const s = await setup(t);
+  await s.nexus(["project", "add", "editable", repo, "--node", node]);
+  const changed = await s.nexus(["project", "edit", "editable", "--login", "claude", "--secret", "CLAUDE_CODE_OAUTH_TOKEN:api.anthropic.com", "--git-name", "Example Person", "--git-email", "person@example.com", "--json"]);
+  assert.equal(changed.code, 0, changed.stderr);
+  const p = JSON.parse(changed.stdout);
+  assert.deepEqual(p.secrets, [{ name: "CLAUDE_CODE_OAUTH_TOKEN", hosts: ["api.anthropic.com"] }]);
+  assert.equal(p.repoUrl, repo);
+  assert.equal(p.defaultNode, node);
+  assert.equal((await s.nexus(["project", "edit", "editable", "--secret", "TOKEN:*.example.com"])).code, 64);
+  const cleared = await s.nexus(["project", "edit", "editable", "--clear-secrets", "--clear-git-identity", "--json"]);
+  assert.equal(cleared.code, 0, cleared.stderr);
+  assert.deepEqual(JSON.parse(cleared.stdout).secrets, []);
+  assert.equal(JSON.parse(cleared.stdout).gitIdentity, null);
+});
+
+test("concurrent project edits preserve independently changed resources", async (t) => {
+  const s = await setup(t);
+  assert.equal((await s.nexus(["project", "add", "concurrent", "--scratch", "--node", node, "--cpus", "1", "--memory", "1", "--disk", "10"])).code, 0);
+  const before = s.proxy.connects.length;
+  const edits = await Promise.all([
+    s.nexus(["project", "edit", "concurrent", "--cpus", "4"]),
+    s.nexus(["project", "edit", "concurrent", "--memory", "8"]),
+  ]);
+  for (const result of edits) assert.equal(result.code, 0, result.stderr);
+  assert.equal(s.proxy.connects.length - before, 2, "each edit sends only its PATCH, without reading the project first");
+  const projects = await s.json(["projects"]);
+  assert.deepEqual(projects.find((p: Project) => p.id === "concurrent").resources, { cpus: 4, memoryGiB: 8, diskGiB: 10 });
+});
+
+test("project add and edit exit 64 for duplicate secret names and explain how to combine hosts", async (t) => {
+  const s = await setup(t);
+  const before = s.registry.project(project.id);
+  for (const args of [
+    ["project", "add", "duplicate", "--scratch", "--node", node],
+    ["project", "edit", project.id],
+  ]) {
+    const result = await s.nexus([...args, "--secret", "TOKEN:a.example", "--secret", "TOKEN:b.example", "--json"]);
+    assert.equal(result.code, 64);
+    const error = JSON.parse(result.stderr);
+    assert.equal(error.status, 400);
+    assert.match(error.error, /duplicate secret names: list all of a secret's hosts in one grant/);
+  }
+  assert.equal(s.registry.project("duplicate" as ProjectId), undefined);
+  assert.deepEqual(s.registry.project(project.id), before);
+  const added = await s.json(["project", "add", "combined", "--scratch", "--node", node, "--secret", "TOKEN:a.example,b.example"]);
+  assert.deepEqual(added.secrets, [{ name: "TOKEN", hosts: ["a.example", "b.example"] }]);
+  const edited = await s.json(["project", "edit", project.id, "--secret", "TOKEN:a.example,b.example"]);
+  assert.deepEqual(edited.secrets, added.secrets);
 });

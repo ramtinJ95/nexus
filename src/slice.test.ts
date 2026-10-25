@@ -280,6 +280,7 @@ function pylonVmFixture(): SliceFixture {
     secrets,
     boot: {
       resources: { cpus: 2, memoryGiB, diskGiB: 8 },
+      gitIdentity: { name: "Example Person", email: "person@example.com" },
       network: { allowedHosts, secrets: [{ name: secret.name, hosts: [secret.host] }] },
       repo,
       // Not on the allowlist, so the first boot's pull fails and keeps the image's baked copy.
@@ -306,6 +307,8 @@ function pylonVmFixture(): SliceFixture {
     },
     async checkFreshBoot(guest) {
       const opts = { cwd: "/home/user/workspace/repo", timeoutMs: 30_000 };
+      assert.equal((await guest.exec(["git", "config", "--global", "user.name"], opts)).output, "Example Person\n");
+      assert.equal((await guest.exec(["git", "config", "--global", "user.email"], opts)).output, "person@example.com\n");
       assert.deepEqual(await guest.exec(["id", "-un"], opts), { exitCode: 0, output: "user\n", truncated: false });
       assert.deepEqual(await guest.exec(["git", "rev-parse", "HEAD"], opts), { exitCode: 0, output: `${repo.checkout.commit}\n`, truncated: false });
       assert.deepEqual(await guest.exec(["git", "symbolic-ref", "--short", "HEAD"], opts), { exitCode: 0, output: `${repo.checkout.branch}\n`, truncated: false });

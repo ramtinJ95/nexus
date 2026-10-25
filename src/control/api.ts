@@ -26,7 +26,7 @@ import { setTimeout as sleep } from "node:timers/promises";
 import { WebSocketServer, type WebSocket } from "ws";
 import { z } from "zod";
 import { actualState, desiredPhase, retryRefusal, type ActualState, type DesiredPhase } from "../reconcile.ts";
-import { effectiveAllowedHosts, gitUrl, hasRemote, linkedName, liveHashOf, reservedPorts, withHttpsHosts, type BootInputs, type Project, type ProjectId, type PylonOverlay, type RepoInit, type SessionHarness } from "../project.ts";
+import { effectiveAllowedHosts, gitIdentitySchema, gitUrl, hasRemote, linkedName, liveHashOf, reservedPorts, withHttpsHosts, type BootInputs, type Project, type ProjectId, type PylonOverlay, type RepoInit, type SessionHarness } from "../project.ts";
 import type { CommandResult, NodeName, ProbeClient, ProbeError, PylonCommand, PylonId, TailnetNodeId } from "../protocol.ts";
 import type { ConversationView, ConversationWatch, EntryRecord, JsonObject } from "@earendil-works/pi-durable";
 import type { HarnessHost } from "../harness/host.ts";
@@ -57,6 +57,7 @@ export interface ApiOptions {
   hostnames: ReadonlySet<string>;
   /** The common dotfiles layer every new pylon pulls on boot. */
   dotfiles: PylonOverlay["dotfiles"];
+  gitIdentity?: BootInputs["gitIdentity"];
   harness: ThreadHarness;
   /** Asks the loop for a pass over the node's pylons. */
   wake(node: NodeName): void;
@@ -88,6 +89,7 @@ export interface ThreadDetail {
   /** What the planner wants of the pylon now, from the thread's status and activity. */
   desired: DesiredPhase;
   pylon: {
+    grantsOutdated: boolean;
     id: PylonId; node: NodeName; actualState: ActualState; failed: string | null; observedAt: string | null;
     /** Why a retry of the pylon, as its node last reported it, cannot help. Null when a retry can. */
     retryRefused: string | null;
@@ -164,6 +166,20 @@ class HttpError extends Error {
   }
 }
 
+function networkGrantsKey(network: BootInputs["network"]): string {
+  const sorted = (values: Iterable<string>) => [...new Set(values)].sort();
+  const secrets = new Map<string, Set<string>>();
+  for (const grant of network.secrets) {
+    const hosts = secrets.get(grant.name) ?? new Set<string>();
+    for (const host of grant.hosts) hosts.add(host);
+    secrets.set(grant.name, hosts);
+  }
+  return JSON.stringify({
+    allowedHosts: sorted(network.allowedHosts),
+    secrets: sorted(secrets.keys()).map((name) => ({ name, hosts: sorted(secrets.get(name)!) })),
+  });
+}
+
 const name = z.string().regex(/^[a-z0-9][a-z0-9-]{0,62}$/);
 const host = z.string().min(1);
 const projectSchema = z.strictObject({
@@ -173,10 +189,13 @@ const projectSchema = z.strictObject({
   defaultNode: z.string().min(1).transform((node) => node as NodeName),
   resources: z.strictObject({ cpus: z.int().positive(), memoryGiB: z.int().positive(), diskGiB: z.int().positive() }),
   allowedHosts: z.array(host),
-  secrets: z.array(z.strictObject({ name: z.string().regex(/^[A-Z_][A-Z0-9_]*$/), hosts: z.array(host) })),
+  secrets: z.array(z.strictObject({ name: z.string().regex(/^[A-Z_][A-Z0-9_]*$/), hosts: z.array(z.string().regex(/^(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/)).min(1) }))
+    .refine((grants) => new Set(grants.map((grant) => grant.name)).size === grants.length, "duplicate secret names: list all of a secret's hosts in one grant"),
   logins: z.array(z.enum(["claude", "chatgpt"])),
   preSetup: z.string().nullable(),
+  gitIdentity: gitIdentitySchema.nullable().optional(),
 });
+const projectEditSchema = projectSchema.omit({ id: true, repoUrl: true, preSetup: true }).extend({ resources: projectSchema.shape.resources.partial() }).partial();
 const startSchema = z.strictObject({
   project: z.string().min(1),
   title: z.string().min(1),
@@ -289,6 +308,7 @@ export async function startApi(options: ApiOptions): Promise<Api> {
     };
     const boot: Omit<BootInputs, "source"> = {
       pylonId, image, resources: project.resources,
+      gitIdentity: project.gitIdentity ?? options.gitIdentity,
       // Every boot pulls the dotfiles through the allowlist. A template build pulls none, so their host stays out of the setup hash.
       network: { allowedHosts: withHttpsHosts(effectiveAllowedHosts(project), [dotfiles.repo]), secrets: project.secrets },
       repo,
@@ -322,6 +342,10 @@ export async function startApi(options: ApiOptions): Promise<Api> {
     // The planner deletes a failed pylon all the same, so a deleted thread's pylon shows the delete.
     const gaveUp = pylon.failed !== null && t.status !== "deleted";
     return {
+      grantsOutdated: networkGrantsKey(pylon.boot.network) !== networkGrantsKey({
+        allowedHosts: withHttpsHosts(effectiveAllowedHosts(registry.project(t.project)!), [pylon.boot.dotfiles.repo]),
+        secrets: registry.project(t.project)!.secrets,
+      }),
       id: pylon.pylonId, node: pylon.node, failed: pylon.failed, observedAt: node.observation?.observedAt ?? null,
       actualState: actualState(observed, inFlight, node.state === "online", gaveUp), retryRefused: retryRefusal(observed),
     };
@@ -664,6 +688,16 @@ export async function startApi(options: ApiOptions): Promise<Api> {
   }
 
   const routes: readonly [string, RegExp, Route][] = [
+    ["PATCH", /^\/v1\/projects\/([^/]+)$/, async ([, id], r) => {
+      const patch = parse(projectEditSchema, await r.body());
+      const project = registry.editProject(id as ProjectId, (previous) => {
+        const updated: Project = parse(projectSchema, { ...previous, ...patch, resources: { ...previous.resources, ...patch.resources } });
+        if (registry.node(updated.defaultNode) === undefined) throw new HttpError(400, `no node ${updated.defaultNode}`);
+        return updated;
+      });
+      if (project === undefined) throw new HttpError(404, `no project ${id}`);
+      return ok(project);
+    }],
     ["GET", /^\/v1\/projects$/, () => ok(registry.projects())],
     ["POST", /^\/v1\/projects$/, async (_, r) => created(createProject(await r.body()))],
     ["GET", /^\/v1\/nodes$/, () => ok(registry.nodes().map(({ observation, ...n }): NodeSummary => ({ ...n, observedAt: observation?.observedAt ?? null })))],

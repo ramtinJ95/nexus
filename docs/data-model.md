@@ -9,7 +9,7 @@ The control plane writes every record. Probes send facts in observations, and th
 | Record | Fields | Comes from |
 |---|---|---|
 | Node | `name`, `tailnetHost`, `tailnetNodeId`, `cpuVendor`, `memoryGiB`, `state` | You add a node. Capacity and `state` come from its probe's observations |
-| Project | `repoUrl`, `defaultBranch`, `defaultNode`, `resources`, `allowedHosts`, `secrets`, `logins`, `preSetup` | You |
+| Project | `repoUrl`, `defaultBranch`, `defaultNode`, `resources`, `allowedHosts`, `secrets`, `logins`, `preSetup`, optional `gitIdentity` | You |
 | Image | `id`, `pins`, `builtOn`, `builtAt` | The results of `build-image` jobs |
 | Template | `id`, `key`, `state`, `node`, `builtAt` | The results of `build-template` jobs |
 | Thread | `id`, `title`, `project`, `status`, `conversationId`, `pylonId`, `startedBy`, `seenAt`, `lastReplyAt` | You, and the harness |
@@ -109,3 +109,9 @@ The `settings` key `release` stores one desired release: the full commit, `reque
 The settings key `deploy-drain` holds `{commit, expiresAt, locked?}` or null. The control node alone acquires/renews/releases it with root-authenticated requests. It survives control process restart. Preparation leases expire without a live worker; the final idle fence sets `locked: true` before a link switch, holding admission through recovery until explicit release. The shared turn gate fences both API and background PR-watch submissions; idle additionally requires no entering submissions, committed live runs or queued inputs.
 
 On each node, root owns `/opt/nexus/<role>-deploy.json`: `{commit, previous, target, state, reason}`, where previous/target are symlink targets and state is installing, healthy, rolled-back or failed. Installing is recorded before activation. A restart recovers it before contacting control. `<role>-deploy.unit` saves the previous unit and `<role>-deploy-report.json` retains terminal failures for later reporting and avoids automatic retries. Those files are separate from service-user-writable state and are not registry records.
+
+## Project edits and boot identity
+
+`Project.gitIdentity` is optional `{ name: string, email: string }` (null also means inherit). The optional control.json `gitIdentity` has the same shape without null. Project values override the control default. Only name and email are carried: no credentials. Before a fresh or checkpoint boot, reconciliation resolves the identity into `BootInputs.gitIdentity`. The boot hook applies it globally for `user` after common dotfiles. The saved value renders PYLON.md while the pylon runs. With neither configured, no git config is changed; an earlier identity on disk remains.
+
+`PATCH /v1/projects/<id>` replaces supplied editable settings without changing the ID or repo URL. No schema migration is required: projects and boot inputs are JSON records and older records lack the optional field. Network settings, resources and repository initialization remain frozen in the existing thread's boot record. A checkpoint wake uses that saved network, even following archive/unarchive. New grants require a new thread. The derived `ThreadDetail.pylon.grantsOutdated` compares the saved network policy and secret grants with the project's current effective policy (including the pylon's dotfiles host); it does not compare node secret values. No edit changes a running VM's network or secrets.

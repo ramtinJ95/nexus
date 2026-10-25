@@ -297,3 +297,15 @@ PY
 Add `"github": { "tokenFile": "/etc/nexus/github-token" }` to `/etc/nexus/control.json`, then restart the control plane during your normal deployment window. Rotation requires replacing the file and restarting. Never put the value in JSON, logs or a pylon. A configured unreadable/empty/malformed file fails startup rather than silently disabling watching. With `github` omitted, watching is off and `nexus show` and the dashboard say so once per detail view.
 
 Discovery watches `origin/` branch outputs for projects with a github.com repository. It does not infer a scratch project's published repository or another remote's identity. Network/authentication failures remain visible as a PR-watch error on the thread detail and are retried. The watcher stops a thread after ten consecutive comment-only wakes; archive/unarchive preserves that stop and all cursors. There is no reset command in this version.
+
+## Git identity and editable projects
+
+Set the optional top-level `gitIdentity` in `control.json` to the person's own commit name and email. There is no separate agent account. For example (placeholder values):
+
+```json
+"gitIdentity": { "name": "Example Person", "email": "person@example.com" }
+```
+
+The control plane reads this on startup. Every subsequent pylon boot, including an existing thread's checkpoint wake, sets both values globally for `user` after the common dotfiles install. All checkouts and agents inherit them unless they have their own local git overrides. A project's `gitIdentity` overrides the default; `nexus project edit <id> --git-name "Example Person" --git-email person@example.com` sets it, and `--clear-git-identity` returns to inheritance. If neither is configured, Nexus leaves git unchanged, including an old identity on disk. PYLON.md names the configured identity or tells agents not to invent one. Do not put tokens or other secrets in this setting or the guide.
+
+Project edits can also replace logins, hosts and secret grants. To use Claude Code with a long-lived token, provision `CLAUDE_CODE_OAUTH_TOKEN` in the node's protected secrets file, grant it explicitly to `api.anthropic.com`, and include `claude` among the project's logins. See [project edit](../docs/cli.md#project-editing-0140) for replacement-list examples. Existing running and paused pylons retain their original network/grants; archive/unarchive uses the saved boot network and does not update grants. Start a new thread to apply them. `nexus show` warns when grants differ. No deployment or live configuration changes are performed by project editing.
