@@ -174,9 +174,10 @@ Pruning runs on registry open, reconcile passes and event retention writes, and
 publishes attention changes. Pre-migration working rows have no receipt time and
 expire on upgrade rather than receiving an invented fresh lease.
 
-A start gives a session a 30-minute working lease. A `session.heartbeat` only
-renews an existing working lease; it cannot start one, resume waiting, or revive
-an ended or expired turn.
+A start gives a session a 30-minute working lease. A `session.heartbeat` renews
+an existing working lease, or resumes an existing waiting session with a fresh
+lease when stamped later than its waiting event. It cannot create a session or
+revive an ended or expired turn.
 PostToolUse hooks share a per-session five-minute throttle; no network call runs
 in the hook process. Each real tool completion can renew the lease, so a turn can
 run for hours without human activity. A killed, silent or fake one-shot turn start

@@ -672,9 +672,43 @@ test("ended sessions reject late heartbeats and starts, including after registry
     }
     report("session.turn-started", now);
     assert.equal(registry.thread(threadId)!.sessionTurnRunning, true, "a genuinely newer turn can start");
-    report("session.waiting", now + 1);
-    report("session.heartbeat", now + 2);
-    assert.equal(registry.thread(threadId)!.sessionWaiting, true);
-    assert.equal(registry.thread(threadId)!.sessionTurnRunning, undefined);
   } finally { registry.close(); }
+});
+
+
+test("a newer heartbeat resumes waiting with a fresh lease, while older or equal stamps do not", async (t) => {
+  const { desiredPhase } = await import("../reconcile.ts");
+  const { sessionActivityTtlMs } = await import("../events.ts");
+  let now = 10_000_000;
+  const registry = seeded(tempDb(), () => now);
+  t.after(() => registry.close());
+  let sequence = 0;
+  const report = (kind: import("../events.ts").PylonEvent["kind"], at: number) => registry.reportSession(node, {
+    sequence: ++sequence, time: now, pylon: pylonId, event: { kind, session: "c1", at },
+  });
+  const attention = () => registry.events("0", { kinds: ["attention.changed"] }).at(-1)!.payload.attention;
+  report("session.turn-started", now);
+  now++;
+  const waitingAt = now;
+  report("session.waiting", waitingAt);
+  const waiting = registry.thread(threadId)!;
+  const count = registry.events().length;
+  now += 24 * 60 * 60_000;
+  report("session.heartbeat", waitingAt - 1);
+  report("session.heartbeat", waitingAt);
+  assert.equal(registry.events().length, count);
+  assert.equal(registry.thread(threadId)!.lastAgentActivityAt, waiting.lastAgentActivityAt);
+  assert.equal(registry.thread(threadId)!.sessionWaiting, true);
+  assert.equal(attention(), "waiting");
+  assert.equal(desiredPhase(registry.thread(threadId)!, now), "paused");
+
+  report("session.heartbeat", waitingAt + 1);
+  const resumed = registry.thread(threadId)!;
+  assert.equal(resumed.sessionWaiting, undefined);
+  assert.equal(resumed.sessionTurnRunning, true);
+  assert.equal(resumed.sessionActiveUntil, now + sessionActivityTtlMs);
+  assert.equal(resumed.lastHumanActivityAt, waiting.lastHumanActivityAt);
+  assert.equal(attention(), "working");
+  now += 25 * 60_000;
+  assert.equal(desiredPhase(registry.thread(threadId)!, now), "running", "the renewed lease outlasts ordinary idle grace");
 });

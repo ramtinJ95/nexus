@@ -495,7 +495,10 @@ export function openRegistry(path: string, clock = Date.now) {
           if (at < Number(previous.at)) return;
           if (at === previous.at && (event.kind === "session.turn-started" || event.kind === "session.heartbeat") && previous.kind !== "session.turn-started" && previous.kind !== "session.heartbeat") return;
         } else if (floor !== undefined && at <= floor) return;
-        if (event.kind === "session.heartbeat" && db.prepare("SELECT state FROM session_activity WHERE thread = ? AND session = ?").get(thread, session)?.state !== "session.turn-started") return;
+        if (event.kind === "session.heartbeat") {
+          const state = db.prepare("SELECT state FROM session_activity WHERE thread = ? AND session = ?").get(thread, session)?.state;
+          if (state !== "session.turn-started" && state !== "session.waiting") return;
+        }
         db.prepare("INSERT INTO session_order VALUES (?, ?, ?, ?) ON CONFLICT(thread, session) DO UPDATE SET at = excluded.at, kind = excluded.kind").run(thread, session, at, event.kind);
         // Keep tombstones after activity rows end, with a floor guarding reports older than evicted cursors.
         const evicted = db.prepare("DELETE FROM session_order WHERE thread = ? AND session NOT IN (SELECT session FROM session_order WHERE thread = ? ORDER BY at DESC, rowid DESC LIMIT ?) RETURNING at")

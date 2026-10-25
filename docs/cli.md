@@ -408,7 +408,8 @@ pause rules. This bounds killed sessions and lost Stop reports; a silent single
 operation longer than the lease also expires. Session state is capped at 16 rows
 per thread, with oldest activity evicted, and ended/expired working rows are deleted.
 Waiting state has no TTL and records no activity: an unanswered question remains
-waiting until a later session event, archive or deletion. Heartbeats only renew
-currently working sessions, never revive ended or waiting ones. Hooks capture
+waiting until a later session event, archive or deletion. Heartbeats renew
+working sessions or resume waiting sessions when stamped later than the waiting
+event; they never create sessions or revive ended ones. Hooks capture
 `--at` before detaching their sender; control rejects older per-session reports.
 This orders delivery without trusting a pylon timestamp to keep its lease alive.
