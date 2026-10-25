@@ -842,11 +842,11 @@ export async function startApi(options: ApiOptions): Promise<Api> {
       if (kinds.some((k) => !(eventKinds as readonly string[]).includes(k))) throw new HttpError(400, "unknown event kind");
       const filter: EventFilter = { kinds, ...(query.has("thread") ? { thread: query.get("thread")! } : {}), ...(query.has("project") ? { project: query.get("project")! } : {}) };
       const read = () => {
-        try { return registry.events(since, filter); }
+        try { return registry.eventBatch(since, filter); }
         catch (err) { throw new HttpError(409, (err as Error).message); }
       };
       const first = read();
-      if (query.get("follow") !== "true") return send(res, 200, first);
+      if (query.get("follow") !== "true") return send(res, 200, first.events);
       if (open.size >= maxStreams) throw new HttpError(503, "too many streams");
       res.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-store" });
       let blocked = false;
@@ -857,19 +857,21 @@ export async function startApi(options: ApiOptions): Promise<Api> {
           stall ??= setTimeout(() => res.destroy(), streamStallMs);
         }
       };
-      const flush = (events = read()) => {
-        for (const event of events) {
+      const flush = (batch = read()) => {
+        for (const event of batch.events) {
           write(`id: ${event.id}\ndata: ${JSON.stringify(event)}\n\n`);
           since = event.id;
-          if (blocked) break;
+          if (blocked) return;
         }
+        since = batch.watermark;
+        write(`id: ${since}\n: ping\n\n`);
       };
       res.on("drain", () => { blocked = false; clearTimeout(stall); stall = undefined; });
       const registration = { thread: "" as ThreadId, end: () => res.end() };
       open.add(registration);
       const timer = setInterval(() => {
         if (blocked) return;
-        try { flush(); if (!blocked) write(": ping\n\n"); }
+        try { flush(); }
         catch { res.destroy(); }
       }, 1000);
       res.once("close", () => { open.delete(registration); clearInterval(timer); clearTimeout(stall); });

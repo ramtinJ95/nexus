@@ -1714,3 +1714,27 @@ test("a Claude worker start stores its first prompt without starting a harness c
   assert.deepEqual(s.registry.claudeWorker(started.body.id), { prompt: "/poteto-mode fix the bug", state: "pending" });
   assert.equal((await s.call("GET", `/v1/threads/${started.body.id}`)).body.claudeWorker.state, "pending");
 });
+
+test("a quiet filtered stream scans past unrelated events and survives retention rollover", async (t) => {
+  const { follow } = await import("../cli/transport.ts");
+  const s = await setup(t);
+  const stop = new AbortController();
+  t.after(() => stop.abort());
+  let cursor = "0";
+  const endpoint = { url: new URL(`http://127.0.0.1:${s.port}`), socks: null };
+  const reading = follow(endpoint, "/v1/events?follow=true&kind=session.turn-ended", () => assert.fail("no matching events yet"), stop.signal, (id) => { cursor = id; });
+  for (let batch = 0; batch < 3; batch++) {
+    let last = "0";
+    for (let i = 0; i < 5000; i++) {
+      last = s.registry.appendEvent("release.changed", null, {}).id;
+      if (i % 100 === 0) await new Promise((resolve) => setImmediate(resolve));
+    }
+    await until(() => cursor === last, "the stream sent its scanned watermark");
+  }
+  stop.abort();
+  await reading;
+  const matching = s.registry.appendEvent("session.turn-ended", null, {});
+  const resumed = s.events(`/v1/events?follow=true&kind=session.turn-ended&since=${cursor}`);
+  t.after(() => resumed.close());
+  assert.equal((await resumed.next()).id, matching.id);
+});

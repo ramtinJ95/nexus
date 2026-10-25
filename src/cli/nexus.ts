@@ -1,3 +1,4 @@
+import { once } from "node:events";
 import type { NexusEvent } from "../events.ts";
 import { releaseOutcome, type ReleaseView } from "../deploy/model.ts";
 /**
@@ -67,7 +68,7 @@ type Values = Record<string, string | boolean | string[] | undefined>;
 /** `idleMs` is how long the reply may take, 30 s by default. */
 type Api = (method: string, path: string, body?: unknown, idleMs?: number) => Promise<unknown>;
 /** Follows one of the API's event streams until it ends or `signal` aborts it. */
-type Follow = (path: string, onEvent: (data: unknown) => void, signal: AbortSignal) => Promise<void>;
+type Follow = (path: string, onEvent: (data: unknown) => void | Promise<void>, signal: AbortSignal, onCursor?: (id: string) => void) => Promise<void>;
 /** What a command prints: its JSON for --json, its text otherwise. */
 interface Result { json: unknown; text: string }
 /** What attach needs beyond the API. */
@@ -499,17 +500,18 @@ const commands: Readonly<Record<string, Command>> = {
       const query = new URLSearchParams();
       for (const key of ["since", "thread", "project"]) if (str(v, key) !== undefined) query.set(key, str(v, key)!);
       for (const kind of strs(v, "kind")) query.append("kind", kind);
-      const print = (event: NexusEvent) => {
-        console.log(v.json ? JSON.stringify(event) : `${event.id} ${new Date(event.time).toISOString()} ${event.thread ?? "-"} ${event.kind} ${JSON.stringify(event.payload)}`);
+      const print = async (event: NexusEvent, signal?: AbortSignal) => {
+        const line = v.json ? JSON.stringify(event) : `${event.id} ${new Date(event.time).toISOString()} ${event.thread ?? "-"} ${event.kind} ${JSON.stringify(event.payload)}`;
+        if (!process.stdout.write(line + "\n")) await once(process.stdout, "drain", { signal });
         query.set("since", event.id);
       };
       if (v.follow !== true) {
-        for (const event of await api("GET", `/v1/events?${query}`) as NexusEvent[]) print(event);
+        for (const event of await api("GET", `/v1/events?${query}`) as NexusEvent[]) await print(event);
         return;
       }
       query.set("follow", "true");
       const stop = new AbortController();
-      const end = () => stop.abort();
+      const end = () => { stop.abort(); process.exit(0); };
       const parent = process.ppid;
       const orphan = setInterval(() => { if (process.ppid !== parent) end(); }, 1000);
       const outputError = (err: NodeJS.ErrnoException) => { if (err.code === "EPIPE") end(); else throw err; };
@@ -518,7 +520,7 @@ const commands: Readonly<Record<string, Command>> = {
       for (const signal of signals) process.once(signal, end);
       try {
         while (!stop.signal.aborted) {
-          try { await follow(`/v1/events?${query}`, (data) => print(data as NexusEvent), stop.signal); }
+          try { await follow(`/v1/events?${query}`, (data) => print(data as NexusEvent, stop.signal), stop.signal, (id) => query.set("since", id)); }
           catch (err) {
             if (err instanceof CliError && err.kind !== "unreachable" && err.kind !== "failed") throw err;
             if (!stop.signal.aborted) console.error(`nexus: ${(err as Error).message}; reconnecting`);
@@ -866,7 +868,7 @@ async function run(argv: readonly string[]): Promise<void> {
   }
   const { endpoint: target, retired } = await settings(values);
   const result = await command.run((method, path, body, idleMs) => call(target, method, path, body, idleMs), positionals, values,
-    (path, onEvent, signal) => follow(target, path, onEvent, signal), { connect: (path) => upgrade(target, path), retired });
+    (path, onEvent, signal, onCursor) => follow(target, path, onEvent, signal, onCursor), { connect: (path) => upgrade(target, path), retired });
   if (result !== undefined) process.stdout.write(`${values.json === true ? JSON.stringify(result.json, null, 2) : result.text}\n`);
 }
 
