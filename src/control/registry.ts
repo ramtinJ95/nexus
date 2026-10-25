@@ -51,10 +51,10 @@ export type Session = { pylon: PylonId; id: string; harness: SessionHarness; har
   | { state: "failed"; herdrPane: string | null; message: string });
 /**
  * `url` is what the data model calls a preview's URL, on its node's tailnet name. `failed` says why the preview
- * cannot answer while its node's last observation reports its service failed, and null otherwise. `ready` is true
- * once the node publishes the URL, unless the running pylon's last read reports the service starting, stopped or
- * failed, whose URL answers 502 though the node may publish it. A service the read does not list, such as a port
- * linked since, is ready once published.
+ * cannot answer while its node's last observation reports its service failed or its port without a route into the
+ * pylon, and null otherwise. `ready` is true once the node publishes the URL, unless the running pylon's last read
+ * reports the service starting, stopped or failed, or its port unrouted, whose URL answers 502 or 404 though the node
+ * may publish it. A service the read does not list, such as a port linked since, is ready once published.
  */
 export interface Preview { pylon: PylonId; service: string; httpsPort: number; ready: boolean; failed: string | null; url: string }
 /** The https ports a node's previews are published on, both ends included. */
@@ -338,13 +338,14 @@ export function openRegistry(path: string) {
     // A pylon's previews are all on its node.
     const observed = jsonOrNull<NodeObservation>((q.node.get(rows[0]!.node as string) as Row).observation)?.pylons.find((p) => p.pylonId === pylon);
     // Only a running pylon's services are known. A paused one's preview shows the waking page, which answers.
-    const states = new Map(observed?.phase === "running" ? (observed.services ?? []).map((s) => [s.name, s.state]) : []);
+    const facts = new Map(observed?.phase === "running" ? (observed.services ?? []).map((s) => [s.name, s]) : []);
     return rows.map((r): Preview => {
       const service = r.service as string;
-      const state = states.get(service);
-      const why = state === "failed" ? `the service ${service} failed. \`nexus service logs ${service}\` in the pylon shows why` : null;
+      const fact = facts.get(service);
+      const why = fact?.unrouted ?? (fact?.state === "failed" ? `the service ${service} failed. \`nexus service logs ${service}\` in the pylon shows why` : null);
       return {
-        pylon: r.pylon as PylonId, service, httpsPort: r.https_port as number, ready: r.ready === 1 && (state === undefined || state === "ready"), failed: why,
+        pylon: r.pylon as PylonId, service, httpsPort: r.https_port as number,
+        ready: r.ready === 1 && (fact === undefined || (fact.state === "ready" && fact.unrouted === undefined)), failed: why,
         url: `https://${r.tailnet_host as string}:${r.https_port as number}/`,
       };
     });

@@ -114,7 +114,7 @@ function table(rows: readonly (readonly string[])[]): string {
   return rows.map((r) => r.map((cell, i) => i === r.length - 1 ? cell : cell.padEnd(widths[i]!)).join("  ")).join("\n");
 }
 
-/** Why the preview's service failed, or null. A control plane older than `Preview.failed` sends none, which is no failure. */
+/** Why the preview cannot answer, such as its service failed, or null. A control plane older than `Preview.failed` sends none, which is no failure. */
 const failureOf = (p: Preview): string | null => p.failed ?? null;
 const clip = (text: string, max: number) => text.length <= max ? text : `${text.slice(0, max)}...`;
 const contentText = (content: string | readonly (TextContent | ImageContent)[]) => typeof content === "string" ? content
@@ -176,7 +176,7 @@ function portsText(ports: ThreadDetail["ports"], id: string): string {
   if (ports === null) return "The pylon's listening ports could not be read.";
   if (ports.length === 0) return "No listening ports.";
   return [
-    table(ports.map((l) => [String(l.port), l.service ?? "-", l.preview === null ? "-" : `${l.preview.url}${failureOf(l.preview) !== null ? " (its service failed)" : l.preview.ready ? "" : " (not served yet)"}`])),
+    table(ports.map((l) => [String(l.port), l.service ?? "-", l.preview === null ? "-" : `${l.preview.url}${failureOf(l.preview) !== null ? ` (not ready: ${failureOf(l.preview)})` : l.preview.ready ? "" : " (not served yet)"}`])),
     ...ports.some((l) => l.preview === null) ? [`\`nexus preview ${id} <port>\` publishes a port.`] : [],
   ].join("\n");
 }
@@ -227,7 +227,8 @@ async function served(api: Api, id: string, port: number): Promise<Preview> {
     const preview = d.ports?.find((l) => l.port === port)?.preview;
     if (preview?.ready === true) return preview;
     if (Date.now() >= deadline) {
-      throw new CliError("failed", `port ${port} of ${id} was not served within ${waitMs / 1000} s. \`nexus ports ${id}\` shows whether it listens and whether its preview is published`);
+      const why = preview && failureOf(preview) !== null ? `, because ${failureOf(preview)}` : "";
+      throw new CliError("failed", `port ${port} of ${id} was not served within ${waitMs / 1000} s${why}. \`nexus ports ${id}\` shows whether it listens and whether its preview is published`);
     }
     await sleep(waitPollMs);
   }

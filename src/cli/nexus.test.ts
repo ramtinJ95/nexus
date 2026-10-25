@@ -411,10 +411,16 @@ test("show reports a published preview whose service is starting as not ready, a
   // A service that listens but fails its health check is failed too.
   observeRunning(s, thread, [web("failed")], [8003]);
   assert.deepEqual(await s.json(["ports", thread.id]), [{ port: 8003, service: "web", preview: { ...preview, ready: false, failed } }]);
-  assert.equal((await s.nexus(["ports", thread.id])).stdout, `8003  web  ${preview.url} (its service failed)\n`);
+  assert.equal((await s.nexus(["ports", thread.id])).stdout, `8003  web  ${preview.url} (not ready: ${failed})\n`);
 
   observeRunning(s, thread, [web("ready")], [8003]);
   assert.deepEqual((await s.json(["show", thread.id])).previews, [preview], "a restarted service's preview is ready again");
+
+  // A ready service whose port has no route into the pylon answers nothing either, and says why.
+  const unrouted = "the relay cannot listen on its relay port 127.0.0.1:700: [Errno 98] Address already in use";
+  observeRunning(s, thread, [{ ...web("ready"), unrouted }], [8003]);
+  assert.deepEqual(await s.json(["ports", thread.id]), [{ port: 8003, service: "web", preview: { ...preview, ready: false, failed: unrouted } }]);
+  assert.equal((await s.nexus(["ports", thread.id])).stdout, `8003  web  ${preview.url} (not ready: ${unrouted})\n`);
 });
 
 test("a preview from a control plane older than Preview.failed reads as not failed, and a session older than Session.state as running", async (t) => {
