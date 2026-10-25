@@ -316,7 +316,10 @@ export class GuestServices {
 		this.relayQueue = run.catch(() => undefined);
 		return run;
 	}
-	/** Reads the relay's status until it has applied the last map, for at most 5 s. A preview it has not stays unrouted. */
+	/**
+	 * Reads the relay's status until it has applied the last map, for at most 5 s. A preview it has not stays unrouted,
+	 * and since every fact waits on the relay queue behind this, a fact only ever reports one the wait gave up on.
+	 */
 	private async confirm(): Promise<void> {
 		const deadline = Date.now() + 5000;
 		for (;;) {
@@ -348,7 +351,7 @@ export class GuestServices {
 						? `the preview has no relay port, because ${this.full}. Unpublish another preview to free one`
 						: current && this.relayStatus.failed[relay] !== undefined
 							? `the relay cannot listen on its relay port 127.0.0.1:${relay}: ${this.relayStatus.failed[relay]}`
-							: `the relay has not yet confirmed its relay port 127.0.0.1:${relay}. Read ${relayLog} in the pylon if this lasts`,
+							: `the relay did not confirm its relay port 127.0.0.1:${relay} within 5 s. Read ${relayLog} in the pylon`,
 				);
 		}
 		if (JSON.stringify(routes) === JSON.stringify(this.published)) return;

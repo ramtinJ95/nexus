@@ -136,6 +136,28 @@ test("a route is set only once the relay confirms its relay port carries to its 
 	assert.deepEqual(fake.events, ["route {}", "map {}", 'map {"700":3001}', 'route {"/port-3001/":700}'], "700 leaves the ingress before the relay drops it, and is routed again only once the relay carries it to 3001");
 });
 
+test("a status asked while the relay has not confirmed a preview waits for it, and reports the preview unrouted only once the wait gives up", async (t) => {
+	const dir = await mkdtemp(join(tmpdir(), "nexus-services-"));
+	t.after(() => rm(dir, { recursive: true, force: true }));
+	const fake = fakeVm();
+	const services = new GuestServices(fake.vm, dir, configPath, "/workspace/repo", "agent", {});
+	t.after(() => services.close());
+	const fact = { name: "port-3000", state: "ready", port: 3000, declared: false, wantsPreview: true };
+	fake.relay.held = true;
+	const attaching = services.attach(3000);
+	while (fake.relayMaps.length === 0) await delay(10);
+	const began = Date.now();
+	assert.deepEqual(await services.operate("status"), [{
+		...fact,
+		unrouted: "the relay did not confirm its relay port 127.0.0.1:700 within 5 s. Read /var/lib/pi-sandbox/relay.log in the pylon",
+	}], "never an unrouted preview while the relay may still confirm it");
+	assert.ok(Date.now() - began >= 4500, "the status waited out the relay");
+	await attaching;
+	fake.relay.apply();
+	assert.deepEqual(await services.operate("status"), [fact], "a late confirmation routes it");
+	assert.deepEqual(fake.targets.at(-1), { "/port-3000/": 700 });
+});
+
 test("a relay port the relay cannot listen on is never routed, and its preview says why until the relay can", async (t) => {
 	const dir = await mkdtemp(join(tmpdir(), "nexus-services-"));
 	t.after(() => rm(dir, { recursive: true, force: true }));
