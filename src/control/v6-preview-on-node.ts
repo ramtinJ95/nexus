@@ -10,9 +10,10 @@
  * answer from this node, and the guest's relay log must name both. The ::1 server then moves its port to 0.0.0.0,
  * which it must bind at once, and its preview must answer from the new server. A declared service that listens only
  * on ::1, 8 s after each start, must become ready through its health check, and after `nexus service restart` must
- * stay starting until its listener is back. After an archive and an unarchive, which pause and wake the pylon, the
- * agent starts the servers again and both previews must answer on the same URLs. Deleting the thread must leave
- * `tailscale serve` as the check found it.
+ * stay starting until its listener is back. Another, with the default health, that never listens again after a
+ * restart must stay starting until its start timeout fails it, never ready. After an archive and an unarchive, which
+ * pause and wake the pylon, the agent starts the servers again and both previews must answer on the same URLs.
+ * Deleting the thread must leave `tailscale serve` as the check found it.
  *
  * At each hold it prints `CURL <url> <body>` for each preview, so a Mac can check them through ts-home's SOCKS proxy:
  *   ssh home-<node> 'cd <checkout> && sudo -u nexus node src/control/v6-preview-on-node.ts' | tee v6-preview.log |
@@ -145,6 +146,7 @@ const v6 = { port: 3461, body: "v6-ok" };
 const v4 = { port: 3462, body: "v4-ok" };
 const named = 3464;
 const slow = { name: "slow6", port: 3466, delayS: 8 };
+const gone = { name: "gone6", port: 3467, timeoutS: 6 };
 /** Detached, because the agent's bash call ends before the servers do. The ::1 server's PID is kept for the move. */
 const startServers = [
   `setsid nohup node -e "require('http').createServer((q,r)=>r.end('${v6.body}')).listen(${v6.port},'::1')" </dev/null >/tmp/v6.log 2>&1 & echo $! > /tmp/v6.pid`,
@@ -159,17 +161,23 @@ const moveServer = [
   "sleep 2; cat /tmp/moved.log",
 ].join("\n");
 /** A declared service that listens on ::1 only, delayS seconds after each start, with a health check through its route. */
-const declareSlow = [
+/**
+ * Two declared services without previews that listen only on ::1. slow6 listens delayS seconds after each start, and
+ * has a health path. gone6 listens at its first start only, and has the default health, a connection.
+ */
+const declareServices = [
   "mkdir -p .nexus",
   `cat > .nexus/slow6.sh <<'SH'\nsleep ${slow.delayS}\nexec node -e "require('http').createServer((q,r)=>r.end('slow6-ok')).listen(Number(process.env.PORT),'::1')"\nSH`,
-  `printf 'services:\\n  ${slow.name}:\\n    command: sh .nexus/slow6.sh\\n    port: ${slow.port}\\n    health: /\\n' > .nexus/services.yaml`,
+  `cat > .nexus/gone6.sh <<'SH'\nif [ -e /tmp/gone6-started ]; then exec sleep 3600; fi\ntouch /tmp/gone6-started\nexec node -e "require('http').createServer((q,r)=>r.end('gone6-ok')).listen(Number(process.env.PORT),'::1')"\nSH`,
+  "rm -f /tmp/gone6-started",
+  `printf 'services:\\n  ${slow.name}:\\n    command: sh .nexus/slow6.sh\\n    port: ${slow.port}\\n    health: /\\n  ${gone.name}:\\n    command: sh .nexus/gone6.sh\\n    port: ${gone.port}\\n    timeoutMs: ${gone.timeoutS * 1000}\\n' > .nexus/services.yaml`,
 ].join("\n");
 /**
- * Runs `command`, then prints the service's state about once a second for `seconds` seconds, each as
+ * Runs `command`, then prints the state of the service `name` about once a second for `seconds` seconds, each as
  * `<tag>#<seconds since before the command> <state>`.
  */
-const sampleSlow = (tag: string, command: string, seconds: number) => [
-  `state() { nexus services list --json | python3 -c 'import json,sys; print(next(s["state"] for s in json.load(sys.stdin)["services"] if s["name"]=="${slow.name}"))'; }`,
+const sample = (name: string, tag: string, command: string, seconds: number) => [
+  `state() { nexus services list --json | python3 -c 'import json,sys; print(next(s["state"] for s in json.load(sys.stdin)["services"] if s["name"]=="${name}"))'; }`,
   `t0=$(date +%s); ${command} >/dev/null`,
   `for i in $(seq 1 ${seconds}); do echo "${tag}#$(( $(date +%s) - t0 )) $(state)"; sleep 1; done`,
 ].join("\n");
@@ -240,11 +248,11 @@ try {
   await answers(v6Preview.url, "moved-ok");
   pass(`a server that moves ${v6.port} from ::1 to 0.0.0.0 binds it at once, and ${v6Preview.url} answers it: ${moved}`);
 
-  await runTool("msg:v6-declare", declareSlow);
-  const ensured = await runTool("msg:v6-ensure", sampleSlow("ensure", "nexus services ensure", slow.delayS + 12));
+  await runTool("msg:v6-declare", declareServices);
+  const ensured = await runTool("msg:v6-ensure", sample(slow.name, "ensure", "nexus services ensure", slow.delayS + 12));
   assert.ok(samples(ensured, "ensure").some((s) => s.state === "ready"), `the declared ::1 service becomes ready: ${ensured}`);
   pass(`the declared service ${slow.name}, which listens only on ::1, becomes ready through its health check: ${ensured}`);
-  const restarted = await runTool("msg:v6-restart", sampleSlow("restart", `nexus service restart ${slow.name}`, slow.delayS + 12));
+  const restarted = await runTool("msg:v6-restart", sample(slow.name, "restart", `nexus service restart ${slow.name}`, slow.delayS + 12));
   const states = samples(restarted, "restart");
   const firstReady = states.find((s) => s.state === "ready");
   assert.ok(firstReady !== undefined, `the restarted service becomes ready again: ${restarted}`);
@@ -252,6 +260,14 @@ try {
   assert.ok(firstReady.at >= slow.delayS - 1, `it is not ready until its ::1 listener is back, ${slow.delayS} s after the restart, but was ${firstReady.at} s after: ${restarted}`);
   assert.ok(states.filter((s) => s.at < firstReady.at).every((s) => s.state === "starting"), `before that it is starting: ${restarted}`);
   pass(`after a restart, ${slow.name} stays starting until its ::1 listener is back, and is ready ${firstReady.at} s after: ${restarted}`);
+
+  const goneUp = await runTool("msg:v6-gone-up", sample(gone.name, "up", "true", 5));
+  assert.ok(samples(goneUp, "up").some((s) => s.state === "ready"), `${gone.name} becomes ready once it listens on ::1: ${goneUp}`);
+  const goneRestart = await runTool("msg:v6-gone-restart", sample(gone.name, "gone", `nexus service restart ${gone.name}`, gone.timeoutS + 8));
+  const goneStates = samples(goneRestart, "gone");
+  assert.ok(goneStates.every((s) => s.state !== "ready"), `restarted, ${gone.name} never listens again and is never ready: ${goneRestart}`);
+  assert.ok(goneStates.some((s) => s.state === "failed" && s.at >= gone.timeoutS - 1), `it fails once its ${gone.timeoutS} s start timeout passes: ${goneRestart}`);
+  pass(`after a restart that never listens again, ${gone.name} stays starting until its ${gone.timeoutS} s timeout fails it, never ready: ${goneRestart}`);
 
   await expect(200, "POST", `/threads/${threadId}/archive`);
   await reaches("paused", 5 * 60_000);
