@@ -175,7 +175,14 @@ const servicesFileSchema = z.strictObject({ services: z.record(serviceName, serv
 
 // The Project record, stored in Nexus.
 
+export const gitIdentitySchema = z.strictObject({
+  name: z.string().trim().min(1).refine((s) => !/[\x00-\x1f\x7f]/.test(s), "must be a single line"),
+  email: z.email(),
+});
+export type GitIdentity = z.infer<typeof gitIdentitySchema>;
+
 export interface Project {
+  gitIdentity?: GitIdentity | null | undefined;
   id: ProjectId;
   /**
    * SSH or HTTPS, or null for a scratch project: its pylons start from `git init` on defaultBranch, nothing is
@@ -254,6 +261,7 @@ export type CloneRepo = Extract<RepoInit, { kind: "clone" }>;
 
 /** Applied only when the VM boots. Changing these on a running pylon takes effect at its next wake. */
 export interface BootInputs {
+  gitIdentity?: GitIdentity | undefined;
   pylonId: PylonId;
   image: ImageId;
   source: PylonSource;
@@ -283,6 +291,7 @@ export interface OverlayFile { path: `/${string}`; mode: 0o644 | 0o755; owner: "
 // The pylon overlay, rendered by the control plane.
 
 export interface PylonOverlay {
+  gitIdentity?: GitIdentity | undefined;
   pylonId: PylonId;
   threadId: string;
   project: ProjectId;
@@ -407,17 +416,12 @@ nexus unpreview 6006                       # stop publishing it
 `;
 }
 
-/** Where the checkout came from, how to set a git author, which no pylon has, and how to publish with a GitHub grant. */
+/** Where the checkout came from, the configured git author, and how to publish with a GitHub grant. */
 function repositorySection(o: PylonOverlay): string {
   const github = o.secrets.some((grant) => grant.name === githubTokenGrant.name);
-  const author = github
-    ? `Git has no author here. Commit as the GitHub account that owns GH_TOKEN:
-
-\`\`\`sh
-git config --global user.name "$(gh api user --jq .login)"
-git config --global user.email "$(gh api user --jq '"\\(.id)+\\(.login)@users.noreply.github.com"')"
-\`\`\``
-    : "Git has no author here. Before your first commit, ask the human which name and email to commit as, and set them with `git config --global user.name` and `git config --global user.email`.";
+  const author = o.gitIdentity
+    ? `Nexus sets git's global identity for user to ${o.gitIdentity.name} <${o.gitIdentity.email}> on every boot. Commit as this person; there is no separate agent account.`
+    : "Nexus has no git identity configured. Git is left unchanged. If a commit needs an identity, ask the human; do not invent an identity or infer one from a token.";
   const token = "`gh` reads GH_TOKEN, and git over HTTPS asks `gh` for it on each push, so never store the token: no `gh auth login`, no credential store. Use HTTPS remotes, because git over SSH reaches only the remotes this pylon booted with.";
   let origin: string;
   let publish: string[];
@@ -435,7 +439,7 @@ git add -A && git commit -m "feat: first version"
 gh repo create <owner>/<name> --private --source . --remote origin --push
 git push                                   # every later push
 \`\`\``]
-        : [`This project has no GitHub token, and a project's secrets are fixed when it is created. To publish from a pylon, ask the human for a project with GitHub access: \`nexus project add <id> --scratch --secret ${githubTokenGrant.name}:${githubTokenGrant.hosts.join(",")}\`.`];
+        : [`This project has no GitHub token, and this pylon's secrets are fixed at thread creation. To publish from a pylon, ask the human for a project with GitHub access: \`nexus project add <id> --scratch --secret ${githubTokenGrant.name}:${githubTokenGrant.hosts.join(",")}\`.`];
       break;
   }
   return `## Repository\n\n${[origin, author, ...publish].join("\n\n")}\n`;

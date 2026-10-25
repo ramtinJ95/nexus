@@ -14,17 +14,16 @@ Nexus threads are building these, one pull request each. They are dogfooding Nex
 
 These start once the work above has landed.
 
+- **The review flow runs on Nexus too.** A task should run end to end on Nexus: build, review, fix, live check, merge and deploy. Today only the build does. Reviews and live checks run on the Mac, through a Claude Code coordinator and its workers, so a task stops whenever the Mac's session isn't running. Each pull request could get a reviewer thread on a different model from the one that built it, which sends its findings back to the builder's thread. The live check needs a place to run a verify stack: a pylon can't run Docker or VMs inside itself today. A written merge policy says when a reviewed, checked pull request merges without the person, and `nexus deploy` ships it. This builds on the event stream and Claude Code workers, and it is the next item to tackle.
 - **The clients use the attention status, the seen marker and the latest-turn base.** The mod and pi-nexus drop their own seen stores (the mod's store and `pi-nexus/viewed.json`) and read the control plane's fields instead.
 - **Dashboard polish.** A live "working 1m 03s" clock on running rows. Rows that don't need you dimmed. Tool calls in the conversation grouped into summaries such as "Ran 3 commands, changed 2 files".
 - **Syntax-highlighted diffs.** The dashboard renders its diffs with Pierre's diff library, [`@pierre/diffs`](https://www.npmjs.com/package/@pierre/diffs), which t3code's web app also uses, so changed code gets proper syntax highlighting instead of today's plain lines. Check its licence before adding it.
 - **Review comments on the diff.** The dashboard's diff works like the review-pane mod's `/review-diff`. Select a line or a range and attach a comment, a question, a suggestion or a requested change. The notes gather into one review, which goes to the composer with each note's file and lines, so the person edits it before it reaches the agent. An answer to a question shows beside the lines it was asked about. When the thread has a pull request, the review could also go to GitHub as review comments, and the pull request's own review comments could show in place, building on the pull request watch.
-- **A git identity in every pylon.** A scratch pylon has no git `user.name` or `user.email`, so an agent there can't commit. Headless Claude Code hit this in the Claude Code spike and stopped to ask who to commit as. The common dotfiles layer or the project could set it.
 
 ## Later
 
 - **Placement by a scheduler.** A client or an agent submits work without naming a node, and Nexus boots the pylon on the node where it fits with the least load. Today every thread boots on its project's default node, unless the CLI's `start --node` names another. The scheduler needs these first:
   - `nexus nodes` reports `committedMemoryGiB: 0` on a node running five 8 GiB pylons, so the capacity it reports is wrong.
-  - A project's default node and resources can't be changed once it is created.
   - The model tools' `start` takes no node.
   - There is no move job, so a pylon stays on the node it booted on. [The lifecycle](design.md#lifecycle-follows-amp) describes how a move could work, and spike S7 showed that copying checkpoints needs verifying.
 - **Tools for an agent to drive other threads.** Delegate a task, send to a thread, wait on it and read it, with retry-safe request IDs and a cap on what a child thread may do. The agent loop runs on the control plane, so these tools could run there. Whether pi-durable can run a tool on the host rather than in the pylon is unchecked.

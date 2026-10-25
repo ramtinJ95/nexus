@@ -39,3 +39,12 @@ test("HTTPS uses an allowed MagicDNS hostname and reserves 7443 from previews", 
   assert.throws(() => parseConfig(JSON.stringify({ ...config, https: { hostname: "localhost" } })), /invalid/);
   assert.throws(() => parseConfig(JSON.stringify({ ...config, previewPorts: { first: 7440, last: 7450 } })), /7443/);
 });
+
+test("git identity is optional and contains only a name and email", () => {
+  const { gitIdentity, ...config } = JSON.parse(example);
+  assert.deepEqual(parseConfig(example).gitIdentity, { name: "Example Person", email: "person@example.com" });
+  assert.equal(parseConfig(JSON.stringify(config)).gitIdentity, undefined);
+  for (const identity of [{ name: "", email: "person@example.com" }, { name: "Person", email: "not-email" }, { ...gitIdentity, token: "not-allowed" }, { name: "Person\nOther", email: "person@example.com" }]) {
+    assert.throws(() => parseConfig(JSON.stringify({ ...config, gitIdentity: identity })), /invalid control plane config/);
+  }
+});
