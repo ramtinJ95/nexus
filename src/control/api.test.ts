@@ -950,15 +950,16 @@ test("a thread's streams end when it is deleted, and a deleted thread, a strange
 /** Backs up a paused client's socket with ten commits of a megabyte each. */
 async function backUp(s: Awaited<ReturnType<typeof withThread>>) {
   const transcript = s.fake.transcript(s.thread.id);
-  for (let i = 0; i < 10; i++) {
-    transcript.docs["pi.live"] = { seq: i, output: "x".repeat(1 << 20) };
+  // One frame must exceed loopback's autotuned socket buffers even when intermediate commits coalesce.
+  for (let i = 0; i < 3; i++) {
+    transcript.docs["pi.live"] = { seq: i, output: "x".repeat(16 << 20) };
     s.fake.commit(s.thread.id);
     await new Promise((resolve) => setImmediate(resolve));
   }
 }
 
 test("a client that stops reading is dropped after the stall limit, with its watch and its place", async (t) => {
-  const s = await withThread(t, { streamStallMs: 300 });
+  const s = await withThread(t, { streamStallMs: 1000 });
   const { thread, fake } = s;
   const stream = s.events(`/v1/threads/${thread.id}/events`);
   await stream.next();
@@ -974,7 +975,7 @@ test("a client that stops reading is dropped after the stall limit, with its wat
 });
 
 test("deleting a thread whose client stopped reading frees the stream at once, writes nothing after the end, and drops the client", async (t) => {
-  const s = await withThread(t, { streamStallMs: 300 });
+  const s = await withThread(t, { streamStallMs: 1000 });
   const { thread, fake } = s;
   const transcript = fake.transcript(thread.id);
   const stream = s.events(`/v1/threads/${thread.id}/events`);
@@ -985,7 +986,7 @@ test("deleting a thread whose client stopped reading frees the stream at once, w
   transcript.docs["pi.live"] = { seq: 10 };
   fake.commit(thread.id);
   assert.equal(fake.watching(thread.id), 0, "the delete stopped the watch at once, though the client has not read the end yet");
-  await new Promise((resolve) => setTimeout(resolve, 600));
+  await new Promise((resolve) => setTimeout(resolve, 1500));
   stream.resume();
   assert.equal(await stream.ended, "dropped", "a client that never read up to the end was dropped after the stall limit");
   assert.equal((await s.call("GET", "/v1/projects")).status, 200, "the control plane is still up");

@@ -510,6 +510,10 @@ const commands: Readonly<Record<string, Command>> = {
       query.set("follow", "true");
       const stop = new AbortController();
       const end = () => stop.abort();
+      const parent = process.ppid;
+      const orphan = setInterval(() => { if (process.ppid !== parent) end(); }, 1000);
+      const outputError = (err: NodeJS.ErrnoException) => { if (err.code === "EPIPE") end(); else throw err; };
+      process.stdout.on("error", outputError);
       const signals = ["SIGINT", "SIGTERM", "SIGHUP"] as const;
       for (const signal of signals) process.once(signal, end);
       try {
@@ -521,7 +525,11 @@ const commands: Readonly<Record<string, Command>> = {
           }
           await sleep(1000, undefined, { signal: stop.signal }).catch(() => undefined);
         }
-      } finally { for (const signal of signals) process.removeListener(signal, end); }
+      } finally {
+        clearInterval(orphan);
+        process.stdout.removeListener("error", outputError);
+        for (const signal of signals) process.removeListener(signal, end);
+      }
     },
   },
   release: {

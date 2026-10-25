@@ -396,7 +396,8 @@ export function openRegistry(path: string) {
     const t = withSessions(row);
     const old = db.prepare("SELECT * FROM thread_attention WHERE thread = ?").get(id);
     const p = q.pylon.get(t.pylonId);
-    const attention = attentionOf(p?.failed != null, old?.parked === 1, t.lastReplyAt, t.seenAt, t.agentTurnRunning || t.sessionTurnRunning === true, t.sessionWaiting);
+    const workerFailed = db.prepare("SELECT state FROM claude_workers WHERE thread = ?").get(id)?.state === "failed";
+    const attention = attentionOf(p?.failed != null || workerFailed, old?.parked === 1, t.lastReplyAt, t.seenAt, t.agentTurnRunning || t.sessionTurnRunning === true, t.sessionWaiting);
     if ((old?.attention ?? null) === attention) return;
     db.prepare("INSERT INTO thread_attention (thread, attention) VALUES (?, ?) ON CONFLICT(thread) DO UPDATE SET attention = excluded.attention").run(id, attention);
     appendEvent("attention.changed", id, { attention });
@@ -428,7 +429,10 @@ export function openRegistry(path: string) {
       return row === undefined ? undefined : { prompt: row.prompt as string, state: row.state as string };
     },
     setClaudeWorker(thread: ThreadId, prompt: string, state: string) {
-      db.prepare("INSERT INTO claude_workers VALUES (?, ?, ?) ON CONFLICT(thread) DO UPDATE SET state = excluded.state").run(thread, prompt, state);
+      transaction(() => {
+        db.prepare("INSERT INTO claude_workers VALUES (?, ?, ?) ON CONFLICT(thread) DO UPDATE SET state = excluded.state").run(thread, prompt, state);
+        updateAttention(thread);
+      });
     },
     reportSession(node: NodeName, report: ReportedEvent) {
       const event = pylonEventSchema.parse(report.event);

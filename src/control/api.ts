@@ -292,6 +292,8 @@ export async function startApi(options: ApiOptions): Promise<Api> {
    */
   async function startThread(body: unknown, caller: TailnetNodeId): Promise<Thread> {
     const request = parse(startSchema, body);
+    const claudePrompt = request.claude === undefined ? undefined : /^\/poteto-mode(?:\s|$)/.test(request.claude) ? request.claude : `/poteto-mode ${request.claude}`;
+    if (claudePrompt !== undefined && claudePrompt.length > 16_384) throw new HttpError(400, "Claude prompt including /poteto-mode exceeds 16384 characters");
     const project = registry.project(request.project as ProjectId);
     if (project === undefined) throw new HttpError(404, `no project ${request.project}`);
     const node = (request.node ?? project.defaultNode) as NodeName;
@@ -331,7 +333,7 @@ export async function startApi(options: ApiOptions): Promise<Api> {
       live,
       liveHash: liveHashOf(live),
     });
-    registry.createThread(t, pylon, request.claude === undefined ? undefined : /^\/poteto-mode(?:\s|$)/.test(request.claude) ? request.claude : `/poteto-mode ${request.claude}`);
+    registry.createThread(t, pylon, claudePrompt);
     wake(node);
     return t;
   }
@@ -375,7 +377,7 @@ export async function startApi(options: ApiOptions): Promise<Api> {
 
   function attention(t: Thread): Attention {
     const parked = t.conversationId !== null && t.status !== "deleted" && harness.activity.parked(t.id).length > 0;
-    return attentionOf(pylonOf(t).failed !== null, parked, t.lastReplyAt, t.seenAt, t.agentTurnRunning || t.sessionTurnRunning === true, t.sessionWaiting);
+    return attentionOf(pylonOf(t).failed !== null || registry.claudeWorker(t.id)?.state === "failed", parked, t.lastReplyAt, t.seenAt, t.agentTurnRunning || t.sessionTurnRunning === true, t.sessionWaiting);
   }
 
   function row(t: Thread): ThreadRow {

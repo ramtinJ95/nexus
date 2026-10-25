@@ -89,3 +89,18 @@ test("without a host bridge, as for a template build, nexus.pylon is an ordinary
 	assert.ok(sent instanceof Request, "the hooks did not answer it");
 	assert.equal(await httpHooks!.isIpAllowed!({ hostname: "nexus.pylon", ip: "198.18.0.1", family: 4, port: 80, protocol: "http" }), false);
 });
+
+test("Claude OAuth uses a placeholder substituted only for its granted Anthropic host", async () => {
+	const { httpHooks, placeholders } = networkOptions({
+		...spec, allowedHosts: ["api.anthropic.com", "github.com"],
+		secrets: { CLAUDE_CODE_OAUTH_TOKEN: { hosts: ["api.anthropic.com"], value: "test-oauth-not-a-real-token" } },
+	}, "pylon-t1");
+	const placeholder = placeholders.CLAUDE_CODE_OAUTH_TOKEN;
+	assert.ok(placeholder);
+	assert.notEqual(placeholder, "test-oauth-not-a-real-token");
+	const send = (host: string) => httpHooks!.onRequest!(new Request(`https://${host}/v1/messages`, { headers: { authorization: `Bearer ${placeholder}` } }));
+	const request = await send("api.anthropic.com");
+	assert.ok(request instanceof Request);
+	assert.equal(request.headers.get("authorization"), "Bearer test-oauth-not-a-real-token");
+	await assert.rejects(async () => send("github.com"), { status: 403 });
+});
