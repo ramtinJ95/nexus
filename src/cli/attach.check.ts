@@ -146,16 +146,22 @@ function echo(name: string, printed: string, line: RegExp): void {
 /** Attaches inside a shell that reports the CLI's exit code and then the terminal's modes. */
 const attachScript = () => `${nexusLine(["attach", thread])}; echo "attach-exit=$?"; stty -a`;
 
-/** Waits for Herdr's screen to show the session. Herdr may first show its onboarding screen once, which Enter passes. */
+/**
+ * Waits for Herdr's screen to show the session. A pylon built before its image set `onboarding = false` shows Herdr's
+ * first-run dialog over the session, which would take the detach keys. Enter passes it and opens Herdr's settings,
+ * which Escape closes.
+ */
 async function seesSession(t: Awaited<ReturnType<typeof inTerminal>>, withinMs: number): Promise<void> {
-  const shows = (printed: string) => plain(printed).includes("attach-check");
-  try {
-    await t.until("Herdr's screen shows the session attach-check", shows, 20_000);
-  } catch {
-    console.log("Herdr's screen does not show attach-check yet, so the check sends one Enter, as its onboarding screen needs");
-    await t.terminal.write(Buffer.from("\r"));
-    await t.until("Herdr's screen shows the session attach-check", shows, withinMs);
-  }
+  await t.until("Herdr's screen shows the session attach-check", (printed) => plain(printed).includes("attach-check"), withinMs);
+  // The dialog comes in the frame that draws the session or soon after it.
+  await sleep(2_000);
+  if (!plain(t.printed()).includes("mouse-first terminal")) return;
+  console.log("Herdr shows its first-run onboarding over the session, so the check passes it with Enter and closes the settings after it with Escape");
+  const onboarding = t.mark();
+  await t.terminal.write(Buffer.from("\r"));
+  await t.until("Herdr opens its settings after the onboarding", (printed) => plain(printed).includes("agent integrations"), 20_000, onboarding);
+  await t.terminal.write(Buffer.from("\x1b"));
+  await sleep(2_000);
 }
 
 /** Detaches with Herdr's prefix and `q`, and checks the CLI exits 0 and leaves the terminal's modes as they were. */
