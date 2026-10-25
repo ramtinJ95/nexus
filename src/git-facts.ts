@@ -1,0 +1,21 @@
+import { readFileSync } from "node:fs";
+import { z } from "zod";
+import type { Guest } from "./backend.ts";
+import type { GitFacts } from "./protocol.ts";
+import { checkoutDir } from "./sessions.ts";
+
+const helper = readFileSync(new URL("./git-facts.py", import.meta.url), "utf8");
+const hash = z.string().regex(/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/);
+const schema = z.strictObject({
+  head: hash,
+  branch: z.string().min(1).nullable(),
+  dirty: z.boolean(),
+  branches: z.array(z.strictObject({ name: z.string().min(1), head: hash, pushedAs: z.string().min(1).nullable() })).max(1000),
+});
+
+/** One local read, with no fetch or index refresh. Ref and reply limits fail whole, never report a partial list. */
+export async function gitFacts(guest: Guest): Promise<GitFacts> {
+  const read = await guest.exec(["python3", "-c", helper], { cwd: checkoutDir, timeoutMs: 3000 });
+  if (read.exitCode !== 0 || read.truncated || Buffer.byteLength(read.output) > 60 * 1024 + 1) throw new Error("checkout git facts could not be read within their limits");
+  return schema.parse(JSON.parse(read.output));
+}
