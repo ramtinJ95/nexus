@@ -126,10 +126,17 @@ registry's `events` table retains the most recent 10,000 records across restarts
 A cursor means **strictly after this ID**. Reconnecting within retention replays
 all matching events; an expired nonzero cursor is refused rather than silently
 skipping a gap. No cursor, or `0`, reads the retained history, not all-time history.
+Thread, project and kind filters run against indexed SQL columns before payload
+JSON is decoded. Each stream batch carries a scanned watermark: an id-only SSE
+keep-alive advances it past skipped events only after every matching record in
+the batch has been sent. Quiet filtered followers therefore advance through
+retention rollover without inventing a gap. Backed-up followers cannot advance
+past matching records they have not consumed.
 
 | Kind | Meaning and payload |
 |---|---|
 | `session.turn-started` | Claude submitted a prompt; optional `session` and `message` |
+| `session.heartbeat` | A throttled PostToolUse hook confirms activity; optional `session` and `message` |
 | `session.turn-ended` | Claude's Stop hook ran; optional `session` and `message` |
 | `session.waiting` | Claude notified that input is needed; optional `session` and `message` |
 | `session.ended` | Claude's SessionEnd hook ran; optional `session` and `message` |
@@ -140,7 +147,7 @@ skipping a gap. No cursor, or `0`, reads the retained history, not all-time hist
 | `pull-request.feedback` | New batched GitHub feedback; `requestId` |
 | `release.changed` | Desired release (`desired`) or changed component report |
 
-Only the four `session.*` kinds may come from a pylon. The strict boundary schema
+Only the five `session.*` kinds may come from a pylon. The strict boundary schema
 rejects extra fields, including a thread or project supplied by the guest. Session
 IDs are at most 200 characters and messages at most 2,048. The bridge supplies the
 pylon identity; control maps it to its registered thread and verifies its node.
@@ -156,15 +163,31 @@ control plane; reports can be lost if the local probe itself is unavailable, or
 an outage exceeds the probe's buffer. The registry cursor guarantee begins once
 control has accepted an event.
 
-`session_activity` keeps each reported session's last lifecycle state separately
-from event retention. Any started, not-ended-or-waiting session keeps its thread
-awake, independently of the harness's activity (`Thread.sessionTurnRunning`). A
-waiting session is exposed as `Thread.sessionWaiting`; both flags are optional. Ending or waiting starts the
-normal five-minute agent grace, without recording human activity. Session turn
-ends use the existing strictly increasing `lastReplyAt` identity. Attention keeps
-its existing precedence: failed pylon or worker launch, parked, unread reply, working, then waiting,
-then null. Seen still changes only `seenAt`. These rules also apply to Claude
-sessions opened by hand when they use the image's hooks.
+`session_activity` holds at most 16 rows per thread, evicting the least recently
+updated row (insertion order breaks ties). Turn end and SessionEnd remove the row;
+reply identity stays in `lastReplyAt`. Remaining rows expire after 30 minutes
+without a session report, using control receipt time, never a guest timestamp.
+Pruning runs on registry open, reconcile passes and event retention writes, and
+publishes attention changes. Pre-migration rows have no receipt time and expire
+on upgrade rather than receiving an invented fresh lease.
+
+A start or `session.heartbeat` gives a session a 30-minute working lease.
+PostToolUse hooks share a per-session five-minute throttle; no network call runs
+in the hook process. Each real tool completion can renew the lease, so a turn can
+run for hours without human activity. A killed, silent or fake one-shot turn start
+expires. A single operation that produces no hook reports for 30 minutes has no
+proof of continuing activity and also expires; no timer guesses that it is busy.
+Herdr's cached Claude status cannot renew the lease. Other harness sessions retain
+their existing observation-based activity rules.
+
+`Thread.sessionTurnRunning` and `sessionWaiting` are optional current facts;
+`sessionActiveUntil` lets the pure planner enforce expiry even on an older read.
+After expiry or an ended/waiting turn, normal agent and human idle rules apply.
+Expiry itself records no new activity. Session turn ends use the existing strictly
+increasing `lastReplyAt` identity. Attention keeps its precedence: failed pylon or
+worker launch, parked, unread reply, working, waiting, then null. Seen still changes
+only `seenAt`. These rules also apply to Claude sessions opened by hand when they
+use the image's hooks.
 
 `claude_workers` holds a thread's first prompt and launch state: `pending`,
 `starting`, `started`, or `failed`. It is created atomically with the thread. A

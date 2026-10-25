@@ -190,7 +190,14 @@ supplies identity, validates the event, journals a bounded reconnect buffer and
 forwards it through observations. Control deduplicates those reports, updates
 activity and attention, and appends the public event. Hook subprocesses are
 independent of Claude and have short deadlines; local-probe outages can lose
-reports rather than block the worker. Running session state is independent of
-the retained log and of harness activity, so retention and a dormant harness
-cannot pause a running Claude turn. A waiting or ended turn returns to the normal
+reports rather than block the worker. Running session state is a 30-minute lease independent of
+the retained log and of harness activity. Throttled PostToolUse heartbeats renew
+it; a dead or silent worker cannot keep its pylon awake indefinitely. At most 16
+session states per thread are kept, and ended or expired rows are removed. A waiting or ended turn returns to the normal
 idle policy; seen remains unrelated to activity.
+
+Filtered stream reads use indexed registry columns, not decoding then filtering
+every retained payload. Id-only keep-alives carry the scanned watermark past
+skipped records. The CLI consumes those without printing them and waits for
+stdout drain before reading more response data or advancing its cursor. Network
+failure cannot start another reader around a pending output write.

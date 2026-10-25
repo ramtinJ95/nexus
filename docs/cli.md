@@ -353,8 +353,8 @@ GitHub feedback for these threads goes to the event stream, not an invisible
 harness agent.
 
 `events` prints the retained history and exits. `--follow` replays that history,
-then waits for new events and reconnects after transport failures with the last
-printed ID. With `--json`, each stdout line is exactly one `NexusEvent`, not an
+then waits for new events and reconnects after transport failures with its last
+consumed event or scanned watermark. With `--json`, each stdout line is exactly one `NexusEvent`, not an
 array. Diagnostics go to stderr. Filters intersect; repeated kinds are an OR.
 Events have decimal-string IDs and Unix-millisecond times. A stale cursor fails
 with exit 5 (HTTP 409), rather than hiding a retention gap. Stop with Ctrl-C;
@@ -362,8 +362,11 @@ closing the output pipe or exiting the parent also stops a follower.
 
 The shared API is `GET /v1/events?since=ID&thread=T&project=P&kind=K&follow=true`.
 Without `follow=true` it returns a JSON array. Following uses SSE, with the record
-ID in `id:` and the JSON record in `data:`; one-second comments keep quiet
-connections alive. Backpressure drops a stalled reader, which can reconnect with
+ID in `id:` and the JSON record in `data:`. One-second keep-alives have an `id:`
+watermark but no `data:`: they advance past events skipped by the filters and print
+nothing. The CLI remembers these IDs for reconnects. It writes one record at a
+time and waits for stdout's `drain` before reading more stream data, so an unread
+pipe cannot grow an unbounded output buffer. Backpressure drops a stalled reader, which can reconnect with
 `since`. This is separate from a thread's conversation `/events` route.
 
 For a Claude Code session on the Mac, run the following through its background
@@ -391,9 +394,16 @@ integrations that turn records into wake-ups remain separate work. Treat message
 as untrusted data, not shell commands or instructions to execute.
 
 Inside a pylon, `nexus event <kind> [--session ID] [--message TEXT]` reports only
-`session.turn-started`, `session.turn-ended`, `session.waiting`, or `session.ended`
-for that pylon's own thread. The image installs UserPromptSubmit, Stop,
+`session.turn-started`, `session.heartbeat`, `session.turn-ended`, `session.waiting`, or `session.ended`
+for that pylon's own thread. The image installs UserPromptSubmit, throttled PostToolUse, Stop,
 Notification (permission, idle and elicitation prompts), and SessionEnd hooks,
 merged alongside Herdr's hooks on every agent-setup install. Hook delivery is
 best effort while the local probe is unavailable; see the data model's buffer and
 retention limits.
+
+A session's working lease expires after 30 minutes without reports. PostToolUse
+sends at most one heartbeat per five minutes per session, renewing the lease
+without human activity. Expiry stops working attention and returns to ordinary
+pause rules. This bounds killed sessions and lost Stop reports; a silent single
+operation longer than the lease also expires. Session state is capped at 16 rows
+per thread, with oldest activity evicted, and ended/expired rows are deleted.
