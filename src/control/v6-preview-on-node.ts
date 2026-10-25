@@ -7,7 +7,7 @@
  * model, and drives the node's running probe through it. The agent starts three servers in a pylon: one on ::1 only,
  * one on 127.0.0.1 only, and one that binds `localhost`, whose address the check prints. The real CLI's `ports` must
  * list all three and none of the relay's own ports, and `preview --wait` must publish the first two, whose URLs must
- * answer from this node, and the guest's relay log must name both. The ::1 server then moves its port to 0.0.0.0,
+ * answer from this node, and the guest's relay log and status must name both. The ::1 server then moves its port to 0.0.0.0,
  * which it must bind at once, and its preview must answer from the new server. A declared service that listens only
  * on ::1, 8 s after each start, must become ready through its health check, and after `nexus service restart` must
  * stay starting until its listener is back. Another, with the default health, that never listens again after a
@@ -35,7 +35,7 @@ import { scriptedModel, scriptedModels } from "../harness/test-fixture.ts";
 import { parseSelfDnsName, readProbeConfig } from "../probe/config.ts";
 import { tailscaleCli } from "../probe/serve.ts";
 import { relayPorts } from "../project.ts";
-import { relayLog } from "../pylon-vm/relay.ts";
+import { relayLog, relayStatus } from "../pylon-vm/relay.ts";
 import type { ThreadDetail } from "./api.ts";
 import { defaultPreviewPorts, startControlPlane, type ControlPlaneConfig } from "./main.ts";
 
@@ -228,10 +228,16 @@ async function serveAll(step: string) {
   pass(`${step}: nexus ports lists the ::1 server's ${v6.port}, the 127.0.0.1 server's ${v4.port} and the localhost server's ${named}, and none of the relay's: ${JSON.stringify(ports)}`);
 }
 
-/** The relay's log names a relay port for each previewed port, and where Node binds `localhost` in the guest. */
+/**
+ * The relay's log names a relay port for each previewed port, its status confirms it holds each, which their routes
+ * waited for, and where Node binds `localhost` in the guest.
+ */
 async function relayLogged(step: string) {
-  const logs = await runTool(`msg:v6-${step}-logs`, `cat ${relayLog}; node -e "require('dns').lookup('localhost',(e,a)=>console.log('localhost binds '+a))"`);
-  for (const port of [v6.port, v4.port]) assert.match(logs, new RegExp(`relaying 127\\.0\\.0\\.1:\\d+ to port ${port}`), `the relay log names ${port}: ${logs}`);
+  const logs = await runTool(`msg:v6-${step}-logs`, `cat ${relayLog}; echo "status $(cat ${relayStatus})"; node -e "require('dns').lookup('localhost',(e,a)=>console.log('localhost binds '+a))"`);
+  for (const port of [v6.port, v4.port]) {
+    assert.match(logs, new RegExp(`relaying 127\\.0\\.0\\.1:\\d+ to port ${port}`), `the relay log names ${port}: ${logs}`);
+    assert.match(logs, new RegExp(`^status .*"bound": \\{[^}]*"\\d+": ${port}[,}]`, "m"), `the relay's status holds a relay port for ${port}: ${logs}`);
+  }
   pass(`${step}: the relay serves both previewed ports: ${logs}`);
 }
 
