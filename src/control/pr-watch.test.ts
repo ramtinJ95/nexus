@@ -31,7 +31,7 @@ function fixture(path = ":memory:") {
   const messages: Parameters<HarnessHost["send"]>[] = [];
   let reject = false;
   const harness: Pick<HarnessHost, "send"> = { async send(...args) { messages.push(args); if (reject) throw new Error("delivery interrupted"); return { id: 1 } as never; } };
-  const github = { async find(repo: string, branch: string) { calls.push(`find:${repo}:${branch}`); return [1]; }, async poll() { calls.push("poll"); return structuredClone(snapshot); } };
+  const github = { async find(repo: string, branch: string) { calls.push(`find:${repo}:${branch}`); return snapshot.pr.state === "open" ? [1] : []; }, async poll() { calls.push("poll"); return structuredClone(snapshot); } };
   let wakes = 0;
   const options = { registry, github, harness, wake() { wakes++; } };
   return { registry, id, add, calls, messages, github, options, watcher: prWatcher(options), get snapshot() { return snapshot; }, set snapshot(s: PrSnapshot) { snapshot = s; }, reject(value: boolean) { reject = value; }, get wakes() { return wakes; } };
@@ -274,4 +274,39 @@ for (const [name, headers, delay] of [
   now++;
   assert.deepEqual(await client.find("other/repo", "main"), []);
   assert.equal(calls, 2);
+});
+
+test("rediscovery reactivates a reopened PR without replaying its consumed feedback", async (t) => {
+  const f = fixture(); t.after(() => f.registry.close());
+  await f.watcher.poll();
+  f.snapshot.comments.push({ id: "comment:old", text: "old feedback" });
+  f.snapshot.failures.push({ id: "check:old", text: "old failed check" });
+  f.snapshot.pr.checks = "failed";
+  await f.watcher.poll();
+  assert.equal(f.messages.length, 1);
+  const seen = f.registry.prWatch(f.id)!.links[0]!.seen;
+  f.snapshot.pr.state = "closed";
+  await f.watcher.poll();
+  assert.equal(f.registry.prWatch(f.id)?.links[0]?.pr.state, "closed");
+  const restarted = prWatcher(f.options);
+  f.calls.length = 0;
+  await restarted.poll();
+  assert.ok(!f.calls.includes("poll"));
+  f.snapshot.pr.state = "open";
+  await restarted.poll();
+  assert.ok(f.calls.includes("poll"));
+  assert.equal(f.registry.prWatch(f.id)?.links[0]?.pr.state, "open");
+  assert.deepEqual(f.registry.prWatch(f.id)?.links[0]?.seen, seen);
+  assert.equal(f.messages.length, 1);
+  f.snapshot.comments.push({ id: "comment:new", text: "new feedback" });
+  await restarted.poll();
+  assert.equal(f.messages.length, 2);
+  assert.match(f.messages[1]![1], /new feedback/);
+  assert.doesNotMatch(f.messages[1]![1], /old feedback|old failed check/);
+  f.snapshot.pr.checks = "passing"; f.snapshot.failures = [];
+  await restarted.poll();
+  assert.equal(f.messages.length, 3);
+  assert.match(f.messages[2]![1], /All checks are passing/);
+  await restarted.poll();
+  assert.equal(f.messages.length, 3);
 });

@@ -49,8 +49,11 @@ export function prWatcher(options: { registry: Registry; github: GitHub | null; 
           const key = `${repo}:${branch}`;
           if (!finds.has(key)) finds.set(key, github.find(repo, branch));
           for (const number of await finds.get(key)!) {
-            if (!state.links.some((l) => l.pr.repo === repo && l.pr.number === number)) {
+            const link = state.links.find((l) => l.pr.repo === repo && l.pr.number === number);
+            if (link === undefined) {
               state.links.push({ pr: { repo, number, title: "", url: "", state: "open", checks: "none", review: "none", conflict: null }, seen: [], failed: false });
+            } else if (link.pr.state === "closed") {
+              link.pr.state = "open";
             }
           }
         }

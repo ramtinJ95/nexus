@@ -265,7 +265,7 @@ pullRequests: {
 }[];
 ```
 
-`enabled` means a control-plane token is configured; `stopped` means the durable ten-comment-only-wake cap was reached, not that the thread is archived. `error` reports a retryable read or delivery failure. Archived/deleted threads retain their last snapshots without polling. Terminal PRs retain their last check/review summary. `outputs` also includes `{ thread, kind: "pull-request", ref: <PR URL> }` for each link.
+`enabled` means a control-plane token is configured; `stopped` means the durable ten-comment-only-wake cap was reached, not that the thread is archived. `error` reports a retryable read or delivery failure. Archived/deleted threads retain their last snapshots without polling. Terminal PRs retain their last check/review summary. A closed PR rediscovered as open resumes watching with its existing cursor, without replaying old feedback or resetting the comment-wake cap. `outputs` also includes `{ thread, kind: "pull-request", ref: <PR URL> }` for each link.
 
 Automated wake entries have `kind: "nexus.pr-watch"` and `data: { sender: "Nexus PR watch" }`, and their user-model message text starts with `[Nexus PR watch — automated, not a message from the person]`. This attribution is preserved in `conversation` and `watch` entries and is shown by the dashboard. It does not count as human activity. Consumers must not interpret every user-model message as coming from the person.
 
