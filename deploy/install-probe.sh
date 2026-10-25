@@ -30,6 +30,11 @@ usermod --append --groups kvm nexus
 tailscale set --operator=nexus
 install -d -o root -g root -m 0755 "$etc"
 
+if [ "${NEXUS_PREPARE:-0}" != 1 ]; then
+  install -d -o root -g root -m 0700 "$prefix/deployer"
+  exec 9>"$prefix/deployer/lock"
+  flock -x 9
+fi
 install_release "$repo"
 [ "${NEXUS_PREPARE:-0}" = 1 ] || link_release "$prefix/current"
 

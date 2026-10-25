@@ -6,6 +6,8 @@
     { "name": "rj-firebat", "tailnetHost": "rj-firebat.example.ts.net", "tailnetNodeId": "nControlPlaneCNTRL" },
     { "name": "infra-testbench", "tailnetHost": "infra-testbench.example.ts.net", "tailnetNodeId": "nPeerProbeCNTRL" }
   ],
+  "deployers": [],
+  "deployKeys": {},
   "callers": ["nLaptopCNTRL"],
   "dotfiles": { "repo": "https://github.com/example/dotfiles.git", "ref": "main" },
   "harness": {

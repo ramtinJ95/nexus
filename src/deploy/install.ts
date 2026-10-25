@@ -9,9 +9,9 @@ export const repository = "https://github.com/ramtinJ95/nexus.git";
 const fullCommit = /^[0-9a-f]{40}$/;
 
 /** No inherited credentials, git configuration or npm configuration crosses the process boundary. */
-export async function command(program: string, args: readonly string[], cwd: string): Promise<string> {
+export async function command(program: string, args: readonly string[], cwd: string, timeoutMs = 300_000): Promise<string> {
   const { stdout } = await exec(program, [...args], {
-    cwd, timeout: 300_000, maxBuffer: 1024 * 1024,
+    cwd, timeout: timeoutMs, maxBuffer: 1024 * 1024,
     env: { PATH: "/usr/local/bin:/usr/bin:/bin", HOME: "/nonexistent", GIT_CONFIG_NOSYSTEM: "1", GIT_TERMINAL_PROMPT: "0" },
   });
   return stdout.trim();
@@ -25,7 +25,7 @@ export async function checkoutMerged(directory: string, commit: string, run: Com
   await mkdir(directory, { recursive: true, mode: 0o700 });
   await run("git", ["init", "--quiet", directory], directory);
   await run("git", ["fetch", "--no-tags", "--force", remote, "+refs/heads/main:refs/remotes/origin/main"], directory);
-  await run("git", ["cat-file", "-e", `${commit}^{commit}`], directory);
+  if (await run("git", ["cat-file", "-t", commit], directory) !== "commit") throw new Error("release object must be a commit");
   try {
     await run("git", ["merge-base", "--is-ancestor", commit, "refs/remotes/origin/main"], directory);
   } catch {

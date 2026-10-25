@@ -1,11 +1,11 @@
 import { request } from "node:http";
 import type { Whois } from "../tailscale.ts";
 
-export async function jsonRequest(url: URL, method: string, body: unknown, token: string | null, peer?: { id: string; whois: Whois }): Promise<any> {
+export async function jsonRequest(url: URL, method: string, body: unknown, token: string | null, peer?: { id: string; whois: Whois }, timeoutMs = 10_000): Promise<any> {
   if (url.protocol !== "http:") throw new Error("deployment endpoint must be tailnet HTTP");
   return new Promise((resolve, reject) => {
     const payload = body === undefined ? undefined : JSON.stringify(body);
-    const req = request(url, { method, agent: false, signal: AbortSignal.timeout(10_000), headers: {
+    const req = request(url, { method, agent: false, signal: AbortSignal.timeout(timeoutMs), headers: {
       "content-type": "application/json",
       ...(token === null ? {} : { authorization: `Bearer ${token}` }),
       ...(payload === undefined ? {} : { "content-length": Buffer.byteLength(payload) }),

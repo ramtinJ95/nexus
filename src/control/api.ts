@@ -1,3 +1,4 @@
+import { DeployDraining } from "./drain.ts";
 import { runningCommit } from "../deploy/health.ts";
 import { canDeploy, commitSchema, isReporter, releaseView, reportSchema, resolveMain, type DeploymentOptions } from "./releases.ts";
 /**
@@ -45,6 +46,7 @@ import { attachTiming, serveAttach, type AttachTiming, type Ending, type PylonDo
 export interface ApiOptions {
   prWatchEnabled?: boolean;
   deployment?: DeploymentOptions;
+  turnsStarting?: () => boolean;
   registry: Registry;
   host: string;
   /** 0 picks a free port. */
@@ -648,7 +650,7 @@ export async function startApi(options: ApiOptions): Promise<Api> {
   let startingTurns = 0;
   const draining = () => (registry.drain()?.expiresAt ?? 0) > Date.now();
   async function turnsRunning(): Promise<boolean> {
-    if (startingTurns > 0) return true;
+    if (startingTurns > 0 || options.turnsStarting?.()) return true;
     for (const t of registry.threads()) {
       if (t.status === "deleted" || t.conversationId === null) continue;
       const watch = await harness.watch(t.id);
@@ -658,7 +660,7 @@ export async function startApi(options: ApiOptions): Promise<Api> {
         if (live?.run !== undefined || (Array.isArray(inbox?.items) && inbox.items.length > 0)) return true;
       } finally { await watch.stop(); }
     }
-    return startingTurns > 0;
+    return startingTurns > 0 || (options.turnsStarting?.() ?? false);
   }
 
   const routes: readonly [string, RegExp, Route][] = [
@@ -885,7 +887,7 @@ export async function startApi(options: ApiOptions): Promise<Api> {
   }, (req, res) => {
     handle(req, res).catch((err: unknown) => {
       if (res.headersSent) return res.destroy(err as Error);
-      send(res, err instanceof HttpError ? err.status : 500, { error: (err as Error).message });
+      send(res, err instanceof HttpError ? err.status : err instanceof DeployDraining ? 409 : 500, { error: (err as Error).message });
     });
   });
   server.on("upgrade", (req: IncomingMessage, socket: Duplex, head: Buffer) => {
@@ -893,7 +895,7 @@ export async function startApi(options: ApiOptions): Promise<Api> {
     socket.on("error", () => undefined);
     upgraded.add(socket);
     socket.once("close", () => upgraded.delete(socket));
-    upgrade(req, socket, head).catch((err: unknown) => refuseUpgrade(socket, err instanceof HttpError ? err.status : 500, (err as Error).message));
+    upgrade(req, socket, head).catch((err: unknown) => refuseUpgrade(socket, err instanceof HttpError ? err.status : err instanceof DeployDraining ? 409 : 500, (err as Error).message));
   });
   await new Promise<void>((resolve, reject) => {
     server.once("error", reject);

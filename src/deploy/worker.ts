@@ -55,26 +55,29 @@ export async function runWorker(check = false): Promise<void> {
     try { await stat(join(prefix, "deployer", "roles", role)); roles.push(role); }
     catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
   }
-  for (const role of roles) await pollRole(role, config, api);
+  for (const role of roles) await reconcileRole(role, config, api);
 }
 
 type Api = (path: string, body?: unknown) => Promise<any>;
-async function pollRole(role: Role, config: WorkerConfig, api: Api): Promise<void> {
+export async function reconcileRole(role: Role, config: WorkerConfig, api: Api, boundary = {
+  prefix, etc: "/etc/nexus", units: "/etc/systemd/system", run: command, checkout: checkoutMerged,
+}): Promise<void> {
+  const { prefix, etc, units, run, checkout } = boundary;
   const link = join(prefix, role === "control" ? "control-current" : "current");
   const service = `nexus-${role}.service`;
-  const unit = `/etc/systemd/system/${service}`;
+  const unit = join(units, service);
   const savedUnit = join(prefix, `${role}-deploy.unit`);
   const reportPath = join(prefix, `${role}-deploy-report.json`);
   const repo = join(prefix, "deployer", "repo");
-  const local = await jsonFile<{ listen: { host: string; port: number } }>(`/etc/nexus/${role}.json`, null!);
+  const local = await jsonFile<{ listen: { host: string; port: number } }>(join(etc, `${role}.json`), null!);
   const healthUrl = new URL(`http://${local.listen.host.includes(":") ? `[${local.listen.host}]` : local.listen.host}:${local.listen.port}/v1/health`);
   const healthy = async () => {
     const expected = await commitAt(link);
     const until = Date.now() + config.healthTimeoutMs;
     do {
       try {
-        await command("systemctl", ["is-active", "--quiet", service], prefix);
-        if ((await jsonRequest(healthUrl, "GET", undefined, null)).commit === expected) return true;
+        await run("systemctl", ["is-active", "--quiet", service], prefix, Math.max(1, Math.min(5000, until - Date.now())));
+        if ((await jsonRequest(healthUrl, "GET", undefined, null, undefined, Math.max(1, Math.min(10_000, until - Date.now())))).commit === expected) return true;
       } catch { /* Retry while the service binds and the harness opens. */ }
       await sleep(500);
     } while (Date.now() < until);
@@ -95,9 +98,9 @@ async function pollRole(role: Role, config: WorkerConfig, api: Api): Promise<voi
   };
   const installer = new ReleaseInstaller(prefix, role, {
     async prepare(commit) {
-      await checkoutMerged(repo, commit);
+      await checkout(repo, commit);
       await copyFile(unit, savedUnit);
-      await command("env", [`NEXUS_COMMIT=${commit}`, "bash", "-c", '. "$1/deploy/release.sh"; install_release "$1"', "build", repo], repo);
+      await run("env", [`NEXUS_COMMIT=${commit}`, "bash", "-c", '. "$1/deploy/release.sh"; install_release "$1"', "build", repo], repo);
       return `releases/${commit}`;
     },
     async activate() {
@@ -105,19 +108,19 @@ async function pollRole(role: Role, config: WorkerConfig, api: Api): Promise<voi
       if (view.desired?.commit !== desired) throw new Error("release superseded before activation");
       if (role === "probe" && !view.nodes.some((r) => r.role === "control" && r.commit === desired && r.state === "healthy" && Date.now() - r.observedAt < 90_000)) throw new Error("control plane is not healthy on the desired release");
       if (role === "control" && (drainLost || !(await drain()).idle)) throw new Error("drain barrier lost before restart");
-      await command("env", [`NEXUS_COMMIT=${desired}`, "NEXUS_PREPARE=1", "bash", join(repo, "deploy", `install-${role}.sh`)], repo);
+      await run("env", [`NEXUS_COMMIT=${desired}`, "NEXUS_PREPARE=1", "bash", join(repo, "deploy", `install-${role}.sh`)], repo);
     },
     async restart() {
       const transaction = await installer.observed();
       if (transaction !== null && await readlink(link) === transaction.previous) {
         await copyFile(savedUnit, unit);
-        await command("systemctl", ["daemon-reload"], prefix);
+        await run("systemctl", ["daemon-reload"], prefix);
       }
       if (role === "control" && transaction !== null && await readlink(link) !== transaction.previous && (drainLost || !(await drain()).idle)) throw new Error("drain barrier lost at restart");
-      await command("systemctl", ["restart", service], prefix);
+      await run("systemctl", ["restart", service], prefix, 60_000);
     },
     healthy,
-    journal: () => command("journalctl", ["-u", service, "-n", "40", "--no-pager"], prefix),
+    journal: () => run("journalctl", ["-u", service, "-n", "40", "--no-pager"], prefix, 5000),
   });
   // Recovery must not depend on the API whose failed upgrade may have stopped it.
   const attempt = await installer.observed();
@@ -156,7 +159,7 @@ async function pollRole(role: Role, config: WorkerConfig, api: Api): Promise<voi
     await report("installing", desired);
     const result = await installer.install(step.commit);
     await report(result.state === "healthy" ? "healthy" : result.state === "rolled-back" ? "rolled-back" : "failed", result.commit, result.reason);
-    if (result.state === "healthy") await promoteWorker(step.commit, repo);
+    if (result.state === "healthy") await promoteWorker(step.commit, repo, prefix, run);
   } catch (error) {
     await report("failed", desired, String(error).slice(-20_000));
   } finally {
@@ -165,11 +168,11 @@ async function pollRole(role: Role, config: WorkerConfig, api: Api): Promise<voi
   }
 }
 
-async function promoteWorker(commit: string, repo: string): Promise<void> {
+async function promoteWorker(commit: string, repo: string, prefix: string, run: typeof command): Promise<void> {
   const target = `releases/${commit}`;
   const rejected = await readFile(join(prefix, "deployer", "rejected"), "utf8").catch(() => "");
   if (rejected.trim() === target) return;
-  try { await command(process.execPath, [join(prefix, target, "src/deploy/worker.ts"), "--check"], repo); }
+  try { await run(process.execPath, [join(prefix, target, "src/deploy/worker.ts"), "--check"], repo); }
   catch { await writeFile(join(prefix, "deployer", "rejected"), target); return; }
   await symlink(target, join(prefix, "deployer-current.new")).catch(async (error: NodeJS.ErrnoException) => {
     if (error.code !== "EEXIST") throw error;
