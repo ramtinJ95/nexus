@@ -1,3 +1,4 @@
+import { pylonEventSchema, type PylonEvent } from "../events.ts";
 /**
  * The probe's answers to the in-pylon `nexus` CLI (PylonApiRequest in project.ts), and the listener a backend's
  * host bridge delivers them through. The bridge names the calling pylon from the VM or container the request
@@ -37,6 +38,7 @@ export type PylonInfo = z.infer<typeof pylonInfoSchema>;
 export type ServiceView = ServiceFact & { url: string | null };
 
 export interface PylonApiReplies {
+  event: { accepted: true };
   info: PylonInfo;
   services: { services: readonly ServiceView[] };
   "service-logs": { logs: string };
@@ -56,6 +58,7 @@ export type HostBridgeAnswer = (pylonId: PylonId, body: string) => Promise<{ sta
 export type HostBridge = (answer: HostBridgeAnswer) => Promise<{ close(): Promise<void> }>;
 
 export interface PylonApiDeps {
+  event?(pylon: PylonId, event: PylonEvent): void;
   guest(pylonId: PylonId): Guest;
   /** The previews the pylon's last successful spawn published and warmed. */
   published(pylonId: PylonId): readonly PreviewAssignment[];
@@ -83,6 +86,7 @@ class Refused extends Error {}
 
 const serviceName = z.string().regex(/^[a-z0-9][a-z0-9-]{0,31}$/);
 const requestSchema = z.discriminatedUnion("op", [
+  pylonEventSchema.extend({ op: z.literal("event") }),
   z.strictObject({ op: z.literal("info") }),
   z.strictObject({ op: z.literal("services"), action: z.enum(["ensure", "list", "restart", "stop"]), name: serviceName.optional() }),
   // The fork returns at most 500 lines.
@@ -163,6 +167,12 @@ export function createPylonApi(deps: PylonApiDeps): PylonApi {
   async function handle(pylonId: PylonId, request: PylonApiRequest): Promise<PylonApiReplies[PylonApiRequest["op"]]> {
     const guest = deps.guest(pylonId);
     switch (request.op) {
+      case "event": {
+        if (deps.event === undefined) throw new Error("event reporting is unavailable");
+        const { op: _, ...event } = request;
+        deps.event(pylonId, event);
+        return { accepted: true };
+      }
       case "info":
         return info(guest, pylonId);
       case "services": {

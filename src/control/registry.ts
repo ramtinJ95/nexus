@@ -1,3 +1,7 @@
+import { attentionOf } from "./attention.ts";
+import { pylonEventSchema } from "../events.ts";
+import type { ReportedEvent } from "../events.ts";
+import { eventCursor, sessionActivityTtlMs, maxActiveSessions, type EventFilter, type EventKind, type NexusEvent } from "../events.ts";
 import type { DesiredRelease } from "../deploy/plan.ts";
 import type { Drain, ReleaseReport } from "../deploy/model.ts";
 /**
@@ -30,6 +34,7 @@ export interface NodeRecord {
 }
 
 export interface Thread extends ActivityFacts {
+  sessionWaiting?: boolean;
   id: ThreadId;
   title: string;
   project: ProjectId;
@@ -204,6 +209,18 @@ const migrations: readonly string[] = [
    ALTER TABLE threads ADD COLUMN last_reply_at INTEGER;`,
   `CREATE TABLE pr_watches (thread TEXT PRIMARY KEY REFERENCES threads (id), record TEXT NOT NULL) STRICT;`,
   `CREATE TABLE release_reports (node TEXT NOT NULL, role TEXT NOT NULL, record TEXT NOT NULL, PRIMARY KEY (node, role)) STRICT;`,
+  `CREATE TABLE events (id INTEGER PRIMARY KEY AUTOINCREMENT, time INTEGER NOT NULL, thread TEXT, project TEXT, kind TEXT NOT NULL, payload TEXT NOT NULL) STRICT;`,
+  `CREATE TABLE session_activity (thread TEXT NOT NULL, session TEXT NOT NULL, state TEXT NOT NULL, PRIMARY KEY(thread, session)) STRICT;
+   CREATE TABLE event_receipts (node TEXT PRIMARY KEY, sequence INTEGER NOT NULL) STRICT;
+   CREATE TABLE claude_workers (thread TEXT PRIMARY KEY, prompt TEXT NOT NULL, state TEXT NOT NULL) STRICT;
+   CREATE TABLE thread_attention (thread TEXT PRIMARY KEY, attention TEXT, parked INTEGER NOT NULL DEFAULT 0) STRICT;`,
+  `ALTER TABLE session_activity ADD COLUMN updated_at INTEGER NOT NULL DEFAULT 0;
+   CREATE INDEX session_activity_updated ON session_activity(updated_at);`,
+  `CREATE INDEX events_thread_id ON events(thread, id);
+   CREATE INDEX events_project_id ON events(project, id);
+   CREATE INDEX events_kind_id ON events(kind, id);`,
+  `CREATE TABLE session_order (thread TEXT NOT NULL, session TEXT NOT NULL, at INTEGER NOT NULL, kind TEXT NOT NULL, PRIMARY KEY(thread, session)) STRICT;
+   CREATE TABLE session_order_floor (thread TEXT PRIMARY KEY, at INTEGER NOT NULL) STRICT;`,
 ];
 
 type Row = Record<string, unknown>;
@@ -268,12 +285,17 @@ function pylonRow(r: Row): StoredPylon {
 export type Registry = ReturnType<typeof openRegistry>;
 
 /** Opens the file, creating it if needed, and applies any migrations it has not seen. */
-export function openRegistry(path: string) {
+export function openRegistry(path: string, clock = Date.now) {
   const db = new DatabaseSync(path);
   db.exec("PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;");
   migrate(db);
 
-  const transaction = <T>(body: () => T): T => inTransaction(db, body);
+  let transactionDepth = 0;
+  const transaction = <T>(body: () => T): T => {
+    if (transactionDepth > 0) return body();
+    transactionDepth++;
+    try { return inTransaction(db, body); } finally { transactionDepth--; }
+  };
 
   const q = {
     upsertNode: db.prepare(`INSERT INTO nodes (name, tailnet_host, tailnet_node_id, state) VALUES (?, ?, ?, 'offline')
@@ -368,13 +390,142 @@ export function openRegistry(path: string) {
     return (q.threadOfPylon.get(pylonId) as Row | undefined)?.thread as ThreadId | undefined;
   }
 
+  function withSessions(row: Row): Thread {
+    const thread = threadRow(row);
+    const working = db.prepare("SELECT max(updated_at) AS at FROM session_activity WHERE thread = ? AND state = 'session.turn-started' AND updated_at > ?").get(thread.id, clock() - sessionActivityTtlMs)?.at as number | null;
+    const waiting = db.prepare("SELECT 1 FROM session_activity WHERE thread = ? AND state = 'session.waiting' LIMIT 1").get(thread.id);
+    return { ...thread, ...(working === null ? {} : { sessionTurnRunning: true, sessionActiveUntil: working + sessionActivityTtlMs }), ...(waiting === undefined ? {} : { sessionWaiting: true }) };
+  }
+
+  function updateAttention(id: ThreadId) {
+    const row = q.thread.get(id);
+    if (row === undefined) return;
+    const t = withSessions(row);
+    const old = db.prepare("SELECT * FROM thread_attention WHERE thread = ?").get(id);
+    const p = q.pylon.get(t.pylonId);
+    const workerFailed = db.prepare("SELECT state FROM claude_workers WHERE thread = ?").get(id)?.state === "failed";
+    const attention = attentionOf(p?.failed != null || workerFailed, old?.parked === 1, t.lastReplyAt, t.seenAt, t.agentTurnRunning || t.sessionTurnRunning === true, t.sessionWaiting);
+    if ((old?.attention ?? null) === attention) return;
+    db.prepare("INSERT INTO thread_attention (thread, attention) VALUES (?, ?) ON CONFLICT(thread) DO UPDATE SET attention = excluded.attention").run(id, attention);
+    appendEvent("attention.changed", id, { attention });
+  }
+
+  function pruneSessions() {
+    transaction(() => {
+      const expired = db.prepare("DELETE FROM session_activity WHERE state = 'session.turn-started' AND updated_at <= ? RETURNING thread").all(clock() - sessionActivityTtlMs);
+      for (const thread of new Set(expired.map((r) => r.thread as ThreadId))) updateAttention(thread);
+    });
+  }
+
+  function appendEvent(kind: EventKind, thread: ThreadId | null, payload: Record<string, unknown>, time = clock()): NexusEvent {
+    return transaction(() => {
+      pruneSessions();
+      const project = thread === null ? null : (q.thread.get(thread)?.project as string | undefined) ?? null;
+      const result = db.prepare("INSERT INTO events (time, thread, project, kind, payload) VALUES (?, ?, ?, ?, ?)").run(time, thread, project, kind, JSON.stringify(payload));
+      const id = Number(result.lastInsertRowid);
+      db.prepare("DELETE FROM events WHERE id <= ?").run(id - 10_000);
+      return { id: String(id), time, thread, project, kind, payload };
+    });
+  }
+
+  function eventBatch(since = "0", filter: EventFilter = {}): { events: NexusEvent[]; watermark: string } {
+    const cursor = eventCursor(since);
+    const oldest = db.prepare("SELECT min(id) AS id FROM events").get()?.id as number | null;
+    const newest = db.prepare("SELECT max(id) AS id FROM events").get()?.id as number | null;
+    if (cursor !== 0 && oldest !== null && cursor < oldest - 1) throw new Error("event cursor expired; retained events cannot fill the gap");
+    const clauses = ["id > ?"];
+    const params: (string | number)[] = [cursor];
+    for (const column of ["thread", "project"] as const) {
+      if (filter[column] === undefined) continue;
+      clauses.push(`${column} = ?`);
+      params.push(filter[column]);
+    }
+    if (filter.kinds?.length) {
+      clauses.push(`kind IN (${filter.kinds.map(() => "?").join(",")})`);
+      params.push(...filter.kinds);
+    }
+    const events = db.prepare(`SELECT * FROM events WHERE ${clauses.join(" AND ")} ORDER BY id`).all(...params).map((r): NexusEvent => ({
+      id: String(r.id), time: r.time as number, thread: r.thread as string | null, project: r.project as string | null,
+      kind: r.kind as EventKind, payload: json<Record<string, unknown>>(r.payload),
+    }));
+    return { events, watermark: String(Math.max(cursor, newest ?? 0)) };
+  }
+
+  pruneSessions();
+
   return {
     close() { db.close(); },
+    appendEvent,
+    pruneSessions,
+    recordParked(id: ThreadId, parked: boolean) {
+      transaction(() => {
+        const old = db.prepare("SELECT parked FROM thread_attention WHERE thread = ?").get(id)?.parked === 1;
+        db.prepare("INSERT INTO thread_attention (thread, parked) VALUES (?, ?) ON CONFLICT(thread) DO UPDATE SET parked = excluded.parked").run(id, parked ? 1 : 0);
+        if (parked && !old) appendEvent("thread.parked", id, {});
+        updateAttention(id);
+      });
+    },
+    claudeWorker(thread: ThreadId): { prompt: string; state: string } | undefined {
+      const row = db.prepare("SELECT prompt, state FROM claude_workers WHERE thread = ?").get(thread);
+      return row === undefined ? undefined : { prompt: row.prompt as string, state: row.state as string };
+    },
+    setClaudeWorker(thread: ThreadId, prompt: string, state: string) {
+      transaction(() => {
+        db.prepare("INSERT INTO claude_workers VALUES (?, ?, ?) ON CONFLICT(thread) DO UPDATE SET state = excluded.state").run(thread, prompt, state);
+        updateAttention(thread);
+      });
+    },
+    reportSession(node: NodeName, report: ReportedEvent) {
+      const event = pylonEventSchema.parse(report.event);
+      const pylon = q.pylon.get(report.pylon);
+      if (pylon === undefined || pylon.node !== node) return;
+      const thread = pylon.thread as ThreadId;
+      transaction(() => {
+        const receipt = db.prepare("SELECT sequence FROM event_receipts WHERE node = ?").get(node);
+        if (receipt !== undefined && Number(receipt.sequence) >= report.sequence) return;
+        db.prepare("INSERT INTO event_receipts VALUES (?, ?) ON CONFLICT(node) DO UPDATE SET sequence = excluded.sequence").run(node, report.sequence);
+        pruneSessions();
+        const session = event.session ?? "default";
+        const status = q.thread.get(thread)?.status;
+        if (status === "archived" || status === "deleted") return;
+        const at = event.at ?? report.time;
+        const previous = db.prepare("SELECT at, kind FROM session_order WHERE thread = ? AND session = ?").get(thread, session);
+        const floor = db.prepare("SELECT at FROM session_order_floor WHERE thread = ?").get(thread)?.at as number | undefined;
+        if (previous !== undefined) {
+          if (at < Number(previous.at)) return;
+          if (at === previous.at && (event.kind === "session.turn-started" || event.kind === "session.heartbeat") && previous.kind !== "session.turn-started" && previous.kind !== "session.heartbeat") return;
+        } else if (floor !== undefined && at <= floor) return;
+        if (event.kind === "session.heartbeat") {
+          const state = db.prepare("SELECT state FROM session_activity WHERE thread = ? AND session = ?").get(thread, session)?.state;
+          if (state !== "session.turn-started" && state !== "session.waiting") return;
+        }
+        db.prepare("INSERT INTO session_order VALUES (?, ?, ?, ?) ON CONFLICT(thread, session) DO UPDATE SET at = excluded.at, kind = excluded.kind").run(thread, session, at, event.kind);
+        // Keep tombstones after activity rows end, with a floor guarding reports older than evicted cursors.
+        const evicted = db.prepare("DELETE FROM session_order WHERE thread = ? AND session NOT IN (SELECT session FROM session_order WHERE thread = ? ORDER BY at DESC, rowid DESC LIMIT ?) RETURNING at")
+          .all(thread, thread, maxActiveSessions * 2);
+        if (evicted.length > 0) db.prepare("INSERT INTO session_order_floor VALUES (?, ?) ON CONFLICT(thread) DO UPDATE SET at = max(at, excluded.at)").run(thread, Math.max(...evicted.map((r) => Number(r.at))));
+        if (event.kind === "session.ended" || event.kind === "session.turn-ended") {
+          db.prepare("DELETE FROM session_activity WHERE thread = ? AND session = ?").run(thread, session);
+        } else {
+          db.prepare("INSERT INTO session_activity VALUES (?, ?, ?, ?) ON CONFLICT(thread, session) DO UPDATE SET state = excluded.state, updated_at = excluded.updated_at")
+            .run(thread, session, event.kind === "session.heartbeat" ? "session.turn-started" : event.kind, clock());
+          db.prepare("DELETE FROM session_activity WHERE thread = ? AND session NOT IN (SELECT session FROM session_activity WHERE thread = ? ORDER BY updated_at DESC, rowid DESC LIMIT ?)").run(thread, thread, maxActiveSessions);
+        }
+        if (event.kind !== "session.waiting") q.agentActivity.run(clock(), thread);
+        if (event.kind === "session.turn-ended") q.recordReply.run(clock(), thread);
+        appendEvent(event.kind, thread, { at, ...(event.session === undefined ? {} : { session: event.session }), ...(event.message === undefined ? {} : { message: event.message }) });
+        updateAttention(thread);
+      });
+    },
+    eventBatch,
+    events: (since = "0", filter: EventFilter = {}) => eventBatch(since, filter).events,
     prWatch(thread: ThreadId): PrWatchState | null {
       const row = db.prepare("SELECT record FROM pr_watches WHERE thread = ?").get(thread) as Row | undefined;
       return row ? json<PrWatchState>(row.record) : null;
     },
     savePrWatch(thread: ThreadId, state: PrWatchState) {
+      const previous = db.prepare("SELECT record FROM pr_watches WHERE thread = ?").get(thread);
+      if (state.pending !== null && (previous === undefined || json<PrWatchState>(previous.record).pending?.id !== state.pending.id)) appendEvent("pull-request.feedback", thread, { requestId: state.pending.id });
       db.prepare("INSERT INTO pr_watches (thread, record) VALUES (?, ?) ON CONFLICT (thread) DO UPDATE SET record = excluded.record").run(thread, JSON.stringify(state));
     },
     desiredRelease(): DesiredRelease | null {
@@ -382,12 +533,17 @@ export function openRegistry(path: string) {
       return row === undefined ? null : JSON.parse(row.value as string) as DesiredRelease;
     },
     setDesiredRelease(release: DesiredRelease) {
+      appendEvent("release.changed", null, { desired: release });
       db.prepare("INSERT INTO settings VALUES ('release', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value").run(JSON.stringify(release));
     },
     releaseReports(): ReleaseReport[] {
       return db.prepare("SELECT record FROM release_reports ORDER BY node, role").all().map((r) => JSON.parse(r.record as string) as ReleaseReport);
     },
     reportRelease(report: ReleaseReport) {
+      const previous = db.prepare("SELECT record FROM release_reports WHERE node = ? AND role = ?").get(report.node, report.role);
+      const { observedAt: _, ...state } = report;
+      const before = previous === undefined ? null : json<ReleaseReport>(previous.record);
+      if (before === null || before.state !== report.state || before.commit !== report.commit || before.target !== report.target || before.reason !== report.reason) appendEvent("release.changed", null, state);
       db.prepare("INSERT INTO release_reports VALUES (?, ?, ?) ON CONFLICT(node, role) DO UPDATE SET record = excluded.record").run(report.node, report.role, JSON.stringify(report));
     },
     drain(): Drain | null {
@@ -426,34 +582,49 @@ export function openRegistry(path: string) {
     },
 
     /** A thread and its pylon are created together, because a thread always has exactly one pylon. */
-    createThread(thread: Omit<Thread, "seenAt" | "lastReplyAt">, pylon: StoredPylon) {
+    createThread(thread: Omit<Thread, "seenAt" | "lastReplyAt">, pylon: StoredPylon, claudePrompt?: string) {
       if (pylon.pylonId !== thread.pylonId || pylon.thread !== thread.id) throw new Error(`pylon ${pylon.pylonId} does not belong to thread ${thread.id}`);
       transaction(() => {
         q.insertThread.run(thread.id, thread.title, thread.project, thread.status, thread.conversationId, thread.startedBy, thread.createdAt,
           thread.agentTurnRunning ? 1 : 0, thread.lastAgentActivityAt, thread.lastHumanActivityAt);
         q.insertPylon.run(pylonParams(pylon));
+        if (claudePrompt !== undefined) db.prepare("INSERT INTO claude_workers VALUES (?, ?, 'pending')").run(thread.id, claudePrompt);
       });
     },
-    threads: (project?: ProjectId) => ((project === undefined ? q.threads.all() : q.threadsOf.all(project)) as Row[]).map(threadRow),
+    threads: (project?: ProjectId) => ((project === undefined ? q.threads.all() : q.threadsOf.all(project)) as Row[]).map(withSessions),
     thread(id: ThreadId): Thread | undefined {
       const row = q.thread.get(id) as Row | undefined;
-      return row && threadRow(row);
+      return row && withSessions(row);
     },
     markSeen(id: ThreadId, unread: boolean, now = Date.now(), lastReplyAt?: number | null) {
       if (!unread && lastReplyAt === null) return;
-      q.markSeen.run(unread ? 1 : 0, now, lastReplyAt ?? Number.MAX_SAFE_INTEGER, id);
+      transaction(() => {
+        q.markSeen.run(unread ? 1 : 0, now, lastReplyAt ?? Number.MAX_SAFE_INTEGER, id);
+        updateAttention(id);
+      });
     },
     // The timestamp also identifies a reply, including two events in one millisecond or a clock correction.
     recordReply(id: ThreadId, at: number) {
-      q.recordReply.run(at, id);
+      transaction(() => { q.recordReply.run(at, id); appendEvent("thread.turn-ended", id, {} , at); updateAttention(id); });
     },
-    setThreadStatus(id: ThreadId, status: ThreadStatus) { q.threadStatus.run(status, id); },
+    setThreadStatus(id: ThreadId, status: ThreadStatus) {
+      transaction(() => {
+        q.threadStatus.run(status, id);
+        if (status === "archived" || status === "deleted") db.prepare("DELETE FROM session_activity WHERE thread = ?").run(id);
+        if (status === "deleted") {
+          db.prepare("DELETE FROM session_order WHERE thread = ?").run(id);
+          db.prepare("DELETE FROM session_order_floor WHERE thread = ?").run(id);
+        }
+        updateAttention(id);
+      });
+    },
     /** Timestamps only move forward, so a late or repeated report cannot make a thread look idle sooner. */
     recordActivity(id: ThreadId, activity: { human?: number; agent?: number; agentTurnRunning?: boolean }) {
       transaction(() => {
         if (activity.human !== undefined) q.humanActivity.run(activity.human, id);
         if (activity.agent !== undefined) q.agentActivity.run(activity.agent, id);
         if (activity.agentTurnRunning !== undefined) q.agentTurn.run(activity.agentTurnRunning ? 1 : 0, id);
+        updateAttention(id);
       });
     },
 
@@ -464,11 +635,21 @@ export function openRegistry(path: string) {
     pylonsOn: (node: NodeName) => (q.pylonsOn.all(node) as Row[]).map(pylonRow),
     /** Takes a whole PylonRecord, so the tick can save what it holds. The desired phase is dropped. */
     savePylon(pylon: StoredPylon) {
-      const { changes } = q.updatePylon.run(pylonParams(pylon));
-      if (changes !== 1) throw new Error(`no pylon ${pylon.pylonId} to save`);
+      transaction(() => {
+        const previous = q.pylon.get(pylon.pylonId);
+        const { changes } = q.updatePylon.run(pylonParams(pylon));
+        if (changes !== 1) throw new Error(`no pylon ${pylon.pylonId} to save`);
+        if (pylon.failed !== null && previous?.failed !== pylon.failed) appendEvent("thread.failed", pylon.thread as ThreadId, { message: pylon.failed });
+        updateAttention(pylon.thread as ThreadId);
+      });
     },
     /** Clears a failed pylon's verdict and attempts, and marks a human retry. False when the pylon has not failed. */
-    retryPylon: (pylonId: PylonId): boolean => q.retryPylon.run(pylonId).changes === 1,
+    retryPylon: (pylonId: PylonId): boolean => transaction(() => {
+      const changed = q.retryPylon.run(pylonId).changes === 1;
+      const thread = threadOfPylon(pylonId);
+      if (thread !== undefined) updateAttention(thread);
+      return changed;
+    }),
 
     sessions: (pylon: PylonId) => (q.sessions.all(pylon) as Row[]).map(sessionRow),
     session(pylon: PylonId, id: string): Session | undefined {

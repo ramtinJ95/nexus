@@ -116,13 +116,13 @@ export class HerdrError extends Error {
 }
 
 /** Returns the new session's Herdr pane. Rolls the workspace back if the harness does not start. */
-export async function openSession(guest: Guest, session: { harness: SessionHarness; title: string; cwd: string; resume?: string }): Promise<string> {
+export async function openSession(guest: Guest, session: { harness: SessionHarness; title: string; cwd: string; resume?: string; prompt?: string }): Promise<string> {
   await ensureServer(guest);
   const created = record(await herdr(guest, ["workspace", "create", "--cwd", session.cwd, "--label", session.title, "--no-focus"]), "workspace create");
   const workspaceId = string(record(created.workspace, "workspace create .workspace").workspace_id, "workspace_id");
   const pane = string(record(created.root_pane, "workspace create .root_pane").pane_id, "pane_id");
   try {
-    await startHarness(guest, pane, session.harness, session.resume);
+    await startHarness(guest, pane, session.harness, session.resume, session.prompt);
   } catch (err) {
     try {
       await herdr(guest, ["workspace", "close", workspaceId]);
@@ -135,12 +135,15 @@ export async function openSession(guest: Guest, session: { harness: SessionHarne
 }
 
 /** Starts the harness's agent in a pane at its shell prompt, and returns once Herdr reports it ready. */
-async function startHarness(guest: Guest, pane: string, harness: SessionHarness, resume: string | undefined): Promise<void> {
+async function startHarness(guest: Guest, pane: string, harness: SessionHarness, resume: string | undefined, prompt?: string): Promise<void> {
   const agent = agents[harness];
   if (agent === null) return;
   const argv = ["agent", "start", `nx-${randomUUID().slice(0, 8)}`, "--kind", agent.kind, "--pane", pane, "--timeout", String(agentStartTimeoutMs)];
   const args = resume === undefined ? agent.fresh() : await agent.resume(guest, resume);
-  if (args.length > 0) argv.push("--", ...args);
+  const launch = [...args];
+  if (harness === "claude-code") launch.push("--permission-mode", "bypassPermissions");
+  if (prompt !== undefined) launch.push(prompt);
+  if (launch.length > 0) argv.push("--", ...launch);
   const busyUntil = Date.now() + paneBusyRetryMs;
   for (;;) {
     try {

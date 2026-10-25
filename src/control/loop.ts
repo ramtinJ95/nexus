@@ -131,6 +131,7 @@ export function startLoop(options: LoopOptions): Loop {
   }
 
   async function pass(node: NodeName, link: Link) {
+    registry.pruneSessions();
     // Each record is read just before its tick, because an API retry may change it while earlier ticks wait on
     // the probe, and saving an older copy would undo it.
     for (const { pylonId } of registry.pylonsOn(node)) {
@@ -146,6 +147,23 @@ export function startLoop(options: LoopOptions): Loop {
         save: (p) => registry.savePylon(p),
       };
       try {
+        const worker = registry.claudeWorker(thread.id);
+        if (worker?.state === "starting") {
+          registry.setClaudeWorker(thread.id, worker.prompt, "failed");
+          registry.appendEvent("thread.failed", thread.id, { message: "Claude launch was interrupted; attach to check before starting another session" });
+        }
+        if (worker?.state === "pending" && thread.status === "active" && observation(node)?.pylons.some((p) => p.pylonId === pylonId && p.phase === "running")) {
+          // Fence the non-idempotent launch before sending: an interrupted reply must never submit the task twice.
+          registry.setClaudeWorker(thread.id, worker.prompt, "starting");
+          try {
+            await link.probe.command(pylonId, { kind: "open-session", harness: "claude-code", title: thread.title.slice(0, 80), prompt: worker.prompt });
+            registry.setClaudeWorker(thread.id, worker.prompt, "started");
+          } catch (err) {
+            registry.setClaudeWorker(thread.id, worker.prompt, "failed");
+            registry.appendEvent("thread.failed", thread.id, { message: "Claude launch did not complete; attach to check before starting another session" });
+            throw err;
+          }
+        }
         const step = await tick(pylon, ctx);
         if (step.kind === "fail" && stored.failed === null) log(`${pylon.pylonId}: the planner gave up: ${step.reason}`);
         // Done for a deleted thread means its node neither has the pylon nor routes a port to it, so nothing serves the ports.
@@ -195,6 +213,7 @@ export function startLoop(options: LoopOptions): Loop {
           // The stored observation is the last one ingested, including the one from before a reconnect or a restart.
           const last = registry.node(node)!.observation;
           const known = new Map(registry.pylonsOn(node).map((p) => [p.pylonId, last?.pylons.find((o) => o.pylonId === p.pylonId) ?? "absent" as const]));
+          for (const report of event.type === "snapshot" ? event.observation.events ?? [] : event.type === "session-event" ? [event.report] : []) registry.reportSession(node, report);
           const current = merge(last, event);
           const writes = ingest(event, node, known, Date.now(), new Set([...known.keys()].filter((id) => !listed.has(id))));
           registry.ingested(current, writes);

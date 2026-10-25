@@ -40,6 +40,7 @@ async function probe(t: TestContext, guest: Partial<Guest> = {}) {
     return { exitCode: 127, output: "unexpected" };
   });
   const api = createPylonApi({
+    event: (pylon, event) => { calls.push(["event", pylon, event]); },
     guest: () => ({
       ...base,
       async services(op, name, lines) { calls.push(["services", op, name, lines]); return { services: [web], logs: "line 1\nline 2\n" }; },
@@ -155,4 +156,13 @@ test("bad arguments exit 64 without calling the probe", async (t) => {
     assert.match(stderr, /Run nexus --help/);
   }
   assert.deepEqual(calls, []);
+});
+
+
+test("event preserves the hook timestamp rather than replacing it at send time", async (t) => {
+  const { nexus, calls } = await probe(t);
+  const reply = await nexus(["event", "session.turn-ended", "--session", "c1", "--at", "1700000000000"]);
+  assert.equal(reply.code, 0, reply.stderr);
+  assert.deepEqual(calls, [["event", pylonId, { kind: "session.turn-ended", session: "c1", at: 1700000000000 }]]);
+  assert.equal((await nexus(["event", "session.heartbeat", "--at", "-1"])).code, 64);
 });

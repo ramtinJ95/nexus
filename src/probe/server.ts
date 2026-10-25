@@ -1,10 +1,12 @@
+import { dirname } from "node:path";
+import { eventJournal } from "./event-journal.ts";
 import { runningCommit } from "../deploy/health.ts";
 /**
  * The probe's HTTP server: lifecycle jobs and observations. It keeps job results and applied live hashes in
  * memory only. Everything durable is the backend's, so a restart loses nothing a later job cannot rebuild.
  */
 import { randomUUID } from "node:crypto";
-import { statfs } from "node:fs/promises";
+import { mkdir, statfs } from "node:fs/promises";
 import { createServer, STATUS_CODES, type IncomingMessage, type ServerResponse } from "node:http";
 import { totalmem } from "node:os";
 import type { Duplex } from "node:stream";
@@ -27,6 +29,7 @@ import { createPylonApi, type HostBridge } from "./pylon-api.ts";
 import { createTailscaleServe, parseServeStatus, readRoutes, type HttpsGet, type TailscaleCli } from "./serve.ts";
 
 export interface ProbeOptions {
+  eventJournal?: string;
   node: NodeName;
   host: string;
   /** 0 picks a free port. */
@@ -85,6 +88,8 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
   const deadlines = options.jobDeadlineMs ?? jobDeadlineMs;
   const peerAddress = options.peerAddress ?? ((peer: NodeName) => ({ host: peer, port: probePort }));
   const bootId = randomUUID();
+  if (options.eventJournal !== undefined) await mkdir(dirname(options.eventJournal), { recursive: true, mode: 0o700 });
+  const journal = eventJournal(options.eventJournal ?? ":memory:");
   const shutdown = new AbortController();
   const previews = options.previews === undefined ? null : {
     ...options.previews,
@@ -147,6 +152,7 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
 
   const emit = (event: ProbeEvent) => { if (!shutdown.signal.aborted) for (const observer of observers) observer.write(event); };
   const api = createPylonApi({
+    event: (pylon, event) => emit({ type: "session-event", report: journal.append(pylon, event) }),
     guest: (pylonId) => backend.guest(pylonId),
     published: (pylonId) => published.get(pylonId) ?? [],
     changed: () => void publishSnapshot(),
@@ -348,6 +354,7 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
       node,
       observedAt: new Date().toISOString(),
       probeBootId: bootId,
+      events: journal.recent(),
       // VmBackend does not report reserved memory yet.
       capacity: { memoryGiB: totalmem() / 2 ** 30, committedMemoryGiB: 0, diskFreeGiB: (disk.bavail * disk.bsize) / 2 ** 30 },
       artifacts,
@@ -576,6 +583,7 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
       for (const socket of streamSockets) socket.destroy();
       await Promise.allSettled([...runningJobs]);
       await Promise.all([closed, previews?.gateway.close(), bridge?.close()]);
+      journal.close();
     },
   };
 }

@@ -1,0 +1,30 @@
+#!/usr/bin/env node
+import { createHash } from "node:crypto";
+import { mkdir, rm } from "node:fs/promises";
+import { homedir } from "node:os";
+import { join } from "node:path";
+import { heartbeatDue } from "./nexus-heartbeat.ts";
+import { spawn } from "node:child_process";
+
+const at = Date.now();
+
+try {
+  let input = "";
+  for await (const chunk of process.stdin) {
+    input += chunk;
+    if (input.length > 64 * 1024) process.exit(0);
+  }
+  const { session_id: session } = JSON.parse(input);
+  if (typeof session !== "string" || session.length > 200) process.exit(0);
+  const dir = join(homedir(), ".nexus", "heartbeats");
+  const path = join(dir, createHash("sha256").update(session).digest("hex"));
+  if (process.argv[2] === "session.heartbeat") {
+    await mkdir(dir, { recursive: true });
+    if (!await heartbeatDue(path)) process.exit(0);
+  } else if (process.argv[2] === "session.ended") {
+    await rm(path, { force: true });
+  }
+  const child = spawn("/usr/local/bin/nexus", ["event", process.argv[2], "--session", session, "--at", String(at)], { detached: true, stdio: "ignore" });
+  child.on("error", () => {});
+  child.unref();
+} catch {}

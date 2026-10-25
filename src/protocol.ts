@@ -1,3 +1,4 @@
+import { reportedEventSchema, type ReportedEvent } from "./events.ts";
 /**
  * Probe contract, control-plane side. The control plane decides, and the probe executes and observes.
  *
@@ -109,6 +110,7 @@ export type SubmitReply =
 // Observations: facts only. The control plane turns them into records.
 
 export interface NodeObservation {
+  events?: readonly ReportedEvent[];
   node: NodeName;
   observedAt: string;
   /** A new value after every probe restart. It tells the control plane that in-memory job results are gone. */
@@ -206,6 +208,7 @@ export type DeclaredOutput =
   | { id: string; kind: "diff"; base: string; sha256: string; title: string | null };
 
 export type ProbeEvent =
+  | { type: "session-event"; report: ReportedEvent }
   | { type: "snapshot"; observation: NodeObservation } // on connect, then every 60 s as anti-entropy
   | { type: "pylon"; pylon: PylonObservation }
   | { type: "job"; status: JobStatus }
@@ -219,7 +222,7 @@ export type ProbeEvent =
 export type PylonCommand =
   /** When the timeout passes, the probe calls pi-sandbox's exec-kill and returns exitCode null. Timeout at most 60 s. */
   | { kind: "exec"; argv: readonly string[]; cwd: string; timeoutMs: number }
-  | { kind: "open-session"; harness: SessionHarness; title: string; resume?: string }
+  | { kind: "open-session"; harness: SessionHarness; title: string; resume?: string; prompt?: string }
   /**
    * `session` is who the control plane last saw in the pane, so a pane a wake has since given to another session is
    * left open. None for a pane no observation has listed yet, such as one opened a moment ago.
@@ -626,6 +629,14 @@ export function parseProbeEvent(frame: string): ProbeEvent {
       if (o.previewRoutes !== null && !Array.isArray(o.previewRoutes)) throw new Error("observation.previewRoutes is not an array");
       (o.jobs as unknown[]).forEach(parseJobStatus);
       (o.pylons as unknown[]).forEach(parsePylonObservation);
+      if (o.events !== undefined) {
+        if (!Array.isArray(o.events) || o.events.length > 100) throw new Error("invalid event backlog");
+        o.events.forEach((report) => reportedEventSchema.parse(report));
+      }
+      return event as ProbeEvent;
+    }
+    case "session-event": {
+      reportedEventSchema.parse(event.report);
       return event as ProbeEvent;
     }
     case "pylon": parsePylonObservation(event.pylon); return event as ProbeEvent;
@@ -724,6 +735,7 @@ export function parsePylonCommand(body: string): PylonCommand {
     case "open-session":
       if (!harnesses.has(c.harness)) throw new Error(`unknown harness ${JSON.stringify(c.harness)}`);
       string(c.title, "command.title");
+      if (c.prompt !== undefined && (c.harness !== "claude-code" || string(c.prompt, "command.prompt").length > 16_384)) throw new Error("invalid Claude prompt");
       if (c.resume !== undefined) {
         string(c.resume, "command.resume");
         if (c.harness === "shell") throw new Error("a shell session has nothing to resume");

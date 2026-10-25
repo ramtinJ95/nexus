@@ -159,6 +159,7 @@ function threadState({ thread: t, pylon, attention }: ThreadDetail): [label: str
   if (attention === "failed") return ["failed", "bad"];
   if (attention === "parked") return ["parked", "bad"];
   if (attention === "reply") return ["new reply", "ok"];
+  if (attention === "waiting") return ["waiting for input", "idle"];
   if (attention === "working") return ["agent working", "work"];
   if (t.status === "archived" || t.status === "deleted") return [t.status, "muted"];
   return actualBadge[pylon.actualState];
@@ -283,6 +284,8 @@ ${chosen === undefined ? html`<div class="modal-empty"><p class="empty">No proje
 ${image === null && html`<p class="error">No image is current yet, so a new pylon has nothing to boot.</p>`}
 <label for="start-title">Title</label>
 <input id="start-title" name="title" required autocomplete="off" placeholder="What should this thread do?" autofocus>
+<label for="start-claude">Claude Code first prompt (optional)</label>
+<textarea id="start-claude" name="claude" placeholder="/poteto-mode &lt;task&gt;"></textarea>
 <fieldset class="seg"><legend>Project</legend>
 ${projects.map((p) => html`<label class="seg-opt"><input type="radio" name="project" required value="${p.id}" data-node="${p.defaultNode}" data-branch="${p.defaultBranch}"${p.repoUrl === null && " data-scratch"}${p === chosen && " checked"}><span class="seg-name">${p.id}</span><span class="seg-repo">${p.repoUrl ?? "scratch"}</span></label>`)}
 </fieldset>

@@ -950,15 +950,16 @@ test("a thread's streams end when it is deleted, and a deleted thread, a strange
 /** Backs up a paused client's socket with ten commits of a megabyte each. */
 async function backUp(s: Awaited<ReturnType<typeof withThread>>) {
   const transcript = s.fake.transcript(s.thread.id);
-  for (let i = 0; i < 10; i++) {
-    transcript.docs["pi.live"] = { seq: i, output: "x".repeat(1 << 20) };
+  // One frame must exceed loopback's autotuned socket buffers even when intermediate commits coalesce.
+  for (let i = 0; i < 3; i++) {
+    transcript.docs["pi.live"] = { seq: i, output: "x".repeat(16 << 20) };
     s.fake.commit(s.thread.id);
     await new Promise((resolve) => setImmediate(resolve));
   }
 }
 
 test("a client that stops reading is dropped after the stall limit, with its watch and its place", async (t) => {
-  const s = await withThread(t, { streamStallMs: 300 });
+  const s = await withThread(t, { streamStallMs: 1000 });
   const { thread, fake } = s;
   const stream = s.events(`/v1/threads/${thread.id}/events`);
   await stream.next();
@@ -974,7 +975,7 @@ test("a client that stops reading is dropped after the stall limit, with its wat
 });
 
 test("deleting a thread whose client stopped reading frees the stream at once, writes nothing after the end, and drops the client", async (t) => {
-  const s = await withThread(t, { streamStallMs: 300 });
+  const s = await withThread(t, { streamStallMs: 1000 });
   const { thread, fake } = s;
   const transcript = fake.transcript(thread.id);
   const stream = s.events(`/v1/threads/${thread.id}/events`);
@@ -985,7 +986,7 @@ test("deleting a thread whose client stopped reading frees the stream at once, w
   transcript.docs["pi.live"] = { seq: 10 };
   fake.commit(thread.id);
   assert.equal(fake.watching(thread.id), 0, "the delete stopped the watch at once, though the client has not read the end yet");
-  await new Promise((resolve) => setTimeout(resolve, 600));
+  await new Promise((resolve) => setTimeout(resolve, 1500));
   stream.resume();
   assert.equal(await stream.ended, "dropped", "a client that never read up to the end was dropped after the stall limit");
   assert.equal((await s.call("GET", "/v1/projects")).status, 200, "the control plane is still up");
@@ -1685,4 +1686,55 @@ test("project add and edit refuse duplicate secret names instead of merging thei
   const edited = await s.call("PATCH", "/v1/projects/acme", { secrets });
   assert.equal(edited.status, 200);
   assert.deepEqual(edited.body.secrets, secrets);
+});
+
+test("event followers replay a disconnect gap with since and filter without losing order", async (t) => {
+  const s = await setup(t);
+  const first = s.registry.appendEvent("release.changed", null, { state: "pending" });
+  const stream = s.events("/v1/events?follow=true&kind=release.changed");
+  assert.equal((await stream.next()).id, first.id);
+  stream.close();
+  const second = s.registry.appendEvent("release.changed", null, { state: "installing" });
+  s.registry.appendEvent("thread.failed", null, {});
+  const third = s.registry.appendEvent("release.changed", null, { state: "healthy" });
+  const resumed = s.events(`/v1/events?follow=true&kind=release.changed&since=${first.id}`);
+  t.after(() => resumed.close());
+  assert.deepEqual([await resumed.next(), await resumed.next()].map((e) => e.id), [second.id, third.id]);
+  const fourth = s.registry.appendEvent("release.changed", null, { state: "pending" });
+  assert.equal((await resumed.next()).id, fourth.id);
+  assert.equal((await s.call("GET", "/v1/events?since=-1")).status, 400);
+  assert.equal((await s.call("GET", "/v1/events?kind=unknown")).status, 400);
+});
+
+test("a Claude worker start stores its first prompt without starting a harness conversation", async (t) => {
+  const s = await withThread(t);
+  const started = await s.call("POST", "/v1/threads", { project: "acme", title: "Claude worker", claude: "fix the bug" });
+  assert.equal(started.status, 201);
+  assert.equal(started.body.conversationId, null);
+  assert.deepEqual(s.registry.claudeWorker(started.body.id), { prompt: "/poteto-mode fix the bug", state: "pending" });
+  assert.equal((await s.call("GET", `/v1/threads/${started.body.id}`)).body.claudeWorker.state, "pending");
+});
+
+test("a quiet filtered stream scans past unrelated events and survives retention rollover", async (t) => {
+  const { follow } = await import("../cli/transport.ts");
+  const s = await setup(t);
+  const stop = new AbortController();
+  t.after(() => stop.abort());
+  let cursor = "0";
+  const endpoint = { url: new URL(`http://127.0.0.1:${s.port}`), socks: null };
+  const reading = follow(endpoint, "/v1/events?follow=true&kind=session.turn-ended", () => assert.fail("no matching events yet"), stop.signal, (id) => { cursor = id; });
+  for (let batch = 0; batch < 3; batch++) {
+    let last = "0";
+    for (let i = 0; i < 5000; i++) {
+      last = s.registry.appendEvent("release.changed", null, {}).id;
+      if (i % 100 === 0) await new Promise((resolve) => setImmediate(resolve));
+    }
+    await until(() => cursor === last, "the stream sent its scanned watermark");
+  }
+  stop.abort();
+  await reading;
+  const matching = s.registry.appendEvent("session.turn-ended", null, {});
+  const resumed = s.events(`/v1/events?follow=true&kind=session.turn-ended&since=${cursor}`);
+  t.after(() => resumed.close());
+  assert.equal((await resumed.next()).id, matching.id);
 });

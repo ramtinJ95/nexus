@@ -74,50 +74,54 @@ function reply(method: string, path: string, status: number, text: string): unkn
  * stream or `signal` aborts it, and rejects as `call` does when the API refuses it or the connection fails. The
  * API pings a quiet stream, so the idle timeout still catches a link that hangs.
  */
-export async function follow(endpoint: Endpoint, path: string, onEvent: (data: unknown) => void, signal: AbortSignal): Promise<void> {
+export async function follow(endpoint: Endpoint, path: string, onEvent: (data: unknown) => void | Promise<void>, signal: AbortSignal, onCursor?: (id: string) => void): Promise<void> {
   const socket = await open(endpoint);
   const host = endpoint.url.host;
   return new Promise((resolve, reject) => {
-    const failed = (err: Error) => signal.aborted ? resolve() : reject(lost(host, err));
+    let responseStarted = false;
+    let transportFailure: Error | undefined;
+    const failed = (err: Error) => signal.aborted ? resolve() : reject(err instanceof CliError ? err : lost(host, err));
     const req = request({ method: "GET", path, createConnection: () => socket, signal, headers: { host, accept: "text/event-stream" } }, (res) => {
+      responseStarted = true;
       res.setEncoding("utf8");
-      // Before the status is read, so a refusal cut off mid-body fails too.
-      res.on("error", failed);
-      if (res.statusCode !== 200) {
-        let text = "";
-        res.on("data", (chunk: string) => { text += chunk; });
-        res.on("end", () => {
-          try {
-            reply("GET", path, res.statusCode!, text);
-            reject(new CliError("failed", `GET ${path} answered ${res.statusCode} rather than a stream`, res.statusCode!));
-          } catch (err) {
-            reject(err);
-          }
-        });
-        return;
-      }
-      let pending = "";
-      let data: string[] = [];
-      res.on("data", (chunk: string) => {
-        const lines = (pending + chunk).split("\n");
-        pending = lines.pop()!;
-        for (const line of lines.map((l) => l.replace(/\r$/, ""))) {
-          // Comments, such as the API's pings, and fields the CLI has no use for are skipped.
-          if (line.startsWith("data:")) data.push(line.slice(5).replace(/^ /, ""));
-          if (line !== "" || data.length === 0) continue;
-          let event: unknown;
-          try {
-            event = JSON.parse(data.join("\n"));
-          } catch {
-            return void req.destroy(new CliError("failed", `GET ${path} sent an event that is not JSON`));
-          }
-          data = [];
-          onEvent(event);
+      const read = async () => {
+        if (res.statusCode !== 200) {
+          let text = "";
+          for await (const chunk of res) text += chunk;
+          reply("GET", path, res.statusCode!, text);
+          throw new CliError("failed", `GET ${path} answered ${res.statusCode} rather than a stream`, res.statusCode!);
         }
-      });
-      res.on("end", () => resolve());
+        let pending = "";
+        let data: string[] = [];
+        let cursor: string | undefined;
+        for await (const chunk of res) {
+          const lines = (pending + chunk).split("\n");
+          pending = lines.pop()!;
+          for (const line of lines.map((l) => l.replace(/\r$/, ""))) {
+            if (line.startsWith("data:")) data.push(line.slice(5).replace(/^ /, ""));
+            if (line.startsWith("id:")) cursor = line.slice(3).replace(/^ /, "");
+            if (line !== "") continue;
+            if (data.length > 0) {
+              let event: unknown;
+              try { event = JSON.parse(data.join("\n")); }
+              catch { throw new CliError("failed", `GET ${path} sent an event that is not JSON`); }
+              data = [];
+              // Waiting for the consumer is not an idle network. Async iteration bounds the unread response.
+              socket.setTimeout(0);
+              try { await onEvent(event); } finally { if (!signal.aborted && !socket.destroyed) socket.setTimeout(idleTimeoutMs); }
+            }
+            if (cursor !== undefined) onCursor?.(cursor);
+            cursor = undefined;
+          }
+        }
+      };
+      void read().then(() => transportFailure === undefined ? resolve() : failed(transportFailure), (err: Error) => { res.destroy(); failed(err); });
     });
-    req.on("error", failed);
+    req.on("error", (err: Error) => {
+      // Do not reconnect around an outstanding consumer write when the network drops under backpressure.
+      if (responseStarted) transportFailure = err;
+      else failed(err);
+    });
     req.end();
   });
 }

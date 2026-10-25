@@ -679,7 +679,7 @@ test("the start dialog's projects refresh with the page, so a project added else
   };
   assert.match(await region("/"), /^No projects yet/);
   await s.call("POST", "/v1/projects", project("acme"));
-  assert.match(await region("/"), /^No image is current yet, .* Title Project acme git@example\.com:acme\.git Node/, "a refresh brings the form once a project exists");
+  assert.match(await region("/"), /^No image is current yet, .* Title Claude Code first prompt \(optional\) Project acme git@example\.com:acme\.git Node/, "a refresh brings the form once a project exists");
   await s.call("POST", "/v1/projects", project("beta"));
   assert.match(await region("/threads/th-missing"), /Project acme git@example\.com:acme\.git beta git@example\.com:beta\.git Node/);
 });
@@ -798,7 +798,7 @@ test("every page carries the start dialog, which offers every project and node a
   await s.call("PUT", "/v1/images/current", { image: image.id });
   const home = (await s.call("GET", "/")).text;
   assert.doesNotMatch(home, /data-autoopen/, "the dialog stays closed until asked for");
-  assert.match(textOf(home.split('<dialog id="start-dialog"')[1]!.replace(/^[^>]*>/, "")), new RegExp(`^Start a thread ✕ Title Project acme .* Boots a pylon on rj-firebat from image ${image.id} and checks out main \\.`));
+  assert.match(textOf(home.split('<dialog id="start-dialog"')[1]!.replace(/^[^>]*>/, "")), new RegExp(`^Start a thread ✕ Title Claude Code first prompt \\(optional\\) Project acme .* Boots a pylon on rj-firebat from image ${image.id} and checks out main \\.`));
 });
 
 test("pages link their assets by hash, and a hashed asset is cached for good", async (t) => {

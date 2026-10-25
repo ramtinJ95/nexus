@@ -7,7 +7,7 @@
  */
 import { execFile } from "node:child_process";
 import { existsSync } from "node:fs";
-import { cp, mkdir, mkdtemp, readdir, readFile, rm, stat } from "node:fs/promises";
+import { cp, mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import { join, relative, resolve } from "node:path";
 import { promisify } from "node:util";
@@ -61,6 +61,20 @@ async function install(setup: AgentSetup): Promise<void> {
 async function herdrIntegrations(): Promise<void> {
   await run("herdr", ["integration", "install", "pi"]);
   await run("herdr", ["integration", "install", "claude"]);
+  const path = join(home, ".claude/settings.json");
+  const settings = JSON.parse(await readFile(path, "utf8"));
+  settings.hooks ??= {};
+  for (const [hook, kind, matcher] of [
+    ["UserPromptSubmit", "session.turn-started", ""],
+    ["PostToolUse", "session.heartbeat", ""],
+    ["Stop", "session.turn-ended", ""],
+    ["Notification", "session.waiting", "permission_prompt|idle_prompt|elicitation_dialog"],
+    ["SessionEnd", "session.ended", ""],
+  ] as const) {
+    settings.hooks[hook] = (settings.hooks[hook] ?? []).filter((entry: { hooks?: { command?: string }[] }) => !entry.hooks?.some((h) => h.command?.includes("nexus-claude-hook")));
+    settings.hooks[hook].push({ matcher, hooks: [{ type: "command", command: `/usr/local/bin/nexus-claude-hook ${kind}`, timeout: 2 }] });
+  }
+  await writeFile(path, JSON.stringify(settings, null, 2) + "\n");
 }
 
 /** The mismatches between the expected layout and this home, and whether pi starts with every extension loaded. */

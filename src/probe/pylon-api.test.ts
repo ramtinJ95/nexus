@@ -162,3 +162,14 @@ test("the pylon CLI bridge refuses deploy, release mutation and arbitrary forwar
     { op: "info", method: "PUT", path: "/v1/release" },
   ]) assert.equal((await call(request)).status, 400);
 });
+
+test("events are scoped by the bridge and reject guest-supplied thread identity", async () => {
+  const accepted: unknown[] = [];
+  const { call } = setup({}, { event: (pylon, event) => accepted.push({ pylon, event }) });
+  assert.equal((await call({ op: "event", kind: "session.turn-ended", session: "c1" })).status, 200);
+  assert.deepEqual(accepted, [{ pylon: pylonId, event: { kind: "session.turn-ended", session: "c1" } }]);
+  for (const extra of [{ thread: "other" }, { kind: "thread.failed" }, { message: "a".repeat(2049) }]) {
+    assert.equal((await call({ op: "event", kind: "session.turn-ended", ...extra })).status, 400);
+  }
+  assert.equal(accepted.length, 1);
+});
