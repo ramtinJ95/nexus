@@ -12,7 +12,7 @@ The control plane writes every record. Probes send facts in observations, and th
 | Project | `repoUrl`, `defaultBranch`, `defaultNode`, `resources`, `allowedHosts`, `secrets`, `logins`, `preSetup` | You |
 | Image | `id`, `pins`, `builtOn`, `builtAt` | The results of `build-image` jobs |
 | Template | `id`, `key`, `state`, `node`, `builtAt` | The results of `build-template` jobs |
-| Thread | `id`, `title`, `project`, `status`, `conversationId`, `pylonId`, `startedBy` | You, and the harness |
+| Thread | `id`, `title`, `project`, `status`, `conversationId`, `pylonId`, `startedBy`, `seenAt`, `lastReplyAt` | You, and the harness |
 | Pylon | `id`, `thread`, `node`, `template` | Thread start |
 | Session | `pylon`, `id`, `herdrPane`, `harness`, `harnessSessionId`, `status`, `title`, `state`, `message` | Observations. Panes opened by hand in Herdr are adopted. A paused pylon's sessions keep their records |
 | Preview | `pylon`, `service`, `httpsPort` | The control plane allocates the port, never one its node's probe still routes. Observations report when it is ready |
@@ -43,6 +43,14 @@ One setting sits beside the records: `current`, the image every new pylon uses. 
 - A preview's service is a declared or ad hoc service, or `port-<port>` for a port linked with `nexus preview`, from inside the pylon or from the Mac. A linked port stays linked across pauses until `nexus unpreview` unlinks it, from inside the pylon or from the Mac, and its preview lasts as long. A declared or ad hoc service's preview lasts for the thread's life.
 - A thread's listening ports are not a record. Each running pylon's observation carries them, and the API joins each with the service that owns its port and that service's preview.
 - `Output.kind` is `branch`, `diff`, `preview`, or `file`. A declared diff output's base is HEAD's commit, or the empty tree before the repository's first commit.
+
+## Attention and seen
+
+The registry stores each thread's nullable `seenAt` and `lastReplyAt` as Unix milliseconds, added by migration. A turn ending records `lastReplyAt`; streaming and parked tasks do not. Old rows start with null timestamps. If recovery finds a previously running turn ended, its reply is dated at recovery.
+
+The API derives `attention` in order: failed pylon, parked tasks, unread reply (`lastReplyAt > seenAt`, with null seen treated as unread), running turn, then null. Parked tasks are tracked for every conversation at harness recovery, independently of client watches. Both the thread list and detail report this value and both timestamps.
+
+Mark seen changes only `seenAt`. Mark unread sets it one millisecond before the latest reply, or null without a reply. Neither is human activity, changes the pylon, nor wakes it, including on archived threads.
 
 ## Pylon states
 

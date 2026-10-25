@@ -34,6 +34,8 @@ export interface Thread extends ActivityFacts {
   conversationId: string | null; // set once pi-durable runs the thread's agent
   startedBy: string;
   createdAt: number;
+  seenAt: number | null;
+  lastReplyAt: number | null;
 }
 
 /** What the registry keeps of a pylon. The desired phase is derived from its thread on every tick. */
@@ -195,6 +197,8 @@ const migrations: readonly string[] = [
   DROP TABLE sessions;
   ALTER TABLE pylon_sessions RENAME TO sessions;
   `,
+  `ALTER TABLE threads ADD COLUMN seen_at INTEGER;
+   ALTER TABLE threads ADD COLUMN last_reply_at INTEGER;`,
 ];
 
 type Row = Record<string, unknown>;
@@ -225,6 +229,8 @@ function threadRow(r: Row): Thread {
     agentTurnRunning: r.agent_turn_running === 1,
     lastAgentActivityAt: r.last_agent_activity_at as number,
     lastHumanActivityAt: r.last_human_activity_at as number,
+    seenAt: r.seen_at as number | null,
+    lastReplyAt: r.last_reply_at as number | null,
   };
 }
 
@@ -289,6 +295,8 @@ export function openRegistry(path: string) {
       VALUES ($id, $thread, $node, $boot, $firstBoot, $live, $liveHash, $pauses, $submitted, $attempts, $failed, $retrying)`),
     updatePylon: db.prepare(`UPDATE pylons SET thread = $thread, node = $node, boot = $boot, first_boot = $firstBoot, live = $live,
       live_hash = $liveHash, pauses = $pauses, submitted = $submitted, attempts = $attempts, failed = $failed, retrying = $retrying WHERE id = $id`),
+    markSeen: db.prepare("UPDATE threads SET seen_at = CASE WHEN ? THEN last_reply_at - 1 ELSE ? END WHERE id = ?"),
+    recordReply: db.prepare("UPDATE threads SET last_reply_at = max(coalesce(last_reply_at, 0), ?) WHERE id = ?"),
     retryPylon: db.prepare(`UPDATE pylons SET failed = NULL, attempts = '{"count":0,"last":null}', retrying = 1 WHERE id = ? AND failed IS NOT NULL`),
     pylon: db.prepare("SELECT * FROM pylons WHERE id = ?"),
     pylonsOn: db.prepare("SELECT * FROM pylons WHERE node = ? ORDER BY id"),
@@ -376,7 +384,7 @@ export function openRegistry(path: string) {
     },
 
     /** A thread and its pylon are created together, because a thread always has exactly one pylon. */
-    createThread(thread: Thread, pylon: StoredPylon) {
+    createThread(thread: Omit<Thread, "seenAt" | "lastReplyAt">, pylon: StoredPylon) {
       if (pylon.pylonId !== thread.pylonId || pylon.thread !== thread.id) throw new Error(`pylon ${pylon.pylonId} does not belong to thread ${thread.id}`);
       transaction(() => {
         q.insertThread.run(thread.id, thread.title, thread.project, thread.status, thread.conversationId, thread.startedBy, thread.createdAt,
@@ -388,6 +396,12 @@ export function openRegistry(path: string) {
     thread(id: ThreadId): Thread | undefined {
       const row = q.thread.get(id) as Row | undefined;
       return row && threadRow(row);
+    },
+    markSeen(id: ThreadId, unread: boolean, now = Date.now()) {
+      q.markSeen.run(unread ? 1 : 0, now, id);
+    },
+    recordReply(id: ThreadId, at: number) {
+      q.recordReply.run(at, id);
     },
     setThreadStatus(id: ThreadId, status: ThreadStatus) { q.threadStatus.run(status, id); },
     /** Timestamps only move forward, so a late or repeated report cannot make a thread look idle sooner. */
