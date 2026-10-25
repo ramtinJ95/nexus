@@ -19,11 +19,12 @@ const transcriptLookup = (argv: readonly string[], exists: boolean): ExecReply |
 
 /**
  * A Herdr server that is up, with `overrides` keyed by subcommand such as "agent start". Claude Code
- * transcripts exist unless `transcripts` is false.
+ * transcripts exist unless `transcripts` is false, and each pane's shell is at its prompt unless `shellReady` is false.
  */
-function herdrUp(overrides: Record<string, (argv: readonly string[]) => ExecReply> = {}, transcripts = true, submitted = true) {
+function herdrUp(overrides: Record<string, (argv: readonly string[]) => ExecReply> = {}, transcripts = true, submitted = true, shellReady = true) {
   return fakeGuest((argv, herdr) => {
     if (argv[2] === seedClaudeState) return { exitCode: 0, output: "" };
+    if (!herdr && argv[3] === "shell-ready") return { exitCode: shellReady ? 0 : 1, output: "" };
     if (!herdr && argv[3] === "claude-submitted") return { exitCode: submitted ? 0 : 1, output: "" };
     if (!herdr && argv.at(-1) === sessionsFile) return { exitCode: 3, output: "" };
     if (!herdr) return transcriptLookup(argv, transcripts) ?? assert.fail(`unexpected exec ${argv.join(" ")}`);
@@ -501,7 +502,11 @@ test("a worker's first prompt reaches Claude as one exact argument through the p
   const prompt = "/poteto-mode fix \"quotes\" and 'single' and `ticks` and $(not-a-shell-command) $HOME !! \\n\nthen\ttest\r\n\n  ünïcode\n";
   await openSession(guest, { harness: "claude-code", title: "worker", cwd: "/home/user/workspace/repo", prompt, model: "claude-opus-5-5" });
   assert.equal(guest.herdrCalls().includes("agent start"), false);
-  const command = guest.execs.find((a) => a[3] === "pane" && a[4] === "run")!.at(-1)!;
+  const typedAt = guest.execs.findIndex((a) => a[3] === "pane" && a[4] === "run");
+  const readyAt = guest.execs.findIndex((a) => a[3] === "shell-ready");
+  assert.ok(readyAt !== -1 && readyAt < typedAt, "the launch is typed only once the pane's shell is at its prompt");
+  assert.deepEqual(guest.execs[readyAt]!.slice(4), ["100"], "the wait watches the pane's shell");
+  const command = guest.execs[typedAt]!.at(-1)!;
   assert.doesNotMatch(command, /[\x00-\x1f\x7f]/, "nothing in the typed line is a key the terminal or readline acts on");
   const typed = `claude() { printf '%s\\0' "$@"; }\n${command}\n`;
   const argv = execFileSync("bash", ["--norc", "--noprofile", "-i"], { input: typed, encoding: "utf8", stdio: ["pipe", "pipe", "ignore"] }).split("\0").slice(0, -1);
@@ -511,6 +516,13 @@ test("a worker's first prompt reaches Claude as one exact argument through the p
   assert.equal(argv[8], prompt);
   assert.equal(argv.length, 9);
   assert.ok(guest.execs.some((a) => a[3] === "claude-submitted"));
+});
+
+test("a worker whose shell never reaches its prompt types nothing and rolls back with the pane's screen", async () => {
+  const guest = herdrUp({ "pane read": () => herdrOk({ read: { text: "still sourcing .bashrc" } }) }, true, true, false);
+  await assert.rejects(openSession(guest, { harness: "claude-code", title: "worker", cwd: "/home/user/workspace/repo", prompt: "x".repeat(5000) }), /shell did not reach an idle prompt within 10 seconds.*still sourcing \.bashrc/s);
+  assert.equal(guest.herdrCalls().includes("pane run"), false);
+  assert.equal(guest.herdrCalls().includes("workspace close"), true);
 });
 
 test("a worker without prompt submission stalls and leaves its visible pane for takeover", async () => {
