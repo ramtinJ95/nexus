@@ -126,10 +126,11 @@ type ToolResult = { kind: string; model?: { content: { type: string; text?: stri
  * stepLimitS and fails the check by name.
  */
 async function runTool(requestId: string, command: string): Promise<string> {
+  // A command that prints nothing has a result with no content, which reads as "". A result with no model entry is a
+  // shape this check does not know, so it fails loudly.
   const text = (e: ToolResult) => {
-    const parts = (e.model ?? []).flatMap((m) => m.content).flatMap((c) => c.type === "text" && c.text !== undefined ? [c.text] : []);
-    if (parts.length === 0) throw new Error(`a tool result has no text: ${JSON.stringify(e)}`);
-    return parts.join("\n");
+    if (e.model === undefined || e.model.length === 0) throw new Error(`a tool result has no model entry: ${JSON.stringify(e)}`);
+    return e.model.flatMap((m) => m.content).flatMap((c) => c.type === "text" && c.text !== undefined ? [c.text] : []).join("\n");
   };
   const results = async () => ((await expect(200, "GET", `/threads/${threadId}/conversation`)).entries as ToolResult[]).filter((e) => e.kind === "pi.tool-result").map(text);
   const seen = (await results()).length;
