@@ -100,3 +100,19 @@ test("an untracked thread is unknown again", async () => {
   await activity.untrack("t1");
   assert.throws(() => activity.facts("t1"), /tracks no thread t1/);
 });
+
+test("only a turn ending records a reply, not streaming, parking or retrying", async () => {
+  const replies: unknown[] = [];
+  const tracker = trackActivity({ ...ignore, now: () => 2000, onReply: (id, at) => replies.push([id, at]) });
+  const live = fakeLive({});
+  await tracker.track(live.observer, "t1", conversationId, false, context);
+  await live.change(busy);
+  await live.change(busy);
+  tracker.park(conversationId, taskId);
+  tracker.retried("t1");
+  assert.deepEqual(replies, []);
+  await live.change({});
+  await live.change({});
+  assert.deepEqual(replies, [["t1", 2000]]);
+  await tracker.close();
+});

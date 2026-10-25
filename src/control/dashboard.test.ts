@@ -490,7 +490,7 @@ test("a thread page's stream sends its conversation, then only the text that gre
   });
   transcript.docs["pi.live"] = live("Hal", "compiling\n");
   const page = (await s.call("GET", `/threads/${fix.id}`)).text;
-  assert.match(page, new RegExp(`<div class="convo" id="convo" data-live data-stream="/threads/${fix.id}/stream">`));
+  assert.match(page, new RegExp(`<div class="convo" id="convo" data-rendered-reply-at="" data-live data-stream="/threads/${fix.id}/stream">`));
 
   const stream = s.events(`/threads/${fix.id}/stream`);
   const first = await stream.next();
@@ -552,7 +552,7 @@ test("each thread state offers only the actions and prompt box that apply", asyn
   const archived = await state();
   assert.deepEqual(archived.actions, ["abort", "delete", "unarchive"], "an archived thread can still abort, but not retry");
   assert.ok(!archived.prompt && !archived.visit);
-  assert.equal(archived.chip, "archived");
+  assert.equal(archived.chip, "parked");
   assert.equal(archived.dock, "2 tasks hit the restart limit and hold the run. Unarchive the thread to retry them. Abort An archived thread takes no messages, because its pylon stays paused. Unarchive the thread to send one.");
 
   await s.call("POST", `/v1/threads/${fix.id}/unarchive`);
@@ -835,4 +835,22 @@ test("a job in flight shows on the thread page as its transition", async (t) => 
   const page = (await s.call("GET", `/threads/${fix.id}`)).text;
   assert.match(textOf(sectionOf(page, "pylon-h")), /Observed pausing/);
   assert.deepEqual(sidebarOf(page).rows, ["pausing Fix checkout now"]);
+});
+
+test("a page's rendered reply marker cannot advance while its conversation is being read", async (t) => {
+  const s = await seeded(t);
+  const fix = await s.start("acme", "Old conversation");
+  s.registry.recordReply(fix.id, 1000);
+  const watch = s.fake.harness.watch;
+  s.fake.harness.watch = async (id) => {
+    const view = await watch(id);
+    s.registry.recordReply(fix.id, 2000);
+    return view;
+  };
+  const html = (await s.call("GET", `/threads/${fix.id}`)).text;
+  assert.match(html, /id="convo" data-rendered-reply-at="1000"/);
+  assert.equal(s.registry.thread(fix.id)!.lastReplyAt, 2000);
+  await s.call("POST", `/v1/threads/${fix.id}/seen`, { lastReplyAt: 1000 });
+  const detail = JSON.parse((await s.call("GET", `/v1/threads/${fix.id}`)).text);
+  assert.equal(detail.attention, "reply");
 });

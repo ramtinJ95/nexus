@@ -1,3 +1,4 @@
+import { attentionOf } from "./attention.ts";
 import { after, test } from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
@@ -219,7 +220,7 @@ test("starting a thread creates its pylon, boots fresh from the current image, a
   assert.deepEqual(s.calls, [["start", { threadId: thread.id, pylonId: thread.pylonId }]]);
   assert.equal(thread.conversationId, "1");
   assert.deepEqual(s.woken, [node]);
-  const row = { ...thread, desired: "running", pylon: { node, actualState: "unknown", failed: null } };
+  const row = { ...thread, attention: null, desired: "running", pylon: { node, actualState: "unknown", failed: null } };
   assert.deepEqual((await s.call("GET", "/v1/threads")).body, [row]);
   assert.deepEqual((await s.call("GET", "/v1/threads?project=acme")).body, [row]);
   assert.deepEqual((await s.call("GET", "/v1/threads?project=other")).body, []);
@@ -284,6 +285,7 @@ test("thread detail derives the actual state from the node's last observation", 
 
   assert.deepEqual(await detail(), {
     thread,
+    attention: null, seenAt: null, lastReplyAt: null,
     desired: "running",
     pylon: { id: thread.pylonId, node, actualState: "unknown", failed: null, observedAt: null, retryRefused: null },
     sessions: [], previews: [], ports: [], outputs: [], attach: "herdr --session nexus", agent: { parkedTasks: 0 },
@@ -1244,4 +1246,84 @@ test("an upgrade the API serves no WebSocket for is handled as an ordinary reque
   assert.equal((await s.call("GET", "/v1/projects", undefined, upgrade)).status, 200);
   const other = await s.call("GET", attachPathOf(s.thread.id), undefined, { connection: "upgrade", upgrade: "h2c" });
   assert.deepEqual(other, { status: 404, body: { error: `no route /v1/threads/${s.thread.id}/attach` } });
+});
+
+test("attention ranks failure, unwatched parked tasks, unread reply, then work; seen never wakes", async (t) => {
+  const s = await withThread(t);
+  const id = s.thread.id;
+  const base = `/v1/threads/${id}`;
+  const attention = async () => {
+    const row = ((await s.call("GET", "/v1/threads")).body as ThreadRow[])[0]!;
+    const detail = (await s.call("GET", base)).body as ThreadDetail;
+    assert.equal(row.attention, detail.attention);
+    assert.equal(row.lastReplyAt, detail.lastReplyAt);
+    assert.equal(row.seenAt, detail.seenAt);
+    return row.attention;
+  };
+  assert.equal(await attention(), null);
+  s.registry.recordActivity(id, { agentTurnRunning: true });
+  assert.equal(await attention(), "working");
+  s.registry.recordReply(id, 1000);
+  assert.equal(await attention(), "reply");
+  s.fake.park(id, 2);
+  assert.equal(await attention(), "parked");
+  assert.ok(!s.calls.some(([kind]) => kind === "watch"), "parked is known without a client watch");
+  const pylon = s.registry.pylon(s.thread.pylonId)!;
+  s.registry.savePylon({ ...pylon, failed: "gave up" });
+  assert.equal(await attention(), "failed");
+  s.registry.savePylon(pylon);
+  s.fake.park(id, 0);
+  s.registry.recordActivity(id, { agentTurnRunning: false });
+  s.woken.length = 0;
+  const human = s.registry.thread(id)!.lastHumanActivityAt;
+  for (const status of ["active", "archived"] as const) {
+    s.registry.setThreadStatus(id, status);
+    assert.equal((await s.call("POST", `${base}/seen`)).status, 204);
+    assert.equal(await attention(), null);
+    assert.equal((await s.call("POST", `${base}/unseen`)).status, 204);
+    assert.equal(s.registry.thread(id)!.seenAt, 999);
+    assert.equal(await attention(), "reply");
+    assert.equal(s.registry.thread(id)!.lastHumanActivityAt, human);
+    assert.deepEqual(s.registry.pylon(s.thread.pylonId), pylon);
+    assert.deepEqual(s.woken, []);
+  }
+});
+
+
+test("attention takes the first matching state in every combination", () => {
+  for (const failed of [false, true]) for (const parked of [false, true]) {
+    for (const reply of [null, 10]) for (const seen of [null, 9, 10, 11]) for (const working of [false, true]) {
+      const expected = failed ? "failed" : parked ? "parked" : reply !== null && (seen === null || reply > seen) ? "reply" : working ? "working" : null;
+      assert.equal(attentionOf(failed, parked, reply, seen, working), expected);
+    }
+  }
+});
+
+test("seen is bounded by the rendered reply, not a newer reply discovered by attention polling", async (t) => {
+  const s = await withThread(t);
+  const id = s.thread.id;
+  const base = `/v1/threads/${id}`;
+  s.registry.recordReply(id, 1000);
+  const renderedReplyAt = s.registry.thread(id)!.lastReplyAt;
+  s.registry.recordReply(id, 2000);
+  const human = s.registry.thread(id)!.lastHumanActivityAt;
+  s.woken.length = 0;
+  assert.equal((await s.call("POST", `${base}/seen`, { lastReplyAt: renderedReplyAt })).status, 204);
+  let detail = (await s.call("GET", base)).body as ThreadDetail;
+  assert.equal(detail.seenAt, 1000);
+  assert.equal(detail.lastReplyAt, 2000);
+  assert.equal(detail.attention, "reply");
+  assert.equal((await s.call("POST", `${base}/seen`, { lastReplyAt: null })).status, 204);
+  assert.equal(s.registry.thread(id)!.seenAt, 1000);
+  await s.call("POST", `${base}/seen`, { lastReplyAt: 2000 });
+  detail = (await s.call("GET", base)).body as ThreadDetail;
+  assert.equal(detail.seenAt, 2000);
+  assert.equal(detail.attention, null);
+  await s.call("POST", `${base}/seen`, { lastReplyAt: 1000 });
+  assert.equal(s.registry.thread(id)!.seenAt, 2000, "a stale page does not undo another client's seen mark");
+  for (const lastReplyAt of [-1, 1.5, "2000"]) {
+    assert.equal((await s.call("POST", `${base}/seen`, { lastReplyAt })).status, 400);
+  }
+  assert.equal(s.registry.thread(id)!.lastHumanActivityAt, human);
+  assert.deepEqual(s.woken, []);
 });

@@ -15,6 +15,7 @@
  * on the allowlist. The API writes only what a human asks for. Every change that can move a pylon
  * wakes the loop for its node, so a start or a dashboard visit acts within one pass rather than 5 seconds.
  */
+import { attentionOf, type Attention } from "./attention.ts";
 import { randomBytes } from "node:crypto";
 import { createServer, STATUS_CODES, type IncomingMessage, type ServerResponse } from "node:http";
 import type { Duplex } from "node:stream";
@@ -73,6 +74,9 @@ export interface Api {
 }
 
 export interface ThreadDetail {
+  attention: Attention;
+  seenAt: number | null;
+  lastReplyAt: number | null;
   thread: Thread;
   /** What the planner wants of the pylon now, from the thread's status and activity. */
   desired: DesiredPhase;
@@ -102,7 +106,7 @@ export interface ThreadDetail {
 export interface ListeningPort { port: number; service: string | null; preview: Preview | null }
 
 /** A thread as the list reports it, with what the planner wants of its pylon and what its node last reported. */
-export type ThreadRow = Thread & { desired: DesiredPhase; pylon: Pick<ThreadDetail["pylon"], "node" | "actualState" | "failed"> };
+export type ThreadRow = Thread & { attention: Attention; desired: DesiredPhase; pylon: Pick<ThreadDetail["pylon"], "node" | "actualState" | "failed"> };
 
 /**
  * One event of `GET /v1/threads/:id/events`. The first carries the whole view. Each later one carries what changed
@@ -176,6 +180,7 @@ const startSchema = z.strictObject({
   commit: z.string().min(1).optional(),
 });
 // Agent activity comes from the harness.
+const seenSchema = z.strictObject({ lastReplyAt: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER).nullable().optional() });
 const activitySchema = z.strictObject({ kind: z.literal("human") });
 const messageSchema = z.strictObject({
   text: z.string().min(1),
@@ -271,7 +276,7 @@ export async function startApi(options: ApiOptions): Promise<Api> {
     const t: Thread = {
       id, title: request.title, project: project.id, pylonId, status: "active", conversationId: String(conversationId), startedBy: caller, createdAt: now,
       // Starting a thread is human activity, so its pylon is wanted at once.
-      agentTurnRunning: false, lastAgentActivityAt: 0, lastHumanActivityAt: now,
+      agentTurnRunning: false, lastAgentActivityAt: 0, lastHumanActivityAt: now, seenAt: null, lastReplyAt: null,
     };
     const boot: Omit<BootInputs, "source"> = {
       pylonId, image, resources: project.resources,
@@ -327,9 +332,14 @@ export async function startApi(options: ApiOptions): Promise<Api> {
     });
   }
 
+  function attention(t: Thread): Attention {
+    const parked = t.conversationId !== null && t.status !== "deleted" && harness.activity.parked(t.id).length > 0;
+    return attentionOf(pylonOf(t).failed !== null, parked, t.lastReplyAt, t.seenAt, t.agentTurnRunning);
+  }
+
   function row(t: Thread): ThreadRow {
     const { node, actualState, failed } = pylonOf(t);
-    return { ...t, desired: desiredPhase(t, Date.now()), pylon: { node, actualState, failed } };
+    return { ...t, attention: attention(t), desired: desiredPhase(t, Date.now()), pylon: { node, actualState, failed } };
   }
 
   function detail(t: Thread): ThreadDetail {
@@ -337,6 +347,7 @@ export async function startApi(options: ApiOptions): Promise<Api> {
     const previews = registry.previews(pylon.pylonId);
     return {
       thread: t,
+      attention: attention(t), seenAt: t.seenAt, lastReplyAt: t.lastReplyAt,
       desired: desiredPhase(t, Date.now()),
       pylon: pylonOf(t),
       sessions: registry.sessions(pylon.pylonId),
@@ -618,7 +629,7 @@ export async function startApi(options: ApiOptions): Promise<Api> {
 
   /** A file is served as its bytes, everything else as JSON. */
   type Reply = { status: number; body?: unknown; file?: never } | { status: number; file: Buffer; type: string };
-  type Route = (match: RegExpExecArray, req: { query: URLSearchParams; body(): Promise<unknown>; caller: TailnetNodeId }) => Reply | Promise<Reply>;
+  type Route = (match: RegExpExecArray, req: { query: URLSearchParams; body(empty?: unknown): Promise<unknown>; caller: TailnetNodeId }) => Reply | Promise<Reply>;
   const ok = (body: unknown): Reply => ({ status: 200, body });
   const created = (body: unknown): Reply => ({ status: 201, body });
   const noContent: Reply = { status: 204 };
@@ -631,6 +642,12 @@ export async function startApi(options: ApiOptions): Promise<Api> {
     ["POST", /^\/v1\/threads$/, async (_, r) => created(await startThread(await r.body(), r.caller))],
     ["GET", /^\/v1\/threads\/([^/]+)$/, (m) => ok(detail(thread(m[1]!)))],
     ["DELETE", /^\/v1\/threads\/([^/]+)$/, async (m) => ok(await setStatus(thread(m[1]!), "deleted"))],
+    ["POST", /^\/v1\/threads\/([^/]+)\/(seen|unseen)$/, async (m, r) => {
+      const t = thread(m[1]!);
+      const body = parse(seenSchema, await r.body({}));
+      registry.markSeen(t.id, m[2] === "unseen", Date.now(), body.lastReplyAt);
+      return noContent;
+    }],
     ["POST", /^\/v1\/threads\/([^/]+)\/archive$/, async (m) => ok(await setStatus(thread(m[1]!), "archived"))],
     ["POST", /^\/v1\/threads\/([^/]+)\/unarchive$/, (m) => ok(unarchive(thread(m[1]!)))],
     ["POST", /^\/v1\/threads\/([^/]+)\/activity$/, async (m, r) => { recordActivity(thread(m[1]!), await r.body()); return noContent; }],
@@ -716,7 +733,7 @@ export async function startApi(options: ApiOptions): Promise<Api> {
     if (matches.length === 0) throw new HttpError(404, `no route ${path}`);
     const match = matches.find((r) => r.method === req.method);
     if (match === undefined) throw new HttpError(405, `${req.method} is not allowed on ${path}`);
-    const reply = await match.route(match.m, { query: url.searchParams, caller, body: () => readJson(req) });
+    const reply = await match.route(match.m, { query: url.searchParams, caller, body: (empty) => readJson(req, empty) });
     if (reply.file !== undefined) sendFile(res, reply.file, reply.type);
     else if (reply.body === undefined) res.writeHead(reply.status).end();
     else send(res, reply.status, reply.body);
@@ -843,13 +860,14 @@ function parse<T>(schema: z.ZodType<T>, body: unknown): T {
 }
 
 const maxBodyBytes = 1 << 20;
-async function readJson(req: IncomingMessage): Promise<unknown> {
+async function readJson(req: IncomingMessage, empty?: unknown): Promise<unknown> {
   let body = "";
   req.setEncoding("utf8");
   for await (const chunk of req as AsyncIterable<string>) {
     body += chunk;
     if (body.length > maxBodyBytes) throw new HttpError(413, `request body over ${maxBodyBytes} bytes`);
   }
+  if (body === "" && empty !== undefined) return empty;
   try {
     return JSON.parse(body);
   } catch (err) {

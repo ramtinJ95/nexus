@@ -19,6 +19,7 @@ const project: RemoteProject = {
   secrets: [{ name: "TOKEN", hosts: ["api.example.com"] }], logins: ["chatgpt"], preSetup: null,
 };
 const thread: Thread = {
+  seenAt: null, lastReplyAt: null,
   id: threadId, title: "fix it", project: project.id, pylonId, status: "active", conversationId: null, startedBy: "nLAPTOP",
   createdAt: 1_000, agentTurnRunning: false, lastAgentActivityAt: 0, lastHumanActivityAt: 1_000,
 };
@@ -216,7 +217,7 @@ test("a registry from before failure messages keeps its pylons' attempts", async
     seeded(path).close();
     const db = new DatabaseSync(path);
     db.prepare("UPDATE pylons SET attempts = ?").run(JSON.stringify(attempts));
-    db.exec(`ALTER TABLE pylons DROP COLUMN retrying; ${untitledSessions} PRAGMA user_version = 1`);
+    db.exec(`ALTER TABLE pylons DROP COLUMN retrying; ${untitledSessions} ALTER TABLE threads DROP COLUMN seen_at; ALTER TABLE threads DROP COLUMN last_reply_at; PRAGMA user_version = 1`);
     db.close();
     return path;
   };
@@ -236,7 +237,7 @@ test("a registry from before pylon retries opens with no retry under way, and a 
   const path = tempDb();
   seeded(path).close();
   const db = new DatabaseSync(path);
-  db.exec(`ALTER TABLE pylons DROP COLUMN retrying; ${untitledSessions} PRAGMA user_version = 3`);
+  db.exec(`ALTER TABLE pylons DROP COLUMN retrying; ${untitledSessions} ALTER TABLE threads DROP COLUMN seen_at; ALTER TABLE threads DROP COLUMN last_reply_at; PRAGMA user_version = 3`);
   db.close();
   const registry = openRegistry(path);
   t.after(() => registry.close());
@@ -382,7 +383,7 @@ test("a registry from before session titles keeps its sessions, untitled until t
   const path = tempDb();
   seeded(path).close();
   const db = new DatabaseSync(path);
-  db.exec(`${untitledSessions} PRAGMA user_version = 4`);
+  db.exec(`${untitledSessions} ALTER TABLE threads DROP COLUMN seen_at; ALTER TABLE threads DROP COLUMN last_reply_at; PRAGMA user_version = 4`);
   db.prepare("INSERT INTO sessions VALUES (?, 'w1:p1', 'claude-code', NULL, 'idle')").run(pylonId);
   db.close();
   const registry = openRegistry(path);
@@ -405,7 +406,7 @@ test("a registry from before repository kinds reads every stored repo, booted or
   first.close();
   const db = new DatabaseSync(path);
   db.exec(`UPDATE pylons SET boot = json_remove(boot, '$.repo.kind'), submitted = CASE WHEN json_extract(submitted, '$.job.kind') = 'spawn'
-    THEN json_remove(submitted, '$.job.boot.repo.kind') ELSE submitted END; PRAGMA user_version = 5`);
+    THEN json_remove(submitted, '$.job.boot.repo.kind') ELSE submitted END; ALTER TABLE threads DROP COLUMN seen_at; ALTER TABLE threads DROP COLUMN last_reply_at; PRAGMA user_version = 5`);
   assert.equal((db.prepare("SELECT count(*) AS n FROM pylons WHERE boot LIKE '%\"kind\":\"clone\"%' OR submitted LIKE '%\"clone\"%'").get() as { n: number }).n, 0, "the old shape has no kind");
   db.close();
 
@@ -420,7 +421,7 @@ test("a registry from before session states keeps its sessions as running in the
   const path = tempDb();
   seeded(path).close();
   const db = new DatabaseSync(path);
-  db.exec(`${untitledSessions} ALTER TABLE sessions ADD COLUMN title TEXT; PRAGMA user_version = 6`);
+  db.exec(`${untitledSessions} ALTER TABLE sessions ADD COLUMN title TEXT; ALTER TABLE threads DROP COLUMN seen_at; ALTER TABLE threads DROP COLUMN last_reply_at; PRAGMA user_version = 6`);
   db.prepare("INSERT INTO sessions VALUES (?, 'w1:p1', 'pi', 's.jsonl', 'working', 'plan')").run(pylonId);
   db.close();
   const registry = openRegistry(path);
@@ -440,7 +441,7 @@ test("a registry from before node-unique preview ports keeps its previews", asyn
     CREATE TABLE previews (pylon TEXT NOT NULL REFERENCES pylons (id), service TEXT NOT NULL, https_port INTEGER NOT NULL, ready INTEGER NOT NULL, PRIMARY KEY (pylon, service)) STRICT;
     ALTER TABLE pylons DROP COLUMN retrying;
     ${untitledSessions}
-    PRAGMA user_version = 2;`);
+    ALTER TABLE threads DROP COLUMN seen_at; ALTER TABLE threads DROP COLUMN last_reply_at; PRAGMA user_version = 2;`);
   db.prepare("INSERT INTO previews VALUES (?, 'web', 10200, 1)").run(pylonId);
   db.close();
 
@@ -449,4 +450,41 @@ test("a registry from before node-unique preview ports keeps its previews", asyn
   assert.deepEqual(registry.previews(pylonId), [{ pylon: pylonId, service: "web", httpsPort: 10200, ready: true, failed: null, url: "https://rj-firebat.tail.ts.net:10200/" }]);
   registry.allocatePreviews(addPylon(registry, "th-2"), ["web"], ports);
   assert.deepEqual(portsOf(registry, "pylon-th-2" as PylonId), ["web 10201"]);
+});
+
+test("seen and reply timestamps migrate from null and persist without activity", async (t) => {
+  const { DatabaseSync } = await import("node:sqlite");
+  const path = tempDb();
+  seeded(path).close();
+  const db = new DatabaseSync(path);
+  db.exec("ALTER TABLE threads DROP COLUMN seen_at; ALTER TABLE threads DROP COLUMN last_reply_at; PRAGMA user_version = 7");
+  db.close();
+  const registry = openRegistry(path);
+  assert.equal(registry.thread(threadId)!.seenAt, null);
+  assert.equal(registry.thread(threadId)!.lastReplyAt, null);
+  registry.markSeen(threadId, true);
+  assert.equal(registry.thread(threadId)!.seenAt, null, "no reply to mark unread");
+  registry.recordReply(threadId, 2000);
+  registry.markSeen(threadId, false, 3000);
+  registry.close();
+  const reopened = openRegistry(path);
+  t.after(() => reopened.close());
+  assert.deepEqual(reopened.thread(threadId), { ...thread, lastReplyAt: 2000, seenAt: 3000 });
+  assert.deepEqual(reopened.pylon(pylonId), pylon);
+});
+
+test("a reply recorded after seen in the same millisecond is unread and has a new identity", (t) => {
+  const registry = seeded(tempDb());
+  t.after(() => registry.close());
+  registry.recordReply(threadId, 1000);
+  registry.markSeen(threadId, false, 2000);
+  registry.recordReply(threadId, 2000);
+  const reply = registry.thread(threadId)!;
+  assert.equal(reply.seenAt, 2000);
+  assert.equal(reply.lastReplyAt, 2001);
+  assert.ok(reply.lastReplyAt > reply.seenAt);
+  registry.markSeen(threadId, false, 2000, reply.lastReplyAt);
+  assert.equal(registry.thread(threadId)!.seenAt, 2001);
+  registry.recordReply(threadId, 2000);
+  assert.equal(registry.thread(threadId)!.lastReplyAt, 2002);
 });

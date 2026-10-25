@@ -478,3 +478,6 @@ a.link { color: var(--accent); }
   .modal { margin-top: 12px; }
   .seg, .two { grid-template-columns: 1fr; }
 }
+
+.attention-toast { position: fixed; bottom: 24px; right: 24px; z-index: 100; display: flex; gap: 16px; padding: 16px; background: #252830; color: white; border: 1px solid #777; border-radius: 8px; }
+.attention-toast a { color: #9dcaff; }

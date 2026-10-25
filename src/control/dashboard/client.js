@@ -1,9 +1,9 @@
-// The dashboard's only script. Pages are rendered on the server. This file sends actions, messages and new projects
+// The dashboard client. Pages are rendered on the server. This file sends actions, messages and new projects
 // to the JSON API, records a visit as human activity, opens the start and new-project dialogs and the phone's panels,
 // and polls the page to swap in each `data-live` region that changed. A thread page also follows its stream, which
 // sends the conversation region as the run streams, and reads its checkout's changes into the inspector, opening
 // each changed file's diff as a tab beside the conversation.
-"use strict";
+import { coordinator, notificationChannel, badgeCount, badgeText, seenBody } from "./notifications.js";
 
 const main = document.querySelector("main");
 const pollMs = Number(main?.dataset.pollMs);
@@ -13,9 +13,9 @@ const projectDialog = document.getElementById("project-dialog");
 const filter = document.getElementById("filter");
 
 /** Sends JSON as the API requires, and throws the API's error message. */
-async function api(method, path, body) {
+async function api(method, path, body, signal) {
   const res = await fetch(path, {
-    method,
+    method, signal,
     headers: { "content-type": "application/json" },
     body: body === undefined ? undefined : JSON.stringify(body),
   });
@@ -166,8 +166,13 @@ async function refresh() {
     const next = new DOMParser().parseFromString(await res.text(), "text/html");
     const followed = streaming() || frames !== seen;
     swap([...next.querySelectorAll("[data-live]")].filter((fresh) => !(followed && fresh.id === "convo")).map((fresh) => [document.getElementById(fresh.id), fresh.innerHTML]));
+    const freshConvo = next.getElementById("convo");
+    // A stream owns its patch indices. Certify its rendered snapshot without replacing it under those patches.
+    if (freshConvo && (!followed || served.get("convo") === comparable(freshConvo.innerHTML))) {
+      document.getElementById("convo").dataset.renderedReplyAt = freshConvo.dataset.renderedReplyAt ?? "";
+    }
     follow(next.getElementById("convo")?.dataset.stream);
-    document.title = next.title;
+
     // An archived or deleted thread stops counting visits, so follow the fresh page.
     const activity = next.querySelector("main")?.dataset.activity;
     if (activity === undefined) delete main.dataset.activity;
@@ -890,3 +895,54 @@ document.addEventListener("visibilitychange", () => {
   // The visit wakes the pylon anyway, so a running one is worth reading again on return.
   if (changesPane !== null && canRead(factsNow())) void readChanges();
 });
+
+const currentThread = () => /^\/threads\/([^/]+)$/.exec(location.pathname)?.[1] ?? null;
+const focused = () => document.visibilityState === "visible" && document.hasFocus();
+const notifications = coordinator((row) => {
+  const channel = notificationChannel(focused(), currentThread(), row.id, window.isSecureContext,
+    window.isSecureContext && "Notification" in window ? Notification.permission : "unavailable");
+  const url = `/threads/${row.id}`;
+  if (channel === "system") {
+    const notice = new Notification(row.title, { body: row.attention === "reply" ? "New reply" : row.attention });
+    notice.onclick = () => { window.focus(); location.assign(url); notice.close(); };
+  } else if (channel === "toast") {
+    const toast = el("div", { className: "attention-toast", role: "status" },
+      el("span", { textContent: `${row.title}: ${row.attention}` }),
+      el("a", { href: url, textContent: "Open" }));
+    const dismiss = el("button", { textContent: "Dismiss", type: "button" });
+    dismiss.onclick = () => toast.remove();
+    toast.append(dismiss);
+    document.body.append(toast);
+    setTimeout(() => toast.remove(), 15000);
+  }
+});
+const permission = el("button", { type: "button", className: "btn", textContent: "Enable system notifications" });
+if (window.isSecureContext && "Notification" in window) {
+  permission.onclick = async () => { permission.textContent = `Notifications: ${await Notification.requestPermission()}`; };
+} else {
+  permission.disabled = true;
+  permission.textContent = "System notifications need HTTPS";
+}
+document.querySelector("aside")?.append(permission);
+let attentionPolling = false;
+let lastSeen = 0;
+async function pollAttention() {
+  if (attentionPolling) return;
+  attentionPolling = true;
+  try {
+    const rows = (await api("GET", "/v1/threads", undefined, AbortSignal.timeout(10_000))).filter((row) => row.status !== "deleted");
+    notifications(rows, Date.now());
+    const count = badgeCount(rows);
+    document.title = `${count ? `(${badgeText(count)}) ` : ""}Nexus`;
+    const favicon = document.querySelector('link[rel="icon"]');
+    favicon.href = count ? `data:image/svg+xml,${encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><rect width="32" height="32" rx="8" fill="#d44"/><text x="16" y="23" text-anchor="middle" font-size="22" fill="white">${badgeText(count)}</text></svg>`)}` : "/assets/favicon.svg";
+    const id = currentThread();
+    if (id && focused() && activeTab === null && document.getElementById("convo") && !document.querySelector("#convo .error") && Date.now() - lastSeen >= 3000) {
+      lastSeen = Date.now();
+      await api("POST", `/v1/threads/${id}/seen`, seenBody(document.getElementById("convo")), AbortSignal.timeout(10_000));
+    }
+  } catch { /* The page's refresh reports connection failures. */ }
+  finally { attentionPolling = false; }
+}
+void pollAttention();
+setInterval(pollAttention, 1000);

@@ -26,6 +26,7 @@ function seeded(t: import("node:test").TestContext) {
     resources: { cpus: 1, memoryGiB: 1, diskGiB: 1 }, allowedHosts: [], secrets: [], logins: [], preSetup: null,
   });
   const thread: Thread = {
+  seenAt: null, lastReplyAt: null,
     id: threadId, title: "t", project: "acme" as ProjectId, pylonId, status: "active", conversationId: "1", startedBy: "nLAPTOP",
     createdAt: 0, agentTurnRunning: true, lastAgentActivityAt: 0, lastHumanActivityAt: 0,
   };

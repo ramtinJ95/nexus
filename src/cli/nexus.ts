@@ -21,7 +21,7 @@ import type { WebSocket } from "ws";
 import { attachTerminal, processTty } from "./attach.ts";
 import { call, CliError, exitCodes, follow, upgrade, type Endpoint, type HostPort } from "./transport.ts";
 
-const version = "0.9.0";
+const version = "0.10.0";
 const defaults = { url: "http://rj-firebat.tailc817d3.ts.net:7470", socks: "localhost:1055" };
 const configFile = () => join(homedir(), ".config", "nexus", "cli.json");
 
@@ -42,6 +42,7 @@ const usage = `nexus ${version}, the Nexus control plane from this Mac
   nexus start --project P [--title T] [--message M] [--node N] [--branch B] [--commit C]
   nexus send <thread> <text...> [--steer] [--request-id ID]
   nexus watch <thread> [--interval MS]
+  nexus seen <thread> [--unread]
   nexus abort|retry|retry-pylon|wake <thread>
   nexus archive|unarchive|delete <thread>
   nexus projects
@@ -609,6 +610,14 @@ const commands: Readonly<Record<string, Command>> = {
       const interval = int(str(v, "interval"), "--interval", 2000);
       if (interval === 0) throw new CliError("invalid", "--interval must be above 0");
       await watch(api, follow, id!, interval, v.json === true);
+    },
+  },
+  seen: {
+    args: [1, 1],
+    options: { unread: { type: "boolean" } },
+    async run(api, [id], v) {
+      await api("POST", `${thread(id!)}/${v.unread ? "unseen" : "seen"}`, {});
+      return { json: null, text: `Marked ${id} ${v.unread ? "unread" : "seen"}.` };
     },
   },
   abort: action("abort", "Aborted the run of"),

@@ -44,6 +44,7 @@ export interface ActivityOptions {
    */
   onChange(threadId: string, facts: AgentFacts): void;
   now?: () => number;
+  onReply?(threadId: string, at: number): void;
 }
 
 export function trackActivity(options: ActivityOptions): ActivityTracker {
@@ -74,8 +75,10 @@ export function trackActivity(options: ActivityOptions): ActivityTracker {
       const a: ThreadActivity = { threadId, watch, running, lastActivityAt: running === recorded ? 0 : now(), parked: new Set(), reported: recorded };
       threads.set(threadId, a);
       conversations.set(conversationId, a);
+      if (recorded && !running) options.onReply?.(threadId, now());
       report(a);
       watch.start(async (live) => {
+        if (a.running && live?.run === undefined) options.onReply?.(threadId, now());
         a.running = live?.run !== undefined;
         a.lastActivityAt = now();
         if (!a.running) a.parked.clear();
