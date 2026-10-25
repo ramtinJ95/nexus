@@ -242,3 +242,36 @@ test("only trusted reviews and comments wake, and untrusted feedback cannot exha
   assert.equal(f.messages.length, 2);
   assert.match(f.messages[1]![1], /Check failed: build/);
 });
+
+test("a repository's ordinary 403 does not cool down other repositories", async () => {
+  const calls: string[] = [];
+  const fake: typeof fetch = async (input) => {
+    const path = new URL(String(input)).pathname; calls.push(path);
+    return path.includes("/denied/") ? new Response(null, { status: 403, headers: { "x-ratelimit-remaining": "4999", "x-ratelimit-reset": "9999999999" } }) : Response.json([]);
+  };
+  const client = githubClient("secret", fake);
+  await assert.rejects(client.find("denied/repo", "main"), /HTTP 403/);
+  assert.deepEqual(await client.find("allowed/repo", "main"), []);
+  assert.deepEqual(calls, ["/repos/denied/repo/pulls", "/repos/allowed/repo/pulls"]);
+});
+
+for (const [name, headers, delay] of [
+  ["short Retry-After", { "retry-after": "5" }, 5_000],
+  ["long Retry-After", { "retry-after": "360" }, 360_000],
+  ["dated Retry-After", { "retry-after": "Fri, 01 Jan 2027 00:03:00 GMT" }, 180_000],
+  ["exhausted primary limit", { "x-ratelimit-remaining": "0", "x-ratelimit-reset": "1798761660" }, 60_000],
+  ["both limits", { "retry-after": "90", "x-ratelimit-remaining": "0", "x-ratelimit-reset": "1798761660" }, 90_000],
+] as const) test(`GitHub honours ${name} before another repository's request`, async (t) => {
+  let now = Date.parse("2027-01-01T00:00:00Z");
+  t.mock.method(Date, "now", () => now);
+  let calls = 0;
+  const fake: typeof fetch = async () => ++calls === 1 ? new Response(null, { status: 403, headers }) : Response.json([]);
+  const client = githubClient("secret", fake);
+  await assert.rejects(client.find("acme/repo", "main"), /HTTP 403/);
+  now += delay - 1;
+  await assert.rejects(client.find("other/repo", "main"), /waiting for its rate limit/);
+  assert.equal(calls, 1);
+  now++;
+  assert.deepEqual(await client.find("other/repo", "main"), []);
+  assert.equal(calls, 2);
+});

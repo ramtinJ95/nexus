@@ -43,7 +43,15 @@ export function githubClient(token: string, request: typeof fetch = fetch): GitH
     });
     if (response.status === 304 && old) return { value: old.value as T, next: old.next };
     if (!response.ok) {
-      if (response.status === 403 || response.status === 429) retryAt = Math.max(Date.now() + 120_000, Number(response.headers.get("x-ratelimit-reset")) * 1000);
+      const retryAfter = response.headers.get("retry-after");
+      const exhausted = response.headers.get("x-ratelimit-remaining") === "0";
+      if ((response.status === 403 || response.status === 429) && (exhausted || retryAfter !== null)) {
+        const now = Date.now();
+        const after = retryAfter === null ? NaN : /^\d+(?:\.\d+)?$/.test(retryAfter) ? now + Number(retryAfter) * 1000 : Date.parse(retryAfter);
+        const reset = exhausted ? Number(response.headers.get("x-ratelimit-reset")) * 1000 : NaN;
+        const deadlines = [after, reset].filter((at) => Number.isFinite(at) && at >= now);
+        retryAt = deadlines.length ? Math.max(...deadlines) : now + 120_000;
+      }
       throw new Error(`GitHub PR watch: HTTP ${response.status}`);
     }
     const value = await response.json() as T;
