@@ -366,7 +366,55 @@ test("malformed commands get 400 and reach no guest", async (t) => {
   assert.equal(await post({ kind: "close-session", herdrPane: "w1:p1", session: { harness: "codex", harnessSessionId: null, title: null } }), 400);
   assert.equal(await post({ kind: "close-session", herdrPane: "w1:p1", session: { harness: "pi", title: null } }), 400);
   assert.equal(await post({ kind: "reboot" }), 400);
+  const send = { kind: "send-claude", session: "0b5e3a52-5d0f-4c1e-9a43-1f2a6c7d8e90", text: "hi" };
+  for (const bad of [{ session: undefined }, { session: "../etc" }, { session: "a".repeat(201) }, { text: "" }, { text: "x".repeat(16_385) }, { text: "a\tb" }, { text: "a\rb" }, { model: "" }, { model: "m".repeat(201) }]) {
+    assert.equal(await post({ ...send, ...bad }), 400, JSON.stringify(bad));
+  }
   assert.deepEqual(guest.execs, []);
+});
+
+test("a message that resumes its Claude session publishes the session's new pane at once", async (t) => {
+  const session = "0b5e3a52-5d0f-4c1e-9a43-1f2a6c7d8e90";
+  let panes: ReturnType<typeof herdrPane>[] = [];
+  const guest = fakeGuest((argv, herdr) => {
+    if (!herdr) return argv[3] === "claude-type" || argv[0] === "node" || argv[0] === "sh" ? { exitCode: argv.at(-1) === sessionsFile ? 3 : 0, output: "" } : assert.fail(`unexpected exec ${argv.join(" ")}`);
+    const sub = argv.slice(0, 2).join(" ");
+    if (sub === "api snapshot") return herdrOk(herdrSnapshot([{ id: "w1", label: "Claude Code" }], panes));
+    if (sub === "workspace list") return herdrOk({ type: "workspace_list", workspaces: [] });
+    if (sub === "workspace create") return herdrOk({ type: "workspace_created", workspace: { workspace_id: "w1" }, tab: { tab_id: "w1:t1" }, root_pane: { pane_id: "w1:p1" } });
+    if (sub === "agent start") {
+      panes = [herdrPane("w1:p1", "w1", "claude", "idle", { kind: "id", value: session })];
+      return herdrOk({ type: "agent_started", agent: {}, argv: [] });
+    }
+    throw new Error(`unscripted ${sub}`);
+  });
+  const { client } = await setup(t, {}, guest);
+  await running(client);
+  const abort = new AbortController();
+  t.after(() => abort.abort());
+  const events = client.observe(abort.signal)[Symbol.asyncIterator]();
+  assert.equal((await events.next()).value?.type, "snapshot");
+  assert.deepEqual(await client.command(pylonId, { kind: "send-claude", session, text: "carry on" }), { kind: "send-claude", outcome: "sent", herdrPane: "w1:p1", resumed: true });
+  const e = (await events.next()).value;
+  const p = e?.type === "snapshot" ? e.observation.pylons[0] : assert.fail(`a snapshot, not ${e?.type}`);
+  assert.deepEqual(p?.phase === "running" ? p.sessions?.map((f: { harnessSessionId: string | null }) => f.harnessSessionId) : assert.fail("the pylon runs"), [session], "the control plane sees the resumed session without waiting a minute");
+});
+
+test("a message for a Claude session is typed into its pane, and the result says how Claude took it", async (t) => {
+  const session = "0b5e3a52-5d0f-4c1e-9a43-1f2a6c7d8e90";
+  const guest = fakeGuest((argv, herdr) => {
+    if (!herdr) return argv[3] === "claude-type" ? { exitCode: 0, output: "" } : assert.fail(`unexpected exec ${argv.join(" ")}`);
+    const sub = argv.slice(0, 2).join(" ");
+    if (sub === "api snapshot") return herdrOk(herdrSnapshot([{ id: "w1", label: "Claude Code" }], [herdrPane("w1:p1", "w1", "claude", "working", { kind: "id", value: session })]));
+    if (sub === "pane process-info") return herdrOk({ type: "pane_process_info", process_info: { pane_id: "w1:p1", shell_pid: 100, foreground_processes: [{ pid: 101, name: "claude", argv: ["claude", "--resume", session] }] } });
+    throw new Error(`unscripted ${sub}`);
+  });
+  const { client } = await setup(t, {}, guest);
+  await running(client);
+  const text = "line one\n\"quoted\" `ticks` $HOME";
+  assert.deepEqual(await client.command(pylonId, { kind: "send-claude", session, text }), { kind: "send-claude", outcome: "queued", herdrPane: "w1:p1", resumed: false });
+  assert.deepEqual(guest.execs.find((a) => a[3] === "claude-type")!.slice(4), ["w1:p1", text]);
+  await assert.rejects(client.command(pylonId, { kind: "send-claude", session, text: "a\tb" }), /HTTP 400: .*Replace tabs with spaces/);
 });
 
 test("a failing command rejects with the guest's error", async (t) => {

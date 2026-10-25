@@ -496,8 +496,8 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
       const result = await (links ? betweenReads(() => runCommand(pylonId, command, deps)) : runCommand(pylonId, command, deps));
       if (result.kind === "link-port") relinked(pylonId, result.service);
       // A linked port is a new service that wants a preview, and an unlinked one a service gone, which the control plane sees in the next read.
-      // An opened or closed session is listed in it too.
-      if (links || command.kind === "open-session" || command.kind === "close-session") void publishSnapshot();
+      // An opened or closed session is listed in it too, as is one a message resumed.
+      if (links || command.kind === "open-session" || command.kind === "close-session" || (result.kind === "send-claude" && result.resumed)) void publishSnapshot();
       return send(res, 200, JSON.stringify(result), "application/json");
     }
     const artifactMatch = /^\/v1\/artifacts\/([^/]+)$/.exec(path);

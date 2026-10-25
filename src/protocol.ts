@@ -22,6 +22,7 @@ import { PassThrough, type Duplex, type Readable } from "node:stream";
 import { setTimeout as delay } from "node:timers/promises";
 import { localApiWhois, type Whois } from "./tailscale.ts";
 import { reservedPorts, type BootInputs, type LiveSpec, type SessionHarness } from "./project.ts";
+import { claudeTextProblem } from "./sessions.ts";
 import type { ArtifactManifest, CheckpointId, ImageId, ImageRecipe, PortableArtifactId, ArtifactId, TemplateBuildInputs, TemplateId } from "./images.ts";
 
 declare const brand: unique symbol;
@@ -230,6 +231,11 @@ export type PylonCommand =
   | { kind: "close-session"; herdrPane: string; session?: SessionIdentity }
   /** Forgets a failed session the last wake left in no pane, so no wake tries it again. */
   | { kind: "drop-failed-session"; id: string }
+  /**
+   * Types `text` into the Claude Code session `session` as a prompt and submits it, resuming the session first, under
+   * `model` if given, when no live pane runs it. `text` holds no control character but newlines (claudeTextProblem).
+   */
+  | { kind: "send-claude"; session: string; text: string; model?: string }
   | { kind: "service"; op: "ensure" | "restart" | "stop" | "logs"; name?: string; lines?: number }
   /** Previews a port that already listens, or will, as `nexus preview <port>` in the pylon does. Safe to repeat. */
   | { kind: "link-port"; port: number }
@@ -246,6 +252,15 @@ export type CommandResult =
   | { kind: "close-session"; outcome: "closed" | "not-open" | "moved" }
   /** `dropped` is false when the pylon holds no such failed session. */
   | { kind: "drop-failed-session"; dropped: boolean }
+  /**
+   * `sent`: Claude was idle, so the message starts a turn. `queued`: Claude was working, so Claude Code queues the message
+   * as it queues input typed during a turn, and takes it at its next tool boundary or after the turn. Both mean it was
+   * typed. `blocked`: Claude waits at a prompt in its terminal, such as a trust or permission dialog, which typing would
+   * answer. `starting`: Herdr could not yet tell Claude's state. Both mean nothing was typed, so the message can be sent
+   * again. A failed command may have typed part of the message, so the control plane never retries one on its own.
+   * `herdrPane` is the pane Claude runs in, and `resumed` says the session had no live pane and was resumed into it first.
+   */
+  | { kind: "send-claude"; outcome: "sent" | "queued" | "blocked" | "starting"; herdrPane: string; resumed: boolean }
   | { kind: "service"; services: readonly ServiceFact[]; logs?: string }
   /** The service the port is previewed under: `port-<port>`, or the service that already owns the port. */
   | { kind: "link-port"; service: string }
@@ -754,6 +769,14 @@ export function parsePylonCommand(body: string): PylonCommand {
     case "drop-failed-session":
       string(c.id, "command.id");
       break;
+    case "send-claude": {
+      if (typeof c.session !== "string" || !/^[A-Za-z0-9-]{1,200}$/.test(c.session)) throw new Error("command.session is not a Claude Code session ID");
+      if (string(c.text, "command.text").length > 16_384) throw new Error("command.text is longer than 16384 characters");
+      const problem = claudeTextProblem(c.text as string);
+      if (problem !== null) throw new Error(problem);
+      if (c.model !== undefined && string(c.model, "command.model").length > 200) throw new Error("command.model is longer than 200 characters");
+      break;
+    }
     case "service":
       if (!serviceOps.has(c.op)) throw new Error(`unknown service op ${JSON.stringify(c.op)}`);
       if (c.name !== undefined) string(c.name, "command.name");
@@ -770,6 +793,7 @@ export function parsePylonCommand(body: string): PylonCommand {
 }
 
 const closeOutcomes: ReadonlySet<unknown> = new Set(["closed", "not-open", "moved"] satisfies Extract<CommandResult, { kind: "close-session" }>["outcome"][]);
+const sendOutcomes: ReadonlySet<unknown> = new Set(["sent", "queued", "blocked", "starting"] satisfies Extract<CommandResult, { kind: "send-claude" }>["outcome"][]);
 function parseCommandResult(command: PylonCommand, body: string): CommandResult {
   const r = record(JSON.parse(body), "command result");
   if (r.kind !== command.kind) throw new Error(`a ${command.kind} command got a ${JSON.stringify(r.kind)} result`);
@@ -779,6 +803,11 @@ function parseCommandResult(command: PylonCommand, body: string): CommandResult 
     if (!closeOutcomes.has(r.outcome)) throw new Error(`unknown close outcome ${JSON.stringify(r.outcome)}`);
   }
   if (r.kind === "drop-failed-session" && typeof r.dropped !== "boolean") throw new Error("result.dropped is not a boolean");
+  if (r.kind === "send-claude") {
+    if (!sendOutcomes.has(r.outcome)) throw new Error(`unknown send outcome ${JSON.stringify(r.outcome)}`);
+    string(r.herdrPane, "result.herdrPane");
+    if (typeof r.resumed !== "boolean") throw new Error("result.resumed is not a boolean");
+  }
   if (r.kind === "link-port") string(r.service, "result.service");
   if (r.kind === "unlink-port" && r.refused !== null) string(r.refused, "result.refused");
   return r as unknown as CommandResult;

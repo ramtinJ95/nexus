@@ -15,9 +15,10 @@
  * what is missing, so it converges whatever Herdr restored first.
  */
 import { createHash, randomUUID } from "node:crypto";
+import { setTimeout as delay } from "node:timers/promises";
 import { seedClaudeState } from "./claude-state.ts";
 import type { Guest } from "./backend.ts";
-import type { HerdrStatus, PausedSession, SessionFact, SessionIdentity } from "./protocol.ts";
+import type { CommandResult, HerdrStatus, PausedSession, SessionFact, SessionIdentity } from "./protocol.ts";
 import type { SessionHarness } from "./project.ts";
 
 export const herdrSession = "nexus";
@@ -258,6 +259,95 @@ export async function closeSession(guest: Guest, herdrPane: string, expected?: S
     if (err instanceof HerdrError && (err.code === "pane_not_found" || err.code === "server_not_running")) return "not-open";
     throw err;
   }
+}
+
+/**
+ * Why `text` cannot be typed into Claude Code's prompt exactly as it is, for a person to act on, or null. A newline
+ * types a line break and Enter submits, so the only control character the prompt takes as typed is `\n`. A tab is
+ * swallowed, a carriage return would submit early, and an escape sequence would drive the terminal.
+ */
+export function claudeTextProblem(text: string): string | null {
+  if (!text.isWellFormed()) return "the message holds an unpaired UTF-16 surrogate, which is not text";
+  if (text.trim() === "") return "the message is blank, and Claude ignores a blank prompt";
+  const control = /[\x00-\x09\x0b-\x1f\x7f-\x9f]/.exec(text);
+  if (control === null) return null;
+  if (control[0] === "\t") return "the message holds a tab, which Claude's prompt swallows. Replace tabs with spaces";
+  if (control[0] === "\r") return "the message holds a carriage return, which would submit it early. End lines with a newline alone";
+  const code = control[0].charCodeAt(0).toString(16).toUpperCase().padStart(4, "0");
+  return `the message holds control character U+${code} at offset ${control.index}, which Claude's prompt cannot take as typed. Remove it`;
+}
+
+/** Claude Code takes a burst of typed input as a paste and wraps it in `<pasted_content>` tags, so text goes in chunks this short. */
+const typedChunkCodePoints = 64;
+const claudeReadyMs = 15_000;
+const claudeReadyPollMs = 250;
+/** Each chunk is a Herdr CLI call, and a 16 KB message is 256 of them. */
+const typeTimeoutMs = 30_000;
+
+/**
+ * Pane ID, then one argument per chunk. Arguments reach Herdr unparsed, so quotes, backticks and `$` are text, and
+ * `--` keeps a chunk that starts with `-` from reading as a flag. It stops at the first failure and says how far it got.
+ */
+const typeChunks = `pane=$1; shift; i=0
+for chunk; do
+  out=$(herdr --session ${herdrSession} pane send-text "$pane" -- "$chunk" 2>&1) || { printf '%s\\n' "$out"; echo "typed $i of $# chunks"; exit 1; }
+  i=$((i+1))
+done
+out=$(herdr --session ${herdrSession} pane send-keys "$pane" Enter 2>&1) || { printf '%s\\n' "$out"; echo "typed all $# chunks but not the Enter that submits them"; exit 1; }`;
+
+/**
+ * Types `message.text` into the Claude Code session `message.session` as a prompt and submits it, as a person at its
+ * terminal would. A session in no live pane is resumed first, under `message.model` if given. The text goes in
+ * exactly as typed, so a leading `!` runs it as a shell command and a leading `/` as a slash command, and text a
+ * person has half-typed in an attached terminal is joined to it. The prompt is not cleared first, because Esc
+ * interrupts Claude and Ctrl+C can exit it.
+ *
+ * Claude typing nothing is an outcome: `blocked` when Claude waits at a dialog in its terminal, which typing would
+ * answer, and `starting` when Herdr still cannot tell Claude's state after `readyWithinMs`. A rejection may come after
+ * part of the text was typed.
+ */
+export async function sendToClaude(guest: Guest, message: { session: string; text: string; model?: string }, readyWithinMs = claudeReadyMs): Promise<Omit<Extract<CommandResult, { kind: "send-claude" }>, "kind">> {
+  const found = await claudePane(guest, message.session);
+  const resumed = found?.runs !== true;
+  const herdrPane = found?.pane.herdrPane ?? await openSession(guest, { harness: "claude-code", title: "Claude Code", cwd: checkoutDir, resume: message.session, ...(message.model === undefined ? {} : { model: message.model }) });
+  // A pane whose Claude exited still reports the session. Starting it there, as a relaunch does, keeps the session in one pane.
+  if (found?.runs === false) await startHarness(guest, herdrPane, "claude-code", message.session, undefined, message.model);
+  let status = found?.runs ? found.pane.status : await paneStatus(guest, herdrPane);
+  for (const deadline = Date.now() + readyWithinMs; status === "unknown" && Date.now() < deadline;) {
+    await delay(claudeReadyPollMs);
+    status = await paneStatus(guest, herdrPane);
+  }
+  if (status === "blocked" || status === "unknown") return { outcome: status === "blocked" ? "blocked" : "starting", herdrPane, resumed };
+  const chunks: string[] = [];
+  const points = Array.from(message.text);
+  for (let i = 0; i < points.length; i += typedChunkCodePoints) chunks.push(points.slice(i, i + typedChunkCodePoints).join(""));
+  const typed = await guest.exec(["sh", "-c", typeChunks, "claude-type", herdrPane, ...chunks], { cwd: home, timeoutMs: typeTimeoutMs });
+  if (typed.exitCode === null) throw new Error(`typing into Claude's pane ${herdrPane} did not finish within ${typeTimeoutMs / 1000} seconds, so part of the message may sit unsent in its prompt`);
+  if (typed.exitCode !== 0) throw new Error(`typing into Claude's pane ${herdrPane} failed, so part of the message may sit unsent in its prompt: ${typed.output.trim().slice(-500)}`);
+  return { outcome: status === "working" ? "queued" : "sent", herdrPane, resumed };
+}
+
+/**
+ * The Claude Code pane that runs `session`, by Herdr's report of its ID or, for a pane Herdr has none for, by its
+ * command line. `runs` is false for a pane that reports the session but whose Claude has exited to the shell.
+ */
+async function claudePane(guest: Guest, session: string): Promise<{ pane: LivePane; runs: boolean } | null> {
+  const claude = (await livePanes(guest).catch(noServer([]))).filter((p) => p.harness === "claude-code");
+  let exited: LivePane | undefined;
+  for (const pane of claude.filter((p) => p.harnessSessionId === session)) {
+    if (await runsAgent(guest, pane.herdrPane, agents["claude-code"]!.kind)) return { pane, runs: true };
+    exited ??= pane;
+  }
+  for (const pane of claude.filter((p) => p.harnessSessionId === null)) {
+    if (await launchedClaudeSession(guest, pane.herdrPane) === session) return { pane, runs: true };
+  }
+  return exited ? { pane: exited, runs: false } : null;
+}
+
+async function paneStatus(guest: Guest, herdrPane: string): Promise<HerdrStatus> {
+  const pane = (await livePanes(guest)).find((p) => p.herdrPane === herdrPane);
+  if (pane === undefined) throw new Error(`Claude's pane ${herdrPane} closed before it could take the message, so nothing was typed`);
+  return pane.status;
 }
 
 /** Forgets a failed session in no pane, by its ID, so no wake tries it again. False when the file holds no such session. */
