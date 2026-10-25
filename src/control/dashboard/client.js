@@ -594,8 +594,12 @@ async function readChanges(wake = false) {
       if (base !== checkout.base) return;
       // The thread closed while the read was out, so the closing, not the failure it caused, is what to show.
       if (threadClosed(factsNow())) return changesUnreadable(factsNow());
-      // A paused pylon answers 409 while the read wakes it.
-      if (err.status === 409 && checkout.wanted && factsNow()?.pylon !== "running") return changesUnreadable(factsNow());
+      // A pylon that is not running answers 409 while the read wakes it, even one the page still shows running, as
+      // the page's state lags the node's. So the read happens again once the page shows it running.
+      if (err.status === 409) {
+        checkout.wanted = true;
+        return changesUnreadable(factsNow());
+      }
       checkout.changes = null;
       showChanges(el("p", { className: "error", textContent: err.message }));
     } finally {
@@ -671,8 +675,8 @@ function renderChanges() {
 }
 
 /**
- * Reads again when the pylon starts running, and when its agent was active since the last look and no turn is
- * running now, so a turn that began and ended between two polls is read too.
+ * Reads again when the pylon starts running or runs while a read waits on its wake, and when its agent was active
+ * since the last look and no turn is running now, so a turn that began and ended between two polls is read too.
  */
 function noticeFacts() {
   const before = checkout.facts;
@@ -683,7 +687,7 @@ function noticeFacts() {
   const agentDone = !now.turn && (before.turn || now.agentAt !== before.agentAt);
   // An unarchive can land before the pylon pauses, so no start follows to read again.
   const reopened = threadClosed(before) && !threadClosed(now);
-  if ((started && (checkout.wanted || checkout.changes === null)) || ((agentDone || reopened) && canRead(now))) void readChanges();
+  if ((started && checkout.changes === null) || ((checkout.wanted || agentDone || reopened) && canRead(now))) void readChanges();
   else if (!canRead(now) && (checkout.changes === null || threadClosed(now))) changesUnreadable(now);
 }
 
