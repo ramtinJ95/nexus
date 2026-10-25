@@ -28,14 +28,21 @@ export function processTty(): Tty {
   };
 }
 
+/**
+ * Leaves the alternate screen and turns the cursor back on, and mouse reports, focus reports, bracketed paste and
+ * the kitty keyboard protocol off. Herdr does this when it detaches, but not when the link drops under it, and
+ * without it the shell after attach would read mouse moves and keys as escape sequences.
+ */
+const screenReset = "\x1b[?1049l\x1b[?25h\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1006l\x1b[?1004l\x1b[?2004l\x1b[<u";
+
 /** Signals that end an attach from outside, such as a closed terminal window. Each exits 128 plus its number. */
 const signals = { SIGHUP: 1, SIGTERM: 15 } as const;
 
 /**
  * Resolves when Herdr exits 0, which is its own detach, and throws a CliError on every other end. Raw mode starts
- * at `attached`, so Ctrl-C still quits while the pylon wakes.
+ * at `attached`, so Ctrl-C still quits while the pylon wakes. `connect` gives a paused WebSocket to the API, as
+ * transport.upgrade does.
  */
-/** `connect` gives a paused WebSocket to the API, as transport.upgrade does. */
 export async function attachTerminal(connect: (path: string) => Promise<WebSocket>, thread: string, tty: Tty): Promise<void> {
   const { input, output } = tty;
   if (input.isTTY !== true || output.isTTY !== true) throw new CliError("invalid", "attach needs a terminal, and stdin or stdout is not one");
@@ -49,10 +56,13 @@ export async function attachTerminal(connect: (path: string) => Promise<WebSocke
   const ws = await connect(attachPath(thread, { size: size(), term: termOf(tty.term) }));
 
   let raw = false;
+  /** Whether Herdr ended the attach itself, and so put back the screen modes it set. */
+  let clean = false;
   /** Puts the terminal back as it was. Safe to repeat, and also run when the process exits. */
   const restore = () => {
     if (!raw) return;
     raw = false;
+    if (!clean) output.write(screenReset);
     input.setRawMode(false);
   };
   const onResize = () => {
@@ -102,6 +112,7 @@ export async function attachTerminal(connect: (path: string) => Promise<WebSocke
           return;
         }
         final = message;
+        clean = message.type === "exit" && message.code === 0;
       });
       ws.resume();
     });

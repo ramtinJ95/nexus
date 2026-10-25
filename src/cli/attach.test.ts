@@ -88,7 +88,7 @@ test("attach says each state the pylon waits in, then gives it the terminal raw,
   assert.equal(t.input.isPaused(), true, "stdin stops being read, so the process can exit");
 });
 
-test("every other end is a CliError of its own kind, and puts the terminal back", async () => {
+test("every other end is a CliError of its own kind, and puts the terminal and its screen modes back", async () => {
   const ends: [ServerMessage | "drop" | "garbage", (err: unknown) => boolean][] = [
     [{ type: "exit", code: 3 }, kindOf("failed", /^Herdr in the pylon of th-0123456789ab exited 3$/)],
     [{ type: "error", kind: "conflict", message: "thread th-0123456789ab is deleted" }, kindOf("conflict", /^thread th-0123456789ab is deleted$/)],
@@ -110,6 +110,7 @@ test("every other end is a CliError of its own kind, and puts the terminal back"
     }
     await assert.rejects(attaching, expected, JSON.stringify(end));
     assert.deepEqual(t.modes, [true, false], `restored after ${JSON.stringify(end)}`);
+    assert.ok(t.written.at(-1)?.startsWith("\x1b[?1049l"), `the screen modes Herdr set are reset after ${JSON.stringify(end)}, because Herdr did not`);
   }
 });
 

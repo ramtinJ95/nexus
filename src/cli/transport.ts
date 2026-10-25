@@ -123,10 +123,10 @@ export async function follow(endpoint: Endpoint, path: string, onEvent: (data: u
 }
 
 /**
- * Opens a WebSocket to the API over the same direct or SOCKS connection as `call`, paused until the caller resumes it. A refused handshake rejects as
- * `call` does. A 404 that names no route is a control plane older than the route. The server's pings keep the idle
- * timeout from firing, so a link that hangs still fails, and the socket's own error, such as that timeout, is what
- * the WebSocket's `error` event carries.
+ * Opens a WebSocket to the API over the same direct or SOCKS connection as `call`, paused until the caller resumes
+ * it. A refused handshake rejects as `call` does. A 404 that names no route is a control plane older than the route.
+ * The server's pings keep the idle timeout from firing, so a link that hangs still fails, and the socket's own
+ * error, such as that timeout, is what the WebSocket's `error` event carries.
  */
 export async function upgrade(endpoint: Endpoint, path: string): Promise<WebSocket> {
   const socket = await open(endpoint);
