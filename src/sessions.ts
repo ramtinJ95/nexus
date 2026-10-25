@@ -30,6 +30,7 @@ const agentStartTimeoutMs = 30_000;
 const serverStartMs = 5_000;
 /** pi-shepherdr's launch.ts: a new pane's shell can still be starting when the first agent start lands. */
 const paneBusyRetryMs = 3_000;
+const shellPromptMs = 10_000;
 
 /**
  * The agent each harness starts in its pane: Herdr's agent kind, the launch arguments that resume a harness
@@ -153,6 +154,7 @@ async function startHarness(guest: Guest, pane: string, harness: SessionHarness,
     const receipt = `${home}/.nexus/claude-submitted-${randomUUID()}`;
     const command = `mkdir -p ${home}/.nexus && touch ${receipt}`;
     launch.push("--settings", JSON.stringify({ hooks: { UserPromptSubmit: [{ hooks: [{ type: "command", command }] }] } }), prompt);
+    await awaitShellPrompt(guest, pane);
     // Herdr 0.9.5's agent start refuses an argument holding a newline or another control character, as a multi-line
     // prompt does, so this launch types its own command. Once typed, any error is as uncertain as a readiness timeout:
     // the receipt decides, and the pane and the submission fence stay.
@@ -191,6 +193,22 @@ async function startHarness(guest: Guest, pane: string, harness: SessionHarness,
     }
   }
 }
+
+/**
+ * Waits until the pane's shell reads a line with readline: its process group holds the terminal, which is out of
+ * canonical mode. Before that, as while bash runs its startup files, the terminal's line discipline holds typed input
+ * and drops a line past its 4 KB limit, as a long first prompt makes. Throws before anything is typed, so the caller
+ * can roll the pane back.
+ */
+async function awaitShellPrompt(guest: Guest, pane: string): Promise<void> {
+  const shell = record(record(await herdr(guest, ["pane", "process-info", "--pane", pane]), "pane process-info").process_info, "process_info").shell_pid;
+  if (typeof shell !== "number") throw new Error(`Herdr pane ${pane} reports no shell_pid`);
+  const ready = await guest.exec(["sh", "-c", shellPrompt, "shell-ready", String(shell)], { cwd: home, timeoutMs: shellPromptMs + callTimeoutMs });
+  if (ready.exitCode !== 0) throw new Error(`the pane's shell did not reach an idle prompt within ${shellPromptMs / 1000} seconds, so the Claude launch was not typed. The pane showed:\n${await screen(guest, pane)}`);
+}
+
+/** Polls `$1`, the shell's PID: field 8 of its stat is the terminal's foreground process group. */
+const shellPrompt = `pid=$1; i=0; until s=$(cat /proc/$pid/stat) && set -- \${s##*) } && test "$6" = "$pid" && stty -a -F /proc/$pid/fd/0 | grep -q -- -icanon; do i=$((i+1)); test "$i" -lt ${shellPromptMs / 100} || exit 1; sleep 0.1; done`;
 
 /**
  * `arg` as one bash word, typed into the pane's shell. ANSI-C quoting spells control characters, `'` and `!` as
