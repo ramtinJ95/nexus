@@ -1049,3 +1049,23 @@ test("a submission receipt wins over a late launch error without a contradictory
   assert.equal(registry.events().some((e) => e.kind === "thread.failed"), false);
   assert.equal(registry.events().filter((e) => e.kind === "attention.changed").at(-1)?.payload.attention, "working");
 });
+
+test("a failed launch persists the same diagnostic it publishes and never resubmits", async (t) => {
+  const registry = openRegistry(tempDb());
+  const thread = seed(registry);
+  registry.setClaudeWorker(thread.id, "hello", "pending");
+  const fake = fakeNode({ autoFinish: true });
+  let launches = 0;
+  const probe: ProbeClient = { ...fake.probe, command: async () => {
+    launches++;
+    throw new Error("seeding Claude state failed: invalid JSON");
+  } };
+  const loop = run(t, registry, probe, { log: () => {} });
+  await until("worker failed", () => registry.claudeWorker(thread.id)?.state === "failed");
+  await loop.wake(node);
+  assert.equal(launches, 1);
+  const worker = registry.claudeWorker(thread.id)!;
+  assert.match(worker.message!, /seeding Claude state failed: invalid JSON/);
+  assert.equal(registry.events().filter((e) => e.kind === "thread.failed").at(-1)?.payload.message, worker.message);
+  assert.equal(registry.events().filter((e) => e.kind === "attention.changed").at(-1)?.payload.attention, "failed");
+});
