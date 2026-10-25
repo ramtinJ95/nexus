@@ -1544,3 +1544,26 @@ test("grant comparison ignores order and duplicates but detects changed access",
     assert.equal(await outdated(), true);
   }
 });
+
+test("project add and edit refuse duplicate secret names instead of merging their grants", async (t) => {
+  const s = await withThread(t);
+  const before = s.registry.project(project.id as ProjectId);
+  for (const hosts of [["b.example"], ["a.example"]]) {
+    const secrets = [{ name: "TOKEN", hosts: ["a.example"] }, { name: "TOKEN", hosts }];
+    const added = await s.call("POST", "/v1/projects", { ...project, id: "duplicate", secrets });
+    assert.equal(added.status, 400);
+    assert.match(added.body.error, /duplicate secret names: list all of a secret's hosts in one grant/);
+    assert.equal(s.registry.project("duplicate" as ProjectId), undefined);
+    const edited = await s.call("PATCH", "/v1/projects/acme", { secrets, resources: { cpus: 16 } });
+    assert.equal(edited.status, 400);
+    assert.match(edited.body.error, /duplicate secret names: list all of a secret's hosts in one grant/);
+    assert.deepEqual(s.registry.project(project.id as ProjectId), before);
+  }
+  const secrets = [{ name: "TOKEN", hosts: ["a.example", "b.example"] }];
+  const added = await s.call("POST", "/v1/projects", { ...project, id: "combined", secrets });
+  assert.equal(added.status, 201);
+  assert.deepEqual(added.body.secrets, secrets);
+  const edited = await s.call("PATCH", "/v1/projects/acme", { secrets });
+  assert.equal(edited.status, 200);
+  assert.deepEqual(edited.body.secrets, secrets);
+});

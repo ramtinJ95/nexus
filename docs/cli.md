@@ -308,7 +308,7 @@ nexus project edit nexus --login claude --secret GH_TOKEN:api.github.com,github.
 nexus project edit nexus --git-name "Example Person" --git-email person@example.com
 ```
 
-These examples do not install secret values: the person must provision `CLAUDE_CODE_OAUTH_TOKEN` in the chosen node's secret file. Grant hosts must be explicit hostnames, never wildcards or an empty list. Add and edit share API validation. A missing project returns 404 (CLI exit 4), invalid settings or immutable fields return 400 (exit 64), and callers outside normal API admission are refused with 403 (exit 3).
+These examples do not install secret values: the person must provision `CLAUDE_CODE_OAUTH_TOKEN` in the chosen node's secret file. Grant hosts must be explicit hostnames, never wildcards or an empty list. Secret names must be unique: list all of a secret’s hosts in one grant. Both add and edit refuse duplicate names with exit 64 (API 400). Add and edit share API validation. A missing project returns 404 (CLI exit 4), invalid settings or immutable fields return 400 (exit 64), and callers outside normal API admission are refused with 403 (exit 3).
 
 The PATCH object accepts optional `defaultNode`, `defaultBranch`, `resources` (any of the positive integer fields `cpus`, `memoryGiB`, `diskGiB`; omitted fields stay unchanged), `allowedHosts`, `logins`, `secrets`, and `gitIdentity` (`{name, email}` or null). Edits merge atomically with the stored project, including each resource field independently. It rejects `id`, `repoUrl`, `preSetup` and unknown fields. Names must be nonempty single lines and email addresses valid. `project add` also accepts the optional identity through its API.
 

@@ -1028,3 +1028,24 @@ test("concurrent project edits preserve independently changed resources", async 
   const projects = await s.json(["projects"]);
   assert.deepEqual(projects.find((p: Project) => p.id === "concurrent").resources, { cpus: 4, memoryGiB: 8, diskGiB: 10 });
 });
+
+test("project add and edit exit 64 for duplicate secret names and explain how to combine hosts", async (t) => {
+  const s = await setup(t);
+  const before = s.registry.project(project.id);
+  for (const args of [
+    ["project", "add", "duplicate", "--scratch", "--node", node],
+    ["project", "edit", project.id],
+  ]) {
+    const result = await s.nexus([...args, "--secret", "TOKEN:a.example", "--secret", "TOKEN:b.example", "--json"]);
+    assert.equal(result.code, 64);
+    const error = JSON.parse(result.stderr);
+    assert.equal(error.status, 400);
+    assert.match(error.error, /duplicate secret names: list all of a secret's hosts in one grant/);
+  }
+  assert.equal(s.registry.project("duplicate" as ProjectId), undefined);
+  assert.deepEqual(s.registry.project(project.id), before);
+  const added = await s.json(["project", "add", "combined", "--scratch", "--node", node, "--secret", "TOKEN:a.example,b.example"]);
+  assert.deepEqual(added.secrets, [{ name: "TOKEN", hosts: ["a.example", "b.example"] }]);
+  const edited = await s.json(["project", "edit", project.id, "--secret", "TOKEN:a.example,b.example"]);
+  assert.deepEqual(edited.secrets, added.secrets);
+});
