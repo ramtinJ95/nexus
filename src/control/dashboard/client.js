@@ -600,6 +600,8 @@ async function readChanges(wake = false) {
         checkout.wanted = true;
         return changesUnreadable(factsNow());
       }
+      // Any other failure is the answer, so no read waits on a wake any more.
+      checkout.wanted = false;
       checkout.changes = null;
       showChanges(el("p", { className: "error", textContent: err.message }));
     } finally {
