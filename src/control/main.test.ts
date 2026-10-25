@@ -23,3 +23,11 @@ test("preview ports default to 10200 to 10999, and a range that ends before it s
   assert.deepEqual(parseConfig(JSON.stringify(rest)).previewPorts, { first: 10200, last: 10999 });
   assert.throws(() => parseConfig(JSON.stringify({ ...rest, previewPorts: { first: 10300, last: 10200 } })), /first must not be above last/);
 });
+
+test("GitHub watching is opt-in and accepts only a token file path, never a token in config", () => {
+  const config = JSON.parse(example);
+  assert.equal(parseConfig(example).github, undefined);
+  assert.deepEqual(parseConfig(JSON.stringify({ ...config, github: { tokenFile: "/etc/nexus/github-token" } })).github, { tokenFile: "/etc/nexus/github-token" });
+  assert.throws(() => parseConfig(JSON.stringify({ ...config, github: { tokenFile: "relative" } })), /absolute path/);
+  assert.throws(() => parseConfig(JSON.stringify({ ...config, github: { token: "secret" } })), /invalid control plane config/);
+});

@@ -5,6 +5,7 @@
  * Nested values (a project's hosts, a pylon's boot inputs, an observation) are stored as JSON columns. Only
  * the control plane reads them, always whole, so they need no columns of their own.
  */
+import type { PrWatchState } from "./pr-watch.ts";
 import { DatabaseSync } from "node:sqlite";
 import type { ActivityFacts, RegistryWrite, ThreadStatus } from "../reconcile.ts";
 import type { HerdrStatus, JobStatus, NodeName, NodeObservation, PylonId, Subject, TailnetNodeId } from "../protocol.ts";
@@ -61,7 +62,7 @@ export type Session = { pylon: PylonId; id: string; harness: SessionHarness; har
 export interface Preview { pylon: PylonId; service: string; httpsPort: number; ready: boolean; failed: string | null; url: string }
 /** The https ports a node's previews are published on, both ends included. */
 export interface PortRange { first: number; last: number }
-export interface Output { thread: ThreadId; kind: Extract<RegistryWrite, { record: "output" }>["kind"]; ref: string }
+export interface Output { thread: ThreadId; kind: Extract<RegistryWrite, { record: "output" }>["kind"] | "pull-request"; ref: string }
 export interface Orphan { node: NodeName; pylonId: PylonId }
 
 /** Applied in order. The database's user_version counts the ones already applied. Never edit one that has shipped. */
@@ -199,6 +200,7 @@ const migrations: readonly string[] = [
   `,
   `ALTER TABLE threads ADD COLUMN seen_at INTEGER;
    ALTER TABLE threads ADD COLUMN last_reply_at INTEGER;`,
+  `CREATE TABLE pr_watches (thread TEXT PRIMARY KEY REFERENCES threads (id), record TEXT NOT NULL) STRICT;`,
 ];
 
 type Row = Record<string, unknown>;
@@ -365,6 +367,13 @@ export function openRegistry(path: string) {
 
   return {
     close() { db.close(); },
+    prWatch(thread: ThreadId): PrWatchState | null {
+      const row = db.prepare("SELECT record FROM pr_watches WHERE thread = ?").get(thread) as Row | undefined;
+      return row ? json<PrWatchState>(row.record) : null;
+    },
+    savePrWatch(thread: ThreadId, state: PrWatchState) {
+      db.prepare("INSERT INTO pr_watches (thread, record) VALUES (?, ?) ON CONFLICT (thread) DO UPDATE SET record = excluded.record").run(thread, JSON.stringify(state));
+    },
 
     /** Nodes come from the config file. Their state and capacity come from observations. */
     upsertNode(node: Pick<NodeRecord, "name" | "tailnetHost" | "tailnetNodeId">) { q.upsertNode.run(node.name, node.tailnetHost, node.tailnetNodeId); },
@@ -460,9 +469,13 @@ export function openRegistry(path: string) {
     /** Drops one service's preview, such as an unlinked port's, and frees its port. A service with none is left as it is. */
     releasePreview(pylonId: PylonId, service: string) { q.deletePreview.run(pylonId, service); },
     previews,
-    outputs: (thread: ThreadId) => (q.outputs.all(thread) as Row[]).map((r): Output => ({
-      thread: r.thread as ThreadId, kind: r.kind as Output["kind"], ref: r.ref as string,
-    })),
+    outputs(thread: ThreadId): Output[] {
+      const row = db.prepare("SELECT record FROM pr_watches WHERE thread = ?").get(thread) as Row | undefined;
+      return [
+        ...(q.outputs.all(thread) as Row[]).map((r): Output => ({ thread, kind: r.kind as Output["kind"], ref: r.ref as string })),
+        ...(row ? json<PrWatchState>(row.record).links.filter((l) => l.pr.url !== "").map((l): Output => ({ thread, kind: "pull-request", ref: l.pr.url })) : []),
+      ];
+    },
     orphans: () => (q.orphans.all() as Row[]).map((r): Orphan => ({ node: r.node as NodeName, pylonId: r.pylon_id as PylonId })),
 
     /** The latest job the node reported for a pylon or an artifact. */
