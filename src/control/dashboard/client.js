@@ -13,9 +13,9 @@ const projectDialog = document.getElementById("project-dialog");
 const filter = document.getElementById("filter");
 
 /** Sends JSON as the API requires, and throws the API's error message. */
-async function api(method, path, body) {
+async function api(method, path, body, signal) {
   const res = await fetch(path, {
-    method,
+    method, signal,
     headers: { "content-type": "application/json" },
     body: body === undefined ? undefined : JSON.stringify(body),
   });
@@ -930,7 +930,7 @@ async function pollAttention() {
   if (attentionPolling) return;
   attentionPolling = true;
   try {
-    const rows = (await api("GET", "/v1/threads")).filter((row) => row.status !== "deleted");
+    const rows = (await api("GET", "/v1/threads", undefined, AbortSignal.timeout(10_000))).filter((row) => row.status !== "deleted");
     notifications(rows, Date.now());
     const count = badgeCount(rows);
     document.title = `${count ? `(${badgeText(count)}) ` : ""}Nexus`;
@@ -939,7 +939,7 @@ async function pollAttention() {
     const id = currentThread();
     if (id && focused() && activeTab === null && document.getElementById("convo") && !document.querySelector("#convo .error") && Date.now() - lastSeen >= 3000) {
       lastSeen = Date.now();
-      await api("POST", `/v1/threads/${id}/seen`, seenBody(document.getElementById("convo")));
+      await api("POST", `/v1/threads/${id}/seen`, seenBody(document.getElementById("convo")), AbortSignal.timeout(10_000));
     }
   } catch { /* The page's refresh reports connection failures. */ }
   finally { attentionPolling = false; }

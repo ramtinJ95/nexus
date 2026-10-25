@@ -82,3 +82,63 @@ test("seen payload stays at the rendered reply while attention polls find newer 
   assert.deepEqual(seenBody(null), { lastReplyAt: null });
   assert.deepEqual(seenBody({ dataset: { renderedReplyAt: "" } }), { lastReplyAt: null });
 });
+
+test("stalled attention requests time out, release the poll lock and retry", async (t) => {
+  const { readFile } = await import("node:fs/promises");
+  const { runInNewContext } = await import("node:vm");
+  const client = await readFile(new URL("./client.js", import.meta.url), "utf8");
+  const api = client.slice(client.indexOf("async function api("), client.indexOf("\nfunction showError("));
+  const polling = client.slice(client.indexOf("let attentionPolling ="), client.indexOf("\nvoid pollAttention();"));
+  for (const method of ["GET", "POST"]) for (const phase of ["headers", "body"]) {
+    await t.test(`${method} stalled at ${phase}`, async () => {
+      let now = 10_000;
+      let stall = true;
+      const requests = [];
+      const updates = [];
+      const timeouts = [];
+      const favicon = {};
+      const conversation = { dataset: { renderedReplyAt: "1000" } };
+      const waitForAbort = (signal) => new Promise((resolve, reject) => {
+        signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+      });
+      const poll = runInNewContext(`${api}\n${polling}\npollAttention`, {
+        AbortSignal: { timeout(ms) { timeouts.push(ms); return AbortSignal.timeout(20); } },
+        Date: { now: () => now },
+        fetch: async (path, options) => {
+          requests.push(options.method);
+          assert.ok(options.signal, "each request has a deadline");
+          const stuck = stall && options.method === method;
+          if (stuck && phase === "headers") return waitForAbort(options.signal);
+          return {
+            ok: true,
+            text: () => stuck ? waitForAbort(options.signal) : Promise.resolve(options.method === "GET" ? '[{"id":"t1","attention":"reply"}]' : ""),
+          };
+        },
+        document: {
+          getElementById: () => conversation,
+          querySelector: (selector) => selector === 'link[rel="icon"]' ? favicon : null,
+        },
+        notifications: (rows) => updates.push(rows),
+        badgeCount, badgeText, seenBody,
+        currentThread: () => "t1", focused: () => true, activeTab: null,
+      });
+      // AbortSignal's timer is unref'ed in Node; keep this simulated browser alive until it fires.
+      const keepAlive = setInterval(() => {}, 1000);
+      try {
+        const first = poll();
+        await poll();
+        await first;
+        assert.deepEqual(requests, method === "GET" ? ["GET"] : ["GET", "POST"], "overlapping polls are suppressed");
+        stall = false;
+        now += 4000;
+        await poll();
+        assert.deepEqual(requests.slice(-2), ["GET", "POST"], "the recovered poll lists threads and marks seen");
+        assert.equal(updates.length, method === "GET" ? 1 : 2);
+        assert.ok(favicon.href.startsWith("data:image/svg+xml,"), "badges recover too");
+        assert.ok(timeouts.every((ms) => ms === 10_000));
+      } finally {
+        clearInterval(keepAlive);
+      }
+    });
+  }
+});
