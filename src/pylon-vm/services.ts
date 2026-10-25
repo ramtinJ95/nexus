@@ -369,28 +369,8 @@ export class GuestServices {
 			return serviceRunning(this.vm, name);
 		return this.answers(entry.port, entry.service.health);
 	}
-	/**
-	 * Asks the port itself in the guest, on 127.0.0.1 or else `::1`, the two addresses the relay carries to, and with a
-	 * path, whether it answers that with a 2xx or 3xx. Never through the relay, so a relay port that listens while the
-	 * service does not cannot make it ready.
-	 */
 	private async answers(port: number, path?: string): Promise<boolean> {
-		const script = [
-			"import http.client,socket,sys",
-			"port=int(sys.argv[1]); path=sys.argv[2] if len(sys.argv)>2 else None",
-			"def up(family,host):",
-			" try:",
-			"  with socket.socket(family) as s: s.settimeout(1); return s.connect_ex((host,port))==0",
-			" except OSError: return False",
-			"host=next((h for f,h in ((socket.AF_INET,'127.0.0.1'),(socket.AF_INET6,'::1')) if up(f,h)),None)",
-			"ok=host is not None",
-			"if ok and path:",
-			" try:",
-			"  c=http.client.HTTPConnection(host,port,timeout=2); c.request('GET',path); ok=200<=c.getresponse().status<400",
-			" except (OSError,http.client.HTTPException): ok=False",
-			"print(ok)",
-		].join("\n");
-		return (await checked(this.vm, `python3 -c ${q(script)} ${port}${path === undefined ? "" : ` ${q(path)}`}`)).trim() === "True";
+		return (await checked(this.vm, `python3 -c ${q(answersScript)} ${port}${path === undefined ? "" : ` ${q(path)}`}`)).trim() === "True";
 	}
 	/** The env and PUBLIC_URL a start gives the service. Throws while a URL it needs is unassigned. */
 	private environment(name: string, entry: Entry): { env: Record<string, string>; url: string | undefined } {
@@ -648,5 +628,28 @@ export class GuestServices {
 		for (const name of this.entries.keys()) await stopService(this.vm, name);
 	}
 }
+
+/**
+ * argv: a port, then optionally a path. Prints whether the port listens on 127.0.0.1, or else `::1`, the two addresses
+ * the relay carries to, and with a path, whether it answers a GET of it with a 2xx or 3xx, all within 2 s. It asks the
+ * port itself, never through the relay, so a relay port that listens while the service does not cannot make it ready.
+ */
+export const answersScript = [
+	"import http.client,os,signal,socket,sys",
+	"def late(*_): sys.stdout.write('False\\n'); sys.stdout.flush(); os._exit(0)",
+	"signal.signal(signal.SIGALRM,late); signal.setitimer(signal.ITIMER_REAL,2)",
+	"port=int(sys.argv[1]); path=sys.argv[2] if len(sys.argv)>2 else None",
+	"def up(family,host):",
+	" try:",
+	"  with socket.socket(family) as s: s.settimeout(1); return s.connect_ex((host,port))==0",
+	" except OSError: return False",
+	"host=next((h for f,h in ((socket.AF_INET,'127.0.0.1'),(socket.AF_INET6,'::1')) if up(f,h)),None)",
+	"ok=host is not None",
+	"if ok and path:",
+	" try:",
+	"  c=http.client.HTTPConnection(host,port,timeout=2); c.request('GET',path); ok=200<=c.getresponse().status<400",
+	" except (OSError,http.client.HTTPException): ok=False",
+	"print(ok)",
+].join("\n");
 
 const wantsPreview = (service: Service) => !!service.preview || service.previews.length > 0;

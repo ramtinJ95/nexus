@@ -4,11 +4,14 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { VM } from "@earendil-works/gondolin";
+import { execFile } from "node:child_process";
+import { createServer as createHttpServer, type Server } from "node:http";
+import { createServer as createTcpServer } from "node:net";
 import type { Writable } from "node:stream";
 import { setTimeout as delay } from "node:timers/promises";
 import { configSchema, type BootSpec, type SandboxRecord } from "./contracts.ts";
 import { lifecycleQueue, SandboxRuntime } from "./runtime.ts";
-import { GuestServices } from "./services.ts";
+import { answersScript, GuestServices } from "./services.ts";
 
 /**
  * A VM whose ingress is never dialled here, the prefixes of the routes set on it and the port each points at, and the
@@ -353,4 +356,58 @@ test("an unpreview sent to the controller during an ensure of a service that nev
 	assert.deepEqual(((await ensure) as { state: string }[]).map((f) => f.state), ["starting"]);
 	assert.deepEqual(await unpreview, { refused: "Port 3000 is the preview of service web, not a linked port. Remove the preview from /workspace/repo/.nexus/services.yaml to unpublish it" });
 	assert.ok(Date.now() - began < 5000, "neither waited for the service's 30 s timeout");
+});
+
+/** What the guest's health check prints for the port, and the path if given, and how long it took. */
+function answers(port: number, path?: string): Promise<{ answer: string; ms: number }> {
+	const began = Date.now();
+	return new Promise((accept, reject) =>
+		execFile("python3", ["-c", answersScript, String(port), ...(path === undefined ? [] : [path])], (error, stdout) =>
+			error ? reject(error) : accept({ answer: stdout.trim(), ms: Date.now() - began })),
+	);
+}
+/** Answers 200, 302 or 503 by path, and 421 to a Host that is not its own address, as Vite's host check would. */
+async function healthServer(host: string): Promise<Server & { port: number; hosts: string[] }> {
+	const hosts: string[] = [];
+	const server = createHttpServer((req, res) => {
+		hosts.push(req.headers.host ?? "");
+		const own = host.includes(":") ? `[${host}]:${port}` : `${host}:${port}`;
+		res.statusCode = req.headers.host !== own ? 421 : req.url === "/ok" ? 200 : req.url === "/moved" ? 302 : 503;
+		res.end();
+	});
+	await new Promise<void>((accept, reject) => server.once("error", reject).listen(0, host, accept));
+	const port = (server.address() as { port: number }).port;
+	return Object.assign(server, { port, hosts });
+}
+
+test("the health check asks the port itself on 127.0.0.1 or else ::1, as its own Host, wants a 2xx or 3xx, and gives up after 2 s in all", async (t) => {
+	const v6 = await healthServer("::1");
+	const v4 = await healthServer("127.0.0.1");
+	// Sends its status line a byte at a time, each well within a socket timeout, and never finishes.
+	const trickle = createTcpServer((socket) => {
+		const bytes = Buffer.from("HTTP/1.1 200 OK\r\nX-Slow: " + "y".repeat(100));
+		let sent = 0;
+		const timer = setInterval(() => sent < bytes.length ? socket.write(bytes.subarray(sent, ++sent)) : socket.end(), 300);
+		socket.on("close", () => clearInterval(timer)).on("error", () => {});
+	});
+	await new Promise<void>((accept) => trickle.listen(0, "127.0.0.1", accept));
+	t.after(() => {
+		v6.close();
+		v4.close();
+		trickle.close();
+	});
+	const slow = (trickle.address() as { port: number }).port;
+
+	assert.equal((await answers(v6.port)).answer, "True", "a port on ::1 alone listens");
+	assert.equal((await answers(v6.port, "/ok")).answer, "True");
+	assert.equal((await answers(v6.port, "/moved")).answer, "True", "a redirect is not followed, and counts as healthy");
+	assert.equal((await answers(v6.port, "/down")).answer, "False");
+	assert.deepEqual(new Set(v6.hosts), new Set([`[::1]:${v6.port}`]), "it asked ::1 as its own Host");
+	assert.equal((await answers(v4.port, "/ok")).answer, "True");
+	assert.deepEqual(new Set(v4.hosts), new Set([`127.0.0.1:${v4.port}`]));
+	const { answer, ms } = await answers(slow, "/");
+	assert.equal(answer, "False", "a response that trickles in is not healthy");
+	assert.ok(ms < 3500, `it gave up after 2 s, not each socket read's, but took ${ms} ms`);
+	v6.close();
+	assert.equal((await answers(v6.port)).answer, "False", "a port nothing listens on does not");
 });
