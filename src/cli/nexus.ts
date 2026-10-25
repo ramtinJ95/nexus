@@ -21,7 +21,7 @@ import type { WebSocket } from "ws";
 import { attachTerminal, processTty } from "./attach.ts";
 import { call, CliError, exitCodes, follow, upgrade, type Endpoint, type HostPort } from "./transport.ts";
 
-const version = "0.11.0";
+const version = "0.12.0";
 const defaults = { url: "http://rj-firebat.tailc817d3.ts.net:7470", socks: "localhost:1055" };
 const configFile = () => join(homedir(), ".config", "nexus", "cli.json");
 
@@ -152,7 +152,7 @@ function conversationText(view: ConversationView): string {
   return parts.length === 0 ? "No messages yet." : parts.join("\n\n");
 }
 
-function detailText({ thread: t, pylon: p, agent, sessions, previews, ports, outputs }: ThreadDetail): string {
+function detailText({ thread: t, pylon: p, agent, sessions, previews, ports, outputs, prWatch, pullRequests }: ThreadDetail): string {
   const observed = p.observedAt === null ? "" : `, observed ${ago(Date.parse(p.observedAt))}`;
   return [
     `${t.id}  ${t.title}`,
@@ -167,6 +167,8 @@ function detailText({ thread: t, pylon: p, agent, sessions, previews, ports, out
       : s.state === "failed" ? `failed: ${s.message}` : s.status}`),
     ...previews.map((v) => `preview: ${v.service} at ${v.url}${failureOf(v) !== null ? `, not ready: ${failureOf(v)}` : v.ready ? "" : ", not ready"}`),
     ...(ports ?? []).map((l) => `port: ${l.port}${l.service === null ? "" : `, service ${l.service}`}${l.preview === null ? "" : `, previewed at ${l.preview.url}`}`),
+    ...(prWatch?.enabled ? [prWatch.stopped ? "PR watch: stopped (10 comment-only wakes)" : "PR watch: on", ...(prWatch.error ? [prWatch.error] : [])] : ["PR watch: off (no control-plane GitHub token configured)"]),
+    ...(pullRequests ?? []).map((pr) => `PR #${pr.number}: ${pr.title} — ${pr.state}, checks ${pr.checks}, review ${pr.review} ${pr.url}`),
     ...outputs.map((o) => `output: ${o.kind} ${o.ref}`),
   ].join("\n");
 }

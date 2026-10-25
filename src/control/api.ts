@@ -36,10 +36,12 @@ import { pylonLive } from "./live.ts";
 import { attachScript, checkoutDir, herdrSession } from "../sessions.ts";
 import { checkoutReader, CheckoutRefused, contentType, pathsFit, type CheckoutReader, type RefusalKind } from "../checkout-files.ts";
 import { attachRoute, parseAttachQuery } from "../attach-wire.ts";
+import type { PullRequest } from "./github.ts";
 import { openTerminal } from "../guest-terminal.ts";
 import { attachTiming, serveAttach, type AttachTiming, type Ending, type PylonDoor } from "./attach.ts";
 
 export interface ApiOptions {
+  prWatchEnabled?: boolean;
   registry: Registry;
   host: string;
   /** 0 picks a free port. */
@@ -93,6 +95,8 @@ export interface ThreadDetail {
    */
   ports: readonly ListeningPort[] | null;
   outputs: readonly Output[];
+  prWatch: { enabled: boolean; stopped: boolean; error: string | null };
+  pullRequests: readonly PullRequest[];
   /** The command that attaches to the pylon's Herdr sessions from a shell in the pylon. */
   attach: string;
   /** Null for a thread that has no conversation. A parked task holds the run until it is retried. */
@@ -345,6 +349,7 @@ export async function startApi(options: ApiOptions): Promise<Api> {
   function detail(t: Thread): ThreadDetail {
     const pylon = registry.pylon(t.pylonId)!;
     const previews = registry.previews(pylon.pylonId);
+    const watch = registry.prWatch(t.id);
     return {
       thread: t,
       attention: attention(t), seenAt: t.seenAt, lastReplyAt: t.lastReplyAt,
@@ -354,6 +359,8 @@ export async function startApi(options: ApiOptions): Promise<Api> {
       previews,
       ports: portsOf(pylon.pylonId, previews),
       outputs: registry.outputs(t.id),
+      prWatch: { enabled: options.prWatchEnabled ?? false, stopped: (watch?.commentWakes ?? 0) >= 10, error: watch?.error ?? null },
+      pullRequests: watch?.links.map((l) => l.pr) ?? [],
       attach: `herdr --session ${herdrSession}`,
       agent: t.conversationId === null || t.status === "deleted" ? null : { parkedTasks: harness.activity.parked(t.id).length },
     };
