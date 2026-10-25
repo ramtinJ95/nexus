@@ -212,11 +212,15 @@ turn, without unbounded tombstones. Thread deletion removes both cursor tables;
 archived/deleted threads ignore session reports.
 
 `claude_workers` holds a thread's first prompt and launch state: `pending`,
-`starting`, `started`, or `failed`. It is created atomically with the thread. A
+`starting`, `started`, `stalled`, or `failed`, plus an optional failure message. It is created atomically with the thread. A
 Claude-worker thread has no control-plane harness conversation. Its pending
 launch runs after its pylon is observed running. `starting` is written before the
 non-idempotent open command: after an interrupted launch, Nexus reports failure
 rather than risking a second submission. Inspect with `attach` before opening
-another session. A launch that reaches Claude's login screen can be `started`
-without running its task; `started` means the session opened, not task success.
-`ThreadDetail.claudeWorker.state` exposes this state.
+another session. `started` means the initial prompt reached a launch-specific UserPromptSubmit
+hook, not task success. A missing local receipt within 30 seconds after Herdr
+startup is `stalled`; the pane remains open. `ThreadDetail.claudeWorker` exposes
+`state` and optional `message`, including the last 20 visible pane lines (at most
+8 KiB). The same diagnostic appears in `thread.failed`; stalled and failed
+workers both have `failed` attention. A later human submission does not erase
+the launch diagnostic or trigger another automatic submission.
