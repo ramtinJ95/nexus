@@ -1,7 +1,10 @@
 import type { PylonId } from "./protocol.ts";
 import { z } from "zod";
 
-export const sessionKinds = ["session.turn-started", "session.turn-ended", "session.waiting", "session.ended"] as const;
+export const sessionActivityTtlMs = 30 * 60_000;
+export const maxActiveSessions = 16;
+
+export const sessionKinds = ["session.turn-started", "session.heartbeat", "session.turn-ended", "session.waiting", "session.ended"] as const;
 export const eventKinds = [...sessionKinds, "thread.turn-ended", "thread.failed", "thread.parked", "attention.changed", "pull-request.feedback", "release.changed"] as const;
 export type EventKind = typeof eventKinds[number];
 

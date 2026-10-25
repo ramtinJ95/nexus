@@ -1,7 +1,7 @@
 import { attentionOf } from "./attention.ts";
 import { pylonEventSchema } from "../events.ts";
 import type { ReportedEvent } from "../events.ts";
-import { eventCursor, matchesEvent, type EventFilter, type EventKind, type NexusEvent } from "../events.ts";
+import { eventCursor, sessionActivityTtlMs, maxActiveSessions, type EventFilter, type EventKind, type NexusEvent } from "../events.ts";
 import type { DesiredRelease } from "../deploy/plan.ts";
 import type { Drain, ReleaseReport } from "../deploy/model.ts";
 /**
@@ -214,6 +214,11 @@ const migrations: readonly string[] = [
    CREATE TABLE event_receipts (node TEXT PRIMARY KEY, sequence INTEGER NOT NULL) STRICT;
    CREATE TABLE claude_workers (thread TEXT PRIMARY KEY, prompt TEXT NOT NULL, state TEXT NOT NULL) STRICT;
    CREATE TABLE thread_attention (thread TEXT PRIMARY KEY, attention TEXT, parked INTEGER NOT NULL DEFAULT 0) STRICT;`,
+  `ALTER TABLE session_activity ADD COLUMN updated_at INTEGER NOT NULL DEFAULT 0;
+   CREATE INDEX session_activity_updated ON session_activity(updated_at);`,
+  `CREATE INDEX events_thread_id ON events(thread, id);
+   CREATE INDEX events_project_id ON events(project, id);
+   CREATE INDEX events_kind_id ON events(kind, id);`,
 ];
 
 type Row = Record<string, unknown>;
@@ -278,7 +283,7 @@ function pylonRow(r: Row): StoredPylon {
 export type Registry = ReturnType<typeof openRegistry>;
 
 /** Opens the file, creating it if needed, and applies any migrations it has not seen. */
-export function openRegistry(path: string) {
+export function openRegistry(path: string, clock = Date.now) {
   const db = new DatabaseSync(path);
   db.exec("PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;");
   migrate(db);
@@ -385,9 +390,9 @@ export function openRegistry(path: string) {
 
   function withSessions(row: Row): Thread {
     const thread = threadRow(row);
-    const working = db.prepare("SELECT 1 FROM session_activity WHERE thread = ? AND state = 'session.turn-started' LIMIT 1").get(thread.id);
-    const waiting = db.prepare("SELECT 1 FROM session_activity WHERE thread = ? AND state = 'session.waiting' LIMIT 1").get(thread.id);
-    return { ...thread, ...(working === undefined ? {} : { sessionTurnRunning: true }), ...(waiting === undefined ? {} : { sessionWaiting: true }) };
+    const working = db.prepare("SELECT max(updated_at) AS at FROM session_activity WHERE thread = ? AND state = 'session.turn-started' AND updated_at > ?").get(thread.id, clock() - sessionActivityTtlMs)?.at as number | null;
+    const waiting = db.prepare("SELECT 1 FROM session_activity WHERE thread = ? AND state = 'session.waiting' AND updated_at > ? LIMIT 1").get(thread.id, clock() - sessionActivityTtlMs);
+    return { ...thread, ...(working === null ? {} : { sessionTurnRunning: true, sessionActiveUntil: working + sessionActivityTtlMs }), ...(waiting === undefined ? {} : { sessionWaiting: true }) };
   }
 
   function updateAttention(id: ThreadId) {
@@ -403,8 +408,16 @@ export function openRegistry(path: string) {
     appendEvent("attention.changed", id, { attention });
   }
 
-  function appendEvent(kind: EventKind, thread: ThreadId | null, payload: Record<string, unknown>, time = Date.now()): NexusEvent {
+  function pruneSessions() {
+    transaction(() => {
+      const expired = db.prepare("DELETE FROM session_activity WHERE updated_at <= ? RETURNING thread").all(clock() - sessionActivityTtlMs);
+      for (const thread of new Set(expired.map((r) => r.thread as ThreadId))) updateAttention(thread);
+    });
+  }
+
+  function appendEvent(kind: EventKind, thread: ThreadId | null, payload: Record<string, unknown>, time = clock()): NexusEvent {
     return transaction(() => {
+      pruneSessions();
       const project = thread === null ? null : (q.thread.get(thread)?.project as string | undefined) ?? null;
       const result = db.prepare("INSERT INTO events (time, thread, project, kind, payload) VALUES (?, ?, ?, ?, ?)").run(time, thread, project, kind, JSON.stringify(payload));
       const id = Number(result.lastInsertRowid);
@@ -413,9 +426,35 @@ export function openRegistry(path: string) {
     });
   }
 
+  function eventBatch(since = "0", filter: EventFilter = {}): { events: NexusEvent[]; watermark: string } {
+    const cursor = eventCursor(since);
+    const oldest = db.prepare("SELECT min(id) AS id FROM events").get()?.id as number | null;
+    const newest = db.prepare("SELECT max(id) AS id FROM events").get()?.id as number | null;
+    if (cursor !== 0 && oldest !== null && cursor < oldest - 1) throw new Error("event cursor expired; retained events cannot fill the gap");
+    const clauses = ["id > ?"];
+    const params: (string | number)[] = [cursor];
+    for (const column of ["thread", "project"] as const) {
+      if (filter[column] === undefined) continue;
+      clauses.push(`${column} = ?`);
+      params.push(filter[column]);
+    }
+    if (filter.kinds?.length) {
+      clauses.push(`kind IN (${filter.kinds.map(() => "?").join(",")})`);
+      params.push(...filter.kinds);
+    }
+    const events = db.prepare(`SELECT * FROM events WHERE ${clauses.join(" AND ")} ORDER BY id`).all(...params).map((r): NexusEvent => ({
+      id: String(r.id), time: r.time as number, thread: r.thread as string | null, project: r.project as string | null,
+      kind: r.kind as EventKind, payload: json<Record<string, unknown>>(r.payload),
+    }));
+    return { events, watermark: String(Math.max(cursor, newest ?? 0)) };
+  }
+
+  pruneSessions();
+
   return {
     close() { db.close(); },
     appendEvent,
+    pruneSessions,
     recordParked(id: ThreadId, parked: boolean) {
       transaction(() => {
         const old = db.prepare("SELECT parked FROM thread_attention WHERE thread = ?").get(id)?.parked === 1;
@@ -443,22 +482,23 @@ export function openRegistry(path: string) {
         const receipt = db.prepare("SELECT sequence FROM event_receipts WHERE node = ?").get(node);
         if (receipt !== undefined && Number(receipt.sequence) >= report.sequence) return;
         db.prepare("INSERT INTO event_receipts VALUES (?, ?) ON CONFLICT(node) DO UPDATE SET sequence = excluded.sequence").run(node, report.sequence);
-        db.prepare("INSERT INTO session_activity VALUES (?, ?, ?) ON CONFLICT(thread, session) DO UPDATE SET state = excluded.state").run(thread, event.session ?? "default", event.kind);
-        q.agentActivity.run(Date.now(), thread);
-        if (event.kind === "session.turn-ended") q.recordReply.run(Date.now(), thread);
+        pruneSessions();
+        const session = event.session ?? "default";
+        if (event.kind === "session.ended" || event.kind === "session.turn-ended") {
+          db.prepare("DELETE FROM session_activity WHERE thread = ? AND session = ?").run(thread, session);
+        } else {
+          db.prepare("INSERT INTO session_activity VALUES (?, ?, ?, ?) ON CONFLICT(thread, session) DO UPDATE SET state = excluded.state, updated_at = excluded.updated_at")
+            .run(thread, session, event.kind === "session.heartbeat" ? "session.turn-started" : event.kind, clock());
+          db.prepare("DELETE FROM session_activity WHERE thread = ? AND session NOT IN (SELECT session FROM session_activity WHERE thread = ? ORDER BY updated_at DESC, rowid DESC LIMIT ?)").run(thread, thread, maxActiveSessions);
+        }
+        q.agentActivity.run(clock(), thread);
+        if (event.kind === "session.turn-ended") q.recordReply.run(clock(), thread);
         appendEvent(event.kind, thread, { ...(event.session === undefined ? {} : { session: event.session }), ...(event.message === undefined ? {} : { message: event.message }) });
         updateAttention(thread);
       });
     },
-    events(since = "0", filter: EventFilter = {}): NexusEvent[] {
-      const cursor = eventCursor(since);
-      const oldest = db.prepare("SELECT min(id) AS id FROM events").get()?.id as number | null;
-      if (cursor !== 0 && oldest !== null && cursor < oldest - 1) throw new Error("event cursor expired; retained events cannot fill the gap");
-      return db.prepare("SELECT * FROM events WHERE id > ? ORDER BY id").all(cursor).map((r): NexusEvent => ({
-        id: String(r.id), time: r.time as number, thread: r.thread as string | null, project: r.project as string | null,
-        kind: r.kind as EventKind, payload: json<Record<string, unknown>>(r.payload),
-      })).filter((e) => matchesEvent(e, filter));
-    },
+    eventBatch,
+    events: (since = "0", filter: EventFilter = {}) => eventBatch(since, filter).events,
     prWatch(thread: ThreadId): PrWatchState | null {
       const row = db.prepare("SELECT record FROM pr_watches WHERE thread = ?").get(thread) as Row | undefined;
       return row ? json<PrWatchState>(row.record) : null;

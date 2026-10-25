@@ -63,3 +63,50 @@ test("the probe journal survives restart and preserves bounded ordered replay", 
     assert.equal(journal.recent()[0]!.sequence, 3);
   } finally { journal.close(); rmSync(dir, { recursive: true, force: true }); }
 });
+
+test("parallel tool hooks share a throttled heartbeat, and refresh after five minutes", async () => {
+  const { heartbeatDue, heartbeatIntervalMs } = await import("../images/pylon/nexus-heartbeat.ts");
+  const dir = mkdtempSync(join(tmpdir(), "nexus-heartbeat-"));
+  const path = join(dir, "session");
+  try {
+    const now = Date.now();
+    const replies = await Promise.all(Array.from({ length: 20 }, () => heartbeatDue(path, now)));
+    assert.equal(replies.filter(Boolean).length, 1);
+    assert.equal(await heartbeatDue(path, now + heartbeatIntervalMs - 1), false);
+    assert.equal(await heartbeatDue(path, now + heartbeatIntervalMs), true);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("filtered reads advance the scanned watermark through retention rollover", () => {
+  const registry = openRegistry(":memory:");
+  try {
+    let since = "0";
+    for (let batch = 0; batch < 3; batch++) {
+      for (let i = 0; i < 5000; i++) registry.appendEvent("release.changed", null, { message: "x".repeat(2048) });
+      const result = registry.eventBatch(since, { kinds: ["session.turn-ended"] });
+      assert.deepEqual(result.events, []);
+      assert.equal(result.watermark, String((batch + 1) * 5000));
+      since = result.watermark;
+    }
+    const matching = registry.appendEvent("session.turn-ended", null, {});
+    assert.deepEqual(registry.eventBatch(since, { kinds: ["session.turn-ended"] }).events, [matching]);
+  } finally { registry.close(); }
+});
+
+test("SQL filters before decoding payloads, including intersecting thread and project filters", async () => {
+  const { DatabaseSync } = await import("node:sqlite");
+  const dir = mkdtempSync(join(tmpdir(), "nexus-event-filter-"));
+  const path = join(dir, "registry.sqlite");
+  const registry = openRegistry(path);
+  const db = new DatabaseSync(path);
+  try {
+    const insert = db.prepare("INSERT INTO events (time, thread, project, kind, payload) VALUES (0, ?, ?, ?, ?)");
+    insert.run("t1", "p1", "session.turn-ended", '{"match":true}');
+    insert.run("t2", "p1", "session.turn-ended", "not JSON");
+    insert.run("t1", "p2", "session.turn-ended", "not JSON");
+    insert.run("t1", "p1", "release.changed", "not JSON");
+    const result = registry.eventBatch("0", { thread: "t1", project: "p1", kinds: ["session.turn-ended", "session.waiting"] });
+    assert.equal(result.watermark, "4");
+    assert.deepEqual(result.events.map((e) => e.payload), [{ match: true }]);
+  } finally { db.close(); registry.close(); rmSync(dir, { recursive: true, force: true }); }
+});

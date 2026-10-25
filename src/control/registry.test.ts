@@ -48,8 +48,8 @@ const dir = await mkdtemp(join(tmpdir(), "nexus-registry-"));
 after(() => rm(dir, { recursive: true }));
 const tempDb = () => join(dir, `${randomUUID()}.db`);
 
-function seeded(path: string) {
-  const registry = openRegistry(path);
+function seeded(path: string, clock = Date.now) {
+  const registry = openRegistry(path, clock);
   registry.upsertNode({ name: node, tailnetHost: "rj-firebat.tail.ts.net", tailnetNodeId: "nFIREBAT" as TailnetNodeId });
   registry.createProject(project);
   registry.createThread(thread, pylon);
@@ -534,7 +534,7 @@ test("Claude turn events keep a pylon awake until it ends, independently of harn
   event(1, "session.turn-started");
   registry.recordActivity(threadId, { agentTurnRunning: false });
   registry.markSeen(threadId, false);
-  assert.equal(desiredPhase(registry.thread(threadId)!, Date.now() + 60 * 60_000), "running");
+  assert.equal(desiredPhase(registry.thread(threadId)!, Date.now() + 25 * 60_000), "running");
   event(2, "session.turn-ended");
   const ended = registry.thread(threadId)!;
   assert.equal(ended.lastHumanActivityAt, thread.lastHumanActivityAt);
@@ -548,4 +548,58 @@ test("Claude turn events keep a pylon awake until it ends, independently of harn
   registry.reportSession("other-node" as NodeName, { sequence: 100, pylon: pylonId, time: 0, event: { kind: "session.turn-started" } });
   assert.equal(registry.thread(threadId)!.sessionTurnRunning, undefined);
   assert.equal(registry.events("0", { kinds: ["session.turn-ended"] }).length, 1);
+});
+
+test("a lost turn end expires while heartbeats keep a long turn awake", async (t) => {
+  const { desiredPhase } = await import("../reconcile.ts");
+  const { sessionActivityTtlMs } = await import("../events.ts");
+  let now = 10_000_000;
+  const registry = seeded(tempDb(), () => now);
+  t.after(() => registry.close());
+  let sequence = 0;
+  const report = (kind: "session.turn-started" | "session.heartbeat") => registry.reportSession(node, {
+    sequence: ++sequence, time: now + 1_000_000_000, pylon: pylonId, event: { kind, session: "long" },
+  });
+  report("session.turn-started");
+  const started = registry.thread(threadId)!;
+  now += sessionActivityTtlMs;
+  assert.equal(desiredPhase(started, now), "paused", "even a previously read thread has a bounded lease");
+  assert.equal(registry.thread(threadId)!.sessionTurnRunning, undefined);
+  registry.pruneSessions();
+  assert.equal(registry.events("0", { kinds: ["attention.changed"] }).at(-1)!.payload.attention, null);
+  report("session.turn-started");
+  for (let i = 0; i < 24; i++) {
+    now += 5 * 60_000;
+    report("session.heartbeat");
+    registry.pruneSessions();
+    assert.equal(desiredPhase(registry.thread(threadId)!, now), "running");
+  }
+  assert.equal(registry.thread(threadId)!.lastHumanActivityAt, thread.lastHumanActivityAt);
+  now += sessionActivityTtlMs;
+  registry.pruneSessions();
+  assert.equal(desiredPhase(registry.thread(threadId)!, now), "paused");
+  assert.equal(registry.events("0", { kinds: ["attention.changed"] }).at(-1)!.payload.attention, null);
+});
+
+test("session state is capped at sixteen, removed at end and pruned with event retention", async (t) => {
+  const { DatabaseSync } = await import("node:sqlite");
+  const { sessionActivityTtlMs, maxActiveSessions } = await import("../events.ts");
+  const path = tempDb();
+  let now = 10_000_000;
+  const registry = seeded(path, () => now);
+  const db = new DatabaseSync(path);
+  t.after(() => { db.close(); registry.close(); });
+  const rows = () => db.prepare("SELECT session FROM session_activity WHERE thread = ? ORDER BY rowid").all(threadId).map((r) => r.session);
+  for (let i = 1; i <= 10_006; i++) {
+    registry.reportSession(node, { sequence: i, time: now, pylon: pylonId, event: { kind: "session.turn-started", session: `s${i}` } });
+    assert.ok(rows().length <= maxActiveSessions);
+  }
+  assert.equal(rows().length, 16);
+  assert.equal(rows()[0], "s9991");
+  registry.reportSession(node, { sequence: 10_007, time: now, pylon: pylonId, event: { kind: "session.ended", session: "s10006" } });
+  assert.equal(rows().length, 15);
+  now += sessionActivityTtlMs;
+  registry.appendEvent("release.changed", null, {});
+  assert.deepEqual(rows(), []);
+  assert.equal(registry.events().length, 10_000);
 });

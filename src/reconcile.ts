@@ -23,8 +23,9 @@ export type DesiredPhase = "running" | "paused" | "deleted";
 export interface ActivityFacts {
   status: ThreadStatus;
   sessionTurnRunning?: boolean;
+  sessionActiveUntil?: number;
   agentTurnRunning: boolean; // the pi-durable turn for this thread, known locally
-  lastAgentActivityAt: number; // pi-durable turns, and any observed session in `working`
+  lastAgentActivityAt: number; // pi-durable turns, Claude hooks and other observed sessions in `working`
   lastHumanActivityAt: number; // messages, attached terminals, preview hits, dashboard opens
 }
 
@@ -35,7 +36,7 @@ export function desiredPhase(a: ActivityFacts, now: number): DesiredPhase {
   if (a.status === "deleted") return "deleted";
   if (a.status === "archived") return "paused";
   // A preview hit on a paused pylon updates lastHumanActivityAt, which is what wakes it.
-  const busy = a.agentTurnRunning || a.sessionTurnRunning === true
+  const busy = a.agentTurnRunning || (a.sessionActiveUntil ?? 0) > now
     || now - a.lastAgentActivityAt < idlePolicy.agentIdleMs
     || now - a.lastHumanActivityAt < idlePolicy.humanIdleMs;
   return busy ? "running" : "paused";
@@ -248,7 +249,7 @@ export type SessionRow = { id: string; harness: SessionHarness; harnessSessionId
  *   never retracted, so only new ones are written.
  * - A preview is ready while a running pylon reports it published and warmed on its port. It stops being ready
  *   when the report drops it or the pylon stops running.
- * - A working session is agent activity and an attached client is human activity, both at `now`, the time
+ * - A working non-Claude session is agent activity and an attached client is human activity, both at `now`, the time
  *   the control plane received the event. A preview hit is human activity at its own time.
  */
 export function ingest(event: ProbeEvent, node: NodeName, known: ReadonlyMap<PylonId, PylonObservation | "absent">, now: number, unlisted: ReadonlySet<PylonId> = new Set()): readonly RegistryWrite[] {
@@ -318,7 +319,8 @@ function pylonWrites(pylonId: PylonId, previous: PylonObservation | "absent", cu
   for (const [key, p] of isReady) if (!wasReady.has(key)) writes.push({ record: "preview", pylonId, ...p, ready: true });
   for (const [key, p] of wasReady) if (!isReady.has(key)) writes.push({ record: "preview", pylonId, ...p, ready: false });
 
-  const agent = after.sessions?.some((s) => s.state === "running" && s.status === "working") ? now : null;
+  // Herdr can retain a dead Claude's working status; only its expiring hook lease keeps it awake.
+  const agent = after.sessions?.some((s) => s.harness !== "claude-code" && s.state === "running" && s.status === "working") ? now : null;
   const human = after.attachedClients > 0 ? now : null;
   if (agent !== null || human !== null) writes.push({ record: "activity", pylonId, human, agent });
   return writes;

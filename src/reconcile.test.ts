@@ -303,13 +303,15 @@ test("ingest: a new running pylon writes its sessions, derived outputs and activ
     { record: "output", pylonId, kind: "file", ref: "o1" },
     { record: "output", pylonId, kind: "diff", ref: "o2" },
     { record: "preview", pylonId, service: "web", httpsPort: 8443, ready: true },
-    { record: "activity", pylonId, human: now, agent: now },
+    { record: "activity", pylonId, human: now, agent: null },
   ] satisfies RegistryWrite[]);
 });
 
 test("ingest: an unchanged observation writes only the activity it still shows", () => {
-  const observed = runningWith({ sessions: [working], git: { head: "h1", branch: "main", dirty: true, branches: [] } });
+  const observed = runningWith({ sessions: [{ ...working, harness: "pi" }], git: { head: "h1", branch: "main", dirty: true, branches: [] } });
   assert.deepEqual(ingest({ type: "pylon", pylon: observed }, node, knows(observed), now), [{ record: "activity", pylonId, human: null, agent: now }]);
+  const staleClaude = runningWith({ sessions: [working] });
+  assert.deepEqual(ingest({ type: "pylon", pylon: staleClaude }, node, knows(staleClaude), now), []);
   const quiet = runningWith({ sessions: [idleShell] });
   assert.deepEqual(ingest({ type: "pylon", pylon: quiet }, node, knows(quiet), now), []);
 });

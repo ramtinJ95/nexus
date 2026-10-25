@@ -58,7 +58,7 @@ const commands = {
     args: 1,
     options: { session: { type: "string" }, message: { type: "string" } },
     request([kind], { session, message }) {
-      if (!["session.turn-started", "session.turn-ended", "session.waiting", "session.ended"].includes(kind)) throw new UsageError("not a pylon event kind");
+      if (!["session.turn-started", "session.heartbeat", "session.turn-ended", "session.waiting", "session.ended"].includes(kind)) throw new UsageError("not a pylon event kind");
       if (session !== undefined && (session.length === 0 || session.length > 200)) throw new UsageError("session must be 1 to 200 characters");
       if (message !== undefined && message.length > 2048) throw new UsageError("message exceeds 2048 characters");
       return { op: "event", kind, ...(session === undefined ? {} : { session }), ...(message === undefined ? {} : { message }) };

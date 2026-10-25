@@ -66,6 +66,7 @@ async function herdrIntegrations(): Promise<void> {
   settings.hooks ??= {};
   for (const [hook, kind, matcher] of [
     ["UserPromptSubmit", "session.turn-started", ""],
+    ["PostToolUse", "session.heartbeat", ""],
     ["Stop", "session.turn-ended", ""],
     ["Notification", "session.waiting", "permission_prompt|idle_prompt|elicitation_dialog"],
     ["SessionEnd", "session.ended", ""],

@@ -131,6 +131,7 @@ export function startLoop(options: LoopOptions): Loop {
   }
 
   async function pass(node: NodeName, link: Link) {
+    registry.pruneSessions();
     // Each record is read just before its tick, because an API retry may change it while earlier ticks wait on
     // the probe, and saving an older copy would undo it.
     for (const { pylonId } of registry.pylonsOn(node)) {
