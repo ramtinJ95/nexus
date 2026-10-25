@@ -208,6 +208,44 @@ The control plane runs as the system user `nexus-control`, apart from the probe'
 
 `control.json` names every node's probe, the tailnet nodes that may call the API (`callers`), the common dotfiles layer every new pylon pulls (`dotfiles`), the model new threads start with (`harness.model`), and the https ports previews are allocated from on each node (`previewPorts`, 10200 to 10999 when omitted). A node's `tailnetHost` is its MagicDNS name, such as `infra-testbench.example.ts.net`, because preview URLs name it and its `tailscale serve` certificate is for that name. Each probe's `auth.controlPlane` must be the control plane's own stable node ID, `self.tailnetNodeId`.
 
+### HTTPS dashboard
+
+The control plane terminates TLS itself at `https://<full control-node MagicDNS name>:7443/`, on the same tailnet address as `listen.host`. Port 7443 avoids privileged port binding or capabilities for `nexus-control`; preview allocation reserves it. The plain HTTP API on 7470 remains unchanged. There is **no dashboard Serve entry**: neither the installer nor the control plane changes the probe's Serve configuration.
+
+After upgrading control, the person does this **once on the control node**, not from a pylon:
+
+1. Enable MagicDNS and HTTPS certificates in the tailnet. Use a Tailscale version supporting the LocalAPI cert endpoint with `type=pair`, `min_validity` and `TS_PERMIT_CERT_UID` (see source references below).
+2. Give the control-plane service user **cert-only** LocalAPI access. Run `sudo systemctl edit tailscaled` and add:
+
+   ```ini
+   [Service]
+   Environment=TS_PERMIT_CERT_UID=nexus-control
+   ```
+
+   Restart tailscaled during a maintenance window: `sudo systemctl restart tailscaled`. This briefly affects tailnet connections. The setting accepts a username or numeric UID and lets that user fetch certificates for names this node can obtain; it grants neither Serve write access nor general operator rights. The probe stays the sole operator (`nexus`). Do not grant either service sudo access and do not transfer operator rights to control.
+3. Add `"https": { "hostname": "rj-firebat.example.ts.net" }` to `/etc/nexus/control.json`, using the node's **actual full MagicDNS name**, and include that name in `listen.hostnames`. Keep `listen.host` bound to the control node's tailnet IP. The example enables HTTPS; existing configs opt in explicitly. Ensure TCP 7443 is available and allowed by any tailnet grants and host firewall, then restart control in the normal deployment window. HTTP starts first and stays available even if certificate access is denied, issuance times out or HTTPS cannot bind. HTTPS starts independently once a certificate arrives and its port can bind; there is no automatic redirect to HTTP.
+4. Open `https://<full control-node MagicDNS name>:7443/` from a node in `callers`. Enable notifications with the dashboard's permission button; permission belongs to this HTTPS origin, not the old HTTP URL. Verify conversation streaming and terminal attach, and trigger a notification with the dashboard in the background. An unlisted node must receive 403 even if owned by the same Tailscale user. Also publish and withdraw a preview on the control node to verify that the probe still works as an operator without sudo.
+
+After starting HTTP, control fetches the certificate/key pair over tailscaled's Unix socket in the background and refreshes it every 12 hours after a success, requesting at least seven days of remaining validity. Tailscaled handles issuance, its cache and renewal. Nexus validates the hostname, validity dates and key pair before installing a new TLS context without restarting or interrupting existing connections. The private key is held in process memory, not written to Nexus files or logs. Renewal requests have a 60-second deadline and a 128-KiB response limit. Every startup or renewal failure logs its error and retry delay, retaining any previously installed certificate. Attempts are serialized, with exponential backoff from one second to a maximum of 60 seconds between failures; success resets the backoff. HTTPS failures never stop the HTTP API. Persistent failures must be repaired before expiry; after expiry browsers reject new connections rather than bypass TLS validation. Watch `journalctl -u nexus-control` for startup/renewal failures. `GET /v1/health` on HTTP remains 200 and includes `https: { status, error, nextAttemptAt }` alongside the release commit. Status is `disabled` without HTTPS config, `waiting` until HTTPS starts, `ready` after a successful installation, or `degraded` when renewal failed but the previous TLS context remains installed. `error` is the latest failure (cleared on success); `nextAttemptAt` is the next scheduled attempt in epoch milliseconds, or null while fetching/disabled. Health is readable by an admitted tailnet caller, or via the existing same-address local health check. For example, from an allowed client:
+
+```sh
+curl -fsS http://rj-firebat:7470/v1/health
+```
+
+A healthy HTTP deployment report does not mean HTTPS is ready; check this state when enabling notifications.
+
+Both HTTP and HTTPS authorize the **actual TCP peer** with tailscaled whois. All `X-Forwarded-*` and `Tailscale-User-*` headers are ignored for identity on both listeners. Stable-node-ID `callers`, self, `deployers`, infrastructure-node exclusion and root-token reporting rules are unchanged. WebSocket origins must match the real HTTPS host and port, so preview origins cannot attach. Do not put a proxy in front of either listener: an allowed proxy's identity would be the caller.
+
+#### Why not Serve for the dashboard?
+
+A Unix-socket Serve target requires local-admin rights for **every later write of the whole Serve config**, including the probe's unrelated preview adds and removals. Operator status alone is insufficient. The original private-socket design therefore blocked previews on the control node. A loopback TCP proxy would avoid that rule but let local users forge identity headers. Direct TLS avoids both problems and does not create, sweep or modify any Serve entry. Previews retain their loopback gateway and default 10200–10999 allocation range.
+
+If the earlier, unmerged private-socket version was manually tried, remove `serveSocket` from control.json and have the person remove **only its confirmed dashboard entry** with `sudo tailscale serve --https=443 off` before using this version. Never run `serve reset`, which would also remove previews. No such migration or live check was performed from this pylon.
+
+Source references at the reviewed upstream revision: [certificate endpoint](https://github.com/tailscale/tailscale/blob/b71e0f30a781894c9508d2903e939c5ca1a1361a/ipn/localapi/cert.go), [cert-only user permission](https://github.com/tailscale/tailscale/blob/b71e0f30a781894c9508d2903e939c5ca1a1361a/ipn/ipnserver/server.go) (`CanFetchCerts`), and [Serve local-admin requirement](https://github.com/tailscale/tailscale/blob/b71e0f30a781894c9508d2903e939c5ca1a1361a/ipn/localapi/serve.go). Tests use a fake LocalAPI and locally generated certificates; real tailscaled issuance/renewal, cert-only permission, preview operations and browser notifications cannot be verified from the development pylon and need the person's post-merge checks above.
+
+The CLI, mod, pi-nexus, probes and root deployers keep using `http://<control>:7470`. Tailnet transport is already encrypted; these clients do not need a browser secure context, and retaining their direct path avoids changing endpoint identity checks or depending on certificate provisioning. No CLI contract changes are needed.
+
 ### Sign the harness in
 
 The harness has its own ChatGPT login, kept apart from any interactive pi on the machine. A ChatGPT login reaches only the models ChatGPT offers through Codex, such as `gpt-6-astra`, so `harness.model` in `control.json` must name one of them. The control plane refuses to start with any other model, such as `gpt-5.5`, or before the harness is signed in, and its error in `journalctl -u nexus-control` lists the models the login offers. Only one process may hold the credentials file, so stop the control plane first:

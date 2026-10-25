@@ -19,6 +19,9 @@ import { canDeploy, commitSchema, isReporter, releaseView, reportSchema, resolve
  * wakes the loop for its node, so a start or a dashboard visit acts within one pass rather than 5 seconds.
  */
 import { attentionOf, type Attention } from "./attention.ts";
+import { createServer as createHttpsServer } from "node:https";
+import { TLSSocket } from "node:tls";
+import type { Certificate } from "../tailscale.ts";
 import { randomBytes } from "node:crypto";
 import { createServer, STATUS_CODES, type IncomingMessage, type ServerResponse } from "node:http";
 import type { Duplex } from "node:stream";
@@ -44,6 +47,7 @@ import { openTerminal } from "../guest-terminal.ts";
 import { attachTiming, serveAttach, type AttachTiming, type Ending, type PylonDoor } from "./attach.ts";
 
 export interface ApiOptions {
+  https?: { port: number; certificate(): Promise<Certificate>; renewalMs?: number; retryMs?: number };
   prWatchEnabled?: boolean;
   deployment?: DeploymentOptions;
   turnsStarting?: () => boolean;
@@ -78,6 +82,7 @@ export type ThreadHarness = Pick<HarnessHost, "startThread" | "send" | "abort" |
 
 export interface Api {
   readonly port: number;
+  readonly httpsPort: number | undefined;
   close(): Promise<void>;
 }
 
@@ -759,6 +764,11 @@ export async function startApi(options: ApiOptions): Promise<Api> {
     ["PUT", /^\/v1\/images\/current$/, async (_, r) => { setCurrentImage(await r.body()); return noContent; }],
   ];
 
+  const httpsState: { status: "disabled" | "waiting" | "ready" | "degraded"; error: string | null; nextAttemptAt: number | null } = {
+    status: options.https ? "waiting" : "disabled", error: null, nextAttemptAt: null,
+  };
+  const health = () => ({ commit: runningCommit, https: { ...httpsState } });
+
   /** The caller, once it is allowed and asked under one of the API's names. Every request and upgrade passes here. */
   async function admit(req: IncomingMessage): Promise<TailnetNodeId> {
     const { remoteAddress, remotePort } = req.socket;
@@ -770,14 +780,15 @@ export async function startApi(options: ApiOptions): Promise<Api> {
     // whois names the machine, not the program, so a web page open on an allowed laptop is that laptop too.
     // It can neither send a JSON content type cross-origin without a preflight, which this API never answers,
     // nor reach the API under its own name.
-    const hostname = req.headers.host === undefined ? undefined : new URL(`http://${req.headers.host}`).hostname;
+    const host = req.headers.host;
+    const hostname = typeof host === "string" ? new URL(`http://${host}`).hostname : undefined;
     if (hostname === undefined || !hostnames.has(hostname)) throw new HttpError(403, `the API does not answer to host ${req.headers.host}`);
     return caller;
   }
 
   async function handle(req: IncomingMessage, res: ServerResponse) {
-    if (req.method === "GET" && req.url === "/v1/health" && req.socket.remoteAddress === req.socket.localAddress) {
-      res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ commit: runningCommit }));
+    if (req.method === "GET" && req.url === "/v1/health" && req.socket.remoteAddress !== undefined && req.socket.remoteAddress === req.socket.localAddress) {
+      res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify(health()));
       return;
     }
     const caller = await admit(req);
@@ -787,6 +798,7 @@ export async function startApi(options: ApiOptions): Promise<Api> {
 
     const url = new URL(req.url ?? "/", "http://nexus");
     const path = decodeURIComponent(url.pathname);
+    if (path === "/v1/health" && req.method === "GET") return send(res, 200, health());
     if (path === "/v1/release" && req.method === "GET") return send(res, 200, releaseView(registry, options.deployment?.self));
     if (path === "/v1/release" && req.method === "PUT") {
       if (!canDeploy(registry, options.deployment, caller)) throw new HttpError(403, "caller may not deploy; infrastructure nodes and pylons cannot deploy");
@@ -884,7 +896,7 @@ export async function startApi(options: ApiOptions): Promise<Api> {
     // CORS does not guard a WebSocket handshake, and previews are served under the API's hostname on other ports, so
     // a preview's page could open a terminal from the browser of anyone allowed. A browser always sends Origin.
     const origin = req.headers.origin;
-    if (origin !== undefined && origin !== `http://${req.headers.host}`) throw new HttpError(403, `the attach route does not answer pages from ${origin}`);
+    if (origin !== undefined && origin !== `${req.socket instanceof TLSSocket ? "https" : "http"}://${req.headers.host}`) throw new HttpError(403, `the attach route does not answer pages from ${origin}`);
     const t = thread(attachRoute.exec(pathOf(req.url))![1]!);
     let request: ReturnType<typeof parseAttachQuery>;
     try {
@@ -917,42 +929,98 @@ export async function startApi(options: ApiOptions): Promise<Api> {
     }
   }
 
-  const server = createServer({
-    // Only a WebSocket to the attach route upgrades. Any other request is handled as one, Upgrade header or not.
-    shouldUpgradeCallback: (req) => req.headers.upgrade?.toLowerCase() === "websocket" && attachRoute.test(pathOf(req.url)),
-  }, (req, res) => {
-    handle(req, res).catch((err: unknown) => {
-      if (res.headersSent) return res.destroy(err as Error);
-      send(res, err instanceof HttpError ? err.status : err instanceof DeployDraining ? 409 : 500, { error: (err as Error).message });
+  function makeServer(certificate?: Certificate) {
+    const serverOptions = {
+      // Only a WebSocket to the attach route upgrades. Any other request is handled as one, Upgrade header or not.
+      shouldUpgradeCallback: (req: IncomingMessage) => req.headers.upgrade?.toLowerCase() === "websocket" && attachRoute.test(pathOf(req.url)),
+    };
+    const server = certificate ? createHttpsServer({ ...serverOptions, ...certificate }) : createServer(serverOptions);
+    server.on("request", (req, res) => {
+      handle(req, res).catch((err: unknown) => {
+        if (res.headersSent) return res.destroy(err as Error);
+        send(res, err instanceof HttpError ? err.status : err instanceof DeployDraining ? 409 : 500, { error: (err as Error).message });
+      });
     });
-  });
-  server.on("upgrade", (req: IncomingMessage, socket: Duplex, head: Buffer) => {
-    // Node hands over an upgraded socket without its error handler, and a reset before the 101 would crash the API.
-    socket.on("error", () => undefined);
-    upgraded.add(socket);
-    socket.once("close", () => upgraded.delete(socket));
-    upgrade(req, socket, head).catch((err: unknown) => refuseUpgrade(socket, err instanceof HttpError ? err.status : err instanceof DeployDraining ? 409 : 500, (err as Error).message));
-  });
+    server.on("upgrade", (req: IncomingMessage, socket: Duplex, head: Buffer) => {
+      // Node hands over an upgraded socket without its error handler, and a reset before the 101 would crash the API.
+      socket.on("error", () => undefined);
+      upgraded.add(socket);
+      socket.once("close", () => upgraded.delete(socket));
+      upgrade(req, socket, head).catch((err: unknown) => refuseUpgrade(socket, err instanceof HttpError ? err.status : err instanceof DeployDraining ? 409 : 500, (err as Error).message));
+    });
+    return server;
+  }
+  const server = makeServer();
+  let secure: ReturnType<typeof makeServer> | null = null;
   await new Promise<void>((resolve, reject) => {
     server.once("error", reject);
     server.listen(options.port, options.host, () => { server.off("error", reject); resolve(); });
   });
+  let renewal: ReturnType<typeof setTimeout> | null = null;
+  let retryMs = options.https?.retryMs ?? 1000;
+  function scheduleCertificate(delay: number) {
+    httpsState.nextAttemptAt = Date.now() + delay;
+    renewal = setTimeout(() => { void refreshCertificate(); }, delay);
+    renewal.unref();
+  }
+  async function refreshCertificate() {
+    if (stopping || !options.https) return;
+    httpsState.nextAttemptAt = null;
+    try {
+      const certificate = await options.https.certificate();
+      if (stopping) return;
+      if (secure) {
+        (secure as import("node:https").Server).setSecureContext(certificate);
+      } else {
+        const listener = makeServer(certificate);
+        secure = listener;
+        try {
+          await new Promise<void>((resolve, reject) => {
+            listener.once("error", reject);
+            listener.listen(options.https!.port, options.host, () => { listener.off("error", reject); resolve(); });
+          });
+        } catch (err) {
+          listener.close();
+          secure = null;
+          throw err;
+        }
+      }
+      if (stopping) { secure?.close(); return; }
+      httpsState.status = "ready";
+      httpsState.error = null;
+      retryMs = options.https.retryMs ?? 1000;
+      scheduleCertificate(options.https.renewalMs ?? 12 * 60 * 60 * 1000);
+    } catch (err) {
+      if (stopping) return;
+      httpsState.status = secure ? "degraded" : "waiting";
+      httpsState.error = (err as Error).message;
+      console.error(`dashboard HTTPS ${secure ? "renewal" : "startup"} failed: ${httpsState.error}; HTTP remains available; retrying in ${retryMs}ms`);
+      scheduleCertificate(retryMs);
+      retryMs = Math.min(retryMs * 2, 60_000);
+    }
+  }
+  if (options.https) void refreshCertificate();
   const address = server.address();
   if (address === null || typeof address === "string") throw new Error(`unexpected server address ${address}`);
 
   return {
     port: address.port,
+    get httpsPort() { return secure?.listening ? (secure.address() as import("node:net").AddressInfo).port : undefined; },
     async close() {
       stopping = true;
-      const closed = new Promise<void>((resolve) => server.close(() => resolve()));
-      server.closeAllConnections();
+      if (renewal) clearTimeout(renewal);
+      const closed = Promise.all([server, ...(secure ? [secure] : [])].map((listener) => {
+        const done = new Promise<void>((resolve) => listener.close(() => resolve()));
+        listener.closeAllConnections();
+        return done;
+      }));
       for (const session of attached) session.end("stopping");
       // Each hang-up waits for its node's probe, and an upgrade still at admission for whois. A node that stopped
       // answering, or a whois that never returns, would hold the close forever.
       const ends = [...[...attached].map((session) => session.served), ...[...upgraded].map((socket) => new Promise((resolve) => socket.once("close", resolve)))];
       await Promise.race([Promise.all(ends), sleep(5_000, undefined, { ref: false })]);
       for (const socket of upgraded) socket.destroy();
-      return closed;
+      await closed;
     },
   };
 }

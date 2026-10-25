@@ -32,6 +32,14 @@ test("GitHub watching is opt-in and accepts only a token file path, never a toke
   assert.throws(() => parseConfig(JSON.stringify({ ...config, github: { token: "secret" } })), /invalid control plane config/);
 });
 
+
+test("HTTPS uses an allowed MagicDNS hostname and reserves 7443 from previews", () => {
+  const config = JSON.parse(example);
+  assert.throws(() => parseConfig(JSON.stringify({ ...config, https: { hostname: "other.example.ts.net" } })), /listen.hostnames/);
+  assert.throws(() => parseConfig(JSON.stringify({ ...config, https: { hostname: "localhost" } })), /invalid/);
+  assert.throws(() => parseConfig(JSON.stringify({ ...config, previewPorts: { first: 7440, last: 7450 } })), /7443/);
+});
+
 test("git identity is optional and contains only a name and email", () => {
   const { gitIdentity, ...config } = JSON.parse(example);
   assert.deepEqual(parseConfig(example).gitIdentity, { name: "Example Person", email: "person@example.com" });

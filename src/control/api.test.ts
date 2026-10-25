@@ -49,7 +49,7 @@ const dotfiles = { repo: "git@github.com:ramtin/dotfiles.git", ref: "main" };
 const dir = await mkdtemp(join(tmpdir(), "nexus-api-"));
 after(() => rm(dir, { recursive: true }));
 
-async function setup(t: import("node:test").TestContext, options: { gitIdentity?: { name: string; email: string }; deployment?: DeploymentOptions; dotfiles?: typeof dotfiles; streamStallMs?: number; attachTiming?: AttachTiming } = {}) {
+async function setup(t: import("node:test").TestContext, options: { gitIdentity?: { name: string; email: string }; https?: import("./api.ts").ApiOptions["https"]; whois?: import("../tailscale.ts").Whois; deployment?: DeploymentOptions; dotfiles?: typeof dotfiles; streamStallMs?: number; attachTiming?: AttachTiming } = {}) {
   const registry = openRegistry(join(dir, `${randomUUID()}.db`));
   registry.upsertNode({ name: node, tailnetHost: "rj-firebat.tail.ts.net", tailnetNodeId: "nFIREBAT" as TailnetNodeId });
   let caller: TailnetNodeId | null = laptop;
@@ -73,11 +73,12 @@ async function setup(t: import("node:test").TestContext, options: { gitIdentity?
   let pipe = async (argv: readonly string[]): Promise<ByteStream> => { throw new Error(`unexpected stream ${argv[0]}`); };
   const api = await startApi({
     registry, host: "127.0.0.1", port: 0,
+    ...(options.https ? { https: options.https } : {}),
     // Every loopback caller is whoever the test says. Tests never ask tailscaled.
-    whois: async () => {
+    whois: options.whois ?? (async () => {
       await admitted;
       return caller;
-    },
+    }),
     allowed: new Set([laptop, "nFIREBAT" as TailnetNodeId]),
     ...(options.deployment === undefined ? {} : { deployment: options.deployment }),
     hostnames: new Set(["127.0.0.1"]),
@@ -126,7 +127,7 @@ async function setup(t: import("node:test").TestContext, options: { gitIdentity?
     });
   }
   return {
-    registry, call, raw, woken, calls, commands, streams, fake, port: api.port, close: () => api.close(),
+    registry, call, raw, woken, calls, commands, streams, fake, port: api.port, get httpsPort() { return api.httpsPort; }, close: () => api.close(),
     callAs(id: TailnetNodeId | null) { caller = id; },
     /** Holds every request at whois until the returned function is called. */
     holdWhois() {
@@ -1455,6 +1456,124 @@ test("the final idle fence holds across lease expiry until rollback or success r
   s.callAs("nFIREBAT" as TailnetNodeId);
   await s.call("POST", "/v1/deployer/drain", { commit: deployCommit, release: true }, reporterHeaders);
   assert.equal(s.registry.drain(), null);
+});
+
+
+test("direct TLS uses TCP whois, ignores forged headers, and renews without disturbing HTTP", async (t) => {
+  const { testCertificate } = await import("../test-certificate.ts");
+  const { request: tlsRequest } = await import("node:https");
+  const { X509Certificate } = await import("node:crypto");
+  const certDir = await mkdtemp(join(dir, "tls-"));
+  const first = await testCertificate(certDir);
+  const second = await testCertificate(certDir);
+  assert.notEqual(new X509Certificate(first.cert).subject, new X509Certificate(second.cert).subject);
+  let current = first;
+  let fail = false;
+  let reads = 0;
+  const api = await setup(t, {
+    https: { port: 0, renewalMs: 25, retryMs: 10, certificate: async () => {
+      reads++;
+      if (fail) throw new Error("renewal unavailable");
+      return current;
+    } },
+    deployment: { self: "nFIREBAT" as TailnetNodeId, deployers: new Set([laptop]), keys: {} },
+  });
+  function tls(path = "/v1/threads", headers: Record<string, string> = {}, method = "GET") {
+    return new Promise<{ status: number; fingerprint: string }>((resolve, reject) => {
+      const req = tlsRequest({
+        hostname: "127.0.0.1", port: api.httpsPort, path, method, agent: false,
+        ca: [first.cert, second.cert], servername: "dashboard.example.ts.net",
+        headers: { host: "127.0.0.1", "content-type": "application/json", ...headers },
+      }, (res) => {
+        const fingerprint = (res.socket as import("node:tls").TLSSocket).getPeerCertificate().fingerprint256;
+        res.resume();
+        res.on("end", () => resolve({ status: res.statusCode!, fingerprint }));
+      });
+      req.on("error", reject).end();
+    });
+  }
+  for (let i = 0; api.httpsPort === undefined; i++) {
+    assert.ok(i < 100, "HTTPS started");
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  assert.equal((await tls()).status, 200);
+  assert.equal((await tls()).fingerprint, new X509Certificate(first.cert).fingerprint256);
+  assert.equal((await api.call("GET", "/v1/threads")).status, 200);
+  api.callAs(null);
+  const forged = { "x-forwarded-for": "100.64.0.10", "x-forwarded-host": "127.0.0.1", "tailscale-user-login": "owner@example.com" };
+  assert.equal((await tls("/v1/threads", forged)).status, 403);
+  assert.equal((await api.call("GET", "/v1/threads", undefined, forged)).status, 403);
+  api.callAs("nFIREBAT" as TailnetNodeId);
+  assert.equal((await tls("/v1/release", forged, "PUT")).status, 403);
+  api.callAs(laptop);
+  assert.equal((await tls("/v1/threads", { ...forged, host: "evil.example" })).status, 403);
+  const upgrade = { connection: "Upgrade", upgrade: "websocket", "sec-websocket-version": "13", "sec-websocket-key": "dGhlIHNhbXBsZSBub25jZQ==" };
+  assert.equal((await tls(attachPathOf("missing"), { ...upgrade, origin: "https://127.0.0.1" })).status, 404);
+  assert.equal((await tls(attachPathOf("missing"), { ...upgrade, origin: "http://127.0.0.1" })).status, 403);
+  assert.equal((await tls(attachPathOf("missing"), { ...upgrade, origin: "https://127.0.0.1:10200" })).status, 403);
+  fail = true;
+  const before = reads;
+  while (reads === before) await new Promise((resolve) => setTimeout(resolve, 10));
+  assert.equal((await tls()).fingerprint, new X509Certificate(first.cert).fingerprint256);
+  assert.equal((await api.call("GET", "/v1/health")).body.https.status, "degraded");
+  fail = false;
+  current = second;
+  for (let i = 0; ; i++) {
+    if ((await tls()).fingerprint === new X509Certificate(second.cert).fingerprint256) break;
+    assert.ok(i < 100, "certificate renewed");
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  assert.equal((await api.call("GET", "/v1/threads")).status, 200);
+});
+
+test("HTTP starts while certificate issuance is pending, survives failure, and HTTPS starts on retry", { timeout: 10_000 }, async (t) => {
+  const { testCertificate } = await import("../test-certificate.ts");
+  const { request: tlsRequest } = await import("node:https");
+  const certificate = await testCertificate(await mkdtemp(join(dir, "startup-tls-")));
+  const first = Promise.withResolvers<typeof certificate>();
+  const retry = Promise.withResolvers<typeof certificate>();
+  let attempts = 0;
+  const api = await setup(t, { https: { port: 0, retryMs: 10, certificate: () => ++attempts === 1 ? first.promise : retry.promise } });
+  assert.equal((await api.call("GET", "/v1/threads")).status, 200);
+  assert.equal(api.httpsPort, undefined);
+  assert.deepEqual((await api.call("GET", "/v1/health")).body.https, { status: "waiting", error: null, nextAttemptAt: null });
+  first.reject(new Error("tailscaled certificate: HTTP 403"));
+  for (let i = 0; attempts < 2; i++) {
+    assert.ok(i < 100, "issuance retried");
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  const failed = await api.call("GET", "/v1/health");
+  assert.equal(failed.status, 200);
+  assert.equal(failed.body.https.status, "waiting");
+  assert.equal(failed.body.https.error, "tailscaled certificate: HTTP 403");
+  assert.equal((await api.call("GET", "/v1/threads")).status, 200);
+  retry.resolve(certificate);
+  for (let i = 0; api.httpsPort === undefined; i++) {
+    assert.ok(i < 100, "HTTPS started after retry");
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  const ready = (await api.call("GET", "/v1/health")).body.https;
+  assert.equal(ready.status, "ready");
+  assert.equal(ready.error, null);
+  assert.ok(ready.nextAttemptAt > Date.now());
+  assert.equal(await new Promise<number>((resolve, reject) => {
+    tlsRequest({ hostname: "127.0.0.1", port: api.httpsPort, path: "/v1/threads", ca: certificate.cert, servername: "dashboard.example.ts.net" }, (res) => {
+      res.resume();
+      res.on("end", () => resolve(res.statusCode!));
+    }).on("error", reject).end();
+  }), 200);
+  assert.equal((await api.call("GET", "/v1/threads")).status, 200);
+});
+
+test("closing HTTP while issuance is pending prevents a late HTTPS listener", async (t) => {
+  const { testCertificate } = await import("../test-certificate.ts");
+  const certificate = await testCertificate(await mkdtemp(join(dir, "late-tls-")));
+  const pending = Promise.withResolvers<typeof certificate>();
+  const api = await setup(t, { https: { port: 0, certificate: () => pending.promise } });
+  await api.close();
+  pending.resolve(certificate);
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  assert.equal(api.httpsPort, undefined);
 });
 
 test("project edits validate before saving, flag older grants, and leave checkpoint boots unchanged", async (t) => {

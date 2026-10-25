@@ -19,7 +19,6 @@ These start once the work above has landed.
 - **Dashboard polish.** A live "working 1m 03s" clock on running rows. Rows that don't need you dimmed. Tool calls in the conversation grouped into summaries such as "Ran 3 commands, changed 2 files".
 - **Syntax-highlighted diffs.** The dashboard renders its diffs with Pierre's diff library, [`@pierre/diffs`](https://www.npmjs.com/package/@pierre/diffs), which t3code's web app also uses, so changed code gets proper syntax highlighting instead of today's plain lines. Check its licence before adding it.
 - **Review comments on the diff.** The dashboard's diff works like the review-pane mod's `/review-diff`. Select a line or a range and attach a comment, a question, a suggestion or a requested change. The notes gather into one review, which goes to the composer with each note's file and lines, so the person edits it before it reaches the agent. An answer to a question shows beside the lines it was asked about. When the thread has a pull request, the review could also go to GitHub as review comments, and the pull request's own review comments could show in place, building on the pull request watch.
-- **Serve the dashboard over HTTPS,** for example through `tailscale serve`. Browsers allow system notifications only in a secure context, and the dashboard is plain HTTP today.
 
 ## Later
 

@@ -38,3 +38,34 @@ test("localApiWhois asks LocalAPI whois for ip:port and returns the stable node 
   await assert.rejects(whois("100.64.0.10", 1), /tailscaled whois 100\.64\.0\.10:1: .*JSON/);
   assert.deepEqual(seen[0], { path: "/localapi/v0/whois?addr=100.64.0.7%3A41641", host: "local-tailscaled.sock" });
 });
+
+test("LocalAPI certificates use cert-only access, request renewal, and reject invalid replies", async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), "nexus-cert-"));
+  t.after(() => rm(dir, { recursive: true }));
+  const { testCertificate } = await import("./test-certificate.ts");
+  const { localApiCertificate } = await import("./tailscale.ts");
+  const certificate = await testCertificate(dir);
+  let status = 200;
+  let body = certificate.key + certificate.cert;
+  let seen = "";
+  const socketPath = join(dir, "tailscaled.sock");
+  const server = createServer((req, res) => {
+    assert.equal(req.headers.host, "local-tailscaled.sock");
+    seen = req.url!;
+    res.writeHead(status).end(body);
+  });
+  await new Promise<void>((resolve) => server.listen(socketPath, resolve));
+  t.after(() => new Promise<void>((resolve) => server.close(() => resolve())));
+  assert.deepEqual(await localApiCertificate("dashboard.example.ts.net", socketPath), {
+    key: certificate.key.trim(), cert: certificate.cert.trim(),
+  });
+  assert.equal(seen, "/localapi/v0/cert/dashboard.example.ts.net?type=pair&min_validity=168h");
+  await assert.rejects(localApiCertificate("wrong.example.ts.net", socketPath), /hostname/);
+  status = 403;
+  body = "private error details";
+  await assert.rejects(localApiCertificate("dashboard.example.ts.net", socketPath), { message: "tailscaled certificate: HTTP 403" });
+  status = 200;
+  await assert.rejects(localApiCertificate("dashboard.example.ts.net", socketPath), /pair/);
+  body = "x".repeat(129 * 1024);
+  await assert.rejects(localApiCertificate("dashboard.example.ts.net", socketPath), /too large/);
+});
