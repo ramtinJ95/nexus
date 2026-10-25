@@ -186,13 +186,17 @@ const declareServices = [
   `printf 'services:\\n  ${slow.name}:\\n    command: sh .nexus/slow6.sh\\n    port: ${slow.port}\\n    health: /\\n  ${gone.name}:\\n    command: sh .nexus/gone6.sh\\n    port: ${gone.port}\\n    timeoutMs: ${gone.timeoutS * 1000}\\n' > .nexus/services.yaml`,
 ].join("\n");
 /**
- * Runs `command`, then prints the state of the service `name` about once a second for `seconds` seconds, each as
- * `<tag>#<seconds since before the command> <state>`.
+ * Prints the state of the service `name` about twice a second for `seconds` seconds, each as
+ * `<tag>#<seconds since before the command> <state>`, from before `command` runs and while it does, because
+ * `nexus service restart` returns only once the service has settled.
  */
 const sample = (name: string, tag: string, command: string, seconds: number) => [
   `state() { nexus services list --json | python3 -c 'import json,sys; print(next(s["state"] for s in json.load(sys.stdin)["services"] if s["name"]=="${name}"))'; }`,
-  `t0=$(date +%s); ${command} >/dev/null`,
-  `for i in $(seq 1 ${seconds}); do echo "${tag}#$(( $(date +%s) - t0 )) $(state)"; sleep 1; done`,
+  "t0=$(date +%s)",
+  `( while [ $(( $(date +%s) - t0 )) -lt ${seconds} ]; do echo "${tag}#$(( $(date +%s) - t0 )) $(state)"; sleep 0.5; done ) &`,
+  "sampler=$!",
+  `${command} >/dev/null; echo "the command returned after $(( $(date +%s) - t0 )) s"`,
+  "wait $sampler",
 ].join("\n");
 const samples = (result: string, tag: string) => [...result.matchAll(new RegExp(`${tag}#(\\d+) (\\w+)`, "g"))].map((m) => ({ at: Number(m[1]), state: m[2]! }));
 
@@ -272,18 +276,24 @@ try {
   assert.ok(samples(ensured, "ensure").some((s) => s.state === "ready"), `the declared ::1 service becomes ready: ${ensured}`);
   pass(`the declared service ${slow.name}, which listens only on ::1, becomes ready through its health check: ${ensured}`);
   const restarted = await runTool("msg:v6-restart", sample(slow.name, "restart", `nexus service restart ${slow.name}`, slow.delayS + 12));
+  // The samples begin before the restart, so the first may still read the old start's ready.
   const states = samples(restarted, "restart");
-  const firstReady = states.find((s) => s.state === "ready");
-  assert.ok(firstReady !== undefined, `the restarted service becomes ready again: ${restarted}`);
+  const firstStarting = states.findIndex((s) => s.state === "starting");
   // Whole seconds on both ends, so the listener, delayS after the restart began, can read up to a second early.
+  assert.ok(firstStarting >= 0 && states[firstStarting]!.at < slow.delayS - 1, `the restart reads starting before its ::1 listener is back, ${slow.delayS} s after: ${restarted}`);
+  const firstReady = states.slice(firstStarting).find((s) => s.state === "ready");
+  assert.ok(firstReady !== undefined, `the restarted service becomes ready again: ${restarted}`);
   assert.ok(firstReady.at >= slow.delayS - 1, `it is not ready until its ::1 listener is back, ${slow.delayS} s after the restart, but was ${firstReady.at} s after: ${restarted}`);
-  assert.ok(states.filter((s) => s.at < firstReady.at).every((s) => s.state === "starting"), `before that it is starting: ${restarted}`);
+  assert.ok(states.slice(firstStarting).filter((s) => s.at < firstReady.at).every((s) => s.state === "starting"), `between them it is starting: ${restarted}`);
   pass(`after a restart, ${slow.name} stays starting until its ::1 listener is back, and is ready ${firstReady.at} s after: ${restarted}`);
 
   const goneUp = await runTool("msg:v6-gone-up", sample(gone.name, "up", "true", 5));
   assert.ok(samples(goneUp, "up").some((s) => s.state === "ready"), `${gone.name} becomes ready once it listens on ::1: ${goneUp}`);
   const goneRestart = await runTool("msg:v6-gone-restart", sample(gone.name, "gone", `nexus service restart ${gone.name}`, gone.timeoutS + 8));
-  const goneStates = samples(goneRestart, "gone");
+  const goneSampled = samples(goneRestart, "gone");
+  const goneStarting = goneSampled.findIndex((s) => s.state === "starting");
+  assert.ok(goneStarting >= 0 && goneSampled[goneStarting]!.at < gone.timeoutS - 1, `the restart reads starting before its ${gone.timeoutS} s timeout: ${goneRestart}`);
+  const goneStates = goneSampled.slice(goneStarting);
   assert.ok(goneStates.every((s) => s.state !== "ready"), `restarted, ${gone.name} never listens again and is never ready: ${goneRestart}`);
   assert.ok(goneStates.some((s) => s.state === "failed" && s.at >= gone.timeoutS - 1), `it fails once its ${gone.timeoutS} s start timeout passes: ${goneRestart}`);
   pass(`after a restart that never listens again, ${gone.name} stays starting until its ${gone.timeoutS} s timeout fails it, never ready: ${goneRestart}`);
