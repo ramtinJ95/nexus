@@ -256,11 +256,12 @@ export type CommandResult =
    * `sent`: Claude was idle, so the message starts a turn. `queued`: Claude was working, so Claude Code queues the message
    * as it queues input typed during a turn, and takes it at its next tool boundary or after the turn. Both mean it was
    * typed. `blocked`: Claude waits at a prompt in its terminal, such as a trust or permission dialog, which typing would
-   * answer. `starting`: Herdr could not yet tell Claude's state. Both mean nothing was typed, so the message can be sent
+   * answer. `starting`: Herdr could not yet tell Claude's state. `moved`: the pane stopped running the session before
+   * anything was typed, as when another agent started in it. These mean nothing was typed, so the message can be sent
    * again. A failed command may have typed part of the message, so the control plane never retries one on its own.
    * `herdrPane` is the pane Claude runs in, and `resumed` says the session had no live pane and was resumed into it first.
    */
-  | { kind: "send-claude"; outcome: "sent" | "queued" | "blocked" | "starting"; herdrPane: string; resumed: boolean }
+  | { kind: "send-claude"; outcome: "sent" | "queued" | "blocked" | "starting" | "moved"; herdrPane: string; resumed: boolean }
   | { kind: "service"; services: readonly ServiceFact[]; logs?: string }
   /** The service the port is previewed under: `port-<port>`, or the service that already owns the port. */
   | { kind: "link-port"; service: string }
@@ -793,7 +794,7 @@ export function parsePylonCommand(body: string): PylonCommand {
 }
 
 const closeOutcomes: ReadonlySet<unknown> = new Set(["closed", "not-open", "moved"] satisfies Extract<CommandResult, { kind: "close-session" }>["outcome"][]);
-const sendOutcomes: ReadonlySet<unknown> = new Set(["sent", "queued", "blocked", "starting"] satisfies Extract<CommandResult, { kind: "send-claude" }>["outcome"][]);
+const sendOutcomes: ReadonlySet<unknown> = new Set(["sent", "queued", "blocked", "starting", "moved"] satisfies Extract<CommandResult, { kind: "send-claude" }>["outcome"][]);
 function parseCommandResult(command: PylonCommand, body: string): CommandResult {
   const r = record(JSON.parse(body), "command result");
   if (r.kind !== command.kind) throw new Error(`a ${command.kind} command got a ${JSON.stringify(r.kind)} result`);

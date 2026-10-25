@@ -608,11 +608,13 @@ export async function startApi(options: ApiOptions): Promise<Api> {
       if (!asked || typedNothing) registry.setClaudeMessage(t.id, message.requestId, null);
       throw err;
     }
-    if (result.outcome === "blocked" || result.outcome === "starting") {
+    if (result.outcome === "blocked" || result.outcome === "starting" || result.outcome === "moved") {
       registry.setClaudeMessage(t.id, message.requestId, null);
-      throw new HttpError(409, result.outcome === "blocked"
-        ? `Claude waits at a prompt in its terminal, so nothing was typed. Attach to the pylon (\`nexus attach ${t.id}\`) and answer it, then send again`
-        : `Claude is not ready to take a message yet, so nothing was typed. Ask again in a moment`);
+      throw new HttpError(409, {
+        blocked: `Claude waits at a prompt in its terminal, so nothing was typed. Attach to the pylon (\`nexus attach ${t.id}\`) and answer it, then send again`,
+        starting: `Claude is not ready to take a message yet, so nothing was typed. Ask again in a moment`,
+        moved: `Herdr pane ${result.herdrPane} stopped running Claude session ${session} before the message was typed, so nothing was typed. Send again to resume the session`,
+      }[result.outcome]);
     }
     const sent: ClaudeSent = { session, outcome: result.outcome, resumed: result.resumed };
     registry.setClaudeMessage(t.id, message.requestId, { state: "sent", result: sent });

@@ -315,8 +315,10 @@ Claude's prompt swallows a tab, and a carriage return submits early, so a messag
 holding them is refused rather than changed. The probe finds the session's pane by
 Herdr's session ID or by Claude's command line. It resumes the session in place, or
 in a new workspace, when no live Claude runs it, and it types nothing while Claude
-waits at a dialog, because typing would answer that dialog. Every outcome in which
-nothing was typed is a result, not an error. A failed command may have typed part of
+waits at a dialog, because typing would answer that dialog. Right before typing, it
+checks again that the pane runs Claude under the session's ID, and types nothing if
+another agent or session took the pane meanwhile. Every outcome in which nothing was
+typed is a result, not an error. A failed command may have typed part of
 the message, so it is never retried automatically: the request ID is fenced as
 sending first, and a repeat of an uncertain one is refused.
 

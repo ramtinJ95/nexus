@@ -382,6 +382,7 @@ test("a message that resumes its Claude session publishes the session's new pane
     if (sub === "api snapshot") return herdrOk(herdrSnapshot([{ id: "w1", label: "Claude Code" }], panes));
     if (sub === "workspace list") return herdrOk({ type: "workspace_list", workspaces: [] });
     if (sub === "workspace create") return herdrOk({ type: "workspace_created", workspace: { workspace_id: "w1" }, tab: { tab_id: "w1:t1" }, root_pane: { pane_id: "w1:p1" } });
+    if (sub === "pane process-info") return herdrOk({ type: "pane_process_info", process_info: { pane_id: "w1:p1", shell_pid: 100, foreground_processes: [{ pid: 101, name: "claude", argv: ["claude", "--session-id", session] }] } });
     if (sub === "agent start") {
       panes = [herdrPane("w1:p1", "w1", "claude", "idle", { kind: "id", value: session })];
       return herdrOk({ type: "agent_started", agent: {}, argv: [] });

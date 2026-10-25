@@ -306,8 +306,9 @@ out=$(herdr --session ${herdrSession} pane send-keys "$pane" Enter 2>&1) || { pr
  * interrupts Claude and Ctrl+C can exit it.
  *
  * Claude typing nothing is an outcome: `blocked` when Claude waits at a dialog in its terminal, which typing would
- * answer, and `starting` when Herdr still cannot tell Claude's state after `readyWithinMs`. A rejection may come after
- * part of the text was typed.
+ * answer, `starting` when Herdr still cannot tell Claude's state after `readyWithinMs`, and `moved` when the pane no
+ * longer runs the session by the time it is ready, as when another agent was started in it. A rejection may come after
+ * part of the text was typed. The caller runs one send per session at a time, since two would interleave their chunks.
  */
 export async function sendToClaude(guest: Guest, message: { session: string; text: string; model?: string }, readyWithinMs = claudeReadyMs): Promise<Omit<Extract<CommandResult, { kind: "send-claude" }>, "kind">> {
   const found = await claudePane(guest, message.session);
@@ -315,12 +316,14 @@ export async function sendToClaude(guest: Guest, message: { session: string; tex
   const herdrPane = found?.pane.herdrPane ?? await openSession(guest, { harness: "claude-code", title: "Claude Code", cwd: checkoutDir, resume: message.session, ...(message.model === undefined ? {} : { model: message.model }) });
   // A pane whose Claude exited still reports the session. Starting it there, as a relaunch does, keeps the session in one pane.
   if (found?.runs === false) await startHarness(guest, herdrPane, "claude-code", message.session, undefined, message.model);
-  let status = found?.runs ? found.pane.status : await paneStatus(guest, herdrPane);
-  for (const deadline = Date.now() + readyWithinMs; status === "unknown" && Date.now() < deadline;) {
+  let pane = await livePane(guest, herdrPane);
+  for (const deadline = Date.now() + readyWithinMs; pane.status === "unknown" && Date.now() < deadline;) {
     await delay(claudeReadyPollMs);
-    status = await paneStatus(guest, herdrPane);
+    pane = await livePane(guest, herdrPane);
   }
+  const { status } = pane;
   if (status === "blocked" || status === "unknown") return { outcome: status === "blocked" ? "blocked" : "starting", herdrPane, resumed };
+  if (!await runsSession(guest, pane, message.session)) return { outcome: "moved", herdrPane, resumed };
   const chunks: string[] = [];
   const points = Array.from(message.text);
   for (let i = 0; i < points.length; i += typedChunkCodePoints) chunks.push(points.slice(i, i + typedChunkCodePoints).join(""));
@@ -335,22 +338,23 @@ export async function sendToClaude(guest: Guest, message: { session: string; tex
  * command line. `runs` is false for a pane that reports the session but whose Claude has exited to the shell.
  */
 async function claudePane(guest: Guest, session: string): Promise<{ pane: LivePane; runs: boolean } | null> {
-  const claude = (await livePanes(guest).catch(noServer([]))).filter((p) => p.harness === "claude-code");
-  let exited: LivePane | undefined;
-  for (const pane of claude.filter((p) => p.harnessSessionId === session)) {
-    if (await runsAgent(guest, pane.herdrPane, agents["claude-code"]!.kind)) return { pane, runs: true };
-    exited ??= pane;
-  }
-  for (const pane of claude.filter((p) => p.harnessSessionId === null)) {
-    if (await launchedClaudeSession(guest, pane.herdrPane) === session) return { pane, runs: true };
-  }
+  const panes = await livePanes(guest).catch(noServer([]));
+  for (const pane of panes) if (await runsSession(guest, pane, session)) return { pane, runs: true };
+  const exited = panes.find((p) => p.harness === "claude-code" && p.harnessSessionId === session);
   return exited ? { pane: exited, runs: false } : null;
 }
 
-async function paneStatus(guest: Guest, herdrPane: string): Promise<HerdrStatus> {
+/** Whether Claude runs `session` in the pane: Herdr reports the session and Claude in its foreground, or, before Herdr learns an ID, Claude's command line names it. */
+async function runsSession(guest: Guest, pane: LivePane, session: string): Promise<boolean> {
+  if (pane.harness !== "claude-code") return false;
+  if (pane.harnessSessionId === null) return await launchedClaudeSession(guest, pane.herdrPane) === session;
+  return pane.harnessSessionId === session && await runsAgent(guest, pane.herdrPane, agents["claude-code"]!.kind);
+}
+
+async function livePane(guest: Guest, herdrPane: string): Promise<LivePane> {
   const pane = (await livePanes(guest)).find((p) => p.herdrPane === herdrPane);
   if (pane === undefined) throw new Error(`Claude's pane ${herdrPane} closed before it could take the message, so nothing was typed`);
-  return pane.status;
+  return pane;
 }
 
 /** Forgets a failed session in no pane, by its ID, so no wake tries it again. False when the file holds no such session. */

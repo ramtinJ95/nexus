@@ -504,7 +504,10 @@ attached terminal is joined to it.
 
 A send to Claude never reaches the Nexus agent. The same request ID is never typed
 twice: a repeat answers the first result. While Claude waits at a dialog in its
-terminal, nothing is typed and the API answers 409, saying to attach and answer it. If
+terminal, nothing is typed and the API answers 409, saying to attach and answer it.
+If the session's pane stops running it before the message is typed, as when another
+agent starts in that pane, nothing is typed and the API answers 409, saying the pane
+stopped running the session. The next try resumes the session in a new pane. If
 the probe fails partway through typing, the message may be partly in Claude's prompt.
 A repeat of that request ID then fails with exit code 1 (API 422), and the person
 checks the conversation before sending again under a new ID. A worker that has not

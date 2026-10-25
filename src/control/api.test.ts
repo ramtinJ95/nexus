@@ -1820,9 +1820,13 @@ test("a Claude worker's message is typed once per request ID, a send that typed 
   assert.match(blocked.body.error, /Claude waits at a prompt in its terminal, so nothing was typed. Attach/);
   answer = async () => sent("starting" as never);
   assert.equal((await send("msg:2")).status, 409);
+  answer = async () => sent("moved" as never);
+  const moved = await send("msg:2");
+  assert.equal(moved.status, 409);
+  assert.match(moved.body.error, new RegExp(`stopped running Claude session ${claudeSession} before the message was typed, so nothing was typed. Send again`));
   answer = async () => sent("sent");
   assert.equal((await send("msg:2")).status, 202);
-  assert.equal(s.commands.length, 5);
+  assert.equal(s.commands.length, 6);
 
   answer = async () => { throw new Error("typing into Claude's pane w1:p1 failed, so part of the message may sit unsent in its prompt"); };
   assert.equal((await send("msg:3")).status, 500);
@@ -1830,7 +1834,7 @@ test("a Claude worker's message is typed once per request ID, a send that typed 
   const again = await send("msg:3");
   assert.equal(again.status, 422);
   assert.match(again.body.error, /Check the conversation before sending it again under a new request ID/);
-  assert.equal(s.commands.length, 6, "a send that may have typed part of the message is not typed again");
+  assert.equal(s.commands.length, 7, "a send that may have typed part of the message is not typed again");
 });
 
 test("a Claude worker thread takes no messages while archived, deleted or before its session starts, and asks no probe", async (t) => {
