@@ -6,9 +6,7 @@ Several items copy ideas from [t3code](https://github.com/pingdotgg/t3code), whi
 
 ## In progress
 
-Nexus threads are building these, one pull request each. They are dogfooding Nexus.
-
-- **Pull request watch that sees real branches.** Pull request watch shipped, but the probe never reported a pylon's git branches, so it found no pull requests in production. The probe now observes each running pylon's branches, including ones pushed without an upstream ([nexus#69](https://github.com/ramtinJ95/nexus/pull/69)).
+Nothing is in progress.
 
 ## Next
 
@@ -26,14 +24,13 @@ These start once the work above has landed.
 - **Event consumers in Claude Code and pi-nexus.** The shared stream and background CLI follower now exist; client wake-ups and automatic reactions do not.
 - **Claude worker transcripts in the dashboard.** Use attach today; the conversation pane does not mirror Claude Code.
 - **Stronger hook delivery.** A guest-side outbox and acknowledged probe delivery could cover local-probe outages beyond the current bounded replay buffer.
-
 - **Placement by a scheduler.** A client or an agent submits work without naming a node, and Nexus boots the pylon on the node where it fits with the least load. Today every thread boots on its project's default node, unless the CLI's `start --node` names another. The scheduler needs these first:
   - `nexus nodes` reports `committedMemoryGiB: 0` on a node running five 8 GiB pylons, so the capacity it reports is wrong.
   - The model tools' `start` takes no node.
   - There is no move job, so a pylon stays on the node it booted on. [The lifecycle](design.md#lifecycle-follows-amp) describes how a move could work, and spike S7 showed that copying checkpoints needs verifying.
 - **Tools for an agent to drive other threads.** Delegate a task, send to a thread, wait on it and read it, with retry-safe request IDs and a cap on what a child thread may do. The agent loop runs on the control plane, so these tools could run there. Whether pi-durable can run a tool on the host rather than in the pylon is unchecked.
 - **Rethink how work is orchestrated.** Revisit this after more of the roadmap has been built through Nexus. Today the coordinator is a Claude Code chat on the Mac. It moves only while it has a turn, so the whole pipeline stops whenever it waits on the person. On 2026-10-25 it stopped three ways. The coordinator asked the person about calls it could have made, such as merging a reviewed PR whose live check couldn't run locally. A thread stopped at a draft and no one noticed until it was read. A deploy needed a sudo password. The rethink should also ask whether there should be one coordinator at all. Today a single chat is the person's only interface to every pylon, and that may not be the right workflow. Before deciding, look at how other tools do it, among them Grok's bot, Muse and t3code, and note their ideas and approaches. One direction among others: a coordinator that runs inside Nexus could fix this, reacting to attention changes and pull request events instead of polling. It would act alone within a written policy (review, live check, merge, deploy) and bring the person only real decisions, through the attention status. It builds on the tools above and on deploys that agents can run.
-- **An agent asking for a secret.** A card in the dashboard where the person enters the value. The agent gets only a reference, and Gondolin's placeholder swap delivers the value. Today a project's secrets are fixed when it is created.
+- **An agent asking for a secret.** A card in the dashboard where the person enters the value. The agent gets only a reference, and Gondolin's placeholder swap delivers the value. A person can already change a project's secrets with `nexus project edit` ([nexus#73](https://github.com/ramtinJ95/nexus/pull/73)), but an agent can't ask for one.
 - **Forking a thread.** Start a new thread from a point in another one. It needs a copy of the source pylon's disk, which is the same problem as the move job.
 - **Templates at thread start.** The backend already builds templates, which would skip `.nexus/setup`, but starting a thread doesn't use them yet.
 - **Named pylons that outlive a thread.**
