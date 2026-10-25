@@ -56,12 +56,14 @@ const serviceOp = (action) => ({ args: 1, request: ([name]) => ({ op: "services"
 const commands = {
   event: {
     args: 1,
-    options: { session: { type: "string" }, message: { type: "string" } },
-    request([kind], { session, message }) {
+    options: { session: { type: "string" }, message: { type: "string" }, at: { type: "string" } },
+    request([kind], { session, message, at }) {
+      const time = at === undefined ? Date.now() : Number(at);
+      if (!Number.isSafeInteger(time) || time < 0) throw new UsageError("--at must be a nonnegative Unix millisecond timestamp");
       if (!["session.turn-started", "session.heartbeat", "session.turn-ended", "session.waiting", "session.ended"].includes(kind)) throw new UsageError("not a pylon event kind");
       if (session !== undefined && (session.length === 0 || session.length > 200)) throw new UsageError("session must be 1 to 200 characters");
       if (message !== undefined && message.length > 2048) throw new UsageError("message exceeds 2048 characters");
-      return { op: "event", kind, ...(session === undefined ? {} : { session }), ...(message === undefined ? {} : { message }) };
+      return { op: "event", kind, at: time, ...(session === undefined ? {} : { session }), ...(message === undefined ? {} : { message }) };
     },
     print: () => "Event accepted.",
   },

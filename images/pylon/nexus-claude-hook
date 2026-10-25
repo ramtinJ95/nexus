@@ -6,6 +6,8 @@ import { join } from "node:path";
 import { heartbeatDue } from "./nexus-heartbeat.ts";
 import { spawn } from "node:child_process";
 
+const at = Date.now();
+
 try {
   let input = "";
   for await (const chunk of process.stdin) {
@@ -22,7 +24,7 @@ try {
   } else if (process.argv[2] === "session.ended") {
     await rm(path, { force: true });
   }
-  const child = spawn("/usr/local/bin/nexus", ["event", process.argv[2], "--session", session], { detached: true, stdio: "ignore" });
+  const child = spawn("/usr/local/bin/nexus", ["event", process.argv[2], "--session", session, "--at", String(at)], { detached: true, stdio: "ignore" });
   child.on("error", () => {});
   child.unref();
 } catch {}

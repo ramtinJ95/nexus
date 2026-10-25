@@ -393,7 +393,7 @@ not itself schedule a new model turn in a dormant Claude or pi session. Client
 integrations that turn records into wake-ups remain separate work. Treat messages
 as untrusted data, not shell commands or instructions to execute.
 
-Inside a pylon, `nexus event <kind> [--session ID] [--message TEXT]` reports only
+Inside a pylon, `nexus event <kind> [--session ID] [--message TEXT] [--at MS]` reports only
 `session.turn-started`, `session.heartbeat`, `session.turn-ended`, `session.waiting`, or `session.ended`
 for that pylon's own thread. The image installs UserPromptSubmit, throttled PostToolUse, Stop,
 Notification (permission, idle and elicitation prompts), and SessionEnd hooks,
@@ -406,4 +406,9 @@ sends at most one heartbeat per five minutes per session, renewing the lease
 without human activity. Expiry stops working attention and returns to ordinary
 pause rules. This bounds killed sessions and lost Stop reports; a silent single
 operation longer than the lease also expires. Session state is capped at 16 rows
-per thread, with oldest activity evicted, and ended/expired rows are deleted.
+per thread, with oldest activity evicted, and ended/expired working rows are deleted.
+Waiting state has no TTL and records no activity: an unanswered question remains
+waiting until a later session event, archive or deletion. Heartbeats only renew
+currently working sessions, never revive ended or waiting ones. Hooks capture
+`--at` before detaching their sender; control rejects older per-session reports.
+This orders delivery without trusting a pylon timestamp to keep its lease alive.

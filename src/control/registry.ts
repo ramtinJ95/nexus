@@ -219,6 +219,8 @@ const migrations: readonly string[] = [
   `CREATE INDEX events_thread_id ON events(thread, id);
    CREATE INDEX events_project_id ON events(project, id);
    CREATE INDEX events_kind_id ON events(kind, id);`,
+  `CREATE TABLE session_order (thread TEXT NOT NULL, session TEXT NOT NULL, at INTEGER NOT NULL, kind TEXT NOT NULL, PRIMARY KEY(thread, session)) STRICT;
+   CREATE TABLE session_order_floor (thread TEXT PRIMARY KEY, at INTEGER NOT NULL) STRICT;`,
 ];
 
 type Row = Record<string, unknown>;
@@ -391,7 +393,7 @@ export function openRegistry(path: string, clock = Date.now) {
   function withSessions(row: Row): Thread {
     const thread = threadRow(row);
     const working = db.prepare("SELECT max(updated_at) AS at FROM session_activity WHERE thread = ? AND state = 'session.turn-started' AND updated_at > ?").get(thread.id, clock() - sessionActivityTtlMs)?.at as number | null;
-    const waiting = db.prepare("SELECT 1 FROM session_activity WHERE thread = ? AND state = 'session.waiting' AND updated_at > ? LIMIT 1").get(thread.id, clock() - sessionActivityTtlMs);
+    const waiting = db.prepare("SELECT 1 FROM session_activity WHERE thread = ? AND state = 'session.waiting' LIMIT 1").get(thread.id);
     return { ...thread, ...(working === null ? {} : { sessionTurnRunning: true, sessionActiveUntil: working + sessionActivityTtlMs }), ...(waiting === undefined ? {} : { sessionWaiting: true }) };
   }
 
@@ -410,7 +412,7 @@ export function openRegistry(path: string, clock = Date.now) {
 
   function pruneSessions() {
     transaction(() => {
-      const expired = db.prepare("DELETE FROM session_activity WHERE updated_at <= ? RETURNING thread").all(clock() - sessionActivityTtlMs);
+      const expired = db.prepare("DELETE FROM session_activity WHERE state = 'session.turn-started' AND updated_at <= ? RETURNING thread").all(clock() - sessionActivityTtlMs);
       for (const thread of new Set(expired.map((r) => r.thread as ThreadId))) updateAttention(thread);
     });
   }
@@ -484,6 +486,21 @@ export function openRegistry(path: string, clock = Date.now) {
         db.prepare("INSERT INTO event_receipts VALUES (?, ?) ON CONFLICT(node) DO UPDATE SET sequence = excluded.sequence").run(node, report.sequence);
         pruneSessions();
         const session = event.session ?? "default";
+        const status = q.thread.get(thread)?.status;
+        if (status === "archived" || status === "deleted") return;
+        const at = event.at ?? report.time;
+        const previous = db.prepare("SELECT at, kind FROM session_order WHERE thread = ? AND session = ?").get(thread, session);
+        const floor = db.prepare("SELECT at FROM session_order_floor WHERE thread = ?").get(thread)?.at as number | undefined;
+        if (previous !== undefined) {
+          if (at < Number(previous.at)) return;
+          if (at === previous.at && (event.kind === "session.turn-started" || event.kind === "session.heartbeat") && previous.kind !== "session.turn-started" && previous.kind !== "session.heartbeat") return;
+        } else if (floor !== undefined && at <= floor) return;
+        if (event.kind === "session.heartbeat" && db.prepare("SELECT state FROM session_activity WHERE thread = ? AND session = ?").get(thread, session)?.state !== "session.turn-started") return;
+        db.prepare("INSERT INTO session_order VALUES (?, ?, ?, ?) ON CONFLICT(thread, session) DO UPDATE SET at = excluded.at, kind = excluded.kind").run(thread, session, at, event.kind);
+        // Keep tombstones after activity rows end, with a floor guarding reports older than evicted cursors.
+        const evicted = db.prepare("DELETE FROM session_order WHERE thread = ? AND session NOT IN (SELECT session FROM session_order WHERE thread = ? ORDER BY at DESC, rowid DESC LIMIT ?) RETURNING at")
+          .all(thread, thread, maxActiveSessions * 2);
+        if (evicted.length > 0) db.prepare("INSERT INTO session_order_floor VALUES (?, ?) ON CONFLICT(thread) DO UPDATE SET at = max(at, excluded.at)").run(thread, Math.max(...evicted.map((r) => Number(r.at))));
         if (event.kind === "session.ended" || event.kind === "session.turn-ended") {
           db.prepare("DELETE FROM session_activity WHERE thread = ? AND session = ?").run(thread, session);
         } else {
@@ -491,9 +508,9 @@ export function openRegistry(path: string, clock = Date.now) {
             .run(thread, session, event.kind === "session.heartbeat" ? "session.turn-started" : event.kind, clock());
           db.prepare("DELETE FROM session_activity WHERE thread = ? AND session NOT IN (SELECT session FROM session_activity WHERE thread = ? ORDER BY updated_at DESC, rowid DESC LIMIT ?)").run(thread, thread, maxActiveSessions);
         }
-        q.agentActivity.run(clock(), thread);
+        if (event.kind !== "session.waiting") q.agentActivity.run(clock(), thread);
         if (event.kind === "session.turn-ended") q.recordReply.run(clock(), thread);
-        appendEvent(event.kind, thread, { ...(event.session === undefined ? {} : { session: event.session }), ...(event.message === undefined ? {} : { message: event.message }) });
+        appendEvent(event.kind, thread, { at, ...(event.session === undefined ? {} : { session: event.session }), ...(event.message === undefined ? {} : { message: event.message }) });
         updateAttention(thread);
       });
     },
@@ -587,7 +604,17 @@ export function openRegistry(path: string, clock = Date.now) {
     recordReply(id: ThreadId, at: number) {
       transaction(() => { q.recordReply.run(at, id); appendEvent("thread.turn-ended", id, {} , at); updateAttention(id); });
     },
-    setThreadStatus(id: ThreadId, status: ThreadStatus) { q.threadStatus.run(status, id); },
+    setThreadStatus(id: ThreadId, status: ThreadStatus) {
+      transaction(() => {
+        q.threadStatus.run(status, id);
+        if (status === "archived" || status === "deleted") db.prepare("DELETE FROM session_activity WHERE thread = ?").run(id);
+        if (status === "deleted") {
+          db.prepare("DELETE FROM session_order WHERE thread = ?").run(id);
+          db.prepare("DELETE FROM session_order_floor WHERE thread = ?").run(id);
+        }
+        updateAttention(id);
+      });
+    },
     /** Timestamps only move forward, so a late or repeated report cannot make a thread look idle sooner. */
     recordActivity(id: ThreadId, activity: { human?: number; agent?: number; agentTurnRunning?: boolean }) {
       transaction(() => {

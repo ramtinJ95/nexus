@@ -165,13 +165,18 @@ control has accepted an event.
 
 `session_activity` holds at most 16 rows per thread, evicting the least recently
 updated row (insertion order breaks ties). Turn end and SessionEnd remove the row;
-reply identity stays in `lastReplyAt`. Remaining rows expire after 30 minutes
+reply identity stays in `lastReplyAt`. Working rows expire after 30 minutes
 without a session report, using control receipt time, never a guest timestamp.
+Waiting rows do not expire or refresh activity: an unanswered question stays
+waiting until a later session event, archive or deletion. They still count toward
+the 16-row cap.
 Pruning runs on registry open, reconcile passes and event retention writes, and
-publishes attention changes. Pre-migration rows have no receipt time and expire
-on upgrade rather than receiving an invented fresh lease.
+publishes attention changes. Pre-migration working rows have no receipt time and
+expire on upgrade rather than receiving an invented fresh lease.
 
-A start or `session.heartbeat` gives a session a 30-minute working lease.
+A start gives a session a 30-minute working lease. A `session.heartbeat` only
+renews an existing working lease; it cannot start one, resume waiting, or revive
+an ended or expired turn.
 PostToolUse hooks share a per-session five-minute throttle; no network call runs
 in the hook process. Each real tool completion can renew the lease, so a turn can
 run for hours without human activity. A killed, silent or fake one-shot turn start
@@ -188,6 +193,22 @@ increasing `lastReplyAt` identity. Attention keeps its precedence: failed pylon 
 worker launch, parked, unread reply, working, waiting, then null. Seen still changes
 only `seenAt`. These rules also apply to Claude sessions opened by hand when they
 use the image's hooks.
+
+The hook captures `at`, the pylon's Unix-millisecond time, before throttling or
+spawning its detached sender. `nexus event --at MS` preserves that timestamp;
+manual event commands default to their own current time. The probe validates it
+but never uses it for identity. Control ignores reports older than the last
+applied report for that session. For equal timestamps, waiting or terminal state
+wins over start/heartbeat. Old images without `at` fall back to probe receipt time.
+Source time orders reports only; it cannot extend a receipt-time working lease.
+
+Ordering survives activity-row deletion and control restart: `session_order`
+keeps at most 32 per-session cursors per thread, including terminal cursors.
+Evicting an old cursor advances a per-thread `session_order_floor`; reports for
+sessions whose cursor is gone must be newer than that floor. This conservatively
+rejects very delayed reports rather than allowing an old start to resurrect a
+turn, without unbounded tombstones. Thread deletion removes both cursor tables;
+archived/deleted threads ignore session reports.
 
 `claude_workers` holds a thread's first prompt and launch state: `pending`,
 `starting`, `started`, or `failed`. It is created atomically with the thread. A

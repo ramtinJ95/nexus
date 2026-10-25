@@ -10,6 +10,7 @@ export type EventKind = typeof eventKinds[number];
 
 export const pylonEventSchema = z.strictObject({
   kind: z.enum(sessionKinds),
+  at: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER).optional(),
   session: z.string().min(1).max(200).optional(),
   message: z.string().max(2048).optional(),
 });

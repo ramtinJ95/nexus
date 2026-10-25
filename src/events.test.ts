@@ -31,6 +31,8 @@ test("pylon event input rejects other threads, unknown kinds and oversized paylo
     { kind: "session.turn-ended", thread: "another-thread" },
     { kind: "release.changed" },
     { kind: "unknown" },
+    { kind: "session.turn-started", at: -1 },
+    { kind: "session.turn-started", at: Number.MAX_SAFE_INTEGER + 1 },
     { kind: "session.waiting", message: "x".repeat(2049) },
     { kind: "session.ended", session: "x".repeat(201) },
   ]) assert.equal(pylonEventSchema.safeParse(input).success, false);

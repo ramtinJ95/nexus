@@ -193,7 +193,10 @@ independent of Claude and have short deadlines; local-probe outages can lose
 reports rather than block the worker. Running session state is a 30-minute lease independent of
 the retained log and of harness activity. Throttled PostToolUse heartbeats renew
 it; a dead or silent worker cannot keep its pylon awake indefinitely. At most 16
-session states per thread are kept, and ended or expired rows are removed. A waiting or ended turn returns to the normal
+session states per thread are kept, and ended or expired working rows are removed.
+Waiting persists without refreshing activity. Hook timestamps and bounded durable
+ordering cursors reject stale reports after an end; heartbeats only renew existing
+working leases. A waiting or ended turn returns to the normal
 idle policy; seen remains unrelated to activity.
 
 Filtered stream reads use indexed registry columns, not decoding then filtering
