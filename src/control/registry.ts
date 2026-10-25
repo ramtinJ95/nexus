@@ -79,13 +79,12 @@ export interface ClaudeTranscript { session: string; cursor: TranscriptCursor; d
 export interface ClaudeRead { session: string; from: TranscriptCursor; entries: readonly ClaudeEntry[]; cursor: TranscriptCursor; reset: boolean; readAt: number }
 /**
  * A message typed into a Claude worker, by its request ID. It is `sending` from before the probe is asked until the
- * probe answers, so a send whose answer was lost, which may have typed some of it, is not typed again.
+ * probe answers, so a send whose answer was lost, which may have typed some of it, is not typed again. A thread keeps
+ * every request ID until it is deleted, since a forgotten ID would be typed again on a resend however late it comes.
  */
 export type ClaudeMessage = { state: "sending" } | { state: "sent"; result: ClaudeSent };
 /** What a send to a Claude worker answers, and answers again for a resend of its request ID. */
 export interface ClaudeSent { session: string; outcome: "sent" | "queued"; resumed: boolean }
-/** Each thread keeps this many of its newest messages' request IDs, far more than a client retries across. */
-const keptClaudeMessages = 256;
 
 /** Applied in order. The database's user_version counts the ones already applied. Never edit one that has shipped. */
 const migrations: readonly string[] = [
@@ -538,12 +537,9 @@ export function openRegistry(path: string, clock = Date.now) {
     },
     /** Null forgets the message, as for a send that typed nothing. */
     setClaudeMessage(thread: ThreadId, requestId: string, message: ClaudeMessage | null) {
-      transaction(() => {
-        if (message === null) return void db.prepare("DELETE FROM claude_messages WHERE thread = ? AND request_id = ?").run(thread, requestId);
-        db.prepare("INSERT INTO claude_messages (thread, request_id, state, result) VALUES (?, ?, ?, ?) ON CONFLICT (thread, request_id) DO UPDATE SET state = excluded.state, result = excluded.result")
-          .run(thread, requestId, message.state, message.state === "sent" ? JSON.stringify(message.result) : null);
-        db.prepare("DELETE FROM claude_messages WHERE thread = ? AND rowid NOT IN (SELECT rowid FROM claude_messages WHERE thread = ? ORDER BY rowid DESC LIMIT ?)").run(thread, thread, keptClaudeMessages);
-      });
+      if (message === null) return void db.prepare("DELETE FROM claude_messages WHERE thread = ? AND request_id = ?").run(thread, requestId);
+      db.prepare("INSERT INTO claude_messages (thread, request_id, state, result) VALUES (?, ?, ?, ?) ON CONFLICT (thread, request_id) DO UPDATE SET state = excluded.state, result = excluded.result")
+        .run(thread, requestId, message.state, message.state === "sent" ? JSON.stringify(message.result) : null);
     },
     setClaudeWorker(thread: ThreadId, prompt: string, state: string, message?: string, session?: string) {
       transaction(() => {
