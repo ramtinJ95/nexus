@@ -173,13 +173,20 @@ test("a withdraw whose write failed writes the table when it is asked again", as
 });
 
 
-test("preview cleanup preserves the dashboard's private socket entry on 443", async (t) => {
-  const { tailscale, serve, signal } = await setup(t);
-  const dashboard = "unix:/run/nexus-control/dashboard.sock";
-  await tailscale.cli(["serve", "--bg", "--https=443", dashboard], signal);
-  await serve.converge(a, [{ service: "web", httpsPort: 10200 }], signal);
-  await serve.converge(a, [], signal);
-  assert.deepEqual(tailscale.entries(), { 443: dashboard });
-  await assert.rejects(serve.converge(a, [{ service: "web", httpsPort: 443 }], signal), /already served/);
-  assert.deepEqual(tailscale.entries(), { 443: dashboard });
+test("an existing Unix target blocks an operator's preview additions and removals", async (t) => {
+  const initial = JSON.stringify({
+    TCP: { 443: { HTTPS: true }, 10200: { HTTPS: true } },
+    Web: {
+      [`${nodeHost}:443`]: { Handlers: { "/": { Proxy: "unix:/run/nexus-control/dashboard.sock" } } },
+      [`${nodeHost}:10200`]: { Handlers: { "/": { Proxy: "GATEWAY" } } },
+    },
+  });
+  const { tailscale, serve, signal } = await setup(t, async (origin) => initial.replace("GATEWAY", origin));
+  const before = tailscale.entries();
+  await assert.rejects(serve.converge(a, [{ service: "web", httpsPort: 10200 }, { service: "api", httpsPort: 10201 }], signal), /must be root/);
+  await assert.rejects(serve.converge(a, [], signal), /must be root/);
+  assert.deepEqual(tailscale.entries(), before);
+  const admin = fakeTailscale(initial, true);
+  await admin.cli(["serve", "--https=10200", "off"], signal);
+  assert.deepEqual(admin.entries(), { 443: "unix:/run/nexus-control/dashboard.sock" });
 });

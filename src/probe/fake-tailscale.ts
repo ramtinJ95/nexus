@@ -9,10 +9,10 @@ export const nodeHost = "infra-testbench.example.ts.net";
 
 interface ServeConfig {
   TCP?: Record<string, { HTTPS: true }>;
-  Web?: Record<string, { Handlers: Record<string, { Proxy: string }> }>;
+  Web?: Record<string, { Handlers: Record<string, { Proxy?: string; Path?: string }> }>;
 }
 
-export function fakeTailscale(initial = "{}") {
+export function fakeTailscale(initial = "{}", localAdmin = false) {
   let config = JSON.parse(initial) as ServeConfig;
   const changes: string[] = [];
   const failing = new Set<string>();
@@ -23,6 +23,7 @@ export function fakeTailscale(initial = "{}") {
     if (line === "serve status --json") return JSON.stringify(config, null, 2);
     const add = /^serve --bg --https=(\d+) ((?:http:\/\/|unix:)\S+)$/.exec(line);
     const off = /^serve --https=(\d+) off$/.exec(line);
+    const previous = config;
     if (add) {
       const [, port, target] = add as unknown as [string, string, string];
       config = { TCP: { ...config.TCP, [port]: { HTTPS: true } }, Web: { ...config.Web, [`${nodeHost}:${port}`]: { Handlers: { "/": { Proxy: target } } } } };
@@ -35,6 +36,10 @@ export function fakeTailscale(initial = "{}") {
     } else {
       throw new Error(`the fake tailscale does not know: tailscale ${line}`);
     }
+    if (!localAdmin && Object.values(config.Web ?? {}).some((web) => Object.values(web.Handlers).some((handler) => handler.Path !== undefined || handler.Proxy?.startsWith("unix:")))) {
+      config = previous;
+      throw new Error("must be root, or be an operator and able to run 'sudo tailscale' to serve a path or Unix socket");
+    }
     changes.push(line);
     return "";
   };
@@ -45,7 +50,7 @@ export function fakeTailscale(initial = "{}") {
     failOnce(line: string) { failing.add(line); },
     /** Port to proxy target, as the status JSON reports it. */
     entries(): Record<string, string> {
-      return Object.fromEntries(Object.entries(config.Web ?? {}).map(([key, web]) => [key.slice(key.lastIndexOf(":") + 1), web.Handlers["/"]!.Proxy]));
+      return Object.fromEntries(Object.entries(config.Web ?? {}).map(([key, web]) => [key.slice(key.lastIndexOf(":") + 1), web.Handlers["/"]!.Proxy!]));
     },
   };
 }
