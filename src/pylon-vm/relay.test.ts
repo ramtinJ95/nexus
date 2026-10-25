@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { mkdtemp, rename, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { createServer, request, type Server } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -42,9 +42,11 @@ async function until(what: string, check: () => Promise<boolean>) {
 	}
 }
 
-test("the relay carries a route's port to 127.0.0.1 or else ::1, follows its server across addresses without holding its port, and lets a relay port go when the map drops it", async (t) => {
+test("the relay carries a route's port to 127.0.0.1 or else ::1, follows its server across addresses without holding its port, lets a relay port go when the map drops it, and caps its log", async (t) => {
 	const dir = await mkdtemp(join(tmpdir(), "nexus-relay-"));
 	const map = join(dir, "relays.json");
+	const logFile = join(dir, "relay.log");
+	await writeFile(logFile, "x".repeat(1048577));
 	/** Written aside and renamed in, as writeRelayMap does. */
 	const relays = async (entries: Record<number, number>) => {
 		await writeFile(`${map}.new`, JSON.stringify(entries));
@@ -53,9 +55,8 @@ test("the relay carries a route's port to 127.0.0.1 or else ::1, follows its ser
 	const v6 = await serve("::1", "v6");
 	const relayPort = await freePort();
 	await relays({ [relayPort]: v6.port });
-	const relay = spawn("python3", ["-c", relayScript, map], { stdio: ["ignore", "pipe", "inherit"] });
-	let log = "";
-	relay.stdout.setEncoding("utf8").on("data", (chunk: string) => { log += chunk; });
+	const relay = spawn("python3", ["-c", relayScript, map, logFile], { stdio: ["ignore", "inherit", "inherit"] });
+	const logged = async (line: string) => (await readFile(logFile, "utf8")).includes(`${line}\n`);
 	const servers: Server[] = [v6];
 	t.after(async () => {
 		relay.kill();
@@ -64,7 +65,9 @@ test("the relay carries a route's port to 127.0.0.1 or else ::1, follows its ser
 	});
 
 	await until(`the relay port answers from the server on ::1`, async () => await get(relayPort) === "v6");
-	await until("the relay logs the port", async () => log.includes(`relaying 127.0.0.1:${relayPort} to port ${v6.port}\n`));
+	await until("the relay logs the port", () => logged(`relaying 127.0.0.1:${relayPort} to port ${v6.port}`));
+	assert.equal((await stat(`${logFile}.previous`)).size, 1048577, "a log past 1 MiB was moved aside");
+	assert.ok((await stat(logFile)).size < 1024, "and a new one begun");
 
 	const v4 = await serve("127.0.0.1", "v4", v6.port);
 	servers.push(v4);
@@ -79,5 +82,5 @@ test("the relay carries a route's port to 127.0.0.1 or else ::1, follows its ser
 
 	await relays({});
 	await until("the relay port is let go", async () => await get(relayPort) === "ECONNREFUSED");
-	await until("the relay logs that it let the port go", async () => log.includes(`stopped relaying 127.0.0.1:${relayPort} to port ${v6.port}\n`));
+	await until("the relay logs that it let the port go", () => logged(`stopped relaying 127.0.0.1:${relayPort} to port ${v6.port}`));
 });

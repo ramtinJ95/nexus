@@ -7,7 +7,8 @@
  *
  * The relay is one process per boot. It reads relayMap, a JSON object from relay port to app port that GuestServices
  * rewrites whenever its routes change, every 200 ms, and listens on exactly the relay ports it names. Each port it
- * starts or stops relaying, each it cannot bind, and each restart is a line in relayLog.
+ * starts or stops relaying, each it cannot bind, and each restart is a line in relayLog. A relay port it cannot bind is
+ * held by some other process, which only root can start there, and the ingress then reaches that process instead.
  */
 import type { VM } from "@earendil-works/gondolin";
 import { checked } from "./guest.ts";
@@ -16,9 +17,12 @@ import { shellQuote as q } from "./storage.ts";
 export const relayMap = "/var/lib/pi-sandbox/relays.json";
 export const relayLog = "/var/lib/pi-sandbox/relay.log";
 
-/** argv: the relay map's path. */
+/** argv: the relay map's path, then the log's, which it moves aside to `.previous` once it passes 1 MiB. */
 export const relayScript = [
-	"import asyncio,json,sys",
+	"import asyncio,json,os,sys",
+	"def log(line):",
+	" if os.path.exists(sys.argv[2]) and os.path.getsize(sys.argv[2])>1048576: os.replace(sys.argv[2],sys.argv[2]+'.previous')",
+	" with open(sys.argv[2],'a') as f: print(line,file=f)",
 	"async def pipe(r,w,other):",
 	" try:",
 	"  while data:=await r.read(65536):",
@@ -36,37 +40,31 @@ export const relayScript = [
 	" await asyncio.gather(pipe(r,uw,w),pipe(ur,w,uw))",
 	" w.close(); uw.close()",
 	"async def main():",
-	" servers={}; failed={}",
+	" log('relay started'); servers={}; failed={}",
 	" while True:",
 	"  with open(sys.argv[1]) as f: wanted={int(k):v for k,v in json.load(f).items()}",
 	"  for listen in [l for l,(port,_) in servers.items() if wanted.get(l)!=port]:",
-	"   port,server=servers.pop(listen); print(f'stopped relaying 127.0.0.1:{listen} to port {port}',flush=True); server.close()",
+	"   port,server=servers.pop(listen); log(f'stopped relaying 127.0.0.1:{listen} to port {port}'); server.close()",
 	"  for listen,port in wanted.items():",
 	"   if listen in servers: continue",
 	"   try: server=await asyncio.start_server(lambda r,w,port=port: relay(r,w,port),'127.0.0.1',listen)",
 	"   except OSError as e:",
-	"    if failed.get(listen)!=str(e): print(f'cannot relay 127.0.0.1:{listen}: {e}',flush=True)",
+	"    if failed.get(listen)!=str(e): log(f'cannot relay 127.0.0.1:{listen}: {e}')",
 	"    failed[listen]=str(e); continue",
-	"   failed.pop(listen,None); servers[listen]=(port,server); print(f'relaying 127.0.0.1:{listen} to port {port}',flush=True)",
+	"   failed.pop(listen,None); servers[listen]=(port,server); log(f'relaying 127.0.0.1:{listen} to port {port}')",
 	"  await asyncio.sleep(0.2)",
 	"asyncio.run(main())",
 ].join("\n");
 
 /**
  * Starts the relay on an empty map, in its own session so it outlives the exec, under a loop that restarts it if it
- * dies and rotates its log as the service supervisor does (guest.ts). A boot starts it once, before any service.
+ * dies. A boot starts it once, before any service. A crash's traceback goes to the log too, and each start rotates it,
+ * so a relay that keeps crashing cannot fill the disk.
  */
 export async function startRelay(vm: VM): Promise<void> {
-	const loop = [
-		"while :; do",
-		'  python3 -c "$0" "$1"',
-		'  echo "relay exited $?, restarting in 1s"',
-		`  if test "$(wc -c < ${q(relayLog)})" -gt 1048576; then mv ${q(relayLog)} ${q(`${relayLog}.previous`)}; exec >>${q(relayLog)} 2>&1; fi`,
-		"  sleep 1",
-		"done",
-	].join("\n");
+	const loop = 'while :; do python3 -c "$0" "$1" "$2" 2>>"$2"; echo "relay exited $?, restarting in 1s" >>"$2"; sleep 1; done';
 	await writeRelayMap(vm, new Map());
-	await checked(vm, `setsid /bin/sh -c ${q(loop)} ${q(relayScript)} ${q(relayMap)} </dev/null >${q(relayLog)} 2>&1 &`);
+	await checked(vm, `rm -f ${q(relayLog)}; setsid /bin/sh -c ${q(loop)} ${q(relayScript)} ${q(relayMap)} ${q(relayLog)} </dev/null >/dev/null 2>&1 &`);
 }
 
 /** Replaces the map, from app port to relay port, in one rename, so the relay never reads half of it. */
