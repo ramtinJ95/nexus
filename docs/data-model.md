@@ -17,6 +17,7 @@ The control plane writes every record. Probes send facts in observations, and th
 | Session | `pylon`, `id`, `herdrPane`, `harness`, `harnessSessionId`, `status`, `title`, `state`, `message` | Observations. Panes opened by hand in Herdr are adopted. A paused pylon's sessions keep their records |
 | Preview | `pylon`, `service`, `httpsPort` | The control plane allocates the port, never one its node's probe still routes. Observations report when it is ready |
 | Output | `thread`, `kind`, `ref` | Observations, including outputs the agent declares with `nexus output add` |
+| NexusEvent | `id`, `time`, `thread`, `project`, `kind`, `payload` | Accepted pylon lifecycle reports and control-plane changes |
 | Orphan | `node`, `pylonId` | Observations of a pylon the registry does not know. Only you delete it |
 
 One setting sits beside the records: `current`, the image every new pylon uses. A build that passes its smoke boot becomes current.
@@ -57,7 +58,7 @@ The probe reads only running pylons, at most once a minute per boot across snaps
 
 The registry stores each thread's nullable `seenAt` and `lastReplyAt` as Unix milliseconds, added by migration. A turn ending records `lastReplyAt`; streaming and parked tasks do not. Old rows start with null timestamps. If recovery finds a previously running turn ended, its reply is dated at recovery.
 
-The API derives `attention` in order: failed pylon, parked tasks, unread reply (`lastReplyAt > seenAt`, with null seen treated as unread), running turn, then null. Parked tasks are tracked for every conversation at harness recovery, independently of client watches. Both the thread list and detail report this value and both timestamps.
+The API derives `attention` in order: failed pylon, parked tasks, unread reply (`lastReplyAt > seenAt`, with null seen treated as unread), running harness or session turn, waiting session, then null. Parked tasks are tracked for every conversation at harness recovery, independently of client watches. Both the thread list and detail report this value and both timestamps.
 
 Each recorded reply timestamp is strictly greater than the preceding reply and seen marker, nudged forward by a millisecond if needed, so reply identities and unread ordering survive same-millisecond events and clock corrections.
 
@@ -71,7 +72,7 @@ The desired phase is `running`, `paused`, or `deleted`. It follows the thread:
 
 | Thread state | Desired phase |
 |---|---|
-| `active` or `idle` | `running` while an agent turn runs, or the agent was active in the last 5 minutes, or a human in the last 20. Otherwise `paused` |
+| `active` or `idle` | `running` while a harness or reported session turn runs, or the agent was active in the last 5 minutes, or a human in the last 20. Otherwise `paused` |
 | `archived` | `paused` at once |
 | `deleted` | `deleted` |
 
@@ -115,3 +116,62 @@ On each node, root owns `/opt/nexus/<role>-deploy.json`: `{commit, previous, tar
 `Project.gitIdentity` is optional `{ name: string, email: string }` (null also means inherit). The optional control.json `gitIdentity` has the same shape without null. Project values override the control default. Only name and email are carried: no credentials. Before a fresh or checkpoint boot, reconciliation resolves the identity into `BootInputs.gitIdentity`. The boot hook applies it globally for `user` after common dotfiles. The saved value renders PYLON.md while the pylon runs. With neither configured, no git config is changed; an earlier identity on disk remains.
 
 `PATCH /v1/projects/<id>` replaces supplied editable settings without changing the ID or repo URL. No schema migration is required: projects and boot inputs are JSON records and older records lack the optional field. Network settings, resources and repository initialization remain frozen in the existing thread's boot record. A checkpoint wake uses that saved network, even following archive/unarchive. New grants require a new thread. The derived `ThreadDetail.pylon.grantsOutdated` compares the saved network policy and secret grants with the project's current effective policy (including the pylon's dotfiles host); it does not compare node secret values. No edit changes a running VM's network or secrets.
+
+## Nexus events and Claude workers
+
+`NexusEvent` is defined in `src/events.ts`. It has `id` (a decimal string), `time`
+(control-plane receipt time in Unix milliseconds), nullable `thread` and `project`,
+`kind`, and a small JSON `payload`. IDs increase globally, not per thread. The
+registry's `events` table retains the most recent 10,000 records across restarts.
+A cursor means **strictly after this ID**. Reconnecting within retention replays
+all matching events; an expired nonzero cursor is refused rather than silently
+skipping a gap. No cursor, or `0`, reads the retained history, not all-time history.
+
+| Kind | Meaning and payload |
+|---|---|
+| `session.turn-started` | Claude submitted a prompt; optional `session` and `message` |
+| `session.turn-ended` | Claude's Stop hook ran; optional `session` and `message` |
+| `session.waiting` | Claude notified that input is needed; optional `session` and `message` |
+| `session.ended` | Claude's SessionEnd hook ran; optional `session` and `message` |
+| `thread.turn-ended` | The control-plane harness completed a turn |
+| `thread.failed` | Pylon or worker launch failed; `message` |
+| `thread.parked` | The harness has parked tasks |
+| `attention.changed` | The new nullable `attention` |
+| `pull-request.feedback` | New batched GitHub feedback; `requestId` |
+| `release.changed` | Desired release (`desired`) or changed component report |
+
+Only the four `session.*` kinds may come from a pylon. The strict boundary schema
+rejects extra fields, including a thread or project supplied by the guest. Session
+IDs are at most 200 characters and messages at most 2,048. The bridge supplies the
+pylon identity; control maps it to its registered thread and verifies its node.
+There is no arbitrary API forwarding. Never include credentials or full tool
+output in a message.
+
+The production probe journals its last 100 session reports in `events.sqlite`
+under its state root. Observations replay that journal after a link or probe
+restart; `event_receipts` deduplicates its sequence per node. This is a bounded
+outage buffer, not an unbounded delivery guarantee. The hooks detach a CLI process
+with a 1.5-second request deadline. A hook cannot block Claude on a disconnected
+control plane; reports can be lost if the local probe itself is unavailable, or
+an outage exceeds the probe's buffer. The registry cursor guarantee begins once
+control has accepted an event.
+
+`session_activity` keeps each reported session's last lifecycle state separately
+from event retention. Any started, not-ended-or-waiting session keeps its thread
+awake, independently of the harness's activity (`Thread.sessionTurnRunning`). A
+waiting session is exposed as `Thread.sessionWaiting`; both flags are optional. Ending or waiting starts the
+normal five-minute agent grace, without recording human activity. Session turn
+ends use the existing strictly increasing `lastReplyAt` identity. Attention keeps
+its existing precedence: failed pylon or worker launch, parked, unread reply, working, then waiting,
+then null. Seen still changes only `seenAt`. These rules also apply to Claude
+sessions opened by hand when they use the image's hooks.
+
+`claude_workers` holds a thread's first prompt and launch state: `pending`,
+`starting`, `started`, or `failed`. It is created atomically with the thread. A
+Claude-worker thread has no control-plane harness conversation. Its pending
+launch runs after its pylon is observed running. `starting` is written before the
+non-idempotent open command: after an interrupted launch, Nexus reports failure
+rather than risking a second submission. Inspect with `attach` before opening
+another session. A launch that reaches Claude's login screen can be `started`
+without running its task; `started` means the session opened, not task success.
+`ThreadDetail.claudeWorker.state` exposes this state.

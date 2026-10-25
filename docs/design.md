@@ -116,6 +116,7 @@ A persistent drain lease blocks API and background PR-watch turn entry, and coun
 | Date | Decision |
 |---|---|
 | 2026-10-26 | Dashboard terminates TLS directly on 7443 with tailscaled cert-only access and renewal; TCP-peer whois remains the only caller identity. No dashboard Serve entry: a Unix target would require local-admin rights for the probe’s later preview writes. HTTP starts independently of certificate availability; HTTPS retries failures and reports its state in health. HTTP clients stay unchanged |
+| 2026-10-25 | A retained cursor-based event stream is shared by every session; opt-in Claude Code workers run `/poteto-mode` inside pylons and report lifecycle through bounded, non-blocking hooks |
 | 2026-10-23 | Root release reconciliation uses direct tailnet plus root-token polling, external-node-only deployers, control-first activation, a conservative drain barrier and a fixed recovery supervisor |
 | 2026-10-22 | The probe, project config and template image contracts in `contracts/` are agreed |
 | 2026-10-22 | Nexus copies Amp's design and uses no part of Amp's stack, including its file names and environment variables |
@@ -164,3 +165,32 @@ A GitHub 403 or 429 sets a shared rate-limit cooldown only when `x-ratelimit-rem
 Humans can use `nexus project edit <id>` or `PATCH /v1/projects/<id>` to change placement defaults, branch, resources, allowed hosts, logins, secret grants and git identity. IDs and repository URLs remain fixed. Add and edit share validation; secret hosts must be explicit, nonempty hostname lists. An edit changes only supplied fields; supplied lists replace whole lists, and a null identity removes the override. No agent-facing edit tool is provided. The dashboard's current limited creation dialog is unchanged.
 
 Existing threads retain their placement, checkout, resources and network boot inputs. Running and paused pylons keep their original grants, and `show` exposes whether those differ from the project. The backend reconstructs network options on checkpoint wake, but reconciliation supplies the original saved boot network, not current project settings: archive/unarchive does not apply new grants. Start a new thread to use them, preserving the old thread's work first. Git identity alone is resolved again before a fresh boot or checkpoint wake, so a configured default reaches existing pylons too. Removing configuration does not erase an identity already on disk. Neither project edits nor identity configuration hot-update a running VM.
+
+## Event stream and Claude Code thread workers
+
+The control plane owns a retained, globally ordered event log, separate from the
+conversation stream. Any authenticated session follows the same endpoint with a
+cursor and thread/project/kind filters. A follower catches up from the registry
+rather than subscribing to an in-memory-only broadcast, so disconnecting between
+replay and live delivery cannot lose an accepted event. Retention expiry is an
+explicit conflict, not a silent jump. Filtering and cursor validation live with
+the event model in `src/events.ts`.
+
+Claude workers run inside the pylon, not in the Nexus harness. Thread creation
+persists a first prompt; reconciliation opens a Herdr Claude session when the
+pylon runs. The initial argument preserves the prompt literally and avoids a
+terminal-readiness/keystroke race. `/poteto-mode` is added unless already present.
+An uncertain launch is not retried automatically, since starting two coding
+agents is worse than asking the person to inspect a possibly started session.
+The sandbox justifies bypassed permission prompts, including on resume. Existing
+secret injection supplies OAuth placeholders through login-shell environment.
+
+Claude hooks report lifecycle facts through the narrow host bridge. The probe
+supplies identity, validates the event, journals a bounded reconnect buffer and
+forwards it through observations. Control deduplicates those reports, updates
+activity and attention, and appends the public event. Hook subprocesses are
+independent of Claude and have short deadlines; local-probe outages can lose
+reports rather than block the worker. Running session state is independent of
+the retained log and of harness activity, so retention and a dormant harness
+cannot pause a running Claude turn. A waiting or ended turn returns to the normal
+idle policy; seen remains unrelated to activity.
