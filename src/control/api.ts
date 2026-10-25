@@ -477,7 +477,7 @@ export async function startApi(options: ApiOptions): Promise<Api> {
    * is refused with a 409 until it is.
    */
   async function inPylon<T>(t: Thread, act: (probe: Pick<ProbeClient, "command" | "stream">, pylonId: PylonId) => Promise<T>): Promise<T> {
-    if (t.status === "deleted" || t.status === "archived") throw new HttpError(409, `thread ${t.id} is ${t.status}, so its pylon stays paused`);
+    refuseClosed(t);
     const pylon = registry.pylon(t.pylonId)!;
     const probe = probes.get(pylon.node);
     if (probe === undefined) throw new HttpError(503, `no probe is configured for ${pylon.node}`);
@@ -487,6 +487,8 @@ export async function startApi(options: ApiOptions): Promise<Api> {
     try {
       result = await act(probe, pylon.pylonId);
     } catch (err) {
+      // A delete or archive that landed meanwhile stopped the pylon, so the thread's state answers, not the node's failure.
+      refuseClosed(registry.thread(t.id)!);
       const code = (err as Partial<ProbeError>).code;
       if (code === "not-running") throw new HttpError(409, `pylon ${pylon.pylonId} is not running yet. This request wakes it, so ask again once it runs`);
       if (code === "unreachable") throw new HttpError(503, (err as Error).message);
@@ -496,6 +498,10 @@ export async function startApi(options: ApiOptions): Promise<Api> {
     // A delete that landed meanwhile may have released the pylon's ports already.
     if (registry.thread(t.id)!.status === "deleted") throw new HttpError(409, `thread ${t.id} is deleted`);
     return result;
+  }
+
+  function refuseClosed(t: Thread) {
+    if (t.status === "deleted" || t.status === "archived") throw new HttpError(409, `thread ${t.id} is ${t.status}, so its pylon stays paused`);
   }
 
   async function pylonCommand<K extends "link-port" | "unlink-port" | "open-session" | "close-session" | "drop-failed-session">(t: Thread, command: Extract<PylonCommand, { kind: K }>): Promise<Extract<CommandResult, { kind: K }>> {
