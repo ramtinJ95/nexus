@@ -174,7 +174,7 @@ function detailText({ thread: t, pylon: p, agent, sessions, previews, ports, out
 
 function portsText(ports: ThreadDetail["ports"], id: string): string {
   if (ports === null) return "The pylon's listening ports could not be read.";
-  if (ports.length === 0) return "No listening ports. A server bound only to ::1 can't be previewed, so bind it to 0.0.0.0 or 127.0.0.1.";
+  if (ports.length === 0) return "No listening ports.";
   return [
     table(ports.map((l) => [String(l.port), l.service ?? "-", l.preview === null ? "-" : `${l.preview.url}${failureOf(l.preview) !== null ? " (its service failed)" : l.preview.ready ? "" : " (not served yet)"}`])),
     ...ports.some((l) => l.preview === null) ? [`\`nexus preview ${id} <port>\` publishes a port.`] : [],
