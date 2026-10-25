@@ -8,12 +8,17 @@
  * conversation for the dashboard. Each stream holds one watch on the harness and sends what changed since its
  * last event, so a slow client gets fewer, larger events and never holds the harness up.
  *
+ * A thread's pylon also gives a terminal on its Herdr session, over a WebSocket on the attach route, which
+ * control/attach.ts serves.
+ *
  * Like the probe, it trusts tailnet identity: each caller's stable node ID, from tailscaled's whois, must be
  * on the allowlist. The API writes only what a human asks for. Every change that can move a pylon
  * wakes the loop for its node, so a start or a dashboard visit acts within one pass rather than 5 seconds.
  */
 import { randomBytes } from "node:crypto";
-import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+import { createServer, STATUS_CODES, type IncomingMessage, type ServerResponse } from "node:http";
+import type { Duplex } from "node:stream";
+import { WebSocketServer, type WebSocket } from "ws";
 import { z } from "zod";
 import { actualState, desiredPhase, retryRefusal, type ActualState, type DesiredPhase } from "../reconcile.ts";
 import { effectiveAllowedHosts, gitUrl, hasRemote, linkedName, liveHashOf, reservedPorts, withHttpsHosts, type BootInputs, type Project, type ProjectId, type PylonOverlay, type RepoInit, type SessionHarness } from "../project.ts";
@@ -26,8 +31,11 @@ import { newPylonRecord } from "../tick.ts";
 import type { NodeRecord, Output, PortRange, Preview, Registry, Session, Thread, ThreadId } from "./registry.ts";
 import { dashboard, liveFrames } from "./dashboard.ts";
 import { pylonLive } from "./live.ts";
-import { checkoutDir, herdrSession } from "../sessions.ts";
+import { attachScript, checkoutDir, herdrSession } from "../sessions.ts";
 import { checkoutReader, CheckoutRefused, contentType, pathsFit, type CheckoutReader, type RefusalKind } from "../checkout-files.ts";
+import { attachRoute, parseAttachQuery } from "../attach-wire.ts";
+import { openTerminal } from "../guest-terminal.ts";
+import { attachTiming, serveAttach, type AttachTiming, type Ending, type PylonDoor } from "./attach.ts";
 
 export interface ApiOptions {
   registry: Registry;
@@ -49,6 +57,8 @@ export interface ApiOptions {
   previewPorts: PortRange;
   /** How long a stream's client may leave what was sent unread before it is dropped. 30 s by default. */
   streamStallMs?: number;
+  /** How attached terminals ping and wait. Tests shorten it. */
+  attachTiming?: AttachTiming;
 }
 
 /** A session `POST /v1/threads/<id>/sessions` opened. Its observed state shows in ThreadDetail.sessions. */
@@ -201,7 +211,7 @@ const refusalStatus: Readonly<Record<RefusalKind, number>> = { missing: 404, out
 const newThreadId = () => `th-${randomBytes(6).toString("hex")}` as ThreadId;
 
 export async function startApi(options: ApiOptions): Promise<Api> {
-  const { registry, whois, allowed, hostnames, dotfiles, harness, wake, probes, previewPorts, streamStallMs = 30_000 } = options;
+  const { registry, whois, allowed, hostnames, dotfiles, harness, wake, probes, previewPorts, streamStallMs = 30_000, attachTiming: timing = attachTiming } = options;
 
   function thread(id: string): Thread {
     const found = registry.thread(id as ThreadId);
@@ -339,7 +349,7 @@ export async function startApi(options: ApiOptions): Promise<Api> {
 
   const page = dashboard({ registry, detail, conversation });
 
-  /** Each open stream's thread and how to end it, so a delete ends its thread's streams. */
+  /** Each open stream's and terminal's thread and how to end it, so a delete ends its thread's streams. */
   const open = new Set<{ thread: ThreadId; end(): void }>();
 
   /**
@@ -668,7 +678,8 @@ export async function startApi(options: ApiOptions): Promise<Api> {
     ["PUT", /^\/v1\/images\/current$/, async (_, r) => { setCurrentImage(await r.body()); return noContent; }],
   ];
 
-  async function handle(req: IncomingMessage, res: ServerResponse) {
+  /** The caller, once it is allowed and asked under one of the API's names. Every request and upgrade passes here. */
+  async function admit(req: IncomingMessage): Promise<TailnetNodeId> {
     const { remoteAddress, remotePort } = req.socket;
     const caller = remoteAddress === undefined || remotePort === undefined ? null : await whois(remoteAddress, remotePort);
     if (caller === null || !allowed.has(caller)) throw new HttpError(403, "caller is not a tailnet node this control plane allows");
@@ -677,6 +688,11 @@ export async function startApi(options: ApiOptions): Promise<Api> {
     // nor reach the API under its own name.
     const hostname = req.headers.host === undefined ? undefined : new URL(`http://${req.headers.host}`).hostname;
     if (hostname === undefined || !hostnames.has(hostname)) throw new HttpError(403, `the API does not answer to host ${req.headers.host}`);
+    return caller;
+  }
+
+  async function handle(req: IncomingMessage, res: ServerResponse) {
+    const caller = await admit(req);
     if (req.method !== "GET" && req.headers["content-type"]?.split(";")[0]?.trim() !== "application/json") {
       throw new HttpError(415, "requests that change state must have content-type application/json");
     }
@@ -705,11 +721,84 @@ export async function startApi(options: ApiOptions): Promise<Api> {
     else send(res, reply.status, reply.body);
   }
 
-  const server = createServer((req, res) => {
+  /** The pylon of a thread, as serveAttach asks for it. */
+  function door(t: Thread, probe: Pick<ProbeClient, "stream">): PylonDoor {
+    const { pylonId, node } = registry.pylon(t.pylonId)!;
+    return {
+      thread: t.id,
+      look() {
+        const now = registry.thread(t.id)!;
+        if (now.status !== "active") return { kind: "over", error: { kind: "conflict", message: `thread ${t.id} is ${now.status}, so its pylon stays paused` } };
+        const pylon = pylonOf(now);
+        if (pylon.actualState === "failed") return { kind: "over", error: { kind: "failed", message: `the pylon of ${t.id} failed: ${pylon.failed ?? "no reason given"}` } };
+        return { kind: "pylon", state: pylon.actualState };
+      },
+      open({ size, term }) {
+        registry.recordActivity(t.id, { human: Date.now() });
+        wake(node);
+        return openTerminal((argv) => probe.stream(pylonId, argv), size, term, ["sh", "-c", attachScript]);
+      },
+    };
+  }
+
+  const sockets = new WebSocketServer({ noServer: true, maxPayload: 1 << 20, perMessageDeflate: false });
+  /** Attached terminals, which close() ends, because closeAllConnections does not reach upgraded sockets. */
+  const attached = new Set<{ end(why: Ending): void; served: Promise<void> }>();
+
+  /**
+   * GET /v1/threads/<thread>/attach as a WebSocket. Every refusal is an HTTP reply before the 101, so a client maps it
+   * as it maps any route's. A terminal takes a place among the streams, so a delete ends it too.
+   */
+  async function upgrade(req: IncomingMessage, socket: Duplex, head: Buffer) {
+    await admit(req);
+    // CORS does not guard a WebSocket handshake, and previews are served under the API's hostname on other ports, so
+    // a preview's page could open a terminal from the browser of anyone allowed. A browser always sends Origin.
+    const origin = req.headers.origin;
+    if (origin !== undefined && origin !== `http://${req.headers.host}`) throw new HttpError(403, `the attach route does not answer pages from ${origin}`);
+    const t = thread(attachRoute.exec(pathOf(req.url))![1]!);
+    let request: ReturnType<typeof parseAttachQuery>;
+    try {
+      request = parseAttachQuery(new URL(req.url ?? "/", "http://nexus").searchParams);
+    } catch (err) {
+      throw new HttpError(400, (err as Error).message);
+    }
+    if (t.status !== "active") throw new HttpError(409, `thread ${t.id} is ${t.status}, so its pylon stays paused`);
+    const { node } = registry.pylon(t.pylonId)!;
+    const probe = probes.get(node);
+    if (probe === undefined) throw new HttpError(503, `no probe is configured for ${node}`);
+    if (open.size >= maxStreams) throw new HttpError(503, `${maxStreams} streams are open, the most this control plane serves at once`);
+    if (socket.destroyed) return;
+    const stop = new AbortController();
+    const handle = { thread: t.id, end: () => stop.abort("deleted" satisfies Ending) };
+    open.add(handle);
+    try {
+      // ws answers a malformed handshake with a 400 itself and never calls back, so the socket's close ends the wait.
+      const ws = await new Promise<WebSocket | null>((resolve) => {
+        socket.once("close", () => resolve(null));
+        sockets.handleUpgrade(req, socket, head, resolve);
+      });
+      if (ws === null) return;
+      const session = { end: (why: Ending) => stop.abort(why), served: serveAttach(ws, door(t, probe), request, stop.signal, timing) };
+      attached.add(session);
+      await session.served.finally(() => attached.delete(session));
+    } finally {
+      open.delete(handle);
+    }
+  }
+
+  const server = createServer({
+    // Only a WebSocket to the attach route upgrades. Any other request is handled as one, Upgrade header or not.
+    shouldUpgradeCallback: (req) => req.headers.upgrade?.toLowerCase() === "websocket" && attachRoute.test(pathOf(req.url)),
+  }, (req, res) => {
     handle(req, res).catch((err: unknown) => {
       if (res.headersSent) return res.destroy(err as Error);
       send(res, err instanceof HttpError ? err.status : 500, { error: (err as Error).message });
     });
+  });
+  server.on("upgrade", (req: IncomingMessage, socket: Duplex, head: Buffer) => {
+    // Node hands over an upgraded socket without its error handler, and a reset before the 101 would crash the API.
+    socket.on("error", () => undefined);
+    upgrade(req, socket, head).catch((err: unknown) => refuseUpgrade(socket, err instanceof HttpError ? err.status : 500, (err as Error).message));
   });
   await new Promise<void>((resolve, reject) => {
     server.once("error", reject);
@@ -720,9 +809,11 @@ export async function startApi(options: ApiOptions): Promise<Api> {
 
   return {
     port: address.port,
-    close() {
+    async close() {
       const closed = new Promise<void>((resolve) => server.close(() => resolve()));
       server.closeAllConnections();
+      for (const session of attached) session.end("stopping");
+      await Promise.all([...attached].map((session) => session.served));
       return closed;
     },
   };
@@ -755,6 +846,22 @@ function sendFile(res: ServerResponse, content: Buffer, type: string) {
     "content-type": type, "content-length": content.length, "cache-control": "no-store",
     "x-content-type-options": "nosniff", "content-security-policy": "default-src 'none'; sandbox",
   }).end(content);
+}
+
+/** The path a request's URL names, decoded as `handle` matches it, or "" for one that cannot be decoded. */
+function pathOf(url: string | undefined): string {
+  try {
+    return decodeURIComponent(new URL(url ?? "/", "http://nexus").pathname);
+  } catch {
+    return "";
+  }
+}
+
+/** An API error reply written on a socket that never upgraded. */
+function refuseUpgrade(socket: Duplex, status: number, message: string) {
+  if (socket.destroyed) return;
+  const body = JSON.stringify({ error: message });
+  socket.end(`HTTP/1.1 ${status} ${STATUS_CODES[status]}\r\ncontent-type: application/json\r\ncache-control: no-store\r\ncontent-length: ${Buffer.byteLength(body)}\r\nconnection: close\r\n\r\n${body}`);
 }
 
 function send(res: ServerResponse, status: number, body: unknown) {

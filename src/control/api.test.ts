@@ -1,13 +1,17 @@
 import { after, test } from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
+import { once } from "node:events";
 import { execFile } from "node:child_process";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { request } from "node:http";
 import { join } from "node:path";
+import { PassThrough } from "node:stream";
 import { promisify } from "node:util";
+import { WebSocket } from "ws";
 import { maxStreams, startApi, type ThreadDetail, type ThreadRow } from "./api.ts";
+import type { AttachTiming } from "./attach.ts";
 import { readEvents } from "./event-reader.ts";
 import { fakeHarness } from "./fake-harness.ts";
 import { openRegistry, type Thread } from "./registry.ts";
@@ -15,8 +19,10 @@ import { githubTokenGrant, liveHashOf } from "../project.ts";
 import { ingest } from "../reconcile.ts";
 import { processStream } from "../process-stream.ts";
 import { repoInitCommand } from "../pylon-vm-backend.ts";
-import { checkoutDir } from "../sessions.ts";
-import type { ByteStream, CommandResult, JobId, NodeName, PausedSession, PylonCommand, PylonId, ServiceFact, TailnetNodeId } from "../protocol.ts";
+import { attachScript, checkoutDir } from "../sessions.ts";
+import { encodeMessage } from "../attach-wire.ts";
+import { terminalSize } from "../guest-terminal.ts";
+import type { ByteStream, CommandResult, JobId, NodeName, PausedSession, PylonCommand, PylonId, ServiceFact, StreamEnd, TailnetNodeId } from "../protocol.ts";
 
 const node = "rj-firebat" as NodeName;
 const laptop = "nLAPTOP" as TailnetNodeId;
@@ -39,7 +45,7 @@ const dotfiles = { repo: "git@github.com:ramtin/dotfiles.git", ref: "main" };
 const dir = await mkdtemp(join(tmpdir(), "nexus-api-"));
 after(() => rm(dir, { recursive: true }));
 
-async function setup(t: import("node:test").TestContext, options: { dotfiles?: typeof dotfiles; streamStallMs?: number } = {}) {
+async function setup(t: import("node:test").TestContext, options: { dotfiles?: typeof dotfiles; streamStallMs?: number; attachTiming?: AttachTiming } = {}) {
   const registry = openRegistry(join(dir, `${randomUUID()}.db`));
   registry.upsertNode({ name: node, tailnetHost: "rj-firebat.tail.ts.net", tailnetNodeId: "nFIREBAT" as TailnetNodeId });
   let caller: TailnetNodeId | null = laptop;
@@ -74,6 +80,7 @@ async function setup(t: import("node:test").TestContext, options: { dotfiles?: t
     }]]),
     previewPorts: { first: 10200, last: 10299 },
     ...options.streamStallMs === undefined ? {} : { streamStallMs: options.streamStallMs },
+    ...options.attachTiming === undefined ? {} : { attachTiming: options.attachTiming },
   });
   t.after(async () => {
     await api.close();
@@ -108,7 +115,7 @@ async function setup(t: import("node:test").TestContext, options: { dotfiles?: t
     });
   }
   return {
-    registry, call, raw, woken, calls, commands, streams, fake,
+    registry, call, raw, woken, calls, commands, streams, fake, port: api.port, close: () => api.close(),
     callAs(id: TailnetNodeId | null) { caller = id; },
     probeAnswers(next: typeof answer) { answer = next; },
     probePipes(next: typeof pipe) { pipe = next; },
@@ -116,7 +123,7 @@ async function setup(t: import("node:test").TestContext, options: { dotfiles?: t
   };
 }
 
-async function withThread(t: import("node:test").TestContext, options: { project?: typeof project; dotfiles?: typeof dotfiles; streamStallMs?: number } = {}) {
+async function withThread(t: import("node:test").TestContext, options: { project?: typeof project; dotfiles?: typeof dotfiles; streamStallMs?: number; attachTiming?: AttachTiming } = {}) {
   const s = await setup(t, options);
   assert.equal((await s.call("POST", "/v1/projects", options.project ?? project)).status, 201);
   assert.equal((await s.call("POST", "/v1/images", image)).status, 201);
@@ -1010,4 +1017,173 @@ test("unknown threads, routes and methods get 404 and 405", async (t) => {
   assert.equal((await s.call("PATCH", "/v1/projects")).status, 405);
   assert.equal((await s.call("POST", "/v1/projects", undefined)).status, 400);
   assert.equal((await s.call("POST", "/v1/projects", "{not json")).status, 400);
+});
+
+const fastAttach: AttachTiming = { pingMs: 60_000, waitMs: 5_000, pollMs: 20 };
+
+/**
+ * Asks for a terminal as the CLI does, with no Origin unless `headers` gives one. Resolves with the open socket and
+ * what it receives, or with the HTTP refusal.
+ */
+function attachTo(port: number, path: string, headers: Record<string, string> = {}): Promise<{ status: number; body: any } | ReturnType<typeof attached>> {
+  return new Promise((resolve, reject) => {
+    const ws = new WebSocket(`ws://127.0.0.1:${port}${path}`, { headers, perMessageDeflate: false });
+    ws.on("unexpected-response", (_req, res) => {
+      let text = "";
+      res.setEncoding("utf8");
+      res.on("data", (chunk: string) => { text += chunk; });
+      res.on("end", () => {
+        resolve({ status: res.statusCode!, body: JSON.parse(text) });
+        ws.terminate();
+      });
+    });
+    ws.on("error", () => undefined);
+    ws.once("open", () => resolve(attached(ws)));
+    ws.once("error", reject);
+  });
+}
+
+function attached(ws: WebSocket) {
+  const received: unknown[] = [];
+  ws.on("message", (data, binary) => { received.push(binary ? Buffer.from(data as Buffer).toString() : JSON.parse(data.toString())); });
+  return { ws, received, closed: once(ws, "close").then(([code]) => code as number) };
+}
+
+/** A pipe to the relay in the guest, which records its stdin. Ending its stdin hangs up, and Herdr's client exits 0. */
+function fakePipe() {
+  const output = new PassThrough();
+  const end = Promise.withResolvers<StreamEnd>();
+  const stdin: Buffer[] = [];
+  const exit = (code: number) => {
+    output.end();
+    end.resolve({ kind: "exited", code });
+  };
+  const stream: ByteStream = {
+    [Symbol.asyncIterator]: () => output[Symbol.asyncIterator](),
+    async write(chunk) { stdin.push(Buffer.from(chunk)); },
+    async close() { setTimeout(() => exit(0), 10); },
+    done: end.promise,
+  };
+  return { stream, stdin: () => Buffer.concat(stdin), print: (text: string) => output.write(text), exit };
+}
+
+const attachPathOf = (thread: string, query = "cols=100&rows=30") => `/v1/threads/${thread}/attach?${query}`;
+
+test("the attach route refuses before the 101 with the API's JSON errors, and a page from any other origin is refused", async (t) => {
+  const s = await withThread(t, { attachTiming: fastAttach });
+  const path = attachPathOf(s.thread.id);
+  s.probePipes(async () => { throw Object.assign(new Error("rj-firebat: not running"), { code: "not-running" }); });
+  const refused = async (status: number, error: RegExp, attempt: Promise<Awaited<ReturnType<typeof attachTo>>>) => {
+    const res = await attempt;
+    assert.ok("status" in res, "refused before the 101");
+    assert.equal(res.status, status);
+    assert.match(res.body.error, error);
+  };
+
+  s.callAs("nSTRANGER" as TailnetNodeId);
+  await refused(403, /caller is not a tailnet node/, attachTo(s.port, path));
+  s.callAs(laptop);
+  await refused(403, /does not answer to host evil\.example/, attachTo(s.port, path, { host: "evil.example" }));
+  for (const origin of [`http://127.0.0.1:8443`, `https://127.0.0.1:${s.port}`, "null", "http://evil.example"]) {
+    await refused(403, /does not answer pages from/, attachTo(s.port, path, { origin }));
+  }
+  await refused(400, /cols must be a whole number from 1 to 9999, got 0/, attachTo(s.port, attachPathOf(s.thread.id, "cols=0&rows=30")));
+  await refused(400, /rows must be a whole number/, attachTo(s.port, attachPathOf(s.thread.id, "cols=80")));
+  await refused(400, /term must be a terminal type/, attachTo(s.port, attachPathOf(s.thread.id, "cols=80&rows=24&term=x%20y")));
+  await refused(404, /^no thread th-missing$/, attachTo(s.port, attachPathOf("th-missing")));
+  assert.equal(s.streams.length, 0, "no refusal reached the probe");
+
+  for (const headers of [{}, { origin: `http://127.0.0.1:${s.port}` }]) {
+    const a = await attachTo(s.port, path, headers);
+    assert.ok("ws" in a, `admitted with ${JSON.stringify(headers)}`);
+    a.ws.close();
+    await a.closed;
+  }
+
+  assert.equal((await s.call("POST", `/v1/threads/${s.thread.id}/archive`)).status, 200);
+  await refused(409, new RegExp(`^thread ${s.thread.id} is archived, so its pylon stays paused$`), attachTo(s.port, path));
+});
+
+test("an attach wakes the pylon, waits for it, and carries keys, resizes and output until Herdr exits", async (t) => {
+  const s = await withThread(t, { attachTiming: fastAttach });
+  const pipe = fakePipe();
+  let running = false;
+  s.probePipes(async () => {
+    if (!running) throw Object.assign(new Error("rj-firebat: not running"), { code: "not-running" });
+    return pipe.stream;
+  });
+  const before = Date.now();
+  const a = await attachTo(s.port, attachPathOf(s.thread.id, "cols=100&rows=30&term=xterm-ghostty"));
+  assert.ok("ws" in a);
+  await until(() => a.received.length === 1, "a waiting message");
+  assert.deepEqual(a.received, [{ type: "waiting", pylon: "unknown" }]);
+  assert.ok(s.registry.thread(s.thread.id)!.lastHumanActivityAt >= before, "attaching is human activity");
+  assert.ok(s.woken.includes(node), "and wakes the node");
+  observeRunning(s, {});
+  running = true;
+  await until(() => a.received.length === 2, "the attached message");
+  assert.deepEqual(a.received[1], { type: "attached" });
+
+  const [pylonId, argv] = s.streams.at(-1)!;
+  assert.equal(pylonId, s.thread.pylonId);
+  assert.deepEqual([argv[0], argv[1], ...argv.slice(4)], ["python3", "-c", "100", "30", "xterm-ghostty", "sh", "-c", attachScript]);
+  const relayBytes = Number(argv[3]);
+  await until(() => pipe.stdin().length >= relayBytes, "the relay's source");
+  assert.match(pipe.stdin().subarray(0, relayBytes).toString(), /^# A program on a pty in a pylon/);
+
+  a.ws.send(Buffer.from("ls\r"));
+  a.ws.send(encodeMessage({ type: "resize", size: terminalSize(140, 40) }));
+  const frames = Buffer.from([0, 0, 0, 0, 3, ...Buffer.from("ls\r"), 1, 0, 0, 0, 4, 0, 140, 0, 40]);
+  await until(() => pipe.stdin().length >= relayBytes + frames.length, "the key and resize frames");
+  assert.deepEqual(pipe.stdin().subarray(relayBytes), frames);
+
+  pipe.print("herdr screen");
+  await until(() => a.received.length === 3, "the output");
+  pipe.exit(0);
+  assert.equal(await a.closed, 1000);
+  assert.deepEqual(a.received.slice(2), ["herdr screen", { type: "exit", code: 0 }]);
+});
+
+test("deleting a thread ends its attach as a conflict, and a closing API ends one with 1001", async (t) => {
+  const s = await withThread(t, { attachTiming: fastAttach });
+  observeRunning(s, {});
+  const pipes: ReturnType<typeof fakePipe>[] = [];
+  s.probePipes(async () => {
+    pipes.push(fakePipe());
+    return pipes.at(-1)!.stream;
+  });
+
+  const deleted = await attachTo(s.port, attachPathOf(s.thread.id));
+  assert.ok("ws" in deleted);
+  await until(() => deleted.received.length === 1, "attached");
+  assert.equal((await s.call("DELETE", `/v1/threads/${s.thread.id}`)).status, 200);
+  assert.equal(await deleted.closed, 1000);
+  assert.deepEqual(deleted.received.at(-1), { type: "error", kind: "conflict", message: `thread ${s.thread.id} is deleted` });
+
+  const other = await withThread(t, { attachTiming: fastAttach });
+  observeRunning(other, {});
+  other.probePipes(async () => fakePipe().stream);
+  const stopping = await attachTo(other.port, attachPathOf(other.thread.id));
+  assert.ok("ws" in stopping);
+  await until(() => stopping.received.length === 1, "attached");
+  await other.close();
+  assert.equal(await stopping.closed, 1001);
+  assert.equal((stopping.received.at(-1) as { kind: string }).kind, "unreachable");
+});
+
+test("a terminal takes a place among the streams", async (t) => {
+  const s = await withThread(t, { attachTiming: fastAttach });
+  const open = Array.from({ length: maxStreams }, () => s.events(`/v1/threads/${s.thread.id}/events`));
+  for (const stream of open) await stream.next();
+  const extra = await attachTo(s.port, attachPathOf(s.thread.id));
+  assert.ok("status" in extra && extra.status === 503, JSON.stringify(extra));
+  for (const stream of open) stream.close();
+});
+
+test("an upgrade the API serves no WebSocket for is handled as an ordinary request", async (t) => {
+  const s = await withThread(t);
+  const upgrade = { connection: "upgrade", upgrade: "websocket", "sec-websocket-version": "13", "sec-websocket-key": "dGhlIHNhbXBsZSBub25jZQ==" };
+  assert.equal((await s.call("GET", "/v1/projects", undefined, upgrade)).status, 200);
+  const other = await s.call("GET", attachPathOf(s.thread.id), undefined, { connection: "upgrade", upgrade: "h2c" });
+  assert.deepEqual(other, { status: 404, body: { error: `no route /v1/threads/${s.thread.id}/attach` } });
 });
