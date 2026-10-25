@@ -42,7 +42,7 @@ Node polling goes directly to the control plane, not through a probe. This keeps
 
 ### Order, drain, rollback and recovery
 
-The pure planner in `src/deploy/plan.ts` upgrades control before probes. A probe rechecks control's fresh healthy report after preparation, before switching links. If readiness is lost or cannot be read, it returns to `waiting-for-control` and retries on the next poll without restarting or quarantining the release. Before upgrading control, its worker acquires a persistent 120-second drain lease, renewing it every 20 seconds during preparation. The API blocks start, send and retry while leased. A shared harness gate also blocks PR-watch submissions, counts submissions already entering, and lets their pending messages retry later. Idle is checked against committed harness live and queue documents, including parked runs, not the asynchronously updated registry activity flag. After the build, a final idle check seals the drain before the link moves: this hold does not expire until the worker reports success or finishes rollback. This prevents recovery after a hung worker from restarting over a turn that entered after lease expiry. Idle is checked again immediately before restart. An unsealed preparation lease expires if the worker dies; the fixed worker clears a sealed hold after recovery. If neither worker can run, the person must recover the service and release the hold manually.
+The pure planner in `src/deploy/plan.ts` upgrades control before probes. A probe rechecks control's fresh healthy report after preparation, before switching links. If readiness is lost or cannot be read, it returns to `waiting-for-control` and retries on the next poll without restarting or quarantining the release. Before upgrading control, its worker acquires a persistent 120-second drain lease, renewing it every 20 seconds during preparation. The API blocks start, send and retry while leased. A shared harness gate also blocks PR-watch submissions, counts submissions already entering, and lets their pending messages retry later. Idle is checked against committed harness live and queue documents, including parked runs, not the asynchronously updated registry activity flag. After the build, a final idle check seals the drain before the link moves: this hold does not expire until the worker reports success or finishes rollback. This prevents recovery after a hung worker from restarting over a turn that entered after lease expiry. Idle is checked again immediately before restart. An unsealed preparation lease expires if the worker dies; the fixed worker clears a sealed hold after recovery. If neither worker can run, the person must recover the service and use the [manual drain escape hatch](#manual-drain-escape-hatch) below.
 
 `drainTimeoutMs` defaults to 300000 (maximum 600000). At the deadline a still-running or queued turn refuses the release, releases the drain and reports failure; it is **not** cut off. The harness resumes after restart, but `src/harness/slice.test.ts` shows that an in-flight tool is interrupted rather than replayed. That is why timeout does not force a restart.
 
@@ -51,6 +51,76 @@ The supervisor serializes both roles and manual installers with one root-owned l
 On failure, or recovery of an interrupted transaction, it restores the old link and service unit, restarts, checks the old service's health, and reports `rolled-back` with the journal tail. Failed rollback is reported as `failed`, not success. The on-disk journal uses atomic rename for process-interruption recovery; it is not a filesystem/power-loss guarantee. Database and harness data are not reverted: releases must keep storage migrations backward-compatible with the previous release. Reverting data would discard accepted user work; an incompatible migration can require manual recovery even after the code link is restored.
 
 GitHub reports this repository as **public**. HTTPS fetches need no credentials. Child commands receive a minimal environment with no inherited `GH_TOKEN`, root deployer token, npm config or git user config. If the repository becomes private, do not put credentials in its URL or run builds with GH_TOKEN: fetch-only credential support must be added before automatic upgrades will work.
+
+### Manual drain escape hatch
+
+Run these on the **control node**, as the person, not from a pylon. Clearing a hold allows new turns: never clear it while a deployer could still switch or roll back control. Run each step separately and stop on any error.
+
+1. Stop automatic deployment, including an already-running worker, then inspect the persisted hold. This read works even when the control API is down and does not load or migrate the registry through release code:
+
+   ```sh
+   sudo systemctl stop nexus-deployer.timer nexus-deployer.service
+   sudo -u nexus-control env PATH=/usr/local/bin:/usr/bin node --input-type=module <<'JS'
+   import { readFileSync } from 'node:fs';
+   import { DatabaseSync } from 'node:sqlite';
+   const config = JSON.parse(readFileSync('/etc/nexus/control.json', 'utf8'));
+   const db = new DatabaseSync(config.db, { readOnly: true });
+   const row = db.prepare("SELECT value FROM settings WHERE key = 'deploy-drain'").get();
+   console.log(JSON.stringify(row ? JSON.parse(row.value) : null, null, 2));
+   db.close();
+   JS
+   sudo sh -c 'if [ -f /opt/nexus/control-deploy.json ]; then cat /opt/nexus/control-deploy.json; fi'
+   ```
+
+   `null` means no hold. Otherwise `commit` identifies its release, `expiresAt` is epoch milliseconds, and `locked: true` means it will not expire. If the local transaction is still `installing`, **do not clear the hold or delete the transaction**. Restore a working bootstrap/worker and finish its recovery first: an unfinished rollback could otherwise restart control over a new turn. The clear command below refuses that case.
+
+2. Confirm control's code link and service unit have been recovered to a known-good release and no further restart/rollback is pending. If control is running, use `nexus threads --json` from an allowed client to check `agentTurnRunning` and wait for any active turns to finish; do not stop a running turn just to clear a hold. Stop control before editing its registry, so it cannot race the edit or admit work midway through recovery:
+
+   ```sh
+   sudo systemctl stop nexus-control.service
+   ```
+
+3. Clear only the drain setting under the deployment lock. This verifies that control, the worker and its timer are stopped and that no install transaction needs recovery, then writes as the registry's service user, not root. It prints the previous hold for the recovery record:
+
+   ```sh
+   sudo flock -x /opt/nexus/deployer/lock bash -s <<'SH'
+   set -euo pipefail
+   for unit in nexus-deployer.timer nexus-deployer.service nexus-control.service; do
+     case "$(systemctl show --property=ActiveState --value "$unit")" in
+       inactive|failed) ;;
+       *) echo "Refusing: $unit is not stopped" >&2; exit 1 ;;
+     esac
+   done
+   /usr/bin/env PATH=/usr/local/bin:/usr/bin node --input-type=module <<'JS'
+   import { readFileSync } from 'node:fs';
+   let transaction = null;
+   try { transaction = JSON.parse(readFileSync('/opt/nexus/control-deploy.json', 'utf8')); }
+   catch (error) { if (error.code !== 'ENOENT') throw error; }
+   if (transaction?.state === 'installing') throw new Error('Finish deployment recovery before clearing the drain');
+   JS
+   /usr/sbin/runuser -u nexus-control -- env PATH=/usr/local/bin:/usr/bin node --input-type=module <<'JS'
+   import { readFileSync } from 'node:fs';
+   import { DatabaseSync } from 'node:sqlite';
+   const config = JSON.parse(readFileSync('/etc/nexus/control.json', 'utf8'));
+   const db = new DatabaseSync(config.db);
+   db.exec('BEGIN IMMEDIATE');
+   const row = db.prepare("SELECT value FROM settings WHERE key = 'deploy-drain'").get();
+   console.log('Previous hold:', row?.value ?? 'null');
+   db.prepare("UPDATE settings SET value = 'null' WHERE key = 'deploy-drain'").run();
+   db.exec('COMMIT');
+   db.close();
+   JS
+   SH
+   ```
+
+4. Start control and check it before allowing deployment again:
+
+   ```sh
+   sudo systemctl start nexus-control.service
+   sudo systemctl is-active nexus-control.service
+   ```
+
+   From an allowed client, check `nexus release` and normal API access. Leave the deployer timer stopped until the worker is repaired and the desired release is the one you intend to run; then use `sudo systemctl start nexus-deployer.timer`. Clearing a hold does **not** cancel the desired release or remove a failed-commit quarantine. Restarting the timer without addressing the original problem may acquire another hold.
 
 ### The deployer upgrading itself
 
