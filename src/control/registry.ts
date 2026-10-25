@@ -18,6 +18,7 @@ import type { HerdrStatus, JobStatus, NodeName, NodeObservation, PylonId, Subjec
 import type { Project, ProjectId, SessionHarness } from "../project.ts";
 import type { ImageId, ImageManifest, TemplateRecord } from "../images.ts";
 import type { PylonRecord } from "../tick.ts";
+import { maxEntries, type ClaudeEntry, type TranscriptCursor } from "../claude-transcript.ts";
 
 declare const brand: unique symbol;
 /** At most 34 characters, so `pylon-<id>` fits pi-sandbox's 40. */
@@ -71,6 +72,20 @@ export interface Preview { pylon: PylonId; service: string; httpsPort: number; r
 export interface PortRange { first: number; last: number }
 export interface Output { thread: ThreadId; kind: Extract<RegistryWrite, { record: "output" }>["kind"] | "pull-request"; ref: string }
 export interface Orphan { node: NodeName; pylonId: PylonId }
+
+/** Where the reader of a Claude worker's transcript is in its session's file, how many entries it dropped to keep maxEntries, and when it last read. */
+export interface ClaudeTranscript { session: string; cursor: TranscriptCursor; dropped: number; readAt: number }
+/** What one read of a Claude worker's transcript found, from `from` to `cursor`. `reset` says the file shrank, so `entries` start it over. */
+export interface ClaudeRead { session: string; from: TranscriptCursor; entries: readonly ClaudeEntry[]; cursor: TranscriptCursor; reset: boolean; readAt: number }
+/**
+ * A message typed into a Claude worker, by its request ID. It is `sending` from before the probe is asked until the
+ * probe answers, so a send whose answer was lost, which may have typed some of it, is not typed again.
+ */
+export type ClaudeMessage = { state: "sending" } | { state: "sent"; result: ClaudeSent };
+/** What a send to a Claude worker answers, and answers again for a resend of its request ID. */
+export interface ClaudeSent { session: string; outcome: "sent" | "queued"; resumed: boolean }
+/** Each thread keeps this many of its newest messages' request IDs, far more than a client retries across. */
+const keptClaudeMessages = 256;
 
 /** Applied in order. The database's user_version counts the ones already applied. Never edit one that has shipped. */
 const migrations: readonly string[] = [
@@ -225,6 +240,12 @@ const migrations: readonly string[] = [
   `ALTER TABLE claude_workers ADD COLUMN session TEXT;`,
   `ALTER TABLE claude_workers ADD COLUMN model TEXT;
    UPDATE claude_workers SET model = 'claude-opus-5-5' WHERE state = 'pending';`,
+  // A Claude worker's transcript as last read from its pylon, so a paused pylon or a restarted control plane still
+  // shows it, and the messages typed into the worker, so a retried send is not typed twice.
+  `CREATE TABLE claude_transcripts (thread TEXT PRIMARY KEY, session TEXT NOT NULL, byte_offset INTEGER NOT NULL, skipping INTEGER NOT NULL, dropped INTEGER NOT NULL, read_at INTEGER NOT NULL) STRICT;
+   CREATE TABLE claude_entries (thread TEXT NOT NULL, seq INTEGER NOT NULL, entry TEXT NOT NULL, PRIMARY KEY (thread, seq)) STRICT;
+   CREATE TABLE claude_messages (thread TEXT NOT NULL, request_id TEXT NOT NULL, state TEXT NOT NULL CHECK (state IN ('sending', 'sent')), result TEXT,
+     PRIMARY KEY (thread, request_id), CHECK ((state = 'sent') = (result IS NOT NULL))) STRICT;`,
 ];
 
 type Row = Record<string, unknown>;
@@ -455,6 +476,13 @@ export function openRegistry(path: string, clock = Date.now) {
     return { events, watermark: String(Math.max(cursor, newest ?? 0)) };
   }
 
+  function claudeTranscript(thread: ThreadId): ClaudeTranscript | undefined {
+    const row = db.prepare("SELECT * FROM claude_transcripts WHERE thread = ?").get(thread);
+    return row === undefined ? undefined : {
+      session: row.session as string, cursor: { offset: row.byte_offset as number, skipping: row.skipping === 1 }, dropped: row.dropped as number, readAt: row.read_at as number,
+    };
+  }
+
   pruneSessions();
 
   return {
@@ -469,9 +497,53 @@ export function openRegistry(path: string, clock = Date.now) {
         updateAttention(id);
       });
     },
-    claudeWorker(thread: ThreadId): { prompt: string; state: string; model: string | null; message?: string } | undefined {
-      const row = db.prepare("SELECT prompt, state, message, model FROM claude_workers WHERE thread = ?").get(thread);
-      return row === undefined ? undefined : { model: row.model as string | null, prompt: row.prompt as string, state: row.state as string, ...(row.message == null ? {} : { message: row.message as string }) };
+    /** `session` is the Claude Code session its launch opened, null until the launch names one. */
+    claudeWorker(thread: ThreadId): { prompt: string; state: string; model: string | null; session: string | null; message?: string } | undefined {
+      const row = db.prepare("SELECT prompt, state, message, model, session FROM claude_workers WHERE thread = ?").get(thread);
+      return row === undefined ? undefined : {
+        model: row.model as string | null, prompt: row.prompt as string, state: row.state as string, session: row.session as string | null,
+        ...(row.message == null ? {} : { message: row.message as string }),
+      };
+    },
+    claudeTranscript,
+    claudeEntries: (thread: ThreadId): ClaudeEntry[] => db.prepare("SELECT entry FROM claude_entries WHERE thread = ? ORDER BY seq").all(thread).map((r) => json<ClaudeEntry>(r.entry)),
+    /**
+     * Appends what a read found and keeps the newest maxEntries. A read of another session than the stored one, or of
+     * a file that shrank, replaces the stored entries. A read that did not start where the stored reader stands, such
+     * as one applied twice, changes nothing and answers false.
+     */
+    appendClaudeRead(thread: ThreadId, read: ClaudeRead): boolean {
+      return transaction(() => {
+        const stored = claudeTranscript(thread);
+        const same = stored?.session === read.session;
+        const at = same ? stored!.cursor : { offset: 0, skipping: false };
+        if (at.offset !== read.from.offset || at.skipping !== read.from.skipping) return false;
+        const replace = !same || read.reset;
+        if (replace) db.prepare("DELETE FROM claude_entries WHERE thread = ?").run(thread);
+        const base = replace ? 0 : Number(db.prepare("SELECT coalesce(max(seq) + 1, 0) AS next FROM claude_entries WHERE thread = ?").get(thread)!.next);
+        const total = base + read.entries.length;
+        const insert = db.prepare("INSERT INTO claude_entries (thread, seq, entry) VALUES (?, ?, ?)");
+        const first = Math.max(0, read.entries.length - maxEntries);
+        read.entries.slice(first).forEach((entry, i) => insert.run(thread, base + first + i, JSON.stringify(entry)));
+        db.prepare("DELETE FROM claude_entries WHERE thread = ? AND seq < ?").run(thread, total - maxEntries);
+        db.prepare(`INSERT INTO claude_transcripts (thread, session, byte_offset, skipping, dropped, read_at) VALUES (?, ?, ?, ?, ?, ?)
+          ON CONFLICT (thread) DO UPDATE SET session = excluded.session, byte_offset = excluded.byte_offset, skipping = excluded.skipping, dropped = excluded.dropped, read_at = excluded.read_at`)
+          .run(thread, read.session, read.cursor.offset, read.cursor.skipping ? 1 : 0, Math.max(0, total - maxEntries), read.readAt);
+        return true;
+      });
+    },
+    claudeMessage(thread: ThreadId, requestId: string): ClaudeMessage | undefined {
+      const row = db.prepare("SELECT state, result FROM claude_messages WHERE thread = ? AND request_id = ?").get(thread, requestId);
+      return row === undefined ? undefined : row.state === "sent" ? { state: "sent", result: json<ClaudeSent>(row.result) } : { state: "sending" };
+    },
+    /** Null forgets the message, as for a send that typed nothing. */
+    setClaudeMessage(thread: ThreadId, requestId: string, message: ClaudeMessage | null) {
+      transaction(() => {
+        if (message === null) return void db.prepare("DELETE FROM claude_messages WHERE thread = ? AND request_id = ?").run(thread, requestId);
+        db.prepare("INSERT INTO claude_messages (thread, request_id, state, result) VALUES (?, ?, ?, ?) ON CONFLICT (thread, request_id) DO UPDATE SET state = excluded.state, result = excluded.result")
+          .run(thread, requestId, message.state, message.state === "sent" ? JSON.stringify(message.result) : null);
+        db.prepare("DELETE FROM claude_messages WHERE thread = ? AND rowid NOT IN (SELECT rowid FROM claude_messages WHERE thread = ? ORDER BY rowid DESC LIMIT ?)").run(thread, thread, keptClaudeMessages);
+      });
     },
     setClaudeWorker(thread: ThreadId, prompt: string, state: string, message?: string, session?: string) {
       transaction(() => {
@@ -619,8 +691,7 @@ export function openRegistry(path: string, clock = Date.now) {
         q.threadStatus.run(status, id);
         if (status === "archived" || status === "deleted") db.prepare("DELETE FROM session_activity WHERE thread = ?").run(id);
         if (status === "deleted") {
-          db.prepare("DELETE FROM session_order WHERE thread = ?").run(id);
-          db.prepare("DELETE FROM session_order_floor WHERE thread = ?").run(id);
+          for (const table of ["session_order", "session_order_floor", "claude_transcripts", "claude_entries", "claude_messages"]) db.prepare(`DELETE FROM ${table} WHERE thread = ?`).run(id);
         }
         updateAttention(id);
       });

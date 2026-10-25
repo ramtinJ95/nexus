@@ -5,12 +5,13 @@ import { canDeploy, commitSchema, isReporter, releaseView, reportSchema, resolve
 /**
  * The control plane's HTTP API for the dashboard and the CLI. JSON in and out.
  *
- * Each thread's agent is a conversation in the control plane's harness. The API creates it with the thread,
- * forwards messages, aborts and retries to it, and serves its view.
+ * Each thread's agent is a conversation in the control plane's harness, or a Claude Code worker in its pylon. The API
+ * creates a harness conversation with the thread, forwards messages, aborts and retries to it, and serves its view. A
+ * Claude worker's messages are typed into its session, and its view is its transcript as claude-conversation.ts reads it.
  *
  * A thread's conversation also streams, as server-sent events: its view for the CLI, and the thread page's
- * conversation for the dashboard. Each stream holds one watch on the harness and sends what changed since its
- * last event, so a slow client gets fewer, larger events and never holds the harness up.
+ * conversation for the dashboard. Each stream holds one watch, on the harness or on a Claude worker's transcript, and
+ * sends what changed since its last event, so a slow client gets fewer, larger events and never holds the harness up.
  *
  * A thread's pylon also gives a terminal on its Herdr session, over a WebSocket on the attach route, which
  * control/attach.ts serves.
@@ -32,15 +33,17 @@ import { z } from "zod";
 import { actualState, desiredPhase, retryRefusal, type ActualState, type DesiredPhase } from "../reconcile.ts";
 import { effectiveAllowedHosts, gitIdentitySchema, gitUrl, hasRemote, linkedName, liveHashOf, reservedPorts, withHttpsHosts, type BootInputs, type Project, type ProjectId, type PylonOverlay, type RepoInit, type SessionHarness } from "../project.ts";
 import type { CommandResult, NodeName, ProbeClient, ProbeError, PylonCommand, PylonId, TailnetNodeId } from "../protocol.ts";
-import type { ConversationView, ConversationWatch, EntryRecord, JsonObject } from "@earendil-works/pi-durable";
+import type { ConversationView, EntryRecord, JsonObject } from "@earendil-works/pi-durable";
 import type { HarnessHost } from "../harness/host.ts";
 import { pinsSchema, type ImageId, type ImageManifest } from "../images.ts";
 import type { Whois } from "../tailscale.ts";
 import { newPylonRecord } from "../tick.ts";
-import type { NodeRecord, Output, PortRange, Preview, Registry, Session, Thread, ThreadId } from "./registry.ts";
+import type { ClaudeSent, NodeRecord, Output, PortRange, Preview, Registry, Session, Thread, ThreadId } from "./registry.ts";
 import { dashboard, liveFrames } from "./dashboard.ts";
 import { pylonLive } from "./live.ts";
-import { attachScript, checkoutDir, herdrSession } from "../sessions.ts";
+import { attachScript, checkoutDir, claudeTextProblem, herdrSession } from "../sessions.ts";
+import { claudeConversations } from "./claude-conversation.ts";
+import type { ClaudeConversation } from "../claude-transcript.ts";
 import { checkoutReader, CheckoutRefused, contentType, pathsFit, type CheckoutReader, type RefusalKind } from "../checkout-files.ts";
 import { attachRoute, parseAttachQuery } from "../attach-wire.ts";
 import type { PullRequest } from "./github.ts";
@@ -136,8 +139,16 @@ export interface ViewFrame {
   docs?: Record<string, JsonObject | null>;
 }
 
-/** Maps each committed view to what one client has not seen yet, or null when nothing it shows changed. */
-export type Frames = (view: ConversationView) => unknown;
+/** Maps each view to what one client has not seen yet, or null when nothing it shows changed. */
+export type Frames<V = ConversationView> = (view: V) => unknown;
+
+/** What a stream follows: a harness conversation's watch, or a Claude worker's. */
+interface Watch<V> {
+  readonly value: V;
+  start(listener: (view: V) => void | Promise<void>): void;
+  stop(): Promise<unknown>;
+  readonly closed: Promise<unknown>;
+}
 
 /** The frames of one client of a thread's event stream. pi-durable's views share every part a commit left alone. */
 export function viewFrames(): Frames {
@@ -154,7 +165,7 @@ export function viewFrames(): Frames {
   };
 }
 
-/** Streams open at once, across threads and callers. Each holds a harness watch and renders on every commit. */
+/** Streams open at once, across threads and callers. Each holds a watch and renders on every change. */
 export const maxStreams = 16;
 /**
  * Under the CLI's 30 s idle timeout, so a quiet thread's stream stays open. Each ping renders the latest view again
@@ -250,11 +261,15 @@ const changesBaseSchema = z.enum(["start", "head", "turn"]).default("start");
 /** What each refusal of a checkout read answers. A missing base is a 422, not a 409, because waiting cannot change it. */
 const refusalStatus: Readonly<Record<RefusalKind, number>> = { missing: 404, outside: 400, kind: 400, large: 413, "no-base": 422, slow: 504, busy: 503, long: 400 };
 
+/** How long a read of a Claude worker's conversation waits for its transcript before answering what is stored. */
+const claudeReadMs = 5_000;
+
 /** `pylon-<id>` must fit in 40 characters. */
 const newThreadId = () => `th-${randomBytes(6).toString("hex")}` as ThreadId;
 
 export async function startApi(options: ApiOptions): Promise<Api> {
   const { registry, whois, allowed, hostnames, dotfiles, harness, wake, probes, previewPorts, streamStallMs = 30_000, attachTiming: timing = attachTiming } = options;
+  const claude = claudeConversations({ registry, probes });
 
   function thread(id: string): Thread {
     const found = registry.thread(id as ThreadId);
@@ -274,12 +289,20 @@ export async function startApi(options: ApiOptions): Promise<Api> {
     return project;
   }
 
+  function refuseDeleted(t: Thread): Thread {
+    if (t.status === "deleted") throw new HttpError(409, `thread ${t.id} is deleted`);
+    return t;
+  }
+
   /** Threads from before the harness ran on the control plane have no conversation, and a deleted thread's is gone. */
   function conversing(t: Thread): Thread {
-    if (t.status === "deleted") throw new HttpError(409, `thread ${t.id} is deleted`);
+    refuseDeleted(t);
     if (t.conversationId === null) throw new HttpError(409, `thread ${t.id} has no conversation`);
     return t;
   }
+
+  /** A Claude worker thread has no harness conversation, so nothing for it ever reaches the harness. */
+  const isClaude = (t: Thread) => registry.claudeWorker(t.id) !== undefined;
 
   /** An archived thread's pylon stays paused, so its agent could not run a tool. */
   function runnable(t: Thread): Thread {
@@ -420,9 +443,9 @@ export async function startApi(options: ApiOptions): Promise<Api> {
    * everything since the last one. So the harness's listener never waits on a client. A client that leaves bytes
    * unread for `streamStallMs` is dropped, and one that still listens connects again.
    */
-  async function stream(res: ServerResponse, t: Thread, frames: Frames) {
+  async function stream<V>(res: ServerResponse, t: Thread, follow: () => Promise<Watch<V>>, frames: Frames<V>) {
     if (open.size >= maxStreams) throw new HttpError(503, `${maxStreams} streams are open, the most this control plane serves at once`);
-    let watch: ConversationWatch | null = null;
+    let watch: Watch<V> | null = null;
     let ping: NodeJS.Timeout | undefined;
     let stalled: NodeJS.Timeout | undefined;
     let ended = false;
@@ -449,7 +472,7 @@ export async function startApi(options: ApiOptions): Promise<Api> {
       end();
     });
     try {
-      watch = await harness.watch(t.id);
+      watch = await follow();
     } catch (err) {
       // The error reply ends the response.
       ended = true;
@@ -486,9 +509,12 @@ export async function startApi(options: ApiOptions): Promise<Api> {
     void watch.closed.then(end);
   }
 
-  const streams: readonly [RegExp, (t: Thread) => Frames][] = [
-    [/^\/v1\/threads\/([^/]+)\/events$/, () => viewFrames()],
-    [/^\/threads\/([^/]+)\/stream$/, (t) => liveFrames(t)],
+  /** Each stream's route, and how it serves a thread. A Claude worker's conversation streams to the dashboard only. */
+  const streams: readonly [RegExp, (res: ServerResponse, t: Thread) => Promise<void>][] = [
+    [/^\/v1\/threads\/([^/]+)\/events$/, (res, t) => stream(res, conversing(t), () => harness.watch(t.id), viewFrames())],
+    [/^\/threads\/([^/]+)\/stream$/, (res, t) => isClaude(t)
+      ? stream<ClaudeConversation>(res, refuseDeleted(t), () => claude.watch(t), liveFrames(t, registry.claudeWorker(t.id)?.model ?? null))
+      : stream<ConversationView>(res, conversing(t), () => harness.watch(t.id), liveFrames(t))],
   ];
 
   async function setStatus(t: Thread, status: "archived" | "deleted"): Promise<Thread> {
@@ -541,6 +567,57 @@ export async function startApi(options: ApiOptions): Promise<Api> {
     wakeThread(t);
     const submission = await harness.send(t.id, message.text, message.requestId, message.mode);
     return { submission: submission.id };
+  }
+
+  /**
+   * Types a message into the Claude worker's session in the pylon, through inPylon, so it wakes a paused pylon and
+   * resumes Claude, and is refused with a 409 until the pylon runs. Both modes go into Claude's prompt, which takes
+   * a message sent during a turn at its next step. Claude receives the text exactly, so text that cannot be typed as
+   * it is, such as one with a tab, is refused rather than changed.
+   *
+   * The request ID is recorded as sending before the probe is asked, and as sent with the answer, which a resend of
+   * the ID answers again without typing. A send whose probe failed may have typed part of the message, so a resend of
+   * it is refused with a 422 for the person to check the conversation. A send that typed nothing, as when the pylon
+   * was not running or Claude waits at a prompt in its terminal, is forgotten, so a resend of its ID types it.
+   */
+  async function sendClaude(t: Thread, session: string | null, model: string | null, body: unknown): Promise<{ claude: ClaudeSent }> {
+    const message = parse(messageSchema, body);
+    const text = message.text.replace(/\r\n?/g, "\n").trim();
+    const problem = claudeTextProblem(text);
+    if (problem !== null) throw new HttpError(400, `Claude cannot take this message as typed: ${problem}`);
+    if (session === null) throw new HttpError(409, `the Claude worker of ${t.id} has not started a session yet, so it takes no messages. Send it once it has started`);
+    const stored = registry.claudeMessage(t.id, message.requestId);
+    if (stored?.state === "sent") return { claude: stored.result };
+    if (stored?.state === "sending") throw new HttpError(422, `an earlier send of request ${message.requestId} failed partway, so Claude may have some or all of it. Check the conversation before sending it again under a new request ID`);
+    registry.setClaudeMessage(t.id, message.requestId, { state: "sending" });
+    // Only a failure from the probe's command can leave text typed. Anything before it typed nothing.
+    let asked = false;
+    let typedNothing = false;
+    let result: Extract<CommandResult, { kind: "send-claude" }>;
+    try {
+      result = await inPylon(t, async (probe, pylonId) => {
+        asked = true;
+        try {
+          return await probe.command(pylonId, { kind: "send-claude", session, text, ...(model === null ? {} : { model }) }) as Extract<CommandResult, { kind: "send-claude" }>;
+        } catch (err) {
+          typedNothing = (err as Partial<ProbeError>).code === "not-running";
+          throw err;
+        }
+      });
+    } catch (err) {
+      if (!asked || typedNothing) registry.setClaudeMessage(t.id, message.requestId, null);
+      throw err;
+    }
+    if (result.outcome === "blocked" || result.outcome === "starting") {
+      registry.setClaudeMessage(t.id, message.requestId, null);
+      throw new HttpError(409, result.outcome === "blocked"
+        ? `Claude waits at a prompt in its terminal, so nothing was typed. Attach to the pylon (\`nexus attach ${t.id}\`) and answer it, then send again`
+        : `Claude is not ready to take a message yet, so nothing was typed. Ask again in a moment`);
+    }
+    const sent: ClaudeSent = { session, outcome: result.outcome, resumed: result.resumed };
+    registry.setClaudeMessage(t.id, message.requestId, { state: "sent", result: sent });
+    void claude.refresh(t);
+    return { claude: sent };
   }
 
   /**
@@ -657,7 +734,9 @@ export async function startApi(options: ApiOptions): Promise<Api> {
     if (outcome === "moved") throw new HttpError(404, `pane ${id} of pylon ${t.pylonId} runs another session now, so it was left open. A wake moved session ${id} to another pane, which the thread's sessions list`);
   }
 
-  async function conversation(t: Thread) {
+  /** What a thread page shows: a Claude worker's transcript as last read, or the harness conversation's view. */
+  async function conversation(t: Thread): Promise<ConversationView | ClaudeConversation> {
+    if (isClaude(t)) return claude.view(t);
     const watch = await harness.watch(t.id);
     try {
       return watch.value;
@@ -731,7 +810,11 @@ export async function startApi(options: ApiOptions): Promise<Api> {
     // The body first, so the thread's status is read after the last await before the message is submitted.
     ["POST", /^\/v1\/threads\/([^/]+)\/messages$/, async (m, r) => {
       const body = await r.body();
-      return { status: 202, body: await sendMessage(runnable(thread(m[1]!)), body) };
+      const t = thread(m[1]!);
+      const worker = registry.claudeWorker(t.id);
+      if (worker === undefined) return { status: 202, body: await sendMessage(runnable(t), body) };
+      if (t.status === "archived") throw new HttpError(409, `thread ${t.id} is archived`);
+      return { status: 202, body: await sendClaude(refuseDeleted(t), worker.session, worker.model, body) };
     }],
     ["POST", /^\/v1\/threads\/([^/]+)\/abort$/, async (m) => { await harness.abort(conversing(thread(m[1]!)).id); return noContent; }],
     ["POST", /^\/v1\/threads\/([^/]+)\/retry$/, async (m) => { await harness.retry(runnable(thread(m[1]!)).id); return noContent; }],
@@ -768,7 +851,12 @@ export async function startApi(options: ApiOptions): Promise<Api> {
       const paths = parse(diffPaths, r.query.getAll("path"));
       return ok(await inCheckout(thread(m[1]!), (c) => c.diff(base, paths)));
     }],
-    ["GET", /^\/v1\/threads\/([^/]+)\/conversation$/, async (m) => ok(await conversation(conversing(thread(m[1]!))))],
+    ["GET", /^\/v1\/threads\/([^/]+)\/conversation$/, async (m) => {
+      const t = thread(m[1]!);
+      if (!isClaude(t)) return ok(await conversation(conversing(t)));
+      await Promise.race([claude.refresh(refuseDeleted(t)), sleep(claudeReadMs, undefined, { ref: false })]);
+      return ok(claude.view(t));
+    }],
     ["POST", /^\/v1\/images$/, async (_, r) => created(recordImage(await r.body()))],
     ["PUT", /^\/v1\/images\/current$/, async (_, r) => { setCurrentImage(await r.body()); return noContent; }],
   ];
@@ -883,12 +971,11 @@ export async function startApi(options: ApiOptions): Promise<Api> {
     }
     const view = req.method === "GET" ? await page(path, url.searchParams) : undefined;
     if (view !== undefined) return void res.writeHead(view.status, view.headers).end(view.body);
-    for (const [pattern, frames] of streams) {
+    for (const [pattern, serve] of streams) {
       const m = pattern.exec(path);
       if (m === null) continue;
       if (req.method !== "GET") throw new HttpError(405, `${req.method} is not allowed on ${path}`);
-      const t = conversing(thread(m[1]!));
-      return stream(res, t, frames(t));
+      return serve(res, thread(m[1]!));
     }
     const matches = routes.flatMap(([method, pattern, route]) => {
       const m = pattern.exec(path);
@@ -1061,6 +1148,7 @@ export async function startApi(options: ApiOptions): Promise<Api> {
     get httpsPort() { return secure?.listening ? (secure.address() as import("node:net").AddressInfo).port : undefined; },
     async close() {
       stopping = true;
+      claude.close();
       if (renewal) clearTimeout(renewal);
       const closed = Promise.all([server, ...(secure ? [secure] : [])].map((listener) => {
         const done = new Promise<void>((resolve) => listener.close(() => resolve()));

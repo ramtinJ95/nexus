@@ -7,7 +7,9 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { once } from "node:events";
 import { execFile } from "node:child_process";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { appendFile, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { setTimeout as sleep } from "node:timers/promises";
+import { claudeProjects, type ClaudeConversation } from "../claude-transcript.ts";
 import { tmpdir } from "node:os";
 import { request } from "node:http";
 import { join } from "node:path";
@@ -48,6 +50,10 @@ const dotfiles = { repo: "git@github.com:ramtin/dotfiles.git", ref: "main" };
 
 const dir = await mkdtemp(join(tmpdir(), "nexus-api-"));
 after(() => rm(dir, { recursive: true }));
+
+const claudeSession = "11111111-2222-4333-8444-555555555501";
+/** The lines of a real Claude Code 2.1.308 transcript, each with its newline. */
+const fixture = (await readFile(new URL("../fixtures/claude-transcript.jsonl", import.meta.url), "utf8")).split("\n").filter((line) => line !== "").map((line) => `${line}\n`);
 
 async function setup(t: import("node:test").TestContext, options: { gitIdentity?: { name: string; email: string }; https?: import("./api.ts").ApiOptions["https"]; whois?: import("../tailscale.ts").Whois; deployment?: DeploymentOptions; dotfiles?: typeof dotfiles; streamStallMs?: number; attachTiming?: AttachTiming } = {}) {
   const registry = openRegistry(join(dir, `${randomUUID()}.db`));
@@ -1711,7 +1717,7 @@ test("a Claude worker start stores its first prompt without starting a harness c
   const started = await s.call("POST", "/v1/threads", { project: "acme", title: "Claude worker", claude: "fix the bug" });
   assert.equal(started.status, 201);
   assert.equal(started.body.conversationId, null);
-  assert.deepEqual(s.registry.claudeWorker(started.body.id), { model: "claude-opus-5-5", prompt: "/poteto-mode fix the bug", state: "pending" });
+  assert.deepEqual(s.registry.claudeWorker(started.body.id), { model: "claude-opus-5-5", prompt: "/poteto-mode fix the bug", state: "pending", session: null });
   assert.equal((await s.call("GET", `/v1/threads/${started.body.id}`)).body.claudeWorker.state, "pending");
   const brief = "fix the bug:\n\t- keep \"quotes\", `ticks` and $HOME\n\nthen test";
   const multiLine = await s.call("POST", "/v1/threads", { project: "acme", title: "Claude worker", claude: brief });
@@ -1741,4 +1747,173 @@ test("a quiet filtered stream scans past unrelated events and survives retention
   const resumed = s.events(`/v1/events?follow=true&kind=session.turn-ended&since=${cursor}`);
   t.after(() => resumed.close());
   assert.equal((await resumed.next()).id, matching.id);
+});
+
+/**
+ * A Claude worker thread whose launch opened the fixture's session, with its pylon running. The probe runs each pipe
+ * here, against a folder in place of the pylon's ~/.claude/projects, where `transcript` is the session's file.
+ */
+async function withClaude(t: import("node:test").TestContext) {
+  const s = await withThread(t);
+  const started = await s.call("POST", "/v1/threads", { project: "acme", title: "Claude worker", claude: "fix it" });
+  assert.equal(started.status, 201, JSON.stringify(started.body));
+  const thread = started.body as Thread;
+  s.registry.setClaudeWorker(thread.id, "/poteto-mode fix it", "started", undefined, claudeSession);
+  const projects = await mkdtemp(join(tmpdir(), "nexus-claude-projects-"));
+  t.after(() => rm(projects, { recursive: true }));
+  await mkdir(join(projects, "-home-user-workspace-repo"));
+  s.probePipes(async (argv) => processStream(argv[0]!, argv.slice(1).map((arg) => arg === claudeProjects ? projects : arg), () => {}));
+  const c = { ...s, thread };
+  observeRunning(c, {});
+  return { ...c, transcript: join(projects, "-home-user-workspace-repo", `${claudeSession}.jsonl`) };
+}
+
+const sent = (outcome: "sent" | "queued", resumed = false): CommandResult => ({ kind: "send-claude", outcome, herdrPane: "w1:p1", resumed });
+
+test("a Claude worker thread's message is typed into its session exactly, in either mode, and never reaches the harness", async (t) => {
+  const s = await withClaude(t);
+  s.probeAnswers(async (command) => command.kind === "send-claude" ? sent("sent") : assert.fail(`unexpected ${command.kind}`));
+  s.calls.length = 0;
+  s.woken.length = 0;
+  const before = Date.now();
+  const send = (body: unknown) => s.call("POST", `/v1/threads/${s.thread.id}/messages`, body);
+  const text = `Fix the "cart" total:\n  run \`npm test\` with $HOME and $(whoami) as typed\n\nthen say 'done' !`;
+
+  assert.deepEqual(await send({ text, requestId: "msg:1" }), { status: 202, body: { claude: { session: claudeSession, outcome: "sent", resumed: false } } });
+  assert.equal((await send({ text: "now", requestId: "msg:2", mode: "steer" })).status, 202);
+  assert.equal((await send({ text: "later", requestId: "msg:3", mode: "followUp" })).status, 202);
+  assert.equal((await send({ text: " one\r\ntwo\rthree\r\n", requestId: "msg:4" })).status, 202);
+  const typed = (text: string) => [s.thread.pylonId, { kind: "send-claude", session: claudeSession, text, model: "claude-opus-5-5" }];
+  assert.deepEqual(s.commands, [typed(text), typed("now"), typed("later"), typed("one\ntwo\nthree")], "the text exactly, line ends made newlines, in both modes");
+  assert.deepEqual(s.calls.filter(([call]) => call === "send"), [], "the harness is sent none of them");
+  assert.ok(s.registry.thread(s.thread.id)!.lastHumanActivityAt >= before, "a message is human activity");
+  assert.ok(s.woken.includes(node));
+
+  s.commands.length = 0;
+  const tab = await send({ text: "a\tb", requestId: "msg:5" });
+  assert.equal(tab.status, 400);
+  assert.match(tab.body.error, /tab/);
+  assert.equal((await send({ text: " \n ", requestId: "msg:6" })).status, 400);
+  assert.equal((await send({ text: "x" })).status, 400);
+  assert.deepEqual(s.commands, [], "a message Claude cannot take as typed never reaches the probe");
+});
+
+test("a Claude worker's message is typed once per request ID, a send that typed nothing can be sent again, and one that may have typed some cannot", async (t) => {
+  const s = await withClaude(t);
+  let answer = async (): Promise<CommandResult> => sent("queued", true);
+  s.probeAnswers(() => answer());
+  const send = (requestId: string) => s.call("POST", `/v1/threads/${s.thread.id}/messages`, { text: "run it", requestId });
+  const queued = { status: 202, body: { claude: { session: claudeSession, outcome: "queued", resumed: true } } };
+  assert.deepEqual(await send("msg:1"), queued);
+  assert.deepEqual(await send("msg:1"), queued, "a resend answers what the send did");
+  assert.equal(s.commands.length, 1, "and types nothing");
+
+  answer = async () => { throw { code: "not-running", message: "the pylon is paused" }; };
+  const before = Date.now();
+  const paused = await send("msg:2");
+  assert.equal(paused.status, 409);
+  assert.match(paused.body.error, /is not running yet. This request wakes it/);
+  assert.ok(s.registry.thread(s.thread.id)!.lastHumanActivityAt >= before, "the send is human activity, which wakes the pylon");
+  answer = async () => sent("blocked" as never);
+  const blocked = await send("msg:2");
+  assert.equal(blocked.status, 409, "the paused send typed nothing, so its request ID is tried again");
+  assert.match(blocked.body.error, /Claude waits at a prompt in its terminal, so nothing was typed. Attach/);
+  answer = async () => sent("starting" as never);
+  assert.equal((await send("msg:2")).status, 409);
+  answer = async () => sent("sent");
+  assert.equal((await send("msg:2")).status, 202);
+  assert.equal(s.commands.length, 5);
+
+  answer = async () => { throw new Error("typing into Claude's pane w1:p1 failed, so part of the message may sit unsent in its prompt"); };
+  assert.equal((await send("msg:3")).status, 500);
+  answer = async () => sent("sent");
+  const again = await send("msg:3");
+  assert.equal(again.status, 422);
+  assert.match(again.body.error, /Check the conversation before sending it again under a new request ID/);
+  assert.equal(s.commands.length, 6, "a send that may have typed part of the message is not typed again");
+});
+
+test("a Claude worker thread takes no messages while archived, deleted or before its session starts, and asks no probe", async (t) => {
+  const s = await withClaude(t);
+  s.probeAnswers(async () => assert.fail("no command reaches the probe"));
+  const fresh = (await s.call("POST", "/v1/threads", { project: "acme", title: "Claude worker", claude: "later" })).body as Thread;
+  const early = await s.call("POST", `/v1/threads/${fresh.id}/messages`, { text: "hi", requestId: "msg:1" });
+  assert.equal(early.status, 409);
+  assert.match(early.body.error, /has not started a session yet/);
+  assert.equal((await s.call("POST", `/v1/threads/${s.thread.id}/archive`, {})).status, 200);
+  assert.deepEqual(await s.call("POST", `/v1/threads/${s.thread.id}/messages`, { text: "hi", requestId: "msg:2" }), { status: 409, body: { error: `thread ${s.thread.id} is archived` } });
+  assert.equal((await s.call("DELETE", `/v1/threads/${s.thread.id}`, {})).status, 200);
+  assert.deepEqual(await s.call("POST", `/v1/threads/${s.thread.id}/messages`, { text: "hi", requestId: "msg:3" }), { status: 409, body: { error: `thread ${s.thread.id} is deleted` } });
+  assert.equal((await s.call("GET", `/v1/threads/${s.thread.id}/conversation`)).status, 409);
+  assert.equal((await s.call("POST", `/v1/threads/${s.thread.id}/abort`)).status, 409);
+  assert.deepEqual(s.calls.filter(([call]) => call === "send" || call === "abort"), []);
+});
+
+/** Records the thread's pylon stopped, as the loop would from its node's observation. */
+function observePaused(s: Awaited<ReturnType<typeof withClaude>>) {
+  const capacity = { memoryGiB: 64, committedMemoryGiB: 0, diskFreeGiB: 100 };
+  const stopped = { pylonId: s.thread.pylonId, phase: "stopped" as const, checkpoint: null, sessions: [] };
+  s.registry.ingested({ node, observedAt: new Date().toISOString(), probeBootId: "b", capacity, artifacts: [], jobs: [], pylons: [stopped], previewRoutes: [] }, []);
+}
+
+test("a Claude worker thread's conversation is its transcript, read from the running pylon after each session event and kept for when it is paused", async (t) => {
+  const s = await withClaude(t);
+  await writeFile(s.transcript, fixture.slice(0, 30).join(""));
+  const reply = await s.call("GET", `/v1/threads/${s.thread.id}/conversation`);
+  assert.equal(reply.status, 200);
+  const first = reply.body as ClaudeConversation;
+  assert.deepEqual({ ...first, entries: [], readAt: null }, { kind: "claude", session: claudeSession, entries: [], dropped: 0, readAt: null, working: false });
+  assert.ok(first.readAt !== null && first.readAt >= Date.now() - 10_000);
+  const prompt = first.entries[0]!;
+  assert.ok(prompt.kind === "prompt" && prompt.from === "person" && prompt.text.startsWith("Do these steps one at a time"), JSON.stringify(prompt));
+  assert.deepEqual(first.entries.flatMap((e) => e.kind === "tool" ? [e.name] : []), ["Write", "Bash", "Bash", "Agent"]);
+  assert.deepEqual(first.entries.flatMap((e) => e.kind === "result" ? [e.isError] : []), [false, false, true, false], "each call's result, the failed `false` among them");
+
+  const reads = s.streams.length;
+  await appendFile(s.transcript, fixture.slice(30, 43).join(""));
+  s.registry.reportSession(node, { sequence: 1, pylon: s.thread.pylonId, time: Date.now(), event: { kind: "session.turn-ended", session: claudeSession } });
+  await until(() => s.registry.claudeTranscript(s.thread.id)!.readAt > first.readAt!, "a session event is followed by a read, with no one watching");
+  assert.equal(s.streams.length, reads + 1);
+
+  observePaused(s);
+  const paused = (await s.call("GET", `/v1/threads/${s.thread.id}/conversation`)).body as ClaudeConversation;
+  assert.equal(s.streams.length, reads + 1, "a paused pylon is not read");
+  assert.ok(paused.entries.length > first.entries.length);
+  assert.deepEqual(paused.entries.slice(0, first.entries.length), first.entries, "a read only appends");
+  assert.ok(paused.entries.some((e) => e.kind === "task" && e.status === "completed" && e.summary.includes("Count lines in hello.py")), "the subagent's finish");
+  assert.ok(paused.entries.some((e) => e.kind === "turn"));
+  assert.deepEqual(s.commands, [], "reading is never a command");
+});
+
+test("a Claude worker thread's page stream shows new entries during a turn, read when its session events say so rather than on a timer", async (t) => {
+  const s = await withClaude(t);
+  await writeFile(s.transcript, fixture.slice(0, 22).join(""));
+  const stream = s.events(`/threads/${s.thread.id}/stream`);
+  t.after(() => stream.close());
+  const frame = async (pattern: RegExp, what: string) => {
+    for (;;) {
+      const next = await stream.next();
+      assert.ok(next.convo !== undefined || next.grow !== undefined, what);
+      if (next.convo !== undefined && pattern.test(next.convo)) return next.convo as string;
+    }
+  };
+  assert.match(await frame(/Do these steps one at a time/, "the read a watch starts with"), /Claude Code · claude-opus-5-5/);
+  const idle = s.streams.length;
+  await sleep(2_500);
+  assert.equal(s.streams.length, idle, "an idle thread is not read on a timer");
+
+  let sequence = 0;
+  const report = (kind: "session.turn-started" | "session.turn-ended") => s.registry.reportSession(node, { sequence: ++sequence, pylon: s.thread.pylonId, time: Date.now(), event: { kind, session: claudeSession } });
+  await appendFile(s.transcript, fixture.slice(22, 24).join(""));
+  report("session.turn-started");
+  await frame(/Wrote a file/, "the turn's start is followed by a read");
+  await appendFile(s.transcript, fixture[24]!);
+  assert.match(await frame(/<span class="t-status run">running<\/span>/, "a turn that runs is read again"), /python3 \/home\/user\/workspace\/repo\/hello.py/);
+  await appendFile(s.transcript, fixture.slice(25, 28).join(""));
+  report("session.turn-ended");
+  assert.doesNotMatch(await frame(/Exit code 1/, "the turn's end is followed by a read"), /t-status run/);
+  await sleep(500);
+  const ended = s.streams.length;
+  await sleep(2_500);
+  assert.equal(s.streams.length, ended, "the reads stop with the turn");
 });
