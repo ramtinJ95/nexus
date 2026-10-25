@@ -13,7 +13,10 @@ const schema = z.strictObject({
   branches: z.array(z.strictObject({ name: z.string().min(1), head: hash, pushedAs: z.string().min(1).nullable() })).max(1000),
 });
 
-/** One local read, with no fetch or index refresh. Ref and reply limits fail whole, never report a partial list. */
+/**
+ * One local read, with no fetch or index refresh. Ref and reply limits fail whole, never report a partial list.
+ * The guest timeout bounds the process, not its controller RPC; the probe separately bounds and tracks that wait.
+ */
 export async function gitFacts(guest: Guest): Promise<GitFacts> {
   const read = await guest.exec(["python3", "-c", helper], { cwd: checkoutDir, timeoutMs: 3000 });
   if (read.exitCode !== 0 || read.truncated || Buffer.byteLength(read.output) > 60 * 1024 + 1) throw new Error("checkout git facts could not be read within their limits");
