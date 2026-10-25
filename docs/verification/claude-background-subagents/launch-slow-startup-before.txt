@@ -1,0 +1,18 @@
+first prompt: 5227 bytes, 48 lines; bash startup sleeps 2 s
+started at 2026-10-25T21:36:57.166Z
+typed 6570 bytes at 2026-10-25T21:36:57.196Z
+<repo>/src/sessions.ts:165
+    if (submitted.exitCode !== 0) throw new ClaudeLaunchStalled(`Claude launch stalled: no UserPromptSubmit within 30 seconds${typed}; attach before starting another session. The pane showed:\n${await screen(guest, pane)}`, pane);
+                                        ^
+
+ClaudeLaunchStalled [Error]: Claude launch stalled: no UserPromptSubmit within 30 seconds; attach before starting another session. The pane showed:
+, `backticks`, $HOME, $(echo no), ${PATH}, \x21\x21, a backslash \\n and a tab:\x09here.\x0a\x0aLine 11 has "double quotes", \x27single quotes\x27, `backticks`, $HOME, $(echo no), ${PATH}, \x21\x21, a backslash \\n and a tab:\x09here.\x0aLine 12 has "double quotes", \x27single quotes\x27, `backticks`, $HOME, $(echo no), ${PATH}, \x21\x21, a backslash \\n and a tab:\x09here.\x0aLine 13 has "double quotes", \x27single quotes\x27, `backticks`, $HOME, $(echo no), ${PATH}, \x21\x21, a backslash \\n and a tab:\x09here.\x0aLine 14 has "double quotes", \x27single quotes\x27, `backticks`, $HOME, $(echo no), ${PATH}, \x21\x21, a backslash \\n and a tab:\x09here.\x0aLine 15 has "double quotes", \x27single quotes\x27, `backticks`, $HOME, $(echo no), ${PATH}, \x21\x21, a backslash \\n and a tab:\x09here.\x0aLine 16 has "double quotes", \x27single quotes\x27, `backticks`, $HOME, $(echo no), ${PATH}, \x21\x21, a backslash \\n and a tab:\x09here.\x0aLine 17 has "double quotes", \x27single quotes\x27, `backticks`, $HOME, $(echo no), ${PATH}, \x21\x21, a backslash \\n and a tab:\x09here.\x0aLine 18 has "double quotes", \x27single quotes\x27, `backticks`, $HOME, $(echo no), ${PATH}, \x21\x21, a backslash \\n and a tab:\x09here.\x0aLine 19 has "double quotes", \x27single quotes\x27, `backticks`, $HOME, $(echo no), ${PATH}, \x21\x21, a backslash \\n and a tab:\x09here.\x0aLine 20 has "double quotes", \x27single quotes\x27, `backticks`, $HOME, $(echo no), ${PATH}, \x21\x21, a backslash \\n and a tab:\x09here.\x0a\x0aLine 21 has "double quotes", \x27single quotes\x27, `backticks`, $HOME, $(echo no), ${PATH}, \x21\x21, a backslash \\n and a tab:\x09here.\x0aLine 22 has "double quotes", \x27single quotes\x27, `backticks`, $HOME, $(echo no), ${PATH}, \x21\x21, a backslash \\n and a tab:\x09here.\x0aLine 23 has "double quotes", \x27single quotes\x27, `backticks`, $HOME, $(echo no), ${PATH}, \x21\x21, a backslash \\n and a tab:\x09here.\x0aLine 24 has "double quotes", \x27single quotes\x27, `backticks`, $HOME, $(echo no), ${PATH}, \x21\x21, a backslash \\n and a tab:\x09here.\x0aLine 25 has "double quotes", \x27single quotes\x27, `backticks`, $HOME, $(echo no), ${PATH}, \x21\x2
+>
+    at startHarness (<repo>/src/sessions.ts:165:41)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async openSession (<repo>/src/sessions.ts:127:5)
+    at async <repo>/docs/verification/claude-background-subagents/verify-launch.mjs:40:14 {
+  herdrPane: 'wB:p1'
+}
+
+Node.js v24.22.1

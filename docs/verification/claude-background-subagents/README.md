@@ -76,14 +76,32 @@ shell prompt in the pane, as in th-eaaf5d544495.
 
 `verify-launch.mjs` runs the patched `openSession` against real Herdr and Claude,
 moving only HOME, the checkout and the Herdr server name, like
-`../claude-worker-launch/verify-launch.mjs`. The test HOME logged UserPromptSubmit
-input. `launch.txt` is its output: the command typed into the pane, whether the
-submitted prompt equals the first prompt, and the pane afterwards.
+`../claude-worker-launch/verify-launch.mjs`. The workspace starts with HOME set,
+so the fresh pane's bash runs the test HOME's `.bashrc`, which sources the real
+one and the token placeholder. Nothing else is typed into the pane and nothing
+waits before `openSession`. The test HOME logs UserPromptSubmit input. The first
+prompt is 5,227 bytes over 48 lines, with blank lines, a tab, quotes, backticks,
+`$HOME`, `$(...)`, `${PATH}` and `!!`. Its typed command is 6.5 KB on one line.
+These runs used an isolated Herdr server, `exp`.
 
-The typed line holds no control character, and Claude's UserPromptSubmit input
-equals the first prompt byte for byte. Claude ran under the session ID Nexus
-chose, answered, and `openSession` returned 1.4 seconds after starting, on the
-receipt.
+Typing a line into a pane is safe only once bash reads it with readline. Before
+that, as while bash runs its startup files, the terminal is in canonical mode,
+and its line discipline drops input past 4 KB on one line. So `startHarness`
+waits, up to 10 seconds, until the shell's process group holds the terminal and
+the terminal is out of canonical mode (`stty -a` shows `-icanon`). A shell that
+never gets there fails the launch before anything is typed, with the pane's
+screen, and the workspace rolls back.
+
+- `launch.txt` is a cold launch. The gate cleared 4 ms after it started, Claude's
+  UserPromptSubmit input equals the first prompt byte for byte, and Claude
+  answered. `openSession` returned 1.2 seconds after starting, on the receipt.
+- `launch-slow-startup.txt` is the same launch with a `.bashrc` that first sleeps
+  2 seconds, a synthesized slow startup. The gate waited 2.05 seconds, then the
+  prompt arrived exactly.
+- `launch-slow-startup-before.txt` is that slow startup with `src/sessions.ts`
+  from before the gate. The command was typed 30 ms after starting, the terminal
+  cut it, and bash sat at a `>` continuation prompt. Claude never started, and
+  the launch stalled after 30 seconds.
 
 ## Checks
 

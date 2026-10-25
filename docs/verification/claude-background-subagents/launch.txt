@@ -1,12 +1,16 @@
-started at 2026-10-25T21:14:23.060Z
-typed: export HOME=<scratch>/launch/home; . /etc/profile.d/nexus-secrets.sh
-typed: $'claude' $'--session-id' $'b856cd29-0a45-46dd-82e0-ad2b4983d479' $'--model' $'claude-sonnet-5-5' $'--permission-mode' $'bypassPermissions' $'--settings' $'{"hooks":{"UserPromptSubmit":[{"hooks":[{"type":"command","command":"mkdir -p <scratch>/launch/home/.nexus && touch <scratch>/launch/home/.nexus/claude-submitted-19550f9a-b784-4cc4-bef4-00c5b94f21b4"}]}]}}' $'Reply with the single word "received" and nothing else.\x0aLine two has "double quotes", \x27single quotes\x27, `backticks`, $HOME, $(echo no), \x21\x21, a backslash \\n and a tab:\x09here.\x0a\x0aLast line, after a blank one.'
-openSession returned wF:p1 2026-10-25T21:14:24.411Z
+first prompt: 5227 bytes, 48 lines; bash startup sleeps 0 s
+started at 2026-10-25T21:36:30.760Z
+waiting for the shell's prompt from 2026-10-25T21:36:30.794Z
+typed 6564 bytes at 2026-10-25T21:36:30.798Z
+openSession returned w9:p1 2026-10-25T21:36:31.917Z
 UserPromptSubmit prompt is the exact first prompt: true
-"Reply with the single word \"received\" and nothing else.\nLine two has \"double quotes\", 'single quotes', `backticks`, $HOME, $(echo no), !!, a backslash \\n and a tab:\there.\n\nLast line, after a blank one."
-  Last line, after a blank one.
+  Line 42 has "double quotes", 'single quotes', `backticks`, $HOME, $(echo no), ${PATH}, !!, a backslash \n and a tab:
+     here.
+  Last line.
+
 ● received
-✻ Brewed for 1s · done 9:14 PM
+
+✻ Baked for 2s · done 9:36 PM
                                                                                                    ◐ medium · /effort
 ───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 ❯ 
