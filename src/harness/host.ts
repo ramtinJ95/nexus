@@ -15,9 +15,12 @@ import { createRegistry, Harness, type ConversationId, type ConversationWatch, t
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
 import { CodingTools } from "@earendil-works/pi-durable/tools";
 import type { Models } from "@earendil-works/pi-ai/models";
-import type { PylonId } from "../protocol.ts";
+import { checkoutReader } from "../checkout-files.ts";
+import { localApiWhois } from "../tailscale.ts";
+import { connectProbe, jobDeadlineMs, type PylonId } from "../protocol.ts";
 import { trackActivity, type AgentFacts, type HarnessActivity } from "./activity.ts";
 import { pylonEnvs, type PylonLocator } from "./pylon-env.ts";
+import { turnSnapshots } from "./turn-snapshot.ts";
 import { writeThread } from "./thread-doc.ts";
 
 export type { ConversationId };
@@ -60,6 +63,7 @@ export interface HarnessHost {
    * conversation queues it as a follow-up, or with `steer` places it after the current tool round.
    */
   send(threadId: string, text: string, requestId: string, mode: "followUp" | "steer"): Promise<Submission>;
+  latestTurn(threadId: string): Promise<string | null>;
   abort(threadId: string): Promise<void>;
   /** Runs again the tasks the restart limit parked, which otherwise hold the thread's run forever. */
   retry(threadId: string): Promise<void>;
@@ -77,6 +81,11 @@ export async function openHarnessHost(options: HarnessHostOptions): Promise<Harn
   const envs = pylonEnvs(options.locator, { tailscaled: options.tailscaled, log });
   const registry = createRegistry();
   registry.install(CodingTools);
+  registry.install(turnSnapshots(async (pylon, turn) => {
+    const target = await options.locator.awaitRunning(pylon, Date.now() + jobDeadlineMs.spawn);
+    const client = connectProbe(target.node, target.host, target.nodeId, { port: target.port, whois: localApiWhois(options.tailscaled) });
+    await checkoutReader((argv) => client.stream(pylon, argv), pylonRepoPath).snapshot(turn);
+  }, log));
   const harness = await Harness.open(await openNodeSqliteStorage(options.storagePath), {
     models: options.models,
     registry,
@@ -126,6 +135,12 @@ export async function openHarnessHost(options: HarnessHostOptions): Promise<Harn
     },
     async send(threadId, text, requestId, mode) {
       return (await conversation(threadId)).submit({ type: "input", content: text, requestId, whenBusy: mode }, context);
+    },
+    async latestTurn(threadId) {
+      const conversationId = conversations.get(threadId);
+      if (conversationId === undefined) return null;
+      const latest = await harness.commit((tx) => tx.scanTasks({ conversationId, kind: "pi.generation", order: "descending" }, 1), context);
+      return latest.items[0] === undefined ? null : String(latest.items[0].id);
     },
     async abort(threadId) {
       await (await conversation(threadId)).abort(context);

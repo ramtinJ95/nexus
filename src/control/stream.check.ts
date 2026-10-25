@@ -38,6 +38,7 @@ const harness = await Harness.open(await openNodeSqliteStorage(join(dir, "harnes
 const conversations = new Map<string, ConversationId>();
 const conversation = async (threadId: string) => (await harness.conversation(conversations.get(threadId)!, context))!;
 const threads: ThreadHarness = {
+  latestTurn: async () => null,
   async startThread({ threadId }) {
     const created = await harness.createConversation({ ownership: { kind: "ownerless" }, agent: { model: scriptedModel, cwd: "/" } }, context);
     conversations.set(threadId, created.id);
