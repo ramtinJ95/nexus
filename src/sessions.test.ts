@@ -779,6 +779,25 @@ test("a Claude whose state Herdr cannot tell yet is waited for, and is reported 
   assert.equal(stuck.typed(), false);
 });
 
+test("a pane that stops running the session before the message is typed types nothing and says so", async (t) => {
+  const panes = [herdrPane("w1:p1", "w1", "claude", "unknown", { kind: "id", value: session })];
+  const foreground: Record<string, readonly string[]> = { ...runningClaude };
+  const toPi = claudeWorkers(t, panes, foreground, (reads) => {
+    if (reads !== 2) return;
+    panes[0] = herdrPane("w1:p1", "w1", "pi", "idle", { kind: "path", value: "/home/user/.pi/sessions/a.jsonl" });
+    foreground["w1:p1"] = ["node", "/usr/local/bin/pi"];
+  });
+  assert.deepEqual(await sendToClaude(toPi.guest, { session, text: "go" }, 5_000), { outcome: "moved", herdrPane: "w1:p1", resumed: false });
+  assert.equal(toPi.typed(), false, "a pi session that took the pane is not typed into");
+
+  const others = [herdrPane("w1:p1", "w1", "claude", "idle", { kind: "id", value: session })];
+  const another = claudeWorkers(t, others, { ...runningClaude }, (reads) => {
+    if (reads === 2) others[0] = herdrPane("w1:p1", "w1", "claude", "idle", { kind: "id", value: "another-session" });
+  });
+  assert.deepEqual(await sendToClaude(another.guest, { session, text: "go" }), { outcome: "moved", herdrPane: "w1:p1", resumed: false });
+  assert.equal(another.typed(), false, "nor is another Claude session");
+});
+
 test("a Claude pane Herdr reports no session for is found by the session its command line started", async (t) => {
   const w = claudeWorkers(t, [
     herdrPane("w1:p1", "w1", "claude", "idle"),
