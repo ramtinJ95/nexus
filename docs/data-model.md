@@ -13,6 +13,7 @@ The control plane writes every record. Probes send facts in observations, and th
 | Image | `id`, `pins`, `builtOn`, `builtAt` | The results of `build-image` jobs |
 | Template | `id`, `key`, `state`, `node`, `builtAt` | The results of `build-template` jobs |
 | Thread | `id`, `title`, `project`, `status`, `conversationId`, `pylonId`, `startedBy`, `seenAt`, `lastReplyAt` | You, and the harness |
+| Claude transcript | `thread`, `session`, `byte_offset`, `skipping`, `dropped`, `read_at`, and its entries | Reads of the Claude worker's transcript in the pylon |
 | Pylon | `id`, `thread`, `node`, `template` | Thread start |
 | Session | `pylon`, `id`, `herdrPane`, `harness`, `harnessSessionId`, `status`, `title`, `state`, `message` | Observations. Panes opened by hand in Herdr are adopted. A paused pylon's sessions keep their records |
 | Preview | `pylon`, `service`, `httpsPort` | The control plane allocates the port, never one its node's probe still routes. Observations report when it is ready |
@@ -245,3 +246,55 @@ provider routing. A local launch receipt or a running Claude with working status
 can confirm startup despite Herdr readiness failure. No failed event is emitted
 for an RPC error when the launch session already reported submission. Otherwise
 the current stored failure message and `thread.failed.payload.message` agree.
+
+## Claude worker conversations
+
+A Claude worker thread's conversation is its session's transcript, which Claude Code
+writes in the pylon as JSON lines at `~/.claude/projects/<cwd>/<session>.jsonl`. Each
+character of the cwd that is not a letter or a digit becomes `-` in the folder's name,
+and `claude --resume` appends to the same file. `src/claude-transcript.ts` parses each
+record at the boundary into a `ClaudeEntry`, and the model only grows, so a later
+record never changes an earlier entry:
+
+| Kind | Fields | From |
+|---|---|---|
+| `prompt` | `text`, `from`: `person`, `command` or `other` | A prompt the person typed, a prompt Claude took from its queue mid-turn (`queued_command`), a slash command, or a prompt from a plugin |
+| `reply` | `text` | An assistant text block |
+| `tool` | `id`, `name`, `input` | An assistant `tool_use` block, or a `!` shell command (`shell`) |
+| `result` | `toolUseId`, `output`, `isError` | A `tool_result`, or a `!` command's output. A background launch's metadata reads "Started in the background" |
+| `task` | `toolUseId`, `status`, `summary`, `result` | A `<task-notification>`: a background subagent or shell finished. `result` is a subagent's answer |
+| `queue` | `op`, `text` | A `queue-operation`: a message typed during a turn joined or left Claude's queue |
+| `notice` | `tone`, `text` | An interruption, a compaction, a model error or a local command's output |
+| `turn` | `durationMs` | `system/turn_duration` |
+| `record` | `type`, `summary` | Any record shape the parser does not know, a malformed line, or a record over 512 KiB, which is skipped |
+
+Every entry has `at`, the record's time in Unix milliseconds. Records Claude Code keeps
+for itself, such as API request copies, context attachments and file-history
+snapshots, give no entry. They are named in tables in the parser, so a new record type
+shows as a `record` rather than disappearing. Prompts are cut at 32 KiB, replies at
+64 KiB, tool inputs at 4 KiB per string and outputs at 8 KiB.
+
+The registry keeps what was read. `claude_transcripts` holds per thread the session it
+read, the cursor (`byte_offset` past the last complete line, and `skipping` while a
+record over 512 KiB is passed over), how many entries were `dropped`, and `read_at`.
+`claude_entries` holds the newest 3,000 entries in order. A read appends only its new
+entries and is applied only where the stored cursor stands, so a read applied twice
+changes nothing. A new session ID, or a file smaller than the cursor, replaces the
+stored entries. Archiving keeps them, and deleting the thread removes them.
+`ClaudeConversation.working` is `Thread.sessionTurnRunning`.
+
+The control plane reads a transcript only while the node's last observation reports
+the pylon running. The read is one raw pipe through the probe, taking at most 512 KiB
+and 20 seconds, and a refresh takes at most 16 reads. It never wakes the pylon and is
+not activity. A failed read keeps what is stored. Each retained `session.*` event for a
+Claude worker thread triggers a read. While a turn runs and a dashboard watches the
+thread, it is read every 2 seconds.
+
+`claude_messages` records each send to a Claude worker by request ID: `sending` before
+the probe is asked, then `sent` with a `ClaudeSent` (`session`, `outcome` of `sent` or
+`queued`, `resumed`). A repeat of a `sent` ID answers the stored result. A send that
+typed nothing, because the pylon was not running, Claude waited at a dialog or was not
+ready yet, removes its row, so the same ID can be sent again. A row left `sending`
+means the probe failed partway, and a repeat is refused with a 422. Each thread keeps
+its newest 256 request IDs.
+

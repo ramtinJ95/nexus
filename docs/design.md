@@ -115,6 +115,7 @@ A persistent drain lease blocks API and background PR-watch turn entry, and coun
 
 | Date | Decision |
 |---|---|
+| 2026-10-26 | A Claude worker's conversation is its session transcript, read from the pylon over the probe's raw pipe when session events say it changed and kept in the registry. Steering types the message into Claude's prompt in short pieces, never into the harness |
 | 2026-10-26 | Dashboard terminates TLS directly on 7443 with tailscaled cert-only access and renewal; TCP-peer whois remains the only caller identity. No dashboard Serve entry: a Unix target would require local-admin rights for the probe’s later preview writes. HTTP starts independently of certificate availability; HTTPS retries failures and reports its state in health. HTTP clients stay unchanged |
 | 2026-10-25 | A prompted Claude launch types its own bash-quoted command, because Herdr refuses multi-line agent arguments |
 | 2026-10-25 | A Claude turn that ends with background subagents running stays working until the turn after its last subagent ends, judged by the Stop hook from Claude's own task list |
@@ -265,3 +266,62 @@ launches publish failure, using the same message stored on the worker. Matching
 late submission reports recover failed as well as stalled launches. Neither
 recovery nor restart resubmits a first prompt. Views render these registry facts
 rather than interpreting historical failure events as current failure.
+
+### Claude worker conversations and steering (0.17.0)
+
+A Claude worker thread has no harness conversation, so its conversation is the
+transcript Claude Code writes for the worker's session in the pylon. The control
+plane reads it the way it reads the checkout for Files and Changes: one raw pipe
+through the probe per read, with a small `sh` helper that prints the file's size and
+the bytes after the stored offset. Unlike a checkout read, a transcript read is never
+a human's request. It runs only while the node reports the pylon running, never
+records activity, and a pylon the probe finds not running keeps what was stored. The
+registry keeps the parsed entries, so a paused pylon, or a control plane that
+restarted, shows the transcript as of its last read. Only complete lines are taken,
+and a record over 512 KiB is skipped with a visible marker, so one huge tool output
+cannot stall the reader.
+
+The parser in `src/claude-transcript.ts` was written against real Claude Code 2.1.308
+transcripts from a pylon. It turns them into a small model that only grows: prompts,
+replies, tool calls, tool results paired by call ID, background task notifications
+(subagents and shells), queue operations, notices and turn durations. Claude Code's
+bookkeeping records are named in tables and left out. Any other record stays visible
+as a generic entry, so a Claude Code upgrade that adds record types degrades to
+showing them rather than hiding work. Subagents show as their `Agent` call, its
+prompt, and the answer their notification carries. Their own transcripts under
+`<session>/subagents/` are not read.
+
+The session events decide when to read rather than a timer. The service follows the
+retained event log, an indexed registry read once a second, and reads a Claude worker
+thread after each `session.*` event for it. Heartbeats are throttled to one per five
+minutes, so while a turn runs and a dashboard watches the thread, it is also read
+every 2 seconds. That is what makes entries appear during a turn. The reads stop at
+the turn's end, so an idle or unwatched thread costs nothing beyond its event reads.
+The dashboard follows its thread stream as it does for a harness conversation, and
+the conversation pane renders the entries with the same blocks.
+
+Steering types the person's message into the worker's Claude session through the
+probe command `send-claude`. Typing is the only input Claude Code's terminal takes,
+and it behaves as the person at the terminal would expect. While Claude is busy, the
+message joins Claude Code's own queue. Claude reads it at its next tool step within
+the same turn (recorded as `absorbed_mid_turn`), or takes it after the turn. A
+bracketed paste, or any long burst of input, is wrapped by Claude Code in
+`<pasted_content>` tags. So the probe types the text in pieces of at most 64
+characters, one Herdr `send-text` each, within one guest exec. It then waits half a
+second and presses Enter, because Claude reads an Enter that directly follows a burst of
+input as a newline. A newline types a line break without submitting, so multi-line
+text arrives exactly.
+Claude's prompt swallows a tab, and a carriage return submits early, so a message
+holding them is refused rather than changed. The probe finds the session's pane by
+Herdr's session ID or by Claude's command line. It resumes the session in place, or
+in a new workspace, when no live Claude runs it, and it types nothing while Claude
+waits at a dialog, because typing would answer that dialog. Every outcome in which
+nothing was typed is a result, not an error. A failed command may have typed part of
+the message, so it is never retried automatically: the request ID is fenced as
+sending first, and a repeat of an uncertain one is refused.
+
+The API decides by the thread's Claude worker record before anything else, so no
+mode or retry of a Claude worker thread's message reaches the harness. Sending is
+human activity: it wakes a paused pylon, the wake relaunches the session before the
+pylon counts as running, and clients retry the 409 until then with the same request
+ID. Captures are in `docs/verification/claude-thread-streaming/`.
