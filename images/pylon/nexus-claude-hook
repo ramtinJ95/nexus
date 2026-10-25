@@ -1,0 +1,15 @@
+#!/usr/bin/env node
+import { spawn } from "node:child_process";
+
+try {
+  let input = "";
+  for await (const chunk of process.stdin) {
+    input += chunk;
+    if (input.length > 64 * 1024) process.exit(0);
+  }
+  const { session_id: session } = JSON.parse(input);
+  if (typeof session !== "string" || session.length > 200) process.exit(0);
+  const child = spawn("/usr/local/bin/nexus", ["event", process.argv[2], "--session", session], { detached: true, stdio: "ignore" });
+  child.on("error", () => {});
+  child.unref();
+} catch {}

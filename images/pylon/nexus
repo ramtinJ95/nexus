@@ -5,11 +5,12 @@
 import { resolve } from "node:path";
 import { parseArgs } from "node:util";
 
-const version = "0.2.0";
+const version = "0.3.0";
 const api = process.env.NEXUS_API || "http://nexus.pylon";
 
 const usage = `nexus ${version}, the Nexus pylon CLI
 
+  nexus event <kind> [--session ID] [--message TEXT]
   nexus info                                     this pylon's thread, project, node, hosts and previews
   nexus services ensure|list                     start what .nexus/services.yaml declares, or list services
   nexus services restart|stop [name]
@@ -53,6 +54,17 @@ const serviceOp = (action) => ({ args: 1, request: ([name]) => ({ op: "services"
 
 /** Keyed by the command's words. The longest key that the arguments start with wins. */
 const commands = {
+  event: {
+    args: 1,
+    options: { session: { type: "string" }, message: { type: "string" } },
+    request([kind], { session, message }) {
+      if (!["session.turn-started", "session.turn-ended", "session.waiting", "session.ended"].includes(kind)) throw new UsageError("not a pylon event kind");
+      if (session !== undefined && (session.length === 0 || session.length > 200)) throw new UsageError("session must be 1 to 200 characters");
+      if (message !== undefined && message.length > 2048) throw new UsageError("message exceeds 2048 characters");
+      return { op: "event", kind, ...(session === undefined ? {} : { session }), ...(message === undefined ? {} : { message }) };
+    },
+    print: () => "Event accepted.",
+  },
   info: {
     args: 0,
     request: () => ({ op: "info" }),
@@ -175,7 +187,7 @@ async function main(argv) {
   }
   let res;
   try {
-    res = await fetch(`${api}/v1/request`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(call.request) });
+    res = await fetch(`${api}/v1/request`, { method: "POST", signal: AbortSignal.timeout(call.request.op === "event" ? 1500 : 120_000), headers: { "content-type": "application/json" }, body: JSON.stringify(call.request) });
   } catch (err) {
     console.error(`nexus: cannot reach ${api}: ${err.cause?.message ?? err.message}`);
     return 1;
