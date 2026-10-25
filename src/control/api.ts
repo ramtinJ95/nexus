@@ -19,9 +19,9 @@ import { canDeploy, commitSchema, isReporter, releaseView, reportSchema, resolve
  * wakes the loop for its node, so a start or a dashboard visit acts within one pass rather than 5 seconds.
  */
 import { attentionOf, type Attention } from "./attention.ts";
-import { chmod, lstat, unlink } from "node:fs/promises";
-import { dirname } from "node:path";
-import { isIP } from "node:net";
+import { createServer as createHttpsServer } from "node:https";
+import { TLSSocket } from "node:tls";
+import type { Certificate } from "../tailscale.ts";
 import { randomBytes } from "node:crypto";
 import { createServer, STATUS_CODES, type IncomingMessage, type ServerResponse } from "node:http";
 import type { Duplex } from "node:stream";
@@ -47,7 +47,7 @@ import { openTerminal } from "../guest-terminal.ts";
 import { attachTiming, serveAttach, type AttachTiming, type Ending, type PylonDoor } from "./attach.ts";
 
 export interface ApiOptions {
-  serveSocket?: string;
+  https?: { port: number; certificate(): Promise<Certificate>; renewalMs?: number };
   prWatchEnabled?: boolean;
   deployment?: DeploymentOptions;
   turnsStarting?: () => boolean;
@@ -81,6 +81,7 @@ export type ThreadHarness = Pick<HarnessHost, "startThread" | "send" | "abort" |
 
 export interface Api {
   readonly port: number;
+  readonly httpsPort?: number;
   close(): Promise<void>;
 }
 
@@ -729,18 +730,10 @@ export async function startApi(options: ApiOptions): Promise<Api> {
     ["PUT", /^\/v1\/images\/current$/, async (_, r) => { setCurrentImage(await r.body()); return noContent; }],
   ];
 
-  const proxied = new WeakSet<IncomingMessage>();
-  const requestHost = (req: IncomingMessage) => proxied.has(req) ? req.headers["x-forwarded-host"] : req.headers.host;
-
   /** The caller, once it is allowed and asked under one of the API's names. Every request and upgrade passes here. */
   async function admit(req: IncomingMessage): Promise<TailnetNodeId> {
     const { remoteAddress, remotePort } = req.socket;
-    // Serve overwrites this with one peer IP, not a proxy chain; user-login headers cannot identify a node.
-    const forwarded = req.headers["x-forwarded-for"];
-    const caller = proxied.has(req)
-      ? typeof forwarded === "string" && isIP(forwarded) && req.headers["tailscale-funnel-request"] === undefined
-        ? await whois(forwarded, 0) : null
-      : remoteAddress === undefined || remotePort === undefined ? null : await whois(remoteAddress, remotePort);
+    const caller = remoteAddress === undefined || remotePort === undefined ? null : await whois(remoteAddress, remotePort);
     const workerRoute = decodeURIComponent(new URL(req.url ?? "/", "http://nexus").pathname).startsWith("/v1/deployer/");
     if (caller === null || (workerRoute
       ? !isReporter(registry, options.deployment, caller, req.headers.authorization)
@@ -748,14 +741,14 @@ export async function startApi(options: ApiOptions): Promise<Api> {
     // whois names the machine, not the program, so a web page open on an allowed laptop is that laptop too.
     // It can neither send a JSON content type cross-origin without a preflight, which this API never answers,
     // nor reach the API under its own name.
-    const host = requestHost(req);
+    const host = req.headers.host;
     const hostname = typeof host === "string" ? new URL(`http://${host}`).hostname : undefined;
     if (hostname === undefined || !hostnames.has(hostname)) throw new HttpError(403, `the API does not answer to host ${req.headers.host}`);
     return caller;
   }
 
   async function handle(req: IncomingMessage, res: ServerResponse) {
-    if (req.method === "GET" && req.url === "/v1/health" && !proxied.has(req) && req.socket.remoteAddress !== undefined && req.socket.remoteAddress === req.socket.localAddress) {
+    if (req.method === "GET" && req.url === "/v1/health" && req.socket.remoteAddress !== undefined && req.socket.remoteAddress === req.socket.localAddress) {
       res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ commit: runningCommit }));
       return;
     }
@@ -863,7 +856,7 @@ export async function startApi(options: ApiOptions): Promise<Api> {
     // CORS does not guard a WebSocket handshake, and previews are served under the API's hostname on other ports, so
     // a preview's page could open a terminal from the browser of anyone allowed. A browser always sends Origin.
     const origin = req.headers.origin;
-    if (origin !== undefined && origin !== `${proxied.has(req) ? "https" : "http"}://${requestHost(req)}`) throw new HttpError(403, `the attach route does not answer pages from ${origin}`);
+    if (origin !== undefined && origin !== `${req.socket instanceof TLSSocket ? "https" : "http"}://${req.headers.host}`) throw new HttpError(403, `the attach route does not answer pages from ${origin}`);
     const t = thread(attachRoute.exec(pathOf(req.url))![1]!);
     let request: ReturnType<typeof parseAttachQuery>;
     try {
@@ -896,19 +889,19 @@ export async function startApi(options: ApiOptions): Promise<Api> {
     }
   }
 
-  function makeServer(served: boolean) {
-    const server = createServer({
+  async function makeServer(tls: boolean) {
+    const serverOptions = {
       // Only a WebSocket to the attach route upgrades. Any other request is handled as one, Upgrade header or not.
-      shouldUpgradeCallback: (req) => req.headers.upgrade?.toLowerCase() === "websocket" && attachRoute.test(pathOf(req.url)),
-    }, (req, res) => {
-      if (served) proxied.add(req);
+      shouldUpgradeCallback: (req: IncomingMessage) => req.headers.upgrade?.toLowerCase() === "websocket" && attachRoute.test(pathOf(req.url)),
+    };
+    const server = tls ? createHttpsServer({ ...serverOptions, ...await options.https!.certificate() }) : createServer(serverOptions);
+    server.on("request", (req, res) => {
       handle(req, res).catch((err: unknown) => {
         if (res.headersSent) return res.destroy(err as Error);
         send(res, err instanceof HttpError ? err.status : err instanceof DeployDraining ? 409 : 500, { error: (err as Error).message });
       });
     });
     server.on("upgrade", (req: IncomingMessage, socket: Duplex, head: Buffer) => {
-      if (served) proxied.add(req);
       // Node hands over an upgraded socket without its error handler, and a reset before the 101 would crash the API.
       socket.on("error", () => undefined);
       upgraded.add(socket);
@@ -917,38 +910,48 @@ export async function startApi(options: ApiOptions): Promise<Api> {
     });
     return server;
   }
-  const server = makeServer(false);
-  const served = options.serveSocket === undefined ? null : makeServer(true);
+  const server = await makeServer(false);
+  const secure = options.https === undefined ? null : await makeServer(true);
   await new Promise<void>((resolve, reject) => {
     server.once("error", reject);
     server.listen(options.port, options.host, () => { server.off("error", reject); resolve(); });
   });
   try {
-    if (served && options.serveSocket) {
-      const parent = await lstat(dirname(options.serveSocket));
-      if (!parent.isDirectory() || parent.uid !== process.getuid?.() || (parent.mode & 0o077) !== 0) {
-        throw new Error("serveSocket needs a private directory owned by the control-plane user");
-      }
-      await unlink(options.serveSocket).catch((err: NodeJS.ErrnoException) => { if (err.code !== "ENOENT") throw err; });
+    if (secure) {
       await new Promise<void>((resolve, reject) => {
-        served.once("error", reject);
-        served.listen(options.serveSocket, () => { served.off("error", reject); resolve(); });
+        secure.once("error", reject);
+        secure.listen(options.https!.port, options.host, () => { secure.off("error", reject); resolve(); });
       });
-      await chmod(options.serveSocket, 0o600);
     }
   } catch (err) {
     server.close();
-    served?.close();
+    secure?.close();
     throw err;
   }
+  let renewing = false;
+  const renewal = secure && options.https ? setInterval(async () => {
+    if (renewing || stopping) return;
+    renewing = true;
+    try {
+      const certificate = await options.https!.certificate();
+      if (!stopping) (secure as import("node:https").Server).setSecureContext(certificate);
+    } catch {
+      console.error("dashboard TLS certificate renewal failed; retaining the previous certificate and retrying next interval");
+    } finally {
+      renewing = false;
+    }
+  }, options.https.renewalMs ?? 12 * 60 * 60 * 1000) : null;
+  renewal?.unref();
   const address = server.address();
   if (address === null || typeof address === "string") throw new Error(`unexpected server address ${address}`);
 
   return {
     port: address.port,
+    ...(secure ? { httpsPort: (secure.address() as import("node:net").AddressInfo).port } : {}),
     async close() {
       stopping = true;
-      const closed = Promise.all([server, ...(served ? [served] : [])].map((listener) => {
+      if (renewal) clearInterval(renewal);
+      const closed = Promise.all([server, ...(secure ? [secure] : [])].map((listener) => {
         const done = new Promise<void>((resolve) => listener.close(() => resolve()));
         listener.closeAllConnections();
         return done;

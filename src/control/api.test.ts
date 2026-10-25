@@ -49,7 +49,7 @@ const dotfiles = { repo: "git@github.com:ramtin/dotfiles.git", ref: "main" };
 const dir = await mkdtemp(join(tmpdir(), "nexus-api-"));
 after(() => rm(dir, { recursive: true }));
 
-async function setup(t: import("node:test").TestContext, options: { serveSocket?: string; whois?: import("../tailscale.ts").Whois; deployment?: DeploymentOptions; dotfiles?: typeof dotfiles; streamStallMs?: number; attachTiming?: AttachTiming } = {}) {
+async function setup(t: import("node:test").TestContext, options: { https?: import("./api.ts").ApiOptions["https"]; whois?: import("../tailscale.ts").Whois; deployment?: DeploymentOptions; dotfiles?: typeof dotfiles; streamStallMs?: number; attachTiming?: AttachTiming } = {}) {
   const registry = openRegistry(join(dir, `${randomUUID()}.db`));
   registry.upsertNode({ name: node, tailnetHost: "rj-firebat.tail.ts.net", tailnetNodeId: "nFIREBAT" as TailnetNodeId });
   let caller: TailnetNodeId | null = laptop;
@@ -73,7 +73,7 @@ async function setup(t: import("node:test").TestContext, options: { serveSocket?
   let pipe = async (argv: readonly string[]): Promise<ByteStream> => { throw new Error(`unexpected stream ${argv[0]}`); };
   const api = await startApi({
     registry, host: "127.0.0.1", port: 0,
-    ...(options.serveSocket ? { serveSocket: options.serveSocket } : {}),
+    ...(options.https ? { https: options.https } : {}),
     // Every loopback caller is whoever the test says. Tests never ask tailscaled.
     whois: options.whois ?? (async () => {
       await admitted;
@@ -126,7 +126,7 @@ async function setup(t: import("node:test").TestContext, options: { serveSocket?
     });
   }
   return {
-    registry, call, raw, woken, calls, commands, streams, fake, port: api.port, close: () => api.close(),
+    registry, call, raw, woken, calls, commands, streams, fake, port: api.port, httpsPort: api.httpsPort, close: () => api.close(),
     callAs(id: TailnetNodeId | null) { caller = id; },
     /** Holds every request at whois until the returned function is called. */
     holdWhois() {
@@ -1458,42 +1458,63 @@ test("the final idle fence holds across lease expiry until rollback or success r
 });
 
 
-test("Serve resolves the original node only on its private socket; TCP ignores forged headers", async (t) => {
-  const socketDir = await mkdtemp(join(dir, "serve-"));
-  const socketPath = join(socketDir, "api.sock");
-  const seen: [string, number][] = [];
+test("direct TLS uses TCP whois, ignores forged headers, and renews without disturbing HTTP", async (t) => {
+  const { testCertificate } = await import("../test-certificate.ts");
+  const { request: tlsRequest } = await import("node:https");
+  const { X509Certificate } = await import("node:crypto");
+  const certDir = await mkdtemp(join(dir, "tls-"));
+  const first = await testCertificate(certDir);
+  const second = await testCertificate(certDir);
+  let current = first;
+  let fail = false;
+  let reads = 0;
   const api = await setup(t, {
-    serveSocket: socketPath,
+    https: { port: 0, renewalMs: 25, certificate: async () => {
+      reads++;
+      if (fail) throw new Error("renewal unavailable");
+      return current;
+    } },
     deployment: { self: "nFIREBAT" as TailnetNodeId, deployers: new Set([laptop]), keys: {} },
-    whois: async (address, port) => {
-      seen.push([address, port]);
-      return address === "100.64.0.10" ? laptop : address === "100.64.0.2" ? "nFIREBAT" as TailnetNodeId : null;
-    },
   });
-  const headers = { "x-forwarded-for": "100.64.0.10", "x-forwarded-host": "127.0.0.1", "tailscale-user-login": "owner@example.com" };
-  assert.equal((await api.call("GET", "/v1/threads", undefined, headers)).status, 403);
-  assert.notEqual(seen.at(-1)![0], "100.64.0.10");
-  function served(path = "/v1/threads", overrides: Record<string, string> = {}, method = "GET") {
-    return new Promise<number>((resolve, reject) => {
-      request({ socketPath, path, method, headers: { host: "localhost", "content-type": "application/json", ...headers, ...overrides } }, (res) => {
+  function tls(path = "/v1/threads", headers: Record<string, string> = {}, method = "GET") {
+    return new Promise<{ status: number; fingerprint: string }>((resolve, reject) => {
+      const req = tlsRequest({
+        hostname: "127.0.0.1", port: api.httpsPort, path, method, agent: false,
+        ca: [first.cert, second.cert], servername: "dashboard.example.ts.net",
+        headers: { host: "127.0.0.1", "content-type": "application/json", ...headers },
+      }, (res) => {
+        const fingerprint = (res.socket as import("node:tls").TLSSocket).getPeerCertificate().fingerprint256;
         res.resume();
-        res.on("end", () => resolve(res.statusCode!));
-      }).on("error", reject).end();
+        res.on("end", () => resolve({ status: res.statusCode!, fingerprint }));
+      });
+      req.on("error", reject).end();
     });
   }
-  assert.equal(await served(), 200);
-  assert.deepEqual(seen.at(-1), ["100.64.0.10", 0]);
-  assert.equal(await served("/v1/threads", { "x-forwarded-for": "100.64.0.99" }), 403);
-  for (const bad of ["", "100.64.0.10, 100.64.0.99", "not-an-ip"]) {
-    assert.equal(await served("/v1/threads", { "x-forwarded-for": bad }), 403);
-  }
-  assert.equal(await served("/v1/threads", { "tailscale-funnel-request": "?1" }), 403);
-  assert.equal(await served("/v1/threads", { "x-forwarded-host": "evil.example" }), 403);
-  assert.equal(await served("/v1/health", { "x-forwarded-for": "" }), 403);
-  assert.equal(await served("/v1/release", { "x-forwarded-for": "100.64.0.2" }, "PUT"), 403);
-  assert.equal(await served("/v1/deployer/desired"), 403);
+  assert.equal((await tls()).status, 200);
+  assert.equal((await tls()).fingerprint, new X509Certificate(first.cert).fingerprint256);
+  assert.equal((await api.call("GET", "/v1/threads")).status, 200);
+  api.callAs(null);
+  const forged = { "x-forwarded-for": "100.64.0.10", "x-forwarded-host": "127.0.0.1", "tailscale-user-login": "owner@example.com" };
+  assert.equal((await tls("/v1/threads", forged)).status, 403);
+  assert.equal((await api.call("GET", "/v1/threads", undefined, forged)).status, 403);
+  api.callAs("nFIREBAT" as TailnetNodeId);
+  assert.equal((await tls("/v1/release", forged, "PUT")).status, 403);
+  api.callAs(laptop);
+  assert.equal((await tls("/v1/threads", { ...forged, host: "evil.example" })).status, 403);
   const upgrade = { connection: "Upgrade", upgrade: "websocket", "sec-websocket-version": "13", "sec-websocket-key": "dGhlIHNhbXBsZSBub25jZQ==" };
-  assert.equal(await served(attachPathOf("missing"), { ...upgrade, origin: "https://127.0.0.1" }), 404);
-  assert.equal(await served(attachPathOf("missing"), { ...upgrade, origin: "http://127.0.0.1" }), 403);
-  assert.equal(await served(attachPathOf("missing"), { ...upgrade, origin: "https://127.0.0.1:10200" }), 403);
+  assert.equal((await tls(attachPathOf("missing"), { ...upgrade, origin: "https://127.0.0.1" })).status, 404);
+  assert.equal((await tls(attachPathOf("missing"), { ...upgrade, origin: "http://127.0.0.1" })).status, 403);
+  assert.equal((await tls(attachPathOf("missing"), { ...upgrade, origin: "https://127.0.0.1:10200" })).status, 403);
+  fail = true;
+  const before = reads;
+  while (reads === before) await new Promise((resolve) => setTimeout(resolve, 10));
+  assert.equal((await tls()).fingerprint, new X509Certificate(first.cert).fingerprint256);
+  fail = false;
+  current = second;
+  for (let i = 0; ; i++) {
+    if ((await tls()).fingerprint === new X509Certificate(second.cert).fingerprint256) break;
+    assert.ok(i < 100, "certificate renewed");
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  assert.equal((await api.call("GET", "/v1/threads")).status, 200);
 });

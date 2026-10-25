@@ -10,7 +10,7 @@ import { z } from "zod";
 import { connectProbe, type NodeName, type TailnetNodeId } from "../protocol.ts";
 import { gitUrl } from "../project.ts";
 import { ingest } from "../reconcile.ts";
-import { linuxTailscaledSocket, localApiWhois } from "../tailscale.ts";
+import { linuxTailscaledSocket, localApiWhois, localApiCertificate } from "../tailscale.ts";
 import type { Models } from "@earendil-works/pi-ai/models";
 import { harnessModels, openCredentials, requireModel } from "../harness/credentials.ts";
 import { openHarnessHost, type ConversationId } from "../harness/host.ts";
@@ -30,7 +30,7 @@ export const defaultPreviewPorts = { first: 10200, last: 10999 } as const;
 
 const configSchema = z.strictObject({
   db: z.string().min(1),
-  serveSocket: absolutePath.optional(),
+  https: z.strictObject({ hostname: z.string().regex(/^[a-z0-9-]+(?:\.[a-z0-9-]+)*\.ts\.net$/) }).optional(),
   github: z.strictObject({ tokenFile: absolutePath }).optional(),
   listen: z.strictObject({
     host: z.string().min(1),
@@ -62,7 +62,7 @@ const configSchema = z.strictObject({
   tailscaledSocket: z.string().min(1).optional(),
   /** The https ports previews are published on. Each node gives a port to one pylon at a time. */
   previewPorts: z.strictObject({ first: port, last: port })
-    .refine((range) => range.first <= range.last && !(range.first <= 443 && range.last >= 443), "first must not be above last, and port 443 is reserved for the dashboard")
+    .refine((range) => range.first <= range.last && !(range.first <= 7443 && range.last >= 7443), "first must not be above last, and port 7443 is reserved for the dashboard")
     .default(defaultPreviewPorts),
 });
 export type ControlPlaneConfig = z.infer<typeof configSchema>;
@@ -80,6 +80,7 @@ export function parseConfig(text: string): ControlPlaneConfig {
   if (!result.success) throw new Error(`invalid control plane config:\n${z.prettifyError(result.error)}`);
   const names = result.data.nodes.map((n) => n.name);
   if (new Set(names).size !== names.length) throw new Error(`invalid control plane config: node names repeat: ${names.join(", ")}`);
+  if (result.data.https && !result.data.listen.hostnames.includes(result.data.https.hostname)) throw new Error("https.hostname must be in listen.hostnames");
   return result.data;
 }
 
@@ -133,7 +134,7 @@ export async function startControlPlane(config: ControlPlaneConfig, models: Mode
   const watchTimer = setInterval(() => { void watch.poll(); }, 120_000);
   void watch.poll();
   const api = await startApi({
-    ...(config.serveSocket ? { serveSocket: config.serveSocket } : {}),
+    ...(config.https ? { https: { port: 7443, certificate: () => localApiCertificate(config.https!.hostname, tailscaled) } } : {}),
     prWatchEnabled: token !== null,
     turnsStarting: gate.busy,
     deployment: { self: config.self.tailnetNodeId as TailnetNodeId, deployers: new Set((config.deployers ?? []) as TailnetNodeId[]), keys: config.deployKeys ?? {} },
