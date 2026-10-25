@@ -343,6 +343,20 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
     return next;
   }
 
+  /**
+   * Sends to one Claude session run one at a time, from finding its pane to the Enter, so two never interleave their
+   * chunks in its prompt, and a second send finds the pane a first one resumed the session into instead of opening another.
+   */
+  const claudeSends = new Map<string, Promise<unknown>>();
+  function oneSendAtATime<T>(pylonId: PylonId, session: string, work: () => Promise<T>): Promise<T> {
+    const key = `${pylonId}:${session}`;
+    const next = (claudeSends.get(key) ?? Promise.resolve()).then(work);
+    const settled = next.catch(() => undefined);
+    claudeSends.set(key, settled);
+    void settled.then(() => { if (claudeSends.get(key) === settled) claudeSends.delete(key); });
+    return next;
+  }
+
   async function readSnapshot(): Promise<NodeObservation> {
     // Jobs before pylons, so the pylons show the result of every job listed as finished. See NodeObservation.jobs.
     const jobs = retainedJobs();
@@ -493,7 +507,8 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
       const pylon = (await backend.list()).find((p) => p.pylonId === pylonId);
       if (pylon?.vm !== "running") return send(res, 409, `${pylonId} is ${pylon?.vm ?? "absent"}, not running`);
       const links = command.kind === "link-port" || command.kind === "unlink-port";
-      const result = await (links ? betweenReads(() => runCommand(pylonId, command, deps)) : runCommand(pylonId, command, deps));
+      const run = () => runCommand(pylonId, command, deps);
+      const result = await (links ? betweenReads(run) : command.kind === "send-claude" ? oneSendAtATime(pylonId, command.session, run) : run());
       if (result.kind === "link-port") relinked(pylonId, result.service);
       // A linked port is a new service that wants a preview, and an unlinked one a service gone, which the control plane sees in the next read.
       // An opened or closed session is listed in it too, as is one a message resumed.
