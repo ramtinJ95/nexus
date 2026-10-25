@@ -45,7 +45,7 @@ test("a Claude Code session opens in its own workspace in the checkout and resum
   assert.ok(start, "an agent start ran");
   assert.deepEqual(start.slice(3, 5), ["agent", "start"]);
   assert.match(start[5]!, /^[a-z][a-z0-9_-]{0,31}$/, "the agent name is one Herdr accepts");
-  assert.deepEqual(start.slice(6), ["--kind", "claude", "--pane", "w1:p1", "--timeout", "30000", "--", "--resume", "bd2c2d6b"]);
+  assert.deepEqual(start.slice(6), ["--kind", "claude", "--pane", "w1:p1", "--timeout", "30000", "--", "--resume", "bd2c2d6b", "--permission-mode", "bypassPermissions"]);
 });
 
 test("a pi session resumes from its session file, and a shell starts no agent", async () => {
@@ -64,18 +64,18 @@ test("a Claude Code session never prompted has no transcript, so it starts fresh
   await openSession(guest, { harness: "claude-code", title: "review", cwd: "/home/user", resume: "d778fc1b" });
   const lookup = guest.execs.find((a) => a[0] === "sh")!;
   assert.deepEqual(lookup.slice(3), ["d778fc1b", "/home/user/.claude/projects"], "the guest looks for that ID's transcript under every project");
-  assert.deepEqual(guest.execs.find((a) => a[3] === "agent")!.slice(-2), ["--session-id", "d778fc1b"]);
+  assert.deepEqual(guest.execs.find((a) => a[3] === "agent")!.slice(-4), ["--session-id", "d778fc1b", "--permission-mode", "bypassPermissions"]);
 });
 
 test("a fresh Claude Code session starts under an ID of its own, and a fresh pi or resumed session gets no extra arguments", async () => {
   const claude = herdrUp();
   await openSession(claude, { harness: "claude-code", title: "review", cwd: "/home/user" });
   const start = claude.execs.find((a) => a[3] === "agent")!;
-  assert.deepEqual(start.slice(-3, -1), ["--", "--session-id"]);
-  assert.match(start.at(-1)!, /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
+  assert.deepEqual(start.slice(-5, -3), ["--", "--session-id"]);
+  assert.match(start.at(-3)!, /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
   const again = herdrUp();
   await openSession(again, { harness: "claude-code", title: "review", cwd: "/home/user" });
-  assert.notEqual(again.execs.find((a) => a[3] === "agent")!.at(-1), start.at(-1), "each start names a new ID");
+  assert.notEqual(again.execs.find((a) => a[3] === "agent")!.at(-3), start.at(-3), "each start names a new ID");
 
   const pi = herdrUp();
   await openSession(pi, { harness: "pi", title: "plan", cwd: "/home/user" });
@@ -284,7 +284,7 @@ test("a pane Herdr restored without its agent gets the agent started in place", 
     throw new Error(`unscripted ${sub}`);
   });
   assert.deepEqual((await relaunchSessions(guest)).map((o) => [o.result, "herdrPane" in o ? o.herdrPane : null]), [["relaunched", "w1:p1"]]);
-  assert.deepEqual(guest.execs.find((a) => a[3] === "agent")!.slice(6), ["--kind", "claude", "--pane", "w1:p1", "--timeout", "30000", "--", "--resume", "bd2c2d6b"]);
+  assert.deepEqual(guest.execs.find((a) => a[3] === "agent")!.slice(6), ["--kind", "claude", "--pane", "w1:p1", "--timeout", "30000", "--", "--resume", "bd2c2d6b", "--permission-mode", "bypassPermissions"]);
 });
 
 test("a pane Herdr still reports as Claude, but that runs only its shell, gets Claude started in place", async () => {
@@ -299,7 +299,7 @@ test("a pane Herdr still reports as Claude, but that runs only its shell, gets C
     throw new Error(`unscripted ${sub}`);
   });
   assert.deepEqual((await relaunchSessions(guest)).map((o) => [o.result, "herdrPane" in o ? o.herdrPane : null]), [["relaunched", "w1:p1"]]);
-  assert.deepEqual(guest.execs.find((a) => a[3] === "agent")!.slice(6), ["--kind", "claude", "--pane", "w1:p1", "--timeout", "30000", "--", "--resume", "bd2c2d6b"]);
+  assert.deepEqual(guest.execs.find((a) => a[3] === "agent")!.slice(6), ["--kind", "claude", "--pane", "w1:p1", "--timeout", "30000", "--", "--resume", "bd2c2d6b", "--permission-mode", "bypassPermissions"]);
 });
 
 test("pi run by node counts as running from its script's name", async () => {
@@ -484,4 +484,13 @@ test("attached terminals are the guest's Herdr clients of the session, and a gue
 test("an attached terminal is a client with exactly the command line attachedTerminals counts, after a server like a session open's", () => {
   assert.match(attachScript, /exec herdr --session nexus$/);
   assert.ok(attachScript.includes("setsid -f tini -s -- herdr --session nexus server </dev/null >/dev/null 2>&1"));
+});
+
+test("a worker's initial slash prompt is one literal Claude argument, not terminal input", async () => {
+  const guest = herdrUp();
+  const prompt = '/poteto-mode fix "quotes" and $(not-a-shell-command)\nthen test';
+  await openSession(guest, { harness: "claude-code", title: "worker", cwd: "/home/user/workspace/repo", prompt });
+  const start = guest.execs.find((a) => a[3] === "agent")!;
+  assert.deepEqual(start.slice(-3), ["--permission-mode", "bypassPermissions", prompt]);
+  assert.equal(guest.execs.some((a) => a.includes("send-text") || a.includes("send-keys")), false);
 });

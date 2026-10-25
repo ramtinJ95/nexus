@@ -115,6 +115,7 @@ export async function startControlPlane(config: ControlPlaneConfig, models: Mode
     threads: conversing.filter((t) => t.status !== "deleted").map((t) => ({ threadId: t.id, conversationId: conversationOf(t), agentTurnRunning: t.agentTurnRunning })),
     deleted: conversing.filter((t) => t.status === "deleted").map(conversationOf),
     // The registry row is what the planner and the dashboard read.
+    onParked: (id, parked) => registry.recordParked(id as ThreadId, parked),
     onReply: (id, at) => registry.recordReply(id as ThreadId, at),
     onActivity(threadId, facts) {
       const t = registry.thread(threadId as ThreadId)!;

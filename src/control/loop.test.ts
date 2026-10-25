@@ -990,3 +990,21 @@ test("every new boot takes the configured git identity, but a checkpoint keeps i
   assert.deepEqual(resume.boot.gitIdentity, override);
   assert.deepEqual(resume.boot.network, fresh.boot.network);
 });
+
+test("a queued Claude worker launches once after its pylon runs", async (t) => {
+  const registry = openRegistry(tempDb());
+  const thread = seed(registry);
+  registry.setClaudeWorker(thread.id, "/poteto-mode implement it", "pending");
+  const fake = fakeNode({ autoFinish: true });
+  const commands: unknown[] = [];
+  const probe: ProbeClient = { ...fake.probe, command: async (pylonId, command) => {
+    assert.equal(pylonId, thread.pylonId);
+    assert.equal(fake.pylons.get(pylonId)?.phase, "running");
+    commands.push(command);
+    return { kind: "open-session", herdrPane: "w1:p1" };
+  } };
+  const loop = run(t, registry, probe);
+  await until("worker started", () => registry.claudeWorker(thread.id)?.state === "started");
+  await loop.wake(node);
+  assert.deepEqual(commands, [{ kind: "open-session", harness: "claude-code", title: "t", prompt: "/poteto-mode implement it" }]);
+});

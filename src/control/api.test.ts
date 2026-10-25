@@ -1686,3 +1686,30 @@ test("project add and edit refuse duplicate secret names instead of merging thei
   assert.equal(edited.status, 200);
   assert.deepEqual(edited.body.secrets, secrets);
 });
+
+test("event followers replay a disconnect gap with since and filter without losing order", async (t) => {
+  const s = await setup(t);
+  const first = s.registry.appendEvent("release.changed", null, { state: "pending" });
+  const stream = s.events("/v1/events?follow=true&kind=release.changed");
+  assert.equal((await stream.next()).id, first.id);
+  stream.close();
+  const second = s.registry.appendEvent("release.changed", null, { state: "installing" });
+  s.registry.appendEvent("thread.failed", null, {});
+  const third = s.registry.appendEvent("release.changed", null, { state: "healthy" });
+  const resumed = s.events(`/v1/events?follow=true&kind=release.changed&since=${first.id}`);
+  t.after(() => resumed.close());
+  assert.deepEqual([await resumed.next(), await resumed.next()].map((e) => e.id), [second.id, third.id]);
+  const fourth = s.registry.appendEvent("release.changed", null, { state: "pending" });
+  assert.equal((await resumed.next()).id, fourth.id);
+  assert.equal((await s.call("GET", "/v1/events?since=-1")).status, 400);
+  assert.equal((await s.call("GET", "/v1/events?kind=unknown")).status, 400);
+});
+
+test("a Claude worker start stores its first prompt without starting a harness conversation", async (t) => {
+  const s = await withThread(t);
+  const started = await s.call("POST", "/v1/threads", { project: "acme", title: "Claude worker", claude: "fix the bug" });
+  assert.equal(started.status, 201);
+  assert.equal(started.body.conversationId, null);
+  assert.deepEqual(s.registry.claudeWorker(started.body.id), { prompt: "/poteto-mode fix the bug", state: "pending" });
+  assert.equal((await s.call("GET", `/v1/threads/${started.body.id}`)).body.claudeWorker.state, "pending");
+});

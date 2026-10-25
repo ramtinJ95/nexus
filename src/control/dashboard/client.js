@@ -349,12 +349,13 @@ function startState() {
   const form = document.getElementById("start");
   if (form === null) return null;
   const project = form.querySelector("input[name=project]:checked")?.value ?? null;
-  return { form, project, title: form.elements.title.value, node: form.elements.node.value, branch: form.elements.branch.value };
+  return { form, project, title: form.elements.title.value, claude: form.elements.claude.value, node: form.elements.node.value, branch: form.elements.branch.value };
 }
 function restoreStart(saved) {
   const form = document.getElementById("start");
   if (saved === null || form === null || form === saved.form) return;
   form.elements.title.value = saved.title;
+  form.elements.claude.value = saved.claude;
   form.elements.branch.value = saved.branch;
   if ([...form.elements.node.options].some((o) => o.value === saved.node)) form.elements.node.value = saved.node;
   if (saved.project !== null) selectProject(saved.project);

@@ -45,6 +45,7 @@ export interface ActivityOptions {
   onChange(threadId: string, facts: AgentFacts): void;
   now?: () => number;
   onReply?(threadId: string, at: number): void;
+  onParked?(threadId: string, parked: boolean): void;
 }
 
 export function trackActivity(options: ActivityOptions): ActivityTracker {
@@ -60,6 +61,7 @@ export function trackActivity(options: ActivityOptions): ActivityTracker {
   const factsOf = (a: ThreadActivity): AgentFacts => ({ agentTurnRunning: a.running && a.parked.size === 0, lastAgentActivityAt: a.lastActivityAt });
   function report(a: ThreadActivity) {
     const facts = factsOf(a);
+    options.onParked?.(a.threadId, a.parked.size > 0);
     if (facts.agentTurnRunning === a.reported) return;
     a.reported = facts.agentTurnRunning;
     options.onChange(a.threadId, facts);

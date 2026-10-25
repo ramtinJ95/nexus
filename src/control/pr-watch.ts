@@ -16,7 +16,7 @@ export interface PrWatchState {
   error: string | null;
 }
 const empty = (): PrWatchState => ({ links: [], commentWakes: 0, pending: null, error: null });
-const active = (t: Thread | undefined) => t !== undefined && t.status !== "archived" && t.status !== "deleted" && t.conversationId !== null;
+const active = (t: Thread | undefined) => t !== undefined && t.status !== "archived" && t.status !== "deleted";
 
 export function prWatcher(options: { registry: Registry; github: GitHub | null; harness: Pick<HarnessHost, "send">; wake(t: Thread): void }) {
   const { registry, github, harness, wake } = options;
@@ -24,9 +24,11 @@ export function prWatcher(options: { registry: Registry; github: GitHub | null; 
   async function deliver(id: ThreadId, state: PrWatchState) {
     const t = registry.thread(id);
     if (!active(t) || state.pending === null) return;
-    await harness.send(id, state.pending.text, state.pending.id, "followUp", "pr-watch");
-    registry.recordActivity(id, { agent: Date.now() });
-    wake(t!);
+    if (registry.claudeWorker(id) === undefined) await harness.send(id, state.pending.text, state.pending.id, "followUp", "pr-watch");
+    if (registry.claudeWorker(id) === undefined) {
+      registry.recordActivity(id, { agent: Date.now() });
+      wake(t!);
+    }
     state.pending = null;
     registry.savePrWatch(id, state);
   }

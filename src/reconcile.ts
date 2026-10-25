@@ -22,6 +22,7 @@ export type DesiredPhase = "running" | "paused" | "deleted";
 
 export interface ActivityFacts {
   status: ThreadStatus;
+  sessionTurnRunning?: boolean;
   agentTurnRunning: boolean; // the pi-durable turn for this thread, known locally
   lastAgentActivityAt: number; // pi-durable turns, and any observed session in `working`
   lastHumanActivityAt: number; // messages, attached terminals, preview hits, dashboard opens
@@ -34,7 +35,7 @@ export function desiredPhase(a: ActivityFacts, now: number): DesiredPhase {
   if (a.status === "deleted") return "deleted";
   if (a.status === "archived") return "paused";
   // A preview hit on a paused pylon updates lastHumanActivityAt, which is what wakes it.
-  const busy = a.agentTurnRunning
+  const busy = a.agentTurnRunning || a.sessionTurnRunning === true
     || now - a.lastAgentActivityAt < idlePolicy.agentIdleMs
     || now - a.lastHumanActivityAt < idlePolicy.humanIdleMs;
   return busy ? "running" : "paused";
@@ -256,6 +257,7 @@ export function ingest(event: ProbeEvent, node: NodeName, known: ReadonlyMap<Pyl
     return previous === undefined ? [{ record: "orphan", node, pylonId: pylon.pylonId }] : pylonWrites(pylon.pylonId, previous, pylon, now, unlisted.has(pylon.pylonId));
   };
   switch (event.type) {
+    case "session-event": return [];
     case "snapshot": {
       const o = event.observation;
       if (o.node !== node) throw new Error(`a snapshot from ${node}'s probe names node ${o.node}`);

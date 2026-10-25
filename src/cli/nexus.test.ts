@@ -1049,3 +1049,20 @@ test("project add and edit exit 64 for duplicate secret names and explain how to
   const edited = await s.json(["project", "edit", project.id, "--secret", "TOKEN:a.example,b.example"]);
   assert.deepEqual(edited.secrets, added.secrets);
 });
+
+test("events prints one JSON object per line and resumes after a cursor", async (t) => {
+  const s = await setup(t);
+  const first = s.registry.appendEvent("release.changed", null, { state: "pending" });
+  const second = s.registry.appendEvent("release.changed", null, { state: "healthy" });
+  const reply = await s.nexus(["events", "--since", first.id, "--kind", "release.changed", "--json"]);
+  assert.equal(reply.code, 0, reply.stderr);
+  assert.deepEqual(reply.stdout.trim().split("\n").map((line) => JSON.parse(line)), [second]);
+});
+
+test("start --claude queues a poteto worker without sending a harness message", async (t) => {
+  const s = await setup(t);
+  const thread = await s.json(["start", "--project", "acme", "--claude", "/poteto-mode fix it"]);
+  assert.equal(thread.conversationId, null);
+  assert.deepEqual(s.registry.claudeWorker(thread.id), { prompt: "/poteto-mode fix it", state: "pending" });
+  assert.equal((await s.nexus(["start", "--project", "acme", "--claude", "fix", "--message", "also fix"])).code, 64);
+});

@@ -88,6 +88,7 @@ export interface Api {
 }
 
 export interface ThreadDetail {
+  claudeWorker?: { state: string };
   attention: Attention;
   seenAt: number | null;
   lastReplyAt: number | null;
@@ -203,6 +204,7 @@ const projectSchema = z.strictObject({
 });
 const projectEditSchema = projectSchema.omit({ id: true, repoUrl: true, preSetup: true }).extend({ resources: projectSchema.shape.resources.partial() }).partial();
 const startSchema = z.strictObject({
+  claude: z.string().trim().min(1).max(16_384).optional(),
   project: z.string().min(1),
   title: z.string().min(1),
   node: z.string().min(1).optional(),
@@ -306,9 +308,9 @@ export async function startApi(options: ApiOptions): Promise<Api> {
     const now = Date.now();
     const id = newThreadId();
     const pylonId = `pylon-${id}` as PylonId;
-    const conversationId = await harness.startThread({ threadId: id, pylonId });
+    const conversationId = request.claude === undefined ? await harness.startThread({ threadId: id, pylonId }) : null;
     const t: Thread = {
-      id, title: request.title, project: project.id, pylonId, status: "active", conversationId: String(conversationId), startedBy: caller, createdAt: now,
+      id, title: request.title, project: project.id, pylonId, status: "active", conversationId: conversationId === null ? null : String(conversationId), startedBy: caller, createdAt: now,
       // Starting a thread is human activity, so its pylon is wanted at once.
       agentTurnRunning: false, lastAgentActivityAt: 0, lastHumanActivityAt: now, seenAt: null, lastReplyAt: null,
     };
@@ -329,7 +331,7 @@ export async function startApi(options: ApiOptions): Promise<Api> {
       live,
       liveHash: liveHashOf(live),
     });
-    registry.createThread(t, pylon);
+    registry.createThread(t, pylon, request.claude === undefined ? undefined : /^\/poteto-mode(?:\s|$)/.test(request.claude) ? request.claude : `/poteto-mode ${request.claude}`);
     wake(node);
     return t;
   }
@@ -373,7 +375,7 @@ export async function startApi(options: ApiOptions): Promise<Api> {
 
   function attention(t: Thread): Attention {
     const parked = t.conversationId !== null && t.status !== "deleted" && harness.activity.parked(t.id).length > 0;
-    return attentionOf(pylonOf(t).failed !== null, parked, t.lastReplyAt, t.seenAt, t.agentTurnRunning);
+    return attentionOf(pylonOf(t).failed !== null, parked, t.lastReplyAt, t.seenAt, t.agentTurnRunning || t.sessionTurnRunning === true, t.sessionWaiting);
   }
 
   function row(t: Thread): ThreadRow {
@@ -387,6 +389,7 @@ export async function startApi(options: ApiOptions): Promise<Api> {
     const watch = registry.prWatch(t.id);
     return {
       thread: t,
+      ...(registry.claudeWorker(t.id) === undefined ? {} : { claudeWorker: { state: registry.claudeWorker(t.id)!.state } }),
       attention: attention(t), seenAt: t.seenAt, lastReplyAt: t.lastReplyAt,
       desired: desiredPhase(t, Date.now()),
       pylon: pylonOf(t),
@@ -575,7 +578,7 @@ export async function startApi(options: ApiOptions): Promise<Api> {
 
   /** Reads the pylon's checkout for the Files and Changes views, over one raw pipe per read. */
   async function inCheckout<T>(t: Thread, read: (checkout: CheckoutReader) => Promise<T>): Promise<T> {
-    const turn = await harness.latestTurn(t.id);
+    const turn = t.conversationId === null ? null : await harness.latestTurn(t.id);
     return inPylon(t, (probe, pylonId) => read(checkoutReader((argv) => probe.stream(pylonId, argv), checkoutDir, undefined, turn)));
   }
 
@@ -860,12 +863,14 @@ export async function startApi(options: ApiOptions): Promise<Api> {
         }
       };
       res.on("drain", () => { blocked = false; clearTimeout(stall); stall = undefined; });
+      const registration = { thread: "" as ThreadId, end: () => res.end() };
+      open.add(registration);
       const timer = setInterval(() => {
         if (blocked) return;
         try { flush(); if (!blocked) write(": ping\n\n"); }
         catch { res.destroy(); }
       }, 1000);
-      res.once("close", () => { clearInterval(timer); clearTimeout(stall); });
+      res.once("close", () => { open.delete(registration); clearInterval(timer); clearTimeout(stall); });
       flush(first);
       return;
     }

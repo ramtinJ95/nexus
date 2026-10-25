@@ -1,3 +1,4 @@
+import type { PylonEvent } from "./events.ts";
 /**
  * Project config contract: what the repo declares, what Nexus stores, and what a pylon is told.
  *
@@ -455,6 +456,7 @@ git push                                   # every later push
  * /run/nexus/requests/ and the probe polls them through Gondolin's file API and writes the replies.
  */
 export type PylonApiRequest =
+  | ({ op: "event" } & PylonEvent)
   | { op: "info" }
   | { op: "services"; action: "ensure" | "list" | "restart" | "stop"; name?: ServiceName }
   | { op: "service-logs"; name: ServiceName; lines: number }

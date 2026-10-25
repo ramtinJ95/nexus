@@ -48,6 +48,7 @@ export interface HarnessHostOptions {
   deleted: readonly ConversationId[];
   /** A thread's agent facts changed, or differ at open from what `threads` says the registry holds. */
   onReply?: (threadId: string, at: number) => void;
+  onParked?: (threadId: string, parked: boolean) => void;
   onActivity(threadId: string, facts: AgentFacts): void;
   log(message: string): void;
 }
@@ -77,7 +78,7 @@ export interface HarnessHost {
 
 export async function openHarnessHost(options: HarnessHostOptions): Promise<HarnessHost> {
   const { log } = options;
-  const activity = trackActivity({ onChange: options.onActivity, onReply: (id, at) => options.onReply?.(id, at) });
+  const activity = trackActivity({ onParked: (id, parked) => options.onParked?.(id, parked), onChange: options.onActivity, onReply: (id, at) => options.onReply?.(id, at) });
   const envs = pylonEnvs(options.locator, { tailscaled: options.tailscaled, log });
   const registry = createRegistry();
   registry.install(CodingTools);

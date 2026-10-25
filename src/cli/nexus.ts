@@ -42,7 +42,7 @@ const usage = `nexus ${version}, the Nexus control plane from this Mac
   nexus session open <thread> [--harness claude-code|pi|shell] [--title T]
   nexus session close <thread> <pane|id>       a session in no pane by its ID, which \`nexus show\` gives
   nexus attach <thread>                        this terminal on the pylon's Herdr sessions, through the control plane
-  nexus start --project P [--title T] [--message M] [--node N] [--branch B] [--commit C]
+  nexus start --project P [--title T] [--message M | --claude PROMPT] [--node N] [--branch B] [--commit C]
   nexus send <thread> <text...> [--steer] [--request-id ID]
   nexus watch <thread> [--interval MS]
   nexus seen <thread> [--unread]
@@ -654,14 +654,16 @@ const commands: Readonly<Record<string, Command>> = {
   },
   start: {
     args: [0, 0],
-    options: { project: { type: "string" }, title: { type: "string" }, message: { type: "string" }, node: { type: "string" }, branch: { type: "string" }, commit: { type: "string" } },
+    options: { claude: { type: "string" }, project: { type: "string" }, title: { type: "string" }, message: { type: "string" }, node: { type: "string" }, branch: { type: "string" }, commit: { type: "string" } },
     async run(api, _, v) {
       const project = str(v, "project");
       const message = str(v, "message");
-      const title = str(v, "title") ?? (message === undefined ? undefined : titleOf(message));
+      const claude = str(v, "claude");
+      if (message !== undefined && claude !== undefined) throw new CliError("invalid", "--claude and --message are mutually exclusive");
+      const title = str(v, "title") ?? (message === undefined && claude === undefined ? undefined : titleOf(message ?? claude!));
       if (project === undefined) throw new CliError("invalid", "start needs --project");
-      if (title === undefined) throw new CliError("invalid", "start needs --title or --message");
-      const optional = Object.fromEntries((["node", "branch", "commit"] as const).flatMap((key) => v[key] === undefined ? [] : [[key, v[key]]]));
+      if (title === undefined) throw new CliError("invalid", "start needs --title, --message or --claude");
+      const optional = Object.fromEntries((["node", "branch", "commit", "claude"] as const).flatMap((key) => v[key] === undefined ? [] : [[key, v[key]]]));
       const t = await api("POST", "/v1/threads", { project, title, ...optional }) as Thread;
       if (message !== undefined) {
         await send(api, t.id, message, false, `msg:${randomUUID()}`).catch((err: unknown) => {
