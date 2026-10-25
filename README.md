@@ -17,7 +17,7 @@ The dashboard marks only rendered replies seen, shows attention in its sidebar a
 
 When a thread pushes an origin branch on its project's GitHub repository, the control plane links its open PRs automatically. `nexus show` and the dashboard's Pylon outputs show the title, URL, state, checks and review state. GitHub reads never wake a pylon.
 
-About every two minutes, Nexus checks for failed checks, recovery, new reviews/comments and merge conflicts. It batches feedback into an explicitly automated conversation message and deliberately wakes the agent, without recording human activity. Watching pauses for archived threads and ends for deleted threads, terminal PRs or ten consecutive comment-only wakes. Cursors survive restart and archive.
+About every two minutes, Nexus checks for failed checks, recovery, new reviews/comments and merge conflicts. It batches feedback into an explicitly automated conversation message and deliberately wakes the agent, without recording human activity. Watching pauses for archived threads and ends for deleted threads, terminal PRs or ten consecutive comment-only wakes. Cursors survive restart and archive. Reviews and comments are forwarded only from GitHub owners, members and collaborators (`author_association`); PR authors must meet the same rule. Other feedback is ignored and cannot exhaust the wake cap.
 
 Configure the optional control-plane `github.tokenFile` as described in the deploy guide. Without it, the UI and CLI show that PR watching is off. The token remains on the control plane and is never sent to a pylon.
 

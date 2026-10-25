@@ -137,7 +137,7 @@ test("GitHub reads use per-resource ETags, paginate, and include the owner's rev
     if (path.includes("/pulls?")) value = [{ number: 1, head: { repo: { full_name: "acme/repo" } } }];
     if (path.endsWith("/pulls/1")) value = { number: 1, title: "Fix", html_url: "https://github.com/acme/repo/pull/1", state: "open", merged: false, mergeable_state: "dirty", head: { sha: "abc" } };
     if (path.includes("check-runs")) value = { check_runs: [{ id: 1, name: "build", status: "completed", conclusion: "failure", details_url: "https://example.com/build", completed_at: "now" }] };
-    if (path.includes("reviews")) value = [{ id: 2, body: "please fix", html_url: "https://example.com/review", user: { login: "owner" }, state: "CHANGES_REQUESTED", submitted_at: "now" }];
+    if (path.includes("reviews")) value = [{ id: 2, body: "please fix", html_url: "https://example.com/review", user: { login: "owner" }, author_association: "OWNER", state: "CHANGES_REQUESTED", submitted_at: "now" }];
     const headers: Record<string, string> = { etag: '"v1"' };
     if (path.includes("issues/1/comments") && !path.includes("page=2")) headers.link = '<https://api.github.com/repos/acme/repo/issues/1/comments?per_page=100&page=2>; rel="next"';
     return Response.json(value, { headers });
@@ -204,4 +204,41 @@ test("legacy statuses use the latest context and missing detail URLs still link 
   assert.match(failed.failures[1]!.text, /https:\/\/github.com\/acme\/repo\/pull\/1/);
   passing = true;
   assert.equal((await client.poll("acme/repo", 1)).pr.checks, "passing");
+});
+
+test("only trusted reviews and comments wake, and untrusted feedback cannot exhaust the cap", async (t) => {
+  const f = fixture(); t.after(() => f.registry.close());
+  let generation = 0;
+  let trusted = false;
+  let failed = false;
+  const associations = ["OWNER", "MEMBER", "COLLABORATOR", "CONTRIBUTOR", "FIRST_TIME_CONTRIBUTOR", "FIRST_TIMER", "NONE", "MANNEQUIN", undefined];
+  const fake: typeof fetch = async (input) => {
+    const path = new URL(String(input)).pathname;
+    if (path.endsWith("/pulls")) return Response.json([{ number: 1, head: { repo: { full_name: "acme/repo" } } }]);
+    if (path.endsWith("/pulls/1")) return Response.json({ number: 1, title: "Fix", html_url: f.snapshot.pr.url, state: "open", merged: false, mergeable_state: "clean", head: { sha: "abc" }, user: { login: "pr-author" }, author_association: "NONE" });
+    if (path.endsWith("/check-runs")) return Response.json({ check_runs: failed ? [{ id: 1, name: "build", status: "completed", conclusion: "failure", details_url: "https://example.com/build", completed_at: "now" }] : [] });
+    if (path.endsWith("/reviews") || path.endsWith("/comments")) return Response.json(associations.flatMap((association, i) => {
+      if (i < 3 && !trusted) return [];
+      return [{ id: generation * 100 + i, body: `feedback-${association ?? "missing"}`, html_url: "https://example.com/comment", user: { login: i === 6 ? "pr-author" : `user-${i}` }, author_association: association, state: "COMMENTED", submitted_at: "now" }];
+    }));
+    return Response.json([]);
+  };
+  const watch = prWatcher({ ...f.options, github: githubClient("secret", fake) });
+  await watch.poll();
+  for (generation = 1; generation <= 11; generation++) await watch.poll();
+  assert.equal(f.messages.length, 0);
+  assert.equal(f.registry.prWatch(f.id)?.commentWakes, 0);
+  assert.deepEqual(f.registry.prWatch(f.id)?.links[0]?.seen, []);
+  trusted = true;
+  await watch.poll();
+  assert.equal(f.messages.length, 1);
+  for (const kind of ["review", "review-comment", "issue-comment"]) assert.match(f.messages[0]![1], new RegExp(`${kind} by`));
+  for (const association of associations.slice(0, 3)) assert.ok(f.messages[0]![1].includes(`feedback-${association}`));
+  for (const association of associations.slice(3)) assert.ok(!f.messages[0]![1].includes(`feedback-${association ?? "missing"}`));
+  assert.ok(!f.messages[0]![1].includes("pr-author"));
+  assert.equal(f.registry.prWatch(f.id)?.commentWakes, 1);
+  failed = true;
+  await watch.poll();
+  assert.equal(f.messages.length, 2);
+  assert.match(f.messages[1]![1], /Check failed: build/);
 });

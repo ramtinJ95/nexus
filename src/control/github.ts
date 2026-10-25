@@ -26,7 +26,7 @@ interface Pr {
   number: number; title: string; html_url: string; state: string; merged: boolean;
   head: { sha: string; repo: { full_name: string } | null }; mergeable_state: string;
 }
-interface Comment { id: number; body: string | null; html_url: string; user: { login: string }; state?: string; submitted_at?: string | null }
+interface Comment { author_association: string; id: number; body: string | null; html_url: string; user: { login: string }; state?: string; submitted_at?: string | null }
 interface Check { id: number; name: string; status: string; conclusion: string | null; details_url: string | null; html_url?: string; completed_at: string | null }
 interface Status { id: number; context: string; state: string; target_url: string | null }
 
@@ -86,7 +86,7 @@ export function githubClient(token: string, request: typeof fetch = fetch): GitH
       pr.checks = failed.length + badStatuses.length ? "failed" : checks.some((c) => c.status !== "completed" || !["success", "neutral", "skipped"].includes(c.conclusion ?? "")) || latest.some((s) => s.state === "pending") ? "pending" : checks.length + latest.length ? "passing" : "none";
       const verdicts = [...new Map(reviews.filter((r) => r.state !== "COMMENTED" && r.state !== "PENDING").map((r) => [r.user.login, r.state])).values()];
       pr.review = verdicts.includes("CHANGES_REQUESTED") ? "changes_requested" : verdicts.includes("APPROVED") ? "approved" : "none";
-      const comments = ([ ["review", reviews.filter((r) => r.submitted_at)], ["review-comment", inline], ["issue-comment", issue] ] as const).flatMap(([kind, items]) => items.map((c) => ({ id: `${kind}:${c.id}`, text: `${kind} by ${c.user.login}${c.state ? ` (${c.state})` : ""}: ${c.html_url}\n${(c.body ?? "").slice(0, 4000)}` })));
+      const comments = ([ ["review", reviews.filter((r) => r.submitted_at)], ["review-comment", inline], ["issue-comment", issue] ] as const).flatMap(([kind, items]) => items.filter((c) => ["OWNER", "MEMBER", "COLLABORATOR"].includes(c.author_association)).map((c) => ({ id: `${kind}:${c.id}`, text: `${kind} by ${c.user.login}${c.state ? ` (${c.state})` : ""}: ${c.html_url}\n${(c.body ?? "").slice(0, 4000)}` })));
       return { pr, comments, failures: [
         ...failed.map((c) => ({ id: `check:${c.id}:${c.completed_at}:${c.conclusion}`, text: `Check failed: ${c.name} — ${c.details_url ?? c.html_url ?? pr.url}` })),
         ...badStatuses.map((s) => ({ id: `status:${s.id}`, text: `Check failed: ${s.context} — ${s.target_url ?? pr.url}` })),
