@@ -868,9 +868,10 @@ test("a Claude worker's messages answer their resends, and its transcript and me
   registry.setClaudeMessage(threadId, "msg:2", { state: "sending" });
   registry.setClaudeMessage(threadId, "msg:2", null);
   assert.equal(registry.claudeMessage(threadId, "msg:2"), undefined, "a send that typed nothing is forgotten");
-  for (let i = 0; i < 256; i++) registry.setClaudeMessage(threadId, `msg:more-${i}`, { state: "sent", result });
-  assert.equal(registry.claudeMessage(threadId, "msg:1"), undefined, "a thread keeps its newest 256 messages");
-  assert.deepEqual(registry.claudeMessage(threadId, "msg:more-0"), { state: "sent", result });
+  registry.setClaudeMessage(threadId, "msg:3", { state: "sending" });
+  for (let i = 0; i < 1_000; i++) registry.setClaudeMessage(threadId, `msg:more-${i}`, { state: "sent", result });
+  assert.deepEqual(registry.claudeMessage(threadId, "msg:1"), { state: "sent", result }, "however many messages follow, a resend is answered, not typed again");
+  assert.deepEqual(registry.claudeMessage(threadId, "msg:3"), { state: "sending" }, "nor is one whose send failed partway");
 
   registry.appendClaudeRead(threadId, { session: "s1", from: cursorAt(0), entries: [reply(0)], cursor: cursorAt(10), reset: false, readAt: 1 });
   registry.setThreadStatus(threadId, "archived");
