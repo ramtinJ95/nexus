@@ -1505,3 +1505,42 @@ test("partial resource patches merge atomically without resetting another edit",
   assert.equal((await s.call("PATCH", "/v1/projects/acme", { resources: { cpus: 16 }, defaultNode: "missing" })).status, 400);
   assert.deepEqual(s.registry.project(project.id as ProjectId), before, "a refused edit rolls back every field");
 });
+
+test("grant comparison ignores order and duplicates but detects changed access", async (t) => {
+  const original = {
+    ...project,
+    allowedHosts: ["registry.npmjs.org", "example.com"],
+    logins: ["claude", "chatgpt"],
+    secrets: [
+      { name: "GH_TOKEN", hosts: ["api.github.com", "github.com"] },
+      { name: "STRIPE_KEY", hosts: ["api.stripe.com", "files.stripe.com"] },
+    ],
+  };
+  const s = await withThread(t, { project: original });
+  const outdated = async () => (await s.call("GET", `/v1/threads/${s.thread.id}`)).body.pylon.grantsOutdated;
+  assert.equal(await outdated(), false);
+  const pylon = s.registry.pylon(s.thread.pylonId)!;
+  s.registry.savePylon({ ...pylon, boot: { ...pylon.boot, network: { ...pylon.boot.network, allowedHosts: [...pylon.boot.network.allowedHosts].reverse() } } });
+  const reordered = {
+    allowedHosts: [...original.allowedHosts].reverse(),
+    logins: [...original.logins].reverse(),
+    secrets: [...original.secrets].reverse().map((grant) => ({ ...grant, hosts: [...grant.hosts].reverse() })),
+  };
+  assert.equal((await s.call("PATCH", "/v1/projects/acme", reordered)).status, 200);
+  assert.equal(await outdated(), false);
+  assert.equal((await s.call("PATCH", "/v1/projects/acme", {
+    allowedHosts: [...reordered.allowedHosts, ...reordered.allowedHosts],
+    logins: [...reordered.logins, ...reordered.logins],
+    secrets: reordered.secrets.map((grant) => ({ ...grant, hosts: [...grant.hosts, ...grant.hosts] })),
+  })).status, 200);
+  assert.equal(await outdated(), false);
+  for (const changed of [
+    { secrets: [original.secrets[0]] },
+    { secrets: [{ ...original.secrets[0], hosts: ["github.com"] }, original.secrets[1]] },
+    { allowedHosts: ["another.example.com"] },
+    { logins: ["claude"] },
+  ]) {
+    assert.equal((await s.call("PATCH", "/v1/projects/acme", { ...reordered, ...changed })).status, 200);
+    assert.equal(await outdated(), true);
+  }
+});

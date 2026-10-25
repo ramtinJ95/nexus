@@ -166,6 +166,20 @@ class HttpError extends Error {
   }
 }
 
+function networkGrantsKey(network: BootInputs["network"]): string {
+  const sorted = (values: Iterable<string>) => [...new Set(values)].sort();
+  const secrets = new Map<string, Set<string>>();
+  for (const grant of network.secrets) {
+    const hosts = secrets.get(grant.name) ?? new Set<string>();
+    for (const host of grant.hosts) hosts.add(host);
+    secrets.set(grant.name, hosts);
+  }
+  return JSON.stringify({
+    allowedHosts: sorted(network.allowedHosts),
+    secrets: sorted(secrets.keys()).map((name) => ({ name, hosts: sorted(secrets.get(name)!) })),
+  });
+}
+
 const name = z.string().regex(/^[a-z0-9][a-z0-9-]{0,62}$/);
 const host = z.string().min(1);
 const projectSchema = z.strictObject({
@@ -327,7 +341,7 @@ export async function startApi(options: ApiOptions): Promise<Api> {
     // The planner deletes a failed pylon all the same, so a deleted thread's pylon shows the delete.
     const gaveUp = pylon.failed !== null && t.status !== "deleted";
     return {
-      grantsOutdated: JSON.stringify(pylon.boot.network) !== JSON.stringify({
+      grantsOutdated: networkGrantsKey(pylon.boot.network) !== networkGrantsKey({
         allowedHosts: withHttpsHosts(effectiveAllowedHosts(registry.project(t.project)!), [pylon.boot.dotfiles.repo]),
         secrets: registry.project(t.project)!.secrets,
       }),
