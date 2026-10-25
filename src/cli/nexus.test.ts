@@ -2,6 +2,7 @@
  * The Mac nexus CLI as a process, against the control plane's real API with a fake harness behind it. Most calls
  * go through a fake SOCKS5 proxy that alone can resolve the API's name, as ts-home's proxy alone knows MagicDNS.
  */
+import { checkoutReader } from "../checkout-files.ts";
 import { test, type TestContext } from "node:test";
 import assert from "node:assert/strict";
 import { execFile, spawn } from "node:child_process";
@@ -498,6 +499,18 @@ test("files, changes and diff read the pylon's checkout, and wait for a paused p
   assert.equal((await s.nexus(["diff", thread.id, "nothing-here"])).stdout, "No changes.\n");
   const renamed = await s.json(["diff", thread.id, "--uncommitted", "app.txt", "main.txt"]);
   assert.match(renamed.diff, /rename from app.txt\nrename to main.txt/, "a rename shows as one when both paths are named");
+
+  s.fake.harness.latestTurn = async () => "42";
+  assert.equal((await s.nexus(["changes", thread.id, "--turn", "--json"])).code, 1);
+  await checkoutReader(async (argv) => processStream(argv[0]!, argv.slice(1), () => {}), repo).snapshot("42");
+  await writeFile(join(repo, "turn.txt"), "latest reply\n");
+  const turn = await s.json(["changes", thread.id, "--turn"]);
+  assert.equal(turn.base.kind, "turn");
+  assert.deepEqual(turn.files.map((f: { path: string }) => f.path), ["turn.txt"]);
+  const turnDiff = await s.json(["diff", thread.id, "--turn", "turn.txt"]);
+  assert.deepEqual(turnDiff.base, turn.base);
+  assert.match(turnDiff.diff, /\+latest reply/);
+  assert.equal((await s.nexus(["changes", thread.id, "--turn", "--uncommitted"])).code, 64);
 
   const missing = await s.nexus(["files", thread.id, "nope", "--json"]);
   assert.equal(missing.code, 4);
