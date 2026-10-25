@@ -47,7 +47,7 @@ import { openTerminal } from "../guest-terminal.ts";
 import { attachTiming, serveAttach, type AttachTiming, type Ending, type PylonDoor } from "./attach.ts";
 
 export interface ApiOptions {
-  https?: { port: number; certificate(): Promise<Certificate>; renewalMs?: number };
+  https?: { port: number; certificate(): Promise<Certificate>; renewalMs?: number; retryMs?: number };
   prWatchEnabled?: boolean;
   deployment?: DeploymentOptions;
   turnsStarting?: () => boolean;
@@ -81,7 +81,7 @@ export type ThreadHarness = Pick<HarnessHost, "startThread" | "send" | "abort" |
 
 export interface Api {
   readonly port: number;
-  readonly httpsPort?: number;
+  readonly httpsPort: number | undefined;
   close(): Promise<void>;
 }
 
@@ -730,6 +730,11 @@ export async function startApi(options: ApiOptions): Promise<Api> {
     ["PUT", /^\/v1\/images\/current$/, async (_, r) => { setCurrentImage(await r.body()); return noContent; }],
   ];
 
+  const httpsState: { status: "disabled" | "waiting" | "ready" | "degraded"; error: string | null; nextAttemptAt: number | null } = {
+    status: options.https ? "waiting" : "disabled", error: null, nextAttemptAt: null,
+  };
+  const health = () => ({ commit: runningCommit, https: { ...httpsState } });
+
   /** The caller, once it is allowed and asked under one of the API's names. Every request and upgrade passes here. */
   async function admit(req: IncomingMessage): Promise<TailnetNodeId> {
     const { remoteAddress, remotePort } = req.socket;
@@ -749,7 +754,7 @@ export async function startApi(options: ApiOptions): Promise<Api> {
 
   async function handle(req: IncomingMessage, res: ServerResponse) {
     if (req.method === "GET" && req.url === "/v1/health" && req.socket.remoteAddress !== undefined && req.socket.remoteAddress === req.socket.localAddress) {
-      res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ commit: runningCommit }));
+      res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify(health()));
       return;
     }
     const caller = await admit(req);
@@ -759,6 +764,7 @@ export async function startApi(options: ApiOptions): Promise<Api> {
 
     const url = new URL(req.url ?? "/", "http://nexus");
     const path = decodeURIComponent(url.pathname);
+    if (path === "/v1/health" && req.method === "GET") return send(res, 200, health());
     if (path === "/v1/release" && req.method === "GET") return send(res, 200, releaseView(registry, options.deployment?.self));
     if (path === "/v1/release" && req.method === "PUT") {
       if (!canDeploy(registry, options.deployment, caller)) throw new HttpError(403, "caller may not deploy; infrastructure nodes and pylons cannot deploy");
@@ -889,12 +895,12 @@ export async function startApi(options: ApiOptions): Promise<Api> {
     }
   }
 
-  async function makeServer(tls: boolean) {
+  function makeServer(certificate?: Certificate) {
     const serverOptions = {
       // Only a WebSocket to the attach route upgrades. Any other request is handled as one, Upgrade header or not.
       shouldUpgradeCallback: (req: IncomingMessage) => req.headers.upgrade?.toLowerCase() === "websocket" && attachRoute.test(pathOf(req.url)),
     };
-    const server = tls ? createHttpsServer({ ...serverOptions, ...await options.https!.certificate() }) : createServer(serverOptions);
+    const server = certificate ? createHttpsServer({ ...serverOptions, ...certificate }) : createServer(serverOptions);
     server.on("request", (req, res) => {
       handle(req, res).catch((err: unknown) => {
         if (res.headersSent) return res.destroy(err as Error);
@@ -910,47 +916,65 @@ export async function startApi(options: ApiOptions): Promise<Api> {
     });
     return server;
   }
-  const server = await makeServer(false);
-  const secure = options.https === undefined ? null : await makeServer(true);
+  const server = makeServer();
+  let secure: ReturnType<typeof makeServer> | null = null;
   await new Promise<void>((resolve, reject) => {
     server.once("error", reject);
     server.listen(options.port, options.host, () => { server.off("error", reject); resolve(); });
   });
-  try {
-    if (secure) {
-      await new Promise<void>((resolve, reject) => {
-        secure.once("error", reject);
-        secure.listen(options.https!.port, options.host, () => { secure.off("error", reject); resolve(); });
-      });
-    }
-  } catch (err) {
-    server.close();
-    secure?.close();
-    throw err;
+  let renewal: ReturnType<typeof setTimeout> | null = null;
+  let retryMs = options.https?.retryMs ?? 1000;
+  function scheduleCertificate(delay: number) {
+    httpsState.nextAttemptAt = Date.now() + delay;
+    renewal = setTimeout(() => { void refreshCertificate(); }, delay);
+    renewal.unref();
   }
-  let renewing = false;
-  const renewal = secure && options.https ? setInterval(async () => {
-    if (renewing || stopping) return;
-    renewing = true;
+  async function refreshCertificate() {
+    if (stopping || !options.https) return;
+    httpsState.nextAttemptAt = null;
     try {
-      const certificate = await options.https!.certificate();
-      if (!stopping) (secure as import("node:https").Server).setSecureContext(certificate);
-    } catch {
-      console.error("dashboard TLS certificate renewal failed; retaining the previous certificate and retrying next interval");
-    } finally {
-      renewing = false;
+      const certificate = await options.https.certificate();
+      if (stopping) return;
+      if (secure) {
+        (secure as import("node:https").Server).setSecureContext(certificate);
+      } else {
+        const listener = makeServer(certificate);
+        secure = listener;
+        try {
+          await new Promise<void>((resolve, reject) => {
+            listener.once("error", reject);
+            listener.listen(options.https!.port, options.host, () => { listener.off("error", reject); resolve(); });
+          });
+        } catch (err) {
+          listener.close();
+          secure = null;
+          throw err;
+        }
+      }
+      if (stopping) { secure?.close(); return; }
+      httpsState.status = "ready";
+      httpsState.error = null;
+      retryMs = options.https.retryMs ?? 1000;
+      scheduleCertificate(options.https.renewalMs ?? 12 * 60 * 60 * 1000);
+    } catch (err) {
+      if (stopping) return;
+      httpsState.status = secure ? "degraded" : "waiting";
+      httpsState.error = (err as Error).message;
+      console.error(`dashboard HTTPS ${secure ? "renewal" : "startup"} failed: ${httpsState.error}; HTTP remains available; retrying in ${retryMs}ms`);
+      scheduleCertificate(retryMs);
+      retryMs = Math.min(retryMs * 2, 60_000);
     }
-  }, options.https.renewalMs ?? 12 * 60 * 60 * 1000) : null;
-  renewal?.unref();
+  }
+  if (options.https) void refreshCertificate();
   const address = server.address();
   if (address === null || typeof address === "string") throw new Error(`unexpected server address ${address}`);
 
   return {
     port: address.port,
-    ...(secure ? { httpsPort: (secure.address() as import("node:net").AddressInfo).port } : {}),
+    get httpsPort() { return secure?.listening ? (secure.address() as import("node:net").AddressInfo).port : undefined; },
     async close() {
       stopping = true;
-      if (renewal) clearInterval(renewal);
+      if (renewal) clearTimeout(renewal);
       const closed = Promise.all([server, ...(secure ? [secure] : [])].map((listener) => {
         const done = new Promise<void>((resolve) => listener.close(() => resolve()));
         listener.closeAllConnections();

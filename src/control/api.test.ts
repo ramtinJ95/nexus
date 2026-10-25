@@ -126,7 +126,7 @@ async function setup(t: import("node:test").TestContext, options: { https?: impo
     });
   }
   return {
-    registry, call, raw, woken, calls, commands, streams, fake, port: api.port, httpsPort: api.httpsPort, close: () => api.close(),
+    registry, call, raw, woken, calls, commands, streams, fake, port: api.port, get httpsPort() { return api.httpsPort; }, close: () => api.close(),
     callAs(id: TailnetNodeId | null) { caller = id; },
     /** Holds every request at whois until the returned function is called. */
     holdWhois() {
@@ -1465,11 +1465,12 @@ test("direct TLS uses TCP whois, ignores forged headers, and renews without dist
   const certDir = await mkdtemp(join(dir, "tls-"));
   const first = await testCertificate(certDir);
   const second = await testCertificate(certDir);
+  assert.notEqual(new X509Certificate(first.cert).subject, new X509Certificate(second.cert).subject);
   let current = first;
   let fail = false;
   let reads = 0;
   const api = await setup(t, {
-    https: { port: 0, renewalMs: 25, certificate: async () => {
+    https: { port: 0, renewalMs: 25, retryMs: 10, certificate: async () => {
       reads++;
       if (fail) throw new Error("renewal unavailable");
       return current;
@@ -1490,6 +1491,10 @@ test("direct TLS uses TCP whois, ignores forged headers, and renews without dist
       req.on("error", reject).end();
     });
   }
+  for (let i = 0; api.httpsPort === undefined; i++) {
+    assert.ok(i < 100, "HTTPS started");
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
   assert.equal((await tls()).status, 200);
   assert.equal((await tls()).fingerprint, new X509Certificate(first.cert).fingerprint256);
   assert.equal((await api.call("GET", "/v1/threads")).status, 200);
@@ -1509,6 +1514,7 @@ test("direct TLS uses TCP whois, ignores forged headers, and renews without dist
   const before = reads;
   while (reads === before) await new Promise((resolve) => setTimeout(resolve, 10));
   assert.equal((await tls()).fingerprint, new X509Certificate(first.cert).fingerprint256);
+  assert.equal((await api.call("GET", "/v1/health")).body.https.status, "degraded");
   fail = false;
   current = second;
   for (let i = 0; ; i++) {
@@ -1517,4 +1523,54 @@ test("direct TLS uses TCP whois, ignores forged headers, and renews without dist
     await new Promise((resolve) => setTimeout(resolve, 10));
   }
   assert.equal((await api.call("GET", "/v1/threads")).status, 200);
+});
+
+test("HTTP starts while certificate issuance is pending, survives failure, and HTTPS starts on retry", { timeout: 10_000 }, async (t) => {
+  const { testCertificate } = await import("../test-certificate.ts");
+  const { request: tlsRequest } = await import("node:https");
+  const certificate = await testCertificate(await mkdtemp(join(dir, "startup-tls-")));
+  const first = Promise.withResolvers<typeof certificate>();
+  const retry = Promise.withResolvers<typeof certificate>();
+  let attempts = 0;
+  const api = await setup(t, { https: { port: 0, retryMs: 10, certificate: () => ++attempts === 1 ? first.promise : retry.promise } });
+  assert.equal((await api.call("GET", "/v1/threads")).status, 200);
+  assert.equal(api.httpsPort, undefined);
+  assert.deepEqual((await api.call("GET", "/v1/health")).body.https, { status: "waiting", error: null, nextAttemptAt: null });
+  first.reject(new Error("tailscaled certificate: HTTP 403"));
+  for (let i = 0; attempts < 2; i++) {
+    assert.ok(i < 100, "issuance retried");
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  const failed = await api.call("GET", "/v1/health");
+  assert.equal(failed.status, 200);
+  assert.equal(failed.body.https.status, "waiting");
+  assert.equal(failed.body.https.error, "tailscaled certificate: HTTP 403");
+  assert.equal((await api.call("GET", "/v1/threads")).status, 200);
+  retry.resolve(certificate);
+  for (let i = 0; api.httpsPort === undefined; i++) {
+    assert.ok(i < 100, "HTTPS started after retry");
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  const ready = (await api.call("GET", "/v1/health")).body.https;
+  assert.equal(ready.status, "ready");
+  assert.equal(ready.error, null);
+  assert.ok(ready.nextAttemptAt > Date.now());
+  assert.equal(await new Promise<number>((resolve, reject) => {
+    tlsRequest({ hostname: "127.0.0.1", port: api.httpsPort, path: "/v1/threads", ca: certificate.cert, servername: "dashboard.example.ts.net" }, (res) => {
+      res.resume();
+      res.on("end", () => resolve(res.statusCode!));
+    }).on("error", reject).end();
+  }), 200);
+  assert.equal((await api.call("GET", "/v1/threads")).status, 200);
+});
+
+test("closing HTTP while issuance is pending prevents a late HTTPS listener", async (t) => {
+  const { testCertificate } = await import("../test-certificate.ts");
+  const certificate = await testCertificate(await mkdtemp(join(dir, "late-tls-")));
+  const pending = Promise.withResolvers<typeof certificate>();
+  const api = await setup(t, { https: { port: 0, certificate: () => pending.promise } });
+  await api.close();
+  pending.resolve(certificate);
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  assert.equal(api.httpsPort, undefined);
 });
