@@ -348,10 +348,16 @@ Use `show --json` to inspect `claudeWorker.state` and its optional failure `mess
 Nexus waits up to 30 seconds after Herdr startup for a launch-specific local hook
 receipt. No receipt means `stalled`, with the last 20 pane lines (up to 8 KiB) in
 the message and a `thread.failed` event. Attention is `failed`, ahead of other
-attention values. The pane stays open for attach; no automatic resubmission occurs.
+attention values. The pane stays open for attach; no automatic resubmission occurs. A late
+turn-started report from this launch's session changes it to `started` and clears
+the current diagnostic, letting attention follow working/reply/seen normally.
+The stall remains in the event history.
 Before every Claude launch or resume, Nexus merges onboarding completion, theme
 (default dark), checkout trust and bypass acceptance into Claude user state.
-Existing credentials, preferences and hooks are retained. After a launch failure or an
+Existing credentials, preferences, hooks and file modes are retained. Already
+seeded files are not written; concurrent changes detected before replacement
+are re-merged, up to five attempts. Trust is restricted to the pylon checkout,
+never a restored pane cwd, root or HOME. After a launch failure or an
 interrupted `starting` launch, attach and inspect before starting another session;
 Nexus deliberately does not retry a possibly submitted task. Human takeover and
 pause/wake use the same Herdr pane and Claude resume path as `session open`.

@@ -222,5 +222,8 @@ hook, not task success. A missing local receipt within 30 seconds after Herdr
 startup is `stalled`; the pane remains open. `ThreadDetail.claudeWorker` exposes
 `state` and optional `message`, including the last 20 visible pane lines (at most
 8 KiB). The same diagnostic appears in `thread.failed`; stalled and failed
-workers both have `failed` attention. A later human submission does not erase
-the launch diagnostic or trigger another automatic submission.
+workers both have `failed` attention. The worker's launch session ID is persisted
+before the open command. A turn-started report from that session changes a
+stalled worker to started and clears its current message, restoring normal
+working/reply/seen attention. Another session cannot clear it. The diagnostic
+remains in event history; no automatic submission is retried.
