@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+import type { DeploymentOptions } from "./releases.ts";
 import { attentionOf } from "./attention.ts";
 import { checkoutReader } from "../checkout-files.ts";
 import { after, test } from "node:test";
@@ -47,7 +49,7 @@ const dotfiles = { repo: "git@github.com:ramtin/dotfiles.git", ref: "main" };
 const dir = await mkdtemp(join(tmpdir(), "nexus-api-"));
 after(() => rm(dir, { recursive: true }));
 
-async function setup(t: import("node:test").TestContext, options: { dotfiles?: typeof dotfiles; streamStallMs?: number; attachTiming?: AttachTiming } = {}) {
+async function setup(t: import("node:test").TestContext, options: { deployment?: DeploymentOptions; dotfiles?: typeof dotfiles; streamStallMs?: number; attachTiming?: AttachTiming } = {}) {
   const registry = openRegistry(join(dir, `${randomUUID()}.db`));
   registry.upsertNode({ name: node, tailnetHost: "rj-firebat.tail.ts.net", tailnetNodeId: "nFIREBAT" as TailnetNodeId });
   let caller: TailnetNodeId | null = laptop;
@@ -76,7 +78,8 @@ async function setup(t: import("node:test").TestContext, options: { dotfiles?: t
       await admitted;
       return caller;
     },
-    allowed: new Set([laptop]),
+    allowed: new Set([laptop, "nFIREBAT" as TailnetNodeId]),
+    ...(options.deployment === undefined ? {} : { deployment: options.deployment }),
     hostnames: new Set(["127.0.0.1"]),
     dotfiles: options.dotfiles ?? dotfiles,
     harness,
@@ -1348,4 +1351,53 @@ test("latest-turn API reads include commits and uncommitted work, and refuse mis
   assert.match(diff.body.diff, /\+untracked/);
   s.fake.harness.latestTurn = async () => "43";
   assert.equal((await s.call("GET", `${route}/diff?base=turn`)).status, 422);
+});
+
+const deployCommit = "a".repeat(40);
+const deployToken = "test-root-token";
+const deployment: DeploymentOptions = {
+  self: "nFIREBAT" as TailnetNodeId,
+  deployers: new Set([laptop, "nFIREBAT" as TailnetNodeId]),
+  keys: { nFIREBAT: createHash("sha256").update(deployToken).digest("hex") },
+  resolveMain: async () => deployCommit,
+};
+const reporterHeaders = { authorization: `Bearer ${deployToken}` };
+
+test("deploy defaults off, main resolves, and release records the authenticated caller", async (t) => {
+  const off = await setup(t);
+  assert.equal((await off.call("PUT", "/v1/release", { commit: "main" })).status, 403);
+  const on = await setup(t, { deployment });
+  const r = await on.call("PUT", "/v1/release", { commit: "main" });
+  assert.equal(r.status, 200);
+  assert.equal(r.body.desired.commit, deployCommit);
+  assert.equal(r.body.desired.requestedBy, laptop);
+  assert.equal(r.body.nodes.length, 2);
+  assert.equal((await on.call("PUT", "/v1/release", { commit: "--evil" })).status, 400);
+});
+
+test("pylon traffic under its host identity cannot deploy even if that identity is allowed and listed as a deployer", async (t) => {
+  const s = await setup(t, { deployment });
+  s.callAs("nFIREBAT" as TailnetNodeId);
+  assert.equal((await s.call("PUT", "/v1/release", { commit: deployCommit }, { "x-forwarded-for": "nLAPTOP", ...reporterHeaders })).status, 403);
+  assert.equal((await s.call("GET", "/v1/deployer/release")).status, 403);
+  assert.equal((await s.call("GET", "/v1/deployer/release", undefined, reporterHeaders)).status, 200);
+  s.callAs(null);
+  assert.equal((await s.call("PUT", "/v1/release", { commit: deployCommit }, reporterHeaders)).status, 403);
+});
+
+test("a root-authenticated drain blocks every turn-entry route and can be released", async (t) => {
+  const s = await setup(t, { deployment });
+  await s.call("PUT", "/v1/release", { commit: deployCommit });
+  s.callAs("nFIREBAT" as TailnetNodeId);
+  const drain = await s.call("POST", "/v1/deployer/drain", { commit: deployCommit }, reporterHeaders);
+  assert.equal(drain.status, 200);
+  assert.equal(drain.body.idle, true);
+  s.callAs(laptop);
+  for (const path of ["/v1/threads", "/v1/threads/anything/messages", "/v1/threads/anything/retry"]) {
+    assert.equal((await s.call("POST", path, {})).status, 409);
+  }
+  assert.equal((await s.call("PUT", "/v1/release", { commit: "b".repeat(40) })).status, 409);
+  s.callAs("nFIREBAT" as TailnetNodeId);
+  await s.call("POST", "/v1/deployer/drain", { commit: deployCommit, release: true }, reporterHeaders);
+  assert.equal(s.registry.drain(), null);
 });

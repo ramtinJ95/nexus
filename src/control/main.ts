@@ -45,6 +45,8 @@ const configSchema = z.strictObject({
   })).min(1),
   /** Other tailnet nodes, such as your laptop and phone, whose callers may use the API. */
   callers: z.array(nodeId),
+  deployers: z.array(nodeId).optional(),
+  deployKeys: z.record(nodeId, z.string().regex(/^[0-9a-f]{64}$/)).optional(),
   /** The common dotfiles layer every new pylon pulls on boot. */
   dotfiles: z.strictObject({ repo: gitUrl, ref: z.string().min(1) }),
   harness: z.strictObject({
@@ -123,6 +125,7 @@ export async function startControlPlane(config: ControlPlaneConfig, models: Mode
   void watch.poll();
   const api = await startApi({
     prWatchEnabled: token !== null,
+    deployment: { self: config.self.tailnetNodeId as TailnetNodeId, deployers: new Set((config.deployers ?? []) as TailnetNodeId[]), keys: config.deployKeys ?? {} },
     registry, whois, host: config.listen.host, port: config.listen.port,
     allowed: new Set([config.self.tailnetNodeId, ...config.callers] as TailnetNodeId[]),
     hostnames: new Set(config.listen.hostnames),
