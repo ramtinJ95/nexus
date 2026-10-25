@@ -187,3 +187,21 @@ test("GitHub failures retain the cursor and expose only a credential-free retry 
   assert.ok(f.registry.prWatch(f.id)?.error); assert.ok(!JSON.stringify(f.registry.prWatch(f.id)).includes("secret-token"));
   await f.watcher.poll(); assert.equal(f.registry.prWatch(f.id)?.error, null);
 });
+
+test("legacy statuses use the latest context and missing detail URLs still link to GitHub", async () => {
+  let passing = false;
+  const fake: typeof fetch = async (input) => {
+    const path = new URL(String(input)).pathname;
+    if (path.endsWith("/pulls/1")) return Response.json({ number: 1, title: "Fix", html_url: "https://github.com/acme/repo/pull/1", state: "open", merged: false, mergeable_state: "clean", head: { sha: "abc" } });
+    if (path.endsWith("/statuses")) return Response.json([{ id: 2, context: "legacy", state: passing ? "success" : "failure", target_url: null }, { id: 1, context: "legacy", state: "pending", target_url: null }]);
+    if (path.endsWith("/check-runs")) return Response.json({ check_runs: [{ id: 3, name: "build", status: "completed", conclusion: passing ? "success" : "failure", details_url: null, html_url: "https://github.com/acme/repo/runs/3", completed_at: "now" }] });
+    return Response.json([]);
+  };
+  const client = githubClient("secret", fake);
+  const failed = await client.poll("acme/repo", 1);
+  assert.equal(failed.pr.checks, "failed");
+  assert.match(failed.failures[0]!.text, /https:\/\/github.com\/acme\/repo\/runs\/3/);
+  assert.match(failed.failures[1]!.text, /https:\/\/github.com\/acme\/repo\/pull\/1/);
+  passing = true;
+  assert.equal((await client.poll("acme/repo", 1)).pr.checks, "passing");
+});
