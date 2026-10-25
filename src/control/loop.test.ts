@@ -1008,3 +1008,22 @@ test("a queued Claude worker launches once after its pylon runs", async (t) => {
   await loop.wake(node);
   assert.deepEqual(commands, [{ kind: "open-session", harness: "claude-code", title: "t", prompt: "/poteto-mode implement it" }]);
 });
+
+test("a stalled Claude launch reports its screen and failed attention without resubmitting", async (t) => {
+  const registry = openRegistry(tempDb());
+  const thread = seed(registry);
+  registry.setClaudeWorker(thread.id, "/poteto-mode hello", "pending");
+  const fake = fakeNode({ autoFinish: true });
+  let launches = 0;
+  const probe: ProbeClient = { ...fake.probe, command: async () => {
+    launches++;
+    throw new Error("Claude launch stalled: no UserPromptSubmit within 30 seconds. The pane showed:\nChoose the text style");
+  } };
+  const loop = run(t, registry, probe, { log: () => {} });
+  await until("worker stalled", () => registry.claudeWorker(thread.id)?.state === "stalled");
+  await loop.wake(node);
+  assert.equal(launches, 1);
+  assert.match(registry.claudeWorker(thread.id)!.message!, /Choose the text style/);
+  assert.ok(registry.events().some((e) => e.kind === "thread.failed" && String(e.payload.message).includes("Choose the text style")));
+  assert.ok(registry.events().some((e) => e.kind === "attention.changed" && e.payload.attention === "failed"));
+});

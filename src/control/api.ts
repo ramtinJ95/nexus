@@ -88,7 +88,7 @@ export interface Api {
 }
 
 export interface ThreadDetail {
-  claudeWorker?: { state: string };
+  claudeWorker?: { state: string; message?: string };
   attention: Attention;
   seenAt: number | null;
   lastReplyAt: number | null;
@@ -377,7 +377,7 @@ export async function startApi(options: ApiOptions): Promise<Api> {
 
   function attention(t: Thread): Attention {
     const parked = t.conversationId !== null && t.status !== "deleted" && harness.activity.parked(t.id).length > 0;
-    return attentionOf(pylonOf(t).failed !== null || registry.claudeWorker(t.id)?.state === "failed", parked, t.lastReplyAt, t.seenAt, t.agentTurnRunning || t.sessionTurnRunning === true, t.sessionWaiting);
+    return attentionOf(pylonOf(t).failed !== null || ["failed", "stalled"].includes(registry.claudeWorker(t.id)?.state ?? ""), parked, t.lastReplyAt, t.seenAt, t.agentTurnRunning || t.sessionTurnRunning === true, t.sessionWaiting);
   }
 
   function row(t: Thread): ThreadRow {
@@ -389,9 +389,10 @@ export async function startApi(options: ApiOptions): Promise<Api> {
     const pylon = registry.pylon(t.pylonId)!;
     const previews = registry.previews(pylon.pylonId);
     const watch = registry.prWatch(t.id);
+    const worker = registry.claudeWorker(t.id);
     return {
       thread: t,
-      ...(registry.claudeWorker(t.id) === undefined ? {} : { claudeWorker: { state: registry.claudeWorker(t.id)!.state } }),
+      ...(worker === undefined ? {} : { claudeWorker: { state: worker.state, ...(worker.message === undefined ? {} : { message: worker.message }) } }),
       attention: attention(t), seenAt: t.seenAt, lastReplyAt: t.lastReplyAt,
       desired: desiredPhase(t, Date.now()),
       pylon: pylonOf(t),

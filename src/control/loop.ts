@@ -159,8 +159,8 @@ export function startLoop(options: LoopOptions): Loop {
             await link.probe.command(pylonId, { kind: "open-session", harness: "claude-code", title: thread.title.slice(0, 80), prompt: worker.prompt });
             registry.setClaudeWorker(thread.id, worker.prompt, "started");
           } catch (err) {
-            registry.setClaudeWorker(thread.id, worker.prompt, "failed");
-            registry.appendEvent("thread.failed", thread.id, { message: "Claude launch did not complete; attach to check before starting another session" });
+            registry.setClaudeWorker(thread.id, worker.prompt, (err as Error).message.includes("Claude launch stalled") ? "stalled" : "failed", (err as Error).message);
+            registry.appendEvent("thread.failed", thread.id, { message: `Claude launch did not complete; attach to check before starting another session: ${(err as Error).message}` });
             throw err;
           }
         }
