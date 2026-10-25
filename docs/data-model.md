@@ -218,12 +218,22 @@ launch runs after its pylon is observed running. `starting` is written before th
 non-idempotent open command: after an interrupted launch, Nexus reports failure
 rather than risking a second submission. Inspect with `attach` before opening
 another session. `started` means the initial prompt reached a launch-specific UserPromptSubmit
-hook, not task success. A missing local receipt within 30 seconds after Herdr
-startup is `stalled`; the pane remains open. `ThreadDetail.claudeWorker` exposes
-`state` and optional `message`, including the last 20 visible pane lines (at most
+hook, or a live Claude process is observed working, not task success. Without
+either proof within 30 seconds after Herdr startup, the launch is `stalled`; the pane remains open. `ThreadDetail.claudeWorker` exposes
+`state`, nullable `model` and optional `message`, including the last 20 visible pane lines (at most
 8 KiB). The same diagnostic appears in `thread.failed`; stalled and failed
 workers both have `failed` attention. The worker's launch session ID is persisted
 before the open command. A turn-started report from that session changes a
-stalled worker to started and clears its current message, restoring normal
+starting, stalled or failed worker to started and clears its current message, restoring normal
 working/reply/seen attention. Another session cannot clear it. The diagnostic
 remains in event history; no automatic submission is retried.
+
+Claude worker `model` is the requested model ID, persisted atomically with new
+threads (default `claude-opus-5-5`). A nullable-column migration leaves old workers
+unknown rather than claiming they ran Opus. Pending legacy launches use the new
+default. Session checkpoint records optionally carry an explicit argv `model`
+for relaunch; old records remain readable. The model is a request, not observed
+provider routing. A local launch receipt or a running Claude with working status
+can confirm startup despite Herdr readiness failure. No failed event is emitted
+for an RPC error when the launch session already reported submission. Otherwise
+the current stored failure message and `thread.failed.payload.message` agree.
