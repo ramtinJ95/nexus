@@ -580,6 +580,17 @@ test("reading the checkout of a pylon that is not running wakes it and is refuse
   assert.deepEqual(s.streams, []);
 });
 
+test("a checkout read whose thread is deleted while it runs answers the delete, not the node's failure", async (t) => {
+  const s = await withThread(t);
+  s.probePipes(async () => {
+    assert.equal((await s.call("DELETE", `/v1/threads/${s.thread.id}`)).status, 200);
+    throw new Error(`rj-firebat: ${s.thread.pylonId} is not running`);
+  });
+  const read = await s.call("GET", `/v1/threads/${s.thread.id}/changes`);
+  assert.equal(read.status, 409);
+  assert.match(read.body.error, /is deleted/);
+});
+
 test("closing a session goes through the node's probe, and a pane that is not open, such as one from before a wake, is a 404", async (t) => {
   const s = await withThread(t);
   assert.deepEqual(await s.call("DELETE", `/v1/threads/${s.thread.id}/sessions/${encodeURIComponent("w1:p1")}`, {}), { status: 204, body: null });

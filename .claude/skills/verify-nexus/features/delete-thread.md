@@ -38,13 +38,12 @@ Preconditions:
   - Run `$V browser delete-ui-open -- goto http://127.0.0.1:7470/threads/$T2`.
   - Run `$V browser delete-ui-click -- click "#delete"`. Its output reports a pending dialog, `Delete "delete: ui"? Its pylon and disk are removed.`
   - Run `$V browser delete-ui-accept -- dialog-accept`.
-  - Within a few polls the header's status chip reads `deleted`, the `Archive` and `Delete` buttons and the `Thread actions` button are gone, and the page reads `The thread is deleted, so its conversation is gone.` Then select the Changes tab with `click 'label.seg-tab:has(input[value="changes"])'` and `click "#changes-reload"`, and the tab reads `The thread is deleted, so its checkout is gone.` Capture with `snapshot --filename delete-ui.md` and `screenshot --filename delete-ui.png`. Then repeat the CLI and Docker checks for `T2`.
+  - Within a few polls the header's status chip reads `deleted`, the `Archive` and `Delete` buttons and the `Thread actions` button are gone, and the page reads `The thread is deleted, so its conversation is gone.` Select the Changes tab with `click 'label.seg-tab:has(input[value="changes"])'`, and it reads `The thread is deleted, so its checkout is gone.` in place of the tree it read before. Capture with `snapshot --filename delete-ui.md` and `screenshot --filename delete-ui.png`. Then repeat the CLI and Docker checks for `T2`.
 - **Proof.** The recorded `delete-watch` stream, `delete-cli`, `delete-docker.txt`, `delete-list` with `delete-list-all`, `delete-again`, and `delete-ui.md` with `delete-ui.png` plus T2's CLI and Docker checks.
 
 ## Gotchas
 
 - `watch` also ends when its parent process exits, which it checks after each poll. Its parent is the `$V` process that runs it, so a watch whose `$V` was killed stops after one more poll and interval, and its `.exit` file is missing. A thread deleted mid-run may print a last `live` line after the `deleted` state. This recipe's thread is idle.
-- The Changes tab keeps a tree it read before the delete, as it does after an archive, and shows the deleted message only after `#changes-reload` or a reload of the page. Right after the delete it can also show an HTTP 502 `pylon-<T2> is not running` from a read already in flight.
 - On a window 760 px wide or less, `#delete` sits behind the `Thread actions` menu, so `click "#delete"` times out until that menu is open.
 - The `Delete` click opens a native `confirm()`. Without `dialog-accept`, the click does nothing, and the thread stays active.
 - The registry keeps deleted threads. `show $T --json` still answers, and `conversation $T` exits 5. Don't treat either as a failed delete.
