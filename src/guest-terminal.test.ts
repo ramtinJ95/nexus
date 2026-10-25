@@ -80,6 +80,16 @@ test("a hang-up sends the program SIGHUP, and is safe to repeat", async () => {
   assert.deepEqual(await terminal.done, { kind: "exited", code: 42 }, "the trap ran");
 });
 
+test("a program that stops reading its keys still hangs up when stdin ends", async () => {
+  const terminal = await openTerminal(local(), size, "xterm", ["sh", "-c", 'trap "exit 42" HUP; echo ready; while :; do sleep 0.05; done']);
+  const out = screen(terminal);
+  await out.until(/ready/);
+  await terminal.write(Buffer.alloc(2 << 20, "k"));
+  await terminal.hangUp();
+  const ended = await Promise.race([terminal.done, sleep(5000, "pending")]);
+  assert.deepEqual(ended, { kind: "exited", code: 42 }, "the relay saw stdin end behind 2 MiB of unread keys");
+});
+
 test("a program that ignores the hang-up is killed, which reads as 128 plus SIGKILL", async () => {
   const terminal = await openTerminal(local(), size, "xterm", ["sh", "-c", 'trap "" HUP; echo ready; while :; do sleep 0.05; done']);
   const out = screen(terminal);

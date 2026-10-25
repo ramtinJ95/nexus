@@ -27,8 +27,9 @@ HANGUP_GRACE_S = 2
 # holds the terminal cannot keep the relay alive.
 DRAIN_QUIET_S = 0.1
 TICK_S = 0.1
-# Keys waiting for the program to read them. Past this, stdin waits too.
-MAX_PENDING = 1 << 20
+# Keys waiting for the program to read them. Past this the program has stopped reading, and the terminal hangs up.
+# stdin is always read, because its end is the hang-up.
+MAX_PENDING = 16 << 20
 
 
 def log(message):
@@ -115,7 +116,7 @@ def main(argv):
             hang_up()
 
     while status is None:
-        reading = [0] if stdin_open and len(pending) < MAX_PENDING else []
+        reading = [0] if stdin_open else []
         if master is not None and master_open:
             reading.append(master)
         writing = [master] if master is not None and master_open and pending else []
@@ -136,6 +137,9 @@ def main(argv):
                     continue
                 if kind == KEYS:
                     pending += payload
+                    if len(pending) > MAX_PENDING:
+                        log(f"the program left {len(pending)} bytes of keys unread, so the terminal hangs up")
+                        hang_up()
                 elif kind == RESIZE and length == 4:
                     # The kernel sends SIGWINCH to the program's foreground process group.
                     set_size(master, *struct.unpack(">HH", payload))
