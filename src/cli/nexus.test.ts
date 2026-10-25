@@ -203,6 +203,37 @@ test("the CLI runs a thread's life through the SOCKS proxy, and --json prints th
   assert.ok(s.proxy.connects.length > 0 && s.proxy.connects.every((c) => c === `${apiName}:${s.api.port}`), "the proxy resolved the API's name");
 });
 
+test("--help or -h after a command prints its lines of nexus --help and exits 0 without a request", async (t) => {
+  const s = await setup(t);
+  const all = new Set((await s.nexus(["--help"])).stdout.split("\n"));
+  const names = ["events", "threads", "show", "ports", "preview", "unpreview", "files", "changes", "diff", "conversation", "session open", "session close",
+    "attach", "start", "send", "watch", "seen", "abort", "retry", "retry-pylon", "wake", "archive", "unarchive", "delete", "projects", "project edit",
+    "project add", "deploy", "release", "nodes"];
+  for (const name of names) {
+    for (const flag of ["--help", "-h"]) {
+      const res = await s.nexus([...name.split(" "), flag]);
+      assert.equal(res.code, 0, `${name} ${flag}: ${res.stderr}`);
+      assert.equal(res.stderr, "");
+      const lines = res.stdout.trimEnd().split("\n");
+      assert.ok(lines[0]!.startsWith("  nexus ") && lines[0]!.includes(name.split(" ").at(-1)!), `${name} ${flag} prints its own entry first: ${lines[0]}`);
+      assert.ok(lines.every((line) => all.has(line)), `${name} ${flag} prints only lines of nexus --help`);
+    }
+  }
+  assert.equal((await s.nexus(["project", "edit", "--help"])).stdout,
+    "  nexus project edit <id> [--node N] [--branch B] [--cpus n] [--memory GiB] [--disk GiB]\n"
+    + "    [--allow-host HOST]... [--login claude|chatgpt]... [--secret NAME:HOST[,HOST]...]...\n"
+    + "    [--clear-hosts] [--clear-logins] [--clear-secrets] [--git-name NAME --git-email EMAIL | --clear-git-identity]\n");
+  assert.equal((await s.nexus(["retry", "-h"])).stdout, "  nexus abort|retry|retry-pylon|wake <thread>\n");
+  const show = await s.nexus(["show", "--help"]);
+  assert.deepEqual([show.code, show.stdout], [0, "  nexus show <thread>                          a thread with its pylon, sessions, previews and outputs\n"], "help needs no thread");
+  assert.deepEqual(s.proxy.connects, [], "no help run sent a request");
+
+  const thread: Thread = await s.json(["start", "--project", "acme", "--title", "Help"]);
+  assert.ok(s.proxy.connects.length > 0, "a command does send its request through the proxy");
+  assert.equal((await s.nexus(["send", thread.id, "--", "--help"])).code, 0);
+  assert.deepEqual(s.fake.calls.at(-1)?.slice(0, 3), ["send", thread.id, "--help"], "after -- it is text to send");
+});
+
 test("each failure has its own exit code, and with --json its error is one JSON line on stderr", async (t) => {
   const s = await setup(t);
   const fails = async (args: readonly string[], code: number, error: Record<string, unknown>, overrides?: Record<string, string>) => {
@@ -984,7 +1015,7 @@ test("show prints PR metadata and one disabled-watch notice without waking the p
 
 test("deploy and release use the shared release view and wait for both roles", async (t) => {
   const s = await setup(t);
-  assert.equal((await s.nexus(["--version"])).stdout.trim(), "nexus 0.16.0");
+  assert.equal((await s.nexus(["--version"])).stdout.trim(), "nexus 0.16.1");
   assert.equal((await s.nexus(["deploy", "bad"])).code, 64);
   const requested = await s.json(["deploy", "main"]);
   assert.equal(requested.desired.commit, "a".repeat(40));
