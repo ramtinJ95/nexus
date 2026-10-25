@@ -171,3 +171,15 @@ test("a withdraw whose write failed writes the table when it is asked again", as
   await serve.withdraw(a, "port-6006");
   assert.deepEqual(await readRoutes(routesFile), new Map([[10000, { pylonId: a, service: "web" }]]));
 });
+
+
+test("preview cleanup preserves the dashboard's private socket entry on 443", async (t) => {
+  const { tailscale, serve, signal } = await setup(t);
+  const dashboard = "unix:/run/nexus-control/dashboard.sock";
+  await tailscale.cli(["serve", "--bg", "--https=443", dashboard], signal);
+  await serve.converge(a, [{ service: "web", httpsPort: 10200 }], signal);
+  await serve.converge(a, [], signal);
+  assert.deepEqual(tailscale.entries(), { 443: dashboard });
+  await assert.rejects(serve.converge(a, [{ service: "web", httpsPort: 443 }], signal), /already served/);
+  assert.deepEqual(tailscale.entries(), { 443: dashboard });
+});

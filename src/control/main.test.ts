@@ -31,3 +31,10 @@ test("GitHub watching is opt-in and accepts only a token file path, never a toke
   assert.throws(() => parseConfig(JSON.stringify({ ...config, github: { tokenFile: "relative" } })), /absolute path/);
   assert.throws(() => parseConfig(JSON.stringify({ ...config, github: { token: "secret" } })), /invalid control plane config/);
 });
+
+
+test("HTTPS socket paths are absolute and previews cannot allocate dashboard port 443", () => {
+  const config = JSON.parse(example);
+  assert.throws(() => parseConfig(JSON.stringify({ ...config, serveSocket: "api.sock" })), /absolute path/);
+  assert.throws(() => parseConfig(JSON.stringify({ ...config, previewPorts: { first: 440, last: 450 } })), /443/);
+});

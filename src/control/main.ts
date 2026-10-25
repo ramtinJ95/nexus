@@ -30,6 +30,7 @@ export const defaultPreviewPorts = { first: 10200, last: 10999 } as const;
 
 const configSchema = z.strictObject({
   db: z.string().min(1),
+  serveSocket: absolutePath.optional(),
   github: z.strictObject({ tokenFile: absolutePath }).optional(),
   listen: z.strictObject({
     host: z.string().min(1),
@@ -61,7 +62,7 @@ const configSchema = z.strictObject({
   tailscaledSocket: z.string().min(1).optional(),
   /** The https ports previews are published on. Each node gives a port to one pylon at a time. */
   previewPorts: z.strictObject({ first: port, last: port })
-    .refine((range) => range.first <= range.last, "first must not be above last")
+    .refine((range) => range.first <= range.last && !(range.first <= 443 && range.last >= 443), "first must not be above last, and port 443 is reserved for the dashboard")
     .default(defaultPreviewPorts),
 });
 export type ControlPlaneConfig = z.infer<typeof configSchema>;
@@ -132,6 +133,7 @@ export async function startControlPlane(config: ControlPlaneConfig, models: Mode
   const watchTimer = setInterval(() => { void watch.poll(); }, 120_000);
   void watch.poll();
   const api = await startApi({
+    ...(config.serveSocket ? { serveSocket: config.serveSocket } : {}),
     prWatchEnabled: token !== null,
     turnsStarting: gate.busy,
     deployment: { self: config.self.tailnetNodeId as TailnetNodeId, deployers: new Set((config.deployers ?? []) as TailnetNodeId[]), keys: config.deployKeys ?? {} },

@@ -17,6 +17,8 @@ After=network-online.target tailscaled.service
 Type=simple
 User=nexus-control
 Group=nexus-control
+RuntimeDirectory=nexus-control
+RuntimeDirectoryMode=0700
 WorkingDirectory=/var/lib/nexus-control
 # The bridges start as this Node, so Node 26 must be in one of these directories.
 Environment=PATH=/usr/local/bin:/usr/bin

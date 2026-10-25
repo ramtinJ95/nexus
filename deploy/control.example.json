@@ -1,4 +1,5 @@
 {
+  "serveSocket": "/run/nexus-control/dashboard.sock",
   "db": "/var/lib/nexus-control/registry.db",
   "listen": { "host": "100.64.0.2", "port": 7470, "hostnames": ["rj-firebat", "rj-firebat.example.ts.net", "100.64.0.2"] },
   "self": { "tailnetNodeId": "nControlPlaneCNTRL" },

@@ -49,7 +49,7 @@ const dotfiles = { repo: "git@github.com:ramtin/dotfiles.git", ref: "main" };
 const dir = await mkdtemp(join(tmpdir(), "nexus-api-"));
 after(() => rm(dir, { recursive: true }));
 
-async function setup(t: import("node:test").TestContext, options: { deployment?: DeploymentOptions; dotfiles?: typeof dotfiles; streamStallMs?: number; attachTiming?: AttachTiming } = {}) {
+async function setup(t: import("node:test").TestContext, options: { serveSocket?: string; whois?: import("../tailscale.ts").Whois; deployment?: DeploymentOptions; dotfiles?: typeof dotfiles; streamStallMs?: number; attachTiming?: AttachTiming } = {}) {
   const registry = openRegistry(join(dir, `${randomUUID()}.db`));
   registry.upsertNode({ name: node, tailnetHost: "rj-firebat.tail.ts.net", tailnetNodeId: "nFIREBAT" as TailnetNodeId });
   let caller: TailnetNodeId | null = laptop;
@@ -73,11 +73,12 @@ async function setup(t: import("node:test").TestContext, options: { deployment?:
   let pipe = async (argv: readonly string[]): Promise<ByteStream> => { throw new Error(`unexpected stream ${argv[0]}`); };
   const api = await startApi({
     registry, host: "127.0.0.1", port: 0,
+    ...(options.serveSocket ? { serveSocket: options.serveSocket } : {}),
     // Every loopback caller is whoever the test says. Tests never ask tailscaled.
-    whois: async () => {
+    whois: options.whois ?? (async () => {
       await admitted;
       return caller;
-    },
+    }),
     allowed: new Set([laptop, "nFIREBAT" as TailnetNodeId]),
     ...(options.deployment === undefined ? {} : { deployment: options.deployment }),
     hostnames: new Set(["127.0.0.1"]),
@@ -1454,4 +1455,45 @@ test("the final idle fence holds across lease expiry until rollback or success r
   s.callAs("nFIREBAT" as TailnetNodeId);
   await s.call("POST", "/v1/deployer/drain", { commit: deployCommit, release: true }, reporterHeaders);
   assert.equal(s.registry.drain(), null);
+});
+
+
+test("Serve resolves the original node only on its private socket; TCP ignores forged headers", async (t) => {
+  const socketDir = await mkdtemp(join(dir, "serve-"));
+  const socketPath = join(socketDir, "api.sock");
+  const seen: [string, number][] = [];
+  const api = await setup(t, {
+    serveSocket: socketPath,
+    deployment: { self: "nFIREBAT" as TailnetNodeId, deployers: new Set([laptop]), keys: {} },
+    whois: async (address, port) => {
+      seen.push([address, port]);
+      return address === "100.64.0.10" ? laptop : address === "100.64.0.2" ? "nFIREBAT" as TailnetNodeId : null;
+    },
+  });
+  const headers = { "x-forwarded-for": "100.64.0.10", "x-forwarded-host": "127.0.0.1", "tailscale-user-login": "owner@example.com" };
+  assert.equal((await api.call("GET", "/v1/threads", undefined, headers)).status, 403);
+  assert.notEqual(seen.at(-1)![0], "100.64.0.10");
+  function served(path = "/v1/threads", overrides: Record<string, string> = {}, method = "GET") {
+    return new Promise<number>((resolve, reject) => {
+      request({ socketPath, path, method, headers: { host: "localhost", "content-type": "application/json", ...headers, ...overrides } }, (res) => {
+        res.resume();
+        res.on("end", () => resolve(res.statusCode!));
+      }).on("error", reject).end();
+    });
+  }
+  assert.equal(await served(), 200);
+  assert.deepEqual(seen.at(-1), ["100.64.0.10", 0]);
+  assert.equal(await served("/v1/threads", { "x-forwarded-for": "100.64.0.99" }), 403);
+  for (const bad of ["", "100.64.0.10, 100.64.0.99", "not-an-ip"]) {
+    assert.equal(await served("/v1/threads", { "x-forwarded-for": bad }), 403);
+  }
+  assert.equal(await served("/v1/threads", { "tailscale-funnel-request": "?1" }), 403);
+  assert.equal(await served("/v1/threads", { "x-forwarded-host": "evil.example" }), 403);
+  assert.equal(await served("/v1/health", { "x-forwarded-for": "" }), 403);
+  assert.equal(await served("/v1/release", { "x-forwarded-for": "100.64.0.2" }, "PUT"), 403);
+  assert.equal(await served("/v1/deployer/desired"), 403);
+  const upgrade = { connection: "Upgrade", upgrade: "websocket", "sec-websocket-version": "13", "sec-websocket-key": "dGhlIHNhbXBsZSBub25jZQ==" };
+  assert.equal(await served(attachPathOf("missing"), { ...upgrade, origin: "https://127.0.0.1" }), 404);
+  assert.equal(await served(attachPathOf("missing"), { ...upgrade, origin: "http://127.0.0.1" }), 403);
+  assert.equal(await served(attachPathOf("missing"), { ...upgrade, origin: "https://127.0.0.1:10200" }), 403);
 });

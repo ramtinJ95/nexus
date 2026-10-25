@@ -21,7 +21,7 @@ export function fakeTailscale(initial = "{}") {
     const line = args.join(" ");
     if (failing.delete(line)) throw new Error(`tailscale ${line}: error: injected failure`);
     if (line === "serve status --json") return JSON.stringify(config, null, 2);
-    const add = /^serve --bg --https=(\d+) (http:\/\/\S+)$/.exec(line);
+    const add = /^serve --bg --https=(\d+) ((?:http:\/\/|unix:)\S+)$/.exec(line);
     const off = /^serve --https=(\d+) off$/.exec(line);
     if (add) {
       const [, port, target] = add as unknown as [string, string, string];
