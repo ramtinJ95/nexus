@@ -681,7 +681,9 @@ function noticeFacts() {
   if (now === null || before === null) return;
   const started = now.pylon === "running" && before.pylon !== "running";
   const agentDone = !now.turn && (before.turn || now.agentAt !== before.agentAt);
-  if ((started && (checkout.wanted || checkout.changes === null)) || (agentDone && canRead(now))) void readChanges();
+  // An unarchive can land before the pylon pauses, so no start follows to read again.
+  const reopened = threadClosed(before) && !threadClosed(now);
+  if ((started && (checkout.wanted || checkout.changes === null)) || ((agentDone || reopened) && canRead(now))) void readChanges();
   else if (!canRead(now) && (checkout.changes === null || threadClosed(now))) changesUnreadable(now);
 }
 
