@@ -19,7 +19,7 @@ function fixture(path = ":memory:") {
   registry.upsertNode({ name: node, tailnetHost: "node.ts.net", tailnetNodeId: "nNODE" as TailnetNodeId });
   registry.createProject(project);
   function add(id = "th-1") {
-    const thread: Thread = { id: id as ThreadId, title: "test", project: project.id, pylonId: `pylon-${id}` as PylonId, status: "active", conversationId: "1", startedBy: "test", createdAt: 1, lastHumanActivityAt: 1, lastAgentActivityAt: 0, agentTurnRunning: false };
+    const thread: Thread = { id: id as ThreadId, title: "test", project: project.id, pylonId: `pylon-${id}` as PylonId, status: "active", conversationId: "1", startedBy: "test", createdAt: 1, seenAt: null, lastReplyAt: null, lastHumanActivityAt: 1, lastAgentActivityAt: 0, agentTurnRunning: false };
     const { desired: _, ...pylon } = newPylonRecord({ thread: id, pylonId: thread.pylonId, node, desired: "paused", boot: { pylonId: thread.pylonId, image: "img-000000000000", resources: project.resources, network: { allowedHosts: [], secrets: [] }, repo: { kind: "clone", url: project.repoUrl, checkout: { branch: "main", commit: "main" } }, dotfiles: { repo: project.repoUrl, ref: "main" } }, firstBoot: { kind: "fresh", preSetup: null }, live: { previews: [], overlay: [] }, liveHash: "hash" as LiveHash });
     registry.createThread(thread, pylon);
     registry.apply({ record: "output", pylonId: thread.pylonId, kind: "branch", ref: "origin/feature" });
@@ -40,6 +40,8 @@ function fixture(path = ":memory:") {
 test("links origin branches, shares reads, and only deliberate messages wake without human activity", async (t) => {
   const f = fixture(); t.after(() => f.registry.close());
   const second = f.add("th-2");
+  f.registry.recordReply(f.id, 1000);
+  f.registry.markSeen(f.id, false, 1000);
   await f.watcher.poll();
   assert.deepEqual(f.calls, ["find:acme/repo:feature", "poll"]);
   assert.equal(f.wakes, 0);
@@ -54,6 +56,8 @@ test("links origin branches, shares reads, and only deliberate messages wake wit
   assert.ok(f.messages[0]![1].startsWith(prWatchPrefix));
   const thread = f.registry.thread(f.id)!;
   assert.equal(thread.lastHumanActivityAt, 1);
+  assert.equal(thread.seenAt, 1000);
+  assert.equal(thread.lastReplyAt, 1000);
   assert.equal(desiredPhase(thread, thread.lastAgentActivityAt), "running");
   assert.equal(desiredPhase(thread, thread.lastAgentActivityAt + 21 * 60_000), "paused");
 });

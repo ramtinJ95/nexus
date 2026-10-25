@@ -488,3 +488,23 @@ test("a reply recorded after seen in the same millisecond is unread and has a ne
   registry.recordReply(threadId, 2000);
   assert.equal(registry.thread(threadId)!.lastReplyAt, 2002);
 });
+
+test("adding PR watches preserves the shared seen and reply markers from schema 8", async (t) => {
+  const { DatabaseSync } = await import("node:sqlite");
+  const path = tempDb();
+  const first = seeded(path);
+  first.recordReply(threadId, 2000);
+  first.markSeen(threadId, false, 3000);
+  first.close();
+  const db = new DatabaseSync(path);
+  db.exec("DROP TABLE pr_watches; PRAGMA user_version = 8");
+  db.close();
+  const registry = openRegistry(path);
+  t.after(() => registry.close());
+  assert.deepEqual(registry.thread(threadId), { ...thread, lastReplyAt: 2000, seenAt: 3000 });
+  assert.equal(registry.prWatch(threadId), null);
+  const watch = { links: [], commentWakes: 0, pending: null, error: null };
+  registry.savePrWatch(threadId, watch);
+  assert.deepEqual(registry.prWatch(threadId), watch);
+  assert.deepEqual(registry.thread(threadId), { ...thread, lastReplyAt: 2000, seenAt: 3000 });
+});
