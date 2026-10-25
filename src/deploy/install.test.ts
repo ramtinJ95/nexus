@@ -122,3 +122,9 @@ test("a failed final idle fence never switches or restarts the running release",
   assert.deepEqual(calls, [`prepare:${commit}`]);
   assert.equal(await installer.observed(), null);
 });
+
+test("deployment child commands include the administrative paths the probe installer needs", async (t) => {
+  const dir = await directory(t);
+  const path = await command(process.execPath, ["-p", "process.env.PATH"], dir);
+  assert.deepEqual(path.split(":"), ["/usr/local/sbin", "/usr/local/bin", "/usr/sbin", "/usr/bin", "/sbin", "/bin"]);
+});
