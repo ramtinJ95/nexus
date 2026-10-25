@@ -32,3 +32,8 @@ export function coordinator(notify) {
   };
 }
 
+
+export function seenBody(conversation) {
+  const at = conversation?.dataset.renderedReplyAt;
+  return { lastReplyAt: at === undefined || at === "" ? null : Number(at) };
+}

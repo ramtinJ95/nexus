@@ -59,10 +59,11 @@ export function dashboard(options: DashboardOptions): (path: string, query: URLS
     [/^\/threads\/([^/]+)$/, async (m) => {
       const thread = registry.thread(m[1]! as ThreadId);
       if (thread === undefined) return { ...ok(notFound(context(), `No thread ${m[1]!}.`)), status: 404 };
+      // The reply known before this read is a safe watermark even if another turn ends during it.
       const view = await transcript(thread);
       // After the read, so the facts are no older than the conversation, and a thread deleted meanwhile shows none.
       const d = detail(registry.thread(thread.id)!);
-      return ok(threadPage(context(), d, registry.node(d.pylon.node)!, d.thread.status === "deleted" ? null : view));
+      return ok(threadPage(context(), d, registry.node(d.pylon.node)!, d.thread.status === "deleted" ? null : view, thread.lastReplyAt));
     }],
     [/^\/assets\/([a-z]+\.[a-z]+)$/, (m, query) => {
       const asset = assets.get(m[1]!);
@@ -403,7 +404,7 @@ function lookOf(d: ThreadDetail, p: Preview) {
   return state === "failed" ? { ...previewLook.failed, hint: p.failed } : previewLook[state];
 }
 
-function threadPage(c: Context, d: ThreadDetail, node: NodeRecord, view: ConversationView | Error | null): Html {
+function threadPage(c: Context, d: ThreadDetail, node: NodeRecord, view: ConversationView | Error | null, renderedReplyAt: number | null): Html {
   const { thread: t } = d;
   const read = view === null || view instanceof Error ? null : view;
   const items = read === null ? [] : conversationItems(read);
@@ -428,7 +429,7 @@ ${actions.length > 0 && html`<div class="bar-actions" id="thread-actions">${acti
 <div class="tabs" id="tabs" role="tablist" aria-label="Open views" data-thread="${t.id}"><button type="button" class="tab active" role="tab" aria-selected="true" aria-controls="scroll" data-tab="convo">${icon("chat")}<span class="tab-name">${t.title}</span></button></div>
 <div class="strip" id="strip" data-live>${strip(d)}</div>
 <div id="facts" data-live hidden>${facts(d)}</div>
-<div class="scroll" id="scroll" role="tabpanel"><div class="convo" id="convo" data-live${t.conversationId !== null && t.status !== "deleted" && html` data-stream="/threads/${t.id}/stream"`}>${convo(t, view, items, c.now)}</div></div>
+<div class="scroll" id="scroll" role="tabpanel"><div class="convo" id="convo" data-rendered-reply-at="${read === null ? "" : renderedReplyAt ?? ""}" data-live${t.conversationId !== null && t.status !== "deleted" && html` data-stream="/threads/${t.id}/stream"`}>${convo(t, view, items, c.now)}</div></div>
 <section class="file-view" id="file-view" role="tabpanel" aria-label="File diff" hidden></section>
 <div class="dock">
 <p id="action-error" class="error" role="alert" hidden></p>

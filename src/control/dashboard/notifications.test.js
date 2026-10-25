@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { coordinator, notificationChannel, badgeCount, badgeText } from "./notifications.js";
+import { coordinator, notificationChannel, badgeCount, badgeText, seenBody } from "./notifications.js";
 
 const row = (attention, agentTurnRunning = false, id = "t1") => ({ id, attention, agentTurnRunning });
 test("initial states are silent; failures and parked notify immediately", () => {
@@ -70,3 +70,15 @@ test("a follow-up's final reply gets its own grace period even while attention s
   assert.deepEqual(events, [reply(3000), reply(9000)]);
 });
 
+
+test("seen payload stays at the rendered reply while attention polls find newer replies", () => {
+  const conversation = { dataset: { renderedReplyAt: "1000" } };
+  const update = coordinator(() => {});
+  update([{ ...row("reply"), lastReplyAt: 1000 }], 1000);
+  update([{ ...row("reply"), lastReplyAt: 2000 }], 2000);
+  assert.deepEqual(seenBody(conversation), { lastReplyAt: 1000 });
+  conversation.dataset.renderedReplyAt = "2000";
+  assert.deepEqual(seenBody(conversation), { lastReplyAt: 2000 });
+  assert.deepEqual(seenBody(null), { lastReplyAt: null });
+  assert.deepEqual(seenBody({ dataset: { renderedReplyAt: "" } }), { lastReplyAt: null });
+});

@@ -3,7 +3,7 @@
 // and polls the page to swap in each `data-live` region that changed. A thread page also follows its stream, which
 // sends the conversation region as the run streams, and reads its checkout's changes into the inspector, opening
 // each changed file's diff as a tab beside the conversation.
-import { coordinator, notificationChannel, badgeCount, badgeText } from "./notifications.js";
+import { coordinator, notificationChannel, badgeCount, badgeText, seenBody } from "./notifications.js";
 
 const main = document.querySelector("main");
 const pollMs = Number(main?.dataset.pollMs);
@@ -166,6 +166,11 @@ async function refresh() {
     const next = new DOMParser().parseFromString(await res.text(), "text/html");
     const followed = streaming() || frames !== seen;
     swap([...next.querySelectorAll("[data-live]")].filter((fresh) => !(followed && fresh.id === "convo")).map((fresh) => [document.getElementById(fresh.id), fresh.innerHTML]));
+    const freshConvo = next.getElementById("convo");
+    // A stream owns its patch indices. Certify its rendered snapshot without replacing it under those patches.
+    if (freshConvo && (!followed || served.get("convo") === comparable(freshConvo.innerHTML))) {
+      document.getElementById("convo").dataset.renderedReplyAt = freshConvo.dataset.renderedReplyAt ?? "";
+    }
     follow(next.getElementById("convo")?.dataset.stream);
 
     // An archived or deleted thread stops counting visits, so follow the fresh page.
@@ -934,7 +939,7 @@ async function pollAttention() {
     const id = currentThread();
     if (id && focused() && activeTab === null && document.getElementById("convo") && !document.querySelector("#convo .error") && Date.now() - lastSeen >= 3000) {
       lastSeen = Date.now();
-      await api("POST", `/v1/threads/${id}/seen`, {});
+      await api("POST", `/v1/threads/${id}/seen`, seenBody(document.getElementById("convo")));
     }
   } catch { /* The page's refresh reports connection failures. */ }
   finally { attentionPolling = false; }

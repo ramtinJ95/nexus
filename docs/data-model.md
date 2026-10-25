@@ -50,7 +50,9 @@ The registry stores each thread's nullable `seenAt` and `lastReplyAt` as Unix mi
 
 The API derives `attention` in order: failed pylon, parked tasks, unread reply (`lastReplyAt > seenAt`, with null seen treated as unread), running turn, then null. Parked tasks are tracked for every conversation at harness recovery, independently of client watches. Both the thread list and detail report this value and both timestamps.
 
-Mark seen changes only `seenAt`. Mark unread sets it one millisecond before the latest reply, or null without a reply. Neither is human activity, changes the pylon, nor wakes it, including on archived threads.
+Each recorded reply timestamp is strictly greater than the preceding reply and seen marker, nudged forward by a millisecond if needed, so reply identities and unread ordering survive same-millisecond events and clock corrections.
+
+Mark seen changes only `seenAt`. An optional `lastReplyAt` in the request caps the mark at the reply the client rendered; null marks nothing. Ordinary seen marks never move backward, so a stale page cannot undo another client's seen mark. Mark unread sets it one millisecond before the latest reply, or null without a reply. Neither is human activity, changes the pylon, nor wakes it, including on archived threads.
 
 ## Pylon states
 

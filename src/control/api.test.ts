@@ -1298,3 +1298,32 @@ test("attention takes the first matching state in every combination", () => {
     }
   }
 });
+
+test("seen is bounded by the rendered reply, not a newer reply discovered by attention polling", async (t) => {
+  const s = await withThread(t);
+  const id = s.thread.id;
+  const base = `/v1/threads/${id}`;
+  s.registry.recordReply(id, 1000);
+  const renderedReplyAt = s.registry.thread(id)!.lastReplyAt;
+  s.registry.recordReply(id, 2000);
+  const human = s.registry.thread(id)!.lastHumanActivityAt;
+  s.woken.length = 0;
+  assert.equal((await s.call("POST", `${base}/seen`, { lastReplyAt: renderedReplyAt })).status, 204);
+  let detail = (await s.call("GET", base)).body as ThreadDetail;
+  assert.equal(detail.seenAt, 1000);
+  assert.equal(detail.lastReplyAt, 2000);
+  assert.equal(detail.attention, "reply");
+  assert.equal((await s.call("POST", `${base}/seen`, { lastReplyAt: null })).status, 204);
+  assert.equal(s.registry.thread(id)!.seenAt, 1000);
+  await s.call("POST", `${base}/seen`, { lastReplyAt: 2000 });
+  detail = (await s.call("GET", base)).body as ThreadDetail;
+  assert.equal(detail.seenAt, 2000);
+  assert.equal(detail.attention, null);
+  await s.call("POST", `${base}/seen`, { lastReplyAt: 1000 });
+  assert.equal(s.registry.thread(id)!.seenAt, 2000, "a stale page does not undo another client's seen mark");
+  for (const lastReplyAt of [-1, 1.5, "2000"]) {
+    assert.equal((await s.call("POST", `${base}/seen`, { lastReplyAt })).status, 400);
+  }
+  assert.equal(s.registry.thread(id)!.lastHumanActivityAt, human);
+  assert.deepEqual(s.woken, []);
+});

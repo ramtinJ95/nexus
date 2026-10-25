@@ -472,3 +472,19 @@ test("seen and reply timestamps migrate from null and persist without activity",
   assert.deepEqual(reopened.thread(threadId), { ...thread, lastReplyAt: 2000, seenAt: 3000 });
   assert.deepEqual(reopened.pylon(pylonId), pylon);
 });
+
+test("a reply recorded after seen in the same millisecond is unread and has a new identity", (t) => {
+  const registry = seeded(tempDb());
+  t.after(() => registry.close());
+  registry.recordReply(threadId, 1000);
+  registry.markSeen(threadId, false, 2000);
+  registry.recordReply(threadId, 2000);
+  const reply = registry.thread(threadId)!;
+  assert.equal(reply.seenAt, 2000);
+  assert.equal(reply.lastReplyAt, 2001);
+  assert.ok(reply.lastReplyAt > reply.seenAt);
+  registry.markSeen(threadId, false, 2000, reply.lastReplyAt);
+  assert.equal(registry.thread(threadId)!.seenAt, 2001);
+  registry.recordReply(threadId, 2000);
+  assert.equal(registry.thread(threadId)!.lastReplyAt, 2002);
+});

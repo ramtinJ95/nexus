@@ -180,6 +180,7 @@ const startSchema = z.strictObject({
   commit: z.string().min(1).optional(),
 });
 // Agent activity comes from the harness.
+const seenSchema = z.strictObject({ lastReplyAt: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER).nullable().optional() });
 const activitySchema = z.strictObject({ kind: z.literal("human") });
 const messageSchema = z.strictObject({
   text: z.string().min(1),
@@ -628,7 +629,7 @@ export async function startApi(options: ApiOptions): Promise<Api> {
 
   /** A file is served as its bytes, everything else as JSON. */
   type Reply = { status: number; body?: unknown; file?: never } | { status: number; file: Buffer; type: string };
-  type Route = (match: RegExpExecArray, req: { query: URLSearchParams; body(): Promise<unknown>; caller: TailnetNodeId }) => Reply | Promise<Reply>;
+  type Route = (match: RegExpExecArray, req: { query: URLSearchParams; body(empty?: unknown): Promise<unknown>; caller: TailnetNodeId }) => Reply | Promise<Reply>;
   const ok = (body: unknown): Reply => ({ status: 200, body });
   const created = (body: unknown): Reply => ({ status: 201, body });
   const noContent: Reply = { status: 204 };
@@ -641,7 +642,12 @@ export async function startApi(options: ApiOptions): Promise<Api> {
     ["POST", /^\/v1\/threads$/, async (_, r) => created(await startThread(await r.body(), r.caller))],
     ["GET", /^\/v1\/threads\/([^/]+)$/, (m) => ok(detail(thread(m[1]!)))],
     ["DELETE", /^\/v1\/threads\/([^/]+)$/, async (m) => ok(await setStatus(thread(m[1]!), "deleted"))],
-    ["POST", /^\/v1\/threads\/([^/]+)\/(seen|unseen)$/, (m) => { registry.markSeen(thread(m[1]!).id, m[2] === "unseen"); return noContent; }],
+    ["POST", /^\/v1\/threads\/([^/]+)\/(seen|unseen)$/, async (m, r) => {
+      const t = thread(m[1]!);
+      const body = parse(seenSchema, await r.body({}));
+      registry.markSeen(t.id, m[2] === "unseen", Date.now(), body.lastReplyAt);
+      return noContent;
+    }],
     ["POST", /^\/v1\/threads\/([^/]+)\/archive$/, async (m) => ok(await setStatus(thread(m[1]!), "archived"))],
     ["POST", /^\/v1\/threads\/([^/]+)\/unarchive$/, (m) => ok(unarchive(thread(m[1]!)))],
     ["POST", /^\/v1\/threads\/([^/]+)\/activity$/, async (m, r) => { recordActivity(thread(m[1]!), await r.body()); return noContent; }],
@@ -727,7 +733,7 @@ export async function startApi(options: ApiOptions): Promise<Api> {
     if (matches.length === 0) throw new HttpError(404, `no route ${path}`);
     const match = matches.find((r) => r.method === req.method);
     if (match === undefined) throw new HttpError(405, `${req.method} is not allowed on ${path}`);
-    const reply = await match.route(match.m, { query: url.searchParams, caller, body: () => readJson(req) });
+    const reply = await match.route(match.m, { query: url.searchParams, caller, body: (empty) => readJson(req, empty) });
     if (reply.file !== undefined) sendFile(res, reply.file, reply.type);
     else if (reply.body === undefined) res.writeHead(reply.status).end();
     else send(res, reply.status, reply.body);
@@ -854,13 +860,14 @@ function parse<T>(schema: z.ZodType<T>, body: unknown): T {
 }
 
 const maxBodyBytes = 1 << 20;
-async function readJson(req: IncomingMessage): Promise<unknown> {
+async function readJson(req: IncomingMessage, empty?: unknown): Promise<unknown> {
   let body = "";
   req.setEncoding("utf8");
   for await (const chunk of req as AsyncIterable<string>) {
     body += chunk;
     if (body.length > maxBodyBytes) throw new HttpError(413, `request body over ${maxBodyBytes} bytes`);
   }
+  if (body === "" && empty !== undefined) return empty;
   try {
     return JSON.parse(body);
   } catch (err) {

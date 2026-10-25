@@ -295,8 +295,8 @@ export function openRegistry(path: string) {
       VALUES ($id, $thread, $node, $boot, $firstBoot, $live, $liveHash, $pauses, $submitted, $attempts, $failed, $retrying)`),
     updatePylon: db.prepare(`UPDATE pylons SET thread = $thread, node = $node, boot = $boot, first_boot = $firstBoot, live = $live,
       live_hash = $liveHash, pauses = $pauses, submitted = $submitted, attempts = $attempts, failed = $failed, retrying = $retrying WHERE id = $id`),
-    markSeen: db.prepare("UPDATE threads SET seen_at = CASE WHEN ? THEN last_reply_at - 1 ELSE ? END WHERE id = ?"),
-    recordReply: db.prepare("UPDATE threads SET last_reply_at = max(coalesce(last_reply_at, 0), ?) WHERE id = ?"),
+    markSeen: db.prepare("UPDATE threads SET seen_at = CASE WHEN ? THEN last_reply_at - 1 ELSE max(coalesce(seen_at, 0), min(max(?, coalesce(last_reply_at, 0)), ?)) END WHERE id = ?"),
+    recordReply: db.prepare("UPDATE threads SET last_reply_at = max(coalesce(last_reply_at, 0) + 1, coalesce(seen_at, 0) + 1, ?) WHERE id = ?"),
     retryPylon: db.prepare(`UPDATE pylons SET failed = NULL, attempts = '{"count":0,"last":null}', retrying = 1 WHERE id = ? AND failed IS NOT NULL`),
     pylon: db.prepare("SELECT * FROM pylons WHERE id = ?"),
     pylonsOn: db.prepare("SELECT * FROM pylons WHERE node = ? ORDER BY id"),
@@ -397,9 +397,11 @@ export function openRegistry(path: string) {
       const row = q.thread.get(id) as Row | undefined;
       return row && threadRow(row);
     },
-    markSeen(id: ThreadId, unread: boolean, now = Date.now()) {
-      q.markSeen.run(unread ? 1 : 0, now, id);
+    markSeen(id: ThreadId, unread: boolean, now = Date.now(), lastReplyAt?: number | null) {
+      if (!unread && lastReplyAt === null) return;
+      q.markSeen.run(unread ? 1 : 0, now, lastReplyAt ?? Number.MAX_SAFE_INTEGER, id);
     },
+    // The timestamp also identifies a reply, including two events in one millisecond or a clock correction.
     recordReply(id: ThreadId, at: number) {
       q.recordReply.run(at, id);
     },

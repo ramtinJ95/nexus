@@ -134,6 +134,10 @@ The shapes are TypeScript types. `Thread`, `Session` and `Preview` are in [`src/
 
 An unread reply outranks working, so a client cancelling a pending reply notification on a follow-up must also check `agentTurnRunning`. Reading `threads` or `show` does not mark anything seen; clients call `seen` when they show the conversation.
 
+`POST /v1/threads/<thread>/seen` accepts an optional JSON body `{ "lastReplyAt": number | null }`. A client rendering asynchronously sends the reply timestamp captured with the conversation it actually rendered, not a newer timestamp from attention polling. The mark cannot advance beyond that timestamp; null marks nothing. A stale mark does not lower an existing seen marker. Omitting the field (as `nexus seen` does) marks the latest reply seen at request time. `/unseen` still marks the latest reply unread.
+
+Reply timestamps also serve as reply identities: each recorded reply is at least one millisecond greater than both the preceding reply and the current seen marker. This preserves strict unread ordering for events in the same millisecond or after a clock correction. A client must use the returned timestamp, not reconstruct it from its own clock. Reply notifications compare this identity and working transitions as well as attention, so a follow-up can notify even while attention stays `"reply"`.
+
 The sessions, previews and ports in `ThreadDetail` have these shapes:
 
 ```ts
