@@ -712,3 +712,32 @@ test("a newer heartbeat resumes waiting with a fresh lease, while older or equal
   now += 25 * 60_000;
   assert.equal(desiredPhase(registry.thread(threadId)!, now), "running", "the renewed lease outlasts ordinary idle grace");
 });
+
+test("only the stalled worker's launch session restores normal reply and seen attention", (t) => {
+  const path = tempDb();
+  const first = seeded(path);
+  first.setClaudeWorker(threadId, "hello", "starting", undefined, "launch-session");
+  first.setClaudeWorker(threadId, "hello", "stalled", "Choose the text style");
+  first.appendEvent("thread.failed", threadId, { message: "Choose the text style" });
+  first.close();
+  const registry = openRegistry(path);
+  t.after(() => registry.close());
+  let sequence = 0;
+  const report = (kind: "session.turn-started" | "session.turn-ended" | "session.ended", session: string) => registry.reportSession(node, {
+    sequence: ++sequence, pylon: pylonId, time: 1000 + sequence, event: { kind, session },
+  });
+  const attention = () => registry.events("0", { kinds: ["attention.changed"] }).at(-1)?.payload.attention;
+  assert.equal(attention(), "failed");
+  report("session.turn-started", "another-session");
+  assert.equal(registry.claudeWorker(threadId)!.state, "stalled");
+  assert.equal(attention(), "failed");
+  report("session.ended", "another-session");
+  report("session.turn-started", "launch-session");
+  assert.deepEqual(registry.claudeWorker(threadId), { prompt: "hello", state: "started" });
+  assert.equal(attention(), "working");
+  report("session.turn-ended", "launch-session");
+  assert.equal(attention(), "reply");
+  registry.markSeen(threadId, false);
+  assert.equal(attention(), null);
+  assert.equal(registry.events("0", { kinds: ["thread.failed"] })[0]!.payload.message, "Choose the text style");
+});

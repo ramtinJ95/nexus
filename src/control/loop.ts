@@ -11,6 +11,7 @@
  * the planner sends it in a spawn. The ports go back once its node neither has the pylon of a deleted thread nor routes
  * a preview to it.
  */
+import { randomUUID } from "node:crypto";
 import { setTimeout as delay } from "node:timers/promises";
 import { desiredPhase, type RegistryWrite } from "../reconcile.ts";
 import { linkedPort, liveHashOf, type GitIdentity } from "../project.ts";
@@ -154,12 +155,13 @@ export function startLoop(options: LoopOptions): Loop {
         }
         if (worker?.state === "pending" && thread.status === "active" && observation(node)?.pylons.some((p) => p.pylonId === pylonId && p.phase === "running")) {
           // Fence the non-idempotent launch before sending: an interrupted reply must never submit the task twice.
-          registry.setClaudeWorker(thread.id, worker.prompt, "starting");
+          const session = randomUUID();
+          registry.setClaudeWorker(thread.id, worker.prompt, "starting", undefined, session);
           try {
-            await link.probe.command(pylonId, { kind: "open-session", harness: "claude-code", title: thread.title.slice(0, 80), prompt: worker.prompt });
+            await link.probe.command(pylonId, { kind: "open-session", harness: "claude-code", title: thread.title.slice(0, 80), resume: session, prompt: worker.prompt });
             registry.setClaudeWorker(thread.id, worker.prompt, "started");
           } catch (err) {
-            registry.setClaudeWorker(thread.id, worker.prompt, (err as Error).message.includes("Claude launch stalled") ? "stalled" : "failed", (err as Error).message);
+            if (registry.claudeWorker(thread.id)?.state !== "started") registry.setClaudeWorker(thread.id, worker.prompt, (err as Error).message.includes("Claude launch stalled") ? "stalled" : "failed", (err as Error).message);
             registry.appendEvent("thread.failed", thread.id, { message: `Claude launch did not complete; attach to check before starting another session: ${(err as Error).message}` });
             throw err;
           }

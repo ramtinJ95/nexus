@@ -1006,7 +1006,7 @@ test("a queued Claude worker launches once after its pylon runs", async (t) => {
   const loop = run(t, registry, probe);
   await until("worker started", () => registry.claudeWorker(thread.id)?.state === "started");
   await loop.wake(node);
-  assert.deepEqual(commands, [{ kind: "open-session", harness: "claude-code", title: "t", prompt: "/poteto-mode implement it" }]);
+  assert.deepEqual(commands, [{ kind: "open-session", harness: "claude-code", title: "t", resume: (commands[0] as { resume: string }).resume, prompt: "/poteto-mode implement it" }]);
 });
 
 test("a stalled Claude launch reports its screen and failed attention without resubmitting", async (t) => {
