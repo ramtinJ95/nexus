@@ -1,10 +1,64 @@
 # Deploy Nexus on the home-lab nodes
 
-Each node runs a probe, which runs the pylon VMs. One machine, `rj-firebat`, also runs the control plane: the registry, the reconcile loop, the agent harness and the API. Both install from a checkout of this repository, as root, and both scripts are safe to rerun.
+Each node runs a probe, which runs the pylon VMs. One machine, `rj-firebat`, also runs the control plane: the registry, the reconcile loop, the agent harness and the API. The first install uses a checkout and sudo. After the one-time setup below, `nexus deploy` requests upgrades without sudo or SSH. The manual scripts remain safe to rerun for bootstrapping and recovery.
 
 Upgrade the control plane before the probes. A probe refuses a spawn from a control plane older than itself and says the control plane needs upgrading, while an older probe still runs projects that clone a repository for an upgraded control plane. A probe from before scratch projects cannot start one, so create scratch projects only after every probe is upgraded. A probe that reports a session its last wake failed to bring back, in no pane, stops a control plane from before session states from storing any observation from that node until the control plane is upgraded too.
 
 CLI 0.11.0 adds `nexus changes <thread> --turn` and `nexus diff <thread> --turn`, also available as Latest turn in the dashboard. Upgrade the control plane to capture these start-of-reply snapshots; no image rebuild is needed. Existing pylons gain a snapshot on their next autonomous turn. Until then, Latest turn reports that no snapshot exists. See [the CLI contract](../docs/cli.md) for the JSON base and failures.
+
+## Deploy a merged commit
+
+From an allowed Mac or other tailnet caller with CLI 0.13.0:
+
+```sh
+nexus deploy main --wait
+nexus deploy <full-40-character-commit> --json
+nexus release
+nexus release --json
+```
+
+`main` is resolved by the control plane to GitHub's current `refs/heads/main`. The registry records the full commit, authenticated caller and request time. Each root deployer independently fetches main and verifies the commit is an ancestor before building it. A requested unmerged commit is recorded but fails at the node without changing the running release. The dashboard's node list shows the desired release and each reported component.
+
+`--wait` waits up to 30 minutes for fresh healthy reports from every configured node's probe and the control node's control plane, tolerating connection failures while control restarts. A rollback or failure ends the wait with the reason. An offline node remains pending; a report older than 90 seconds is stale. Failed commits are quarantined locally rather than retried every poll. Request a different merged commit to fix one. After a drain refusal, the person may clear `/opt/nexus/control-deploy-report.json` while the deployer service is stopped to retry the same commit when idle; a rolled-back install also has a terminal attempt in `control-deploy.json` (or `probe-deploy.json`). Manual recovery is preferable to clearing a rollback without fixing its cause.
+
+### One-time setup, by the person after merge
+
+1. Install the control plane first, then every probe, with the existing sudo scripts below. Use an edited service config, not an example. Each script installs the root `nexus-deployer.service` and its 15-second timer, records its role, and creates `/etc/nexus/deployer.json` **only if absent**. On the control node, run both scripts. No pylon image rebuild or Mac CLI installation is part of this flow.
+2. The installer prints the node's stable tailnet ID and a SHA-256 token digest. Add each pair to `deployKeys` in `/etc/nexus/control.json`. The plaintext token remains only in that node's root-owned, mode-0600 `deployer.json`; never put it in a project's secrets or a pylon. The timer refuses access until its digest is configured. If the install was rerun and you missed the printed digest, read it as root with `node --input-type=module -e 'import{readFileSync}from"node:fs";import{createHash}from"node:crypto";console.log(createHash("sha256").update(JSON.parse(readFileSync("/etc/nexus/deployer.json")).token).digest("hex"))'`.
+3. Add the allowed Mac/client stable IDs to both `callers` and `deployers` in control.json. `deployers` missing or empty disables release changes. Never list an infrastructure node as a deployer: the API rejects every configured node and `self` even if listed.
+4. Verify `controlUrl` and `controlNodeId` in each deployer.json. The installer derives the control name from tailscale and assumes port 7470 on probe-only nodes; edit it for a nondefault port. The URL's hostname must be in the control plane's `listen.hostnames`. The worker verifies the endpoint with tailscaled **before sending its token**. Restart the control plane once after configuring the digest map and deployers. Check `nexus release` for fresh reports from every role.
+
+For example, these additions to control.json grant the laptop release-setting rights and two nodes reporting rights:
+
+```json
+"deployers": ["nLaptopCNTRL"],
+"deployKeys": {
+  "nFirebatCNTRL": "<64-character SHA-256 digest printed on firebat>",
+  "nTestbenchCNTRL": "<64-character SHA-256 digest printed on testbench>"
+}
+```
+
+Node polling goes directly to the control plane, not through a probe. This keeps root credentials out of the probe and reuses the existing mutual tailnet identity check. Node routes additionally require the root-only token, so pylon egress through its host cannot forge health reports or drain control. Node credentials cannot set a release. The in-pylon CLI bridge accepts only its closed operation schema; it cannot forward an arbitrary API route. Tests cover the bridge, a pylon presenting its host's allowed/deployer identity, spoofed forwarding headers, missing node tokens, and the wrong control endpoint. Do not run an unauthenticated proxy on an allowed deployer: tailnet identity authorizes that machine, not individual programs on it.
+
+### Order, drain, rollback and recovery
+
+The pure planner in `src/deploy/plan.ts` upgrades control before probes. A probe rechecks control's fresh healthy report before activation. Before upgrading control, its worker acquires a persistent 120-second drain lease, renewing it every 20 seconds during preparation. The API blocks start, send and retry while leased. A shared harness gate also blocks PR-watch submissions, counts submissions already entering, and lets their pending messages retry later. Idle is checked against committed harness live and queue documents, including parked runs, not the asynchronously updated registry activity flag. After the build, a final idle check seals the drain before the link moves: this hold does not expire until the worker reports success or finishes rollback. This prevents recovery after a hung worker from restarting over a turn that entered after lease expiry. Idle is checked again immediately before restart. An unsealed preparation lease expires if the worker dies; the fixed worker clears a sealed hold after recovery. If neither worker can run, the person must recover the service and release the hold manually.
+
+`drainTimeoutMs` defaults to 300000 (maximum 600000). At the deadline a still-running or queued turn refuses the release, releases the drain and reports failure; it is **not** cut off. The harness resumes after restart, but `src/harness/slice.test.ts` shows that an in-flight tool is interrupted rather than replayed. That is why timeout does not force a restart.
+
+The supervisor serializes both roles and manual installers with one root-owned lock. Git lives in `/opt/nexus/deployer/repo`, not a person's checkout. Build uses `deploy/release.sh`, producing `/opt/nexus/releases/<full commit>`, then the normal role installer performs its upgrade steps in preparation mode: no config or secret replacement, no independent link switch or restart. Control uses `control-current`; probe uses `current`. An atomic transaction records the old link before switching. The worker saves the service unit too, restarts, and requires both an active unit and the local API's `/v1/health` answering with the candidate process's commit. `healthTimeoutMs` defaults to 60000 and is bounded to 1000–60000; HTTP response bodies and service commands have deadlines.
+
+On failure, or recovery of an interrupted transaction, it restores the old link and service unit, restarts, checks the old service's health, and reports `rolled-back` with the journal tail. Failed rollback is reported as `failed`, not success. The on-disk journal uses atomic rename for process-interruption recovery; it is not a filesystem/power-loss guarantee. Database and harness data are not reverted: releases must keep storage migrations backward-compatible with the previous release. Reverting data would discard accepted user work; an incompatible migration can require manual recovery even after the code link is restored.
+
+GitHub reports this repository as **public**. HTTPS fetches need no credentials. Child commands receive a minimal environment with no inherited `GH_TOKEN`, root deployer token, npm config or git user config. If the repository becomes private, do not put credentials in its URL or run builds with GH_TOKEN: fetch-only credential support must be added before automatic upgrades will work.
+
+### The deployer upgrading itself
+
+`/opt/nexus/deployer/supervise.sh` and `deployer/bootstrap` are fixed recovery copies, refreshed only by the person's manual installer. Once a release passes service health, its worker must also complete `--check` (load its code and authenticate a read of desired state) before `deployer-current` selects it. Subsequent polls run that candidate worker under a 15-minute deadline. A crash or hang causes the fixed supervisor to reject that worker and immediately run the bootstrap worker, which recovers unfinished transactions before contacting control. The rejected worker is not promoted again; a later healthy commit can supply a fixed worker. The timer runs a single oneshot unit, and the shared lock also protects manual invocations. The systemd unit allows time for both the candidate and fallback.
+
+This does not make arbitrary merged root code safe: merged release code and npm lifecycle scripts are trusted. The fixed supervisor protects against broken workers, not a release deliberately deleting its recovery copy.
+
+The old scripts below remain the bootstrapping and recovery path. Before repairing a deployment manually, stop both `nexus-deployer.timer` and `nexus-deployer.service` (stopping a timer alone does not stop its running service), repair/install from a known-good checkout, then start the timer again. They preserve configs and secrets, and the manual path retains content-hash release directories. The pylon test environment cannot run node systemd, tailscaled or real VM hosts: rollback, polling and supervisor recovery are tested with temporary files, local HTTP/git servers and fake service commands. The actual one-time node installation and service restart must be verified by the person after merge.
 
 ## Install or upgrade a probe
 
