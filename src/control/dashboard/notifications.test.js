@@ -47,3 +47,26 @@ test("badge counts only actionable threads and caps its label", () => {
   assert.equal(badgeText(9), "9");
   assert.equal(badgeText(10), "9+");
 });
+
+
+test("a follow-up's final reply gets its own grace period even while attention stays reply", () => {
+  const events = [];
+  const update = coordinator((r) => events.push(r));
+  const reply = (lastReplyAt, working = false) => ({ ...row("reply", working), lastReplyAt });
+  update([row(null)], 0);
+  update([reply(100)], 100);
+  update([reply(100, true)], 1000);
+  update([reply(100, true)], 2200);
+  assert.deepEqual(events, []);
+  update([reply(3000)], 3000);
+  update([reply(3000)], 4999);
+  assert.deepEqual(events, []);
+  update([reply(3000)], 5000);
+  update([reply(3000)], 8000);
+  assert.deepEqual(events, [reply(3000)]);
+  // Even a follow-up entirely between polls is a distinct reply.
+  update([reply(9000)], 9000);
+  update([reply(9000)], 11000);
+  assert.deepEqual(events, [reply(3000), reply(9000)]);
+});
+

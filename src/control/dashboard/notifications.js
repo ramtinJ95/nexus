@@ -17,9 +17,11 @@ export function coordinator(notify) {
     }
     if (previous !== null) {
       for (const row of rows) {
-        if (previous.get(row.id)?.attention === row.attention) continue;
-        if (row.attention === "failed" || row.attention === "parked") notify(row);
-        else if (row.attention === "reply" && !row.agentTurnRunning) pending.set(row.id, now + 2000);
+        const before = previous.get(row.id);
+        const changed = before?.attention !== row.attention;
+        if (changed && (row.attention === "failed" || row.attention === "parked")) notify(row);
+        else if (row.attention === "reply" && !row.agentTurnRunning
+          && (changed || before?.lastReplyAt !== row.lastReplyAt || before?.agentTurnRunning)) pending.set(row.id, now + 2000);
       }
     }
     for (const [id, due] of pending) if (now >= due) {
@@ -29,3 +31,4 @@ export function coordinator(notify) {
     previous = next;
   };
 }
+
