@@ -40,6 +40,6 @@ export function releaseView(registry: Registry, self: string | undefined, now = 
   }) };
 }
 export async function resolveMain(): Promise<string> {
-  const result = await command("git", ["ls-remote", repository, "refs/heads/main"], "/tmp");
+  const result = await command("git", ["ls-remote", repository, "refs/heads/main"], "/tmp", 10_000);
   return commitSchema.parse(result.split(/\s/)[0]);
 }
