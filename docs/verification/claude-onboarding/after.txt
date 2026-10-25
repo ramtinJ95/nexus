@@ -1,0 +1,40 @@
+
+ ▐▛███▛█   Claude Code v2.1.308
+▝▜██████▀  Sonnet 5.5 · Claude API
+ ▝▝   ▝▝   /tmp/claude-test-checkout
+
+  Get to finished work sooner with Opus 5.5. Switch anytime with /model.
+
+❯ /pstack:poteto-mode say hello and stop
+
+● Hello. Stopping here as asked.
+
+✻ Baked for 3s · done 7:14 PM
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+❯ 
+───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  ⏵⏵ bypass permissions on (shift+tab to cycle)

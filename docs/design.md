@@ -184,6 +184,22 @@ An uncertain launch is not retried automatically, since starting two coding
 agents is worse than asking the person to inspect a possibly started session.
 The sandbox justifies bypassed permission prompts, including on resume. Existing
 secret injection supplies OAuth placeholders through login-shell environment.
+Before every launch/resume, merge Claude's empirically observed onboarding and
+trust state for the real checkout into its user files; retain credentials and
+unrelated keys and file modes. Already-seeded files are not written. When a
+write is needed, re-read before rename and re-merge changed content, up to five
+attempts; fail rather than replacing a repeatedly changing file. Trust only the
+pylon checkout, never a restored pane cwd, root or HOME. Theme and bypass acceptance live in settings.json on Claude
+2.1.308, while onboarding and project trust live in .claude.json.
+A worker is started only after a launch-specific UserPromptSubmit hook writes a
+local receipt. This avoids depending on best-effort network event delivery and
+cannot confuse another session's event with the worker's first submission.
+After Herdr startup, allow 30 seconds for the receipt. Missing proof leaves the
+pane open and records stalled state, pane text, thread.failed and failed attention.
+The launch fence still forbids automatic retries, including after interruption.
+Persist its session ID before launch so a late turn-started report can clear
+stalled attention without another session clearing it; retain the diagnostic
+in the event history.
 
 Claude hooks report lifecycle facts through the narrow host bridge. The probe
 supplies identity, validates the event, journals a bounded reconnect buffer and
