@@ -635,6 +635,21 @@ test("replies and prompts render their markdown, and every string in it stays te
   assert.equal(answer!.match(/<a /g)?.length, 2);
 });
 
+test("markdown nested past what a page shows renders the rest as escaped text instead of failing the page", async (t) => {
+  const s = await seeded(t);
+  const fix = await s.start("acme", "Fix checkout");
+  const replies = [
+    ">".repeat(10_000) + " <x>quoted</x>",
+    "- ".repeat(10_000) + "<x>listed</x>",
+  ];
+  s.fake.transcript(fix.id).messages.push(...replies.map((text) => assistant([{ type: "text", text }])));
+  const res = await s.call("GET", `/threads/${fix.id}`);
+  assert.equal(res.status, 200);
+  for (const word of ["quoted", "listed"]) assert.ok(res.text.includes(`&lt;x&gt;${word}&lt;/x&gt;`), `${word} shows, escaped`);
+  assert.ok(!res.text.includes("<x>"));
+  assert.ok((res.text.match(/<blockquote>/g)?.length ?? 0) < 100 && (res.text.match(/<li>/g)?.length ?? 0) < 100, "the nesting shown is bounded");
+});
+
 test("strings from humans and probes are escaped, never markup", async (t) => {
   const s = await seeded(t);
   const evil = await s.start("acme", `<img src=x onerror="alert(1)">`);
