@@ -7,9 +7,10 @@ import { linkedName, relayPorts, reservedPortMessage, reservedPorts } from "../p
 import { configSchema, type Service } from "./contracts.ts";
 import { checked, guestExists, serviceRunning, startService, stopService } from "./guest.ts";
 import { openPortal } from "./portals.ts";
-import { writeRelayMap } from "./relay.ts";
+import { noRelayStatus, readRelayStatus, relayLog, writeRelayMap } from "./relay.ts";
 import { existsError, shellQuote as q, saveJson } from "./storage.ts";
 
+const relayPortList = Array.from({ length: relayPorts.last - relayPorts.first + 1 }, (_, i) => relayPorts.first + i);
 const reference = /\$\{services\.([a-z0-9][a-z0-9-]{0,31})\.publicURL\}/g;
 type Entry = {
 	service: Service;
@@ -32,6 +33,8 @@ export type ServiceFact = {
 	port: number;
 	declared: boolean;
 	wantsPreview: boolean;
+	/** Why its preview has no route, while it has none. */
+	unrouted?: string;
 };
 const linkedSchema = z.array(z.number().int().min(1).max(65535));
 
@@ -59,16 +62,17 @@ export class GuestServices {
 	 * which ends that watch without a verdict.
 	 */
 	private watches = new Map<string, object>();
-	/** The relay port each routed port is served on. A port keeps its relay port while it stays routed. */
+	/** The relay port each previewed port is served on. A port keeps its relay port while it stays previewed. */
 	private relays = new Map<number, number>();
-	/**
-	 * The relay ports no route holds, least recently freed first. The relay may still forward a freed port to its old
-	 * app until its next read of the map, so a freed port is taken again only once every other one has been.
-	 */
-	private freeRelays = Array.from({ length: relayPorts.last - relayPorts.first + 1 }, (_, i) => relayPorts.first + i);
-	/** The last relay map written, and the write in flight, so writes land in the order their routes changed. */
+	/** The generation of the last relay map written, the last map, and the relay's last status. */
+	private generation = 0;
 	private relaysWritten = "";
-	private relayWrite: Promise<void> = Promise.resolve();
+	private relayStatus = noRelayStatus;
+	/** The ingress routes last set, and why each previewed port without one has none. */
+	private published: { prefix: string; port: number; stripPrefix: boolean }[] | undefined;
+	private unrouted = new Map<number, string>();
+	/** Map writes and status reads, one at a time, so a map lands, and is confirmed, in the order its routes changed. */
+	private relayQueue: Promise<void> = Promise.resolve();
 	private vm: VM;
 	private dir: string;
 	readonly configPath: string;
@@ -263,48 +267,98 @@ export class GuestServices {
 		await this.routes();
 		return entry;
 	}
-	/**
-	 * A route for each preview, a service's or a linked port's, pointing at the port's relay port rather than the port,
-	 * because the ingress dials only 127.0.0.1 and the relay reaches `::1` too (relay.ts). A service without a preview
-	 * needs no route, since its health is asked in the guest. The routes change at once, and the relay listens on a new
-	 * relay port within its next read of the map, 200 ms. A port that finds no free relay port, only one restored from
-	 * an earlier boot since roomFor refuses new ones, is logged and left unrouted rather than failing the boot.
-	 */
-	private async routes(): Promise<void> {
-		const routed = [
+	/** Each preview, a service's or a linked port's, by its ingress prefix. */
+	private previews(): { prefix: string; port: number }[] {
+		return [
 			...[...this.entries].flatMap(([name, entry]) => (entry.portal ? [{ prefix: `/${name}/`, port: entry.port }] : [])),
 			...[...this.attached.keys()].map((port) => ({ prefix: `/${linkedName(port)}/`, port })),
 		];
-		const ports = new Set(routed.map((route) => route.port));
-		for (const [port, relay] of this.relays)
-			if (!ports.has(port)) {
-				this.relays.delete(port);
-				this.freeRelays.push(relay);
-			}
+	}
+	/**
+	 * Gives each preview a relay port, tells the relay, and routes the preview to its relay port once the relay
+	 * confirms it carries that port to the preview's app (relay.ts). The ingress dials only 127.0.0.1 and the relay
+	 * reaches `::1` too. A service without a preview needs no route, since its health is asked in the guest. A dropped
+	 * preview's route goes before the relay hears that its relay port is free, and a relay port is routed again only
+	 * once the relay confirms its new app, so the ingress never reaches the wrong app. A preview that finds no free relay
+	 * port, only one restored from an earlier boot since roomFor refuses new ones, stays unrouted rather than failing
+	 * the boot, and takes the next relay port freed.
+	 */
+	private async routes(): Promise<void> {
+		const ports = new Set(this.previews().map((route) => route.port));
+		for (const port of this.relays.keys()) if (!ports.has(port)) this.relays.delete(port);
+		const taken = new Set(this.relays.values());
 		for (const port of ports) {
 			if (this.relays.has(port)) continue;
-			const relay = this.freeRelays.shift();
-			if (relay === undefined) console.log(`services: port ${port} is not routed, because ${this.full}`);
-			else this.relays.set(port, relay);
+			const relay = relayPortList.find((candidate) => !taken.has(candidate));
+			if (relay === undefined) {
+				console.log(`services: port ${port} is not routed, because ${this.full}`);
+				continue;
+			}
+			this.relays.set(port, relay);
+			taken.add(relay);
 		}
-		this.vm.setIngressRoutes(routed.flatMap((route) => {
-			const relay = this.relays.get(route.port);
-			return relay === undefined ? [] : [{ prefix: route.prefix, port: relay, stripPrefix: true }];
-		}));
+		this.publish();
 		const relays = new Map(this.relays);
-		const write = this.relayWrite.then(async () => {
+		await this.relayStep(async () => {
 			const json = JSON.stringify([...relays]);
-			if (json === this.relaysWritten) return;
-			await writeRelayMap(this.vm, relays);
-			this.relaysWritten = json;
+			if (json !== this.relaysWritten) {
+				await writeRelayMap(this.vm, ++this.generation, relays);
+				this.relaysWritten = json;
+			}
+			await this.confirm();
 		});
-		this.relayWrite = write.catch(() => undefined);
-		await write;
+	}
+	private relayStep(step: () => Promise<void>): Promise<void> {
+		const run = this.relayQueue.then(async () => {
+			await step();
+			this.publish();
+		});
+		this.relayQueue = run.catch(() => undefined);
+		return run;
+	}
+	/** Reads the relay's status until it has applied the last map, for at most 5 s. A preview it has not stays unrouted. */
+	private async confirm(): Promise<void> {
+		const deadline = Date.now() + 5000;
+		for (;;) {
+			this.relayStatus = await readRelayStatus(this.vm);
+			if (this.relayStatus.generation >= this.generation || Date.now() >= deadline) return;
+			await new Promise((accept) => setTimeout(accept, 100));
+		}
+	}
+	/**
+	 * Routes each preview whose relay port the relay's status shows carrying to its app. A status from before the last
+	 * map keeps only the routes already set, whose relay ports that map left as they were.
+	 */
+	private publish(): void {
+		const current = this.relayStatus.generation >= this.generation;
+		const routes: { prefix: string; port: number; stripPrefix: boolean }[] = [];
+		this.unrouted.clear();
+		for (const { prefix, port } of this.previews()) {
+			const relay = this.relays.get(port);
+			const confirmed =
+				relay !== undefined &&
+				(current
+					? this.relayStatus.bound[relay] === port
+					: !!this.published?.some((route) => route.prefix === prefix && route.port === relay));
+			if (confirmed) routes.push({ prefix, port: relay, stripPrefix: true });
+			else
+				this.unrouted.set(
+					port,
+					relay === undefined
+						? `the preview has no relay port, because ${this.full}. Unpublish another preview to free one`
+						: current && this.relayStatus.failed[relay] !== undefined
+							? `the relay cannot listen on its relay port 127.0.0.1:${relay}: ${this.relayStatus.failed[relay]}`
+							: `the relay has not yet confirmed its relay port 127.0.0.1:${relay}. Read ${relayLog} in the pylon if this lasts`,
+				);
+		}
+		if (JSON.stringify(routes) === JSON.stringify(this.published)) return;
+		this.vm.setIngressRoutes(routes);
+		this.published = routes;
 	}
 	private readonly full = `every relay port from ${relayPorts.first} to ${relayPorts.last} serves another preview`;
-	/** Refuses a new route that no relay port is free for, before anything is saved. */
+	/** Refuses a new preview that no relay port is free for, before anything is saved. */
 	private roomFor(port: number): void {
-		if (!this.relays.has(port) && this.freeRelays.length === 0)
+		if (!this.relays.has(port) && this.relays.size >= relayPortList.length)
 			throw new Error(`Port ${port} cannot be previewed, because ${this.full}. Unpublish one first`);
 	}
 	/** Previews a port that is already listening, unsupervised. Returns the name it is reported under. */
@@ -546,6 +600,10 @@ export class GuestServices {
 				const entry = await this.configure(name, config[name]!, true);
 				if (!wantsPreview(entry.service)) await this.start(name, entry, entry.service.timeoutMs);
 			}
+		// The relay may have confirmed a relay port since the routes last changed, or lost one.
+		await this.relayStep(async () => {
+			this.relayStatus = await readRelayStatus(this.vm);
+		});
 		const facts = await Promise.all(
 			names.flatMap((name) => {
 				const entry = this.entries.get(name);
@@ -572,7 +630,12 @@ export class GuestServices {
 			port: entry.port,
 			declared: entry.declared,
 			wantsPreview: wantsPreview(entry.service),
+			...(entry.portal ? this.unroutedFact(entry.port) : {}),
 		};
+	}
+	private unroutedFact(port: number): Pick<ServiceFact, "unrouted"> {
+		const unrouted = this.unrouted.get(port);
+		return unrouted === undefined ? {} : { unrouted };
 	}
 	private async linkedFact(port: number): Promise<ServiceFact> {
 		return {
@@ -581,6 +644,7 @@ export class GuestServices {
 			port,
 			declared: false,
 			wantsPreview: true,
+			...this.unroutedFact(port),
 		};
 	}
 	async adHoc(name: string, service: Service): Promise<ServiceFact[]> {

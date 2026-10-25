@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { mkdtemp, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
+import { appendFile, mkdtemp, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { createServer, request, type Server } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -42,20 +42,23 @@ async function until(what: string, check: () => Promise<boolean>) {
 	}
 }
 
-test("the relay carries a route's port to 127.0.0.1 or else ::1, follows its server across addresses without holding its port, lets a relay port go when the map drops it, and caps its log", async (t) => {
+test("the relay carries a route's port to 127.0.0.1 or else ::1, follows its server across addresses without holding its port, reports the relay ports it holds and those it cannot, lets a relay port go when the map drops it, and caps its log as it runs", async (t) => {
 	const dir = await mkdtemp(join(tmpdir(), "nexus-relay-"));
 	const map = join(dir, "relays.json");
+	const statusFile = join(dir, "relay-status.json");
 	const logFile = join(dir, "relay.log");
 	await writeFile(logFile, "x".repeat(1048577));
 	/** Written aside and renamed in, as writeRelayMap does. */
-	const relays = async (entries: Record<number, number>) => {
-		await writeFile(`${map}.new`, JSON.stringify(entries));
+	const relays = async (generation: number, entries: Record<number, number>) => {
+		await writeFile(`${map}.new`, JSON.stringify({ generation, relays: entries }));
 		await rename(`${map}.new`, map);
 	};
+	const status = async () => JSON.parse(await readFile(statusFile, "utf8").catch(() => '{"generation":0}')) as { generation: number; bound: Record<string, number>; failed: Record<string, string> };
+	const applied = (generation: number) => until(`the relay applies map ${generation}`, async () => (await status()).generation >= generation);
 	const v6 = await serve("::1", "v6");
 	const relayPort = await freePort();
-	await relays({ [relayPort]: v6.port });
-	const relay = spawn("python3", ["-c", relayScript, map, logFile], { stdio: ["ignore", "inherit", "inherit"] });
+	await relays(1, { [relayPort]: v6.port });
+	const relay = spawn("python3", ["-c", relayScript, map, statusFile, logFile], { stdio: ["ignore", "inherit", "inherit"] });
 	const logged = async (line: string) => (await readFile(logFile, "utf8")).includes(`${line}\n`);
 	const servers: Server[] = [v6];
 	t.after(async () => {
@@ -64,10 +67,26 @@ test("the relay carries a route's port to 127.0.0.1 or else ::1, follows its ser
 		await rm(dir, { recursive: true, force: true });
 	});
 
-	await until(`the relay port answers from the server on ::1`, async () => await get(relayPort) === "v6");
-	await until("the relay logs the port", () => logged(`relaying 127.0.0.1:${relayPort} to port ${v6.port}`));
-	assert.equal((await stat(`${logFile}.previous`)).size, 1048577, "a log past 1 MiB was moved aside");
+	await applied(1);
+	assert.deepEqual(await status(), { generation: 1, bound: { [relayPort]: v6.port }, failed: {} });
+	assert.equal(await get(relayPort), "v6", "the relay port answers from the server on ::1");
+	assert.ok(await logged(`relaying 127.0.0.1:${relayPort} to port ${v6.port}`));
+	assert.equal((await stat(`${logFile}.previous`)).size, 1048577, "a log past 1 MiB was moved aside at the start");
 	assert.ok((await stat(logFile)).size < 1024, "and a new one begun");
+
+	// Something else holds a relay port, as only root could in the guest, and the log passes 1 MiB while the relay runs.
+	const held = await serve("127.0.0.1", "held");
+	servers.push(held);
+	await appendFile(logFile, "y".repeat(1048577));
+	await relays(2, { [relayPort]: v6.port, [held.port]: v6.port });
+	await applied(2);
+	const second = await status();
+	assert.deepEqual(second.bound, { [relayPort]: v6.port }, "a relay port the relay cannot listen on is not reported as held");
+	assert.match(second.failed[held.port] ?? "", /in use/i);
+	assert.equal(await get(held.port), "held", "its holder still answers it");
+	assert.ok(await logged(`cannot relay 127.0.0.1:${held.port}: ${second.failed[held.port]}`));
+	assert.ok((await readFile(`${logFile}.previous`, "utf8")).endsWith("y".repeat(1048577)), "the running relay moved the full log aside before its next line");
+	assert.ok((await stat(logFile)).size < 1024);
 
 	const v4 = await serve("127.0.0.1", "v4", v6.port);
 	servers.push(v4);
@@ -80,7 +99,9 @@ test("the relay carries a route's port to 127.0.0.1 or else ::1, follows its ser
 	servers.push(moved);
 	assert.equal(await get(relayPort), "moved", "the server moved from ::1 to 0.0.0.0 on the same port, which the relay never held");
 
-	await relays({});
-	await until("the relay port is let go", async () => await get(relayPort) === "ECONNREFUSED");
-	await until("the relay logs that it let the port go", () => logged(`stopped relaying 127.0.0.1:${relayPort} to port ${v6.port}`));
+	await relays(3, {});
+	await applied(3);
+	assert.deepEqual(await status(), { generation: 3, bound: {}, failed: {} });
+	assert.equal(await get(relayPort), "ECONNREFUSED", "the relay port is let go");
+	assert.ok(await logged(`stopped relaying 127.0.0.1:${relayPort} to port ${v6.port}`));
 });

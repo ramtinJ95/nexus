@@ -176,7 +176,11 @@ export interface RunningFacts {
   attachedClients: number;
 }
 
-export interface ServiceFact { name: string; state: "starting" | "ready" | "failed" | "stopped"; port: number; declared: boolean; wantsPreview: boolean }
+/**
+ * `unrouted` says why a preview's port has no route into the pylon while it has none, such as a pylon VM relay port
+ * that something else holds (src/pylon-vm/relay.ts). A probe from before it sends none.
+ */
+export interface ServiceFact { name: string; state: "starting" | "ready" | "failed" | "stopped"; port: number; declared: boolean; wantsPreview: boolean; unrouted?: string }
 export interface ListeningFact { port: number }
 /** `unknown` is Herdr's word for a pane it cannot classify, which every plain shell is. */
 export type HerdrStatus = "working" | "idle" | "blocked" | "done" | "unknown";

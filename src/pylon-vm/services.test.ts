@@ -15,15 +15,31 @@ import { answersScript, GuestServices } from "./services.ts";
 
 /**
  * A VM whose ingress is never dialled here, the prefixes of the routes set on it and the port each points at, and the
- * relay maps written to its guest. Its guest has the services
+ * relay maps written to its guest, with `events` recording both in order. Its guest has the services
  * file `file` holds, none while undefined, and runs a service from its launch until its stop, unless `exits` holds,
  * as for a service whose cwd is missing. Every port listens while `listening` holds, every new port asked for is the
- * next from 41000, and every other command succeeds.
+ * next from 41000, and every other command succeeds. Its relay applies each map as it is written, unless `relay.held`
+ * holds, until `relay.apply()`, and cannot listen on the relay ports `relay.unbindable` names.
  */
 function fakeVm() {
 	const routes: string[][] = [];
 	const targets: Record<string, number>[] = [];
 	const relayMaps: Record<string, number>[] = [];
+	const events: string[] = [];
+	const relay = {
+		held: false,
+		unbindable: new Map<number, string>(),
+		map: { generation: 0, relays: {} as Record<string, number> },
+		status: undefined as string | undefined,
+		apply() {
+			const relays = Object.entries(relay.map.relays);
+			relay.status = JSON.stringify({
+				generation: relay.map.generation,
+				bound: Object.fromEntries(relays.filter(([listen]) => !relay.unbindable.has(Number(listen)))),
+				failed: Object.fromEntries(relays.flatMap(([listen]) => relay.unbindable.has(Number(listen)) ? [[listen, relay.unbindable.get(Number(listen))!]] : [])),
+			});
+		},
+	};
 	const running = new Set<string>();
 	const launches: string[] = [];
 	const scripts = new Map<string, string>();
@@ -37,13 +53,20 @@ function fakeVm() {
 		setIngressRoutes(set: { prefix: string; port: number }[]) {
 			routes.push(set.map((route) => route.prefix));
 			targets.push(Object.fromEntries(set.map((route) => [route.prefix, route.port])));
+			events.push(`route ${JSON.stringify(targets.at(-1))}`);
 		},
 		async exec(argv: string[], options: { stdout: Writable }) {
 			const command = argv[3]!;
 			let exitCode = 0;
 			const relayMap = /relays\.json\.new' && mv /.test(command) ? /printf '%s' '([^']*)'/.exec(command) : null;
-			if (relayMap) relayMaps.push(JSON.parse(relayMap[1]!));
-			if (command.startsWith("test -e")) exitCode = guest.file === undefined ? 1 : 0;
+			if (relayMap) {
+				relay.map = JSON.parse(relayMap[1]!);
+				relayMaps.push(relay.map.relays);
+				events.push(`map ${JSON.stringify(relay.map.relays)}`);
+				if (!relay.held) relay.apply();
+			}
+			if (command.startsWith("cat ") && command.includes("relay-status.json")) options.stdout.write(relay.status ?? "");
+			else if (command.startsWith("test -e")) exitCode = guest.file === undefined ? 1 : 0;
 			else if (command.includes("connect_ex")) options.stdout.write(guest.listening ? "True\n" : "False\n");
 			else if (command.includes("getsockname")) options.stdout.write(`${nextPort++}\n`);
 			else if (command.startsWith("test -f")) exitCode = running.has(service(command)) ? 0 : 1;
@@ -66,10 +89,10 @@ function fakeVm() {
 			},
 		},
 	};
-	return { vm: vm as unknown as VM, routes, targets, relayMaps, running, launches, scripts, guest };
+	return { vm: vm as unknown as VM, routes, targets, relayMaps, events, relay, running, launches, scripts, guest };
 }
 
-test("every route points at a relay port of Nexus's own, which the relay map carries to the routed port, a port keeps its relay port while it stays routed, and a freed one waits its turn", async (t) => {
+test("every route points at a relay port of Nexus's own, which the relay map carries to the routed port, a port keeps its relay port while it stays routed, and a freed one is taken again first", async (t) => {
 	const dir = await mkdtemp(join(tmpdir(), "nexus-services-"));
 	t.after(() => rm(dir, { recursive: true, force: true }));
 	const fake = fakeVm();
@@ -86,8 +109,50 @@ test("every route points at a relay port of Nexus's own, which the relay map car
 	await services.attach(3001);
 	assert.equal(fake.relayMaps.length, written, "an unchanged map is not written again");
 	await services.attach(3002);
-	assert.deepEqual(fake.relayMaps.at(-1), { 701: 3001, 702: 3002 }, "700 is not taken again while another is free, because the relay may still forward it to 3000");
+	assert.deepEqual(fake.relayMaps.at(-1), { 700: 3002, 701: 3001 }, "the lowest free relay port, since its route waits for the relay to confirm it");
+	assert.deepEqual(fake.targets.at(-1), { "/port-3001/": 701, "/port-3002/": 700 });
 	await assert.rejects(services.attach(700), { message: /^Port 700 is Nexus's own/ }, "a relay port is never previewed itself");
+});
+
+test("a route is set only once the relay confirms its relay port carries to its port, and a dropped route goes before the relay hears its relay port is free", async (t) => {
+	const dir = await mkdtemp(join(tmpdir(), "nexus-services-"));
+	t.after(() => rm(dir, { recursive: true, force: true }));
+	const fake = fakeVm();
+	const services = new GuestServices(fake.vm, dir, configPath, "/workspace/repo", "agent", {});
+	t.after(() => services.close());
+	fake.relay.held = true;
+	const attaching = services.attach(3000);
+	while (fake.relayMaps.length === 0) await delay(10);
+	await delay(300);
+	assert.deepEqual(fake.events, ["route {}", 'map {"700":3000}'], "nothing is routed while the relay has not applied the map");
+	fake.relay.apply();
+	await attaching;
+	assert.deepEqual(fake.events.at(-1), 'route {"/port-3000/":700}');
+
+	fake.relay.held = false;
+	fake.events.length = 0;
+	await services.detach(3000);
+	await services.attach(3001);
+	assert.deepEqual(fake.events, ["route {}", "map {}", 'map {"700":3001}', 'route {"/port-3001/":700}'], "700 leaves the ingress before the relay drops it, and is routed again only once the relay carries it to 3001");
+});
+
+test("a relay port the relay cannot listen on is never routed, and its preview says why until the relay can", async (t) => {
+	const dir = await mkdtemp(join(tmpdir(), "nexus-services-"));
+	t.after(() => rm(dir, { recursive: true, force: true }));
+	const fake = fakeVm();
+	const services = new GuestServices(fake.vm, dir, configPath, "/workspace/repo", "agent", {});
+	t.after(() => services.close());
+	fake.relay.unbindable.set(700, "[Errno 98] Address already in use");
+	await services.attach(3000);
+	assert.deepEqual(fake.targets.at(-1), {}, "something else holds 700, so the ingress must not reach it");
+	assert.deepEqual(await services.operate("status"), [{
+		name: "port-3000", state: "ready", port: 3000, declared: false, wantsPreview: true,
+		unrouted: "the relay cannot listen on its relay port 127.0.0.1:700: [Errno 98] Address already in use",
+	}]);
+	fake.relay.unbindable.clear();
+	fake.relay.apply();
+	assert.deepEqual(await services.operate("status"), [{ name: "port-3000", state: "ready", port: 3000, declared: false, wantsPreview: true }], "a status reads the relay's again");
+	assert.deepEqual(fake.targets.at(-1), { "/port-3000/": 700 });
 });
 
 test("a declaration that fixes one of Nexus's ports is refused, and a service without a preview takes no route", async (t) => {
@@ -150,6 +215,14 @@ test("a port past the relay's 100 is refused before anything is saved, and a wak
 	assert.equal(Object.keys(woken.targets.at(-1)!).length, 100);
 	assert.equal(woken.targets.at(-1)!["/port-3100/"], undefined);
 	assert.ok(logged.mock.calls.some((call) => call.arguments[0] === "services: port 3100 is not routed, because every relay port from 700 to 799 serves another preview"));
+	assert.equal(
+		(await again.operate("status")).find((fact) => fact.port === 3100)?.unrouted,
+		"the preview has no relay port, because every relay port from 700 to 799 serves another preview. Unpublish another preview to free one",
+		"its URL would answer 404, so it is not ready",
+	);
+	await again.detach(3000);
+	assert.equal(woken.targets.at(-1)!["/port-3100/"], 700, "it takes the next relay port freed");
+	assert.equal((await again.operate("status")).find((fact) => fact.port === 3100)?.unrouted, undefined);
 });
 
 test("a reserved port is refused, and a linked port is saved before it is acknowledged, so a retry after a failed save saves it, and a fresh boot routes it again", async (t) => {
