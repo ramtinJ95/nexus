@@ -7,6 +7,10 @@
  * hangs the terminal up, which detaches Herdr's client and keeps its session, and waits for the guest's process to
  * exit, so nothing is left running in the pylon once serveAttach resolves. A node that does not let it exit within
  * hangUpMs has its stream dropped, which frees the stream's slot and hangs the relay up from the probe's side.
+ *
+ * Keys wait in order for the relay to take them. Past maxQueuedKeys the socket stops being read until they drain, so
+ * a pylon that takes no keys holds a bounded amount of them here. A paused socket answers no pings either, so one
+ * that stays paused is dropped like a silent client.
  */
 import { setTimeout as sleep } from "node:timers/promises";
 import type { WebSocket } from "ws";
@@ -42,6 +46,8 @@ export interface AttachTiming {
 }
 export const attachTiming: AttachTiming = { pingMs: 15_000, waitMs: 120_000, pollMs: 1_000, hangUpMs: 10_000 };
 
+export const maxQueuedKeys = 1 << 20;
+
 /**
  * Serves one attach until it ends, and never rejects. Each end is one final message and a close, unless the client
  * is the one that left. `signal` aborts with an Ending.
@@ -51,6 +57,7 @@ export async function serveAttach(ws: WebSocket, door: PylonDoor, opening: Attac
   let terminal: Terminal | null = null;
   /** Keys and resizes in the order they came. A write fails only once the relay is gone, which `done` reports. */
   let input = Promise.resolve();
+  let queued = 0;
   const left = new AbortController();
   const ended = AbortSignal.any([signal, left.signal]);
   // ws closes the link after an error, and the close hangs up.
@@ -68,7 +75,13 @@ export async function serveAttach(ws: WebSocket, door: PylonDoor, opening: Attac
     if (binary) {
       // Keys before `attached` have no terminal to go to. ws hands binary over as one Buffer.
       const keys = data as Buffer;
-      if (terminal !== null) input = input.then(() => terminal!.write(keys)).catch(() => undefined);
+      if (terminal === null) return;
+      queued += keys.length;
+      if (queued > maxQueuedKeys) ws.pause();
+      input = input.then(() => terminal!.write(keys)).catch(() => undefined).finally(() => {
+        queued -= keys.length;
+        if (queued <= maxQueuedKeys && ws.isPaused) ws.resume();
+      });
       return;
     }
     let message: ReturnType<typeof parseClientMessage>;
@@ -134,6 +147,8 @@ export async function serveAttach(ws: WebSocket, door: PylonDoor, opening: Attac
     await finish({ type: "error", kind: "failed", message: (err as Error).message });
   } finally {
     clearInterval(ping);
+    // A paused socket would not read the client's answer to the close.
+    ws.resume();
   }
 
   async function waitForTerminal(): Promise<Waited> {

@@ -8,7 +8,7 @@ import { WebSocket, WebSocketServer, type ClientOptions } from "ws";
 import { encodeMessage, type AttachRequest } from "../attach-wire.ts";
 import { terminalSize, type Terminal } from "../guest-terminal.ts";
 import type { StreamEnd } from "../protocol.ts";
-import { serveAttach, type AttachTiming, type Ending, type Look, type PylonDoor } from "./attach.ts";
+import { maxQueuedKeys, serveAttach, type AttachTiming, type Ending, type Look, type PylonDoor } from "./attach.ts";
 
 const fast: AttachTiming = { pingMs: 60_000, waitMs: 5_000, pollMs: 10, hangUpMs: 5_000 };
 const opening: AttachRequest = { size: terminalSize(100, 30), term: "xterm-256color" };
@@ -201,6 +201,24 @@ test("a terminal that does not end after its hang-up is dropped after hangUpMs, 
   assert.equal(await Promise.race([a.served.then(() => "served"), sleep(2_000, "still serving")]), "served");
   assert.deepEqual(program.calls, [["hangUp"], ["abort"]]);
   assert.deepEqual(await program.terminal.done, { kind: "lost" });
+});
+
+test("keys the pylon does not take stop the socket being read once they pass maxQueuedKeys, and all arrive in order once it takes them", async () => {
+  const program = fakeTerminal();
+  const taking = Promise.withResolvers<void>();
+  program.keys.taking = taking.promise;
+  const a = await attach(fakeDoor([program]).door);
+  await a.messages(1);
+  const chunk = 64 * 1024;
+  const chunks = 8 * maxQueuedKeys / chunk;
+  for (let i = 0; i < chunks; i++) a.client.send(Buffer.alloc(chunk, i));
+  await sleep(200);
+  assert.ok(a.client.bufferedAmount > chunks * chunk - 2 * maxQueuedKeys, `the control plane read all but ${a.client.bufferedAmount} bytes`);
+  taking.resolve();
+  for (const deadline = Date.now() + 5_000; program.keys.taken < chunks * chunk && Date.now() < deadline;) await sleep(20);
+  assert.deepEqual(program.calls, Array.from({ length: chunks }, (_, i) => ["paste", i, chunk]));
+  program.exit(0);
+  await a.served;
 });
 
 test("a client that stops answering pings is dropped, which hangs up", async () => {
