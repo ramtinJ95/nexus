@@ -204,6 +204,18 @@ a.link { color: var(--accent); }
 .msg.agent { font-size: 15px; line-height: 1.6; color: var(--text); }
 .msg code { background: var(--code-bg); padding: 1px 4px; border-radius: 4px; font-size: 13px; }
 .msg pre.code { white-space: pre; overflow: auto; margin: 6px 0; padding: 10px 12px; background: var(--code-bg); border-radius: 8px; font-size: 12.5px; line-height: 1.55; }
+:is(.msg .text, .t-text) :where(p, ul, ol, blockquote, hr, .md-h) { margin: 0.6em 0; }
+:is(.msg .text, .t-text) > :first-child { margin-top: 0; }
+:is(.msg .text, .t-text) > :last-child { margin-bottom: 0; }
+:is(.msg .text, .t-text) li > * { margin: 0; }
+:is(.msg .text, .t-text) li + li { margin-top: 0.2em; }
+:is(.msg .text, .t-text) :where(ul, ol) { padding-left: 1.4em; }
+:is(.msg .text, .t-text) blockquote { padding-left: 12px; border-left: 3px solid var(--line); color: var(--text-2); }
+:is(.msg .text, .t-text) hr { border: 0; border-top: 1px solid var(--line); }
+:is(.msg .text, .t-text) a.link { text-decoration: underline; text-underline-offset: 2px; }
+.md-h { font-size: 1em; font-weight: 600; line-height: 1.4; }
+h3.md-h { font-size: 1.15em; }
+h4.md-h { font-size: 1.07em; }
 .msg.user { align-self: flex-end; max-width: 82%; background: var(--raised); border-radius: 14px; padding: 10px 16px; font-size: 15px; line-height: 1.55; }
 .msg-who { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
 .msg.user.queued { background: transparent; border: 1px dashed var(--line); color: var(--text-2); }

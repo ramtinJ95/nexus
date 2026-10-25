@@ -501,11 +501,16 @@ test("a thread page's stream sends its conversation, then only the text that gre
 
   transcript.docs["pi.live"] = live("Half an <answer>", "compiling\nlinking\n");
   s.fake.commit(fix.id);
-  assert.deepEqual(await stream.next(), { grow: [[0, "2 lines"], [1, "compiling\nlinking\n"], [2, 'Half an &lt;answer&gt;<span class="caret" aria-hidden="true"></span>']] },
+  assert.deepEqual(await stream.next(), { grow: [[0, "2 lines"], [1, "compiling\nlinking\n"], [2, '<p>Half an &lt;answer&gt;<span class="caret" aria-hidden="true"></span></p>']] },
     "the line count, the output and the answer grow in place, escaped as the page escapes them");
   transcript.docs["pi.live"] = live("Half an <answer> and more", "compiling\nlinking\n");
   s.fake.commit(fix.id);
-  assert.deepEqual(await stream.next(), { grow: [[2, 'Half an &lt;answer&gt; and more<span class="caret" aria-hidden="true"></span>']] }, "only the parts that grew");
+  assert.deepEqual(await stream.next(), { grow: [[2, '<p>Half an &lt;answer&gt; and more<span class="caret" aria-hidden="true"></span></p>']] }, "only the parts that grew");
+  transcript.docs["pi.live"] = live("Half an <answer> and more\n\n- **one**\n```sh\nnpm te <!--/grow-->", "compiling\nlinking\n");
+  s.fake.commit(fix.id);
+  assert.deepEqual(await stream.next(), {
+    grow: [[2, '<p>Half an &lt;answer&gt; and more</p><ul><li><p><strong>one</strong></p></li></ul><pre class="code">npm te &lt;!--/grow--&gt;<span class="caret" aria-hidden="true"></span></pre>']],
+  }, "markdown blocks grow in place, an open fence is code so far, the caret trails the last character, and text cannot close the part");
 
   transcript.messages.push(result("c1", "built"), assistant([{ type: "text", text: "Built." }]));
   transcript.docs["pi.live"] = {};
@@ -600,6 +605,34 @@ test("a conversation that cannot be read says why, and the rest of the page stil
   assert.equal(res.status, 200);
   assert.match(conversationOf(res.text).text, /The conversation could not be read: the harness has no conversation for thread x$/);
   assert.match(textOf(sectionOf(res.text, "pylon-h")), /Desired running/);
+});
+
+test("replies and prompts render their markdown, and every string in it stays text", async (t) => {
+  const s = await seeded(t);
+  const fix = await s.start("acme", "Fix checkout");
+  const reply = [
+    "## Plan", "", "Some **bold**, __strong__, *soft* and _soft_ words, with snake_case_name, __init__.py beside my_var_ and 2*3*4 as typed.",
+    "", "- one", "- two", "  - nested", "", "3. third", "", "4. fourth", "", "> quoted", "", "---", "",
+    "See [the docs](https://example.com/a?b=1&c=2), not [this](javascript:alert(1)) or [that](file:///etc/passwd).",
+    "", "An odd ` count leaves `this` as typed.", "", "Run `npm test`:", "```sh", "npm test -- <all> **not bold**", "```",
+    "**<script>alert(1)</script>** [<img src=x>](https://example.com/\"onclick)",
+  ].join("\n");
+  s.fake.transcript(fix.id).messages.push({ role: "user", content: "First line\nsecond *line*\n\n- a list", timestamp: 0 }, assistant([{ type: "text", text: reply }]));
+  const html = (await s.call("GET", `/threads/${fix.id}`)).text;
+  const [prompt, answer] = [...html.matchAll(/<div class="text">([\s\S]*?)<\/div><\/div>/g)].map((m) => m[1]!);
+  const blocks = (markup: string) => markup.replace(/<\/?p>/g, "");
+
+  assert.equal(blocks(prompt!), "First line\nsecond <em>line</em><ul><li>a list</li></ul>", "the person's prompt keeps its lines and renders its markdown");
+  assert.ok(answer!.startsWith('<h4 class="md-h">Plan</h4>'), "a heading stays below the page's own");
+  assert.ok(answer!.includes("Some <strong>bold</strong>, <strong>strong</strong>, <em>soft</em> and <em>soft</em> words, with snake_case_name, __init__.py beside my_var_ and 2*3*4 as typed."),
+    "markers inside a word stay as typed");
+  assert.ok(blocks(answer!).includes("<ul><li>one</li><li>two<ul><li>nested</li></ul></li></ul><ol start=\"3\"><li>third</li><li>fourth</li></ol><blockquote>quoted</blockquote><hr>"));
+  assert.ok(answer!.includes('<a class="link" href="https://example.com/a?b=1&amp;c=2" target="_blank" rel="noopener noreferrer">the docs</a>'));
+  assert.ok(answer!.includes(", not [this](javascript:alert(1)) or [that](file:///etc/passwd)."), "a link to any other scheme stays text");
+  assert.ok(answer!.includes("<p>An odd ` count leaves `this` as typed.</p><p>Run <code>npm test</code>:</p>"));
+  assert.ok(answer!.includes('<pre class="code">npm test -- &lt;all&gt; **not bold**</pre>'), "a fenced block is code, as written");
+  assert.ok(answer!.endsWith('<strong>&lt;script&gt;alert(1)&lt;/script&gt;</strong> <a class="link" href="https://example.com/&quot;onclick" target="_blank" rel="noopener noreferrer">&lt;img src=x&gt;</a></p>'));
+  assert.equal(answer!.match(/<a /g)?.length, 2);
 });
 
 test("strings from humans and probes are escaped, never markup", async (t) => {
