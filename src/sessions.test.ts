@@ -34,6 +34,7 @@ function herdrUp(overrides: Record<string, (argv: readonly string[]) => ExecRepl
     if (sub === "workspace create") return created("w1", "w1:p1");
     if (sub === "agent start") return agentStarted;
     if (sub === "workspace close") return herdrOk({ type: "ok" });
+    if (sub === "pane process-info") return processInfo({})(argv);
     if (sub === "pane read") return herdrOk({ type: "pane_read", read: { text: "user@pylon:~$ " } });
     throw new Error(`unscripted herdr ${argv.join(" ")}`);
   });
@@ -214,7 +215,7 @@ test("Herdr's own report of a Claude Code session wins over its command line, wh
   const snapshot = herdrSnapshot([{ id: "w1", label: "review" }], [herdrPane("w1:p1", "w1", "claude", "idle", { kind: "id", value: "after-clear" })]);
   const guest = herdrUp({ "api snapshot": () => herdrOk(snapshot) });
   assert.deepEqual((await recordSessions(guest))!.map((r) => r.harnessSessionId), ["after-clear"]);
-  assert.ok(!guest.herdrCalls().includes("pane process-info"), "a reported ID needs no command line");
+  assert.equal(guest.herdrCalls().filter((c) => c === "pane process-info").length, 1, "only the explicit model is read from the command line");
 });
 
 test("recording with no Herdr server leaves the last sessions file in place", async () => {
@@ -595,4 +596,44 @@ test("resuming a pane at root or HOME seeds only the pylon checkout", async () =
     assert.equal((await relaunchSessions(guest))[0]!.result, "relaunched");
     assert.deepEqual(guest.execs.filter((argv) => argv[2] === seedClaudeState).map((argv) => argv[3]), ["/home/user/workspace/repo"]);
   }
+});
+
+
+test("a readiness timeout after submission is started and never closes the busy pane", async () => {
+  const guest = herdrUp({ "agent start": () => herdrError("timeout", "timed out waiting for agent startup") });
+  assert.equal(await openSession(guest, { harness: "claude-code", title: "worker", cwd: "/home/user/workspace/repo", prompt: "work", model: "custom-model" }), "w1:p1");
+  assert.equal(guest.herdrCalls().includes("workspace close"), false);
+  assert.equal(guest.herdrCalls().filter((c) => c === "agent start").length, 1);
+  const start = guest.execs.find((a) => a[3] === "agent")!;
+  assert.equal(start[start.indexOf("--model") + 1], "custom-model");
+});
+
+test("a lost receipt with a running busy Claude also preserves the launch", async () => {
+  const guest = herdrUp({
+    "agent start": () => herdrError("timeout", "timed out waiting for agent startup"),
+    "pane process-info": processInfo({ "w1:p1": ["claude"] }),
+    "api snapshot": () => herdrOk(herdrSnapshot([{ id: "w1", label: "worker" }], [herdrPane("w1:p1", "w1", "claude", "working")])),
+  }, true, false);
+  assert.equal(await openSession(guest, { harness: "claude-code", title: "worker", cwd: "/home/user/workspace/repo", prompt: "work" }), "w1:p1");
+  assert.equal(guest.herdrCalls().includes("workspace close"), false);
+});
+
+test("a receipt read failure preserves the pane rather than rolling back uncertain work", async () => {
+  const base = herdrUp();
+  const guest = { ...base, exec: async (...args: Parameters<typeof base.exec>) => {
+    if (args[0][3] === "claude-submitted") throw new Error("guest disconnected");
+    return base.exec(...args);
+  } };
+  await assert.rejects(openSession(guest, { harness: "claude-code", title: "worker", cwd: "/home/user/workspace/repo", prompt: "work" }), /Claude launch stalled/);
+  assert.equal(base.herdrCalls().includes("workspace close"), false);
+});
+
+test("an explicit Claude model is recorded and passed on checkpoint relaunch", async () => {
+  const records: SessionRecord[] = [{ herdrPane: "w1:p1", harness: "claude-code", title: "review", cwd: "/home/user", harnessSessionId: "aaaa", model: "custom-model" }];
+  const guest = pylon(records, []);
+  await relaunchSessions(guest);
+  const start = guest.execs.find((a) => a[3] === "agent" && a[4] === "start")!;
+  assert.equal(start[start.indexOf("--model") + 1], "custom-model");
+  const recorded = await recordSessions(guest);
+  assert.equal(recorded![0]!.model, "custom-model");
 });
