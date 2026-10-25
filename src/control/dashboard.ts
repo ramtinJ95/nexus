@@ -653,7 +653,7 @@ type UserItem = Extract<Item, { kind: "user" }>;
 type PromptFrom = PromptSource | "pr-watch";
 /** How a bubble names who a message came from. A person's is said only to a screen reader, as the bubble's side shows it. */
 const promptLabel: Record<PromptFrom, string> = {
-  person: "You", "pr-watch": "Nexus PR watch", task: "Background task", command: "Slash command", shell: "Shell command", other: "Claude Code",
+  person: "You", "pr-watch": "Nexus PR watch", command: "Slash command", other: "Claude Code",
 };
 
 const contentText = (content: UserMessage["content"]) => typeof content === "string" ? content

@@ -12,8 +12,11 @@
 import type { OpenPipe } from "./checkout-files.ts";
 import type { ByteStream, StreamEnd } from "./protocol.ts";
 
-/** Who a prompt came from: the person, a finished background task, a slash command, a `!` shell command, or something else, such as a plugin. */
-export type PromptSource = "person" | "task" | "command" | "shell" | "other";
+/**
+ * Who a prompt came from: the person, a slash command, or something else, such as a plugin. A finished background
+ * task is a `task` entry and a `!` shell command a `tool` entry, not prompts.
+ */
+export type PromptSource = "person" | "command" | "other";
 
 export type ClaudeEntry =
   | { kind: "prompt"; at: number; text: string; from: PromptSource }
@@ -255,6 +258,8 @@ const forms = table<Form>({
   "task-notification": (text, _r, at) => [task(text, at)],
 });
 
+const personForms = table<Form>({ "command-name": personCommand, "command-message": personCommand });
+
 const blocks = table<Block>({
   text: (block, at, tone) => {
     const text = str(block.text, "text");
@@ -273,10 +278,12 @@ function userRecord(r: Fields, at: number): ClaudeEntry[] {
   // The summary Claude Code writes for itself after a compaction, which is long and not the person's.
   if (r.isCompactSummary === true) return [notice(at, "info", "Claude continues from a summary of the earlier conversation")];
   const content = fields(r.message, "message").content;
-  // The person's own words are a prompt whatever they hold, so typing a tag such as <bash-input> forges nothing.
+  // The person's own words are a prompt whatever they hold, so typing a tag such as <bash-input> forges nothing. A slash
+  // command the person typed, such as the worker's first `/poteto-mode` prompt, is recorded in its command form.
   const from = isFields(r.origin) && r.origin.kind === "human" ? "person" : "other";
   if (typeof content === "string") {
-    const form = from === "person" ? undefined : forms.get(leadingTag(content));
+    const tag = leadingTag(content);
+    const form = from === "person" ? personForms.get(tag) : forms.get(tag);
     return form === undefined ? [prompt(at, content, from)] : form(content, r, at);
   }
   // Claude's metadata for a subagent it started in the background, which tells Claude not to show it.
@@ -314,6 +321,11 @@ function command(text: string, _r: Fields, at: number): ClaudeEntry[] {
   if (name === null) throw new Error("a command names none");
   const args = inner(text, "command-args")?.trim() ?? "";
   return [prompt(at, args === "" ? name.trim() : `${name.trim()} ${args}`, "command")];
+}
+
+/** The person's slash command, as they typed it: a prompt from the person, not from Claude Code. */
+function personCommand(text: string, r: Fields, at: number): ClaudeEntry[] {
+  return command(text, r, at).map((entry) => entry.kind === "prompt" ? { ...entry, from: "person" } : entry);
 }
 
 function task(text: string, at: number): ClaudeEntry {

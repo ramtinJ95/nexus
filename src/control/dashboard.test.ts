@@ -881,7 +881,7 @@ test("a Claude worker that works shows its turn's call running, the turn's clock
     { kind: "tool", at: 2, id: "old", name: "Bash", input: { command: "sleep 1" } },
     { kind: "turn", at: 3, durationMs: 1_000 },
     { kind: "prompt", at: Date.now() - 72_000, text: "Run the tests", from: "person" },
-    { kind: "prompt", at: Date.now(), text: "A background task finished", from: "task" },
+    { kind: "prompt", at: Date.now(), text: "/compact", from: "command" },
     { kind: "tool", at: 4, id: "t1", name: "Bash", input: { command: "npm test" } },
   ]);
   s.observe(thread);
@@ -895,7 +895,7 @@ test("a Claude worker that works shows its turn's call running, the turn's clock
     "› Bash sleep 1 no result sleep 1 No output.",
     "Worked for 1s.",
     "You Run the tests",
-    "Background task A background task finished",
+    "Slash command /compact",
     "Ran a command 1 running ›",
     "› Bash npm test running npm test No output yet.",
   ], "only a call of the running turn runs");

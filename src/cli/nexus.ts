@@ -165,7 +165,7 @@ function conversationText(view: ConversationView): string {
 }
 
 /** How a prompt's first line names who it came from. A person's is not named. */
-const promptLabel: Record<PromptSource, string> = { person: "", task: "[background task] ", command: "[slash command] ", shell: "[shell command] ", other: "[Claude Code] " };
+const promptLabel: Record<PromptSource, string> = { person: "", command: "[slash command] ", other: "[Claude Code] " };
 
 /**
  * A Claude worker's transcript: each prompt, reply, notice and task, and each tool call on one line with how it

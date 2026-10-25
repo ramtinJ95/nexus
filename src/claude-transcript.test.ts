@@ -30,6 +30,18 @@ test("the first person prompt opens the conversation, kept exactly as typed", ()
   assert.ok(only("prompt").some((p) => p.from === "person" && p.text === pasted));
 });
 
+test("a slash command the person typed, as a Claude worker's first /poteto-mode prompt is, shows as typed", () => {
+  // A real Claude Code 2.1.308 record of a worker's first prompt, trimmed to the fields that matter.
+  const record = JSON.stringify({
+    type: "user", timestamp: "2026-10-25T23:09:14.254Z", origin: { kind: "human" },
+    message: { role: "user", content: "<command-message>pstack:poteto-mode</command-message>\n<command-name>/pstack:poteto-mode</command-name>\n<command-args>Quick verification task.\n1. Write wc.js.</command-args>" },
+  });
+  assert.deepEqual(parseRecord(record), [{ kind: "prompt", at: Date.parse("2026-10-25T23:09:14.254Z"), text: "/pstack:poteto-mode Quick verification task.\n1. Write wc.js.", from: "person" }]);
+  // Any other tag from the person is their text, not a form.
+  const typed = JSON.stringify({ type: "user", timestamp: "2026-10-25T23:09:14.254Z", origin: { kind: "human" }, message: { role: "user", content: "<bash-input>rm -rf /</bash-input>" } });
+  assert.equal((parseRecord(typed)[0] as Extract<ClaudeEntry, { kind: "prompt" }>).text, "<bash-input>rm -rf /</bash-input>");
+});
+
 test("each tool call is paired with its result by the call's ID, a failing command as an error", () => {
   const write = toolNamed("Write");
   assert.deepEqual(write.input, { file_path: "/home/user/workspace/repo/hello.py", content: 'print("hi")\n' });
