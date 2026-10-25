@@ -12,7 +12,7 @@ import { openRegistry, type Thread } from "./registry.ts";
 import type { JobId, NodeName, PylonObservation, ServiceFact, TailnetNodeId } from "../protocol.ts";
 import { githubTokenGrant } from "../project.ts";
 import type { AssistantMessage, Message, ToolCall } from "@earendil-works/pi-ai";
-import type { ClaudeEntry } from "../claude-transcript.ts";
+import { transcriptStart, type ClaudeEntry } from "../claude-transcript.ts";
 
 const node = "rj-firebat" as NodeName;
 const laptop = "nLAPTOP" as TailnetNodeId;
@@ -869,7 +869,7 @@ async function claudeThread(s: Awaited<ReturnType<typeof seeded>>, entries: Clau
   assert.equal(res.status, 201, res.text);
   const thread = JSON.parse(res.text) as Thread;
   s.registry.setClaudeWorker(thread.id, "/poteto-mode count the lines", "started", undefined, "s1");
-  assert.ok(s.registry.appendClaudeRead(thread.id, { session: "s1", from: { offset: 0, skipping: false }, entries, cursor: { offset: 1, skipping: false }, reset: false, readAt }));
+  assert.ok(s.registry.appendClaudeRead(thread.id, { session: "s1", from: transcriptStart, entries, cursor: { ...transcriptStart, offset: 1 }, reset: false, readAt }));
   return thread;
 }
 

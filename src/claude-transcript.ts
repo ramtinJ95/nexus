@@ -9,6 +9,7 @@
  * copies and context attachments, are known and left out. Every other record shape the parser does not know stays
  * visible as a `record` entry, so a new Claude Code version shows something rather than nothing.
  */
+import { createHash } from "node:crypto";
 import type { OpenPipe } from "./checkout-files.ts";
 import type { ByteStream, StreamEnd } from "./protocol.ts";
 
@@ -52,8 +53,16 @@ export interface ClaudeConversation {
   working: boolean;
 }
 
-/** Where a reader is in the file. `skipping` means a record longer than maxRecordBytes is being passed over. */
-export interface TranscriptCursor { offset: number; skipping: boolean }
+/**
+ * Where a reader is in the file. `skipping` means a record longer than maxRecordBytes is being passed over. `before`
+ * is the SHA-256 of the up to beforeBytes just before `offset`, which a file replaced by another does not match.
+ */
+export interface TranscriptCursor { offset: number; skipping: boolean; before: string }
+
+/** Claude's records end alike, with its cwd, session, version and branch, so the check spans whole records. */
+const beforeBytes = 4 << 10;
+const sha256 = (bytes: Uint8Array) => createHash("sha256").update(bytes).digest("hex");
+export const transcriptStart: TranscriptCursor = { offset: 0, skipping: false, before: sha256(new Uint8Array()) };
 
 export const maxEntries = 3000;
 /** The most one read takes from the file. A record longer than this is skipped, and a `record` entry says so. */
@@ -65,18 +74,20 @@ export const textLimits = { prompt: 32 << 10, reply: 64 << 10, input: 4 << 10, o
 export const claudeProjects = "/home/user/.claude/projects";
 /** Far longer than reading maxRecordBytes of a local file takes, even on a busy pylon. */
 export const transcriptDeadlineMs = 20_000;
-/** The header line and one read's bytes. A reply longer than this is not the script's. */
-const maxReplyBytes = maxRecordBytes + 64;
+/** The header line, the bytes before the cursor and one read's bytes. A reply longer than this is not the script's. */
+const maxReplyBytes = 64 + beforeBytes + maxRecordBytes;
 
 /** One read's result. `reset` means the file was replaced, so `entries` start from its beginning and replace any read before. */
 export interface TranscriptRead { entries: ClaudeEntry[]; cursor: TranscriptCursor; more: boolean; reset: boolean }
 
 /**
- * Prints the transcript's size and the offset this read starts at, then at most $3 bytes from there. A file smaller
- * than the cursor's offset was replaced, so the read starts over at 0; one replaced by a file at least as long is
- * not told apart. Exits 3 when no project holds the session's transcript.
+ * Prints the transcript's size, the offset this read starts at and how many bytes before it follow, then those bytes
+ * and at most $3 bytes from the offset. A file smaller than the cursor's offset, or whose $5 bytes before it do not
+ * hash to $4, was replaced, so the read starts over at 0. Exits 3 when no project holds the session's transcript.
  */
-const readScript = 'for f in "$1"/*/"$0".jsonl; do [ -e "$f" ] || continue; size=$(($(wc -c < "$f"))); start=$2; [ "$size" -lt "$start" ] && start=0; echo "$size $start"; tail -c +$((start + 1)) "$f" | head -c "$3"; exit 0; done; exit 3';
+const readScript = `for f in "$1"/*/"$0".jsonl; do [ -e "$f" ] || continue; size=$(($(wc -c < "$f"))); start=$2; n=$((start < $5 ? start : $5))
+{ [ "$size" -lt "$start" ] || [ "$(tail -c +$((start - n + 1)) "$f" | head -c $n | sha256sum)" != "$4  -" ]; } && start=0 n=0
+echo "$size $start $n"; tail -c +$((start - n + 1)) "$f" | head -c $((n + $3)); exit 0; done; exit 3`;
 
 /**
  * Reads the session's transcript from `cursor` over one raw pipe and parses the complete lines it gets. Null when the
@@ -85,18 +96,23 @@ const readScript = 'for f in "$1"/*/"$0".jsonl; do [ -e "$f" ] || continue; size
  */
 export async function readTranscript(open: OpenPipe, session: string, cursor: TranscriptCursor, projects = claudeProjects, deadlineMs = transcriptDeadlineMs): Promise<TranscriptRead | null> {
   if (!/^[A-Za-z0-9-]{1,200}$/.test(session)) throw new Error(`${JSON.stringify(session.slice(0, 200))} is not a Claude Code session ID`);
-  const { end, out } = await drained(await open(["sh", "-c", readScript, session, projects, String(cursor.offset), String(maxRecordBytes)]), deadlineMs);
+  const { end, out } = await drained(await open(["sh", "-c", readScript, session, projects, String(cursor.offset), String(maxRecordBytes), cursor.before, String(beforeBytes)]), deadlineMs);
   if (end.kind === "lost") throw new Error("the pipe to the pylon was lost before the transcript was read");
   if (end.code === 3) return null;
   if (end.code !== 0) throw new Error(`reading the Claude Code transcript exited ${end.code}`);
   const newline = out.indexOf(0x0a);
-  const header = newline < 0 ? null : /^(\d{1,15}) (\d{1,15})$/.exec(out.subarray(0, newline).toString("latin1"));
-  const body = out.subarray(newline + 1);
+  const header = newline < 0 ? null : /^(\d{1,15}) (\d{1,15}) (\d{1,15})$/.exec(out.subarray(0, newline).toString("latin1"));
   const size = Number(header?.[1]);
   const start = Number(header?.[2]);
-  if (header === null || body.length > maxRecordBytes || (start !== cursor.offset && start !== 0)) throw new Error("the transcript reader's reply is malformed");
+  const preceding = out.subarray(newline + 1, newline + 1 + Number(header?.[3]));
+  const body = out.subarray(newline + 1 + preceding.length);
+  if (header === null || preceding.length !== Math.min(start, beforeBytes) || body.length > maxRecordBytes || (start !== cursor.offset && start !== 0)) {
+    throw new Error("the transcript reader's reply is malformed");
+  }
   const reset = start !== cursor.offset;
-  return { ...consumed(body, { offset: start, skipping: !reset && cursor.skipping }), more: size > start + body.length, reset };
+  const next = consumed(body, { offset: start, skipping: !reset && cursor.skipping });
+  const before = sha256(Buffer.concat([preceding, body.subarray(0, next.cursor.offset - start)]).subarray(-beforeBytes));
+  return { entries: next.entries, cursor: { ...next.cursor, before }, more: size > start + body.length, reset };
 }
 
 /** The pipe's whole output. A pipe that passes the deadline or prints past the cap is dropped. */
@@ -133,7 +149,7 @@ async function drained(stream: ByteStream, deadlineMs: number): Promise<{ end: S
  * partial line waits for the next read. A full read with no newline is the middle of a record too long to read, so
  * the cursor skips it, and the newline that ends it gives one `record` entry in its place.
  */
-function consumed(body: Buffer, cursor: TranscriptCursor): { entries: ClaudeEntry[]; cursor: TranscriptCursor } {
+function consumed(body: Buffer, cursor: Omit<TranscriptCursor, "before">): { entries: ClaudeEntry[]; cursor: Omit<TranscriptCursor, "before"> } {
   const last = body.lastIndexOf(0x0a);
   if (last < 0) {
     const skipping = cursor.skipping || body.length === maxRecordBytes;

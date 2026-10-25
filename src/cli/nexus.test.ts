@@ -27,7 +27,7 @@ import { processStream } from "../process-stream.ts";
 import { repoInitCommand } from "../pylon-vm-backend.ts";
 import type { ByteStream, CommandResult, NodeName, PylonCommand, PylonId, ServiceFact, StreamEnd, TailnetNodeId } from "../protocol.ts";
 import { checkoutDir } from "../sessions.ts";
-import type { ClaudeEntry } from "../claude-transcript.ts";
+import { transcriptStart, type ClaudeEntry } from "../claude-transcript.ts";
 import { call, CliError, follow } from "./transport.ts";
 
 const cli = fileURLToPath(new URL("./nexus.ts", import.meta.url));
@@ -1246,7 +1246,7 @@ test("conversation prints a Claude worker's transcript, and send types into its 
     { kind: "tool", at: 12, id: "t3", name: "Read", input: { file_path: "hello.py" } },
   ];
   const readAt = Date.now();
-  s.registry.appendClaudeRead(thread.id, { session: "s1", from: { offset: 0, skipping: false }, entries, cursor: { offset: 9, skipping: false }, reset: false, readAt });
+  s.registry.appendClaudeRead(thread.id, { session: "s1", from: transcriptStart, entries, cursor: { ...transcriptStart, offset: 9 }, reset: false, readAt });
 
   assert.deepEqual(await s.json(["conversation", thread.id]), { kind: "claude", session: "s1", entries, dropped: 0, readAt, working: false }, "--json prints the API's reply");
   const transcript = [

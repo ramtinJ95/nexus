@@ -18,7 +18,7 @@ import type { HerdrStatus, JobStatus, NodeName, NodeObservation, PylonId, Subjec
 import type { Project, ProjectId, SessionHarness } from "../project.ts";
 import type { ImageId, ImageManifest, TemplateRecord } from "../images.ts";
 import type { PylonRecord } from "../tick.ts";
-import { maxEntries, type ClaudeEntry, type TranscriptCursor } from "../claude-transcript.ts";
+import { maxEntries, transcriptStart, type ClaudeEntry, type TranscriptCursor } from "../claude-transcript.ts";
 
 declare const brand: unique symbol;
 /** At most 34 characters, so `pylon-<id>` fits pi-sandbox's 40. */
@@ -75,7 +75,7 @@ export interface Orphan { node: NodeName; pylonId: PylonId }
 
 /** Where the reader of a Claude worker's transcript is in its session's file, how many entries it dropped to keep maxEntries, and when it last read. */
 export interface ClaudeTranscript { session: string; cursor: TranscriptCursor; dropped: number; readAt: number }
-/** What one read of a Claude worker's transcript found, from `from` to `cursor`. `reset` says the file shrank, so `entries` start it over. */
+/** What one read of a Claude worker's transcript found, from `from` to `cursor`. `reset` says the file was replaced, so `entries` start it over. */
 export interface ClaudeRead { session: string; from: TranscriptCursor; entries: readonly ClaudeEntry[]; cursor: TranscriptCursor; reset: boolean; readAt: number }
 /**
  * A message typed into a Claude worker, by its request ID. It is `sending` from before the probe is asked until the
@@ -245,6 +245,8 @@ const migrations: readonly string[] = [
    CREATE TABLE claude_entries (thread TEXT NOT NULL, seq INTEGER NOT NULL, entry TEXT NOT NULL, PRIMARY KEY (thread, seq)) STRICT;
    CREATE TABLE claude_messages (thread TEXT NOT NULL, request_id TEXT NOT NULL, state TEXT NOT NULL CHECK (state IN ('sending', 'sent')), result TEXT,
      PRIMARY KEY (thread, request_id), CHECK ((state = 'sent') = (result IS NOT NULL))) STRICT;`,
+  // The hash of the transcript's bytes before the stored offset. One stored before it matches none, so its reader starts over.
+  `ALTER TABLE claude_transcripts ADD COLUMN before_hash TEXT NOT NULL DEFAULT '';`,
 ];
 
 type Row = Record<string, unknown>;
@@ -478,7 +480,7 @@ export function openRegistry(path: string, clock = Date.now) {
   function claudeTranscript(thread: ThreadId): ClaudeTranscript | undefined {
     const row = db.prepare("SELECT * FROM claude_transcripts WHERE thread = ?").get(thread);
     return row === undefined ? undefined : {
-      session: row.session as string, cursor: { offset: row.byte_offset as number, skipping: row.skipping === 1 }, dropped: row.dropped as number, readAt: row.read_at as number,
+      session: row.session as string, cursor: { offset: row.byte_offset as number, skipping: row.skipping === 1, before: row.before_hash as string }, dropped: row.dropped as number, readAt: row.read_at as number,
     };
   }
 
@@ -508,15 +510,15 @@ export function openRegistry(path: string, clock = Date.now) {
     claudeEntries: (thread: ThreadId): ClaudeEntry[] => db.prepare("SELECT entry FROM claude_entries WHERE thread = ? ORDER BY seq").all(thread).map((r) => json<ClaudeEntry>(r.entry)),
     /**
      * Appends what a read found and keeps the newest maxEntries. A read of another session than the stored one, or of
-     * a file that shrank, replaces the stored entries. A read that did not start where the stored reader stands, such
+     * a file that was replaced, replaces the stored entries. A read that did not start where the stored reader stands, such
      * as one applied twice, changes nothing and answers false.
      */
     appendClaudeRead(thread: ThreadId, read: ClaudeRead): boolean {
       return transaction(() => {
         const stored = claudeTranscript(thread);
         const same = stored?.session === read.session;
-        const at = same ? stored!.cursor : { offset: 0, skipping: false };
-        if (at.offset !== read.from.offset || at.skipping !== read.from.skipping) return false;
+        const at = same ? stored!.cursor : transcriptStart;
+        if (at.offset !== read.from.offset || at.skipping !== read.from.skipping || at.before !== read.from.before) return false;
         const replace = !same || read.reset;
         if (replace) db.prepare("DELETE FROM claude_entries WHERE thread = ?").run(thread);
         const base = replace ? 0 : Number(db.prepare("SELECT coalesce(max(seq) + 1, 0) AS next FROM claude_entries WHERE thread = ?").get(thread)!.next);
@@ -525,9 +527,10 @@ export function openRegistry(path: string, clock = Date.now) {
         const first = Math.max(0, read.entries.length - maxEntries);
         read.entries.slice(first).forEach((entry, i) => insert.run(thread, base + first + i, JSON.stringify(entry)));
         db.prepare("DELETE FROM claude_entries WHERE thread = ? AND seq < ?").run(thread, total - maxEntries);
-        db.prepare(`INSERT INTO claude_transcripts (thread, session, byte_offset, skipping, dropped, read_at) VALUES (?, ?, ?, ?, ?, ?)
-          ON CONFLICT (thread) DO UPDATE SET session = excluded.session, byte_offset = excluded.byte_offset, skipping = excluded.skipping, dropped = excluded.dropped, read_at = excluded.read_at`)
-          .run(thread, read.session, read.cursor.offset, read.cursor.skipping ? 1 : 0, Math.max(0, total - maxEntries), read.readAt);
+        db.prepare(`INSERT INTO claude_transcripts (thread, session, byte_offset, skipping, before_hash, dropped, read_at) VALUES (?, ?, ?, ?, ?, ?, ?)
+          ON CONFLICT (thread) DO UPDATE SET session = excluded.session, byte_offset = excluded.byte_offset, skipping = excluded.skipping, before_hash = excluded.before_hash,
+            dropped = excluded.dropped, read_at = excluded.read_at`)
+          .run(thread, read.session, read.cursor.offset, read.cursor.skipping ? 1 : 0, read.cursor.before, Math.max(0, total - maxEntries), read.readAt);
         return true;
       });
     },

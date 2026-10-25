@@ -9,7 +9,7 @@ import { newPylonRecord } from "../tick.ts";
 import type { JobId, LiveHash, NodeName, NodeObservation, PylonId, ServiceFact, TailnetNodeId } from "../protocol.ts";
 import type { ProjectId, RemoteProject } from "../project.ts";
 import type { ImageManifest, TemplateRecord } from "../images.ts";
-import { maxEntries, type ClaudeEntry } from "../claude-transcript.ts";
+import { maxEntries, transcriptStart, type ClaudeEntry } from "../claude-transcript.ts";
 
 const node = "rj-firebat" as NodeName;
 const threadId = "th-1" as ThreadId;
@@ -822,7 +822,7 @@ test("only the stalled worker's launch session restores normal reply and seen at
 });
 
 const reply = (n: number): ClaudeEntry => ({ kind: "reply", at: n, text: `reply ${n}` });
-const cursorAt = (offset: number, skipping = false) => ({ offset, skipping });
+const cursorAt = (offset: number, skipping = false) => offset === 0 ? transcriptStart : { offset, skipping, before: `hash at ${offset}` };
 
 test("a Claude worker's transcript survives reopening, keeps its newest entries, and starts over for a new session or a replaced file", (t) => {
   const path = tempDb();

@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { appendFile, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { maxRecordBytes, parseRecord, readTranscript, type ClaudeEntry, type TranscriptCursor } from "./claude-transcript.ts";
+import { maxRecordBytes, parseRecord, readTranscript, transcriptStart as start, type ClaudeEntry, type TranscriptCursor } from "./claude-transcript.ts";
 import type { OpenPipe } from "./checkout-files.ts";
 import { processStream } from "./process-stream.ts";
 import type { ByteStream } from "./protocol.ts";
@@ -11,7 +11,6 @@ import type { ByteStream } from "./protocol.ts";
 const fixture = await readFile(new URL("./fixtures/claude-transcript.jsonl", import.meta.url), "utf8");
 const lines = fixture.split("\n").filter((line) => line !== "");
 const session = "11111111-2222-4333-8444-555555555501";
-const start: TranscriptCursor = { offset: 0, skipping: false };
 
 const parsedAll = (records: readonly string[]): ClaudeEntry[] => records.flatMap((line) => parseRecord(line));
 const entries = parsedAll(lines);
@@ -203,10 +202,10 @@ test("reads across appends give each entry once, in order, and never take a part
 
   const first = (await p.read(start))!;
   assert.deepEqual(first.entries, parsedAll(lines.slice(0, 31)));
-  assert.deepEqual(first.cursor, { offset: bytes(lines.slice(0, 31)), skipping: false });
+  assert.deepEqual([first.cursor.offset, first.cursor.skipping], [bytes(lines.slice(0, 31)), false]);
   assert.deepEqual([first.more, first.reset], [false, false]);
   assert.deepEqual(p.requests[0]?.slice(0, 2), ["sh", "-c"]);
-  assert.deepEqual(p.requests[0]?.slice(3), [session, p.root, "0", String(maxRecordBytes)]);
+  assert.deepEqual(p.requests[0]?.slice(3, 7), [session, p.root, "0", String(maxRecordBytes)]);
 
   // Nothing new but the same partial line: no entries, and the cursor stays.
   assert.deepEqual(await p.read(first.cursor), { entries: [], cursor: first.cursor, more: false, reset: false });
@@ -245,7 +244,7 @@ test("a record longer than one read is skipped with one record entry, and readin
     { kind: "record", at: null, type: "oversized", summary: `a record of more than ${maxRecordBytes} bytes was skipped` },
     ...parseRecord(lines[22]!),
   ]);
-  assert.deepEqual(all.cursor, { offset: (await readFile(p.file)).length, skipping: false });
+  assert.deepEqual([all.cursor.offset, all.cursor.skipping], [(await readFile(p.file)).length, false]);
   assert.ok(all.reads >= 4, `${all.reads} reads`);
 });
 

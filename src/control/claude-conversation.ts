@@ -9,7 +9,7 @@
  * its session runs, so its entries show during the turn, and a watch reads once when it starts.
  */
 import { sessionKinds } from "../events.ts";
-import { readTranscript, type ClaudeConversation, type ClaudeEntry, type TranscriptCursor, type TranscriptRead } from "../claude-transcript.ts";
+import { readTranscript, transcriptStart, type ClaudeConversation, type ClaudeEntry, type TranscriptRead } from "../claude-transcript.ts";
 import type { NodeName, ProbeClient } from "../protocol.ts";
 import type { Registry, Thread, ThreadId } from "./registry.ts";
 
@@ -66,7 +66,6 @@ interface Reader {
 
 /** One refresh takes this many reads at most. A transcript with more to read goes on in the refresh after it. */
 const maxReadsPerRefresh = 16;
-const start: TranscriptCursor = { offset: 0, skipping: false };
 
 export function claudeConversations(options: { registry: Registry; probes: ReadonlyMap<NodeName, Pick<ProbeClient, "stream">>; workingReadMs?: number; followMs?: number }): ClaudeConversations {
   const { registry, probes, workingReadMs = 2_000, followMs = 1_000 } = options;
@@ -126,7 +125,7 @@ export function claudeConversations(options: { registry: Registry; probes: Reado
       const probe = probeOf(t);
       if (probe === null) return;
       const stored = registry.claudeTranscript(id);
-      const from = stored?.session === session ? stored.cursor : start;
+      const from = stored?.session === session ? stored.cursor : transcriptStart;
       let found: TranscriptRead | null;
       try {
         found = await readTranscript((argv) => probe.stream(t.pylonId, argv), session, from);
