@@ -168,7 +168,7 @@ test("the CLI runs a thread's life through the SOCKS proxy, and --json prints th
   const stable = ({ lastHumanActivityAt: _, ...rest }: Thread) => rest;
   assert.deepEqual(stable(s.registry.thread(thread.id)!), stable(thread));
   assert.deepEqual(s.fake.calls.at(-1)?.slice(0, 3), ["send", thread.id, "\n  Fix the build  \nand run the tests"]);
-  assert.deepEqual((await s.json(["threads"])).map(stable), [{ ...stable(thread), desired: "running", pylon: { node, actualState: "unknown", failed: null } }],
+  assert.deepEqual((await s.json(["threads"])).map(stable), [{ ...stable(thread), attention: null, desired: "running", pylon: { node, actualState: "unknown", failed: null } }],
     "a row carries what the planner wants of the pylon and what its node last reported");
   assert.deepEqual(await s.json(["threads", "--project", "other"]), []);
 
@@ -759,14 +759,21 @@ test("a watch whose consumer is killed outright exits, though an idle thread nev
   const [pidLine] = await once(sh.stdout, "data") as [Buffer];
   const pid = Number(pidLine.toString().trim());
   t.after(() => { try { process.kill(pid); } catch {} });
-  const alive = () => { try { process.kill(pid, 0); return true; } catch { return false; } };
+  const alive = async () => {
+    try {
+      process.kill(pid, 0);
+      // A container's PID 1 may leave an exited orphan as a zombie.
+      const stat = await readFile(`/proc/${pid}/stat`, "utf8").catch(() => "");
+      return !/\) Z /.test(stat);
+    } catch { return false; }
+  };
   for (let i = 0; !(await readFile(out, "utf8").catch(() => "")).includes('"type":"state"'); i++) {
     assert.ok(i < 200, "the watch printed the thread's state");
     await new Promise((r) => setTimeout(r, 50));
   }
   sh.kill("SIGKILL");
   await once(sh, "exit");
-  for (let i = 0; alive(); i++) {
+  for (let i = 0; await alive(); i++) {
     assert.ok(i < 100, "the orphaned watch exited");
     await new Promise((r) => setTimeout(r, 50));
   }
@@ -918,4 +925,17 @@ test("a thread ID is one path segment", async (t) => {
   const s = await setup(t);
   const res = await s.nexus(["show", `../projects?${randomUUID()}`, "--json"]);
   assert.equal(res.code, 4, res.stderr);
+});
+
+
+test("seen and --unread share the API marker without waking an archived thread", async (t) => {
+  const s = await setup(t);
+  const thread: Thread = await s.json(["start", "--project", "acme", "--title", "read me"]);
+  await s.json(["archive", thread.id]);
+  s.registry.recordReply(thread.id, 1000);
+  const before = s.registry.thread(thread.id)!;
+  assert.equal(await s.json(["seen", thread.id]), null);
+  assert.ok(s.registry.thread(thread.id)!.seenAt! >= 1000);
+  assert.equal(await s.json(["seen", thread.id, "--unread"]), null);
+  assert.deepEqual(s.registry.thread(thread.id), { ...before, seenAt: 999 });
 });
