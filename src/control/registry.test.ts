@@ -217,7 +217,7 @@ test("a registry from before failure messages keeps its pylons' attempts", async
     seeded(path).close();
     const db = new DatabaseSync(path);
     db.prepare("UPDATE pylons SET attempts = ?").run(JSON.stringify(attempts));
-    db.exec(`ALTER TABLE pylons DROP COLUMN retrying; ${untitledSessions} ALTER TABLE threads DROP COLUMN seen_at; ALTER TABLE threads DROP COLUMN last_reply_at; DROP TABLE pr_watches; PRAGMA user_version = 1`);
+    db.exec(`ALTER TABLE pylons DROP COLUMN retrying; ${untitledSessions} ALTER TABLE threads DROP COLUMN seen_at; ALTER TABLE threads DROP COLUMN last_reply_at; DROP TABLE release_reports; DROP TABLE pr_watches; PRAGMA user_version = 1`);
     db.close();
     return path;
   };
@@ -237,7 +237,7 @@ test("a registry from before pylon retries opens with no retry under way, and a 
   const path = tempDb();
   seeded(path).close();
   const db = new DatabaseSync(path);
-  db.exec(`ALTER TABLE pylons DROP COLUMN retrying; ${untitledSessions} ALTER TABLE threads DROP COLUMN seen_at; ALTER TABLE threads DROP COLUMN last_reply_at; DROP TABLE pr_watches; PRAGMA user_version = 3`);
+  db.exec(`ALTER TABLE pylons DROP COLUMN retrying; ${untitledSessions} ALTER TABLE threads DROP COLUMN seen_at; ALTER TABLE threads DROP COLUMN last_reply_at; DROP TABLE release_reports; DROP TABLE pr_watches; PRAGMA user_version = 3`);
   db.close();
   const registry = openRegistry(path);
   t.after(() => registry.close());
@@ -383,7 +383,7 @@ test("a registry from before session titles keeps its sessions, untitled until t
   const path = tempDb();
   seeded(path).close();
   const db = new DatabaseSync(path);
-  db.exec(`${untitledSessions} ALTER TABLE threads DROP COLUMN seen_at; ALTER TABLE threads DROP COLUMN last_reply_at; DROP TABLE pr_watches; PRAGMA user_version = 4`);
+  db.exec(`${untitledSessions} ALTER TABLE threads DROP COLUMN seen_at; ALTER TABLE threads DROP COLUMN last_reply_at; DROP TABLE release_reports; DROP TABLE pr_watches; PRAGMA user_version = 4`);
   db.prepare("INSERT INTO sessions VALUES (?, 'w1:p1', 'claude-code', NULL, 'idle')").run(pylonId);
   db.close();
   const registry = openRegistry(path);
@@ -406,7 +406,7 @@ test("a registry from before repository kinds reads every stored repo, booted or
   first.close();
   const db = new DatabaseSync(path);
   db.exec(`UPDATE pylons SET boot = json_remove(boot, '$.repo.kind'), submitted = CASE WHEN json_extract(submitted, '$.job.kind') = 'spawn'
-    THEN json_remove(submitted, '$.job.boot.repo.kind') ELSE submitted END; ALTER TABLE threads DROP COLUMN seen_at; ALTER TABLE threads DROP COLUMN last_reply_at; DROP TABLE pr_watches; PRAGMA user_version = 5`);
+    THEN json_remove(submitted, '$.job.boot.repo.kind') ELSE submitted END; ALTER TABLE threads DROP COLUMN seen_at; ALTER TABLE threads DROP COLUMN last_reply_at; DROP TABLE release_reports; DROP TABLE pr_watches; PRAGMA user_version = 5`);
   assert.equal((db.prepare("SELECT count(*) AS n FROM pylons WHERE boot LIKE '%\"kind\":\"clone\"%' OR submitted LIKE '%\"clone\"%'").get() as { n: number }).n, 0, "the old shape has no kind");
   db.close();
 
@@ -421,7 +421,7 @@ test("a registry from before session states keeps its sessions as running in the
   const path = tempDb();
   seeded(path).close();
   const db = new DatabaseSync(path);
-  db.exec(`${untitledSessions} ALTER TABLE sessions ADD COLUMN title TEXT; ALTER TABLE threads DROP COLUMN seen_at; ALTER TABLE threads DROP COLUMN last_reply_at; DROP TABLE pr_watches; PRAGMA user_version = 6`);
+  db.exec(`${untitledSessions} ALTER TABLE sessions ADD COLUMN title TEXT; ALTER TABLE threads DROP COLUMN seen_at; ALTER TABLE threads DROP COLUMN last_reply_at; DROP TABLE release_reports; DROP TABLE pr_watches; PRAGMA user_version = 6`);
   db.prepare("INSERT INTO sessions VALUES (?, 'w1:p1', 'pi', 's.jsonl', 'working', 'plan')").run(pylonId);
   db.close();
   const registry = openRegistry(path);
@@ -441,7 +441,7 @@ test("a registry from before node-unique preview ports keeps its previews", asyn
     CREATE TABLE previews (pylon TEXT NOT NULL REFERENCES pylons (id), service TEXT NOT NULL, https_port INTEGER NOT NULL, ready INTEGER NOT NULL, PRIMARY KEY (pylon, service)) STRICT;
     ALTER TABLE pylons DROP COLUMN retrying;
     ${untitledSessions}
-    ALTER TABLE threads DROP COLUMN seen_at; ALTER TABLE threads DROP COLUMN last_reply_at; DROP TABLE pr_watches; PRAGMA user_version = 2;`);
+    ALTER TABLE threads DROP COLUMN seen_at; ALTER TABLE threads DROP COLUMN last_reply_at; DROP TABLE release_reports; DROP TABLE pr_watches; PRAGMA user_version = 2;`);
   db.prepare("INSERT INTO previews VALUES (?, 'web', 10200, 1)").run(pylonId);
   db.close();
 
@@ -457,7 +457,7 @@ test("seen and reply timestamps migrate from null and persist without activity",
   const path = tempDb();
   seeded(path).close();
   const db = new DatabaseSync(path);
-  db.exec("ALTER TABLE threads DROP COLUMN seen_at; ALTER TABLE threads DROP COLUMN last_reply_at; DROP TABLE pr_watches; PRAGMA user_version = 7");
+  db.exec("ALTER TABLE threads DROP COLUMN seen_at; ALTER TABLE threads DROP COLUMN last_reply_at; DROP TABLE release_reports; DROP TABLE pr_watches; PRAGMA user_version = 7");
   db.close();
   const registry = openRegistry(path);
   assert.equal(registry.thread(threadId)!.seenAt, null);
@@ -497,7 +497,7 @@ test("adding PR watches preserves the shared seen and reply markers from schema 
   first.markSeen(threadId, false, 3000);
   first.close();
   const db = new DatabaseSync(path);
-  db.exec("DROP TABLE pr_watches; PRAGMA user_version = 8");
+  db.exec("DROP TABLE release_reports; DROP TABLE pr_watches; PRAGMA user_version = 8");
   db.close();
   const registry = openRegistry(path);
   t.after(() => registry.close());
@@ -507,4 +507,21 @@ test("adding PR watches preserves the shared seen and reply markers from schema 
   registry.savePrWatch(threadId, watch);
   assert.deepEqual(registry.prWatch(threadId), watch);
   assert.deepEqual(registry.thread(threadId), { ...thread, lastReplyAt: 2000, seenAt: 3000 });
+});
+
+test("desired release, reports and drain survive reopening the registry", () => {
+  const path = join(dir, `${randomUUID()}.db`);
+  const first = openRegistry(path);
+  const desired = { commit: "a".repeat(40), requestedBy: "nMac", requestedAt: 100 };
+  const report = { node, role: "control" as const, commit: "b".repeat(40), target: desired.commit, state: "rolled-back" as const, reason: "unhealthy", observedAt: 200 };
+  first.setDesiredRelease(desired);
+  first.reportRelease(report);
+  first.setDrain({ commit: desired.commit, expiresAt: 300 });
+  first.close();
+  const reopened = openRegistry(path);
+  try {
+    assert.deepEqual(reopened.desiredRelease(), desired);
+    assert.deepEqual(reopened.releaseReports(), [report]);
+    assert.deepEqual(reopened.drain(), { commit: desired.commit, expiresAt: 300 });
+  } finally { reopened.close(); }
 });

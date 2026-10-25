@@ -1,0 +1,13 @@
+[Unit]
+Description=Nexus release reconciler (root supervisor)
+Wants=network-online.target
+After=network-online.target tailscaled.service
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+ExecStart=/opt/nexus/deployer/supervise.sh
+TimeoutStartSec=32min
+UMask=0077
+Environment=PATH=/usr/local/bin:/usr/bin:/bin

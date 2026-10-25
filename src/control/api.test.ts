@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+import type { DeploymentOptions } from "./releases.ts";
 import { attentionOf } from "./attention.ts";
 import { checkoutReader } from "../checkout-files.ts";
 import { after, test } from "node:test";
@@ -47,7 +49,7 @@ const dotfiles = { repo: "git@github.com:ramtin/dotfiles.git", ref: "main" };
 const dir = await mkdtemp(join(tmpdir(), "nexus-api-"));
 after(() => rm(dir, { recursive: true }));
 
-async function setup(t: import("node:test").TestContext, options: { dotfiles?: typeof dotfiles; streamStallMs?: number; attachTiming?: AttachTiming } = {}) {
+async function setup(t: import("node:test").TestContext, options: { deployment?: DeploymentOptions; dotfiles?: typeof dotfiles; streamStallMs?: number; attachTiming?: AttachTiming } = {}) {
   const registry = openRegistry(join(dir, `${randomUUID()}.db`));
   registry.upsertNode({ name: node, tailnetHost: "rj-firebat.tail.ts.net", tailnetNodeId: "nFIREBAT" as TailnetNodeId });
   let caller: TailnetNodeId | null = laptop;
@@ -76,7 +78,8 @@ async function setup(t: import("node:test").TestContext, options: { dotfiles?: t
       await admitted;
       return caller;
     },
-    allowed: new Set([laptop]),
+    allowed: new Set([laptop, "nFIREBAT" as TailnetNodeId]),
+    ...(options.deployment === undefined ? {} : { deployment: options.deployment }),
     hostnames: new Set(["127.0.0.1"]),
     dotfiles: options.dotfiles ?? dotfiles,
     harness,
@@ -139,7 +142,7 @@ async function setup(t: import("node:test").TestContext, options: { dotfiles?: t
   };
 }
 
-async function withThread(t: import("node:test").TestContext, options: { project?: typeof project; dotfiles?: typeof dotfiles; streamStallMs?: number; attachTiming?: AttachTiming } = {}) {
+async function withThread(t: import("node:test").TestContext, options: { deployment?: DeploymentOptions; project?: typeof project; dotfiles?: typeof dotfiles; streamStallMs?: number; attachTiming?: AttachTiming } = {}) {
   const s = await setup(t, options);
   assert.equal((await s.call("POST", "/v1/projects", options.project ?? project)).status, 201);
   assert.equal((await s.call("POST", "/v1/images", image)).status, 201);
@@ -1348,4 +1351,107 @@ test("latest-turn API reads include commits and uncommitted work, and refuse mis
   assert.match(diff.body.diff, /\+untracked/);
   s.fake.harness.latestTurn = async () => "43";
   assert.equal((await s.call("GET", `${route}/diff?base=turn`)).status, 422);
+});
+
+const deployCommit = "a".repeat(40);
+const deployToken = "test-root-token";
+const deployment: DeploymentOptions = {
+  self: "nFIREBAT" as TailnetNodeId,
+  deployers: new Set([laptop, "nFIREBAT" as TailnetNodeId]),
+  keys: { nFIREBAT: createHash("sha256").update(deployToken).digest("hex") },
+  resolveMain: async () => deployCommit,
+};
+const reporterHeaders = { authorization: `Bearer ${deployToken}` };
+
+test("deploy defaults off, main resolves, and release records the authenticated caller", async (t) => {
+  const off = await setup(t);
+  assert.equal((await off.call("PUT", "/v1/release", { commit: "main" })).status, 403);
+  const on = await setup(t, { deployment });
+  const r = await on.call("PUT", "/v1/release", { commit: "main" });
+  assert.equal(r.status, 200);
+  assert.equal(r.body.desired.commit, deployCommit);
+  assert.equal(r.body.desired.requestedBy, laptop);
+  assert.equal(r.body.nodes.length, 2);
+  assert.equal((await on.call("PUT", "/v1/release", { commit: "--evil" })).status, 400);
+});
+
+test("pylon traffic under its host identity cannot deploy even if that identity is allowed and listed as a deployer", async (t) => {
+  const s = await setup(t, { deployment });
+  s.callAs("nFIREBAT" as TailnetNodeId);
+  assert.equal((await s.call("PUT", "/v1/release", { commit: deployCommit }, { "x-forwarded-for": "nLAPTOP", ...reporterHeaders })).status, 403);
+  assert.equal((await s.call("GET", "/v1/deployer/release")).status, 403);
+  assert.equal((await s.call("GET", "/v1/%64eployer/release")).status, 403);
+  assert.equal((await s.call("POST", "/v1/%64eployer/drain", { commit: deployCommit })).status, 403);
+  assert.equal((await s.call("GET", "/v1/deployer/release", undefined, reporterHeaders)).status, 200);
+  s.callAs(null);
+  assert.equal((await s.call("PUT", "/v1/release", { commit: deployCommit }, reporterHeaders)).status, 403);
+});
+
+test("a root-authenticated drain blocks every turn-entry route and can be released", async (t) => {
+  const s = await setup(t, { deployment });
+  await s.call("PUT", "/v1/release", { commit: deployCommit });
+  s.callAs("nFIREBAT" as TailnetNodeId);
+  const drain = await s.call("POST", "/v1/deployer/drain", { commit: deployCommit }, reporterHeaders);
+  assert.equal(drain.status, 200);
+  assert.equal(drain.body.idle, true);
+  s.callAs(laptop);
+  for (const path of ["/v1/threads", "/v1/threads/anything/messages", "/v1/threads/anything/retry"]) {
+    assert.equal((await s.call("POST", path, {})).status, 409);
+  }
+  assert.equal((await s.call("PUT", "/v1/release", { commit: "b".repeat(40) })).status, 409);
+  s.callAs("nFIREBAT" as TailnetNodeId);
+  await s.call("POST", "/v1/deployer/drain", { commit: deployCommit, release: true }, reporterHeaders);
+  assert.equal(s.registry.drain(), null);
+});
+
+test("drain reads committed live and queued work rather than a lagging activity flag", async (t) => {
+  const s = await withThread(t, { deployment });
+  await s.call("PUT", "/v1/release", { commit: deployCommit });
+  s.callAs("nFIREBAT" as TailnetNodeId);
+  for (const docs of [{ "pi.live": { run: {} } }, { "pi.inbox": { items: [{ id: 1 }] } }]) {
+    s.fake.transcript(s.thread.id).docs = docs as never;
+    s.fake.commit(s.thread.id);
+    const result = await s.call("POST", "/v1/deployer/drain", { commit: deployCommit }, reporterHeaders);
+    assert.equal(result.body.idle, false);
+  }
+  s.fake.transcript(s.thread.id).docs = {};
+  s.fake.commit(s.thread.id);
+  assert.equal((await s.call("POST", "/v1/deployer/drain", { commit: deployCommit }, reporterHeaders)).body.idle, true);
+});
+
+test("expired drain leases no longer block callers", async (t) => {
+  const s = await withThread(t, { deployment });
+  s.registry.setDrain({ commit: deployCommit, expiresAt: Date.now() - 1 });
+  assert.equal((await s.call("POST", `/v1/threads/${s.thread.id}/messages`, { text: "hello", requestId: "after-drain" })).status, 202);
+});
+
+test("drain cannot declare idle while a previously admitted message is still entering the harness", async (t) => {
+  const s = await withThread(t, { deployment });
+  await s.call("PUT", "/v1/release", { commit: deployCommit });
+  const entering = Promise.withResolvers<void>();
+  const finish = Promise.withResolvers<void>();
+  const send = s.fake.harness.send;
+  s.fake.harness.send = async (...args) => { entering.resolve(); await finish.promise; return send(...args); };
+  const sending = s.call("POST", `/v1/threads/${s.thread.id}/messages`, { text: "hello", requestId: "entering-drain" });
+  await entering.promise;
+  s.callAs("nFIREBAT" as TailnetNodeId);
+  try {
+    assert.equal((await s.call("POST", "/v1/deployer/drain", { commit: deployCommit }, reporterHeaders)).body.idle, false);
+  } finally { finish.resolve(); }
+  assert.equal((await sending).status, 202);
+  assert.equal((await s.call("POST", "/v1/deployer/drain", { commit: deployCommit }, reporterHeaders)).body.idle, true);
+});
+
+test("the final idle fence holds across lease expiry until rollback or success releases it", async (t) => {
+  const s = await setup(t, { deployment });
+  await s.call("PUT", "/v1/release", { commit: deployCommit });
+  s.callAs("nFIREBAT" as TailnetNodeId);
+  assert.equal((await s.call("POST", "/v1/deployer/drain", { commit: deployCommit, hold: true }, reporterHeaders)).body.idle, true);
+  assert.equal(s.registry.drain()!.locked, true);
+  s.registry.setDrain({ ...s.registry.drain()!, expiresAt: 0 });
+  s.callAs(laptop);
+  assert.equal((await s.call("POST", "/v1/threads", {})).status, 409);
+  s.callAs("nFIREBAT" as TailnetNodeId);
+  await s.call("POST", "/v1/deployer/drain", { commit: deployCommit, release: true }, reporterHeaders);
+  assert.equal(s.registry.drain(), null);
 });

@@ -266,7 +266,7 @@ ${closed.length > 0 && html`<details class="archived" id="archived-${p.id}"${clo
 </details>`;
 })}
 </nav>
-<div class="nodes" id="side-nodes" data-live aria-label="Nodes"><h2>Nodes</h2>${c.registry.nodes().map((n) => html`<span>${icon("server")}${n.name}${dot(n.state === "online" ? "ok" : "muted")}${n.state === "offline" && html`<em>offline</em>`}</span>`)}</div>
+<div class="nodes" id="side-nodes" data-live aria-label="Nodes"><h2>Nodes</h2><small>Desired release: ${c.registry.desiredRelease()?.commit.slice(0, 12) ?? "manual"}</small>${c.registry.nodes().map((n) => html`<span>${icon("server")}${n.name}${dot(n.state === "online" ? "ok" : "muted")}${n.state === "offline" && html`<em>offline</em>`}</span>${c.registry.releaseReports().filter((r) => r.node === n.name).map((r) => html`<small title="${r.reason ?? ""}">${r.role}: ${r.commit?.slice(0, 12) ?? "unknown"} · ${c.now - r.observedAt >= 90_000 ? "stale" : r.state}</small>`)}`)}</div>
 <a class="btn side-add" href="/projects/new" data-new-project>New project</a>
 </aside>`;
 }

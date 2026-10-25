@@ -110,6 +110,7 @@ async function setup(t: TestContext) {
   let pipe = async (argv: readonly string[]): Promise<ByteStream> => { throw new Error(`unexpected stream ${argv[0]}`); };
   const fake = fakeHarness();
   const options = (port: number) => ({
+    deployment: { self: "nFIREBAT" as TailnetNodeId, deployers: new Set([laptop]), keys: {}, resolveMain: async () => "a".repeat(40) },
     registry, host: "127.0.0.1", port, whois: async () => caller, allowed: new Set([laptop]),
     hostnames: new Set([apiName, "127.0.0.1"]), dotfiles: { repo: "https://github.com/ramtin/dotfiles.git", ref: "main" },
     harness: fake.harness, wake: () => {}, previewPorts: { first: 10200, last: 10299 },
@@ -979,4 +980,20 @@ test("show prints PR metadata and one disabled-watch notice without waking the p
   assert.deepEqual(detail.pullRequests, [pr]);
   assert.equal(detail.prWatch.enabled, false);
   assert.equal(s.registry.thread(thread.id)!.lastHumanActivityAt, before);
+});
+
+test("deploy and release use the shared release view and wait for both roles", async (t) => {
+  const s = await setup(t);
+  assert.equal((await s.nexus(["--version"])).stdout.trim(), "nexus 0.13.0");
+  assert.equal((await s.nexus(["deploy", "bad"])).code, 64);
+  const requested = await s.json(["deploy", "main"]);
+  assert.equal(requested.desired.commit, "a".repeat(40));
+  assert.equal(requested.desired.requestedBy, laptop);
+  for (const role of ["control", "probe"] as const) s.registry.reportRelease({ node, role, commit: requested.desired.commit, target: requested.desired.commit, state: "healthy", reason: null, observedAt: Date.now() });
+  assert.equal((await s.json(["deploy", "main", "--wait"])).nodes.every((r: { state: string }) => r.state === "healthy"), true);
+  assert.equal((await s.json(["release"])).desired.commit, requested.desired.commit);
+  s.registry.reportRelease({ node, role: "control", commit: "b".repeat(40), target: requested.desired.commit, state: "rolled-back", reason: "failed to bind", observedAt: Date.now() });
+  const failed = await s.nexus(["deploy", "main", "--wait", "--json"]);
+  assert.equal(failed.code, 1);
+  assert.match(failed.stderr, /failed to bind/);
 });

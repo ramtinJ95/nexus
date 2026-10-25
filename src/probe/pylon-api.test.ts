@@ -152,3 +152,13 @@ test("service-logs answers with the guest's logs, and a guest failure is a 500 w
   assert.deepEqual(await t.call({ op: "service-logs", name: "web", lines: 200 }), { status: 200, reply: { logs: "logs web 200\n" } });
   assert.deepEqual(await t.call({ op: "service-logs", name: "gone", lines: 10 }), { status: 500, reply: "Unknown service gone" });
 });
+
+test("the pylon CLI bridge refuses deploy, release mutation and arbitrary forwarded API routes", async () => {
+  const { call } = setup({});
+  for (const request of [
+    { op: "deploy", commit: "main" },
+    { op: "release", commit: "a".repeat(40) },
+    { op: "request", method: "PUT", path: "/v1/release", body: { commit: "main" } },
+    { op: "info", method: "PUT", path: "/v1/release" },
+  ]) assert.equal((await call(request)).status, 400);
+});

@@ -1,3 +1,5 @@
+import type { DesiredRelease } from "../deploy/plan.ts";
+import type { Drain, ReleaseReport } from "../deploy/model.ts";
 /**
  * The registry: every Nexus record, in one SQLite file. The control plane process is its only writer, and
  * it holds one connection, so every write is a synchronous statement and no two writes interleave.
@@ -201,6 +203,7 @@ const migrations: readonly string[] = [
   `ALTER TABLE threads ADD COLUMN seen_at INTEGER;
    ALTER TABLE threads ADD COLUMN last_reply_at INTEGER;`,
   `CREATE TABLE pr_watches (thread TEXT PRIMARY KEY REFERENCES threads (id), record TEXT NOT NULL) STRICT;`,
+  `CREATE TABLE release_reports (node TEXT NOT NULL, role TEXT NOT NULL, record TEXT NOT NULL, PRIMARY KEY (node, role)) STRICT;`,
 ];
 
 type Row = Record<string, unknown>;
@@ -373,6 +376,26 @@ export function openRegistry(path: string) {
     },
     savePrWatch(thread: ThreadId, state: PrWatchState) {
       db.prepare("INSERT INTO pr_watches (thread, record) VALUES (?, ?) ON CONFLICT (thread) DO UPDATE SET record = excluded.record").run(thread, JSON.stringify(state));
+    },
+    desiredRelease(): DesiredRelease | null {
+      const row = db.prepare("SELECT value FROM settings WHERE key = 'release'").get();
+      return row === undefined ? null : JSON.parse(row.value as string) as DesiredRelease;
+    },
+    setDesiredRelease(release: DesiredRelease) {
+      db.prepare("INSERT INTO settings VALUES ('release', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value").run(JSON.stringify(release));
+    },
+    releaseReports(): ReleaseReport[] {
+      return db.prepare("SELECT record FROM release_reports ORDER BY node, role").all().map((r) => JSON.parse(r.record as string) as ReleaseReport);
+    },
+    reportRelease(report: ReleaseReport) {
+      db.prepare("INSERT INTO release_reports VALUES (?, ?, ?) ON CONFLICT(node, role) DO UPDATE SET record = excluded.record").run(report.node, report.role, JSON.stringify(report));
+    },
+    drain(): Drain | null {
+      const row = db.prepare("SELECT value FROM settings WHERE key = 'deploy-drain'").get();
+      return row === undefined ? null : JSON.parse(row.value as string) as Drain;
+    },
+    setDrain(drain: Drain | null) {
+      db.prepare("INSERT INTO settings VALUES ('deploy-drain', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value").run(JSON.stringify(drain));
     },
 
     /** Nodes come from the config file. Their state and capacity come from observations. */

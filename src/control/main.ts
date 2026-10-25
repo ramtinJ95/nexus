@@ -1,3 +1,4 @@
+import { turnGate } from "./drain.ts";
 /**
  * The control plane process: `node src/control/main.ts <config.json>`, run by deploy/nexus-control.service.
  * It opens the registry, follows every configured node's probe, runs every thread's agent in the harness, and
@@ -45,6 +46,8 @@ const configSchema = z.strictObject({
   })).min(1),
   /** Other tailnet nodes, such as your laptop and phone, whose callers may use the API. */
   callers: z.array(nodeId),
+  deployers: z.array(nodeId).optional(),
+  deployKeys: z.record(nodeId, z.string().regex(/^[0-9a-f]{64}$/)).optional(),
   /** The common dotfiles layer every new pylon pulls on boot. */
   dotfiles: z.strictObject({ repo: gitUrl, ref: z.string().min(1) }),
   harness: z.strictObject({
@@ -100,7 +103,7 @@ export async function startControlPlane(config: ControlPlaneConfig, models: Mode
 
   const conversing = registry.threads().filter((t) => t.conversationId !== null);
   const conversationOf = (t: Thread) => Number(t.conversationId) as ConversationId;
-  const harness = await openHarnessHost({
+  const rawHarness = await openHarnessHost({
     storagePath: config.harness.storage,
     models,
     model: config.harness.model,
@@ -118,11 +121,20 @@ export async function startControlPlane(config: ControlPlaneConfig, models: Mode
     log: (message) => console.error(message),
   });
 
+  const gate = turnGate(() => registry.drain()?.locked === true || (registry.drain()?.expiresAt ?? 0) > Date.now());
+  const harness: typeof rawHarness = {
+    ...rawHarness,
+    startThread: (...args) => gate.run(() => rawHarness.startThread(...args)),
+    send: (...args) => gate.run(() => rawHarness.send(...args)),
+    retry: (...args) => gate.run(() => rawHarness.retry(...args)),
+  };
   const watch = prWatcher({ registry, github: token === null ? null : githubClient(token), harness, wake: wakeThread });
   const watchTimer = setInterval(() => { void watch.poll(); }, 120_000);
   void watch.poll();
   const api = await startApi({
     prWatchEnabled: token !== null,
+    turnsStarting: gate.busy,
+    deployment: { self: config.self.tailnetNodeId as TailnetNodeId, deployers: new Set((config.deployers ?? []) as TailnetNodeId[]), keys: config.deployKeys ?? {} },
     registry, whois, host: config.listen.host, port: config.listen.port,
     allowed: new Set([config.self.tailnetNodeId, ...config.callers] as TailnetNodeId[]),
     hostnames: new Set(config.listen.hostnames),

@@ -1,3 +1,6 @@
+import { DeployDraining } from "./drain.ts";
+import { runningCommit } from "../deploy/health.ts";
+import { canDeploy, commitSchema, isReporter, releaseView, reportSchema, resolveMain, type DeploymentOptions } from "./releases.ts";
 /**
  * The control plane's HTTP API for the dashboard and the CLI. JSON in and out.
  *
@@ -42,6 +45,8 @@ import { attachTiming, serveAttach, type AttachTiming, type Ending, type PylonDo
 
 export interface ApiOptions {
   prWatchEnabled?: boolean;
+  deployment?: DeploymentOptions;
+  turnsStarting?: () => boolean;
   registry: Registry;
   host: string;
   /** 0 picks a free port. */
@@ -642,6 +647,22 @@ export async function startApi(options: ApiOptions): Promise<Api> {
   const created = (body: unknown): Reply => ({ status: 201, body });
   const noContent: Reply = { status: 204 };
 
+  let startingTurns = 0;
+  const draining = () => registry.drain()?.locked === true || (registry.drain()?.expiresAt ?? 0) > Date.now();
+  async function turnsRunning(): Promise<boolean> {
+    if (startingTurns > 0 || options.turnsStarting?.()) return true;
+    for (const t of registry.threads()) {
+      if (t.status === "deleted" || t.conversationId === null) continue;
+      const watch = await harness.watch(t.id);
+      try {
+        const live = watch.value.docs["pi.live"];
+        const inbox = watch.value.docs["pi.inbox"];
+        if (live?.run !== undefined || (Array.isArray(inbox?.items) && inbox.items.length > 0)) return true;
+      } finally { await watch.stop(); }
+    }
+    return startingTurns > 0 || (options.turnsStarting?.() ?? false);
+  }
+
   const routes: readonly [string, RegExp, Route][] = [
     ["GET", /^\/v1\/projects$/, () => ok(registry.projects())],
     ["POST", /^\/v1\/projects$/, async (_, r) => created(createProject(await r.body()))],
@@ -708,7 +729,10 @@ export async function startApi(options: ApiOptions): Promise<Api> {
   async function admit(req: IncomingMessage): Promise<TailnetNodeId> {
     const { remoteAddress, remotePort } = req.socket;
     const caller = remoteAddress === undefined || remotePort === undefined ? null : await whois(remoteAddress, remotePort);
-    if (caller === null || !allowed.has(caller)) throw new HttpError(403, "caller is not a tailnet node this control plane allows");
+    const workerRoute = decodeURIComponent(new URL(req.url ?? "/", "http://nexus").pathname).startsWith("/v1/deployer/");
+    if (caller === null || (workerRoute
+      ? !isReporter(registry, options.deployment, caller, req.headers.authorization)
+      : !allowed.has(caller))) throw new HttpError(403, "caller is not a tailnet node this control plane allows");
     // whois names the machine, not the program, so a web page open on an allowed laptop is that laptop too.
     // It can neither send a JSON content type cross-origin without a preflight, which this API never answers,
     // nor reach the API under its own name.
@@ -718,6 +742,10 @@ export async function startApi(options: ApiOptions): Promise<Api> {
   }
 
   async function handle(req: IncomingMessage, res: ServerResponse) {
+    if (req.method === "GET" && req.url === "/v1/health" && req.socket.remoteAddress === req.socket.localAddress) {
+      res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ commit: runningCommit }));
+      return;
+    }
     const caller = await admit(req);
     if (req.method !== "GET" && req.headers["content-type"]?.split(";")[0]?.trim() !== "application/json") {
       throw new HttpError(415, "requests that change state must have content-type application/json");
@@ -725,6 +753,35 @@ export async function startApi(options: ApiOptions): Promise<Api> {
 
     const url = new URL(req.url ?? "/", "http://nexus");
     const path = decodeURIComponent(url.pathname);
+    if (path === "/v1/release" && req.method === "GET") return send(res, 200, releaseView(registry, options.deployment?.self));
+    if (path === "/v1/release" && req.method === "PUT") {
+      if (!canDeploy(registry, options.deployment, caller)) throw new HttpError(403, "caller may not deploy; infrastructure nodes and pylons cannot deploy");
+      const input = parse(z.strictObject({ commit: z.union([z.literal("main"), commitSchema]) }), await readJson(req));
+      const commit = input.commit === "main" ? await (options.deployment?.resolveMain ?? resolveMain)() : input.commit;
+      if (draining()) throw new HttpError(409, "control plane is draining; wait for this deployment to finish");
+      registry.setDesiredRelease({ commit: commitSchema.parse(commit), requestedBy: caller, requestedAt: Date.now() });
+      return send(res, 200, releaseView(registry, options.deployment?.self));
+    }
+    if (path.startsWith("/v1/deployer/")) {
+      const node = registry.nodes().find((n) => n.tailnetNodeId === caller)!;
+      if (path === "/v1/deployer/release" && req.method === "GET") return send(res, 200, releaseView(registry, options.deployment?.self));
+      if (path === "/v1/deployer/report" && req.method === "POST") {
+        const report = parse(reportSchema, await readJson(req));
+        if (report.role === "control" && caller !== options.deployment?.self) throw new HttpError(403, "only the control node reports control health");
+        registry.reportRelease({ ...report, node: node.name, observedAt: Date.now() });
+        return send(res, 200, { ok: true });
+      }
+      if (path === "/v1/deployer/drain" && req.method === "POST") {
+        if (caller !== options.deployment?.self) throw new HttpError(403, "only the control node drains");
+        const body = parse(z.strictObject({ commit: commitSchema, release: z.boolean().optional(), hold: z.boolean().optional() }), await readJson(req));
+        if (body.commit !== registry.desiredRelease()?.commit) throw new HttpError(409, "release was superseded");
+        registry.setDrain(body.release ? null : { commit: body.commit, expiresAt: Date.now() + 120_000, locked: registry.drain()?.locked ?? false });
+        const idle = body.release ? false : !await turnsRunning();
+        if (body.hold && idle) registry.setDrain({ commit: body.commit, expiresAt: Date.now() + 120_000, locked: true });
+        return send(res, 200, { idle, expiresAt: registry.drain()?.expiresAt ?? null });
+      }
+      throw new HttpError(404, `no deployer route ${path}`);
+    }
     const view = req.method === "GET" ? await page(path, url.searchParams) : undefined;
     if (view !== undefined) return void res.writeHead(view.status, view.headers).end(view.body);
     for (const [pattern, frames] of streams) {
@@ -741,7 +798,12 @@ export async function startApi(options: ApiOptions): Promise<Api> {
     if (matches.length === 0) throw new HttpError(404, `no route ${path}`);
     const match = matches.find((r) => r.method === req.method);
     if (match === undefined) throw new HttpError(405, `${req.method} is not allowed on ${path}`);
-    const reply = await match.route(match.m, { query: url.searchParams, caller, body: (empty) => readJson(req, empty) });
+    const startsTurn = req.method === "POST" && (path === "/v1/threads" || /^\/v1\/threads\/[^/]+\/(messages|retry)$/.test(path));
+    if (startsTurn && draining()) throw new HttpError(409, "control plane is draining for deployment; retry after the release completes");
+    if (startsTurn) startingTurns++;
+    let reply: Reply;
+    try { reply = await match.route(match.m, { query: url.searchParams, caller, body: (empty) => readJson(req, empty) }); }
+    finally { if (startsTurn) startingTurns--; }
     if (reply.file !== undefined) sendFile(res, reply.file, reply.type);
     else if (reply.body === undefined) res.writeHead(reply.status).end();
     else send(res, reply.status, reply.body);
@@ -827,7 +889,7 @@ export async function startApi(options: ApiOptions): Promise<Api> {
   }, (req, res) => {
     handle(req, res).catch((err: unknown) => {
       if (res.headersSent) return res.destroy(err as Error);
-      send(res, err instanceof HttpError ? err.status : 500, { error: (err as Error).message });
+      send(res, err instanceof HttpError ? err.status : err instanceof DeployDraining ? 409 : 500, { error: (err as Error).message });
     });
   });
   server.on("upgrade", (req: IncomingMessage, socket: Duplex, head: Buffer) => {
@@ -835,7 +897,7 @@ export async function startApi(options: ApiOptions): Promise<Api> {
     socket.on("error", () => undefined);
     upgraded.add(socket);
     socket.once("close", () => upgraded.delete(socket));
-    upgrade(req, socket, head).catch((err: unknown) => refuseUpgrade(socket, err instanceof HttpError ? err.status : 500, (err as Error).message));
+    upgrade(req, socket, head).catch((err: unknown) => refuseUpgrade(socket, err instanceof HttpError ? err.status : err instanceof DeployDraining ? 409 : 500, (err as Error).message));
   });
   await new Promise<void>((resolve, reject) => {
     server.once("error", reject);

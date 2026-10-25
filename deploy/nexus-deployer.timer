@@ -1,0 +1,10 @@
+[Unit]
+Description=Poll the desired Nexus release
+
+[Timer]
+OnBootSec=30s
+OnUnitInactiveSec=15s
+Unit=nexus-deployer.service
+
+[Install]
+WantedBy=timers.target

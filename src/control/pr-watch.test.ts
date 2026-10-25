@@ -314,3 +314,22 @@ test("rediscovery reactivates a reopened PR without replaying its consumed feedb
   await restarted.poll();
   assert.equal(f.messages.length, 3);
 });
+
+test("deployment drain retains PR-watch feedback for delivery after the barrier releases", async (t) => {
+  const { turnGate } = await import("./drain.ts");
+  const f = fixture();
+  t.after(() => f.registry.close());
+  let draining = true;
+  const gate = turnGate(() => draining);
+  const watcher = prWatcher({ ...f.options, harness: { send: (...args) => gate.run(() => f.options.harness.send(...args)) } });
+  f.snapshot.failures.push({ id: "failed:drain", text: "failed while draining" });
+  await watcher.poll();
+  assert.equal(f.messages.length, 0);
+  const pending = f.registry.prWatch(f.id)!.pending;
+  assert.ok(pending);
+  draining = false;
+  await watcher.poll();
+  assert.equal(f.messages.length, 1);
+  assert.equal(f.messages[0]![2], pending.id);
+  assert.equal(f.registry.prWatch(f.id)!.pending, null);
+});

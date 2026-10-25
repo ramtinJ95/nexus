@@ -1,3 +1,4 @@
+import { releaseOutcome, type ReleaseView } from "../deploy/model.ts";
 /**
  * The Mac's nexus CLI: the control plane's API as commands, for a human at a shell and for the Claude Code and pi
  * integrations, which shell out to it. docs/cli.md is the contract: the commands, their JSON, the exit codes and
@@ -21,7 +22,7 @@ import type { WebSocket } from "ws";
 import { attachTerminal, processTty } from "./attach.ts";
 import { call, CliError, exitCodes, follow, upgrade, type Endpoint, type HostPort } from "./transport.ts";
 
-const version = "0.12.0";
+const version = "0.13.0";
 const defaults = { url: "http://rj-firebat.tailc817d3.ts.net:7470", socks: "localhost:1055" };
 const configFile = () => join(homedir(), ".config", "nexus", "cli.json");
 
@@ -48,6 +49,8 @@ const usage = `nexus ${version}, the Nexus control plane from this Mac
   nexus projects
   nexus project add <id> (<repo-url> | --scratch) --node N [--branch B] [--cpus n] [--memory GiB] [--disk GiB]
                     [--allow-host HOST]... [--login claude|chatgpt]... [--secret NAME:HOST[,HOST]...]...
+  nexus deploy <commit|main> [--wait]
+  nexus release
   nexus nodes
   nexus --version
 
@@ -477,7 +480,39 @@ async function watch(api: Api, follow: Follow, id: string, intervalMs: number, j
   }
 }
 
+function releaseText(view: ReleaseView): string {
+  return [`Desired: ${view.desired === null ? "none" : `${view.desired.commit} by ${view.desired.requestedBy} at ${new Date(view.desired.requestedAt).toISOString()}`}`,
+    ...view.nodes.map((r) => `${r.node} ${r.role}: ${r.commit ?? "unknown"} ${r.state}${r.reason === null ? "" : `: ${r.reason}`}`)].join("\n");
+}
+
 const commands: Readonly<Record<string, Command>> = {
+  release: {
+    args: [0, 0],
+    async run(api) {
+      const view = await api("GET", "/v1/release") as ReleaseView;
+      return { json: view, text: releaseText(view) };
+    },
+  },
+  deploy: {
+    args: [1, 1], options: { wait: { type: "boolean" } },
+    async run(api, [commit], values) {
+      if (commit !== "main" && !/^[0-9a-f]{40}$/.test(commit!)) throw new CliError("invalid", "deploy takes main or a full lower-case commit hash");
+      let view = await api("PUT", "/v1/release", { commit }) as ReleaseView;
+      const target = view.desired!.commit;
+      const deadline = Date.now() + 30 * 60_000;
+      while (values.wait === true) {
+        const outcome = releaseOutcome(view, target);
+        if (outcome === "healthy") break;
+        if (outcome === "failed") throw new CliError("failed", releaseText(view));
+        if (outcome === "superseded") throw new CliError("conflict", `deployment superseded\n${releaseText(view)}`);
+        if (Date.now() >= deadline) throw new CliError("failed", `deployment wait timed out\n${releaseText(view)}`);
+        await sleep(1_000);
+        try { view = await api("GET", "/v1/release") as ReleaseView; }
+        catch (error) { if (!(error instanceof CliError) || error.kind !== "unreachable") throw error; }
+      }
+      return { json: view, text: releaseText(view) };
+    },
+  },
   threads: {
     args: [0, 0],
     options: { project: { type: "string" }, all: { type: "boolean" } },

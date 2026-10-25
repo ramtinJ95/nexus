@@ -99,10 +99,19 @@ These parts come from IgorWarzocha's `howaboua-pi-stuff`, which is MIT-licensed:
 
 Nexus lives in its own repository, `ramtinJ95/nexus` on GitHub.
 
+## Release reconciliation and caller checks
+
+The release planner in `src/deploy/plan.ts` has the same boundary as pylon reconciliation: desired and observed state in, a decision out. Root workers poll control directly, validate main ancestry in their own clone, and reconcile each installed role. The control plane goes first; probes require its fresh healthy desired-release report. Link and unit rollback is journaled locally so recovery does not depend on the API that may have failed.
+
+Release setting is separate from ordinary caller admission: callers must also be in `deployers`, which defaults off. Every infrastructure node, including self, is excluded even if listed. Thus guest egress carrying a host's tailnet identity cannot deploy. The pylon bridge has no deploy operation and no general-purpose API forwarding. Root node polling additionally requires a per-node token whose digest is in control.json, and verifies control's tailnet identity before sending the token. See [deployment](../deploy/README.md) for provisioning and the trust limits of machine identity.
+
+A persistent drain lease blocks API and background PR-watch turn entry, and counts in-flight admission before examining committed harness runs and queues. It refuses at timeout rather than interrupting an in-flight tool. The final idle fence seals the lease before the link switch so it cannot expire underneath interrupted-install recovery. A fixed root supervisor and bootstrap worker remain outside automatic link updates, so a bad candidate worker cannot stop a later release fixing it.
+
 ## Decisions
 
 | Date | Decision |
 |---|---|
+| 2026-10-23 | Root release reconciliation uses direct tailnet plus root-token polling, external-node-only deployers, control-first activation, a conservative drain barrier and a fixed recovery supervisor |
 | 2026-10-22 | The probe, project config and template image contracts in `contracts/` are agreed |
 | 2026-10-22 | Nexus copies Amp's design and uses no part of Amp's stack, including its file names and environment variables |
 | 2026-10-22 | pi-sandbox becomes `pylon-vm`, a hard fork owned by Nexus. pi-sandbox stays the design reference |

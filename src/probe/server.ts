@@ -1,3 +1,4 @@
+import { runningCommit } from "../deploy/health.ts";
 /**
  * The probe's HTTP server: lifecycle jobs and observations. It keeps job results and applied live hashes in
  * memory only. Everything durable is the backend's, so a restart loses nothing a later job cannot rebuild.
@@ -409,6 +410,10 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
   }
 
   async function handle(req: IncomingMessage, res: ServerResponse) {
+    if (req.method === "GET" && req.url === "/v1/health" && req.socket.remoteAddress === req.socket.localAddress) {
+      res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ commit: runningCommit }));
+      return;
+    }
     const path = new URL(req.url ?? "/", "http://probe").pathname;
     const route = (Object.keys(routeAuth) as (keyof typeof routeAuth)[]).find((prefix) => path === prefix || path.startsWith(`${prefix}/`));
     if (route === undefined) return send(res, 404, `no route ${path}`);
