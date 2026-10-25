@@ -22,7 +22,7 @@ import type { WebSocket } from "ws";
 import { attachTerminal, processTty } from "./attach.ts";
 import { call, CliError, exitCodes, follow, upgrade, type Endpoint, type HostPort } from "./transport.ts";
 
-const version = "0.13.0";
+const version = "0.14.0";
 const defaults = { url: "http://rj-firebat.tailc817d3.ts.net:7470", socks: "localhost:1055" };
 const configFile = () => join(homedir(), ".config", "nexus", "cli.json");
 
@@ -47,6 +47,9 @@ const usage = `nexus ${version}, the Nexus control plane from this Mac
   nexus abort|retry|retry-pylon|wake <thread>
   nexus archive|unarchive|delete <thread>
   nexus projects
+  nexus project edit <id> [--node N] [--branch B] [--cpus n] [--memory GiB] [--disk GiB]
+    [--allow-host HOST]... [--login claude|chatgpt]... [--secret NAME:HOST[,HOST]...]...
+    [--clear-hosts] [--clear-logins] [--clear-secrets] [--git-name NAME --git-email EMAIL | --clear-git-identity]
   nexus project add <id> (<repo-url> | --scratch) --node N [--branch B] [--cpus n] [--memory GiB] [--disk GiB]
                     [--allow-host HOST]... [--login claude|chatgpt]... [--secret NAME:HOST[,HOST]...]...
   nexus deploy <commit|main> [--wait]
@@ -162,6 +165,7 @@ function detailText({ thread: t, pylon: p, agent, sessions, previews, ports, out
     `project: ${t.project}`,
     `status: ${t.status}${t.agentTurnRunning ? ", agent working" : ""}`,
     `pylon: ${p.id} on ${p.node}, ${p.actualState}${observed}`,
+    ...(p.grantsOutdated ? ["grants: older than project; start a new thread to apply current grants (archive/unarchive keeps these grants)"] : []),
     ...p.failed === null ? [] : [`failed: ${p.failed}`],
     ...p.retryRefused === null ? [] : [`retry refused: ${p.retryRefused}`],
     ...(agent?.parkedTasks ?? 0) === 0 ? [] : [`parked tasks: ${agent!.parkedTasks}. \`nexus retry ${t.id}\` runs them again`],
@@ -674,6 +678,37 @@ const commands: Readonly<Record<string, Command>> = {
       return { json: projects, text: projects.length === 0 ? "No projects." : table(projects.map((p) => [p.id, `node ${p.defaultNode}`, `branch ${p.defaultBranch}`, p.repoUrl ?? "scratch"])) };
     },
   },
+  "project edit": {
+    args: [1, 1],
+    options: {
+      node: { type: "string" }, branch: { type: "string" }, cpus: { type: "string" }, memory: { type: "string" }, disk: { type: "string" },
+      "allow-host": { type: "string", multiple: true }, login: { type: "string", multiple: true }, secret: { type: "string", multiple: true },
+      "clear-hosts": { type: "boolean" }, "clear-logins": { type: "boolean" }, "clear-secrets": { type: "boolean" },
+      "git-name": { type: "string" }, "git-email": { type: "string" }, "clear-git-identity": { type: "boolean" },
+    },
+    async run(api, [id], v) {
+      const patch: Record<string, unknown> = {};
+      for (const [flag, field] of [["node", "defaultNode"], ["branch", "defaultBranch"]] as const) {
+        if (v[flag] !== undefined) patch[field] = str(v, flag);
+      }
+      if (["cpus", "memory", "disk"].some((flag) => v[flag] !== undefined)) {
+        const projects = await api("GET", "/v1/projects") as Project[];
+        const previous = projects.find((p) => p.id === id);
+        if (previous === undefined) throw new CliError("not-found", `no project ${id}`);
+        patch.resources = { cpus: int(str(v, "cpus"), "--cpus", previous.resources.cpus), memoryGiB: int(str(v, "memory"), "--memory", previous.resources.memoryGiB), diskGiB: int(str(v, "disk"), "--disk", previous.resources.diskGiB) };
+      }
+      for (const [flag, clear, field] of [["allow-host", "clear-hosts", "allowedHosts"], ["login", "clear-logins", "logins"], ["secret", "clear-secrets", "secrets"]] as const) {
+        if (v[clear] && v[flag] !== undefined) throw new CliError("invalid", `--${clear} conflicts with --${flag}`);
+        if (v[clear] || v[flag] !== undefined) patch[field] = flag === "secret" ? strs(v, flag).map(secretGrantOf) : strs(v, flag);
+      }
+      const name = str(v, "git-name"), email = str(v, "git-email");
+      if ((name === undefined) !== (email === undefined) || (v["clear-git-identity"] && name !== undefined)) throw new CliError("invalid", "use --git-name with --git-email, or --clear-git-identity");
+      if (v["clear-git-identity"]) patch.gitIdentity = null;
+      else if (name !== undefined) patch.gitIdentity = { name, email };
+      const p = await api("PATCH", `/v1/projects/${encodeURIComponent(id!)}`, patch) as Project;
+      return { json: p, text: `Updated project ${p.id}. Existing threads keep their boot settings and grants; start a new thread to apply them.` };
+    },
+  },
   "project add": {
     args: [1, 2],
     options: {
@@ -682,7 +717,7 @@ const commands: Readonly<Record<string, Command>> = {
       scratch: { type: "boolean" },
     },
     async run(api, [id, url], v) {
-      // A project cannot be changed or removed, so a forgotten URL must not quietly make a scratch project.
+      // A forgotten URL must not quietly make a scratch project.
       if ((url === undefined) === (v.scratch !== true)) throw new CliError("invalid", "project add takes a <repo-url> or --scratch, and not both");
       const repoUrl = url ?? null;
       const resources = { cpus: int(str(v, "cpus"), "--cpus", 2), memoryGiB: int(str(v, "memory"), "--memory", 4), diskGiB: int(str(v, "disk"), "--disk", 10) };

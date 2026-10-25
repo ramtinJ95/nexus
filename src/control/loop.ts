@@ -13,7 +13,7 @@
  */
 import { setTimeout as delay } from "node:timers/promises";
 import { desiredPhase, type RegistryWrite } from "../reconcile.ts";
-import { linkedPort, liveHashOf } from "../project.ts";
+import { linkedPort, liveHashOf, type GitIdentity } from "../project.ts";
 import { tick, type TickContext } from "../tick.ts";
 import type { NodeName, NodeObservation, ProbeClient, ProbeError, ProbeEvent, PylonId, PylonObservation } from "../protocol.ts";
 import type { ArtifactId } from "../images.ts";
@@ -28,6 +28,7 @@ export type Ingest = (event: ProbeEvent, node: NodeName, known: ReadonlyMap<Pylo
 
 export interface LoopOptions {
   registry: Registry;
+  gitIdentity?: GitIdentity | undefined;
   /** One client per registry node. */
   probes: readonly ProbeClient[];
   ingest: Ingest;
@@ -113,6 +114,14 @@ export function startLoop(options: LoopOptions): Loop {
 
   /** The pylon with the LiveSpec its records give now, saved if that changed. */
   function withLive(stored: StoredPylon, thread: Thread): StoredPylon {
+    const observed = observation(stored.node)?.pylons.find((p) => p.pylonId === stored.pylonId);
+    if (observation(stored.node) !== null && (observed === undefined || observed.phase === "stopped") && stored.submitted === null) {
+      const gitIdentity = registry.project(thread.project)!.gitIdentity ?? options.gitIdentity;
+      if (JSON.stringify(gitIdentity) !== JSON.stringify(stored.boot.gitIdentity)) {
+        stored = { ...stored, boot: { ...stored.boot, gitIdentity } };
+        registry.savePylon(stored);
+      }
+    }
     const live = pylonLive(stored, registry.project(thread.project)!, registry.previews(stored.pylonId));
     const liveHash = liveHashOf(live);
     if (liveHash === stored.liveHash) return stored;

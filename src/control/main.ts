@@ -8,7 +8,7 @@ import { readFile } from "node:fs/promises";
 import { isAbsolute } from "node:path";
 import { z } from "zod";
 import { connectProbe, type NodeName, type TailnetNodeId } from "../protocol.ts";
-import { gitUrl } from "../project.ts";
+import { gitIdentitySchema, gitUrl } from "../project.ts";
 import { ingest } from "../reconcile.ts";
 import { linuxTailscaledSocket, localApiWhois } from "../tailscale.ts";
 import type { Models } from "@earendil-works/pi-ai/models";
@@ -30,6 +30,7 @@ export const defaultPreviewPorts = { first: 10200, last: 10999 } as const;
 
 const configSchema = z.strictObject({
   db: z.string().min(1),
+  gitIdentity: gitIdentitySchema.optional(),
   github: z.strictObject({ tokenFile: absolutePath }).optional(),
   listen: z.strictObject({
     host: z.string().min(1),
@@ -98,7 +99,7 @@ export async function startControlPlane(config: ControlPlaneConfig, models: Mode
     registry.upsertNode({ name: node.name as NodeName, tailnetHost: node.tailnetHost, tailnetNodeId: node.tailnetNodeId as TailnetNodeId });
   }
   const probes = config.nodes.map((n) => connectProbe(n.name as NodeName, n.tailnetHost, n.tailnetNodeId as TailnetNodeId, { whois }));
-  const loop = startLoop({ registry, probes, ingest, previewPorts: config.previewPorts });
+  const loop = startLoop({ registry, probes, ingest, previewPorts: config.previewPorts, gitIdentity: config.gitIdentity });
   const wakeThread = (t: Thread) => { void loop.wake(registry.pylon(t.pylonId)!.node); };
 
   const conversing = registry.threads().filter((t) => t.conversationId !== null);
@@ -139,6 +140,7 @@ export async function startControlPlane(config: ControlPlaneConfig, models: Mode
     allowed: new Set([config.self.tailnetNodeId, ...config.callers] as TailnetNodeId[]),
     hostnames: new Set(config.listen.hostnames),
     dotfiles: config.dotfiles,
+    gitIdentity: config.gitIdentity,
     harness,
     wake: (node) => { void loop.wake(node); },
     probes: new Map(probes.map((probe) => [probe.node, probe])),
