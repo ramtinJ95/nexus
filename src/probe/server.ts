@@ -14,13 +14,14 @@ import type { PortableArtifactId } from "../images.ts";
 import {
   artifactHeaders, encodeProbeEvent, encodeSubmitReply, fetchArtifact, jobDeadlineMs, probePort, jobSubject, parseJobEnvelope, parsePylonCommand, parseStreamRequest, routeAuth, serveByteStream, streamUpgradeResponse,
   type Job, type JobEnvelope, type JobId, type JobStatus, type LiveHash, type NodeName, type NodeObservation,
-  type DeclaredOutput, type ListeningFact, type ProbeAuthConfig, type ProbeEvent, type PylonCommand, type PylonId, type PylonObservation, type ServiceFact, type SessionFact, type Subject,
+  type DeclaredOutput, type GitFacts, type ListeningFact, type ProbeAuthConfig, type ProbeEvent, type PylonCommand, type PylonId, type PylonObservation, type ServiceFact, type SessionFact, type Subject,
 } from "../protocol.ts";
 import type { ServiceName } from "../project.ts";
 import { attachedTerminals, sessionFacts } from "../sessions.ts";
 import type { Whois } from "../tailscale.ts";
 import { listOutputs } from "../outputs.ts";
 import { listeningFacts } from "../listening.ts";
+import { gitFacts } from "../git-facts.ts";
 import { startGateway } from "./gateway.ts";
 import { createPylonApi, type HostBridge } from "./pylon-api.ts";
 import { createTailscaleServe, parseServeStatus, readRoutes, type HttpsGet, type TailscaleCli } from "./serve.ts";
@@ -69,6 +70,7 @@ const maxBodyBytes = 1 << 20;
 const sessionReadTimeoutMs = 3_000;
 /** Longer, because a pylon's supervisor checks each service's health to answer. */
 const serviceReadTimeoutMs = 5_000;
+const gitPollMs = 60_000;
 
 /** A probe without a preview gateway. An empty set is already converged. */
 const noPreviews: ProbeDeps["serve"] = {
@@ -258,8 +260,27 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
     }
   }
 
+  const gitReads = new Map<PylonId, { bootedAt: string; at: number; facts: GitFacts | null }>();
+  const unreadGit = new Set<PylonId>();
+  async function git(pylonId: PylonId, bootedAt: string): Promise<GitFacts | null> {
+    const previous = gitReads.get(pylonId);
+    const at = Date.now();
+    if (previous?.bootedAt === bootedAt && at - previous.at < gitPollMs) return previous.facts;
+    let facts: GitFacts | null = null;
+    try {
+      facts = await gitFacts(backend.guest(pylonId));
+      unreadGit.delete(pylonId);
+    } catch {
+      if (!unreadGit.has(pylonId)) log(`${pylonId} git: checkout facts unavailable; retrying on the next git poll`);
+      unreadGit.add(pylonId);
+    }
+    gitReads.set(pylonId, { bootedAt, at, facts });
+    return facts;
+  }
+
   async function observation(p: BackendPylon): Promise<PylonObservation> {
     const { pylonId } = p;
+    if (p.vm !== "running") gitReads.delete(pylonId);
     switch (p.vm) {
       case "booting": case "stopping": case "deleting": return { pylonId, phase: p.vm };
       case "stopped":
@@ -275,8 +296,7 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
         return {
           pylonId, phase: "running", liveHash: liveHashes.get(pylonId) ?? null, bootedAt: p.bootedAt,
           bootedFrom: { image: p.image, checkpoint: p.checkpoint },
-          // The other guest facts need guest operations, which this slice does not have.
-          services: await services(pylonId), listening: ports, previews: (published.get(pylonId) ?? []).map((preview) => ({ ...preview, ready: true })), sessions: await sessions(pylonId), git: null, declaredOutputs: await declaredOutputs(pylonId),
+          services: await services(pylonId), listening: ports, previews: (published.get(pylonId) ?? []).map((preview) => ({ ...preview, ready: true })), sessions: await sessions(pylonId), git: await git(pylonId, p.bootedAt), declaredOutputs: await declaredOutputs(pylonId),
           attachedClients: await attached(pylonId),
         };
       }
@@ -307,6 +327,9 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
     // Jobs before pylons, so the pylons show the result of every job listed as finished. See NodeObservation.jobs.
     const jobs = retainedJobs();
     const [pylons, artifacts, disk] = await Promise.all([backend.list(), backend.artifacts.list(), statfs("/")]);
+    const present = new Set(pylons.map((p) => p.pylonId));
+    for (const id of gitReads.keys()) if (!present.has(id)) gitReads.delete(id);
+    for (const id of unreadGit) if (!present.has(id)) unreadGit.delete(id);
     return {
       node,
       observedAt: new Date().toISOString(),
