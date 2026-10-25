@@ -530,7 +530,7 @@ function inspector(d: ThreadDetail, node: NodeRecord, now: number): Html {
 <div class="seg-bar" role="radiogroup" aria-label="Inspector">${panes.map(([pane, label, glyph]) => html`<label class="seg-tab"><input type="radio" name="pane" value="${pane}"${pane === "changes" && " checked"}>${icon(glyph)}<span class="seg-label">${label}</span>${pane === "previews" && html`<span class="count" id="count-previews" data-live>${listed}</span>`}</label>`)}</div>
 <section class="ipane" id="pane-changes" aria-labelledby="changes-h" data-thread="${d.thread.id}">
 <h2 id="changes-h" class="vh">Changes</h2>
-<div class="ch-head"><label class="switch"><input type="checkbox" id="changes-head"><span class="switch-label">Only uncommitted</span></label><button type="button" class="icon-btn" id="changes-reload" aria-label="Read the changes again" title="Read the changes again">↻</button></div>
+<div class="ch-head"><label class="switch"><input type="checkbox" id="changes-head"><span class="switch-label">Only uncommitted</span></label><label class="switch"><input type="checkbox" id="changes-turn"><span class="switch-label">Latest turn</span></label><button type="button" class="icon-btn" id="changes-reload" aria-label="Read the changes again" title="Read the changes again">↻</button></div>
 <p class="ch-base dim small" id="changes-base">Since the pylon booted</p>
 <div id="changes-body"><p class="empty">The changes show once the page's script loads.</p></div>
 </section>

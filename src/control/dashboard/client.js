@@ -530,7 +530,7 @@ const changesPane = document.getElementById("pane-changes");
 const thread = changesPane?.dataset.thread;
 const baseKey = "nexus.base";
 const checkout = {
-  base: localStorage.getItem(baseKey) === "head" ? "head" : "start",
+  base: ["head", "turn"].includes(localStorage.getItem(baseKey)) ? localStorage.getItem(baseKey) : "start",
   /** The last reply, kept so a fold the reader closed and the open tabs survive a read. */
   changes: null,
   /** Whether the reader asked to wake a paused pylon to read it, so the read happens once it runs. */
@@ -543,7 +543,7 @@ const factsNow = () => {
   const span = document.querySelector("#facts span");
   return span === null ? null : { pylon: span.dataset.pylon, turn: span.dataset.turn === "true", agentAt: span.dataset.agentAt, status: span.dataset.threadStatus };
 };
-const baseLabel = () => checkout.base === "head" ? "Since the last commit" : "Since the pylon booted";
+const baseLabel = () => checkout.base === "turn" ? "Since the latest turn began" : checkout.base === "head" ? "Since the last commit" : "Since the pylon booted";
 
 function showChanges(...nodes) {
   document.getElementById("changes-body")?.replaceChildren(...present(nodes));
@@ -649,7 +649,7 @@ function renderChanges() {
   const commit = base.commit === null ? (checkout.base === "head" ? "no commit yet" : "an empty repository") : base.commit.slice(0, 7);
   document.getElementById("changes-base").textContent = `${baseLabel()}, ${commit}`;
   if (files.length === 0) {
-    return showChanges(el("p", { className: "empty", textContent: checkout.base === "head" ? "No uncommitted changes." : "Nothing has changed since the pylon booted." }));
+    return showChanges(el("p", { className: "empty", textContent: checkout.base === "turn" ? "Nothing has changed since the latest turn began." : checkout.base === "head" ? "No uncommitted changes." : "Nothing has changed since the pylon booted." }));
   }
   const { root, merged } = treeOf(files);
   const branch = (dir, path) => {
@@ -700,10 +700,21 @@ function noticeFacts() {
 
 if (changesPane !== null) {
   const head = document.getElementById("changes-head");
+  const turn = document.getElementById("changes-turn");
+  turn.checked = checkout.base === "turn";
   head.checked = checkout.base === "head";
   document.getElementById("changes-base").textContent = baseLabel();
   head.addEventListener("change", () => {
+    turn.checked = false;
     checkout.base = head.checked ? "head" : "start";
+    localStorage.setItem(baseKey, checkout.base);
+    checkout.changes = null;
+    document.getElementById("changes-base").textContent = baseLabel();
+    void readChanges();
+  });
+  turn.addEventListener("change", () => {
+    head.checked = false;
+    checkout.base = turn.checked ? "turn" : "start";
     localStorage.setItem(baseKey, checkout.base);
     checkout.changes = null;
     document.getElementById("changes-base").textContent = baseLabel();
@@ -826,7 +837,7 @@ async function readDiff(path) {
   if (file === undefined || fileView === null) return;
   const read = ++diffRead;
   const head = el("header", { className: "fv-head" }, badge(file.status), el("span", { className: "fv-path", textContent: file.path }),
-    el("span", { className: "dim small", textContent: checkout.base === "head" ? "vs last commit" : "vs boot" }), counts(file.additions, file.deletions));
+    el("span", { className: "dim small", textContent: checkout.base === "turn" ? "vs turn start" : checkout.base === "head" ? "vs last commit" : "vs boot" }), counts(file.additions, file.deletions));
   // A diff reaches into the pylon as the changes do, so a paused one is woken only when the reader says to, and
   // the read of the changes that wakes it reads the open diff again.
   const facts = factsNow();
