@@ -223,6 +223,13 @@ test("a lost terminal is unreachable, and a conflict when the thread was archive
   crashed.exit(3);
   await d.closed;
   assert.deepEqual(d.received.at(-1), { type: "exit", code: 3 }, "on a thread that is still active, any other exit is the program's");
+
+  const dropped = fakeTerminal();
+  const e = await attach(fakeDoor([dropped]).door);
+  await e.messages(1);
+  dropped.exit(255);
+  await e.closed;
+  assert.equal((e.received.at(-1) as { kind: string }).kind, "unreachable", "but 255 is ssh's lost connection to the guest, not Herdr's");
 });
 
 test("a delete ends the attach as a conflict, and a stopping control plane closes it with 1001", async () => {

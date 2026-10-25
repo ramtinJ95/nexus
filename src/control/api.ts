@@ -745,6 +745,8 @@ export async function startApi(options: ApiOptions): Promise<Api> {
   const sockets = new WebSocketServer({ noServer: true, maxPayload: 1 << 20, perMessageDeflate: false });
   /** Attached terminals, which close() ends, because closeAllConnections does not reach upgraded sockets. */
   const attached = new Set<{ end(why: Ending): void; served: Promise<void> }>();
+  /** Set by close(), so an upgrade still waiting on whois opens no terminal close() would miss. */
+  let stopping = false;
 
   /**
    * GET /v1/threads/<thread>/attach as a WebSocket. Every refusal is an HTTP reply before the 101, so a client maps it
@@ -752,6 +754,7 @@ export async function startApi(options: ApiOptions): Promise<Api> {
    */
   async function upgrade(req: IncomingMessage, socket: Duplex, head: Buffer) {
     await admit(req);
+    if (stopping) throw new HttpError(503, "the control plane is stopping");
     // CORS does not guard a WebSocket handshake, and previews are served under the API's hostname on other ports, so
     // a preview's page could open a terminal from the browser of anyone allowed. A browser always sends Origin.
     const origin = req.headers.origin;
@@ -779,6 +782,7 @@ export async function startApi(options: ApiOptions): Promise<Api> {
         sockets.handleUpgrade(req, socket, head, resolve);
       });
       if (ws === null) return;
+      if (stopping) stop.abort("stopping" satisfies Ending);
       const session = { end: (why: Ending) => stop.abort(why), served: serveAttach(ws, door(t, probe), request, stop.signal, timing) };
       attached.add(session);
       await session.served.finally(() => attached.delete(session));
@@ -811,11 +815,13 @@ export async function startApi(options: ApiOptions): Promise<Api> {
   return {
     port: address.port,
     async close() {
+      stopping = true;
       const closed = new Promise<void>((resolve) => server.close(() => resolve()));
       server.closeAllConnections();
       for (const session of attached) session.end("stopping");
       // Each hang-up waits for its node's probe, and a node that stopped answering would hold the close forever.
       await Promise.race([Promise.all([...attached].map((session) => session.served)), sleep(5_000, undefined, { ref: false })]);
+      for (const ws of sockets.clients) ws.terminate();
       return closed;
     },
   };

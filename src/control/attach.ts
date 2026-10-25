@@ -116,9 +116,10 @@ export async function serveAttach(ws: WebSocket, door: PylonDoor, opening: Attac
     await input;
     if (endedFirst) return await finish(left.signal.aborted ? null : { type: "error", ...endedBy() }, closeCode());
     if (end.kind === "exited" && end.code === 0) return await finish({ type: "exit", code: 0 });
-    // An archive pauses the pylon under the terminal, which a pylon VM's ssh reports as its own exit 255.
+    // A pylon VM's stream is ssh to the guest, which exits 255 when its connection ends, as when an archive pauses
+    // the pylon or the guest goes away. So a 255 is the link's, not Herdr's.
     const look = door.look();
-    if (look.kind !== "over" && end.kind === "exited") return await finish({ type: "exit", code: end.code });
+    if (look.kind !== "over" && end.kind === "exited" && end.code !== sshLost) return await finish({ type: "exit", code: end.code });
     await finish({
       type: "error",
       ...look.kind === "over" ? look.error : {
@@ -171,6 +172,8 @@ export async function serveAttach(ws: WebSocket, door: PylonDoor, opening: Attac
 
 /** How the wait for a terminal ended: with one, opened at `asked`, with why none opens, or with the attach itself. */
 type Waited = { kind: "opened"; terminal: Terminal; asked: AttachRequest } | { kind: "refused"; error: AttachError } | { kind: "ended" };
+
+const sshLost = 255;
 
 /** A relay already gone needs no hang-up, and `done` says how it ended. */
 const hangUp = (terminal: Terminal) => terminal.hangUp().catch(() => undefined);

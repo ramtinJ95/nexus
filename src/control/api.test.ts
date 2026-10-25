@@ -49,6 +49,8 @@ async function setup(t: import("node:test").TestContext, options: { dotfiles?: t
   const registry = openRegistry(join(dir, `${randomUUID()}.db`));
   registry.upsertNode({ name: node, tailnetHost: "rj-firebat.tail.ts.net", tailnetNodeId: "nFIREBAT" as TailnetNodeId });
   let caller: TailnetNodeId | null = laptop;
+  /** Every whois waits for it, so a test can hold a request at admission. */
+  let admitted = Promise.resolve();
   const woken: NodeName[] = [];
   const fake = fakeHarness();
   const { harness, calls } = fake;
@@ -68,7 +70,10 @@ async function setup(t: import("node:test").TestContext, options: { dotfiles?: t
   const api = await startApi({
     registry, host: "127.0.0.1", port: 0,
     // Every loopback caller is whoever the test says. Tests never ask tailscaled.
-    whois: async () => caller,
+    whois: async () => {
+      await admitted;
+      return caller;
+    },
     allowed: new Set([laptop]),
     hostnames: new Set(["127.0.0.1"]),
     dotfiles: options.dotfiles ?? dotfiles,
@@ -117,6 +122,15 @@ async function setup(t: import("node:test").TestContext, options: { dotfiles?: t
   return {
     registry, call, raw, woken, calls, commands, streams, fake, port: api.port, close: () => api.close(),
     callAs(id: TailnetNodeId | null) { caller = id; },
+    /** Holds every request at whois until the returned function is called. */
+    holdWhois() {
+      const held = Promise.withResolvers<void>();
+      admitted = held.promise;
+      return () => {
+        admitted = Promise.resolve();
+        held.resolve();
+      };
+    },
     probeAnswers(next: typeof answer) { answer = next; },
     probePipes(next: typeof pipe) { pipe = next; },
     events: (path: string) => readEvents(api.port, path),
@@ -1169,6 +1183,33 @@ test("deleting a thread ends its attach as a conflict, and a closing API ends on
   await other.close();
   assert.equal(await stopping.closed, 1001);
   assert.equal((stopping.received.at(-1) as { kind: string }).kind, "unreachable");
+});
+
+test("a closing API gives up on a terminal whose node stopped answering after 5 s, and opens none for an upgrade it was admitting", async (t) => {
+  const s = await withThread(t, { attachTiming: fastAttach });
+  observeRunning(s, {});
+  let opened = 0;
+  s.probePipes(async () => {
+    opened++;
+    // Its hang-up never ends, as a node that stopped answering would leave it.
+    return { ...fakePipe().stream, async close() {} };
+  });
+  const stuck = await attachTo(s.port, attachPathOf(s.thread.id));
+  assert.ok("ws" in stuck);
+  await until(() => stuck.received.length === 1, "attached");
+
+  const release = s.holdWhois();
+  const admitting = attachTo(s.port, attachPathOf(s.thread.id));
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  const closing = s.close();
+  const started = Date.now();
+  release();
+  await closing;
+  assert.ok(Date.now() - started < 7000, `close waited ${Date.now() - started} ms`);
+  assert.equal(await stuck.closed, 1006, "the stuck terminal's socket is dropped");
+  const late = await admitting;
+  assert.ok("status" in late && late.status === 503, JSON.stringify("status" in late ? late : "attached"));
+  assert.equal(opened, 1, "no terminal opened for the upgrade that was still at whois");
 });
 
 test("a terminal takes a place among the streams", async (t) => {
