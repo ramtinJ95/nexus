@@ -513,18 +513,86 @@ test("a worker without prompt submission stalls and leaves its visible pane for 
 });
 
 test("Claude user state merges onboarding, trust and bypass acceptance without losing login or hooks", async (t) => {
-  const { mkdtemp, mkdir, writeFile, readFile, rm } = await import("node:fs/promises");
+  const { mkdtemp, mkdir, writeFile, readFile, rm, realpath } = await import("node:fs/promises");
   const { tmpdir } = await import("node:os");
   const { join } = await import("node:path");
   const { execFileSync } = await import("node:child_process");
-  const home = await mkdtemp(join(tmpdir(), "nexus-claude-state-"));
+  const home = await realpath(await mkdtemp(join(tmpdir(), "nexus-claude-state-")));
+  const checkout = join(home, "repo");
+  await mkdir(checkout);
   t.after(() => rm(home, { recursive: true, force: true }));
   await mkdir(join(home, ".claude"));
-  const original = { oauthAccount: { accountUuid: "keep" }, projects: { [home]: { allowedTools: ["Read"] }, "/elsewhere": { hasTrustDialogAccepted: false } } };
+  const original = { oauthAccount: { accountUuid: "keep" }, projects: { [checkout]: { allowedTools: ["Read"] }, "/elsewhere": { hasTrustDialogAccepted: false } } };
   const settings = { theme: "light", hooks: { Stop: [{ hooks: [{ command: "keep" }] }] }, enabledPlugins: { pstack: true } };
   await writeFile(join(home, ".claude.json"), JSON.stringify(original));
   await writeFile(join(home, ".claude/settings.json"), JSON.stringify(settings));
-  for (let i = 0; i < 2; i++) execFileSync("node", ["-e", seedClaudeState, home], { env: { ...process.env, HOME: home } });
-  assert.deepEqual(JSON.parse(await readFile(join(home, ".claude.json"), "utf8")), { ...original, hasCompletedOnboarding: true, projects: { ...original.projects, [home]: { allowedTools: ["Read"], hasTrustDialogAccepted: true } } });
+  for (let i = 0; i < 2; i++) execFileSync("node", ["-e", seedClaudeState, checkout], { env: { ...process.env, HOME: home } });
+  assert.deepEqual(JSON.parse(await readFile(join(home, ".claude.json"), "utf8")), { ...original, hasCompletedOnboarding: true, projects: { ...original.projects, [checkout]: { allowedTools: ["Read"], hasTrustDialogAccepted: true } } });
   assert.deepEqual(JSON.parse(await readFile(join(home, ".claude/settings.json"), "utf8")), { ...settings, skipDangerousModePermissionPrompt: true });
+});
+
+test("Claude seeding remerges concurrent updates, preserves modes and writes nothing once seeded", async (t) => {
+  const fs = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const path = await import("node:path");
+  const { runInNewContext } = await import("node:vm");
+  const home = fs.realpathSync(fs.mkdtempSync(path.join(tmpdir(), "nexus-claude-race-")));
+  t.after(() => fs.rmSync(home, { recursive: true, force: true }));
+  const checkout = path.join(home, "repo");
+  fs.mkdirSync(checkout);
+  fs.mkdirSync(path.join(home, ".claude"));
+  const file = path.join(home, ".claude.json");
+  fs.writeFileSync(file, JSON.stringify({ oauthAccount: "old" }));
+  fs.chmodSync(file, 0o640);
+  let interleaved = false;
+  const run = (guestFs: unknown) => runInNewContext(seedClaudeState, {
+    require: (name: string) => name === "node:fs" ? guestFs : path,
+    process: { env: { HOME: home }, argv: ["node", checkout], pid: process.pid },
+  });
+  run({ ...fs, writeFileSync: (target: string, ...args: [data: string, options: { mode: number }]) => {
+    fs.writeFileSync(target, ...args);
+    if (target.startsWith(file + ".") && !interleaved) {
+      interleaved = true;
+      fs.writeFileSync(file, JSON.stringify({ oauthAccount: "new", mcpServers: { added: { command: "new-server" } } }));
+    }
+  } });
+  assert.ok(interleaved);
+  const state = JSON.parse(fs.readFileSync(file, "utf8"));
+  assert.equal(state.oauthAccount, "new");
+  assert.deepEqual(state.mcpServers, { added: { command: "new-server" } });
+  assert.equal(state.projects[checkout].hasTrustDialogAccepted, true);
+  assert.equal(fs.statSync(file).mode & 0o777, 0o640);
+  run({ ...fs, writeFileSync: () => assert.fail("already seeded state must not write"), renameSync: () => assert.fail("already seeded state must not rename") });
+  let writes = 0;
+  fs.writeFileSync(file, "{}");
+  assert.throws(() => run({ ...fs, writeFileSync: (target: string, data: string, options: { mode: number }) => {
+    fs.writeFileSync(target, data, options);
+    fs.writeFileSync(file, JSON.stringify({ concurrentUpdate: ++writes }));
+  } }), /kept changing/);
+  assert.equal(writes, 5);
+  assert.deepEqual(JSON.parse(fs.readFileSync(file, "utf8")), { concurrentUpdate: 5 });
+  assert.equal(fs.readdirSync(home).some((name) => name.endsWith(".tmp")), false);
+});
+
+test("Claude seeding refuses root and HOME, including aliases", async (t) => {
+  const fs = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const path = await import("node:path");
+  const { execFileSync } = await import("node:child_process");
+  const home = fs.realpathSync(fs.mkdtempSync(path.join(tmpdir(), "nexus-claude-trust-")));
+  t.after(() => fs.rmSync(home, { recursive: true, force: true }));
+  fs.symlinkSync(home, path.join(home, "alias"));
+  for (const checkout of ["/", home, path.join(home, "alias")]) {
+    assert.throws(() => execFileSync("node", ["-e", seedClaudeState, checkout], { env: { ...process.env, HOME: home }, stdio: "pipe" }), /refusing to grant Claude trust/);
+  }
+  assert.equal(fs.existsSync(path.join(home, ".claude.json")), false);
+});
+
+test("resuming a pane at root or HOME seeds only the pylon checkout", async () => {
+  for (const cwd of ["/", "/home/user"]) {
+    const records: SessionRecord[] = [{ herdrPane: "w1:p1", harness: "claude-code", title: "review", cwd, harnessSessionId: "bd2c2d6b" }];
+    const guest = pylon(records, []);
+    assert.equal((await relaunchSessions(guest))[0]!.result, "relaunched");
+    assert.deepEqual(guest.execs.filter((argv) => argv[2] === seedClaudeState).map((argv) => argv[3]), ["/home/user/workspace/repo"]);
+  }
 });

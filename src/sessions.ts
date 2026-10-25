@@ -123,7 +123,7 @@ export async function openSession(guest: Guest, session: { harness: SessionHarne
   const workspaceId = string(record(created.workspace, "workspace create .workspace").workspace_id, "workspace_id");
   const pane = string(record(created.root_pane, "workspace create .root_pane").pane_id, "pane_id");
   try {
-    await startHarness(guest, pane, session.harness, session.resume, session.prompt, session.cwd);
+    await startHarness(guest, pane, session.harness, session.resume, session.prompt);
   } catch (err) {
     if (err instanceof ClaudeLaunchStalled) throw err;
     try {
@@ -137,11 +137,11 @@ export async function openSession(guest: Guest, session: { harness: SessionHarne
 }
 
 /** Starts the harness's agent in a pane at its shell prompt, and returns once Herdr reports it ready. */
-async function startHarness(guest: Guest, pane: string, harness: SessionHarness, resume: string | undefined, prompt?: string, cwd = checkoutDir): Promise<void> {
+async function startHarness(guest: Guest, pane: string, harness: SessionHarness, resume: string | undefined, prompt?: string): Promise<void> {
   const agent = agents[harness];
   if (agent === null) return;
   if (harness === "claude-code") {
-    const seeded = await guest.exec(["node", "-e", seedClaudeState, cwd], { cwd: home, timeoutMs: callTimeoutMs });
+    const seeded = await guest.exec(["node", "-e", seedClaudeState, checkoutDir], { cwd: home, timeoutMs: callTimeoutMs });
     if (seeded.exitCode !== 0) throw new Error(`seeding Claude state failed: ${seeded.output}`);
   }
   const receipt = `${home}/.nexus/claude-submitted-${randomUUID()}`;
@@ -334,7 +334,7 @@ export async function relaunchSessions(guest: Guest): Promise<readonly RelaunchO
       if (pane && (agent === null ? pane.harness === "shell" : await runsAgent(guest, pane.herdrPane, agent.kind))) {
         outcomes.push({ record: r, result: "present", herdrPane: pane.herdrPane });
       } else if (pane) {
-        await startHarness(guest, pane.herdrPane, r.harness, resume, undefined, r.cwd);
+        await startHarness(guest, pane.herdrPane, r.harness, resume);
         outcomes.push({ record: r, result: "relaunched", herdrPane: pane.herdrPane });
       } else {
         const herdrPane = await openSession(guest, { harness: r.harness, title: r.title, cwd: r.cwd, ...(resume === undefined ? {} : { resume }) });
