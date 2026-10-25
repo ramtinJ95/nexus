@@ -59,10 +59,10 @@ export interface HarnessHost {
    */
   startThread(thread: { threadId: string; pylonId: PylonId }): Promise<ConversationId>;
   /**
-   * A message from the dashboard. A retry with the same `requestId` returns the first submission. A busy
+   * A human message, or an attributed PR-watch input. A retry with the same `requestId` returns the first submission. A busy
    * conversation queues it as a follow-up, or with `steer` places it after the current tool round.
    */
-  send(threadId: string, text: string, requestId: string, mode: "followUp" | "steer"): Promise<Submission>;
+  send(threadId: string, text: string, requestId: string, mode: "followUp" | "steer", sender?: "pr-watch"): Promise<Submission>;
   latestTurn(threadId: string): Promise<string | null>;
   abort(threadId: string): Promise<void>;
   /** Runs again the tasks the restart limit parked, which otherwise hold the thread's run forever. */
@@ -133,8 +133,8 @@ export async function openHarnessHost(options: HarnessHostOptions): Promise<Harn
       await activity.track(harness, threadId, created.id, false, context);
       return created.id;
     },
-    async send(threadId, text, requestId, mode) {
-      return (await conversation(threadId)).submit({ type: "input", content: text, requestId, whenBusy: mode }, context);
+    async send(threadId, text, requestId, mode, sender) {
+      return (await conversation(threadId)).submit({ type: "input", content: text, requestId, whenBusy: mode, ...(sender ? { entry: { kind: "nexus.pr-watch", data: { sender: "Nexus PR watch" } } } : {}) }, context);
     },
     async latestTurn(threadId) {
       const conversationId = conversations.get(threadId);

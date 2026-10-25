@@ -284,7 +284,7 @@ test("the thread page shows its pylon, sessions with how to attach, previews as 
   assert.ok(!previews.includes(":8444/"), "a preview that is not ready has no link yet");
 
   const outputs = sectionOf(res.text, "outputs-h");
-  assert.equal(textOf(outputs), "Outputs 3 branch nexus/fix-checkout diff abc1234 file out-1", "web's preview is listed once, under Previews");
+  assert.equal(textOf(outputs), "Outputs 3 PR watch: off (no control-plane GitHub token configured). branch nexus/fix-checkout diff abc1234 file out-1", "web's preview is listed once, under Previews");
 
   const strip = textOf(res.text.split('id="strip"')[1]!.split("</div>")[0]!.replace(/^[^>]*>/, ""));
   assert.equal(strip, "running · rj-firebat api, starting web ↗ Changes 3 outputs", "the phone's strip names the pylon, each preview, the changes and the outputs");
@@ -294,7 +294,7 @@ test("the thread page shows its pylon, sessions with how to attach, previews as 
 
   s.registry.releasePreviews(fix.pylonId);
   const released = sectionOf((await s.call("GET", `/threads/${fix.id}`)).text, "outputs-h");
-  assert.equal(textOf(released), "Outputs 4 branch nexus/fix-checkout diff abc1234 file out-1 preview web", "a preview the control plane no longer has stays an output");
+  assert.equal(textOf(released), "Outputs 4 PR watch: off (no control-plane GitHub token configured). branch nexus/fix-checkout diff abc1234 file out-1 preview web", "a preview the control plane no longer has stays an output");
 });
 
 test("the inspector's tabs pick the changes, the previews or the pylon, and the changes are the client's to read", async (t) => {
@@ -854,4 +854,22 @@ test("a page's rendered reply marker cannot advance while its conversation is be
   await s.call("POST", `/v1/threads/${fix.id}/seen`, { lastReplyAt: 1000 });
   const detail = JSON.parse((await s.call("GET", `/v1/threads/${fix.id}`)).text);
   assert.equal(detail.attention, "reply");
+});
+
+test("PR outputs show GitHub metadata and automated entries are not labelled as the person", async (t) => {
+  const s = await seeded(t);
+  const thread = await s.start("acme", "Review");
+  const pr = { repo: "acme/repo", number: 42, title: "Fix <checkout>", url: "https://github.com/acme/repo/pull/42", state: "merged", checks: "passing", review: "approved", conflict: false } as const;
+  s.registry.savePrWatch(thread.id, { links: [{ pr, seen: [], failed: false }], commentWakes: 0, pending: null, error: null });
+  s.fake.transcript(thread.id).entries = [{ id: 1, conversationId: 1, kind: "nexus.pr-watch", data: { sender: "Nexus PR watch" }, model: [{ role: "user", content: "Automated feedback", timestamp: 0 }] }] as never;
+  const page = (await s.call("GET", `/threads/${thread.id}`)).text;
+  const outputs = sectionOf(page, "outputs-h");
+  assert.match(textOf(outputs), /PR #42: Fix <checkout> — merged, checks passing, review approved/);
+  assert.ok(outputs.includes(`href="${pr.url}"`));
+  assert.ok(outputs.includes("Fix &lt;checkout&gt;"));
+  assert.equal((outputs.match(/PR watch: off/g) ?? []).length, 1);
+  assert.match(conversationOf(page).text, /Nexus PR watch Automated feedback/);
+  const detail = JSON.parse((await s.call("GET", `/v1/threads/${thread.id}`)).text);
+  assert.deepEqual(detail.pullRequests, [pr]);
+  assert.ok(detail.outputs.some((o: { kind: string; ref: string }) => o.kind === "pull-request" && o.ref === pr.url));
 });

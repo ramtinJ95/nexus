@@ -129,7 +129,7 @@ const actualBadge: Record<ActualState, [label: string, tone: Tone]> = {
 const desiredTone: Record<DesiredPhase, Tone> = { running: "ok", paused: "idle", deleted: "muted" };
 const sessionTone: Record<HerdrStatus, Tone> = { working: "work", idle: "idle", blocked: "bad", done: "ok", unknown: "muted" };
 const harnessLabel: Record<SessionHarness, string> = { "claude-code": "Claude Code", pi: "pi", shell: "Shell" };
-const outputLabel: Record<Output["kind"], string> = { branch: "branch", diff: "diff", preview: "preview", file: "file" };
+const outputLabel: Record<Output["kind"], string> = { branch: "branch", diff: "diff", preview: "preview", file: "file", "pull-request": "pull request" };
 
 /** A dot alone carries its meaning in its accessible name. One beside its label is decoration. */
 const dot = (tone: Tone, label?: string) => label === undefined
@@ -444,7 +444,7 @@ ${actions.length > 0 && html`<div class="bar-actions" id="thread-actions">${acti
  * Each preview is listed once, under Previews, so the outputs leave out those it lists. A preview output stays for
  * one the control plane no longer has.
  */
-const outputsOf = (d: ThreadDetail) => d.outputs.filter((o) => o.kind !== "preview" || !d.previews.some((p) => p.service === o.ref));
+const outputsOf = (d: ThreadDetail) => d.outputs.filter((o) => o.kind !== "pull-request" && (o.kind !== "preview" || !d.previews.some((p) => p.service === o.ref)));
 
 /** The inside of the conversation region, which the page's stream sends again whenever it changed. */
 function convo(t: Thread, view: ConversationView | Error | null, items: readonly Item[], now: number): Html {
@@ -503,7 +503,7 @@ function facts({ thread: t, pylon }: ThreadDetail): Html {
 
 /** The phone's stand-in for the inspector: the pylon, each preview as a link where it has one, and the outputs. */
 function strip(d: ThreadDetail): Html {
-  const outputs = outputsOf(d).length;
+  const outputs = outputsOf(d).length + (d.pullRequests?.length ?? 0);
   const [label, tone] = actualBadge[d.pylon.actualState];
   return html`<button type="button" class="mini" data-open="inspect" data-pane="pylon">${dot(tone)}${label} · ${d.pylon.node}</button>
 ${d.previews.map((p) => {
@@ -583,8 +583,10 @@ ${unpublished === null ? html`<p class="empty">The pylon's ports could not be re
 <code class="id">${pylon.id}</code>
 ${pylon.failed !== null && html`<p class="error">The planner gave up: ${pylon.failed}</p>`}
 </section>
-<section aria-labelledby="outputs-h"><h2 id="outputs-h">Outputs ${count(outputs.length)}</h2>
-${outputs.length === 0 ? html`<p class="empty">No outputs yet.</p>` : html`<ul class="list outs">${outputs.map((o) => html`<li><span class="o-kind">${outputLabel[o.kind]}</span><code>${o.ref}</code></li>`)}</ul>`}
+<section aria-labelledby="outputs-h"><h2 id="outputs-h">Outputs ${count(outputs.length + (d.pullRequests?.length ?? 0))}</h2>
+${!d.prWatch?.enabled ? html`<p class="empty">PR watch: off (no control-plane GitHub token configured).</p>` : html`<p>PR watch: ${d.prWatch.stopped ? "stopped (10 comment-only wakes)" : "on"}${d.prWatch.error && html` — ${d.prWatch.error}`}</p>`}
+${(d.pullRequests ?? []).map((pr) => html`<p><a href="${pr.url}" target="_blank" rel="noreferrer">PR #${pr.number}: ${pr.title}</a> — ${pr.state}, checks ${pr.checks}, review ${pr.review}</p>`)}
+${outputs.length === 0 ? html`<p class="empty">No other outputs yet.</p>` : html`<ul class="list outs">${outputs.map((o) => html`<li><span class="o-kind">${outputLabel[o.kind]}</span><code>${o.ref}</code></li>`)}</ul>`}
 </section>
 <section aria-labelledby="sessions-h"><h2 id="sessions-h">Sessions ${count(d.sessions.length)}</h2>
 ${d.sessions.length === 0 ? html`<p class="empty">No sessions.</p>` : html`<ul class="list outs">${d.sessions.map((s) => html`<li>
@@ -602,7 +604,7 @@ ${s.state === "failed" && html`<p class="error s-why">It did not come back from 
 
 /** One row of the conversation. A tool call carries its result, which the transcript holds in a later entry. */
 type Item =
-  | { kind: "user"; text: string; queued: boolean; at: number }
+  | { kind: "user"; text: string; queued: boolean; at: number; automated?: boolean }
   | { kind: "agent"; text: string; streaming: boolean }
   | { kind: "tool"; call: Pick<ToolCall, "id" | "name" | "arguments">; result: ToolResult }
   | { kind: "notice"; text: string; tone: Tone };
@@ -635,8 +637,8 @@ function conversationItems(view: ConversationView): Item[] {
     if (message.stopReason === "aborted") items.push({ kind: "notice", text: "Aborted.", tone: "muted" });
   };
 
-  for (const message of view.entries.flatMap((entry) => entry.model ?? [])) {
-    if (message.role === "user") items.push({ kind: "user", text: contentText(message.content), queued: false, at: message.timestamp });
+  for (const { entry, message } of view.entries.flatMap((entry) => (entry.model ?? []).map((message) => ({ entry, message })))) {
+    if (message.role === "user") items.push({ kind: "user", text: contentText(message.content), queued: false, at: message.timestamp, automated: entry.kind === "nexus.pr-watch" });
     if (message.role === "assistant") answer(message, false);
     if (message.role === "toolResult") {
       const result: ToolResult = { state: "done", output: contentText(message.content), isError: message.isError };
@@ -731,7 +733,7 @@ function blocks(items: readonly Item[]): Block[] {
 
 function blockView(block: Block): Html {
   switch (block.kind) {
-    case "user": return html`<div class="msg user${block.queued && " queued"}">${unseen("You")}${block.queued && html`<div class="msg-who"><span class="chip chip-queued">queued, sends after this run</span></div>`}<div class="text">${prose(block.text)}</div></div>`;
+    case "user": return html`<div class="msg user${block.queued && " queued"}">${unseen(block.automated || block.text.startsWith("[Nexus PR watch") ? "Nexus PR watch" : "You")}${block.queued && html`<div class="msg-who"><span class="chip chip-queued">queued, sends after this run</span></div>`}<div class="text">${prose(block.text)}</div></div>`;
     case "agent": return block.streaming
       ? html`<div class="msg agent streaming"><div class="text" data-grow>${grows(html`${prose(block.text)}<span class="caret" aria-hidden="true"></span>`)}</div></div>`
       : html`<div class="msg agent"><div class="text">${prose(block.text)}</div></div>`;

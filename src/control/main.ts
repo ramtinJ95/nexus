@@ -17,6 +17,8 @@ import { startApi } from "./api.ts";
 import { registryLocator } from "./locator.ts";
 import { startLoop } from "./loop.ts";
 import { openRegistry, type Thread, type ThreadId } from "./registry.ts";
+import { githubClient } from "./github.ts";
+import { prWatcher } from "./pr-watch.ts";
 
 const nodeId = z.string().regex(/^n[A-Za-z0-9]+$/, "a Tailscale stable node ID, such as nAbC123CNTRL");
 const absolutePath = z.string().refine(isAbsolute, "must be an absolute path");
@@ -27,6 +29,7 @@ export const defaultPreviewPorts = { first: 10200, last: 10999 } as const;
 
 const configSchema = z.strictObject({
   db: z.string().min(1),
+  github: z.strictObject({ tokenFile: absolutePath }).optional(),
   listen: z.strictObject({
     host: z.string().min(1),
     port: z.int().min(0).max(65_535),
@@ -83,6 +86,8 @@ export interface ControlPlane {
 
 /** Everything but the model login, so src/control/thread-on-node.ts runs this same wiring with a scripted model. */
 export async function startControlPlane(config: ControlPlaneConfig, models: Models): Promise<ControlPlane> {
+  const token = config.github ? (await readFile(config.github.tokenFile, "utf8")).trim() : null;
+  if (token !== null && !/^[A-Za-z0-9_]+$/.test(token)) throw new Error("github.tokenFile must contain only a GitHub token");
   const tailscaled = config.tailscaledSocket ?? linuxTailscaledSocket;
   const whois = localApiWhois(tailscaled);
   const registry = openRegistry(config.db);
@@ -113,7 +118,11 @@ export async function startControlPlane(config: ControlPlaneConfig, models: Mode
     log: (message) => console.error(message),
   });
 
+  const watch = prWatcher({ registry, github: token === null ? null : githubClient(token), harness, wake: wakeThread });
+  const watchTimer = setInterval(() => { void watch.poll(); }, 120_000);
+  void watch.poll();
   const api = await startApi({
+    prWatchEnabled: token !== null,
     registry, whois, host: config.listen.host, port: config.listen.port,
     allowed: new Set([config.self.tailnetNodeId, ...config.callers] as TailnetNodeId[]),
     hostnames: new Set(config.listen.hostnames),
@@ -128,6 +137,8 @@ export async function startControlPlane(config: ControlPlaneConfig, models: Mode
   return {
     port: api.port,
     async close() {
+      clearInterval(watchTimer);
+      await watch.close();
       await api.close();
       await harness.close();
       await loop.close();

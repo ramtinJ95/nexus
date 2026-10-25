@@ -964,3 +964,19 @@ test("seen encodes a thread ID so it cannot become an unarchive request", async 
     assert.deepEqual(s.registry.thread(thread.id), before);
   }
 });
+
+test("show prints PR metadata and one disabled-watch notice without waking the pylon", async (t) => {
+  const s = await setup(t);
+  const thread: Thread = await s.json(["start", "--project", "acme", "--title", "PR"]);
+  const pr = { repo: "acme/repo", number: 12, title: "Fix build", url: "https://github.com/acme/repo/pull/12", state: "open", checks: "failed", review: "changes_requested", conflict: false } as const;
+  s.registry.savePrWatch(thread.id, { links: [{ pr, seen: [], failed: false }], commentWakes: 0, pending: null, error: null });
+  const before = s.registry.thread(thread.id)!.lastHumanActivityAt;
+  const shown = await s.nexus(["show", thread.id]);
+  assert.equal(shown.code, 0, shown.stderr);
+  assert.match(shown.stdout, /PR #12: Fix build — open, checks failed, review changes_requested/);
+  assert.equal((shown.stdout.match(/PR watch: off/g) ?? []).length, 1);
+  const detail = await s.json(["show", thread.id]);
+  assert.deepEqual(detail.pullRequests, [pr]);
+  assert.equal(detail.prWatch.enabled, false);
+  assert.equal(s.registry.thread(thread.id)!.lastHumanActivityAt, before);
+});
