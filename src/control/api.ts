@@ -511,7 +511,7 @@ export async function startApi(options: ApiOptions): Promise<Api> {
 
   /** Reads the pylon's checkout for the Files and Changes views, over one raw pipe per read. */
   function inCheckout<T>(t: Thread, read: (checkout: CheckoutReader) => Promise<T>): Promise<T> {
-    return inPylon(t, (probe, pylonId) => read(checkoutReader((request) => probe.stream(pylonId, request), checkoutDir)));
+    return inPylon(t, (probe, pylonId) => read(checkoutReader((argv) => probe.stream(pylonId, argv), checkoutDir)));
   }
 
   async function checkoutFile(t: Thread, path: string): Promise<Reply> {

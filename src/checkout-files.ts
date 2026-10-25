@@ -12,12 +12,12 @@
 import { readFileSync } from "node:fs";
 import { extname } from "node:path";
 import { z } from "zod";
-import type { ByteStream, StreamRequest } from "./protocol.ts";
+import type { ByteStream } from "./protocol.ts";
 
 const helper = readFileSync(new URL("./checkout-files.py", import.meta.url), "utf8");
 
-/** Opens a raw pipe to a process in the pylon. */
-export type OpenPipe = (request: StreamRequest) => Promise<ByteStream>;
+/** Opens a raw pipe to a process in the pylon, which runs argv. */
+export type OpenPipe = (argv: readonly string[]) => Promise<ByteStream>;
 
 /** `start` is what the pylon booted at, which its first boot records as refs/nexus/base. */
 export type ChangesBase = "start" | "head";
@@ -93,7 +93,7 @@ export function checkoutReader(open: OpenPipe, checkout: string, deadlineMs = re
     openPipes++;
     let stream: ByteStream;
     try {
-      stream = await open({ pty: null, argv: ["python3", "-", checkout, ...args] });
+      stream = await open(["python3", "-", checkout, ...args]);
     } catch (err) {
       openPipes--;
       throw err;

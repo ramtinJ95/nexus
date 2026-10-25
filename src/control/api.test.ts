@@ -16,7 +16,7 @@ import { ingest } from "../reconcile.ts";
 import { processStream } from "../process-stream.ts";
 import { repoInitCommand } from "../pylon-vm-backend.ts";
 import { checkoutDir } from "../sessions.ts";
-import type { ByteStream, CommandResult, JobId, NodeName, PausedSession, PylonCommand, PylonId, ServiceFact, StreamRequest, TailnetNodeId } from "../protocol.ts";
+import type { ByteStream, CommandResult, JobId, NodeName, PausedSession, PylonCommand, PylonId, ServiceFact, TailnetNodeId } from "../protocol.ts";
 
 const node = "rj-firebat" as NodeName;
 const laptop = "nLAPTOP" as TailnetNodeId;
@@ -56,9 +56,9 @@ async function setup(t: import("node:test").TestContext, options: { dotfiles?: t
     if (command.kind === "drop-failed-session") return { kind: "drop-failed-session", dropped: true };
     throw new Error(`unexpected ${command.kind} command`);
   };
-  const streams: [PylonId, StreamRequest][] = [];
+  const streams: [PylonId, readonly string[]][] = [];
   /** What the node's probe opens a pipe to. Tests replace it. */
-  let pipe = async (request: StreamRequest): Promise<ByteStream> => { throw new Error(`unexpected stream ${request.argv[0]}`); };
+  let pipe = async (argv: readonly string[]): Promise<ByteStream> => { throw new Error(`unexpected stream ${argv[0]}`); };
   const api = await startApi({
     registry, host: "127.0.0.1", port: 0,
     // Every loopback caller is whoever the test says. Tests never ask tailscaled.
@@ -70,7 +70,7 @@ async function setup(t: import("node:test").TestContext, options: { dotfiles?: t
     wake: (n) => { woken.push(n); },
     probes: new Map([[node, {
       command: (pylonId: PylonId, command: PylonCommand) => { commands.push([pylonId, command]); return answer(command); },
-      stream: (pylonId: PylonId, request: StreamRequest) => { streams.push([pylonId, request]); return pipe(request); },
+      stream: (pylonId: PylonId, argv: readonly string[]) => { streams.push([pylonId, argv]); return pipe(argv); },
     }]]),
     previewPorts: { first: 10200, last: 10299 },
     ...options.streamStallMs === undefined ? {} : { streamStallMs: options.streamStallMs },
@@ -445,7 +445,7 @@ test("opening a session goes through the node's probe, defaults to Claude Code t
 const git = promisify(execFile);
 
 /** A checkout on this machine whose first commit is refs/nexus/base, which the probe's pipes read in place of the pylon's. */
-async function localCheckout(t: import("node:test").TestContext, s: { probePipes(next: (request: StreamRequest) => Promise<ByteStream>): void }) {
+async function localCheckout(t: import("node:test").TestContext, s: { probePipes(next: (argv: readonly string[]) => Promise<ByteStream>): void }) {
   const repo = await mkdtemp(join(tmpdir(), "nexus-api-checkout-"));
   t.after(() => rm(repo, { recursive: true }));
   const run = (...args: string[]) => git("git", ["-C", repo, "-c", "user.name=t", "-c", "user.email=t@t", ...args]);
@@ -456,7 +456,7 @@ async function localCheckout(t: import("node:test").TestContext, s: { probePipes
   await run("commit", "-q", "-m", "first");
   await run("update-ref", "refs/nexus/base", "HEAD");
   const base = (await run("rev-parse", "HEAD")).stdout.trim();
-  s.probePipes(async ({ argv }) => processStream(argv[0]!, argv.slice(1).map((arg) => arg === checkoutDir ? repo : arg), () => {}));
+  s.probePipes(async (argv) => processStream(argv[0]!, argv.slice(1).map((arg) => arg === checkoutDir ? repo : arg), () => {}));
   return { repo, run, base };
 }
 
@@ -498,7 +498,7 @@ test("a thread's files and changes are read from its checkout through its node's
   assert.equal(diff.body.base.kind, "head");
   assert.match(diff.body.diff, /^diff --git a\/src\/app.ts b\/src\/app.ts\n[^]*-export const a = 1;\n\+export const a = 2;\n$/);
 
-  assert.ok(s.streams.every(([pylon, request]) => pylon === s.thread.pylonId && request.pty === null));
+  assert.ok(s.streams.every(([pylon, argv]) => pylon === s.thread.pylonId && argv[0] === "python3"));
   assert.ok(s.registry.thread(id)!.lastHumanActivityAt > 1);
   assert.ok(s.woken.includes(node));
 });
@@ -510,7 +510,7 @@ test("a scratch thread's changes and diff are against the empty tree, before its
   const repo = join(scratch, "repo");
   await git("sh", ["-c", repoInitCommand({ kind: "empty", branch: "main" }, repo)]);
   const run = (...args: string[]) => git("git", ["-C", repo, "-c", "user.name=t", "-c", "user.email=t@t", ...args]);
-  s.probePipes(async ({ argv }) => processStream(argv[0]!, argv.slice(1).map((arg) => arg === checkoutDir ? repo : arg), () => {}));
+  s.probePipes(async (argv) => processStream(argv[0]!, argv.slice(1).map((arg) => arg === checkoutDir ? repo : arg), () => {}));
   const id = s.thread.id;
   const added = (path: string, additions: number) => ({ path, oldPath: null, status: "added", additions, deletions: 0 });
   await mkdir(join(repo, "src"));

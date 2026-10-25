@@ -22,7 +22,7 @@ import type { ImageId, ImageManifest } from "../images.ts";
 import type { Project, ProjectId } from "../project.ts";
 import { processStream } from "../process-stream.ts";
 import { repoInitCommand } from "../pylon-vm-backend.ts";
-import type { ByteStream, CommandResult, NodeName, PylonCommand, PylonId, ServiceFact, StreamRequest, TailnetNodeId } from "../protocol.ts";
+import type { ByteStream, CommandResult, NodeName, PylonCommand, PylonId, ServiceFact, TailnetNodeId } from "../protocol.ts";
 import { checkoutDir } from "../sessions.ts";
 import { call, CliError, follow } from "./transport.ts";
 
@@ -104,7 +104,7 @@ async function setup(t: TestContext) {
     : { kind: "link-port", service: `port-${(command as { port: number }).port}` };
   const commands: PylonCommand[] = [];
   /** What the node's probe opens a pipe to. Tests replace it. */
-  let pipe = async (request: StreamRequest): Promise<ByteStream> => { throw new Error(`unexpected stream ${request.argv[0]}`); };
+  let pipe = async (argv: readonly string[]): Promise<ByteStream> => { throw new Error(`unexpected stream ${argv[0]}`); };
   const fake = fakeHarness();
   const options = (port: number) => ({
     registry, host: "127.0.0.1", port, whois: async () => caller, allowed: new Set([laptop]),
@@ -112,7 +112,7 @@ async function setup(t: TestContext) {
     harness: fake.harness, wake: () => {}, previewPorts: { first: 10200, last: 10299 },
     probes: new Map([[node, {
       command: (_pylonId: PylonId, command: PylonCommand) => { commands.push(command); return answer(command); },
-      stream: (_pylonId: PylonId, request: StreamRequest) => pipe(request),
+      stream: (_pylonId: PylonId, argv: readonly string[]) => pipe(argv),
     }]]),
   });
   let api = await startApi(options(0));
@@ -471,7 +471,7 @@ test("files, changes and diff read the pylon's checkout, and wait for a paused p
   await mkdir(join(repo, "src"));
   await writeFile(join(repo, "src", "x.ts"), "x\n");
   let refusals = 2;
-  s.probePipes(async ({ argv }) => {
+  s.probePipes(async (argv) => {
     if (refusals-- > 0) throw Object.assign(new Error("rj-firebat: pylon-x is stopped, not running"), { code: "not-running" });
     return processStream(argv[0]!, argv.slice(1).map((arg) => arg === checkoutDir ? repo : arg), () => {});
   });
@@ -510,7 +510,7 @@ test("changes and diff of a scratch thread are against the empty tree, before it
   const repo = join(scratch, "repo");
   await promisify(execFile)("sh", ["-c", repoInitCommand({ kind: "empty", branch: "main" }, repo)]);
   const git = (...args: string[]) => promisify(execFile)("git", ["-C", repo, "-c", "user.name=t", "-c", "user.email=t@t", ...args]);
-  s.probePipes(async ({ argv }) => processStream(argv[0]!, argv.slice(1).map((arg) => arg === checkoutDir ? repo : arg), () => {}));
+  s.probePipes(async (argv) => processStream(argv[0]!, argv.slice(1).map((arg) => arg === checkoutDir ? repo : arg), () => {}));
   const output = async (args: string[]) => {
     const res = await s.nexus(args);
     assert.equal(res.code, 0, res.stderr);
