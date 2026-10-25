@@ -115,6 +115,7 @@ A persistent drain lease blocks API and background PR-watch turn entry, and coun
 
 | Date | Decision |
 |---|---|
+| 2026-10-26 | Dashboard HTTPS uses Serve on 443 and a private Unix socket; overwritten peer-IP headers resolve through whois to the same node allowlists. HTTP clients stay unchanged; the person provisions Serve once, separately from probe previews |
 | 2026-10-23 | Root release reconciliation uses direct tailnet plus root-token polling, external-node-only deployers, control-first activation, a conservative drain barrier and a fixed recovery supervisor |
 | 2026-10-22 | The probe, project config and template image contracts in `contracts/` are agreed |
 | 2026-10-22 | Nexus copies Amp's design and uses no part of Amp's stack, including its file names and environment variables |

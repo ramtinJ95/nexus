@@ -208,6 +208,34 @@ The control plane runs as the system user `nexus-control`, apart from the probe'
 
 `control.json` names every node's probe, the tailnet nodes that may call the API (`callers`), the common dotfiles layer every new pylon pulls (`dotfiles`), the model new threads start with (`harness.model`), and the https ports previews are allocated from on each node (`previewPorts`, 10200 to 10999 when omitted). A node's `tailnetHost` is its MagicDNS name, such as `infra-testbench.example.ts.net`, because preview URLs name it and its `tailscale serve` certificate is for that name. Each probe's `auth.controlPlane` must be the control plane's own stable node ID, `self.tailnetNodeId`.
 
+### HTTPS dashboard
+
+After upgrading control, the person configures this **once on the control node**, not from a pylon. Neither the installer nor control startup changes Serve configuration. The probe remains the sole tailscale operator (`nexus`); control needs no operator rights.
+
+1. Use a Tailscale version whose `tailscale serve --help` supports `unix:/path` targets. Enable MagicDNS and HTTPS certificates in the tailnet if they are not enabled already. Do not enable Funnel.
+2. Add `"serveSocket": "/run/nexus-control/dashboard.sock"` to `/etc/nexus/control.json`, and include the control node's **full** MagicDNS name (such as `rj-firebat.example.ts.net`) in `listen.hostnames`. The example includes the socket; existing configs opt in explicitly. Restart control in the normal deployment window. The installed systemd unit creates `/run/nexus-control` owned by `nexus-control`, mode 0700; the API requires a private owned directory and creates the socket mode 0600. Root tailscaled can connect, but the probe user, other local users and tailnet peers cannot. Root and the control-plane user remain trusted.
+3. Inspect `sudo tailscale serve status --json`. If port 443 already serves something, stop and resolve that ownership conflict rather than overwrite it. Then run:
+
+   ```sh
+   sudo tailscale serve --bg --https=443 unix:/run/nexus-control/dashboard.sock
+   sudo tailscale serve status
+   ```
+
+   `sudo` is needed because the probe, not the person or control, is the operator. The background entry persists across restarts. Never use `serve reset`: it would remove previews too. To withdraw only the dashboard, use `sudo tailscale serve --https=443 off`.
+4. Open `https://<full control-node MagicDNS name>/` from a node in `callers`. Enable notifications with the dashboard's permission button; permission belongs to this HTTPS origin, not the old HTTP URL. Verify conversation streaming and terminal attach, and trigger a notification with the dashboard in the background. An unlisted node must receive 403, even if owned by the same Tailscale user.
+
+Port 443 is reserved from preview allocation. Previews keep their default 10200–10999 range and their loopback gateway on 7481. The probe recognizes ownership by the exact gateway target, so the dashboard's Unix-socket target is foreign and is never swept by preview cleanup. Do not point dashboard Serve at the plain API or at the preview gateway.
+
+#### Caller identity behind Serve
+
+Serve supplies `Tailscale-User-Login`, `Tailscale-User-Name`, and `Tailscale-User-Profile-Pic` for user-owned nodes, removes incoming copies, and omits them for tagged nodes. These identify a user, not a node, so Nexus **does not map them to permissions**. Serve also replaces `X-Forwarded-For` with the original peer IP and `X-Forwarded-Host` with the incoming host. For Unix targets it changes `Host` to `localhost`. Nexus trusts those two forwarding headers only on the private socket, requires exactly one IP (no comma-separated chain), and asks tailscaled whois about that IP with port 0. Missing, malformed, unknown and Funnel callers fail closed. The TCP listener ignores all identity/forwarding headers and still checks its actual TCP peer.
+
+Both paths then apply the same stable-node-ID `callers`, self, `deployers`, infrastructure-node exclusion and root-token reporting rules. An allowed user on an unlisted device is still denied; tagged nodes work by stable ID. WebSocket origins must match the public HTTPS host, including its port, so preview origins cannot attach. The local health-check shortcut applies only to the direct TCP listener.
+
+References: [Serve documentation](https://tailscale.com/kb/1312/serve), [Serve CLI help](https://github.com/tailscale/tailscale/blob/b71e0f30a781894c9508d2903e939c5ca1a1361a/cmd/tailscale/cli/serve_v2.go) and [proxy implementation](https://github.com/tailscale/tailscale/blob/b71e0f30a781894c9508d2903e939c5ca1a1361a/ipn/ipnlocal/serve.go) (`addProxyForwardedHeaders`, `addTailscaleIdentityHeaders`). Context7 and the docs site were blocked in the development pylon; the upstream CLI help and implementation were read through GitHub. Real Serve, certificate issuance, systemd permissions and browser notifications cannot be checked here and need the person's post-merge verification above.
+
+The CLI, mod, pi-nexus, probes and root deployers keep using `http://<control>:7470`. Tailnet transport is already encrypted; these clients do not need a browser secure context, and keeping their direct path avoids changing endpoint identity checks or making them depend on Serve setup. No CLI contract changes are needed.
+
 ### Sign the harness in
 
 The harness has its own ChatGPT login, kept apart from any interactive pi on the machine. A ChatGPT login reaches only the models ChatGPT offers through Codex, such as `gpt-6-astra`, so `harness.model` in `control.json` must name one of them. The control plane refuses to start with any other model, such as `gpt-5.5`, or before the harness is signed in, and its error in `journalctl -u nexus-control` lists the models the login offers. Only one process may hold the credentials file, so stop the control plane first:

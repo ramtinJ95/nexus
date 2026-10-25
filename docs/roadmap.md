@@ -19,7 +19,6 @@ These start once the work above has landed.
 - **Syntax-highlighted diffs.** The dashboard renders its diffs with Pierre's diff library, [`@pierre/diffs`](https://www.npmjs.com/package/@pierre/diffs), which t3code's web app also uses, so changed code gets proper syntax highlighting instead of today's plain lines. Check its licence before adding it.
 - **Review comments on the diff.** The dashboard's diff works like the review-pane mod's `/review-diff`. Select a line or a range and attach a comment, a question, a suggestion or a requested change. The notes gather into one review, which goes to the composer with each note's file and lines, so the person edits it before it reaches the agent. An answer to a question shows beside the lines it was asked about. When the thread has a pull request, the review could also go to GitHub as review comments, and the pull request's own review comments could show in place, building on the pull request watch.
 - **A git identity in every pylon.** A scratch pylon has no git `user.name` or `user.email`, so an agent there can't commit. Headless Claude Code hit this in the Claude Code spike and stopped to ask who to commit as. The common dotfiles layer or the project could set it.
-- **Serve the dashboard over HTTPS,** for example through `tailscale serve`. Browsers allow system notifications only in a secure context, and the dashboard is plain HTTP today.
 
 ## Later
 
