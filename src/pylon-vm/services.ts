@@ -3,10 +3,11 @@ import { join, posix } from "node:path";
 import type { VM } from "@earendil-works/gondolin";
 import { parseDocument } from "yaml";
 import { z } from "zod";
-import { linkedName, reservedPorts } from "../project.ts";
+import { linkedName, relayPorts, reservedPorts } from "../project.ts";
 import { configSchema, type Service } from "./contracts.ts";
 import { checked, guestExists, serviceRunning, startService, stopService } from "./guest.ts";
 import { openPortal } from "./portals.ts";
+import { writeRelayMap } from "./relay.ts";
 import { existsError, shellQuote as q, saveJson } from "./storage.ts";
 
 const reference = /\$\{services\.([a-z0-9][a-z0-9-]{0,31})\.publicURL\}/g;
@@ -58,6 +59,11 @@ export class GuestServices {
 	 * which ends that watch without a verdict.
 	 */
 	private watches = new Map<string, object>();
+	/** The relay port each routed port is served on. A port keeps its relay port while it stays routed. */
+	private relays = new Map<number, number>();
+	/** The last relay map written, and the write in flight, so writes land in the order their routes changed. */
+	private relaysWritten = "";
+	private relayWrite: Promise<void> = Promise.resolve();
 	private vm: VM;
 	private dir: string;
 	readonly configPath: string;
@@ -105,7 +111,7 @@ export class GuestServices {
 		}
 		for (const port of linked)
 			this.attached.set(port, await openPortal(await this.ingress(), `/${linkedName(port)}`));
-		this.routes();
+		await this.routes();
 	}
 	/** A repo without the file declares no services. */
 	private async declaredFile(): Promise<Record<string, Service>> {
@@ -239,22 +245,37 @@ export class GuestServices {
 			...(portal ? { portalPort: Number(new URL(portal.url).port) } : {}),
 		};
 		await saveJson(join(this.dir, "services.json"), this.assignments);
-		this.routes();
+		await this.routes();
 		return entry;
 	}
-	private routes(): void {
-		this.vm.setIngressRoutes([
-			...[...this.entries].map(([name, entry]) => ({
-				prefix: `/${name}/`,
-				port: entry.port,
-				stripPrefix: true,
-			})),
-			...[...this.attached.keys()].map((port) => ({
-				prefix: `/${linkedName(port)}/`,
-				port,
-				stripPrefix: true,
-			})),
-		]);
+	/**
+	 * Every route points at the port's relay port, not at the port, because the ingress dials only 127.0.0.1 and the
+	 * relay reaches `::1` too (relay.ts). The routes change at once, and the relay listens on a new relay port within
+	 * its next read of the map, 200 ms.
+	 */
+	private async routes(): Promise<void> {
+		const routed = [
+			...[...this.entries].map(([name, entry]) => ({ prefix: `/${name}/`, port: entry.port })),
+			...[...this.attached.keys()].map((port) => ({ prefix: `/${linkedName(port)}/`, port })),
+		];
+		const ports = new Set(routed.map((route) => route.port));
+		for (const port of this.relays.keys()) if (!ports.has(port)) this.relays.delete(port);
+		for (const port of ports) if (!this.relays.has(port)) this.relays.set(port, this.freeRelayPort());
+		this.vm.setIngressRoutes(routed.map((route) => ({ prefix: route.prefix, port: this.relays.get(route.port)!, stripPrefix: true })));
+		const relays = new Map(this.relays);
+		const write = this.relayWrite.then(async () => {
+			const json = JSON.stringify([...relays]);
+			if (json === this.relaysWritten) return;
+			await writeRelayMap(this.vm, relays);
+			this.relaysWritten = json;
+		});
+		this.relayWrite = write.catch(() => undefined);
+		await write;
+	}
+	private freeRelayPort(): number {
+		const used = new Set(this.relays.values());
+		for (let port = relayPorts.first; port <= relayPorts.last; port++) if (!used.has(port)) return port;
+		throw new Error(`Every relay port from ${relayPorts.first} to ${relayPorts.last} serves a route, so no more ports can be previewed`);
 	}
 	/** Previews a port that is already listening, unsupervised. Returns the name it is reported under. */
 	async attach(port: number): Promise<string> {
@@ -282,8 +303,9 @@ export class GuestServices {
 				throw error;
 			}
 			this.attached.set(port, portal);
-			this.routes();
 		}
+		// Also when the port was linked already, so a retry after a failed write of the relay map writes it.
+		await this.routes();
 		return linkedName(port);
 	}
 	/**
@@ -304,14 +326,15 @@ export class GuestServices {
 		// Saved before the port stops counting as attached, so a failed save leaves it linked and a retry saves it again.
 		await saveJson(join(this.dir, "linked.json"), [...this.attached.keys()].filter((linked) => linked !== port));
 		this.attached.delete(port);
-		this.routes();
+		await this.routes();
 		await portal.close();
 		return null;
 	}
+	/** Asks the port itself, on both addresses the relay carries to, so a relay that listens never makes a service ready. */
 	private async listening(port: number): Promise<boolean> {
 		const listening = await checked(
 			this.vm,
-			`python3 -c ${q("import socket,sys; s=socket.socket(); s.settimeout(1); print(s.connect_ex(('127.0.0.1',int(sys.argv[1])))==0); s.close()")} ${port}`,
+			`python3 -c ${q("import socket,sys\ndef up(family,host):\n try:\n  with socket.socket(family) as s: s.settimeout(1); return s.connect_ex((host,int(sys.argv[1])))==0\n except OSError: return False\nprint(up(socket.AF_INET,'127.0.0.1') or up(socket.AF_INET6,'::1'))")} ${port}`,
 		);
 		return listening.trim() === "True";
 	}
@@ -464,7 +487,7 @@ export class GuestServices {
 				}
 			}
 			await saveJson(join(this.dir, "services.json"), this.assignments);
-			this.routes();
+			await this.routes();
 			if (selected && !config[selected] && !this.entries.has(selected))
 				throw new Error(
 					`Service ${selected} is no longer declared. Edit ${this.configPath}`,

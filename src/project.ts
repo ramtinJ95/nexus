@@ -37,10 +37,15 @@ export function linkedPort(service: ServiceName): number | null {
   return m === null ? null : Number(m[1]);
 }
 /**
- * Nexus's own listeners in every pylon: the sshd that Gondolin's enableSsh starts for streams and terminals. They
- * are never reported as listening, and never linked.
+ * The ports the pylon's loopback relay (src/pylon-vm/relay.ts) listens on, one per routed port. They are below 1024,
+ * so the agent's apps, which run as `user`, can never hold one.
  */
-export const reservedPorts: ReadonlySet<number> = new Set([22]);
+export const relayPorts = { first: 700, last: 799 } as const;
+/**
+ * Nexus's own listeners in every pylon: the sshd that Gondolin's enableSsh starts for streams and terminals, and the
+ * relay's ports. They are never reported as listening, and never linked.
+ */
+export const reservedPorts: ReadonlySet<number> = new Set([22, ...Array.from({ length: relayPorts.last - relayPorts.first + 1 }, (_, i) => relayPorts.first + i)]);
 export interface ServiceDecl {
   command: string; // foreground, run as `user` through a login shell
   cwd?: string; // relative to the repo root, default "."
