@@ -58,6 +58,8 @@ export async function runWorker(check = false): Promise<void> {
   for (const role of roles) await reconcileRole(role, config, api);
 }
 
+class WaitingForControl extends Error {}
+
 type Api = (path: string, body?: unknown) => Promise<any>;
 export async function reconcileRole(role: Role, config: WorkerConfig, api: Api, boundary = {
   prefix, etc: "/etc/nexus", units: "/etc/systemd/system", run: command, checkout: checkoutMerged,
@@ -104,13 +106,23 @@ export async function reconcileRole(role: Role, config: WorkerConfig, api: Api, 
       return `releases/${commit}`;
     },
     async beforeSwitch() {
+      if (role === "probe") {
+        let view: ReleaseView;
+        try { view = await api("release") as ReleaseView; }
+        catch { throw new WaitingForControl("control readiness could not be read; retrying next poll"); }
+        if (view.desired?.commit !== desired) throw new WaitingForControl("release superseded before activation; retrying next poll");
+        if (!view.nodes.some((r) => r.role === "control" && r.commit === desired && r.state === "healthy" && Date.now() - r.observedAt < 90_000)) {
+          throw new WaitingForControl("control plane is not freshly healthy on the desired release; retrying next poll");
+        }
+      }
       if (role === "control" && !(await api("drain", { commit: desired, hold: true })).idle) throw new Error("agent turn entered after the drain lease expired; refusing restart");
     },
     async activate() {
-      const view = await api("release") as ReleaseView;
-      if (view.desired?.commit !== desired) throw new Error("release superseded before activation");
-      if (role === "probe" && !view.nodes.some((r) => r.role === "control" && r.commit === desired && r.state === "healthy" && Date.now() - r.observedAt < 90_000)) throw new Error("control plane is not healthy on the desired release");
-      if (role === "control" && (drainLost || !(await drain()).idle)) throw new Error("drain barrier lost before restart");
+      if (role === "control") {
+        const view = await api("release") as ReleaseView;
+        if (view.desired?.commit !== desired) throw new Error("release superseded before activation");
+        if (drainLost || !(await drain()).idle) throw new Error("drain barrier lost before restart");
+      }
       await run("env", [`NEXUS_COMMIT=${desired}`, "NEXUS_PREPARE=1", "bash", join(repo, "deploy", `install-${role}.sh`)], repo);
     },
     async restart() {
@@ -167,7 +179,7 @@ export async function reconcileRole(role: Role, config: WorkerConfig, api: Api, 
     await report(result.state === "healthy" ? "healthy" : result.state === "rolled-back" ? "rolled-back" : "failed", result.commit, result.reason);
     if (result.state === "healthy") await promoteWorker(step.commit, repo, prefix, run);
   } catch (error) {
-    await report("failed", desired, String(error).slice(-20_000));
+    await report(error instanceof WaitingForControl ? "waiting-for-control" : "failed", desired, String(error).slice(-20_000));
   } finally {
     clearInterval(renewal);
     if (role === "control") await api("drain", { commit: desired, release: true }).catch(() => {});

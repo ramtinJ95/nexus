@@ -113,3 +113,65 @@ test("polling reconciles a desired control release, reports rollback and leaves 
   await reconcileRole("control", config, api, boundary);
   assert.equal(calls.length, 0, "bad commits remain quarantined, including across polling cycles");
 });
+
+for (const readiness of ["stale", "unhealthy", "unreachable"] as const) test(`probe retries when control becomes ${readiness} during preparation, without switching or quarantining`, async (t) => {
+  const { createServer } = await import("node:http");
+  const { once } = await import("node:events");
+  const { reconcileRole } = await import("./worker.ts");
+  const dir = await mkdtemp(join(tmpdir(), "nexus-probe-poll-"));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const old = "b".repeat(40);
+  for (const path of ["etc", "units", "deployer", `releases/${old}`, `releases/${commit}`]) await mkdir(join(dir, path), { recursive: true });
+  for (const hash of [old, commit]) await writeFile(join(dir, `releases/${hash}/release-commit`), hash);
+  await symlink(`releases/${old}`, join(dir, "current"));
+  await symlink(`releases/${commit}`, join(dir, "control-current"));
+  await writeFile(join(dir, "units/nexus-probe.service"), "old unit");
+  let processCommit = old;
+  const server = createServer((_req, res) => res.end(JSON.stringify({ commit: processCommit }))).listen(0, "127.0.0.1");
+  await once(server, "listening");
+  t.after(() => { server.closeAllConnections(); server.close(); });
+  await writeFile(join(dir, "etc/probe.json"), JSON.stringify({ listen: { host: "127.0.0.1", port: (server.address() as { port: number }).port } }));
+  const reports: string[] = [];
+  let reads = 0;
+  let activations = 0;
+  let restarts = 0;
+  const api = async (path: string, body?: any) => {
+    if (path === "release") {
+      reads++;
+      if (reads === 2 && readiness === "unreachable") throw new Error("control connection lost");
+      return {
+        desired: { commit, requestedBy: "nMac", requestedAt: 0 },
+        nodes: [{ node: "control", role: "control", commit, target: commit, reason: null,
+          state: reads === 2 && readiness === "unhealthy" ? "failed" : "healthy",
+          observedAt: Date.now() - (reads === 2 && readiness === "stale" ? 90_001 : 0) }],
+      };
+    }
+    if (path === "report") { reports.push(body.state); return { ok: true }; }
+    assert.fail(path);
+  };
+  const config = { controlUrl: "http://control/", controlNodeId: "nControl", token: "a".repeat(64), healthTimeoutMs: 1000, drainTimeoutMs: 0 };
+  const boundary = {
+    prefix: dir, etc: join(dir, "etc"), units: join(dir, "units"),
+    async checkout() {},
+    async run(program: string, args: readonly string[]) {
+      if (program === "env" && args.includes("NEXUS_PREPARE=1")) activations++;
+      if (program === "systemctl" && args[0] === "restart") { restarts++; processCommit = commit; }
+      return "";
+    },
+  };
+  await reconcileRole("probe", config, api, boundary);
+  assert.equal(reads, 2, "control was fresh at planning and checked again after preparation");
+  assert.deepEqual(reports, ["installing", "waiting-for-control"]);
+  assert.equal(activations, 0);
+  assert.equal(restarts, 0);
+  assert.equal(await readlink(join(dir, "current")), `releases/${old}`);
+  await assert.rejects(readFile(join(dir, "probe-deploy.json")), { code: "ENOENT" });
+  await reconcileRole("probe", config, api, boundary);
+  assert.equal(reads, 4);
+  assert.deepEqual(reports, ["installing", "waiting-for-control", "installing", "healthy"]);
+  assert.equal(activations, 1);
+  assert.equal(restarts, 1);
+  assert.equal(await readlink(join(dir, "current")), `releases/${commit}`);
+  assert.equal(await readlink(join(dir, "control-current")), `releases/${commit}`);
+  assert.equal(JSON.parse(await readFile(join(dir, "probe-deploy.json"), "utf8")).state, "healthy");
+});
