@@ -878,9 +878,12 @@ const itemLine = /^( *)([-*+]|(\d{1,9})[.)])[ \t]+(.*)$/;
 const isBlank = (line: string) => line.trim() === "";
 const indentOf = (line: string) => line.length - line.trimStart().length;
 const startsBlock = (line: string) => [fenceLine, headingLine, ruleLine, quoteLine, itemLine].some((re) => re.test(line));
+/** Quotes and lists nested deeper read as typed, since a reply is untrusted and each level parses and renders a call deeper. */
+const maxNesting = 16;
 
 /** Every line is kept, so a paragraph's line breaks show as they were typed. */
-function parseMarkdown(lines: readonly string[]): Markdown[] {
+function parseMarkdown(lines: readonly string[], depth = 0): Markdown[] {
+  if (depth === maxNesting) return lines.some((l) => !isBlank(l)) ? [{ kind: "para", text: lines.join("\n") }] : [];
   const out: Markdown[] = [];
   let i = 0;
   while (i < lines.length) {
@@ -908,7 +911,7 @@ function parseMarkdown(lines: readonly string[]): Markdown[] {
         body.push(q[1]!);
         i++;
       }
-      out.push({ kind: "quote", body: parseMarkdown(body) });
+      out.push({ kind: "quote", body: parseMarkdown(body, depth + 1) });
     } else if (item !== null) {
       const ordered = item[3] !== undefined;
       const items: Markdown[][] = [];
@@ -932,7 +935,7 @@ function parseMarkdown(lines: readonly string[]): Markdown[] {
           else if (!isBlank(body.at(-1)!) && !startsBlock(next)) body.push(next);
           else break;
         }
-        items.push(parseMarkdown(body));
+        items.push(parseMarkdown(body, depth + 1));
       }
       out.push({ kind: "list", start: ordered ? Number(item[3]) : null, items });
     } else {
