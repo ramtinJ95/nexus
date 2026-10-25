@@ -117,7 +117,8 @@ a.link { color: var(--accent); }
 .chip-bad { color: var(--bad); }
 .chip-busy { color: var(--warn); }
 .chip-model { font-size: 12px; background: transparent; border: 1px solid var(--line); color: var(--text-2); padding: 6px 11px; }
-.chip-queued { font-size: 11px; padding: 3px 8px; }
+.chip-queued, .chip-from { font-size: 11px; padding: 3px 8px; }
+.chip-from { background: var(--raised-2); }
 
 /* sidebar */
 .side { background: var(--side); display: flex; flex-direction: column; min-height: 0; }
@@ -213,6 +214,7 @@ a.link { color: var(--accent); }
 .notice-mark { font: 700 11px/16px var(--mono); width: 16px; flex: none; text-align: center; border-radius: 50%; background: var(--raised-2); }
 .notice-busy { color: var(--warn); background: color-mix(in srgb, var(--warn) 9%, transparent); }
 .notice-bad { color: var(--del-text); background: var(--del-bg); }
+.note { margin: 0; font-size: 12px; color: var(--text-3); }
 
 /* a run of tool calls is one quiet line, as Jetline's "Ran a command, edited 2 files ›" */
 .steps > summary { list-style: none; display: inline-flex; align-items: center; gap: 8px; min-height: 26px; padding: 0 6px 0 2px; border-radius: 6px; cursor: pointer; font-size: 14px; color: var(--text-3); }
@@ -243,6 +245,8 @@ a.link { color: var(--accent); }
 .t-args { color: var(--text-3); }
 .t-full { white-space: pre-wrap; overflow-wrap: anywhere; color: var(--text); }
 .t-empty { margin: 2px 0 6px 22px; font-size: 11.5px; color: var(--text-3); }
+.t-text { margin: 3px 0 7px 18px; font-size: 13px; line-height: 1.55; color: var(--text-2); white-space: pre-wrap; overflow-wrap: anywhere; max-height: 240px; overflow: auto; }
+.t-task { margin: 2px 0 6px 22px; font-size: 12px; color: var(--text-2); overflow-wrap: anywhere; }
 .tool.failed > summary { background: var(--del-bg); }
 .tool.failed .t-name, .tool.failed .t-subj { color: var(--del-text); }
 .tool.failed .t-out { border-left: 2px solid var(--bad); }
@@ -404,6 +408,9 @@ a.link { color: var(--accent); }
 .form label, .seg legend { font-size: 12px; color: var(--text-2); margin-top: 8px; }
 .form input:not([type]), .form select { font: 13.5px var(--sans); color: var(--text); background: var(--bg); border: 1px solid var(--line); border-radius: 8px; height: 36px; padding: 0 11px; width: 100%; min-width: 0; }
 .form #start-title { font-size: 15px; height: 40px; }
+.form textarea { font: 13.5px/1.5 var(--sans); color: var(--text); background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 8px 11px; width: 100%; min-width: 0; min-height: 96px; max-height: 40vh; resize: vertical; field-sizing: content; }
+#start-claude-fields { display: grid; gap: 6px; }
+#start-claude-fields .hint { margin: 0; }
 .seg { border: 0; padding: 0; margin: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 6px; min-width: 0; }
 .seg legend { padding: 0; margin-bottom: 6px; }
 .seg .seg-opt { margin: 0; border: 1px solid var(--line); border-radius: 10px; padding: 8px 10px; display: grid; gap: 2px; cursor: pointer; background: var(--bg); min-width: 0; }

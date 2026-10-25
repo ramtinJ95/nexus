@@ -12,6 +12,7 @@ import { openRegistry, type Thread } from "./registry.ts";
 import type { JobId, NodeName, PylonObservation, ServiceFact, TailnetNodeId } from "../protocol.ts";
 import { githubTokenGrant } from "../project.ts";
 import type { AssistantMessage, Message, ToolCall } from "@earendil-works/pi-ai";
+import type { ClaudeEntry } from "../claude-transcript.ts";
 
 const node = "rj-firebat" as NodeName;
 const laptop = "nLAPTOP" as TailnetNodeId;
@@ -150,7 +151,7 @@ function conversationOf(html: string) {
   const convo = html.split('id="convo"')[1]!.split('<div class="dock">')[0]!;
   const dock = html.split('<div class="dock">')[1]!.split("</main>")[0]!;
   return {
-    rows: convo.split(/(?=<div class="msg |<p class="notice|<details class="tool|<details class="steps)/).slice(1).map((row) => textOf(`<x ${row}`).replace(/^<x /, "")),
+    rows: convo.split(/(?=<div class="msg |<p class="notice|<p class="note"|<details class="tool|<details class="steps)/).slice(1).map((row) => textOf(`<x ${row}`).replace(/^<x /, "")),
     open: [...convo.matchAll(/<details class="(?:tool|steps)[^"]*" id="([^"]*)"( open)?>/g)].map((m) => [m[1], m[2] !== undefined]),
     text: textOf(convo.replace(/^[^>]*>/, "")),
     dock: textOf(dock),
@@ -679,7 +680,7 @@ test("the start dialog's projects refresh with the page, so a project added else
   };
   assert.match(await region("/"), /^No projects yet/);
   await s.call("POST", "/v1/projects", project("acme"));
-  assert.match(await region("/"), /^No image is current yet, .* Title Claude Code first prompt \(optional\) Claude model \(optional; claude-opus-5-5\) Project acme git@example\.com:acme\.git Node/, "a refresh brings the form once a project exists");
+  assert.match(await region("/"), /^No image is current yet, .* Worker Claude Code .* Prompt .* Title \(optional\) Project acme git@example\.com:acme\.git Node/, "a refresh brings the form once a project exists");
   await s.call("POST", "/v1/projects", project("beta"));
   assert.match(await region("/threads/th-missing"), /Project acme git@example\.com:acme\.git beta git@example\.com:beta\.git Node/);
 });
@@ -798,7 +799,122 @@ test("every page carries the start dialog, which offers every project and node a
   await s.call("PUT", "/v1/images/current", { image: image.id });
   const home = (await s.call("GET", "/")).text;
   assert.doesNotMatch(home, /data-autoopen/, "the dialog stays closed until asked for");
-  assert.match(textOf(home.split('<dialog id="start-dialog"')[1]!.replace(/^[^>]*>/, "")), new RegExp(`^Start a thread ✕ Title Claude Code first prompt \\(optional\\) Claude model \\(optional; claude-opus-5-5\\) Project acme .* Boots a pylon on rj-firebat from image ${image.id} and checks out main \\.`));
+  assert.match(textOf(home.split('<dialog id="start-dialog"')[1]!.replace(/^[^>]*>/, "")), new RegExp(`^Start a thread ✕ Worker Claude Code .* Title \\(optional\\) Project acme .* Boots a pylon on rj-firebat from image ${image.id} and checks out main \\.`));
+});
+
+test("the start dialog picks Claude Code for a prompt unless the reader picks the Nexus agent, whose thread needs a title", async (t) => {
+  const s = await seeded(t);
+  const dialog = (await s.call("GET", "/threads/new")).text.split('<dialog id="start-dialog"')[1]!.split("</dialog>")[0]!;
+  assert.deepEqual([...dialog.matchAll(/<input type="radio" name="worker" value="([^"]*)"( checked)?><span class="seg-name">([^<]*)<\/span><span class="seg-repo">([^<]*)</g)].map((m) => [m[1], m[2] !== undefined, m[3], m[4]]),
+    [["claude", true, "Claude Code", "for code work"], ["harness", false, "Nexus agent", "the control plane's own harness"]]);
+  const field = (name: string) => new RegExp(`<(?:input|textarea)[^>]* name="${name}"[^>]*>`).exec(dialog)?.[0];
+  assert.match(field("claude")!, /^<textarea [^>]*required/, "Claude Code's prompt is required");
+  assert.match(field("model")!, /placeholder="claude-opus-5-5"/);
+  assert.doesNotMatch(field("title")!, /required/, "a Claude worker's title defaults to its prompt's first line");
+  const claudeFields = textOf(dialog.split('<div id="start-claude-fields">')[1]!.split("</div>")[0]!);
+  assert.equal(claudeFields, "Prompt Runs /poteto-mode with this prompt, as nexus start --claude does. Model (optional) Opus 5.5 unless you name another.");
+});
+
+/** Starts a Claude worker thread whose launch opened session s1, and stores these entries as its transcript's last read. */
+async function claudeThread(s: Awaited<ReturnType<typeof seeded>>, entries: ClaudeEntry[], readAt = Date.now()): Promise<Thread> {
+  const res = await s.call("POST", "/v1/threads", { project: "acme", title: "Count lines", claude: "count the lines" });
+  assert.equal(res.status, 201, res.text);
+  const thread = JSON.parse(res.text) as Thread;
+  s.registry.setClaudeWorker(thread.id, "/poteto-mode count the lines", "started", undefined, "s1");
+  assert.ok(s.registry.appendClaudeRead(thread.id, { session: "s1", from: { offset: 0, skipping: false }, entries, cursor: { offset: 1, skipping: false }, reset: false, readAt }));
+  return thread;
+}
+
+test("a Claude worker's transcript reads as its conversation: prompts by who sent them, replies, folded calls with their results and a subagent's finish, notes, unknown records and what Claude queued", async (t) => {
+  const s = await seeded(t);
+  const thread = await claudeThread(s, [
+    { kind: "prompt", at: 1, text: "Write hello.py, then count its lines", from: "person" },
+    { kind: "tool", at: 2, id: "t1", name: "Write", input: { file_path: "/repo/hello.py", content: 'print("hi")\n' } },
+    { kind: "result", at: 3, toolUseId: "t1", output: "File created", isError: false },
+    { kind: "tool", at: 4, id: "t2", name: "Bash", input: { command: "false" } },
+    { kind: "result", at: 5, toolUseId: "t2", output: "Exit code 1", isError: true },
+    { kind: "tool", at: 6, id: "t3", name: "Agent", input: { description: "Count lines", subagent_type: "general-purpose", prompt: "Count the lines of `hello.py`" } },
+    { kind: "result", at: 7, toolUseId: "t3", output: "Started in the background", isError: false },
+    { kind: "reply", at: 8, text: "Counting with `wc`:\n```\nwc -l <hello.py>\n```\n" },
+    { kind: "task", at: 9, toolUseId: "t3", status: "completed", summary: 'Agent "Count lines" finished', result: "It has `1` line." },
+    { kind: "task", at: 10, toolUseId: null, status: "failed", summary: "Background command failed", result: null },
+    { kind: "turn", at: 11, durationMs: 72_000 },
+    { kind: "record", at: null, type: "mystery", summary: '{"type":"mystery"}' },
+    { kind: "prompt", at: 12, text: "/compact", from: "command" },
+    { kind: "notice", at: 13, tone: "error", text: "The model failed" },
+    { kind: "queue", at: 14, op: "enqueue", text: "taken first" },
+    { kind: "queue", at: 15, op: "dequeue", text: null },
+    { kind: "queue", at: 16, op: "enqueue", text: "and then <deploy>" },
+    { kind: "queue", at: 17, op: "enqueue", text: "taken by its text" },
+    { kind: "queue", at: 18, op: "remove", text: "taken by its text" },
+  ]);
+
+  const html = (await s.call("GET", `/threads/${thread.id}`)).text;
+  const { rows, open, dock } = conversationOf(html);
+  assert.deepEqual(rows, [
+    "You Write hello.py, then count its lines",
+    "Wrote a file, ran a command, ran a subagent 1 failed ›",
+    '› Write /repo/hello.py +1 −0 ✓ /repo/hello.py + print("hi")',
+    "› Bash false 1 line exit 1 false Exit code 1",
+    '› Agent Count lines 1 line ✓ Count lines Count the lines of hello.py { "subagent_type": "general-purpose" } Started in the background Background task completed: Agent "Count lines" finished It has 1 line.',
+    "Counting with wc : wc -l <hello.py>",
+    "! A background task failed: Background command failed",
+    "Worked for 1m 12s.",
+    '! Claude Code wrote a mystery record: {"type":"mystery"}',
+    "Slash command /compact",
+    "! The model failed",
+    "You queued, Claude takes it at its next step and then <deploy>",
+  ]);
+  assert.deepEqual(open, [["steps-t1", true], ["tool-t1", true], ["tool-t2", true], ["tool-t3", false]], "a fold with a failure starts open, as do the failure and the write's diff");
+  assert.ok(html.includes("and then &lt;deploy&gt;"), "transcript text is escaped");
+  assert.match(textOf(html.split('<p class="convo-meta">')[1]!.split("</p>")[0]!), new RegExp(`^${thread.id} · started just now · Claude Code · claude-opus-5-5$`));
+  assert.match(html, /<form id="prompt" class="composer" data-thread="[^"]+" data-claude>/);
+  assert.match(html, /placeholder="Message Claude…"/);
+  assert.equal(dock, "The pylon is not running, so the transcript is as of its last read, just now . Sending a message wakes it and resumes Claude. claude-opus-5-5 ⌘↵ to send Send");
+  assert.match(html, new RegExp(`data-stream="/threads/${thread.id}/stream"`));
+});
+
+test("a Claude worker that works shows its turn's call running, the turn's clock and calls, and a box that queues for Claude", async (t) => {
+  const s = await seeded(t);
+  const thread = await claudeThread(s, [
+    { kind: "prompt", at: 1, text: "Earlier", from: "person" },
+    { kind: "tool", at: 2, id: "old", name: "Bash", input: { command: "sleep 1" } },
+    { kind: "turn", at: 3, durationMs: 1_000 },
+    { kind: "prompt", at: Date.now() - 72_000, text: "Run the tests", from: "person" },
+    { kind: "prompt", at: Date.now(), text: "A background task finished", from: "task" },
+    { kind: "tool", at: 4, id: "t1", name: "Bash", input: { command: "npm test" } },
+  ]);
+  s.observe(thread);
+  s.registry.reportSession(node, { sequence: 1, pylon: thread.pylonId, time: Date.now(), event: { kind: "session.turn-started", session: "s1" } });
+
+  const html = (await s.call("GET", `/threads/${thread.id}`)).text;
+  const { rows, dock } = conversationOf(html);
+  assert.deepEqual(rows, [
+    "You Earlier",
+    "Ran a command ›",
+    "› Bash sleep 1 no result sleep 1 No output.",
+    "Worked for 1s.",
+    "You Run the tests",
+    "Background task A background task finished",
+    "Ran a command 1 running ›",
+    "› Bash npm test running npm test No output yet.",
+  ], "only a call of the running turn runs");
+  assert.match(dock, /^Claude is working\. 1m 1[2-3]s · 1 tool this turn · new messages go in at its next step Claude Code takes a message sent during a turn at its next step\. claude-opus-5-5 ⌘↵ to queue Queue$/,
+    "the turn is timed from the person's prompt, and Claude cannot be aborted");
+  assert.doesNotMatch(html, /data-action="abort"/);
+  assert.match(html, /placeholder="Queue for Claude…"/);
+});
+
+test("a Claude worker without a transcript says whether it was read, and an archived one's says how old it is", async (t) => {
+  const s = await seeded(t);
+  const res = await s.call("POST", "/v1/threads", { project: "acme", title: "Fresh", claude: "go" });
+  const fresh = JSON.parse(res.text) as Thread;
+  assert.match(conversationOf((await s.call("GET", `/threads/${fresh.id}`)).text).text, /Claude's transcript has not been read yet\. It is read while the pylon runs\.$/);
+  const read = await claudeThread(s, [], Date.now() - 10 * 60_000);
+  assert.match(conversationOf((await s.call("GET", `/threads/${read.id}`)).text).text, /Claude has not written a transcript yet\.$/);
+  assert.equal((await s.call("POST", `/v1/threads/${read.id}/archive`, {})).status, 200);
+  assert.equal(conversationOf((await s.call("GET", `/threads/${read.id}`)).text).dock,
+    "An archived thread takes no messages, because its pylon stays paused. Unarchive the thread to send one. The pylon is not running, so the transcript is as of its last read, 10 min ago .");
 });
 
 test("pages link their assets by hash, and a hashed asset is cached for good", async (t) => {

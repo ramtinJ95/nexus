@@ -11,29 +11,36 @@
  * without a JSON content type and an HTML form cannot send one. The client polls each page and swaps the regions
  * marked `data-live` that changed. A thread page also opens its stream, which sends the conversation region as the
  * run streams: whole when its shape changed, or else only the parts that grow in place, the partial answer and
- * each running tool. The changes and the diffs are read by the client from the JSON API, because each read reaches
- * into the pylon and counts as a human's visit, so they are read when asked for rather than with every poll.
+ * each running tool. A Claude worker thread's conversation is its transcript, shown in the same rows. The changes and
+ * the diffs are read by the client from the JSON API, because each read reaches into the pylon and counts as a
+ * human's visit, so they are read when asked for rather than with every poll.
  */
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
-import type { AssistantMessage, ImageContent, TextContent, ToolCall, UserMessage } from "@earendil-works/pi-ai";
+import type { AssistantMessage, ImageContent, TextContent, UserMessage } from "@earendil-works/pi-ai";
 import type { ConversationView, InboxState, LiveState } from "@earendil-works/pi-durable";
 import { desiredPhase, type ActualState, type DesiredPhase } from "../reconcile.ts";
 import type { HerdrStatus } from "../protocol.ts";
 import { githubTokenGrant, linkedPort, type SessionHarness } from "../project.ts";
 import type { ThreadDetail } from "./api.ts";
 import type { NodeRecord, Output, Preview, Registry, Thread, ThreadId } from "./registry.ts";
+import type { ClaudeConversation, ClaudeEntry, PromptSource } from "../claude-transcript.ts";
+import { queuedOf } from "./claude-conversation.ts";
 
 export interface DashboardOptions {
   registry: Registry;
   /** The API's thread detail, so the dashboard derives the actual state exactly as the API does. */
   detail(thread: Thread): ThreadDetail;
-  /** The API's conversation view, for a thread that has a conversation and is not deleted. */
-  conversation(thread: Thread): Promise<ConversationView>;
+  /** The API's conversation view, or a Claude worker's transcript, for a thread that has one and is not deleted. */
+  conversation(thread: Thread): Promise<Conversation>;
   now?: () => number;
 }
 
 export interface Page { status: number; headers: Record<string, string>; body: string }
+
+/** What a thread page shows as its conversation: the harness conversation's view, or a Claude worker's transcript. */
+type Conversation = ConversationView | ClaudeConversation;
+const isClaude = (view: Conversation): view is ClaudeConversation => (view as Partial<ClaudeConversation>).kind === "claude";
 
 /** How often the client refetches a page. The loop ticks every 5 s, so polling faster shows nothing new. */
 export const pollMs = 5_000;
@@ -47,8 +54,8 @@ export function dashboard(options: DashboardOptions): (path: string, query: URLS
   const context = (): Context => ({ registry, detail, now: (options.now ?? Date.now)() });
 
   /** A failed read shows in the conversation, so the rest of the page still says what the pylon is doing. */
-  async function transcript(t: Thread): Promise<ConversationView | Error | null> {
-    if (t.conversationId === null || t.status === "deleted") return null;
+  async function transcript(t: Thread): Promise<Conversation | Error | null> {
+    if ((t.conversationId === null && registry.claudeWorker(t.id) === undefined) || t.status === "deleted") return null;
     return options.conversation(t).catch((err: unknown) => err as Error);
   }
 
@@ -272,6 +279,11 @@ ${closed.length > 0 && html`<details class="archived" id="archived-${p.id}"${clo
 </aside>`;
 }
 
+/**
+ * The dialog starts a Claude Code worker unless the reader picks the Nexus agent. A Claude worker's title is its
+ * prompt's first line unless given, as `nexus start --claude` does. client.js disables the fields of the worker not
+ * picked, so the form never sends them, and makes the title required for the Nexus agent.
+ */
 function startDialog(c: Context, start: Shell["start"]): Html {
   const projects = c.registry.projects();
   const nodes = c.registry.nodes();
@@ -282,12 +294,20 @@ function startDialog(c: Context, start: Shell["start"]): Html {
 <div id="start-body" data-live>
 ${chosen === undefined ? html`<div class="modal-empty"><p class="empty">No projects yet, so there is no repository to start a thread on.</p>${newProjectButton}</div>` : html`<form id="start" class="form">
 ${image === null && html`<p class="error">No image is current yet, so a new pylon has nothing to boot.</p>`}
-<label for="start-title">Title</label>
-<input id="start-title" name="title" required autocomplete="off" placeholder="What should this thread do?" autofocus>
-<label for="start-claude">Claude Code first prompt (optional)</label>
-<textarea id="start-claude" name="claude" placeholder="/poteto-mode &lt;task&gt;"></textarea>
-<label for="start-model">Claude model (optional; claude-opus-5-5)</label>
-<input id="start-model" name="model" placeholder="claude-opus-5-5">
+<fieldset class="seg" id="start-worker"><legend>Worker</legend>
+<label class="seg-opt"><input type="radio" name="worker" value="claude" checked><span class="seg-name">Claude Code</span><span class="seg-repo">for code work</span></label>
+<label class="seg-opt"><input type="radio" name="worker" value="harness"><span class="seg-name">Nexus agent</span><span class="seg-repo">the control plane's own harness</span></label>
+</fieldset>
+<div id="start-claude-fields">
+<label for="start-claude">Prompt</label>
+<textarea id="start-claude" name="claude" required placeholder="What should Claude do?" autofocus></textarea>
+<p class="hint">Runs <code>/poteto-mode</code> with this prompt, as <code>nexus start --claude</code> does.</p>
+<label for="start-model">Model (optional)</label>
+<input id="start-model" name="model" autocomplete="off" placeholder="claude-opus-5-5">
+<p class="hint">Opus 5.5 unless you name another.</p>
+</div>
+<label for="start-title" id="start-title-label">Title (optional)</label>
+<input id="start-title" name="title" autocomplete="off" placeholder="The prompt's first line">
 <fieldset class="seg"><legend>Project</legend>
 ${projects.map((p) => html`<label class="seg-opt"><input type="radio" name="project" required value="${p.id}" data-node="${p.defaultNode}" data-branch="${p.defaultBranch}"${p.repoUrl === null && " data-scratch"}${p === chosen && " checked"}><span class="seg-name">${p.id}</span><span class="seg-repo">${p.repoUrl ?? "scratch"}</span></label>`)}
 </fieldset>
@@ -409,11 +429,12 @@ function lookOf(d: ThreadDetail, p: Preview) {
   return state === "failed" ? { ...previewLook.failed, hint: p.failed } : previewLook[state];
 }
 
-function threadPage(c: Context, d: ThreadDetail, node: NodeRecord, view: ConversationView | Error | null, renderedReplyAt: number | null): Html {
+function threadPage(c: Context, d: ThreadDetail, node: NodeRecord, view: Conversation | Error | null, renderedReplyAt: number | null): Html {
   const { thread: t } = d;
   const read = view === null || view instanceof Error ? null : view;
-  const items = read === null ? [] : conversationItems(read);
+  const items = read === null ? [] : itemsOf(read);
   const run = runOf(d, read, items);
+  const model = d.claudeWorker !== undefined ? d.claudeWorker.model : read === null || isClaude(read) ? null : modelOf(read);
   const [label, tone] = threadState(d);
   const open = t.status === "active" || t.status === "idle";
   const actions = [
@@ -434,12 +455,13 @@ ${actions.length > 0 && html`<div class="bar-actions" id="thread-actions">${acti
 <div class="tabs" id="tabs" role="tablist" aria-label="Open views" data-thread="${t.id}"><button type="button" class="tab active" role="tab" aria-selected="true" aria-controls="scroll" data-tab="convo">${icon("chat")}<span class="tab-name">${t.title}</span></button></div>
 <div class="strip" id="strip" data-live>${strip(d)}</div>
 <div id="facts" data-live hidden>${facts(d)}</div>
-<div class="scroll" id="scroll" role="tabpanel"><div class="convo" id="convo" data-rendered-reply-at="${read === null ? "" : renderedReplyAt ?? ""}" data-live${t.conversationId !== null && t.status !== "deleted" && html` data-stream="/threads/${t.id}/stream"`}>${convo(t, view, items, c.now)}</div></div>
+<div class="scroll" id="scroll" role="tabpanel"><div class="convo" id="convo" data-rendered-reply-at="${read === null ? "" : renderedReplyAt ?? ""}" data-live${(t.conversationId !== null || d.claudeWorker !== undefined) && t.status !== "deleted" && html` data-stream="/threads/${t.id}/stream"`}>${convo(t, view, items, model, c.now)}</div></div>
 <section class="file-view" id="file-view" role="tabpanel" aria-label="File diff" hidden></section>
 <div class="dock">
 <p id="action-error" class="error" role="alert" hidden></p>
+<p id="action-status" class="comp-note" role="status" hidden></p>
 <div id="run" data-live>${runBar(t, run, c.now)}</div>
-<div id="composer" data-live>${composer(d, run, read === null ? null : modelOf(read))}</div>
+<div id="composer" data-live>${composer(d, run, model, read !== null && isClaude(read) ? read : null, c.now)}</div>
 </div>`,
     inspector: inspector(d, node, c.now),
   });
@@ -451,15 +473,19 @@ ${actions.length > 0 && html`<div class="bar-actions" id="thread-actions">${acti
  */
 const outputsOf = (d: ThreadDetail) => d.outputs.filter((o) => o.kind !== "pull-request" && (o.kind !== "preview" || !d.previews.some((p) => p.service === o.ref)));
 
-/** The inside of the conversation region, which the page's stream sends again whenever it changed. */
-function convo(t: Thread, view: ConversationView | Error | null, items: readonly Item[], now: number): Html {
-  const read = view === null || view instanceof Error ? null : view;
+/**
+ * The inside of the conversation region, which the page's stream sends again whenever it changed. `model` is the
+ * model the next message goes to, or a Claude worker's.
+ */
+function convo(t: Thread, view: Conversation | Error | null, items: readonly Item[], model: string | null, now: number): Html {
+  const claude = view !== null && !(view instanceof Error) && isClaude(view) ? view : null;
   return html`
-<p class="convo-meta"><code>${t.id}</code> · started ${ago(t.createdAt, now)}${read !== null && modelOf(read) !== null && html` · ${modelOf(read)}`}</p>
+<p class="convo-meta"><code>${t.id}</code> · started ${ago(t.createdAt, now)}${claude !== null && " · Claude Code"}${model !== null && html` · ${model}`}</p>
 ${view === null ? html`<p class="empty">${t.status === "deleted" ? "The thread is deleted, so its conversation is gone." : "This thread has no agent conversation."}</p>`
   : view instanceof Error ? html`<p class="error">The conversation could not be read: ${view.message}</p>`
+  : claude !== null && items.length === 0 ? html`<p class="empty">${claude.readAt === null ? "Claude's transcript has not been read yet. It is read while the pylon runs." : "Claude has not written a transcript yet."}</p>`
   : items.length === 0 ? html`<p class="empty">No messages yet.</p>`
-  : blocks(items).map(blockView)}
+  : html`${claude !== null && claude.dropped > 0 && html`<p class="note">${claude.dropped} older ${claude.dropped === 1 ? "entry is" : "entries are"} not kept.</p>`}${blocks(items).map(blockView)}`}
 `;
 }
 
@@ -481,11 +507,11 @@ const grown = /<!--grow-->([\s\S]*?)<!--\/grow-->/g;
  * its growing parts changed, such as a new entry or a tool call that finished, and otherwise only the parts that
  * grew. Each frame is the change since the one this reader got last, so a reader that fell behind skips ahead.
  */
-export function liveFrames(t: Thread, now: () => number = Date.now): (view: ConversationView) => LiveFrame | null {
+export function liveFrames(t: Thread, claudeModel: string | null = null, now: () => number = Date.now): (view: Conversation) => LiveFrame | null {
   let shape: string | null = null;
   let parts: string[] = [];
   return (view) => {
-    const region = convo(t, view, conversationItems(view), now()).text;
+    const region = convo(t, view, itemsOf(view), isClaude(view) ? claudeModel : modelOf(view), now()).text;
     const next = [...region.matchAll(grown)].map((m) => m[1]!);
     const nextShape = region.replace(grown, "<!--grow-->");
     const grew = next.flatMap((inside, i): [number, string][] => inside === parts[i] ? [] : [[i, inside]]);
@@ -608,14 +634,27 @@ ${s.state === "failed" && html`<p class="error s-why">It did not come back from 
 </div>`;
 }
 
-/** One row of the conversation. A tool call carries its result, which the transcript holds in a later entry. */
+/**
+ * One row of the conversation. A tool call carries its result, which the transcript holds in a later entry, and the
+ * finish of a background task it started. A queued message carries what happens to it, such as that it sends after
+ * the run. A note is a quiet line, such as how long a turn took.
+ */
 type Item =
-  | { kind: "user"; text: string; queued: boolean; at: number; automated?: boolean }
+  | { kind: "user"; text: string; queued: string | null; at: number; from: PromptFrom }
   | { kind: "agent"; text: string; streaming: boolean }
-  | { kind: "tool"; call: Pick<ToolCall, "id" | "name" | "arguments">; result: ToolResult }
-  | { kind: "notice"; text: string; tone: Tone };
+  | { kind: "tool"; call: { id: string; name: string; arguments: Readonly<Record<string, unknown>> }; result: ToolResult; task?: Pick<Extract<ClaudeEntry, { kind: "task" }>, "status" | "summary" | "result"> }
+  | { kind: "notice"; text: string; tone: Tone }
+  | { kind: "note"; text: string };
 type ToolResult = { state: "done"; output: string; isError: boolean } | { state: "running"; output: string } | { state: "none" };
 type ToolItem = Extract<Item, { kind: "tool" }>;
+type UserItem = Extract<Item, { kind: "user" }>;
+
+/** Who a message came from. Nexus's PR watch writes into a harness conversation as a user. */
+type PromptFrom = PromptSource | "pr-watch";
+/** How a bubble names who a message came from. A person's is said only to a screen reader, as the bubble's side shows it. */
+const promptLabel: Record<PromptFrom, string> = {
+  person: "You", "pr-watch": "Nexus PR watch", task: "Background task", command: "Slash command", shell: "Shell command", other: "Claude Code",
+};
 
 const contentText = (content: UserMessage["content"]) => typeof content === "string" ? content
   : content.map((part: TextContent | ImageContent) => part.type === "text" ? part.text : `[${part.mimeType} image]`).join("");
@@ -644,7 +683,7 @@ function conversationItems(view: ConversationView): Item[] {
   };
 
   for (const { entry, message } of view.entries.flatMap((entry) => (entry.model ?? []).map((message) => ({ entry, message })))) {
-    if (message.role === "user") items.push({ kind: "user", text: contentText(message.content), queued: false, at: message.timestamp, automated: entry.kind === "nexus.pr-watch" });
+    if (message.role === "user") items.push({ kind: "user", text: contentText(message.content), queued: null, at: message.timestamp, from: entry.kind === "nexus.pr-watch" ? "pr-watch" : "person" });
     if (message.role === "assistant") answer(message, false);
     if (message.role === "toolResult") {
       const result: ToolResult = { state: "done", output: contentText(message.content), isError: message.isError };
@@ -661,8 +700,57 @@ function conversationItems(view: ConversationView): Item[] {
   if (generation?.message !== undefined) answer(generation.message as AssistantMessage, true);
   if (generation?.retry !== undefined) items.push({ kind: "notice", text: `The model request failed and will be retried: ${generation.retry.error}`, tone: "busy" });
   for (const queued of inbox?.items ?? []) {
-    if (queued.mode !== "write") items.push({ kind: "user", text: contentText(queued.content as UserMessage["content"]), queued: true, at: 0 });
+    if (queued.mode !== "write") items.push({ kind: "user", text: contentText(queued.content as UserMessage["content"]), queued: "sends after this run", at: 0, from: "person" });
   }
+  return items;
+}
+
+const itemsOf = (view: Conversation): Item[] => isClaude(view) ? claudeItems(view) : conversationItems(view);
+
+/**
+ * A Claude worker's transcript as the rows a harness conversation shows. Each result goes on its call, and a
+ * background task's finish on the call that started it. A call of the current turn without a result runs while
+ * Claude works. A message Claude Code queued and has not taken shows queued at the end.
+ */
+function claudeItems({ entries, working }: ClaudeConversation): Item[] {
+  const items: Item[] = [];
+  const tools = new Map<string, ToolItem>();
+  let turn: ToolItem[] = [];
+  for (const entry of entries) {
+    switch (entry.kind) {
+      case "prompt": items.push({ kind: "user", text: entry.text, queued: null, at: entry.at, from: entry.from }); break;
+      case "reply": items.push({ kind: "agent", text: entry.text, streaming: false }); break;
+      case "tool": {
+        const tool: ToolItem = { kind: "tool", call: { id: entry.id, name: entry.name, arguments: entry.input }, result: { state: "none" } };
+        tools.set(entry.id, tool);
+        turn.push(tool);
+        items.push(tool);
+        break;
+      }
+      case "result": {
+        const result: ToolResult = { state: "done", output: entry.output, isError: entry.isError };
+        const tool = tools.get(entry.toolUseId);
+        if (tool === undefined) items.push({ kind: "tool", call: { id: entry.toolUseId, name: "tool", arguments: {} }, result });
+        else tool.result = result;
+        break;
+      }
+      case "task": {
+        const tool = entry.toolUseId === null ? undefined : tools.get(entry.toolUseId);
+        if (tool === undefined) items.push({ kind: "notice", text: `A background task ${entry.status}: ${entry.summary}`, tone: "muted" });
+        else tool.task = entry;
+        break;
+      }
+      case "queue": break;
+      case "notice": items.push({ kind: "notice", text: entry.text, tone: entry.tone === "error" ? "bad" : "muted" }); break;
+      case "turn":
+        turn = [];
+        items.push({ kind: "note", text: `Worked for ${clock(entry.durationMs)}.` });
+        break;
+      case "record": items.push({ kind: "notice", text: `Claude Code wrote a ${entry.type} record: ${entry.summary}`, tone: "muted" }); break;
+    }
+  }
+  if (working) for (const tool of turn) if (tool.result.state === "none") tool.result = { state: "running", output: "" };
+  for (const q of queuedOf(entries)) items.push({ kind: "user", text: q.text ?? "A message the transcript does not show", queued: "Claude takes it at its next step", at: q.at, from: "person" });
   return items;
 }
 
@@ -674,37 +762,50 @@ function modelOf(view: ConversationView): string | null {
 
 /**
  * What the agent's run is doing. Busy comes from the view rather than agentTurnRunning, which a parked run
- * reports as false, so a stuck run can still be aborted. A parked run is stuck, not working.
+ * reports as false, so a stuck run can still be aborted. A parked run is stuck, not working. A Claude worker works
+ * while a turn of its session runs, and the harness cannot abort it.
  */
 type Run =
   | { kind: "idle" }
-  | { kind: "working"; since: number | null; tools: number }
+  | { kind: "working"; since: number | null; tools: number; claude: boolean }
   | { kind: "parked"; tasks: number; busy: boolean };
-function runOf(d: ThreadDetail, view: ConversationView | null, items: readonly Item[]): Run {
+function runOf(d: ThreadDetail, view: Conversation | null, items: readonly Item[]): Run {
+  if (view !== null && isClaude(view)) return view.working ? working(items, (item) => item.from === "person", true) : { kind: "idle" };
   const busy = (view?.docs["pi.live"] as LiveState | undefined)?.run !== undefined;
   const parked = d.agent?.parkedTasks ?? 0;
   if (parked > 0) return { kind: "parked", tasks: parked, busy };
   if (!busy) return { kind: "idle" };
-  // pi-durable keeps no start time for a run, so it is timed from the message it answers.
-  const asked = items.findLastIndex((item) => item.kind === "user" && !item.queued);
+  return working(items, () => true, false);
+}
+
+/** Neither pi-durable nor Claude Code keeps a start time for a turn, so it is timed from the message it answers. */
+function working(items: readonly Item[], asks: (item: UserItem) => boolean, claude: boolean): Run {
+  const asked = items.findLastIndex((item) => item.kind === "user" && item.queued === null && asks(item));
   const turn = items.slice(asked + 1);
-  const since = asked === -1 ? null : (items[asked] as Extract<Item, { kind: "user" }>).at;
-  return { kind: "working", since, tools: turn.filter((item) => item.kind === "tool").length };
+  const since = asked === -1 ? null : (items[asked] as UserItem).at;
+  return { kind: "working", since, tools: turn.filter((item) => item.kind === "tool").length, claude };
 }
 
 function runBar(t: Thread, run: Run, now: number): Html {
   const abort = html`<button type="button" class="btn btn-abort" id="abort" data-action="abort" data-thread="${t.id}">Abort</button>`;
   switch (run.kind) {
     case "idle": return html``;
-    case "working": return html`<div class="run-bar working" role="status"><span class="spin" aria-hidden="true"></span><span class="run-label">The agent is working.</span><span class="dim">${run.since !== null && html`<time data-since="${run.since}">${clock(now - run.since)}</time> · `}${run.tools} ${run.tools === 1 ? "tool" : "tools"} this turn${t.status !== "archived" && " · new messages queue"}</span>${abort}</div>`;
+    case "working": return html`<div class="run-bar working" role="status"><span class="spin" aria-hidden="true"></span><span class="run-label">${run.claude ? "Claude is working." : "The agent is working."}</span><span class="dim">${run.since !== null && html`<time data-since="${run.since}">${clock(now - run.since)}</time> · `}${run.tools} ${run.tools === 1 ? "tool" : "tools"} this turn${t.status !== "archived" && (run.claude ? " · new messages go in at its next step" : " · new messages queue")}</span>${!run.claude && abort}</div>`;
     case "parked": return html`<div class="run-bar parked" role="alert"><span>${run.tasks} ${run.tasks === 1 ? "task" : "tasks"} hit the restart limit and hold the run. ${t.status === "archived" ? "Unarchive the thread to retry them." : "Retry runs them again."}</span>${t.status !== "archived" && html`<button type="button" class="btn" id="retry" data-action="retry" data-thread="${t.id}">Retry</button>`}${run.busy && abort}</div>`;
   }
 }
 
-/** Why a thread takes no messages, or the prompt box. A busy run queues what is sent, so the button says so. */
-function composer(d: ThreadDetail, run: Run, model: string | null): Html {
+/**
+ * Why a thread takes no messages, or the prompt box. A busy run queues what is sent, so the button says so. A Claude
+ * worker's box is marked for client.js, which tries a send again while the pylon wakes, and says how old the
+ * transcript is while the pylon does not run.
+ */
+function composer(d: ThreadDetail, run: Run, model: string | null, claude: ClaudeConversation | null, now: number): Html {
   const { thread: t } = d;
-  if (t.status === "deleted" || t.conversationId === null) return html``;
+  if (t.status === "deleted" || (t.conversationId === null && claude === null)) return html``;
+  const asOf = claude === null || d.pylon.actualState === "running" ? null
+    : claude.readAt === null ? html`The pylon is not running, and Claude's transcript has not been read yet.`
+    : html`The pylon is not running, so the transcript is as of its last read, ${ago(claude.readAt, now)}.`;
   // Only the planner giving up holds the pylon until a human acts. A pylon the probe reports broken may still be paused and resumed.
   if (d.pylon.failed !== null) {
     const refused = d.pylon.retryRefused !== null;
@@ -714,12 +815,14 @@ function composer(d: ThreadDetail, run: Run, model: string | null): Html {
 <pre class="diag">${d.pylon.failed}</pre>
 <div class="failed-actions">${!refused && html`<button type="button" class="btn" id="retry-pylon" data-action="retry-pylon" data-thread="${t.id}">Retry</button>`}<button type="button" class="btn" data-start="${t.project}" data-title="${t.title}">Start again</button></div></div>`;
   }
-  if (t.status === "archived") return html`<p class="note-box">An archived thread takes no messages, because its pylon stays paused. Unarchive the thread to send one.</p>`;
+  if (t.status === "archived") return html`<p class="note-box">An archived thread takes no messages, because its pylon stays paused. Unarchive the thread to send one.${asOf !== null && html` ${asOf}`}</p>`;
   const queue = run.kind !== "idle";
-  return html`<form id="prompt" class="composer${queue && " busy"}" data-thread="${t.id}">
-${d.pylon.actualState === "paused" && html`<p class="comp-note">The pylon is paused. Sending a message wakes it.</p>`}
+  const placeholder = claude === null ? (queue ? "Queue a follow-up…" : "Message the agent…") : queue ? "Queue for Claude…" : "Message Claude…";
+  return html`<form id="prompt" class="composer${queue && " busy"}" data-thread="${t.id}"${claude !== null && " data-claude"}>
+${claude === null ? d.pylon.actualState === "paused" && html`<p class="comp-note">The pylon is paused. Sending a message wakes it.</p>`
+  : html`${asOf !== null && html`<p class="comp-note">${asOf} Sending a message wakes it and resumes Claude.</p>`}${queue && html`<p class="comp-note">Claude Code takes a message sent during a turn at its next step.</p>`}`}
 <div class="comp-box">
-<textarea id="prompt-text" name="text" rows="2" required aria-label="Message the agent" placeholder="${queue ? "Queue a follow-up…" : "Message the agent…"}"></textarea>
+<textarea id="prompt-text" name="text" rows="2" required aria-label="${claude === null ? "Message the agent" : "Message Claude"}" placeholder="${placeholder}"></textarea>
 <div class="comp-foot">${model !== null && html`<span class="chip chip-model">${model}</span>`}<span class="dim small keys">⌘↵ to ${queue ? "queue" : "send"}</span><button type="submit" class="send" id="send" title="${queue ? "Queue" : "Send"}">${icon("up")}${unseen(queue ? "Queue" : "Send")}</button></div>
 </div>
 </form>`;
@@ -739,11 +842,16 @@ function blocks(items: readonly Item[]): Block[] {
 
 function blockView(block: Block): Html {
   switch (block.kind) {
-    case "user": return html`<div class="msg user${block.queued && " queued"}">${unseen(block.automated || block.text.startsWith("[Nexus PR watch") ? "Nexus PR watch" : "You")}${block.queued && html`<div class="msg-who"><span class="chip chip-queued">queued, sends after this run</span></div>`}<div class="text">${prose(block.text)}</div></div>`;
+    case "user": {
+      const from: PromptFrom = block.from === "person" && block.text.startsWith("[Nexus PR watch") ? "pr-watch" : block.from;
+      const named = from !== "person" && from !== "pr-watch";
+      return html`<div class="msg user${block.queued !== null && " queued"}">${!named && unseen(promptLabel[from])}${(named || block.queued !== null) && html`<div class="msg-who">${named && html`<span class="chip chip-from">${promptLabel[from]}</span>`}${block.queued !== null && html`<span class="chip chip-queued">queued, ${block.queued}</span>`}</div>`}<div class="text">${prose(block.text)}</div></div>`;
+    }
     case "agent": return block.streaming
       ? html`<div class="msg agent streaming"><div class="text" data-grow>${grows(html`${prose(block.text)}<span class="caret" aria-hidden="true"></span>`)}</div></div>`
       : html`<div class="msg agent"><div class="text">${prose(block.text)}</div></div>`;
     case "notice": return html`<p class="notice notice-${block.tone}"><span class="notice-mark" aria-hidden="true">!</span>${block.text}</p>`;
+    case "note": return html`<p class="note">${block.text}</p>`;
     case "tools": return stepsView(block.tools);
   }
 }
@@ -758,36 +866,79 @@ function prose(text: string): Html {
   return html`${text.split(/```[^\n]*\n([\s\S]*?)```/).map((part, i) => i % 2 === 1 ? html`<pre class="code">${part}</pre>` : inline(part))}`;
 }
 
-/** The argument that says what a call did, shown in its row. */
+type DiffLine = readonly ["+" | "-", string];
+type Args = ToolItem["call"]["arguments"];
+/** What a call changes, and the arguments that hold it. */
+type Diff = { keys: readonly string[]; lines: DiffLine[] };
+const linesOf = (sign: "+" | "-", text: string) => text.split("\n").map((line): DiffLine => [sign, line]);
+const replaced = (old: string, now: string) => [...linesOf("-", old), ...linesOf("+", now)];
+/** A list of edits under `edits`, each a pair of strings under these keys, as pi's edit and Claude Code's MultiEdit take. */
+const editsDiff = (oldKey: string, newKey: string) => ({ edits }: Args): Diff | null => {
+  const pairs = Array.isArray(edits) ? edits.flatMap((e: Record<string, unknown> | null) => typeof e?.[oldKey] === "string" && typeof e[newKey] === "string" ? [[e[oldKey], e[newKey]] as const] : []) : [];
+  return pairs.length === 0 || pairs.length !== (edits as unknown[]).length ? null : { keys: ["edits"], lines: pairs.flatMap(([old, now]) => replaced(old, now)) };
+};
+const contentDiff = ({ content }: Args): Diff | null => typeof content === "string" ? { keys: ["content"], lines: linesOf("+", content.replace(/\n$/, "")) } : null;
+const stringDiff = ({ old_string: old, new_string: now }: Args): Diff | null => typeof old === "string" && typeof now === "string" ? { keys: ["old_string", "new_string"], lines: replaced(old, now) } : null;
+
+/**
+ * How a tool's calls read, by its name, pi's in lower case and Claude Code's capitalized: the argument that says what
+ * a call did, shown in its row, one shown whole as text, what it changes, the argument naming the file it acts on,
+ * so a fold counts a file once, and how a fold says what it did once and many times.
+ */
+interface ToolLook {
+  subject?: string;
+  text?: string;
+  diff?: (args: Args) => Diff | null;
+  file?: string;
+  doing?: readonly [one: string, many: (n: number) => string];
+}
+const reads = ["read a file", (n: number) => `read ${n} files`] as const;
+const commands = ["ran a command", (n: number) => `ran ${n} commands`] as const;
+const edits = ["edited a file", (n: number) => `edited ${n} files`] as const;
+const writes = ["wrote a file", (n: number) => `wrote ${n} files`] as const;
+const searches = ["searched", (n: number) => `searched ${n} times`] as const;
+const finds = ["looked for files", (n: number) => `looked for files ${n} times`] as const;
+const toolLooks: Readonly<Record<string, ToolLook>> = {
+  read: { subject: "path", file: "path", doing: reads },
+  bash: { subject: "command", doing: commands },
+  edit: { subject: "path", file: "path", diff: editsDiff("oldText", "newText"), doing: edits },
+  write: { subject: "path", file: "path", diff: contentDiff, doing: writes },
+  grep: { subject: "pattern", doing: searches },
+  find: { subject: "pattern", doing: finds },
+  ls: { subject: "path", file: "path", doing: ["listed a folder", (n) => `listed ${n} folders`] },
+  Read: { subject: "file_path", file: "file_path", doing: reads },
+  Bash: { subject: "command", doing: commands },
+  Edit: { subject: "file_path", file: "file_path", diff: stringDiff, doing: edits },
+  MultiEdit: { subject: "file_path", file: "file_path", diff: editsDiff("old_string", "new_string"), doing: edits },
+  Write: { subject: "file_path", file: "file_path", diff: contentDiff, doing: writes },
+  Grep: { subject: "pattern", doing: searches },
+  Glob: { subject: "pattern", doing: finds },
+  Agent: { subject: "description", text: "prompt", doing: ["ran a subagent", (n) => `ran ${n} subagents`] },
+  WebFetch: { subject: "url", doing: ["fetched a page", (n) => `fetched ${n} pages`] },
+  WebSearch: { subject: "query", doing: ["searched the web", (n) => `searched the web ${n} times`] },
+  TodoWrite: { doing: ["updated the to-do list", (n) => `updated the to-do list ${n} times`] },
+  shell: { subject: "command", doing: ["ran a shell command", (n) => `ran ${n} shell commands`] },
+};
+/** The arguments that say what a call of a tool without a look did, the first one it has. */
 const subjectKeys = ["command", "pattern", "path", "url"];
+const lookOfTool = (name: string): ToolLook => Object.hasOwn(toolLooks, name) ? toolLooks[name]! : {};
+const textArg = (args: Args, key: string | undefined) => key !== undefined && typeof args[key] === "string" ? { key, value: args[key] as string } : undefined;
 const subjectOf = (call: ToolItem["call"]) => {
-  const key = subjectKeys.find((k) => typeof call.arguments[k] === "string");
-  return key === undefined ? undefined : { key, value: String(call.arguments[key]) };
+  const { subject } = lookOfTool(call.name);
+  return textArg(call.arguments, subject ?? subjectKeys.find((k) => typeof call.arguments[k] === "string"));
 };
 
-type DiffLine = readonly ["+" | "-", string];
-const isEdit = (e: unknown): e is { oldText: string; newText: string } =>
-  typeof e === "object" && e !== null && typeof (e as { oldText?: unknown }).oldText === "string" && typeof (e as { newText?: unknown }).newText === "string";
-/** What pi's edit and write tools change, from the call's arguments, and the argument that holds it. */
-function diffOf(call: ToolItem["call"]): { key: string; lines: DiffLine[] } | null {
-  const lines = (sign: "+" | "-", text: string) => text.split("\n").map((line): DiffLine => [sign, line]);
-  const { edits, content } = call.arguments;
-  if (call.name === "edit" && Array.isArray(edits) && edits.length > 0 && edits.every(isEdit)) {
-    return { key: "edits", lines: edits.flatMap((e) => [...lines("-", e.oldText), ...lines("+", e.newText)]) };
-  }
-  if (call.name === "write" && typeof content === "string") return { key: "content", lines: lines("+", content.replace(/\n$/, "")) };
-  return null;
-}
-
 const failed = ({ result }: ToolItem) => result.state === "done" && result.isError;
-/** pi's bash tool ends a failed command's output with its exit code. */
-const exitCode = (output: string) => /exited with code (\d+)/.exec(output)?.[1];
+/** pi's bash tool ends a failed command's output with its exit code, and Claude Code's starts with it. */
+const exitCode = (output: string) => /exited with code (\d+)|^Exit code (\d+)/.exec(output)?.slice(1).find((code) => code !== undefined);
 
 function toolView(tool: ToolItem): Html {
-  const { call, result } = tool;
+  const { call, result, task } = tool;
+  const look = lookOfTool(call.name);
   const subject = subjectOf(call);
-  const diff = diffOf(call);
-  const rest = Object.fromEntries(Object.entries(call.arguments).filter(([key]) => key !== subject?.key && key !== diff?.key));
+  const text = textArg(call.arguments, look.text);
+  const diff = look.diff?.(call.arguments) ?? null;
+  const rest = Object.fromEntries(Object.entries(call.arguments).filter(([key]) => key !== subject?.key && key !== text?.key && !diff?.keys.includes(key)));
   const output = result.state === "none" ? "" : result.output;
   const lines = output === "" ? 0 : output.trimEnd().split("\n").length;
   const bad = failed(tool);
@@ -805,37 +956,28 @@ function toolView(tool: ToolItem): Html {
   return html`<details class="tool${bad && " failed"}${running && " running"}" id="tool-${call.id}"${open && " open"}>
 <summary><span class="chev" aria-hidden="true">›</span><span class="t-name">${call.name}</span><span class="t-subj">${subject?.value}</span><span class="t-meta"${running && " data-grow"}>${grow(meta)}</span>${status}</summary>
 ${subject !== undefined && html`<pre class="t-full">${subject.value}</pre>`}
+${text !== undefined && html`<div class="t-text">${prose(text.value)}</div>`}
 ${Object.keys(rest).length > 0 && html`<pre class="t-args">${JSON.stringify(rest, null, 2)}</pre>`}
 ${diff !== null && html`<pre class="t-out diff">${diff.lines.map(([sign, line]) => html`<span class="d d-${sign === "+" ? "add" : "del"}">${sign === "+" ? "+" : "−"} ${line}</span>`)}</pre>`}
 ${(diff === null || bad) && (output === "" ? html`<p class="t-empty">${running ? "No output yet." : "No output."}</p>` : html`<pre class="t-out"${running && " data-grow"}>${grow(output)}</pre>`)}
+${task !== undefined && html`<p class="t-task">Background task ${task.status}: ${task.summary}</p>${task.result !== null && html`<div class="t-text">${prose(task.result)}</div>`}`}
 </details>`;
 }
 
-/** How a fold says what a kind of call did, once and many times. A call to another tool is named as it is. */
-const doings: Record<string, readonly [one: string, many: (n: number) => string]> = {
-  read: ["read a file", (n) => `read ${n} files`],
-  bash: ["ran a command", (n) => `ran ${n} commands`],
-  edit: ["edited a file", (n) => `edited ${n} files`],
-  write: ["wrote a file", (n) => `wrote ${n} files`],
-  grep: ["searched", (n) => `searched ${n} times`],
-  find: ["looked for files", (n) => `looked for files ${n} times`],
-  ls: ["listed a folder", (n) => `listed ${n} folders`],
-};
-
 /**
  * What a run of calls did, as Jetline says it: Read 2 files, ran a command. Calls on the same path count once, so
- * three edits to one file are one edited file.
+ * three edits to one file are one edited file. A call to a tool without a look is named as it is.
  */
 function stepsSummary(tools: readonly ToolItem[]): string {
   const done = new Map<string, Set<string>>();
   for (const { call } of tools) {
-    const path = call.arguments.path;
+    const file = textArg(call.arguments, lookOfTool(call.name).file);
     const seen = done.get(call.name) ?? new Set<string>();
-    seen.add(["read", "edit", "write", "ls"].includes(call.name) && typeof path === "string" ? path : call.id);
+    seen.add(file?.value ?? call.id);
     done.set(call.name, seen);
   }
   const said = [...done].map(([name, seen]) => {
-    const [one, many] = doings[name] ?? [`used ${name}`, (n: number) => `used ${name} ${n} times`];
+    const [one, many] = lookOfTool(name).doing ?? [`used ${name}`, (n: number) => `used ${name} ${n} times`];
     return seen.size === 1 ? one : many(seen.size);
   }).join(", ");
   return said.charAt(0).toUpperCase() + said.slice(1);
