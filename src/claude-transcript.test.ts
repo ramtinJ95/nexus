@@ -273,3 +273,16 @@ test("a pylon that does not answer fails the read at its deadline and drops the 
   await assert.rejects(readTranscript(async () => silent, session, start, "/nowhere", 50), /did not read the transcript within 0.05 s/);
   assert.equal(aborted, true);
 });
+
+test("a transcript replaced by one at least as long starts over from its beginning", async (t) => {
+  const p = await projects(t);
+  await writeFile(p.file, fixture);
+  const all = await readAll(p.read, start);
+  const replaced = [...lines.slice(30), ...lines.slice(0, 30), lines[4]!].map((l) => `${l}\n`).join("");
+  await writeFile(p.file, replaced);
+  const first = (await p.read(all.cursor))!;
+  assert.equal(first.reset, true);
+  const rest = await readAll(p.read, first.cursor);
+  assert.deepEqual([...first.entries, ...rest.entries], parsedAll([...lines.slice(30), ...lines.slice(0, 30), lines[4]!]));
+  assert.equal(rest.cursor.offset, Buffer.byteLength(replaced));
+});
