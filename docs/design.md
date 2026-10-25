@@ -99,10 +99,15 @@ These parts come from IgorWarzocha's `howaboua-pi-stuff`, which is MIT-licensed:
 
 Nexus lives in its own repository, `ramtinJ95/nexus` on GitHub.
 
+## Deployment groundwork
+
+The release planner in `src/deploy/plan.ts` follows the reconcile planner's split: observations and desired state in, one decision out; git, files and services are outside it. The install transaction boundary in `src/deploy/install.ts` is not connected to the control plane. See [deployment groundwork](../deploy/README.md#agent-driven-deployment-groundwork-not-enabled) for the remaining security and runtime integration.
+
 ## Decisions
 
 | Date | Decision |
 |---|---|
+| Pending | Deployment groundwork uses a pure control-first planner and refuses a still-running turn at drain timeout: harness recovery interrupts in-flight tools. Automated deployment is not enabled yet |
 | 2026-10-22 | The probe, project config and template image contracts in `contracts/` are agreed |
 | 2026-10-22 | Nexus copies Amp's design and uses no part of Amp's stack, including its file names and environment variables |
 | 2026-10-22 | pi-sandbox becomes `pylon-vm`, a hard fork owned by Nexus. pi-sandbox stays the design reference |
