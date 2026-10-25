@@ -552,7 +552,7 @@ test("each thread state offers only the actions and prompt box that apply", asyn
   const archived = await state();
   assert.deepEqual(archived.actions, ["abort", "delete", "unarchive"], "an archived thread can still abort, but not retry");
   assert.ok(!archived.prompt && !archived.visit);
-  assert.equal(archived.chip, "archived");
+  assert.equal(archived.chip, "parked");
   assert.equal(archived.dock, "2 tasks hit the restart limit and hold the run. Unarchive the thread to retry them. Abort An archived thread takes no messages, because its pylon stays paused. Unarchive the thread to send one.");
 
   await s.call("POST", `/v1/threads/${fix.id}/unarchive`);

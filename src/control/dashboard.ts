@@ -84,6 +84,7 @@ export function dashboard(options: DashboardOptions): (path: string, query: URLS
 
 const assets = new Map([
   ["style.css", "text/css; charset=utf-8"],
+  ["notifications.js", "text/javascript; charset=utf-8"],
   ["client.js", "text/javascript; charset=utf-8"],
   ["favicon.svg", "image/svg+xml"],
 ].map(([file, type]) => {
@@ -95,7 +96,7 @@ const assetUrl = (file: string) => `/assets/${file}?v=${assets.get(file)!.versio
 const pageHeaders = {
   "content-type": "text/html; charset=utf-8",
   "cache-control": "no-store",
-  "content-security-policy": "default-src 'none'; style-src 'self'; script-src 'self'; connect-src 'self'; img-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
+  "content-security-policy": "default-src 'none'; style-src 'self'; script-src 'self'; connect-src 'self'; img-src 'self' data:; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
   "x-content-type-options": "nosniff",
   "referrer-policy": "no-referrer",
 };
@@ -153,9 +154,12 @@ const icon = (name: IconName) => html`<svg class="i i-${name}" viewBox="0 0 16 1
 const unseen = (text: string) => html`<span class="vh">${text}</span>`;
 
 /** What a thread is doing, most urgent first: the agent mid-turn hides a running pylon, never a failed one. */
-function threadState({ thread: t, pylon }: ThreadDetail): [label: string, tone: Tone] {
+function threadState({ thread: t, pylon, attention }: ThreadDetail): [label: string, tone: Tone] {
+  if (attention === "failed") return ["failed", "bad"];
+  if (attention === "parked") return ["parked", "bad"];
+  if (attention === "reply") return ["new reply", "ok"];
+  if (attention === "working") return ["agent working", "work"];
   if (t.status === "archived" || t.status === "deleted") return [t.status, "muted"];
-  if (t.agentTurnRunning && pylon.actualState !== "failed") return ["agent working", "work"];
   return actualBadge[pylon.actualState];
 }
 
@@ -205,7 +209,7 @@ function layout(c: Context, page: Shell): Html {
 <title>${page.title} · Nexus</title>
 <link rel="icon" href="${assetUrl("favicon.svg")}" type="image/svg+xml">
 <link rel="stylesheet" href="${assetUrl("style.css")}">
-<script src="${assetUrl("client.js")}" defer></script>
+<script type="module" src="${assetUrl("client.js")}"></script>
 </head>
 <body>
 <div class="app${page.inspector !== undefined && " has-inspect"}">
