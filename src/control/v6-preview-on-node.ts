@@ -119,12 +119,19 @@ const reaches = (state: string, timeoutMs: number) => until(`the pylon is ${stat
 });
 
 const stepLimitS = 90;
+type ToolResult = { kind: string; model?: { content: { type: string; text?: string }[] }[] };
 /**
- * Sends `bash: <command>`, which the scripted model turns into one bash call, and returns that call's result. The
- * command runs under `timeout`, so one that hangs ends the agent's turn after stepLimitS and fails the check by name.
+ * Sends `bash: <command>`, which the scripted model turns into one bash call, and returns that call's output as text,
+ * so a check can anchor on its lines. The command runs under `timeout`, so one that hangs ends the agent's turn after
+ * stepLimitS and fails the check by name.
  */
 async function runTool(requestId: string, command: string): Promise<string> {
-  const results = async () => ((await expect(200, "GET", `/threads/${threadId}/conversation`)).entries as { kind: string }[]).filter((e) => e.kind === "pi.tool-result").map((e) => JSON.stringify(e));
+  const text = (e: ToolResult) => {
+    const parts = (e.model ?? []).flatMap((m) => m.content).flatMap((c) => c.type === "text" && c.text !== undefined ? [c.text] : []);
+    if (parts.length === 0) throw new Error(`a tool result has no text: ${JSON.stringify(e)}`);
+    return parts.join("\n");
+  };
+  const results = async () => ((await expect(200, "GET", `/threads/${threadId}/conversation`)).entries as ToolResult[]).filter((e) => e.kind === "pi.tool-result").map(text);
   const seen = (await results()).length;
   const bounded = `timeout ${stepLimitS} bash -c '${command.replaceAll("'", "'\\''")}'; code=$?; if [ $code = 124 ]; then echo "STEP TIMED OUT"; fi`;
   await expect(202, "POST", `/threads/${threadId}/messages`, { text: `bash: ${bounded}`, requestId });
