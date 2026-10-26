@@ -350,6 +350,17 @@ test("a session stopped on its usage limit while the newest entry, bookkeeping a
   assert.equal(usageLimitStop([]), null);
 });
 
+test("Claude Code's own continue after the reset is a prompt from Claude Code, which ends the stop", async () => {
+  const session = (await readFile(new URL("./fixtures/claude-usage-limit-session.jsonl", import.meta.url), "utf8")).split("\n").filter((line) => line !== "");
+  const entries = session.flatMap(parseRecord);
+  assert.deepEqual(entries.at(-1), { kind: "prompt", at: Date.parse("2026-10-26T05:55:36.839Z"), from: "other", text: "Your claude.ai usage limit has reset. Continue the task you were working on when the limit was reached; do not repeat work that is already complete." });
+  assert.equal(usageLimitStop(entries), null);
+  const stopped = session.slice(0, 3).flatMap(parseRecord);
+  assert.deepEqual(stopped.map((e) => e.kind), ["notice", "notice", "turn"]);
+  assert.deepEqual(stopped[1], { kind: "notice", at: Date.parse("2026-10-26T05:51:36.706Z"), tone: "info", text: "Usage limit reached · continuing automatically at 5:54am · esc to cancel" });
+  assert.deepEqual(usageLimitStop(stopped), { stoppedAt: Date.parse("2026-10-26T05:51:36.702Z"), resetsAt: 1792994043000 });
+});
+
 test("a usage limit's text names its reset in UTC, with its date when more than a day away, and says once it passed", () => {
   const reset = Date.parse("2026-10-26T06:30:00Z");
   assert.equal(usageLimitText({ resetsAt: reset }, Date.parse("2026-10-26T05:34:00Z")), "stopped on its usage limit until 06:30 UTC");

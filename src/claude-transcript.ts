@@ -47,11 +47,15 @@ export type ClaudeEntry =
 /** `resetsAt` is in Unix milliseconds, null when Claude Code did not say. */
 export interface UsageLimit { resetsAt: number | null }
 
-/** The usage limit the newest entry that is not bookkeeping stopped on, or null. Bookkeeping is a turn's duration, a queue operation, a pull request and an unknown record. */
+/**
+ * The usage limit the newest entry that is not bookkeeping stopped on, or null. Bookkeeping is a turn's duration, a
+ * queue operation, a pull request, an unknown record and an info notice, since Claude Code writes "continuing
+ * automatically" after the stop.
+ */
 export function usageLimitStop(entries: readonly ClaudeEntry[]): { stoppedAt: number; resetsAt: number | null } | null {
   for (let i = entries.length - 1; i >= 0; i--) {
     const entry = entries[i]!;
-    if (bookkeeping.has(entry.kind)) continue;
+    if (bookkeeping.has(entry.kind) || (entry.kind === "notice" && entry.tone === "info")) continue;
     return entry.kind === "notice" && entry.usageLimit !== undefined ? { stoppedAt: entry.at, resetsAt: entry.usageLimit.resetsAt } : null;
   }
   return null;
@@ -272,6 +276,7 @@ const systems = table<Parse>({
     return [{ kind: "turn", at, durationMs: r.durationMs }];
   },
   compact_boundary: (_r, at) => [notice(at, "info", "Claude compacted the conversation")],
+  informational: (r, at) => [notice(at, "info", str(r.content, "content"))],
   local_command: (r, at) => {
     const text = str(r.content, "content");
     const form = forms.get(leadingTag(text));
@@ -330,6 +335,8 @@ const blocks = table<Block>({
 const interruptions = new Set(["[Request interrupted by user]", "[Request interrupted by user for tool use]"]);
 
 function userRecord(r: Fields, at: number): ClaudeEntry[] {
+  // Claude Code's own continue once a usage limit resets, which it writes as metadata.
+  if (isFields(r.origin) && r.origin.kind === "auto-continuation" && isFields(r.message) && typeof r.message.content === "string") return [prompt(at, r.message.content, "other")];
   if (r.isMeta === true) return [];
   // The summary Claude Code writes for itself after a compaction, which is long and not the person's.
   if (r.isCompactSummary === true) return [notice(at, "info", "Claude continues from a summary of the earlier conversation")];
