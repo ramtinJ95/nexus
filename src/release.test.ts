@@ -1,9 +1,12 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { chmod, mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, relative, resolve } from "node:path";
 import { test, type TestContext } from "node:test";
+import { pathToFileURL } from "node:url";
+import { loadImageRecipe } from "./image-build.ts";
+import { imageIdOf } from "./images.ts";
 
 const root = resolve(import.meta.dirname, "..");
 
@@ -59,6 +62,17 @@ test("a release is installed with dev dependencies, built, then pruned, and publ
   assert.deepEqual(run.calls, ["ci --no-audit", "run build", "prune --omit=dev"]);
   assert.deepEqual(run.releases, ["c".repeat(40)]);
   await readFile(join(run.release, "dist/dashboard/client.js"));
+});
+
+test("a release carries the image recipe the control plane builds, the same recipe as the checkout's", async (t) => {
+  const run = await installRelease(t, null);
+  assert.equal(run.code, 0, run.stderr);
+  await symlink(join(root, "node_modules"), join(run.release, "node_modules"));
+  const released = (await import(pathToFileURL(join(run.release, "src/image-build.ts")).href)) as typeof import("./image-build.ts");
+  const recipe = await released.loadImageRecipe();
+  const checkout = await loadImageRecipe();
+  assert.deepEqual(recipe.files.map((f) => f.path), checkout.files.map((f) => f.path));
+  assert.equal(imageIdOf(recipe), imageIdOf(checkout));
 });
 
 for (const failing of ["ci --no-audit", "run build", "prune --omit=dev"]) {

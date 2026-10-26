@@ -1,0 +1,33 @@
+$ run.sh deploy/release.sh (this branch)
+installed release 4f545fa6b2eae81fbe5702aeec8136dab40cf49b
+release: $SCRATCH/opt-branch/releases/4f545fa6b2eae81fbe5702aeec8136dab40cf49b, owner root, user user
+release images/pylon:
+  images/pylon/Dockerfile
+  images/pylon/agent-setup/install.ts
+  images/pylon/agent-setup/manifest.json
+  images/pylon/agent-setup/manifest.ts
+  images/pylon/build.sh
+  images/pylon/dotfiles/README.md
+  images/pylon/gondolin.json
+  images/pylon/nexus
+  images/pylon/nexus-claude-hook
+  images/pylon/nexus-heartbeat.ts
+  images/pylon/nexus-outbox.ts
+  images/pylon/nexus-turn.ts
+  images/pylon/pins.json
+  images/pylon/rootfs-init-extra.sh
+checkout recipe: img-051b22b601e4, 13 files
+release recipe:  img-051b22b601e4, 13 files, pins gondolin 0.13.0
+  Dockerfile 7683 bytes, same as checkout
+  agent-setup/install.ts 13415 bytes, same as checkout
+  agent-setup/manifest.json 3178 bytes, same as checkout
+  agent-setup/manifest.ts 12238 bytes, same as checkout
+  checkout-files.py 14398 bytes, same as checkout
+  dotfiles/README.md 1207 bytes, same as checkout
+  gondolin.json 563 bytes, same as checkout
+  nexus 10218 bytes, same as checkout
+  nexus-claude-hook 3395 bytes, same as checkout
+  nexus-heartbeat.ts 10050 bytes, same as checkout
+  nexus-outbox.ts 5108 bytes, same as checkout
+  nexus-turn.ts 2300 bytes, same as checkout
+  rootfs-init-extra.sh 1241 bytes, same as checkout
