@@ -28,7 +28,7 @@ function fixture(path = ":memory:") {
     return thread.id;
   }
   const id = add();
-  let snapshot: PrSnapshot = { pr: { repo: "acme/repo", number: 1, title: "Fix", url: "https://github.com/acme/repo/pull/1", state: "open", checks: "passing", review: "none", conflict: false }, failures: [], comments: [] };
+  let snapshot: PrSnapshot = { pr: { repo: "acme/repo", number: 1, title: "Fix", url: "https://github.com/acme/repo/pull/1", state: "open", checks: "passing", review: "none", conflict: false }, detail: { head: "1".repeat(40), branch: "feature", base: "main", body: "", mergeCommit: null }, failures: [], comments: [] };
   const calls: string[] = [];
   const messages: Parameters<HarnessHost["send"]>[] = [];
   let reject = false;
@@ -149,7 +149,7 @@ test("GitHub reads use per-resource ETags, paginate, and include the owner's rev
     if (etag) return new Response(null, { status: 304 });
     let value: unknown = [];
     if (path.includes("/pulls?")) value = [{ number: 1, head: { repo: { full_name: "acme/repo" } } }];
-    if (path.endsWith("/pulls/1")) value = { number: 1, title: "Fix", html_url: "https://github.com/acme/repo/pull/1", state: "open", merged: false, mergeable_state: "dirty", head: { sha: "abc" } };
+    if (path.endsWith("/pulls/1")) value = { number: 1, title: "Fix", html_url: "https://github.com/acme/repo/pull/1", state: "open", merged: false, mergeable_state: "dirty", head: { sha: "abc", ref: "feature" }, base: { ref: "main" } };
     if (path.includes("check-runs")) value = { check_runs: [{ id: 1, name: "build", status: "completed", conclusion: "failure", details_url: "https://example.com/build", completed_at: "now" }] };
     if (path.includes("reviews")) value = [{ id: 2, body: "please fix", html_url: "https://example.com/review", user: { login: "owner" }, author_association: "OWNER", state: "CHANGES_REQUESTED", submitted_at: "now" }];
     const headers: Record<string, string> = { etag: '"v1"' };
@@ -206,7 +206,7 @@ test("legacy statuses use the latest context and missing detail URLs still link 
   let passing = false;
   const fake: typeof fetch = async (input) => {
     const path = new URL(String(input)).pathname;
-    if (path.endsWith("/pulls/1")) return Response.json({ number: 1, title: "Fix", html_url: "https://github.com/acme/repo/pull/1", state: "open", merged: false, mergeable_state: "clean", head: { sha: "abc" } });
+    if (path.endsWith("/pulls/1")) return Response.json({ number: 1, title: "Fix", html_url: "https://github.com/acme/repo/pull/1", state: "open", merged: false, mergeable_state: "clean", head: { sha: "abc", ref: "feature" }, base: { ref: "main" } });
     if (path.endsWith("/statuses")) return Response.json([{ id: 2, context: "legacy", state: passing ? "success" : "failure", target_url: null }, { id: 1, context: "legacy", state: "pending", target_url: null }]);
     if (path.endsWith("/check-runs")) return Response.json({ check_runs: [{ id: 3, name: "build", status: "completed", conclusion: passing ? "success" : "failure", details_url: null, html_url: "https://github.com/acme/repo/runs/3", completed_at: "now" }] });
     return Response.json([]);
@@ -229,7 +229,7 @@ test("only trusted reviews and comments wake, and untrusted feedback cannot exha
   const fake: typeof fetch = async (input) => {
     const path = new URL(String(input)).pathname;
     if (path.endsWith("/pulls")) return Response.json([{ number: 1, head: { repo: { full_name: "acme/repo" } } }]);
-    if (path.endsWith("/pulls/1")) return Response.json({ number: 1, title: "Fix", html_url: f.snapshot.pr.url, state: "open", merged: false, mergeable_state: "clean", head: { sha: "abc" }, user: { login: "pr-author" }, author_association: "NONE" });
+    if (path.endsWith("/pulls/1")) return Response.json({ number: 1, title: "Fix", html_url: f.snapshot.pr.url, state: "open", merged: false, mergeable_state: "clean", head: { sha: "abc", ref: "feature" }, base: { ref: "main" }, user: { login: "pr-author" }, author_association: "NONE" });
     if (path.endsWith("/check-runs")) return Response.json({ check_runs: failed ? [{ id: 1, name: "build", status: "completed", conclusion: "failure", details_url: "https://example.com/build", completed_at: "now" }] : [] });
     if (path.endsWith("/reviews") || path.endsWith("/comments")) return Response.json(associations.flatMap((association, i) => {
       if (i < 3 && !trusted) return [];
@@ -375,4 +375,27 @@ test("feedback reaches a Claude worker thread typed into its session once its py
   assert.equal(f.messages.filter(([thread]) => thread === claude).length, 0, "nothing reaches the harness");
   await watcher.poll();
   assert.equal(typed.length, 2);
+});
+
+test("the client reads a PR's head, base and body, its changed files, and merges only the head it is given", async () => {
+  const merges: unknown[] = [];
+  let answer = (): Response => Response.json({ sha: "m".repeat(40), merged: true });
+  const fake: typeof fetch = async (input, init) => {
+    const path = new URL(String(input)).pathname;
+    if (path.endsWith("/merge")) { merges.push(JSON.parse(String(init?.body))); return answer(); }
+    if (path.endsWith("/pulls/1")) return Response.json({ number: 1, title: "Fix", html_url: "https://github.com/acme/repo/pull/1", state: "open", merged: false, mergeable_state: "clean", body: "Not checked live: the deploy", merge_commit_sha: "t".repeat(40), head: { sha: "abc", ref: "feature" }, base: { ref: "main" } });
+    if (path.endsWith("/files")) return Response.json([{ filename: "src/a.ts", patch: "@@ -1 +1 @@\n-a\n+b" }, { filename: "logo.png" }]);
+    return Response.json(path.endsWith("/check-runs") ? { check_runs: [] } : []);
+  };
+  const client = githubClient("secret", fake);
+  assert.deepEqual((await client.poll("acme/repo", 1)).detail, { head: "abc", branch: "feature", base: "main", body: "Not checked live: the deploy", mergeCommit: null }, "an unmerged PR's test merge commit is not its merge commit");
+  assert.deepEqual(await client.files("acme/repo", 1), [{ path: "src/a.ts", patch: "@@ -1 +1 @@\n-a\n+b" }, { path: "logo.png", patch: "" }]);
+  assert.deepEqual(await client.merge("acme/repo", 1, "abc"), { kind: "merged", commit: "m".repeat(40) });
+  assert.deepEqual(merges, [{ sha: "abc", merge_method: "squash" }]);
+  answer = () => Response.json({ message: "Resource not accessible by personal access token" }, { status: 403 });
+  assert.deepEqual(await client.merge("acme/repo", 1, "abc"), { kind: "denied", message: "GitHub answered 403: Resource not accessible by personal access token" });
+  answer = () => Response.json({ message: "Head branch was modified. Review and try the merge again." }, { status: 409 });
+  assert.equal((await client.merge("acme/repo", 1, "abc")).kind, "refused");
+  answer = () => Response.json({ message: "API rate limit exceeded" }, { status: 403, headers: { "x-ratelimit-remaining": "0", "x-ratelimit-reset": String(Math.floor(Date.now() / 1000) + 60) } });
+  await assert.rejects(client.merge("acme/repo", 1, "abc"), /HTTP 403/, "a rate limit is retried, not reported as a denial");
 });

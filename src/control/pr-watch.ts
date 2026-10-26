@@ -18,7 +18,7 @@ export interface PrWatchState {
 const empty = (): PrWatchState => ({ links: [], commentWakes: 0, pending: null, error: null });
 const active = (t: Thread | undefined) => t !== undefined && t.status !== "archived" && t.status !== "deleted";
 
-export function prWatcher(options: { registry: Registry; github: GitHub | null; inbox: Inbox }) {
+export function prWatcher(options: { registry: Registry; github: Pick<GitHub, "find" | "poll"> | null; inbox: Inbox }) {
   const { registry, github, inbox } = options;
   let running: Promise<void> | null = null;
   async function deliver(id: ThreadId, state: PrWatchState) {
