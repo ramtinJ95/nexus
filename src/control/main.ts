@@ -20,6 +20,7 @@ import { startLoop } from "./loop.ts";
 import { openRegistry, type Thread, type ThreadId } from "./registry.ts";
 import { githubClient } from "./github.ts";
 import { prWatcher } from "./pr-watch.ts";
+import { agentInbox } from "./inbox.ts";
 
 const nodeId = z.string().regex(/^n[A-Za-z0-9]+$/, "a Tailscale stable node ID, such as nAbC123CNTRL");
 const absolutePath = z.string().refine(isAbsolute, "must be an absolute path");
@@ -132,7 +133,8 @@ export async function startControlPlane(config: ControlPlaneConfig, models: Mode
     send: (...args) => gate.run(() => rawHarness.send(...args)),
     retry: (...args) => gate.run(() => rawHarness.retry(...args)),
   };
-  const watch = prWatcher({ registry, github: token === null ? null : githubClient(token), harness, wake: wakeThread });
+  const inbox = agentInbox({ registry, harness, probes: new Map(probes.map((probe) => [probe.node, probe])), wake: wakeThread });
+  const watch = prWatcher({ registry, github: token === null ? null : githubClient(token), inbox });
   const watchTimer = setInterval(() => { void watch.poll(); }, 120_000);
   void watch.poll();
   const api = await startApi({

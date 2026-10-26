@@ -49,6 +49,7 @@ import { attachRoute, parseAttachQuery } from "../attach-wire.ts";
 import type { PullRequest } from "./github.ts";
 import { openTerminal } from "../guest-terminal.ts";
 import { attachTiming, serveAttach, type AttachTiming, type Ending, type PylonDoor } from "./attach.ts";
+import { typeIntoClaude } from "./inbox.ts";
 
 export interface ApiOptions {
   https?: { port: number; certificate(): Promise<Certificate>; renewalMs?: number; retryMs?: number };
@@ -588,38 +589,17 @@ export async function startApi(options: ApiOptions): Promise<Api> {
     if (session === null) throw new HttpError(409, `the Claude worker of ${t.id} has not started a session yet, so it takes no messages. Send it once it has started`);
     const stored = registry.claudeMessage(t.id, message.requestId);
     if (stored?.state === "sent") return { claude: stored.result };
-    if (stored?.state === "sending") throw new HttpError(422, `an earlier send of request ${message.requestId} failed partway, so Claude may have some or all of it. Check the conversation before sending it again under a new request ID`);
-    registry.setClaudeMessage(t.id, message.requestId, { state: "sending" });
-    // Only a failure from the probe's command can leave text typed. Anything before it typed nothing.
-    let asked = false;
-    let typedNothing = false;
-    let result: Extract<CommandResult, { kind: "send-claude" }>;
-    try {
-      result = await inPylon(t, async (probe, pylonId) => {
-        asked = true;
-        try {
-          return await probe.command(pylonId, { kind: "send-claude", session, text, ...(model === null ? {} : { model }) }) as Extract<CommandResult, { kind: "send-claude" }>;
-        } catch (err) {
-          typedNothing = (err as Partial<ProbeError>).code === "not-running";
-          throw err;
-        }
-      });
-    } catch (err) {
-      if (!asked || typedNothing) registry.setClaudeMessage(t.id, message.requestId, null);
-      throw err;
-    }
-    if (result.outcome === "blocked" || result.outcome === "starting" || result.outcome === "moved") {
-      registry.setClaudeMessage(t.id, message.requestId, null);
+    const typed = await inPylon(t, (probe, pylonId) => typeIntoClaude(registry, t.id, session, model, message.requestId, text, (command) => probe.command(pylonId, command)));
+    if (typed.kind === "uncertain") throw new HttpError(422, `an earlier send of request ${message.requestId} failed partway, so Claude may have some or all of it. Check the conversation before sending it again under a new request ID`);
+    if (typed.kind === "nothing") {
       throw new HttpError(409, {
         blocked: `Claude waits at a prompt in its terminal, so nothing was typed. Attach to the pylon (\`nexus attach ${t.id}\`) and answer it, then send again`,
         starting: `Claude is not ready to take a message yet, so nothing was typed. Ask again in a moment`,
-        moved: `Herdr pane ${result.herdrPane} stopped running Claude session ${session} before the message was typed, so nothing was typed. Send again to resume the session`,
-      }[result.outcome]);
+        moved: `Herdr pane ${typed.herdrPane} stopped running Claude session ${session} before the message was typed, so nothing was typed. Send again to resume the session`,
+      }[typed.outcome]);
     }
-    const sent: ClaudeSent = { session, outcome: result.outcome, resumed: result.resumed };
-    registry.setClaudeMessage(t.id, message.requestId, { state: "sent", result: sent });
     void claude.refresh(t);
-    return { claude: sent };
+    return { claude: typed.sent };
   }
 
   /**
