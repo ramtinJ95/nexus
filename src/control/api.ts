@@ -253,6 +253,7 @@ const imageSchema = z.strictObject({
   sha256: z.string().regex(/^[0-9a-f]{64}$/),
 });
 const rolloutSchema = z.strictObject({ image: imageSchema.shape.id });
+const noFields = z.strictObject({});
 const previewSchema = z.strictObject({ port: z.int().min(1).max(65535).refine((port) => !reservedPorts.has(port), "is Nexus's own") });
 const sessionSchema = z.strictObject({
   harness: z.enum(["claude-code", "pi", "shell"]).default("claude-code"),
@@ -840,7 +841,7 @@ export async function startApi(options: ApiOptions): Promise<Api> {
     }],
     ["POST", /^\/v1\/images\/build$/, async (_, r) => {
       const images = imageRollout(r.caller);
-      parse(z.strictObject({}), await r.body({}));
+      parse(noFields, await r.body({}));
       return started(await images.build(r.caller));
     }],
     ["POST", /^\/v1\/images\/rollout$/, async (_, r) => {
@@ -849,7 +850,7 @@ export async function startApi(options: ApiOptions): Promise<Api> {
     }],
     ["POST", /^\/v1\/images\/rollback$/, async (_, r) => {
       const images = imageRollout(r.caller);
-      parse(z.strictObject({}), await r.body({}));
+      parse(noFields, await r.body({}));
       return started(images.rollback(r.caller));
     }],
   ];

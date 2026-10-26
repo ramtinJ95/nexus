@@ -158,7 +158,8 @@ export function startImageRollout(options: ImageRolloutOptions): ImageRollout {
     const reply = await probe.submit(env);
     if ("accepted" in reply) set({ state: "running" });
     else if (reply.rejected === "invalid") return failed(reply.message);
-    // busy: another job on the image runs on the node, such as a pylon's fetch of it. Either way the next pass sends again.
+    // busy: another job on the image runs on the node, such as a pylon's fetch of it. expired: the send outlived its
+    // envelope. Either way the next pass sends again.
     else set({ job: null });
     return null;
   }
