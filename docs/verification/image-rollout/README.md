@@ -18,10 +18,10 @@ Copies between the probes are real. They go over the probes' artifact route as G
 
 - `01-list-before.txt`. `img-0000000000aa` is current and held by all three nodes.
 - `02-build-as-control-node.txt`. The control node itself is refused with exit 3, because only `deployers` may build.
-- `03-build.txt`. `image build --wait` sends `build-image` with the 13-file recipe (`stack.log`). It prints the step on stderr while it runs, and the image `img-c6e71ae15790` when it is recorded, with release `cb2e8856ce66`. Nothing became current.
+- `03-build.txt`. `image build --wait` sends `build-image` with the 13-file recipe (`stack.log`). It prints the step on stderr while it runs, and the image `img-051b22b601e4` when it is recorded, with release `c93c0f2475b7`. Nothing became current.
 - `04-build-again.txt`. The unchanged recipe answers at once, `recorded already`, and `stack.log` shows no second build.
 - `05-rollout-nuc-fails.txt` and `06-current-after-failure.txt`. `rj-firebat` fetched the image, `rj-nuc` could not, and the rollout failed with exit 1, naming `rj-nuc` and the probe's reason. `img-0000000000aa` stayed current.
-- `07-nodes-nuc-offline.txt` and `08-rollout.txt`. With `rj-nuc`'s probe stopped and the node offline, the rollout skipped it and made `img-c6e71ae15790` current, with `img-0000000000aa` as previous.
+- `07-nodes-nuc-offline.txt` and `08-rollout.txt`. With `rj-nuc`'s probe stopped and the node offline, the rollout skipped it and made `img-051b22b601e4` current, with `img-0000000000aa` as previous.
 - `09-list-after-rollout.txt` and `10-list-json.txt`. These show which nodes hold each image, the release and build time, and the last operation.
 - `11-stores.txt`. `rj-firebat`'s copy archives to the recorded sha256, the same as the build node's copy.
 - `12-rollback.txt` and `13-current-after-rollback.txt`. A rollback made `img-0000000000aa` current again. `14-rollback-forward.txt` shows that a second rollback goes forward again.

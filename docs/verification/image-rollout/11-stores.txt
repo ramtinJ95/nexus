@@ -1,17 +1,17 @@
 /tmp/nir/infra-testbench/artifacts/:
 total 8
-drwx------ 2 user user 4096 Oct 26 09:52 img-0000000000aa
-drwx------ 2 user user 4096 Oct 26 09:52 img-c6e71ae15790
+drwx------ 2 user user 4096 Oct 26 10:08 img-0000000000aa
+drwx------ 2 user user 4096 Oct 26 10:08 img-051b22b601e4
 
 /tmp/nir/rj-firebat/artifacts/:
 total 8
-drwx------ 2 user user 4096 Oct 26 09:52 img-0000000000aa
-drwxr-xr-x 2 user user 4096 Oct 26 09:52 img-c6e71ae15790
+drwx------ 2 user user 4096 Oct 26 10:08 img-0000000000aa
+drwxr-xr-x 2 user user 4096 Oct 26 10:08 img-051b22b601e4
 
 /tmp/nir/rj-nuc/artifacts/:
 total 4
-drwx------ 2 user user 4096 Oct 26 09:52 img-0000000000aa
-sha256 of each copy's archive, as the next fetch from it would send it, against the recorded img-c6e71ae15790:
-infra-testbench: de09fe8bbba7220284d5c7e4ea0624026a96991cc9f81e8dfb9f9c3588f66b04
-rj-firebat: de09fe8bbba7220284d5c7e4ea0624026a96991cc9f81e8dfb9f9c3588f66b04
-recorded: de09fe8bbba7220284d5c7e4ea0624026a96991cc9f81e8dfb9f9c3588f66b04
+drwx------ 2 user user 4096 Oct 26 10:08 img-0000000000aa
+sha256 of each copy's archive, as the next fetch from it would send it, against the recorded img-051b22b601e4:
+infra-testbench: f9504ad362a150e9ce933114e8a0c30472bd927fd11c0ed12861b25f96b71c66
+rj-firebat: f9504ad362a150e9ce933114e8a0c30472bd927fd11c0ed12861b25f96b71c66
+recorded: f9504ad362a150e9ce933114e8a0c30472bd927fd11c0ed12861b25f96b71c66

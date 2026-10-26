@@ -1,14 +1,14 @@
 $ nexus image list --json
 {
-  "current": "img-c6e71ae15790",
+  "current": "img-051b22b601e4",
   "previous": "img-0000000000aa",
   "images": [
     {
-      "id": "img-c6e71ae15790",
-      "gondolinBuildId": "stand-in-img-c6e71ae15790",
+      "id": "img-051b22b601e4",
+      "gondolinBuildId": "stand-in-img-051b22b601e4",
       "builtOn": "infra-testbench",
-      "builtAt": "2026-10-26T09:52:14.301Z",
-      "sha256": "de09fe8bbba7220284d5c7e4ea0624026a96991cc9f81e8dfb9f9c3588f66b04",
+      "builtAt": "2026-10-26T10:08:22.074Z",
+      "sha256": "f9504ad362a150e9ce933114e8a0c30472bd927fd11c0ed12861b25f96b71c66",
       "pins": {
         "debianDigest": "sha256:7ff6ba31527b9e336162fa061746c366c4b2032f4d2cff2078bea43f78efe3f8",
         "node": "24.22.1",
@@ -26,7 +26,7 @@ $ nexus image list --json
         "neovim": "0.12.6",
         "neovimSha256": "474430d53e6264f6d6dd18db42d6dc9df3a1b56ca9e88a325bbf860e1a811d87"
       },
-      "release": "cb2e8856ce667f6bbaf5cf4eb1772206c0f4a4eb",
+      "release": "c93c0f2475b744ce0a4469aaecfa0ce4c6343aba",
       "nodes": [
         "infra-testbench",
         "rj-firebat"
@@ -65,9 +65,9 @@ $ nexus image list --json
   ],
   "operation": {
     "kind": "rollout",
-    "image": "img-c6e71ae15790",
+    "image": "img-051b22b601e4",
     "requestedBy": "nLAPTOP",
-    "requestedAt": 1793008345074,
+    "requestedAt": 1793009313015,
     "steps": [
       {
         "node": "infra-testbench",
@@ -89,7 +89,7 @@ $ nexus image list --json
       }
     ],
     "state": "done",
-    "finishedAt": 1793008345094
+    "finishedAt": 1793009313036
   }
 }
 exit 0
