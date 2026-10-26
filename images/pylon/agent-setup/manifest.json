@@ -30,7 +30,8 @@
       "common-config/common-dotfiles/pi/.pi/agent/extensions/exa-web-search.ts",
       "common-config/common-dotfiles/pi/.pi/agent/extensions/pi-vim",
       "common-config/common-dotfiles/pi/.pi/agent/extensions/silly-messages.ts"
-    ]
+    ],
+    "shepherdrProfiles": []
   },
   "skills": [
     {"path":"common-config/common-dotfiles/agents/.agents/skills/grill-me","for":["claude","pi"]},

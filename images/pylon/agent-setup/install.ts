@@ -18,6 +18,8 @@ const skillDirs: Record<Harness, string> = { claude: join(home, ".claude", "skil
 const piAgent = join(home, ".pi", "agent");
 const piExtensions = join(piAgent, "extensions");
 const piPackages = join(piAgent, "packages");
+const shepherdr = join(piAgent, "shepherdr");
+const shepherdrProfiles = join(shepherdr, "profiles");
 const marketplaces = join(import.meta.dirname, "marketplaces");
 // The build has open network, and the official marketplace is not part of the pinned setup.
 const env = { ...process.env, CLAUDE_CODE_DISABLE_OFFICIAL_MARKETPLACE_AUTOINSTALL: "1", DISABLE_AUTOUPDATER: "1" };
@@ -25,8 +27,9 @@ const env = { ...process.env, CLAUDE_CODE_DISABLE_OFFICIAL_MARKETPLACE_AUTOINSTA
 /**
  * Once, as user, with the build's open network. Each step fails the build with the command's output:
  * 1. Dotfiles: a depth-1 fetch of the pinned commit into a scratch repo, each skill copied to its harness
- *    directories, each extension to ~/.pi/agent/extensions, each local package to ~/.pi/agent/packages. The
- *    scratch repo is removed: nothing keeps a dotfiles checkout.
+ *    directories, each extension to ~/.pi/agent/extensions, each local package to ~/.pi/agent/packages, each
+ *    shepherdr profile to ~/.pi/agent/shepherdr/profiles, marked initialized. The scratch repo is removed: nothing
+ *    keeps a dotfiles checkout.
  * 2. Claude: each marketplace fetched the same way into marketplaces/<name> beside this file and added as a
  *    local directory marketplace, which nothing in a pylon tries to update from GitHub. Then each plugin.
  * 3. pi: each package with `pi install`, in manifest order, because pi loads packages in that order.
@@ -43,6 +46,10 @@ async function install(setup: AgentSetup): Promise<void> {
   for (const local of setup.pi.packages) {
     if (local.kind === "local") await copy(join(dotfiles, local.path), join(piPackages, basename(local.path)));
   }
+  for (const profile of setup.pi.shepherdrProfiles) await copy(join(dotfiles, profile), join(shepherdrProfiles, basename(profile)));
+  // pi-shepherdr's first load adds its bundled profiles beside the captured ones unless this marker exists.
+  await mkdir(shepherdrProfiles, { recursive: true });
+  await writeFile(join(shepherdr, ".profiles-initialized"), "1\n");
   await rm(dotfiles, { recursive: true });
 
   for (const marketplace of setup.claude.marketplaces) {
@@ -94,6 +101,7 @@ export function installMismatches(expected: InstalledAgentSetup, actual: Install
     piSkills: "pi skill",
     piExtensions: "pi extension",
     piPackages: "pi package",
+    shepherdrProfiles: "shepherdr profile",
   };
   const lines = Object.entries(what).flatMap(([key, label]) => {
     const want = expected[key as keyof InstalledAgentSetup];
@@ -121,6 +129,7 @@ async function observe(): Promise<InstalledAgentSetup> {
     piSkills: await skillNames(skillDirs.pi),
     piExtensions: existsSync(piExtensions) ? (await readdir(piExtensions)).sort() : [],
     piPackages: await Promise.all((settings.packages ?? []).map((entry) => installedPackage(entry))),
+    shepherdrProfiles: existsSync(shepherdrProfiles) ? (await readdir(shepherdrProfiles)).sort() : [],
   };
 }
 

@@ -1,7 +1,7 @@
 /**
- * The agent setup baked into the pylon image: this Mac's Claude Code plugins, skills, pi packages and pi
- * extensions, as pinned refs and never as file contents. src/agent-setup.ts captures it on the Mac into
- * manifest.json, install.ts installs it during docker build, and src/image-build.ts refuses a recipe whose
+ * The agent setup baked into the pylon image: this Mac's Claude Code plugins, skills, pi packages, pi extensions
+ * and pi-shepherdr profiles, as pinned refs and never as file contents. src/agent-setup.ts captures it on the Mac
+ * into manifest.json, install.ts installs it during docker build, and src/image-build.ts refuses a recipe whose
  * manifest does not parse and derives the agent smoke check from it. The module imports nothing, so the
  * image's Node runs it as it is.
  */
@@ -33,6 +33,8 @@ export interface AgentSetup {
     packages: readonly PiPackage[];
     /** Copied into ~/.pi/agent/extensions, which pi auto-loads: a .ts or .js file, or a directory with a package.json pi.extensions file or an index file. */
     extensions: readonly DotfilesPath[];
+    /** Copied to ~/.pi/agent/shepherdr/profiles/<name>, where pi-shepherdr reads its agent profiles. */
+    shepherdrProfiles: readonly DotfilesPath[];
   };
   /** Each skill directory once. Copied to ~/.claude/skills/<name> for claude and ~/.agents/skills/<name> for pi. */
   skills: readonly { path: DotfilesPath; for: readonly Harness[] }[];
@@ -57,8 +59,8 @@ export function basename(path: DotfilesPath): string {
 /**
  * The boundary for the manifest, used by all three readers. Throws naming the field on: an unknown or missing key,
  * a commit that is not 40 hex, a URL that is not https, a path with an empty, `.` or `..` part, two skills,
- * extensions or local packages with one basename, a plugin whose marketplace is not listed, a skill with an empty
- * or repeated `for`.
+ * extensions, shepherdr profiles or local packages with one basename, a plugin whose marketplace is not listed, a
+ * skill with an empty or repeated `for`.
  */
 export function parseAgentSetup(json: string): AgentSetup {
   const root = fields(JSON.parse(json) as unknown, "manifest", ["dotfiles", "claude", "pi", "skills"]);
@@ -79,7 +81,7 @@ export function parseAgentSetup(json: string): AgentSetup {
     return { id, version: matching(p.version, `${field}.version`, versionPattern) };
   });
   unique(plugins.map((p) => p.id), "claude.plugins", "plugin");
-  const pi = fields(root.pi, "pi", ["packages", "extensions"]);
+  const pi = fields(root.pi, "pi", ["packages", "extensions", "shepherdrProfiles"]);
   const packages = list(pi.packages, "pi.packages").map((value, i): PiPackage => {
     const field = `pi.packages[${i}]`;
     const kind = fields(value, field, ["kind"], true).kind;
@@ -94,6 +96,8 @@ export function parseAgentSetup(json: string): AgentSetup {
   unique(packages.flatMap((p) => (p.kind === "local" ? [basename(p.path)] : [])), "pi.packages", "local package name");
   const extensions = list(pi.extensions, "pi.extensions").map((value, i) => asDotfilesPath(value, `pi.extensions[${i}]`));
   unique(extensions.map(basename), "pi.extensions", "extension name");
+  const shepherdrProfiles = list(pi.shepherdrProfiles, "pi.shepherdrProfiles").map((value, i) => asDotfilesPath(value, `pi.shepherdrProfiles[${i}]`));
+  unique(shepherdrProfiles.map(basename), "pi.shepherdrProfiles", "profile name");
   const skills = list(root.skills, "skills").map((value, i) => {
     const field = `skills[${i}]`;
     const s = fields(value, field, ["path", "for"]);
@@ -109,7 +113,7 @@ export function parseAgentSetup(json: string): AgentSetup {
   return {
     dotfiles: { url: asHttpsUrl(dotfiles.url, "dotfiles.url"), commit: asCommit(dotfiles.commit, "dotfiles.commit") },
     claude: { marketplaces, plugins },
-    pi: { packages, extensions },
+    pi: { packages, extensions, shepherdrProfiles },
     skills,
   };
 }
@@ -134,7 +138,8 @@ export function formatAgentSetup(setup: AgentSetup): string {
     "  },",
     `  "pi": {`,
     `    "packages": ${entries(packages, "    ")},`,
-    `    "extensions": ${entries(sorted(setup.pi.extensions, (path) => path), "    ")}`,
+    `    "extensions": ${entries(sorted(setup.pi.extensions, (path) => path), "    ")},`,
+    `    "shepherdrProfiles": ${entries(sorted(setup.pi.shepherdrProfiles, (path) => path), "    ")}`,
     "  },",
     `  "skills": ${entries(skills, "  ")}`,
     "}",
@@ -154,6 +159,8 @@ export interface InstalledAgentSetup {
   piExtensions: readonly string[];
   /** ~/.pi/agent/settings.json `packages` as pi install writes them, in order, each npm one at its installed version and each local one with all it declares. */
   piPackages: readonly string[];
+  /** Directory names under ~/.pi/agent/shepherdr/profiles, sorted. */
+  shepherdrProfiles: readonly string[];
 }
 
 /** `herdr integration install pi` writes this extension, at build time and on every boot. */
@@ -167,6 +174,7 @@ export function installedLayout(setup: AgentSetup): InstalledAgentSetup {
     piSkills: skillsFor("pi"),
     piExtensions: sorted([...setup.pi.extensions.map(basename), herdrPiExtension], (name) => name),
     piPackages: setup.pi.packages.map((p) => (p.kind === "npm" ? `npm:${p.name}@${p.version}` : `packages/${basename(p.path)}`)),
+    shepherdrProfiles: sorted(setup.pi.shepherdrProfiles.map(basename), (name) => name),
   };
 }
 

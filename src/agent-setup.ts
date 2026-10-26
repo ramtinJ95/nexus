@@ -1,6 +1,7 @@
 /**
- * The Mac side of the pylon's agent setup: reads this Mac's Claude Code plugins, skills, pi packages and pi
- * extensions and captures them into images/pylon/agent-setup/manifest.json, which the image build installs.
+ * The Mac side of the pylon's agent setup: reads this Mac's Claude Code plugins, skills, pi packages, pi
+ * extensions and pi-shepherdr profiles and captures them into images/pylon/agent-setup/manifest.json, which the
+ * image build installs.
  *   node src/agent-setup.ts [--dry-run] [--leave-out <kind>:<name>]...
  * It reads ~/.claude, ~/.pi, ~/.agents and the dotfiles repo they link into, asks the remotes what they hold, and
  * writes nothing but the manifest. A thin reader (readMacSetup) collects plain facts and a pure planner
@@ -78,15 +79,17 @@ export interface MacSetup {
     skills: readonly { name: string; realPath: string; loads: boolean }[];
     /** settings.json `skills`, as written. */
     skillSettings: readonly string[];
+    /** Directories of ~/.pi/agent/shepherdr/profiles but dot entries, sorted. files: every file under it, links followed, by POSIX path, as text. */
+    shepherdrProfiles: readonly { name: string; realPath: string; files: ReadonlyMap<string, string> }[];
   };
   /** For the version skew note only. */
   versions: { claudeCode: string; pi: string };
 }
 
-export type LeaveOutKind = "claude-plugin" | "pi-package" | "skill" | "pi-extension";
+export type LeaveOutKind = "claude-plugin" | "pi-package" | "skill" | "pi-extension" | "shepherdr-profile";
 /** One deliberate leave-out. The capture prints each with its reason, so nothing disappears silently. */
 export interface LeaveOut { kind: LeaveOutKind; name: string; why: string }
-const leaveOutKinds: readonly LeaveOutKind[] = ["claude-plugin", "pi-package", "skill", "pi-extension"];
+const leaveOutKinds: readonly LeaveOutKind[] = ["claude-plugin", "pi-package", "skill", "pi-extension", "shepherdr-profile"];
 
 /** The settled leave-outs, the only list of them. --leave-out adds to it for one run. */
 export const leaveOuts: readonly LeaveOut[] = [
@@ -107,7 +110,8 @@ export type Capture =
 const pluginMarkers = new Set([".in_use", ".orphaned_at"]);
 
 /**
- * Pure. Ships every enabled plugin, pi package, loading pi extension and skill that `rules` does not leave out.
+ * Pure. Ships every enabled plugin, pi package, loading pi extension, skill and shepherdr profile that `rules` does
+ * not leave out.
  * Refuses, listing every problem rather than the first, when an item would ship but:
  * - its real path is outside the dotfiles repo, or any file under it is uncommitted or changed there, or the
  *   dotfiles HEAD is not shown to be on origin. The build fetches the public repo, so only pushed, committed
@@ -117,6 +121,7 @@ const pluginMarkers = new Set([".in_use", ".orphaned_at"]);
  *   is `claude plugin update <id>` on the Mac, then capture again;
  * - it is a pi package source other than npm: or a local path that exists, or an npm package with no installed version;
  * - it is a pi `skills` setting other than a `-path` exclusion, which the capture does not reproduce;
+ * - it is a shepherdr profile that names something outside it or unknown to pi-shepherdr (profileProblems);
  * - its name differs from its directory's name, which is the name the image installs it under;
  * - two shipped skills, extensions or local packages share a name, or anything else the manifest parser refuses.
  * An extension entry that is also a local package ships once, as the package. Any other entry pi loads nothing from is
@@ -237,13 +242,22 @@ export function planAgentSetup(mac: MacSetup, rules: readonly LeaveOut[]): Captu
     if (path !== null) extensions.push(path);
   }
 
+  const shepherdrProfiles: DotfilesPath[] = [];
+  for (const profile of mac.pi.shepherdrProfiles) {
+    if (leftOut("shepherdr-profile", profile.name)) continue;
+    const path = inDotfiles("shepherdr profile", profile.name, profile.realPath, true);
+    const defects = profileProblems(profile.name, profile.files);
+    problems.push(...defects);
+    if (path !== null && defects.length === 0) shepherdrProfiles.push(path);
+  }
+
   if (fromDotfiles && !dotfiles.onOrigin.shown) {
     problems.push(`dotfiles: HEAD ${dotfiles.commit.slice(0, 7)} is not shown to be on ${dotfiles.url} (${dotfiles.onOrigin.why}), so the image build may not fetch it. Push it, or fetch so this clone knows origin's branches`);
   }
   const candidate: AgentSetup = {
     dotfiles: { url: dotfiles.url, commit: dotfiles.commit },
     claude: { marketplaces: [...marketplaces.values()], plugins },
-    pi: { packages, extensions },
+    pi: { packages, extensions, shepherdrProfiles },
     skills,
   };
   let setup: AgentSetup | undefined;
@@ -267,6 +281,51 @@ const loadsNothing = "pi loads nothing from it: it is not a .ts or .js file, nor
 function npmName(entry: string): string | null {
   return /^npm:\s*(@?[^@]+)/.exec(entry)?.[1]?.trim() ?? null;
 }
+
+const profileFields = new Set(["accepts", "blocking", "description", "model", "pi_args", "prepare", "prompt", "share_context", "thinking"]);
+
+/**
+ * Why the shepherdr profile `name` with these files cannot work once copied into a pylon, one line per defect: its
+ * profile.json is missing, unparsable or has a field pi-shepherdr refuses, its prompt or prepare is not a file in
+ * it, a pi_args entry is a path on this Mac, or its prepare file imports what is neither node: nor a file in it.
+ */
+export function profileProblems(name: string, files: ReadonlyMap<string, string>): string[] {
+  const problem = (why: string) => `shepherdr profile ${name}: ${why}`;
+  const text = files.get("profile.json");
+  if (text === undefined) return [problem("it has no profile.json")];
+  let profile: unknown;
+  try {
+    profile = JSON.parse(text);
+  } catch (err) {
+    return [problem(`profile.json is not JSON (${(err as Error).message})`)];
+  }
+  if (typeof profile !== "object" || profile === null || Array.isArray(profile)) return [problem("profile.json is not an object")];
+  const fields = profile as Record<string, unknown>;
+  /** The profile's file a relative path from `from` names, or null when it names none. */
+  const fileAt = (path: unknown, from = "."): string | null => {
+    if (typeof path !== "string" || path.startsWith("/") || path.startsWith("~")) return null;
+    const normal = posix.normalize(posix.join(from, path));
+    return files.has(normal) ? normal : null;
+  };
+  const problems = Object.keys(fields).filter((key) => !profileFields.has(key)).map((key) => problem(`pi-shepherdr does not know its field ${key}`));
+  for (const key of ["prompt", "prepare"]) {
+    if (Object.hasOwn(fields, key) && fileAt(fields[key]) === null) problems.push(problem(`${key} ${JSON.stringify(fields[key])} is not a file in the profile`));
+  }
+  const args: unknown[] = Array.isArray(fields.pi_args) ? fields.pi_args : [];
+  for (const arg of args) {
+    if (typeof arg === "string" && /^[/~]/.test(arg)) problems.push(problem(`pi_args entry ${JSON.stringify(arg)} is a path on this Mac`));
+  }
+  const prepare = fileAt(fields.prepare);
+  const specifiers = prepare === null ? [] : [...files.get(prepare)!.matchAll(moduleSpecifier)].map((match) => match[2]!);
+  for (const specifier of specifiers) {
+    if (specifier.startsWith("node:") || (/^\.\.?\//.test(specifier) && fileAt(specifier, posix.dirname(prepare!)) !== null)) continue;
+    problems.push(problem(`${prepare} imports ${JSON.stringify(specifier)}, which is neither node: nor a file in the profile`));
+  }
+  return problems;
+}
+
+/** `from "x"`, `import "x"`, `import("x")` and `require("x")`, the specifier in group 2. */
+const moduleSpecifier = /(?:\bfrom\s*|\bimport\s*\(?\s*|\brequire\s*\(\s*)(["'])(.+?)\1/g;
 
 function samePluginFiles(installed: PluginFiles, atHead: PluginFiles): boolean {
   const files = [...installed].filter(([path]) => !pluginMarkers.has(path.split("/")[0]!));
@@ -377,6 +436,18 @@ async function skillsIn(dir: string): Promise<{ name: string; realPath: string }
   return Promise.all(names.map(async (name) => ({ name, realPath: await realpath(join(dir, name)) })));
 }
 
+/** Every file under `dir`, links followed, by POSIX path, as text. */
+async function textFiles(dir: string, prefix = ""): Promise<[string, string][]> {
+  const files: [string, string][] = [];
+  for (const name of (await readdir(dir)).sort()) {
+    const full = join(dir, name);
+    const info = await stat(full);
+    if (info.isDirectory()) files.push(...(await textFiles(full, `${prefix}${name}/`)));
+    else if (info.isFile()) files.push([`${prefix}${name}`, await readFile(full, "utf8")]);
+  }
+  return files;
+}
+
 /**
  * The shell: reads the Mac (git, Claude Code's and pi's JSON files, realpaths). It reads Claude Code's plugin files
  * rather than running `claude plugin list`, because a Claude Code start may update a marketplace with autoUpdate on.
@@ -481,6 +552,12 @@ export async function readPiSetup(home: string): Promise<MacSetup["pi"]> {
     }))))
     .flat()
     .filter((skill, i, all) => all.findIndex((s) => s.realPath === skill.realPath) === i);
+  const profilesDir = join(piAgent, "shepherdr", "profiles");
+  const profileNames = existsSync(profilesDir) ? (await readdir(profilesDir)).filter((name) => !name.startsWith(".")).sort() : [];
+  const shepherdrProfiles = (await Promise.all(profileNames.map(async (name) => {
+    const realPath = await realpath(join(profilesDir, name));
+    return (await stat(realPath)).isDirectory() ? [{ name, realPath, files: new Map(await textFiles(realPath)) }] : [];
+  }))).flat();
 
   return {
     packages: piSettings.packages,
@@ -489,6 +566,7 @@ export async function readPiSetup(home: string): Promise<MacSetup["pi"]> {
     extensions,
     skills: piSkills,
     skillSettings: piSettings.skills,
+    shepherdrProfiles,
   };
 }
 
@@ -507,7 +585,7 @@ export function captureSummary(capture: Extract<Capture, { kind: "captured" }>, 
   const { setup } = capture;
   const evidence = mac.dotfiles.onOrigin.shown ? `, on origin by ${mac.dotfiles.onOrigin.by}` : "";
   const forHarness = (h: Harness) => setup.skills.filter((s) => s.for.includes(h)).length;
-  const kindLabel: Record<LeaveOutKind, string> = { "claude-plugin": "claude plugin", "pi-package": "pi package", skill: "skill", "pi-extension": "pi extension" };
+  const kindLabel: Record<LeaveOutKind, string> = { "claude-plugin": "claude plugin", "pi-package": "pi package", skill: "skill", "pi-extension": "pi extension", "shepherdr-profile": "shepherdr profile" };
   const notes = [
     ...capture.notes,
     ...(mac.versions.claudeCode === pins.claudeCode ? [] : [`this Mac runs Claude Code ${mac.versions.claudeCode} and the image pins ${pins.claudeCode} (pins.json is yours to change)`]),
@@ -517,7 +595,7 @@ export function captureSummary(capture: Extract<Capture, { kind: "captured" }>, 
     ["dotfiles", [`${setup.dotfiles.url} at ${setup.dotfiles.commit.slice(0, 7)}${evidence}`]],
     ["claude", setup.claude.plugins.map((p) => `${p.id} ${p.version}`)],
     ["skills", [`${setup.skills.length}: ${forHarness("claude")} for Claude Code, ${forHarness("pi")} for pi`]],
-    ["pi", [`${setup.pi.packages.length} packages, ${setup.pi.extensions.length} extensions`]],
+    ["pi", [`${setup.pi.packages.length} packages, ${setup.pi.extensions.length} extensions, ${setup.pi.shepherdrProfiles.length} shepherdr profiles`]],
     ["left out", capture.leftOut.map((rule) => `${kindLabel[rule.kind]} ${rule.name}: ${rule.why}`)],
     ["note", notes],
   ];
