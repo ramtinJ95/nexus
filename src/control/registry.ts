@@ -18,7 +18,7 @@ import type { HerdrStatus, JobStatus, NodeName, NodeObservation, PylonId, Subjec
 import type { Project, ProjectId, SessionHarness } from "../project.ts";
 import type { ImageId, ImageManifest, TemplateRecord } from "../images.ts";
 import type { PylonRecord } from "../tick.ts";
-import { needsPerson, type Review } from "./review.ts";
+import { needsPerson, reviewerCaller, type Review } from "./review.ts";
 import { maxEntries, transcriptStart, type ClaudeEntry, type TranscriptCursor } from "../claude-transcript.ts";
 
 declare const brand: unique symbol;
@@ -621,7 +621,8 @@ export function openRegistry(path: string, clock = Date.now) {
       return jsonOrNull<Review>(db.prepare("SELECT record FROM reviews WHERE builder = ?").get(builder)?.record ?? null);
     },
     reviews: (): Review[] => db.prepare("SELECT record FROM reviews ORDER BY builder").all().map((r) => json<Review>(r.record)),
-    isReviewer: (thread: ThreadId) => db.prepare("SELECT 1 FROM reviews WHERE reviewer = ?").get(thread) !== undefined,
+    /** A thread a review started, whether or not a later review replaced the record that names it. */
+    isReviewer: (thread: ThreadId) => db.prepare("SELECT 1 FROM threads WHERE id = ? AND started_by = ? UNION SELECT 1 FROM reviews WHERE reviewer = ?").get(thread, reviewerCaller, thread) !== undefined,
     /** Replaces the builder's review, and tells the event log when its phase or round changed. */
     saveReview(review: Review) {
       transaction(() => {

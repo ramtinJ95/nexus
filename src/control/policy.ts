@@ -3,9 +3,10 @@
  * reasons it fails, so a held landing tells the person exactly which ones, all at once.
  *
  * Most conditions read what the review loop recorded. The reserved cases come from two places that must both be
- * clear: the reviewer's classification, and, for Nexus's own pull requests, the changed paths. The paths are the
- * check a prompt injected into the PR cannot talk round, so they fail closed: a path that might touch a reserved case
- * holds the landing for the person, who can merge it themselves.
+ * clear: the reviewer's classification, and, for Nexus's own pull requests, the changed paths. Text in the PR can
+ * mislead the reviewer but cannot change its paths, so the path list is drawn wide: a path that might touch a
+ * reserved case holds the landing for the person, who can merge it themselves. It is a list, so a reserved change in
+ * a file it does not name still rests on the reviewer alone.
  */
 import type { ChangedFile, PrSnapshot } from "./github.ts";
 import { findingsOf, type ReservedCase, type Review } from "./review.ts";
@@ -19,22 +20,23 @@ export const reservedNames: Readonly<Record<ReservedCase, string>> = {
 export interface LandingFacts {
   review: Review;
   pr: PrSnapshot;
-  /** The changed files when the PR is Nexus's own, whose paths this module knows, and null otherwise. */
-  files: readonly ChangedFile[] | null;
+  files: readonly ChangedFile[];
+  /** Whether the PR is Nexus's own, whose paths this module knows. */
+  nexus: boolean;
 }
 
 /**
  * Nexus paths that may touch a reserved case. A registry migration counts as irreversible even when it adds only: a
  * control plane refuses a registry newer than its code, so a rollback past one cannot start.
  */
-const reservedPaths: readonly { case: ReservedCase; matches(file: ChangedFile): boolean }[] = [
-  { case: "secrets", matches: (f) => /secret/i.test(f.path) || f.path === "src/harness/credentials.ts" || f.path.startsWith("deploy/") },
-  { case: "egress", matches: (f) => f.path === "src/pylon-vm/network.ts" || f.path === "src/project.ts" },
-  { case: "auth", matches: (f) => ["src/control/login.ts", "src/control/releases.ts", "src/probe/config.ts"].includes(f.path) },
-  { case: "tailnet", matches: (f) => /tailnet|tailscale/i.test(f.path) },
-  { case: "image-rebuild", matches: (f) => f.path.startsWith("images/") },
-  { case: "irreversible", matches: (f) => f.path === "src/control/registry.ts" && (f.patch === "" || /^@@.*\bmigrations\b|^\+.*\b(CREATE|ALTER|DROP) (TABLE|INDEX)\b/im.test(f.patch)) },
-  { case: "irreversible", matches: (f) => f.path === "package.json" && (f.patch === "" || /^[+-].*@earendil-works\/pi-durable/m.test(f.patch)) },
+const reservedPaths: readonly { case: ReservedCase; matches(path: string, patch: string): boolean }[] = [
+  { case: "secrets", matches: (p) => /secret|credential/i.test(p) || p.startsWith("deploy/") },
+  { case: "egress", matches: (p) => ["src/project.ts", "src/control/threads.ts", "src/control/live.ts"].includes(p) || p.startsWith("src/pylon-vm") || /network|egress|allowlist/i.test(p) },
+  { case: "auth", matches: (p) => ["src/control/api.ts", "src/control/main.ts", "src/control/login.ts", "src/control/releases.ts", "src/control/attach.ts", "src/control/policy.ts"].includes(p) || p.startsWith("src/probe/") || p.startsWith("src/deploy/") || /auth|login|whois/i.test(p) },
+  { case: "tailnet", matches: (p) => /tailnet|tailscale/i.test(p) },
+  { case: "image-rebuild", matches: (p) => p.startsWith("images/") || p === "src/agent-setup.ts" },
+  { case: "irreversible", matches: (p, patch) => p === "src/control/registry.ts" && (patch === "" || /^@@.*\bmigrations\b|^\+.*\b(CREATE|ALTER|DROP) (TABLE|INDEX)\b/im.test(patch)) },
+  { case: "irreversible", matches: (p, patch) => p === "package.json" && (patch === "" || /^[+-].*@earendil-works\/pi-durable/m.test(patch)) },
 ];
 
 const squash = (text: string) => text.replace(/\s+/g, " ").trim().toLowerCase();
@@ -67,16 +69,20 @@ const conditions: readonly ((facts: LandingFacts) => string[])[] = [
   // No verify stack exists yet (docs/design.md, open questions), so every PR lands on its statement of what it could not check live.
   ({ review, pr }) => {
     const quoted = review.rounds.at(-1)!.verdict?.notCheckedLive ?? null;
-    if (quoted === null || squash(quoted) === "") return ["No live check ran, and the pull request does not say what could not be checked live."];
+    if (quoted === null || squash(quoted).length < 20) return ["No live check ran, and the pull request does not say what could not be checked live."];
     return squash(pr.detail.body).includes(squash(quoted)) ? [] : ["The reviewer's quote of what could not be checked live is not in the pull request's description."];
   },
   ({ review }) => (review.rounds.at(-1)!.verdict?.reserved ?? []).map((r) => `Always needs the person: ${reservedNames[r.case]}, by the reviewer's reading (${r.why}).`),
-  ({ files }) => {
-    if (files === null) return [];
+  ({ files }) => files.some((f) => f.path === ".nexus/check" || f.previous === ".nexus/check") ? ["The pull request changes .nexus/check, the check this policy relies on."] : [],
+  ({ files, nexus }) => {
+    if (!nexus) return [];
     const hits = new Map<ReservedCase, string[]>();
-    for (const file of files) for (const rule of reservedPaths) if (rule.matches(file)) hits.set(rule.case, [...new Set([...hits.get(rule.case) ?? [], file.path])]);
-    const gate = files.filter((f) => f.path === ".nexus/check").map(() => "The pull request changes .nexus/check, the check this policy relies on.");
-    return [...[...hits].map(([c, paths]) => `Always needs the person: ${reservedNames[c]}, as it changes ${paths.join(", ")}.`), ...gate];
+    for (const file of files) {
+      for (const path of [file.path, ...file.previous === null ? [] : [file.previous]]) {
+        for (const rule of reservedPaths) if (rule.matches(path, file.patch)) hits.set(rule.case, [...new Set([...hits.get(rule.case) ?? [], path])]);
+      }
+    }
+    return [...hits].map(([c, paths]) => `Always needs the person: ${reservedNames[c]}, as it changes ${paths.join(", ")}.`);
   },
 ];
 

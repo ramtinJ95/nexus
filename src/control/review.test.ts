@@ -29,9 +29,9 @@ function fixture(t: import("node:test").TestContext, options: { path?: string; r
     registry.upsertNode({ name: node, tailnetHost: "node.ts.net", tailnetNodeId: self });
     registry.createProject(project);
   }
-  function add(id: string, claude: boolean): ThreadId {
+  function add(id: string, claude: boolean, startedBy = "test"): ThreadId {
     if (registry.thread(id as ThreadId) !== undefined) return id as ThreadId;
-    const thread: Thread = { id: id as ThreadId, title: id, project: project.id, pylonId: `pylon-${id}` as PylonId, status: "active", conversationId: claude ? null : "1", startedBy: "test", createdAt: 1, seenAt: null, lastReplyAt: null, lastHumanActivityAt: 1, lastAgentActivityAt: 0, agentTurnRunning: false };
+    const thread: Thread = { id: id as ThreadId, title: id, project: project.id, pylonId: `pylon-${id}` as PylonId, status: "active", conversationId: claude ? null : "1", startedBy, createdAt: 1, seenAt: null, lastReplyAt: null, lastHumanActivityAt: 1, lastAgentActivityAt: 0, agentTurnRunning: false };
     const { desired: _, ...pylon } = newPylonRecord({ thread: id, pylonId: thread.pylonId, node, desired: "running", boot: { pylonId: thread.pylonId, image: "img-000000000000", resources: project.resources, network: { allowedHosts: [], secrets: [] }, repo: { kind: "clone", url: project.repoUrl, checkout: { branch: "feature", commit: "origin/feature" } }, dotfiles: { repo: project.repoUrl, ref: "main" } }, firstBoot: { kind: "fresh", preSetup: null }, live: { previews: [], overlay: [] }, liveHash: "hash" as LiveHash });
     registry.createThread(thread, pylon, claude ? "fix it" : undefined, claude ? "claude-opus-5-5" : undefined);
     return thread.id;
@@ -45,7 +45,7 @@ function fixture(t: import("node:test").TestContext, options: { path?: string; r
   const sent: { to: ThreadId; message: AutomatedMessage }[] = [];
   const started: StartRequest[] = [];
   let snapshot: PrSnapshot = { pr: { ...pr }, detail: { head: head1, branch: "feature", base: "main", body: "Adds a cache.\n\nNot checked live: the cache under real traffic.", mergeCommit: null }, failures: [], comments: [] };
-  let files: ChangedFile[] = [{ path: "src/cache.ts", patch: "@@ -0,0 +1 @@\n+export {};" }];
+  let files: ChangedFile[] = [{ path: "src/cache.ts", previous: null, patch: "@@ -0,0 +1 @@\n+export {};" }];
   const merges: string[] = [];
   let mergeAnswer: () => MergeResult = () => ({ kind: "merged", commit: merged });
   let check: CheckState = { kind: "done", passed: true, output: "ok" };
@@ -64,7 +64,7 @@ function fixture(t: import("node:test").TestContext, options: { path?: string; r
     release: { self, repo: "ramtinJ95/nexus" },
     log: () => {},
     now: () => clock,
-    async startThread(request) { started.push(request); return registry.thread(add("th-reviewer", request.claude !== undefined))!; },
+    async startThread(request, caller) { started.push(request); return registry.thread(add(`th-reviewer-${started.length}`, request.claude !== undefined, caller))!; },
   });
   const reply = (id: ThreadId, text: string) => {
     replies.set(id, [...replies.get(id) ?? [], text]);
@@ -73,7 +73,7 @@ function fixture(t: import("node:test").TestContext, options: { path?: string; r
     clock += 61_000;
   };
   return {
-    registry, builder, loop, sent, started, merges, replies, reply,
+    registry, builder, loop, add, sent, started, merges, replies, reply,
     get snapshot() { return snapshot; }, set snapshot(s) { snapshot = s; },
     set files(f: ChangedFile[]) { files = f; },
     set mergeAnswer(a: () => MergeResult) { mergeAnswer = a; },
@@ -84,8 +84,9 @@ function fixture(t: import("node:test").TestContext, options: { path?: string; r
   };
 }
 
-const verdict = (r: Review, round: number, fields: Record<string, unknown>) => `Done.\n\`\`\`nexus-review\n${JSON.stringify({ token: `${r.id}:${round}`, verdict: "approve", findings: [], reserved: [], notCheckedLive: "the cache under real traffic", ...fields })}\n\`\`\``;
-const answers = (r: Review, round: number, list: unknown[]) => `Fixed.\n\`\`\`nexus-review-answers\n${JSON.stringify({ token: `${r.id}:${round}`, answers: list })}\n\`\`\``;
+const archive = (registry: ReturnType<typeof openRegistry>, id: ThreadId) => registry.setThreadStatus(id, "archived");
+const verdict = (r: Review, fields: Record<string, unknown>) => `Done.\n\`\`\`nexus-review\n${JSON.stringify({ token: r.expect, verdict: "approve", findings: [], reserved: [], notCheckedLive: "the cache under real traffic", ...fields })}\n\`\`\``;
+const answers = (r: Review, list: unknown[]) => `Fixed.\n\`\`\`nexus-review-answers\n${JSON.stringify({ token: r.expect, answers: list })}\n\`\`\``;
 const serious = { id: "F1", severity: "serious", where: "src/cache.ts:1", summary: "The cache never expires", detail: "Add a TTL." };
 
 test("a Claude builder's PR gets a harness reviewer, and findings, fixes and new commits go round until it approves", async (t) => {
@@ -105,14 +106,14 @@ test("a Claude builder's PR gets a harness reviewer, and findings, fixes and new
   assert.equal(f.sent[0]!.message.sender, "review");
   assert.equal(f.registry.isReviewer(reviewer), true);
 
-  f.reply(reviewer, verdict(f.review(), 1, { verdict: "changes", findings: [serious] }));
+  f.reply(reviewer, verdict(f.review(), { verdict: "changes", findings: [serious] }));
   await loop.poll();
   assert.equal(f.review().phase.kind, "fixing");
   assert.equal(f.sent[1]!.to, f.builder);
   assert.match(f.sent[1]!.message.text, /F1 \(serious\) src\/cache.ts:1: The cache never expires\n {4}Add a TTL\./);
   assert.match(f.sent[1]!.message.text, /```nexus-review-answers/);
 
-  f.reply(f.builder, answers(f.review(), 1, [{ id: "F1", action: "fixed", reason: "Added a 5-minute TTL." }]));
+  f.reply(f.builder, answers(f.review(), [{ id: "F1", action: "fixed", reason: "Added a 5-minute TTL." }]));
   await loop.poll();
   assert.equal(f.sent.length, 2, "the loop waits for the push the builder says it made");
   f.snapshot = { ...f.snapshot, detail: { ...f.snapshot.detail, head: head2 } };
@@ -123,7 +124,7 @@ test("a Claude builder's PR gets a harness reviewer, and findings, fixes and new
   assert.match(f.sent[2]!.message.text, new RegExp(`git diff ${head1}..${head2}`));
   assert.match(f.sent[2]!.message.text, /F1: fixed\. Added a 5-minute TTL\./);
 
-  f.reply(reviewer, verdict(f.review(), 2, {}));
+  f.reply(reviewer, verdict(f.review(), {}));
   await loop.poll();
   assert.deepEqual(f.review().phase, { kind: "approved" }, "approval runs the check, then stops when no landing was asked for");
   assert.deepEqual(f.review().rounds[1]!.check, { passed: true, output: "ok" });
@@ -138,7 +139,7 @@ test("rounds that run out, and agents that never answer in the block, end with t
   await loop.start(f.builder, { land: null, rounds: 1 });
   await loop.poll();
   const reviewer = f.review().reviewer;
-  f.reply(reviewer, verdict(f.review(), 1, { verdict: "changes", findings: [serious] }));
+  f.reply(reviewer, verdict(f.review(), { verdict: "changes", findings: [serious] }));
   await loop.poll();
   assert.deepEqual(f.review().phase, { kind: "needs-person", reasons: ["The reviewer still requests changes after 1 rounds, the most this review allows."] });
   assert.equal(f.registry.threads().find((th) => th.id === f.builder) && (f.registry.events("0", { kinds: ["attention.changed"], thread: f.builder }).at(-1)?.payload.attention), "decision");
@@ -153,7 +154,8 @@ test("rounds that run out, and agents that never answer in the block, end with t
     await silent.poll();
     assert.match(g.sent.at(-1)!.message.text, /no nexus-review block/);
   }
-  assert.deepEqual(g.sent.map((s) => s.message.id).slice(1), [`${g.review().id}:1:reminder:1`, `${g.review().id}:1:reminder:2`]);
+  assert.deepEqual(g.sent.map((s) => s.message.id), [1, 2, 3].map((n) => `${g.review().id}:${n}`));
+  assert.ok(g.sent.slice(1).every((s) => s.message.text.includes(g.review().expect)), "a reminder asks for the same token");
   g.reply(r, "Still fine.");
   await silent.poll();
   assert.equal(g.review().phase.kind, "needs-person");
@@ -172,7 +174,7 @@ test("a message the inbox cannot deliver yet is sent again under the same reques
   f.delivery = "delivered";
   await loop.poll();
   await loop.poll();
-  assert.deepEqual(f.sent.map((s) => s.message.id), [`${f.review().id}:1:request:0`]);
+  assert.deepEqual(f.sent.map((s) => s.message.id), [`${f.review().id}:1`]);
 });
 
 test("a harness builder gets a Claude reviewer only where the project grants a Claude token, and its prompt runs as given", async (t) => {
@@ -190,7 +192,7 @@ async function approved(f: ReturnType<typeof fixture>, land: string | null) {
   const loop = f.loop();
   await loop.start(f.builder, { land });
   await loop.poll();
-  f.reply(f.review().reviewer, verdict(f.review(), 1, {}));
+  f.reply(f.review().reviewer, verdict(f.review(), {}));
   await loop.poll();
   return loop;
 }
@@ -256,15 +258,15 @@ test("a token that cannot merge holds the landing for the person, and a later la
 test("the policy names every condition that fails and every reserved case, and holds without merging", async (t) => {
   const f = fixture(t);
   f.files = [
-    { path: "images/pylon/Dockerfile", patch: "@@ -1 +1 @@\n-FROM a\n+FROM b" },
-    { path: "src/control/registry.ts", patch: "@@ -240,3 +240,4 @@ const migrations: readonly string[] = [\n+  `ALTER TABLE threads ADD COLUMN x TEXT;`," },
-    { path: "src/control/registry.ts.bak", patch: "" },
+    { path: "images/pylon/Dockerfile", previous: null, patch: "@@ -1 +1 @@\n-FROM a\n+FROM b" },
+    { path: "src/control/registry.ts", previous: null, patch: "@@ -240,3 +240,4 @@ const migrations: readonly string[] = [\n+  `ALTER TABLE threads ADD COLUMN x TEXT;`," },
+    { path: "src/control/registry.ts.bak", previous: null, patch: "" },
   ];
   f.snapshot = { ...f.snapshot, detail: { ...f.snapshot.detail, body: "Adds a cache." } };
   const loop = f.loop();
   await loop.start(f.builder, { land: "nLAPTOP" });
   await loop.poll();
-  f.reply(f.review().reviewer, verdict(f.review(), 1, { reserved: [{ case: "cli-breaking", why: "renames --wait" }] }));
+  f.reply(f.review().reviewer, verdict(f.review(), { reserved: [{ case: "cli-breaking", why: "renames --wait" }] }));
   await loop.poll();
   assert.deepEqual(f.merges, []);
   assert.deepEqual(f.review().phase, { kind: "needs-person", reasons: [
@@ -276,14 +278,14 @@ test("the policy names every condition that fails and every reserved case, and h
 });
 
 test("the policy's review conditions: another model, an approval with nothing serious open, and every finding answered", () => {
-  const round = { head: head1, verdict: { token: "x", verdict: "approve" as const, findings: [], reserved: [], notCheckedLive: "the cache" }, check: { passed: true, output: "" }, answers: null };
+  const round = { head: head1, verdict: { token: "x", verdict: "approve" as const, findings: [], reserved: [], notCheckedLive: "the cache under real traffic" }, check: { passed: true, output: "" }, answers: null };
   const review: Review = {
     id: "rv-1", builder: "th-b" as ThreadId, reviewer: "th-r" as ThreadId, pr: { repo: "acme/shop", number: 7, url: "", title: "" }, models: { builder: "m", reviewer: "m" },
-    maxRounds: 3, land: null, merged: null, phase: { kind: "checking", startedAt: 0 }, outbox: null, since: 0, nudges: 0, startedAt: 0,
+    maxRounds: 3, land: null, merged: null, expect: "rv-1:t", sent: 1, phase: { kind: "checking", startedAt: 0 }, outbox: null, since: 0, nudges: 0, startedAt: 0,
     rounds: [{ ...round, verdict: { ...round.verdict, verdict: "changes", findings: [{ id: "F1", severity: "minor", summary: "s" }, { id: "F2", severity: "minor", summary: "s" }] }, answers: [{ id: "F1", action: "rejected", reason: " " }] }, round],
   };
-  const pr: PrSnapshot = { pr: { repo: "acme/shop", number: 7, title: "", url: "", state: "open", checks: "pending", review: "none", conflict: true }, detail: { head: head2, branch: "f", base: "main", body: "Not checked live: the cache.", mergeCommit: null }, failures: [], comments: [] };
-  assert.deepEqual(landingHolds({ review, pr, files: null }), [
+  const pr: PrSnapshot = { pr: { repo: "acme/shop", number: 7, title: "", url: "", state: "open", checks: "pending", review: "none", conflict: true }, detail: { head: head2, branch: "f", base: "main", body: "Not checked live: the cache under real traffic.", mergeCommit: null }, failures: [], comments: [] };
+  assert.deepEqual(landingHolds({ review, pr, files: [], nexus: false }), [
     "The reviewer ran the builder's own model, m.",
     "The builder neither fixed nor rejected with a reason finding F1 of round 1.",
     "The builder neither fixed nor rejected with a reason finding F2 of round 1.",
@@ -291,4 +293,83 @@ test("the policy's review conditions: another model, an approval with nothing se
     "The branch conflicts with its base.",
     "The pull request's GitHub checks are pending.",
   ]);
+});
+
+test("a check that fails after minor findings were answered reaches the builder as a new request, which old answers cannot satisfy", async (t) => {
+  const f = fixture(t);
+  const loop = f.loop();
+  await loop.start(f.builder, { land: null });
+  await loop.poll();
+  f.reply(f.review().reviewer, verdict(f.review(), { findings: [{ id: "M1", severity: "minor", summary: "Name the constant" }] }));
+  await loop.poll();
+  assert.equal(f.review().phase.kind, "fixing", "an approval with a minor finding still asks the builder to answer it");
+  const first = f.review().expect;
+  f.check = { kind: "done", passed: false, output: "src/cache.ts(1,1): error TS2322" };
+  f.reply(f.builder, answers(f.review(), [{ id: "M1", action: "rejected", reason: "The name is the convention here." }]));
+  await loop.poll();
+  assert.equal(f.review().phase.kind, "fixing");
+  const ids = f.sent.map((s) => s.message.id);
+  assert.equal(new Set(ids).size, ids.length, "every message has its own request ID");
+  assert.notEqual(f.review().expect, first, "the check's findings ask for a new token");
+  assert.match(f.sent.at(-1)!.message.text, /CHECK \(serious\) \.nexus\/check: \.nexus\/check failed at 1{40}\n {4}src\/cache\.ts\(1,1\): error TS2322/);
+  f.tick(120_000);
+  await loop.poll();
+  assert.equal(f.sent.length, ids.length, "the builder's earlier answers do not answer the check");
+  assert.equal(f.review().nudges, 0);
+});
+
+test("commits pushed with answers that fixed nothing still get another round", async (t) => {
+  const f = fixture(t);
+  const loop = f.loop();
+  await loop.start(f.builder, { land: null });
+  await loop.poll();
+  f.reply(f.review().reviewer, verdict(f.review(), { findings: [{ id: "M1", severity: "minor", summary: "Name the constant" }] }));
+  await loop.poll();
+  f.snapshot = { ...f.snapshot, detail: { ...f.snapshot.detail, head: head2 } };
+  f.reply(f.builder, answers(f.review(), [{ id: "M1", action: "rejected", reason: "The name is the convention here." }]));
+  await loop.poll();
+  assert.equal(f.review().phase.kind, "reviewing");
+  assert.equal(f.review().rounds.at(-1)!.head, head2);
+});
+
+test("a landing sees its deploy through, rolling back, though its threads are archived meanwhile", async (t) => {
+  const f = fixture(t);
+  f.registry.setDesiredRelease({ commit: previous, requestedBy: "person", requestedAt: 1 });
+  const loop = await approved(f, "nLAPTOP");
+  assert.equal(f.review().phase.kind, "deploying");
+  archive(f.registry, f.builder);
+  archive(f.registry, f.review().reviewer);
+  f.registry.reportRelease({ node, role: "control", commit: previous, target: merged, state: "failed", reason: "unit failed", observedAt: Date.now() });
+  await loop.poll();
+  assert.equal(f.registry.desiredRelease()?.commit, previous);
+  assert.match((f.review().phase as { reasons: string[] }).reasons[1]!, /Rolled back/);
+});
+
+test("a PR that merged at another head than the approved one is not deployed", async (t) => {
+  const f = fixture(t);
+  f.registry.setDesiredRelease({ commit: previous, requestedBy: "person", requestedAt: 1 });
+  f.mergeAnswer = () => ({ kind: "refused", message: "unused" });
+  const loop = f.loop();
+  await loop.start(f.builder, { land: "nLAPTOP" });
+  await loop.poll();
+  f.reply(f.review().reviewer, verdict(f.review(), {}));
+  f.snapshot = { ...f.snapshot, pr: { ...f.snapshot.pr, state: "merged" }, detail: { ...f.snapshot.detail, head: head2, mergeCommit: merged } };
+  await loop.poll();
+  assert.equal(f.registry.desiredRelease()?.commit, previous);
+  assert.equal(f.review().phase.kind, "needs-person");
+});
+
+test("a reviewer a later review replaced is still a reviewer, and an archived builder cannot land", async (t) => {
+  const f = fixture(t);
+  const loop = f.loop();
+  await loop.start(f.builder, { land: null, rounds: 1 });
+  await loop.poll();
+  const first = f.review().reviewer;
+  f.reply(first, verdict(f.review(), { verdict: "changes", findings: [serious] }));
+  await loop.poll();
+  await loop.start(f.builder, { land: null });
+  assert.notEqual(f.review().reviewer, first);
+  assert.equal(f.registry.isReviewer(first), true);
+  archive(f.registry, f.builder);
+  assert.throws(() => loop.land(f.builder, "nLAPTOP"), /archived/);
 });

@@ -1041,7 +1041,7 @@ test("review and land reach the review loop's routes, and show prints a review a
   assert.equal((await s.nexus(["review", thread.id, "--rounds", "two"])).code, 64);
   const review: Review = {
     id: "rv-1", builder: thread.id, reviewer: "th-reviewer" as ThreadId, pr: { repo: "octocat/Spoon-Knife", number: 7, url: "https://github.com/octocat/Spoon-Knife/pull/7", title: "Cache" },
-    models: { builder: "gpt-6-astra", reviewer: "claude-opus-5-5" }, maxRounds: 3, land: null, merged: null, outbox: null, since: 0, nudges: 0, startedAt: 0,
+    models: { builder: "gpt-6-astra", reviewer: "claude-opus-5-5" }, maxRounds: 3, land: null, merged: null, expect: "rv-1:t", sent: 1, outbox: null, since: 0, nudges: 0, startedAt: 0,
     rounds: [{ head: "1".repeat(40), verdict: null, check: null, answers: null }],
     phase: { kind: "needs-person", reasons: ["The reviewer still requests changes after 3 rounds, the most this review allows."] },
   };

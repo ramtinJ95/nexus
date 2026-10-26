@@ -5,9 +5,10 @@
  *
  * A probe exec lasts at most 60 seconds, and a suite runs longer, so one exec starts the job detached and later ones
  * read its state. The job lives in its own worktree under ~/.nexus-checks/<commit>, on the pylon's disk, and writes its
- * exit code last, so every exec judges it from what is on disk: a result, a live process, or neither. A pylon that
- * paused mid-run left neither, and the next exec starts it over. A result is kept, so a second land of the same head
- * reads it again rather than running it twice.
+ * exit code last, so every exec judges it from what is on disk: a result, a live process of this boot, or neither. A
+ * pylon that paused mid-run left neither, and the next exec starts it over. A result is kept, so a second land of the
+ * same head reads it again rather than running it twice. A setup failure, such as a fetch that failed, is not the
+ * check's result, so it is reported as an error and the next exec tries again.
  */
 import { checkoutDir } from "../sessions.ts";
 import type { CommandResult, NodeName, ProbeClient, ProbeError } from "../protocol.ts";
@@ -16,23 +17,25 @@ import type { CheckState } from "./review.ts";
 
 const outputBytes = 6_000;
 
-/** `$1` is the commit. It prints `done <exit code>` and the log's tail, `running`, or `started`. */
+/** `$1` is the commit. It prints `done <exit code>` and the log's tail, `running`, `started`, or `error` and the log's tail. */
 export const checkScript = `set -u
 sha=$1
 d="$HOME/.nexus-checks/$sha"
+boot=$(cat /proc/sys/kernel/random/boot_id)
 finish() { printf 'done %s\\n' "$(cat "$d/exit")"; tail -c ${outputBytes} "$d/log"; exit 0; }
 [ -f "$d/exit" ] && finish
-if [ -f "$d/pid" ] && kill -0 "$(cat "$d/pid")" 2>/dev/null; then echo running; exit 0; fi
+if [ -f "$d/pid" ] && [ "$(cat "$d/boot" 2>/dev/null)" = "$boot" ] && kill -0 "$(cat "$d/pid")" 2>/dev/null; then echo running; exit 0; fi
 rm -rf "$d" && mkdir -p "$d"
 git worktree prune
 if ! { git cat-file -e "$sha^{commit}" 2>/dev/null || git fetch -q origin "$sha"; } >"$d/log" 2>&1 || ! git worktree add -q --detach "$d/tree" "$sha" >>"$d/log" 2>&1; then
-  echo 1 >"$d/exit"; finish
+  echo error; tail -c ${outputBytes} "$d/log"; rm -rf "$d"; exit 0
 fi
 if [ ! -x "$d/tree/.nexus/check" ]; then
   echo "The repository has no executable .nexus/check at $sha." >>"$d/log"; echo 127 >"$d/exit"; finish
 fi
 cd "$d/tree" && setsid sh -c './.nexus/check >>../log 2>&1; echo $? >../exit.tmp && mv ../exit.tmp ../exit' </dev/null >/dev/null 2>&1 &
 echo $! >"$d/pid"
+echo "$boot" >"$d/boot"
 echo started`;
 
 export function parseCheck(result: Extract<CommandResult, { kind: "exec" }>): CheckState {
@@ -41,6 +44,7 @@ export function parseCheck(result: Extract<CommandResult, { kind: "exec" }>): Ch
   const done = /^done (\d+)$/.exec(first);
   if (done !== null) return { kind: "done", passed: done[1] === "0", output: rest.join("\n").trim() };
   if (first === "running" || first === "started") return { kind: "running" };
+  if (first === "error") throw new Error("the check could not check out its commit");
   throw new Error("the check's exec printed no state");
 }
 

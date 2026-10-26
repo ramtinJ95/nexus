@@ -16,7 +16,8 @@ export interface PrSnapshot {
   failures: { id: string; text: string }[];
   comments: { id: string; text: string }[];
 }
-export interface ChangedFile { path: string; patch: string }
+/** `previous` is the path a renamed file had, so a rename cannot carry a file past a check on its path. */
+export interface ChangedFile { path: string; previous: string | null; patch: string }
 /** What a merge GitHub refused says: `denied` when the token may not merge, `refused` when the PR cannot be. */
 export type MergeResult = { kind: "merged"; commit: string } | { kind: "denied" | "refused"; message: string };
 export interface GitHub {
@@ -118,7 +119,7 @@ export function githubClient(token: string, request: typeof fetch = fetch): GitH
       ] };
     },
     async files(repo, number) {
-      return (await list<{ filename: string; patch?: string }>(`/repos/${repo}/pulls/${number}/files`)).map((f) => ({ path: f.filename, patch: f.patch ?? "" }));
+      return (await list<{ filename: string; previous_filename?: string; patch?: string }>(`/repos/${repo}/pulls/${number}/files`)).map((f) => ({ path: f.filename, previous: f.previous_filename ?? null, patch: f.patch ?? "" }));
     },
     async merge(repo, number, head) {
       if (Date.now() < retryAt) throw new Error("GitHub is waiting for its rate limit");

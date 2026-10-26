@@ -384,12 +384,12 @@ test("the client reads a PR's head, base and body, its changed files, and merges
     const path = new URL(String(input)).pathname;
     if (path.endsWith("/merge")) { merges.push(JSON.parse(String(init?.body))); return answer(); }
     if (path.endsWith("/pulls/1")) return Response.json({ number: 1, title: "Fix", html_url: "https://github.com/acme/repo/pull/1", state: "open", merged: false, mergeable_state: "clean", body: "Not checked live: the deploy", merge_commit_sha: "t".repeat(40), head: { sha: "abc", ref: "feature" }, base: { ref: "main" } });
-    if (path.endsWith("/files")) return Response.json([{ filename: "src/a.ts", patch: "@@ -1 +1 @@\n-a\n+b" }, { filename: "logo.png" }]);
+    if (path.endsWith("/files")) return Response.json([{ filename: "src/a.ts", patch: "@@ -1 +1 @@\n-a\n+b" }, { filename: "logo.png", previous_filename: "img/logo.png" }]);
     return Response.json(path.endsWith("/check-runs") ? { check_runs: [] } : []);
   };
   const client = githubClient("secret", fake);
   assert.deepEqual((await client.poll("acme/repo", 1)).detail, { head: "abc", branch: "feature", base: "main", body: "Not checked live: the deploy", mergeCommit: null }, "an unmerged PR's test merge commit is not its merge commit");
-  assert.deepEqual(await client.files("acme/repo", 1), [{ path: "src/a.ts", patch: "@@ -1 +1 @@\n-a\n+b" }, { path: "logo.png", patch: "" }]);
+  assert.deepEqual(await client.files("acme/repo", 1), [{ path: "src/a.ts", previous: null, patch: "@@ -1 +1 @@\n-a\n+b" }, { path: "logo.png", previous: "img/logo.png", patch: "" }]);
   assert.deepEqual(await client.merge("acme/repo", 1, "abc"), { kind: "merged", commit: "m".repeat(40) });
   assert.deepEqual(merges, [{ sha: "abc", merge_method: "squash" }]);
   answer = () => Response.json({ message: "Resource not accessible by personal access token" }, { status: 403 });

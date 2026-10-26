@@ -24,8 +24,8 @@ async function checkout(t: import("node:test").TestContext, check: string | null
   git("add", "-A");
   git("commit", "-qm", "init");
   const head = git("rev-parse", "HEAD");
-  const run = (): CheckState => {
-    const output = execFileSync("sh", ["-c", checkScript, "nexus-check", head], { cwd: repo, env: { ...process.env, HOME: root }, encoding: "utf8" });
+  const run = (commit = head): CheckState => {
+    const output = execFileSync("sh", ["-c", checkScript, "nexus-check", commit], { cwd: repo, env: { ...process.env, HOME: root }, encoding: "utf8" });
     return parseCheck({ kind: "exec", exitCode: 0, output, truncated: false });
   };
   return { run, root, head };
@@ -70,4 +70,10 @@ test("a job the pylon's pause killed, which left no result, starts over", async 
   const restarted = execFileSync("cat", [join(c.root, ".nexus-checks", c.head, "pid")], { encoding: "utf8" }).trim();
   assert.notEqual(restarted, pid);
   process.kill(-Number(restarted), "SIGKILL");
+});
+
+test("a commit the pylon cannot check out is an error to retry, not a kept failure", async (t) => {
+  const c = await checkout(t, "true");
+  assert.throws(() => c.run("f".repeat(40)), /could not check out/);
+  assert.throws(() => c.run("f".repeat(40)), /could not check out/, "nothing was kept, so it tries again");
 });
