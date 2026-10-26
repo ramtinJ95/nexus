@@ -39,6 +39,8 @@ export interface NodeRecord {
 
 export interface Thread extends ActivityFacts {
   sessionWaiting?: boolean;
+  /** What the most recently waiting session's report said, when it said anything. */
+  sessionWaitingMessage?: string;
   /** The earliest known start of a running harness or session turn. Absent when none runs or no start is known. */
   workingSince?: number;
   id: ThreadId;
@@ -264,6 +266,8 @@ const migrations: readonly string[] = [
   `ALTER TABLE claude_workers ADD COLUMN turn_session TEXT;
    ALTER TABLE claude_workers ADD COLUMN turn_at INTEGER;`,
   `ALTER TABLE threads ADD COLUMN placement TEXT;`,
+  // What a waiting session's report said it waits for, such as a background command still running at the hold's cap.
+  `ALTER TABLE session_activity ADD COLUMN message TEXT;`,
 ];
 
 type Row = Record<string, unknown>;
@@ -445,10 +449,11 @@ export function openRegistry(path: string, clock = Date.now) {
     const thread = threadRow(row);
     const live = db.prepare("SELECT max(updated_at) AS at, min(started_at) AS since FROM session_activity WHERE thread = ? AND state = 'session.turn-started' AND updated_at > ?").get(thread.id, clock() - sessionActivityTtlMs)!;
     const working = live.at as number | null;
-    const waiting = db.prepare("SELECT 1 FROM session_activity WHERE thread = ? AND state = 'session.waiting' LIMIT 1").get(thread.id);
+    const waiting = db.prepare("SELECT message FROM session_activity WHERE thread = ? AND state = 'session.waiting' ORDER BY updated_at DESC, rowid DESC LIMIT 1").get(thread.id);
     const starts = [thread.agentTurnRunning ? row.agent_turn_started_at : null, live.since].filter((at): at is number => typeof at === "number");
     return {
       ...thread, ...(working === null ? {} : { sessionTurnRunning: true, sessionActiveUntil: working + sessionActivityTtlMs }), ...(waiting === undefined ? {} : { sessionWaiting: true }),
+      ...(typeof waiting?.message === "string" ? { sessionWaitingMessage: waiting.message } : {}),
       ...(starts.length === 0 ? {} : { workingSince: Math.min(...starts) }),
     };
   }
@@ -626,9 +631,9 @@ export function openRegistry(path: string, clock = Date.now) {
           const startedAt = event.kind === "session.waiting" ? null
             : event.kind === "session.heartbeat" && current?.state === "session.turn-started" ? current.started_at as number | null
             : clock();
-          db.prepare(`INSERT INTO session_activity (thread, session, state, updated_at, started_at) VALUES (?, ?, ?, ?, ?)
-            ON CONFLICT(thread, session) DO UPDATE SET state = excluded.state, updated_at = excluded.updated_at, started_at = excluded.started_at`)
-            .run(thread, session, event.kind === "session.heartbeat" ? "session.turn-started" : event.kind, clock(), startedAt);
+          db.prepare(`INSERT INTO session_activity (thread, session, state, updated_at, started_at, message) VALUES (?, ?, ?, ?, ?, ?)
+            ON CONFLICT(thread, session) DO UPDATE SET state = excluded.state, updated_at = excluded.updated_at, started_at = excluded.started_at, message = excluded.message`)
+            .run(thread, session, event.kind === "session.heartbeat" ? "session.turn-started" : event.kind, clock(), startedAt, event.kind === "session.waiting" ? event.message ?? null : null);
           db.prepare("DELETE FROM session_activity WHERE thread = ? AND session NOT IN (SELECT session FROM session_activity WHERE thread = ? ORDER BY updated_at DESC, rowid DESC LIMIT ?)").run(thread, thread, maxActiveSessions);
         }
         if (event.kind !== "session.waiting") q.agentActivity.run(clock(), thread);

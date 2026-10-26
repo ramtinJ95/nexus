@@ -58,19 +58,22 @@ async function install(setup: AgentSetup): Promise<void> {
   await herdrIntegrations();
 }
 
+/** Each Claude hook nexus-claude-hook runs for, the kind it reports and its matcher. Claude's idle prompt, 60 seconds after every turn, waits for no one. */
+export const claudeHooks = [
+  ["UserPromptSubmit", "session.turn-started", ""],
+  ["PostToolUse", "session.heartbeat", ""],
+  ["Stop", "session.turn-ended", ""],
+  ["Notification", "session.waiting", "permission_prompt|elicitation_dialog"],
+  ["SessionEnd", "session.ended", ""],
+] as const;
+
 async function herdrIntegrations(): Promise<void> {
   await run("herdr", ["integration", "install", "pi"]);
   await run("herdr", ["integration", "install", "claude"]);
   const path = join(home, ".claude/settings.json");
   const settings = JSON.parse(await readFile(path, "utf8"));
   settings.hooks ??= {};
-  for (const [hook, kind, matcher] of [
-    ["UserPromptSubmit", "session.turn-started", ""],
-    ["PostToolUse", "session.heartbeat", ""],
-    ["Stop", "session.turn-ended", ""],
-    ["Notification", "session.waiting", "permission_prompt|idle_prompt|elicitation_dialog"],
-    ["SessionEnd", "session.ended", ""],
-  ] as const) {
+  for (const [hook, kind, matcher] of claudeHooks) {
     settings.hooks[hook] = (settings.hooks[hook] ?? []).filter((entry: { hooks?: { command?: string }[] }) => !entry.hooks?.some((h) => h.command?.includes("nexus-claude-hook")));
     settings.hooks[hook].push({ matcher, hooks: [{ type: "command", command: `/usr/local/bin/nexus-claude-hook ${kind}`, timeout: 2 }] });
   }

@@ -154,9 +154,9 @@ past matching records they have not consumed.
 | Kind | Meaning and payload |
 |---|---|
 | `session.turn-started` | Claude submitted a prompt; optional `session` and `message` |
-| `session.heartbeat` | A throttled PostToolUse hook, or a Stop hook while background subagents run, confirms activity; optional `session` and `message` |
-| `session.turn-ended` | Claude's Stop hook ran with no background subagent running; optional `session` and `message` |
-| `session.waiting` | Claude notified that input is needed; optional `session` and `message` |
+| `session.heartbeat` | A throttled PostToolUse hook, or a Stop hook while background tasks run, confirms activity; optional `session` and `message` |
+| `session.turn-ended` | Claude's Stop hook ran with no background task running, or after one with only background shells running once they exit or 2 hours pass; optional `session` and `message` |
+| `session.waiting` | Claude showed a permission or input prompt, or a background command still ran after 2 hours; optional `session` and `message` |
 | `session.ended` | Claude's SessionEnd hook ran; optional `session` and `message` |
 | `thread.turn-ended` | The control-plane harness completed a turn |
 | `thread.failed` | Pylon or worker launch failed; `message` |
@@ -205,12 +205,21 @@ proof of continuing activity and also expires; no timer guesses that it is busy.
 Herdr's cached Claude status cannot renew the lease. Other harness sessions retain
 their existing observation-based activity rules.
 
-A Stop hook whose `background_tasks` lists a `subagent` with status `running`
-reports `session.heartbeat` through the same throttle, so the turn is not ended
-and records no reply. A subagent's tool hooks report under the main session's ID
-and renew the same lease. The turn Claude starts when the last subagent finishes
-ends it. Background `shell` tasks do not count. There is no subagent record: a
-subagent that never finishes lets the lease expire like any other silent turn.
+A Stop hook whose `background_tasks` lists a `subagent` or `shell` with status
+`running` reports `session.heartbeat` through the same throttle, so the turn is
+not ended and records no reply. A subagent's tool hooks report under the main
+session's ID and renew the same lease. The turn Claude starts when the last task
+finishes ends it. There is no subagent record: a subagent that never finishes
+lets the lease expire like any other silent turn. When only shells run, a detached
+hold, owned by the session's newest Stop, sends `session.heartbeat` every five minutes while a process
+group the commands lead, or a process writing to a shell's output file, lives. It
+sends `session.turn-ended` 30 seconds after they stop. After 2 hours it sends
+`session.turn-ended` and then, once that is sent, `session.waiting`, both with the
+message "A background command was still running after 2 hours". Each carries the Stop's time, so they
+renew the lease by receipt time, and any later report for the session, such as the
+turn a command's finish starts, makes the rest stale. A waiting session's latest
+message is kept with it as `Thread.sessionWaitingMessage`, and the dashboard shows
+it as the thread's state.
 
 `Thread.sessionTurnRunning` and `sessionWaiting` are optional current facts;
 `sessionActiveUntil` lets the pure planner enforce expiry even on an older read.
@@ -226,7 +235,8 @@ Expiry itself records no new activity. Session turn ends use the existing strict
 increasing `lastReplyAt` identity. Attention keeps its precedence: failed pylon or
 worker launch, parked, unread reply, working, waiting, then null. Seen still changes
 only `seenAt`. These rules also apply to Claude sessions opened by hand when they
-use the image's hooks.
+use the image's hooks. A Claude started inside another Claude session, or under a
+HOME other than the pylon user's, reports nothing.
 
 The hook captures `at`, the pylon's Unix-millisecond time, before throttling or
 spawning its detached sender. `nexus event --at MS` preserves that timestamp;

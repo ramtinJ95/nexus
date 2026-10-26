@@ -6,7 +6,7 @@ import { dirname, join } from "node:path";
 import {
   agentSetupManifest, formatAgentSetup, installedLayout, parseAgentSetup, type AgentSetup, type InstalledAgentSetup,
 } from "../images/pylon/agent-setup/manifest.ts";
-import { installedPackage, installMismatches } from "../images/pylon/agent-setup/install.ts";
+import { claudeHooks, installedPackage, installMismatches } from "../images/pylon/agent-setup/install.ts";
 import { httpsRemote, leaveOuts, parseLeaveOut, planAgentSetup, readPiSetup, type Capture, type LeaveOut, type MacSetup, type PluginFiles } from "./agent-setup.ts";
 import { pylonRecipeDir } from "./image-build.ts";
 
@@ -76,6 +76,12 @@ test("the installed layout names each plugin, skill directory, extension and pi 
     piExtensions: ["herdr-agent-state.ts", "pi-vim", "silly.ts"],
     piPackages: ["npm:@me/pi-ask@0.0.16", "packages/pi-viz"],
   });
+});
+
+test("Claude's notifications count as waiting only for a permission or input prompt, not its idle prompt", () => {
+  const [, , matcher] = claudeHooks.find(([hook]) => hook === "Notification")!;
+  const waits = ["permission_prompt", "idle_prompt", "elicitation_dialog", "auth_success"].filter((type) => new RegExp(matcher).test(type));
+  assert.deepEqual(waits, ["permission_prompt", "elicitation_dialog"]);
 });
 
 test("an install that differs from its layout is named item by item, and pi packages out of order are caught", () => {

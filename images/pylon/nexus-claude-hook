@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 import { createHash } from "node:crypto";
 import { mkdir, rm } from "node:fs/promises";
-import { homedir } from "node:os";
+import { homedir, userInfo } from "node:os";
 import { join } from "node:path";
-import { heartbeatDue, reportedKind } from "./nexus-heartbeat.ts";
+import { backgroundGroups, backgroundWatch, claimHold, claudeEnviron, heartbeatDue, holdSuperseded, holdTurnEnd, releaseHold, reportedKind, reportsIntoThread } from "./nexus-heartbeat.ts";
 import { claudeTurn, snapshotTurn } from "./nexus-turn.ts";
 import { spawn } from "node:child_process";
 
@@ -19,21 +19,53 @@ async function report() {
   const payload = JSON.parse(input);
   const { session_id: session } = payload;
   if (typeof session !== "string" || session.length > 200) return null;
-  const kind = reportedKind(process.argv[2], payload);
+  const { kind, shells } = reportedKind(process.argv[2], payload);
+  if (shells !== undefined) {
+    const groups = process.env.CLAUDE_PID === undefined ? [] : await backgroundGroups(Number(process.env.CLAUDE_PID));
+    send(process.execPath, [import.meta.filename, "hold", session, String(at), groups.map((g) => `${g.pgid}@${g.start}`).join(","), ...shells]);
+  }
   const dir = join(homedir(), ".nexus", "heartbeats");
-  const path = join(dir, createHash("sha256").update(session).digest("hex"));
+  const path = join(dir, sessionFile(session));
   if (kind === "session.heartbeat") {
     await mkdir(dir, { recursive: true });
     if (!await heartbeatDue(path)) return session;
   } else if (kind === "session.ended") {
     await rm(path, { force: true });
   }
-  const child = spawn("/usr/local/bin/nexus", ["event", kind, "--session", session, "--at", String(at)], { detached: true, stdio: "ignore" });
-  child.on("error", () => {});
-  child.unref();
+  send("/usr/local/bin/nexus", ["event", kind, "--session", session, "--at", String(at)]);
   return session;
 }
 
+function sessionFile(session) {
+  return createHash("sha256").update(session).digest("hex");
+}
+
+function send(command, args) {
+  const child = spawn(command, args, { detached: true, stdio: "ignore" });
+  child.on("error", () => {});
+  child.unref();
+}
+
+if (process.argv[2] === "hold") {
+  const [session, stamp, groups, ...shells] = process.argv.slice(3);
+  const dir = join(homedir(), ".nexus", "holds");
+  const owner = join(dir, sessionFile(session));
+  await mkdir(dir, { recursive: true });
+  if (!await claimHold(owner, Number(stamp), process.pid)) process.exit(0);
+  const superseded = () => holdSuperseded(owner, Number(stamp), process.pid);
+  await holdTurnEnd({
+    running: backgroundWatch(session, shells, groups.split(",").filter(Boolean).map((g) => ({ pgid: Number(g.split("@")[0]), start: Number(g.split("@")[1]) }))),
+    superseded,
+    report: (kind, message) => new Promise((sent) => {
+      const child = spawn("/usr/local/bin/nexus", ["event", kind, "--session", session, "--at", stamp, ...(message === undefined ? [] : ["--message", message])], { stdio: "ignore" });
+      child.on("error", () => sent());
+      child.on("exit", () => sent());
+    }),
+  });
+  await releaseHold(owner, Number(stamp), process.pid);
+  process.exit(0);
+}
+if (!reportsIntoThread(process.env, await claudeEnviron(process.env.CLAUDE_PID), userInfo().homedir)) process.exit(0);
 const session = await report().catch(() => null);
 // A turn whose session is unknown reports no start, so its snapshot is named for none, and the previous turn's
 // snapshot cannot pass for its own.

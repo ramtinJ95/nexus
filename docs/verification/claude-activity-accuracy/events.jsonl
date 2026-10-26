@@ -1,0 +1,12 @@
+{"time":1792983305018,"request":{"op":"event","kind":"session.turn-started","at":1792983304882,"session":"8ec342b7-d659-4c48-b640-d2e2909387fe"}}
+{"time":1792983305174,"request":{"op":"event","kind":"session.turn-started","at":1792983305060,"session":"c4acd325-36e1-4ece-8f18-dfb48e953869"}}
+{"time":1792983307299,"request":{"op":"event","kind":"session.heartbeat","at":1792983307119,"session":"8ec342b7-d659-4c48-b640-d2e2909387fe"}}
+{"time":1792983307491,"request":{"op":"event","kind":"session.heartbeat","at":1792983307408,"session":"c4acd325-36e1-4ece-8f18-dfb48e953869"}}
+{"time":1792983608727,"request":{"op":"event","kind":"session.heartbeat","at":1792983308370,"session":"c4acd325-36e1-4ece-8f18-dfb48e953869"}}
+{"time":1792983608765,"request":{"op":"event","kind":"session.heartbeat","at":1792983308252,"session":"8ec342b7-d659-4c48-b640-d2e2909387fe"}}
+{"time":1792983727204,"request":{"op":"event","kind":"session.turn-started","at":1792983727116,"session":"8ec342b7-d659-4c48-b640-d2e2909387fe"}}
+{"time":1792983728835,"request":{"op":"event","kind":"session.turn-ended","at":1792983728751,"session":"8ec342b7-d659-4c48-b640-d2e2909387fe"}}
+{"time":1792983758918,"request":{"op":"event","kind":"session.turn-ended","at":1792983308252,"session":"8ec342b7-d659-4c48-b640-d2e2909387fe"}}
+{"time":1792983908986,"request":{"op":"event","kind":"session.heartbeat","at":1792983308370,"session":"c4acd325-36e1-4ece-8f18-dfb48e953869"}}
+{"time":1792983996453,"request":{"op":"event","kind":"session.ended","at":1792983996399,"session":"c4acd325-36e1-4ece-8f18-dfb48e953869"}}
+{"time":1792984059109,"request":{"op":"event","kind":"session.turn-ended","at":1792983308370,"session":"c4acd325-36e1-4ece-8f18-dfb48e953869"}}

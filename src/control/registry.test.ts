@@ -785,7 +785,7 @@ test("a turn running before turn starts were recorded has no known start", async
   const db = new DatabaseSync(path);
   const version = db.prepare("PRAGMA user_version").get()!.user_version as number;
   db.exec(`UPDATE threads SET agent_turn_running = 1; ALTER TABLE threads DROP COLUMN placement; ALTER TABLE threads DROP COLUMN agent_turn_started_at; ALTER TABLE session_activity DROP COLUMN started_at; DROP TABLE reviews;
-    ALTER TABLE claude_workers DROP COLUMN turn_session; ALTER TABLE claude_workers DROP COLUMN turn_at; PRAGMA user_version = ${version - 4}`);
+    ALTER TABLE claude_workers DROP COLUMN turn_session; ALTER TABLE claude_workers DROP COLUMN turn_at; ALTER TABLE session_activity DROP COLUMN message; PRAGMA user_version = ${version - 5}`);
   db.close();
   const registry = openRegistry(path, () => now);
   t.after(() => registry.close());
@@ -798,16 +798,39 @@ test("a turn running before turn starts were recorded has no known start", async
 
 /**
  * Claude's hooks for one session, as the image's hook reports them: a Stop hook's input decides whether its turn
- * ended. Each report is stamped a second after the last.
+ * ended. Each report is stamped a second after the last. `hold` runs the hook's detached hold for the last Stop that
+ * listed background shells, on the test's clock, and calls `exited` once the command exits.
  */
 async function claudeHooks(registry: ReturnType<typeof seeded>, clock: { now: number }) {
-  const { reportedKind } = await import("../../images/pylon/nexus-heartbeat.ts");
+  const { holdTurnEnd, reportedKind } = await import("../../images/pylon/nexus-heartbeat.ts");
+  type Kind = import("../events.ts").PylonEvent["kind"];
   let sequence = 0;
-  return (kind: import("../events.ts").PylonEvent["kind"], input: { background_tasks?: unknown } = {}, at = (clock.now += 1000)) => registry.reportSession(node, {
-    sequence: ++sequence, time: clock.now, pylon: pylonId, event: { kind: reportedKind(kind, input) as typeof kind, session: "c1", at },
+  const held: number[] = [];
+  const send = (kind: Kind, at: number, message?: string) => registry.reportSession(node, {
+    sequence: ++sequence, time: clock.now, pylon: pylonId, event: { kind, session: "c1", at, ...(message === undefined ? {} : { message }) },
   });
+  const hook = (kind: Kind, input: { background_tasks?: unknown } = {}, at = (clock.now += 1000)) => {
+    const reported = reportedKind(kind, input);
+    if (reported.shells !== undefined) held.push(at);
+    send(reported.kind as Kind, at);
+  };
+  const hold = (exitsAfterMs: number, exited = () => {}) => {
+    const stop = held.pop()!;
+    const exit = clock.now + exitsAfterMs;
+    let gone = false;
+    return holdTurnEnd({ running: async () => clock.now < exit, superseded: async () => false, report: async (kind, message) => { send(kind, stop, message); } }, {
+      now: () => clock.now,
+      sleep: async (ms) => {
+        clock.now += ms;
+        registry.pruneSessions();
+        if (!gone && clock.now >= exit) { gone = true; exited(); }
+      },
+    });
+  };
+  return Object.assign(hook, { hold });
 }
 const backgroundSubagent = { id: "ac4719df54252d254", type: "subagent", status: "running", agent_type: "poteto-agent" };
+const backgroundShell = { id: "b6fh14jr7", type: "shell", status: "running", command: "npm test" };
 
 test("a main turn that ends while a background subagent runs stays working until the turn its finish starts ends", async (t) => {
   const { desiredPhase } = await import("../reconcile.ts");
@@ -872,6 +895,53 @@ test("a late background subagent report after its session ended changes nothing"
   hook("session.turn-ended", { background_tasks: [backgroundSubagent] }, start + 5000);
   assert.equal(registry.events().length, count, "stale and inactive reports have no side effects");
   assert.deepEqual(registry.thread(threadId), ended);
+});
+
+test("a main turn that ends while a background command runs stays working until the turn its finish starts ends", async (t) => {
+  const { desiredPhase } = await import("../reconcile.ts");
+  const clock = { now: 10_000_000 };
+  const registry = seeded(tempDb(), () => clock.now);
+  t.after(() => registry.close());
+  const hook = await claudeHooks(registry, clock);
+  const attention = () => registry.events("0", { kinds: ["attention.changed"] }).at(-1)!.payload.attention;
+  hook("session.turn-started");
+  hook("session.turn-ended", { background_tasks: [backgroundShell] });
+  await hook.hold(45 * 60_000, () => {
+    const running = registry.thread(threadId)!;
+    assert.equal(running.sessionTurnRunning, true, "heartbeats outlast the 30-minute lease while the command runs");
+    assert.equal(desiredPhase(running, clock.now), "running");
+    assert.equal(running.lastReplyAt, null);
+    hook("session.turn-started");
+  });
+  assert.equal(registry.thread(threadId)!.lastReplyAt, null, "the turn the command's finish started makes the held end stale");
+  assert.equal(attention(), "working");
+  hook("session.turn-ended", { background_tasks: [] });
+  assert.ok(registry.thread(threadId)!.lastReplyAt);
+  assert.equal(attention(), "reply");
+  assert.equal(registry.events("0", { kinds: ["session.turn-ended"] }).length, 1);
+});
+
+test("a background command still running at the cap, such as a dev server, ends its turn and waits, saying why", async (t) => {
+  const { backgroundShellCapMs, backgroundStillRunning } = await import("../../images/pylon/nexus-heartbeat.ts");
+  const clock = { now: 10_000_000 };
+  const registry = seeded(tempDb(), () => clock.now);
+  t.after(() => registry.close());
+  const hook = await claudeHooks(registry, clock);
+  const attention = () => registry.events("0", { kinds: ["attention.changed"] }).at(-1)!.payload.attention;
+  hook("session.turn-started");
+  hook("session.turn-ended", { background_tasks: [backgroundShell] });
+  const stop = clock.now;
+  await hook.hold(Infinity);
+  const ended = registry.thread(threadId)!;
+  assert.equal(ended.sessionTurnRunning, undefined);
+  assert.ok(ended.lastReplyAt! >= stop + backgroundShellCapMs && ended.lastReplyAt! < stop + backgroundShellCapMs + 2 * 60_000);
+  assert.equal(ended.sessionWaitingMessage, backgroundStillRunning);
+  assert.deepEqual(registry.events("0", { kinds: ["session.turn-ended"] }).map((e) => e.payload.message), [backgroundStillRunning]);
+  assert.equal(attention(), "reply");
+  registry.markSeen(threadId, false, clock.now);
+  assert.equal(attention(), "waiting", "once the reply is read, the thread still shows the command");
+  hook("session.turn-started");
+  assert.equal(registry.thread(threadId)!.sessionWaitingMessage, undefined, "the turn the command's finish starts clears it");
 });
 
 test("only the stalled worker's launch session restores normal reply and seen attention", (t) => {
