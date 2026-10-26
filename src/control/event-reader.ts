@@ -34,10 +34,15 @@ export function readEvents(port: number, path: string): EventReader {
   const response = once(req, "response").then(([r]) => {
     res = r as IncomingMessage;
     res.setEncoding("utf8");
-    let pending = "";
+    // A long event's chunks are joined once it is whole: rescanning all that is held on every chunk is quadratic, and
+    // under a loaded suite a 16 MiB view then outlasts next()'s wait.
+    let held: string[] = [];
     res.on("data", (chunk: string) => {
-      const blocks = (pending + chunk).split("\n\n");
-      pending = blocks.pop()!;
+      const whole = ((held.at(-1) ?? "").slice(-1) + chunk).includes("\n\n");
+      held.push(chunk);
+      if (!whole) return;
+      const blocks = held.join("").split("\n\n");
+      held = [blocks.pop()!];
       for (const block of blocks) {
         const data = block.split("\n").filter((line) => line.startsWith("data: ")).map((line) => line.slice(6));
         if (data.length > 0) queued.push(JSON.parse(data.join("\n")));
