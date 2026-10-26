@@ -1,0 +1,6 @@
+$ nexus image rollout img-c6e71ae15790 --wait
+nexus: rollout img-c6e71ae15790: failed: rj-nuc could not fetch img-c6e71ae15790: backend: no space left on device writing img-c6e71ae15790.partial.archive
+  infra-testbench: done
+  rj-firebat: done
+  rj-nuc: failed: backend: no space left on device writing img-c6e71ae15790.partial.archive
+exit 1

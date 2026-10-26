@@ -1,0 +1,4 @@
+$ nexus image build
+build img-c6e71ae15790: done
+  infra-testbench: done: recorded already
+exit 0
