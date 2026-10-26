@@ -1,0 +1,46 @@
+[
+  {
+    "template": "tpl-d921661d4d81",
+    "inputs": {
+      "key": {
+        "project": "acme",
+        "image": "img-0000000000cc",
+        "setupHash": "fe733e1ccd88a7f9780b55624772a5503e2c27bc901c1f67b5297008b79f6cdd"
+      },
+      "repo": {
+        "url": "file:///tmp/tmp.n6EEUig5y6/origin.git",
+        "branch": "main",
+        "commit": "63cf8f9c60367a74435c7067b9b29605dbfe2603"
+      },
+      "preSetup": null,
+      "allowedHosts": [],
+      "resources": {
+        "cpus": 2,
+        "memoryGiB": 4,
+        "diskGiB": 10
+      }
+    }
+  },
+  {
+    "template": "tpl-ad1dacf48b98",
+    "inputs": {
+      "key": {
+        "project": "acme",
+        "image": "img-0000000000cc",
+        "setupHash": "41cf585885d51cfb13c5e57cf7d9cd3eace732518c6cc98a04636efebcb3b1f1"
+      },
+      "repo": {
+        "url": "file:///tmp/tmp.n6EEUig5y6/origin.git",
+        "branch": "main",
+        "commit": "020122f684a54458e24f9c59ea0d9514d96490d4"
+      },
+      "preSetup": null,
+      "allowedHosts": [],
+      "resources": {
+        "cpus": 2,
+        "memoryGiB": 4,
+        "diskGiB": 10
+      }
+    }
+  }
+]

@@ -1,0 +1,5 @@
+th-1be1c906d597  active  -  pylon failed  acme  3s ago  A: first thread of the setup
+th-10c28b229f56  active  -  pylon failed  acme  2s ago  B: branch tip moved, same setup
+th-fd73300b9738  active  -  pylon failed  acme  2s ago  C: full first commit
+th-649e0b7bdbf2  active  -  pylon failed  acme  1s ago  D: short commit
+th-569f641a703a  active  -  pylon failed  acme  0s ago  E: setup changed

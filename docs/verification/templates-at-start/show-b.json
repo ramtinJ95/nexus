@@ -1,0 +1,55 @@
+{
+  "thread": {
+    "id": "th-10c28b229f56",
+    "title": "B: branch tip moved, same setup",
+    "project": "acme",
+    "pylonId": "pylon-th-10c28b229f56",
+    "status": "active",
+    "conversationId": "2",
+    "startedBy": "nLAPTOP",
+    "createdAt": 1792992993461,
+    "agentTurnRunning": false,
+    "lastAgentActivityAt": 0,
+    "lastHumanActivityAt": 1792992993461,
+    "seenAt": null,
+    "lastReplyAt": null,
+    "placement": {
+      "how": "default",
+      "node": "local-node"
+    },
+    "setup": {
+      "how": "template",
+      "template": "tpl-d921661d4d81",
+      "builtAt": 1792992992894,
+      "commit": "abd2ab748291c0c002d83c4b4db48b3c3b8c27ca"
+    }
+  },
+  "attention": "failed",
+  "seenAt": null,
+  "lastReplyAt": null,
+  "desired": "running",
+  "pylon": {
+    "grantsOutdated": false,
+    "id": "pylon-th-10c28b229f56",
+    "node": "local-node",
+    "failed": "last job failed with invalid, which is not retryable: file:///tmp/tmp.n6EEUig5y6/origin.git is neither an SSH nor an HTTPS git URL",
+    "observedAt": "2026-10-26T05:36:33.502Z",
+    "actualState": "failed",
+    "retryRefused": null
+  },
+  "sessions": [],
+  "previews": [],
+  "ports": [],
+  "outputs": [],
+  "prWatch": {
+    "enabled": false,
+    "stopped": false,
+    "error": null
+  },
+  "pullRequests": [],
+  "review": null,
+  "attach": "herdr --session nexus",
+  "agent": {
+    "parkedTasks": 0
+  }
+}

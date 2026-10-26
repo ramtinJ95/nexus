@@ -1,0 +1,25 @@
+{
+  "id": "th-fd73300b9738",
+  "title": "C: full first commit",
+  "project": "acme",
+  "pylonId": "pylon-th-fd73300b9738",
+  "status": "active",
+  "conversationId": "3",
+  "startedBy": "nLAPTOP",
+  "createdAt": 1792992994033,
+  "agentTurnRunning": false,
+  "lastAgentActivityAt": 0,
+  "lastHumanActivityAt": 1792992994033,
+  "seenAt": null,
+  "lastReplyAt": null,
+  "placement": {
+    "how": "default",
+    "node": "local-node"
+  },
+  "setup": {
+    "how": "template",
+    "template": "tpl-d921661d4d81",
+    "builtAt": 1792992992894,
+    "commit": "63cf8f9c60367a74435c7067b9b29605dbfe2603"
+  }
+}

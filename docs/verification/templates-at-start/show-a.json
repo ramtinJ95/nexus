@@ -1,0 +1,54 @@
+{
+  "thread": {
+    "id": "th-1be1c906d597",
+    "title": "A: first thread of the setup",
+    "project": "acme",
+    "pylonId": "pylon-th-1be1c906d597",
+    "status": "active",
+    "conversationId": "1",
+    "startedBy": "nLAPTOP",
+    "createdAt": 1792992992817,
+    "agentTurnRunning": false,
+    "lastAgentActivityAt": 0,
+    "lastHumanActivityAt": 1792992992817,
+    "seenAt": null,
+    "lastReplyAt": null,
+    "placement": {
+      "how": "default",
+      "node": "local-node"
+    },
+    "setup": {
+      "how": "fresh",
+      "reason": "no template of this setup is on local-node yet",
+      "building": "tpl-d921661d4d81"
+    }
+  },
+  "attention": "failed",
+  "seenAt": null,
+  "lastReplyAt": null,
+  "desired": "running",
+  "pylon": {
+    "grantsOutdated": false,
+    "id": "pylon-th-1be1c906d597",
+    "node": "local-node",
+    "failed": "last job failed with invalid, which is not retryable: file:///tmp/tmp.n6EEUig5y6/origin.git is neither an SSH nor an HTTPS git URL",
+    "observedAt": "2026-10-26T05:36:32.888Z",
+    "actualState": "failed",
+    "retryRefused": null
+  },
+  "sessions": [],
+  "previews": [],
+  "ports": [],
+  "outputs": [],
+  "prWatch": {
+    "enabled": false,
+    "stopped": false,
+    "error": null
+  },
+  "pullRequests": [],
+  "review": null,
+  "attach": "herdr --session nexus",
+  "agent": {
+    "parkedTasks": 0
+  }
+}

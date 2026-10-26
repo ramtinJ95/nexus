@@ -1,0 +1,9 @@
+th-1be1c906d597  A: first thread of the setup
+project: acme
+attention: failed
+status: active
+pylon: pylon-th-1be1c906d597 on local-node, failed, observed 0s ago
+placement: local-node, the project's default node
+setup: fresh boot runs .nexus/setup, because no template of this setup is on local-node yet; tpl-d921661d4d81 builds for the next thread
+failed: last job failed with invalid, which is not retryable: file:///tmp/tmp.n6EEUig5y6/origin.git is neither an SSH nor an HTTPS git URL
+PR watch: off (no control-plane GitHub token configured)

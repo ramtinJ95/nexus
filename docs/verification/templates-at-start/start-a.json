@@ -1,0 +1,24 @@
+{
+  "id": "th-1be1c906d597",
+  "title": "A: first thread of the setup",
+  "project": "acme",
+  "pylonId": "pylon-th-1be1c906d597",
+  "status": "active",
+  "conversationId": "1",
+  "startedBy": "nLAPTOP",
+  "createdAt": 1792992992817,
+  "agentTurnRunning": false,
+  "lastAgentActivityAt": 0,
+  "lastHumanActivityAt": 1792992992817,
+  "seenAt": null,
+  "lastReplyAt": null,
+  "placement": {
+    "how": "default",
+    "node": "local-node"
+  },
+  "setup": {
+    "how": "fresh",
+    "reason": "no template of this setup is on local-node yet",
+    "building": "tpl-d921661d4d81"
+  }
+}

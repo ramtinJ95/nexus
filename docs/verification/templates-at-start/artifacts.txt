@@ -1,0 +1,20 @@
+/tmp/nexus-templates/artifacts/tpl-ad1dacf48b98:
+total 8
+-rw-r--r-- 1 user user  50 Oct 26 05:36 disk.qcow2
+-rw-r--r-- 1 user user 364 Oct 26 05:36 template.json
+
+/tmp/nexus-templates/artifacts/tpl-d921661d4d81:
+total 8
+-rw-r--r-- 1 user user  50 Oct 26 05:36 disk.qcow2
+-rw-r--r-- 1 user user 364 Oct 26 05:36 template.json
+{
+  "id": "tpl-d921661d4d81",
+  "key": {
+    "project": "acme",
+    "image": "img-0000000000cc",
+    "setupHash": "fe733e1ccd88a7f9780b55624772a5503e2c27bc901c1f67b5297008b79f6cdd"
+  },
+  "commit": "63cf8f9c60367a74435c7067b9b29605dbfe2603",
+  "builtAt": "2026-10-26T05:36:32.848Z",
+  "sha256": "ccb92fa4a8fdb859598b2a96fb7ee589211afff9357e17cce0593fe8f7973a4e"
+}

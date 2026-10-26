@@ -1,0 +1,9 @@
+th-fd73300b9738  C: full first commit
+project: acme
+attention: failed
+status: active
+pylon: pylon-th-fd73300b9738 on local-node, failed, observed 0s ago
+placement: local-node, the project's default node
+setup: from template tpl-d921661d4d81, built 1s ago, then checked out 63cf8f9c6036
+failed: last job failed with invalid, which is not retryable: file:///tmp/tmp.n6EEUig5y6/origin.git is neither an SSH nor an HTTPS git URL
+PR watch: off (no control-plane GitHub token configured)
