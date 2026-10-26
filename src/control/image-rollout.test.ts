@@ -101,8 +101,8 @@ function setup(t: TestContext, names: readonly NodeName[]) {
     registry.close();
   });
   /** A worker, as a control plane starts one. Its interval never fires within a test, so each pass is one the test asks for. */
-  function start(): ImageRollout {
-    const worker = startImageRollout({ registry, probes: nodes.probes, buildNode: testbench, recipe: async () => recipe, release, intervalMs: 600_000, log: (line) => logged.push(line) });
+  function start(runs = release): ImageRollout {
+    const worker = startImageRollout({ registry, probes: nodes.probes, buildNode: testbench, recipe: async () => recipe, release: runs, intervalMs: 600_000, log: (line) => logged.push(line) });
     workers.push(worker);
     return worker;
   }
@@ -145,6 +145,23 @@ test("a build sends build-image with the recipe to the build node and records th
   assert.deepEqual([again.state, stepsOf(again)], ["done", [[testbench, "done", "recorded already"]]]);
   await worker.wake();
   assert.equal(s.nodes.submitted.length, 1, "an unchanged recipe sends no job");
+});
+
+test("a build that a control plane of another release finishes records the release that sent it", async (t) => {
+  const s = setup(t, [firebat, testbench]);
+  for (const node of [firebat, testbench]) s.nodes.observe(node);
+  const before = s.start();
+  await before.build(laptop);
+  await before.wake();
+  await before.close();
+
+  const deployed = "d".repeat(40);
+  const after = s.start(deployed);
+  s.nodes.finish(testbench);
+  await after.wake();
+  assert.equal(s.registry.imageOperation()?.state, "done");
+  assert.equal(s.registry.image(imageIdOf(recipe))?.release, release, `not ${deployed}, the release that only finished it`);
+  assert.equal(s.nodes.submitted.length, 1);
 });
 
 test("a rollout sends fetch-artifact with the recorded sha256 from a holder to each online node lacking the image, and makes it current only once the last one holds it", async (t) => {

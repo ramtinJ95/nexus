@@ -343,8 +343,10 @@ The `image` commands build the pylon image and make it current, as [the deploy g
 The control plane runs one image operation at a time. It is stored in the registry and advanced every 2 seconds, so it carries on across a control plane restart:
 
 ```ts
-type ImageOperation = {
-  kind: "build" | "rollout";
+type ImageOperation = (
+  | { kind: "build"; release: string | null }   // the release whose recipe the build sent, which it records
+  | { kind: "rollout" }
+) & {
   image: string;             // img-<12 hex>
   requestedBy: string;       // the caller's stable tailnet node ID
   requestedAt: number;       // Unix milliseconds

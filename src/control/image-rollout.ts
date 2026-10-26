@@ -30,9 +30,11 @@ export interface ImageStep {
 
 type Outcome = { state: "running" } | { state: "done"; finishedAt: number } | { state: "failed"; finishedAt: number; reason: string };
 
-/** A build has one step, on the image build node. A rollout has one step per registry node. */
-export type ImageOperation = {
-  kind: "build" | "rollout";
+/**
+ * A build has one step, on the image build node, and keeps the release whose recipe it sent, which a control plane
+ * deployed while it runs must not record in its place. A rollout has one step per registry node.
+ */
+export type ImageOperation = ({ kind: "build"; release: string | null } | { kind: "rollout" }) & {
   image: ImageId;
   requestedBy: TailnetNodeId;
   requestedAt: number;
@@ -180,7 +182,7 @@ export function startImageRollout(options: ImageRolloutOptions): ImageRollout {
     const manifest = await probes.get(node)!.manifest(operation.image);
     if (manifest === null) return `${node} lists ${operation.image} but serves no manifest of it, as a probe older than this control plane does. Upgrade it with nexus deploy, then build again, which finishes at once`;
     if (manifest.id !== operation.image) return `${node} answered the manifest of ${manifest.id} for ${operation.image}`;
-    registry.saveImage(manifest as ImageManifest, options.release);
+    registry.saveImage(manifest as ImageManifest, operation.release);
     return null;
   }
 
@@ -188,8 +190,8 @@ export function startImageRollout(options: ImageRolloutOptions): ImageRollout {
     const operation = registry.imageOperation();
     if (operation?.state !== "running") return;
     const steps = [...operation.steps];
-    const { kind, image, requestedBy, requestedAt } = operation;
-    const save = (outcome: Outcome) => registry.saveImageOperation({ kind, image, requestedBy, requestedAt, steps, ...outcome });
+    const { kind, image } = operation;
+    const save = (outcome: Outcome) => registry.saveImageOperation({ ...operation, steps, ...outcome } as ImageOperation);
     const what = `image ${kind} of ${image}`;
     const unexpected = (err: unknown) => { if ((err as ProbeError).code !== "unreachable") log(`${what}: ${(err as Error).message}`); };
     const end = (reason: string | null) => {
@@ -245,12 +247,12 @@ export function startImageRollout(options: ImageRolloutOptions): ImageRollout {
       const node = options.buildNode;
       if (registry.image(image) !== undefined) {
         const now = Date.now();
-        return start({ kind: "build", image, requestedBy: caller, requestedAt: now, steps: [{ node, state: "done", job: null, reason: "recorded already" }], state: "done", finishedAt: now });
+        return start({ kind: "build", release: options.release, image, requestedBy: caller, requestedAt: now, steps: [{ node, state: "done", job: null, reason: "recorded already" }], state: "done", finishedAt: now });
       }
       const record = registry.node(node);
       if (record === undefined) throw new HttpError(409, `the image build node ${node} is not a node of this control plane`);
       if (!online(record)) throw new HttpError(409, `the image build node ${node} is offline`);
-      return start({ kind: "build", image, requestedBy: caller, requestedAt: Date.now(), steps: [{ node, state: "pending", job: null, reason: null }], state: "running" });
+      return start({ kind: "build", release: options.release, image, requestedBy: caller, requestedAt: Date.now(), steps: [{ node, state: "pending", job: null, reason: null }], state: "running" });
     },
     rollout,
     rollback(caller) {
