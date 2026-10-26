@@ -9,7 +9,7 @@ import { request, type IncomingMessage } from "node:http";
 export interface EventReader {
   /** The response, once its headers are in. */
   response: Promise<IncomingMessage>;
-  /** The next event's data, waiting up to 5 s for it. */
+  /** The next event's data. The wait gives up after 60 s, which only ends a hang: a loaded suite can take seconds. */
   next(): Promise<any>;
   /**
    * Settles with "end" when the server ends the stream, or "dropped" when the connection closes before its end. A
@@ -57,7 +57,7 @@ export function readEvents(port: number, path: string): EventReader {
   return {
     response,
     async next() {
-      const deadline = Date.now() + 5_000;
+      const deadline = Date.now() + 60_000;
       while (queued.length === 0) {
         assert.ok(Date.now() < deadline, `no event on ${path}`);
         await new Promise<void>((resolve) => {
