@@ -61,7 +61,7 @@ The probe reads only running pylons, at most once a minute per boot across snaps
 
 The registry stores each thread's nullable `seenAt` and `lastReplyAt` as Unix milliseconds, added by migration. A turn ending records `lastReplyAt`; streaming and parked tasks do not. Old rows start with null timestamps. If recovery finds a previously running turn ended, its reply is dated at recovery.
 
-The API derives `attention` in order: failed pylon, `decision` (the thread's review ended for the person, as [review records](#review-records) say), parked tasks, unread reply (`lastReplyAt > seenAt`, with null seen treated as unread), running harness or session turn, waiting session, then null. Parked tasks are tracked for every conversation at harness recovery, independently of client watches. Both the thread list and detail report this value and both timestamps.
+The API derives `attention` in order: failed pylon, `decision` (the thread's review ended for the person, as [review records](#review-records) say), parked tasks, `limited` (the Claude worker's session stopped on its usage limit, as [Claude worker conversations](#claude-worker-conversations) say), unread reply (`lastReplyAt > seenAt`, with null seen treated as unread), running harness or session turn, waiting session, then null. Parked tasks are tracked for every conversation at harness recovery, independently of client watches. Both the thread list and detail report this value and both timestamps.
 
 Each recorded reply timestamp is strictly greater than the preceding reply and seen marker, nudged forward by a millisecond if needed, so reply identities and unread ordering survive same-millisecond events and clock corrections.
 
@@ -165,6 +165,7 @@ past matching records they have not consumed.
 | `pull-request.feedback` | New batched GitHub feedback; `requestId` |
 | `release.changed` | Desired release (`desired`) or changed component report |
 | `review.changed` | A review started or changed phase or round; `review`, `reviewer`, `phase` and `round` |
+| `usage-limit.continued` | The control plane typed its continue into a Claude worker whose usage limit reset; `session`, `stoppedAt`, `resetsAt` and `requestId` |
 
 Only the five `session.*` kinds may come from a pylon. The strict boundary schema
 rejects extra fields, including a thread or project supplied by the guest. Session
@@ -255,7 +256,7 @@ start, and none is invented.
 After expiry or an ended/waiting turn, normal agent and human idle rules apply.
 Expiry itself records no new activity. Session turn ends use the existing strictly
 increasing `lastReplyAt` identity. Attention keeps its precedence: failed pylon or
-worker launch, parked, unread reply, working, waiting, then null. Seen still changes
+worker launch, decision, parked, limited, unread reply, working, waiting, then null. Seen still changes
 only `seenAt`. These rules also apply to Claude sessions opened by hand when they
 use the image's hooks. A Claude started inside another Claude session, or under a
 HOME other than the pylon user's, reports nothing.
@@ -327,7 +328,7 @@ record never changes an earlier entry:
 | `result` | `toolUseId`, `output`, `isError` | A `tool_result`, or a `!` command's output. A background launch's metadata reads "Started in the background" |
 | `task` | `toolUseId`, `status`, `summary`, `result` | A `<task-notification>`: a background subagent or shell finished. `result` is a subagent's answer |
 | `queue` | `op`, `text` | A `queue-operation`: a message typed during a turn joined or left Claude's queue |
-| `notice` | `tone`, `text` | An interruption, a compaction, a model error or a local command's output |
+| `notice` | `tone`, `text`, optional `usageLimit` | An interruption, a compaction, a model error, a local command's output, or Claude Code's own `system/informational` message. `usageLimit` (`resetsAt`, Unix ms or null) marks the error an assistant record with `apiError: "usage_limit_reached"` gives, with `apiErrorParams.rate_limit_info.resetsAt` |
 | `turn` | `durationMs` | `system/turn_duration` |
 | `pull-request` | `number`, `url`, `repository` | A `pr-link`: Claude opened a pull request. Claude Code writes it again each time it saves the session's metadata, so clients show the first entry for each `url`. `url` is always an https URL |
 | `record` | `type`, `summary` | Any record shape the parser does not know, a malformed line, or a record over 512 KiB, which is skipped |
@@ -349,6 +350,22 @@ changes nothing. A new session ID, a file smaller than the cursor, or bytes befo
 cursor that no longer match `before_hash` replace the stored entries. Archiving keeps them, and deleting the thread removes them.
 `ClaudeConversation.working` is `Thread.sessionTurnRunning`.
 
+A Claude worker's session stopped on its usage limit while the newest of the newest 16
+stored entries that is not bookkeeping is a `notice` with `usageLimit`. Turn
+durations, queue operations, pull requests, `record` entries and info notices are
+bookkeeping. `Thread.usageLimit` and `ClaudeConversation.usageLimit` are that stop
+(`stoppedAt`, the record's time, and `resetsAt`), derived on each read of the thread
+rather than stored, and only while no session turn runs and no turn started after the
+stop. The latest turn start is `claude_workers.turn_at`, the hook's time by the pylon's
+clock, as the record's time is, so a turn's end that arrives before the read of its
+prompt does not bring the stop back. Nothing else marks the stop,
+so it holds whichever of the turn's end and the transcript's read comes first, and the
+next prompt, turn start or Claude Code's own `auto-continuation` prompt ends it. Claude
+Code reports the turn's end through its StopFailure hook, not Stop. With an image that
+has no StopFailure hook, a read that ends on the stop ends the worker session's working
+lease, as `session.turn-ended` would, when the session's last turn start or heartbeat is
+no later than the stop, both by the pylon's clock. Such an end records no reply.
+
 The control plane reads a transcript only while the node's last observation reports
 the pylon running. The read is one raw pipe through the probe, taking at most 512 KiB
 and 20 seconds, and a refresh takes at most 16 reads. It never wakes the pylon and is
@@ -365,5 +382,5 @@ means the probe's answer never came, so a repeat asks the probe with
 `send-claude-outcome` and stores what it answers, as for the first answer. If the probe
 says the send failed partway, or no longer knows it, the row stays `sending` and the
 repeat is refused with a 422. A thread keeps every request ID until the thread is
-deleted.
+deleted. The control plane's continue after a usage limit uses `usage-limit:<session>:<stoppedAt>`, so each stop gets at most one.
 

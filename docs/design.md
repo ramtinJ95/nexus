@@ -39,11 +39,11 @@ A Claude Code session is a session inside a thread, not a separate kind of threa
 
 ## Shared attention and dashboard notifications
 
-The control plane owns attention and the shared seen marker, rather than each client keeping its own interpretation. List rows and detail expose failed, parked, unread reply, working or null, in that order. The registry persists reply-end and seen timestamps. Marking seen or unread is not human activity and never wakes a paused pylon; a dashboard visit remains the separate human-activity action described below. The dashboard marks seen while the conversation is visible and focused, at most once every three seconds. It sends a reply watermark captured before reading the rendered conversation, never a newer timestamp from attention polling. A streamed conversation is certified against a matching HTML snapshot without replacing the stream's patch structure; while disconnected, only a rendered HTML refresh advances the watermark. The API caps the mark at that watermark. Reply timestamps advance monotonically past seen markers, including when both events happen in the same millisecond.
+The control plane owns attention and the shared seen marker, rather than each client keeping its own interpretation. List rows and detail expose failed, decision, parked, limited, unread reply, working, waiting or null, in that order. The registry persists reply-end and seen timestamps. Marking seen or unread is not human activity and never wakes a paused pylon; a dashboard visit remains the separate human-activity action described below. The dashboard marks seen while the conversation is visible and focused, at most once every three seconds. It sends a reply watermark captured before reading the rendered conversation, never a newer timestamp from attention polling. A streamed conversation is certified against a matching HTML snapshot without replacing the stream's patch structure; while disconnected, only a rendered HTML refresh advances the watermark. The API caps the mark at that watermark. Reply timestamps advance monotonically past seen markers, including when both events happen in the same millisecond.
 
-The dashboard uses attention in the sidebar and home table. It silently baselines threads on first load, notifies immediately for a new failed or parked state, and delays a new reply by two seconds, cancelling if work restarts and scheduling again for the follow-up’s final reply identity even if attention never stopped being reply. A focused dashboard shows a toast with Open for another thread; an unfocused one uses a system notification only in a secure context with permission. Permission is requested only by clicking its control. On plain HTTP, background system notifications are unavailable; toasts, favicon and title counts still work. System notifications use the optional direct HTTPS listener on 7443; see the deployment guide for certificate provisioning. Each attention list read and seen update has a ten-second deadline, including its response body, so a stalled connection releases the poll lock and the next poll retries. The badge counts failed, parked and reply threads, including archived ones, and displays `9+` above nine.
+The dashboard uses attention in the sidebar and home table. It silently baselines threads on first load, notifies immediately for a new failed, decision, parked or limited state, and delays a new reply by two seconds, cancelling if work restarts and scheduling again for the follow-up’s final reply identity even if attention never stopped being reply. A focused dashboard shows a toast with Open for another thread; an unfocused one uses a system notification only in a secure context with permission. Permission is requested only by clicking its control. On plain HTTP, background system notifications are unavailable; toasts, favicon and title counts still work. System notifications use the optional direct HTTPS listener on 7443; see the deployment guide for certificate provisioning. Each attention list read and seen update has a ten-second deadline, including its response body, so a stalled connection releases the poll lock and the next poll retries. The badge counts failed, decision, parked, limited and reply threads, including archived ones, and displays `9+` above nine.
 
-Rows of open threads whose attention is working or null are dimmed in the sidebar and home table, so the eye goes to the threads that need a fix, a review or a reply: failed, parked, reply and waiting stay bright. Waiting ranks below working in the order, yet it is the one of the two that is blocked on the person. The open thread's row never dims, and a dimmed row comes back to full strength on hover or focus. A thread whose harness or session turn runs shows `working 1m 03s` in its row, its home-table and inspector Agent field and the run bar, counted from the registry's `workingSince`. The page ticks it every second from that one timestamp, so the clock makes no requests of its own. A turn that began before the registry recorded starts shows `working` without a clock.
+Rows of open threads whose attention is working or null are dimmed in the sidebar and home table, so the eye goes to the threads that need a fix, a review or a reply: failed, decision, parked, limited, reply and waiting stay bright. Waiting ranks below working in the order, yet it is the one of the two that is blocked on the person. The open thread's row never dims, and a dimmed row comes back to full strength on hover or focus. A thread whose harness or session turn runs shows `working 1m 03s` in its row, its home-table and inspector Agent field and the run bar, counted from the registry's `workingSince`. The page ticks it every second from that one timestamp, so the clock makes no requests of its own. A turn that began before the registry recorded starts shows `working` without a clock.
 
 A conversation folds each run of consecutive tool calls between two messages into one line that says what the calls did, such as "Ran 3 commands, changed 2 files", and opens to the individual calls. Calls are counted by what they do rather than which tool made them, after t3code's tool-group summaries: an edit and a write to the same file are one changed file. Commands, changes and subagents come first, then reads and searches, and past three phrases the rest are counted as other tools. A notice, such as an interrupted turn or a model error, stays visible between two folds. The harness conversation and a Claude worker's transcript fold the same way.
 
@@ -137,6 +137,7 @@ A persistent drain lease blocks API and background PR-watch turn entry, and coun
 
 | Date | Decision |
 |---|---|
+| 2026-10-26 | A Claude worker that stops on its usage limit gets its own attention, `limited`, rather than `waiting` with a message: it outranks the reply its turn end records, seen does not clear it, and the transcript's error record, with the reset time Claude Code gives, is the evidence. The control plane types a continue after the reset only when its config opts in, once per stop and never into an archived thread, and three minutes after the reset, after Claude Code's own continue |
 | 2026-10-26 | Hooks in a pylon write session events to a bounded outbox on the pylon's disk and return, and one sender at a time delivers it to the probe in order, deleting an event only once the probe has journaled it. A full outbox drops its oldest event, and an event a day old is dropped unsent. Each event carries an ID the hook gave it, and control ignores a report that repeats an ID it applied at its session's latest stamp. The sender also starts at every boot, and holds an event until hooks stamped earlier have had their two seconds, so delivery follows the stamps. The probe's journal is kept, because it covers the other hop, a control plane that is not following the probe |
 | 2026-10-26 | A node's committed capacity counts the CPUs and memory of VMs that are up and the disk of every pylon, paused or not. `start --node auto` is opt-in. It ranks nodes by memory left after the pylon, then CPUs, then disk, refuses a node where memory or disk does not fit, and lets CPUs be oversubscribed |
 | 2026-10-26 | A Claude turn that ends with only background commands running stays working while their process groups live, for up to 2 hours, until the turn their finish starts. One still running after 2 hours ends the turn and leaves the session waiting with a message that says so. Only Claude's permission and input prompts count as waiting, filtered by the image's hook matcher, not by the control plane. A Claude started inside another Claude session, or under another HOME, does not report into the thread |
@@ -440,3 +441,44 @@ mode or retry of a Claude worker thread's message reaches the harness. Sending i
 human activity: it wakes a paused pylon, the wake relaunches the session before the
 pylon counts as running, and clients retry the 409 until then with the same request
 ID. Captures are in `docs/verification/claude-thread-streaming/`.
+
+### Usage-limit stops (0.21.0)
+
+Claude workers share the project's Claude subscription, so when it runs out, every
+worker stops mid-task at once. Claude Code ends each turn with a synthetic assistant
+record, `isApiErrorMessage` with `apiError: "usage_limit_reached"` and the reset time
+in `apiErrorParams.rate_limit_info.resetsAt`, whose text reads `You've hit your session
+limit · resets 5am (UTC)`. It runs the StopFailure hook rather than Stop, so the image
+reports that hook as `session.turn-ended` too. The parser marks the record's notice with
+`usageLimit` and its reset. The text is Claude Code's rendering of that same field,
+so Nexus never parses it.
+
+A stop is a state of the session rather than something to read, so it is its own
+attention, `limited`, rather than `waiting` with a message. `waiting` ranks below
+`reply`, which the stop's turn end records, so it would never show. It also means
+Claude asks the person something, and a stop asks for nothing until the reset. And a
+reply clears when it is seen, which a stop must not. The registry derives the stop on
+each read of the thread from the newest transcript entries and the session's state,
+rather than storing a flag, so it holds whichever of the turn's end and the
+transcript's read arrives first, and the next turn ends it, whoever starts it. An
+image without the StopFailure hook never reports the turn's end. The stop record then
+ends the session's working lease itself, so such a thread does not show `working`
+for 30 minutes.
+
+Other API errors stay plain error notices, and the thread shows an unread reply. Claude
+Code has already retried an overload or a server error several times before it gives
+up, a 429 that is not the usage limit passes in seconds, and neither says when the API
+will take a request again. So the person can send "continue" as soon as they read it,
+and there is no time to wait for or to show.
+
+Claude Code continues a session it still runs on its own, about 90 seconds after the
+reset. That timer lives in the Claude process, so a pylon that paused while the
+worker was idle loses it. `nexus send <thread> continue` after the reset always works.
+The control plane can also send it, when `resumeAfterUsageLimit` is set in its
+config. It is off by default, because it spends the subscription while the person
+may be away. Three minutes after the reset, a pass every 30 seconds types one
+attributed message into each stopped active or idle thread whose session has not
+continued. Its request ID names the session and the stop, so a restart or a second
+pass never types it again. It is never typed into an archived thread, so it never
+wakes a pylon the person archived. Each message typed appends `usage-limit.continued`
+to the event stream. Captures are in `docs/verification/usage-limit-stops/`.
