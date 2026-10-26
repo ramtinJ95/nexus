@@ -13,8 +13,8 @@ import type { JobEnvelope, NodeName } from "./protocol.ts";
 /** img-<sha256 of the recipe>[:12]. The same inputs give the same ID, so a rebuild of unchanged inputs is a no-op. */
 export type ImageId = `img-${string}`;
 /**
- * tpl-<sha256 of the TemplateKey and the build's start time in ms>[:12]. An ID names one build, not one key:
- * the same key built twice gives two IDs, so a node's bytes under one ID never change.
+ * tpl-<sha256 of the TemplateKey, the node that builds it and the build's start time in ms>[:12]. An ID names one build,
+ * not one key: the same key built twice, or on two nodes at once, gives two IDs, so a node's bytes under one ID never change.
  */
 export type TemplateId = `tpl-${string}`;
 /** ckpt-<thread id>-<n>, minted by the control plane for each pause. */
@@ -159,8 +159,8 @@ export interface ProjectMirror {
 export function setupHashOf(project: Project, inputs: SetupInputs): string {
   return sha256Of({ setupBlob: inputs.setupBlob, preSetup: project.preSetup, allowedHosts: effectiveAllowedHosts(project) });
 }
-export function templateIdOf(key: TemplateKey, startedAt: number): TemplateId {
-  return `tpl-${sha256Of({ project: key.project, image: key.image, setupHash: key.setupHash, startedAt }).slice(0, 12)}`;
+export function templateIdOf(key: TemplateKey, node: NodeName, startedAt: number): TemplateId {
+  return `tpl-${sha256Of({ project: key.project, image: key.image, setupHash: key.setupHash, node, startedAt }).slice(0, 12)}`;
 }
 
 /** Hex sha256 of canonical JSON: object keys sorted, so the same value always gives the same hash. */
@@ -239,7 +239,7 @@ export function chooseTemplate(project: RemoteProject, key: TemplateKey, checkou
   if (failed !== undefined) return { kind: "fresh", reason: `the build of template ${failed.id} failed on ${failed.on}: ${failed.logTail}` };
   return {
     kind: "build",
-    template: templateIdOf(key, now),
+    template: templateIdOf(key, targetNode, now),
     on: targetNode,
     inputs: {
       key,

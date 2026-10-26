@@ -6,8 +6,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { tickTemplateBuild } from "./template-builds.ts";
 import { openRegistry, type Registry } from "./registry.ts";
-import type { BuildingTemplate, ImageId, TemplateKey, TemplateRecord } from "../images.ts";
-import type { ProjectId } from "../project.ts";
+import { chooseTemplate, type BuildingTemplate, type ImageId, type TemplateKey, type TemplateRecord } from "../images.ts";
+import type { ProjectId, RemoteProject } from "../project.ts";
 import type { JobEnvelope, JobErrorCode, JobId, JobStatus, NodeName, NodeObservation, ProbeClient, SubmitReply } from "../protocol.ts";
 
 const node = "rj-firebat" as NodeName;
@@ -182,4 +182,25 @@ test("nothing is sent while the node is offline", async (t) => {
   const s = setup(t);
   await s.pass(null);
   assert.deepEqual([s.fake.sent.length, s.stored()], [0, [building]]);
+});
+
+test("builds of one setup chosen on two nodes in the same millisecond are two records, and one's end leaves the other", async (t) => {
+  const s = setup(t);
+  const peer = "infra-testbench" as NodeName;
+  const remote: RemoteProject = { id: project, repoUrl: building.inputs.repo.url, defaultBranch: "main", defaultNode: node, resources: building.inputs.resources, allowedHosts: [], secrets: [], logins: [], preSetup: null };
+  const other: TemplateKey = { ...key, setupHash: "o".repeat(64) };
+  const now = Date.now();
+  const builds = [node, peer].map((on) => {
+    const choice = chooseTemplate(remote, other, { branch: "main", commit }, s.registry.templates(project), on, [], now);
+    assert.equal(choice.kind, "build", `a build is chosen on ${on}, which holds no template`);
+    if (choice.kind !== "build") throw new Error("unreachable");
+    const record: BuildingTemplate = { id: choice.template, key: other, state: "building", on: choice.on, inputs: choice.inputs, submitted: null };
+    s.registry.saveTemplate(record);
+    return record;
+  });
+  assert.notEqual(builds[0]!.id, builds[1]!.id);
+  assert.deepEqual(s.registry.buildingTemplates(node).filter((b) => b.key.setupHash === other.setupHash), [builds[0]]);
+  assert.deepEqual(s.registry.buildingTemplates(peer), [builds[1]]);
+  s.registry.deleteTemplate(builds[0]!.id);
+  assert.deepEqual(s.registry.buildingTemplates(peer), [builds[1]], "a retryable failure on one node forgets only that node's build");
 });

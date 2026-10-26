@@ -65,13 +65,14 @@ test("setupHashOf changes with .nexus/setup, preSetup and the effective allowlis
 const image: ImageId = "img-aaaaaaaaaaaa";
 const oldImage: ImageId = "img-000000000000";
 const key: TemplateKey = { project: project.id, image, setupHash: setupHashOf(project, inputs) };
-const template = templateIdOf(key, now);
+const template = templateIdOf(key, node, now);
 
-test("templateIdOf names one build: its key and its start time", () => {
+test("templateIdOf names one build: its key, its node and its start time", () => {
   assert.match(template, /^tpl-[0-9a-f]{12}$/);
-  assert.equal(templateIdOf({ setupHash: key.setupHash, image, project: key.project }, now), template);
-  assert.notEqual(templateIdOf({ ...key, image: oldImage }, now), template);
-  assert.notEqual(templateIdOf(key, now + 1), template);
+  assert.equal(templateIdOf({ setupHash: key.setupHash, image, project: key.project }, node, now), template);
+  assert.notEqual(templateIdOf({ ...key, image: oldImage }, node, now), template);
+  assert.notEqual(templateIdOf(key, peer, now), template);
+  assert.notEqual(templateIdOf(key, node, now + 1), template);
 });
 
 const checkout = { branch: "feature", commit: "c1" };
@@ -83,10 +84,10 @@ const buildInputs: TemplateBuildInputs = {
   allowedHosts: ["registry.npmjs.org"],
   resources: project.resources,
 };
-const ready = (builtAt: number, k = key, on = node): TemplateRecord & { state: "ready" } => ({ id: templateIdOf(k, builtAt - buildMs), key: k, state: "ready", builtOn: on, builtAt, commit: "c0" });
-const buildingOn = (on: NodeName, k = key): TemplateRecord => ({ id: templateIdOf(k, now - buildMs), key: k, state: "building", on, inputs: { ...buildInputs, key: k }, submitted: null });
+const ready = (builtAt: number, k = key, on = node): TemplateRecord & { state: "ready" } => ({ id: templateIdOf(k, on, builtAt - buildMs), key: k, state: "ready", builtOn: on, builtAt, commit: "c0" });
+const buildingOn = (on: NodeName, k = key): TemplateRecord => ({ id: templateIdOf(k, on, now - buildMs), key: k, state: "building", on, inputs: { ...buildInputs, key: k }, submitted: null });
 const building = buildingOn(node);
-const failedOn = (on: NodeName): TemplateRecord => ({ id: templateIdOf(key, now - 2 * hour), key, state: "failed", on, failedAt: now - hour, logTail: "npm ERR! 404" });
+const failedOn = (on: NodeName): TemplateRecord => ({ id: templateIdOf(key, on, now - 2 * hour), key, state: "failed", on, failedAt: now - hour, logTail: "npm ERR! 404" });
 const failed = failedOn(node);
 const otherKey: TemplateKey = { ...key, setupHash: "other" };
 const recent = ready(now - hour);
