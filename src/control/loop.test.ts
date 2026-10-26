@@ -4,6 +4,7 @@ import { randomUUID } from "node:crypto";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { chatgptTokenHandoff } from "./chatgpt-token.ts";
 import { startLoop, type Ingest, type Loop } from "./loop.ts";
 import { openRegistry, type PortRange, type Registry, type Thread, type ThreadId } from "./registry.ts";
 import { newPylonRecord } from "../tick.ts";
@@ -27,6 +28,8 @@ function fakeNode(options: { autoFinish: boolean; node?: NodeName; reportsRoutes
   const node = options.node ?? firebat;
   /** The held secrets the node's probe takes. A spawn asking for another fails for good, as on a probe older than it. */
   let heldSecrets = options.heldSecrets;
+  /** The held secrets the control plane has handed the probe since it started. */
+  const handed = new Set<string>();
   const pylons = new Map<PylonId, PylonObservation>();
   const jobs = new Map<JobId, { env: JobEnvelope; status: JobStatus }>();
   const submitted: Job[] = [];
@@ -40,7 +43,7 @@ function fakeNode(options: { autoFinish: boolean; node?: NodeName; reportsRoutes
   const observation = (): NodeObservation => ({
     node, observedAt: new Date().toISOString(), probeBootId: "boot-1",
     capacity: { cpus: 16, committedCpus: 0, memoryGiB: 64, committedMemoryGiB: 0, diskFreeGiB: 100, committedDiskGiB: 0 },
-    artifacts: [image], jobs: [...jobs.values()].map((j) => j.status), pylons: [...pylons.values()], grants: { secrets: [], gitSsh: false }, previewRoutes: options.reportsRoutes === false ? null : [...routes.values()],
+    artifacts: [image], jobs: [...jobs.values()].map((j) => j.status), pylons: [...pylons.values()], grants: { secrets: [...handed], gitSsh: false }, previewRoutes: options.reportsRoutes === false ? null : [...routes.values()],
     ...(options.claudeLaunchRepeatable === true ? { claudeLaunchRepeatable: true } : {}),
     ...(heldSecrets === undefined ? {} : { heldSecrets }),
   });
@@ -176,7 +179,13 @@ function fakeNode(options: { autoFinish: boolean; node?: NodeName; reportsRoutes
     command: () => Promise.reject(new Error("unused")),
     stream: () => Promise.reject(new Error("unused")),
     manifest: () => Promise.reject(new Error("unused")),
-    putSecret: () => Promise.reject(new Error("unused")),
+    async putSecret(name) {
+      if (!reachable) throw Object.assign(new Error("probe unreachable"), { code: "unreachable" });
+      if (!heldSecrets?.includes(name)) throw new Error(`${name} is not a secret the control plane hands over`);
+      if (handed.has(name)) return;
+      handed.add(name);
+      emit({ type: "snapshot", observation: observation() });
+    },
   };
 
   /** Changes a running pylon's guest facts, and announces it with a snapshot as the probe does after a job. */
@@ -213,6 +222,8 @@ function fakeNode(options: { autoFinish: boolean; node?: NodeName; reportsRoutes
     },
     /** Upgrades the probe to one that takes these held secrets, and announces it with a snapshot. */
     upgrade(names: readonly string[]) { heldSecrets = names; emit({ type: "snapshot", observation: observation() }); },
+    /** Restarts the probe, which forgets the held secrets it was handed, and announces it with a snapshot. */
+    restartProbe() { handed.clear(); emit({ type: "snapshot", observation: observation() }); },
     /** Drops every observe link and refuses calls until `reconnect`. */
     disconnect() { reachable = false; for (const push of streams) push(null); },
     reconnect() { reachable = true; },
@@ -1028,7 +1039,7 @@ test("a node reporting a pylon the registry places on another node gets no ports
   assert.deepEqual(home.submitted.map((job) => job.kind), ["spawn"]);
 });
 
-test("a boot asking for a held secret waits for a probe older than it, and boots once the probe is upgraded", async (t) => {
+test("a boot asking for a held secret waits for a probe older than it, and boots once the upgraded probe has it", async (t) => {
   const registry = openRegistry(tempDb());
   const thread = seed(registry);
   const stored = registry.pylon(thread.pylonId)!;
@@ -1041,9 +1052,36 @@ test("a boot asking for a held secret waits for a probe older than it, and boots
   assert.equal(registry.pylon(thread.pylonId)!.failed, null);
 
   fake.upgrade([chatgptTokenGrant.name]);
+  await new Promise((r) => setTimeout(r, 200));
+  assert.deepEqual(fake.submitted, [], "no spawn reaches a probe that takes the held secret but has not got it");
+
+  await fake.probe.putSecret(chatgptTokenGrant.name, "token");
   await until("the pylon runs", () => fake.pylons.get(thread.pylonId)?.phase === "running");
   assert.deepEqual(kinds(fake.submitted), ["spawn fresh"]);
   assert.equal(registry.pylon(thread.pylonId)!.attempts.count, 0);
+});
+
+test("a boot asking for the ChatGPT token right after a probe restart boots once the handoff the restart set off arrives", async (t) => {
+  const registry = openRegistry(tempDb());
+  registry.upsertNode({ name: node, tailnetHost: "rj-firebat.tail.ts.net", tailnetNodeId: "nFIREBAT" as TailnetNodeId });
+  const fake = fakeNode({ autoFinish: true, heldSecrets: [chatgptTokenGrant.name] });
+  let token: string | undefined;
+  const handoff = chatgptTokenHandoff({ probes: [fake.probe], token: async () => token, log: assert.fail });
+  run(t, registry, fake.probe, { ingest: (event, ...rest) => {
+    if (event.type === "snapshot") handoff.observed(event.observation);
+    return ingest(event, ...rest);
+  } });
+  await until("the node is online", () => registry.node(node)?.state === "online");
+  token = "token";
+
+  fake.restartProbe();
+  const thread = seed(registry);
+  const stored = registry.pylon(thread.pylonId)!;
+  registry.savePylon({ ...stored, boot: { ...stored.boot, network: { allowedHosts: [], secrets: [chatgptTokenGrant] } } });
+  await until("the pylon runs", () => fake.pylons.get(thread.pylonId)?.phase === "running");
+  assert.deepEqual(kinds(fake.submitted), ["spawn fresh"]);
+  assert.deepEqual(registry.node(node)?.observation?.grants?.secrets, [chatgptTokenGrant.name]);
+  await handoff.close();
 });
 
 test("every new boot takes the configured git identity, but a checkpoint keeps its original grants", async (t) => {

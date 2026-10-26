@@ -361,16 +361,29 @@ test("--node auto refuses with each node's reason when none can run the pylon, a
   observeNode(s, "no-image", { total: 64, committed: 0 }, { artifacts: [] });
   observeNode(s, "no-secret", { total: 64, committed: 0 }, { grants: { secrets: [], gitSsh: true } });
   observeNode(s, "no-token", { total: 64, committed: 0 }, { grants: { secrets: ["STRIPE_KEY"], gitSsh: true } });
+  observeNode(s, "token-coming", { total: 16, committed: 0 }, { grants: { secrets: [], gitSsh: true }, heldSecrets: ["NEXUS_CHATGPT_TOKEN"] });
   observeNode(s, "no-ssh", { total: 64, committed: 0 }, { grants: { secrets: ["STRIPE_KEY", "NEXUS_CHATGPT_TOKEN"], gitSsh: false } });
   observeNode(s, "old-probe", { total: 64, committed: 0 }, { grants: null });
   const refused = await s.call("POST", "/v1/threads", { project: "acme", title: "Nowhere", node: "auto" });
   assert.equal(refused.status, 409);
   assert.equal(refused.body.error, "no node can run this pylon: full has 30 of 32 GiB of memory committed, and the pylon needs 4; "
-    + `no-image does not hold image ${image.id}; no-secret has no secret STRIPE_KEY in its secret file, NEXUS_CHATGPT_TOKEN from the control plane yet; `
-    + "no-ssh has no git SSH key to reach git@example.com:acme.git and git@github.com:ramtin/dotfiles.git; no-token has no secret NEXUS_CHATGPT_TOKEN from the control plane yet; old-probe runs a probe too old to report what its pylons hold; rj-firebat is offline");
+    + `no-image does not hold image ${image.id}; no-secret has no secret STRIPE_KEY in its secret file, NEXUS_CHATGPT_TOKEN, which its probe is too old to take from the control plane; `
+    + "no-ssh has no git SSH key to reach git@example.com:acme.git and git@github.com:ramtin/dotfiles.git; no-token has no secret NEXUS_CHATGPT_TOKEN, which its probe is too old to take from the control plane; "
+    + "old-probe runs a probe too old to report what its pylons hold; rj-firebat is offline; token-coming has no secret STRIPE_KEY in its secret file");
   assert.deepEqual((await s.call("GET", "/v1/threads")).body, []);
   assert.deepEqual(s.calls, [], "no conversation was started for it");
   assert.deepEqual(s.woken, []);
+});
+
+test("--node auto places a thread that needs the ChatGPT token on a node whose probe takes it and has not got it yet", async (t) => {
+  const s = await withImage(t);
+  const restarted = { secrets: ["STRIPE_KEY"], gitSsh: true };
+  observeNode(s, "big", { total: 64, committed: 0 }, { grants: restarted, heldSecrets: ["NEXUS_CHATGPT_TOKEN"] });
+  observeNode(s, "small", { total: 32, committed: 0 }, { grants: restarted, heldSecrets: ["NEXUS_CHATGPT_TOKEN"] });
+  const started = await s.call("POST", "/v1/threads", { project: "acme", title: "Right after a restart", node: "auto" });
+  assert.equal(started.status, 201, started.body.error);
+  assert.equal(started.body.placement.node, "big");
+  assert.deepEqual(s.woken, ["big"]);
 });
 
 test("without --node a thread still boots on its project's default node, and a named node is taken as named", async (t) => {
