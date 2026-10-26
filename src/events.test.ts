@@ -91,6 +91,25 @@ test("a turn end with background tasks still running reports a heartbeat, and ho
   assert.deepEqual(reportedKind("session.ended", { background_tasks: [subagent, shell] }), { kind: "session.ended" });
 });
 
+test("only a Claude started outside other Claude sessions, under the pylon user's HOME, reports into the thread", async (t) => {
+  const { reportsIntoThread } = await import("../images/pylon/nexus-heartbeat.ts");
+  const { spawn } = await import("node:child_process");
+  const { once } = await import("node:events");
+  const claude = async (env: NodeJS.ProcessEnv) => {
+    const child = spawn("sleep", ["30"], { env: { PATH: process.env.PATH, ...env } });
+    t.after(() => child.kill());
+    await once(child, "spawn");
+    return String(child.pid);
+  };
+  const home = "/home/user";
+  const primary = await claude({});
+  const nested = await claude({ CLAUDE_CODE_SESSION_ID: "37c5ec30-c691-4b40-992d-75e5cfd4eebc", CLAUDE_PID: "3445" });
+  assert.equal(await reportsIntoThread({ HOME: home, CLAUDE_PID: primary, CLAUDE_CODE_SESSION_ID: "336789b3" }, home), true);
+  assert.equal(await reportsIntoThread({ HOME: home, CLAUDE_PID: nested }, home), false, "a Claude another session's tool started");
+  assert.equal(await reportsIntoThread({ HOME: "/tmp/verify/home", CLAUDE_PID: primary }, home), false, "a Claude under an isolated HOME");
+  assert.equal(await reportsIntoThread({ HOME: home }, home), true, "a Claude that does not name its process reports as before");
+});
+
 test("filtered reads advance the scanned watermark through retention rollover", () => {
   const registry = openRegistry(":memory:");
   try {

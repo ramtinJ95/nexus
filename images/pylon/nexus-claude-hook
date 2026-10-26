@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import { mkdir, rm } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { heartbeatDue, reportedKind } from "./nexus-heartbeat.ts";
+import { heartbeatDue, reportedKind, reportsIntoThread } from "./nexus-heartbeat.ts";
 import { claudeTurn, snapshotTurn } from "./nexus-turn.ts";
 import { spawn } from "node:child_process";
 
@@ -41,6 +41,7 @@ function send(command, args) {
   child.unref();
 }
 
+if (!await reportsIntoThread()) process.exit(0);
 const session = await report().catch(() => null);
 // A turn whose session is unknown reports no start, so its snapshot is named for none, and the previous turn's
 // snapshot cannot pass for its own.

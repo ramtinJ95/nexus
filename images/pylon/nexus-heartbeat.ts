@@ -1,4 +1,5 @@
 import { mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { userInfo } from "node:os";
 
 export const heartbeatIntervalMs = 5 * 60_000;
 /** As long as Claude Code lets a foreground command run. */
@@ -16,6 +17,17 @@ export function reportedKind(kind: string, input: { background_tasks?: unknown }
   if (kind !== "session.turn-ended") return { kind };
   if (running("subagent")) return { kind: "session.heartbeat" };
   return running("shell") ? { kind: "session.heartbeat", endAfterMs: backgroundShellGraceMs } : { kind };
+}
+
+/**
+ * Whether the Claude running this hook is one Nexus started, under the pylon user's own HOME. Claude Code puts
+ * CLAUDE_CODE_SESSION_ID in the environment of everything it runs, so a Claude started with it runs inside another
+ * session, such as one a worker starts to verify its work. CLAUDE_PID names the Claude running the hook.
+ */
+export async function reportsIntoThread(env: NodeJS.ProcessEnv = process.env, home = userInfo().homedir): Promise<boolean> {
+  if (env.HOME !== home) return false;
+  const environ = await readFile(`/proc/${env.CLAUDE_PID}/environ`, "utf8").catch(() => "");
+  return !environ.split("\0").some((variable) => variable.startsWith("CLAUDE_CODE_SESSION_ID="));
 }
 
 /** A lock covers the timestamp check too, so parallel tool hooks cannot all report at once. */
