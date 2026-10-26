@@ -121,7 +121,14 @@ export async function startControlPlane(config: ControlPlaneConfig, models: Mode
     registry.upsertNode({ name: node.name as NodeName, tailnetHost: node.tailnetHost, tailnetNodeId: node.tailnetNodeId as TailnetNodeId });
   }
   const probes = config.nodes.map((n) => connectProbe(n.name as NodeName, n.tailnetHost, n.tailnetNodeId as TailnetNodeId, { whois }));
-  const loop = startLoop({ registry, probes, ingest, previewPorts: config.previewPorts, gitIdentity: config.gitIdentity });
+  const handoff = chatgptToken === undefined ? null : chatgptTokenHandoff({ probes, token: chatgptToken });
+  const loop = startLoop({
+    registry, probes, previewPorts: config.previewPorts, gitIdentity: config.gitIdentity,
+    ingest: (event, ...rest) => {
+      if (event.type === "snapshot") handoff?.observed(event.observation);
+      return ingest(event, ...rest);
+    },
+  });
   const wakeThread = (t: Thread) => { void loop.wake(registry.pylon(t.pylonId)!.node); };
 
   const conversing = registry.threads().filter((t) => t.conversationId !== null);
@@ -161,7 +168,6 @@ export async function startControlPlane(config: ControlPlaneConfig, models: Mode
   const watch = prWatcher({ registry, github, inbox });
   const watchTimer = setInterval(() => { void watch.poll(); }, 120_000);
   void watch.poll();
-  const handoff = chatgptToken === undefined ? null : chatgptTokenHandoff({ probes, token: chatgptToken });
   const handoffTimer = setInterval(() => { void handoff?.poll(); }, 60_000);
   handoffTimer.unref();
   void handoff?.poll();
