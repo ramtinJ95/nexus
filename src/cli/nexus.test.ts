@@ -114,7 +114,7 @@ async function setup(t: TestContext) {
   const fake = fakeHarness();
   const noJobs = () => Promise.reject(new Error("the CLI tests' nodes hold every image they roll out"));
   const images = startImageRollout({
-    registry, probes: new Map([[node, { submit: noJobs, job: noJobs, manifest: noJobs }]]), buildNode: node,
+    registry, probes: new Map([[node, { submit: noJobs, job: noJobs, manifest: async (id) => registry.image(id as ImageId) ?? null }]]), buildNode: node,
     recipe: noJobs, release: null, log: () => {},
   });
   const options = (port: number) => ({

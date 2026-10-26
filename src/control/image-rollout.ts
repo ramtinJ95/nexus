@@ -178,7 +178,7 @@ export function startImageRollout(options: ImageRolloutOptions): ImageRollout {
     }
     const { node } = operation.steps[0]!;
     const manifest = await probes.get(node)!.manifest(operation.image);
-    if (manifest === null) return `${node} holds no manifest of ${operation.image}`;
+    if (manifest === null) return `${node} lists ${operation.image} but serves no manifest of it, as a probe older than this control plane does. Upgrade it with nexus deploy, then build again, which finishes at once`;
     if (manifest.id !== operation.image) return `${node} answered the manifest of ${manifest.id} for ${operation.image}`;
     registry.saveImage(manifest as ImageManifest, options.release);
     return null;
