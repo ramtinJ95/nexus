@@ -17,7 +17,7 @@ import type { ImageContent, Message, TextContent } from "@earendil-works/pi-ai";
 import type { ConversationView, EntryRecord, InboxState, LiveState } from "@earendil-works/pi-durable";
 import type { ListeningPort, NodeSummary, OpenedSession, ThreadDetail, ThreadRow, ViewFrame } from "../control/api.ts";
 import type { ImageEntry, ImageOperation, ImagesView } from "../control/image-rollout.ts";
-import type { Placement, Room } from "../control/placement.ts";
+import type { NodePylons, Placement, Room } from "../control/placement.ts";
 import type { ClaudeSent, Preview, Thread } from "../control/registry.ts";
 import type { Review } from "../control/review.ts";
 import { maxEntries, usageLimitText, type ClaudeConversation, type ClaudeEntry, type PromptSource } from "../claude-transcript.ts";
@@ -31,7 +31,7 @@ import type { WebSocket } from "ws";
 import { attachTerminal, processTty } from "./attach.ts";
 import { call, CliError, exitCodes, follow, upgrade, type Endpoint, type HostPort } from "./transport.ts";
 
-const version = "0.24.0";
+const version = "0.25.0";
 const defaults = { url: "http://rj-firebat.tailc817d3.ts.net:7470", socks: "localhost:1055" };
 const configFile = () => join(homedir(), ".config", "nexus", "cli.json");
 
@@ -51,6 +51,7 @@ const usage = `nexus ${version}, the Nexus control plane from this Mac
   nexus session close <thread> <pane|id>       a session in no pane by its ID, which \`nexus show\` gives
   nexus attach <thread>                        this terminal on the pylon's Herdr sessions, through the control plane
   nexus start --project P [--title T] [--message M | --claude PROMPT [--model ID]] [--node N|auto] [--branch B] [--commit C]
+              [--cpus n] [--memory GiB] [--disk GiB]
   nexus send <thread> <text...> [--steer] [--request-id ID]
     a message to the agent, or typed into the Claude worker's session, which waits for a paused pylon to wake
   nexus watch <thread> [--interval MS]         the conversation, or the Claude worker's transcript, as it grows
@@ -59,10 +60,10 @@ const usage = `nexus ${version}, the Nexus control plane from this Mac
   nexus abort|retry|retry-pylon|wake <thread>
   nexus archive|unarchive|delete <thread>
   nexus projects
-  nexus project edit <id> [--node N] [--branch B] [--cpus n] [--memory GiB] [--disk GiB]
+  nexus project edit <id> [--node N|auto] [--branch B] [--cpus n] [--memory GiB] [--disk GiB]
     [--allow-host HOST]... [--login claude|chatgpt]... [--secret NAME:HOST[,HOST]...]...
     [--clear-hosts] [--clear-logins] [--clear-secrets] [--git-name NAME --git-email EMAIL | --clear-git-identity]
-  nexus project add <id> (<repo-url> | --scratch) --node N [--branch B] [--cpus n] [--memory GiB] [--disk GiB]
+  nexus project add <id> (<repo-url> | --scratch) [--node N|auto] [--branch B] [--cpus n] [--memory GiB] [--disk GiB]
                     [--allow-host HOST]... [--login claude|chatgpt]... [--secret NAME:HOST[,HOST]...]...
   nexus review <thread> [--pr N] [--rounds N] [--land]
     a reviewer on another model for the thread's open PR, round after round until it approves; --land merges and deploys under the merge policy
@@ -126,6 +127,15 @@ function int(value: string | undefined, flag: string, fallback: number): number 
   const n = Number(value);
   if (!Number.isInteger(n) || n < 0) throw new CliError("invalid", `${flag} takes a whole number, got ${value}`);
   return n;
+}
+
+/** The --cpus, --memory and --disk given, or undefined for none, as `project edit` and `start` send them. */
+function resourcesOf(v: Values): Partial<Project["resources"]> | undefined {
+  const resources: Partial<Project["resources"]> = {};
+  for (const [flag, field] of [["cpus", "cpus"], ["memory", "memoryGiB"], ["disk", "diskGiB"]] as const) {
+    if (v[flag] !== undefined) resources[field] = int(str(v, flag), `--${flag}`, 0);
+  }
+  return Object.keys(resources).length > 0 ? resources : undefined;
 }
 
 function ago(at: number, now = Date.now()): string {
@@ -231,10 +241,27 @@ function claudeText(c: ClaudeConversation): string {
 
 const gib = (n: number) => Number(n.toFixed(1));
 /** A probe from before pylons were counted reports no CPUs or committed disk, and always 0 GiB of memory committed. */
-function capacityText(c: Partial<NonNullable<NodeSummary["capacity"]>>): string {
+function capacityText(c: Partial<NonNullable<NodeSummary["capacity"]>>, overcommitted: boolean): string {
   const counted = c.committedDiskGiB !== undefined;
   const n = (v: number | undefined, known = true) => v === undefined || !known ? "unknown" : gib(v);
-  return `${n(c.committedCpus)}/${n(c.cpus)} CPUs, ${n(c.committedMemoryGiB, counted)}/${n(c.memoryGiB)} GiB memory committed, ${n(c.committedDiskGiB)} GiB disk committed, ${n(c.diskFreeGiB)} GiB disk free`;
+  return `${n(c.committedCpus)}/${n(c.cpus)} CPUs, ${n(c.committedMemoryGiB, counted)}/${n(c.memoryGiB)} GiB memory committed${overcommitted ? ", overcommitted" : ""}, ${n(c.committedDiskGiB)} GiB disk committed, ${n(c.diskFreeGiB)} GiB disk free`;
+}
+
+/**
+ * Such as `5 up holding 20 CPUs and 40 GiB, 1 paused needing 8 GiB to wake, 3 archived, 1 crashed needing 8 GiB to retry,
+ * 1 orphaned (pylon-x)`. Empty
+ * for a node with no pylons, or never observed, or from a control plane older than 0.25.0, which sends no `pylons`.
+ */
+function pylonsText(p: NodePylons | null): string {
+  if (p === null) return "";
+  return [
+    ...p.up.pylons === 0 ? [] : [`${p.up.pylons} up holding ${p.up.cpus} CPUs and ${gib(p.up.memoryGiB)} GiB`],
+    ...p.paused.pylons === 0 ? [] : [`${p.paused.pylons} paused needing ${gib(p.paused.memoryGiB)} GiB to wake`],
+    ...p.archived.pylons === 0 ? [] : [`${p.archived.pylons} archived`],
+    // A control plane older than `crashed` counts such pylons as up.
+    ...(p.crashed?.pylons ?? 0) === 0 ? [] : [`${p.crashed.pylons} crashed needing ${gib(p.crashed.memoryGiB)} GiB to retry`],
+    ...p.orphaned.length === 0 ? [] : [`${p.orphaned.length} orphaned (${p.orphaned.join(", ")})`],
+  ].join(", ");
 }
 
 const roomText = (r: Room) => `${gib(r.memoryGiB)} GiB memory, ${r.cpus} CPUs and ${gib(r.diskGiB)} GiB disk left`;
@@ -274,6 +301,8 @@ function detailText({ thread: t, pylon: p, agent, sessions, previews, ports, out
     ...t.usageLimit === undefined ? [] : [`usage limit: ${usageLimitText(t.usageLimit, Date.now())}. \`nexus send ${t.id} continue\` resumes it once the limit resets`],
     `status: ${t.status}${t.agentTurnRunning ? ", agent working" : ""}`,
     `pylon: ${p.id} on ${p.node}, ${p.actualState}${observed}`,
+    // A control plane older than the size in thread detail sends none.
+    ...p.resources === undefined ? [] : [`size: ${p.resources.cpus} CPUs, ${p.resources.memoryGiB} GiB memory, ${p.resources.diskGiB} GiB disk`],
     ...t.placement === undefined ? [] : [`placement: ${placementText(t.placement)}`],
     ...t.setup === undefined ? [] : [`setup: ${setupText(t.setup)}`],
     ...(p.grantsOutdated ? ["grants: older than project; start a new thread to apply current grants (archive/unarchive keeps these grants)"] : []),
@@ -939,7 +968,10 @@ const commands: Readonly<Record<string, Command>> = {
   },
   start: {
     args: [0, 0],
-    options: { model: { type: "string" }, claude: { type: "string" }, project: { type: "string" }, title: { type: "string" }, message: { type: "string" }, node: { type: "string" }, branch: { type: "string" }, commit: { type: "string" } },
+    options: {
+      model: { type: "string" }, claude: { type: "string" }, project: { type: "string" }, title: { type: "string" }, message: { type: "string" }, node: { type: "string" }, branch: { type: "string" }, commit: { type: "string" },
+      cpus: { type: "string" }, memory: { type: "string" }, disk: { type: "string" },
+    },
     async run(api, _, v) {
       const project = str(v, "project");
       const message = str(v, "message");
@@ -950,7 +982,8 @@ const commands: Readonly<Record<string, Command>> = {
       if (project === undefined) throw new CliError("invalid", "start needs --project");
       if (title === undefined) throw new CliError("invalid", "start needs --title, --message or --claude");
       const optional = Object.fromEntries((["node", "branch", "commit", "claude", "model"] as const).flatMap((key) => v[key] === undefined ? [] : [[key, v[key]]]));
-      const t = await api("POST", "/v1/threads", { project, title, ...optional }) as Thread;
+      const resources = resourcesOf(v);
+      const t = await api("POST", "/v1/threads", { project, title, ...optional, ...resources === undefined ? {} : { resources } }) as Thread;
       if (message !== undefined) {
         await send(api, t.id, message, false, `msg:${randomUUID()}`).catch((err: unknown) => {
           throw err instanceof CliError ? new CliError(err.kind, `started ${t.id}, but its first message was not sent: ${err.message}`, err.status) : err;
@@ -1023,11 +1056,8 @@ const commands: Readonly<Record<string, Command>> = {
       for (const [flag, field] of [["node", "defaultNode"], ["branch", "defaultBranch"]] as const) {
         if (v[flag] !== undefined) patch[field] = str(v, flag);
       }
-      const resources: Partial<Project["resources"]> = {};
-      for (const [flag, field] of [["cpus", "cpus"], ["memory", "memoryGiB"], ["disk", "diskGiB"]] as const) {
-        if (v[flag] !== undefined) resources[field] = int(str(v, flag), `--${flag}`, 0);
-      }
-      if (Object.keys(resources).length > 0) patch.resources = resources;
+      const resources = resourcesOf(v);
+      if (resources !== undefined) patch.resources = resources;
       for (const [flag, clear, field] of [["allow-host", "clear-hosts", "allowedHosts"], ["login", "clear-logins", "logins"], ["secret", "clear-secrets", "secrets"]] as const) {
         if (v[clear] && v[flag] !== undefined) throw new CliError("invalid", `--${clear} conflicts with --${flag}`);
         if (v[clear] || v[flag] !== undefined) patch[field] = flag === "secret" ? strs(v, flag).map(secretGrantOf) : strs(v, flag);
@@ -1051,12 +1081,10 @@ const commands: Readonly<Record<string, Command>> = {
       // A forgotten URL must not quietly make a scratch project.
       if ((url === undefined) === (v.scratch !== true)) throw new CliError("invalid", "project add takes a <repo-url> or --scratch, and not both");
       const repoUrl = url ?? null;
-      const resources = { cpus: int(str(v, "cpus"), "--cpus", 2), memoryGiB: int(str(v, "memory"), "--memory", 4), diskGiB: int(str(v, "disk"), "--disk", 10) };
+      const resources = { cpus: int(str(v, "cpus"), "--cpus", 2), memoryGiB: int(str(v, "memory"), "--memory", 6), diskGiB: int(str(v, "disk"), "--disk", 10) };
       const secrets = strs(v, "secret").map(secretGrantOf);
-      const node = str(v, "node");
-      if (node === undefined) throw new CliError("invalid", "project add needs --node. Run nexus nodes to list them");
       const p = await api("POST", "/v1/projects", {
-        id, repoUrl, defaultBranch: str(v, "branch") ?? "main", defaultNode: node, resources,
+        id, repoUrl, defaultBranch: str(v, "branch") ?? "main", defaultNode: str(v, "node") ?? "auto", resources,
         allowedHosts: strs(v, "allow-host"), secrets, logins: strs(v, "login"), preSetup: null,
       }) as Project;
       return { json: p, text: p.repoUrl === null ? `Added scratch project ${p.id} on ${p.defaultNode}` : `Added project ${p.id} (${p.repoUrl}) on ${p.defaultNode}` };
@@ -1070,8 +1098,11 @@ const commands: Readonly<Record<string, Command>> = {
         json: nodes,
         text: nodes.length === 0 ? "No nodes." : table(nodes.map((n) => [
           n.name, n.state, n.observedAt === null ? "never observed" : `observed ${ago(Date.parse(n.observedAt))}`,
-          n.capacity === null ? "" : capacityText(n.capacity),
-        ])),
+          n.capacity === null ? "" : capacityText(n.capacity, n.overcommitted ?? false),
+        ])).split("\n").flatMap((line, i) => {
+          const held = pylonsText(nodes[i]!.pylons ?? null);
+          return held === "" ? [line] : [line, `  pylons: ${held}`];
+        }).join("\n"),
       };
     },
   },

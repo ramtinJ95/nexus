@@ -496,7 +496,7 @@ async function checkFailedSetupRetry() {
 
 /**
  * The thread's project comes from the real CLI's `project add`, as the Claude mod and the pi extension add one, with
- * the CLI's defaults. Adding it again is a conflict, and leaving out --node is a usage error.
+ * the CLI's defaults. Adding it again is a conflict, and leaving out --node defaults to auto.
  */
 async function addProject() {
   const repoUrl = "https://github.com/octocat/Spoon-Knife.git";
@@ -504,16 +504,16 @@ async function addProject() {
   assert.equal(added.code, 0, added.stderr);
   const expected = {
     id: "node-check", repoUrl, defaultBranch: "main", defaultNode: probeConfig.node,
-    resources: { cpus: 2, memoryGiB: 4, diskGiB: 10 }, allowedHosts: [], secrets: [], logins: [], preSetup: null,
+    resources: { cpus: 2, memoryGiB: 6, diskGiB: 10 }, allowedHosts: [], secrets: [], logins: [], preSetup: null,
   };
   assert.deepEqual(JSON.parse(added.stdout), expected);
   assert.deepEqual(await expect(200, "GET", "/projects"), [expected]);
   pass(`nexus project add created node-check on ${probeConfig.node} with the CLI's defaults: ${added.stdout.replace(/\s+/g, " ")}`);
   const again = await nexus("project", "add", "node-check", repoUrl, "--node", probeConfig.node, "--json");
   assert.deepEqual([again.code, JSON.parse(again.stderr)], [5, { error: "project node-check exists", kind: "conflict", status: 409 }]);
-  const unnamed = await nexus("project", "add", "node-check-2", repoUrl, "--json");
-  assert.deepEqual([unnamed.code, JSON.parse(unnamed.stderr)], [64, { error: "project add needs --node. Run nexus nodes to list them", kind: "invalid", status: null }]);
-  pass(`adding node-check again exits 5, and leaving out --node exits 64`);
+  const unnamed = await nexus("project", "add", "node-check-auto", repoUrl, "--json");
+  assert.deepEqual([unnamed.code, JSON.parse(unnamed.stdout).defaultNode], [0, "auto"], unnamed.stderr);
+  pass(`adding node-check again exits 5, and leaving out --node adds a project whose default node is auto`);
 }
 
 let verdict = "FAIL";

@@ -197,7 +197,7 @@ test("the CLI runs a thread's life through the SOCKS proxy, and --json prints th
   const shown = await s.json(["show", thread.id]);
   assert.equal(shown.thread.id, thread.id);
   assert.equal(shown.desired, "running", "a thread with fresh human activity wants its pylon running");
-  assert.deepEqual(shown.pylon, { grantsOutdated: false, id: thread.pylonId, node, actualState: "unknown", failed: null, observedAt: null, retryRefused: null });
+  assert.deepEqual(shown.pylon, { grantsOutdated: false, id: thread.pylonId, node, actualState: "unknown", failed: null, observedAt: null, retryRefused: null, resources: project.resources });
   assert.deepEqual((await s.json(["conversation", thread.id])).entries.map((e: { id: number }) => e.id), [1, 2, 3]);
   const human = await s.nexus(["conversation", thread.id]);
   assert.equal(human.stdout, "> \n>   Fix the build  \n> and run the tests\n\n> now the lint\n\n> stop that\n");
@@ -233,7 +233,7 @@ test("--help or -h after a command prints its lines of nexus --help and exits 0 
     }
   }
   assert.equal((await s.nexus(["project", "edit", "--help"])).stdout,
-    "  nexus project edit <id> [--node N] [--branch B] [--cpus n] [--memory GiB] [--disk GiB]\n"
+    "  nexus project edit <id> [--node N|auto] [--branch B] [--cpus n] [--memory GiB] [--disk GiB]\n"
     + "    [--allow-host HOST]... [--login claude|chatgpt]... [--secret NAME:HOST[,HOST]...]...\n"
     + "    [--clear-hosts] [--clear-logins] [--clear-secrets] [--git-name NAME --git-email EMAIL | --clear-git-identity]\n");
   assert.equal((await s.nexus(["retry", "-h"])).stdout, "  nexus abort|retry|retry-pylon|wake <thread>\n");
@@ -309,8 +309,8 @@ test("project add creates a project with the contract's defaults or its flags, a
   assert.deepEqual([added.code, added.stdout, added.stderr], [0, `Added project hello (${repo}) on ${node}\n`, ""]);
   assert.deepEqual(s.registry.project("hello" as ProjectId), {
     id: "hello", repoUrl: repo, defaultBranch: "main", defaultNode: node,
-    resources: { cpus: 2, memoryGiB: 4, diskGiB: 10 }, allowedHosts: [], secrets: [], logins: [], preSetup: null,
-  }, "an unflagged project gets main, 2 CPUs, 4 GiB of memory and 10 GiB of disk");
+    resources: { cpus: 2, memoryGiB: 6, diskGiB: 10 }, allowedHosts: [], secrets: [], logins: [], preSetup: null,
+  }, "an unflagged project gets main, 2 CPUs, 6 GiB of memory and 10 GiB of disk");
 
   const custom = await s.json([
     "project", "add", "custom", "git@github.com:octocat/Spoon-Knife.git", "--node", node, "--branch", "dev", "--cpus", "4", "--memory", "8", "--disk", "20",
@@ -336,15 +336,13 @@ test("project add creates a project with the contract's defaults or its flags, a
   await fails(["project", "add", "other", "https://", "--node", node], 64, { kind: "invalid", status: 400 });
   await fails(["project", "add", "other", repo, "--node", node, "--login", "gemini"], 64, { kind: "invalid", status: 400 });
   await fails(["project", "add", "other", repo, "--node", node, "--cpus", "two"], 64, { kind: "invalid", status: null, error: "--cpus takes a whole number, got two" });
-  await fails(["project", "add", "other", repo], 64, { kind: "invalid", status: null, error: "project add needs --node. Run nexus nodes to list them" });
-  await fails(["project", "add", "other", repo], 64, { kind: "invalid", status: null, error: "project add needs --node. Run nexus nodes to list them" },
-    { NEXUS_SOCKS: `127.0.0.1:${await closedPort()}` }); // with no proxy too, because it sends no request
   await fails(["project", "add"], 64, { kind: "invalid", status: null, error: "project add takes 1 to 2 arguments, got 0" });
   await fails(["project", "other"], 64, { kind: "invalid", status: null, error: "unknown command project" });
   assert.deepEqual(s.registry.projects().map((p) => p.id).toSorted(), ["acme", "custom", "hello"], "no refused project was created");
 
-  const human = await s.nexus(["project", "add", "other", repo]);
-  assert.deepEqual([human.code, human.stderr], [64, "nexus: project add needs --node. Run nexus nodes to list them. Run nexus --help for usage\n"]);
+  const spread = await s.nexus(["project", "add", "spread", repo]);
+  assert.deepEqual([spread.code, spread.stdout, spread.stderr], [0, `Added project spread (${repo}) on auto\n`, ""]);
+  assert.equal(s.registry.project("spread" as ProjectId)!.defaultNode, "auto", "without --node its threads boot where they fit best");
 });
 
 test("project add --scratch makes a project with no repository, --secret grants each NAME:HOST in order, and start cannot pin its commit", async (t) => {
@@ -352,7 +350,7 @@ test("project add --scratch makes a project with no repository, --secret grants 
   const added = await s.nexus(["project", "add", "sketch", "--scratch", "--node", node, "--secret", "GH_TOKEN:api.github.com,github.com", "--secret", "EXA_API_KEY:api.exa.ai"]);
   assert.deepEqual([added.code, added.stdout, added.stderr], [0, `Added scratch project sketch on ${node}\n`, ""]);
   assert.deepEqual(s.registry.project("sketch" as ProjectId), {
-    id: "sketch", repoUrl: null, defaultBranch: "main", defaultNode: node, resources: { cpus: 2, memoryGiB: 4, diskGiB: 10 }, allowedHosts: [],
+    id: "sketch", repoUrl: null, defaultBranch: "main", defaultNode: node, resources: { cpus: 2, memoryGiB: 6, diskGiB: 10 }, allowedHosts: [],
     secrets: [{ name: "GH_TOKEN", hosts: ["api.github.com", "github.com"] }, { name: "EXA_API_KEY", hosts: ["api.exa.ai"] }], logins: [], preSetup: null,
   });
   assert.match((await s.nexus(["projects"])).stdout, /^sketch +node rj-firebat +branch main +scratch$/m);
@@ -1223,6 +1221,42 @@ test("show says how the pylon got its setup: fresh and why, with the build it as
   assert.equal((await shown("reused")).line, `setup: from template ${building!.id}, built 3m ago, then checked out 222222222222`);
 });
 
+test("start --cpus, --memory and --disk size the thread over its project's, and show prints the size", async (t) => {
+  const s = await setup(t);
+  const sized: Thread = await s.json(["start", "--project", "acme", "--title", "sized", "--memory", "12", "--cpus", "4"]);
+  assert.deepEqual(s.registry.pylon(sized.pylonId)!.boot.resources, { cpus: 4, memoryGiB: 12, diskGiB: 10 }, "the disk it leaves out is the project's");
+  assert.match((await s.nexus(["show", sized.id])).stdout, /^size: 4 CPUs, 12 GiB memory, 10 GiB disk$/m);
+  const disk: Thread = await s.json(["start", "--project", "acme", "--title", "disk", "--disk", "40"]);
+  assert.deepEqual(s.registry.pylon(disk.pylonId)!.boot.resources, { cpus: 2, memoryGiB: 4, diskGiB: 40 });
+  const plain: Thread = await s.json(["start", "--project", "acme", "--title", "plain"]);
+  assert.match((await s.nexus(["show", plain.id])).stdout, /^size: 2 CPUs, 4 GiB memory, 10 GiB disk$/m, "a thread started without them has its project's size");
+
+  for (const [flag, value, status] of [["--memory", "0", 400], ["--cpus", "-2", null], ["--disk", "1.5", null], ["--memory", "lots", null]] as const) {
+    const res = await s.nexus(["start", "--project", "acme", "--title", "wrong", flag, value, "--json"]);
+    assert.equal(res.code, 64, `${flag} ${value}: ${res.stderr}`);
+    assert.deepEqual((({ kind, status }) => ({ kind, status }))(JSON.parse(res.stderr)), { kind: "invalid", status }, `${flag} ${value}`);
+  }
+  assert.deepEqual((await s.json(["threads"])).map((r: Thread) => r.title).toSorted(), ["disk", "plain", "sized"], "no refused start made a thread");
+});
+
+test("nodes marks an overcommitted node and says what its pylons hold", async (t) => {
+  const s = await setup(t);
+  const [up, paused, archived, crashed] = await Promise.all(["up", "paused", "archived", "crashed"].map((title) => s.json(["start", "--project", "acme", "--title", title]))) as Thread[];
+  await s.nexus(["archive", archived!.id]);
+  const capacity = { cpus: 8, committedCpus: 2, memoryGiB: 22.8, committedMemoryGiB: 40, diskFreeGiB: 100, committedDiskGiB: 30 };
+  s.registry.apply({ record: "node", node, state: "online", capacity });
+  const stopped = (t: Thread) => ({ pylonId: t.pylonId, phase: "stopped" as const, checkpoint: null, sessions: null });
+  s.registry.ingested({
+    node, observedAt: new Date().toISOString(), probeBootId: "b", capacity, artifacts: [image.id], jobs: [],
+    pylons: [{ pylonId: up!.pylonId, phase: "booting" }, stopped(paused!), stopped(archived!), { pylonId: "pylon-x" as PylonId, phase: "booting" },
+      { pylonId: crashed!.pylonId, phase: "broken", detail: "the controller exited", cause: "controller" }],
+    grants: { secrets: [], gitSsh: false }, previewRoutes: [],
+  }, []);
+  const text = (await s.nexus(["nodes"])).stdout;
+  assert.match(text, /^rj-firebat +online +observed .+ {2}2\/8 CPUs, 40\/22\.8 GiB memory committed, overcommitted, 30 GiB disk committed, 100 GiB disk free$/m);
+  assert.match(text, /^ {2}pylons: 1 up holding 2 CPUs and 4 GiB, 1 paused needing 4 GiB to wake, 1 archived, 1 crashed needing 4 GiB to retry, 1 orphaned \(pylon-x\)$/m);
+});
+
 test("nodes prints what an older probe does not count as unknown, never as 0, with --json or without", async (t) => {
   const s = await setup(t);
   const capacity = { memoryGiB: 64, committedMemoryGiB: 0, diskFreeGiB: 100 } as never;
@@ -1251,7 +1285,7 @@ test("show prints PR metadata and one disabled-watch notice without waking the p
 
 test("deploy and release use the shared release view and wait for both roles", async (t) => {
   const s = await setup(t);
-  assert.equal((await s.nexus(["--version"])).stdout.trim(), "nexus 0.24.0");
+  assert.equal((await s.nexus(["--version"])).stdout.trim(), "nexus 0.25.0");
   assert.equal((await s.nexus(["deploy", "bad"])).code, 64);
   const requested = await s.json(["deploy", "main"]);
   assert.equal(requested.desired.commit, "a".repeat(40));
@@ -1331,6 +1365,8 @@ test("project edit replaces supplied grants and preserves omitted settings", asy
   assert.equal(p.repoUrl, repo);
   assert.equal(p.defaultNode, node);
   assert.equal((await s.nexus(["project", "edit", "editable", "--secret", "TOKEN:*.example.com"])).code, 64);
+  assert.equal((await s.json(["project", "edit", "editable", "--node", "auto"])).defaultNode, "auto");
+  assert.match((await s.nexus(["projects"])).stdout, /^editable +node auto +branch main/m);
   const cleared = await s.nexus(["project", "edit", "editable", "--clear-secrets", "--clear-git-identity", "--json"]);
   assert.equal(cleared.code, 0, cleared.stderr);
   assert.deepEqual(JSON.parse(cleared.stdout).secrets, []);

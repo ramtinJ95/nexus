@@ -1,0 +1,121 @@
+[
+  {
+    "name": "infra-testbench",
+    "tailnetHost": "127.0.0.1",
+    "tailnetNodeId": "ninfra-testbench",
+    "state": "online",
+    "capacity": {
+      "cpus": 16,
+      "committedCpus": 0,
+      "memoryGiB": 31.3,
+      "committedMemoryGiB": 0,
+      "diskFreeGiB": 400,
+      "committedDiskGiB": 0
+    },
+    "observedAt": "2026-10-26T11:22:07.984Z",
+    "overcommitted": false,
+    "pylons": {
+      "up": {
+        "pylons": 0,
+        "cpus": 0,
+        "memoryGiB": 0
+      },
+      "paused": {
+        "pylons": 0,
+        "cpus": 0,
+        "memoryGiB": 0
+      },
+      "archived": {
+        "pylons": 0,
+        "cpus": 0,
+        "memoryGiB": 0
+      },
+      "crashed": {
+        "pylons": 0,
+        "cpus": 0,
+        "memoryGiB": 0
+      },
+      "orphaned": []
+    }
+  },
+  {
+    "name": "rj-firebat",
+    "tailnetHost": "127.0.0.1",
+    "tailnetNodeId": "nrj-firebat",
+    "state": "online",
+    "capacity": {
+      "cpus": 16,
+      "committedCpus": 20,
+      "memoryGiB": 22.8,
+      "committedMemoryGiB": 40,
+      "diskFreeGiB": 400,
+      "committedDiskGiB": 320
+    },
+    "observedAt": "2026-10-26T11:22:07.876Z",
+    "overcommitted": true,
+    "pylons": {
+      "up": {
+        "pylons": 4,
+        "cpus": 16,
+        "memoryGiB": 32
+      },
+      "paused": {
+        "pylons": 1,
+        "cpus": 4,
+        "memoryGiB": 8
+      },
+      "archived": {
+        "pylons": 2,
+        "cpus": 8,
+        "memoryGiB": 16
+      },
+      "crashed": {
+        "pylons": 0,
+        "cpus": 0,
+        "memoryGiB": 0
+      },
+      "orphaned": [
+        "pylon-th-0rphan000000"
+      ]
+    }
+  },
+  {
+    "name": "spare-node",
+    "tailnetHost": "127.0.0.1",
+    "tailnetNodeId": "nspare-node",
+    "state": "online",
+    "capacity": {
+      "cpus": 16,
+      "committedCpus": 2,
+      "memoryGiB": 31.3,
+      "committedMemoryGiB": 4,
+      "diskFreeGiB": 400,
+      "committedDiskGiB": 40
+    },
+    "observedAt": "2026-10-26T11:22:08.044Z",
+    "overcommitted": false,
+    "pylons": {
+      "up": {
+        "pylons": 0,
+        "cpus": 0,
+        "memoryGiB": 0
+      },
+      "paused": {
+        "pylons": 0,
+        "cpus": 0,
+        "memoryGiB": 0
+      },
+      "archived": {
+        "pylons": 0,
+        "cpus": 0,
+        "memoryGiB": 0
+      },
+      "crashed": {
+        "pylons": 0,
+        "cpus": 0,
+        "memoryGiB": 0
+      },
+      "orphaned": []
+    }
+  }
+]

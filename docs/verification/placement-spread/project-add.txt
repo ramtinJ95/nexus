@@ -1,0 +1,20 @@
+Added project spread (https://github.com/octocat/Hello-World.git) on auto
+exit 0
+{
+  "id": "spread-json",
+  "repoUrl": "https://github.com/octocat/Hello-World.git",
+  "defaultBranch": "main",
+  "defaultNode": "auto",
+  "resources": {
+    "cpus": 2,
+    "memoryGiB": 6,
+    "diskGiB": 10
+  },
+  "allowedHosts": [],
+  "secrets": [],
+  "logins": [],
+  "preSetup": null
+}
+nexus        node auto  branch main  https://github.com/ramtinJ95/nexus.git
+spread       node auto  branch main  https://github.com/octocat/Hello-World.git
+spread-json  node auto  branch main  https://github.com/octocat/Hello-World.git

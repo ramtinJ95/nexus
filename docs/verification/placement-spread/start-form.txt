@@ -1,0 +1,5 @@
+nexus picked: cpus 4, memoryGiB 8, diskGiB 40
+spread picked: cpus 2, memoryGiB 6, diskGiB 10
+nexus picked again: cpus 4, memoryGiB 8, diskGiB 40
+sent with memory 12 and cpus 2: {"title":"from the form","project":"nexus","resources":{"cpus":2,"memoryGiB":12}}
+sent with the size fields empty: {"title":"from the form","project":"nexus"}

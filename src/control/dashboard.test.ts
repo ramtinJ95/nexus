@@ -255,6 +255,24 @@ test("a new thread whose node does not have its pylon yet reads as absent, not d
   assert.equal(overviewRow((await s.call("GET", "/")).text, fix), "Fix checkout running not on its node rj-firebat just now never");
 });
 
+test("the side nodes show each node's committed memory, mark an overcommitted one, and say what its paused pylons need to wake", async (t) => {
+  const s = await seeded(t);
+  const [fix, docs] = [await s.start("acme", "Fix checkout"), await s.start("acme", "Write docs")];
+  const over = { ...capacity, memoryGiB: 22.8, committedMemoryGiB: 40, committedDiskGiB: 20 };
+  s.registry.apply({ record: "node", node, state: "online", capacity: over });
+  const stopped = (t: Thread): PylonObservation => ({ pylonId: t.pylonId, phase: "stopped", checkpoint: null, sessions: null });
+  s.registry.ingested({ node, observedAt: new Date().toISOString(), probeBootId: "b", capacity: over, artifacts: [], jobs: [], pylons: [stopped(fix), stopped(docs)], grants: { secrets: [], gitSsh: false }, previewRoutes: [] }, []);
+  assert.equal((await s.call("POST", `/v1/threads/${docs.id}/archive`)).status, 200);
+  const nodes = (await s.call("GET", "/")).text.split('id="side-nodes"')[1]!.split("</div>")[0]!;
+  assert.match(nodes, /<em>overcommitted<\/em>/, "the marker uses the offline marker's style");
+  assert.match(textOf(nodes), /rj-firebat overcommitted 40\/22\.8 GiB memory · 4 GiB to wake paused/, "only the paused pylon whose thread is not archived needs memory to wake");
+
+  s.observe();
+  const fits = textOf((await s.call("GET", "/")).text.split('id="side-nodes"')[1]!.split("</div>")[0]!);
+  assert.match(fits, /rj-firebat 0\/64 GiB memory/);
+  assert.doesNotMatch(fits, /overcommitted|to wake/);
+});
+
 test("an offline node shows its pylons as unknown, and the last observation as stale", async (t) => {
   const s = await seeded(t);
   const fix = await s.start("acme", "Fix checkout");
@@ -832,13 +850,13 @@ test("/projects/new opens the new-project dialog with the fields of nexus projec
     .map((m) => [m[2], m[3], /required/.test(m[4]!), /value="([^"]*)"/.exec(m[4]!)?.[1] ?? null]);
   assert.deepEqual(fields, [["ID", "id", true, null], ["Repository URL", "repoUrl", true, null], ["Node", "defaultNode", false, null], ["Branch", "defaultBranch", true, "main"]]);
   assert.deepEqual([...dialog.matchAll(/<option value="([^"]*)"( selected)?>([^<]*)</g)].map((m) => [m[1], m[2] !== undefined, m[3]]),
-    [[node, false, `${node}, offline`], [tower, true, tower]], "the node defaults to the first one online");
+    [["auto", true, "auto, where it fits best"], [node, false, `${node}, offline`], [tower, false, tower]], "the node defaults to auto");
   assert.deepEqual([...dialog.matchAll(/<input type="radio" name="repoKind" value="([^"]*)"( checked)?>/g)].map((m) => [m[1], m[2] !== undefined]), [["clone", true], ["scratch", false]],
     "the repository is cloned from a URL unless the project is scratch");
   assert.match(dialog, /<label class="check"><input type="checkbox" name="github"> GitHub access<\/label>/, "GitHub access is off unless asked for");
   assert.deepEqual(JSON.parse(/data-github-grant="([^"]*)"/.exec(dialog)![1]!.replace(/&quot;/g, '"')), githubTokenGrant);
   assert.match(textOf(dialog), /GitHub access sends the node's GH_TOKEN to api\.github\.com and github\.com/);
-  assert.match(textOf(dialog), /Each pylon gets 2 CPUs, 4 GiB of memory and 10 GiB of disk\. nexus project add can set those, allowed hosts, logins and other secrets\./);
+  assert.match(textOf(dialog), /Each pylon gets 2 CPUs, 6 GiB of memory and 10 GiB of disk\. nexus project add can set those, allowed hosts, logins and other secrets\./);
   assert.match(dialog, /<p id="project-error" class="error" role="alert" hidden><\/p>/, "the dialog has a place for the API's refusal");
 });
 
@@ -853,7 +871,7 @@ test("the new-project form adds the project nexus project add would, and the API
   });
   const added = await add("acme", node);
   assert.equal(added.status, 201, added.text);
-  assert.deepEqual(JSON.parse(added.text), project("acme"), "the same project as the CLI's defaults");
+  assert.deepEqual(JSON.parse(added.text), { ...project("acme"), resources: { cpus: 2, memoryGiB: 6, diskGiB: 10 } }, "the same project as the CLI's defaults");
   assert.equal(sidebarOf((await s.call("GET", "/")).text).text, "acme main", "the sidebar lists it with its branch");
 
   const refusal = (res: Reply) => [res.status, (JSON.parse(res.text) as { error: string }).error];
@@ -906,11 +924,27 @@ test("every page carries the start dialog, which offers every project and node a
   assert.deepEqual([...dialog.matchAll(/<option value="([^"]*)">([^<]*)</g)].map((m) => [m[1], m[2]]), [["", "rj-firebat (project default)"], ["auto", "auto, where it fits best"], [node, `${node}, offline`]]);
   assert.match(textOf(dialog), /No image is current yet.* Boots a pylon on rj-firebat and checks out main \./);
 
+  await s.call("POST", "/v1/projects", { ...project("spread"), defaultNode: "auto" });
+  const spread = (await s.call("GET", "/threads/new?project=spread")).text.split('<dialog id="start-dialog"')[1]!.split("</dialog>")[0]!;
+  assert.match(spread, /<option value="">auto \(project default\)<\/option>/);
+  assert.match(textOf(spread), /Boots a pylon on the node with the most room left and checks out main \./, "a project whose default node is auto names no node");
+
   await s.call("POST", "/v1/images", image);
   s.registry.setCurrentImage(image.id as ImageId);
   const home = (await s.call("GET", "/")).text;
   assert.doesNotMatch(home, /data-autoopen/, "the dialog stays closed until asked for");
   assert.match(textOf(home.split('<dialog id="start-dialog"')[1]!.replace(/^[^>]*>/, "")), new RegExp(`^Start a thread ✕ Worker Claude Code .* Title \\(optional\\) Project acme .* Boots a pylon on rj-firebat from image ${image.id} and checks out main \\.`));
+});
+
+test("the start dialog offers the thread's size, with the chosen project's as placeholders, and each project radio carries its own", async (t) => {
+  const s = await setup(t);
+  await s.call("POST", "/v1/projects", project("acme"));
+  await s.call("POST", "/v1/projects", { ...project("big"), resources: { cpus: 4, memoryGiB: 12, diskGiB: 40 } });
+  const dialog = (await s.call("GET", "/threads/new?project=big")).text.split('<dialog id="start-dialog"')[1]!.split("</dialog>")[0]!;
+  assert.deepEqual([...dialog.matchAll(/<label for="(start-(?:cpus|memory|disk))">([^<]*)<\/label><input id="\1" name="([^"]*)" type="number" min="1" step="1" inputmode="numeric" placeholder="([^"]*)">/g)].map((m) => [m[2], m[3], m[4]]),
+    [["CPUs", "cpus", "4"], ["Memory (GiB)", "memoryGiB", "12"], ["Disk (GiB)", "diskGiB", "40"]], "empty, so a start without them takes the project's");
+  assert.deepEqual([...dialog.matchAll(/name="project" required value="([^"]*)"[^>]* data-cpus="([^"]*)" data-memory-gib="([^"]*)" data-disk-gib="([^"]*)"/g)].map((m) => m.slice(1)),
+    [["acme", "2", "4", "10"], ["big", "4", "12", "40"]], "client.js shows the picked project's size from these");
 });
 
 test("the start dialog picks Claude Code for a prompt unless the reader picks the Nexus agent, whose thread needs a title", async (t) => {

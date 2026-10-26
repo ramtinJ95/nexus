@@ -1,0 +1,11 @@
+<div class="nodes" id="side-nodes" data-live aria-label="Nodes"><h2>Nodes</h2><small>Desired release: manual</small><span><svg class="i i-server" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 3h10v4H3zM3 9h10v4H3zM5.5 5h.01M5.5 11h.01"/></svg>infra-testbench<span class="dot dot-ok" aria-hidden="true"></span></span><small>0/31.3 GiB memory</small><span><svg class="i i-server" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 3h10v4H3zM3 9h10v4H3zM5.5 5h.01M5.5 11h.01"/></svg>rj-firebat<span class="dot dot-ok" aria-hidden="true"></span><em>overcommitted</em></span><small>40/22.8 GiB memory · 8 GiB to wake paused</small><span><svg class="i i-server" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 3h10v4H3zM3 9h10v4H3zM5.5 5h.01M5.5 11h.01"/></svg>spare-node<span class="dot dot-ok" aria-hidden="true"></span></span><small>4/31.3 GiB memory</small></div>
+<div class="two three">
+<div><label for="start-cpus">CPUs</label><input id="start-cpus" name="cpus" type="number" min="1" step="1" inputmode="numeric" placeholder="4"></div>
+<div><label for="start-memory">Memory (GiB)</label><input id="start-memory" name="memoryGiB" type="number" min="1" step="1" inputmode="numeric" placeholder="8"></div>
+<div><label for="start-disk">Disk (GiB)</label><input id="start-disk" name="diskGiB" type="number" min="1" step="1" inputmode="numeric" placeholder="40"></div>
+</div>
+<p class="hint" id="start-hint" data-image="img-0000000000dd">Boots a pylon on the node with the most room left from image <code>img-0000000000dd</code> and checks out <code>main</code>.</p>
+<select id="project-node" name="defaultNode">
+<option value="auto" selected>auto, where it fits best</option>
+<option value="infra-testbench">infra-testbench</option><option value="rj-firebat">rj-firebat</option><option value="spare-node">spare-node</option>
+</select>

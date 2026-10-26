@@ -28,6 +28,7 @@ import type { NodeRecord, Output, Preview, Registry, Thread, ThreadId } from "./
 import { usageLimitText, type ClaudeConversation, type ClaudeEntry, type PromptSource } from "../claude-transcript.ts";
 import { queuedOf } from "./claude-conversation.ts";
 import { labelNote, roundsSpent } from "./review.ts";
+import { gib, nodePylons, overcommitted } from "./placement.ts";
 
 export interface DashboardOptions {
   registry: Registry;
@@ -304,9 +305,19 @@ ${closed.length > 0 && html`<details class="archived" id="archived-${p.id}"${clo
 </details>`;
 })}
 </nav>
-<div class="nodes" id="side-nodes" data-live aria-label="Nodes"><h2>Nodes</h2><small>Desired release: ${c.registry.desiredRelease()?.commit.slice(0, 12) ?? "manual"}</small>${c.registry.nodes().map((n) => html`<span>${icon("server")}${n.name}${dot(n.state === "online" ? "ok" : "muted")}${n.state === "offline" && html`<em>offline</em>`}</span>${c.registry.releaseReports().filter((r) => r.node === n.name).map((r) => html`<small title="${r.reason ?? ""}">${r.role}: ${r.commit?.slice(0, 12) ?? "unknown"} · ${c.now - r.observedAt >= 90_000 ? "stale" : r.state}</small>`)}`)}</div>
+<div class="nodes" id="side-nodes" data-live aria-label="Nodes"><h2>Nodes</h2><small>Desired release: ${c.registry.desiredRelease()?.commit.slice(0, 12) ?? "manual"}</small>${c.registry.nodes().map((n) => html`<span>${icon("server")}${n.name}${dot(n.state === "online" ? "ok" : "muted")}${n.state === "offline" && html`<em>offline</em>`}${overcommitted(n.capacity) && html`<em>overcommitted</em>`}</span>${memoryLine(c, n)}${c.registry.releaseReports().filter((r) => r.node === n.name).map((r) => html`<small title="${r.reason ?? ""}">${r.role}: ${r.commit?.slice(0, 12) ?? "unknown"} · ${c.now - r.observedAt >= 90_000 ? "stale" : r.state}</small>`)}`)}</div>
 <a class="btn side-add" href="/projects/new" data-new-project>New project</a>
 </aside>`;
+}
+
+/**
+ * A node's committed and total memory, and what its paused pylons need to wake. A probe from before pylons were
+ * counted reports no committed memory, so its node shows none.
+ */
+function memoryLine(c: Context, n: NodeRecord): Html | false {
+  if (n.capacity?.committedDiskGiB === undefined) return false;
+  const paused = nodePylons(c.registry, n)?.paused.memoryGiB ?? 0;
+  return html`<small>${gib(n.capacity.committedMemoryGiB)}/${gib(n.capacity.memoryGiB)} GiB memory${paused > 0 && ` · ${gib(paused)} GiB to wake paused`}</small>`;
 }
 
 /**
@@ -339,7 +350,7 @@ ${image === null && html`<p class="error">No image is current yet, so a new pylo
 <label for="start-title" id="start-title-label">Title (optional)</label>
 <input id="start-title" name="title" autocomplete="off" placeholder="The prompt's first line">
 <fieldset class="seg"><legend>Project</legend>
-${projects.map((p) => html`<label class="seg-opt"><input type="radio" name="project" required value="${p.id}" data-node="${p.defaultNode}" data-branch="${p.defaultBranch}"${p.repoUrl === null && " data-scratch"}${p === chosen && " checked"}><span class="seg-name">${p.id}</span><span class="seg-repo">${p.repoUrl ?? "scratch"}</span></label>`)}
+${projects.map((p) => html`<label class="seg-opt"><input type="radio" name="project" required value="${p.id}" data-node="${p.defaultNode}" data-branch="${p.defaultBranch}" data-cpus="${p.resources.cpus}" data-memory-gib="${p.resources.memoryGiB}" data-disk-gib="${p.resources.diskGiB}"${p.repoUrl === null && " data-scratch"}${p === chosen && " checked"}><span class="seg-name">${p.id}</span><span class="seg-repo">${p.repoUrl ?? "scratch"}</span></label>`)}
 </fieldset>
 <div class="two">
 <div><label for="start-node">Node</label><select id="start-node" name="node">
@@ -349,7 +360,12 @@ ${nodes.map((n) => html`<option value="${n.name}">${n.name}${n.state === "offlin
 </select></div>
 <div><label for="start-branch">Branch</label><input id="start-branch" name="branch" autocomplete="off" placeholder="${chosen.defaultBranch}"></div>
 </div>
-<p class="hint" id="start-hint" data-image="${image ?? ""}">Boots a pylon on <b>${chosen.defaultNode}</b>${image !== null && html` from image <code>${image}</code>`} and ${chosen.repoUrl === null ? "starts an empty repository on" : "checks out"} <code>${chosen.defaultBranch}</code>.</p>
+<div class="two three">
+<div><label for="start-cpus">CPUs</label><input id="start-cpus" name="cpus" type="number" min="1" step="1" inputmode="numeric" placeholder="${chosen.resources.cpus}"></div>
+<div><label for="start-memory">Memory (GiB)</label><input id="start-memory" name="memoryGiB" type="number" min="1" step="1" inputmode="numeric" placeholder="${chosen.resources.memoryGiB}"></div>
+<div><label for="start-disk">Disk (GiB)</label><input id="start-disk" name="diskGiB" type="number" min="1" step="1" inputmode="numeric" placeholder="${chosen.resources.diskGiB}"></div>
+</div>
+<p class="hint" id="start-hint" data-image="${image ?? ""}">Boots a pylon on ${chosen.defaultNode === "auto" ? "the node with the most room left" : html`<b>${chosen.defaultNode}</b>`}${image !== null && html` from image <code>${image}</code>`} and ${chosen.repoUrl === null ? "starts an empty repository on" : "checks out"} <code>${chosen.defaultBranch}</code>.</p>
 <p id="start-error" class="error" role="alert" hidden></p>
 <footer><button type="button" class="btn btn-ghost" data-close>Cancel</button><button type="submit" class="btn btn-primary">Start thread<kbd>⌘↵</kbd></button></footer>
 </form>`}
@@ -360,22 +376,20 @@ ${nodes.map((n) => html`<option value="${n.name}">${n.name}${n.state === "offlin
 const newProjectButton = html`<a class="btn btn-primary" href="/projects/new" data-new-project>New project</a>`;
 
 /** What a new project gets beyond the dialog's fields, the same as `nexus project add` without its flags. */
-const newProjectResources = { cpus: 2, memoryGiB: 4, diskGiB: 10 };
+const newProjectResources = { cpus: 2, memoryGiB: 6, diskGiB: 10 };
 
 /**
- * The fields `nexus project add` asks for. The node is one of the known nodes, the first online one unless changed,
- * and the API's own checks, such as for an ID that exists, answer in the dialog. GitHub access is the one secret
- * grant the dialog offers, githubTokenGrant, which the form carries for client.js to send. Nodes come from the control plane's
- * config and change only with a restart, so the dialog is not refreshed with the page, and its default is the node
- * that was online when the page loaded.
+ * The fields `nexus project add` asks for. The node is `auto` unless changed to one of the known nodes, as `nexus
+ * project add` without --node, and the API's own checks, such as for an ID that exists, answer in the dialog. GitHub
+ * access is the one secret grant the dialog offers, githubTokenGrant, which the form carries for client.js to send.
+ * Nodes come from the control plane's config and change only with a restart, so the dialog is not refreshed with the page.
  */
 function projectDialog(c: Context, open: boolean): Html {
   const nodes = c.registry.nodes();
-  const chosen = nodes.find((n) => n.state === "online") ?? nodes[0];
   const { cpus, memoryGiB, diskGiB } = newProjectResources;
   return html`<dialog id="project-dialog" class="modal" aria-labelledby="project-h"${open && " data-autoopen"}>
 <header><h2 id="project-h">New project</h2><button type="button" class="icon-btn" data-close aria-label="Close">✕</button></header>
-${chosen === undefined ? html`<p class="empty modal-empty">No nodes yet, so a project has nowhere to run.</p>` : html`<form id="project" class="form" data-resources="${JSON.stringify(newProjectResources)}" data-github-grant="${JSON.stringify(githubTokenGrant)}">
+${nodes.length === 0 ? html`<p class="empty modal-empty">No nodes yet, so a project has nowhere to run.</p>` : html`<form id="project" class="form" data-resources="${JSON.stringify(newProjectResources)}" data-github-grant="${JSON.stringify(githubTokenGrant)}">
 <label for="project-id">ID</label>
 <input id="project-id" name="id" required autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="my-app" autofocus>
 <fieldset class="seg"><legend>Repository</legend>
@@ -386,12 +400,13 @@ ${chosen === undefined ? html`<p class="empty modal-empty">No nodes yet, so a pr
 <input id="project-repo" name="repoUrl" required autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="git@github.com:you/my-app.git">
 <div class="two">
 <div><label for="project-node">Node</label><select id="project-node" name="defaultNode">
-${nodes.map((n) => html`<option value="${n.name}"${n === chosen && " selected"}>${n.name}${n.state === "offline" && ", offline"}</option>`)}
+<option value="auto" selected>auto, where it fits best</option>
+${nodes.map((n) => html`<option value="${n.name}">${n.name}${n.state === "offline" && ", offline"}</option>`)}
 </select></div>
 <div><label for="project-branch">Branch</label><input id="project-branch" name="defaultBranch" required autocomplete="off" autocapitalize="off" spellcheck="false" value="main"></div>
 </div>
 <label class="check"><input type="checkbox" name="github"> GitHub access</label>
-<p class="hint">Threads clone the repository at this branch, or in a scratch project start an empty repository on it, and boot on this node unless they pick another. A scratch pylon keeps nothing once its thread is deleted, so its agent publishes what is worth keeping. GitHub access sends the node's <code>${githubTokenGrant.name}</code> to ${githubTokenGrant.hosts.join(" and ")}, so agents can create repositories and push. Each pylon gets ${cpus} CPUs, ${memoryGiB} GiB of memory and ${diskGiB} GiB of disk. <code>nexus project add</code> can set those, allowed hosts, logins and other secrets.</p>
+<p class="hint">Threads clone the repository at this branch, or in a scratch project start an empty repository on it, and boot on this node unless they pick another. With auto, each boots on the node with the most room left among those that hold the image and the project's secrets. A scratch pylon keeps nothing once its thread is deleted, so its agent publishes what is worth keeping. GitHub access sends the node's <code>${githubTokenGrant.name}</code> to ${githubTokenGrant.hosts.join(" and ")}, so agents can create repositories and push. Each pylon gets ${cpus} CPUs, ${memoryGiB} GiB of memory and ${diskGiB} GiB of disk. <code>nexus project add</code> can set those, allowed hosts, logins and other secrets.</p>
 <p id="project-error" class="error" role="alert" hidden></p>
 <footer><button type="button" class="btn btn-ghost" data-close>Cancel</button><button type="submit" class="btn btn-primary">Add project<kbd>⌘↵</kbd></button></footer>
 </form>`}

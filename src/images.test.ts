@@ -48,11 +48,12 @@ const project: RemoteProject = {
 };
 const inputs: SetupInputs = { commit: "c1", setupBlob: "blob1" };
 
-test("setupHashOf changes with .nexus/setup, preSetup and the effective allowlist only", () => {
+test("setupHashOf changes with .nexus/setup, preSetup, the effective allowlist and the disk size only", () => {
   const hash = setupHashOf(project, inputs);
   assert.match(hash, /^[0-9a-f]{64}$/);
   assert.equal(setupHashOf(project, { ...inputs, commit: "c2" }), hash, "a commit that leaves setup alone keeps the key");
   assert.equal(setupHashOf({ ...project, allowedHosts: ["registry.npmjs.org", "registry.npmjs.org"] }, inputs), hash);
+  assert.equal(setupHashOf({ ...project, resources: { ...project.resources, cpus: 8, memoryGiB: 32 } }, inputs), hash, "CPUs and memory are the VM's, not the template's");
   for (const changed of [
     setupHashOf(project, { ...inputs, setupBlob: "blob2" }),
     setupHashOf(project, { ...inputs, setupBlob: null }),
@@ -60,6 +61,7 @@ test("setupHashOf changes with .nexus/setup, preSetup and the effective allowlis
     setupHashOf({ ...project, logins: ["claude"] }, inputs),
     setupHashOf({ ...project, secrets: [{ name: "K", hosts: ["api.stripe.com"] }] }, inputs),
     setupHashOf({ ...project, repoUrl: "https://github.com/ramtin/acme-web.git" }, inputs),
+    setupHashOf({ ...project, resources: { ...project.resources, diskGiB: project.resources.diskGiB + 10 } }, inputs),
   ]) assert.notEqual(changed, hash);
 });
 

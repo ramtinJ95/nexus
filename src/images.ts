@@ -157,8 +157,9 @@ export interface ProjectMirror {
 }
 
 /** sha256 of setupBlob, project.preSetup and effectiveAllowedHosts(project), since the hosts setup can reach change what it can install. */
+/** The disk size is in it because a template's disk is the pylon's, and a pylon's disk size is fixed once it exists. */
 export function setupHashOf(project: Project, inputs: SetupInputs): string {
-  return sha256Of({ setupBlob: inputs.setupBlob, preSetup: project.preSetup, allowedHosts: effectiveAllowedHosts(project) });
+  return sha256Of({ setupBlob: inputs.setupBlob, preSetup: project.preSetup, allowedHosts: effectiveAllowedHosts(project), diskGiB: project.resources.diskGiB });
 }
 export function templateIdOf(key: TemplateKey, node: NodeName, startedAt: number): TemplateId {
   return `tpl-${sha256Of({ project: key.project, image: key.image, setupHash: key.setupHash, node, startedAt }).slice(0, 12)}`;

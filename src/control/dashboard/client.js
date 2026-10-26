@@ -337,6 +337,9 @@ function updateStartHint() {
   const branch = form.elements.branch.value || project.dataset.branch;
   form.querySelector("#start-node option[value='']").textContent = `${project.dataset.node} (project default)`;
   form.elements.branch.placeholder = project.dataset.branch;
+  form.elements.cpus.placeholder = project.dataset.cpus;
+  form.elements.memoryGiB.placeholder = project.dataset.memoryGib;
+  form.elements.diskGiB.placeholder = project.dataset.diskGib;
   const hint = document.getElementById("start-hint");
   const tag = (name, text) => Object.assign(document.createElement(name), { textContent: text });
   const image = hint.dataset.image;
@@ -408,7 +411,8 @@ function startState() {
   const form = document.getElementById("start");
   if (form === null) return null;
   const project = form.querySelector("input[name=project]:checked")?.value ?? null;
-  return { form, project, worker: form.elements.worker.value, title: form.elements.title.value, claude: form.elements.claude.value, model: form.elements.model.value, node: form.elements.node.value, branch: form.elements.branch.value };
+  return { form, project, worker: form.elements.worker.value, title: form.elements.title.value, claude: form.elements.claude.value, model: form.elements.model.value, node: form.elements.node.value, branch: form.elements.branch.value,
+    cpus: form.elements.cpus.value, memoryGiB: form.elements.memoryGiB.value, diskGiB: form.elements.diskGiB.value };
 }
 function restoreStart(saved) {
   const form = document.getElementById("start");
@@ -419,6 +423,7 @@ function restoreStart(saved) {
   form.elements.claude.value = saved.claude;
   form.elements.model.value = saved.model;
   form.elements.branch.value = saved.branch;
+  for (const field of ["cpus", "memoryGiB", "diskGiB"]) form.elements[field].value = saved[field];
   if ([...form.elements.node.options].some((o) => o.value === saved.node)) form.elements.node.value = saved.node;
   if (saved.project !== null) selectProject(saved.project);
   form.querySelector("button[type=submit]").disabled = starting;
@@ -432,9 +437,11 @@ document.addEventListener("submit", async (event) => {
   if (starting) return;
   starting = true;
   const form = event.target;
-  // Empty optional fields mean the project's defaults, which the API applies when the field is absent. The worker
-  // picked shows in which fields are sent.
-  const body = Object.fromEntries([...new FormData(form)].filter(([key, value]) => value !== "" && key !== "worker"));
+  // Empty optional fields mean the project's defaults, which the API applies when the field is absent. The size
+  // fields go in `resources`, as the API takes them. The worker picked shows in which fields are sent.
+  const { cpus, memoryGiB, diskGiB, ...body } = Object.fromEntries([...new FormData(form)].filter(([key, value]) => value !== "" && key !== "worker"));
+  const resources = Object.fromEntries(Object.entries({ cpus, memoryGiB, diskGiB }).flatMap(([key, value]) => value === undefined ? [] : [[key, Number(value)]]));
+  if (Object.keys(resources).length > 0) body.resources = resources;
   if (body.claude !== undefined && body.title === undefined) body.title = titleOf(body.claude);
   form.querySelector("button[type=submit]").disabled = true;
   try {

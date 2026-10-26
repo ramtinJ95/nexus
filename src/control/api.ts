@@ -51,6 +51,7 @@ import { typeIntoClaude } from "./inbox.ts";
 import { HttpError } from "./http-error.ts";
 import { imagesView, type ImageOperation, type ImageRollout } from "./image-rollout.ts";
 import { threadStarter } from "./threads.ts";
+import { nodePylons, overcommitted, type NodePylons } from "./placement.ts";
 import { maxRounds, needsPerson, type Review, type ReviewLoop } from "./review.ts";
 
 export interface ApiOptions {
@@ -110,6 +111,8 @@ export interface ThreadDetail {
   pylon: {
     grantsOutdated: boolean;
     id: PylonId; node: NodeName; actualState: ActualState; failed: string | null; observedAt: string | null;
+    /** The size the pylon boots with, fixed when its thread started. */
+    resources: BootInputs["resources"];
     /** Why a retry of the pylon, as its node last reported it, cannot help. Null when a retry can. */
     retryRefused: string | null;
   };
@@ -184,8 +187,11 @@ export const maxStreams = 16;
  */
 const pingMs = 15_000;
 
-/** A node without its probe's latest observation, which thread detail already reports per pylon. */
-export type NodeSummary = Omit<NodeRecord, "observation"> & { observedAt: string | null };
+/**
+ * A node without its probe's latest observation, which thread detail already reports per pylon. `pylons` sorts the
+ * observation's pylons by what they hold, and is null for a node never observed.
+ */
+export type NodeSummary = Omit<NodeRecord, "observation"> & { observedAt: string | null; overcommitted: boolean; pylons: NodePylons | null };
 
 function networkGrantsKey(network: BootInputs["network"]): string {
   const sorted = (values: Iterable<string>) => [...new Set(values)].sort();
@@ -207,7 +213,7 @@ const projectSchema = z.strictObject({
   id: name.transform((id) => id as ProjectId),
   repoUrl: gitUrl.nullable(),
   defaultBranch: z.string().min(1),
-  defaultNode: z.string().min(1).transform((node) => node as NodeName),
+  defaultNode: z.string().min(1).transform((node) => node as NodeName | "auto"),
   resources: z.strictObject({ cpus: z.int().positive(), memoryGiB: z.int().positive(), diskGiB: z.int().positive() }),
   allowedHosts: z.array(host),
   secrets: z.array(z.strictObject({ name: z.string().regex(/^[A-Z_][A-Z0-9_]*$/), hosts: z.array(z.string().regex(/^(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/)).min(1) }))
@@ -230,6 +236,8 @@ const startSchema = z.strictObject({
    * A scratch project has none to pin.
    */
   commit: z.string().min(1).optional(),
+  /** The thread's size where it differs from its project's. Its pylon boots this size on every wake. */
+  resources: projectSchema.shape.resources.partial().optional(),
 });
 // Agent activity comes from the harness.
 const seenSchema = z.strictObject({ lastReplyAt: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER).nullable().optional() });
@@ -291,9 +299,13 @@ export async function startApi(options: ApiOptions): Promise<Api> {
     wake(registry.pylon(t.pylonId)!.node);
   }
 
+  function refuseUnknownNode(project: Project) {
+    if (project.defaultNode !== "auto" && registry.node(project.defaultNode) === undefined) throw new HttpError(400, `no node ${project.defaultNode}`);
+  }
+
   function createProject(body: unknown): Project {
     const project: Project = parse(projectSchema, body);
-    if (registry.node(project.defaultNode) === undefined) throw new HttpError(400, `no node ${project.defaultNode}`);
+    refuseUnknownNode(project);
     if (registry.project(project.id) !== undefined) throw new HttpError(409, `project ${project.id} exists`);
     registry.createProject(project);
     return project;
@@ -354,7 +366,7 @@ export async function startApi(options: ApiOptions): Promise<Api> {
         allowedHosts: withHttpsHosts(effectiveAllowedHosts(registry.project(t.project)!), [pylon.boot.dotfiles.repo]),
         secrets: bootSecrets(registry.project(t.project)!),
       }),
-      id: pylon.pylonId, node: pylon.node, failed: pylon.failed, observedAt: node.observation?.observedAt ?? null,
+      id: pylon.pylonId, node: pylon.node, failed: pylon.failed, observedAt: node.observation?.observedAt ?? null, resources: pylon.boot.resources,
       actualState: actualState(observed, inFlight, node.state === "online", gaveUp), retryRefused: retryRefusal(observed),
     };
   }
@@ -748,7 +760,7 @@ export async function startApi(options: ApiOptions): Promise<Api> {
       const patch = parse(projectEditSchema, await r.body());
       const project = registry.editProject(id as ProjectId, (previous) => {
         const updated: Project = parse(projectSchema, { ...previous, ...patch, resources: { ...previous.resources, ...patch.resources } });
-        if (registry.node(updated.defaultNode) === undefined) throw new HttpError(400, `no node ${updated.defaultNode}`);
+        refuseUnknownNode(updated);
         return updated;
       });
       if (project === undefined) throw new HttpError(404, `no project ${id}`);
@@ -756,7 +768,10 @@ export async function startApi(options: ApiOptions): Promise<Api> {
     }],
     ["GET", /^\/v1\/projects$/, () => ok(registry.projects())],
     ["POST", /^\/v1\/projects$/, async (_, r) => created(createProject(await r.body()))],
-    ["GET", /^\/v1\/nodes$/, () => ok(registry.nodes().map(({ observation, ...n }): NodeSummary => ({ ...n, observedAt: observation?.observedAt ?? null })))],
+    ["GET", /^\/v1\/nodes$/, () => ok(registry.nodes().map((record): NodeSummary => {
+      const { observation, ...n } = record;
+      return { ...n, observedAt: observation?.observedAt ?? null, overcommitted: overcommitted(n.capacity), pylons: nodePylons(registry, record) };
+    }))],
     ["GET", /^\/v1\/threads$/, (_, r) => ok(registry.threads((r.query.get("project") ?? undefined) as ProjectId | undefined).map(row))],
     ["POST", /^\/v1\/threads$/, async (_, r) => {
       const request = parse(startSchema, await r.body());

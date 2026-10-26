@@ -210,12 +210,13 @@ test("projects are created, listed, and checked", async (t) => {
 
 test("nodes are listed with their state and capacity, without the observation", async (t) => {
   const s = await setup(t);
-  const offline = { name: node, tailnetHost: "rj-firebat.tail.ts.net", tailnetNodeId: "nFIREBAT", state: "offline", capacity: null, observedAt: null };
+  const offline = { name: node, tailnetHost: "rj-firebat.tail.ts.net", tailnetNodeId: "nFIREBAT", state: "offline", capacity: null, observedAt: null, overcommitted: false, pylons: null };
   assert.deepEqual(await s.call("GET", "/v1/nodes"), { status: 200, body: [offline] });
   const capacity = { cpus: 16, committedCpus: 0, memoryGiB: 64, committedMemoryGiB: 0, diskFreeGiB: 100, committedDiskGiB: 0 };
+  const none = { pylons: 0, cpus: 0, memoryGiB: 0 };
   s.registry.apply({ record: "node", node, state: "online", capacity });
   s.registry.ingested({ node, observedAt: "2027-01-01T00:01:00Z", probeBootId: "b", capacity, artifacts: [], jobs: [], pylons: [], grants: { secrets: [], gitSsh: false }, previewRoutes: [] }, []);
-  assert.deepEqual((await s.call("GET", "/v1/nodes")).body, [{ ...offline, state: "online", capacity, observedAt: "2027-01-01T00:01:00Z" }]);
+  assert.deepEqual((await s.call("GET", "/v1/nodes")).body, [{ ...offline, state: "online", capacity, observedAt: "2027-01-01T00:01:00Z", pylons: { up: none, paused: none, archived: none, crashed: none, orphaned: [] } }]);
 });
 
 test("a thread cannot start before an image is current", async (t) => {
@@ -433,6 +434,164 @@ test("a start whose setup cannot be read boots fresh and says why, and only a fu
   assert.equal(pinned.setup?.how, "fresh");
 });
 
+test("two overlapping --node auto starts take different rooms, and a start that fails gives its room back", async (t) => {
+  const s = await withImage(t);
+  observeNode(s, "a", { total: 16, committed: 8 });
+  observeNode(s, "b", { total: 16, committed: 9 });
+  const { harness } = s.fake;
+  const start = harness.startThread;
+  const held = Promise.withResolvers<void>();
+  let entered = 0;
+  harness.startThread = async (thread) => { entered++; await held.promise; return start(thread); };
+  const both = [s.call("POST", "/v1/threads", { project: "acme", title: "One", node: "auto" }), s.call("POST", "/v1/threads", { project: "acme", title: "Two", node: "auto" })];
+  while (entered < 2) await sleep(5);
+  held.resolve();
+  const placed = (await Promise.all(both)).map((r) => r.body.placement.node);
+  assert.deepEqual(placed.toSorted(), ["a", "b"], "the second start sees the room the first one reserved on a");
+
+  observeNode(s, "a", { total: 16, committed: 0 });
+  observeNode(s, "b", { total: 16, committed: 0 });
+  harness.startThread = async () => { throw new Error("the harness is down"); };
+  assert.equal((await s.call("POST", "/v1/threads", { project: "acme", title: "Fails", node: "a" })).status, 500);
+  harness.startThread = start;
+  const after = await s.call("POST", "/v1/threads", { project: "acme", title: "After", node: "auto" });
+  assert.deepEqual(after.body.placement.weighed.filter((w: { node: string }) => w.node !== "rj-firebat"), [
+    { node: "a", left: { cpus: 8, memoryGiB: 8, diskGiB: 180 } },
+    { node: "b", left: { cpus: 8, memoryGiB: 8, diskGiB: 180 } },
+  ], "each node counts the one overlapping start it has yet to report, and a counts nothing of the start that failed");
+});
+
+test("a project whose default node is auto places each thread that names none, and a named node still pins", async (t) => {
+  const s = await withImage(t);
+  observeNode(s, "big", { total: 64, committed: 0 });
+  assert.equal((await s.call("PATCH", "/v1/projects/acme", { defaultNode: "nowhere" })).status, 400);
+  const edited = await s.call("PATCH", "/v1/projects/acme", { defaultNode: "auto" });
+  assert.deepEqual([edited.status, edited.body.defaultNode], [200, "auto"]);
+  const plain = await s.call("POST", "/v1/threads", { project: "acme", title: "Plain" });
+  assert.equal(plain.status, 201, JSON.stringify(plain.body));
+  assert.deepEqual([plain.body.placement.how, plain.body.placement.node], ["auto", "big"]);
+  const named = await s.call("POST", "/v1/threads", { project: "acme", title: "Named", node });
+  assert.deepEqual(named.body.placement, { how: "named", node });
+  assert.equal((await s.call("POST", "/v1/projects", { ...project, id: "spread", defaultNode: "auto" })).status, 201);
+});
+
+test("--node auto refuses an overcommitted node with its reason, and places the pylon on one that fits", async (t) => {
+  const s = await withImage(t);
+  observeNode(s, "firebat", { total: 22.8, committed: 40 });
+  observeNode(s, "testbench", { total: 32, committed: 0 });
+  const started = await s.call("POST", "/v1/threads", { project: "acme", title: "Placed", node: "auto" });
+  assert.equal(started.body.placement.node, "testbench");
+  assert.deepEqual(started.body.placement.weighed.find((w: { node: string }) => w.node === "firebat"), { node: "firebat", refused: "is overcommitted, with 40 of 22.8 GiB of memory committed" });
+});
+
+test("a start whose disk differs from its project's boots fresh without a template, and one that changes only CPUs or memory may use one", async (t) => {
+  const s = await withImage(t);
+  s.remoteReads(async () => ({ commit: "1".repeat(40), setupBlob: "b".repeat(40) }));
+  const disk = (await s.call("POST", "/v1/threads", { project: "acme", title: "Disk", resources: { diskGiB: 40 } })).body as Thread;
+  assert.deepEqual(disk.setup, { how: "fresh", reason: "the start asked for a 40 GiB disk, and this project's templates have 10 GiB" });
+  assert.deepEqual([s.reads, s.registry.templates(project.id as ProjectId)], [[], []], "nothing is read, and no template of the project's size is built for it");
+  const memory = (await s.call("POST", "/v1/threads", { project: "acme", title: "Memory", resources: { memoryGiB: 12 } })).body as Thread;
+  assert.equal(memory.setup?.how, "fresh");
+  assert.ok(memory.setup?.how === "fresh" && memory.setup.building !== undefined, "it asks for the project's template, whose disk it can boot");
+  assert.deepEqual(s.reads, [{ branch: "main" }]);
+});
+
+test("a template built before the project's disk size changed is not reused by a start of the new size", async (t) => {
+  const s = await withImage(t);
+  observeNode(s, node, { total: 64, committed: 0 });
+  s.remoteReads(async () => ({ commit: "1".repeat(40), setupBlob: "b".repeat(40) }));
+  await s.call("POST", "/v1/threads", { project: "acme", title: "Builds" });
+  const [old] = s.registry.templates(project.id as ProjectId);
+  assert.ok(old?.state === "building");
+  s.registry.saveTemplate({ id: old.id, key: old.key, state: "ready", builtOn: node, builtAt: Date.now() - 60_000, commit: "1".repeat(40) });
+  observeNode(s, node, { total: 64, committed: 0 }, { artifacts: [image.id, old.id] as NodeObservation["artifacts"] });
+  assert.equal((await s.call("POST", "/v1/threads", { project: "acme", title: "Reuses" })).body.setup.how, "template", "the 10 GiB template serves a 10 GiB start");
+
+  assert.equal((await s.call("PATCH", "/v1/projects/acme", { resources: { diskGiB: 40 } })).status, 200);
+  const sized = (await s.call("POST", "/v1/threads", { project: "acme", title: "Sized", resources: { diskGiB: 40 } })).body as Thread;
+  assert.equal(sized.setup?.how, "fresh", "the 10 GiB template's disk cannot be a 40 GiB pylon's");
+  assert.ok(sized.setup?.how === "fresh" && sized.setup.building !== undefined && sized.setup.building !== old.id, "a 40 GiB template is built for the next thread");
+  assert.deepEqual(s.registry.pylon(sized.pylonId)!.firstBoot, { kind: "fresh", preSetup: null });
+});
+
+test("a start's size overrides its project's field by field, its pylon boots that size, and thread detail reads it back", async (t) => {
+  const s = await withImage(t);
+  const bigger = await s.call("POST", "/v1/threads", { project: "acme", title: "Bigger", resources: { memoryGiB: 12 } });
+  assert.equal(bigger.status, 201, JSON.stringify(bigger.body));
+  assert.deepEqual(s.registry.pylon(bigger.body.pylonId)!.boot.resources, { cpus: 2, memoryGiB: 12, diskGiB: 10 }, "the fields it leaves out are the project's");
+  assert.deepEqual((await s.call("GET", `/v1/threads/${bigger.body.id}`)).body.pylon.resources, { cpus: 2, memoryGiB: 12, diskGiB: 10 });
+  const sized = await s.call("POST", "/v1/threads", { project: "acme", title: "Sized", resources: { cpus: 4, memoryGiB: 8, diskGiB: 40 } });
+  assert.deepEqual(s.registry.pylon(sized.body.pylonId)!.boot.resources, { cpus: 4, memoryGiB: 8, diskGiB: 40 });
+  const plain = await s.call("POST", "/v1/threads", { project: "acme", title: "Plain" });
+  assert.deepEqual((await s.call("GET", `/v1/threads/${plain.body.id}`)).body.pylon.resources, project.resources);
+
+  for (const resources of [{ cpus: 0 }, { memoryGiB: -8 }, { diskGiB: 1.5 }, { memoryGiB: "8" }, { gpus: 1 }, 8]) {
+    assert.equal((await s.call("POST", "/v1/threads", { project: "acme", title: "Wrong", resources })).status, 400, JSON.stringify(resources));
+  }
+  assert.deepEqual((await s.call("GET", "/v1/threads")).body.map((r: Thread) => r.title).toSorted(), ["Bigger", "Plain", "Sized"], "no refused start made a thread");
+});
+
+test("--node auto weighs a thread's own size, not its project's, and counts it once placed", async (t) => {
+  const s = await withImage(t);
+  observeNode(s, "small", { total: 16, committed: 8 });
+  observeNode(s, "big", { total: 64, committed: 48 });
+  const started = await s.call("POST", "/v1/threads", { project: "acme", title: "Big", node: "auto", resources: { memoryGiB: 12 } });
+  assert.equal(started.status, 201, JSON.stringify(started.body));
+  assert.equal(started.body.placement.node, "big");
+  assert.deepEqual(started.body.placement.weighed.find((w: { node: string }) => w.node === "small"), { node: "small", refused: "has 8 of 16 GiB of memory committed, and the pylon needs 12" },
+    "small has room for the project's 4 GiB but not the start's 12");
+  const refused = await s.call("POST", "/v1/threads", { project: "acme", title: "Huge", node: "auto", resources: { memoryGiB: 20 } });
+  assert.equal(refused.status, 409);
+  assert.match(refused.body.error, /big has 60 of 64 GiB of memory committed, and the pylon needs 20/, "big counts Big's 12 GiB, which it has yet to report");
+
+});
+
+test("an overlapping start's reservation holds the start's own size", async (t) => {
+  const s = await withImage(t);
+  observeNode(s, "a", { total: 16, committed: 0 });
+  observeNode(s, "b", { total: 16, committed: 2 });
+  const { harness } = s.fake;
+  const start = harness.startThread;
+  const held = Promise.withResolvers<void>();
+  let entered = 0;
+  harness.startThread = async (thread) => { entered++; await held.promise; return start(thread); };
+  const first = s.call("POST", "/v1/threads", { project: "acme", title: "One", node: "auto", resources: { memoryGiB: 12 } });
+  while (entered < 1) await sleep(5);
+  const second = s.call("POST", "/v1/threads", { project: "acme", title: "Two", node: "auto" });
+  while (entered < 2) await sleep(5);
+  held.resolve();
+  const [one, two] = await Promise.all([first, second]);
+  assert.equal(one.body.placement.node, "a");
+  assert.equal(two.body.placement.node, "b");
+  assert.deepEqual(two.body.placement.weighed.find((w: { node: string }) => w.node === "a").left.memoryGiB, 0, "a counts the 12 GiB One reserved there, then Two's 4");
+});
+
+test("nodes report whether they are overcommitted, and their observed pylons as up, paused, archived, crashed and orphaned", async (t) => {
+  const s = await withImage(t);
+  const started = async (title: string) => (await s.call("POST", "/v1/threads", { project: "acme", title, node: "a" })).body as Thread;
+  observeNode(s, "a", { total: 64, committed: 0 });
+  const [up, paused, archived, failing, crashed] = [await started("Up"), await started("Paused"), await started("Archived"), await started("Failing"), await started("Crashed")];
+  assert.equal((await s.call("POST", `/v1/threads/${archived.id}/archive`)).status, 200);
+  s.registry.savePylon({ ...s.registry.pylon(up.pylonId)!, boot: { ...s.registry.pylon(up.pylonId)!.boot, resources: { cpus: 4, memoryGiB: 8, diskGiB: 10 } } });
+  const stopped = (t: Thread) => ({ pylonId: t.pylonId, phase: "stopped" as const, checkpoint: null, sessions: null });
+  observeNode(s, "a", { total: 6, committed: 8 }, {
+    pylons: [{ pylonId: up.pylonId, phase: "booting" }, stopped(paused), stopped(archived), { pylonId: "pylon-gone" as PylonId, phase: "booting" },
+      { pylonId: failing.pylonId, phase: "broken", detail: "a service did not start", cause: "services" },
+      { pylonId: crashed.pylonId, phase: "broken", detail: "the controller exited", cause: "controller" }],
+  });
+  observeNode(s, "old", { total: 6, committed: 8 });
+  s.registry.apply({ record: "node", node: "old" as NodeName, state: "online", capacity: { memoryGiB: 6, committedMemoryGiB: 8, diskFreeGiB: 100 } as never });
+  const nodes = (await s.call("GET", "/v1/nodes")).body as { name: string; overcommitted: boolean; pylons: unknown }[];
+  const of = (name: string) => nodes.find((n) => n.name === name)!;
+  assert.equal(of("a").overcommitted, true);
+  assert.deepEqual(of("a").pylons, {
+    up: { pylons: 2, cpus: 6, memoryGiB: 12 }, paused: { pylons: 1, cpus: 2, memoryGiB: 4 }, archived: { pylons: 1, cpus: 2, memoryGiB: 4 },
+    crashed: { pylons: 1, cpus: 2, memoryGiB: 4 }, orphaned: ["pylon-gone"],
+  }, "a VM whose service failed still holds its CPUs and memory, and one whose controller exited holds only its disk");
+  assert.equal(of("old").overcommitted, false, "a probe from before pylons were counted reports a committed memory that means nothing");
+  assert.deepEqual([of(node).overcommitted, of(node).pylons], [false, null], "a node never observed has no pylons to report");
+});
+
 test("a scratch project has no repository, and each of its threads starts an empty one on its branch", async (t) => {
   const s = await setup(t);
   const scratch = { ...project, id: "sketch", repoUrl: null, allowedHosts: [], logins: [], secrets: [githubTokenGrant] };
@@ -478,7 +637,7 @@ test("thread detail derives the actual state from the node's last observation", 
     thread,
     attention: null, seenAt: null, lastReplyAt: null,
     desired: "running",
-    pylon: { grantsOutdated: false, id: thread.pylonId, node, actualState: "unknown", failed: null, observedAt: null, retryRefused: null },
+    pylon: { grantsOutdated: false, id: thread.pylonId, node, actualState: "unknown", failed: null, observedAt: null, retryRefused: null, resources: project.resources },
     sessions: [], previews: [], ports: [], outputs: [], prWatch: { enabled: false, stopped: false, error: null }, pullRequests: [], review: null, attach: "herdr --session nexus", agent: { parkedTasks: 0 },
   });
 
@@ -909,7 +1068,7 @@ test("a failed pylon shows failed with its reason until its thread is deleted, a
   s.registry.apply({ record: "node", node, state: "online", capacity });
   const reason = "last job failed with setup-failed, which is not retryable: pylon-x: Setup exited 128\nfatal: unable to access";
   s.registry.savePylon({ ...s.registry.pylon(thread.pylonId)!, failed: reason });
-  assert.deepEqual((await detail()).pylon, { grantsOutdated: false, id: thread.pylonId, node, actualState: "failed", failed: reason, observedAt: null, retryRefused: null });
+  assert.deepEqual((await detail()).pylon, { grantsOutdated: false, id: thread.pylonId, node, actualState: "failed", failed: reason, observedAt: null, retryRefused: null, resources: project.resources });
   const [row] = (await s.call("GET", "/v1/threads")).body as ThreadRow[];
   assert.deepEqual([row!.desired, row!.pylon], [(await detail()).desired, { node, actualState: "failed", failed: reason }], "the list reports the pylon as its detail does");
 
@@ -919,7 +1078,7 @@ test("a failed pylon shows failed with its reason until its thread is deleted, a
   assert.equal((await detail()).pylon.actualState, "deleting");
   s.registry.apply({ record: "job", status: { ...del, state: "succeeded", finishedAt: "2027-01-01T00:00:05Z" } });
   s.registry.ingested({ node, observedAt: "2027-01-01T00:00:06Z", probeBootId: "b", capacity, artifacts: [], jobs: [], pylons: [], grants: { secrets: [], gitSsh: false }, previewRoutes: [] }, []);
-  assert.deepEqual((await detail()).pylon, { grantsOutdated: false, id: thread.pylonId, node, actualState: "absent", failed: reason, observedAt: "2027-01-01T00:00:06Z", retryRefused: null });
+  assert.deepEqual((await detail()).pylon, { grantsOutdated: false, id: thread.pylonId, node, actualState: "absent", failed: reason, observedAt: "2027-01-01T00:00:06Z", retryRefused: null, resources: project.resources });
 });
 
 test("retrying a failed pylon clears the planner's verdict and its attempts, marks the retry, counts as human activity and wakes its node", async (t) => {
