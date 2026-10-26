@@ -1,0 +1,20 @@
+$ node --test --test-name-pattern="never take the controller down" src/pylon-vm/network.test.ts   # main, undici 6.29.1
+✖ guest requests that fail upstream fail one by one and never take the controller down (359.261568ms)
+✖ guest requests that fail upstream fail one by one and never take the controller down (163.210978ms)
+✖ guest requests that fail upstream fail one by one and never take the controller down (188.788136ms)
+✖ failing tests:
+
+test at src/pylon-vm/network.test.ts:111:1
+✖ guest requests that fail upstream fail one by one and never take the controller down (252.126923ms)
+  Error [ClientDestroyedError]: The client is destroyed
+      at node_modules/undici/lib/dispatcher/dispatcher-base.js:82:37
+      at node:internal/process/task_queues:151:7
+      at AsyncResource.runInAsyncScope (node:async_hooks:227:14)
+      at AsyncResource.runMicrotask (node:internal/process/task_queues:148:8) {
+    code: 'UND_ERR_DESTROYED'
+  }
+
+$ node --test --test-name-pattern="never take the controller down" src/pylon-vm/network.test.ts   # this branch, undici 7.30.1
+✔ guest requests that fail upstream fail one by one and never take the controller down (2147.963014ms)
+✔ guest requests that fail upstream fail one by one and never take the controller down (2046.502235ms)
+✔ guest requests that fail upstream fail one by one and never take the controller down (2614.293605ms)

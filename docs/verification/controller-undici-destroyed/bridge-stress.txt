@@ -1,0 +1,6 @@
+$ node docs/verification/controller-undici-destroyed/bridge-stress.mjs 150   # main, undici 6.29.1
+ClientDestroyedError UND_ERR_DESTROYED ClientDestroyedError: The client is destroyed     at /tmp/claude-1000/-home-user-workspace-repo/9c4d041c-1fed-4dc6-a145-3088bfa663e3/scratchpad/main-wt/node_modules/undici/lib/dispatcher/dispatcher-base.js:82:37
+{"undici":"6.29.1","rounds":150,"statuses":{"200":1018,"403":114,"502":695,"guest closed":386},"unhandled":{"ClientDestroyedError UND_ERR_DESTROYED":22}}
+
+$ node docs/verification/controller-undici-destroyed/bridge-stress.mjs 150   # this branch, undici 7.30.1
+{"undici":"7.30.1","rounds":150,"statuses":{"200":1116,"403":120,"502":683,"guest closed":413},"unhandled":{}}
