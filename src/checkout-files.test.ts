@@ -369,6 +369,32 @@ test("a snapshot a newer turn superseded while it ran never replaces the newer o
   await assert.rejects(checkoutReader(c.open, c.dir, undefined, older).changes("turn"), refused("no-base", /no latest-turn snapshot/));
 });
 
+test("a deadline that passes during the ref update lets it finish, so no ref lock is left to fail later snapshots", async (t) => {
+  const c = await checkout(t);
+  const hooks = join(c.scratch, "hooks");
+  await mkdir(hooks);
+  await writeFile(join(hooks, "reference-transaction"), "#!/bin/sh\n[ \"$1\" = prepared ] && sleep 1\nexit 0\n", { mode: 0o755 });
+  await c.git("config", "core.hooksPath", hooks);
+  const turn = claudeTurn("s1", 1000);
+  assert.equal(await snapshotTurn(c.dir, turn, 300, helperPath), true);
+  for (const lock of ["refs/nexus/turn.lock", "packed-refs.lock"]) await assert.rejects(readFile(join(c.dir, ".git", lock)), { code: "ENOENT" }, `${lock} is gone`);
+  assert.equal((await c.git("log", "-1", "--format=%s", "refs/nexus/turn")).trim(), `Nexus turn ${turn}`);
+  await c.git("config", "--unset", "core.hooksPath");
+  await c.reader.snapshot("input:1");
+  assert.equal((await c.git("log", "-1", "--format=%s", "refs/nexus/turn")).trim(), "Nexus turn input:1");
+});
+
+test("a Claude turn that started before the one the checkout last claimed never replaces its snapshot", async (t) => {
+  const c = await checkout(t);
+  const older = claudeTurn("a", 1000);
+  const newer = claudeTurn("b", 1001);
+  assert.equal(await snapshotTurn(c.dir, newer, 30_000, helperPath), true);
+  assert.equal(await snapshotTurn(c.dir, older, 30_000, helperPath), false);
+  assert.equal((await c.git("log", "-1", "--format=%s", "refs/nexus/turn")).trim(), `Nexus turn ${newer}`);
+  await checkoutReader(c.open, c.dir, undefined, newer).changes("turn");
+  await assert.rejects(checkoutReader(c.open, c.dir, undefined, older).changes("turn"), refused("no-base", /no latest-turn snapshot/));
+});
+
 test("a turn snapshot works before a scratch repository's first commit", async (t) => {
   const c = await checkout(t);
   await rm(join(c.dir, ".git"), { recursive: true });
