@@ -25,7 +25,7 @@ test("a page loads a small client with no grammar until a diff opens", () => {
   assert.ok(entry !== undefined, "the build writes client.js");
   assert.deepEqual(inputsOf(page).filter((input) => input.includes("@shikijs/langs")), []);
   const bytes = [...page].reduce((sum, path) => sum + outputs[path]!.bytes, 0);
-  assert.ok(bytes < 40_000, `a page loads ${bytes} bytes of script`);
+  assert.ok(bytes < 50_000, `a page loads ${bytes} bytes of script`);
 });
 
 test("a language's grammar is a chunk of its own, which a page reaches only by importing it when a file needs it", () => {

@@ -304,7 +304,7 @@ h4.md-h { font-size: 1.07em; }
 .note-box { margin: 0; font-size: 13px; color: var(--text-2); background: var(--raised); border: 1px dashed var(--line); border-radius: 12px; padding: 12px 14px; }
 
 /* a file's diff, opened as a tab */
-.file-view { flex: 1; min-height: 0; overflow: auto; }
+.file-view { flex: 1; min-height: 0; overflow: auto; position: relative; }
 .fv-head { position: sticky; top: 0; z-index: 1; display: flex; align-items: center; gap: 9px; padding: 10px 20px; background: var(--bg); border-bottom: 1px solid var(--line-soft); font-size: 13px; }
 .fv-path { font-family: var(--mono); font-size: 12.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 .fv-head .lines { margin-left: auto; }
@@ -312,6 +312,28 @@ h4.md-h { font-size: 1.07em; }
 .fv-meta { padding: 8px 20px; font-family: var(--mono); border-bottom: 1px solid var(--line-soft); }
 /* The diff draws in its own shadow root, which inherits these. */
 .diff-view { --diffs-font-family: var(--mono); --diffs-font-size: 12.5px; --diffs-line-height: 20px; --diffs-light-bg: var(--bg); --diffs-dark-bg: var(--bg); padding: 4px 0 24px; }
+.diff-view:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.fv-review:empty { display: none; }
+.review-bar { display: flex; align-items: center; gap: 8px; padding: 8px 20px; border-bottom: 1px solid var(--line-soft); font-size: 12.5px; color: var(--text-2); }
+.review-bar span { margin-right: auto; }
+.notes-outdated { display: grid; gap: 8px; padding: 10px 20px; border-bottom: 1px solid var(--line-soft); }
+.notes-outdated > p { margin: 0; }
+.note-pick { position: absolute; z-index: 2; display: flex; align-items: center; gap: 6px; padding: 5px 6px 5px 10px; background: var(--bg); border: 1px solid var(--line); border-radius: 999px; box-shadow: var(--pop); }
+.notes { display: grid; gap: 6px; padding: 6px 12px 8px; font: 13px/1.5 var(--sans); white-space: normal; }
+.note { --kind: var(--accent); display: grid; gap: 6px; padding: 8px 10px; border-left: 3px solid var(--kind); border-radius: 6px; background: var(--card); color: var(--text); box-shadow: var(--shadow); max-width: 760px; }
+.note-question { --kind: var(--warn); }
+.note-suggestion { --kind: var(--ok); }
+.note-change { --kind: var(--bad); }
+.note-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.note-head .btn:first-of-type { margin-left: auto; }
+.note-kind { font-weight: 600; font-size: 12px; color: var(--kind); }
+.note-kinds { margin-left: auto; }
+.note-body { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.note-quote { margin: 0; padding: 6px 8px; max-height: 120px; overflow: auto; font-size: 11.5px; line-height: 1.5; background: var(--code-bg); border-radius: 4px; white-space: pre; }
+.note-text { width: 100%; min-height: 64px; resize: vertical; font: 13px/1.5 var(--sans); color: var(--text); background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; }
+.note-text:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+.note-actions { display: flex; justify-content: flex-end; gap: 6px; }
+.note-count { flex: none; min-width: 16px; padding: 0 5px; border-radius: 999px; background: var(--warn); color: #fff; font-size: 10.5px; line-height: 16px; text-align: center; }
 .badge { display: inline-flex; align-items: center; justify-content: center; width: 15px; height: 15px; flex: none; border-radius: 3px; font: 700 9.5px/1 var(--mono); color: #fff; background: var(--text-3); }
 .badge-added, .badge-copied { background: var(--ok); }
 .badge-modified, .badge-renamed, .badge-typechange { background: var(--accent); }
