@@ -80,6 +80,8 @@ export interface ClaudeConversation {
   readAt: number | null;
   /** Whether a turn of the worker's session runs, from its session events. */
   working: boolean;
+  /** The thread's usage-limit stop, as its `usageLimit` says. */
+  usageLimit: { stoppedAt: number; resetsAt: number | null } | null;
 }
 
 /**

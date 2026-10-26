@@ -368,7 +368,7 @@ export async function startApi(options: ApiOptions): Promise<Api> {
 
   function attention(t: Thread): Attention {
     const parked = t.conversationId !== null && t.status !== "deleted" && harness.activity.parked(t.id).length > 0;
-    return attentionOf(pylonOf(t).failed !== null || ["failed", "stalled"].includes(registry.claudeWorker(t.id)?.state ?? ""), parked, t.lastReplyAt, t.seenAt, t.agentTurnRunning || t.sessionTurnRunning === true, t.sessionWaiting, needsPerson(registry.review(t.id)));
+    return attentionOf(pylonOf(t).failed !== null || ["failed", "stalled"].includes(registry.claudeWorker(t.id)?.state ?? ""), parked, t.lastReplyAt, t.seenAt, t.agentTurnRunning || t.sessionTurnRunning === true, t.sessionWaiting, needsPerson(registry.review(t.id)), t.usageLimit !== undefined);
   }
 
   function row(t: Thread): ThreadRow {

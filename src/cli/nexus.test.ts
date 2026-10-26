@@ -1471,7 +1471,7 @@ test("conversation prints a Claude worker's transcript, and send types into its 
   const readAt = Date.now();
   s.registry.appendClaudeRead(thread.id, { session: "s1", from: transcriptStart, entries, cursor: { ...transcriptStart, offset: 9 }, reset: false, readAt });
 
-  assert.deepEqual(await s.json(["conversation", thread.id]), { kind: "claude", session: "s1", entries, dropped: 0, readAt, working: false }, "--json prints the API's reply");
+  assert.deepEqual(await s.json(["conversation", thread.id]), { kind: "claude", session: "s1", entries, dropped: 0, readAt, working: false, usageLimit: null }, "--json prints the API's reply");
   const transcript = [
     "> Count the lines\n> of hello.py",
     '[tool] Bash {"command":"wc -l hello.py"} (ok)',

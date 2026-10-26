@@ -57,6 +57,7 @@ after(() => rm(dir, { recursive: true }));
 const claudeSession = "11111111-2222-4333-8444-555555555501";
 /** The lines of a real Claude Code 2.1.308 transcript, each with its newline. */
 const fixture = (await readFile(new URL("../fixtures/claude-transcript.jsonl", import.meta.url), "utf8")).split("\n").filter((line) => line !== "").map((line) => `${line}\n`);
+const usageLimitRecord = (await readFile(new URL("../fixtures/claude-api-errors.jsonl", import.meta.url), "utf8")).split("\n")[0]! + "\n";
 
 async function setup(t: import("node:test").TestContext, options: { gitIdentity?: { name: string; email: string }; https?: import("./api.ts").ApiOptions["https"]; whois?: import("../tailscale.ts").Whois; deployment?: DeploymentOptions; dotfiles?: typeof dotfiles; streamStallMs?: number; attachTiming?: AttachTiming; reviews?: ReviewLoop } = {}) {
   const registry = openRegistry(join(dir, `${randomUUID()}.db`));
@@ -1417,10 +1418,10 @@ test("attention ranks failure, unwatched parked tasks, unread reply, then work; 
 
 
 test("attention takes the first matching state in every combination", () => {
-  for (const failed of [false, true]) for (const parked of [false, true]) {
+  for (const failed of [false, true]) for (const parked of [false, true]) for (const decision of [false, true]) for (const limited of [false, true]) {
     for (const reply of [null, 10]) for (const seen of [null, 9, 10, 11]) for (const working of [false, true]) {
-      const expected = failed ? "failed" : parked ? "parked" : reply !== null && (seen === null || reply > seen) ? "reply" : working ? "working" : null;
-      assert.equal(attentionOf(failed, parked, reply, seen, working), expected);
+      const expected = failed ? "failed" : decision ? "decision" : parked ? "parked" : limited ? "limited" : reply !== null && (seen === null || reply > seen) ? "reply" : working ? "working" : null;
+      assert.equal(attentionOf(failed, parked, reply, seen, working, false, decision, limited), expected);
     }
   }
 });
@@ -2057,13 +2058,23 @@ function observePaused(s: Awaited<ReturnType<typeof withClaude>>) {
   s.registry.ingested({ node, observedAt: new Date().toISOString(), probeBootId: "b", capacity, artifacts: [], jobs: [], pylons: [stopped], grants: { secrets: [], gitSsh: false }, previewRoutes: [] }, []);
 }
 
+test("a Claude worker stopped on its usage limit lists as limited, with the stop in its row and its conversation", async (t) => {
+  const s = await withClaude(t);
+  await writeFile(s.transcript, `${fixture[0]}${usageLimitRecord}`);
+  const stop = { stoppedAt: Date.parse("2026-10-26T05:34:18.605Z"), resetsAt: 1792996200000 };
+  assert.deepEqual(((await s.call("GET", `/v1/threads/${s.thread.id}/conversation`)).body as ClaudeConversation).usageLimit, stop);
+  const row = ((await s.call("GET", "/v1/threads")).body as ThreadRow[]).find((r) => r.id === s.thread.id)!;
+  assert.equal(row.attention, "limited");
+  assert.deepEqual(row.usageLimit, stop);
+});
+
 test("a Claude worker thread's conversation is its transcript, read from the running pylon after each session event and kept for when it is paused", async (t) => {
   const s = await withClaude(t);
   await writeFile(s.transcript, fixture.slice(0, 30).join(""));
   const reply = await s.call("GET", `/v1/threads/${s.thread.id}/conversation`);
   assert.equal(reply.status, 200);
   const first = reply.body as ClaudeConversation;
-  assert.deepEqual({ ...first, entries: [], readAt: null }, { kind: "claude", session: claudeSession, entries: [], dropped: 0, readAt: null, working: false });
+  assert.deepEqual({ ...first, entries: [], readAt: null }, { kind: "claude", session: claudeSession, entries: [], dropped: 0, readAt: null, working: false, usageLimit: null });
   assert.ok(first.readAt !== null && first.readAt >= Date.now() - 10_000);
   const prompt = first.entries[0]!;
   assert.ok(prompt.kind === "prompt" && prompt.from === "person" && prompt.text.startsWith("Do these steps one at a time"), JSON.stringify(prompt));

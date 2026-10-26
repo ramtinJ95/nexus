@@ -183,7 +183,7 @@ function threadState({ thread: t, pylon, attention }: ThreadDetail): [label: str
  * Whether a thread needs the person, so its row stays bright: a failure or a parked run to fix, a review's decision,
  * a reply to read, or a session waiting on an answer. Waiting ranks below working, but only waiting is blocked on the person.
  */
-const needsPerson: Record<`${Attention}`, boolean> = { failed: true, decision: true, parked: true, reply: true, waiting: true, working: false, null: false };
+const needsPerson: Record<`${Attention}`, boolean> = { failed: true, decision: true, parked: true, limited: true, reply: true, waiting: true, working: false, null: false };
 /** The open thread's row never dims, nor a closed thread's, which its fold already sets apart. */
 const dims = (d: ThreadDetail, active?: ThreadId) =>
   d.thread.id !== active && (d.thread.status === "active" || d.thread.status === "idle") && !needsPerson[`${d.attention}`];

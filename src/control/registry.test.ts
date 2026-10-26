@@ -1077,3 +1077,44 @@ test("a Claude worker's messages answer their resends, and its transcript and me
   assert.deepEqual(registry.claudeEntries(threadId), []);
   assert.equal(registry.claudeMessage(threadId, "msg:more-0"), undefined);
 });
+
+test("a Claude worker whose transcript ends on a usage limit is limited until a turn starts or a prompt follows, whichever arrives first", (t) => {
+  const registry = seeded(tempDb());
+  t.after(() => registry.close());
+  registry.setClaudeWorker(threadId, "hello", "started", undefined, "s1");
+  let sequence = 0;
+  let offset = 0;
+  const report = (kind: "session.turn-started" | "session.turn-ended") => registry.reportSession(node, { sequence: ++sequence, pylon: pylonId, time: 1000 + sequence, event: { kind, session: "s1" } });
+  const append = (...entries: ClaudeEntry[]) => assert.equal(registry.appendClaudeRead(threadId, { session: "s1", from: cursorAt(offset), entries, cursor: cursorAt(offset += 10), reset: false, readAt: offset }), true);
+  const attention = () => registry.events("0", { kinds: ["attention.changed"] }).at(-1)?.payload.attention;
+  const stop: ClaudeEntry = { kind: "notice", at: 50, tone: "error", text: "You've hit your session limit", usageLimit: { resetsAt: 9000 } };
+
+  report("session.turn-started");
+  append({ kind: "prompt", at: 40, text: "go", from: "person" }, stop);
+  assert.equal(registry.thread(threadId)!.usageLimit, undefined, "a running turn is not stopped");
+  assert.equal(attention(), "working");
+  report("session.turn-ended");
+  assert.deepEqual(registry.thread(threadId)!.usageLimit, { stoppedAt: 50, resetsAt: 9000 });
+  assert.equal(attention(), "limited");
+  registry.markSeen(threadId, false);
+  assert.equal(attention(), "limited", "seeing the thread does not resume it");
+  append({ kind: "turn", at: 51, durationMs: 10 });
+  assert.equal(attention(), "limited");
+
+  report("session.turn-started");
+  assert.equal(registry.thread(threadId)!.usageLimit, undefined);
+  assert.equal(attention(), "working");
+  report("session.turn-ended");
+  assert.equal(attention(), "limited", "a turn that ends before its transcript is read still shows the stop");
+  append({ kind: "prompt", at: 60, text: "continue", from: "person" });
+  assert.equal(registry.thread(threadId)!.usageLimit, undefined);
+  assert.notEqual(attention(), "limited");
+
+  report("session.turn-started");
+  report("session.turn-ended");
+  append(stop);
+  assert.equal(attention(), "limited", "the read that finds the stop after the turn ended limits the thread");
+  append({ kind: "notice", at: 70, tone: "error", text: "API Error: 529 Overloaded" });
+  assert.equal(registry.thread(threadId)!.usageLimit, undefined);
+  assert.equal(attention(), "reply", "another API error is a plain reply");
+});
