@@ -10,7 +10,7 @@ The control plane writes every record. Probes send facts in observations, and th
 |---|---|---|
 | Node | `name`, `tailnetHost`, `tailnetNodeId`, `cpuVendor`, `memoryGiB`, `state` | You add a node. Capacity and `state` come from its probe's observations |
 | Project | `repoUrl`, `defaultBranch`, `defaultNode`, `resources`, `allowedHosts`, `secrets`, `logins`, `preSetup`, optional `gitIdentity` | You |
-| Image | `id`, `pins`, `builtOn`, `builtAt` | The results of `build-image` jobs |
+| Image | `id`, `pins`, `builtOn`, `builtAt`, `sha256`, `release` | `nexus image build`: the manifest the build node's probe wrote, and the control plane release whose recipe it built. `release` is null for an image recorded by hand |
 | Template | `id`, `key`, `state`, `node`, `builtAt` | The results of `build-template` jobs |
 | Thread | `id`, `title`, `project`, `status`, `conversationId`, `pylonId`, `startedBy`, `seenAt`, `lastReplyAt`, `placement` | You, and the harness |
 | Claude transcript | `thread`, `session`, `byte_offset`, `skipping`, `dropped`, `read_at`, and its entries | Reads of the Claude worker's transcript in the pylon |
@@ -21,7 +21,7 @@ The control plane writes every record. Probes send facts in observations, and th
 | NexusEvent | `id`, `time`, `thread`, `project`, `kind`, `payload` | Accepted pylon lifecycle reports and control-plane changes |
 | Orphan | `node`, `pylonId` | Observations of a pylon the registry does not know. Only you delete it |
 
-One setting sits beside the records: `current`, the image every new pylon uses. A build that passes its smoke boot becomes current.
+Three settings sit beside the records. `current` is the image every new pylon uses, and only `nexus image rollout` or `rollback` changes it, once every online node holds the image. `previous-image` is the image current before the last change, which `rollback` makes current again. `image-operation` is the running image build or rollout, or the last one, with each node's step and the probe job it last sent.
 
 ## Field values
 

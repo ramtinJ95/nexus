@@ -10,6 +10,7 @@ import { readEvents } from "./event-reader.ts";
 import { fakeHarness } from "./fake-harness.ts";
 import { openRegistry, type Thread } from "./registry.ts";
 import type { JobId, NodeName, PylonObservation, ServiceFact, TailnetNodeId } from "../protocol.ts";
+import type { ImageId } from "../images.ts";
 import { githubTokenGrant } from "../project.ts";
 import type { AssistantMessage, Message, ToolCall } from "@earendil-works/pi-ai";
 import { transcriptStart, type ClaudeEntry } from "../claude-transcript.ts";
@@ -99,7 +100,7 @@ async function seeded(t: TestContext) {
   const s = await setup(t);
   for (const id of ["acme", "beta"]) assert.equal((await s.call("POST", "/v1/projects", project(id))).status, 201);
   assert.equal((await s.call("POST", "/v1/images", image)).status, 201);
-  assert.equal((await s.call("PUT", "/v1/images/current", { image: image.id })).status, 204);
+  s.registry.setCurrentImage(image.id as ImageId);
   return s;
 }
 
@@ -905,7 +906,7 @@ test("every page carries the start dialog, which offers every project and node a
   assert.match(textOf(dialog), /No image is current yet.* Boots a pylon on rj-firebat and checks out main \./);
 
   await s.call("POST", "/v1/images", image);
-  await s.call("PUT", "/v1/images/current", { image: image.id });
+  s.registry.setCurrentImage(image.id as ImageId);
   const home = (await s.call("GET", "/")).text;
   assert.doesNotMatch(home, /data-autoopen/, "the dialog stays closed until asked for");
   assert.match(textOf(home.split('<dialog id="start-dialog"')[1]!.replace(/^[^>]*>/, "")), new RegExp(`^Start a thread ✕ Worker Claude Code .* Title \\(optional\\) Project acme .* Boots a pylon on rj-firebat from image ${image.id} and checks out main \\.`));

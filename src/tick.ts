@@ -155,7 +155,7 @@ const maxLogChars = 1_500;
  * A failed job's message and the last lines of its log, trimmed and bounded. The record carries it into
  * the planner's reason, so the API, the dashboard and the loop's log say why without the probe's logs.
  */
-function failureMessage(message: string, logTail: string): string {
+export function failureMessage(message: string, logTail: string): string {
   const log = logTail.trim().split("\n").slice(-maxLogLines).join("\n").slice(-maxLogChars);
   return [message.trim().slice(0, maxMessageChars), log].filter((part) => part !== "").join("\n");
 }

@@ -169,6 +169,7 @@ function fakeNode(options: { autoFinish: boolean; node?: NodeName; reportsRoutes
     },
     command: () => Promise.reject(new Error("unused")),
     stream: () => Promise.reject(new Error("unused")),
+    manifest: () => Promise.reject(new Error("unused")),
   };
 
   /** Changes a running pylon's guest facts, and announces it with a snapshot as the probe does after a job. */

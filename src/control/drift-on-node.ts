@@ -33,6 +33,7 @@ import { parseSelfDnsName, readProbeConfig } from "../probe/config.ts";
 import { parseServeStatus, readRoutes, tailscaleCli } from "../probe/serve.ts";
 import type { ThreadDetail } from "./api.ts";
 import { defaultPreviewPorts, startControlPlane, type ControlPlane } from "./main.ts";
+import { openRegistry } from "./registry.ts";
 
 const probeConfig = await readProbeConfig(process.argv[2] ?? "/etc/nexus/probe.json");
 if (probeConfig.backend.kind !== "pylon-vm") throw new Error(`the probe runs the ${probeConfig.backend.kind} backend. This check is for pylon-vm`);
@@ -68,8 +69,14 @@ for (const [port, listener] of parseServeStatus(serveBefore, `http://127.0.0.1:$
 
 /** One control plane over the registry in `dir`, which it creates on first use. */
 async function plane(dir: string) {
+  const db = join(dir, "registry.db");
+  // A rollout needs a deployer, which the control plane's own node never is, so the check makes the image current in the registry.
+  const seed = openRegistry(db);
+  seed.saveImage(manifest!, null);
+  seed.setCurrentImage(manifest!.id);
+  seed.close();
   const controlPlane: ControlPlane = await startControlPlane({
-    db: join(dir, "registry.db"),
+    db,
     listen: { host, port: 0, hostnames: [host] },
     self: { tailnetNodeId: self },
     nodes: [{ name: probeConfig.node, tailnetHost: dnsName, tailnetNodeId: self }],
@@ -119,8 +126,6 @@ async function plane(dir: string) {
   /** A thread whose pylon runs and publishes a preview of web, and that preview's port once it is ready. */
   async function threadWithPreview(title: string): Promise<{ threadId: string; pylonId: PylonId; httpsPort: number }> {
     if (!(await expect(200, "GET", "/projects") as { id: string }[]).some((p) => p.id === "drift-check")) {
-      await expect(201, "POST", "/images", manifest);
-      await expect(204, "PUT", "/images/current", { image });
       await expect(201, "POST", "/projects", {
         id: "drift-check", repoUrl: "https://github.com/octocat/Spoon-Knife.git", defaultBranch: "main", defaultNode: probeConfig.node,
         resources: { cpus: 2, memoryGiB: 4, diskGiB: 10 }, allowedHosts: [], secrets: [], logins: [], preSetup: null,

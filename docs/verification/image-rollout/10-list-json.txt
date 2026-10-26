@@ -1,0 +1,95 @@
+$ nexus image list --json
+{
+  "current": "img-051b22b601e4",
+  "previous": "img-0000000000aa",
+  "images": [
+    {
+      "id": "img-051b22b601e4",
+      "gondolinBuildId": "stand-in-img-051b22b601e4",
+      "builtOn": "infra-testbench",
+      "builtAt": "2026-10-26T10:08:22.074Z",
+      "sha256": "f9504ad362a150e9ce933114e8a0c30472bd927fd11c0ed12861b25f96b71c66",
+      "pins": {
+        "debianDigest": "sha256:7ff6ba31527b9e336162fa061746c366c4b2032f4d2cff2078bea43f78efe3f8",
+        "node": "24.22.1",
+        "nodeSha256": "6c172a9ab6718f7b801fb5a7bd486af2ee5e32758086a04b84fcce2aa77095e6",
+        "claudeCode": "2.1.308",
+        "pi": "1.4.0",
+        "herdr": "0.9.5",
+        "piEnv": "1.4.0",
+        "piEnvSha256": "46dde0e25b5cf1a327a10ddcb25f746f85b783492f5b225dfaa1a0d84cf5b56a",
+        "gondolin": "0.13.0",
+        "alpineKernel": "6.18.58-0-virt",
+        "dotfilesCommon": "placeholder",
+        "gh": "2.103.2",
+        "ghSha256": "62ccf747115ddc61237efffdde66a3c8f70ba249433dc64f70801089b59c59c8",
+        "neovim": "0.12.6",
+        "neovimSha256": "474430d53e6264f6d6dd18db42d6dc9df3a1b56ca9e88a325bbf860e1a811d87"
+      },
+      "release": "c93c0f2475b744ce0a4469aaecfa0ce4c6343aba",
+      "nodes": [
+        "infra-testbench",
+        "rj-firebat"
+      ]
+    },
+    {
+      "id": "img-0000000000aa",
+      "gondolinBuildId": "stand-in-img-0000000000aa",
+      "builtOn": "infra-testbench",
+      "builtAt": "2026-10-20T00:00:00.000Z",
+      "sha256": "f71297412597c36295b5e6ba6b43b7af9b01bc922d4029531a8b3511f009dbed",
+      "pins": {
+        "debianDigest": "sha256:7ff6ba31527b9e336162fa061746c366c4b2032f4d2cff2078bea43f78efe3f8",
+        "node": "24.22.1",
+        "nodeSha256": "6c172a9ab6718f7b801fb5a7bd486af2ee5e32758086a04b84fcce2aa77095e6",
+        "claudeCode": "2.1.308",
+        "pi": "1.4.0",
+        "herdr": "0.9.5",
+        "piEnv": "1.4.0",
+        "piEnvSha256": "46dde0e25b5cf1a327a10ddcb25f746f85b783492f5b225dfaa1a0d84cf5b56a",
+        "gondolin": "0.13.0",
+        "alpineKernel": "6.18.58-0-virt",
+        "dotfilesCommon": "placeholder",
+        "gh": "2.103.2",
+        "ghSha256": "62ccf747115ddc61237efffdde66a3c8f70ba249433dc64f70801089b59c59c8",
+        "neovim": "0.12.6",
+        "neovimSha256": "474430d53e6264f6d6dd18db42d6dc9df3a1b56ca9e88a325bbf860e1a811d87"
+      },
+      "release": null,
+      "nodes": [
+        "infra-testbench",
+        "rj-firebat",
+        "rj-nuc"
+      ]
+    }
+  ],
+  "operation": {
+    "kind": "rollout",
+    "image": "img-051b22b601e4",
+    "requestedBy": "nLAPTOP",
+    "requestedAt": 1793009313015,
+    "steps": [
+      {
+        "node": "infra-testbench",
+        "state": "done",
+        "job": null,
+        "reason": null
+      },
+      {
+        "node": "rj-firebat",
+        "state": "done",
+        "job": null,
+        "reason": null
+      },
+      {
+        "node": "rj-nuc",
+        "state": "skipped",
+        "job": null,
+        "reason": "offline when the rollout began; it fetches the image on first use"
+      }
+    ],
+    "state": "done",
+    "finishedAt": 1793009313036
+  }
+}
+exit 0

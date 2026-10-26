@@ -26,6 +26,9 @@ import { repository } from "../deploy/install.ts";
 import { prWatcher } from "./pr-watch.ts";
 import { agentInbox } from "./inbox.ts";
 import { usageLimitResumer } from "./usage-limit.ts";
+import { startImageRollout } from "./image-rollout.ts";
+import { loadImageRecipe } from "../image-build.ts";
+import { runningCommit } from "../deploy/health.ts";
 
 const nodeId = z.string().regex(/^n[A-Za-z0-9]+$/, "a Tailscale stable node ID, such as nAbC123CNTRL");
 const absolutePath = z.string().refine(isAbsolute, "must be an absolute path");
@@ -52,6 +55,8 @@ const configSchema = z.strictObject({
     tailnetHost: z.string().min(1),
     tailnetNodeId: nodeId,
   })).min(1),
+  /** Where `nexus image build` builds: infra-testbench when omitted, where Docker access was first verified. */
+  imageBuildNode: z.string().min(1).optional(),
   /** Other tailnet nodes, such as your laptop and phone, whose callers may use the API. */
   callers: z.array(nodeId),
   deployers: z.array(nodeId).optional(),
@@ -89,6 +94,8 @@ export function parseConfig(text: string): ControlPlaneConfig {
   if (!result.success) throw new Error(`invalid control plane config:\n${z.prettifyError(result.error)}`);
   const names = result.data.nodes.map((n) => n.name);
   if (new Set(names).size !== names.length) throw new Error(`invalid control plane config: node names repeat: ${names.join(", ")}`);
+  const { imageBuildNode } = result.data;
+  if (imageBuildNode !== undefined && !names.includes(imageBuildNode)) throw new Error(`invalid control plane config: imageBuildNode ${imageBuildNode} is not one of the nodes`);
   if (result.data.https && !result.data.listen.hostnames.includes(result.data.https.hostname)) throw new Error("https.hostname must be in listen.hostnames");
   return result.data;
 }
@@ -141,6 +148,9 @@ export async function startControlPlane(config: ControlPlaneConfig, models: Mode
     retry: (...args) => gate.run(() => rawHarness.retry(...args)),
   };
   const probeMap = new Map(probes.map((probe) => [probe.node, probe]));
+  const images = startImageRollout({
+    registry, probes: probeMap, buildNode: (config.imageBuildNode ?? "infra-testbench") as NodeName, recipe: () => loadImageRecipe(), release: runningCommit,
+  });
   const inbox = agentInbox({ registry, harness, probes: probeMap, wake: wakeThread });
   const github = token === null ? null : githubClient(token);
   const watch = prWatcher({ registry, github, inbox });
@@ -175,6 +185,7 @@ export async function startControlPlane(config: ControlPlaneConfig, models: Mode
     wake: (node) => { void loop.wake(node); },
     probes: new Map(probes.map((probe) => [probe.node, probe])),
     previewPorts: config.previewPorts,
+    images,
   });
   console.error(`nexus control plane: API on ${config.listen.host}:${api.port}, following ${config.nodes.map((n) => n.name).join(", ")}`);
 
@@ -190,6 +201,7 @@ export async function startControlPlane(config: ControlPlaneConfig, models: Mode
       await api.close();
       await harness.close();
       await loop.close();
+      await images.close();
       registry.close();
     },
   };

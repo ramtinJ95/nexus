@@ -1,0 +1,5 @@
+$ nexus nodes
+infra-testbench  online   observed 10s ago  0/4 CPUs, 0/5.8 GiB memory committed, 0 GiB disk committed, 17.7 GiB disk free
+rj-firebat       online   observed 8s ago   0/4 CPUs, 0/5.8 GiB memory committed, 0 GiB disk committed, 17.7 GiB disk free
+rj-nuc           offline  observed 8s ago   0/4 CPUs, 0/5.8 GiB memory committed, 0 GiB disk committed, 17.7 GiB disk free
+exit 0

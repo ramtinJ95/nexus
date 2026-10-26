@@ -1,0 +1,8 @@
+$ nexus image build --wait
+build img-051b22b601e4: running
+  infra-testbench: running
+img-051b22b601e4  -        built 2026-10-26T10:08:22.074Z on infra-testbench  release c93c0f2475b7  on infra-testbench
+img-0000000000aa  current  built 2026-10-20T00:00:00.000Z on infra-testbench  release unknown       on infra-testbench, rj-firebat, rj-nuc
+build img-051b22b601e4: done
+  infra-testbench: done
+exit 0

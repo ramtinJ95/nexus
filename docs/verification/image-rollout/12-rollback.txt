@@ -1,0 +1,8 @@
+$ nexus image rollback --wait
+img-051b22b601e4  previous  built 2026-10-26T10:08:22.074Z on infra-testbench  release c93c0f2475b7  on infra-testbench, rj-firebat
+img-0000000000aa  current   built 2026-10-20T00:00:00.000Z on infra-testbench  release unknown       on infra-testbench, rj-firebat, rj-nuc
+rollout img-0000000000aa: done
+  infra-testbench: done
+  rj-firebat: done
+  rj-nuc: skipped: offline when the rollout began; it fetches the image on first use
+exit 0

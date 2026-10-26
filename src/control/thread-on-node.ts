@@ -37,6 +37,7 @@ import { parseSelfDnsName, readProbeConfig } from "../probe/config.ts";
 import { tailscaleCli } from "../probe/serve.ts";
 import type { ThreadDetail, ThreadRow } from "./api.ts";
 import { defaultPreviewPorts, startControlPlane, type ControlPlaneConfig } from "./main.ts";
+import { openRegistry } from "./registry.ts";
 
 const probeConfig = await readProbeConfig(process.argv[2] ?? "/etc/nexus/probe.json");
 if (probeConfig.backend.kind !== "pylon-vm") throw new Error(`the probe runs the ${probeConfig.backend.kind} backend. This check is for pylon-vm`);
@@ -77,6 +78,11 @@ const config: ControlPlaneConfig = {
   previewPorts: defaultPreviewPorts,
   resumeAfterUsageLimit: false,
 };
+// A rollout needs a deployer, which the control plane's own node never is, so the check makes the image current in the registry.
+const seed = openRegistry(config.db);
+seed.saveImage(manifest!, null);
+seed.setCurrentImage(image);
+seed.close();
 let controlPlane = await startControlPlane(config, scriptedModels());
 
 function call(method: string, path: string, body?: unknown): Promise<{ status: number; body: any }> {
@@ -512,8 +518,6 @@ async function addProject() {
 
 let verdict = "FAIL";
 try {
-  await expect(201, "POST", "/images", manifest);
-  await expect(204, "PUT", "/images/current", { image });
   await addProject();
   const thread = await expect(201, "POST", "/threads", { project: "node-check", title: "thread on node" });
   threadId = thread.id;

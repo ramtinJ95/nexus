@@ -4,6 +4,7 @@ import { randomUUID } from "node:crypto";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { openRegistry, type StoredPylon, type Thread, type ThreadId } from "./registry.ts";
 import { newPylonRecord } from "../tick.ts";
 import { trackActivity } from "../harness/activity.ts";
@@ -69,7 +70,7 @@ test("records survive closing and reopening the file", async (t) => {
     attempts: { count: 1, last: { at: 5, code: "backend", message: "pylon-th-1: the controller exited" } },
   };
   first.savePylon(submitted);
-  first.saveImage(image);
+  first.saveImage(image, "c".repeat(40));
   first.setCurrentImage(image.id);
   const template: TemplateRecord = { id: "tpl-000000000000", key: { project: project.id, image: image.id, setupHash: "s" }, state: "building", on: node };
   first.saveTemplate(template);
@@ -83,7 +84,7 @@ test("records survive closing and reopening the file", async (t) => {
   assert.deepEqual(second.threads("other" as ProjectId), []);
   assert.deepEqual(second.pylon(pylonId), submitted);
   assert.deepEqual(second.pylonsOn(node), [submitted]);
-  assert.deepEqual(second.image(image.id), image);
+  assert.deepEqual(second.image(image.id), { ...image, release: "c".repeat(40) });
   assert.equal(second.currentImage(), image.id);
   assert.deepEqual(second.templates(project.id), [template]);
   assert.deepEqual(second.node(node), { name: node, tailnetHost: "rj-firebat.tail.ts.net", tailnetNodeId: "nFIREBAT", state: "offline", capacity: null, observation: null });
@@ -102,6 +103,32 @@ test("only a recorded image can become current", async (t) => {
   t.after(() => registry.close());
   assert.equal(registry.currentImage(), null);
   assert.throws(() => registry.setCurrentImage("img-ffffffffffff"), /no image/);
+});
+
+test("the image a new current one replaces becomes previous, and making it current again swaps them", async (t) => {
+  const registry = seeded(tempDb());
+  t.after(() => registry.close());
+  const next = { ...image, id: "img-111111111111" as const };
+  registry.saveImage(image, null);
+  registry.saveImage(next, null);
+  registry.setCurrentImage(image.id);
+  assert.deepEqual([registry.currentImage(), registry.previousImage()], [image.id, null], "the first current image replaces none");
+  registry.setCurrentImage(next.id);
+  registry.setCurrentImage(next.id);
+  assert.deepEqual([registry.currentImage(), registry.previousImage()], [next.id, image.id], "making the current image current again keeps previous");
+  registry.setCurrentImage(image.id);
+  assert.deepEqual([registry.currentImage(), registry.previousImage()], [image.id, next.id]);
+});
+
+test("an image recorded before images carried their release reads as of no known release", async (t) => {
+  const path = tempDb();
+  seeded(path).close();
+  const db = new DatabaseSync(path);
+  db.prepare("INSERT INTO images (id, manifest) VALUES (?, ?)").run(image.id, JSON.stringify(image));
+  db.close();
+  const registry = openRegistry(path);
+  t.after(() => registry.close());
+  assert.deepEqual(registry.images(), [{ ...image, release: null }]);
 });
 
 test("activity timestamps only move forward", async (t) => {
