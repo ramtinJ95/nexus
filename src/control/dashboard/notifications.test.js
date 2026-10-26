@@ -11,7 +11,9 @@ test("initial states are silent; failures and parked notify immediately", () => 
   assert.deepEqual(events, []);
   update([row("parked")], 9001);
   update([row("failed")], 9002);
-  assert.deepEqual(events.map((r) => r.attention), ["parked", "failed"]);
+  update([row("decision")], 9003);
+  assert.deepEqual(events.map((r) => r.attention), ["parked", "failed", "decision"]);
+  assert.equal(badgeCount([row("decision"), row("working")]), 1);
 });
 test("reply waits two seconds, and a follow-up cancels even when unread reply outranks working", () => {
   const events = [];
