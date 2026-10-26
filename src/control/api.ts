@@ -24,23 +24,20 @@ import { attentionOf, type Attention } from "./attention.ts";
 import { createServer as createHttpsServer } from "node:https";
 import { TLSSocket } from "node:tls";
 import type { Certificate } from "../tailscale.ts";
-import { randomBytes } from "node:crypto";
 import { createServer, STATUS_CODES, type IncomingMessage, type ServerResponse } from "node:http";
 import type { Duplex } from "node:stream";
 import { setTimeout as sleep } from "node:timers/promises";
 import { WebSocketServer, type WebSocket } from "ws";
 import { z } from "zod";
 import { actualState, desiredPhase, retryRefusal, type ActualState, type DesiredPhase } from "../reconcile.ts";
-import { effectiveAllowedHosts, gitIdentitySchema, gitUrl, hasRemote, linkedName, liveHashOf, reservedPorts, withHttpsHosts, type BootInputs, type Project, type ProjectId, type PylonOverlay, type RepoInit, type SessionHarness } from "../project.ts";
+import { effectiveAllowedHosts, gitIdentitySchema, gitUrl, linkedName, reservedPorts, withHttpsHosts, type BootInputs, type Project, type ProjectId, type PylonOverlay, type SessionHarness } from "../project.ts";
 import type { CommandResult, NodeName, ProbeClient, ProbeError, PylonCommand, PylonId, TailnetNodeId } from "../protocol.ts";
 import type { ConversationView, EntryRecord, JsonObject } from "@earendil-works/pi-durable";
 import type { HarnessHost } from "../harness/host.ts";
 import { pinsSchema, type ImageId, type ImageManifest } from "../images.ts";
 import type { Whois } from "../tailscale.ts";
-import { newPylonRecord } from "../tick.ts";
 import type { ClaudeSent, NodeRecord, Output, PortRange, Preview, Registry, Session, Thread, ThreadId } from "./registry.ts";
 import { dashboard, liveFrames } from "./dashboard.ts";
-import { pylonLive } from "./live.ts";
 import { attachScript, checkoutDir, claudeTextProblem, herdrSession } from "../sessions.ts";
 import { claudeConversations } from "./claude-conversation.ts";
 import type { ClaudeConversation } from "../claude-transcript.ts";
@@ -50,6 +47,8 @@ import type { PullRequest } from "./github.ts";
 import { openTerminal } from "../guest-terminal.ts";
 import { attachTiming, serveAttach, type AttachTiming, type Ending, type PylonDoor } from "./attach.ts";
 import { typeIntoClaude } from "./inbox.ts";
+import { HttpError } from "./http-error.ts";
+import { threadStarter } from "./threads.ts";
 
 export interface ApiOptions {
   https?: { port: number; certificate(): Promise<Certificate>; renewalMs?: number; retryMs?: number };
@@ -177,14 +176,6 @@ const pingMs = 15_000;
 /** A node without its probe's latest observation, which thread detail already reports per pylon. */
 export type NodeSummary = Omit<NodeRecord, "observation"> & { observedAt: string | null };
 
-class HttpError extends Error {
-  readonly status: number;
-  constructor(status: number, message: string) {
-    super(message);
-    this.status = status;
-  }
-}
-
 function networkGrantsKey(network: BootInputs["network"]): string {
   const sorted = (values: Iterable<string>) => [...new Set(values)].sort();
   const secrets = new Map<string, Set<string>>();
@@ -265,12 +256,11 @@ const refusalStatus: Readonly<Record<RefusalKind, number>> = { missing: 404, out
 /** How long a read of a Claude worker's conversation waits for its transcript before answering what is stored. */
 const claudeReadMs = 5_000;
 
-/** `pylon-<id>` must fit in 40 characters. */
-const newThreadId = () => `th-${randomBytes(6).toString("hex")}` as ThreadId;
 
 export async function startApi(options: ApiOptions): Promise<Api> {
   const { registry, whois, allowed, hostnames, dotfiles, harness, wake, probes, previewPorts, streamStallMs = 30_000, attachTiming: timing = attachTiming } = options;
   const claude = claudeConversations({ registry, probes });
+  const startThread = threadStarter({ registry, harness, dotfiles, gitIdentity: options.gitIdentity, wake });
 
   function thread(id: string): Thread {
     const found = registry.thread(id as ThreadId);
@@ -309,59 +299,6 @@ export async function startApi(options: ApiOptions): Promise<Api> {
   function runnable(t: Thread): Thread {
     if (t.status === "archived") throw new HttpError(409, `thread ${t.id} is archived`);
     return conversing(t);
-  }
-
-  /**
-   * Templates come later, so every pylon boots fresh from the current image and runs setup inline. The
-   * conversation is created before the registry row, as HarnessHost.startThread requires.
-   */
-  async function startThread(body: unknown, caller: TailnetNodeId): Promise<Thread> {
-    const request = parse(startSchema, body);
-    if (request.model !== undefined && request.claude === undefined) throw new HttpError(400, "model requires claude");
-    const claudePrompt = request.claude === undefined ? undefined : /^\/poteto-mode(?:\s|$)/.test(request.claude) ? request.claude : `/poteto-mode ${request.claude}`;
-    if (claudePrompt !== undefined && claudePrompt.length > 16_384) throw new HttpError(400, "Claude prompt including /poteto-mode exceeds 16384 characters");
-    const project = registry.project(request.project as ProjectId);
-    if (project === undefined) throw new HttpError(404, `no project ${request.project}`);
-    const node = (request.node ?? project.defaultNode) as NodeName;
-    if (registry.node(node) === undefined) throw new HttpError(400, `no node ${node}`);
-    const image = registry.currentImage();
-    if (image === null) throw new HttpError(409, "no image is current yet, so a pylon has nothing to boot");
-    const branch = request.branch ?? project.defaultBranch;
-    if (!hasRemote(project) && request.commit !== undefined) throw new HttpError(400, `project ${project.id} is a scratch project, so it has no commit to check out`);
-    // The one place a thread's repository is decided. It is frozen into the pylon's boot.
-    const repo: RepoInit = hasRemote(project)
-      ? { kind: "clone", url: project.repoUrl, checkout: { branch, commit: request.commit ?? `origin/${branch}` } }
-      : { kind: "empty", branch };
-
-    const now = Date.now();
-    const id = newThreadId();
-    const pylonId = `pylon-${id}` as PylonId;
-    const conversationId = request.claude === undefined ? await harness.startThread({ threadId: id, pylonId }) : null;
-    const t: Thread = {
-      id, title: request.title, project: project.id, pylonId, status: "active", conversationId: conversationId === null ? null : String(conversationId), startedBy: caller, createdAt: now,
-      // Starting a thread is human activity, so its pylon is wanted at once.
-      agentTurnRunning: false, lastAgentActivityAt: 0, lastHumanActivityAt: now, seenAt: null, lastReplyAt: null,
-    };
-    const boot: Omit<BootInputs, "source"> = {
-      pylonId, image, resources: project.resources,
-      gitIdentity: project.gitIdentity ?? options.gitIdentity,
-      // Every boot pulls the dotfiles through the allowlist. A template build pulls none, so their host stays out of the setup hash.
-      network: { allowedHosts: withHttpsHosts(effectiveAllowedHosts(project), [dotfiles.repo]), secrets: project.secrets },
-      repo,
-      dotfiles,
-    };
-    // Ports are allocated once the pylon reports the services that want a preview.
-    const live = pylonLive({ pylonId, thread: id, node, boot }, project, []);
-    const { desired: _, ...pylon } = newPylonRecord({
-      thread: id, pylonId, node, desired: "running",
-      boot,
-      firstBoot: { kind: "fresh", preSetup: project.preSetup },
-      live,
-      liveHash: liveHashOf(live),
-    });
-    registry.createThread(t, pylon, claudePrompt, request.model);
-    wake(node);
-    return t;
   }
 
   /** The pylon as its node's last observation reports it. */
@@ -777,7 +714,11 @@ export async function startApi(options: ApiOptions): Promise<Api> {
     ["POST", /^\/v1\/projects$/, async (_, r) => created(createProject(await r.body()))],
     ["GET", /^\/v1\/nodes$/, () => ok(registry.nodes().map(({ observation, ...n }): NodeSummary => ({ ...n, observedAt: observation?.observedAt ?? null })))],
     ["GET", /^\/v1\/threads$/, (_, r) => ok(registry.threads((r.query.get("project") ?? undefined) as ProjectId | undefined).map(row))],
-    ["POST", /^\/v1\/threads$/, async (_, r) => created(await startThread(await r.body(), r.caller))],
+    ["POST", /^\/v1\/threads$/, async (_, r) => {
+      const request = parse(startSchema, await r.body());
+      if (request.model !== undefined && request.claude === undefined) throw new HttpError(400, "model requires claude");
+      return created(await startThread(request, r.caller));
+    }],
     ["GET", /^\/v1\/threads\/([^/]+)$/, (m) => ok(detail(thread(m[1]!)))],
     ["DELETE", /^\/v1\/threads\/([^/]+)$/, async (m) => ok(await setStatus(thread(m[1]!), "deleted"))],
     ["POST", /^\/v1\/threads\/([^/]+)\/(seen|unseen)$/, async (m, r) => {
