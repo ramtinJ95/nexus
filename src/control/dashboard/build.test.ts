@@ -25,7 +25,16 @@ test("a page loads a small client with no grammar until a diff opens", () => {
   assert.ok(entry !== undefined, "the build writes client.js");
   assert.deepEqual(inputsOf(page).filter((input) => input.includes("@shikijs/langs")), []);
   const bytes = [...page].reduce((sum, path) => sum + outputs[path]!.bytes, 0);
-  assert.ok(bytes < 64_000, `a page loads ${bytes} bytes of script`);
+  assert.ok(bytes < 40_000, `a page loads ${bytes} bytes of script`);
+});
+
+test("a language's grammar is a chunk of its own, which a page reaches only by importing it when a file needs it", () => {
+  const grammar = Object.keys(outputs).filter((path) => Object.keys(outputs[path]!.inputs).some((input) => input.endsWith("@shikijs/langs/dist/typescript.mjs")));
+  assert.equal(grammar.length, 1, "one chunk holds the typescript grammar");
+  assert.ok(reached(entry, ["import-statement", "dynamic-import"]).has(grammar[0]!), "the client can load it");
+  const diff = Object.keys(outputs).filter((path) => Object.keys(outputs[path]!.inputs).some((input) => input.endsWith("src/control/dashboard/diff.js")));
+  assert.equal(diff.length, 1, "one chunk holds the diff view");
+  assert.ok(!reached(diff[0]!, ["import-statement"]).has(grammar[0]!), "opening a diff does not load the grammar for every file");
 });
 
 test("every package bundled into the client is named in THIRD_PARTY_NOTICES.md with its version", async () => {

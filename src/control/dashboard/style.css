@@ -310,17 +310,8 @@ h4.md-h { font-size: 1.07em; }
 .fv-head .lines { margin-left: auto; }
 .fv-note { margin: 16px 20px; }
 .fv-meta { padding: 8px 20px; font-family: var(--mono); border-bottom: 1px solid var(--line-soft); }
-.diff-view { font: 12.5px/1.6 var(--mono); padding: 4px 0 24px; min-width: max-content; }
-.dl { display: grid; grid-template-columns: 60px 18px minmax(0, 1fr); }
-.dl .ln { color: var(--text-3); text-align: right; padding-right: 10px; user-select: none; border-right: 1px solid var(--line-soft); }
-.dl .sg { text-align: center; user-select: none; color: var(--text-3); }
-.dl .code { white-space: pre; padding-right: 20px; }
-.dl-add { background: var(--add-bg); }
-.dl-add .sg { color: var(--add-text); }
-.dl-del { background: var(--del-bg); }
-.dl-del .sg { color: var(--del-text); }
-.dl-hunk { color: var(--text-3); background: var(--raised); margin: 6px 0; }
-.dl-hunk .code { font-size: 11.5px; }
+/* The diff draws in its own shadow root, which inherits these. */
+.diff-view { --diffs-font-family: var(--mono); --diffs-font-size: 12.5px; --diffs-line-height: 20px; --diffs-light-bg: var(--bg); --diffs-dark-bg: var(--bg); padding: 4px 0 24px; }
 .badge { display: inline-flex; align-items: center; justify-content: center; width: 15px; height: 15px; flex: none; border-radius: 3px; font: 700 9.5px/1 var(--mono); color: #fff; background: var(--text-3); }
 .badge-added, .badge-copied { background: var(--ok); }
 .badge-modified, .badge-renamed, .badge-typechange { background: var(--accent); }
@@ -491,7 +482,6 @@ h4.md-h { font-size: 1.07em; }
   .comp-box textarea { font-size: 16px; }
   .comp-foot .keys { display: none; }
   .fv-head { padding: 10px 12px; }
-  .dl { grid-template-columns: 40px 14px minmax(0, 1fr); }
 
   .page { padding: 14px 12px 24px; }
   .ov .wide { display: none; }
