@@ -4,7 +4,7 @@ import { mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promise
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Credential } from "@earendil-works/pi-ai";
-import { harnessModels, openCredentials, requireModel } from "./credentials.ts";
+import { chatgptToken, harnessModels, openCredentials, requireModel } from "./credentials.ts";
 
 async function credentialsPath(t: import("node:test").TestContext): Promise<string> {
   const dir = await mkdtemp(join(tmpdir(), "nexus-credentials-"));
@@ -114,4 +114,29 @@ test("a harness that is not signed in, or a provider it does not have, has no mo
   const models = harnessModels(await openCredentials(await credentialsPath(t)));
   await assert.rejects(requireModel(models, { provider: "openai", modelId: "gpt-6-astra" }), /not signed in to openai.*login\.ts/);
   await assert.rejects(requireModel(models, { provider: "openai-codex", modelId: "gpt-6-astra" }), /names provider openai-codex, but the harness has only openai/);
+});
+
+test("the token probes are handed is the ChatGPT login's access token, refreshed with ten minutes left, and never an API key", async (t) => {
+  const credentials = await openCredentials(await credentialsPath(t));
+  const models = harnessModels(credentials);
+  const login = { type: "oauth", refresh: "refresh-1", clientId: "app_test", scopes: ["chatgpt.tokens.use.direct"] } as const;
+  await credentials.store.modify("openai", async () => ({ ...login, access: "access-1", expires: Date.now() + 11 * 60_000 }));
+  assert.equal(await chatgptToken(models, credentials), "access-1");
+
+  const fetched: string[] = [];
+  const realFetch = globalThis.fetch;
+  t.after(() => { globalThis.fetch = realFetch; });
+  globalThis.fetch = async (input, init) => {
+    fetched.push(`${String(input)} ${String(init?.body)}`);
+    return Response.json({ access_token: "access-2", refresh_token: "refresh-2", scope: "chatgpt.tokens.use.direct", expires_in: 3600 });
+  };
+  await credentials.store.modify("openai", async () => ({ ...login, access: "access-1", expires: Date.now() + 9 * 60_000 }));
+  assert.equal(await chatgptToken(models, credentials), "access-2");
+  assert.equal(fetched.length, 1);
+  assert.match(fetched[0]!, /^https:\/\/auth\.openai\.com\/.* grant_type=refresh_token&client_id=app_test&refresh_token=refresh-1/);
+  const stored = await credentials.store.read("openai");
+  assert.equal(stored?.type === "oauth" ? stored.refresh : undefined, "refresh-2", "the rotated refresh token is stored");
+
+  await credentials.store.modify("openai", async () => ({ type: "api_key", key: "sk-test" }));
+  assert.equal(await chatgptToken(models, credentials), undefined);
 });

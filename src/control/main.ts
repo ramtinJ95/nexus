@@ -12,7 +12,7 @@ import { gitIdentitySchema, gitUrl } from "../project.ts";
 import { ingest } from "../reconcile.ts";
 import { linuxTailscaledSocket, localApiWhois, localApiCertificate } from "../tailscale.ts";
 import type { Models } from "@earendil-works/pi-ai/models";
-import { harnessModels, openCredentials, requireModel } from "../harness/credentials.ts";
+import { chatgptToken, harnessModels, openCredentials, requireModel } from "../harness/credentials.ts";
 import { openHarnessHost, type ConversationId } from "../harness/host.ts";
 import { startApi } from "./api.ts";
 import { registryLocator } from "./locator.ts";
@@ -30,6 +30,7 @@ import { usageLimitResumer } from "./usage-limit.ts";
 import { startImageRollout } from "./image-rollout.ts";
 import { loadImageRecipe } from "../image-build.ts";
 import { runningCommit } from "../deploy/health.ts";
+import { chatgptTokenHandoff } from "./chatgpt-token.ts";
 
 const nodeId = z.string().regex(/^n[A-Za-z0-9]+$/, "a Tailscale stable node ID, such as nAbC123CNTRL");
 const absolutePath = z.string().refine(isAbsolute, "must be an absolute path");
@@ -106,8 +107,11 @@ export interface ControlPlane {
   close(): Promise<void>;
 }
 
-/** Everything but the model login, so src/control/thread-on-node.ts runs this same wiring with a scripted model. */
-export async function startControlPlane(config: ControlPlaneConfig, models: Models): Promise<ControlPlane> {
+/**
+ * Everything but the model login, so src/control/thread-on-node.ts runs this same wiring with a scripted model.
+ * `chatgptToken` reads the token every probe is handed for the chatgpt login. Without it, probes get none.
+ */
+export async function startControlPlane(config: ControlPlaneConfig, models: Models, chatgptToken?: () => Promise<string | undefined>): Promise<ControlPlane> {
   const token = config.github ? (await readFile(config.github.tokenFile, "utf8")).trim() : null;
   if (token !== null && !/^[A-Za-z0-9_]+$/.test(token)) throw new Error("github.tokenFile must contain only a GitHub token");
   const tailscaled = config.tailscaledSocket ?? linuxTailscaledSocket;
@@ -157,6 +161,10 @@ export async function startControlPlane(config: ControlPlaneConfig, models: Mode
   const watch = prWatcher({ registry, github, inbox });
   const watchTimer = setInterval(() => { void watch.poll(); }, 120_000);
   void watch.poll();
+  const handoff = chatgptToken === undefined ? null : chatgptTokenHandoff({ probes, token: chatgptToken });
+  const handoffTimer = setInterval(() => { void handoff?.poll(); }, 60_000);
+  handoffTimer.unref();
+  void handoff?.poll();
   const resumer = config.resumeAfterUsageLimit ? usageLimitResumer({ registry, inbox }) : null;
   const resumeTimer = setInterval(() => { void resumer?.poll(); }, 30_000);
   resumeTimer.unref();
@@ -198,7 +206,9 @@ export async function startControlPlane(config: ControlPlaneConfig, models: Mode
       clearInterval(watchTimer);
       clearInterval(reviewTimer);
       clearInterval(resumeTimer);
+      clearInterval(handoffTimer);
       await watch.close();
+      await handoff?.close();
       await resumer?.close();
       await reviews?.close();
       await api.close();
@@ -212,9 +222,10 @@ export async function startControlPlane(config: ControlPlaneConfig, models: Mode
 
 async function main(configPath: string) {
   const config = await readConfig(configPath);
-  const models = harnessModels(await openCredentials(config.harness.credentials));
+  const credentials = await openCredentials(config.harness.credentials);
+  const models = harnessModels(credentials);
   await requireModel(models, config.harness.model);
-  const controlPlane = await startControlPlane(config, models);
+  const controlPlane = await startControlPlane(config, models, () => chatgptToken(models, credentials));
   for (const signal of ["SIGINT", "SIGTERM"] as const) {
     process.once(signal, () => { controlPlane.close().then(() => process.exit(0), (err: unknown) => { console.error(err); process.exit(1); }); });
   }
