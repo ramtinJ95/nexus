@@ -27,6 +27,7 @@ import { openRegistry, type Registry, type Thread } from "./registry.ts";
 import { startImageRollout, type ImageRollout } from "./image-rollout.ts";
 import { imageIdOf, type ImageId, type ImageRecipe } from "../images.ts";
 import { githubTokenGrant, liveHashOf, type ProjectId } from "../project.ts";
+import type { ProjectMirror, TemplateRecord } from "../images.ts";
 import { ingest } from "../reconcile.ts";
 import { processStream } from "../process-stream.ts";
 import { repoInitCommand } from "../pylon-vm-backend.ts";
@@ -84,6 +85,9 @@ async function setup(t: import("node:test").TestContext, options: { gitIdentity?
   const streams: [PylonId, readonly string[]][] = [];
   /** What the node's probe opens a pipe to. Tests replace it. */
   let pipe = async (argv: readonly string[]): Promise<ByteStream> => { throw new Error(`unexpected stream ${argv[0]}`); };
+  /** What a project's remote answers a setup read with. Tests replace it. */
+  let read: ProjectMirror["setupInputs"] = () => Promise.reject(new Error("this test has no remote"));
+  const reads: Parameters<ProjectMirror["setupInputs"]>[1][] = [];
   const api = await startApi({
     registry, host: "127.0.0.1", port: 0,
     ...(options.https ? { https: options.https } : {}),
@@ -100,6 +104,7 @@ async function setup(t: import("node:test").TestContext, options: { gitIdentity?
     dotfiles: options.dotfiles ?? dotfiles,
     gitIdentity: options.gitIdentity,
     harness,
+    mirror: { setupInputs(p, ref) { reads.push(ref); return read(p, ref); } },
     wake: (n) => { woken.push(n); },
     probes: new Map([[node, {
       command: (pylonId: PylonId, command: PylonCommand) => { commands.push([pylonId, command]); return answer(command); },
@@ -143,7 +148,7 @@ async function setup(t: import("node:test").TestContext, options: { gitIdentity?
     });
   }
   return {
-    registry, images, call, raw, woken, calls, commands, streams, fake, port: api.port, get httpsPort() { return api.httpsPort; }, close: () => api.close(),
+    registry, images, call, raw, woken, calls, commands, streams, reads, fake, port: api.port, get httpsPort() { return api.httpsPort; }, close: () => api.close(),
     callAs(id: TailnetNodeId | null) { caller = id; },
     /** Holds every request at whois until the returned function is called. */
     holdWhois() {
@@ -156,6 +161,7 @@ async function setup(t: import("node:test").TestContext, options: { gitIdentity?
     },
     probeAnswers(next: typeof answer) { answer = next; },
     probePipes(next: typeof pipe) { pipe = next; },
+    remoteReads(next: typeof read) { read = next; },
     events: (path: string) => readEvents(api.port, path),
   };
 }
@@ -376,6 +382,56 @@ test("without --node a thread still boots on its project's default node, and a n
   assert.equal((await s.call("POST", "/v1/threads", { project: "acme", title: "x", node: "nowhere" })).status, 400);
 });
 
+test("the first start of a setup builds its template on the node, the next waits for it, and one after it is ready boots from it at the commit read", async (t) => {
+  const s = await withImage(t);
+  observeNode(s, node, { total: 64, committed: 0 });
+  const [first, moved] = ["1".repeat(40), "2".repeat(40)];
+  s.remoteReads(async () => ({ commit: first, setupBlob: "b".repeat(40) }));
+
+  const building = (await s.call("POST", "/v1/threads", { project: "acme", title: "First", branch: "feature" })).body as Thread;
+  const [template] = s.registry.templates(project.id as ProjectId);
+  assert.ok(template?.state === "building");
+  assert.deepEqual(building.setup, { how: "fresh", reason: `no template of this setup is on ${node} yet`, building: template.id });
+  assert.deepEqual([template.on, template.inputs.repo, template.submitted], [node, { url: project.repoUrl, branch: "feature", commit: first }, null], "the build checks out the commit the setup was read at");
+  assert.deepEqual(s.registry.pylon(building.pylonId)!.firstBoot, { kind: "fresh", preSetup: null });
+  assert.deepEqual(s.registry.pylon(building.pylonId)!.boot.repo, { kind: "clone", url: project.repoUrl, checkout: { branch: "feature", commit: "origin/feature" } });
+
+  const waiting = (await s.call("POST", "/v1/threads", { project: "acme", title: "Second", branch: "feature" })).body as Thread;
+  assert.deepEqual(waiting.setup, { how: "fresh", reason: `template ${template.id} of this setup is still building on ${node}`, building: template.id });
+  assert.equal(s.registry.templates(project.id as ProjectId).length, 1, "a running build is not started twice");
+
+  const builtAt = Date.now() - 60_000;
+  s.registry.saveTemplate({ id: template.id, key: template.key, state: "ready", builtOn: node, builtAt, commit: first });
+  observeNode(s, node, { total: 64, committed: 0 }, { artifacts: [image.id, template.id] as NodeObservation["artifacts"] });
+  s.remoteReads(async () => ({ commit: moved, setupBlob: "b".repeat(40) }));
+  const reused = (await s.call("POST", "/v1/threads", { project: "acme", title: "Third", branch: "feature" })).body as Thread;
+  assert.deepEqual(reused.setup, { how: "template", template: template.id, builtAt, commit: moved });
+  const pylon = s.registry.pylon(reused.pylonId)!;
+  assert.deepEqual(pylon.firstBoot, { kind: "template", template: template.id });
+  assert.deepEqual(pylon.boot.repo, { kind: "clone", url: project.repoUrl, checkout: { branch: "feature", commit: moved } }, "the pylon checks out the commit its setup was read at, not the branch's tip at boot");
+  assert.deepEqual((await s.call("GET", `/v1/threads/${reused.id}`)).body.thread.setup, reused.setup, "show reads it back");
+  assert.deepEqual(s.reads, [{ branch: "feature" }, { branch: "feature" }, { branch: "feature" }]);
+});
+
+test("a start whose setup cannot be read boots fresh and says why, and only a full commit ID is read", async (t) => {
+  const s = await withImage(t);
+  const unread = (await s.call("POST", "/v1/threads", { project: "acme", title: "Unread" })).body as Thread;
+  assert.deepEqual(unread.setup, { how: "fresh", reason: "the control plane could not read .nexus/setup at main: this test has no remote" });
+  assert.deepEqual(s.registry.templates(project.id as ProjectId), []);
+  assert.deepEqual(s.registry.pylon(unread.pylonId)!.firstBoot, { kind: "fresh", preSetup: null });
+
+  const short = (await s.call("POST", "/v1/threads", { project: "acme", title: "Short", commit: "abc123" })).body as Thread;
+  assert.deepEqual(short.setup, { how: "fresh", reason: "the start named commit abc123, and only a full commit ID or a branch tip can use a template" });
+  assert.deepEqual(s.registry.pylon(short.pylonId)!.boot.repo, { kind: "clone", url: project.repoUrl, checkout: { branch: "main", commit: "abc123" } });
+
+  const full = "f".repeat(40);
+  s.remoteReads(async () => ({ commit: full, setupBlob: null }));
+  const pinned = (await s.call("POST", "/v1/threads", { project: "acme", title: "Pinned", commit: full })).body as Thread;
+  assert.deepEqual(s.reads, [{ branch: "main" }, { commit: full }]);
+  assert.deepEqual(s.registry.templates(project.id as ProjectId).map((r: TemplateRecord) => r.state === "building" && r.inputs.repo), [{ url: project.repoUrl, branch: "main", commit: full }]);
+  assert.equal(pinned.setup?.how, "fresh");
+});
+
 test("a scratch project has no repository, and each of its threads starts an empty one on its branch", async (t) => {
   const s = await setup(t);
   const scratch = { ...project, id: "sketch", repoUrl: null, allowedHosts: [], logins: [], secrets: [githubTokenGrant] };
@@ -387,6 +443,8 @@ test("a scratch project has no repository, and each of its threads starts an emp
 
   const started = await s.call("POST", "/v1/threads", { project: "sketch", title: "Sketch" });
   assert.equal(started.status, 201, JSON.stringify(started.body));
+  assert.deepEqual(started.body.setup, { how: "fresh", reason: "the project is scratch, so it has no template" });
+  assert.deepEqual(s.reads, [], "a scratch project has no remote to read");
   const pylon = s.registry.pylon(started.body.pylonId)!;
   assert.deepEqual(pylon.boot.repo, { kind: "empty", branch: "main" });
   assert.deepEqual(pylon.boot.network, { allowedHosts: ["api.github.com", "github.com"], secrets: [githubTokenGrant] }, "the grant opens GitHub, and no repo host joins");

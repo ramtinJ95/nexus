@@ -48,6 +48,7 @@ async function setup(t: TestContext) {
     hostnames: new Set(["127.0.0.1"]),
     dotfiles: { repo: "git@github.com:ramtin/dotfiles.git", ref: "main" },
     harness: fake.harness,
+    mirror: { setupInputs: () => Promise.reject(new Error("the dashboard tests read no remote")) },
     wake: () => {},
     probes: new Map(),
     previewPorts: { first: 10200, last: 10299 },

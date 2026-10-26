@@ -22,8 +22,8 @@ import { fakeHarness } from "../control/fake-harness.ts";
 import { openRegistry, type Thread, type ThreadId } from "../control/registry.ts";
 import type { Review } from "../control/review.ts";
 import { startImageRollout } from "../control/image-rollout.ts";
-import type { ImageId, ImageManifest } from "../images.ts";
-import type { Project, ProjectId } from "../project.ts";
+import type { ImageId, ImageManifest, ProjectMirror } from "../images.ts";
+import type { Project, ProjectId, RemoteProject } from "../project.ts";
 import { openTerminal, terminalSize } from "../guest-terminal.ts";
 import { processStream } from "../process-stream.ts";
 import { repoInitCommand } from "../pylon-vm-backend.ts";
@@ -111,6 +111,8 @@ async function setup(t: TestContext) {
   const commands: PylonCommand[] = [];
   /** What the node's probe opens a pipe to. Tests replace it. */
   let pipe = async (argv: readonly string[]): Promise<ByteStream> => { throw new Error(`unexpected stream ${argv[0]}`); };
+  /** What the project's remote answers a setup read with. Tests replace it. */
+  let read: ProjectMirror["setupInputs"] = () => Promise.reject(new Error("this test has no remote"));
   const fake = fakeHarness();
   const noJobs = () => Promise.reject(new Error("the CLI tests' nodes hold every image they roll out"));
   const images = startImageRollout({
@@ -122,6 +124,7 @@ async function setup(t: TestContext) {
     registry, host: "127.0.0.1", port, whois: async () => caller, allowed: new Set([laptop]),
     hostnames: new Set([apiName, "127.0.0.1"]), dotfiles: { repo: "https://github.com/ramtin/dotfiles.git", ref: "main" },
     harness: fake.harness, wake: () => {}, previewPorts: { first: 10200, last: 10299 }, images,
+    mirror: { setupInputs: (p: RemoteProject, ref: { branch: string } | { commit: string }) => read(p, ref) },
     probes: new Map([[node, {
       command: (_pylonId: PylonId, command: PylonCommand) => { commands.push(command); return answer(command); },
       stream: (_pylonId: PylonId, argv: readonly string[]) => pipe(argv),
@@ -158,6 +161,7 @@ async function setup(t: TestContext) {
     callAs(id: TailnetNodeId) { caller = id; },
     probeAnswers(next: typeof answer) { answer = next; },
     probePipes(next: typeof pipe) { pipe = next; },
+    remoteReads(next: typeof read) { read = next; },
     localUrl: `http://127.0.0.1:${api.port}`,
     /** Stops the control plane, which drops every connection, and returns a function that starts it again on its port. */
     async stop() {

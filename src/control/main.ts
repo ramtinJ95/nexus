@@ -21,6 +21,7 @@ import { openRegistry, type Thread, type ThreadId } from "./registry.ts";
 import { githubClient, githubRepo } from "./github.ts";
 import { agentReplies, reviewLoop } from "./review.ts";
 import { threadStarter } from "./threads.ts";
+import { projectMirror } from "./mirror.ts";
 import { checkRuns } from "./gate.ts";
 import { repository } from "../deploy/install.ts";
 import { prWatcher } from "./pr-watch.ts";
@@ -160,7 +161,8 @@ export async function startControlPlane(config: ControlPlaneConfig, models: Mode
   const resumeTimer = setInterval(() => { void resumer?.poll(); }, 30_000);
   resumeTimer.unref();
   void resumer?.poll();
-  const startThread = threadStarter({ registry, harness, dotfiles: config.dotfiles, gitIdentity: config.gitIdentity, wake: (node) => { void loop.wake(node); } });
+  const mirror = projectMirror({ githubToken: token });
+  const startThread = threadStarter({ registry, harness, mirror, dotfiles: config.dotfiles, gitIdentity: config.gitIdentity, wake: (node) => { void loop.wake(node); } });
   const reviews = github === null ? null : reviewLoop({
     registry, github, inbox, harnessModel: config.harness.model.modelId, startThread,
     replies: agentReplies(registry, harness),
@@ -182,6 +184,7 @@ export async function startControlPlane(config: ControlPlaneConfig, models: Mode
     dotfiles: config.dotfiles,
     gitIdentity: config.gitIdentity,
     harness,
+    mirror,
     wake: (node) => { void loop.wake(node); },
     probes: new Map(probes.map((probe) => [probe.node, probe])),
     previewPorts: config.previewPorts,

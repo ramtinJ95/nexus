@@ -33,6 +33,7 @@ const api = await startApi({
   whois: async () => laptop, allowed: new Set([laptop]), hostnames: new Set(["127.0.0.1"]),
   dotfiles: { repo: "git@github.com:ramtin/dotfiles.git", ref: "main" },
   harness: fakeHarness().harness, wake: () => {}, probes: new Map(), previewPorts: { first: 10200, last: 10299 },
+  mirror: { setupInputs: () => Promise.reject(new Error("the screenshots read no remote")) },
 });
 const post = async (method: string, path: string, body: unknown) => {
   const res = await fetch(`${base}${path}`, { method, headers: { "content-type": "application/json" }, body: JSON.stringify(body) });

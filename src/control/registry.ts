@@ -17,7 +17,7 @@ import { DatabaseSync } from "node:sqlite";
 import type { ActivityFacts, RegistryWrite, ThreadStatus } from "../reconcile.ts";
 import type { HerdrStatus, JobStatus, NodeName, NodeObservation, PylonId, Subject, TailnetNodeId } from "../protocol.ts";
 import type { Project, ProjectId, SessionHarness } from "../project.ts";
-import type { BuildingTemplate, ImageId, ImageManifest, TemplateId, TemplateRecord } from "../images.ts";
+import type { BuildingTemplate, ImageId, ImageManifest, TemplateId, TemplateRecord, ThreadSetup } from "../images.ts";
 import type { PylonRecord } from "../tick.ts";
 import type { ImageOperation } from "./image-rollout.ts";
 import { needsPerson, reviewerCaller, type Review } from "./review.ts";
@@ -57,6 +57,8 @@ export interface Thread extends ActivityFacts {
   placement?: Placement;
   /** The Claude worker's session stopped on its usage limit and no turn of a session runs since. `resetsAt` is null when Claude Code did not say when the limit resets. */
   usageLimit?: { stoppedAt: number; resetsAt: number | null };
+  /** Absent from a thread started before setups were recorded. */
+  setup?: ThreadSetup;
 }
 
 /**
@@ -278,6 +280,7 @@ const migrations: readonly string[] = [
   // What a waiting session's report said it waits for, such as a background command still running at the hold's cap.
   `ALTER TABLE session_activity ADD COLUMN message TEXT;`,
   `ALTER TABLE session_order ADD COLUMN event_ids TEXT;`,
+  `ALTER TABLE threads ADD COLUMN setup TEXT;`,
 ];
 
 type Row = Record<string, unknown>;
@@ -322,6 +325,7 @@ function threadRow(r: Row): Thread {
     seenAt: r.seen_at as number | null,
     lastReplyAt: r.last_reply_at as number | null,
     ...(r.placement === null ? {} : { placement: json<Placement>(r.placement) }),
+    ...(r.setup === null ? {} : { setup: json<ThreadSetup>(r.setup) }),
   };
 }
 
@@ -378,7 +382,7 @@ export function openRegistry(path: string, clock = Date.now) {
     projects: db.prepare("SELECT record FROM projects ORDER BY id"),
     project: db.prepare("SELECT record FROM projects WHERE id = ?"),
     insertThread: db.prepare(`INSERT INTO threads (id, title, project, status, conversation_id, started_by, created_at,
-      agent_turn_running, last_agent_activity_at, last_human_activity_at, placement) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
+      agent_turn_running, last_agent_activity_at, last_human_activity_at, placement, setup) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
     threads: db.prepare("SELECT * FROM threads ORDER BY created_at, id"),
     threadsOf: db.prepare("SELECT * FROM threads WHERE project = ? ORDER BY created_at, id"),
     thread: db.prepare("SELECT * FROM threads WHERE id = ?"),
@@ -773,7 +777,8 @@ export function openRegistry(path: string, clock = Date.now) {
       if (pylon.pylonId !== thread.pylonId || pylon.thread !== thread.id) throw new Error(`pylon ${pylon.pylonId} does not belong to thread ${thread.id}`);
       transaction(() => {
         q.insertThread.run(thread.id, thread.title, thread.project, thread.status, thread.conversationId, thread.startedBy, thread.createdAt,
-          thread.agentTurnRunning ? 1 : 0, thread.lastAgentActivityAt, thread.lastHumanActivityAt, thread.placement === undefined ? null : JSON.stringify(thread.placement));
+          thread.agentTurnRunning ? 1 : 0, thread.lastAgentActivityAt, thread.lastHumanActivityAt, thread.placement === undefined ? null : JSON.stringify(thread.placement),
+          thread.setup === undefined ? null : JSON.stringify(thread.setup));
         q.insertPylon.run(pylonParams(pylon));
         if (claudePrompt !== undefined) db.prepare("INSERT INTO claude_workers (thread, prompt, state, model) VALUES (?, ?, 'pending', ?)").run(thread.id, claudePrompt, model);
       });

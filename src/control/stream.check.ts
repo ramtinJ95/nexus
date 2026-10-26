@@ -70,6 +70,7 @@ registry.setCurrentImage(image);
 const api = await startApi({
   registry, host: "127.0.0.1", port: 0, whois: async () => laptop, allowed: new Set([laptop]), hostnames: new Set(["127.0.0.1"]),
   dotfiles: { repo: "https://github.com/ramtin/dotfiles.git", ref: "main" }, harness: threads, wake: () => {},
+  mirror: { setupInputs: () => Promise.reject(new Error("the stream check reads no remote")) },
   probes: new Map(), previewPorts: { first: 10200, last: 10299 },
 });
 const url = `http://127.0.0.1:${api.port}`;
