@@ -1,0 +1,20 @@
+probe: {"t":"2026-10-26T05:34:33.165Z","started":true,"pid":32328,"replayed":0,"sessionTurnRunning":false,"lastReplyAt":null,"sessionEvents":[]}
+== a Claude Code turn starts
+probe: {"t":"2026-10-26T05:34:36.263Z","journaled":1,"kind":"session.turn-started","at":1792992874222,"id":"0001792992874222-32389-2a938138","sessionTurnRunning":true,"lastReplyAt":null,"sessionEvents":["session.turn-started"]}
+== killing the probe mid-turn
+claude: done
+docs/verification/hook-outbox/run.sh: line 38: 32328 Killed                  node "$here/stand-in-probe.ts" "$port" "$work/state"
+     32329 Done                    | sed -u 's/^/probe: /'
+== Claude's turn and session ended; the probe is still down. Outbox:
+0001792992896139-890-885d87a8.json
+0001792992897382-1056-c479e99e.json
+0001792992897516-1098-b52d6365.json
+sender running: 1
+== the probe comes back, losing its first acknowledgement
+probe: {"t":"2026-10-26T05:35:13.134Z","started":true,"pid":1765,"replayed":1,"sessionTurnRunning":true,"lastReplyAt":null,"sessionEvents":["session.turn-started"]}
+probe: {"t":"2026-10-26T05:35:13.720Z","journaled":2,"kind":"session.heartbeat","at":1792992896139,"id":"0001792992896139-890-885d87a8","sessionTurnRunning":true,"lastReplyAt":null,"sessionEvents":["session.turn-started","session.heartbeat"]}
+probe: {"t":"2026-10-26T05:35:13.720Z","droppedAnswer":200}
+probe: {"t":"2026-10-26T05:35:23.740Z","journaled":3,"kind":"session.heartbeat","at":1792992896139,"id":"0001792992896139-890-885d87a8","sessionTurnRunning":true,"lastReplyAt":null,"sessionEvents":["session.turn-started","session.heartbeat"]}
+probe: {"t":"2026-10-26T05:35:23.766Z","journaled":4,"kind":"session.turn-ended","at":1792992897382,"id":"0001792992897382-1056-c479e99e","sessionTurnRunning":false,"lastReplyAt":1792992923761,"sessionEvents":["session.turn-started","session.heartbeat","session.turn-ended"]}
+probe: {"t":"2026-10-26T05:35:23.783Z","journaled":5,"kind":"session.ended","at":1792992897516,"id":"0001792992897516-1098-b52d6365","sessionTurnRunning":false,"lastReplyAt":1792992923761,"sessionEvents":["session.turn-started","session.heartbeat","session.turn-ended","session.ended"]}
+== outbox empty, sender exited

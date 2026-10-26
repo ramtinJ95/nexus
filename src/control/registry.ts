@@ -268,6 +268,7 @@ const migrations: readonly string[] = [
   `ALTER TABLE threads ADD COLUMN placement TEXT;`,
   // What a waiting session's report said it waits for, such as a background command still running at the hold's cap.
   `ALTER TABLE session_activity ADD COLUMN message TEXT;`,
+  `ALTER TABLE session_order ADD COLUMN event_ids TEXT;`,
 ];
 
 type Row = Record<string, unknown>;
@@ -605,10 +606,13 @@ export function openRegistry(path: string, clock = Date.now) {
         const status = q.thread.get(thread)?.status;
         if (status === "archived" || status === "deleted") return;
         const at = event.at ?? report.time;
-        const previous = db.prepare("SELECT at, kind FROM session_order WHERE thread = ? AND session = ?").get(thread, session);
+        const previous = db.prepare("SELECT at, kind, event_ids FROM session_order WHERE thread = ? AND session = ?").get(thread, session);
+        const previousIds = previous?.event_ids == null ? [] : json<string[]>(previous.event_ids);
         const floor = db.prepare("SELECT at FROM session_order_floor WHERE thread = ?").get(thread)?.at as number | undefined;
         if (previous !== undefined) {
           if (at < Number(previous.at)) return;
+          // The pylon's outbox sends an event again when its acknowledgement was lost, under the ID it was applied with.
+          if (event.id !== undefined && at === previous.at && previousIds.includes(event.id)) return;
           if (at === previous.at && (event.kind === "session.turn-started" || event.kind === "session.heartbeat") && previous.kind !== "session.turn-started" && previous.kind !== "session.heartbeat") return;
         } else if (floor !== undefined && at <= floor) return;
         const current = db.prepare("SELECT state, started_at FROM session_activity WHERE thread = ? AND session = ?").get(thread, session);
@@ -619,7 +623,10 @@ export function openRegistry(path: string, clock = Date.now) {
         if (event.kind === "session.turn-started") {
           db.prepare("UPDATE claude_workers SET turn_session = ?, turn_at = ? WHERE thread = ? AND (turn_at IS NULL OR turn_at < ?)").run(session, at, thread, at);
         }
-        db.prepare("INSERT INTO session_order VALUES (?, ?, ?, ?) ON CONFLICT(thread, session) DO UPDATE SET at = excluded.at, kind = excluded.kind").run(thread, session, at, event.kind);
+        // Only reports at the cursor's own stamp can still be resent and pass the stamp checks, so only their IDs are kept.
+        const ids = [...(previous !== undefined && at === previous.at ? previousIds : []), ...(event.id === undefined ? [] : [event.id])];
+        db.prepare("INSERT INTO session_order (thread, session, at, kind, event_ids) VALUES (?, ?, ?, ?, ?) ON CONFLICT(thread, session) DO UPDATE SET at = excluded.at, kind = excluded.kind, event_ids = excluded.event_ids")
+          .run(thread, session, at, event.kind, ids.length === 0 ? null : JSON.stringify(ids));
         // Keep tombstones after activity rows end, with a floor guarding reports older than evicted cursors.
         const evicted = db.prepare("DELETE FROM session_order WHERE thread = ? AND session NOT IN (SELECT session FROM session_order WHERE thread = ? ORDER BY at DESC, rowid DESC LIMIT ?) RETURNING at")
           .all(thread, thread, maxActiveSessions * 2);

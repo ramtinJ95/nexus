@@ -136,6 +136,7 @@ A persistent drain lease blocks API and background PR-watch turn entry, and coun
 
 | Date | Decision |
 |---|---|
+| 2026-10-26 | Hooks in a pylon write session events to a bounded outbox on the pylon's disk and return, and one sender at a time delivers it to the probe in order, deleting an event only once the probe has journaled it. A full outbox drops its oldest event, and an event a day old is dropped unsent. Each event carries an ID the hook gave it, and control ignores a report that repeats an ID it applied at its session's latest stamp. The sender also starts at every boot, and holds an event until hooks stamped earlier have had their two seconds, so delivery follows the stamps. The probe's journal is kept, because it covers the other hop, a control plane that is not following the probe |
 | 2026-10-26 | A node's committed capacity counts the CPUs and memory of VMs that are up and the disk of every pylon, paused or not. `start --node auto` is opt-in. It ranks nodes by memory left after the pylon, then CPUs, then disk, refuses a node where memory or disk does not fit, and lets CPUs be oversubscribed |
 | 2026-10-26 | A Claude turn that ends with only background commands running stays working while their process groups live, for up to 2 hours, until the turn their finish starts. One still running after 2 hours ends the turn and leaves the session waiting with a message that says so. Only Claude's permission and input prompts count as waiting, filtered by the image's hook matcher, not by the control plane. A Claude started inside another Claude session, or under another HOME, does not report into the thread |
 | 2026-10-26 | [The merge policy](merge-policy.md), as the person approved it, says when an agent may merge and deploy a pull request without the person, and which changes always need the person |
@@ -269,9 +270,14 @@ in the event history.
 Claude hooks report lifecycle facts through the narrow host bridge. The probe
 supplies identity, validates the event, journals a bounded reconnect buffer and
 forwards it through observations. Control deduplicates those reports, updates
-activity and attention, and appends the public event. Hook subprocesses are
-independent of Claude and have short deadlines; local-probe outages can lose
-reports rather than block the worker. Running session state is a 30-minute lease independent of
+activity and attention, and appends the public event. A hook never waits on the
+probe. It writes its event to an outbox in the pylon, `~/.nexus/outbox`, and
+returns, and a sender it starts delivers the outbox in order and deletes each
+event once the probe answers, which it does only after journaling the event. A
+probe that is down or restarting delays reports instead of losing them, and an
+event sent again after a lost answer carries the ID control already applied, so
+control ignores it. Every boot, a wake included, starts a sender too, for the
+events a pause left behind. Running session state is a 30-minute lease independent of
 the retained log and of harness activity. Throttled PostToolUse heartbeats renew
 it; a dead or silent worker cannot keep its pylon awake indefinitely. At most 16
 session states per thread are kept, and ended or expired working rows are removed.

@@ -15,7 +15,6 @@ Several items copy ideas from [t3code](https://github.com/pingdotgg/t3code), whi
 ## Later
 
 - **Event consumers in Claude Code and pi-nexus.** The shared stream and background CLI follower now exist; client wake-ups and automatic reactions do not.
-- **Stronger hook delivery.** A guest-side outbox and acknowledged probe delivery could cover local-probe outages beyond the current bounded replay buffer.
 - **Placement by a scheduler.** A client or an agent submits work without naming a node, and Nexus boots the pylon on the node where it fits with the least load. Nodes now report what their pylons hold, and `nexus start --node auto` picks the node with the most room left, as [the design's placement](design.md#placement) describes, but only when the person asks for it. What remains:
   - The model tools' `start` takes no node, so an agent cannot ask for `auto`.
   - There is no move job, so a pylon stays on the node it booted on. [The lifecycle](design.md#lifecycle-follows-amp) describes how a move could work, and spike S7 showed that copying checkpoints needs verifying.

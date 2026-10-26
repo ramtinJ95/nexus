@@ -173,14 +173,36 @@ pylon identity; control maps it to its registered thread and verifies its node.
 There is no arbitrary API forwarding. Never include credentials or full tool
 output in a message.
 
-The production probe journals its last 100 session reports in `events.sqlite`
-under its state root. Observations replay that journal after a link or probe
+A report crosses two hops, and each has its own buffer. From hook to probe, the
+hook writes the event to `~/.nexus/outbox` in the pylon, one JSON file per event
+named by its stamp, its process and a count of the events that process wrote, and starts a sender. The file name without `.json` is the
+event's `id`, which the event carries to control. Every boot of the pylon, a wake
+included, also starts a sender, because a pause stops one. The sender holds a lock
+that dies with it, so one runs at a time. It lists the outbox before each delivery
+and posts the oldest event until the probe answers, but first waits until the
+event is two seconds old. A hook gets two seconds, so by then every hook stamped
+earlier has written its event, and a turn end never goes out after a later
+waiting event that control would then prefer. It deletes the event on a 200 or a
+4xx, which no retry would change, and retries anything else after 0.5 seconds,
+doubling to at most 10. It exits when the outbox is empty. The outbox holds at
+most 1,000 events. A full one drops its oldest, so the newest state, such as the
+latest turn end, is what survives. An event older than a day is dropped unsent,
+and so is a temporary file a killed hook left for more than a minute. Neither
+wait holds up Claude, whose hook only writes the file.
+
+From probe to control, the production probe journals its last 100 session
+reports in `events.sqlite` under its state root, and answers the hook only after
+the journal commits. Observations replay that journal after a link or probe
 restart; `event_receipts` deduplicates its sequence per node. This is a bounded
-outage buffer, not an unbounded delivery guarantee. The hooks detach a CLI process
-with a 1.5-second request deadline. A hook cannot block Claude on a disconnected
-control plane; reports can be lost if the local probe itself is unavailable, or
-an outage exceeds the probe's buffer. The registry cursor guarantee begins once
-control has accepted an event.
+buffer for a control plane that is not following the probe, not an unbounded
+delivery guarantee: more than 100 reports on a node while control is away loses
+the oldest. A sender whose answer was lost posts the event again, and the probe
+journals it under a new sequence. Control keeps the IDs of the reports it applied
+at its session's latest stamp, and ignores a report that repeats one. A resend
+at an older stamp already fails the stamp check. A report without an ID, such as
+one from today's image or `nexus event`, is never taken for a resend, so two
+different reports at the same stamp both apply. The registry cursor guarantee
+begins once control has accepted an event.
 
 `session_activity` holds at most 16 rows per thread, evicting the least recently
 updated row (insertion order breaks ties). Turn end and SessionEnd remove the row;
@@ -214,8 +236,8 @@ lets the lease expire like any other silent turn. When only shells run, a detach
 hold, owned by the session's newest Stop, sends `session.heartbeat` every five minutes while a process
 group the commands lead, or a process writing to a shell's output file, lives. It
 sends `session.turn-ended` 30 seconds after they stop. After 2 hours it sends
-`session.turn-ended` and then, once that is sent, `session.waiting`, both with the
-message "A background command was still running after 2 hours". Each carries the Stop's time, so they
+`session.turn-ended` and then `session.waiting`, both with the
+message "A background command was still running after 2 hours". The hold writes its reports to the outbox as a hook does, and events one process writes at the same stamp go out in the order it wrote them. Each carries the Stop's time, so they
 renew the lease by receipt time, and any later report for the session, such as the
 turn a command's finish starts, makes the rest stale. A waiting session's latest
 message is kept with it as `Thread.sessionWaitingMessage`, and the dashboard shows
@@ -239,7 +261,7 @@ use the image's hooks. A Claude started inside another Claude session, or under 
 HOME other than the pylon user's, reports nothing.
 
 The hook captures `at`, the pylon's Unix-millisecond time, before throttling or
-spawning its detached sender. `nexus event --at MS` preserves that timestamp;
+writing the event to the outbox, which delivers it unchanged. `nexus event --at MS` also preserves a timestamp;
 manual event commands default to their own current time. The probe validates it
 but never uses it for identity. Control ignores reports older than the last
 applied report for that session. For equal timestamps, waiting or terminal state

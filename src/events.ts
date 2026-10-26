@@ -13,6 +13,8 @@ export const pylonEventSchema = z.strictObject({
   at: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER).optional(),
   session: z.string().min(1).max(200).optional(),
   message: z.string().max(2048).optional(),
+  /** Set by the pylon's outbox, and kept when it sends the event again. */
+  id: z.string().regex(/^[0-9a-z-]{1,64}$/).optional(),
 });
 export type PylonEvent = z.infer<typeof pylonEventSchema>;
 export interface ReportedEvent { sequence: number; pylon: PylonId; event: PylonEvent; time: number }
