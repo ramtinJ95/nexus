@@ -184,6 +184,9 @@ export const roundsSpent = (r: Pick<Review, "rounds">) => r.rounds.filter((round
   const previous = r.rounds[i - 1];
   return !(previous?.head === round.head && previous.verdict?.verdict === "approve" && round.verdict?.verdict === "approve" && !round.verdict.findings.some(blocks));
 }).length;
+const labelStates = { adding: `, adding the label "${humanLabel}"`, added: `, labelled "${humanLabel}"`, failed: `, label "${humanLabel}" not added` } as const;
+/** How a review's line in `nexus show` and the dashboard ends. A refused label's why is already one of the reasons. */
+export const labelNote = (r: Review) => r.phase.kind === "needs-person" && r.phase.label ? labelStates[r.phase.label.state] : "";
 const checkOutput = (output: string) => `The check's output:\n${output}`;
 const findingLine = (f: Finding) => `${f.id} (${f.priority})${f.where ? ` ${f.where}` : ""}: ${f.summary}${f.detail ? `\n${f.detail.split("\n").map((l) => `    ${l}`).join("\n")}` : ""}`;
 
