@@ -128,7 +128,7 @@ The shapes are TypeScript types. `Thread`, `Session` and `Preview` are in [`src/
 
 ### Thread fields
 
-`Thread` and `ThreadRow`, and `ThreadDetail` at its top level, carry these fields. A field marked optional is left out rather than sent as false or null. Times are Unix milliseconds.
+`Thread` carries these fields. So does each `ThreadRow`, at its top level, and `ThreadDetail.thread`. A field marked optional is left out rather than sent as false or null. Times are Unix milliseconds.
 
 | Field | Type | Meaning |
 |---|---|---|
@@ -144,7 +144,7 @@ The shapes are TypeScript types. `Thread`, `Session` and `Preview` are in [`src/
 | `workingSince` | optional `number` | The earliest known start of the running turns, as `threads` describes |
 | `lastAgentActivityAt`, `lastHumanActivityAt` | `number` | The newest agent and human activity, which decide when the pylon pauses |
 | `seenAt`, `lastReplyAt` | `number \| null` | The shared seen marker and the latest reply, as the next section describes |
-| `attention`, `desired`, `pylon` | | In `ThreadRow` only, at the top level of `ThreadDetail` |
+| `attention`, `desired`, `pylon` | | In `ThreadRow` only. `ThreadDetail` has them at its top level, beside `thread` |
 
 `ThreadDetail` has `thread`, `attention`, `seenAt`, `lastReplyAt`, `desired`, `pylon` (`id`, `node`, `actualState`, `failed`, `observedAt`, `grantsOutdated` and `retryRefused`, why a retry cannot help or null), `sessions`, `previews`, `ports`, `outputs`, `prWatch`, `pullRequests`, `review`, `attach`, `agent` (`{ parkedTasks }`, or null for a thread without a Nexus agent conversation), and for a Claude worker thread `claudeWorker` (`model`, `state`, optional `message`).
 
