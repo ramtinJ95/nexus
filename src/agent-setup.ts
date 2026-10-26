@@ -91,9 +91,7 @@ const leaveOutKinds: readonly LeaveOutKind[] = ["claude-plugin", "pi-package", "
 /** The settled leave-outs, the only list of them. --leave-out adds to it for one run. */
 export const leaveOuts: readonly LeaveOut[] = [
   { kind: "claude-plugin", name: "nexus@claude-mods", why: "recursive inside a pylon" },
-  { kind: "claude-plugin", name: "shepherdr@claude-mods", why: "recursive inside a pylon" },
   { kind: "pi-package", name: "npm:@ramtinj95/pi-nexus", why: "recursive inside a pylon" },
-  { kind: "pi-package", name: "npm:@howaboua/pi-shepherdr", why: "recursive inside a pylon" },
   { kind: "skill", name: "anki-cards", why: "Mac-only" },
   { kind: "skill", name: "voxcraft-remote", why: "Mac-only" },
   { kind: "skill", name: "macmini-handoff", why: "Mac-only" },

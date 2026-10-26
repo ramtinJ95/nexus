@@ -185,7 +185,7 @@ node src/agent-setup.ts                            # writes the manifest, and no
 node src/agent-setup.ts --leave-out skill:drafts   # leave one item out for this run, by <kind>:<name>
 ```
 
-It reads `~/.claude`, `~/.pi` and `~/.agents`, and the dotfiles repo they link into. It shows that each pinned commit is on its remote with `git ls-remote`, the clone's own history, or GitHub's compare API, and never fetches, so it writes nothing outside the nexus checkout. Running it twice on an unchanged Mac writes the same bytes, so the image ID does not move. The leave-outs it always applies, each printed with its reason, are in `leaveOuts` in [`src/agent-setup.ts`](../../src/agent-setup.ts): the Nexus and Shepherdr plugins and pi packages, which are recursive inside a pylon, and the skills and pi extensions that work only on the Mac. A skill that `skillOverrides` turns off for Claude Code goes to pi only.
+It reads `~/.claude`, `~/.pi` and `~/.agents`, and the dotfiles repo they link into. It shows that each pinned commit is on its remote with `git ls-remote`, the clone's own history, or GitHub's compare API, and never fetches, so it writes nothing outside the nexus checkout. Running it twice on an unchanged Mac writes the same bytes, so the image ID does not move. The leave-outs it always applies, each printed with its reason, are in `leaveOuts` in [`src/agent-setup.ts`](../../src/agent-setup.ts): the Nexus plugin and the pi-nexus package, which are recursive inside a pylon, and the skills and pi extensions that work only on the Mac. A skill that `skillOverrides` turns off for Claude Code goes to pi only.
 
 When something would ship but the image build could not fetch exactly what this Mac runs, the capture writes nothing, lists every problem and exits 1:
 
@@ -196,7 +196,7 @@ When something would ship but the image build could not fetch exactly what this 
 Wrote nothing: 3 problems above.
 ```
 
-Commit and push the manifest, then build the image as [the deploy guide](../../deploy/README.md) describes. The build fetches what the manifest pins, installs it as `user`, and fails on any difference from the manifest. Its smoke boot checks the installed setup against the manifest in the recipe and starts pi offline to prove every extension loads. Pylons start pi with `PI_OFFLINE=1` and Claude Code without its official marketplace, because neither can reach the network to update. The review-pane mod's review command needs Neovim 0.10 or later, so the image pins a Neovim release in `pins.json` and the smoke boot checks its version. The exa extensions need a project that grants `EXA_API_KEY` to `api.exa.ai`.
+Commit and push the manifest, then build the image as [the deploy guide](../../deploy/README.md) describes. The build fetches what the manifest pins, installs it as `user`, and fails on any difference from the manifest. Its smoke boot checks the installed setup against the manifest in the recipe and starts pi offline to prove every extension loads. Pylons start pi with `PI_OFFLINE=1` and Claude Code without its official marketplace, because neither can reach the network to update. The review-pane mod's review command needs Neovim 0.10 or later, so the image pins a Neovim release in `pins.json` and the smoke boot checks its version. The exa extensions need a project that grants `EXA_API_KEY` to `api.exa.ai`. The Shepherdr mod and pi-shepherdr ship, because the workers they spawn are Herdr panes in the same pylon, not Nexus threads.
 
 ### Call site: starting a thread picks or builds a template
 

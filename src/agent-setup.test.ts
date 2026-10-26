@@ -217,8 +217,6 @@ test("the plan ships what the Mac runs and reports each settled leave-out, and a
     "pi-extension:herdr-agent-state.ts", "skill:ramtin-mode", "pi-extension:pi-better-openai-lite",
   ]);
   assert.deepEqual(notes, [
-    "leave-out claude-plugin:shepherdr@claude-mods matches nothing on this Mac",
-    "leave-out pi-package:npm:@howaboua/pi-shepherdr matches nothing on this Mac",
     "leave-out skill:voxcraft-remote matches nothing on this Mac",
     "leave-out skill:macmini-handoff matches nothing on this Mac",
   ]);
