@@ -19,7 +19,8 @@ import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
 import { startApi } from "../control/api.ts";
 import { fakeHarness } from "../control/fake-harness.ts";
-import { openRegistry, type Thread } from "../control/registry.ts";
+import { openRegistry, type Thread, type ThreadId } from "../control/registry.ts";
+import type { Review } from "../control/review.ts";
 import type { ImageId, ImageManifest } from "../images.ts";
 import type { Project, ProjectId } from "../project.ts";
 import { openTerminal, terminalSize } from "../guest-terminal.ts";
@@ -209,7 +210,7 @@ test("--help or -h after a command prints its lines of nexus --help and exits 0 
   const all = new Set((await s.nexus(["--help"])).stdout.split("\n"));
   const names = ["events", "threads", "show", "ports", "preview", "unpreview", "files", "changes", "diff", "conversation", "session open", "session close",
     "attach", "start", "send", "watch", "seen", "abort", "retry", "retry-pylon", "wake", "archive", "unarchive", "delete", "projects", "project edit",
-    "project add", "deploy", "release", "nodes"];
+    "project add", "review", "land", "deploy", "release", "nodes"];
   for (const name of names) {
     for (const flag of ["--help", "-h"]) {
       const res = await s.nexus([...name.split(" "), flag]);
@@ -1016,7 +1017,7 @@ test("show prints PR metadata and one disabled-watch notice without waking the p
 
 test("deploy and release use the shared release view and wait for both roles", async (t) => {
   const s = await setup(t);
-  assert.equal((await s.nexus(["--version"])).stdout.trim(), "nexus 0.17.0");
+  assert.equal((await s.nexus(["--version"])).stdout.trim(), "nexus 0.18.0");
   assert.equal((await s.nexus(["deploy", "bad"])).code, 64);
   const requested = await s.json(["deploy", "main"]);
   assert.equal(requested.desired.commit, "a".repeat(40));
@@ -1028,6 +1029,28 @@ test("deploy and release use the shared release view and wait for both roles", a
   const failed = await s.nexus(["deploy", "main", "--wait", "--json"]);
   assert.equal(failed.code, 1);
   assert.match(failed.stderr, /failed to bind/);
+});
+
+test("review and land reach the review loop's routes, and show prints a review and what it needs from the person", async (t) => {
+  const s = await setup(t);
+  const thread: Thread = await s.json(["start", "--project", "acme", "--title", "Cache"]);
+  const refused = await s.nexus(["review", thread.id, "--json"]);
+  assert.equal(refused.code, 5);
+  assert.match(refused.stderr, /github.tokenFile/);
+  assert.equal((await s.nexus(["land", thread.id])).code, 5);
+  assert.equal((await s.nexus(["review", thread.id, "--rounds", "two"])).code, 64);
+  const review: Review = {
+    id: "rv-1", builder: thread.id, reviewer: "th-reviewer" as ThreadId, pr: { repo: "octocat/Spoon-Knife", number: 7, url: "https://github.com/octocat/Spoon-Knife/pull/7", title: "Cache" },
+    models: { builder: "gpt-6-astra", reviewer: "claude-opus-5-5" }, maxRounds: 3, land: null, merged: null, outbox: null, since: 0, nudges: 0, startedAt: 0,
+    rounds: [{ head: "1".repeat(40), verdict: null, check: null, answers: null }],
+    phase: { kind: "needs-person", reasons: ["The reviewer still requests changes after 3 rounds, the most this review allows."] },
+  };
+  s.registry.saveReview(review);
+  const shown = await s.nexus(["show", thread.id]);
+  assert.match(shown.stdout, /^attention: decision$/m);
+  assert.match(shown.stdout, /^review rv-1 of PR #7: needs-person, round 1 of 3, reviewer th-reviewer on claude-opus-5-5$/m);
+  assert.match(shown.stdout, /^needs you: The reviewer still requests changes after 3 rounds, the most this review allows\.$/m);
+  assert.deepEqual((await s.json(["show", thread.id])).review, review);
 });
 
 test("project edit replaces supplied grants and preserves omitted settings", async (t) => {

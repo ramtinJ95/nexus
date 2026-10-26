@@ -17,6 +17,7 @@ import type { ImageContent, Message, TextContent } from "@earendil-works/pi-ai";
 import type { ConversationView, EntryRecord, InboxState, LiveState } from "@earendil-works/pi-durable";
 import type { ListeningPort, NodeSummary, OpenedSession, ThreadDetail, ThreadRow, ViewFrame } from "../control/api.ts";
 import type { ClaudeSent, Preview, Thread } from "../control/registry.ts";
+import type { Review } from "../control/review.ts";
 import type { ClaudeConversation, PromptSource } from "../claude-transcript.ts";
 import { queuedOf } from "../control/claude-conversation.ts";
 import type { Changes, Diff, Listing } from "../checkout-files.ts";
@@ -26,7 +27,7 @@ import type { WebSocket } from "ws";
 import { attachTerminal, processTty } from "./attach.ts";
 import { call, CliError, exitCodes, follow, upgrade, type Endpoint, type HostPort } from "./transport.ts";
 
-const version = "0.17.0";
+const version = "0.18.0";
 const defaults = { url: "http://rj-firebat.tailc817d3.ts.net:7470", socks: "localhost:1055" };
 const configFile = () => join(homedir(), ".config", "nexus", "cli.json");
 
@@ -58,6 +59,9 @@ const usage = `nexus ${version}, the Nexus control plane from this Mac
     [--clear-hosts] [--clear-logins] [--clear-secrets] [--git-name NAME --git-email EMAIL | --clear-git-identity]
   nexus project add <id> (<repo-url> | --scratch) --node N [--branch B] [--cpus n] [--memory GiB] [--disk GiB]
                     [--allow-host HOST]... [--login claude|chatgpt]... [--secret NAME:HOST[,HOST]...]...
+  nexus review <thread> [--pr N] [--rounds N] [--land]
+    a reviewer on another model for the thread's open PR, round after round until it approves; --land merges and deploys under the merge policy
+  nexus land <thread>                          land an approved review under the merge policy, or try a held landing again
   nexus deploy <commit|main> [--wait]
   nexus release
   nexus nodes
@@ -200,7 +204,16 @@ function claudeText(c: ClaudeConversation): string {
   return c.readAt === null ? "Claude's transcript has not been read yet. It is read while the pylon runs." : "Claude has not written a transcript yet.";
 }
 
-function detailText({ thread: t, pylon: p, agent, sessions, previews, ports, outputs, prWatch, pullRequests, claudeWorker, attention }: ThreadDetail): string {
+/** A review's state for a person: its phase and round, its reviewer, and what it needs from them. */
+function reviewText(r: Review): string {
+  const phase = r.phase.kind === "landed" ? `landed as ${r.phase.commit}` : r.phase.kind === "deploying" ? `deploying ${r.phase.commit}` : r.phase.kind;
+  return [
+    `review ${r.id} of PR #${r.pr.number}: ${phase}, round ${r.rounds.length} of ${r.maxRounds}, reviewer ${r.reviewer} on ${r.models.reviewer}${r.land === null ? "" : ", landing when approved"}`,
+    ...r.phase.kind === "needs-person" ? r.phase.reasons.map((reason) => `needs you: ${reason}`) : [],
+  ].join("\n");
+}
+
+function detailText({ thread: t, pylon: p, agent, sessions, previews, ports, outputs, prWatch, pullRequests, claudeWorker, attention, review }: ThreadDetail): string {
   const observed = p.observedAt === null ? "" : `, observed ${ago(Date.parse(p.observedAt))}`;
   return [
     `${t.id}  ${t.title}`,
@@ -220,6 +233,7 @@ function detailText({ thread: t, pylon: p, agent, sessions, previews, ports, out
     ...(ports ?? []).map((l) => `port: ${l.port}${l.service === null ? "" : `, service ${l.service}`}${l.preview === null ? "" : `, previewed at ${l.preview.url}`}`),
     ...(prWatch?.enabled ? [prWatch.stopped ? "PR watch: stopped (10 comment-only wakes)" : "PR watch: on", ...(prWatch.error ? [prWatch.error] : [])] : ["PR watch: off (no control-plane GitHub token configured)"]),
     ...(pullRequests ?? []).map((pr) => `PR #${pr.number}: ${pr.title} — ${pr.state}, checks ${pr.checks}, review ${pr.review} ${pr.url}`),
+    ...review == null ? [] : [reviewText(review)],
     ...outputs.map((o) => `output: ${o.kind} ${o.ref}`),
   ].join("\n");
 }
@@ -580,6 +594,23 @@ const commands: Readonly<Record<string, Command>> = {
     async run(api) {
       const view = await api("GET", "/v1/release") as ReleaseView;
       return { json: view, text: releaseText(view) };
+    },
+  },
+  review: {
+    args: [1, 1], options: { pr: { type: "string" }, rounds: { type: "string" }, land: { type: "boolean" } },
+    async run(api, [id], v) {
+      const pr = str(v, "pr");
+      const rounds = str(v, "rounds");
+      const body = { ...pr === undefined ? {} : { pr: int(pr, "--pr", 0) }, ...rounds === undefined ? {} : { rounds: int(rounds, "--rounds", 0) }, ...v.land === true ? { land: true } : {} };
+      const r = await api("POST", `${thread(id!)}/review`, body) as Review;
+      return { json: r, text: `Started ${reviewText(r)}` };
+    },
+  },
+  land: {
+    args: [1, 1],
+    async run(api, [id]) {
+      const r = await api("POST", `${thread(id!)}/land`, {}) as Review;
+      return { json: r, text: `Landing ${reviewText(r)}` };
     },
   },
   deploy: {
