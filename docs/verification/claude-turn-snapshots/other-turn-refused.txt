@@ -1,0 +1,6 @@
+# refs/nexus/turn now holds a snapshot taken for another session
+$ git log -1 --format=%s refs/nexus/turn
+Nexus turn claude:timing:1792979374456
+$ nexus changes th-8b7c342fddb1 --turn
+nexus: the checkout has no latest-turn snapshot: no turn has been captured yet, or its snapshot failed. Start another agent turn or ask for changes since HEAD instead
+exit 1

@@ -4,7 +4,8 @@
 # It must run on Python 3.9, which the Mac's tests run it with.
 #
 # Ops, each printing to stdout:
-#   snapshot <turn>        capture the working tree once for this durable run
+#   snapshot <turn> [handshake]  capture the working tree once for this turn; with handshake, print `captured`
+#                           and update the ref only once stdin says `go`
 #   list <path>             the directory's entries, as JSON
 #   read <path> <max>       the file's bytes, at most <max> of them
 #   changes <base>          the files that differ from <base>, as JSON
@@ -16,6 +17,8 @@
 #
 # Exit 0 is an answer. Exit 3 is a refusal the caller can act on, printed as {"refused": kind, "message": text}.
 # Any other exit is a failure, whose traceback goes to stderr, which the probe logs.
+import contextlib
+import fcntl
 import json
 import os
 import shutil
@@ -52,7 +55,7 @@ def main(argv):
             raise subprocess.TimeoutExpired("turn snapshot", 60)
         signal.signal(signal.SIGALRM, expired)
         signal.alarm(60)
-        snapshot(root, args[0])
+        snapshot(root, args[0], args[1:] == ["handshake"])
         signal.alarm(0)
         answer({})
     elif op == "changes":
@@ -148,8 +151,11 @@ def base_of(root, base):
     else:
         raise ValueError("unknown base %r" % base)
     found = resolve(root, ref)
-    if base == "turn" and found is not None and expected is not None:
-        if git(root, ["show", "-s", "--format=%s", found]).decode().strip() != "Nexus turn " + expected:
+    if base == "turn" and found is not None:
+        # The marker names the latest attempt, whose failure leaves the previous snapshot in place, and the caller's
+        # turn can lag it when a turn start was lost. Either one disagreeing makes the snapshot stale.
+        named = git(root, ["show", "-s", "--format=%s", found]).decode().strip()
+        if any(turn is not None and named != "Nexus turn " + turn for turn in (expected, marked(turn_marker(root)))):
             found = None
     if found is None:
         if base == "turn":
@@ -178,23 +184,60 @@ def scratch_env(root, scratch):
     return env
 
 
-def snapshot(root, turn):
-    marker = os.path.join(root, git(root, ["rev-parse", "--git-path", "nexus-turn"]).decode().strip())
-    if os.path.exists(marker):
-        with open(marker) as f:
-            if f.read() == turn:
-                return
-    # Invalidate first: a failed attempt must not show the preceding turn's changes.
-    git(root, ["update-ref", "-d", "refs/nexus/turn"])
-    with open(marker, "w") as f:
-        f.write(turn)
+def snapshot(root, turn, handshake=False):
+    marker = turn_marker(root)
+    # The marker, not a ref update, invalidates the previous snapshot, so the hook can kill an attempt at any point
+    # before its handshake without leaving a ref lock behind.
+    with turn_lock(marker):
+        named = marked(marker)
+        if named == turn or (named is not None and newer(named, turn)):
+            return
+        with open(marker + ".new", "w") as f:
+            f.write(turn)
+        os.replace(marker + ".new", marker)
     with tempfile.TemporaryDirectory() as scratch:
         env = scratch_env(root, scratch)
         tree = git(root, ["write-tree"], env).decode().strip()
         env.update(GIT_AUTHOR_NAME="Nexus", GIT_AUTHOR_EMAIL="nexus@localhost",
                    GIT_COMMITTER_NAME="Nexus", GIT_COMMITTER_EMAIL="nexus@localhost")
         commit = git(root, ["commit-tree", tree, "-m", "Nexus turn " + turn], env).decode().strip()
-        git(root, ["update-ref", "refs/nexus/turn", commit])
+    if handshake:
+        # Past this point the caller lets the ref update finish rather than kill it.
+        sys.stdout.write("captured\n")
+        sys.stdout.flush()
+        if sys.stdin.readline() != "go\n":
+            return
+    with turn_lock(marker):
+        if marked(marker) == turn:
+            git(root, ["update-ref", "refs/nexus/turn", commit])
+
+
+def turn_marker(root):
+    return os.path.join(root, git(root, ["rev-parse", "--git-path", "nexus-turn"]).decode().strip())
+
+
+def marked(marker):
+    try:
+        with open(marker) as f:
+            return f.read()
+    except FileNotFoundError:
+        return None
+
+
+def newer(a, b):
+    """Whether Claude turn `a` started after Claude turn `b`, by the pylon's start stamps that end their IDs. A
+    harness thread snapshots one reply at a time, so its turns need no order."""
+    if not (a.startswith("claude:") and b.startswith("claude:")):
+        return False
+    at_a, at_b = a.rpartition(":")[2], b.rpartition(":")[2]
+    return at_a.isdigit() and at_b.isdigit() and int(at_a) > int(at_b)
+
+
+@contextlib.contextmanager
+def turn_lock(marker):
+    with open(marker + ".lock", "w") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        yield
 
 
 DIFF_FLAGS = ["diff", "--cached", "--no-color", "--no-ext-diff", "--no-textconv", "--find-renames", "--no-relative"]

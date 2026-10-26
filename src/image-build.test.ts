@@ -47,11 +47,11 @@ test("the checked-in recipe loads, with pins.json as its pins and build.sh left 
   const recipe = await loadImageRecipe();
   const paths = recipe.files.map((f) => f.path);
   assert.deepEqual(recipe.pins, JSON.parse(await readFile(join(pylonRecipeDir, "pins.json"), "utf8")));
-  for (const path of ["Dockerfile", "gondolin.json", "nexus", "rootfs-init-extra.sh"]) assert.ok(paths.includes(path), `${path} is an image input`);
+  for (const path of ["Dockerfile", "gondolin.json", "nexus", "nexus-turn.ts", "checkout-files.py", "rootfs-init-extra.sh"]) assert.ok(paths.includes(path), `${path} is an image input`);
   assert.ok(!paths.includes("build.sh") && !paths.includes("pins.json"));
 });
 
-test("a recipe is every file under its directory, nested ones by posix path, sorted", async (t) => {
+test("a recipe is every file under its directory and the shared checkout helper, nested ones by posix path, sorted", async (t) => {
   const dir = await recipeDir(t, {
     "pins.json": JSON.stringify(pins),
     "build.sh": "echo runner",
@@ -62,6 +62,7 @@ test("a recipe is every file under its directory, nested ones by posix path, sor
   assert.deepEqual(await loadImageRecipe(dir), {
     files: [
       { path: "Dockerfile", content: "FROM scratch\n" },
+      { path: "checkout-files.py", content: await readFile(new URL("./checkout-files.py", import.meta.url), "utf8") },
       { path: "dotfiles-common/pi/AGENTS.md", content: "pi rules" },
       { path: "nexus", content: "#!/bin/sh\n" },
     ],

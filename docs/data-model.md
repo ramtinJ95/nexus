@@ -44,7 +44,7 @@ One setting sits beside the records: `current`, the image every new pylon uses. 
 - A preview's URL is `https://<node tailnet name>:<httpsPort>/`. The API reports it as the preview's `url`, so clients never build it.
 - A preview's service is a declared or ad hoc service, or `port-<port>` for a port linked with `nexus preview`, from inside the pylon or from the Mac. A linked port stays linked across pauses until `nexus unpreview` unlinks it, from inside the pylon or from the Mac, and its preview lasts as long. A declared or ad hoc service's preview lasts for the thread's life.
 - A thread's listening ports are not a record. Each running pylon's observation carries them, and the API joins each with the service that owns its port and that service's preview.
-- The checkout holds `refs/nexus/turn`, a parentless snapshot commit for the latest autonomous reply, and `.git/nexus-turn`, its attempted reply identity (`input:<first submission ID>`). These are pylon disk data, not registry records, and survive pause/wake. A snapshot includes uncommitted and non-ignored untracked files without changing HEAD or the real index. The harness attempts it before the first request and reads validate its identity against the active run's first input or the last attempted reply. The latest-only conversation document `nexus.turn-snapshot` holds `{ turn: string | null }` and records the attempt before capture, even on failure. Unlike a generation task and its memos, that document and the first input identity survive tool-round handoffs. Missing or failed snapshots are unavailable, never a fallback to the preceding turn. `Changes.base` and `Diff.base` have `{ kind: "start" | "head" | "turn", commit: string | null }`; a turn always names the snapshot commit, even in an empty repository.
+- The checkout holds `refs/nexus/turn`, a parentless snapshot commit for the latest autonomous reply, and `.git/nexus-turn`, its attempted turn identity: `input:<first submission ID>` for a harness reply, or `claude:<session>:<at>` for a Claude Code turn. These are pylon disk data, not registry records, and survive pause/wake. A snapshot includes uncommitted and non-ignored untracked files without changing HEAD or the real index. The harness attempts it before the first request and reads validate its identity against the active run's first input or the last attempted reply. A Claude Code session's `UserPromptSubmit` hook attempts it before Claude acts on each prompt, and a Claude worker thread's reads validate it against the thread's newest recorded turn start. Every read also requires `.git/nexus-turn` to name the snapshot's turn, so a later attempt that failed leaves no snapshot to read, whatever turn the caller expected. The latest-only conversation document `nexus.turn-snapshot` holds `{ turn: string | null }` and records the attempt before capture, even on failure. Unlike a generation task and its memos, that document and the first input identity survive tool-round handoffs. Missing or failed snapshots are unavailable, never a fallback to the preceding turn. `Changes.base` and `Diff.base` have `{ kind: "start" | "head" | "turn", commit: string | null }`; a turn always names the snapshot commit, even in an empty repository.
 - `Output.kind` is `branch`, `diff`, `preview`, `file`, or `pull-request`. A declared diff output's base is HEAD's commit, or the empty tree before the repository's first commit.
 
 ## Checkout Git observations and outputs
@@ -259,6 +259,12 @@ before the open command. A turn-started report from that session changes a
 starting, stalled or failed worker to started and clears its current message, restoring normal
 working/reply/seen attention. Another session cannot clear it. The diagnostic
 remains in event history; no automatic submission is retried.
+
+`claude_workers.turn_session` and `turn_at` hold the newest `session.turn-started`
+the thread recorded, from any of its sessions, with the stamp the pylon's hook sent
+as `at`. A report older than the stored stamp leaves them. Together they name the
+latest turn's checkout snapshot, `claude:<session>:<at>`, which reads of the
+thread's latest turn expect. Both are null until a turn starts.
 
 Claude worker `model` is the requested model ID, persisted atomically with new
 threads (default `claude-opus-5-5`). A nullable-column migration leaves old workers

@@ -784,7 +784,8 @@ test("a turn running before turn starts were recorded has no known start", async
   seeded(path, () => now).reportSession(node, { sequence: 1, time: now, pylon: pylonId, event: { kind: "session.turn-started", session: "c1", at: now } });
   const db = new DatabaseSync(path);
   const version = db.prepare("PRAGMA user_version").get()!.user_version as number;
-  db.exec(`UPDATE threads SET agent_turn_running = 1; ALTER TABLE threads DROP COLUMN agent_turn_started_at; ALTER TABLE session_activity DROP COLUMN started_at; DROP TABLE reviews; PRAGMA user_version = ${version - 2}`);
+  db.exec(`UPDATE threads SET agent_turn_running = 1; ALTER TABLE threads DROP COLUMN agent_turn_started_at; ALTER TABLE session_activity DROP COLUMN started_at; DROP TABLE reviews;
+    ALTER TABLE claude_workers DROP COLUMN turn_session; ALTER TABLE claude_workers DROP COLUMN turn_at; PRAGMA user_version = ${version - 3}`);
   db.close();
   const registry = openRegistry(path, () => now);
   t.after(() => registry.close());

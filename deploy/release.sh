@@ -25,7 +25,7 @@ install_release() {
   staging=$(mktemp -d "$prefix/releases/.staging.XXXXXX")
   trap 'rm -rf "$staging"' EXIT
   # src/release.test.ts fails when src imports a file outside this list.
-  tar -C "$repo" -cf - package.json package-lock.json tsconfig.json src deploy images/pylon/agent-setup/manifest.ts | tar -C "$staging" --no-same-owner -xf -
+  tar -C "$repo" -cf - package.json package-lock.json tsconfig.json src deploy images/pylon/agent-setup/manifest.ts images/pylon/nexus-turn.ts | tar -C "$staging" --no-same-owner -xf -
   release=$(cd "$staging" && find . -type f -print0 | LC_ALL=C sort -z | xargs -0 sha256sum | sha256sum | cut -c1-12)
   if [ -n "${NEXUS_COMMIT:-}" ]; then
     [[ "$NEXUS_COMMIT" =~ ^[0-9a-f]{40}$ ]] || fail "NEXUS_COMMIT must be a full commit"

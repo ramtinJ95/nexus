@@ -31,9 +31,13 @@ const imageManifestFile = manifestFiles.image;
 /** build.sh only runs a build. pins.json becomes ImageRecipe.pins. */
 const notRecipeFiles = new Set(["build.sh", "pins.json"]);
 
-/** Every file under `dir` except build.sh, sorted by path, and pins.json parsed. */
+/** Image inputs kept beside the control plane, which runs them too. The Claude hook snapshots turns with the checkout helper. */
+const sharedFiles = ["checkout-files.py"];
+
+/** Every file under `dir` except build.sh, and the shared files, sorted by path, and pins.json parsed. */
 export async function loadImageRecipe(dir: string = pylonRecipeDir): Promise<ImageRecipe> {
   const files: { path: string; content: string }[] = [];
+  for (const path of sharedFiles) files.push({ path, content: await readFile(new URL(`./${path}`, import.meta.url), "utf8") });
   for (const entry of await readdir(dir, { recursive: true, withFileTypes: true })) {
     if (entry.isDirectory()) continue;
     const path = relative(dir, join(entry.parentPath, entry.name)).split(sep).join("/");
@@ -481,6 +485,11 @@ export function smokeChecks(recipe: ImageRecipe): readonly SmokeCheck[] {
       name: "pi-env daemon",
       argv: asUser("bash -lc 'exec /usr/local/libexec/nexus/pi-env \"$@\"' pi-env serve --token 00ff </dev/null"),
       expect: /^PI-ENV 00ff\n/,
+    },
+    {
+      name: "Claude turn snapshot",
+      argv: asUser(`d="$(mktemp -d)" && git -C "$d" init -q && echo a > "$d/a" && node --input-type=module -e "const { snapshotTurn } = await import('/usr/local/bin/nexus-turn.ts'); console.log(await snapshotTurn(process.argv[1], 'smoke', 60_000))" "$d" && git -C "$d" log -1 --format=%s refs/nexus/turn`),
+      expect: "true\nNexus turn smoke\n",
     },
     {
       name: "TLS through Gondolin's interception",
