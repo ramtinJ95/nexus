@@ -141,6 +141,7 @@ The shapes are TypeScript types. `Thread`, `Session` and `Preview` are in [`src/
 | `sessionTurnRunning` | optional `true` | A turn of a session in the pylon runs, as its hooks report, such as the Claude worker's. A Claude worker thread works while this is present |
 | `sessionActiveUntil` | optional `number` | When that turn's working lease runs out without another report. Present with `sessionTurnRunning` |
 | `sessionWaiting` | optional `true` | A session in the pylon waits for input, such as a permission prompt |
+| `sessionWaitingMessage` | optional `string` | What the latest waiting session's report said, such as "A background command was still running after 2 hours" |
 | `workingSince` | optional `number` | The earliest known start of the running turns, as `threads` describes |
 | `lastAgentActivityAt`, `lastHumanActivityAt` | `number` | The newest agent and human activity, which decide when the pylon pauses |
 | `seenAt`, `lastReplyAt` | `number \| null` | The shared seen marker and the latest reply, as the next section describes |

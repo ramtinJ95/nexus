@@ -81,12 +81,36 @@ and neither session gets a reply while its background task runs.
 
 - The command's hold sent a heartbeat at 303.7 seconds, stamped with the Stop's
   time. The command's finish started a turn at 422.2 seconds, and that turn's
-  Stop gave the reply at 423.8 seconds. The hold saw the output file closed and
-  sent its turn end 30 seconds later, and the registry ignored it as stale.
+  Stop gave the reply at 423.8 seconds. The hold saw the command gone and sent
+  its turn end 30 seconds later, and the registry ignored it as stale.
 - The server's hold sent heartbeats at 303.6 and 603.8 seconds. Its held turn
-  end came after the session ended and was stale too. The hour cap was not
-  reached live. The tests cover it.
+  end came after the session ended and was stale too.
+
+This run's hold watched only the output file, which the next run replaced with
+process groups.
 - Neither idle prompt was reported.
+
+### Process groups and one hold per session
+
+`process-groups/` is a run of the final hook, with the same setup.
+
+- `4d278340` started `exec python3 -c "import time; time.sleep(200)" >/dev/null 2>&1`
+  in the background, so no process held the output file. The hook recorded one
+  process group, 31320, the `exec`'d `python3`, a direct child of Claude leading
+  its own group. The session stayed `working`, with no reply, until the turn the
+  command's finish started at 202.7 seconds. The hold's turn end at 274.1 seconds
+  was stale. That turn's own Stop never ran: this task's own session hit the
+  account's usage limit at about that time, and the `verify` Claude used the same
+  token, so the turn most likely failed (inferred, not captured).
+- `9d31de68` started `python3 -m http.server 8765` and then got two more prompts,
+  so three Stops listed the server. Each started a hold. Within a minute the two
+  older holds saw the pidfile name the newest one and stopped, leaving one. It
+  sent a heartbeat every 5 minutes, up to 1802 seconds, when this pylon paused
+  and stopped every process in it.
+
+`process-groups/timeline.txt` replays both. The 2-hour cap was not reached live.
+The tests cover it, and the dashboard test shows its message as the thread's
+state.
 
 ### Nested sessions and a question
 
@@ -114,8 +138,9 @@ branch.
 
 - A rebuilt pylon image, and a worker started through the control plane. The
   hook ran from this branch's files, copied into the `verify` user's HOME.
-- A dev server reaching the hour cap live, and a pause while a hold runs. The
-  session is working then, so the planner keeps the pylon running.
+- A dev server reaching the 2-hour cap live. After the cap the session waits,
+  which does not keep the pylon awake, so with no other activity the pylon
+  pauses and stops the command.
 - A Notification with `elicitation_dialog`, which needs an MCP server that asks
   for input.
 - Until the image is rebuilt, the old matcher's idle prompt still makes a

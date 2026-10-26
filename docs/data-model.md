@@ -155,8 +155,8 @@ past matching records they have not consumed.
 |---|---|
 | `session.turn-started` | Claude submitted a prompt; optional `session` and `message` |
 | `session.heartbeat` | A throttled PostToolUse hook, or a Stop hook while background tasks run, confirms activity; optional `session` and `message` |
-| `session.turn-ended` | Claude's Stop hook ran with no background task running, or after one with only background shells running once they exit or an hour passes; optional `session` and `message` |
-| `session.waiting` | Claude showed a permission or input prompt; optional `session` and `message` |
+| `session.turn-ended` | Claude's Stop hook ran with no background task running, or after one with only background shells running once they exit or 2 hours pass; optional `session` and `message` |
+| `session.waiting` | Claude showed a permission or input prompt, or a background command still ran after 2 hours; optional `session` and `message` |
 | `session.ended` | Claude's SessionEnd hook ran; optional `session` and `message` |
 | `thread.turn-ended` | The control-plane harness completed a turn |
 | `thread.failed` | Pylon or worker launch failed; `message` |
@@ -211,11 +211,15 @@ not ended and records no reply. A subagent's tool hooks report under the main
 session's ID and renew the same lease. The turn Claude starts when the last task
 finishes ends it. There is no subagent record: a subagent that never finishes
 lets the lease expire like any other silent turn. When only shells run, a detached
-hold sends `session.heartbeat` every five minutes while a process writes to a
-shell's output file, then `session.turn-ended` 30 seconds after the last one stops,
-or after an hour. Each carries the Stop's time, so they renew the lease by receipt
-time, a dev server's turn still ends, and any later report for the session, such
-as the turn a command's finish starts, makes the rest stale.
+hold, one per session, sends `session.heartbeat` every five minutes while a process
+group the commands lead, or a process writing to a shell's output file, lives. It
+sends `session.turn-ended` 30 seconds after they stop. After 2 hours it sends
+`session.turn-ended` and `session.waiting`, both with the message "A background
+command was still running after 2 hours". Each carries the Stop's time, so they
+renew the lease by receipt time, and any later report for the session, such as the
+turn a command's finish starts, makes the rest stale. A waiting session's latest
+message is kept with it as `Thread.sessionWaitingMessage`, and the dashboard shows
+it as the thread's state.
 
 `Thread.sessionTurnRunning` and `sessionWaiting` are optional current facts;
 `sessionActiveUntil` lets the pure planner enforce expiry even on an older read.
