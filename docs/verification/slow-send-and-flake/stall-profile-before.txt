@@ -1,0 +1,10 @@
+# origin/main: CPU profile of one unloaded run of the stall-limit test, top 8 by self time (ms)
+total ms 3478
+  1037 (idle) :0
+   962 (anon) control/event-reader.ts:38
+   227 (garbage collector) :0
+   190 inTransaction control/registry.ts:926
+    97 flush control/api.ts:452
+    61 compileSourceTextModule esm/utils:317
+    50 wrapSafe cjs/loader:1819
+    41 (program) :0

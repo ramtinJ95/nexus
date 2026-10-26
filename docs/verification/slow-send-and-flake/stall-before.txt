@@ -1,0 +1,15 @@
+# origin/main: 20 runs of the stall-limit tests in src/control/api.test.ts beside burn.sh 6 (6 busy loops on 4 CPUs)
+ AssertionError [ERR_ASSERTION]: no event on /v1/threads/th-8e8f0d37a959/events  actual: false,  expected: true, 
+ AssertionError [ERR_ASSERTION]: no event on /v1/threads/th-5329cac11209/events  actual: false,  expected: true, 
+ AssertionError [ERR_ASSERTION]: no event on /v1/threads/th-a840b565f328/events  actual: false,  expected: true, 
+ AssertionError [ERR_ASSERTION]: no event on /v1/threads/th-70eaabaddfa6/events  actual: false,  expected: true, 
+ AssertionError [ERR_ASSERTION]: no event on /v1/threads/th-565b7747d1d4/events  actual: false,  expected: true, 
+ AssertionError [ERR_ASSERTION]: no event on /v1/threads/th-d2ee215fc096/events  actual: false,  expected: true, 
+ AssertionError [ERR_ASSERTION]: no event on /v1/threads/th-d65c43fce43a/events  actual: false,  expected: true, 
+ AssertionError [ERR_ASSERTION]: no event on /v1/threads/th-8412f57ee48f/events  actual: false,  expected: true, 
+ AssertionError [ERR_ASSERTION]: no event on /v1/threads/th-4d5f97d39620/events  actual: false,  expected: true, 
+ AssertionError [ERR_ASSERTION]: no event on /v1/threads/th-d482cfc8d6a4/events  actual: false,  expected: true, 
+ AssertionError [ERR_ASSERTION]: no event on /v1/threads/th-dce1be042e13/events  actual: false,  expected: true, 
+ AssertionError [ERR_ASSERTION]: no event on /v1/threads/th-9a9941796add/events  actual: false,  expected: true, 
+ AssertionError [ERR_ASSERTION]: no event on /v1/threads/th-1cdc7b91ed0e/events  actual: false,  expected: true, 
+pass=7 fail=13
