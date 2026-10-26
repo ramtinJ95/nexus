@@ -18,6 +18,7 @@ import { promisify } from "node:util";
 import { WebSocket } from "ws";
 import { maxStreams, startApi, type ThreadDetail, type ThreadRow } from "./api.ts";
 import type { AttachTiming } from "./attach.ts";
+import type { ReviewLoop } from "./review.ts";
 import { readEvents } from "./event-reader.ts";
 import { fakeHarness } from "./fake-harness.ts";
 import { openRegistry, type Thread } from "./registry.ts";
@@ -55,7 +56,7 @@ const claudeSession = "11111111-2222-4333-8444-555555555501";
 /** The lines of a real Claude Code 2.1.308 transcript, each with its newline. */
 const fixture = (await readFile(new URL("../fixtures/claude-transcript.jsonl", import.meta.url), "utf8")).split("\n").filter((line) => line !== "").map((line) => `${line}\n`);
 
-async function setup(t: import("node:test").TestContext, options: { gitIdentity?: { name: string; email: string }; https?: import("./api.ts").ApiOptions["https"]; whois?: import("../tailscale.ts").Whois; deployment?: DeploymentOptions; dotfiles?: typeof dotfiles; streamStallMs?: number; attachTiming?: AttachTiming } = {}) {
+async function setup(t: import("node:test").TestContext, options: { gitIdentity?: { name: string; email: string }; https?: import("./api.ts").ApiOptions["https"]; whois?: import("../tailscale.ts").Whois; deployment?: DeploymentOptions; dotfiles?: typeof dotfiles; streamStallMs?: number; attachTiming?: AttachTiming; reviews?: ReviewLoop } = {}) {
   const registry = openRegistry(join(dir, `${randomUUID()}.db`));
   registry.upsertNode({ name: node, tailnetHost: "rj-firebat.tail.ts.net", tailnetNodeId: "nFIREBAT" as TailnetNodeId });
   let caller: TailnetNodeId | null = laptop;
@@ -87,6 +88,7 @@ async function setup(t: import("node:test").TestContext, options: { gitIdentity?
     }),
     allowed: new Set([laptop, "nFIREBAT" as TailnetNodeId]),
     ...(options.deployment === undefined ? {} : { deployment: options.deployment }),
+    ...(options.reviews === undefined ? {} : { reviews: options.reviews }),
     hostnames: new Set(["127.0.0.1"]),
     dotfiles: options.dotfiles ?? dotfiles,
     gitIdentity: options.gitIdentity,
@@ -150,7 +152,7 @@ async function setup(t: import("node:test").TestContext, options: { gitIdentity?
   };
 }
 
-async function withThread(t: import("node:test").TestContext, options: { gitIdentity?: { name: string; email: string }; deployment?: DeploymentOptions; project?: typeof project; dotfiles?: typeof dotfiles; streamStallMs?: number; attachTiming?: AttachTiming } = {}) {
+async function withThread(t: import("node:test").TestContext, options: { gitIdentity?: { name: string; email: string }; deployment?: DeploymentOptions; reviews?: ReviewLoop; project?: typeof project; dotfiles?: typeof dotfiles; streamStallMs?: number; attachTiming?: AttachTiming } = {}) {
   const s = await setup(t, options);
   assert.equal((await s.call("POST", "/v1/projects", options.project ?? project)).status, 201);
   assert.equal((await s.call("POST", "/v1/images", image)).status, 201);
@@ -300,7 +302,7 @@ test("thread detail derives the actual state from the node's last observation", 
     attention: null, seenAt: null, lastReplyAt: null,
     desired: "running",
     pylon: { grantsOutdated: false, id: thread.pylonId, node, actualState: "unknown", failed: null, observedAt: null, retryRefused: null },
-    sessions: [], previews: [], ports: [], outputs: [], prWatch: { enabled: false, stopped: false, error: null }, pullRequests: [], attach: "herdr --session nexus", agent: { parkedTasks: 0 },
+    sessions: [], previews: [], ports: [], outputs: [], prWatch: { enabled: false, stopped: false, error: null }, pullRequests: [], review: null, attach: "herdr --session nexus", agent: { parkedTasks: 0 },
   });
 
   const capacity = { memoryGiB: 64, committedMemoryGiB: 0, diskFreeGiB: 100 };
@@ -1920,4 +1922,31 @@ test("a Claude worker thread's page stream shows new entries during a turn, read
   const ended = s.streams.length;
   await sleep(2_500);
   assert.equal(s.streams.length, ended, "the reads stop with the turn");
+});
+
+test("a review needs the GitHub token's loop, and landing, at its start or later, needs a deployer", async (t) => {
+  const off = await withThread(t);
+  const refused = await off.call("POST", `/v1/threads/${off.thread.id}/review`, {});
+  assert.equal(refused.status, 409);
+  assert.match(refused.body.error, /github.tokenFile/);
+  const asked: unknown[] = [];
+  const reviews = {
+    async start(builder: string, request: unknown) { asked.push(["start", builder, request]); return { id: "rv-1" }; },
+    land(builder: string, by: string) { asked.push(["land", builder, by]); return { id: "rv-1" }; },
+  } as never as ReviewLoop;
+  const s = await withThread(t, { reviews, deployment: { self: "nFIREBAT" as TailnetNodeId, deployers: new Set([laptop, "nFIREBAT" as TailnetNodeId]), keys: {} } });
+  assert.equal((await s.call("POST", `/v1/threads/${s.thread.id}/review`, { rounds: 11 })).status, 400);
+  assert.equal((await s.call("POST", `/v1/threads/${s.thread.id}/review`, { pr: 7, rounds: 2 })).status, 201);
+  assert.equal((await s.call("POST", `/v1/threads/${s.thread.id}/review`, { land: true })).status, 201);
+  assert.equal((await s.call("POST", `/v1/threads/${s.thread.id}/land`)).status, 200);
+  s.callAs("nFIREBAT" as TailnetNodeId);
+  assert.equal((await s.call("POST", `/v1/threads/${s.thread.id}/review`, { land: true })).status, 403, "the control node itself never lands, even listed as a deployer");
+  assert.equal((await s.call("POST", `/v1/threads/${s.thread.id}/land`)).status, 403);
+  assert.equal((await s.call("POST", `/v1/threads/${s.thread.id}/review`, {})).status, 201, "a review that stops at approval needs no deploy right");
+  assert.deepEqual(asked, [
+    ["start", s.thread.id, { pr: 7, rounds: 2, land: null }],
+    ["start", s.thread.id, { pr: undefined, rounds: undefined, land: laptop }],
+    ["land", s.thread.id, laptop],
+    ["start", s.thread.id, { pr: undefined, rounds: undefined, land: null }],
+  ]);
 });

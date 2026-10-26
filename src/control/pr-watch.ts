@@ -33,7 +33,8 @@ export function prWatcher(options: { registry: Registry; github: Pick<GitHub, "f
     const finds = new Map<string, Promise<number[]>>();
     const polls = new Map<string, Promise<PrSnapshot>>();
     for (const t of registry.threads()) {
-      if (!active(t)) continue;
+      // A reviewer checks out the builder's branch, so its outputs would link it to the PR it reviews.
+      if (!active(t) || registry.isReviewer(t.id)) continue;
       const state = registry.prWatch(t.id) ?? empty();
       try {
         if (state.pending) { await deliver(t.id, state); continue; }

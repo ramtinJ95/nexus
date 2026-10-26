@@ -49,10 +49,13 @@ import { attachTiming, serveAttach, type AttachTiming, type Ending, type PylonDo
 import { typeIntoClaude } from "./inbox.ts";
 import { HttpError } from "./http-error.ts";
 import { threadStarter } from "./threads.ts";
+import { maxRounds, needsPerson, type Review, type ReviewLoop } from "./review.ts";
 
 export interface ApiOptions {
   https?: { port: number; certificate(): Promise<Certificate>; renewalMs?: number; retryMs?: number };
   prWatchEnabled?: boolean;
+  /** Null without a control-plane GitHub token, which the review loop reads and merges with. */
+  reviews?: ReviewLoop | null;
   deployment?: DeploymentOptions;
   turnsStarting?: () => boolean;
   registry: Registry;
@@ -114,6 +117,8 @@ export interface ThreadDetail {
   outputs: readonly Output[];
   prWatch: { enabled: boolean; stopped: boolean; error: string | null };
   pullRequests: readonly PullRequest[];
+  /** The thread's latest review as a builder, or null. */
+  review: Review | null;
   /** The command that attaches to the pylon's Herdr sessions from a shell in the pylon. */
   attach: string;
   /** Null for a thread that has no conversation. A parked task holds the run until it is retried. */
@@ -229,6 +234,12 @@ const messageSchema = z.strictObject({
   /** followUp waits for the current run. steer joins it after its current tool round. */
   mode: z.enum(["followUp", "steer"]).default("followUp"),
 });
+const reviewSchema = z.strictObject({
+  pr: z.int().positive().optional(),
+  rounds: z.int().min(1).max(maxRounds).optional(),
+  /** Land the PR under the merge policy once the review approves it and its checks pass. */
+  land: z.boolean().default(false),
+});
 const imageSchema = z.strictObject({
   id: z.string().regex(/^img-[0-9a-f]{12}$/).transform((id) => id as ImageId),
   gondolinBuildId: z.string().min(1),
@@ -301,6 +312,16 @@ export async function startApi(options: ApiOptions): Promise<Api> {
     return conversing(t);
   }
 
+  function reviewsOrRefuse(): ReviewLoop {
+    if (!options.reviews) throw new HttpError(409, "the review loop needs the control plane's GitHub token (github.tokenFile), which is not configured");
+    return options.reviews;
+  }
+
+  /** Landing merges and may deploy, so it takes the same right as `nexus deploy`, whatever the repository. */
+  function mayLand(caller: TailnetNodeId) {
+    if (!canDeploy(registry, options.deployment, caller)) throw new HttpError(403, "caller may not land a pull request: landing deploys, and only deployers may, never infrastructure nodes or pylons");
+  }
+
   /** The pylon as its node's last observation reports it. */
   function observedPylon(pylonId: PylonId) {
     const node = registry.node(registry.pylon(pylonId)!.node)!;
@@ -340,7 +361,7 @@ export async function startApi(options: ApiOptions): Promise<Api> {
 
   function attention(t: Thread): Attention {
     const parked = t.conversationId !== null && t.status !== "deleted" && harness.activity.parked(t.id).length > 0;
-    return attentionOf(pylonOf(t).failed !== null || ["failed", "stalled"].includes(registry.claudeWorker(t.id)?.state ?? ""), parked, t.lastReplyAt, t.seenAt, t.agentTurnRunning || t.sessionTurnRunning === true, t.sessionWaiting);
+    return attentionOf(pylonOf(t).failed !== null || ["failed", "stalled"].includes(registry.claudeWorker(t.id)?.state ?? ""), parked, t.lastReplyAt, t.seenAt, t.agentTurnRunning || t.sessionTurnRunning === true, t.sessionWaiting, needsPerson(registry.review(t.id)));
   }
 
   function row(t: Thread): ThreadRow {
@@ -365,6 +386,7 @@ export async function startApi(options: ApiOptions): Promise<Api> {
       outputs: registry.outputs(t.id),
       prWatch: { enabled: options.prWatchEnabled ?? false, stopped: (watch?.commentWakes ?? 0) >= 10, error: watch?.error ?? null },
       pullRequests: watch?.links.map((l) => l.pr) ?? [],
+      review: registry.review(t.id),
       attach: `herdr --session ${herdrSession}`,
       agent: t.conversationId === null || t.status === "deleted" ? null : { parkedTasks: harness.activity.parked(t.id).length },
     };
@@ -738,6 +760,17 @@ export async function startApi(options: ApiOptions): Promise<Api> {
       if (worker === undefined) return { status: 202, body: await sendMessage(runnable(t), body) };
       if (t.status === "archived") throw new HttpError(409, `thread ${t.id} is archived`);
       return { status: 202, body: await sendClaude(refuseDeleted(t), worker.session, worker.model, body) };
+    }],
+    ["POST", /^\/v1\/threads\/([^/]+)\/review$/, async (m, r) => {
+      const body = parse(reviewSchema, await r.body({}));
+      const t = thread(m[1]!);
+      if (body.land) mayLand(r.caller);
+      return created(await reviewsOrRefuse().start(t.id, { pr: body.pr, rounds: body.rounds, land: body.land ? r.caller : null }));
+    }],
+    ["POST", /^\/v1\/threads\/([^/]+)\/land$/, async (m, r) => {
+      const t = thread(m[1]!);
+      mayLand(r.caller);
+      return ok(reviewsOrRefuse().land(t.id, r.caller));
     }],
     ["POST", /^\/v1\/threads\/([^/]+)\/abort$/, async (m) => { await harness.abort(conversing(thread(m[1]!)).id); return noContent; }],
     ["POST", /^\/v1\/threads\/([^/]+)\/retry$/, async (m) => { await harness.retry(runnable(thread(m[1]!)).id); return noContent; }],

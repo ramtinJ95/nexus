@@ -18,6 +18,7 @@ import type { HerdrStatus, JobStatus, NodeName, NodeObservation, PylonId, Subjec
 import type { Project, ProjectId, SessionHarness } from "../project.ts";
 import type { ImageId, ImageManifest, TemplateRecord } from "../images.ts";
 import type { PylonRecord } from "../tick.ts";
+import { needsPerson, type Review } from "./review.ts";
 import { maxEntries, transcriptStart, type ClaudeEntry, type TranscriptCursor } from "../claude-transcript.ts";
 
 declare const brand: unique symbol;
@@ -253,6 +254,8 @@ const migrations: readonly string[] = [
   // has none, as its start was never seen.
   `ALTER TABLE threads ADD COLUMN agent_turn_started_at INTEGER;
    ALTER TABLE session_activity ADD COLUMN started_at INTEGER;`,
+  // A builder thread's latest review, keyed by its builder. `reviewer` is the thread the review started to review it.
+  `CREATE TABLE reviews (builder TEXT PRIMARY KEY REFERENCES threads (id), reviewer TEXT NOT NULL UNIQUE, record TEXT NOT NULL) STRICT;`,
 ];
 
 type Row = Record<string, unknown>;
@@ -443,7 +446,8 @@ export function openRegistry(path: string, clock = Date.now) {
     const old = db.prepare("SELECT * FROM thread_attention WHERE thread = ?").get(id);
     const p = q.pylon.get(t.pylonId);
     const workerFailed = ["failed", "stalled"].includes(String(db.prepare("SELECT state FROM claude_workers WHERE thread = ?").get(id)?.state));
-    const attention = attentionOf(p?.failed != null || workerFailed, old?.parked === 1, t.lastReplyAt, t.seenAt, t.agentTurnRunning || t.sessionTurnRunning === true, t.sessionWaiting);
+    const decision = needsPerson(jsonOrNull<Review>(db.prepare("SELECT record FROM reviews WHERE builder = ?").get(id)?.record ?? null));
+    const attention = attentionOf(p?.failed != null || workerFailed, old?.parked === 1, t.lastReplyAt, t.seenAt, t.agentTurnRunning || t.sessionTurnRunning === true, t.sessionWaiting, decision);
     if ((old?.attention ?? null) === attention) return;
     db.prepare("INSERT INTO thread_attention (thread, attention) VALUES (?, ?) ON CONFLICT(thread) DO UPDATE SET attention = excluded.attention").run(id, attention);
     appendEvent("attention.changed", id, { attention });
@@ -613,6 +617,23 @@ export function openRegistry(path: string, clock = Date.now) {
     },
     eventBatch,
     events: (since = "0", filter: EventFilter = {}) => eventBatch(since, filter).events,
+    review(builder: ThreadId): Review | null {
+      return jsonOrNull<Review>(db.prepare("SELECT record FROM reviews WHERE builder = ?").get(builder)?.record ?? null);
+    },
+    reviews: (): Review[] => db.prepare("SELECT record FROM reviews ORDER BY builder").all().map((r) => json<Review>(r.record)),
+    isReviewer: (thread: ThreadId) => db.prepare("SELECT 1 FROM reviews WHERE reviewer = ?").get(thread) !== undefined,
+    /** Replaces the builder's review, and tells the event log when its phase or round changed. */
+    saveReview(review: Review) {
+      transaction(() => {
+        const before = jsonOrNull<Review>(db.prepare("SELECT record FROM reviews WHERE builder = ?").get(review.builder)?.record ?? null);
+        db.prepare("INSERT INTO reviews (builder, reviewer, record) VALUES (?, ?, ?) ON CONFLICT (builder) DO UPDATE SET reviewer = excluded.reviewer, record = excluded.record")
+          .run(review.builder, review.reviewer, JSON.stringify(review));
+        if (before?.id !== review.id || before.phase.kind !== review.phase.kind || before.rounds.length !== review.rounds.length) {
+          appendEvent("review.changed", review.builder, { review: review.id, reviewer: review.reviewer, phase: review.phase, round: review.rounds.length });
+        }
+        updateAttention(review.builder);
+      });
+    },
     prWatch(thread: ThreadId): PrWatchState | null {
       const row = db.prepare("SELECT record FROM pr_watches WHERE thread = ?").get(thread) as Row | undefined;
       return row ? json<PrWatchState>(row.record) : null;
