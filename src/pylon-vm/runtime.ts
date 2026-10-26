@@ -6,6 +6,7 @@ import type { Action, BootSpec, SandboxRecord } from "./contracts.ts";
 import {
 	checked,
 	execute,
+	freeReservedSlots,
 	guestExists,
 	serviceRoot,
 	stagingRoot,
@@ -379,6 +380,7 @@ export class SandboxRuntime {
 	private async leaveRunning(state: "stopping" | "failed"): Promise<string[]> {
 		this.state = state;
 		this.stopping.abort(new NotRunning(state, "the action"));
+		if (this.vm) freeReservedSlots(this.vm);
 		const inFlight = [...this.admitted.values()].join(", ") || "none";
 		console.error(`Sandbox is ${state} since ${new Date().toISOString()}, so it settles the guest actions in flight: ${inFlight}`);
 		const settled = Promise.allSettled(this.admitted.keys()).then(() => true);

@@ -203,6 +203,22 @@ test("reads against a guest that stopped answering take at most 48 of its 64 com
 	assert.equal(((await runtime.stop()) as { state: string }).state, "stopped");
 });
 
+test("a stop refuses the reads still waiting for a command slot, so they never take the slots its own commands need", async (t) => {
+	const { fake, runtime } = await runningOnAFakeVm(t, /^$/, "queued", undefined, (cmd) => cmd.startsWith("head -c"));
+	const reads = Array.from({ length: 70 }, (_, i) => runtime.handle({ action: "read", name: "pylon-a", path: `/tmp/${i}` } as Action));
+	for (const read of reads) void read.catch(() => {});
+	await delay(50);
+	const stop = runtime.stop();
+	fake.answer();
+	assert.equal(((await stop) as { state: string }).state, "stopped");
+	const outcomes = await Promise.allSettled(reads);
+	assert.equal(outcomes.filter((read) => read.status === "fulfilled").length, 48, "the reads the guest ran were answered within the stop's wait");
+	for (const read of outcomes.slice(48)) assert.match(String((read as PromiseRejectedResult).reason), /the VM stopped running while it waited for a command slot/);
+	assert.deepEqual(fake.refused, []);
+	assert.equal(fake.peak, 48);
+	assert.equal(fake.checkpoints.length, 1);
+});
+
 test("a stop checkpoints although reads whose waits ran out still hold command slots the guest never answered", async (t) => {
 	let stalled = false;
 	const { dir, fake, runtime } = await runningOnAFakeVm(t, /^$/, "queued", undefined, (cmd) => stalled && /\/done'?$/.test(cmd));
