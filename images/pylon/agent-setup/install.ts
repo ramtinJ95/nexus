@@ -28,7 +28,7 @@ const env = { ...process.env, CLAUDE_CODE_DISABLE_OFFICIAL_MARKETPLACE_AUTOINSTA
  * Once, as user, with the build's open network. Each step fails the build with the command's output:
  * 1. Dotfiles: a depth-1 fetch of the pinned commit into a scratch repo, each skill copied to its harness
  *    directories, each extension to ~/.pi/agent/extensions, each local package to ~/.pi/agent/packages, each
- *    shepherdr profile to ~/.pi/agent/shepherdr/profiles, marked initialized. The scratch repo is removed: nothing
+ *    shepherdr profile to ~/.pi/agent/shepherdr/profiles with its model on pylonProfile's provider, marked initialized. The scratch repo is removed: nothing
  *    keeps a dotfiles checkout.
  * 2. Claude: each marketplace fetched the same way into marketplaces/<name> beside this file and added as a
  *    local directory marketplace, which nothing in a pylon tries to update from GitHub. Then each plugin.
@@ -46,7 +46,11 @@ async function install(setup: AgentSetup): Promise<void> {
   for (const local of setup.pi.packages) {
     if (local.kind === "local") await copy(join(dotfiles, local.path), join(piPackages, basename(local.path)));
   }
-  for (const profile of setup.pi.shepherdrProfiles) await copy(join(dotfiles, profile), join(shepherdrProfiles, basename(profile)));
+  for (const profile of setup.pi.shepherdrProfiles) {
+    const dir = join(shepherdrProfiles, basename(profile));
+    await copy(join(dotfiles, profile), dir);
+    await writeFile(join(dir, "profile.json"), pylonProfile(await readFile(join(dir, "profile.json"), "utf8")));
+  }
   // pi-shepherdr's first load adds its bundled profiles beside the captured ones unless this marker exists.
   await mkdir(shepherdrProfiles, { recursive: true });
   await writeFile(join(shepherdr, ".profiles-initialized"), "1\n");
@@ -63,6 +67,17 @@ async function install(setup: AgentSetup): Promise<void> {
     await run("pi", ["install", pkg.kind === "npm" ? `npm:${pkg.name}@${pkg.version}` : join(piPackages, basename(pkg.path))]);
   }
   await herdrIntegrations();
+}
+
+/**
+ * A captured shepherdr profile as a pylon runs it. A pylon's pi is signed in only as `openai`, with the harness's
+ * ChatGPT login, while a Mac's profile may name `openai-codex`, the same models through the Codex client, which has
+ * no login in a pylon. Any other profile comes back byte for byte.
+ */
+export function pylonProfile(json: string): string {
+  const profile = JSON.parse(json) as { model?: unknown };
+  if (typeof profile.model !== "string" || !profile.model.startsWith("openai-codex/")) return json;
+  return `${JSON.stringify({ ...profile, model: `openai/${profile.model.slice("openai-codex/".length)}` }, null, "\t")}\n`;
 }
 
 /** Each Claude hook nexus-claude-hook runs for, the kind it reports and its matcher. Claude's idle prompt, 60 seconds after every turn, waits for no one. */

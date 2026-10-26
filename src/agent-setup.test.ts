@@ -6,7 +6,7 @@ import { dirname, join } from "node:path";
 import {
   agentSetupManifest, formatAgentSetup, installedLayout, parseAgentSetup, type AgentSetup, type InstalledAgentSetup,
 } from "../images/pylon/agent-setup/manifest.ts";
-import { claudeHooks, installedPackage, installMismatches } from "../images/pylon/agent-setup/install.ts";
+import { claudeHooks, installedPackage, installMismatches, pylonProfile } from "../images/pylon/agent-setup/install.ts";
 import { httpsRemote, leaveOuts, parseLeaveOut, planAgentSetup, readPiSetup, type Capture, type LeaveOut, type MacSetup, type PluginFiles } from "./agent-setup.ts";
 import { pylonRecipeDir } from "./image-build.ts";
 
@@ -87,6 +87,14 @@ test("Claude's notifications count as waiting only for a permission or input pro
   const [, , matcher] = claudeHooks.find(([hook]) => hook === "Notification")!;
   const waits = ["permission_prompt", "idle_prompt", "elicitation_dialog", "auth_success"].filter((type) => new RegExp(matcher).test(type));
   assert.deepEqual(waits, ["permission_prompt", "elicitation_dialog"]);
+});
+
+test("a profile installed in a pylon names the openai provider for a model the Mac reaches through openai-codex, and is otherwise unchanged", () => {
+  const astra = JSON.stringify({ description: "Read-only review", blocking: true, model: "openai-codex/gpt-6-astra", thinking: "high", prompt: "prompt.md" }, null, "\t");
+  assert.deepEqual(JSON.parse(pylonProfile(astra)), { description: "Read-only review", blocking: true, model: "openai/gpt-6-astra", thinking: "high", prompt: "prompt.md" });
+  const other = '{"model": "anthropic/claude-opus-5-5", "thinking": "high"}';
+  assert.equal(pylonProfile(other), other);
+  assert.equal(pylonProfile('{"model":"openai/gpt-6-sol"}'), '{"model":"openai/gpt-6-sol"}');
 });
 
 test("an install that differs from its layout is named item by item, and pi packages out of order are caught", () => {
