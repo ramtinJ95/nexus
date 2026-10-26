@@ -385,7 +385,7 @@ ${list(o.allowedHosts)}
 ${secrets}## Previews
 
 ${previews}
-A browser reaches a preview over HTTPS, but the app gets plain HTTP, with the public address in \`Host\` and \`X-Forwarded-Proto: https\`. Nexus turns the app's redirects to its own \`http://\` address into \`https://\`, and has the browser load the page's \`http://\` links over HTTPS. A dev server that checks \`Host\` refuses the address until you allow it, as Vite's \`server.allowedHosts: [".ts.net"]\` does.
+A browser reaches a preview over HTTPS, but the app gets plain HTTP, with the public address in \`Host\` and \`X-Forwarded-Proto: https\`. Nexus turns the app's redirects to its own \`http://\` address into \`https://\`, and has the browser load the page's \`http://\` links over HTTPS. That includes links to other ports on the same name, so a preview cannot link to a plain-HTTP port there. A dev server that checks \`Host\` refuses the address until you allow it, as Vite's \`server.allowedHosts: [".ts.net"]\` does.
 
 ## Sleep
 

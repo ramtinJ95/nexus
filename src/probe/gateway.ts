@@ -206,8 +206,9 @@ function endToEnd(headers: IncomingHttpHeaders): OutgoingHttpHeaders {
 /**
  * An app that builds absolute URLs from its own scheme redirects to `http://<host>`, which serve does not listen on,
  * so that Location becomes https. Its pages link http:// subresources too, so every response also carries
- * upgrade-insecure-requests as a CSP of its own. Separate policies are enforced independently, so it restricts
- * nothing the guest allowed.
+ * upgrade-insecure-requests as a CSP of its own, which leaves the guest's own policy as it was. The browser also
+ * upgrades navigations to http:// on this hostname at any port, so a link from a preview to a plain-HTTP port on the
+ * node, such as the dashboard's, fails. Mixed content in previews matters more than such links.
  */
 function toBrowser(headers: IncomingHttpHeaders, host: string | undefined): OutgoingHttpHeaders {
   const out = endToEnd(headers);
