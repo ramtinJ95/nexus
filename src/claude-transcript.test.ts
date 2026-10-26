@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { appendFile, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { maxRecordBytes, parseRecord, readTranscript, transcriptStart as start, type ClaudeEntry, type TranscriptCursor } from "./claude-transcript.ts";
+import { maxRecordBytes, parseRecord, readTranscript, transcriptStart as start, usageLimitStop, usageLimitText, type ClaudeEntry, type TranscriptCursor } from "./claude-transcript.ts";
 import type { OpenPipe } from "./checkout-files.ts";
 import { processStream } from "./process-stream.ts";
 import type { ByteStream } from "./protocol.ts";
@@ -313,4 +313,58 @@ test("a transcript replaced by one at least as long starts over from its beginni
   const rest = await readAll(p.read, first.cursor);
   assert.deepEqual([...first.entries, ...rest.entries], parsedAll([...lines.slice(30), ...lines.slice(0, 30), lines[4]!]));
   assert.equal(rest.cursor.offset, Buffer.byteLength(replaced));
+});
+
+const apiErrors = (await readFile(new URL("./fixtures/claude-api-errors.jsonl", import.meta.url), "utf8")).split("\n").filter((line) => line !== "");
+
+test("a usage limit's error notice says when the limit resets, and other API errors stay plain error notices", () => {
+  const [session, weekly, limited, overloaded] = apiErrors.map(parseRecord);
+  assert.deepEqual(session, [{ kind: "notice", at: Date.parse("2026-10-26T05:34:18.605Z"), tone: "error", text: "You've hit your session limit · resets 6:30am (UTC)", usageLimit: { resetsAt: 1792996200000 } }]);
+  assert.deepEqual(weekly!.map((e) => e.kind === "notice" && e.usageLimit), [{ resetsAt: 1793251800000 }]);
+  for (const plain of [limited!, overloaded!]) {
+    assert.equal(plain.length, 1);
+    assert.equal(plain[0]!.kind === "notice" && plain[0]!.tone, "error");
+    assert.equal("usageLimit" in plain[0]!, false);
+  }
+});
+
+test("a usage limit whose reset is missing or malformed still gives its notice, with no reset", () => {
+  const record = JSON.parse(apiErrors[0]!);
+  for (const apiErrorParams of [undefined, "soon", { rate_limit_info: { resetsAt: "1792996200" } }, { rate_limit_info: { resetsAt: -1 } }, { rate_limit_info: null }]) {
+    const [entry] = parseRecord(JSON.stringify({ ...record, apiErrorParams }));
+    assert.equal(entry!.kind === "notice" && entry!.text, "You've hit your session limit · resets 6:30am (UTC)");
+    assert.deepEqual(entry!.kind === "notice" && entry!.usageLimit, { resetsAt: null });
+  }
+});
+
+test("a session stopped on its usage limit while the newest entry, bookkeeping aside, is the limit's notice", () => {
+  const stop: ClaudeEntry = { kind: "notice", at: 5, tone: "error", text: "You've hit your session limit", usageLimit: { resetsAt: 9000 } };
+  const turn: ClaudeEntry = { kind: "turn", at: 6, durationMs: 100 };
+  const prompt: ClaudeEntry = { kind: "prompt", at: 7, text: "continue", from: "person" };
+  const queue: ClaudeEntry = { kind: "queue", at: 7, op: "enqueue", text: "continue" };
+  assert.deepEqual(usageLimitStop([prompt, stop]), { stoppedAt: 5, resetsAt: 9000 });
+  assert.deepEqual(usageLimitStop([stop, turn, queue]), { stoppedAt: 5, resetsAt: 9000 });
+  assert.equal(usageLimitStop([stop, turn, prompt]), null);
+  assert.equal(usageLimitStop([stop, { kind: "notice", at: 8, tone: "error", text: "API Error: 529 Overloaded" }]), null);
+  assert.equal(usageLimitStop([turn]), null);
+  assert.equal(usageLimitStop([]), null);
+});
+
+test("Claude Code's own continue after the reset is a prompt from Claude Code, which ends the stop", async () => {
+  const session = (await readFile(new URL("./fixtures/claude-usage-limit-session.jsonl", import.meta.url), "utf8")).split("\n").filter((line) => line !== "");
+  const entries = session.flatMap(parseRecord);
+  assert.deepEqual(entries.at(-1), { kind: "prompt", at: Date.parse("2026-10-26T05:55:36.839Z"), from: "other", text: "Your claude.ai usage limit has reset. Continue the task you were working on when the limit was reached; do not repeat work that is already complete." });
+  assert.equal(usageLimitStop(entries), null);
+  const stopped = session.slice(0, 3).flatMap(parseRecord);
+  assert.deepEqual(stopped.map((e) => e.kind), ["notice", "notice", "turn"]);
+  assert.deepEqual(stopped[1], { kind: "notice", at: Date.parse("2026-10-26T05:51:36.706Z"), tone: "info", text: "Usage limit reached · continuing automatically at 5:54am · esc to cancel" });
+  assert.deepEqual(usageLimitStop(stopped), { stoppedAt: Date.parse("2026-10-26T05:51:36.702Z"), resetsAt: 1792994043000 });
+});
+
+test("a usage limit's text names its reset in UTC, with its date when more than a day away, and says once it passed", () => {
+  const reset = Date.parse("2026-10-26T06:30:00Z");
+  assert.equal(usageLimitText({ resetsAt: reset }, Date.parse("2026-10-26T05:34:00Z")), "stopped on its usage limit until 06:30 UTC");
+  assert.equal(usageLimitText({ resetsAt: Date.parse("2026-10-29T05:30:00Z") }, Date.parse("2026-10-26T05:34:00Z")), "stopped on its usage limit until Oct 29, 05:30 UTC");
+  assert.equal(usageLimitText({ resetsAt: reset }, Date.parse("2026-10-26T07:00:00Z")), "stopped on its usage limit, which reset at 06:30 UTC");
+  assert.equal(usageLimitText({ resetsAt: null }, reset), "stopped on its usage limit");
 });

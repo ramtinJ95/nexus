@@ -21,7 +21,7 @@ import type { ImageId, ImageManifest, TemplateRecord } from "../images.ts";
 import type { PylonRecord } from "../tick.ts";
 import { needsPerson, reviewerCaller, type Review } from "./review.ts";
 import { claudeTurn } from "../../images/pylon/nexus-turn.ts";
-import { maxEntries, transcriptStart, type ClaudeEntry, type TranscriptCursor } from "../claude-transcript.ts";
+import { maxEntries, transcriptStart, usageLimitStop, type ClaudeEntry, type TranscriptCursor } from "../claude-transcript.ts";
 
 declare const brand: unique symbol;
 /** At most 34 characters, so `pylon-<id>` fits pi-sandbox's 40. */
@@ -54,6 +54,8 @@ export interface Thread extends ActivityFacts {
   lastReplyAt: number | null;
   /** Absent from a thread started before placements were recorded. */
   placement?: Placement;
+  /** The Claude worker's session stopped on its usage limit and no turn of a session runs since. `resetsAt` is null when Claude Code did not say when the limit resets. */
+  usageLimit?: { stoppedAt: number; resetsAt: number | null };
 }
 
 /** What the registry keeps of a pylon. The desired phase is derived from its thread on every tick. */
@@ -452,11 +454,22 @@ export function openRegistry(path: string, clock = Date.now) {
     const working = live.at as number | null;
     const waiting = db.prepare("SELECT message FROM session_activity WHERE thread = ? AND state = 'session.waiting' ORDER BY updated_at DESC, rowid DESC LIMIT 1").get(thread.id);
     const starts = [thread.agentTurnRunning ? row.agent_turn_started_at : null, live.since].filter((at): at is number => typeof at === "number");
+    const usageLimit = working === null ? usageLimitOf(thread.id) : null;
     return {
       ...thread, ...(working === null ? {} : { sessionTurnRunning: true, sessionActiveUntil: working + sessionActivityTtlMs }), ...(waiting === undefined ? {} : { sessionWaiting: true }),
       ...(typeof waiting?.message === "string" ? { sessionWaitingMessage: waiting.message } : {}),
-      ...(starts.length === 0 ? {} : { workingSince: Math.min(...starts) }),
+      ...(starts.length === 0 ? {} : { workingSince: Math.min(...starts) }), ...(usageLimit === null ? {} : { usageLimit }),
     };
+  }
+
+  /** Derived from the newest entries rather than stored, so it holds whichever of the turn's end and the transcript's read comes first. */
+  function usageLimitOf(id: ThreadId) {
+    const worker = db.prepare("SELECT w.turn_at FROM claude_workers w JOIN claude_transcripts t ON t.thread = w.thread AND t.session = w.session WHERE w.thread = ?").get(id);
+    if (worker === undefined) return null;
+    const entries = db.prepare("SELECT entry FROM claude_entries WHERE thread = ? ORDER BY seq DESC LIMIT 16").all(id).map((r) => json<ClaudeEntry>(r.entry)).reverse();
+    const stop = usageLimitStop(entries);
+    // A turn that started after the stop, by the pylon's clock as the record's time is, ended it, though its prompt may not be read yet.
+    return stop !== null && (worker.turn_at === null || Number(worker.turn_at) <= stop.stoppedAt) ? stop : null;
   }
 
   function updateAttention(id: ThreadId) {
@@ -467,7 +480,7 @@ export function openRegistry(path: string, clock = Date.now) {
     const p = q.pylon.get(t.pylonId);
     const workerFailed = ["failed", "stalled"].includes(String(db.prepare("SELECT state FROM claude_workers WHERE thread = ?").get(id)?.state));
     const decision = needsPerson(jsonOrNull<Review>(db.prepare("SELECT record FROM reviews WHERE builder = ?").get(id)?.record ?? null));
-    const attention = attentionOf(p?.failed != null || workerFailed, old?.parked === 1, t.lastReplyAt, t.seenAt, t.agentTurnRunning || t.sessionTurnRunning === true, t.sessionWaiting, decision);
+    const attention = attentionOf(p?.failed != null || workerFailed, old?.parked === 1, t.lastReplyAt, t.seenAt, t.agentTurnRunning || t.sessionTurnRunning === true, t.sessionWaiting, decision, t.usageLimit !== undefined);
     if ((old?.attention ?? null) === attention) return;
     db.prepare("INSERT INTO thread_attention (thread, attention) VALUES (?, ?) ON CONFLICT(thread) DO UPDATE SET attention = excluded.attention").run(id, attention);
     appendEvent("attention.changed", id, { attention });
@@ -573,6 +586,13 @@ export function openRegistry(path: string, clock = Date.now) {
           ON CONFLICT (thread) DO UPDATE SET session = excluded.session, byte_offset = excluded.byte_offset, skipping = excluded.skipping, before_hash = excluded.before_hash,
             dropped = excluded.dropped, read_at = excluded.read_at`)
           .run(thread, read.session, read.cursor.offset, read.cursor.skipping ? 1 : 0, read.cursor.before, Math.max(0, total - maxEntries), read.readAt);
+        // An image without the StopFailure hook reports no end to the turn a usage limit stopped, so the transcript ends it.
+        const stop = usageLimitOf(thread);
+        if (stop !== null) {
+          db.prepare("DELETE FROM session_activity WHERE thread = ? AND session = ? AND state = 'session.turn-started' AND EXISTS (SELECT 1 FROM session_order o WHERE o.thread = ? AND o.session = ? AND o.at <= ?)")
+            .run(thread, read.session, thread, read.session, stop.stoppedAt);
+        }
+        updateAttention(thread);
         return true;
       });
     },

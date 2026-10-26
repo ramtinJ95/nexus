@@ -25,7 +25,7 @@ import { githubTokenGrant, linkedPort, type SessionHarness } from "../project.ts
 import type { ThreadDetail } from "./api.ts";
 import type { Attention } from "./attention.ts";
 import type { NodeRecord, Output, Preview, Registry, Thread, ThreadId } from "./registry.ts";
-import type { ClaudeConversation, ClaudeEntry, PromptSource } from "../claude-transcript.ts";
+import { usageLimitText, type ClaudeConversation, type ClaudeEntry, type PromptSource } from "../claude-transcript.ts";
 import { queuedOf } from "./claude-conversation.ts";
 import { roundsSpent } from "./review.ts";
 
@@ -173,6 +173,7 @@ function threadState({ thread: t, pylon, attention }: ThreadDetail): [label: str
   if (attention === "failed") return ["failed", "bad"];
   if (attention === "decision") return ["needs your decision", "bad"];
   if (attention === "parked") return ["parked", "bad"];
+  if (attention === "limited") return [usageLimitText(t.usageLimit ?? { resetsAt: null }, Date.now()), "bad"];
   if (attention === "reply") return ["new reply", "ok"];
   if (attention === "waiting") return [t.sessionWaitingMessage ?? "waiting for input", "idle"];
   if (attention === "working") return ["agent working", "work"];
@@ -182,9 +183,9 @@ function threadState({ thread: t, pylon, attention }: ThreadDetail): [label: str
 
 /**
  * Whether a thread needs the person, so its row stays bright: a failure or a parked run to fix, a review's decision,
- * a reply to read, or a session waiting on an answer. Waiting ranks below working, but only waiting is blocked on the person.
+ * a session stopped on its usage limit, a reply to read, or a session waiting on an answer. Waiting ranks below working, but only waiting is blocked on the person.
  */
-const needsPerson: Record<`${Attention}`, boolean> = { failed: true, decision: true, parked: true, reply: true, waiting: true, working: false, null: false };
+const needsPerson: Record<`${Attention}`, boolean> = { failed: true, decision: true, parked: true, limited: true, reply: true, waiting: true, working: false, null: false };
 /** The open thread's row never dims, nor a closed thread's, which its fold already sets apart. */
 const dims = (d: ThreadDetail, active?: ThreadId) =>
   d.thread.id !== active && (d.thread.status === "active" || d.thread.status === "idle") && !needsPerson[`${d.attention}`];

@@ -1,0 +1,24 @@
+2026-10-26T06:39:28.999Z started th-c8a6bfd1fcb3, the fake API's limit resets at 2026-10-26T06:41:58.000Z
+2026-10-26T06:39:34.054Z th-c8a6bfd1fcb3 attention is limited: {"stoppedAt":1792996771398,"resetsAt":1792996918000}
+2026-10-26T06:39:34.193Z saved 01-threads.txt
+2026-10-26T06:39:34.329Z saved 01-thread-row.json
+2026-10-26T06:39:34.463Z saved 01-show.txt
+2026-10-26T06:39:34.610Z saved 01-conversation.txt
+2026-10-26T06:39:34.757Z saved 01-conversation.json
+2026-10-26T06:39:34.764Z saved 01-home.html
+2026-10-26T06:39:34.764Z / states: ["stopped on its usage limit until 06:41 UTC (bad)"]
+2026-10-26T06:39:34.770Z saved 02-thread.html
+2026-10-26T06:39:34.770Z /threads/th-c8a6bfd1fcb3 states: ["stopped on its usage limit until 06:41 UTC (bad)"]
+2026-10-26T06:39:35.055Z after seen, th-c8a6bfd1fcb3 attention is limited
+2026-10-26T06:42:05.658Z continued th-c8a6bfd1fcb3: [{"id":"5","time":1792996924895,"thread":"th-c8a6bfd1fcb3","project":"words","kind":"usage-limit.continued","payload":{"session":"85b7afd5-cbe4-4cfd-b240-c929520f586f","stoppedAt":1792996771398,"resetsAt":1792996918000,"requestId":"usage-limit:85b7afd5-cbe4-4cfd-b240-c929520f586f:1792996771398"}}]
+2026-10-26T06:42:18.342Z saved 03-events.jsonl
+2026-10-26T06:42:18.500Z saved 03-conversation.txt
+2026-10-26T06:42:18.949Z th-c8a6bfd1fcb3 has 1 usage-limit.continued event(s) after 10 s more; attention reply, usageLimit null
+2026-10-26T06:42:18.957Z saved 03-continued.html
+2026-10-26T06:42:18.957Z /threads/th-c8a6bfd1fcb3 states: ["new reply (ok)"]
+2026-10-26T06:42:24.628Z saved 04-send.txt
+2026-10-26T06:42:27.333Z saved 04-conversation.txt
+2026-10-26T06:42:27.647Z th-0a049fae7cb2 after nexus send: attention reply, continued events 0
+2026-10-26T06:43:27.351Z saved 05-archived.txt
+2026-10-26T06:43:27.513Z th-1b4d9023c3c5 archived, 20 s past its reset: continued events 0
+2026-10-26T06:43:27.674Z done

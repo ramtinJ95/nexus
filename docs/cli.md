@@ -1,6 +1,6 @@
 # The Mac nexus CLI
 
-`nexus` runs on a Mac and drives the control plane's API: add projects, list threads, start one, message it, watch it, and archive or delete it. People use it at a shell. The Claude Code mod and the pi extension shell out to it, so this page is their contract. The code is [`src/cli/nexus.ts`](../src/cli/nexus.ts), and its transport is [`src/cli/transport.ts`](../src/cli/transport.ts). This page describes version 0.20.1, which `nexus --version` prints. Version 0.20.1 made `send` to a Claude worker wait out the API's wait for the pylon, and a repeat of a send whose answer was lost report what it did, as [Claude conversations and steering](#claude-conversations-and-steering-0170) describes. Version 0.20.0 added `start --node auto`, `Thread.placement` and the placement line of `show`, and the CPUs and committed CPUs and disk of `NodeSummary.capacity`, as [Placement](#placement-0200) describes. Version 0.19.0 added `seen --last-reply-at`, made `watch` follow a Claude worker's transcript with `claude-reset` and `claude-entry` lines, and added the `pull-request` transcript entry. This page also lists [every thread field](#thread-fields) since then, `sessionTurnRunning` among them, though the fields are older. Version 0.18.0 added `review` and `land`, `ThreadDetail.review`, the `decision` attention and the `review.changed` event, as [Reviews and landing](#reviews-and-landing-0180) describes. Version 0.17.0 makes a Claude worker thread a conversation: `conversation` prints its Claude Code transcript and `send` types a message into its Claude session, as [Claude conversations and steering](#claude-conversations-and-steering-0170) describes. Version 0.16.1 added `--help` and `-h` after every command. Version 0.16.0 added `start --claude --model`, defaulted Claude to Opus 5.5, disabled commit and PR attribution, and preserved busy launches across Herdr readiness timeouts. `show` reports the worker model and launch diagnostic. Version 0.15.1 exposed stalled Claude worker launches, with pane diagnostics in `claudeWorker.message`. Version 0.15.0 added the resumable event stream and Claude Code thread workers. Version 0.14.0 added human-only project editing and a stale-grants warning. Version 0.13.0 added `deploy`, `release`, and waiting for fleet release health. Version 0.12.0 added PR-watch metadata and pull-request outputs to `show` (see [Pull requests](#pull-requests-0120)). Version 0.11.0 added Latest turn to dashboard Changes, `--turn` to `nexus changes` and `nexus diff`, and API `base=turn` with turn metadata and failures. Version 0.10.0 added shared `seenAt`, `lastReplyAt` and `attention` to thread rows and detail, and `seen <thread> [--unread]`, so clients no longer need their own seen stores. Version 0.9.0 made `attach` go through the control plane, over the attach route `GET /v1/threads/<thread>/attach`, a WebSocket, instead of ssh to the pylon's node, and retired its settings: `NEXUS_ATTACH`, and `"ssh"` and `"attach"` in the config file. An older control plane has no such route, and `attach` says to upgrade it. In 0.9.0, `Preview.failed` and `ready` also cover a preview whose port has no route into the pylon, and `ports` prints why a preview is not ready. Version 0.8.0 added `Session.id`, `Session.state` and `Session.message`, so a paused pylon lists the sessions its wake brings back and a session its last wake failed to bring back shows why, and `session close` now takes a session's ID, refuses a paused session, fails on a pane that is not open or that runs another session than the one listed there, and no longer tries again. Version 0.7.0 added scratch projects, whose `Project.repoUrl` is null, `project add --scratch` and `--secret`, and a null `Base.commit` where the base is the empty tree. Version 0.6.0 added `files`, `changes` and `diff`, their routes `GET /v1/threads/<thread>/files`, `GET /v1/threads/<thread>/changes` and `GET /v1/threads/<thread>/diff`, `Listing`, `Changes` and `Diff`, and the route `GET /v1/threads/<thread>/files/content`, which the CLI does not use. Version 0.5.0 added `session open`, `session close` and `attach`, the routes `POST /v1/threads/<thread>/sessions` and `DELETE /v1/threads/<thread>/sessions/<pane>`, `OpenedSession`, `Session.title`, `Preview.failed`, and the attach settings: `NEXUS_ATTACH`, and `"ssh"` and `"attach"` in the config file. Version 0.4.0 added `project add` and its route, `POST /v1/projects`. Version 0.3.0 added `unpreview` and its route, `DELETE /v1/threads/<thread>/previews/<port>`. Version 0.2.0 added `ports`, `preview`, `Preview.url`, `ThreadDetail.ports` and the `ports` of a watch `state`.
+`nexus` runs on a Mac and drives the control plane's API: add projects, list threads, start one, message it, watch it, and archive or delete it. People use it at a shell. The Claude Code mod and the pi extension shell out to it, so this page is their contract. The code is [`src/cli/nexus.ts`](../src/cli/nexus.ts), and its transport is [`src/cli/transport.ts`](../src/cli/transport.ts). This page describes version 0.21.0, which `nexus --version` prints. Version 0.21.0 added the `limited` attention, `Thread.usageLimit`, `ClaudeConversation.usageLimit`, the `usageLimit` of a `notice` entry, the `usage-limit.continued` event, and the usage-limit lines of `threads`, `show` and `conversation`, as [Usage-limit stops](#usage-limit-stops-0210) describes. Version 0.20.1 made `send` to a Claude worker wait out the API's wait for the pylon, and a repeat of a send whose answer was lost report what it did, as [Claude conversations and steering](#claude-conversations-and-steering-0170) describes. Version 0.20.0 added `start --node auto`, `Thread.placement` and the placement line of `show`, and the CPUs and committed CPUs and disk of `NodeSummary.capacity`, as [Placement](#placement-0200) describes. Version 0.19.0 added `seen --last-reply-at`, made `watch` follow a Claude worker's transcript with `claude-reset` and `claude-entry` lines, and added the `pull-request` transcript entry. This page also lists [every thread field](#thread-fields) since then, `sessionTurnRunning` among them, though the fields are older. Version 0.18.0 added `review` and `land`, `ThreadDetail.review`, the `decision` attention and the `review.changed` event, as [Reviews and landing](#reviews-and-landing-0180) describes. Version 0.17.0 makes a Claude worker thread a conversation: `conversation` prints its Claude Code transcript and `send` types a message into its Claude session, as [Claude conversations and steering](#claude-conversations-and-steering-0170) describes. Version 0.16.1 added `--help` and `-h` after every command. Version 0.16.0 added `start --claude --model`, defaulted Claude to Opus 5.5, disabled commit and PR attribution, and preserved busy launches across Herdr readiness timeouts. `show` reports the worker model and launch diagnostic. Version 0.15.1 exposed stalled Claude worker launches, with pane diagnostics in `claudeWorker.message`. Version 0.15.0 added the resumable event stream and Claude Code thread workers. Version 0.14.0 added human-only project editing and a stale-grants warning. Version 0.13.0 added `deploy`, `release`, and waiting for fleet release health. Version 0.12.0 added PR-watch metadata and pull-request outputs to `show` (see [Pull requests](#pull-requests-0120)). Version 0.11.0 added Latest turn to dashboard Changes, `--turn` to `nexus changes` and `nexus diff`, and API `base=turn` with turn metadata and failures. Version 0.10.0 added shared `seenAt`, `lastReplyAt` and `attention` to thread rows and detail, and `seen <thread> [--unread]`, so clients no longer need their own seen stores. Version 0.9.0 made `attach` go through the control plane, over the attach route `GET /v1/threads/<thread>/attach`, a WebSocket, instead of ssh to the pylon's node, and retired its settings: `NEXUS_ATTACH`, and `"ssh"` and `"attach"` in the config file. An older control plane has no such route, and `attach` says to upgrade it. In 0.9.0, `Preview.failed` and `ready` also cover a preview whose port has no route into the pylon, and `ports` prints why a preview is not ready. Version 0.8.0 added `Session.id`, `Session.state` and `Session.message`, so a paused pylon lists the sessions its wake brings back and a session its last wake failed to bring back shows why, and `session close` now takes a session's ID, refuses a paused session, fails on a pane that is not open or that runs another session than the one listed there, and no longer tries again. Version 0.7.0 added scratch projects, whose `Project.repoUrl` is null, `project add --scratch` and `--secret`, and a null `Base.commit` where the base is the empty tree. Version 0.6.0 added `files`, `changes` and `diff`, their routes `GET /v1/threads/<thread>/files`, `GET /v1/threads/<thread>/changes` and `GET /v1/threads/<thread>/diff`, `Listing`, `Changes` and `Diff`, and the route `GET /v1/threads/<thread>/files/content`, which the CLI does not use. Version 0.5.0 added `session open`, `session close` and `attach`, the routes `POST /v1/threads/<thread>/sessions` and `DELETE /v1/threads/<thread>/sessions/<pane>`, `OpenedSession`, `Session.title`, `Preview.failed`, and the attach settings: `NEXUS_ATTACH`, and `"ssh"` and `"attach"` in the config file. Version 0.4.0 added `project add` and its route, `POST /v1/projects`. Version 0.3.0 added `unpreview` and its route, `DELETE /v1/threads/<thread>/previews/<port>`. Version 0.2.0 added `ports`, `preview`, `Preview.url`, `ThreadDetail.ports` and the `ports` of a watch `state`.
 
 This is a different program from the `nexus` inside a pylon ([`images/pylon/nexus`](../images/pylon/nexus)), which talks to its own node's probe.
 
@@ -146,6 +146,7 @@ The shapes are TypeScript types. `Thread`, `Session` and `Preview` are in [`src/
 | `lastAgentActivityAt`, `lastHumanActivityAt` | `number` | The newest agent and human activity, which decide when the pylon pauses |
 | `seenAt`, `lastReplyAt` | `number \| null` | The shared seen marker and the latest reply, as the next section describes |
 | `placement` | optional `Placement` | Which node the pylon boots on and why, as [Placement](#placement-0200) describes. Left out for a thread started before 0.20.0 |
+| `usageLimit` | optional `{ stoppedAt: number, resetsAt: number \| null }` | The Claude worker's session stopped on its usage limit at `stoppedAt`, and nothing has run since. `resetsAt` is when the limit resets, null when Claude Code did not say. [Usage-limit stops](#usage-limit-stops-0210) describes it |
 | `attention`, `desired`, `pylon` | | In `ThreadRow` only. `ThreadDetail` has them at its top level, beside `thread` |
 
 `ThreadDetail` has `thread`, `attention`, `seenAt`, `lastReplyAt`, `desired`, `pylon` (`id`, `node`, `actualState`, `failed`, `observedAt`, `grantsOutdated` and `retryRefused`, why a retry cannot help or null), `sessions`, `previews`, `ports`, `outputs`, `prWatch`, `pullRequests`, `review`, `attach`, `agent` (`{ parkedTasks }`, or null for a thread without a Nexus agent conversation), and for a Claude worker thread `claudeWorker` (`model`, `state`, optional `message`).
@@ -159,10 +160,11 @@ The shapes are TypeScript types. `Thread`, `Session` and `Preview` are in [`src/
 1. `"failed"`: the pylon or Claude worker launch failed.
 2. `"decision"`: the thread's review ended for the person, whose reasons `review.phase.reasons` lists.
 3. `"parked"`: tasks hit the restart limit and need `retry`, whether any client watches the thread or not.
-4. `"reply"`: `lastReplyAt` is non-null and later than `seenAt`, or `seenAt` is null.
-5. `"working"`: a harness or reported session turn is running.
-6. `"waiting"`: a session is waiting for input.
-7. `null`.
+4. `"limited"`: the Claude worker's session stopped on its usage limit, so `usageLimit` is present. Seen does not clear it; the next turn does.
+5. `"reply"`: `lastReplyAt` is non-null and later than `seenAt`, or `seenAt` is null.
+6. `"working"`: a harness or reported session turn is running.
+7. `"waiting"`: a session is waiting for input.
+8. `null`.
 
 An unread reply outranks working, so a client cancelling a pending reply notification on a follow-up must also check `agentTurnRunning`. Reading `threads` or `show` does not mark anything seen; clients call `seen` when they show the conversation.
 
@@ -497,7 +499,8 @@ as untrusted data, not shell commands or instructions to execute.
 
 Inside a pylon, `nexus event <kind> [--session ID] [--message TEXT] [--at MS]` reports only
 `session.turn-started`, `session.heartbeat`, `session.turn-ended`, `session.waiting`, or `session.ended`
-for that pylon's own thread. The image installs UserPromptSubmit, throttled PostToolUse, Stop,
+for that pylon's own thread. The image installs UserPromptSubmit, throttled PostToolUse, Stop, StopFailure (which
+Claude Code runs instead of Stop when an API error ends the turn),
 Notification (permission and input prompts), and SessionEnd hooks,
 merged alongside Herdr's hooks on every agent-setup install. The hooks do not run
 `nexus event`. They write to an outbox in the pylon, which a sender delivers once
@@ -552,7 +555,8 @@ control plane reads it over the probe's raw pipe, from where its last read stopp
 and keeps what it read in the registry. `GET /v1/threads/<thread>/conversation`
 answers a `ClaudeConversation` for such a thread: `kind: "claude"`, the worker's
 `session`, its `entries`, how many older entries were `dropped` (at most 3,000 are
-kept), when it was last read (`readAt`) and whether a turn runs (`working`). An entry
+kept), when it was last read (`readAt`), whether a turn runs (`working`) and, since
+0.21.0, the session's `usageLimit` stop or null. An entry
 is a prompt (with who it came from), a reply, a tool call, a tool result paired with
 its call by ID, a background task's notification, a queue operation, a notice, a turn
 duration, a pull request Claude opened, or a `record` that names a transcript record Nexus does not know yet, so a
@@ -613,3 +617,51 @@ repeat after the node's probe restarted, or more than an hour after the first se
 settled, since the probe no longer knows how it went. A worker that has not started a
 session yet answers 409.
 
+## Usage-limit stops (0.21.0)
+
+```sh
+nexus threads                  # the stop, and when the limit resets, in place of working
+nexus show <thread>            # attention: limited, and a usage limit line
+nexus send <thread> continue   # once the limit resets, resumes the worker
+```
+
+When the Claude subscription runs out, Claude Code ends the worker's turn with an
+error record, `You've hit your session limit · resets 5am (UTC)`. Nexus keeps it as a
+`notice` entry whose `usageLimit` holds `resetsAt`, when the limit resets, in Unix
+milliseconds, from the record's `apiErrorParams.rate_limit_info.resetsAt`, or null
+when the record names none. Other API errors, such as a 529 overload or a 429 that
+says it is "not your usage limit", stay plain error notices.
+
+While the newest entry that is not bookkeeping is that notice, and no turn of a
+session runs, the thread has `usageLimit` (`stoppedAt`, `resetsAt`) and its attention
+is `limited`. Turn durations, queue operations, pull requests, unknown records and
+Claude Code's own info notices, such as "Usage limit reached · continuing
+automatically at 5am", are bookkeeping. `ClaudeConversation.usageLimit` holds the
+same, or null. `threads` shows `stopped on its usage limit until 05:00 UTC` in place
+of `working`, and `which reset at 05:00 UTC` once the time passed, `show` prints a
+`usage limit:` line, and `conversation` ends with a line saying to send "continue"
+after the reset. The dashboard shows the same text as the thread's state, keeps the
+row bright, counts it in its badge and notifies at once. `limited` outranks `reply`,
+because the turn end that recorded the reply is the stop itself, and seen does not
+clear it. The next turn of the session clears it, whoever starts it.
+
+Claude Code continues a session it still runs on its own, about 90 seconds after the
+reset, with the prompt "Your claude.ai usage limit has reset. Continue the task…",
+which `conversation` shows as a prompt from Claude Code. That timer is in the Claude
+process, so a pylon that paused meanwhile loses it. Then `nexus send <thread>
+continue` after the reset resumes the worker, as any send does, waking a paused
+pylon. A send before the reset types the message, and Claude stops on the limit
+again.
+
+The control plane can do that send itself. With `"resumeAfterUsageLimit": true` in
+its config, off by default, every 30 seconds it types `[Nexus usage limit — automated,
+not a message from the person] The usage limit reset. Continue where you stopped.`
+into each `limited` active or idle thread whose `resetsAt` passed three minutes ago,
+which gives Claude Code's own continue time to come first. Each stop gets one message,
+under the request ID `usage-limit:<session>:<stoppedAt>`, which a thread keeps, so a
+restart never sends it twice. It wakes a paused pylon as other automated messages do,
+as agent activity. It never types into an archived thread, so it never wakes a pylon
+the person archived. A stop with no `resetsAt`, or with one no later than the stop, which would stop
+the worker again at once, waits for the person. Each message it
+typed appends a `usage-limit.continued` event with `session`, `stoppedAt`, `resetsAt`
+and `requestId`, which `events --kind usage-limit.continued` follows.

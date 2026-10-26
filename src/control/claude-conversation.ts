@@ -114,7 +114,7 @@ export function claudeConversations(options: { registry: Registry; probes: Reado
     return {
       kind: "claude", session,
       entries: current === undefined ? [] : registry.claudeEntries(t.id), dropped: current?.dropped ?? 0, readAt: current?.readAt ?? null,
-      working: now.sessionTurnRunning === true,
+      working: now.sessionTurnRunning === true, usageLimit: now.usageLimit ?? null,
     };
   }
 

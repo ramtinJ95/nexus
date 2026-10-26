@@ -1332,7 +1332,7 @@ const notifications = coordinator((row) => {
     window.isSecureContext && "Notification" in window ? Notification.permission : "unavailable");
   const url = `/threads/${row.id}`;
   if (channel === "system") {
-    const notice = new Notification(row.title, { body: row.attention === "reply" ? "New reply" : row.attention === "decision" ? "Needs your decision" : row.attention });
+    const notice = new Notification(row.title, { body: row.attention === "reply" ? "New reply" : row.attention === "decision" ? "Needs your decision" : row.attention === "limited" ? "Stopped on its usage limit" : row.attention });
     notice.onclick = () => { window.focus(); location.assign(url); notice.close(); };
   } else if (channel === "toast") {
     const toast = el("div", { className: "attention-toast", role: "status" },

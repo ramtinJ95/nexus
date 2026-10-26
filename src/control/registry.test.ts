@@ -1077,3 +1077,67 @@ test("a Claude worker's messages answer their resends, and its transcript and me
   assert.deepEqual(registry.claudeEntries(threadId), []);
   assert.equal(registry.claudeMessage(threadId, "msg:more-0"), undefined);
 });
+
+test("a Claude worker whose transcript ends on a usage limit is limited until a turn starts or a prompt follows, whichever arrives first", (t) => {
+  const registry = seeded(tempDb());
+  t.after(() => registry.close());
+  registry.setClaudeWorker(threadId, "hello", "started", undefined, "s1");
+  let sequence = 0;
+  let offset = 0;
+  const report = (kind: "session.turn-started" | "session.turn-ended", at: number) => registry.reportSession(node, { sequence: ++sequence, pylon: pylonId, time: 1000 + sequence, event: { kind, session: "s1", at } });
+  const append = (...entries: ClaudeEntry[]) => assert.equal(registry.appendClaudeRead(threadId, { session: "s1", from: cursorAt(offset), entries, cursor: cursorAt(offset += 10), reset: false, readAt: offset }), true);
+  const attentions = () => registry.events("0", { kinds: ["attention.changed"] }).map((e) => e.payload.attention);
+  const attention = () => attentions().at(-1);
+  const stop = (at: number): ClaudeEntry => ({ kind: "notice", at, tone: "error", text: "You've hit your session limit", usageLimit: { resetsAt: 9000 } });
+
+  report("session.turn-started", 40);
+  append({ kind: "prompt", at: 40, text: "go", from: "person" }, stop(50));
+  report("session.turn-ended", 55);
+  assert.deepEqual(registry.thread(threadId)!.usageLimit, { stoppedAt: 50, resetsAt: 9000 });
+  assert.equal(attention(), "limited");
+  registry.markSeen(threadId, false);
+  assert.equal(attention(), "limited", "seeing the thread does not resume it");
+  append({ kind: "turn", at: 51, durationMs: 10 });
+  assert.equal(attention(), "limited");
+
+  report("session.turn-started", 58);
+  assert.equal(registry.thread(threadId)!.usageLimit, undefined);
+  assert.equal(attention(), "working");
+  const before = attentions().length;
+  report("session.turn-ended", 59);
+  assert.equal(registry.thread(threadId)!.usageLimit, undefined, "a turn that started after the stop ended it, though its prompt is not read yet");
+  assert.ok(!attentions().slice(before).includes("limited"), "so the turn's end does not flash limited");
+  append({ kind: "prompt", at: 58, text: "continue", from: "person" }, { kind: "reply", at: 59, text: "done" });
+  assert.equal(attention(), "reply");
+
+  report("session.turn-started", 65);
+  report("session.turn-ended", 75);
+  append({ kind: "prompt", at: 65, text: "more", from: "person" }, stop(70));
+  assert.equal(attention(), "limited", "the read that finds the stop after the turn ended limits the thread");
+  append({ kind: "notice", at: 71, tone: "error", text: "API Error: 529 Overloaded" });
+  assert.equal(registry.thread(threadId)!.usageLimit, undefined);
+  assert.equal(attention(), "reply", "another API error is a plain reply");
+});
+
+test("a read that ends on a usage limit ends the turn that ran into it, though Claude Code reported no end, and not a later turn", (t) => {
+  const registry = seeded(tempDb());
+  t.after(() => registry.close());
+  registry.setClaudeWorker(threadId, "hello", "started", undefined, "s1");
+  let sequence = 0;
+  let offset = 0;
+  const report = (at: number) => registry.reportSession(node, { sequence: ++sequence, pylon: pylonId, time: 1000 + sequence, event: { kind: "session.turn-started", session: "s1", at } });
+  const append = (...entries: ClaudeEntry[]) => assert.equal(registry.appendClaudeRead(threadId, { session: "s1", from: cursorAt(offset), entries, cursor: cursorAt(offset += 10), reset: false, readAt: offset }), true);
+  const attention = () => registry.events("0", { kinds: ["attention.changed"] }).at(-1)?.payload.attention;
+
+  report(40);
+  const replied = registry.thread(threadId)!.lastReplyAt;
+  append({ kind: "prompt", at: 40, text: "go", from: "person" }, { kind: "notice", at: 50, tone: "error", text: "You've hit your session limit", usageLimit: { resetsAt: 9000 } });
+  assert.equal(registry.thread(threadId)!.sessionTurnRunning, undefined);
+  assert.equal(attention(), "limited");
+  assert.equal(registry.thread(threadId)!.lastReplyAt, replied, "the stop records no reply");
+
+  report(60);
+  append({ kind: "turn", at: 61, durationMs: 10 });
+  assert.equal(registry.thread(threadId)!.sessionTurnRunning, true, "a turn that started after the stop keeps running");
+  assert.equal(attention(), "working");
+});

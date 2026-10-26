@@ -1175,3 +1175,15 @@ test("a failed Claude worker's dashboard agrees with its registry event and API 
   assert.ok(page.includes(message));
   assert.equal(s.registry.events().filter((e) => e.kind === "thread.failed").at(-1)?.payload.message, detail.claudeWorker.message);
 });
+
+test("a Claude worker stopped on its usage limit shows the stop and when the limit resets", async (t) => {
+  const s = await seeded(t);
+  const id = JSON.parse((await s.call("POST", "/v1/threads", { project: "acme", title: "worker", claude: "fix it" })).text).id;
+  s.registry.setClaudeWorker(id, "fix it", "started", undefined, "s1");
+  const resetsAt = Date.now() + 3_600_000;
+  const entries: ClaudeEntry[] = [{ kind: "notice", at: Date.now(), tone: "error", text: "You've hit your session limit", usageLimit: { resetsAt } }];
+  assert.ok(s.registry.appendClaudeRead(id, { session: "s1", from: transcriptStart, entries, cursor: { ...transcriptStart, offset: 1 }, reset: false, readAt: Date.now() }));
+  const page = textOf((await s.call("GET", `/threads/${id}`)).text);
+  const until = new Date(resetsAt).toISOString().slice(11, 16);
+  assert.ok(page.includes(`stopped on its usage limit until ${until} UTC`), page);
+});

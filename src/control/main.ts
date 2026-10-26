@@ -25,6 +25,7 @@ import { checkRuns } from "./gate.ts";
 import { repository } from "../deploy/install.ts";
 import { prWatcher } from "./pr-watch.ts";
 import { agentInbox } from "./inbox.ts";
+import { usageLimitResumer } from "./usage-limit.ts";
 
 const nodeId = z.string().regex(/^n[A-Za-z0-9]+$/, "a Tailscale stable node ID, such as nAbC123CNTRL");
 const absolutePath = z.string().refine(isAbsolute, "must be an absolute path");
@@ -70,6 +71,8 @@ const configSchema = z.strictObject({
   previewPorts: z.strictObject({ first: port, last: port })
     .refine((range) => range.first <= range.last && !(range.first <= 7443 && range.last >= 7443), "first must not be above last, and port 7443 is reserved for the dashboard")
     .default(defaultPreviewPorts),
+  /** Type "continue" into a Claude worker that stopped on its usage limit, once the limit resets. Off unless set. */
+  resumeAfterUsageLimit: z.boolean().default(false),
 });
 export type ControlPlaneConfig = z.infer<typeof configSchema>;
 
@@ -143,6 +146,10 @@ export async function startControlPlane(config: ControlPlaneConfig, models: Mode
   const watch = prWatcher({ registry, github, inbox });
   const watchTimer = setInterval(() => { void watch.poll(); }, 120_000);
   void watch.poll();
+  const resumer = config.resumeAfterUsageLimit ? usageLimitResumer({ registry, inbox }) : null;
+  const resumeTimer = setInterval(() => { void resumer?.poll(); }, 30_000);
+  resumeTimer.unref();
+  void resumer?.poll();
   const startThread = threadStarter({ registry, harness, dotfiles: config.dotfiles, gitIdentity: config.gitIdentity, wake: (node) => { void loop.wake(node); } });
   const reviews = github === null ? null : reviewLoop({
     registry, github, inbox, harnessModel: config.harness.model.modelId, startThread,
@@ -176,7 +183,9 @@ export async function startControlPlane(config: ControlPlaneConfig, models: Mode
     async close() {
       clearInterval(watchTimer);
       clearInterval(reviewTimer);
+      clearInterval(resumeTimer);
       await watch.close();
+      await resumer?.close();
       await reviews?.close();
       await api.close();
       await harness.close();

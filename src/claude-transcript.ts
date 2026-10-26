@@ -33,8 +33,8 @@ export type ClaudeEntry =
   | { kind: "task"; at: number; toolUseId: string | null; status: string; summary: string; result: string | null }
   /** A prompt typed while Claude was busy joins its queue, and leaves it when Claude takes it. `text` is null when the record names none. */
   | { kind: "queue"; at: number; op: string; text: string | null }
-  /** Such as an interrupted turn, a model error or a compaction. */
-  | { kind: "notice"; at: number; tone: "info" | "error"; text: string }
+  /** Such as an interrupted turn, a model error or a compaction. `usageLimit` marks the error a usage limit stopped the turn with, and when the limit resets, if Claude Code said. */
+  | { kind: "notice"; at: number; tone: "info" | "error"; text: string; usageLimit?: UsageLimit }
   | { kind: "turn"; at: number; durationMs: number }
   /**
    * Claude opened a pull request. Claude Code writes the record again each time it saves the session's metadata, so
@@ -43,6 +43,33 @@ export type ClaudeEntry =
   | { kind: "pull-request"; at: number; number: number; url: string; repository: string }
   /** A record the parser does not know, kept visible. `summary` is a short, cut rendering of it. */
   | { kind: "record"; at: number | null; type: string; summary: string };
+
+/** `resetsAt` is in Unix milliseconds, null when Claude Code did not say. */
+export interface UsageLimit { resetsAt: number | null }
+
+/**
+ * The usage limit the newest entry that is not bookkeeping stopped on, or null. Bookkeeping is a turn's duration, a
+ * queue operation, a pull request, an unknown record and an info notice, since Claude Code writes "continuing
+ * automatically" after the stop.
+ */
+export function usageLimitStop(entries: readonly ClaudeEntry[]): { stoppedAt: number; resetsAt: number | null } | null {
+  for (let i = entries.length - 1; i >= 0; i--) {
+    const entry = entries[i]!;
+    if (bookkeeping.has(entry.kind) || (entry.kind === "notice" && entry.tone === "info")) continue;
+    return entry.kind === "notice" && entry.usageLimit !== undefined ? { stoppedAt: entry.at, resetsAt: entry.usageLimit.resetsAt } : null;
+  }
+  return null;
+}
+const bookkeeping = new Set<ClaudeEntry["kind"]>(["turn", "queue", "pull-request", "record"]);
+
+/** "stopped on its usage limit until 06:30 UTC", or "…, which reset at 06:30 UTC" once the reset passed. A reset more than a day away also names its date, as in "Oct 29, 05:30 UTC". */
+export function usageLimitText(limit: { resetsAt: number | null }, now: number): string {
+  if (limit.resetsAt === null) return "stopped on its usage limit";
+  const at = new Date(limit.resetsAt);
+  const time = `${String(at.getUTCHours()).padStart(2, "0")}:${String(at.getUTCMinutes()).padStart(2, "0")} UTC`;
+  const when = Math.abs(limit.resetsAt - now) > 86_400_000 ? `${at.toLocaleString("en-US", { month: "short", day: "numeric", timeZone: "UTC" })}, ${time}` : time;
+  return limit.resetsAt > now ? `stopped on its usage limit until ${when}` : `stopped on its usage limit, which reset at ${when}`;
+}
 
 /** What `GET /v1/threads/<id>/conversation` answers for a Claude worker thread. */
 export interface ClaudeConversation {
@@ -57,6 +84,8 @@ export interface ClaudeConversation {
   readAt: number | null;
   /** Whether a turn of the worker's session runs, from its session events. */
   working: boolean;
+  /** The thread's usage-limit stop, as its `usageLimit` says. */
+  usageLimit: { stoppedAt: number; resetsAt: number | null } | null;
 }
 
 /**
@@ -247,6 +276,7 @@ const systems = table<Parse>({
     return [{ kind: "turn", at, durationMs: r.durationMs }];
   },
   compact_boundary: (_r, at) => [notice(at, "info", "Claude compacted the conversation")],
+  informational: (r, at) => [notice(at, "info", str(r.content, "content"))],
   local_command: (r, at) => {
     const text = str(r.content, "content");
     const form = forms.get(leadingTag(text));
@@ -305,6 +335,8 @@ const blocks = table<Block>({
 const interruptions = new Set(["[Request interrupted by user]", "[Request interrupted by user for tool use]"]);
 
 function userRecord(r: Fields, at: number): ClaudeEntry[] {
+  // Claude Code's own continue once a usage limit resets, which it writes as metadata.
+  if (isFields(r.origin) && r.origin.kind === "auto-continuation" && isFields(r.message) && typeof r.message.content === "string") return [prompt(at, r.message.content, "other")];
   if (r.isMeta === true) return [];
   // The summary Claude Code writes for itself after a compaction, which is long and not the person's.
   if (r.isCompactSummary === true) return [notice(at, "info", "Claude continues from a summary of the earlier conversation")];
@@ -339,12 +371,22 @@ function assistantRecord(r: Fields, at: number): ClaudeEntry[] {
   const message = fields(r.message, "message");
   const tone = r.isApiErrorMessage === true ? "error" : message.model === "<synthetic>" ? "info" : null;
   const content = typeof message.content === "string" ? [{ type: "text", text: message.content }] : list(message.content, "message.content");
-  return content.flatMap((item) => {
+  const entries = content.flatMap((item) => {
     const block = fields(item, "a content block");
     const type = str(block.type, "a content block's type");
     const parse = blocks.get(type);
     return parse === undefined ? [record(`assistant/${type}`, block, at)] : parse(block, at, tone);
   });
+  if (r.isApiErrorMessage !== true || r.apiError !== "usage_limit_reached") return entries;
+  const usageLimit = { resetsAt: resetsAt(r.apiErrorParams) };
+  return entries.map((entry) => entry.kind === "notice" && entry.tone === "error" ? { ...entry, usageLimit } : entry);
+}
+
+/** `apiErrorParams.rate_limit_info.resetsAt`, which is in Unix seconds, in milliseconds, or null for anything else. */
+function resetsAt(params: unknown): number | null {
+  const info = isFields(params) ? params.rate_limit_info : undefined;
+  const seconds = isFields(info) ? info.resetsAt : undefined;
+  return typeof seconds === "number" && Number.isFinite(seconds) && seconds > 0 ? seconds * 1000 : null;
 }
 
 function command(text: string, _r: Fields, at: number): ClaudeEntry[] {

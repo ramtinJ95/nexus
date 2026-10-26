@@ -144,3 +144,13 @@ test("stalled attention requests time out, release the poll lock and retry", asy
     });
   }
 });
+
+test("a usage-limit stop notifies at once, where the reply that recorded it would wait", () => {
+  const events = [];
+  const update = coordinator((r) => events.push(r));
+  update([row("working")], 0);
+  update([row("limited")], 100);
+  update([row("limited")], 5000);
+  assert.deepEqual(events.map((r) => r.attention), ["limited"]);
+  assert.equal(badgeCount([row("limited"), row("working")]), 1);
+});

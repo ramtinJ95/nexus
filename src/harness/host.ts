@@ -26,8 +26,8 @@ import { writeThread } from "./thread-doc.ts";
 export type { ConversationId };
 
 /** Who sent an automated input entry, which the entry's kind, `nexus.<sender>`, and its data name. */
-export type Sender = "pr-watch" | "review";
-const senderNames: Readonly<Record<Sender, string>> = { "pr-watch": "Nexus PR watch", review: "Nexus review" };
+export type Sender = "pr-watch" | "review" | "usage-limit";
+const senderNames: Readonly<Record<Sender, string>> = { "pr-watch": "Nexus PR watch", review: "Nexus review", "usage-limit": "Nexus usage limit" };
 
 /** Where the repository is checked out in every pylon. */
 export const pylonRepoPath = "/home/user/workspace/repo";

@@ -19,7 +19,7 @@ import type { ListeningPort, NodeSummary, OpenedSession, ThreadDetail, ThreadRow
 import type { Placement, Room } from "../control/placement.ts";
 import type { ClaudeSent, Preview, Thread } from "../control/registry.ts";
 import type { Review } from "../control/review.ts";
-import { maxEntries, type ClaudeConversation, type ClaudeEntry, type PromptSource } from "../claude-transcript.ts";
+import { maxEntries, usageLimitText, type ClaudeConversation, type ClaudeEntry, type PromptSource } from "../claude-transcript.ts";
 import { claudeFrames, queuedOf, type ClaudeFrame } from "../control/claude-conversation.ts";
 import { roundsSpent } from "../control/review.ts";
 import type { Changes, Diff, Listing } from "../checkout-files.ts";
@@ -29,7 +29,7 @@ import type { WebSocket } from "ws";
 import { attachTerminal, processTty } from "./attach.ts";
 import { call, CliError, exitCodes, follow, upgrade, type Endpoint, type HostPort } from "./transport.ts";
 
-const version = "0.20.1";
+const version = "0.21.0";
 const defaults = { url: "http://rj-firebat.tailc817d3.ts.net:7470", socks: "localhost:1055" };
 const configFile = () => join(homedir(), ".config", "nexus", "cli.json");
 
@@ -215,6 +215,8 @@ function claudeText(c: ClaudeConversation): string {
     ...lines,
     ...queuedOf(c.entries).map((q) => `(queued) > ${q.text ?? ""}`),
     ...c.working ? ["(Claude is working)"] : [],
+    // A control plane older than `usageLimit` sends none.
+    ...c.usageLimit == null ? [] : [`(Claude ${usageLimitText(c.usageLimit, Date.now())}. Send it "continue" after the reset to resume)`],
   ];
   if (parts.length > 0) return parts.join("\n\n");
   return c.readAt === null ? "Claude's transcript has not been read yet. It is read while the pylon runs." : "Claude has not written a transcript yet.";
@@ -254,6 +256,7 @@ function detailText({ thread: t, pylon: p, agent, sessions, previews, ports, out
     `project: ${t.project}`,
     ...(claudeWorker === undefined ? [] : [`Claude worker: ${claudeWorker.state}, model ${claudeWorker.model ?? "unknown"}`, ...(claudeWorker.message === undefined ? [] : [`failed: ${claudeWorker.message}`])]),
     `attention: ${attention ?? "none"}`,
+    ...t.usageLimit === undefined ? [] : [`usage limit: ${usageLimitText(t.usageLimit, Date.now())}. \`nexus send ${t.id} continue\` resumes it once the limit resets`],
     `status: ${t.status}${t.agentTurnRunning ? ", agent working" : ""}`,
     `pylon: ${p.id} on ${p.node}, ${p.actualState}${observed}`,
     ...t.placement === undefined ? [] : [`placement: ${placementText(t.placement)}`],
@@ -358,7 +361,7 @@ async function whenRunning<T>(api: Api, id: string, send: () => Promise<T>, undo
   }
 }
 
-const threadRow = (t: ThreadRow) => [t.id, t.status, t.agentTurnRunning ? "working" : "-", `pylon ${t.pylon.actualState}`, t.project, ago(t.createdAt), t.title];
+const threadRow = (t: ThreadRow) => [t.id, t.status, t.usageLimit !== undefined ? usageLimitText(t.usageLimit, Date.now()) : t.agentTurnRunning ? "working" : "-", `pylon ${t.pylon.actualState}`, t.project, ago(t.createdAt), t.title];
 
 /** The first line of a message, as the title of the thread it starts. */
 const titleOf = (message: string) => clip(message.split("\n").find((line) => line.trim() !== "")?.trim() ?? message, 80);
