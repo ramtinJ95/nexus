@@ -71,16 +71,112 @@ function toDom(node) {
   return el;
 }
 
-/** The lines of a diff's files in the given layout, "unified" or "split". */
+/** The slot a file's notes after a row go in. The light DOM fills it, so a note is drawn by the page's own styles. */
+const slotName = (entry, side, line) => `note-${entry}-${side}-${line}`;
+
+const cursorSheet = `[data-line][data-cursor] { box-shadow: inset 2px 0 0 light-dark(var(--diffs-modified-light), var(--diffs-modified-dark)); }
+[data-column-number] { user-select: none; }`;
+
+/**
+ * The lines of a diff's files in the given layout, "unified" or "split", in a view that draws a slot under each row a
+ * note ends on, marks rows as selected, and says which row a pointer is over.
+ */
 export async function diffView(files, layout) {
   const node = document.createElement("div");
   node.className = "diff-view";
   const root = node.attachShadow({ mode: "open" });
-  for (const file of files) {
-    const renderer = new DiffHunksRenderer({ diffStyle: layout, disableFileHeader: true });
+  const entries = [];
+  let selected = null;
+  let cursor = null;
+  for (const [entry, file] of files.entries()) {
+    const renderer = new DiffHunksRenderer({ diffStyle: layout, disableFileHeader: true }, (a) => slotName(entry, a.side, a.lineNumber));
     const result = await renderer.asyncRender(file);
-    if (root.adoptedStyleSheets.length === 0) root.adoptedStyleSheets = [sheet(wrapCoreCSS(result.css)), sheet(wrapThemeCSS(result.themeStyles, "system"))];
-    root.append(toDom(renderer.renderFullAST(result)));
+    if (root.adoptedStyleSheets.length === 0) root.adoptedStyleSheets = [sheet(wrapCoreCSS(result.css)), sheet(wrapThemeCSS(result.themeStyles, "system")), sheet(cursorSheet)];
+    const pre = drawn(renderer.renderFullAST(result), entry);
+    root.append(pre);
+    entries.push({ file, renderer, pre, rows: rowElements(pre), slotKey: "[]" });
   }
-  return node;
+
+  const observer = new ResizeObserver(() => fit(root));
+  observer.observe(node);
+
+  const paint = (attr, at) => {
+    for (const el of root.querySelectorAll(`[${attr}]`)) el.removeAttribute(attr);
+    if (at === null) return;
+    const { rows } = entries[at.entry];
+    for (let i = at.from; i <= at.to; i++) for (const el of rows.get(i) ?? []) el.setAttribute(attr, "");
+  };
+
+  return {
+    node,
+    /** Draws a slot under each of these rows of file `entry`, `{ side, line }` as a note keeps them, and returns their names. */
+    slots(entry, anchors) {
+      const names = anchors.map((a) => slotName(entry, a.side, a.line));
+      const key = JSON.stringify([...new Set(names)].sort());
+      const drawnFile = entries[entry];
+      if (key === drawnFile.slotKey) return names;
+      drawnFile.slotKey = key;
+      drawnFile.renderer.setLineAnnotations(anchors.map((a) => ({ side: a.side, lineNumber: a.line })));
+      const pre = drawn(drawnFile.renderer.renderFullAST(drawnFile.renderer.renderDiff(drawnFile.file)), entry);
+      drawnFile.pre.replaceWith(pre);
+      Object.assign(drawnFile, { pre, rows: rowElements(pre) });
+      fit(root);
+      paint("data-selected-line", selected);
+      paint("data-cursor", cursor);
+      return names;
+    },
+    /** Marks rows `from` to `to` of file `entry` by their unified index as selected, or none when given null. */
+    select(range) {
+      selected = range;
+      paint("data-selected-line", range);
+    },
+    /** Marks the row the keyboard is on, `{ entry, index }`, or none. */
+    cursor(at) {
+      cursor = at === null ? null : { entry: at.entry, from: at.index, to: at.index };
+      paint("data-cursor", cursor);
+    },
+    /** The row of an event in the view, `{ entry, index, number }`, where `number` says it was on a line number. */
+    rowOf(event) {
+      const path = event.composedPath();
+      const row = path.find((el) => el instanceof Element && el.hasAttribute("data-line-index"));
+      const pre = path.find((el) => el instanceof Element && el.hasAttribute("data-entry"));
+      if (row === undefined || pre === undefined) return null;
+      return { entry: Number(pre.dataset.entry), index: Number(row.getAttribute("data-line-index").split(",")[0]), number: row.hasAttribute("data-column-number") };
+    },
+    /** The drawn row of file `entry` at a unified index, for placing and scrolling to it. */
+    rowElement(entry, index) {
+      return entries[entry]?.rows.get(index)?.find((el) => el.hasAttribute("data-line")) ?? null;
+    },
+  };
+}
+
+/**
+ * Sizes each column's note rows to the part of it on show, beside its line numbers, as the library's own component
+ * measures them, so a note stays in view while the code beside it scrolls sideways.
+ */
+function fit(root) {
+  for (const code of root.querySelectorAll("[data-code]")) {
+    if (code.clientWidth === 0) continue;
+    const numbers = code.querySelector("[data-gutter]")?.offsetWidth ?? 0;
+    code.style.setProperty("--diffs-column-number-width", `${numbers}px`);
+    code.style.setProperty("--diffs-column-content-width", `${code.clientWidth - numbers}px`);
+  }
+}
+
+function drawn(ast, entry) {
+  const pre = toDom(ast);
+  pre.dataset.entry = String(entry);
+  pre.setAttribute("data-interactive-line-numbers", "");
+  return pre;
+}
+
+/** Each row's elements by unified index: its line number and its line, on each side it shows in. */
+function rowElements(pre) {
+  const rows = new Map();
+  for (const el of pre.querySelectorAll("[data-line-index]")) {
+    const index = Number(el.getAttribute("data-line-index").split(",")[0]);
+    if (!rows.has(index)) rows.set(index, []);
+    rows.get(index).push(el);
+  }
+  return rows;
 }
