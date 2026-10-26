@@ -18,7 +18,7 @@ import { z } from "zod";
 import { artifactDirectory, manifestFiles, tarCodec } from "./artifacts.ts";
 import { JobFailure, type ArtifactStore, type BackendPylon, type Guest, type SecretSource, type VmBackend } from "./backend.ts";
 import { buildImage as buildPylonImage } from "./image-build.ts";
-import type { BootInputs, CloneRepo, LiveSpec, RepoInit } from "./project.ts";
+import { chatgptTokenGrant, type BootInputs, type CloneRepo, type LiveSpec, type RepoInit } from "./project.ts";
 import { isImageId, isTemplateId, type PausedSession, type PylonId } from "./protocol.ts";
 import { imageIdOf, type ArtifactId, type CheckpointId, type ImageId, type PortableArtifactId, type TemplateId, type TemplateManifest } from "./images.ts";
 import * as templates from "./pylon-vm-templates.ts";
@@ -154,6 +154,50 @@ function dotfilesPull({ repo, ref }: BootInputs["dotfiles"]): string {
     "elif herdr integration install pi && herdr integration install claude; then echo 'herdr: reinstalled the pi and claude integrations'",
     "else echo 'herdr: reinstalling the pi and claude integrations failed'; fi",
   ].join("\n"), "/home/user");
+}
+
+/**
+ * Sets pi's `openai` entry in ~/.pi/agent/auth.json, keeping every other provider's, to a ChatGPT sign-in whose access
+ * token is the chatgpt login's placeholder, which the host swaps for the real token toward api.openai.com only. With no
+ * refresh token and an expiry in 2100, pi never tries a refresh. Tests run it to write the file as a pylon does.
+ */
+export function piChatgptLoginCommand(): string {
+  return `node -e ${q(piChatgptLogin)}`;
+}
+const piChatgptLogin = `
+const fs = require("node:fs");
+const path = require("node:path");
+const dir = path.join(process.env.HOME, ".pi", "agent");
+const file = path.join(dir, "auth.json");
+const access = process.env.${chatgptTokenGrant.name};
+if (!access) {
+  console.log("pi: ${chatgptTokenGrant.name} is not set, so ~/.pi/agent/auth.json is left as it is");
+  process.exit(1);
+}
+let auth = {};
+try {
+  auth = JSON.parse(fs.readFileSync(file, "utf8"));
+} catch (error) {
+  if (error.code !== "ENOENT") auth = null;
+}
+if (auth === null || typeof auth !== "object" || Array.isArray(auth)) {
+  console.log("pi: ~/.pi/agent/auth.json is not a readable JSON object, so it is left as it is");
+  process.exit(1);
+}
+auth.openai = { type: "oauth", access, refresh: "", expires: 4102444800000 };
+fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+fs.writeFileSync(file + ".nexus-tmp", JSON.stringify(auth, null, 2) + "\\n", { mode: 0o600 });
+fs.renameSync(file + ".nexus-tmp", file);
+console.log("pi: signed in to ChatGPT as its openai provider");
+`;
+
+/** Every boot's hooks, in order. pi's sign-in follows the dotfiles pull, whose install may replace ~/.pi/agent files. */
+export function bootHooks(boot: Pick<BootInputs, "dotfiles" | "gitIdentity" | "network">): string[] {
+  return [
+    dotfilesPull(boot.dotfiles),
+    ...boot.network.secrets.some((grant) => grant.name === chatgptTokenGrant.name) ? [asUser(piChatgptLoginCommand(), "/home/user")] : [],
+    ...boot.gitIdentity === undefined ? [] : [asUser(`git config --global user.name ${q(boot.gitIdentity.name)} && git config --global user.email ${q(boot.gitIdentity.email)}`, "/home/user")],
+  ];
 }
 
 /**
@@ -293,9 +337,7 @@ export function createPylonVmBackend(options: PylonVmBackendOptions): VmBackend 
       secrets,
       ssh: await gitSshOf(boot.pylonId, remotes),
       files: [...live.overlay],
-      hooks: [dotfilesPull(boot.dotfiles), ...(boot.gitIdentity === undefined ? [] : [asUser(
-        `git config --global user.name ${q(boot.gitIdentity.name)} && git config --global user.email ${q(boot.gitIdentity.email)}`, "/home/user"),
-      ])],
+      hooks: bootHooks(boot),
       publicUrls: publicUrls(boot.pylonId, live.previews, options.previewHost),
       hostBridge: hostBridgeSocket(options.stateRoot),
     };
