@@ -296,6 +296,19 @@ test("PYLON.md of a pylon granted the ChatGPT token says pi is signed in to it, 
   assert.doesNotMatch(bootedBefore, /signed in to ChatGPT/);
 });
 
+test("PYLON.md tells Claude Code to have a shepherdr reviewer check its diff before a pull request, and whether pi is signed in for it", () => {
+  const md = renderOverlay({ ...overlay, secrets: [chatgptTokenGrant] })[2]!.content;
+  for (const fact of [
+    "## Review before a pull request", "`mcp__shepherdr__agents`", "Before you open a pull request or push to one", "`agent_type: \"reviewer\"`",
+    "which findings you accepted and which you rejected, and why", "Without the tool, say the review was skipped",
+    "The reviewer runs on pi's `openai` provider, which is signed in here",
+  ]) assert.ok(md.includes(fact), `PYLON.md mentions ${JSON.stringify(fact)}`);
+  const notGranted = renderOverlay({ ...overlay, secrets: [] })[2]!.content;
+  assert.ok(notGranted.includes("This pylon was not granted the ChatGPT token"), "says why the reviewer cannot run");
+  assert.ok(notGranted.includes("the review was skipped and why"));
+  assert.doesNotMatch(notGranted, /which is signed in here/);
+});
+
 test("PYLON.md of a scratch project with GitHub access says nothing is kept and how to publish without inventing an author", () => {
   const md = renderOverlay({ ...overlay, repo: { kind: "empty", branch: "trunk" }, secrets: [githubTokenGrant] })[2]!.content;
   for (const fact of [
