@@ -190,7 +190,7 @@ type Session = {
   title: string | null;                // the session's title, its Herdr workspace's label. null when last observed by a probe from before 0.5.0
 } & (
   | { state: "running"; herdrPane: string; message: null }         // open in its pane
-  | { state: "paused"; herdrPane: string | null; message: null }   // its pylon is paused, and its wake brings it back. herdrPane is the pane it had
+  | { state: "paused"; herdrPane: string | null; message: null }   // its pylon is paused, and its wake brings it back. herdrPane is the pane it had. Never set once the pylon runs
   | { state: "failed"; herdrPane: string | null; message: string } // the last wake did not bring it back, and message says why. The next wake tries again.
 );                                     // herdrPane is the pane it left behind, such as a shell its agent would not start in, or null
 type OpenedSession = { herdrPane: string; harness: "claude-code" | "pi" | "shell"; title: string };  // what session open prints
