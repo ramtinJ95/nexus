@@ -365,6 +365,39 @@ test("a human retry of a pylon whose fresh setup failed spawns it fresh again, a
   assert.equal(again.retrying, false);
 });
 
+test("a retry and a wake boot the size the thread started with, though its project's size changed since", async (t) => {
+  const registry = openRegistry(tempDb());
+  const thread = seed(registry);
+  const sized = { cpus: 4, memoryGiB: 12, diskGiB: 40 };
+  const seeded = registry.pylon(thread.pylonId)!;
+  // As threadStarter freezes a start's --memory 12 --cpus 4 --disk 40 into the pylon's boot.
+  registry.savePylon({ ...seeded, boot: { ...seeded.boot, resources: sized } });
+  const fake = fakeNode({ autoFinish: false });
+  const loop = run(t, registry, fake.probe, { log: () => {} });
+  await until("the spawn runs", () => fake.running().length === 1);
+  fake.finish(fake.running()[0]!, setupFailed(thread.pylonId, 1));
+  await until("the planner gives up", () => registry.pylon(thread.pylonId)?.failed !== null);
+
+  registry.updateProject({ ...registry.project(thread.project)!, resources: { cpus: 8, memoryGiB: 16, diskGiB: 80 } });
+  assert.equal(registry.retryPylon(thread.pylonId), true);
+  void loop.wake(node);
+  await until("the retry's spawn runs", () => fake.running().length === 1 && fake.submitted.length === 2);
+  fake.finish(fake.running()[0]!);
+  await until("the pylon runs", () => fake.pylons.get(thread.pylonId)?.phase === "running");
+  registry.setThreadStatus(thread.id, "archived");
+  await until("the pause runs", () => fake.running().length === 1);
+  fake.finish(fake.running()[0]!);
+  await until("the pause is folded in", () => registry.pylon(thread.pylonId)?.pauses === 1);
+  registry.setThreadStatus(thread.id, "active");
+  registry.recordActivity(thread.id, { human: Date.now() });
+  await until("the wake runs", () => fake.running().length === 1);
+  fake.finish(fake.running()[0]!);
+  await until("the pylon runs again", () => fake.pylons.get(thread.pylonId)?.phase === "running");
+
+  assert.deepEqual(kinds(fake.submitted), ["spawn fresh", "spawn fresh", "pause", "spawn resume"]);
+  assert.deepEqual(fake.submitted.flatMap((job) => job.kind === "spawn" ? [job.boot.resources] : []), [sized, sized, sized]);
+});
+
 test("a human retry of a pylon broken after a resume pauses it onto its newest disk and resumes that", async (t) => {
   const registry = openRegistry(tempDb());
   const thread = seed(registry);

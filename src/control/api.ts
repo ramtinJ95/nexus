@@ -111,6 +111,8 @@ export interface ThreadDetail {
   pylon: {
     grantsOutdated: boolean;
     id: PylonId; node: NodeName; actualState: ActualState; failed: string | null; observedAt: string | null;
+    /** The size the pylon boots with, fixed when its thread started. */
+    resources: BootInputs["resources"];
     /** Why a retry of the pylon, as its node last reported it, cannot help. Null when a retry can. */
     retryRefused: string | null;
   };
@@ -234,6 +236,8 @@ const startSchema = z.strictObject({
    * A scratch project has none to pin.
    */
   commit: z.string().min(1).optional(),
+  /** The thread's size where it differs from its project's. Its pylon boots this size on every wake. */
+  resources: projectSchema.shape.resources.partial().optional(),
 });
 // Agent activity comes from the harness.
 const seenSchema = z.strictObject({ lastReplyAt: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER).nullable().optional() });
@@ -362,7 +366,7 @@ export async function startApi(options: ApiOptions): Promise<Api> {
         allowedHosts: withHttpsHosts(effectiveAllowedHosts(registry.project(t.project)!), [pylon.boot.dotfiles.repo]),
         secrets: bootSecrets(registry.project(t.project)!),
       }),
-      id: pylon.pylonId, node: pylon.node, failed: pylon.failed, observedAt: node.observation?.observedAt ?? null,
+      id: pylon.pylonId, node: pylon.node, failed: pylon.failed, observedAt: node.observation?.observedAt ?? null, resources: pylon.boot.resources,
       actualState: actualState(observed, inFlight, node.state === "online", gaveUp), retryRefused: retryRefusal(observed),
     };
   }

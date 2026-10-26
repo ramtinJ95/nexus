@@ -13,9 +13,12 @@ import type { Registry, Thread, ThreadId } from "./registry.ts";
  * What starts a thread. `claude` makes it a Claude worker with that first prompt, which gets `/poteto-mode` in front
  * unless `raw`, as for the review loop's reviewers. A `bare` thread has neither agent, as a check thread needs only
  * its pylon. Only the control plane itself asks for `raw` or `bare`. `node` names a node, or is `auto` for the one
- * where the pylon fits best.
+ * where the pylon fits best. `resources` overrides the project's size field by field.
  */
-export interface StartRequest { project: string; title: string; node?: string | undefined; branch?: string | undefined; commit?: string | undefined; claude?: string | undefined; model?: string | undefined; raw?: boolean; bare?: boolean }
+export interface StartRequest {
+  project: string; title: string; node?: string | undefined; branch?: string | undefined; commit?: string | undefined; claude?: string | undefined; model?: string | undefined; raw?: boolean; bare?: boolean;
+  resources?: { [K in keyof BootInputs["resources"]]?: BootInputs["resources"][K] | undefined } | undefined;
+}
 
 /** `pylon-<id>` must fit in 40 characters. */
 const newThreadId = () => `th-${randomBytes(6).toString("hex")}` as ThreadId;
@@ -86,20 +89,22 @@ export function threadStarter(options: { registry: Registry; harness: Pick<Harne
     // Every boot pulls the dotfiles through the allowlist. A template build pulls none, so their host stays out of the setup hash.
     const network = { allowedHosts: withHttpsHosts(effectiveAllowedHosts(project), [dotfiles.repo]), secrets: bootSecrets(project) };
 
+    const size = request.resources ?? {};
+    const resources = { cpus: size.cpus ?? project.resources.cpus, memoryGiB: size.memoryGiB ?? project.resources.memoryGiB, diskGiB: size.diskGiB ?? project.resources.diskGiB };
     const id = newThreadId();
     const pylonId = `pylon-${id}` as PylonId;
     const placement: Placement = named ? { how: "named", node: request.node as NodeName }
-      : (request.node ?? project.defaultNode) === "auto" ? placeAuto(registry, { image, resources: project.resources, network, repo: freshRepo, dotfiles })
+      : (request.node ?? project.defaultNode) === "auto" ? placeAuto(registry, { image, resources, network, repo: freshRepo, dotfiles })
       : { how: "default", node: project.defaultNode as NodeName };
     const { node } = placement;
-    const release = registry.reserve(pylonId, node, project.resources);
+    const release = registry.reserve(pylonId, node, resources);
     try {
       const read = await readSetup(project, branch, request.commit);
 
       const conversationId = request.claude === undefined && request.bare !== true ? await harness.startThread({ threadId: id, pylonId }) : null;
       const now = Date.now();
       const { setup, firstBoot, repo } = setUp(project, read, freshRepo, image, branch, node, now);
-      const boot: Omit<BootInputs, "source"> = { pylonId, image, resources: project.resources, gitIdentity: project.gitIdentity ?? gitIdentity, network, repo, dotfiles };
+      const boot: Omit<BootInputs, "source"> = { pylonId, image, resources, gitIdentity: project.gitIdentity ?? gitIdentity, network, repo, dotfiles };
       const t: Thread = {
         id, title: request.title, project: project.id, pylonId, status: "active", conversationId: conversationId === null ? null : String(conversationId), startedBy: caller, createdAt: now,
         // Starting a thread is human activity, so its pylon is wanted at once.

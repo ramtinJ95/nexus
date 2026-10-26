@@ -350,7 +350,7 @@ ${image === null && html`<p class="error">No image is current yet, so a new pylo
 <label for="start-title" id="start-title-label">Title (optional)</label>
 <input id="start-title" name="title" autocomplete="off" placeholder="The prompt's first line">
 <fieldset class="seg"><legend>Project</legend>
-${projects.map((p) => html`<label class="seg-opt"><input type="radio" name="project" required value="${p.id}" data-node="${p.defaultNode}" data-branch="${p.defaultBranch}"${p.repoUrl === null && " data-scratch"}${p === chosen && " checked"}><span class="seg-name">${p.id}</span><span class="seg-repo">${p.repoUrl ?? "scratch"}</span></label>`)}
+${projects.map((p) => html`<label class="seg-opt"><input type="radio" name="project" required value="${p.id}" data-node="${p.defaultNode}" data-branch="${p.defaultBranch}" data-cpus="${p.resources.cpus}" data-memory-gib="${p.resources.memoryGiB}" data-disk-gib="${p.resources.diskGiB}"${p.repoUrl === null && " data-scratch"}${p === chosen && " checked"}><span class="seg-name">${p.id}</span><span class="seg-repo">${p.repoUrl ?? "scratch"}</span></label>`)}
 </fieldset>
 <div class="two">
 <div><label for="start-node">Node</label><select id="start-node" name="node">
@@ -359,6 +359,11 @@ ${projects.map((p) => html`<label class="seg-opt"><input type="radio" name="proj
 ${nodes.map((n) => html`<option value="${n.name}">${n.name}${n.state === "offline" && ", offline"}</option>`)}
 </select></div>
 <div><label for="start-branch">Branch</label><input id="start-branch" name="branch" autocomplete="off" placeholder="${chosen.defaultBranch}"></div>
+</div>
+<div class="two three">
+<div><label for="start-cpus">CPUs</label><input id="start-cpus" name="cpus" type="number" min="1" step="1" inputmode="numeric" placeholder="${chosen.resources.cpus}"></div>
+<div><label for="start-memory">Memory (GiB)</label><input id="start-memory" name="memoryGiB" type="number" min="1" step="1" inputmode="numeric" placeholder="${chosen.resources.memoryGiB}"></div>
+<div><label for="start-disk">Disk (GiB)</label><input id="start-disk" name="diskGiB" type="number" min="1" step="1" inputmode="numeric" placeholder="${chosen.resources.diskGiB}"></div>
 </div>
 <p class="hint" id="start-hint" data-image="${image ?? ""}">Boots a pylon on ${chosen.defaultNode === "auto" ? "the node with the most room left" : html`<b>${chosen.defaultNode}</b>`}${image !== null && html` from image <code>${image}</code>`} and ${chosen.repoUrl === null ? "starts an empty repository on" : "checks out"} <code>${chosen.defaultBranch}</code>.</p>
 <p id="start-error" class="error" role="alert" hidden></p>

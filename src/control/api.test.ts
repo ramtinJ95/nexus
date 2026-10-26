@@ -484,6 +484,58 @@ test("--node auto refuses an overcommitted node with its reason, and places the 
   assert.deepEqual(started.body.placement.weighed.find((w: { node: string }) => w.node === "firebat"), { node: "firebat", refused: "is overcommitted, with 40 of 22.8 GiB of memory committed" });
 });
 
+test("a start's size overrides its project's field by field, its pylon boots that size, and thread detail reads it back", async (t) => {
+  const s = await withImage(t);
+  const bigger = await s.call("POST", "/v1/threads", { project: "acme", title: "Bigger", resources: { memoryGiB: 12 } });
+  assert.equal(bigger.status, 201, JSON.stringify(bigger.body));
+  assert.deepEqual(s.registry.pylon(bigger.body.pylonId)!.boot.resources, { cpus: 2, memoryGiB: 12, diskGiB: 10 }, "the fields it leaves out are the project's");
+  assert.deepEqual((await s.call("GET", `/v1/threads/${bigger.body.id}`)).body.pylon.resources, { cpus: 2, memoryGiB: 12, diskGiB: 10 });
+  const sized = await s.call("POST", "/v1/threads", { project: "acme", title: "Sized", resources: { cpus: 4, memoryGiB: 8, diskGiB: 40 } });
+  assert.deepEqual(s.registry.pylon(sized.body.pylonId)!.boot.resources, { cpus: 4, memoryGiB: 8, diskGiB: 40 });
+  const plain = await s.call("POST", "/v1/threads", { project: "acme", title: "Plain" });
+  assert.deepEqual((await s.call("GET", `/v1/threads/${plain.body.id}`)).body.pylon.resources, project.resources);
+
+  for (const resources of [{ cpus: 0 }, { memoryGiB: -8 }, { diskGiB: 1.5 }, { memoryGiB: "8" }, { gpus: 1 }, 8]) {
+    assert.equal((await s.call("POST", "/v1/threads", { project: "acme", title: "Wrong", resources })).status, 400, JSON.stringify(resources));
+  }
+  assert.deepEqual((await s.call("GET", "/v1/threads")).body.map((r: Thread) => r.title).toSorted(), ["Bigger", "Plain", "Sized"], "no refused start made a thread");
+});
+
+test("--node auto weighs a thread's own size, not its project's, and counts it once placed", async (t) => {
+  const s = await withImage(t);
+  observeNode(s, "small", { total: 16, committed: 8 });
+  observeNode(s, "big", { total: 64, committed: 48 });
+  const started = await s.call("POST", "/v1/threads", { project: "acme", title: "Big", node: "auto", resources: { memoryGiB: 12 } });
+  assert.equal(started.status, 201, JSON.stringify(started.body));
+  assert.equal(started.body.placement.node, "big");
+  assert.deepEqual(started.body.placement.weighed.find((w: { node: string }) => w.node === "small"), { node: "small", refused: "has 8 of 16 GiB of memory committed, and the pylon needs 12" },
+    "small has room for the project's 4 GiB but not the start's 12");
+  const refused = await s.call("POST", "/v1/threads", { project: "acme", title: "Huge", node: "auto", resources: { memoryGiB: 20 } });
+  assert.equal(refused.status, 409);
+  assert.match(refused.body.error, /big has 60 of 64 GiB of memory committed, and the pylon needs 20/, "big counts Big's 12 GiB, which it has yet to report");
+
+});
+
+test("an overlapping start's reservation holds the start's own size", async (t) => {
+  const s = await withImage(t);
+  observeNode(s, "a", { total: 16, committed: 0 });
+  observeNode(s, "b", { total: 16, committed: 2 });
+  const { harness } = s.fake;
+  const start = harness.startThread;
+  const held = Promise.withResolvers<void>();
+  let entered = 0;
+  harness.startThread = async (thread) => { entered++; await held.promise; return start(thread); };
+  const first = s.call("POST", "/v1/threads", { project: "acme", title: "One", node: "auto", resources: { memoryGiB: 12 } });
+  while (entered < 1) await sleep(5);
+  const second = s.call("POST", "/v1/threads", { project: "acme", title: "Two", node: "auto" });
+  while (entered < 2) await sleep(5);
+  held.resolve();
+  const [one, two] = await Promise.all([first, second]);
+  assert.equal(one.body.placement.node, "a");
+  assert.equal(two.body.placement.node, "b");
+  assert.deepEqual(two.body.placement.weighed.find((w: { node: string }) => w.node === "a").left.memoryGiB, 0, "a counts the 12 GiB One reserved there, then Two's 4");
+});
+
 test("nodes report whether they are overcommitted, and their observed pylons as up, paused, archived and orphaned", async (t) => {
   const s = await withImage(t);
   const started = async (title: string) => (await s.call("POST", "/v1/threads", { project: "acme", title, node: "a" })).body as Thread;
@@ -552,7 +604,7 @@ test("thread detail derives the actual state from the node's last observation", 
     thread,
     attention: null, seenAt: null, lastReplyAt: null,
     desired: "running",
-    pylon: { grantsOutdated: false, id: thread.pylonId, node, actualState: "unknown", failed: null, observedAt: null, retryRefused: null },
+    pylon: { grantsOutdated: false, id: thread.pylonId, node, actualState: "unknown", failed: null, observedAt: null, retryRefused: null, resources: project.resources },
     sessions: [], previews: [], ports: [], outputs: [], prWatch: { enabled: false, stopped: false, error: null }, pullRequests: [], review: null, attach: "herdr --session nexus", agent: { parkedTasks: 0 },
   });
 
@@ -983,7 +1035,7 @@ test("a failed pylon shows failed with its reason until its thread is deleted, a
   s.registry.apply({ record: "node", node, state: "online", capacity });
   const reason = "last job failed with setup-failed, which is not retryable: pylon-x: Setup exited 128\nfatal: unable to access";
   s.registry.savePylon({ ...s.registry.pylon(thread.pylonId)!, failed: reason });
-  assert.deepEqual((await detail()).pylon, { grantsOutdated: false, id: thread.pylonId, node, actualState: "failed", failed: reason, observedAt: null, retryRefused: null });
+  assert.deepEqual((await detail()).pylon, { grantsOutdated: false, id: thread.pylonId, node, actualState: "failed", failed: reason, observedAt: null, retryRefused: null, resources: project.resources });
   const [row] = (await s.call("GET", "/v1/threads")).body as ThreadRow[];
   assert.deepEqual([row!.desired, row!.pylon], [(await detail()).desired, { node, actualState: "failed", failed: reason }], "the list reports the pylon as its detail does");
 
@@ -993,7 +1045,7 @@ test("a failed pylon shows failed with its reason until its thread is deleted, a
   assert.equal((await detail()).pylon.actualState, "deleting");
   s.registry.apply({ record: "job", status: { ...del, state: "succeeded", finishedAt: "2027-01-01T00:00:05Z" } });
   s.registry.ingested({ node, observedAt: "2027-01-01T00:00:06Z", probeBootId: "b", capacity, artifacts: [], jobs: [], pylons: [], grants: { secrets: [], gitSsh: false }, previewRoutes: [] }, []);
-  assert.deepEqual((await detail()).pylon, { grantsOutdated: false, id: thread.pylonId, node, actualState: "absent", failed: reason, observedAt: "2027-01-01T00:00:06Z", retryRefused: null });
+  assert.deepEqual((await detail()).pylon, { grantsOutdated: false, id: thread.pylonId, node, actualState: "absent", failed: reason, observedAt: "2027-01-01T00:00:06Z", retryRefused: null, resources: project.resources });
 });
 
 test("retrying a failed pylon clears the planner's verdict and its attempts, marks the retry, counts as human activity and wakes its node", async (t) => {

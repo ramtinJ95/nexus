@@ -936,6 +936,17 @@ test("every page carries the start dialog, which offers every project and node a
   assert.match(textOf(home.split('<dialog id="start-dialog"')[1]!.replace(/^[^>]*>/, "")), new RegExp(`^Start a thread ✕ Worker Claude Code .* Title \\(optional\\) Project acme .* Boots a pylon on rj-firebat from image ${image.id} and checks out main \\.`));
 });
 
+test("the start dialog offers the thread's size, with the chosen project's as placeholders, and each project radio carries its own", async (t) => {
+  const s = await setup(t);
+  await s.call("POST", "/v1/projects", project("acme"));
+  await s.call("POST", "/v1/projects", { ...project("big"), resources: { cpus: 4, memoryGiB: 12, diskGiB: 40 } });
+  const dialog = (await s.call("GET", "/threads/new?project=big")).text.split('<dialog id="start-dialog"')[1]!.split("</dialog>")[0]!;
+  assert.deepEqual([...dialog.matchAll(/<label for="(start-(?:cpus|memory|disk))">([^<]*)<\/label><input id="\1" name="([^"]*)" type="number" min="1" step="1" inputmode="numeric" placeholder="([^"]*)">/g)].map((m) => [m[2], m[3], m[4]]),
+    [["CPUs", "cpus", "4"], ["Memory (GiB)", "memoryGiB", "12"], ["Disk (GiB)", "diskGiB", "40"]], "empty, so a start without them takes the project's");
+  assert.deepEqual([...dialog.matchAll(/name="project" required value="([^"]*)"[^>]* data-cpus="([^"]*)" data-memory-gib="([^"]*)" data-disk-gib="([^"]*)"/g)].map((m) => m.slice(1)),
+    [["acme", "2", "4", "10"], ["big", "4", "12", "40"]], "client.js shows the picked project's size from these");
+});
+
 test("the start dialog picks Claude Code for a prompt unless the reader picks the Nexus agent, whose thread needs a title", async (t) => {
   const s = await seeded(t);
   const dialog = (await s.call("GET", "/threads/new")).text.split('<dialog id="start-dialog"')[1]!.split("</dialog>")[0]!;

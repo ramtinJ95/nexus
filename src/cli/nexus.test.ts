@@ -197,7 +197,7 @@ test("the CLI runs a thread's life through the SOCKS proxy, and --json prints th
   const shown = await s.json(["show", thread.id]);
   assert.equal(shown.thread.id, thread.id);
   assert.equal(shown.desired, "running", "a thread with fresh human activity wants its pylon running");
-  assert.deepEqual(shown.pylon, { grantsOutdated: false, id: thread.pylonId, node, actualState: "unknown", failed: null, observedAt: null, retryRefused: null });
+  assert.deepEqual(shown.pylon, { grantsOutdated: false, id: thread.pylonId, node, actualState: "unknown", failed: null, observedAt: null, retryRefused: null, resources: project.resources });
   assert.deepEqual((await s.json(["conversation", thread.id])).entries.map((e: { id: number }) => e.id), [1, 2, 3]);
   const human = await s.nexus(["conversation", thread.id]);
   assert.equal(human.stdout, "> \n>   Fix the build  \n> and run the tests\n\n> now the lint\n\n> stop that\n");
@@ -1219,6 +1219,24 @@ test("show says how the pylon got its setup: fresh and why, with the build it as
   const capacity = { cpus: 16, committedCpus: 0, memoryGiB: 64, committedMemoryGiB: 0, diskFreeGiB: 100, committedDiskGiB: 0 };
   s.registry.ingested({ node, observedAt: new Date().toISOString(), probeBootId: "b", capacity, artifacts: [image.id, building!.id], jobs: [], pylons: [], grants: { secrets: [], gitSsh: false }, previewRoutes: [] }, []);
   assert.equal((await shown("reused")).line, `setup: from template ${building!.id}, built 3m ago, then checked out 222222222222`);
+});
+
+test("start --cpus, --memory and --disk size the thread over its project's, and show prints the size", async (t) => {
+  const s = await setup(t);
+  const sized: Thread = await s.json(["start", "--project", "acme", "--title", "sized", "--memory", "12", "--cpus", "4"]);
+  assert.deepEqual(s.registry.pylon(sized.pylonId)!.boot.resources, { cpus: 4, memoryGiB: 12, diskGiB: 10 }, "the disk it leaves out is the project's");
+  assert.match((await s.nexus(["show", sized.id])).stdout, /^size: 4 CPUs, 12 GiB memory, 10 GiB disk$/m);
+  const disk: Thread = await s.json(["start", "--project", "acme", "--title", "disk", "--disk", "40"]);
+  assert.deepEqual(s.registry.pylon(disk.pylonId)!.boot.resources, { cpus: 2, memoryGiB: 4, diskGiB: 40 });
+  const plain: Thread = await s.json(["start", "--project", "acme", "--title", "plain"]);
+  assert.match((await s.nexus(["show", plain.id])).stdout, /^size: 2 CPUs, 4 GiB memory, 10 GiB disk$/m, "a thread started without them has its project's size");
+
+  for (const [flag, value, status] of [["--memory", "0", 400], ["--cpus", "-2", null], ["--disk", "1.5", null], ["--memory", "lots", null]] as const) {
+    const res = await s.nexus(["start", "--project", "acme", "--title", "wrong", flag, value, "--json"]);
+    assert.equal(res.code, 64, `${flag} ${value}: ${res.stderr}`);
+    assert.deepEqual((({ kind, status }) => ({ kind, status }))(JSON.parse(res.stderr)), { kind: "invalid", status }, `${flag} ${value}`);
+  }
+  assert.deepEqual((await s.json(["threads"])).map((r: Thread) => r.title).toSorted(), ["disk", "plain", "sized"], "no refused start made a thread");
 });
 
 test("nodes marks an overcommitted node and says what its pylons hold", async (t) => {

@@ -51,6 +51,7 @@ const usage = `nexus ${version}, the Nexus control plane from this Mac
   nexus session close <thread> <pane|id>       a session in no pane by its ID, which \`nexus show\` gives
   nexus attach <thread>                        this terminal on the pylon's Herdr sessions, through the control plane
   nexus start --project P [--title T] [--message M | --claude PROMPT [--model ID]] [--node N|auto] [--branch B] [--commit C]
+              [--cpus n] [--memory GiB] [--disk GiB]
   nexus send <thread> <text...> [--steer] [--request-id ID]
     a message to the agent, or typed into the Claude worker's session, which waits for a paused pylon to wake
   nexus watch <thread> [--interval MS]         the conversation, or the Claude worker's transcript, as it grows
@@ -126,6 +127,15 @@ function int(value: string | undefined, flag: string, fallback: number): number 
   const n = Number(value);
   if (!Number.isInteger(n) || n < 0) throw new CliError("invalid", `${flag} takes a whole number, got ${value}`);
   return n;
+}
+
+/** The --cpus, --memory and --disk given, or undefined for none, as `project edit` and `start` send them. */
+function resourcesOf(v: Values): Partial<Project["resources"]> | undefined {
+  const resources: Partial<Project["resources"]> = {};
+  for (const [flag, field] of [["cpus", "cpus"], ["memory", "memoryGiB"], ["disk", "diskGiB"]] as const) {
+    if (v[flag] !== undefined) resources[field] = int(str(v, flag), `--${flag}`, 0);
+  }
+  return Object.keys(resources).length > 0 ? resources : undefined;
 }
 
 function ago(at: number, now = Date.now()): string {
@@ -288,6 +298,8 @@ function detailText({ thread: t, pylon: p, agent, sessions, previews, ports, out
     ...t.usageLimit === undefined ? [] : [`usage limit: ${usageLimitText(t.usageLimit, Date.now())}. \`nexus send ${t.id} continue\` resumes it once the limit resets`],
     `status: ${t.status}${t.agentTurnRunning ? ", agent working" : ""}`,
     `pylon: ${p.id} on ${p.node}, ${p.actualState}${observed}`,
+    // A control plane older than the size in thread detail sends none.
+    ...p.resources === undefined ? [] : [`size: ${p.resources.cpus} CPUs, ${p.resources.memoryGiB} GiB memory, ${p.resources.diskGiB} GiB disk`],
     ...t.placement === undefined ? [] : [`placement: ${placementText(t.placement)}`],
     ...t.setup === undefined ? [] : [`setup: ${setupText(t.setup)}`],
     ...(p.grantsOutdated ? ["grants: older than project; start a new thread to apply current grants (archive/unarchive keeps these grants)"] : []),
@@ -953,7 +965,10 @@ const commands: Readonly<Record<string, Command>> = {
   },
   start: {
     args: [0, 0],
-    options: { model: { type: "string" }, claude: { type: "string" }, project: { type: "string" }, title: { type: "string" }, message: { type: "string" }, node: { type: "string" }, branch: { type: "string" }, commit: { type: "string" } },
+    options: {
+      model: { type: "string" }, claude: { type: "string" }, project: { type: "string" }, title: { type: "string" }, message: { type: "string" }, node: { type: "string" }, branch: { type: "string" }, commit: { type: "string" },
+      cpus: { type: "string" }, memory: { type: "string" }, disk: { type: "string" },
+    },
     async run(api, _, v) {
       const project = str(v, "project");
       const message = str(v, "message");
@@ -964,7 +979,8 @@ const commands: Readonly<Record<string, Command>> = {
       if (project === undefined) throw new CliError("invalid", "start needs --project");
       if (title === undefined) throw new CliError("invalid", "start needs --title, --message or --claude");
       const optional = Object.fromEntries((["node", "branch", "commit", "claude", "model"] as const).flatMap((key) => v[key] === undefined ? [] : [[key, v[key]]]));
-      const t = await api("POST", "/v1/threads", { project, title, ...optional }) as Thread;
+      const resources = resourcesOf(v);
+      const t = await api("POST", "/v1/threads", { project, title, ...optional, ...resources === undefined ? {} : { resources } }) as Thread;
       if (message !== undefined) {
         await send(api, t.id, message, false, `msg:${randomUUID()}`).catch((err: unknown) => {
           throw err instanceof CliError ? new CliError(err.kind, `started ${t.id}, but its first message was not sent: ${err.message}`, err.status) : err;
@@ -1037,11 +1053,8 @@ const commands: Readonly<Record<string, Command>> = {
       for (const [flag, field] of [["node", "defaultNode"], ["branch", "defaultBranch"]] as const) {
         if (v[flag] !== undefined) patch[field] = str(v, flag);
       }
-      const resources: Partial<Project["resources"]> = {};
-      for (const [flag, field] of [["cpus", "cpus"], ["memory", "memoryGiB"], ["disk", "diskGiB"]] as const) {
-        if (v[flag] !== undefined) resources[field] = int(str(v, flag), `--${flag}`, 0);
-      }
-      if (Object.keys(resources).length > 0) patch.resources = resources;
+      const resources = resourcesOf(v);
+      if (resources !== undefined) patch.resources = resources;
       for (const [flag, clear, field] of [["allow-host", "clear-hosts", "allowedHosts"], ["login", "clear-logins", "logins"], ["secret", "clear-secrets", "secrets"]] as const) {
         if (v[clear] && v[flag] !== undefined) throw new CliError("invalid", `--${clear} conflicts with --${flag}`);
         if (v[clear] || v[flag] !== undefined) patch[field] = flag === "secret" ? strs(v, flag).map(secretGrantOf) : strs(v, flag);
