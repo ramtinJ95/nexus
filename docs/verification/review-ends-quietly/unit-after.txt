@@ -1,0 +1,48 @@
+✔ a Claude builder's PR gets a harness reviewer, and findings, fixes and new commits go round until it approves (16.790097ms)
+✔ rounds that run out, and agents that never answer in the block, end with the person's attention (12.969683ms)
+✔ a message the inbox cannot deliver yet is sent again under the same request ID, never twice (4.771202ms)
+✔ a harness builder gets a Claude reviewer only where the project grants a Claude token, and its prompt runs as given (7.904021ms)
+✔ a landing under the policy merges the approved head, deploys it and waits for every service to be healthy (39.258524ms)
+✔ a deploy that fails rolls back to the previous release and tells the person what still needs reverting (8.86075ms)
+✔ another repository's PR merges without a deploy (6.810605ms)
+✔ a token that cannot merge holds the landing for the person, and a later land tries again (7.98964ms)
+✔ the policy names every condition that fails and every reserved case, and holds without merging (6.623276ms)
+✔ the policy's review conditions: another model, an approval with no P0 to P2 open, and every blocking finding answered (0.311242ms)
+✔ a check that fails after an approval with P3 notes asks the builder to answer only the check, under a new token (8.440935ms)
+✔ commits pushed with answers that fixed nothing still get another round (7.271408ms)
+✔ a check the pylon cannot run goes to the person with its output, and costs the builder nothing (6.68449ms)
+✔ a failed check the builder answers without a push goes to the person at once, not back to the reviewer (7.681414ms)
+✔ a failed check answered as fixed with no push goes to the person once the push grace ends (7.817589ms)
+✔ a check that fails again at a head where it failed before goes to the person (12.015088ms)
+✔ in a review stored before priorities, a reviewer's repeat approval of an unchanged head costs no round (11.870788ms)
+✔ a landing sees its deploy through, rolling back, though its threads are archived meanwhile (8.984ms)
+✔ a PR that merged at another head than the approved one is not deployed (6.105407ms)
+✔ a reviewer a later review replaced is still a reviewer, and an archived builder cannot land (6.997525ms)
+✔ each check runs in its own check thread, thrown away after its verdict, and a check thread no review holds is thrown away (6.059471ms)
+✔ a check run that cannot give a verdict starts again in a fresh check thread (7.195465ms)
+✔ a Claude reviewer's approval does not land, and goes to the person (5.421418ms)
+✔ every merge attempt checks the policy again, so checks that fail after approval, or across a restart, hold it (28.869476ms)
+✔ a reply that came while a delivered message was not yet cleared is still read after a crash (5.914811ms)
+✔ a PR merged outside the review is held by the policy like this review's own merge, and never deployed past a hold (6.024035ms)
+✔ a PR merged outside the review that the policy would have merged deploys (6.205935ms)
+✔ this review's own merge, recorded before the merge call, deploys after a crash without being judged again (6.560709ms)
+✔ a reviewer that still requests changes after the last round gets the PR labelled for the person, once across retries (6.114634ms)
+✔ a check that fails after the last round gets the PR labelled for the person, once across retries (5.748179ms)
+✔ a review stored with more rounds reads back capped at 5 with priorities, and stops at round 5 with the label (5.315731ms)
+✔ a builder that pushes fixes after the last round gets the PR labelled for the person, once across retries (5.608548ms)
+✔ a token that cannot label tells the person why, and the loop does not try again (4.81239ms)
+✔ an approval with only P3 findings goes straight to the check, sending the builder its notes with nothing to answer (5.314889ms)
+✔ the findings decide the verdict: changes with only P3 findings is an approval, and an approval with a P2 finding requests changes (10.454219ms)
+✔ a check that fails again at an earlier head in the last round still gets the PR labelled (10.180728ms)
+✔ a reviewer's verdict in the old severity shape still reads: serious blocks as P1, minor is a P3 note (7.597006ms)
+✔ a PR merged or closed outside a review that does not land ends it quietly, with no check, round, label or decision (27.173795ms)
+✔ a review that lands still sees a merge made outside it through, and a real failure while the PR is open still asks the person (11.692665ms)
+✔ a builder or reviewer thread the person archives or deletes cancels the review, with no label or decision (19.639015ms)
+ℹ tests 40
+ℹ suites 0
+ℹ pass 40
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 624.403254

@@ -10,6 +10,9 @@
 //  - Labels are kept per repository and on PR #1. With DENY_LABELS=1 GitHub answers every label write 403, as for a
 //    token that may not write issues or pull requests. With P3=1 the reviewer's approval carries a P3 finding, and with
 //    ALWAYS_CHANGES=1 it never approves, so the review runs out of rounds.
+//  - With SCRIPTED_BUILDER=1 the builder is a Claude worker with no session: the stack pushes `feature` for it.
+//  - The person can merge PR #1 outside the review, which deletes `feature` as GitHub's auto-delete does, close it, or
+//    reopen it, through /verify/merge, /verify/close and /verify/reopen. REVIEWER_DELAY_MS slows the reviewer's answer.
 //  - A check thread's pylon is a fresh clone here at the commit its boot names, made when its pipe opens, so the real
 //    check script and .nexus/check run, and the verdict is the local process's exit status. Each pipe is logged.
 //
@@ -17,7 +20,7 @@
 import { execFile, execFileSync } from "node:child_process";
 import { appendFileSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { startApi } from "../../../src/control/api.ts";
 import { fakeHarness } from "../../../src/control/fake-harness.ts";
 import { openRegistry, type ThreadId } from "../../../src/control/registry.ts";
@@ -100,30 +103,36 @@ const guest = {
     }
     return result;
   },
+  async writeFiles(files: readonly { path: string; mode: number; content: string }[]) {
+    for (const f of files) {
+      mkdirSync(dirname(moved(f.path)), { recursive: true });
+      writeFileSync(moved(f.path), f.content, { mode: f.mode });
+    }
+  },
 } as unknown as Guest;
 const deps = { node, backend: { guest: () => guest }, serve: { withdraw: async () => {} } } as unknown as ProbeDeps;
 
 const registry = openRegistry(join(root, "registry.db"));
 registry.upsertNode({ name: node, tailnetHost: "verify-node.tail.ts.net", tailnetNodeId: nodeId });
-registry.saveImage({ id: "img-0000000000aa", gondolinBuildId: "b1", builtOn: node, builtAt: "2026-10-26T00:00:00Z", sha256: "a".repeat(64), pins: {} } as never);
+registry.saveImage({ id: "img-0000000000aa", gondolinBuildId: "b1", builtOn: node, builtAt: "2026-10-26T00:00:00Z", sha256: "a".repeat(64), pins: {} } as never, null);
 registry.setCurrentImage("img-0000000000aa" as never);
 registry.createProject({ id: "nexus", repoUrl: `https://github.com/${repo}.git`, defaultBranch: "main", defaultNode: node, resources: { cpus: 2, memoryGiB: 4, diskGiB: 10 }, allowedHosts: [], secrets: [], logins: ["claude"], preSetup: null } as never);
 registry.setDesiredRelease({ commit: git(origin, "rev-parse", "main"), requestedBy: "verify seed", requestedAt: Date.now() });
 for (const role of ["control", "probe"] as const) registry.reportRelease({ node, role, commit: git(origin, "rev-parse", "main"), target: git(origin, "rev-parse", "main"), state: "healthy", reason: null, observedAt: Date.now() });
 
 function observe() {
-  const capacity = { memoryGiB: 64, committedMemoryGiB: 0, diskFreeGiB: 100 };
+  const capacity = { cpus: 16, committedCpus: 0, memoryGiB: 64, committedMemoryGiB: 0, diskFreeGiB: 100, committedDiskGiB: 0 };
   registry.apply({ record: "node", node, state: "online", capacity });
   const pylons = registry.pylonsOn(node).map((p) => ({
     pylonId: p.pylonId, phase: "running" as const, liveHash: p.liveHash, bootedAt: "2026-10-26T00:00:00Z",
     bootedFrom: { image: "img-0000000000aa" as `img-${string}`, checkpoint: null },
     services: [], listening: [], previews: [], sessions: [], git: null, declaredOutputs: [], attachedClients: 0,
   }));
-  registry.ingested({ node, observedAt: new Date().toISOString(), probeBootId: "verify", capacity, artifacts: [], jobs: [], pylons: pylons as never, previewRoutes: [] }, []);
+  registry.ingested({ node, observedAt: new Date().toISOString(), probeBootId: "verify", capacity, artifacts: [], jobs: [], pylons: pylons as never, grants: { secrets: [], gitSsh: false }, previewRoutes: [] }, []);
 }
 
 // GitHub, over origin.git.
-const pr = { opened: false, merged: null as string | null, comments: [] as { id: number; body: string }[], labels: new Set<string>() };
+const pr = { opened: false, merged: null as string | null, closed: false, lastHead: null as string | null, comments: [] as { id: number; body: string }[], labels: new Set<string>() };
 const repoLabels = new Set<string>();
 const denied = () => Response.json({ message: "Resource not accessible by personal access token" }, { status: 403 });
 const branchHead = () => { try { return git(origin, "rev-parse", "--verify", "-q", "refs/heads/feature"); } catch { return null; } };
@@ -134,12 +143,13 @@ const fakeGitHub: typeof fetch = async (input, init) => {
   const base = `/repos/${repo}`;
   const head = branchHead();
   if (head !== null && !pr.opened) pr.opened = true;
+  if (head !== null) pr.lastHead = head;
   const p = () => ({
-    number: 1, title: "Add greet.sh", html_url: `https://github.com/${repo}/pull/1`, state: pr.merged ? "closed" : "open", merged: pr.merged !== null,
+    number: 1, title: "Add greet.sh", html_url: `https://github.com/${repo}/pull/1`, state: pr.merged || pr.closed ? "closed" : "open", merged: pr.merged !== null,
     body: "Adds greet.sh, which greets.\n\nNot checked live: greet.sh is a local script, with no service to start.", merge_commit_sha: pr.merged ?? "t".repeat(40),
-    head: { sha: head, ref: "feature", repo: { full_name: repo } }, base: { ref: "main" }, mergeable_state: "clean",
+    head: { sha: head ?? pr.lastHead, ref: "feature", repo: { full_name: repo } }, base: { ref: "main" }, mergeable_state: "clean",
   });
-  if (url.pathname === `${base}/pulls`) return Response.json(pr.opened && pr.merged === null ? [p()] : []);
+  if (url.pathname === `${base}/pulls`) return Response.json(pr.opened && pr.merged === null && !pr.closed ? [p()] : []);
   if (url.pathname === `${base}/pulls/1` && pr.opened) return Response.json(p());
   if (url.pathname === `${base}/pulls/1/files`) {
     const names = git(origin, "diff", "--name-only", `main...${head}`).split("\n").filter(Boolean);
@@ -185,7 +195,7 @@ const harness = {
   async send(threadId: string, text: string, requestId: string, mode: "followUp" | "steer", sender?: "pr-watch" | "review") {
     const submission = await fake.harness.send(threadId, text, requestId, mode, sender);
     log("reviewer.log", `received ${requestId}`);
-    setTimeout(() => answer(threadId as ThreadId, text), 2_000);
+    setTimeout(() => answer(threadId as ThreadId, text), Number(process.env.REVIEWER_DELAY_MS ?? 2_000));
     return submission;
   },
 };
@@ -217,6 +227,7 @@ function answer(thread: ThreadId, request: string) {
 const probe = {
   async command(pylonId: PylonId, command: PylonCommand): Promise<CommandResult> {
     if (command.kind === "send-claude") log("typed.log", `send-claude to ${pylonId}:\n${command.text}\n`);
+    if (command.kind === "send-claude-outcome") return { kind: "send-claude-outcome", send: "unknown" };
     return runCommand(pylonId, command, deps);
   },
   async stream(pylonId: PylonId, argv: readonly string[]) {
@@ -236,7 +247,8 @@ const probes = new Map([[node, probe]]);
 const wake = () => {};
 const inbox = agentInbox({ registry, harness, probes, wake });
 const watch = prWatcher({ registry, github, inbox });
-const startThread = threadStarter({ registry, harness, dotfiles: { repo: "https://example.com/dotfiles.git", ref: "main" }, wake });
+const mirror = { setupInputs: () => Promise.reject(new Error("the verify stack reads no remote, so every thread boots fresh")) };
+const startThread = threadStarter({ registry, harness, mirror, dotfiles: { repo: "https://example.com/dotfiles.git", ref: "main" }, wake });
 const reviews = reviewLoop({
   registry, github, inbox, harnessModel: "gpt-6-astra", startThread,
   replies: agentReplies(registry, harness),
@@ -250,7 +262,7 @@ const api = await startApi({
   deployment: { self: nodeId, deployers: new Set([laptop]), keys: {} },
   whois: async () => laptop, allowed: new Set([laptop]), hostnames: new Set(["127.0.0.1", "localhost"]),
   dotfiles: { repo: "https://example.com/dotfiles.git", ref: "main" },
-  harness, wake: () => {}, probes: probes as never,
+  harness, mirror, wake: () => {}, probes: probes as never,
   previewPorts: { first: 10200, last: 10299 },
 });
 
@@ -261,6 +273,16 @@ async function launch() {
     const worker = registry.claudeWorker(t.id);
     if (worker?.state !== "pending") continue;
     const session = crypto.randomUUID();
+    if (process.env.SCRIPTED_BUILDER) {
+      writeFileSync(join(builderRepo, "greet.sh"), "echo hello\n");
+      git(builderRepo, "checkout", "-qb", "feature");
+      git(builderRepo, "add", "greet.sh");
+      git(builderRepo, "commit", "-qm", "Add greet.sh");
+      git(builderRepo, "push", "-q", "-u", "origin", "feature");
+      registry.setClaudeWorker(t.id, worker.prompt, "started", undefined, session);
+      console.log(`scripted builder ${t.id} pushed feature without a Claude session`);
+      continue;
+    }
     registry.setClaudeWorker(t.id, worker.prompt, "starting", undefined, session);
     try {
       await runCommand(t.pylonId, { kind: "open-session", harness: "claude-code", title: t.title.slice(0, 80), resume: session, prompt: worker.prompt, model: worker.model ?? "claude-opus-5-5" }, deps);
@@ -318,6 +340,22 @@ createServer((req, res) => {
       if (req.url === "/verify/comment" && req.method === "POST") {
         pr.comments.push({ id: pr.comments.length + 1, body });
         log("github.log", `owner commented: ${body}`);
+        return void res.writeHead(204).end();
+      }
+      if (req.url === "/verify/merge" && req.method === "POST") {
+        const work = join(root, "merge");
+        rmSync(work, { recursive: true, force: true });
+        execFileSync("git", ["clone", "-q", origin, work]);
+        git(work, "merge", "--squash", "-q", "origin/feature");
+        git(work, "commit", "-qm", "Add greet.sh (#1), merged by the person");
+        git(work, "push", "-q", "origin", "main", ":feature");
+        pr.merged = git(work, "rev-parse", "HEAD");
+        log("github.log", `the person merged PR #1 as ${pr.merged} and deleted feature`);
+        return void res.writeHead(204).end();
+      }
+      if ((req.url === "/verify/close" || req.url === "/verify/reopen") && req.method === "POST") {
+        pr.closed = req.url === "/verify/close";
+        log("github.log", `the person ${pr.closed ? "closed" : "reopened"} PR #1`);
         return void res.writeHead(204).end();
       }
       res.writeHead(404).end();

@@ -1,0 +1,16 @@
+$ nexus show th-4fe6bf2d4c57
+th-4fe6bf2d4c57  Greet script
+project: nexus
+Claude worker: started, model claude-opus-5-5
+attention: none
+status: active
+pylon: pylon-th-4fe6bf2d4c57 on verify-node, running, observed 0s ago
+size: 2 CPUs, 4 GiB memory, 10 GiB disk
+placement: verify-node, the project's default node
+setup: fresh boot runs .nexus/setup, because the control plane could not read .nexus/setup at main: the verify stack reads no remote, so every thread boots fresh
+PR watch: on
+PR #1: Add greet.sh — open, checks none, review none https://github.com/ramtinJ95/nexus/pull/1
+review rv-0dd8b0cf of PR #1: cancelled, round 1 of 5, reviewer th-e169b02a8c5b on gpt-6-astra, the reviewer thread th-e169b02a8c5b was archived
+output: branch origin/feature
+output: pull-request https://github.com/ramtinJ95/nexus/pull/1
+--- exit 0
