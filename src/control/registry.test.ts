@@ -680,6 +680,27 @@ test("ended sessions reject late heartbeats and starts, including after registry
 });
 
 
+test("a report delivered again under a new sequence has no effect", () => {
+  let now = 10_000_000;
+  const registry = seeded(tempDb(), () => now);
+  let sequence = 0;
+  const report = (kind: import("../events.ts").PylonEvent["kind"], at: number) => {
+    now += 1000;
+    registry.reportSession(node, { sequence: ++sequence, time: now, pylon: pylonId, event: { kind, session: "c1", at } });
+  };
+  try {
+    const start = now;
+    for (const [kind, at] of [["session.turn-started", start], ["session.heartbeat", start + 1], ["session.waiting", start + 2], ["session.turn-ended", start + 3]] as const) {
+      report(kind, at);
+      const before = registry.thread(threadId)!;
+      const count = registry.events().length;
+      report(kind, at);
+      assert.equal(registry.events().length, count, `a resent ${kind} appends no event`);
+      assert.deepEqual(registry.thread(threadId), before, `a resent ${kind} changes no thread fact`);
+    }
+  } finally { registry.close(); }
+});
+
 test("a newer heartbeat resumes waiting with a fresh lease, while older or equal stamps do not", async (t) => {
   const { desiredPhase } = await import("../reconcile.ts");
   const { sessionActivityTtlMs } = await import("../events.ts");

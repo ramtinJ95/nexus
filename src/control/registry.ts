@@ -609,7 +609,8 @@ export function openRegistry(path: string, clock = Date.now) {
         const floor = db.prepare("SELECT at FROM session_order_floor WHERE thread = ?").get(thread)?.at as number | undefined;
         if (previous !== undefined) {
           if (at < Number(previous.at)) return;
-          if (at === previous.at && (event.kind === "session.turn-started" || event.kind === "session.heartbeat") && previous.kind !== "session.turn-started" && previous.kind !== "session.heartbeat") return;
+          // The same kind at the same stamp is the pylon's outbox sending a report again after its acknowledgement was lost.
+          if (at === previous.at && (event.kind === previous.kind || (event.kind === "session.turn-started" || event.kind === "session.heartbeat") && previous.kind !== "session.turn-started" && previous.kind !== "session.heartbeat")) return;
         } else if (floor !== undefined && at <= floor) return;
         const current = db.prepare("SELECT state, started_at FROM session_activity WHERE thread = ? AND session = ?").get(thread, session);
         if (event.kind === "session.heartbeat" && current?.state !== "session.turn-started" && current?.state !== "session.waiting") return;
