@@ -301,15 +301,19 @@ child, leading a process group of its own, which the command keeps through `exec
 redirected output or closed stdio. Its stdio MCP servers stay in Claude's group.
 At the Stop the hook records those groups and starts a detached copy of itself,
 the hold, which checks every minute whether a recorded group still has a process.
-A command that leaves its group, such as one that calls `setsid`, still counts
-while a process writes to its output file, which Claude Code names by session and
-task ID. While the command runs, the hold sends a heartbeat every five minutes, so
+Each group is recorded with its leader's start time, so a later group that reuses
+the ID does not count. A command that leaves its group, such as one that calls
+`setsid`, still counts while a process writes to its output file, which Claude Code
+names by session and task ID. While the command runs, the hold sends a heartbeat every five minutes, so
 a long build keeps its lease and its pylon. Once it exits, the hold waits 30 seconds
 and sends the turn end. Every report carries the Stop's own stamp, so the lease
 renews by receipt time, and the turn Claude starts when the command finishes, or a
-message from the person, makes the rest stale. A pidfile per session keeps one
-hold: a newer Stop lists every shell still running, so its hold replaces the older
-one, which stops at its next check.
+message from the person, makes the rest stale. One hold owns a session at a time,
+because a newer Stop lists every shell still running. Holds start in any order, so
+under a lock a hold claims the session only from one for an older Stop, and exits if
+the owner's Stop is newer. A replaced hold stops at its next check, and only the
+owner releases the claim. At the cap the hold sends the turn end and waits for its
+sender to finish before it sends the waiting report, so the turn end cannot remove it.
 
 Nothing tells a dev server from finite work. A command still running after 2 hours
 has its turn ended, and the hold also reports `session.waiting` with the message

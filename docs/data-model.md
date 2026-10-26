@@ -211,11 +211,11 @@ not ended and records no reply. A subagent's tool hooks report under the main
 session's ID and renew the same lease. The turn Claude starts when the last task
 finishes ends it. There is no subagent record: a subagent that never finishes
 lets the lease expire like any other silent turn. When only shells run, a detached
-hold, one per session, sends `session.heartbeat` every five minutes while a process
+hold, owned by the session's newest Stop, sends `session.heartbeat` every five minutes while a process
 group the commands lead, or a process writing to a shell's output file, lives. It
 sends `session.turn-ended` 30 seconds after they stop. After 2 hours it sends
-`session.turn-ended` and `session.waiting`, both with the message "A background
-command was still running after 2 hours". Each carries the Stop's time, so they
+`session.turn-ended` and then, once that is sent, `session.waiting`, both with the
+message "A background command was still running after 2 hours". Each carries the Stop's time, so they
 renew the lease by receipt time, and any later report for the session, such as the
 turn a command's finish starts, makes the rest stale. A waiting session's latest
 message is kept with it as `Thread.sessionWaitingMessage`, and the dashboard shows

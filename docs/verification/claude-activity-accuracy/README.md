@@ -108,6 +108,12 @@ process groups.
   sent a heartbeat every 5 minutes, up to 1802 seconds, when this pylon paused
   and stopped every process in it.
 
+A later fix claims a session by its Stop's stamp, not by start order. Run with
+`NEXUS_API` at a dead port, this repro started the hook's hold for a Stop stamped
+2000 first, then one for a Stop stamped 1000. The older one exited at once, and
+the owner file still named the newer one (`2000 23793`), which kept running.
+The run above predates this fix and the start times kept with each group.
+
 `process-groups/timeline.txt` replays both. The 2-hour cap was not reached live.
 The tests cover it, and the dashboard test shows its message as the thread's
 state.
