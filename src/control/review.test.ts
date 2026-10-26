@@ -913,3 +913,17 @@ test("a message that waits to be delivered is not sent once the PR merged, and a
   assert.deepEqual(g.merges, []);
   assert.ok(!g.attention().includes("decision"));
 });
+
+test("a check that passes after the PR merged or closed, before the PR watch saw it, ends the review merged or closed, not approved", async (t) => {
+  for (const state of ["merged", "closed"] as const) {
+    const f = fixture(t);
+    f.check = { kind: "running" };
+    await approved(f, null);
+    assert.equal(f.review().phase.kind, "checking");
+    f.snapshot = { ...f.snapshot, pr: { ...f.snapshot.pr, state }, detail: { ...f.snapshot.detail, mergeCommit: state === "merged" ? merged : null } };
+    f.check = { kind: "done", passed: true, output: "ok" };
+    await f.loop().poll();
+    assert.deepEqual(f.review().phase, { kind: state });
+    assert.deepEqual(f.discarded, f.checkThreads, "the check thread is still thrown away");
+  }
+});

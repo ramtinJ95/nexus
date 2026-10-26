@@ -488,7 +488,7 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
     const phase = r.phase;
     if (ended.has(phase.kind)) return r;
     const next = await (steps[phase.kind as keyof typeof steps] as (r: Review, p: Phase, b: Thread, v: Thread) => Promise<Review>)(r, phase, builder!, reviewer!);
-    return live && next.phase.kind === "needs-person" ? await endedOnGitHub(next) ?? next : next;
+    return live && ended.has(next.phase.kind) ? await endedOnGitHub(next) ?? next : next;
   }
 
   async function pass() {
