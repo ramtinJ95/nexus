@@ -31,7 +31,7 @@ import { repoInitCommand } from "../pylon-vm-backend.ts";
 import { attachScript, checkoutDir } from "../sessions.ts";
 import { encodeMessage } from "../attach-wire.ts";
 import { terminalSize } from "../guest-terminal.ts";
-import type { ByteStream, CommandResult, JobId, NodeName, PausedSession, PylonCommand, PylonId, ServiceFact, StreamEnd, TailnetNodeId } from "../protocol.ts";
+import type { ByteStream, CommandResult, JobId, NodeName, NodeObservation, PausedSession, PylonCommand, PylonId, ServiceFact, StreamEnd, TailnetNodeId } from "../protocol.ts";
 
 const node = "rj-firebat" as NodeName;
 const laptop = "nLAPTOP" as TailnetNodeId;
@@ -258,6 +258,90 @@ test("starting a thread creates its pylon, boots fresh from the current image, a
   });
   assert.equal(pylon.liveHash, liveHashOf(pylon.live));
   assert.equal(pylon.submitted, null);
+});
+
+/** Puts a node online with this capacity and grants, holding the current image unless told otherwise. */
+function observeNode(s: Awaited<ReturnType<typeof setup>>, name: string, memory: { total: number; committed: number }, over: Partial<NodeObservation> = {}) {
+  const at = name as NodeName;
+  s.registry.upsertNode({ name: at, tailnetHost: `${name}.tail.ts.net`, tailnetNodeId: `n${name.toUpperCase()}` as TailnetNodeId });
+  const capacity = { cpus: 16, committedCpus: 4, memoryGiB: memory.total, committedMemoryGiB: memory.committed, diskFreeGiB: 200, committedDiskGiB: 60 };
+  s.registry.apply({ record: "node", node: at, state: "online", capacity });
+  s.registry.ingested({
+    node: at, observedAt: "2027-01-01T00:01:00Z", probeBootId: "b", capacity, artifacts: [image.id] as NodeObservation["artifacts"], jobs: [], pylons: [],
+    grants: { secrets: ["STRIPE_KEY"], gitSsh: true }, previewRoutes: [], ...over,
+  }, []);
+}
+
+async function withImage(t: import("node:test").TestContext) {
+  const s = await setup(t);
+  assert.equal((await s.call("POST", "/v1/projects", project)).status, 201);
+  assert.equal((await s.call("POST", "/v1/images", image)).status, 201);
+  assert.equal((await s.call("PUT", "/v1/images/current", { image: image.id })).status, 204);
+  return s;
+}
+
+test("--node auto boots the pylon on the node with the most memory left after it, and the thread records why", async (t) => {
+  const s = await withImage(t);
+  observeNode(s, "big", { total: 64, committed: 48 });
+  observeNode(s, "small", { total: 32, committed: 24 });
+  const started = await s.call("POST", "/v1/threads", { project: "acme", title: "Placed", node: "auto" });
+  assert.equal(started.status, 201, JSON.stringify(started.body));
+  const thread = started.body as Thread;
+  assert.deepEqual(thread.placement, {
+    how: "auto", node: "big", weighed: [
+      { node: "big", left: { cpus: 10, memoryGiB: 12, diskGiB: 190 } },
+      { node: "rj-firebat", refused: "is offline" },
+      { node: "small", left: { cpus: 10, memoryGiB: 4, diskGiB: 190 } },
+    ],
+  });
+  assert.equal(s.registry.pylon(thread.pylonId)!.node, "big");
+  assert.deepEqual(s.woken, ["big"]);
+  assert.deepEqual((await s.call("GET", `/v1/threads/${thread.id}`)).body.thread.placement, thread.placement, "show reads it back");
+
+  const next = await s.call("POST", "/v1/threads", { project: "acme", title: "Next", node: "auto" });
+  assert.equal(next.body.placement.node, "big", "big still has 8 GiB left once its unreported pylon is counted, and small 4");
+  const third = await s.call("POST", "/v1/threads", { project: "acme", title: "Third", node: "auto" });
+  assert.equal(third.body.placement.node, "small", "two unreported pylons leave big as little memory as small, and fewer CPUs");
+});
+
+test("--node auto counts the memory of a paused pylon about to wake, and not of one that stays paused", async (t) => {
+  const s = await withImage(t);
+  observeNode(s, "a", { total: 64, committed: 0 });
+  observeNode(s, "b", { total: 64, committed: 2 });
+  const waking = (await s.call("POST", "/v1/threads", { project: "acme", title: "Waking", node: "a" })).body as Thread;
+  observeNode(s, "a", { total: 64, committed: 0 }, { pylons: [{ pylonId: waking.pylonId, phase: "stopped", checkpoint: null, sessions: null }] });
+  assert.equal((await s.call("POST", "/v1/threads", { project: "acme", title: "Placed", node: "auto" })).body.placement.node, "b");
+  assert.equal((await s.call("POST", `/v1/threads/${waking.id}/archive`)).status, 200);
+  assert.equal((await s.call("POST", "/v1/threads", { project: "acme", title: "Placed again", node: "auto" })).body.placement.node, "a",
+    "once Waking stays paused, a has 60 GiB left, and b 54 with Placed still to boot there");
+});
+
+test("--node auto refuses with each node's reason when none can run the pylon, and starts nothing", async (t) => {
+  const s = await withImage(t);
+  observeNode(s, "full", { total: 32, committed: 30 });
+  observeNode(s, "no-image", { total: 64, committed: 0 }, { artifacts: [] });
+  observeNode(s, "no-secret", { total: 64, committed: 0 }, { grants: { secrets: [], gitSsh: true } });
+  observeNode(s, "no-ssh", { total: 64, committed: 0 }, { grants: { secrets: ["STRIPE_KEY"], gitSsh: false } });
+  observeNode(s, "old-probe", { total: 64, committed: 0 }, { grants: null });
+  const refused = await s.call("POST", "/v1/threads", { project: "acme", title: "Nowhere", node: "auto" });
+  assert.equal(refused.status, 409);
+  assert.equal(refused.body.error, "no node can run this pylon: full has 30 of 32 GiB of memory committed, and the pylon needs 4; "
+    + `no-image does not hold image ${image.id}; no-secret has no secret STRIPE_KEY in its secret file; `
+    + "no-ssh has no git SSH key to reach git@example.com:acme.git and git@github.com:ramtin/dotfiles.git; old-probe runs a probe too old to report what its pylons hold; rj-firebat is offline");
+  assert.deepEqual((await s.call("GET", "/v1/threads")).body, []);
+  assert.deepEqual(s.calls, [], "no conversation was started for it");
+  assert.deepEqual(s.woken, []);
+});
+
+test("without --node a thread still boots on its project's default node, and a named node is taken as named", async (t) => {
+  const s = await withImage(t);
+  observeNode(s, "big", { total: 64, committed: 0 });
+  const plain = await s.call("POST", "/v1/threads", { project: "acme", title: "Default" });
+  assert.deepEqual(plain.body.placement, { how: "default", node }, "even while the default node is offline and another has room");
+  assert.equal(s.registry.pylon(plain.body.pylonId)!.node, node);
+  const named = await s.call("POST", "/v1/threads", { project: "acme", title: "Named", node: "big" });
+  assert.deepEqual(named.body.placement, { how: "named", node: "big" });
+  assert.equal((await s.call("POST", "/v1/threads", { project: "acme", title: "x", node: "nowhere" })).status, 400);
 });
 
 test("a scratch project has no repository, and each of its threads starts an empty one on its branch", async (t) => {

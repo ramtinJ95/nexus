@@ -12,6 +12,7 @@ import type { Drain, ReleaseReport } from "../deploy/model.ts";
  * the control plane reads them, always whole, so they need no columns of their own.
  */
 import type { PrWatchState } from "./pr-watch.ts";
+import type { Placement } from "./placement.ts";
 import { DatabaseSync } from "node:sqlite";
 import type { ActivityFacts, RegistryWrite, ThreadStatus } from "../reconcile.ts";
 import type { HerdrStatus, JobStatus, NodeName, NodeObservation, PylonId, Subject, TailnetNodeId } from "../protocol.ts";
@@ -49,6 +50,8 @@ export interface Thread extends ActivityFacts {
   createdAt: number;
   seenAt: number | null;
   lastReplyAt: number | null;
+  /** Absent from a thread started before placements were recorded. */
+  placement?: Placement;
 }
 
 /** What the registry keeps of a pylon. The desired phase is derived from its thread on every tick. */
@@ -260,6 +263,7 @@ const migrations: readonly string[] = [
   // The session and pylon-side stamp of a Claude worker thread's latest turn, which name its checkout snapshot.
   `ALTER TABLE claude_workers ADD COLUMN turn_session TEXT;
    ALTER TABLE claude_workers ADD COLUMN turn_at INTEGER;`,
+  `ALTER TABLE threads ADD COLUMN placement TEXT;`,
 ];
 
 type Row = Record<string, unknown>;
@@ -292,6 +296,7 @@ function threadRow(r: Row): Thread {
     lastHumanActivityAt: r.last_human_activity_at as number,
     seenAt: r.seen_at as number | null,
     lastReplyAt: r.last_reply_at as number | null,
+    ...(r.placement === null ? {} : { placement: json<Placement>(r.placement) }),
   };
 }
 
@@ -348,7 +353,7 @@ export function openRegistry(path: string, clock = Date.now) {
     projects: db.prepare("SELECT record FROM projects ORDER BY id"),
     project: db.prepare("SELECT record FROM projects WHERE id = ?"),
     insertThread: db.prepare(`INSERT INTO threads (id, title, project, status, conversation_id, started_by, created_at,
-      agent_turn_running, last_agent_activity_at, last_human_activity_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
+      agent_turn_running, last_agent_activity_at, last_human_activity_at, placement) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
     threads: db.prepare("SELECT * FROM threads ORDER BY created_at, id"),
     threadsOf: db.prepare("SELECT * FROM threads WHERE project = ? ORDER BY created_at, id"),
     thread: db.prepare("SELECT * FROM threads WHERE id = ?"),
@@ -714,7 +719,7 @@ export function openRegistry(path: string, clock = Date.now) {
       if (pylon.pylonId !== thread.pylonId || pylon.thread !== thread.id) throw new Error(`pylon ${pylon.pylonId} does not belong to thread ${thread.id}`);
       transaction(() => {
         q.insertThread.run(thread.id, thread.title, thread.project, thread.status, thread.conversationId, thread.startedBy, thread.createdAt,
-          thread.agentTurnRunning ? 1 : 0, thread.lastAgentActivityAt, thread.lastHumanActivityAt);
+          thread.agentTurnRunning ? 1 : 0, thread.lastAgentActivityAt, thread.lastHumanActivityAt, thread.placement === undefined ? null : JSON.stringify(thread.placement));
         q.insertPylon.run(pylonParams(pylon));
         if (claudePrompt !== undefined) db.prepare("INSERT INTO claude_workers (thread, prompt, state, model) VALUES (?, ?, 'pending', ?)").run(thread.id, claudePrompt, model);
       });

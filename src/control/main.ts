@@ -47,7 +47,7 @@ const configSchema = z.strictObject({
   /** The control plane's own tailnet node. The CLI on the same machine calls the API as this node. */
   self: z.strictObject({ tailnetNodeId: nodeId }),
   nodes: z.array(z.strictObject({
-    name: z.string().regex(/^[a-z0-9][a-z0-9-]{0,62}$/),
+    name: z.string().regex(/^[a-z0-9][a-z0-9-]{0,62}$/).refine((name) => name !== "auto", "auto is what `start --node auto` asks for, so no node may be named it"),
     tailnetHost: z.string().min(1),
     tailnetNodeId: nodeId,
   })).min(1),

@@ -17,6 +17,11 @@ test("a config without the harness, or with a relative harness path, is refused"
   assert.throws(() => parseConfig(JSON.stringify({ ...rest, harness: { ...harness, storage: "harness.sqlite" } })), /absolute path/);
 });
 
+test("no node may be named auto, which start --node auto asks for", () => {
+  const config = JSON.parse(example);
+  assert.throws(() => parseConfig(JSON.stringify({ ...config, nodes: [{ ...config.nodes[0], name: "auto" }] })), /no node may be named it/);
+});
+
 test("preview ports default to 10200 to 10999, and a range that ends before it starts is refused", () => {
   const { previewPorts, ...rest } = JSON.parse(example);
   assert.deepEqual(previewPorts, { first: 10200, last: 10999 });
