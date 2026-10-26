@@ -14,34 +14,36 @@ Verified in this task's pylon on 2026-10-26, on branch `review-flow`, with Claud
 
 `drive.mjs` drives it through the Mac CLI only (`node src/cli/nexus.ts` with `NEXUS_URL` and `NEXUS_SOCKS=none`), and saves each step's command, output and exit code. The PR comment is posted to the stand-in GitHub, as the repository's owner would.
 
+Each run's folder holds the numbered CLI steps, `drive.log` and `timeline.txt`, and the stack's logs: `github.log`, `typed.log` (every message typed into Claude), `reviewer.log`, `check.log` and `release.log`. The runs were made after the fixes for the first review of this branch. The builder's choice to fix or reject a finding varies from run to run, so each run's task is given.
+
 ## A review that lands (`landed/`)
 
-The first drive stopped on a bug in the driver, which read `typed.log` before the stack wrote it. It was resumed against the same builder with `BUILDER=`, so the numbered files of the two drives interleave: `01-start` and `02-show-linked` are the first drive's, and the rest the resumed one's. `drive.log` and `timeline.txt` show both.
+The task asked for a script that prints `hello`, and said a reviewer's findings would arrive as messages to fix.
 
 - `01-start.txt`, `02-show-linked.txt`. `nexus start --claude` started the builder. It pushed `feature`, and the PR watch linked PR #1.
-- `typed.log`, `02-conversation-after-comment.txt`. The owner's PR comment, with CRLF line ends, was typed into the Claude worker's session as one prompt starting with `[Nexus PR watch — automated, not a message from the person]`, and Claude answered it. Before this branch the PR watch dropped it.
-- `03-review.txt`. `nexus review <builder> --land` started review `rv-54c44b5c` with a harness reviewer on `gpt-6-astra`, another model family than the builder's `claude-opus-5-5`.
-- `reviewer.log`, `08-conversation-builder.txt`, `09-conversation-reviewer.txt`. Round 1: the reviewer ran the pushed script, found that `sh greet.sh Ada` printed `hello`, and requested a change (F1, serious). The findings were typed into Claude with the `nexus-review-answers` block to fill in. Claude fixed `greet.sh`, pushed `0418b74`, and answered F1 as fixed in the block. Round 2: the reviewer got the new commits and the answer, and approved.
-- `check.log`. `.nexus/check` started detached at `0418b74` in the reviewer's clone, and the next exec read `done 0`.
-- `github.log`, `release.log`. The landing merged with `sha` `0418b74` and squashed it into `11d5fd3`. It set `11d5fd3` as the desired release, recorded as `nexus review rv-54c44b5c`, and ended `landed` once both roles reported it healthy.
-- `04-show-ended.txt`, `05-show-ended-json.txt`, `06-events-review.txt`. `show` prints the review's line, and the event log has every `review.changed` from `reviewing` round 1 to `landed`, between 01:08:48 and 01:09:14.
-- `13-land-again.txt`. A second `nexus land` exits 5: the review already merged.
+- `typed.log`, `03-conversation-after-comment.txt`. The owner's PR comment, with CRLF line ends, was typed into the Claude worker's session as one prompt starting with `[Nexus PR watch — automated, not a message from the person]`, and Claude answered it. Before this branch the PR watch dropped it.
+- `04-review.txt`. `nexus review <builder> --land` started review `rv-6b055ce0` with a harness reviewer on `gpt-6-astra`, another model family than the builder's `claude-opus-5-5`.
+- `reviewer.log`, `typed.log`, `09-conversation-builder.txt`, `10-conversation-reviewer.txt`. Round 1: the reviewer ran the pushed script, found that `sh greet.sh Ada` printed `hello`, and requested a change (F1, serious). Request `rv-6b055ce0:2` typed the findings into Claude with its own token. Claude fixed `greet.sh`, pushed `c5ae5fa`, and answered F1 as fixed in the block. Round 2, request `rv-6b055ce0:3`, sent the reviewer the new commits and the answer, under a new token, and it approved.
+- `check.log`. `.nexus/check` started detached at `c5ae5fa` in the reviewer's clone, and the next exec read `done 0`.
+- `github.log`, `release.log`. The landing merged with `sha` `c5ae5fa` and squashed it into `6a73de6`. It set `6a73de6` as the desired release, recorded as `nexus review rv-6b055ce0`, and ended `landed` once both roles reported it healthy.
+- `05-show-ended.txt`, `07-events-review.txt`. `show` prints the review's line, and the event log has every `review.changed`, from `reviewing` round 1 through `checking` and `merging` to `landed`, in under 30 seconds.
+- `14-land-again.txt`. A second `nexus land` exits 5: the review already merged.
 
 ## A builder that rejects a finding (`disagreed/`)
 
-The same drive, with the same task. This time the builder rejected F1 with a reason, twice: greeting a name was outside its minimal task. The reviewer held its finding, so the loop never sent the builder's unchanged head for a check.
+The task asked for a script that prints `hello` and said nothing about reviews. The builder rejected F1 with a reason, twice: greeting a name was outside its minimal task. The reviewer held its finding, so the loop never ran a check on the unchanged head. An earlier run with the same task had complied, and this one did not, so the choice is the model's.
 
-- `08-conversation-builder.txt`. Both answers are `rejected`, each with a reason, in the round's block. No commit was pushed after the first.
-- `reviewer.log`, `06-events-review.txt`. Three rounds of `changes`, then `needs-person` with "The reviewer still requests changes after 3 rounds, the most this review allows."
-- `04-show-ended.txt`. The builder's attention is `decision`, and `needs you:` gives the reason. Nothing merged.
+- `09-conversation-builder.txt`. Both answers are `rejected`, each with a reason, in the request's block. Nothing was pushed after the first commit.
+- `reviewer.log`, `07-events-review.txt`. Three rounds of `changes`, then `needs-person` with "The reviewer still requests changes after 3 rounds, the most this review allows."
+- `05-show-ended.txt`. The builder's attention is `decision`, and `needs you:` gives the reason. Nothing merged.
 
 ## A deploy that fails rolls back (`rolled-back/`)
 
-Run with `FAIL_DEPLOY=1`, and with a task (`TASK=`) that already asks for the name, so the reviewer approved in round 1.
+Run with `FAIL_DEPLOY=1`, and with a task that already asked for the name, so the reviewer approved in round 1.
 
 - `check.log`, `github.log`. `.nexus/check` passed at the approved head, and the landing merged it.
-- `release.log`. The merge commit became the desired release, the stand-in worker reported it rolled back, and the loop set the previous release, `777f1a1`, back as desired, recorded as the review's rollback.
-- `04-show-ended.txt`. The builder's attention is `decision`, with three `needs you:` lines: which components failed and why, which release it rolled back to, and that the merge commit is still on the default branch to revert.
+- `release.log`. The merge commit became the desired release, the stand-in worker reported it rolled back, and the loop set the previous release, `b254b12`, back as desired, recorded as the review's rollback.
+- `05-show-ended.txt`. The builder's attention is `decision`, with three `needs you:` lines: which components failed and why, which release it rolled back to, and that the merge commit is still on the default branch to revert.
 
 ## Nested virtualization (`nested-kvm.txt`)
 

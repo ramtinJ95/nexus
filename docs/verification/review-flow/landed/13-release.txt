@@ -1,0 +1,5 @@
+$ nexus release
+Desired: 6a73de6b6a674b8674e11ff3427fa7462644f82b by nexus review rv-6b055ce0 at 2026-10-26T01:18:56.170Z
+verify-node control: 6a73de6b6a674b8674e11ff3427fa7462644f82b healthy
+verify-node probe: 6a73de6b6a674b8674e11ff3427fa7462644f82b healthy
+--- exit 0

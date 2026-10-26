@@ -1,8 +1,0 @@
-$ nexus events --kind release.changed
-1 2026-10-26T01:08:01.852Z - release.changed {"desired":{"commit":"4ead3e33e6a911423e27e278daab1af87f66ab8f","requestedBy":"verify seed","requestedAt":1792976881851}}
-2 2026-10-26T01:08:01.871Z - release.changed {"node":"verify-node","role":"control","commit":"4ead3e33e6a911423e27e278daab1af87f66ab8f","target":"4ead3e33e6a911423e27e278daab1af87f66ab8f","state":"healthy","reason":null}
-3 2026-10-26T01:08:01.897Z - release.changed {"node":"verify-node","role":"probe","commit":"4ead3e33e6a911423e27e278daab1af87f66ab8f","target":"4ead3e33e6a911423e27e278daab1af87f66ab8f","state":"healthy","reason":null}
-23 2026-10-26T01:09:10.101Z - release.changed {"desired":{"commit":"11d5fd3c389443c4fae1ec2dcbc243d9b6436f6e","requestedBy":"nexus review rv-54c44b5c","requestedAt":1792976950101}}
-24 2026-10-26T01:09:13.128Z - release.changed {"node":"verify-node","role":"control","commit":"11d5fd3c389443c4fae1ec2dcbc243d9b6436f6e","target":"11d5fd3c389443c4fae1ec2dcbc243d9b6436f6e","state":"healthy","reason":null}
-25 2026-10-26T01:09:13.139Z - release.changed {"node":"verify-node","role":"probe","commit":"11d5fd3c389443c4fae1ec2dcbc243d9b6436f6e","target":"11d5fd3c389443c4fae1ec2dcbc243d9b6436f6e","state":"healthy","reason":null}
---- exit 0

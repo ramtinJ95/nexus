@@ -1,11 +1,11 @@
-$ nexus events --thread th-c99d60e1c3ab --kind review.changed --kind attention.changed --kind pull-request.feedback
-5 2026-10-26T01:11:18.539Z th-c99d60e1c3ab attention.changed {"attention":"working"}
-8 2026-10-26T01:11:34.315Z th-c99d60e1c3ab attention.changed {"attention":"reply"}
-9 2026-10-26T01:11:38.403Z th-c99d60e1c3ab pull-request.feedback {"requestId":"pr-watch:eb595444-750c-4c68-b07d-83c3cd375139"}
-12 2026-10-26T01:11:42.201Z th-c99d60e1c3ab review.changed {"review":"rv-1ccfed28","reviewer":"th-6cdb3af81369","phase":{"kind":"reviewing"},"round":1}
-15 2026-10-26T01:11:45.452Z th-c99d60e1c3ab review.changed {"review":"rv-1ccfed28","reviewer":"th-6cdb3af81369","phase":{"kind":"checking","startedAt":1792977105452},"round":1}
-16 2026-10-26T01:11:47.481Z th-c99d60e1c3ab review.changed {"review":"rv-1ccfed28","reviewer":"th-6cdb3af81369","phase":{"kind":"merging"},"round":1}
-17 2026-10-26T01:11:47.537Z th-c99d60e1c3ab review.changed {"review":"rv-1ccfed28","reviewer":"th-6cdb3af81369","phase":{"kind":"deploying","commit":"92f9fcc9138412338e5b666da65e5ae621cd2108","previous":"777f1a18640fd4dde0fd66de01acba3de0f94804","requested":false,"deadline":1792978907537},"round":1}
-22 2026-10-26T01:11:51.546Z th-c99d60e1c3ab review.changed {"review":"rv-1ccfed28","reviewer":"th-6cdb3af81369","phase":{"kind":"needs-person","reasons":["The deploy of 92f9fcc9138412338e5b666da65e5ae621cd2108 failed: verify-node control rolled-back (health check failed); verify-node probe rolled-back (health check failed).","Rolled back to the previous release, 777f1a18640fd4dde0fd66de01acba3de0f94804.","92f9fcc9138412338e5b666da65e5ae621cd2108 is still on the default branch, so revert it before the next deploy."]},"round":1}
-23 2026-10-26T01:11:51.546Z th-c99d60e1c3ab attention.changed {"attention":"decision"}
+$ nexus events --thread th-30d1b0720c04 --kind review.changed --kind attention.changed --kind pull-request.feedback
+5 2026-10-26T01:19:16.916Z th-30d1b0720c04 attention.changed {"attention":"working"}
+8 2026-10-26T01:19:33.089Z th-30d1b0720c04 attention.changed {"attention":"reply"}
+9 2026-10-26T01:19:36.586Z th-30d1b0720c04 pull-request.feedback {"requestId":"pr-watch:3664f87e-91e8-4096-b563-a0a42d0da0d7"}
+12 2026-10-26T01:19:39.993Z th-30d1b0720c04 review.changed {"review":"rv-9d744c18","reviewer":"th-75c1d55fe5bb","phase":{"kind":"reviewing"},"round":1}
+15 2026-10-26T01:19:43.557Z th-30d1b0720c04 review.changed {"review":"rv-9d744c18","reviewer":"th-75c1d55fe5bb","phase":{"kind":"checking","startedAt":1792977583557},"round":1}
+16 2026-10-26T01:19:45.587Z th-30d1b0720c04 review.changed {"review":"rv-9d744c18","reviewer":"th-75c1d55fe5bb","phase":{"kind":"merging"},"round":1}
+17 2026-10-26T01:19:45.648Z th-30d1b0720c04 review.changed {"review":"rv-9d744c18","reviewer":"th-75c1d55fe5bb","phase":{"kind":"deploying","commit":"ccc4c6c9fd516e2b1441b70f23587cb526b7ecce","previous":"b254b123f4dc1edb800acb012f083d434e89159d","requested":false,"deadline":1792979385648},"round":1}
+22 2026-10-26T01:19:49.572Z th-30d1b0720c04 review.changed {"review":"rv-9d744c18","reviewer":"th-75c1d55fe5bb","phase":{"kind":"needs-person","reasons":["The deploy of ccc4c6c9fd516e2b1441b70f23587cb526b7ecce failed: verify-node control rolled-back (health check failed); verify-node probe rolled-back (health check failed).","Rolled back to the previous release, b254b123f4dc1edb800acb012f083d434e89159d.","ccc4c6c9fd516e2b1441b70f23587cb526b7ecce is still on the default branch, so revert it before the next deploy."]},"round":1}
+23 2026-10-26T01:19:49.572Z th-30d1b0720c04 attention.changed {"attention":"decision"}
 --- exit 0

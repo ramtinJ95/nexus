@@ -1,5 +1,0 @@
-$ nexus release
-Desired: 11d5fd3c389443c4fae1ec2dcbc243d9b6436f6e by nexus review rv-54c44b5c at 2026-10-26T01:09:10.101Z
-verify-node control: 11d5fd3c389443c4fae1ec2dcbc243d9b6436f6e healthy
-verify-node probe: 11d5fd3c389443c4fae1ec2dcbc243d9b6436f6e healthy
---- exit 0

@@ -1,19 +1,19 @@
-$ nexus show th-c99d60e1c3ab --json
+$ nexus show th-30d1b0720c04 --json
 {
   "thread": {
-    "id": "th-c99d60e1c3ab",
+    "id": "th-30d1b0720c04",
     "title": "Greet script",
     "project": "nexus",
-    "pylonId": "pylon-th-c99d60e1c3ab",
+    "pylonId": "pylon-th-30d1b0720c04",
     "status": "active",
     "conversationId": null,
     "startedBy": "nVERIFY",
-    "createdAt": 1792977075465,
+    "createdAt": 1792977554005,
     "agentTurnRunning": false,
-    "lastAgentActivityAt": 1792977101844,
-    "lastHumanActivityAt": 1792977075465,
+    "lastAgentActivityAt": 1792977579948,
+    "lastHumanActivityAt": 1792977554005,
     "seenAt": null,
-    "lastReplyAt": 1792977101844
+    "lastReplyAt": 1792977579948
   },
   "claudeWorker": {
     "model": "claude-opus-5-5",
@@ -21,14 +21,14 @@ $ nexus show th-c99d60e1c3ab --json
   },
   "attention": "decision",
   "seenAt": null,
-  "lastReplyAt": 1792977101844,
+  "lastReplyAt": 1792977579948,
   "desired": "running",
   "pylon": {
     "grantsOutdated": false,
-    "id": "pylon-th-c99d60e1c3ab",
+    "id": "pylon-th-30d1b0720c04",
     "node": "verify-node",
     "failed": null,
-    "observedAt": "2026-10-26T01:11:51.438Z",
+    "observedAt": "2026-10-26T01:19:49.676Z",
     "actualState": "running",
     "retryRefused": null
   },
@@ -37,12 +37,12 @@ $ nexus show th-c99d60e1c3ab --json
   "ports": [],
   "outputs": [
     {
-      "thread": "th-c99d60e1c3ab",
+      "thread": "th-30d1b0720c04",
       "kind": "branch",
       "ref": "origin/feature"
     },
     {
-      "thread": "th-c99d60e1c3ab",
+      "thread": "th-30d1b0720c04",
       "kind": "pull-request",
       "ref": "https://github.com/ramtinJ95/nexus/pull/1"
     }
@@ -65,9 +65,11 @@ $ nexus show th-c99d60e1c3ab --json
     }
   ],
   "review": {
-    "id": "rv-1ccfed28",
-    "builder": "th-c99d60e1c3ab",
-    "reviewer": "th-6cdb3af81369",
+    "id": "rv-9d744c18",
+    "expect": "rv-9d744c18:55e87b0b8054",
+    "sent": 1,
+    "builder": "th-30d1b0720c04",
+    "reviewer": "th-75c1d55fe5bb",
     "pr": {
       "repo": "ramtinJ95/nexus",
       "number": 1,
@@ -84,9 +86,9 @@ $ nexus show th-c99d60e1c3ab --json
     },
     "rounds": [
       {
-        "head": "648bb086cefa339dcac59d141af4c99d4da752c9",
+        "head": "fceca4e6fa3c5b7c6bbee5329e2b7dc98825196c",
         "verdict": {
-          "token": "rv-1ccfed28:1",
+          "token": "rv-9d744c18:55e87b0b8054",
           "verdict": "approve",
           "findings": [],
           "reserved": [],
@@ -99,19 +101,19 @@ $ nexus show th-c99d60e1c3ab --json
         "answers": null
       }
     ],
-    "merged": "92f9fcc9138412338e5b666da65e5ae621cd2108",
+    "merged": "ccc4c6c9fd516e2b1441b70f23587cb526b7ecce",
     "phase": {
       "kind": "needs-person",
       "reasons": [
-        "The deploy of 92f9fcc9138412338e5b666da65e5ae621cd2108 failed: verify-node control rolled-back (health check failed); verify-node probe rolled-back (health check failed).",
-        "Rolled back to the previous release, 777f1a18640fd4dde0fd66de01acba3de0f94804.",
-        "92f9fcc9138412338e5b666da65e5ae621cd2108 is still on the default branch, so revert it before the next deploy."
+        "The deploy of ccc4c6c9fd516e2b1441b70f23587cb526b7ecce failed: verify-node control rolled-back (health check failed); verify-node probe rolled-back (health check failed).",
+        "Rolled back to the previous release, b254b123f4dc1edb800acb012f083d434e89159d.",
+        "ccc4c6c9fd516e2b1441b70f23587cb526b7ecce is still on the default branch, so revert it before the next deploy."
       ]
     },
     "outbox": null,
-    "since": 1792977102213,
+    "since": 1792977580001,
     "nudges": 0,
-    "startedAt": 1792977102192
+    "startedAt": 1792977579989
   },
   "attach": "herdr --session nexus",
   "agent": null

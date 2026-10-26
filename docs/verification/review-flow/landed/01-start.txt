@@ -1,16 +1,16 @@
-$ nexus start --project nexus --title Greet script --claude Add a shell script greet.sh at the repository root that prints hello. Commit it on a new branch named feature and push it with `git push -u origin feature`. Do not open a pull request yourself: Nexus opens it for this verification. Keep it minimal, with no subagents, tests or docs. --json
+$ nexus start --project nexus --title Greet script --claude Add a shell script greet.sh at the repository root that prints hello. Commit it on a new branch named feature and push it with `git push -u origin feature`. Do not open a pull request yourself: Nexus opens it for this verification. Keep it minimal, with no subagents, tests or docs. A reviewer on another model will review the pull request and its findings will arrive here as messages: fix them on the same branch and push. --json
 {
-  "id": "th-b58e9a803ee8",
+  "id": "th-9fbfc2a1c07d",
   "title": "Greet script",
   "project": "nexus",
-  "pylonId": "pylon-th-b58e9a803ee8",
+  "pylonId": "pylon-th-9fbfc2a1c07d",
   "status": "active",
   "conversationId": null,
   "startedBy": "nVERIFY",
-  "createdAt": 1792976890316,
+  "createdAt": 1792977488287,
   "agentTurnRunning": false,
   "lastAgentActivityAt": 0,
-  "lastHumanActivityAt": 1792976890316,
+  "lastHumanActivityAt": 1792977488287,
   "seenAt": null,
   "lastReplyAt": null
 }

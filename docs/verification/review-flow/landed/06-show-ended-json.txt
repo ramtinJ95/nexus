@@ -1,19 +1,19 @@
-$ nexus show th-b58e9a803ee8 --json
+$ nexus show th-9fbfc2a1c07d --json
 {
   "thread": {
-    "id": "th-b58e9a803ee8",
+    "id": "th-9fbfc2a1c07d",
     "title": "Greet script",
     "project": "nexus",
-    "pylonId": "pylon-th-b58e9a803ee8",
+    "pylonId": "pylon-th-9fbfc2a1c07d",
     "status": "active",
     "conversationId": null,
     "startedBy": "nVERIFY",
-    "createdAt": 1792976890316,
+    "createdAt": 1792977488287,
     "agentTurnRunning": false,
-    "lastAgentActivityAt": 1792976941140,
-    "lastHumanActivityAt": 1792976890316,
+    "lastAgentActivityAt": 1792977527382,
+    "lastHumanActivityAt": 1792977488287,
     "seenAt": null,
-    "lastReplyAt": 1792976941140
+    "lastReplyAt": 1792977527382
   },
   "claudeWorker": {
     "model": "claude-opus-5-5",
@@ -21,14 +21,14 @@ $ nexus show th-b58e9a803ee8 --json
   },
   "attention": "reply",
   "seenAt": null,
-  "lastReplyAt": 1792976941140,
+  "lastReplyAt": 1792977527382,
   "desired": "running",
   "pylon": {
     "grantsOutdated": false,
-    "id": "pylon-th-b58e9a803ee8",
+    "id": "pylon-th-9fbfc2a1c07d",
     "node": "verify-node",
     "failed": null,
-    "observedAt": "2026-10-26T01:09:14.120Z",
+    "observedAt": "2026-10-26T01:19:00.196Z",
     "actualState": "running",
     "retryRefused": null
   },
@@ -37,12 +37,12 @@ $ nexus show th-b58e9a803ee8 --json
   "ports": [],
   "outputs": [
     {
-      "thread": "th-b58e9a803ee8",
+      "thread": "th-9fbfc2a1c07d",
       "kind": "branch",
       "ref": "origin/feature"
     },
     {
-      "thread": "th-b58e9a803ee8",
+      "thread": "th-9fbfc2a1c07d",
       "kind": "pull-request",
       "ref": "https://github.com/ramtinJ95/nexus/pull/1"
     }
@@ -65,9 +65,11 @@ $ nexus show th-b58e9a803ee8 --json
     }
   ],
   "review": {
-    "id": "rv-54c44b5c",
-    "builder": "th-b58e9a803ee8",
-    "reviewer": "th-b4504777b47e",
+    "id": "rv-6b055ce0",
+    "expect": "rv-6b055ce0:3915da0d2b30",
+    "sent": 3,
+    "builder": "th-9fbfc2a1c07d",
+    "reviewer": "th-1191237ef1b2",
     "pr": {
       "repo": "ramtinJ95/nexus",
       "number": 1,
@@ -84,9 +86,9 @@ $ nexus show th-b58e9a803ee8 --json
     },
     "rounds": [
       {
-        "head": "3bea73877900505e6810bfcec087c0b557447dde",
+        "head": "0a7b46e16e7475b7eb682100c11f0fabd5bf4e17",
         "verdict": {
-          "token": "rv-54c44b5c:1",
+          "token": "rv-6b055ce0:f69065e5787e",
           "verdict": "changes",
           "findings": [
             {
@@ -105,14 +107,14 @@ $ nexus show th-b58e9a803ee8 --json
           {
             "id": "F1",
             "action": "fixed",
-            "reason": "greet.sh now runs echo \"hello${1:+ $1}\", which greets the first argument when given and prints plain hello otherwise. Verified that sh greet.sh prints hello, sh greet.sh Ada prints hello Ada, and ./greet.sh \"Ada Lovelace\" prints hello Ada Lovelace. Pushed as 0418b74."
+            "reason": "greet.sh now runs echo \"hello${1:+ $1}\". Verified that sh greet.sh prints hello and sh greet.sh Ada prints hello Ada. Pushed as c5ae5fa."
           }
         ]
       },
       {
-        "head": "0418b741cbe82d937b5860edb98468e40ac7756d",
+        "head": "c5ae5fa718a26bc3cfff244f3cf3fca77b137b3e",
         "verdict": {
-          "token": "rv-54c44b5c:2",
+          "token": "rv-6b055ce0:3915da0d2b30",
           "verdict": "approve",
           "findings": [],
           "reserved": [],
@@ -125,15 +127,15 @@ $ nexus show th-b58e9a803ee8 --json
         "answers": null
       }
     ],
-    "merged": "11d5fd3c389443c4fae1ec2dcbc243d9b6436f6e",
+    "merged": "6a73de6b6a674b8674e11ff3427fa7462644f82b",
     "phase": {
       "kind": "landed",
-      "commit": "11d5fd3c389443c4fae1ec2dcbc243d9b6436f6e"
+      "commit": "6a73de6b6a674b8674e11ff3427fa7462644f82b"
     },
     "outbox": null,
-    "since": 1792976944037,
+    "since": 1792977530084,
     "nudges": 0,
-    "startedAt": 1792976928824
+    "startedAt": 1792977514665
   },
   "attach": "herdr --session nexus",
   "agent": null

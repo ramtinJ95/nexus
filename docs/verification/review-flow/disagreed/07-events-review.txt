@@ -1,12 +1,12 @@
-$ nexus events --thread th-650268f41ac5 --kind review.changed --kind attention.changed --kind pull-request.feedback
-5 2026-10-26T01:09:54.330Z th-650268f41ac5 attention.changed {"attention":"working"}
-8 2026-10-26T01:10:11.599Z th-650268f41ac5 attention.changed {"attention":"reply"}
-9 2026-10-26T01:10:15.126Z th-650268f41ac5 pull-request.feedback {"requestId":"pr-watch:8015f2a2-33e6-4cc4-89c8-2d4d9e255773"}
-11 2026-10-26T01:10:17.707Z th-650268f41ac5 review.changed {"review":"rv-9f707d04","reviewer":"th-d2f6a0ae0235","phase":{"kind":"reviewing"},"round":1}
-15 2026-10-26T01:10:20.110Z th-650268f41ac5 review.changed {"review":"rv-9f707d04","reviewer":"th-d2f6a0ae0235","phase":{"kind":"fixing"},"round":1}
-18 2026-10-26T01:10:30.123Z th-650268f41ac5 review.changed {"review":"rv-9f707d04","reviewer":"th-d2f6a0ae0235","phase":{"kind":"reviewing"},"round":2}
-20 2026-10-26T01:10:34.110Z th-650268f41ac5 review.changed {"review":"rv-9f707d04","reviewer":"th-d2f6a0ae0235","phase":{"kind":"fixing"},"round":2}
-23 2026-10-26T01:10:42.133Z th-650268f41ac5 review.changed {"review":"rv-9f707d04","reviewer":"th-d2f6a0ae0235","phase":{"kind":"reviewing"},"round":3}
-25 2026-10-26T01:10:46.111Z th-650268f41ac5 review.changed {"review":"rv-9f707d04","reviewer":"th-d2f6a0ae0235","phase":{"kind":"needs-person","reasons":["The reviewer still requests changes after 3 rounds, the most this review allows."]},"round":3}
-26 2026-10-26T01:10:46.111Z th-650268f41ac5 attention.changed {"attention":"decision"}
+$ nexus events --thread th-8dfe8affbd8a --kind review.changed --kind attention.changed --kind pull-request.feedback
+5 2026-10-26T01:16:48.254Z th-8dfe8affbd8a attention.changed {"attention":"working"}
+8 2026-10-26T01:17:08.965Z th-8dfe8affbd8a attention.changed {"attention":"reply"}
+9 2026-10-26T01:17:14.601Z th-8dfe8affbd8a pull-request.feedback {"requestId":"pr-watch:b9a869e7-c22d-48d6-a99c-f684e84ed275"}
+12 2026-10-26T01:17:19.030Z th-8dfe8affbd8a review.changed {"review":"rv-d44f5e13","reviewer":"th-c70feae4599f","phase":{"kind":"reviewing"},"round":1}
+15 2026-10-26T01:17:22.639Z th-8dfe8affbd8a review.changed {"review":"rv-d44f5e13","reviewer":"th-c70feae4599f","phase":{"kind":"fixing"},"round":1}
+18 2026-10-26T01:17:32.661Z th-8dfe8affbd8a review.changed {"review":"rv-d44f5e13","reviewer":"th-c70feae4599f","phase":{"kind":"reviewing"},"round":2}
+20 2026-10-26T01:17:36.641Z th-8dfe8affbd8a review.changed {"review":"rv-d44f5e13","reviewer":"th-c70feae4599f","phase":{"kind":"fixing"},"round":2}
+23 2026-10-26T01:17:44.663Z th-8dfe8affbd8a review.changed {"review":"rv-d44f5e13","reviewer":"th-c70feae4599f","phase":{"kind":"reviewing"},"round":3}
+25 2026-10-26T01:17:48.646Z th-8dfe8affbd8a review.changed {"review":"rv-d44f5e13","reviewer":"th-c70feae4599f","phase":{"kind":"needs-person","reasons":["The reviewer still requests changes after 3 rounds, the most this review allows."]},"round":3}
+26 2026-10-26T01:17:48.646Z th-8dfe8affbd8a attention.changed {"attention":"decision"}
 --- exit 0

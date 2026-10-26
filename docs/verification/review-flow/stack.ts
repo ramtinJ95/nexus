@@ -171,7 +171,7 @@ const harness = {
   },
 };
 function answer(thread: ThreadId, request: string) {
-  const token = /"token": "(rv-[0-9a-f]+:\d+)"/.exec(request)?.[1] ?? /token "(rv-[0-9a-f]+:\d+)"/.exec(request)?.[1];
+  const token = /"token": "(rv-[0-9a-f]+:[0-9a-f]+)"/.exec(request)?.[1] ?? /token "(rv-[0-9a-f]+:[0-9a-f]+)"/.exec(request)?.[1];
   const review = registry.reviews().find((r) => r.reviewer === thread);
   const head = review?.rounds.at(-1)?.head;
   if (token === undefined || head === undefined) return;
