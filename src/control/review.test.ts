@@ -389,6 +389,31 @@ test("a check that fails again at a head where it failed before goes to the pers
   assert.deepEqual(f.review().phase, { kind: "needs-person", reasons: [`.nexus/check failed again at ${head1}, where it failed before.`, "The check's output:\n1 test failed"] });
 });
 
+test("a reviewer's repeat approval of an unchanged head costs no round", async (t) => {
+  const f = fixture(t);
+  const loop = f.loop();
+  await loop.start(f.builder, { land: null, rounds: 2 });
+  await loop.poll();
+  f.reply(f.review().reviewer, verdict(f.review(), { findings: [serious] }));
+  await loop.poll();
+  f.reply(f.builder, answers(f.review(), [{ id: "F1", action: "rejected", reason: "The cache is rebuilt on every deploy." }]));
+  await loop.poll();
+  assert.equal(f.review().rounds[1]!.head, head1);
+  f.check = { kind: "done", passed: false, output: "1 test failed" };
+  f.reply(f.review().reviewer, verdict(f.review(), {}));
+  await loop.poll();
+  assert.equal(f.review().phase.kind, "fixing", "the failed check reaches the builder: the approval at the same head spent no round");
+  assert.match(f.sent.at(-1)!.message.text, /^Round 1 of at most 2/m);
+  f.snapshot = { ...f.snapshot, detail: { ...f.snapshot.detail, head: head2 } };
+  f.reply(f.builder, answers(f.review(), [{ id: "CHECK", action: "fixed", reason: "Fixed the test." }]));
+  await loop.poll();
+  assert.match(f.sent.at(-1)!.message.text, /^Round 2 of at most 2/m);
+  f.check = { kind: "done", passed: true, output: "ok" };
+  f.reply(f.review().reviewer, verdict(f.review(), {}));
+  await loop.poll();
+  assert.deepEqual(f.review().phase, { kind: "approved" });
+});
+
 test("a landing sees its deploy through, rolling back, though its threads are archived meanwhile", async (t) => {
   const f = fixture(t);
   f.registry.setDesiredRelease({ commit: previous, requestedBy: "person", requestedAt: 1 });
