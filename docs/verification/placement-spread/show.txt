@@ -1,0 +1,20 @@
+th-82a90095078c  overlap one
+pylon: pylon-th-82a90095078c on spare-node, absent, observed 17s ago
+placement: auto chose spare-node, which had the most room left after this pylon; infra-testbench had 15.3 GiB memory, 8 CPUs and 320 GiB disk left; rj-firebat is overcommitted, with 48 of 22.8 GiB of memory committed; spare-node had 19.3 GiB memory, 10 CPUs and 360 GiB disk left
+
+th-bc18ad89b27f  overlap two
+pylon: pylon-th-bc18ad89b27f on infra-testbench, absent, observed 18s ago
+placement: auto chose infra-testbench, which had the most room left after this pylon; infra-testbench had 23.3 GiB memory, 12 CPUs and 360 GiB disk left; rj-firebat is overcommitted, with 48 of 22.8 GiB of memory committed; spare-node had 19.3 GiB memory, 10 CPUs and 360 GiB disk left
+
+th-2e2166488970  before the edit
+pylon: pylon-th-2e2166488970 on rj-firebat, absent, observed 18s ago
+placement: rj-firebat, the project's default node
+
+th-60514862b7bc  after the edit
+pylon: pylon-th-60514862b7bc on infra-testbench, absent, observed 19s ago
+placement: auto chose infra-testbench, which had the most room left after this pylon; infra-testbench had 15.3 GiB memory, 8 CPUs and 320 GiB disk left; rj-firebat is overcommitted, with 56 of 22.8 GiB of memory committed; spare-node had 11.3 GiB memory, 6 CPUs and 320 GiB disk left
+
+th-7c59b1ef8ad1  pinned
+pylon: pylon-th-7c59b1ef8ad1 on spare-node, absent, observed 19s ago
+placement: spare-node, as the start named
+

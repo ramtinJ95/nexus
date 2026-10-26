@@ -1,0 +1,2 @@
+overlap one: auto chose spare-node; infra-testbench had 15.3 GiB left; rj-firebat is overcommitted, with 48 of 22.8 GiB of memory committed; spare-node had 19.3 GiB left
+overlap two: auto chose infra-testbench; infra-testbench had 23.3 GiB left; rj-firebat is overcommitted, with 48 of 22.8 GiB of memory committed; spare-node had 19.3 GiB left

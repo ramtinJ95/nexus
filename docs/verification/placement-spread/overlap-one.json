@@ -1,0 +1,41 @@
+{
+  "id": "th-82a90095078c",
+  "title": "overlap one",
+  "project": "nexus",
+  "pylonId": "pylon-th-82a90095078c",
+  "status": "active",
+  "conversationId": "2",
+  "startedBy": "nLAPTOP",
+  "createdAt": 1792996096432,
+  "agentTurnRunning": false,
+  "lastAgentActivityAt": 0,
+  "lastHumanActivityAt": 1792996096432,
+  "seenAt": null,
+  "lastReplyAt": null,
+  "placement": {
+    "how": "auto",
+    "node": "spare-node",
+    "weighed": [
+      {
+        "node": "infra-testbench",
+        "left": {
+          "cpus": 8,
+          "memoryGiB": 15.3,
+          "diskGiB": 320
+        }
+      },
+      {
+        "node": "rj-firebat",
+        "refused": "is overcommitted, with 48 of 22.8 GiB of memory committed"
+      },
+      {
+        "node": "spare-node",
+        "left": {
+          "cpus": 10,
+          "memoryGiB": 19.3,
+          "diskGiB": 360
+        }
+      }
+    ]
+  }
+}
