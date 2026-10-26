@@ -250,7 +250,7 @@ function capacityText(c: Partial<NonNullable<NodeSummary["capacity"]>>, overcomm
 /**
  * Such as `5 up holding 20 CPUs and 40 GiB, 1 paused needing 8 GiB to wake, 3 archived, 1 crashed needing 8 GiB to retry,
  * 1 orphaned (pylon-x)`. Empty
- * for a node with no pylons, or never observed, or from a control plane older than 0.23.0, which sends no `pylons`.
+ * for a node with no pylons, or never observed, or from a control plane older than 0.24.0, which sends no `pylons`.
  */
 function pylonsText(p: NodePylons | null): string {
   if (p === null) return "";
