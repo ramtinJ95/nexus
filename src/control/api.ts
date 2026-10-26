@@ -601,7 +601,7 @@ export async function startApi(options: ApiOptions): Promise<Api> {
 
   /** Reads the pylon's checkout for the Files and Changes views, over one raw pipe per read. */
   async function inCheckout<T>(t: Thread, read: (checkout: CheckoutReader) => Promise<T>): Promise<T> {
-    const turn = t.conversationId === null ? null : await harness.latestTurn(t.id);
+    const turn = t.conversationId === null ? registry.latestClaudeTurn(t.id) : await harness.latestTurn(t.id);
     return inPylon(t, (probe, pylonId) => read(checkoutReader((argv) => probe.stream(pylonId, argv), checkoutDir, undefined, turn)));
   }
 

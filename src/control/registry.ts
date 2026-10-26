@@ -19,6 +19,7 @@ import type { Project, ProjectId, SessionHarness } from "../project.ts";
 import type { ImageId, ImageManifest, TemplateRecord } from "../images.ts";
 import type { PylonRecord } from "../tick.ts";
 import { needsPerson, reviewerCaller, type Review } from "./review.ts";
+import { claudeTurn } from "../../images/pylon/nexus-turn.ts";
 import { maxEntries, transcriptStart, type ClaudeEntry, type TranscriptCursor } from "../claude-transcript.ts";
 
 declare const brand: unique symbol;
@@ -256,6 +257,9 @@ const migrations: readonly string[] = [
    ALTER TABLE session_activity ADD COLUMN started_at INTEGER;`,
   // A builder thread's latest review, keyed by its builder. `reviewer` is the thread the review started to review it.
   `CREATE TABLE reviews (builder TEXT PRIMARY KEY REFERENCES threads (id), reviewer TEXT NOT NULL UNIQUE, record TEXT NOT NULL) STRICT;`,
+  // The session and pylon-side stamp of a Claude worker thread's latest turn, which name its checkout snapshot.
+  `ALTER TABLE claude_workers ADD COLUMN turn_session TEXT;
+   ALTER TABLE claude_workers ADD COLUMN turn_at INTEGER;`,
 ];
 
 type Row = Record<string, unknown>;
@@ -523,6 +527,11 @@ export function openRegistry(path: string, clock = Date.now) {
         ...(row.message == null ? {} : { message: row.message as string }),
       };
     },
+    /** The snapshot ID of the latest session.turn-started of any session on a Claude worker thread. */
+    latestClaudeTurn(thread: ThreadId): string | null {
+      const row = db.prepare("SELECT turn_session, turn_at FROM claude_workers WHERE thread = ? AND turn_at IS NOT NULL").get(thread);
+      return row === undefined ? null : claudeTurn(row.turn_session as string, row.turn_at as number);
+    },
     claudeTranscript,
     claudeEntries: (thread: ThreadId): ClaudeEntry[] => db.prepare("SELECT entry FROM claude_entries WHERE thread = ? ORDER BY seq").all(thread).map((r) => json<ClaudeEntry>(r.entry)),
     /**
@@ -591,6 +600,9 @@ export function openRegistry(path: string, clock = Date.now) {
         if (event.kind === "session.heartbeat" && current?.state !== "session.turn-started" && current?.state !== "session.waiting") return;
         if (event.kind === "session.turn-started" && event.session !== undefined) {
           db.prepare("UPDATE claude_workers SET state = 'started', message = NULL WHERE thread = ? AND session = ? AND state IN ('starting', 'stalled', 'failed')").run(thread, event.session);
+        }
+        if (event.kind === "session.turn-started") {
+          db.prepare("UPDATE claude_workers SET turn_session = ?, turn_at = ? WHERE thread = ? AND (turn_at IS NULL OR turn_at < ?)").run(session, at, thread, at);
         }
         db.prepare("INSERT INTO session_order VALUES (?, ?, ?, ?) ON CONFLICT(thread, session) DO UPDATE SET at = excluded.at, kind = excluded.kind").run(thread, session, at, event.kind);
         // Keep tombstones after activity rows end, with a floor guarding reports older than evicted cursors.

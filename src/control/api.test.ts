@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import type { DeploymentOptions } from "./releases.ts";
 import { attentionOf } from "./attention.ts";
 import { checkoutReader } from "../checkout-files.ts";
+import { claudeTurn, snapshotTurn } from "../../images/pylon/nexus-turn.ts";
 import { after, test } from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
@@ -13,6 +14,7 @@ import { claudeProjects, type ClaudeConversation } from "../claude-transcript.ts
 import { tmpdir } from "node:os";
 import { request } from "node:http";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { PassThrough } from "node:stream";
 import { promisify } from "node:util";
 import { WebSocket } from "ws";
@@ -1769,6 +1771,34 @@ async function withClaude(t: import("node:test").TestContext) {
   observeRunning(c, {});
   return { ...c, transcript: join(projects, "-home-user-workspace-repo", `${claudeSession}.jsonl`) };
 }
+
+test("a Claude worker thread's latest turn is the one its newest turn-started names, and a turn without a snapshot is refused", async (t) => {
+  const s = await withClaude(t);
+  const { repo } = await localCheckout(t, s);
+  const route = `/v1/threads/${s.thread.id}/changes?base=turn`;
+  const helper = fileURLToPath(new URL("../checkout-files.py", import.meta.url));
+  let sequence = 0;
+  const started = (session: string, at: number) => s.registry.reportSession(node, { sequence: ++sequence, pylon: s.thread.pylonId, time: Date.now(), event: { kind: "session.turn-started", session, at } });
+  const turn = async (session: string, at: number) => {
+    assert.ok(await snapshotTurn(repo, claudeTurn(session, at), 30_000, helper));
+    started(session, at);
+  };
+  const changed = async () => (await s.call("GET", route)).body.files.map((f: { path: string }) => f.path);
+  assert.equal((await s.call("GET", route)).status, 422, "no turn has started");
+  const at = Date.now();
+  await turn(claudeSession, at);
+  await writeFile(join(repo, "first.txt"), "first\n");
+  assert.deepEqual(await changed(), ["first.txt"]);
+  await turn(claudeSession, at + 1);
+  await writeFile(join(repo, "second.txt"), "second\n");
+  assert.deepEqual(await changed(), ["second.txt"]);
+  started("another-session", at);
+  assert.deepEqual(await changed(), ["second.txt"], "an older turn reported late does not replace the newest");
+  started(claudeSession, at + 2);
+  const stale = await s.call("GET", route);
+  assert.equal(stale.status, 422, "a turn whose hook took no snapshot, as on an older image, never shows the previous one");
+  assert.match(stale.body.error, /no latest-turn snapshot/);
+});
 
 const sent = (outcome: "sent" | "queued", resumed = false): CommandResult => ({ kind: "send-claude", outcome, herdrPane: "w1:p1", resumed });
 
