@@ -83,6 +83,8 @@ RUN cd /tmp \
 COPY --chmod=0755 nexus /usr/local/bin/nexus
 COPY --chmod=0755 nexus-claude-hook /usr/local/bin/nexus-claude-hook
 COPY nexus-heartbeat.ts /usr/local/bin/nexus-heartbeat.ts
+COPY nexus-turn.ts /usr/local/bin/nexus-turn.ts
+COPY checkout-files.py /usr/local/lib/nexus/checkout-files.py
 # The common dotfiles layer as a git repository, which the boot path clones into ~/.nexus/dotfiles and then
 # updates by fetch. It is owned by user because git refuses to clone a local repository another user owns.
 # The recipe carries files, not git objects, so its one commit names the upstream commit instead of being it,

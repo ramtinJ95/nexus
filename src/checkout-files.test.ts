@@ -4,11 +4,13 @@ import { execFile } from "node:child_process";
 import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { setFlagsFromString } from "node:v8";
 import { runInNewContext } from "node:vm";
 import { checkoutReader, CheckoutRefused, contentType, maxFileBytes, maxOpenPipes, pathsFit, type OpenPipe } from "./checkout-files.ts";
 import { processStream } from "./process-stream.ts";
+import { claudeTurn, snapshotTurn } from "../images/pylon/nexus-turn.ts";
 import type { ByteStream, StreamEnd } from "./protocol.ts";
 
 const run = promisify(execFile);
@@ -307,6 +309,20 @@ test("latest turn refuses an older pylon and a failed snapshot invalidates its p
   await assert.rejects(c.reader.changes("turn"), refused("no-base", /snapshot failed/));
   await c.reader.snapshot("two");
   await assert.rejects(c.reader.diff("turn", []), refused("no-base", /snapshot failed/));
+});
+
+test("the Claude hook's snapshot is the base of its turn, and one past its deadline leaves none under its ID", async (t) => {
+  const c = await checkout(t);
+  const helper = fileURLToPath(new URL("./checkout-files.py", import.meta.url));
+  await writeFile(join(c.dir, "app.txt"), "before the turn\n");
+  const first = claudeTurn("s1", 1000);
+  assert.equal(await snapshotTurn(c.dir, first, 30_000, helper), true);
+  await writeFile(join(c.dir, "turn.txt"), "the turn's\n");
+  const changes = await checkoutReader(c.open, c.dir, undefined, first).changes("turn");
+  assert.deepEqual(changes.files.map((f) => f.path), ["turn.txt"]);
+  const second = claudeTurn("s1", 2000);
+  assert.equal(await snapshotTurn(c.dir, second, 0, helper), false);
+  await assert.rejects(checkoutReader(c.open, c.dir, undefined, second).changes("turn"), refused("no-base", /no latest-turn snapshot/));
 });
 
 test("a turn snapshot works before a scratch repository's first commit", async (t) => {

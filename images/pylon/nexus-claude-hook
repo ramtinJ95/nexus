@@ -4,29 +4,37 @@ import { mkdir, rm } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { heartbeatDue, reportedKind } from "./nexus-heartbeat.ts";
+import { claudeTurn, snapshotTurn } from "./nexus-turn.ts";
 import { spawn } from "node:child_process";
 
 const at = Date.now();
 
-try {
+/** Reports the hook's event, and answers its session, or null when the input names none. */
+async function report() {
   let input = "";
   for await (const chunk of process.stdin) {
     input += chunk;
-    if (input.length > 64 * 1024) process.exit(0);
+    if (input.length > 64 * 1024) return null;
   }
   const payload = JSON.parse(input);
   const { session_id: session } = payload;
-  if (typeof session !== "string" || session.length > 200) process.exit(0);
+  if (typeof session !== "string" || session.length > 200) return null;
   const kind = reportedKind(process.argv[2], payload);
   const dir = join(homedir(), ".nexus", "heartbeats");
   const path = join(dir, createHash("sha256").update(session).digest("hex"));
   if (kind === "session.heartbeat") {
     await mkdir(dir, { recursive: true });
-    if (!await heartbeatDue(path)) process.exit(0);
+    if (!await heartbeatDue(path)) return session;
   } else if (kind === "session.ended") {
     await rm(path, { force: true });
   }
   const child = spawn("/usr/local/bin/nexus", ["event", kind, "--session", session, "--at", String(at)], { detached: true, stdio: "ignore" });
   child.on("error", () => {});
   child.unref();
-} catch {}
+  return session;
+}
+
+const session = await report().catch(() => null);
+// A turn whose session is unknown reports no start, so its snapshot is named for none, and the previous turn's
+// snapshot cannot pass for its own.
+if (process.argv[2] === "session.turn-started") await snapshotTurn("/home/user/workspace/repo", claudeTurn(session ?? "unknown", at));
