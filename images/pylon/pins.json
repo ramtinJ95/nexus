@@ -2,7 +2,7 @@
   "debianDigest": "sha256:7ff6ba31527b9e336162fa061746c366c4b2032f4d2cff2078bea43f78efe3f8",
   "node": "24.22.1",
   "nodeSha256": "6c172a9ab6718f7b801fb5a7bd486af2ee5e32758086a04b84fcce2aa77095e6",
-  "claudeCode": "2.1.308",
+  "claudeCode": "2.1.310",
   "pi": "1.4.0",
   "herdr": "0.9.5",
   "piEnv": "1.4.0",
