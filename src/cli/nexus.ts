@@ -28,7 +28,7 @@ import type { WebSocket } from "ws";
 import { attachTerminal, processTty } from "./attach.ts";
 import { call, CliError, exitCodes, follow, upgrade, type Endpoint, type HostPort } from "./transport.ts";
 
-const version = "0.20.0";
+const version = "0.20.1";
 const defaults = { url: "http://rj-firebat.tailc817d3.ts.net:7470", socks: "localhost:1055" };
 const configFile = () => join(homedir(), ".config", "nexus", "cli.json");
 
@@ -319,7 +319,7 @@ function changesText(c: Changes): string {
 
 const waitMs = 120_000;
 /** Longer than the probe takes to answer a command, at most 90 s. */
-const sessionOpenMs = 120_000;
+const pylonCommandMs = 120_000;
 const waitPollMs = 1_000;
 
 /** Polls the thread until its node reports the port listening and its preview published and warmed. */
@@ -362,8 +362,8 @@ const threadRow = (t: ThreadRow) => [t.id, t.status, t.agentTurnRunning ? "worki
 /** The first line of a message, as the title of the thread it starts. */
 const titleOf = (message: string) => clip(message.split("\n").find((line) => line.trim() !== "")?.trim() ?? message, 80);
 
-async function send(api: Api, id: string, text: string, steer: boolean, requestId: string): Promise<{ submission: number } | { claude: ClaudeSent }> {
-  return await api("POST", `${thread(id)}/messages`, { text, requestId, mode: steer ? "steer" : "followUp" }) as { submission: number } | { claude: ClaudeSent };
+async function send(api: Api, id: string, text: string, steer: boolean, requestId: string, idleMs?: number): Promise<{ submission: number } | { claude: ClaudeSent }> {
+  return await api("POST", `${thread(id)}/messages`, { text, requestId, mode: steer ? "steer" : "followUp" }, idleMs) as { submission: number } | { claude: ClaudeSent };
 }
 
 /** A thread action whose route answers 204. Its JSON is null. */
@@ -827,7 +827,7 @@ const commands: Readonly<Record<string, Command>> = {
     async run(api, [id], v) {
       const body = Object.fromEntries((["harness", "title"] as const).flatMap((key) => v[key] === undefined ? [] : [[key, v[key]]]));
       // The API answers once the agent is ready or waits for its human, which can take a minute.
-      const opened = await whenRunning(api, id!, () => api("POST", `${thread(id!)}/sessions`, body, sessionOpenMs), "no session was opened") as OpenedSession;
+      const opened = await whenRunning(api, id!, () => api("POST", `${thread(id!)}/sessions`, body, pylonCommandMs), "no session was opened") as OpenedSession;
       return { json: opened, text: `Opened ${opened.harness} session ${JSON.stringify(opened.title)} in pane ${opened.herdrPane} of ${id}. \`nexus attach ${id}\` attaches to it.` };
     },
   },
@@ -877,9 +877,9 @@ const commands: Readonly<Record<string, Command>> = {
       const steer = v.steer === true;
       // The API treats a resend with the same request ID as the same message, so a caller that retries passes one.
       const requestId = str(v, "request-id") ?? `msg:${randomUUID()}`;
-      const message = () => send(api, id!, words.join(" "), steer, requestId);
       // A Claude worker's message is typed in its pylon, so its send waits for a paused pylon to wake.
       const claude = (await api("GET", thread(id!)) as ThreadDetail).claudeWorker !== undefined;
+      const message = () => send(api, id!, words.join(" "), steer, requestId, claude ? pylonCommandMs : undefined);
       const reply = claude ? await whenRunning(api, id!, message, "the message was not sent") : await message();
       if ("claude" in reply) {
         const resumed = reply.claude.resumed ? " Its session was resumed to take it." : "";
