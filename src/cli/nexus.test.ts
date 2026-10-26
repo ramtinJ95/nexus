@@ -8,7 +8,7 @@ import assert from "node:assert/strict";
 import { execFile, spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { once } from "node:events";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { appendFile, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { createServer as createHttpServer } from "node:http";
 import { connect, createServer, type Server, type Socket } from "node:net";
 import { tmpdir } from "node:os";
@@ -28,7 +28,7 @@ import { processStream } from "../process-stream.ts";
 import { repoInitCommand } from "../pylon-vm-backend.ts";
 import type { ByteStream, CommandResult, NodeName, PylonCommand, PylonId, ServiceFact, StreamEnd, TailnetNodeId } from "../protocol.ts";
 import { checkoutDir } from "../sessions.ts";
-import { transcriptStart, type ClaudeEntry } from "../claude-transcript.ts";
+import { claudeProjects, transcriptStart, type ClaudeEntry } from "../claude-transcript.ts";
 import { call, CliError, follow } from "./transport.ts";
 
 const cli = fileURLToPath(new URL("./nexus.ts", import.meta.url));
@@ -919,6 +919,157 @@ test("watch opens a dropped stream again, reports the outage once, and prints th
   assert.equal(s.fake.watching(thread.id), 1, "the old stream's watch stopped when its connection dropped");
 });
 
+/**
+ * A Claude worker thread whose session's transcript is the returned file, read from a pylon reported running. Its
+ * launch has opened session s1 unless `launched` is false.
+ */
+async function claudeWatched(t: TestContext, s: Awaited<ReturnType<typeof setup>>, launched = true) {
+  const thread: Thread = await s.json(["start", "--project", "acme", "--claude", "count the lines"]);
+  if (launched) s.registry.setClaudeWorker(thread.id, "/poteto-mode count the lines", "started", undefined, "s1");
+  const projects = await mkdtemp(join(tmpdir(), "nexus-claude-projects-"));
+  t.after(() => rm(projects, { recursive: true }));
+  await mkdir(join(projects, "-home-user-workspace-repo"));
+  s.probePipes(async (argv) => processStream(argv[0]!, argv.slice(1).map((arg) => arg === claudeProjects ? projects : arg), () => {}));
+  observeRunning(s, thread, [], []);
+  let sequence = 0;
+  return {
+    thread, transcript: join(projects, "-home-user-workspace-repo", "s1.jsonl"),
+    report: (kind: "session.turn-started" | "session.turn-ended") => s.registry.reportSession(node, { sequence: ++sequence, pylon: thread.pylonId, time: Date.now(), event: { kind, session: "s1" } }),
+  };
+}
+
+const at = (n: number) => new Date(Date.UTC(2026, 9, 26, 2, 0, n)).toISOString();
+const claudeRecords = {
+  prompt: { type: "user", timestamp: at(1), origin: { kind: "human" }, message: { role: "user", content: "Count the lines of hello.py" } },
+  call: { type: "assistant", timestamp: at(2), message: { model: "claude-opus-5-5", content: [{ type: "tool_use", id: "t1", name: "Bash", input: { command: "wc -l hello.py" } }] } },
+  failed: { type: "user", timestamp: at(3), message: { role: "user", content: [{ type: "tool_result", tool_use_id: "t1", content: "wc: hello.py: No such file", is_error: true }] } },
+  reply: { type: "assistant", timestamp: at(4), message: { model: "claude-opus-5-5", content: [{ type: "text", text: "There is no hello.py." }] } },
+  pr: { type: "pr-link", sessionId: "s1", prNumber: 7, prUrl: "https://github.com/acme/shop/pull/7", prRepository: "acme/shop", timestamp: at(5) },
+};
+const jsonl = (...records: object[]) => records.map((r) => `${JSON.stringify(r)}\n`).join("");
+
+test("watch follows a Claude worker's transcript: the entries whole, then each new one as Claude writes it, and whether Claude works", async (t) => {
+  const s = await setup(t);
+  const c = await claudeWatched(t, s);
+  await writeFile(c.transcript, jsonl(claudeRecords.prompt));
+  // The conversation route reads the transcript, so the stream's first frame holds what that read found.
+  assert.equal((await s.json(["conversation", c.thread.id])).entries.length, 1);
+  const watch = watchLines(t, s, [c.thread.id]);
+  const exited = once(watch.child, "exit");
+
+  assert.deepEqual(await watch.next(), {
+    type: "claude-reset", thread: c.thread.id, session: "s1", dropped: 0,
+    entries: [{ entry: { kind: "prompt", at: Date.parse(at(1)), text: "Count the lines of hello.py", from: "person" }, text: "> Count the lines of hello.py" }],
+  });
+  const state = { type: "state", thread: c.thread.id, status: "active", run: "idle", parkedTasks: 0, queued: 0, pylon: "running", failed: null, ports: [] };
+  assert.deepEqual(await watch.next(), state);
+  const quiet = { type: "live", thread: c.thread.id, queued: [], tools: [], partial: null, retry: null };
+  assert.deepEqual(await watch.next(), quiet);
+
+  c.report("session.turn-started");
+  assert.deepEqual(await watch.next(), { ...state, run: "working" });
+  await appendFile(c.transcript, jsonl(claudeRecords.call));
+  c.report("session.turn-started");
+  const call = await watch.next();
+  assert.deepEqual([call.type, call.entry.kind, call.text], ["claude-entry", "tool", '[tool] Bash {"command":"wc -l hello.py"}']);
+  assert.deepEqual(await watch.next(), { ...quiet, tools: [{ callId: "t1", output: "" }] }, "the turn's call runs until its result");
+
+  await appendFile(c.transcript, jsonl(claudeRecords.failed, claudeRecords.reply, claudeRecords.pr, { ...claudeRecords.pr, timestamp: at(6) }));
+  c.report("session.turn-ended");
+  const texts: string[] = [];
+  let idle = false;
+  while (texts.length < 4 || !idle) {
+    const line = await watch.next();
+    if (line.type === "claude-entry") texts.push(line.text);
+    idle ||= line.type === "state" && line.run === "idle";
+  }
+  assert.deepEqual(texts, ["[tool error] wc: hello.py: No such file", "There is no hello.py.", "[pull request] Opened pull request #7: https://github.com/acme/shop/pull/7", ""],
+    "a pull request Claude Code names again prints nothing the second time");
+
+  const restart = await s.stop();
+  await restart();
+  await appendFile(c.transcript, jsonl({ ...claudeRecords.reply, timestamp: at(7), message: { model: "claude-opus-5-5", content: [{ type: "text", text: "Done." }] } }));
+  c.report("session.turn-ended");
+  let line = await watch.next();
+  for (; line.type !== "claude-entry"; line = await watch.next()) assert.notEqual(line.type, "claude-reset", "a reconnect prints no entry again");
+  assert.equal(line.text, "Done.", "only the entry Claude wrote since");
+
+  await s.json(["delete", c.thread.id]);
+  for (let line = await watch.next(); ; line = await watch.next()) {
+    if (line.type === "state" && line.status === "deleted") break;
+  }
+  assert.deepEqual(await exited, [0, null]);
+});
+
+test("watch prints one new entry past the kept 3,000 of a Claude transcript, across a reconnect too", async (t) => {
+  const s = await setup(t);
+  const thread: Thread = await s.json(["start", "--project", "acme", "--claude", "count the lines"]);
+  s.registry.setClaudeWorker(thread.id, "/poteto-mode count the lines", "started", undefined, "s1");
+  const prompt = (n: number): ClaudeEntry => ({ kind: "prompt", at: n, text: `prompt ${n}`, from: "person" });
+  let offset = 0;
+  const read = (entries: ClaudeEntry[]) => {
+    const from = { ...transcriptStart, offset };
+    offset += entries.length;
+    assert.ok(s.registry.appendClaudeRead(thread.id, { session: "s1", from, entries, cursor: { ...transcriptStart, offset }, reset: false, readAt: Date.now() }));
+  };
+  let sequence = 0;
+  const report = (kind: "session.turn-started" | "session.turn-ended") => s.registry.reportSession(node, { sequence: ++sequence, pylon: thread.pylonId, time: Date.now(), event: { kind, session: "s1" } });
+  read(Array.from({ length: 3000 }, (_, i) => prompt(i)));
+  const watch = watchLines(t, s, [thread.id]);
+  const first = await watch.next();
+  assert.deepEqual([first.type, first.entries.length, first.dropped], ["claude-reset", 3000, 0]);
+  const next = async (what: string) => {
+    for (;;) {
+      const line = await watch.next();
+      assert.notEqual(line.type, "claude-reset", what);
+      if (line.type === "claude-entry") return line.entry;
+    }
+  };
+
+  read([prompt(3000)]);
+  report("session.turn-started");
+  assert.deepEqual(await next("an entry past the kept 3,000 is no reset"), prompt(3000));
+  const restart = await s.stop();
+  await restart();
+  read([prompt(3001)]);
+  report("session.turn-ended");
+  assert.deepEqual(await next("a reconnect at the limit prints no entry again"), prompt(3001));
+  const reread = await s.json(["conversation", thread.id]);
+  assert.deepEqual([reread.entries.length, reread.dropped], [3000, 2]);
+});
+
+test("watch's text says a Claude transcript was replaced only when it printed some of it, not when the worker's first session starts", async (t) => {
+  const s = await setup(t);
+  const c = await claudeWatched(t, s, false);
+  const child = spawn(process.execPath, [cli, "watch", c.thread.id, "--interval", "50"], { env: s.env() });
+  t.after(() => { child.kill(); });
+  const lines = createInterface({ input: child.stdout })[Symbol.asyncIterator]();
+  assert.equal((await lines.next()).value, "-- active, pylon running");
+  await writeFile(c.transcript, jsonl(claudeRecords.prompt));
+  s.registry.setClaudeWorker(c.thread.id, "/poteto-mode count the lines", "started", undefined, "s1");
+  c.report("session.turn-started");
+  const printed: string[] = [];
+  while (!printed.includes("> Count the lines of hello.py")) printed.push((await lines.next()).value as string);
+  assert.ok(!printed.some((line) => line.includes("replaced")), printed.join("\n"));
+});
+
+test("watch says to use conversation when the control plane is older than the Claude transcript stream", async (t) => {
+  const s = await setup(t);
+  const c = await claudeWatched(t, s);
+  const detail = await s.json(["show", c.thread.id]);
+  const old = createHttpServer((req, res) => {
+    const path = new URL(req.url!, "http://x").pathname;
+    if (path === `/v1/threads/${c.thread.id}`) return void res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify(detail));
+    res.writeHead(404, { "content-type": "application/json" }).end(JSON.stringify({ error: `no route ${path}` }));
+  });
+  const port = await listening(t, old);
+  const child = spawn(process.execPath, [cli, "watch", c.thread.id, "--interval", "50"], { env: s.env({ NEXUS_URL: `http://127.0.0.1:${port}`, NEXUS_SOCKS: "none" }) });
+  t.after(() => { child.kill(); });
+  const lines = createInterface({ input: child.stdout })[Symbol.asyncIterator]();
+  assert.equal((await lines.next()).value, `-- The control plane does not stream Claude transcripts. Upgrade it, or run nexus conversation ${c.thread.id}`);
+  assert.equal((await lines.next()).value, "-- active, pylon running", "the thread's state still prints");
+});
+
 test("watch ends with the API's exit code when it refuses the stream", async (t) => {
   const s = await setup(t);
   const thread: Thread = await s.json(["start", "--project", "acme", "--title", "x"]);
@@ -987,6 +1138,27 @@ test("seen and --unread share the API marker without waking an archived thread",
   assert.deepEqual(s.registry.thread(thread.id), { ...before, seenAt: 999 });
 });
 
+test("seen --last-reply-at marks only up to the reply the client showed, and never lowers the mark", async (t) => {
+  const s = await setup(t);
+  const thread: Thread = await s.json(["start", "--project", "acme", "--title", "read me"]);
+  s.registry.recordReply(thread.id, 1000);
+  s.registry.recordReply(thread.id, 2000);
+  const seen = async (...flags: string[]) => {
+    assert.equal(await s.json(["seen", thread.id, ...flags]), null);
+    return s.registry.thread(thread.id)!.seenAt;
+  };
+  assert.equal(await seen("--last-reply-at", "1000"), 1000, "a reply that landed after the one shown stays unread");
+  assert.equal((await s.json(["show", thread.id])).attention, "reply");
+  assert.equal(await seen("--last-reply-at", "500"), 1000, "an older mark does not lower it");
+  assert.equal(await seen("--last-reply-at", "2000"), 2000);
+  assert.equal((await s.json(["show", thread.id])).attention, null);
+  for (const flags of [["--last-reply-at", "soon"], ["--last-reply-at", "-1"], ["--last-reply-at", "1000", "--unread"]]) {
+    const refused = await s.nexus(["seen", thread.id, ...flags]);
+    assert.equal(refused.code, 64, flags.join(" "));
+  }
+  assert.equal(s.registry.thread(thread.id)!.seenAt, 2000);
+});
+
 test("seen encodes a thread ID so it cannot become an unarchive request", async (t) => {
   const s = await setup(t);
   const thread: Thread = await s.json(["start", "--project", "acme", "--title", "Stay archived"]);
@@ -1017,7 +1189,7 @@ test("show prints PR metadata and one disabled-watch notice without waking the p
 
 test("deploy and release use the shared release view and wait for both roles", async (t) => {
   const s = await setup(t);
-  assert.equal((await s.nexus(["--version"])).stdout.trim(), "nexus 0.18.0");
+  assert.equal((await s.nexus(["--version"])).stdout.trim(), "nexus 0.19.0");
   assert.equal((await s.nexus(["deploy", "bad"])).code, 64);
   const requested = await s.json(["deploy", "main"]);
   assert.equal(requested.desired.commit, "a".repeat(40));
@@ -1264,6 +1436,8 @@ test("conversation prints a Claude worker's transcript, and send types into its 
     { kind: "notice", at: 8, tone: "error", text: "The model failed" },
     { kind: "turn", at: 9, durationMs: 72_000 },
     { kind: "record", at: null, type: "mystery", summary: '{"type":"mystery"}' },
+    { kind: "pull-request", at: 10, number: 7, url: "https://github.com/acme/shop/pull/7", repository: "acme/shop" },
+    { kind: "pull-request", at: 10, number: 7, url: "https://github.com/acme/shop/pull/7", repository: "acme/shop" },
     { kind: "prompt", at: 10, text: "/compact", from: "command" },
     { kind: "queue", at: 11, op: "enqueue", text: "and then deploy" },
     { kind: "tool", at: 12, id: "t3", name: "Read", input: { file_path: "hello.py" } },
@@ -1281,6 +1455,7 @@ test("conversation prints a Claude worker's transcript, and send types into its 
     "[error] The model failed",
     "[turn] 72s",
     '[record] mystery: {"type":"mystery"}',
+    "[pull request] Opened pull request #7: https://github.com/acme/shop/pull/7",
     "> [slash command] /compact",
   ];
   assert.equal((await s.nexus(["conversation", thread.id])).stdout, [...transcript, '[tool] Read {"file_path":"hello.py"} (no result)', "(queued) > and then deploy"].join("\n\n") + "\n");

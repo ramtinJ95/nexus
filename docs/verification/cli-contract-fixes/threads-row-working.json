@@ -1,0 +1,25 @@
+{
+  "id": "th-1f76f68d6ae6",
+  "title": "Quick verification task, keep it small: no subagents, no pull request, no review...",
+  "project": "words",
+  "pylonId": "pylon-th-1f76f68d6ae6",
+  "status": "active",
+  "conversationId": null,
+  "startedBy": "nVERIFY",
+  "createdAt": 1792981898186,
+  "agentTurnRunning": false,
+  "lastAgentActivityAt": 1792981901217,
+  "lastHumanActivityAt": 1792981898186,
+  "seenAt": null,
+  "lastReplyAt": null,
+  "sessionTurnRunning": true,
+  "sessionActiveUntil": 1792983701217,
+  "workingSince": 1792981901217,
+  "attention": "working",
+  "desired": "running",
+  "pylon": {
+    "node": "verify-node",
+    "actualState": "running",
+    "failed": null
+  }
+}

@@ -6,8 +6,9 @@
  * earlier entry, so a tool call and its result are two entries that a renderer pairs by the call's ID.
  *
  * A record is untrusted guest output. Records Claude Code writes for its own bookkeeping, such as API request
- * copies and context attachments, are known and left out. Every other record shape the parser does not know stays
- * visible as a `record` entry, so a new Claude Code version shows something rather than nothing.
+ * copies, context attachments and the session metadata it writes again each time it saves the session, are known
+ * and left out. Every other record shape the parser does not know stays visible as a `record` entry, so a new
+ * Claude Code version shows something rather than nothing.
  */
 import { createHash } from "node:crypto";
 import type { OpenPipe } from "./checkout-files.ts";
@@ -35,6 +36,11 @@ export type ClaudeEntry =
   /** Such as an interrupted turn, a model error or a compaction. */
   | { kind: "notice"; at: number; tone: "info" | "error"; text: string }
   | { kind: "turn"; at: number; durationMs: number }
+  /**
+   * Claude opened a pull request. Claude Code writes the record again each time it saves the session's metadata, so
+   * one pull request gives many entries, which a client shows once. `url` is an https URL.
+   */
+  | { kind: "pull-request"; at: number; number: number; url: string; repository: string }
   /** A record the parser does not know, kept visible. `summary` is a short, cut rendering of it. */
   | { kind: "record"; at: number | null; type: string; summary: string };
 
@@ -211,7 +217,9 @@ const hidden = (...types: string[]): Record<string, typeof none> => Object.fromE
 const shown = (type: string): Parse => (r, at) => [record(type, r, at)];
 
 const records = table<Parse>({
-  ...hidden("api-request", "api-request-blob", "api-request-shape", "mode", "permission-mode", "atis-latch", "last-prompt", "file-history-snapshot", "file-history-delta", "ai-title", "cost-state"),
+  ...hidden("api-request", "api-request-blob", "api-request-shape", "mode", "permission-mode", "atis-latch", "last-prompt", "file-history-snapshot", "file-history-delta", "ai-title", "cost-state",
+    "custom-title", "tag", "relocated", "agent-name", "agent-color", "agent-setting", "isolation-latch", "dev-mods", "memory-mode", "worktree-state",
+    "frame-link", "history-suppression", "bridge-session"),
   user: userRecord,
   assistant: assistantRecord,
   system: (r, at) => {
@@ -221,6 +229,13 @@ const records = table<Parse>({
   attachment: (r, at) => {
     const type = str(fields(r.attachment, "attachment").type, "attachment.type");
     return (attachments.get(type) ?? shown(`attachment/${type}`))(r, at);
+  },
+  "pr-link": (r, at) => {
+    if (typeof r.prNumber !== "number" || !Number.isSafeInteger(r.prNumber) || r.prNumber < 1) throw new Error("prNumber is not a pull request's number");
+    const url = str(r.prUrl, "prUrl");
+    // The URL becomes a link, so nothing but a whole https URL may pass.
+    if (!URL.canParse(url) || new URL(url).protocol !== "https:" || url.length > textLimits.summary) throw new Error("prUrl is not an https URL");
+    return [{ kind: "pull-request", at, number: r.prNumber, url, repository: cut(str(r.prRepository, "prRepository"), textLimits.summary) }];
   },
   "queue-operation": (r, at) => [{ kind: "queue", at, op: cut(str(r.operation, "operation"), textLimits.summary), text: r.content === undefined ? null : cut(str(r.content, "content"), textLimits.prompt) }],
 });

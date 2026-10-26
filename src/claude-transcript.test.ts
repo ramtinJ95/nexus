@@ -112,6 +112,35 @@ test("Claude's bookkeeping records give no entries, and every record in the real
   assert.deepEqual(only("record"), []);
 });
 
+test("the session metadata Claude Code writes again on each save gives no entries", () => {
+  // Shapes from the writer in Claude Code 2.1.308, which saves these with last-prompt and mode.
+  const sessionId = session;
+  const metadata = [
+    { type: "custom-title", customTitle: "Fix the cart", sessionId }, { type: "tag", tag: "bug", sessionId },
+    { type: "relocated", relocatedCwd: "/tmp/x", sessionId }, { type: "agent-name", agentName: "reviewer", sessionId },
+    { type: "agent-color", agentColor: "blue", sessionId }, { type: "agent-setting", agentSetting: "reviewer", sessionId },
+    { type: "isolation-latch", side: "worktree", sessionId }, { type: "dev-mods", folder: "/home/user/mods", sessionId },
+    { type: "memory-mode", mode: "on", afterUuid: "u1", timestamp: "2026-10-26T02:00:00.000Z", sessionId },
+    { type: "worktree-state", worktreeSession: { path: "/tmp/wt" }, sessionId },
+    { type: "frame-link", artifactCount: 1, sessionId, timestamp: "2026-10-26T02:00:00.000Z" },
+    { type: "history-suppression", sessionId, cause: "migration" }, { type: "bridge-session", sessionId, bridgeSessionId: "", lastSequenceNum: 0 },
+  ];
+  for (const record of metadata) assert.deepEqual(parseRecord(JSON.stringify(record)), [], record.type);
+});
+
+test("a pull request Claude opened is an entry with its number, URL and repository, and a link only to an https URL", () => {
+  // The record Claude Code 2.1.308 wrote when it opened this change's pull request.
+  const line = '{"type":"pr-link","sessionId":"3c79b34a-6040-4332-a067-4e29168431dc","prNumber":92,"prUrl":"https://github.com/ramtinJ95/nexus/pull/92","prRepository":"ramtinJ95/nexus","timestamp":"2026-10-26T02:27:33.565Z"}';
+  const record = JSON.parse(line);
+  assert.deepEqual(parseRecord(line), [
+    { kind: "pull-request", at: Date.parse("2026-10-26T02:27:33.565Z"), number: 92, url: "https://github.com/ramtinJ95/nexus/pull/92", repository: "ramtinJ95/nexus" },
+  ]);
+  for (const broken of [{ prUrl: "javascript:alert(1)" }, { prUrl: "http://github.com/a/b/pull/1" }, { prUrl: `https://github.com/${"a".repeat(600)}` }, { prNumber: "91" }, { prNumber: 0 }, { prRepository: undefined }]) {
+    const got = parseRecord(JSON.stringify({ ...record, ...broken }));
+    assert.deepEqual(got.map((e) => [e.kind, e.kind === "record" && e.type]), [["record", "pr-link"]], JSON.stringify(broken));
+  }
+});
+
 test("unknown and malformed records stay visible as record entries", () => {
   const at = "2026-10-25T22:14:50.563Z";
   // Synthetic records, made up for this test, standing in for shapes a later Claude Code may write.

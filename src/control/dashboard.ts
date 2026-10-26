@@ -668,7 +668,8 @@ type Item =
   | { kind: "agent"; text: string; streaming: boolean }
   | { kind: "tool"; call: { id: string; name: string; arguments: Readonly<Record<string, unknown>> }; result: ToolResult; task?: Pick<Extract<ClaudeEntry, { kind: "task" }>, "status" | "summary" | "result"> }
   | { kind: "notice"; text: string; tone: Tone }
-  | { kind: "note"; text: string };
+  | { kind: "note"; text: string }
+  | { kind: "link"; text: string; url: string };
 type ToolResult = { state: "done"; output: string; isError: boolean } | { state: "running"; output: string } | { state: "none" };
 type ToolItem = Extract<Item, { kind: "tool" }>;
 type UserItem = Extract<Item, { kind: "user" }>;
@@ -734,11 +735,12 @@ const itemsOf = (view: Conversation): Item[] => isClaude(view) ? claudeItems(vie
 /**
  * A Claude worker's transcript as the rows a harness conversation shows. Each result goes on its call, and a
  * background task's finish on the call that started it. A call of the current turn without a result runs while
- * Claude works. A message Claude Code queued and has not taken shows queued at the end.
+ * Claude works. A message Claude Code queued and has not taken shows queued at the end. A pull request shows once.
  */
 function claudeItems({ entries, working }: ClaudeConversation): Item[] {
   const items: Item[] = [];
   const tools = new Map<string, ToolItem>();
+  const pullRequests = new Set<string>();
   let turn: ToolItem[] = [];
   for (const entry of entries) {
     switch (entry.kind) {
@@ -769,6 +771,10 @@ function claudeItems({ entries, working }: ClaudeConversation): Item[] {
       case "turn":
         turn = [];
         items.push({ kind: "note", text: `Worked for ${clock(entry.durationMs)}.` });
+        break;
+      case "pull-request":
+        if (!pullRequests.has(entry.url)) items.push({ kind: "link", text: `Opened pull request #${entry.number}`, url: entry.url });
+        pullRequests.add(entry.url);
         break;
       case "record": items.push({ kind: "notice", text: `Claude Code wrote a ${entry.type} record: ${entry.summary}`, tone: "muted" }); break;
     }
@@ -874,6 +880,7 @@ function blockView(block: Block): Html {
       : html`<div class="msg agent"><div class="text">${prose(block.text)}</div></div>`;
     case "notice": return html`<p class="notice notice-${block.tone}"><span class="notice-mark" aria-hidden="true">!</span>${block.text}</p>`;
     case "note": return html`<p class="note">${block.text}</p>`;
+    case "link": return html`<p class="note"><a class="link" href="${block.url}" target="_blank" rel="noopener">${block.text} ↗</a></p>`;
     case "tools": return stepsView(block.tools);
   }
 }

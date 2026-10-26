@@ -315,7 +315,8 @@ cannot stall the reader.
 The parser in `src/claude-transcript.ts` was written against real Claude Code 2.1.308
 transcripts from a pylon. It turns them into a small model that only grows: prompts,
 replies, tool calls, tool results paired by call ID, background task notifications
-(subagents and shells), queue operations, notices and turn durations. Claude Code's
+(subagents and shells), queue operations, notices, turn durations and the pull
+requests Claude opened. Claude Code's
 bookkeeping records are named in tables and left out. Any other record stays visible
 as a generic entry, so a Claude Code upgrade that adds record types degrades to
 showing them rather than hiding work. Subagents show as their `Agent` call, its

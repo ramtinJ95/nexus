@@ -970,6 +970,21 @@ test("a Claude worker's transcript reads as its conversation: prompts by who sen
   assert.match(html, new RegExp(`data-stream="/threads/${thread.id}/stream"`));
 });
 
+test("a pull request Claude opened shows once, as an escaped link to it, however often its transcript names it", async (t) => {
+  const s = await seeded(t);
+  const url = 'https://github.com/acme/shop/pull/7?x="><b>';
+  const thread = await claudeThread(s, [
+    { kind: "pull-request", at: 1, number: 7, url, repository: "acme/shop" },
+    { kind: "reply", at: 2, text: "Opened it." },
+    { kind: "pull-request", at: 3, number: 7, url, repository: "acme/shop" },
+    { kind: "pull-request", at: 4, number: 8, url: "https://github.com/acme/shop/pull/8", repository: "acme/shop" },
+  ]);
+  const html = (await s.call("GET", `/threads/${thread.id}`)).text;
+  assert.deepEqual(conversationOf(html).rows, ["Opened pull request #7 ↗", "Opened it.", "Opened pull request #8 ↗"]);
+  assert.ok(html.includes('<a class="link" href="https://github.com/acme/shop/pull/7?x=&quot;&gt;&lt;b&gt;" target="_blank" rel="noopener">Opened pull request #7 ↗</a>'), "the URL is escaped");
+  assert.ok(html.includes('<a class="link" href="https://github.com/acme/shop/pull/8" target="_blank" rel="noopener">'));
+});
+
 test("a Claude worker that works shows its turn's call running, the turn's clock and calls, and a box that queues for Claude", async (t) => {
   const s = await seeded(t);
   const thread = await claudeThread(s, [
