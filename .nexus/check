@@ -1,0 +1,6 @@
+#!/bin/sh
+# The typecheck and the full test suite, which the review loop runs at an approved head before a landing.
+set -e
+npm ci --no-audit --no-fund
+npm run typecheck
+npm test
