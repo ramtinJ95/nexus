@@ -688,7 +688,7 @@ function imagesText(view: ImagesView): string {
 
 /**
  * Polls the images every 2 s until the operation ends, through restarts of the control plane, as deploy --wait does. Each
- * change of a step goes to stderr, so a build of minutes shows where it is and stdout stays one value for --json.
+ * change of a running step goes to stderr, so a build of minutes shows where it is and stdout stays one value for --json.
  */
 async function imageWait(api: Api, started: ImageOperation): Promise<Result> {
   const deadline = Date.now() + 45 * 60_000;
@@ -708,7 +708,7 @@ async function imageWait(api: Api, started: ImageOperation): Promise<Result> {
     if (now === null || now.kind !== started.kind || now.image !== started.image || now.requestedAt !== started.requestedAt) {
       throw new CliError("conflict", `another image operation replaced the ${started.kind} of ${started.image}${now === null ? "" : `\n${operationText(now)}`}`);
     }
-    if (operationText(now) !== operationText(operation)) process.stderr.write(`${operationText(now)}\n`);
+    if (now.state === "running" && operationText(now) !== operationText(operation)) process.stderr.write(`${operationText(now)}\n`);
     operation = now;
   }
 }

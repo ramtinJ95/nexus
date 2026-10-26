@@ -1521,7 +1521,7 @@ test("a deployer's image operations answer 200 once done and 202 while running, 
   const noJobs = () => assert.fail("no job is needed");
   const s = await setup(t, {
     deployment,
-    images: (registry) => startImageRollout({ registry, probes: new Map([[node, { submit: noJobs, job: noJobs, manifest: noJobs }]]), buildNode: node, recipe: async () => recipe, release: null, intervalMs: 600_000, log: () => {} }),
+    images: (registry) => startImageRollout({ registry, probes: new Map([[node, { submit: noJobs, job: noJobs, manifest: async (id) => registry.image(id as ImageId) ?? null }]]), buildNode: node, recipe: async () => recipe, release: null, intervalMs: 600_000, log: () => {} }),
   });
   for (const manifest of [image, built]) assert.equal((await s.call("POST", "/v1/images", manifest)).status, 201);
   const capacity = { cpus: 16, committedCpus: 0, memoryGiB: 64, committedMemoryGiB: 0, diskFreeGiB: 100, committedDiskGiB: 0 };
