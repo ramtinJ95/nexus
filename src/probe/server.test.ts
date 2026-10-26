@@ -392,9 +392,10 @@ test("malformed commands get 400 and reach no guest", async (t) => {
   assert.equal(await post({ kind: "close-session", herdrPane: "w1:p1", session: { harness: "pi", title: null } }), 400);
   assert.equal(await post({ kind: "reboot" }), 400);
   const send = { kind: "send-claude", session: "0b5e3a52-5d0f-4c1e-9a43-1f2a6c7d8e90", text: "hi" };
-  for (const bad of [{ session: undefined }, { session: "../etc" }, { session: "a".repeat(201) }, { text: "" }, { text: "x".repeat(16_385) }, { text: "a\tb" }, { text: "a\rb" }, { model: "" }, { model: "m".repeat(201) }]) {
+  for (const bad of [{ session: undefined }, { session: "../etc" }, { session: "a".repeat(201) }, { text: "" }, { text: "x".repeat(16_385) }, { text: "a\tb" }, { text: "a\rb" }, { model: "" }, { model: "m".repeat(201) }, { requestId: "" }, { requestId: 1 }]) {
     assert.equal(await post({ ...send, ...bad }), 400, JSON.stringify(bad));
   }
+  assert.equal(await post({ kind: "send-claude-outcome" }), 400);
   assert.deepEqual(guest.execs, []);
 });
 
@@ -478,6 +479,45 @@ test("two messages for one Claude session run one after the other, so the sessio
   assert.deepEqual(sends.map((r) => r.kind === "send-claude" && r.resumed), [true, false], "the second message finds the session the first resumed");
   assert.equal(base.herdrCalls().filter((c) => c === "workspace create").length, 1);
   assert.deepEqual(typed, ["first", "second"]);
+});
+
+test("the outcome of a Claude send waits for one queued behind a slow send, types nothing, and says when a send failed or is unknown", async (t) => {
+  const session = "0b5e3a52-5d0f-4c1e-9a43-1f2a6c7d8e90";
+  const base = fakeGuest((argv, herdr) => {
+    if (!herdr) return argv[3] === "claude-type" ? { exitCode: 0, output: "" } : assert.fail(`unexpected exec ${argv.join(" ")}`);
+    const sub = argv.slice(0, 2).join(" ");
+    if (sub === "api snapshot") return herdrOk(herdrSnapshot([{ id: "w1", label: "Claude Code" }], [herdrPane("w1:p1", "w1", "claude", "working", { kind: "id", value: session })]));
+    if (sub === "pane process-info") return herdrOk({ type: "pane_process_info", process_info: { pane_id: "w1:p1", shell_pid: 100, foreground_processes: [{ pid: 101, name: "claude", argv: ["claude", "--resume", session] }] } });
+    throw new Error(`unscripted ${sub}`);
+  });
+  const slow = Promise.withResolvers<void>();
+  const typed: string[] = [];
+  const guest: Guest = {
+    ...base,
+    async exec(argv, options) {
+      if (argv[3] !== "claude-type") return base.exec(argv, options);
+      if (argv[5] === "slow") await slow.promise;
+      typed.push(argv[5]!);
+      return argv[5] === "breaks" ? { exitCode: 1, output: "herdr: pane w1:p1 went away", truncated: false } : base.exec(argv, options);
+    },
+  };
+  const { client } = await setup(t, {}, guest);
+  await running(client);
+  const sending = ["slow", "queued"].map((text) => client.command(pylonId, { kind: "send-claude", session, text, requestId: `msg:${text}` }));
+  let settled = false;
+  const outcome = client.command(pylonId, { kind: "send-claude-outcome", requestId: "msg:queued" }).finally(() => { settled = true; });
+  await new Promise((resolve) => setTimeout(resolve, 100));
+  assert.equal(settled, false, "the outcome waits while the send waits behind the slow one");
+  slow.resolve();
+  const queued = { outcome: "queued", herdrPane: "w1:p1", resumed: false };
+  assert.deepEqual(await outcome, { kind: "send-claude-outcome", send: queued });
+  assert.deepEqual(await Promise.all(sending), [{ kind: "send-claude", ...queued }, { kind: "send-claude", ...queued }]);
+  assert.deepEqual(await client.command(pylonId, { kind: "send-claude-outcome", requestId: "msg:queued" }), { kind: "send-claude-outcome", send: queued }, "a settled send is still known");
+
+  await assert.rejects(client.command(pylonId, { kind: "send-claude", session, text: "breaks", requestId: "msg:breaks" }), /part of the message may sit unsent/);
+  assert.deepEqual(await client.command(pylonId, { kind: "send-claude-outcome", requestId: "msg:breaks" }), { kind: "send-claude-outcome", send: "failed" });
+  assert.deepEqual(await client.command(pylonId, { kind: "send-claude-outcome", requestId: "msg:never" }), { kind: "send-claude-outcome", send: "unknown" });
+  assert.deepEqual(typed, ["slow", "queued", "breaks"], "asking for an outcome types nothing");
 });
 
 test("a failing command rejects with the guest's error", async (t) => {

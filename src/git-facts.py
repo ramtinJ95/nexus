@@ -36,7 +36,8 @@ def git(*args, allowed=(0,), dirty=False, raw=False):
     finally:
         try:
             os.killpg(process.pid, signal.SIGKILL)
-        except ProcessLookupError:
+        # macOS refuses to signal a group whose only members are zombies, as git is once it exits unreaped after its first byte.
+        except (ProcessLookupError, PermissionError):
             pass
         process.wait()
         process.stdout.close()

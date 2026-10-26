@@ -15,11 +15,18 @@ async function serve(host: string, body: string, port = 0): Promise<Server & { p
 }
 const closed = (server: Server) => new Promise<void>((accept) => server.close(() => accept()));
 
-/** A loopback port nothing listens on, for the relay to take. */
-async function freePort(): Promise<number> {
-	const server = await serve("127.0.0.1", "");
-	await closed(server);
-	return server.port;
+/**
+ * A port free on both 127.0.0.1 and ::1, from below every ephemeral range (Linux's starts at 32768, macOS's at 49152).
+ * Other test files' listeners on port 0 can then never take its 127.0.0.1 side, where the relay would reach them first.
+ */
+async function quietPort(): Promise<number> {
+	for (;;) {
+		const port = 20_000 + Math.floor(Math.random() * 12_000);
+		try {
+			for (const host of ["127.0.0.1", "::1"]) await closed(await serve(host, "", port));
+			return port;
+		} catch {}
+	}
 }
 
 /** One GET to 127.0.0.1, as the ingress dials it: the body, or the connection error's code. */
@@ -55,8 +62,8 @@ test("the relay carries a route's port to 127.0.0.1 or else ::1, follows its ser
 	};
 	const status = async () => JSON.parse(await readFile(statusFile, "utf8").catch(() => '{"generation":0}')) as { generation: number; bound: Record<string, number>; failed: Record<string, string> };
 	const applied = (generation: number) => until(`the relay applies map ${generation}`, async () => (await status()).generation >= generation);
-	const v6 = await serve("::1", "v6");
-	const relayPort = await freePort();
+	const v6 = await serve("::1", "v6", await quietPort());
+	const relayPort = await quietPort();
 	await relays(1, { [relayPort]: v6.port });
 	const relay = spawn("python3", ["-c", relayScript, map, statusFile, logFile], { stdio: ["ignore", "inherit", "inherit"] });
 	const logged = async (line: string) => (await readFile(logFile, "utf8")).includes(`${line}\n`);

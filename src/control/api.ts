@@ -544,9 +544,11 @@ export async function startApi(options: ApiOptions): Promise<Api> {
    * it is, such as one with a tab, is refused rather than changed.
    *
    * The request ID is recorded as sending before the probe is asked, and as sent with the answer, which a resend of
-   * the ID answers again without typing. A send whose probe failed may have typed part of the message, so a resend of
-   * it is refused with a 422 for the person to check the conversation. A send that typed nothing, as when the pylon
-   * was not running or Claude waits at a prompt in its terminal, is forgotten, so a resend of its ID types it.
+   * the ID answers again without typing. A send whose answer never came, as one queued in the pylon behind a slow send
+   * past the probe's wait, may still be typed, so a resend of it asks the probe what became of it and answers that. A
+   * send that failed partway, or that the probe no longer knows, may have typed part of the message, so a resend of it
+   * is refused with a 422 for the person to check the conversation. A send that typed nothing, as when the pylon was
+   * not running or Claude waits at a prompt in its terminal, is forgotten, so a resend of its ID types it.
    */
   async function sendClaude(t: Thread, session: string | null, model: string | null, body: unknown): Promise<{ claude: ClaudeSent }> {
     const message = parse(messageSchema, body);
@@ -556,8 +558,11 @@ export async function startApi(options: ApiOptions): Promise<Api> {
     if (session === null) throw new HttpError(409, `the Claude worker of ${t.id} has not started a session yet, so it takes no messages. Send it once it has started`);
     const stored = registry.claudeMessage(t.id, message.requestId);
     if (stored?.state === "sent") return { claude: stored.result };
-    const typed = await inPylon(t, (probe, pylonId) => typeIntoClaude(registry, t.id, session, model, message.requestId, text, (command) => probe.command(pylonId, command)));
-    if (typed.kind === "uncertain") throw new HttpError(422, `an earlier send of request ${message.requestId} failed partway, so Claude may have some or all of it. Check the conversation before sending it again under a new request ID`);
+    const typed = await inPylon(t, (probe, pylonId) => typeIntoClaude(registry, t.id, session, model, message.requestId, text, (command) => probe.command(pylonId, command)).catch((err: Partial<ProbeError>) => {
+      if (err.code !== "unreachable") throw err;
+      throw Object.assign(new Error(`${err.message}. The message may still reach Claude, as one queued in the pylon behind an earlier send does, and reaches it at most once. Send it again under request ID ${message.requestId} to learn what became of it`), { code: "unreachable" });
+    }));
+    if (typed.kind === "uncertain") throw new HttpError(422, `an earlier send of request ${message.requestId} failed partway, or its pylon no longer knows how far it got, so Claude may have some or all of it. Check the conversation before sending it again under a new request ID`);
     if (typed.kind === "nothing") {
       throw new HttpError(409, {
         blocked: `Claude waits at a prompt in its terminal, so nothing was typed. Attach to the pylon (\`nexus attach ${t.id}\`) and answer it, then send again`,

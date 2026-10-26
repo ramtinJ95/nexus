@@ -361,6 +361,9 @@ the probe is asked, then `sent` with a `ClaudeSent` (`session`, `outcome` of `se
 `queued`, `resumed`). A repeat of a `sent` ID answers the stored result. A send that
 typed nothing, because the pylon was not running, Claude waited at a dialog or was not
 ready yet, or its pane stopped running the session (`moved`), removes its row, so the same ID can be sent again. A row left `sending`
-means the probe failed partway, and a repeat is refused with a 422. A thread keeps
-every request ID until the thread is deleted.
+means the probe's answer never came, so a repeat asks the probe with
+`send-claude-outcome` and stores what it answers, as for the first answer. If the probe
+says the send failed partway, or no longer knows it, the row stays `sending` and the
+repeat is refused with a 422. A thread keeps every request ID until the thread is
+deleted.
 

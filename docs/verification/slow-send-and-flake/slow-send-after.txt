@@ -1,0 +1,15 @@
+# this branch: node docs/verification/slow-send-and-flake/slow-send.ts (stdout only)
+[  0 s] $ nexus send th-4d3ccd43138c first --request-id msg:first
+[  0 s] guest: typing "first" starts
+[  1 s] $ nexus send th-4d3ccd43138c second --request-id msg:second
+[ 60 s] guest: typing "first" done
+[ 60 s] guest: typing "second" starts
+[ 60 s]   exit 0: Queued for Claude in th-4d3ccd43138c, which takes it at its next step.
+[ 91 s]   exit 1: nexus: rj-firebat: no answer within 90000 ms. The message may still reach Claude, as one queued in the pylon behind an earlier send does, and reaches it at most once. Send it again under request ID msg:second to learn what became of it
+[ 91 s] $ nexus send th-4d3ccd43138c second --request-id msg:second
+[100 s] guest: typing "second" done
+[100 s]   exit 0: Queued for Claude in th-4d3ccd43138c, which takes it at its next step.
+[100 s] $ nexus send th-4d3ccd43138c second --request-id msg:second
+[101 s]   exit 0: Queued for Claude in th-4d3ccd43138c, which takes it at its next step.
+[101 s] typed into Claude: ["first","second"]
+[101 s] second send exit 1, resend exit 0, resend again exit 0

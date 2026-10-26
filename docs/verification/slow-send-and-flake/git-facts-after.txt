@@ -1,0 +1,5 @@
+# this branch: 15 runs of src/git-facts.test.ts with sitecustomize.py emulating XNU's killpg (EPERM for a zombie-only group)
+pass=15 fail=0
+EPERM returned: 45
+# and 15 runs without the emulation
+pass=15 fail=0

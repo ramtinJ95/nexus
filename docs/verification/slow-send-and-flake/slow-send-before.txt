@@ -1,0 +1,12 @@
+# origin/main, with this script copied in: node docs/verification/slow-send-and-flake/slow-send.ts (stdout only)
+[  0 s] $ nexus send th-22454d2ee7bf first --request-id msg:first
+[  0 s] guest: typing "first" starts
+[  1 s] $ nexus send th-22454d2ee7bf second --request-id msg:second
+[ 30 s]   exit 2: nexus: the control plane at 127.0.0.1:36653 sent nothing for 30s
+[ 31 s]   exit 2: nexus: the control plane at 127.0.0.1:36653 sent nothing for 30s
+[ 31 s] $ nexus send th-22454d2ee7bf second --request-id msg:second
+[ 32 s]   exit 1: nexus: an earlier send of request msg:second failed partway, so Claude may have some or all of it. Check the conversation before sending it again under a new request ID
+[ 32 s] $ nexus send th-22454d2ee7bf second --request-id msg:second
+[ 32 s]   exit 1: nexus: an earlier send of request msg:second failed partway, so Claude may have some or all of it. Check the conversation before sending it again under a new request ID
+[ 32 s] typed into Claude: []
+[ 32 s] second send exit 2, resend exit 1, resend again exit 1

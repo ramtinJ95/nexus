@@ -295,9 +295,10 @@ document.addEventListener("submit", async (event) => {
     showStatus(null);
     outgoing.inFlight = false;
     // A Claude worker's send that failed partway may have typed the message, so the API refuses its request ID again.
-    // The reader checks the conversation, and sending again is a new message.
+    // The reader checks the conversation, and sending again is a new message. A 503 may still be typed, and its
+    // reason says so: sending the same text again keeps the request ID, which answers what became of it.
     if (err.status === 422) outgoing = null;
-    showError("action-error", err.status === 422 ? err : new Error(`The message was not sent: ${err.message}`));
+    showError("action-error", err.status === 422 || err.status === 503 ? err : new Error(`The message was not sent: ${err.message}`));
   } finally {
     const send = document.getElementById("send");
     if (send !== null) send.disabled = false;

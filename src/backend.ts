@@ -188,8 +188,11 @@ export async function runJob(job: Job, deps: ProbeDeps, signal: AbortSignal): Pr
   }
 }
 
-/** The caller has checked that the pylon runs. Sessions open in the checkout. */
-export async function runCommand(pylonId: PylonId, command: PylonCommand, deps: ProbeDeps): Promise<CommandResult> {
+/**
+ * The caller has checked that the pylon runs. Sessions open in the checkout. A send-claude-outcome never comes here,
+ * since the probe answers it from its own record of its sends.
+ */
+export async function runCommand(pylonId: PylonId, command: Exclude<PylonCommand, { kind: "send-claude-outcome" }>, deps: ProbeDeps): Promise<CommandResult> {
   const guest = deps.backend.guest(pylonId);
   switch (command.kind) {
     case "exec":

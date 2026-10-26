@@ -1215,7 +1215,7 @@ test("show prints PR metadata and one disabled-watch notice without waking the p
 
 test("deploy and release use the shared release view and wait for both roles", async (t) => {
   const s = await setup(t);
-  assert.equal((await s.nexus(["--version"])).stdout.trim(), "nexus 0.20.0");
+  assert.equal((await s.nexus(["--version"])).stdout.trim(), "nexus 0.20.1");
   assert.equal((await s.nexus(["deploy", "bad"])).code, 64);
   const requested = await s.json(["deploy", "main"]);
   assert.equal(requested.desired.commit, "a".repeat(40));
@@ -1497,7 +1497,7 @@ test("conversation prints a Claude worker's transcript, and send types into its 
   const queued = await s.nexus(["send", thread.id, "and", "then", '"deploy"', "--request-id", "msg:fixed"]);
   assert.equal(queued.code, 0, queued.stderr);
   assert.equal(queued.stdout, `Queued for Claude in ${thread.id}, which takes it at its next step. Its session was resumed to take it.\n`);
-  assert.deepEqual(s.commands, Array(3).fill({ kind: "send-claude", session: "s1", text: 'and then "deploy"', model: "claude-opus-5-5" }), "a paused pylon is woken and asked again until it runs");
+  assert.deepEqual(s.commands, Array(3).fill({ kind: "send-claude", session: "s1", text: 'and then "deploy"', requestId: "msg:fixed", model: "claude-opus-5-5" }), "a paused pylon is woken and asked again until it runs");
   assert.deepEqual(await s.json(["send", thread.id, "and", "then", '"deploy"', "--request-id", "msg:fixed"]), { claude: { session: "s1", outcome: "queued", resumed: true } });
   assert.equal(s.commands.length, 3, "a resend under the same request ID is not typed again");
   s.probeAnswers(async () => ({ kind: "send-claude", outcome: "sent", herdrPane: "w1:p1", resumed: false }));

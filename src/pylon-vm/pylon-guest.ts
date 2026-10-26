@@ -21,11 +21,16 @@ export const asUser = (script: string, cwd: string) => `runuser -l user -c ${q(`
 /** The instance's controller log, which `logs` without a service reads. The controller appends to it too. */
 export const controllerLog = (dir: string): PylonLog => (line) => appendFile(join(dir, "controller.log"), `${line}\n`, { mode: 0o600 });
 
+/** gondolin build writes gondolin.json's env here, for login shells. sandboxd's execs get the same env directly. */
+export const imageEnv = "/etc/profile.d/gondolin-image-env.sh";
+
 /**
  * sshd hands the remote command to the user's shell as one string, so each argument is quoted to reach the
- * guest process unchanged.
+ * guest process unchanged. That shell is no login shell, so it reads the image's env first, as sandboxd's execs have
+ * it: without NODE_EXTRA_CA_CERTS, npm in a stream, as in the review loop's check, refuses Gondolin's TLS proxy. The
+ * process then replaces the shell, so the stream's exit status is its own.
  */
-export const remoteCommand = (argv: readonly string[]) => argv.map(q).join(" ");
+export const remoteCommand = (argv: readonly string[]) => `[ ! -r ${imageEnv} ] || . ${imageEnv}; exec ${argv.map(q).join(" ")}`;
 
 const execReplySchema = z.object({
 	pid: z.string(),
