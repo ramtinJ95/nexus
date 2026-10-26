@@ -1,6 +1,7 @@
 /**
  * The reconcile loop. It follows every node's observe stream, folds each event into the registry, and ticks
- * every pylon on a node after each event and every 5 seconds.
+ * every pylon on a node after each event and every 5 seconds. Each pass first moves the node's template builds along
+ * (template-builds.ts).
  *
  * Each node has one pass at a time. A pass that is asked for while one runs is coalesced into a single
  * pass after it, so no two ticks of the same pylon overlap and a slow probe holds up only its own node.
@@ -20,6 +21,7 @@ import type { NodeName, NodeObservation, ProbeClient, ProbeError, ProbeEvent, Py
 import type { ArtifactId } from "../images.ts";
 import { pylonLive } from "./live.ts";
 import type { PortRange, Registry, StoredPylon, Thread, ThreadId } from "./registry.ts";
+import { tickTemplateBuild } from "./template-builds.ts";
 
 /**
  * reconcile.ts's ingest. `known` maps each registry pylon on the node to its last ingested observation, and `unlisted`
@@ -133,6 +135,13 @@ export function startLoop(options: LoopOptions): Loop {
 
   async function pass(node: NodeName, link: Link) {
     registry.pruneSessions();
+    for (const template of registry.buildingTemplates(node)) {
+      try {
+        await tickTemplateBuild(template, { probe: link.probe, observation: observation(node), registry, log });
+      } catch (err) {
+        log(`${template.id}: template build tick failed: ${(err as Error).message}`);
+      }
+    }
     // Each record is read just before its tick, because an API retry may change it while earlier ticks wait on
     // the probe, and saving an older copy would undo it.
     for (const { pylonId } of registry.pylonsOn(node)) {

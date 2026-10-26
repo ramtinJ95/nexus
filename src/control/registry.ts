@@ -17,7 +17,7 @@ import { DatabaseSync } from "node:sqlite";
 import type { ActivityFacts, RegistryWrite, ThreadStatus } from "../reconcile.ts";
 import type { HerdrStatus, JobStatus, NodeName, NodeObservation, PylonId, Subject, TailnetNodeId } from "../protocol.ts";
 import type { Project, ProjectId, SessionHarness } from "../project.ts";
-import type { ImageId, ImageManifest, TemplateRecord } from "../images.ts";
+import type { BuildingTemplate, ImageId, ImageManifest, TemplateId, TemplateRecord } from "../images.ts";
 import type { PylonRecord } from "../tick.ts";
 import type { ImageOperation } from "./image-rollout.ts";
 import { needsPerson, reviewerCaller, type Review } from "./review.ts";
@@ -427,6 +427,8 @@ export function openRegistry(path: string, clock = Date.now) {
     images: db.prepare("SELECT manifest FROM images ORDER BY id"),
     upsertTemplate: db.prepare("INSERT INTO templates (id, project, record) VALUES (?, ?, ?) ON CONFLICT (id) DO UPDATE SET record = excluded.record"),
     templates: db.prepare("SELECT record FROM templates WHERE project = ? ORDER BY id"),
+    buildingTemplates: db.prepare("SELECT record FROM templates WHERE json_extract(record, '$.state') = 'building' AND json_extract(record, '$.on') = ? ORDER BY id"),
+    deleteTemplate: db.prepare("DELETE FROM templates WHERE id = ?"),
     setSetting: db.prepare("INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value"),
     setting: db.prepare("SELECT value FROM settings WHERE key = ?"),
   };
@@ -907,6 +909,9 @@ export function openRegistry(path: string, clock = Date.now) {
 
     saveTemplate(template: TemplateRecord) { q.upsertTemplate.run(template.id, template.key.project, JSON.stringify(template)); },
     templates: (project: ProjectId) => (q.templates.all(project) as Row[]).map((r) => json<TemplateRecord>(r.record)),
+    /** The builds the node's loop pass moves along, in every project. */
+    buildingTemplates: (node: NodeName) => (q.buildingTemplates.all(node) as Row[]).map((r) => json<BuildingTemplate>(r.record)),
+    deleteTemplate(id: TemplateId) { q.deleteTemplate.run(id); },
 
     /**
      * Stores the node's new observation together with the writes ingest derived from it. One transaction,
