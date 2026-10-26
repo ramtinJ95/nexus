@@ -1,0 +1,13 @@
+> /pstack:poteto-mode Write hello.txt containing hi, then say done.
+
+[error] You've hit your session limit · resets 6:31am (UTC)
+
+[notice] Usage limit reached · continuing automatically at 6:31am · esc to cancel
+
+[turn] 0s
+
+> [Nexus usage limit — automated, not a message from the person] The usage limit reset. Continue where you stopped.
+
+Continuing where I stopped.
+
+[turn] 0s

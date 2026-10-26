@@ -1,0 +1,9 @@
+th-e26d3e3b7c8f  Stops on its limit
+project: words
+Claude worker: started, model claude-opus-5-5
+attention: limited
+usage limit: stopped on its usage limit until 06:31 UTC. `nexus send th-e26d3e3b7c8f continue` resumes it once the limit resets
+status: active
+pylon: pylon-th-e26d3e3b7c8f on verify-node, running, observed 0s ago
+placement: verify-node, the project's default node
+PR watch: off (no control-plane GitHub token configured)

@@ -1,0 +1,10 @@
+{"id":"1","time":1792996118315,"thread":"th-e26d3e3b7c8f","project":"words","kind":"session.turn-started","payload":{"at":1792996118253,"session":"bef6071c-8e93-4d2c-b88f-39b546d94f7b"}}
+{"id":"2","time":1792996118315,"thread":"th-e26d3e3b7c8f","project":"words","kind":"attention.changed","payload":{"attention":"working"}}
+{"id":"3","time":1792996118696,"thread":"th-e26d3e3b7c8f","project":"words","kind":"session.turn-ended","payload":{"at":1792996118633,"session":"bef6071c-8e93-4d2c-b88f-39b546d94f7b"}}
+{"id":"4","time":1792996118696,"thread":"th-e26d3e3b7c8f","project":"words","kind":"attention.changed","payload":{"attention":"reply"}}
+{"id":"5","time":1792996119458,"thread":"th-e26d3e3b7c8f","project":"words","kind":"attention.changed","payload":{"attention":"limited"}}
+{"id":"6","time":1792996272431,"thread":"th-e26d3e3b7c8f","project":"words","kind":"usage-limit.continued","payload":{"session":"bef6071c-8e93-4d2c-b88f-39b546d94f7b","stoppedAt":1792996118544,"resetsAt":1792996266000,"requestId":"usage-limit:bef6071c-8e93-4d2c-b88f-39b546d94f7b:1792996118544"}}
+{"id":"7","time":1792996272608,"thread":"th-e26d3e3b7c8f","project":"words","kind":"session.turn-started","payload":{"at":1792996272497,"session":"bef6071c-8e93-4d2c-b88f-39b546d94f7b"}}
+{"id":"8","time":1792996272608,"thread":"th-e26d3e3b7c8f","project":"words","kind":"attention.changed","payload":{"attention":"working"}}
+{"id":"9","time":1792996272696,"thread":"th-e26d3e3b7c8f","project":"words","kind":"session.turn-ended","payload":{"at":1792996272646,"session":"bef6071c-8e93-4d2c-b88f-39b546d94f7b"}}
+{"id":"10","time":1792996272697,"thread":"th-e26d3e3b7c8f","project":"words","kind":"attention.changed","payload":{"attention":"reply"}}

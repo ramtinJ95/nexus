@@ -1,0 +1,11 @@
+th-7bb74e4f0f40  Archived while stopped
+project: words
+Claude worker: started, model claude-opus-5-5
+attention: limited
+usage limit: stopped on its usage limit, which reset at 06:32 UTC. `nexus send th-7bb74e4f0f40 continue` resumes it once the limit resets
+status: archived
+pylon: pylon-th-7bb74e4f0f40 on verify-node, running, observed 0s ago
+placement: verify-node, the project's default node
+PR watch: off (no control-plane GitHub token configured)
+
+usage-limit.continued events: 0

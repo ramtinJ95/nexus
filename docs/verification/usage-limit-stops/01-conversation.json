@@ -1,0 +1,39 @@
+{
+  "kind": "claude",
+  "session": "bef6071c-8e93-4d2c-b88f-39b546d94f7b",
+  "entries": [
+    {
+      "kind": "prompt",
+      "at": 1792996118325,
+      "text": "/pstack:poteto-mode Write hello.txt containing hi, then say done.",
+      "from": "person"
+    },
+    {
+      "kind": "notice",
+      "at": 1792996118544,
+      "tone": "error",
+      "text": "You've hit your session limit · resets 6:31am (UTC)",
+      "usageLimit": {
+        "resetsAt": 1792996266000
+      }
+    },
+    {
+      "kind": "notice",
+      "at": 1792996118548,
+      "tone": "info",
+      "text": "Usage limit reached · continuing automatically at 6:31am · esc to cancel"
+    },
+    {
+      "kind": "turn",
+      "at": 1792996118563,
+      "durationMs": 465
+    }
+  ],
+  "dropped": 0,
+  "readAt": 1792996120759,
+  "working": false,
+  "usageLimit": {
+    "stoppedAt": 1792996118544,
+    "resetsAt": 1792996266000
+  }
+}

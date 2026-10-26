@@ -1,0 +1,30 @@
+{
+  "id": "th-e26d3e3b7c8f",
+  "title": "Stops on its limit",
+  "project": "words",
+  "pylonId": "pylon-th-e26d3e3b7c8f",
+  "status": "active",
+  "conversationId": null,
+  "startedBy": "nVERIFY",
+  "createdAt": 1792996116215,
+  "agentTurnRunning": false,
+  "lastAgentActivityAt": 1792996118696,
+  "lastHumanActivityAt": 1792996116215,
+  "seenAt": null,
+  "lastReplyAt": 1792996118696,
+  "placement": {
+    "how": "default",
+    "node": "verify-node"
+  },
+  "usageLimit": {
+    "stoppedAt": 1792996118544,
+    "resetsAt": 1792996266000
+  },
+  "attention": "limited",
+  "desired": "running",
+  "pylon": {
+    "node": "verify-node",
+    "actualState": "running",
+    "failed": null
+  }
+}

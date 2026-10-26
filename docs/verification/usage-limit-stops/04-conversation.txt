@@ -1,0 +1,11 @@
+> /pstack:poteto-mode Write two.txt containing 2, then say done.
+
+[error] You've hit your session limit · resets 7:31am (UTC)
+
+[notice] Usage limit reached · continuing automatically at 7:31am · esc to cancel
+
+[turn] 0s
+
+> continue
+
+Continuing where I stopped.

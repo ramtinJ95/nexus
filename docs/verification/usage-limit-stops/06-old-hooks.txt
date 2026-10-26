@@ -1,0 +1,7 @@
+HOOKS=old: the image's hook table before this branch, with no StopFailure hook. Attention after 4 s:
+th-57e82588ccc5  active  stopped on its usage limit until 07:32 UTC  pylon running  words  3s ago  Old image hooks
+{"attention": "limited", "sessionTurnRunning": null, "usageLimit": {"stoppedAt": 1792996382694, "resetsAt": 1792999979000}, "lastReplyAt": null}
+events:
+  session.turn-started {"at": 1792996382316, "session": "ca6568aa-1118-4c39-93b4-8c9504bee1c1"}
+  attention.changed {"attention": "working"}
+  attention.changed {"attention": "limited"}
