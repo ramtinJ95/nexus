@@ -395,6 +395,19 @@ test("a Claude turn that started before the one the checkout last claimed never 
   await assert.rejects(checkoutReader(c.open, c.dir, undefined, older).changes("turn"), refused("no-base", /no latest-turn snapshot/));
 });
 
+test("a snapshot whose turn a later attempt claimed is refused even to a read expecting it, as when that attempt's turn start was lost", async (t) => {
+  const c = await checkout(t);
+  const { slow } = await slowFilter(c);
+  const older = claudeTurn("a", 1000);
+  assert.equal(await snapshotTurn(c.dir, older, 30_000, helperPath), true);
+  await checkoutReader(c.open, c.dir, undefined, older).changes("turn");
+  await writeFile(slow, "");
+  assert.equal(await snapshotTurn(c.dir, claudeTurn("b", 2000), 300, helperPath), false);
+  assert.equal((await c.git("log", "-1", "--format=%s", "refs/nexus/turn")).trim(), `Nexus turn ${older}`);
+  await assert.rejects(checkoutReader(c.open, c.dir, undefined, older).changes("turn"), refused("no-base", /no latest-turn snapshot/));
+  await assert.rejects(checkoutReader(c.open, c.dir, undefined, older).diff("turn", []), refused("no-base", /no latest-turn snapshot/));
+});
+
 test("a turn snapshot works before a scratch repository's first commit", async (t) => {
   const c = await checkout(t);
   await rm(join(c.dir, ".git"), { recursive: true });

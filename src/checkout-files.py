@@ -151,10 +151,11 @@ def base_of(root, base):
     else:
         raise ValueError("unknown base %r" % base)
     found = resolve(root, ref)
-    if base == "turn" and expected is None:
-        expected = marked(turn_marker(root))
-    if base == "turn" and found is not None and expected is not None:
-        if git(root, ["show", "-s", "--format=%s", found]).decode().strip() != "Nexus turn " + expected:
+    if base == "turn" and found is not None:
+        # The marker names the latest attempt, whose failure leaves the previous snapshot in place, and the caller's
+        # turn can lag it when a turn start was lost. Either one disagreeing makes the snapshot stale.
+        named = git(root, ["show", "-s", "--format=%s", found]).decode().strip()
+        if any(turn is not None and named != "Nexus turn " + turn for turn in (expected, marked(turn_marker(root)))):
             found = None
     if found is None:
         if base == "turn":
