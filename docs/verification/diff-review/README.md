@@ -1,8 +1,8 @@
 # Review notes on the diff verification
 
-Verified in this task's pylon on 2026-10-26, on branch `diff-review-comments`, with
-headless Chromium, Claude Code 2.1.308 and Herdr 0.9.5. No live control plane, node,
-image or other thread was touched.
+Verified in this task's pylon on 2026-10-26, on branch `diff-review-comments` rebased on
+`main` after nexus#96, with headless Chromium, Claude Code 2.1.308 and Herdr 0.9.5. No live
+control plane, node, image or other thread was touched.
 
 ## The stacks
 
@@ -14,12 +14,17 @@ image or other thread was touched.
 - `claude` runs against [the Claude turn snapshots stack](../claude-turn-snapshots/README.md),
   `docs/verification/claude-turn-snapshots/stack.ts` on `127.0.0.1:7472`. Its worker is a
   real Claude Code session in Herdr, messaged by the real `sessions.ts` code, and its
-  latest turn is the snapshot the worker's hook took.
+  latest turn is the snapshot the worker's hook took. Since nexus#96 the hook reports only
+  from the real home and only for a Claude that no other Claude started, so the stack now
+  stages `nexus-outbox.ts`, points the hook's home check at its own home, and launches the
+  worker without this session's `CLAUDE_CODE_SESSION_ID`. Without those changes the
+  worker's turns took no snapshot.
 
 `drive.mjs` drives the thread page in headless Chromium (`@sparticuz/chromium` and
-`puppeteer-core`, installed outside the repo). It writes `harness.log` or `claude.log`,
-logs every response with a status of 400 or more, and fails on any CSP violation or page
-error.
+`puppeteer-core`, installed outside the repo, run with `LD_LIBRARY_PATH=/tmp/al2023/lib`
+and `FONTCONFIG_PATH=/tmp/fonts` so Chromium finds the libraries and fonts the package
+unpacks). It writes `harness.log` or `claude.log`, logs every response with a status of
+400 or more, and fails on any CSP violation or page error.
 
 ## What was checked
 
@@ -61,7 +66,3 @@ error.
   the Claude worker ran in this pylon's Herdr.
 - Safari and Firefox, a touch screen, and the phone layout.
 - A screen reader.
-- The full test suite also failed twice while a stack or Chromium ran in this pylon:
-  `src/cli/nexus.test.ts` stalled, and the API test of a client dropped after the stall
-  limit timed out. Both passed alone, and the whole suite then passed with no stack
-  running. `origin/main` passed in the same pylon.

@@ -232,17 +232,18 @@ if (mode === "claude") {
   await page.evaluate(() => localStorage.clear());
   await base(page, "turn");
   log(`latest turn: ${await page.$eval("#changes-body", (el) => el.innerText.replace(/\s+/g, " "))}`);
-  await diff(page, "greet.py");
+  const path = await page.$eval("#changes-body .tree-file", (el) => el.dataset.path);
+  await diff(page, path);
   const lines = await page.evaluate(() => [...document.querySelector(".diff-view").shadowRoot.querySelectorAll("[data-column-number]")]
     .filter((el) => el.dataset.lineType !== "change-deletion").map((el) => Number(el.textContent.trim())));
-  log(`greet.py's diff shows new lines ${lines[0]}-${lines.at(-1)}`);
+  log(`${path}'s diff shows new lines ${lines[0]}-${lines.at(-1)}`);
   await drag(page, lines[0], lines[2]);
   await write(page, "Question", "Why is this the order the functions come in?");
   await drag(page, lines.at(-3), lines.at(-1));
   await write(page, "Requested change", "Add a docstring to each function you added.");
   await page.reload();
   await base(page, "turn");
-  await diff(page, "greet.py");
+  await diff(page, path);
   log(`after a reload: ${JSON.stringify(await cards(page))}`);
   await shot(page, "01-notes");
   await send(page);

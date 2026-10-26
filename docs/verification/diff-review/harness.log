@@ -14,7 +14,7 @@ screenshot harness-07-dark.png
 composed review: 53 lines, saved as harness-composed.md; the tab on show is convo
 screenshot harness-composer.png
 the conversation shows 1 reviews, 0 before the send
-after the send: the stored review is {"notes":[{"id":"note:mvouza7e4702f1b7","kind":"comment","path":"style.css","entry":0,"start":{"side":"additions","line":3},"end":{"side":"additions","line":4},"lines":{"from":3,"to":4,"removed":false},"quote":["+  gap: 8px;","+  color: light-dark(#222, #eee);"],"body":"Use the gap token here."}],"draft":null,"composed":null}, and the conversation's last message starts "th-c9bdd7824f21 · started just now  You  I reviewed the diff in the Nexus dashboard. Please address these notes, and ans"
+after the send: the stored review is {"notes":[{"id":"note:mvovkq5j106fc7d7","kind":"comment","path":"style.css","entry":0,"start":{"side":"additions","line":3},"end":{"side":"additions","line":4},"lines":{"from":3,"to":4,"removed":false},"quote":["+  gap: 8px;","+  color: light-dark(#222, #eee);"],"body":"Use the gap token here."}],"draft":null,"composed":null}, and the conversation's last message starts "th-591a1bae263d · started 1 min ago  You  I reviewed the diff in the Nexus dashboard. Please address these notes, and an"
 screenshot harness-08-sent.png
 the review bar after the send: Review: 1 note Add to message Discard
 problems: []
