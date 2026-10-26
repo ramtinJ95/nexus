@@ -46,11 +46,11 @@ async function setup(t: import("node:test").TestContext, origin: (route: Preview
   gateway.routes.set(10001, { pylonId, service: "web" });
   const gatewayPort = Number(new URL(gateway.origin).port);
   const call = (path: string, init: { method?: string; headers?: Record<string, string>; body?: string } = {}) =>
-    new Promise<{ status: number; headers: IncomingMessage["headers"]; body: string }>((resolve, reject) => {
+    new Promise<{ status: number; headers: IncomingMessage["headers"]; rawHeaders: string[]; body: string }>((resolve, reject) => {
       const req = request({ host: "127.0.0.1", port: gatewayPort, path, method: init.method ?? "GET", headers: { host: publicHost, ...init.headers } }, async (res) => {
         let body = "";
         for await (const chunk of res) body += chunk;
-        resolve({ status: res.statusCode!, headers: res.headers, body });
+        resolve({ status: res.statusCode!, headers: res.headers, rawHeaders: res.rawHeaders, body });
       });
       req.on("error", reject);
       req.end(init.body);
@@ -80,6 +80,36 @@ test("a request is forwarded by its Host port, with its body, the public Host an
   assert.equal(seen.headers["x-forwarded-for"], "100.64.0.12, 127.0.0.1");
   assert.equal(seen.headers["tailscale-user-login"], "someone@example.com");
   assert.equal(seen.headers["x-drop-me"], undefined, "headers the Connection header names are hop-by-hop");
+});
+
+async function headerOrigin(t: import("node:test").TestContext) {
+  const server = createServer((req, res) => {
+    const headers = new URL(req.url!, "http://guest").searchParams;
+    res.writeHead(headers.has("location") ? 302 : 200, [...headers].flat()).end();
+  });
+  return `http://127.0.0.1:${await listen(t, server)}` as const;
+}
+
+function cspValues(rawHeaders: string[]): string[] {
+  return rawHeaders.filter((_, i) => i % 2 === 1 && rawHeaders[i - 1]!.toLowerCase() === "content-security-policy");
+}
+
+test("a guest's plain-http redirect to its own public URL reaches the browser as https, and other redirects arrive unchanged", async (t) => {
+  const origin = await headerOrigin(t);
+  const { call } = await setup(t, () => origin);
+  const redirect = async (location: string) => (await call(`/?location=${encodeURIComponent(location)}`)).headers.location;
+  assert.equal(await redirect(`http://${publicHost}/x?y#z`), `https://${publicHost}/x?y#z`);
+  assert.equal(await redirect("http://elsewhere.example.com:10001/x"), "http://elsewhere.example.com:10001/x");
+  assert.equal(await redirect("http://infra-testbench.example.ts.net:10002/x"), "http://infra-testbench.example.ts.net:10002/x");
+  assert.equal(await redirect("/login?next=%2F"), "/login?next=%2F");
+});
+
+test("every forwarded response asks the browser to upgrade insecure requests, beside the guest's own CSP", async (t) => {
+  const origin = await headerOrigin(t);
+  const { call } = await setup(t, () => origin);
+  assert.deepEqual(cspValues((await call("/")).rawHeaders), ["upgrade-insecure-requests"]);
+  const csp = "default-src 'self'";
+  assert.deepEqual(cspValues((await call(`/?content-security-policy=${encodeURIComponent(csp)}`)).rawHeaders), [csp, "upgrade-insecure-requests"]);
 });
 
 test("a response streams through before the origin has finished it", async (t) => {
@@ -195,6 +225,7 @@ test("a refused upgrade whose body the origin cuts short closes the browser's co
   req.end();
   const [res] = await once(req, "response") as [IncomingMessage];
   assert.equal(res.statusCode, 403);
+  assert.deepEqual(cspValues(res.rawHeaders), ["upgrade-insecure-requests"]);
   res.on("error", () => {}); // the cut-short body arrives as "aborted"
   res.resume();
   await new Promise((resolve) => res.on("close", resolve));
