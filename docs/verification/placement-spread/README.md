@@ -19,9 +19,12 @@ Project `nexus` asks for 4 CPUs, 8 GiB and 40 GiB, and starts with `rj-firebat` 
 - `project-edit.txt`. `nexus project edit nexus --node auto` succeeded, and `nexus projects` lists `node auto`.
 - `start-project-auto.txt`. After the edit, a start without `--node` was placed by `auto` on `infra-testbench` (`show.txt`, `after the edit`).
 - `start-pinned.txt`. `--node spare-node` still pins the pylon, with `placement: spare-node, as the start named`.
-- `project-add.txt`. `nexus project add spread <url>` without `--node` printed `Added project spread (...) on auto`. With `--json`, it returned `defaultNode: "auto"`. `nexus projects` lists both new projects with `node auto`.
-- `dashboard.html`. The rendered HTML of the dashboard's home page, fetched from the stack, cut to three parts. The side node list shows each node's committed and total memory, `rj-firebat`'s `<em>overcommitted</em>`, and `8 GiB to wake paused`. The start dialog's hint for `nexus`, whose default is now `auto`, reads `Boots a pylon on the node with the most room left`. The new-project dialog's node picker offers `auto, where it fits best` first and selected.
-- `threads.json` lists the seven seeded workers and the five threads started above.
+- `project-add.txt`. `nexus project add spread <url>` without `--node` printed `Added project spread (...) on auto`. With `--json`, it returned `defaultNode: "auto"`. `nexus projects` lists both new projects with `node auto`. Both got 6 GiB of memory, the new default without `--memory`.
+- `start-sized.txt` and `show.txt` (`sized`). `nexus start --project nexus --memory 12 --cpus 2` took the project's 40 GiB disk and went to `infra-testbench`, the only node with 12 GiB left, since `spare-node` had 11.3. `show` prints `size: 2 CPUs, 12 GiB memory, 40 GiB disk`, and its placement line weighs the 12 GiB.
+- `start-too-big.txt`. `--memory 20` fits no node, so the start is refused with each node's reason, every one weighed against 20 GiB, and exits 5.
+- `start-form.txt`. `start-form.mjs` runs the dashboard's built `client.js` in jsdom against the start dialog the stack serves. The CPUs, memory and disk fields show the picked project's size as placeholders and follow the project picked. A submit with memory 12 and CPUs 2 sends `resources: { cpus: 2, memoryGiB: 12 }`, and one with the fields empty sends no `resources`.
+- `dashboard.html`. The rendered HTML of the dashboard's home page, fetched from the stack, cut to four parts by `drive.sh`. The start dialog's CPUs, memory and disk fields carry the project's size as placeholders. The side node list shows each node's committed and total memory, `rj-firebat`'s `<em>overcommitted</em>`, and `8 GiB to wake paused`. The start dialog's hint for `nexus`, whose default is now `auto`, reads `Boots a pylon on the node with the most room left`. The new-project dialog's node picker offers `auto, where it fits best` first and selected.
+- `threads.json` lists the seven seeded workers and the six threads started above.
 
 Every started pylon shows `absent`, because no probe runs. Placement happens before a pylon boots, and does not depend on it.
 
@@ -29,7 +32,7 @@ Every started pylon shows `absent`, because no probe runs. Placement happens bef
 
 - A real probe's reading. The committed figures here are the stack's numbers, not a measurement. The probe's counting is unchanged since `docs/verification/node-capacity`, which ran real probes over pylon-vm.
 - The live fleet. `nexus nodes` against the live control plane needs the tailnet, which this pylon cannot reach.
-- The dashboard in a browser. `dashboard.html` is the server's HTML, and `dashboard.test.ts` checks it. No screenshot was taken, and `client.js` did not run, so the client's own hint for a project whose default is `auto` was not watched. It reads the same `data-node` the server renders.
+- The dashboard in a real browser. `dashboard.html` is the server's HTML, and `dashboard.test.ts` checks it. `client.js` ran only in jsdom, for the start form's size fields, and no screenshot was taken.
 - The same stack without the reservation. Instead, in `src/control/api.test.ts`, removing the reserved rooms from `weigh` made the overlapping-starts test fail.
 
 ## Rerun
@@ -40,4 +43,4 @@ sleep 5
 sh docs/verification/placement-spread/drive.sh
 ```
 
-`stack.ts` starts from an empty `/tmp/nexus-spread` each time, so the thread IDs change. `drive.sh` does not write `dashboard.html`. It came from `curl -H 'host: 127.0.0.1' http://127.0.0.1:7471/`, cut to the side node list, the start hint and the new-project node picker.
+`stack.ts` starts from an empty `/tmp/nexus-spread` each time, so the thread IDs change. `start-form.mjs` needs jsdom, which the repo does not depend on: `NODE_PATH=<dir>/node_modules node docs/verification/placement-spread/start-form.mjs > docs/verification/placement-spread/start-form.txt`, with the stack still up after `drive.sh`.

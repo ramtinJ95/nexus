@@ -7,7 +7,7 @@ exit 0
   "defaultNode": "auto",
   "resources": {
     "cpus": 2,
-    "memoryGiB": 4,
+    "memoryGiB": 6,
     "diskGiB": 10
   },
   "allowedHosts": [],

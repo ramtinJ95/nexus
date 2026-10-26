@@ -12,7 +12,7 @@
       "diskFreeGiB": 400,
       "committedDiskGiB": 0
     },
-    "observedAt": "2026-10-26T06:28:13.442Z",
+    "observedAt": "2026-10-26T10:27:10.919Z",
     "overcommitted": false,
     "pylons": {
       "up": {
@@ -46,7 +46,7 @@
       "diskFreeGiB": 400,
       "committedDiskGiB": 320
     },
-    "observedAt": "2026-10-26T06:28:13.195Z",
+    "observedAt": "2026-10-26T10:27:10.669Z",
     "overcommitted": true,
     "pylons": {
       "up": {
@@ -82,7 +82,7 @@
       "diskFreeGiB": 400,
       "committedDiskGiB": 40
     },
-    "observedAt": "2026-10-26T06:28:13.604Z",
+    "observedAt": "2026-10-26T10:27:11.152Z",
     "overcommitted": false,
     "pylons": {
       "up": {

@@ -1,16 +1,16 @@
 [
   {
-    "id": "th-6be88506d79c",
+    "id": "th-f874fbfe770e",
     "title": "worker 1",
     "project": "nexus",
-    "pylonId": "pylon-th-6be88506d79c",
+    "pylonId": "pylon-th-f874fbfe770e",
     "status": "active",
     "conversationId": null,
     "startedBy": "nLAPTOP",
-    "createdAt": 1792996091509,
+    "createdAt": 1793010429476,
     "agentTurnRunning": false,
     "lastAgentActivityAt": 0,
-    "lastHumanActivityAt": 1792996091509,
+    "lastHumanActivityAt": 1793010429476,
     "seenAt": null,
     "lastReplyAt": null,
     "placement": {
@@ -26,17 +26,17 @@
     }
   },
   {
-    "id": "th-6cfaeab937f2",
+    "id": "th-66771e8c5761",
     "title": "worker 2",
     "project": "nexus",
-    "pylonId": "pylon-th-6cfaeab937f2",
+    "pylonId": "pylon-th-66771e8c5761",
     "status": "active",
     "conversationId": null,
     "startedBy": "nLAPTOP",
-    "createdAt": 1792996091722,
+    "createdAt": 1793010429564,
     "agentTurnRunning": false,
     "lastAgentActivityAt": 0,
-    "lastHumanActivityAt": 1792996091722,
+    "lastHumanActivityAt": 1793010429564,
     "seenAt": null,
     "lastReplyAt": null,
     "placement": {
@@ -52,17 +52,17 @@
     }
   },
   {
-    "id": "th-035658f8a70f",
+    "id": "th-5741faa8eb75",
     "title": "worker 3",
     "project": "nexus",
-    "pylonId": "pylon-th-035658f8a70f",
+    "pylonId": "pylon-th-5741faa8eb75",
     "status": "active",
     "conversationId": null,
     "startedBy": "nLAPTOP",
-    "createdAt": 1792996091924,
+    "createdAt": 1793010429661,
     "agentTurnRunning": false,
     "lastAgentActivityAt": 0,
-    "lastHumanActivityAt": 1792996091924,
+    "lastHumanActivityAt": 1793010429661,
     "seenAt": null,
     "lastReplyAt": null,
     "placement": {
@@ -78,17 +78,17 @@
     }
   },
   {
-    "id": "th-1eeffc9dee85",
+    "id": "th-6515f2caea0b",
     "title": "worker 4",
     "project": "nexus",
-    "pylonId": "pylon-th-1eeffc9dee85",
+    "pylonId": "pylon-th-6515f2caea0b",
     "status": "active",
     "conversationId": null,
     "startedBy": "nLAPTOP",
-    "createdAt": 1792996092191,
+    "createdAt": 1793010429768,
     "agentTurnRunning": false,
     "lastAgentActivityAt": 0,
-    "lastHumanActivityAt": 1792996092191,
+    "lastHumanActivityAt": 1793010429768,
     "seenAt": null,
     "lastReplyAt": null,
     "placement": {
@@ -104,17 +104,17 @@
     }
   },
   {
-    "id": "th-bdaefa80138a",
+    "id": "th-464279e38477",
     "title": "paused worker",
     "project": "nexus",
-    "pylonId": "pylon-th-bdaefa80138a",
+    "pylonId": "pylon-th-464279e38477",
     "status": "active",
     "conversationId": null,
     "startedBy": "nLAPTOP",
-    "createdAt": 1792996092377,
+    "createdAt": 1793010429894,
     "agentTurnRunning": false,
     "lastAgentActivityAt": 0,
-    "lastHumanActivityAt": 1792996092377,
+    "lastHumanActivityAt": 1793010429894,
     "seenAt": null,
     "lastReplyAt": null,
     "placement": {
@@ -130,17 +130,17 @@
     }
   },
   {
-    "id": "th-032b2a1c6cff",
+    "id": "th-a3e23b861abd",
     "title": "archived 1",
     "project": "nexus",
-    "pylonId": "pylon-th-032b2a1c6cff",
+    "pylonId": "pylon-th-a3e23b861abd",
     "status": "archived",
     "conversationId": null,
     "startedBy": "nLAPTOP",
-    "createdAt": 1792996092498,
+    "createdAt": 1793010430033,
     "agentTurnRunning": false,
     "lastAgentActivityAt": 0,
-    "lastHumanActivityAt": 1792996092498,
+    "lastHumanActivityAt": 1793010430033,
     "seenAt": null,
     "lastReplyAt": null,
     "placement": {
@@ -156,17 +156,17 @@
     }
   },
   {
-    "id": "th-39b30bdd3cb9",
+    "id": "th-3a5dd9d86b79",
     "title": "archived 2",
     "project": "nexus",
-    "pylonId": "pylon-th-39b30bdd3cb9",
+    "pylonId": "pylon-th-3a5dd9d86b79",
     "status": "archived",
     "conversationId": null,
     "startedBy": "nLAPTOP",
-    "createdAt": 1792996092670,
+    "createdAt": 1793010430143,
     "agentTurnRunning": false,
     "lastAgentActivityAt": 0,
-    "lastHumanActivityAt": 1792996092670,
+    "lastHumanActivityAt": 1793010430143,
     "seenAt": null,
     "lastReplyAt": null,
     "placement": {
@@ -182,17 +182,17 @@
     }
   },
   {
-    "id": "th-bc18ad89b27f",
+    "id": "th-8c996eeeb753",
     "title": "overlap two",
     "project": "nexus",
-    "pylonId": "pylon-th-bc18ad89b27f",
+    "pylonId": "pylon-th-8c996eeeb753",
     "status": "active",
     "conversationId": "1",
     "startedBy": "nLAPTOP",
-    "createdAt": 1792996096411,
+    "createdAt": 1793010433078,
     "agentTurnRunning": false,
     "lastAgentActivityAt": 0,
-    "lastHumanActivityAt": 1792996096411,
+    "lastHumanActivityAt": 1793010433078,
     "seenAt": null,
     "lastReplyAt": null,
     "placement": {
@@ -230,17 +230,17 @@
     }
   },
   {
-    "id": "th-82a90095078c",
+    "id": "th-1e158bf34f1c",
     "title": "overlap one",
     "project": "nexus",
-    "pylonId": "pylon-th-82a90095078c",
+    "pylonId": "pylon-th-1e158bf34f1c",
     "status": "active",
     "conversationId": "2",
     "startedBy": "nLAPTOP",
-    "createdAt": 1792996096432,
+    "createdAt": 1793010433139,
     "agentTurnRunning": false,
     "lastAgentActivityAt": 0,
-    "lastHumanActivityAt": 1792996096432,
+    "lastHumanActivityAt": 1793010433139,
     "seenAt": null,
     "lastReplyAt": null,
     "placement": {
@@ -278,17 +278,17 @@
     }
   },
   {
-    "id": "th-2e2166488970",
+    "id": "th-e30151177910",
     "title": "before the edit",
     "project": "nexus",
-    "pylonId": "pylon-th-2e2166488970",
+    "pylonId": "pylon-th-e30151177910",
     "status": "active",
     "conversationId": "3",
     "startedBy": "nLAPTOP",
-    "createdAt": 1792996099515,
+    "createdAt": 1793010435922,
     "agentTurnRunning": false,
     "lastAgentActivityAt": 0,
-    "lastHumanActivityAt": 1792996099515,
+    "lastHumanActivityAt": 1793010435922,
     "seenAt": null,
     "lastReplyAt": null,
     "placement": {
@@ -304,17 +304,17 @@
     }
   },
   {
-    "id": "th-60514862b7bc",
+    "id": "th-8fe969eace80",
     "title": "after the edit",
     "project": "nexus",
-    "pylonId": "pylon-th-60514862b7bc",
+    "pylonId": "pylon-th-8fe969eace80",
     "status": "active",
     "conversationId": "4",
     "startedBy": "nLAPTOP",
-    "createdAt": 1792996103425,
+    "createdAt": 1793010439533,
     "agentTurnRunning": false,
     "lastAgentActivityAt": 0,
-    "lastHumanActivityAt": 1792996103425,
+    "lastHumanActivityAt": 1793010439533,
     "seenAt": null,
     "lastReplyAt": null,
     "placement": {
@@ -352,17 +352,17 @@
     }
   },
   {
-    "id": "th-7c59b1ef8ad1",
+    "id": "th-78919acb92a4",
     "title": "pinned",
     "project": "nexus",
-    "pylonId": "pylon-th-7c59b1ef8ad1",
+    "pylonId": "pylon-th-78919acb92a4",
     "status": "active",
     "conversationId": "5",
     "startedBy": "nLAPTOP",
-    "createdAt": 1792996106114,
+    "createdAt": 1793010442054,
     "agentTurnRunning": false,
     "lastAgentActivityAt": 0,
-    "lastHumanActivityAt": 1792996106114,
+    "lastHumanActivityAt": 1793010442054,
     "seenAt": null,
     "lastReplyAt": null,
     "placement": {
@@ -373,6 +373,50 @@
     "desired": "running",
     "pylon": {
       "node": "spare-node",
+      "actualState": "absent",
+      "failed": null
+    }
+  },
+  {
+    "id": "th-207f588fc605",
+    "title": "sized",
+    "project": "nexus",
+    "pylonId": "pylon-th-207f588fc605",
+    "status": "active",
+    "conversationId": "6",
+    "startedBy": "nLAPTOP",
+    "createdAt": 1793010444790,
+    "agentTurnRunning": false,
+    "lastAgentActivityAt": 0,
+    "lastHumanActivityAt": 1793010444790,
+    "seenAt": null,
+    "lastReplyAt": null,
+    "placement": {
+      "how": "auto",
+      "node": "infra-testbench",
+      "weighed": [
+        {
+          "node": "infra-testbench",
+          "left": {
+            "cpus": 6,
+            "memoryGiB": 3.3000000000000007,
+            "diskGiB": 280
+          }
+        },
+        {
+          "node": "rj-firebat",
+          "refused": "is overcommitted, with 56 of 22.8 GiB of memory committed"
+        },
+        {
+          "node": "spare-node",
+          "refused": "has 20 of 31.3 GiB of memory committed, and the pylon needs 12"
+        }
+      ]
+    },
+    "attention": null,
+    "desired": "running",
+    "pylon": {
+      "node": "infra-testbench",
       "actualState": "absent",
       "failed": null
     }
