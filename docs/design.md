@@ -252,7 +252,7 @@ This is a proposal. It is not built, and it changes `src/control/review.ts`, whi
 
 Today `nexus review` starts a separate reviewer thread. With the shepherdr mod and pi-shepherdr in the image, a Claude worker builder can run the reviewer itself: pi on the person's `reviewer` profile, in a Herdr tab of the builder's own pylon. That is how the person works on the Mac. The build and its review are then one thread and one pylon. No second pylon boots, and the reviewer reads the builder's working tree, uncommitted changes included.
 
-The control plane keeps what needs a party the builder cannot reach. It still runs `.nexus/check` in a bare check thread and reads the verdict from the exit status. It still caps the rounds, labels a review that runs out, and holds a review for the person. It still re-checks the merge policy before every merge, lands and deploys.
+The control plane keeps what needs a party the builder cannot reach. It still runs `.nexus/check` in a bare check thread and reads the verdict from the exit status. It still caps the rounds and holds a review that runs out for the person. It still re-checks the merge policy before every merge, lands and deploys.
 
 What changes:
 
