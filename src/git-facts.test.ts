@@ -173,7 +173,7 @@ test("the helper deadline kills a slow clean filter and its children on every po
   await s.commit();
   const script = join(s.dir, ".git", "slow-filter");
   const pids = join(s.dir, ".git", "filter-pids");
-  await writeFile(script, `#!/bin/sh\necho $$ >> '${pids}'\nsleep 30 &\necho $! >> '${pids}'\nwait\n`);
+  await writeFile(script, `#!/bin/sh\necho $$ >> '${pids}'\nsleep 120 &\necho $! >> '${pids}'\nwait\n`);
   await chmod(script, 0o700);
   await s.git("config", "filter.slow.clean", script);
   await s.git("config", "filter.slow.required", "true");
@@ -194,8 +194,9 @@ test("the helper deadline kills a slow clean filter and its children on every po
     await assert.rejects(gitFacts(s.guest), /could not be read/);
     const ids = (await readFile(pids, "utf8")).trim().split("\n").map(Number);
     assert.equal(ids.length, i * 2, "the clean filter really ran and spawned a child");
-    for (let retry = 0; (await Promise.all(ids.map(running))).some(Boolean); retry++) {
-      assert.ok(retry < 50, "no filter process may outlive the helper");
+    // The deadline only ends a hang: a loaded suite can take seconds to reap what dies at once alone, and the child sleeps for longer.
+    for (const deadline = Date.now() + 60_000; (await Promise.all(ids.map(running))).some(Boolean);) {
+      assert.ok(Date.now() < deadline, "no filter process may outlive the helper");
       await new Promise((resolve) => setTimeout(resolve, 10));
     }
   }

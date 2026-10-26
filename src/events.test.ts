@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { openRegistry } from "./control/registry.ts";
@@ -201,7 +201,7 @@ test("a background command runs while its process group lives, through exec or c
   };
   const build = await start("exec sleep 30 >/dev/null 2>&1 <&-", true);
   const mcp = await start("exec sleep 30", false);
-  await new Promise((resolve) => setTimeout(resolve, 100));
+  while (!readFileSync(`/proc/${build.pid}/cmdline`, "utf8").startsWith("sleep")) await new Promise((resolve) => setTimeout(resolve, 10));
   const groups = await backgroundGroups(process.pid);
   assert.deepEqual(groups.map((g) => g.pgid), [build.pid]);
   const running = backgroundWatch("c1", ["b6fh14jr7"], groups);

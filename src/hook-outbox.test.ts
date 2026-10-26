@@ -40,8 +40,9 @@ async function bridge(t: TestContext, answer: (event: OutboxEvent, res: ServerRe
   return { requests, url: `http://127.0.0.1:${(server.address() as { port: number }).port}` };
 }
 
-async function until(check: () => boolean, ms = 10_000) {
-  const deadline = Date.now() + ms;
+/** Waits for the check. The deadline only ends a hang: a loaded suite can take seconds over what takes milliseconds alone. */
+async function until(check: () => boolean) {
+  const deadline = Date.now() + 60_000;
   while (!check()) {
     if (Date.now() > deadline) throw new Error("timed out");
     await new Promise((resolve) => setTimeout(resolve, 20));
