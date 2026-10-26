@@ -96,7 +96,10 @@ async function socksProxy(t: TestContext, reply: number | "close" = 0) {
           client.write(Buffer.from([5, 0, 0, 1, 127, 0, 0, 1, 0, 0]));
           client.pipe(upstream).pipe(client);
         });
-        upstream.on("error", () => client.destroy());
+        // A pipe only ends the client when the API hangs up, and leaves it paused, so it would never read the CLI's
+        // own end and the proxy's close would wait for it forever.
+        upstream.on("close", () => client.destroy());
+        upstream.on("error", () => {});
       });
     });
   });
