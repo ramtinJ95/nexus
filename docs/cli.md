@@ -314,6 +314,8 @@ Both fail with exit code 5 when the control plane has no GitHub token (`github.t
 ```ts
 interface Review {
   id: string;                         // rv-<8 hex>
+  expect: string;                     // the token the awaited answer echoes
+  sent: number;                       // messages sent, which number their request IDs
   builder: string; reviewer: string;  // thread IDs
   pr: { repo: string; number: number; url: string; title: string };
   models: { builder: string; reviewer: string };

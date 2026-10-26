@@ -104,9 +104,9 @@ A linked PR contributes an `Output` with `kind: "pull-request"` and `ref` equal 
 
 ## Review records
 
-`reviews` stores a builder thread's latest review, one JSON record per builder, with its reviewer thread in a unique column so the PR watch can skip reviewers. `Review` in `src/control/review.ts` is the shape, and `ThreadDetail.review` serves it:
+`reviews` stores a builder thread's latest review, one JSON record per builder, with its reviewer thread in a unique column. The PR watch skips every thread started by `nexus-review`, so a reviewer stays skipped after a later review replaces the record that named it. `Review` in `src/control/review.ts` is the shape, and `ThreadDetail.review` serves it:
 
-- `id` is `rv-` and eight hex digits. It is in every token the agents echo and every request ID the loop sends under, so a later review of the same thread never matches an earlier one's answers.
+- `id` is `rv-` and eight hex digits. It starts every token the agents echo and every request ID the loop sends under. `expect` is the token the awaited answer must echo, random per request, and `sent` counts the review's messages, numbering their request IDs `<id>:<n>`.
 - `builder`, `reviewer`, `pr` (`repo`, `number`, `url`, `title`) and `models` (`builder`, `reviewer`) say who reviews what. `maxRounds` is 1 to 10, 3 by default.
 - `land` is null to stop at approval, or `{ requestedBy }`, the deployer who asked for the landing. `merged` is the merge commit once the PR merged, after which the review never lands again.
 - `rounds` holds one entry per review of a head: `head`, the reviewer's parsed `verdict` (`verdict`, `findings` with `id`, `severity`, `where`, `summary`, `detail`, `reserved` cases, and `notCheckedLive`), the `check` at that head (`passed`, the output's tail), and the builder's `answers` (`id`, `action` fixed or rejected, `reason`).
