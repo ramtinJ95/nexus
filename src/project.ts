@@ -385,6 +385,8 @@ ${list(o.allowedHosts)}
 ${secrets}## Previews
 
 ${previews}
+A browser reaches a preview over HTTPS, but the app gets plain HTTP, with the public address in \`Host\` and \`X-Forwarded-Proto: https\`. Nexus turns the app's redirects to its own \`http://\` address into \`https://\`, and has the browser load the page's \`http://\` links over HTTPS. A dev server that checks \`Host\` refuses the address until you allow it, as Vite's \`server.allowedHosts: [".ts.net"]\` does.
+
 ## Sleep
 
 Nexus pauses this pylon when the thread goes idle and wakes it on the next message, terminal attach or preview visit. A pause saves the disk and stops the VM, so only files on disk survive it. Processes, services and anything held in memory stop. On wake, Nexus runs .nexus/resume, starts the services again and relaunches the open sessions.
