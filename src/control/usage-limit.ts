@@ -8,8 +8,8 @@ import type { Registry } from "./registry.ts";
 
 export const usageLimitPrefix = "[Nexus usage limit — automated, not a message from the person]";
 const text = `${usageLimitPrefix} The usage limit reset. Continue where you stopped.`;
-/** The API's reset is by its own clock, so wait a little past it. */
-const defaultGraceMs = 60_000;
+/** Claude Code continues a session it still runs about 90 s after the reset, so only a session that did not, such as one whose pylon paused, is typed into. */
+const defaultGraceMs = 180_000;
 
 export function usageLimitResumer(options: { registry: Registry; inbox: Inbox; clock?: () => number; graceMs?: number }) {
   const { registry, inbox, clock = Date.now, graceMs = defaultGraceMs } = options;

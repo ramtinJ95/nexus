@@ -11,7 +11,7 @@ import type { ProjectId } from "../project.ts";
 const node = "node" as NodeName;
 const session = "c0ffee00-0000-4000-8000-000000000000";
 const resetsAt = 10_000_000;
-const graceMs = 60_000;
+const graceMs = 180_000;
 
 /** A Claude worker thread whose transcript ends on a usage limit, behind the real inbox and a probe that types or blocks. */
 function fixture(t: import("node:test").TestContext, limit: { resetsAt: number | null } = { resetsAt }) {
