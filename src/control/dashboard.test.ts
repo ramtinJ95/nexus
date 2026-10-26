@@ -163,7 +163,8 @@ test("the overview lists each project's open threads with their phases, node and
   const fix = await s.start("acme", "Fix checkout");
   const docs = await s.start("beta", "Write docs");
   const old = await s.start("acme", "Old spike");
-  s.registry.recordActivity(docs.id, { agent: Date.now(), agentTurnRunning: true });
+  const started = Date.now() - 63_000;
+  s.registry.recordActivity(docs.id, { agent: started, agentTurnRunning: true });
   assert.equal((await s.call("POST", `/v1/threads/${old.id}/archive`)).status, 200);
   s.observe(fix);
 
@@ -176,7 +177,8 @@ test("the overview lists each project's open threads with their phases, node and
   assert.ok(acme!.includes(fix.id) && !acme!.includes(docs.id), "each thread is listed under its own project");
   assert.ok(beta!.includes(docs.id));
   assert.equal(overviewRow(res.text, fix), "Fix checkout running running rj-firebat just now never");
-  assert.equal(overviewRow(res.text, docs), "Write docs running not on its node rj-firebat just now turn running");
+  assert.match(overviewRow(res.text, docs), /^Write docs running not on its node rj-firebat just now working 1m 0[34]s$/);
+  assert.match(beta!, new RegExp(`<td class="wide">working <time data-since="${started}">1m 0[34]s</time></td>`), "the client ticks the turn's clock from its start");
   assert.match(textOf(acme!), /Thread Desired Observed Node Human Agent Fix checkout .* 1 archived Thread .* Old spike archived paused not on its node/);
   assert.match(acme!, /<details class="ov-closed"[^>]*><summary>1 archived<\/summary>/, "archived threads start folded away");
 });
@@ -187,16 +189,19 @@ test("the sidebar lists every project's threads with their state, folds the arch
   const docs = await s.start("beta", "Write docs");
   const old = await s.start("acme", "Old spike");
   const gone = await s.start("acme", "Gone");
-  s.registry.recordActivity(docs.id, { agent: Date.now(), agentTurnRunning: true });
+  const started = Date.now() - 63_000;
+  s.registry.recordActivity(docs.id, { agent: started, agentTurnRunning: true });
   await s.call("POST", `/v1/threads/${old.id}/archive`);
   await s.call("DELETE", `/v1/threads/${gone.id}`);
   s.observe(fix);
 
   for (const path of ["/", `/threads/${fix.id}`, "/threads/new", "/threads/th-missing"]) {
-    const sidebar = sidebarOf((await s.call("GET", path)).text);
+    const html = (await s.call("GET", path)).text;
+    const sidebar = sidebarOf(html);
     // Threads started in the same millisecond have no order between them.
-    assert.deepEqual(sidebar.rows.toSorted(), ["agent working Write docs now", "archived Old spike now", "deleted Gone now", "running Fix checkout now"], `${path} lists the threads`);
-    assert.match(sidebar.text, /^acme main Fix checkout now 1 archived, 1 deleted (Gone now Old spike now|Old spike now Gone now) beta main Write docs now$/);
+    assert.deepEqual(sidebar.rows.toSorted().map((row) => row.replace(/1m 0[34]s$/, "1m 03s")), ["agent working Write docs working 1m 03s", "archived Old spike now", "deleted Gone now", "running Fix checkout now"], `${path} lists the threads`);
+    assert.match(sidebar.text, /^acme main Fix checkout now 1 archived, 1 deleted (Gone now Old spike now|Old spike now Gone now) beta main Write docs working 1m 0[34]s$/);
+    assert.match(html, new RegExp(`<span class="row-at">working <time data-since="${started}">1m 0[34]s</time></span>`), `${path} ticks the working thread's clock`);
   }
   const page = (await s.call("GET", `/threads/${fix.id}`)).text;
   assert.equal(sidebarOf(page).active, fix.id);
@@ -457,7 +462,8 @@ test("a running turn shows its tool's output so far, the partial answer, queued 
   const s = await seeded(t);
   const fix = await s.start("acme", "Fix checkout");
   const transcript = s.fake.transcript(fix.id);
-  transcript.messages.push({ role: "user", content: "Build it", timestamp: Date.now() - 72_000 }, assistant([bash("c1", "npm run build")], "toolUse"));
+  transcript.messages.push({ role: "user", content: "Build it", timestamp: 0 }, assistant([bash("c1", "npm run build")], "toolUse"));
+  s.registry.recordActivity(fix.id, { agent: Date.now() - 72_000, agentTurnRunning: true });
   transcript.docs["pi.live"] = {
     run: { taskId: 1, inputs: [1] },
     tools: [{ callId: "c1", name: "bash", status: "running", output: "compiling\n" }],
@@ -947,10 +953,22 @@ test("a Claude worker that works shows its turn's call running, the turn's clock
     "Ran a command 1 running ›",
     "› Bash npm test running npm test No output yet.",
   ], "only a call of the running turn runs");
-  assert.match(dock, /^Claude is working\. 1m 1[2-3]s · 1 tool this turn · new messages go in at its next step Claude Code takes a message sent during a turn at its next step\. claude-opus-5-5 ⌘↵ to queue Queue$/,
-    "the turn is timed from the person's prompt, and Claude cannot be aborted");
+  assert.match(dock, /^Claude is working\. [01]s · 1 tool this turn · new messages go in at its next step Claude Code takes a message sent during a turn at its next step\. claude-opus-5-5 ⌘↵ to queue Queue$/,
+    "the turn is timed from when control heard it start, and Claude cannot be aborted");
+  const since = s.registry.thread(thread.id)!.workingSince;
+  assert.equal(html.split(`<time data-since="${since}">`).length - 1, 3, "the run bar, the sidebar row and the inspector tick the same clock");
   assert.doesNotMatch(html, /data-action="abort"/);
   assert.match(html, /placeholder="Queue for Claude…"/);
+});
+
+test("a turn's length reads as a padded clock: seconds, then minutes and seconds, then hours and minutes", async (t) => {
+  const s = await seeded(t);
+  const thread = await claudeThread(s, [45_000, 63_000, 3_900_000].flatMap((durationMs, i): ClaudeEntry[] => [
+    { kind: "prompt", at: i, text: `turn ${i}`, from: "person" },
+    { kind: "turn", at: i, durationMs },
+  ]));
+  const { rows } = conversationOf((await s.call("GET", `/threads/${thread.id}`)).text);
+  assert.deepEqual(rows.filter((row) => row.startsWith("Worked")), ["Worked for 45s.", "Worked for 1m 03s.", "Worked for 1h 05m."]);
 });
 
 test("a Claude worker without a transcript says whether it was read, and an archived one's says how old it is", async (t) => {

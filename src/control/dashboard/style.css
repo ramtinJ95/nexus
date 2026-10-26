@@ -68,6 +68,8 @@
 * { box-sizing: border-box; }
 body { margin: 0; }
 code, kbd, pre { font-family: var(--mono); }
+/* A ticking clock keeps its width from second to second. */
+time[data-since] { font-variant-numeric: tabular-nums; }
 code { font-size: 0.92em; overflow-wrap: anywhere; }
 a { color: inherit; text-decoration: none; }
 a.link { color: var(--accent); }
@@ -155,7 +157,7 @@ a.link { color: var(--accent); }
 .row-icon .dot { position: absolute; right: -3px; bottom: -2px; width: 8px; height: 8px; box-shadow: 0 0 0 1.5px var(--side); }
 .row-icon .dot-busy, .row-icon .dot-idle { background: var(--side); }
 .row-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; }
-.row-at { font-size: 11px; color: var(--text-3); white-space: nowrap; }
+.row-at { flex: none; font-size: 11px; color: var(--text-3); white-space: nowrap; }
 .archived > summary { list-style: none; cursor: pointer; padding: 4px 8px 4px 47px; font-size: 12px; color: var(--text-3); border-radius: 8px; }
 .archived > summary::-webkit-details-marker { display: none; }
 .archived > summary:hover { color: var(--text-2); }

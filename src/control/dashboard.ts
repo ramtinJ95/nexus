@@ -188,10 +188,21 @@ function ago(at: number, now: number): Html {
   return html`<time datetime="${iso}" title="${iso}">${label === null ? "just now" : `${label} ago`}</time>`;
 }
 
-/** A run's length as a clock reads it, such as 1m 12s. client.js ticks it with the same format. */
+/** A run's length as a clock reads it, such as 1m 03s. client.js ticks it with the same format. */
+// After t3code's formatElapsedSeconds. Copyright (c) 2026 T3 Tools Inc., MIT licence.
 function clock(ms: number): string {
-  const s = Math.max(0, Math.floor(ms / 1000));
-  return s < 60 ? `${s}s` : s < 3600 ? `${Math.floor(s / 60)}m ${s % 60}s` : `${Math.floor(s / 3600)}h ${Math.floor((s % 3600) / 60)}m`;
+  const seconds = Math.max(0, Math.floor(ms / 1000));
+  const minutes = Math.floor(seconds / 60);
+  if (minutes === 0) return `${seconds}s`;
+  const hours = Math.floor(minutes / 60);
+  if (hours === 0) return `${minutes}m ${String(seconds % 60).padStart(2, "0")}s`;
+  return `${hours}h ${String(minutes % 60).padStart(2, "0")}m`;
+}
+
+/** How long a thread's running turn has worked, which client.js ticks, or null when no turn runs. */
+function workingFor(t: Thread, now: number): Html | null {
+  if (!t.agentTurnRunning && t.sessionTurnRunning !== true) return null;
+  return t.workingSince === undefined ? html`working` : html`working <time data-since="${t.workingSince}">${clock(now - t.workingSince)}</time>`;
 }
 
 interface Shell {
@@ -257,7 +268,7 @@ function sidebar(c: Context, active: ThreadId | undefined): Html {
   // A thread works in its own checkout, as a Jetline workspace does, so its row shows a branch with its state as a badge.
   const row = (t: Thread) => {
     const [label, tone] = threadState(c.detail(t));
-    return html`<li><a class="row${t.id === active && " active"}" href="/threads/${t.id}"${t.id === active && html` aria-current="page"`}><span class="row-icon">${icon("branch")}${dot(tone, label)}</span><span class="row-title">${t.title}</span><span class="row-at">${span(lastActive(t), c.now) ?? "now"}</span></a></li>`;
+    return html`<li><a class="row${t.id === active && " active"}" href="/threads/${t.id}"${t.id === active && html` aria-current="page"`}><span class="row-icon">${icon("branch")}${dot(tone, label)}</span><span class="row-title">${t.title}</span><span class="row-at">${workingFor(t, c.now) ?? span(lastActive(t), c.now) ?? "now"}</span></a></li>`;
   };
   return html`<aside class="side" aria-label="Threads">
 <div class="side-head"><a class="brand" href="/"><span class="brand-mark" aria-hidden="true">◆</span>nexus</a><a class="btn btn-new" href="/threads/new" data-start>New thread<kbd>N</kbd></a></div>
@@ -383,7 +394,7 @@ function home(c: Context, dialogs: Pick<Shell, "start" | "addProject">): Html {
 <td>${state(...actualBadge[d.pylon.actualState])}</td>
 <td class="wide">${d.pylon.node}${nodes.get(d.pylon.node)!.state === "offline" && html` <span class="tag">offline</span>`}</td>
 <td class="wide">${ago(t.lastHumanActivityAt, c.now)}</td>
-<td class="wide">${t.agentTurnRunning ? "turn running" : ago(t.lastAgentActivityAt, c.now)}</td>
+<td class="wide">${workingFor(t, c.now) ?? ago(t.lastAgentActivityAt, c.now)}</td>
 </tr>`;
 })}</tbody>
 </table>`;
@@ -609,7 +620,7 @@ ${unpublished === null ? html`<p class="empty">The pylon's ports could not be re
 <dt>Node</dt><dd>${pylon.node}${node.state === "offline" && html` <span class="tag">offline</span>`}</dd>
 <dt>Last seen</dt><dd>${pylon.observedAt === null ? "never" : ago(Date.parse(pylon.observedAt), now)}${node.state === "offline" && pylon.observedAt !== null && " (stale)"}</dd>
 <dt>Human</dt><dd>${ago(t.lastHumanActivityAt, now)}</dd>
-<dt>Agent</dt><dd>${t.agentTurnRunning ? "turn running" : ago(t.lastAgentActivityAt, now)}</dd>
+<dt>Agent</dt><dd>${workingFor(t, now) ?? ago(t.lastAgentActivityAt, now)}</dd>
 </dl>
 <code class="id">${pylon.id}</code>
 ${pylon.failed !== null && html`<p class="error">The planner gave up: ${pylon.failed}</p>`}
@@ -770,20 +781,18 @@ type Run =
   | { kind: "working"; since: number | null; tools: number; claude: boolean }
   | { kind: "parked"; tasks: number; busy: boolean };
 function runOf(d: ThreadDetail, view: Conversation | null, items: readonly Item[]): Run {
-  if (view !== null && isClaude(view)) return view.working ? working(items, (item) => item.from === "person", true) : { kind: "idle" };
+  if (view !== null && isClaude(view)) return view.working ? working(d, items, (item) => item.from === "person", true) : { kind: "idle" };
   const busy = (view?.docs["pi.live"] as LiveState | undefined)?.run !== undefined;
   const parked = d.agent?.parkedTasks ?? 0;
   if (parked > 0) return { kind: "parked", tasks: parked, busy };
   if (!busy) return { kind: "idle" };
-  return working(items, () => true, false);
+  return working(d, items, () => true, false);
 }
 
-/** Neither pi-durable nor Claude Code keeps a start time for a turn, so it is timed from the message it answers. */
-function working(items: readonly Item[], asks: (item: UserItem) => boolean, claude: boolean): Run {
-  const asked = items.findLastIndex((item) => item.kind === "user" && item.queued === null && asks(item));
-  const turn = items.slice(asked + 1);
-  const since = asked === -1 ? null : (items[asked] as UserItem).at;
-  return { kind: "working", since, tools: turn.filter((item) => item.kind === "tool").length, claude };
+/** A turn's calls are those after the message it answers. Its start is the registry's, so the bar and the rows agree. */
+function working(d: ThreadDetail, items: readonly Item[], asks: (item: UserItem) => boolean, claude: boolean): Run {
+  const turn = items.slice(items.findLastIndex((item) => item.kind === "user" && item.queued === null && asks(item)) + 1);
+  return { kind: "working", since: d.thread.workingSince ?? null, tools: turn.filter((item) => item.kind === "tool").length, claude };
 }
 
 function runBar(t: Thread, run: Run, now: number): Html {
