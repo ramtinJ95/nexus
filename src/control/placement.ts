@@ -1,5 +1,5 @@
 import type { BootInputs } from "../project.ts";
-import { heldSecrets, type NodeName, type PylonObservation } from "../protocol.ts";
+import { heldSecrets, type NodeName, type PylonId, type PylonObservation } from "../protocol.ts";
 import { desiredPhase } from "../reconcile.ts";
 import { HttpError } from "./http-error.ts";
 import type { NodeRecord, Registry, StoredPylon, ThreadId } from "./registry.ts";
@@ -47,7 +47,9 @@ function weigh(registry: Registry, node: NodeRecord, need: Need): Weighed {
     memoryGiB: c.memoryGiB - c.committedMemoryGiB - pending.memoryGiB - need.resources.memoryGiB,
     diskGiB: c.diskFreeGiB - pending.diskGiB - need.resources.diskGiB,
   };
-  if (left.memoryGiB < 0) return refused(`has ${gib(c.committedMemoryGiB + pending.memoryGiB)} of ${gib(c.memoryGiB)} GiB of memory committed, and the pylon needs ${need.resources.memoryGiB}`);
+  const committed = `${gib(c.committedMemoryGiB + pending.memoryGiB)} of ${gib(c.memoryGiB)} GiB of memory committed`;
+  if (c.committedMemoryGiB + pending.memoryGiB > c.memoryGiB) return refused(`is overcommitted, with ${committed}`);
+  if (left.memoryGiB < 0) return refused(`has ${committed}, and the pylon needs ${need.resources.memoryGiB}`);
   if (left.diskGiB < 0) return refused(`has ${gib(left.diskGiB + need.resources.diskGiB)} GiB of disk free, and the pylon needs ${need.resources.diskGiB}`);
   return { node: node.name, left };
 }
@@ -64,4 +66,38 @@ function uncounted(p: StoredPylon, seen: PylonObservation | undefined): Room {
   return reboots ? { cpus, memoryGiB, diskGiB: 0 } : { cpus: 0, memoryGiB: 0, diskGiB: 0 };
 }
 
-const gib = (n: number) => Number(n.toFixed(1));
+export const gib = (n: number) => Number(n.toFixed(1));
+
+/**
+ * A node's committed memory exceeds its memory. A probe from before pylons were counted reports no committed disk,
+ * and its committed memory is always 0, so such a node is never overcommitted.
+ */
+export const overcommitted = (c: NodeRecord["capacity"]): boolean => c !== null && c.committedDiskGiB !== undefined && c.committedMemoryGiB > c.memoryGiB;
+
+export interface Tally { pylons: number; cpus: number; memoryGiB: number }
+/**
+ * The pylons in a node's latest observation, by what they hold. One that is up holds its CPUs and memory, and a paused
+ * one needs them back to wake. An archived one, whose thread is archived or deleted, stays paused. An orphaned VM is one
+ * the registry has not placed on the node, whose CPUs and memory the control plane does not know.
+ */
+export interface NodePylons { up: Tally; paused: Tally; archived: Tally; orphaned: readonly PylonId[] }
+
+export function nodePylons(registry: Registry, node: NodeRecord): NodePylons | null {
+  if (node.observation === null) return null;
+  const zero = (): Tally => ({ pylons: 0, cpus: 0, memoryGiB: 0 });
+  const tallies = { up: zero(), paused: zero(), archived: zero() };
+  const orphaned: PylonId[] = [];
+  for (const seen of node.observation.pylons) {
+    const p = registry.pylon(seen.pylonId);
+    if (p === undefined || p.node !== node.name) {
+      orphaned.push(seen.pylonId);
+      continue;
+    }
+    const { status } = registry.thread(p.thread as ThreadId)!;
+    const tally = tallies[seen.phase !== "stopped" ? "up" : status === "archived" || status === "deleted" ? "archived" : "paused"];
+    tally.pylons += 1;
+    tally.cpus += p.boot.resources.cpus;
+    tally.memoryGiB += p.boot.resources.memoryGiB;
+  }
+  return { ...tallies, orphaned };
+}

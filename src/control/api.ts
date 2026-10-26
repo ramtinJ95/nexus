@@ -51,6 +51,7 @@ import { typeIntoClaude } from "./inbox.ts";
 import { HttpError } from "./http-error.ts";
 import { imagesView, type ImageOperation, type ImageRollout } from "./image-rollout.ts";
 import { threadStarter } from "./threads.ts";
+import { nodePylons, overcommitted, type NodePylons } from "./placement.ts";
 import { maxRounds, needsPerson, type Review, type ReviewLoop } from "./review.ts";
 
 export interface ApiOptions {
@@ -184,8 +185,11 @@ export const maxStreams = 16;
  */
 const pingMs = 15_000;
 
-/** A node without its probe's latest observation, which thread detail already reports per pylon. */
-export type NodeSummary = Omit<NodeRecord, "observation"> & { observedAt: string | null };
+/**
+ * A node without its probe's latest observation, which thread detail already reports per pylon. `pylons` sorts the
+ * observation's pylons by what they hold, and is null for a node never observed.
+ */
+export type NodeSummary = Omit<NodeRecord, "observation"> & { observedAt: string | null; overcommitted: boolean; pylons: NodePylons | null };
 
 function networkGrantsKey(network: BootInputs["network"]): string {
   const sorted = (values: Iterable<string>) => [...new Set(values)].sort();
@@ -760,7 +764,10 @@ export async function startApi(options: ApiOptions): Promise<Api> {
     }],
     ["GET", /^\/v1\/projects$/, () => ok(registry.projects())],
     ["POST", /^\/v1\/projects$/, async (_, r) => created(createProject(await r.body()))],
-    ["GET", /^\/v1\/nodes$/, () => ok(registry.nodes().map(({ observation, ...n }): NodeSummary => ({ ...n, observedAt: observation?.observedAt ?? null })))],
+    ["GET", /^\/v1\/nodes$/, () => ok(registry.nodes().map((record): NodeSummary => {
+      const { observation, ...n } = record;
+      return { ...n, observedAt: observation?.observedAt ?? null, overcommitted: overcommitted(n.capacity), pylons: nodePylons(registry, record) };
+    }))],
     ["GET", /^\/v1\/threads$/, (_, r) => ok(registry.threads((r.query.get("project") ?? undefined) as ProjectId | undefined).map(row))],
     ["POST", /^\/v1\/threads$/, async (_, r) => {
       const request = parse(startSchema, await r.body());

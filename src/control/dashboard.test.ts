@@ -255,6 +255,24 @@ test("a new thread whose node does not have its pylon yet reads as absent, not d
   assert.equal(overviewRow((await s.call("GET", "/")).text, fix), "Fix checkout running not on its node rj-firebat just now never");
 });
 
+test("the side nodes show each node's committed memory, mark an overcommitted one, and say what its paused pylons need to wake", async (t) => {
+  const s = await seeded(t);
+  const [fix, docs] = [await s.start("acme", "Fix checkout"), await s.start("acme", "Write docs")];
+  const over = { ...capacity, memoryGiB: 22.8, committedMemoryGiB: 40, committedDiskGiB: 20 };
+  s.registry.apply({ record: "node", node, state: "online", capacity: over });
+  const stopped = (t: Thread): PylonObservation => ({ pylonId: t.pylonId, phase: "stopped", checkpoint: null, sessions: null });
+  s.registry.ingested({ node, observedAt: new Date().toISOString(), probeBootId: "b", capacity: over, artifacts: [], jobs: [], pylons: [stopped(fix), stopped(docs)], grants: { secrets: [], gitSsh: false }, previewRoutes: [] }, []);
+  assert.equal((await s.call("POST", `/v1/threads/${docs.id}/archive`)).status, 200);
+  const nodes = (await s.call("GET", "/")).text.split('id="side-nodes"')[1]!.split("</div>")[0]!;
+  assert.match(nodes, /<em>overcommitted<\/em>/, "the marker uses the offline marker's style");
+  assert.match(textOf(nodes), /rj-firebat overcommitted 40\/22\.8 GiB memory · 4 GiB to wake paused/, "only the paused pylon whose thread is not archived needs memory to wake");
+
+  s.observe();
+  const fits = textOf((await s.call("GET", "/")).text.split('id="side-nodes"')[1]!.split("</div>")[0]!);
+  assert.match(fits, /rj-firebat 0\/64 GiB memory/);
+  assert.doesNotMatch(fits, /overcommitted|to wake/);
+});
+
 test("an offline node shows its pylons as unknown, and the last observation as stale", async (t) => {
   const s = await seeded(t);
   const fix = await s.start("acme", "Fix checkout");

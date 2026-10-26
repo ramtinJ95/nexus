@@ -1221,6 +1221,23 @@ test("show says how the pylon got its setup: fresh and why, with the build it as
   assert.equal((await shown("reused")).line, `setup: from template ${building!.id}, built 3m ago, then checked out 222222222222`);
 });
 
+test("nodes marks an overcommitted node and says what its pylons hold", async (t) => {
+  const s = await setup(t);
+  const [up, paused, archived] = [await s.json(["start", "--project", "acme", "--title", "up"]), await s.json(["start", "--project", "acme", "--title", "paused"]), await s.json(["start", "--project", "acme", "--title", "archived"])] as Thread[];
+  await s.nexus(["archive", archived!.id]);
+  const capacity = { cpus: 8, committedCpus: 2, memoryGiB: 22.8, committedMemoryGiB: 40, diskFreeGiB: 100, committedDiskGiB: 30 };
+  s.registry.apply({ record: "node", node, state: "online", capacity });
+  const stopped = (t: Thread) => ({ pylonId: t.pylonId, phase: "stopped" as const, checkpoint: null, sessions: null });
+  s.registry.ingested({
+    node, observedAt: new Date().toISOString(), probeBootId: "b", capacity, artifacts: [image.id], jobs: [],
+    pylons: [{ pylonId: up!.pylonId, phase: "booting" }, stopped(paused!), stopped(archived!), { pylonId: "pylon-x" as PylonId, phase: "booting" }],
+    grants: { secrets: [], gitSsh: false }, previewRoutes: [],
+  }, []);
+  const text = (await s.nexus(["nodes"])).stdout;
+  assert.match(text, /^rj-firebat +online +observed .+ {2}2\/8 CPUs, 40\/22\.8 GiB memory committed, overcommitted, 30 GiB disk committed, 100 GiB disk free$/m);
+  assert.match(text, /^ {2}pylons: 1 up holding 2 CPUs and 4 GiB, 1 paused needing 4 GiB to wake, 1 archived, 1 orphaned \(pylon-x\)$/m);
+});
+
 test("nodes prints what an older probe does not count as unknown, never as 0, with --json or without", async (t) => {
   const s = await setup(t);
   const capacity = { memoryGiB: 64, committedMemoryGiB: 0, diskFreeGiB: 100 } as never;

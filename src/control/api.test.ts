@@ -210,12 +210,13 @@ test("projects are created, listed, and checked", async (t) => {
 
 test("nodes are listed with their state and capacity, without the observation", async (t) => {
   const s = await setup(t);
-  const offline = { name: node, tailnetHost: "rj-firebat.tail.ts.net", tailnetNodeId: "nFIREBAT", state: "offline", capacity: null, observedAt: null };
+  const offline = { name: node, tailnetHost: "rj-firebat.tail.ts.net", tailnetNodeId: "nFIREBAT", state: "offline", capacity: null, observedAt: null, overcommitted: false, pylons: null };
   assert.deepEqual(await s.call("GET", "/v1/nodes"), { status: 200, body: [offline] });
   const capacity = { cpus: 16, committedCpus: 0, memoryGiB: 64, committedMemoryGiB: 0, diskFreeGiB: 100, committedDiskGiB: 0 };
+  const none = { pylons: 0, cpus: 0, memoryGiB: 0 };
   s.registry.apply({ record: "node", node, state: "online", capacity });
   s.registry.ingested({ node, observedAt: "2027-01-01T00:01:00Z", probeBootId: "b", capacity, artifacts: [], jobs: [], pylons: [], grants: { secrets: [], gitSsh: false }, previewRoutes: [] }, []);
-  assert.deepEqual((await s.call("GET", "/v1/nodes")).body, [{ ...offline, state: "online", capacity, observedAt: "2027-01-01T00:01:00Z" }]);
+  assert.deepEqual((await s.call("GET", "/v1/nodes")).body, [{ ...offline, state: "online", capacity, observedAt: "2027-01-01T00:01:00Z", pylons: { up: none, paused: none, archived: none, orphaned: [] } }]);
 });
 
 test("a thread cannot start before an image is current", async (t) => {
@@ -472,6 +473,38 @@ test("a project whose default node is auto places each thread that names none, a
   const named = await s.call("POST", "/v1/threads", { project: "acme", title: "Named", node });
   assert.deepEqual(named.body.placement, { how: "named", node });
   assert.equal((await s.call("POST", "/v1/projects", { ...project, id: "spread", defaultNode: "auto" })).status, 201);
+});
+
+test("--node auto refuses an overcommitted node with its reason, and places the pylon on one that fits", async (t) => {
+  const s = await withImage(t);
+  observeNode(s, "firebat", { total: 22.8, committed: 40 });
+  observeNode(s, "testbench", { total: 32, committed: 0 });
+  const started = await s.call("POST", "/v1/threads", { project: "acme", title: "Placed", node: "auto" });
+  assert.equal(started.body.placement.node, "testbench");
+  assert.deepEqual(started.body.placement.weighed.find((w: { node: string }) => w.node === "firebat"), { node: "firebat", refused: "is overcommitted, with 40 of 22.8 GiB of memory committed" });
+});
+
+test("nodes report whether they are overcommitted, and their observed pylons as up, paused, archived and orphaned", async (t) => {
+  const s = await withImage(t);
+  const started = async (title: string) => (await s.call("POST", "/v1/threads", { project: "acme", title, node: "a" })).body as Thread;
+  observeNode(s, "a", { total: 64, committed: 0 });
+  const [up, paused, archived] = [await started("Up"), await started("Paused"), await started("Archived")];
+  assert.equal((await s.call("POST", `/v1/threads/${archived.id}/archive`)).status, 200);
+  s.registry.savePylon({ ...s.registry.pylon(up.pylonId)!, boot: { ...s.registry.pylon(up.pylonId)!.boot, resources: { cpus: 4, memoryGiB: 8, diskGiB: 10 } } });
+  const stopped = (t: Thread) => ({ pylonId: t.pylonId, phase: "stopped" as const, checkpoint: null, sessions: null });
+  observeNode(s, "a", { total: 6, committed: 8 }, {
+    pylons: [{ pylonId: up.pylonId, phase: "booting" }, stopped(paused), stopped(archived), { pylonId: "pylon-gone" as PylonId, phase: "booting" }],
+  });
+  observeNode(s, "old", { total: 6, committed: 8 });
+  s.registry.apply({ record: "node", node: "old" as NodeName, state: "online", capacity: { memoryGiB: 6, committedMemoryGiB: 8, diskFreeGiB: 100 } as never });
+  const nodes = (await s.call("GET", "/v1/nodes")).body as { name: string; overcommitted: boolean; pylons: unknown }[];
+  const of = (name: string) => nodes.find((n) => n.name === name)!;
+  assert.equal(of("a").overcommitted, true);
+  assert.deepEqual(of("a").pylons, {
+    up: { pylons: 1, cpus: 4, memoryGiB: 8 }, paused: { pylons: 1, cpus: 2, memoryGiB: 4 }, archived: { pylons: 1, cpus: 2, memoryGiB: 4 }, orphaned: ["pylon-gone"],
+  });
+  assert.equal(of("old").overcommitted, false, "a probe from before pylons were counted reports a committed memory that means nothing");
+  assert.deepEqual([of(node).overcommitted, of(node).pylons], [false, null], "a node never observed has no pylons to report");
 });
 
 test("a scratch project has no repository, and each of its threads starts an empty one on its branch", async (t) => {

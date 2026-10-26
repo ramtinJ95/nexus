@@ -28,6 +28,7 @@ import type { NodeRecord, Output, Preview, Registry, Thread, ThreadId } from "./
 import { usageLimitText, type ClaudeConversation, type ClaudeEntry, type PromptSource } from "../claude-transcript.ts";
 import { queuedOf } from "./claude-conversation.ts";
 import { labelNote, roundsSpent } from "./review.ts";
+import { gib, nodePylons, overcommitted } from "./placement.ts";
 
 export interface DashboardOptions {
   registry: Registry;
@@ -304,9 +305,19 @@ ${closed.length > 0 && html`<details class="archived" id="archived-${p.id}"${clo
 </details>`;
 })}
 </nav>
-<div class="nodes" id="side-nodes" data-live aria-label="Nodes"><h2>Nodes</h2><small>Desired release: ${c.registry.desiredRelease()?.commit.slice(0, 12) ?? "manual"}</small>${c.registry.nodes().map((n) => html`<span>${icon("server")}${n.name}${dot(n.state === "online" ? "ok" : "muted")}${n.state === "offline" && html`<em>offline</em>`}</span>${c.registry.releaseReports().filter((r) => r.node === n.name).map((r) => html`<small title="${r.reason ?? ""}">${r.role}: ${r.commit?.slice(0, 12) ?? "unknown"} · ${c.now - r.observedAt >= 90_000 ? "stale" : r.state}</small>`)}`)}</div>
+<div class="nodes" id="side-nodes" data-live aria-label="Nodes"><h2>Nodes</h2><small>Desired release: ${c.registry.desiredRelease()?.commit.slice(0, 12) ?? "manual"}</small>${c.registry.nodes().map((n) => html`<span>${icon("server")}${n.name}${dot(n.state === "online" ? "ok" : "muted")}${n.state === "offline" && html`<em>offline</em>`}${overcommitted(n.capacity) && html`<em>overcommitted</em>`}</span>${memoryLine(c, n)}${c.registry.releaseReports().filter((r) => r.node === n.name).map((r) => html`<small title="${r.reason ?? ""}">${r.role}: ${r.commit?.slice(0, 12) ?? "unknown"} · ${c.now - r.observedAt >= 90_000 ? "stale" : r.state}</small>`)}`)}</div>
 <a class="btn side-add" href="/projects/new" data-new-project>New project</a>
 </aside>`;
+}
+
+/**
+ * A node's committed and total memory, and what its paused pylons need to wake. A probe from before pylons were
+ * counted reports no committed memory, so its node shows none.
+ */
+function memoryLine(c: Context, n: NodeRecord): Html | false {
+  if (n.capacity?.committedDiskGiB === undefined) return false;
+  const paused = nodePylons(c.registry, n)?.paused.memoryGiB ?? 0;
+  return html`<small>${gib(n.capacity.committedMemoryGiB)}/${gib(n.capacity.memoryGiB)} GiB memory${paused > 0 && ` · ${gib(paused)} GiB to wake paused`}</small>`;
 }
 
 /**

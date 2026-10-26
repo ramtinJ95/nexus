@@ -17,7 +17,7 @@ import type { ImageContent, Message, TextContent } from "@earendil-works/pi-ai";
 import type { ConversationView, EntryRecord, InboxState, LiveState } from "@earendil-works/pi-durable";
 import type { ListeningPort, NodeSummary, OpenedSession, ThreadDetail, ThreadRow, ViewFrame } from "../control/api.ts";
 import type { ImageEntry, ImageOperation, ImagesView } from "../control/image-rollout.ts";
-import type { Placement, Room } from "../control/placement.ts";
+import type { NodePylons, Placement, Room } from "../control/placement.ts";
 import type { ClaudeSent, Preview, Thread } from "../control/registry.ts";
 import type { Review } from "../control/review.ts";
 import { maxEntries, usageLimitText, type ClaudeConversation, type ClaudeEntry, type PromptSource } from "../claude-transcript.ts";
@@ -231,10 +231,24 @@ function claudeText(c: ClaudeConversation): string {
 
 const gib = (n: number) => Number(n.toFixed(1));
 /** A probe from before pylons were counted reports no CPUs or committed disk, and always 0 GiB of memory committed. */
-function capacityText(c: Partial<NonNullable<NodeSummary["capacity"]>>): string {
+function capacityText(c: Partial<NonNullable<NodeSummary["capacity"]>>, overcommitted: boolean): string {
   const counted = c.committedDiskGiB !== undefined;
   const n = (v: number | undefined, known = true) => v === undefined || !known ? "unknown" : gib(v);
-  return `${n(c.committedCpus)}/${n(c.cpus)} CPUs, ${n(c.committedMemoryGiB, counted)}/${n(c.memoryGiB)} GiB memory committed, ${n(c.committedDiskGiB)} GiB disk committed, ${n(c.diskFreeGiB)} GiB disk free`;
+  return `${n(c.committedCpus)}/${n(c.cpus)} CPUs, ${n(c.committedMemoryGiB, counted)}/${n(c.memoryGiB)} GiB memory committed${overcommitted ? ", overcommitted" : ""}, ${n(c.committedDiskGiB)} GiB disk committed, ${n(c.diskFreeGiB)} GiB disk free`;
+}
+
+/**
+ * Such as `5 up holding 20 CPUs and 40 GiB, 1 paused needing 8 GiB to wake, 3 archived, 1 orphaned (pylon-x)`. Empty
+ * for a node with no pylons, or never observed, or from a control plane older than 0.21.0, which sends no `pylons`.
+ */
+function pylonsText(p: NodePylons | null): string {
+  if (p === null) return "";
+  return [
+    ...p.up.pylons === 0 ? [] : [`${p.up.pylons} up holding ${p.up.cpus} CPUs and ${gib(p.up.memoryGiB)} GiB`],
+    ...p.paused.pylons === 0 ? [] : [`${p.paused.pylons} paused needing ${gib(p.paused.memoryGiB)} GiB to wake`],
+    ...p.archived.pylons === 0 ? [] : [`${p.archived.pylons} archived`],
+    ...p.orphaned.length === 0 ? [] : [`${p.orphaned.length} orphaned (${p.orphaned.join(", ")})`],
+  ].join(", ");
 }
 
 const roomText = (r: Room) => `${gib(r.memoryGiB)} GiB memory, ${r.cpus} CPUs and ${gib(r.diskGiB)} GiB disk left`;
@@ -1068,8 +1082,11 @@ const commands: Readonly<Record<string, Command>> = {
         json: nodes,
         text: nodes.length === 0 ? "No nodes." : table(nodes.map((n) => [
           n.name, n.state, n.observedAt === null ? "never observed" : `observed ${ago(Date.parse(n.observedAt))}`,
-          n.capacity === null ? "" : capacityText(n.capacity),
-        ])),
+          n.capacity === null ? "" : capacityText(n.capacity, n.overcommitted ?? false),
+        ])).split("\n").flatMap((line, i) => {
+          const held = pylonsText(nodes[i]!.pylons ?? null);
+          return held === "" ? [line] : [line, `  pylons: ${held}`];
+        }).join("\n"),
       };
     },
   },
