@@ -93,6 +93,12 @@ without the marker:  Not logged in · Please run /login     profiles: explorer g
 
 Both times the reviewer kept `openai-codex/gpt-6-astra`. `Not logged in` is the answer the image's smoke check takes as a clean load.
 
+## After the ChatGPT login for pylons landed
+
+[nexus#107](https://github.com/ramtinJ95/nexus/pull/107) signs a pylon's pi in as the `openai` provider with the harness's ChatGPT login, and leaves `openai-codex` without a login. So the image's installer now rewrites a captured profile's `openai-codex/` model to `openai/` (`pylonProfile` in `images/pylon/agent-setup/install.ts`). The `openai-codex` findings above still say what that provider would need. They no longer decide how a pylon signs in.
+
+This pylon booted before #107, so it has no ChatGPT grant. Its reviewer profile was rewritten by `pylonProfile` to `openai/gpt-6-astra`, and this Claude Code session's own `mcp__shepherdr__agents` spawned it on the branch. The worker stopped with `Error: Provider is not configured: openai`, and its status line showed `gpt-6-astra • high`. PYLON.md quotes that error for a pylon without the grant.
+
 ## Not run here
 
-No reviewer ran to completion, because there is no ChatGPT login to use. These remain unchecked: whether a review on gpt-6-astra finishes inside a pylon, whether Gondolin passes pi's WebSocket upgrade to `chatgpt.com` or pi falls back to SSE (S5 proved a model request succeeds, without recording the transport), and an image build that installs the captured profiles. The capture itself must run on the Mac, against its own dotfiles.
+No reviewer ran to completion, because this pylon has no ChatGPT grant. These remain unchecked: whether a review on `openai/gpt-6-astra` finishes inside a pylon with the grant, and an image build that installs the captured profiles. The capture itself must run on the Mac, against its own dotfiles.
