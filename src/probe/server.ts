@@ -574,9 +574,12 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
         return send(res, 400, `a secret value is at most ${maxSecretBytes} bytes`);
       }
       if (!tokenAlphabet.test(value)) return send(res, 400, "a secret value is a token: letters, digits and -._~+/ with optional = padding");
+      const first = !options.secrets.names().includes(name);
       options.secrets.hold(name, value);
       for (const { pylonId, reason } of await backend.updateSecret(name, value)) log(`${pylonId}: ${name} was not updated: ${reason}`);
       res.writeHead(204).end();
+      // Boots that need it wait for a snapshot that lists it.
+      if (first) void publishSnapshot();
       return;
     }
     const artifactMatch = /^\/v1\/artifacts\/([^/]+)$/.exec(path);
