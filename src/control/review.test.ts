@@ -94,6 +94,8 @@ function fixture(t: import("node:test").TestContext, options: { path?: string; r
     set delivery(d: "delivered" | "later") { delivery = d; },
     tick(ms: number) { clock += ms; },
     review: () => registry.review(builder)!,
+    watched(state: "open" | "merged" | "closed") { registry.savePrWatch(builder, { links: [{ pr: { ...pr, state }, seen: [], failed: false }], commentWakes: 0, pending: null, error: null }); },
+    attention: () => registry.events("0", { kinds: ["attention.changed"], thread: builder }).map((e) => e.payload.attention),
   };
 }
 
@@ -778,4 +780,150 @@ test("a reviewer's verdict in the old severity shape still reads: serious blocks
   f.reply(f.builder, answers(f.review(), [{ id: "F1", action: "fixed", reason: "Added a TTL." }]));
   await loop.poll();
   assert.equal(f.review().phase.kind, "reviewing", "the P3 note needs no answer");
+});
+
+test("a PR merged or closed outside a review that does not land ends it quietly, with no check, round, label or decision", async (t) => {
+  const f = fixture(t);
+  f.check = { kind: "running" };
+  await approved(f, null);
+  assert.equal(f.review().phase.kind, "checking");
+  f.snapshot = { ...f.snapshot, pr: { ...f.snapshot.pr, state: "merged" }, detail: { ...f.snapshot.detail, mergeCommit: merged } };
+  f.check = { kind: "unrunnable", output: "The check pylon did not boot: Setup exited 128" };
+  await f.loop().poll();
+  assert.deepEqual(f.review().phase, { kind: "merged" }, "a check the merge broke is not the person's");
+  assert.deepEqual(f.discarded, f.checkThreads);
+  assert.deepEqual(f.labelCalls, []);
+  assert.ok(!f.attention().includes("decision"));
+  assert.equal(f.sent.length, 1);
+
+  const g = fixture(t);
+  const loop = g.loop();
+  await loop.start(g.builder, { land: null });
+  await loop.poll();
+  g.snapshot = { ...g.snapshot, pr: { ...g.snapshot.pr, state: "merged" }, detail: { ...g.snapshot.detail, mergeCommit: merged } };
+  g.reply(g.review().reviewer, verdict(g.review(), {}));
+  await loop.poll();
+  assert.deepEqual(g.review().phase, { kind: "merged" }, "GitHub is read before a check starts, ahead of the PR watch");
+  assert.deepEqual(g.checkThreads, []);
+
+  const h = fixture(t);
+  const silent = h.loop();
+  await silent.start(h.builder, { land: null });
+  await silent.poll();
+  h.watched("closed");
+  h.reply(h.review().reviewer, "I looked and it seems fine.");
+  await silent.poll();
+  assert.deepEqual(h.review().phase, { kind: "closed" }, "the PR watch's state ends it before the reviewer is reminded");
+  assert.equal(h.sent.length, 1);
+  assert.ok(!h.attention().includes("decision"));
+  h.tick(4 * 60 * 60_000);
+  await silent.poll();
+  assert.deepEqual(h.review().phase, { kind: "closed" });
+
+  const i = fixture(t);
+  const fixing = i.loop();
+  await fixing.start(i.builder, { land: null });
+  await fixing.poll();
+  i.reply(i.review().reviewer, verdict(i.review(), { verdict: "changes", findings: [serious] }));
+  await fixing.poll();
+  i.snapshot = { ...i.snapshot, pr: { ...i.snapshot.pr, state: "closed" } };
+  i.reply(i.builder, answers(i.review(), [{ id: "F1", action: "fixed", reason: "Added a TTL." }]));
+  await fixing.poll();
+  assert.deepEqual(i.review().phase, { kind: "closed" });
+  assert.equal(i.sent.length, 2, "the reviewer gets no next round");
+});
+
+test("a review that lands still sees a merge made outside it through, and a real failure while the PR is open still asks the person", async (t) => {
+  const f = fixture(t);
+  f.registry.setDesiredRelease({ commit: previous, requestedBy: "person", requestedAt: 1 });
+  f.check = { kind: "running" };
+  await approved(f, "nLAPTOP");
+  f.snapshot = { ...f.snapshot, pr: { ...f.snapshot.pr, state: "merged" }, detail: { ...f.snapshot.detail, mergeCommit: merged } };
+  f.watched("merged");
+  f.check = { kind: "done", passed: true, output: "ok" };
+  await f.loop().poll();
+  assert.equal(f.review().phase.kind, "deploying", "the landing decides whether the merge deploys");
+
+  const g = fixture(t);
+  const silent = g.loop();
+  await silent.start(g.builder, { land: null });
+  await silent.poll();
+  g.tick(4 * 60 * 60_000);
+  await silent.poll();
+  assert.deepEqual(g.review().phase, { kind: "needs-person", reasons: ["The reviewer gave no answer within 3 hours in round 1."] });
+  assert.equal(g.attention().at(-1), "decision");
+});
+
+test("a builder or reviewer thread the person archives or deletes cancels the review, with no label or decision", async (t) => {
+  const f = fixture(t);
+  const loop = f.loop();
+  await loop.start(f.builder, { land: null });
+  await loop.poll();
+  archive(f.registry, f.review().reviewer);
+  await loop.poll();
+  assert.deepEqual(f.review().phase, { kind: "cancelled", who: "reviewer", status: "archived" });
+  assert.deepEqual(f.labelCalls, []);
+  assert.ok(!f.attention().includes("decision"));
+  const restarted = await loop.start(f.builder, { land: null });
+  assert.equal(restarted.phase.kind, "reviewing", "a cancelled review makes way for a new one");
+
+  const g = fixture(t);
+  const fixing = g.loop();
+  await fixing.start(g.builder, { land: null });
+  await fixing.poll();
+  g.reply(g.review().reviewer, verdict(g.review(), { verdict: "changes", findings: [serious] }));
+  await fixing.poll();
+  g.registry.setThreadStatus(g.builder, "deleted");
+  await fixing.poll();
+  assert.deepEqual(g.review().phase, { kind: "cancelled", who: "builder", status: "deleted" });
+
+  const h = fixture(t);
+  h.check = { kind: "running" };
+  await approved(h, null);
+  assert.equal(h.review().phase.kind, "checking");
+  archive(h.registry, h.review().reviewer);
+  await h.loop().poll();
+  assert.equal(h.review().phase.kind, "cancelled");
+  assert.deepEqual(h.discarded, h.checkThreads, "its check thread goes with it");
+});
+
+test("a message that waits to be delivered is not sent once the PR merged, and a PR closed before the landing merges ends closed", async (t) => {
+  const f = fixture(t);
+  const loop = f.loop();
+  await loop.start(f.builder, { land: null });
+  await loop.poll();
+  f.delivery = "later";
+  f.reply(f.review().reviewer, verdict(f.review(), { verdict: "changes", findings: [serious] }));
+  await loop.poll();
+  assert.equal(f.review().outbox?.to, "builder");
+  f.snapshot = { ...f.snapshot, pr: { ...f.snapshot.pr, state: "merged" }, detail: { ...f.snapshot.detail, mergeCommit: merged } };
+  f.delivery = "delivered";
+  await loop.poll();
+  assert.deepEqual(f.review().phase, { kind: "merged" });
+  assert.equal(f.sent.length, 1, "the builder never gets the findings");
+
+  const g = fixture(t);
+  g.check = { kind: "running" };
+  await approved(g, "nLAPTOP");
+  g.snapshot = { ...g.snapshot, pr: { ...g.snapshot.pr, state: "closed" } };
+  g.watched("closed");
+  g.check = { kind: "done", passed: true, output: "ok" };
+  await g.loop().poll();
+  assert.deepEqual(g.review().phase, { kind: "closed" });
+  assert.deepEqual(g.merges, []);
+  assert.ok(!g.attention().includes("decision"));
+});
+
+test("a check that passes after the PR merged or closed, before the PR watch saw it, ends the review merged or closed, not approved", async (t) => {
+  for (const state of ["merged", "closed"] as const) {
+    const f = fixture(t);
+    f.check = { kind: "running" };
+    await approved(f, null);
+    assert.equal(f.review().phase.kind, "checking");
+    f.snapshot = { ...f.snapshot, pr: { ...f.snapshot.pr, state }, detail: { ...f.snapshot.detail, mergeCommit: state === "merged" ? merged : null } };
+    f.check = { kind: "done", passed: true, output: "ok" };
+    await f.loop().poll();
+    assert.deepEqual(f.review().phase, { kind: state });
+    assert.deepEqual(f.discarded, f.checkThreads, "the check thread is still thrown away");
+  }
 });

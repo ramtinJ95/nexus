@@ -1,0 +1,3 @@
+verify stack: API at http://127.0.0.1:7470, hooks bridge on 7489, Herdr server verify-review, evidence /home/user/workspace/repo/docs/verification/review-ends-quietly/before-run
+scripted builder th-314bda642c1c pushed feature without a Claude session
+2026-10-26T16:39:29.043Z recorded branch output origin/feature for th-314bda642c1c

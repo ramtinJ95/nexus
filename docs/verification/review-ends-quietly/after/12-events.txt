@@ -1,0 +1,13 @@
+$ nexus events --thread th-4fe6bf2d4c57 --kind review.changed --kind attention.changed
+4 2026-10-26T16:36:44.250Z th-4fe6bf2d4c57 review.changed {"review":"rv-4df5b7f8","reviewer":"th-e4df02f25dbb","phase":{"kind":"reviewing"},"round":1}
+7 2026-10-26T16:37:25.488Z th-4fe6bf2d4c57 review.changed {"review":"rv-4df5b7f8","reviewer":"th-e4df02f25dbb","phase":{"kind":"needs-person","reasons":["The reviewer still requests changes after 1 rounds, the most this review allows."],"label":{"state":"adding"}},"round":1}
+8 2026-10-26T16:37:25.488Z th-4fe6bf2d4c57 attention.changed {"attention":"decision"}
+9 2026-10-26T16:37:25.493Z th-4fe6bf2d4c57 review.changed {"review":"rv-4df5b7f8","reviewer":"th-e4df02f25dbb","phase":{"kind":"needs-person","reasons":["The reviewer still requests changes after 1 rounds, the most this review allows."],"label":{"state":"added"}},"round":1}
+10 2026-10-26T16:37:27.763Z th-4fe6bf2d4c57 review.changed {"review":"rv-0dd8b0cf","reviewer":"th-e169b02a8c5b","phase":{"kind":"reviewing"},"round":1}
+11 2026-10-26T16:37:27.763Z th-4fe6bf2d4c57 attention.changed {"attention":null}
+12 2026-10-26T16:37:33.473Z th-4fe6bf2d4c57 review.changed {"review":"rv-0dd8b0cf","reviewer":"th-e169b02a8c5b","phase":{"kind":"cancelled","who":"reviewer","status":"archived"},"round":1}
+13 2026-10-26T16:37:35.521Z th-4fe6bf2d4c57 review.changed {"review":"rv-6d27e48c","reviewer":"th-7044d3cc23c6","phase":{"kind":"reviewing"},"round":1}
+14 2026-10-26T16:37:43.474Z th-4fe6bf2d4c57 review.changed {"review":"rv-6d27e48c","reviewer":"th-7044d3cc23c6","phase":{"kind":"closed"},"round":1}
+15 2026-10-26T16:37:49.738Z th-4fe6bf2d4c57 review.changed {"review":"rv-97f1e430","reviewer":"th-b3a6a4d27855","phase":{"kind":"reviewing"},"round":1}
+16 2026-10-26T16:37:59.477Z th-4fe6bf2d4c57 review.changed {"review":"rv-97f1e430","reviewer":"th-b3a6a4d27855","phase":{"kind":"merged"},"round":1}
+--- exit 0

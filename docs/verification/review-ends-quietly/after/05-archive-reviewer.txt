@@ -1,0 +1,3 @@
+$ nexus archive th-e169b02a8c5b
+Archived th-e169b02a8c5b.
+--- exit 0
