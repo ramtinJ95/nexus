@@ -584,6 +584,12 @@ export function openRegistry(path: string, clock = Date.now) {
           ON CONFLICT (thread) DO UPDATE SET session = excluded.session, byte_offset = excluded.byte_offset, skipping = excluded.skipping, before_hash = excluded.before_hash,
             dropped = excluded.dropped, read_at = excluded.read_at`)
           .run(thread, read.session, read.cursor.offset, read.cursor.skipping ? 1 : 0, read.cursor.before, Math.max(0, total - maxEntries), read.readAt);
+        // Claude Code before the StopFailure hook reports no end to the turn a usage limit stopped, so the transcript ends it.
+        const stop = usageLimitOf(thread);
+        if (stop !== null) {
+          db.prepare("DELETE FROM session_activity WHERE thread = ? AND session = ? AND state = 'session.turn-started' AND EXISTS (SELECT 1 FROM session_order o WHERE o.thread = ? AND o.session = ? AND o.at <= ?)")
+            .run(thread, read.session, thread, read.session, stop.stoppedAt);
+        }
         updateAttention(thread);
         return true;
       });
