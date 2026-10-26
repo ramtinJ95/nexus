@@ -133,11 +133,17 @@ export function startImageRollout(options: ImageRolloutOptions): ImageRollout {
       set({ state: "failed", reason: "went offline" });
       return `${step.node} went offline before it held ${operation.image}`;
     }
+    const probe = probes.get(step.node)!;
     if (holds(node, operation.image)) {
+      // A copy from before this rollout, such as one made by hand, may hold other bytes under the same ID.
+      if (operation.kind === "rollout") {
+        const held = (await probe.manifest(operation.image))?.sha256;
+        const recorded = registry.image(operation.image)!.sha256;
+        if (held !== recorded) return failed(`it holds ${operation.image} with sha256 ${held ?? "unknown"}, not the recorded ${recorded}`);
+      }
       set({ state: "done", job: null, reason: null });
       return null;
     }
-    const probe = probes.get(step.node)!;
     if (step.job !== null) {
       // Only a lookup that began after notAfter proves the probe can no longer accept the envelope.
       const askedAt = Date.now();

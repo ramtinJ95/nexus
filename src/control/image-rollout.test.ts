@@ -1,6 +1,6 @@
 import { after, test, type TestContext } from "node:test";
 import assert from "node:assert/strict";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -23,7 +23,7 @@ const recipe: ImageRecipe = { files: [{ path: "Dockerfile", content: "FROM debia
 const old = "img-000000000001" as ImageId;
 const next = "img-000000000002" as ImageId;
 const manifestOf = (id: ImageId, builtOn: NodeName): ImageManifest => ({
-  id, gondolinBuildId: `gondolin-${id}`, builtOn, builtAt: "2027-01-01T00:00:00.000Z", sha256: id.slice(-1).repeat(64), pins,
+  id, gondolinBuildId: `gondolin-${id}`, builtOn, builtAt: "2027-01-01T00:00:00.000Z", sha256: createHash("sha256").update(`${id} on ${builtOn}`).digest("hex"), pins,
 });
 
 const dir = await mkdtemp(join(tmpdir(), "nexus-image-rollout-"));
@@ -182,6 +182,19 @@ test("a failed fetch on one node fails the rollout with that node and the probe'
   assert.deepEqual(stepsOf(failed)?.[1], [firebat, "failed", "backend: the copy hashes to 0000, so it was thrown away\ntar: short read"]);
   assert.deepEqual([s.registry.currentImage(), s.registry.previousImage()], [old, null]);
   assert.match(s.logged.join("\n"), /image rollout of img-000000000002 failed: rj-firebat could not fetch/);
+});
+
+test("a node that already holds the image under another sha256 fails the rollout, and the current image stays", async (t) => {
+  const s = withTwoImages(t, [firebat, testbench]);
+  s.nodes.hold(firebat, next, firebat);
+  const worker = s.start();
+  worker.rollout(next, laptop);
+  await worker.wake();
+  const failed = s.registry.imageOperation();
+  assert.ok(failed?.state === "failed");
+  assert.equal(failed.reason, `rj-firebat could not fetch ${next}: it holds ${next} with sha256 ${manifestOf(next, firebat).sha256}, not the recorded ${manifestOf(next, testbench).sha256}`);
+  assert.equal(s.nodes.submitted.length, 0);
+  assert.equal(s.registry.currentImage(), old);
 });
 
 test("rollback makes the previous image current again, and a second rollback goes forward", async (t) => {
