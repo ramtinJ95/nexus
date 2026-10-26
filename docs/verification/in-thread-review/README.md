@@ -82,6 +82,17 @@ The log's last two cases test the credential designs in `docs/design.md`:
 
 Rerun it with `docs/verification/in-thread-review/provider.sh` in any pylon with pi. It sends nothing but fake tokens, and Gondolin blocks those before they leave.
 
+## The installed profiles stay the captured set
+
+`install.ts` copies the captured profiles and writes pi-shepherdr's marker before pi first runs. To check that this keeps pi-shepherdr's bundled profiles out, a scratch `PI_CODING_AGENT_DIR` got this pylon's pi settings, packages and extensions, with pi-shepherdr among them, and only the astra `reviewer`. Then `pi --offline -p hi` ran in it twice:
+
+```text
+with the marker:     Not logged in · Please run /login     profiles: reviewer
+without the marker:  Not logged in · Please run /login     profiles: explorer general reviewer
+```
+
+Both times the reviewer kept `openai-codex/gpt-6-astra`. `Not logged in` is the answer the image's smoke check takes as a clean load.
+
 ## Not run here
 
-No reviewer ran to completion, because there is no ChatGPT login to use. These remain unchecked: whether a review on gpt-6-astra finishes inside a pylon, whether Gondolin passes pi's WebSocket upgrade to `chatgpt.com` or pi falls back to SSE (S5 proved a model request succeeds, without recording the transport), and the image build that installs the captured profiles.
+No reviewer ran to completion, because there is no ChatGPT login to use. These remain unchecked: whether a review on gpt-6-astra finishes inside a pylon, whether Gondolin passes pi's WebSocket upgrade to `chatgpt.com` or pi falls back to SSE (S5 proved a model request succeeds, without recording the transport), and an image build that installs the captured profiles. The capture itself must run on the Mac, against its own dotfiles.
