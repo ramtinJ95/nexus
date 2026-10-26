@@ -8,14 +8,38 @@ export const maxDiffRows = 20_000;
 const metaLine = /^(old mode|new mode|new file mode|deleted file mode|similarity index|rename from|rename to|copy from|copy to) /;
 
 /**
- * What the pylon's diff of one file has to show: its lines, or that it is binary, or only what it says of the file
- * beyond its lines, or nothing. Every kind but the last has those lines of meta.
+ * The patch up to its first maxDiffRows lines of hunks, and whether it went further. A cut hunk's header takes the
+ * counts of the lines kept, so the parser reads a whole hunk and the highlighter never sees the rest.
  */
-export function diffOf(patch) {
-  const meta = patch.split("\n").filter((line) => metaLine.test(line));
-  const file = parsePatchFiles(patch).flatMap((p) => p.files)[0];
-  if (file !== undefined && file.hunks.length > 0) return { kind: "lines", file, meta };
-  if (/^Binary files /m.test(patch)) return { kind: "binary", meta };
+function cutPatch(patch) {
+  const lines = patch.split("\n");
+  let rows = 0;
+  let header = -1;
+  for (let i = 0; i < lines.length; i++) {
+    if (/^@@ /.test(lines[i])) header = i;
+    else if (header !== -1 && /^[ +-]/.test(lines[i]) && ++rows > maxDiffRows) {
+      const kept = lines.slice(header + 1, i).filter((line) => /^[ +-]/.test(line));
+      const old = kept.filter((line) => line[0] !== "+").length;
+      const added = kept.filter((line) => line[0] !== "-").length;
+      const at = /^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@(.*)$/.exec(lines[header]);
+      lines[header] = `@@ -${at[1]},${old} +${at[2]},${added} @@${at[3]}`;
+      return { patch: lines.slice(0, i).join("\n") + "\n", cut: true };
+    } else if (/^diff --git /.test(lines[i])) header = -1;
+  }
+  return { patch, cut: false };
+}
+
+/**
+ * What the pylon's diff of one file has to show: its lines, or that it is binary, or only what it says of the file
+ * beyond its lines, or nothing. Every kind but the last has those lines of meta. A file whose type changed, such as
+ * a file that became a symlink, has two entries, its removal and its addition, and both are its lines.
+ */
+export function diffOf(text) {
+  const meta = text.split("\n").filter((line) => metaLine.test(line));
+  const { patch, cut } = cutPatch(text);
+  const files = parsePatchFiles(patch).flatMap((p) => p.files).filter((file) => file.hunks.length > 0);
+  if (files.length > 0) return { kind: "lines", files, meta, cut };
+  if (/^Binary files /m.test(text)) return { kind: "binary", meta };
   return meta.length > 0 ? { kind: "meta", meta } : { kind: "none" };
 }
 
@@ -47,15 +71,16 @@ function toDom(node) {
   return el;
 }
 
-/** A file's lines in the given layout, "unified" or "split", and whether they were cut at maxDiffRows. */
-export async function diffView(file, layout) {
-  const renderer = new DiffHunksRenderer({ diffStyle: layout, disableFileHeader: true });
-  const result = await renderer.asyncRender(file, { startingLine: 0, totalLines: maxDiffRows, bufferBefore: 0, bufferAfter: 0 });
+/** The lines of a diff's files in the given layout, "unified" or "split". */
+export async function diffView(files, layout) {
   const node = document.createElement("div");
   node.className = "diff-view";
   const root = node.attachShadow({ mode: "open" });
-  root.adoptedStyleSheets = [sheet(wrapCoreCSS(result.css)), sheet(wrapThemeCSS(result.themeStyles, "system"))];
-  root.append(toDom(renderer.renderFullAST(result)));
-  const rows = file.hunks.reduce((sum, hunk) => sum + (layout === "split" ? hunk.splitLineCount : hunk.unifiedLineCount), 0);
-  return { node, cut: rows > maxDiffRows };
+  for (const file of files) {
+    const renderer = new DiffHunksRenderer({ diffStyle: layout, disableFileHeader: true });
+    const result = await renderer.asyncRender(file);
+    if (root.adoptedStyleSheets.length === 0) root.adoptedStyleSheets = [sheet(wrapCoreCSS(result.css)), sheet(wrapThemeCSS(result.themeStyles, "system"))];
+    root.append(toDom(renderer.renderFullAST(result)));
+  }
+  return node;
 }

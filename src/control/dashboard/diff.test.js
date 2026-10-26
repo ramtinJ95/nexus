@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { diffOf } from "./diff.js";
+import { diffOf, maxDiffRows } from "./diff.js";
 
 const edit = `diff --git a/src/a.ts b/src/a.ts
 index 1111111..2222222 100644
@@ -14,16 +14,16 @@ index 1111111..2222222 100644
  export { a };
 `;
 /** The lines a diff of kind "lines" shows, as the reader sees them: each with its sign. */
-const linesOf = (shown) => shown.file.hunks.flatMap((hunk) => hunk.hunkContent.flatMap((part) => part.type === "context"
-  ? shown.file.additionLines.slice(part.additionLineIndex, part.additionLineIndex + part.lines).map((line) => ` ${line}`)
-  : [...shown.file.deletionLines.slice(part.deletionLineIndex, part.deletionLineIndex + part.deletions).map((line) => `-${line}`),
-    ...shown.file.additionLines.slice(part.additionLineIndex, part.additionLineIndex + part.additions).map((line) => `+${line}`)]))
+const linesOf = (shown) => shown.files.flatMap((file) => file.hunks.flatMap((hunk) => hunk.hunkContent.flatMap((part) => part.type === "context"
+  ? file.additionLines.slice(part.additionLineIndex, part.additionLineIndex + part.lines).map((line) => ` ${line}`)
+  : [...file.deletionLines.slice(part.deletionLineIndex, part.deletionLineIndex + part.deletions).map((line) => `-${line}`),
+    ...file.additionLines.slice(part.additionLineIndex, part.additionLineIndex + part.additions).map((line) => `+${line}`)])))
   .map((line) => line.replace(/\n$/, ""));
 
 test("an edit shows its lines under the file's name", () => {
   const shown = diffOf(edit);
   assert.equal(shown.kind, "lines");
-  assert.equal(shown.file.name, "src/a.ts");
+  assert.equal(shown.files[0].name, "src/a.ts");
   assert.deepEqual(shown.meta, []);
   assert.deepEqual(linesOf(shown), [" const a = 1;", "-const b = 2;", "+const b = 3;", "+const c = 4;", " export { a };"]);
 });
@@ -39,7 +39,7 @@ index 3333333..0000000
 -print("two")
 `);
   assert.equal(shown.kind, "lines");
-  assert.equal(shown.file.type, "deleted");
+  assert.equal(shown.files[0].type, "deleted");
   assert.deepEqual(shown.meta, ["deleted file mode 100644"]);
   assert.deepEqual(linesOf(shown), ['-print("one")', '-print("two")']);
 });
@@ -66,8 +66,8 @@ index 4444444..5555555 100644
 +export const y = 3;
 `);
   assert.equal(shown.kind, "lines");
-  assert.equal(shown.file.name, "lib/y.js");
-  assert.equal(shown.file.prevName, "lib/x.js");
+  assert.equal(shown.files[0].name, "lib/y.js");
+  assert.equal(shown.files[0].prevName, "lib/x.js");
   assert.deepEqual(shown.meta, ["similarity index 80%", "rename from lib/x.js", "rename to lib/y.js"]);
   assert.deepEqual(linesOf(shown), [" export const x = 1;", "-export const y = 2;", "+export const y = 3;"]);
 });
@@ -96,4 +96,50 @@ test("a diff cut short still shows the lines it has", (t) => {
   const shown = diffOf(edit.split("\n").slice(0, 7).join("\n") + "\n");
   assert.equal(shown.kind, "lines");
   assert.deepEqual(linesOf(shown), [" const a = 1;", "-const b = 2;"]);
+});
+
+test("a file that became a symlink shows its removal and its addition", () => {
+  const shown = diffOf(`diff --git a/link b/link
+deleted file mode 100644
+index 94954ab..0000000
+--- a/link
++++ /dev/null
+@@ -1,2 +0,0 @@
+-hello
+-world
+diff --git a/link b/link
+new file mode 120000
+index 0000000..4cbb553
+--- /dev/null
++++ b/link
+@@ -0,0 +1 @@
++target.txt
+\\ No newline at end of file
+`);
+  assert.equal(shown.kind, "lines");
+  assert.deepEqual(shown.files.map((file) => file.type), ["deleted", "new"]);
+  assert.deepEqual(linesOf(shown), ["-hello", "-world", "+target.txt"]);
+  assert.deepEqual(shown.meta, ["deleted file mode 100644", "new file mode 120000"]);
+});
+
+test("a diff longer than the row cap is cut to it before it is parsed, and says so", (t) => {
+  const errors = t.mock.method(console, "error", () => {});
+  const lines = Array.from({ length: 500_000 }, (_, i) => `+row ${i}`);
+  const shown = diffOf(`diff --git a/rows.csv b/rows.csv
+new file mode 100644
+index 0000000..1111111
+--- /dev/null
++++ b/rows.csv
+@@ -0,0 +1,500000 @@
+${lines.join("\n")}
+`);
+  assert.equal(shown.kind, "lines");
+  assert.equal(shown.cut, true);
+  assert.equal(linesOf(shown).length, maxDiffRows);
+  assert.equal(linesOf(shown).at(-1), `+row ${maxDiffRows - 1}`);
+  assert.equal(errors.mock.callCount(), 0, "the cut hunk's header matches its lines");
+});
+
+test("a diff within the row cap is not cut", () => {
+  assert.equal(diffOf(edit).cut, false);
 });

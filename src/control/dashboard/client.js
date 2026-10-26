@@ -884,13 +884,13 @@ function pickLayout(layout) {
 async function drawDiff({ read, head, shown, truncated }) {
   try {
     const { diffView } = await import("./diff.js");
-    const view = shown.kind === "lines" ? await diffView(shown.file, diffLayout) : null;
+    const view = shown.kind === "lines" ? await diffView(shown.files, diffLayout) : null;
     if (read !== diffRead) return;
     head.querySelector(".fv-layout").hidden = view === null;
     fileView.replaceChildren(...present([head,
       shown.kind !== "none" && shown.meta.length > 0 && el("div", { className: "fv-meta dim small" }, ...shown.meta.map((line) => el("div", { textContent: line }))),
-      view?.node ?? el("p", { className: "empty fv-note", textContent: shown.kind === "binary" ? "The file is binary, so there is no diff to show." : shown.kind === "meta" ? "No lines changed." : "The file has no changes now." }),
-      (truncated || view?.cut) && el("p", { className: "dim small fv-note", textContent: "The diff is cut short here, because the whole of it is too long to show." })]));
+      view ?? el("p", { className: "empty fv-note", textContent: shown.kind === "binary" ? "The file is binary, so there is no diff to show." : shown.kind === "meta" ? "No lines changed." : "The file has no changes now." }),
+      (truncated || (shown.kind === "lines" && shown.cut)) && el("p", { className: "dim small fv-note", textContent: "The diff is cut short here, because the whole of it is too long to show." })]));
   } catch (err) {
     if (read !== diffRead) return;
     fileView.replaceChildren(head, el("p", { className: "error fv-note", textContent: err.message }));
