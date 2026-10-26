@@ -1,0 +1,17 @@
+$ nexus start --project nexus --title Greet script --claude Add a shell script greet.sh at the repository root that prints hello. Commit it on a new branch named feature and push it with `git push -u origin feature`. Do not open a pull request yourself: Nexus opens it for this verification. Keep it minimal, with no subagents, tests or docs. --json
+{
+  "id": "th-b58e9a803ee8",
+  "title": "Greet script",
+  "project": "nexus",
+  "pylonId": "pylon-th-b58e9a803ee8",
+  "status": "active",
+  "conversationId": null,
+  "startedBy": "nVERIFY",
+  "createdAt": 1792976890316,
+  "agentTurnRunning": false,
+  "lastAgentActivityAt": 0,
+  "lastHumanActivityAt": 1792976890316,
+  "seenAt": null,
+  "lastReplyAt": null
+}
+--- exit 0

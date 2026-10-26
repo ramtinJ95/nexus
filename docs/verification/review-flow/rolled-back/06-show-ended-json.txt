@@ -1,0 +1,119 @@
+$ nexus show th-c99d60e1c3ab --json
+{
+  "thread": {
+    "id": "th-c99d60e1c3ab",
+    "title": "Greet script",
+    "project": "nexus",
+    "pylonId": "pylon-th-c99d60e1c3ab",
+    "status": "active",
+    "conversationId": null,
+    "startedBy": "nVERIFY",
+    "createdAt": 1792977075465,
+    "agentTurnRunning": false,
+    "lastAgentActivityAt": 1792977101844,
+    "lastHumanActivityAt": 1792977075465,
+    "seenAt": null,
+    "lastReplyAt": 1792977101844
+  },
+  "claudeWorker": {
+    "model": "claude-opus-5-5",
+    "state": "started"
+  },
+  "attention": "decision",
+  "seenAt": null,
+  "lastReplyAt": 1792977101844,
+  "desired": "running",
+  "pylon": {
+    "grantsOutdated": false,
+    "id": "pylon-th-c99d60e1c3ab",
+    "node": "verify-node",
+    "failed": null,
+    "observedAt": "2026-10-26T01:11:51.438Z",
+    "actualState": "running",
+    "retryRefused": null
+  },
+  "sessions": [],
+  "previews": [],
+  "ports": [],
+  "outputs": [
+    {
+      "thread": "th-c99d60e1c3ab",
+      "kind": "branch",
+      "ref": "origin/feature"
+    },
+    {
+      "thread": "th-c99d60e1c3ab",
+      "kind": "pull-request",
+      "ref": "https://github.com/ramtinJ95/nexus/pull/1"
+    }
+  ],
+  "prWatch": {
+    "enabled": true,
+    "stopped": false,
+    "error": null
+  },
+  "pullRequests": [
+    {
+      "repo": "ramtinJ95/nexus",
+      "number": 1,
+      "title": "Add greet.sh",
+      "url": "https://github.com/ramtinJ95/nexus/pull/1",
+      "state": "merged",
+      "checks": "none",
+      "review": "none",
+      "conflict": false
+    }
+  ],
+  "review": {
+    "id": "rv-1ccfed28",
+    "builder": "th-c99d60e1c3ab",
+    "reviewer": "th-6cdb3af81369",
+    "pr": {
+      "repo": "ramtinJ95/nexus",
+      "number": 1,
+      "url": "https://github.com/ramtinJ95/nexus/pull/1",
+      "title": "Add greet.sh"
+    },
+    "models": {
+      "builder": "claude-opus-5-5",
+      "reviewer": "gpt-6-astra"
+    },
+    "maxRounds": 3,
+    "land": {
+      "requestedBy": "nVERIFY"
+    },
+    "rounds": [
+      {
+        "head": "648bb086cefa339dcac59d141af4c99d4da752c9",
+        "verdict": {
+          "token": "rv-1ccfed28:1",
+          "verdict": "approve",
+          "findings": [],
+          "reserved": [],
+          "notCheckedLive": "greet.sh is a local script, with no service to start."
+        },
+        "check": {
+          "passed": true,
+          "output": "check passed"
+        },
+        "answers": null
+      }
+    ],
+    "merged": "92f9fcc9138412338e5b666da65e5ae621cd2108",
+    "phase": {
+      "kind": "needs-person",
+      "reasons": [
+        "The deploy of 92f9fcc9138412338e5b666da65e5ae621cd2108 failed: verify-node control rolled-back (health check failed); verify-node probe rolled-back (health check failed).",
+        "Rolled back to the previous release, 777f1a18640fd4dde0fd66de01acba3de0f94804.",
+        "92f9fcc9138412338e5b666da65e5ae621cd2108 is still on the default branch, so revert it before the next deploy."
+      ]
+    },
+    "outbox": null,
+    "since": 1792977102213,
+    "nudges": 0,
+    "startedAt": 1792977102192
+  },
+  "attach": "herdr --session nexus",
+  "agent": null
+}
+--- exit 0

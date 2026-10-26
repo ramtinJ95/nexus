@@ -1,0 +1,12 @@
+$ nexus events --thread th-b58e9a803ee8 --kind review.changed --kind attention.changed --kind pull-request.feedback
+5 2026-10-26T01:08:13.762Z th-b58e9a803ee8 attention.changed {"attention":"working"}
+8 2026-10-26T01:08:27.708Z th-b58e9a803ee8 attention.changed {"attention":"reply"}
+9 2026-10-26T01:08:31.968Z th-b58e9a803ee8 pull-request.feedback {"requestId":"pr-watch:c885b80e-c517-46cd-a70a-5412239a135f"}
+12 2026-10-26T01:08:48.829Z th-b58e9a803ee8 review.changed {"review":"rv-54c44b5c","reviewer":"th-b4504777b47e","phase":{"kind":"reviewing"},"round":1}
+15 2026-10-26T01:08:52.002Z th-b58e9a803ee8 review.changed {"review":"rv-54c44b5c","reviewer":"th-b4504777b47e","phase":{"kind":"fixing"},"round":1}
+18 2026-10-26T01:09:04.017Z th-b58e9a803ee8 review.changed {"review":"rv-54c44b5c","reviewer":"th-b4504777b47e","phase":{"kind":"reviewing"},"round":2}
+20 2026-10-26T01:09:08.001Z th-b58e9a803ee8 review.changed {"review":"rv-54c44b5c","reviewer":"th-b4504777b47e","phase":{"kind":"checking","startedAt":1792976948001},"round":2}
+21 2026-10-26T01:09:10.032Z th-b58e9a803ee8 review.changed {"review":"rv-54c44b5c","reviewer":"th-b4504777b47e","phase":{"kind":"merging"},"round":2}
+22 2026-10-26T01:09:10.088Z th-b58e9a803ee8 review.changed {"review":"rv-54c44b5c","reviewer":"th-b4504777b47e","phase":{"kind":"deploying","commit":"11d5fd3c389443c4fae1ec2dcbc243d9b6436f6e","previous":"4ead3e33e6a911423e27e278daab1af87f66ab8f","requested":false,"deadline":1792978750087},"round":2}
+26 2026-10-26T01:09:14.001Z th-b58e9a803ee8 review.changed {"review":"rv-54c44b5c","reviewer":"th-b4504777b47e","phase":{"kind":"landed","commit":"11d5fd3c389443c4fae1ec2dcbc243d9b6436f6e"},"round":2}
+--- exit 0

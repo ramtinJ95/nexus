@@ -1,0 +1,4 @@
+$ nexus threads
+th-b58e9a803ee8  active  -  pylon running  nexus  1m ago   Greet script
+th-b4504777b47e  active  -  pylon running  nexus  27s ago  Review of #1: Add greet.sh
+--- exit 0

@@ -1,0 +1,13 @@
+$ nexus show th-b58e9a803ee8
+th-b58e9a803ee8  Greet script
+project: nexus
+Claude worker: started, model claude-opus-5-5
+attention: reply
+status: active
+pylon: pylon-th-b58e9a803ee8 on verify-node, running, observed 0s ago
+PR watch: on
+PR #1: Add greet.sh — merged, checks none, review none https://github.com/ramtinJ95/nexus/pull/1
+review rv-54c44b5c of PR #1: landed as 11d5fd3c389443c4fae1ec2dcbc243d9b6436f6e, round 2 of 3, reviewer th-b4504777b47e on gpt-6-astra, landing when approved
+output: branch origin/feature
+output: pull-request https://github.com/ramtinJ95/nexus/pull/1
+--- exit 0

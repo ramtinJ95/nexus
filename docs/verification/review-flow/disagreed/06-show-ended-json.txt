@@ -1,0 +1,174 @@
+$ nexus show th-650268f41ac5 --json
+{
+  "thread": {
+    "id": "th-650268f41ac5",
+    "title": "Greet script",
+    "project": "nexus",
+    "pylonId": "pylon-th-650268f41ac5",
+    "status": "active",
+    "conversationId": null,
+    "startedBy": "nVERIFY",
+    "createdAt": 1792976991440,
+    "agentTurnRunning": false,
+    "lastAgentActivityAt": 1792977039579,
+    "lastHumanActivityAt": 1792976991440,
+    "seenAt": null,
+    "lastReplyAt": 1792977039579
+  },
+  "claudeWorker": {
+    "model": "claude-opus-5-5",
+    "state": "started"
+  },
+  "attention": "decision",
+  "seenAt": null,
+  "lastReplyAt": 1792977039579,
+  "desired": "running",
+  "pylon": {
+    "grantsOutdated": false,
+    "id": "pylon-th-650268f41ac5",
+    "node": "verify-node",
+    "failed": null,
+    "observedAt": "2026-10-26T01:10:46.251Z",
+    "actualState": "running",
+    "retryRefused": null
+  },
+  "sessions": [],
+  "previews": [],
+  "ports": [],
+  "outputs": [
+    {
+      "thread": "th-650268f41ac5",
+      "kind": "branch",
+      "ref": "origin/feature"
+    },
+    {
+      "thread": "th-650268f41ac5",
+      "kind": "pull-request",
+      "ref": "https://github.com/ramtinJ95/nexus/pull/1"
+    }
+  ],
+  "prWatch": {
+    "enabled": true,
+    "stopped": false,
+    "error": null
+  },
+  "pullRequests": [
+    {
+      "repo": "ramtinJ95/nexus",
+      "number": 1,
+      "title": "Add greet.sh",
+      "url": "https://github.com/ramtinJ95/nexus/pull/1",
+      "state": "open",
+      "checks": "none",
+      "review": "none",
+      "conflict": false
+    }
+  ],
+  "review": {
+    "id": "rv-9f707d04",
+    "builder": "th-650268f41ac5",
+    "reviewer": "th-d2f6a0ae0235",
+    "pr": {
+      "repo": "ramtinJ95/nexus",
+      "number": 1,
+      "url": "https://github.com/ramtinJ95/nexus/pull/1",
+      "title": "Add greet.sh"
+    },
+    "models": {
+      "builder": "claude-opus-5-5",
+      "reviewer": "gpt-6-astra"
+    },
+    "maxRounds": 3,
+    "land": {
+      "requestedBy": "nVERIFY"
+    },
+    "rounds": [
+      {
+        "head": "d198ad114eba6dbf49f43ccec37afaa792ce5c32",
+        "verdict": {
+          "token": "rv-9f707d04:1",
+          "verdict": "changes",
+          "findings": [
+            {
+              "id": "F1",
+              "severity": "serious",
+              "where": "greet.sh:1",
+              "summary": "`sh greet.sh Ada` prints \"hello\", not \"hello Ada\"",
+              "detail": "Greet the name given as the first argument, and keep printing plain `hello` without one."
+            }
+          ],
+          "reserved": [],
+          "notCheckedLive": "greet.sh is a local script, with no service to start."
+        },
+        "check": null,
+        "answers": [
+          {
+            "id": "F1",
+            "action": "rejected",
+            "reason": "Out of scope. The requested behavior was a script that prints hello, and greet.sh does that. Greeting a name passed as an argument is a new feature the task did not ask for, and the task asked to keep the change minimal. I will add it if the person requests it."
+          }
+        ]
+      },
+      {
+        "head": "d198ad114eba6dbf49f43ccec37afaa792ce5c32",
+        "verdict": {
+          "token": "rv-9f707d04:2",
+          "verdict": "changes",
+          "findings": [
+            {
+              "id": "F1",
+              "severity": "serious",
+              "where": "greet.sh:1",
+              "summary": "`sh greet.sh Ada` prints \"hello\", not \"hello Ada\"",
+              "detail": "Greet the name given as the first argument, and keep printing plain `hello` without one."
+            }
+          ],
+          "reserved": [],
+          "notCheckedLive": "greet.sh is a local script, with no service to start."
+        },
+        "check": null,
+        "answers": [
+          {
+            "id": "F1",
+            "action": "rejected",
+            "reason": "Unchanged finding with no new rationale. The task specified a script that prints hello and asked for a minimal change, and greet.sh does exactly that. Greeting a name from an argument is new scope, not a defect. I will add it if the person asks for it."
+          }
+        ]
+      },
+      {
+        "head": "d198ad114eba6dbf49f43ccec37afaa792ce5c32",
+        "verdict": {
+          "token": "rv-9f707d04:3",
+          "verdict": "changes",
+          "findings": [
+            {
+              "id": "F1",
+              "severity": "serious",
+              "where": "greet.sh:1",
+              "summary": "`sh greet.sh Ada` prints \"hello\", not \"hello Ada\"",
+              "detail": "Greet the name given as the first argument, and keep printing plain `hello` without one."
+            }
+          ],
+          "reserved": [],
+          "notCheckedLive": "greet.sh is a local script, with no service to start."
+        },
+        "check": null,
+        "answers": null
+      }
+    ],
+    "merged": null,
+    "phase": {
+      "kind": "needs-person",
+      "reasons": [
+        "The reviewer still requests changes after 3 rounds, the most this review allows."
+      ]
+    },
+    "outbox": null,
+    "since": 1792977042145,
+    "nudges": 0,
+    "startedAt": 1792977017698
+  },
+  "attach": "herdr --session nexus",
+  "agent": null
+}
+--- exit 0
