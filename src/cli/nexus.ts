@@ -24,13 +24,14 @@ import { maxEntries, usageLimitText, type ClaudeConversation, type ClaudeEntry, 
 import { claudeFrames, queuedOf, type ClaudeFrame } from "../control/claude-conversation.ts";
 import { roundsSpent } from "../control/review.ts";
 import type { Changes, Diff, Listing } from "../checkout-files.ts";
+import type { ThreadSetup } from "../images.ts";
 import type { Project, SecretGrant } from "../project.ts";
 import type { ActualState } from "../reconcile.ts";
 import type { WebSocket } from "ws";
 import { attachTerminal, processTty } from "./attach.ts";
 import { call, CliError, exitCodes, follow, upgrade, type Endpoint, type HostPort } from "./transport.ts";
 
-const version = "0.22.0";
+const version = "0.23.0";
 const defaults = { url: "http://rj-firebat.tailc817d3.ts.net:7470", socks: "localhost:1055" };
 const configFile = () => join(homedir(), ".config", "nexus", "cli.json");
 
@@ -246,6 +247,14 @@ function placementText(p: Placement): string {
   }
 }
 
+/** A fresh boot's reason may end in a failed build's log, which only --json prints. */
+function setupText(s: ThreadSetup): string {
+  switch (s.how) {
+    case "template": return `from template ${s.template}, built ${ago(s.builtAt)}, then checked out ${s.commit.slice(0, 12)}`;
+    case "fresh": return `fresh boot runs .nexus/setup, because ${s.reason.split("\n")[0]}${s.building === undefined ? "" : `; ${s.building} builds for the next thread`}`;
+  }
+}
+
 /** A review's state for a person: its phase and round, its reviewer, and what it needs from them. */
 function reviewText(r: Review): string {
   const phase = r.phase.kind === "landed" ? `landed as ${r.phase.commit}` : r.phase.kind === "deploying" ? `deploying ${r.phase.commit}` : r.phase.kind;
@@ -266,6 +275,7 @@ function detailText({ thread: t, pylon: p, agent, sessions, previews, ports, out
     `status: ${t.status}${t.agentTurnRunning ? ", agent working" : ""}`,
     `pylon: ${p.id} on ${p.node}, ${p.actualState}${observed}`,
     ...t.placement === undefined ? [] : [`placement: ${placementText(t.placement)}`],
+    ...t.setup === undefined ? [] : [`setup: ${setupText(t.setup)}`],
     ...(p.grantsOutdated ? ["grants: older than project; start a new thread to apply current grants (archive/unarchive keeps these grants)"] : []),
     ...p.failed === null ? [] : [`failed: ${p.failed}`],
     ...p.retryRefused === null ? [] : [`retry refused: ${p.retryRefused}`],

@@ -22,7 +22,7 @@ import { fakeHarness } from "../control/fake-harness.ts";
 import { openRegistry, type Thread, type ThreadId } from "../control/registry.ts";
 import type { Review } from "../control/review.ts";
 import { startImageRollout } from "../control/image-rollout.ts";
-import type { ImageId, ImageManifest, ProjectMirror } from "../images.ts";
+import type { ImageId, ImageManifest, ProjectMirror, TemplateRecord } from "../images.ts";
 import type { Project, ProjectId, RemoteProject } from "../project.ts";
 import { openTerminal, terminalSize } from "../guest-terminal.ts";
 import { processStream } from "../process-stream.ts";
@@ -1198,6 +1198,31 @@ test("start --node auto picks the node with room, show says why, and nodes print
     "the default thread's pylon, which the node has yet to report, counts against it");
 });
 
+test("show says how the pylon got its setup: fresh and why, with the build it asked for, or from a template its node holds", async (t) => {
+  const s = await setup(t);
+  const shown = async (title: string) => {
+    const thread: Thread = await s.json(["start", "--project", "acme", "--title", title]);
+    return { thread, line: (await s.nexus(["show", thread.id])).stdout.split("\n").find((l) => l.startsWith("setup: ")) };
+  };
+  assert.equal((await shown("unread")).line, "setup: fresh boot runs .nexus/setup, because the control plane could not read .nexus/setup at main: this test has no remote");
+
+  s.remoteReads(async () => ({ commit: "2".repeat(40), setupBlob: "b".repeat(40) }));
+  const built = await shown("built");
+  const [building] = s.registry.templates(project.id) as Extract<TemplateRecord, { state: "building" }>[];
+  assert.equal(built.line, `setup: fresh boot runs .nexus/setup, because no template of this setup is on rj-firebat yet; ${building!.id} builds for the next thread`);
+
+  const log = `the setup of template ${building!.id} failed: Setup exited 1\nnpm ERR! 404`;
+  s.registry.saveTemplate({ id: building!.id, key: building!.key, state: "failed", on: node, failedAt: Date.now(), logTail: log });
+  const failed = await shown("failed");
+  assert.equal(failed.line, `setup: fresh boot runs .nexus/setup, because the build of template ${building!.id} failed on rj-firebat: the setup of template ${building!.id} failed: Setup exited 1`, "the log stays out of the text");
+  assert.equal((await s.json(["show", failed.thread.id])).thread.setup.reason, `the build of template ${building!.id} failed on rj-firebat: ${log}`);
+
+  s.registry.saveTemplate({ id: building!.id, key: building!.key, state: "ready", builtOn: node, builtAt: Date.now() - 3 * 60_000, commit: "2".repeat(40) });
+  const capacity = { cpus: 16, committedCpus: 0, memoryGiB: 64, committedMemoryGiB: 0, diskFreeGiB: 100, committedDiskGiB: 0 };
+  s.registry.ingested({ node, observedAt: new Date().toISOString(), probeBootId: "b", capacity, artifacts: [image.id, building!.id], jobs: [], pylons: [], grants: { secrets: [], gitSsh: false }, previewRoutes: [] }, []);
+  assert.equal((await shown("reused")).line, `setup: from template ${building!.id}, built 3m ago, then checked out 222222222222`);
+});
+
 test("nodes prints what an older probe does not count as unknown, never as 0, with --json or without", async (t) => {
   const s = await setup(t);
   const capacity = { memoryGiB: 64, committedMemoryGiB: 0, diskFreeGiB: 100 } as never;
@@ -1226,7 +1251,7 @@ test("show prints PR metadata and one disabled-watch notice without waking the p
 
 test("deploy and release use the shared release view and wait for both roles", async (t) => {
   const s = await setup(t);
-  assert.equal((await s.nexus(["--version"])).stdout.trim(), "nexus 0.22.0");
+  assert.equal((await s.nexus(["--version"])).stdout.trim(), "nexus 0.23.0");
   assert.equal((await s.nexus(["deploy", "bad"])).code, 64);
   const requested = await s.json(["deploy", "main"]);
   assert.equal(requested.desired.commit, "a".repeat(40));
