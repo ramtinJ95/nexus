@@ -13,7 +13,7 @@ import { join } from "node:path";
 import { PassThrough, Readable } from "node:stream";
 import { createPylonVmBackend, type PylonVmBackendOptions } from "./pylon-vm-backend.ts";
 import { identityOf } from "./pylon-vm/identity.ts";
-import { pylonGuest } from "./pylon-vm/pylon-guest.ts";
+import { imageEnv, pylonGuest } from "./pylon-vm/pylon-guest.ts";
 import type { BootInputs } from "./project.ts";
 import type { BrokenCause, PylonId } from "./protocol.ts";
 import { herdrOk, herdrPane, herdrSnapshot } from "./fake-guest.ts";
@@ -313,6 +313,26 @@ test("a raw stream runs its argv unchanged over SSH to the forwarder the control
   const args = (await readFile(join(scratch, "ssh-args"), "utf8")).split("\n");
   assert.deepEqual([args[args.indexOf("-p") + 1], args[args.indexOf("-i") + 1], args[args.indexOf("--") - 1]], ["40022", "/run/keys/id", "user@127.0.0.1"]);
   assert.deepEqual(actions.map((a) => [a.action, a.user]), [["shell", "user"]]);
+});
+
+test("a raw stream has the image's env, as sandboxd's execs do, though sshd runs it in no login shell", { skip: !existsSync(imageEnv) && `only a pylon image has ${imageEnv}` }, async (t) => {
+  const { backend, instances } = await backendWith();
+  const dir = await leftInstance(instances, "pylon-ssh-env", "running");
+  await fakeController(dir, "pylon-ssh-env", () => ({ name: "pylon-ssh-env", access: { user: "user", port: 40022, identityFile: "/run/keys/id" }, command: "ssh ...", handoff: "" }));
+  const bin = join(scratch, "bin-env");
+  await mkdir(bin, { recursive: true });
+  await writeFile(join(bin, "ssh"), `#!/bin/sh\nwhile [ "$1" != -- ]; do shift; done\nexec env -u NODE_EXTRA_CA_CERTS sh -c "$2"\n`);
+  await chmod(join(bin, "ssh"), 0o755);
+  const path = process.env.PATH;
+  process.env.PATH = `${bin}:${path}`;
+  t.after(() => { process.env.PATH = path; });
+
+  const stream = await backend.guest("pylon-ssh-env" as PylonId).stream(["sh", "-c", 'printf %s "$NODE_EXTRA_CA_CERTS"'], () => {});
+  await stream.close();
+  let out = "";
+  for await (const chunk of stream) out += Buffer.from(chunk).toString();
+  assert.equal(out, /NODE_EXTRA_CA_CERTS='([^']*)'/.exec(await readFile(imageEnv, "utf8"))?.[1], "the CA npm needs to trust Gondolin's TLS proxy");
+  assert.deepEqual(await stream.done, { kind: "exited", code: 0 });
 });
 
 test("service facts come from the controller's supervisor, a list starts nothing, and logs name one service", async () => {
