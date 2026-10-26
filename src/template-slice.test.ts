@@ -27,6 +27,7 @@ import { artifactArchive } from "./artifacts.ts";
 import { createDockerBackend } from "./docker-backend.ts";
 import { createPylonVmBackend } from "./pylon-vm-backend.ts";
 import { run as pylonVm } from "./pylon-vm/client.ts";
+import { nodeSecrets } from "./probe/config.ts";
 import { startProbe, type Probe } from "./probe/server.ts";
 import { connectProbe, type Job, type JobStatus, type LiveHash, type NodeName, type ProbeClient, type PylonId, type TailnetNodeId } from "./protocol.ts";
 import { envelope } from "./reconcile.ts";
@@ -208,7 +209,7 @@ before(async () => {
       auth: { controlPlane: tailnetId, peers: [tailnetId] },
       whois: async () => tailnetId,
       backend: fixture.backends[side],
-      secrets: { value: () => undefined, names: () => [] },
+      secrets: nodeSecrets({ value: () => undefined, names: () => [] }),
       peerAddress: (peer) => {
         assert.equal(peer, nodes.a, "only A holds what B fetches");
         return { host: "127.0.0.1", port: probes.a.port };

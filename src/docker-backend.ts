@@ -394,6 +394,8 @@ export function createDockerBackend(options: DockerBackendOptions): VmBackend {
     },
     buildImage(image) { return Promise.reject(new JobFailure("invalid", `the Docker backend uses configured Docker images and builds none, so it cannot build ${image}`)); },
     guest,
+    // Its containers get no secrets, so none holds one to update.
+    async updateSecret() { return []; },
   };
 }
 

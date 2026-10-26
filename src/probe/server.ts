@@ -11,10 +11,10 @@ import { createServer, STATUS_CODES, type IncomingMessage, type ServerResponse }
 import { availableParallelism, totalmem } from "node:os";
 import type { Duplex } from "node:stream";
 import { pipeline } from "node:stream/promises";
-import { JobFailure, runCommand, runJob, type BackendPylon, type ProbeDeps, type SecretSource, type VmBackend } from "../backend.ts";
+import { JobFailure, runCommand, runJob, type BackendPylon, type ProbeDeps, type VmBackend } from "../backend.ts";
 import type { PortableArtifactId } from "../images.ts";
 import {
-  artifactHeaders, encodeProbeEvent, encodeSubmitReply, fetchArtifact, isPortableArtifactId, jobDeadlineMs, probePort, jobSubject, parseJobEnvelope, parsePylonCommand, parseStreamRequest, routeAuth, serveByteStream, streamUpgradeResponse,
+  artifactHeaders, encodeProbeEvent, encodeSubmitReply, fetchArtifact, heldSecrets, isPortableArtifactId, jobDeadlineMs, probePort, jobSubject, parseJobEnvelope, parsePylonCommand, parseStreamRequest, routeAuth, serveByteStream, streamUpgradeResponse,
   type Job, type JobEnvelope, type JobId, type JobStatus, type LiveHash, type NodeName, type NodeObservation,
   type DeclaredOutput, type GitFacts, type ListeningFact, type ProbeAuthConfig, type CommandResult, type ProbeEvent, type PylonCommand, type PylonId, type PylonObservation, type ServiceFact, type SessionFact, type Subject,
 } from "../protocol.ts";
@@ -27,6 +27,7 @@ import { gitFacts } from "../git-facts.ts";
 import { startGateway } from "./gateway.ts";
 import { createPylonApi, type HostBridge } from "./pylon-api.ts";
 import { createTailscaleServe, parseServeStatus, readRoutes, type HttpsGet, type TailscaleCli } from "./serve.ts";
+import type { NodeSecrets } from "./config.ts";
 
 export interface ProbeOptions {
   eventJournal?: string;
@@ -37,7 +38,7 @@ export interface ProbeOptions {
   auth: ProbeAuthConfig;
   whois: Whois;
   backend: VmBackend;
-  secrets: SecretSource;
+  secrets: NodeSecrets;
   /** Whether the backend has a git SSH key, so a pylon can clone over SSH. Default false. */
   gitSsh?: boolean;
   jobDeadlineMs?: { readonly [K in Job["kind"]]: number };
@@ -71,6 +72,9 @@ export interface Probe {
 const jobRetentionMs = 10 * 60_000;
 const snapshotIntervalMs = 60_000;
 const maxBodyBytes = 1 << 20;
+const maxSecretBytes = 16_384;
+/** RFC 6750's b64token, the alphabet bearer tokens are written in. */
+const tokenAlphabet = /^[A-Za-z0-9\-._~+/]+=*$/;
 const sum = (pylons: readonly BackendPylon[], resource: keyof NonNullable<BackendPylon["holds"]>) => pylons.reduce((total, p) => total + (p.holds?.[resource] ?? 0), 0);
 /** Short, because snapshots are read one at a time and a stuck guest would hold up every observer. */
 const sessionReadTimeoutMs = 3_000;
@@ -557,6 +561,24 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
       const manifest = await backend.artifacts.manifest(id);
       return manifest === null ? send(res, 404, `this node holds no ${id}`) : send(res, 200, JSON.stringify(manifest), "application/json");
     }
+    const secretMatch = /^\/v1\/secrets\/([^/]+)$/.exec(path);
+    if (secretMatch) {
+      if (req.method !== "PUT") return send(res, 405, `${req.method} is not allowed on ${path}`);
+      const name = decodeURIComponent(secretMatch[1]!);
+      if (!heldSecrets.includes(name)) return send(res, 404, `${name} is not a secret the control plane hands over`);
+      // No reply or log carries the value, so a refusal says what a value must be, never what this one was.
+      let value: string;
+      try {
+        value = await readBody(req, maxSecretBytes);
+      } catch {
+        return send(res, 400, `a secret value is at most ${maxSecretBytes} bytes`);
+      }
+      if (!tokenAlphabet.test(value)) return send(res, 400, "a secret value is a token: letters, digits and -._~+/ with optional = padding");
+      options.secrets.hold(name, value);
+      for (const { pylonId, reason } of await backend.updateSecret(name, value)) log(`${pylonId}: ${name} was not updated: ${reason}`);
+      res.writeHead(204).end();
+      return;
+    }
     const artifactMatch = /^\/v1\/artifacts\/([^/]+)$/.exec(path);
     if (artifactMatch && req.method === "GET") {
       const id = decodeURIComponent(artifactMatch[1]!) as PortableArtifactId;
@@ -655,12 +677,12 @@ function send(res: ServerResponse, status: number, body: string, contentType = "
   res.writeHead(status, { "content-type": contentType }).end(body);
 }
 
-async function readBody(req: IncomingMessage): Promise<string> {
+async function readBody(req: IncomingMessage, limit = maxBodyBytes): Promise<string> {
   let body = "";
   req.setEncoding("utf8");
   for await (const chunk of req as AsyncIterable<string>) {
     body += chunk;
-    if (body.length > maxBodyBytes) throw new Error(`request body over ${maxBodyBytes} bytes`);
+    if (body.length > limit) throw new Error(`request body over ${limit} bytes`);
   }
   return body;
 }

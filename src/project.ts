@@ -208,6 +208,11 @@ export const hasRemote = (project: Project): project is RemoteProject => project
 export interface SecretGrant { name: string; hosts: readonly string[] }
 /** The grant `gh`, and git through gh's credential helper, need to create GitHub repositories and push to them. */
 export const githubTokenGrant: SecretGrant = { name: "GH_TOKEN", hosts: ["api.github.com", "github.com"] };
+/**
+ * The access token of the harness's own Sign in with ChatGPT, for pi's `openai` provider. Its value is not in any
+ * node's secret file: the control plane holds it, refreshes it, and hands it to every probe.
+ */
+export const chatgptTokenGrant: SecretGrant = { name: "NEXUS_CHATGPT_TOKEN", hosts: ["api.openai.com"] };
 export type LoginKind = "claude" | "chatgpt";
 
 /**

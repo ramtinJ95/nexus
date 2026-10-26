@@ -68,6 +68,8 @@ const bakedDotfiles = "/opt/nexus/dotfiles";
 const imageLabel = "nexus.image";
 const checkpointFile = "nexus-checkpoint.json";
 const pollMs = 500;
+/** Each controller's limit, so a stuck one cannot hold the update past the control plane's 10 s wait for the probe. */
+const secretUpdateMs = 5_000;
 /** Measured in the pylon-vm slice: 3 GiB boots, 4, 8, 12 and 16 GiB pass the whole slice, and 2 GiB hangs at "ACPI: Core revision". */
 const minMemoryGiB = 3;
 /** The pi-sandbox instance name limit, which PylonId keeps to. */
@@ -573,6 +575,21 @@ export function createPylonVmBackend(options: PylonVmBackendOptions): VmBackend 
     guest(pylonId): Guest {
       instanceName(pylonId);
       return pylonGuest(pylonId, instanceDir(pylonId), sandbox);
+    },
+
+    async updateSecret(secret, value, signal) {
+      const instances = z.array(instanceSchema).parse(await sandbox({ action: "list", kind: "instances" }));
+      const limit = () => signal === undefined ? AbortSignal.timeout(secretUpdateMs) : AbortSignal.any([signal, AbortSignal.timeout(secretUpdateMs)]);
+      // A controller whose boot did not grant the secret answers that it does not hold it, which is no failure.
+      const failures = await Promise.all(instances.filter((instance) => instance.status.state === "running").map(async ({ name }) => {
+        try {
+          await sandbox({ action: "update-secret", name, secret, value }, limit());
+          return [];
+        } catch (err) {
+          return [{ pylonId: name as PylonId, reason: (err as Error).message }];
+        }
+      }));
+      return failures.flat();
     },
   };
 }

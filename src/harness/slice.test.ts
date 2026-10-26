@@ -21,6 +21,7 @@ import type { ExecutionEnv } from "@earendil-works/pi-durable/env";
 import { createEnvConformance } from "@earendil-works/pi-durable/testing";
 import { packagedDaemon } from "@earendil-works/pi-env";
 import { createDockerBackend } from "../docker-backend.ts";
+import { nodeSecrets } from "../probe/config.ts";
 import { startProbe, type Probe } from "../probe/server.ts";
 import type { NodeName, PylonId, TailnetNodeId } from "../protocol.ts";
 import type { ImageId } from "../images.ts";
@@ -73,7 +74,7 @@ before(async () => {
     auth: { controlPlane: controlPlaneId, peers: [] },
     whois: async () => controlPlaneId,
     backend,
-    secrets: { value: () => undefined, names: () => [] },
+    secrets: nodeSecrets({ value: () => undefined, names: () => [] }),
     log,
   });
   locator = { awaitRunning: async () => ({ node, host: "127.0.0.1", port: probe.port, nodeId: probeId }) };

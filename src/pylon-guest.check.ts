@@ -29,6 +29,7 @@ import { createEnvConformance } from "@earendil-works/pi-durable/testing";
 import { pylonEnvs } from "./harness/pylon-env.ts";
 import { pylonRepoPath } from "./harness/host.ts";
 import { fakeTailscale, nodeHost, viaGateway } from "./probe/fake-tailscale.ts";
+import { nodeSecrets } from "./probe/config.ts";
 import { startProbe } from "./probe/server.ts";
 import { connectProbe, type Job, type JobId, type NodeName, type PylonId, type TailnetNodeId } from "./protocol.ts";
 import { createPylonVmBackend } from "./pylon-vm-backend.ts";
@@ -62,7 +63,7 @@ const probe = await startProbe({
   auth: { controlPlane: controlPlaneId, peers: [] },
   whois: async () => controlPlaneId,
   backend,
-  secrets: { value: () => undefined, names: () => [] },
+  secrets: nodeSecrets({ value: () => undefined, names: () => [] }),
   log: (message) => console.log(`probe: ${message}`),
   previews: { gatewayPort, routesFile: join(stateRoot, `check-${run}-routes.json`), tailscale: tailscale.cli, get: viaGateway(() => `http://127.0.0.1:${gatewayPort}`).get },
 });

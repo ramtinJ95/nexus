@@ -265,6 +265,21 @@ test("a PID handed out again, or one from an earlier boot of the host, is a dead
   }
 });
 
+test("a secret update reaches every running pylon's controller, and reports by pylon the ones that fail, not the ones that do not hold it", async () => {
+  const { backend, instances } = await backendWith();
+  const holder = await fakeController(await leftInstance(instances, "pylon-holds", "running"), "pylon-holds", () => ({ held: true }));
+  const other = await fakeController(await leftInstance(instances, "pylon-other", "running"), "pylon-other", () => ({ held: false }));
+  await fakeController(await leftInstance(instances, "pylon-failing", "running"), "pylon-failing", () => { throw new Error("Sandbox is stopping, so update-secret waits until it runs again"); });
+  const paused = await fakeController(await leftInstance(instances, "pylon-paused", "stopped"), "pylon-paused");
+  paused.state.current = "stopped";
+  const failures = await backend.updateSecret("NEXUS_CHATGPT_TOKEN", "eyJ.second", signal());
+  const update = { action: "update-secret", secret: "NEXUS_CHATGPT_TOKEN", value: "eyJ.second" };
+  assert.deepEqual(holder.actions, [{ ...update, name: "pylon-holds" }]);
+  assert.deepEqual(other.actions, [{ ...update, name: "pylon-other" }]);
+  assert.deepEqual(paused.actions, [], "a paused pylon gets the value when it next boots");
+  assert.deepEqual(failures, [{ pylonId: "pylon-failing", reason: "Sandbox is stopping, so update-secret waits until it runs again" }]);
+});
+
 test("a spawn with previews on a node without a preview host fails as invalid and creates nothing", async () => {
   const { backend, instances } = await backendWith();
   await assert.rejects(backend.ensureRunning(bootOf("pylon-nohost"), { previews: [{ service: "web", httpsPort: 10100 }], overlay: [] }, signal()), { code: "invalid", message: /no previewHost/ });
