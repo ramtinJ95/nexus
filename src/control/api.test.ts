@@ -1924,6 +1924,43 @@ test("a Claude worker thread's page stream shows new entries during a turn, read
   assert.equal(s.streams.length, ended, "the reads stop with the turn");
 });
 
+test("a Claude worker's transcript streams to the CLI as its entries whole, then each read's new entries and the turn's start and end", async (t) => {
+  const s = await withClaude(t);
+  await writeFile(s.transcript, fixture.slice(0, 22).join(""));
+  const whole = (await s.call("GET", `/v1/threads/${s.thread.id}/conversation`)).body as ClaudeConversation;
+  const stream = s.events(`/v1/threads/${s.thread.id}/claude/events`);
+  t.after(() => stream.close());
+  assert.deepEqual(await stream.next(), { reset: true, session: claudeSession, entries: whole.entries, dropped: 0, working: false });
+
+  let sequence = 0;
+  const report = (kind: "session.turn-started" | "session.turn-ended") => s.registry.reportSession(node, { sequence: ++sequence, pylon: s.thread.pylonId, time: Date.now(), event: { kind, session: claudeSession } });
+  report("session.turn-started");
+  assert.deepEqual(await stream.next(), { reset: false, session: claudeSession, entries: [], dropped: 0, working: true }, "the turn's start");
+  await appendFile(s.transcript, fixture.slice(22, 25).join(""));
+  const appended: unknown[] = [];
+  for (let frame = await stream.next(); ; frame = await stream.next()) {
+    assert.deepEqual([frame.reset, frame.working], [false, true]);
+    appended.push(...frame.entries);
+    if (appended.length > 0) break;
+  }
+  report("session.turn-ended");
+  for (let frame = await stream.next(); frame.working; frame = await stream.next()) appended.push(...frame.entries);
+  const after = (await s.call("GET", `/v1/threads/${s.thread.id}/conversation`)).body as ClaudeConversation;
+  assert.deepEqual([...whole.entries, ...appended], after.entries, "the frames add up to the transcript, each entry once");
+
+  await writeFile(s.transcript, fixture.slice(0, 3).join(""));
+  report("session.turn-ended");
+  const replaced = await stream.next();
+  assert.equal(replaced.reset, true, "a replaced transcript starts over");
+  assert.deepEqual(replaced.entries, ((await s.call("GET", `/v1/threads/${s.thread.id}/conversation`)).body as ClaudeConversation).entries);
+
+  const harness = await s.call("GET", `/v1/threads/${s.thread.id}/events`);
+  assert.equal(harness.status, 409, "a Claude worker has no harness conversation to stream");
+  const other = await s.call("GET", `/v1/threads/${(await s.call("POST", "/v1/threads", { project: "acme", title: "Agent" })).body.id}/claude/events`);
+  assert.deepEqual(other.status, 409);
+  assert.match(other.body.error, /has no Claude worker/);
+});
+
 test("a review needs the GitHub token's loop, and landing, at its start or later, needs a deployer", async (t) => {
   const off = await withThread(t);
   const refused = await off.call("POST", `/v1/threads/${off.thread.id}/review`, {});

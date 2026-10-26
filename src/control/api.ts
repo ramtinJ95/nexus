@@ -9,9 +9,10 @@ import { canDeploy, commitSchema, isReporter, releaseView, reportSchema, resolve
  * creates a harness conversation with the thread, forwards messages, aborts and retries to it, and serves its view. A
  * Claude worker's messages are typed into its session, and its view is its transcript as claude-conversation.ts reads it.
  *
- * A thread's conversation also streams, as server-sent events: its view for the CLI, and the thread page's
- * conversation for the dashboard. Each stream holds one watch, on the harness or on a Claude worker's transcript, and
- * sends what changed since its last event, so a slow client gets fewer, larger events and never holds the harness up.
+ * A thread's conversation also streams, as server-sent events: its view, or a Claude worker's transcript, for the
+ * CLI, and the thread page's conversation for the dashboard. Each stream holds one watch, on the harness or on a
+ * Claude worker's transcript, and sends what changed since its last event, so a slow client gets fewer, larger
+ * events and never holds the harness up.
  *
  * A thread's pylon also gives a terminal on its Herdr session, over a WebSocket on the attach route, which
  * control/attach.ts serves.
@@ -40,7 +41,7 @@ import type { ClaudeSent, NodeRecord, Output, PortRange, Preview, Registry, Sess
 import { dashboard, liveFrames } from "./dashboard.ts";
 import { attachScript, checkoutDir, claudeTextProblem, herdrSession } from "../sessions.ts";
 import { claudeConversations } from "./claude-conversation.ts";
-import type { ClaudeConversation } from "../claude-transcript.ts";
+import type { ClaudeConversation, ClaudeEntry } from "../claude-transcript.ts";
 import { checkoutReader, CheckoutRefused, contentType, pathsFit, type CheckoutReader, type RefusalKind } from "../checkout-files.ts";
 import { attachRoute, parseAttachQuery } from "../attach-wire.ts";
 import type { PullRequest } from "./github.ts";
@@ -167,6 +168,29 @@ export function viewFrames(): Frames {
     };
     sent = view;
     return Object.keys(frame).length === 0 ? null : frame;
+  };
+}
+
+/**
+ * One event of `GET /v1/threads/:id/claude/events`. The first, and any after the transcript was replaced, has
+ * `reset` and every entry kept. Each later one has the entries appended since the one before.
+ */
+export interface ClaudeFrame { reset: boolean; session: string | null; entries: readonly ClaudeEntry[]; dropped: number; working: boolean }
+
+/** The frames of one client of a Claude worker's transcript stream, or null when no entry came and `working` held. */
+export function claudeFrames(): Frames<ClaudeConversation> {
+  let sent: { session: string | null; total: number; last: string | undefined; working: boolean } | null = null;
+  return (view) => {
+    const total = view.dropped + view.entries.length;
+    // Where the entries not sent yet start. The registry keeps no generation, so a replaced transcript shows as a
+    // different entry where the last one sent stood.
+    const start = sent === null ? -1 : sent.total - view.dropped;
+    const appended = sent !== null && sent.session === view.session && start >= 0 && start <= view.entries.length
+      && (sent.total === 0 || (start > 0 && JSON.stringify(view.entries[start - 1]) === sent.last));
+    const entries = appended ? view.entries.slice(start) : view.entries;
+    if (appended && entries.length === 0 && view.working === sent!.working) return null;
+    sent = { session: view.session, total, last: JSON.stringify(view.entries.at(-1)), working: view.working };
+    return { reset: !appended, session: view.session, entries, dropped: view.dropped, working: view.working } satisfies ClaudeFrame;
   };
 }
 
@@ -305,6 +329,12 @@ export async function startApi(options: ApiOptions): Promise<Api> {
 
   /** A Claude worker thread has no harness conversation, so nothing for it ever reaches the harness. */
   const isClaude = (t: Thread) => registry.claudeWorker(t.id) !== undefined;
+
+  function claudeWorker(t: Thread): Thread {
+    refuseDeleted(t);
+    if (!isClaude(t)) throw new HttpError(409, `thread ${t.id} has no Claude worker`);
+    return t;
+  }
 
   /** An archived thread's pylon stays paused, so its agent could not run a tool. */
   function runnable(t: Thread): Thread {
@@ -469,9 +499,10 @@ export async function startApi(options: ApiOptions): Promise<Api> {
     void watch.closed.then(end);
   }
 
-  /** Each stream's route, and how it serves a thread. A Claude worker's conversation streams to the dashboard only. */
+  /** Each stream's route, and how it serves a thread. */
   const streams: readonly [RegExp, (res: ServerResponse, t: Thread) => Promise<void>][] = [
     [/^\/v1\/threads\/([^/]+)\/events$/, (res, t) => stream(res, conversing(t), () => harness.watch(t.id), viewFrames())],
+    [/^\/v1\/threads\/([^/]+)\/claude\/events$/, (res, t) => stream(res, claudeWorker(t), () => claude.watch(t), claudeFrames())],
     [/^\/threads\/([^/]+)\/stream$/, (res, t) => isClaude(t)
       ? stream<ClaudeConversation>(res, refuseDeleted(t), () => claude.watch(t), liveFrames(t, registry.claudeWorker(t.id)?.model ?? null))
       : stream<ConversationView>(res, conversing(t), () => harness.watch(t.id), liveFrames(t))],
