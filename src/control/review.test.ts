@@ -371,6 +371,19 @@ test("a failed check the builder answers without a push goes to the person at on
   assert.equal(f.checkThreads.length, 1);
 });
 
+test("a failed check answered as fixed with no push goes to the person once the push grace ends", async (t) => {
+  const f = fixture(t);
+  f.check = { kind: "done", passed: false, output: "1 test failed" };
+  const loop = await approved(f, null);
+  f.reply(f.builder, answers(f.review(), [{ id: "CHECK", action: "fixed", reason: "Fixed the test." }]));
+  await loop.poll();
+  assert.equal(f.review().phase.kind, "fixing", "a push may land a little after the turn");
+  f.tick(10 * 60_000);
+  await loop.poll();
+  assert.deepEqual(f.review().phase, { kind: "needs-person", reasons: [`.nexus/check failed at ${head1}, and the builder pushed nothing for it: Fixed the test.`, "The check's output:\n1 test failed"] });
+  assert.equal(f.sent.length, 2, "no reminder, and no round for the reviewer");
+});
+
 test("a check that fails again at a head where it failed before goes to the person", async (t) => {
   const f = fixture(t);
   f.check = { kind: "done", passed: false, output: "1 test failed" };

@@ -308,7 +308,7 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
       if (fixed && snapshot.detail.head === round.head) {
         // A push can land on GitHub a little after the turn that made it ends.
         if (now() - (builder.lastReplyAt ?? 0) < pushGraceMs) return r;
-        return waitOn(r, builder, "builder", `You answered that you fixed findings, but the pull request's head is still ${round.head}. Push the fixes.`);
+        if (round.check?.passed !== false) return waitOn(r, builder, "builder", `You answered that you fixed findings, but the pull request's head is still ${round.head}. Push the fixes.`);
       }
       // The reviewer cannot change a check's result, so a failed check at an unmoved head is the person's.
       if (round.check?.passed === false && snapshot.detail.head === round.head) {
