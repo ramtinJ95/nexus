@@ -38,8 +38,9 @@ const bin = join(root, "bin");
 mkdirSync(bin, { recursive: true });
 const image = new URL("../../../images/pylon/", import.meta.url);
 const helper = new URL("../../../src/checkout-files.py", import.meta.url).pathname;
-for (const file of ["nexus-claude-hook", "nexus-heartbeat.ts", "nexus-turn.ts"]) {
-  const staged = readFileSync(new URL(file, image), "utf8").replaceAll("/home/user/workspace/repo", repo).replaceAll("/usr/local/lib/nexus/checkout-files.py", helper);
+// The hook reports only under the pylon user's HOME, which the stack moves, so the staged copy compares with the moved one.
+for (const file of ["nexus-claude-hook", "nexus-heartbeat.ts", "nexus-turn.ts", "nexus-outbox.ts"]) {
+  const staged = readFileSync(new URL(file, image), "utf8").replaceAll("/home/user/workspace/repo", repo).replaceAll("/usr/local/lib/nexus/checkout-files.py", helper).replaceAll("userInfo().homedir", "process.env.HOME");
   writeFileSync(join(bin, file), staged, { mode: 0o755 });
 }
 const hookPath = join(bin, "nexus-claude-hook");

@@ -1,6 +1,7 @@
 # Usage-limit stops verification
 
-Verified in this task's pylon on 2026-10-26, on branch `usage-limit-stops`, with Claude
+Verified in this task's pylon on 2026-10-26, on branch `usage-limit-stops` rebased on main
+with #93 and #96, with Claude
 Code 2.1.308 and Herdr 0.9.5. No live control plane, node, image, Claude subscription or
 other thread was touched.
 
@@ -37,7 +38,11 @@ a minute.
 - The worker reaches `fake-api.mjs` on 18767 with a fake login. The driver switches the fake
   API between the limit and a short streamed reply.
 - The hooks are the image's, with this branch's StopFailure hook. `HOOKS=old` leaves it out,
-  as the current image does.
+  as the current image does. They deliver through the image's outbox (#96) to the stack's
+  bridge. The hook reports only under the pylon user's HOME, which the stack moves, so the
+  staged copy compares with the moved HOME. The stack must start without Claude Code's
+  `CLAUDE_*` variables, as a Nexus worker does, or the hook takes the worker for a session
+  nested in this pylon's own Claude and reports nothing.
 - The opt-in resumer runs every 2 s through the real `agentInbox` and `runCommand`. Its grace
   is 5 s, not 3 minutes, so a run takes minutes.
 
@@ -59,13 +64,15 @@ mirrors are not reachable, so there are no screenshots.
 - `01-home.html`, `02-thread.html`. The dashboard's home row and the thread page show the
   state "stopped on its usage limit until 06:31 UTC" with the bad tone (`drive.log` lists
   each page's states).
-- `03-events.jsonl`, `03-conversation.txt`, `03-continued.html`. Six seconds after the
+- `03-events.jsonl`, `03-conversation.txt`, `03-continued.html`. Seven seconds after the
   reset, the resumer typed its attributed continue once. The `usage-limit.continued` event
   names the session, the stop, the reset and the request ID. The turn it started answered,
   and attention went `working` then `reply`. Ten seconds later there was still one event.
-  The thread page shows "new reply". The StopFailure hook reported `session.turn-ended`
-  380 ms after the turn started. Attention showed `reply` for 762 ms, until the transcript
-  read found the stop.
+  The thread page shows "new reply". The StopFailure hook reported `session.turn-ended`,
+  which the outbox delivered 2 s after the hook ran. The transcript read had already found
+  the stop by then, so attention went from `working` straight to `limited`. When the turn
+  end comes first, as in a run before the rebase, without the outbox, attention shows
+  `reply` until the read, 762 ms that time.
 - Several minutes after the reset, the thread still ended on that one continue. Claude
   Code's own continue did not follow, because the Nexus prompt had already started a turn.
 - `04-send.txt`, `04-conversation.txt`. A second thread, whose reset was an hour away so the
@@ -74,7 +81,7 @@ mirrors are not reachable, so there are no screenshots.
 - `05-archived.txt`. A third thread, archived while stopped, still shows `limited` 20 s past
   its reset and got no continue.
 - `06-old-hooks.txt`. With `HOOKS=old`, no turn end is ever reported. The read that found the
-  stop ended the session's lease. The thread went from `working` to `limited` in 4 s, with no
+  stop ended the session's lease. The thread went from `working` to `limited` in 5 s, with no
   `sessionTurnRunning` and no reply recorded.
 
 A first run showed a flash of `limited` after the continued turn ended, while the read of

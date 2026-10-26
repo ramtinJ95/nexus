@@ -1,8 +1,8 @@
 > /pstack:poteto-mode Write hello.txt containing hi, then say done.
 
-[error] You've hit your session limit · resets 6:31am (UTC)
+[error] You've hit your session limit · resets 6:41am (UTC)
 
-[notice] Usage limit reached · continuing automatically at 6:31am · esc to cancel
+[notice] Usage limit reached · continuing automatically at 6:41am · esc to cancel
 
 [turn] 0s
 
@@ -10,4 +10,4 @@
 
 Continuing where I stopped.
 
-[turn] 0s
+[turn] 1s
