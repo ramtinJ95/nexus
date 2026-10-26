@@ -290,6 +290,8 @@ node src/agent-setup.ts
 git commit -m "chore(image): refresh the pylon agent setup" images/pylon/agent-setup/manifest.json && git push
 ```
 
+The capture also takes pi-shepherdr's agent profiles from `~/.pi/agent/shepherdr/profiles/`, so a pylon's shepherdr `reviewer` is the one on this Mac. Like skills, each profile ships from the dotfiles repo, so it must be committed and pushed there. A profile whose `prompt` or `prepare` names a file outside its directory, whose `pi_args` names a path on this Mac, or whose `prepare` file imports anything but `node:` modules and files in its directory cannot ship either.
+
 The capture prints what ships and what it leaves out. When something cannot ship, such as a skill not committed and pushed in the dotfiles repo or a plugin older than its marketplace, it writes nothing and says how to fix each problem. `docs/contracts/usage.md` describes it.
 
 Then deploy the commit that carries the manifest with `nexus deploy main --wait`, because the control plane builds the recipe of the release it runs. From a Mac in the control plane's `deployers`, with CLI 0.22.0:
@@ -385,6 +387,36 @@ Discovery watches `origin/` branch outputs for projects with a github.com reposi
 The review loop (`nexus review`) uses the same token file and is off without it. A review that stops at approval only reads, as the PR watch does. A landing (`nexus review --land` or `nexus land`) also merges, with `PUT /repos/<repo>/pulls/<n>/merge`, which needs write access to the repository's contents and pull requests. A classic token with the `repo` scope, as described above, has it. A fine-grained or otherwise read-only token does not, and a landing then holds for the person with GitHub's answer instead of merging. Widening the token is a credential change, which the [merge policy](../docs/merge-policy.md) reserves for the person: install the wider token in `/etc/nexus/github-token` as above and restart the control plane. Merges then appear on GitHub as the token's owner.
 
 Landing a Nexus pull request deploys it, so the caller who asks for the landing must be in `deployers`, as for `nexus deploy`. The control plane then sets the desired release itself, recorded as requested by `nexus review <id>`, and rolls back to the previous desired release if the fleet does not report healthy within 30 minutes, then waits for the rollback to report healthy before saying so. `.nexus/check` runs in a short-lived check thread of the same project, and Nexus's own runs `npm ci`, so a project whose reviews land needs `registry.npmjs.org` among its allowed hosts.
+
+### A ChatGPT login for a Claude worker's reviewer
+
+A Claude worker has a shepherdr `reviewer` check its diff before each pull request, as PYLON.md tells it. The reviewer is pi on `openai-codex`, so it needs a ChatGPT login and the hosts `chatgpt.com` and `auth.openai.com`. Without them the reviewer stops with `Provider is not configured: openai-codex`, and Claude says the review was skipped. Granting the login is your decision. [The design](../docs/design.md#a-chatgpt-login-for-a-claude-workers-reviewer) compares this login with two ways that keep the token out of the pylon, which are not built yet.
+
+Once, after the change that ships shepherdr merges, on the Mac:
+
+1. Commit the profiles to the dotfiles repo. If `git status` in that repo lists `common-config/common-dotfiles/pi/.pi/agent/shepherdr/` as untracked, `~/.pi/agent` already links into the repo, so add only its `profiles` directory. Otherwise move the profiles into the repo and restow:
+
+	```sh
+	cd <the dotfiles repo>
+	mkdir -p common-config/common-dotfiles/pi/.pi/agent/shepherdr
+	mv ~/.pi/agent/shepherdr/profiles common-config/common-dotfiles/pi/.pi/agent/shepherdr/
+	scripts/dotfiles restow mac
+	git add common-config/common-dotfiles/pi/.pi/agent/shepherdr/profiles
+	git commit -m "chore(pi): track the shepherdr profiles" && git push
+	```
+
+	Leave `~/.pi/agent/shepherdr/.profiles-initialized` out. It is pi-shepherdr's own marker, and the image writes its own.
+2. Capture and build, as [Build the pylon image](#build-the-pylon-image) says. The dry run should list `shepherdr@claude-mods` among the Claude plugins and count the profiles in its `pi` line.
+
+For each project whose Claude workers should review, allow the login. `--login` replaces the list, so name every login the project keeps:
+
+```sh
+nexus project edit <project> --login claude --login chatgpt
+```
+
+That adds `auth.openai.com`, `chatgpt.com` and `api.openai.com` to the project's allowlist. Threads started after the edit get it. An existing thread keeps the grants it booted with, even across an archive and an unarchive.
+
+For each thread, sign pi in once. Run `nexus attach <thread>`, open a new tab in Herdr, and run `pi`. Enter `/login`, choose OpenAI (ChatGPT Plus/Pro), then the device-code method. Open the address it shows on another device and enter the code. Then enter `/quit`. The access and refresh tokens stay in that pylon's `~/.pi/agent/auth.json`, where its agents can read them, until the thread is deleted.
 
 ## Git identity and editable projects
 

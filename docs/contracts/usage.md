@@ -177,7 +177,7 @@ The recipe lives in this repo under `images/pylon/`, and the control plane build
 
 ### Refreshing the pylon's agent setup
 
-The image bakes the Claude Code plugins, skills, pi packages and pi extensions this Mac runs, from `images/pylon/agent-setup/manifest.json`. The manifest names refs, never file contents: the dotfiles repo and each Claude Code marketplace at a commit, and each plugin and npm package at its exact version. The capture on the Mac writes it:
+The image bakes the Claude Code plugins, skills, pi packages, pi extensions and pi-shepherdr profiles this Mac runs, from `images/pylon/agent-setup/manifest.json`. The manifest names refs, never file contents: the dotfiles repo and each Claude Code marketplace at a commit, and each plugin and npm package at its exact version. The capture on the Mac writes it:
 
 ```sh
 node src/agent-setup.ts --dry-run                  # what would ship, what is left out and why, and the image ID it gives
@@ -185,7 +185,7 @@ node src/agent-setup.ts                            # writes the manifest, and no
 node src/agent-setup.ts --leave-out skill:drafts   # leave one item out for this run, by <kind>:<name>
 ```
 
-It reads `~/.claude`, `~/.pi` and `~/.agents`, and the dotfiles repo they link into. It shows that each pinned commit is on its remote with `git ls-remote`, the clone's own history, or GitHub's compare API, and never fetches, so it writes nothing outside the nexus checkout. Running it twice on an unchanged Mac writes the same bytes, so the image ID does not move. The leave-outs it always applies, each printed with its reason, are in `leaveOuts` in [`src/agent-setup.ts`](../../src/agent-setup.ts): the Nexus plugin and the pi-nexus package, which are recursive inside a pylon, and the skills and pi extensions that work only on the Mac. A skill that `skillOverrides` turns off for Claude Code goes to pi only.
+It reads `~/.claude`, `~/.pi` and `~/.agents`, and the dotfiles repo they link into. It shows that each pinned commit is on its remote with `git ls-remote`, the clone's own history, or GitHub's compare API, and never fetches, so it writes nothing outside the nexus checkout. Running it twice on an unchanged Mac writes the same bytes, so the image ID does not move. The leave-outs it always applies, each printed with its reason, are in `leaveOuts` in [`src/agent-setup.ts`](../../src/agent-setup.ts): the Nexus plugin and the pi-nexus package, which are recursive inside a pylon, and the skills and pi extensions that work only on the Mac. A skill that `skillOverrides` turns off for Claude Code goes to pi only. Each directory of `~/.pi/agent/shepherdr/profiles/` ships from the dotfiles repo like a skill, and the image installs exactly those profiles, so pi-shepherdr adds none of its bundled ones. A profile whose `prompt` or `prepare` is not a file in its directory, whose `pi_args` names an absolute or `~` path, or whose `prepare` file imports anything but a `node:` module or a file in its directory is refused. Leave one out with `--leave-out shepherdr-profile:<name>`.
 
 When something would ship but the image build could not fetch exactly what this Mac runs, the capture writes nothing, lists every problem and exits 1:
 
