@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 import { createHash } from "node:crypto";
 import { mkdir, rm } from "node:fs/promises";
-import { homedir } from "node:os";
+import { homedir, userInfo } from "node:os";
 import { join } from "node:path";
-import { heartbeatDue, holdTurnEnd, reportedKind, reportsIntoThread, shellsRunning } from "./nexus-heartbeat.ts";
+import { claudeEnviron, heartbeatDue, holdTurnEnd, reportedKind, reportsIntoThread, shellsRunning } from "./nexus-heartbeat.ts";
 import { claudeTurn, snapshotTurn } from "./nexus-turn.ts";
 import { spawn } from "node:child_process";
 
@@ -44,7 +44,7 @@ if (process.argv[2] === "hold") {
   await holdTurnEnd(() => shellsRunning(session, shells), (kind) => send("/usr/local/bin/nexus", ["event", kind, "--session", session, "--at", stamp]));
   process.exit(0);
 }
-if (!await reportsIntoThread()) process.exit(0);
+if (!reportsIntoThread(process.env, await claudeEnviron(process.env.CLAUDE_PID), userInfo().homedir)) process.exit(0);
 const session = await report().catch(() => null);
 // A turn whose session is unknown reports no start, so its snapshot is named for none, and the previous turn's
 // snapshot cannot pass for its own.

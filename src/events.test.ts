@@ -125,23 +125,27 @@ test("a background shell runs while any process writes to its output file", { sk
   assert.equal(await shellsRunning("c1", ["b6fh14jr7"]), false);
 });
 
-test("only a Claude started outside other Claude sessions, under the pylon user's HOME, reports into the thread", async (t) => {
+test("only a Claude started outside other Claude sessions, under the pylon user's HOME, reports into the thread", async () => {
   const { reportsIntoThread } = await import("../images/pylon/nexus-heartbeat.ts");
+  const home = "/home/user";
+  const primary = "HOME=/home/user\0HERDR_ENV=1\0";
+  const nested = "HOME=/home/user\0CLAUDE_CODE_SESSION_ID=37c5ec30-c691-4b40-992d-75e5cfd4eebc\0CLAUDE_PID=3445\0";
+  assert.equal(reportsIntoThread({ HOME: home, CLAUDE_CODE_SESSION_ID: "336789b3" }, primary, home), true, "Claude sets the variable for its own hooks too");
+  assert.equal(reportsIntoThread({ HOME: home }, nested, home), false, "a Claude another session's tool started");
+  assert.equal(reportsIntoThread({ HOME: "/tmp/verify/home" }, primary, home), false, "a Claude under an isolated HOME");
+  assert.equal(reportsIntoThread({ HOME: home }, "", home), true, "a Claude whose start is not known reports as before");
+});
+
+test("the environment a Claude started with is read from its process", { skip: process.platform !== "linux" && "reads /proc" }, async (t) => {
+  const { claudeEnviron } = await import("../images/pylon/nexus-heartbeat.ts");
   const { spawn } = await import("node:child_process");
   const { once } = await import("node:events");
-  const claude = async (env: NodeJS.ProcessEnv) => {
-    const child = spawn("sleep", ["30"], { env: { PATH: process.env.PATH, ...env } });
-    t.after(() => child.kill());
-    await once(child, "spawn");
-    return String(child.pid);
-  };
-  const home = "/home/user";
-  const primary = await claude({});
-  const nested = await claude({ CLAUDE_CODE_SESSION_ID: "37c5ec30-c691-4b40-992d-75e5cfd4eebc", CLAUDE_PID: "3445" });
-  assert.equal(await reportsIntoThread({ HOME: home, CLAUDE_PID: primary, CLAUDE_CODE_SESSION_ID: "336789b3" }, home), true);
-  assert.equal(await reportsIntoThread({ HOME: home, CLAUDE_PID: nested }, home), false, "a Claude another session's tool started");
-  assert.equal(await reportsIntoThread({ HOME: "/tmp/verify/home", CLAUDE_PID: primary }, home), false, "a Claude under an isolated HOME");
-  assert.equal(await reportsIntoThread({ HOME: home }, home), true, "a Claude that does not name its process reports as before");
+  const child = spawn("sleep", ["30"], { env: { PATH: process.env.PATH, CLAUDE_CODE_SESSION_ID: "37c5ec30" } });
+  t.after(() => child.kill());
+  await once(child, "spawn");
+  assert.match(await claudeEnviron(String(child.pid)), /(^|\0)CLAUDE_CODE_SESSION_ID=37c5ec30\0/);
+  assert.equal(await claudeEnviron(undefined), "");
+  assert.equal(await claudeEnviron("0"), "");
 });
 
 test("filtered reads advance the scanned watermark through retention rollover", () => {

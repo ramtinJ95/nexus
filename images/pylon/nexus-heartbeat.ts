@@ -1,5 +1,4 @@
 import { mkdir, readdir, readFile, readlink, rm, stat, writeFile } from "node:fs/promises";
-import { userInfo } from "node:os";
 
 export const heartbeatIntervalMs = 5 * 60_000;
 /** Long enough for a slow build or test suite, while a dev server's turn still ends within the hour. */
@@ -52,14 +51,17 @@ export async function shellsRunning(session: string, shells: readonly string[], 
 }
 
 /**
- * Whether the Claude running this hook is one Nexus started, under the pylon user's own HOME. Claude Code puts
- * CLAUDE_CODE_SESSION_ID in the environment of everything it runs, so a Claude started with it runs inside another
- * session, such as one a worker starts to verify its work. CLAUDE_PID names the Claude running the hook.
+ * Whether a Claude reports into the thread: one Nexus started, under the pylon user's own HOME. Claude Code puts
+ * CLAUDE_CODE_SESSION_ID in the environment of everything it runs, so a Claude whose process started with it runs
+ * inside another session, such as one a worker starts to verify its work.
  */
-export async function reportsIntoThread(env: NodeJS.ProcessEnv = process.env, home = userInfo().homedir): Promise<boolean> {
-  if (env.HOME !== home) return false;
-  const environ = await readFile(`/proc/${env.CLAUDE_PID}/environ`, "utf8").catch(() => "");
-  return !environ.split("\0").some((variable) => variable.startsWith("CLAUDE_CODE_SESSION_ID="));
+export function reportsIntoThread(env: NodeJS.ProcessEnv, claudeEnviron: string, home: string): boolean {
+  return env.HOME === home && !claudeEnviron.split("\0").some((variable) => variable.startsWith("CLAUDE_CODE_SESSION_ID="));
+}
+
+/** The environment the Claude running a hook started with, which CLAUDE_PID names, or nothing when it is not known. */
+export async function claudeEnviron(pid: string | undefined, proc = "/proc"): Promise<string> {
+  return pid === undefined ? "" : await readFile(`${proc}/${pid}/environ`, "utf8").catch(() => "");
 }
 
 /** A lock covers the timestamp check too, so parallel tool hooks cannot all report at once. */
