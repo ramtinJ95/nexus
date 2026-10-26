@@ -443,7 +443,7 @@ test("a run of tool calls folds into a line that says what it did, over rows whe
     "Ran a command ›",
     `› bash npm test 40 lines ✓ npm test ${long.replace(/\n/g, " ")}`,
     "One more.",
-    "Ran a command, edited a file, read a file 1 failed ›",
+    "Ran a command, changed a file, read a file 1 failed ›",
     "› bash git status 2 lines exit 128 git status fatal: not a git repository Command exited with code 128",
     "› edit src/a.ts +1 −2 ✓ src/a.ts − const a = 1; − const b = 2; + const a = 2;",
     `› read src/b.ts no result src/b.ts { "offset": 10 } No output.`,
@@ -467,13 +467,37 @@ test("a fold counts each kind of call, a file once however often it is read, and
   transcript.messages.push(assistant([{ type: "text", text: "Now the rest." }, bash("c1", "ls"), bash("c2", "pwd"), bash("c3", "id")]), result("c1", "a"), result("c2", "b"), result("c3", "c"));
 
   const { rows, open } = conversationOf((await s.call("GET", `/threads/${fix.id}`)).text);
-  assert.equal(rows[1], "Read 2 files, searched, ran 2 commands ›");
-  assert.equal(rows[8], "Read 2 files, searched, ran 2 commands 1 failed ›");
+  assert.equal(rows[1], "Ran 2 commands, read 2 files, searched the code ›");
+  assert.equal(rows[8], "Ran 2 commands, read 2 files, searched the code 1 failed ›");
   assert.equal(rows[14], "Now the rest.");
   assert.equal(rows[15], "Ran 3 commands ›");
   assert.equal(rows[16], "› bash ls 1 line ✓ ls a");
   assert.deepEqual(open.filter(([id]) => String(id).startsWith("steps-")), [["steps-a1", false], ["steps-b1", true], ["steps-c1", false]], "a fold with a failure starts open");
   assert.deepEqual(open.filter(([id]) => ["tool-b4", "tool-a4"].includes(String(id))), [["tool-a4", false], ["tool-b4", true]]);
+});
+
+test("a fold says what its calls did by action, weightiest first, a changed file once, and counts the tools past three actions", async (t) => {
+  const s = await seeded(t);
+  const fix = await s.start("acme", "Fix checkout");
+  s.fake.transcript(fix.id).messages.push(
+    { role: "user", content: "Fix it", timestamp: 0 },
+    assistant([
+      call("a1", "read", { path: "src/a.ts" }), call("a2", "edit", { path: "src/a.ts", edits: [{ oldText: "a", newText: "b" }] }), call("a3", "write", { path: "src/a.ts", content: "b" }),
+      bash("a4", "npm test"), call("a5", "write", { path: "src/b.ts", content: "c" }), call("a6", "grep", { pattern: "b" }),
+      call("a7", "lint", {}), call("a8", "deploy", {}), call("a9", "lint", {}),
+    ]),
+    assistant([{ type: "text", text: "Fixed." }]),
+    assistant([bash("b1", "ls"), call("b2", "find", { pattern: "*.ts" }), call("b3", "frob", {})]),
+    assistant([], "aborted"),
+    assistant([bash("c1", "pwd"), call("c2", "read", { path: "src/a.ts" }), call("c3", "grep", { pattern: "x" }), call("c4", "ls", { path: "src" }), call("c5", "frob", {})]),
+  );
+  const { rows } = conversationOf((await s.call("GET", `/threads/${fix.id}`)).text);
+  assert.deepEqual(rows.filter((row) => row.endsWith("›") && !row.startsWith("›")), [
+    "Changed 2 files, ran a command, read a file, used 3 other tools ›",
+    "Ran a command, searched the code, used frob ›",
+    "Ran a command, read a file, searched the code 2 times, used another tool ›",
+  ]);
+  assert.ok(rows.includes("! Aborted."), "a notice between two runs stays between their folds");
 });
 
 test("a running turn shows its tool's output so far, the partial answer, queued messages and what the run has done", async (t) => {
@@ -738,7 +762,7 @@ test("a tool call's expanded body shows its whole command, path or pattern", asy
   const body = (id: string) => /<pre class="t-full">([^<]*)<\/pre>/.exec(html.split(`id="tool-${id}"`)[1]!)![1]!;
   assert.equal(body("c1"), command.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;"), "the multiline command is whole and escaped");
   assert.equal(body("c2"), "a|b&lt;c&gt;");
-  assert.equal(conversationOf(html).rows[0], "Ran a command, searched ›");
+  assert.equal(conversationOf(html).rows[0], "Ran a command, searched the code ›");
   assert.equal(conversationOf(html).rows[2], `› grep a|b<c> 1 line ✓ a|b<c> { "path": "src" } src/a.ts:1`);
 });
 
@@ -925,7 +949,7 @@ test("a Claude worker's transcript reads as its conversation: prompts by who sen
   const { rows, open, dock } = conversationOf(html);
   assert.deepEqual(rows, [
     "You Write hello.py, then count its lines",
-    "Wrote a file, ran a command, ran a subagent 1 failed ›",
+    "Changed a file, ran a command, ran a subagent 1 failed ›",
     '› Write /repo/hello.py +1 −0 ✓ /repo/hello.py + print("hi")',
     "› Bash false 1 line exit 1 false Exit code 1",
     '› Agent Count lines 1 line ✓ Count lines Count the lines of hello.py { "subagent_type": "general-purpose" } Started in the background Background task completed: Agent "Count lines" finished It has 1 line.',
@@ -977,6 +1001,27 @@ test("a Claude worker that works shows its turn's call running, the turn's clock
   assert.equal(html.split(`<time data-since="${since}">`).length - 1, 3, "the run bar, the sidebar row and the inspector tick the same clock");
   assert.doesNotMatch(html, /data-action="abort"/);
   assert.match(html, /placeholder="Queue for Claude…"/);
+});
+
+test("a Claude worker's folds say what their calls did by action, a changed file once, and count the tools past three actions", async (t) => {
+  const s = await seeded(t);
+  let id = 0;
+  const tool = (name: string, input: Record<string, unknown> = {}): ClaudeEntry => ({ kind: "tool", at: id, id: `t${++id}`, name, input });
+  const thread = await claudeThread(s, [
+    { kind: "prompt", at: 0, text: "Fix it", from: "person" },
+    tool("Edit", { file_path: "/r/a.ts", old_string: "a", new_string: "b" }), tool("MultiEdit", { file_path: "/r/a.ts", edits: [] }), tool("Write", { file_path: "/r/a.ts", content: "b" }),
+    tool("Write", { file_path: "/r/b.ts", content: "c" }), tool("Bash", { command: "npm test" }), tool("Bash", { command: "npm test" }), tool("Bash", { command: "git status" }),
+    tool("Agent", { description: "Review" }), tool("Read", { file_path: "/r/a.ts" }), tool("Agent", { description: "Check" }), tool("TodoWrite"), tool("WebSearch", { query: "q" }),
+    tool("WebFetch", { url: "https://example.com" }), tool("mcp__x"),
+    { kind: "notice", at: 1, tone: "error", text: "Interrupted" },
+    tool("Read", { file_path: "/r/a.ts" }), tool("Read", { file_path: "/r/a.ts" }), tool("Read", { file_path: "/r/b.ts" }), tool("Grep", { pattern: "x" }), tool("Glob", { pattern: "*.ts" }), tool("WebSearch", { query: "r" }),
+  ]);
+  const { rows } = conversationOf((await s.call("GET", `/threads/${thread.id}`)).text);
+  assert.deepEqual(rows.filter((row) => row.endsWith("›") && !row.startsWith("›")), [
+    "Changed 2 files, ran 3 commands, ran 2 subagents, used 5 other tools ›",
+    "Read 2 files, searched the code 2 times, searched the web ›",
+  ]);
+  assert.ok(rows.includes("! Interrupted"), "the interrupt stays between the two folds");
 });
 
 test("a turn's length reads as a padded clock: seconds, then minutes and seconds, then hours and minutes", async (t) => {
