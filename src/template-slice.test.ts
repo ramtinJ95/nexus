@@ -193,8 +193,8 @@ async function pylonVmFixture(): Promise<TemplateFixture> {
 const fixture = process.env["NEXUS_SLICE_BACKEND"] === "pylon-vm" ? await pylonVmFixture() : await dockerFixture();
 const project = `tslice-${run}` as ProjectId;
 const key = { project, image: fixture.image, setupHash: createHash("sha256").update(run).digest("hex") };
-const built: TemplateId = templateIdOf(key, Date.now());
-const broken: TemplateId = templateIdOf({ ...key, setupHash: createHash("sha256").update(`${run} broken`).digest("hex") }, Date.now());
+const built: TemplateId = templateIdOf(key, nodes.a, Date.now());
+const broken: TemplateId = templateIdOf({ ...key, setupHash: createHash("sha256").update(`${run} broken`).digest("hex") }, nodes.a, Date.now());
 const inputs = (preSetup: string): TemplateBuildInputs => ({ key, repo: fixture.repo, preSetup, allowedHosts: fixture.allowedHosts, resources: fixture.resources });
 
 const probes = {} as Record<Side, Probe>;

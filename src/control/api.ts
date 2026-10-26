@@ -35,7 +35,7 @@ import { effectiveAllowedHosts, gitIdentitySchema, gitUrl, linkedName, reservedP
 import type { CommandResult, NodeName, ProbeClient, ProbeError, PylonCommand, PylonId, TailnetNodeId } from "../protocol.ts";
 import type { ConversationView, EntryRecord, JsonObject } from "@earendil-works/pi-durable";
 import type { HarnessHost } from "../harness/host.ts";
-import { pinsSchema, type ImageId, type ImageManifest } from "../images.ts";
+import { pinsSchema, type ImageId, type ImageManifest, type ProjectMirror } from "../images.ts";
 import type { Whois } from "../tailscale.ts";
 import type { ClaudeSent, NodeRecord, Output, PortRange, Preview, Registry, Session, Thread, ThreadId } from "./registry.ts";
 import { dashboard, liveFrames } from "./dashboard.ts";
@@ -72,6 +72,8 @@ export interface ApiOptions {
   dotfiles: PylonOverlay["dotfiles"];
   gitIdentity?: BootInputs["gitIdentity"];
   harness: ThreadHarness;
+  /** Reads the .nexus/setup a new thread's template is keyed on. */
+  mirror: ProjectMirror;
   /** Asks the loop for a pass over the node's pylons. */
   wake(node: NodeName): void;
   /** One client per registry node, for the guest commands and checkout reads a human asks for. */
@@ -274,9 +276,9 @@ const claudeReadMs = 5_000;
 
 
 export async function startApi(options: ApiOptions): Promise<Api> {
-  const { registry, whois, allowed, hostnames, dotfiles, harness, wake, probes, previewPorts, streamStallMs = 30_000, attachTiming: timing = attachTiming } = options;
+  const { registry, whois, allowed, hostnames, dotfiles, harness, mirror, wake, probes, previewPorts, streamStallMs = 30_000, attachTiming: timing = attachTiming } = options;
   const claude = claudeConversations({ registry, probes });
-  const startThread = threadStarter({ registry, harness, dotfiles, gitIdentity: options.gitIdentity, wake });
+  const startThread = threadStarter({ registry, harness, mirror, dotfiles, gitIdentity: options.gitIdentity, wake });
 
   function thread(id: string): Thread {
     const found = registry.thread(id as ThreadId);

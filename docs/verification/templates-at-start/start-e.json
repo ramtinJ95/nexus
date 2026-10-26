@@ -1,0 +1,24 @@
+{
+  "id": "th-569f641a703a",
+  "title": "E: setup changed",
+  "project": "acme",
+  "pylonId": "pylon-th-569f641a703a",
+  "status": "active",
+  "conversationId": "5",
+  "startedBy": "nLAPTOP",
+  "createdAt": 1792992995095,
+  "agentTurnRunning": false,
+  "lastAgentActivityAt": 0,
+  "lastHumanActivityAt": 1792992995095,
+  "seenAt": null,
+  "lastReplyAt": null,
+  "placement": {
+    "how": "default",
+    "node": "local-node"
+  },
+  "setup": {
+    "how": "fresh",
+    "reason": "no template of this setup is on local-node yet",
+    "building": "tpl-ad1dacf48b98"
+  }
+}

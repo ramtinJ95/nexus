@@ -133,7 +133,7 @@ const probe = await startProbe({
   auth: { controlPlane: controlPlaneId, peers: [] },
   whois,
   backend: createDockerBackend({ images: { [imageId]: tag }, labels, hostBridgePort: ports.bridge, previewHost: nodeHost, artifacts: join(runDir, "artifacts") }),
-  secrets: { value: () => undefined },
+  secrets: { value: () => undefined, names: () => [] },
   log: (message) => log(`probe: ${message}`),
   previews: { gatewayPort: ports.gateway, routesFile: join(runDir, "preview-routes.json"), tailscale: serve.cli, get: viaGateway(() => `http://127.0.0.1:${ports.gateway}`).get },
   hostBridge: dockerHostBridge(ports.bridge, labels),
@@ -165,6 +165,7 @@ const controlPlane = await startControlPlane({
   harness: { storage: join(runDir, "harness.sqlite"), credentials: join(runDir, "unused-credentials.json"), model: scriptedModel },
   tailscaledSocket: socket,
   previewPorts: { first: 10200, last: 10299 },
+  resumeAfterUsageLimit: false,
 }, scriptedModels());
 closers.push(() => controlPlane.close());
 

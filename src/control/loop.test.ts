@@ -295,6 +295,20 @@ test("a thread's pylon follows its thread: spawn, pause on archive, resume on ac
   assert.equal(resume.boot.source.checkpoint, `ckpt-${thread.id}-1`);
 });
 
+test("each pass sends the template builds recorded for its node, before its pylons", async (t) => {
+  const registry = openRegistry(tempDb());
+  const thread = seed(registry);
+  const key = { project: "acme" as ProjectId, image, setupHash: "s" };
+  const inputs = { key, repo: { url: "git@example.com:acme.git", branch: "main", commit: "c".repeat(40) }, preSetup: null, allowedHosts: [], resources: { cpus: 2, memoryGiB: 4, diskGiB: 10 } };
+  registry.saveTemplate({ id: "tpl-aaaaaaaaaaaa", key, state: "building", on: node, inputs, submitted: null });
+  const fake = fakeNode({ autoFinish: false });
+  run(t, registry, fake.probe);
+  await until("the pylon's spawn is sent", () => fake.submitted.some((job) => job.kind === "spawn"));
+  assert.deepEqual(fake.submitted.map((job) => job.kind), ["build-template", "spawn"]);
+  assert.deepEqual(fake.submitted[0], { kind: "build-template", template: "tpl-aaaaaaaaaaaa", inputs });
+  assert.equal(registry.pylon(thread.pylonId)!.submitted?.job.kind, "spawn");
+});
+
 test("a job that fails for good gives up with the probe's message and the end of its log", async (t) => {
   const registry = openRegistry(tempDb());
   const thread = seed(registry);

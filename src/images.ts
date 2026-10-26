@@ -7,14 +7,14 @@
  */
 import { createHash } from "node:crypto";
 import { z } from "zod";
-import { effectiveAllowedHosts, type Checkout, type Project, type ProjectId, type RemoteProject, type ServicesFile } from "./project.ts";
-import type { NodeName } from "./protocol.ts";
+import { effectiveAllowedHosts, type Checkout, type Project, type ProjectId, type RemoteProject } from "./project.ts";
+import type { JobEnvelope, NodeName } from "./protocol.ts";
 
 /** img-<sha256 of the recipe>[:12]. The same inputs give the same ID, so a rebuild of unchanged inputs is a no-op. */
 export type ImageId = `img-${string}`;
 /**
- * tpl-<sha256 of the TemplateKey and the build's start time in ms>[:12]. An ID names one build, not one key:
- * the same key built twice gives two IDs, so a node's bytes under one ID never change.
+ * tpl-<sha256 of the TemplateKey, the node that builds it and the build's start time in ms>[:12]. An ID names one build,
+ * not one key: the same key built twice, or on two nodes at once, gives two IDs, so a node's bytes under one ID never change.
  */
 export type TemplateId = `tpl-${string}`;
 /** ckpt-<thread id>-<n>, minted by the control plane for each pause. */
@@ -145,23 +145,22 @@ export interface TemplateKey {
 }
 export const templateMaxAgeMs = 72 * 3_600_000;
 
-/** Read by the control plane from its bare mirror of the repo on rj-firebat. No pylon is booted to learn these. */
+/** Read by the control plane from the project's remote, src/control/mirror.ts. No pylon is booted to learn these. */
 export interface SetupInputs {
-  commit: string;
-  setupBlob: string | null; // git blob ID of .nexus/setup at `commit`
-  services: ServicesFile | null; // not part of the key. It lets the control plane allocate preview ports before the first boot
+  commit: string; // the full commit ID the ref resolved to
+  setupBlob: string | null; // git object ID of .nexus/setup at `commit`
 }
 export interface ProjectMirror {
-  /** git fetch, then read blobs at the resolved commit. */
-  setupInputs(project: RemoteProject, ref: string): Promise<SetupInputs>;
+  /** Resolves a branch's tip or a full commit ID on the remote, and reads .nexus/setup's object ID there. Throws when the remote cannot be read. */
+  setupInputs(project: RemoteProject, ref: { branch: string } | { commit: string }, signal?: AbortSignal): Promise<SetupInputs>;
 }
 
 /** sha256 of setupBlob, project.preSetup and effectiveAllowedHosts(project), since the hosts setup can reach change what it can install. */
 export function setupHashOf(project: Project, inputs: SetupInputs): string {
   return sha256Of({ setupBlob: inputs.setupBlob, preSetup: project.preSetup, allowedHosts: effectiveAllowedHosts(project) });
 }
-export function templateIdOf(key: TemplateKey, startedAt: number): TemplateId {
-  return `tpl-${sha256Of({ project: key.project, image: key.image, setupHash: key.setupHash, startedAt }).slice(0, 12)}`;
+export function templateIdOf(key: TemplateKey, node: NodeName, startedAt: number): TemplateId {
+  return `tpl-${sha256Of({ project: key.project, image: key.image, setupHash: key.setupHash, node, startedAt }).slice(0, 12)}`;
 }
 
 /** Hex sha256 of canonical JSON: object keys sorted, so the same value always gives the same hash. */
@@ -181,12 +180,17 @@ export interface TemplateBuildInputs {
   resources: Project["resources"];
 }
 
+/**
+ * A building record holds its job's inputs, and the envelope it last sent, saved before the submit as a pylon's is,
+ * so a control plane that restarts mid-build asks the probe about it instead of building twice.
+ */
 export type TemplateRecord =
-  | { id: TemplateId; key: TemplateKey; state: "building"; on: NodeName }
+  | { id: TemplateId; key: TemplateKey; state: "building"; on: NodeName; inputs: TemplateBuildInputs; submitted: JobEnvelope | null }
   | { id: TemplateId; key: TemplateKey; state: "ready"; builtOn: NodeName; builtAt: number; commit: string }
   | { id: TemplateId; key: TemplateKey; state: "failed"; on: NodeName; failedAt: number; logTail: string };
 
 type ReadyTemplate = Extract<TemplateRecord, { state: "ready" }>;
+export type BuildingTemplate = Extract<TemplateRecord, { state: "building" }>;
 
 /**
  * template.json in a template's artifact directory, written when its build publishes. The control plane's
@@ -203,34 +207,39 @@ export interface TemplateManifest {
 export type ArtifactManifest = ImageManifest | TemplateManifest;
 
 export type TemplateChoice =
-  | { kind: "reuse"; template: TemplateId }
+  | { kind: "reuse"; template: TemplateId; builtAt: number }
   | { kind: "build"; template: TemplateId; on: NodeName; inputs: TemplateBuildInputs }
-  | { kind: "wait"; template: TemplateId } // another thread's build of this key is running
-  | { kind: "fresh"; reason: string }; // the last build of this key failed: boot the image and run setup inline
+  | { kind: "wait"; template: TemplateId } // another thread's build of this key is running on the node
+  | { kind: "fresh"; reason: string }; // the last build of this key on the node failed: boot the image and run setup inline
+
+/** How a thread's pylon got its setup, decided once when the thread starts. */
+export type ThreadSetup =
+  | { how: "template"; template: TemplateId; builtAt: number; commit: string } // commit: the full ID the pylon checks out over the template
+  | { how: "fresh"; reason: string; building?: TemplateId }; // building: the build this start asked for or found running, for the next thread
 
 /**
- * Rules, first match wins:
- * - ready with this key and built less than templateMaxAgeMs ago: reuse, whichever node holds it
- *   (planPylon fetches it to targetNode if needed: one LAN copy beats minutes of setup).
- * - building with this key: wait.
- * - failed with this key: fresh, with its log, so the thread's agent can see and fix the failing setup.
+ * Only records on targetNode count, and a ready one only while `held`, the node's last reported artifacts, lists it:
+ * the registry records no template's sha256, so no copy from another node could be verified. Rules, first match wins:
+ * - ready with this key, built on targetNode less than templateMaxAgeMs ago, and held: reuse.
+ * - building with this key on targetNode: wait.
+ * - failed with this key on targetNode: fresh, with its log, so the thread's agent can see and fix the failing setup.
  * - otherwise: build on targetNode, so the first spawn copies nothing. The build checks out `checkout`,
  *   the commit setupInputs resolved for the thread that asked, under a new ID minted from `now`.
  * reuse and wait return the ID of the record they found.
  */
-export function chooseTemplate(project: RemoteProject, key: TemplateKey, checkout: Checkout, templates: readonly TemplateRecord[], targetNode: NodeName, now: number): TemplateChoice {
+export function chooseTemplate(project: RemoteProject, key: TemplateKey, checkout: Checkout, templates: readonly TemplateRecord[], targetNode: NodeName, held: readonly ArtifactId[], now: number): TemplateChoice {
   const records = templates.filter((t) => t.key.project === key.project && t.key.image === key.image && t.key.setupHash === key.setupHash);
   const reusable = records
-    .filter((t): t is ReadyTemplate => t.state === "ready" && now - t.builtAt < templateMaxAgeMs)
+    .filter((t): t is ReadyTemplate => t.state === "ready" && t.builtOn === targetNode && held.includes(t.id) && now - t.builtAt < templateMaxAgeMs)
     .sort((a, b) => b.builtAt - a.builtAt)[0];
-  if (reusable !== undefined) return { kind: "reuse", template: reusable.id };
-  const building = records.find((t) => t.state === "building");
+  if (reusable !== undefined) return { kind: "reuse", template: reusable.id, builtAt: reusable.builtAt };
+  const building = records.find((t) => t.state === "building" && t.on === targetNode);
   if (building !== undefined) return { kind: "wait", template: building.id };
-  const failed = records.find((t) => t.state === "failed");
-  if (failed !== undefined) return { kind: "fresh", reason: `the setup of template ${failed.id} failed on ${failed.on}:\n${failed.logTail}` };
+  const failed = records.find((t): t is Extract<TemplateRecord, { state: "failed" }> => t.state === "failed" && t.on === targetNode);
+  if (failed !== undefined) return { kind: "fresh", reason: `the build of template ${failed.id} failed on ${failed.on}: ${failed.logTail}` };
   return {
     kind: "build",
-    template: templateIdOf(key, now),
+    template: templateIdOf(key, targetNode, now),
     on: targetNode,
     inputs: {
       key,

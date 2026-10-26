@@ -1,0 +1,23 @@
+{
+  "id": "th-649e0b7bdbf2",
+  "title": "D: short commit",
+  "project": "acme",
+  "pylonId": "pylon-th-649e0b7bdbf2",
+  "status": "active",
+  "conversationId": "4",
+  "startedBy": "nLAPTOP",
+  "createdAt": 1792992994548,
+  "agentTurnRunning": false,
+  "lastAgentActivityAt": 0,
+  "lastHumanActivityAt": 1792992994548,
+  "seenAt": null,
+  "lastReplyAt": null,
+  "placement": {
+    "how": "default",
+    "node": "local-node"
+  },
+  "setup": {
+    "how": "fresh",
+    "reason": "the start named commit 63cf8f9, and only a full commit ID or a branch tip can use a template"
+  }
+}

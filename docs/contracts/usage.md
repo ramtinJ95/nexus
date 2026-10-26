@@ -202,10 +202,10 @@ Commit and push the manifest, then build the image as [the deploy guide](../../d
 Templates mirror a remote, so only a `RemoteProject` (a project whose `repoUrl` is not null) has one. A scratch project's threads always boot fresh.
 
 ```ts
-const inputs = await mirror.setupInputs(project, thread.branch); // the control plane's bare mirror, no pylon booted
+const inputs = await mirror.setupInputs(project, commit === undefined ? { branch } : { commit }); // src/control/mirror.ts, no pylon booted
 const key = { project: project.id, image: settings.current, setupHash: setupHashOf(project, inputs) };
-const choice = chooseTemplate(project, key, { branch: thread.branch, commit: inputs.commit }, registry.templates(project.id), thread.node, clock.now());
-// reuse | build on thread.node | wait for a running build | fresh (boot the image, run setup inline) after a failed build
+const choice = chooseTemplate(project, key, { branch, commit: inputs.commit }, registry.templates(project.id), node, registry.node(node)?.observation?.artifacts ?? [], clock.now());
+// reuse a template the node holds, booting at inputs.commit | build on node and boot fresh | fresh while one builds | fresh after a failed build
 ```
 
 ### Call site: spawning on a node that lacks an artifact

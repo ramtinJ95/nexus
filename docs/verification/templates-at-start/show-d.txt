@@ -1,0 +1,9 @@
+th-649e0b7bdbf2  D: short commit
+project: acme
+attention: failed
+status: active
+pylon: pylon-th-649e0b7bdbf2 on local-node, failed, observed 0s ago
+placement: local-node, the project's default node
+setup: fresh boot runs .nexus/setup, because the start named commit 63cf8f9, and only a full commit ID or a branch tip can use a template
+failed: last job failed with invalid, which is not retryable: file:///tmp/tmp.n6EEUig5y6/origin.git is neither an SSH nor an HTTPS git URL
+PR watch: off (no control-plane GitHub token configured)
