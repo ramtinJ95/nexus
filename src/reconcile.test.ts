@@ -75,8 +75,8 @@ interface Row {
   previewsRouted?: boolean;
   /** A human retried the pylon. */
   retrying?: boolean;
-  /** The secrets the boot asks for, and the held secrets the node's probe takes from the control plane. */
-  secrets?: { asked: readonly string[]; takes: readonly string[] };
+  /** The secrets the boot asks for, and the secrets the node holds. */
+  secrets?: { asked: readonly string[]; holds: readonly string[] };
 }
 
 const none: Attempts = [0, null, null];
@@ -146,13 +146,13 @@ const rows: Record<string, Row> = {
   "liveHash null after a probe restart re-submits spawn": { desired: "running", observed: running(null), inFlight: null, attempts: none, online: true, present: imageOnly, expect: spawn(fresh) },
   "absent boots from the template": { desired: "running", observed: "absent", inFlight: null, attempts: none, online: true, present: [image, template], firstBoot: fromTemplate, expect: spawn(fromTemplate) },
   // 7d
-  "a boot asking for a held secret waits for a probe that does not take it": { desired: "running", observed: "absent", inFlight: null, attempts: none, online: true, present: imageOnly, secrets: { asked: ["GH_TOKEN", chatgptTokenGrant.name], takes: [] }, expect: wait("held-secret") },
-  "a wake asking for a held secret waits for a probe that does not take it": { desired: "running", observed: stopped(lastCheckpoint), inFlight: null, attempts: none, online: true, present: imageOnly, secrets: { asked: [chatgptTokenGrant.name], takes: [] }, expect: wait("held-secret") },
-  "a boot asking for a held secret boots on a probe that takes it": { desired: "running", observed: "absent", inFlight: null, attempts: none, online: true, present: imageOnly, secrets: { asked: [chatgptTokenGrant.name], takes: [chatgptTokenGrant.name] }, expect: spawnAsking([chatgptTokenGrant.name], fresh) },
-  "a running pylon with an older liveHash waits for a probe that does not take its held secret": { desired: "running", observed: running("hash-old" as LiveHash), inFlight: null, attempts: none, online: true, present: imageOnly, secrets: { asked: [chatgptTokenGrant.name], takes: [] }, expect: wait("held-secret") },
-  "a running pylon with a matching liveHash is done, whether or not its probe takes its held secret": { desired: "running", observed: running(liveHash), inFlight: null, attempts: none, online: true, present: imageOnly, secrets: { asked: [chatgptTokenGrant.name], takes: [] }, expect: done },
-  "a pylon whose probe does not take its held secret still pauses": { desired: "paused", observed: running(liveHash), inFlight: null, attempts: none, online: true, present: imageOnly, secrets: { asked: [chatgptTokenGrant.name], takes: [] }, expect: pause },
-  "a boot asking only for a file secret boots, and the probe judges it": { desired: "running", observed: "absent", inFlight: null, attempts: none, online: true, present: imageOnly, secrets: { asked: ["GH_TOKEN"], takes: [] }, expect: spawnAsking(["GH_TOKEN"], fresh) },
+  "a boot asking for a held secret waits for a probe that has not got it": { desired: "running", observed: "absent", inFlight: null, attempts: none, online: true, present: imageOnly, secrets: { asked: ["GH_TOKEN", chatgptTokenGrant.name], holds: ["GH_TOKEN"] }, expect: wait("held-secret") },
+  "a wake asking for a held secret waits for a probe that has not got it": { desired: "running", observed: stopped(lastCheckpoint), inFlight: null, attempts: none, online: true, present: imageOnly, secrets: { asked: [chatgptTokenGrant.name], holds: [] }, expect: wait("held-secret") },
+  "a boot asking for a held secret boots on a probe that has it": { desired: "running", observed: "absent", inFlight: null, attempts: none, online: true, present: imageOnly, secrets: { asked: [chatgptTokenGrant.name], holds: [chatgptTokenGrant.name] }, expect: spawnAsking([chatgptTokenGrant.name], fresh) },
+  "a running pylon with an older liveHash waits for a probe that has not got its held secret": { desired: "running", observed: running("hash-old" as LiveHash), inFlight: null, attempts: none, online: true, present: imageOnly, secrets: { asked: [chatgptTokenGrant.name], holds: [] }, expect: wait("held-secret") },
+  "a running pylon with a matching liveHash is done, whether or not its probe has its held secret": { desired: "running", observed: running(liveHash), inFlight: null, attempts: none, online: true, present: imageOnly, secrets: { asked: [chatgptTokenGrant.name], holds: [] }, expect: done },
+  "a pylon whose probe has not got its held secret still pauses": { desired: "paused", observed: running(liveHash), inFlight: null, attempts: none, online: true, present: imageOnly, secrets: { asked: [chatgptTokenGrant.name], holds: [] }, expect: pause },
+  "a boot asking only for a file secret boots, and the probe judges it": { desired: "running", observed: "absent", inFlight: null, attempts: none, online: true, present: imageOnly, secrets: { asked: ["GH_TOKEN"], holds: [] }, expect: spawnAsking(["GH_TOKEN"], fresh) },
 };
 
 function input(row: Row): PlanInput {
@@ -166,7 +166,7 @@ function input(row: Row): PlanInput {
     observed: row.observed,
     previewsRouted: row.previewsRouted ?? false,
     nodeArtifacts: new Set(row.present),
-    nodeHeldSecrets: new Set(row.secrets?.takes ?? []),
+    nodeSecrets: new Set(row.secrets?.holds ?? []),
     inFlight: row.inFlight === null ? null : jobInFlight(row.inFlight),
     attempts: { count, last: lastCode === null ? null : { at: now - failedAgo!, code: lastCode, message: `the probe's ${lastCode} message` } },
     retrying: row.retrying ?? false,

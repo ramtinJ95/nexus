@@ -270,13 +270,13 @@ nexus project edit <project> --login claude --login chatgpt
 
 That grants `NEXUS_CHATGPT_TOKEN` for `api.openai.com` and adds `auth.openai.com`, `chatgpt.com` and `api.openai.com` to the allowlist. Threads started after the edit get it. An existing thread keeps the grants it booted with, even across an archive and an unarchive. A project may not grant `NEXUS_CHATGPT_TOKEN` itself, and a node's `secrets.env` may not set it.
 
-A thread with the login boots only on a probe that takes `NEXUS_CHATGPT_TOKEN` from the control plane. On a probe from before the login, its pylon waits until that probe is upgraded.
+A thread with the login boots only on a probe that holds `NEXUS_CHATGPT_TOKEN` from the control plane. A probe that just started gets it within a second or so of its first snapshot, and the start is accepted meanwhile. On a probe from before the login, its pylon waits until that probe is upgraded.
 
 In the pylon, pi's `openai` provider is signed in, so a model reference names `openai/<model>`, such as `openai/gpt-6-astra`. `openai-codex` is not signed in. Each boot rewrites the `openai` entry of `~/.pi/agent/auth.json`, so a `/login` to OpenAI inside a pylon lasts only until the next wake.
 
 What each place holds:
 
-- The control plane holds the access and refresh tokens in `harness-credentials.json`, as before. It refreshes them when less than 10 minutes remain and sends the access token to every probe every 60 seconds over the tailnet. It asks tailscaled who answered on the connection before it sends any byte, so a node that took over a probe's name gets nothing. `journalctl -u nexus-control` names a probe it could not reach, never the token.
+- The control plane holds the access and refresh tokens in `harness-credentials.json`, as before. It refreshes them when less than 10 minutes remain and sends the access token to every probe every 60 seconds over the tailnet, and at once to a probe that reports it has none. It asks tailscaled who answered on the connection before it sends any byte, so a node that took over a probe's name gets nothing. `journalctl -u nexus-control` names a probe it could not reach, never the token.
 - Each probe holds the current access token in memory, and so does the controller of each running pylon. Root on a node can read it there, as it can read `secrets.env`, and use it until it expires. Neither process writes it to disk or to a log, and it never reaches the registry, the events or the observation.
 - A pylon holds only a placeholder, which changes on every boot. Its agents can spend the ChatGPT subscription through `api.openai.com`, but cannot read the token.
 

@@ -68,3 +68,35 @@ test("a poll while one runs joins it instead of reading the token twice", async 
   assert.equal(reads, 1);
   assert.deepEqual(p.put, [["rj-firebat", "NEXUS_CHATGPT_TOKEN", token]]);
 });
+
+test("a probe that takes the token and has not got it, as one that just started, gets it at once", async () => {
+  const p = probes("rj-firebat", "infra-testbench");
+  const handoff = chatgptTokenHandoff({ probes: p.clients, token: async () => token, log: () => {} });
+  const seen = (node: string, holds: readonly string[], takes?: readonly string[]) =>
+    ({ node: node as NodeName, grants: { secrets: holds, gitSsh: false }, ...takes === undefined ? {} : { heldSecrets: takes } });
+  handoff.observed(seen("rj-firebat", ["GH_TOKEN", "NEXUS_CHATGPT_TOKEN"], ["NEXUS_CHATGPT_TOKEN"]));
+  handoff.observed(seen("rj-firebat", [], []));
+  handoff.observed(seen("rj-firebat", []));
+  await handoff.close();
+  assert.deepEqual(p.put, [], "a probe that has it, or takes none, sets nothing off");
+
+  handoff.observed(seen("infra-testbench", ["GH_TOKEN"], ["NEXUS_CHATGPT_TOKEN"]));
+  await handoff.close();
+  assert.deepEqual(p.put, [["rj-firebat", "NEXUS_CHATGPT_TOKEN", token], ["infra-testbench", "NEXUS_CHATGPT_TOKEN", token]]);
+});
+
+test("a probe that shows up without the token while a poll runs gets it from one more poll", async () => {
+  const p = probes("rj-firebat", "infra-testbench");
+  p.down.add("rj-firebat");
+  const slow = Promise.withResolvers<void>();
+  const clients = p.clients.map((c) => c.node === "infra-testbench" ? { ...c, putSecret: async (name: string, value: string) => { await slow.promise; return c.putSecret(name, value); } } : c);
+  const handoff = chatgptTokenHandoff({ probes: clients, token: async () => token, log: () => {} });
+  const first = handoff.poll();
+  await new Promise((r) => setTimeout(r, 10));
+  p.down.delete("rj-firebat");
+  handoff.observed({ grants: { secrets: [], gitSsh: false }, heldSecrets: ["NEXUS_CHATGPT_TOKEN"] });
+  slow.resolve();
+  await first;
+  await handoff.close();
+  assert.ok(p.put.some(([node]) => node === "rj-firebat"), "the restarted probe got the token without waiting for the timer");
+});

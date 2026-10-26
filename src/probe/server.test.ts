@@ -419,6 +419,17 @@ test("a held secret is taken only from the control plane, only under a held name
   assert.deepEqual(secrets.names(), []);
 });
 
+test("an observer learns at once that the probe got a held secret it did not have", async (t) => {
+  const { base, client } = await setup(t, { secrets: nodeSecrets({ value: () => undefined, names: () => [] }) });
+  const events = client.observe(AbortSignal.timeout(5000))[Symbol.asyncIterator]();
+  const first = (await events.next()).value;
+  assert.deepEqual(first?.type === "snapshot" && first.observation.grants?.secrets, []);
+  assert.equal((await fetch(`${base}/v1/secrets/NEXUS_CHATGPT_TOKEN`, { method: "PUT", body: "eyJhbGciOiJSUzI1NiJ9.e30.c2ln" })).status, 204);
+  const next = (await events.next()).value;
+  assert.deepEqual(next?.type === "snapshot" && next.observation.grants?.secrets, ["NEXUS_CHATGPT_TOKEN"], "the snapshot comes before the 60 s one");
+  await events.return?.();
+});
+
 test("observations name the secrets the node holds, never their values, and whether it has a git SSH key", async (t) => {
   const { client } = await setup(t, { secrets: nodeSecrets({ value: () => "s3cr3t", names: () => ["GH_TOKEN"] }), gitSsh: true });
   for await (const e of client.observe(AbortSignal.timeout(5000))) {

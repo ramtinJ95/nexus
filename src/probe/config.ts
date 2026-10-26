@@ -110,12 +110,13 @@ export function parseSecretsEnv(text: string): SecretSource {
 export interface NodeSecrets extends SecretSource { hold(name: string, value: string): void }
 
 /**
- * A pylon can boot before the first handoff, as after a probe restart, and a missing value fails its spawn for good
- * (secret-missing is final). It boots with this instead, which no API accepts, and the next handoff replaces it.
+ * A pylon can boot before the first handoff, when the probe restarts between the snapshot the control plane boots it on
+ * and the spawn, and a missing value fails its spawn for good (secret-missing is final). It boots with this instead,
+ * which no API accepts, and the next handoff replaces it.
  */
 const notHandedOver = "nexus-held-secret-not-handed-over-yet";
 
-/** `names` lists a held secret only once it is handed over, so placement waits for it. */
+/** `names` lists a held secret only once it is handed over, so the control plane holds a boot that needs it until then. */
 export function nodeSecrets(file: SecretSource): NodeSecrets {
   const held = new Map<string, string>();
   return {
