@@ -1,8 +1,8 @@
 // Checks that a browser terminal on the dashboard can use the attach route the CLI uses, against the stack in
 // ../claude-thread-streaming/stack.ts. It starts a thread with a shell session, then in headless Chromium: opens the
-// attach WebSocket from the thread page under the dashboard's own CSP, opens it from a page on another origin, and
-// renders the terminal with xterm.js on the thread page, types a command into it and resizes it. Last it renders
-// xterm.js under the thread page's CSP with its DOM renderer and with its WebGL renderer. Chromium and the rest come
+// attach WebSocket from the thread page under the dashboard's own CSP, and opens it from a page on another origin.
+// Then it renders the terminal with xterm.js on the thread page, under that page's own CSP: with the WebGL renderer it
+// types a command and resizes, and with the DOM renderer it records what the CSP refuses. Chromium and the rest come
 // from the npm packages @sparticuz/chromium, puppeteer-core, @xterm/xterm and @xterm/addon-webgl, installed outside the
 // repo: MODULES names their node_modules, and LD_LIBRARY_PATH and FONTCONFIG_FILE their libraries and fonts.
 //
@@ -70,78 +70,78 @@ log(`from http://127.0.0.1:7471: refused, ${answer}`);
 await elsewhere.close();
 other.close();
 
-// The dashboard does not serve xterm.js, so this page takes it as an injected tag, which the dashboard's
-// `script-src 'self'` refuses. A terminal that ships with the dashboard is served from 'self' and needs no bypass.
-const cspBypassedPage = await browser.newPage();
-await cspBypassedPage.setViewport({ width: 1440, height: 900 });
-await cspBypassedPage.setBypassCSP(true);
-await cspBypassedPage.goto(`${base}/threads/${thread}`, { waitUntil: "networkidle2" });
-await cspBypassedPage.addStyleTag({ path: join(xterm, "css/xterm.css") });
-await cspBypassedPage.addScriptTag({ path: join(xterm, "lib/xterm.js") });
-await cspBypassedPage.evaluate((thread) => {
-  const box = document.createElement("div");
-  box.id = "terminal";
-  box.style.cssText = "position:fixed;left:270px;right:330px;bottom:0;height:420px;background:#000;z-index:9;padding:6px";
-  document.body.append(box);
-  const term = new window.Terminal({ cols: 110, rows: 24, fontSize: 13 });
-  term.open(box);
-  const ws = new WebSocket(`ws://${location.host}/v1/threads/${thread}/attach?cols=110&rows=24&term=xterm-256color`);
-  ws.binaryType = "arraybuffer";
-  window.attach = { messages: [], bytes: 0, resize: (cols, rows) => { term.resize(cols, rows); ws.send(JSON.stringify({ type: "resize", cols, rows })); } };
-  ws.onmessage = (e) => {
-    if (typeof e.data === "string") window.attach.messages.push(JSON.parse(e.data));
-    else { window.attach.bytes += e.data.byteLength; term.write(new Uint8Array(e.data)); }
-  };
-  ws.onclose = (e) => window.attach.messages.push({ close: e.code });
-  term.onData((keys) => ws.readyState === WebSocket.OPEN && ws.send(new TextEncoder().encode(keys)));
-}, thread);
-await sleep(4000);
-await cspBypassedPage.click("#terminal");
-await cspBypassedPage.keyboard.type("clear; echo typed in the dashboard, over the attach route; git --no-pager log --oneline -1\n");
-await sleep(2500);
-const screen = await cspBypassedPage.evaluate(() => document.querySelector("#terminal .xterm-rows")?.innerText ?? "");
-const echoed = screen.split("\n").map((line) => line.trim()).find((line) => line.endsWith("typed in the dashboard, over the attach route"));
-assert.ok(echoed !== undefined, "the typed command's output is not on the screen");
-await cspBypassedPage.screenshot({ path: join(out, "attach-terminal.png") });
-log(`typed a command in the browser terminal, and its output came back: ${JSON.stringify(echoed)}`);
+// The dashboard does not serve xterm.js, so each terminal page is the real thread page, with its real headers and CSP,
+// plus script tags for xterm.js that the browser loads from the dashboard's own origin, as shipped assets would be.
+const assets = {
+  "/__terminal/xterm.css": ["text/css", readFileSync(join(xterm, "css/xterm.css"))],
+  "/__terminal/xterm.js": ["text/javascript", readFileSync(join(xterm, "lib/xterm.js"))],
+  "/__terminal/webgl.js": ["text/javascript", readFileSync(join(process.env.MODULES, "@xterm/addon-webgl/lib/addon-webgl.js"))],
+};
+for (const renderer of ["dom", "webgl"]) assets[`/__terminal/${renderer}-start.js`] = ["text/javascript", `window.violations = [];
+document.addEventListener("securitypolicyviolation", (e) => violations.push(e.violatedDirective));
+const box = document.createElement("div");
+box.id = "terminal";
+box.style.position = "fixed"; box.style.left = "270px"; box.style.right = "330px"; box.style.bottom = "0"; box.style.height = "420px"; box.style.zIndex = "9";
+document.body.append(box);
+const term = new Terminal({ cols: 110, rows: 24, fontSize: 13 });
+term.open(box);
+${renderer === "webgl" ? "term.loadAddon(new WebglAddon.WebglAddon());" : ""}
+const ws = new WebSocket(\`ws://\${location.host}/v1/threads/\${location.pathname.split("/")[2]}/attach?cols=110&rows=24&term=xterm-256color\`);
+ws.binaryType = "arraybuffer";
+window.attach = {
+  messages: [], bytes: 0,
+  resize: (cols, rows) => { term.resize(cols, rows); ws.send(JSON.stringify({ type: "resize", cols, rows })); },
+  screen: () => Array.from({ length: term.buffer.active.length }, (_, i) => term.buffer.active.getLine(i)?.translateToString(true) ?? ""),
+};
+ws.onmessage = (e) => {
+  if (typeof e.data === "string") window.attach.messages.push(JSON.parse(e.data));
+  else { window.attach.bytes += e.data.byteLength; term.write(new Uint8Array(e.data)); }
+};
+ws.onclose = (e) => window.attach.messages.push({ close: e.code });
+term.onData((keys) => ws.readyState === WebSocket.OPEN && ws.send(new TextEncoder().encode(keys)));
+term.focus();`];
 
-await cspBypassedPage.evaluate(() => window.attach.resize(90, 16));
-await sleep(1500);
-const state = await cspBypassedPage.evaluate(() => window.attach);
-assert.deepEqual(state.messages, [{ type: "attached" }], "the attach ended or reported an error");
-log(`resized to 90x16, still attached: messages ${JSON.stringify(state.messages)}, ${state.bytes} bytes received`);
+const dashboardTerminal = async (renderer) => {
+  const p = await browser.newPage();
+  await p.setViewport({ width: 1440, height: 900 });
+  await p.setRequestInterception(true);
+  p.on("request", async (request) => {
+    const path = new URL(request.url()).pathname;
+    const asset = assets[path];
+    if (asset !== undefined) return request.respond({ status: 200, contentType: asset[0], body: asset[1] });
+    if (path !== `/threads/${thread}` || request.resourceType() !== "document") return request.continue();
+    const res = await fetch(request.url());
+    const tags = `<link rel="stylesheet" href="/__terminal/xterm.css"><script src="/__terminal/xterm.js"></script><script src="/__terminal/webgl.js"></script><script src="/__terminal/${renderer}-start.js"></script>`;
+    const headers = Object.fromEntries([...res.headers].filter(([name]) => !["content-length", "content-encoding", "transfer-encoding"].includes(name)));
+    request.respond({ status: res.status, headers, body: (await res.text()).replace("</body>", `${tags}</body>`) });
+  });
+  await p.goto(`${base}/threads/${thread}`, { waitUntil: "networkidle2" });
+  await sleep(4000);
+  return p;
+};
 
 const csp = (await fetch(`${base}/threads/${thread}`)).headers.get("content-security-policy");
-const selfServedXtermPage = (renderer) => `<!doctype html><link rel=stylesheet href=/xterm.css><div id=t></div><script src=/xterm.js></script><script src=/webgl.js></script><script src=/${renderer}.js></script>`;
-const xtermBootScript = (webgl) => `window.violations = [];
-document.addEventListener("securitypolicyviolation", (e) => violations.push(e.violatedDirective));
-const term = new Terminal({ cols: 40, rows: 3 });
-term.open(document.getElementById("t"));
-${webgl ? "term.loadAddon(new WebglAddon.WebglAddon());" : ""}
-term.write("\\x1b[32mgreen\\x1b[0m plain");`;
-const files = {
-  "/dom": ["text/html", selfServedXtermPage("dom")], "/webgl": ["text/html", selfServedXtermPage("webgl-start")],
-  "/xterm.css": ["text/css", readFileSync(join(xterm, "css/xterm.css"))],
-  "/xterm.js": ["text/javascript", readFileSync(join(xterm, "lib/xterm.js"))],
-  "/webgl.js": ["text/javascript", readFileSync(join(process.env.MODULES, "@xterm/addon-webgl/lib/addon-webgl.js"))],
-  "/dom.js": ["text/javascript", xtermBootScript(false)], "/webgl-start.js": ["text/javascript", xtermBootScript(true)],
-};
-const selfServedXterm = createServer((req, res) => {
-  const file = files[req.url];
-  if (file === undefined) return void res.writeHead(404).end();
-  res.writeHead(200, { "content-type": file[0], "content-security-policy": csp }).end(file[1]);
-}).listen(7472, "127.0.0.1");
-for (const renderer of ["dom", "webgl"]) {
-  const p = await browser.newPage();
-  await p.goto(`http://127.0.0.1:7472/${renderer}`, { waitUntil: "networkidle0" });
-  await sleep(1000);
-  const seen = await p.evaluate(() => {
-    const green = [...document.querySelectorAll(".xterm-rows span")].find((span) => span.textContent === "green");
-    return { violations: window.violations, domColor: green === undefined ? null : getComputedStyle(green).color };
-  });
-  await p.screenshot({ path: join(out, `xterm-csp-${renderer}.png`), clip: { x: 0, y: 0, width: 360, height: 70 } });
-  log(`xterm.js ${renderer} renderer under ${JSON.stringify(csp)}: ${JSON.stringify(seen)}`);
-  await p.close();
-}
-selfServedXterm.close();
+const webgl = await dashboardTerminal("webgl");
+await webgl.keyboard.type("clear; echo typed in the dashboard, over the attach route; git --no-pager log --oneline -1\n");
+await sleep(2500);
+const echoed = (await webgl.evaluate(() => window.attach.screen())).map((line) => line.trim()).find((line) => line.endsWith("typed in the dashboard, over the attach route"));
+assert.ok(echoed !== undefined, "the typed command's output is not on the screen");
+await webgl.screenshot({ path: join(out, "attach-terminal.png") });
+log(`WebGL renderer on the thread page under its own CSP ${JSON.stringify(csp)}: typed a command, and its output came back: ${JSON.stringify(echoed)}`);
+await webgl.evaluate(() => window.attach.resize(90, 16));
+await sleep(1500);
+const state = await webgl.evaluate(() => ({ messages: window.attach.messages, bytes: window.attach.bytes, violations: window.violations }));
+assert.deepEqual(state.messages, [{ type: "attached" }], "the attach ended or reported an error");
+assert.ok(!state.violations.some((directive) => directive.startsWith("script-src") || directive.startsWith("connect-src")), "the CSP refused a script or the socket");
+log(`resized to 90x16, still attached: ${state.bytes} bytes received, CSP violations ${JSON.stringify(state.violations)}`);
+await webgl.close();
+
+const dom = await dashboardTerminal("dom");
+const seen = await dom.evaluate(() => {
+  const row = [...document.querySelectorAll("#terminal .xterm-rows > div")].find((div) => div.textContent.trim() !== "");
+  return { attached: window.attach.messages.some((m) => m.type === "attached"), violations: window.violations, color: row === undefined ? null : getComputedStyle(row).color, background: getComputedStyle(document.querySelector("#terminal .xterm-viewport")).backgroundColor };
+});
+assert.ok(seen.attached && seen.violations.includes("style-src-elem"), `expected the DOM renderer's styles to be refused: ${JSON.stringify(seen)}`);
+await dom.screenshot({ path: join(out, "attach-terminal-dom.png") });
+log(`DOM renderer on the thread page under the same CSP: ${JSON.stringify(seen)}`);
 await browser.close();

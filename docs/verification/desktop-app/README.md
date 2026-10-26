@@ -29,8 +29,10 @@ MODULES=... node docs/verification/desktop-app/attach-terminal.mjs
 
 - The thread page opened `GET /v1/threads/<thread>/attach` under the dashboard's own CSP and received Herdr's screen.
 - A page on another origin was refused with 403.
-- xterm.js on the thread page rendered Herdr, a command typed into it printed its output, and a resize kept it attached (`attach-terminal.png`). This page injects xterm.js, which the dashboard's `script-src 'self'` would refuse, so it bypasses the CSP for that tag only. A terminal that ships with the dashboard is served from `'self'`.
-- xterm.js served from `'self'` under the same CSP. With its DOM renderer the policy blocks the four `<style>` elements it adds, and the text is black on black (`xterm-csp-dom.png`). With its WebGL renderer the same four are blocked, but the text draws in its colours (`xterm-csp-webgl.png`).
+- xterm.js on the thread page, with its WebGL renderer, rendered Herdr. A command typed into it printed its output, and a resize kept it attached (`attach-terminal.png`).
+- The same page with xterm.js's default DOM renderer attached too, but its text is unreadable and its layout broken (`attach-terminal-dom.png`).
+
+Both terminal checks run on the real thread page under its real headers and CSP. The dashboard does not serve xterm.js, so the script intercepts the page's own request, adds `<script>` and `<link>` tags for `/__terminal/...` to the HTML the stack returned, and answers those paths itself. The browser loads them from the dashboard's own origin, as it would load assets the dashboard ships. Nothing bypasses the CSP. The CSP is enforced: it refuses the `<style>` elements that xterm.js adds, which the log records as `style-src-elem`, and with the DOM renderer also its inline `style` attributes, as `style-src-attr`. With the WebGL renderer it refuses no script and no connection, and the colours still draw. Not tested: xterm.js served by the dashboard's own asset route, which does not exist yet.
 
 Every thread on this stack shares one Herdr server, so the Herdr sidebar in `attach-terminal.png` lists a shell for each thread the script started. In a pylon each thread has its own.
 
