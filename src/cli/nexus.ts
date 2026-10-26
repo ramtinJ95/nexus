@@ -570,9 +570,9 @@ async function watch(api: Api, follow: Follow, id: string, intervalMs: number, j
   /** Each connection's first frame is the whole transcript, and each later one adds entries. */
   const onTranscript = (data: unknown) => {
     const { reset, ...frame } = data as ClaudeFrame;
-    const kept = reset || transcript === null || transcript === "none" ? frame : { ...frame, entries: [...transcript.entries, ...frame.entries] };
-    const over = Math.max(0, kept.entries.length - maxEntries);
-    transcript = { ...kept, entries: kept.entries.slice(over), dropped: kept.dropped + over };
+    const entries = reset || transcript === null || transcript === "none" ? frame.entries : [...transcript.entries, ...frame.entries];
+    // The server keeps the same newest maxEntries, and its `dropped` counts every entry before them.
+    transcript = { ...frame, entries: entries.slice(-maxEntries) };
   };
 
   const stop = new AbortController();

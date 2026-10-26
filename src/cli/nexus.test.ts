@@ -1001,6 +1001,43 @@ test("watch follows a Claude worker's transcript: the entries whole, then each n
   assert.deepEqual(await exited, [0, null]);
 });
 
+test("watch prints one new entry past the kept 3,000 of a Claude transcript, across a reconnect too", async (t) => {
+  const s = await setup(t);
+  const thread: Thread = await s.json(["start", "--project", "acme", "--claude", "count the lines"]);
+  s.registry.setClaudeWorker(thread.id, "/poteto-mode count the lines", "started", undefined, "s1");
+  const prompt = (n: number): ClaudeEntry => ({ kind: "prompt", at: n, text: `prompt ${n}`, from: "person" });
+  let offset = 0;
+  const read = (entries: ClaudeEntry[]) => {
+    const from = { ...transcriptStart, offset };
+    offset += entries.length;
+    assert.ok(s.registry.appendClaudeRead(thread.id, { session: "s1", from, entries, cursor: { ...transcriptStart, offset }, reset: false, readAt: Date.now() }));
+  };
+  let sequence = 0;
+  const report = (kind: "session.turn-started" | "session.turn-ended") => s.registry.reportSession(node, { sequence: ++sequence, pylon: thread.pylonId, time: Date.now(), event: { kind, session: "s1" } });
+  read(Array.from({ length: 3000 }, (_, i) => prompt(i)));
+  const watch = watchLines(t, s, [thread.id]);
+  const first = await watch.next();
+  assert.deepEqual([first.type, first.entries.length, first.dropped], ["claude-reset", 3000, 0]);
+  const next = async (what: string) => {
+    for (;;) {
+      const line = await watch.next();
+      assert.notEqual(line.type, "claude-reset", what);
+      if (line.type === "claude-entry") return line.entry;
+    }
+  };
+
+  read([prompt(3000)]);
+  report("session.turn-started");
+  assert.deepEqual(await next("an entry past the kept 3,000 is no reset"), prompt(3000));
+  const restart = await s.stop();
+  await restart();
+  read([prompt(3001)]);
+  report("session.turn-ended");
+  assert.deepEqual(await next("a reconnect at the limit prints no entry again"), prompt(3001));
+  const reread = await s.json(["conversation", thread.id]);
+  assert.deepEqual([reread.entries.length, reread.dropped], [3000, 2]);
+});
+
 test("watch's text says a Claude transcript was replaced only when it printed some of it, not when the worker's first session starts", async (t) => {
   const s = await setup(t);
   const c = await claudeWatched(t, s, false);
