@@ -499,14 +499,17 @@ test("an attached terminal is a client with exactly the command line attachedTer
  * starts Claude there, the launch's files in ~/.nexus, and the transcripts Claude has written. Typing `claude` starts
  * it under the command's session ID, working, unless `starts` is false, and its UserPromptSubmit hook writes the
  * receipt unless `submits` is false. `probe()` is one probe's view of the guest. `diesAt` ends that probe at the first exec it matches, after the
- * exec ran in the guest when `ran` is true, as a guest exec runs to its end after the probe that started it exits.
- * The dead probe's later execs never reach the guest.
+ * exec ran in the guest when `ran` is true, as a guest exec runs to its end after the probe that started it exits. With
+ * `ran: "held"` the exec runs only on `release()`, as one the guest started late. The dead probe's later execs never
+ * reach the guest. The exec that types the launch claims it as the real one does, so a second claim types nothing.
  */
 function launchPylon(options: { shellReady?: boolean; starts?: boolean; submits?: boolean; typeReply?: ExecReply; screen?: string; transcripts?: readonly string[] } = {}) {
   const files = new Map<string, string>();
   const panes = new Map<string, { workspace: string; label: string; foreground: readonly string[] }>();
   const execs: (readonly string[])[] = [];
+  const held: (() => ExecReply)[] = [];
   let workspaces = 0;
+  let typed = 0;
   const words = (line: string) => [...line.matchAll(/\$'((?:[^'\\]|\\.)*)'/g)].map((m) => m[1]!.replace(/\\x([0-9a-f]{2})|\\(.)/g, (_, hex: string | undefined, c: string) => hex ? String.fromCharCode(parseInt(hex, 16)) : c));
   function herdrCall(argv: readonly string[]): ExecReply {
     const sub = argv.slice(0, 2).join(" ");
@@ -527,6 +530,7 @@ function launchPylon(options: { shellReady?: boolean; starts?: boolean; submits?
       case "pane process-info": return processInfo(Object.fromEntries([...panes].map(([id, p]) => [id, p.foreground])))(argv);
       case "pane run": {
         const argvTyped = words(argv[3]!);
+        typed++;
         if (argvTyped[0] !== "claude" || pane(argv[2]!).foreground[0] !== "-bash") return assert.fail(`typed ${argv[3]} into a pane running ${pane(argv[2]!).foreground[0]}`);
         if (options.starts !== false) panes.set(argv[2]!, { ...pane(argv[2]!), foreground: argvTyped });
         const hook = JSON.parse(argvTyped[argvTyped.indexOf("--settings") + 1]!).hooks.UserPromptSubmit[0].hooks[0].command as string;
@@ -543,7 +547,8 @@ function launchPylon(options: { shellReady?: boolean; starts?: boolean; submits?
     if (argv[2] === seedClaudeState) return { exitCode: 0, output: "" };
     if (argv[3] === "shell-ready") return { exitCode: options.shellReady === false ? 1 : 0, output: "" };
     if (argv[3] === "claude-submitted") return { exitCode: files.has(argv[4]!) ? 0 : 1, output: "" };
-    if (argv[2] === 'touch "$0" && exec "$@"') {
+    if (typedExec(argv)) {
+      if (argv[2]!.startsWith("mkdir") && files.has(argv[3]!)) return { exitCode: 75, output: "" };
       files.set(argv[3]!, "");
       return herdrCall(argv.slice(7));
     }
@@ -554,11 +559,12 @@ function launchPylon(options: { shellReady?: boolean; starts?: boolean; submits?
     const lookup = transcriptLookup(argv, (options.transcripts ?? []).includes(argv[3]!));
     return lookup ?? assert.fail(`unexpected exec ${argv.join(" ")}`);
   }
-  const typings = () => execs.filter((a) => a.includes("run") && a.includes("pane")).length;
   return {
-    files, panes, execs, typings,
+    files, panes, execs,
+    typings: () => typed,
+    release: () => held.splice(0).map((exec) => exec()),
     claudes: () => [...panes.values()].filter((p) => p.foreground[0] === "claude"),
-    probe(diesAt?: { exec: (argv: readonly string[]) => boolean; ran: boolean }): FakeGuest {
+    probe(diesAt?: { exec: (argv: readonly string[]) => boolean; ran: boolean | "held" }): FakeGuest {
       let dead = false;
       const guest = fakeGuest(() => assert.fail("unused"));
       return {
@@ -567,7 +573,8 @@ function launchPylon(options: { shellReady?: boolean; starts?: boolean; submits?
           if (dead) throw new Error("socket hang up");
           if (diesAt?.exec(argv)) {
             dead = true;
-            if (diesAt.ran) run(argv);
+            if (diesAt.ran === "held") held.push(() => run(argv));
+            else if (diesAt.ran) run(argv);
             throw new Error("socket hang up");
           }
           return { truncated: false, ...run(argv) };
@@ -583,7 +590,7 @@ function launchPylon(options: { shellReady?: boolean; starts?: boolean; submits?
 
 const launched = "6f1c2a9e-3b7d-4e05-8c21-9d4b7a1e5f30";
 const prompted = { harness: "claude-code" as const, title: "worker", cwd: "/home/user/workspace/repo", resume: launched, prompt: "work" };
-const typedExec = (argv: readonly string[]) => argv[2] === 'touch "$0" && exec "$@"';
+const typedExec = (argv: readonly string[]) => argv[0] === "sh" && argv[4] === "herdr" && argv.includes("run");
 
 test("a worker's first prompt reaches Claude as one exact argument through the pane's interactive bash", async () => {
   const { execFileSync } = await import("node:child_process");
@@ -605,7 +612,7 @@ test("a worker's first prompt reaches Claude as one exact argument through the p
   assert.equal(JSON.parse(argv[7]!).hooks.UserPromptSubmit[0].hooks[0].command, `mkdir -p ${launch} && touch ${launch}/submitted`);
   assert.equal(argv[8], prompt);
   assert.equal(argv.length, 9);
-  assert.equal(pylon.execs[typedAt]![3], `${launch}/typed`, "the exec that types the launch records it first");
+  assert.equal(pylon.execs[typedAt]![3], `${launch}/typed`, "the exec that types the launch claims it first");
   assert.equal(pylon.files.get(`${launch}/opened`), "w1 w1:p1\n");
 });
 
@@ -657,6 +664,15 @@ test("a launch whose probe died while typing is not typed again, and its receipt
   const pylon = launchPylon();
   await assert.rejects(openSession(pylon.probe({ exec: typedExec, ran: true }), prompted));
   assert.equal(await openSession(pylon.probe(), prompted), "w1:p1");
+  assert.equal(pylon.typings(), 1);
+  assert.equal(pylon.claudes().length, 1);
+});
+
+test("a typing exec the dead probe's guest starts late types nothing once the second launch has typed", async () => {
+  const pylon = launchPylon();
+  await assert.rejects(openSession(pylon.probe({ exec: typedExec, ran: "held" }), prompted));
+  assert.equal(await openSession(pylon.probe(), prompted), "w1:p1");
+  assert.deepEqual(pylon.release(), [{ exitCode: 75, output: "" }]);
   assert.equal(pylon.typings(), 1);
   assert.equal(pylon.claudes().length, 1);
 });
