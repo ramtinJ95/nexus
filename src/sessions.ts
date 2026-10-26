@@ -119,28 +119,70 @@ export class HerdrError extends Error {
   }
 }
 
-/** Returns the new session's Herdr pane. Rolls the workspace back if the harness does not start. */
+/**
+ * Returns the new session's Herdr pane. Rolls the workspace back if the harness does not start.
+ *
+ * A prompted Claude Code launch is safe to send again under the same `resume` ID, as after the probe restarted
+ * under it: it reads how far the earlier one got (claudeLaunch) and carries on from there. It types the command at
+ * most once, reuses the earlier one's pane if nothing was typed, and never starts Claude in a second pane.
+ */
 export async function openSession(guest: Guest, session: { harness: SessionHarness; title: string; cwd: string; resume?: string; prompt?: string; model?: string }): Promise<string> {
   await ensureServer(guest);
-  const created = record(await herdr(guest, ["workspace", "create", "--cwd", session.cwd, "--label", session.title, "--no-focus"]), "workspace create");
-  const workspaceId = string(record(created.workspace, "workspace create .workspace").workspace_id, "workspace_id");
-  const pane = string(record(created.root_pane, "workspace create .root_pane").pane_id, "pane_id");
+  const prompted = session.harness === "claude-code" && session.prompt !== undefined;
+  const resume = prompted ? session.resume ?? randomUUID() : session.resume;
+  const launch = prompted ? await claudeLaunch(guest, resume!) : null;
+  if (launch?.progress === "typed") {
+    await awaitSubmission(guest, launch.pane, launch.dir, " before the probe lost the launch");
+    return launch.pane;
+  }
+  if (launch !== null) {
+    // A probe older than the launch record types without recording it, so its launch shows only as a running Claude.
+    const running = await claudePane(guest, resume!);
+    if (running?.runs === true) return running.pane.herdrPane;
+  }
+  let opened: { workspace: string; pane: string } | null = launch?.progress === "opened" && (await livePanes(guest)).some((p) => p.herdrPane === launch.pane) ? launch : null;
+  if (opened === null) {
+    const created = record(await herdr(guest, ["workspace", "create", "--cwd", session.cwd, "--label", session.title, "--no-focus"]), "workspace create");
+    opened = { workspace: string(record(created.workspace, "workspace create .workspace").workspace_id, "workspace_id"), pane: string(record(created.root_pane, "workspace create .root_pane").pane_id, "pane_id") };
+    if (launch !== null) await guest.writeFiles([{ path: `${launch.dir}/opened`, mode: 0o644, owner: "user", content: `${opened.workspace} ${opened.pane}\n` }]);
+  }
   try {
-    await startHarness(guest, pane, session.harness, session.resume, session.prompt, session.model);
+    await startHarness(guest, opened.pane, session.harness, resume, session.prompt, session.model, launch?.dir);
   } catch (err) {
     if (err instanceof ClaudeLaunchStalled) throw err;
     try {
-      await herdr(guest, ["workspace", "close", workspaceId]);
+      await herdr(guest, ["workspace", "close", opened.workspace]);
     } catch (cleanup) {
-      throw new Error(`${(err as Error).message}; rolling back workspace ${workspaceId} also failed: ${(cleanup as Error).message}`, { cause: err });
+      throw new Error(`${(err as Error).message}; rolling back workspace ${opened.workspace} also failed: ${(cleanup as Error).message}`, { cause: err });
     }
     throw err;
   }
-  return pane;
+  return opened.pane;
+}
+
+const launchesDir = `${home}/.nexus/claude-launches`;
+
+/**
+ * How far a prompted Claude Code launch got: `opened` once its workspace exists, `typed` once the command to start
+ * Claude is on its way into the pane, and `submitted` once Claude took the first prompt. `typed` is written by the
+ * same guest exec that types the command, and a guest exec runs to its end even when the probe that started it
+ * exits, so a launch without it typed nothing.
+ */
+type ClaudeLaunch = { dir: `/${string}` } & ({ progress: "none" } | { progress: "opened" | "typed"; workspace: string; pane: string });
+
+async function claudeLaunch(guest: Guest, session: string): Promise<ClaudeLaunch> {
+  if (!/^[A-Za-z0-9-]{1,200}$/.test(session)) throw new Error(`a prompted Claude launch needs a session ID of letters, digits and dashes, not ${JSON.stringify(session)}`);
+  const dir = `${launchesDir}/${session}` as const;
+  const { exitCode, output } = await guest.exec(["sh", "-c", 'test -f "$0/opened" || exit 0; cat "$0/opened"; test -e "$0/typed" && echo typed; exit 0', dir], { cwd: home, timeoutMs: callTimeoutMs });
+  if (exitCode !== 0) throw new Error(`reading Claude launch ${dir} failed with exit ${exitCode}: ${output}`);
+  const [opened, ...stages] = output.trim().split("\n");
+  if (opened === undefined || opened === "") return { dir, progress: "none" };
+  const [workspace, pane] = opened.split(" ");
+  return { dir, progress: stages.includes("typed") ? "typed" : "opened", workspace: string(workspace, `${dir}/opened workspace`), pane: string(pane, `${dir}/opened pane`) };
 }
 
 /** Starts at the shell prompt; prompted Claude launches use submission evidence instead of readiness. */
-async function startHarness(guest: Guest, pane: string, harness: SessionHarness, resume: string | undefined, prompt?: string, model?: string): Promise<void> {
+async function startHarness(guest: Guest, pane: string, harness: SessionHarness, resume: string | undefined, prompt?: string, model?: string, launchDir?: string): Promise<void> {
   const agent = agents[harness];
   if (agent === null) return;
   if (harness === "claude-code") {
@@ -151,21 +193,16 @@ async function startHarness(guest: Guest, pane: string, harness: SessionHarness,
   const launch = [...args];
   if (harness === "claude-code" && model !== undefined) launch.push("--model", model);
   if (harness === "claude-code") launch.push("--permission-mode", "bypassPermissions");
-  if (harness === "claude-code" && prompt !== undefined) {
-    const receipt = `${home}/.nexus/claude-submitted-${randomUUID()}`;
-    const command = `mkdir -p ${home}/.nexus && touch ${receipt}`;
+  if (harness === "claude-code" && prompt !== undefined && launchDir !== undefined) {
+    if (args[0] === "--resume") throw new Error(`Claude session ${resume} already has a transcript, so its first prompt went in before this launch, which typed nothing. Attach to check before starting another session`);
+    const command = `mkdir -p ${launchDir} && touch ${launchDir}/submitted`;
     launch.push("--settings", JSON.stringify({ hooks: { UserPromptSubmit: [{ hooks: [{ type: "command", command }] }] } }), prompt);
     await awaitShellPrompt(guest, pane);
     // Herdr 0.9.5's agent start refuses an argument holding a newline or another control character, as a multi-line
     // prompt does, so this launch types its own command. Once typed, any error is as uncertain as a readiness timeout:
     // the receipt decides, and the pane and the submission fence stay.
-    const typed = await herdr(guest, ["pane", "run", pane, [agent.kind, ...launch].map(shellWord).join(" ")]).then(() => "", (err: Error) => ` after ${err.message}`);
-    const submitted = await guest.exec(["sh", "-c", 'i=0; until test -f "$1"; do i=$((i+1)); test "$i" -lt 300 || exit 1; sleep 0.1; done; rm -f "$1"', "claude-submitted", receipt], { cwd: home, timeoutMs: 35_000 }).catch(() => ({ exitCode: null }));
-    if (submitted.exitCode !== 0 && await runsAgent(guest, pane, "claude").catch(() => false)) {
-      const panes = await livePanes(guest).catch(() => []);
-      if (panes.some((p) => p.herdrPane === pane && p.status === "working")) return;
-    }
-    if (submitted.exitCode !== 0) throw new ClaudeLaunchStalled(`Claude launch stalled: no UserPromptSubmit within 30 seconds${typed}; attach before starting another session. The pane showed:\n${await screen(guest, pane)}`, pane);
+    const typed = await herdr(guest, ["pane", "run", pane, [agent.kind, ...launch].map(shellWord).join(" ")], callTimeoutMs, `${launchDir}/typed`).then(() => "", (err: Error) => ` after ${err.message}`);
+    await awaitSubmission(guest, pane, launchDir, typed);
     return;
   }
   if (prompt !== undefined) launch.push(prompt);
@@ -193,6 +230,17 @@ async function startHarness(guest: Guest, pane: string, harness: SessionHarness,
       throw new Error(`${(err as Error).message}. The pane showed:\n${await screen(guest, pane)}`, { cause: err });
     }
   }
+}
+
+/**
+ * Waits up to 30 seconds for the launch's UserPromptSubmit receipt. A live, working Claude in the pane also shows the
+ * launch went in. Anything else leaves the pane as it is for the person, since Claude may still be starting.
+ */
+async function awaitSubmission(guest: Guest, pane: string, launchDir: string, typed: string): Promise<void> {
+  const submitted = await guest.exec(["sh", "-c", 'i=0; until test -f "$1"; do i=$((i+1)); test "$i" -lt 300 || exit 1; sleep 0.1; done', "claude-submitted", `${launchDir}/submitted`], { cwd: home, timeoutMs: 35_000 }).catch(() => ({ exitCode: null }));
+  if (submitted.exitCode === 0) return;
+  if (await runsAgent(guest, pane, "claude").catch(() => false) && (await livePanes(guest).catch(() => [])).some((p) => p.herdrPane === pane && p.status === "working")) return;
+  throw new ClaudeLaunchStalled(`Claude launch stalled: no UserPromptSubmit within 30 seconds${typed}; attach before starting another session. The pane showed:\n${await screen(guest, pane)}`, pane);
 }
 
 /**
@@ -684,9 +732,10 @@ async function writeSessionsFile(guest: Guest, file: SessionsFile): Promise<void
  * One Herdr CLI call. Control commands print one JSON line, `{ id, result }` or `{ id, error }`, and the
  * exec merges stderr into the output, so the reply is the last line that starts with `{`.
  */
-async function herdr(guest: Guest, args: readonly string[], timeoutMs = callTimeoutMs): Promise<unknown> {
+async function herdr(guest: Guest, args: readonly string[], timeoutMs = callTimeoutMs, marker?: string): Promise<unknown> {
   const what = `herdr ${args.slice(0, 2).join(" ")}`;
-  const { exitCode, output } = await guest.exec(["herdr", "--session", herdrSession, ...args], { cwd: home, timeoutMs });
+  const argv = ["herdr", "--session", herdrSession, ...args];
+  const { exitCode, output } = await guest.exec(marker === undefined ? argv : ["sh", "-c", 'touch "$0" && exec "$@"', marker, ...argv], { cwd: home, timeoutMs });
   if (exitCode === null) throw new Error(`${what} did not finish within ${timeoutMs} ms`);
   const line = output.trimEnd().split("\n").findLast((l) => l.startsWith("{"));
   // `pane run` succeeds silently.
