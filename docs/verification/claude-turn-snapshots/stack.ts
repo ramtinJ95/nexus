@@ -1,10 +1,10 @@
 // A local Nexus control plane for this pylon, as docs/verification/claude-thread-streaming/stack.ts runs it: the real
 // registry, API and dashboard on 127.0.0.1:7472, a node whose probe runs commands through the real runCommand and pipes
 // as local processes, and a real Claude Code as the Claude worker, with HOME, the checkout and the Herdr server moved
-// under /tmp/nexus-turn-verify. The hooks are this branch's images/pylon hook, staged with the image's two paths moved
-// the same way: the checkout, and the image's copy of the checkout helper, which is src/checkout-files.py. With
-// HOOKS=old they are the image's current /usr/local/bin/nexus-claude-hook, which takes no snapshot. They post to a
-// bridge on 127.0.0.1:7490 that hands their events to the registry, as the probe would. Nothing reaches the live
+// under /tmp/nexus-turn-verify. The hooks are this branch's images/pylon hook, staged with the image's paths moved
+// the same way: the checkout, the image's copy of the checkout helper, which is src/checkout-files.py, and the home
+// the hook reports from. With HOOKS=old they are the image's current /usr/local/bin/nexus-claude-hook, which takes no
+// snapshot. They post to a bridge on 127.0.0.1:7490 that hands their events to the registry, as the probe would. Nothing reaches the live
 // control plane: the isolated HOME has only these hooks, and NEXUS_API points them here.
 //
 //   node docs/verification/claude-turn-snapshots/stack.ts
@@ -38,8 +38,8 @@ const bin = join(root, "bin");
 mkdirSync(bin, { recursive: true });
 const image = new URL("../../../images/pylon/", import.meta.url);
 const helper = new URL("../../../src/checkout-files.py", import.meta.url).pathname;
-for (const file of ["nexus-claude-hook", "nexus-heartbeat.ts", "nexus-turn.ts"]) {
-  const staged = readFileSync(new URL(file, image), "utf8").replaceAll("/home/user/workspace/repo", repo).replaceAll("/usr/local/lib/nexus/checkout-files.py", helper);
+for (const file of ["nexus-claude-hook", "nexus-heartbeat.ts", "nexus-outbox.ts", "nexus-turn.ts"]) {
+  const staged = readFileSync(new URL(file, image), "utf8").replaceAll("/home/user/workspace/repo", repo).replaceAll("/usr/local/lib/nexus/checkout-files.py", helper).replaceAll("userInfo().homedir", JSON.stringify(home));
   writeFileSync(join(bin, file), staged, { mode: 0o755 });
 }
 const hookPath = process.env.HOOKS === "old" ? "/usr/local/bin/nexus-claude-hook" : join(bin, "nexus-claude-hook");
@@ -70,7 +70,8 @@ const guest = {
     const result = await run(local, options.timeoutMs, herdr || argv.some((a) => a.includes("herdr --session")) ? process.env : { ...process.env, HOME: home });
     if (herdr && argv[3] === "workspace" && argv[4] === "create" && result.exitCode === 0) {
       const pane = JSON.parse(result.output.trim().split("\n").at(-1)!).result.root_pane.pane_id as string;
-      await run(["herdr", "--session", herdrServer, "pane", "run", pane, `. /etc/profile.d/nexus-secrets.sh; export HOME=${home} NEXUS_API=http://127.0.0.1:${bridgePort}; cd ${repo}; clear`], 10_000, process.env);
+      // The hook reports only for a Claude no other Claude started, so the worker drops the variable that would say one did.
+      await run(["herdr", "--session", herdrServer, "pane", "run", pane, `. /etc/profile.d/nexus-secrets.sh; unset CLAUDE_CODE_SESSION_ID; export HOME=${home} NEXUS_API=http://127.0.0.1:${bridgePort}; cd ${repo}; clear`], 10_000, process.env);
       await new Promise((resolve) => setTimeout(resolve, 1000));
     }
     return result;
