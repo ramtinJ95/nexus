@@ -142,6 +142,12 @@ export interface NodeObservation {
    * Null from a probe older than this field, whose capacity also counts no pylons.
    */
   grants: { secrets: readonly string[]; gitSsh: boolean } | null;
+  /**
+   * True from a probe whose open-session of a prompted Claude Code launch is safe to send again under the same `resume`
+   * ID (sessions.ts openSession). A probe older than the field sends none, and the control plane never sends a launch
+   * to it twice.
+   */
+  claudeLaunchRepeatable?: true;
 }
 
 export interface PreviewRouteFact { httpsPort: number; pylonId: PylonId; service: string }
@@ -232,6 +238,7 @@ export type ProbeEvent =
 export type PylonCommand =
   /** When the timeout passes, the probe calls pi-sandbox's exec-kill and returns exitCode null. Timeout at most 60 s. */
   | { kind: "exec"; argv: readonly string[]; cwd: string; timeoutMs: number }
+  /** With a `prompt` and a `resume` ID, safe to send again from a probe whose snapshot says `claudeLaunchRepeatable`. */
   | { kind: "open-session"; harness: SessionHarness; title: string; resume?: string; prompt?: string; model?: string }
   /**
    * `session` is who the control plane last saw in the pane, so a pane a wake has since given to another session is
@@ -408,7 +415,7 @@ export function connectProbe(node: NodeName, tailnetHost: string, expected: Tail
       res.socket.setTimeout(0);
       for await (const line of lines(res)) yield parseProbeEvent(line);
     },
-    /** Never retried: an exec or a session open is not safe to run twice. */
+    /** Never retried here: an exec or a session open is not safe to run twice, except as `claudeLaunchRepeatable` says. */
     async command(pylonId, command) {
       const path = `/v1/pylons/${encodeURIComponent(pylonId)}/commands`;
       const res = await call("POST", path, JSON.stringify(command), commandTimeoutMs);

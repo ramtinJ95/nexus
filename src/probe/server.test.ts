@@ -536,6 +536,39 @@ test("the outcome of a Claude send waits for one queued behind a slow send, type
   assert.deepEqual(typed, ["slow", "queued", "breaks"], "asking for an outcome types nothing");
 });
 
+test("a prompted Claude launch sent again while the first still runs waits for it, and snapshots say a launch can be sent again", async (t) => {
+  const execs: string[] = [];
+  let release!: () => void;
+  const held = new Promise<void>((resolve) => { release = resolve; });
+  const base = fakeGuest((argv, herdr) => herdr ? herdrError("server_not_running") : { exitCode: 1, output: "no Herdr in this guest" });
+  const guest: Guest = {
+    ...base,
+    async exec(argv, options) {
+      execs.push(argv.join(" "));
+      if (execs.length === 1) await held;
+      return base.exec(argv, options);
+    },
+  };
+  const { client } = await setup(t, {}, guest);
+  await running(client);
+  const launch = { kind: "open-session" as const, harness: "claude-code" as const, title: "worker", resume: "6f1c2a9e-3b7d-4e05-8c21-9d4b7a1e5f30", prompt: "hello" };
+  execs.length = 0;
+  const first = client.command(pylonId, launch);
+  while (execs.length === 0) await new Promise((r) => setTimeout(r, 5));
+  const again = client.command(pylonId, launch);
+  await new Promise((r) => setTimeout(r, 100));
+  assert.equal(execs.length, 1, "the second launch ran nothing while the first held the guest");
+  release();
+  await Promise.all([assert.rejects(first, /starting the Herdr server failed/), assert.rejects(again, /starting the Herdr server failed/)]);
+  assert.equal(execs.length, 4);
+  assert.deepEqual(execs.slice(0, 2).map((e) => e.split(" ")[0]), ["herdr", "sh"], "the first launch ran to its end before the second began");
+  const stream = client.observe(AbortSignal.timeout(5_000));
+  for await (const event of stream) {
+    assert.ok(event.type === "snapshot" && event.observation.claudeLaunchRepeatable === true);
+    break;
+  }
+});
+
 test("a failing command rejects with the guest's error", async (t) => {
   const guest = fakeGuest((_argv, herdr) => herdr ? herdrError("invalid_params", "pane w9:p9 is malformed") : { exitCode: 0, output: "" });
   const { client } = await setup(t, {}, guest);
