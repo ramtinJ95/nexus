@@ -1,0 +1,17 @@
+ ▐▛███▛█   Claude Code v2.1.308
+▝▜██████▀  Sonnet 5.5 · Claude API
+ ▝▝   ▝▝   ~/repo
+  Get to finished work sooner with Opus 5.5. Switch anytime with /model.
+❯ Run the Bash command python3 -c "import time; time.sleep(420)"; echo suite-passed with run_in_background set to
+  true. Then end your turn immediately with the words "waiting on the suite". Do not wait for it, do not poll it. When
+  it finishes, reply with one word: done.
+  Ran 1 shell command
+● waiting on the suite
+✻ Baked for 3s · done 2:55 AM
+● Background command "Run 7-minute background suite" completed (exit code 0)
+● done
+✻ Churned for 1s · done 3:02 AM
+───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+❯
+───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  ⏵⏵ bypass permissions on (shift+tab to cycle)

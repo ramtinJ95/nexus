@@ -6,8 +6,8 @@
   immediately with the words "server is up". Do not check on it.
   Ran 1 shell command
 ● server is up
-✻ Sautéed for 4s · done 2:20 AM · 1 shell still running
+✻ Cooked for 3s · done 2:55 AM · 1 shell still running
 ───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-❯ curl localhost:8765
+❯ curl localhost:8765 to check it
 ───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
   ⏵⏵ bypass permissions on · 1 shell · ↓ to manage

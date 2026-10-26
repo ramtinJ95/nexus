@@ -155,7 +155,7 @@ past matching records they have not consumed.
 |---|---|
 | `session.turn-started` | Claude submitted a prompt; optional `session` and `message` |
 | `session.heartbeat` | A throttled PostToolUse hook, or a Stop hook while background tasks run, confirms activity; optional `session` and `message` |
-| `session.turn-ended` | Claude's Stop hook ran with no background task running, or 10 minutes after one with only background shells running; optional `session` and `message` |
+| `session.turn-ended` | Claude's Stop hook ran with no background task running, or after one with only background shells running once they exit or an hour passes; optional `session` and `message` |
 | `session.waiting` | Claude showed a permission or input prompt; optional `session` and `message` |
 | `session.ended` | Claude's SessionEnd hook ran; optional `session` and `message` |
 | `thread.turn-ended` | The control-plane harness completed a turn |
@@ -196,7 +196,7 @@ expire on upgrade rather than receiving an invented fresh lease.
 A start gives a session a 30-minute working lease. A `session.heartbeat` renews
 an existing working lease, or resumes an existing waiting session with a fresh
 lease when stamped later than its waiting event. It cannot create a session or
-revive an ended or expired turn, and neither can a `session.waiting`.
+revive an ended or expired turn.
 PostToolUse hooks share a per-session five-minute throttle; no network call runs
 in the hook process. Each real tool completion can renew the lease, so a turn can
 run for hours without human activity. A killed, silent or fake one-shot turn start
@@ -210,10 +210,12 @@ A Stop hook whose `background_tasks` lists a `subagent` or `shell` with status
 not ended and records no reply. A subagent's tool hooks report under the main
 session's ID and renew the same lease. The turn Claude starts when the last task
 finishes ends it. There is no subagent record: a subagent that never finishes
-lets the lease expire like any other silent turn. When only shells run, the hook
-also reports `session.turn-ended` 10 minutes later, stamped with the Stop's time,
-so a dev server's turn still ends, and any later report for the session, such as
-the turn a command's finish starts, makes that end stale.
+lets the lease expire like any other silent turn. When only shells run, a detached
+hold sends `session.heartbeat` every five minutes while a process writes to a
+shell's output file, then `session.turn-ended` 30 seconds after the last one stops,
+or after an hour. Each carries the Stop's time, so they renew the lease by receipt
+time, a dev server's turn still ends, and any later report for the session, such
+as the turn a command's finish starts, makes the rest stale.
 
 `Thread.sessionTurnRunning` and `sessionWaiting` are optional current facts;
 `sessionActiveUntil` lets the pure planner enforce expiry even on an older read.

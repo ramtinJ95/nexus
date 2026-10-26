@@ -1,100 +1,38 @@
 === background command
 
-Old hook into main's registry
+Old hook
   +s      report                  attention  session turn  reply
-     0.0  session.turn-started    working    true          no    (927f6327 UserPromptSubmit)
-     2.7  session.heartbeat       working    true          no    (927f6327 PostToolUse)
-     3.9  session.turn-ended      reply      false         yes   (927f6327 Stop, running ["shell"])
-    63.9  session.waiting         waiting    false         yes   (927f6327 Notification idle_prompt)
-   152.8  session.turn-started    working    true          yes   (927f6327 UserPromptSubmit)
-   154.1  session.turn-ended      reply      false         yes   (927f6327 Stop, running [])
-   214.2  session.waiting         waiting    false         yes   (927f6327 Notification idle_prompt)
+     0.0  session.turn-started    working    true          no    (8ec342b7 UserPromptSubmit)
+     2.3  session.heartbeat       working    true          no    (8ec342b7 PostToolUse)
+     3.4  session.turn-ended      reply      false         yes   (8ec342b7 Stop, running ["shell"])
+    63.6  session.waiting         waiting    false         yes   (8ec342b7 Notification idle_prompt)
+   422.3  session.turn-started    working    true          yes   (8ec342b7 UserPromptSubmit)
+   423.9  session.turn-ended      reply      false         yes   (8ec342b7 Stop, running [])
+   484.0  session.waiting         waiting    false         yes   (8ec342b7 Notification idle_prompt)
 
-Old hook into this branch's registry
+This branch's hook
   +s      report                  attention  session turn  reply
-     0.0  session.turn-started    working    true          no    (927f6327 UserPromptSubmit)
-     2.7  session.heartbeat       working    true          no    (927f6327 PostToolUse)
-     3.9  session.turn-ended      reply      false         yes   (927f6327 Stop, running ["shell"])
-    63.9  session.waiting         null       false         yes   (927f6327 Notification idle_prompt)
-   152.8  session.turn-started    working    true          yes   (927f6327 UserPromptSubmit)
-   154.1  session.turn-ended      reply      false         yes   (927f6327 Stop, running [])
-   214.2  session.waiting         null       false         yes   (927f6327 Notification idle_prompt)
-
-This branch's hook into this branch's registry
-  +s      report                  attention  session turn  reply
-     0.0  session.turn-started    working    true          no    (927f6327)
-     2.6  session.heartbeat       working    true          no    (927f6327)
-   152.6  session.turn-started    working    true          no    (927f6327)
-   154.0  session.turn-ended      reply      false         yes   (927f6327)
-   603.7  session.turn-ended      null       false         yes   (927f6327, held end stamped 600 s earlier)
+     0.0  session.turn-started    working    true          no    (8ec342b7)
+     2.3  session.heartbeat       working    true          no    (8ec342b7)
+   303.7  session.heartbeat       working    true          no    (8ec342b7, held report stamped 301 s earlier)
+   422.2  session.turn-started    working    true          no    (8ec342b7)
+   423.8  session.turn-ended      reply      false         yes   (8ec342b7)
+   453.9  session.turn-ended      null       false         yes   (8ec342b7, held report stamped 451 s earlier)
 === background dev server
 
-Old hook into main's registry
+Old hook
   +s      report                  attention  session turn  reply
-     0.0  session.turn-started    working    true          no    (ff3ae72a UserPromptSubmit)
-     2.6  session.heartbeat       working    true          no    (ff3ae72a PostToolUse)
-     3.7  session.turn-ended      reply      false         yes   (ff3ae72a Stop, running ["shell"])
-    63.8  session.waiting         waiting    false         yes   (ff3ae72a Notification idle_prompt)
+     0.0  session.turn-started    working    true          no    (c4acd325 UserPromptSubmit)
+     2.4  session.heartbeat       working    true          no    (c4acd325 PostToolUse)
+     3.3  session.turn-ended      reply      false         yes   (c4acd325 Stop, running ["shell"])
+    63.5  session.waiting         waiting    false         yes   (c4acd325 Notification idle_prompt)
+   691.4  session.ended           null       false         yes   (c4acd325 SessionEnd)
 
-Old hook into this branch's registry
+This branch's hook
   +s      report                  attention  session turn  reply
-     0.0  session.turn-started    working    true          no    (ff3ae72a UserPromptSubmit)
-     2.6  session.heartbeat       working    true          no    (ff3ae72a PostToolUse)
-     3.7  session.turn-ended      reply      false         yes   (ff3ae72a Stop, running ["shell"])
-    63.8  session.waiting         null       false         yes   (ff3ae72a Notification idle_prompt)
-
-This branch's hook into this branch's registry
-  +s      report                  attention  session turn  reply
-     0.0  session.turn-started    working    true          no    (ff3ae72a)
-     2.5  session.heartbeat       working    true          no    (ff3ae72a)
-   603.6  session.turn-ended      reply      false         yes   (ff3ae72a, held end stamped 600 s earlier)
-=== nested sessions and a question
-
-Old hook into main's registry
-  +s      report                  attention  session turn  reply
-     0.0  session.turn-started    working    true          no    (6019981b UserPromptSubmit)
-     3.3  session.turn-started    working    true          no    (385fcfb0 UserPromptSubmit)
-     3.8  session.ended           working    true          no    (385fcfb0 SessionEnd)
-     7.3  session.turn-started    working    true          no    (35aa52c9 UserPromptSubmit)
-     7.4  session.ended           working    true          no    (35aa52c9 SessionEnd)
-    15.7  session.waiting         waiting    false         no    (6019981b Notification permission_prompt)
-    61.4  session.heartbeat       working    true          no    (6019981b PostToolUse)
-    62.6  session.turn-ended      reply      false         yes   (6019981b Stop, running [])
-    69.5  session.turn-started    working    true          yes   (6019981b UserPromptSubmit)
-    73.0  session.turn-started    working    true          yes   (182e4cc0 UserPromptSubmit)
-    74.5  session.turn-ended      reply      true          yes   (182e4cc0 Stop, running [])
-    74.6  session.ended           working    true          yes   (182e4cc0 SessionEnd)
-    76.0  session.turn-started    working    true          yes   (01698671 UserPromptSubmit)
-    77.4  session.turn-ended      reply      true          yes   (01698671 Stop, running [])
-    77.5  session.ended           working    true          yes   (01698671 SessionEnd)
-    79.0  session.turn-ended      reply      false         yes   (6019981b Stop, running [])
-   139.1  session.waiting         waiting    false         yes   (6019981b Notification idle_prompt)
-
-Old hook into this branch's registry
-  +s      report                  attention  session turn  reply
-     0.0  session.turn-started    working    true          no    (6019981b UserPromptSubmit)
-     3.3  session.turn-started    working    true          no    (385fcfb0 UserPromptSubmit)
-     3.8  session.ended           working    true          no    (385fcfb0 SessionEnd)
-     7.3  session.turn-started    working    true          no    (35aa52c9 UserPromptSubmit)
-     7.4  session.ended           working    true          no    (35aa52c9 SessionEnd)
-    15.7  session.waiting         waiting    false         no    (6019981b Notification permission_prompt)
-    61.4  session.heartbeat       working    true          no    (6019981b PostToolUse)
-    62.6  session.turn-ended      reply      false         yes   (6019981b Stop, running [])
-    69.5  session.turn-started    working    true          yes   (6019981b UserPromptSubmit)
-    73.0  session.turn-started    working    true          yes   (182e4cc0 UserPromptSubmit)
-    74.5  session.turn-ended      reply      true          yes   (182e4cc0 Stop, running [])
-    74.6  session.ended           working    true          yes   (182e4cc0 SessionEnd)
-    76.0  session.turn-started    working    true          yes   (01698671 UserPromptSubmit)
-    77.4  session.turn-ended      reply      true          yes   (01698671 Stop, running [])
-    77.5  session.ended           working    true          yes   (01698671 SessionEnd)
-    79.0  session.turn-ended      reply      false         yes   (6019981b Stop, running [])
-   139.1  session.waiting         null       false         yes   (6019981b Notification idle_prompt)
-
-This branch's hook into this branch's registry
-  +s      report                  attention  session turn  reply
-     0.0  session.turn-started    working    true          no    (6019981b)
-    15.5  session.waiting         waiting    false         no    (6019981b)
-    61.4  session.heartbeat       working    true          no    (6019981b)
-    62.5  session.turn-ended      reply      false         yes   (6019981b)
-    69.4  session.turn-started    working    true          yes   (6019981b)
-    78.9  session.turn-ended      reply      false         yes   (6019981b)
+     0.0  session.turn-started    working    true          no    (c4acd325)
+     2.3  session.heartbeat       working    true          no    (c4acd325)
+   303.6  session.heartbeat       working    true          no    (c4acd325, held report stamped 300 s earlier)
+   603.8  session.heartbeat       working    true          no    (c4acd325, held report stamped 601 s earlier)
+   691.3  session.ended           null       false         no    (c4acd325)
+   753.9  session.turn-ended      null       false         no    (c4acd325, held report stamped 751 s earlier)

@@ -137,7 +137,7 @@ A persistent drain lease blocks API and background PR-watch turn entry, and coun
 | Date | Decision |
 |---|---|
 | 2026-10-26 | A node's committed capacity counts the CPUs and memory of VMs that are up and the disk of every pylon, paused or not. `start --node auto` is opt-in. It ranks nodes by memory left after the pylon, then CPUs, then disk, refuses a node where memory or disk does not fit, and lets CPUs be oversubscribed |
-| 2026-10-26 | A Claude turn that ends with only background commands running stays working for up to 10 minutes, until the turn their finish starts. Only Claude's permission and input prompts count as waiting, and only during a turn. A Claude started inside another Claude session, or under another HOME, does not report into the thread |
+| 2026-10-26 | A Claude turn that ends with only background commands running stays working while their processes live, for up to an hour, until the turn their finish starts. Only Claude's permission and input prompts count as waiting, filtered by the image's hook matcher, not by the control plane. A Claude started inside another Claude session, or under another HOME, does not report into the thread |
 | 2026-10-26 | [The merge policy](merge-policy.md), as the person approved it, says when an agent may merge and deploy a pull request without the person, and which changes always need the person |
 | 2026-10-26 | The review loop runs on the control plane, started by `nexus review <thread>`, not for every PR yet. A Claude worker's PR is reviewed by a harness thread on the harness's OpenAI model, and a harness thread's PR by a Claude worker, so the reviewer is always another model family. Agents answer in fenced JSON blocks that echo a random token sent with each request, read from their replies. The control plane runs `.nexus/check` at the approved head itself, in a fresh agentless check thread it deletes afterwards, and takes the verdict from the exit status of the probe's pipe, never from a file the check could write. Only a harness reviewer's approval can land, since a Claude reviewer's verdict is read from a pylon where PR code could run. Landing checks the policy again before every merge attempt, merges only the approved head, deploys only Nexus's own PRs, verifies a rollback before claiming it, and needs a caller with the deploy right |
 | 2026-10-26 | The preview gateway keeps the browser on HTTPS for apps that name their own scheme: it rewrites redirects to the preview's own `http://` address and sends `upgrade-insecure-requests`, which also breaks a preview's links to plain-HTTP ports on the same name. It does not rewrite bodies, and sends no HSTS, which would cover the dashboard's plain HTTP port on the same name |
@@ -296,22 +296,28 @@ Captures are in `docs/verification/claude-background-subagents/`.
 A Bash command Claude runs in the background lists as a running `shell` in the
 same Stop input, and its finish starts a `<task-notification>` turn too. A shell
 may also be a dev server that never finishes, so the Stop reports a heartbeat and
-the hook holds the turn end back. A detached process reports it 10 minutes later,
-as long as Claude Code lets a foreground command run, stamped with the Stop's own
-time. A turn that starts sooner, when the command finishes or the person sends a
-message, makes it stale, so the registry ignores it. A dev server's turn therefore
-ends 10 minutes late, and a command that outlasts the grace shows a reply until its
-finish starts the next turn.
+the hook holds the turn end back. A detached copy of the hook checks every minute
+whether a process still writes to the command's output file, which Claude Code
+names by session and task ID and gives the command as stdout and stderr. While one
+does, it sends a heartbeat every five minutes, so a long build keeps its lease and
+its pylon. When none does, it waits 30 seconds and sends the turn end. Every report
+carries the Stop's own stamp, so the lease renews by receipt time, and the turn
+Claude starts when the command finishes, or a message from the person, makes the
+rest stale. A command that runs past an hour, such as a dev server, has its turn
+ended then, so a server delays its reply by an hour at most. A held process does
+not survive a pause, but the session is working, so its pylon is not paused.
 
 Claude's Notification hook also fires for an idle prompt, 60 seconds after any
 turn ends, even with a background command still running. Only `permission_prompt`,
-which AskUserQuestion also fires, and `elicitation_dialog` report waiting, and a
-waiting report, like a heartbeat, applies only to a session whose turn runs.
+which AskUserQuestion also fires, and `elicitation_dialog` report waiting. The
+event does not say which notification fired, so the control plane cannot drop an
+idle prompt without risking a real wait whose turn start was lost or late. Until
+the image is rebuilt, the old matcher's idle prompt still counts.
 
 Every Claude in the pylon reads the same hooks, including one a worker starts to
 verify its work, whose turn end would otherwise give the thread a reply while the
-worker still works. The hook reports only for a Claude under the pylon user's own
-HOME whose process started without `CLAUDE_CODE_SESSION_ID`, which Claude Code puts
+worker still works. The hook reports, and snapshots a turn, only for a Claude under
+the pylon user's own HOME whose process started without `CLAUDE_CODE_SESSION_ID`, which Claude Code puts
 in the environment of everything it runs, even after `env -u CLAUDECODE`. Sessions
 Nexus opens in Herdr panes, the worker's and the person's, start without it.
 Captures are in `docs/verification/claude-activity-accuracy/`.

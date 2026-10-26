@@ -1,14 +1,13 @@
-// node replay.ts <hooks.jsonl> <events.jsonl> <main checkout> <session prefixes, comma-separated>
-// Replays the named real Claude sessions from one pylon into one thread of a fresh registry, three ways: the old
-// hook's reports from the raw hook inputs into main's registry, the same reports into this branch's registry, and what
-// the branch's hook sent (events.jsonl, from capture-server.mjs) into this branch's registry. The person reads each
+// node replay.ts <hooks.jsonl> <events.jsonl> <session prefixes, comma-separated>
+// Replays the named real Claude sessions from one pylon into one thread of a fresh registry, twice: as the old hook
+// would have reported the raw hook inputs, and as capture-server.mjs recorded the branch's hook reporting them. The person reads each
 // reply right after it is printed, so a waiting session shows. Each line is the thread's attention, whether a session
 // turn runs, and whether a reply is recorded.
 import { readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
-import type { Thread, ThreadId } from "../../../src/control/registry.ts";
+import { openRegistry, type Thread, type ThreadId } from "../../../src/control/registry.ts";
 import { newPylonRecord } from "../../../src/tick.ts";
 import { heartbeatIntervalMs } from "../../../images/pylon/nexus-heartbeat.ts";
 import type { PylonEvent } from "../../../src/events.ts";
@@ -17,7 +16,7 @@ import type { ProjectId, RemoteProject } from "../../../src/project.ts";
 
 type Report = { time: number; event: PylonEvent; note: string };
 const lines = (path: string) => readFileSync(path, "utf8").trim().split("\n").map((l) => JSON.parse(l));
-const [hooksFile, eventsFile, main, prefixes] = process.argv.slice(2) as [string, string, string, string];
+const [hooksFile, eventsFile, prefixes] = process.argv.slice(2) as [string, string, string];
 const named = (session: string) => prefixes.split(",").some((prefix) => session.startsWith(prefix));
 
 const oldKinds: Record<string, PylonEvent["kind"]> = {
@@ -41,11 +40,10 @@ const old: Report[] = lines(hooksFile).flatMap(({ t, hook, payload }): Report[] 
   return [{ time: t, event: { kind, session, at: t }, note: `${short(session)} ${what}` }];
 });
 const captured: Report[] = lines(eventsFile).filter(({ request }) => named(request.session)).map(({ time, request: { op: _, ...event } }) => ({
-  time, event, note: `${short(event.session)}${event.at < time - 60_000 ? `, held end stamped ${((time - event.at) / 1000).toFixed(0)} s earlier` : ""}`,
+  time, event, note: `${short(event.session)}${event.at < time - 60_000 ? `, held report stamped ${((time - event.at) / 1000).toFixed(0)} s earlier` : ""}`,
 }));
 
-async function replay(title: string, registryModule: string, reports: Report[]) {
-  const { openRegistry } = await import(registryModule) as typeof import("../../../src/control/registry.ts");
+function replay(title: string, reports: Report[]) {
   const node = "rj-firebat" as NodeName;
   const pylonId = "pylon-th-verify" as PylonId;
   const project: RemoteProject = {
@@ -81,6 +79,5 @@ async function replay(title: string, registryModule: string, reports: Report[]) 
   registry.close();
 }
 
-await replay("Old hook into main's registry", join(main, "src/control/registry.ts"), old);
-await replay("Old hook into this branch's registry", "../../../src/control/registry.ts", old);
-await replay("This branch's hook into this branch's registry", "../../../src/control/registry.ts", captured);
+replay("Old hook", old);
+replay("This branch's hook", captured);
