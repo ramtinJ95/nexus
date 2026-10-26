@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { existsSync } from "node:fs";
 import { mkdtemp, mkdir, readFile, readlink, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -8,6 +9,7 @@ import { parseWorkerConfig } from "./worker.ts";
 import { releaseOutcome } from "./model.ts";
 
 const commit = "a".repeat(40);
+const supervisorLacks = ["flock", "timeout", "node"].filter((tool) => !["/usr/local/bin", "/usr/bin", "/bin"].some((dir) => existsSync(join(dir, tool))));
 
 test("worker config bounds drain and health and rejects credential-bearing endpoints", () => {
   const config = { controlUrl: "http://control:7470/", controlNodeId: "nControl", token: "a".repeat(64), drainTimeoutMs: 300000, healthTimeoutMs: 60000 };
@@ -24,7 +26,7 @@ test("wait outcome requires fresh health from every role and detects rollback an
   assert.equal(releaseOutcome({ desired: null, nodes: [report] }, commit, 101), "superseded");
 });
 
-test("fixed supervisor falls back after a worker crashes or hangs, and accepts a later worker", async (t) => {
+test("fixed supervisor falls back after a worker crashes or hangs, and accepts a later worker", { skip: supervisorLacks.length > 0 && `the supervisor runs on Linux nodes, and its PATH here lacks ${supervisorLacks.join(" and ")}` }, async (t) => {
   const dir = await mkdtemp(join(tmpdir(), "nexus-supervisor-"));
   t.after(() => rm(dir, { recursive: true, force: true }));
   const workerDir = (name: string) => join(dir, name, "src/deploy");
