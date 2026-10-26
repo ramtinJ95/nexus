@@ -987,6 +987,27 @@ test("seen and --unread share the API marker without waking an archived thread",
   assert.deepEqual(s.registry.thread(thread.id), { ...before, seenAt: 999 });
 });
 
+test("seen --last-reply-at marks only up to the reply the client showed, and never lowers the mark", async (t) => {
+  const s = await setup(t);
+  const thread: Thread = await s.json(["start", "--project", "acme", "--title", "read me"]);
+  s.registry.recordReply(thread.id, 1000);
+  s.registry.recordReply(thread.id, 2000);
+  const seen = async (...flags: string[]) => {
+    assert.equal(await s.json(["seen", thread.id, ...flags]), null);
+    return s.registry.thread(thread.id)!.seenAt;
+  };
+  assert.equal(await seen("--last-reply-at", "1000"), 1000, "a reply that landed after the one shown stays unread");
+  assert.equal((await s.json(["show", thread.id])).attention, "reply");
+  assert.equal(await seen("--last-reply-at", "500"), 1000, "an older mark does not lower it");
+  assert.equal(await seen("--last-reply-at", "2000"), 2000);
+  assert.equal((await s.json(["show", thread.id])).attention, null);
+  for (const flags of [["--last-reply-at", "soon"], ["--last-reply-at", "-1"], ["--last-reply-at", "1000", "--unread"]]) {
+    const refused = await s.nexus(["seen", thread.id, ...flags]);
+    assert.equal(refused.code, 64, flags.join(" "));
+  }
+  assert.equal(s.registry.thread(thread.id)!.seenAt, 2000);
+});
+
 test("seen encodes a thread ID so it cannot become an unarchive request", async (t) => {
   const s = await setup(t);
   const thread: Thread = await s.json(["start", "--project", "acme", "--title", "Stay archived"]);

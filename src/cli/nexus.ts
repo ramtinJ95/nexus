@@ -50,7 +50,8 @@ const usage = `nexus ${version}, the Nexus control plane from this Mac
   nexus send <thread> <text...> [--steer] [--request-id ID]
     a message to the agent, or typed into the Claude worker's session, which waits for a paused pylon to wake
   nexus watch <thread> [--interval MS]
-  nexus seen <thread> [--unread]
+  nexus seen <thread> [--unread | --last-reply-at MS]
+    mark the latest reply seen, or unread, or only up to the reply at MS, as captured with what the client showed
   nexus abort|retry|retry-pylon|wake <thread>
   nexus archive|unarchive|delete <thread>
   nexus projects
@@ -798,9 +799,11 @@ const commands: Readonly<Record<string, Command>> = {
   },
   seen: {
     args: [1, 1],
-    options: { unread: { type: "boolean" } },
+    options: { unread: { type: "boolean" }, "last-reply-at": { type: "string" } },
     async run(api, [id], v) {
-      await api("POST", `${thread(id!)}/${v.unread ? "unseen" : "seen"}`, {});
+      const shown = str(v, "last-reply-at");
+      if (shown !== undefined && v.unread) throw new CliError("invalid", "--last-reply-at marks a reply seen, so it cannot go with --unread");
+      await api("POST", `${thread(id!)}/${v.unread ? "unseen" : "seen"}`, shown === undefined ? {} : { lastReplyAt: int(shown, "--last-reply-at", 0) });
       return { json: null, text: `Marked ${id} ${v.unread ? "unread" : "seen"}.` };
     },
   },
