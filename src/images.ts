@@ -56,11 +56,12 @@ export type PortableArtifactId = Exclude<ArtifactId, CheckpointId>;
  *   of the kernel module seed into /lib/modules (the S1 workaround), and init.rootfsInitExtra.
  * - rootfs-init-extra.sh: run as root by Gondolin's /init before sandboxd. It sets the hostname pylon and
  *   writes /etc/hostname and /etc/hosts, because Gondolin sets no hostname and sudo warns without one.
- * - pins.json: ImageRecipe.pins. Every other file except build.sh is in ImageRecipe.files.
+ * - pins.json: ImageRecipe.pins. Every other file except build.sh is in ImageRecipe.files, with the mode git gives
+ *   it, 0755 when executable and 0644 otherwise, because Docker's COPY keeps a file's mode.
  * Logins and secrets are never in the image.
  */
 export interface ImageRecipe {
-  files: readonly { path: string; content: string }[];
+  files: readonly { path: string; mode: 0o644 | 0o755; content: string }[];
   pins: {
     debianDigest: string;
     node: string; // "24.22.1"

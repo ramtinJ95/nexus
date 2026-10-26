@@ -173,7 +173,7 @@ nexus image build              # build-image job on the image build node, record
 nexus image rollout <image>    # fetch-artifact to every other online node, then current once all hold it
 ```
 
-The recipe lives in this repo under `images/pylon/`, and the control plane builds the recipe of the release it runs. Its content hash is the image ID, so rebuilding unchanged inputs is a no-op. A build changes nothing pylons use. The rollout makes the image current only once every online node holds it, and `nexus image rollback` returns to the image current before. Running and paused pylons keep the image they booted from.
+The recipe lives in this repo under `images/pylon/`, and the control plane builds the recipe of the release it runs. Each file carries its mode as git checks it out, 0755 when executable and 0644 otherwise, and the build writes it with that mode whatever the build node's umask. The hash of the files, their modes and the pins is the image ID, so rebuilding unchanged inputs is a no-op. A build changes nothing pylons use. The rollout makes the image current only once every online node holds it, and `nexus image rollback` returns to the image current before. Running and paused pylons keep the image they booted from.
 
 ### Refreshing the pylon's agent setup
 

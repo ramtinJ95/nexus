@@ -546,7 +546,7 @@ if (import.meta.main) {
   const file = join(pylonRecipeDir, agentSetupManifest);
   const manifest = formatAgentSetup(capture.setup);
   const before = imageIdOf(recipe);
-  const after = imageIdOf({ ...recipe, files: [...recipe.files.filter((f) => f.path !== agentSetupManifest), { path: agentSetupManifest, content: manifest }] });
+  const after = imageIdOf({ ...recipe, files: recipe.files.map((f) => (f.path === agentSetupManifest ? { ...f, content: manifest } : f)) });
   const shown = relative(process.cwd(), file);
   if (before === after) process.stdout.write(`${shown} is unchanged. The image stays ${before}.\n`);
   else if (values["dry-run"] === true) process.stdout.write(`Would write ${shown}, which makes the image ${after} (now ${before}). Dry run: wrote nothing.\n`);

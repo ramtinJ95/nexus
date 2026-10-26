@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { existsSync } from "node:fs";
-import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { JobFailure } from "./backend.ts";
@@ -31,7 +31,7 @@ const pins: ImageRecipe["pins"] = {
   neovim: "0.12.6",
   neovimSha256: "e".repeat(64),
 };
-const manifest = { path: agentSetupManifest, content: await readFile(join(pylonRecipeDir, agentSetupManifest), "utf8") };
+const manifest: ImageRecipe["files"][number] = { path: agentSetupManifest, mode: 0o644, content: await readFile(join(pylonRecipeDir, agentSetupManifest), "utf8") };
 
 async function recipeDir(t: { after(fn: () => Promise<void>): void }, files: Record<string, string>): Promise<string> {
   const dir = await mkdtemp(join(tmpdir(), "nexus-recipe-"));
@@ -49,6 +49,8 @@ test("the checked-in recipe loads, with pins.json as its pins and build.sh left 
   assert.deepEqual(recipe.pins, JSON.parse(await readFile(join(pylonRecipeDir, "pins.json"), "utf8")));
   for (const path of ["Dockerfile", "gondolin.json", "nexus", "nexus-turn.ts", "checkout-files.py", "rootfs-init-extra.sh"]) assert.ok(paths.includes(path), `${path} is an image input`);
   assert.ok(!paths.includes("build.sh") && !paths.includes("pins.json"));
+  const modes = Object.fromEntries(recipe.files.map((f) => [f.path, f.mode.toString(8)]));
+  assert.deepEqual([modes["nexus"], modes["nexus-claude-hook"], modes["nexus-turn.ts"], modes["checkout-files.py"]], ["755", "755", "644", "644"]);
 });
 
 test("a recipe is every file under its directory and the shared checkout helper, nested ones by posix path, sorted", async (t) => {
@@ -59,12 +61,13 @@ test("a recipe is every file under its directory and the shared checkout helper,
     "dotfiles-common/pi/AGENTS.md": "pi rules",
     "Dockerfile": "FROM scratch\n",
   });
+  await chmod(join(dir, "nexus"), 0o700);
   assert.deepEqual(await loadImageRecipe(dir), {
     files: [
-      { path: "Dockerfile", content: "FROM scratch\n" },
-      { path: "checkout-files.py", content: await readFile(new URL("./checkout-files.py", import.meta.url), "utf8") },
-      { path: "dotfiles-common/pi/AGENTS.md", content: "pi rules" },
-      { path: "nexus", content: "#!/bin/sh\n" },
+      { path: "Dockerfile", mode: 0o644, content: "FROM scratch\n" },
+      { path: "checkout-files.py", mode: 0o644, content: await readFile(new URL("./checkout-files.py", import.meta.url), "utf8") },
+      { path: "dotfiles-common/pi/AGENTS.md", mode: 0o644, content: "pi rules" },
+      { path: "nexus", mode: 0o755, content: "#!/bin/sh\n" },
     ],
     pins,
   });
@@ -80,26 +83,55 @@ test("loading refuses pins with a missing or unknown field, a bad digest, and a 
   await assert.rejects(loadImageRecipe(dir), /Containerfile .* is not a regular file/);
 });
 
-test("buildImage refuses a recipe from a job whose paths, pins, nexus script or agent setup manifest are unsafe, before it writes anything", async (t) => {
+test("buildImage refuses a recipe from a job whose paths, modes, pins, nexus script or agent setup manifest are unsafe, before it writes anything", async (t) => {
   const root = await mkdtemp(join(tmpdir(), "nexus-image-out-"));
   t.after(() => rm(root, { recursive: true }));
   const outDir = join(root, "img-000000000000");
   const node = "infra-testbench" as NodeName;
   const bad: readonly ImageRecipe[] = [
-    { files: [{ path: "../escape", content: "" }], pins },
-    { files: [{ path: "/etc/passwd", content: "" }], pins },
-    { files: [{ path: "a//b", content: "" }], pins },
+    { files: [{ path: "../escape", mode: 0o644, content: "" }], pins },
+    { files: [{ path: "/etc/passwd", mode: 0o644, content: "" }], pins },
+    { files: [{ path: "a//b", mode: 0o644, content: "" }], pins },
+    { files: [{ ...manifest, mode: 0o600 as 0o644 }], pins },
+    { files: [{ path: manifest.path, content: manifest.content } as ImageRecipe["files"][number]], pins },
     { files: [], pins: { ...pins, nodeSha256: "not-a-digest" } },
     { files: [manifest], pins: { ...pins, gh: "latest" } },
     { files: [manifest], pins: { ...pins, neovim: "stable" } },
-    { files: [manifest, { path: "nexus", content: '#!/usr/bin/env node\nconst version = "dev";\n' }], pins },
-    { files: [{ path: "nexus", content: 'const version = "0.7.3";\n' }], pins },
+    { files: [manifest, { path: "nexus", mode: 0o644, content: '#!/usr/bin/env node\nconst version = "dev";\n' }], pins },
+    { files: [{ path: "nexus", mode: 0o644, content: 'const version = "0.7.3";\n' }], pins },
     { files: [{ ...manifest, content: manifest.content.replace(/"commit":"([0-9a-f]{7})[0-9a-f]+"/, '"commit":"$1"') }], pins },
   ];
   for (const recipe of bad) {
     await assert.rejects(buildImage(recipe, node, outDir, AbortSignal.timeout(5_000)), (err) => err instanceof JobFailure && err.code === "invalid");
   }
   assert.ok(!existsSync(`${outDir}.partial`) && !existsSync(join(root, "escape")));
+});
+
+test("a build job under the probe's 077 umask gives Docker each recipe file with its own mode, and directories 0755", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "nexus-image-modes-"));
+  t.after(() => rm(root, { recursive: true }));
+  const docker = join(root, "bin", "docker");
+  await mkdir(join(root, "bin"));
+  await writeFile(docker, `#!/bin/sh\n[ "$1" = build ] || exit 0\nfor context; do :; done\ncd "$context" && find . -mindepth 1 -printf '%m %p\\n' > ${root}/modes\nexit 1\n`);
+  await chmod(docker, 0o755);
+  const recipe = await loadImageRecipe();
+  const path = process.env.PATH;
+  const umask = process.umask(0o077);
+  process.env.PATH = `${join(root, "bin")}:${path}`;
+  try {
+    await assert.rejects(buildImage(recipe, "infra-testbench" as NodeName, join(root, "out"), AbortSignal.timeout(30_000)), /docker build exited 1/);
+  } finally {
+    process.umask(umask);
+    process.env.PATH = path;
+  }
+  const modes = new Map((await readFile(join(root, "modes"), "utf8")).trim().split("\n").map((line) => {
+    const [mode, file] = line.split(" ");
+    return [file!.slice(2), mode!];
+  }));
+  assert.deepEqual([modes.get("nexus"), modes.get("nexus-turn.ts"), modes.get("checkout-files.py")], ["755", "644", "644"]);
+  for (const file of recipe.files) assert.equal(modes.get(file.path), file.mode.toString(8), file.path);
+  for (const dir of ["agent-setup", "dotfiles"]) assert.equal(modes.get(dir), "755", dir);
+  assert.equal(modes.size, recipe.files.length + 2);
 });
 
 test("the smoke boot expects each tool's exact pinned version, and whatever the recipe's nexus CLI prints", async () => {
@@ -117,7 +149,7 @@ test("the smoke boot expects each tool's exact pinned version, and whatever the 
 });
 
 test("a version check fails on any other version, naming the expected and actual output", () => {
-  const checks = smokeChecks({ files: [{ path: "nexus", content: 'const version = "0.7.3";\n' }, manifest], pins });
+  const checks = smokeChecks({ files: [{ path: "nexus", mode: 0o644, content: 'const version = "0.7.3";\n' }, manifest], pins });
   const check = (name: string) => checks.find((c) => c.name === name)!;
   assert.equal(smokeFailure(check("claude version"), 0, "2.1.308 (Claude Code)\n"), undefined);
   assert.equal(smokeFailure(check("claude version"), 0, "2.1.309 (Claude Code)\n"), 'expected "2.1.308 (Claude Code)\\n", got "2.1.309 (Claude Code)\\n"');
@@ -143,7 +175,7 @@ test("the smoke boot checks the agent setup against the layout derived from the 
 });
 
 test("a recipe without an agent setup manifest has no smoke checks", () => {
-  assert.throws(() => smokeChecks({ files: [{ path: "nexus", content: 'const version = "0.7.3";\n' }], pins }), (err) => err instanceof JobFailure && err.code === "invalid");
+  assert.throws(() => smokeChecks({ files: [{ path: "nexus", mode: 0o644, content: 'const version = "0.7.3";\n' }], pins }), (err) => err instanceof JobFailure && err.code === "invalid");
 });
 
 test("the smoke boot expects the offline switches in every exec, and the PYLON.md import and link", async () => {

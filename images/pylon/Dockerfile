@@ -80,8 +80,9 @@ RUN cd /tmp \
  && tar -xzf nvim.tgz -C /usr/local --strip-components=1 --no-same-owner \
  && rm nvim.tgz
 
-COPY --chmod=0755 nexus /usr/local/bin/nexus
-COPY --chmod=0755 nexus-claude-hook /usr/local/bin/nexus-claude-hook
+# COPY keeps each file's mode, which the recipe carries from git.
+COPY nexus /usr/local/bin/nexus
+COPY nexus-claude-hook /usr/local/bin/nexus-claude-hook
 COPY nexus-heartbeat.ts /usr/local/bin/nexus-heartbeat.ts
 COPY nexus-outbox.ts /usr/local/bin/nexus-outbox.ts
 COPY nexus-turn.ts /usr/local/bin/nexus-turn.ts
@@ -89,15 +90,13 @@ COPY checkout-files.py /usr/local/lib/nexus/checkout-files.py
 # The common dotfiles layer as a git repository, which the boot path clones into ~/.nexus/dotfiles and then
 # updates by fetch. It is owned by user because git refuses to clone a local repository another user owns.
 # The recipe carries files, not git objects, so its one commit names the upstream commit instead of being it,
-# with a fixed author and date so that the same files give the same commit. Recipe files carry no modes, so
-# the layer's install script gets its exec bit here.
+# with a fixed author and date so that the same files give the same commit.
 ARG DOTFILES_COMMIT
 COPY --chown=user:user dotfiles/ /opt/nexus/dotfiles/
 
 USER user
 WORKDIR /home/user
 RUN cd /opt/nexus/dotfiles \
- && if [ -e install ]; then chmod 0755 install; fi \
  && git init -q -b main \
  && git add -A \
  && GIT_AUTHOR_DATE=2000-01-01T00:00:00Z GIT_COMMITTER_DATE=2000-01-01T00:00:00Z \

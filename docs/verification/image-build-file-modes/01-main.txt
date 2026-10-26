@@ -1,0 +1,38 @@
+checkout 599972b, umask 0077, user user
+recipe img-051b22b601e4
+context as written by buildImage:
+  600 ./Dockerfile
+  700 ./agent-setup
+  600 ./agent-setup/install.ts
+  600 ./agent-setup/manifest.json
+  600 ./agent-setup/manifest.ts
+  600 ./checkout-files.py
+  700 ./dotfiles
+  600 ./dotfiles/README.md
+  600 ./gondolin.json
+  600 ./nexus
+  600 ./nexus-claude-hook
+  600 ./nexus-heartbeat.ts
+  600 ./nexus-outbox.ts
+  600 ./nexus-turn.ts
+  600 ./rootfs-init-extra.sh
+in the image, read as user:
+  755 root /usr/local/bin/nexus ok
+  755 root /usr/local/bin/nexus-claude-hook ok
+  600 root /usr/local/bin/nexus-heartbeat.ts DENIED
+  600 root /usr/local/bin/nexus-outbox.ts DENIED
+  600 root /usr/local/bin/nexus-turn.ts DENIED
+  600 root /usr/local/lib/nexus/checkout-files.py DENIED
+  700 user /opt/nexus/dotfiles/ ok
+  600 user /opt/nexus/dotfiles/README.md ok
+  700 user /opt/nexus/agent-setup/ ok
+  600 user /opt/nexus/agent-setup/manifest.ts ok
+  600 user /opt/nexus/agent-setup/install.ts ok
+  600 user /opt/nexus/agent-setup/manifest.json ok
+Claude turn snapshot:
+  Error: EACCES: permission denied, open '/tmp/claude-1000/repro-scratch/rootfs/usr/local/bin/nexus-turn.ts'
+  fatal: ambiguous argument 'refs/nexus/turn': unknown revision or path not in the working tree.
+  Use '--' to separate paths from revisions, like this:
+  'git <command> [<revision>...] -- [<file>...]'
+docker shim: stopping the build after COPY
+buildImage: docker build exited 1

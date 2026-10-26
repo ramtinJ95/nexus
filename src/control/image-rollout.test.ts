@@ -19,7 +19,7 @@ const pins: ImageRecipe["pins"] = {
   piEnvSha256: "f".repeat(64), gondolin: "0.13.0", alpineKernel: "k", dotfilesCommon: "f", gh: "2.103.2", ghSha256: "a".repeat(64),
   neovim: "0.12.6", neovimSha256: "b".repeat(64),
 };
-const recipe: ImageRecipe = { files: [{ path: "Dockerfile", content: "FROM debian\n" }], pins };
+const recipe: ImageRecipe = { files: [{ path: "Dockerfile", mode: 0o644, content: "FROM debian\n" }], pins };
 const old = "img-000000000001" as ImageId;
 const next = "img-000000000002" as ImageId;
 const manifestOf = (id: ImageId, builtOn: NodeName): ImageManifest => ({
