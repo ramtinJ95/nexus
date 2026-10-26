@@ -16,7 +16,7 @@ import type { PortableArtifactId } from "../images.ts";
 import {
   artifactHeaders, encodeProbeEvent, encodeSubmitReply, fetchArtifact, jobDeadlineMs, probePort, jobSubject, parseJobEnvelope, parsePylonCommand, parseStreamRequest, routeAuth, serveByteStream, streamUpgradeResponse,
   type Job, type JobEnvelope, type JobId, type JobStatus, type LiveHash, type NodeName, type NodeObservation,
-  type DeclaredOutput, type GitFacts, type ListeningFact, type ProbeAuthConfig, type ProbeEvent, type PylonCommand, type PylonId, type PylonObservation, type ServiceFact, type SessionFact, type Subject,
+  type DeclaredOutput, type GitFacts, type ListeningFact, type ProbeAuthConfig, type CommandResult, type ProbeEvent, type PylonCommand, type PylonId, type PylonObservation, type ServiceFact, type SessionFact, type Subject,
 } from "../protocol.ts";
 import type { ServiceName } from "../project.ts";
 import { attachedTerminals, sessionFacts } from "../sessions.ts";
@@ -77,6 +77,7 @@ const sessionReadTimeoutMs = 3_000;
 /** Longer, because a pylon's supervisor checks each service's health to answer. */
 const serviceReadTimeoutMs = 5_000;
 const gitPollMs = 60_000;
+const claudeSendMemoryMs = 60 * 60_000;
 
 /** A probe without a preview gateway. An empty set is already converged. */
 const noPreviews: ProbeDeps["serve"] = {
@@ -360,6 +361,31 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
     return next;
   }
 
+  /**
+   * Each send to a Claude session by its request ID, until an hour after it settles, so a control plane whose wait for
+   * one ran out, as behind a slow send to the same session, learns what became of it instead of typing it again. They
+   * are held in memory, so a restarted probe knows none.
+   */
+  const claudeSendsById = new Map<string, Promise<CommandResult>>();
+  function sendClaude(pylonId: PylonId, command: Extract<PylonCommand, { kind: "send-claude" }>, run: () => Promise<CommandResult>): Promise<CommandResult> {
+    const sending = oneSendAtATime(pylonId, command.session, run);
+    if (command.requestId === undefined) return sending;
+    const key = `${pylonId} ${command.requestId}`;
+    claudeSendsById.set(key, sending);
+    void sending.catch(() => undefined).then(() => setTimeout(() => { if (claudeSendsById.get(key) === sending) claudeSendsById.delete(key); }, claudeSendMemoryMs).unref());
+    return sending;
+  }
+  async function outcomeOf(pylonId: PylonId, requestId: string): Promise<CommandResult> {
+    const sending = claudeSendsById.get(`${pylonId} ${requestId}`);
+    if (sending === undefined) return { kind: "send-claude-outcome", send: "unknown" };
+    try {
+      const { outcome, herdrPane, resumed } = await sending as Extract<CommandResult, { kind: "send-claude" }>;
+      return { kind: "send-claude-outcome", send: { outcome, herdrPane, resumed } };
+    } catch {
+      return { kind: "send-claude-outcome", send: "failed" };
+    }
+  }
+
   async function readSnapshot(): Promise<NodeObservation> {
     // Jobs before pylons, so the pylons show the result of every job listed as finished. See NodeObservation.jobs.
     const jobs = retainedJobs();
@@ -513,9 +539,11 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
       }
       const pylon = (await backend.list()).find((p) => p.pylonId === pylonId);
       if (pylon?.vm !== "running") return send(res, 409, `${pylonId} is ${pylon?.vm ?? "absent"}, not running`);
-      const links = command.kind === "link-port" || command.kind === "unlink-port";
-      const run = () => runCommand(pylonId, command, deps);
-      const result = await (links ? betweenReads(run) : command.kind === "send-claude" ? oneSendAtATime(pylonId, command.session, run) : run());
+      if (command.kind === "send-claude-outcome") return send(res, 200, JSON.stringify(await outcomeOf(pylonId, command.requestId)), "application/json");
+      const guestCommand = command;
+      const links = guestCommand.kind === "link-port" || guestCommand.kind === "unlink-port";
+      const run = () => runCommand(pylonId, guestCommand, deps);
+      const result = await (links ? betweenReads(run) : guestCommand.kind === "send-claude" ? sendClaude(pylonId, guestCommand, run) : run());
       if (result.kind === "link-port") relinked(pylonId, result.service);
       // A linked port is a new service that wants a preview, and an unlinked one a service gone, which the control plane sees in the next read.
       // An opened or closed session is listed in it too, as is one a message resumed.

@@ -243,13 +243,21 @@ export type PylonCommand =
   /**
    * Types `text` into the Claude Code session `session` as a prompt and submits it, resuming the session first, under
    * `model` if given, when no live pane runs it. `text` holds no control character but newlines (claudeTextProblem).
+   * The probe remembers the send under `requestId`, for send-claude-outcome. A control plane older than it sends none.
    */
-  | { kind: "send-claude"; session: string; text: string; model?: string }
+  | { kind: "send-claude"; session: string; text: string; model?: string; requestId?: string }
+  /**
+   * What became of the send-claude under `requestId`, answered once it settles. It never types: a send still waiting
+   * behind another to the same session is waited for, so a control plane whose wait ran out asks this, not again.
+   */
+  | { kind: "send-claude-outcome"; requestId: string }
   | { kind: "service"; op: "ensure" | "restart" | "stop" | "logs"; name?: string; lines?: number }
   /** Previews a port that already listens, or will, as `nexus preview <port>` in the pylon does. Safe to repeat. */
   | { kind: "link-port"; port: number }
   /** Stops previewing a linked port. A port not linked succeeds, and a port a service's preview owns is refused. Safe to repeat. */
   | { kind: "unlink-port"; port: number };
+
+export type SendClaudeOutcome = "sent" | "queued" | "blocked" | "starting" | "moved";
 
 export type CommandResult =
   | { kind: "exec"; exitCode: number | null; output: string; truncated: boolean }
@@ -270,7 +278,12 @@ export type CommandResult =
    * again. A failed command may have typed part of the message, so the control plane never retries one on its own.
    * `herdrPane` is the pane Claude runs in, and `resumed` says the session had no live pane and was resumed into it first.
    */
-  | { kind: "send-claude"; outcome: "sent" | "queued" | "blocked" | "starting" | "moved"; herdrPane: string; resumed: boolean }
+  | { kind: "send-claude"; outcome: SendClaudeOutcome; herdrPane: string; resumed: boolean }
+  /**
+   * The send's own result, `failed` for a send that failed and so may have typed part of the message, or `unknown`
+   * when the probe holds no send under the ID: it never got one, or forgot it in a restart or an hour after it settled.
+   */
+  | { kind: "send-claude-outcome"; send: { outcome: SendClaudeOutcome; herdrPane: string; resumed: boolean } | "failed" | "unknown" }
   | { kind: "service"; services: readonly ServiceFact[]; logs?: string }
   /** The service the port is previewed under: `port-<port>`, or the service that already owns the port. */
   | { kind: "link-port"; service: string }
@@ -786,8 +799,12 @@ export function parsePylonCommand(body: string): PylonCommand {
       const problem = claudeTextProblem(c.text as string);
       if (problem !== null) throw new Error(problem);
       if (c.model !== undefined && string(c.model, "command.model").length > 200) throw new Error("command.model is longer than 200 characters");
+      if (c.requestId !== undefined) string(c.requestId, "command.requestId");
       break;
     }
+    case "send-claude-outcome":
+      string(c.requestId, "command.requestId");
+      break;
     case "service":
       if (!serviceOps.has(c.op)) throw new Error(`unknown service op ${JSON.stringify(c.op)}`);
       if (c.name !== undefined) string(c.name, "command.name");
@@ -804,7 +821,12 @@ export function parsePylonCommand(body: string): PylonCommand {
 }
 
 const closeOutcomes: ReadonlySet<unknown> = new Set(["closed", "not-open", "moved"] satisfies Extract<CommandResult, { kind: "close-session" }>["outcome"][]);
-const sendOutcomes: ReadonlySet<unknown> = new Set(["sent", "queued", "blocked", "starting", "moved"] satisfies Extract<CommandResult, { kind: "send-claude" }>["outcome"][]);
+const sendOutcomes: ReadonlySet<unknown> = new Set(["sent", "queued", "blocked", "starting", "moved"] satisfies SendClaudeOutcome[]);
+function parseSend(r: Record<string, unknown>) {
+  if (!sendOutcomes.has(r.outcome)) throw new Error(`unknown send outcome ${JSON.stringify(r.outcome)}`);
+  string(r.herdrPane, "result.herdrPane");
+  if (typeof r.resumed !== "boolean") throw new Error("result.resumed is not a boolean");
+}
 function parseCommandResult(command: PylonCommand, body: string): CommandResult {
   const r = record(JSON.parse(body), "command result");
   if (r.kind !== command.kind) throw new Error(`a ${command.kind} command got a ${JSON.stringify(r.kind)} result`);
@@ -814,11 +836,8 @@ function parseCommandResult(command: PylonCommand, body: string): CommandResult 
     if (!closeOutcomes.has(r.outcome)) throw new Error(`unknown close outcome ${JSON.stringify(r.outcome)}`);
   }
   if (r.kind === "drop-failed-session" && typeof r.dropped !== "boolean") throw new Error("result.dropped is not a boolean");
-  if (r.kind === "send-claude") {
-    if (!sendOutcomes.has(r.outcome)) throw new Error(`unknown send outcome ${JSON.stringify(r.outcome)}`);
-    string(r.herdrPane, "result.herdrPane");
-    if (typeof r.resumed !== "boolean") throw new Error("result.resumed is not a boolean");
-  }
+  if (r.kind === "send-claude") parseSend(r);
+  if (r.kind === "send-claude-outcome" && r.send !== "failed" && r.send !== "unknown") parseSend(record(r.send, "result.send"));
   if (r.kind === "link-port") string(r.service, "result.service");
   if (r.kind === "unlink-port" && r.refused !== null) string(r.refused, "result.refused");
   return r as unknown as CommandResult;
