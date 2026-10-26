@@ -1,14 +1,15 @@
 {
-  "dotfiles": {"url":"https://github.com/ramtinJ95/dotfiles","commit":"9ba7de9d525a918d4af189d55c57f59ba0de875d"},
+  "dotfiles": {"url":"https://github.com/ramtinJ95/dotfiles","commit":"8692b390f5ab912c9dc701a528cba84fd36fddba"},
   "claude": {
     "marketplaces": [
-      {"name":"claude-mods","url":"https://github.com/ramtinJ95/claude-mods","commit":"b97e1e322f7dc521dbe512e819fc54865d628ad2"},
-      {"name":"cursor-plugins","url":"https://github.com/cursor/plugins","commit":"9580c23696ac8d7abed0c166f2f9918800afb819"}
+      {"name":"claude-mods","url":"https://github.com/ramtinJ95/claude-mods","commit":"27f39a788c765ae7db7c3759b25d13ad17bda2fe"},
+      {"name":"cursor-plugins","url":"https://github.com/cursor/plugins","commit":"99b609a72323b70204eab407c622f436e858e112"}
     ],
     "plugins": [
       {"id":"notes-compaction@claude-mods","version":"0.2.11"},
       {"id":"pstack@cursor-plugins","version":"0.15.32"},
-      {"id":"review-pane@claude-mods","version":"0.3.0"}
+      {"id":"review-pane@claude-mods","version":"0.3.0"},
+      {"id":"shepherdr@claude-mods","version":"0.2.6"}
     ]
   },
   "pi": {
@@ -23,7 +24,8 @@
       {"kind":"npm","name":"@howaboua/pi-gpt-switcher","version":"0.1.5"},
       {"kind":"npm","name":"@ramtinj95/pi-claude-delegation","version":"0.2.0"},
       {"kind":"npm","name":"@howaboua/pi-codex-web-run","version":"0.0.8"},
-      {"kind":"npm","name":"@howaboua/pi-codex-imagegen","version":"0.0.11"}
+      {"kind":"npm","name":"@howaboua/pi-codex-imagegen","version":"0.0.11"},
+      {"kind":"npm","name":"@howaboua/pi-shepherdr","version":"0.2.23"}
     ],
     "extensions": [
       "common-config/common-dotfiles/pi/.pi/agent/extensions/exa-deep-research.ts",
@@ -31,7 +33,11 @@
       "common-config/common-dotfiles/pi/.pi/agent/extensions/pi-vim",
       "common-config/common-dotfiles/pi/.pi/agent/extensions/silly-messages.ts"
     ],
-    "shepherdrProfiles": []
+    "shepherdrProfiles": [
+      "common-config/common-dotfiles/pi/.pi/agent/shepherdr/profiles/explorer",
+      "common-config/common-dotfiles/pi/.pi/agent/shepherdr/profiles/general",
+      "common-config/common-dotfiles/pi/.pi/agent/shepherdr/profiles/reviewer"
+    ]
   },
   "skills": [
     {"path":"common-config/common-dotfiles/agents/.agents/skills/grill-me","for":["claude","pi"]},
@@ -46,6 +52,7 @@
     {"path":"common-config/common-dotfiles/agents/.agents/skills/teach","for":["claude","pi"]},
     {"path":"common-config/common-dotfiles/agents/.agents/skills/typesafe-ai","for":["claude","pi"]},
     {"path":"common-config/common-dotfiles/agents/.agents/skills/writing-great-skills","for":["pi"]},
+    {"path":"mac-config/mac-dotfiles/claude/.claude/skills/readable-log","for":["claude"]},
     {"path":"mac-config/mac-dotfiles/claude/.claude/skills/show-me","for":["claude"]}
   ]
 }
