@@ -409,6 +409,9 @@ export function openRegistry(path: string, clock = Date.now) {
       status = coalesce($status, sessions.status), title = excluded.title, state = excluded.state, message = excluded.message`),
     deleteSession: db.prepare("DELETE FROM sessions WHERE pylon = ? AND id = ?"),
     pauseSessions: db.prepare("UPDATE sessions SET state = 'paused', message = NULL WHERE pylon = ?"),
+    resumeSessions: db.prepare(`UPDATE sessions SET status = 'unknown', state = CASE WHEN herdr_pane IS NULL THEN 'failed' ELSE 'running' END,
+      message = CASE WHEN herdr_pane IS NULL THEN 'its last wake did not bring it back, and whether this one did is not read yet' END
+      WHERE pylon = ? AND state = 'paused'`),
     sessions: db.prepare("SELECT * FROM sessions WHERE pylon = ? ORDER BY id"),
     session: db.prepare("SELECT * FROM sessions WHERE pylon = ? AND id = ?"),
     insertPreview: db.prepare("INSERT INTO previews (pylon, node, service, https_port, ready) SELECT id, node, ?, ?, 0 FROM pylons WHERE id = ?"),
@@ -952,6 +955,9 @@ export function openRegistry(path: string, clock = Date.now) {
       }
       case "sessions-paused":
         q.pauseSessions.run(write.pylonId);
+        return;
+      case "sessions-resumed":
+        q.resumeSessions.run(write.pylonId);
         return;
       case "output": {
         const thread = threadOfPylon(write.pylonId);

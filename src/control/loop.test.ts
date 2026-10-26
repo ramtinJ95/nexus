@@ -582,7 +582,7 @@ test("with the real ingest, a pylon's sessions reach the registry and a working 
   assert.deepEqual(registry.orphans(), []);
 });
 
-test("with the real ingest, a paused pylon lists its sessions as paused until the wake's first read replaces them", async (t) => {
+test("with the real ingest, a paused pylon lists its sessions as paused, and once it runs again they run, with the status each read gives", async (t) => {
   const registry = openRegistry(tempDb());
   const thread = seed(registry);
   const fake = fakeNode({ autoFinish: true });
@@ -599,15 +599,18 @@ test("with the real ingest, a paused pylon lists its sessions as paused until th
   registry.setThreadStatus(thread.id, "active");
   registry.recordActivity(thread.id, { human: Date.now() });
   await until("the pylon runs again", () => registry.node(node)!.observation?.pylons.find((p) => p.pylonId === thread.pylonId)?.phase === "running");
-  // Its sessions are not read yet, so the stored observation knows none, and the paused rows stand.
+  // Its sessions are not read yet, so the stored observation knows none, and the session runs in its pane, its status unknown.
   const stored = registry.node(node)!.observation!.pylons.find((p) => p.pylonId === thread.pylonId);
   assert.ok(stored?.phase === "running" && stored.sessions === null);
-  assert.deepEqual(registry.sessions(thread.pylonId).map((s) => [s.id, s.state]), [["w1:p1", "paused"]]);
+  assert.deepEqual(registry.sessions(thread.pylonId), [{ pylon: thread.pylonId, ...review, status: "unknown", message: null }]);
 
-  const moved: SessionFact = { ...review, id: "w3:p1", herdrPane: "w3:p1", status: "idle" };
+  const moved: SessionFact = { ...review, id: "w3:p1", herdrPane: "w3:p1", status: "working" };
   fake.setSessions(thread.pylonId, [moved]);
-  await until("the relaunched session replaces the paused one", () => registry.sessions(thread.pylonId)[0]?.id === "w3:p1");
+  await until("the relaunched session replaces the resumed one", () => registry.sessions(thread.pylonId)[0]?.id === "w3:p1");
   assert.deepEqual(registry.sessions(thread.pylonId), [{ pylon: thread.pylonId, ...moved, message: null }]);
+  fake.setSessions(thread.pylonId, [{ ...moved, status: "idle" }]);
+  await until("its turn ends", () => registry.sessions(thread.pylonId)[0]?.status === "idle");
+  assert.equal(registry.sessions(thread.pylonId)[0]?.state, "running");
 });
 
 test("a restarted control plane writes each pylon's session list on its first observation, though the stored one has the same list", async (t) => {

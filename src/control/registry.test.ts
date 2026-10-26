@@ -218,6 +218,12 @@ test("a paused pylon's sessions keep their rows and last status, and the first l
 
   registry.apply({ record: "sessions-paused", pylonId });
   assert.deepEqual(registry.sessions(pylonId).map((s) => [s.id, s.state, s.message]), [["failed-0123456789ab", "paused", null], ["w3:p1", "paused", null]]);
+  registry.apply({ record: "sessions-resumed", pylonId });
+  assert.deepEqual(registry.sessions(pylonId).map((s) => [s.id, s.state, s.status, s.message]), [
+    ["failed-0123456789ab", "failed", "unknown", "its last wake did not bring it back, and whether this one did is not read yet"],
+    ["w3:p1", "running", "unknown", null],
+  ], "a pylon that runs again before a read has no paused session");
+  registry.apply({ record: "sessions-paused", pylonId });
   registry.apply({ record: "sessions", pylonId, sessions: [] });
   assert.deepEqual(registry.sessions(pylonId), [], "a deleted pylon drops its rows");
 });
