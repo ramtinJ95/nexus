@@ -5,6 +5,58 @@ import type { VM } from "@earendil-works/gondolin";
 import { commandOutcomeSchema, type GuestFile, type Service } from "./contracts.ts";
 import { shellQuote as q } from "./storage.ts";
 
+/**
+ * Gondolin refuses a command once 64 are outstanding, and counts one until the guest answers it, also after the host
+ * stopped waiting (sandbox/server-ops.js, handleExec; exec.js, rejectExecSession). They are counted here the same way.
+ * While the VM runs, its commands may hold only `runningSlots`, and the next waits for one to free, so that the
+ * commands a stop runs always find room.
+ */
+const gondolinSlots = 64;
+const runningSlots = 48;
+type Slots = { outstanding: number; limit: number; waiting: Set<{ start(): void; refuse(error: Error): void }> };
+const slots = new WeakMap<VM, Slots>();
+function slotsOf(vm: VM): Slots {
+	let held = slots.get(vm);
+	if (held === undefined) slots.set(vm, (held = { outstanding: 0, limit: runningSlots, waiting: new Set() }));
+	return held;
+}
+function takeSlot(held: Slots, signal: AbortSignal): Promise<void> {
+	if (held.waiting.size === 0 && held.outstanding < held.limit) {
+		held.outstanding += 1;
+		return Promise.resolve();
+	}
+	return new Promise((start, refuse) => {
+		const waiter = {
+			start() {
+				signal.removeEventListener("abort", expire);
+				held.outstanding += 1;
+				start();
+			},
+			refuse,
+		};
+		const expire = () => {
+			held.waiting.delete(waiter);
+			refuse(signal.reason);
+		};
+		held.waiting.add(waiter);
+		signal.addEventListener("abort", expire, { once: true });
+	});
+}
+function giveSlot(held: Slots): void {
+	held.outstanding -= 1;
+	const [next] = held.waiting;
+	if (next === undefined || held.outstanding >= held.limit) return;
+	held.waiting.delete(next);
+	next.start();
+}
+/** Once the VM stops running, only what closes it starts commands, and they may take every slot. */
+export function freeReservedSlots(vm: VM): void {
+	const held = slotsOf(vm);
+	held.limit = gondolinSlots;
+	for (const waiter of held.waiting) waiter.refuse(new Error("Guest command was not started, because the VM stopped running while it waited for a command slot"));
+	held.waiting.clear();
+}
+
 export async function execute(
 	vm: VM,
 	cmd: string,
@@ -26,8 +78,7 @@ export async function execute(
 			done();
 		},
 	});
-	// SDK AbortSignal stops the host wait, not the guest process. The guest
-	// watchdog owns a separate process group and terminates it on timeout.
+	// The guest watchdog owns a separate process group and terminates it on timeout.
 	const watchdog = [
 		"import json,os,signal,subprocess,sys,time",
 		"p=subprocess.Popen(['/bin/sh','-lc',sys.argv[1]],start_new_session=True,stderr=subprocess.STDOUT)",
@@ -44,15 +95,24 @@ export async function execute(
 		" result={'state':'timed-out'}",
 		"sys.stderr.write(json.dumps(result))",
 	].join("\n");
-	const result = await vm.exec(
-		["python3", "-c", watchdog, cmd, String(timeoutMs / 1000)],
-		{
-			cwd,
-			signal: AbortSignal.timeout(timeoutMs + 10000),
-			stdout: sink,
-			stderr: "buffer",
-		},
+	const held = slotsOf(vm);
+	const waitMs = timeoutMs + 10000;
+	// Not Gondolin's signal, whose abort would end the wait and leave the command running uncounted.
+	const expiry = AbortSignal.timeout(waitMs);
+	const expired = new Promise<never>((_, reject) =>
+		expiry.addEventListener("abort", () => reject(new Error(`Guest command got no answer within ${waitMs} ms. Once started, it holds a command slot until it answers`)), { once: true }),
 	);
+	await Promise.race([takeSlot(held, expiry), expired]);
+	const result = await Promise.race([
+		vm
+			.exec(["python3", "-c", watchdog, cmd, String(timeoutMs / 1000)], {
+				cwd,
+				stdout: sink,
+				stderr: "buffer",
+			})
+			.finally(() => giveSlot(held)),
+		expired,
+	]);
 	const output = Buffer.concat(chunks).toString("utf8");
 	if (result.exitCode !== 0)
 		throw new Error(

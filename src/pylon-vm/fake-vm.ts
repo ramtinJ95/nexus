@@ -9,6 +9,10 @@
  * awaits the guest's answer, no longer heeds its signal: only `answer` or the VM's close ends either. A write that
  * holds Gondolin's one file slot, any but `queued`, holds every command back until it ends. A close fails the
  * writes holding the slot but not the queued ones, which then wait for good, as Gondolin's late registration does.
+ *
+ * Its commands are admitted as Gondolin's are (sandbox/server-ops.js, handleExec): at most 64 at once, each counted
+ * from its request until the guest answers it, also while it waits behind a file write. One that `hangs` is answered only by `answer`, or failed by the VM's close. An abort ends
+ * the host's wait and nothing else (exec.js, rejectExecSession), so the command keeps its slot.
  */
 import { writeFile } from "node:fs/promises";
 import type { VM } from "@earendil-works/gondolin";
@@ -19,17 +23,20 @@ export interface FakeVm {
 	readonly vm: VM;
 	/** Resolves once a write to a path ending in `suffix` holds. */
 	holding(suffix: string): Promise<void>;
-	/** The guest answers every write that holds, and the bridge drains. */
+	/** The guest answers every write that holds and every command that hangs, and the bridge drains. */
 	answer(): void;
 	readonly checkpoints: string[];
 	/** The guest commands that ran, in order. */
 	readonly commands: string[];
 	/** What closed, in order: "ssh" for the guest terminal's SSH, "vm" for the VM. */
 	readonly closed: string[];
+	/** The most commands outstanding at once, and the commands the guest refused as full. */
+	readonly peak: number;
+	readonly refused: string[];
 }
 
 /** `hold` says where a write to `path` holds, or undefined for one that ends at once, and `fails` which commands exit 1. */
-export function fakeVm(hold: (path: string) => WritePhase | undefined = () => undefined, fails: (cmd: string) => boolean = () => false): FakeVm {
+export function fakeVm(hold: (path: string) => WritePhase | undefined = () => undefined, fails: (cmd: string) => boolean = () => false, hangs: (cmd: string) => boolean = () => false): FakeVm {
 	type Write = { path: string; phase: WritePhase; end(error?: Error): void };
 	const held: Write[] = [];
 	const waiters: { suffix: string; accept(): void }[] = [];
@@ -37,32 +44,52 @@ export function fakeVm(hold: (path: string) => WritePhase | undefined = () => un
 	const checkpoints: string[] = [];
 	const commands: string[] = [];
 	const closed: string[] = [];
+	const refused: string[] = [];
+	const hanging = new Set<(error?: Error) => void>();
+	let outstanding = 0;
+	let peak = 0;
 	const release = (write: Write, error?: Error) => {
 		if (!held.includes(write)) return;
 		held.splice(held.indexOf(write), 1);
 		write.end(error);
-		for (const wake of slotWaiters) wake();
+		for (const wake of [...slotWaiters]) {
+			slotWaiters.delete(wake);
+			wake();
+		}
 	};
 	const slotFree = () => !held.some((w) => w.phase !== "queued");
 	const close = () => {
 		closed.push("vm");
 		for (const write of [...held]) if (write.phase !== "queued") release(write, new Error("sandbox closed"));
+		for (const answer of hanging) answer(new Error("sandbox closed"));
 	};
 	const vm = {
 		async exec(argv: string[], options?: { signal?: AbortSignal }) {
-			while (!slotFree()) {
-				options?.signal?.throwIfAborted();
-				let wake!: () => void;
-				await new Promise<void>((accept) => {
-					wake = accept;
-					slotWaiters.add(wake);
-					options?.signal?.addEventListener("abort", wake, { once: true });
-				});
-				slotWaiters.delete(wake);
+			const cmd = argv[3]!;
+			if (outstanding >= 64) {
+				refused.push(cmd);
+				throw new Error("error queue_full: too many concurrent exec requests (limit 64)");
 			}
-			commands.push(argv[3]!);
-			const exitCode = /\/done'?$/.test(argv[3]!) || fails(argv[3]!) ? 1 : 0;
-			return { exitCode: 0, stdout: "", stderr: JSON.stringify({ state: "exited", exitCode }) };
+			outstanding += 1;
+			peak = Math.max(peak, outstanding);
+			const run = (async () => {
+				while (!slotFree()) await new Promise<void>((wake) => slotWaiters.add(wake));
+				commands.push(cmd);
+				if (hangs(cmd))
+					await new Promise<void>((accept, reject) => {
+						const answer = (error?: Error) => {
+							hanging.delete(answer);
+							if (error) reject(error);
+							else accept();
+						};
+						hanging.add(answer);
+					});
+				const exitCode = /\/done'?$/.test(cmd) || fails(cmd) ? 1 : 0;
+				return { exitCode: 0, stdout: "", stderr: JSON.stringify({ state: "exited", exitCode }) };
+			})().finally(() => (outstanding -= 1));
+			const signal = options?.signal;
+			if (signal === undefined) return run;
+			return Promise.race([run, new Promise<never>((_, reject) => signal.addEventListener("abort", () => reject(new Error("exec aborted")), { once: true }))]);
 		},
 		fs: {
 			async writeFile(path: string, _data: unknown, options?: { signal?: AbortSignal }) {
@@ -102,9 +129,14 @@ export function fakeVm(hold: (path: string) => WritePhase | undefined = () => un
 				: new Promise<void>((accept) => waiters.push({ suffix, accept })),
 		answer: () => {
 			for (const write of [...held]) release(write);
+			for (const answer of [...hanging]) answer();
 		},
 		checkpoints,
 		commands,
 		closed,
+		get peak() {
+			return peak;
+		},
+		refused,
 	};
 }

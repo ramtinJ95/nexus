@@ -89,10 +89,10 @@ test("an instance whose intent predates the disk marker boots as its intent said
 });
 
 /** A running instance on a fake VM whose file writes to paths `holds` names hold in `phase`. */
-async function runningOnAFakeVm(t: { after(fn: () => Promise<void>): void }, holds: RegExp, phase: WritePhase, fails?: (cmd: string) => boolean) {
+async function runningOnAFakeVm(t: { after(fn: () => Promise<void>): void }, holds: RegExp, phase: WritePhase, fails?: (cmd: string) => boolean, hangs?: (cmd: string) => boolean) {
 	const dir = await mkdtemp(join(tmpdir(), "runtime-stop-"));
 	t.after(() => rm(dir, { recursive: true, force: true }));
-	const fake = fakeVm((path) => (holds.test(path) ? phase : undefined), fails);
+	const fake = fakeVm((path) => (holds.test(path) ? phase : undefined), fails, hangs);
 	const record = { name: "pylon-a", createdAt: "2027-01-01T00:00:00.000Z", config: { diskGiB: 8, workspace: "/workspace" } } as SandboxRecord;
 	const spec = { resources: { cpus: 2, memoryGiB: 4 } } as BootSpec;
 	return { dir, fake, runtime: new SandboxRuntime(dir, record, spec, { vm: fake.vm, settleMs: 300 }) };
@@ -174,6 +174,65 @@ test("a stop under a command's kill write that holds the file slot closes the VM
 	await assert.rejects(stop, /Stop failed before its checkpoint completed/);
 	assert.deepEqual(fake.checkpoints, []);
 	await assert.rejects(killing, /sandbox closed/);
+});
+
+test("reads queued behind a file write take at most 48 of the guest's 64 command slots, and the rest wait for one", async (t) => {
+	const { fake, runtime } = await runningOnAFakeVm(t, staged, "answering");
+	const writing = runtime.handle(writeFiles);
+	await fake.holding("/0");
+	const reads = Array.from({ length: 65 }, (_, i) => runtime.handle({ action: "read", name: "pylon-a", path: `/tmp/${i}` } as Action));
+	assert.ok((await Promise.all(reads.map((read) => settles(read, 200)))).every((outcome) => outcome === "still waiting"), `no read failed behind the write, but the guest refused ${fake.refused.length} as full`);
+	fake.answer();
+	await writing;
+	assert.equal((await Promise.allSettled(reads)).filter((read) => read.status === "fulfilled").length, 65);
+	assert.deepEqual(fake.refused, []);
+	assert.equal(fake.peak, 48);
+});
+
+test("reads against a guest that stopped answering take at most 48 of its 64 command slots, and the rest wait for one", async (t) => {
+	const { fake, runtime } = await runningOnAFakeVm(t, /^$/, "queued", undefined, (cmd) => cmd.startsWith("head -c"));
+	const reads = Array.from({ length: 70 }, (_, i) => runtime.handle({ action: "read", name: "pylon-a", path: `/tmp/${i}` } as Action));
+	assert.ok((await Promise.all(reads.map((read) => settles(read, 200)))).every((outcome) => outcome === "still waiting"), `no read failed while the guest held them, but the guest refused ${fake.refused.length} as full`);
+	assert.equal(fake.peak, 48);
+	fake.answer();
+	await delay(50);
+	fake.answer();
+	assert.equal((await Promise.allSettled(reads)).filter((read) => read.status === "fulfilled").length, 70, "each waiting read ran once a slot freed");
+	assert.deepEqual(fake.refused, [], "the guest never refused a command as full");
+	assert.equal(fake.peak, 48);
+	assert.equal(((await runtime.stop()) as { state: string }).state, "stopped");
+});
+
+test("a stop refuses the reads still waiting for a command slot, so they never take the slots its own commands need", async (t) => {
+	const { fake, runtime } = await runningOnAFakeVm(t, /^$/, "queued", undefined, (cmd) => cmd.startsWith("head -c"));
+	const reads = Array.from({ length: 70 }, (_, i) => runtime.handle({ action: "read", name: "pylon-a", path: `/tmp/${i}` } as Action));
+	for (const read of reads) void read.catch(() => {});
+	await delay(50);
+	const stop = runtime.stop();
+	fake.answer();
+	assert.equal(((await stop) as { state: string }).state, "stopped");
+	const outcomes = await Promise.allSettled(reads);
+	assert.equal(outcomes.filter((read) => read.status === "fulfilled").length, 48, "the reads the guest ran were answered within the stop's wait");
+	for (const read of outcomes.slice(48)) assert.match(String((read as PromiseRejectedResult).reason), /the VM stopped running while it waited for a command slot/);
+	assert.deepEqual(fake.refused, []);
+	assert.equal(fake.peak, 48);
+	assert.equal(fake.checkpoints.length, 1);
+});
+
+test("a stop checkpoints although reads whose waits ran out still hold command slots the guest never answered", async (t) => {
+	let stalled = false;
+	const { dir, fake, runtime } = await runningOnAFakeVm(t, /^$/, "queued", undefined, (cmd) => stalled && /\/done'?$/.test(cmd));
+	const exec = { action: "exec", name: "pylon-a", cmd: "sleep 600", timeoutMs: 0 } as Action;
+	const pids: string[] = [];
+	for (let i = 0; i < 64; i++) pids.push(((await runtime.handle(exec)) as { pid: string }).pid);
+	stalled = true;
+	// Each status read polls the guest with a 3 s command, whose wait ends 10 s after that, as a probe's read does.
+	const reads = await Promise.allSettled(pids.map((pid) => runtime.handle({ action: "exec-status", name: "pylon-a", pid, timeoutMs: 3000 } as Action)));
+	assert.ok(reads.every((read) => read.status === "rejected"), "the guest answered none of them");
+	assert.equal(((await runtime.stop()) as { state: string }).state, "stopped");
+	assert.deepEqual(fake.refused, [], "the stop's own commands found room");
+	assert.equal(fake.checkpoints.length, 1);
+	await access(join(dir, "disk.qcow2"));
 });
 
 /** Opens the guest terminal, a real listener on the host, and closes it after the test even when the code under test does not. */

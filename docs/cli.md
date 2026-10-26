@@ -420,8 +420,8 @@ interface Tally { pylons: number; cpus: number; memoryGiB: number }
 interface NodePylons {
   up: Tally;       // every phase but stopped, and broken but for a controller that exited: holds its CPUs and memory
   paused: Tally;   // stopped, thread not archived or deleted: a wake needs its CPUs and memory back
-  archived: Tally; // stopped, thread archived or deleted
-  crashed: Tally;  // broken because its controller exited or failed to boot the VM: holds only its disk, and a retry needs its CPUs and memory back
+  archived: Tally; // stopped or crashed, thread archived or deleted: holds only its disk, and boots only once the thread is unarchived
+  crashed: Tally;  // broken because its controller exited or failed to boot the VM, thread not archived or deleted: holds only its disk, and a retry needs its CPUs and memory back
   orphaned: PylonId[]; // in the observation but not placed on this node by the registry, so its resources are unknown
 }
 ```

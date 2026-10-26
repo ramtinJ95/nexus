@@ -583,14 +583,15 @@ test("nodes report whether they are overcommitted, and their observed pylons as 
   const s = await withImage(t);
   const started = async (title: string) => (await s.call("POST", "/v1/threads", { project: "acme", title, node: "a" })).body as Thread;
   observeNode(s, "a", { total: 64, committed: 0 });
-  const [up, paused, archived, failing, crashed] = [await started("Up"), await started("Paused"), await started("Archived"), await started("Failing"), await started("Crashed")];
-  assert.equal((await s.call("POST", `/v1/threads/${archived.id}/archive`)).status, 200);
+  const [up, paused, archived, failing, crashed, given] = [await started("Up"), await started("Paused"), await started("Archived"), await started("Failing"), await started("Crashed"), await started("Given up")];
+  for (const thread of [archived, given]) assert.equal((await s.call("POST", `/v1/threads/${thread.id}/archive`)).status, 200);
   s.registry.savePylon({ ...s.registry.pylon(up.pylonId)!, boot: { ...s.registry.pylon(up.pylonId)!.boot, resources: { cpus: 4, memoryGiB: 8, diskGiB: 10 } } });
   const stopped = (t: Thread) => ({ pylonId: t.pylonId, phase: "stopped" as const, checkpoint: null, sessions: null });
   observeNode(s, "a", { total: 6, committed: 8 }, {
     pylons: [{ pylonId: up.pylonId, phase: "booting" }, stopped(paused), stopped(archived), { pylonId: "pylon-gone" as PylonId, phase: "booting" },
       { pylonId: failing.pylonId, phase: "broken", detail: "a service did not start", cause: "services" },
-      { pylonId: crashed.pylonId, phase: "broken", detail: "the controller exited", cause: "controller" }],
+      { pylonId: crashed.pylonId, phase: "broken", detail: "the controller exited", cause: "controller" },
+      { pylonId: given.pylonId, phase: "broken", detail: "the controller exited", cause: "controller" }],
   });
   observeNode(s, "old", { total: 6, committed: 8 });
   s.registry.apply({ record: "node", node: "old" as NodeName, state: "online", capacity: { memoryGiB: 6, committedMemoryGiB: 8, diskFreeGiB: 100 } as never });
@@ -598,9 +599,9 @@ test("nodes report whether they are overcommitted, and their observed pylons as 
   const of = (name: string) => nodes.find((n) => n.name === name)!;
   assert.equal(of("a").overcommitted, true);
   assert.deepEqual(of("a").pylons, {
-    up: { pylons: 2, cpus: 6, memoryGiB: 12 }, paused: { pylons: 1, cpus: 2, memoryGiB: 4 }, archived: { pylons: 1, cpus: 2, memoryGiB: 4 },
+    up: { pylons: 2, cpus: 6, memoryGiB: 12 }, paused: { pylons: 1, cpus: 2, memoryGiB: 4 }, archived: { pylons: 2, cpus: 4, memoryGiB: 8 },
     crashed: { pylons: 1, cpus: 2, memoryGiB: 4 }, orphaned: ["pylon-gone"],
-  }, "a VM whose service failed still holds its CPUs and memory, and one whose controller exited holds only its disk");
+  }, "a VM whose service failed still holds its CPUs and memory, one whose controller exited holds only its disk, and with its thread archived it waits for an unarchive, not a retry");
   assert.equal(of("old").overcommitted, false, "a probe from before pylons were counted reports a committed memory that means nothing");
   assert.deepEqual([of(node).overcommitted, of(node).pylons], [false, null], "a node never observed has no pylons to report");
 });
