@@ -108,7 +108,9 @@ interface SessionsFile { version: 1; recordedAt: string; sessions: readonly Sess
 
 export type RelaunchOutcome =
   | { record: SessionRecord; result: "present" | "relaunched"; herdrPane: string }
-  | { record: SessionRecord; result: "failed"; herdrPane: string | null; message: string };
+  | { record: SessionRecord; result: "failed"; herdrPane: string | null; message: string }
+  /** A second record of a Claude Code session another record brings back. Its pane, if open, is closed. */
+  | { record: SessionRecord; result: "dropped"; herdrPane: string | null };
 
 /** A Herdr CLI error. `code` is Herdr's, such as `pane_not_found`, `server_not_running` or `agent_not_ready`. */
 export class HerdrError extends Error {
@@ -360,10 +362,11 @@ out=$(herdr --session ${herdrSession} pane send-keys "$pane" Enter 2>&1) || { pr
  * part of the text was typed. The caller runs one send per session at a time, since two would interleave their chunks.
  */
 export async function sendToClaude(guest: Guest, message: { session: string; text: string; model?: string }, readyWithinMs = claudeReadyMs): Promise<Omit<Extract<CommandResult, { kind: "send-claude" }>, "kind">> {
-  const found = await claudePane(guest, message.session);
+  const found = await claudePane(guest, message.session) ?? await restoredPane(guest, message.session);
   const resumed = found?.runs !== true;
   const herdrPane = found?.pane.herdrPane ?? await openSession(guest, { harness: "claude-code", title: "Claude Code", cwd: checkoutDir, resume: message.session, ...(message.model === undefined ? {} : { model: message.model }) });
-  // A pane whose Claude exited still reports the session. Starting it there, as a relaunch does, keeps the session in one pane.
+  // A pane whose Claude exited still reports the session, and a restored one is recorded with it. Starting it there, as a
+  // relaunch does, keeps the session in one pane.
   if (found?.runs === false) await startHarness(guest, herdrPane, "claude-code", message.session, undefined, message.model);
   let pane = await livePane(guest, herdrPane);
   for (const deadline = Date.now() + readyWithinMs; pane.status === "unknown" && Date.now() < deadline;) {
@@ -391,6 +394,21 @@ async function claudePane(guest: Guest, session: string): Promise<{ pane: LivePa
   for (const pane of panes) if (await runsSession(guest, pane, session)) return { pane, runs: true };
   const exited = panes.find((p) => p.harness === "claude-code" && p.harnessSessionId === session);
   return exited ? { pane: exited, runs: false } : null;
+}
+
+/**
+ * The shell Herdr restored the pane the sessions file records `session` in as, before a relaunch starts Claude in it.
+ * Herdr restores its panes as its server starts, so a send that comes before the relaunch starts it.
+ */
+async function restoredPane(guest: Guest, session: string): Promise<{ pane: LivePane; runs: false } | null> {
+  const file = await readSessionsFile(guest);
+  if (file === null) return null;
+  await ensureServer(guest);
+  const panes = await livePanes(guest);
+  const records = [...file.sessions, ...file.failed.flatMap((f) => f.inPane ? [f.record] : [])];
+  const pane = records.flatMap((r) => r.harness === "claude-code" && r.harnessSessionId === session
+    ? panes.filter((p) => p.herdrPane === r.herdrPane && p.title === r.title && p.harness === "shell") : [])[0];
+  return pane === undefined ? null : { pane, runs: false };
 }
 
 /** Whether Claude runs `session` in the pane: Herdr reports the session and Claude in its foreground, or, before Herdr learns an ID, Claude's command line names it. */
@@ -479,12 +497,20 @@ function relaunchedFrom(file: SessionsFile): RecordedSession[] {
  * restore nor an earlier relaunch is opened twice. One failure does not stop the rest, and the sessions
  * file is rewritten with each session's pane and with the failures, so a later record keeps them. A Herdr that
  * does not start fails every session, for its reason.
+ *
+ * A Claude Code session comes back in one pane only: the first record of it whose pane still runs it, or else its
+ * first record. Every other record of it is dropped and its pane closed. `exclusive` runs the relaunch while no send
+ * or launch of those sessions does, so none of them starts a session the relaunch is bringing back.
  */
-export async function relaunchSessions(guest: Guest): Promise<readonly RelaunchOutcome[]> {
+export async function relaunchSessions(guest: Guest, exclusive: <T>(claudeSessions: readonly string[], work: () => Promise<T>) => Promise<T> = (_, work) => work()): Promise<readonly RelaunchOutcome[]> {
   const file = await readSessionsFile(guest);
   if (file === null) return [];
   const records = [...file.sessions, ...file.failed.map((f) => f.record)];
   if (records.length === 0) return [];
+  return exclusive(records.flatMap((r) => r.harness === "claude-code" && r.harnessSessionId !== null ? [r.harnessSessionId] : []), () => relaunch(guest, file, records));
+}
+
+async function relaunch(guest: Guest, file: SessionsFile, records: readonly SessionRecord[]): Promise<readonly RelaunchOutcome[]> {
   let unclaimed: LivePane[];
   try {
     await ensureServer(guest);
@@ -517,15 +543,35 @@ export async function relaunchSessions(guest: Guest): Promise<readonly RelaunchO
     }
   }
 
+  // Herdr's agent fact outlives a failed start, so an agent counts as present only if its pane runs it.
+  const present = new Set<SessionRecord>();
+  const unreadable = new Map<SessionRecord, Error>();
+  for (const [r, pane] of claimed) {
+    const agent = agents[r.harness];
+    try {
+      if (agent === null ? pane.harness === "shell" : await runsAgent(guest, pane.herdrPane, agent.kind)) present.add(r);
+    } catch (err) {
+      unreadable.set(r, err as Error);
+    }
+  }
+  const recordsOf = (r: SessionRecord) => r.harness === "claude-code" && r.harnessSessionId !== null
+    ? records.filter((other) => other.harness === "claude-code" && other.harnessSessionId === r.harnessSessionId) : [r];
+  // Any of a session's panes might still run it, so none of them is started or closed.
+  const doubt = (r: SessionRecord) => recordsOf(r).flatMap((other) => unreadable.has(other) ? [{ pane: claimed.get(other)!.herdrPane, err: unreadable.get(other)! }] : [])[0];
+  const kept = (r: SessionRecord) => r === (recordsOf(r).find((other) => present.has(other)) ?? recordsOf(r)[0]);
+
   const outcomes: RelaunchOutcome[] = [];
   for (const r of records) {
     const pane = claimed.get(r);
     const resume = r.harnessSessionId ?? undefined;
-    const agent = agents[r.harness];
     try {
-      // Herdr's agent fact outlives a failed start, so an agent counts as present only if its pane runs it.
-      if (pane && (agent === null ? pane.harness === "shell" : await runsAgent(guest, pane.herdrPane, agent.kind))) {
-        outcomes.push({ record: r, result: "present", herdrPane: pane.herdrPane });
+      const unsure = present.has(r) ? undefined : doubt(r);
+      if (unsure) throw new Error(`whether ${unsure.pane} still runs the session could not be read, so it was not started again: ${unsure.err.message}`);
+      if (!kept(r)) {
+        if (pane) await closeSession(guest, pane.herdrPane);
+        outcomes.push({ record: r, result: "dropped", herdrPane: pane?.herdrPane ?? null });
+      } else if (present.has(r)) {
+        outcomes.push({ record: r, result: "present", herdrPane: pane!.herdrPane });
       } else if (pane) {
         await startHarness(guest, pane.herdrPane, r.harness, resume, undefined, r.model);
         outcomes.push({ record: r, result: "relaunched", herdrPane: pane.herdrPane });
@@ -545,7 +591,7 @@ export async function relaunchSessions(guest: Guest): Promise<readonly RelaunchO
 async function recordOutcomes(guest: Guest, file: SessionsFile, outcomes: readonly RelaunchOutcome[]): Promise<void> {
   await writeSessionsFile(guest, {
     ...file,
-    sessions: outcomes.flatMap((o) => o.result === "failed" ? [] : [{ ...o.record, herdrPane: o.herdrPane }]),
+    sessions: outcomes.flatMap((o) => o.result === "present" || o.result === "relaunched" ? [{ ...o.record, herdrPane: o.herdrPane }] : []),
     failed: outcomes.flatMap((o): FailedRecord[] => o.result !== "failed" ? []
       : [{ record: { ...o.record, herdrPane: o.herdrPane ?? o.record.herdrPane }, inPane: o.herdrPane !== null, message: o.message }]),
   });

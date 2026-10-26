@@ -1,0 +1,27 @@
+11:33:03 before-fix: worker session 20b2e84e-1532-44c1-8f07-0b311d351b9e
+11:33:04 launch: the worker runs in w1:p1
+11:33:08 after launch: 1 claude process(es) run session 20b2e84e: 15836
+11:33:08 after launch: workspaces w1="Fix the login page"
+11:33:23 wake 1: recorded [["w1:p1","Fix the login page","20b2e84e"]]
+11:33:23 pause: SIGKILLed 4 process(es), Herdr server and claude included
+11:33:24 wake 1: Herdr answers; the message goes now. Panes: [["w1:p1","Fix the login page","shell",null,"unknown"]]
+11:33:28 wake 1: relaunch [["Fix the login page","relaunched","w1:p1"]]
+11:33:28 wake 1: send {"outcome":"sent","herdrPane":"w2:p1","resumed":true}
+11:33:28 after wake 1: 2 claude process(es) run session 20b2e84e: 16220, 16243
+11:33:28 after wake 1: workspaces w1="Fix the login page" w2="Claude Code"
+11:33:43 wake 2: recorded [["w1:p1","Fix the login page","20b2e84e"],["w2:p1","Claude Code","20b2e84e"]]
+11:33:43 pause: SIGKILLed 6 process(es), Herdr server and claude included
+11:33:44 wake 2: Herdr answers; the message goes now. Panes: [["w1:p1","Fix the login page","shell",null,"unknown"],["w2:p1","Claude Code","shell",null,"unknown"]]
+11:33:52 wake 2: relaunch [["Fix the login page","relaunched","w1:p1"],["Claude Code","relaunched","w2:p1"]]
+11:33:52 wake 2: send {"outcome":"sent","herdrPane":"w3:p1","resumed":true}
+11:33:52 after wake 2: 3 claude process(es) run session 20b2e84e: 16968, 16977, 17196
+11:33:52 after wake 2: workspaces w1="Fix the login page" w2="Claude Code" w3="Claude Code"
+11:34:07 wake 3: recorded [["w1:p1","Fix the login page","20b2e84e"],["w2:p1","Claude Code","20b2e84e"],["w3:p1","Claude Code","20b2e84e"]]
+11:34:07 pause: SIGKILLed 8 process(es), Herdr server and claude included
+11:34:08 wake 3: Herdr answers; the message goes now. Panes: [["w1:p1","Fix the login page","shell",null,"unknown"],["w2:p1","Claude Code","shell",null,"unknown"],["w3:p1","Claude Code","shell",null,"unknown"]]
+11:34:19 wake 3: relaunch [["Fix the login page","relaunched","w1:p1"],["Claude Code","relaunched","w2:p1"],["Claude Code","relaunched","w3:p1"]]
+11:34:19 wake 3: send {"outcome":"sent","herdrPane":"w4:p1","resumed":true}
+11:34:19 after wake 3: 4 claude process(es) run session 20b2e84e: 17560, 17591, 17813, 18020
+11:34:19 after wake 3: workspaces w1="Fix the login page" w2="Claude Code" w3="Claude Code" w4="Claude Code"
+11:34:19 before-fix: claude processes for the worker's session after launch and each wake: 1 2 3 4
+11:34:19 pause: SIGKILLed 12 process(es), Herdr server and claude included
