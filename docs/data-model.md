@@ -275,12 +275,13 @@ shows as a `record` rather than disappearing. Prompts are cut at 32 KiB, replies
 64 KiB, tool inputs at 4 KiB per string and outputs at 8 KiB.
 
 The registry keeps what was read. `claude_transcripts` holds per thread the session it
-read, the cursor (`byte_offset` past the last complete line, and `skipping` while a
-record over 512 KiB is passed over), how many entries were `dropped`, and `read_at`.
+read, the cursor (`byte_offset` past the last complete line, `skipping` while a
+record over 512 KiB is passed over, and `before_hash`, the SHA-256 of the up to 4 KiB
+just before the offset), how many entries were `dropped`, and `read_at`.
 `claude_entries` holds the newest 3,000 entries in order. A read appends only its new
 entries and is applied only where the stored cursor stands, so a read applied twice
-changes nothing. A new session ID, or a file smaller than the cursor, replaces the
-stored entries. Archiving keeps them, and deleting the thread removes them.
+changes nothing. A new session ID, a file smaller than the cursor, or bytes before the
+cursor that no longer match `before_hash` replace the stored entries. Archiving keeps them, and deleting the thread removes them.
 `ClaudeConversation.working` is `Thread.sessionTurnRunning`.
 
 The control plane reads a transcript only while the node's last observation reports
@@ -294,7 +295,7 @@ thread, it is read every 2 seconds.
 the probe is asked, then `sent` with a `ClaudeSent` (`session`, `outcome` of `sent` or
 `queued`, `resumed`). A repeat of a `sent` ID answers the stored result. A send that
 typed nothing, because the pylon was not running, Claude waited at a dialog or was not
-ready yet, removes its row, so the same ID can be sent again. A row left `sending`
-means the probe failed partway, and a repeat is refused with a 422. Each thread keeps
-its newest 256 request IDs.
+ready yet, or its pane stopped running the session (`moved`), removes its row, so the same ID can be sent again. A row left `sending`
+means the probe failed partway, and a repeat is refused with a 422. A thread keeps
+every request ID until the thread is deleted.
 
