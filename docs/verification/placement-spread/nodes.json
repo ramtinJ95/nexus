@@ -12,7 +12,7 @@
       "diskFreeGiB": 400,
       "committedDiskGiB": 0
     },
-    "observedAt": "2026-10-26T10:27:10.919Z",
+    "observedAt": "2026-10-26T11:22:07.984Z",
     "overcommitted": false,
     "pylons": {
       "up": {
@@ -26,6 +26,11 @@
         "memoryGiB": 0
       },
       "archived": {
+        "pylons": 0,
+        "cpus": 0,
+        "memoryGiB": 0
+      },
+      "crashed": {
         "pylons": 0,
         "cpus": 0,
         "memoryGiB": 0
@@ -46,7 +51,7 @@
       "diskFreeGiB": 400,
       "committedDiskGiB": 320
     },
-    "observedAt": "2026-10-26T10:27:10.669Z",
+    "observedAt": "2026-10-26T11:22:07.876Z",
     "overcommitted": true,
     "pylons": {
       "up": {
@@ -63,6 +68,11 @@
         "pylons": 2,
         "cpus": 8,
         "memoryGiB": 16
+      },
+      "crashed": {
+        "pylons": 0,
+        "cpus": 0,
+        "memoryGiB": 0
       },
       "orphaned": [
         "pylon-th-0rphan000000"
@@ -82,7 +92,7 @@
       "diskFreeGiB": 400,
       "committedDiskGiB": 40
     },
-    "observedAt": "2026-10-26T10:27:11.152Z",
+    "observedAt": "2026-10-26T11:22:08.044Z",
     "overcommitted": false,
     "pylons": {
       "up": {
@@ -96,6 +106,11 @@
         "memoryGiB": 0
       },
       "archived": {
+        "pylons": 0,
+        "cpus": 0,
+        "memoryGiB": 0
+      },
+      "crashed": {
         "pylons": 0,
         "cpus": 0,
         "memoryGiB": 0

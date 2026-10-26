@@ -1,21 +1,25 @@
 [
   {
-    "id": "th-f874fbfe770e",
+    "id": "th-e7169e76eb3b",
     "title": "worker 1",
     "project": "nexus",
-    "pylonId": "pylon-th-f874fbfe770e",
+    "pylonId": "pylon-th-e7169e76eb3b",
     "status": "active",
     "conversationId": null,
     "startedBy": "nLAPTOP",
-    "createdAt": 1793010429476,
+    "createdAt": 1793013727129,
     "agentTurnRunning": false,
     "lastAgentActivityAt": 0,
-    "lastHumanActivityAt": 1793010429476,
+    "lastHumanActivityAt": 1793013727129,
     "seenAt": null,
     "lastReplyAt": null,
     "placement": {
       "how": "named",
       "node": "rj-firebat"
+    },
+    "setup": {
+      "how": "fresh",
+      "reason": "the control plane could not read .nexus/setup at main: Cannot read properties of undefined (reading 'setupInputs')"
     },
     "attention": null,
     "desired": "running",
@@ -26,22 +30,26 @@
     }
   },
   {
-    "id": "th-66771e8c5761",
+    "id": "th-bef71264c675",
     "title": "worker 2",
     "project": "nexus",
-    "pylonId": "pylon-th-66771e8c5761",
+    "pylonId": "pylon-th-bef71264c675",
     "status": "active",
     "conversationId": null,
     "startedBy": "nLAPTOP",
-    "createdAt": 1793010429564,
+    "createdAt": 1793013727190,
     "agentTurnRunning": false,
     "lastAgentActivityAt": 0,
-    "lastHumanActivityAt": 1793010429564,
+    "lastHumanActivityAt": 1793013727190,
     "seenAt": null,
     "lastReplyAt": null,
     "placement": {
       "how": "named",
       "node": "rj-firebat"
+    },
+    "setup": {
+      "how": "fresh",
+      "reason": "the control plane could not read .nexus/setup at main: Cannot read properties of undefined (reading 'setupInputs')"
     },
     "attention": null,
     "desired": "running",
@@ -52,22 +60,26 @@
     }
   },
   {
-    "id": "th-5741faa8eb75",
+    "id": "th-442c4c1a5f55",
     "title": "worker 3",
     "project": "nexus",
-    "pylonId": "pylon-th-5741faa8eb75",
+    "pylonId": "pylon-th-442c4c1a5f55",
     "status": "active",
     "conversationId": null,
     "startedBy": "nLAPTOP",
-    "createdAt": 1793010429661,
+    "createdAt": 1793013727281,
     "agentTurnRunning": false,
     "lastAgentActivityAt": 0,
-    "lastHumanActivityAt": 1793010429661,
+    "lastHumanActivityAt": 1793013727281,
     "seenAt": null,
     "lastReplyAt": null,
     "placement": {
       "how": "named",
       "node": "rj-firebat"
+    },
+    "setup": {
+      "how": "fresh",
+      "reason": "the control plane could not read .nexus/setup at main: Cannot read properties of undefined (reading 'setupInputs')"
     },
     "attention": null,
     "desired": "running",
@@ -78,22 +90,26 @@
     }
   },
   {
-    "id": "th-6515f2caea0b",
+    "id": "th-b9887c8b0710",
     "title": "worker 4",
     "project": "nexus",
-    "pylonId": "pylon-th-6515f2caea0b",
+    "pylonId": "pylon-th-b9887c8b0710",
     "status": "active",
     "conversationId": null,
     "startedBy": "nLAPTOP",
-    "createdAt": 1793010429768,
+    "createdAt": 1793013727317,
     "agentTurnRunning": false,
     "lastAgentActivityAt": 0,
-    "lastHumanActivityAt": 1793010429768,
+    "lastHumanActivityAt": 1793013727317,
     "seenAt": null,
     "lastReplyAt": null,
     "placement": {
       "how": "named",
       "node": "rj-firebat"
+    },
+    "setup": {
+      "how": "fresh",
+      "reason": "the control plane could not read .nexus/setup at main: Cannot read properties of undefined (reading 'setupInputs')"
     },
     "attention": null,
     "desired": "running",
@@ -104,22 +120,26 @@
     }
   },
   {
-    "id": "th-464279e38477",
+    "id": "th-2602a0a55232",
     "title": "paused worker",
     "project": "nexus",
-    "pylonId": "pylon-th-464279e38477",
+    "pylonId": "pylon-th-2602a0a55232",
     "status": "active",
     "conversationId": null,
     "startedBy": "nLAPTOP",
-    "createdAt": 1793010429894,
+    "createdAt": 1793013727422,
     "agentTurnRunning": false,
     "lastAgentActivityAt": 0,
-    "lastHumanActivityAt": 1793010429894,
+    "lastHumanActivityAt": 1793013727422,
     "seenAt": null,
     "lastReplyAt": null,
     "placement": {
       "how": "named",
       "node": "rj-firebat"
+    },
+    "setup": {
+      "how": "fresh",
+      "reason": "the control plane could not read .nexus/setup at main: Cannot read properties of undefined (reading 'setupInputs')"
     },
     "attention": null,
     "desired": "running",
@@ -130,22 +150,26 @@
     }
   },
   {
-    "id": "th-a3e23b861abd",
+    "id": "th-4fa328a0cfbc",
     "title": "archived 1",
     "project": "nexus",
-    "pylonId": "pylon-th-a3e23b861abd",
+    "pylonId": "pylon-th-4fa328a0cfbc",
     "status": "archived",
     "conversationId": null,
     "startedBy": "nLAPTOP",
-    "createdAt": 1793010430033,
+    "createdAt": 1793013727546,
     "agentTurnRunning": false,
     "lastAgentActivityAt": 0,
-    "lastHumanActivityAt": 1793010430033,
+    "lastHumanActivityAt": 1793013727546,
     "seenAt": null,
     "lastReplyAt": null,
     "placement": {
       "how": "named",
       "node": "rj-firebat"
+    },
+    "setup": {
+      "how": "fresh",
+      "reason": "the control plane could not read .nexus/setup at main: Cannot read properties of undefined (reading 'setupInputs')"
     },
     "attention": null,
     "desired": "paused",
@@ -156,22 +180,26 @@
     }
   },
   {
-    "id": "th-3a5dd9d86b79",
+    "id": "th-df6f9a9635ae",
     "title": "archived 2",
     "project": "nexus",
-    "pylonId": "pylon-th-3a5dd9d86b79",
+    "pylonId": "pylon-th-df6f9a9635ae",
     "status": "archived",
     "conversationId": null,
     "startedBy": "nLAPTOP",
-    "createdAt": 1793010430143,
+    "createdAt": 1793013727601,
     "agentTurnRunning": false,
     "lastAgentActivityAt": 0,
-    "lastHumanActivityAt": 1793010430143,
+    "lastHumanActivityAt": 1793013727601,
     "seenAt": null,
     "lastReplyAt": null,
     "placement": {
       "how": "named",
       "node": "rj-firebat"
+    },
+    "setup": {
+      "how": "fresh",
+      "reason": "the control plane could not read .nexus/setup at main: Cannot read properties of undefined (reading 'setupInputs')"
     },
     "attention": null,
     "desired": "paused",
@@ -182,17 +210,17 @@
     }
   },
   {
-    "id": "th-8c996eeeb753",
-    "title": "overlap two",
+    "id": "th-b2e146d09c7b",
+    "title": "overlap one",
     "project": "nexus",
-    "pylonId": "pylon-th-8c996eeeb753",
+    "pylonId": "pylon-th-b2e146d09c7b",
     "status": "active",
     "conversationId": "1",
     "startedBy": "nLAPTOP",
-    "createdAt": 1793010433078,
+    "createdAt": 1793013731642,
     "agentTurnRunning": false,
     "lastAgentActivityAt": 0,
-    "lastHumanActivityAt": 1793010433078,
+    "lastHumanActivityAt": 1793013731642,
     "seenAt": null,
     "lastReplyAt": null,
     "placement": {
@@ -221,6 +249,10 @@
         }
       ]
     },
+    "setup": {
+      "how": "fresh",
+      "reason": "the control plane could not read .nexus/setup at main: Cannot read properties of undefined (reading 'setupInputs')"
+    },
     "attention": null,
     "desired": "running",
     "pylon": {
@@ -230,17 +262,17 @@
     }
   },
   {
-    "id": "th-1e158bf34f1c",
-    "title": "overlap one",
+    "id": "th-8c25fb611310",
+    "title": "overlap two",
     "project": "nexus",
-    "pylonId": "pylon-th-1e158bf34f1c",
+    "pylonId": "pylon-th-8c25fb611310",
     "status": "active",
     "conversationId": "2",
     "startedBy": "nLAPTOP",
-    "createdAt": 1793010433139,
+    "createdAt": 1793013731739,
     "agentTurnRunning": false,
     "lastAgentActivityAt": 0,
-    "lastHumanActivityAt": 1793010433139,
+    "lastHumanActivityAt": 1793013731739,
     "seenAt": null,
     "lastReplyAt": null,
     "placement": {
@@ -269,6 +301,10 @@
         }
       ]
     },
+    "setup": {
+      "how": "fresh",
+      "reason": "the control plane could not read .nexus/setup at main: Cannot read properties of undefined (reading 'setupInputs')"
+    },
     "attention": null,
     "desired": "running",
     "pylon": {
@@ -278,22 +314,26 @@
     }
   },
   {
-    "id": "th-e30151177910",
+    "id": "th-56f87d47a213",
     "title": "before the edit",
     "project": "nexus",
-    "pylonId": "pylon-th-e30151177910",
+    "pylonId": "pylon-th-56f87d47a213",
     "status": "active",
     "conversationId": "3",
     "startedBy": "nLAPTOP",
-    "createdAt": 1793010435922,
+    "createdAt": 1793013734290,
     "agentTurnRunning": false,
     "lastAgentActivityAt": 0,
-    "lastHumanActivityAt": 1793010435922,
+    "lastHumanActivityAt": 1793013734290,
     "seenAt": null,
     "lastReplyAt": null,
     "placement": {
       "how": "default",
       "node": "rj-firebat"
+    },
+    "setup": {
+      "how": "fresh",
+      "reason": "the control plane could not read .nexus/setup at main: Cannot read properties of undefined (reading 'setupInputs')"
     },
     "attention": null,
     "desired": "running",
@@ -304,17 +344,17 @@
     }
   },
   {
-    "id": "th-8fe969eace80",
+    "id": "th-e864e6381bb9",
     "title": "after the edit",
     "project": "nexus",
-    "pylonId": "pylon-th-8fe969eace80",
+    "pylonId": "pylon-th-e864e6381bb9",
     "status": "active",
     "conversationId": "4",
     "startedBy": "nLAPTOP",
-    "createdAt": 1793010439533,
+    "createdAt": 1793013737974,
     "agentTurnRunning": false,
     "lastAgentActivityAt": 0,
-    "lastHumanActivityAt": 1793010439533,
+    "lastHumanActivityAt": 1793013737974,
     "seenAt": null,
     "lastReplyAt": null,
     "placement": {
@@ -343,6 +383,10 @@
         }
       ]
     },
+    "setup": {
+      "how": "fresh",
+      "reason": "the control plane could not read .nexus/setup at main: Cannot read properties of undefined (reading 'setupInputs')"
+    },
     "attention": null,
     "desired": "running",
     "pylon": {
@@ -352,22 +396,26 @@
     }
   },
   {
-    "id": "th-78919acb92a4",
+    "id": "th-a9657e0123d4",
     "title": "pinned",
     "project": "nexus",
-    "pylonId": "pylon-th-78919acb92a4",
+    "pylonId": "pylon-th-a9657e0123d4",
     "status": "active",
     "conversationId": "5",
     "startedBy": "nLAPTOP",
-    "createdAt": 1793010442054,
+    "createdAt": 1793013740519,
     "agentTurnRunning": false,
     "lastAgentActivityAt": 0,
-    "lastHumanActivityAt": 1793010442054,
+    "lastHumanActivityAt": 1793013740519,
     "seenAt": null,
     "lastReplyAt": null,
     "placement": {
       "how": "named",
       "node": "spare-node"
+    },
+    "setup": {
+      "how": "fresh",
+      "reason": "the control plane could not read .nexus/setup at main: Cannot read properties of undefined (reading 'setupInputs')"
     },
     "attention": null,
     "desired": "running",
@@ -378,17 +426,17 @@
     }
   },
   {
-    "id": "th-207f588fc605",
+    "id": "th-fffa32e46911",
     "title": "sized",
     "project": "nexus",
-    "pylonId": "pylon-th-207f588fc605",
+    "pylonId": "pylon-th-fffa32e46911",
     "status": "active",
     "conversationId": "6",
     "startedBy": "nLAPTOP",
-    "createdAt": 1793010444790,
+    "createdAt": 1793013743036,
     "agentTurnRunning": false,
     "lastAgentActivityAt": 0,
-    "lastHumanActivityAt": 1793010444790,
+    "lastHumanActivityAt": 1793013743036,
     "seenAt": null,
     "lastReplyAt": null,
     "placement": {
@@ -412,6 +460,10 @@
           "refused": "has 20 of 31.3 GiB of memory committed, and the pylon needs 12"
         }
       ]
+    },
+    "setup": {
+      "how": "fresh",
+      "reason": "the control plane could not read .nexus/setup at main: Cannot read properties of undefined (reading 'setupInputs')"
     },
     "attention": null,
     "desired": "running",

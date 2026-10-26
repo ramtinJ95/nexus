@@ -1,4 +1,4 @@
-infra-testbench  online  observed 1s ago  0/16 CPUs, 0/31.3 GiB memory committed, 0 GiB disk committed, 400 GiB disk free
-rj-firebat       online  observed 1s ago  20/16 CPUs, 40/22.8 GiB memory committed, overcommitted, 320 GiB disk committed, 400 GiB disk free
+infra-testbench  online  observed 0s ago  0/16 CPUs, 0/31.3 GiB memory committed, 0 GiB disk committed, 400 GiB disk free
+rj-firebat       online  observed 0s ago  20/16 CPUs, 40/22.8 GiB memory committed, overcommitted, 320 GiB disk committed, 400 GiB disk free
   pylons: 4 up holding 16 CPUs and 32 GiB, 1 paused needing 8 GiB to wake, 2 archived, 1 orphaned (pylon-th-0rphan000000)
-spare-node       online  observed 1s ago  2/16 CPUs, 4/31.3 GiB memory committed, 40 GiB disk committed, 400 GiB disk free
+spare-node       online  observed 0s ago  2/16 CPUs, 4/31.3 GiB memory committed, 40 GiB disk committed, 400 GiB disk free

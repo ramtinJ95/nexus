@@ -1,27 +1,27 @@
 {
-  "id": "th-1e158bf34f1c",
+  "id": "th-b2e146d09c7b",
   "title": "overlap one",
   "project": "nexus",
-  "pylonId": "pylon-th-1e158bf34f1c",
+  "pylonId": "pylon-th-b2e146d09c7b",
   "status": "active",
-  "conversationId": "2",
+  "conversationId": "1",
   "startedBy": "nLAPTOP",
-  "createdAt": 1793010433139,
+  "createdAt": 1793013731642,
   "agentTurnRunning": false,
   "lastAgentActivityAt": 0,
-  "lastHumanActivityAt": 1793010433139,
+  "lastHumanActivityAt": 1793013731642,
   "seenAt": null,
   "lastReplyAt": null,
   "placement": {
     "how": "auto",
-    "node": "spare-node",
+    "node": "infra-testbench",
     "weighed": [
       {
         "node": "infra-testbench",
         "left": {
-          "cpus": 8,
-          "memoryGiB": 15.3,
-          "diskGiB": 320
+          "cpus": 12,
+          "memoryGiB": 23.3,
+          "diskGiB": 360
         }
       },
       {
@@ -37,5 +37,9 @@
         }
       }
     ]
+  },
+  "setup": {
+    "how": "fresh",
+    "reason": "the control plane could not read .nexus/setup at main: Cannot read properties of undefined (reading 'setupInputs')"
   }
 }
