@@ -72,7 +72,11 @@ test("records survive closing and reopening the file", async (t) => {
   first.savePylon(submitted);
   first.saveImage(image, "c".repeat(40));
   first.setCurrentImage(image.id);
-  const template: TemplateRecord = { id: "tpl-000000000000", key: { project: project.id, image: image.id, setupHash: "s" }, state: "building", on: node };
+  const key = { project: project.id, image: image.id, setupHash: "s" };
+  const template: TemplateRecord = {
+    id: "tpl-000000000000", key, state: "building", on: node, submitted: null,
+    inputs: { key, repo: { url: project.repoUrl, branch: "main", commit: "c".repeat(40) }, preSetup: null, allowedHosts: [], resources: project.resources },
+  };
   first.saveTemplate(template);
   first.close();
 

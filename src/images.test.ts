@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   chooseTemplate, garbage, imageIdOf, setupHashOf, templateIdOf, templateMaxAgeMs,
-  type ArtifactId, type CheckpointId, type ImageId, type ImageRecipe, type SetupInputs, type TemplateKey, type TemplateRecord,
+  type ArtifactId, type CheckpointId, type ImageId, type ImageRecipe, type SetupInputs, type TemplateBuildInputs, type TemplateKey, type TemplateRecord,
 } from "./images.ts";
 import type { ProjectId, RemoteProject } from "./project.ts";
 import type { NodeName } from "./protocol.ts";
@@ -45,12 +45,12 @@ const project: RemoteProject = {
   logins: [],
   preSetup: null,
 };
-const inputs: SetupInputs = { commit: "c1", setupBlob: "blob1", services: null };
+const inputs: SetupInputs = { commit: "c1", setupBlob: "blob1" };
 
 test("setupHashOf changes with .nexus/setup, preSetup and the effective allowlist only", () => {
   const hash = setupHashOf(project, inputs);
   assert.match(hash, /^[0-9a-f]{64}$/);
-  assert.equal(setupHashOf(project, { ...inputs, commit: "c2", services: { services: {} } }), hash, "a commit that leaves setup alone keeps the key");
+  assert.equal(setupHashOf(project, { ...inputs, commit: "c2" }), hash, "a commit that leaves setup alone keeps the key");
   assert.equal(setupHashOf({ ...project, allowedHosts: ["registry.npmjs.org", "registry.npmjs.org"] }, inputs), hash);
   for (const changed of [
     setupHashOf(project, { ...inputs, setupBlob: "blob2" }),
@@ -76,55 +76,58 @@ test("templateIdOf names one build: its key and its start time", () => {
 
 const checkout = { branch: "feature", commit: "c1" };
 const buildMs = 10 * 60_000;
-const ready = (builtAt: number, k = key): TemplateRecord & { state: "ready" } => ({ id: templateIdOf(k, builtAt - buildMs), key: k, state: "ready", builtOn: peer, builtAt, commit: "c0" });
-const building: TemplateRecord = { id: templateIdOf(key, now - buildMs), key, state: "building", on: peer };
-const failed: TemplateRecord = { id: templateIdOf(key, now - 2 * hour), key, state: "failed", on: peer, failedAt: now - hour, logTail: "npm ERR! 404" };
+const buildInputs: TemplateBuildInputs = {
+  key,
+  repo: { url: project.repoUrl, branch: "feature", commit: "c1" },
+  preSetup: null,
+  allowedHosts: ["registry.npmjs.org"],
+  resources: project.resources,
+};
+const ready = (builtAt: number, k = key, on = node): TemplateRecord & { state: "ready" } => ({ id: templateIdOf(k, builtAt - buildMs), key: k, state: "ready", builtOn: on, builtAt, commit: "c0" });
+const buildingOn = (on: NodeName, k = key): TemplateRecord => ({ id: templateIdOf(k, now - buildMs), key: k, state: "building", on, inputs: { ...buildInputs, key: k }, submitted: null });
+const building = buildingOn(node);
+const failedOn = (on: NodeName): TemplateRecord => ({ id: templateIdOf(key, now - 2 * hour), key, state: "failed", on, failedAt: now - hour, logTail: "npm ERR! 404" });
+const failed = failedOn(node);
 const otherKey: TemplateKey = { ...key, setupHash: "other" };
 const recent = ready(now - hour);
 const older = ready(now - 2 * hour);
 
-const choices: Record<string, [readonly TemplateRecord[], ReturnType<typeof chooseTemplate>]> = {
-  "a fresh ready template is reused, whichever node built it": [[recent], { kind: "reuse", template: recent.id }],
-  "the newest fresh ready template is reused": [[older, recent], { kind: "reuse", template: recent.id }],
-  "a ready template wins over a failed one": [[failed, recent], { kind: "reuse", template: recent.id }],
+/** The target node holds every template it built, unless a case says otherwise. */
+const choices: Record<string, [readonly TemplateRecord[], ReturnType<typeof chooseTemplate>, (readonly ArtifactId[])?]> = {
+  "a fresh ready template the node holds is reused": [[recent], { kind: "reuse", template: recent.id, builtAt: recent.builtAt }],
+  "the newest fresh ready template is reused": [[older, recent], { kind: "reuse", template: recent.id, builtAt: recent.builtAt }],
+  "a ready template wins over a failed one": [[failed, recent], { kind: "reuse", template: recent.id, builtAt: recent.builtAt }],
   "a running build is waited for": [[building], { kind: "wait", template: building.id }],
   "a running build wins over a template past its age": [[ready(now - templateMaxAgeMs), building], { kind: "wait", template: building.id }],
-  "a failed build boots fresh, with its log": [[failed], { kind: "fresh", reason: `the setup of template ${failed.id} failed on ${peer}:\nnpm ERR! 404` }],
+  "a failed build boots fresh, with its log": [[failed], { kind: "fresh", reason: `the build of template ${failed.id} failed on ${node}: npm ERR! 404` }],
   "a template past its age is rebuilt": [[ready(now - templateMaxAgeMs)], build()],
-  "another key's template is ignored": [[ready(now - hour, otherKey), { ...building, id: templateIdOf(otherKey, now), key: otherKey }], build()],
+  "another key's template is ignored": [[ready(now - hour, otherKey), buildingOn(node, otherKey)], build()],
   "no template is built on the target node": [[], build()],
+  "a ready template built on another node is built again here": [[ready(now - hour, key, peer)], build()],
+  "a ready template the node no longer holds is built again": [[recent], build(), []],
+  "a build running on another node is not waited for": [[buildingOn(peer)], build()],
+  "a build that failed on another node does not stop one here": [[failedOn(peer)], build()],
 };
 
 function build(): ReturnType<typeof chooseTemplate> {
-  return {
-    kind: "build",
-    template,
-    on: node,
-    inputs: {
-      key,
-      repo: { url: project.repoUrl, branch: "feature", commit: "c1" },
-      preSetup: null,
-      allowedHosts: ["registry.npmjs.org"],
-      resources: project.resources,
-    },
-  };
+  return { kind: "build", template, on: node, inputs: buildInputs };
 }
 
-for (const [name, [templates, expected]] of Object.entries(choices)) {
+for (const [name, [templates, expected, held]] of Object.entries(choices)) {
   test(`chooseTemplate: ${name}`, () => {
-    assert.deepEqual(chooseTemplate(project, key, checkout, templates, node, now), expected);
+    assert.deepEqual(chooseTemplate(project, key, checkout, templates, node, held ?? templates.map((t) => t.id), now), expected);
   });
 }
 
 test("chooseTemplate builds with the effective allowlist, so setup can reach login and secret hosts", () => {
   const withLogin = { ...project, logins: ["chatgpt"] as const, secrets: [{ name: "K", hosts: ["api.stripe.com"] }] };
-  const choice = chooseTemplate(withLogin, key, checkout, [], node, now);
+  const choice = chooseTemplate(withLogin, key, checkout, [], node, [], now);
   assert.equal(choice.kind, "build");
   assert.deepEqual(choice.kind === "build" && choice.inputs.allowedHosts, ["api.openai.com", "api.stripe.com", "auth.openai.com", "chatgpt.com", "registry.npmjs.org"]);
 });
 
 test("chooseTemplate builds with the host of an HTTPS repo on the allowlist, so setup can clone it", () => {
-  const choice = chooseTemplate({ ...project, repoUrl: "https://github.com/ramtin/acme-web.git" }, key, checkout, [], node, now);
+  const choice = chooseTemplate({ ...project, repoUrl: "https://github.com/ramtin/acme-web.git" }, key, checkout, [], node, [], now);
   assert.deepEqual(choice.kind === "build" && choice.inputs.allowedHosts, ["github.com", "registry.npmjs.org"]);
 });
 
@@ -149,24 +152,24 @@ test("garbage drops aged templates that are not their project's newest ready one
 
 test("a rebuild after expiry gets a new ID, and garbage keeps the old one until the rebuild is ready", () => {
   const expired = ready(now - templateMaxAgeMs - hour);
-  const choice = chooseTemplate(project, key, checkout, [expired], node, now);
+  const choice = chooseTemplate(project, key, checkout, [expired], node, [expired.id], now);
   assert.ok(choice.kind === "build");
   assert.notEqual(choice.template, expired.id, "the bytes under the expired ID never change");
 
   const settings = { imageBuildNode: node, current: image };
-  const rebuilding: TemplateRecord = { id: choice.template, key, state: "building", on: node };
+  const rebuilding: TemplateRecord = { id: choice.template, key, state: "building", on: node, inputs: choice.inputs, submitted: null };
   assert.deepEqual(garbage([image, expired.id], [expired, rebuilding], settings, now), [], "the newest ready template of the project is kept");
 
   const later = now + buildMs;
   const rebuilt: TemplateRecord = { id: choice.template, key, state: "ready", builtOn: node, builtAt: later, commit: "c1" };
-  assert.deepEqual(chooseTemplate(project, key, checkout, [expired, rebuilt], node, later), { kind: "reuse", template: choice.template });
+  assert.deepEqual(chooseTemplate(project, key, checkout, [expired, rebuilt], node, [expired.id, rebuilt.id], later), { kind: "reuse", template: choice.template, builtAt: later });
   assert.deepEqual(garbage([image, expired.id, rebuilt.id], [expired, rebuilt], settings, later), [expired.id]);
 });
 
 test("garbage keeps the image a running template build needs, before any template of it is held", () => {
   const buildImage: ImageId = "img-333333333333";
   const fresh = ready(now - hour);
-  const buildingOnNewImage: TemplateRecord = { id: templateIdOf({ ...key, image: buildImage }, now), key: { ...key, image: buildImage }, state: "building", on: node };
+  const buildingOnNewImage = buildingOn(node, { ...key, image: buildImage });
   const settings = { imageBuildNode: node, current: image };
   assert.deepEqual(garbage([image, buildImage, fresh.id], [fresh, buildingOnNewImage], settings, now), []);
   assert.deepEqual(garbage([image, buildImage, fresh.id], [fresh], settings, now), [buildImage]);
