@@ -1,0 +1,37 @@
++   0.2s checkout <repo>/src
++   0.7s node-a: probe listening on 127.0.0.1:7480
++   0.8s node-b: probe listening on 127.0.0.2:7480
++   1.9s control: control plane listening
++   2.0s project chat with the chatgpt login and default node auto: HTTP 201
++   2.0s == a cold start: the first start on a new stack
++   2.4s node-a: backend: booted pylon-th-f1dfca7acc76 with NEXUS_CHATGPT_TOKEN: the handed-over token
++   2.4s nexus start "cold start": accepted after 0.4 s and 0 refusals, th-f1dfca7acc76 on node-a
++   2.4s booted 0.4 s after the first start: node-a backend: booted pylon-th-f1dfca7acc76 with NEXUS_CHATGPT_TOKEN: the handed-over token
++   2.4s == a control plane restart
++   3.8s control: control plane listening
++   3.9s control plane healthy
++   4.3s node-a: backend: booted pylon-th-6aa2482d30de with NEXUS_CHATGPT_TOKEN: the handed-over token
++   4.3s nexus start "after a control plane restart": accepted after 0.4 s and 0 refusals, th-6aa2482d30de on node-a
++   4.3s booted 0.4 s after the first start: node-a backend: booted pylon-th-6aa2482d30de with NEXUS_CHATGPT_TOKEN: the handed-over token
++   4.3s == a deploy: the control plane restarts, then both probes, as nexus deploy upgrades them
++   5.8s control: control plane listening
++   5.8s control plane healthy
++   9.5s node-b: probe listening on 127.0.0.2:7480
++   9.6s node-a: probe listening on 127.0.0.1:7480
++   9.6s probes listening again
++  10.0s nexus start "after a deploy": accepted after 0.4 s and 0 refusals, th-0fd4e9c658d9 on node-a
++  10.9s node-a: backend: booted pylon-th-0fd4e9c658d9 with NEXUS_CHATGPT_TOKEN: the handed-over token
++  10.9s node-a: backend: booted pylon-th-6aa2482d30de with NEXUS_CHATGPT_TOKEN: the handed-over token
++  10.9s node-a: backend: booted pylon-th-f1dfca7acc76 with NEXUS_CHATGPT_TOKEN: the handed-over token
++  10.9s booted 1.3 s after the first start: node-a backend: booted pylon-th-0fd4e9c658d9 with NEXUS_CHATGPT_TOKEN: the handed-over token
++  10.9s == a probe restart on both nodes
++  11.4s node-a: probe listening on 127.0.0.1:7480
++  11.4s node-b: probe listening on 127.0.0.2:7480
++  13.0s the control plane has each restarted probe's first snapshot
++  13.0s node-a: backend: booted pylon-th-0fd4e9c658d9 with NEXUS_CHATGPT_TOKEN: the handed-over token
++  13.0s node-a: backend: booted pylon-th-6aa2482d30de with NEXUS_CHATGPT_TOKEN: the handed-over token
++  13.0s node-a: backend: booted pylon-th-f1dfca7acc76 with NEXUS_CHATGPT_TOKEN: the handed-over token
++  13.4s node-b: backend: booted pylon-th-8273bb26bc14 with NEXUS_CHATGPT_TOKEN: the handed-over token
++  13.4s nexus start "after a probe restart": accepted after 0.5 s and 0 refusals, th-8273bb26bc14 on node-b
++  13.4s booted 0.5 s after the first start: node-b backend: booted pylon-th-8273bb26bc14 with NEXUS_CHATGPT_TOKEN: the handed-over token
+exit 0
