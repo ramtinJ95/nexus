@@ -426,15 +426,15 @@ interface NodePylons {
 }
 ```
 
-A tally's CPUs and memory are what each pylon's boot asked for. Plain `nodes` prints the classes that have pylons on a line under the node, such as `  pylons: 5 up holding 20 CPUs and 40 GiB, 1 paused needing 8 GiB to wake, 3 archived, 1 crashed needing 8 GiB to retry, 1 orphaned (pylon-x)`. A control plane older than 0.22.0 sends neither field, so plain `nodes` then prints no mark and no `pylons` line.
+A tally's CPUs and memory are what each pylon's boot asked for. Plain `nodes` prints the classes that have pylons on a line under the node, such as `  pylons: 5 up holding 20 CPUs and 40 GiB, 1 paused needing 8 GiB to wake, 3 archived, 1 crashed needing 8 GiB to retry, 1 orphaned (pylon-x)`. A control plane older than 0.23.0 sends neither field, so plain `nodes` then prints no mark and no `pylons` line.
 
-### A thread's size (0.22.0)
+### A thread's size (0.23.0)
 
 `start --cpus n --memory GiB --disk GiB` sizes the thread's pylon over its project's `resources`. It sends `"resources"` in the body of `POST /v1/threads` with only the fields given, such as `{ "memoryGiB": 12, "cpus": 2 }`, and each field left out is the project's. Each is a positive whole number. The CLI refuses a negative number or one that is not whole with exit code 64 before it sends a request, and the API answers 0, like any other value it refuses, with 400, which is exit code 64 too. The dashboard's start dialog has CPUs, memory and disk fields whose placeholders show the picked project's size, and sends only the fields filled in.
 
 The size is frozen into the pylon's boot when the thread starts, with its repository and grants. Every wake, unarchive and pylon retry boots that size, and a later `project edit` of `resources` changes only new threads. `--node auto` weighs the thread's size, and the start reserves it, so a node with room for the project's size but not the thread's is refused with the thread's number, such as `infra-testbench has 24 of 32 GiB of memory committed, and the pylon needs 12`.
 
-`ThreadDetail.pylon.resources` is the size, `{ cpus, memoryGiB, diskGiB }`. Plain `show` prints it after the pylon line, such as `size: 2 CPUs, 12 GiB memory, 10 GiB disk`. A control plane older than 0.22.0 sends none, and plain `show` then prints no size line.
+`ThreadDetail.pylon.resources` is the size, `{ cpus, memoryGiB, diskGiB }`. Plain `show` prints it after the pylon line, such as `size: 2 CPUs, 12 GiB memory, 10 GiB disk`. A control plane older than 0.23.0 sends none, and plain `show` then prints no size line.
 
 ## Reviews and landing (0.18.0)
 
