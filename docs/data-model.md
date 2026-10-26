@@ -107,11 +107,13 @@ A linked PR contributes an `Output` with `kind: "pull-request"` and `ref` equal 
 `reviews` stores a builder thread's latest review, one JSON record per builder, with its reviewer thread in a unique column. The PR watch skips every thread started by `nexus-review`, so a reviewer stays skipped after a later review replaces the record that named it. `Review` in `src/control/review.ts` is the shape, and `ThreadDetail.review` serves it:
 
 - `id` is `rv-` and eight hex digits. It starts every token the agents echo and every request ID the loop sends under. `expect` is the token the awaited answer must echo, random per request, and `sent` counts the review's messages, numbering their request IDs `<id>:<n>`.
-- `builder`, `reviewer`, `pr` (`repo`, `number`, `url`, `title`) and `models` (`builder`, `reviewer`) say who reviews what. `maxRounds` is 1 to 10, 3 by default.
+- `builder`, `reviewer`, `pr` (`repo`, `number`, `url`, `title`, `branch`) and `models` (`builder`, `reviewer`) say who reviews what. `reviewerKind` is `harness` or `claude`, and only a harness reviewer's approval can land. `maxRounds` is 1 to 10, 3 by default.
 - `land` is null to stop at approval, or `{ requestedBy }`, the deployer who asked for the landing. `merged` is the merge commit once the PR merged, after which the review never lands again.
 - `rounds` holds one entry per review of a head: `head`, the reviewer's parsed `verdict` (`verdict`, `findings` with `id`, `severity`, `where`, `summary`, `detail`, `reserved` cases, and `notCheckedLive`), the `check` at that head (`passed`, the output's tail), and the builder's `answers` (`id`, `action` fixed or rejected, `reason`).
-- `phase` is one of `reviewing`, `fixing`, `checking` (with `startedAt`), `approved`, `merging`, `deploying` (`commit`, `previous`, `requested`, `deadline`), `landed` (`commit`), or `needs-person` (`reasons`). `approved`, `landed` and `needs-person` have ended.
-- `outbox` is the next message (`to`, `id`, `text`), saved before it is sent. `since` is when the agent the loop waits on was last sent one, and `nudges` how many reminders in a row it has had.
+- `phase` is one of `reviewing`, `fixing`, `checking` (`startedAt`, and `thread`, the check thread of the run in progress or null), `approved`, `merging`, `deploying` (`commit`, `previous`, `requested`, `deadline`), `rolling-back` (`commit`, `previous`, `why`, `requested`, `deadline`), `landed` (`commit`), or `needs-person` (`reasons`). `approved`, `landed` and `needs-person` have ended.
+- `outbox` is the next message (`to`, `id`, `text`, and `attempted`, when its first send began, saved before that send), saved before it is sent. `since` is when the agent the loop waits on was last sent one, and `nudges` how many reminders in a row it has had.
+
+A check thread is a bare thread, with no conversation and no Claude worker, whose `startedBy` is `nexus-check`. It lives only while its run does, and the review loop deletes any it does not hold.
 
 `needs-person` makes the builder's attention `decision`. A new `nexus review` replaces an ended record, and `nexus land` moves an approved one, or one the policy held after its check passed, back to `checking`.
 

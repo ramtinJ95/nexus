@@ -303,7 +303,7 @@ Release changes require both ordinary API admission and `deployers` membership. 
 
 ## Reviews and landing (0.18.0)
 
-`review` starts [the review loop](design.md#the-review-loop-and-landing) for the thread's open pull request, the one the PR watch linked, and prints the review it started. The control plane starts a reviewer thread on another model than the builder's, which is listed in `threads` like any other, and runs the rounds itself, so the command returns at once and the Mac can sleep. `--pr N` names the PR when the thread has several open. `--rounds N` caps the reviews of new commits, 3 by default, from 1 to 10. `--land` lands the PR under [the merge policy](merge-policy.md) once the reviewer approves it and `.nexus/check` passes at the approved head: merge, then for Nexus's own repository deploy and wait for health, rolling back if it does not come.
+`review` starts [the review loop](design.md#the-review-loop-and-landing) for the thread's open pull request, the one the PR watch linked, and prints the review it started. The control plane starts a reviewer thread on another model than the builder's, which is listed in `threads` like any other, as is each short-lived check thread, started by `nexus-check`, that runs `.nexus/check` and is deleted after its verdict. It runs the rounds itself, so the command returns at once and the Mac can sleep. `--pr N` names the PR when the thread has several open. `--rounds N` caps the reviews of new commits, 3 by default, from 1 to 10. `--land` lands the PR under [the merge policy](merge-policy.md) once the reviewer approves it and `.nexus/check` passes at the approved head: merge, then for Nexus's own repository deploy and wait for health, rolling back if it does not come. A Claude reviewer's approval never lands; it ends in `decision` for the person.
 
 `land` lands a review that ended approved, or tries again one the policy held after its check passed, such as after the PR's description changed or the person granted the merge token. It runs the check again first, which reads the kept result for the same head. A review that already merged never lands again.
 
@@ -317,18 +317,20 @@ interface Review {
   expect: string;                     // the token the awaited answer echoes
   sent: number;                       // messages sent, which number their request IDs
   builder: string; reviewer: string;  // thread IDs
-  pr: { repo: string; number: number; url: string; title: string };
+  pr: { repo: string; number: number; url: string; title: string; branch: string };
   models: { builder: string; reviewer: string };
+  reviewerKind: "harness" | "claude";   // only a harness reviewer's approval lands
   maxRounds: number;
   land: { requestedBy: string } | null;
   merged: string | null;              // the merge commit once merged
   rounds: { head: string; verdict: Verdict | null; check: { passed: boolean; output: string } | null; answers: Answer[] | null }[];
   phase: { kind: "reviewing" | "fixing" | "approved" | "merging" }
-    | { kind: "checking"; startedAt: number }
+    | { kind: "checking"; startedAt: number; thread: string | null }
     | { kind: "deploying"; commit: string; previous: string | null; requested: boolean; deadline: number }
+    | { kind: "rolling-back"; commit: string; previous: string; why: string; requested: boolean; deadline: number }
     | { kind: "landed"; commit: string }
     | { kind: "needs-person"; reasons: string[] };
-  outbox: { to: "builder" | "reviewer"; id: string; text: string } | null;
+  outbox: { to: "builder" | "reviewer"; id: string; text: string; attempted: number | null } | null;
   since: number; nudges: number; startedAt: number;
 }
 ```

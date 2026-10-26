@@ -23,14 +23,14 @@ An agent may merge and deploy a pull request without the person when all of thes
 
 | Condition | What the landing checks |
 |---|---|
-| A reviewer on another model approved | The review's reviewer model differs from the builder's, and its latest round's verdict is an approval with no serious finding open, a failed check included. |
+| A reviewer on another model approved | The review's reviewer model differs from the builder's, and its latest round's verdict is an approval with no serious finding open, a failed check included. The approval must come from a harness reviewer, whose verdict the control plane's own agent loop produces. A Claude reviewer's verdict is read from its transcript in its pylon, where code it runs, such as the pull request's tests, could write a forged one, so a landing it approved goes to the person. |
 | Every finding fixed or rejected with a reason | Every finding of every round has the builder's answer: fixed, or rejected with a non-empty reason. |
-| Typecheck and full test suite | The control plane ran the repository's `.nexus/check` at the approved head, in the reviewer's pylon, and it exited 0. Any GitHub check on the pull request must not be failing or pending either. |
+| Typecheck and full test suite | The control plane ran the repository's `.nexus/check` at the approved head in a fresh check thread, a pylon with no agent cloned at that commit, and the pipe the probe carried reported the check's process exiting 0. Nothing the check writes in the pylon decides it, and the thread is deleted afterwards, so nothing it leaves running reaches a later round or any reviewer. Any GitHub check on the pull request must not be failing or pending either. |
 | Live check, or a statement of what couldn't be checked live | No verify stack exists yet ([open questions](design.md#open-questions)), so every landing takes the second branch. The reviewer quotes the passage of the pull request's description that says what couldn't be checked live, at least 20 characters, which must appear in the description, and counts what it names among the reserved cases it lists. |
 | Nothing reserved for the person | The reviewer lists every reserved case the change touches, which must be none. For Nexus's own pull requests, the changed paths must also touch none, as the table below says. In any repository, a change to `.nexus/check` holds the landing. |
-| Deploy healthy, else roll back | Nexus's own pull requests deploy their merge commit and wait up to 30 minutes, as `nexus deploy --wait` does. A failed, rolled-back or late deploy sets the desired release back to the previous one. Another repository's pull request is merged with nothing to deploy. |
+| Deploy healthy, else roll back | Nexus's own pull requests deploy their merge commit and wait up to 30 minutes, as `nexus deploy --wait` does. A failed, rolled-back or late deploy sets the desired release back to the previous one and waits, up to 30 minutes again, for every service to report it healthy. Only then does the person hear that it rolled back; a rollback that fails too is reported as failed. Another repository's pull request is merged with nothing to deploy. |
 
-The landing also refuses a pull request that is not open, whose head moved after the approval, or whose branch conflicts with its base. It merges with GitHub's head check, so it merges only the commit the reviewer approved.
+The landing also refuses a pull request that is not open, whose head moved after the approval, or whose branch conflicts with its base. It checks every condition again, with what GitHub says at that moment, right before each merge attempt, including one retried after a restart, since checks can fail after an approval and branch protection may not enforce them. It merges with GitHub's head check, so it merges only the commit the reviewer approved.
 
 ## Paths that hold a Nexus pull request
 
@@ -49,7 +49,7 @@ A registry migration counts as irreversible even when it only adds a table: a co
 
 ## Known limits
 
-- `.nexus/check` runs the pull request's own code in the reviewer's pylon. A Claude reviewer's transcript lives on that pylon's disk, so code from the pull request could write a forged answer into it. The tokens are random per request, but such code could read the latest one from the same disk. A harness reviewer's conversation is on the control plane, out of reach. Running the check in a throwaway pylon would close this, at the cost of a boot per check.
+- The check's exit status is what the pylon reports for the pipe's process. Code in the check runs as the pylon's `user`, who has sudo, so a check written to attack its own VM's process reporting could still lie about it. That is a deliberate attack on Nexus rather than a test that writes the wrong file, and the reviewer reads the change for it.
 - The typecheck and the tests are whatever the pull request's `.nexus/check` and its scripts run. A change to `.nexus/check` holds the landing, but a change to what it calls, such as `package.json`'s scripts, is for the reviewer to catch.
 
 ## What the person does with a held landing
