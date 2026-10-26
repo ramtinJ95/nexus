@@ -38,7 +38,7 @@ function fakeNode(options: { autoFinish: boolean; node?: NodeName; reportsRoutes
   const observation = (): NodeObservation => ({
     node, observedAt: new Date().toISOString(), probeBootId: "boot-1",
     capacity: { cpus: 16, committedCpus: 0, memoryGiB: 64, committedMemoryGiB: 0, diskFreeGiB: 100, committedDiskGiB: 0 },
-    artifacts: [image], jobs: [...jobs.values()].map((j) => j.status), pylons: [...pylons.values()], previewRoutes: options.reportsRoutes === false ? null : [...routes.values()],
+    artifacts: [image], jobs: [...jobs.values()].map((j) => j.status), pylons: [...pylons.values()], grants: { secrets: [], gitSsh: false }, previewRoutes: options.reportsRoutes === false ? null : [...routes.values()],
   });
   const unroute = (pylonId: PylonId) => { for (const [port, route] of routes) if (route.pylonId === pylonId) routes.delete(port); };
   const emit = (event: ProbeEvent) => { for (const push of streams) push(event); };

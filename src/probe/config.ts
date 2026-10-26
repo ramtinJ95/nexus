@@ -101,7 +101,7 @@ export function parseSecretsEnv(text: string): SecretSource {
     if (/^(["']).*\1$/.test(value)) throw new Error(`${at} quotes the value of ${name}. Values are taken verbatim, so remove the quotes`);
     values.set(name, value);
   });
-  return { value: (name) => values.get(name) };
+  return { value: (name) => values.get(name), names: () => [...values.keys()] };
 }
 
 /** Refuses a file that every user on the node can read or write. The probe user reads it through its group. */

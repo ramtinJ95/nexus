@@ -246,7 +246,7 @@ test("a snapshot from a probe older than route reporting parses with its routes 
   const old = parseProbeEvent(encodeProbeEvent({ type: "snapshot", observation } as unknown as ProbeEvent));
   assert.ok(old.type === "snapshot" && old.observation.previewRoutes === null);
   const routes = [{ httpsPort: 10200, pylonId, service: "web" }];
-  const current = parseProbeEvent(encodeProbeEvent({ type: "snapshot", observation: { ...observation, previewRoutes: routes } }));
+  const current = parseProbeEvent(encodeProbeEvent({ type: "snapshot", observation: { ...observation, grants: { secrets: [], gitSsh: false }, previewRoutes: routes } }));
   assert.ok(current.type === "snapshot" && current.observation.previewRoutes !== null);
   assert.deepEqual(current.observation.previewRoutes, routes);
   assert.throws(() => parseProbeEvent(encodeProbeEvent({ type: "snapshot", observation: { ...observation, previewRoutes: {} } } as unknown as ProbeEvent)), /previewRoutes is not an array/);
@@ -380,7 +380,7 @@ test("ingest: the first list after a wake replaces the paused sessions with thei
 test("ingest: a deleted pylon drops its sessions", () => {
   assert.deepEqual(ingest({ type: "snapshot", observation: {
     node, observedAt: "2027-01-01T00:00:00Z", probeBootId: "b1", capacity: { cpus: 16, committedCpus: 0, memoryGiB: 64, committedMemoryGiB: 8, diskFreeGiB: 500, committedDiskGiB: 0 },
-    artifacts: [], jobs: [], pylons: [], previewRoutes: [],
+    artifacts: [], jobs: [], pylons: [], grants: { secrets: [], gitSsh: false }, previewRoutes: [],
   } }, node, knows(phase("deleting")), now).filter((w) => w.record === "sessions"), [{ record: "sessions", pylonId, sessions: [] }]);
 });
 
@@ -408,7 +408,7 @@ test("ingest: a snapshot writes the node, its jobs, its pylons, and closes known
     capacity: { cpus: 16, committedCpus: 0, memoryGiB: 64, committedMemoryGiB: 8, diskFreeGiB: 500, committedDiskGiB: 0 },
     artifacts: [image], jobs: [status],
     pylons: [runningWith({ attachedClients: 2 }), { pylonId: "pylon-x" as PylonId, phase: "booting" }],
-    previewRoutes: [],
+    grants: { secrets: [], gitSsh: false }, previewRoutes: [],
   };
   const known = new Map<PylonId, PylonObservation | "absent">([[pylonId, "absent"], [gone, { ...runningWith({ sessions: [idleShell] }), pylonId: gone }]]);
   assert.deepEqual(ingest({ type: "snapshot", observation }, node, known, now), [

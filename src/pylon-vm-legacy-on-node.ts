@@ -20,7 +20,7 @@ import type { PylonId } from "./protocol.ts";
 const [step, ...args] = process.argv.slice(2);
 const pylonId = "pylon-legacy-wake" as PylonId;
 const checkpoint = "ckpt-legacy-wake-1" as CheckpointId;
-const secrets = { value: () => undefined };
+const secrets = { value: () => undefined, names: () => [] };
 const home = "/home/user";
 const repoDir = `${home}/workspace/repo`;
 const signal = () => AbortSignal.timeout(20 * 60_000);

@@ -96,7 +96,7 @@ async function setup(t: import("node:test").TestContext, overrides: Partial<Prob
     auth: { controlPlane, peers: [peer] },
     whois: async () => caller,
     backend: fake.backend,
-    secrets: { value: () => undefined },
+    secrets: { value: () => undefined, names: () => [] },
     ...overrides,
   });
   t.after(() => probe.close());
@@ -229,7 +229,7 @@ test("fetch-artifact imports from the peer probe, and refuses a copy whose sha25
   const peerNode = "peer-node" as NodeName;
   const holder = await startProbe({
     node: peerNode, host: "127.0.0.1", port: 0, auth: { controlPlane, peers: [probeNodeId] }, whois: async () => probeNodeId,
-    backend: source.backend, secrets: { value: () => undefined }, log: () => undefined,
+    backend: source.backend, secrets: { value: () => undefined, names: () => [] }, log: () => undefined,
   });
   t.after(() => holder.close());
   const manifest = templateManifest("b".repeat(64));
@@ -328,6 +328,16 @@ test("capacity counts the CPUs and memory of VMs that are up and the disk of eve
     const { capacity } = e.type === "snapshot" ? e.observation : assert.fail();
     assert.deepEqual([capacity.committedCpus, capacity.committedMemoryGiB, capacity.committedDiskGiB], [6, 16, 150], "a pylon whose backend reserves nothing counts for nothing");
     assert.ok(capacity.cpus > 0 && capacity.memoryGiB > 0);
+    break;
+  }
+});
+
+test("observations name the secrets the node holds, never their values, and whether it has a git SSH key", async (t) => {
+  const { client } = await setup(t, { secrets: { value: () => "s3cr3t", names: () => ["GH_TOKEN"] }, gitSsh: true });
+  for await (const e of client.observe(AbortSignal.timeout(5000))) {
+    const observation = e.type === "snapshot" ? e.observation : assert.fail();
+    assert.deepEqual(observation.grants, { secrets: ["GH_TOKEN"], gitSsh: true });
+    assert.ok(!JSON.stringify(observation).includes("s3cr3t"));
     break;
   }
 });

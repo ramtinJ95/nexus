@@ -37,6 +37,7 @@ const probe = await startProbe({
   whois: localApiWhois(),
   backend: config.backend.kind === "pylon-vm" ? pylonVm(config.backend) : docker(config.backend),
   secrets,
+  gitSsh: config.backend.kind === "pylon-vm" && config.backend.gitSsh !== undefined,
   ...(config.previews === undefined ? {} : { previews: { ...config.previews, tailscale } }),
   // The Docker backend's bridge needs a fixed port, which this config does not have, so a Docker probe leaves NEXUS_API unanswered.
   ...(config.backend.kind === "pylon-vm" ? { eventJournal: `${config.backend.stateRoot}/events.sqlite`, hostBridge: pylonVmHostBridge(config.backend.stateRoot) } : {}),

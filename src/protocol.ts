@@ -137,6 +137,11 @@ export interface NodeObservation {
    * pylon the node reports absent counts as gone.
    */
   previewRoutes: readonly PreviewRouteFact[] | null;
+  /**
+   * What the node can give a pylon: the names of the secrets in its secret file, and whether it has a git SSH key.
+   * Null from a probe older than this field, whose capacity also counts no pylons.
+   */
+  grants: { secrets: readonly string[]; gitSsh: boolean } | null;
 }
 
 export interface PreviewRouteFact { httpsPort: number; pylonId: PylonId; service: string }
@@ -647,6 +652,7 @@ export function parseProbeEvent(frame: string): ProbeEvent {
       }
       o.previewRoutes ??= null;
       if (o.previewRoutes !== null && !Array.isArray(o.previewRoutes)) throw new Error("observation.previewRoutes is not an array");
+      o.grants ??= null;
       (o.jobs as unknown[]).forEach(parseJobStatus);
       (o.pylons as unknown[]).forEach(parsePylonObservation);
       if (o.events !== undefined) {

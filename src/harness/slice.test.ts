@@ -73,7 +73,7 @@ before(async () => {
     auth: { controlPlane: controlPlaneId, peers: [] },
     whois: async () => controlPlaneId,
     backend,
-    secrets: { value: () => undefined },
+    secrets: { value: () => undefined, names: () => [] },
     log,
   });
   locator = { awaitRunning: async () => ({ node, host: "127.0.0.1", port: probe.port, nodeId: probeId }) };

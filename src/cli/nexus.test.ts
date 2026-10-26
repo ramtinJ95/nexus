@@ -392,7 +392,7 @@ function observeRunning(s: Awaited<ReturnType<typeof setup>>, thread: Thread, se
   const capacity = { cpus: 16, committedCpus: 0, memoryGiB: 64, committedMemoryGiB: 0, diskFreeGiB: 100, committedDiskGiB: 0 };
   s.registry.apply({ record: "node", node, state: "online", capacity });
   s.registry.ingested({
-    node, observedAt: new Date().toISOString(), probeBootId: "b", capacity, artifacts: [], jobs: [], previewRoutes: [],
+    node, observedAt: new Date().toISOString(), probeBootId: "b", capacity, artifacts: [], jobs: [], grants: { secrets: [], gitSsh: false }, previewRoutes: [],
     pylons: [{
       pylonId: thread.pylonId, phase: "running", liveHash: s.registry.pylon(thread.pylonId)!.liveHash, bootedAt: "2027-01-01T00:00:00Z",
       bootedFrom: { image: image.id, checkpoint: null }, services, listening: ports.map((port) => ({ port })), previews: [], sessions: [], git: null, declaredOutputs: [], attachedClients: 0,

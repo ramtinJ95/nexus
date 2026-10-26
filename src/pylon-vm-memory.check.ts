@@ -33,7 +33,7 @@ assert.ok(Number.isInteger(diskGiB) && diskGiB > 0 && diskGiB < 6, "the disk wri
 const pylonId = `pylon-mem-${Date.now().toString(36)}` as PylonId;
 const image = basename(imageDir) as ImageId;
 const signal = () => AbortSignal.timeout(20 * 60_000);
-const backend = createPylonVmBackend({ stateRoot, artifacts: dirname(imageDir), secrets: { value: () => undefined } });
+const backend = createPylonVmBackend({ stateRoot, artifacts: dirname(imageDir), secrets: { value: () => undefined, names: () => [] } });
 const boot = (source: BootInputs["source"]): BootInputs => ({
   pylonId, image, source,
   resources: { cpus: 2, memoryGiB, diskGiB: 8 },

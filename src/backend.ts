@@ -100,7 +100,8 @@ export interface ArtifactStore {
 }
 
 /** Node-local secret values, from a root-owned file such as /etc/nexus/secrets.env. */
-export interface SecretSource { value(name: string): string | undefined }
+/** `names` lists the secrets the node holds, which its probe reports. Values never leave the node. */
+export interface SecretSource { value(name: string): string | undefined; names(): readonly string[] }
 
 export interface ProbeDeps {
   node: NodeName;

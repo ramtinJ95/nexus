@@ -38,6 +38,8 @@ export interface ProbeOptions {
   whois: Whois;
   backend: VmBackend;
   secrets: SecretSource;
+  /** Whether the backend has a git SSH key, so a pylon can clone over SSH. Default false. */
+  gitSsh?: boolean;
   jobDeadlineMs?: { readonly [K in Job["kind"]]: number };
   /** The probe's log, which also receives the stderr of raw pipes. Default console.error. */
   log?: (message: string) => void;
@@ -379,6 +381,7 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
       jobs,
       pylons: await Promise.all(pylons.map(observation)),
       previewRoutes: previews === null ? [] : [...previews.gateway.routes].map(([httpsPort, route]) => ({ httpsPort, ...route })),
+      grants: { secrets: options.secrets.names(), gitSsh: options.gitSsh ?? false },
     };
   }
 
