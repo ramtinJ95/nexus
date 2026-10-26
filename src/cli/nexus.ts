@@ -220,8 +220,12 @@ function claudeText(c: ClaudeConversation): string {
 }
 
 const gib = (n: number) => Number(n.toFixed(1));
-const capacityText = (c: NonNullable<NodeSummary["capacity"]>) =>
-  `${c.committedCpus}/${c.cpus} CPUs, ${gib(c.committedMemoryGiB)}/${gib(c.memoryGiB)} GiB memory committed, ${gib(c.committedDiskGiB)} GiB disk committed, ${gib(c.diskFreeGiB)} GiB disk free`;
+/** A probe from before pylons were counted reports no CPUs or committed disk, and always 0 GiB of memory committed. */
+function capacityText(c: Partial<NonNullable<NodeSummary["capacity"]>>): string {
+  const counted = c.committedDiskGiB !== undefined;
+  const n = (v: number | undefined, known = true) => v === undefined || !known ? "unknown" : gib(v);
+  return `${n(c.committedCpus)}/${n(c.cpus)} CPUs, ${n(c.committedMemoryGiB, counted)}/${n(c.memoryGiB)} GiB memory committed, ${n(c.committedDiskGiB)} GiB disk committed, ${n(c.diskFreeGiB)} GiB disk free`;
+}
 
 const roomText = (r: Room) => `${gib(r.memoryGiB)} GiB memory, ${r.cpus} CPUs and ${gib(r.diskGiB)} GiB disk left`;
 function placementText(p: Placement): string {

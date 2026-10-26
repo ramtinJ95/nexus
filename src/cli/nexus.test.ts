@@ -1187,6 +1187,16 @@ test("start --node auto picks the node with room, show says why, and nodes print
     "the default thread's pylon, which the node has yet to report, counts against it");
 });
 
+test("nodes prints what an older probe does not count as unknown, never as 0, with --json or without", async (t) => {
+  const s = await setup(t);
+  const capacity = { memoryGiB: 64, committedMemoryGiB: 0, diskFreeGiB: 100 } as never;
+  s.registry.apply({ record: "node", node, state: "online", capacity });
+  const text = await s.nexus(["nodes"]);
+  assert.equal(text.code, 0, text.stderr);
+  assert.match(text.stdout, /^rj-firebat +online +.+ {2}unknown\/unknown CPUs, unknown\/64 GiB memory committed, unknown GiB disk committed, 100 GiB disk free$/m);
+  assert.deepEqual((await s.json(["nodes"]))[0].capacity, capacity);
+});
+
 test("show prints PR metadata and one disabled-watch notice without waking the pylon", async (t) => {
   const s = await setup(t);
   const thread: Thread = await s.json(["start", "--project", "acme", "--title", "PR"]);

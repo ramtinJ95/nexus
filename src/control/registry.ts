@@ -269,6 +269,11 @@ const migrations: readonly string[] = [
 type Row = Record<string, unknown>;
 const json = <T>(value: unknown): T => JSON.parse(value as string) as T;
 const jsonOrNull = <T>(value: unknown): T | null => value === null ? null : json<T>(value);
+/** An observation stored from a probe older than `grants` has none, which reads as such a probe's null. */
+function observationOf(value: unknown): NodeObservation | null {
+  const o = jsonOrNull<NodeObservation>(value);
+  return o === null ? null : { ...o, grants: o.grants ?? null };
+}
 
 function nodeRow(r: Row): NodeRecord {
   return {
@@ -277,7 +282,7 @@ function nodeRow(r: Row): NodeRecord {
     tailnetNodeId: r.tailnet_node_id as TailnetNodeId,
     state: r.state as NodeRecord["state"],
     capacity: jsonOrNull(r.capacity),
-    observation: jsonOrNull(r.observation),
+    observation: observationOf(r.observation),
   };
 }
 
@@ -417,7 +422,7 @@ export function openRegistry(path: string, clock = Date.now) {
     const rows = q.previews.all(pylon) as Row[];
     if (rows.length === 0) return [];
     // A pylon's previews are all on its node.
-    const observed = jsonOrNull<NodeObservation>((q.node.get(rows[0]!.node as string) as Row).observation)?.pylons.find((p) => p.pylonId === pylon);
+    const observed = observationOf((q.node.get(rows[0]!.node as string) as Row).observation)?.pylons.find((p) => p.pylonId === pylon);
     // Only a running pylon's services are known. A paused one's preview shows the waking page, which answers.
     const facts = new Map(observed?.phase === "running" ? (observed.services ?? []).map((s) => [s.name, s]) : []);
     return rows.map((r): Preview => {
@@ -799,7 +804,7 @@ export function openRegistry(path: string, clock = Date.now) {
     allocatePreviews(pylonId: PylonId, services: readonly string[], range: PortRange) {
       const node = (q.pylon.get(pylonId) as Row | undefined)?.node as NodeName | undefined;
       if (node === undefined) throw new Error(`no pylon ${pylonId} to allocate previews for`);
-      const routed = (jsonOrNull<NodeObservation>((q.node.get(node) as Row).observation)?.previewRoutes ?? []).map((r) => r.httpsPort);
+      const routed = (observationOf((q.node.get(node) as Row).observation)?.previewRoutes ?? []).map((r) => r.httpsPort);
       const held = new Set(previews(pylonId).map((p) => p.service));
       for (const service of services) {
         if (held.has(service)) continue;

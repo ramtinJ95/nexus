@@ -316,6 +316,31 @@ test("--node auto counts the memory of a paused pylon about to wake, and not of 
     "once Waking stays paused, a has 60 GiB left, and b 54 with Placed still to boot there");
 });
 
+test("--node auto passes over a node whose stored observation is from a probe older than grants", async (t) => {
+  const s = await withImage(t);
+  observeNode(s, "old", { total: 64, committed: 0 }, { grants: undefined as never });
+  observeNode(s, "new", { total: 16, committed: 8 });
+  const started = await s.call("POST", "/v1/threads", { project: "acme", title: "Placed", node: "auto" });
+  assert.equal(started.status, 201, JSON.stringify(started.body));
+  assert.equal(started.body.placement.node, "new");
+  assert.deepEqual(started.body.placement.weighed.find((w: { node: string }) => w.node === "old"), { node: "old", refused: "runs a probe too old to report what its pylons hold" });
+});
+
+test("--node auto counts a crashed pylon a person retried, which boots again, and not one whose VM still holds its memory", async (t) => {
+  const s = await withImage(t);
+  observeNode(s, "b", { total: 16, committed: 10 });
+  observeNode(s, "a", { total: 16, committed: 0 });
+  const t1 = (await s.call("POST", "/v1/threads", { project: "acme", title: "Crashed", node: "a" })).body as Thread;
+  s.registry.savePylon({ ...s.registry.pylon(t1.pylonId)!, boot: { ...s.registry.pylon(t1.pylonId)!.boot, resources: { cpus: 2, memoryGiB: 12, diskGiB: 10 } }, retrying: true });
+  const broken = (cause: "controller" | "services") => ({ pylonId: t1.pylonId, phase: "broken" as const, detail: "the controller exited", cause });
+  observeNode(s, "a", { total: 16, committed: 0 }, { pylons: [broken("controller")] });
+  assert.equal((await s.call("POST", "/v1/threads", { project: "acme", title: "x", node: "auto" })).body.placement.node, "b",
+    "a will boot the retried 12 GiB pylon again, which leaves it 0 GiB, and b 2");
+  observeNode(s, "a", { total: 16, committed: 12 }, { pylons: [broken("services")] });
+  const weighed = (await s.call("POST", "/v1/threads", { project: "acme", title: "y", node: "auto" })).body.placement.weighed;
+  assert.deepEqual(weighed.find((w: { node: string }) => w.node === "a").left.memoryGiB, 0, "a broken VM that is still up is counted once, in the node's capacity");
+});
+
 test("--node auto refuses with each node's reason when none can run the pylon, and starts nothing", async (t) => {
   const s = await withImage(t);
   observeNode(s, "full", { total: 32, committed: 30 });

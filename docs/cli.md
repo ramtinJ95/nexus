@@ -344,7 +344,7 @@ interface Room { cpus: number; memoryGiB: number; diskGiB: number }
 
 Plain `show` prints it after the pylon line, such as `placement: rj-firebat, the project's default node`, or `placement: auto chose rj-firebat, which had the most room left after this pylon; infra-testbench had 4 GiB memory, 2 CPUs and 80 GiB disk left; rj-firebat had 40 GiB memory, 10 CPUs and 300 GiB disk left`.
 
-`NodeSummary.capacity` is `{ cpus, committedCpus, memoryGiB, committedMemoryGiB, diskFreeGiB, committedDiskGiB }`, or null for a node never observed. A pylon commits its CPUs and memory while its VM is up and its disk size until it is deleted, so a paused pylon counts toward `committedDiskGiB` only. Plain `nodes` prints it as `6/16 CPUs, 16/62.8 GiB memory committed, 120 GiB disk committed, 180.3 GiB disk free`.
+`NodeSummary.capacity` is `{ cpus, committedCpus, memoryGiB, committedMemoryGiB, diskFreeGiB, committedDiskGiB }`, or null for a node never observed. A pylon commits its CPUs and memory while its VM is up and its disk size until it is deleted, so a paused pylon counts toward `committedDiskGiB` only. Plain `nodes` prints it as `6/16 CPUs, 16/62.8 GiB memory committed, 120 GiB disk committed, 180.3 GiB disk free`. A probe from before pylons were counted reports no CPUs and no committed disk, and its committed memory is always 0. The fields it lacks are left out of `--json`, and plain `nodes` prints `unknown` for them and for its committed memory.
 
 ## Reviews and landing (0.18.0)
 
