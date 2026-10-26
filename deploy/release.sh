@@ -35,13 +35,14 @@ install_release() {
     echo "release $release is already installed"
   else
     # The dashboard's client is bundled from its sources and their dev dependencies, which go once it is built.
-    (cd "$staging" && PATH=$service_path npm ci --no-audit --no-fund)
-    (cd "$staging" && PATH=$service_path npm run build)
-    (cd "$staging" && PATH=$service_path npm prune --omit=dev --no-audit --no-fund)
-    printf '%s\n' "${NEXUS_COMMIT:-$(git -C "$repo" rev-parse HEAD 2>/dev/null || true)}" > "$staging/release-commit"
-    chown -R root:root "$staging"
-    chmod -R u+rwX,go+rX,go-w "$staging"
-    mv "$staging" "$prefix/releases/$release"
+    # Callers run this without errexit, so each step's failure stops here, and the EXIT trap removes the staging
+    # directory, which leaves no release directory for a retry to take as installed.
+    (cd "$staging" && PATH=$service_path npm ci --no-audit --no-fund) || fail "npm ci failed for release $release"
+    (cd "$staging" && PATH=$service_path npm run build) || fail "the dashboard build failed for release $release"
+    (cd "$staging" && PATH=$service_path npm prune --omit=dev --no-audit --no-fund) || fail "npm prune failed for release $release"
+    printf '%s\n' "${NEXUS_COMMIT:-$(git -C "$repo" rev-parse HEAD 2>/dev/null || true)}" > "$staging/release-commit" || fail "could not record the release's commit"
+    chown -R root:root "$staging" && chmod -R u+rwX,go+rX,go-w "$staging" || fail "could not make release $release root-owned"
+    mv "$staging" "$prefix/releases/$release" || fail "could not publish release $release"
     echo "installed release $release"
   fi
 }
