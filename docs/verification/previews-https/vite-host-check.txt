@@ -1,0 +1,7 @@
+$ curl -H "Host: rj-firebat.tailc817d3.ts.net:10201" http://localhost:5174/   # Vite 6.3.5, default config
+Blocked request. This host ("rj-firebat.tailc817d3.ts.net") is not allowed.
+To allow this host, add "rj-firebat.tailc817d3.ts.net" to `server.allowedHosts` in vite.config.js.
+(HTTP 403)
+
+$ curl -H "Host: rj-firebat.tailc817d3.ts.net:10201" http://localhost:5173/   # same app, server.allowedHosts: [".ts.net"]
+(HTTP 200)

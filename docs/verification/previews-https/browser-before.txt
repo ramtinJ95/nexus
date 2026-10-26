@@ -1,0 +1,39 @@
+
+## vite: on https://rj-firebat.example.ts.net:7443/, follow the link to https://rj-firebat.example.ts.net:10201/
+- loaded 200: https://rj-firebat.example.ts.net:10201/
+- loaded 200: https://rj-firebat.example.ts.net:10201/main.js?t=1792975589106
+- loaded 200: https://rj-firebat.example.ts.net:10201/@vite/client
+- loaded 200: https://rj-firebat.example.ts.net:10201/node_modules/vite/dist/client/env.mjs
+- console debug: [vite] connecting...
+- websocket opened: wss://rj-firebat.example.ts.net:10201/?token=qi8MP--gIhT5
+- websocket handshake: 101
+- console debug: [vite] connected.
+- landed on https://rj-firebat.example.ts.net:10201/
+- page text: "main loaded v1"
+- after editing main.js: loaded 200: https://rj-firebat.example.ts.net:10201/
+- after editing main.js: redirect 304: https://rj-firebat.example.ts.net:10201/@vite/client -> undefined
+- after editing main.js: loaded 200: https://rj-firebat.example.ts.net:10201/main.js?t=1792975592567
+- after editing main.js: redirect 304: https://rj-firebat.example.ts.net:10201/node_modules/vite/dist/client/env.mjs -> undefined
+- after editing main.js: console debug: [vite] connecting...
+- after editing main.js: websocket opened: wss://rj-firebat.example.ts.net:10201/?token=qi8MP--gIhT5
+- after editing main.js: websocket handshake: 101
+- after editing main.js: console debug: [vite] connected.
+- after editing main.js, page text: "main loaded v2"
+
+## wsgi: on https://rj-firebat.example.ts.net:7443/, follow the link to https://rj-firebat.example.ts.net:10202/
+- redirect 302: https://rj-firebat.example.ts.net:10202/ -> http://rj-firebat.example.ts.net:10202/login
+- loaded 400: http://rj-firebat.example.ts.net:10202/login
+- console error: Failed to load resource: the server responded with a status of 400 (Bad Request)
+- landed on http://rj-firebat.example.ts.net:10202/login
+- page text: "Client sent an HTTP request to an HTTPS server."
+- then open https://rj-firebat.example.ts.net:10202/login directly:
+  - loaded 200: https://rj-firebat.example.ts.net:10202/login
+  - console error: Mixed Content: The page at 'https://rj-firebat.example.ts.net:10202/login' was loaded over HTTPS, but requested an insecure stylesheet 'http://rj-firebat.example.ts.net:10202/static/app.css'. This request has been blocked; the content must 
+  - request failed: http://rj-firebat.example.ts.net:10202/static/app.css (undefined)
+
+## naive: on https://rj-firebat.example.ts.net:7443/, follow the link to https://rj-firebat.example.ts.net:10203/
+- redirect 302: https://rj-firebat.example.ts.net:10203/ -> http://rj-firebat.example.ts.net:10203/dashboard
+- loaded 400: http://rj-firebat.example.ts.net:10203/dashboard
+- console error: Failed to load resource: the server responded with a status of 400 (Bad Request)
+- landed on http://rj-firebat.example.ts.net:10203/dashboard
+- page text: "Client sent an HTTP request to an HTTPS server."

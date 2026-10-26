@@ -3,7 +3,7 @@
  * owns. Serve keeps the public `Host`, so the port in it names the preview (S6). The gateway forwards to that
  * pylon's preview origin, streaming bodies and passing websocket upgrades through.
  */
-import { STATUS_CODES, createServer, request, type IncomingHttpHeaders, type IncomingMessage, type OutgoingHttpHeaders, type ServerResponse } from "node:http";
+import { STATUS_CODES, createServer, request, type IncomingHttpHeaders, type IncomingMessage, type OutgoingHttpHeader, type OutgoingHttpHeaders, type ServerResponse } from "node:http";
 import type { Socket } from "node:net";
 import { pipeline } from "node:stream";
 import type { ServiceName } from "../project.ts";
@@ -84,7 +84,7 @@ export async function startGateway(options: GatewayOptions): Promise<PreviewGate
     const target = resolve(req);
     if ("status" in target) return res.writeHead(target.status, target.headers).end(target.body);
     const upstream = request(target.origin, { method: req.method, path: req.url, headers: forwardedHeaders(req, target.port, false) }, (up) => {
-      res.writeHead(up.statusCode ?? 502, up.statusMessage, endToEnd(up.headers));
+      res.writeHead(up.statusCode ?? 502, up.statusMessage, toBrowser(up.headers, req.headers.host));
       pipeline(up, res, () => {});
     });
     upstream.on("error", (err) => {
@@ -117,7 +117,7 @@ export async function startGateway(options: GatewayOptions): Promise<PreviewGate
     });
     // The origin refused the upgrade with an ordinary response. Relay it and close.
     upstream.on("response", (up) => {
-      socket.write(rawResponse(up.statusCode ?? 502, { ...endToEnd(up.headers), connection: "close" }, "", up.statusMessage));
+      socket.write(rawResponse(up.statusCode ?? 502, { ...toBrowser(up.headers, req.headers.host), connection: "close" }, "", up.statusMessage));
       pipeline(up, socket, () => {});
     });
     upstream.on("error", (err) => socket.end(rawResponse(502, { "content-type": "text/plain; charset=utf-8", connection: "close" }, `the preview origin did not answer: ${err.message}`)));
@@ -201,6 +201,30 @@ function endToEnd(headers: IncomingHttpHeaders): OutgoingHttpHeaders {
     if (value !== undefined && !hopByHop.has(name) && !named.has(name)) out[name] = value;
   }
   return out;
+}
+
+/**
+ * An app that builds absolute URLs from its own scheme redirects to `http://<host>`, which serve does not listen on,
+ * so that Location becomes https. Its pages link http:// subresources too, so every response also carries
+ * upgrade-insecure-requests as a CSP of its own, which leaves the guest's own policy as it was. The browser also
+ * upgrades navigations to http:// on this hostname at any port, so a link from a preview to a plain-HTTP port on the
+ * node, such as the dashboard's, fails. Mixed content in previews matters more than such links.
+ */
+function toBrowser(headers: IncomingHttpHeaders, host: string | undefined): OutgoingHttpHeaders {
+  const out = endToEnd(headers);
+  const location = headers.location;
+  if (location !== undefined && host !== undefined && /^http:\/\//i.test(location) && sameHost(location, host)) out.location = `https://${location.slice("http://".length)}`;
+  // Node's types allow one string here, but writeHead sends an array as one header line per value.
+  (out as Record<string, OutgoingHttpHeader>)["content-security-policy"] = [headers["content-security-policy"] ?? [], "upgrade-insecure-requests"].flat();
+  return out;
+}
+
+function sameHost(url: string, host: string): boolean {
+  try {
+    return new URL(url).host === new URL(`http://${host}`).host;
+  } catch {
+    return false;
+  }
 }
 
 function rawResponse(status: number, headers: IncomingHttpHeaders | OutgoingHttpHeaders, body: string, statusMessage = STATUS_CODES[status] ?? ""): string {

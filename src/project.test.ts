@@ -265,7 +265,7 @@ test("pylon.json carries the overlay facts for nexus info --json", () => {
 
 test("PYLON.md tells the agent its hosts, previews, logins and how to declare outputs", () => {
   const md = renderOverlay(overlay)[2]!.content;
-  for (const fact of ["Thread: t1", "- api.openai.com\n", "- registry.npmjs.org\n", "Every other host is blocked", "web: https://rj-firebat.example.ts.net:8443/", "chatgpt", "device-code", "nexus output add file", "only files on disk survive"]) {
+  for (const fact of ["Thread: t1", "- api.openai.com\n", "- registry.npmjs.org\n", "Every other host is blocked", "web: https://rj-firebat.example.ts.net:8443/", "chatgpt", "device-code", "nexus output add file", "only files on disk survive", "X-Forwarded-Proto: https", "server.allowedHosts"]) {
     assert.ok(md.includes(fact), `PYLON.md mentions ${JSON.stringify(fact)}`);
   }
   const bare = renderOverlay({ ...overlay, previews: [], logins: [] })[2]!.content;
