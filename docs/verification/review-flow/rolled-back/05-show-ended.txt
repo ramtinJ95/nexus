@@ -1,0 +1,16 @@
+$ nexus show th-3a47227a722c
+th-3a47227a722c  Greet script
+project: nexus
+Claude worker: started, model claude-opus-5-5
+attention: decision
+status: active
+pylon: pylon-th-3a47227a722c on verify-node, running, observed 0s ago
+PR watch: on
+PR #1: Add greet.sh — merged, checks none, review none https://github.com/ramtinJ95/nexus/pull/1
+review rv-7be2063d of PR #1: needs-person, round 1 of 3, reviewer th-ea3d03d46d38 on gpt-6-astra, landing when approved
+needs you: The deploy of 1de635964642c9f671b88f551af23961e8d4db8f failed: verify-node control rolled-back (health check failed); verify-node probe rolled-back (health check failed).
+needs you: Rolled back to the previous release, a1e2ec2e5bb76690b1fb7f6f122121777cf46f7a, which every service reports healthy.
+needs you: 1de635964642c9f671b88f551af23961e8d4db8f is still on the default branch, so revert it before the next deploy.
+output: branch origin/feature
+output: pull-request https://github.com/ramtinJ95/nexus/pull/1
+--- exit 0

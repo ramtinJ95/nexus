@@ -24,23 +24,20 @@ import { attentionOf, type Attention } from "./attention.ts";
 import { createServer as createHttpsServer } from "node:https";
 import { TLSSocket } from "node:tls";
 import type { Certificate } from "../tailscale.ts";
-import { randomBytes } from "node:crypto";
 import { createServer, STATUS_CODES, type IncomingMessage, type ServerResponse } from "node:http";
 import type { Duplex } from "node:stream";
 import { setTimeout as sleep } from "node:timers/promises";
 import { WebSocketServer, type WebSocket } from "ws";
 import { z } from "zod";
 import { actualState, desiredPhase, retryRefusal, type ActualState, type DesiredPhase } from "../reconcile.ts";
-import { effectiveAllowedHosts, gitIdentitySchema, gitUrl, hasRemote, linkedName, liveHashOf, reservedPorts, withHttpsHosts, type BootInputs, type Project, type ProjectId, type PylonOverlay, type RepoInit, type SessionHarness } from "../project.ts";
+import { effectiveAllowedHosts, gitIdentitySchema, gitUrl, linkedName, reservedPorts, withHttpsHosts, type BootInputs, type Project, type ProjectId, type PylonOverlay, type SessionHarness } from "../project.ts";
 import type { CommandResult, NodeName, ProbeClient, ProbeError, PylonCommand, PylonId, TailnetNodeId } from "../protocol.ts";
 import type { ConversationView, EntryRecord, JsonObject } from "@earendil-works/pi-durable";
 import type { HarnessHost } from "../harness/host.ts";
 import { pinsSchema, type ImageId, type ImageManifest } from "../images.ts";
 import type { Whois } from "../tailscale.ts";
-import { newPylonRecord } from "../tick.ts";
 import type { ClaudeSent, NodeRecord, Output, PortRange, Preview, Registry, Session, Thread, ThreadId } from "./registry.ts";
 import { dashboard, liveFrames } from "./dashboard.ts";
-import { pylonLive } from "./live.ts";
 import { attachScript, checkoutDir, claudeTextProblem, herdrSession } from "../sessions.ts";
 import { claudeConversations } from "./claude-conversation.ts";
 import type { ClaudeConversation } from "../claude-transcript.ts";
@@ -49,10 +46,16 @@ import { attachRoute, parseAttachQuery } from "../attach-wire.ts";
 import type { PullRequest } from "./github.ts";
 import { openTerminal } from "../guest-terminal.ts";
 import { attachTiming, serveAttach, type AttachTiming, type Ending, type PylonDoor } from "./attach.ts";
+import { typeIntoClaude } from "./inbox.ts";
+import { HttpError } from "./http-error.ts";
+import { threadStarter } from "./threads.ts";
+import { maxRounds, needsPerson, type Review, type ReviewLoop } from "./review.ts";
 
 export interface ApiOptions {
   https?: { port: number; certificate(): Promise<Certificate>; renewalMs?: number; retryMs?: number };
   prWatchEnabled?: boolean;
+  /** Null without a control-plane GitHub token, which the review loop reads and merges with. */
+  reviews?: ReviewLoop | null;
   deployment?: DeploymentOptions;
   turnsStarting?: () => boolean;
   registry: Registry;
@@ -114,6 +117,8 @@ export interface ThreadDetail {
   outputs: readonly Output[];
   prWatch: { enabled: boolean; stopped: boolean; error: string | null };
   pullRequests: readonly PullRequest[];
+  /** The thread's latest review as a builder, or null. */
+  review: Review | null;
   /** The command that attaches to the pylon's Herdr sessions from a shell in the pylon. */
   attach: string;
   /** Null for a thread that has no conversation. A parked task holds the run until it is retried. */
@@ -176,14 +181,6 @@ const pingMs = 15_000;
 /** A node without its probe's latest observation, which thread detail already reports per pylon. */
 export type NodeSummary = Omit<NodeRecord, "observation"> & { observedAt: string | null };
 
-class HttpError extends Error {
-  readonly status: number;
-  constructor(status: number, message: string) {
-    super(message);
-    this.status = status;
-  }
-}
-
 function networkGrantsKey(network: BootInputs["network"]): string {
   const sorted = (values: Iterable<string>) => [...new Set(values)].sort();
   const secrets = new Map<string, Set<string>>();
@@ -237,6 +234,12 @@ const messageSchema = z.strictObject({
   /** followUp waits for the current run. steer joins it after its current tool round. */
   mode: z.enum(["followUp", "steer"]).default("followUp"),
 });
+const reviewSchema = z.strictObject({
+  pr: z.int().positive().optional(),
+  rounds: z.int().min(1).max(maxRounds).optional(),
+  /** Land the PR under the merge policy once the review approves it and its checks pass. */
+  land: z.boolean().default(false),
+});
 const imageSchema = z.strictObject({
   id: z.string().regex(/^img-[0-9a-f]{12}$/).transform((id) => id as ImageId),
   gondolinBuildId: z.string().min(1),
@@ -264,12 +267,11 @@ const refusalStatus: Readonly<Record<RefusalKind, number>> = { missing: 404, out
 /** How long a read of a Claude worker's conversation waits for its transcript before answering what is stored. */
 const claudeReadMs = 5_000;
 
-/** `pylon-<id>` must fit in 40 characters. */
-const newThreadId = () => `th-${randomBytes(6).toString("hex")}` as ThreadId;
 
 export async function startApi(options: ApiOptions): Promise<Api> {
   const { registry, whois, allowed, hostnames, dotfiles, harness, wake, probes, previewPorts, streamStallMs = 30_000, attachTiming: timing = attachTiming } = options;
   const claude = claudeConversations({ registry, probes });
+  const startThread = threadStarter({ registry, harness, dotfiles, gitIdentity: options.gitIdentity, wake });
 
   function thread(id: string): Thread {
     const found = registry.thread(id as ThreadId);
@@ -310,57 +312,14 @@ export async function startApi(options: ApiOptions): Promise<Api> {
     return conversing(t);
   }
 
-  /**
-   * Templates come later, so every pylon boots fresh from the current image and runs setup inline. The
-   * conversation is created before the registry row, as HarnessHost.startThread requires.
-   */
-  async function startThread(body: unknown, caller: TailnetNodeId): Promise<Thread> {
-    const request = parse(startSchema, body);
-    if (request.model !== undefined && request.claude === undefined) throw new HttpError(400, "model requires claude");
-    const claudePrompt = request.claude === undefined ? undefined : /^\/poteto-mode(?:\s|$)/.test(request.claude) ? request.claude : `/poteto-mode ${request.claude}`;
-    if (claudePrompt !== undefined && claudePrompt.length > 16_384) throw new HttpError(400, "Claude prompt including /poteto-mode exceeds 16384 characters");
-    const project = registry.project(request.project as ProjectId);
-    if (project === undefined) throw new HttpError(404, `no project ${request.project}`);
-    const node = (request.node ?? project.defaultNode) as NodeName;
-    if (registry.node(node) === undefined) throw new HttpError(400, `no node ${node}`);
-    const image = registry.currentImage();
-    if (image === null) throw new HttpError(409, "no image is current yet, so a pylon has nothing to boot");
-    const branch = request.branch ?? project.defaultBranch;
-    if (!hasRemote(project) && request.commit !== undefined) throw new HttpError(400, `project ${project.id} is a scratch project, so it has no commit to check out`);
-    // The one place a thread's repository is decided. It is frozen into the pylon's boot.
-    const repo: RepoInit = hasRemote(project)
-      ? { kind: "clone", url: project.repoUrl, checkout: { branch, commit: request.commit ?? `origin/${branch}` } }
-      : { kind: "empty", branch };
+  function reviewsOrRefuse(): ReviewLoop {
+    if (!options.reviews) throw new HttpError(409, "the review loop needs the control plane's GitHub token (github.tokenFile), which is not configured");
+    return options.reviews;
+  }
 
-    const now = Date.now();
-    const id = newThreadId();
-    const pylonId = `pylon-${id}` as PylonId;
-    const conversationId = request.claude === undefined ? await harness.startThread({ threadId: id, pylonId }) : null;
-    const t: Thread = {
-      id, title: request.title, project: project.id, pylonId, status: "active", conversationId: conversationId === null ? null : String(conversationId), startedBy: caller, createdAt: now,
-      // Starting a thread is human activity, so its pylon is wanted at once.
-      agentTurnRunning: false, lastAgentActivityAt: 0, lastHumanActivityAt: now, seenAt: null, lastReplyAt: null,
-    };
-    const boot: Omit<BootInputs, "source"> = {
-      pylonId, image, resources: project.resources,
-      gitIdentity: project.gitIdentity ?? options.gitIdentity,
-      // Every boot pulls the dotfiles through the allowlist. A template build pulls none, so their host stays out of the setup hash.
-      network: { allowedHosts: withHttpsHosts(effectiveAllowedHosts(project), [dotfiles.repo]), secrets: project.secrets },
-      repo,
-      dotfiles,
-    };
-    // Ports are allocated once the pylon reports the services that want a preview.
-    const live = pylonLive({ pylonId, thread: id, node, boot }, project, []);
-    const { desired: _, ...pylon } = newPylonRecord({
-      thread: id, pylonId, node, desired: "running",
-      boot,
-      firstBoot: { kind: "fresh", preSetup: project.preSetup },
-      live,
-      liveHash: liveHashOf(live),
-    });
-    registry.createThread(t, pylon, claudePrompt, request.model);
-    wake(node);
-    return t;
+  /** Landing merges and may deploy, so it takes the same right as `nexus deploy`, whatever the repository. */
+  function mayLand(caller: TailnetNodeId) {
+    if (!canDeploy(registry, options.deployment, caller)) throw new HttpError(403, "caller may not land a pull request: landing deploys, and only deployers may, never infrastructure nodes or pylons");
   }
 
   /** The pylon as its node's last observation reports it. */
@@ -402,7 +361,7 @@ export async function startApi(options: ApiOptions): Promise<Api> {
 
   function attention(t: Thread): Attention {
     const parked = t.conversationId !== null && t.status !== "deleted" && harness.activity.parked(t.id).length > 0;
-    return attentionOf(pylonOf(t).failed !== null || ["failed", "stalled"].includes(registry.claudeWorker(t.id)?.state ?? ""), parked, t.lastReplyAt, t.seenAt, t.agentTurnRunning || t.sessionTurnRunning === true, t.sessionWaiting);
+    return attentionOf(pylonOf(t).failed !== null || ["failed", "stalled"].includes(registry.claudeWorker(t.id)?.state ?? ""), parked, t.lastReplyAt, t.seenAt, t.agentTurnRunning || t.sessionTurnRunning === true, t.sessionWaiting, needsPerson(registry.review(t.id)));
   }
 
   function row(t: Thread): ThreadRow {
@@ -427,6 +386,7 @@ export async function startApi(options: ApiOptions): Promise<Api> {
       outputs: registry.outputs(t.id),
       prWatch: { enabled: options.prWatchEnabled ?? false, stopped: (watch?.commentWakes ?? 0) >= 10, error: watch?.error ?? null },
       pullRequests: watch?.links.map((l) => l.pr) ?? [],
+      review: registry.review(t.id),
       attach: `herdr --session ${herdrSession}`,
       agent: t.conversationId === null || t.status === "deleted" ? null : { parkedTasks: harness.activity.parked(t.id).length },
     };
@@ -588,38 +548,17 @@ export async function startApi(options: ApiOptions): Promise<Api> {
     if (session === null) throw new HttpError(409, `the Claude worker of ${t.id} has not started a session yet, so it takes no messages. Send it once it has started`);
     const stored = registry.claudeMessage(t.id, message.requestId);
     if (stored?.state === "sent") return { claude: stored.result };
-    if (stored?.state === "sending") throw new HttpError(422, `an earlier send of request ${message.requestId} failed partway, so Claude may have some or all of it. Check the conversation before sending it again under a new request ID`);
-    registry.setClaudeMessage(t.id, message.requestId, { state: "sending" });
-    // Only a failure from the probe's command can leave text typed. Anything before it typed nothing.
-    let asked = false;
-    let typedNothing = false;
-    let result: Extract<CommandResult, { kind: "send-claude" }>;
-    try {
-      result = await inPylon(t, async (probe, pylonId) => {
-        asked = true;
-        try {
-          return await probe.command(pylonId, { kind: "send-claude", session, text, ...(model === null ? {} : { model }) }) as Extract<CommandResult, { kind: "send-claude" }>;
-        } catch (err) {
-          typedNothing = (err as Partial<ProbeError>).code === "not-running";
-          throw err;
-        }
-      });
-    } catch (err) {
-      if (!asked || typedNothing) registry.setClaudeMessage(t.id, message.requestId, null);
-      throw err;
-    }
-    if (result.outcome === "blocked" || result.outcome === "starting" || result.outcome === "moved") {
-      registry.setClaudeMessage(t.id, message.requestId, null);
+    const typed = await inPylon(t, (probe, pylonId) => typeIntoClaude(registry, t.id, session, model, message.requestId, text, (command) => probe.command(pylonId, command)));
+    if (typed.kind === "uncertain") throw new HttpError(422, `an earlier send of request ${message.requestId} failed partway, so Claude may have some or all of it. Check the conversation before sending it again under a new request ID`);
+    if (typed.kind === "nothing") {
       throw new HttpError(409, {
         blocked: `Claude waits at a prompt in its terminal, so nothing was typed. Attach to the pylon (\`nexus attach ${t.id}\`) and answer it, then send again`,
         starting: `Claude is not ready to take a message yet, so nothing was typed. Ask again in a moment`,
-        moved: `Herdr pane ${result.herdrPane} stopped running Claude session ${session} before the message was typed, so nothing was typed. Send again to resume the session`,
-      }[result.outcome]);
+        moved: `Herdr pane ${typed.herdrPane} stopped running Claude session ${session} before the message was typed, so nothing was typed. Send again to resume the session`,
+      }[typed.outcome]);
     }
-    const sent: ClaudeSent = { session, outcome: result.outcome, resumed: result.resumed };
-    registry.setClaudeMessage(t.id, message.requestId, { state: "sent", result: sent });
     void claude.refresh(t);
-    return { claude: sent };
+    return { claude: typed.sent };
   }
 
   /**
@@ -797,7 +736,11 @@ export async function startApi(options: ApiOptions): Promise<Api> {
     ["POST", /^\/v1\/projects$/, async (_, r) => created(createProject(await r.body()))],
     ["GET", /^\/v1\/nodes$/, () => ok(registry.nodes().map(({ observation, ...n }): NodeSummary => ({ ...n, observedAt: observation?.observedAt ?? null })))],
     ["GET", /^\/v1\/threads$/, (_, r) => ok(registry.threads((r.query.get("project") ?? undefined) as ProjectId | undefined).map(row))],
-    ["POST", /^\/v1\/threads$/, async (_, r) => created(await startThread(await r.body(), r.caller))],
+    ["POST", /^\/v1\/threads$/, async (_, r) => {
+      const request = parse(startSchema, await r.body());
+      if (request.model !== undefined && request.claude === undefined) throw new HttpError(400, "model requires claude");
+      return created(await startThread(request, r.caller));
+    }],
     ["GET", /^\/v1\/threads\/([^/]+)$/, (m) => ok(detail(thread(m[1]!)))],
     ["DELETE", /^\/v1\/threads\/([^/]+)$/, async (m) => ok(await setStatus(thread(m[1]!), "deleted"))],
     ["POST", /^\/v1\/threads\/([^/]+)\/(seen|unseen)$/, async (m, r) => {
@@ -817,6 +760,17 @@ export async function startApi(options: ApiOptions): Promise<Api> {
       if (worker === undefined) return { status: 202, body: await sendMessage(runnable(t), body) };
       if (t.status === "archived") throw new HttpError(409, `thread ${t.id} is archived`);
       return { status: 202, body: await sendClaude(refuseDeleted(t), worker.session, worker.model, body) };
+    }],
+    ["POST", /^\/v1\/threads\/([^/]+)\/review$/, async (m, r) => {
+      const body = parse(reviewSchema, await r.body({}));
+      const t = thread(m[1]!);
+      if (body.land) mayLand(r.caller);
+      return created(await reviewsOrRefuse().start(t.id, { pr: body.pr, rounds: body.rounds, land: body.land ? r.caller : null }));
+    }],
+    ["POST", /^\/v1\/threads\/([^/]+)\/land$/, async (m, r) => {
+      const t = thread(m[1]!);
+      mayLand(r.caller);
+      return ok(reviewsOrRefuse().land(t.id, r.caller));
     }],
     ["POST", /^\/v1\/threads\/([^/]+)\/abort$/, async (m) => { await harness.abort(conversing(thread(m[1]!)).id); return noContent; }],
     ["POST", /^\/v1\/threads\/([^/]+)\/retry$/, async (m) => { await harness.retry(runnable(thread(m[1]!)).id); return noContent; }],

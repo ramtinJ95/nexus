@@ -165,6 +165,7 @@ const unseen = (text: string) => html`<span class="vh">${text}</span>`;
 /** What a thread is doing, most urgent first: the agent mid-turn hides a running pylon, never a failed one. */
 function threadState({ thread: t, pylon, attention }: ThreadDetail): [label: string, tone: Tone] {
   if (attention === "failed") return ["failed", "bad"];
+  if (attention === "decision") return ["needs your decision", "bad"];
   if (attention === "parked") return ["parked", "bad"];
   if (attention === "reply") return ["new reply", "ok"];
   if (attention === "waiting") return ["waiting for input", "idle"];
@@ -174,10 +175,10 @@ function threadState({ thread: t, pylon, attention }: ThreadDetail): [label: str
 }
 
 /**
- * Whether a thread needs the person, so its row stays bright: a failure or a parked run to fix, a reply to read, or
- * a session waiting on an answer. Waiting ranks below working, but only waiting is blocked on the person.
+ * Whether a thread needs the person, so its row stays bright: a failure or a parked run to fix, a review's decision,
+ * a reply to read, or a session waiting on an answer. Waiting ranks below working, but only waiting is blocked on the person.
  */
-const needsPerson: Record<`${Attention}`, boolean> = { failed: true, parked: true, reply: true, waiting: true, working: false, null: false };
+const needsPerson: Record<`${Attention}`, boolean> = { failed: true, decision: true, parked: true, reply: true, waiting: true, working: false, null: false };
 /** The open thread's row never dims, nor a closed thread's, which its fold already sets apart. */
 const dims = (d: ThreadDetail, active?: ThreadId) =>
   d.thread.id !== active && (d.thread.status === "active" || d.thread.status === "idle") && !needsPerson[`${d.attention}`];
@@ -639,6 +640,7 @@ ${pylon.failed !== null && html`<p class="error">The planner gave up: ${pylon.fa
 <section aria-labelledby="outputs-h"><h2 id="outputs-h">Outputs ${count(outputs.length + (d.pullRequests?.length ?? 0))}</h2>
 ${!d.prWatch?.enabled ? html`<p class="empty">PR watch: off (no control-plane GitHub token configured).</p>` : html`<p>PR watch: ${d.prWatch.stopped ? "stopped (10 comment-only wakes)" : "on"}${d.prWatch.error && html` — ${d.prWatch.error}`}</p>`}
 ${(d.pullRequests ?? []).map((pr) => html`<p><a href="${pr.url}" target="_blank" rel="noreferrer">PR #${pr.number}: ${pr.title}</a> — ${pr.state}, checks ${pr.checks}, review ${pr.review}</p>`)}
+${d.review != null && html`<p>Nexus review ${d.review.id}: ${d.review.phase.kind}, round ${d.review.rounds.length} of ${d.review.maxRounds}, by <a href="/threads/${d.review.reviewer}">${d.review.reviewer}</a> on ${d.review.models.reviewer}${d.review.land !== null && ", landing when approved"}</p>${d.review.phase.kind === "needs-person" && html`<ul class="error">${d.review.phase.reasons.map((reason) => html`<li>${reason}</li>`)}</ul>`}`}
 ${outputs.length === 0 ? html`<p class="empty">No other outputs yet.</p>` : html`<ul class="list outs">${outputs.map((o) => html`<li><span class="o-kind">${outputLabel[o.kind]}</span><code>${o.ref}</code></li>`)}</ul>`}
 </section>
 ${d.claudeWorker === undefined ? "" : html`<section><h2>Claude worker</h2><p>${d.claudeWorker.state} · ${d.claudeWorker.model ?? "unknown"}</p>${d.claudeWorker.message === undefined ? "" : html`<pre>${d.claudeWorker.message}</pre>`}</section>`}
@@ -671,11 +673,11 @@ type ToolResult = { state: "done"; output: string; isError: boolean } | { state:
 type ToolItem = Extract<Item, { kind: "tool" }>;
 type UserItem = Extract<Item, { kind: "user" }>;
 
-/** Who a message came from. Nexus's PR watch writes into a harness conversation as a user. */
-type PromptFrom = PromptSource | "pr-watch";
+/** Who a message came from. Nexus's PR watch and review loop write into a conversation as a user. */
+type PromptFrom = PromptSource | "pr-watch" | "review";
 /** How a bubble names who a message came from. A person's is said only to a screen reader, as the bubble's side shows it. */
 const promptLabel: Record<PromptFrom, string> = {
-  person: "You", "pr-watch": "Nexus PR watch", command: "Slash command", other: "Claude Code",
+  person: "You", "pr-watch": "Nexus PR watch", review: "Nexus review", command: "Slash command", other: "Claude Code",
 };
 
 const contentText = (content: UserMessage["content"]) => typeof content === "string" ? content
@@ -705,7 +707,7 @@ function conversationItems(view: ConversationView): Item[] {
   };
 
   for (const { entry, message } of view.entries.flatMap((entry) => (entry.model ?? []).map((message) => ({ entry, message })))) {
-    if (message.role === "user") items.push({ kind: "user", text: contentText(message.content), queued: null, at: message.timestamp, from: entry.kind === "nexus.pr-watch" ? "pr-watch" : "person" });
+    if (message.role === "user") items.push({ kind: "user", text: contentText(message.content), queued: null, at: message.timestamp, from: entry.kind === "nexus.pr-watch" ? "pr-watch" : entry.kind === "nexus.review" ? "review" : "person" });
     if (message.role === "assistant") answer(message, false);
     if (message.role === "toolResult") {
       const result: ToolResult = { state: "done", output: contentText(message.content), isError: message.isError };
@@ -863,8 +865,8 @@ function blocks(items: readonly Item[]): Block[] {
 function blockView(block: Block): Html {
   switch (block.kind) {
     case "user": {
-      const from: PromptFrom = block.from === "person" && block.text.startsWith("[Nexus PR watch") ? "pr-watch" : block.from;
-      const named = from !== "person" && from !== "pr-watch";
+      const from: PromptFrom = block.from !== "person" ? block.from : block.text.startsWith("[Nexus PR watch") ? "pr-watch" : block.text.startsWith("[Nexus review") ? "review" : "person";
+      const named = from !== "person" && from !== "pr-watch" && from !== "review";
       return html`<div class="msg user${block.queued !== null && " queued"}">${!named && unseen(promptLabel[from])}${(named || block.queued !== null) && html`<div class="msg-who">${named && html`<span class="chip chip-from">${promptLabel[from]}</span>`}${block.queued !== null && html`<span class="chip chip-queued">queued, ${block.queued}</span>`}</div>`}<div class="text">${prose(block.text)}</div></div>`;
     }
     case "agent": return block.streaming

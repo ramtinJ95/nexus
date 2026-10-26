@@ -18,8 +18,13 @@ import { startApi } from "./api.ts";
 import { registryLocator } from "./locator.ts";
 import { startLoop } from "./loop.ts";
 import { openRegistry, type Thread, type ThreadId } from "./registry.ts";
-import { githubClient } from "./github.ts";
+import { githubClient, githubRepo } from "./github.ts";
+import { agentReplies, reviewLoop } from "./review.ts";
+import { threadStarter } from "./threads.ts";
+import { checkRuns } from "./gate.ts";
+import { repository } from "../deploy/install.ts";
 import { prWatcher } from "./pr-watch.ts";
+import { agentInbox } from "./inbox.ts";
 
 const nodeId = z.string().regex(/^n[A-Za-z0-9]+$/, "a Tailscale stable node ID, such as nAbC123CNTRL");
 const absolutePath = z.string().refine(isAbsolute, "must be an absolute path");
@@ -132,12 +137,26 @@ export async function startControlPlane(config: ControlPlaneConfig, models: Mode
     send: (...args) => gate.run(() => rawHarness.send(...args)),
     retry: (...args) => gate.run(() => rawHarness.retry(...args)),
   };
-  const watch = prWatcher({ registry, github: token === null ? null : githubClient(token), harness, wake: wakeThread });
+  const probeMap = new Map(probes.map((probe) => [probe.node, probe]));
+  const inbox = agentInbox({ registry, harness, probes: probeMap, wake: wakeThread });
+  const github = token === null ? null : githubClient(token);
+  const watch = prWatcher({ registry, github, inbox });
   const watchTimer = setInterval(() => { void watch.poll(); }, 120_000);
   void watch.poll();
+  const startThread = threadStarter({ registry, harness, dotfiles: config.dotfiles, gitIdentity: config.gitIdentity, wake: (node) => { void loop.wake(node); } });
+  const reviews = github === null ? null : reviewLoop({
+    registry, github, inbox, harnessModel: config.harness.model.modelId, startThread,
+    replies: agentReplies(registry, harness),
+    checks: checkRuns({ registry, probes: probeMap, startThread, wake: wakeThread }),
+    release: { self: config.self.tailnetNodeId, repo: githubRepo(repository)! },
+    log: (message) => console.error(message),
+  });
+  const reviewTimer = setInterval(() => { void reviews?.poll(); }, 15_000);
+  void reviews?.poll();
   const api = await startApi({
     ...(config.https ? { https: { port: 7443, certificate: () => localApiCertificate(config.https!.hostname, tailscaled) } } : {}),
     prWatchEnabled: token !== null,
+    reviews,
     turnsStarting: gate.busy,
     deployment: { self: config.self.tailnetNodeId as TailnetNodeId, deployers: new Set((config.deployers ?? []) as TailnetNodeId[]), keys: config.deployKeys ?? {} },
     registry, whois, host: config.listen.host, port: config.listen.port,
@@ -156,7 +175,9 @@ export async function startControlPlane(config: ControlPlaneConfig, models: Mode
     port: api.port,
     async close() {
       clearInterval(watchTimer);
+      clearInterval(reviewTimer);
       await watch.close();
+      await reviews?.close();
       await api.close();
       await harness.close();
       await loop.close();

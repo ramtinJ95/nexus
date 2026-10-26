@@ -1,0 +1,43 @@
+2026-10-26T01:42:05.261Z GET /repos/ramtinJ95/nexus/pulls?state=open&head=ramtinJ95%3Afeature&per_page=100
+2026-10-26T01:42:05.267Z GET /repos/ramtinJ95/nexus/pulls/1
+2026-10-26T01:42:05.271Z GET /repos/ramtinJ95/nexus/commits/0f4fd922084b9f474aaadb561069a103fd9bedaa/check-runs?filter=latest&per_page=100
+2026-10-26T01:42:05.275Z GET /repos/ramtinJ95/nexus/commits/0f4fd922084b9f474aaadb561069a103fd9bedaa/statuses?per_page=100
+2026-10-26T01:42:05.278Z GET /repos/ramtinJ95/nexus/pulls/1/reviews?per_page=100
+2026-10-26T01:42:05.281Z GET /repos/ramtinJ95/nexus/pulls/1/comments?per_page=100
+2026-10-26T01:42:05.285Z GET /repos/ramtinJ95/nexus/issues/1/comments?per_page=100
+2026-10-26T01:42:08.054Z owner commented: Thanks for the script.
+No change is needed for this comment: it only checks that PR feedback reaches you.
+2026-10-26T01:42:10.261Z GET /repos/ramtinJ95/nexus/pulls?state=open&head=ramtinJ95%3Afeature&per_page=100
+2026-10-26T01:42:10.267Z GET /repos/ramtinJ95/nexus/pulls/1
+2026-10-26T01:42:10.273Z GET /repos/ramtinJ95/nexus/commits/0f4fd922084b9f474aaadb561069a103fd9bedaa/check-runs?filter=latest&per_page=100
+2026-10-26T01:42:10.278Z GET /repos/ramtinJ95/nexus/commits/0f4fd922084b9f474aaadb561069a103fd9bedaa/statuses?per_page=100
+2026-10-26T01:42:10.283Z GET /repos/ramtinJ95/nexus/pulls/1/reviews?per_page=100
+2026-10-26T01:42:10.288Z GET /repos/ramtinJ95/nexus/pulls/1/comments?per_page=100
+2026-10-26T01:42:10.293Z GET /repos/ramtinJ95/nexus/issues/1/comments?per_page=100
+2026-10-26T01:42:11.955Z GET /repos/ramtinJ95/nexus/pulls/1
+2026-10-26T01:42:11.959Z GET /repos/ramtinJ95/nexus/commits/0f4fd922084b9f474aaadb561069a103fd9bedaa/check-runs?filter=latest&per_page=100
+2026-10-26T01:42:11.964Z GET /repos/ramtinJ95/nexus/commits/0f4fd922084b9f474aaadb561069a103fd9bedaa/statuses?per_page=100
+2026-10-26T01:42:11.968Z GET /repos/ramtinJ95/nexus/pulls/1/reviews?per_page=100
+2026-10-26T01:42:11.973Z GET /repos/ramtinJ95/nexus/pulls/1/comments?per_page=100
+2026-10-26T01:42:11.978Z GET /repos/ramtinJ95/nexus/issues/1/comments?per_page=100
+2026-10-26T01:42:15.262Z GET /repos/ramtinJ95/nexus/pulls?state=open&head=ramtinJ95%3Afeature&per_page=100
+2026-10-26T01:42:15.267Z GET /repos/ramtinJ95/nexus/pulls/1
+2026-10-26T01:42:15.274Z GET /repos/ramtinJ95/nexus/commits/0f4fd922084b9f474aaadb561069a103fd9bedaa/check-runs?filter=latest&per_page=100
+2026-10-26T01:42:15.281Z GET /repos/ramtinJ95/nexus/commits/0f4fd922084b9f474aaadb561069a103fd9bedaa/statuses?per_page=100
+2026-10-26T01:42:15.286Z GET /repos/ramtinJ95/nexus/pulls/1/reviews?per_page=100
+2026-10-26T01:42:15.291Z GET /repos/ramtinJ95/nexus/pulls/1/comments?per_page=100
+2026-10-26T01:42:15.297Z GET /repos/ramtinJ95/nexus/issues/1/comments?per_page=100
+2026-10-26T01:42:19.322Z GET /repos/ramtinJ95/nexus/pulls/1
+2026-10-26T01:42:19.327Z GET /repos/ramtinJ95/nexus/commits/0f4fd922084b9f474aaadb561069a103fd9bedaa/check-runs?filter=latest&per_page=100
+2026-10-26T01:42:19.332Z GET /repos/ramtinJ95/nexus/commits/0f4fd922084b9f474aaadb561069a103fd9bedaa/statuses?per_page=100
+2026-10-26T01:42:19.336Z GET /repos/ramtinJ95/nexus/pulls/1/reviews?per_page=100
+2026-10-26T01:42:19.341Z GET /repos/ramtinJ95/nexus/pulls/1/comments?per_page=100
+2026-10-26T01:42:19.345Z GET /repos/ramtinJ95/nexus/issues/1/comments?per_page=100
+2026-10-26T01:42:19.350Z GET /repos/ramtinJ95/nexus/pulls/1/files?per_page=100
+2026-10-26T01:42:19.367Z PUT /repos/ramtinJ95/nexus/pulls/1/merge
+2026-10-26T01:42:19.420Z merged 0f4fd922084b9f474aaadb561069a103fd9bedaa as 1de635964642c9f671b88f551af23961e8d4db8f
+2026-10-26T01:42:20.262Z GET /repos/ramtinJ95/nexus/pulls?state=open&head=ramtinJ95%3Afeature&per_page=100
+2026-10-26T01:42:20.266Z GET /repos/ramtinJ95/nexus/pulls/1
+2026-10-26T01:42:25.264Z GET /repos/ramtinJ95/nexus/pulls?state=open&head=ramtinJ95%3Afeature&per_page=100
+2026-10-26T01:42:30.262Z GET /repos/ramtinJ95/nexus/pulls?state=open&head=ramtinJ95%3Afeature&per_page=100
+2026-10-26T01:42:35.262Z GET /repos/ramtinJ95/nexus/pulls?state=open&head=ramtinJ95%3Afeature&per_page=100

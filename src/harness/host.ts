@@ -25,6 +25,10 @@ import { writeThread } from "./thread-doc.ts";
 
 export type { ConversationId };
 
+/** Who sent an automated input entry, which the entry's kind, `nexus.<sender>`, and its data name. */
+export type Sender = "pr-watch" | "review";
+const senderNames: Readonly<Record<Sender, string>> = { "pr-watch": "Nexus PR watch", review: "Nexus review" };
+
 /** Where the repository is checked out in every pylon. */
 export const pylonRepoPath = "/home/user/workspace/repo";
 
@@ -63,7 +67,7 @@ export interface HarnessHost {
    * A human message, or an attributed PR-watch input. A retry with the same `requestId` returns the first submission. A busy
    * conversation queues it as a follow-up, or with `steer` places it after the current tool round.
    */
-  send(threadId: string, text: string, requestId: string, mode: "followUp" | "steer", sender?: "pr-watch"): Promise<Submission>;
+  send(threadId: string, text: string, requestId: string, mode: "followUp" | "steer", sender?: Sender): Promise<Submission>;
   latestTurn(threadId: string): Promise<string | null>;
   abort(threadId: string): Promise<void>;
   /** Runs again the tasks the restart limit parked, which otherwise hold the thread's run forever. */
@@ -135,7 +139,7 @@ export async function openHarnessHost(options: HarnessHostOptions): Promise<Harn
       return created.id;
     },
     async send(threadId, text, requestId, mode, sender) {
-      return (await conversation(threadId)).submit({ type: "input", content: text, requestId, whenBusy: mode, ...(sender ? { entry: { kind: "nexus.pr-watch", data: { sender: "Nexus PR watch" } } } : {}) }, context);
+      return (await conversation(threadId)).submit({ type: "input", content: text, requestId, whenBusy: mode, ...(sender ? { entry: { kind: `nexus.${sender}`, data: { sender: senderNames[sender] } } } : {}) }, context);
     },
     async latestTurn(threadId) {
       const conversationId = conversations.get(threadId);

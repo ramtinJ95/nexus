@@ -6,10 +6,11 @@ import { join } from "node:path";
 import { openRegistry, type Thread, type ThreadId } from "./registry.ts";
 import { newPylonRecord } from "../tick.ts";
 import { desiredPhase } from "../reconcile.ts";
-import type { NodeName, PylonId, TailnetNodeId, LiveHash } from "../protocol.ts";
+import type { CommandResult, NodeName, PylonCommand, PylonId, TailnetNodeId, LiveHash } from "../protocol.ts";
 import type { ProjectId } from "../project.ts";
 import { githubClient, githubRepo, type PrSnapshot } from "./github.ts";
 import { prWatcher, prWatchPrefix } from "./pr-watch.ts";
+import { agentInbox } from "./inbox.ts";
 import type { HarnessHost } from "../harness/host.ts";
 
 function fixture(path = ":memory:") {
@@ -18,23 +19,32 @@ function fixture(path = ":memory:") {
   const project = { id: "project" as ProjectId, repoUrl: "https://github.com/acme/repo.git", defaultBranch: "main", defaultNode: node, resources: { cpus: 2, memoryGiB: 4, diskGiB: 10 }, allowedHosts: [], secrets: [], logins: [], preSetup: null };
   registry.upsertNode({ name: node, tailnetHost: "node.ts.net", tailnetNodeId: "nNODE" as TailnetNodeId });
   registry.createProject(project);
-  function add(id = "th-1") {
-    const thread: Thread = { id: id as ThreadId, title: "test", project: project.id, pylonId: `pylon-${id}` as PylonId, status: "active", conversationId: "1", startedBy: "test", createdAt: 1, seenAt: null, lastReplyAt: null, lastHumanActivityAt: 1, lastAgentActivityAt: 0, agentTurnRunning: false };
+  function add(id = "th-1", claude = false) {
+    const thread: Thread = { id: id as ThreadId, title: "test", project: project.id, pylonId: `pylon-${id}` as PylonId, status: "active", conversationId: claude ? null : "1", startedBy: "test", createdAt: 1, seenAt: null, lastReplyAt: null, lastHumanActivityAt: 1, lastAgentActivityAt: 0, agentTurnRunning: false };
     const { desired: _, ...pylon } = newPylonRecord({ thread: id, pylonId: thread.pylonId, node, desired: "paused", boot: { pylonId: thread.pylonId, image: "img-000000000000", resources: project.resources, network: { allowedHosts: [], secrets: [] }, repo: { kind: "clone", url: project.repoUrl, checkout: { branch: "main", commit: "main" } }, dotfiles: { repo: project.repoUrl, ref: "main" } }, firstBoot: { kind: "fresh", preSetup: null }, live: { previews: [], overlay: [] }, liveHash: "hash" as LiveHash });
-    registry.createThread(thread, pylon);
+    registry.createThread(thread, pylon, claude ? "/poteto-mode fix it" : undefined);
+    if (claude) registry.setClaudeWorker(thread.id, "/poteto-mode fix it", "started", undefined, "c0ffee00-0000-4000-8000-000000000000");
     registry.apply({ record: "output", pylonId: thread.pylonId, kind: "branch", ref: "origin/feature" });
     return thread.id;
   }
   const id = add();
-  let snapshot: PrSnapshot = { pr: { repo: "acme/repo", number: 1, title: "Fix", url: "https://github.com/acme/repo/pull/1", state: "open", checks: "passing", review: "none", conflict: false }, failures: [], comments: [] };
+  let snapshot: PrSnapshot = { pr: { repo: "acme/repo", number: 1, title: "Fix", url: "https://github.com/acme/repo/pull/1", state: "open", checks: "passing", review: "none", conflict: false }, detail: { head: "1".repeat(40), branch: "feature", base: "main", body: "", mergeCommit: null }, failures: [], comments: [] };
   const calls: string[] = [];
   const messages: Parameters<HarnessHost["send"]>[] = [];
   let reject = false;
   const harness: Pick<HarnessHost, "send"> = { async send(...args) { messages.push(args); if (reject) throw new Error("delivery interrupted"); return { id: 1 } as never; } };
   const github = { async find(repo: string, branch: string) { calls.push(`find:${repo}:${branch}`); return snapshot.pr.state === "open" ? [1] : []; }, async poll() { calls.push("poll"); return structuredClone(snapshot); } };
   let wakes = 0;
-  const options = { registry, github, harness, wake() { wakes++; } };
-  return { registry, id, add, calls, messages, github, options, watcher: prWatcher(options), get snapshot() { return snapshot; }, set snapshot(s: PrSnapshot) { snapshot = s; }, reject(value: boolean) { reject = value; }, get wakes() { return wakes; } };
+  const inbox = (r = registry, h = harness) => agentInbox({ registry: r, harness: h, probes: new Map(), wake() { wakes++; } });
+  const options = { registry, github, inbox: inbox() };
+  /** Reports the node online with the thread's pylon running, or with no pylons. */
+  function observe(thread: ThreadId, running: boolean) {
+    const capacity = { memoryGiB: 64, committedMemoryGiB: 0, diskFreeGiB: 100 };
+    registry.apply({ record: "node", node, state: "online", capacity });
+    const pylon = { pylonId: `pylon-${thread}` as PylonId, phase: "running" as const, liveHash: "hash" as LiveHash, bootedAt: "2027-01-01T00:00:00Z", bootedFrom: { image: "img-000000000000" as const, checkpoint: null }, services: [], listening: [], previews: [], sessions: [], git: null, declaredOutputs: [], attachedClients: 0 };
+    registry.ingested({ node, observedAt: new Date().toISOString(), probeBootId: "b", capacity, artifacts: [], jobs: [], pylons: running ? [pylon] : [], previewRoutes: [] }, []);
+  }
+  return { registry, id, add, observe, node, calls, messages, github, harness, inbox, options, watcher: prWatcher(options), get snapshot() { return snapshot; }, set snapshot(s: PrSnapshot) { snapshot = s; }, reject(value: boolean) { reject = value; }, get wakes() { return wakes; } };
 }
 
 test("links origin branches, shares reads, and only deliberate messages wake without human activity", async (t) => {
@@ -121,7 +131,7 @@ test("durable pending delivery reuses its request id after restart, with no repe
   await f.watcher.poll(); f.snapshot.pr.conflict = true; f.reject(true); await f.watcher.poll();
   const requestId = f.messages[0]![2]; f.registry.close();
   const registry = openRegistry(path); t.after(() => registry.close()); f.reject(false);
-  const restarted = prWatcher({ ...f.options, registry }); await restarted.poll();
+  const restarted = prWatcher({ ...f.options, registry, inbox: f.inbox(registry) }); await restarted.poll();
   assert.equal(f.messages[1]![2], requestId); await restarted.poll(); assert.equal(f.messages.length, 2);
 });
 
@@ -139,7 +149,7 @@ test("GitHub reads use per-resource ETags, paginate, and include the owner's rev
     if (etag) return new Response(null, { status: 304 });
     let value: unknown = [];
     if (path.includes("/pulls?")) value = [{ number: 1, head: { repo: { full_name: "acme/repo" } } }];
-    if (path.endsWith("/pulls/1")) value = { number: 1, title: "Fix", html_url: "https://github.com/acme/repo/pull/1", state: "open", merged: false, mergeable_state: "dirty", head: { sha: "abc" } };
+    if (path.endsWith("/pulls/1")) value = { number: 1, title: "Fix", html_url: "https://github.com/acme/repo/pull/1", state: "open", merged: false, mergeable_state: "dirty", head: { sha: "abc", ref: "feature" }, base: { ref: "main" } };
     if (path.includes("check-runs")) value = { check_runs: [{ id: 1, name: "build", status: "completed", conclusion: "failure", details_url: "https://example.com/build", completed_at: "now" }] };
     if (path.includes("reviews")) value = [{ id: 2, body: "please fix", html_url: "https://example.com/review", user: { login: "owner" }, author_association: "OWNER", state: "CHANGES_REQUESTED", submitted_at: "now" }];
     const headers: Record<string, string> = { etag: '"v1"' };
@@ -196,7 +206,7 @@ test("legacy statuses use the latest context and missing detail URLs still link 
   let passing = false;
   const fake: typeof fetch = async (input) => {
     const path = new URL(String(input)).pathname;
-    if (path.endsWith("/pulls/1")) return Response.json({ number: 1, title: "Fix", html_url: "https://github.com/acme/repo/pull/1", state: "open", merged: false, mergeable_state: "clean", head: { sha: "abc" } });
+    if (path.endsWith("/pulls/1")) return Response.json({ number: 1, title: "Fix", html_url: "https://github.com/acme/repo/pull/1", state: "open", merged: false, mergeable_state: "clean", head: { sha: "abc", ref: "feature" }, base: { ref: "main" } });
     if (path.endsWith("/statuses")) return Response.json([{ id: 2, context: "legacy", state: passing ? "success" : "failure", target_url: null }, { id: 1, context: "legacy", state: "pending", target_url: null }]);
     if (path.endsWith("/check-runs")) return Response.json({ check_runs: [{ id: 3, name: "build", status: "completed", conclusion: passing ? "success" : "failure", details_url: null, html_url: "https://github.com/acme/repo/runs/3", completed_at: "now" }] });
     return Response.json([]);
@@ -219,7 +229,7 @@ test("only trusted reviews and comments wake, and untrusted feedback cannot exha
   const fake: typeof fetch = async (input) => {
     const path = new URL(String(input)).pathname;
     if (path.endsWith("/pulls")) return Response.json([{ number: 1, head: { repo: { full_name: "acme/repo" } } }]);
-    if (path.endsWith("/pulls/1")) return Response.json({ number: 1, title: "Fix", html_url: f.snapshot.pr.url, state: "open", merged: false, mergeable_state: "clean", head: { sha: "abc" }, user: { login: "pr-author" }, author_association: "NONE" });
+    if (path.endsWith("/pulls/1")) return Response.json({ number: 1, title: "Fix", html_url: f.snapshot.pr.url, state: "open", merged: false, mergeable_state: "clean", head: { sha: "abc", ref: "feature" }, base: { ref: "main" }, user: { login: "pr-author" }, author_association: "NONE" });
     if (path.endsWith("/check-runs")) return Response.json({ check_runs: failed ? [{ id: 1, name: "build", status: "completed", conclusion: "failure", details_url: "https://example.com/build", completed_at: "now" }] : [] });
     if (path.endsWith("/reviews") || path.endsWith("/comments")) return Response.json(associations.flatMap((association, i) => {
       if (i < 3 && !trusted) return [];
@@ -321,7 +331,7 @@ test("deployment drain retains PR-watch feedback for delivery after the barrier 
   t.after(() => f.registry.close());
   let draining = true;
   const gate = turnGate(() => draining);
-  const watcher = prWatcher({ ...f.options, harness: { send: (...args) => gate.run(() => f.options.harness.send(...args)) } });
+  const watcher = prWatcher({ ...f.options, inbox: f.inbox(f.registry, { send: (...args) => gate.run(() => f.harness.send(...args)) }) });
   f.snapshot.failures.push({ id: "failed:drain", text: "failed while draining" });
   await watcher.poll();
   assert.equal(f.messages.length, 0);
@@ -332,4 +342,60 @@ test("deployment drain retains PR-watch feedback for delivery after the barrier 
   assert.equal(f.messages.length, 1);
   assert.equal(f.messages[0]![2], pending.id);
   assert.equal(f.registry.prWatch(f.id)!.pending, null);
+});
+
+test("feedback reaches a Claude worker thread typed into its session once its pylon runs, as agent activity only", async (t) => {
+  const f = fixture(); t.after(() => f.registry.close());
+  const claude = f.add("th-claude", true);
+  const typed: PylonCommand[] = [];
+  let outcome: "sent" | "blocked" = "blocked";
+  const probe = { async command(_: PylonId, command: PylonCommand): Promise<CommandResult> { typed.push(command); return { kind: "send-claude", outcome, herdrPane: "w1:p1", resumed: false }; } };
+  const woken: ThreadId[] = [];
+  const watcher = prWatcher({ ...f.options, inbox: agentInbox({ registry: f.registry, harness: f.harness, probes: new Map([[f.node, probe]]), wake(t) { woken.push(t.id); } }) });
+  await watcher.poll();
+  f.snapshot.comments.push({ id: "review:1", text: "review by owner (CHANGES_REQUESTED): https://example.com\r\n\tUse the cache\r\n" });
+  await watcher.poll();
+  assert.equal(typed.length, 0, "a paused pylon is woken, not typed into");
+  assert.deepEqual(woken.filter((id) => id === claude).length, 1);
+  const pending = f.registry.prWatch(claude)!.pending!;
+  assert.ok(pending);
+  f.observe(claude, true);
+  await watcher.poll();
+  assert.equal(typed.length, 1);
+  assert.equal(f.registry.prWatch(claude)!.pending?.id, pending.id, "Claude at a dialog typed nothing, so the message waits");
+  outcome = "sent";
+  await watcher.poll();
+  assert.equal(typed.length, 2);
+  const command = typed[1] as Extract<PylonCommand, { kind: "send-claude" }>;
+  assert.ok(command.text.startsWith(prWatchPrefix));
+  assert.match(command.text, /CHANGES_REQUESTED\): https:\/\/example.com\n  Use the cache$/, "line ends and tabs made typeable");
+  assert.equal(f.registry.prWatch(claude)!.pending, null);
+  assert.deepEqual(f.registry.claudeMessage(claude, pending.id), { state: "sent", result: { session: "c0ffee00-0000-4000-8000-000000000000", outcome: "sent", resumed: false } });
+  assert.equal(f.registry.thread(claude)!.lastHumanActivityAt, 1, "automated feedback is never human activity");
+  assert.equal(f.messages.filter(([thread]) => thread === claude).length, 0, "nothing reaches the harness");
+  await watcher.poll();
+  assert.equal(typed.length, 2);
+});
+
+test("the client reads a PR's head, base and body, its changed files, and merges only the head it is given", async () => {
+  const merges: unknown[] = [];
+  let answer = (): Response => Response.json({ sha: "m".repeat(40), merged: true });
+  const fake: typeof fetch = async (input, init) => {
+    const path = new URL(String(input)).pathname;
+    if (path.endsWith("/merge")) { merges.push(JSON.parse(String(init?.body))); return answer(); }
+    if (path.endsWith("/pulls/1")) return Response.json({ number: 1, title: "Fix", html_url: "https://github.com/acme/repo/pull/1", state: "open", merged: false, mergeable_state: "clean", body: "Not checked live: the deploy", merge_commit_sha: "t".repeat(40), head: { sha: "abc", ref: "feature" }, base: { ref: "main" } });
+    if (path.endsWith("/files")) return Response.json([{ filename: "src/a.ts", patch: "@@ -1 +1 @@\n-a\n+b" }, { filename: "logo.png", previous_filename: "img/logo.png" }]);
+    return Response.json(path.endsWith("/check-runs") ? { check_runs: [] } : []);
+  };
+  const client = githubClient("secret", fake);
+  assert.deepEqual((await client.poll("acme/repo", 1)).detail, { head: "abc", branch: "feature", base: "main", body: "Not checked live: the deploy", mergeCommit: null }, "an unmerged PR's test merge commit is not its merge commit");
+  assert.deepEqual(await client.files("acme/repo", 1), [{ path: "src/a.ts", previous: null, patch: "@@ -1 +1 @@\n-a\n+b" }, { path: "logo.png", previous: "img/logo.png", patch: "" }]);
+  assert.deepEqual(await client.merge("acme/repo", 1, "abc"), { kind: "merged", commit: "m".repeat(40) });
+  assert.deepEqual(merges, [{ sha: "abc", merge_method: "squash" }]);
+  answer = () => Response.json({ message: "Resource not accessible by personal access token" }, { status: 403 });
+  assert.deepEqual(await client.merge("acme/repo", 1, "abc"), { kind: "denied", message: "GitHub answered 403: Resource not accessible by personal access token" });
+  answer = () => Response.json({ message: "Head branch was modified. Review and try the merge again." }, { status: 409 });
+  assert.equal((await client.merge("acme/repo", 1, "abc")).kind, "refused");
+  answer = () => Response.json({ message: "API rate limit exceeded" }, { status: 403, headers: { "x-ratelimit-remaining": "0", "x-ratelimit-reset": String(Math.floor(Date.now() / 1000) + 60) } });
+  await assert.rejects(client.merge("acme/repo", 1, "abc"), /HTTP 403/, "a rate limit is retried, not reported as a denial");
 });

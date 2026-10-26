@@ -1,0 +1,5 @@
+$ nexus release
+Desired: d24f322b2b30ed9ac5624ffc4b7848b7b35242b2 by nexus review rv-a924176d at 2026-10-26T01:41:20.418Z
+verify-node control: d24f322b2b30ed9ac5624ffc4b7848b7b35242b2 healthy
+verify-node probe: d24f322b2b30ed9ac5624ffc4b7848b7b35242b2 healthy
+--- exit 0

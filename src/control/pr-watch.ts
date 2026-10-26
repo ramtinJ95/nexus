@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import type { HarnessHost } from "../harness/host.ts";
+import type { Inbox } from "./inbox.ts";
 import { githubRepo, type GitHub, type PrSnapshot, type PullRequest } from "./github.ts";
 import type { Registry, Thread, ThreadId } from "./registry.ts";
 
@@ -18,17 +18,13 @@ export interface PrWatchState {
 const empty = (): PrWatchState => ({ links: [], commentWakes: 0, pending: null, error: null });
 const active = (t: Thread | undefined) => t !== undefined && t.status !== "archived" && t.status !== "deleted";
 
-export function prWatcher(options: { registry: Registry; github: GitHub | null; harness: Pick<HarnessHost, "send">; wake(t: Thread): void }) {
-  const { registry, github, harness, wake } = options;
+export function prWatcher(options: { registry: Registry; github: Pick<GitHub, "find" | "poll"> | null; inbox: Inbox }) {
+  const { registry, github, inbox } = options;
   let running: Promise<void> | null = null;
   async function deliver(id: ThreadId, state: PrWatchState) {
     const t = registry.thread(id);
     if (!active(t) || state.pending === null) return;
-    if (registry.claudeWorker(id) === undefined) await harness.send(id, state.pending.text, state.pending.id, "followUp", "pr-watch");
-    if (registry.claudeWorker(id) === undefined) {
-      registry.recordActivity(id, { agent: Date.now() });
-      wake(t!);
-    }
+    if (await inbox(t!, { ...state.pending, sender: "pr-watch" }) === "later") return;
     state.pending = null;
     registry.savePrWatch(id, state);
   }
@@ -37,7 +33,8 @@ export function prWatcher(options: { registry: Registry; github: GitHub | null; 
     const finds = new Map<string, Promise<number[]>>();
     const polls = new Map<string, Promise<PrSnapshot>>();
     for (const t of registry.threads()) {
-      if (!active(t)) continue;
+      // A reviewer checks out the builder's branch, so its outputs would link it to the PR it reviews.
+      if (!active(t) || registry.isReviewer(t.id)) continue;
       const state = registry.prWatch(t.id) ?? empty();
       try {
         if (state.pending) { await deliver(t.id, state); continue; }
