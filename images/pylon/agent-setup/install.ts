@@ -63,6 +63,7 @@ export const claudeHooks = [
   ["UserPromptSubmit", "session.turn-started", ""],
   ["PostToolUse", "session.heartbeat", ""],
   ["Stop", "session.turn-ended", ""],
+  ["StopFailure", "session.turn-ended", ""],
   ["Notification", "session.waiting", "permission_prompt|elicitation_dialog"],
   ["SessionEnd", "session.ended", ""],
 ] as const;
