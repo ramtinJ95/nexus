@@ -496,7 +496,7 @@ async function checkFailedSetupRetry() {
 
 /**
  * The thread's project comes from the real CLI's `project add`, as the Claude mod and the pi extension add one, with
- * the CLI's defaults. Adding it again is a conflict, and leaving out --node is a usage error.
+ * the CLI's defaults. Adding it again is a conflict, and leaving out --node defaults to auto.
  */
 async function addProject() {
   const repoUrl = "https://github.com/octocat/Spoon-Knife.git";
