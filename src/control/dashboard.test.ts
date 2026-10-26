@@ -128,7 +128,7 @@ function sidebarOf(html: string) {
 
 /** One overview row per thread, as its table cells read. */
 function overviewRow(html: string, thread: Thread): string {
-  const row = html.split('id="overview"')[1]!.split("<tr>").find((chunk) => chunk.includes(`href="/threads/${thread.id}"`));
+  const row = html.split('id="overview"')[1]!.split(/<tr(?: class="[^"]*")?>/).find((chunk) => chunk.includes(`href="/threads/${thread.id}"`));
   assert.ok(row !== undefined, `no overview row for ${thread.id}`);
   return textOf(row.split("</tr>")[0]!);
 }
@@ -208,6 +208,24 @@ test("the sidebar lists every project's threads with their state, folds the arch
   assert.match(page, /<details class="archived" id="archived-acme">/, "the archived fold starts closed");
   assert.match((await s.call("GET", `/threads/${old.id}`)).text, /<details class="archived" id="archived-acme" open>/, "an archived thread's page opens its fold");
   assert.match(textOf(page.split('id="side-nodes"')[1]!.split("</div>")[0]!), /rj-firebat/);
+});
+
+test("rows of threads that need the person stay bright, and the rest dim unless open", async (t) => {
+  const s = await seeded(t);
+  const [failed, parked, reply, working, waiting, idle, open] = await Promise.all(["Failed", "Parked", "Reply", "Working", "Waiting", "Idle", "Open"].map((title) => s.start("acme", title)));
+  s.registry.savePylon({ ...s.registry.pylon(failed!.pylonId)!, failed: "setup exited 1" });
+  s.fake.park(parked!.id, 1);
+  s.registry.recordReply(reply!.id, Date.now());
+  s.registry.recordActivity(working!.id, { agent: Date.now(), agentTurnRunning: true });
+  s.registry.reportSession(node, { sequence: 1, pylon: waiting!.pylonId, time: Date.now(), event: { kind: "session.waiting", session: "c1" } });
+  const dimmed = (html: string, pattern: RegExp) => Object.fromEntries([...html.matchAll(pattern)].map((m) => [m[2]!, m[1] !== undefined]));
+  const bright = { [failed!.id]: false, [parked!.id]: false, [reply!.id]: false, [waiting!.id]: false, [working!.id]: true, [idle!.id]: true };
+
+  const home = (await s.call("GET", "/")).text;
+  assert.deepEqual(dimmed(home.split('id="overview"')[1]!, /<tr( class="dim")?>\s*<td><span class="ov-title">.*?href="\/threads\/([^"]+)"/g), { ...bright, [open!.id]: true });
+  assert.deepEqual(dimmed(home.split('id="side-threads"')[1]!, /<a class="row( dim)?" href="\/threads\/([^"]+)"/g), { ...bright, [open!.id]: true });
+  const page = (await s.call("GET", `/threads/${open!.id}`)).text;
+  assert.deepEqual(dimmed(page.split('id="side-threads"')[1]!, /<a class="row(?: active)?( dim)?" href="\/threads\/([^"]+)"/g), { ...bright, [open!.id]: false }, "the open thread's row stays bright");
 });
 
 test("a new thread whose node does not have its pylon yet reads as absent, not deleted", async (t) => {

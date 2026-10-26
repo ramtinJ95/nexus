@@ -23,6 +23,7 @@ import { desiredPhase, type ActualState, type DesiredPhase } from "../reconcile.
 import type { HerdrStatus } from "../protocol.ts";
 import { githubTokenGrant, linkedPort, type SessionHarness } from "../project.ts";
 import type { ThreadDetail } from "./api.ts";
+import type { Attention } from "./attention.ts";
 import type { NodeRecord, Output, Preview, Registry, Thread, ThreadId } from "./registry.ts";
 import type { ClaudeConversation, ClaudeEntry, PromptSource } from "../claude-transcript.ts";
 import { queuedOf } from "./claude-conversation.ts";
@@ -172,6 +173,15 @@ function threadState({ thread: t, pylon, attention }: ThreadDetail): [label: str
   return actualBadge[pylon.actualState];
 }
 
+/**
+ * Whether a thread needs the person, so its row stays bright: a failure or a parked run to fix, a reply to read, or
+ * a session waiting on an answer. Waiting ranks below working, but only waiting is blocked on the person.
+ */
+const needsPerson: Record<`${Attention}`, boolean> = { failed: true, parked: true, reply: true, waiting: true, working: false, null: false };
+/** The open thread's row never dims, nor a closed thread's, which its fold already sets apart. */
+const dims = (d: ThreadDetail, active?: ThreadId) =>
+  d.thread.id !== active && (d.thread.status === "active" || d.thread.status === "idle") && !needsPerson[`${d.attention}`];
+
 /** "5 min", or null under 45 seconds. */
 function span(at: number, now: number): string | null {
   const seconds = Math.max(0, Math.round((now - at) / 1000));
@@ -267,8 +277,9 @@ function sidebar(c: Context, active: ThreadId | undefined): Html {
   const projects = c.registry.projects();
   // A thread works in its own checkout, as a Jetline workspace does, so its row shows a branch with its state as a badge.
   const row = (t: Thread) => {
-    const [label, tone] = threadState(c.detail(t));
-    return html`<li><a class="row${t.id === active && " active"}" href="/threads/${t.id}"${t.id === active && html` aria-current="page"`}><span class="row-icon">${icon("branch")}${dot(tone, label)}</span><span class="row-title">${t.title}</span><span class="row-at">${workingFor(t, c.now) ?? span(lastActive(t), c.now) ?? "now"}</span></a></li>`;
+    const d = c.detail(t);
+    const [label, tone] = threadState(d);
+    return html`<li><a class="row${t.id === active && " active"}${dims(d, active) && " dim"}" href="/threads/${t.id}"${t.id === active && html` aria-current="page"`}><span class="row-icon">${icon("branch")}${dot(tone, label)}</span><span class="row-title">${t.title}</span><span class="row-at">${workingFor(t, c.now) ?? span(lastActive(t), c.now) ?? "now"}</span></a></li>`;
   };
   return html`<aside class="side" aria-label="Threads">
 <div class="side-head"><a class="brand" href="/"><span class="brand-mark" aria-hidden="true">◆</span>nexus</a><a class="btn btn-new" href="/threads/new" data-start>New thread<kbd>N</kbd></a></div>
@@ -388,7 +399,7 @@ function home(c: Context, dialogs: Pick<Shell, "start" | "addProject">): Html {
   const d = c.detail(t);
   const desired = desiredPhase(t, c.now);
   const [label, tone] = threadState(d);
-  return html`<tr>
+  return html`<tr${dims(d) && html` class="dim"`}>
 <td><span class="ov-title">${dot(tone, label)}<a href="/threads/${t.id}">${t.title}</a>${t.status !== "active" && html`<span class="tag">${t.status}</span>`}</span></td>
 <td class="wide">${state(desired, desiredTone[desired])}</td>
 <td>${state(...actualBadge[d.pylon.actualState])}</td>
