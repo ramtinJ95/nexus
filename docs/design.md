@@ -302,7 +302,9 @@ redirected output or closed stdio. Its stdio MCP servers stay in Claude's group.
 At the Stop the hook records those groups and starts a detached copy of itself,
 the hold, which checks every minute whether a recorded group still has a process.
 Each group is recorded with its leader's start time, so a later group that reuses
-the ID does not count. A command that leaves its group, such as one that calls
+the ID does not count. Once its leader exits, a group counts only while a member
+the hold already saw in it, or one that started before the hold, lives: the kernel
+reuses no ID while its group has a process, so a reused group's members are all new. A command that leaves its group, such as one that calls
 `setsid`, still counts while a process writes to its output file, which Claude Code
 names by session and task ID. While the command runs, the hold sends a heartbeat every five minutes, so
 a long build keeps its lease and its pylon. Once it exits, the hold waits 30 seconds
