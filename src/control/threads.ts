@@ -91,28 +91,34 @@ export function threadStarter(options: { registry: Registry; harness: Pick<Harne
     const placement: Placement = request.node === "auto" ? placeAuto(registry, { image, resources: project.resources, network, repo: freshRepo, dotfiles })
       : named ? { how: "named", node: request.node as NodeName } : { how: "default", node: project.defaultNode };
     const { node } = placement;
-    const read = await readSetup(project, branch, request.commit);
+    const release = registry.reserve(pylonId, node, project.resources);
+    try {
+      const read = await readSetup(project, branch, request.commit);
 
-    const conversationId = request.claude === undefined && request.bare !== true ? await harness.startThread({ threadId: id, pylonId }) : null;
-    const now = Date.now();
-    const { setup, firstBoot, repo } = setUp(project, read, freshRepo, image, branch, node, now);
-    const boot: Omit<BootInputs, "source"> = { pylonId, image, resources: project.resources, gitIdentity: project.gitIdentity ?? gitIdentity, network, repo, dotfiles };
-    const t: Thread = {
-      id, title: request.title, project: project.id, pylonId, status: "active", conversationId: conversationId === null ? null : String(conversationId), startedBy: caller, createdAt: now,
-      // Starting a thread is human activity, so its pylon is wanted at once.
-      agentTurnRunning: false, lastAgentActivityAt: 0, lastHumanActivityAt: now, seenAt: null, lastReplyAt: null, placement, setup,
-    };
-    // Ports are allocated once the pylon reports the services that want a preview.
-    const live = pylonLive({ pylonId, thread: id, node, boot }, project, []);
-    const { desired: _, ...pylon } = newPylonRecord({
-      thread: id, pylonId, node, desired: "running",
-      boot,
-      firstBoot,
-      live,
-      liveHash: liveHashOf(live),
-    });
-    registry.createThread(t, pylon, claudePrompt, request.model);
-    wake(node);
-    return t;
+      const conversationId = request.claude === undefined && request.bare !== true ? await harness.startThread({ threadId: id, pylonId }) : null;
+      const now = Date.now();
+      const { setup, firstBoot, repo } = setUp(project, read, freshRepo, image, branch, node, now);
+      const boot: Omit<BootInputs, "source"> = { pylonId, image, resources: project.resources, gitIdentity: project.gitIdentity ?? gitIdentity, network, repo, dotfiles };
+      const t: Thread = {
+        id, title: request.title, project: project.id, pylonId, status: "active", conversationId: conversationId === null ? null : String(conversationId), startedBy: caller, createdAt: now,
+        // Starting a thread is human activity, so its pylon is wanted at once.
+        agentTurnRunning: false, lastAgentActivityAt: 0, lastHumanActivityAt: now, seenAt: null, lastReplyAt: null, placement, setup,
+      };
+      // Ports are allocated once the pylon reports the services that want a preview.
+      const live = pylonLive({ pylonId, thread: id, node, boot }, project, []);
+      const { desired: _, ...pylon } = newPylonRecord({
+        thread: id, pylonId, node, desired: "running",
+        boot,
+        firstBoot,
+        live,
+        liveHash: liveHashOf(live),
+      });
+      registry.createThread(t, pylon, claudePrompt, request.model);
+      wake(node);
+      return t;
+    } finally {
+      // Once the pylon's row exists, placement counts it from there.
+      release();
+    }
   };
 }

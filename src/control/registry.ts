@@ -16,7 +16,7 @@ import type { Placement } from "./placement.ts";
 import { DatabaseSync } from "node:sqlite";
 import type { ActivityFacts, RegistryWrite, ThreadStatus } from "../reconcile.ts";
 import type { HerdrStatus, JobStatus, NodeName, NodeObservation, PylonId, Subject, TailnetNodeId } from "../protocol.ts";
-import type { Project, ProjectId, SessionHarness } from "../project.ts";
+import type { BootInputs, Project, ProjectId, SessionHarness } from "../project.ts";
 import type { BuildingTemplate, ImageId, ImageManifest, TemplateId, TemplateRecord, ThreadSetup } from "../images.ts";
 import type { PylonRecord } from "../tick.ts";
 import type { ImageOperation } from "./image-rollout.ts";
@@ -363,6 +363,11 @@ export function openRegistry(path: string, clock = Date.now) {
   db.exec("PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;");
   migrate(db);
 
+  /**
+   * Room a start placed a pylon in before its row exists, so an overlapping start sees it taken. It is held in memory,
+   * because a start that a crash ended took no room.
+   */
+  const reservations = new Map<PylonId, { node: NodeName; resources: BootInputs["resources"] }>();
   let transactionDepth = 0;
   const transaction = <T>(body: () => T): T => {
     if (transactionDepth > 0) return body();
@@ -827,6 +832,12 @@ export function openRegistry(path: string, clock = Date.now) {
       return row && pylonRow(row);
     },
     pylonsOn: (node: NodeName) => (q.pylonsOn.all(node) as Row[]).map(pylonRow),
+    /** Returns what releases it, once the pylon's row counts it or the start failed. */
+    reserve(pylonId: PylonId, node: NodeName, resources: BootInputs["resources"]): () => void {
+      reservations.set(pylonId, { node, resources });
+      return () => { reservations.delete(pylonId); };
+    },
+    reserved: (node: NodeName) => [...reservations.values()].filter((r) => r.node === node).map((r) => r.resources),
     /** Takes a whole PylonRecord, so the tick can save what it holds. The desired phase is dropped. */
     savePylon(pylon: StoredPylon) {
       transaction(() => {

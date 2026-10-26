@@ -433,6 +433,33 @@ test("a start whose setup cannot be read boots fresh and says why, and only a fu
   assert.equal(pinned.setup?.how, "fresh");
 });
 
+test("two overlapping --node auto starts take different rooms, and a start that fails gives its room back", async (t) => {
+  const s = await withImage(t);
+  observeNode(s, "a", { total: 16, committed: 8 });
+  observeNode(s, "b", { total: 16, committed: 9 });
+  const { harness } = s.fake;
+  const start = harness.startThread;
+  const held = Promise.withResolvers<void>();
+  let entered = 0;
+  harness.startThread = async (thread) => { entered++; await held.promise; return start(thread); };
+  const both = [s.call("POST", "/v1/threads", { project: "acme", title: "One", node: "auto" }), s.call("POST", "/v1/threads", { project: "acme", title: "Two", node: "auto" })];
+  while (entered < 2) await sleep(5);
+  held.resolve();
+  const placed = (await Promise.all(both)).map((r) => r.body.placement.node);
+  assert.deepEqual(placed.toSorted(), ["a", "b"], "the second start sees the room the first one reserved on a");
+
+  observeNode(s, "a", { total: 16, committed: 0 });
+  observeNode(s, "b", { total: 16, committed: 0 });
+  harness.startThread = async () => { throw new Error("the harness is down"); };
+  assert.equal((await s.call("POST", "/v1/threads", { project: "acme", title: "Fails", node: "a" })).status, 500);
+  harness.startThread = start;
+  const after = await s.call("POST", "/v1/threads", { project: "acme", title: "After", node: "auto" });
+  assert.deepEqual(after.body.placement.weighed.filter((w: { node: string }) => w.node !== "rj-firebat"), [
+    { node: "a", left: { cpus: 8, memoryGiB: 8, diskGiB: 180 } },
+    { node: "b", left: { cpus: 8, memoryGiB: 8, diskGiB: 180 } },
+  ], "each node counts the one overlapping start it has yet to report, and a counts nothing of the start that failed");
+});
+
 test("a scratch project has no repository, and each of its threads starts an empty one on its branch", async (t) => {
   const s = await setup(t);
   const scratch = { ...project, id: "sketch", repoUrl: null, allowedHosts: [], logins: [], secrets: [githubTokenGrant] };
