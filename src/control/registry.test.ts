@@ -680,23 +680,46 @@ test("ended sessions reject late heartbeats and starts, including after registry
 });
 
 
-test("a report delivered again under a new sequence has no effect", () => {
+test("an outbox event sent again under its ID has no effect, even after another event at its stamp", () => {
   let now = 10_000_000;
   const registry = seeded(tempDb(), () => now);
   let sequence = 0;
-  const report = (kind: import("../events.ts").PylonEvent["kind"], at: number) => {
+  const report = (kind: import("../events.ts").PylonEvent["kind"], at: number, id: string) => {
     now += 1000;
-    registry.reportSession(node, { sequence: ++sequence, time: now, pylon: pylonId, event: { kind, session: "c1", at } });
+    registry.reportSession(node, { sequence: ++sequence, time: now, pylon: pylonId, event: { kind, session: "c1", at, id } });
   };
   try {
     const start = now;
-    for (const [kind, at] of [["session.turn-started", start], ["session.heartbeat", start + 1], ["session.waiting", start + 2], ["session.turn-ended", start + 3]] as const) {
-      report(kind, at);
+    for (const [kind, at, id] of [["session.turn-started", start, "a"], ["session.heartbeat", start + 1, "b"], ["session.waiting", start + 2, "c"], ["session.turn-ended", start + 3, "d"]] as const) {
+      report(kind, at, id);
       const before = registry.thread(threadId)!;
       const count = registry.events().length;
-      report(kind, at);
+      report(kind, at, id);
       assert.equal(registry.events().length, count, `a resent ${kind} appends no event`);
       assert.deepEqual(registry.thread(threadId), before, `a resent ${kind} changes no thread fact`);
+    }
+    report("session.ended", start + 3, "e");
+    const ended = registry.thread(threadId)!;
+    const count = registry.events().length;
+    report("session.turn-ended", start + 3, "d");
+    assert.equal(registry.events().length, count);
+    assert.equal(registry.thread(threadId)!.lastReplyAt, ended.lastReplyAt, "the resent turn end records no second reply");
+  } finally { registry.close(); }
+});
+
+test("distinct reports at the same stamp all apply, with or without IDs", () => {
+  let now = 10_000_000;
+  const registry = seeded(tempDb(), () => now);
+  let sequence = 0;
+  const at = now;
+  try {
+    for (const ids of [["w1", "w2"], [undefined, undefined]]) {
+      const count = registry.events("0", { kinds: ["session.waiting"] }).length;
+      ids.forEach((id, i) => {
+        now += 1000;
+        registry.reportSession(node, { sequence: ++sequence, time: now, pylon: pylonId, event: { kind: "session.waiting", session: `c-${ids[0]}`, at, message: `Approve file ${i}`, ...(id === undefined ? {} : { id }) } });
+      });
+      assert.deepEqual(registry.events("0", { kinds: ["session.waiting"] }).slice(count).map((e) => e.payload.message), ["Approve file 0", "Approve file 1"]);
     }
   } finally { registry.close(); }
 });
@@ -806,7 +829,7 @@ test("a turn running before turn starts were recorded has no known start", async
   const db = new DatabaseSync(path);
   const version = db.prepare("PRAGMA user_version").get()!.user_version as number;
   db.exec(`UPDATE threads SET agent_turn_running = 1; ALTER TABLE threads DROP COLUMN placement; ALTER TABLE threads DROP COLUMN agent_turn_started_at; ALTER TABLE session_activity DROP COLUMN started_at; DROP TABLE reviews;
-    ALTER TABLE claude_workers DROP COLUMN turn_session; ALTER TABLE claude_workers DROP COLUMN turn_at; ALTER TABLE session_activity DROP COLUMN message; PRAGMA user_version = ${version - 5}`);
+    ALTER TABLE claude_workers DROP COLUMN turn_session; ALTER TABLE claude_workers DROP COLUMN turn_at; ALTER TABLE session_activity DROP COLUMN message; ALTER TABLE session_order DROP COLUMN event_ids; PRAGMA user_version = ${version - 6}`);
   db.close();
   const registry = openRegistry(path, () => now);
   t.after(() => registry.close());
