@@ -20,7 +20,7 @@ import { z } from "zod";
 import { releaseOutcome } from "../deploy/model.ts";
 import type { HarnessHost } from "../harness/host.ts";
 import type { SecretGrant } from "../project.ts";
-import type { GitHub, PrSnapshot } from "./github.ts";
+import type { GitHub, PrSnapshot, PullRequest } from "./github.ts";
 import { HttpError } from "./http-error.ts";
 import type { Inbox } from "./inbox.ts";
 import { landingHolds } from "./policy.ts";
@@ -99,7 +99,12 @@ export type Phase =
   /** `commit` is the merge commit, deployed when the PR is Nexus's own. */
   | { kind: "landed"; commit: string }
   /** Ended, for the person to decide. `reasons` say exactly which condition failed or which reserved case applies. */
-  | { kind: "needs-person"; reasons: string[]; label?: Label };
+  | { kind: "needs-person"; reasons: string[]; label?: Label }
+  /** The PR merged or closed outside a review that does not land it, so nothing was left to review. */
+  | { kind: "merged" }
+  | { kind: "closed" }
+  /** The person archived or deleted one of the review's threads. */
+  | { kind: "cancelled"; who: "builder" | "reviewer"; status: "archived" | "deleted" };
 /** The "needs human review" label on the PR, which only a review whose rounds ran out gets. */
 export type Label = { state: "adding" } | { state: "added" } | { state: "failed"; why: string };
 export type PhaseKind = Phase["kind"];
@@ -137,8 +142,9 @@ export interface Review {
   startedAt: number;
 }
 
+const endedKinds = ["approved", "landed", "needs-person", "merged", "closed", "cancelled"] as const;
 /** Phases a pass never moves on from. A new review or a land request starts the thread over. */
-export const ended: ReadonlySet<PhaseKind> = new Set(["approved", "landed", "needs-person"]);
+export const ended: ReadonlySet<PhaseKind> = new Set(endedKinds);
 export const needsPerson = (r: Review | null) => r?.phase.kind === "needs-person";
 
 /** A stored record as this code reads it: a review saved with more rounds stops at the cap, and old findings get priorities. */
@@ -186,7 +192,8 @@ export const roundsSpent = (r: Pick<Review, "rounds">) => r.rounds.filter((round
 }).length;
 const labelStates = { adding: `, adding the label "${humanLabel}"`, added: `, labelled "${humanLabel}"`, failed: `, label "${humanLabel}" not added` } as const;
 /** How a review's line in `nexus show` and the dashboard ends. A refused label's why is already one of the reasons. */
-export const labelNote = (r: Review) => r.phase.kind === "needs-person" && r.phase.label ? labelStates[r.phase.label.state] : "";
+export const phaseNote = (r: Review) => r.phase.kind === "cancelled" ? `, the ${r.phase.who} thread ${r[r.phase.who]} was ${r.phase.status}`
+  : r.phase.kind === "needs-person" && r.phase.label ? labelStates[r.phase.label.state] : "";
 const checkOutput = (output: string) => `The check's output:\n${output}`;
 const findingLine = (f: Finding) => `${f.id} (${f.priority})${f.where ? ` ${f.where}` : ""}: ${f.summary}${f.detail ? `\n${f.detail.split("\n").map((l) => `    ${l}`).join("\n")}` : ""}`;
 
@@ -292,10 +299,16 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
 
   /** Whether a turn of `t` ended since its last message from the loop, the only time its replies can hold an answer. */
   const answeredSince = (r: Review, t: Thread) => t.lastReplyAt !== null && t.lastReplyAt > r.since;
-  const toPerson = (r: Review, ...reasons: string[]): Review => {
+  const end = (r: Review, phase: Extract<Phase, { kind: typeof endedKinds[number] }>): Review => {
     if (r.phase.kind === "checking" && r.phase.thread !== null) checks.discard(r.phase.thread);
-    return { ...r, phase: { kind: "needs-person", reasons }, outbox: null };
+    return { ...r, phase, outbox: null };
   };
+  const toPerson = (r: Review, ...reasons: string[]): Review => end(r, { kind: "needs-person", reasons });
+  /** A review that lands still decides whether a merge made outside it deploys. */
+  const outside = (r: Review, state: PullRequest["state"] | undefined): Review | null =>
+    state === "closed" || (state === "merged" && r.land === null) ? end(r, { kind: state }) : null;
+  /** The PR watch reads GitHub only every two minutes, so the loop asks GitHub itself before it acts on an open PR. */
+  const endedOnGitHub = async (r: Review) => outside(r, (await github.poll(r.pr.repo, r.pr.number)).pr.state);
   /** The rounds ran out without an approval the checks passed, so the PR gets the label that asks for the person. */
   const ranOut = (r: Review, ...reasons: string[]): Review => ({ ...toPerson(r), phase: { kind: "needs-person", reasons, label: { state: "adding" } } });
   const checking = (): Phase => ({ kind: "checking", startedAt: now(), thread: null });
@@ -319,7 +332,7 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
   }
 
 
-  const steps: { [K in Exclude<PhaseKind, "approved" | "landed" | "needs-person">]: (r: Review, phase: Extract<Phase, { kind: K }>, builder: Thread, reviewer: Thread) => Promise<Review> } = {
+  const steps: { [K in Exclude<PhaseKind, typeof endedKinds[number]>]: (r: Review, phase: Extract<Phase, { kind: K }>, builder: Thread, reviewer: Thread) => Promise<Review> } = {
     async reviewing(r, _, __, reviewer) {
       const verdict = answeredSince(r, reviewer) ? latest(await replies(reviewer), "nexus-review", verdictSchema, r.expect) : null;
       if (verdict === null) return waitOn(r, reviewer, "reviewer");
@@ -340,7 +353,7 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
       const answered = withRound(r, { answers: found.answers });
       const fixed = found.answers.some((a) => a.action === "fixed");
       const snapshot = await github.poll(r.pr.repo, r.pr.number);
-      if (snapshot.pr.state !== "open") return toPerson(answered, `Pull request #${r.pr.number} was ${snapshot.pr.state} during the review.`);
+      if (snapshot.pr.state !== "open") return outside(answered, snapshot.pr.state) ?? toPerson(answered, `Pull request #${r.pr.number} was ${snapshot.pr.state} during the review.`);
       if (fixed && snapshot.detail.head === round.head) {
         // A push can land on GitHub a little after the turn that made it ends.
         if (now() - (builder.lastReplyAt ?? 0) < pushGraceMs) return r;
@@ -360,7 +373,7 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
     async checking(r, phase, builder) {
       const round = r.rounds.at(-1)!;
       if (now() - phase.startedAt > checkMs) return toPerson(r, `.nexus/check gave no verdict within ${checkMs / 60_000} minutes at ${round.head}.`);
-      if (phase.thread === null) return { ...r, phase: { ...phase, thread: await checks.start(builder, r.pr.branch, round.head) } };
+      if (phase.thread === null) return await endedOnGitHub(r) ?? { ...r, phase: { ...phase, thread: await checks.start(builder, r.pr.branch, round.head) } };
       const state = checks.poll(phase.thread, round.head);
       if (state.kind === "void") {
         checks.discard(phase.thread);
@@ -453,17 +466,26 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
     const reviewer = registry.thread(r.reviewer);
     // Once merging, the landing must see its deploy through, rollback included, whatever happens to the threads.
     const landing = r.phase.kind === "merging" || r.phase.kind === "deploying" || r.phase.kind === "rolling-back";
+    const live = !landing && !ended.has(r.phase.kind);
+    if (live) {
+      const gone = outside(r, registry.prWatch(r.builder)?.links.find((l) => l.pr.repo === r.pr.repo && l.pr.number === r.pr.number)?.pr.state);
+      if (gone !== null) return gone;
+    }
     for (const [who, t] of [["builder", builder], ["reviewer", reviewer]] as const) {
-      if (!landing && (t === undefined || t.status !== "active")) return toPerson(r, `The ${who} thread ${t?.id ?? ""} is ${t?.status ?? "gone"}, so the review stopped.`);
+      if (landing || t?.status === "active") continue;
+      // Only the person archives or deletes a builder or a reviewer.
+      if (t?.status === "archived" || t?.status === "deleted") return end(r, { kind: "cancelled", who, status: t.status });
+      return toPerson(r, `The ${who} thread ${t?.id ?? ""} is ${t?.status ?? "gone"}, so the review stopped.`);
     }
     if (r.outbox !== null) {
-      if (r.outbox.attempted === null) return { ...r, outbox: { ...r.outbox, attempted: now() } };
+      if (r.outbox.attempted === null) return (live ? await endedOnGitHub(r) : null) ?? { ...r, outbox: { ...r.outbox, attempted: now() } };
       if (await inbox(r.outbox.to === "builder" ? builder! : reviewer!, { id: r.outbox.id, text: r.outbox.text, sender: "review" }) === "later") return r;
       return { ...r, outbox: null, since: r.outbox.attempted };
     }
     const phase = r.phase;
     if (ended.has(phase.kind)) return r;
-    return (steps[phase.kind as keyof typeof steps] as (r: Review, p: Phase, b: Thread, v: Thread) => Promise<Review>)(r, phase, builder!, reviewer!);
+    const next = await (steps[phase.kind as keyof typeof steps] as (r: Review, p: Phase, b: Thread, v: Thread) => Promise<Review>)(r, phase, builder!, reviewer!);
+    return live && next.phase.kind === "needs-person" ? await endedOnGitHub(next) ?? next : next;
   }
 
   async function pass() {

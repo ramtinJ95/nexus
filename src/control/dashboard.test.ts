@@ -212,6 +212,18 @@ test("the sidebar lists every project's threads with their state, folds the arch
   assert.match(textOf(page.split('id="side-nodes"')[1]!.split("</div>")[0]!), /rj-firebat/);
 });
 
+test("a review the person cancelled says which thread they archived, and asks nothing of them", async (t) => {
+  const s = await seeded(t);
+  const fix = await s.start("acme", "Fix checkout");
+  s.registry.saveReview({
+    id: "rv-1", builder: fix.id, reviewer: "th-reviewer" as Thread["id"], pr: { repo: "acme/repo", number: 7, url: "https://github.com/acme/repo/pull/7", title: "Cache", branch: "cache" }, reviewerKind: "harness",
+    models: { builder: "claude-opus-5-5", reviewer: "gpt-6-astra" }, maxRounds: 5, land: null, merged: null, expect: "rv-1:t", sent: 1, outbox: null, since: 0, nudges: 0, startedAt: 0,
+    rounds: [{ head: "1".repeat(40), verdict: null, check: null, answers: null }], phase: { kind: "cancelled", who: "reviewer", status: "archived" },
+  });
+  const page = textOf((await s.call("GET", `/threads/${fix.id}`)).text);
+  assert.match(page, /Nexus review rv-1: cancelled, round 1 of 5, by th-reviewer on gpt-6-astra, the reviewer thread th-reviewer was archived/);
+});
+
 test("a waiting session's message replaces the waiting label, such as a background command still running at the cap", async (t) => {
   const s = await seeded(t);
   const [quiet, held] = await Promise.all(["Asks", "Serves"].map((title) => s.start("acme", title)));

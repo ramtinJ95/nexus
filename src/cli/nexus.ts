@@ -22,7 +22,7 @@ import type { ClaudeSent, Preview, Thread } from "../control/registry.ts";
 import type { Review } from "../control/review.ts";
 import { maxEntries, usageLimitText, type ClaudeConversation, type ClaudeEntry, type PromptSource } from "../claude-transcript.ts";
 import { claudeFrames, queuedOf, type ClaudeFrame } from "../control/claude-conversation.ts";
-import { labelNote, roundsSpent } from "../control/review.ts";
+import { phaseNote, roundsSpent } from "../control/review.ts";
 import type { Changes, Diff, Listing } from "../checkout-files.ts";
 import type { ThreadSetup } from "../images.ts";
 import type { Project, SecretGrant } from "../project.ts";
@@ -286,7 +286,7 @@ function setupText(s: ThreadSetup): string {
 function reviewText(r: Review): string {
   const phase = r.phase.kind === "landed" ? `landed as ${r.phase.commit}` : r.phase.kind === "deploying" ? `deploying ${r.phase.commit}` : r.phase.kind;
   return [
-    `review ${r.id} of PR #${r.pr.number}: ${phase}, round ${roundsSpent(r)} of ${r.maxRounds}, reviewer ${r.reviewer} on ${r.models.reviewer}${r.land === null ? "" : ", landing when approved"}${labelNote(r)}`,
+    `review ${r.id} of PR #${r.pr.number}: ${phase}, round ${roundsSpent(r)} of ${r.maxRounds}, reviewer ${r.reviewer} on ${r.models.reviewer}${r.land === null ? "" : ", landing when approved"}${phaseNote(r)}`,
     ...r.phase.kind === "needs-person" ? r.phase.reasons.map((reason) => `needs you: ${reason}`) : [],
   ].join("\n");
 }

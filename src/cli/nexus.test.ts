@@ -1352,6 +1352,13 @@ test("review and land reach the review loop's routes, and show prints a review a
   assert.match(shown.stdout, /^needs you: The reviewer still requests changes after 5 rounds, the most this review allows\.$/m);
   assert.match(shown.stdout, /^needs you: Nexus could not add the label "needs human review" to pull request #7 \(GitHub answered 403: Forbidden\)\.$/m);
   assert.deepEqual((await s.json(["show", thread.id])).review, review);
+
+  s.registry.saveReview({ ...review, phase: { kind: "cancelled", who: "reviewer", status: "archived" } });
+  const cancelled = await s.nexus(["show", thread.id]);
+  assert.match(cancelled.stdout, /^review rv-1 of PR #7: cancelled, round 1 of 5, reviewer th-reviewer on claude-opus-5-5, the reviewer thread th-reviewer was archived$/m);
+  assert.doesNotMatch(cancelled.stdout, /^attention: decision$|^needs you:/m);
+  s.registry.saveReview({ ...review, phase: { kind: "merged" } });
+  assert.match((await s.nexus(["show", thread.id])).stdout, /^review rv-1 of PR #7: merged, round 1 of 5, reviewer th-reviewer on claude-opus-5-5$/m);
 });
 
 test("project edit replaces supplied grants and preserves omitted settings", async (t) => {
