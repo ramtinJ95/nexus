@@ -108,7 +108,7 @@ test("Claude OAuth uses a placeholder substituted only for its granted Anthropic
 	await assert.rejects(async () => send("github.com"), { status: 403 });
 });
 
-test("guest requests that fail upstream fail one by one and never take the controller down", async () => {
+test("guest requests that fail upstream fail one by one and never take the controller down", { timeout: 60_000 }, async () => {
 	// Gondolin does not export its network backend, so the test loads the module the VM runs.
 	const { QemuNetworkBackend } = await import(new URL("qemu/net.js", import.meta.resolve("@earendil-works/gondolin")).href);
 	let served = 0;
@@ -132,6 +132,7 @@ test("guest requests that fail upstream fail one by one and never take the contr
 				handleTcpData: ({ key, data }: { key: string; data: Buffer }) => { replies.get(key)!.text += data.toString("latin1"); },
 				handleTcpEnd: ({ key }: { key: string }) => replies.get(key)?.end(),
 				handleTcpError: ({ key }: { key: string }) => replies.get(key)?.end(),
+				reset() {},
 			};
 			await Promise.all(Array.from({ length: 30 }, async (_, i) => {
 				await sleep(i % 20);
@@ -140,9 +141,10 @@ test("guest requests that fail upstream fail one by one and never take the contr
 				backend.tcpSessions.set(key, { srcIP: "192.168.127.3", srcPort: 40000 + i, dstIP: "10.0.0.1", dstPort: port, protocol: "http", pendingWrites: [], pendingWriteBytes: 0, flowControlPaused: false });
 				backend.handleTcpSend({ key, data: Buffer.from(`GET / HTTP/1.1\r\nHost: localhost:${port}\r\n\r\n`) });
 				if (flow % 3 === 0) setTimeout(() => { backend.handleTcpClose({ key }); replies.get(key)!.end(); }, flow % 30);
-				await Promise.race([ended, sleep(1000)]);
+				await ended;
 				statuses.add(replies.get(key)!.text.slice(9, 12));
 			}));
+			await backend.close();
 			await sleep(30);
 		}
 	} finally {
