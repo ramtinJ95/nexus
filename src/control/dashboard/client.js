@@ -852,12 +852,41 @@ function closeTab(path) {
 
 tabsBar?.querySelector('[data-tab="convo"]').addEventListener("click", () => showTab(null));
 
+// The layout the reader picked for diffs, on every thread page.
+const layoutKey = "nexus.diff-layout";
+let diffLayout = localStorage.getItem(layoutKey) === "split" ? "split" : "unified";
+/** The open diff as last read, so a change of layout draws it again without reading the pylon. */
+let openDiff = null;
+
+function layoutPicker() {
+  const picker = el("span", { className: "fv-layout" }, ...["unified", "split"].map((layout) => {
+    const button = el("button", { type: "button", value: layout, textContent: layout === "unified" ? "Unified" : "Split" });
+    button.setAttribute("aria-pressed", String(layout === diffLayout));
+    button.addEventListener("click", () => pickLayout(layout));
+    return button;
+  }));
+  picker.setAttribute("role", "group");
+  picker.setAttribute("aria-label", "Diff layout");
+  return picker;
+}
+
+function pickLayout(layout) {
+  diffLayout = layout;
+  localStorage.setItem(layoutKey, layout);
+  for (const button of fileView.querySelectorAll(".fv-layout button")) button.setAttribute("aria-pressed", String(button.value === layout));
+  // While a read is under way, it draws in the new layout once it is done.
+  if (openDiff === null || openDiff.read !== diffRead) return;
+  openDiff = { ...openDiff, read: ++diffRead };
+  void drawDiff(openDiff);
+}
+
 /** Shows a diff read from the pylon, once its lines are drawn. */
 async function drawDiff({ read, head, shown, truncated }) {
   try {
     const { diffView } = await import("./diff.js");
-    const view = shown.kind === "lines" ? await diffView(shown.file, "unified") : null;
+    const view = shown.kind === "lines" ? await diffView(shown.file, diffLayout) : null;
     if (read !== diffRead) return;
+    head.querySelector(".fv-layout").hidden = view === null;
     fileView.replaceChildren(...present([head,
       shown.kind !== "none" && shown.meta.length > 0 && el("div", { className: "fv-meta dim small" }, ...shown.meta.map((line) => el("div", { textContent: line }))),
       view?.node ?? el("p", { className: "empty fv-note", textContent: shown.kind === "binary" ? "The file is binary, so there is no diff to show." : shown.kind === "meta" ? "No lines changed." : "The file has no changes now." }),
@@ -874,7 +903,7 @@ async function readDiff(path) {
   if (file === undefined || fileView === null) return;
   const read = ++diffRead;
   const head = el("header", { className: "fv-head" }, badge(file.status), el("span", { className: "fv-path", textContent: file.path }),
-    el("span", { className: "dim small", textContent: checkout.base === "turn" ? "vs turn start" : checkout.base === "head" ? "vs last commit" : "vs boot" }), counts(file.additions, file.deletions));
+    el("span", { className: "dim small", textContent: checkout.base === "turn" ? "vs turn start" : checkout.base === "head" ? "vs last commit" : "vs boot" }), counts(file.additions, file.deletions), layoutPicker());
   // A diff reaches into the pylon as the changes do, so a paused one is woken only when the reader says to, and
   // the read of the changes that wakes it reads the open diff again.
   const facts = factsNow();
@@ -896,7 +925,8 @@ async function readDiff(path) {
   try {
     const [{ diff, truncated }, { diffOf }] = await Promise.all([api("GET", `/v1/threads/${thread}/diff?base=${checkout.base}${query}`), import("./diff.js")]);
     if (read !== diffRead) return;
-    await drawDiff({ read, head, shown: diffOf(diff), truncated });
+    openDiff = { read, head, shown: diffOf(diff), truncated };
+    await drawDiff(openDiff);
   } catch (err) {
     if (read !== diffRead) return;
     fileView.replaceChildren(head, el("p", { className: "error fv-note", textContent: err.message }));

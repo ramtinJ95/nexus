@@ -326,6 +326,10 @@ h4.md-h { font-size: 1.07em; }
 .seg-tab:has(input:checked) { background: var(--bg); color: var(--text); box-shadow: var(--shadow); }
 .seg-tab:has(input:focus-visible) { outline: 2px solid var(--accent); outline-offset: 1px; }
 .seg-tab .i { width: 14px; height: 14px; }
+.fv-layout { display: flex; flex: none; padding: 2px; border-radius: 8px; background: var(--raised-2); }
+.fv-layout button { font: 500 11.5px/1 var(--sans); color: var(--text-2); background: none; border: 0; border-radius: 6px; padding: 5px 9px; cursor: pointer; }
+.fv-layout button[aria-pressed="true"] { background: var(--bg); color: var(--text); box-shadow: var(--shadow); }
+.fv-layout button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .ipane { display: none; }
 .inspect:has(input[value="changes"]:checked) #pane-changes,
 .inspect:has(input[value="previews"]:checked) #pane-previews,
