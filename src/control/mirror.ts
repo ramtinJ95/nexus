@@ -14,7 +14,7 @@ const readTimeoutMs = 15_000;
 
 /**
  * `githubToken` reaches https://github.com as an HTTP header set through git's environment, so it never shows in a
- * process listing. An SSH remote fails at once, as the control plane holds no SSH key and git may not prompt.
+ * process listing. An SSH remote fails at once: the control plane holds no SSH key, and git is told never to prompt.
  */
 export function projectMirror(options: { githubToken: string | null }): ProjectMirror {
   return {
