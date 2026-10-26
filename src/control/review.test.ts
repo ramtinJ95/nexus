@@ -738,6 +738,31 @@ test("the findings decide the verdict: changes with only P3 findings is an appro
   assert.equal(g.review().rounds[0]!.verdict!.verdict, "changes");
 });
 
+test("a check that fails again at an earlier head in the last round still gets the PR labelled", async (t) => {
+  const f = fixture(t);
+  f.check = { kind: "done", passed: false, output: "1 test failed" };
+  const loop = f.loop();
+  await loop.start(f.builder, { land: null, rounds: 3 });
+  await loop.poll();
+  f.reply(f.review().reviewer, verdict(f.review(), {}));
+  await loop.poll();
+  f.snapshot = { ...f.snapshot, detail: { ...f.snapshot.detail, head: head2 } };
+  f.reply(f.builder, answers(f.review(), [{ id: "CHECK", action: "fixed", reason: "Fixed the test." }]));
+  await loop.poll();
+  f.reply(f.review().reviewer, verdict(f.review(), { verdict: "changes", findings: [serious] }));
+  await loop.poll();
+  f.snapshot = { ...f.snapshot, detail: { ...f.snapshot.detail, head: head1 } };
+  f.reply(f.builder, answers(f.review(), [{ id: "F1", action: "fixed", reason: "Reverted to the first head." }]));
+  await loop.poll();
+  assert.equal(f.review().rounds.length, 3);
+  f.reply(f.review().reviewer, verdict(f.review(), {}));
+  await loop.poll();
+  assert.deepEqual(f.review().phase, { kind: "needs-person", label: { state: "added" }, reasons: [
+    `.nexus/check failed at ${head1} after the last round this review allows.`, `.nexus/check failed again at ${head1}, where it failed before.`, "The check's output:\n1 test failed",
+  ] });
+  assert.deepEqual([...f.labels], ["needs human review"]);
+});
+
 test("a reviewer's verdict in the old severity shape still reads: serious blocks as P1, minor is a P3 note", async (t) => {
   const f = fixture(t);
   const loop = f.loop();

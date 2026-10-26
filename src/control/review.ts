@@ -371,8 +371,9 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
       checks.discard(phase.thread);
       const next = withRound({ ...r, phase: { ...phase, thread: null } }, { check: { passed: state.passed, output: state.output } });
       if (state.passed) return r.land === null ? { ...next, phase: { kind: "approved" } } : { ...next, phase: { kind: "merging", authorized: null } };
-      if (r.rounds.slice(0, -1).some((earlier) => earlier.head === round.head && earlier.check?.passed === false)) return toPerson(next, `.nexus/check failed again at ${round.head}, where it failed before.`, checkOutput(state.output));
-      if (roundsSpent(r) >= r.maxRounds) return ranOut(next, `.nexus/check failed at ${round.head} after the last round this review allows.`, checkOutput(state.output));
+      const again = r.rounds.slice(0, -1).some((earlier) => earlier.head === round.head && earlier.check?.passed === false) ? [`.nexus/check failed again at ${round.head}, where it failed before.`] : [];
+      if (roundsSpent(r) >= r.maxRounds) return ranOut(next, `.nexus/check failed at ${round.head} after the last round this review allows.`, ...again, checkOutput(state.output));
+      if (again.length) return toPerson(next, ...again, checkOutput(state.output));
       return send(next, "builder", (token) => builderFindings(next, token), { kind: "fixing" });
     },
     async merging(r, phase) {
