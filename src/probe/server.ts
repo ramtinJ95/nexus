@@ -203,14 +203,21 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
     }
   }
 
+  /** The pylons whose last sessions read failed, so each failure is logged once, not on every read. */
+  const unreadSessions = new Set<PylonId>();
   /**
    * Costs one guest exec (`herdr api snapshot`) per running pylon per snapshot, so a snapshot waits for the
-   * slowest pylon, up to sessionReadTimeoutMs. A failed read reports null, never "no sessions".
+   * slowest pylon, up to sessionReadTimeoutMs. A failed read reports null, never "no sessions", and is logged once,
+   * until a read succeeds again.
    */
   async function sessions(pylonId: PylonId): Promise<readonly SessionFact[] | null> {
     try {
-      return await readFact(pylonId, "sessions", sessionReadTimeoutMs, () => sessionFacts(backend.guest(pylonId), sessionReadTimeoutMs));
-    } catch {
+      const facts = await readFact(pylonId, "sessions", sessionReadTimeoutMs, () => sessionFacts(backend.guest(pylonId), sessionReadTimeoutMs));
+      unreadSessions.delete(pylonId);
+      return facts;
+    } catch (err) {
+      if (!unreadSessions.has(pylonId)) log(`${pylonId} sessions: ${(err as Error).message}. The control plane keeps the last list read until a read succeeds`);
+      unreadSessions.add(pylonId);
       return null;
     }
   }
@@ -307,7 +314,10 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
 
   async function observation(p: BackendPylon): Promise<PylonObservation> {
     const { pylonId } = p;
-    if (p.vm !== "running") gitReads.delete(pylonId);
+    if (p.vm !== "running") {
+      gitReads.delete(pylonId);
+      unreadSessions.delete(pylonId);
+    }
     switch (p.vm) {
       case "booting": case "stopping": case "deleting": return { pylonId, phase: p.vm };
       case "stopped":

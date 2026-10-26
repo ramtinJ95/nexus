@@ -658,7 +658,8 @@ test("observations carry session facts from Herdr, and null when Herdr cannot be
       ? herdrOk(herdrSnapshot([{ id: "w1", label: "review" }], [herdrPane("w1:p1", "w1", "claude", "working", { kind: "id", value: "bd2c2d6b" })]))
       : { exitCode: 1, output: "Error: exec failed" };
   });
-  const { client } = await setup(t, {}, guest);
+  const logged: string[] = [];
+  const { client } = await setup(t, { log: (line) => logged.push(line) }, guest);
   await running(client);
 
   const sessionsSeen = async () => {
@@ -670,6 +671,8 @@ test("observations carry session facts from Herdr, and null when Herdr cannot be
   assert.deepEqual(await sessionsSeen(), [{ id: "w1:p1", state: "running", herdrPane: "w1:p1", harness: "claude-code", harnessSessionId: "bd2c2d6b", status: "working", title: "review" }]);
   readable = false;
   assert.equal(await sessionsSeen(), null);
+  assert.equal(await sessionsSeen(), null);
+  assert.deepEqual(logged.filter((l) => l.includes("sessions")), [`${pylonId} sessions: herdr api snapshot exited 1 without a JSON reply: Error: exec failed. The control plane keeps the last list read until a read succeeds`], "logged once");
 });
 
 test("a stopped pylon's observation carries the sessions its backend kept from the pause", async (t) => {
