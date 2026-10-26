@@ -21,6 +21,7 @@ import { startApi } from "../control/api.ts";
 import { fakeHarness } from "../control/fake-harness.ts";
 import { openRegistry, type Thread, type ThreadId } from "../control/registry.ts";
 import type { Review } from "../control/review.ts";
+import { startImageRollout } from "../control/image-rollout.ts";
 import type { ImageId, ImageManifest } from "../images.ts";
 import type { Project, ProjectId } from "../project.ts";
 import { openTerminal, terminalSize } from "../guest-terminal.ts";
@@ -111,11 +112,16 @@ async function setup(t: TestContext) {
   /** What the node's probe opens a pipe to. Tests replace it. */
   let pipe = async (argv: readonly string[]): Promise<ByteStream> => { throw new Error(`unexpected stream ${argv[0]}`); };
   const fake = fakeHarness();
+  const noJobs = () => Promise.reject(new Error("the CLI tests' nodes hold every image they roll out"));
+  const images = startImageRollout({
+    registry, probes: new Map([[node, { submit: noJobs, job: noJobs, manifest: noJobs }]]), buildNode: node,
+    recipe: noJobs, release: null, log: () => {},
+  });
   const options = (port: number) => ({
     deployment: { self: "nFIREBAT" as TailnetNodeId, deployers: new Set([laptop]), keys: {}, resolveMain: async () => "a".repeat(40) },
     registry, host: "127.0.0.1", port, whois: async () => caller, allowed: new Set([laptop]),
     hostnames: new Set([apiName, "127.0.0.1"]), dotfiles: { repo: "https://github.com/ramtin/dotfiles.git", ref: "main" },
-    harness: fake.harness, wake: () => {}, previewPorts: { first: 10200, last: 10299 },
+    harness: fake.harness, wake: () => {}, previewPorts: { first: 10200, last: 10299 }, images,
     probes: new Map([[node, {
       command: (_pylonId: PylonId, command: PylonCommand) => { commands.push(command); return answer(command); },
       stream: (_pylonId: PylonId, argv: readonly string[]) => pipe(argv),
@@ -124,6 +130,7 @@ async function setup(t: TestContext) {
   let api = await startApi(options(0));
   t.after(async () => {
     await api.close();
+    await images.close();
     registry.close();
     await rm(dir, { recursive: true });
   });
@@ -210,7 +217,7 @@ test("--help or -h after a command prints its lines of nexus --help and exits 0 
   const all = new Set((await s.nexus(["--help"])).stdout.split("\n"));
   const names = ["events", "threads", "show", "ports", "preview", "unpreview", "files", "changes", "diff", "conversation", "session open", "session close",
     "attach", "start", "send", "watch", "seen", "abort", "retry", "retry-pylon", "wake", "archive", "unarchive", "delete", "projects", "project edit",
-    "project add", "review", "land", "deploy", "release", "nodes"];
+    "project add", "review", "land", "deploy", "release", "image build", "image rollout", "image rollback", "image list", "image current", "nodes"];
   for (const name of names) {
     for (const flag of ["--help", "-h"]) {
       const res = await s.nexus([...name.split(" "), flag]);
@@ -1227,6 +1234,37 @@ test("deploy and release use the shared release view and wait for both roles", a
   const failed = await s.nexus(["deploy", "main", "--wait", "--json"]);
   assert.equal(failed.code, 1);
   assert.match(failed.stderr, /failed to bind/);
+});
+
+test("image list and current print each image's role, build, release and nodes, and rollout --wait follows the rollout until it is done", async (t) => {
+  const s = await setup(t);
+  const older: ImageManifest = { ...image, id: "img-00000000000a" as ImageId, builtAt: "2026-12-01T00:00:00Z" };
+  s.registry.saveImage(older, "f".repeat(40));
+  const capacity = { cpus: 16, committedCpus: 0, memoryGiB: 64, committedMemoryGiB: 0, diskFreeGiB: 100, committedDiskGiB: 0 };
+  s.registry.apply({ record: "node", node, state: "online", capacity });
+  s.registry.ingested({ node, observedAt: new Date().toISOString(), probeBootId: "b", capacity, artifacts: [image.id, older.id], jobs: [], pylons: [], grants: { secrets: [], gitSsh: false }, previewRoutes: [] }, []);
+  const entry = { ...image, release: null, nodes: [node] };
+  const olderEntry = { ...older, release: "f".repeat(40), nodes: [node] };
+
+  assert.equal((await s.nexus(["image", "list"])).stdout, [
+    "img-0123456789ab  current  built 2027-01-01T00:00:00Z on rj-firebat  release unknown       on rj-firebat",
+    "img-00000000000a  -        built 2026-12-01T00:00:00Z on rj-firebat  release ffffffffffff  on rj-firebat",
+  ].join("\n") + "\n");
+  assert.deepEqual(await s.json(["image", "list"]), { current: image.id, previous: null, images: [entry, olderEntry], operation: null });
+  assert.equal((await s.nexus(["image", "current"])).stdout, "img-0123456789ab  current  built 2027-01-01T00:00:00Z on rj-firebat  release unknown  on rj-firebat\n");
+
+  const rolled = await s.nexus(["image", "rollout", older.id, "--wait"]);
+  assert.equal(rolled.code, 0, rolled.stderr);
+  assert.equal(rolled.stdout, [
+    "img-0123456789ab  previous  built 2027-01-01T00:00:00Z on rj-firebat  release unknown       on rj-firebat",
+    "img-00000000000a  current   built 2026-12-01T00:00:00Z on rj-firebat  release ffffffffffff  on rj-firebat",
+    "rollout img-00000000000a: done",
+    "  rj-firebat: done",
+  ].join("\n") + "\n");
+  assert.deepEqual(await s.json(["image", "current"]), { current: olderEntry, previous: entry });
+
+  const unknown = await s.nexus(["image", "rollout", "img-ffffffffffff", "--json"]);
+  assert.deepEqual([unknown.code, JSON.parse(unknown.stderr)], [4, { error: "no image img-ffffffffffff is recorded", kind: "not-found", status: 404 }]);
 });
 
 test("review and land reach the review loop's routes, and show prints a review and what it needs from the person", async (t) => {
