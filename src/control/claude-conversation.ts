@@ -48,6 +48,33 @@ export function queuedOf(entries: readonly ClaudeEntry[]): Extract<ClaudeEntry, 
   return queued;
 }
 
+/**
+ * One event of `GET /v1/threads/:id/claude/events`. The first, and any after the transcript was replaced, has
+ * `reset` and every entry kept. Each later one has the entries appended since the one before.
+ */
+export interface ClaudeFrame { reset: boolean; session: string | null; entries: readonly ClaudeEntry[]; dropped: number; working: boolean }
+
+/**
+ * The frames of one client of a Claude worker's transcript stream, or null when no entry came and `working` held.
+ * The CLI's watch passes the frames it gets through one too, so the whole transcript that each reconnect sends
+ * prints only what it has not printed.
+ */
+export function claudeFrames(): (view: Omit<ClaudeFrame, "reset">) => ClaudeFrame | null {
+  let sent: { session: string | null; total: number; last: string | undefined; working: boolean } | null = null;
+  return (view) => {
+    const total = view.dropped + view.entries.length;
+    // Where the entries not sent yet start. The registry keeps no generation, so a replaced transcript shows as a
+    // different entry where the last one sent stood.
+    const start = sent === null ? -1 : sent.total - view.dropped;
+    const appended = sent !== null && sent.session === view.session && start >= 0 && start <= view.entries.length
+      && (sent.total === 0 || (start > 0 && JSON.stringify(view.entries[start - 1]) === sent.last));
+    const entries = appended ? view.entries.slice(start) : view.entries;
+    if (appended && entries.length === 0 && view.working === sent!.working) return null;
+    sent = { session: view.session, total, last: JSON.stringify(view.entries.at(-1)), working: view.working };
+    return { reset: !appended, session: view.session, entries, dropped: view.dropped, working: view.working };
+  };
+}
+
 /** A watch's listener is null until it starts. */
 interface Watcher { listener: ((view: ClaudeConversation) => void | Promise<void>) | null; closed: PromiseWithResolvers<void> }
 

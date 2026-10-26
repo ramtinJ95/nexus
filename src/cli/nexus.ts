@@ -18,8 +18,8 @@ import type { ConversationView, EntryRecord, InboxState, LiveState } from "@eare
 import type { ListeningPort, NodeSummary, OpenedSession, ThreadDetail, ThreadRow, ViewFrame } from "../control/api.ts";
 import type { ClaudeSent, Preview, Thread } from "../control/registry.ts";
 import type { Review } from "../control/review.ts";
-import type { ClaudeConversation, ClaudeEntry, PromptSource } from "../claude-transcript.ts";
-import { queuedOf } from "../control/claude-conversation.ts";
+import { maxEntries, type ClaudeConversation, type ClaudeEntry, type PromptSource } from "../claude-transcript.ts";
+import { claudeFrames, queuedOf, type ClaudeFrame } from "../control/claude-conversation.ts";
 import type { Changes, Diff, Listing } from "../checkout-files.ts";
 import type { Project, SecretGrant } from "../project.ts";
 import type { ActualState } from "../reconcile.ts";
@@ -27,7 +27,7 @@ import type { WebSocket } from "ws";
 import { attachTerminal, processTty } from "./attach.ts";
 import { call, CliError, exitCodes, follow, upgrade, type Endpoint, type HostPort } from "./transport.ts";
 
-const version = "0.18.0";
+const version = "0.19.0";
 const defaults = { url: "http://rj-firebat.tailc817d3.ts.net:7470", socks: "localhost:1055" };
 const configFile = () => join(homedir(), ".config", "nexus", "cli.json");
 
@@ -49,7 +49,7 @@ const usage = `nexus ${version}, the Nexus control plane from this Mac
   nexus start --project P [--title T] [--message M | --claude PROMPT [--model ID]] [--node N] [--branch B] [--commit C]
   nexus send <thread> <text...> [--steer] [--request-id ID]
     a message to the agent, or typed into the Claude worker's session, which waits for a paused pylon to wake
-  nexus watch <thread> [--interval MS]
+  nexus watch <thread> [--interval MS]         the conversation, or the Claude worker's transcript, as it grows
   nexus seen <thread> [--unread | --last-reply-at MS]
     mark the latest reply seen, or unread, or only up to the reply at MS, as captured with what the client showed
   nexus abort|retry|retry-pylon|wake <thread>
@@ -394,20 +394,34 @@ export interface WatchLive {
 }
 /** An entry with the CLI's plain rendering of its messages. */
 export interface RenderedEntry { entry: EntryRecord; text: string }
+/** A Claude worker's transcript entry with the CLI's plain rendering of it. */
+export interface RenderedClaudeEntry { entry: ClaudeEntry; text: string }
 export type WatchEvent =
   | { type: "reset"; thread: string; entries: RenderedEntry[] }
   | { type: "entry"; thread: string } & RenderedEntry
+  | { type: "claude-reset"; thread: string; session: string | null; dropped: number; entries: RenderedClaudeEntry[] }
+  | { type: "claude-entry"; thread: string } & RenderedClaudeEntry
   | WatchState
   | WatchLive
   | { type: "error"; thread: string; kind: "unreachable" | "failed"; message: string };
 
-function stateOf(d: ThreadDetail, view: View | null): WatchState {
+function stateOf(d: ThreadDetail, working: boolean, queued: number): WatchState {
   const parkedTasks = d.agent?.parkedTasks ?? 0;
   return {
-    type: "state", thread: d.thread.id, status: d.thread.status,
-    run: parkedTasks > 0 ? "parked" : view !== null && busy(view) ? "working" : "idle",
-    parkedTasks, queued: view === null ? 0 : queuedTexts(view).length, pylon: d.pylon.actualState, failed: d.pylon.failed, ports: d.ports,
+    type: "state", thread: d.thread.id, status: d.thread.status, run: parkedTasks > 0 ? "parked" : working ? "working" : "idle",
+    parkedTasks, queued, pylon: d.pylon.actualState, failed: d.pylon.failed, ports: d.ports,
   };
+}
+
+/** What watch keeps of a Claude worker's transcript: the stream's entries, the newest maxEntries of them. */
+type Transcript = Omit<ClaudeFrame, "reset">;
+
+/** A Claude worker's run in flight: what Claude Code queued, and each call of the running turn without a result. */
+function claudeLiveOf(id: string, c: Transcript): WatchLive {
+  const lastTurn = c.entries.findLastIndex((e) => e.kind === "turn");
+  const done = new Set(c.entries.flatMap((e) => e.kind === "result" ? [e.toolUseId] : []));
+  const running = c.working ? c.entries.slice(lastTurn + 1).flatMap((e) => e.kind === "tool" && !done.has(e.id) ? [{ callId: e.id, output: "" }] : []) : [];
+  return { type: "live", thread: id, queued: queuedOf(c.entries).map((q) => q.text ?? ""), tools: running, partial: null, retry: null };
 }
 
 function liveOf(id: string, view: View | null): WatchLive {
@@ -431,11 +445,12 @@ function stateText(s: WatchState): string {
  * Follows the thread's conversation as the API streams it, and polls the thread. The conversation is pi-durable's
  * active context, not the full history: a new head marker, a compaction or a delete can reorder or drop entries.
  * So the first print shows the context whole, a later one that only appends prints each new entry, and any other
- * change prints it whole again. Then the thread's state and the run in flight, when they changed. Every print
- * comes from the latest of both sources, so an answer's entry is printed before the live event that drops its
- * partial. An unreachable or failing control plane is reported once and retried through, so a live pane survives
- * a restart of the control plane. Ends after the state that says the thread is deleted, or once the process that
- * started it is gone.
+ * change prints it whole again. A Claude worker's transcript streams instead, and prints the same way, whole first
+ * and when it was replaced. Then the thread's state and the run in flight, when they changed. Every print comes
+ * from the latest of both sources, so an answer's entry is printed before the live event that drops its partial.
+ * An unreachable or failing control plane is reported once and retried through, so a live pane survives a restart
+ * of the control plane. Ends after the state that says the thread is deleted, or once the process that started it
+ * is gone.
  */
 async function watch(api: Api, follow: Follow, id: string, intervalMs: number, json: boolean): Promise<void> {
   for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"] as const) process.once(signal, () => process.exit(0));
@@ -451,7 +466,7 @@ async function watch(api: Api, follow: Follow, id: string, intervalMs: number, j
     else if (text !== "") process.stdout.write(`${text}\n`);
   };
   const rendered = (entry: EntryRecord): RenderedEntry => ({ entry, text: entryText(entry) });
-  const joined = (entries: readonly RenderedEntry[]) => entries.map((e) => e.text).filter((text) => text !== "").join("\n");
+  const joined = (entries: readonly { text: string }[]) => entries.map((e) => e.text).filter((text) => text !== "").join("\n");
   /** The IDs of the active context as last printed, or null before the first print. */
   let printed: number[] | null = null;
   let shown: string | null = null;
@@ -459,6 +474,15 @@ async function watch(api: Api, follow: Follow, id: string, intervalMs: number, j
   /** The thread as last polled, and its conversation as last streamed. */
   let detail: ThreadDetail | null = null;
   let streamed: View | null = null;
+  /** A Claude worker's transcript as streamed, or "none" when it does not stream, such as from an older control plane. */
+  let transcript: Transcript | "none" | null = null;
+  /** What of the transcript is printed, so each entry prints once across reconnects. */
+  const claudePrinted = claudeFrames();
+  /** The pull requests printed since the last whole print of the transcript, which Claude Code names again and again. */
+  let pullRequests = new Set<string>();
+  /** Whether the text stream has printed any of the transcript, which a replaced one then says it replaces. */
+  let textShown = false;
+  const firstDetail = Promise.withResolvers<ThreadDetail>();
   /** What each source failed with last, while it fails. After an outage the state is printed again. */
   const failing = new Map<"poll" | "stream", string>();
   let recovered = false;
@@ -471,10 +495,10 @@ async function watch(api: Api, follow: Follow, id: string, intervalMs: number, j
     if (failing.delete(source) && failing.size === 0) recovered = true;
   };
 
-  function print() {
-    const d = detail;
+  /** Prints what the harness conversation gained, and answers what its run does, or null until its first frame. */
+  function printConversation(d: ThreadDetail): { working: boolean; live: WatchLive } | null {
     // A thread with a conversation waits for its first frame.
-    if (d === null || (d.agent !== null && streamed === null)) return;
+    if (d.agent !== null && streamed === null) return null;
     const view = d.agent === null ? null : streamed;
     // Without a conversation, the entries last printed stand. The first print shows an empty context.
     const entries: readonly EntryRecord[] | null = view?.entries ?? (printed === null ? [] : null);
@@ -492,41 +516,96 @@ async function watch(api: Api, follow: Follow, id: string, intervalMs: number, j
       }
       printed = entries.map((e) => e.id);
     }
-    const state = stateOf(d, view);
+    return { working: view !== null && busy(view), live: liveOf(id, view) };
+  }
+
+  /** Prints what a Claude worker's transcript gained, and answers what its turn does, or null until its first frame. */
+  function printTranscript(d: ThreadDetail): { working: boolean; live: WatchLive } | null {
+    if (transcript === null) return null;
+    if (transcript === "none") return { working: d.thread.sessionTurnRunning === true, live: { type: "live", thread: id, queued: [], tools: [], partial: null, retry: null } };
+    const frame = claudePrinted(transcript);
+    const claudeRendered = (entry: ClaudeEntry): RenderedClaudeEntry => ({
+      entry, text: entry.kind === "result" && entry.isError ? `[tool error] ${clip(entry.output, 400)}` : claudeEntryText(entry, pullRequests),
+    });
+    if (frame?.reset === true) {
+      pullRequests = new Set();
+      const all = frame.entries.map(claudeRendered);
+      // A worker's first session replaces an empty transcript, which replaces nothing a person saw.
+      emit({ type: "claude-reset", thread: id, session: frame.session, dropped: frame.dropped, entries: all }, textShown ? `-- Claude's transcript was replaced. It now reads:\n${joined(all)}` : joined(all));
+      textShown = all.some((e) => e.text !== "");
+    } else {
+      for (const entry of frame?.entries ?? []) {
+        const e = claudeRendered(entry);
+        textShown ||= e.text !== "";
+        emit({ type: "claude-entry", thread: id, ...e }, e.text);
+      }
+    }
+    return { working: transcript.working, live: claudeLiveOf(id, transcript) };
+  }
+
+  function print() {
+    const d = detail;
+    if (d === null) return;
+    const run = d.claudeWorker === undefined ? printConversation(d) : printTranscript(d);
+    if (run === null) return;
+    const state = stateOf(d, run.working, run.live.queued.length);
     const key = JSON.stringify(state);
     // After an outage the state is printed again, which tells the consumer the control plane is back.
     if (key !== shown || recovered) emit(state, stateText(state));
     shown = key;
     recovered = false;
     // The text stream already says what the state does of the run, so only JSON carries it.
-    const live = liveOf(id, view);
-    const liveKey = JSON.stringify(live);
-    if (liveKey !== liveShown) emit(live, "");
+    const liveKey = JSON.stringify(run.live);
+    if (liveKey !== liveShown) emit(run.live, "");
     liveShown = liveKey;
   }
 
+  /** Each connection's first frame is the whole view, and each later one replaces what changed. */
+  const onView = (data: unknown, first: boolean) => {
+    const frame = data as ViewFrame;
+    const docs = { ...first ? {} : streamed!.docs, ...frame.docs };
+    for (const [kind, doc] of Object.entries(docs)) if (doc === null) delete docs[kind];
+    streamed = { entries: frame.entries ?? streamed!.entries, docs: docs as View["docs"] };
+  };
+  /** Each connection's first frame is the whole transcript, and each later one adds entries. */
+  const onTranscript = (data: unknown) => {
+    const { reset, ...frame } = data as ClaudeFrame;
+    const kept = reset || transcript === null || transcript === "none" ? frame : { ...frame, entries: [...transcript.entries, ...frame.entries] };
+    const over = Math.max(0, kept.entries.length - maxEntries);
+    transcript = { ...kept, entries: kept.entries.slice(over), dropped: kept.dropped + over };
+  };
+
   const stop = new AbortController();
   /**
-   * Each connection's first frame is the whole view, and each later one replaces what changed. A dropped stream
-   * is opened again after 100 ms, doubling up to the poll interval, and from 100 ms again once a frame arrives.
-   * A thread without a conversation, or a deleted one, refuses the stream, and never streams again.
+   * A dropped stream is opened again after 100 ms, doubling up to the poll interval, and from 100 ms again once a
+   * frame arrives. A thread without a conversation, or a deleted one, refuses the stream, and never streams again.
+   * A control plane without the route for Claude transcripts is older than it, and streams nothing.
    */
   async function stream() {
+    const claude = (await firstDetail.promise).claudeWorker !== undefined;
     for (let attempt = 0; !stop.signal.aborted; attempt++) {
       let first = true;
       try {
-        await follow(`${thread(id)}/events`, (data) => {
-          const frame = data as ViewFrame;
-          const docs = { ...first ? {} : streamed!.docs, ...frame.docs };
-          for (const [kind, doc] of Object.entries(docs)) if (doc === null) delete docs[kind];
-          streamed = { entries: frame.entries ?? streamed!.entries, docs: docs as View["docs"] };
+        await follow(claude ? `${thread(id)}/claude/events` : `${thread(id)}/events`, (data) => {
+          if (claude) onTranscript(data);
+          else onView(data, first);
           first = false;
           attempt = 0;
           succeeded("stream");
           print();
         }, stop.signal);
       } catch (err) {
-        if (err instanceof CliError && err.kind === "conflict") return;
+        if (err instanceof CliError && err.kind === "conflict") {
+          // A deleted thread's transcript is gone, and its poll still prints its state.
+          if (claude) transcript = "none";
+          return;
+        }
+        if (claude && err instanceof CliError && err.status === 404 && err.message.startsWith("no route ")) {
+          transcript = "none";
+          emit({ type: "error", thread: id, kind: "failed", message: `The control plane does not stream Claude transcripts. Upgrade it, or run nexus conversation ${id}` }, `-- The control plane does not stream Claude transcripts. Upgrade it, or run nexus conversation ${id}`);
+          print();
+          return;
+        }
         failed("stream", err);
       }
       await sleep(Math.min(100 * 2 ** attempt, intervalMs), undefined, { signal: stop.signal }).catch(() => {});
@@ -536,6 +615,7 @@ async function watch(api: Api, follow: Follow, id: string, intervalMs: number, j
     while (!stop.signal.aborted) {
       try {
         detail = await api("GET", thread(id)) as ThreadDetail;
+        firstDetail.resolve(detail);
         succeeded("poll");
         print();
         if (detail.thread.status === "deleted") return;
