@@ -12,7 +12,7 @@
  */
 import { randomUUID } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
-import { retryable } from "./protocol.ts";
+import { heldSecrets, retryable } from "./protocol.ts";
 import type { HerdrStatus, Job, JobEnvelope, JobErrorCode, JobId, JobStatus, LiveHash, NodeName, NodeObservation, PausedSession, ProbeEvent, PylonId, PylonObservation, RunningFacts, SessionFact } from "./protocol.ts";
 import type { BootInputs, LiveSpec, PylonSource, SessionHarness } from "./project.ts";
 import type { ArtifactId, CheckpointId } from "./images.ts";
@@ -57,6 +57,8 @@ export interface PlanInput {
   /** The node's gateway routes a preview port to the pylon. A paused pylon keeps its routes, and only a delete removes them. */
   previewsRouted: boolean;
   nodeArtifacts: ReadonlySet<ArtifactId>;
+  /** The held secrets the node's probe takes from the control plane, none from a probe older than them. */
+  nodeHeldSecrets: ReadonlySet<string>;
   inFlight: JobStatus | null; // for this pylon, or for an artifact this pylon is waiting on
   /** Consecutive failed jobs, and the last one's. A success clears both. */
   attempts: { count: number; last: FailedAttempt | null };
@@ -73,7 +75,7 @@ export interface FailedAttempt { at: number; code: JobErrorCode; message: string
 
 export type PlanStep =
   | { kind: "done" }
-  | { kind: "wait"; reason: "node-offline" | "in-flight" | "backoff" | "transitioning" }
+  | { kind: "wait"; reason: "node-offline" | "in-flight" | "backoff" | "transitioning" | "held-secret" }
   | { kind: "submit"; job: Job }
   | { kind: "fail"; reason: string }; // the registry marks the pylon failed until a human retries
 
@@ -140,6 +142,8 @@ const planRules: readonly Rule[] = [
   },
   // 7c.
   ({ observed: o, liveHash }) => o !== "absent" && o.phase === "running" && o.liveHash === liveHash ? done : null,
+  // 7d. A probe older than a held secret fails the spawn for good, as in a deploy that upgrades the control plane first.
+  (i) => i.boot.network.secrets.some((s) => heldSecrets.includes(s.name) && !i.nodeHeldSecrets.has(s.name)) ? wait("held-secret") : null,
   (i) => submit({ kind: "spawn", pylonId: i.pylonId, boot: { ...i.boot, source: bootSource(i) }, live: i.live, liveHash: i.liveHash }),
 ];
 

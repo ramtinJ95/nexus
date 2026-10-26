@@ -2,7 +2,7 @@
 
 Each node runs a probe, which runs the pylon VMs. One machine, `rj-firebat`, also runs the control plane: the registry, the reconcile loop, the agent harness and the API. The first install uses a checkout and sudo. After the one-time setup below, `nexus deploy` requests upgrades without sudo or SSH. The manual scripts remain safe to rerun for bootstrapping and recovery.
 
-Upgrade the control plane before the probes. A probe refuses a spawn from a control plane older than itself and says the control plane needs upgrading, while an older probe still runs projects that clone a repository for an upgraded control plane. A probe from before scratch projects cannot start one, so create scratch projects only after every probe is upgraded. A probe that reports a session its last wake failed to bring back, in no pane, stops a control plane from before session states from storing any observation from that node until the control plane is upgraded too.
+Upgrade the control plane before the probes. `nexus deploy` does this on its own. A probe refuses a spawn from a control plane older than itself and says the control plane needs upgrading, while an older probe still runs projects that clone a repository for an upgraded control plane. A boot that needs a secret the control plane hands over, such as `NEXUS_CHATGPT_TOKEN`, goes only to a probe whose snapshot says it takes that secret from the control plane. A probe from before the secret would look for it in its own secret file and fail the thread for good. So in the seconds between the control plane's upgrade and the probe's, such a boot waits, and it goes ahead on the upgraded probe's first snapshot. A probe from before scratch projects cannot start one, so create scratch projects only after every probe is upgraded. A probe that reports a session its last wake failed to bring back, in no pane, stops a control plane from before session states from storing any observation from that node until the control plane is upgraded too.
 
 CLI 0.11.0 adds `nexus changes <thread> --turn` and `nexus diff <thread> --turn`, also available as Latest turn in the dashboard. Upgrade the control plane to capture these start-of-reply snapshots; no image rebuild is needed. Existing pylons gain a snapshot on their next autonomous turn. Until then, Latest turn reports that no snapshot exists. See [the CLI contract](../docs/cli.md) for the JSON base and failures.
 
@@ -270,7 +270,7 @@ nexus project edit <project> --login claude --login chatgpt
 
 That grants `NEXUS_CHATGPT_TOKEN` for `api.openai.com` and adds `auth.openai.com`, `chatgpt.com` and `api.openai.com` to the allowlist. Threads started after the edit get it. An existing thread keeps the grants it booted with, even across an archive and an unarchive. A project may not grant `NEXUS_CHATGPT_TOKEN` itself, and a node's `secrets.env` may not set it.
 
-Upgrade every probe before you start a thread with the login. A probe from before this change looks for `NEXUS_CHATGPT_TOKEN` in its `secrets.env`, does not find it, and fails the spawn for good.
+A thread with the login boots only on a probe that takes `NEXUS_CHATGPT_TOKEN` from the control plane. On a probe from before the login, its pylon waits until that probe is upgraded.
 
 In the pylon, pi's `openai` provider is signed in, so a model reference names `openai/<model>`, such as `openai/gpt-6-astra`. `openai-codex` is not signed in. Each boot rewrites the `openai` entry of `~/.pi/agent/auth.json`, so a `/login` to OpenAI inside a pylon lasts only until the next wake.
 
