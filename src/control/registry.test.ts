@@ -798,21 +798,34 @@ test("a turn running before turn starts were recorded has no known start", async
 
 /**
  * Claude's hooks for one session, as the image's hook reports them: a Stop hook's input decides whether its turn
- * ended. Each report is stamped a second after the last. `heldEnds` delivers the turn ends the hook held back for
- * background shells, as their grace runs out.
+ * ended. Each report is stamped a second after the last. `hold` runs the hook's detached hold for the last Stop that
+ * listed background shells, on the test's clock, and calls `exited` once the command exits.
  */
 async function claudeHooks(registry: ReturnType<typeof seeded>, clock: { now: number }) {
-  const { reportedKind } = await import("../../images/pylon/nexus-heartbeat.ts");
+  const { holdTurnEnd, reportedKind } = await import("../../images/pylon/nexus-heartbeat.ts");
   type Kind = import("../events.ts").PylonEvent["kind"];
   let sequence = 0;
   const held: number[] = [];
   const send = (kind: Kind, at: number) => registry.reportSession(node, { sequence: ++sequence, time: clock.now, pylon: pylonId, event: { kind, session: "c1", at } });
   const hook = (kind: Kind, input: { background_tasks?: unknown } = {}, at = (clock.now += 1000)) => {
     const reported = reportedKind(kind, input);
-    if (reported.endAfterMs !== undefined) held.push(at);
+    if (reported.shells !== undefined) held.push(at);
     send(reported.kind as Kind, at);
   };
-  return Object.assign(hook, { heldEnds: () => { for (const at of held.splice(0)) send("session.turn-ended", at); } });
+  const hold = (exitsAfterMs: number, exited = () => {}) => {
+    const stop = held.pop()!;
+    const exit = clock.now + exitsAfterMs;
+    let gone = false;
+    return holdTurnEnd(async () => clock.now < exit, (kind) => send(kind, stop), {
+      now: () => clock.now,
+      sleep: async (ms) => {
+        clock.now += ms;
+        registry.pruneSessions();
+        if (!gone && clock.now >= exit) { gone = true; exited(); }
+      },
+    });
+  };
+  return Object.assign(hook, { hold });
 }
 const backgroundSubagent = { id: "ac4719df54252d254", type: "subagent", status: "running", agent_type: "poteto-agent" };
 const backgroundShell = { id: "b6fh14jr7", type: "shell", status: "running", command: "npm test" };
@@ -883,7 +896,7 @@ test("a late background subagent report after its session ended changes nothing"
 });
 
 test("a main turn that ends while a background command runs stays working until the turn its finish starts ends", async (t) => {
-  const { backgroundShellGraceMs } = await import("../../images/pylon/nexus-heartbeat.ts");
+  const { desiredPhase } = await import("../reconcile.ts");
   const clock = { now: 10_000_000 };
   const registry = seeded(tempDb(), () => clock.now);
   t.after(() => registry.close());
@@ -891,12 +904,13 @@ test("a main turn that ends while a background command runs stays working until 
   const attention = () => registry.events("0", { kinds: ["attention.changed"] }).at(-1)!.payload.attention;
   hook("session.turn-started");
   hook("session.turn-ended", { background_tasks: [backgroundShell] });
-  assert.equal(registry.thread(threadId)!.lastReplyAt, null);
-  assert.equal(attention(), "working");
-  clock.now += 3 * 60_000;
-  hook("session.turn-started");
-  clock.now += backgroundShellGraceMs;
-  hook.heldEnds();
+  await hook.hold(45 * 60_000, () => {
+    const running = registry.thread(threadId)!;
+    assert.equal(running.sessionTurnRunning, true, "heartbeats outlast the 30-minute lease while the command runs");
+    assert.equal(desiredPhase(running, clock.now), "running");
+    assert.equal(running.lastReplyAt, null);
+    hook("session.turn-started");
+  });
   assert.equal(registry.thread(threadId)!.lastReplyAt, null, "the turn the command's finish started makes the held end stale");
   assert.equal(attention(), "working");
   hook("session.turn-ended", { background_tasks: [] });
@@ -905,21 +919,19 @@ test("a main turn that ends while a background command runs stays working until 
   assert.equal(registry.events("0", { kinds: ["session.turn-ended"] }).length, 1);
 });
 
-test("a background command still running when the grace runs out, such as a dev server, ends the turn then", async (t) => {
-  const { backgroundShellGraceMs } = await import("../../images/pylon/nexus-heartbeat.ts");
+test("a background command still running at the cap, such as a dev server, ends its turn then", async (t) => {
+  const { backgroundShellCapMs } = await import("../../images/pylon/nexus-heartbeat.ts");
   const clock = { now: 10_000_000 };
   const registry = seeded(tempDb(), () => clock.now);
   t.after(() => registry.close());
   const hook = await claudeHooks(registry, clock);
   hook("session.turn-started");
   hook("session.turn-ended", { background_tasks: [backgroundShell] });
-  clock.now += backgroundShellGraceMs;
-  registry.pruneSessions();
-  assert.equal(registry.thread(threadId)!.sessionTurnRunning, true);
-  hook.heldEnds();
+  const stop = clock.now;
+  await hook.hold(Infinity);
   const ended = registry.thread(threadId)!;
   assert.equal(ended.sessionTurnRunning, undefined);
-  assert.equal(ended.lastReplyAt, clock.now);
+  assert.ok(ended.lastReplyAt! >= stop + backgroundShellCapMs && ended.lastReplyAt! < stop + backgroundShellCapMs + 2 * 60_000);
   assert.equal(registry.events("0", { kinds: ["attention.changed"] }).at(-1)!.payload.attention, "reply");
   hook("session.heartbeat");
   assert.equal(registry.thread(threadId)!.sessionTurnRunning, undefined, "nothing revives the ended turn");

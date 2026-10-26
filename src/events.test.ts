@@ -79,16 +79,50 @@ test("parallel tool hooks share a throttled heartbeat, and refresh after five mi
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
-test("a turn end with background tasks still running reports a heartbeat, and holds the turn end back for shells alone", async () => {
-  const { reportedKind, backgroundShellGraceMs } = await import("../images/pylon/nexus-heartbeat.ts");
+test("a turn end with background tasks still running reports a heartbeat, and names the shells it waits for alone", async () => {
+  const { reportedKind } = await import("../images/pylon/nexus-heartbeat.ts");
   const subagent = { id: "ac4719df54252d254", type: "subagent", status: "running", agent_type: "general-purpose" };
   const shell = { id: "bq5q9o836", type: "shell", status: "running", command: "sleep 90" };
   assert.deepEqual(reportedKind("session.turn-ended", { background_tasks: [shell, subagent] }), { kind: "session.heartbeat" });
-  assert.deepEqual(reportedKind("session.turn-ended", { background_tasks: [shell] }), { kind: "session.heartbeat", endAfterMs: backgroundShellGraceMs });
+  assert.deepEqual(reportedKind("session.turn-ended", { background_tasks: [shell] }), { kind: "session.heartbeat", shells: ["bq5q9o836"] });
   assert.deepEqual(reportedKind("session.turn-ended", { background_tasks: [{ ...subagent, status: "completed" }, { ...shell, status: "completed" }] }), { kind: "session.turn-ended" });
   assert.deepEqual(reportedKind("session.turn-ended", { background_tasks: [] }), { kind: "session.turn-ended" });
   assert.deepEqual(reportedKind("session.turn-ended", {}), { kind: "session.turn-ended" }, "a Claude without the field ends turns as before");
   assert.deepEqual(reportedKind("session.ended", { background_tasks: [subagent, shell] }), { kind: "session.ended" });
+});
+
+test("a held turn end heartbeats every five minutes while the command runs, and ends the turn after it exits or at the cap", async () => {
+  const { backgroundShellCapMs, holdTurnEnd } = await import("../images/pylon/nexus-heartbeat.ts");
+  const run = async (exitsAfterMs: number) => {
+    let now = 0;
+    const reports: [string, number][] = [];
+    await holdTurnEnd(async () => now < exitsAfterMs, (kind) => reports.push([kind, now / 60_000]), { now: () => now, sleep: async (ms) => { now += ms; } });
+    return reports;
+  };
+  assert.deepEqual(await run(12 * 60_000), [["session.heartbeat", 5], ["session.heartbeat", 10], ["session.turn-ended", 12.5]]);
+  const capped = await run(Infinity);
+  assert.equal(capped.filter(([kind]) => kind === "session.heartbeat").length, backgroundShellCapMs / (5 * 60_000));
+  assert.deepEqual(capped.at(-1), ["session.turn-ended", backgroundShellCapMs / 60_000 + 0.5]);
+});
+
+test("a background shell runs while any process writes to its output file", { skip: process.platform !== "linux" && "reads /proc" }, async (t) => {
+  const { shellsRunning } = await import("../images/pylon/nexus-heartbeat.ts");
+  const { spawn } = await import("node:child_process");
+  const { once } = await import("node:events");
+  const { mkdirSync, openSync } = await import("node:fs");
+  const dir = mkdtempSync(join(tmpdir(), "nexus-shell-"));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  mkdirSync(join(dir, "c1", "tasks"), { recursive: true });
+  const output = openSync(join(dir, "c1", "tasks", "b6fh14jr7.output"), "w");
+  const child = spawn("sleep", ["30"], { stdio: ["ignore", output, output] });
+  t.after(() => child.kill());
+  await once(child, "spawn");
+  assert.equal(await shellsRunning("c1", ["b6fh14jr7"]), true);
+  assert.equal(await shellsRunning("c1", ["bq5q9o836"]), false);
+  assert.equal(await shellsRunning("c2", ["b6fh14jr7"]), false);
+  child.kill();
+  await once(child, "exit");
+  assert.equal(await shellsRunning("c1", ["b6fh14jr7"]), false);
 });
 
 test("only a Claude started outside other Claude sessions, under the pylon user's HOME, reports into the thread", async (t) => {
