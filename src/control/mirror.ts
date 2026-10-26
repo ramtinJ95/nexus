@@ -14,11 +14,13 @@ const readTimeoutMs = 15_000;
 
 /**
  * `githubToken` reaches https://github.com as an HTTP header set through git's environment, so it never shows in a
- * process listing. An SSH remote fails at once: the control plane holds no SSH key, and git is told never to prompt.
+ * process listing. Only an https:// remote is read, or a file:// one in tests: the control plane holds no SSH key, so any
+ * other remote is refused before git runs, and git itself may use no other transport.
  */
 export function projectMirror(options: { githubToken: string | null }): ProjectMirror {
   return {
     async setupInputs(project, ref, signal) {
+      if (!/^(?:https|file):\/\//.test(project.repoUrl)) throw new Error(`the control plane reads only https:// remotes, and holds no SSH key for ${project.repoUrl}`);
       const deadline = AbortSignal.timeout(readTimeoutMs);
       const bounded = signal === undefined ? deadline : AbortSignal.any([deadline, signal]);
       const env = gitEnv(project.repoUrl, options.githubToken);
@@ -49,7 +51,7 @@ export function projectMirror(options: { githubToken: string | null }): ProjectM
 }
 
 function gitEnv(url: string, githubToken: string | null): NodeJS.ProcessEnv {
-  const env = { ...process.env, GIT_TERMINAL_PROMPT: "0", GIT_SSH_COMMAND: "ssh -o BatchMode=yes" };
+  const env = { ...process.env, GIT_TERMINAL_PROMPT: "0", GIT_ALLOW_PROTOCOL: "https:file" };
   if (githubToken === null || !url.startsWith("https://github.com/")) return env;
   const basic = Buffer.from(`x-access-token:${githubToken}`).toString("base64");
   return { ...env, GIT_CONFIG_COUNT: "1", GIT_CONFIG_KEY_0: "http.https://github.com/.extraheader", GIT_CONFIG_VALUE_0: `AUTHORIZATION: basic ${basic}` };
