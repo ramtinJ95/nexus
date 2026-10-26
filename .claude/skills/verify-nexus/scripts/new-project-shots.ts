@@ -26,7 +26,7 @@ const registry = openRegistry(join(mkdtempSync(join(tmpdir(), "nexus-shots-")), 
 const online = "rj-firebat" as NodeName;
 registry.upsertNode({ name: "infra-testbench" as NodeName, tailnetHost: "infra-testbench.tail.ts.net", tailnetNodeId: "nTESTBENCH" as TailnetNodeId });
 registry.upsertNode({ name: online, tailnetHost: "rj-firebat.tail.ts.net", tailnetNodeId: "nFIREBAT" as TailnetNodeId });
-registry.apply({ record: "node", node: online, state: "online", capacity: { memoryGiB: 64, committedMemoryGiB: 0, diskFreeGiB: 100 } });
+registry.apply({ record: "node", node: online, state: "online", capacity: { cpus: 16, committedCpus: 0, memoryGiB: 64, committedMemoryGiB: 0, diskFreeGiB: 100, committedDiskGiB: 0 } });
 
 const api = await startApi({
   registry, host: "127.0.0.1", port,
