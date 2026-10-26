@@ -497,7 +497,7 @@ as untrusted data, not shell commands or instructions to execute.
 Inside a pylon, `nexus event <kind> [--session ID] [--message TEXT] [--at MS]` reports only
 `session.turn-started`, `session.heartbeat`, `session.turn-ended`, `session.waiting`, or `session.ended`
 for that pylon's own thread. The image installs UserPromptSubmit, throttled PostToolUse, Stop,
-Notification (permission, idle and elicitation prompts), and SessionEnd hooks,
+Notification (permission and input prompts), and SessionEnd hooks,
 merged alongside Herdr's hooks on every agent-setup install. Hook delivery is
 best effort while the local probe is unavailable; see the data model's buffer and
 retention limits.
