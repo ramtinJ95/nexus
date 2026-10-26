@@ -9,7 +9,7 @@ import {
   type JobErrorCode, type JobId, type JobStatus, type LiveHash, type NodeName, type NodeObservation, type ProbeEvent, type PylonId, type PylonObservation,
   type PausedSession, type RunningFacts, type SessionFact,
 } from "./protocol.ts";
-import type { BootInputs, PylonSource } from "./project.ts";
+import { chatgptTokenGrant, type BootInputs, type PylonSource } from "./project.ts";
 import type { ArtifactId, CheckpointId, ImageId, TemplateId } from "./images.ts";
 
 const now = 1_800_000_000_000;
@@ -46,11 +46,13 @@ const phase = (p: "booting" | "stopping" | "deleting"): PylonObservation => ({ p
 const fresh: PylonSource & { kind: "fresh" } = { kind: "fresh", preSetup: null };
 const fromTemplate: PylonSource & { kind: "template" } = { kind: "template", template };
 const spawn = (source: PylonSource): PlanStep => ({ kind: "submit", job: { kind: "spawn", pylonId, boot: { ...boot, source }, live, liveHash } });
+const asking = (names: readonly string[]): Omit<BootInputs, "source"> => ({ ...boot, network: { allowedHosts: [], secrets: names.map((name) => ({ name, hosts: ["api.example.com"] })) } });
+const spawnAsking = (names: readonly string[], source: PylonSource): PlanStep => ({ kind: "submit", job: { kind: "spawn", pylonId, boot: { ...asking(names), source }, live, liveHash } });
 const pause: PlanStep = { kind: "submit", job: { kind: "pause", pylonId, checkpoint: nextCheckpoint } };
 const del: PlanStep = { kind: "submit", job: { kind: "delete", pylonId } };
 const fetch = (artifact: ArtifactId, from: NodeName): PlanStep => ({ kind: "submit", job: { kind: "fetch-artifact", artifact, from, sha256: `sha-${artifact}` } });
 const done: PlanStep = { kind: "done" };
-const wait = (reason: "node-offline" | "in-flight" | "backoff" | "transitioning"): PlanStep => ({ kind: "wait", reason });
+const wait = (reason: "node-offline" | "in-flight" | "backoff" | "transitioning" | "held-secret"): PlanStep => ({ kind: "wait", reason });
 
 const jobInFlight = (state: "running" | "succeeded"): JobStatus => state === "running"
   ? { jobId: "j1" as JobId, subject: pylonId, kind: "spawn", state, startedAt: "2027-01-01T00:00:00Z" }
@@ -73,6 +75,8 @@ interface Row {
   previewsRouted?: boolean;
   /** A human retried the pylon. */
   retrying?: boolean;
+  /** The secrets the boot asks for, and the held secrets the node's probe takes from the control plane. */
+  secrets?: { asked: readonly string[]; takes: readonly string[] };
 }
 
 const none: Attempts = [0, null, null];
@@ -141,18 +145,28 @@ const rows: Record<string, Row> = {
   "a running pylon with a matching liveHash needs no artifacts": { desired: "running", observed: running(liveHash), inFlight: null, attempts: none, online: true, present: [], firstBoot: fromTemplate, expect: done },
   "liveHash null after a probe restart re-submits spawn": { desired: "running", observed: running(null), inFlight: null, attempts: none, online: true, present: imageOnly, expect: spawn(fresh) },
   "absent boots from the template": { desired: "running", observed: "absent", inFlight: null, attempts: none, online: true, present: [image, template], firstBoot: fromTemplate, expect: spawn(fromTemplate) },
+  // 7d
+  "a boot asking for a held secret waits for a probe that does not take it": { desired: "running", observed: "absent", inFlight: null, attempts: none, online: true, present: imageOnly, secrets: { asked: ["GH_TOKEN", chatgptTokenGrant.name], takes: [] }, expect: wait("held-secret") },
+  "a wake asking for a held secret waits for a probe that does not take it": { desired: "running", observed: stopped(lastCheckpoint), inFlight: null, attempts: none, online: true, present: imageOnly, secrets: { asked: [chatgptTokenGrant.name], takes: [] }, expect: wait("held-secret") },
+  "a boot asking for a held secret boots on a probe that takes it": { desired: "running", observed: "absent", inFlight: null, attempts: none, online: true, present: imageOnly, secrets: { asked: [chatgptTokenGrant.name], takes: [chatgptTokenGrant.name] }, expect: spawnAsking([chatgptTokenGrant.name], fresh) },
+  "a running pylon with an older liveHash waits for a probe that does not take its held secret": { desired: "running", observed: running("hash-old" as LiveHash), inFlight: null, attempts: none, online: true, present: imageOnly, secrets: { asked: [chatgptTokenGrant.name], takes: [] }, expect: wait("held-secret") },
+  "a running pylon with a matching liveHash is done, whether or not its probe takes its held secret": { desired: "running", observed: running(liveHash), inFlight: null, attempts: none, online: true, present: imageOnly, secrets: { asked: [chatgptTokenGrant.name], takes: [] }, expect: done },
+  "a pylon whose probe does not take its held secret still pauses": { desired: "paused", observed: running(liveHash), inFlight: null, attempts: none, online: true, present: imageOnly, secrets: { asked: [chatgptTokenGrant.name], takes: [] }, expect: pause },
+  "a boot asking only for a file secret boots, and the probe judges it": { desired: "running", observed: "absent", inFlight: null, attempts: none, online: true, present: imageOnly, secrets: { asked: ["GH_TOKEN"], takes: [] }, expect: spawnAsking(["GH_TOKEN"], fresh) },
 };
 
 function input(row: Row): PlanInput {
   const [count, failedAgo, lastCode] = row.attempts;
   return {
-    pylonId, node, boot, live, liveHash, nextCheckpoint,
+    pylonId, node, live, liveHash, nextCheckpoint,
+    boot: asking(row.secrets?.asked ?? []),
     nodeOnline: row.online,
     desired: row.desired,
     firstBoot: row.firstBoot ?? fresh,
     observed: row.observed,
     previewsRouted: row.previewsRouted ?? false,
     nodeArtifacts: new Set(row.present),
+    nodeHeldSecrets: new Set(row.secrets?.takes ?? []),
     inFlight: row.inFlight === null ? null : jobInFlight(row.inFlight),
     attempts: { count, last: lastCode === null ? null : { at: now - failedAgo!, code: lastCode, message: `the probe's ${lastCode} message` } },
     retrying: row.retrying ?? false,

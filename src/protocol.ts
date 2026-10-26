@@ -148,6 +148,11 @@ export interface NodeObservation {
    * to it twice.
    */
   claudeLaunchRepeatable?: true;
+  /**
+   * The heldSecrets this probe takes from the control plane. A probe older than the field takes none: it looks for one
+   * in its secret file and fails the spawn for good, so the control plane holds a boot that needs one (reconcile.ts).
+   */
+  heldSecrets?: readonly string[];
 }
 
 export interface PreviewRouteFact { httpsPort: number; pylonId: PylonId; service: string }

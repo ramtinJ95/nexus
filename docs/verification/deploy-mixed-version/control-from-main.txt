@@ -1,0 +1,9 @@
++0.097s control plane from <scratch>/main/src
++0.278s pylon attempts 0, job in flight: none, node offline
++0.416s probe 29583 listening on 17490 as boot 79498141-6131-4c8b-b3ac-bc16eb5b9172, from <scratch>/old/src
++2.303s pylon attempts 0, job in flight: spawn, node online
++2.329s pylon-th-verify: the planner gave up: last job failed with secret-missing, which is not retryable: secret NEXUS_CHATGPT_TOKEN is not in this node's secret file
++2.404s pylon failed: last job failed with secret-missing, which is not retryable: secret NEXUS_CHATGPT_TOKEN is not in this node's secret file
++2.405s thread.failed events: 1
++2.405s pylon failed: last job failed with secret-missing, which is not retryable: secret NEXUS_CHATGPT_TOKEN is not in this node's secret file
++2.410s probe 29583: SIGTERM, closing
