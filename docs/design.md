@@ -371,7 +371,13 @@ at a time, from finding the pane to the Enter, so two sends never interleave the
 pieces and never resume the session twice. Every outcome in which nothing was typed is
 a result, not an error. A failed command may have typed part of
 the message, so it is never retried automatically: the request ID is fenced as
-sending first, and a repeat of an uncertain one is refused.
+sending first, and a repeat of a fenced one is never typed. The probe remembers each
+send by its request ID until an hour after it settles, so a repeat asks it with
+`send-claude-outcome`, which waits for a send still queued behind another and answers
+what the send did. A send queued behind a slow one can outlast the control plane's
+90-second wait for the probe, and its answer is then lost although the message is
+still typed. The repeat reports it. Only a repeat the probe cannot answer, because the
+send failed partway or the probe restarted or forgot it, is refused.
 
 The API decides by the thread's Claude worker record before anything else, so no
 mode or retry of a Claude worker thread's message reaches the harness. Sending is

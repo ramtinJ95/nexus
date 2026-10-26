@@ -17,25 +17,41 @@ export type ClaudeTyped =
   | { kind: "sent"; sent: ClaudeSent }
   /** Nothing was typed and the request ID is forgotten, so a resend types it. */
   | { kind: "nothing"; outcome: "blocked" | "starting" | "moved"; herdrPane: string }
-  /** An earlier send under this ID failed partway, so Claude may have some or all of it. It is never typed again. */
+  /**
+   * An earlier send under this ID failed partway, or its probe no longer knows what became of it, so Claude may have
+   * some or all of it. It is never typed again.
+   */
   | { kind: "uncertain" };
 
 /**
  * Types `text` into the worker's session under `requestId`. The ID is fenced as sending before the probe is asked and
  * recorded as sent with the answer. A failed command may have typed part of the message, so its ID stays fenced, and
- * only a pylon found not running, which typed nothing, forgets it.
+ * only a pylon found not running, which typed nothing, forgets it. A fenced ID is asked after, never typed: its first
+ * answer may only have been lost, as when the wait for it ran out while the probe still had it queued.
  */
 export async function typeIntoClaude(registry: Registry, thread: ThreadId, session: string, model: string | null, requestId: string, text: string, ask: (command: PylonCommand) => Promise<CommandResult>): Promise<ClaudeTyped> {
   const stored = registry.claudeMessage(thread, requestId);
   if (stored?.state === "sent") return { kind: "sent", sent: stored.result };
-  if (stored?.state === "sending") return { kind: "uncertain" };
-  registry.setClaudeMessage(thread, requestId, { state: "sending" });
-  let result: Extract<CommandResult, { kind: "send-claude" }>;
-  try {
-    result = await ask({ kind: "send-claude", session, text, ...(model === null ? {} : { model }) }) as Extract<CommandResult, { kind: "send-claude" }>;
-  } catch (err) {
-    if ((err as Partial<ProbeError>).code === "not-running") registry.setClaudeMessage(thread, requestId, null);
-    throw err;
+  let result: Omit<Extract<CommandResult, { kind: "send-claude" }>, "kind">;
+  if (stored?.state === "sending") {
+    let earlier: Extract<CommandResult, { kind: "send-claude-outcome" }>;
+    try {
+      earlier = await ask({ kind: "send-claude-outcome", requestId }) as Extract<CommandResult, { kind: "send-claude-outcome" }>;
+    } catch (err) {
+      // A probe older than the command refuses it, and so cannot say either.
+      if ((err as Partial<ProbeError>).code !== undefined) throw err;
+      return { kind: "uncertain" };
+    }
+    if (earlier.send === "failed" || earlier.send === "unknown") return { kind: "uncertain" };
+    result = earlier.send;
+  } else {
+    registry.setClaudeMessage(thread, requestId, { state: "sending" });
+    try {
+      result = await ask({ kind: "send-claude", session, text, requestId, ...(model === null ? {} : { model }) }) as Extract<CommandResult, { kind: "send-claude" }>;
+    } catch (err) {
+      if ((err as Partial<ProbeError>).code === "not-running") registry.setClaudeMessage(thread, requestId, null);
+      throw err;
+    }
   }
   if (result.outcome === "blocked" || result.outcome === "starting" || result.outcome === "moved") {
     registry.setClaudeMessage(thread, requestId, null);

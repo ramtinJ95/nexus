@@ -1924,8 +1924,8 @@ test("a Claude worker thread's message is typed into its session exactly, in eit
   assert.equal((await send({ text: "now", requestId: "msg:2", mode: "steer" })).status, 202);
   assert.equal((await send({ text: "later", requestId: "msg:3", mode: "followUp" })).status, 202);
   assert.equal((await send({ text: " one\r\ntwo\rthree\r\n", requestId: "msg:4" })).status, 202);
-  const typed = (text: string) => [s.thread.pylonId, { kind: "send-claude", session: claudeSession, text, model: "claude-opus-5-5" }];
-  assert.deepEqual(s.commands, [typed(text), typed("now"), typed("later"), typed("one\ntwo\nthree")], "the text exactly, line ends made newlines, in both modes");
+  const typed = (text: string, requestId: string) => [s.thread.pylonId, { kind: "send-claude", session: claudeSession, text, requestId, model: "claude-opus-5-5" }];
+  assert.deepEqual(s.commands, [typed(text, "msg:1"), typed("now", "msg:2"), typed("later", "msg:3"), typed("one\ntwo\nthree", "msg:4")], "the text exactly, line ends made newlines, in both modes");
   assert.deepEqual(s.calls.filter(([call]) => call === "send"), [], "the harness is sent none of them");
   assert.ok(s.registry.thread(s.thread.id)!.lastHumanActivityAt >= before, "a message is human activity");
   assert.ok(s.woken.includes(node));
@@ -1971,11 +1971,43 @@ test("a Claude worker's message is typed once per request ID, a send that typed 
 
   answer = async () => { throw new Error("typing into Claude's pane w1:p1 failed, so part of the message may sit unsent in its prompt"); };
   assert.equal((await send("msg:3")).status, 500);
-  answer = async () => sent("sent");
+  answer = async () => ({ kind: "send-claude-outcome", send: "failed" });
   const again = await send("msg:3");
   assert.equal(again.status, 422);
   assert.match(again.body.error, /Check the conversation before sending it again under a new request ID/);
-  assert.equal(s.commands.length, 7, "a send that may have typed part of the message is not typed again");
+  assert.deepEqual(s.commands.slice(6).map(([, command]) => command.kind), ["send-claude", "send-claude-outcome"], "a send that may have typed part of the message is asked after, not typed again");
+});
+
+test("a Claude worker's message whose probe wait ran out is typed once, and a resend under its request ID answers what became of it", async (t) => {
+  const s = await withClaude(t);
+  const send = (requestId: string) => s.call("POST", `/v1/threads/${s.thread.id}/messages`, { text: "run it", requestId });
+  let answer = async (_command: PylonCommand): Promise<CommandResult> => { throw Object.assign(new Error(`${node}: no answer within 90000 ms`), { code: "unreachable" }); };
+  s.probeAnswers((command) => answer(command));
+  const slow = await send("msg:1");
+  assert.equal(slow.status, 503);
+  assert.match(slow.body.error, /no answer within 90000 ms. The message may still reach Claude, as one queued in the pylon behind an earlier send does, and reaches it at most once. Send it again under request ID msg:1 to learn what became of it/);
+
+  answer = async (command) => command.kind === "send-claude-outcome" ? { kind: "send-claude-outcome", send: { outcome: "queued", herdrPane: "w1:p1", resumed: false } } : assert.fail(`${command.kind} would type it again`);
+  const queued = { status: 202, body: { claude: { session: claudeSession, outcome: "queued", resumed: false } } };
+  assert.deepEqual(await send("msg:1"), queued, "the resend answers how Claude took the first");
+  assert.deepEqual(await send("msg:1"), queued);
+  assert.deepEqual(s.commands.map(([, command]) => command), [
+    { kind: "send-claude", session: claudeSession, text: "run it", requestId: "msg:1", model: "claude-opus-5-5" },
+    { kind: "send-claude-outcome", requestId: "msg:1" },
+  ], "the probe was asked about it once, and the message typed once");
+
+  answer = async (command) => { if (command.kind === "send-claude") throw Object.assign(new Error(`${node}: no answer within 90000 ms`), { code: "unreachable" }); return { kind: "send-claude-outcome", send: { outcome: "blocked", herdrPane: "w1:p1", resumed: false } }; };
+  assert.equal((await send("msg:2")).status, 503);
+  assert.equal((await send("msg:2")).status, 409, "the first send typed nothing after all");
+  answer = async () => sent("sent");
+  assert.equal((await send("msg:2")).status, 202, "so its request ID is typed when sent again");
+
+  for (const [requestId, earlier] of [["msg:3", async () => ({ kind: "send-claude-outcome", send: "unknown" }) as CommandResult], ["msg:4", async () => { throw new Error(`${node}: POST /v1/pylons/x/commands: HTTP 400: unknown command kind "send-claude-outcome"`); }]] as const) {
+    answer = async () => { throw Object.assign(new Error(`${node}: no answer within 90000 ms`), { code: "unreachable" }); };
+    assert.equal((await send(requestId)).status, 503);
+    answer = earlier;
+    assert.equal((await send(requestId)).status, 422, `${requestId}: a probe that cannot say what became of it, restarted or older, leaves it uncertain`);
+  }
 });
 
 test("a Claude worker thread takes no messages while archived, deleted or before its session starts, and asks no probe", async (t) => {
