@@ -37,7 +37,7 @@ const focusKey = (el) => el.id !== "" ? `#${CSS.escape(el.id)}`
   : null;
 
 /** The same format as the server's clock(). */
-// After t3code's formatElapsedSeconds. Copyright (c) 2026 T3 Tools Inc., MIT licence.
+// After t3code's formatElapsedSeconds. Copyright (c) 2026 T3 Tools Inc., MIT licence; see THIRD_PARTY_NOTICES.md.
 function clock(ms) {
   const seconds = Math.max(0, Math.floor(ms / 1000));
   const minutes = Math.floor(seconds / 60);

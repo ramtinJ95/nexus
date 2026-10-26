@@ -199,7 +199,7 @@ function ago(at: number, now: number): Html {
 }
 
 /** A run's length as a clock reads it, such as 1m 03s. client.js ticks it with the same format. */
-// After t3code's formatElapsedSeconds. Copyright (c) 2026 T3 Tools Inc., MIT licence.
+// After t3code's formatElapsedSeconds. Copyright (c) 2026 T3 Tools Inc., MIT licence; see THIRD_PARTY_NOTICES.md.
 function clock(ms: number): string {
   const seconds = Math.max(0, Math.floor(ms / 1000));
   const minutes = Math.floor(seconds / 60);
@@ -1046,7 +1046,7 @@ const stringDiff = ({ old_string: old, new_string: now }: Args): Diff | null => 
  * a change. A fold says its weightiest actions first: commands, changes and subagents, then reads and searches, then
  * tools it does not know.
  */
-// After t3code's summarizeToolGroup. Copyright (c) 2026 T3 Tools Inc., MIT licence.
+// After t3code's summarizeToolGroup. Copyright (c) 2026 T3 Tools Inc., MIT licence; see THIRD_PARTY_NOTICES.md.
 type Action = "command" | "change" | "subagent" | "read" | "search" | "web" | "fetch" | "todo";
 interface Phrase { priority: number; one: string; many: (n: number) => string }
 const actions: Record<Action, Phrase> = {
