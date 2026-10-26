@@ -324,8 +324,9 @@ export interface PylonOverlay {
  * - /home/user/.nexus/PYLON.md: prose for the agent. It is in a pylon, where its repository came from and how to
  *   commit and publish from it, which hosts it can reach and that everything else is blocked, the names and hosts
  *   of its secrets, its preview URLs, that work survives sleep only on disk, how to declare
- *   outputs, that pi is signed in to ChatGPT when the pylon was granted the ChatGPT token, and that other logins use
- *   the device-code flow (S5: the browser callback listens inside the guest).
+ *   outputs, that pi is signed in to ChatGPT when the pylon was granted the ChatGPT token, that other logins use
+ *   the device-code flow (S5: the browser callback listens inside the guest), and that Claude Code has a shepherdr
+ *   reviewer check its diff before a pull request, which runs only when pi is signed in.
  *   The image imports this file from ~/.claude/CLAUDE.md and links it as ~/.pi/agent/AGENTS.md, so the
  *   overlay never edits dotfiles.
  */
@@ -373,6 +374,9 @@ function pylonGuide(o: PylonOverlay): string {
     ...chatgpt ? ["pi is already signed in to ChatGPT as its `openai` provider, so models such as `openai/gpt-6-astra` work without a login. Nexus rewrites that entry of ~/.pi/agent/auth.json on every boot. pi's `openai-codex` provider is not signed in, and needs no `/login`."] : [],
     ...deviceCode.length === 0 ? [] : [`This project ${chatgpt ? "also " : ""}allows these logins: ${deviceCode.join(", ")}. Sign in with the device-code flow, which shows a code to enter in a browser on another device. A browser-callback login fails, because its callback listens inside this pylon, where that browser cannot reach it.`],
   ].map((paragraph) => `${paragraph}\n`).join("\n") || "This project has no interactive logins.\n";
+  const reviewLogin = chatgpt
+    ? "The reviewer runs on pi's `openai` provider, which is signed in here. If it stops on a login or model error anyway, say the review was skipped and why, and go on with the work."
+    : "This pylon was not granted the ChatGPT token, so pi is not signed in and the reviewer stops with `Provider is not configured: openai`. Say in your reply and in the pull request that the review was skipped and why, and go on with the work. The human can add the `chatgpt` login to the project, which reaches threads started after that.";
   const secrets = o.secrets.length === 0 ? "" : `## Secrets
 
 Login shells have these variables. Each holds a placeholder that is swapped for the real value only in requests to the hosts listed, and the placeholder changes on every boot, so never write one into a file, a git config or a remote URL.
@@ -418,6 +422,12 @@ nexus output list
 ## Logins
 
 ${logins}
+## Review before a pull request
+
+This is for Claude Code, whose shepherdr mod gives it the \`mcp__shepherdr__agents\` tool. Before you open a pull request or push to one, have a shepherdr \`reviewer\` check the diff. Spawn it with \`agent_type: "reviewer"\`, the pull request's base branch as \`base\`, and a message that says what the change is for. The reviewer is a read-only pi worker in a new Herdr tab of this pylon, on the model the person's \`reviewer\` profile names. Fix the findings you accept. Then say in your reply, and in the pull request, which findings you accepted and which you rejected, and why. Without the tool, say the review was skipped.
+
+${reviewLogin}
+
 ## Services
 
 Nexus starts each service .nexus/services.yaml declares, one you add within seconds and one with a preview once its URL is assigned. A running service keeps its command and env until \`nexus service restart\`.

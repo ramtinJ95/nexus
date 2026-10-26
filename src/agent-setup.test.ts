@@ -6,7 +6,7 @@ import { dirname, join } from "node:path";
 import {
   agentSetupManifest, formatAgentSetup, installedLayout, parseAgentSetup, type AgentSetup, type InstalledAgentSetup,
 } from "../images/pylon/agent-setup/manifest.ts";
-import { claudeHooks, installedPackage, installMismatches } from "../images/pylon/agent-setup/install.ts";
+import { claudeHooks, installedPackage, installMismatches, pylonProfile } from "../images/pylon/agent-setup/install.ts";
 import { httpsRemote, leaveOuts, parseLeaveOut, planAgentSetup, readPiSetup, type Capture, type LeaveOut, type MacSetup, type PluginFiles } from "./agent-setup.ts";
 import { pylonRecipeDir } from "./image-build.ts";
 
@@ -22,6 +22,7 @@ const small = {
   pi: {
     packages: [{ kind: "npm", name: "@me/pi-ask", version: "0.0.16" }, { kind: "local", path: "pi/extensions/pi-viz" }],
     extensions: ["pi/extensions/pi-vim", "pi/extensions/silly.ts"],
+    shepherdrProfiles: ["pi/shepherdr/reviewer", "pi/shepherdr/general"],
   },
   skills: [{ path: "skills/grok", for: ["pi"] }, { path: "claude/skills/show-me", for: ["claude", "pi"] }],
 };
@@ -35,12 +36,13 @@ test("formatting is canonical: arrays sorted, except pi packages, which keep the
   const shuffled = {
     ...small,
     claude: { ...small.claude, marketplaces: [{ name: "z", url: "https://github.com/me/z", commit: commit("c") }, ...small.claude.marketplaces] },
-    pi: { packages: [...small.pi.packages].reverse(), extensions: [...small.pi.extensions].reverse() },
+    pi: { packages: [...small.pi.packages].reverse(), extensions: [...small.pi.extensions].reverse(), shepherdrProfiles: small.pi.shepherdrProfiles },
     skills: [...small.skills].reverse().map((s) => ({ ...s, for: [...s.for].reverse() })),
   };
   const formatted = parseAgentSetup(formatAgentSetup(parseAgentSetup(json(shuffled))));
   assert.deepEqual(formatted.claude.marketplaces.map((m) => m.name), ["mods", "z"]);
   assert.deepEqual(formatted.pi.extensions, ["pi/extensions/pi-vim", "pi/extensions/silly.ts"]);
+  assert.deepEqual(formatted.pi.shepherdrProfiles, ["pi/shepherdr/general", "pi/shepherdr/reviewer"]);
   assert.deepEqual(formatted.pi.packages, [...small.pi.packages].reverse());
   assert.deepEqual(formatted.skills, [{ path: "claude/skills/show-me", for: ["claude", "pi"] }, { path: "skills/grok", for: ["pi"] }]);
   const twice = formatAgentSetup(formatted);
@@ -58,6 +60,8 @@ test("the parser refuses what the build cannot fetch exactly or install unambigu
     [{ ...small, skills: [{ path: "skills/grok", for: ["codex"] }] }, /skills\[0\]\.for\[0\]/],
     [{ ...small, skills: [{ path: "a/grok", for: ["pi"] }, { path: "b/grok", for: ["claude"] }] }, /skills: two entries with skill name grok/],
     [{ ...small, pi: { ...small.pi, extensions: ["a/x.ts", "b/x.ts"] } }, /pi\.extensions: two entries/],
+    [{ ...small, pi: { ...small.pi, shepherdrProfiles: ["a/reviewer", "b/reviewer"] } }, /pi\.shepherdrProfiles: two entries with profile name reviewer/],
+    [{ ...small, pi: { packages: [], extensions: [] } }, /pi: missing shepherdrProfiles/],
     [{ ...small, pi: { ...small.pi, packages: [{ kind: "local", path: "a/viz" }, { kind: "local", path: "b/viz" }] } }, /pi\.packages: two entries/],
     [{ ...small, pi: { ...small.pi, packages: [{ kind: "git", url: "https://github.com/me/x" }] } }, /pi\.packages\[0\]\.kind/],
     [{ ...small, pi: { ...small.pi, packages: [{ kind: "npm", name: "@me/x", version: "^1.0.0" }] } }, /pi\.packages\[0\]\.version/],
@@ -68,13 +72,14 @@ test("the parser refuses what the build cannot fetch exactly or install unambigu
   for (const [value, message] of refusals) assert.throws(() => parseAgentSetup(json(value)), message, json(value));
 });
 
-test("the installed layout names each plugin, skill directory, extension and pi settings entry a correct install leaves", () => {
+test("the installed layout names each plugin, skill directory, extension, pi settings entry and shepherdr profile a correct install leaves", () => {
   assert.deepEqual(installedLayout(parseAgentSetup(json(small))), {
     plugins: ["notes@mods 0.2.11 enabled"],
     claudeSkills: ["show-me"],
     piSkills: ["grok", "show-me"],
     piExtensions: ["herdr-agent-state.ts", "pi-vim", "silly.ts"],
     piPackages: ["npm:@me/pi-ask@0.0.16", "packages/pi-viz"],
+    shepherdrProfiles: ["general", "reviewer"],
   });
 });
 
@@ -82,6 +87,14 @@ test("Claude's notifications count as waiting only for a permission or input pro
   const [, , matcher] = claudeHooks.find(([hook]) => hook === "Notification")!;
   const waits = ["permission_prompt", "idle_prompt", "elicitation_dialog", "auth_success"].filter((type) => new RegExp(matcher).test(type));
   assert.deepEqual(waits, ["permission_prompt", "elicitation_dialog"]);
+});
+
+test("a profile installed in a pylon names the openai provider for a model the Mac reaches through openai-codex, and is otherwise unchanged", () => {
+  const astra = JSON.stringify({ description: "Read-only review", blocking: true, model: "openai-codex/gpt-6-astra", thinking: "high", prompt: "prompt.md" }, null, "\t");
+  assert.deepEqual(JSON.parse(pylonProfile(astra)), { description: "Read-only review", blocking: true, model: "openai/gpt-6-astra", thinking: "high", prompt: "prompt.md" });
+  const other = '{"model": "anthropic/claude-opus-5-5", "thinking": "high"}';
+  assert.equal(pylonProfile(other), other);
+  assert.equal(pylonProfile('{"model":"openai/gpt-6-sol"}'), '{"model":"openai/gpt-6-sol"}');
 });
 
 test("an install that differs from its layout is named item by item, and pi packages out of order are caught", () => {
@@ -93,6 +106,7 @@ test("an install that differs from its layout is named item by item, and pi pack
     claudeSkills: [],
     piSkills: ["grok", "show-me (no SKILL.md)"],
     piPackages: ["npm:@me/pi-ask@0.0.16 (installed 0.0.17)", "packages/pi-viz"],
+    shepherdrProfiles: ["explorer", "reviewer"],
   };
   assert.deepEqual(installMismatches(expected, actual), [
     "missing Claude plugin notes@mods 0.2.11 enabled",
@@ -102,6 +116,8 @@ test("an install that differs from its layout is named item by item, and pi pack
     "unexpected pi skill show-me (no SKILL.md)",
     "missing pi package npm:@me/pi-ask@0.0.16",
     "unexpected pi package npm:@me/pi-ask@0.0.16 (installed 0.0.17)",
+    "missing shepherdr profile general",
+    "unexpected shepherdr profile explorer",
   ]);
   assert.deepEqual(installMismatches(expected, { ...expected, piPackages: [...expected.piPackages].reverse() }), [
     "pi packages are out of order: expected npm:@me/pi-ask@0.0.16, packages/pi-viz, got packages/pi-viz, npm:@me/pi-ask@0.0.16",
@@ -113,6 +129,12 @@ const root = "/Users/me/dotfiles";
 const agentSkills = "common-config/common-dotfiles/agents/.agents/skills";
 const extensions = "common-config/common-dotfiles/pi/.pi/agent/extensions";
 const claudeSkills = "mac-config/mac-dotfiles/claude/.claude/skills";
+const profiles = "common-config/common-dotfiles/pi/.pi/agent/shepherdr/profiles";
+const reviewer = new Map([
+  ["profile.json", JSON.stringify({ description: "Read-only review", blocking: true, model: "openai-codex/gpt-6-astra", thinking: "high", prompt: "prompt.md", prepare: "prepare.mjs", accepts: ["base"], pi_args: [] })],
+  ["prompt.md", "You are a read-only reviewer."],
+  ["prepare.mjs", 'import { spawnSync } from "node:child_process";\nexport default () => spawnSync("git", ["diff"]);\n'],
+]);
 const blobs = (entries: Record<string, string>): PluginFiles => new Map(Object.entries(entries).map(([path, c]) => [path, c.repeat(40)]));
 const notesAtHead = blobs({ ".claude-plugin/plugin.json": "1", "hooks/hooks.json": "2", "register.ts": "3" });
 const nexusAtHead = blobs({ ".claude-plugin/plugin.json": "4" });
@@ -133,6 +155,7 @@ function thisMac(): MacSetup {
         `${claudeSkills}/show-me/SKILL.md`, `${extensions}/atuin.ts`, `${extensions}/herdr-agent-state.ts`, `${extensions}/pi-vim/index.ts`,
         `${extensions}/silly-messages.ts`, `${extensions}/pi-visualize-code-changes/package.json`,
         `${extensions}/pi-visualize-code-changes/skills/visualize-code-changes/SKILL.md`,
+        ...[...reviewer.keys()].map((file) => `${profiles}/reviewer/${file}`),
       ]),
       changed: new Set([`${claudeSkills}/ramtin-mode/SKILL.md`, "unrelated/settings.json"]),
     },
@@ -170,6 +193,7 @@ function thisMac(): MacSetup {
         { ...skill(agentSkills, "herdr"), loads: true }, { ...skill(agentSkills, "teach"), loads: false },
       ],
       skillSettings: ["-skills/teach/SKILL.md"],
+      shepherdrProfiles: [{ name: "reviewer", realPath: `${root}/${profiles}/reviewer`, files: reviewer, links: new Map() }],
     },
     versions: { claudeCode: "2.1.310", pi: "1.4.0" },
   };
@@ -203,6 +227,7 @@ test("the plan ships what the Mac runs and reports each settled leave-out, and a
         { kind: "local", path: `${extensions}/pi-visualize-code-changes` },
       ],
       extensions: [`${extensions}/pi-vim`, `${extensions}/silly-messages.ts`],
+      shepherdrProfiles: [`${profiles}/reviewer`],
     },
     skills: [
       { path: `${agentSkills}/grok`, for: ["pi"] },
@@ -217,8 +242,6 @@ test("the plan ships what the Mac runs and reports each settled leave-out, and a
     "pi-extension:herdr-agent-state.ts", "skill:ramtin-mode", "pi-extension:pi-better-openai-lite",
   ]);
   assert.deepEqual(notes, [
-    "leave-out claude-plugin:shepherdr@claude-mods matches nothing on this Mac",
-    "leave-out pi-package:npm:@howaboua/pi-shepherdr matches nothing on this Mac",
     "leave-out skill:voxcraft-remote matches nothing on this Mac",
     "leave-out skill:macmini-handoff matches nothing on this Mac",
   ]);
@@ -249,6 +272,96 @@ test("a committed skill with uncommitted changes, or one outside the dotfiles, i
   assert.deepEqual(problemsOf(plan(changed)), [`skill herdr: ${agentSkills}/herdr has uncommitted changes in ${root}`]);
   const outside = { ...mac, claude: { ...mac.claude, skills: [...mac.claude.skills, { name: "loose", realPath: "/Users/me/loose" }] } };
   assert.deepEqual(problemsOf(plan(outside)), [`skill loose: /Users/me/loose is outside ${root}`]);
+});
+
+const withProfile = (mac: MacSetup, name: string, files: Record<string, string>, dir = `${root}/${profiles}/${name}`, links: Record<string, string> = {}): MacSetup => ({
+  ...mac,
+  dotfiles: { ...mac.dotfiles, tracked: new Set([...mac.dotfiles.tracked, ...[...Object.keys(files), ...Object.keys(links)].map((file) => `${profiles}/${name}/${file}`)]) },
+  pi: { ...mac.pi, shepherdrProfiles: [...mac.pi.shepherdrProfiles, { name, realPath: dir, files: new Map(Object.entries(files)), links: new Map(Object.entries(links)) }] },
+});
+
+test("a shepherdr profile that names something that cannot ship is refused, every defect named", () => {
+  const broken = withProfile(thisMac(), "broken", {
+    "profile.json": JSON.stringify({
+      description: "d", model: "m", thinking: "high", tools: ["read"], prompt: "../reviewer/prompt.md", prepare: "lib/prepare.mjs",
+      pi_args: ["--no-session", "~/notes.md", "/Users/me/x"],
+    }),
+    "lib/prepare.mjs": [
+      'import { x } from "./util.mjs";', 'import "node:fs";', 'import lodash from "lodash";', 'const y = await import("../outside.mjs");',
+      'const z = require("./missing.cjs");',
+    ].join("\n"),
+    "lib/util.mjs": "export const x = 1;",
+  });
+  const unparsable = withProfile(thisMac(), "unparsable", { "profile.json": "{" });
+  const bare = withProfile(thisMac(), "bare", { "prompt.md": "" });
+  const list = withProfile(thisMac(), "list", { "profile.json": "[]" });
+  const absolute = withProfile(thisMac(), "absolute", { "profile.json": JSON.stringify({ prompt: "/Users/me/prompt.md", prepare: "~/prepare.mjs" }) });
+  assert.deepEqual(problemsOf(plan(broken)), [
+    "shepherdr profile broken: pi-shepherdr does not know its field tools",
+    'shepherdr profile broken: prompt "../reviewer/prompt.md" is not a file in the profile',
+    'shepherdr profile broken: pi_args entry "~/notes.md" is a path on this Mac',
+    'shepherdr profile broken: pi_args entry "/Users/me/x" is a path on this Mac',
+    'shepherdr profile broken: lib/prepare.mjs imports "lodash", which is neither node: nor a file in the profile',
+    'shepherdr profile broken: lib/prepare.mjs imports "../outside.mjs", which is neither node: nor a file in the profile',
+    'shepherdr profile broken: lib/prepare.mjs imports "./missing.cjs", which is neither node: nor a file in the profile',
+  ]);
+  assert.match(problemsOf(plan(unparsable)).join("\n"), /^shepherdr profile unparsable: profile\.json is not JSON/);
+  assert.deepEqual(problemsOf(plan(bare)), ["shepherdr profile bare: it has no profile.json"]);
+  assert.deepEqual(problemsOf(plan(list)), ["shepherdr profile list: profile.json is not an object"]);
+  assert.deepEqual(problemsOf(plan(absolute)), [
+    'shepherdr profile absolute: prompt "/Users/me/prompt.md" is not a file in the profile',
+    'shepherdr profile absolute: prepare "~/prepare.mjs" is not a file in the profile',
+  ]);
+});
+
+test("a shepherdr profile's prepare file is checked through every local module it imports, cycles included", () => {
+  const profile = (name: string, helper: string) => withProfile(thisMac(), name, {
+    "profile.json": JSON.stringify({ description: "d", model: "m", thinking: "high", prepare: "prepare.mjs" }),
+    "prepare.mjs": 'import { git } from "./lib/git.mjs";\nexport const prepare = (input) => git(input);\n',
+    "lib/git.mjs": helper,
+    "lib/util.mjs": 'import { git } from "./git.mjs";\nimport { spawnSync } from "node:child_process";\nexport const run = spawnSync;\n',
+  });
+  const reaching = profile("reaching", 'import { run } from "./util.mjs";\nimport mac from "../../mac-only.mjs";\nimport lodash from "lodash";\nexport const git = run;\n');
+  assert.deepEqual(problemsOf(plan(reaching)), [
+    'shepherdr profile reaching: lib/git.mjs imports "../../mac-only.mjs", which is neither node: nor a file in the profile',
+    'shepherdr profile reaching: lib/git.mjs imports "lodash", which is neither node: nor a file in the profile',
+  ]);
+  const cyclic = profile("cyclic", 'import { run } from "./util.mjs";\nexport const git = run;\n');
+  assert.deepEqual(captured(plan(cyclic)).setup.pi.shepherdrProfiles, [`${profiles}/cyclic`, `${profiles}/reviewer`]);
+});
+
+test("a committed link in a shepherdr profile ships only when it leads to a file in the profile, since the build copies the link, not what it reaches on the Mac", () => {
+  const linked = withProfile(thisMac(), "linked", {
+    "profile.json": JSON.stringify({ description: "d", model: "m", thinking: "high", prompt: "prompt.md" }),
+    "prompts/review.md": "Review.",
+  }, undefined, {
+    "prompt.md": "prompts/review.md",
+    "private.md": "/Users/me/private/prompt.md",
+    "notes.md": "../../../notes.md",
+    "lib": "prompts",
+    "self": ".",
+    "gone.md": "prompts/gone.md",
+  });
+  assert.deepEqual(problemsOf(plan(linked)), [
+    "shepherdr profile linked: private.md links to /Users/me/private/prompt.md, outside the profile",
+    "shepherdr profile linked: notes.md links to ../../../notes.md, outside the profile",
+    "shepherdr profile linked: lib links to prompts, which is not a file in the profile",
+    "shepherdr profile linked: self links to ., which is not a file in the profile",
+    "shepherdr profile linked: gone.md links to prompts/gone.md, which is not a file in the profile",
+  ]);
+  const inside = withProfile(thisMac(), "inside", {
+    "profile.json": JSON.stringify({ description: "d", model: "m", thinking: "high", prompt: "prompt.md" }),
+    "prompts/review.md": "Review.",
+  }, undefined, { "prompt.md": "prompts/review.md" });
+  assert.deepEqual(captured(plan(inside)).setup.pi.shepherdrProfiles, [`${profiles}/inside`, `${profiles}/reviewer`]);
+});
+
+test("a shepherdr profile outside the dotfiles is refused, and --leave-out shepherdr-profile lets the rest ship", () => {
+  const outside = withProfile(thisMac(), "loose", { "profile.json": "{}" }, "/Users/me/loose");
+  assert.deepEqual(problemsOf(plan(outside)), [`shepherdr profile loose: /Users/me/loose is outside ${root}`]);
+  const { setup, leftOut } = captured(plan(outside, [ramtinMode, parseLeaveOut("shepherdr-profile:loose")]));
+  assert.deepEqual(setup.pi.shepherdrProfiles, [`${profiles}/reviewer`]);
+  assert.ok(leftOut.some((rule) => rule.kind === "shepherdr-profile" && rule.name === "loose"));
 });
 
 test("a plugin ships only when its installed copy is byte for byte its directory at the marketplace's HEAD", () => {
@@ -353,13 +466,7 @@ test("git remotes read as the https URL the image build fetches", () => {
  * file. Its dotfiles/ directory stands in for the dotfiles repo, with every file in it committed.
  */
 async function piCapture(files: Record<string, string | { link: string }>): Promise<Capture> {
-  const home = await realpath(await mkdtemp(join(tmpdir(), "agent-setup-home-")));
-  for (const [path, content] of Object.entries(files)) {
-    const full = join(home, path);
-    await mkdir(path.endsWith("/") ? full : dirname(full), { recursive: true });
-    if (typeof content === "object") await symlink(content.link, full);
-    else if (!path.endsWith("/")) await writeFile(full, content);
-  }
+  const home = await scratchHome(files);
   const tracked = Object.keys(files).filter((path) => path.startsWith("dotfiles/") && !path.endsWith("/")).map((path) => path.slice("dotfiles/".length));
   const mac = thisMac();
   return planAgentSetup({
@@ -369,7 +476,41 @@ async function piCapture(files: Record<string, string | { link: string }>): Prom
     pi: await readPiSetup(home),
   }, leaveOuts);
 }
+async function scratchHome(files: Record<string, string | { link: string }>): Promise<string> {
+  const home = await realpath(await mkdtemp(join(tmpdir(), "agent-setup-home-")));
+  for (const [path, content] of Object.entries(files)) {
+    const full = join(home, path);
+    await mkdir(path.endsWith("/") ? full : dirname(full), { recursive: true });
+    if (typeof content === "object") await symlink(content.link, full);
+    else if (!path.endsWith("/")) await writeFile(full, content);
+  }
+  return home;
+}
 const piSettings = (settings: object) => JSON.stringify(settings);
+
+test("pi reads each shepherdr profile directory's files and, unfollowed, its links, and none without the directory", async () => {
+  const home = await scratchHome({
+    ".pi/agent/settings.json": piSettings({}),
+    ".pi/agent/shepherdr/profiles/reviewer": { link: "../../../../dotfiles/reviewer" },
+    ".pi/agent/shepherdr/profiles/general/profile.json": "{}",
+    ".pi/agent/shepherdr/profiles/.general-x1/general/profile.json": "{}",
+    ".pi/agent/shepherdr/profiles/notes.md": "",
+    "dotfiles/reviewer/profile.json": '{"prompt":"prompt.md"}',
+    "dotfiles/reviewer/prompt.md": "Review.",
+    "dotfiles/reviewer/lib/util.mjs": "export {};",
+    "dotfiles/reviewer/private.md": { link: "/Users/me/private/prompt.md" },
+    "dotfiles/reviewer/loop": { link: "." },
+  });
+  assert.deepEqual((await readPiSetup(home)).shepherdrProfiles, [
+    { name: "general", realPath: join(home, ".pi/agent/shepherdr/profiles/general"), files: new Map([["profile.json", "{}"]]), links: new Map() },
+    {
+      name: "reviewer", realPath: join(home, "dotfiles/reviewer"),
+      files: new Map([["lib/util.mjs", "export {};"], ["profile.json", '{"prompt":"prompt.md"}'], ["prompt.md", "Review."]]),
+      links: new Map([["loop", "."], ["private.md", "/Users/me/private/prompt.md"]]),
+    },
+  ]);
+  assert.deepEqual((await readPiSetup(await scratchHome({ ".pi/agent/settings.json": piSettings({}) }))).shepherdrProfiles, []);
+});
 
 test("a local pi package written with ~ is read from the home, as pi resolves it", async () => {
   const { setup } = captured(await piCapture({

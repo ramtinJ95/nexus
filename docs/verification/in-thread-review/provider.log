@@ -1,0 +1,29 @@
+pi 1.4.0, 2026-10-26T09:09:49Z
+
+$ pi -p --model openai-codex/gpt-6-astra   # no login
+Use /login to log into a provider via OAuth or API key. See:
+  /usr/local/lib/node_modules/@earendil-works/pi-coding-agent/docs/providers.md
+  /usr/local/lib/node_modules/@earendil-works/pi-coding-agent/docs/models.md
+
+$ pi -p --model openai-codex/gpt-6-astra   # an unexpired access token
+403 Forbidden: blocked by policy: chatgpt.com
+
+
+$ pi -p --model openai-codex/gpt-6-astra   # an expired access token, so pi refreshes first
+OAuth refresh failed for openai-codex: OpenAI Codex token refresh failed (403): 403 Forbidden: blocked by policy: auth.openai.com
+
+$ pi -p --model openai-codex/gpt-6-astra   # a signature shaped like Gondolin's default placeholder, <marker>.<name>
+Failed to extract accountId from token
+
+$ pi -p --model openai-codex/gpt-6-astra   # models.json points openai-codex at the probe's pylon API
+no route POST /openai-codex/codex/responses
+
+$ curl https://chatgpt.com/
+403 Forbidden: blocked by policy: chatgpt.com
+
+$ curl https://auth.openai.com/
+403 Forbidden: blocked by policy: auth.openai.com
+
+$ curl https://api.openai.com/
+403 Forbidden: blocked by policy: api.openai.com
+
