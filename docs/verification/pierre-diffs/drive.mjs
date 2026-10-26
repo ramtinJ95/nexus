@@ -66,7 +66,7 @@ const shot = async (page, name) => {
 const light = await open("light");
 await base(light, "start");
 log(`changes since boot: ${await light.$eval("#changes-body", (el) => el.innerText.replace(/\s+/g, " "))}`);
-for (const [path, name] of [["src/server.ts", "modified-ts"], ["old.go", "deleted"], ["docs/handbook.md", "renamed"], ["logo.png", "binary"], ["run.sh", "mode"], ["data/rows.csv", "long"]]) {
+for (const [path, name] of [["src/server.ts", "modified-ts"], ["old.go", "deleted"], ["docs/handbook.md", "renamed"], ["logo.png", "binary"], ["run.sh", "mode"], ["config.txt", "typechange"], ["data/rows.csv", "long"]]) {
   log(`${path} since boot: ${await diff(light, path)}`);
   await shot(light, name);
 }

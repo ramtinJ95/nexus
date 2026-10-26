@@ -5,7 +5,7 @@
 //
 //   node docs/verification/pierre-diffs/stack.ts
 import { execFileSync } from "node:child_process";
-import { chmodSync, mkdirSync, mkdtempSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { startApi } from "../../../src/control/api.ts";
@@ -64,6 +64,7 @@ write("old.go", "package old\n\n// Answer is kept for the old clients.\nfunc Ans
 write("docs/guide.md", "# Guide\n\nRun `npm ci`, then `npm test`.\n");
 write("lib/util.js", "export const sum = (xs) => xs.reduce((a, b) => a + b, 0);\nexport const mean = (xs) => sum(xs) / xs.length;\n");
 write("run.sh", "#!/bin/sh\nnode src/server.ts\n");
+write("config.txt", "port=8080\nhost=127.0.0.1\n");
 git("add", "-A");
 git("commit", "-q", "-m", "base");
 git("update-ref", "refs/nexus/base", "HEAD");
@@ -140,6 +141,8 @@ if __name__ == "__main__":
 `);
 write("style.css", ".card {\n  display: grid;\n  gap: 8px;\n  color: light-dark(#222, #eee);\n}\n");
 chmodSync(join(repo, "run.sh"), 0o755);
+rmSync(join(repo, "config.txt"));
+symlinkSync("config/defaults.txt", join(repo, "config.txt"));
 git("mv", "lib/util.js", "lib/helpers.js");
 write("lib/helpers.js", "export const sum = (xs) => xs.reduce((a, b) => a + b, 0);\nexport const mean = (xs) => (xs.length === 0 ? 0 : sum(xs) / xs.length);\n");
 write("data/rows.csv", Array.from({ length: 25_000 }, (_, i) => `${i},row ${i},${(i * 7) % 100}`).join("\n") + "\n");

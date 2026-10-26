@@ -7,7 +7,7 @@ Chromium. No live control plane, node, image or other thread was touched.
 
 `stack.ts` runs the real registry, API and dashboard on `127.0.0.1:7470` with one running
 thread. Its checkout is a fixture repository the stack makes, with a TypeScript edit, a
-deleted Go file, a pure rename, a mode change, a binary file, a 25,000-line CSV, a Python
+deleted Go file, a pure rename, a mode change, a file that became a symlink, a binary file, a 25,000-line CSV, a Python
 edit since a latest-turn snapshot and an uncommitted CSS file. The probe is a fake whose
 raw pipe runs the real checkout helper on this machine against that repository, so the
 Changes view and each diff come from real git output.
@@ -31,9 +31,15 @@ dashboard code, and the `after-*` captures are the branch.
 - `after-deleted.png`, `after-renamed.png`, `after-mode.png`, `after-binary.png`. A deletion
   shows its removed lines. A pure rename and a mode change list their git lines and say "No
   lines changed." A binary file says there is no diff to show. These notes read as before.
+- `after-typechange.png`. A file that became a symlink shows both of git's entries for
+  it, the removed file's lines and the link's target, as Changes counts them (+1 −2).
 - `after-long.png`. The 25,000-line CSV shows its first 20,000 rows and the cut-short note
   below them, as before. It drew 1.4 s after the click on a cold page, including the
-  grammar's fetch.
+  grammar's fetch. The page cuts the patch at the cap before it parses or highlights it.
+  A 500,000-line addition (1.9 MB, under the API's 4 MiB cap) written into the fixture by
+  hand drew 20,000 rows and the note in 0.5 s. The highest JS heap sampled while it drew
+  was 53 MiB, against 887 MiB a review measured before the cut moved ahead of the
+  highlighter.
 - `after.log`. No CSP violation and no page error, under the page's unchanged policy. The
   page loaded `client.js` and one small shared chunk before any diff opened. The library and
   each grammar came later, only for the languages opened: TypeScript, Go, CSV, Python and
