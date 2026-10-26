@@ -77,6 +77,7 @@ async function plane(dir: string) {
     dotfiles: { repo: "https://github.com/octocat/Spoon-Knife.git", ref: "main" },
     harness: { storage: join(dir, "harness.sqlite"), credentials: join(dir, "unused-credentials.json"), model: scriptedModel },
     previewPorts: defaultPreviewPorts,
+    resumeAfterUsageLimit: false,
   }, scriptedModels());
 
   function call(method: string, path: string, body?: unknown): Promise<{ status: number; body: any }> {

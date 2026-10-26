@@ -53,3 +53,10 @@ test("git identity is optional and contains only a name and email", () => {
     assert.throws(() => parseConfig(JSON.stringify({ ...config, gitIdentity: identity })), /invalid control plane config/);
   }
 });
+
+test("continuing after a usage limit is off unless the config turns it on", () => {
+  const config = JSON.parse(example);
+  assert.equal(parseConfig(example).resumeAfterUsageLimit, false);
+  assert.equal(parseConfig(JSON.stringify({ ...config, resumeAfterUsageLimit: true })).resumeAfterUsageLimit, true);
+  assert.throws(() => parseConfig(JSON.stringify({ ...config, resumeAfterUsageLimit: "yes" })), /invalid control plane config/);
+});
