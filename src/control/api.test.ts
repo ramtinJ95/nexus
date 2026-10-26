@@ -1575,7 +1575,7 @@ test("only a deployer may build, roll out or roll back an image, never the contr
 });
 
 test("a deployer's image operations answer 200 once done and 202 while running, and the image routes show each image, its nodes and the operation", async (t) => {
-  const recipe: ImageRecipe = { files: [{ path: "Dockerfile", content: "FROM debian\n" }], pins: image.pins };
+  const recipe: ImageRecipe = { files: [{ path: "Dockerfile", mode: 0o644, content: "FROM debian\n" }], pins: image.pins };
   const built = { ...image, id: imageIdOf(recipe), builtAt: "2027-02-01T00:00:00Z" };
   const noJobs = () => assert.fail("no job is needed");
   const s = await setup(t, {

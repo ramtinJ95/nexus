@@ -10,7 +10,7 @@ import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { once } from "node:events";
 import { createReadStream, existsSync, readFileSync } from "node:fs";
-import { mkdir, mkdtemp, readdir, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { createRequire } from "node:module";
 import { dirname, join, relative, resolve, sep } from "node:path";
@@ -34,31 +34,38 @@ const notRecipeFiles = new Set(["build.sh", "pins.json"]);
 /** Image inputs kept beside the control plane, which runs them too. The Claude hook snapshots turns with the checkout helper. */
 const sharedFiles = ["checkout-files.py"];
 
-/** Every file under `dir` except build.sh, and the shared files, sorted by path, and pins.json parsed. */
+/**
+ * Every file under `dir` except build.sh, and the shared files, sorted by path, each executable when its owner may
+ * execute it, as git checks it out, and pins.json parsed.
+ */
 export async function loadImageRecipe(dir: string = pylonRecipeDir): Promise<ImageRecipe> {
-  const files: { path: string; content: string }[] = [];
-  for (const path of sharedFiles) files.push({ path, content: await readFile(new URL(`./${path}`, import.meta.url), "utf8") });
+  const files: ImageRecipe["files"][number][] = [];
+  const load = async (path: string, from: string | URL) => {
+    files.push({ path, mode: ((await stat(from)).mode & 0o100) === 0 ? 0o644 : 0o755, content: await readFile(from, "utf8") });
+  };
+  for (const path of sharedFiles) await load(path, new URL(`./${path}`, import.meta.url));
   for (const entry of await readdir(dir, { recursive: true, withFileTypes: true })) {
     if (entry.isDirectory()) continue;
     const path = relative(dir, join(entry.parentPath, entry.name)).split(sep).join("/");
     if (!entry.isFile()) throw new Error(`${path} in ${dir} is not a regular file`);
-    if (!notRecipeFiles.has(path)) files.push({ path, content: await readFile(join(dir, path), "utf8") });
+    if (!notRecipeFiles.has(path)) await load(path, join(dir, path));
   }
   files.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
   return { files, pins: pinsSchema.parse(JSON.parse(await readFile(join(dir, "pins.json"), "utf8"))) };
 }
 
 /**
- * The recipe arrives in a job, so its paths, pins and agent setup manifest are checked again before anything
- * touches the disk.
+ * The recipe arrives in a job, so its paths, modes, pins and agent setup manifest are checked again before
+ * anything touches the disk.
  */
 function parseRecipe(recipe: ImageRecipe): ImageRecipe {
   const pins = pinsSchema.safeParse(recipe.pins);
   if (!pins.success) throw new JobFailure("invalid", `recipe pins: ${z.prettifyError(pins.error)}`);
-  for (const { path } of recipe.files) {
+  for (const { path, mode } of recipe.files) {
     if (path.startsWith("/") || path.split("/").some((part) => part === "" || part === "." || part === "..")) {
       throw new JobFailure("invalid", `recipe file path ${JSON.stringify(path)} is not a plain relative path`);
     }
+    if (mode !== 0o644 && mode !== 0o755) throw new JobFailure("invalid", `recipe file ${path} has mode ${(mode as number | undefined)?.toString(8) ?? "none"}, not 644 or 755`);
   }
   agentSetupOf(recipe);
   return { files: recipe.files, pins: pins.data };
@@ -78,6 +85,22 @@ function recipeFile(recipe: ImageRecipe, path: string): string {
   const file = recipe.files.find((f) => f.path === path);
   if (file === undefined) throw new JobFailure("invalid", `the recipe has no ${path}`);
   return file.content;
+}
+
+/**
+ * Writes the files under `context` with their recipe modes, and the directories 0755, as a git checkout has them.
+ * Docker's COPY keeps those modes, and the probe's umask would otherwise leave root's files unreadable to user.
+ */
+async function writeRecipeFiles(files: ImageRecipe["files"], context: string): Promise<void> {
+  const dirs = new Set([context]);
+  for (const file of files) {
+    const path = join(context, file.path);
+    for (let dir = dirname(path); dir !== context; dir = dirname(dir)) dirs.add(dir);
+    await mkdir(dirname(path), { recursive: true });
+    await writeFile(path, file.content);
+    await chmod(path, file.mode);
+  }
+  for (const dir of dirs) await chmod(dir, 0o755);
 }
 
 /** Dockerfile ARG name for each pin the Dockerfile uses. */
@@ -141,10 +164,7 @@ export async function buildImage(input: ImageRecipe, node: NodeName, out: string
   const scratch = join(partial, ".scratch");
   await rm(partial, { recursive: true, force: true });
   const context = join(scratch, "context");
-  for (const file of recipe.files) {
-    await mkdir(dirname(join(context, file.path)), { recursive: true });
-    await writeFile(join(context, file.path), file.content);
-  }
+  await writeRecipeFiles(recipe.files, context);
   // The tag only lives until the modes are listed from it.
   const tag = `nexus-pylon:${id}`;
   const seed = join(scratch, "kernel-module-seed");
