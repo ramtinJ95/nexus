@@ -270,13 +270,37 @@ git commit -m "chore(image): refresh the pylon agent setup" images/pylon/agent-s
 
 The capture prints what ships and what it leaves out. When something cannot ship, such as a skill not committed and pushed in the dotfiles repo or a plugin older than its marketplace, it writes nothing and says how to fix each problem. `docs/contracts/usage.md` describes it.
 
-Then build on `infra-testbench`, from a checkout at the pushed commit with `npm ci` done:
+Then deploy the commit that carries the manifest with `nexus deploy main --wait`, because the control plane builds the recipe of the release it runs. From a Mac in the control plane's `deployers`, with CLI 0.22.0:
 
 ```sh
-git pull && bash images/pylon/build.sh
+nexus image build --wait
+nexus image rollout <image ID> --wait
 ```
 
-The build needs Docker and KVM, and its Docker step reaches GitHub and npm. When the smoke boot passes, it writes the image to `~/nexus-spikes/images/<image ID>` and prints its manifest, whose `id` is the image ID. A recipe that did not change gives the same ID, and the build returns at once.
+`nexus image build` reads `images/pylon/` from the control plane's release and sends a `build-image` job to the probe on the image build node, `imageBuildNode` in `control.json` (`infra-testbench` when omitted). The probe builds with Docker, smoke-boots the result, and publishes it into its store, `/var/lib/nexus/artifacts`. The control plane then reads the image's manifest from the probe and records it, with the release it came from. The command prints the image ID at once, and `--wait` follows the build until it is recorded, about 8 minutes on `infra-testbench`. A recipe that did not change is the image already recorded, and the command reports it as built at once. A build changes nothing that pylons use.
+
+`nexus image rollout <image>` copies the image to every other online node with a checksum-verified `fetch-artifact` job, and makes it current only once every online node reports holding it, so `--node auto` never meets a current image that a node lacks. A node that cannot fetch it stops the rollout, the error names the node and the probe's reason, and the current image stays as it was. A node that is offline when the rollout begins is skipped, and fetches the image the first time one of its pylons needs it. Copies between the nodes run at about 22 Mbit/s, so a rollout takes minutes. `--wait` follows it like `nexus deploy --wait` and survives a control plane restart.
+
+The image that was current stays recorded, and the nodes keep it. `nexus image rollback` makes it current again, through the same rollout, so it checks that every online node still holds it. A second rollback goes forward again. `nexus image list` and `nexus image current` show every recorded image, the nodes that hold it, the release it was built from, when it was built, and which image is current and which is previous.
+
+Only callers in `deployers` may build, roll out or roll back, as with `nexus deploy`. Under [the merge policy](../docs/merge-policy.md), a pylon image rebuild always needs the person, so an agent never runs these commands. The commands exist so the person runs one line instead of a runbook.
+
+Running and paused pylons keep the image they booted from, because their disks are overlays on its root filesystem, and nothing removes an image from a node. Only a pylon that boots fresh, from a new thread, uses the new current image. Archive and unarchive does not move a pylon to the new image, because the wake resumes its own disk.
+
+### Docker access for the image build node's probe
+
+The build runs inside the probe, as the system user `nexus`, which has only the `kvm` group. The Docker step needs the Docker daemon, and membership of the `docker` group is equivalent to root on that node, so a compromised probe would control the node. This is the person's decision. To allow builds, run once on the image build node:
+
+```sh
+sudo usermod --append --groups docker nexus
+sudo systemctl restart nexus-probe
+```
+
+Without it, `nexus image build` fails with Docker's permission error in its reason. The build also reaches GitHub and npm, and keeps Docker and Gondolin caches under `/var/lib/nexus`, the probe user's home.
+
+### Build by hand
+
+`bash images/pylon/build.sh` on the image build node still builds and smoke-boots the recipe of a checkout into `~/nexus-spikes/images/<image ID>` and prints its manifest. Use it to debug a build. An image built this way is not in the probe's store and not recorded, so roll out only images that `nexus image build` recorded.
 
 ## Run a first thread
 
@@ -285,16 +309,14 @@ These steps check a fresh install with the real model. Run them on the control p
 ```sh
 IP=<listen.host from control.json>
 A="http://$IP:7470/v1"
-IMG=<an image ID in the node's /var/lib/nexus/artifacts>
 ```
 
 1. Sign the harness in, as the previous section describes, then start the control plane with `sudo systemctl start nexus-control`. `journalctl -u nexus-control -n 20` shows `nexus control plane: API on ...` and no `harness` errors.
-2. Record the image and make it current. The image's manifest is `image.json` in its directory on the node that holds it, here `infra-testbench`:
+2. From a Mac in `deployers`, build the image and make it current, as [Build the pylon image](#build-the-pylon-image) describes. The control plane's own machine cannot, because `deployers` never includes it:
 
    ```sh
-   ssh infra-testbench sudo cat /var/lib/nexus/artifacts/$IMG/image.json > image.json
-   curl -sS -H content-type:application/json --data @image.json $A/images
-   curl -sS -X PUT -H content-type:application/json -d "{\"image\":\"$IMG\"}" $A/images/current
+   nexus image build --wait
+   nexus image rollout <image ID it printed> --wait
    ```
 
 3. Create a project and start a thread:

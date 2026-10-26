@@ -77,7 +77,7 @@ Fixes from the judge's check of pi-sandbox:
 Cuts from A, for v1 scope:
 
 - The dotfiles artifact is gone. Every boot pulls the dotfiles repo, which the design already says, and the image bakes a fallback copy.
-- The per-project image pin and `nexus image promote` are gone. A build that passes its smoke boot becomes current.
+- The per-project image pin and `nexus image promote` are gone. A build that passes its smoke boot was to become current. Since 2026-10-26 a separate `nexus image rollout` makes it current, once every online node holds it, so the person decides when.
 - The checkpoint-mismatch check is gone. Without moves, the local disk is the only disk, so there is nothing to compare it against.
 
 ## Tradeoffs accepted

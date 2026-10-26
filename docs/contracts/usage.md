@@ -17,6 +17,7 @@ A probe serves HTTP on its tailnet address, port 7480. Tailnet identity is the o
 | `GET /v1/observe` (NDJSON stream) | Control plane (`rj-firebat`) | A snapshot of the node, then events |
 | `POST /v1/pylons/{id}/commands` | Control plane (`rj-firebat`) | Synchronous guest commands: exec, open or close a session or drop a failed one, service operations, linking a listening port as a preview |
 | `GET /v1/pylons/{id}/stream` (WebSocket) | Control plane (`rj-firebat`) | A raw byte stream to a program in the pylon, for the harness channel and, through a pty relay, terminal attach |
+| `GET /v1/manifests/{artifactId}` | Control plane (`rj-firebat`) | The manifest of an image or template the node holds, or 404. The control plane records a built image from it |
 | `GET /v1/artifacts/{artifactId}?sha256=` | The other probe | Probe-to-probe copies of images and templates: the manifest in a header, then the archive, which the fetching probe verifies before use. A probe holding other bytes under the ID refuses with 409 and its reason, before it sends any. A checkpoint stays on its node |
 
 Lifecycle jobs are Amp's `spawn`, `pause` and `delete`, plus `build-image`, `build-template`, `fetch-artifact` and `drop-artifact`. A job expires 30 seconds after it was issued if the probe has not accepted it. Once accepted, it has a fixed deadline: 5 minutes for Amp's three, and 30 minutes for builds and copies. The probe runs at most one job per subject (a pylon or an artifact) and answers `busy` to a second one. `drop-artifact` cannot name a checkpoint.
@@ -167,10 +168,11 @@ nexus output add diff                      # works before the first commit too: 
 ### Building and shipping the base image
 
 ```sh
-nexus image build   # build-image job on the image build node. Passing its smoke boot makes it current
+nexus image build              # build-image job on the image build node, recorded once its smoke boot passes
+nexus image rollout <image>    # fetch-artifact to every other online node, then current once all hold it
 ```
 
-The recipe lives in this repo under `images/pylon/`. Its content hash is the image ID, so rebuilding unchanged inputs is a no-op. After a successful build, the control plane sends `fetch-artifact` to every other online node. Running and paused pylons keep the image they booted from.
+The recipe lives in this repo under `images/pylon/`, and the control plane builds the recipe of the release it runs. Its content hash is the image ID, so rebuilding unchanged inputs is a no-op. A build changes nothing pylons use. The rollout makes the image current only once every online node holds it, and `nexus image rollback` returns to the image current before. Running and paused pylons keep the image they booted from.
 
 ### Refreshing the pylon's agent setup
 
