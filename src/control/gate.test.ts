@@ -70,8 +70,9 @@ async function fixture(t: import("node:test").TestContext, check: string | null)
   return { registry, builder, head, repo, root, image, local, started, runs, running, set stream(s: typeof stream) { stream = s; } };
 }
 
+/** Polls until the check ends. The deadline only ends a hang: a loaded suite can take seconds over what takes milliseconds alone. */
 async function settle(poll: () => CheckState): Promise<CheckState> {
-  for (let i = 0; i < 200; i++) {
+  for (const deadline = Date.now() + 60_000; Date.now() < deadline;) {
     const state = poll();
     if (state.kind === "done" || state.kind === "void" || state.kind === "unrunnable") return state;
     await sleep(20);
