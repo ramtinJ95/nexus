@@ -18,8 +18,8 @@ export function usageLimitResumer(options: { registry: Registry; inbox: Inbox; c
     for (const t of registry.threads()) {
       const limit = t.usageLimit;
       const session = registry.claudeWorker(t.id)?.session ?? null;
-      // An archived thread's pylon stays paused until the person unarchives it, so the message would wake it.
-      if (limit === undefined || limit.resetsAt === null || clock() < limit.resetsAt + graceMs || (t.status !== "active" && t.status !== "idle") || session === null) continue;
+      // A reset no later than the stop would stop the worker again at once, every pass. An archived thread's pylon stays paused until the person unarchives it, so the message would wake it.
+      if (limit === undefined || limit.resetsAt === null || limit.resetsAt <= limit.stoppedAt || clock() < limit.resetsAt + graceMs || (t.status !== "active" && t.status !== "idle") || session === null) continue;
       const id = `usage-limit:${session}:${limit.stoppedAt}`;
       if (registry.claudeMessage(t.id, id) !== undefined) continue;
       try {

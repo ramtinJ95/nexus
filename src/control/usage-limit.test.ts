@@ -59,11 +59,15 @@ test("a worker stopped on its usage limit is told to continue once, after the re
   assert.equal(f.continued().length, 1);
 });
 
-test("a worker whose usage limit names no reset, or whose thread is archived, is not told to continue", async (t) => {
+test("a worker whose usage limit names no reset, a reset no later than the stop, or whose thread is archived, is not told to continue", async (t) => {
   const unknown = fixture(t, { resetsAt: null });
   unknown.setNow(Number.MAX_SAFE_INTEGER);
   await unknown.resumer.poll();
   assert.equal(unknown.typed.length, 0);
+  const past = fixture(t, { resetsAt: 5000 });
+  past.setNow(Number.MAX_SAFE_INTEGER);
+  await past.resumer.poll();
+  assert.equal(past.typed.length, 0, "a reset that had passed when the limit stopped the worker would stop it again");
   const archived = fixture(t);
   archived.registry.setThreadStatus(archived.id, "archived");
   await archived.resumer.poll();
