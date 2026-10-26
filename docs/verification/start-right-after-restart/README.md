@@ -6,9 +6,9 @@ The control plane is the real `startControlPlane`, with its registry, loop, harn
 
 | Moment | `main.txt`: main, bd1335d | `branch.txt`: this branch |
 | --- | --- | --- |
-| New stack | Refused 11 times with `no node can run this pylon: node-a has no secret NEXUS_CHATGPT_TOKEN from the control plane yet; node-b ...`. Accepted 62.3 s after the first try. | Accepted at once. The pylon boots with the token 0.4 s after the start. |
+| New stack | Refused 11 times with `no node can run this pylon: node-a has no secret NEXUS_CHATGPT_TOKEN from the control plane yet; node-b ...`. Accepted 62.3 s after the first try. | Accepted at once. The pylon boots with the token 0.7 s after the start. |
 | Control plane restart | Accepted at once, because the probes still hold the token. | The same. |
-| Deploy | Accepted, because the control plane had not yet seen the new probes' snapshots. Every pylon on the node, the new one too, boots with the stand-in, so its first requests to `api.openai.com` would be refused. | Accepted at once. Every pylon boots with the token 1.3 s after the start. |
+| Deploy | Accepted, because the control plane had not yet seen the new probes' snapshots. Every pylon on the node, the new one too, boots with the stand-in, so its first requests to `api.openai.com` would be refused. | Accepted at once. Every pylon boots with the token 1.5 s after the start. |
 | Probe restart | Refused 11 times. Accepted 62.3 s after the first try. The pylons that were running boot again with the stand-in. | Accepted at once. Every pylon boots with the token, the new one 0.5 s after the start. |
 
 ```sh
