@@ -75,6 +75,12 @@ const guestUser = "user";
  */
 const repoRoot = (workspace: string) => posix.join(workspace, "repo");
 const servicesFile = (workspace: string) => posix.join(repoRoot(workspace), ".nexus/services.yaml");
+/**
+ * Gondolin's root disk. A running VM writes to a temporary overlay that no boot ever reuses, since a boot resumes the
+ * last checkpoint, so a guest flush keeps nothing safer until a stop, and each one waits on an fdatasync on the node.
+ * A guest told its disk has no volatile cache sends none, and a stop turns the cache back on so its sync flushes.
+ */
+const writeCache = "/sys/block/vda/queue/write_cache";
 
 /** An SSH forwarder on the host's loopback that logs in to the guest as `user` with `identityFile`. */
 type SshAccess = { user: string; port: number; identityFile: string };
@@ -183,6 +189,7 @@ export class SandboxRuntime {
 		// Disabling scratch tmpfs preserves HOME on disk. OCI images still need
 		// normal Unix temporary-directory permissions for unprivileged tools.
 		await checked(vm, "mkdir -p /tmp /var/tmp; chmod 1777 /tmp /var/tmp");
+		await checked(vm, `echo 'write through' > ${writeCache}`);
 		await checked(vm, `mkdir -p ${q(config.workspace)}`);
 		// A checkpoint restores filesystem files, not processes. Old service pid
 		// files must never be mistaken for newly booted unrelated processes.
@@ -340,7 +347,7 @@ export class SandboxRuntime {
 			if (unsettled.length > 0)
 				throw new Error(`Guest actions were still in flight ${this.settleMs} ms into the stop (${unsettled.join(", ")}), so the VM is not checkpointed`);
 			await this.managed?.stopAll();
-			await checked(vm, "sync");
+			await checked(vm, `echo 'write back' > ${writeCache}; sync`);
 			await vm.checkpoint(next);
 			this.vm = undefined;
 			await rename(next, join(this.dir, "disk.qcow2"));

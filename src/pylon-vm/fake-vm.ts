@@ -22,6 +22,8 @@ export interface FakeVm {
 	/** The guest answers every write that holds, and the bridge drains. */
 	answer(): void;
 	readonly checkpoints: string[];
+	/** The guest commands that ran, in order. */
+	readonly commands: string[];
 	/** What closed, in order: "ssh" for the guest terminal's SSH, "vm" for the VM. */
 	readonly closed: string[];
 }
@@ -33,6 +35,7 @@ export function fakeVm(hold: (path: string) => WritePhase | undefined = () => un
 	const waiters: { suffix: string; accept(): void }[] = [];
 	const slotWaiters = new Set<() => void>();
 	const checkpoints: string[] = [];
+	const commands: string[] = [];
 	const closed: string[] = [];
 	const release = (write: Write, error?: Error) => {
 		if (!held.includes(write)) return;
@@ -57,6 +60,7 @@ export function fakeVm(hold: (path: string) => WritePhase | undefined = () => un
 				});
 				slotWaiters.delete(wake);
 			}
+			commands.push(argv[3]!);
 			const exitCode = /\/done'?$/.test(argv[3]!) ? 1 : 0;
 			return { exitCode: 0, stdout: "", stderr: JSON.stringify({ state: "exited", exitCode }) };
 		},
@@ -100,6 +104,7 @@ export function fakeVm(hold: (path: string) => WritePhase | undefined = () => un
 			for (const write of [...held]) release(write);
 		},
 		checkpoints,
+		commands,
 		closed,
 	};
 }

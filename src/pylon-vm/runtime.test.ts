@@ -114,6 +114,13 @@ test("a stop refuses a file write still waiting for its turn, and then checkpoin
 	await access(join(dir, "disk.qcow2"));
 });
 
+test("a stop turns the guest's disk cache back on and syncs it right before its checkpoint", async (t) => {
+	const { fake, runtime } = await runningOnAFakeVm(t, /^$/, "queued");
+	assert.equal(((await runtime.stop()) as { state: string }).state, "stopped");
+	assert.equal(fake.checkpoints.length, 1);
+	assert.equal(fake.commands.at(-1), "echo 'write back' > /sys/block/vda/queue/write_cache; sync", "the sync reaches the node's disk, not only the guest's");
+});
+
 test("a stop refuses a file write still sending its data, and then checkpoints", async (t) => {
 	const { fake, runtime } = await runningOnAFakeVm(t, staged, "sending");
 	const writing = runtime.handle(writeFiles);
