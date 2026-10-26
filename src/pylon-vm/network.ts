@@ -1,6 +1,7 @@
 import {
 	createHttpHooks,
 	getInfoFromSshExecRequest,
+	type SecretManager,
 	type SshExecPolicy,
 	type VMOptions,
 } from "@earendil-works/gondolin";
@@ -10,25 +11,26 @@ import { hostBridgeHook } from "./host-bridge.ts";
 type Remote = NonNullable<BootSpec["ssh"]>["remotes"][number];
 
 /**
- * Gondolin's network options for one boot, and the secret placeholders the guest sees in place of values.
- * The host substitutes a value only in requests to its own hosts, so no value is ever provisioned into the
- * guest. A granted host that reflects a request header in its response still hands the value to the guest,
- * so a secret should be granted only to hosts that never echo credentials back.
+ * Gondolin's network options for one boot, the secret placeholders the guest sees in place of values, and the
+ * manager that changes a value on the running VM. The host substitutes a value only in requests to its own hosts,
+ * so no value is ever provisioned into the guest. A granted host that reflects a request header in its response
+ * still hands the value to the guest, so a secret should be granted only to hosts that never echo credentials back.
  */
 export function networkOptions(
 	spec: BootSpec,
 	instance: string,
-): Pick<VMOptions, "httpHooks" | "ssh"> & { placeholders: Record<string, string> } {
-	const { httpHooks, env } = createHttpHooks({
+): Pick<VMOptions, "httpHooks" | "ssh"> & { placeholders: Record<string, string>; secretManager: SecretManager } {
+	const { httpHooks, env, secretManager } = createHttpHooks({
 		allowedHosts: spec.allowedHosts,
 		secrets: spec.secrets,
 		...(spec.hostBridge === null ? {} : { onRequest: hostBridgeHook(spec.hostBridge, instance) }),
 	});
-	if (spec.ssh === null) return { httpHooks, placeholders: env };
+	if (spec.ssh === null) return { httpHooks, placeholders: env, secretManager };
 	const { privateKey, knownHostsFile, remotes } = spec.ssh;
 	return {
 		httpHooks,
 		placeholders: env,
+		secretManager,
 		ssh: {
 			allowedHosts: [...new Set(remotes.map(target))],
 			credentials: Object.fromEntries(
