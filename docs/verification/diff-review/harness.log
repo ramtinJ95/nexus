@@ -1,0 +1,20 @@
+dragged over lines 10-12 of src/server.ts: 3 rows selected; the bar reads "lines 10-12 Comment Question Suggestion Requested change"
+screenshot harness-01-selected.png
+keyboard selection: ["    const route = routes.get(`${req.method} ${req.url}`);","    if (route === undefined) {","      res.writeHead(404).end();"]
+screenshot harness-02-question-draft.png
+screenshot harness-03-split.png
+src/server.ts notes after the switch back to unified: ["Comment lines 10-12 Edit Delete notFound could live beside the routes map.","Question line 16 Edit Delete Why does a missing route return early here instead of falling through?","Suggestion removed lines 12-15 Edit Delete Keep the 404 body empty, as before."]
+screenshot harness-04-turn.png
+after a reload: 5 notes of kinds comment, question, suggestion, change, comment; style.css shows ["Comment lines 3-4 Edit Delete Use the gap token here."]; the tree counts ["app.py: 1","style.css: 1"]
+screenshot harness-05-reloaded.png
+a draft after a reload: Is light-dark supported everywhere we run? Safari 17.5?
+after style.css changed under its note: The diff no longer shows these lines as quoted. The notes stay in the review with their quotes. Comment style.css lines 3-4 Edit Delete + gap: 8px; + color: light-dark(#222, #eee); Use the gap token here.
+screenshot harness-06-outdated.png
+screenshot harness-07-dark.png
+composed review: 53 lines, saved as harness-composed.md; the tab on show is convo
+screenshot harness-composer.png
+the conversation shows 1 reviews, 0 before the send
+after the send: the stored review is {"notes":[{"id":"note:mvouza7e4702f1b7","kind":"comment","path":"style.css","entry":0,"start":{"side":"additions","line":3},"end":{"side":"additions","line":4},"lines":{"from":3,"to":4,"removed":false},"quote":["+  gap: 8px;","+  color: light-dark(#222, #eee);"],"body":"Use the gap token here."}],"draft":null,"composed":null}, and the conversation's last message starts "th-c9bdd7824f21 · started just now  You  I reviewed the diff in the Nexus dashboard. Please address these notes, and ans"
+screenshot harness-08-sent.png
+the review bar after the send: Review: 1 note Add to message Discard
+problems: []

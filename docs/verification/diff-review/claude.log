@@ -1,0 +1,11 @@
+GET /v1/threads/th-f958b100459d/changes?base=start answered 422
+latest turn: 1 file +3 −0 M greet.py +3 −0
+greet.py's diff shows new lines 2-23
+after a reload: ["Question lines 2-4 Edit Delete Why is this the order the functions come in?","Requested change lines 21-23 Edit Delete Add a docstring to each function you added."]
+screenshot claude-01-notes.png
+composed review: 21 lines, saved as claude-composed.md; the tab on show is convo
+screenshot claude-composer.png
+the conversation shows 3 reviews, 2 before the send
+after the send: the stored review is {"notes":[],"draft":null,"composed":null}
+screenshot claude-02-sent.png
+problems: ["light: Failed to load resource: the server responded with a status of 422 (Unprocessable Entity)"]
