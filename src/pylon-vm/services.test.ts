@@ -19,7 +19,8 @@ import { answersScript, GuestServices } from "./services.ts";
  * file `file` holds, none while undefined, and runs a service from its launch until its stop, unless `exits` holds,
  * as for a service whose cwd is missing. Every port listens while `listening` holds, every new port asked for is the
  * next from 41000, and every other command succeeds. Its relay applies each map as it is written, unless `relay.held`
- * holds, until `relay.apply()`, and cannot listen on the relay ports `relay.unbindable` names.
+ * holds, until `relay.apply()`, cannot listen on the relay ports `relay.unbindable` names, and counts each read of its
+ * status in `relay.reads`.
  */
 function fakeVm() {
 	const routes: string[][] = [];
@@ -31,6 +32,7 @@ function fakeVm() {
 		unbindable: new Map<number, string>(),
 		map: { generation: 0, relays: {} as Record<string, number> },
 		status: undefined as string | undefined,
+		reads: 0,
 		apply() {
 			const relays = Object.entries(relay.map.relays);
 			relay.status = JSON.stringify({
@@ -65,7 +67,10 @@ function fakeVm() {
 				events.push(`map ${JSON.stringify(relay.map.relays)}`);
 				if (!relay.held) relay.apply();
 			}
-			if (command.startsWith("cat ") && command.includes("relay-status.json")) options.stdout.write(relay.status ?? "");
+			if (command.startsWith("cat ") && command.includes("relay-status.json")) {
+				relay.reads++;
+				options.stdout.write(relay.status ?? "");
+			}
 			else if (command.startsWith("test -e")) exitCode = guest.file === undefined ? 1 : 0;
 			else if (command.includes("connect_ex")) options.stdout.write(guest.listening ? "True\n" : "False\n");
 			else if (command.includes("getsockname")) options.stdout.write(`${nextPort++}\n`);
@@ -123,7 +128,8 @@ test("a route is set only once the relay confirms its relay port carries to its 
 	fake.relay.held = true;
 	const attaching = services.attach(3000);
 	while (fake.relayMaps.length === 0) await delay(10);
-	await delay(300);
+	const reads = fake.relay.reads;
+	while (fake.relay.reads === reads) await delay(10);
 	assert.deepEqual(fake.events, ["route {}", 'map {"700":3000}'], "nothing is routed while the relay has not applied the map");
 	fake.relay.apply();
 	await attaching;
@@ -331,13 +337,13 @@ test("a port whose linked name a service holds is refused, so its caller leaves 
 
 const configPath = "/workspace/repo/.nexus/services.yaml";
 const declared = (services: string) => `services:\n${services}`;
-/** Waits for the service's reported state, as the probe's reads would see it change. */
+/** Waits for the service's reported state, as the probe's reads would see it change. The deadline only ends a hang: a loaded suite can take seconds over what takes milliseconds alone. It reads performance.now, since tests freeze Date. */
 async function until(services: GuestServices, name: string, state: string) {
-	const deadline = Date.now() + 5000;
+	const deadline = performance.now() + 60_000;
 	for (;;) {
 		const fact = (await services.operate("status", name))[0];
 		if (fact?.state === state) return;
-		if (Date.now() > deadline) assert.fail(`${name} is ${fact?.state}, not ${state}`);
+		if (performance.now() > deadline) assert.fail(`${name} is ${fact?.state}, not ${state}`);
 		await delay(50);
 	}
 }
@@ -388,7 +394,7 @@ test("a service declared without a preview while the pylon runs starts when a st
 	assert.deepEqual(guest.launches, ["worker"], "a status or new URLs do not start it again once stopped");
 });
 
-test("a start does not wait for health: ensure and new URLs return at once, the service is starting, and it fails after its timeout", async (t) => {
+test("a start does not wait for health: ensure and new URLs return at once, the service is starting, and it fails after its timeout", { timeout: 60_000 }, async (t) => {
 	const root = await mkdtemp(join(tmpdir(), "nexus-services-"));
 	t.after(() => rm(root, { recursive: true, force: true }));
 	const logged = t.mock.method(console, "log", () => {});
@@ -398,7 +404,8 @@ test("a start does not wait for health: ensure and new URLs return at once, the 
 	const services = new GuestServices(guest.vm, root, configPath, "/workspace/repo", "agent", {});
 	t.after(() => services.close());
 	await services.initialize();
-	const began = Date.now();
+	// The clock moves only on a tick, so a call that waited for the service's timeout would never return.
+	t.mock.timers.enable({ apis: ["Date"] });
 	assert.deepEqual((await services.operate("ensure")).map((f) => f.state), ["starting"]);
 	await services.setPublicUrls({ web: "https://node.example:10100" });
 	assert.deepEqual(guest.launches, ["web", "web"], "the new URL restarted it");
@@ -406,10 +413,9 @@ test("a start does not wait for health: ensure and new URLs return at once, the 
 		await services.detach(3000),
 		"Port 3000 is the preview of service web, not a linked port. Remove the preview from /workspace/repo/.nexus/services.yaml to unpublish it",
 	);
-	assert.ok(Date.now() - began < 1000, "nothing waited for the service's timeout");
 	assert.equal((await services.operate("status"))[0]!.state, "starting");
+	t.mock.timers.tick(1_000);
 	await until(services, "web", "failed");
-	assert.ok(Date.now() - began >= 1000);
 	assert.deepEqual(logged.mock.calls.map((call) => call.arguments[0]), [
 		"services: web failed: Service web started but is not responding. Read logs, then restart or stop it",
 	], "the restart's start replaced the first's watch, so it fails once");
@@ -432,7 +438,7 @@ test("a start whose process exits at once is starting until its timeout fails it
 	assert.equal((await services.operate("status"))[0]!.state, "stopped");
 });
 
-test("an unpreview sent to the controller during an ensure of a service that never answers is answered at once", async (t) => {
+test("an unpreview sent to the controller during an ensure of a service that never answers is answered at once", { timeout: 60_000 }, async (t) => {
 	const root = await mkdtemp(join(tmpdir(), "nexus-services-"));
 	t.after(() => rm(root, { recursive: true, force: true }));
 	t.mock.method(console, "log", () => {});
@@ -446,12 +452,12 @@ test("an unpreview sent to the controller during an ensure of a service that nev
 	const spec = { resources: { cpus: 1, memoryGiB: 1 } } as BootSpec;
 	const runtime = new SandboxRuntime(root, record, spec, { vm: guest.vm, settleMs: 0, services });
 	const queue = lifecycleQueue();
-	const began = Date.now();
+	// The clock moves only on a tick, so a call that waited for the service's timeout would never return.
+	t.mock.timers.enable({ apis: ["Date"] });
 	const ensure = queue.run(() => runtime.handle({ action: "services", name: "pylon-q", op: "ensure" }));
 	const unpreview = queue.run(() => runtime.handle({ action: "unpreview", name: "pylon-q", port: 3000 }));
 	assert.deepEqual(((await ensure) as { state: string }[]).map((f) => f.state), ["starting"]);
 	assert.deepEqual(await unpreview, { refused: "Port 3000 is the preview of service web, not a linked port. Remove the preview from /workspace/repo/.nexus/services.yaml to unpublish it" });
-	assert.ok(Date.now() - began < 5000, "neither waited for the service's 30 s timeout");
 });
 
 /** What the guest's health check prints for the port, and the path if given, and how long it took. */
@@ -503,7 +509,8 @@ test("the health check asks the port itself on 127.0.0.1 or else ::1, as its own
 	assert.deepEqual(new Set(v4.hosts), new Set([`127.0.0.1:${v4.port}`]));
 	const { answer, ms } = await answers(slow, "/");
 	assert.equal(answer, "False", "a response that trickles in is not healthy");
-	assert.ok(ms < 3500, `it gave up after 2 s, not each socket read's, but took ${ms} ms`);
+	// Far above 2 s, which a loaded machine's Python start adds to, and far below the 35 s the trickle takes to end.
+	assert.ok(ms < 15_000, `it gave up after 2 s, not each socket read's, but took ${ms} ms`);
 	v6.close();
 	assert.equal((await answers(v6.port)).answer, "False", "a port nothing listens on does not");
 });

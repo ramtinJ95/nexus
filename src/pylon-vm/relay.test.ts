@@ -41,8 +41,9 @@ function get(port: number): Promise<string> {
 	});
 }
 
+/** Waits for the check. The deadline only ends a hang: a loaded suite can take seconds over what takes milliseconds alone. */
 async function until(what: string, check: () => Promise<boolean>) {
-	const deadline = Date.now() + 5_000;
+	const deadline = Date.now() + 60_000;
 	while (!await check()) {
 		if (Date.now() > deadline) throw new Error(`timed out waiting until ${what}`);
 		await delay(100);
