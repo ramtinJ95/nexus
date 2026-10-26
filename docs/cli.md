@@ -507,8 +507,10 @@ answers a `ClaudeConversation` for such a thread: `kind: "claude"`, the worker's
 kept), when it was last read (`readAt`) and whether a turn runs (`working`). An entry
 is a prompt (with who it came from), a reply, a tool call, a tool result paired with
 its call by ID, a background task's notification, a queue operation, a notice, a turn
-duration, or a `record` that names a transcript record Nexus does not know yet, so a
-newer Claude Code shows something rather than nothing. Each text is cut to a limit and
+duration, a pull request Claude opened, or a `record` that names a transcript record Nexus does not know yet, so a
+newer Claude Code shows something rather than nothing. Claude Code writes a pull
+request's record again each time it saves the session, so a consumer shows the first
+`pull-request` entry for each `url`, as `conversation` and the dashboard do. Each text is cut to a limit and
 marked where it was cut. A consumer must ignore entry kinds and fields it does not know.
 
 Reading never wakes a pylon and is not human activity. The control plane reads only

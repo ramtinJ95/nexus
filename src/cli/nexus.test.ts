@@ -1264,6 +1264,8 @@ test("conversation prints a Claude worker's transcript, and send types into its 
     { kind: "notice", at: 8, tone: "error", text: "The model failed" },
     { kind: "turn", at: 9, durationMs: 72_000 },
     { kind: "record", at: null, type: "mystery", summary: '{"type":"mystery"}' },
+    { kind: "pull-request", at: 10, number: 7, url: "https://github.com/acme/shop/pull/7", repository: "acme/shop" },
+    { kind: "pull-request", at: 10, number: 7, url: "https://github.com/acme/shop/pull/7", repository: "acme/shop" },
     { kind: "prompt", at: 10, text: "/compact", from: "command" },
     { kind: "queue", at: 11, op: "enqueue", text: "and then deploy" },
     { kind: "tool", at: 12, id: "t3", name: "Read", input: { file_path: "hello.py" } },
@@ -1281,6 +1283,7 @@ test("conversation prints a Claude worker's transcript, and send types into its 
     "[error] The model failed",
     "[turn] 72s",
     '[record] mystery: {"type":"mystery"}',
+    "[pull request] Opened pull request #7: https://github.com/acme/shop/pull/7",
     "> [slash command] /compact",
   ];
   assert.equal((await s.nexus(["conversation", thread.id])).stdout, [...transcript, '[tool] Read {"file_path":"hello.py"} (no result)', "(queued) > and then deploy"].join("\n\n") + "\n");

@@ -289,11 +289,13 @@ record never changes an earlier entry:
 | `queue` | `op`, `text` | A `queue-operation`: a message typed during a turn joined or left Claude's queue |
 | `notice` | `tone`, `text` | An interruption, a compaction, a model error or a local command's output |
 | `turn` | `durationMs` | `system/turn_duration` |
+| `pull-request` | `number`, `url`, `repository` | A `pr-link`: Claude opened a pull request. Claude Code writes it again each time it saves the session's metadata, so clients show the first entry for each `url`. `url` is always an https URL |
 | `record` | `type`, `summary` | Any record shape the parser does not know, a malformed line, or a record over 512 KiB, which is skipped |
 
 Every entry has `at`, the record's time in Unix milliseconds. Records Claude Code keeps
-for itself, such as API request copies, context attachments and file-history
-snapshots, give no entry. They are named in tables in the parser, so a new record type
+for itself, such as API request copies, context attachments, file-history
+snapshots and the session metadata it writes again on each save (its title, tag, mode,
+agent, worktree and the like), give no entry. They are named in tables in the parser, so a new record type
 shows as a `record` rather than disappearing. Prompts are cut at 32 KiB, replies at
 64 KiB, tool inputs at 4 KiB per string and outputs at 8 KiB.
 

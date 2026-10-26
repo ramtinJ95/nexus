@@ -18,7 +18,7 @@ import type { ConversationView, EntryRecord, InboxState, LiveState } from "@eare
 import type { ListeningPort, NodeSummary, OpenedSession, ThreadDetail, ThreadRow, ViewFrame } from "../control/api.ts";
 import type { ClaudeSent, Preview, Thread } from "../control/registry.ts";
 import type { Review } from "../control/review.ts";
-import type { ClaudeConversation, PromptSource } from "../claude-transcript.ts";
+import type { ClaudeConversation, ClaudeEntry, PromptSource } from "../claude-transcript.ts";
 import { queuedOf } from "../control/claude-conversation.ts";
 import type { Changes, Diff, Listing } from "../checkout-files.ts";
 import type { Project, SecretGrant } from "../project.ts";
@@ -172,28 +172,41 @@ function conversationText(view: ConversationView): string {
 const promptLabel: Record<PromptSource, string> = { person: "", command: "[slash command] ", other: "[Claude Code] " };
 
 /**
+ * One transcript entry as a line or more, empty for one that prints nothing alone: a result, which its call shows,
+ * a queue operation, and a pull request `shown` already holds, which this adds to it. A call says how it ended
+ * when `how` is given.
+ */
+function claudeEntryText(e: ClaudeEntry, shown: Set<string>, how?: string): string {
+  switch (e.kind) {
+    case "prompt": return `> ${promptLabel[e.from]}${e.text.split("\n").join("\n> ")}`;
+    case "reply": return e.text;
+    case "tool": return `[tool] ${e.name} ${clip(JSON.stringify(e.input), 200)}${how === undefined ? "" : ` (${how})`}`;
+    case "task": return `[task] ${e.status}: ${e.summary}`;
+    case "notice": return `[${e.tone === "error" ? "error" : "notice"}] ${e.text}`;
+    case "turn": return `[turn] ${Math.round(e.durationMs / 1000)}s`;
+    case "pull-request": {
+      if (shown.has(e.url)) return "";
+      shown.add(e.url);
+      return `[pull request] Opened pull request #${e.number}: ${e.url}`;
+    }
+    case "record": return `[record] ${e.type}: ${e.summary}`;
+    case "result": case "queue": return "";
+  }
+}
+
+/**
  * A Claude worker's transcript: each prompt, reply, notice and task, and each tool call on one line with how it
  * ended, then the messages Claude Code queued and whether Claude works.
  */
 function claudeText(c: ClaudeConversation): string {
   const results = new Map(c.entries.flatMap((e) => e.kind === "result" ? [[e.toolUseId, e] as const] : []));
   const lastTurn = c.entries.findLastIndex((e) => e.kind === "turn");
-  const lines = c.entries.flatMap((e, i): string[] => {
-    switch (e.kind) {
-      case "prompt": return [`> ${promptLabel[e.from]}${e.text.split("\n").join("\n> ")}`];
-      case "reply": return [e.text];
-      case "tool": {
-        const result = results.get(e.id);
-        const how = result !== undefined ? (result.isError ? "failed" : "ok") : c.working && i > lastTurn ? "running" : "no result";
-        return [`[tool] ${e.name} ${clip(JSON.stringify(e.input), 200)} (${how})`];
-      }
-      case "task": return [`[task] ${e.status}: ${e.summary}`];
-      case "notice": return [`[${e.tone === "error" ? "error" : "notice"}] ${e.text}`];
-      case "turn": return [`[turn] ${Math.round(e.durationMs / 1000)}s`];
-      case "record": return [`[record] ${e.type}: ${e.summary}`];
-      case "result": case "queue": return [];
-    }
-  });
+  const shown = new Set<string>();
+  const lines = c.entries.map((e, i) => {
+    if (e.kind !== "tool") return claudeEntryText(e, shown);
+    const result = results.get(e.id);
+    return claudeEntryText(e, shown, result !== undefined ? (result.isError ? "failed" : "ok") : c.working && i > lastTurn ? "running" : "no result");
+  }).filter((text) => text !== "");
   const parts = [
     ...c.dropped === 0 ? [] : [`(${c.dropped} older entries are not kept)`],
     ...lines,
