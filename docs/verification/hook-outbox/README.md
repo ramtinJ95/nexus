@@ -7,7 +7,7 @@ What the log shows:
 - The probe journaled the turn start (sequence 1), and the registry marked the session working.
 - The script killed the probe with SIGKILL. Claude ran its tool, ended its turn and its session, and replied `done` without waiting on the probe. The heartbeat, turn end and session end were in `~/.nexus/outbox` as three files, and one sender was still running.
 - 15 seconds later the probe came back. It replayed sequence 1 from its journal. The sender delivered the outbox in order within its 10-second backoff.
-- The restarted probe dropped its first answer after journaling, as a probe that dies between its commit and its reply would. The sender sent that heartbeat again. The probe journaled it a second time (sequences 2 and 3), and the registry applied it once: the public event log holds one `session.heartbeat`.
+- The restarted probe dropped its first answer after journaling, as a probe that dies between its commit and its reply would. The sender sent that heartbeat again. The probe journaled it a second time under the same ID (sequences 2 and 3), and the registry applied it once: the public event log holds one `session.heartbeat`.
 - After the turn end, the session no longer runs and `lastReplyAt` is set. The outbox is empty and the sender has exited.
 
 Rerun it with `docs/verification/hook-outbox/run.sh` from the repository, in a pylon with Claude Code logged in. It never reaches the node's probe.

@@ -58,7 +58,7 @@ const api = createPylonApi({
   event(pylon, event) {
     const report = journal.append(pylon, event);
     registry.reportSession(node, report);
-    log({ journaled: report.sequence, kind: event.kind, at: event.at, ...facts() });
+    log({ journaled: report.sequence, kind: event.kind, at: event.at, id: event.id, ...facts() });
   },
   // Events never reach the guest; the API looks it up before it reads the op.
   guest: () => ({}) as never,
