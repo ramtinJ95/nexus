@@ -832,7 +832,7 @@ test("/projects/new opens the new-project dialog with the fields of nexus projec
     .map((m) => [m[2], m[3], /required/.test(m[4]!), /value="([^"]*)"/.exec(m[4]!)?.[1] ?? null]);
   assert.deepEqual(fields, [["ID", "id", true, null], ["Repository URL", "repoUrl", true, null], ["Node", "defaultNode", false, null], ["Branch", "defaultBranch", true, "main"]]);
   assert.deepEqual([...dialog.matchAll(/<option value="([^"]*)"( selected)?>([^<]*)</g)].map((m) => [m[1], m[2] !== undefined, m[3]]),
-    [[node, false, `${node}, offline`], [tower, true, tower]], "the node defaults to the first one online");
+    [["auto", true, "auto, where it fits best"], [node, false, `${node}, offline`], [tower, false, tower]], "the node defaults to auto");
   assert.deepEqual([...dialog.matchAll(/<input type="radio" name="repoKind" value="([^"]*)"( checked)?>/g)].map((m) => [m[1], m[2] !== undefined]), [["clone", true], ["scratch", false]],
     "the repository is cloned from a URL unless the project is scratch");
   assert.match(dialog, /<label class="check"><input type="checkbox" name="github"> GitHub access<\/label>/, "GitHub access is off unless asked for");
@@ -905,6 +905,11 @@ test("every page carries the start dialog, which offers every project and node a
   assert.deepEqual([...dialog.matchAll(/<input type="radio" name="project" required value="([^"]*)"[^>]*?( checked)?>/g)].map((m) => [m[1], m[2] !== undefined]), [["acme", false], ["beta", true]]);
   assert.deepEqual([...dialog.matchAll(/<option value="([^"]*)">([^<]*)</g)].map((m) => [m[1], m[2]]), [["", "rj-firebat (project default)"], ["auto", "auto, where it fits best"], [node, `${node}, offline`]]);
   assert.match(textOf(dialog), /No image is current yet.* Boots a pylon on rj-firebat and checks out main \./);
+
+  await s.call("POST", "/v1/projects", { ...project("spread"), defaultNode: "auto" });
+  const spread = (await s.call("GET", "/threads/new?project=spread")).text.split('<dialog id="start-dialog"')[1]!.split("</dialog>")[0]!;
+  assert.match(spread, /<option value="">auto \(project default\)<\/option>/);
+  assert.match(textOf(spread), /Boots a pylon on the node with the most room left and checks out main \./, "a project whose default node is auto names no node");
 
   await s.call("POST", "/v1/images", image);
   s.registry.setCurrentImage(image.id as ImageId);

@@ -88,8 +88,9 @@ export function threadStarter(options: { registry: Registry; harness: Pick<Harne
 
     const id = newThreadId();
     const pylonId = `pylon-${id}` as PylonId;
-    const placement: Placement = request.node === "auto" ? placeAuto(registry, { image, resources: project.resources, network, repo: freshRepo, dotfiles })
-      : named ? { how: "named", node: request.node as NodeName } : { how: "default", node: project.defaultNode };
+    const placement: Placement = named ? { how: "named", node: request.node as NodeName }
+      : (request.node ?? project.defaultNode) === "auto" ? placeAuto(registry, { image, resources: project.resources, network, repo: freshRepo, dotfiles })
+      : { how: "default", node: project.defaultNode as NodeName };
     const { node } = placement;
     const release = registry.reserve(pylonId, node, project.resources);
     try {

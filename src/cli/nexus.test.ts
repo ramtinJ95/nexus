@@ -233,7 +233,7 @@ test("--help or -h after a command prints its lines of nexus --help and exits 0 
     }
   }
   assert.equal((await s.nexus(["project", "edit", "--help"])).stdout,
-    "  nexus project edit <id> [--node N] [--branch B] [--cpus n] [--memory GiB] [--disk GiB]\n"
+    "  nexus project edit <id> [--node N|auto] [--branch B] [--cpus n] [--memory GiB] [--disk GiB]\n"
     + "    [--allow-host HOST]... [--login claude|chatgpt]... [--secret NAME:HOST[,HOST]...]...\n"
     + "    [--clear-hosts] [--clear-logins] [--clear-secrets] [--git-name NAME --git-email EMAIL | --clear-git-identity]\n");
   assert.equal((await s.nexus(["retry", "-h"])).stdout, "  nexus abort|retry|retry-pylon|wake <thread>\n");
@@ -336,15 +336,13 @@ test("project add creates a project with the contract's defaults or its flags, a
   await fails(["project", "add", "other", "https://", "--node", node], 64, { kind: "invalid", status: 400 });
   await fails(["project", "add", "other", repo, "--node", node, "--login", "gemini"], 64, { kind: "invalid", status: 400 });
   await fails(["project", "add", "other", repo, "--node", node, "--cpus", "two"], 64, { kind: "invalid", status: null, error: "--cpus takes a whole number, got two" });
-  await fails(["project", "add", "other", repo], 64, { kind: "invalid", status: null, error: "project add needs --node. Run nexus nodes to list them" });
-  await fails(["project", "add", "other", repo], 64, { kind: "invalid", status: null, error: "project add needs --node. Run nexus nodes to list them" },
-    { NEXUS_SOCKS: `127.0.0.1:${await closedPort()}` }); // with no proxy too, because it sends no request
   await fails(["project", "add"], 64, { kind: "invalid", status: null, error: "project add takes 1 to 2 arguments, got 0" });
   await fails(["project", "other"], 64, { kind: "invalid", status: null, error: "unknown command project" });
   assert.deepEqual(s.registry.projects().map((p) => p.id).toSorted(), ["acme", "custom", "hello"], "no refused project was created");
 
-  const human = await s.nexus(["project", "add", "other", repo]);
-  assert.deepEqual([human.code, human.stderr], [64, "nexus: project add needs --node. Run nexus nodes to list them. Run nexus --help for usage\n"]);
+  const spread = await s.nexus(["project", "add", "spread", repo]);
+  assert.deepEqual([spread.code, spread.stdout, spread.stderr], [0, `Added project spread (${repo}) on auto\n`, ""]);
+  assert.equal(s.registry.project("spread" as ProjectId)!.defaultNode, "auto", "without --node its threads boot where they fit best");
 });
 
 test("project add --scratch makes a project with no repository, --secret grants each NAME:HOST in order, and start cannot pin its commit", async (t) => {
@@ -1331,6 +1329,8 @@ test("project edit replaces supplied grants and preserves omitted settings", asy
   assert.equal(p.repoUrl, repo);
   assert.equal(p.defaultNode, node);
   assert.equal((await s.nexus(["project", "edit", "editable", "--secret", "TOKEN:*.example.com"])).code, 64);
+  assert.equal((await s.json(["project", "edit", "editable", "--node", "auto"])).defaultNode, "auto");
+  assert.match((await s.nexus(["projects"])).stdout, /^editable +node auto +branch main/m);
   const cleared = await s.nexus(["project", "edit", "editable", "--clear-secrets", "--clear-git-identity", "--json"]);
   assert.equal(cleared.code, 0, cleared.stderr);
   assert.deepEqual(JSON.parse(cleared.stdout).secrets, []);

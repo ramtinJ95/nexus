@@ -460,6 +460,20 @@ test("two overlapping --node auto starts take different rooms, and a start that 
   ], "each node counts the one overlapping start it has yet to report, and a counts nothing of the start that failed");
 });
 
+test("a project whose default node is auto places each thread that names none, and a named node still pins", async (t) => {
+  const s = await withImage(t);
+  observeNode(s, "big", { total: 64, committed: 0 });
+  assert.equal((await s.call("PATCH", "/v1/projects/acme", { defaultNode: "nowhere" })).status, 400);
+  const edited = await s.call("PATCH", "/v1/projects/acme", { defaultNode: "auto" });
+  assert.deepEqual([edited.status, edited.body.defaultNode], [200, "auto"]);
+  const plain = await s.call("POST", "/v1/threads", { project: "acme", title: "Plain" });
+  assert.equal(plain.status, 201, JSON.stringify(plain.body));
+  assert.deepEqual([plain.body.placement.how, plain.body.placement.node], ["auto", "big"]);
+  const named = await s.call("POST", "/v1/threads", { project: "acme", title: "Named", node });
+  assert.deepEqual(named.body.placement, { how: "named", node });
+  assert.equal((await s.call("POST", "/v1/projects", { ...project, id: "spread", defaultNode: "auto" })).status, 201);
+});
+
 test("a scratch project has no repository, and each of its threads starts an empty one on its branch", async (t) => {
   const s = await setup(t);
   const scratch = { ...project, id: "sketch", repoUrl: null, allowedHosts: [], logins: [], secrets: [githubTokenGrant] };

@@ -193,7 +193,8 @@ export interface Project {
   repoUrl: string | null;
   /** The branch threads check out, or the first branch of a scratch project's empty repository. */
   defaultBranch: string;
-  defaultNode: NodeName;
+  /** `auto` boots each thread that names no node where its pylon fits best. */
+  defaultNode: NodeName | "auto";
   resources: { cpus: number; memoryGiB: number; diskGiB: number };
   allowedHosts: readonly string[];
   secrets: readonly SecretGrant[];

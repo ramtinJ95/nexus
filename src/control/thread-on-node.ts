@@ -511,9 +511,9 @@ async function addProject() {
   pass(`nexus project add created node-check on ${probeConfig.node} with the CLI's defaults: ${added.stdout.replace(/\s+/g, " ")}`);
   const again = await nexus("project", "add", "node-check", repoUrl, "--node", probeConfig.node, "--json");
   assert.deepEqual([again.code, JSON.parse(again.stderr)], [5, { error: "project node-check exists", kind: "conflict", status: 409 }]);
-  const unnamed = await nexus("project", "add", "node-check-2", repoUrl, "--json");
-  assert.deepEqual([unnamed.code, JSON.parse(unnamed.stderr)], [64, { error: "project add needs --node. Run nexus nodes to list them", kind: "invalid", status: null }]);
-  pass(`adding node-check again exits 5, and leaving out --node exits 64`);
+  const unnamed = await nexus("project", "add", "node-check-auto", repoUrl, "--json");
+  assert.deepEqual([unnamed.code, JSON.parse(unnamed.stdout).defaultNode], [0, "auto"], unnamed.stderr);
+  pass(`adding node-check again exits 5, and leaving out --node adds a project whose default node is auto`);
 }
 
 let verdict = "FAIL";

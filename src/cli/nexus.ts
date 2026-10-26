@@ -59,10 +59,10 @@ const usage = `nexus ${version}, the Nexus control plane from this Mac
   nexus abort|retry|retry-pylon|wake <thread>
   nexus archive|unarchive|delete <thread>
   nexus projects
-  nexus project edit <id> [--node N] [--branch B] [--cpus n] [--memory GiB] [--disk GiB]
+  nexus project edit <id> [--node N|auto] [--branch B] [--cpus n] [--memory GiB] [--disk GiB]
     [--allow-host HOST]... [--login claude|chatgpt]... [--secret NAME:HOST[,HOST]...]...
     [--clear-hosts] [--clear-logins] [--clear-secrets] [--git-name NAME --git-email EMAIL | --clear-git-identity]
-  nexus project add <id> (<repo-url> | --scratch) --node N [--branch B] [--cpus n] [--memory GiB] [--disk GiB]
+  nexus project add <id> (<repo-url> | --scratch) [--node N|auto] [--branch B] [--cpus n] [--memory GiB] [--disk GiB]
                     [--allow-host HOST]... [--login claude|chatgpt]... [--secret NAME:HOST[,HOST]...]...
   nexus review <thread> [--pr N] [--rounds N] [--land]
     a reviewer on another model for the thread's open PR, round after round until it approves; --land merges and deploys under the merge policy
@@ -1053,10 +1053,8 @@ const commands: Readonly<Record<string, Command>> = {
       const repoUrl = url ?? null;
       const resources = { cpus: int(str(v, "cpus"), "--cpus", 2), memoryGiB: int(str(v, "memory"), "--memory", 4), diskGiB: int(str(v, "disk"), "--disk", 10) };
       const secrets = strs(v, "secret").map(secretGrantOf);
-      const node = str(v, "node");
-      if (node === undefined) throw new CliError("invalid", "project add needs --node. Run nexus nodes to list them");
       const p = await api("POST", "/v1/projects", {
-        id, repoUrl, defaultBranch: str(v, "branch") ?? "main", defaultNode: node, resources,
+        id, repoUrl, defaultBranch: str(v, "branch") ?? "main", defaultNode: str(v, "node") ?? "auto", resources,
         allowedHosts: strs(v, "allow-host"), secrets, logins: strs(v, "login"), preSetup: null,
       }) as Project;
       return { json: p, text: p.repoUrl === null ? `Added scratch project ${p.id} on ${p.defaultNode}` : `Added project ${p.id} (${p.repoUrl}) on ${p.defaultNode}` };

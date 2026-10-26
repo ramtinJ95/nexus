@@ -124,15 +124,15 @@ try {
   await shot("2-empty-start-dialog");
 
   await pw("click", "#start-body [data-new-project]");
-  await expect("the new-project dialog in place of the start dialog, on the first online node and main",
-    { projectOpen: true, startOpen: false, projectError: null, node: online, branch: "main" });
+  await expect("the new-project dialog in place of the start dialog, on auto and main",
+    { projectOpen: true, startOpen: false, projectError: null, node: "auto", branch: "main" });
   await shot("3-new-project-dialog");
 
   await pw("fill", "#project-id", "My App");
   await pw("fill", "#project-repo", repoUrl);
   await shot("4-filled-form");
 
-  const invalid = await refusal({ id: "My App", repoUrl, defaultNode: online, ...cliDefaults });
+  const invalid = await refusal({ id: "My App", repoUrl, defaultNode: "auto", ...cliDefaults });
   await pw("click", "#project button[type=submit]");
   await expect("the API's 400 in the dialog, which stays open", { projectOpen: true, projectError: invalid });
   await shot("5-error-invalid-id");
@@ -141,7 +141,7 @@ try {
   await pw("click", "#project button[type=submit]");
   await expect("the start dialog open on the new project, listed in the sidebar",
     { projectOpen: false, startOpen: true, checked: "acme", sidebar: ["acme"] });
-  if (!isDeepStrictEqual(registry.project("acme" as ProjectId), { id: "acme", repoUrl, defaultNode: online, ...cliDefaults })) {
+  if (!isDeepStrictEqual(registry.project("acme" as ProjectId), { id: "acme", repoUrl, defaultNode: "auto", ...cliDefaults })) {
     throw new Error(`the added project is not the CLI's: ${JSON.stringify(registry.project("acme" as ProjectId))}`);
   }
   console.log("ok: the added project has the CLI's defaults");

@@ -207,7 +207,7 @@ const projectSchema = z.strictObject({
   id: name.transform((id) => id as ProjectId),
   repoUrl: gitUrl.nullable(),
   defaultBranch: z.string().min(1),
-  defaultNode: z.string().min(1).transform((node) => node as NodeName),
+  defaultNode: z.string().min(1).transform((node) => node as NodeName | "auto"),
   resources: z.strictObject({ cpus: z.int().positive(), memoryGiB: z.int().positive(), diskGiB: z.int().positive() }),
   allowedHosts: z.array(host),
   secrets: z.array(z.strictObject({ name: z.string().regex(/^[A-Z_][A-Z0-9_]*$/), hosts: z.array(z.string().regex(/^(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/)).min(1) }))
@@ -291,9 +291,13 @@ export async function startApi(options: ApiOptions): Promise<Api> {
     wake(registry.pylon(t.pylonId)!.node);
   }
 
+  function refuseUnknownNode(project: Project) {
+    if (project.defaultNode !== "auto" && registry.node(project.defaultNode) === undefined) throw new HttpError(400, `no node ${project.defaultNode}`);
+  }
+
   function createProject(body: unknown): Project {
     const project: Project = parse(projectSchema, body);
-    if (registry.node(project.defaultNode) === undefined) throw new HttpError(400, `no node ${project.defaultNode}`);
+    refuseUnknownNode(project);
     if (registry.project(project.id) !== undefined) throw new HttpError(409, `project ${project.id} exists`);
     registry.createProject(project);
     return project;
@@ -748,7 +752,7 @@ export async function startApi(options: ApiOptions): Promise<Api> {
       const patch = parse(projectEditSchema, await r.body());
       const project = registry.editProject(id as ProjectId, (previous) => {
         const updated: Project = parse(projectSchema, { ...previous, ...patch, resources: { ...previous.resources, ...patch.resources } });
-        if (registry.node(updated.defaultNode) === undefined) throw new HttpError(400, `no node ${updated.defaultNode}`);
+        refuseUnknownNode(updated);
         return updated;
       });
       if (project === undefined) throw new HttpError(404, `no project ${id}`);
