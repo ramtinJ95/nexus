@@ -77,15 +77,17 @@ export const overcommitted = (c: NodeRecord["capacity"]): boolean => c !== null 
 export interface Tally { pylons: number; cpus: number; memoryGiB: number }
 /**
  * The pylons in a node's latest observation, by what they hold. One that is up holds its CPUs and memory, and a paused
- * one needs them back to wake. An archived one, whose thread is archived or deleted, stays paused. An orphaned VM is one
+ * one needs them back to wake. An archived one, whose thread is archived or deleted, stays paused. A crashed one, broken
+ * because its controller exited or failed to boot the VM, holds only its disk, and needs its CPUs and memory back for a
+ * retry. An orphaned VM is one
  * the registry has not placed on the node, whose CPUs and memory the control plane does not know.
  */
-export interface NodePylons { up: Tally; paused: Tally; archived: Tally; orphaned: readonly PylonId[] }
+export interface NodePylons { up: Tally; paused: Tally; archived: Tally; crashed: Tally; orphaned: readonly PylonId[] }
 
 export function nodePylons(registry: Registry, node: NodeRecord): NodePylons | null {
   if (node.observation === null) return null;
   const zero = (): Tally => ({ pylons: 0, cpus: 0, memoryGiB: 0 });
-  const tallies = { up: zero(), paused: zero(), archived: zero() };
+  const tallies = { up: zero(), paused: zero(), archived: zero(), crashed: zero() };
   const orphaned: PylonId[] = [];
   for (const seen of node.observation.pylons) {
     const p = registry.pylon(seen.pylonId);
@@ -94,7 +96,8 @@ export function nodePylons(registry: Registry, node: NodeRecord): NodePylons | n
       continue;
     }
     const { status } = registry.thread(p.thread as ThreadId)!;
-    const tally = tallies[seen.phase !== "stopped" ? "up" : status === "archived" || status === "deleted" ? "archived" : "paused"];
+    const tally = tallies[seen.phase === "broken" && seen.cause === "controller" ? "crashed"
+      : seen.phase !== "stopped" ? "up" : status === "archived" || status === "deleted" ? "archived" : "paused"];
     tally.pylons += 1;
     tally.cpus += p.boot.resources.cpus;
     tally.memoryGiB += p.boot.resources.memoryGiB;

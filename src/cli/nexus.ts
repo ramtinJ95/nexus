@@ -248,7 +248,8 @@ function capacityText(c: Partial<NonNullable<NodeSummary["capacity"]>>, overcomm
 }
 
 /**
- * Such as `5 up holding 20 CPUs and 40 GiB, 1 paused needing 8 GiB to wake, 3 archived, 1 orphaned (pylon-x)`. Empty
+ * Such as `5 up holding 20 CPUs and 40 GiB, 1 paused needing 8 GiB to wake, 3 archived, 1 crashed needing 8 GiB to retry,
+ * 1 orphaned (pylon-x)`. Empty
  * for a node with no pylons, or never observed, or from a control plane older than 0.22.0, which sends no `pylons`.
  */
 function pylonsText(p: NodePylons | null): string {
@@ -257,6 +258,8 @@ function pylonsText(p: NodePylons | null): string {
     ...p.up.pylons === 0 ? [] : [`${p.up.pylons} up holding ${p.up.cpus} CPUs and ${gib(p.up.memoryGiB)} GiB`],
     ...p.paused.pylons === 0 ? [] : [`${p.paused.pylons} paused needing ${gib(p.paused.memoryGiB)} GiB to wake`],
     ...p.archived.pylons === 0 ? [] : [`${p.archived.pylons} archived`],
+    // A control plane older than `crashed` counts such pylons as up.
+    ...(p.crashed?.pylons ?? 0) === 0 ? [] : [`${p.crashed.pylons} crashed needing ${gib(p.crashed.memoryGiB)} GiB to retry`],
     ...p.orphaned.length === 0 ? [] : [`${p.orphaned.length} orphaned (${p.orphaned.join(", ")})`],
   ].join(", ");
 }

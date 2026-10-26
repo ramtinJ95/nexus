@@ -418,14 +418,15 @@ Committed CPUs and memory count every VM on the node whose controller is alive: 
 ```ts
 interface Tally { pylons: number; cpus: number; memoryGiB: number }
 interface NodePylons {
-  up: Tally;       // every phase but stopped: holds its CPUs and memory
+  up: Tally;       // every phase but stopped, and broken but for a controller that exited: holds its CPUs and memory
   paused: Tally;   // stopped, thread not archived or deleted: a wake needs its CPUs and memory back
   archived: Tally; // stopped, thread archived or deleted
+  crashed: Tally;  // broken because its controller exited or failed to boot the VM: holds only its disk, and a retry needs its CPUs and memory back
   orphaned: PylonId[]; // in the observation but not placed on this node by the registry, so its resources are unknown
 }
 ```
 
-A tally's CPUs and memory are what each pylon's boot asked for. Plain `nodes` prints the classes that have pylons on a line under the node, such as `  pylons: 5 up holding 20 CPUs and 40 GiB, 1 paused needing 8 GiB to wake, 3 archived, 1 orphaned (pylon-x)`. A control plane older than 0.22.0 sends neither field, so plain `nodes` then prints no mark and no `pylons` line.
+A tally's CPUs and memory are what each pylon's boot asked for. Plain `nodes` prints the classes that have pylons on a line under the node, such as `  pylons: 5 up holding 20 CPUs and 40 GiB, 1 paused needing 8 GiB to wake, 3 archived, 1 crashed needing 8 GiB to retry, 1 orphaned (pylon-x)`. A control plane older than 0.22.0 sends neither field, so plain `nodes` then prints no mark and no `pylons` line.
 
 ### A thread's size (0.22.0)
 

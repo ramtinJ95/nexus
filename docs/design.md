@@ -69,7 +69,7 @@ A start may size its thread over its project's resources, field by field, so one
 
 Every start reserves the room it placed its pylon in, whichever way the node was chosen, from the choice until the pylon's registry row exists or the start fails. A harness thread's conversation is created between the two, so without the reservation two overlapping `auto` starts would choose the same room. The registry holds the reservations in memory, shared by the API and the review loop. A crash ends the starts that held them, so losing the reservations loses nothing.
 
-`nexus nodes` and the dashboard say which nodes are overcommitted, and sort each node's observed pylons into up, paused, archived and orphaned, so a person can see what a full node holds and what its paused pylons need to wake.
+`nexus nodes` and the dashboard say which nodes are overcommitted, and sort each node's observed pylons into up, paused, archived, crashed and orphaned, so a person can see what a full node holds and what its paused pylons need to wake.
 
 A scheduler that places work on its own still needs:
 

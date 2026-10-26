@@ -216,7 +216,7 @@ test("nodes are listed with their state and capacity, without the observation", 
   const none = { pylons: 0, cpus: 0, memoryGiB: 0 };
   s.registry.apply({ record: "node", node, state: "online", capacity });
   s.registry.ingested({ node, observedAt: "2027-01-01T00:01:00Z", probeBootId: "b", capacity, artifacts: [], jobs: [], pylons: [], grants: { secrets: [], gitSsh: false }, previewRoutes: [] }, []);
-  assert.deepEqual((await s.call("GET", "/v1/nodes")).body, [{ ...offline, state: "online", capacity, observedAt: "2027-01-01T00:01:00Z", pylons: { up: none, paused: none, archived: none, orphaned: [] } }]);
+  assert.deepEqual((await s.call("GET", "/v1/nodes")).body, [{ ...offline, state: "online", capacity, observedAt: "2027-01-01T00:01:00Z", pylons: { up: none, paused: none, archived: none, crashed: none, orphaned: [] } }]);
 });
 
 test("a thread cannot start before an image is current", async (t) => {
@@ -536,16 +536,18 @@ test("an overlapping start's reservation holds the start's own size", async (t) 
   assert.deepEqual(two.body.placement.weighed.find((w: { node: string }) => w.node === "a").left.memoryGiB, 0, "a counts the 12 GiB One reserved there, then Two's 4");
 });
 
-test("nodes report whether they are overcommitted, and their observed pylons as up, paused, archived and orphaned", async (t) => {
+test("nodes report whether they are overcommitted, and their observed pylons as up, paused, archived, crashed and orphaned", async (t) => {
   const s = await withImage(t);
   const started = async (title: string) => (await s.call("POST", "/v1/threads", { project: "acme", title, node: "a" })).body as Thread;
   observeNode(s, "a", { total: 64, committed: 0 });
-  const [up, paused, archived] = [await started("Up"), await started("Paused"), await started("Archived")];
+  const [up, paused, archived, failing, crashed] = [await started("Up"), await started("Paused"), await started("Archived"), await started("Failing"), await started("Crashed")];
   assert.equal((await s.call("POST", `/v1/threads/${archived.id}/archive`)).status, 200);
   s.registry.savePylon({ ...s.registry.pylon(up.pylonId)!, boot: { ...s.registry.pylon(up.pylonId)!.boot, resources: { cpus: 4, memoryGiB: 8, diskGiB: 10 } } });
   const stopped = (t: Thread) => ({ pylonId: t.pylonId, phase: "stopped" as const, checkpoint: null, sessions: null });
   observeNode(s, "a", { total: 6, committed: 8 }, {
-    pylons: [{ pylonId: up.pylonId, phase: "booting" }, stopped(paused), stopped(archived), { pylonId: "pylon-gone" as PylonId, phase: "booting" }],
+    pylons: [{ pylonId: up.pylonId, phase: "booting" }, stopped(paused), stopped(archived), { pylonId: "pylon-gone" as PylonId, phase: "booting" },
+      { pylonId: failing.pylonId, phase: "broken", detail: "a service did not start", cause: "services" },
+      { pylonId: crashed.pylonId, phase: "broken", detail: "the controller exited", cause: "controller" }],
   });
   observeNode(s, "old", { total: 6, committed: 8 });
   s.registry.apply({ record: "node", node: "old" as NodeName, state: "online", capacity: { memoryGiB: 6, committedMemoryGiB: 8, diskFreeGiB: 100 } as never });
@@ -553,8 +555,9 @@ test("nodes report whether they are overcommitted, and their observed pylons as 
   const of = (name: string) => nodes.find((n) => n.name === name)!;
   assert.equal(of("a").overcommitted, true);
   assert.deepEqual(of("a").pylons, {
-    up: { pylons: 1, cpus: 4, memoryGiB: 8 }, paused: { pylons: 1, cpus: 2, memoryGiB: 4 }, archived: { pylons: 1, cpus: 2, memoryGiB: 4 }, orphaned: ["pylon-gone"],
-  });
+    up: { pylons: 2, cpus: 6, memoryGiB: 12 }, paused: { pylons: 1, cpus: 2, memoryGiB: 4 }, archived: { pylons: 1, cpus: 2, memoryGiB: 4 },
+    crashed: { pylons: 1, cpus: 2, memoryGiB: 4 }, orphaned: ["pylon-gone"],
+  }, "a VM whose service failed still holds its CPUs and memory, and one whose controller exited holds only its disk");
   assert.equal(of("old").overcommitted, false, "a probe from before pylons were counted reports a committed memory that means nothing");
   assert.deepEqual([of(node).overcommitted, of(node).pylons], [false, null], "a node never observed has no pylons to report");
 });
