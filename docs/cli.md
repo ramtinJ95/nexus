@@ -499,9 +499,11 @@ Inside a pylon, `nexus event <kind> [--session ID] [--message TEXT] [--at MS]` r
 `session.turn-started`, `session.heartbeat`, `session.turn-ended`, `session.waiting`, or `session.ended`
 for that pylon's own thread. The image installs UserPromptSubmit, throttled PostToolUse, Stop,
 Notification (permission and input prompts), and SessionEnd hooks,
-merged alongside Herdr's hooks on every agent-setup install. Hook delivery is
-best effort while the local probe is unavailable; see the data model's buffer and
-retention limits.
+merged alongside Herdr's hooks on every agent-setup install. The hooks do not run
+`nexus event`. They write to an outbox in the pylon, which a sender delivers once
+the local probe answers, so a probe restart delays reports rather than losing
+them; see the data model's outbox and buffer limits. `nexus event` itself sends
+once and fails while the probe is unavailable.
 
 A session's working lease expires after 30 minutes without reports. PostToolUse
 sends at most one heartbeat per five minutes per session, renewing the lease
@@ -513,7 +515,7 @@ Waiting state has no TTL and records no activity: an unanswered question remains
 waiting until a later session event, archive or deletion. Heartbeats renew
 working sessions or resume waiting sessions when stamped later than the waiting
 event; they never create sessions or revive ended ones. Hooks capture
-`--at` before detaching their sender; control rejects older per-session reports.
+the event's time before writing it to the outbox; control rejects older per-session reports.
 This orders delivery without trusting a pylon timestamp to keep its lease alive.
 
 ### Claude model and launch safety (0.16.0)

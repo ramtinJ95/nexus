@@ -1,0 +1,20 @@
+probe: {"t":"2026-10-26T05:14:34.186Z","started":true,"pid":1570,"replayed":0,"sessionTurnRunning":false,"lastReplyAt":null,"sessionEvents":[]}
+== a Claude Code turn starts
+probe: {"t":"2026-10-26T05:14:35.199Z","journaled":1,"kind":"session.turn-started","at":1792991675101,"sessionTurnRunning":true,"lastReplyAt":null,"sessionEvents":["session.turn-started"]}
+== killing the probe mid-turn
+claude: done
+./run.sh: line 38:  1570 Killed                  node "$here/stand-in-probe.ts" "$port" "$work/state"
+      1571 Done                    | sed -u 's/^/probe: /'
+== Claude's turn and session ended; the probe is still down. Outbox:
+0001792991696814-1861-fa09f31f.json
+0001792991698521-1886-11072226.json
+0001792991698604-1905-b5ad6377.json
+sender running: 1
+== the probe comes back, losing its first acknowledgement
+probe: {"t":"2026-10-26T05:15:14.222Z","started":true,"pid":2406,"replayed":1,"sessionTurnRunning":true,"lastReplyAt":null,"sessionEvents":["session.turn-started"]}
+probe: {"t":"2026-10-26T05:15:22.430Z","journaled":2,"kind":"session.heartbeat","at":1792991696814,"sessionTurnRunning":true,"lastReplyAt":null,"sessionEvents":["session.turn-started","session.heartbeat"]}
+probe: {"t":"2026-10-26T05:15:22.430Z","droppedAnswer":200}
+probe: {"t":"2026-10-26T05:15:32.452Z","journaled":3,"kind":"session.heartbeat","at":1792991696814,"sessionTurnRunning":true,"lastReplyAt":null,"sessionEvents":["session.turn-started","session.heartbeat"]}
+probe: {"t":"2026-10-26T05:15:32.471Z","journaled":4,"kind":"session.turn-ended","at":1792991698521,"sessionTurnRunning":false,"lastReplyAt":1792991732467,"sessionEvents":["session.turn-started","session.heartbeat","session.turn-ended"]}
+probe: {"t":"2026-10-26T05:15:32.482Z","journaled":5,"kind":"session.ended","at":1792991698604,"sessionTurnRunning":false,"lastReplyAt":1792991732467,"sessionEvents":["session.turn-started","session.heartbeat","session.turn-ended","session.ended"]}
+== outbox empty, sender exited

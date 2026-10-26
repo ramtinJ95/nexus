@@ -173,14 +173,28 @@ pylon identity; control maps it to its registered thread and verifies its node.
 There is no arbitrary API forwarding. Never include credentials or full tool
 output in a message.
 
-The production probe journals its last 100 session reports in `events.sqlite`
-under its state root. Observations replay that journal after a link or probe
+A report crosses two hops, and each has its own buffer. From hook to probe, the
+hook writes the event to `~/.nexus/outbox` in the pylon, one JSON file per event
+named by its stamp, and starts a sender. The sender holds a lock that dies with
+it, so one runs at a time, and it posts the oldest event until the probe answers.
+It deletes the event on a 200 or a 4xx, which no retry would change, and retries
+anything else after 0.5 seconds, doubling to at most 10. It exits when the outbox
+is empty. A pylon paused before its outbox emptied delivers the rest after its
+next hook. The outbox holds at most 1,000 events. A full one drops its oldest,
+so the newest state, such as the latest turn end, is what survives. An event
+older than a day is dropped unsent. Neither wait holds up Claude, whose hook only
+writes the file.
+
+From probe to control, the production probe journals its last 100 session
+reports in `events.sqlite` under its state root, and answers the hook only after
+the journal commits. Observations replay that journal after a link or probe
 restart; `event_receipts` deduplicates its sequence per node. This is a bounded
-outage buffer, not an unbounded delivery guarantee. The hooks detach a CLI process
-with a 1.5-second request deadline. A hook cannot block Claude on a disconnected
-control plane; reports can be lost if the local probe itself is unavailable, or
-an outage exceeds the probe's buffer. The registry cursor guarantee begins once
-control has accepted an event.
+buffer for a control plane that is not following the probe, not an unbounded
+delivery guarantee: more than 100 reports on a node while control is away loses
+the oldest. A sender whose answer was lost posts the event again, and the probe
+journals it under a new sequence. Control then sees the same kind and stamp as
+the session's last applied report and ignores it. The registry cursor guarantee
+begins once control has accepted an event.
 
 `session_activity` holds at most 16 rows per thread, evicting the least recently
 updated row (insertion order breaks ties). Turn end and SessionEnd remove the row;
@@ -239,11 +253,11 @@ use the image's hooks. A Claude started inside another Claude session, or under 
 HOME other than the pylon user's, reports nothing.
 
 The hook captures `at`, the pylon's Unix-millisecond time, before throttling or
-spawning its detached sender. `nexus event --at MS` preserves that timestamp;
+writing the event to the outbox, which delivers it unchanged. `nexus event --at MS` also preserves a timestamp;
 manual event commands default to their own current time. The probe validates it
 but never uses it for identity. Control ignores reports older than the last
 applied report for that session. For equal timestamps, waiting or terminal state
-wins over start/heartbeat. Old images without `at` fall back to probe receipt time.
+wins over start/heartbeat, and the same kind is a resend. Old images without `at` fall back to probe receipt time.
 Source time orders reports only; it cannot extend a receipt-time working lease.
 
 Ordering survives activity-row deletion and control restart: `session_order`
