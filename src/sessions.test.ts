@@ -293,6 +293,28 @@ test("a pane Herdr restored without its agent gets the agent started in place", 
   assert.deepEqual(guest.execs.find((a) => a[3] === "agent")!.slice(6), ["--kind", "claude", "--pane", "w1:p1", "--timeout", "30000", "--", "--resume", "bd2c2d6b", "--permission-mode", "bypassPermissions"]);
 });
 
+test("a Claude session whose pane cannot be inspected is neither started again nor closed in any of its panes", async () => {
+  const records: SessionRecord[] = [
+    { herdrPane: "w1:p1", harness: "claude-code", title: "review", cwd: "/home/user/workspace/repo", harnessSessionId: "bd2c2d6b" },
+    { herdrPane: "w2:p1", harness: "claude-code", title: "Claude Code", cwd: "/home/user/workspace/repo", harnessSessionId: "bd2c2d6b" },
+  ];
+  const live = herdrSnapshot([{ id: "w1", label: "review" }, { id: "w2", label: "Claude Code" }], [
+    herdrPane("w1:p1", "w1", "claude", "working", { kind: "id", value: "bd2c2d6b" }),
+    herdrPane("w2:p1", "w2", null, "unknown"),
+  ]);
+  const guest = withSessionsFile(records, (argv) => {
+    const sub = argv.slice(0, 2).join(" ");
+    if (sub === "workspace list") return herdrOk({ type: "workspace_list", workspaces: [] });
+    if (sub === "api snapshot") return herdrOk(live);
+    if (sub === "pane process-info") return argv[3] === "w1:p1" ? herdrError("timeout", "process-info timed out") : processInfo({})(argv);
+    throw new Error(`unscripted ${sub}`);
+  });
+  const outcomes = await relaunchSessions(guest);
+  assert.deepEqual(outcomes.map((o) => [o.record.title, o.result, o.herdrPane]), [["review", "failed", "w1:p1"], ["Claude Code", "failed", "w2:p1"]]);
+  assert.match(outcomes[0]!.result === "failed" ? outcomes[0]!.message : "", /whether w1:p1 still runs the session could not be read.*process-info timed out/);
+  assert.deepEqual(guest.herdrCalls().filter((c) => c === "agent start" || c === "pane close" || c === "workspace close"), []);
+});
+
 test("a pane Herdr still reports as Claude, but that runs only its shell, gets Claude started in place", async () => {
   const records: SessionRecord[] = [{ herdrPane: "w1:p1", harness: "claude-code", title: "review", cwd: "/home/user", harnessSessionId: "bd2c2d6b" }];
   const live = herdrSnapshot([{ id: "w1", label: "review" }], [herdrPane("w1:p1", "w1", "claude", "idle", { kind: "id", value: "bd2c2d6b" })]);

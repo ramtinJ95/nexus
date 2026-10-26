@@ -545,19 +545,28 @@ async function relaunch(guest: Guest, file: SessionsFile, records: readonly Sess
 
   // Herdr's agent fact outlives a failed start, so an agent counts as present only if its pane runs it.
   const present = new Set<SessionRecord>();
+  const unreadable = new Map<SessionRecord, Error>();
   for (const [r, pane] of claimed) {
     const agent = agents[r.harness];
-    if (agent === null ? pane.harness === "shell" : await runsAgent(guest, pane.herdrPane, agent.kind).catch(() => false)) present.add(r);
+    try {
+      if (agent === null ? pane.harness === "shell" : await runsAgent(guest, pane.herdrPane, agent.kind)) present.add(r);
+    } catch (err) {
+      unreadable.set(r, err as Error);
+    }
   }
-  const claudeRecords = (id: string) => records.filter((r) => r.harness === "claude-code" && r.harnessSessionId === id);
-  const kept = (r: SessionRecord) => r.harness !== "claude-code" || r.harnessSessionId === null
-    || r === (claudeRecords(r.harnessSessionId).find((other) => present.has(other)) ?? claudeRecords(r.harnessSessionId)[0]);
+  const recordsOf = (r: SessionRecord) => r.harness === "claude-code" && r.harnessSessionId !== null
+    ? records.filter((other) => other.harness === "claude-code" && other.harnessSessionId === r.harnessSessionId) : [r];
+  // Any of a session's panes might still run it, so none of them is started or closed.
+  const doubt = (r: SessionRecord) => recordsOf(r).flatMap((other) => unreadable.has(other) ? [{ pane: claimed.get(other)!.herdrPane, err: unreadable.get(other)! }] : [])[0];
+  const kept = (r: SessionRecord) => r === (recordsOf(r).find((other) => present.has(other)) ?? recordsOf(r)[0]);
 
   const outcomes: RelaunchOutcome[] = [];
   for (const r of records) {
     const pane = claimed.get(r);
     const resume = r.harnessSessionId ?? undefined;
     try {
+      const unsure = present.has(r) ? undefined : doubt(r);
+      if (unsure) throw new Error(`whether ${unsure.pane} still runs the session could not be read, so it was not started again: ${unsure.err.message}`);
       if (!kept(r)) {
         if (pane) await closeSession(guest, pane.herdrPane);
         outcomes.push({ record: r, result: "dropped", herdrPane: pane?.herdrPane ?? null });
