@@ -99,7 +99,10 @@ export function threadStarter(options: { registry: Registry; harness: Pick<Harne
     const { node } = placement;
     const release = registry.reserve(pylonId, node, resources);
     try {
-      const read = await readSetup(project, branch, request.commit);
+      // A template's disk is its project's size, and a pylon's disk size is fixed once it exists.
+      const read: SetupRead = resources.diskGiB !== project.resources.diskGiB
+        ? { fresh: `the start asked for a ${resources.diskGiB} GiB disk, and this project's templates have ${project.resources.diskGiB} GiB` }
+        : await readSetup(project, branch, request.commit);
 
       const conversationId = request.claude === undefined && request.bare !== true ? await harness.startThread({ threadId: id, pylonId }) : null;
       const now = Date.now();

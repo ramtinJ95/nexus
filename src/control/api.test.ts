@@ -484,6 +484,18 @@ test("--node auto refuses an overcommitted node with its reason, and places the 
   assert.deepEqual(started.body.placement.weighed.find((w: { node: string }) => w.node === "firebat"), { node: "firebat", refused: "is overcommitted, with 40 of 22.8 GiB of memory committed" });
 });
 
+test("a start whose disk differs from its project's boots fresh without a template, and one that changes only CPUs or memory may use one", async (t) => {
+  const s = await withImage(t);
+  s.remoteReads(async () => ({ commit: "1".repeat(40), setupBlob: "b".repeat(40) }));
+  const disk = (await s.call("POST", "/v1/threads", { project: "acme", title: "Disk", resources: { diskGiB: 40 } })).body as Thread;
+  assert.deepEqual(disk.setup, { how: "fresh", reason: "the start asked for a 40 GiB disk, and this project's templates have 10 GiB" });
+  assert.deepEqual([s.reads, s.registry.templates(project.id as ProjectId)], [[], []], "nothing is read, and no template of the project's size is built for it");
+  const memory = (await s.call("POST", "/v1/threads", { project: "acme", title: "Memory", resources: { memoryGiB: 12 } })).body as Thread;
+  assert.equal(memory.setup?.how, "fresh");
+  assert.ok(memory.setup?.how === "fresh" && memory.setup.building !== undefined, "it asks for the project's template, whose disk it can boot");
+  assert.deepEqual(s.reads, [{ branch: "main" }]);
+});
+
 test("a start's size overrides its project's field by field, its pylon boots that size, and thread detail reads it back", async (t) => {
   const s = await withImage(t);
   const bigger = await s.call("POST", "/v1/threads", { project: "acme", title: "Bigger", resources: { memoryGiB: 12 } });
