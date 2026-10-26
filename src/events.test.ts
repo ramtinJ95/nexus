@@ -99,7 +99,7 @@ test("a held turn end heartbeats every five minutes while the command runs, and 
     await holdTurnEnd({
       running: async () => now < exitsAfterMs,
       superseded: async () => now >= supersededAfterMs,
-      report: (kind, message) => reports.push(message === undefined ? [kind, now / 60_000] : [kind, now / 60_000, message]),
+      report: async (kind, message) => { reports.push(message === undefined ? [kind, now / 60_000] : [kind, now / 60_000, message]); },
     }, { now: () => now, sleep: async (ms) => { now += ms; } });
     return reports;
   };
@@ -109,6 +109,68 @@ test("a held turn end heartbeats every five minutes while the command runs, and 
   assert.deepEqual(capped.slice(-2), [["session.turn-ended", 120, backgroundStillRunning], ["session.waiting", 120, backgroundStillRunning]]);
   assert.deepEqual(await run(Infinity, 7 * 60_000), [["session.heartbeat", 5]], "a newer Stop's hold takes over and this one stops");
   assert.deepEqual(await run(3 * 60_000, 3.2 * 60_000), [], "a hold superseded while it settles sends no turn end");
+});
+
+test("at the cap the waiting report is sent only after the turn end's sender finishes, so the turn end cannot clear it", async () => {
+  const { holdTurnEnd } = await import("../images/pylon/nexus-heartbeat.ts");
+  let now = 0;
+  const log: string[] = [];
+  await holdTurnEnd({
+    running: async () => true,
+    superseded: async () => false,
+    report: async (kind) => {
+      if (kind === "session.heartbeat") return;
+      log.push(`${kind} sent`);
+      await new Promise((resolve) => setTimeout(resolve, kind === "session.turn-ended" ? 50 : 0));
+      log.push(`${kind} accepted`);
+    },
+  }, { now: () => now, sleep: async (ms) => { now += ms; } });
+  assert.deepEqual(log, ["session.turn-ended sent", "session.turn-ended accepted", "session.waiting sent", "session.waiting accepted"]);
+});
+
+test("the newest Stop's hold owns the session whatever order the holds start in, and only its owner releases it", async (t) => {
+  const { claimHold, holdSuperseded, releaseHold } = await import("../images/pylon/nexus-heartbeat.ts");
+  const dir = mkdtempSync(join(tmpdir(), "nexus-hold-"));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const owner = join(dir, "session");
+  assert.equal(await claimHold(owner, 2000, 22), true, "the newer Stop's hold starts first");
+  assert.equal(await claimHold(owner, 1000, 11), false, "the older one, starting later, finds a newer owner and exits");
+  assert.equal(await holdSuperseded(owner, 2000, 22), false);
+  await releaseHold(owner, 1000, 11);
+  assert.equal(await holdSuperseded(owner, 2000, 22), false, "a hold that never owned the session cannot release it");
+  assert.equal(await claimHold(owner, 3000, 33), true);
+  assert.equal(await holdSuperseded(owner, 2000, 22), true);
+  await releaseHold(owner, 2000, 22);
+  assert.equal(await holdSuperseded(owner, 3000, 33), false, "a superseded hold's release leaves the new owner");
+  const claims = await Promise.all(Array.from({ length: 20 }, (_, i) => claimHold(join(dir, "race"), 100 + i, 1000 + i)));
+  assert.equal(await holdSuperseded(join(dir, "race"), 119, 1019), false, "concurrent claims leave the newest Stop's hold as owner");
+  assert.equal(claims[19], true);
+  await releaseHold(owner, 3000, 33);
+  assert.equal(await holdSuperseded(owner, 3000, 33), true, "the owner's release frees the session");
+});
+
+test("a group counts only while its leader is the process that started it, or its leader is gone and a member lives", async (t) => {
+  const { backgroundRunning } = await import("../images/pylon/nexus-heartbeat.ts");
+  const { mkdirSync, writeFileSync } = await import("node:fs");
+  const proc = mkdtempSync(join(tmpdir(), "nexus-proc-"));
+  t.after(() => rmSync(proc, { recursive: true, force: true }));
+  const processes = (list: [pid: number, ppid: number, pgid: number, start: number][]) => {
+    rmSync(proc, { recursive: true, force: true });
+    for (const [pid, ppid, pgid, start] of list) {
+      mkdirSync(join(proc, String(pid)), { recursive: true });
+      const rest = Array.from({ length: 13 }, () => "0").join(" ");
+      writeFileSync(join(proc, String(pid), "stat"), `${pid} (python3) S ${ppid} ${pgid} ${pgid} 0 -1 ${rest} ${start} 0`);
+    }
+  };
+  const build = { pgid: 4200, start: 5_000 };
+  processes([[4200, 100, 4200, 5_000]]);
+  assert.equal(await backgroundRunning("c1", [], [build], proc), true);
+  processes([[4201, 4200, 4200, 5_010]]);
+  assert.equal(await backgroundRunning("c1", [], [build], proc), true, "a member outlives its leader");
+  processes([[4200, 100, 4200, 9_000]]);
+  assert.equal(await backgroundRunning("c1", [], [build], proc), false, "a later group reusing the ID");
+  processes([[4200, 100, 4300, 9_000], [4300, 1, 4300, 8_000]]);
+  assert.equal(await backgroundRunning("c1", [], [build], proc), false, "a later process reusing the ID in another group");
 });
 
 test("a background command runs while its process group lives, through exec or closed output, and MCP servers in Claude's group do not count", { skip: process.platform !== "linux" && "reads /proc" }, async (t) => {
@@ -125,7 +187,7 @@ test("a background command runs while its process group lives, through exec or c
   const mcp = await start("exec sleep 30", false);
   await new Promise((resolve) => setTimeout(resolve, 100));
   const groups = await backgroundGroups(process.pid);
-  assert.deepEqual(groups, [build.pid]);
+  assert.deepEqual(groups.map((g) => g.pgid), [build.pid]);
   assert.equal(await backgroundRunning("c1", ["b6fh14jr7"], groups), true);
   process.kill(-build.pid!, "SIGKILL");
   await once(build, "exit");

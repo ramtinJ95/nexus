@@ -25,7 +25,8 @@ export function reportedKind(kind: string, input: { background_tasks?: unknown }
   return shells.length > 0 ? { kind: "session.heartbeat", shells } : { kind };
 }
 
-type HeldReport = (kind: "session.heartbeat" | "session.turn-ended" | "session.waiting", message?: string) => void;
+/** Resolves once the report is sent, so the turn end at the cap arrives before the waiting that follows it. */
+type HeldReport = (kind: "session.heartbeat" | "session.turn-ended" | "session.waiting", message?: string) => Promise<void>;
 
 /**
  * Run detached after a Stop, and given up for a newer Stop's hold of the same session. Every report carries the
@@ -40,25 +41,62 @@ export async function holdTurnEnd(
   let beat = start;
   while (await running()) {
     if (now() - start >= backgroundShellCapMs) {
-      report("session.turn-ended", backgroundStillRunning);
-      report("session.waiting", backgroundStillRunning);
+      await report("session.turn-ended", backgroundStillRunning);
+      await report("session.waiting", backgroundStillRunning);
       return;
     }
     await sleep(60_000);
     if (await superseded()) return;
-    if (now() - beat >= heartbeatIntervalMs) { beat = now(); report("session.heartbeat"); }
+    if (now() - beat >= heartbeatIntervalMs) { beat = now(); await report("session.heartbeat"); }
   }
   await sleep(settleMs);
-  if (!await superseded()) report("session.turn-ended");
+  if (!await superseded()) await report("session.turn-ended");
 }
 
-type Proc = { pid: number; ppid: number; pgid: number };
+/**
+ * Makes this hold the session's, unless a hold for a newer Stop already is: holds start in any order, and only the
+ * newest Stop's reports are not stale. Answers whether it did.
+ */
+export async function claimHold(path: string, stamp: number, pid: number): Promise<boolean> {
+  for (let tries = 0; tries < 200; tries++) {
+    const claimed = await locked(path, async () => {
+      const [owner] = (await readFile(path, "utf8").catch(() => "0")).split(" ");
+      if (Number(owner) >= stamp) return false;
+      await writeFile(path, `${stamp} ${pid}`);
+      return true;
+    });
+    if (claimed !== undefined) return claimed;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  return false;
+}
+
+/** Gives the session up at the end, unless a newer hold has claimed it. */
+export async function releaseHold(path: string, stamp: number, pid: number): Promise<void> {
+  for (let tries = 0; tries < 200; tries++) {
+    const released = await locked(path, async () => {
+      if (!await holdSuperseded(path, stamp, pid)) await rm(path, { force: true });
+      return true;
+    });
+    if (released) return;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+}
+
+/** Whether another hold has claimed the session since this one did. */
+export async function holdSuperseded(path: string, stamp: number, pid: number): Promise<boolean> {
+  return await readFile(path, "utf8").catch(() => "") !== `${stamp} ${pid}`;
+}
+
+type Proc = { pid: number; ppid: number; pgid: number; start: number };
+/** A process group, with its leader's start time, so a later group that reuses the ID is not taken for it. */
+export type Group = { pgid: number; start: number };
 
 async function processes(proc: string): Promise<Proc[]> {
   const stats = await Promise.all((await readdir(proc)).filter((name) => /^\d+$/.test(name)).map((pid) => readFile(`${proc}/${pid}/stat`, "utf8").catch(() => "")));
   return stats.flatMap((stat) => {
     const fields = stat.slice(stat.lastIndexOf(")") + 2).split(" ");
-    return stat === "" ? [] : [{ pid: Number(stat.slice(0, stat.indexOf(" "))), ppid: Number(fields[1]), pgid: Number(fields[2]) }];
+    return stat === "" ? [] : [{ pid: Number(stat.slice(0, stat.indexOf(" "))), ppid: Number(fields[1]), pgid: Number(fields[2]), start: Number(fields[19]) }];
   });
 }
 
@@ -67,19 +105,24 @@ async function processes(proc: string): Promise<Proc[]> {
  * group of its own, which a command keeps through exec or closed output. Its stdio MCP servers stay in Claude's own
  * group. The calling hook's group is left out.
  */
-export async function backgroundGroups(claudePid: number, proc = "/proc", self = process.pid): Promise<number[]> {
+export async function backgroundGroups(claudePid: number, proc = "/proc", self = process.pid): Promise<Group[]> {
   const all = await processes(proc);
   const own = (pid: number) => all.find((p) => p.pid === pid)?.pgid;
-  return all.filter((p) => p.ppid === claudePid && p.pid === p.pgid && p.pgid !== own(claudePid) && p.pgid !== own(self)).map((p) => p.pgid);
+  return all.filter((p) => p.ppid === claudePid && p.pid === p.pgid && p.pgid !== own(claudePid) && p.pgid !== own(self)).map(({ pgid, start }) => ({ pgid, start }));
 }
 
 /**
  * Whether one of the groups still has a process, or, for a command that left its group, a process still writes to one
  * of the shells' output files, which Claude Code gives the command as stdout and stderr.
  */
-export async function backgroundRunning(session: string, shells: readonly string[], groups: readonly number[], proc = "/proc"): Promise<boolean> {
+export async function backgroundRunning(session: string, shells: readonly string[], groups: readonly Group[], proc = "/proc"): Promise<boolean> {
   const all = await processes(proc);
-  if (all.some((p) => groups.includes(p.pgid))) return true;
+  // The kernel reuses no ID while its group has a process, so a leader that started at another time leads another group.
+  const lives = ({ pgid, start }: Group) => {
+    const leader = all.find((p) => p.pid === pgid);
+    return leader === undefined ? all.some((p) => p.pgid === pgid) : leader.pgid === pgid && leader.start === start;
+  };
+  if (groups.some(lives)) return true;
   const outputs = shells.map((id) => `/${session}/tasks/${id}.output`);
   for (const { pid } of all) {
     for (const fd of ["1", "2"]) {
@@ -106,15 +149,20 @@ export async function claudeEnviron(pid: string | undefined, proc = "/proc"): Pr
 
 /** A lock covers the timestamp check too, so parallel tool hooks cannot all report at once. */
 export async function heartbeatDue(path: string, now = Date.now()): Promise<boolean> {
-  const lock = `${path}.lock`;
-  const held = await stat(lock).catch(() => null);
-  // Claude kills a hook after two seconds; a minute-old lock belongs to an interrupted hook.
-  if (held !== null && now - held.mtimeMs > 60_000) await rm(lock, { recursive: true, force: true });
-  try { await mkdir(lock); } catch { return false; }
-  try {
+  return await locked(path, async () => {
     const previous = Number(await readFile(path, "utf8").catch(() => "0"));
     if (now - previous < heartbeatIntervalMs) return false;
     await writeFile(path, String(now));
     return true;
-  } finally { await rm(lock, { recursive: true, force: true }); }
+  }, now) ?? false;
+}
+
+/** Runs `critical` under the path's lock, or answers undefined while another process holds it. */
+async function locked<T>(path: string, critical: () => Promise<T>, now = Date.now()): Promise<T | undefined> {
+  const lock = `${path}.lock`;
+  const held = await stat(lock).catch(() => null);
+  // Claude kills a hook after two seconds; a minute-old lock belongs to an interrupted hook.
+  if (held !== null && now - held.mtimeMs > 60_000) await rm(lock, { recursive: true, force: true });
+  try { await mkdir(lock); } catch { return undefined; }
+  try { return await critical(); } finally { await rm(lock, { recursive: true, force: true }); }
 }

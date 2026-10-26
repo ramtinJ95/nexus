@@ -818,7 +818,7 @@ async function claudeHooks(registry: ReturnType<typeof seeded>, clock: { now: nu
     const stop = held.pop()!;
     const exit = clock.now + exitsAfterMs;
     let gone = false;
-    return holdTurnEnd({ running: async () => clock.now < exit, superseded: async () => false, report: (kind, message) => send(kind, stop, message) }, {
+    return holdTurnEnd({ running: async () => clock.now < exit, superseded: async () => false, report: async (kind, message) => { send(kind, stop, message); } }, {
       now: () => clock.now,
       sleep: async (ms) => {
         clock.now += ms;
