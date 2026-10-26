@@ -126,6 +126,28 @@ These commands need more explanation:
 
 The shapes are TypeScript types. `Thread`, `Session` and `Preview` are in [`src/control/registry.ts`](../src/control/registry.ts). `Listing`, `Changes` and `Diff` are in [`src/checkout-files.ts`](../src/checkout-files.ts). `ThreadDetail`, `ListeningPort`, `OpenedSession` and `NodeSummary` are in [`src/control/api.ts`](../src/control/api.ts). `Project` is in [`src/project.ts`](../src/project.ts). `ConversationView`, `EntryRecord`, `LiveState` and `InboxState` come from `@earendil-works/pi-durable`. `ClaudeConversation` and `ClaudeEntry` are in [`src/claude-transcript.ts`](../src/claude-transcript.ts), and `ClaudeSent` is in [`src/control/registry.ts`](../src/control/registry.ts). Times in `Thread` are Unix milliseconds, and the observation times are ISO strings. A consumer must ignore fields it does not know.
 
+### Thread fields
+
+`Thread` and `ThreadRow`, and `ThreadDetail` at its top level, carry these fields. A field marked optional is left out rather than sent as false or null. Times are Unix milliseconds.
+
+| Field | Type | Meaning |
+|---|---|---|
+| `id`, `title`, `project`, `pylonId` | `string` | The thread, its title, its project and its pylon |
+| `status` | `"active" \| "idle" \| "archived" \| "deleted"` | The thread's status |
+| `conversationId` | `string \| null` | The Nexus agent's conversation. Null for a thread without one, such as a Claude worker thread |
+| `startedBy` | `string` | The tailnet node ID of the caller that started the thread, or `nexus-review` or `nexus-check` for a reviewer or check thread that the review loop started |
+| `createdAt` | `number` | When the thread started |
+| `agentTurnRunning` | `boolean` | A turn of the Nexus agent runs |
+| `sessionTurnRunning` | optional `true` | A turn of a session in the pylon runs, as its hooks report, such as the Claude worker's. A Claude worker thread works while this is present |
+| `sessionActiveUntil` | optional `number` | When that turn's working lease runs out without another report. Present with `sessionTurnRunning` |
+| `sessionWaiting` | optional `true` | A session in the pylon waits for input, such as a permission prompt |
+| `workingSince` | optional `number` | The earliest known start of the running turns, as `threads` describes |
+| `lastAgentActivityAt`, `lastHumanActivityAt` | `number` | The newest agent and human activity, which decide when the pylon pauses |
+| `seenAt`, `lastReplyAt` | `number \| null` | The shared seen marker and the latest reply, as the next section describes |
+| `attention`, `desired`, `pylon` | | In `ThreadRow` only, at the top level of `ThreadDetail` |
+
+`ThreadDetail` has `thread`, `attention`, `seenAt`, `lastReplyAt`, `desired`, `pylon` (`id`, `node`, `actualState`, `failed`, `observedAt`, `grantsOutdated` and `retryRefused`, why a retry cannot help or null), `sessions`, `previews`, `ports`, `outputs`, `prWatch`, `pullRequests`, `review`, `attach`, `agent` (`{ parkedTasks }`, or null for a thread without a Nexus agent conversation), and for a Claude worker thread `claudeWorker` (`model`, `state`, optional `message`).
+
 ### Attention and shared seen state
 
 `ThreadRow` has `seenAt`, `lastReplyAt` and `attention` at the top level. `ThreadDetail` has the same three fields at the top level; its `thread` also has the two stored timestamps. The timestamps are Unix milliseconds or null. `lastReplyAt` is when the latest agent turn ended, not each streamed chunk. `seenAt` is when a person last marked the conversation seen, from any client. Existing threads start with both timestamps null at migration; their next observed turn end supplies a reply timestamp. A turn found ended on control-plane recovery is dated at recovery, since its exact end time is not known.
