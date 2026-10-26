@@ -31,7 +31,7 @@ import type { WebSocket } from "ws";
 import { attachTerminal, processTty } from "./attach.ts";
 import { call, CliError, exitCodes, follow, upgrade, type Endpoint, type HostPort } from "./transport.ts";
 
-const version = "0.24.0";
+const version = "0.25.0";
 const defaults = { url: "http://rj-firebat.tailc817d3.ts.net:7470", socks: "localhost:1055" };
 const configFile = () => join(homedir(), ".config", "nexus", "cli.json");
 
@@ -250,7 +250,7 @@ function capacityText(c: Partial<NonNullable<NodeSummary["capacity"]>>, overcomm
 /**
  * Such as `5 up holding 20 CPUs and 40 GiB, 1 paused needing 8 GiB to wake, 3 archived, 1 crashed needing 8 GiB to retry,
  * 1 orphaned (pylon-x)`. Empty
- * for a node with no pylons, or never observed, or from a control plane older than 0.24.0, which sends no `pylons`.
+ * for a node with no pylons, or never observed, or from a control plane older than 0.25.0, which sends no `pylons`.
  */
 function pylonsText(p: NodePylons | null): string {
   if (p === null) return "";

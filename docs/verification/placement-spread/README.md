@@ -12,7 +12,7 @@ Project `nexus` asks for 4 CPUs, 8 GiB and 40 GiB, and starts with `rj-firebat` 
 
 ## What it shows
 
-- `version.txt`. The CLI is 0.24.0.
+- `version.txt`. The CLI is 0.25.0.
 - `nodes.txt` and `nodes.json`. `rj-firebat` is marked `overcommitted` after its memory figure. The line under it reads `4 up holding 16 CPUs and 32 GiB, 1 paused needing 8 GiB to wake, 2 archived, 1 orphaned (pylon-th-0rphan000000)`. The other nodes have no pylons, so they get no `pylons` line. `nodes.json` has the same facts as `overcommitted` and `pylons`.
 - `overlap.txt`, `overlap-one.json` and `overlap-two.json`. Two `nexus start --node auto` calls ran at once. Each waited 2 s for its conversation between the choice and the registry write. Whichever chose first saw `infra-testbench` with 23.3 GiB left and went there. The other saw the room the first had reserved, so `infra-testbench` showed 15.3 GiB left against `spare-node`'s 19.3, and it went to `spare-node`. Which of the two chooses first varies between runs. Both list `rj-firebat is overcommitted, with 48 of 22.8 GiB of memory committed`. The 48 is the reported 40 plus the paused worker, whose thread has recent human activity, so the planner is about to wake it.
 - `start-default.txt`. Before the edit, a start without `--node` went to `rj-firebat`, the project's default, although it is overcommitted (`show.txt`, `before the edit`).
