@@ -57,8 +57,8 @@ export interface PlanInput {
   /** The node's gateway routes a preview port to the pylon. A paused pylon keeps its routes, and only a delete removes them. */
   previewsRouted: boolean;
   nodeArtifacts: ReadonlySet<ArtifactId>;
-  /** The held secrets the node's probe takes from the control plane, none from a probe older than them. */
-  nodeHeldSecrets: ReadonlySet<string>;
+  /** The secrets the node holds: those in its secret file, and the held secrets the control plane has handed its probe. */
+  nodeSecrets: ReadonlySet<string>;
   inFlight: JobStatus | null; // for this pylon, or for an artifact this pylon is waiting on
   /** Consecutive failed jobs, and the last one's. A success clears both. */
   attempts: { count: number; last: FailedAttempt | null };
@@ -142,8 +142,9 @@ const planRules: readonly Rule[] = [
   },
   // 7c.
   ({ observed: o, liveHash }) => o !== "absent" && o.phase === "running" && o.liveHash === liveHash ? done : null,
-  // 7d. A probe older than a held secret fails the spawn for good, as in a deploy that upgrades the control plane first.
-  (i) => i.boot.network.secrets.some((s) => heldSecrets.includes(s.name) && !i.nodeHeldSecrets.has(s.name)) ? wait("held-secret") : null,
+  // 7d. A probe older than a held secret fails the spawn for good, as in a deploy that upgrades the control plane first,
+  // and one that has not been handed it yet, as after a restart, would boot a pylon whose first requests are refused.
+  (i) => i.boot.network.secrets.some((s) => heldSecrets.includes(s.name) && !i.nodeSecrets.has(s.name)) ? wait("held-secret") : null,
   (i) => submit({ kind: "spawn", pylonId: i.pylonId, boot: { ...i.boot, source: bootSource(i) }, live: i.live, liveHash: i.liveHash }),
 ];
 
