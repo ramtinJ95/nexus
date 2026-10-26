@@ -1,5 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import http from "node:http";
+import type { AddressInfo } from "node:net";
+import { setTimeout as sleep } from "node:timers/promises";
 import type { SshExecRequest } from "@earendil-works/gondolin";
 import type { BootSpec } from "./contracts.ts";
 import { networkOptions } from "./network.ts";
@@ -103,4 +106,50 @@ test("Claude OAuth uses a placeholder substituted only for its granted Anthropic
 	assert.ok(request instanceof Request);
 	assert.equal(request.headers.get("authorization"), "Bearer test-oauth-not-a-real-token");
 	await assert.rejects(async () => send("github.com"), { status: 403 });
+});
+
+test("guest requests that fail upstream fail one by one and never take the controller down", { timeout: 60_000 }, async () => {
+	// Gondolin does not export its network backend, so the test loads the module the VM runs.
+	const { QemuNetworkBackend } = await import(new URL("qemu/net.js", import.meta.resolve("@earendil-works/gondolin")).href);
+	let served = 0;
+	const upstream = http.createServer((req, res) => {
+		if (++served % 6 === 0) return setTimeout(() => req.socket.destroy(), served % 30);
+		res.writeHead(200);
+		const body = setInterval(() => res.write("x"), served % 10 + 1);
+		setTimeout(() => { clearInterval(body); res.end(); }, served % 40);
+	});
+	await new Promise<void>((resolve) => upstream.listen(0, "127.0.0.1", resolve));
+	const port = (upstream.address() as AddressInfo).port;
+	const statuses = new Set<string>();
+	try {
+		let flow = 0;
+		for (let round = 0; round < 15; round++) {
+			let checks = 0;
+			const backend = new QemuNetworkBackend({ socketPath: "/nonexistent", httpHooks: { isIpAllowed: () => ++checks % 4 !== 0 } });
+			backend.on("error", () => {});
+			const replies = new Map<string, { text: string; end: () => void }>();
+			backend.stack = {
+				handleTcpData: ({ key, data }: { key: string; data: Buffer }) => { replies.get(key)!.text += data.toString("latin1"); },
+				handleTcpEnd: ({ key }: { key: string }) => replies.get(key)?.end(),
+				handleTcpError: ({ key }: { key: string }) => replies.get(key)?.end(),
+				reset() {},
+			};
+			await Promise.all(Array.from({ length: 30 }, async (_, i) => {
+				await sleep(i % 20);
+				const key = `flow-${++flow}`;
+				const ended = new Promise<void>((end) => replies.set(key, { text: "", end }));
+				backend.tcpSessions.set(key, { srcIP: "192.168.127.3", srcPort: 40000 + i, dstIP: "10.0.0.1", dstPort: port, protocol: "http", pendingWrites: [], pendingWriteBytes: 0, flowControlPaused: false });
+				backend.handleTcpSend({ key, data: Buffer.from(`GET / HTTP/1.1\r\nHost: localhost:${port}\r\n\r\n`) });
+				if (flow % 3 === 0) setTimeout(() => { backend.handleTcpClose({ key }); replies.get(key)!.end(); }, flow % 30);
+				await ended;
+				statuses.add(replies.get(key)!.text.slice(9, 12));
+			}));
+			await backend.close();
+			await sleep(30);
+		}
+	} finally {
+		upstream.closeAllConnections();
+		upstream.close();
+	}
+	assert.ok(statuses.has("200") && statuses.has("502"), `both served and failed requests, got ${[...statuses]}`);
 });

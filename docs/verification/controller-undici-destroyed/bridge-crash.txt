@@ -1,0 +1,18 @@
+$ node docs/verification/controller-undici-destroyed/bridge-stress.mjs 150 --crash   # main, undici 6.29.1, no listener, as in the controller
+node_modules/undici/lib/dispatcher/dispatcher-base.js:82
+      queueMicrotask(() => callback(new ClientDestroyedError(), null))
+                                    ^
+
+ClientDestroyedError: The client is destroyed
+    at node_modules/undici/lib/dispatcher/dispatcher-base.js:82:37 {
+  code: 'UND_ERR_DESTROYED',
+  Symbol(undici.error.UND_ERR): true,
+  Symbol(undici.error.UND_ERR_DESTROYED): true
+}
+
+Node.js v24.22.1
+exit status 1
+
+$ node docs/verification/controller-undici-destroyed/bridge-stress.mjs 150 --crash   # this branch, undici 7.30.1
+{"undici":"7.30.1","rounds":150,"statuses":{"200":1048,"403":159,"502":728,"guest closed":436},"unhandled":{}}
+exit status 0
