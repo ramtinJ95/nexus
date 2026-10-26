@@ -294,6 +294,8 @@ The capture also takes pi-shepherdr's agent profiles from `~/.pi/agent/shepherdr
 
 The capture prints what ships and what it leaves out. When something cannot ship, such as a skill not committed and pushed in the dotfiles repo or a plugin older than its marketplace, it writes nothing and says how to fix each problem. `docs/contracts/usage.md` describes it.
 
+The capture leaves the Claude Code and pi pins in `images/pylon/pins.json` alone. When the Mac runs another version, its notes say so, and moving a pin is a separate commit that edits `pins.json`.
+
 Then deploy the commit that carries the manifest with `nexus deploy main --wait`, because the control plane builds the recipe of the release it runs. From a Mac in the control plane's `deployers`, with CLI 0.22.0:
 
 ```sh
