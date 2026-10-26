@@ -343,6 +343,90 @@ test("commits pushed with answers that fixed nothing still get another round", a
   assert.equal(f.review().rounds.at(-1)!.head, head2);
 });
 
+test("a check the pylon cannot run goes to the person with its output, and costs the builder nothing", async (t) => {
+  const f = fixture(t);
+  f.check = { kind: "unrunnable", output: "The repository has no executable .nexus/check at 1." };
+  await approved(f, null);
+  assert.deepEqual(f.review().phase, { kind: "needs-person", reasons: [
+    `.nexus/check could not run at ${head1}.`,
+    "The check's output:\nThe repository has no executable .nexus/check at 1.",
+  ] });
+  assert.equal(f.sent.length, 1, "neither agent hears of it");
+  assert.equal(f.review().rounds.length, 1);
+  assert.deepEqual(f.discarded, f.checkThreads);
+});
+
+test("a failed check the builder answers without a push goes to the person at once, not back to the reviewer", async (t) => {
+  const f = fixture(t);
+  f.check = { kind: "done", passed: false, output: "npm error code SELF_SIGNED_CERT_IN_CHAIN" };
+  await approved(f, null);
+  assert.equal(f.review().phase.kind, "fixing");
+  f.reply(f.builder, answers(f.review(), [{ id: "CHECK", action: "rejected", reason: "npm cannot reach the registry from the check pylon." }]));
+  await f.loop().poll();
+  assert.deepEqual(f.review().phase, { kind: "needs-person", reasons: [
+    `.nexus/check failed at ${head1}, and the builder pushed nothing for it: npm cannot reach the registry from the check pylon.`,
+    "The check's output:\nnpm error code SELF_SIGNED_CERT_IN_CHAIN",
+  ] });
+  assert.equal(f.sent.length, 2, "the reviewer is not asked to approve the same head again");
+  assert.equal(f.checkThreads.length, 1);
+});
+
+test("a failed check answered as fixed with no push goes to the person once the push grace ends", async (t) => {
+  const f = fixture(t);
+  f.check = { kind: "done", passed: false, output: "1 test failed" };
+  const loop = await approved(f, null);
+  f.reply(f.builder, answers(f.review(), [{ id: "CHECK", action: "fixed", reason: "Fixed the test." }]));
+  await loop.poll();
+  assert.equal(f.review().phase.kind, "fixing", "a push may land a little after the turn");
+  f.tick(10 * 60_000);
+  await loop.poll();
+  assert.deepEqual(f.review().phase, { kind: "needs-person", reasons: [`.nexus/check failed at ${head1}, and the builder pushed nothing for it: Fixed the test.`, "The check's output:\n1 test failed"] });
+  assert.equal(f.sent.length, 2, "no reminder, and no round for the reviewer");
+});
+
+test("a check that fails again at a head where it failed before goes to the person", async (t) => {
+  const f = fixture(t);
+  f.check = { kind: "done", passed: false, output: "1 test failed" };
+  const loop = await approved(f, null);
+  f.snapshot = { ...f.snapshot, detail: { ...f.snapshot.detail, head: head2 } };
+  f.reply(f.builder, answers(f.review(), [{ id: "CHECK", action: "fixed", reason: "Fixed the test." }]));
+  await loop.poll();
+  f.reply(f.review().reviewer, verdict(f.review(), { verdict: "changes", findings: [serious] }));
+  await loop.poll();
+  f.snapshot = { ...f.snapshot, detail: { ...f.snapshot.detail, head: head1 } };
+  f.reply(f.builder, answers(f.review(), [{ id: "F1", action: "fixed", reason: "Reverted to the first head." }]));
+  await loop.poll();
+  assert.equal(f.review().rounds.at(-1)!.head, head1);
+  f.reply(f.review().reviewer, verdict(f.review(), {}));
+  await loop.poll();
+  assert.deepEqual(f.review().phase, { kind: "needs-person", reasons: [`.nexus/check failed again at ${head1}, where it failed before.`, "The check's output:\n1 test failed"] });
+});
+
+test("a reviewer's repeat approval of an unchanged head costs no round", async (t) => {
+  const f = fixture(t);
+  const loop = f.loop();
+  await loop.start(f.builder, { land: null, rounds: 2 });
+  await loop.poll();
+  f.reply(f.review().reviewer, verdict(f.review(), { findings: [serious] }));
+  await loop.poll();
+  f.reply(f.builder, answers(f.review(), [{ id: "F1", action: "rejected", reason: "The cache is rebuilt on every deploy." }]));
+  await loop.poll();
+  assert.equal(f.review().rounds[1]!.head, head1);
+  f.check = { kind: "done", passed: false, output: "1 test failed" };
+  f.reply(f.review().reviewer, verdict(f.review(), {}));
+  await loop.poll();
+  assert.equal(f.review().phase.kind, "fixing", "the failed check reaches the builder: the approval at the same head spent no round");
+  assert.match(f.sent.at(-1)!.message.text, /^Round 1 of at most 2/m);
+  f.snapshot = { ...f.snapshot, detail: { ...f.snapshot.detail, head: head2 } };
+  f.reply(f.builder, answers(f.review(), [{ id: "CHECK", action: "fixed", reason: "Fixed the test." }]));
+  await loop.poll();
+  assert.match(f.sent.at(-1)!.message.text, /^Round 2 of at most 2/m);
+  f.check = { kind: "done", passed: true, output: "ok" };
+  f.reply(f.review().reviewer, verdict(f.review(), {}));
+  await loop.poll();
+  assert.deepEqual(f.review().phase, { kind: "approved" });
+});
+
 test("a landing sees its deploy through, rolling back, though its threads are archived meanwhile", async (t) => {
   const f = fixture(t);
   f.registry.setDesiredRelease({ commit: previous, requestedBy: "person", requestedAt: 1 });

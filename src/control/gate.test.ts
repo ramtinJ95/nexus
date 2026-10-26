@@ -5,7 +5,7 @@ import { chmod, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
-import { checkCaller, checkRuns, type CheckRuns, type CheckState } from "./gate.ts";
+import { checkCaller, checkRuns, imageEnv, type CheckRuns, type CheckState } from "./gate.ts";
 import { openRegistry, type Thread, type ThreadId } from "./registry.ts";
 import { newPylonRecord } from "../tick.ts";
 import { processStream } from "../process-stream.ts";
@@ -18,7 +18,8 @@ const node = "node" as NodeName;
 
 /**
  * A registry whose check threads' pylons run here: each pipe runs its argv as a local process, in a checkout with one
- * commit whose `.nexus/check` is `check`, so the script and the exit status are real. `stream` can be replaced.
+ * commit whose `.nexus/check` is `check`, so the script and the exit status are real. The image's environment is
+ * read from the file `image`, NUL-separated as /proc/1/environ is. `stream` can be replaced.
  */
 async function fixture(t: import("node:test").TestContext, check: string | null) {
   const root = await mkdtemp(join(tmpdir(), "nexus-gate-"));
@@ -35,6 +36,8 @@ async function fixture(t: import("node:test").TestContext, check: string | null)
   git("add", "-A");
   git("commit", "-qm", "init");
   const head = git("rev-parse", "HEAD");
+  const image = join(root, "environ");
+  await writeFile(image, `PATH=${process.env.PATH}\0NODE_EXTRA_CA_CERTS=/run/gondolin/ca-certificates.crt\0HOME=/root\0`);
 
   const registry = openRegistry(":memory:");
   t.after(() => registry.close());
@@ -57,19 +60,20 @@ async function fixture(t: import("node:test").TestContext, check: string | null)
   }
   const builder = add("person");
   const started: StartRequest[] = [];
-  let stream = async (_: PylonId, argv: readonly string[]): Promise<ByteStream> => processStream(argv[0]!, argv.slice(1).map((a) => a.replaceAll(checkoutDir, repo)), () => {});
+  const local = (argv: readonly string[]) => argv.map((a) => a.replaceAll(checkoutDir, repo).replace(imageEnv, `cat ${image}`));
+  let stream = async (_: PylonId, argv: readonly string[]): Promise<ByteStream> => processStream(argv[0]!, local(argv).slice(1), () => {});
   const runs = (): CheckRuns => checkRuns({
     registry, wake: () => {},
     probes: new Map([[node, { stream: (pylon: PylonId, argv: readonly string[]) => stream(pylon, argv) }]]),
     async startThread(request, caller) { started.push(request); return add(caller); },
   });
-  return { registry, builder, head, repo, root, started, runs, running, set stream(s: typeof stream) { stream = s; } };
+  return { registry, builder, head, repo, root, image, local, started, runs, running, set stream(s: typeof stream) { stream = s; } };
 }
 
 async function settle(poll: () => CheckState): Promise<CheckState> {
   for (let i = 0; i < 200; i++) {
     const state = poll();
-    if (state.kind === "done" || state.kind === "void") return state;
+    if (state.kind === "done" || state.kind === "void" || state.kind === "unrunnable") return state;
     await sleep(20);
   }
   assert.fail("the check never finished");
@@ -97,13 +101,39 @@ test("what the check writes cannot pass it: a forged exit file or a printed stat
   assert.equal(state.kind === "done" && state.passed, false);
 });
 
-test("a repository without .nexus/check fails, saying so", async (t) => {
-  const f = await fixture(t, null);
+test("the check runs in the image's environment, which the pipe's own shell lacks", async (t) => {
+  const f = await fixture(t, `echo "$NODE_EXTRA_CA_CERTS $HOME"; [ -n "$NODE_EXTRA_CA_CERTS" ]`);
+  f.stream = async (_, argv) => processStream("env", ["-i", `HOME=${f.root}`, "PATH=/usr/bin:/bin", ...f.local(argv)], () => {});
   const runs = f.runs();
   const id = await runs.start(f.builder, "feature", f.head);
   f.running(f.registry.thread(id)!);
-  const state = await settle(() => runs.poll(id, f.head));
-  assert.ok(state.kind === "done" && !state.passed && /no executable \.nexus\/check/.test(state.output));
+  assert.deepEqual(await settle(() => runs.poll(id, f.head)), { kind: "done", passed: true, output: `/run/gondolin/ca-certificates.crt ${f.root}` }, "the image's CA, and the pipe's own HOME");
+
+  await writeFile(f.image, "");
+  const unread = await runs.start(f.builder, "feature", f.head);
+  f.running(f.registry.thread(unread)!);
+  assert.deepEqual(await settle(() => runs.poll(unread, f.head)), { kind: "unrunnable", output: "The check pylon's image environment could not be read." });
+});
+
+test("a check the pylon cannot run says so instead of failing: no .nexus/check, a missing command, or a pylon that did not boot", async (t) => {
+  const none = await fixture(t, null);
+  const runs = none.runs();
+  const id = await runs.start(none.builder, "feature", none.head);
+  none.running(none.registry.thread(id)!);
+  const state = await settle(() => runs.poll(id, none.head));
+  assert.ok(state.kind === "unrunnable" && /no executable \.nexus\/check/.test(state.output));
+
+  const tool = await fixture(t, "echo installing; nexus-no-such-tool ci");
+  const toolRuns = tool.runs();
+  const toolId = await toolRuns.start(tool.builder, "feature", tool.head);
+  tool.running(tool.registry.thread(toolId)!);
+  const missing = await settle(() => toolRuns.poll(toolId, tool.head));
+  assert.ok(missing.kind === "unrunnable" && /installing\n.*nexus-no-such-tool.*not found/.test(missing.output), JSON.stringify(missing));
+
+  const failedBoot = await toolRuns.start(tool.builder, "feature", tool.head);
+  const pylon = tool.registry.pylon(tool.registry.thread(failedBoot)!.pylonId)!;
+  tool.registry.savePylon({ ...pylon, failed: ".nexus/setup exited 1" });
+  assert.deepEqual(toolRuns.poll(failedBoot, tool.head), { kind: "unrunnable", output: "The check pylon did not boot: .nexus/setup exited 1" });
 });
 
 test("a run that cannot give a verdict is void: a pylon at the wrong commit, a lost pipe, or a run this process does not hold", async (t) => {

@@ -21,6 +21,7 @@ import type { ClaudeSent, Preview, Thread } from "../control/registry.ts";
 import type { Review } from "../control/review.ts";
 import { maxEntries, type ClaudeConversation, type ClaudeEntry, type PromptSource } from "../claude-transcript.ts";
 import { claudeFrames, queuedOf, type ClaudeFrame } from "../control/claude-conversation.ts";
+import { roundsSpent } from "../control/review.ts";
 import type { Changes, Diff, Listing } from "../checkout-files.ts";
 import type { Project, SecretGrant } from "../project.ts";
 import type { ActualState } from "../reconcile.ts";
@@ -241,7 +242,7 @@ function placementText(p: Placement): string {
 function reviewText(r: Review): string {
   const phase = r.phase.kind === "landed" ? `landed as ${r.phase.commit}` : r.phase.kind === "deploying" ? `deploying ${r.phase.commit}` : r.phase.kind;
   return [
-    `review ${r.id} of PR #${r.pr.number}: ${phase}, round ${r.rounds.length} of ${r.maxRounds}, reviewer ${r.reviewer} on ${r.models.reviewer}${r.land === null ? "" : ", landing when approved"}`,
+    `review ${r.id} of PR #${r.pr.number}: ${phase}, round ${roundsSpent(r)} of ${r.maxRounds}, reviewer ${r.reviewer} on ${r.models.reviewer}${r.land === null ? "" : ", landing when approved"}`,
     ...r.phase.kind === "needs-person" ? r.phase.reasons.map((reason) => `needs you: ${reason}`) : [],
   ].join("\n");
 }
