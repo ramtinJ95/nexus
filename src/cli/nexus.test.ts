@@ -1447,6 +1447,21 @@ test("show exposes the registry's failed worker and its selected model", async (
   assert.equal((await s.nexus(["start", "--project", "acme", "--title", "no worker", "--model", "x"])).code, 64);
 });
 
+test("threads, show and conversation say a Claude worker stopped on its usage limit, until when, and how to resume it", async (t) => {
+  const s = await setup(t);
+  const thread: Thread = await s.json(["start", "--project", "acme", "--claude", "count the lines"]);
+  s.registry.setClaudeWorker(thread.id, "/poteto-mode count the lines", "started", undefined, "s1");
+  const resetsAt = Date.now() + 3_600_000;
+  const until = `${new Date(resetsAt).toISOString().slice(11, 16)} UTC`;
+  const entries: ClaudeEntry[] = [{ kind: "notice", at: 1, tone: "error", text: "You've hit your session limit", usageLimit: { resetsAt } }];
+  s.registry.appendClaudeRead(thread.id, { session: "s1", from: transcriptStart, entries, cursor: { ...transcriptStart, offset: 9 }, reset: false, readAt: Date.now() });
+  assert.match((await s.nexus(["threads"])).stdout, new RegExp(`${thread.id} +active +stopped on its usage limit until ${until}`));
+  const shown = (await s.nexus(["show", thread.id])).stdout;
+  assert.ok(shown.includes("attention: limited"), shown);
+  assert.ok(shown.includes(`usage limit: stopped on its usage limit until ${until}. \`nexus send ${thread.id} continue\` resumes it once the limit resets`), shown);
+  assert.ok((await s.nexus(["conversation", thread.id])).stdout.endsWith(`(Claude stopped on its usage limit until ${until}. Send it "continue" after the reset to resume)\n`));
+});
+
 test("conversation prints a Claude worker's transcript, and send types into its session, waiting for a paused pylon under one request ID", async (t) => {
   const s = await setup(t);
   const thread: Thread = await s.json(["start", "--project", "acme", "--claude", "count the lines"]);
