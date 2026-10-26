@@ -88,7 +88,7 @@ The actual state comes from the probe's last observation and the job in flight:
 | State | Meaning |
 |---|---|
 | `spawning` | A `spawn` job is creating the pylon, or booting it from its checkpoint |
-| `running` | The VM is up, services are started, and sessions are relaunched |
+| `running` | The VM is up and services are started. A wake may still be relaunching its sessions |
 | `pausing` | A `pause` job is recording sessions, stopping services, and writing the checkpoint |
 | `paused` | Only the checkpoint exists |
 | `deleting` | A `delete` job is removing the disk and logs |

@@ -53,6 +53,7 @@ A conversation folds each run of consecutive tool calls between two messages int
 - A pylon sleeps when its agents are idle and nobody has used it for a while. Amp uses 5 minutes of agent idleness and 20 minutes without a human. Nexus starts with the same numbers. A terminal attached to the pylon's Herdr session, such as `nexus attach` through the control plane, counts as a human for as long as it stays attached, because the probe counts the guest's Herdr clients in every observation. Close the terminal to let the pylon pause.
 - Sleep is a disk checkpoint. The VM stops and memory is lost.
 - Waking boots the pylon from its checkpoint, runs `.nexus/resume`, restarts services, and relaunches every recorded Herdr session into its prompt. Claude Code runs `claude --resume <session id>` and finds its transcript on disk, or starts afresh under the same ID when the session was never prompted. The command that was running at sleep time shows as cut off.
+- A Claude Code session runs in one pane, whatever the number of wakes. Herdr restores each workspace as a shell, because the image turns off its own agent resume, and the relaunch starts Claude in the restored pane. The probe runs a wake's relaunch, the launches and the sends of one Claude session one at a time, so a message that comes while the relaunch runs waits for it. A send that finds the session in no pane uses the restored pane the sessions file records for it before it opens a new workspace. A sessions file that names one Claude session in several panes, as wakes before this fix left behind, brings it back in the first and closes the others. Captures are in `docs/verification/one-claude-session/`.
 - Archiving a thread puts its pylon to sleep at once. Deleting a thread deletes its pylon.
 - A stopped pylon could move to another node by copying its disk. Disk checkpoints do not depend on the CPU, so moving between the Intel and the AMD node works. Spike S7 tested one round trip by hand. Nexus has no move job yet, so a pylon stays on the node it started on.
 
@@ -423,8 +424,8 @@ running Claude fails without typing, since its prompt already went in. One that 
 older probe lost before typing gets a new workspace, and the older probe's empty
 shell workspace stays beside it. Captures are in
 `docs/verification/launch-survives-deploy/`. The probe
-runs the launches and sends of one session one at a time, so a launch sent again
-while the first still runs waits for it and reads what it did.
+runs the launches, the sends and a wake's relaunch of one session one at a time, so
+a launch sent again while the first still runs waits for it and reads what it did.
 
 Only a probe whose snapshot says `claudeLaunchRepeatable` gets a launch twice. A
 probe from before this change would open a second workspace and type the launch
@@ -523,9 +524,9 @@ send failed partway or the probe restarted or forgot it, is refused.
 
 The API decides by the thread's Claude worker record before anything else, so no
 mode or retry of a Claude worker thread's message reaches the harness. Sending is
-human activity: it wakes a paused pylon, the wake relaunches the session before the
-pylon counts as running, and clients retry the 409 until then with the same request
-ID. Captures are in `docs/verification/claude-thread-streaming/`.
+human activity: it wakes a paused pylon, and clients retry the 409 until it runs with
+the same request ID. A message that comes while the wake still relaunches the session
+waits for the relaunch. Captures are in `docs/verification/claude-thread-streaming/`.
 
 ### Usage-limit stops (0.21.0)
 

@@ -651,8 +651,9 @@ first.
 
 Sending is human activity, so it wakes a paused pylon. Until the pylon runs, the API
 answers 409, and the CLI and the dashboard try again once a second, for up to 120
-seconds, with the same request ID. A wake relaunches the worker's session before the
-pylon counts as running. The text arrives exactly as written, newlines, quotes,
+seconds, with the same request ID. The pylon counts as running before its wake has
+relaunched the worker's session, so a message that comes during the relaunch waits for
+it in the pylon and goes to the pane the relaunch brought the session back in. The text arrives exactly as written, newlines, quotes,
 backticks and dollar signs included, after CRLF becomes LF and the ends are trimmed.
 Nexus types it in short pieces, because Claude Code takes a long burst of input as a
 paste and wraps it in `<pasted_content>` tags. A tab, a carriage return or another
