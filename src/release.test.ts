@@ -22,3 +22,17 @@ test("every file the services import is in the release that deploy/release.sh pa
   }
   assert.deepEqual(outside, []);
 });
+
+test("a release builds the dashboard client after it is hashed and before its dev dependencies are dropped", async () => {
+  const script = await readFile(join(root, "deploy/release.sh"), "utf8");
+  const at = (pattern: RegExp) => {
+    const index = script.search(pattern);
+    assert.notEqual(index, -1, `release.sh has ${pattern}`);
+    return index;
+  };
+  const hashed = at(/^\s*release=\$\(cd "\$staging" && find /m);
+  const installed = at(/npm ci (?!.*--omit=dev)/);
+  const built = at(/npm run build/);
+  const pruned = at(/npm prune --omit=dev/);
+  assert.ok(hashed < installed && installed < built && built < pruned, "hash, then npm ci with dev dependencies, then the build, then the prune");
+});

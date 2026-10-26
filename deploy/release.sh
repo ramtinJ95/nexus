@@ -34,7 +34,10 @@ install_release() {
   if [ -d "$prefix/releases/$release" ]; then
     echo "release $release is already installed"
   else
-    (cd "$staging" && PATH=$service_path npm ci --omit=dev --no-audit --no-fund)
+    # The dashboard's client is bundled from its sources and their dev dependencies, which go once it is built.
+    (cd "$staging" && PATH=$service_path npm ci --no-audit --no-fund)
+    (cd "$staging" && PATH=$service_path npm run build)
+    (cd "$staging" && PATH=$service_path npm prune --omit=dev --no-audit --no-fund)
     printf '%s\n' "${NEXUS_COMMIT:-$(git -C "$repo" rev-parse HEAD 2>/dev/null || true)}" > "$staging/release-commit"
     chown -R root:root "$staging"
     chmod -R u+rwX,go+rX,go-w "$staging"

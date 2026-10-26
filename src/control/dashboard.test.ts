@@ -1059,7 +1059,13 @@ test("pages link their assets by hash, and a hashed asset is cached for good", a
     assert.ok(versioned.text.length > 0);
     assert.equal((await s.call("GET", `/assets/${file}?v=stale`)).headers["cache-control"], "no-cache");
   }
-  assert.equal((await s.call("GET", "/assets/secret.txt")).status, 404);
+  for (const name of ["secret.txt", "notifications.js", "chunk-NOSUCH.js", "..%2Fpackage.json"]) assert.equal((await s.call("GET", `/assets/${name}`)).status, 404, name);
+});
+
+test("pages are served under a content security policy that allows only the dashboard's own origin", async (t) => {
+  const s = await setup(t);
+  assert.equal((await s.call("GET", "/")).headers["content-security-policy"],
+    "default-src 'none'; style-src 'self'; script-src 'self'; connect-src 'self'; img-src 'self' data:; base-uri 'none'; form-action 'none'; frame-ancestors 'none'");
 });
 
 test("dashboard pages answer only allowed callers under the API's own names", async (t) => {

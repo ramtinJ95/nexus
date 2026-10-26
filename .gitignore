@@ -4,3 +4,4 @@ node_modules/
 !.claude/skills/
 # Evidence and scratch state from .claude/skills/verify-nexus
 .verify/
+dist/
