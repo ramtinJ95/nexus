@@ -374,7 +374,14 @@ test("ingest: the first list after a wake replaces the paused sessions with thei
       { id: "failed-0123456789ab", state: "failed", herdrPane: null, harness: "pi", harnessSessionId: "/s.jsonl", title: "plan", status: null, message: "pi exited 1" },
     ] },
   ] satisfies RegistryWrite[]);
-  assert.deepEqual(ingest({ type: "pylon", pylon: runningWith({ sessions: null }) }, node, knows(phase("booting")), now), [], "an unread list leaves the paused rows");
+});
+
+test("ingest: a pylon that runs again before its sessions are read resumes the paused ones, once", () => {
+  const unread = runningWith({ sessions: null });
+  assert.deepEqual(ingest({ type: "pylon", pylon: unread }, node, knows(phase("booting")), now), [{ record: "sessions-resumed", pylonId }]);
+  assert.deepEqual(ingest({ type: "pylon", pylon: unread }, node, knows(stopped(lastCheckpoint, [pausedReview])), now), [{ record: "sessions-resumed", pylonId }], "a wake between two observations");
+  assert.deepEqual(ingest({ type: "pylon", pylon: unread }, node, knows(unread), now), [], "a later unread list writes nothing");
+  assert.deepEqual(ingest({ type: "pylon", pylon: unread }, node, knows(runningWith({ sessions: [working] })), now, new Set([pylonId])), [{ record: "sessions-resumed", pylonId }], "a restarted control plane resumes them too, since an older one may have left them paused");
 });
 
 test("ingest: a deleted pylon drops its sessions", () => {

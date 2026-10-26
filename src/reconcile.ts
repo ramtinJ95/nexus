@@ -211,6 +211,11 @@ export type RegistryWrite =
   | { record: "sessions"; pylonId: PylonId; sessions: readonly SessionRow[] }
   /** The pylon paused without saying what its wake brings back, so every session it had is paused. */
   | { record: "sessions-paused"; pylonId: PylonId }
+  /**
+   * The pylon runs again, but its sessions are not read yet. Each paused one runs in the pane it had, with its status
+   * unknown, and one that had no pane, which its last wake failed to bring back, is failed until a read says otherwise.
+   */
+  | { record: "sessions-resumed"; pylonId: PylonId }
   | { record: "output"; pylonId: PylonId; kind: "branch" | "diff" | "preview" | "file"; ref: string }
   | { record: "preview"; pylonId: PylonId; service: string; httpsPort: number; ready: boolean }
   | { record: "activity"; pylonId: PylonId; human: number | null; agent: number | null }
@@ -239,9 +244,11 @@ export type SessionRow = { id: string; harness: SessionHarness; harnessSessionId
  *   before paused sessions deleted a paused pylon's rows. A running
  *   pylon lists its panes and the sessions its last wake failed to bring back. A stopped one lists, as paused, what
  *   its pause recorded, under the IDs they ran under, or says nothing (null), and then every session it had is
- *   paused. A booting, stopping, deleting or broken pylon says nothing, so its rows stand until the next list: the
- *   first one after a wake replaces the paused sessions with their new panes. An absent pylon has none. Running
- *   sessions the probe could not read (null) write nothing, and loop.ts stores the last list read in their place.
+ *   paused. A booting, stopping, deleting or broken pylon says nothing, so its rows stand until the next list. An
+ *   absent pylon has none. Running sessions the probe could not read (null) write nothing, and loop.ts stores the last
+ *   list read in their place, except on the pylon's first running observation, or its first since this control plane
+ *   started: a pylon that runs has no paused session, so that one resumes them (sessions-resumed) until the first list
+ *   after the wake replaces them.
  * - Outputs are diffed against the previous observation, and derived here, not reported by the probe as outputs: a branch with pushedAs is "branch" with
  *   that ref, a dirty tree is "diff" with the head as ref (one per head), a ready preview is "preview" with
  *   the service as ref, and a declared output keeps its kind with its declaration id as ref. Outputs are
@@ -306,6 +313,8 @@ function pylonWrites(pylonId: PylonId, previous: PylonObservation | "absent", cu
   const sessions = sessionsOf(current);
   if (sessions !== null && (unlisted || !isDeepStrictEqual(sessionsOf(previous), sessions))) {
     writes.push(sessions === "paused" ? { record: "sessions-paused", pylonId } : { record: "sessions", pylonId, sessions });
+  } else if (current !== "absent" && current.phase === "running" && current.sessions === null && (unlisted || previous === "absent" || previous.phase !== "running")) {
+    writes.push({ record: "sessions-resumed", pylonId });
   }
 
   const had = new Set(outputsOf(before).map(({ kind, ref }) => `${kind} ${ref}`));
