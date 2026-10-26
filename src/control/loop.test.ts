@@ -38,6 +38,12 @@ function fakeNode(options: { autoFinish: boolean; node?: NodeName; reportsRoutes
   /** The gateway's route table: a spawn routes its previews, a pause keeps them and a delete drops them. */
   const routes = new Map<number, PreviewRouteFact>();
   const streams = new Set<(event: ProbeEvent | null) => void>();
+  /** The observe streams whose loop has taken every event and asks for the next, and who waits for all of them to. */
+  const waiting = new Set<(event: ProbeEvent | null) => void>();
+  let delivered: (() => void)[] = [];
+  const checkDelivered = () => {
+    if ([...streams].every((push) => waiting.has(push))) for (const resolve of delivered.splice(0)) resolve();
+  };
   let reachable = true;
 
   const observation = (): NodeObservation => ({
@@ -157,7 +163,7 @@ function fakeNode(options: { autoFinish: boolean; node?: NodeName; reportsRoutes
       if (!reachable) throw unreachable();
       const queue: (ProbeEvent | null)[] = [{ type: "snapshot", observation: observation() }];
       let notify: (() => void) | null = null;
-      const push = (event: ProbeEvent | null) => { queue.push(event); notify?.(); };
+      const push = (event: ProbeEvent | null) => { queue.push(event); waiting.delete(push); notify?.(); };
       streams.add(push);
       const onAbort = () => push(null);
       signal.addEventListener("abort", onAbort);
@@ -168,11 +174,16 @@ function fakeNode(options: { autoFinish: boolean; node?: NodeName; reportsRoutes
             if (event === null) return;
             yield event;
           }
-          await new Promise<void>((resolve) => { notify = resolve; });
+          const next = new Promise<void>((resolve) => { notify = resolve; });
+          waiting.add(push);
+          checkDelivered();
+          await next;
           notify = null;
         }
       } finally {
         streams.delete(push);
+        waiting.delete(push);
+        checkDelivered();
         signal.removeEventListener("abort", onAbort);
       }
     },
@@ -211,6 +222,8 @@ function fakeNode(options: { autoFinish: boolean; node?: NodeName; reportsRoutes
   return {
     probe, pylons, submitted, lives, routes, finish, setSessions, breakPylon, stopOnFailedSetup, setServices: (pylonId: PylonId, services: readonly ServiceFact[] | null) => setFacts(pylonId, { services }),
     setListening: (pylonId: PylonId, listening: readonly ListeningFact[] | null) => setFacts(pylonId, { listening }),
+    /** Settles once the loop has taken every event sent so far, which it ingests before it asks for the next. */
+    delivered: () => new Promise<void>((resolve) => { delivered.push(resolve); checkDelivered(); }),
     /** Sends a snapshot of the node as it is, after a test changed it by hand. */
     announce: () => emit({ type: "snapshot", observation: observation() }),
     running: () => [...jobs.values()].filter((j) => j.status.state === "running").map((j) => j.env.jobId),
@@ -235,12 +248,19 @@ const ingest: Ingest = (event, eventNode) => event.type === "snapshot"
   ? [{ record: "node", node: eventNode, state: "online", capacity: event.observation.capacity }]
   : [];
 
-async function until(what: string, predicate: () => boolean, timeoutMs = 3_000) {
-  const deadline = Date.now() + timeoutMs;
+/** Waits for the predicate. The deadline only ends a hang: a loaded suite can take seconds over what takes milliseconds alone. */
+async function until(what: string, predicate: () => boolean) {
+  const deadline = Date.now() + 60_000;
   while (!predicate()) {
     if (Date.now() > deadline) throw new Error(`timed out waiting until ${what}`);
     await new Promise((r) => setTimeout(r, 5));
   }
+}
+
+/** Waits until the loop has ingested every event the node sent and run a pass after them. */
+async function settled(fake: ReturnType<typeof fakeNode>, loop: Loop) {
+  await fake.delivered();
+  await loop.wake(node);
 }
 
 // One directory for the file, so each test's registry is closed before it is removed.
@@ -609,7 +629,7 @@ test("with the real ingest, a pylon's sessions reach the registry and a working 
   const longAgo = Date.now() - 60 * 60_000;
   const thread = seed(registry, { agentTurnRunning: true, lastAgentActivityAt: longAgo, lastHumanActivityAt: longAgo });
   const fake = fakeNode({ autoFinish: true });
-  run(t, registry, fake.probe, { ingest: realIngest });
+  const loop = run(t, registry, fake.probe, { ingest: realIngest });
   await until("the pylon runs", () => fake.pylons.get(thread.pylonId)?.phase === "running");
 
   const working: SessionFact = { id: "p1", state: "running", herdrPane: "p1", harness: "pi", harnessSessionId: "s.jsonl", status: "working", title: "plan" };
@@ -620,12 +640,12 @@ test("with the real ingest, a pylon's sessions reach the registry and a working 
 
   // The turn ends, but the working session counts as agent activity, so the pylon stays up.
   registry.recordActivity(thread.id, { agentTurnRunning: false });
-  await new Promise((r) => setTimeout(r, 50));
+  await settled(fake, loop);
   assert.equal(fake.pylons.get(thread.pylonId)?.phase, "running");
 
   // Sessions the probe could not read leave the registry as it was, and the next read is diffed against the last one.
   fake.setSessions(thread.pylonId, null);
-  await new Promise((r) => setTimeout(r, 50));
+  await settled(fake, loop);
   assert.deepEqual(registry.sessions(thread.pylonId), [{ pylon: thread.pylonId, ...working, message: null }]);
 
   fake.setSessions(thread.pylonId, []);
@@ -692,7 +712,7 @@ test("with the real ingest, sessions the probe could not read record no agent ac
   const longAgo = Date.now() - 60 * 60_000;
   const thread = seed(registry, { agentTurnRunning: true, lastAgentActivityAt: longAgo, lastHumanActivityAt: longAgo });
   const fake = fakeNode({ autoFinish: true });
-  run(t, registry, fake.probe, { ingest: realIngest });
+  const loop = run(t, registry, fake.probe, { ingest: realIngest });
   await until("the pylon runs", () => fake.pylons.get(thread.pylonId)?.phase === "running");
 
   const working: SessionFact = { id: "p1", state: "running", herdrPane: "p1", harness: "pi", harnessSessionId: "s.jsonl", status: "working" };
@@ -703,7 +723,7 @@ test("with the real ingest, sessions the probe could not read record no agent ac
   // The stored observation still lists the working session, but only a fresh read of it is activity.
   for (let i = 0; i < 2; i++) {
     fake.setSessions(thread.pylonId, null);
-    await new Promise((r) => setTimeout(r, 50));
+    await settled(fake, loop);
     assert.equal(registry.thread(thread.id)!.lastAgentActivityAt, seen);
   }
   fake.setSessions(thread.pylonId, [working]);
@@ -865,7 +885,7 @@ test("a linked port's preview goes once a read of the pylon's services leaves it
   const registry = openRegistry(tempDb());
   const thread = seed(registry);
   const fake = fakeNode({ autoFinish: true });
-  run(t, registry, fake.probe, { ingest: realIngest });
+  const loop = run(t, registry, fake.probe, { ingest: realIngest });
   await until("the pylon runs", () => fake.pylons.get(thread.pylonId)?.phase === "running");
   const linked: ServiceFact = { name: "port-3000", state: "ready", port: 3000, declared: false, wantsPreview: true };
   const services = () => registry.previews(thread.pylonId).map((p) => `${p.service} ${p.httpsPort}`);
@@ -882,7 +902,7 @@ test("a linked port's preview goes once a read of the pylon's services leaves it
   // As the API does once the pylon unlinks the port. A read that fails then carries the list read before the unlink.
   registry.releasePreview(thread.pylonId, "port-3000");
   fake.setServices(thread.pylonId, null);
-  await new Promise((r) => setTimeout(r, 50));
+  await settled(fake, loop);
   assert.deepEqual(services(), ["web 10200"], "a list carried from an earlier read gives no port back");
 });
 
@@ -963,7 +983,7 @@ test("a deleted thread whose pylon was removed by hand gets a delete that unpubl
     await until(`a ${kind} job runs`, () => fake.running().length === 1 && fake.submitted.at(-1)?.kind === kind);
     fake.finish(fake.running()[0]!);
   };
-  run(t, registry, fake.probe, { ingest: realIngest });
+  const loop = run(t, registry, fake.probe, { ingest: realIngest });
   await finishNext("spawn");
   await until("the pylon runs", () => fake.pylons.get(thread.pylonId)?.phase === "running");
   fake.setServices(thread.pylonId, [web]);
@@ -983,7 +1003,7 @@ test("a deleted thread whose pylon was removed by hand gets a delete that unpubl
   assert.deepEqual([...fake.routes.keys()], []);
   const deletes = () => fake.submitted.filter((job) => job.kind === "delete").length;
   const sent = deletes();
-  await new Promise((resolve) => setTimeout(resolve, 100));
+  await settled(fake, loop);
   assert.equal(deletes(), sent, "once the node has neither the pylon nor its routes, no delete follows");
 });
 
@@ -1045,14 +1065,14 @@ test("a boot asking for a held secret waits for a probe older than it, and boots
   const stored = registry.pylon(thread.pylonId)!;
   registry.savePylon({ ...stored, boot: { ...stored.boot, network: { allowedHosts: [], secrets: [chatgptTokenGrant] } } });
   const fake = fakeNode({ autoFinish: true });
-  run(t, registry, fake.probe);
+  const loop = run(t, registry, fake.probe);
   await until("the node is online", () => registry.node(node)?.state === "online");
-  await new Promise((r) => setTimeout(r, 200));
+  await settled(fake, loop);
   assert.deepEqual(fake.submitted, [], "no spawn reaches a probe that does not take the held secret");
   assert.equal(registry.pylon(thread.pylonId)!.failed, null);
 
   fake.upgrade([chatgptTokenGrant.name]);
-  await new Promise((r) => setTimeout(r, 200));
+  await settled(fake, loop);
   assert.deepEqual(fake.submitted, [], "no spawn reaches a probe that takes the held secret but has not got it");
 
   await fake.probe.putSecret(chatgptTokenGrant.name, "token");
@@ -1210,7 +1230,7 @@ test("a Claude launch whose probe restarts mid-way is sent again under its sessi
   const commands: PylonCommand[] = [];
   const logged: string[] = [];
   run(t, registry, restartingProbe(fake, ["restart", "restart", { kind: "open-session", herdrPane: "w1:p1" }], commands), { log: (line) => logged.push(line) });
-  await until("worker started", () => registry.claudeWorker(thread.id)?.state === "started", 5_000);
+  await until("worker started", () => registry.claudeWorker(thread.id)?.state === "started");
   assert.equal(commands.length, 3);
   assert.deepEqual(new Set(commands.map((c) => c.kind === "open-session" && c.resume)), new Set([registry.claudeWorker(thread.id)!.session]), "every send names the session recorded before the first");
   assert.equal(registry.events().some((e) => e.kind === "thread.failed"), false);
@@ -1224,7 +1244,7 @@ test("a Claude launch whose probe comes back unable to take it again fails as be
   const fake = fakeNode({ autoFinish: true });
   const commands: PylonCommand[] = [];
   run(t, registry, restartingProbe(fake, ["restart"], commands), { log: () => {} });
-  await until("worker failed", () => registry.claudeWorker(thread.id)?.state === "failed", 5_000);
+  await until("worker failed", () => registry.claudeWorker(thread.id)?.state === "failed");
   assert.equal(commands.length, 1);
   assert.match(registry.claudeWorker(thread.id)!.message!, /^Claude launch did not complete; attach to check before starting another session: .*socket hang up, and the probe that came back cannot take a launch again$/);
 });
@@ -1241,7 +1261,7 @@ test("a Claude launch whose probe stays away fails once the wait is over", async
     throw Object.assign(new Error(`${node}: socket hang up`), { code: "unreachable" });
   } };
   run(t, registry, probe, { log: () => {}, claudeLaunchRetryMs: 200 });
-  await until("worker failed", () => registry.claudeWorker(thread.id)?.state === "failed", 5_000);
+  await until("worker failed", () => registry.claudeWorker(thread.id)?.state === "failed");
   assert.equal(commands.length, 1);
   assert.match(registry.claudeWorker(thread.id)!.message!, /socket hang up, and the probe did not come back within 0\.2 seconds$/);
   assert.ok(registry.events().some((e) => e.kind === "thread.failed"));
