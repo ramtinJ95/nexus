@@ -1,0 +1,2 @@
+# this branch: 5 runs of src/control/loop.test.ts with tools/slow-disk.mjs at WRITE_MS=30, beside the same runs of the other side
+pass=5 fail=0

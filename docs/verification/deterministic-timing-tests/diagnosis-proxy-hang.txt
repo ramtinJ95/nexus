@@ -1,0 +1,20 @@
+# This branch before the proxy fix: round 5 of the full suite under CPU load (compare.sh 5 0-1 2), which ran 1628 s.
+# src/cli/nexus.test.ts had reported "watch prints one new entry past the kept 3,000 …" and nothing after it for 18 minutes.
+
+The worker of src/cli/nexus.test.ts (pid 17035) was asleep in epoll. Its child was:
+  /usr/local/bin/node src/cli/nexus.ts watch th-928b1da0da03 --interval 50   (pid 29392, 18:20 old, asleep in epoll, no TCP socket)
+Neither the API (NEXUS_URL port 43755) nor the SOCKS proxy (44109) answered: curl gave 000 for both.
+
+Inspector on the worker (SIGUSR1, then Runtime.evaluate):
+  process.getActiveResourcesInfo()  ["PipeWrap" x5, "ProcessWrap", "TCPSocketWrap"]
+  the watch ChildProcess            killed: false, exitCode: null
+  the one TCP socket                localPort 44109, server-side, readyState "readOnly", isPaused() true
+
+So the test's body had ended and its teardown was running. setup's hook closed the API first. The proxy's pipe then
+ended the client side of its socket and left it paused. A paused socket never reads the watch's own end, so the
+proxy's server.close() waited on it forever, and the next hook, the one that kills the watch, never ran.
+
+Destroying that one socket through the inspector let the teardown go on:
+  {"paused":true,"flowing":false,"before":"readOnly","destroyed":true}
+  watch exited
+  ✔ watch's text says a Claude transcript was replaced only when it printed some of it, not when the worker's first session starts (1315965.407949ms)
