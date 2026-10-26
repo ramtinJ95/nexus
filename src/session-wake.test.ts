@@ -1,8 +1,9 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { seedClaudeState } from "./claude-state.ts";
 import { fakeGuest, herdrError, herdrOk, herdrPane, herdrSnapshot, type ExecReply } from "./fake-guest.ts";
 import { recordBeforePause, relaunchAfterWake } from "./session-wake.ts";
-import { sessionFacts, sessionsFile, type SessionRecord } from "./sessions.ts";
+import { sendToClaude, sessionFacts, sessionsFile, type SessionRecord } from "./sessions.ts";
 
 function logged() {
   const lines: string[] = [];
@@ -85,4 +86,91 @@ test("a pause logs what it recorded and returns it for the backend to keep, and 
   const missing = logged();
   assert.equal(await recordBeforePause(fakeGuest(() => ({ exitCode: 127, output: "sh: herdr: not found\n" })), missing.log), null);
   assert.deepEqual(missing.lines, ["sessions: recording failed, so the wake relaunches what the last record holds: herdr api snapshot exited 127 without a JSON reply: sh: herdr: not found\n"]);
+});
+
+/**
+ * A pylon whose Herdr keeps its panes in memory. An agent start makes its pane run Claude under the launch's
+ * session, and a pause stops every process: Herdr restores each workspace as a shell, as with its agent resume off,
+ * or with `restores` false, as before Herdr first saved its layout, nothing.
+ */
+function pylon(restores = true) {
+  let up = true;
+  let panes: ReturnType<typeof herdrPane>[] = [];
+  const labels = new Map<string, string>();
+  const foreground = new Map<string, readonly string[]>();
+  const guest = fakeGuest((argv, isHerdr) => {
+    if (!isHerdr) {
+      if (argv[2] === seedClaudeState) return { exitCode: 0, output: "" };
+      if (argv.at(-1) === "/home/user/.claude/projects") return { exitCode: 0, output: "" };
+      if (argv[3] === "claude-type") return { exitCode: 0, output: "" };
+      if (argv.at(-1) === sessionsFile) {
+        const last = guest.written.findLast((f) => f.path === sessionsFile);
+        return last === undefined ? { exitCode: 3, output: "" } : { exitCode: 0, output: last.content };
+      }
+      if (argv[2]?.includes("herdr --session nexus server")) { up = true; return { exitCode: 0, output: "" }; }
+      throw new Error(`unscripted ${argv.join(" ")}`);
+    }
+    if (!up) return herdrError("server_not_running");
+    const sub = argv.slice(0, 2).join(" ");
+    const flag = (name: string) => argv[argv.indexOf(name) + 1]!;
+    switch (sub) {
+      case "workspace list": return herdrOk({ type: "workspace_list", workspaces: [] });
+      case "api snapshot": return herdrOk(herdrSnapshot([...labels].map(([id, label]) => ({ id, label })), panes));
+      case "pane process-info": {
+        const pane = argv[3]!;
+        const fg = foreground.get(pane) ?? ["-bash"];
+        return herdrOk({ type: "pane_process_info", process_info: { pane_id: pane, shell_pid: 100, foreground_processes: [{ pid: 101, name: fg[0]!, argv: fg }] } });
+      }
+      case "workspace create": {
+        const workspace = `w${Math.max(0, ...[...labels.keys()].map((id) => Number(id.slice(1)))) + 1}`;
+        labels.set(workspace, flag("--label"));
+        panes.push(herdrPane(`${workspace}:p1`, workspace, null, "unknown"));
+        return herdrOk({ type: "workspace_created", workspace: { workspace_id: workspace, label: flag("--label") }, tab: { tab_id: `${workspace}:t1` }, root_pane: { pane_id: `${workspace}:p1` } });
+      }
+      case "agent start": {
+        const pane = flag("--pane");
+        const args = argv.slice(argv.indexOf("--") + 1);
+        panes = panes.map((p) => p.pane_id === pane ? herdrPane(pane, p.workspace_id, "claude", "idle", { kind: "id", value: args[1]! }) : p);
+        foreground.set(pane, ["claude", ...args]);
+        return herdrOk({ type: "agent_started", agent: {}, argv: [] });
+      }
+      case "pane close": case "workspace close": {
+        const id = argv[2]!;
+        panes = panes.filter((p) => p.pane_id !== id && p.workspace_id !== id);
+        for (const w of labels.keys()) if (!panes.some((p) => p.workspace_id === w)) labels.delete(w);
+        foreground.delete(id);
+        return herdrOk({ type: "ok" });
+      }
+    }
+    throw new Error(`unscripted herdr ${argv.join(" ")}`);
+  });
+  return {
+    guest,
+    pause() {
+      up = false;
+      foreground.clear();
+      panes = restores ? panes.map((p) => herdrPane(p.pane_id, p.workspace_id, null, "unknown")) : [];
+      if (!restores) labels.clear();
+    },
+    /** The panes whose foreground runs `claude` under `session`. */
+    running: (session: string) => [...foreground].filter(([, argv]) => argv[0] === "claude" && argv.includes(session)).map(([pane]) => pane),
+    workspaces: () => [...labels.values()],
+  };
+}
+
+const worker = "0b5e3a52-5d0f-4c1e-9a43-1f2a6c7d8e90";
+const quiet = async () => {};
+
+test("every wake brings the worker back in its own pane, though a message reaches it while the wake relaunches it", async () => {
+  const p = pylon();
+  await p.guest.exec(["herdr", "--session", "nexus", "workspace", "create", "--cwd", "/home/user/workspace/repo", "--label", "Fix the login page", "--no-focus"], { cwd: "/home/user", timeoutMs: 1 });
+  await p.guest.exec(["herdr", "--session", "nexus", "agent", "start", "nx-1", "--kind", "claude", "--pane", "w1:p1", "--timeout", "1", "--", "--session-id", worker], { cwd: "/home/user", timeoutMs: 1 });
+  for (const wake of [1, 2, 3]) {
+    await recordBeforePause(p.guest, quiet);
+    p.pause();
+    const [, sent] = await Promise.all([relaunchAfterWake(p.guest, quiet), sendToClaude(p.guest, { session: worker, text: `wake ${wake}` })]);
+    assert.deepEqual(p.running(worker), ["w1:p1"], `after wake ${wake}, one Claude runs the worker's session`);
+    assert.equal(sent.herdrPane, "w1:p1", `the message of wake ${wake} went to it`);
+  }
+  assert.deepEqual(p.workspaces(), ["Fix the login page"]);
 });
