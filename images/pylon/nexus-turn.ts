@@ -1,4 +1,7 @@
 import { spawn } from "node:child_process";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 /** The image's copy of src/checkout-files.py, which the control plane reads the snapshot back with. */
 export const checkoutHelper = "/usr/local/lib/nexus/checkout-files.py";
@@ -8,14 +11,20 @@ export const claudeTurn = (session: string, at: number): string => `claude:${ses
 
 /**
  * Snapshots the checkout into refs/nexus/turn before Claude acts on the prompt. Claude kills a hook after two seconds,
- * and a snapshot finishing after that could include Claude's first edits, so the helper is killed sooner. A killed or
- * failed snapshot leaves no snapshot under this turn's ID, which reads refuse.
+ * and a snapshot finishing after that could include Claude's first edits, so the helper's process group, git and any
+ * filter it runs included, is killed sooner. A killed or failed snapshot leaves no snapshot under this turn's ID, which
+ * reads refuse. The helper's temporary index goes in a directory removed whichever way it ends.
  */
-export function snapshotTurn(checkout: string, turn: string, deadlineMs = 1_500, helper = checkoutHelper): Promise<boolean> {
-  return new Promise((resolve) => {
-    const child = spawn("python3", [helper, checkout, "snapshot", turn], { stdio: "ignore" });
-    const timer = setTimeout(() => child.kill("SIGKILL"), deadlineMs);
-    child.on("error", () => { clearTimeout(timer); resolve(false); });
-    child.on("exit", (code) => { clearTimeout(timer); resolve(code === 0); });
-  });
+export async function snapshotTurn(checkout: string, turn: string, deadlineMs = 1_500, helper = checkoutHelper): Promise<boolean> {
+  const scratch = await mkdtemp(join(tmpdir(), "nexus-turn-"));
+  try {
+    return await new Promise((resolve) => {
+      const child = spawn("python3", [helper, checkout, "snapshot", turn], { stdio: "ignore", detached: true, env: { ...process.env, TMPDIR: scratch } });
+      const timer = setTimeout(() => { try { process.kill(-child.pid!, "SIGKILL"); } catch {} }, deadlineMs);
+      child.on("error", () => { clearTimeout(timer); resolve(false); });
+      child.on("exit", (code) => { clearTimeout(timer); resolve(code === 0); });
+    });
+  } finally {
+    await rm(scratch, { recursive: true, force: true });
+  }
 }

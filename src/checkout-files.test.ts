@@ -1,7 +1,7 @@
 import { test, type TestContext } from "node:test";
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -311,18 +311,62 @@ test("latest turn refuses an older pylon and a failed snapshot invalidates its p
   await assert.rejects(c.reader.diff("turn", []), refused("no-base", /snapshot failed/));
 });
 
-test("the Claude hook's snapshot is the base of its turn, and one past its deadline leaves none under its ID", async (t) => {
+const helperPath = fileURLToPath(new URL("./checkout-files.py", import.meta.url));
+
+/** A clean filter on `*.slow` that waits while `slow` exists in the scratch directory, and then leaves `filtered` there. */
+async function slowFilter(c: Awaited<ReturnType<typeof checkout>>) {
+  const slow = join(c.scratch, "slow");
+  const filtered = join(c.scratch, "filtered");
+  await c.git("config", "filter.slow.clean", `while [ -e '${slow}' ]; do sleep 0.1; done; touch '${filtered}'; cat`);
+  await writeFile(join(c.dir, ".gitattributes"), "*.slow filter=slow\n");
+  await writeFile(join(c.dir, "big.slow"), "slow\n");
+  return { slow, filtered };
+}
+
+test("the Claude hook's snapshot is the base of its turn", async (t) => {
   const c = await checkout(t);
-  const helper = fileURLToPath(new URL("./checkout-files.py", import.meta.url));
   await writeFile(join(c.dir, "app.txt"), "before the turn\n");
-  const first = claudeTurn("s1", 1000);
-  assert.equal(await snapshotTurn(c.dir, first, 30_000, helper), true);
+  const turn = claudeTurn("s1", 1000);
+  assert.equal(await snapshotTurn(c.dir, turn, 30_000, helperPath), true);
   await writeFile(join(c.dir, "turn.txt"), "the turn's\n");
-  const changes = await checkoutReader(c.open, c.dir, undefined, first).changes("turn");
+  const changes = await checkoutReader(c.open, c.dir, undefined, turn).changes("turn");
   assert.deepEqual(changes.files.map((f) => f.path), ["turn.txt"]);
-  const second = claudeTurn("s1", 2000);
-  assert.equal(await snapshotTurn(c.dir, second, 0, helper), false);
-  await assert.rejects(checkoutReader(c.open, c.dir, undefined, second).changes("turn"), refused("no-base", /no latest-turn snapshot/));
+});
+
+test("a snapshot past its deadline is killed with the git and filters it runs, leaves no temporary index and none under its ID", async (t) => {
+  const c = await checkout(t);
+  const { slow, filtered } = await slowFilter(c);
+  await writeFile(slow, "");
+  const scratch = join(c.scratch, "tmp");
+  await mkdir(scratch);
+  const tmp = process.env.TMPDIR;
+  process.env.TMPDIR = scratch;
+  t.after(() => { if (tmp === undefined) delete process.env.TMPDIR; else process.env.TMPDIR = tmp; });
+  const turn = claudeTurn("s1", 2000);
+  const started = Date.now();
+  assert.equal(await snapshotTurn(c.dir, turn, 500, helperPath), false);
+  assert.ok(Date.now() - started < 1_500, "the snapshot gives up at its deadline");
+  assert.deepEqual(await readdir(scratch), [], "the temporary index is gone");
+  await rm(slow);
+  await new Promise((resolve) => setTimeout(resolve, 500));
+  await assert.rejects(readFile(filtered), { code: "ENOENT" }, "the filter was killed with the snapshot");
+  await assert.rejects(checkoutReader(c.open, c.dir, undefined, turn).changes("turn"), refused("no-base", /no latest-turn snapshot/));
+});
+
+test("a snapshot a newer turn superseded while it ran never replaces the newer one", async (t) => {
+  const c = await checkout(t);
+  const { slow } = await slowFilter(c);
+  await writeFile(slow, "");
+  const older = claudeTurn("a", 1000);
+  const newer = claudeTurn("b", 1001);
+  const first = snapshotTurn(c.dir, older, 30_000, helperPath);
+  while ((await readFile(join(c.dir, ".git/nexus-turn"), "utf8").catch(() => "")) !== older) await new Promise((resolve) => setTimeout(resolve, 20));
+  await rm(slow);
+  assert.equal(await snapshotTurn(c.dir, newer, 30_000, helperPath), true);
+  await first;
+  assert.equal((await c.git("log", "-1", "--format=%s", "refs/nexus/turn")).trim(), `Nexus turn ${newer}`);
+  await checkoutReader(c.open, c.dir, undefined, newer).changes("turn");
+  await assert.rejects(checkoutReader(c.open, c.dir, undefined, older).changes("turn"), refused("no-base", /no latest-turn snapshot/));
 });
 
 test("a turn snapshot works before a scratch repository's first commit", async (t) => {

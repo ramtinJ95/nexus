@@ -16,6 +16,8 @@
 #
 # Exit 0 is an answer. Exit 3 is a refusal the caller can act on, printed as {"refused": kind, "message": text}.
 # Any other exit is a failure, whose traceback goes to stderr, which the probe logs.
+import contextlib
+import fcntl
 import json
 import os
 import shutil
@@ -180,21 +182,39 @@ def scratch_env(root, scratch):
 
 def snapshot(root, turn):
     marker = os.path.join(root, git(root, ["rev-parse", "--git-path", "nexus-turn"]).decode().strip())
-    if os.path.exists(marker):
-        with open(marker) as f:
-            if f.read() == turn:
-                return
-    # Invalidate first: a failed attempt must not show the preceding turn's changes.
-    git(root, ["update-ref", "-d", "refs/nexus/turn"])
-    with open(marker, "w") as f:
-        f.write(turn)
+
+    def claimed():
+        try:
+            with open(marker) as f:
+                return f.read() == turn
+        except FileNotFoundError:
+            return False
+
+    # Concurrent sessions each snapshot. The last to claim the marker owns the ref, so an attempt another turn
+    # superseded while it built never publishes its older base.
+    with turn_lock(marker):
+        if claimed():
+            return
+        # Invalidate first: a failed attempt must not show the preceding turn's changes.
+        git(root, ["update-ref", "-d", "refs/nexus/turn"])
+        with open(marker, "w") as f:
+            f.write(turn)
     with tempfile.TemporaryDirectory() as scratch:
         env = scratch_env(root, scratch)
         tree = git(root, ["write-tree"], env).decode().strip()
         env.update(GIT_AUTHOR_NAME="Nexus", GIT_AUTHOR_EMAIL="nexus@localhost",
                    GIT_COMMITTER_NAME="Nexus", GIT_COMMITTER_EMAIL="nexus@localhost")
         commit = git(root, ["commit-tree", tree, "-m", "Nexus turn " + turn], env).decode().strip()
-        git(root, ["update-ref", "refs/nexus/turn", commit])
+    with turn_lock(marker):
+        if claimed():
+            git(root, ["update-ref", "refs/nexus/turn", commit])
+
+
+@contextlib.contextmanager
+def turn_lock(marker):
+    with open(marker + ".lock", "w") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        yield
 
 
 DIFF_FLAGS = ["diff", "--cached", "--no-color", "--no-ext-diff", "--no-textconv", "--find-renames", "--no-relative"]
