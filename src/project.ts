@@ -376,7 +376,7 @@ function pylonGuide(o: PylonOverlay): string {
   ].map((paragraph) => `${paragraph}\n`).join("\n") || "This project has no interactive logins.\n";
   const reviewLogin = chatgpt
     ? "The reviewer runs on pi's `openai` provider, which is signed in here. If it stops on a login or model error anyway, say the review was skipped and why, and go on with the work."
-    : "This pylon was not granted the ChatGPT token, so pi is not signed in and the reviewer stops before it reviews. Say in your reply and in the pull request that the review was skipped and why, and go on with the work. The human can add the `chatgpt` login to the project, which reaches threads started after that.";
+    : "This pylon was not granted the ChatGPT token, so pi is not signed in and the reviewer stops with `Provider is not configured: openai`. Say in your reply and in the pull request that the review was skipped and why, and go on with the work. The human can add the `chatgpt` login to the project, which reaches threads started after that.";
   const secrets = o.secrets.length === 0 ? "" : `## Secrets
 
 Login shells have these variables. Each holds a placeholder that is swapped for the real value only in requests to the hosts listed, and the placeholder changes on every boot, so never write one into a file, a git config or a remote URL.
