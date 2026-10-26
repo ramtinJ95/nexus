@@ -9,7 +9,7 @@ import { openRegistry, type PortRange, type Registry, type Thread, type ThreadId
 import { newPylonRecord } from "../tick.ts";
 import { envelope, ingest as realIngest } from "../reconcile.ts";
 import type {
-  BrokenCause, Job, JobEnvelope, JobErrorCode, JobId, JobStatus, ListeningFact, LiveHash, NodeName, NodeObservation, PreviewRouteFact, ProbeClient, ProbeEvent, PylonId, PylonObservation, RunningFacts, ServiceFact, SessionFact, SubmitReply, TailnetNodeId,
+  BrokenCause, CommandResult, Job, JobEnvelope, JobErrorCode, JobId, JobStatus, ListeningFact, LiveHash, NodeName, NodeObservation, PreviewRouteFact, ProbeClient, ProbeEvent, PylonCommand, PylonId, PylonObservation, RunningFacts, ServiceFact, SessionFact, SubmitReply, TailnetNodeId,
 } from "../protocol.ts";
 import { liveHashOf, type LiveSpec, type ProjectId } from "../project.ts";
 import type { CheckpointId, ImageId } from "../images.ts";
@@ -23,7 +23,7 @@ const previewPorts: PortRange = { first: 10200, last: 10209 };
  * A node as its probe presents it. Jobs run until `finish` unless `autoFinish` is set. Like the real probe, a
  * finished job is announced by a job event first and by a fresh snapshot a moment later.
  */
-function fakeNode(options: { autoFinish: boolean; node?: NodeName; reportsRoutes?: boolean }) {
+function fakeNode(options: { autoFinish: boolean; node?: NodeName; reportsRoutes?: boolean; claudeLaunchRepeatable?: boolean }) {
   const node = options.node ?? firebat;
   const pylons = new Map<PylonId, PylonObservation>();
   const jobs = new Map<JobId, { env: JobEnvelope; status: JobStatus }>();
@@ -39,6 +39,7 @@ function fakeNode(options: { autoFinish: boolean; node?: NodeName; reportsRoutes
     node, observedAt: new Date().toISOString(), probeBootId: "boot-1",
     capacity: { cpus: 16, committedCpus: 0, memoryGiB: 64, committedMemoryGiB: 0, diskFreeGiB: 100, committedDiskGiB: 0 },
     artifacts: [image], jobs: [...jobs.values()].map((j) => j.status), pylons: [...pylons.values()], grants: { secrets: [], gitSsh: false }, previewRoutes: options.reportsRoutes === false ? null : [...routes.values()],
+    ...(options.claudeLaunchRepeatable === true ? { claudeLaunchRepeatable: true } : {}),
   });
   const unroute = (pylonId: PylonId) => { for (const [port, route] of routes) if (route.pylonId === pylonId) routes.delete(port); };
   const emit = (event: ProbeEvent) => { for (const push of streams) push(event); };
@@ -256,8 +257,9 @@ function seed(registry: Registry, activity: Partial<Pick<Thread, "agentTurnRunni
   return thread;
 }
 
-function run(t: import("node:test").TestContext, registry: Registry, probe: ProbeClient, overrides: { gitIdentity?: { name: string; email: string }; offlineAfterMs?: number; silenceMs?: number; ingest?: Ingest; previewPorts?: PortRange; log?: (line: string) => void } = {}): Loop {
+function run(t: import("node:test").TestContext, registry: Registry, probe: ProbeClient, overrides: { gitIdentity?: { name: string; email: string }; offlineAfterMs?: number; silenceMs?: number; ingest?: Ingest; previewPorts?: PortRange; log?: (line: string) => void; claudeLaunchRetryMs?: number } = {}): Loop {
   const loop = startLoop({
+    ...(overrides.claudeLaunchRetryMs === undefined ? {} : { claudeLaunchRetryMs: overrides.claudeLaunchRetryMs }),
     gitIdentity: overrides.gitIdentity,
     registry, probes: [probe], ingest: overrides.ingest ?? ingest, previewPorts: overrides.previewPorts ?? previewPorts, intervalMs: 10, reconnectMs: 10,
     offlineAfterMs: overrides.offlineAfterMs ?? 30_000, silenceMs: overrides.silenceMs ?? 30_000, log: overrides.log ?? assert.fail,
@@ -1083,4 +1085,84 @@ test("a failed launch persists the same diagnostic it publishes and never resubm
   assert.match(worker.message!, /seeding Claude state failed: invalid JSON/);
   assert.equal(registry.events().filter((e) => e.kind === "thread.failed").at(-1)?.payload.message, worker.message);
   assert.equal(registry.events().filter((e) => e.kind === "attention.changed").at(-1)?.payload.attention, "failed");
+});
+
+/**
+ * A probe whose command answers with `answers`, in order. A "restart" drops the connection, as a deploy's probe restart
+ * does, with the observe link, and the probe is back 30 ms later.
+ */
+function restartingProbe(fake: ReturnType<typeof fakeNode>, answers: ("restart" | CommandResult)[], commands: PylonCommand[]): ProbeClient {
+  return { ...fake.probe, command: async (_pylonId, command) => {
+    commands.push(command);
+    const answer = answers.shift() ?? assert.fail("the launch was sent once too often");
+    if (answer !== "restart") return answer;
+    fake.disconnect();
+    setTimeout(() => fake.reconnect(), 30);
+    throw Object.assign(new Error(`${node}: socket hang up`), { code: "unreachable" });
+  } };
+}
+
+test("a Claude launch whose probe restarts mid-way is sent again under its session once the probe is back, and starts once", async (t) => {
+  const registry = openRegistry(tempDb());
+  const thread = seed(registry);
+  registry.setClaudeWorker(thread.id, "/poteto-mode hello", "pending");
+  const fake = fakeNode({ autoFinish: true, claudeLaunchRepeatable: true });
+  const commands: PylonCommand[] = [];
+  const logged: string[] = [];
+  run(t, registry, restartingProbe(fake, ["restart", "restart", { kind: "open-session", herdrPane: "w1:p1" }], commands), { log: (line) => logged.push(line) });
+  await until("worker started", () => registry.claudeWorker(thread.id)?.state === "started", 5_000);
+  assert.equal(commands.length, 3);
+  assert.deepEqual(new Set(commands.map((c) => c.kind === "open-session" && c.resume)), new Set([registry.claudeWorker(thread.id)!.session]), "every send names the session recorded before the first");
+  assert.equal(registry.events().some((e) => e.kind === "thread.failed"), false);
+  assert.ok(logged.some((line) => line.includes("the Claude launch lost its probe (rj-firebat: socket hang up). Sending it again")));
+});
+
+test("a Claude launch whose probe comes back unable to take it again fails as before, sent once", async (t) => {
+  const registry = openRegistry(tempDb());
+  const thread = seed(registry);
+  registry.setClaudeWorker(thread.id, "hello", "pending");
+  const fake = fakeNode({ autoFinish: true });
+  const commands: PylonCommand[] = [];
+  run(t, registry, restartingProbe(fake, ["restart"], commands), { log: () => {} });
+  await until("worker failed", () => registry.claudeWorker(thread.id)?.state === "failed", 5_000);
+  assert.equal(commands.length, 1);
+  assert.match(registry.claudeWorker(thread.id)!.message!, /^Claude launch did not complete; attach to check before starting another session: .*socket hang up, and the probe that came back cannot take a launch again$/);
+});
+
+test("a Claude launch whose probe stays away fails once the wait is over", async (t) => {
+  const registry = openRegistry(tempDb());
+  const thread = seed(registry);
+  registry.setClaudeWorker(thread.id, "hello", "pending");
+  const fake = fakeNode({ autoFinish: true, claudeLaunchRepeatable: true });
+  const commands: PylonCommand[] = [];
+  const probe: ProbeClient = { ...fake.probe, command: async (_pylonId, command) => {
+    commands.push(command);
+    fake.disconnect();
+    throw Object.assign(new Error(`${node}: socket hang up`), { code: "unreachable" });
+  } };
+  run(t, registry, probe, { log: () => {}, claudeLaunchRetryMs: 200 });
+  await until("worker failed", () => registry.claudeWorker(thread.id)?.state === "failed", 5_000);
+  assert.equal(commands.length, 1);
+  assert.match(registry.claudeWorker(thread.id)!.message!, /socket hang up, and the probe did not come back within 0\.2 seconds$/);
+  assert.ok(registry.events().some((e) => e.kind === "thread.failed"));
+});
+
+test("a Claude launch a control plane restart cut off goes again under its session, where the probe can take it again", async (t) => {
+  const registry = openRegistry(tempDb());
+  const thread = seed(registry);
+  registry.setClaudeWorker(thread.id, "hello", "starting", undefined, "6f1c2a9e-3b7d-4e05-8c21-9d4b7a1e5f30");
+  const fake = fakeNode({ autoFinish: true, claudeLaunchRepeatable: true });
+  const commands: PylonCommand[] = [];
+  run(t, registry, restartingProbe(fake, [{ kind: "open-session", herdrPane: "w1:p1" }], commands));
+  await until("worker started", () => registry.claudeWorker(thread.id)?.state === "started");
+  assert.deepEqual(commands.map((c) => c.kind === "open-session" && c.resume), ["6f1c2a9e-3b7d-4e05-8c21-9d4b7a1e5f30"]);
+
+  const older = openRegistry(tempDb());
+  const other = seed(older);
+  older.setClaudeWorker(other.id, "hello", "starting", undefined, "6f1c2a9e-3b7d-4e05-8c21-9d4b7a1e5f30");
+  const sent: PylonCommand[] = [];
+  run(t, older, restartingProbe(fakeNode({ autoFinish: true }), [], sent));
+  await until("worker failed", () => older.claudeWorker(other.id)?.state === "failed");
+  assert.equal(older.claudeWorker(other.id)!.message, "Claude launch was interrupted; attach to check before starting another session");
+  assert.deepEqual(sent, []);
 });

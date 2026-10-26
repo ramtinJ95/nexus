@@ -110,18 +110,26 @@ export class GuestProcesses {
 			`python3 -c ${q("import subprocess,sys; subprocess.Popen(sys.argv[1:],stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,start_new_session=True)")} python3 ${q(`${path}/worker.py`)} ${q(cmd)} ${q(cwd)} ${q(path)} ${q(String(cleanup))} ${q(String(deadlineSeconds))}`,
 		);
 		const deadline = Date.now() + 5000;
-		while (!(await guestExists(this.vm, `${path}/pid`))) {
-			if (await guestExists(this.vm, `${path}/done`)) {
+		while (true) {
+			// The worker writes pid before done, so a done seen first settles whether pid will ever appear.
+			const done = await guestExists(this.vm, `${path}/done`);
+			if (await guestExists(this.vm, `${path}/pid`)) break;
+			if (done) {
+				const { exitCode } = outcome.parse(
+					JSON.parse(await this.vm.fs.readFile(`${path}/done`, { encoding: "utf8", signal: this.stopping })),
+				);
 				const output = await this.vm.fs.readFile(`${path}/output`, {
 					encoding: "utf8",
 					signal: this.stopping,
 				});
 				await checked(this.vm, `rm -rf ${q(path)}`);
-				throw new Error(`Guest command could not start: ${output}`);
+				throw new Error(
+					`Guest command could not start: its worker wrote done but never pid, so spawning it failed (exit ${exitCode}): ${output || "(no output)"}`,
+				);
 			}
 			if (Date.now() >= deadline)
 				throw new Error(
-					"Guest command did not start. Check its working directory and image Python installation",
+					"Guest command did not start: neither its pid nor its done file appeared within 5 s. Check its working directory and image Python installation",
 				);
 			await new Promise((accept) => setTimeout(accept, 50));
 		}

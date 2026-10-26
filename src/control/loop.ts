@@ -17,7 +17,7 @@ import { setTimeout as delay } from "node:timers/promises";
 import { desiredPhase, type RegistryWrite } from "../reconcile.ts";
 import { linkedPort, liveHashOf, type GitIdentity } from "../project.ts";
 import { tick, type TickContext } from "../tick.ts";
-import type { NodeName, NodeObservation, ProbeClient, ProbeError, ProbeEvent, PylonId, PylonObservation } from "../protocol.ts";
+import type { NodeName, NodeObservation, ProbeClient, ProbeError, ProbeEvent, PylonCommand, PylonId, PylonObservation } from "../protocol.ts";
 import type { ArtifactId } from "../images.ts";
 import { pylonLive } from "./live.ts";
 import type { PortRange, Registry, StoredPylon, Thread, ThreadId } from "./registry.ts";
@@ -46,6 +46,8 @@ export interface LoopOptions {
    */
   silenceMs?: number;
   reconnectMs?: number;
+  /** How long a Claude launch that lost its probe connection waits for the probe to come back. Default 3 minutes. */
+  claudeLaunchRetryMs?: number;
   log?: (message: string) => void;
 }
 
@@ -59,6 +61,7 @@ interface Link {
   probe: ProbeClient;
   /** The planner acts on a node only while its observe stream is open. */
   up: boolean;
+  snapshots: number;
   pass: Promise<void> | null;
   again: boolean;
   offline: NodeJS.Timeout | null;
@@ -70,6 +73,7 @@ export function startLoop(options: LoopOptions): Loop {
   const offlineAfterMs = options.offlineAfterMs ?? 30_000;
   const reconnectMs = options.reconnectMs ?? 2_000;
   const silenceMs = options.silenceMs ?? 90_000;
+  const claudeLaunchRetryMs = options.claudeLaunchRetryMs ?? 3 * 60_000;
   const log = options.log ?? ((message: string) => console.error(message));
   const shutdown = new AbortController();
   const listed = new Set<PylonId>();
@@ -77,7 +81,7 @@ export function startLoop(options: LoopOptions): Loop {
   const links = new Map<NodeName, Link>();
   for (const probe of options.probes) {
     if (registry.node(probe.node) === undefined) throw new Error(`probe for ${probe.node}, which the registry does not know`);
-    links.set(probe.node, { probe, up: false, pass: null, again: false, offline: null });
+    links.set(probe.node, { probe, up: false, snapshots: 0, pass: null, again: false, offline: null });
   }
 
   const observation = (node: NodeName): NodeObservation | null => links.get(node)?.up ? registry.node(node)?.observation ?? null : null;
@@ -158,20 +162,21 @@ export function startLoop(options: LoopOptions): Loop {
       };
       try {
         const worker = registry.claudeWorker(thread.id);
-        if (worker?.state === "starting") {
+        const running = observation(node)?.pylons.some((p) => p.pylonId === pylonId && p.phase === "running") === true;
+        // A launch this process did not finish, as one a control plane restart cut off, goes again only where it is safe to.
+        if (worker?.state === "starting" && observation(node) !== null && (observation(node)!.claudeLaunchRepeatable !== true || worker.session === null)) {
           const message = "Claude launch was interrupted; attach to check before starting another session";
           registry.setClaudeWorker(thread.id, worker.prompt, "failed", message);
           registry.appendEvent("thread.failed", thread.id, { message });
-        }
-        if (worker?.state === "pending" && thread.status === "active" && observation(node)?.pylons.some((p) => p.pylonId === pylonId && p.phase === "running")) {
-          // Fence the non-idempotent launch before sending: an interrupted reply must never submit the task twice.
-          const session = randomUUID();
+        } else if ((worker?.state === "pending" || worker?.state === "starting") && thread.status === "active" && running) {
+          // Fence the launch under its session before sending: a launch sent again must name the same session, or it could submit the task twice.
+          const session = worker.state === "starting" ? worker.session! : randomUUID();
           registry.setClaudeWorker(thread.id, worker.prompt, "starting", undefined, session);
           try {
-            await link.probe.command(pylonId, { kind: "open-session", harness: "claude-code", title: thread.title.slice(0, 80), resume: session, prompt: worker.prompt, model: worker.model ?? "claude-opus-5-5" });
+            await launchClaude(node, link, pylonId, { kind: "open-session", harness: "claude-code", title: thread.title.slice(0, 80), resume: session, prompt: worker.prompt, model: worker.model ?? "claude-opus-5-5" });
             registry.setClaudeWorker(thread.id, worker.prompt, "started");
           } catch (err) {
-            if (registry.claudeWorker(thread.id)?.state === "started") continue;
+            if (registry.claudeWorker(thread.id)?.state === "started" || shutdown.signal.aborted) continue;
             const message = `Claude launch did not complete; attach to check before starting another session: ${(err as Error).message}`;
             registry.setClaudeWorker(thread.id, worker.prompt, message.includes("Claude launch stalled") ? "stalled" : "failed", message);
             registry.appendEvent("thread.failed", thread.id, { message });
@@ -184,6 +189,31 @@ export function startLoop(options: LoopOptions): Loop {
         if (pylon.desired === "deleted" && step.kind === "done") registry.releasePreviews(pylon.pylonId);
       } catch (err) {
         log(`${pylon.pylonId}: tick failed: ${(err as Error).message}`);
+      }
+    }
+  }
+
+  /**
+   * Sends a prompted Claude launch, and sends it again, under the same session ID, each time the probe connection is
+   * lost before it answers, as when a deploy restarts the probe. It waits for a snapshot from after the loss, so the
+   * probe that answers it is one that came back, and sends again only if that probe says the launch is safe to repeat
+   * (sessions.ts openSession), which reads from the pylon how far the launch got.
+   */
+  async function launchClaude(node: NodeName, link: Link, pylonId: PylonId, command: Extract<PylonCommand, { kind: "open-session" }>): Promise<void> {
+    const until = Date.now() + claudeLaunchRetryMs;
+    for (;;) {
+      try {
+        await link.probe.command(pylonId, command);
+        return;
+      } catch (err) {
+        if ((err as Partial<ProbeError>).code !== "unreachable") throw err;
+        const seen = link.snapshots;
+        while (!link.up || link.snapshots === seen) {
+          if (Date.now() >= until) throw new Error(`${(err as Error).message}, and the probe did not come back within ${claudeLaunchRetryMs / 1000} seconds`);
+          await delay(250, undefined, { signal: shutdown.signal });
+        }
+        if (observation(node)?.claudeLaunchRepeatable !== true) throw new Error(`${(err as Error).message}, and the probe that came back cannot take a launch again`);
+        log(`${pylonId}: the Claude launch lost its probe (${(err as Error).message}). Sending it again`);
       }
     }
   }
@@ -233,7 +263,10 @@ export function startLoop(options: LoopOptions): Loop {
           registry.ingested(current, writes);
           for (const w of writes) if (w.record === "sessions" || w.record === "sessions-paused") listed.add(w.pylonId);
           reconcilePreviews(node, event.type === "snapshot" ? event.observation.pylons : event.type === "pylon" ? [event.pylon] : []);
-          if (event.type === "snapshot") linkUp(link);
+          if (event.type === "snapshot") {
+            link.snapshots++;
+            linkUp(link);
+          }
           void wake(node);
         }
       } catch (err) {

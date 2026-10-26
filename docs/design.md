@@ -247,7 +247,9 @@ readline or history expansion acts on, and Claude receives the exact text. A NUL
 cannot be an argument, so the API refuses a prompt with one. Unprompted and
 resumed sessions still use `agent start` and its readiness wait.
 An uncertain launch is not retried automatically, since starting two coding
-agents is worse than asking the person to inspect a possibly started session.
+agents is worse than asking the person to inspect a possibly started session. A
+launch cut off by a probe restart is the exception, as described under
+[a launch survives a probe restart](#a-launch-survives-a-probe-restart).
 The sandbox justifies bypassed permission prompts, including on resume. Existing
 secret injection supplies OAuth placeholders through login-shell environment.
 Before every launch/resume, merge Claude's empirically observed onboarding and
@@ -267,7 +269,7 @@ process plus working status is fallback startup evidence. Never roll back an
 uncertain first-prompt launch: retaining an empty pane is safer than killing work.
 For unprompted launches, close only after confirming no Claude process runs. Missing proof leaves the
 pane open and records stalled state, pane text, thread.failed and failed attention.
-The launch fence still forbids automatic retries, including after interruption.
+The launch fence forbids any other automatic retry.
 Persist its session ID before launch so a late turn-started report can clear
 stalled attention without another session clearing it; retain the diagnostic
 in the event history.
@@ -372,6 +374,65 @@ launches publish failure, using the same message stored on the worker. Matching
 late submission reports recover failed as well as stalled launches. Neither
 recovery nor restart resubmits a first prompt. Views render these registry facts
 rather than interpreting historical failure events as current failure.
+
+### A launch survives a probe restart
+
+A deploy restarts each node's probe, and the probe closes its connections at once.
+A Claude worker launch in flight then loses its answer, though the pylon and every
+guest command already started keep running, so the launch may have done any part
+of its work. The control plane treats a lost probe connection as no answer, not
+as a failure. It waits up to three minutes for a snapshot from the probe that came
+back and sends the same launch again, under the session ID it recorded before the
+first. It does the same for a launch still `starting` when the control plane
+itself starts, as after its own deploy.
+
+Sending a prompted launch again is safe because the launch records its progress in
+the pylon, in `~/.nexus/claude-launches/<session>/`: `opened` names its workspace
+and pane once they exist, `typed` is the claim of the guest command that types the
+launch, and `submitted` is the UserPromptSubmit receipt. That command creates
+`typed` with `mkdir` and types only if it created it, so of two typing commands,
+such as one the stopped probe's guest started late and one from the probe that
+replaced it, only one types and the other waits for the receipt. A launch sent again
+reads them. If the command was typed, it only waits for the receipt, as the first
+one would have, and reports a stall the same way. If nothing was typed, it types
+into the pane the first one opened, or opens one if that pane is gone. A launch
+from a probe older than these files leaves none, so a pane whose Claude already
+runs the session ends it as started, and a session with a transcript but no
+running Claude fails without typing, since its prompt already went in. One that an
+older probe lost before typing gets a new workspace, and the older probe's empty
+shell workspace stays beside it. Captures are in
+`docs/verification/launch-survives-deploy/`. The probe
+runs the launches and sends of one session one at a time, so a launch sent again
+while the first still runs waits for it and reads what it did.
+
+Only a probe whose snapshot says `claudeLaunchRepeatable` gets a launch twice. A
+probe from before this change would open a second workspace and type the launch
+again, so the control plane fails the launch against it as before. Any other
+error, or a probe that does not come back in time, fails the launch with the same
+diagnostic as before.
+
+The probe does not drain in-flight commands on SIGTERM. A prompted launch can take
+over 50 seconds, longer than a drain that fits the unit's 30-second stop timeout,
+so a drain could not make launches safe and the retry is needed anyway. The guest
+commands a drain would wait for finish on their own, and a drain would delay every
+deploy and keep the old probe answering while the new one waits.
+
+Other calls a probe restart can cut:
+
+- Jobs are retried by the control plane until they expire, under the same job ID,
+  and the next job converges from wherever an aborted one stopped.
+- Closing a session, dropping a failed session and linking or unlinking a port are
+  safe to repeat. The person or client that asked gets a 503 and can ask again.
+- A transcript or checkout read is read again on the next event or request. A
+  check run whose pipe breaks is discarded and runs again in a new check thread.
+- A message sent to a Claude worker that loses its answer stays fenced as
+  `sending`. A repeat asks the probe with `send-claude-outcome`, but the probe
+  keeps that answer in memory, so after a restart the repeat is refused as
+  uncertain, though nothing may have been typed. An agent's message is logged and
+  not typed again. Surviving a restart needs the same treatment as a launch: a
+  record of the request in the pylon, written by the command that types it.
+- Opening a session for a person, with no prompt, opens a second workspace if the
+  person asks again after a lost answer.
 
 ### Claude worker conversations and steering (0.17.0)
 

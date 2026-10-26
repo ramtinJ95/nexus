@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import assert from "node:assert/strict";
 import { attachedTerminals, attachScript, claudeTextProblem, closeSession, dropFailedSession, openSession, pausedSessionsIn, recordSessions, relaunchSessions, sendToClaude, sessionFacts, sessionsFile, type RelaunchOutcome, type SessionRecord } from "./sessions.ts";
-import { fakeGuest, herdrError, herdrOk, herdrPane, herdrSnapshot, type ExecReply } from "./fake-guest.ts";
+import { fakeGuest, herdrError, herdrOk, herdrPane, herdrSnapshot, type ExecReply, type FakeGuest } from "./fake-guest.ts";
 
 const created = (workspace: string, pane: string) => herdrOk({ type: "workspace_created", workspace: { workspace_id: workspace, label: "x" }, tab: { tab_id: `${workspace}:t1` }, root_pane: { pane_id: pane } });
 const agentStarted = herdrOk({ type: "agent_started", agent: {}, argv: [] });
@@ -21,15 +21,10 @@ const processInfo = (foreground: Record<string, readonly string[]>) => (argv: re
 const transcriptLookup = (argv: readonly string[], exists: boolean): ExecReply | undefined =>
   argv[0] === "sh" && argv.at(-1) === "/home/user/.claude/projects" ? { exitCode: exists ? 0 : 1, output: "" } : undefined;
 
-/**
- * A Herdr server that is up, with `overrides` keyed by subcommand such as "agent start". Claude Code
- * transcripts exist unless `transcripts` is false, and each pane's shell is at its prompt unless `shellReady` is false.
- */
-function herdrUp(overrides: Record<string, (argv: readonly string[]) => ExecReply> = {}, transcripts = true, submitted = true, shellReady = true) {
+/** A Herdr server that is up, with `overrides` keyed by subcommand such as "agent start". Claude Code transcripts exist unless `transcripts` is false. */
+function herdrUp(overrides: Record<string, (argv: readonly string[]) => ExecReply> = {}, transcripts = true) {
   return fakeGuest((argv, herdr) => {
     if (argv[2] === seedClaudeState) return { exitCode: 0, output: "" };
-    if (!herdr && argv[3] === "shell-ready") return { exitCode: shellReady ? 0 : 1, output: "" };
-    if (!herdr && argv[3] === "claude-submitted") return { exitCode: submitted ? 0 : 1, output: "" };
     if (!herdr && argv.at(-1) === sessionsFile) return { exitCode: 3, output: "" };
     if (!herdr) return transcriptLookup(argv, transcripts) ?? assert.fail(`unexpected exec ${argv.join(" ")}`);
     const sub = argv.slice(0, 2).join(" ");
@@ -38,7 +33,6 @@ function herdrUp(overrides: Record<string, (argv: readonly string[]) => ExecRepl
     if (sub === "workspace list") return herdrOk({ type: "workspace_list", workspaces: [] });
     if (sub === "workspace create") return created("w1", "w1:p1");
     if (sub === "agent start") return agentStarted;
-    if (sub === "pane run") return { exitCode: 0, output: "" };
     if (sub === "workspace close") return herdrOk({ type: "ok" });
     if (sub === "pane process-info") return processInfo({})(argv);
     if (sub === "pane read") return herdrOk({ type: "pane_read", read: { text: "user@pylon:~$ " } });
@@ -500,40 +494,241 @@ test("an attached terminal is a client with exactly the command line attachedTer
   assert.ok(attachScript.includes("setsid -f tini -s -- herdr --session nexus server </dev/null >/dev/null 2>&1"));
 });
 
+/**
+ * A pylon for prompted Claude launches: Herdr workspaces whose root pane runs a shell until a typed `claude` command
+ * starts Claude there, the launch's files in ~/.nexus, and the transcripts Claude has written. Typing `claude` starts
+ * it under the command's session ID, working, unless `starts` is false, and its UserPromptSubmit hook writes the
+ * receipt unless `submits` is false. `probe()` is one probe's view of the guest. `diesAt` ends that probe at the first exec it matches, after the
+ * exec ran in the guest when `ran` is true, as a guest exec runs to its end after the probe that started it exits. With
+ * `ran: "held"` the exec runs only on `release()`, as one the guest started late. The dead probe's later execs never
+ * reach the guest. The exec that types the launch claims it as the real one does, so a second claim types nothing.
+ */
+function launchPylon(options: { shellReady?: boolean; starts?: boolean; submits?: boolean; typeReply?: ExecReply; screen?: string; transcripts?: readonly string[] } = {}) {
+  const files = new Map<string, string>();
+  const panes = new Map<string, { workspace: string; label: string; foreground: readonly string[] }>();
+  const execs: (readonly string[])[] = [];
+  const held: (() => ExecReply)[] = [];
+  let workspaces = 0;
+  let typed = 0;
+  const words = (line: string) => [...line.matchAll(/\$'((?:[^'\\]|\\.)*)'/g)].map((m) => m[1]!.replace(/\\x([0-9a-f]{2})|\\(.)/g, (_, hex: string | undefined, c: string) => hex ? String.fromCharCode(parseInt(hex, 16)) : c));
+  function herdrCall(argv: readonly string[]): ExecReply {
+    const sub = argv.slice(0, 2).join(" ");
+    const pane = (id: string) => panes.get(id) ?? assert.fail(`no pane ${id}`);
+    switch (sub) {
+      case "workspace list": return herdrOk({ type: "workspace_list", workspaces: [] });
+      case "workspace create": {
+        const workspace = `w${++workspaces}`;
+        panes.set(`${workspace}:p1`, { workspace, label: argv[argv.indexOf("--label") + 1]!, foreground: ["-bash"] });
+        return created(workspace, `${workspace}:p1`);
+      }
+      case "workspace close":
+        for (const [id, p] of panes) if (p.workspace === argv[2]) panes.delete(id);
+        return herdrOk({ type: "ok" });
+      case "api snapshot":
+        return herdrOk(herdrSnapshot([...panes.values()].map((p) => ({ id: p.workspace, label: p.label })), [...panes].map(([id, p]) =>
+          p.foreground[0] === "claude" ? herdrPane(id, p.workspace, "claude", "working") : herdrPane(id, p.workspace, null, "unknown"))));
+      case "pane process-info": return processInfo(Object.fromEntries([...panes].map(([id, p]) => [id, p.foreground])))(argv);
+      case "pane run": {
+        const argvTyped = words(argv[3]!);
+        typed++;
+        if (argvTyped[0] !== "claude" || pane(argv[2]!).foreground[0] !== "-bash") return assert.fail(`typed ${argv[3]} into a pane running ${pane(argv[2]!).foreground[0]}`);
+        if (options.starts !== false) panes.set(argv[2]!, { ...pane(argv[2]!), foreground: argvTyped });
+        const hook = JSON.parse(argvTyped[argvTyped.indexOf("--settings") + 1]!).hooks.UserPromptSubmit[0].hooks[0].command as string;
+        if (options.starts !== false && options.submits !== false) files.set(/touch (\S+)$/.exec(hook)![1]!, "");
+        return options.typeReply ?? { exitCode: 0, output: "" };
+      }
+      case "pane read": return herdrOk({ type: "pane_read", read: { text: options.screen ?? "user@pylon:~$ " } });
+    }
+    throw new Error(`unscripted herdr ${argv.join(" ")}`);
+  }
+  function run(argv: readonly string[]): ExecReply {
+    execs.push(argv);
+    if (argv[0] === "herdr") return herdrCall(argv.slice(3));
+    if (argv[2] === seedClaudeState) return { exitCode: 0, output: "" };
+    if (argv[3] === "shell-ready") return { exitCode: options.shellReady === false ? 1 : 0, output: "" };
+    if (argv[3] === "claude-submitted") return { exitCode: files.has(argv[4]!) ? 0 : 1, output: "" };
+    if (typedExec(argv)) {
+      if (argv[2]!.startsWith("mkdir") && files.has(argv[3]!)) return { exitCode: 75, output: "" };
+      files.set(argv[3]!, "");
+      return herdrCall(argv.slice(7));
+    }
+    if (argv[3]?.startsWith("/home/user/.nexus/claude-launches/")) {
+      const opened = files.get(`${argv[3]}/opened`);
+      return { exitCode: 0, output: opened === undefined ? "" : opened + (files.has(`${argv[3]}/typed`) ? "typed\n" : "") };
+    }
+    const lookup = transcriptLookup(argv, (options.transcripts ?? []).includes(argv[3]!));
+    return lookup ?? assert.fail(`unexpected exec ${argv.join(" ")}`);
+  }
+  return {
+    files, panes, execs,
+    typings: () => typed,
+    release: () => held.splice(0).map((exec) => exec()),
+    claudes: () => [...panes.values()].filter((p) => p.foreground[0] === "claude"),
+    probe(diesAt?: { exec: (argv: readonly string[]) => boolean; ran: boolean | "held" }): FakeGuest {
+      let dead = false;
+      const guest = fakeGuest(() => assert.fail("unused"));
+      return {
+        ...guest,
+        async exec(argv) {
+          if (dead) throw new Error("socket hang up");
+          if (diesAt?.exec(argv)) {
+            dead = true;
+            if (diesAt.ran === "held") held.push(() => run(argv));
+            else if (diesAt.ran) run(argv);
+            throw new Error("socket hang up");
+          }
+          return { truncated: false, ...run(argv) };
+        },
+        async writeFiles(written) {
+          if (dead) throw new Error("socket hang up");
+          for (const f of written) files.set(f.path, f.content);
+        },
+      };
+    },
+  };
+}
+
+const launched = "6f1c2a9e-3b7d-4e05-8c21-9d4b7a1e5f30";
+const prompted = { harness: "claude-code" as const, title: "worker", cwd: "/home/user/workspace/repo", resume: launched, prompt: "work" };
+const typedExec = (argv: readonly string[]) => argv[0] === "sh" && argv[4] === "herdr" && argv.includes("run");
+
 test("a worker's first prompt reaches Claude as one exact argument through the pane's interactive bash", async () => {
   const { execFileSync } = await import("node:child_process");
-  const guest = herdrUp();
+  const pylon = launchPylon();
   const prompt = "/poteto-mode fix \"quotes\" and 'single' and `ticks` and $(not-a-shell-command) $HOME !! \\n\nthen\ttest\r\n\n  ünïcode\n";
-  await openSession(guest, { harness: "claude-code", title: "worker", cwd: "/home/user/workspace/repo", prompt, model: "claude-opus-5-5" });
-  assert.equal(guest.herdrCalls().includes("agent start"), false);
-  const typedAt = guest.execs.findIndex((a) => a[3] === "pane" && a[4] === "run");
-  const readyAt = guest.execs.findIndex((a) => a[3] === "shell-ready");
+  await openSession(pylon.probe(), { harness: "claude-code", title: "worker", cwd: "/home/user/workspace/repo", prompt, model: "claude-opus-5-5" });
+  assert.equal(pylon.execs.some((a) => a[3] === "agent"), false);
+  const typedAt = pylon.execs.findIndex(typedExec);
+  const readyAt = pylon.execs.findIndex((a) => a[3] === "shell-ready");
   assert.ok(readyAt !== -1 && readyAt < typedAt, "the launch is typed only once the pane's shell is at its prompt");
-  assert.deepEqual(guest.execs[readyAt]!.slice(4), ["100"], "the wait watches the pane's shell");
-  const command = guest.execs[typedAt]!.at(-1)!;
+  assert.deepEqual(pylon.execs[readyAt]!.slice(4), ["100"], "the wait watches the pane's shell");
+  const command = pylon.execs[typedAt]!.at(-1)!;
   assert.doesNotMatch(command, /[\x00-\x1f\x7f]/, "nothing in the typed line is a key the terminal or readline acts on");
   const typed = `claude() { printf '%s\\0' "$@"; }\n${command}\n`;
   const argv = execFileSync("bash", ["--norc", "--noprofile", "-i"], { input: typed, encoding: "utf8", stdio: ["pipe", "pipe", "ignore"] }).split("\0").slice(0, -1);
   assert.deepEqual(argv.slice(0, 1), ["--session-id"]);
   assert.deepEqual(argv.slice(2, 7), ["--model", "claude-opus-5-5", "--permission-mode", "bypassPermissions", "--settings"]);
-  assert.match(JSON.parse(argv[7]!).hooks.UserPromptSubmit[0].hooks[0].command, /^mkdir -p \/home\/user\/\.nexus && touch \/home\/user\/\.nexus\/claude-submitted-/);
+  const launch = `/home/user/.nexus/claude-launches/${argv[1]}`;
+  assert.equal(JSON.parse(argv[7]!).hooks.UserPromptSubmit[0].hooks[0].command, `mkdir -p ${launch} && touch ${launch}/submitted`);
   assert.equal(argv[8], prompt);
   assert.equal(argv.length, 9);
-  assert.ok(guest.execs.some((a) => a[3] === "claude-submitted"));
+  assert.equal(pylon.execs[typedAt]![3], `${launch}/typed`, "the exec that types the launch claims it first");
+  assert.equal(pylon.files.get(`${launch}/opened`), "w1 w1:p1\n");
 });
 
 test("a worker whose shell never reaches its prompt types nothing and rolls back with the pane's screen", async () => {
-  const guest = herdrUp({ "pane read": () => herdrOk({ read: { text: "still sourcing .bashrc" } }) }, true, true, false);
-  await assert.rejects(openSession(guest, { harness: "claude-code", title: "worker", cwd: "/home/user/workspace/repo", prompt: "x".repeat(5000) }), /shell did not reach an idle prompt within 10 seconds.*still sourcing \.bashrc/s);
-  assert.equal(guest.herdrCalls().includes("pane run"), false);
-  assert.equal(guest.herdrCalls().includes("workspace close"), true);
+  const pylon = launchPylon({ shellReady: false, screen: "still sourcing .bashrc" });
+  await assert.rejects(openSession(pylon.probe(), { ...prompted, prompt: "x".repeat(5000) }), /shell did not reach an idle prompt within 10 seconds.*still sourcing \.bashrc/s);
+  assert.equal(pylon.typings(), 0);
+  assert.equal(pylon.panes.size, 0, "the workspace was closed");
 });
 
 test("a worker without prompt submission stalls and leaves its visible pane for takeover", async () => {
-  const guest = herdrUp({ "pane read": () => herdrOk({ read: { text: "Choose the text style" } }) }, true, false);
-  await assert.rejects(openSession(guest, { harness: "claude-code", title: "worker", cwd: "/home/user/workspace/repo", prompt: "hello" }), /Claude launch stalled.*Choose the text style/s);
-  assert.equal(guest.herdrCalls().includes("workspace close"), false);
-  assert.equal(guest.herdrCalls().filter((c) => c === "pane run").length, 1);
+  const pylon = launchPylon({ starts: false, screen: "Choose the text style" });
+  await assert.rejects(openSession(pylon.probe(), prompted), /Claude launch stalled.*Choose the text style/s);
+  assert.equal(pylon.panes.size, 1);
+  assert.equal(pylon.typings(), 1);
+});
+
+test("an error typing the launch is uncertain, so its receipt starts the worker and the pane is never closed", async () => {
+  const pylon = launchPylon({ typeReply: herdrError("timeout", "timed out") });
+  assert.equal(await openSession(pylon.probe(), { ...prompted, model: "custom-model" }), "w1:p1");
+  assert.equal(pylon.panes.size, 1);
+  assert.equal(pylon.typings(), 1);
+  assert.match(pylon.execs.find(typedExec)!.at(-1)!, / \$'--model' \$'custom-model' /);
+});
+
+test("a lost receipt with a running busy Claude also preserves the launch", async () => {
+  const pylon = launchPylon({ submits: false, typeReply: herdrError("timeout", "timed out") });
+  assert.equal(await openSession(pylon.probe(), prompted), "w1:p1");
+  assert.equal(pylon.panes.size, 1);
+});
+
+test("a receipt read failure preserves the pane rather than rolling back uncertain work", async () => {
+  const pylon = launchPylon({ submits: false });
+  await assert.rejects(openSession(pylon.probe({ exec: (a) => a[3] === "claude-submitted", ran: false }), prompted), /Claude launch stalled/);
+  assert.equal(pylon.panes.size, 1);
+});
+
+test("a launch whose probe died before typing is sent again into the same pane and typed once", async () => {
+  const pylon = launchPylon();
+  await assert.rejects(openSession(pylon.probe({ exec: (a) => a[3] === "shell-ready", ran: false }), prompted));
+  assert.equal(pylon.typings(), 0);
+  assert.equal(await openSession(pylon.probe(), prompted), "w1:p1");
+  assert.equal(pylon.execs.filter((a) => a[4] === "create").length, 1, "the second launch took the first one's pane");
+  assert.equal(pylon.typings(), 1);
+  assert.deepEqual(pylon.claudes().map((p) => p.foreground.slice(0, 3)), [["claude", "--session-id", launched]]);
+});
+
+test("a launch whose probe died while typing is not typed again, and its receipt answers the second launch", async () => {
+  const pylon = launchPylon();
+  await assert.rejects(openSession(pylon.probe({ exec: typedExec, ran: true }), prompted));
+  assert.equal(await openSession(pylon.probe(), prompted), "w1:p1");
+  assert.equal(pylon.typings(), 1);
+  assert.equal(pylon.claudes().length, 1);
+});
+
+test("a typing exec the dead probe's guest starts late types nothing once the second launch has typed", async () => {
+  const pylon = launchPylon();
+  await assert.rejects(openSession(pylon.probe({ exec: typedExec, ran: "held" }), prompted));
+  assert.equal(await openSession(pylon.probe(), prompted), "w1:p1");
+  assert.deepEqual(pylon.release(), [{ exitCode: 75, output: "" }]);
+  assert.equal(pylon.typings(), 1);
+  assert.equal(pylon.claudes().length, 1);
+});
+
+test("a typing exec the dead probe's guest starts late wins the claim from a second launch that has not typed yet", async () => {
+  const pylon = launchPylon();
+  await assert.rejects(openSession(pylon.probe({ exec: typedExec, ran: "held" }), prompted));
+  const second = pylon.probe();
+  const exec = second.exec;
+  second.exec = async (argv, options) => {
+    if (typedExec(argv)) pylon.release();
+    return exec(argv, options);
+  };
+  assert.equal(await openSession(second, prompted), "w1:p1");
+  assert.equal(pylon.typings(), 1);
+  assert.equal(pylon.claudes().length, 1);
+});
+
+test("a launch whose probe died waiting for its receipt is not typed again", async () => {
+  const pylon = launchPylon();
+  await assert.rejects(openSession(pylon.probe({ exec: (a) => a[3] === "claude-submitted", ran: false }), prompted));
+  assert.equal(await openSession(pylon.probe(), prompted), "w1:p1");
+  assert.equal(pylon.typings(), 1);
+  assert.equal(pylon.claudes().length, 1);
+});
+
+test("a launch typed before its probe died whose Claude is gone fails with the pane's screen and types nothing", async () => {
+  const pylon = launchPylon({ submits: false, screen: "claude: command not found" });
+  await assert.rejects(openSession(pylon.probe({ exec: typedExec, ran: true }), prompted));
+  pylon.panes.set("w1:p1", { ...pylon.panes.get("w1:p1")!, foreground: ["-bash"] });
+  await assert.rejects(openSession(pylon.probe(), prompted), /Claude launch stalled: no UserPromptSubmit within 30 seconds before the probe lost the launch.*command not found/s);
+  assert.equal(pylon.typings(), 1);
+  assert.equal(pylon.panes.size, 1, "the pane stays for the person");
+});
+
+test("a launch an older probe typed records nothing, and its running Claude answers the second launch", async () => {
+  const pylon = launchPylon();
+  pylon.panes.set("w1:p1", { workspace: "w1", label: "worker", foreground: ["claude", "--session-id", launched, "--permission-mode", "bypassPermissions"] });
+  assert.equal(await openSession(pylon.probe(), prompted), "w1:p1");
+  assert.equal(pylon.typings(), 0);
+  assert.equal(pylon.execs.some((a) => a[4] === "create"), false);
+});
+
+test("a launch an older probe lost before typing starts Claude once, beside the shell it left", async () => {
+  const pylon = launchPylon();
+  pylon.panes.set("w9:p1", { workspace: "w9", label: "worker", foreground: ["-bash"] });
+  assert.equal(await openSession(pylon.probe(), prompted), "w1:p1");
+  assert.equal(pylon.typings(), 1);
+  assert.equal(pylon.claudes().length, 1);
+});
+
+test("a launch whose session already has a transcript but no running Claude types nothing", async () => {
+  const pylon = launchPylon({ transcripts: [launched] });
+  await assert.rejects(openSession(pylon.probe(), prompted), /already has a transcript, so its first prompt went in/);
+  assert.equal(pylon.typings(), 0);
+  assert.equal(pylon.panes.size, 0);
 });
 
 test("Claude user state merges onboarding, trust and bypass acceptance without losing login or hooks", async (t) => {
@@ -621,34 +816,6 @@ test("resuming a pane at root or HOME seeds only the pylon checkout", async () =
   }
 });
 
-
-test("an error typing the launch is uncertain, so its receipt starts the worker and the pane is never closed", async () => {
-  const guest = herdrUp({ "pane run": () => herdrError("timeout", "timed out") });
-  assert.equal(await openSession(guest, { harness: "claude-code", title: "worker", cwd: "/home/user/workspace/repo", prompt: "work", model: "custom-model" }), "w1:p1");
-  assert.equal(guest.herdrCalls().includes("workspace close"), false);
-  assert.equal(guest.herdrCalls().filter((c) => c === "pane run").length, 1);
-  assert.match(guest.execs.find((a) => a[3] === "pane" && a[4] === "run")!.at(-1)!, / \$'--model' \$'custom-model' /);
-});
-
-test("a lost receipt with a running busy Claude also preserves the launch", async () => {
-  const guest = herdrUp({
-    "pane run": () => herdrError("timeout", "timed out"),
-    "pane process-info": processInfo({ "w1:p1": ["claude"] }),
-    "api snapshot": () => herdrOk(herdrSnapshot([{ id: "w1", label: "worker" }], [herdrPane("w1:p1", "w1", "claude", "working")])),
-  }, true, false);
-  assert.equal(await openSession(guest, { harness: "claude-code", title: "worker", cwd: "/home/user/workspace/repo", prompt: "work" }), "w1:p1");
-  assert.equal(guest.herdrCalls().includes("workspace close"), false);
-});
-
-test("a receipt read failure preserves the pane rather than rolling back uncertain work", async () => {
-  const base = herdrUp();
-  const guest = { ...base, exec: async (...args: Parameters<typeof base.exec>) => {
-    if (args[0][3] === "claude-submitted") throw new Error("guest disconnected");
-    return base.exec(...args);
-  } };
-  await assert.rejects(openSession(guest, { harness: "claude-code", title: "worker", cwd: "/home/user/workspace/repo", prompt: "work" }), /Claude launch stalled/);
-  assert.equal(base.herdrCalls().includes("workspace close"), false);
-});
 
 test("an explicit Claude model is recorded and passed on checkpoint relaunch", async () => {
   const records: SessionRecord[] = [{ herdrPane: "w1:p1", harness: "claude-code", title: "review", cwd: "/home/user", harnessSessionId: "aaaa", model: "custom-model" }];

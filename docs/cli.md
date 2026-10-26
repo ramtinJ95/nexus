@@ -509,9 +509,12 @@ Before every Claude launch or resume, Nexus merges onboarding completion, theme
 Existing credentials, preferences, hooks and file modes are retained. Already
 seeded files are not written; concurrent changes detected before replacement
 are re-merged, up to five attempts. Trust is restricted to the pylon checkout,
-never a restored pane cwd, root or HOME. After a launch failure or an
-interrupted `starting` launch, attach and inspect before starting another session;
-Nexus deliberately does not retry a possibly submitted task. Human takeover and
+never a restored pane cwd, root or HOME. A launch that loses its probe connection,
+as when a deploy restarts the probe, stays `starting` while Nexus waits up to three
+minutes for the probe to come back, then carries on from what the pylon shows: it
+types the launch only if it was not typed before, and never starts a second Claude.
+After a launch failure, attach and inspect before starting another session; Nexus
+deliberately does not otherwise retry a possibly submitted task. Human takeover and
 pause/wake use the same Herdr pane and Claude resume path as `session open`.
 A Claude worker thread's conversation is its Claude Code transcript, and `send` steers
 it, as the next section describes. Harness abort/retry and latest-turn snapshots do not apply to it.

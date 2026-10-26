@@ -1,0 +1,59 @@
++2.627s worker pending
++3.181s probe 12206 listening on 17480 as boot 854eb872-03cc-4c47-a388-1362a676c511, from this branch
++4.771s probe stderr: pylon-th-verify git: checkout facts unavailable; retrying on the next git poll
++5.039s worker starting
++5.525s probe 12206: stopping with SIGTERM at after-typing
++5.525s probe 12206: SIGTERM, closing
++5.557s probe exited 0; the replacement starts in 1.3 s
++7.686s probe 12309 listening on 17480 as boot 7132d60f-9e6a-462d-aa67-78bddf2552ac, from this branch
++9.655s probe stderr: pylon-th-verify git: checkout facts unavailable; retrying on the next git poll
++9.800s pylon-th-verify: the Claude launch lost its probe (verify-node: socket hang up). Sending it again
++9.951s worker started
++9.952s thread.failed events: 0
++24.959s 1 workspace(s), 1 pane(s)
++24.963s pane w1:p1: agent claude idle, foreground claude --session-id a7965f50-9ec1-4c53-b586-b63267ed031b
++24.969s pane w1:p1 shows:
+
+ ▐▛███▛█   Claude Code v2.1.308
+▝▜██████▀  Opus 5.5 · Claude API
+ ▝▝   ▝▝   /tmp/nexus-restart-after-typing/repo
+
+  Get to finished work sooner with Opus 5.5. Switch anytime with /model.
+
+❯ Reply with exactly the words: restart verified. Use no tools.
+
+● restart verified
+
+✻ Baked for 1s · done 10:10 AM
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+❯ 
+───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  ⏵⏵ bypass permissions on (shift+tab to cycle)
++24.995s claude processes in the isolated HOME: 1
++25.000s launch record: opened=w1 w1:p1 submitted= typed/
++25.086s probe 12309: SIGTERM, closing
+exit 0
