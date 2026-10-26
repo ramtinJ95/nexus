@@ -1,0 +1,9 @@
+$ nexus events --thread th-0705557bc9a0 --kind review.changed --kind attention.changed --kind pull-request.feedback
+5 2026-10-26T11:04:14.607Z th-0705557bc9a0 attention.changed {"attention":"working"}
+8 2026-10-26T11:04:29.826Z th-0705557bc9a0 attention.changed {"attention":"reply"}
+9 2026-10-26T11:04:35.334Z th-0705557bc9a0 pull-request.feedback {"requestId":"pr-watch:80196b74-6e0f-4ce0-8843-c51a8fd6e434"}
+12 2026-10-26T11:04:41.348Z th-0705557bc9a0 review.changed {"review":"rv-d88a30e1","reviewer":"th-5d045384c787","phase":{"kind":"reviewing"},"round":1}
+15 2026-10-26T11:04:43.681Z th-0705557bc9a0 review.changed {"review":"rv-d88a30e1","reviewer":"th-5d045384c787","phase":{"kind":"needs-person","reasons":["The reviewer still requests changes after 1 rounds, the most this review allows."],"label":{"state":"adding"}},"round":1}
+16 2026-10-26T11:04:43.682Z th-0705557bc9a0 attention.changed {"attention":"decision"}
+17 2026-10-26T11:04:43.745Z th-0705557bc9a0 review.changed {"review":"rv-d88a30e1","reviewer":"th-5d045384c787","phase":{"kind":"needs-person","reasons":["The reviewer still requests changes after 1 rounds, the most this review allows.","Nexus could not add the label \"needs human review\" to pull request #1 (GitHub answered 403: Resource not accessible by personal access token). Labelling needs a token that may write issues or pull requests, which only the person can grant."],"label":{"state":"failed","why":"GitHub answered 403: Resource not accessible by personal access token"}},"round":1}
+--- exit 0

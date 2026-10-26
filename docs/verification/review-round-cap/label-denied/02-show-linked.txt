@@ -1,0 +1,13 @@
+$ nexus show th-0705557bc9a0
+th-0705557bc9a0  Greet script
+project: nexus
+Claude worker: started, model claude-opus-5-5
+attention: working
+status: active
+pylon: pylon-th-0705557bc9a0 on verify-node, running, observed 0s ago
+placement: verify-node, the project's default node
+PR watch: on
+PR #1: Add greet.sh — open, checks none, review none https://github.com/ramtinJ95/nexus/pull/1
+output: branch origin/feature
+output: pull-request https://github.com/ramtinJ95/nexus/pull/1
+--- exit 0

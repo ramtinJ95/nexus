@@ -6,10 +6,19 @@ The person approved this policy on 2026-10-26. It says when an agent may merge a
 
 An agent may merge and deploy a pull request without the person when all of these hold:
 
-1. A reviewer on a different model from the builder approved it with no serious findings open, and the builder fixed or rejected, with a reason, every finding.
+1. A reviewer on a different model from the builder approved it with no P0, P1 or P2 finding open, and the builder fixed or rejected, with a reason, every P0 to P2 finding. P3 findings never block a merge and need no fix.
 2. The typecheck and the full test suite pass.
 3. A live check passed on a verify stack, or the pull request says what couldn't be checked live and none of it is on the always-needs-the-person list below.
 4. After merging, `nexus deploy --wait` reports every service healthy. If it doesn't, the agent rolls back to the previous release and tells the person.
+
+The reviewer gives each finding a priority. The person decided on 2026-10-26 that only P0 to P2 findings block a merge into main:
+
+| Priority | Means | Blocks |
+|---|---|---|
+| P0 | It breaks main or loses data. | Yes |
+| P1 | A real bug or security problem that users hit. | Yes |
+| P2 | A bug in a less common path, a missing test for new behaviour, or docs the change makes wrong. | Yes |
+| P3 | Style, naming, small cleanups and nitpicks. | No. The builder gets them as notes it may take up in a later pull request. |
 
 ## Always needs the person
 
@@ -23,8 +32,8 @@ An agent may merge and deploy a pull request without the person when all of thes
 
 | Condition | What the landing checks |
 |---|---|
-| A reviewer on another model approved | The review's reviewer model differs from the builder's, and its latest round's verdict is an approval with no serious finding open, a failed check included. The approval must come from a harness reviewer, whose verdict the control plane's own agent loop produces. A Claude reviewer's verdict is read from its transcript in its pylon, where code it runs, such as the pull request's tests, could write a forged one, so a landing it approved goes to the person. |
-| Every finding fixed or rejected with a reason | Every finding of every round has the builder's answer: fixed, or rejected with a non-empty reason. |
+| A reviewer on another model approved | The review's reviewer model differs from the builder's, and its latest round's verdict is an approval with no P0 to P2 finding open. A failed `.nexus/check` counts as a P0 finding. The approval must come from a harness reviewer, whose verdict the control plane's own agent loop produces. A Claude reviewer's verdict is read from its transcript in its pylon, where code it runs, such as the pull request's tests, could write a forged one, so a landing it approved goes to the person. |
+| Every P0 to P2 finding fixed or rejected with a reason | Every P0 to P2 finding of every round has the builder's answer: fixed, or rejected with a non-empty reason. A P3 finding needs no answer. |
 | Typecheck and full test suite | The control plane ran the repository's `.nexus/check` at the approved head in a fresh check thread, a pylon with no agent cloned at that commit, in the environment the pylon's image gives its agents, and the pipe the probe carried reported the check's process exiting 0. Nothing the check writes in the pylon decides it, and the thread is deleted afterwards, so nothing it leaves running reaches a later round or any reviewer. Any GitHub check on the pull request must not be failing or pending either. |
 | Live check, or a statement of what couldn't be checked live | No verify stack exists yet ([open questions](design.md#open-questions)), so every landing takes the second branch. The reviewer quotes the passage of the pull request's description that says what couldn't be checked live, at least 20 characters, which must appear in the description, and counts what it names among the reserved cases it lists. |
 | Nothing reserved for the person | The reviewer lists every reserved case the change touches, which must be none. For Nexus's own pull requests, the changed paths must also touch none, as the table below says. In any repository, a change to `.nexus/check` holds the landing. |

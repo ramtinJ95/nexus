@@ -1,0 +1,5 @@
+$ nexus events --kind release.changed
+1 2026-10-26T11:01:58.178Z - release.changed {"desired":{"commit":"c9d0829eba878bd4d001280e84423b45c85e515a","requestedBy":"verify seed","requestedAt":1793012518178}}
+2 2026-10-26T11:01:58.341Z - release.changed {"node":"verify-node","role":"control","commit":"c9d0829eba878bd4d001280e84423b45c85e515a","target":"c9d0829eba878bd4d001280e84423b45c85e515a","state":"healthy","reason":null}
+3 2026-10-26T11:01:58.464Z - release.changed {"node":"verify-node","role":"probe","commit":"c9d0829eba878bd4d001280e84423b45c85e515a","target":"c9d0829eba878bd4d001280e84423b45c85e515a","state":"healthy","reason":null}
+--- exit 0

@@ -1251,7 +1251,7 @@ test("show prints PR metadata and one disabled-watch notice without waking the p
 
 test("deploy and release use the shared release view and wait for both roles", async (t) => {
   const s = await setup(t);
-  assert.equal((await s.nexus(["--version"])).stdout.trim(), "nexus 0.23.0");
+  assert.equal((await s.nexus(["--version"])).stdout.trim(), "nexus 0.24.0");
   assert.equal((await s.nexus(["deploy", "bad"])).code, 64);
   const requested = await s.json(["deploy", "main"]);
   assert.equal(requested.desired.commit, "a".repeat(40));
@@ -1304,17 +1304,19 @@ test("review and land reach the review loop's routes, and show prints a review a
   assert.match(refused.stderr, /github.tokenFile/);
   assert.equal((await s.nexus(["land", thread.id])).code, 5);
   assert.equal((await s.nexus(["review", thread.id, "--rounds", "two"])).code, 64);
+  assert.equal((await s.nexus(["review", thread.id, "--rounds", "6"])).code, 64, "a review runs at most 5 rounds");
   const review: Review = {
     id: "rv-1", builder: thread.id, reviewer: "th-reviewer" as ThreadId, pr: { repo: "octocat/Spoon-Knife", number: 7, url: "https://github.com/octocat/Spoon-Knife/pull/7", title: "Cache", branch: "cache" }, reviewerKind: "claude",
-    models: { builder: "gpt-6-astra", reviewer: "claude-opus-5-5" }, maxRounds: 3, land: null, merged: null, expect: "rv-1:t", sent: 1, outbox: null, since: 0, nudges: 0, startedAt: 0,
+    models: { builder: "gpt-6-astra", reviewer: "claude-opus-5-5" }, maxRounds: 5, land: null, merged: null, expect: "rv-1:t", sent: 1, outbox: null, since: 0, nudges: 0, startedAt: 0,
     rounds: [{ head: "1".repeat(40), verdict: null, check: null, answers: null }],
-    phase: { kind: "needs-person", reasons: ["The reviewer still requests changes after 3 rounds, the most this review allows."] },
+    phase: { kind: "needs-person", reasons: ["The reviewer still requests changes after 5 rounds, the most this review allows.", "Nexus could not add the label \"needs human review\" to pull request #7 (GitHub answered 403: Forbidden)."], label: { state: "failed", why: "GitHub answered 403: Forbidden" } },
   };
   s.registry.saveReview(review);
   const shown = await s.nexus(["show", thread.id]);
   assert.match(shown.stdout, /^attention: decision$/m);
-  assert.match(shown.stdout, /^review rv-1 of PR #7: needs-person, round 1 of 3, reviewer th-reviewer on claude-opus-5-5$/m);
-  assert.match(shown.stdout, /^needs you: The reviewer still requests changes after 3 rounds, the most this review allows\.$/m);
+  assert.match(shown.stdout, /^review rv-1 of PR #7: needs-person, round 1 of 5, reviewer th-reviewer on claude-opus-5-5, label "needs human review" not added$/m);
+  assert.match(shown.stdout, /^needs you: The reviewer still requests changes after 5 rounds, the most this review allows\.$/m);
+  assert.match(shown.stdout, /^needs you: Nexus could not add the label "needs human review" to pull request #7 \(GitHub answered 403: Forbidden\)\.$/m);
   assert.deepEqual((await s.json(["show", thread.id])).review, review);
 });
 

@@ -32,8 +32,9 @@ import type { StartRequest } from "./threads.ts";
 /** Who starts a reviewer thread, as its `startedBy`. */
 export const reviewerCaller = "nexus-review";
 export const reviewPrefix = "[Nexus review — automated, not a message from the person]";
-export const defaultRounds = 3;
-export const maxRounds = 10;
+/** The most rounds a review runs, and how many it runs unless asked for fewer. */
+export const maxRounds = 5;
+export const humanLabel = "needs human review";
 /** How long a turn's end may run ahead of its transcript before a reply without the block counts as missing it. */
 const replyGraceMs = 60_000;
 /** How long an agent may take to answer, or the builder to push what it says it fixed, before the loop asks the person. */
@@ -47,26 +48,32 @@ const deployMs = 30 * 60_000;
 export const reservedCases = ["secrets", "egress", "auth", "tailnet", "destructive-migration", "image-rebuild", "cli-breaking", "irreversible"] as const;
 export type ReservedCase = typeof reservedCases[number];
 
-const findingSchema = z.object({
+export const priorities = ["P0", "P1", "P2", "P3"] as const;
+/** What a finding's severity, before priorities, reads as: a reviewer told the old shape, or a stored round, still answers with it. */
+const legacyPriority: Record<string, typeof priorities[number]> = { serious: "P1", minor: "P3" };
+const findingSchema = z.preprocess((v) => typeof v === "object" && v !== null && "severity" in v && !("priority" in v) ? { ...v, priority: legacyPriority[String(v.severity)] } : v, z.object({
   id: z.string().regex(/^[A-Za-z0-9_-]{1,40}$/),
-  severity: z.enum(["serious", "minor"]),
+  priority: z.enum(priorities),
   where: z.string().max(300).nullish(),
   summary: z.string().min(1).max(2_000),
   detail: z.string().max(8_000).nullish(),
-});
+}));
+/** P0 to P2 hold the loop and a merge until answered. A P3 is a note the builder may leave for a later pull request. */
+export const blocks = (f: Finding) => f.priority !== "P3";
+/** The reviewer approves exactly when no P0 to P2 finding is open, so its findings decide the verdict, whatever word it chose. */
 const verdictSchema = z.object({
   token: z.string(),
   verdict: z.enum(["approve", "changes"]),
   findings: z.array(findingSchema).max(50),
   reserved: z.array(z.object({ case: z.enum(reservedCases), why: z.string().max(2_000) })).max(20),
   notCheckedLive: z.string().max(4_000).nullable(),
-});
+}).transform((v) => ({ ...v, verdict: v.findings.some(blocks) ? "changes" as const : "approve" as const }));
 const answersSchema = z.object({
   token: z.string(),
   answers: z.array(z.object({ id: z.string().max(40), action: z.enum(["fixed", "rejected"]), reason: z.string().max(4_000) })).max(60),
 });
-export type Finding = z.infer<typeof findingSchema>;
-export type Verdict = z.infer<typeof verdictSchema>;
+export type Finding = z.output<typeof findingSchema>;
+export type Verdict = z.output<typeof verdictSchema>;
 export type Answer = z.infer<typeof answersSchema>["answers"][number];
 
 /** A round is one review of `head`. `check` is the repository's checks at `head`, run once the reviewer approves it. */
@@ -92,7 +99,9 @@ export type Phase =
   /** `commit` is the merge commit, deployed when the PR is Nexus's own. */
   | { kind: "landed"; commit: string }
   /** Ended, for the person to decide. `reasons` say exactly which condition failed or which reserved case applies. */
-  | { kind: "needs-person"; reasons: string[] };
+  | { kind: "needs-person"; reasons: string[]; label?: Label };
+/** The "needs human review" label on the PR, which only a review whose rounds ran out gets. */
+export type Label = { state: "adding" } | { state: "added" } | { state: "failed"; why: string };
 export type PhaseKind = Phase["kind"];
 
 export interface Review {
@@ -132,6 +141,14 @@ export interface Review {
 export const ended: ReadonlySet<PhaseKind> = new Set(["approved", "landed", "needs-person"]);
 export const needsPerson = (r: Review | null) => r?.phase.kind === "needs-person";
 
+/** A stored record as this code reads it: a review saved with more rounds stops at the cap, and old findings get priorities. */
+export function storedReview(record: Review): Review {
+  return {
+    ...record, maxRounds: Math.min(record.maxRounds, maxRounds),
+    rounds: record.rounds.map((round) => round.verdict === null ? round : { ...round, verdict: { ...round.verdict, findings: round.verdict.findings.map((f) => findingSchema.parse(f)) } }),
+  };
+}
+
 export interface ReviewDeps {
   registry: Registry;
   github: GitHub;
@@ -157,17 +174,21 @@ const latest = <T extends { token: string }>(replies: readonly string[], fence: 
 };
 
 const checkFinding = (round: Round): Finding[] => round.check?.passed === false
-  ? [{ id: "CHECK", severity: "serious", where: ".nexus/check", summary: `.nexus/check failed at ${round.head}`, detail: round.check.output }] : [];
+  ? [{ id: "CHECK", priority: "P0", where: ".nexus/check", summary: `.nexus/check failed at ${round.head}`, detail: round.check.output }] : [];
 /** What the builder must answer for a round: the reviewer's findings and a failed check. */
 export const findingsOf = (round: Round): Finding[] => [...round.verdict?.findings ?? [], ...checkFinding(round)];
-/** An approval with no serious finding open, the check included. */
-const approves = (round: Round) => round.verdict?.verdict === "approve" && !findingsOf(round).some((f) => f.severity === "serious");
+/** An approval with no blocking finding open, the check included. */
+const approves = (round: Round) => round.verdict?.verdict === "approve" && !findingsOf(round).some(blocks);
 /** The rounds that count against the limit. One that approves again the head its previous round approved reviewed nothing new. */
 export const roundsSpent = (r: Pick<Review, "rounds">) => r.rounds.filter((round, i) => {
   const previous = r.rounds[i - 1];
-  return !(previous?.head === round.head && previous.verdict?.verdict === "approve" && round.verdict?.verdict === "approve" && !round.verdict.findings.some((f) => f.severity === "serious"));
+  return !(previous?.head === round.head && previous.verdict?.verdict === "approve" && round.verdict?.verdict === "approve" && !round.verdict.findings.some(blocks));
 }).length;
+const labelStates = { adding: `, adding the label "${humanLabel}"`, added: `, labelled "${humanLabel}"`, failed: `, label "${humanLabel}" not added` } as const;
+/** How a review's line in `nexus show` and the dashboard ends. A refused label's why is already one of the reasons. */
+export const labelNote = (r: Review) => r.phase.kind === "needs-person" && r.phase.label ? labelStates[r.phase.label.state] : "";
 const checkOutput = (output: string) => `The check's output:\n${output}`;
+const findingLine = (f: Finding) => `${f.id} (${f.priority})${f.where ? ` ${f.where}` : ""}: ${f.summary}${f.detail ? `\n${f.detail.split("\n").map((l) => `    ${l}`).join("\n")}` : ""}`;
 
 const reservedList = "secrets; the egress allowlist; login or auth; the tailnets; database migrations that delete or rewrite existing data; pylon image rebuilds; breaking changes to the CLI's contract; anything irreversible";
 
@@ -181,7 +202,7 @@ Fetch and check out the head, then review the change against its base:
   git fetch origin && git checkout --detach ${detail.head}
   git diff origin/${detail.base}...${detail.head}
 
-Look for correctness bugs, regressions, security problems, missing tests, and docs the change makes wrong. Mark a finding serious if it must be fixed before merging, minor otherwise. Approve only when no serious finding is open; minor ones go to the builder to fix or reject either way.
+Look for correctness bugs, regressions, security problems, missing tests, and docs the change makes wrong. Give each finding a priority. P0: it breaks main or loses data. P1: a real bug or security problem users hit. P2: a bug in a less common path, a missing test for new behaviour, or docs the change makes wrong. P3: style, naming, small cleanups and nitpicks. Approve when no P0 to P2 finding is open. P3 findings never block, and the builder may leave them for a later pull request.
 
 Also classify the change under the merge policy. These always need the person: ${reservedList}. List each one the change touches under "reserved", with why, including anything the description says could not be checked live. Then quote, word for word from the description below, the passage that says what could not be checked live, or null if it does not say.
 
@@ -192,24 +213,37 @@ ${detail.body.slice(0, 8_000)}
 
 End your reply with exactly one block like this, with JSON in it:
 \`\`\`nexus-review
-{"token": "${token}", "verdict": "approve" or "changes", "findings": [{"id": "F1", "severity": "serious" or "minor", "where": "path:line", "summary": "one line", "detail": "why, and what would fix it"}], "reserved": [{"case": one of ${reservedCases.map((c) => `"${c}"`).join(", ")}, "why": "..."}], "notCheckedLive": "the quote" or null}
+{"token": "${token}", "verdict": "approve" or "changes", "findings": [{"id": "F1", "priority": "P0", "P1", "P2" or "P3", "where": "path:line", "summary": "one line", "detail": "why, and what would fix it"}], "reserved": [{"case": one of ${reservedCases.map((c) => `"${c}"`).join(", ")}, "why": "..."}], "notCheckedLive": "the quote" or null}
 \`\`\``;
 }
 
 function builderFindings(r: Review, token: string): string {
   const n = roundsSpent(r);
   const round = r.rounds.at(-1)!;
-  const lines = findingsOf(round).map((f) => `${f.id} (${f.severity})${f.where ? ` ${f.where}` : ""}: ${f.summary}${f.detail ? `\n${f.detail.split("\n").map((l) => `    ${l}`).join("\n")}` : ""}`);
-  const verdict = round.check?.passed === false ? "the repository's checks failed after the reviewer approved" : round.verdict!.verdict === "approve" ? "approved, with minor findings to answer" : "changes requested";
+  const failed = round.check?.passed === false;
+  const findings = findingsOf(round);
+  // The builder got the notes already with the approval that the check then failed.
+  const notes = failed ? [] : findings.filter((f) => !blocks(f));
+  const verdict = failed ? "the repository's checks failed after the reviewer approved" : "changes requested";
   return `${reviewPrefix}
 Round ${n} of at most ${r.maxRounds} on pull request #${r.pr.number} (${r.pr.url}), reviewed at ${round.head} by a reviewer on ${r.models.reviewer}: ${verdict}.
 
-${lines.join("\n\n")}
-
-Fix each finding or reject it with a reason. Push what you fix to the pull request's branch; the reviewer reviews the new commits. Then end your reply with exactly one block like this, with JSON in it:
+${findings.filter(blocks).map(findingLine).join("\n\n")}
+${notes.length ? `\nThese P3 notes do not block and need no answer. Take them up here or in a later pull request:\n\n${notes.map(findingLine).join("\n\n")}\n` : ""}
+Fix each P0 to P2 finding or reject it with a reason. Push what you fix to the pull request's branch; the reviewer reviews the new commits. Then end your reply with exactly one block like this, with JSON in it:
 \`\`\`nexus-review-answers
 {"token": "${token}", "answers": [{"id": "F1", "action": "fixed" or "rejected", "reason": "what you changed, or why not"}]}
 \`\`\``;
+}
+
+function builderNotes(r: Review): string {
+  const round = r.rounds.at(-1)!;
+  return `${reviewPrefix}
+The reviewer on ${r.models.reviewer} approved pull request #${r.pr.number} (${r.pr.url}) at ${round.head} in round ${roundsSpent(r)}. It left these P3 notes, which do not block and need no answer or push:
+
+${findingsOf(round).map(findingLine).join("\n\n")}
+
+You may take them up in a later pull request. Do not push to this pull request's branch: the approved head is what gets checked and landed.`;
 }
 
 function nextRound(r: Review, previous: Round, token: string): string {
@@ -262,6 +296,8 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
     if (r.phase.kind === "checking" && r.phase.thread !== null) checks.discard(r.phase.thread);
     return { ...r, phase: { kind: "needs-person", reasons }, outbox: null };
   };
+  /** The rounds ran out without an approval the checks passed, so the PR gets the label that asks for the person. */
+  const ranOut = (r: Review, ...reasons: string[]): Review => ({ ...toPerson(r), phase: { kind: "needs-person", reasons, label: { state: "adding" } } });
   const checking = (): Phase => ({ kind: "checking", startedAt: now(), thread: null });
   /** A reminder keeps the awaited token. Anything else is a new request, with a new token and no reminders yet. */
   const send = (r: Review, to: "builder" | "reviewer", text: (token: string) => string, phase: Phase, nudges = 0): Review => {
@@ -290,8 +326,8 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
       const next = withRound(r, { verdict });
       const round = next.rounds.at(-1)!;
       const n = roundsSpent(next);
-      if (approves(round) && findingsOf(round).length === 0) return { ...next, phase: checking(), nudges: 0 };
-      if (!approves(round) && n >= r.maxRounds) return toPerson(next, `The reviewer still requests changes after ${n} rounds, the most this review allows.`);
+      if (approves(round)) return findingsOf(round).length ? send(next, "builder", () => builderNotes(next), checking()) : { ...next, phase: checking(), nudges: 0 };
+      if (n >= r.maxRounds) return ranOut(next, `The reviewer still requests changes after ${n} rounds, the most this review allows.`);
       return send(next, "builder", (token) => builderFindings(next, token), { kind: "fixing" });
     },
     async fixing(r, _, builder) {
@@ -299,7 +335,7 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
       const round = r.rounds.at(-1)!;
       const found = answeredSince(r, builder) ? latest(await replies(builder), "nexus-review-answers", answersSchema, r.expect) : null;
       if (found === null) return waitOn(r, builder, "builder");
-      const unanswered = findingsOf(round).filter((f) => !found.answers.some((a) => a.id === f.id && (a.action === "fixed" || a.reason.trim() !== "")));
+      const unanswered = findingsOf(round).filter(blocks).filter((f) => !found.answers.some((a) => a.id === f.id && (a.action === "fixed" || a.reason.trim() !== "")));
       if (unanswered.length) return waitOn(r, builder, "builder", `Your answers leave ${unanswered.map((f) => f.id).join(", ")} without a fix or a reason to reject.`);
       const answered = withRound(r, { answers: found.answers });
       const fixed = found.answers.some((a) => a.action === "fixed");
@@ -317,7 +353,7 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
       }
       // Commits pushed with answers that fixed nothing are still unreviewed, so only an unmoved head skips a round.
       if (snapshot.detail.head === round.head && approves(round)) return { ...answered, phase: checking(), nudges: 0 };
-      if (n >= r.maxRounds) return toPerson(answered, `The builder pushed fixes after round ${n}, the last this review allows, so they are unreviewed.`);
+      if (n >= r.maxRounds) return ranOut(answered, `The builder pushed fixes after round ${n}, the last this review allows, so they are unreviewed.`);
       const next: Review = { ...answered, rounds: [...answered.rounds, { head: snapshot.detail.head, verdict: null, check: null, answers: null }] };
       return send(next, "reviewer", (token) => nextRound(next, answered.rounds.at(-1)!, token), { kind: "reviewing" });
     },
@@ -335,8 +371,9 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
       checks.discard(phase.thread);
       const next = withRound({ ...r, phase: { ...phase, thread: null } }, { check: { passed: state.passed, output: state.output } });
       if (state.passed) return r.land === null ? { ...next, phase: { kind: "approved" } } : { ...next, phase: { kind: "merging", authorized: null } };
-      if (r.rounds.slice(0, -1).some((earlier) => earlier.head === round.head && earlier.check?.passed === false)) return toPerson(next, `.nexus/check failed again at ${round.head}, where it failed before.`, checkOutput(state.output));
-      if (roundsSpent(r) >= r.maxRounds) return toPerson(next, `.nexus/check failed at ${round.head} after the last round this review allows.`, checkOutput(state.output));
+      const again = r.rounds.slice(0, -1).some((earlier) => earlier.head === round.head && earlier.check?.passed === false) ? [`.nexus/check failed again at ${round.head}, where it failed before.`] : [];
+      if (roundsSpent(r) >= r.maxRounds) return ranOut(next, `.nexus/check failed at ${round.head} after the last round this review allows.`, ...again, checkOutput(state.output));
+      if (again.length) return toPerson(next, ...again, checkOutput(state.output));
       return send(next, "builder", (token) => builderFindings(next, token), { kind: "fixing" });
     },
     async merging(r, phase) {
@@ -404,6 +441,13 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
   };
 
   async function step(r: Review): Promise<Review> {
+    // A failed call throws, so the pass retries it. GitHub adds a label the PR has already as a no-op.
+    if (r.phase.kind === "needs-person" && r.phase.label?.state === "adding") {
+      const result = await github.label(r.pr.repo, r.pr.number, humanLabel);
+      if (result.kind === "labelled") return { ...r, phase: { ...r.phase, label: { state: "added" } } };
+      return { ...r, phase: { ...r.phase, label: { state: "failed", why: result.message }, reasons: [...r.phase.reasons,
+        `Nexus could not add the label "${humanLabel}" to pull request #${r.pr.number} (${result.message}). Labelling needs a token that may write issues or pull requests, which only the person can grant.`] } };
+    }
     if (ended.has(r.phase.kind) && r.outbox === null) return r;
     const builder = registry.thread(r.builder);
     const reviewer = registry.thread(r.reviewer);
@@ -474,7 +518,7 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
       const id = `rv-${randomBytes(4).toString("hex")}`;
       const draft: Review = {
         id, expect: mint(id), sent: 1, builder: builder.id, reviewer: "" as ThreadId, pr: { repo, number, url: snapshot.pr.url, title: snapshot.pr.title, branch: snapshot.detail.branch }, models, reviewerKind: kind.claude ? "claude" : "harness",
-        maxRounds: request.rounds ?? defaultRounds, land: request.land === null ? null : { requestedBy: request.land },
+        maxRounds: request.rounds ?? maxRounds, land: request.land === null ? null : { requestedBy: request.land },
         rounds: [{ head: snapshot.detail.head, verdict: null, check: null, answers: null }], merged: null, phase: { kind: "reviewing" }, outbox: null,
         since: now(), nudges: 0, startedAt: now(),
       };

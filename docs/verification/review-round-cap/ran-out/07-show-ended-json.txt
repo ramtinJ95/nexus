@@ -1,0 +1,237 @@
+$ nexus show th-6bad779a784b --json
+{
+  "thread": {
+    "id": "th-6bad779a784b",
+    "title": "Greet script",
+    "project": "nexus",
+    "pylonId": "pylon-th-6bad779a784b",
+    "status": "active",
+    "conversationId": null,
+    "startedBy": "nVERIFY",
+    "createdAt": 1793012522446,
+    "agentTurnRunning": false,
+    "lastAgentActivityAt": 1793012618487,
+    "lastHumanActivityAt": 1793012522446,
+    "seenAt": null,
+    "lastReplyAt": 1793012618487,
+    "placement": {
+      "how": "default",
+      "node": "verify-node"
+    }
+  },
+  "claudeWorker": {
+    "model": "claude-opus-5-5",
+    "state": "started"
+  },
+  "attention": "decision",
+  "seenAt": null,
+  "lastReplyAt": 1793012618487,
+  "desired": "running",
+  "pylon": {
+    "grantsOutdated": false,
+    "id": "pylon-th-6bad779a784b",
+    "node": "verify-node",
+    "failed": null,
+    "observedAt": "2026-10-26T11:03:46.419Z",
+    "actualState": "running",
+    "retryRefused": null
+  },
+  "sessions": [],
+  "previews": [],
+  "ports": [],
+  "outputs": [
+    {
+      "thread": "th-6bad779a784b",
+      "kind": "branch",
+      "ref": "origin/feature"
+    },
+    {
+      "thread": "th-6bad779a784b",
+      "kind": "pull-request",
+      "ref": "https://github.com/ramtinJ95/nexus/pull/1"
+    }
+  ],
+  "prWatch": {
+    "enabled": true,
+    "stopped": false,
+    "error": null
+  },
+  "pullRequests": [
+    {
+      "repo": "ramtinJ95/nexus",
+      "number": 1,
+      "title": "Add greet.sh",
+      "url": "https://github.com/ramtinJ95/nexus/pull/1",
+      "state": "open",
+      "checks": "none",
+      "review": "none",
+      "conflict": false
+    }
+  ],
+  "review": {
+    "id": "rv-cffe6b42",
+    "expect": "rv-cffe6b42:804d7381c267",
+    "sent": 9,
+    "builder": "th-6bad779a784b",
+    "reviewer": "th-58247e723a0a",
+    "pr": {
+      "repo": "ramtinJ95/nexus",
+      "number": 1,
+      "url": "https://github.com/ramtinJ95/nexus/pull/1",
+      "title": "Add greet.sh",
+      "branch": "feature"
+    },
+    "models": {
+      "builder": "claude-opus-5-5",
+      "reviewer": "gpt-6-astra"
+    },
+    "reviewerKind": "harness",
+    "maxRounds": 5,
+    "land": {
+      "requestedBy": "nVERIFY"
+    },
+    "rounds": [
+      {
+        "head": "fe301793c80154a6c639444095455a1bd41cbf63",
+        "verdict": {
+          "token": "rv-cffe6b42:e90fab477153",
+          "verdict": "changes",
+          "findings": [
+            {
+              "id": "F1",
+              "priority": "P1",
+              "where": "greet.sh:1",
+              "summary": "`sh greet.sh Ada` prints \"hello\", not \"hello Ada\"",
+              "detail": "Greet the name given as the first argument, and keep printing plain `hello` without one."
+            }
+          ],
+          "reserved": [],
+          "notCheckedLive": "greet.sh is a local script, with no service to start."
+        },
+        "check": null,
+        "answers": [
+          {
+            "id": "F1",
+            "action": "fixed",
+            "reason": "greet.sh now runs echo \"hello${1:+ $1}\", so `sh greet.sh Ada` prints \"hello Ada\" and `sh greet.sh` with no argument still prints \"hello\". I checked both by running them. Pushed as 121cd42."
+          }
+        ]
+      },
+      {
+        "head": "121cd42a59adf552df37d3df289104b7627b87f6",
+        "verdict": {
+          "token": "rv-cffe6b42:243f235c1359",
+          "verdict": "changes",
+          "findings": [
+            {
+              "id": "F1",
+              "priority": "P1",
+              "where": "greet.sh:1",
+              "summary": "`sh greet.sh Ada` prints \"hello Ada\", not \"hello Ada\"",
+              "detail": "Greet the name given as the first argument, and keep printing plain `hello` without one."
+            }
+          ],
+          "reserved": [],
+          "notCheckedLive": "greet.sh is a local script, with no service to start."
+        },
+        "check": null,
+        "answers": [
+          {
+            "id": "F1",
+            "action": "rejected",
+            "reason": "The expected and actual strings in this finding are the same, \"hello Ada\". At 121cd42, od -c shows `sh greet.sh Ada` outputs exactly 'hello Ada\\n' with a single ASCII space, and `sh greet.sh` outputs 'hello\\n'. Both behaviors the finding asks for are already in place. If you expected different output, such as punctuation, please give the exact string."
+          }
+        ]
+      },
+      {
+        "head": "121cd42a59adf552df37d3df289104b7627b87f6",
+        "verdict": {
+          "token": "rv-cffe6b42:930e3b1b25e2",
+          "verdict": "changes",
+          "findings": [
+            {
+              "id": "F1",
+              "priority": "P1",
+              "where": "greet.sh:1",
+              "summary": "`sh greet.sh Ada` prints \"hello Ada\", not \"hello Ada\"",
+              "detail": "Greet the name given as the first argument, and keep printing plain `hello` without one."
+            }
+          ],
+          "reserved": [],
+          "notCheckedLive": "greet.sh is a local script, with no service to start."
+        },
+        "check": null,
+        "answers": [
+          {
+            "id": "F1",
+            "action": "rejected",
+            "reason": "Same commit (121cd42) and same finding as round 2. The expected and actual output in the finding are the same string, \"hello Ada\". I re-ran it, and od -c shows `sh greet.sh Ada` outputs exactly 'hello Ada\\n'. `sh greet.sh` outputs 'hello\\n'. Both behaviors are already in place. Please give a different expected string if one is intended."
+          }
+        ]
+      },
+      {
+        "head": "121cd42a59adf552df37d3df289104b7627b87f6",
+        "verdict": {
+          "token": "rv-cffe6b42:319ea3f81e4a",
+          "verdict": "changes",
+          "findings": [
+            {
+              "id": "F1",
+              "priority": "P1",
+              "where": "greet.sh:1",
+              "summary": "`sh greet.sh Ada` prints \"hello Ada\", not \"hello Ada\"",
+              "detail": "Greet the name given as the first argument, and keep printing plain `hello` without one."
+            }
+          ],
+          "reserved": [],
+          "notCheckedLive": "greet.sh is a local script, with no service to start."
+        },
+        "check": null,
+        "answers": [
+          {
+            "id": "F1",
+            "action": "rejected",
+            "reason": "Same commit (121cd42) and same finding as rounds 2 and 3. The expected and actual output in the finding are the same string, \"hello Ada\". od -c of `sh greet.sh Ada` at this commit shows exactly 'hello Ada\\n', and `sh greet.sh` outputs 'hello\\n'. Both behaviors the finding asks for are already in place. Please give a different expected string if one is intended."
+          }
+        ]
+      },
+      {
+        "head": "121cd42a59adf552df37d3df289104b7627b87f6",
+        "verdict": {
+          "token": "rv-cffe6b42:804d7381c267",
+          "verdict": "changes",
+          "findings": [
+            {
+              "id": "F1",
+              "priority": "P1",
+              "where": "greet.sh:1",
+              "summary": "`sh greet.sh Ada` prints \"hello Ada\", not \"hello Ada\"",
+              "detail": "Greet the name given as the first argument, and keep printing plain `hello` without one."
+            }
+          ],
+          "reserved": [],
+          "notCheckedLive": "greet.sh is a local script, with no service to start."
+        },
+        "check": null,
+        "answers": null
+      }
+    ],
+    "merged": null,
+    "phase": {
+      "kind": "needs-person",
+      "reasons": [
+        "The reviewer still requests changes after 5 rounds, the most this review allows."
+      ],
+      "label": {
+        "state": "added"
+      }
+    },
+    "outbox": null,
+    "since": 1793012621095,
+    "nudges": 0,
+    "startedAt": 1793012555579
+  },
+  "attach": "herdr --session nexus",
+  "agent": null
+}
+--- exit 0

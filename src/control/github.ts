@@ -20,6 +20,8 @@ export interface PrSnapshot {
 export interface ChangedFile { path: string; previous: string | null; patch: string }
 /** What a merge GitHub refused says: `denied` when the token may not merge, `refused` when the PR cannot be. */
 export type MergeResult = { kind: "merged"; commit: string } | { kind: "denied" | "refused"; message: string };
+/** `denied` when GitHub refused for good, such as a token that may not write issues or pull requests. */
+export type LabelResult = { kind: "labelled" } | { kind: "denied"; message: string };
 export interface GitHub {
   find(repo: string, branch: string): Promise<number[]>;
   poll(repo: string, number: number): Promise<PrSnapshot>;
@@ -27,6 +29,8 @@ export interface GitHub {
   files(repo: string, number: number): Promise<ChangedFile[]>;
   /** Squash-merges only while the PR's head is still `head`, so it never merges a commit nobody reviewed. */
   merge(repo: string, number: number, head: string): Promise<MergeResult>;
+  /** Adds the label `name` to the PR, creating it in the repository first if it has none. Adding it twice is harmless. */
+  label(repo: string, number: number, name: string): Promise<LabelResult>;
 }
 
 export function githubRepo(url: string | null): string | null {
@@ -78,6 +82,18 @@ export function githubClient(token: string, request: typeof fetch = fetch): GitH
     cache.set(path, { etag: response.headers.get("etag"), value, next });
     return { value, next };
   }
+  /** A write's answer. A rate limit throws, so the caller's step is retried, never reported as a refusal. */
+  async function write(method: "PUT" | "POST", path: string, body: unknown, what: string) {
+    if (Date.now() < retryAt) throw new Error("GitHub is waiting for its rate limit");
+    const response = await request(`https://api.github.com${path}`, {
+      method, headers: { ...headers, "Content-Type": "application/json" }, body: JSON.stringify(body), signal: AbortSignal.timeout(30_000), redirect: "error",
+    });
+    const reply = await response.json().catch(() => ({})) as { sha?: string; message?: string };
+    if (!response.ok && limited(response)) throw new Error(`GitHub ${what}: HTTP ${response.status}`);
+    return { response, reply, message: `GitHub answered ${response.status}${typeof reply.message === "string" ? `: ${reply.message.slice(0, 500)}` : ""}` };
+  }
+  // A token that cannot write gets 403, or 404 for a repository it may only read through a fine-grained grant.
+  const denies = (response: Response) => response.status === 401 || response.status === 403 || response.status === 404;
   async function list<T>(path: string, key?: string): Promise<T[]> {
     const all: T[] = [];
     let next: string | null = `${path}${path.includes("?") ? "&" : "?"}per_page=100`;
@@ -122,19 +138,20 @@ export function githubClient(token: string, request: typeof fetch = fetch): GitH
       return (await list<{ filename: string; previous_filename?: string; patch?: string }>(`/repos/${repo}/pulls/${number}/files`)).map((f) => ({ path: f.filename, previous: f.previous_filename ?? null, patch: f.patch ?? "" }));
     },
     async merge(repo, number, head) {
-      if (Date.now() < retryAt) throw new Error("GitHub is waiting for its rate limit");
-      const response = await request(`https://api.github.com/repos/${repo}/pulls/${number}/merge`, {
-        method: "PUT", headers: { ...headers, "Content-Type": "application/json" }, body: JSON.stringify({ sha: head, merge_method: "squash" }),
-        signal: AbortSignal.timeout(30_000), redirect: "error",
-      });
-      const reply = await response.json().catch(() => ({})) as { sha?: string; message?: string };
+      const { response, reply, message } = await write("PUT", `/repos/${repo}/pulls/${number}/merge`, { sha: head, merge_method: "squash" }, "merge");
       if (response.ok && typeof reply.sha === "string") return { kind: "merged", commit: reply.sha };
-      if (limited(response)) throw new Error(`GitHub merge: HTTP ${response.status}`);
-      // A token that cannot write gets 403, or 404 for a repository it may only read through a fine-grained grant.
-      const message = `GitHub answered ${response.status}${typeof reply.message === "string" ? `: ${reply.message.slice(0, 500)}` : ""}`;
-      if (response.status === 403 || response.status === 404 || response.status === 401) return { kind: "denied", message };
+      if (denies(response)) return { kind: "denied", message };
       if (response.status === 405 || response.status === 409 || response.status === 422) return { kind: "refused", message };
       throw new Error(`GitHub merge: HTTP ${response.status}`);
+    },
+    async label(repo, number, name) {
+      // 422 says the repository has the label already. A token that may not create labels may still add an existing one.
+      const created = await write("POST", `/repos/${repo}/labels`, { name, color: "d93f0b", description: "The Nexus review ran out of rounds" }, "label");
+      if (created.response.status !== 201 && created.response.status !== 422 && !denies(created.response)) throw new Error(`GitHub label: HTTP ${created.response.status}`);
+      const added = await write("POST", `/repos/${repo}/issues/${number}/labels`, { labels: [name] }, "label");
+      if (added.response.status === 200) return { kind: "labelled" };
+      if (denies(added.response) || added.response.status === 410 || added.response.status === 422) return { kind: "denied", message: added.message };
+      throw new Error(`GitHub label: HTTP ${added.response.status}`);
     },
   };
 }

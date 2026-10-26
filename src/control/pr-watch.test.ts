@@ -399,3 +399,27 @@ test("the client reads a PR's head, base and body, its changed files, and merges
   answer = () => Response.json({ message: "API rate limit exceeded" }, { status: 403, headers: { "x-ratelimit-remaining": "0", "x-ratelimit-reset": String(Math.floor(Date.now() / 1000) + 60) } });
   await assert.rejects(client.merge("acme/repo", 1, "abc"), /HTTP 403/, "a rate limit is retried, not reported as a denial");
 });
+
+test("the client creates the label once, adds it to the PR, and reports a token that may not write as denied", async () => {
+  const calls: [string, unknown][] = [];
+  let create = (): Response => Response.json({}, { status: 201 });
+  let add = (): Response => Response.json([{ name: "needs human review" }]);
+  const fake: typeof fetch = async (input, init) => {
+    const path = new URL(String(input)).pathname;
+    calls.push([`${init?.method} ${path}`, JSON.parse(String(init?.body))]);
+    return path.endsWith("/issues/1/labels") ? add() : create();
+  };
+  const client = githubClient("secret", fake);
+  assert.deepEqual(await client.label("acme/repo", 1, "needs human review"), { kind: "labelled" });
+  assert.deepEqual(calls, [
+    ["POST /repos/acme/repo/labels", { name: "needs human review", color: "d93f0b", description: "The Nexus review ran out of rounds" }],
+    ["POST /repos/acme/repo/issues/1/labels", { labels: ["needs human review"] }],
+  ]);
+  create = () => Response.json({ message: "Validation Failed", errors: [{ code: "already_exists" }] }, { status: 422 });
+  assert.deepEqual(await client.label("acme/repo", 1, "needs human review"), { kind: "labelled" }, "a label the repository has already is added");
+  create = () => Response.json({ message: "Resource not accessible by personal access token" }, { status: 403 });
+  add = () => Response.json({ message: "Resource not accessible by personal access token" }, { status: 403 });
+  assert.deepEqual(await client.label("acme/repo", 1, "needs human review"), { kind: "denied", message: "GitHub answered 403: Resource not accessible by personal access token" });
+  add = () => Response.json({ message: "Server Error" }, { status: 502 });
+  await assert.rejects(client.label("acme/repo", 1, "needs human review"), /HTTP 502/, "a server error is retried, not reported as a denial");
+});
