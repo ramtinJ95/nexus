@@ -1,0 +1,13 @@
+th-8b7c342fddb1 with Latest turn on: Since the latest turn began, da47e8b
+2 files
++2 −1
+M
+five.txt
++1 −1
+A
+six.txt
++1 −0
+screenshot 01-latest-turn.png
+th-8f9744cc00de with Latest turn on: Since the latest turn began
+the checkout has no latest-turn snapshot: no turn has been captured yet, or its snapshot failed. Start another agent turn or ask for changes since HEAD instead
+screenshot 02-old-hook-refused.png
