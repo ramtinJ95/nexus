@@ -15,7 +15,11 @@ export function usageLimitResumer(options: { registry: Registry; inbox: Inbox; c
   const { registry, inbox, clock = Date.now, graceMs = defaultGraceMs } = options;
   let running: Promise<void> | null = null;
   async function tick() {
-    for (const t of registry.threads()) {
+    for (const { id: thread } of registry.threads()) {
+      // Read again after the sends before it, which another thread's archive or continue may have outrun. From here to
+      // the inbox fencing the request ID nothing awaits, so the stop and session it checks are the ones it sends for.
+      const t = registry.thread(thread);
+      if (t === undefined) continue;
       const limit = t.usageLimit;
       const session = registry.claudeWorker(t.id)?.session ?? null;
       // A reset no later than the stop would stop the worker again at once, every pass. An archived thread's pylon stays paused until the person unarchives it, so the message would wake it.

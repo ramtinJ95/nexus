@@ -14,30 +14,35 @@ const resetsAt = 10_000_000;
 const graceMs = 180_000;
 
 /** A Claude worker thread whose transcript ends on a usage limit, behind the real inbox and a probe that types or blocks. */
-function fixture(t: import("node:test").TestContext, limit: { resetsAt: number | null } = { resetsAt }) {
+function fixture(t: import("node:test").TestContext, limit: { resetsAt: number | null } = { resetsAt }, ids: readonly string[] = ["th-1"]) {
   const registry = openRegistry(":memory:");
   t.after(() => registry.close());
   const project = { id: "project" as ProjectId, repoUrl: "https://github.com/acme/repo.git", defaultBranch: "main", defaultNode: node, resources: { cpus: 2, memoryGiB: 4, diskGiB: 10 }, allowedHosts: [], secrets: [], logins: [], preSetup: null };
   registry.upsertNode({ name: node, tailnetHost: "node.ts.net", tailnetNodeId: "nNODE" as TailnetNodeId });
   registry.createProject(project);
-  const thread: Thread = { id: "th-1" as ThreadId, title: "test", project: project.id, pylonId: "pylon-th-1" as PylonId, status: "active", conversationId: null, startedBy: "test", createdAt: 1, seenAt: null, lastReplyAt: null, lastHumanActivityAt: 1, lastAgentActivityAt: 0, agentTurnRunning: false };
-  const { desired: _, ...pylon } = newPylonRecord({ thread: thread.id, pylonId: thread.pylonId, node, desired: "running", boot: { pylonId: thread.pylonId, image: "img-000000000000", resources: project.resources, network: { allowedHosts: [], secrets: [] }, repo: { kind: "clone", url: project.repoUrl, checkout: { branch: "main", commit: "main" } }, dotfiles: { repo: project.repoUrl, ref: "main" } }, firstBoot: { kind: "fresh", preSetup: null }, live: { previews: [], overlay: [] }, liveHash: "hash" as LiveHash });
-  registry.createThread(thread, pylon, "/poteto-mode fix it");
-  registry.setClaudeWorker(thread.id, "/poteto-mode fix it", "started", undefined, session);
-  const stop: ClaudeEntry = { kind: "notice", at: 5000, tone: "error", text: "You've hit your session limit", usageLimit: limit };
-  registry.appendClaudeRead(thread.id, { session, from: transcriptStart, entries: [stop], cursor: { ...transcriptStart, offset: 1 }, reset: false, readAt: 1 });
+  const threads = ids.map((id): Thread => ({ id: id as ThreadId, title: "test", project: project.id, pylonId: `pylon-${id}` as PylonId, status: "active", conversationId: null, startedBy: "test", createdAt: 1, seenAt: null, lastReplyAt: null, lastHumanActivityAt: 1, lastAgentActivityAt: 0, agentTurnRunning: false }));
+  for (const thread of threads) {
+    const { desired: _, ...pylon } = newPylonRecord({ thread: thread.id, pylonId: thread.pylonId, node, desired: "running", boot: { pylonId: thread.pylonId, image: "img-000000000000", resources: project.resources, network: { allowedHosts: [], secrets: [] }, repo: { kind: "clone", url: project.repoUrl, checkout: { branch: "main", commit: "main" } }, dotfiles: { repo: project.repoUrl, ref: "main" } }, firstBoot: { kind: "fresh", preSetup: null }, live: { previews: [], overlay: [] }, liveHash: "hash" as LiveHash });
+    registry.createThread(thread, pylon, "/poteto-mode fix it");
+    registry.setClaudeWorker(thread.id, "/poteto-mode fix it", "started", undefined, session);
+    const stop: ClaudeEntry = { kind: "notice", at: 5000, tone: "error", text: "You've hit your session limit", usageLimit: limit };
+    registry.appendClaudeRead(thread.id, { session, from: transcriptStart, entries: [stop], cursor: { ...transcriptStart, offset: 1 }, reset: false, readAt: 1 });
+  }
+  const thread = threads[0]!;
   const capacity = { cpus: 16, committedCpus: 0, memoryGiB: 64, committedMemoryGiB: 0, diskFreeGiB: 100, committedDiskGiB: 0 };
-  const running = { pylonId: thread.pylonId, phase: "running" as const, liveHash: "hash" as LiveHash, bootedAt: "2027-01-01T00:00:00Z", bootedFrom: { image: "img-000000000000" as const, checkpoint: null }, services: [], listening: [], previews: [], sessions: [], git: null, declaredOutputs: [], attachedClients: 0 };
+  const running = (pylonId: PylonId) => ({ pylonId, phase: "running" as const, liveHash: "hash" as LiveHash, bootedAt: "2027-01-01T00:00:00Z", bootedFrom: { image: "img-000000000000" as const, checkpoint: null }, services: [], listening: [], previews: [], sessions: [], git: null, declaredOutputs: [], attachedClients: 0 });
   registry.apply({ record: "node", node, state: "online", capacity });
-  registry.ingested({ node, observedAt: new Date().toISOString(), probeBootId: "b", capacity, artifacts: [], jobs: [], pylons: [running], grants: { secrets: [], gitSsh: false }, previewRoutes: [] }, []);
+  registry.ingested({ node, observedAt: new Date().toISOString(), probeBootId: "b", capacity, artifacts: [], jobs: [], pylons: threads.map((th) => running(th.pylonId)), grants: { secrets: [], gitSsh: false }, previewRoutes: [] }, []);
   const typed: Extract<PylonCommand, { kind: "send-claude" }>[] = [];
   let outcome: "sent" | "blocked" = "sent";
   const probe = { async command(_: PylonId, command: PylonCommand): Promise<CommandResult> { typed.push(command as Extract<PylonCommand, { kind: "send-claude" }>); return { kind: "send-claude", outcome, herdrPane: "w1:p1", resumed: false }; } };
   const inbox = agentInbox({ registry, harness: { async send() { throw new Error("a Claude worker's message never reaches the harness"); } }, probes: new Map([[node, probe]]), wake() {} });
   let now = resetsAt + graceMs;
-  const resumer = usageLimitResumer({ registry, inbox, clock: () => now, graceMs });
+  let gate: Promise<void> | null = null;
+  const gated: typeof inbox = async (th, message) => { await gate; return inbox(th, message); };
+  const resumer = usageLimitResumer({ registry, inbox: gated, clock: () => now, graceMs });
   const continued = () => registry.events("0", { kinds: ["usage-limit.continued"] });
-  return { registry, id: thread.id, typed, resumer, continued, setNow(at: number) { now = at; }, setOutcome(o: typeof outcome) { outcome = o; } };
+  return { registry, id: thread.id, typed, resumer, continued, setNow(at: number) { now = at; }, setOutcome(o: typeof outcome) { outcome = o; }, hold(until: Promise<void> | null) { gate = until; } };
 }
 
 test("a worker stopped on its usage limit is told to continue once, after the reset and its grace, under the stop's request ID", async (t) => {
@@ -85,4 +90,19 @@ test("a message the session could not take yet is sent again on the next poll", 
   await f.resumer.poll();
   assert.equal(f.typed.length, 2);
   assert.equal(f.continued().length, 1);
+});
+
+test("a thread archived or continued while an earlier thread's message is being sent is not told to continue", async (t) => {
+  const f = fixture(t, { resetsAt }, ["th-1", "th-2", "th-3"]);
+  const released = Promise.withResolvers<void>();
+  f.hold(released.promise);
+  const poll = f.resumer.poll();
+  await new Promise((resolve) => setImmediate(resolve));
+  f.hold(null);
+  f.registry.setThreadStatus("th-2" as ThreadId, "archived");
+  f.registry.appendClaudeRead("th-3" as ThreadId, { session, from: { ...transcriptStart, offset: 1 }, entries: [{ kind: "prompt", at: 6000, text: "continue", from: "person" }], cursor: { ...transcriptStart, offset: 2 }, reset: false, readAt: 2 });
+  released.resolve();
+  await poll;
+  assert.deepEqual(f.continued().map((e) => e.thread), ["th-1"], "only the thread that was still stopped when its turn came was told to continue");
+  assert.equal(f.typed.length, 1);
 });
