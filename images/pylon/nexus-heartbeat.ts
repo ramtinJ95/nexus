@@ -25,7 +25,7 @@ export function reportedKind(kind: string, input: { background_tasks?: unknown }
   return shells.length > 0 ? { kind: "session.heartbeat", shells } : { kind };
 }
 
-/** Resolves once the report is sent, so the turn end at the cap arrives before the waiting that follows it. */
+/** Resolves once the report is in the outbox, so the turn end at the cap is delivered before the waiting that follows it. */
 type HeldReport = (kind: "session.heartbeat" | "session.turn-ended" | "session.waiting", message?: string) => Promise<void>;
 
 /**

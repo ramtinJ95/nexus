@@ -175,7 +175,7 @@ output in a message.
 
 A report crosses two hops, and each has its own buffer. From hook to probe, the
 hook writes the event to `~/.nexus/outbox` in the pylon, one JSON file per event
-named by its stamp, and starts a sender. The file name without `.json` is the
+named by its stamp, its process and a count of the events that process wrote, and starts a sender. The file name without `.json` is the
 event's `id`, which the event carries to control. Every boot of the pylon, a wake
 included, also starts a sender, because a pause stops one. The sender holds a lock
 that dies with it, so one runs at a time. It lists the outbox before each delivery
@@ -236,8 +236,8 @@ lets the lease expire like any other silent turn. When only shells run, a detach
 hold, owned by the session's newest Stop, sends `session.heartbeat` every five minutes while a process
 group the commands lead, or a process writing to a shell's output file, lives. It
 sends `session.turn-ended` 30 seconds after they stop. After 2 hours it sends
-`session.turn-ended` and then, once that is sent, `session.waiting`, both with the
-message "A background command was still running after 2 hours". Each carries the Stop's time, so they
+`session.turn-ended` and then `session.waiting`, both with the
+message "A background command was still running after 2 hours". The hold writes its reports to the outbox as a hook does, and events one process writes at the same stamp go out in the order it wrote them. Each carries the Stop's time, so they
 renew the lease by receipt time, and any later report for the session, such as the
 turn a command's finish starts, makes the rest stale. A waiting session's latest
 message is kept with it as `Thread.sessionWaitingMessage`, and the dashboard shows

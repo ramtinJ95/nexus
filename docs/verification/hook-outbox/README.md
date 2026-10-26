@@ -11,3 +11,5 @@ What the log shows:
 - After the turn end, the session no longer runs and `lastReplyAt` is set. The outbox is empty and the sender has exited.
 
 Rerun it with `docs/verification/hook-outbox/run.sh` from the repository, in a pylon with Claude Code logged in. It never reaches the node's probe.
+
+The run predates [#93](https://github.com/ramtinJ95/nexus/pull/93). Since then the hook reports only for a Claude under the pylon user's own HOME, and `run.sh` gives Claude a scratch HOME, so it now reports nothing. To run it again, run it as a separate Linux user, as `docs/verification/claude-activity-accuracy/` does.

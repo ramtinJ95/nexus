@@ -59,11 +59,10 @@ if (process.argv[2] === "hold") {
   await holdTurnEnd({
     running: backgroundWatch(session, shells, groups.split(",").filter(Boolean).map((g) => ({ pgid: Number(g.split("@")[0]), start: Number(g.split("@")[1]) }))),
     superseded,
-    report: (kind, message) => new Promise((sent) => {
-      const child = spawn("/usr/local/bin/nexus", ["event", kind, "--session", session, "--at", stamp, ...(message === undefined ? [] : ["--message", message])], { stdio: "ignore" });
-      child.on("error", () => sent());
-      child.on("exit", () => sent());
-    }),
+    async report(kind, message) {
+      await enqueue({ kind, at: Number(stamp), session, ...(message === undefined ? {} : { message }) }).catch(() => {});
+      startSender();
+    },
   });
   await releaseHold(owner, Number(stamp), process.pid);
   process.exit(0);

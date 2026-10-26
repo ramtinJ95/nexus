@@ -20,8 +20,11 @@ async function entries(dir: string): Promise<string[]> {
   return names.filter((n) => n.endsWith(".json") && !n.startsWith(".")).sort();
 }
 
+let written = 0;
+
 export async function enqueue(event: Omit<OutboxEvent, "id">, dir = defaultDir): Promise<void> {
-  const id = `${String(event.at).padStart(16, "0")}-${process.pid}-${randomBytes(4).toString("hex")}`;
+  // The count keeps one process's events at the same stamp, such as a hold's turn end and waiting, in write order.
+  const id = `${String(event.at).padStart(16, "0")}-${process.pid}-${String(written++).padStart(6, "0")}-${randomBytes(4).toString("hex")}`;
   const temp = join(dir, `.${id}.json`);
   await mkdir(dir, { recursive: true });
   try {

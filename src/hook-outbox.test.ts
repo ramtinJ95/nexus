@@ -1,6 +1,6 @@
 /**
  * The guest-side outbox that carries Claude hook events to the probe (images/pylon/nexus-outbox.ts), through the
- * real hook and sender processes against a local server standing in for the host bridge.
+ * real sender process against a local server standing in for the host bridge.
  */
 import { test, type TestContext } from "node:test";
 import assert from "node:assert/strict";
@@ -15,7 +15,6 @@ import { setTimeout as wait } from "node:timers/promises";
 import { drain, enqueue, maxAgeMs, maxEntries, settleMs, type OutboxEvent, type Outcome } from "../images/pylon/nexus-outbox.ts";
 
 const sender = fileURLToPath(new URL("../images/pylon/nexus-outbox.ts", import.meta.url));
-const hook = fileURLToPath(new URL("../images/pylon/nexus-claude-hook", import.meta.url));
 const lockless = process.platform !== "linux" && "the sender's lock is a Linux abstract socket";
 
 function home(t: TestContext) {
@@ -75,12 +74,11 @@ test("events written while the probe is down reach it in order and once when it 
   const exited = runSender(env);
   await until(() => requests.length > 0);
 
-  const started = Date.now();
-  const child = execFile(hook, ["session.turn-ended"], { env: { ...process.env, ...env } });
-  child.stdin!.end(JSON.stringify({ session_id: "c1" }));
-  const [code] = await once(child, "exit");
-  assert.equal(code, 0);
-  assert.ok(Date.now() - started < 1500, "the hook returns while the probe is down");
+  // The hook reports only under the pylon user's own HOME, so another process writes as it does.
+  const writer = execFile(process.execPath, ["--input-type=module", "-e",
+    `const { enqueue, startSender } = await import(${JSON.stringify(sender)}); await enqueue({ kind: "session.turn-ended", at: Date.now(), session: "c1" }); startSender();`,
+  ], { env: { ...process.env, ...env } });
+  assert.deepEqual(await once(writer, "exit"), [0, null]);
   await enqueue({ kind: "bogus", at: Date.now() + 1 }, outbox);
   await enqueue({ kind: "session.waiting", at: Date.now() + 2, session: "c1", message: "approve?" }, outbox);
 
@@ -164,6 +162,16 @@ test("an event stamped earlier goes first even when its hook wrote it later", as
     return "delivered";
   }, wait);
   assert.deepEqual(sent, ["session.heartbeat", "session.turn-ended", "session.waiting"]);
+});
+
+test("events one process writes at the same stamp go in the order it wrote them", async (t) => {
+  const { outbox } = home(t);
+  const at = Date.now() - settleMs - 1;
+  const kinds = Array.from({ length: 20 }, (_, i) => i % 2 === 0 ? "session.turn-ended" : "session.waiting");
+  for (const kind of kinds) await enqueue({ kind, at, session: "c1" }, outbox);
+  const sent: string[] = [];
+  await drain(outbox, async (e) => { sent.push(e.kind); return "delivered"; });
+  assert.deepEqual(sent, kinds);
 });
 
 test("a temporary file a killed hook left behind is removed after a minute", async (t) => {
