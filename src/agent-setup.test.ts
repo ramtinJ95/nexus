@@ -185,7 +185,7 @@ function thisMac(): MacSetup {
         { ...skill(agentSkills, "herdr"), loads: true }, { ...skill(agentSkills, "teach"), loads: false },
       ],
       skillSettings: ["-skills/teach/SKILL.md"],
-      shepherdrProfiles: [{ name: "reviewer", realPath: `${root}/${profiles}/reviewer`, files: reviewer }],
+      shepherdrProfiles: [{ name: "reviewer", realPath: `${root}/${profiles}/reviewer`, files: reviewer, links: new Map() }],
     },
     versions: { claudeCode: "2.1.310", pi: "1.4.0" },
   };
@@ -266,10 +266,10 @@ test("a committed skill with uncommitted changes, or one outside the dotfiles, i
   assert.deepEqual(problemsOf(plan(outside)), [`skill loose: /Users/me/loose is outside ${root}`]);
 });
 
-const withProfile = (mac: MacSetup, name: string, files: Record<string, string>, dir = `${root}/${profiles}/${name}`): MacSetup => ({
+const withProfile = (mac: MacSetup, name: string, files: Record<string, string>, dir = `${root}/${profiles}/${name}`, links: Record<string, string> = {}): MacSetup => ({
   ...mac,
-  dotfiles: { ...mac.dotfiles, tracked: new Set([...mac.dotfiles.tracked, ...Object.keys(files).map((file) => `${profiles}/${name}/${file}`)]) },
-  pi: { ...mac.pi, shepherdrProfiles: [...mac.pi.shepherdrProfiles, { name, realPath: dir, files: new Map(Object.entries(files)) }] },
+  dotfiles: { ...mac.dotfiles, tracked: new Set([...mac.dotfiles.tracked, ...[...Object.keys(files), ...Object.keys(links)].map((file) => `${profiles}/${name}/${file}`)]) },
+  pi: { ...mac.pi, shepherdrProfiles: [...mac.pi.shepherdrProfiles, { name, realPath: dir, files: new Map(Object.entries(files)), links: new Map(Object.entries(links)) }] },
 });
 
 test("a shepherdr profile that names something that cannot ship is refused, every defect named", () => {
@@ -304,6 +304,32 @@ test("a shepherdr profile that names something that cannot ship is refused, ever
     'shepherdr profile absolute: prompt "/Users/me/prompt.md" is not a file in the profile',
     'shepherdr profile absolute: prepare "~/prepare.mjs" is not a file in the profile',
   ]);
+});
+
+test("a committed link in a shepherdr profile ships only when it leads to a file in the profile, since the build copies the link, not what it reaches on the Mac", () => {
+  const linked = withProfile(thisMac(), "linked", {
+    "profile.json": JSON.stringify({ description: "d", model: "m", thinking: "high", prompt: "prompt.md" }),
+    "prompts/review.md": "Review.",
+  }, undefined, {
+    "prompt.md": "prompts/review.md",
+    "private.md": "/Users/me/private/prompt.md",
+    "notes.md": "../../../notes.md",
+    "lib": "prompts",
+    "self": ".",
+    "gone.md": "prompts/gone.md",
+  });
+  assert.deepEqual(problemsOf(plan(linked)), [
+    "shepherdr profile linked: private.md links to /Users/me/private/prompt.md, outside the profile",
+    "shepherdr profile linked: notes.md links to ../../../notes.md, outside the profile",
+    "shepherdr profile linked: lib links to prompts, which is not a file in the profile",
+    "shepherdr profile linked: self links to ., which is not a file in the profile",
+    "shepherdr profile linked: gone.md links to prompts/gone.md, which is not a file in the profile",
+  ]);
+  const inside = withProfile(thisMac(), "inside", {
+    "profile.json": JSON.stringify({ description: "d", model: "m", thinking: "high", prompt: "prompt.md" }),
+    "prompts/review.md": "Review.",
+  }, undefined, { "prompt.md": "prompts/review.md" });
+  assert.deepEqual(captured(plan(inside)).setup.pi.shepherdrProfiles, [`${profiles}/inside`, `${profiles}/reviewer`]);
 });
 
 test("a shepherdr profile outside the dotfiles is refused, and --leave-out shepherdr-profile lets the rest ship", () => {
@@ -438,7 +464,7 @@ async function scratchHome(files: Record<string, string | { link: string }>): Pr
 }
 const piSettings = (settings: object) => JSON.stringify(settings);
 
-test("pi reads each shepherdr profile directory with every file under it, links followed, and none without the directory", async () => {
+test("pi reads each shepherdr profile directory's files and, unfollowed, its links, and none without the directory", async () => {
   const home = await scratchHome({
     ".pi/agent/settings.json": piSettings({}),
     ".pi/agent/shepherdr/profiles/reviewer": { link: "../../../../dotfiles/reviewer" },
@@ -448,12 +474,15 @@ test("pi reads each shepherdr profile directory with every file under it, links 
     "dotfiles/reviewer/profile.json": '{"prompt":"prompt.md"}',
     "dotfiles/reviewer/prompt.md": "Review.",
     "dotfiles/reviewer/lib/util.mjs": "export {};",
+    "dotfiles/reviewer/private.md": { link: "/Users/me/private/prompt.md" },
+    "dotfiles/reviewer/loop": { link: "." },
   });
   assert.deepEqual((await readPiSetup(home)).shepherdrProfiles, [
-    { name: "general", realPath: join(home, ".pi/agent/shepherdr/profiles/general"), files: new Map([["profile.json", "{}"]]) },
+    { name: "general", realPath: join(home, ".pi/agent/shepherdr/profiles/general"), files: new Map([["profile.json", "{}"]]), links: new Map() },
     {
       name: "reviewer", realPath: join(home, "dotfiles/reviewer"),
       files: new Map([["lib/util.mjs", "export {};"], ["profile.json", '{"prompt":"prompt.md"}'], ["prompt.md", "Review."]]),
+      links: new Map([["loop", "."], ["private.md", "/Users/me/private/prompt.md"]]),
     },
   ]);
   assert.deepEqual((await readPiSetup(await scratchHome({ ".pi/agent/settings.json": piSettings({}) }))).shepherdrProfiles, []);

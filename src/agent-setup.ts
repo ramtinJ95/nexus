@@ -79,8 +79,12 @@ export interface MacSetup {
     skills: readonly { name: string; realPath: string; loads: boolean }[];
     /** settings.json `skills`, as written. */
     skillSettings: readonly string[];
-    /** Directories of ~/.pi/agent/shepherdr/profiles but dot entries, sorted. files: every file under it, links followed, by POSIX path, as text. */
-    shepherdrProfiles: readonly { name: string; realPath: string; files: ReadonlyMap<string, string> }[];
+    /**
+     * Directories of ~/.pi/agent/shepherdr/profiles but dot entries, sorted, the directory's own link resolved. files:
+     * every regular file under it, by POSIX path, as text. links: every link under it, by POSIX path, to its target as
+     * written, never followed, since the image build copies the link from the dotfiles checkout, not what it reaches here.
+     */
+    shepherdrProfiles: readonly { name: string; realPath: string; files: ReadonlyMap<string, string>; links: ReadonlyMap<string, string> }[];
   };
   /** For the version skew note only. */
   versions: { claudeCode: string; pi: string };
@@ -246,7 +250,7 @@ export function planAgentSetup(mac: MacSetup, rules: readonly LeaveOut[]): Captu
   for (const profile of mac.pi.shepherdrProfiles) {
     if (leftOut("shepherdr-profile", profile.name)) continue;
     const path = inDotfiles("shepherdr profile", profile.name, profile.realPath, true);
-    const defects = profileProblems(profile.name, profile.files);
+    const defects = profileProblems(profile.name, profile.files, profile.links);
     problems.push(...defects);
     if (path !== null && defects.length === 0) shepherdrProfiles.push(path);
   }
@@ -287,19 +291,29 @@ const profileFields = new Set(["accepts", "blocking", "description", "model", "p
 /**
  * Why the shepherdr profile `name` with these files cannot work once copied into a pylon, one line per defect: its
  * profile.json is missing, unparsable or has a field pi-shepherdr refuses, its prompt or prepare is not a file in
- * it, a pi_args entry is a path on this Mac, or its prepare file imports what is neither node: nor a file in it.
+ * it, a pi_args entry is a path on this Mac, its prepare file imports what is neither node: nor a file in it, or a link
+ * in it is absolute or leads to anything but a file in it. A link to a file in it counts as that file.
  */
-export function profileProblems(name: string, files: ReadonlyMap<string, string>): string[] {
+export function profileProblems(name: string, regularFiles: ReadonlyMap<string, string>, links: ReadonlyMap<string, string>): string[] {
   const problem = (why: string) => `shepherdr profile ${name}: ${why}`;
+  const files = new Map(regularFiles);
+  const linkProblems: string[] = [];
+  for (const [path, target] of links) {
+    const resolved = posix.normalize(posix.join(posix.dirname(path), target));
+    const content = files.get(resolved);
+    if (target.startsWith("/") || resolved === ".." || resolved.startsWith("../")) linkProblems.push(problem(`${path} links to ${target}, outside the profile`));
+    else if (content === undefined) linkProblems.push(problem(`${path} links to ${target}, which is not a file in the profile`));
+    else files.set(path, content);
+  }
   const text = files.get("profile.json");
-  if (text === undefined) return [problem("it has no profile.json")];
+  if (text === undefined) return [...linkProblems, problem("it has no profile.json")];
   let profile: unknown;
   try {
     profile = JSON.parse(text);
   } catch (err) {
-    return [problem(`profile.json is not JSON (${(err as Error).message})`)];
+    return [...linkProblems, problem(`profile.json is not JSON (${(err as Error).message})`)];
   }
-  if (typeof profile !== "object" || profile === null || Array.isArray(profile)) return [problem("profile.json is not an object")];
+  if (typeof profile !== "object" || profile === null || Array.isArray(profile)) return [...linkProblems, problem("profile.json is not an object")];
   const fields = profile as Record<string, unknown>;
   /** The profile's file a relative path from `from` names, or null when it names none. */
   const fileAt = (path: unknown, from = "."): string | null => {
@@ -307,7 +321,7 @@ export function profileProblems(name: string, files: ReadonlyMap<string, string>
     const normal = posix.normalize(posix.join(from, path));
     return files.has(normal) ? normal : null;
   };
-  const problems = Object.keys(fields).filter((key) => !profileFields.has(key)).map((key) => problem(`pi-shepherdr does not know its field ${key}`));
+  const problems = [...linkProblems, ...Object.keys(fields).filter((key) => !profileFields.has(key)).map((key) => problem(`pi-shepherdr does not know its field ${key}`))];
   for (const key of ["prompt", "prepare"]) {
     if (Object.hasOwn(fields, key) && fileAt(fields[key]) === null) problems.push(problem(`${key} ${JSON.stringify(fields[key])} is not a file in the profile`));
   }
@@ -436,16 +450,16 @@ async function skillsIn(dir: string): Promise<{ name: string; realPath: string }
   return Promise.all(names.map(async (name) => ({ name, realPath: await realpath(join(dir, name)) })));
 }
 
-/** Every file under `dir`, links followed, by POSIX path, as text. */
-async function textFiles(dir: string, prefix = ""): Promise<[string, string][]> {
-  const files: [string, string][] = [];
-  for (const name of (await readdir(dir)).sort()) {
-    const full = join(dir, name);
-    const info = await stat(full);
-    if (info.isDirectory()) files.push(...(await textFiles(full, `${prefix}${name}/`)));
-    else if (info.isFile()) files.push([`${prefix}${name}`, await readFile(full, "utf8")]);
+/** Every regular file under `dir` as text, and every link to its target as written, by POSIX path. Links are not followed. */
+async function profileTree(dir: string, prefix = "", tree = { files: new Map<string, string>(), links: new Map<string, string>() }) {
+  for (const entry of (await readdir(dir, { withFileTypes: true })).sort((a, b) => (a.name < b.name ? -1 : 1))) {
+    const full = join(dir, entry.name);
+    const path = `${prefix}${entry.name}`;
+    if (entry.isSymbolicLink()) tree.links.set(path, await readlink(full));
+    else if (entry.isDirectory()) await profileTree(full, `${path}/`, tree);
+    else if (entry.isFile()) tree.files.set(path, await readFile(full, "utf8"));
   }
-  return files;
+  return tree;
 }
 
 /**
@@ -556,7 +570,7 @@ export async function readPiSetup(home: string): Promise<MacSetup["pi"]> {
   const profileNames = existsSync(profilesDir) ? (await readdir(profilesDir)).filter((name) => !name.startsWith(".")).sort() : [];
   const shepherdrProfiles = (await Promise.all(profileNames.map(async (name) => {
     const realPath = await realpath(join(profilesDir, name));
-    return (await stat(realPath)).isDirectory() ? [{ name, realPath, files: new Map(await textFiles(realPath)) }] : [];
+    return (await stat(realPath)).isDirectory() ? [{ name, realPath, ...(await profileTree(realPath)) }] : [];
   }))).flat();
 
   return {
