@@ -496,6 +496,24 @@ test("a start whose disk differs from its project's boots fresh without a templa
   assert.deepEqual(s.reads, [{ branch: "main" }]);
 });
 
+test("a template built before the project's disk size changed is not reused by a start of the new size", async (t) => {
+  const s = await withImage(t);
+  observeNode(s, node, { total: 64, committed: 0 });
+  s.remoteReads(async () => ({ commit: "1".repeat(40), setupBlob: "b".repeat(40) }));
+  await s.call("POST", "/v1/threads", { project: "acme", title: "Builds" });
+  const [old] = s.registry.templates(project.id as ProjectId);
+  assert.ok(old?.state === "building");
+  s.registry.saveTemplate({ id: old.id, key: old.key, state: "ready", builtOn: node, builtAt: Date.now() - 60_000, commit: "1".repeat(40) });
+  observeNode(s, node, { total: 64, committed: 0 }, { artifacts: [image.id, old.id] as NodeObservation["artifacts"] });
+  assert.equal((await s.call("POST", "/v1/threads", { project: "acme", title: "Reuses" })).body.setup.how, "template", "the 10 GiB template serves a 10 GiB start");
+
+  assert.equal((await s.call("PATCH", "/v1/projects/acme", { resources: { diskGiB: 40 } })).status, 200);
+  const sized = (await s.call("POST", "/v1/threads", { project: "acme", title: "Sized", resources: { diskGiB: 40 } })).body as Thread;
+  assert.equal(sized.setup?.how, "fresh", "the 10 GiB template's disk cannot be a 40 GiB pylon's");
+  assert.ok(sized.setup?.how === "fresh" && sized.setup.building !== undefined && sized.setup.building !== old.id, "a 40 GiB template is built for the next thread");
+  assert.deepEqual(s.registry.pylon(sized.pylonId)!.firstBoot, { kind: "fresh", preSetup: null });
+});
+
 test("a start's size overrides its project's field by field, its pylon boots that size, and thread detail reads it back", async (t) => {
   const s = await withImage(t);
   const bigger = await s.call("POST", "/v1/threads", { project: "acme", title: "Bigger", resources: { memoryGiB: 12 } });
