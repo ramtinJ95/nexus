@@ -91,22 +91,50 @@ test("a turn end with background tasks still running reports a heartbeat, and na
   assert.deepEqual(reportedKind("session.ended", { background_tasks: [subagent, shell] }), { kind: "session.ended" });
 });
 
-test("a held turn end heartbeats every five minutes while the command runs, and ends the turn after it exits or at the cap", async () => {
-  const { backgroundShellCapMs, holdTurnEnd } = await import("../images/pylon/nexus-heartbeat.ts");
-  const run = async (exitsAfterMs: number) => {
+test("a held turn end heartbeats every five minutes while the command runs, and ends the turn after it exits or waits at the cap", async () => {
+  const { backgroundShellCapMs, backgroundStillRunning, holdTurnEnd } = await import("../images/pylon/nexus-heartbeat.ts");
+  const run = async (exitsAfterMs: number, supersededAfterMs = Infinity) => {
     let now = 0;
-    const reports: [string, number][] = [];
-    await holdTurnEnd(async () => now < exitsAfterMs, (kind) => reports.push([kind, now / 60_000]), { now: () => now, sleep: async (ms) => { now += ms; } });
+    const reports: [string, number, string?][] = [];
+    await holdTurnEnd({
+      running: async () => now < exitsAfterMs,
+      superseded: async () => now >= supersededAfterMs,
+      report: (kind, message) => reports.push(message === undefined ? [kind, now / 60_000] : [kind, now / 60_000, message]),
+    }, { now: () => now, sleep: async (ms) => { now += ms; } });
     return reports;
   };
   assert.deepEqual(await run(12 * 60_000), [["session.heartbeat", 5], ["session.heartbeat", 10], ["session.turn-ended", 12.5]]);
   const capped = await run(Infinity);
   assert.equal(capped.filter(([kind]) => kind === "session.heartbeat").length, backgroundShellCapMs / (5 * 60_000));
-  assert.deepEqual(capped.at(-1), ["session.turn-ended", backgroundShellCapMs / 60_000 + 0.5]);
+  assert.deepEqual(capped.slice(-2), [["session.turn-ended", 120, backgroundStillRunning], ["session.waiting", 120, backgroundStillRunning]]);
+  assert.deepEqual(await run(Infinity, 7 * 60_000), [["session.heartbeat", 5]], "a newer Stop's hold takes over and this one stops");
+  assert.deepEqual(await run(3 * 60_000, 3.2 * 60_000), [], "a hold superseded while it settles sends no turn end");
 });
 
-test("a background shell runs while any process writes to its output file", { skip: process.platform !== "linux" && "reads /proc" }, async (t) => {
-  const { shellsRunning } = await import("../images/pylon/nexus-heartbeat.ts");
+test("a background command runs while its process group lives, through exec or closed output, and MCP servers in Claude's group do not count", { skip: process.platform !== "linux" && "reads /proc" }, async (t) => {
+  const { backgroundGroups, backgroundRunning } = await import("../images/pylon/nexus-heartbeat.ts");
+  const { spawn } = await import("node:child_process");
+  const { once } = await import("node:events");
+  const start = async (script: string, detached: boolean) => {
+    const child = spawn("bash", ["-c", script], { detached, stdio: "ignore" });
+    t.after(() => { try { process.kill(detached ? -child.pid! : child.pid!, "SIGKILL"); } catch {} });
+    await once(child, "spawn");
+    return child;
+  };
+  const build = await start("exec sleep 30 >/dev/null 2>&1 <&-", true);
+  const mcp = await start("exec sleep 30", false);
+  await new Promise((resolve) => setTimeout(resolve, 100));
+  const groups = await backgroundGroups(process.pid);
+  assert.deepEqual(groups, [build.pid]);
+  assert.equal(await backgroundRunning("c1", ["b6fh14jr7"], groups), true);
+  process.kill(-build.pid!, "SIGKILL");
+  await once(build, "exit");
+  assert.equal(await backgroundRunning("c1", ["b6fh14jr7"], groups), false);
+  mcp.kill();
+});
+
+test("a background command that left its group runs while a process writes to its output file", { skip: process.platform !== "linux" && "reads /proc" }, async (t) => {
+  const { backgroundRunning } = await import("../images/pylon/nexus-heartbeat.ts");
   const { spawn } = await import("node:child_process");
   const { once } = await import("node:events");
   const { mkdirSync, openSync } = await import("node:fs");
@@ -117,12 +145,12 @@ test("a background shell runs while any process writes to its output file", { sk
   const child = spawn("sleep", ["30"], { stdio: ["ignore", output, output] });
   t.after(() => child.kill());
   await once(child, "spawn");
-  assert.equal(await shellsRunning("c1", ["b6fh14jr7"]), true);
-  assert.equal(await shellsRunning("c1", ["bq5q9o836"]), false);
-  assert.equal(await shellsRunning("c2", ["b6fh14jr7"]), false);
+  assert.equal(await backgroundRunning("c1", ["b6fh14jr7"], []), true);
+  assert.equal(await backgroundRunning("c1", ["bq5q9o836"], []), false);
+  assert.equal(await backgroundRunning("c2", ["b6fh14jr7"], []), false);
   child.kill();
   await once(child, "exit");
-  assert.equal(await shellsRunning("c1", ["b6fh14jr7"]), false);
+  assert.equal(await backgroundRunning("c1", ["b6fh14jr7"], []), false);
 });
 
 test("only a Claude started outside other Claude sessions, under the pylon user's HOME, reports into the thread", async () => {

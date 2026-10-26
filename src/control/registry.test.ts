@@ -806,7 +806,9 @@ async function claudeHooks(registry: ReturnType<typeof seeded>, clock: { now: nu
   type Kind = import("../events.ts").PylonEvent["kind"];
   let sequence = 0;
   const held: number[] = [];
-  const send = (kind: Kind, at: number) => registry.reportSession(node, { sequence: ++sequence, time: clock.now, pylon: pylonId, event: { kind, session: "c1", at } });
+  const send = (kind: Kind, at: number, message?: string) => registry.reportSession(node, {
+    sequence: ++sequence, time: clock.now, pylon: pylonId, event: { kind, session: "c1", at, ...(message === undefined ? {} : { message }) },
+  });
   const hook = (kind: Kind, input: { background_tasks?: unknown } = {}, at = (clock.now += 1000)) => {
     const reported = reportedKind(kind, input);
     if (reported.shells !== undefined) held.push(at);
@@ -816,7 +818,7 @@ async function claudeHooks(registry: ReturnType<typeof seeded>, clock: { now: nu
     const stop = held.pop()!;
     const exit = clock.now + exitsAfterMs;
     let gone = false;
-    return holdTurnEnd(async () => clock.now < exit, (kind) => send(kind, stop), {
+    return holdTurnEnd({ running: async () => clock.now < exit, superseded: async () => false, report: (kind, message) => send(kind, stop, message) }, {
       now: () => clock.now,
       sleep: async (ms) => {
         clock.now += ms;
@@ -919,12 +921,13 @@ test("a main turn that ends while a background command runs stays working until 
   assert.equal(registry.events("0", { kinds: ["session.turn-ended"] }).length, 1);
 });
 
-test("a background command still running at the cap, such as a dev server, ends its turn then", async (t) => {
-  const { backgroundShellCapMs } = await import("../../images/pylon/nexus-heartbeat.ts");
+test("a background command still running at the cap, such as a dev server, ends its turn and waits, saying why", async (t) => {
+  const { backgroundShellCapMs, backgroundStillRunning } = await import("../../images/pylon/nexus-heartbeat.ts");
   const clock = { now: 10_000_000 };
   const registry = seeded(tempDb(), () => clock.now);
   t.after(() => registry.close());
   const hook = await claudeHooks(registry, clock);
+  const attention = () => registry.events("0", { kinds: ["attention.changed"] }).at(-1)!.payload.attention;
   hook("session.turn-started");
   hook("session.turn-ended", { background_tasks: [backgroundShell] });
   const stop = clock.now;
@@ -932,9 +935,13 @@ test("a background command still running at the cap, such as a dev server, ends 
   const ended = registry.thread(threadId)!;
   assert.equal(ended.sessionTurnRunning, undefined);
   assert.ok(ended.lastReplyAt! >= stop + backgroundShellCapMs && ended.lastReplyAt! < stop + backgroundShellCapMs + 2 * 60_000);
-  assert.equal(registry.events("0", { kinds: ["attention.changed"] }).at(-1)!.payload.attention, "reply");
-  hook("session.heartbeat");
-  assert.equal(registry.thread(threadId)!.sessionTurnRunning, undefined, "nothing revives the ended turn");
+  assert.equal(ended.sessionWaitingMessage, backgroundStillRunning);
+  assert.deepEqual(registry.events("0", { kinds: ["session.turn-ended"] }).map((e) => e.payload.message), [backgroundStillRunning]);
+  assert.equal(attention(), "reply");
+  registry.markSeen(threadId, false, clock.now);
+  assert.equal(attention(), "waiting", "once the reply is read, the thread still shows the command");
+  hook("session.turn-started");
+  assert.equal(registry.thread(threadId)!.sessionWaitingMessage, undefined, "the turn the command's finish starts clears it");
 });
 
 test("only the stalled worker's launch session restores normal reply and seen attention", (t) => {

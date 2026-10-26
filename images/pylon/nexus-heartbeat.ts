@@ -1,8 +1,12 @@
 import { mkdir, readdir, readFile, readlink, rm, stat, writeFile } from "node:fs/promises";
 
 export const heartbeatIntervalMs = 5 * 60_000;
-/** Long enough for a slow build or test suite, while a dev server's turn still ends within the hour. */
-export const backgroundShellCapMs = 60 * 60_000;
+/**
+ * Nothing tells a dev server from finite work, so a command still running after this ends its turn anyway, and the
+ * session waits with backgroundStillRunning, so the person sees it rather than a normal reply.
+ */
+export const backgroundShellCapMs = 2 * 60 * 60_000;
+export const backgroundStillRunning = "A background command was still running after 2 hours";
 /** Claude submits a finished command's notification within a second; its turn start then makes the held end stale. */
 const settleMs = 30_000;
 
@@ -21,27 +25,63 @@ export function reportedKind(kind: string, input: { background_tasks?: unknown }
   return shells.length > 0 ? { kind: "session.heartbeat", shells } : { kind };
 }
 
+type HeldReport = (kind: "session.heartbeat" | "session.turn-ended" | "session.waiting", message?: string) => void;
+
 /**
- * Run detached after a Stop. Every report carries the Stop's stamp, so heartbeats renew the lease by their receipt
- * time, and any newer report for the session, such as the turn a command's finish starts, makes the rest stale.
+ * Run detached after a Stop, and given up for a newer Stop's hold of the same session. Every report carries the
+ * Stop's stamp, so heartbeats renew the lease by their receipt time, and any newer report for the session, such as the
+ * turn a command's finish starts, makes the rest stale.
  */
 export async function holdTurnEnd(
-  running: () => Promise<boolean>, report: (kind: "session.heartbeat" | "session.turn-ended") => void,
+  { running, superseded, report }: { running: () => Promise<boolean>; superseded: () => Promise<boolean>; report: HeldReport },
   { now = Date.now, sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)) } = {},
 ): Promise<void> {
   const start = now();
-  for (let beat = start; await running() && now() - start < backgroundShellCapMs;) {
+  let beat = start;
+  while (await running()) {
+    if (now() - start >= backgroundShellCapMs) {
+      report("session.turn-ended", backgroundStillRunning);
+      report("session.waiting", backgroundStillRunning);
+      return;
+    }
     await sleep(60_000);
+    if (await superseded()) return;
     if (now() - beat >= heartbeatIntervalMs) { beat = now(); report("session.heartbeat"); }
   }
   await sleep(settleMs);
-  report("session.turn-ended");
+  if (!await superseded()) report("session.turn-ended");
 }
 
-/** Whether a process still writes to one of these background shells' output files, the command's stdout and stderr. */
-export async function shellsRunning(session: string, shells: readonly string[], proc = "/proc"): Promise<boolean> {
+type Proc = { pid: number; ppid: number; pgid: number };
+
+async function processes(proc: string): Promise<Proc[]> {
+  const stats = await Promise.all((await readdir(proc)).filter((name) => /^\d+$/.test(name)).map((pid) => readFile(`${proc}/${pid}/stat`, "utf8").catch(() => "")));
+  return stats.flatMap((stat) => {
+    const fields = stat.slice(stat.lastIndexOf(")") + 2).split(" ");
+    return stat === "" ? [] : [{ pid: Number(stat.slice(0, stat.indexOf(" "))), ppid: Number(fields[1]), pgid: Number(fields[2]) }];
+  });
+}
+
+/**
+ * The process groups of a Claude's background commands. Claude Code starts each Bash command as a child that leads a
+ * group of its own, which a command keeps through exec or closed output. Its stdio MCP servers stay in Claude's own
+ * group. The calling hook's group is left out.
+ */
+export async function backgroundGroups(claudePid: number, proc = "/proc", self = process.pid): Promise<number[]> {
+  const all = await processes(proc);
+  const own = (pid: number) => all.find((p) => p.pid === pid)?.pgid;
+  return all.filter((p) => p.ppid === claudePid && p.pid === p.pgid && p.pgid !== own(claudePid) && p.pgid !== own(self)).map((p) => p.pgid);
+}
+
+/**
+ * Whether one of the groups still has a process, or, for a command that left its group, a process still writes to one
+ * of the shells' output files, which Claude Code gives the command as stdout and stderr.
+ */
+export async function backgroundRunning(session: string, shells: readonly string[], groups: readonly number[], proc = "/proc"): Promise<boolean> {
+  const all = await processes(proc);
+  if (all.some((p) => groups.includes(p.pgid))) return true;
   const outputs = shells.map((id) => `/${session}/tasks/${id}.output`);
-  for (const pid of (await readdir(proc)).filter((name) => /^\d+$/.test(name))) {
+  for (const { pid } of all) {
     for (const fd of ["1", "2"]) {
       const target = await readlink(`${proc}/${pid}/fd/${fd}`).catch(() => "");
       if (outputs.some((output) => target.endsWith(output))) return true;
