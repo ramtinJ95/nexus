@@ -11,7 +11,7 @@ import { envelope, ingest as realIngest } from "../reconcile.ts";
 import type {
   BrokenCause, CommandResult, Job, JobEnvelope, JobErrorCode, JobId, JobStatus, ListeningFact, LiveHash, NodeName, NodeObservation, PreviewRouteFact, ProbeClient, ProbeEvent, PylonCommand, PylonId, PylonObservation, RunningFacts, ServiceFact, SessionFact, SubmitReply, TailnetNodeId,
 } from "../protocol.ts";
-import { liveHashOf, type LiveSpec, type ProjectId } from "../project.ts";
+import { chatgptTokenGrant, liveHashOf, type LiveSpec, type ProjectId } from "../project.ts";
 import type { CheckpointId, ImageId } from "../images.ts";
 
 const firebat = "rj-firebat" as NodeName;
@@ -23,8 +23,10 @@ const previewPorts: PortRange = { first: 10200, last: 10209 };
  * A node as its probe presents it. Jobs run until `finish` unless `autoFinish` is set. Like the real probe, a
  * finished job is announced by a job event first and by a fresh snapshot a moment later.
  */
-function fakeNode(options: { autoFinish: boolean; node?: NodeName; reportsRoutes?: boolean; claudeLaunchRepeatable?: boolean }) {
+function fakeNode(options: { autoFinish: boolean; node?: NodeName; reportsRoutes?: boolean; claudeLaunchRepeatable?: boolean; heldSecrets?: readonly string[] }) {
   const node = options.node ?? firebat;
+  /** The held secrets the node's probe takes. A spawn asking for another fails for good, as on a probe older than it. */
+  let heldSecrets = options.heldSecrets;
   const pylons = new Map<PylonId, PylonObservation>();
   const jobs = new Map<JobId, { env: JobEnvelope; status: JobStatus }>();
   const submitted: Job[] = [];
@@ -40,6 +42,7 @@ function fakeNode(options: { autoFinish: boolean; node?: NodeName; reportsRoutes
     capacity: { cpus: 16, committedCpus: 0, memoryGiB: 64, committedMemoryGiB: 0, diskFreeGiB: 100, committedDiskGiB: 0 },
     artifacts: [image], jobs: [...jobs.values()].map((j) => j.status), pylons: [...pylons.values()], grants: { secrets: [], gitSsh: false }, previewRoutes: options.reportsRoutes === false ? null : [...routes.values()],
     ...(options.claudeLaunchRepeatable === true ? { claudeLaunchRepeatable: true } : {}),
+    ...(heldSecrets === undefined ? {} : { heldSecrets }),
   });
   const unroute = (pylonId: PylonId) => { for (const [port, route] of routes) if (route.pylonId === pylonId) routes.delete(port); };
   const emit = (event: ProbeEvent) => { for (const push of streams) push(event); };
@@ -54,6 +57,8 @@ function fakeNode(options: { autoFinish: boolean; node?: NodeName; reportsRoutes
   function apply(job: Job): Failure | undefined {
     switch (job.kind) {
       case "spawn": {
+        const missing = job.boot.network.secrets.find((grant) => !heldSecrets?.includes(grant.name));
+        if (missing !== undefined) return { code: "secret-missing", message: `secret ${missing.name} is not in this node's secret file`, logTail: "" };
         if (job.boot.source.kind === "resume" && failedSetupDisks.has(job.boot.source.checkpoint)) {
           const detail = "Setup exited 128. Read controller logs";
           return { code: "setup-failed", message: `${job.pylonId}: ${detail}`, logTail: "fatal: repository not found", broken: { detail, cause: "saved-setup" } };
@@ -206,6 +211,8 @@ function fakeNode(options: { autoFinish: boolean; node?: NodeName; reportsRoutes
       held = new Promise((resolve) => { release = resolve; });
       return () => { held = null; release(); };
     },
+    /** Upgrades the probe to one that takes these held secrets, and announces it with a snapshot. */
+    upgrade(names: readonly string[]) { heldSecrets = names; emit({ type: "snapshot", observation: observation() }); },
     /** Drops every observe link and refuses calls until `reconnect`. */
     disconnect() { reachable = false; for (const push of streams) push(null); },
     reconnect() { reachable = true; },
@@ -983,6 +990,24 @@ test("a node reporting a pylon the registry places on another node gets no ports
   await loop.wake(firebat);
   assert.deepEqual(registry.previews(thread.pylonId), []);
   assert.deepEqual(home.submitted.map((job) => job.kind), ["spawn"]);
+});
+
+test("a boot asking for a held secret waits for a probe older than it, and boots once the probe is upgraded", async (t) => {
+  const registry = openRegistry(tempDb());
+  const thread = seed(registry);
+  const stored = registry.pylon(thread.pylonId)!;
+  registry.savePylon({ ...stored, boot: { ...stored.boot, network: { allowedHosts: [], secrets: [chatgptTokenGrant] } } });
+  const fake = fakeNode({ autoFinish: true });
+  run(t, registry, fake.probe);
+  await until("the node is online", () => registry.node(node)?.state === "online");
+  await new Promise((r) => setTimeout(r, 200));
+  assert.deepEqual(fake.submitted, [], "no spawn reaches a probe that does not take the held secret");
+  assert.equal(registry.pylon(thread.pylonId)!.failed, null);
+
+  fake.upgrade([chatgptTokenGrant.name]);
+  await until("the pylon runs", () => fake.pylons.get(thread.pylonId)?.phase === "running");
+  assert.deepEqual(kinds(fake.submitted), ["spawn fresh"]);
+  assert.equal(registry.pylon(thread.pylonId)!.attempts.count, 0);
 });
 
 test("every new boot takes the configured git identity, but a checkpoint keeps its original grants", async (t) => {
