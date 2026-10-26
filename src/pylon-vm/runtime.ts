@@ -347,7 +347,8 @@ export class SandboxRuntime {
 			if (unsettled.length > 0)
 				throw new Error(`Guest actions were still in flight ${this.settleMs} ms into the stop (${unsettled.join(", ")}), so the VM is not checkpointed`);
 			await this.managed?.stopAll();
-			await checked(vm, `echo 'write back' > ${writeCache}; sync`);
+			await checked(vm, `echo 'write back' > ${writeCache}`);
+			await checked(vm, "sync");
 			await vm.checkpoint(next);
 			this.vm = undefined;
 			await rename(next, join(this.dir, "disk.qcow2"));

@@ -23,7 +23,7 @@ The node's own storage is why one fdatasync costs tens of milliseconds. Nexus's 
 
 ## Checkpoints
 
-After a boot sets `write through`, the guest's `sync` sends nothing to QEMU. QEMU keeps qcow2's L2 and refcount tables in memory until a flush or a clean exit. A stop therefore sets `write back` again before its `sync`. In this pylon, each `sync` under `write back` sent one flush even with nothing dirty. With `write through` it sent none. So a checkpoint is written exactly as before this branch. The guest's dirty pages reach QEMU, and one flush writes QEMU's metadata and fdatasyncs the overlay before Gondolin stops QEMU and moves the overlay into place.
+After a boot sets `write through`, the guest's `sync` sends nothing to QEMU. QEMU keeps qcow2's L2 and refcount tables in memory until a flush or a clean exit. A stop therefore sets `write back` again before its `sync`. If that write fails, the stop fails before its checkpoint and the instance is `interrupted`, so a checkpoint is never taken without the flush. In this pylon, each `sync` under `write back` sent one flush even with nothing dirty. With `write through` it sent none. So a checkpoint is written exactly as before this branch. The guest's dirty pages reach QEMU, and one flush writes QEMU's metadata and fdatasyncs the overlay before Gondolin stops QEMU and moves the overlay into place.
 
 ## What was not verified
 

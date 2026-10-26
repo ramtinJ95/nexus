@@ -28,8 +28,8 @@ export interface FakeVm {
 	readonly closed: string[];
 }
 
-/** `hold` says where a write to `path` holds, or undefined for one that ends at once. */
-export function fakeVm(hold: (path: string) => WritePhase | undefined = () => undefined): FakeVm {
+/** `hold` says where a write to `path` holds, or undefined for one that ends at once, and `fails` which commands exit 1. */
+export function fakeVm(hold: (path: string) => WritePhase | undefined = () => undefined, fails: (cmd: string) => boolean = () => false): FakeVm {
 	type Write = { path: string; phase: WritePhase; end(error?: Error): void };
 	const held: Write[] = [];
 	const waiters: { suffix: string; accept(): void }[] = [];
@@ -61,7 +61,7 @@ export function fakeVm(hold: (path: string) => WritePhase | undefined = () => un
 				slotWaiters.delete(wake);
 			}
 			commands.push(argv[3]!);
-			const exitCode = /\/done'?$/.test(argv[3]!) ? 1 : 0;
+			const exitCode = /\/done'?$/.test(argv[3]!) || fails(argv[3]!) ? 1 : 0;
 			return { exitCode: 0, stdout: "", stderr: JSON.stringify({ state: "exited", exitCode }) };
 		},
 		fs: {
