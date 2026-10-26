@@ -142,6 +142,20 @@ test("the client refuses a probe that whois does not name", async (t) => {
   await assert.rejects(impostor.job("x" as JobId), { code: "forbidden" });
 });
 
+test("the client sends nothing, not even the request line, to a peer that whois does not name", async (t) => {
+  const received: Buffer[] = [];
+  const server = createServer();
+  server.on("connection", (socket) => socket.on("data", (chunk: Buffer) => received.push(chunk)));
+  server.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  t.after(() => server.close());
+  const port = (server.address() as { port: number }).port;
+  const impostor = connectProbe(node, "127.0.0.1", probeNodeId, { port, whois: async () => "nOTHER" as TailnetNodeId });
+  await assert.rejects(impostor.putSecret("NEXUS_CHATGPT_TOKEN", "a-real-looking-token"), { code: "forbidden" });
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  assert.equal(Buffer.concat(received).length, 0, "the other node received no bytes");
+});
+
 test("a repeated jobId returns the job's current status", async (t) => {
   const { client, fake } = await setup(t);
   fake.hold();

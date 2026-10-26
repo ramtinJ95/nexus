@@ -276,7 +276,7 @@ In the pylon, pi's `openai` provider is signed in, so a model reference names `o
 
 What each place holds:
 
-- The control plane holds the access and refresh tokens in `harness-credentials.json`, as before. It refreshes them when less than 10 minutes remain and sends the access token to every probe every 60 seconds over the tailnet. `journalctl -u nexus-control` names a probe it could not reach, never the token.
+- The control plane holds the access and refresh tokens in `harness-credentials.json`, as before. It refreshes them when less than 10 minutes remain and sends the access token to every probe every 60 seconds over the tailnet. It asks tailscaled who answered on the connection before it sends any byte, so a node that took over a probe's name gets nothing. `journalctl -u nexus-control` names a probe it could not reach, never the token.
 - Each probe holds the current access token in memory, and so does the controller of each running pylon. Root on a node can read it there, as it can read `secrets.env`, and use it until it expires. Neither process writes it to disk or to a log, and it never reaches the registry, the events or the observation.
 - A pylon holds only a placeholder, which changes on every boot. Its agents can spend the ChatGPT subscription through `api.openai.com`, but cannot read the token.
 

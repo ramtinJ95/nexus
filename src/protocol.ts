@@ -354,27 +354,28 @@ export function connectProbe(node: NodeName, tailnetHost: string, expected: Tail
   function open(method: "GET" | "PUT" | "POST", path: string, body: string | null, signal?: AbortSignal, timeoutMs = requestTimeoutMs, contentType = "application/json"): Promise<IncomingMessage> {
     return new Promise((resolve, reject) => {
       const req = request({ host: tailnetHost, port, method, path, agent, timeout: timeoutMs, ...(signal ? { signal } : {}) }, (res) => {
-        const { remoteAddress, remotePort } = res.socket;
-        if (remoteAddress === undefined || remotePort === undefined) {
+        if (res.statusCode === 403) {
           res.destroy();
-          return reject(probeError("unreachable", `${node}: the connection closed before whois`));
+          return reject(probeError("forbidden", `${node} refused this caller`));
         }
-        whois(remoteAddress, remotePort).then((id) => {
-          if (id !== expected) {
-            res.destroy();
-            return reject(probeError("forbidden", `${node}: ${remoteAddress}:${remotePort} is tailnet node ${id ?? "unknown"}, expected ${expected}`));
-          }
-          if (res.statusCode === 403) {
-            res.destroy();
-            return reject(probeError("forbidden", `${node} refused this caller`));
-          }
-          resolve(res);
-        }, (err: unknown) => { res.destroy(); reject(err); });
+        resolve(res);
       });
       req.on("timeout", () => req.destroy(new Error(`no answer within ${timeoutMs} ms`)));
-      req.on("error", (err) => reject(signal?.aborted ? err : probeError("unreachable", `${node}: ${err.message}`)));
+      req.on("error", (err) => reject(signal?.aborted || isProbeError(err) ? err : probeError("unreachable", `${node}: ${err.message}`)));
       if (body !== null) req.setHeader("content-type", contentType);
-      req.end(body ?? undefined);
+      // A body can be a secret, so not even the request line goes out until whois names the connected peer.
+      req.once("socket", (socket) => {
+        const verify = () => {
+          const { remoteAddress, remotePort } = socket;
+          if (remoteAddress === undefined || remotePort === undefined) return req.destroy(probeError("unreachable", `${node}: the connection closed before whois`));
+          whois(remoteAddress, remotePort).then((id) => {
+            if (id !== expected) return req.destroy(probeError("forbidden", `${node}: ${remoteAddress}:${remotePort} is tailnet node ${id ?? "unknown"}, expected ${expected}`));
+            req.end(body ?? undefined);
+          }, (err: Error) => req.destroy(err));
+        };
+        if (socket.connecting) socket.once("connect", verify);
+        else verify();
+      });
     });
   }
 
