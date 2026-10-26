@@ -400,6 +400,7 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
       previewRoutes: previews === null ? [] : [...previews.gateway.routes].map(([httpsPort, route]) => ({ httpsPort, ...route })),
       grants: { secrets: options.secrets.names(), gitSsh: options.gitSsh ?? false },
       claudeLaunchRepeatable: true,
+      heldSecrets,
     };
   }
 

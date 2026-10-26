@@ -424,6 +424,7 @@ test("observations name the secrets the node holds, never their values, and whet
   for await (const e of client.observe(AbortSignal.timeout(5000))) {
     const observation = e.type === "snapshot" ? e.observation : assert.fail();
     assert.deepEqual(observation.grants, { secrets: ["GH_TOKEN"], gitSsh: true });
+    assert.deepEqual(observation.heldSecrets, ["NEXUS_CHATGPT_TOKEN"], "it takes the held secrets from the control plane, handed over or not");
     assert.ok(!JSON.stringify(observation).includes("s3cr3t"));
     break;
   }
