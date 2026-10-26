@@ -149,13 +149,14 @@ test("the newest Stop's hold owns the session whatever order the holds start in,
   assert.equal(await holdSuperseded(owner, 3000, 33), true, "the owner's release frees the session");
 });
 
-test("a group counts only while its leader is the process that started it, or its leader is gone and a member lives", async (t) => {
-  const { backgroundRunning } = await import("../images/pylon/nexus-heartbeat.ts");
+test("a group counts only while its leader is the one recorded, or, without a leader, while a member of that generation lives", async (t) => {
+  const { backgroundWatch } = await import("../images/pylon/nexus-heartbeat.ts");
   const { mkdirSync, writeFileSync } = await import("node:fs");
   const proc = mkdtempSync(join(tmpdir(), "nexus-proc-"));
   t.after(() => rmSync(proc, { recursive: true, force: true }));
   const processes = (list: [pid: number, ppid: number, pgid: number, start: number][]) => {
     rmSync(proc, { recursive: true, force: true });
+    mkdirSync(proc);
     for (const [pid, ppid, pgid, start] of list) {
       mkdirSync(join(proc, String(pid)), { recursive: true });
       const rest = Array.from({ length: 13 }, () => "0").join(" ");
@@ -163,18 +164,33 @@ test("a group counts only while its leader is the process that started it, or it
     }
   };
   const build = { pgid: 4200, start: 5_000 };
-  processes([[4200, 100, 4200, 5_000]]);
-  assert.equal(await backgroundRunning("c1", [], [build], proc), true);
-  processes([[4201, 4200, 4200, 5_010]]);
-  assert.equal(await backgroundRunning("c1", [], [build], proc), true, "a member outlives its leader");
+  const hold = 5_050;
+  const watch = (since = hold) => backgroundWatch("c1", [], [build], { proc, since });
+
+  const running = watch();
+  processes([[4200, 100, 4200, 5_000], [4201, 4200, 4200, 5_010]]);
+  assert.equal(await running(), true);
+  processes([[4201, 1, 4200, 5_010], [4202, 4201, 4200, 6_000]]);
+  assert.equal(await running(), true, "a member outlives its leader");
+  processes([[4202, 1, 4200, 6_000]]);
+  assert.equal(await running(), true, "a member forked after the hold started, while the group was known to be the original");
+  processes([]);
+  assert.equal(await running(), false);
+  processes([[4300, 4200, 4200, 9_100]]);
+  assert.equal(await running(), false, "the ID reused by a leader that forked and exited before the poll");
+
+  processes([[4201, 1, 4200, 5_010]]);
+  assert.equal(await watch()(), true, "a member that started before the hold, with its leader gone by the first poll");
+  processes([[4300, 4200, 4200, 9_100]]);
+  assert.equal(await watch()(), false, "a reused ID's member, the first time the hold looks");
   processes([[4200, 100, 4200, 9_000]]);
-  assert.equal(await backgroundRunning("c1", [], [build], proc), false, "a later group reusing the ID");
+  assert.equal(await watch()(), false, "a later leader reusing the ID");
   processes([[4200, 100, 4300, 9_000], [4300, 1, 4300, 8_000]]);
-  assert.equal(await backgroundRunning("c1", [], [build], proc), false, "a later process reusing the ID in another group");
+  assert.equal(await watch()(), false, "a later process reusing the ID in another group");
 });
 
 test("a background command runs while its process group lives, through exec or closed output, and MCP servers in Claude's group do not count", { skip: process.platform !== "linux" && "reads /proc" }, async (t) => {
-  const { backgroundGroups, backgroundRunning } = await import("../images/pylon/nexus-heartbeat.ts");
+  const { backgroundGroups, backgroundWatch } = await import("../images/pylon/nexus-heartbeat.ts");
   const { spawn } = await import("node:child_process");
   const { once } = await import("node:events");
   const start = async (script: string, detached: boolean) => {
@@ -188,15 +204,16 @@ test("a background command runs while its process group lives, through exec or c
   await new Promise((resolve) => setTimeout(resolve, 100));
   const groups = await backgroundGroups(process.pid);
   assert.deepEqual(groups.map((g) => g.pgid), [build.pid]);
-  assert.equal(await backgroundRunning("c1", ["b6fh14jr7"], groups), true);
+  const running = backgroundWatch("c1", ["b6fh14jr7"], groups);
+  assert.equal(await running(), true);
   process.kill(-build.pid!, "SIGKILL");
   await once(build, "exit");
-  assert.equal(await backgroundRunning("c1", ["b6fh14jr7"], groups), false);
+  assert.equal(await running(), false);
   mcp.kill();
 });
 
 test("a background command that left its group runs while a process writes to its output file", { skip: process.platform !== "linux" && "reads /proc" }, async (t) => {
-  const { backgroundRunning } = await import("../images/pylon/nexus-heartbeat.ts");
+  const { backgroundWatch } = await import("../images/pylon/nexus-heartbeat.ts");
   const { spawn } = await import("node:child_process");
   const { once } = await import("node:events");
   const { mkdirSync, openSync } = await import("node:fs");
@@ -207,12 +224,12 @@ test("a background command that left its group runs while a process writes to it
   const child = spawn("sleep", ["30"], { stdio: ["ignore", output, output] });
   t.after(() => child.kill());
   await once(child, "spawn");
-  assert.equal(await backgroundRunning("c1", ["b6fh14jr7"], []), true);
-  assert.equal(await backgroundRunning("c1", ["bq5q9o836"], []), false);
-  assert.equal(await backgroundRunning("c2", ["b6fh14jr7"], []), false);
+  assert.equal(await backgroundWatch("c1", ["b6fh14jr7"], [])(), true);
+  assert.equal(await backgroundWatch("c1", ["bq5q9o836"], [])(), false);
+  assert.equal(await backgroundWatch("c2", ["b6fh14jr7"], [])(), false);
   child.kill();
   await once(child, "exit");
-  assert.equal(await backgroundRunning("c1", ["b6fh14jr7"], []), false);
+  assert.equal(await backgroundWatch("c1", ["b6fh14jr7"], [])(), false);
 });
 
 test("only a Claude started outside other Claude sessions, under the pylon user's HOME, reports into the thread", async () => {

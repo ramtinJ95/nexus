@@ -112,25 +112,40 @@ export async function backgroundGroups(claudePid: number, proc = "/proc", self =
 }
 
 /**
- * Whether one of the groups still has a process, or, for a command that left its group, a process still writes to one
- * of the shells' output files, which Claude Code gives the command as stdout and stderr.
+ * Polls whether one of the groups still has a process, or, for a command that left its group, a process still writes
+ * to one of the shells' output files, which Claude Code gives the command as stdout and stderr. `since` is when the
+ * hold started, in the clock ticks of /proc's start times, and defaults to the calling process's own start.
  */
-export async function backgroundRunning(session: string, shells: readonly string[], groups: readonly Group[], proc = "/proc"): Promise<boolean> {
-  const all = await processes(proc);
-  // The kernel reuses no ID while its group has a process, so a leader that started at another time leads another group.
-  const lives = ({ pgid, start }: Group) => {
-    const leader = all.find((p) => p.pid === pgid);
-    return leader === undefined ? all.some((p) => p.pgid === pgid) : leader.pgid === pgid && leader.start === start;
-  };
-  if (groups.some(lives)) return true;
+export function backgroundWatch(session: string, shells: readonly string[], groups: readonly Group[], { proc = "/proc", since }: { proc?: string; since?: number } = {}): () => Promise<boolean> {
   const outputs = shells.map((id) => `/${session}/tasks/${id}.output`);
-  for (const { pid } of all) {
-    for (const fd of ["1", "2"]) {
-      const target = await readlink(`${proc}/${pid}/fd/${fd}`).catch(() => "");
-      if (outputs.some((output) => target.endsWith(output))) return true;
+  // The original members of each group seen so far, as pid@start.
+  const known = new Map(groups.map((g) => [g.pgid, new Set([`${g.pgid}@${g.start}`])]));
+  let started = since;
+  return async () => {
+    started ??= Number((await readFile(`${proc}/self/stat`, "utf8").catch(() => "")).split(") ").at(-1)?.split(" ")[19] ?? 0);
+    const all = await processes(proc);
+    // The kernel reuses no ID while its group has a process. So a leader that started at another time leads another
+    // group, and without its leader the group is the original only while a member already known to be in it lives,
+    // or one that started before the hold did, when the recorded group still existed.
+    const lives = ({ pgid, start }: Group) => {
+      const members = all.filter((p) => p.pgid === pgid);
+      const leader = all.find((p) => p.pid === pgid);
+      const seen = known.get(pgid)!;
+      const original = leader !== undefined
+        ? leader.pgid === pgid && leader.start === start
+        : members.some((p) => seen.has(`${p.pid}@${p.start}`) || p.start <= started!);
+      if (original) for (const p of members) seen.add(`${p.pid}@${p.start}`);
+      return original;
+    };
+    if (groups.filter(lives).length > 0) return true;
+    for (const { pid } of all) {
+      for (const fd of ["1", "2"]) {
+        const target = await readlink(`${proc}/${pid}/fd/${fd}`).catch(() => "");
+        if (outputs.some((output) => target.endsWith(output))) return true;
+      }
     }
-  }
-  return false;
+    return false;
+  };
 }
 
 /**
