@@ -1,6 +1,6 @@
 # The Mac nexus CLI
 
-`nexus` runs on a Mac and drives the control plane's API: add projects, list threads, start one, message it, watch it, and archive or delete it. People use it at a shell. The Claude Code mod and the pi extension shell out to it, so this page is their contract. The code is [`src/cli/nexus.ts`](../src/cli/nexus.ts), and its transport is [`src/cli/transport.ts`](../src/cli/transport.ts). This page describes version 0.16.1, which `nexus --version` prints. Version 0.16.1 adds `--help` and `-h` after every command. Version 0.16.0 added `start --claude --model`, defaulted Claude to Opus 5.5, disabled commit and PR attribution, and preserved busy launches across Herdr readiness timeouts. `show` reports the worker model and launch diagnostic. Version 0.15.1 exposed stalled Claude worker launches, with pane diagnostics in `claudeWorker.message`. Version 0.15.0 added the resumable event stream and Claude Code thread workers. Version 0.14.0 added human-only project editing and a stale-grants warning. Version 0.13.0 added `deploy`, `release`, and waiting for fleet release health. Version 0.12.0 added PR-watch metadata and pull-request outputs to `show` (see [Pull requests](#pull-requests-0120)). Version 0.11.0 added Latest turn to dashboard Changes, `--turn` to `nexus changes` and `nexus diff`, and API `base=turn` with turn metadata and failures. Version 0.10.0 added shared `seenAt`, `lastReplyAt` and `attention` to thread rows and detail, and `seen <thread> [--unread]`, so clients no longer need their own seen stores. Version 0.9.0 made `attach` go through the control plane, over the attach route `GET /v1/threads/<thread>/attach`, a WebSocket, instead of ssh to the pylon's node, and retired its settings: `NEXUS_ATTACH`, and `"ssh"` and `"attach"` in the config file. An older control plane has no such route, and `attach` says to upgrade it. In 0.9.0, `Preview.failed` and `ready` also cover a preview whose port has no route into the pylon, and `ports` prints why a preview is not ready. Version 0.8.0 added `Session.id`, `Session.state` and `Session.message`, so a paused pylon lists the sessions its wake brings back and a session its last wake failed to bring back shows why, and `session close` now takes a session's ID, refuses a paused session, fails on a pane that is not open or that runs another session than the one listed there, and no longer tries again. Version 0.7.0 added scratch projects, whose `Project.repoUrl` is null, `project add --scratch` and `--secret`, and a null `Base.commit` where the base is the empty tree. Version 0.6.0 added `files`, `changes` and `diff`, their routes `GET /v1/threads/<thread>/files`, `GET /v1/threads/<thread>/changes` and `GET /v1/threads/<thread>/diff`, `Listing`, `Changes` and `Diff`, and the route `GET /v1/threads/<thread>/files/content`, which the CLI does not use. Version 0.5.0 added `session open`, `session close` and `attach`, the routes `POST /v1/threads/<thread>/sessions` and `DELETE /v1/threads/<thread>/sessions/<pane>`, `OpenedSession`, `Session.title`, `Preview.failed`, and the attach settings: `NEXUS_ATTACH`, and `"ssh"` and `"attach"` in the config file. Version 0.4.0 added `project add` and its route, `POST /v1/projects`. Version 0.3.0 added `unpreview` and its route, `DELETE /v1/threads/<thread>/previews/<port>`. Version 0.2.0 added `ports`, `preview`, `Preview.url`, `ThreadDetail.ports` and the `ports` of a watch `state`.
+`nexus` runs on a Mac and drives the control plane's API: add projects, list threads, start one, message it, watch it, and archive or delete it. People use it at a shell. The Claude Code mod and the pi extension shell out to it, so this page is their contract. The code is [`src/cli/nexus.ts`](../src/cli/nexus.ts), and its transport is [`src/cli/transport.ts`](../src/cli/transport.ts). This page describes version 0.17.0, which `nexus --version` prints. Version 0.17.0 makes a Claude worker thread a conversation: `conversation` prints its Claude Code transcript and `send` types a message into its Claude session, as [Claude conversations and steering](#claude-conversations-and-steering-0170) describes. Version 0.16.1 added `--help` and `-h` after every command. Version 0.16.0 added `start --claude --model`, defaulted Claude to Opus 5.5, disabled commit and PR attribution, and preserved busy launches across Herdr readiness timeouts. `show` reports the worker model and launch diagnostic. Version 0.15.1 exposed stalled Claude worker launches, with pane diagnostics in `claudeWorker.message`. Version 0.15.0 added the resumable event stream and Claude Code thread workers. Version 0.14.0 added human-only project editing and a stale-grants warning. Version 0.13.0 added `deploy`, `release`, and waiting for fleet release health. Version 0.12.0 added PR-watch metadata and pull-request outputs to `show` (see [Pull requests](#pull-requests-0120)). Version 0.11.0 added Latest turn to dashboard Changes, `--turn` to `nexus changes` and `nexus diff`, and API `base=turn` with turn metadata and failures. Version 0.10.0 added shared `seenAt`, `lastReplyAt` and `attention` to thread rows and detail, and `seen <thread> [--unread]`, so clients no longer need their own seen stores. Version 0.9.0 made `attach` go through the control plane, over the attach route `GET /v1/threads/<thread>/attach`, a WebSocket, instead of ssh to the pylon's node, and retired its settings: `NEXUS_ATTACH`, and `"ssh"` and `"attach"` in the config file. An older control plane has no such route, and `attach` says to upgrade it. In 0.9.0, `Preview.failed` and `ready` also cover a preview whose port has no route into the pylon, and `ports` prints why a preview is not ready. Version 0.8.0 added `Session.id`, `Session.state` and `Session.message`, so a paused pylon lists the sessions its wake brings back and a session its last wake failed to bring back shows why, and `session close` now takes a session's ID, refuses a paused session, fails on a pane that is not open or that runs another session than the one listed there, and no longer tries again. Version 0.7.0 added scratch projects, whose `Project.repoUrl` is null, `project add --scratch` and `--secret`, and a null `Base.commit` where the base is the empty tree. Version 0.6.0 added `files`, `changes` and `diff`, their routes `GET /v1/threads/<thread>/files`, `GET /v1/threads/<thread>/changes` and `GET /v1/threads/<thread>/diff`, `Listing`, `Changes` and `Diff`, and the route `GET /v1/threads/<thread>/files/content`, which the CLI does not use. Version 0.5.0 added `session open`, `session close` and `attach`, the routes `POST /v1/threads/<thread>/sessions` and `DELETE /v1/threads/<thread>/sessions/<pane>`, `OpenedSession`, `Session.title`, `Preview.failed`, and the attach settings: `NEXUS_ATTACH`, and `"ssh"` and `"attach"` in the config file. Version 0.4.0 added `project add` and its route, `POST /v1/projects`. Version 0.3.0 added `unpreview` and its route, `DELETE /v1/threads/<thread>/previews/<port>`. Version 0.2.0 added `ports`, `preview`, `Preview.url`, `ThreadDetail.ports` and the `ports` of a watch `state`.
 
 This is a different program from the `nexus` inside a pylon ([`images/pylon/nexus`](../images/pylon/nexus)), which talks to its own node's probe.
 
@@ -74,12 +74,12 @@ With `--json`, a command prints one JSON value on stdout, pretty-printed. The va
 | `files <thread> [path]` | `GET /v1/threads/<thread>/files?path=<path>`. While the pylon is not running, it tries again once a second | `Listing`, the directory's entries |
 | `changes <thread> [--uncommitted | --turn]` | `GET /v1/threads/<thread>/changes?base=start`, or `base=head` with `--uncommitted`, or `base=turn` with `--turn`. While the pylon is not running, it tries again once a second | `Changes` |
 | `diff <thread> [path...] [--uncommitted | --turn]` | `GET /v1/threads/<thread>/diff?base=start&path=<path>...`, or `base=head` with `--uncommitted`, or `base=turn` with `--turn`. While the pylon is not running, it tries again once a second | `Diff` |
-| `conversation <thread>` | `GET /v1/threads/<thread>/conversation` | `ConversationView` |
+| `conversation <thread>` | `GET /v1/threads/<thread>/conversation` | `ConversationView`, or a `ClaudeConversation` for a Claude worker thread |
 | `session open <thread> [--harness claude-code\|pi\|shell] [--title T]` | `POST /v1/threads/<thread>/sessions` with `{"harness"?: string, "title"?: string}`, which answers 201. While the pylon is not running, it tries again once a second | `OpenedSession`, the session it opened |
 | `session close <thread> <pane\|id>` | `DELETE /v1/threads/<thread>/sessions/<id>` with `{}`, which answers 204. It does not try again | `null` |
 | `attach <thread>` | `GET /v1/threads/<thread>/attach`, a WebSocket, as [the attach route](#the-attach-route) describes | Nothing. The terminal is the session's |
 | `start --project P [--title T] [--message M] [--node N] [--branch B] [--commit C]` | `POST /v1/threads`, then `POST .../messages` when `--message` is given | `Thread`, the thread that was started |
-| `send <thread> <text...> [--steer] [--request-id ID]` | `POST /v1/threads/<thread>/messages` | `{ "submission": number }` |
+| `send <thread> <text...> [--steer] [--request-id ID]` | `POST /v1/threads/<thread>/messages`. For a Claude worker thread, while the pylon is not running, it tries again once a second | `{ "submission": number }`, or `{ "claude": ClaudeSent }` for a Claude worker thread |
 | `watch <thread> [--interval MS]` | Follows `GET /v1/threads/<thread>/events` and polls `GET /v1/threads/<thread>` | A stream of JSON lines, described below |
 | `abort <thread>` | `POST /v1/threads/<thread>/abort` | `null` |
 | `retry <thread>` | `POST /v1/threads/<thread>/retry` | `null` |
@@ -97,7 +97,7 @@ These commands need more explanation:
 
 - `start` without `--title` takes the title from the first non-empty line of `--message`, trimmed. A line longer than 80 characters keeps its first 80 and gets `...` appended, so such a title is 83 characters. It needs at least one of the two. If the thread starts but its first message fails, the command fails with the message's exit code, and the error names the thread that was started.
 - `start --commit` on a scratch project fails with exit code 64, because its repository has no commit to check out. `--branch` names the empty repository's first branch instead.
-- `send` joins its words with single spaces. By default the message is a follow-up, so a busy run takes it after its current turn. With `--steer`, the message joins the current run after its current tool round. The API treats a second send with the same `--request-id` as the same message. A caller that retries a send should pass its own request ID, such as `msg:<uuid>`. Without one, each run mints a new ID.
+- `send` joins its words with single spaces. By default the message is a follow-up, so a busy run takes it after its current turn. With `--steer`, the message joins the current run after its current tool round. The API treats a second send with the same `--request-id` as the same message. A caller that retries a send should pass its own request ID, such as `msg:<uuid>`. Without one, each run mints a new ID. A Claude worker thread's message goes to Claude, never to the Nexus agent, whatever the mode.
 - `project add` adds a project whose threads clone `<repo-url>` and boot on node `N` unless `start --node` picks another. With `--scratch` instead of a URL, the project has no repository: each thread's pylon starts from `git init` on the branch, nothing is fetched, and nothing in the pylon is kept once the thread is deleted unless its agent pushed it somewhere. It sends this `Project`: `repoUrl` is `<repo-url>`, or null with `--scratch`. `defaultBranch` is `--branch`, or `main`. `resources` is `{ cpus, memoryGiB, diskGiB }` from `--cpus`, `--memory` and `--disk`, or 2, 4 and 10. `allowedHosts` holds each `--allow-host`, `logins` each `--login`, and `secrets` each `--secret`, in the order given. `preSetup` is null, which only the API can set. Without `--json` it prints `Added project <id> (<repo-url>) on <node>`, or `Added scratch project <id> on <node>`. `--node` is required, and exactly one of `<repo-url>` and `--scratch` is too. Without them the command fails with exit code 64 before it sends any request, so a forgotten URL never makes a scratch project. `nexus nodes` lists the nodes. A project that exists fails with exit code 5. A node the control plane does not know, an ID that is not lowercase letters, digits and hyphens starting with a letter or digit, up to 63 characters, an `https://` URL that does not parse, or a login other than `claude` or `chatgpt` fails with exit code 64. The API accepts any other non-empty `<repo-url>`, such as an SSH one. Use `project edit` to change settings; IDs and repository URLs cannot change. Projects cannot be removed from the CLI.
 - `--secret NAME:HOST[,HOST]` grants the secret `NAME` to those hosts, such as `--secret GH_TOKEN:api.github.com,github.com`, which lets the project's agents create GitHub repositories with `gh` and push to them. The value is never sent: it lives in each node's `/etc/nexus/secrets.env`, as [deploy/README.md](../deploy/README.md) describes, and a pylon on a node that lacks it fails to boot. The name is upper-case letters, digits and underscores, not starting with a digit, and each host a lower-case hostname with a dot. Anything else, such as `GH_TOKEN=<token>` pasted by mistake, fails with exit code 64 before any request, and the error does not repeat it. Each host joins the pylon's allowlist.
 - `session open` opens a session in the pylon: a Herdr workspace in the checkout, `/home/user/workspace/repo`, labelled with the title, with the harness's agent in it. The harness is `claude-code` by default, and the title is the harness's name by default, at most 80 characters. The command returns once the agent is ready or waits for its human, such as Claude Code at its login or trust screen, so a session that needs `/login` opens and waits for it. Starting an agent can take most of a minute, so the command waits up to 120 seconds for the reply, rather than the usual 30. Opening is human activity, so a paused pylon is woken, and the command tries again once a second until the pylon runs, failing with exit code 1 after 120 seconds. An archived or deleted thread fails with exit code 5, a harness other than the three with exit code 64, and a node the control plane cannot reach with exit code 1. The session is listed in the thread's `sessions` within moments, because the node reads its sessions again at once. Without `--json` it prints `Opened <harness> session "<title>" in pane <pane> of <thread>.` and how to attach.
@@ -122,7 +122,7 @@ These commands need more explanation:
 - `unpreview` needs the pylon running, because the pylon holds the link. Unpublishing is human activity, so the first try wakes a paused pylon, and the command tries again once a second until the pylon runs. It fails with exit code 1 after 120 seconds.
 - Once `unpreview` exits 0, nothing reaches the app through the URL: the node's preview gateway has stopped routing it and answers 404 `no preview is published on <host>` itself, to a browser too. Tailscale stops serving the URL, after which a new connection to it is refused, only once the control plane's next pass publishes the previews without it, usually within a few seconds. The command does not wait for that pass.
 
-The shapes are TypeScript types. `Thread`, `Session` and `Preview` are in [`src/control/registry.ts`](../src/control/registry.ts). `Listing`, `Changes` and `Diff` are in [`src/checkout-files.ts`](../src/checkout-files.ts). `ThreadDetail`, `ListeningPort`, `OpenedSession` and `NodeSummary` are in [`src/control/api.ts`](../src/control/api.ts). `Project` is in [`src/project.ts`](../src/project.ts). `ConversationView`, `EntryRecord`, `LiveState` and `InboxState` come from `@earendil-works/pi-durable`. Times in `Thread` are Unix milliseconds, and the observation times are ISO strings. A consumer must ignore fields it does not know.
+The shapes are TypeScript types. `Thread`, `Session` and `Preview` are in [`src/control/registry.ts`](../src/control/registry.ts). `Listing`, `Changes` and `Diff` are in [`src/checkout-files.ts`](../src/checkout-files.ts). `ThreadDetail`, `ListeningPort`, `OpenedSession` and `NodeSummary` are in [`src/control/api.ts`](../src/control/api.ts). `Project` is in [`src/project.ts`](../src/project.ts). `ConversationView`, `EntryRecord`, `LiveState` and `InboxState` come from `@earendil-works/pi-durable`. `ClaudeConversation` and `ClaudeEntry` are in [`src/claude-transcript.ts`](../src/claude-transcript.ts), and `ClaudeSent` is in [`src/control/registry.ts`](../src/control/registry.ts). Times in `Thread` are Unix milliseconds, and the observation times are ISO strings. A consumer must ignore fields it does not know.
 
 ### Attention and shared seen state
 
@@ -331,7 +331,7 @@ nexus events [--follow] [--since ID] [--thread T] [--project P] [--kind K]... [-
 the Nexus harness. It is mutually exclusive with `--message`; the prompt supplies
 the default title. A prompt not already beginning with `/poteto-mode` is prefixed
 with it. The API accepts the same optional `claude` string on `POST /v1/threads`,
-and the dashboard's start form has a first-prompt field. Empty means the existing
+and the dashboard's start form offers Claude Code as its default worker, with the prompt as its main field. Empty means the existing
 harness workflow. API prompts are at most 16,384 characters, may span lines and
 hold any characters but NUL, and reach Claude exactly after trimming.
 
@@ -363,8 +363,8 @@ never a restored pane cwd, root or HOME. After a launch failure or an
 interrupted `starting` launch, attach and inspect before starting another session;
 Nexus deliberately does not retry a possibly submitted task. Human takeover and
 pause/wake use the same Herdr pane and Claude resume path as `session open`.
-Claude-worker threads have no harness transcript: use attach, files and changes.
-`send`, harness abort/retry and latest-turn snapshots are not Claude steering.
+A Claude worker thread's conversation is its Claude Code transcript, and `send` steers
+it, as the next section describes. Harness abort/retry and latest-turn snapshots do not apply to it.
 GitHub feedback for these threads goes to the event stream, not an invisible
 harness agent.
 
@@ -450,3 +450,66 @@ history. A launch command error after a reported submission emits no false
 worker state, model and diagnostic; session lists remain observed facts, not
 invented sessions. All Nexus launches merge Claude's native empty commit and PR
 attribution settings, preserving unrelated settings and hooks.
+
+## Claude conversations and steering (0.17.0)
+
+```sh
+nexus conversation <thread>            # the Claude worker's transcript
+nexus send <thread> 'another prompt'   # typed into the worker's Claude session
+```
+
+A Claude worker thread's conversation is the transcript Claude Code writes for the
+worker's session in the pylon, `~/.claude/projects/<cwd>/<session>.jsonl`. The
+control plane reads it over the probe's raw pipe, from where its last read stopped,
+and keeps what it read in the registry. `GET /v1/threads/<thread>/conversation`
+answers a `ClaudeConversation` for such a thread: `kind: "claude"`, the worker's
+`session`, its `entries`, how many older entries were `dropped` (at most 3,000 are
+kept), when it was last read (`readAt`) and whether a turn runs (`working`). An entry
+is a prompt (with who it came from), a reply, a tool call, a tool result paired with
+its call by ID, a background task's notification, a queue operation, a notice, a turn
+duration, or a `record` that names a transcript record Nexus does not know yet, so a
+newer Claude Code shows something rather than nothing. Each text is cut to a limit and
+marked where it was cut. A consumer must ignore entry kinds and fields it does not know.
+
+Reading never wakes a pylon and is not human activity. The control plane reads only
+while the node reports the pylon running. A paused pylon's thread shows the transcript
+as of its last read, which survives a control-plane restart. The session events say
+when to read: each `session.*` event for the thread is followed by a read, and while a
+turn runs and a dashboard watches the thread, it is read every 2 seconds, so new
+entries appear during the turn. An idle thread costs no reads. The conversation route
+reads once, for up to 5 seconds, before it answers. `nexus watch` does not stream a
+Claude worker's transcript; use the dashboard or `conversation`.
+
+`send` to a Claude worker thread types the message into the worker's Claude session, as
+a person at its terminal would, and submits it. It answers `{ "claude": { "session",
+"outcome", "resumed" } }`. `outcome` is `sent` when Claude was idle, so the message
+starts a turn, or `queued` when Claude was working. Claude Code then queues it as it
+queues input typed during a turn. Claude reads a queued message at its next tool step
+and answers it within the same turn, or takes it after the turn when no tool step comes.
+The dashboard shows it as queued until then. `--steer` changes nothing for Claude.
+`resumed` says that no pane ran the session, so Nexus resumed it with `claude --resume`
+first.
+
+Sending is human activity, so it wakes a paused pylon. Until the pylon runs, the API
+answers 409, and the CLI and the dashboard try again once a second, for up to 120
+seconds, with the same request ID. A wake relaunches the worker's session before the
+pylon counts as running. The text arrives exactly as written, newlines, quotes,
+backticks and dollar signs included, after CRLF becomes LF and the ends are trimmed.
+Nexus types it in short pieces, because Claude Code takes a long burst of input as a
+paste and wraps it in `<pasted_content>` tags. A tab, a carriage return or another
+control character cannot be typed as written, so such a message fails with exit code 64
+(API 400). As in Claude's terminal, a message that starts with `/` runs a slash command,
+one that starts with `!` runs a shell command, and text a person has half-typed in an
+attached terminal is joined to it.
+
+A send to Claude never reaches the Nexus agent. The same request ID is never typed
+twice: a repeat answers the first result. While Claude waits at a dialog in its
+terminal, nothing is typed and the API answers 409, saying to attach and answer it.
+If the session's pane stops running it before the message is typed, as when another
+agent starts in that pane, nothing is typed and the API answers 409, saying the pane
+stopped running the session. The next try resumes the session in a new pane. If
+the probe fails partway through typing, the message may be partly in Claude's prompt.
+A repeat of that request ID then fails with exit code 1 (API 422), and the person
+checks the conversation before sending again under a new ID. A worker that has not
+started a session yet answers 409.
+

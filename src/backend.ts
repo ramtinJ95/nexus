@@ -14,7 +14,7 @@
  */
 import type { Readable } from "node:stream";
 import type { ArtifactCopy, BrokenCause, ByteStream, CommandResult, Job, JobErrorCode, NodeName, PausedSession, PylonCommand, PylonId, ServiceFact } from "./protocol.ts";
-import { checkoutDir, closeSession, dropFailedSession, openSession } from "./sessions.ts";
+import { checkoutDir, closeSession, dropFailedSession, openSession, sendToClaude } from "./sessions.ts";
 import { linkedName, type BootInputs, type LiveSpec, type OverlayFile, type PreviewAssignment, type ServiceDecl, type ServiceName } from "./project.ts";
 import type { ArtifactId, ArtifactManifest, CheckpointId, ImageId, ImageRecipe, PortableArtifactId, TemplateBuildInputs, TemplateId } from "./images.ts";
 
@@ -196,6 +196,10 @@ export async function runCommand(pylonId: PylonId, command: PylonCommand, deps: 
       return { kind: "close-session", outcome: await closeSession(guest, command.herdrPane, command.session) };
     case "drop-failed-session":
       return { kind: "drop-failed-session", dropped: await dropFailedSession(guest, command.id) };
+    case "send-claude": {
+      const { session, text, model } = command;
+      return { kind: "send-claude", ...await sendToClaude(guest, { session, text, ...(model === undefined ? {} : { model }) }) };
+    }
     case "service": {
       const { services, logs } = await guest.services(command.op, command.name, command.lines);
       return { kind: "service", services, ...(logs === undefined ? {} : { logs }) };

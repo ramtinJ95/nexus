@@ -1,0 +1,287 @@
+import { test, type TestContext } from "node:test";
+import assert from "node:assert/strict";
+import { appendFile, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { maxRecordBytes, parseRecord, readTranscript, transcriptStart as start, type ClaudeEntry, type TranscriptCursor } from "./claude-transcript.ts";
+import type { OpenPipe } from "./checkout-files.ts";
+import { processStream } from "./process-stream.ts";
+import type { ByteStream } from "./protocol.ts";
+
+const fixture = await readFile(new URL("./fixtures/claude-transcript.jsonl", import.meta.url), "utf8");
+const lines = fixture.split("\n").filter((line) => line !== "");
+const session = "11111111-2222-4333-8444-555555555501";
+
+const parsedAll = (records: readonly string[]): ClaudeEntry[] => records.flatMap((line) => parseRecord(line));
+const entries = parsedAll(lines);
+const only = <K extends ClaudeEntry["kind"]>(kind: K) => entries.filter((e): e is Extract<ClaudeEntry, { kind: K }> => e.kind === kind);
+const toolNamed = (name: string, command?: string) => only("tool").find((t) => t.name === name && (command === undefined || t.input.command === command))!;
+const resultOf = (id: string) => only("result").filter((r) => r.toolUseId === id);
+
+test("the first person prompt opens the conversation, kept exactly as typed", () => {
+  const first = entries[0]!;
+  assert.equal(first.kind, "prompt");
+  assert.equal(first.kind === "prompt" && first.from, "person");
+  assert.match(first.kind === "prompt" ? first.text : "", /^Do these steps one at a time, each as its own tool call: 1\) write hello\.py/);
+  assert.equal(first.at, Date.parse("2026-10-25T22:14:50.563Z"));
+  // Claude wraps a long paste in <pasted_content>, and the prompt keeps the wrapper.
+  const pasted = JSON.parse(lines.find((l) => l.includes("Steer one"))!).message.content as string;
+  assert.ok(only("prompt").some((p) => p.from === "person" && p.text === pasted));
+});
+
+test("a slash command the person typed, as a Claude worker's first /poteto-mode prompt is, shows as typed", () => {
+  // A real Claude Code 2.1.308 record of a worker's first prompt, trimmed to the fields that matter.
+  const record = JSON.stringify({
+    type: "user", timestamp: "2026-10-25T23:09:14.254Z", origin: { kind: "human" },
+    message: { role: "user", content: "<command-message>pstack:poteto-mode</command-message>\n<command-name>/pstack:poteto-mode</command-name>\n<command-args>Quick verification task.\n1. Write wc.js.</command-args>" },
+  });
+  assert.deepEqual(parseRecord(record), [{ kind: "prompt", at: Date.parse("2026-10-25T23:09:14.254Z"), text: "/pstack:poteto-mode Quick verification task.\n1. Write wc.js.", from: "person" }]);
+  // Any other tag from the person is their text, not a form.
+  const typed = JSON.stringify({ type: "user", timestamp: "2026-10-25T23:09:14.254Z", origin: { kind: "human" }, message: { role: "user", content: "<bash-input>rm -rf /</bash-input>" } });
+  assert.equal((parseRecord(typed)[0] as Extract<ClaudeEntry, { kind: "prompt" }>).text, "<bash-input>rm -rf /</bash-input>");
+});
+
+test("each tool call is paired with its result by the call's ID, a failing command as an error", () => {
+  const write = toolNamed("Write");
+  assert.deepEqual(write.input, { file_path: "/home/user/workspace/repo/hello.py", content: 'print("hi")\n' });
+  assert.deepEqual(resultOf(write.id).map((r) => [r.isError, r.output.startsWith("File created successfully")]), [[false, true]]);
+
+  const run = toolNamed("Bash", "python3 /home/user/workspace/repo/hello.py");
+  assert.deepEqual(resultOf(run.id).map((r) => [r.output, r.isError]), [["hi", false]]);
+
+  const fails = toolNamed("Bash", "false");
+  assert.deepEqual(resultOf(fails.id).map((r) => [r.output, r.isError]), [["Exit code 1", true]]);
+  assert.ok(entries.indexOf(write) < entries.indexOf(run) && entries.indexOf(run) < entries.indexOf(fails));
+});
+
+test("a background subagent's launch hides Claude's metadata, and its notification pairs with the call", () => {
+  const agent = toolNamed("Agent");
+  assert.deepEqual(agent.input, { description: "Count lines in hello.py", subagent_type: "general-purpose", prompt: "Count the number of lines in /home/user/workspace/repo/hello.py and report the number." });
+  const [launched] = resultOf(agent.id);
+  assert.equal(launched!.isError, false);
+  assert.doesNotMatch(launched!.output, /agentId|internal metadata/);
+  assert.match(launched!.output, /background/i);
+
+  const done = only("task").filter((t) => t.toolUseId === agent.id);
+  assert.deepEqual(done.map((t) => [t.status, t.summary]), [["completed", 'Agent "Count lines in hello.py" finished']]);
+  assert.match(done[0]!.result ?? "", /has \*\*1\*\* line/);
+
+  // A background shell's notification arrives as its own turn, and carries no result.
+  const shell = only("task").filter((t) => t.toolUseId === "toolu_01S7wDMAwvUA7vjJFKi7mhf7");
+  assert.deepEqual(shell.map((t) => [t.status, t.summary, t.result]), [["completed", 'Background command "Sleep 40 seconds in background" completed (exit code 0)', null]]);
+  assert.equal(resultOf("toolu_01S7wDMAwvUA7vjJFKi7mhf7").length, 1);
+});
+
+test("a message typed mid-turn joins the queue, leaves it, and shows as the person's prompt", () => {
+  const steer = 'Steer seven mid-turn: also tell me the word "banana" with `ticks` and $DOLLAR.\nSecond line.';
+  assert.deepEqual(only("queue").filter((q) => q.text === steer).map((q) => q.op), ["enqueue", "remove"]);
+  assert.deepEqual(only("prompt").filter((p) => p.text === steer).map((p) => p.from), ["person"]);
+  assert.deepEqual(only("queue").filter((q) => q.text === null).map((q) => q.op), ["dequeue", "dequeue", "dequeue"]);
+});
+
+test("a ! shell command is a tool call named shell whose result is its output", () => {
+  const shell = toolNamed("shell");
+  assert.deepEqual(shell.input, { command: "echo bang-mode" });
+  assert.deepEqual(resultOf(shell.id).map((r) => [r.output, r.isError]), [["bang-mode", false]]);
+});
+
+test("interruptions, compaction, slash commands, Claude's own messages and turn durations are shown", () => {
+  const notices = only("notice").map((n) => [n.tone, n.text]);
+  assert.ok(notices.some(([tone, text]) => tone === "info" && text === "Interrupted"));
+  assert.ok(notices.some(([, text]) => /compacted the conversation/i.test(text!)));
+  // The local command's output loses its terminal escapes.
+  assert.ok(notices.some(([tone, text]) => tone === "info" && text === "Compacted (ctrl+o to see full summary)"));
+  assert.ok(notices.some(([tone, text]) => tone === "info" && text === "No response requested."));
+  assert.equal(only("reply").some((r) => r.text === "No response requested."), false);
+  assert.deepEqual(only("prompt").filter((p) => p.from === "command").map((p) => p.text.slice(0, 30)), ["/compact", "/compact The agent saved its w"]);
+  assert.deepEqual(only("turn").map((t) => t.durationMs), [12262, 2495, 2049]);
+});
+
+test("Claude's bookkeeping records give no entries, and every record in the real session is known", () => {
+  const hiddenTypes = ["api-request", "api-request-blob", "api-request-shape", "mode", "permission-mode", "atis-latch", "last-prompt", "file-history-snapshot", "file-history-delta", "ai-title", "cost-state"];
+  const hiddenAttachments = ["environment", "model", "deferred_tools_delta", "agent_listing_delta", "mcp_instructions_delta", "skill_listing", "instructions", "session_context", "date", "prompt_snapshot", "total_tokens_reminder", "silent_turn_reminder"];
+  let hidden = 0;
+  for (const line of lines) {
+    const r = JSON.parse(line);
+    const bookkeeping = hiddenTypes.includes(r.type) || (r.type === "attachment" && hiddenAttachments.includes(r.attachment.type)) || r.subtype === "stop_hook_summary" || r.isMeta === true || (r.type === "assistant" && r.message.content[0].type === "thinking");
+    if (!bookkeeping) continue;
+    hidden++;
+    assert.deepEqual(parseRecord(line), [], line.slice(0, 120));
+  }
+  assert.ok(hidden >= 30, `${hidden} bookkeeping records in the fixture`);
+  assert.deepEqual(only("record"), []);
+});
+
+test("unknown and malformed records stay visible as record entries", () => {
+  const at = "2026-10-25T22:14:50.563Z";
+  // Synthetic records, made up for this test, standing in for shapes a later Claude Code may write.
+  const synthetic = {
+    type: JSON.stringify({ type: "made-up-record", timestamp: at, detail: "x" }),
+    attachment: JSON.stringify({ type: "attachment", timestamp: at, attachment: { type: "made_up_attachment" } }),
+    block: JSON.stringify({ type: "assistant", timestamp: at, message: { model: "m", content: [{ type: "made_up_block", data: 1 }] } }),
+    system: JSON.stringify({ type: "system", subtype: "made_up_subtype", timestamp: at }),
+    wrongType: JSON.stringify({ type: "user", timestamp: at, message: { content: 42 } }),
+  };
+  const recordOf = (line: string) => {
+    const got = parseRecord(line);
+    assert.equal(got.length, 1);
+    assert.equal(got[0]!.kind, "record");
+    return got[0] as Extract<ClaudeEntry, { kind: "record" }>;
+  };
+  assert.deepEqual([recordOf(synthetic.type).type, recordOf(synthetic.type).at], ["made-up-record", Date.parse(at)]);
+  assert.match(recordOf(synthetic.type).summary, /"detail":"x"/);
+  assert.equal(recordOf(synthetic.attachment).type, "attachment/made_up_attachment");
+  assert.equal(recordOf(synthetic.block).type, "assistant/made_up_block");
+  assert.equal(recordOf(synthetic.system).type, "system/made_up_subtype");
+  assert.equal(recordOf(synthetic.wrongType).type, "user");
+  assert.deepEqual(recordOf('{"type": "user", "message": {"content": "cut off'), { kind: "record", at: null, type: "invalid", summary: '{"type": "user", "message": {"content": "cut off' });
+  assert.equal(recordOf("[1, 2]").type, "invalid");
+  assert.equal(recordOf("x".repeat(10_000)).summary.length, 500);
+});
+
+test("the person's own words stay a prompt, even when they look like a tag Claude Code writes", () => {
+  const typed = "<bash-input>rm -rf /</bash-input>";
+  assert.deepEqual(parseRecord(JSON.stringify({ type: "user", timestamp: "2026-10-25T22:14:50.563Z", origin: { kind: "human" }, message: { content: typed } })), [
+    { kind: "prompt", at: Date.parse("2026-10-25T22:14:50.563Z"), text: typed, from: "person" },
+  ]);
+});
+
+test("long text is cut to its limit, marked as cut", () => {
+  const long = "a".repeat(100_000);
+  const [reply] = parseRecord(JSON.stringify({ type: "assistant", timestamp: "2026-10-25T22:14:50.563Z", message: { content: [{ type: "text", text: long }] } })) as [Extract<ClaudeEntry, { kind: "reply" }>];
+  assert.equal(reply.kind, "reply");
+  assert.equal(reply.text.length, 64 << 10);
+  assert.ok(reply.text.endsWith("…"));
+  const [tool] = parseRecord(JSON.stringify({ type: "assistant", timestamp: "2026-10-25T22:14:50.563Z", message: { content: [{ type: "tool_use", id: "t", name: "Write", input: { content: long, nested: { edits: [long] } } }] } })) as [Extract<ClaudeEntry, { kind: "tool" }>];
+  assert.equal(tool.kind, "tool");
+  assert.equal((tool.input.content as string).length, 4 << 10);
+  assert.deepEqual((tool.input.nested as { edits: string[] }).edits.map((e) => e.length), [4 << 10]);
+});
+
+/** Each pipe runs on this machine, as a pylon would over its raw pipe. */
+function localPipes(): { open: OpenPipe; requests: (readonly string[])[] } {
+  const requests: (readonly string[])[] = [];
+  return {
+    requests,
+    open: async (argv) => {
+      requests.push(argv);
+      return processStream(argv[0]!, argv.slice(1), () => undefined);
+    },
+  };
+}
+
+/** A projects directory like ~/.claude/projects, holding the session's transcript under a project slug. */
+async function projects(t: TestContext) {
+  const root = await mkdtemp(join(tmpdir(), "nexus-claude-"));
+  t.after(() => rm(root, { recursive: true }));
+  await mkdir(join(root, "-home-user-workspace-repo"));
+  await mkdir(join(root, "-other-project"));
+  const file = join(root, "-home-user-workspace-repo", `${session}.jsonl`);
+  const pipes = localPipes();
+  return { root, file, ...pipes, read: (cursor: TranscriptCursor, id = session) => readTranscript(pipes.open, id, cursor, root) };
+}
+
+/** Reads until the file holds nothing past the cursor, as a caller does when `more` is set. */
+async function readAll(read: (cursor: TranscriptCursor) => ReturnType<typeof readTranscript>, cursor: TranscriptCursor) {
+  const got: ClaudeEntry[] = [];
+  let reads = 0;
+  for (;;) {
+    const r = (await read(cursor))!;
+    reads++;
+    got.push(...r.entries);
+    cursor = r.cursor;
+    if (!r.more) return { entries: got, cursor, reads };
+  }
+}
+
+test("reads across appends give each entry once, in order, and never take a partial line", async (t) => {
+  const p = await projects(t);
+  const bytes = (records: readonly string[]) => Buffer.byteLength(records.map((l) => `${l}\n`).join(""));
+  const half = lines[31]!.slice(0, 200);
+  await writeFile(p.file, lines.slice(0, 31).map((l) => `${l}\n`).join("") + half);
+
+  const first = (await p.read(start))!;
+  assert.deepEqual(first.entries, parsedAll(lines.slice(0, 31)));
+  assert.deepEqual([first.cursor.offset, first.cursor.skipping], [bytes(lines.slice(0, 31)), false]);
+  assert.deepEqual([first.more, first.reset], [false, false]);
+  assert.deepEqual(p.requests[0]?.slice(0, 2), ["sh", "-c"]);
+  assert.deepEqual(p.requests[0]?.slice(3, 7), [session, p.root, "0", String(maxRecordBytes)]);
+
+  // Nothing new but the same partial line: no entries, and the cursor stays.
+  assert.deepEqual(await p.read(first.cursor), { entries: [], cursor: first.cursor, more: false, reset: false });
+
+  await appendFile(p.file, lines[31]!.slice(200) + "\n" + lines.slice(32, 60).map((l) => `${l}\n`).join("") + lines[60]!.slice(0, 50));
+  const second = (await p.read(first.cursor))!;
+  assert.deepEqual(second.entries, parsedAll(lines.slice(31, 60)));
+  assert.equal(second.cursor.offset, bytes(lines.slice(0, 60)));
+
+  await appendFile(p.file, lines[60]!.slice(50) + "\n" + lines.slice(61).map((l) => `${l}\n`).join(""));
+  const third = (await p.read(second.cursor))!;
+  assert.deepEqual(third.entries, parsedAll(lines.slice(60)));
+  assert.equal(third.cursor.offset, Buffer.byteLength(fixture));
+  assert.deepEqual([...first.entries, ...second.entries, ...third.entries], entries);
+});
+
+test("a session with no transcript reads as null, and an ID that is not one is refused", async (t) => {
+  const p = await projects(t);
+  assert.equal(await p.read(start), null);
+  await writeFile(join(p.root, "-other-project", `${session}.jsonl`), lines[4] + "\n");
+  // The transcript is found under whatever project slug Claude gave it.
+  assert.deepEqual((await p.read(start))!.entries, parseRecord(lines[4]!));
+  for (const bad of ["../etc/passwd", "*", "", "a b", "x".repeat(201)]) {
+    await assert.rejects(p.read(start, bad), /is not a Claude Code session ID/);
+  }
+  assert.equal(p.requests.length, 2);
+});
+
+test("a record longer than one read is skipped with one record entry, and reading goes on after it", async (t) => {
+  const p = await projects(t);
+  const huge = JSON.stringify({ type: "assistant", timestamp: "2026-10-25T22:14:50.563Z", message: { content: [{ type: "text", text: "z".repeat(maxRecordBytes * 2 + 1000) }] } });
+  await writeFile(p.file, `${lines[4]}\n${huge}\n${lines[22]}\n`);
+  const all = await readAll(p.read, start);
+  assert.deepEqual(all.entries, [
+    ...parseRecord(lines[4]!),
+    { kind: "record", at: null, type: "oversized", summary: `a record of more than ${maxRecordBytes} bytes was skipped` },
+    ...parseRecord(lines[22]!),
+  ]);
+  assert.deepEqual([all.cursor.offset, all.cursor.skipping], [(await readFile(p.file)).length, false]);
+  assert.ok(all.reads >= 4, `${all.reads} reads`);
+});
+
+test("a transcript that shrinks was replaced, so reading starts over from its beginning", async (t) => {
+  const p = await projects(t);
+  await writeFile(p.file, fixture);
+  const all = await readAll(p.read, start);
+  assert.deepEqual(all.entries, entries);
+  await writeFile(p.file, lines.slice(0, 30).map((l) => `${l}\n`).join(""));
+  const again = (await p.read(all.cursor))!;
+  assert.equal(again.reset, true);
+  assert.deepEqual(again.entries, parsedAll(lines.slice(0, 30)));
+  assert.equal(again.cursor.offset, Buffer.byteLength(lines.slice(0, 30).map((l) => `${l}\n`).join("")));
+});
+
+test("a pylon that does not answer fails the read at its deadline and drops the pipe", async () => {
+  let aborted = false;
+  const silent: ByteStream = {
+    async *[Symbol.asyncIterator]() { await new Promise(() => undefined); },
+    write: async () => undefined,
+    close: async () => undefined,
+    abort: () => { aborted = true; },
+    done: new Promise(() => undefined),
+  };
+  await assert.rejects(readTranscript(async () => silent, session, start, "/nowhere", 50), /did not read the transcript within 0.05 s/);
+  assert.equal(aborted, true);
+});
+
+test("a transcript replaced by one at least as long starts over from its beginning", async (t) => {
+  const p = await projects(t);
+  await writeFile(p.file, fixture);
+  const all = await readAll(p.read, start);
+  const replaced = [...lines.slice(30), ...lines.slice(0, 30), lines[4]!].map((l) => `${l}\n`).join("");
+  await writeFile(p.file, replaced);
+  const first = (await p.read(all.cursor))!;
+  assert.equal(first.reset, true);
+  const rest = await readAll(p.read, first.cursor);
+  assert.deepEqual([...first.entries, ...rest.entries], parsedAll([...lines.slice(30), ...lines.slice(0, 30), lines[4]!]));
+  assert.equal(rest.cursor.offset, Buffer.byteLength(replaced));
+});

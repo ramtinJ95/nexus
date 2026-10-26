@@ -1,0 +1,13 @@
+{
+  "steer": "Also add this line to README.md, exactly:\nShe said \"it's `wc` -- it costs $5 and $(echo nothing) runs\"\nand mention it in your summary.",
+  "after": "Reply with only the text between the markers, unchanged:\n<<\nquote \" single ' backtick ` dollar $HOME $(whoami) backslash \\ tab-free\n>>",
+  "recordedPersonPrompts": [
+    "<command-message>pstack:poteto-mode</command-message>\n<command-name>/pstack:poteto-mode</command-name>\n<command-args>Quick verification task, keep it small: no subagents, no pull request, no reviews.\nIn this repository, one tool call per step:\n1. Write wc.js, a Node script that prints the number of words it reads on stdin.\n2. Write wc.test.js with node:test that checks it on two inputs.\n3. Run node --test.\n4. Run `node -e \"setTimeout(() => {}, 40000)\"` in the foreground with Bash (timeout 120000), which waits 40 seconds.\n5. Commit with git -c user.name=verify -c user.email=verify@example.com commit.\n6. Reply with a short markdown summary: a heading and a list.</command-args>",
+    "Also add this line to README.md, exactly:\nShe said \"it's `wc` -- it costs $5 and $(echo nothing) runs\"\nand mention it in your summary.",
+    "Reply with only the text between the markers, unchanged:\n<<\nquote \" single ' backtick ` dollar $HOME $(whoami) backslash \\ tab-free\n>>"
+  ],
+  "exact": {
+    "midTurn": true,
+    "afterTurn": true
+  }
+}

@@ -1,7 +1,11 @@
 import { seedClaudeState } from "./claude-state.ts";
 import { test } from "node:test";
+import { spawnSync } from "node:child_process";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import assert from "node:assert/strict";
-import { attachedTerminals, attachScript, closeSession, dropFailedSession, openSession, pausedSessionsIn, recordSessions, relaunchSessions, sessionFacts, sessionsFile, type RelaunchOutcome, type SessionRecord } from "./sessions.ts";
+import { attachedTerminals, attachScript, claudeTextProblem, closeSession, dropFailedSession, openSession, pausedSessionsIn, recordSessions, relaunchSessions, sendToClaude, sessionFacts, sessionsFile, type RelaunchOutcome, type SessionRecord } from "./sessions.ts";
 import { fakeGuest, herdrError, herdrOk, herdrPane, herdrSnapshot, type ExecReply } from "./fake-guest.ts";
 
 const created = (workspace: string, pane: string) => herdrOk({ type: "workspace_created", workspace: { workspace_id: workspace, label: "x" }, tab: { tab_id: `${workspace}:t1` }, root_pane: { pane_id: pane } });
@@ -679,4 +683,164 @@ test("a stalled relaunch keeps its new pane attached to the failure across recor
   assert.equal(file.sessions.length, 1);
   assert.equal(file.sessions[0].harnessSessionId, "aaaa");
   assert.deepEqual(file.failed, [], "the recovered pane supersedes the failure");
+});
+
+/**
+ * A pylon with Claude Code panes, whose typing script runs for real under sh against a fake `herdr` on PATH that
+ * records each call's argv. A send-text of a chunk holding FAILME fails. An agent start makes its pane an idle Claude
+ * running the launch's arguments. `onSnapshot` sees each Herdr snapshot read, by count, before it is answered.
+ */
+function claudeWorkers(t: { after(fn: () => void): void }, panes: ReturnType<typeof herdrPane>[], foreground: Record<string, readonly string[]> = {}, onSnapshot: (reads: number) => void = () => {}) {
+  const dir = mkdtempSync(join(tmpdir(), "nexus-claude-type-"));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const log = join(dir, "calls");
+  writeFileSync(join(dir, "herdr"), `#!/bin/sh
+{ printf '%s\\0' "$@"; printf '\\1'; } >> '${log}'
+case "$*" in *FAILME*) echo '{"error":{"code":"pane_not_found","message":"gone"},"id":"cli:test"}'; exit 1;; esac
+echo '{"id":"cli:test","result":{"type":"ok"}}'
+`, { mode: 0o755 });
+  let reads = 0;
+  const guest = fakeGuest((argv, herdr) => {
+    if (argv[2] === seedClaudeState) return { exitCode: 0, output: "" };
+    if (!herdr && argv[3] === "claude-type") {
+      const run = spawnSync(argv[0]!, argv.slice(1), { env: { PATH: `${dir}:/usr/bin:/bin` }, encoding: "utf8" });
+      return { exitCode: run.status, output: run.stdout + run.stderr };
+    }
+    if (!herdr) return transcriptLookup(argv, true) ?? assert.fail(`unexpected exec ${argv.join(" ")}`);
+    const sub = argv.slice(0, 2).join(" ");
+    const flag = (name: string) => argv[argv.indexOf(name) + 1]!;
+    switch (sub) {
+      case "api snapshot":
+        onSnapshot(++reads);
+        return herdrOk(herdrSnapshot([...new Set(panes.map((p) => p.workspace_id))].map((id) => ({ id, label: "Claude Code" })), panes));
+      case "pane process-info": return processInfo(foreground)(argv);
+      case "workspace list": return herdrOk({ type: "workspace_list", workspaces: [] });
+      case "workspace create": return created("w5", "w5:p1");
+      case "agent start": {
+        const pane = flag("--pane");
+        const args = argv.slice(argv.indexOf("--") + 1);
+        panes.splice(0, panes.length, ...panes.filter((p) => p.pane_id !== pane), herdrPane(pane, pane.split(":")[0]!, "claude", "idle", { kind: "id", value: args[1]! }));
+        foreground[pane] = ["claude", ...args];
+        return agentStarted;
+      }
+    }
+    throw new Error(`unscripted herdr ${argv.join(" ")}`);
+  });
+  const herdrCalls = () => existsSync(log) ? readFileSync(log, "utf8").split("\x01").slice(0, -1).map((call) => call.split("\0").slice(0, -1)) : [];
+  return { guest, herdrCalls, typed: () => guest.execs.some((a) => a[3] === "claude-type") };
+}
+
+const session = "0b5e3a52-5d0f-4c1e-9a43-1f2a6c7d8e90";
+const runningClaude = { "w1:p1": ["claude", "--resume", session] };
+
+test("a message reaches Claude's prompt exactly, typed in chunks of at most 64 characters and then submitted with one Enter", async (t) => {
+  // The emoji ends the first chunk across a UTF-16 boundary, and the next chunk starts with a dash.
+  const text = "x".repeat(63) + "😀" + "-n is no flag\n\"double\" 'single' `ticks` $HOME $(whoami) \\ backslash \\n\n" + "ünïcödé ".repeat(12) + "\n\n  indented\n";
+  assert.equal(claudeTextProblem(text), null);
+  const w = claudeWorkers(t, [herdrPane("w1:p1", "w1", "claude", "idle", { kind: "id", value: session })], { ...runningClaude });
+  assert.deepEqual(await sendToClaude(w.guest, { session, text }), { outcome: "sent", herdrPane: "w1:p1", resumed: false });
+  const calls = w.herdrCalls();
+  const chunks = calls.slice(0, -1).map((call) => {
+    // Herdr types every argument after the pane, so a chunk is the only one.
+    assert.deepEqual(call.slice(0, 5), ["--session", "nexus", "pane", "send-text", "w1:p1"]);
+    assert.equal(call.length, 6);
+    return call[5]!;
+  });
+  assert.equal(chunks.join(""), text, "the chunks put together are the message");
+  assert.ok(chunks.length > 2);
+  for (const chunk of chunks) {
+    assert.ok(Array.from(chunk).length <= 64, `chunk ${JSON.stringify(chunk)} is at most 64 characters`);
+    assert.ok(chunk.isWellFormed(), "no chunk splits a surrogate pair");
+  }
+  assert.ok(chunks[1]!.startsWith("-n"));
+  assert.deepEqual(calls.at(-1), ["--session", "nexus", "pane", "send-keys", "w1:p1", "Enter"]);
+});
+
+test("a message to a working Claude is typed and queued, and one to a blocked Claude types nothing", async (t) => {
+  const working = claudeWorkers(t, [herdrPane("w1:p1", "w1", "claude", "working", { kind: "id", value: session })], { ...runningClaude });
+  assert.deepEqual(await sendToClaude(working.guest, { session, text: "also check the tests" }), { outcome: "queued", herdrPane: "w1:p1", resumed: false });
+  assert.equal(working.herdrCalls().at(-1)?.[3], "send-keys");
+
+  const blocked = claudeWorkers(t, [herdrPane("w1:p1", "w1", "claude", "blocked", { kind: "id", value: session })], { ...runningClaude });
+  assert.deepEqual(await sendToClaude(blocked.guest, { session, text: "yes" }), { outcome: "blocked", herdrPane: "w1:p1", resumed: false });
+  assert.equal(blocked.typed(), false, "typing would answer the dialog");
+  assert.deepEqual(blocked.herdrCalls(), []);
+});
+
+test("a Claude whose state Herdr cannot tell yet is waited for, and is reported starting with nothing typed if it stays so", async (t) => {
+  const panes = [herdrPane("w1:p1", "w1", "claude", "unknown", { kind: "id", value: session })];
+  const late = claudeWorkers(t, panes, { ...runningClaude }, (reads) => { if (reads === 3) panes[0]!.agent_status = "idle"; });
+  assert.deepEqual(await sendToClaude(late.guest, { session, text: "go" }, 5_000), { outcome: "sent", herdrPane: "w1:p1", resumed: false });
+  assert.equal(late.typed(), true);
+
+  const stuck = claudeWorkers(t, [herdrPane("w1:p1", "w1", "claude", "unknown", { kind: "id", value: session })], { ...runningClaude });
+  assert.deepEqual(await sendToClaude(stuck.guest, { session, text: "go" }, 600), { outcome: "starting", herdrPane: "w1:p1", resumed: false });
+  assert.ok(stuck.guest.herdrCalls().filter((c) => c === "api snapshot").length > 2, "it polled before giving up");
+  assert.equal(stuck.typed(), false);
+});
+
+test("a pane that stops running the session before the message is typed types nothing and says so", async (t) => {
+  const panes = [herdrPane("w1:p1", "w1", "claude", "unknown", { kind: "id", value: session })];
+  const foreground: Record<string, readonly string[]> = { ...runningClaude };
+  const toPi = claudeWorkers(t, panes, foreground, (reads) => {
+    if (reads !== 2) return;
+    panes[0] = herdrPane("w1:p1", "w1", "pi", "idle", { kind: "path", value: "/home/user/.pi/sessions/a.jsonl" });
+    foreground["w1:p1"] = ["node", "/usr/local/bin/pi"];
+  });
+  assert.deepEqual(await sendToClaude(toPi.guest, { session, text: "go" }, 5_000), { outcome: "moved", herdrPane: "w1:p1", resumed: false });
+  assert.equal(toPi.typed(), false, "a pi session that took the pane is not typed into");
+
+  const others = [herdrPane("w1:p1", "w1", "claude", "idle", { kind: "id", value: session })];
+  const another = claudeWorkers(t, others, { ...runningClaude }, (reads) => {
+    if (reads === 2) others[0] = herdrPane("w1:p1", "w1", "claude", "idle", { kind: "id", value: "another-session" });
+  });
+  assert.deepEqual(await sendToClaude(another.guest, { session, text: "go" }), { outcome: "moved", herdrPane: "w1:p1", resumed: false });
+  assert.equal(another.typed(), false, "nor is another Claude session");
+});
+
+test("a Claude pane Herdr reports no session for is found by the session its command line started", async (t) => {
+  const w = claudeWorkers(t, [
+    herdrPane("w1:p1", "w1", "claude", "idle"),
+    herdrPane("w2:p1", "w2", "claude", "idle", { kind: "id", value: "another-session" }),
+    herdrPane("w3:p1", "w3", "claude", "idle"),
+  ], { "w1:p1": ["claude", "--session-id", "another-one"], "w2:p1": ["claude", "--resume", session], "w3:p1": ["node", "/usr/local/bin/claude", "--resume", session] });
+  assert.deepEqual(await sendToClaude(w.guest, { session, text: "hi" }), { outcome: "sent", herdrPane: "w3:p1", resumed: false });
+  assert.ok(w.herdrCalls().every((call) => call[4] === "w3:p1"));
+});
+
+test("a session in no live pane is resumed in a new workspace in the checkout, then given the message", async (t) => {
+  const w = claudeWorkers(t, [herdrPane("w1:p1", "w1", "claude", "idle", { kind: "id", value: "another-session" })], { "w1:p1": ["claude", "--resume", "another-session"] });
+  assert.deepEqual(await sendToClaude(w.guest, { session, text: "pick it back up", model: "claude-opus-5-5" }), { outcome: "sent", herdrPane: "w5:p1", resumed: true });
+  assert.deepEqual(w.guest.execs.find((a) => a[4] === "create")!.slice(5, 9), ["--cwd", "/home/user/workspace/repo", "--label", "Claude Code"]);
+  const start = w.guest.execs.find((a) => a[3] === "agent")!;
+  assert.deepEqual(start.slice(start.indexOf("--") + 1, -2), ["--resume", session, "--model", "claude-opus-5-5"]);
+  assert.ok(w.guest.execs.indexOf(start) < w.guest.execs.findIndex((a) => a[3] === "claude-type"), "the message is typed once Claude runs");
+  assert.deepEqual(w.herdrCalls().map((call) => call.slice(3, 5)), [["send-text", "w5:p1"], ["send-keys", "w5:p1"]]);
+});
+
+test("a pane that reports the session but whose Claude exited to its shell gets Claude resumed in place", async (t) => {
+  const w = claudeWorkers(t, [herdrPane("w1:p1", "w1", "claude", "idle", { kind: "id", value: session })]);
+  assert.deepEqual(await sendToClaude(w.guest, { session, text: "ls" }), { outcome: "sent", herdrPane: "w1:p1", resumed: true });
+  assert.equal(w.guest.herdrCalls().includes("workspace create"), false);
+  const start = w.guest.execs.find((a) => a[3] === "agent")!;
+  assert.deepEqual(start.slice(start.indexOf("--pane"), start.indexOf("--pane") + 2), ["--pane", "w1:p1"]);
+  assert.deepEqual(start.slice(start.indexOf("--") + 1, start.indexOf("--") + 3), ["--resume", session]);
+});
+
+test("a failed chunk stops the typing before Enter, and the error says how far it got", async (t) => {
+  const w = claudeWorkers(t, [herdrPane("w1:p1", "w1", "claude", "idle", { kind: "id", value: session })], { ...runningClaude });
+  await assert.rejects(sendToClaude(w.guest, { session, text: "a".repeat(64) + "FAILME" + "b".repeat(64) }), /part of the message may sit unsent.*typed 1 of 3 chunks/s);
+  assert.deepEqual(w.herdrCalls().map((call) => call[3]), ["send-text", "send-text"]);
+});
+
+test("a message Claude's prompt cannot take exactly is refused with a reason, and newlines are fine", () => {
+  assert.equal(claudeTextProblem("line one\nline two\n"), null);
+  assert.equal(claudeTextProblem("ünïcödé 😀 `$x`"), null);
+  assert.match(claudeTextProblem("a\tb")!, /tab.*Replace tabs with spaces/);
+  assert.match(claudeTextProblem("a\r\nb")!, /carriage return/);
+  assert.match(claudeTextProblem("a\x1b[2Jb")!, /U\+001B at offset 1/);
+  assert.match(claudeTextProblem("a\x00")!, /U\+0000/);
+  assert.match(claudeTextProblem("a\x9b")!, /U\+009B/);
+  assert.match(claudeTextProblem("bad \ud800 half")!, /surrogate/);
+  assert.match(claudeTextProblem(" \n \n")!, /blank/);
 });

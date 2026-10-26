@@ -27,6 +27,7 @@ import { processStream } from "../process-stream.ts";
 import { repoInitCommand } from "../pylon-vm-backend.ts";
 import type { ByteStream, CommandResult, NodeName, PylonCommand, PylonId, ServiceFact, StreamEnd, TailnetNodeId } from "../protocol.ts";
 import { checkoutDir } from "../sessions.ts";
+import { transcriptStart, type ClaudeEntry } from "../claude-transcript.ts";
 import { call, CliError, follow } from "./transport.ts";
 
 const cli = fileURLToPath(new URL("./nexus.ts", import.meta.url));
@@ -1015,7 +1016,7 @@ test("show prints PR metadata and one disabled-watch notice without waking the p
 
 test("deploy and release use the shared release view and wait for both roles", async (t) => {
   const s = await setup(t);
-  assert.equal((await s.nexus(["--version"])).stdout.trim(), "nexus 0.16.1");
+  assert.equal((await s.nexus(["--version"])).stdout.trim(), "nexus 0.17.0");
   assert.equal((await s.nexus(["deploy", "bad"])).code, 64);
   const requested = await s.json(["deploy", "main"]);
   assert.equal(requested.desired.commit, "a".repeat(40));
@@ -1094,7 +1095,7 @@ test("start --claude queues a poteto worker without sending a harness message", 
   const s = await setup(t);
   const thread = await s.json(["start", "--project", "acme", "--claude", "/poteto-mode fix it"]);
   assert.equal(thread.conversationId, null);
-  assert.deepEqual(s.registry.claudeWorker(thread.id), { model: "claude-opus-5-5", prompt: "/poteto-mode fix it", state: "pending" });
+  assert.deepEqual(s.registry.claudeWorker(thread.id), { model: "claude-opus-5-5", prompt: "/poteto-mode fix it", state: "pending", session: null });
   assert.equal((await s.nexus(["start", "--project", "acme", "--claude", "fix", "--message", "also fix"])).code, 64);
 });
 
@@ -1223,4 +1224,60 @@ test("show exposes the registry's failed worker and its selected model", async (
   assert.ok(text.includes(message));
   assert.equal(s.registry.events().filter((e) => e.kind === "thread.failed").at(-1)?.payload.message, detail.claudeWorker.message);
   assert.equal((await s.nexus(["start", "--project", "acme", "--title", "no worker", "--model", "x"])).code, 64);
+});
+
+test("conversation prints a Claude worker's transcript, and send types into its session, waiting for a paused pylon under one request ID", async (t) => {
+  const s = await setup(t);
+  const thread: Thread = await s.json(["start", "--project", "acme", "--claude", "count the lines"]);
+  s.registry.setClaudeWorker(thread.id, "/poteto-mode count the lines", "started", undefined, "s1");
+  const entries: ClaudeEntry[] = [
+    { kind: "prompt", at: 1, text: "Count the lines\nof hello.py", from: "person" },
+    { kind: "tool", at: 2, id: "t1", name: "Bash", input: { command: "wc -l hello.py" } },
+    { kind: "result", at: 3, toolUseId: "t1", output: "1 hello.py", isError: false },
+    { kind: "tool", at: 4, id: "t2", name: "Bash", input: { command: "false" } },
+    { kind: "result", at: 5, toolUseId: "t2", output: "Exit code 1", isError: true },
+    { kind: "reply", at: 6, text: "It has 1 line." },
+    { kind: "task", at: 7, toolUseId: "t1", status: "completed", summary: 'Agent "Count" finished', result: null },
+    { kind: "notice", at: 8, tone: "error", text: "The model failed" },
+    { kind: "turn", at: 9, durationMs: 72_000 },
+    { kind: "record", at: null, type: "mystery", summary: '{"type":"mystery"}' },
+    { kind: "prompt", at: 10, text: "/compact", from: "command" },
+    { kind: "queue", at: 11, op: "enqueue", text: "and then deploy" },
+    { kind: "tool", at: 12, id: "t3", name: "Read", input: { file_path: "hello.py" } },
+  ];
+  const readAt = Date.now();
+  s.registry.appendClaudeRead(thread.id, { session: "s1", from: transcriptStart, entries, cursor: { ...transcriptStart, offset: 9 }, reset: false, readAt });
+
+  assert.deepEqual(await s.json(["conversation", thread.id]), { kind: "claude", session: "s1", entries, dropped: 0, readAt, working: false }, "--json prints the API's reply");
+  const transcript = [
+    "> Count the lines\n> of hello.py",
+    '[tool] Bash {"command":"wc -l hello.py"} (ok)',
+    '[tool] Bash {"command":"false"} (failed)',
+    "It has 1 line.",
+    '[task] completed: Agent "Count" finished',
+    "[error] The model failed",
+    "[turn] 72s",
+    '[record] mystery: {"type":"mystery"}',
+    "> [slash command] /compact",
+  ];
+  assert.equal((await s.nexus(["conversation", thread.id])).stdout, [...transcript, '[tool] Read {"file_path":"hello.py"} (no result)', "(queued) > and then deploy"].join("\n\n") + "\n");
+  s.registry.reportSession(node, { sequence: 1, pylon: thread.pylonId, time: Date.now(), event: { kind: "session.turn-started", session: "s1" } });
+  assert.equal((await s.nexus(["conversation", thread.id])).stdout, [...transcript, '[tool] Read {"file_path":"hello.py"} (running)', "(queued) > and then deploy", "(Claude is working)"].join("\n\n") + "\n");
+
+  let refusals = 2;
+  s.probeAnswers(async () => {
+    if (refusals-- > 0) throw Object.assign(new Error("rj-firebat: pylon-x is stopped, not running"), { code: "not-running" });
+    return { kind: "send-claude", outcome: "queued", herdrPane: "w1:p1", resumed: true };
+  });
+  s.commands.length = 0;
+  const queued = await s.nexus(["send", thread.id, "and", "then", '"deploy"', "--request-id", "msg:fixed"]);
+  assert.equal(queued.code, 0, queued.stderr);
+  assert.equal(queued.stdout, `Queued for Claude in ${thread.id}, which takes it at its next step. Its session was resumed to take it.\n`);
+  assert.deepEqual(s.commands, Array(3).fill({ kind: "send-claude", session: "s1", text: 'and then "deploy"', model: "claude-opus-5-5" }), "a paused pylon is woken and asked again until it runs");
+  assert.deepEqual(await s.json(["send", thread.id, "and", "then", '"deploy"', "--request-id", "msg:fixed"]), { claude: { session: "s1", outcome: "queued", resumed: true } });
+  assert.equal(s.commands.length, 3, "a resend under the same request ID is not typed again");
+  s.probeAnswers(async () => ({ kind: "send-claude", outcome: "sent", herdrPane: "w1:p1", resumed: false }));
+  assert.equal((await s.nexus(["send", thread.id, "go", "--steer"])).stdout, `Sent to Claude in ${thread.id}.\n`);
+  assert.deepEqual(s.fake.calls.filter(([call]) => call === "send"), [], "the harness is sent nothing");
+  assert.match((await s.nexus(["send", "--help"])).stdout, /typed into the Claude worker's session/);
 });

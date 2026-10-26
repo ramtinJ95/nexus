@@ -195,6 +195,26 @@ function recordVisit() {
   });
 }
 
+/**
+ * Sends a request that needs the pylon running, as the CLI's whenRunning does: the first try wakes a paused pylon,
+ * and a 409 is tried again once a second for up to 120 s, unless the thread is archived or deleted. `waiting` hears
+ * each refusal while it waits.
+ */
+async function whenRunning(thread, send, waiting = () => {}) {
+  const deadline = Date.now() + 120_000;
+  for (;;) {
+    try {
+      return await send();
+    } catch (err) {
+      if (err.status !== 409 || Date.now() >= deadline) throw err;
+      const detail = await api("GET", `/v1/threads/${thread}`);
+      if (detail.thread.status === "archived" || detail.thread.status === "deleted") throw err;
+      waiting(err, detail);
+    }
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+  }
+}
+
 const actions = {
   archive: (thread) => api("POST", `/v1/threads/${thread}/archive`),
   unarchive: (thread) => api("POST", `/v1/threads/${thread}/unarchive`),
@@ -204,21 +224,8 @@ const actions = {
   "retry-pylon": (thread) => api("POST", `/v1/threads/${thread}/pylon/retry`),
   // Publishes the port. The next refresh shows its preview, which links once the node serves it.
   "link-port": (thread, { port }) => api("POST", `/v1/threads/${thread}/previews`, { port: Number(port) }),
-  // As `nexus unpreview`: the first try wakes a paused pylon, and a 409 is tried again once a second until it runs,
-  // unless the thread is archived or deleted.
-  async unpublish(thread, { port }) {
-    const deadline = Date.now() + 120_000;
-    for (;;) {
-      try {
-        return await api("DELETE", `/v1/threads/${thread}/previews/${port}`, {});
-      } catch (err) {
-        if (err.status !== 409 || Date.now() >= deadline) throw err;
-        const { status } = (await api("GET", `/v1/threads/${thread}`)).thread;
-        if (status === "archived" || status === "deleted") throw err;
-      }
-      await new Promise((resolve) => setTimeout(resolve, 1000));
-    }
-  },
+  // As `nexus unpreview`.
+  unpublish: (thread, { port }) => whenRunning(thread, () => api("DELETE", `/v1/threads/${thread}/previews/${port}`, {})),
 };
 
 document.addEventListener("click", async (event) => {
@@ -241,6 +248,13 @@ document.addEventListener("click", async (event) => {
 // crypto.randomUUID needs a secure context, and the dashboard is plain HTTP on the tailnet.
 const newRequestId = () => `msg:${[...crypto.getRandomValues(new Uint8Array(16))].map((b) => b.toString(16).padStart(2, "0")).join("")}`;
 
+function showStatus(text) {
+  const el = document.getElementById("action-status");
+  if (el === null) return;
+  el.textContent = text ?? "";
+  el.hidden = text === null;
+}
+
 // The last message sent. Sending the same text again after a failure reuses its request ID, so a send whose
 // reply was lost is not posted twice. One send at a time, so a second one cannot take the first one's ID.
 let outgoing = null;
@@ -249,13 +263,21 @@ document.addEventListener("submit", async (event) => {
   event.preventDefault();
   if (outgoing?.inFlight) return;
   const form = event.target;
+  const thread = form.dataset.thread;
   const text = form.elements.text.value;
   if (outgoing?.text !== text) outgoing = { text, requestId: newRequestId() };
   outgoing.inFlight = true;
   form.querySelector("#send").disabled = true;
+  // A busy run queues the message as a follow-up, which is the API's default.
+  const { requestId } = outgoing;
+  const post = () => api("POST", `/v1/threads/${thread}/messages`, { text, requestId });
   try {
-    // A busy run queues the message as a follow-up, which is the API's default.
-    await api("POST", `/v1/threads/${form.dataset.thread}/messages`, { text, requestId: outgoing.requestId });
+    // A Claude worker's message is typed in its pylon, so it waits for a paused pylon to wake, under the same request
+    // ID, which the API types once however often it is asked.
+    await (form.dataset.claude === undefined ? post() : whenRunning(thread, post, (err, detail) => {
+      showStatus(detail.pylon.actualState === "running" ? `Not sent yet, trying again: ${err.message}` : "Waking the pylon. The message sends once Claude runs.");
+    }));
+    showStatus(null);
     outgoing = null;
     // The poll may have swapped in a new prompt box meanwhile, or none if the thread was archived. Text typed
     // since the send is the next message, so it stays.
@@ -265,8 +287,12 @@ document.addEventListener("submit", async (event) => {
     await refreshAfter();
     if (scroller !== null) scroller.scrollTop = scroller.scrollHeight;
   } catch (err) {
+    showStatus(null);
     outgoing.inFlight = false;
-    showError("action-error", new Error(`The message was not sent: ${err.message}`));
+    // A Claude worker's send that failed partway may have typed the message, so the API refuses its request ID again.
+    // The reader checks the conversation, and sending again is a new message.
+    if (err.status === 422) outgoing = null;
+    showError("action-error", err.status === 422 ? err : new Error(`The message was not sent: ${err.message}`));
   } finally {
     const send = document.getElementById("send");
     if (send !== null) send.disabled = false;
@@ -306,6 +332,29 @@ function updateStartHint() {
   const image = hint.dataset.image;
   const repo = project.dataset.scratch === undefined ? " and checks out " : " and starts an empty repository on ";
   hint.replaceChildren("Boots a pylon on ", tag("b", node), ...(image === "" ? [] : [" from image ", tag("code", image)]), repo, tag("code", branch), ".");
+}
+
+/**
+ * Shows the fields of the worker picked and disables the others', so the form sends none of them. A Claude worker's
+ * title is optional, as it defaults to the prompt's first line.
+ */
+function syncWorker(form) {
+  const claude = form.elements.worker.value === "claude";
+  form.querySelector("#start-claude-fields").hidden = !claude;
+  form.elements.claude.disabled = !claude;
+  form.elements.model.disabled = !claude;
+  form.elements.title.required = !claude;
+  form.elements.title.placeholder = claude ? "The prompt's first line" : "What should this thread do?";
+  form.querySelector("#start-title-label").textContent = claude ? "Title (optional)" : "Title";
+}
+document.addEventListener("change", (event) => {
+  if (event.target instanceof HTMLInputElement && event.target.name === "worker" && event.target.form?.matches("#start")) syncWorker(event.target.form);
+});
+
+/** As the CLI's titleOf: the first line that is not blank, cut to 80 characters. */
+function titleOf(prompt) {
+  const line = prompt.split("\n").find((l) => l.trim() !== "")?.trim() ?? prompt;
+  return line.length <= 80 ? line : `${line.slice(0, 80)}...`;
 }
 
 const projectRadios = () => [...document.querySelectorAll("#start input[name=project]")];
@@ -349,11 +398,13 @@ function startState() {
   const form = document.getElementById("start");
   if (form === null) return null;
   const project = form.querySelector("input[name=project]:checked")?.value ?? null;
-  return { form, project, title: form.elements.title.value, claude: form.elements.claude.value, model: form.elements.model.value, node: form.elements.node.value, branch: form.elements.branch.value };
+  return { form, project, worker: form.elements.worker.value, title: form.elements.title.value, claude: form.elements.claude.value, model: form.elements.model.value, node: form.elements.node.value, branch: form.elements.branch.value };
 }
 function restoreStart(saved) {
   const form = document.getElementById("start");
   if (saved === null || form === null || form === saved.form) return;
+  for (const radio of form.querySelectorAll("input[name=worker]")) radio.checked = radio.value === saved.worker;
+  syncWorker(form);
   form.elements.title.value = saved.title;
   form.elements.claude.value = saved.claude;
   form.elements.model.value = saved.model;
@@ -371,8 +422,10 @@ document.addEventListener("submit", async (event) => {
   if (starting) return;
   starting = true;
   const form = event.target;
-  // Empty optional fields mean the project's defaults, which the API applies when the field is absent.
-  const body = Object.fromEntries([...new FormData(form)].filter(([, value]) => value !== ""));
+  // Empty optional fields mean the project's defaults, which the API applies when the field is absent. The worker
+  // picked shows in which fields are sent.
+  const body = Object.fromEntries([...new FormData(form)].filter(([key, value]) => value !== "" && key !== "worker"));
+  if (body.claude !== undefined && body.title === undefined) body.title = titleOf(body.claude);
   form.querySelector("button[type=submit]").disabled = true;
   try {
     const thread = await api("POST", "/v1/threads", body);

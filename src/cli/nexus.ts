@@ -16,7 +16,9 @@ import { z } from "zod";
 import type { ImageContent, Message, TextContent } from "@earendil-works/pi-ai";
 import type { ConversationView, EntryRecord, InboxState, LiveState } from "@earendil-works/pi-durable";
 import type { ListeningPort, NodeSummary, OpenedSession, ThreadDetail, ThreadRow, ViewFrame } from "../control/api.ts";
-import type { Preview, Thread } from "../control/registry.ts";
+import type { ClaudeSent, Preview, Thread } from "../control/registry.ts";
+import type { ClaudeConversation, PromptSource } from "../claude-transcript.ts";
+import { queuedOf } from "../control/claude-conversation.ts";
 import type { Changes, Diff, Listing } from "../checkout-files.ts";
 import type { Project, SecretGrant } from "../project.ts";
 import type { ActualState } from "../reconcile.ts";
@@ -24,7 +26,7 @@ import type { WebSocket } from "ws";
 import { attachTerminal, processTty } from "./attach.ts";
 import { call, CliError, exitCodes, follow, upgrade, type Endpoint, type HostPort } from "./transport.ts";
 
-const version = "0.16.1";
+const version = "0.17.0";
 const defaults = { url: "http://rj-firebat.tailc817d3.ts.net:7470", socks: "localhost:1055" };
 const configFile = () => join(homedir(), ".config", "nexus", "cli.json");
 
@@ -39,12 +41,13 @@ const usage = `nexus ${version}, the Nexus control plane from this Mac
   nexus files <thread> [path]                  a directory of the pylon's checkout
   nexus changes <thread> [--uncommitted | --turn]       the files changed since boot, HEAD, or the latest turn
   nexus diff <thread> [path...] [--uncommitted | --turn]
-  nexus conversation <thread>                  the agent's transcript
+  nexus conversation <thread>                  the agent's transcript, or the Claude worker's
   nexus session open <thread> [--harness claude-code|pi|shell] [--title T]
   nexus session close <thread> <pane|id>       a session in no pane by its ID, which \`nexus show\` gives
   nexus attach <thread>                        this terminal on the pylon's Herdr sessions, through the control plane
   nexus start --project P [--title T] [--message M | --claude PROMPT [--model ID]] [--node N] [--branch B] [--commit C]
   nexus send <thread> <text...> [--steer] [--request-id ID]
+    a message to the agent, or typed into the Claude worker's session, which waits for a paused pylon to wake
   nexus watch <thread> [--interval MS]
   nexus seen <thread> [--unread]
   nexus abort|retry|retry-pylon|wake <thread>
@@ -161,6 +164,42 @@ function conversationText(view: ConversationView): string {
   return parts.length === 0 ? "No messages yet." : parts.join("\n\n");
 }
 
+/** How a prompt's first line names who it came from. A person's is not named. */
+const promptLabel: Record<PromptSource, string> = { person: "", command: "[slash command] ", other: "[Claude Code] " };
+
+/**
+ * A Claude worker's transcript: each prompt, reply, notice and task, and each tool call on one line with how it
+ * ended, then the messages Claude Code queued and whether Claude works.
+ */
+function claudeText(c: ClaudeConversation): string {
+  const results = new Map(c.entries.flatMap((e) => e.kind === "result" ? [[e.toolUseId, e] as const] : []));
+  const lastTurn = c.entries.findLastIndex((e) => e.kind === "turn");
+  const lines = c.entries.flatMap((e, i): string[] => {
+    switch (e.kind) {
+      case "prompt": return [`> ${promptLabel[e.from]}${e.text.split("\n").join("\n> ")}`];
+      case "reply": return [e.text];
+      case "tool": {
+        const result = results.get(e.id);
+        const how = result !== undefined ? (result.isError ? "failed" : "ok") : c.working && i > lastTurn ? "running" : "no result";
+        return [`[tool] ${e.name} ${clip(JSON.stringify(e.input), 200)} (${how})`];
+      }
+      case "task": return [`[task] ${e.status}: ${e.summary}`];
+      case "notice": return [`[${e.tone === "error" ? "error" : "notice"}] ${e.text}`];
+      case "turn": return [`[turn] ${Math.round(e.durationMs / 1000)}s`];
+      case "record": return [`[record] ${e.type}: ${e.summary}`];
+      case "result": case "queue": return [];
+    }
+  });
+  const parts = [
+    ...c.dropped === 0 ? [] : [`(${c.dropped} older entries are not kept)`],
+    ...lines,
+    ...queuedOf(c.entries).map((q) => `(queued) > ${q.text ?? ""}`),
+    ...c.working ? ["(Claude is working)"] : [],
+  ];
+  if (parts.length > 0) return parts.join("\n\n");
+  return c.readAt === null ? "Claude's transcript has not been read yet. It is read while the pylon runs." : "Claude has not written a transcript yet.";
+}
+
 function detailText({ thread: t, pylon: p, agent, sessions, previews, ports, outputs, prWatch, pullRequests, claudeWorker, attention }: ThreadDetail): string {
   const observed = p.observedAt === null ? "" : `, observed ${ago(Date.parse(p.observedAt))}`;
   return [
@@ -275,8 +314,8 @@ const threadRow = (t: ThreadRow) => [t.id, t.status, t.agentTurnRunning ? "worki
 /** The first line of a message, as the title of the thread it starts. */
 const titleOf = (message: string) => clip(message.split("\n").find((line) => line.trim() !== "")?.trim() ?? message, 80);
 
-async function send(api: Api, id: string, text: string, steer: boolean, requestId: string): Promise<{ submission: number }> {
-  return await api("POST", `${thread(id)}/messages`, { text, requestId, mode: steer ? "steer" : "followUp" }) as { submission: number };
+async function send(api: Api, id: string, text: string, steer: boolean, requestId: string): Promise<{ submission: number } | { claude: ClaudeSent }> {
+  return await api("POST", `${thread(id)}/messages`, { text, requestId, mode: steer ? "steer" : "followUp" }) as { submission: number } | { claude: ClaudeSent };
 }
 
 /** A thread action whose route answers 204. Its JSON is null. */
@@ -633,8 +672,8 @@ const commands: Readonly<Record<string, Command>> = {
   conversation: {
     args: [1, 1],
     async run(api, [id]) {
-      const view = await api("GET", `${thread(id!)}/conversation`) as ConversationView;
-      return { json: view, text: conversationText(view) };
+      const view = await api("GET", `${thread(id!)}/conversation`) as ConversationView | ClaudeConversation;
+      return { json: view, text: (view as Partial<ClaudeConversation>).kind === "claude" ? claudeText(view as ClaudeConversation) : conversationText(view as ConversationView) };
     },
   },
   "session open": {
@@ -692,7 +731,15 @@ const commands: Readonly<Record<string, Command>> = {
     async run(api, [id, ...words], v) {
       const steer = v.steer === true;
       // The API treats a resend with the same request ID as the same message, so a caller that retries passes one.
-      const reply = await send(api, id!, words.join(" "), steer, str(v, "request-id") ?? `msg:${randomUUID()}`);
+      const requestId = str(v, "request-id") ?? `msg:${randomUUID()}`;
+      const message = () => send(api, id!, words.join(" "), steer, requestId);
+      // A Claude worker's message is typed in its pylon, so its send waits for a paused pylon to wake.
+      const claude = (await api("GET", thread(id!)) as ThreadDetail).claudeWorker !== undefined;
+      const reply = claude ? await whenRunning(api, id!, message, "the message was not sent") : await message();
+      if ("claude" in reply) {
+        const resumed = reply.claude.resumed ? " Its session was resumed to take it." : "";
+        return { json: reply, text: reply.claude.outcome === "queued" ? `Queued for Claude in ${id}, which takes it at its next step.${resumed}` : `Sent to Claude in ${id}.${resumed}` };
+      }
       return { json: reply, text: steer ? `Sent to ${id}, to join the current run after its tool round.` : `Sent to ${id}.` };
     },
   },
