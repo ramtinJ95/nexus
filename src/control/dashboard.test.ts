@@ -210,6 +210,19 @@ test("the sidebar lists every project's threads with their state, folds the arch
   assert.match(textOf(page.split('id="side-nodes"')[1]!.split("</div>")[0]!), /rj-firebat/);
 });
 
+test("a waiting session's message replaces the waiting label, such as a background command still running at the cap", async (t) => {
+  const s = await seeded(t);
+  const [quiet, held] = await Promise.all(["Asks", "Serves"].map((title) => s.start("acme", title)));
+  let sequence = 0;
+  for (const [thread, message] of [[quiet!, undefined], [held!, "A background command was still running after 2 hours"]] as const) {
+    s.registry.reportSession(node, { sequence: ++sequence, pylon: thread.pylonId, time: Date.now(), event: { kind: "session.turn-started", session: "c1" } });
+    s.registry.reportSession(node, { sequence: ++sequence, pylon: thread.pylonId, time: Date.now(), event: { kind: "session.waiting", session: "c1", ...(message === undefined ? {} : { message }) } });
+  }
+  const page = (await s.call("GET", `/threads/${held!.id}`)).text;
+  assert.match(page, /A background command was still running after 2 hours/);
+  assert.match((await s.call("GET", `/threads/${quiet!.id}`)).text, /waiting for input/);
+});
+
 test("rows of threads that need the person stay bright, and the rest dim unless open", async (t) => {
   const s = await seeded(t);
   const [failed, parked, reply, working, waiting, idle, open] = await Promise.all(["Failed", "Parked", "Reply", "Working", "Waiting", "Idle", "Open"].map((title) => s.start("acme", title)));

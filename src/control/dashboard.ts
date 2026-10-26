@@ -173,7 +173,7 @@ function threadState({ thread: t, pylon, attention }: ThreadDetail): [label: str
   if (attention === "decision") return ["needs your decision", "bad"];
   if (attention === "parked") return ["parked", "bad"];
   if (attention === "reply") return ["new reply", "ok"];
-  if (attention === "waiting") return ["waiting for input", "idle"];
+  if (attention === "waiting") return [t.sessionWaitingMessage ?? "waiting for input", "idle"];
   if (attention === "working") return ["agent working", "work"];
   if (t.status === "archived" || t.status === "deleted") return [t.status, "muted"];
   return actualBadge[pylon.actualState];
