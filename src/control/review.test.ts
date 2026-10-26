@@ -7,10 +7,10 @@ import { openRegistry, type Thread, type ThreadId } from "./registry.ts";
 import { newPylonRecord } from "../tick.ts";
 import type { LiveHash, NodeName, PylonId, TailnetNodeId } from "../protocol.ts";
 import type { ProjectId, SecretGrant } from "../project.ts";
-import type { ChangedFile, MergeResult, PrSnapshot } from "./github.ts";
+import type { ChangedFile, LabelResult, MergeResult, PrSnapshot } from "./github.ts";
 import type { AutomatedMessage } from "./inbox.ts";
 import { landingHolds } from "./policy.ts";
-import { reviewLoop, reviewPrefix, type Review } from "./review.ts";
+import { humanLabel, reviewLoop, reviewPrefix, type Review } from "./review.ts";
 import { checkCaller, type CheckState } from "./gate.ts";
 import type { StartRequest } from "./threads.ts";
 
@@ -49,6 +49,9 @@ function fixture(t: import("node:test").TestContext, options: { path?: string; r
   let files: ChangedFile[] = [{ path: "src/cache.ts", previous: null, patch: "@@ -0,0 +1 @@\n+export {};" }];
   const merges: string[] = [];
   let mergeAnswer: () => MergeResult = () => ({ kind: "merged", commit: merged });
+  const labels = new Set<string>();
+  const labelCalls: string[] = [];
+  let labelAnswer: (name: string) => LabelResult = (name) => { labels.add(name); return { kind: "labelled" }; };
   let check: CheckState = { kind: "done", passed: true, output: "ok" };
   const checkThreads: ThreadId[] = [];
   const discarded: ThreadId[] = [];
@@ -59,6 +62,7 @@ function fixture(t: import("node:test").TestContext, options: { path?: string; r
       find: async () => [7],
       poll: async () => structuredClone(snapshot),
       files: async () => files,
+      async label(_, __, name) { labelCalls.push(name); return labelAnswer(name); },
       async merge(_, __, sha) { merges.push(sha); const answer = mergeAnswer(); if (answer.kind === "merged") snapshot = { ...snapshot, pr: { ...snapshot.pr, state: "merged" }, detail: { ...snapshot.detail, mergeCommit: answer.commit } }; return answer; },
     },
     inbox: async (target, message) => { if (delivery === "delivered") sent.push({ to: target.id, message }); return delivery; },
@@ -84,6 +88,7 @@ function fixture(t: import("node:test").TestContext, options: { path?: string; r
     get snapshot() { return snapshot; }, set snapshot(s) { snapshot = s; },
     set files(f: ChangedFile[]) { files = f; },
     set mergeAnswer(a: () => MergeResult) { mergeAnswer = a; },
+    labels, labelCalls, set labelAnswer(a: (name: string) => LabelResult) { labelAnswer = a; },
     set check(c: CheckState) { check = c; },
     checkThreads, discarded,
     set delivery(d: "delivered" | "later") { delivery = d; },
@@ -95,13 +100,14 @@ function fixture(t: import("node:test").TestContext, options: { path?: string; r
 const archive = (registry: ReturnType<typeof openRegistry>, id: ThreadId) => registry.setThreadStatus(id, "archived");
 const verdict = (r: Review, fields: Record<string, unknown>) => `Done.\n\`\`\`nexus-review\n${JSON.stringify({ token: r.expect, verdict: "approve", findings: [], reserved: [], notCheckedLive: "the cache under real traffic", ...fields })}\n\`\`\``;
 const answers = (r: Review, list: unknown[]) => `Fixed.\n\`\`\`nexus-review-answers\n${JSON.stringify({ token: r.expect, answers: list })}\n\`\`\``;
-const serious = { id: "F1", severity: "serious", where: "src/cache.ts:1", summary: "The cache never expires", detail: "Add a TTL." };
+const serious = { id: "F1", priority: "P1", where: "src/cache.ts:1", summary: "The cache never expires", detail: "Add a TTL." };
 
 test("a Claude builder's PR gets a harness reviewer, and findings, fixes and new commits go round until it approves", async (t) => {
   const f = fixture(t);
   const loop = f.loop();
   const started = await loop.start(f.builder, { land: null });
   assert.deepEqual(started.models, { builder: "claude-opus-5-5", reviewer: "gpt-6-astra" }, "another model family than the builder's");
+  assert.equal(started.maxRounds, 5, "a review runs 5 rounds unless asked for fewer");
   assert.equal(f.started[0]!.claude, undefined, "the reviewer is a harness thread");
   assert.equal(f.started[0]!.branch, "feature");
   await loop.poll();
@@ -118,7 +124,7 @@ test("a Claude builder's PR gets a harness reviewer, and findings, fixes and new
   await loop.poll();
   assert.equal(f.review().phase.kind, "fixing");
   assert.equal(f.sent[1]!.to, f.builder);
-  assert.match(f.sent[1]!.message.text, /F1 \(serious\) src\/cache.ts:1: The cache never expires\n {4}Add a TTL\./);
+  assert.match(f.sent[1]!.message.text, /F1 \(P1\) src\/cache.ts:1: The cache never expires\n {4}Add a TTL\./);
   assert.match(f.sent[1]!.message.text, /```nexus-review-answers/);
 
   f.reply(f.builder, answers(f.review(), [{ id: "F1", action: "fixed", reason: "Added a 5-minute TTL." }]));
@@ -149,7 +155,7 @@ test("rounds that run out, and agents that never answer in the block, end with t
   const reviewer = f.review().reviewer;
   f.reply(reviewer, verdict(f.review(), { verdict: "changes", findings: [serious] }));
   await loop.poll();
-  assert.deepEqual(f.review().phase, { kind: "needs-person", reasons: ["The reviewer still requests changes after 1 rounds, the most this review allows."] });
+  assert.deepEqual(f.review().phase, { kind: "needs-person", reasons: ["The reviewer still requests changes after 1 rounds, the most this review allows."], label: { state: "added" } });
   assert.equal(f.registry.threads().find((th) => th.id === f.builder) && (f.registry.events("0", { kinds: ["attention.changed"], thread: f.builder }).at(-1)?.payload.attention), "decision");
 
   const g = fixture(t);
@@ -169,6 +175,8 @@ test("rounds that run out, and agents that never answer in the block, end with t
   assert.equal(g.review().phase.kind, "needs-person");
   await silent.poll();
   assert.equal(g.sent.length, 3, "a reply in the old turn's shape is not answered twice");
+  assert.equal((g.review().phase as { label?: unknown }).label, undefined, "only rounds that ran out label the PR");
+  assert.deepEqual(g.labelCalls, []);
 });
 
 test("a message the inbox cannot deliver yet is sent again under the same request ID, never twice", async (t) => {
@@ -288,12 +296,12 @@ test("the policy names every condition that fails and every reserved case, and h
   ] });
 });
 
-test("the policy's review conditions: another model, an approval with nothing serious open, and every finding answered", () => {
+test("the policy's review conditions: another model, an approval with no P0 to P2 open, and every blocking finding answered", () => {
   const round = { head: head1, verdict: { token: "x", verdict: "approve" as const, findings: [], reserved: [], notCheckedLive: "the cache under real traffic" }, check: { passed: true, output: "" }, answers: null };
   const review: Review = {
     id: "rv-1", builder: "th-b" as ThreadId, reviewer: "th-r" as ThreadId, pr: { repo: "acme/shop", number: 7, url: "", title: "", branch: "f" }, models: { builder: "m", reviewer: "m" }, reviewerKind: "harness",
     maxRounds: 3, land: null, merged: null, expect: "rv-1:t", sent: 1, phase: { kind: "checking", startedAt: 0, thread: null }, outbox: null, since: 0, nudges: 0, startedAt: 0,
-    rounds: [{ ...round, verdict: { ...round.verdict, verdict: "changes", findings: [{ id: "F1", severity: "minor", summary: "s" }, { id: "F2", severity: "minor", summary: "s" }] }, answers: [{ id: "F1", action: "rejected", reason: " " }] }, round],
+    rounds: [{ ...round, verdict: { ...round.verdict, verdict: "changes", findings: [{ id: "F1", priority: "P2", summary: "s" }, { id: "F2", priority: "P2", summary: "s" }, { id: "N1", priority: "P3", summary: "s" }] }, answers: [{ id: "F1", action: "rejected", reason: " " }] }, round],
   };
   const pr: PrSnapshot = { pr: { repo: "acme/shop", number: 7, title: "", url: "", state: "open", checks: "pending", review: "none", conflict: true }, detail: { head: head2, branch: "f", base: "main", body: "Not checked live: the cache under real traffic.", mergeCommit: null }, failures: [], comments: [] };
   assert.deepEqual(landingHolds({ review, pr, files: [], nexus: false }), [
@@ -306,38 +314,40 @@ test("the policy's review conditions: another model, an approval with nothing se
   ]);
 });
 
-test("a check that fails after minor findings were answered reaches the builder as a new request, which old answers cannot satisfy", async (t) => {
+test("a check that fails after an approval with P3 notes asks the builder to answer only the check, under a new token", async (t) => {
   const f = fixture(t);
+  f.check = { kind: "done", passed: false, output: "src/cache.ts(1,1): error TS2322" };
   const loop = f.loop();
   await loop.start(f.builder, { land: null });
   await loop.poll();
-  f.reply(f.review().reviewer, verdict(f.review(), { findings: [{ id: "M1", severity: "minor", summary: "Name the constant" }] }));
-  await loop.poll();
-  assert.equal(f.review().phase.kind, "fixing", "an approval with a minor finding still asks the builder to answer it");
-  const first = f.review().expect;
-  f.check = { kind: "done", passed: false, output: "src/cache.ts(1,1): error TS2322" };
-  f.reply(f.builder, answers(f.review(), [{ id: "M1", action: "rejected", reason: "The name is the convention here." }]));
+  f.reply(f.review().reviewer, verdict(f.review(), { findings: [{ id: "M1", priority: "P3", summary: "Name the constant" }] }));
   await loop.poll();
   assert.equal(f.review().phase.kind, "fixing");
+  const toBuilder = f.sent.filter((s) => s.to === f.builder).map((s) => s.message.text);
+  assert.equal(toBuilder.length, 2, "the approval's notes, then the check's failure");
   const ids = f.sent.map((s) => s.message.id);
   assert.equal(new Set(ids).size, ids.length, "every message has its own request ID");
-  assert.notEqual(f.review().expect, first, "the check's findings ask for a new token");
-  assert.match(f.sent.at(-1)!.message.text, /CHECK \(serious\) \.nexus\/check: \.nexus\/check failed at 1{40}\n {4}src\/cache\.ts\(1,1\): error TS2322/);
-  f.tick(120_000);
+  assert.match(toBuilder[1]!, /CHECK \(P0\) \.nexus\/check: \.nexus\/check failed at 1{40}\n {4}src\/cache\.ts\(1,1\): error TS2322/);
+  assert.doesNotMatch(toBuilder[1]!, /M1/, "the notes came with the approval already");
+  assert.ok(toBuilder[1]!.includes(f.review().expect));
+  f.snapshot = { ...f.snapshot, detail: { ...f.snapshot.detail, head: head2 } };
+  f.reply(f.builder, answers(f.review(), [{ id: "CHECK", action: "fixed", reason: "Fixed the type." }]));
   await loop.poll();
-  assert.equal(f.sent.length, ids.length, "the builder's earlier answers do not answer the check");
-  assert.equal(f.review().nudges, 0);
+  assert.equal(f.review().phase.kind, "reviewing", "the check is the only finding to answer");
+  assert.equal(f.review().rounds.at(-1)!.head, head2);
 });
 
 test("commits pushed with answers that fixed nothing still get another round", async (t) => {
   const f = fixture(t);
+  f.check = { kind: "done", passed: false, output: "flaky" };
   const loop = f.loop();
   await loop.start(f.builder, { land: null });
   await loop.poll();
-  f.reply(f.review().reviewer, verdict(f.review(), { findings: [{ id: "M1", severity: "minor", summary: "Name the constant" }] }));
+  f.reply(f.review().reviewer, verdict(f.review(), {}));
   await loop.poll();
+  assert.equal(f.review().phase.kind, "fixing");
   f.snapshot = { ...f.snapshot, detail: { ...f.snapshot.detail, head: head2 } };
-  f.reply(f.builder, answers(f.review(), [{ id: "M1", action: "rejected", reason: "The name is the convention here." }]));
+  f.reply(f.builder, answers(f.review(), [{ id: "CHECK", action: "rejected", reason: "The check is flaky." }]));
   await loop.poll();
   assert.equal(f.review().phase.kind, "reviewing");
   assert.equal(f.review().rounds.at(-1)!.head, head2);
@@ -402,13 +412,16 @@ test("a check that fails again at a head where it failed before goes to the pers
   assert.deepEqual(f.review().phase, { kind: "needs-person", reasons: [`.nexus/check failed again at ${head1}, where it failed before.`, "The check's output:\n1 test failed"] });
 });
 
-test("a reviewer's repeat approval of an unchanged head costs no round", async (t) => {
+test("in a review stored before priorities, a reviewer's repeat approval of an unchanged head costs no round", async (t) => {
   const f = fixture(t);
   const loop = f.loop();
   await loop.start(f.builder, { land: null, rounds: 2 });
   await loop.poll();
   f.reply(f.review().reviewer, verdict(f.review(), { findings: [serious] }));
   await loop.poll();
+  // Before priorities, an approval with a serious finding was stored as an approval.
+  const stored = f.review();
+  f.registry.saveReview({ ...stored, rounds: [{ ...stored.rounds[0]!, verdict: { ...stored.rounds[0]!.verdict!, verdict: "approve" } }] });
   f.reply(f.builder, answers(f.review(), [{ id: "F1", action: "rejected", reason: "The cache is rebuilt on every deploy." }]));
   await loop.poll();
   assert.equal(f.review().rounds[1]!.head, head1);
@@ -506,6 +519,8 @@ test("a Claude reviewer's approval does not land, and goes to the person", async
   assert.deepEqual(f.merges, []);
   assert.equal(f.review().phase.kind, "needs-person");
   assert.match((f.review().phase as { reasons: string[] }).reasons.join("\n"), /A Claude reviewer approved it/);
+  assert.equal((f.review().phase as { label?: unknown }).label, undefined, "a held approval is not a review that ran out of rounds");
+  assert.deepEqual(f.labelCalls, []);
 });
 
 test("every merge attempt checks the policy again, so checks that fail after approval, or across a restart, hold it", async (t) => {
@@ -593,4 +608,149 @@ test("this review's own merge, recorded before the merge call, deploys after a c
   assert.deepEqual(f.merges, [head1]);
   assert.equal(f.review().phase.kind, "deploying");
   assert.equal(f.registry.desiredRelease()?.commit, merged);
+});
+
+const labelStates = (f: ReturnType<typeof fixture>) => f.registry.events("0", { kinds: ["review.changed"] }).map((e) => (e.payload.phase as { label?: { state: string } }).label?.state).filter((s) => s !== undefined);
+
+async function labelsOnceAcrossRetries(f: ReturnType<typeof fixture>, loop: ReturnType<ReturnType<typeof fixture>["loop"]>, exhaust: () => void, ...reasons: string[]) {
+  f.labelAnswer = (name) => { f.labels.add(name); throw new Error("connection reset"); };
+  exhaust();
+  await loop.poll();
+  assert.deepEqual(f.review().phase, { kind: "needs-person", reasons, label: { state: "adding" } }, "a failed call leaves the label to add at the next pass");
+  f.labelAnswer = (name) => { f.labels.add(name); return { kind: "labelled" }; };
+  await loop.poll();
+  await loop.poll();
+  assert.deepEqual(f.review().phase, { kind: "needs-person", reasons, label: { state: "added" } });
+  assert.deepEqual([...f.labels], [humanLabel]);
+  assert.equal(f.labelCalls.length, 2, "once more after the failed call, then never again");
+  assert.deepEqual(labelStates(f), ["adding", "added"]);
+}
+
+test("a reviewer that still requests changes after the last round gets the PR labelled for the person, once across retries", async (t) => {
+  const f = fixture(t);
+  const loop = f.loop();
+  await loop.start(f.builder, { land: null, rounds: 1 });
+  await loop.poll();
+  await labelsOnceAcrossRetries(f, loop, () => f.reply(f.review().reviewer, verdict(f.review(), { verdict: "changes", findings: [serious] })),
+    "The reviewer still requests changes after 1 rounds, the most this review allows.");
+});
+
+test("a check that fails after the last round gets the PR labelled for the person, once across retries", async (t) => {
+  const f = fixture(t);
+  f.check = { kind: "done", passed: false, output: "error" };
+  const loop = f.loop();
+  await loop.start(f.builder, { land: null, rounds: 1 });
+  await loop.poll();
+  await labelsOnceAcrossRetries(f, loop, () => f.reply(f.review().reviewer, verdict(f.review(), {})), `.nexus/check failed at ${head1} after the last round this review allows.`, "The check's output:\nerror");
+});
+
+/** A review saved before the cap and priorities: 10 rounds allowed, findings with a severity, and 5 rounds run. */
+function legacyReview(f: ReturnType<typeof fixture>, phase: "reviewing" | "fixing"): void {
+  const r = f.review();
+  const old = { id: "F1", severity: "serious", where: "src/cache.ts:1", summary: "The cache never expires" };
+  const round = (head: string) => ({ head, verdict: { token: "x", verdict: "changes", findings: [old, { id: "M1", severity: "minor", summary: "Name the constant" }], reserved: [], notCheckedLive: null }, check: null, answers: [{ id: "F1", action: "fixed", reason: "TTL" }] });
+  const last = phase === "reviewing" ? { head: head1, verdict: null, check: null, answers: null } : { ...round(head1), answers: null };
+  f.registry.saveReview({ ...r, maxRounds: 10, phase: { kind: phase }, rounds: [round("a".repeat(40)), round("b".repeat(40)), round("c".repeat(40)), round("d".repeat(40)), last] } as never as Review);
+}
+
+test("a review stored with more rounds reads back capped at 5 with priorities, and stops at round 5 with the label", async (t) => {
+  const f = fixture(t);
+  const loop = f.loop();
+  await loop.start(f.builder, { land: null });
+  await loop.poll();
+  legacyReview(f, "reviewing");
+  assert.equal(f.review().maxRounds, 5);
+  assert.deepEqual(f.review().rounds[0]!.verdict!.findings.map((x) => [x.id, x.priority]), [["F1", "P1"], ["M1", "P3"]], "serious reads as P1 and minor as P3");
+  assert.equal("severity" in f.review().rounds[0]!.verdict!.findings[0]!, false);
+  f.reply(f.review().reviewer, verdict(f.review(), { verdict: "changes", findings: [serious] }));
+  await loop.poll();
+  assert.deepEqual(f.review().phase, { kind: "needs-person", reasons: ["The reviewer still requests changes after 5 rounds, the most this review allows."], label: { state: "added" } });
+  assert.deepEqual(f.labelCalls, [humanLabel]);
+});
+
+test("a builder that pushes fixes after the last round gets the PR labelled for the person, once across retries", async (t) => {
+  const f = fixture(t);
+  const loop = f.loop();
+  await loop.start(f.builder, { land: null });
+  await loop.poll();
+  legacyReview(f, "fixing");
+  await labelsOnceAcrossRetries(f, loop, () => {
+    f.snapshot = { ...f.snapshot, detail: { ...f.snapshot.detail, head: head2 } };
+    f.reply(f.builder, answers(f.review(), [{ id: "F1", action: "fixed", reason: "Added a TTL." }]));
+  }, "The builder pushed fixes after round 5, the last this review allows, so they are unreviewed.");
+});
+
+test("a token that cannot label tells the person why, and the loop does not try again", async (t) => {
+  const f = fixture(t);
+  f.labelAnswer = () => ({ kind: "denied", message: "GitHub answered 403: Resource not accessible by personal access token" });
+  const loop = f.loop();
+  await loop.start(f.builder, { land: null, rounds: 1 });
+  await loop.poll();
+  f.reply(f.review().reviewer, verdict(f.review(), { verdict: "changes", findings: [serious] }));
+  await loop.poll();
+  const phase = { kind: "needs-person", reasons: [
+    "The reviewer still requests changes after 1 rounds, the most this review allows.",
+    `Nexus could not add the label "needs human review" to pull request #7 (GitHub answered 403: Resource not accessible by personal access token). Labelling needs a token that may write issues or pull requests, which only the person can grant.`,
+  ], label: { state: "failed", why: "GitHub answered 403: Resource not accessible by personal access token" } };
+  assert.deepEqual(f.review().phase, phase);
+  assert.deepEqual(f.registry.events("0", { kinds: ["review.changed"] }).at(-1)!.payload.phase, phase, "the event log says the label could not be added");
+  await loop.poll();
+  await loop.poll();
+  assert.equal(f.labelCalls.length, 1);
+  assert.deepEqual(f.labels, new Set());
+});
+
+test("an approval with only P3 findings goes straight to the check, sending the builder its notes with nothing to answer", async (t) => {
+  const f = fixture(t);
+  const loop = f.loop();
+  await loop.start(f.builder, { land: null });
+  await loop.poll();
+  f.reply(f.review().reviewer, verdict(f.review(), { findings: [{ id: "N1", priority: "P3", where: "src/cache.ts:1", summary: "Name the constant" }] }));
+  await loop.poll();
+  assert.deepEqual(f.review().phase, { kind: "approved" });
+  assert.equal(f.review().rounds.length, 1);
+  const toBuilder = f.sent.filter((s) => s.to === f.builder).map((s) => s.message.text);
+  assert.equal(toBuilder.length, 1);
+  assert.ok(toBuilder[0]!.startsWith(reviewPrefix));
+  assert.match(toBuilder[0]!, new RegExp(`approved pull request #7 \\(.*\\) at ${head1} in round 1`));
+  assert.match(toBuilder[0]!, /N1 \(P3\) src\/cache\.ts:1: Name the constant/);
+  assert.match(toBuilder[0]!, /Do not push to this pull request's branch/);
+  assert.doesNotMatch(toBuilder[0]!, /nexus-review-answers/);
+  assert.deepEqual(f.registry.events("0", { kinds: ["review.changed"] }).map((e) => (e.payload.phase as { kind: string }).kind), ["reviewing", "checking", "approved"], "no fixing round");
+});
+
+test("the findings decide the verdict: changes with only P3 findings is an approval, and an approval with a P2 finding requests changes", async (t) => {
+  const f = fixture(t);
+  const loop = f.loop();
+  await loop.start(f.builder, { land: null });
+  await loop.poll();
+  f.reply(f.review().reviewer, verdict(f.review(), { verdict: "changes", findings: [{ id: "N1", priority: "P3", summary: "Name the constant" }] }));
+  await loop.poll();
+  assert.deepEqual(f.review().phase, { kind: "approved" });
+
+  const g = fixture(t);
+  const other = g.loop();
+  await other.start(g.builder, { land: null });
+  await other.poll();
+  g.reply(g.review().reviewer, verdict(g.review(), { findings: [{ id: "T1", priority: "P2", summary: "No test for the expiry" }] }));
+  await other.poll();
+  assert.equal(g.review().phase.kind, "fixing");
+  assert.equal(g.review().rounds[0]!.verdict!.verdict, "changes");
+});
+
+test("a reviewer's verdict in the old severity shape still reads: serious blocks as P1, minor is a P3 note", async (t) => {
+  const f = fixture(t);
+  const loop = f.loop();
+  await loop.start(f.builder, { land: null });
+  await loop.poll();
+  f.reply(f.review().reviewer, verdict(f.review(), { verdict: "changes", findings: [{ id: "F1", severity: "serious", summary: "The cache never expires" }, { id: "M1", severity: "minor", summary: "Name the constant" }] }));
+  await loop.poll();
+  assert.equal(f.review().phase.kind, "fixing");
+  const text = f.sent.at(-1)!.message.text;
+  assert.match(text, /F1 \(P1\): The cache never expires\n/);
+  assert.match(text, /These P3 notes do not block and need no answer[^\n]*\n\nM1 \(P3\): Name the constant/);
+  f.snapshot = { ...f.snapshot, detail: { ...f.snapshot.detail, head: head2 } };
+  f.reply(f.builder, answers(f.review(), [{ id: "F1", action: "fixed", reason: "Added a TTL." }]));
+  await loop.poll();
+  assert.equal(f.review().phase.kind, "reviewing", "the P3 note needs no answer");
 });

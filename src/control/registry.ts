@@ -20,7 +20,7 @@ import type { Project, ProjectId, SessionHarness } from "../project.ts";
 import type { BuildingTemplate, ImageId, ImageManifest, TemplateId, TemplateRecord, ThreadSetup } from "../images.ts";
 import type { PylonRecord } from "../tick.ts";
 import type { ImageOperation } from "./image-rollout.ts";
-import { needsPerson, reviewerCaller, type Review } from "./review.ts";
+import { needsPerson, reviewerCaller, storedReview, type Review } from "./review.ts";
 import { claudeTurn } from "../../images/pylon/nexus-turn.ts";
 import { maxEntries, transcriptStart, usageLimitStop, type ClaudeEntry, type TranscriptCursor } from "../claude-transcript.ts";
 
@@ -693,18 +693,20 @@ export function openRegistry(path: string, clock = Date.now) {
     eventBatch,
     events: (since = "0", filter: EventFilter = {}) => eventBatch(since, filter).events,
     review(builder: ThreadId): Review | null {
-      return jsonOrNull<Review>(db.prepare("SELECT record FROM reviews WHERE builder = ?").get(builder)?.record ?? null);
+      const record = jsonOrNull<Review>(db.prepare("SELECT record FROM reviews WHERE builder = ?").get(builder)?.record ?? null);
+      return record === null ? null : storedReview(record);
     },
-    reviews: (): Review[] => db.prepare("SELECT record FROM reviews ORDER BY builder").all().map((r) => json<Review>(r.record)),
+    reviews: (): Review[] => db.prepare("SELECT record FROM reviews ORDER BY builder").all().map((r) => storedReview(json<Review>(r.record))),
     /** A thread a review started, whether or not a later review replaced the record that names it. */
     isReviewer: (thread: ThreadId) => db.prepare("SELECT 1 FROM threads WHERE id = ? AND started_by = ? UNION SELECT 1 FROM reviews WHERE reviewer = ?").get(thread, reviewerCaller, thread) !== undefined,
-    /** Replaces the builder's review, and tells the event log when its phase or round changed. */
+    /** Replaces the builder's review, and tells the event log when its phase, round or label changed. */
     saveReview(review: Review) {
       transaction(() => {
         const before = jsonOrNull<Review>(db.prepare("SELECT record FROM reviews WHERE builder = ?").get(review.builder)?.record ?? null);
         db.prepare("INSERT INTO reviews (builder, reviewer, record) VALUES (?, ?, ?) ON CONFLICT (builder) DO UPDATE SET reviewer = excluded.reviewer, record = excluded.record")
           .run(review.builder, review.reviewer, JSON.stringify(review));
-        if (before?.id !== review.id || before.phase.kind !== review.phase.kind || before.rounds.length !== review.rounds.length) {
+        const label = (r: Review | null) => r?.phase.kind === "needs-person" ? r.phase.label?.state : undefined;
+        if (before?.id !== review.id || before.phase.kind !== review.phase.kind || before.rounds.length !== review.rounds.length || label(before) !== label(review)) {
           appendEvent("review.changed", review.builder, { review: review.id, reviewer: review.reviewer, phase: review.phase, round: review.rounds.length });
         }
         updateAttention(review.builder);

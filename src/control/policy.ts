@@ -9,7 +9,7 @@
  * a file it does not name still rests on the reviewer alone.
  */
 import type { ChangedFile, PrSnapshot } from "./github.ts";
-import { findingsOf, type ReservedCase, type Review } from "./review.ts";
+import { blocks, findingsOf, type ReservedCase, type Review } from "./review.ts";
 
 export const reservedNames: Readonly<Record<ReservedCase, string>> = {
   secrets: "changes to secrets", egress: "changes to the egress allowlist", auth: "changes to login or auth", tailnet: "changes to the tailnets",
@@ -47,10 +47,10 @@ const conditions: readonly ((facts: LandingFacts) => string[])[] = [
   ({ review }) => {
     const round = review.rounds.at(-1)!;
     if (round.verdict?.verdict !== "approve") return ["The reviewer has not approved the latest commits."];
-    const serious = findingsOf(round).filter((f) => f.severity === "serious");
-    return serious.length ? [`Serious findings are open: ${serious.map((f) => f.id).join(", ")}.`] : [];
+    const open = findingsOf(round).filter(blocks);
+    return open.length ? [`Findings P0 to P2 are open: ${open.map((f) => f.id).join(", ")}.`] : [];
   },
-  ({ review }) => review.rounds.flatMap((round, i) => findingsOf(round)
+  ({ review }) => review.rounds.flatMap((round, i) => findingsOf(round).filter(blocks)
     .filter((f) => !round.answers?.some((a) => a.id === f.id && (a.action === "fixed" || a.reason.trim() !== "")))
     .map((f) => `The builder neither fixed nor rejected with a reason finding ${f.id} of round ${i + 1}.`)),
   ({ review }) => {
