@@ -2010,6 +2010,30 @@ test("a Claude worker's message whose probe wait ran out is typed once, and a re
   }
 });
 
+test("a resend while its first send is still asked waits for it, so a late answer that typed nothing cannot clear a newer send's fence", async (t) => {
+  const s = await withClaude(t);
+  const answers: PromiseWithResolvers<CommandResult>[] = [];
+  s.probeAnswers(() => { answers.push(Promise.withResolvers()); return answers.at(-1)!.promise; });
+  const send = () => s.call("POST", `/v1/threads/${s.thread.id}/messages`, { text: "run it", requestId: "msg:1" });
+  const asked = async (n: number) => { while (s.commands.length < n) await sleep(5); };
+  const first = send();
+  await asked(1);
+  const resend = send();
+  await sleep(100);
+  assert.equal(s.commands.length, 1, "the resend does not ask the probe while the first send waits on it");
+  answers[0]!.resolve(sent("blocked" as never));
+  assert.equal((await first).status, 409, "the first send typed nothing");
+  await asked(2);
+  const again = send();
+  await sleep(100);
+  answers[1]!.resolve(sent("queued"));
+  const queued = { status: 202, body: { claude: { session: claudeSession, outcome: "queued", resumed: false } } };
+  assert.deepEqual(await resend, queued, "the resend typed the message itself, as the first typed nothing");
+  assert.deepEqual(await again, queued, "and a resend while it was typing answers what it did");
+  assert.deepEqual(await send(), queued);
+  assert.deepEqual(s.commands.map(([, command]) => command.kind), ["send-claude", "send-claude"], "the message was typed by one send only");
+});
+
 test("a Claude worker thread takes no messages while archived, deleted or before its session starts, and asks no probe", async (t) => {
   const s = await withClaude(t);
   s.probeAnswers(async () => assert.fail("no command reaches the probe"));
