@@ -1,7 +1,7 @@
 import { randomBytes } from "node:crypto";
 import type { HarnessHost } from "../harness/host.ts";
 import { chooseTemplate, setupHashOf, type ImageId, type ProjectMirror, type SetupInputs, type TemplateId, type ThreadSetup } from "../images.ts";
-import { effectiveAllowedHosts, hasRemote, liveHashOf, withHttpsHosts, type BootInputs, type Project, type ProjectId, type PylonOverlay, type RemoteProject, type RepoInit } from "../project.ts";
+import { bootSecrets, effectiveAllowedHosts, hasRemote, liveHashOf, withHttpsHosts, type BootInputs, type Project, type ProjectId, type PylonOverlay, type RemoteProject, type RepoInit } from "../project.ts";
 import type { NodeName, PylonId } from "../protocol.ts";
 import { newPylonRecord, type PylonRecord } from "../tick.ts";
 import { HttpError } from "./http-error.ts";
@@ -84,7 +84,7 @@ export function threadStarter(options: { registry: Registry; harness: Pick<Harne
       ? { kind: "clone", url: project.repoUrl, checkout: { branch, commit: request.commit ?? `origin/${branch}` } }
       : { kind: "empty", branch };
     // Every boot pulls the dotfiles through the allowlist. A template build pulls none, so their host stays out of the setup hash.
-    const network = { allowedHosts: withHttpsHosts(effectiveAllowedHosts(project), [dotfiles.repo]), secrets: project.secrets };
+    const network = { allowedHosts: withHttpsHosts(effectiveAllowedHosts(project), [dotfiles.repo]), secrets: bootSecrets(project) };
 
     const id = newThreadId();
     const pylonId = `pylon-${id}` as PylonId;

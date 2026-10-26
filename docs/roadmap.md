@@ -35,7 +35,6 @@ Several items copy ideas from [t3code](https://github.com/pingdotgg/t3code), whi
   - If `.nexus/setup` changes tracked files, a template boot's checkout of a commit that changes them too fails, and retries until the planner gives up. Git refuses rather than carrying the old content over, so no thread gets stale code, but it should boot fresh instead.
   - The dashboard does not show `Thread.setup` yet.
 - **Named pylons that outlive a thread.**
-- **A shared credential service,** so that Claude Code and Codex don't need a `/login` in every new pylon.
 - **Deleting a thread's conversation from the harness.** pi-durable can't delete one yet, so a deleted thread's transcript stays in the harness's storage.
 - **A Firecracker backend.**
 - **Phone steering through Claude Code Remote Control.** This is low priority, because Nexus is rarely used from a phone.

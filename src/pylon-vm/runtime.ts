@@ -48,8 +48,8 @@ export async function reportResume(
 	return true;
 }
 
-/** Actions that wait on a process or only read, which run beside the lifecycle queue so that they never wait behind it. */
-const besideQueue = new Set(["inspect", "exec", "exec-status", "exec-kill", "read", "write-files", "logs"]);
+/** Actions that wait on a process, only read, or touch only the host, which run beside the lifecycle queue so that they never wait behind it. */
+const besideQueue = new Set(["inspect", "exec", "exec-status", "exec-kill", "read", "write-files", "logs", "update-secret"]);
 export const runsBesideQueue = (action: string) => besideQueue.has(action);
 
 /**
@@ -128,8 +128,9 @@ export class SandboxRuntime {
 	private dir: string;
 	private record: SandboxRecord;
 	private spec: BootSpec;
-	/** `running` adopts a VM that already runs, and its services, instead of booting one, so a test can drive it. */
-	constructor(dir: string, record: SandboxRecord, spec: BootSpec, running?: { vm: VM; settleMs: number; services?: GuestServices }) {
+	private network: ReturnType<typeof networkOptions> | undefined;
+	/** `running` adopts a VM that already runs, its services and its network, instead of booting one, so a test can drive it. */
+	constructor(dir: string, record: SandboxRecord, spec: BootSpec, running?: { vm: VM; settleMs: number; services?: GuestServices; network?: ReturnType<typeof networkOptions> }) {
 		this.dir = dir;
 		this.record = record;
 		this.spec = spec;
@@ -138,13 +139,15 @@ export class SandboxRuntime {
 			this.processes = new GuestProcesses(running.vm, this.stopping.signal);
 			this.settleMs = running.settleMs;
 			this.managed = running.services;
+			this.network = running.network;
 			this.state = "running";
 		}
 	}
 	async boot(prepare: boolean, setupRan?: SetupRun): Promise<void> {
 		const config = this.record.config;
 		const { resources } = this.spec;
-		const { placeholders, ...network } = networkOptions(this.spec, this.record.name);
+		this.network = networkOptions(this.spec, this.record.name);
+		const { placeholders, secretManager: _, ...network } = this.network;
 		const options: VMOptions = {
 			cpus: resources.cpus,
 			memory: `${resources.memoryGiB}G`,
@@ -391,6 +394,7 @@ export class SandboxRuntime {
 				connected: true,
 				services: this.managed?.names() ?? [],
 			};
+		if (action.action === "update-secret") return this.updateSecret(action.secret, action.value);
 		if (action.action === "stop") return this.stop();
 		if (action.action === "destroy") {
 			if (action.confirm !== this.record.name)
@@ -521,6 +525,13 @@ export class SandboxRuntime {
 			default:
 				throw new Error("Action unavailable on a running instance");
 		}
+	}
+	/** Only the host's hooks change, so the guest is not involved. A secret this boot did not grant is not held, which is no error. */
+	private updateSecret(name: string, value: string): { held: boolean } {
+		const secrets = this.network?.secretManager;
+		if (secrets === undefined || !secrets.listSecrets().some((secret) => secret.name === name)) return { held: false };
+		secrets.updateSecret(name, { value });
+		return { held: true };
 	}
 	private async recordSetup(vm: VM): Promise<void> {
 		await checked(vm, `mkdir -p ${q(posix.dirname(setupMarker))}`);

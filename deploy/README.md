@@ -258,6 +258,28 @@ sudo systemctl start nexus-control
 
 The login prints a URL to open in your browser. The browser's last step goes to port 1455 on `rj-firebat`, so on your laptop that page fails to load. Paste the address it ended on into the prompt. Alternatively, forward the port first with `ssh -L 1455:127.0.0.1:1455 rj-firebat`.
 
+### pi's ChatGPT login in pylons
+
+A project with the `chatgpt` login gives the pi in each new pylon the harness's ChatGPT login, so nobody signs pi in per thread. [The design](../docs/design.md#pis-chatgpt-login-in-a-pylon) describes how. Nothing needs configuring beyond signing the harness in with ChatGPT, as above. A harness on an API key hands out nothing, and a pylon's pi then answers 401.
+
+For each project whose pylons should have it, allow the login. `--login` replaces the list, so name every login the project keeps:
+
+```sh
+nexus project edit <project> --login claude --login chatgpt
+```
+
+That grants `NEXUS_CHATGPT_TOKEN` for `api.openai.com` and adds `auth.openai.com`, `chatgpt.com` and `api.openai.com` to the allowlist. Threads started after the edit get it. An existing thread keeps the grants it booted with, even across an archive and an unarchive. A project may not grant `NEXUS_CHATGPT_TOKEN` itself, and a node's `secrets.env` may not set it.
+
+Upgrade every probe before you start a thread with the login. A probe from before this change looks for `NEXUS_CHATGPT_TOKEN` in its `secrets.env`, does not find it, and fails the spawn for good.
+
+In the pylon, pi's `openai` provider is signed in, so a model reference names `openai/<model>`, such as `openai/gpt-6-astra`. `openai-codex` is not signed in. Each boot rewrites the `openai` entry of `~/.pi/agent/auth.json`, so a `/login` to OpenAI inside a pylon lasts only until the next wake.
+
+What each place holds:
+
+- The control plane holds the access and refresh tokens in `harness-credentials.json`, as before. It refreshes them when less than 10 minutes remain and sends the access token to every probe every 60 seconds over the tailnet. It asks tailscaled who answered on the connection before it sends any byte, so a node that took over a probe's name gets nothing. `journalctl -u nexus-control` names a probe it could not reach, never the token.
+- Each probe holds the current access token in memory, and so does the controller of each running pylon. Root on a node can read it there, as it can read `secrets.env`, and use it until it expires. Neither process writes it to disk or to a log, and it never reaches the registry, the events or the observation.
+- A pylon holds only a placeholder, which changes on every boot. Its agents can spend the ChatGPT subscription through `api.openai.com`, but cannot read the token.
+
 ## Build the pylon image
 
 The image bakes this Mac's Claude Code plugins, skills, pi packages and pi extensions, as `images/pylon/agent-setup/manifest.json` pins them. To refresh them, capture them on the Mac in the nexus checkout, then commit and push the manifest:

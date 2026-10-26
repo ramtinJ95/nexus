@@ -7,14 +7,14 @@ import { after, test } from "node:test";
 import assert from "node:assert/strict";
 import { existsSync } from "node:fs";
 import { spawnSync } from "node:child_process";
-import { chmod, mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { join } from "node:path";
 import { PassThrough, Readable } from "node:stream";
-import { createPylonVmBackend, type PylonVmBackendOptions } from "./pylon-vm-backend.ts";
+import { bootHooks, createPylonVmBackend, piChatgptLoginCommand, type PylonVmBackendOptions } from "./pylon-vm-backend.ts";
 import { identityOf } from "./pylon-vm/identity.ts";
-import { imageEnv, pylonGuest } from "./pylon-vm/pylon-guest.ts";
-import type { BootInputs } from "./project.ts";
+import { asUser, imageEnv, pylonGuest } from "./pylon-vm/pylon-guest.ts";
+import { chatgptTokenGrant, type BootInputs } from "./project.ts";
 import type { BrokenCause, PylonId } from "./protocol.ts";
 import { herdrOk, herdrPane, herdrSnapshot } from "./fake-guest.ts";
 import type { ImageId, TemplateBuildInputs, TemplateId, TemplateManifest } from "./images.ts";
@@ -186,6 +186,43 @@ test("a secret grant whose value this node lacks fails as secret-missing", async
   assert.equal(existsSync(join(instances, "pylon-sec")), false);
 });
 
+test("a boot granted the ChatGPT token signs pi in after the dotfiles pull, as user, and only such a boot", () => {
+  const gitIdentity = { name: "Example Person", email: "person@example.com" };
+  const granted = bootHooks(bootOf("pylon-pi", { gitIdentity, network: { allowedHosts: ["api.openai.com"], secrets: [chatgptTokenGrant] } }));
+  const signIn = asUser(piChatgptLoginCommand(), "/home/user");
+  assert.equal(granted.length, 3);
+  assert.match(granted[0]!, /dotfiles: pulled/);
+  assert.equal(granted[1], signIn, "after the pull, whose install may replace ~/.pi/agent files");
+  assert.match(granted[2]!, /git config --global user\.name/);
+  assert.ok(!bootHooks(bootOf("pylon-pi", { gitIdentity })).includes(signIn));
+});
+
+test("pi's ChatGPT sign-in merges the placeholder into auth.json, keeping every other provider, and leaves a file it cannot read alone", async () => {
+  const home = await mkdtemp(join(scratch, "home-"));
+  const file = join(home, ".pi", "agent", "auth.json");
+  const signIn = (env: Record<string, string>) => spawnSync("sh", ["-c", piChatgptLoginCommand()], { env: { PATH: process.env.PATH!, HOME: home, ...env }, encoding: "utf8" });
+  const openai = { type: "oauth", access: "GONDOLIN_SECRET_placeholder", refresh: "", expires: 4102444800000 };
+
+  let run = signIn({ NEXUS_CHATGPT_TOKEN: "GONDOLIN_SECRET_placeholder" });
+  assert.equal(run.status, 0, run.stderr);
+  assert.deepEqual(JSON.parse(await readFile(file, "utf8")), { openai }, "a home without pi's directory gets one");
+  assert.equal((await stat(join(home, ".pi", "agent"))).mode & 0o777, 0o700);
+
+  const anthropic = { type: "oauth", access: "a", refresh: "r", expires: 1 };
+  await writeFile(file, JSON.stringify({ anthropic, openai: { type: "api_key", key: "sk-own" } }), { mode: 0o644 });
+  run = signIn({ NEXUS_CHATGPT_TOKEN: "GONDOLIN_SECRET_placeholder" });
+  assert.equal(run.status, 0, run.stderr);
+  assert.equal(run.stdout, "pi: signed in to ChatGPT as its openai provider\n");
+  assert.deepEqual(JSON.parse(await readFile(file, "utf8")), { anthropic, openai });
+  assert.equal((await stat(file)).mode & 0o777, 0o600);
+  assert.deepEqual(await readdir(join(home, ".pi", "agent")), ["auth.json"]);
+
+  await writeFile(file, "{ not json");
+  assert.equal(signIn({ NEXUS_CHATGPT_TOKEN: "GONDOLIN_SECRET_placeholder" }).status, 1);
+  assert.equal(signIn({}).status, 1, "a login shell without the placeholder");
+  assert.equal(await readFile(file, "utf8"), "{ not json");
+});
+
 test("a repo URL that is neither SSH nor HTTPS is invalid", async () => {
   const { backend } = await backendWith();
   const boot = bootOf("pylon-url", { repo: { kind: "clone", url: "file:///srv/repo.git", checkout: { branch: "main", commit: "c0ffee" } } });
@@ -263,6 +300,21 @@ test("a PID handed out again, or one from an earlier boot of the host, is a dead
     await writeFile(join(starting, "launch.lock", "owner"), JSON.stringify(identity));
     assert.deepEqual((await backend.list()).map((p) => p.vm), ["broken"]);
   }
+});
+
+test("a secret update reaches every running pylon's controller, and reports by pylon the ones that fail, not the ones that do not hold it", async () => {
+  const { backend, instances } = await backendWith();
+  const holder = await fakeController(await leftInstance(instances, "pylon-holds", "running"), "pylon-holds", () => ({ held: true }));
+  const other = await fakeController(await leftInstance(instances, "pylon-other", "running"), "pylon-other", () => ({ held: false }));
+  await fakeController(await leftInstance(instances, "pylon-failing", "running"), "pylon-failing", () => { throw new Error("Sandbox is stopping, so update-secret waits until it runs again"); });
+  const paused = await fakeController(await leftInstance(instances, "pylon-paused", "stopped"), "pylon-paused");
+  paused.state.current = "stopped";
+  const failures = await backend.updateSecret("NEXUS_CHATGPT_TOKEN", "eyJ.second", signal());
+  const update = { action: "update-secret", secret: "NEXUS_CHATGPT_TOKEN", value: "eyJ.second" };
+  assert.deepEqual(holder.actions, [{ ...update, name: "pylon-holds" }]);
+  assert.deepEqual(other.actions, [{ ...update, name: "pylon-other" }]);
+  assert.deepEqual(paused.actions, [], "a paused pylon gets the value when it next boots");
+  assert.deepEqual(failures, [{ pylonId: "pylon-failing", reason: "Sandbox is stopping, so update-secret waits until it runs again" }]);
 });
 
 test("a spawn with previews on a node without a preview host fails as invalid and creates nothing", async () => {

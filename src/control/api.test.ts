@@ -259,7 +259,7 @@ test("starting a thread creates its pylon, boots fresh from the current image, a
   assert.deepEqual(pylon.firstBoot, { kind: "fresh", preSetup: null });
   assert.deepEqual(pylon.boot, {
     pylonId: thread.pylonId, image: image.id, resources: project.resources,
-    network: { allowedHosts: ["api.openai.com", "api.stripe.com", "auth.openai.com", "chatgpt.com", "registry.npmjs.org"], secrets: project.secrets },
+    network: { allowedHosts: ["api.openai.com", "api.stripe.com", "auth.openai.com", "chatgpt.com", "registry.npmjs.org"], secrets: [...project.secrets, { name: "NEXUS_CHATGPT_TOKEN", hosts: ["api.openai.com"] }] },
     repo: { kind: "clone", url: project.repoUrl, checkout: { branch: "main", commit: "origin/main" } },
     dotfiles,
   });
@@ -281,7 +281,7 @@ function observeNode(s: Awaited<ReturnType<typeof setup>>, name: string, memory:
   s.registry.apply({ record: "node", node: at, state: "online", capacity });
   s.registry.ingested({
     node: at, observedAt: "2027-01-01T00:01:00Z", probeBootId: "b", capacity, artifacts: [image.id] as NodeObservation["artifacts"], jobs: [], pylons: [],
-    grants: { secrets: ["STRIPE_KEY"], gitSsh: true }, previewRoutes: [], ...over,
+    grants: { secrets: ["STRIPE_KEY", "NEXUS_CHATGPT_TOKEN"], gitSsh: true }, previewRoutes: [], ...over,
   }, []);
 }
 
@@ -359,13 +359,14 @@ test("--node auto refuses with each node's reason when none can run the pylon, a
   observeNode(s, "full", { total: 32, committed: 30 });
   observeNode(s, "no-image", { total: 64, committed: 0 }, { artifacts: [] });
   observeNode(s, "no-secret", { total: 64, committed: 0 }, { grants: { secrets: [], gitSsh: true } });
-  observeNode(s, "no-ssh", { total: 64, committed: 0 }, { grants: { secrets: ["STRIPE_KEY"], gitSsh: false } });
+  observeNode(s, "no-token", { total: 64, committed: 0 }, { grants: { secrets: ["STRIPE_KEY"], gitSsh: true } });
+  observeNode(s, "no-ssh", { total: 64, committed: 0 }, { grants: { secrets: ["STRIPE_KEY", "NEXUS_CHATGPT_TOKEN"], gitSsh: false } });
   observeNode(s, "old-probe", { total: 64, committed: 0 }, { grants: null });
   const refused = await s.call("POST", "/v1/threads", { project: "acme", title: "Nowhere", node: "auto" });
   assert.equal(refused.status, 409);
   assert.equal(refused.body.error, "no node can run this pylon: full has 30 of 32 GiB of memory committed, and the pylon needs 4; "
-    + `no-image does not hold image ${image.id}; no-secret has no secret STRIPE_KEY in its secret file; `
-    + "no-ssh has no git SSH key to reach git@example.com:acme.git and git@github.com:ramtin/dotfiles.git; old-probe runs a probe too old to report what its pylons hold; rj-firebat is offline");
+    + `no-image does not hold image ${image.id}; no-secret has no secret STRIPE_KEY in its secret file, NEXUS_CHATGPT_TOKEN from the control plane yet; `
+    + "no-ssh has no git SSH key to reach git@example.com:acme.git and git@github.com:ramtin/dotfiles.git; no-token has no secret NEXUS_CHATGPT_TOKEN from the control plane yet; old-probe runs a probe too old to report what its pylons hold; rj-firebat is offline");
   assert.deepEqual((await s.call("GET", "/v1/threads")).body, []);
   assert.deepEqual(s.calls, [], "no conversation was started for it");
   assert.deepEqual(s.woken, []);
@@ -1890,6 +1891,19 @@ test("grant comparison ignores order and duplicates but detects changed access",
     assert.equal((await s.call("PATCH", "/v1/projects/acme", { ...reordered, ...changed })).status, 200);
     assert.equal(await outdated(), true);
   }
+});
+
+test("project add and edit refuse a grant of the ChatGPT token, which comes with the chatgpt login", async (t) => {
+  const s = await withThread(t);
+  const before = s.registry.project(project.id as ProjectId);
+  const secrets = [{ name: "NEXUS_CHATGPT_TOKEN", hosts: ["api.openai.com"] }];
+  const added = await s.call("POST", "/v1/projects", { ...project, id: "granted", secrets });
+  assert.equal(added.status, 400);
+  assert.match(added.body.error, /NEXUS_CHATGPT_TOKEN comes with the chatgpt login: add the login instead/);
+  assert.equal(s.registry.project("granted" as ProjectId), undefined);
+  const edited = await s.call("PATCH", "/v1/projects/acme", { secrets });
+  assert.equal(edited.status, 400);
+  assert.deepEqual(s.registry.project(project.id as ProjectId), before);
 });
 
 test("project add and edit refuse duplicate secret names instead of merging their grants", async (t) => {

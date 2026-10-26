@@ -37,6 +37,11 @@ export interface VmBackend {
   /** Rejects with not-running unless the pylon is running. */
   guest(pylonId: PylonId): Guest;
   readonly artifacts: ArtifactStore;
+  /**
+   * Swap in a secret's new value on every running pylon whose boot granted it. Best effort per pylon: it returns
+   * the pylons it could not reach and why. A pylon booting meanwhile starts with whatever value it was given.
+   */
+  updateSecret(name: string, value: string, signal?: AbortSignal): Promise<readonly { pylonId: PylonId; reason: string }[]>;
 }
 
 export interface BackendPylon {

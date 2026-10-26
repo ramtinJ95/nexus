@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { parseDocument } from "yaml";
 import { configSchema } from "./pylon-vm/contracts.ts";
-import { effectiveAllowedHosts, githubTokenGrant, parseServicesFile, renderOverlay, type Project, type ProjectId, type PylonOverlay } from "./project.ts";
+import { bootSecrets, chatgptTokenGrant, effectiveAllowedHosts, githubTokenGrant, parseServicesFile, renderOverlay, type Project, type ProjectId, type PylonOverlay } from "./project.ts";
 import type { NodeName, PylonId } from "./protocol.ts";
 
 const usageExample = `
@@ -210,6 +210,12 @@ test("effectiveAllowedHosts of a scratch project adds no repo host and keeps its
   assert.deepEqual(effectiveAllowedHosts({ ...scratch, secrets: [githubTokenGrant] }), ["api.github.com", "github.com"]);
 });
 
+test("a pylon is granted the ChatGPT token exactly when its project has the chatgpt login", () => {
+  assert.deepEqual(bootSecrets(project), [...project.secrets, { name: "NEXUS_CHATGPT_TOKEN", hosts: ["api.openai.com"] }]);
+  assert.deepEqual(bootSecrets({ ...project, logins: ["claude"] }), project.secrets);
+  assert.deepEqual(bootSecrets({ ...project, logins: [] }), project.secrets);
+});
+
 const overlay: PylonOverlay = {
   pylonId: "pylon-t1" as PylonId,
   threadId: "t1",
@@ -272,6 +278,22 @@ test("PYLON.md tells the agent its hosts, previews, logins and how to declare ou
   assert.match(bare, /No previews are published yet/);
   assert.match(bare, /no interactive logins/);
   assert.doesNotMatch(bare, /device-code/);
+});
+
+test("PYLON.md of a pylon granted the ChatGPT token says pi is signed in to it, and device-code only for the other logins", () => {
+  const md = renderOverlay({ ...overlay, secrets: [chatgptTokenGrant] })[2]!.content;
+  for (const fact of [
+    "pi is already signed in to ChatGPT as its `openai` provider", "`openai/gpt-6-astra`", "Nexus rewrites that entry of ~/.pi/agent/auth.json on every boot",
+    "`openai-codex` provider is not signed in, and needs no `/login`", "## Secrets", "- NEXUS_CHATGPT_TOKEN: api.openai.com\n",
+  ]) assert.ok(md.includes(fact), `PYLON.md mentions ${JSON.stringify(fact)}`);
+  assert.doesNotMatch(md, /device-code|no interactive logins/);
+
+  const withClaude = renderOverlay({ ...overlay, logins: ["claude", "chatgpt"], secrets: [chatgptTokenGrant] })[2]!.content;
+  assert.ok(withClaude.includes("This project also allows these logins: claude. Sign in with the device-code flow"));
+
+  const bootedBefore = renderOverlay({ ...overlay, secrets: [] })[2]!.content;
+  assert.ok(bootedBefore.includes("This project allows these logins: chatgpt. Sign in with the device-code flow"), "a pylon booted without the grant was not signed in");
+  assert.doesNotMatch(bootedBefore, /signed in to ChatGPT/);
 });
 
 test("PYLON.md of a scratch project with GitHub access says nothing is kept and how to publish without inventing an author", () => {

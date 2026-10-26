@@ -31,13 +31,14 @@ import { createDockerBackend } from "./docker-backend.ts";
 import { dockerHostBridge } from "./docker-host-bridge.ts";
 import { createPylonVmBackend } from "./pylon-vm-backend.ts";
 import { run as pylonVm } from "./pylon-vm/client.ts";
+import { nodeSecrets, type NodeSecrets } from "./probe/config.ts";
 import { startProbe, type Probe } from "./probe/server.ts";
 import { fakeTailscale, nodeHost, viaGateway } from "./probe/fake-tailscale.ts";
 import { pylonInfoFile, pylonVmHostBridge, type HostBridge } from "./probe/pylon-api.ts";
 import { connectProbe, type DeclaredOutput, type LiveHash, type NodeName, type ProbeClient, type PylonId, type ServiceFact, type TailnetNodeId } from "./protocol.ts";
 import { envelope, type PlanStep } from "./reconcile.ts";
 import { newPylonRecord, nextCheckpoint, snapshot, tick, type PylonRecord } from "./tick.ts";
-import type { BackendPylon, Guest, SecretSource, VmBackend } from "./backend.ts";
+import type { BackendPylon, Guest, VmBackend } from "./backend.ts";
 import { loginHosts, renderOverlay, type BootInputs, type CloneRepo, type OverlayFile, type PreviewAssignment, type ProjectId, type SessionHarness } from "./project.ts";
 import { checkoutDir, sessionFacts, sessionsFile } from "./sessions.ts";
 import type { CheckpointId, ImageId } from "./images.ts";
@@ -59,7 +60,7 @@ interface SliceFixture {
   /** Puts this checkout's CLI and the given pylon.json into the running pylon, whatever its image has. */
   installCli(pylonJson: string): Promise<void>;
   /** The node's secret file, shared by the probe and the backend as on a real node. */
-  secrets: SecretSource;
+  secrets: NodeSecrets;
   boot: Omit<BootInputs, "source" | "pylonId" | "image">;
   /** Boot inputs the wake changes, and node secrets it rotates. A pylon applies both at every boot. */
   wake(): Partial<SliceFixture["boot"]>;
@@ -116,7 +117,7 @@ function dockerFixture(): SliceFixture {
       await docker("cp", cli, `${pylonId}:/usr/local/bin/nexus`);
       await docker("exec", pylonId, "sh", "-c", `mkdir -p /home/user/.nexus && printf '%s' "$1" > ${pylonInfoFile}`, "sh", pylonJson);
     },
-    secrets: { value: () => undefined, names: () => [] },
+    secrets: nodeSecrets({ value: () => undefined, names: () => [] }),
     boot: {
       resources: { cpus: 1, memoryGiB: 1, diskGiB: 1 },
       network: { allowedHosts: [], secrets: [] },
@@ -266,7 +267,7 @@ function pylonVmFixture(): SliceFixture {
       throw err;
     }
   };
-  const secrets: SecretSource = { value: (name) => name === secret.name ? secret.value : undefined, names: () => [secret.name] };
+  const secrets = nodeSecrets({ value: (name) => name === secret.name ? secret.value : undefined, names: () => [secret.name] });
   return {
     backend: createPylonVmBackend({ stateRoot, artifacts: dirname(assets), secrets, previewHost: nodeHost, ...(gitSsh === undefined ? {} : { gitSsh }) }),
     image: basename(assets) as ImageId,

@@ -9,7 +9,7 @@ import { basename, dirname, isAbsolute } from "node:path";
 import { z } from "zod";
 import type { SecretSource } from "../backend.ts";
 import type { ImageId } from "../images.ts";
-import { probePort, type NodeName, type ProbeAuthConfig, type TailnetNodeId } from "../protocol.ts";
+import { heldSecrets, probePort, type NodeName, type ProbeAuthConfig, type TailnetNodeId } from "../protocol.ts";
 
 const absolutePath = z.string().refine(isAbsolute, "must be an absolute path");
 const nodeName = z.string().regex(/^[a-z0-9][a-z0-9-]*$/, "must be a lowercase tailnet machine name").transform((v) => v as NodeName);
@@ -86,7 +86,8 @@ export async function readProbeConfig(path: string): Promise<ProbeConfig> {
 
 /**
  * `NAME=value` lines, blank lines and `#` comments. Values are taken verbatim to the end of the line, so
- * quoting is refused rather than guessed at. Errors name the line, never the value.
+ * quoting is refused rather than guessed at. A held secret is refused, as the control plane provides it. Errors
+ * name the line, never the value.
  */
 export function parseSecretsEnv(text: string): SecretSource {
   const values = new Map<string, string>();
@@ -97,11 +98,31 @@ export function parseSecretsEnv(text: string): SecretSource {
     if (match === null) throw new Error(`${at} is not NAME=value`);
     const [, name, value] = match as unknown as [string, string, string];
     if (values.has(name)) throw new Error(`${at} sets ${name} a second time`);
+    if (heldSecrets.includes(name)) throw new Error(`${at} sets ${name}, which the control plane hands to this probe. Remove the line`);
     if (value === "") throw new Error(`${at} gives ${name} no value`);
     if (/^(["']).*\1$/.test(value)) throw new Error(`${at} quotes the value of ${name}. Values are taken verbatim, so remove the quotes`);
     values.set(name, value);
   });
   return { value: (name) => values.get(name), names: () => [...values.keys()] };
+}
+
+/** The node's secret file, plus the held secrets the control plane hands over, which are kept in memory only. */
+export interface NodeSecrets extends SecretSource { hold(name: string, value: string): void }
+
+/**
+ * A pylon can boot before the first handoff, as after a probe restart, and a missing value fails its spawn for good
+ * (secret-missing is final). It boots with this instead, which no API accepts, and the next handoff replaces it.
+ */
+const notHandedOver = "nexus-held-secret-not-handed-over-yet";
+
+/** `names` lists a held secret only once it is handed over, so placement waits for it. */
+export function nodeSecrets(file: SecretSource): NodeSecrets {
+  const held = new Map<string, string>();
+  return {
+    value: (name) => heldSecrets.includes(name) ? held.get(name) ?? notHandedOver : file.value(name),
+    names: () => [...file.names(), ...held.keys()],
+    hold(name, value) { held.set(name, value); },
+  };
 }
 
 /** Refuses a file that every user on the node can read or write. The probe user reads it through its group. */

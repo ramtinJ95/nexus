@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { parseProbeConfig, parseSecretsEnv, parseSelfDnsName, readSecretsFile } from "./config.ts";
+import { nodeSecrets, parseProbeConfig, parseSecretsEnv, parseSelfDnsName, readSecretsFile } from "./config.ts";
 
 const deploy = new URL("../../deploy/", import.meta.url);
 
@@ -115,10 +115,24 @@ test("a malformed secrets file is refused by line, without echoing values", () =
     ["A=", "an empty value", /line 1 gives A no value/],
     ["\nA=\"hunter2\"", "a quoted value", /line 2 quotes the value of A/],
     ["hunter2", "a bare value", /line 1 is not NAME=value/],
+    ["A=x\nNEXUS_CHATGPT_TOKEN=hunter2", "a secret the control plane hands over", /line 2 sets NEXUS_CHATGPT_TOKEN, which the control plane hands to this probe/],
   ];
   for (const [text, what, message] of cases) {
     assert.throws(() => parseSecretsEnv(text), (err: Error) => message.test(err.message) && !err.message.includes("hunter"), what);
   }
+});
+
+test("a node's secrets add a held secret once the control plane hands it over, and stand in for it until then", () => {
+  const secrets = nodeSecrets(parseSecretsEnv("GH_TOKEN=ghp_file\n"));
+  assert.deepEqual(secrets.names(), ["GH_TOKEN"], "placement waits for the handoff");
+  const standIn = secrets.value("NEXUS_CHATGPT_TOKEN");
+  assert.ok(standIn !== undefined && standIn !== "", "a spawn granted it boots, rather than failing as secret-missing");
+  assert.equal(secrets.value("STRIPE_KEY"), undefined, "a file secret the file lacks is still missing");
+  secrets.hold("NEXUS_CHATGPT_TOKEN", "eyJ.first");
+  secrets.hold("NEXUS_CHATGPT_TOKEN", "eyJ.second");
+  assert.equal(secrets.value("NEXUS_CHATGPT_TOKEN"), "eyJ.second");
+  assert.deepEqual(secrets.names(), ["GH_TOKEN", "NEXUS_CHATGPT_TOKEN"]);
+  assert.equal(secrets.value("GH_TOKEN"), "ghp_file");
 });
 
 test("readSecretsFile refuses a file every user can reach and reads one they cannot", async (t) => {

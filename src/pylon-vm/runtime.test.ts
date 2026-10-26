@@ -6,6 +6,7 @@ import { setTimeout as delay } from "node:timers/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fakeVm, type WritePhase } from "./fake-vm.ts";
+import { networkOptions } from "./network.ts";
 import { readIntent, reportResume, SandboxRuntime, setupMarkerOf, setupOnDisk, setupState } from "./runtime.ts";
 
 type Status = Awaited<ReturnType<Parameters<typeof reportResume>[0]["status"]>>;
@@ -191,4 +192,31 @@ test("a failed controller whose status cannot be saved still closes the guest te
 	await mkdir(join(dir, "status.json"));
 	await assert.rejects(runtime.fail(new Error("the guest stopped answering")));
 	assert.deepEqual(fake.closed, ["ssh", "vm"]);
+});
+
+test("update-secret swaps a granted secret's new value into the running VM's requests, still only toward its own hosts", async () => {
+	const spec = {
+		resources: { cpus: 2, memoryGiB: 4 },
+		allowedHosts: ["api.openai.com", "github.com"],
+		secrets: { NEXUS_CHATGPT_TOKEN: { hosts: ["api.openai.com"], value: "first-token" } },
+		ssh: null, files: [], hooks: [], publicUrls: {}, hostBridge: null,
+	} satisfies BootSpec;
+	const record = { name: "pylon-a", createdAt: "2027-01-01T00:00:00.000Z", config: { diskGiB: 8, workspace: "/workspace" } } as SandboxRecord;
+	const network = networkOptions(spec, record.name);
+	const runtime = new SandboxRuntime("/nonexistent", record, spec, { vm: fakeVm().vm, settleMs: 300, network });
+	const placeholder = network.placeholders.NEXUS_CHATGPT_TOKEN!;
+	const sent = async (host: string) => {
+		const request = await network.httpHooks!.onRequest!(new Request(`https://${host}/v1/responses`, { method: "POST", headers: { authorization: `Bearer ${placeholder}` } }));
+		assert.ok(request instanceof Request);
+		return request.headers.get("authorization");
+	};
+	const update = (secret: string, value: string) => runtime.handle({ action: "update-secret", name: "pylon-a", secret, value });
+
+	assert.equal(await sent("api.openai.com"), "Bearer first-token");
+	assert.deepEqual(await update("NEXUS_CHATGPT_TOKEN", "second-token"), { held: true });
+	assert.equal(await sent("api.openai.com"), "Bearer second-token");
+	await assert.rejects(sent("github.com"), { status: 403 }, "another host gets neither value");
+
+	assert.deepEqual(await update("STRIPE_KEY", "sk_live_new"), { held: false }, "a secret the boot did not grant is not held, and not an error");
+	assert.equal(await sent("api.openai.com"), "Bearer second-token");
 });

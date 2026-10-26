@@ -208,6 +208,15 @@ export const hasRemote = (project: Project): project is RemoteProject => project
 export interface SecretGrant { name: string; hosts: readonly string[] }
 /** The grant `gh`, and git through gh's credential helper, need to create GitHub repositories and push to them. */
 export const githubTokenGrant: SecretGrant = { name: "GH_TOKEN", hosts: ["api.github.com", "github.com"] };
+/**
+ * The access token of the harness's own Sign in with ChatGPT, for pi's `openai` provider. Its value is not in any
+ * node's secret file: the control plane holds it, refreshes it, and hands it to every probe.
+ */
+export const chatgptTokenGrant: SecretGrant = { name: "NEXUS_CHATGPT_TOKEN", hosts: ["api.openai.com"] };
+/** What a new thread's pylon is granted: the project's grants, plus the ChatGPT token when the project has the chatgpt login. */
+export function bootSecrets(project: Project): readonly SecretGrant[] {
+  return project.logins.includes("chatgpt") ? [...project.secrets, chatgptTokenGrant] : project.secrets;
+}
 export type LoginKind = "claude" | "chatgpt";
 
 /**
@@ -315,7 +324,8 @@ export interface PylonOverlay {
  * - /home/user/.nexus/PYLON.md: prose for the agent. It is in a pylon, where its repository came from and how to
  *   commit and publish from it, which hosts it can reach and that everything else is blocked, the names and hosts
  *   of its secrets, its preview URLs, that work survives sleep only on disk, how to declare
- *   outputs, and that logins use the device-code flow (S5: the browser callback listens inside the guest).
+ *   outputs, that pi is signed in to ChatGPT when the pylon was granted the ChatGPT token, and that other logins use
+ *   the device-code flow (S5: the browser callback listens inside the guest).
  *   The image imports this file from ~/.claude/CLAUDE.md and links it as ~/.pi/agent/AGENTS.md, so the
  *   overlay never edits dotfiles.
  */
@@ -356,9 +366,13 @@ function pylonGuide(o: PylonOverlay): string {
   const previews = o.previews.length === 0
     ? "No previews are published yet. Nexus starts the services .nexus/services.yaml declares and publishes their previews on its own, `nexus services ensure --json` starts them now and prints the URLs, and `nexus preview <port>` publishes a port that is already listening.\n"
     : `Each preview is reachable from the human's tailnet devices:\n\n${list(o.previews.map((p) => `${p.service}: ${p.url}`))}`;
-  const logins = o.logins.length === 0
-    ? "This project has no interactive logins.\n"
-    : `This project allows these logins: ${o.logins.join(", ")}. Sign in with the device-code flow, which shows a code to enter in a browser on another device. A browser-callback login fails, because its callback listens inside this pylon, where that browser cannot reach it.\n`;
+  // From the boot's grants, not the project's logins, as the boot hook that signs pi in reads them too.
+  const chatgpt = o.secrets.some((grant) => grant.name === chatgptTokenGrant.name);
+  const deviceCode = o.logins.filter((login) => !(chatgpt && login === "chatgpt"));
+  const logins = [
+    ...chatgpt ? ["pi is already signed in to ChatGPT as its `openai` provider, so models such as `openai/gpt-6-astra` work without a login. Nexus rewrites that entry of ~/.pi/agent/auth.json on every boot. pi's `openai-codex` provider is not signed in, and needs no `/login`."] : [],
+    ...deviceCode.length === 0 ? [] : [`This project ${chatgpt ? "also " : ""}allows these logins: ${deviceCode.join(", ")}. Sign in with the device-code flow, which shows a code to enter in a browser on another device. A browser-callback login fails, because its callback listens inside this pylon, where that browser cannot reach it.`],
+  ].map((paragraph) => `${paragraph}\n`).join("\n") || "This project has no interactive logins.\n";
   const secrets = o.secrets.length === 0 ? "" : `## Secrets
 
 Login shells have these variables. Each holds a placeholder that is swapped for the real value only in requests to the hosts listed, and the placeholder changes on every boot, so never write one into a file, a git config or a remote URL.

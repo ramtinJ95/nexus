@@ -21,7 +21,7 @@ import { Agent, request, type IncomingMessage } from "node:http";
 import { PassThrough, type Duplex, type Readable } from "node:stream";
 import { setTimeout as delay } from "node:timers/promises";
 import { localApiWhois, type Whois } from "./tailscale.ts";
-import { reservedPorts, type BootInputs, type LiveSpec, type SessionHarness } from "./project.ts";
+import { chatgptTokenGrant, reservedPorts, type BootInputs, type LiveSpec, type SessionHarness } from "./project.ts";
 import { claudeTextProblem } from "./sessions.ts";
 import type { ArtifactManifest, CheckpointId, ImageId, ImageRecipe, PortableArtifactId, ArtifactId, TemplateBuildInputs, TemplateId } from "./images.ts";
 
@@ -332,7 +332,12 @@ export interface ProbeClient {
   stream(pylonId: PylonId, argv: readonly string[]): Promise<ByteStream>;
   /** GET /v1/manifests/{id}: the manifest of an image or template the node holds, or null when it holds none. */
   manifest(artifact: PortableArtifactId): Promise<ArtifactManifest | null>;
+  /** PUT /v1/secrets/{name}: the current value of one of heldSecrets. The probe holds it in memory and applies it to its running pylons. */
+  putSecret(name: string, value: string): Promise<void>;
 }
+
+/** The secrets whose values the control plane holds and hands to every probe, which no node's secret file may set. */
+export const heldSecrets: readonly string[] = [chatgptTokenGrant.name];
 
 /** Tailscale's stable node ID, as LocalAPI whois reports it. It survives renames and address changes. */
 export type TailnetNodeId = Brand<string, "TailnetNodeId">;
@@ -353,35 +358,36 @@ export function connectProbe(node: NodeName, tailnetHost: string, expected: Tail
   const agent = new Agent({ keepAlive: false });
 
   /** A silent socket for `requestTimeoutMs` fails the call as unreachable. Observe lifts the limit once its stream starts. */
-  function open(method: "GET" | "PUT" | "POST", path: string, body: string | null, signal?: AbortSignal, timeoutMs = requestTimeoutMs): Promise<IncomingMessage> {
+  function open(method: "GET" | "PUT" | "POST", path: string, body: string | null, signal?: AbortSignal, timeoutMs = requestTimeoutMs, contentType = "application/json"): Promise<IncomingMessage> {
     return new Promise((resolve, reject) => {
       const req = request({ host: tailnetHost, port, method, path, agent, timeout: timeoutMs, ...(signal ? { signal } : {}) }, (res) => {
-        const { remoteAddress, remotePort } = res.socket;
-        if (remoteAddress === undefined || remotePort === undefined) {
+        if (res.statusCode === 403) {
           res.destroy();
-          return reject(probeError("unreachable", `${node}: the connection closed before whois`));
+          return reject(probeError("forbidden", `${node} refused this caller`));
         }
-        whois(remoteAddress, remotePort).then((id) => {
-          if (id !== expected) {
-            res.destroy();
-            return reject(probeError("forbidden", `${node}: ${remoteAddress}:${remotePort} is tailnet node ${id ?? "unknown"}, expected ${expected}`));
-          }
-          if (res.statusCode === 403) {
-            res.destroy();
-            return reject(probeError("forbidden", `${node} refused this caller`));
-          }
-          resolve(res);
-        }, (err: unknown) => { res.destroy(); reject(err); });
+        resolve(res);
       });
       req.on("timeout", () => req.destroy(new Error(`no answer within ${timeoutMs} ms`)));
-      req.on("error", (err) => reject(signal?.aborted ? err : probeError("unreachable", `${node}: ${err.message}`)));
-      if (body !== null) req.setHeader("content-type", "application/json");
-      req.end(body ?? undefined);
+      req.on("error", (err) => reject(signal?.aborted || isProbeError(err) ? err : probeError("unreachable", `${node}: ${err.message}`)));
+      if (body !== null) req.setHeader("content-type", contentType);
+      // A body can be a secret, so not even the request line goes out until whois names the connected peer.
+      req.once("socket", (socket) => {
+        const verify = () => {
+          const { remoteAddress, remotePort } = socket;
+          if (remoteAddress === undefined || remotePort === undefined) return req.destroy(probeError("unreachable", `${node}: the connection closed before whois`));
+          whois(remoteAddress, remotePort).then((id) => {
+            if (id !== expected) return req.destroy(probeError("forbidden", `${node}: ${remoteAddress}:${remotePort} is tailnet node ${id ?? "unknown"}, expected ${expected}`));
+            req.end(body ?? undefined);
+          }, (err: Error) => req.destroy(err));
+        };
+        if (socket.connecting) socket.once("connect", verify);
+        else verify();
+      });
     });
   }
 
-  async function call(method: "GET" | "PUT" | "POST", path: string, body: string | null = null, timeoutMs = requestTimeoutMs): Promise<{ status: number; body: string }> {
-    const res = await open(method, path, body, undefined, timeoutMs);
+  async function call(method: "GET" | "PUT" | "POST", path: string, body: string | null = null, timeoutMs = requestTimeoutMs, contentType?: string): Promise<{ status: number; body: string }> {
+    const res = await open(method, path, body, undefined, timeoutMs, contentType);
     try {
       return { status: res.statusCode ?? 0, body: await text(res) };
     } catch (err) {
@@ -422,6 +428,11 @@ export function connectProbe(node: NodeName, tailnetHost: string, expected: Tail
       if (res.status === 409) throw probeError("not-running", `${node}: ${res.body}`);
       if (res.status !== 200) throw new Error(`${node}: POST ${path}: HTTP ${res.status}: ${res.body}`);
       return parseCommandResult(command, res.body);
+    },
+    async putSecret(name, value) {
+      const path = `/v1/secrets/${encodeURIComponent(name)}`;
+      const res = await call("PUT", path, value, requestTimeoutMs, "text/plain; charset=utf-8");
+      if (res.status !== 204) throw new Error(`${node}: PUT ${path}: HTTP ${res.status}: ${res.body}`);
     },
     stream(pylonId, argv) {
       const path = streamPath(pylonId, argv);
@@ -512,6 +523,7 @@ export const routeAuth = {
   "/v1/observe": "control-plane",
   "/v1/pylons": "control-plane",
   "/v1/manifests": "control-plane",
+  "/v1/secrets": "control-plane",
   "/v1/artifacts": "peer-probe", // checkpoints hold the pylon's logins, so only the other probe may read them
 } as const satisfies Record<string, CallerRole>;
 

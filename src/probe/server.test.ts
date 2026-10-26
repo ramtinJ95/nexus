@@ -10,6 +10,7 @@ import { Readable } from "node:stream";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { startProbe, type Probe, type ProbeOptions } from "./server.ts";
+import { nodeSecrets } from "./config.ts";
 import { connectProbe, fetchArtifact, jobDeadlineMs, type ByteStream, type DeclaredOutput, type GitFacts, type Job, type JobEnvelope, type JobId, type JobStatus, type LiveHash, type NodeName, type ProbeEvent, type PylonId, type ServiceFact, type TailnetNodeId } from "../protocol.ts";
 import { envelope, ingest } from "../reconcile.ts";
 import { processStream } from "../process-stream.ts";
@@ -48,6 +49,9 @@ function fakeBackend(guest: Guest | null = null) {
   const calls: string[] = [];
   const offered = new Map<PortableArtifactId, { manifest: ArtifactManifest; body: string }>();
   const imported = new Map<PortableArtifactId, { manifest: ArtifactManifest; body: string }>();
+  /** Each secret update the backend was asked for, and the pylons it then fails to reach. */
+  const secretUpdates: [string, string][] = [];
+  const unreachable: PylonId[] = [];
   let gate: PromiseWithResolvers<void> | null = null;
   const held = (signal: AbortSignal) => gate === null ? Promise.resolve() : new Promise<void>((resolve, reject) => {
     gate!.promise.then(resolve);
@@ -70,6 +74,10 @@ function fakeBackend(guest: Guest | null = null) {
     async buildTemplate(id) { calls.push(`build-template ${id}`); },
     async buildImage(id, _recipe, on) { calls.push(`build-image ${id} on ${on}`); },
     guest: () => { if (guest === null) throw new Error("this test has no guest"); return guest; },
+    async updateSecret(name, value) {
+      secretUpdates.push([name, value]);
+      return unreachable.map((id) => ({ pylonId: id, reason: "its controller did not answer" }));
+    },
     artifacts: {
       list: async () => [image, ...offered.keys(), ...imported.keys()],
       manifest: async (id) => imported.get(id)?.manifest ?? offered.get(id)?.manifest ?? null,
@@ -82,7 +90,7 @@ function fakeBackend(guest: Guest | null = null) {
     },
   };
   return {
-    backend, pylons, calls, imported,
+    backend, pylons, calls, imported, secretUpdates, unreachable,
     offer(manifest: ArtifactManifest, body: string) { offered.set(manifest.id, { manifest, body }); },
     hold() { gate = Promise.withResolvers(); }, release() { gate?.resolve(); gate = null; },
   };
@@ -96,7 +104,7 @@ async function setup(t: import("node:test").TestContext, overrides: Partial<Prob
     auth: { controlPlane, peers: [peer] },
     whois: async () => caller,
     backend: fake.backend,
-    secrets: { value: () => undefined, names: () => [] },
+    secrets: nodeSecrets({ value: () => undefined, names: () => [] }),
     ...overrides,
   });
   t.after(() => probe.close());
@@ -132,6 +140,20 @@ test("the client refuses a probe that whois does not name", async (t) => {
   const { probe } = await setup(t);
   const impostor = connectProbe(node, "127.0.0.1", probeNodeId, { port: probe.port, whois: async () => "nOTHER" as TailnetNodeId });
   await assert.rejects(impostor.job("x" as JobId), { code: "forbidden" });
+});
+
+test("the client sends nothing, not even the request line, to a peer that whois does not name", async (t) => {
+  const received: Buffer[] = [];
+  const server = createServer();
+  server.on("connection", (socket) => socket.on("data", (chunk: Buffer) => received.push(chunk)));
+  server.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  t.after(() => server.close());
+  const port = (server.address() as { port: number }).port;
+  const impostor = connectProbe(node, "127.0.0.1", probeNodeId, { port, whois: async () => "nOTHER" as TailnetNodeId });
+  await assert.rejects(impostor.putSecret("NEXUS_CHATGPT_TOKEN", "a-real-looking-token"), { code: "forbidden" });
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  assert.equal(Buffer.concat(received).length, 0, "the other node received no bytes");
 });
 
 test("a repeated jobId returns the job's current status", async (t) => {
@@ -245,7 +267,7 @@ test("fetch-artifact imports from the peer probe, and refuses a copy whose sha25
   const peerNode = "peer-node" as NodeName;
   const holder = await startProbe({
     node: peerNode, host: "127.0.0.1", port: 0, auth: { controlPlane, peers: [probeNodeId] }, whois: async () => probeNodeId,
-    backend: source.backend, secrets: { value: () => undefined, names: () => [] }, log: () => undefined,
+    backend: source.backend, secrets: nodeSecrets({ value: () => undefined, names: () => [] }), log: () => undefined,
   });
   t.after(() => holder.close());
   const manifest = templateManifest("b".repeat(64));
@@ -290,6 +312,15 @@ test("spawn checks secret grants before booting", async (t) => {
   const status = await finished(client, env.jobId);
   assert.ok(status.state === "failed" && status.code === "secret-missing");
   assert.equal(fake.pylons.size, 0);
+});
+
+test("a spawn granted a held secret boots before the control plane hands it over, rather than failing for good", async (t) => {
+  const { client, fake } = await setup(t);
+  const job: Job = { ...spawnJob, boot: { ...boot, network: { allowedHosts: [], secrets: [{ name: "NEXUS_CHATGPT_TOKEN", hosts: ["api.openai.com"] }] } } } as Job;
+  const env = envelope(job, node, Date.now());
+  await client.submit(env);
+  assert.equal((await finished(client, env.jobId)).state, "succeeded");
+  assert.equal(fake.pylons.get(pylonId)?.vm, "running");
 });
 
 test("observe starts with a snapshot carrying the applied liveHash, and a new probe reports none", async (t) => {
@@ -348,8 +379,48 @@ test("capacity counts the CPUs and memory of VMs that are up and the disk of eve
   }
 });
 
+test("a held secret from the control plane is held, applied to the running pylons, and then reported as one the node holds", async (t) => {
+  const secrets = nodeSecrets({ value: () => undefined, names: () => [] });
+  const logged: string[] = [];
+  const { base, client, fake } = await setup(t, { secrets, log: (line) => logged.push(line) });
+  const token = "eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJ0ZXN0In0.c2lnbmF0dXJl-_";
+  fake.unreachable.push("pylon-stuck" as PylonId);
+  const put = await fetch(`${base}/v1/secrets/NEXUS_CHATGPT_TOKEN`, { method: "PUT", body: token });
+  assert.equal(put.status, 204);
+  assert.deepEqual(fake.secretUpdates, [["NEXUS_CHATGPT_TOKEN", token]]);
+  assert.equal(secrets.value("NEXUS_CHATGPT_TOKEN"), token, "the backend boots new pylons with it");
+  assert.deepEqual(logged, ["pylon-stuck: NEXUS_CHATGPT_TOKEN was not updated: its controller did not answer"]);
+  for await (const e of client.observe(AbortSignal.timeout(5000))) {
+    const observation = e.type === "snapshot" ? e.observation : assert.fail();
+    assert.deepEqual(observation.grants, { secrets: ["NEXUS_CHATGPT_TOKEN"], gitSsh: false });
+    assert.ok(!JSON.stringify(observation).includes(token));
+    break;
+  }
+  await client.putSecret("NEXUS_CHATGPT_TOKEN", `${token}2`);
+  assert.equal(secrets.value("NEXUS_CHATGPT_TOKEN"), `${token}2`, "the client puts the value as the probe takes it");
+});
+
+test("a held secret is taken only from the control plane, only under a held name, and only as a token, and a refusal never echoes the value", async (t) => {
+  const secrets = nodeSecrets({ value: () => undefined, names: () => [] });
+  const { base, client, fake, callAs } = await setup(t, { secrets });
+  const put = (name: string, body: string) => fetch(`${base}/v1/secrets/${name}`, { method: "PUT", body });
+  callAs(peer);
+  assert.equal((await put("NEXUS_CHATGPT_TOKEN", "peer-token")).status, 403);
+  callAs(controlPlane);
+  assert.equal((await put("GH_TOKEN", "ghp_token")).status, 404, "a file secret is the node's own");
+  await assert.rejects(client.putSecret("STRIPE_KEY", "sk_live_x"), /HTTP 404/);
+  for (const [value, what] of [["", "empty"], ["hunter2".repeat(2341), "over 16 KiB"], ["bad hunter2", "a space"], ["hunter2\nX-Injected: 1", "a newline"], ["héllo-hunter2", "a non-ASCII letter"]] as const) {
+    const response = await put("NEXUS_CHATGPT_TOKEN", value);
+    assert.equal(response.status, 400, what);
+    assert.doesNotMatch(await response.text(), /hunter2/, `${what}: the refusal echoes the value`);
+  }
+  assert.equal((await fetch(`${base}/v1/secrets/NEXUS_CHATGPT_TOKEN`)).status, 405);
+  assert.deepEqual(fake.secretUpdates, [], "nothing refused reached a pylon");
+  assert.deepEqual(secrets.names(), []);
+});
+
 test("observations name the secrets the node holds, never their values, and whether it has a git SSH key", async (t) => {
-  const { client } = await setup(t, { secrets: { value: () => "s3cr3t", names: () => ["GH_TOKEN"] }, gitSsh: true });
+  const { client } = await setup(t, { secrets: nodeSecrets({ value: () => "s3cr3t", names: () => ["GH_TOKEN"] }), gitSsh: true });
   for await (const e of client.observe(AbortSignal.timeout(5000))) {
     const observation = e.type === "snapshot" ? e.observation : assert.fail();
     assert.deepEqual(observation.grants, { secrets: ["GH_TOKEN"], gitSsh: true });

@@ -11,14 +11,14 @@
 import { createDockerBackend } from "../docker-backend.ts";
 import { createPylonVmBackend } from "../pylon-vm-backend.ts";
 import { localApiWhois } from "../tailscale.ts";
-import { parseSelfDnsName, readProbeConfig, readSecretsFile, type ProbeConfig } from "./config.ts";
+import { nodeSecrets, parseSelfDnsName, readProbeConfig, readSecretsFile, type ProbeConfig } from "./config.ts";
 import { pylonVmHostBridge } from "./pylon-api.ts";
 import { tailscaleCli } from "./serve.ts";
 import { startProbe } from "./server.ts";
 
 const config = await readProbeConfig(process.argv[2] ?? "/etc/nexus/probe.json");
-// One source, so the probe's pre-boot check and the VMs see the same values.
-const secrets = await readSecretsFile(config.secretsFile);
+// One source, so the probe's pre-boot check, the VMs and the control plane's handoffs see the same values.
+const secrets = nodeSecrets(await readSecretsFile(config.secretsFile));
 // `tailscale serve` as the probe's user needs `tailscale set --operator=nexus`, which deploy/install-probe.sh runs.
 const tailscale = tailscaleCli();
 // Read from tailscale rather than configured, so a preview URL always names the node the probe runs on.

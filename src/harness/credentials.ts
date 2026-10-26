@@ -62,6 +62,16 @@ export async function requireModel(models: Models, model: ModelRef): Promise<voi
 }
 
 /**
+ * The access token of the harness's Sign in with ChatGPT, which every probe is handed for the chatgpt login, or
+ * undefined for an API key, which never leaves the control plane. It is refreshed with ten minutes left, so every probe
+ * has the new token several handoffs before the old one expires.
+ */
+export async function chatgptToken(models: Models, credentials: HarnessCredentials): Promise<string | undefined> {
+  if ((await credentials.store.read("openai"))?.type !== "oauth") return undefined;
+  return (await models.getAuth("openai", { minOAuthValidityMs: 10 * 60_000 }))?.auth.apiKey;
+}
+
+/**
  * Sign in with ChatGPT, stored in the credentials. The browser's callback goes to port 1455 of the machine that
  * runs this, so from another machine paste the redirect URL into the `manual_code` prompt instead.
  */

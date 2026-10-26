@@ -269,6 +269,13 @@ export const actionSchema = z.discriminatedUnion("action", [
 		service: serviceName.optional(),
 		lines: z.number().int().min(1).max(500).default(100),
 	}),
+	/** A new value for a secret this boot granted, swapped in on the running VM. It is never stored or logged. */
+	z.strictObject({
+		action: z.literal("update-secret"),
+		...identity,
+		secret: bootSchema.shape.secrets.keyType,
+		value: z.string().min(1),
+	}),
 ]);
 export type Action = z.infer<typeof actionSchema>;
 export const recordSchema = z.strictObject({
