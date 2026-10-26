@@ -1,5 +1,5 @@
 import type { BootInputs } from "../project.ts";
-import type { NodeName, PylonObservation } from "../protocol.ts";
+import { heldSecrets, type NodeName, type PylonObservation } from "../protocol.ts";
 import { desiredPhase } from "../reconcile.ts";
 import { HttpError } from "./http-error.ts";
 import type { NodeRecord, Registry, StoredPylon, ThreadId } from "./registry.ts";
@@ -32,7 +32,8 @@ function weigh(registry: Registry, node: NodeRecord, need: Need): Weighed {
   if (o.grants === null) return refused("runs a probe too old to report what its pylons hold");
   if (!o.artifacts.includes(need.image)) return refused(`does not hold image ${need.image}`);
   const missing = need.network.secrets.map((s) => s.name).filter((name) => !o.grants!.secrets.includes(name));
-  if (missing.length > 0) return refused(`has no secret ${missing.join(", ")} in its secret file`);
+  const from = (name: string) => heldSecrets.includes(name) ? `${name} from the control plane yet` : `${name} in its secret file`;
+  if (missing.length > 0) return refused(`has no secret ${missing.map(from).join(", ")}`);
   const ssh = [...need.repo.kind === "clone" ? [need.repo.url] : [], need.dotfiles.repo].filter((url) => !url.startsWith("https://"));
   if (ssh.length > 0 && !o.grants.gitSsh) return refused(`has no git SSH key to reach ${ssh.join(" and ")}`);
   const now = Date.now();
