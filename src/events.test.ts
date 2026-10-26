@@ -150,21 +150,24 @@ test("the newest Stop's hold owns the session whatever order the holds start in,
 });
 
 test("every background group is found among more processes than a process may hold files open at once", async (t) => {
-  const { backgroundGroups } = await import("../images/pylon/nexus-heartbeat.ts");
+  const { execFile } = await import("node:child_process");
+  const { promisify } = await import("node:util");
   const { mkdirSync, writeFileSync } = await import("node:fs");
   const proc = mkdtempSync(join(tmpdir(), "nexus-proc-"));
   t.after(() => rmSync(proc, { recursive: true, force: true }));
   const rest = Array.from({ length: 13 }, () => "0").join(" ");
-  // As many as a pylon holds once its init leaves thousands of zombies unreaped. Every tenth leads a background group.
+  // Three times the open-file limit the scan runs under, as a pylon holds once its init leaves zombies unreaped.
   const leaders: number[] = [];
-  for (let pid = 1_000; pid < 11_000; pid++) {
+  for (let pid = 1_000; pid < 4_000; pid++) {
     const leads = pid % 10 === 0;
     if (leads) leaders.push(pid);
     mkdirSync(join(proc, String(pid)));
     writeFileSync(join(proc, String(pid), "stat"), `${pid} (sleep) S ${leads ? 100 : 1} ${leads ? pid : 1} 0 0 -1 ${rest} 7 0`);
   }
-  const groups = await backgroundGroups(100, proc, 200);
-  assert.deepEqual(groups.map((g) => g.pgid).toSorted((a, b) => a - b), leaders);
+  const heartbeat = new URL("../images/pylon/nexus-heartbeat.ts", import.meta.url).href;
+  const scan = `const { backgroundGroups } = await import(${JSON.stringify(heartbeat)}); console.log(JSON.stringify((await backgroundGroups(100, process.argv[1], 200)).map((g) => g.pgid)));`;
+  const { stdout } = await promisify(execFile)("sh", ["-c", 'ulimit -n 1024 && exec "$0" --input-type=module -e "$1" "$2"', process.execPath, scan, proc]);
+  assert.deepEqual(JSON.parse(stdout).toSorted((a: number, b: number) => a - b), leaders);
 });
 
 test("a group counts only while its leader is the one recorded, or, without a leader, while a member of that generation lives", async (t) => {

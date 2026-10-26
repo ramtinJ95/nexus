@@ -333,6 +333,26 @@ async function gone(pidFile: string) {
   }
 }
 
+/**
+ * Runs a snapshot whose deadline passes only once `reached` holds, so a slow machine cannot reach the deadline before
+ * the stage the test is about. The deadline only ends a hang.
+ */
+async function snapshotPastDeadline(t: TestContext, dir: string, turn: string, deadlineMs: number, reached: () => Promise<boolean>): Promise<boolean> {
+  const realTimeout = setTimeout;
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  try {
+    const snapshot = snapshotTurn(dir, turn, deadlineMs, helperPath);
+    for (const deadline = Date.now() + 60_000; !await reached();) {
+      assert.ok(Date.now() < deadline, "the snapshot reached the stage the test needs");
+      await new Promise((resolve) => realTimeout(resolve, 20));
+    }
+    t.mock.timers.tick(deadlineMs);
+    return await snapshot;
+  } finally {
+    t.mock.timers.reset();
+  }
+}
+
 test("the Claude hook's snapshot is the base of its turn", async (t) => {
   const c = await checkout(t);
   await writeFile(join(c.dir, "app.txt"), "before the turn\n");
@@ -343,7 +363,7 @@ test("the Claude hook's snapshot is the base of its turn", async (t) => {
   assert.deepEqual(changes.files.map((f) => f.path), ["turn.txt"]);
 });
 
-test("a snapshot past its deadline is killed with the git and filters it runs, leaves no temporary index and none under its ID", { timeout: 60_000 }, async (t) => {
+test("a snapshot past its deadline is killed with the git and filters it runs, leaves no temporary index and none under its ID", async (t) => {
   const c = await checkout(t);
   const { slow, filtered, pid } = await slowFilter(c);
   await writeFile(slow, "");
@@ -353,8 +373,8 @@ test("a snapshot past its deadline is killed with the git and filters it runs, l
   process.env.TMPDIR = scratch;
   t.after(() => { if (tmp === undefined) delete process.env.TMPDIR; else process.env.TMPDIR = tmp; });
   const turn = claudeTurn("s1", 2000);
-  // A snapshot that outlived its deadline would wait on the filter until the test ends it.
-  assert.equal(await snapshotTurn(c.dir, turn, 500, helperPath), false);
+  const filtering = async () => (await readFile(pid, "utf8").catch(() => "")) !== "";
+  assert.equal(await snapshotPastDeadline(t, c.dir, turn, 500, filtering), false);
   assert.deepEqual(await readdir(scratch), [], "the temporary index is gone");
   await rm(slow);
   await gone(pid);
@@ -382,10 +402,12 @@ test("a deadline that passes during the ref update lets it finish, so no ref loc
   const c = await checkout(t);
   const hooks = join(c.scratch, "hooks");
   await mkdir(hooks);
-  await writeFile(join(hooks, "reference-transaction"), "#!/bin/sh\n[ \"$1\" = prepared ] && sleep 1\nexit 0\n", { mode: 0o755 });
+  const updating = join(c.scratch, "updating");
+  await writeFile(join(hooks, "reference-transaction"), `#!/bin/sh\n[ "$1" = prepared ] && touch '${updating}' && sleep 1\nexit 0\n`, { mode: 0o755 });
   await c.git("config", "core.hooksPath", hooks);
   const turn = claudeTurn("s1", 1000);
-  assert.equal(await snapshotTurn(c.dir, turn, 300, helperPath), true);
+  const inUpdate = async () => await readFile(updating).then(() => true, () => false);
+  assert.equal(await snapshotPastDeadline(t, c.dir, turn, 300, inUpdate), true);
   for (const lock of ["refs/nexus/turn.lock", "packed-refs.lock"]) await assert.rejects(readFile(join(c.dir, ".git", lock)), { code: "ENOENT" }, `${lock} is gone`);
   assert.equal((await c.git("log", "-1", "--format=%s", "refs/nexus/turn")).trim(), `Nexus turn ${turn}`);
   await c.git("config", "--unset", "core.hooksPath");
@@ -411,7 +433,9 @@ test("a snapshot whose turn a later attempt claimed is refused even to a read ex
   assert.equal(await snapshotTurn(c.dir, older, 30_000, helperPath), true);
   await checkoutReader(c.open, c.dir, undefined, older).changes("turn");
   await writeFile(slow, "");
-  assert.equal(await snapshotTurn(c.dir, claudeTurn("b", 2000), 300, helperPath), false);
+  const later = claudeTurn("b", 2000);
+  const claimed = async () => (await readFile(join(c.dir, ".git/nexus-turn"), "utf8").catch(() => "")) === later;
+  assert.equal(await snapshotPastDeadline(t, c.dir, later, 300, claimed), false);
   assert.equal((await c.git("log", "-1", "--format=%s", "refs/nexus/turn")).trim(), `Nexus turn ${older}`);
   await assert.rejects(checkoutReader(c.open, c.dir, undefined, older).changes("turn"), refused("no-base", /no latest-turn snapshot/));
   await assert.rejects(checkoutReader(c.open, c.dir, undefined, older).diff("turn", []), refused("no-base", /no latest-turn snapshot/));

@@ -1,2 +1,2 @@
-# this branch, the same test, 5 runs (ulimit -n 4096)
+# this branch, the same test, 5 runs
 pass=5 fail=0

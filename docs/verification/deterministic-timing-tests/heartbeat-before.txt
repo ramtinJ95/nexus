@@ -1,4 +1,4 @@
-# origin/main's images/pylon/nexus-heartbeat.ts under this branch's new test, 5 runs (ulimit -n 4096)
+# origin/main's images/pylon/nexus-heartbeat.ts under this branch's new test, which scans under ulimit -n 1024, 5 runs
  AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:  actual: [  expected: [ 
  AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:  actual: [  expected: [ 
  AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:  actual: [  expected: [ 
