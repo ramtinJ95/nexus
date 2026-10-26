@@ -121,3 +121,21 @@ test("a run that cannot give a verdict is void: a pylon at the wrong commit, a l
   const restarted = f.runs();
   assert.deepEqual(restarted.poll(lost, f.head), { kind: "void" }, "after a restart, nothing says what the thread already ran");
 });
+
+test("a pipe that fails while it is consumed voids the run and deletes its check thread, with no unhandled rejection", async (t) => {
+  for (const failure of ["close", "read"] as const) {
+    const f = await fixture(t, "true");
+    const runs = f.runs();
+    const id = await runs.start(f.builder, "feature", f.head);
+    f.stream = async () => ({
+      write: async () => {},
+      close: async () => { if (failure === "close") throw Object.assign(new Error("write EPIPE"), { code: "EPIPE" }); },
+      abort: () => {},
+      done: Promise.resolve({ kind: "lost" as const }),
+      async *[Symbol.asyncIterator]() { if (failure === "read") throw new Error("socket hang up"); yield new Uint8Array(); },
+    });
+    f.running(f.registry.thread(id)!);
+    assert.deepEqual(await settle(() => runs.poll(id, f.head)), { kind: "void" }, `a failed ${failure}`);
+    assert.equal(f.registry.thread(id)!.status, "deleted");
+  }
+});

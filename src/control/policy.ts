@@ -60,6 +60,8 @@ const conditions: readonly ((facts: LandingFacts) => string[])[] = [
   },
   ({ review, pr }) => {
     const head = review.rounds.at(-1)!.head;
+    // A PR merged outside the review is held on what can still be judged: which head merged.
+    if (pr.pr.state === "merged") return pr.detail.head === head ? [] : [`Pull request #${pr.pr.number} merged at ${pr.detail.head}, not the approved ${head}.`];
     if (pr.pr.state !== "open") return [`Pull request #${pr.pr.number} is ${pr.pr.state}.`];
     return [
       ...pr.detail.head === head ? [] : [`The pull request's head is ${pr.detail.head}, not the approved ${head}.`],

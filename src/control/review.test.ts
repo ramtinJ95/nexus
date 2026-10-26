@@ -454,3 +454,59 @@ test("a reply that came while a delivered message was not yet cleared is still r
   assert.equal(f.review().since, attempted);
   assert.notEqual(f.review().phase.kind, "reviewing", "the reply that came meanwhile was read");
 });
+
+test("a PR merged outside the review is held by the policy like this review's own merge, and never deployed past a hold", async (t) => {
+  const f = fixture(t, { claudeBuilder: false, secrets: [{ name: "CLAUDE_CODE_OAUTH_TOKEN", hosts: ["api.anthropic.com"] }] });
+  f.registry.setDesiredRelease({ commit: previous, requestedBy: "person", requestedAt: 1 });
+  f.files = [{ path: "images/pylon/Dockerfile", previous: null, patch: "@@ -1 +1 @@\n-FROM a\n+FROM b" }];
+  f.check = { kind: "running" };
+  const loop = f.loop();
+  await loop.start(f.builder, { land: "nLAPTOP" });
+  await loop.poll();
+  f.reply(f.review().reviewer, verdict(f.review(), {}));
+  await loop.poll();
+  assert.equal(f.review().phase.kind, "checking");
+  f.snapshot = { ...f.snapshot, pr: { ...f.snapshot.pr, state: "merged" }, detail: { ...f.snapshot.detail, mergeCommit: merged } };
+  f.check = { kind: "done", passed: true, output: "ok" };
+  await loop.poll();
+  assert.deepEqual(f.merges, []);
+  assert.equal(f.registry.desiredRelease()?.commit, previous, "nothing was deployed");
+  const reasons = (f.review().phase as { reasons: string[] }).reasons;
+  assert.equal(reasons[0], "Pull request #7 was merged outside this review, so it is not deployed.");
+  assert.ok(reasons.some((r) => r.startsWith("A Claude reviewer approved it")));
+  assert.ok(reasons.some((r) => r.startsWith("Always needs the person: pylon image rebuilds")));
+});
+
+test("a PR merged outside the review that the policy would have merged deploys", async (t) => {
+  const f = fixture(t);
+  f.registry.setDesiredRelease({ commit: previous, requestedBy: "person", requestedAt: 1 });
+  f.check = { kind: "running" };
+  const loop = f.loop();
+  await loop.start(f.builder, { land: "nLAPTOP" });
+  await loop.poll();
+  f.reply(f.review().reviewer, verdict(f.review(), {}));
+  await loop.poll();
+  f.snapshot = { ...f.snapshot, pr: { ...f.snapshot.pr, state: "merged" }, detail: { ...f.snapshot.detail, mergeCommit: merged } };
+  f.check = { kind: "done", passed: true, output: "ok" };
+  await loop.poll();
+  assert.deepEqual(f.merges, []);
+  assert.equal(f.review().phase.kind, "deploying");
+  assert.equal(f.registry.desiredRelease()?.commit, merged);
+});
+
+test("this review's own merge, recorded before the merge call, deploys after a crash without being judged again", async (t) => {
+  const f = fixture(t);
+  f.registry.setDesiredRelease({ commit: previous, requestedBy: "person", requestedAt: 1 });
+  f.mergeAnswer = () => {
+    // GitHub merged it, then the control plane crashed before it saw the answer.
+    f.snapshot = { ...f.snapshot, pr: { ...f.snapshot.pr, state: "merged" }, detail: { ...f.snapshot.detail, mergeCommit: merged } };
+    throw new Error("connection reset");
+  };
+  await approved(f, "nLAPTOP");
+  assert.deepEqual(f.review().phase, { kind: "merging", authorized: head1 }, "the head is authorized before the merge call");
+  f.files = [{ path: "images/pylon/Dockerfile", previous: null, patch: "" }];
+  await f.loop().poll();
+  assert.deepEqual(f.merges, [head1]);
+  assert.equal(f.review().phase.kind, "deploying");
+  assert.equal(f.registry.desiredRelease()?.commit, merged);
+});

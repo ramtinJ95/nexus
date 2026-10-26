@@ -80,7 +80,11 @@ export type Phase =
   /** The repository's checks run at the approved head, in `thread`, a check thread thrown away afterwards. */
   | { kind: "checking"; startedAt: number; thread: ThreadId | null }
   | { kind: "approved" }
-  | { kind: "merging" }
+  /**
+   * `authorized` is the head this review is about to merge, saved before the merge call, so after a restart a PR that
+   * merged at it is this review's own merge, and any other merge is someone else's.
+   */
+  | { kind: "merging"; authorized: string | null }
   /** `requested` once the desired release is set. `previous` is the release to roll back to, null if there was none. */
   | { kind: "deploying"; commit: string; previous: string | null; requested: boolean; deadline: number }
   /** The deploy of `commit` failed for `why`, and the fleet goes back to `previous`, the desired release once `requested`. */
@@ -318,23 +322,29 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
       if (state.kind !== "done") return r;
       checks.discard(phase.thread);
       const next = withRound({ ...r, phase: { ...phase, thread: null } }, { check: { passed: state.passed, output: state.output } });
-      if (state.passed) return r.land === null ? { ...next, phase: { kind: "approved" } } : { ...next, phase: { kind: "merging" } };
+      if (state.passed) return r.land === null ? { ...next, phase: { kind: "approved" } } : { ...next, phase: { kind: "merging", authorized: null } };
       if (r.rounds.length >= r.maxRounds) return toPerson(next, `.nexus/check failed at ${round.head} after the last round this review allows.`);
       return send(next, "builder", (token) => builderFindings(next, token), { kind: "fixing" });
     },
-    async merging(r) {
+    async merging(r, phase) {
       const head = r.rounds.at(-1)!.head;
       const snapshot = await github.poll(r.pr.repo, r.pr.number);
+      const holds = async () => landingHolds({ review: r, pr: snapshot, files: await github.files(r.pr.repo, r.pr.number), nexus: r.pr.repo.toLowerCase() === release.repo.toLowerCase() });
       let commit: string;
       if (snapshot.detail.mergeCommit !== null) {
-        // Merged before this step merged it, such as by this step before a restart, or by someone else.
         if (snapshot.detail.head !== head) return toPerson(r, `Pull request #${r.pr.number} merged at ${snapshot.detail.head}, not the approved ${head}, so it is not deployed.`);
+        // A merge this review did not authorize is someone else's, so it deploys only if the policy would have let this review merge it.
+        if (phase.authorized !== head) {
+          const held = await holds();
+          if (held.length) return toPerson(r, `Pull request #${r.pr.number} was merged outside this review, so it is not deployed.`, ...held);
+        }
         commit = snapshot.detail.mergeCommit;
       } else {
         // Every attempt checks the whole policy again with what GitHub says now, since checks and the PR can change
         // between attempts and branch protection may not enforce them.
-        const holds = landingHolds({ review: r, pr: snapshot, files: await github.files(r.pr.repo, r.pr.number), nexus: r.pr.repo.toLowerCase() === release.repo.toLowerCase() });
-        if (holds.length) return toPerson(r, ...holds);
+        const held = await holds();
+        if (held.length) return toPerson(r, ...held);
+        if (phase.authorized !== head) return { ...r, phase: { kind: "merging", authorized: head } };
         const merged = await github.merge(r.pr.repo, r.pr.number, head);
         if (merged.kind !== "merged") {
           return toPerson(r, merged.kind === "denied"

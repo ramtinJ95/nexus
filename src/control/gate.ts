@@ -11,7 +11,7 @@
  * Only this process knows that it opened a run's pipe, so a check thread it holds no run for, as after a restart, may
  * have run something already. It is thrown away, and the check starts again in a fresh one.
  */
-import type { NodeName, ProbeClient, ProbeError } from "../protocol.ts";
+import type { ByteStream, NodeName, ProbeClient, ProbeError } from "../protocol.ts";
 import { checkoutDir } from "../sessions.ts";
 import type { Registry, Thread, ThreadId } from "./registry.ts";
 import type { StartRequest } from "./threads.ts";
@@ -57,16 +57,42 @@ export function checkRuns(options: {
     const run: Run = { kind: "running", output: Buffer.alloc(0) };
     runs.set(t.id, run);
     const settle = (next: Run) => { if (runs.get(t.id) === run) runs.set(t.id, next); };
-    probe.stream(t.pylonId, ["sh", "-c", checkScript, "nexus-check", head]).then(async (stream) => {
-      await stream.close();
-      for await (const chunk of stream) run.output = Buffer.concat([run.output, chunk]).subarray(-tailBytes);
-      const end = await stream.done;
-      const output = run.output.toString("utf8").trim();
-      settle(end.kind === "exited" && end.code !== unfit ? { kind: "done", passed: end.code === 0, output } : { kind: "void" });
-    }, (err: unknown) => {
-      // Nothing ran in a pylon that was not running, so the run may open its pipe again.
-      settle((err as Partial<ProbeError>).code === "not-running" ? { kind: "waiting", output: Buffer.alloc(0) } : { kind: "void" });
-    });
+    void (async () => {
+      let stream: ByteStream;
+      try {
+        stream = await probe.stream(t.pylonId, ["sh", "-c", checkScript, "nexus-check", head]);
+      } catch (err) {
+        // Nothing ran in a pylon that was not running, so the run may open its pipe again.
+        if ((err as Partial<ProbeError>).code === "not-running") return settle({ kind: "waiting", output: Buffer.alloc(0) });
+        return invalid(t.id, run);
+      }
+      try {
+        await stream.close();
+        for await (const chunk of stream) run.output = Buffer.concat([run.output, chunk]).subarray(-tailBytes);
+        const end = await stream.done;
+        const output = run.output.toString("utf8").trim();
+        if (end.kind === "exited" && end.code !== unfit) settle({ kind: "done", passed: end.code === 0, output });
+        else invalid(t.id, run);
+      } catch {
+        // A pipe that failed partway, such as one closed before its EOF went out, may have run the check, so it says nothing.
+        stream.abort();
+        invalid(t.id, run);
+      }
+    })();
+  }
+
+  /** The run can give no verdict, so its pylon, which may have run something, goes at once. */
+  function invalid(id: ThreadId, run: Run) {
+    if (runs.get(id) !== run) return;
+    runs.set(id, { kind: "void" });
+    remove(id);
+  }
+
+  function remove(id: ThreadId) {
+    const t = registry.thread(id);
+    if (t === undefined || t.status === "deleted") return;
+    registry.setThreadStatus(id, "deleted");
+    wake(t);
   }
 
   return {
@@ -92,10 +118,7 @@ export function checkRuns(options: {
     },
     discard(id) {
       runs.delete(id);
-      const t = registry.thread(id);
-      if (t === undefined || t.status === "deleted") return;
-      registry.setThreadStatus(id, "deleted");
-      wake(t);
+      remove(id);
     },
   };
 }
