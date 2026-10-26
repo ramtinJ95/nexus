@@ -7,7 +7,8 @@
 //    origin.git, runs it, and requests a change until `sh greet.sh Ada` prints `hello Ada`.
 //  - The probe's git facts are the branch output this stack records once origin.git has `feature`.
 //  - The node's release worker reports each new desired release healthy after 3 s, or rolled back with FAIL_DEPLOY=1.
-//  - The reviewer pylon's exec runs here, in its own clone, so .nexus/check runs for real.
+//  - A check thread's pylon is a fresh clone here at the commit its boot names, made when its pipe opens, so the real
+//    check script and .nexus/check run, and the verdict is the local process's exit status. Each pipe is logged.
 //
 //   node docs/verification/review-flow/stack.ts
 import { execFile, execFileSync } from "node:child_process";
@@ -24,7 +25,7 @@ import { agentInbox } from "../../../src/control/inbox.ts";
 import { prWatcher } from "../../../src/control/pr-watch.ts";
 import { agentReplies, reviewLoop } from "../../../src/control/review.ts";
 import { threadStarter } from "../../../src/control/threads.ts";
-import { checkRunner } from "../../../src/control/gate.ts";
+import { checkCaller, checkRuns } from "../../../src/control/gate.ts";
 import type { CommandResult, NodeName, PylonCommand, PylonId, TailnetNodeId } from "../../../src/protocol.ts";
 
 const root = "/tmp/nexus-review-verify";
@@ -55,14 +56,13 @@ git(seed, "add", "-A");
 git(seed, "commit", "-qm", "init");
 git(seed, "push", "-q", origin, "main");
 execFileSync("git", ["clone", "-q", origin, builderRepo]);
-const reviewerRepos = new Map<PylonId, string>();
-function reviewerRepo(pylon: PylonId): string {
-  let dir = reviewerRepos.get(pylon);
-  if (dir === undefined) {
-    dir = join(root, pylon);
-    execFileSync("git", ["clone", "-q", origin, dir]);
-    reviewerRepos.set(pylon, dir);
-  }
+/** A check pylon's checkout: a fresh clone at the commit its boot names, as the pylon's first boot would clone it. */
+function checkRepo(pylon: PylonId): string {
+  const dir = join(root, pylon);
+  const boot = registry.pylon(pylon)!.boot.repo;
+  rmSync(dir, { recursive: true, force: true });
+  execFileSync("git", ["clone", "-q", origin, dir]);
+  if (boot.kind === "clone") git(dir, "checkout", "-q", "--detach", boot.checkout.commit);
   return dir;
 }
 
@@ -197,18 +197,18 @@ function answer(thread: ThreadId, request: string) {
 
 const probe = {
   async command(pylonId: PylonId, command: PylonCommand): Promise<CommandResult> {
-    const builder = registry.threads().find((t) => registry.claudeWorker(t.id) !== undefined)?.pylonId;
-    if (command.kind === "exec" && pylonId !== builder) {
-      const dir = reviewerRepo(pylonId);
-      log("check.log", `exec in ${pylonId}: ${command.argv.slice(3).join(" ")}`);
-      const result = await run(command.argv, command.timeoutMs, { ...process.env, HOME: join(dir, ".home") }, dir);
-      log("check.log", `→ ${result.output.split("\n")[0]}`);
-      return { kind: "exec", ...result };
-    }
     if (command.kind === "send-claude") log("typed.log", `send-claude to ${pylonId}:\n${command.text}\n`);
     return runCommand(pylonId, command, deps);
   },
   async stream(pylonId: PylonId, argv: readonly string[]) {
+    const thread = registry.threads().find((t) => t.pylonId === pylonId);
+    if (thread?.startedBy === checkCaller) {
+      const dir = checkRepo(pylonId);
+      log("check.log", `pipe into ${pylonId}, a fresh clone at ${argv.at(-1)}`);
+      const stream = processStream(argv[0]!, argv.slice(1).map((a) => a.replaceAll("/home/user/workspace/repo", dir)), (text) => process.stderr.write(text));
+      void stream.done.then((end) => log("check.log", `pipe into ${pylonId} ended: ${JSON.stringify(end)}`));
+      return stream;
+    }
     const local = argv.map(moved);
     return processStream(local[0]!, local.slice(1), (text) => process.stderr.write(text));
   },
@@ -217,11 +217,11 @@ const probes = new Map([[node, probe]]);
 const wake = () => {};
 const inbox = agentInbox({ registry, harness, probes, wake });
 const watch = prWatcher({ registry, github, inbox });
+const startThread = threadStarter({ registry, harness, dotfiles: { repo: "https://example.com/dotfiles.git", ref: "main" }, wake });
 const reviews = reviewLoop({
-  registry, github, inbox, harnessModel: "gpt-6-astra",
-  startThread: threadStarter({ registry, harness, dotfiles: { repo: "https://example.com/dotfiles.git", ref: "main" }, wake }),
+  registry, github, inbox, harnessModel: "gpt-6-astra", startThread,
   replies: agentReplies(registry, harness),
-  check: checkRunner({ registry, probes, wake }),
+  checks: checkRuns({ registry, probes, startThread, wake }),
   release: { self: nodeId, repo },
   log: (message) => console.error(message),
 });

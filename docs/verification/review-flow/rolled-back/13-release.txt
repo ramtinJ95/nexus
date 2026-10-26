@@ -1,5 +1,5 @@
 $ nexus release
-Desired: b254b123f4dc1edb800acb012f083d434e89159d by nexus review rv-9d744c18 rollback at 2026-10-26T01:19:49.558Z
-verify-node control: unknown rolled-back: health check failed
-verify-node probe: unknown rolled-back: health check failed
+Desired: a1e2ec2e5bb76690b1fb7f6f122121777cf46f7a by nexus review rv-7be2063d rollback at 2026-10-26T01:42:23.316Z
+verify-node control: a1e2ec2e5bb76690b1fb7f6f122121777cf46f7a healthy
+verify-node probe: a1e2ec2e5bb76690b1fb7f6f122121777cf46f7a healthy
 --- exit 0

@@ -62,6 +62,6 @@ nexus("events-release", ["events", "--kind", "release.changed"]);
 nexus("conversation-builder", ["conversation", builder.id]);
 nexus("conversation-reviewer", ["conversation", ended.reviewer]);
 nexus("show-reviewer", ["show", ended.reviewer]);
-nexus("threads", ["threads"]);
+nexus("threads", ["threads", "--all"]);
 nexus("release", ["release"]);
 nexus("land-again", ["land", builder.id]);

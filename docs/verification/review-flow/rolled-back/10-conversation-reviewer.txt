@@ -1,10 +1,10 @@
-$ nexus conversation th-75c1d55fe5bb
+$ nexus conversation th-ea3d03d46d38
 > [Nexus review — automated, not a message from the person]
 > You are the independent reviewer of pull request #1, "Add greet.sh" (https://github.com/ramtinJ95/nexus/pull/1). An agent on claude-opus-5-5 wrote it; you run on gpt-6-astra. Review only. Do not push, change the branch, or comment on GitHub. Your findings go to the builder, who answers each, and you review its new commits in later rounds.
 > 
 > Fetch and check out the head, then review the change against its base:
->   git fetch origin && git checkout --detach fceca4e6fa3c5b7c6bbee5329e2b7dc98825196c
->   git diff origin/main...fceca4e6fa3c5b7c6bbee5329e2b7dc98825196c
+>   git fetch origin && git checkout --detach 0f4fd922084b9f474aaadb561069a103fd9bedaa
+>   git diff origin/main...0f4fd922084b9f474aaadb561069a103fd9bedaa
 > 
 > Look for correctness bugs, regressions, security problems, missing tests, and docs the change makes wrong. Mark a finding serious if it must be fixed before merging, minor otherwise. Approve only when no serious finding is open; minor ones go to the builder to fix or reject either way.
 > 
@@ -19,14 +19,14 @@ $ nexus conversation th-75c1d55fe5bb
 > 
 > End your reply with exactly one block like this, with JSON in it:
 > ```nexus-review
-> {"token": "rv-9d744c18:55e87b0b8054", "verdict": "approve" or "changes", "findings": [{"id": "F1", "severity": "serious" or "minor", "where": "path:line", "summary": "one line", "detail": "why, and what would fix it"}], "reserved": [{"case": one of "secrets", "egress", "auth", "tailnet", "destructive-migration", "image-rebuild", "cli-breaking", "irreversible", "why": "..."}], "notCheckedLive": "the quote" or null}
+> {"token": "rv-7be2063d:bedffb0cc078", "verdict": "approve" or "changes", "findings": [{"id": "F1", "severity": "serious" or "minor", "where": "path:line", "summary": "one line", "detail": "why, and what would fix it"}], "reserved": [{"case": one of "secrets", "egress", "auth", "tailnet", "destructive-migration", "image-rebuild", "cli-breaking", "irreversible", "why": "..."}], "notCheckedLive": "the quote" or null}
 > ```
 
-I ran greet.sh at fceca4e6fa3c5b7c6bbee5329e2b7dc98825196c: `sh greet.sh Ada` printed "hello Ada".
+I ran greet.sh at 0f4fd922084b9f474aaadb561069a103fd9bedaa: `sh greet.sh Ada` printed "hello Ada".
 
 ```nexus-review
 {
-  "token": "rv-9d744c18:55e87b0b8054",
+  "token": "rv-7be2063d:bedffb0cc078",
   "verdict": "approve",
   "findings": [],
   "reserved": [],

@@ -1,8 +1,8 @@
-$ nexus show th-75c1d55fe5bb
-th-75c1d55fe5bb  Review of #1: Add greet.sh
+$ nexus show th-ea3d03d46d38
+th-ea3d03d46d38  Review of #1: Add greet.sh
 project: nexus
 attention: reply
 status: active
-pylon: pylon-th-75c1d55fe5bb on verify-node, running, observed 0s ago
+pylon: pylon-th-ea3d03d46d38 on verify-node, running, observed 0s ago
 PR watch: on
 --- exit 0
