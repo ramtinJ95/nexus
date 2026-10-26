@@ -108,7 +108,7 @@ async function fakeController(dir: string, pylonId: string, answer: (action: Rec
     const action = JSON.parse(body) as Record<string, unknown>;
     try {
       const result = action.action === "inspect"
-        ? { name: pylonId, labels: { "nexus.image": image }, status: { name: pylonId, state: state.current } }
+        ? { name: pylonId, labels: { "nexus.image": image }, status: { name: pylonId, state: state.current, resources: { cpus: 2, memoryGiB: 4 } } }
         : (actions.push(action), await answer(action));
       res.end(JSON.stringify({ ok: true, result }));
     } catch (err) {
@@ -226,6 +226,23 @@ test("a pylon whose controller has yet to publish its PID is booting while its l
   assert.deepEqual((await backend.list()).map((p) => p.vm), ["booting"]);
   await rm(join(dir, "launch.lock"), { recursive: true });
   assert.deepEqual((await backend.list()).map((p) => p.vm), ["broken"]);
+});
+
+test("a pylon holds its CPUs and memory while its VM is up, from launch on, and its disk until it is deleted", async () => {
+  const { backend, instances } = await backendWith();
+  const dir = await leftInstance(instances, "pylon-up", "running", 16);
+  await fakeController(dir, "pylon-up");
+  await leftInstance(instances, "pylon-paused", "stopped", 30);
+  const launching = await leftInstance(instances, "pylon-launching", "starting", 8);
+  // What the launching client writes before its controller listens.
+  await writeFile(join(launching, "status.json"), JSON.stringify({ name: "pylon-launching", state: "starting", resources: { cpus: 2, memoryGiB: 4 } }));
+  await mkdir(join(launching, "launch.lock"));
+  await writeFile(join(launching, "launch.lock", "owner"), JSON.stringify(await identityOf(process.pid)));
+  assert.deepEqual(Object.fromEntries((await backend.list()).map((p) => [p.pylonId, [p.vm, p.holds]])), {
+    "pylon-up": ["running", { cpus: 2, memoryGiB: 4, diskGiB: 16 }],
+    "pylon-paused": ["stopped", { cpus: 0, memoryGiB: 0, diskGiB: 30 }],
+    "pylon-launching": ["booting", { cpus: 2, memoryGiB: 4, diskGiB: 8 }],
+  });
 });
 
 test("a PID handed out again, or one from an earlier boot of the host, is a dead controller and a dead launcher", async () => {

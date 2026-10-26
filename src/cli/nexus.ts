@@ -218,6 +218,10 @@ function claudeText(c: ClaudeConversation): string {
   return c.readAt === null ? "Claude's transcript has not been read yet. It is read while the pylon runs." : "Claude has not written a transcript yet.";
 }
 
+const gib = (n: number) => Number(n.toFixed(1));
+const capacityText = (c: NonNullable<NodeSummary["capacity"]>) =>
+  `${c.committedCpus}/${c.cpus} CPUs, ${gib(c.committedMemoryGiB)}/${gib(c.memoryGiB)} GiB memory committed, ${gib(c.committedDiskGiB)} GiB disk committed, ${gib(c.diskFreeGiB)} GiB disk free`;
+
 /** A review's state for a person: its phase and round, its reviewer, and what it needs from them. */
 function reviewText(r: Review): string {
   const phase = r.phase.kind === "landed" ? `landed as ${r.phase.commit}` : r.phase.kind === "deploying" ? `deploying ${r.phase.commit}` : r.phase.kind;
@@ -961,7 +965,7 @@ const commands: Readonly<Record<string, Command>> = {
         json: nodes,
         text: nodes.length === 0 ? "No nodes." : table(nodes.map((n) => [
           n.name, n.state, n.observedAt === null ? "never observed" : `observed ${ago(Date.parse(n.observedAt))}`,
-          n.capacity === null ? "" : `${n.capacity.committedMemoryGiB}/${n.capacity.memoryGiB} GiB committed, ${n.capacity.diskFreeGiB} GiB disk free`,
+          n.capacity === null ? "" : capacityText(n.capacity),
         ])),
       };
     },

@@ -116,7 +116,11 @@ export interface NodeObservation {
   observedAt: string;
   /** A new value after every probe restart. It tells the control plane that in-memory job results are gone. */
   probeBootId: string;
-  capacity: { memoryGiB: number; committedMemoryGiB: number; diskFreeGiB: number };
+  /**
+   * What the node has, and what its pylons reserve of it. A VM that is up holds its CPUs and memory, and every pylon
+   * holds its disk size until it is deleted, so a paused pylon counts toward `committedDiskGiB` only.
+   */
+  capacity: { cpus: number; committedCpus: number; memoryGiB: number; committedMemoryGiB: number; diskFreeGiB: number; committedDiskGiB: number };
   artifacts: readonly ArtifactId[];
   /**
    * Running jobs, plus results from the last 10 minutes. Read before `pylons`, so `pylons` shows the result of

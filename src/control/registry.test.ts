@@ -119,7 +119,7 @@ test("activity timestamps only move forward", async (t) => {
 test("ingest writes fold into records, and applying one twice changes nothing", async (t) => {
   const registry = seeded(tempDb());
   t.after(() => registry.close());
-  const capacity = { memoryGiB: 64, committedMemoryGiB: 8, diskFreeGiB: 400 };
+  const capacity = { cpus: 16, committedCpus: 0, memoryGiB: 64, committedMemoryGiB: 8, diskFreeGiB: 400, committedDiskGiB: 0 };
   const writes = [
     { record: "node", node, state: "online", capacity },
     { record: "sessions", pylonId, sessions: [
@@ -146,7 +146,7 @@ test("ingest writes fold into records, and applying one twice changes nothing", 
 test("an observation is stored only together with the writes derived from it", async (t) => {
   const registry = seeded(tempDb());
   t.after(() => registry.close());
-  const capacity = { memoryGiB: 64, committedMemoryGiB: 8, diskFreeGiB: 400 };
+  const capacity = { cpus: 16, committedCpus: 0, memoryGiB: 64, committedMemoryGiB: 8, diskFreeGiB: 400, committedDiskGiB: 0 };
   const first: NodeObservation = { node, observedAt: "2027-01-01T00:00:00Z", probeBootId: "b", capacity, artifacts: [], jobs: [], pylons: [], previewRoutes: [] };
   registry.ingested(first, [{ record: "node", node, state: "online", capacity }]);
   assert.deepEqual(registry.node(node)?.observation, first);
@@ -344,7 +344,7 @@ test("a published preview is ready only while its running pylon reports its serv
   registry.apply({ record: "preview", pylonId, service: "api", httpsPort: 10200, ready: true });
   registry.apply({ record: "preview", pylonId, service: "web", httpsPort: 10201, ready: true });
   const observe = (observed: NodeObservation["pylons"][number]) => registry.ingested({
-    node, observedAt: "2027-01-01T00:00:00Z", probeBootId: "b", capacity: { memoryGiB: 64, committedMemoryGiB: 8, diskFreeGiB: 400 },
+    node, observedAt: "2027-01-01T00:00:00Z", probeBootId: "b", capacity: { cpus: 16, committedCpus: 0, memoryGiB: 64, committedMemoryGiB: 8, diskFreeGiB: 400, committedDiskGiB: 0 },
     artifacts: [], jobs: [], pylons: [observed], previewRoutes: [],
   }, []);
   const running = (webState: ServiceFact["state"] | null) => observe({
@@ -376,7 +376,7 @@ test("a port the node routes is never handed out, though no row holds it", async
   const registry = seeded(tempDb());
   t.after(() => registry.close());
   const routed = (httpsPort: number, owner: string) => ({ httpsPort, pylonId: owner as PylonId, service: "web" });
-  registry.ingested({ node, observedAt: "2027-01-01T00:00:00Z", probeBootId: "b", capacity: { memoryGiB: 64, committedMemoryGiB: 8, diskFreeGiB: 400 }, artifacts: [], jobs: [], pylons: [],
+  registry.ingested({ node, observedAt: "2027-01-01T00:00:00Z", probeBootId: "b", capacity: { cpus: 16, committedCpus: 0, memoryGiB: 64, committedMemoryGiB: 8, diskFreeGiB: 400, committedDiskGiB: 0 }, artifacts: [], jobs: [], pylons: [],
     previewRoutes: [routed(10200, "pylon-lost"), routed(10201, pylonId)] }, []);
   registry.allocatePreviews(pylonId, ["web", "api"], ports);
   assert.deepEqual(portsOf(registry, pylonId), ["api 10203", "web 10202"], "a route left to this pylon from a lost row is refused too");

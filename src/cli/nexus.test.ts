@@ -389,7 +389,7 @@ function watchLines(t: TestContext, s: Awaited<ReturnType<typeof setup>>, args: 
 
 /** Reports the node online with the thread's pylon running these services and listening on these ports. */
 function observeRunning(s: Awaited<ReturnType<typeof setup>>, thread: Thread, services: ServiceFact[], ports: number[]) {
-  const capacity = { memoryGiB: 64, committedMemoryGiB: 0, diskFreeGiB: 100 };
+  const capacity = { cpus: 16, committedCpus: 0, memoryGiB: 64, committedMemoryGiB: 0, diskFreeGiB: 100, committedDiskGiB: 0 };
   s.registry.apply({ record: "node", node, state: "online", capacity });
   s.registry.ingested({
     node, observedAt: new Date().toISOString(), probeBootId: "b", capacity, artifacts: [], jobs: [], previewRoutes: [],

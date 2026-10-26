@@ -200,7 +200,7 @@ test("nodes are listed with their state and capacity, without the observation", 
   const s = await setup(t);
   const offline = { name: node, tailnetHost: "rj-firebat.tail.ts.net", tailnetNodeId: "nFIREBAT", state: "offline", capacity: null, observedAt: null };
   assert.deepEqual(await s.call("GET", "/v1/nodes"), { status: 200, body: [offline] });
-  const capacity = { memoryGiB: 64, committedMemoryGiB: 0, diskFreeGiB: 100 };
+  const capacity = { cpus: 16, committedCpus: 0, memoryGiB: 64, committedMemoryGiB: 0, diskFreeGiB: 100, committedDiskGiB: 0 };
   s.registry.apply({ record: "node", node, state: "online", capacity });
   s.registry.ingested({ node, observedAt: "2027-01-01T00:01:00Z", probeBootId: "b", capacity, artifacts: [], jobs: [], pylons: [], previewRoutes: [] }, []);
   assert.deepEqual((await s.call("GET", "/v1/nodes")).body, [{ ...offline, state: "online", capacity, observedAt: "2027-01-01T00:01:00Z" }]);
@@ -307,7 +307,7 @@ test("thread detail derives the actual state from the node's last observation", 
     sessions: [], previews: [], ports: [], outputs: [], prWatch: { enabled: false, stopped: false, error: null }, pullRequests: [], review: null, attach: "herdr --session nexus", agent: { parkedTasks: 0 },
   });
 
-  const capacity = { memoryGiB: 64, committedMemoryGiB: 0, diskFreeGiB: 100 };
+  const capacity = { cpus: 16, committedCpus: 0, memoryGiB: 64, committedMemoryGiB: 0, diskFreeGiB: 100, committedDiskGiB: 0 };
   s.registry.apply({ record: "node", node, state: "online", capacity });
   const pylon = s.registry.pylon(thread.pylonId)!;
   const running = {
@@ -337,7 +337,7 @@ test("thread detail derives the actual state from the node's last observation", 
 
 /** Reports the node online with the thread's pylon running these services and listening on these ports. */
 function observeRunning(s: Awaited<ReturnType<typeof withThread>>, facts: { services?: ServiceFact[]; listening?: { port: number }[] | null }) {
-  const capacity = { memoryGiB: 64, committedMemoryGiB: 0, diskFreeGiB: 100 };
+  const capacity = { cpus: 16, committedCpus: 0, memoryGiB: 64, committedMemoryGiB: 0, diskFreeGiB: 100, committedDiskGiB: 0 };
   s.registry.apply({ record: "node", node, state: "online", capacity });
   const running = {
     pylonId: s.thread.pylonId, phase: "running" as const, liveHash: s.registry.pylon(s.thread.pylonId)!.liveHash, bootedAt: "2027-01-01T00:00:00Z",
@@ -654,7 +654,7 @@ test("closing a listed session names it, and a pane that runs another session no
 
 /** Records the thread's pylon stopped with these sessions, as the loop would from the node's observation. */
 function observeStopped(s: Awaited<ReturnType<typeof withThread>>, sessions: readonly PausedSession[]) {
-  const capacity = { memoryGiB: 64, committedMemoryGiB: 0, diskFreeGiB: 100 };
+  const capacity = { cpus: 16, committedCpus: 0, memoryGiB: 64, committedMemoryGiB: 0, diskFreeGiB: 100, committedDiskGiB: 0 };
   s.registry.apply({ record: "node", node, state: "online", capacity });
   const stopped = { pylonId: s.thread.pylonId, phase: "stopped" as const, checkpoint: null, sessions };
   s.registry.ingested({ node, observedAt: new Date().toISOString(), probeBootId: "b", capacity, artifacts: [], jobs: [], pylons: [stopped], previewRoutes: [] },
@@ -730,7 +730,7 @@ test("a failed pylon shows failed with its reason until its thread is deleted, a
   const s = await withThread(t);
   const { thread } = s;
   const detail = async () => (await s.call("GET", `/v1/threads/${thread.id}`)).body as ThreadDetail;
-  const capacity = { memoryGiB: 64, committedMemoryGiB: 0, diskFreeGiB: 100 };
+  const capacity = { cpus: 16, committedCpus: 0, memoryGiB: 64, committedMemoryGiB: 0, diskFreeGiB: 100, committedDiskGiB: 0 };
   s.registry.apply({ record: "node", node, state: "online", capacity });
   const reason = "last job failed with setup-failed, which is not retryable: pylon-x: Setup exited 128\nfatal: unable to access";
   s.registry.savePylon({ ...s.registry.pylon(thread.pylonId)!, failed: reason });
@@ -779,7 +779,7 @@ test("retrying a failed pylon clears the planner's verdict and its attempts, mar
 test("a pylon whose disk holds a failed setup cannot be retried, and its detail says why", async (t) => {
   const s = await withThread(t);
   const { thread } = s;
-  const capacity = { memoryGiB: 64, committedMemoryGiB: 0, diskFreeGiB: 100 };
+  const capacity = { cpus: 16, committedCpus: 0, memoryGiB: 64, committedMemoryGiB: 0, diskFreeGiB: 100, committedDiskGiB: 0 };
   s.registry.apply({ record: "node", node, state: "online", capacity });
   const broken = (cause: "setup" | "saved-setup" | "services") => s.registry.ingested({
     node, observedAt: "2027-01-01T00:01:00Z", probeBootId: "b", capacity, artifacts: [], jobs: [],
@@ -1887,7 +1887,7 @@ test("a Claude worker thread takes no messages while archived, deleted or before
 
 /** Records the thread's pylon stopped, as the loop would from its node's observation. */
 function observePaused(s: Awaited<ReturnType<typeof withClaude>>) {
-  const capacity = { memoryGiB: 64, committedMemoryGiB: 0, diskFreeGiB: 100 };
+  const capacity = { cpus: 16, committedCpus: 0, memoryGiB: 64, committedMemoryGiB: 0, diskFreeGiB: 100, committedDiskGiB: 0 };
   const stopped = { pylonId: s.thread.pylonId, phase: "stopped" as const, checkpoint: null, sessions: [] };
   s.registry.ingested({ node, observedAt: new Date().toISOString(), probeBootId: "b", capacity, artifacts: [], jobs: [], pylons: [stopped], previewRoutes: [] }, []);
 }

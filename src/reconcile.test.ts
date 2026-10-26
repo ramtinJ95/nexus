@@ -242,7 +242,7 @@ test("submit replies round-trip through the wire encoding", () => {
 });
 
 test("a snapshot from a probe older than route reporting parses with its routes unknown", () => {
-  const observation = { node, observedAt: "2027-01-01T00:00:00Z", probeBootId: "b", capacity: { memoryGiB: 64, committedMemoryGiB: 0, diskFreeGiB: 100 }, artifacts: [], jobs: [], pylons: [] };
+  const observation = { node, observedAt: "2027-01-01T00:00:00Z", probeBootId: "b", capacity: { cpus: 16, committedCpus: 0, memoryGiB: 64, committedMemoryGiB: 0, diskFreeGiB: 100, committedDiskGiB: 0 }, artifacts: [], jobs: [], pylons: [] };
   const old = parseProbeEvent(encodeProbeEvent({ type: "snapshot", observation } as unknown as ProbeEvent));
   assert.ok(old.type === "snapshot" && old.observation.previewRoutes === null);
   const routes = [{ httpsPort: 10200, pylonId, service: "web" }];
@@ -254,7 +254,7 @@ test("a snapshot from a probe older than route reporting parses with its routes 
 
 test("a broken pylon whose cause is missing, as from an older probe, or one this control plane does not know parses with its cause unknown", () => {
   const snapshot = (pylon: Record<string, unknown>) => encodeProbeEvent({ type: "snapshot", observation: {
-    node, observedAt: "2027-01-01T00:00:00Z", probeBootId: "b", capacity: { memoryGiB: 64, committedMemoryGiB: 0, diskFreeGiB: 100 }, artifacts: [], jobs: [], pylons: [pylon], previewRoutes: [],
+    node, observedAt: "2027-01-01T00:00:00Z", probeBootId: "b", capacity: { cpus: 16, committedCpus: 0, memoryGiB: 64, committedMemoryGiB: 0, diskFreeGiB: 100, committedDiskGiB: 0 }, artifacts: [], jobs: [], pylons: [pylon], previewRoutes: [],
   } } as unknown as ProbeEvent);
   const old = parseProbeEvent(snapshot({ pylonId, phase: "broken", detail: "Setup exited 128. Read controller logs" }));
   assert.ok(old.type === "snapshot");
@@ -379,7 +379,7 @@ test("ingest: the first list after a wake replaces the paused sessions with thei
 
 test("ingest: a deleted pylon drops its sessions", () => {
   assert.deepEqual(ingest({ type: "snapshot", observation: {
-    node, observedAt: "2027-01-01T00:00:00Z", probeBootId: "b1", capacity: { memoryGiB: 64, committedMemoryGiB: 8, diskFreeGiB: 500 },
+    node, observedAt: "2027-01-01T00:00:00Z", probeBootId: "b1", capacity: { cpus: 16, committedCpus: 0, memoryGiB: 64, committedMemoryGiB: 8, diskFreeGiB: 500, committedDiskGiB: 0 },
     artifacts: [], jobs: [], pylons: [], previewRoutes: [],
   } }, node, knows(phase("deleting")), now).filter((w) => w.record === "sessions"), [{ record: "sessions", pylonId, sessions: [] }]);
 });
@@ -405,7 +405,7 @@ test("ingest: a snapshot writes the node, its jobs, its pylons, and closes known
   const gone = "pylon-gone" as PylonId;
   const observation: NodeObservation = {
     node, observedAt: "2027-01-01T00:00:00Z", probeBootId: "b1",
-    capacity: { memoryGiB: 64, committedMemoryGiB: 8, diskFreeGiB: 500 },
+    capacity: { cpus: 16, committedCpus: 0, memoryGiB: 64, committedMemoryGiB: 8, diskFreeGiB: 500, committedDiskGiB: 0 },
     artifacts: [image], jobs: [status],
     pylons: [runningWith({ attachedClients: 2 }), { pylonId: "pylon-x" as PylonId, phase: "booting" }],
     previewRoutes: [],

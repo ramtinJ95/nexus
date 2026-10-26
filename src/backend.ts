@@ -53,6 +53,11 @@ export interface BackendPylon {
    * checkpoint because the checkpoint cannot be read while paused. Null when that pause recorded none.
    */
   sessions?: readonly PausedSession[] | null;
+  /**
+   * What the pylon reserves on its node: CPUs and memory while its VM is up, and its disk for as long as it exists,
+   * paused or not. Absent from a backend that reserves nothing, such as Docker's.
+   */
+  holds?: BootInputs["resources"];
 }
 
 /** Every call runs as `user`. */

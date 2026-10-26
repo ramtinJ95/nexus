@@ -87,6 +87,8 @@ const sidecarSchema = z.strictObject({
   checkpoint: checkpointId.nullable(), pausing: checkpointId.optional(), relaunch: z.literal(true).optional(), sessions: z.array(pausedSessionSchema).optional(),
 });
 type Sidecar = z.infer<typeof sidecarSchema>;
+/** What a VM that is up reports holding, from the boot it was started with. */
+const vmHolds = z.object({ cpus: z.number(), memoryGiB: z.number() });
 const setupFailed = (status: Instance["status"]) => status.startupFailures?.some((f) => f.kind === "setup") === true;
 /** A controller older than startupFailures reports only the startupError, so whether setup failed is unknown. */
 const failureUnknown = (status: Instance["status"]) => status.startupError !== undefined && status.startupFailures === undefined;
@@ -398,12 +400,18 @@ export function createPylonVmBackend(options: PylonVmBackendOptions): VmBackend 
 
   async function list(): Promise<BackendPylon[]> {
     const instances = z.array(instanceSchema).parse(await sandbox({ action: "list", kind: "instances" }));
-    return Promise.all(instances.map(async (instance) => {
+    const listed = await Promise.all(instances.map(async (instance): Promise<BackendPylon | null> => {
       const pylonId = instance.name as PylonId;
       const image = instance.labels[imageLabel];
       if (image === undefined) throw new Error(`instance ${pylonId} in ${stateRoot} has no ${imageLabel} label, so this backend did not create it`);
       const state = vmState(instance);
       const sidecar = await readSidecar(pylonId);
+      const record = await readRecord(instanceDir(pylonId)).catch((err: unknown) => {
+        if (existsError(err, "ENOENT")) return null; // destroyed since the list
+        throw err;
+      });
+      if (record === null) return null;
+      const up = vmHolds.safeParse(["starting", "unavailable", "running", "stopping"].includes(instance.status.state) ? instance.status.resources : undefined);
       return {
         pylonId,
         ...state,
@@ -411,8 +419,10 @@ export function createPylonVmBackend(options: PylonVmBackendOptions): VmBackend 
         ...state.vm === "stopped" ? { sessions: sidecar.sessions ?? null } : {},
         image: image as ImageId,
         bootedAt: state.vm === "running" ? instance.status.bootedAt ?? null : null,
+        holds: { cpus: up.data?.cpus ?? 0, memoryGiB: up.data?.memoryGiB ?? 0, diskGiB: record.config.diskGiB },
       };
     }));
+    return listed.filter((p) => p !== null);
   }
 
   const artifacts: ArtifactStore = {

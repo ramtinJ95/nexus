@@ -39,7 +39,7 @@ function fixture(path = ":memory:") {
   const options = { registry, github, inbox: inbox() };
   /** Reports the node online with the thread's pylon running, or with no pylons. */
   function observe(thread: ThreadId, running: boolean) {
-    const capacity = { memoryGiB: 64, committedMemoryGiB: 0, diskFreeGiB: 100 };
+    const capacity = { cpus: 16, committedCpus: 0, memoryGiB: 64, committedMemoryGiB: 0, diskFreeGiB: 100, committedDiskGiB: 0 };
     registry.apply({ record: "node", node, state: "online", capacity });
     const pylon = { pylonId: `pylon-${thread}` as PylonId, phase: "running" as const, liveHash: "hash" as LiveHash, bootedAt: "2027-01-01T00:00:00Z", bootedFrom: { image: "img-000000000000" as const, checkpoint: null }, services: [], listening: [], previews: [], sessions: [], git: null, declaredOutputs: [], attachedClients: 0 };
     registry.ingested({ node, observedAt: new Date().toISOString(), probeBootId: "b", capacity, artifacts: [], jobs: [], pylons: running ? [pylon] : [], previewRoutes: [] }, []);

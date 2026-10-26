@@ -13,7 +13,7 @@
 import { randomUUID } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
 import { retryable } from "./protocol.ts";
-import type { HerdrStatus, Job, JobEnvelope, JobErrorCode, JobId, JobStatus, LiveHash, NodeName, PausedSession, ProbeEvent, PylonId, PylonObservation, RunningFacts, SessionFact } from "./protocol.ts";
+import type { HerdrStatus, Job, JobEnvelope, JobErrorCode, JobId, JobStatus, LiveHash, NodeName, NodeObservation, PausedSession, ProbeEvent, PylonId, PylonObservation, RunningFacts, SessionFact } from "./protocol.ts";
 import type { BootInputs, LiveSpec, PylonSource, SessionHarness } from "./project.ts";
 import type { ArtifactId, CheckpointId } from "./images.ts";
 
@@ -206,7 +206,7 @@ export function envelope(job: Job, node: NodeName, now: number): JobEnvelope {
 
 /** Record writes derived from one probe event. The control plane is the only writer of every record. */
 export type RegistryWrite =
-  | { record: "node"; node: NodeName; state: "online" | "offline"; capacity: NodeCapacity }
+  | { record: "node"; node: NodeName; state: "online" | "offline"; capacity: NodeObservation["capacity"] }
   /** The pylon's whole list: a session it does not list is gone. Adopts panes opened by hand in Herdr. */
   | { record: "sessions"; pylonId: PylonId; sessions: readonly SessionRow[] }
   /** The pylon paused without saying what its wake brings back, so every session it had is paused. */
@@ -216,7 +216,6 @@ export type RegistryWrite =
   | { record: "activity"; pylonId: PylonId; human: number | null; agent: number | null }
   | { record: "orphan"; node: NodeName; pylonId: PylonId }
   | { record: "job"; status: JobStatus };
-type NodeCapacity = { memoryGiB: number; committedMemoryGiB: number; diskFreeGiB: number };
 
 /**
  * A session as the registry keeps it, but its pylon: running in a pane, paused with its pylon, or failed to come back

@@ -28,7 +28,7 @@ const image = {
     neovim: "0.12.6", neovimSha256: "b".repeat(64),
   },
 };
-const capacity = { memoryGiB: 64, committedMemoryGiB: 0, diskFreeGiB: 100 };
+const capacity = { cpus: 16, committedCpus: 0, memoryGiB: 64, committedMemoryGiB: 0, diskFreeGiB: 100, committedDiskGiB: 0 };
 
 const dir = await mkdtemp(join(tmpdir(), "nexus-dashboard-"));
 after(() => rm(dir, { recursive: true }));
@@ -744,7 +744,7 @@ test("a failed pylon whose disk holds a failed setup offers no retry, and says t
   const s = await seeded(t);
   const fix = await s.start("acme", "Fix checkout");
   s.registry.ingested({
-    node, observedAt: new Date().toISOString(), probeBootId: "b", capacity: { memoryGiB: 64, committedMemoryGiB: 0, diskFreeGiB: 100 }, artifacts: [], jobs: [],
+    node, observedAt: new Date().toISOString(), probeBootId: "b", capacity: { cpus: 16, committedCpus: 0, memoryGiB: 64, committedMemoryGiB: 0, diskFreeGiB: 100, committedDiskGiB: 0 }, artifacts: [], jobs: [],
     pylons: [{ pylonId: fix.pylonId, phase: "broken", detail: "Setup exited 128. Read controller logs", cause: "saved-setup" }], previewRoutes: [],
   }, []);
   s.registry.savePylon({ ...s.registry.pylon(fix.pylonId)!, failed: "pylon is broken: Setup exited 128. Read controller logs" });

@@ -317,6 +317,21 @@ test("observe starts with a snapshot carrying the applied liveHash, and a new pr
   }
 });
 
+test("capacity counts the CPUs and memory of VMs that are up and the disk of every pylon, paused ones included", async (t) => {
+  const { client, fake } = await setup(t);
+  const at = (id: string) => id as PylonId;
+  fake.pylons.set(at("pylon-a"), { pylonId: at("pylon-a"), vm: "running", checkpoint: null, image, bootedAt: "2027-01-01T00:00:00Z", holds: { cpus: 4, memoryGiB: 8, diskGiB: 60 } });
+  fake.pylons.set(at("pylon-b"), { pylonId: at("pylon-b"), vm: "booting", checkpoint: null, image, bootedAt: null, holds: { cpus: 2, memoryGiB: 8, diskGiB: 30 } });
+  fake.pylons.set(at("pylon-c"), { pylonId: at("pylon-c"), vm: "stopped", checkpoint: "ckpt-c-1", image, bootedAt: null, sessions: null, holds: { cpus: 0, memoryGiB: 0, diskGiB: 60 } });
+  fake.pylons.set(at("pylon-d"), { pylonId: at("pylon-d"), vm: "running", checkpoint: null, image, bootedAt: "2027-01-01T00:00:00Z" });
+  for await (const e of client.observe(AbortSignal.timeout(5000))) {
+    const { capacity } = e.type === "snapshot" ? e.observation : assert.fail();
+    assert.deepEqual([capacity.committedCpus, capacity.committedMemoryGiB, capacity.committedDiskGiB], [6, 16, 150], "a pylon whose backend reserves nothing counts for nothing");
+    assert.ok(capacity.cpus > 0 && capacity.memoryGiB > 0);
+    break;
+  }
+});
+
 async function running(client: ReturnType<typeof connectProbe>) {
   const env = envelope(spawnJob, node, Date.now());
   await client.submit(env);
