@@ -28,9 +28,9 @@ test("every file the services import is in the release that deploy/release.sh pa
 /**
  * Runs install_release on this checkout into a scratch prefix, as the deployer does, through `bash -c` without
  * errexit. npm is a fake that records each call and fails the one named by `failing`, and root ownership is skipped,
- * as the test does not run as root.
+ * as the test does not run as root. `stubs` defines shell functions that stand in for commands, to make one fail.
  */
-async function installRelease(t: TestContext, failing: string | null) {
+async function installRelease(t: TestContext, failing: string | null, stubs = "") {
   const scratch = await mkdtemp(join(tmpdir(), "nexus-release-"));
   t.after(() => rm(scratch, { recursive: true, force: true }));
   const bin = join(scratch, "bin");
@@ -43,7 +43,7 @@ exit 0
 `);
   await chmod(join(bin, "npm"), 0o755);
   const commit = "c".repeat(40);
-  const script = `. "$1/deploy/release.sh"; prefix=$2; service_path=$3:$PATH; install() { mkdir -p "$prefix/releases"; }; chown() { :; }; install_release "$1"`;
+  const script = `. "$1/deploy/release.sh"; prefix=$2; service_path=$3:$PATH; install() { mkdir -p "$prefix/releases"; }; chown() { :; }; ${stubs} install_release "$1"`;
   const done = await new Promise<{ code: number | null; stderr: string }>((resolve) => {
     execFile("bash", ["-c", script, "build", root, join(scratch, "opt"), bin], { env: { ...process.env, NEXUS_COMMIT: commit } }, (err, _stdout, stderr) => {
       resolve({ code: err === null ? 0 : (err.code as number), stderr });
@@ -66,6 +66,22 @@ for (const failing of ["ci --no-audit", "run build", "prune --omit=dev"]) {
     const run = await installRelease(t, failing);
     assert.notEqual(run.code, 0, "install_release fails");
     assert.equal(run.calls.at(-1), failing, "no step runs after the failed one");
+    assert.deepEqual(run.releases, [], "no release directory and no staging directory are left");
+  });
+}
+
+// Each stub fails one step before npm runs, after doing what a real failure might have done first.
+const earlyFailures = {
+  "the archive cannot read a file": `tar() { if [ "$3" = -cf ]; then command tar --exclude=images/pylon/nexus-turn.ts "$@"; return 2; fi; command tar "$@"; };`,
+  "the archive cannot be unpacked": `tar() { if [ "$4" = -xf ]; then cat > /dev/null; return 2; fi; command tar "$@"; };`,
+  "the hash fails": `sha256sum() { command sha256sum "$@"; return 1; };`,
+  "the staging directory cannot be made": `mktemp() { return 1; };`,
+};
+for (const [failure, stub] of Object.entries(earlyFailures)) {
+  test(`a release is not published, and npm never runs, when ${failure}`, async (t) => {
+    const run = await installRelease(t, null, stub);
+    assert.notEqual(run.code, 0, "install_release fails");
+    assert.deepEqual(run.calls, [""], "npm never runs");
     assert.deepEqual(run.releases, [], "no release directory and no staging directory are left");
   });
 }

@@ -19,14 +19,20 @@ require_node() {
 # Installs the checkout at $1 as a release, unless an identical one exists, and sets $release to its hash.
 install_release() {
   local repo=$1
-  install -d -o root -g root -m 0755 "$prefix" "$prefix/releases"
+  # Callers run this without errexit, so every step up to the publish checks its own failure, and pipefail, kept
+  # to this function, makes a pipeline fail when any part of it does. A failure exits, and the EXIT trap removes
+  # the staging directory, which leaves no release directory for a retry to take as installed.
+  local -
+  set -o pipefail
+  install -d -o root -g root -m 0755 "$prefix" "$prefix/releases" || fail "could not make $prefix/releases"
   # A staging directory left by an interrupted run holds nothing a later run needs.
-  rm -rf "$prefix"/releases/.staging.*
-  staging=$(mktemp -d "$prefix/releases/.staging.XXXXXX")
+  rm -rf "$prefix"/releases/.staging.* || fail "could not remove old staging directories"
+  staging=$(mktemp -d "$prefix/releases/.staging.XXXXXX") || fail "could not make a staging directory"
   trap 'rm -rf "$staging"' EXIT
   # src/release.test.ts fails when src imports a file outside this list.
-  tar -C "$repo" -cf - package.json package-lock.json tsconfig.json src deploy images/pylon/agent-setup/manifest.ts images/pylon/nexus-turn.ts | tar -C "$staging" --no-same-owner -xf -
-  release=$(cd "$staging" && find . -type f -print0 | LC_ALL=C sort -z | xargs -0 sha256sum | sha256sum | cut -c1-12)
+  tar -C "$repo" -cf - package.json package-lock.json tsconfig.json src deploy images/pylon/agent-setup/manifest.ts images/pylon/nexus-turn.ts | tar -C "$staging" --no-same-owner -xf - \
+    || fail "could not copy $repo into the release"
+  release=$(cd "$staging" && find . -type f -print0 | LC_ALL=C sort -z | xargs -0 sha256sum | sha256sum | cut -c1-12) || fail "could not hash the release"
   if [ -n "${NEXUS_COMMIT:-}" ]; then
     [[ "$NEXUS_COMMIT" =~ ^[0-9a-f]{40}$ ]] || fail "NEXUS_COMMIT must be a full commit"
     release=$NEXUS_COMMIT
@@ -35,8 +41,6 @@ install_release() {
     echo "release $release is already installed"
   else
     # The dashboard's client is bundled from its sources and their dev dependencies, which go once it is built.
-    # Callers run this without errexit, so each step's failure stops here, and the EXIT trap removes the staging
-    # directory, which leaves no release directory for a retry to take as installed.
     (cd "$staging" && PATH=$service_path npm ci --no-audit --no-fund) || fail "npm ci failed for release $release"
     (cd "$staging" && PATH=$service_path npm run build) || fail "the dashboard build failed for release $release"
     (cd "$staging" && PATH=$service_path npm prune --omit=dev --no-audit --no-fund) || fail "npm prune failed for release $release"
