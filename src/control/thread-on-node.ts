@@ -504,7 +504,7 @@ async function addProject() {
   assert.equal(added.code, 0, added.stderr);
   const expected = {
     id: "node-check", repoUrl, defaultBranch: "main", defaultNode: probeConfig.node,
-    resources: { cpus: 2, memoryGiB: 4, diskGiB: 10 }, allowedHosts: [], secrets: [], logins: [], preSetup: null,
+    resources: { cpus: 2, memoryGiB: 6, diskGiB: 10 }, allowedHosts: [], secrets: [], logins: [], preSetup: null,
   };
   assert.deepEqual(JSON.parse(added.stdout), expected);
   assert.deepEqual(await expect(200, "GET", "/projects"), [expected]);

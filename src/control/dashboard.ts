@@ -376,7 +376,7 @@ ${nodes.map((n) => html`<option value="${n.name}">${n.name}${n.state === "offlin
 const newProjectButton = html`<a class="btn btn-primary" href="/projects/new" data-new-project>New project</a>`;
 
 /** What a new project gets beyond the dialog's fields, the same as `nexus project add` without its flags. */
-const newProjectResources = { cpus: 2, memoryGiB: 4, diskGiB: 10 };
+const newProjectResources = { cpus: 2, memoryGiB: 6, diskGiB: 10 };
 
 /**
  * The fields `nexus project add` asks for. The node is `auto` unless changed to one of the known nodes, as `nexus

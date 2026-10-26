@@ -111,7 +111,7 @@ async function refusal(body: unknown): Promise<string> {
   return ((await res.json()) as { error: string }).error;
 }
 const repoUrl = "git@github.com:octocat/Hello-World.git";
-const cliDefaults = { defaultBranch: "main", resources: { cpus: 2, memoryGiB: 4, diskGiB: 10 }, allowedHosts: [], secrets: [], logins: [], preSetup: null };
+const cliDefaults = { defaultBranch: "main", resources: { cpus: 2, memoryGiB: 6, diskGiB: 10 }, allowedHosts: [], secrets: [], logins: [], preSetup: null };
 
 try {
   await pw("open", `${base}/`);

@@ -856,7 +856,7 @@ test("/projects/new opens the new-project dialog with the fields of nexus projec
   assert.match(dialog, /<label class="check"><input type="checkbox" name="github"> GitHub access<\/label>/, "GitHub access is off unless asked for");
   assert.deepEqual(JSON.parse(/data-github-grant="([^"]*)"/.exec(dialog)![1]!.replace(/&quot;/g, '"')), githubTokenGrant);
   assert.match(textOf(dialog), /GitHub access sends the node's GH_TOKEN to api\.github\.com and github\.com/);
-  assert.match(textOf(dialog), /Each pylon gets 2 CPUs, 4 GiB of memory and 10 GiB of disk\. nexus project add can set those, allowed hosts, logins and other secrets\./);
+  assert.match(textOf(dialog), /Each pylon gets 2 CPUs, 6 GiB of memory and 10 GiB of disk\. nexus project add can set those, allowed hosts, logins and other secrets\./);
   assert.match(dialog, /<p id="project-error" class="error" role="alert" hidden><\/p>/, "the dialog has a place for the API's refusal");
 });
 
@@ -871,7 +871,7 @@ test("the new-project form adds the project nexus project add would, and the API
   });
   const added = await add("acme", node);
   assert.equal(added.status, 201, added.text);
-  assert.deepEqual(JSON.parse(added.text), project("acme"), "the same project as the CLI's defaults");
+  assert.deepEqual(JSON.parse(added.text), { ...project("acme"), resources: { cpus: 2, memoryGiB: 6, diskGiB: 10 } }, "the same project as the CLI's defaults");
   assert.equal(sidebarOf((await s.call("GET", "/")).text).text, "acme main", "the sidebar lists it with its branch");
 
   const refusal = (res: Reply) => [res.status, (JSON.parse(res.text) as { error: string }).error];

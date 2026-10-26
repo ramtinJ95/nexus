@@ -309,8 +309,8 @@ test("project add creates a project with the contract's defaults or its flags, a
   assert.deepEqual([added.code, added.stdout, added.stderr], [0, `Added project hello (${repo}) on ${node}\n`, ""]);
   assert.deepEqual(s.registry.project("hello" as ProjectId), {
     id: "hello", repoUrl: repo, defaultBranch: "main", defaultNode: node,
-    resources: { cpus: 2, memoryGiB: 4, diskGiB: 10 }, allowedHosts: [], secrets: [], logins: [], preSetup: null,
-  }, "an unflagged project gets main, 2 CPUs, 4 GiB of memory and 10 GiB of disk");
+    resources: { cpus: 2, memoryGiB: 6, diskGiB: 10 }, allowedHosts: [], secrets: [], logins: [], preSetup: null,
+  }, "an unflagged project gets main, 2 CPUs, 6 GiB of memory and 10 GiB of disk");
 
   const custom = await s.json([
     "project", "add", "custom", "git@github.com:octocat/Spoon-Knife.git", "--node", node, "--branch", "dev", "--cpus", "4", "--memory", "8", "--disk", "20",
@@ -350,7 +350,7 @@ test("project add --scratch makes a project with no repository, --secret grants 
   const added = await s.nexus(["project", "add", "sketch", "--scratch", "--node", node, "--secret", "GH_TOKEN:api.github.com,github.com", "--secret", "EXA_API_KEY:api.exa.ai"]);
   assert.deepEqual([added.code, added.stdout, added.stderr], [0, `Added scratch project sketch on ${node}\n`, ""]);
   assert.deepEqual(s.registry.project("sketch" as ProjectId), {
-    id: "sketch", repoUrl: null, defaultBranch: "main", defaultNode: node, resources: { cpus: 2, memoryGiB: 4, diskGiB: 10 }, allowedHosts: [],
+    id: "sketch", repoUrl: null, defaultBranch: "main", defaultNode: node, resources: { cpus: 2, memoryGiB: 6, diskGiB: 10 }, allowedHosts: [],
     secrets: [{ name: "GH_TOKEN", hosts: ["api.github.com", "github.com"] }, { name: "EXA_API_KEY", hosts: ["api.exa.ai"] }], logins: [], preSetup: null,
   });
   assert.match((await s.nexus(["projects"])).stdout, /^sketch +node rj-firebat +branch main +scratch$/m);

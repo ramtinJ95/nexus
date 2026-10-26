@@ -1078,7 +1078,7 @@ const commands: Readonly<Record<string, Command>> = {
       // A forgotten URL must not quietly make a scratch project.
       if ((url === undefined) === (v.scratch !== true)) throw new CliError("invalid", "project add takes a <repo-url> or --scratch, and not both");
       const repoUrl = url ?? null;
-      const resources = { cpus: int(str(v, "cpus"), "--cpus", 2), memoryGiB: int(str(v, "memory"), "--memory", 4), diskGiB: int(str(v, "disk"), "--disk", 10) };
+      const resources = { cpus: int(str(v, "cpus"), "--cpus", 2), memoryGiB: int(str(v, "memory"), "--memory", 6), diskGiB: int(str(v, "disk"), "--disk", 10) };
       const secrets = strs(v, "secret").map(secretGrantOf);
       const p = await api("POST", "/v1/projects", {
         id, repoUrl, defaultBranch: str(v, "branch") ?? "main", defaultNode: str(v, "node") ?? "auto", resources,
