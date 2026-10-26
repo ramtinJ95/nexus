@@ -6,6 +6,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { openRegistry, type StoredPylon, type Thread, type ThreadId } from "./registry.ts";
 import { newPylonRecord } from "../tick.ts";
+import { trackActivity } from "../harness/activity.ts";
+import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
+import type { ConversationId, DocumentObserver, LiveState, TaskId } from "@earendil-works/pi-durable";
 import type { JobId, LiveHash, NodeName, NodeObservation, PylonId, ServiceFact, TailnetNodeId } from "../protocol.ts";
 import type { ProjectId, RemoteProject } from "../project.ts";
 import type { ImageManifest, TemplateRecord } from "../images.ts";
@@ -714,6 +717,28 @@ test("a newer heartbeat resumes waiting with a fresh lease, while older or equal
   assert.equal(desiredPhase(registry.thread(threadId)!, now), "running", "the renewed lease outlasts ordinary idle grace");
 });
 
+test("a parked harness run that is retried is working since the retry, as the tracker reports it", async (t) => {
+  let now = 10_000_000;
+  const registry = seeded(tempDb(), () => now);
+  t.after(() => registry.close());
+  let listener: ((value: LiveState) => Promise<void>) | undefined;
+  const observer = {
+    watchDoc: async () => ({ value: {}, start: (l: typeof listener) => { listener = l; }, stop: async () => ({}) }),
+  } as unknown as DocumentObserver;
+  // Wired as the control plane wires them.
+  const tracker = trackActivity({ now: () => now, onChange: (id, facts) => registry.recordActivity(id as ThreadId, { agent: facts.lastAgentActivityAt, agentTurnRunning: facts.agentTurnRunning }) });
+  await tracker.track(observer, threadId, 7 as ConversationId, false, BACKGROUND_CONTEXT);
+  await listener!({ run: { taskId: 1 as TaskId, inputs: [] } });
+  assert.equal(registry.thread(threadId)!.workingSince, now, "the run began when its document changed");
+
+  now += 60_000;
+  tracker.park(7 as ConversationId, 2 as TaskId);
+  assert.equal(registry.thread(threadId)!.workingSince, undefined, "a parked run is not working");
+  now += 3 * 3600_000;
+  tracker.retried(threadId);
+  assert.equal(registry.thread(threadId)!.workingSince, now, "the retried run is working since the retry, not since its last progress");
+});
+
 test("a thread is working since the earliest start of its running harness turn and live session turns", async (t) => {
   let now = 10_000_000;
   const registry = seeded(tempDb(), () => now);
@@ -750,9 +775,6 @@ test("a thread is working since the earliest start of its running harness turn a
 
   registry.recordActivity(threadId, { agentTurnRunning: true });
   assert.equal(since(), now, "a turn reported without its activity starts when control hears of it");
-  registry.recordActivity(threadId, { agentTurnRunning: false });
-  registry.recordActivity(threadId, { agent: 0, agentTurnRunning: true });
-  assert.equal(since(), now, "a retried run whose tracker saw no change starts when control hears of it");
 });
 
 test("a turn running before turn starts were recorded has no known start", async (t) => {

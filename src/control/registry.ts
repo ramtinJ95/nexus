@@ -716,9 +716,8 @@ export function openRegistry(path: string, clock = Date.now) {
       transaction(() => {
         if (activity.human !== undefined) q.humanActivity.run(activity.human, id);
         if (activity.agent !== undefined) q.agentActivity.run(activity.agent, id);
-        // The harness reports its last activity as the moment the turn flipped, or 0 when a retry resumes a run it has
-        // seen no change of since it started.
-        if (activity.agentTurnRunning !== undefined) q.agentTurn.run({ $running: activity.agentTurnRunning ? 1 : 0, $start: activity.agent || clock(), $id: id });
+        // The harness reports its last activity as the moment the turn flipped.
+        if (activity.agentTurnRunning !== undefined) q.agentTurn.run({ $running: activity.agentTurnRunning ? 1 : 0, $start: activity.agent ?? clock(), $id: id });
         updateAttention(id);
       });
     },

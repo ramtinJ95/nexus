@@ -199,7 +199,7 @@ subagent that never finishes lets the lease expire like any other silent turn.
 `Thread.workingSince` is the earliest known start, in Unix milliseconds, of the
 running harness turn and the live working sessions, and is absent when none runs
 or none has a known start. The harness turn's start, `agent_turn_started_at`, is
-when its tracker saw the turn begin. A working row's `started_at` is the receipt
+when its tracker saw the turn begin, or the retry that resumed a parked run. A working row's `started_at` is the receipt
 time of its `session.turn-started`, or of the heartbeat that resumed it from
 waiting; later heartbeats keep it. Turns running before the migration have no
 start, and none is invented.
