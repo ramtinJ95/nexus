@@ -888,7 +888,7 @@ test("every page carries the start dialog, which offers every project and node a
   const dialog = page.split('<dialog id="start-dialog"')[1]!.split("</dialog>")[0]!;
   assert.match(dialog, /^[^>]* data-autoopen>/, "/threads/new opens the dialog");
   assert.deepEqual([...dialog.matchAll(/<input type="radio" name="project" required value="([^"]*)"[^>]*?( checked)?>/g)].map((m) => [m[1], m[2] !== undefined]), [["acme", false], ["beta", true]]);
-  assert.deepEqual([...dialog.matchAll(/<option value="([^"]*)">([^<]*)</g)].map((m) => [m[1], m[2]]), [["", "rj-firebat (project default)"], [node, `${node}, offline`]]);
+  assert.deepEqual([...dialog.matchAll(/<option value="([^"]*)">([^<]*)</g)].map((m) => [m[1], m[2]]), [["", "rj-firebat (project default)"], ["auto", "auto, where it fits best"], [node, `${node}, offline`]]);
   assert.match(textOf(dialog), /No image is current yet.* Boots a pylon on rj-firebat and checks out main \./);
 
   await s.call("POST", "/v1/images", image);

@@ -337,6 +337,7 @@ ${projects.map((p) => html`<label class="seg-opt"><input type="radio" name="proj
 <div class="two">
 <div><label for="start-node">Node</label><select id="start-node" name="node">
 <option value="">${chosen.defaultNode} (project default)</option>
+<option value="auto">auto, where it fits best</option>
 ${nodes.map((n) => html`<option value="${n.name}">${n.name}${n.state === "offline" && ", offline"}</option>`)}
 </select></div>
 <div><label for="start-branch">Branch</label><input id="start-branch" name="branch" autocomplete="off" placeholder="${chosen.defaultBranch}"></div>
