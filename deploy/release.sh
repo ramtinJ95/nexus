@@ -29,8 +29,8 @@ install_release() {
   rm -rf "$prefix"/releases/.staging.* || fail "could not remove old staging directories"
   staging=$(mktemp -d "$prefix/releases/.staging.XXXXXX") || fail "could not make a staging directory"
   trap 'rm -rf "$staging"' EXIT
-  # src/release.test.ts fails when src imports a file outside this list.
-  tar -C "$repo" -cf - package.json package-lock.json tsconfig.json src deploy images/pylon/agent-setup/manifest.ts images/pylon/nexus-turn.ts | tar -C "$staging" --no-same-owner -xf - \
+  # src/release.test.ts fails when src imports a file outside this list. loadImageRecipe sends every file under images/pylon, so it goes whole.
+  tar -C "$repo" -cf - package.json package-lock.json tsconfig.json src deploy images/pylon | tar -C "$staging" --no-same-owner -xf - \
     || fail "could not copy $repo into the release"
   release=$(cd "$staging" && find . -type f -print0 | LC_ALL=C sort -z | xargs -0 sha256sum | sha256sum | cut -c1-12) || fail "could not hash the release"
   if [ -n "${NEXUS_COMMIT:-}" ]; then
