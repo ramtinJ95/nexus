@@ -29,7 +29,7 @@ import { newPylonRecord } from "../../../src/tick.ts";
 const [mode, mainSrc] = process.argv.slice(2) as [string, string | undefined];
 const steps = {
   "before-typing": (a: readonly string[]) => a[3] === "shell-ready",
-  "while-typing": (a: readonly string[]) => a[2] === 'touch "$0" && exec "$@"' || (a[3] === "pane" && a[4] === "run"),
+  "while-typing": (a: readonly string[]) => (a[0] === "sh" && a[4] === "herdr") || (a[3] === "pane" && a[4] === "run"),
   "after-typing": (a: readonly string[]) => a[3] === "claude-submitted",
 };
 const kill = mode === "probe" ? process.env.STOP_AT as keyof typeof steps | undefined : mode as keyof typeof steps;
@@ -150,7 +150,7 @@ async function controlPlane() {
       log(`pane ${pane.pane_id} shows:\n${(await herdr("pane", "read", pane.pane_id, "--source", "recent-unwrapped", "--lines", "40")).output.trimEnd()}`);
     }
     log(`claude processes in the isolated HOME: ${(await run(["sh", "-c", `for p in $(pgrep -x claude); do tr '\\0' ' ' < /proc/$p/environ | grep -q "HOME=${home} " && echo $p; done | wc -l`], 5_000)).output.trim()}`);
-    log(`launch record: ${(await run(["sh", "-c", 'cd "$0"/.nexus/claude-launches/* && for f in *; do printf "%s=%s " "$f" "$(cat "$f")"; done', home], 5_000)).output.trim()}`);
+    log(`launch record: ${(await run(["sh", "-c", 'cd "$0"/.nexus/claude-launches/* && for f in *; do if test -d "$f"; then printf "%s/ " "$f"; else printf "%s=%s " "$f" "$(cat "$f")"; fi; done', home], 5_000)).output.trim()}`);
   } finally {
     await loop.close();
     registry.close();

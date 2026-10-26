@@ -387,8 +387,11 @@ itself starts, as after its own deploy.
 
 Sending a prompted launch again is safe because the launch records its progress in
 the pylon, in `~/.nexus/claude-launches/<session>/`: `opened` names its workspace
-and pane once they exist, `typed` is written by the same guest command that types
-the launch, and `submitted` is the UserPromptSubmit receipt. A launch sent again
+and pane once they exist, `typed` is the claim of the guest command that types the
+launch, and `submitted` is the UserPromptSubmit receipt. That command creates
+`typed` with `mkdir` and types only if it created it, so of two typing commands,
+such as one the stopped probe's guest started late and one from the probe that
+replaced it, only one types and the other waits for the receipt. A launch sent again
 reads them. If the command was typed, it only waits for the receipt, as the first
 one would have, and reports a stall the same way. If nothing was typed, it types
 into the pane the first one opened, or opens one if that pane is gone. A launch
