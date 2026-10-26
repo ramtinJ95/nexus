@@ -24,6 +24,7 @@ import type { GitHub, PrSnapshot } from "./github.ts";
 import { HttpError } from "./http-error.ts";
 import type { Inbox } from "./inbox.ts";
 import { landingHolds } from "./policy.ts";
+import { checkCaller, type CheckRuns } from "./gate.ts";
 import { releaseView } from "./releases.ts";
 import type { Registry, Thread, ThreadId } from "./registry.ts";
 import type { StartRequest } from "./threads.ts";
@@ -76,12 +77,14 @@ export type Phase =
   | { kind: "reviewing" }
   /** The builder has the round's findings and owes an answer to each, and a push for what it fixed. */
   | { kind: "fixing" }
-  /** The repository's checks run at the approved head, in the reviewer's pylon. */
-  | { kind: "checking"; startedAt: number }
+  /** The repository's checks run at the approved head, in `thread`, a check thread thrown away afterwards. */
+  | { kind: "checking"; startedAt: number; thread: ThreadId | null }
   | { kind: "approved" }
   | { kind: "merging" }
   /** `requested` once the desired release is set. `previous` is the release to roll back to, null if there was none. */
   | { kind: "deploying"; commit: string; previous: string | null; requested: boolean; deadline: number }
+  /** The deploy of `commit` failed for `why`, and the fleet goes back to `previous`, the desired release once `requested`. */
+  | { kind: "rolling-back"; commit: string; previous: string; why: string; requested: boolean; deadline: number }
   /** `commit` is the merge commit, deployed when the PR is Nexus's own. */
   | { kind: "landed"; commit: string }
   /** Ended, for the person to decide. `reasons` say exactly which condition failed or which reserved case applies. */
@@ -96,8 +99,13 @@ export interface Review {
   sent: number;
   builder: ThreadId;
   reviewer: ThreadId;
-  pr: { repo: string; number: number; url: string; title: string };
+  pr: { repo: string; number: number; url: string; title: string; branch: string };
   models: { builder: string; reviewer: string };
+  /**
+   * A harness reviewer's verdict comes from the control plane's agent loop. A Claude reviewer's is read from its
+   * transcript in its pylon, where code it runs could write, so its approval never lands without the person.
+   */
+  reviewerKind: "harness" | "claude";
   maxRounds: number;
   /** Who asked for the PR to land once approved, or null to stop at approval. */
   land: { requestedBy: string } | null;
@@ -105,8 +113,11 @@ export interface Review {
   /** The merge commit once the PR merged, so a later land never merges or deploys it again. */
   merged: string | null;
   phase: Phase;
-  /** The next message, saved before it is sent. */
-  outbox: { to: "builder" | "reviewer"; id: string; text: string } | null;
+  /**
+   * The next message, saved before it is sent. `attempted` is when its first send began, saved before it, so a send
+   * that went through before a crash still dates the wait from then, and a reply that came meanwhile is read.
+   */
+  outbox: { to: "builder" | "reviewer"; id: string; text: string; attempted: number | null } | null;
   /** When the agent the loop waits on was last sent something, and how many reminders in a row it has had. */
   since: number;
   nudges: number;
@@ -117,17 +128,13 @@ export interface Review {
 export const ended: ReadonlySet<PhaseKind> = new Set(["approved", "landed", "needs-person"]);
 export const needsPerson = (r: Review | null) => r?.phase.kind === "needs-person";
 
-/** What a review of the check at a head finds: still running, or its result. `waiting` while the pylon does not run. */
-export type CheckState = { kind: "running" | "waiting" } | { kind: "done"; passed: boolean; output: string };
-
 export interface ReviewDeps {
   registry: Registry;
   github: GitHub;
   inbox: Inbox;
   /** The agent's replies, oldest first: a Claude worker's transcript as last read, or the harness conversation. */
   replies(t: Thread): Promise<string[]>;
-  /** Starts or polls `.nexus/check` at `head` in the thread's pylon. */
-  check(t: Thread, head: string): Promise<CheckState>;
+  checks: CheckRuns;
   /** The control plane's own node, for the release view, and the repository its releases come from. */
   release: { self: string | undefined; repo: string };
   log(message: string): void;
@@ -235,17 +242,21 @@ export function reviewerFor(builder: { claude: boolean; model: string }, secrets
 }
 
 export function reviewLoop(deps: ReviewDeps & { startThread(request: StartRequest, caller: string): Promise<Thread>; harnessModel: string }) {
-  const { registry, github, inbox, replies, check, release, log } = deps;
+  const { registry, github, inbox, replies, checks, release, log } = deps;
   const now = deps.now ?? Date.now;
   let running: Promise<void> | null = null;
 
   /** Whether a turn of `t` ended since its last message from the loop, the only time its replies can hold an answer. */
   const answeredSince = (r: Review, t: Thread) => t.lastReplyAt !== null && t.lastReplyAt > r.since;
-  const toPerson = (r: Review, ...reasons: string[]): Review => ({ ...r, phase: { kind: "needs-person", reasons }, outbox: null });
+  const toPerson = (r: Review, ...reasons: string[]): Review => {
+    if (r.phase.kind === "checking" && r.phase.thread !== null) checks.discard(r.phase.thread);
+    return { ...r, phase: { kind: "needs-person", reasons }, outbox: null };
+  };
+  const checking = (): Phase => ({ kind: "checking", startedAt: now(), thread: null });
   /** A reminder keeps the awaited token. Anything else is a new request, with a new token and no reminders yet. */
   const send = (r: Review, to: "builder" | "reviewer", text: (token: string) => string, phase: Phase, nudges = 0): Review => {
     const expect = nudges === 0 ? mint(r.id) : r.expect;
-    return { ...r, phase, nudges, expect, sent: r.sent + 1, outbox: { to, id: `${r.id}:${r.sent + 1}`, text: text(expect) } };
+    return { ...r, phase, nudges, expect, sent: r.sent + 1, outbox: { to, id: `${r.id}:${r.sent + 1}`, text: text(expect), attempted: null } };
   };
   const withRound = (r: Review, round: Partial<Round>): Review => ({ ...r, rounds: [...r.rounds.slice(0, -1), { ...r.rounds.at(-1)!, ...round }] });
 
@@ -261,12 +272,6 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
     return send(r, who, (token) => reminder(who, missing, token), r.phase, r.nudges + 1);
   }
 
-  async function afterApproval(r: Review): Promise<Review> {
-    if (r.land === null) return { ...r, phase: { kind: "approved" } };
-    const snapshot = await github.poll(r.pr.repo, r.pr.number);
-    const holds = landingHolds({ review: r, pr: snapshot, files: await github.files(r.pr.repo, r.pr.number), nexus: r.pr.repo.toLowerCase() === release.repo.toLowerCase() });
-    return holds.length ? toPerson(r, ...holds) : { ...r, phase: { kind: "merging" } };
-  }
 
   const steps: { [K in Exclude<PhaseKind, "approved" | "landed" | "needs-person">]: (r: Review, phase: Extract<Phase, { kind: K }>, builder: Thread, reviewer: Thread) => Promise<Review> } = {
     async reviewing(r, _, __, reviewer) {
@@ -275,7 +280,7 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
       if (verdict === null) return waitOn(r, reviewer, "reviewer");
       const next = withRound(r, { verdict });
       const round = next.rounds.at(-1)!;
-      if (approves(round) && findingsOf(round).length === 0) return { ...next, phase: { kind: "checking", startedAt: now() }, nudges: 0 };
+      if (approves(round) && findingsOf(round).length === 0) return { ...next, phase: checking(), nudges: 0 };
       if (!approves(round) && n >= r.maxRounds) return toPerson(next, `The reviewer still requests changes after ${n} rounds, the most this review allows.`);
       return send(next, "builder", (token) => builderFindings(next, token), { kind: "fixing" });
     },
@@ -296,20 +301,24 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
         return waitOn(r, builder, "builder", `You answered that you fixed findings, but the pull request's head is still ${round.head}. Push the fixes.`);
       }
       // Commits pushed with answers that fixed nothing are still unreviewed, so only an unmoved head skips a round.
-      if (snapshot.detail.head === round.head && approves(round)) return { ...answered, phase: { kind: "checking", startedAt: now() }, nudges: 0 };
+      if (snapshot.detail.head === round.head && approves(round)) return { ...answered, phase: checking(), nudges: 0 };
       if (n >= r.maxRounds) return toPerson(answered, `The builder pushed fixes after round ${n}, the last this review allows, so they are unreviewed.`);
       const next: Review = { ...answered, rounds: [...answered.rounds, { head: snapshot.detail.head, verdict: null, check: null, answers: null }] };
       return send(next, "reviewer", (token) => nextRound(next, answered.rounds.at(-1)!, token), { kind: "reviewing" });
     },
-    async checking(r, phase, _, reviewer) {
+    async checking(r, phase, builder) {
       const round = r.rounds.at(-1)!;
-      const state = await check(reviewer, round.head);
-      if (state.kind !== "done") {
-        if (now() - phase.startedAt < checkMs) return r;
-        return toPerson(r, `.nexus/check did not finish within ${checkMs / 60_000} minutes at ${round.head}.`);
+      if (now() - phase.startedAt > checkMs) return toPerson(r, `.nexus/check gave no verdict within ${checkMs / 60_000} minutes at ${round.head}.`);
+      if (phase.thread === null) return { ...r, phase: { ...phase, thread: await checks.start(builder, r.pr.branch, round.head) } };
+      const state = checks.poll(phase.thread, round.head);
+      if (state.kind === "void") {
+        checks.discard(phase.thread);
+        return { ...r, phase: { ...phase, thread: null } };
       }
-      const next = withRound(r, { check: { passed: state.passed, output: state.output } });
-      if (state.passed) return afterApproval(next);
+      if (state.kind !== "done") return r;
+      checks.discard(phase.thread);
+      const next = withRound({ ...r, phase: { ...phase, thread: null } }, { check: { passed: state.passed, output: state.output } });
+      if (state.passed) return r.land === null ? { ...next, phase: { kind: "approved" } } : { ...next, phase: { kind: "merging" } };
       if (r.rounds.length >= r.maxRounds) return toPerson(next, `.nexus/check failed at ${round.head} after the last round this review allows.`);
       return send(next, "builder", (token) => builderFindings(next, token), { kind: "fixing" });
     },
@@ -322,8 +331,10 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
         if (snapshot.detail.head !== head) return toPerson(r, `Pull request #${r.pr.number} merged at ${snapshot.detail.head}, not the approved ${head}, so it is not deployed.`);
         commit = snapshot.detail.mergeCommit;
       } else {
-        if (snapshot.pr.state !== "open") return toPerson(r, `Pull request #${r.pr.number} was closed before it merged.`);
-        if (snapshot.detail.head !== head) return toPerson(r, `The pull request's head moved to ${snapshot.detail.head} after the approval of ${head}.`);
+        // Every attempt checks the whole policy again with what GitHub says now, since checks and the PR can change
+        // between attempts and branch protection may not enforce them.
+        const holds = landingHolds({ review: r, pr: snapshot, files: await github.files(r.pr.repo, r.pr.number), nexus: r.pr.repo.toLowerCase() === release.repo.toLowerCase() });
+        if (holds.length) return toPerson(r, ...holds);
         const merged = await github.merge(r.pr.repo, r.pr.number, head);
         if (merged.kind !== "merged") {
           return toPerson(r, merged.kind === "denied"
@@ -349,8 +360,23 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
         ? `The deploy of ${phase.commit} failed: ${view.nodes.filter((n) => n.target === phase.commit && (n.state === "failed" || n.state === "rolled-back")).map((n) => `${n.node} ${n.role} ${n.state}${n.reason ? ` (${n.reason})` : ""}`).join("; ")}.`
         : `Not every service reported healthy at ${phase.commit} within ${deployMs / 60_000} minutes.`;
       if (phase.previous === null) return toPerson(r, why, "There is no previous release to roll back to.");
-      registry.setDesiredRelease({ commit: phase.previous, requestedBy: `nexus review ${r.id} rollback`, requestedAt: now() });
-      return toPerson(r, why, `Rolled back to the previous release, ${phase.previous}.`, `${phase.commit} is still on the default branch, so revert it before the next deploy.`);
+      return { ...r, phase: { kind: "rolling-back", commit: phase.commit, previous: phase.previous, why, requested: false, deadline: now() + deployMs } };
+    },
+    async "rolling-back"(r, phase) {
+      if (!phase.requested) {
+        if (registry.desiredRelease()?.commit !== phase.previous) registry.setDesiredRelease({ commit: phase.previous, requestedBy: `nexus review ${r.id} rollback`, requestedAt: now() });
+        return { ...r, phase: { ...phase, requested: true } };
+      }
+      const view = releaseView(registry, release.self, now());
+      const outcome = releaseOutcome(view, phase.previous, now());
+      const revert = `${phase.commit} is still on the default branch, so revert it before the next deploy.`;
+      if (outcome === "healthy") return toPerson(r, phase.why, `Rolled back to the previous release, ${phase.previous}, which every service reports healthy.`, revert);
+      if (outcome === "superseded") return toPerson(r, phase.why, `Another release, ${view.desired?.commit ?? "none"}, replaced the rollback to ${phase.previous} before it was healthy.`, revert);
+      if (outcome === "pending" && now() < phase.deadline) return r;
+      const failed = outcome === "failed"
+        ? view.nodes.filter((n) => n.target === phase.previous && (n.state === "failed" || n.state === "rolled-back")).map((n) => `${n.node} ${n.role} ${n.state}${n.reason ? ` (${n.reason})` : ""}`).join("; ")
+        : `not every service reported healthy within ${deployMs / 60_000} minutes`;
+      return toPerson(r, phase.why, `The rollback to ${phase.previous} failed too: ${failed}. The fleet needs the person now.`, revert);
     },
   };
 
@@ -359,31 +385,30 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
     const builder = registry.thread(r.builder);
     const reviewer = registry.thread(r.reviewer);
     // Once merging, the landing must see its deploy through, rollback included, whatever happens to the threads.
-    const landing = r.phase.kind === "merging" || r.phase.kind === "deploying";
+    const landing = r.phase.kind === "merging" || r.phase.kind === "deploying" || r.phase.kind === "rolling-back";
     for (const [who, t] of [["builder", builder], ["reviewer", reviewer]] as const) {
       if (!landing && (t === undefined || t.status !== "active")) return toPerson(r, `The ${who} thread ${t?.id ?? ""} is ${t?.status ?? "gone"}, so the review stopped.`);
     }
     if (r.outbox !== null) {
+      if (r.outbox.attempted === null) return { ...r, outbox: { ...r.outbox, attempted: now() } };
       if (await inbox(r.outbox.to === "builder" ? builder! : reviewer!, { id: r.outbox.id, text: r.outbox.text, sender: "review" }) === "later") return r;
-      return { ...r, outbox: null, since: now() };
+      return { ...r, outbox: null, since: r.outbox.attempted };
     }
     const phase = r.phase;
     if (ended.has(phase.kind)) return r;
-    try {
-      return await (steps[phase.kind as keyof typeof steps] as (r: Review, p: Phase, b: Thread, v: Thread) => Promise<Review>)(r, phase, builder!, reviewer!);
-    } catch (err) {
-      // A check whose exec keeps failing would otherwise be retried forever.
-      if (phase.kind === "checking" && now() - phase.startedAt > checkMs) return toPerson(r, `.nexus/check could not run at ${r.rounds.at(-1)!.head} within ${checkMs / 60_000} minutes.`);
-      throw err;
-    }
+    return (steps[phase.kind as keyof typeof steps] as (r: Review, p: Phase, b: Thread, v: Thread) => Promise<Review>)(r, phase, builder!, reviewer!);
   }
 
   async function pass() {
-    for (const stored of registry.reviews()) {
+    const reviews = registry.reviews();
+    // A check thread no review holds, such as one started just before a crash, has nothing left to give.
+    const held = new Set(reviews.flatMap((r) => r.phase.kind === "checking" && r.phase.thread !== null ? [r.phase.thread] : []));
+    for (const t of registry.threads()) if (t.startedBy === checkCaller && t.status !== "deleted" && !held.has(t.id)) checks.discard(t.id);
+    for (const stored of reviews) {
       let r = stored;
       try {
         // A step that sent a message or changed phase saves before the next one acts on it.
-        for (let i = 0; i < 4; i++) {
+        for (let i = 0; i < 8; i++) {
           const next = await step(r);
           if (next === r) break;
           registry.saveReview(next);
@@ -425,7 +450,7 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
       const models = { builder: builderModel, reviewer: kind.model };
       const id = `rv-${randomBytes(4).toString("hex")}`;
       const draft: Review = {
-        id, expect: mint(id), sent: 1, builder: builder.id, reviewer: "" as ThreadId, pr: { repo, number, url: snapshot.pr.url, title: snapshot.pr.title }, models,
+        id, expect: mint(id), sent: 1, builder: builder.id, reviewer: "" as ThreadId, pr: { repo, number, url: snapshot.pr.url, title: snapshot.pr.title, branch: snapshot.detail.branch }, models, reviewerKind: kind.claude ? "claude" : "harness",
         maxRounds: request.rounds ?? defaultRounds, land: request.land === null ? null : { requestedBy: request.land },
         rounds: [{ head: snapshot.detail.head, verdict: null, check: null, answers: null }], merged: null, phase: { kind: "reviewing" }, outbox: null,
         since: now(), nudges: 0, startedAt: now(),
@@ -435,7 +460,7 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
         project: builder.project, title: `Review of #${number}: ${snapshot.pr.title}`.slice(0, 200), node: registry.pylon(builder.pylonId)!.node, branch: snapshot.detail.branch,
         ...(kind.claude ? { claude: prompt, model: kind.model, raw: true } : {}),
       }, reviewerCaller);
-      const review: Review = { ...draft, reviewer: reviewer.id, ...(kind.claude ? {} : { outbox: { to: "reviewer", id: `${id}:1`, text: prompt } }) };
+      const review: Review = { ...draft, reviewer: reviewer.id, ...(kind.claude ? {} : { outbox: { to: "reviewer", id: `${id}:1`, text: prompt, attempted: null } }) };
       registry.saveReview(review);
       void poll();
       return review;
@@ -454,7 +479,7 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
       if (r.merged !== null) throw new HttpError(409, `review ${r.id} already merged pull request #${r.pr.number} as ${r.merged}, so it does not land again`);
       const approved = r.phase.kind === "approved" || (r.phase.kind === "needs-person" && r.rounds.at(-1)!.check?.passed === true && approves(r.rounds.at(-1)!));
       if (!approved) throw new HttpError(409, `review ${r.id} of ${builderId} is ${r.phase.kind}${r.phase.kind === "needs-person" ? `: ${r.phase.reasons.join(" ")}` : ""}, not approved with its checks passing`);
-      const next: Review = { ...r, land: { requestedBy }, phase: { kind: "checking", startedAt: now() }, outbox: null, nudges: 0 };
+      const next: Review = { ...r, land: { requestedBy }, phase: checking(), outbox: null, nudges: 0 };
       registry.saveReview(next);
       void poll();
       return next;

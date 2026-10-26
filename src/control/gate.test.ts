@@ -1,15 +1,26 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdtemp, rm, writeFile, chmod } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
-import { checkScript, parseCheck } from "./gate.ts";
-import type { CheckState } from "./review.ts";
+import { checkCaller, checkRuns, type CheckRuns, type CheckState } from "./gate.ts";
+import { openRegistry, type Thread, type ThreadId } from "./registry.ts";
+import { newPylonRecord } from "../tick.ts";
+import { processStream } from "../process-stream.ts";
+import { checkoutDir } from "../sessions.ts";
+import type { ByteStream, LiveHash, NodeName, PylonId, TailnetNodeId } from "../protocol.ts";
+import type { ProjectId } from "../project.ts";
+import type { StartRequest } from "./threads.ts";
 
-/** A checkout with one commit whose `.nexus/check` is `check`, or none, and a HOME of its own, as a pylon has. */
-async function checkout(t: import("node:test").TestContext, check: string | null) {
+const node = "node" as NodeName;
+
+/**
+ * A registry whose check threads' pylons run here: each pipe runs its argv as a local process, in a checkout with one
+ * commit whose `.nexus/check` is `check`, so the script and the exit status are real. `stream` can be replaced.
+ */
+async function fixture(t: import("node:test").TestContext, check: string | null) {
   const root = await mkdtemp(join(tmpdir(), "nexus-gate-"));
   t.after(() => rm(root, { recursive: true, force: true }));
   const repo = join(root, "repo");
@@ -17,63 +28,96 @@ async function checkout(t: import("node:test").TestContext, check: string | null
   execFileSync("git", ["init", "-q", "-b", "main", repo]);
   await writeFile(join(repo, "README.md"), "# repo\n");
   if (check !== null) {
-    await execFileSync("mkdir", ["-p", join(repo, ".nexus")]);
+    await mkdir(join(repo, ".nexus"));
     await writeFile(join(repo, ".nexus", "check"), `#!/bin/sh\n${check}\n`);
     await chmod(join(repo, ".nexus", "check"), 0o755);
   }
   git("add", "-A");
   git("commit", "-qm", "init");
   const head = git("rev-parse", "HEAD");
-  const run = (commit = head): CheckState => {
-    const output = execFileSync("sh", ["-c", checkScript, "nexus-check", commit], { cwd: repo, env: { ...process.env, HOME: root }, encoding: "utf8" });
-    return parseCheck({ kind: "exec", exitCode: 0, output, truncated: false });
-  };
-  return { run, root, head };
+
+  const registry = openRegistry(":memory:");
+  t.after(() => registry.close());
+  const project = { id: "p" as ProjectId, repoUrl: "https://github.com/acme/repo.git", defaultBranch: "main", defaultNode: node, resources: { cpus: 1, memoryGiB: 4, diskGiB: 10 }, allowedHosts: [], secrets: [], logins: [], preSetup: null };
+  registry.upsertNode({ name: node, tailnetHost: "node.ts.net", tailnetNodeId: "nNODE" as TailnetNodeId });
+  registry.createProject(project);
+  let count = 0;
+  function add(caller: string): Thread {
+    const id = `th-${++count}` as ThreadId;
+    const thread: Thread = { id, title: id, project: project.id, pylonId: `pylon-${id}` as PylonId, status: "active", conversationId: null, startedBy: caller, createdAt: 1, seenAt: null, lastReplyAt: null, lastHumanActivityAt: 1, lastAgentActivityAt: 0, agentTurnRunning: false };
+    const { desired: _, ...pylon } = newPylonRecord({ thread: id, pylonId: thread.pylonId, node, desired: "running", boot: { pylonId: thread.pylonId, image: "img-000000000000", resources: project.resources, network: { allowedHosts: [], secrets: [] }, repo: { kind: "clone", url: project.repoUrl, checkout: { branch: "main", commit: head } }, dotfiles: { repo: project.repoUrl, ref: "main" } }, firstBoot: { kind: "fresh", preSetup: null }, live: { previews: [], overlay: [] }, liveHash: "hash" as LiveHash });
+    registry.createThread(thread, pylon);
+    return thread;
+  }
+  function running(...threads: Thread[]) {
+    const capacity = { memoryGiB: 64, committedMemoryGiB: 0, diskFreeGiB: 100 };
+    registry.apply({ record: "node", node, state: "online", capacity });
+    const pylons = threads.map((th) => ({ pylonId: th.pylonId, phase: "running" as const, liveHash: "hash" as LiveHash, bootedAt: "2027-01-01T00:00:00Z", bootedFrom: { image: "img-000000000000" as const, checkpoint: null }, services: [], listening: [], previews: [], sessions: [], git: null, declaredOutputs: [], attachedClients: 0 }));
+    registry.ingested({ node, observedAt: new Date().toISOString(), probeBootId: "b", capacity, artifacts: [], jobs: [], pylons, previewRoutes: [] }, []);
+  }
+  const builder = add("person");
+  const started: StartRequest[] = [];
+  let stream = async (_: PylonId, argv: readonly string[]): Promise<ByteStream> => processStream(argv[0]!, argv.slice(1).map((a) => a.replaceAll(checkoutDir, repo)), () => {});
+  const runs = (): CheckRuns => checkRuns({
+    registry, wake: () => {},
+    probes: new Map([[node, { stream: (pylon: PylonId, argv: readonly string[]) => stream(pylon, argv) }]]),
+    async startThread(request, caller) { started.push(request); return add(caller); },
+  });
+  return { registry, builder, head, repo, root, started, runs, running, set stream(s: typeof stream) { stream = s; } };
 }
 
-async function settle(run: () => CheckState): Promise<CheckState> {
-  for (let i = 0; i < 100; i++) {
-    const state = run();
-    if (state.kind === "done") return state;
-    await sleep(50);
+async function settle(poll: () => CheckState): Promise<CheckState> {
+  for (let i = 0; i < 200; i++) {
+    const state = poll();
+    if (state.kind === "done" || state.kind === "void") return state;
+    await sleep(20);
   }
   assert.fail("the check never finished");
 }
 
-test("a check starts detached, reads running, then keeps its result for the same commit", async (t) => {
-  const c = await checkout(t, "echo typecheck ok; sleep 0.3; echo tests ok");
-  assert.deepEqual(c.run(), { kind: "running" }, "the first exec starts it");
-  assert.deepEqual(await settle(c.run), { kind: "done", passed: true, output: "typecheck ok\ntests ok" });
-  assert.deepEqual(c.run(), { kind: "done", passed: true, output: "typecheck ok\ntests ok" }, "a later exec reads the kept result");
+test("a check runs in a fresh bare check thread at the commit, and its verdict is the pipe's exit status", async (t) => {
+  const f = await fixture(t, "echo typecheck ok; echo tests ok");
+  const runs = f.runs();
+  const id = await runs.start(f.builder, "feature", f.head);
+  assert.deepEqual(f.started, [{ project: "p", title: `Check of feature at ${f.head.slice(0, 12)}`, node, branch: "feature", commit: f.head, bare: true }]);
+  assert.equal(f.registry.thread(id)!.startedBy, checkCaller);
+  assert.deepEqual(runs.poll(id, f.head), { kind: "waiting" }, "nothing runs until the pylon does");
+  f.running(f.registry.thread(id)!);
+  assert.deepEqual(await settle(() => runs.poll(id, f.head)), { kind: "done", passed: true, output: "typecheck ok\ntests ok" });
+  runs.discard(id);
+  assert.equal(f.registry.thread(id)!.status, "deleted");
 });
 
-test("a failing check reports its exit code's failure and the log's tail", async (t) => {
-  const c = await checkout(t, "echo 'src/a.ts(1,1): error TS2322'; exit 2");
-  c.run();
-  assert.deepEqual(await settle(c.run), { kind: "done", passed: false, output: "src/a.ts(1,1): error TS2322" });
+test("what the check writes cannot pass it: a forged exit file or a printed status counts for nothing", async (t) => {
+  const f = await fixture(t, `mkdir -p "$HOME/.nexus-checks"; echo 0 > exit; echo "done 0"; exit 3`);
+  const runs = f.runs();
+  const id = await runs.start(f.builder, "feature", f.head);
+  f.running(f.registry.thread(id)!);
+  const state = await settle(() => runs.poll(id, f.head));
+  assert.equal(state.kind === "done" && state.passed, false);
 });
 
 test("a repository without .nexus/check fails, saying so", async (t) => {
-  const c = await checkout(t, null);
-  const state = c.run();
-  assert.equal(state.kind, "done");
+  const f = await fixture(t, null);
+  const runs = f.runs();
+  const id = await runs.start(f.builder, "feature", f.head);
+  f.running(f.registry.thread(id)!);
+  const state = await settle(() => runs.poll(id, f.head));
   assert.ok(state.kind === "done" && !state.passed && /no executable \.nexus\/check/.test(state.output));
 });
 
-test("a job the pylon's pause killed, which left no result, starts over", async (t) => {
-  const c = await checkout(t, "echo ran >> \"$HOME/runs\"; sleep 30");
-  c.run();
-  const pid = execFileSync("cat", [join(c.root, ".nexus-checks", c.head, "pid")], { encoding: "utf8" }).trim();
-  process.kill(-Number(pid), "SIGKILL");
-  await sleep(100);
-  assert.deepEqual(c.run(), { kind: "running" });
-  const restarted = execFileSync("cat", [join(c.root, ".nexus-checks", c.head, "pid")], { encoding: "utf8" }).trim();
-  assert.notEqual(restarted, pid);
-  process.kill(-Number(restarted), "SIGKILL");
-});
+test("a run that cannot give a verdict is void: a pylon at the wrong commit, a lost pipe, or a run this process does not hold", async (t) => {
+  const f = await fixture(t, "true");
+  const runs = f.runs();
+  const wrong = await runs.start(f.builder, "feature", f.head);
+  f.running(f.registry.thread(wrong)!);
+  assert.deepEqual(await settle(() => runs.poll(wrong, "f".repeat(40))), { kind: "void" }, "a checkout at another commit says nothing of the change");
 
-test("a commit the pylon cannot check out is an error to retry, not a kept failure", async (t) => {
-  const c = await checkout(t, "true");
-  assert.throws(() => c.run("f".repeat(40)), /could not check out/);
-  assert.throws(() => c.run("f".repeat(40)), /could not check out/, "nothing was kept, so it tries again");
+  const lost = await runs.start(f.builder, "feature", f.head);
+  f.stream = async () => ({ ...processStream("true", [], () => {}), done: Promise.resolve({ kind: "lost" as const }) });
+  f.running(f.registry.thread(lost)!);
+  assert.deepEqual(await settle(() => runs.poll(lost, f.head)), { kind: "void" });
+
+  const restarted = f.runs();
+  assert.deepEqual(restarted.poll(lost, f.head), { kind: "void" }, "after a restart, nothing says what the thread already ran");
 });

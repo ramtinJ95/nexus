@@ -43,6 +43,7 @@ const squash = (text: string) => text.replace(/\s+/g, " ").trim().toLowerCase();
 
 const conditions: readonly ((facts: LandingFacts) => string[])[] = [
   ({ review }) => review.models.reviewer === review.models.builder ? [`The reviewer ran the builder's own model, ${review.models.builder}.`] : [],
+  ({ review }) => review.reviewerKind === "claude" ? ["A Claude reviewer approved it. Its verdict is read from its transcript in its pylon, where code it runs could write, so only the person can land what it approved."] : [],
   ({ review }) => {
     const round = review.rounds.at(-1)!;
     if (round.verdict?.verdict !== "approve") return ["The reviewer has not approved the latest commits."];

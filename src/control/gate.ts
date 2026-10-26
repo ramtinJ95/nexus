@@ -1,70 +1,101 @@
 /**
- * Runs the repository's `.nexus/check`, its typecheck and full test suite, at a commit in a thread's pylon, for the
- * merge policy's "the typecheck and the full test suite pass". The control plane runs it rather than trusting an
- * agent's report, in the reviewer's pylon rather than the builder's, so the agent under review cannot touch it.
+ * Runs the repository's `.nexus/check`, its typecheck and full test suite, at an approved commit, for the merge
+ * policy's "the typecheck and the full test suite pass".
  *
- * A probe exec lasts at most 60 seconds, and a suite runs longer, so one exec starts the job detached and later ones
- * read its state. The job lives in its own worktree under ~/.nexus-checks/<commit>, on the pylon's disk, and writes its
- * exit code last, so every exec judges it from what is on disk: a result, a live process of this boot, or neither. A
- * pylon that paused mid-run left neither, and the next exec starts it over. A result is kept, so a second land of the
- * same head reads it again rather than running it twice. A setup failure, such as a fetch that failed, is not the
- * check's result, so it is reported as an error and the next exec tries again.
+ * The check runs the pull request's own code, so nothing it can write may decide the verdict. Each run gets a fresh
+ * check thread, a bare one with no agent, whose pylon clones the repository at the commit. The check is the process
+ * of one raw pipe into that pylon, and its verdict is that process's exit status as the probe reports it, never a
+ * file in the guest. Afterwards the thread is deleted, so no process the check left behind survives into a later
+ * round, and no reviewer's pylon ever runs it.
+ *
+ * Only this process knows that it opened a run's pipe, so a check thread it holds no run for, as after a restart, may
+ * have run something already. It is thrown away, and the check starts again in a fresh one.
  */
+import type { NodeName, ProbeClient, ProbeError } from "../protocol.ts";
 import { checkoutDir } from "../sessions.ts";
-import type { CommandResult, NodeName, ProbeClient, ProbeError } from "../protocol.ts";
-import type { Registry, Thread } from "./registry.ts";
-import type { CheckState } from "./review.ts";
+import type { Registry, Thread, ThreadId } from "./registry.ts";
+import type { StartRequest } from "./threads.ts";
 
-const outputBytes = 6_000;
+/** Who starts a check thread, as its `startedBy`. */
+export const checkCaller = "nexus-check";
+const tailBytes = 6_000;
+/** The pipe's exit status when the pylon was not fit to run the check, which says nothing of the change. */
+const unfit = 125;
 
-/** `$1` is the commit. It prints `done <exit code>` and the log's tail, `running`, `started`, or `error` and the log's tail. */
-export const checkScript = `set -u
-sha=$1
-d="$HOME/.nexus-checks/$sha"
-boot=$(cat /proc/sys/kernel/random/boot_id)
-finish() { printf 'done %s\\n' "$(cat "$d/exit")"; tail -c ${outputBytes} "$d/log"; exit 0; }
-[ -f "$d/exit" ] && finish
-if [ -f "$d/pid" ] && [ "$(cat "$d/boot" 2>/dev/null)" = "$boot" ] && kill -0 "$(cat "$d/pid")" 2>/dev/null; then echo running; exit 0; fi
-rm -rf "$d" && mkdir -p "$d"
-git worktree prune
-if ! { git cat-file -e "$sha^{commit}" 2>/dev/null || git fetch -q origin "$sha"; } >"$d/log" 2>&1 || ! git worktree add -q --detach "$d/tree" "$sha" >>"$d/log" 2>&1; then
-  echo error; tail -c ${outputBytes} "$d/log"; rm -rf "$d"; exit 0
-fi
-if [ ! -x "$d/tree/.nexus/check" ]; then
-  echo "The repository has no executable .nexus/check at $sha." >>"$d/log"; echo 127 >"$d/exit"; finish
-fi
-cd "$d/tree" && setsid sh -c './.nexus/check >>../log 2>&1; echo $? >../exit.tmp && mv ../exit.tmp ../exit' </dev/null >/dev/null 2>&1 &
-echo $! >"$d/pid"
-echo "$boot" >"$d/boot"
-echo started`;
+/** `$1` is the commit. The check replaces the shell, so the pipe's process is the check's and its status the check's. */
+export const checkScript = `cd ${checkoutDir} || exit ${unfit}
+[ "$(git rev-parse HEAD)" = "$1" ] || { echo "The check pylon's checkout is not at $1."; exit ${unfit}; }
+[ -x .nexus/check ] || { echo "The repository has no executable .nexus/check at $1."; exit 127; }
+exec ./.nexus/check </dev/null 2>&1`;
 
-export function parseCheck(result: Extract<CommandResult, { kind: "exec" }>): CheckState {
-  if (result.exitCode !== 0) throw new Error(`the check's exec exited ${result.exitCode ?? "on its timeout"}`);
-  const [first = "", ...rest] = result.output.split("\n");
-  const done = /^done (\d+)$/.exec(first);
-  if (done !== null) return { kind: "done", passed: done[1] === "0", output: rest.join("\n").trim() };
-  if (first === "running" || first === "started") return { kind: "running" };
-  if (first === "error") throw new Error("the check could not check out its commit");
-  throw new Error("the check's exec printed no state");
+/**
+ * A check run's state. `waiting` while its pylon boots. `void` when this run cannot give a verdict, because its pipe was
+ * lost, its pylon was unfit, or this process holds no run for the thread, so the thread goes and a fresh one starts.
+ */
+export type CheckState = { kind: "waiting" | "running" | "void" } | { kind: "done"; passed: boolean; output: string };
+
+export interface CheckRuns {
+  /** Starts a fresh check thread at `head` on the PR's branch, in the builder's project and node. */
+  start(builder: Thread, branch: string, head: string): Promise<ThreadId>;
+  poll(thread: ThreadId, head: string): CheckState;
+  /** Deletes the check thread and its pylon. Safe to repeat. */
+  discard(thread: ThreadId): void;
 }
 
-/** Keeps the pylon awake while its check runs, as agent activity, and reads `waiting` until the pylon runs. */
-export function checkRunner(options: { registry: Registry; probes: ReadonlyMap<NodeName, Pick<ProbeClient, "command">>; wake(t: Thread): void }) {
-  const { registry, probes, wake } = options;
-  return async (t: Thread, head: string): Promise<CheckState> => {
-    if (!/^[0-9a-f]{40}$/.test(head)) throw new Error("a check runs at a full commit hash");
-    registry.recordActivity(t.id, { agent: Date.now() });
-    wake(t);
-    const pylon = registry.pylon(t.pylonId)!;
-    const node = registry.node(pylon.node);
-    const probe = probes.get(pylon.node);
-    const running = node?.state === "online" && node.observation?.pylons.some((p) => p.pylonId === t.pylonId && p.phase === "running") === true;
-    if (!running || probe === undefined) return { kind: "waiting" };
-    try {
-      return parseCheck(await probe.command(t.pylonId, { kind: "exec", argv: ["sh", "-c", checkScript, "nexus-check", head], cwd: checkoutDir, timeoutMs: 55_000 }) as Extract<CommandResult, { kind: "exec" }>);
-    } catch (err) {
-      if ((err as Partial<ProbeError>).code === "not-running") return { kind: "waiting" };
-      throw err;
-    }
+type Run = { kind: "waiting" | "running"; output: Buffer } | { kind: "void" } | Extract<CheckState, { kind: "done" }>;
+
+export function checkRuns(options: {
+  registry: Registry;
+  probes: ReadonlyMap<NodeName, Pick<ProbeClient, "stream">>;
+  startThread(request: StartRequest, caller: string): Promise<Thread>;
+  wake(t: Thread): void;
+}): CheckRuns {
+  const { registry, probes, startThread, wake } = options;
+  const runs = new Map<ThreadId, Run>();
+
+  function open(t: Thread, head: string, probe: Pick<ProbeClient, "stream">) {
+    const run: Run = { kind: "running", output: Buffer.alloc(0) };
+    runs.set(t.id, run);
+    const settle = (next: Run) => { if (runs.get(t.id) === run) runs.set(t.id, next); };
+    probe.stream(t.pylonId, ["sh", "-c", checkScript, "nexus-check", head]).then(async (stream) => {
+      await stream.close();
+      for await (const chunk of stream) run.output = Buffer.concat([run.output, chunk]).subarray(-tailBytes);
+      const end = await stream.done;
+      const output = run.output.toString("utf8").trim();
+      settle(end.kind === "exited" && end.code !== unfit ? { kind: "done", passed: end.code === 0, output } : { kind: "void" });
+    }, (err: unknown) => {
+      // Nothing ran in a pylon that was not running, so the run may open its pipe again.
+      settle((err as Partial<ProbeError>).code === "not-running" ? { kind: "waiting", output: Buffer.alloc(0) } : { kind: "void" });
+    });
+  }
+
+  return {
+    async start(builder, branch, head) {
+      const t = await startThread({ project: builder.project, title: `Check of ${branch} at ${head.slice(0, 12)}`, node: registry.pylon(builder.pylonId)!.node, branch, commit: head, bare: true }, checkCaller);
+      runs.set(t.id, { kind: "waiting", output: Buffer.alloc(0) });
+      return t.id;
+    },
+    poll(id, head) {
+      const run = runs.get(id);
+      const t = registry.thread(id);
+      if (run === undefined || t === undefined || t.status !== "active") return { kind: "void" };
+      if (run.kind === "done" || run.kind === "void") return run;
+      // Agent activity keeps the pylon running while the check does.
+      registry.recordActivity(id, { agent: Date.now() });
+      wake(t);
+      if (run.kind === "running") return { kind: "running" };
+      const pylon = registry.pylon(t.pylonId)!;
+      const node = registry.node(pylon.node);
+      const probe = probes.get(pylon.node);
+      if (probe !== undefined && node?.state === "online" && node.observation?.pylons.some((p) => p.pylonId === t.pylonId && p.phase === "running") === true) open(t, head, probe);
+      return { kind: runs.get(id)!.kind === "running" ? "running" : "waiting" };
+    },
+    discard(id) {
+      runs.delete(id);
+      const t = registry.thread(id);
+      if (t === undefined || t.status === "deleted") return;
+      registry.setThreadStatus(id, "deleted");
+      wake(t);
+    },
   };
 }

@@ -21,7 +21,7 @@ import { openRegistry, type Thread, type ThreadId } from "./registry.ts";
 import { githubClient, githubRepo } from "./github.ts";
 import { agentReplies, reviewLoop } from "./review.ts";
 import { threadStarter } from "./threads.ts";
-import { checkRunner } from "./gate.ts";
+import { checkRuns } from "./gate.ts";
 import { repository } from "../deploy/install.ts";
 import { prWatcher } from "./pr-watch.ts";
 import { agentInbox } from "./inbox.ts";
@@ -143,11 +143,11 @@ export async function startControlPlane(config: ControlPlaneConfig, models: Mode
   const watch = prWatcher({ registry, github, inbox });
   const watchTimer = setInterval(() => { void watch.poll(); }, 120_000);
   void watch.poll();
+  const startThread = threadStarter({ registry, harness, dotfiles: config.dotfiles, gitIdentity: config.gitIdentity, wake: (node) => { void loop.wake(node); } });
   const reviews = github === null ? null : reviewLoop({
-    registry, github, inbox, harnessModel: config.harness.model.modelId,
-    startThread: threadStarter({ registry, harness, dotfiles: config.dotfiles, gitIdentity: config.gitIdentity, wake: (node) => { void loop.wake(node); } }),
+    registry, github, inbox, harnessModel: config.harness.model.modelId, startThread,
     replies: agentReplies(registry, harness),
-    check: checkRunner({ registry, probes: probeMap, wake: wakeThread }),
+    checks: checkRuns({ registry, probes: probeMap, startThread, wake: wakeThread }),
     release: { self: config.self.tailnetNodeId, repo: githubRepo(repository)! },
     log: (message) => console.error(message),
   });

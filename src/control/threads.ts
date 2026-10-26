@@ -9,9 +9,10 @@ import type { Registry, Thread, ThreadId } from "./registry.ts";
 
 /**
  * What starts a thread. `claude` makes it a Claude worker with that first prompt, which gets `/poteto-mode` in front
- * unless `raw`, as for the review loop's reviewers. Only the control plane itself asks for `raw`.
+ * unless `raw`, as for the review loop's reviewers. A `bare` thread has neither agent, as a check thread needs only
+ * its pylon. Only the control plane itself asks for `raw` or `bare`.
  */
-export interface StartRequest { project: string; title: string; node?: string | undefined; branch?: string | undefined; commit?: string | undefined; claude?: string | undefined; model?: string | undefined; raw?: boolean }
+export interface StartRequest { project: string; title: string; node?: string | undefined; branch?: string | undefined; commit?: string | undefined; claude?: string | undefined; model?: string | undefined; raw?: boolean; bare?: boolean }
 
 /** `pylon-<id>` must fit in 40 characters. */
 const newThreadId = () => `th-${randomBytes(6).toString("hex")}` as ThreadId;
@@ -41,7 +42,7 @@ export function threadStarter(options: { registry: Registry; harness: Pick<Harne
     const now = Date.now();
     const id = newThreadId();
     const pylonId = `pylon-${id}` as PylonId;
-    const conversationId = request.claude === undefined ? await harness.startThread({ threadId: id, pylonId }) : null;
+    const conversationId = request.claude === undefined && request.bare !== true ? await harness.startThread({ threadId: id, pylonId }) : null;
     const t: Thread = {
       id, title: request.title, project: project.id, pylonId, status: "active", conversationId: conversationId === null ? null : String(conversationId), startedBy: caller, createdAt: now,
       // Starting a thread is human activity, so its pylon is wanted at once.
