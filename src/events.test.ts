@@ -149,6 +149,24 @@ test("the newest Stop's hold owns the session whatever order the holds start in,
   assert.equal(await holdSuperseded(owner, 3000, 33), true, "the owner's release frees the session");
 });
 
+test("every background group is found among more processes than a process may hold files open at once", async (t) => {
+  const { backgroundGroups } = await import("../images/pylon/nexus-heartbeat.ts");
+  const { mkdirSync, writeFileSync } = await import("node:fs");
+  const proc = mkdtempSync(join(tmpdir(), "nexus-proc-"));
+  t.after(() => rmSync(proc, { recursive: true, force: true }));
+  const rest = Array.from({ length: 13 }, () => "0").join(" ");
+  // As many as a pylon holds once its init leaves thousands of zombies unreaped. Every tenth leads a background group.
+  const leaders: number[] = [];
+  for (let pid = 1_000; pid < 11_000; pid++) {
+    const leads = pid % 10 === 0;
+    if (leads) leaders.push(pid);
+    mkdirSync(join(proc, String(pid)));
+    writeFileSync(join(proc, String(pid), "stat"), `${pid} (sleep) S ${leads ? 100 : 1} ${leads ? pid : 1} 0 0 -1 ${rest} 7 0`);
+  }
+  const groups = await backgroundGroups(100, proc, 200);
+  assert.deepEqual(groups.map((g) => g.pgid).toSorted((a, b) => a - b), leaders);
+});
+
 test("a group counts only while its leader is the one recorded, or, without a leader, while a member of that generation lives", async (t) => {
   const { backgroundWatch } = await import("../images/pylon/nexus-heartbeat.ts");
   const { mkdirSync, writeFileSync } = await import("node:fs");
