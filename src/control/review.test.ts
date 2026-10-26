@@ -886,3 +886,30 @@ test("a builder or reviewer thread the person archives or deletes cancels the re
   assert.equal(h.review().phase.kind, "cancelled");
   assert.deepEqual(h.discarded, h.checkThreads, "its check thread goes with it");
 });
+
+test("a message that waits to be delivered is not sent once the PR merged, and a PR closed before the landing merges ends closed", async (t) => {
+  const f = fixture(t);
+  const loop = f.loop();
+  await loop.start(f.builder, { land: null });
+  await loop.poll();
+  f.delivery = "later";
+  f.reply(f.review().reviewer, verdict(f.review(), { verdict: "changes", findings: [serious] }));
+  await loop.poll();
+  assert.equal(f.review().outbox?.to, "builder");
+  f.snapshot = { ...f.snapshot, pr: { ...f.snapshot.pr, state: "merged" }, detail: { ...f.snapshot.detail, mergeCommit: merged } };
+  f.delivery = "delivered";
+  await loop.poll();
+  assert.deepEqual(f.review().phase, { kind: "merged" });
+  assert.equal(f.sent.length, 1, "the builder never gets the findings");
+
+  const g = fixture(t);
+  g.check = { kind: "running" };
+  await approved(g, "nLAPTOP");
+  g.snapshot = { ...g.snapshot, pr: { ...g.snapshot.pr, state: "closed" } };
+  g.watched("closed");
+  g.check = { kind: "done", passed: true, output: "ok" };
+  await g.loop().poll();
+  assert.deepEqual(g.review().phase, { kind: "closed" });
+  assert.deepEqual(g.merges, []);
+  assert.ok(!g.attention().includes("decision"));
+});

@@ -29,7 +29,7 @@ The same driver against main's `src/control/review.ts`, `src/cli/nexus.ts` and `
 
 ## Unit tests
 
-`unit-before.txt` is `src/control/review.test.ts` with the new tests on main's loop. Two fail: the review of a merged PR whose check pylon failed with `Setup exited 128` ends `needs-person`, as #104's did, and an archived reviewer ends `needs-person`. `unit-after.txt` is the same file after the fix, with all 40 tests passing.
+`unit-before.txt` is `src/control/review.test.ts` with the new tests on main's loop. Two fail: the review of a merged PR whose check pylon failed with `Setup exited 128` ends `needs-person`, as #104's did, and an archived reviewer ends `needs-person`. `unit-after.txt` is the same file after the fix, with all 41 tests passing, the last one added for the pre-PR review's findings.
 
 ## What this does not prove
 

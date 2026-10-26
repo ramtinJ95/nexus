@@ -392,6 +392,7 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
     async merging(r, phase) {
       const head = r.rounds.at(-1)!.head;
       const snapshot = await github.poll(r.pr.repo, r.pr.number);
+      if (snapshot.pr.state === "closed") return end(r, { kind: "closed" });
       const holds = async () => landingHolds({ review: r, pr: snapshot, files: await github.files(r.pr.repo, r.pr.number), nexus: r.pr.repo.toLowerCase() === release.repo.toLowerCase() });
       let commit: string;
       if (snapshot.detail.mergeCommit !== null) {
@@ -478,7 +479,9 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
       return toPerson(r, `The ${who} thread ${t?.id ?? ""} is ${t?.status ?? "gone"}, so the review stopped.`);
     }
     if (r.outbox !== null) {
-      if (r.outbox.attempted === null) return (live ? await endedOnGitHub(r) : null) ?? { ...r, outbox: { ...r.outbox, attempted: now() } };
+      const gone = live ? await endedOnGitHub(r) : null;
+      if (gone !== null) return gone;
+      if (r.outbox.attempted === null) return { ...r, outbox: { ...r.outbox, attempted: now() } };
       if (await inbox(r.outbox.to === "builder" ? builder! : reviewer!, { id: r.outbox.id, text: r.outbox.text, sender: "review" }) === "later") return r;
       return { ...r, outbox: null, since: r.outbox.attempted };
     }
