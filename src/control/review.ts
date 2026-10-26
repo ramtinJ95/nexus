@@ -162,6 +162,7 @@ const checkFinding = (round: Round): Finding[] => round.check?.passed === false
 export const findingsOf = (round: Round): Finding[] => [...round.verdict?.findings ?? [], ...checkFinding(round)];
 /** An approval with no serious finding open, the check included. */
 const approves = (round: Round) => round.verdict?.verdict === "approve" && !findingsOf(round).some((f) => f.severity === "serious");
+const checkOutput = (output: string) => `The check's output:\n${output}`;
 
 const reservedList = "secrets; the egress allowlist; login or auth; the tailnets; database migrations that delete or rewrite existing data; pylon image rebuilds; breaking changes to the CLI's contract; anything irreversible";
 
@@ -304,6 +305,11 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
         if (now() - (builder.lastReplyAt ?? 0) < pushGraceMs) return r;
         return waitOn(r, builder, "builder", `You answered that you fixed findings, but the pull request's head is still ${round.head}. Push the fixes.`);
       }
+      // The reviewer cannot change a check's result, so a failed check at an unmoved head is the person's.
+      if (round.check?.passed === false && snapshot.detail.head === round.head) {
+        const answer = found.answers.find((a) => a.id === "CHECK");
+        return toPerson(answered, `.nexus/check failed at ${round.head}, and the builder pushed nothing for it${answer === undefined ? "." : `: ${answer.reason}`}`, checkOutput(round.check.output));
+      }
       // Commits pushed with answers that fixed nothing are still unreviewed, so only an unmoved head skips a round.
       if (snapshot.detail.head === round.head && approves(round)) return { ...answered, phase: checking(), nudges: 0 };
       if (n >= r.maxRounds) return toPerson(answered, `The builder pushed fixes after round ${n}, the last this review allows, so they are unreviewed.`);
@@ -319,11 +325,13 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
         checks.discard(phase.thread);
         return { ...r, phase: { ...phase, thread: null } };
       }
+      if (state.kind === "unrunnable") return toPerson(r, `.nexus/check could not run at ${round.head}.`, checkOutput(state.output));
       if (state.kind !== "done") return r;
       checks.discard(phase.thread);
       const next = withRound({ ...r, phase: { ...phase, thread: null } }, { check: { passed: state.passed, output: state.output } });
       if (state.passed) return r.land === null ? { ...next, phase: { kind: "approved" } } : { ...next, phase: { kind: "merging", authorized: null } };
-      if (r.rounds.length >= r.maxRounds) return toPerson(next, `.nexus/check failed at ${round.head} after the last round this review allows.`);
+      if (r.rounds.slice(0, -1).some((earlier) => earlier.head === round.head && earlier.check?.passed === false)) return toPerson(next, `.nexus/check failed again at ${round.head}, where it failed before.`, checkOutput(state.output));
+      if (r.rounds.length >= r.maxRounds) return toPerson(next, `.nexus/check failed at ${round.head} after the last round this review allows.`, checkOutput(state.output));
       return send(next, "builder", (token) => builderFindings(next, token), { kind: "fixing" });
     },
     async merging(r, phase) {
