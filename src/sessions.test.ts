@@ -677,6 +677,20 @@ test("a typing exec the dead probe's guest starts late types nothing once the se
   assert.equal(pylon.claudes().length, 1);
 });
 
+test("a typing exec the dead probe's guest starts late wins the claim from a second launch that has not typed yet", async () => {
+  const pylon = launchPylon();
+  await assert.rejects(openSession(pylon.probe({ exec: typedExec, ran: "held" }), prompted));
+  const second = pylon.probe();
+  const exec = second.exec;
+  second.exec = async (argv, options) => {
+    if (typedExec(argv)) pylon.release();
+    return exec(argv, options);
+  };
+  assert.equal(await openSession(second, prompted), "w1:p1");
+  assert.equal(pylon.typings(), 1);
+  assert.equal(pylon.claudes().length, 1);
+});
+
 test("a launch whose probe died waiting for its receipt is not typed again", async () => {
   const pylon = launchPylon();
   await assert.rejects(openSession(pylon.probe({ exec: (a) => a[3] === "claude-submitted", ran: false }), prompted));

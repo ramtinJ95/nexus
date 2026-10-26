@@ -165,8 +165,9 @@ const launchesDir = `${home}/.nexus/claude-launches`;
 /**
  * How far a prompted Claude Code launch got: `opened` once its workspace exists, `typed` once the command to start
  * Claude is on its way into the pane, and `submitted` once Claude took the first prompt. `typed` is written by the
- * same guest exec that types the command, and a guest exec runs to its end even when the probe that started it
- * exits, so a launch without it typed nothing.
+ * same guest exec that types the command, before it types, and only the exec that creates it types. A guest exec runs
+ * to its end even when the probe that started it exits, so a launch without it typed nothing, though an exec its
+ * probe outlived may still claim it.
  */
 type ClaudeLaunch = { dir: `/${string}` } & ({ progress: "none" } | { progress: "opened" | "typed"; workspace: string; pane: string });
 
@@ -729,14 +730,21 @@ async function writeSessionsFile(guest: Guest, file: SessionsFile): Promise<void
 }
 
 /**
+ * Runs its arguments only if it creates the directory `$0`, which only one exec can, so a launch typed by an exec its
+ * probe outlived is never typed again by a later probe. Exits 75 when another exec created it first.
+ */
+const claimThenRun = 'mkdir "$0" 2>/dev/null && exec "$@"; test -d "$0" && exit 75; mkdir "$0"';
+
+/**
  * One Herdr CLI call. Control commands print one JSON line, `{ id, result }` or `{ id, error }`, and the
  * exec merges stderr into the output, so the reply is the last line that starts with `{`.
  */
 async function herdr(guest: Guest, args: readonly string[], timeoutMs = callTimeoutMs, marker?: string): Promise<unknown> {
   const what = `herdr ${args.slice(0, 2).join(" ")}`;
   const argv = ["herdr", "--session", herdrSession, ...args];
-  const { exitCode, output } = await guest.exec(marker === undefined ? argv : ["sh", "-c", 'touch "$0" && exec "$@"', marker, ...argv], { cwd: home, timeoutMs });
+  const { exitCode, output } = await guest.exec(marker === undefined ? argv : ["sh", "-c", claimThenRun, marker, ...argv], { cwd: home, timeoutMs });
   if (exitCode === null) throw new Error(`${what} did not finish within ${timeoutMs} ms`);
+  if (marker !== undefined && exitCode === 75) throw new Error(`${what} ran nothing, because another exec had already claimed ${marker}`);
   const line = output.trimEnd().split("\n").findLast((l) => l.startsWith("{"));
   // `pane run` succeeds silently.
   if (line === undefined && exitCode === 0 && output.trim() === "") return undefined;
