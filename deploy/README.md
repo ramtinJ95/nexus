@@ -290,7 +290,7 @@ node src/agent-setup.ts
 git commit -m "chore(image): refresh the pylon agent setup" images/pylon/agent-setup/manifest.json && git push
 ```
 
-The capture also takes pi-shepherdr's agent profiles from `~/.pi/agent/shepherdr/profiles/`, so a pylon's shepherdr `reviewer` is the one on this Mac. Like skills, each profile ships from the dotfiles repo, so it must be committed and pushed there. A profile whose `prompt` or `prepare` names a file outside its directory, whose `pi_args` names a path on this Mac, whose `prepare` file imports anything but `node:` modules and files in its directory, or that holds a link leading anywhere but a file in its directory cannot ship either. The image build copies a link from the dotfiles checkout, not what it reaches on this Mac.
+The capture also takes pi-shepherdr's agent profiles from `~/.pi/agent/shepherdr/profiles/`, so a pylon's shepherdr `reviewer` is the one on this Mac. Like skills, each profile ships from the dotfiles repo, so it must be committed and pushed there. A profile whose `prompt` or `prepare` names a file outside its directory, whose `pi_args` names a path on this Mac, whose `prepare` file, or a module it imports, imports anything but `node:` modules and files in its directory, or that holds a link leading anywhere but a file in its directory cannot ship either. The image build copies a link from the dotfiles checkout, not what it reaches on this Mac.
 
 The capture prints what ships and what it leaves out. When something cannot ship, such as a skill not committed and pushed in the dotfiles repo or a plugin older than its marketplace, it writes nothing and says how to fix each problem. `docs/contracts/usage.md` describes it.
 

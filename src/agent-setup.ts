@@ -291,7 +291,8 @@ const profileFields = new Set(["accepts", "blocking", "description", "model", "p
 /**
  * Why the shepherdr profile `name` with these files cannot work once copied into a pylon, one line per defect: its
  * profile.json is missing, unparsable or has a field pi-shepherdr refuses, its prompt or prepare is not a file in
- * it, a pi_args entry is a path on this Mac, its prepare file imports what is neither node: nor a file in it, or a link
+ * it, a pi_args entry is a path on this Mac, its prepare file or a module it imports, transitively, imports what is
+ * neither node: nor a file in it, or a link
  * in it is absolute or leads to anything but a file in it. A link to a file in it counts as that file.
  */
 export function profileProblems(name: string, regularFiles: ReadonlyMap<string, string>, links: ReadonlyMap<string, string>): string[] {
@@ -330,10 +331,14 @@ export function profileProblems(name: string, regularFiles: ReadonlyMap<string, 
     if (typeof arg === "string" && /^[/~]/.test(arg)) problems.push(problem(`pi_args entry ${JSON.stringify(arg)} is a path on this Mac`));
   }
   const prepare = fileAt(fields.prepare);
-  const specifiers = prepare === null ? [] : [...files.get(prepare)!.matchAll(moduleSpecifier)].map((match) => match[2]!);
-  for (const specifier of specifiers) {
-    if (specifier.startsWith("node:") || (/^\.\.?\//.test(specifier) && fileAt(specifier, posix.dirname(prepare!)) !== null)) continue;
-    problems.push(problem(`${prepare} imports ${JSON.stringify(specifier)}, which is neither node: nor a file in the profile`));
+  const modules = prepare === null ? [] : [prepare];
+  for (const module of modules) {
+    for (const [, , specifier] of files.get(module)!.matchAll(moduleSpecifier)) {
+      if (specifier!.startsWith("node:")) continue;
+      const local = /^\.\.?\//.test(specifier!) ? fileAt(specifier, posix.dirname(module)) : null;
+      if (local === null) problems.push(problem(`${module} imports ${JSON.stringify(specifier)}, which is neither node: nor a file in the profile`));
+      else if (!modules.includes(local)) modules.push(local);
+    }
   }
   return problems;
 }

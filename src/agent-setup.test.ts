@@ -314,6 +314,22 @@ test("a shepherdr profile that names something that cannot ship is refused, ever
   ]);
 });
 
+test("a shepherdr profile's prepare file is checked through every local module it imports, cycles included", () => {
+  const profile = (name: string, helper: string) => withProfile(thisMac(), name, {
+    "profile.json": JSON.stringify({ description: "d", model: "m", thinking: "high", prepare: "prepare.mjs" }),
+    "prepare.mjs": 'import { git } from "./lib/git.mjs";\nexport const prepare = (input) => git(input);\n',
+    "lib/git.mjs": helper,
+    "lib/util.mjs": 'import { git } from "./git.mjs";\nimport { spawnSync } from "node:child_process";\nexport const run = spawnSync;\n',
+  });
+  const reaching = profile("reaching", 'import { run } from "./util.mjs";\nimport mac from "../../mac-only.mjs";\nimport lodash from "lodash";\nexport const git = run;\n');
+  assert.deepEqual(problemsOf(plan(reaching)), [
+    'shepherdr profile reaching: lib/git.mjs imports "../../mac-only.mjs", which is neither node: nor a file in the profile',
+    'shepherdr profile reaching: lib/git.mjs imports "lodash", which is neither node: nor a file in the profile',
+  ]);
+  const cyclic = profile("cyclic", 'import { run } from "./util.mjs";\nexport const git = run;\n');
+  assert.deepEqual(captured(plan(cyclic)).setup.pi.shepherdrProfiles, [`${profiles}/cyclic`, `${profiles}/reviewer`]);
+});
+
 test("a committed link in a shepherdr profile ships only when it leads to a file in the profile, since the build copies the link, not what it reaches on the Mac", () => {
   const linked = withProfile(thisMac(), "linked", {
     "profile.json": JSON.stringify({ description: "d", model: "m", thinking: "high", prompt: "prompt.md" }),
