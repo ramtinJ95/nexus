@@ -77,10 +77,10 @@ export const overcommitted = (c: NodeRecord["capacity"]): boolean => c !== null 
 export interface Tally { pylons: number; cpus: number; memoryGiB: number }
 /**
  * The pylons in a node's latest observation, by what they hold. One that is up holds its CPUs and memory, and a paused
- * one needs them back to wake. An archived one, whose thread is archived or deleted, stays paused. A crashed one, broken
- * because its controller exited or failed to boot the VM, holds only its disk, and needs its CPUs and memory back for a
- * retry. An orphaned VM is one
- * the registry has not placed on the node, whose CPUs and memory the control plane does not know.
+ * one needs them back to wake. A crashed one, broken because its controller exited or failed to boot the VM, holds only
+ * its disk, and needs its CPUs and memory back for a retry. An archived one, paused or crashed with its thread archived
+ * or deleted, holds only its disk and boots only once the thread is unarchived. An orphaned VM is one the registry has
+ * not placed on the node, whose CPUs and memory the control plane does not know.
  */
 export interface NodePylons { up: Tally; paused: Tally; archived: Tally; crashed: Tally; orphaned: readonly PylonId[] }
 
@@ -96,8 +96,9 @@ export function nodePylons(registry: Registry, node: NodeRecord): NodePylons | n
       continue;
     }
     const { status } = registry.thread(p.thread as ThreadId)!;
-    const tally = tallies[seen.phase === "broken" && seen.cause === "controller" ? "crashed"
-      : seen.phase !== "stopped" ? "up" : status === "archived" || status === "deleted" ? "archived" : "paused"];
+    const crashed = seen.phase === "broken" && seen.cause === "controller";
+    const tally = tallies[(crashed || seen.phase === "stopped") && (status === "archived" || status === "deleted") ? "archived"
+      : crashed ? "crashed" : seen.phase !== "stopped" ? "up" : "paused"];
     tally.pylons += 1;
     tally.cpus += p.boot.resources.cpus;
     tally.memoryGiB += p.boot.resources.memoryGiB;
