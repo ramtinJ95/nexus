@@ -68,6 +68,8 @@
 * { box-sizing: border-box; }
 body { margin: 0; }
 code, kbd, pre { font-family: var(--mono); }
+/* A ticking clock keeps its width from second to second. */
+time[data-since] { font-variant-numeric: tabular-nums; }
 code { font-size: 0.92em; overflow-wrap: anywhere; }
 a { color: inherit; text-decoration: none; }
 a.link { color: var(--accent); }
@@ -155,7 +157,10 @@ a.link { color: var(--accent); }
 .row-icon .dot { position: absolute; right: -3px; bottom: -2px; width: 8px; height: 8px; box-shadow: 0 0 0 1.5px var(--side); }
 .row-icon .dot-busy, .row-icon .dot-idle { background: var(--side); }
 .row-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; }
-.row-at { font-size: 11px; color: var(--text-3); white-space: nowrap; }
+.row-at { flex: none; font-size: 11px; color: var(--text-3); white-space: nowrap; }
+/* A row whose thread needs no one recedes until it is pointed at or focused. */
+.row.dim > .row-title, .row.dim > .row-at, .ov tr.dim td { opacity: 0.6; transition: opacity 0.15s; }
+.row.dim:hover > *, .row.dim:focus-visible > *, .ov tr.dim:hover td, .ov tr.dim:focus-within td { opacity: 1; }
 .archived > summary { list-style: none; cursor: pointer; padding: 4px 8px 4px 47px; font-size: 12px; color: var(--text-3); border-radius: 8px; }
 .archived > summary::-webkit-details-marker { display: none; }
 .archived > summary:hover { color: var(--text-2); }
@@ -281,7 +286,7 @@ h4.md-h { font-size: 1.07em; }
 .run-bar.parked .btn:first-of-type { margin-left: auto; }
 .spin { width: 11px; height: 11px; border-radius: 50%; border: 1.5px solid color-mix(in srgb, var(--work) 25%, transparent); border-top-color: var(--work); animation: spin 0.8s linear infinite; flex: none; }
 @keyframes spin { to { transform: rotate(360deg); } }
-@media (prefers-reduced-motion: reduce) { .spin, .caret { animation: none; } }
+@media (prefers-reduced-motion: reduce) { .spin, .caret { animation: none; } .row.dim > *, .ov tr.dim td { transition: none; } }
 .comp-box { padding: 2px 0 0; }
 .comp-box textarea { all: unset; display: block; width: 100%; font: 15px/1.5 var(--sans); color: var(--text); min-height: 46px; max-height: 40vh; overflow: auto; field-sizing: content; white-space: pre-wrap; overflow-wrap: anywhere; }
 .comp-box textarea::placeholder { color: var(--text-3); }

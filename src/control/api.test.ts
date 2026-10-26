@@ -1910,7 +1910,7 @@ test("a Claude worker thread's page stream shows new entries during a turn, read
   const report = (kind: "session.turn-started" | "session.turn-ended") => s.registry.reportSession(node, { sequence: ++sequence, pylon: s.thread.pylonId, time: Date.now(), event: { kind, session: claudeSession } });
   await appendFile(s.transcript, fixture.slice(22, 24).join(""));
   report("session.turn-started");
-  await frame(/Wrote a file/, "the turn's start is followed by a read");
+  await frame(/Changed a file/, "the turn's start is followed by a read");
   await appendFile(s.transcript, fixture[24]!);
   assert.match(await frame(/<span class="t-status run">running<\/span>/, "a turn that runs is read again"), /python3 \/home\/user\/workspace\/repo\/hello.py/);
   await appendFile(s.transcript, fixture.slice(25, 28).join(""));

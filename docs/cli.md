@@ -66,7 +66,7 @@ With `--json`, a command prints one JSON value on stdout, pretty-printed. The va
 |---|---|---|
 | `deploy <commit|main> [--wait]` | `PUT /v1/release` with `{"commit": string}`, then `GET /v1/release` while waiting | `ReleaseView`, described below |
 | `release` | `GET /v1/release` | `ReleaseView` |
-| `threads [--project P] [--all]` | `GET /v1/threads[?project=P]` | `ThreadRow[]`: each `Thread` with `desired` and `pylon: { node, actualState, failed }`, as in `ThreadDetail`. Deleted threads are left out unless `--all` is given |
+| `threads [--project P] [--all]` | `GET /v1/threads[?project=P]` | `ThreadRow[]`: each `Thread` with `desired` and `pylon: { node, actualState, failed }`, as in `ThreadDetail`. A thread whose harness or session turn runs carries `workingSince`, the earliest known start of those turns in Unix milliseconds, unless no start is known. Deleted threads are left out unless `--all` is given |
 | `show <thread>` | `GET /v1/threads/<thread>` | `ThreadDetail`. Its `desired` is what the planner wants of the pylon now: `running`, `paused` or `deleted`. Its `attach` is the command that attaches to the pylon's Herdr sessions from a shell in the pylon |
 | `ports <thread>` | `GET /v1/threads/<thread>` | `ListeningPort[] \| null`, the detail's `ports` |
 | `preview <thread> <port> [--wait]` | `POST /v1/threads/<thread>/previews` with `{"port": number}`, then with `--wait` polls `GET /v1/threads/<thread>` | `Preview`, the port's preview |

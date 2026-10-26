@@ -128,7 +128,7 @@ function sidebarOf(html: string) {
 
 /** One overview row per thread, as its table cells read. */
 function overviewRow(html: string, thread: Thread): string {
-  const row = html.split('id="overview"')[1]!.split("<tr>").find((chunk) => chunk.includes(`href="/threads/${thread.id}"`));
+  const row = html.split('id="overview"')[1]!.split(/<tr(?: class="[^"]*")?>/).find((chunk) => chunk.includes(`href="/threads/${thread.id}"`));
   assert.ok(row !== undefined, `no overview row for ${thread.id}`);
   return textOf(row.split("</tr>")[0]!);
 }
@@ -163,7 +163,8 @@ test("the overview lists each project's open threads with their phases, node and
   const fix = await s.start("acme", "Fix checkout");
   const docs = await s.start("beta", "Write docs");
   const old = await s.start("acme", "Old spike");
-  s.registry.recordActivity(docs.id, { agent: Date.now(), agentTurnRunning: true });
+  const started = Date.now() - 63_000;
+  s.registry.recordActivity(docs.id, { agent: started, agentTurnRunning: true });
   assert.equal((await s.call("POST", `/v1/threads/${old.id}/archive`)).status, 200);
   s.observe(fix);
 
@@ -176,7 +177,8 @@ test("the overview lists each project's open threads with their phases, node and
   assert.ok(acme!.includes(fix.id) && !acme!.includes(docs.id), "each thread is listed under its own project");
   assert.ok(beta!.includes(docs.id));
   assert.equal(overviewRow(res.text, fix), "Fix checkout running running rj-firebat just now never");
-  assert.equal(overviewRow(res.text, docs), "Write docs running not on its node rj-firebat just now turn running");
+  assert.match(overviewRow(res.text, docs), /^Write docs running not on its node rj-firebat just now working 1m 0[34]s$/);
+  assert.match(beta!, new RegExp(`<td class="wide">working <time data-since="${started}">1m 0[34]s</time></td>`), "the client ticks the turn's clock from its start");
   assert.match(textOf(acme!), /Thread Desired Observed Node Human Agent Fix checkout .* 1 archived Thread .* Old spike archived paused not on its node/);
   assert.match(acme!, /<details class="ov-closed"[^>]*><summary>1 archived<\/summary>/, "archived threads start folded away");
 });
@@ -187,22 +189,43 @@ test("the sidebar lists every project's threads with their state, folds the arch
   const docs = await s.start("beta", "Write docs");
   const old = await s.start("acme", "Old spike");
   const gone = await s.start("acme", "Gone");
-  s.registry.recordActivity(docs.id, { agent: Date.now(), agentTurnRunning: true });
+  const started = Date.now() - 63_000;
+  s.registry.recordActivity(docs.id, { agent: started, agentTurnRunning: true });
   await s.call("POST", `/v1/threads/${old.id}/archive`);
   await s.call("DELETE", `/v1/threads/${gone.id}`);
   s.observe(fix);
 
   for (const path of ["/", `/threads/${fix.id}`, "/threads/new", "/threads/th-missing"]) {
-    const sidebar = sidebarOf((await s.call("GET", path)).text);
+    const html = (await s.call("GET", path)).text;
+    const sidebar = sidebarOf(html);
     // Threads started in the same millisecond have no order between them.
-    assert.deepEqual(sidebar.rows.toSorted(), ["agent working Write docs now", "archived Old spike now", "deleted Gone now", "running Fix checkout now"], `${path} lists the threads`);
-    assert.match(sidebar.text, /^acme main Fix checkout now 1 archived, 1 deleted (Gone now Old spike now|Old spike now Gone now) beta main Write docs now$/);
+    assert.deepEqual(sidebar.rows.toSorted().map((row) => row.replace(/1m 0[34]s$/, "1m 03s")), ["agent working Write docs working 1m 03s", "archived Old spike now", "deleted Gone now", "running Fix checkout now"], `${path} lists the threads`);
+    assert.match(sidebar.text, /^acme main Fix checkout now 1 archived, 1 deleted (Gone now Old spike now|Old spike now Gone now) beta main Write docs working 1m 0[34]s$/);
+    assert.match(html, new RegExp(`<span class="row-at">working <time data-since="${started}">1m 0[34]s</time></span>`), `${path} ticks the working thread's clock`);
   }
   const page = (await s.call("GET", `/threads/${fix.id}`)).text;
   assert.equal(sidebarOf(page).active, fix.id);
   assert.match(page, /<details class="archived" id="archived-acme">/, "the archived fold starts closed");
   assert.match((await s.call("GET", `/threads/${old.id}`)).text, /<details class="archived" id="archived-acme" open>/, "an archived thread's page opens its fold");
   assert.match(textOf(page.split('id="side-nodes"')[1]!.split("</div>")[0]!), /rj-firebat/);
+});
+
+test("rows of threads that need the person stay bright, and the rest dim unless open", async (t) => {
+  const s = await seeded(t);
+  const [failed, parked, reply, working, waiting, idle, open] = await Promise.all(["Failed", "Parked", "Reply", "Working", "Waiting", "Idle", "Open"].map((title) => s.start("acme", title)));
+  s.registry.savePylon({ ...s.registry.pylon(failed!.pylonId)!, failed: "setup exited 1" });
+  s.fake.park(parked!.id, 1);
+  s.registry.recordReply(reply!.id, Date.now());
+  s.registry.recordActivity(working!.id, { agent: Date.now(), agentTurnRunning: true });
+  s.registry.reportSession(node, { sequence: 1, pylon: waiting!.pylonId, time: Date.now(), event: { kind: "session.waiting", session: "c1" } });
+  const dimmed = (html: string, pattern: RegExp) => Object.fromEntries([...html.matchAll(pattern)].map((m) => [m[2]!, m[1] !== undefined]));
+  const bright = { [failed!.id]: false, [parked!.id]: false, [reply!.id]: false, [waiting!.id]: false, [working!.id]: true, [idle!.id]: true };
+
+  const home = (await s.call("GET", "/")).text;
+  assert.deepEqual(dimmed(home.split('id="overview"')[1]!, /<tr( class="dim")?>\s*<td><span class="ov-title">.*?href="\/threads\/([^"]+)"/g), { ...bright, [open!.id]: true });
+  assert.deepEqual(dimmed(home.split('id="side-threads"')[1]!, /<a class="row( dim)?" href="\/threads\/([^"]+)"/g), { ...bright, [open!.id]: true });
+  const page = (await s.call("GET", `/threads/${open!.id}`)).text;
+  assert.deepEqual(dimmed(page.split('id="side-threads"')[1]!, /<a class="row(?: active)?( dim)?" href="\/threads\/([^"]+)"/g), { ...bright, [open!.id]: false }, "the open thread's row stays bright");
 });
 
 test("a new thread whose node does not have its pylon yet reads as absent, not deleted", async (t) => {
@@ -420,7 +443,7 @@ test("a run of tool calls folds into a line that says what it did, over rows whe
     "Ran a command ›",
     `› bash npm test 40 lines ✓ npm test ${long.replace(/\n/g, " ")}`,
     "One more.",
-    "Ran a command, edited a file, read a file 1 failed ›",
+    "Ran a command, changed a file, read a file 1 failed ›",
     "› bash git status 2 lines exit 128 git status fatal: not a git repository Command exited with code 128",
     "› edit src/a.ts +1 −2 ✓ src/a.ts − const a = 1; − const b = 2; + const a = 2;",
     `› read src/b.ts no result src/b.ts { "offset": 10 } No output.`,
@@ -444,8 +467,8 @@ test("a fold counts each kind of call, a file once however often it is read, and
   transcript.messages.push(assistant([{ type: "text", text: "Now the rest." }, bash("c1", "ls"), bash("c2", "pwd"), bash("c3", "id")]), result("c1", "a"), result("c2", "b"), result("c3", "c"));
 
   const { rows, open } = conversationOf((await s.call("GET", `/threads/${fix.id}`)).text);
-  assert.equal(rows[1], "Read 2 files, searched, ran 2 commands ›");
-  assert.equal(rows[8], "Read 2 files, searched, ran 2 commands 1 failed ›");
+  assert.equal(rows[1], "Ran 2 commands, read 2 files, searched the code ›");
+  assert.equal(rows[8], "Ran 2 commands, read 2 files, searched the code 1 failed ›");
   assert.equal(rows[14], "Now the rest.");
   assert.equal(rows[15], "Ran 3 commands ›");
   assert.equal(rows[16], "› bash ls 1 line ✓ ls a");
@@ -453,11 +476,36 @@ test("a fold counts each kind of call, a file once however often it is read, and
   assert.deepEqual(open.filter(([id]) => ["tool-b4", "tool-a4"].includes(String(id))), [["tool-a4", false], ["tool-b4", true]]);
 });
 
+test("a fold says what its calls did by action, weightiest first, a changed file once, and counts the tools past three actions", async (t) => {
+  const s = await seeded(t);
+  const fix = await s.start("acme", "Fix checkout");
+  s.fake.transcript(fix.id).messages.push(
+    { role: "user", content: "Fix it", timestamp: 0 },
+    assistant([
+      call("a1", "read", { path: "src/a.ts" }), call("a2", "edit", { path: "src/a.ts", edits: [{ oldText: "a", newText: "b" }] }), call("a3", "write", { path: "src/a.ts", content: "b" }),
+      bash("a4", "npm test"), call("a5", "write", { path: "src/b.ts", content: "c" }), call("a6", "grep", { pattern: "b" }),
+      call("a7", "lint", {}), call("a8", "deploy", {}), call("a9", "lint", {}),
+    ]),
+    assistant([{ type: "text", text: "Fixed." }]),
+    assistant([bash("b1", "ls"), call("b2", "find", { pattern: "*.ts" }), call("b3", "frob", {})]),
+    assistant([], "aborted"),
+    assistant([bash("c1", "pwd"), call("c2", "read", { path: "src/a.ts" }), call("c3", "grep", { pattern: "x" }), call("c4", "ls", { path: "src" }), call("c5", "frob", {})]),
+  );
+  const { rows } = conversationOf((await s.call("GET", `/threads/${fix.id}`)).text);
+  assert.deepEqual(rows.filter((row) => row.endsWith("›") && !row.startsWith("›")), [
+    "Changed 2 files, ran a command, read a file, used 3 other tools ›",
+    "Ran a command, searched the code, used frob ›",
+    "Ran a command, read a file, searched the code 2 times, used another tool ›",
+  ]);
+  assert.ok(rows.includes("! Aborted."), "a notice between two runs stays between their folds");
+});
+
 test("a running turn shows its tool's output so far, the partial answer, queued messages and what the run has done", async (t) => {
   const s = await seeded(t);
   const fix = await s.start("acme", "Fix checkout");
   const transcript = s.fake.transcript(fix.id);
-  transcript.messages.push({ role: "user", content: "Build it", timestamp: Date.now() - 72_000 }, assistant([bash("c1", "npm run build")], "toolUse"));
+  transcript.messages.push({ role: "user", content: "Build it", timestamp: 0 }, assistant([bash("c1", "npm run build")], "toolUse"));
+  s.registry.recordActivity(fix.id, { agent: Date.now() - 72_000, agentTurnRunning: true });
   transcript.docs["pi.live"] = {
     run: { taskId: 1, inputs: [1] },
     tools: [{ callId: "c1", name: "bash", status: "running", output: "compiling\n" }],
@@ -714,7 +762,7 @@ test("a tool call's expanded body shows its whole command, path or pattern", asy
   const body = (id: string) => /<pre class="t-full">([^<]*)<\/pre>/.exec(html.split(`id="tool-${id}"`)[1]!)![1]!;
   assert.equal(body("c1"), command.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;"), "the multiline command is whole and escaped");
   assert.equal(body("c2"), "a|b&lt;c&gt;");
-  assert.equal(conversationOf(html).rows[0], "Ran a command, searched ›");
+  assert.equal(conversationOf(html).rows[0], "Ran a command, searched the code ›");
   assert.equal(conversationOf(html).rows[2], `› grep a|b<c> 1 line ✓ a|b<c> { "path": "src" } src/a.ts:1`);
 });
 
@@ -901,7 +949,7 @@ test("a Claude worker's transcript reads as its conversation: prompts by who sen
   const { rows, open, dock } = conversationOf(html);
   assert.deepEqual(rows, [
     "You Write hello.py, then count its lines",
-    "Wrote a file, ran a command, ran a subagent 1 failed ›",
+    "Changed a file, ran a command, ran a subagent 1 failed ›",
     '› Write /repo/hello.py +1 −0 ✓ /repo/hello.py + print("hi")',
     "› Bash false 1 line exit 1 false Exit code 1",
     '› Agent Count lines 1 line ✓ Count lines Count the lines of hello.py { "subagent_type": "general-purpose" } Started in the background Background task completed: Agent "Count lines" finished It has 1 line.',
@@ -947,10 +995,43 @@ test("a Claude worker that works shows its turn's call running, the turn's clock
     "Ran a command 1 running ›",
     "› Bash npm test running npm test No output yet.",
   ], "only a call of the running turn runs");
-  assert.match(dock, /^Claude is working\. 1m 1[2-3]s · 1 tool this turn · new messages go in at its next step Claude Code takes a message sent during a turn at its next step\. claude-opus-5-5 ⌘↵ to queue Queue$/,
-    "the turn is timed from the person's prompt, and Claude cannot be aborted");
+  assert.match(dock, /^Claude is working\. [01]s · 1 tool this turn · new messages go in at its next step Claude Code takes a message sent during a turn at its next step\. claude-opus-5-5 ⌘↵ to queue Queue$/,
+    "the turn is timed from when control heard it start, and Claude cannot be aborted");
+  const since = s.registry.thread(thread.id)!.workingSince;
+  assert.equal(html.split(`<time data-since="${since}">`).length - 1, 3, "the run bar, the sidebar row and the inspector tick the same clock");
   assert.doesNotMatch(html, /data-action="abort"/);
   assert.match(html, /placeholder="Queue for Claude…"/);
+});
+
+test("a Claude worker's folds say what their calls did by action, a changed file once, and count the tools past three actions", async (t) => {
+  const s = await seeded(t);
+  let id = 0;
+  const tool = (name: string, input: Record<string, unknown> = {}): ClaudeEntry => ({ kind: "tool", at: id, id: `t${++id}`, name, input });
+  const thread = await claudeThread(s, [
+    { kind: "prompt", at: 0, text: "Fix it", from: "person" },
+    tool("Edit", { file_path: "/r/a.ts", old_string: "a", new_string: "b" }), tool("MultiEdit", { file_path: "/r/a.ts", edits: [] }), tool("Write", { file_path: "/r/a.ts", content: "b" }),
+    tool("Write", { file_path: "/r/b.ts", content: "c" }), tool("Bash", { command: "npm test" }), tool("Bash", { command: "npm test" }), tool("Bash", { command: "git status" }),
+    tool("Agent", { description: "Review" }), tool("Read", { file_path: "/r/a.ts" }), tool("Agent", { description: "Check" }), tool("TodoWrite"), tool("WebSearch", { query: "q" }),
+    tool("WebFetch", { url: "https://example.com" }), tool("mcp__x"),
+    { kind: "notice", at: 1, tone: "error", text: "Interrupted" },
+    tool("Read", { file_path: "/r/a.ts" }), tool("Read", { file_path: "/r/a.ts" }), tool("Read", { file_path: "/r/b.ts" }), tool("Grep", { pattern: "x" }), tool("Glob", { pattern: "*.ts" }), tool("WebSearch", { query: "r" }),
+  ]);
+  const { rows } = conversationOf((await s.call("GET", `/threads/${thread.id}`)).text);
+  assert.deepEqual(rows.filter((row) => row.endsWith("›") && !row.startsWith("›")), [
+    "Changed 2 files, ran 3 commands, ran 2 subagents, used 5 other tools ›",
+    "Read 2 files, searched the code 2 times, searched the web ›",
+  ]);
+  assert.ok(rows.includes("! Interrupted"), "the interrupt stays between the two folds");
+});
+
+test("a turn's length reads as a padded clock: seconds, then minutes and seconds, then hours and minutes", async (t) => {
+  const s = await seeded(t);
+  const thread = await claudeThread(s, [45_000, 63_000, 3_900_000].flatMap((durationMs, i): ClaudeEntry[] => [
+    { kind: "prompt", at: i, text: `turn ${i}`, from: "person" },
+    { kind: "turn", at: i, durationMs },
+  ]));
+  const { rows } = conversationOf((await s.call("GET", `/threads/${thread.id}`)).text);
+  assert.deepEqual(rows.filter((row) => row.startsWith("Worked")), ["Worked for 45s.", "Worked for 1m 03s.", "Worked for 1h 05m."]);
 });
 
 test("a Claude worker without a transcript says whether it was read, and an archived one's says how old it is", async (t) => {

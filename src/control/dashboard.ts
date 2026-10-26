@@ -23,6 +23,7 @@ import { desiredPhase, type ActualState, type DesiredPhase } from "../reconcile.
 import type { HerdrStatus } from "../protocol.ts";
 import { githubTokenGrant, linkedPort, type SessionHarness } from "../project.ts";
 import type { ThreadDetail } from "./api.ts";
+import type { Attention } from "./attention.ts";
 import type { NodeRecord, Output, Preview, Registry, Thread, ThreadId } from "./registry.ts";
 import type { ClaudeConversation, ClaudeEntry, PromptSource } from "../claude-transcript.ts";
 import { queuedOf } from "./claude-conversation.ts";
@@ -172,6 +173,15 @@ function threadState({ thread: t, pylon, attention }: ThreadDetail): [label: str
   return actualBadge[pylon.actualState];
 }
 
+/**
+ * Whether a thread needs the person, so its row stays bright: a failure or a parked run to fix, a reply to read, or
+ * a session waiting on an answer. Waiting ranks below working, but only waiting is blocked on the person.
+ */
+const needsPerson: Record<`${Attention}`, boolean> = { failed: true, parked: true, reply: true, waiting: true, working: false, null: false };
+/** The open thread's row never dims, nor a closed thread's, which its fold already sets apart. */
+const dims = (d: ThreadDetail, active?: ThreadId) =>
+  d.thread.id !== active && (d.thread.status === "active" || d.thread.status === "idle") && !needsPerson[`${d.attention}`];
+
 /** "5 min", or null under 45 seconds. */
 function span(at: number, now: number): string | null {
   const seconds = Math.max(0, Math.round((now - at) / 1000));
@@ -188,10 +198,21 @@ function ago(at: number, now: number): Html {
   return html`<time datetime="${iso}" title="${iso}">${label === null ? "just now" : `${label} ago`}</time>`;
 }
 
-/** A run's length as a clock reads it, such as 1m 12s. client.js ticks it with the same format. */
+/** A run's length as a clock reads it, such as 1m 03s. client.js ticks it with the same format. */
+// After t3code's formatElapsedSeconds. Copyright (c) 2026 T3 Tools Inc., MIT licence; see THIRD_PARTY_NOTICES.md.
 function clock(ms: number): string {
-  const s = Math.max(0, Math.floor(ms / 1000));
-  return s < 60 ? `${s}s` : s < 3600 ? `${Math.floor(s / 60)}m ${s % 60}s` : `${Math.floor(s / 3600)}h ${Math.floor((s % 3600) / 60)}m`;
+  const seconds = Math.max(0, Math.floor(ms / 1000));
+  const minutes = Math.floor(seconds / 60);
+  if (minutes === 0) return `${seconds}s`;
+  const hours = Math.floor(minutes / 60);
+  if (hours === 0) return `${minutes}m ${String(seconds % 60).padStart(2, "0")}s`;
+  return `${hours}h ${String(minutes % 60).padStart(2, "0")}m`;
+}
+
+/** How long a thread's running turn has worked, which client.js ticks, or null when no turn runs. */
+function workingFor(t: Thread, now: number): Html | null {
+  if (!t.agentTurnRunning && t.sessionTurnRunning !== true) return null;
+  return t.workingSince === undefined ? html`working` : html`working <time data-since="${t.workingSince}">${clock(now - t.workingSince)}</time>`;
 }
 
 interface Shell {
@@ -256,8 +277,9 @@ function sidebar(c: Context, active: ThreadId | undefined): Html {
   const projects = c.registry.projects();
   // A thread works in its own checkout, as a Jetline workspace does, so its row shows a branch with its state as a badge.
   const row = (t: Thread) => {
-    const [label, tone] = threadState(c.detail(t));
-    return html`<li><a class="row${t.id === active && " active"}" href="/threads/${t.id}"${t.id === active && html` aria-current="page"`}><span class="row-icon">${icon("branch")}${dot(tone, label)}</span><span class="row-title">${t.title}</span><span class="row-at">${span(lastActive(t), c.now) ?? "now"}</span></a></li>`;
+    const d = c.detail(t);
+    const [label, tone] = threadState(d);
+    return html`<li><a class="row${t.id === active && " active"}${dims(d, active) && " dim"}" href="/threads/${t.id}"${t.id === active && html` aria-current="page"`}><span class="row-icon">${icon("branch")}${dot(tone, label)}</span><span class="row-title">${t.title}</span><span class="row-at">${workingFor(t, c.now) ?? span(lastActive(t), c.now) ?? "now"}</span></a></li>`;
   };
   return html`<aside class="side" aria-label="Threads">
 <div class="side-head"><a class="brand" href="/"><span class="brand-mark" aria-hidden="true">◆</span>nexus</a><a class="btn btn-new" href="/threads/new" data-start>New thread<kbd>N</kbd></a></div>
@@ -377,13 +399,13 @@ function home(c: Context, dialogs: Pick<Shell, "start" | "addProject">): Html {
   const d = c.detail(t);
   const desired = desiredPhase(t, c.now);
   const [label, tone] = threadState(d);
-  return html`<tr>
+  return html`<tr${dims(d) && html` class="dim"`}>
 <td><span class="ov-title">${dot(tone, label)}<a href="/threads/${t.id}">${t.title}</a>${t.status !== "active" && html`<span class="tag">${t.status}</span>`}</span></td>
 <td class="wide">${state(desired, desiredTone[desired])}</td>
 <td>${state(...actualBadge[d.pylon.actualState])}</td>
 <td class="wide">${d.pylon.node}${nodes.get(d.pylon.node)!.state === "offline" && html` <span class="tag">offline</span>`}</td>
 <td class="wide">${ago(t.lastHumanActivityAt, c.now)}</td>
-<td class="wide">${t.agentTurnRunning ? "turn running" : ago(t.lastAgentActivityAt, c.now)}</td>
+<td class="wide">${workingFor(t, c.now) ?? ago(t.lastAgentActivityAt, c.now)}</td>
 </tr>`;
 })}</tbody>
 </table>`;
@@ -609,7 +631,7 @@ ${unpublished === null ? html`<p class="empty">The pylon's ports could not be re
 <dt>Node</dt><dd>${pylon.node}${node.state === "offline" && html` <span class="tag">offline</span>`}</dd>
 <dt>Last seen</dt><dd>${pylon.observedAt === null ? "never" : ago(Date.parse(pylon.observedAt), now)}${node.state === "offline" && pylon.observedAt !== null && " (stale)"}</dd>
 <dt>Human</dt><dd>${ago(t.lastHumanActivityAt, now)}</dd>
-<dt>Agent</dt><dd>${t.agentTurnRunning ? "turn running" : ago(t.lastAgentActivityAt, now)}</dd>
+<dt>Agent</dt><dd>${workingFor(t, now) ?? ago(t.lastAgentActivityAt, now)}</dd>
 </dl>
 <code class="id">${pylon.id}</code>
 ${pylon.failed !== null && html`<p class="error">The planner gave up: ${pylon.failed}</p>`}
@@ -770,20 +792,18 @@ type Run =
   | { kind: "working"; since: number | null; tools: number; claude: boolean }
   | { kind: "parked"; tasks: number; busy: boolean };
 function runOf(d: ThreadDetail, view: Conversation | null, items: readonly Item[]): Run {
-  if (view !== null && isClaude(view)) return view.working ? working(items, (item) => item.from === "person", true) : { kind: "idle" };
+  if (view !== null && isClaude(view)) return view.working ? working(d, items, (item) => item.from === "person", true) : { kind: "idle" };
   const busy = (view?.docs["pi.live"] as LiveState | undefined)?.run !== undefined;
   const parked = d.agent?.parkedTasks ?? 0;
   if (parked > 0) return { kind: "parked", tasks: parked, busy };
   if (!busy) return { kind: "idle" };
-  return working(items, () => true, false);
+  return working(d, items, () => true, false);
 }
 
-/** Neither pi-durable nor Claude Code keeps a start time for a turn, so it is timed from the message it answers. */
-function working(items: readonly Item[], asks: (item: UserItem) => boolean, claude: boolean): Run {
-  const asked = items.findLastIndex((item) => item.kind === "user" && item.queued === null && asks(item));
-  const turn = items.slice(asked + 1);
-  const since = asked === -1 ? null : (items[asked] as UserItem).at;
-  return { kind: "working", since, tools: turn.filter((item) => item.kind === "tool").length, claude };
+/** A turn's calls are those after the message it answers. Its start is the registry's, so the bar and the rows agree. */
+function working(d: ThreadDetail, items: readonly Item[], asks: (item: UserItem) => boolean, claude: boolean): Run {
+  const turn = items.slice(items.findLastIndex((item) => item.kind === "user" && item.queued === null && asks(item)) + 1);
+  return { kind: "working", since: d.thread.workingSince ?? null, tools: turn.filter((item) => item.kind === "tool").length, claude };
 }
 
 function runBar(t: Thread, run: Run, now: number): Html {
@@ -1022,43 +1042,57 @@ const contentDiff = ({ content }: Args): Diff | null => typeof content === "stri
 const stringDiff = ({ old_string: old, new_string: now }: Args): Diff | null => typeof old === "string" && typeof now === "string" ? { keys: ["old_string", "new_string"], lines: replaced(old, now) } : null;
 
 /**
+ * How a fold says what calls did, by what they do rather than which tool did them, so an edit and a write are both
+ * a change. A fold says its weightiest actions first: commands, changes and subagents, then reads and searches, then
+ * tools it does not know.
+ */
+// After t3code's summarizeToolGroup. Copyright (c) 2026 T3 Tools Inc., MIT licence; see THIRD_PARTY_NOTICES.md.
+type Action = "command" | "change" | "subagent" | "read" | "search" | "web" | "fetch" | "todo";
+interface Phrase { priority: number; one: string; many: (n: number) => string }
+const actions: Record<Action, Phrase> = {
+  command: { priority: 0, one: "ran a command", many: (n) => `ran ${n} commands` },
+  change: { priority: 0, one: "changed a file", many: (n) => `changed ${n} files` },
+  subagent: { priority: 0, one: "ran a subagent", many: (n) => `ran ${n} subagents` },
+  read: { priority: 1, one: "read a file", many: (n) => `read ${n} files` },
+  search: { priority: 1, one: "searched the code", many: (n) => `searched the code ${n} times` },
+  web: { priority: 1, one: "searched the web", many: (n) => `searched the web ${n} times` },
+  fetch: { priority: 1, one: "fetched a page", many: (n) => `fetched ${n} pages` },
+  todo: { priority: 1, one: "updated the to-do list", many: (n) => `updated the to-do list ${n} times` },
+};
+const unknownTool = (name: string): Phrase => ({ priority: 2, one: `used ${name}`, many: (n) => `used ${name} ${n} times` });
+
+/**
  * How a tool's calls read, by its name, pi's in lower case and Claude Code's capitalized: the argument that says what
  * a call did, shown in its row, one shown whole as text, what it changes, the argument naming the file it acts on,
- * so a fold counts a file once, and how a fold says what it did once and many times.
+ * so a fold counts a file once, and the action a fold counts it under.
  */
 interface ToolLook {
   subject?: string;
   text?: string;
   diff?: (args: Args) => Diff | null;
   file?: string;
-  doing?: readonly [one: string, many: (n: number) => string];
+  action?: Action;
 }
-const reads = ["read a file", (n: number) => `read ${n} files`] as const;
-const commands = ["ran a command", (n: number) => `ran ${n} commands`] as const;
-const edits = ["edited a file", (n: number) => `edited ${n} files`] as const;
-const writes = ["wrote a file", (n: number) => `wrote ${n} files`] as const;
-const searches = ["searched", (n: number) => `searched ${n} times`] as const;
-const finds = ["looked for files", (n: number) => `looked for files ${n} times`] as const;
 const toolLooks: Readonly<Record<string, ToolLook>> = {
-  read: { subject: "path", file: "path", doing: reads },
-  bash: { subject: "command", doing: commands },
-  edit: { subject: "path", file: "path", diff: editsDiff("oldText", "newText"), doing: edits },
-  write: { subject: "path", file: "path", diff: contentDiff, doing: writes },
-  grep: { subject: "pattern", doing: searches },
-  find: { subject: "pattern", doing: finds },
-  ls: { subject: "path", file: "path", doing: ["listed a folder", (n) => `listed ${n} folders`] },
-  Read: { subject: "file_path", file: "file_path", doing: reads },
-  Bash: { subject: "command", doing: commands },
-  Edit: { subject: "file_path", file: "file_path", diff: stringDiff, doing: edits },
-  MultiEdit: { subject: "file_path", file: "file_path", diff: editsDiff("old_string", "new_string"), doing: edits },
-  Write: { subject: "file_path", file: "file_path", diff: contentDiff, doing: writes },
-  Grep: { subject: "pattern", doing: searches },
-  Glob: { subject: "pattern", doing: finds },
-  Agent: { subject: "description", text: "prompt", doing: ["ran a subagent", (n) => `ran ${n} subagents`] },
-  WebFetch: { subject: "url", doing: ["fetched a page", (n) => `fetched ${n} pages`] },
-  WebSearch: { subject: "query", doing: ["searched the web", (n) => `searched the web ${n} times`] },
-  TodoWrite: { doing: ["updated the to-do list", (n) => `updated the to-do list ${n} times`] },
-  shell: { subject: "command", doing: ["ran a shell command", (n) => `ran ${n} shell commands`] },
+  read: { subject: "path", file: "path", action: "read" },
+  bash: { subject: "command", action: "command" },
+  edit: { subject: "path", file: "path", diff: editsDiff("oldText", "newText"), action: "change" },
+  write: { subject: "path", file: "path", diff: contentDiff, action: "change" },
+  grep: { subject: "pattern", action: "search" },
+  find: { subject: "pattern", action: "search" },
+  ls: { subject: "path", action: "search" },
+  Read: { subject: "file_path", file: "file_path", action: "read" },
+  Bash: { subject: "command", action: "command" },
+  Edit: { subject: "file_path", file: "file_path", diff: stringDiff, action: "change" },
+  MultiEdit: { subject: "file_path", file: "file_path", diff: editsDiff("old_string", "new_string"), action: "change" },
+  Write: { subject: "file_path", file: "file_path", diff: contentDiff, action: "change" },
+  Grep: { subject: "pattern", action: "search" },
+  Glob: { subject: "pattern", action: "search" },
+  Agent: { subject: "description", text: "prompt", action: "subagent" },
+  WebFetch: { subject: "url", action: "fetch" },
+  WebSearch: { subject: "query", action: "web" },
+  TodoWrite: { action: "todo" },
+  shell: { subject: "command", action: "command" },
 };
 /** The arguments that say what a call of a tool without a look did, the first one it has. */
 const subjectKeys = ["command", "pattern", "path", "url"];
@@ -1105,22 +1139,30 @@ ${task !== undefined && html`<p class="t-task">Background task ${task.status}: $
 </details>`;
 }
 
+/** How many actions a fold names before it counts the tools of the rest. */
+const phrasesShown = 3;
+
 /**
- * What a run of calls did, as Jetline says it: Read 2 files, ran a command. Calls on the same path count once, so
- * three edits to one file are one edited file. A call to a tool without a look is named as it is.
+ * What a run of calls did: Ran 3 commands, changed 2 files. Calls on the same path count once, so an edit and a
+ * write to one file are one changed file. Each tool without a look is its own action, named as it is.
  */
 function stepsSummary(tools: readonly ToolItem[]): string {
-  const done = new Map<string, Set<string>>();
+  const done = new Map<string, { phrase: Phrase; seen: Set<string>; names: Set<string> }>();
   for (const { call } of tools) {
-    const file = textArg(call.arguments, lookOfTool(call.name).file);
-    const seen = done.get(call.name) ?? new Set<string>();
-    seen.add(file?.value ?? call.id);
-    done.set(call.name, seen);
+    const look = lookOfTool(call.name);
+    const key = look.action === undefined ? `tool ${call.name}` : look.action;
+    const action = done.get(key) ?? { phrase: look.action === undefined ? unknownTool(call.name) : actions[look.action], seen: new Set(), names: new Set() };
+    action.seen.add(textArg(call.arguments, look.file)?.value ?? call.id);
+    action.names.add(call.name);
+    done.set(key, action);
   }
-  const said = [...done].map(([name, seen]) => {
-    const [one, many] = lookOfTool(name).doing ?? [`used ${name}`, (n: number) => `used ${name} ${n} times`];
-    return seen.size === 1 ? one : many(seen.size);
-  }).join(", ");
+  // The sort is stable, so actions of one priority keep the order they first appear in.
+  const ranked = [...done.values()].sort((a, b) => a.phrase.priority - b.phrase.priority);
+  const others = new Set(ranked.slice(phrasesShown).flatMap((a) => [...a.names])).size;
+  const said = [
+    ...ranked.slice(0, phrasesShown).map(({ phrase, seen }) => seen.size === 1 ? phrase.one : phrase.many(seen.size)),
+    ...others === 0 ? [] : [others === 1 ? "used another tool" : `used ${others} other tools`],
+  ].join(", ");
   return said.charAt(0).toUpperCase() + said.slice(1);
 }
 

@@ -102,6 +102,8 @@ export function trackActivity(options: ActivityOptions): ActivityTracker {
     retried(threadId) {
       const a = thread(threadId);
       a.parked.clear();
+      // The run resumes now, which is when its turn starts again, however long ago its document last changed.
+      a.lastActivityAt = now();
       report(a);
     },
     async close() {

@@ -37,9 +37,14 @@ const focusKey = (el) => el.id !== "" ? `#${CSS.escape(el.id)}`
   : null;
 
 /** The same format as the server's clock(). */
+// After t3code's formatElapsedSeconds. Copyright (c) 2026 T3 Tools Inc., MIT licence; see THIRD_PARTY_NOTICES.md.
 function clock(ms) {
-  const s = Math.max(0, Math.floor(ms / 1000));
-  return s < 60 ? `${s}s` : s < 3600 ? `${Math.floor(s / 60)}m ${s % 60}s` : `${Math.floor(s / 3600)}h ${Math.floor((s % 3600) / 60)}m`;
+  const seconds = Math.max(0, Math.floor(ms / 1000));
+  const minutes = Math.floor(seconds / 60);
+  if (minutes === 0) return `${seconds}s`;
+  const hours = Math.floor(minutes / 60);
+  if (hours === 0) return `${minutes}m ${String(seconds % 60).padStart(2, "0")}s`;
+  return `${hours}h ${String(minutes % 60).padStart(2, "0")}m`;
 }
 function tick() {
   for (const time of document.querySelectorAll("time[data-since]")) time.textContent = clock(Date.now() - Number(time.dataset.since));

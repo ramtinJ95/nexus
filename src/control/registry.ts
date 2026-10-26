@@ -36,6 +36,8 @@ export interface NodeRecord {
 
 export interface Thread extends ActivityFacts {
   sessionWaiting?: boolean;
+  /** The earliest known start of a running harness or session turn. Absent when none runs or no start is known. */
+  workingSince?: number;
   id: ThreadId;
   title: string;
   project: ProjectId;
@@ -247,6 +249,10 @@ const migrations: readonly string[] = [
      PRIMARY KEY (thread, request_id), CHECK ((state = 'sent') = (result IS NOT NULL))) STRICT;`,
   // The hash of the transcript's bytes before the stored offset. One stored before it matches none, so its reader starts over.
   `ALTER TABLE claude_transcripts ADD COLUMN before_hash TEXT NOT NULL DEFAULT '';`,
+  // When the running harness turn and each working session's turn began, by control's clock. A turn running before
+  // has none, as its start was never seen.
+  `ALTER TABLE threads ADD COLUMN agent_turn_started_at INTEGER;
+   ALTER TABLE session_activity ADD COLUMN started_at INTEGER;`,
 ];
 
 type Row = Record<string, unknown>;
@@ -343,7 +349,9 @@ export function openRegistry(path: string, clock = Date.now) {
     threadStatus: db.prepare("UPDATE threads SET status = ? WHERE id = ?"),
     humanActivity: db.prepare("UPDATE threads SET last_human_activity_at = max(last_human_activity_at, ?) WHERE id = ?"),
     agentActivity: db.prepare("UPDATE threads SET last_agent_activity_at = max(last_agent_activity_at, ?) WHERE id = ?"),
-    agentTurn: db.prepare("UPDATE threads SET agent_turn_running = ? WHERE id = ?"),
+    // A turn that keeps running keeps its start, and a turn that ends forgets it.
+    agentTurn: db.prepare(`UPDATE threads SET agent_turn_running = $running,
+      agent_turn_started_at = CASE WHEN $running = 0 THEN NULL WHEN agent_turn_running = 1 THEN agent_turn_started_at ELSE $start END WHERE id = $id`),
     insertPylon: db.prepare(`INSERT INTO pylons (id, thread, node, boot, first_boot, live, live_hash, pauses, submitted, attempts, failed, retrying)
       VALUES ($id, $thread, $node, $boot, $firstBoot, $live, $liveHash, $pauses, $submitted, $attempts, $failed, $retrying)`),
     updatePylon: db.prepare(`UPDATE pylons SET thread = $thread, node = $node, boot = $boot, first_boot = $firstBoot, live = $live,
@@ -418,9 +426,14 @@ export function openRegistry(path: string, clock = Date.now) {
 
   function withSessions(row: Row): Thread {
     const thread = threadRow(row);
-    const working = db.prepare("SELECT max(updated_at) AS at FROM session_activity WHERE thread = ? AND state = 'session.turn-started' AND updated_at > ?").get(thread.id, clock() - sessionActivityTtlMs)?.at as number | null;
+    const live = db.prepare("SELECT max(updated_at) AS at, min(started_at) AS since FROM session_activity WHERE thread = ? AND state = 'session.turn-started' AND updated_at > ?").get(thread.id, clock() - sessionActivityTtlMs)!;
+    const working = live.at as number | null;
     const waiting = db.prepare("SELECT 1 FROM session_activity WHERE thread = ? AND state = 'session.waiting' LIMIT 1").get(thread.id);
-    return { ...thread, ...(working === null ? {} : { sessionTurnRunning: true, sessionActiveUntil: working + sessionActivityTtlMs }), ...(waiting === undefined ? {} : { sessionWaiting: true }) };
+    const starts = [thread.agentTurnRunning ? row.agent_turn_started_at : null, live.since].filter((at): at is number => typeof at === "number");
+    return {
+      ...thread, ...(working === null ? {} : { sessionTurnRunning: true, sessionActiveUntil: working + sessionActivityTtlMs }), ...(waiting === undefined ? {} : { sessionWaiting: true }),
+      ...(starts.length === 0 ? {} : { workingSince: Math.min(...starts) }),
+    };
   }
 
   function updateAttention(id: ThreadId) {
@@ -570,10 +583,8 @@ export function openRegistry(path: string, clock = Date.now) {
           if (at < Number(previous.at)) return;
           if (at === previous.at && (event.kind === "session.turn-started" || event.kind === "session.heartbeat") && previous.kind !== "session.turn-started" && previous.kind !== "session.heartbeat") return;
         } else if (floor !== undefined && at <= floor) return;
-        if (event.kind === "session.heartbeat") {
-          const state = db.prepare("SELECT state FROM session_activity WHERE thread = ? AND session = ?").get(thread, session)?.state;
-          if (state !== "session.turn-started" && state !== "session.waiting") return;
-        }
+        const current = db.prepare("SELECT state, started_at FROM session_activity WHERE thread = ? AND session = ?").get(thread, session);
+        if (event.kind === "session.heartbeat" && current?.state !== "session.turn-started" && current?.state !== "session.waiting") return;
         if (event.kind === "session.turn-started" && event.session !== undefined) {
           db.prepare("UPDATE claude_workers SET state = 'started', message = NULL WHERE thread = ? AND session = ? AND state IN ('starting', 'stalled', 'failed')").run(thread, event.session);
         }
@@ -585,8 +596,13 @@ export function openRegistry(path: string, clock = Date.now) {
         if (event.kind === "session.ended" || event.kind === "session.turn-ended") {
           db.prepare("DELETE FROM session_activity WHERE thread = ? AND session = ?").run(thread, session);
         } else {
-          db.prepare("INSERT INTO session_activity VALUES (?, ?, ?, ?) ON CONFLICT(thread, session) DO UPDATE SET state = excluded.state, updated_at = excluded.updated_at")
-            .run(thread, session, event.kind === "session.heartbeat" ? "session.turn-started" : event.kind, clock());
+          // A heartbeat keeps a running turn's start and starts a new turn for a waiting session.
+          const startedAt = event.kind === "session.waiting" ? null
+            : event.kind === "session.heartbeat" && current?.state === "session.turn-started" ? current.started_at as number | null
+            : clock();
+          db.prepare(`INSERT INTO session_activity (thread, session, state, updated_at, started_at) VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(thread, session) DO UPDATE SET state = excluded.state, updated_at = excluded.updated_at, started_at = excluded.started_at`)
+            .run(thread, session, event.kind === "session.heartbeat" ? "session.turn-started" : event.kind, clock(), startedAt);
           db.prepare("DELETE FROM session_activity WHERE thread = ? AND session NOT IN (SELECT session FROM session_activity WHERE thread = ? ORDER BY updated_at DESC, rowid DESC LIMIT ?)").run(thread, thread, maxActiveSessions);
         }
         if (event.kind !== "session.waiting") q.agentActivity.run(clock(), thread);
@@ -700,7 +716,8 @@ export function openRegistry(path: string, clock = Date.now) {
       transaction(() => {
         if (activity.human !== undefined) q.humanActivity.run(activity.human, id);
         if (activity.agent !== undefined) q.agentActivity.run(activity.agent, id);
-        if (activity.agentTurnRunning !== undefined) q.agentTurn.run(activity.agentTurnRunning ? 1 : 0, id);
+        // The harness reports its last activity as the moment the turn flipped.
+        if (activity.agentTurnRunning !== undefined) q.agentTurn.run({ $running: activity.agentTurnRunning ? 1 : 0, $start: activity.agent ?? clock(), $id: id });
         updateAttention(id);
       });
     },
