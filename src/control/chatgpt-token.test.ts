@@ -84,3 +84,19 @@ test("a probe that takes the token and has not got it, as one that just started,
   await handoff.close();
   assert.deepEqual(p.put, [["rj-firebat", "NEXUS_CHATGPT_TOKEN", token], ["infra-testbench", "NEXUS_CHATGPT_TOKEN", token]]);
 });
+
+test("a probe that shows up without the token while a poll runs gets it from one more poll", async () => {
+  const p = probes("rj-firebat", "infra-testbench");
+  p.down.add("rj-firebat");
+  const slow = Promise.withResolvers<void>();
+  const clients = p.clients.map((c) => c.node === "infra-testbench" ? { ...c, putSecret: async (name: string, value: string) => { await slow.promise; return c.putSecret(name, value); } } : c);
+  const handoff = chatgptTokenHandoff({ probes: clients, token: async () => token, log: () => {} });
+  const first = handoff.poll();
+  await new Promise((r) => setTimeout(r, 10));
+  p.down.delete("rj-firebat");
+  handoff.observed({ grants: { secrets: [], gitSsh: false }, heldSecrets: ["NEXUS_CHATGPT_TOKEN"] });
+  slow.resolve();
+  await first;
+  await handoff.close();
+  assert.ok(p.put.some(([node]) => node === "rj-firebat"), "the restarted probe got the token without waiting for the timer");
+});
