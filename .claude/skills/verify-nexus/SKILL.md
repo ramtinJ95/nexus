@@ -27,7 +27,7 @@ All state lives under `<repo>/.verify/nexus/`, which `.gitignore` ignores. A run
 
 ## Launch
 
-Prerequisites: Docker Desktop running, Node 26 or newer, `npm ci` done in the repo, and network access for the first image build, which pulls `node:24-bookworm-slim` and installs Herdr from herdr.dev. The Claude Code sandbox blocks both the Docker socket and local port binding. If a command fails with `permission denied ... docker.sock` or `listen EPERM`, the sandbox stopped it. Hand the run to a worker outside the sandbox, or ask the user to run it with `!`.
+Prerequisites: Docker Desktop running, Node 26 or newer, `npm ci` and `npm run build` done in the repo, and network access for the first image build, which pulls `node:24-bookworm-slim` and installs Herdr from herdr.dev. The Claude Code sandbox blocks both the Docker socket and local port binding. If a command fails with `permission denied ... docker.sock` or `listen EPERM`, the sandbox stopped it. Hand the run to a worker outside the sandbox, or ask the user to run it with `!`.
 
 ```sh
 V=.claude/skills/verify-nexus/scripts/verify-nexus   # from the repo root

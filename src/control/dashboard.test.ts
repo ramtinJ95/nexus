@@ -1,7 +1,7 @@
 import { after, test, type TestContext } from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { request } from "node:http";
 import { join } from "node:path";
@@ -1074,7 +1074,19 @@ test("pages link their assets by hash, and a hashed asset is cached for good", a
     assert.ok(versioned.text.length > 0);
     assert.equal((await s.call("GET", `/assets/${file}?v=stale`)).headers["cache-control"], "no-cache");
   }
-  assert.equal((await s.call("GET", "/assets/secret.txt")).status, 404);
+  const chunk = (await readdir(new URL("../../dist/dashboard/", import.meta.url))).find((file) => file !== "client.js");
+  assert.ok(chunk !== undefined, "the bundle has a chunk besides client.js");
+  const served = await s.call("GET", `/assets/${chunk}`);
+  assert.equal(served.status, 200);
+  assert.ok((served.headers["content-type"] as string).startsWith("text/javascript"), "a chunk is served as JavaScript");
+  assert.match(served.headers["cache-control"] as string, /immutable/, "a chunk's name has its hash, so it is cached for good");
+  for (const name of ["secret.txt", "notifications.js", "chunk-NOSUCH.js", "..%2Fpackage.json"]) assert.equal((await s.call("GET", `/assets/${name}`)).status, 404, name);
+});
+
+test("pages are served under a content security policy that allows only the dashboard's own origin", async (t) => {
+  const s = await setup(t);
+  assert.equal((await s.call("GET", "/")).headers["content-security-policy"],
+    "default-src 'none'; style-src 'self'; script-src 'self'; connect-src 'self'; img-src 'self' data:; base-uri 'none'; form-action 'none'; frame-ancestors 'none'");
 });
 
 test("dashboard pages answer only allowed callers under the API's own names", async (t) => {

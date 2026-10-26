@@ -16,7 +16,7 @@
  * human's visit, so they are read when asked for rather than with every poll.
  */
 import { createHash } from "node:crypto";
-import { readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import type { AssistantMessage, ImageContent, TextContent, UserMessage } from "@earendil-works/pi-ai";
 import type { ConversationView, InboxState, LiveState } from "@earendil-works/pi-durable";
 import { desiredPhase, type ActualState, type DesiredPhase } from "../reconcile.ts";
@@ -73,11 +73,12 @@ export function dashboard(options: DashboardOptions): (path: string, query: URLS
       const d = detail(registry.thread(thread.id)!);
       return ok(threadPage(context(), d, registry.node(d.pylon.node)!, d.thread.status === "deleted" ? null : view, thread.lastReplyAt));
     }],
-    [/^\/assets\/([a-z]+\.[a-z]+)$/, (m, query) => {
+    [/^\/assets\/([\w.-]+)$/, (m, query) => {
       const asset = assets.get(m[1]!);
       if (asset === undefined) return { ...ok(notFound(context(), `No asset ${m[1]!}.`)), status: 404 };
-      // Pages link each asset with its hash, so a versioned URL never changes and the phone keeps it.
-      const cache = query.get("v") === asset.version ? "public, max-age=31536000, immutable" : "no-cache";
+      // Pages link each asset with its hash, and a chunk's name has its hash, so neither URL ever changes and the
+      // phone keeps it.
+      const cache = asset.version === null || query.get("v") === asset.version ? "public, max-age=31536000, immutable" : "no-cache";
       return { status: 200, headers: { "content-type": asset.type, "cache-control": cache, "x-content-type-options": "nosniff" }, body: asset.body };
     }],
   ];
@@ -91,14 +92,18 @@ export function dashboard(options: DashboardOptions): (path: string, query: URLS
   };
 }
 
+const types: Record<string, string> = { css: "text/css; charset=utf-8", js: "text/javascript; charset=utf-8", svg: "image/svg+xml" };
+const bundle = new URL("../../dist/dashboard/", import.meta.url);
+if (!existsSync(new URL("client.js", bundle))) throw new Error("The dashboard client is not built. Run `npm run build`.");
+/** The stylesheet and icon as they are in src, and the client as src/control/dashboard/build.ts bundled it. */
 const assets = new Map([
-  ["style.css", "text/css; charset=utf-8"],
-  ["notifications.js", "text/javascript; charset=utf-8"],
-  ["client.js", "text/javascript; charset=utf-8"],
-  ["favicon.svg", "image/svg+xml"],
-].map(([file, type]) => {
-  const body = readFileSync(new URL(`./dashboard/${file}`, import.meta.url), "utf8");
-  return [file!, { type: type!, body, version: createHash("sha256").update(body).digest("hex").slice(0, 12) }];
+  ...["style.css", "favicon.svg"].map((file) => [file, new URL(`./dashboard/${file}`, import.meta.url)] as const),
+  ...readdirSync(bundle).map((file) => [file, new URL(file, bundle)] as const),
+].map(([file, url]) => {
+  const body = readFileSync(url, "utf8");
+  // A chunk is named by its hash, so only the files a page links carry a version.
+  const version = ["style.css", "favicon.svg", "client.js"].includes(file) ? createHash("sha256").update(body).digest("hex").slice(0, 12) : null;
+  return [file, { type: types[file.split(".").at(-1)!]!, body, version }];
 }));
 const assetUrl = (file: string) => `/assets/${file}?v=${assets.get(file)!.version}`;
 

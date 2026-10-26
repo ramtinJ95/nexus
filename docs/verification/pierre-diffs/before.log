@@ -1,0 +1,21 @@
+changes since boot: 10 files +25025 −20 data A rows.csv +25000 −0 docs R handbook.md +0 −0 lib A helpers.js +2 −0 D util.js +0 −2 src M server.ts +9 −7 M app.py +9 −5 A logo.png binary D old.go +0 −6 M run.sh +0 −0 A style.css +5 −0
+src/server.ts since boot: M | src/server.ts | vs boot | +9 −7
+screenshot before-modified-ts.png
+old.go since boot: D | old.go | vs boot | +0 −6
+screenshot before-deleted.png
+docs/handbook.md since boot: R | docs/handbook.md | vs boot | +0 −0
+screenshot before-renamed.png
+logo.png since boot: A | logo.png | vs boot | binary
+screenshot before-binary.png
+run.sh since boot: M | run.sh | vs boot | +0 −0
+screenshot before-mode.png
+data/rows.csv since boot: A | data/rows.csv | vs boot | +25000 −0
+screenshot before-long.png
+app.py since the latest turn: M | app.py | vs turn start | +5 −1
+screenshot before-turn-python.png
+style.css since the last commit: A | style.css | vs last commit | +5 −0
+screenshot before-head-css.png
+src/server.ts since boot, dark: M | src/server.ts | vs boot | +9 −7
+screenshot before-dark-modified-ts.png
+requests: ["/assets/style.css","/assets/client.js","/assets/notifications.js"]
+problems: []

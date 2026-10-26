@@ -31,4 +31,6 @@ npm run typecheck
 npm test
 ```
 
+The control plane serves the dashboard's client from `dist/dashboard`, bundled from `src/control/dashboard`, and does not start without it. `npm test` builds it first. To run the control plane from a checkout, run `npm run build` after `npm ci` and after each change to the client.
+
 Live slice checks need a suitable VM host and are separate from the unit suite.

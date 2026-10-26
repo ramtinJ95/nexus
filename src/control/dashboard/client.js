@@ -852,43 +852,49 @@ function closeTab(path) {
 
 tabsBar?.querySelector('[data-tab="convo"]').addEventListener("click", () => showTab(null));
 
-/** A diff this long is shown up to here, so a huge one does not stall the page. */
-const maxDiffRows = 20_000;
-/** What a diff says of a file beyond its lines, such as a rename or a new mode. */
-const metaLine = /^(old mode|new mode|new file mode|deleted file mode|similarity index|rename from|rename to|copy from|copy to) /;
+// The layout the reader picked for diffs, on every thread page.
+const layoutKey = "nexus.diff-layout";
+let diffLayout = localStorage.getItem(layoutKey) === "split" ? "split" : "unified";
+/** The open diff as last read, so a change of layout draws it again without reading the pylon. */
+let openDiff = null;
 
-/**
- * The rows of a unified diff, each with the new file's line number, or none for a removed line, and the lines
- * that say what changed beyond the lines.
- */
-function parseDiff(text) {
-  const rows = [];
-  const meta = [];
-  let next = 0;
-  let inHunk = false;
-  for (const line of text.split("\n")) {
-    if (rows.length >= maxDiffRows) break;
-    if (line.startsWith("diff --git ")) { inHunk = false; continue; }
-    const hunk = /^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@(.*)$/.exec(line);
-    if (hunk !== null) {
-      next = Number(hunk[1]);
-      inHunk = true;
-      rows.push(el("div", { className: "dl dl-hunk" }, el("span", { className: "ln", textContent: "⋯" }), el("span", { className: "sg" }), el("span", { className: "code", textContent: hunk[2].trim() })));
-      continue;
-    }
-    if (!inHunk) {
-      if (metaLine.test(line)) meta.push(line);
-      continue;
-    }
-    if (line === "" || line[0] === "\\") continue;
-    const kind = line[0] === "+" ? "add" : line[0] === "-" ? "del" : "ctx";
-    rows.push(el("div", { className: `dl dl-${kind}` },
-      el("span", { className: "ln", textContent: kind === "del" ? "" : String(next) }),
-      el("span", { className: "sg", textContent: kind === "add" ? "+" : kind === "del" ? "−" : "" }),
-      el("span", { className: "code", textContent: line.slice(1) })));
-    if (kind !== "del") next += 1;
+function layoutPicker() {
+  const picker = el("span", { className: "fv-layout" }, ...["unified", "split"].map((layout) => {
+    const button = el("button", { type: "button", value: layout, textContent: layout === "unified" ? "Unified" : "Split" });
+    button.setAttribute("aria-pressed", String(layout === diffLayout));
+    button.addEventListener("click", () => pickLayout(layout));
+    return button;
+  }));
+  picker.setAttribute("role", "group");
+  picker.setAttribute("aria-label", "Diff layout");
+  return picker;
+}
+
+function pickLayout(layout) {
+  diffLayout = layout;
+  localStorage.setItem(layoutKey, layout);
+  for (const button of fileView.querySelectorAll(".fv-layout button")) button.setAttribute("aria-pressed", String(button.value === layout));
+  // While a read is under way, it draws in the new layout once it is done.
+  if (openDiff === null || openDiff.read !== diffRead) return;
+  openDiff = { ...openDiff, read: ++diffRead };
+  void drawDiff(openDiff);
+}
+
+/** Shows a diff read from the pylon, once its lines are drawn. */
+async function drawDiff({ read, head, shown, truncated }) {
+  try {
+    const { diffView } = await import("./diff.js");
+    const view = shown.kind === "lines" ? await diffView(shown.files, diffLayout) : null;
+    if (read !== diffRead) return;
+    head.querySelector(".fv-layout").hidden = view === null;
+    fileView.replaceChildren(...present([head,
+      shown.kind !== "none" && shown.meta.length > 0 && el("div", { className: "fv-meta dim small" }, ...shown.meta.map((line) => el("div", { textContent: line }))),
+      view ?? el("p", { className: "empty fv-note", textContent: shown.kind === "binary" ? "The file is binary, so there is no diff to show." : shown.kind === "meta" ? "No lines changed." : "The file has no changes now." }),
+      (truncated || (shown.kind === "lines" && shown.cut)) && el("p", { className: "dim small fv-note", textContent: "The diff is cut short here, because the whole of it is too long to show." })]));
+  } catch (err) {
+    if (read !== diffRead) return;
+    fileView.replaceChildren(head, el("p", { className: "error fv-note", textContent: err.message }));
   }
-  return { rows, meta, cut: rows.length >= maxDiffRows };
 }
 
 let diffRead = 0;
@@ -897,7 +903,7 @@ async function readDiff(path) {
   if (file === undefined || fileView === null) return;
   const read = ++diffRead;
   const head = el("header", { className: "fv-head" }, badge(file.status), el("span", { className: "fv-path", textContent: file.path }),
-    el("span", { className: "dim small", textContent: checkout.base === "turn" ? "vs turn start" : checkout.base === "head" ? "vs last commit" : "vs boot" }), counts(file.additions, file.deletions));
+    el("span", { className: "dim small", textContent: checkout.base === "turn" ? "vs turn start" : checkout.base === "head" ? "vs last commit" : "vs boot" }), counts(file.additions, file.deletions), layoutPicker());
   // A diff reaches into the pylon as the changes do, so a paused one is woken only when the reader says to, and
   // the read of the changes that wakes it reads the open diff again.
   const facts = factsNow();
@@ -917,18 +923,10 @@ async function readDiff(path) {
   // A renamed file's old path goes too, or the diff shows it as added.
   const query = [file.path, ...(file.oldPath === null ? [] : [file.oldPath])].map((p) => `&path=${encodeURIComponent(p)}`).join("");
   try {
-    const { diff, truncated } = await api("GET", `/v1/threads/${thread}/diff?base=${checkout.base}${query}`);
+    const [{ diff, truncated }, { diffOf }] = await Promise.all([api("GET", `/v1/threads/${thread}/diff?base=${checkout.base}${query}`), import("./diff.js")]);
     if (read !== diffRead) return;
-    const { rows, meta, cut } = parseDiff(diff);
-    const view = el("div", { className: "diff-view" });
-    // One at a time: a long diff has more rows than a call can take as arguments.
-    for (const row of rows) view.append(row);
-    const binary = /^Binary files /m.test(diff);
-    fileView.replaceChildren(...present([head,
-      meta.length > 0 && el("div", { className: "fv-meta dim small" }, ...meta.map((line) => el("div", { textContent: line }))),
-      rows.length > 0 ? view
-        : el("p", { className: "empty fv-note", textContent: binary ? "The file is binary, so there is no diff to show." : meta.length > 0 ? "No lines changed." : "The file has no changes now." }),
-      (truncated || cut) && el("p", { className: "dim small fv-note", textContent: "The diff is cut short here, because the whole of it is too long to show." })]));
+    openDiff = { read, head, shown: diffOf(diff), truncated };
+    await drawDiff(openDiff);
   } catch (err) {
     if (read !== diffRead) return;
     fileView.replaceChildren(head, el("p", { className: "error fv-note", textContent: err.message }));

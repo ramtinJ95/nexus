@@ -1,0 +1,25 @@
+changes since boot: 11 files +25026 −22 data A rows.csv +25000 −0 docs R handbook.md +0 −0 lib A helpers.js +2 −0 D util.js +0 −2 src M server.ts +9 −7 M app.py +9 −5 T config.txt +1 −2 A logo.png binary D old.go +0 −6 M run.sh +0 −0 A style.css +5 −0
+src/server.ts since boot: M | src/server.ts | vs boot | +9 −7
+screenshot after-modified-ts.png
+old.go since boot: D | old.go | vs boot | +0 −6
+screenshot after-deleted.png
+docs/handbook.md since boot: R | docs/handbook.md | vs boot | +0 −0
+screenshot after-renamed.png
+logo.png since boot: A | logo.png | vs boot | binary
+screenshot after-binary.png
+run.sh since boot: M | run.sh | vs boot | +0 −0
+screenshot after-mode.png
+config.txt since boot: T | config.txt | vs boot | +1 −2
+screenshot after-typechange.png
+data/rows.csv since boot: A | data/rows.csv | vs boot | +25000 −0
+screenshot after-long.png
+app.py since the latest turn: M | app.py | vs turn start | +5 −1
+screenshot after-turn-python.png
+style.css since the last commit: A | style.css | vs last commit | +5 −0
+screenshot after-head-css.png
+screenshot after-split-ts.png
+src/server.ts since boot, dark: M | src/server.ts | vs boot | +9 −7
+screenshot after-dark-modified-ts.png
+screenshot after-dark-split-ts.png
+requests: ["/assets/style.css","/assets/client.js","/assets/chunk-WOT6VMZA.js","/assets/diff-R3WDPWOE.js","/assets/chunk-WTOCHFRU.js","/assets/chunk-WRMS3MG4.js","/assets/chunk-2IDW4TGW.js","/assets/chunk-TMN3X6BP.js","/assets/chunk-GSYJMN5D.js","/assets/shiki-KZTRXDBD.js","/assets/chunk-6U2ELAFD.js","/assets/chunk-NHDYSGMK.js","/assets/chunk-W6NRUYMZ.js","/assets/engine-javascript-63MDVWX5.js","/assets/langs-GGLOW5LE.js","/assets/themes-3SLKCMFI.js","/assets/typescript-CILON7YJ.js","/assets/pierre-dark-VICPBBPA.js","/assets/core-CDK3GUNL.js","/assets/pierre-light-6VBIK2QF.js","/assets/chunk-6R3KEE7K.js","/assets/go-VX2NEO5C.js","/assets/chunk-O36SAGVH.js","/assets/csv-ZIM2MSUO.js","/assets/chunk-HHEBGI74.js","/assets/python-T4L4K3IO.js","/assets/chunk-DCJRCM7E.js","/assets/css-UBECL2PI.js","/assets/chunk-7GRX63SD.js"]
+problems: []
