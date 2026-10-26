@@ -16,7 +16,7 @@ import { processStream } from "../process-stream.ts";
 import type { BackendPylon, Guest, VmBackend } from "../backend.ts";
 import { fakeTailscale, nodeHost, viaGateway } from "./fake-tailscale.ts";
 import type { BootInputs, ProjectId } from "../project.ts";
-import type { ArtifactId, ArtifactManifest, ImageId, PortableArtifactId, TemplateId, TemplateManifest } from "../images.ts";
+import type { ArtifactId, ArtifactManifest, ImageId, ImageManifest, PortableArtifactId, TemplateId, TemplateManifest } from "../images.ts";
 import { fakeGuest, herdrError, herdrOk, herdrPane, herdrSnapshot } from "../fake-guest.ts";
 import { outputsDir } from "../outputs.ts";
 import { sessionsFile } from "../sessions.ts";
@@ -222,6 +222,22 @@ test("a peer probe fetches an artifact as its manifest in a header and its archi
   await assert.rejects(fetchAs(probeNodeId, "tpl-ffffffffffff"), /HTTP 404: this node holds no image or template tpl-ffffffffffff/);
   callAs(controlPlane);
   await assert.rejects(fetchAs(probeNodeId), /HTTP 403/, "only a peer probe may copy artifacts");
+});
+
+test("the control plane reads the manifest of an artifact the node holds, and a peer may not", async (t) => {
+  const { client, fake, base, callAs } = await setup(t);
+  const built: ImageManifest = {
+    id: "img-0123456789ab", gondolinBuildId: "b1", builtOn: node, builtAt: "2027-01-01T00:00:00.000Z", sha256: "a".repeat(64),
+    pins: { debianDigest: "d", node: "24.22.1", nodeSha256: "n", claudeCode: "c", pi: "p", herdr: "h", piEnv: "e", piEnvSha256: "s", gondolin: "0.13.0", alpineKernel: "k", dotfilesCommon: "f", gh: "2.103.2", ghSha256: "g", neovim: "0.12.6", neovimSha256: "v" },
+  };
+  fake.offer(built, "image bytes");
+  fake.offer(templateManifest("b".repeat(64)), "template bytes");
+  assert.deepEqual(await client.manifest(built.id), built);
+  assert.deepEqual(await client.manifest(template), templateManifest("b".repeat(64)));
+  assert.equal(await client.manifest("img-ffffffffffff"), null, "a node that holds no such artifact answers 404");
+  assert.equal((await fetch(`${base}/v1/manifests/ckpt-unit-1`)).status, 400, "a checkpoint has no manifest to read");
+  callAs(peer);
+  assert.equal((await fetch(`${base}/v1/manifests/${built.id}`)).status, 403);
 });
 
 test("fetch-artifact imports from the peer probe, and refuses a copy whose sha256 differs from the job's", async (t) => {

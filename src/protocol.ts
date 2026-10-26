@@ -323,6 +323,8 @@ export interface ProbeClient {
   observe(signal: AbortSignal): AsyncIterable<ProbeEvent>;
   command(pylonId: PylonId, command: PylonCommand): Promise<CommandResult>;
   stream(pylonId: PylonId, argv: readonly string[]): Promise<ByteStream>;
+  /** GET /v1/manifests/{id}: the manifest of an image or template the node holds, or null when it holds none. */
+  manifest(artifact: PortableArtifactId): Promise<ArtifactManifest | null>;
 }
 
 /** Tailscale's stable node ID, as LocalAPI whois reports it. It survives renames and address changes. */
@@ -448,6 +450,13 @@ export function connectProbe(node: NodeName, tailnetHost: string, expected: Tail
         req.end();
       });
     },
+    async manifest(artifact) {
+      const path = `/v1/manifests/${encodeURIComponent(artifact)}`;
+      const res = await call("GET", path);
+      if (res.status === 404) return null;
+      if (res.status !== 200) throw new Error(`${node}: GET ${path}: HTTP ${res.status}: ${res.body}`);
+      return parseArtifactManifest(JSON.parse(res.body));
+    },
   };
 }
 
@@ -495,6 +504,7 @@ export const routeAuth = {
   "/v1/jobs": "control-plane",
   "/v1/observe": "control-plane",
   "/v1/pylons": "control-plane",
+  "/v1/manifests": "control-plane",
   "/v1/artifacts": "peer-probe", // checkpoints hold the pylon's logins, so only the other probe may read them
 } as const satisfies Record<string, CallerRole>;
 

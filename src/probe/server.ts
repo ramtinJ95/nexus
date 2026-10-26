@@ -14,7 +14,7 @@ import { pipeline } from "node:stream/promises";
 import { JobFailure, runCommand, runJob, type BackendPylon, type ProbeDeps, type SecretSource, type VmBackend } from "../backend.ts";
 import type { PortableArtifactId } from "../images.ts";
 import {
-  artifactHeaders, encodeProbeEvent, encodeSubmitReply, fetchArtifact, jobDeadlineMs, probePort, jobSubject, parseJobEnvelope, parsePylonCommand, parseStreamRequest, routeAuth, serveByteStream, streamUpgradeResponse,
+  artifactHeaders, encodeProbeEvent, encodeSubmitReply, fetchArtifact, isPortableArtifactId, jobDeadlineMs, probePort, jobSubject, parseJobEnvelope, parsePylonCommand, parseStreamRequest, routeAuth, serveByteStream, streamUpgradeResponse,
   type Job, type JobEnvelope, type JobId, type JobStatus, type LiveHash, type NodeName, type NodeObservation,
   type DeclaredOutput, type GitFacts, type ListeningFact, type ProbeAuthConfig, type CommandResult, type ProbeEvent, type PylonCommand, type PylonId, type PylonObservation, type ServiceFact, type SessionFact, type Subject,
 } from "../protocol.ts";
@@ -549,6 +549,13 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
       // An opened or closed session is listed in it too, as is one a message resumed.
       if (links || command.kind === "open-session" || command.kind === "close-session" || (result.kind === "send-claude" && result.resumed)) void publishSnapshot();
       return send(res, 200, JSON.stringify(result), "application/json");
+    }
+    const manifestMatch = /^\/v1\/manifests\/([^/]+)$/.exec(path);
+    if (manifestMatch && req.method === "GET") {
+      const id = decodeURIComponent(manifestMatch[1]!);
+      if (!isPortableArtifactId(id)) return send(res, 400, `${JSON.stringify(id)} is not an image or template ID`);
+      const manifest = await backend.artifacts.manifest(id);
+      return manifest === null ? send(res, 404, `this node holds no ${id}`) : send(res, 200, JSON.stringify(manifest), "application/json");
     }
     const artifactMatch = /^\/v1\/artifacts\/([^/]+)$/.exec(path);
     if (artifactMatch && req.method === "GET") {
