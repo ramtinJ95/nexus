@@ -38,6 +38,7 @@ import { relayPorts } from "../project.ts";
 import { relayLog, relayStatus } from "../pylon-vm/relay.ts";
 import type { ThreadDetail } from "./api.ts";
 import { defaultPreviewPorts, startControlPlane, type ControlPlaneConfig } from "./main.ts";
+import { openRegistry } from "./registry.ts";
 
 const probeConfig = await readProbeConfig(process.argv[2] ?? "/etc/nexus/probe.json");
 if (probeConfig.backend.kind !== "pylon-vm") throw new Error(`the probe runs the ${probeConfig.backend.kind} backend. This check is for pylon-vm`);
@@ -73,6 +74,11 @@ const config: ControlPlaneConfig = {
   previewPorts: defaultPreviewPorts,
   resumeAfterUsageLimit: false,
 };
+// A rollout needs a deployer, which the control plane's own node never is, so the check makes the image current in the registry.
+const seed = openRegistry(config.db);
+seed.saveImage((await store.manifest(image))!, null);
+seed.setCurrentImage(image);
+seed.close();
 const controlPlane = await startControlPlane(config, scriptedModels());
 
 function call(method: string, path: string, body?: unknown): Promise<{ status: number; body: any }> {
@@ -256,8 +262,6 @@ async function relayLogged(step: string) {
 
 let verdict = "FAIL";
 try {
-  await expect(201, "POST", "/images", await store.manifest(image));
-  await expect(204, "PUT", "/images/current", { image });
   await expect(201, "POST", "/projects", {
     id: "v6-check", repoUrl: "https://github.com/octocat/Spoon-Knife.git", defaultBranch: "main", defaultNode: probeConfig.node,
     resources: { cpus: 2, memoryGiB: 4, diskGiB: 10 }, allowedHosts: [], secrets: [], logins: [], preSetup: null,

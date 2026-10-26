@@ -49,6 +49,7 @@ import { openTerminal } from "../guest-terminal.ts";
 import { attachTiming, serveAttach, type AttachTiming, type Ending, type PylonDoor } from "./attach.ts";
 import { typeIntoClaude } from "./inbox.ts";
 import { HttpError } from "./http-error.ts";
+import { imagesView, type ImageOperation, type ImageRollout } from "./image-rollout.ts";
 import { threadStarter } from "./threads.ts";
 import { maxRounds, needsPerson, type Review, type ReviewLoop } from "./review.ts";
 
@@ -77,6 +78,8 @@ export interface ApiOptions {
   probes: ReadonlyMap<NodeName, Pick<ProbeClient, "command" | "stream">>;
   /** The https ports each node's previews are allocated from, the loop's range. */
   previewPorts: PortRange;
+  /** Image builds and rollouts. Without it, their routes answer 409. */
+  images?: ImageRollout;
   /** How long a stream's client may leave what was sent unread before it is dropped. 30 s by default. */
   streamStallMs?: number;
   /** How attached terminals ping and wait. Tests shorten it. */
@@ -249,7 +252,7 @@ const imageSchema = z.strictObject({
   builtAt: z.string().min(1),
   sha256: z.string().regex(/^[0-9a-f]{64}$/),
 });
-const currentImageSchema = z.strictObject({ image: z.string().min(1) });
+const rolloutSchema = z.strictObject({ image: imageSchema.shape.id });
 const previewSchema = z.strictObject({ port: z.int().min(1).max(65535).refine((port) => !reservedPorts.has(port), "is Nexus's own") });
 const sessionSchema = z.strictObject({
   harness: z.enum(["claude-code", "pi", "shell"]).default("claude-code"),
@@ -705,11 +708,13 @@ export async function startApi(options: ApiOptions): Promise<Api> {
     return manifest;
   }
 
-  function setCurrentImage(body: unknown) {
-    const { image } = parse(currentImageSchema, body);
-    if (registry.image(image as ImageId) === undefined) throw new HttpError(404, `no image ${image}`);
-    registry.setCurrentImage(image as ImageId);
+  /** An image becomes what every new pylon boots, so building and rolling one out takes the same right as `nexus deploy`. */
+  function imageRollout(caller: TailnetNodeId): ImageRollout {
+    if (!canDeploy(registry, options.deployment, caller)) throw new HttpError(403, "caller may not build, roll out or roll back an image: only deployers may, never infrastructure nodes or pylons");
+    if (options.images === undefined) throw new HttpError(409, "image builds are not configured");
+    return options.images;
   }
+  const started = (operation: ImageOperation): Reply => ({ status: operation.state === "running" ? 202 : 200, body: operation });
 
   /** A file is served as its bytes, everything else as JSON. */
   type Reply = { status: number; body?: unknown; file?: never } | { status: number; file: Buffer; type: string };
@@ -826,8 +831,27 @@ export async function startApi(options: ApiOptions): Promise<Api> {
       await Promise.race([claude.refresh(refuseDeleted(t)), sleep(claudeReadMs, undefined, { ref: false })]);
       return ok(claude.view(t));
     }],
+    ["GET", /^\/v1\/images$/, () => ok(imagesView(registry))],
     ["POST", /^\/v1\/images$/, async (_, r) => created(recordImage(await r.body()))],
-    ["PUT", /^\/v1\/images\/current$/, async (_, r) => { setCurrentImage(await r.body()); return noContent; }],
+    ["GET", /^\/v1\/images\/current$/, () => {
+      const view = imagesView(registry);
+      const entry = (id: ImageId | null) => view.images.find((image) => image.id === id) ?? null;
+      return ok({ current: entry(view.current), previous: entry(view.previous) });
+    }],
+    ["POST", /^\/v1\/images\/build$/, async (_, r) => {
+      const images = imageRollout(r.caller);
+      parse(z.strictObject({}), await r.body({}));
+      return started(await images.build(r.caller));
+    }],
+    ["POST", /^\/v1\/images\/rollout$/, async (_, r) => {
+      const images = imageRollout(r.caller);
+      return started(images.rollout(parse(rolloutSchema, await r.body()).image, r.caller));
+    }],
+    ["POST", /^\/v1\/images\/rollback$/, async (_, r) => {
+      const images = imageRollout(r.caller);
+      parse(z.strictObject({}), await r.body({}));
+      return started(images.rollback(r.caller));
+    }],
   ];
 
   const httpsState: { status: "disabled" | "waiting" | "ready" | "degraded"; error: string | null; nextAttemptAt: number | null } = {

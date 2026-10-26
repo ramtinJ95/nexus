@@ -26,6 +26,7 @@ import { dockerHostBridge } from "../../../../src/docker-host-bridge.ts";
 import { scriptedModel, scriptedModels } from "../../../../src/harness/test-fixture.ts";
 import { pylonRepoPath } from "../../../../src/harness/host.ts";
 import { startControlPlane } from "../../../../src/control/main.ts";
+import { openRegistry } from "../../../../src/control/registry.ts";
 import { fakeTailscale, nodeHost, viaGateway } from "../../../../src/probe/fake-tailscale.ts";
 import { startProbe } from "../../../../src/probe/server.ts";
 import { localApiWhois } from "../../../../src/tailscale.ts";
@@ -140,6 +141,20 @@ const probe = await startProbe({
 closers.push(() => probe.close());
 log(`probe ${node} on 127.0.0.1:${probe.port}, boot ${probe.bootId}`);
 
+// The Docker image, current. A rollout needs a deployer, which this stack's only caller, the control plane's own node, never is.
+const manifest: ImageManifest = {
+  id: imageId, gondolinBuildId: `docker:${tag}`, builtOn: node, builtAt: new Date().toISOString(), sha256: "0".repeat(64),
+  pins: {
+    debianDigest: `sha256:${"0".repeat(64)}`, node: "0.0.0", nodeSha256: "0".repeat(64), claudeCode: "none", pi: "none", herdr: "pinned",
+    piEnv: "packaged", piEnvSha256: "0".repeat(64), gondolin: "none", alpineKernel: "none", dotfilesCommon: "none", gh: "0.0.0", ghSha256: "0".repeat(64),
+    neovim: "0.0.0", neovimSha256: "0".repeat(64),
+  },
+};
+const seed = openRegistry(join(runDir, "registry.db"));
+seed.saveImage(manifest, null);
+seed.setCurrentImage(imageId);
+seed.close();
+
 const controlPlane = await startControlPlane({
   db: join(runDir, "registry.db"),
   listen: { host: "127.0.0.1", port: ports.api, hostnames: ["127.0.0.1", "localhost"] },
@@ -153,21 +168,11 @@ const controlPlane = await startControlPlane({
 }, scriptedModels());
 closers.push(() => controlPlane.close());
 
-// Seed through the API, as release tooling does: the image, made current, and one project on the node.
-const manifest: ImageManifest = {
-  id: imageId, gondolinBuildId: `docker:${tag}`, builtOn: node, builtAt: new Date().toISOString(), sha256: "0".repeat(64),
-  pins: {
-    debianDigest: `sha256:${"0".repeat(64)}`, node: "0.0.0", nodeSha256: "0".repeat(64), claudeCode: "none", pi: "none", herdr: "pinned",
-    piEnv: "packaged", piEnvSha256: "0".repeat(64), gondolin: "none", alpineKernel: "none", dotfilesCommon: "none", gh: "0.0.0", ghSha256: "0".repeat(64),
-    neovim: "0.0.0", neovimSha256: "0".repeat(64),
-  },
-};
+// One project on the node, through the API.
 const project: Project = {
   id: "spoon" as ProjectId, repoUrl: "https://github.com/octocat/Spoon-Knife.git", defaultBranch: "main", defaultNode: node,
   resources: { cpus: 1, memoryGiB: 1, diskGiB: 1 }, allowedHosts: [], secrets: [], logins: [], preSetup: null,
 };
-await call("POST", "/v1/images", manifest);
-await call("PUT", "/v1/images/current", { image: imageId });
 await call("POST", "/v1/projects", project);
 
 // Ready means a thread can start and its pylon can be planned: the node is online in the registry.

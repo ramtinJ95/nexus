@@ -48,7 +48,7 @@ await post("POST", "/v1/images", {
     neovim: "0.12.6", neovimSha256: "b".repeat(64),
   },
 });
-await post("PUT", "/v1/images/current", { image });
+registry.setCurrentImage(image);
 
 const session = "-s=nexus-new-project";
 const playwright = (args: string[]) => promisify(execFile)("playwright-cli", [session, ...args], { cwd: out, encoding: "utf8" });

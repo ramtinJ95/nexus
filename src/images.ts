@@ -121,9 +121,11 @@ export interface ImageManifest {
 /**
  * Where and when. Built only when a human runs `nexus image build`, on the node named by the control
  * plane's `imageBuildNode` setting (default infra-testbench, where S1 verified Docker access). A build that
- * passes its smoke boot becomes `current`, which every new pylon uses. Running and paused pylons keep the
- * image they booted from, because their disks depend on its rootfs. After a build, the control plane sends
- * fetch-artifact to every online node. A node that was offline gets it from planPylon's missing-artifact rule on first use.
+ * passes its smoke boot is recorded, which changes nothing pylons use. `nexus image rollout` then sends
+ * fetch-artifact to every online node that lacks the image, and makes it `current`, which every new pylon uses,
+ * once each holds it. A node that was offline gets it from planPylon's missing-artifact rule on first use. The
+ * image it replaces stays recorded as the previous one, which `nexus image rollback` rolls out again. Running and
+ * paused pylons keep the image they booted from, because their disks depend on its rootfs.
  */
 export interface ImageSettings { imageBuildNode: NodeName; current: ImageId }
 
