@@ -36,6 +36,7 @@ CPU load alone rarely breaks these tests. Two suites on 2 CPUs beside 2 busy loo
 | `loop.test.ts` on a slow disk, `WRITE_MS=30` (`slow-disk-loop-*.txt`) | 0 of 5 passed, each timed out at "the last read is ingested" | 5 of 5 |
 | The used-up port range test, `WRITE_MS=100` (`slow-disk-port-range-*.txt`) | 0 of 5, each timed out at "web is published" | 5 of 5 |
 | The queued Claude worker test, `WRITE_MS=300` (`slow-disk-worker-*.txt`) | 0 of 3, each timed out at "worker started" | 3 of 3 |
+| Full suite with each spawn 600 ms late, `SPAWN_MS=600` (`slow-spawn-full-*.txt`) | 1136 of 1140. The two turn-snapshot deadline tests failed, and so did the two heartbeat tests, from this pylon's zombies | 1142 of 1142 |
 | The page stream test with each read 6 s late, `SPAWN_MS=6000` (`slow-spawn-api-*.txt`) | 0 of 5, each `no event on /threads/…/stream`, as in #119 | 5 of 5 |
 
 In the slow-spawn run, main survives reads up to about 4 s. Any frame restarts its 5 s wait, and the 2 s timer keeps the reads overlapping. It fails once one read takes longer than 5 s, which is what #119's run hit. 6 s is a synthesized stall, not a measured one.
