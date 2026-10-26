@@ -98,7 +98,7 @@ async function setup(t: TestContext) {
   const registry = openRegistry(join(dir, "registry.db"));
   registry.upsertNode({ name: node, tailnetHost: "rj-firebat.tail.ts.net", tailnetNodeId: "nFIREBAT" as TailnetNodeId });
   registry.createProject(project);
-  registry.saveImage(image);
+  registry.saveImage(image, null);
   registry.setCurrentImage(image.id);
   let caller: TailnetNodeId = laptop;
   /** What the node's probe answers a guest command with. Tests replace it. */

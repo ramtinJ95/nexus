@@ -65,7 +65,7 @@ const image = "img-0123456789ab" as ImageId;
 registry.saveImage({
   id: image, gondolinBuildId: "b1", builtOn: node, builtAt: "2027-01-01T00:00:00Z", sha256: "a".repeat(64),
   pins: { debianDigest: "d", node: "n", nodeSha256: "n", claudeCode: "c", pi: "p", herdr: "h", piEnv: "e", piEnvSha256: "s", gondolin: "g", alpineKernel: "k", dotfilesCommon: "f", gh: "2.103.2", ghSha256: "a".repeat(64), neovim: "0.12.6", neovimSha256: "b".repeat(64) },
-});
+}, null);
 registry.setCurrentImage(image);
 const api = await startApi({
   registry, host: "127.0.0.1", port: 0, whois: async () => laptop, allowed: new Set([laptop]), hostnames: new Set(["127.0.0.1"]),

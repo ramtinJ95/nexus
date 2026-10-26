@@ -19,6 +19,7 @@ import type { HerdrStatus, JobStatus, NodeName, NodeObservation, PylonId, Subjec
 import type { Project, ProjectId, SessionHarness } from "../project.ts";
 import type { ImageId, ImageManifest, TemplateRecord } from "../images.ts";
 import type { PylonRecord } from "../tick.ts";
+import type { ImageOperation } from "./image-rollout.ts";
 import { needsPerson, reviewerCaller, type Review } from "./review.ts";
 import { claudeTurn } from "../../images/pylon/nexus-turn.ts";
 import { maxEntries, transcriptStart, usageLimitStop, type ClaudeEntry, type TranscriptCursor } from "../claude-transcript.ts";
@@ -57,6 +58,12 @@ export interface Thread extends ActivityFacts {
   /** The Claude worker's session stopped on its usage limit and no turn of a session runs since. `resetsAt` is null when Claude Code did not say when the limit resets. */
   usageLimit?: { stoppedAt: number; resetsAt: number | null };
 }
+
+/**
+ * An image's manifest and `release`, the full commit of the control plane release whose recipe built it. Null when that is
+ * unknown, as for a build from a dev checkout or an image recorded through POST /v1/images.
+ */
+export type RecordedImage = ImageManifest & { release: string | null };
 
 /** What the registry keeps of a pylon. The desired phase is derived from its thread on every tick. */
 export type StoredPylon = Omit<PylonRecord, "desired">;
@@ -280,6 +287,12 @@ const jsonOrNull = <T>(value: unknown): T | null => value === null ? null : json
 function observationOf(value: unknown): NodeObservation | null {
   const o = jsonOrNull<NodeObservation>(value);
   return o === null ? null : { ...o, grants: o.grants ?? null };
+}
+
+/** A row written before images recorded their release has none. */
+function recordedImage(r: Row): RecordedImage {
+  const image = json<ImageManifest & { release?: string | null }>(r.manifest);
+  return { ...image, release: image.release ?? null };
 }
 
 function nodeRow(r: Row): NodeRecord {
@@ -533,6 +546,8 @@ export function openRegistry(path: string, clock = Date.now) {
       session: row.session as string, cursor: { offset: row.byte_offset as number, skipping: row.skipping === 1, before: row.before_hash as string }, dropped: row.dropped as number, readAt: row.read_at as number,
     };
   }
+
+  const setting = (key: string): string | null => ((q.setting.get(key) as Row | undefined)?.value ?? null) as string | null;
 
   pruneSessions();
 
@@ -868,18 +883,27 @@ export function openRegistry(path: string, clock = Date.now) {
       return row && json<JobStatus>(row.status);
     },
 
-    saveImage(manifest: ImageManifest) { q.upsertImage.run(manifest.id, JSON.stringify(manifest)); },
-    image(id: ImageId): ImageManifest | undefined {
+    /** Kept in the manifest column, so a control plane older than `release` still reads the row. */
+    saveImage(manifest: ImageManifest, release: string | null) { q.upsertImage.run(manifest.id, JSON.stringify({ ...manifest, release })); },
+    image(id: ImageId): RecordedImage | undefined {
       const row = q.image.get(id) as Row | undefined;
-      return row && json<ImageManifest>(row.manifest);
+      return row && recordedImage(row);
     },
-    images: () => (q.images.all() as Row[]).map((r) => json<ImageManifest>(r.manifest)),
-    /** The image every new pylon boots. Only a recorded image can become current. */
+    images: () => (q.images.all() as Row[]).map(recordedImage),
+    /** The image every new pylon boots. Only a recorded image can become current, and the one it replaces becomes the previous image. */
     setCurrentImage(id: ImageId) {
-      if (q.image.get(id) === undefined) throw new Error(`no image ${id} is recorded`);
-      q.setSetting.run("current", id);
+      transaction(() => {
+        if (q.image.get(id) === undefined) throw new Error(`no image ${id} is recorded`);
+        const current = setting("current");
+        if (current !== null && current !== id) q.setSetting.run("previous-image", current);
+        q.setSetting.run("current", id);
+      });
     },
-    currentImage: (): ImageId | null => ((q.setting.get("current") as Row | undefined)?.value ?? null) as ImageId | null,
+    currentImage: (): ImageId | null => setting("current") as ImageId | null,
+    previousImage: (): ImageId | null => setting("previous-image") as ImageId | null,
+    /** The latest image build or rollout. One runs at a time, and it stays readable once it has finished. */
+    imageOperation: (): ImageOperation | null => jsonOrNull<ImageOperation>(setting("image-operation")),
+    saveImageOperation(operation: ImageOperation) { q.setSetting.run("image-operation", JSON.stringify(operation)); },
 
     saveTemplate(template: TemplateRecord) { q.upsertTemplate.run(template.id, template.key.project, JSON.stringify(template)); },
     templates: (project: ProjectId) => (q.templates.all(project) as Row[]).map((r) => json<TemplateRecord>(r.record)),

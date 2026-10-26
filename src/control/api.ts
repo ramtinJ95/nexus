@@ -701,7 +701,7 @@ export async function startApi(options: ApiOptions): Promise<Api> {
 
   function recordImage(body: unknown): ImageManifest {
     const manifest: ImageManifest = parse(imageSchema, body);
-    registry.saveImage(manifest);
+    registry.saveImage(manifest, null);
     return manifest;
   }
 
