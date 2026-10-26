@@ -29,7 +29,24 @@ export type ClaudeTyped =
  * only a pylon found not running, which typed nothing, forgets it. A fenced ID is asked after, never typed: its first
  * answer may only have been lost, as when the wait for it ran out while the probe still had it queued.
  */
-export async function typeIntoClaude(registry: Registry, thread: ThreadId, session: string, model: string | null, requestId: string, text: string, ask: (command: PylonCommand) => Promise<CommandResult>): Promise<ClaudeTyped> {
+export function typeIntoClaude(registry: Registry, thread: ThreadId, session: string, model: string | null, requestId: string, text: string, ask: (command: PylonCommand) => Promise<CommandResult>): Promise<ClaudeTyped> {
+  const held = attempts.get(registry) ?? new Map<string, Promise<unknown>>();
+  attempts.set(registry, held);
+  const key = `${thread} ${requestId}`;
+  const next = (held.get(key) ?? Promise.resolve()).then(() => typeOnce(registry, thread, session, model, requestId, text, ask));
+  const settled = next.catch(() => undefined);
+  held.set(key, settled);
+  void settled.then(() => { if (held.get(key) === settled) held.delete(key); });
+  return next;
+}
+
+/**
+ * One send per thread and request ID at a time. A resend asked while its first send waits on the probe would get the
+ * same answer, and if that typed nothing, whichever came later would clear the fence a newer send had set meanwhile.
+ */
+const attempts = new WeakMap<Registry, Map<string, Promise<unknown>>>();
+
+async function typeOnce(registry: Registry, thread: ThreadId, session: string, model: string | null, requestId: string, text: string, ask: (command: PylonCommand) => Promise<CommandResult>): Promise<ClaudeTyped> {
   const stored = registry.claudeMessage(thread, requestId);
   if (stored?.state === "sent") return { kind: "sent", sent: stored.result };
   let result: Omit<Extract<CommandResult, { kind: "send-claude" }>, "kind">;
