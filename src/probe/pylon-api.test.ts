@@ -16,7 +16,16 @@ const pylonJson = renderOverlay(overlay).find((f) => f.path === pylonInfoFile)!.
 const fact = (name: string, wantsPreview: boolean): ServiceFact => ({ name, state: "ready", port: 3000, declared: true, wantsPreview });
 const url = (port: number) => `https://infra-testbench.tail0.ts.net:${port}/`;
 
-/** The tailscale serve stand-in serves every port the test publishes. */
+/** Waits for the predicate. The deadline only ends a hang: a loaded suite can take seconds over what takes milliseconds alone. */
+async function until(what: string, predicate: () => boolean) {
+  const deadline = Date.now() + 60_000;
+  while (!predicate()) {
+    if (Date.now() > deadline) throw new Error(`timed out waiting until ${what}`);
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+}
+
+/** The tailscale serve stand-in serves every port the test publishes. A call's wait for a URL only ends a hang, unless the test sets its own. */
 function setup(guest: Partial<Guest>, deps: Partial<PylonApiDeps> = {}) {
   let changes = 0;
   const withdrawn: string[] = [];
@@ -31,7 +40,7 @@ function setup(guest: Partial<Guest>, deps: Partial<PylonApiDeps> = {}) {
     previewUrl: async (port) => served.has(port) ? url(port) : null,
     async withdraw(_pylonId, service) { withdrawn.push(service); },
     linked(_pylonId, service) { relinked.push(service); },
-    previewWaitMs: 2_000,
+    previewWaitMs: 60_000,
     ...deps,
   });
   return {
@@ -75,7 +84,7 @@ test("preview links the port, reports the change at once, and answers with the U
   const linked: unknown[] = [];
   const t = setup({ async linkPort(port, title) { linked.push([port, title]); return "storybook"; } });
   const reply = t.call({ op: "preview", port: 6006, title: "Storybook" });
-  await new Promise((resolve) => setTimeout(resolve, 20));
+  await until("the call waits for the URL", () => t.changes() === 1);
   assert.deepEqual(linked, [[6006, "Storybook"]]);
   assert.equal(t.changes(), 1, "the control plane hears of the new service before the wait");
   assert.deepEqual(t.relinked, ["storybook"], "spawns may route it again after an earlier unpreview");
@@ -110,7 +119,7 @@ test("services ensure waits for the URL of every service that wants a preview", 
   const ops: unknown[] = [];
   const t = setup({ async services(op, name) { ops.push([op, name]); return { services: [fact("web", true), fact("worker", false)] }; } });
   const reply = t.call({ op: "services", action: "ensure" });
-  await new Promise((resolve) => setTimeout(resolve, 20));
+  await until("the call waits for the URL", () => t.changes() === 1);
   t.publish([{ service: "web", httpsPort: 10101 }]);
   assert.deepEqual(await reply, { status: 200, reply: { services: [{ ...fact("web", true), url: url(10101) }, { ...fact("worker", false), url: null }] } });
   assert.deepEqual(ops, [["ensure", undefined]]);
@@ -136,7 +145,7 @@ test("service-start hands the declaration to the guest and waits for its URL", a
   const decl: ServiceDecl = { command: "pnpm storybook --port $PORT", preview: { title: "Storybook" } };
   const t = setup({ async startService(name, d) { started.push([name, d]); return [fact(name, true)]; } });
   const reply = t.call({ op: "service-start", name: "storybook", decl });
-  await new Promise((resolve) => setTimeout(resolve, 20));
+  await until("the call waits for the URL", () => t.changes() === 1);
   t.publish([{ service: "storybook", httpsPort: 10103 }]);
   assert.deepEqual(await reply, { status: 200, reply: { services: [{ ...fact("storybook", true), url: url(10103) }] } });
   assert.deepEqual(started, [["storybook", decl]]);

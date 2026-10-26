@@ -144,15 +144,16 @@ test("the client refuses a probe that whois does not name", async (t) => {
 
 test("the client sends nothing, not even the request line, to a peer that whois does not name", async (t) => {
   const received: Buffer[] = [];
+  const closed = Promise.withResolvers<void>();
   const server = createServer();
-  server.on("connection", (socket) => socket.on("data", (chunk: Buffer) => received.push(chunk)));
+  server.on("connection", (socket) => socket.on("data", (chunk: Buffer) => received.push(chunk)).on("close", () => closed.resolve()));
   server.listen(0, "127.0.0.1");
   await once(server, "listening");
   t.after(() => server.close());
   const port = (server.address() as { port: number }).port;
   const impostor = connectProbe(node, "127.0.0.1", probeNodeId, { port, whois: async () => "nOTHER" as TailnetNodeId });
   await assert.rejects(impostor.putSecret("NEXUS_CHATGPT_TOKEN", "a-real-looking-token"), { code: "forbidden" });
-  await new Promise((resolve) => setTimeout(resolve, 50));
+  await closed.promise;
   assert.equal(Buffer.concat(received).length, 0, "the other node received no bytes");
 });
 
@@ -794,27 +795,34 @@ test("a checkout read fits the probe's stream request and comes back through it"
 
 test("a process that closes its stdin still delivers its output and exit code", async (t) => {
   const { client } = await streaming(t);
-  const stream = await client.stream(pylonId, ["sh", "-c", "exec 0<&-; sleep 1; printf done; exit 7"]);
-  await new Promise((r) => setTimeout(r, 300));
+  const dir = await mkdtemp(join(tmpdir(), "nexus-probe-stdin-"));
+  t.after(() => rm(dir, { recursive: true }));
+  const written = join(dir, "written");
+  const stream = await client.stream(pylonId, ["sh", "-c", 'exec 0<&-; printf closed; until [ -e "$0" ]; do sleep 0.01; done; printf done; exit 7', written]);
+  const output = stream[Symbol.asyncIterator]();
+  assert.equal(Buffer.from((await output.next()).value!).toString(), "closed");
   await stream.write(new TextEncoder().encode("nobody reads this"));
-  assert.equal(await readAll(stream), "done");
+  await writeFile(written, "");
+  const rest: Uint8Array[] = [];
+  for (let chunk = await output.next(); !chunk.done; chunk = await output.next()) rest.push(chunk.value);
+  assert.equal(Buffer.concat(rest).toString(), "done");
   assert.deepEqual(await stream.done, { kind: "exited", code: 7 });
 });
 
 test("a caller that resets its stream connection during whois does not take the probe down", async (t) => {
   const entered = Promise.withResolvers<void>();
   const release = Promise.withResolvers<void>();
+  const reset = Promise.withResolvers<void>();
   const { client, probe } = await setup(t, {
     whois: async () => { entered.resolve(); await release.promise; return controlPlane; },
-    log: () => undefined,
+    log: () => reset.resolve(),
   });
   const socket = connect(probe.port, "127.0.0.1");
   socket.write(`GET /v1/pylons/${pylonId}/stream?request=${encodeURIComponent(JSON.stringify({ pty: null, argv: ["true"] }))} HTTP/1.1\r\nhost: probe\r\nconnection: upgrade\r\nupgrade: nexus-stream\r\n\r\n`);
   await entered.promise;
   socket.resetAndDestroy();
-  await new Promise((r) => setTimeout(r, 50));
+  await reset.promise;
   release.resolve();
-  await new Promise((r) => setTimeout(r, 50));
   assert.equal(await client.job("after-reset" as JobId), "unknown", "the probe still answers");
 });
 
@@ -1078,6 +1086,7 @@ test("an unlink-port command waits for a read in flight, which is published befo
   let linked = [3000];
   let gate: PromiseWithResolvers<void> | null = null;
   let reads = 0;
+  let unlinkedDuringRead = false;
   const guest: Guest = {
     ...listeningGuest(() => ports),
     async services() {
@@ -1086,6 +1095,7 @@ test("an unlink-port command waits for a read in flight, which is published befo
       return { services: linked.map((port): ServiceFact => ({ name: `port-${port}`, state: "ready", port, declared: false, wantsPreview: true })) };
     },
     async unlinkPort(port) {
+      unlinkedDuringRead ||= gate !== null;
       // A pylon's unlink is a controller round trip, long after the read published before it reached the control plane.
       await until("the read in flight reaches the observer", () => seen.length === 2);
       linked = linked.filter((p) => p !== port);
@@ -1105,8 +1115,9 @@ test("an unlink-port command waits for a read in flight, which is published befo
       if (services) seen.push(`read ${services.map((s) => s.name).join(" ") || "none"}`);
     }
   })().catch(() => undefined);
+  /** Waits for the predicate. The deadline only ends a hang: a loaded suite can take seconds over what takes milliseconds alone. */
   const until = async (what: string, predicate: () => boolean) => {
-    for (const deadline = Date.now() + 3_000; !predicate();) {
+    for (const deadline = Date.now() + 60_000; !predicate();) {
       if (Date.now() > deadline) throw new Error(`timed out waiting until ${what}`);
       await new Promise((r) => setTimeout(r, 5));
     }
@@ -1118,11 +1129,12 @@ test("an unlink-port command waits for a read in flight, which is published befo
   ports = [3000, 5173];
   await until("a read is in flight", () => reads > before);
   const reply = client.command(pylonId, { kind: "unlink-port", port: 3000 }).then((result) => { seen.push("reply"); return result; });
+  // Nothing shows the command has reached the probe's queue, so it gets a moment to overtake the read.
   await new Promise((r) => setTimeout(r, 50));
-  assert.deepEqual(linked, [3000], "the unlink waits for the read in flight");
   gate.resolve();
   gate = null;
   assert.deepEqual(await reply, { kind: "unlink-port", refused: null });
+  assert.equal(unlinkedDuringRead, false, "the unlink waits for the read in flight");
   assert.deepEqual(linked, []);
   await until("the next read is published", () => seen.at(-1) === "read none");
   assert.deepEqual(seen, ["read port-3000", "read port-3000", "reply", "read none"]);
@@ -1339,7 +1351,7 @@ test("probe git observations derive pushed-branch outputs and bound reads across
   assert.equal(logged.filter((line) => line.includes(" git:")).length, 2, "a recovered read allows a later failure to be logged");
 });
 
-test("stalled controller RPCs cannot hold healthy pylon facts or pile up behind later snapshots", async (t) => {
+test("stalled controller RPCs cannot hold healthy pylon facts or pile up behind later snapshots", { timeout: 60_000 }, async (t) => {
   const stalled = "pylon-stalled" as PylonId;
   const gitStalled = "pylon-git-stalled" as PylonId;
   const facts: GitFacts = { head: "a".repeat(40), branch: "main", dirty: false, branches: [] };
@@ -1355,17 +1367,27 @@ test("stalled controller RPCs cannot hold healthy pylon facts or pile up behind 
   t.after(() => gate.resolve());
   let blockedCalls = 0;
   let gitCalls = 0;
+  const allStuck = Promise.withResolvers<void>();
+  const stuck = () => {
+    if (blockedCalls === 7 && gitCalls === 1) allStuck.resolve();
+    return gate.promise;
+  };
+  const lateGit = Promise.withResolvers<void>();
   let recovering = false;
   const blocked: Guest = {
     ...healthy,
-    async exec(argv, opts) { blockedCalls++; await gate.promise; return healthy.exec(argv, opts); },
-    async services() { blockedCalls++; await gate.promise; return { services: [] }; },
+    async exec(argv, opts) { blockedCalls++; await stuck(); return healthy.exec(argv, opts); },
+    async services() { blockedCalls++; await stuck(); return { services: [] }; },
   };
   const gitBlocked: Guest = {
     ...healthy,
     async exec(argv, opts) {
-      if (argv[0] === "python3") { gitCalls++; await gate.promise; }
-      return healthy.exec(argv, opts);
+      if (argv[0] !== "python3") return healthy.exec(argv, opts);
+      gitCalls++;
+      await stuck();
+      const reply = await healthy.exec(argv, opts);
+      lateGit.resolve();
+      return reply;
     },
   };
   const fake = fakeBackend();
@@ -1375,15 +1397,19 @@ test("stalled controller RPCs cannot hold healthy pylon facts or pile up behind 
     listeningPollMs: 60_000, log: () => {},
   });
   const snapshot = async () => {
-    for await (const event of client.observe(AbortSignal.timeout(8000))) {
+    for await (const event of client.observe(AbortSignal.timeout(60_000))) {
       assert.ok(event.type === "snapshot");
       return event.observation.pylons;
     }
     return assert.fail("missing snapshot");
   };
-  const started = performance.now();
-  const first = await snapshot();
-  assert.ok(performance.now() - started < 7500, "all fact deadlines run in parallel, not sequentially or for 180 seconds");
+  // Timers fire only on a tick, so a snapshot that waits on a deadline the ticks do not reach never comes.
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const reading = snapshot();
+  await allStuck.promise; // all fact deadlines run in parallel, not sequentially
+  await new Promise((resolve) => setImmediate(resolve)); // the healthy pylon's reads answer within these microtasks
+  t.mock.timers.tick(5_000); // the longest fact deadline, not 180 seconds
+  const first = await reading;
   const good = first.find((p) => p.pylonId === pylonId)!;
   assert.ok(good.phase === "running");
   assert.deepEqual(good.git, facts);
@@ -1402,16 +1428,15 @@ test("stalled controller RPCs cannot hold healthy pylon facts or pile up behind 
   // Expire the Git cache and change the healthy facts while the underlying RPCs are still stuck.
   t.mock.method(Date, "now", () => Date.parse("2099-01-01T00:00:00Z"));
   facts.dirty = true;
-  const secondStart = performance.now();
+  // No tick, so a later snapshot queued behind the timed-out controller calls would never come.
   const second = await snapshot();
-  assert.ok(performance.now() - secondStart < 2000, "a later snapshot is not queued behind timed-out controller calls");
   const next = second.find((p) => p.pylonId === pylonId)!;
   assert.ok(next.phase === "running");
   assert.equal(next.git?.dirty, true);
   assert.equal(blockedCalls, 7);
   assert.equal(gitCalls, 1, "even an expired Git cache cannot start another outstanding controller RPC");
   gate.resolve();
-  await new Promise((resolve) => setTimeout(resolve, 20));
+  await lateGit.promise;
   const late = (await snapshot()).find((p) => p.pylonId === gitStalled)!;
   assert.ok(late.phase === "running");
   assert.equal(late.git, null, "late replies do not overwrite the timed-out snapshot or its cache");
