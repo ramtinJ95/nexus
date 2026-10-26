@@ -24,11 +24,23 @@ Every pylon then fails, so `show` reports `attention: failed` for each thread. T
 - `templates.json` is the registry's template records at the end. Both templates are `ready` on `local-node`, each with the commit its build checked out. `artifacts.txt` lists both artifact directories and `tpl-d921661d4d81`'s published `template.json`.
 - `threads.txt` lists the five threads, each with `pylon failed`, for the reason given above. `project-add.txt` is the project's add.
 
+## Start time both ways
+
+`measure-start.sh` times the work a first boot does in the guest on each path, with the commands `src/pylon-vm-backend.ts` runs, and `measure-start.txt` is its output from 5 alternating runs per side in this pylon (4 CPUs, ext4, load average under 2). The project is this repository with a `.nexus/setup` that runs `npm ci`, 162 packages, from an empty npm cache as a fresh disk has. The thread checks out a commit made after the template's. Every run checks that the checkout is at that commit, that `refs/nexus/base` is too, that no tracked file changed, and that `node_modules` is there.
+
+| Path | Median | Range | What bounds it |
+|---|---|---|---|
+| Fresh: clone, check out, `.nexus/setup` | 6.5 s | 5.1 to 11.6 s | `npm ci` downloading and unpacking from registry.npmjs.org |
+| Template: copy the disk, fetch, check out | 0.25 s | 0.24 to 0.31 s | the copy, 231 MB at about 1 GB/s. ext4 has no reflink, so `cp --reflink=auto` copies every byte. The checkout takes about 40 ms |
+| The control plane's read of `.nexus/setup` at start, against github.com | 0.76 s | 0.66 to 1.11 s | the round trips of a one-commit fetch |
+
+Every start of a remote project now pays the read, fresh ones included. So for this setup a thread on a template starts about 5.5 s sooner, and one that boots fresh starts about 0.8 s later than before. The saving grows with what setup does: `npm ci` here is small next to a setup that installs system packages or builds. The VM boot is the same on both paths and is not timed. The template's real disk is one qcow2 overlay, which a tar of the set-up checkout stands in for here. On a filesystem with reflinks, such as XFS or btrfs, the copy would take far less than 0.2 s.
+
 ## What was not verified
 
 - A VM booting from a template disk, and the in-guest checkout over it. No VM ran, and `disk.qcow2` is a placeholder file, not a qcow2 image.
 - A real template build. The stand-in replaces the prepare, the setup run and the disk copy. The real `buildTemplate` would also refuse this `file://` remote, as the spawns do.
-- The mirror reading a real GitHub repository over HTTPS with the control plane's token. Here it read a local bare repository over `file://`.
+- The mirror reading a private GitHub repository with the control plane's token. The stack read a local bare repository over `file://`, and the timing above read the public `ramtinJ95/nexus` over HTTPS with no token.
 - A template on another node. Only one node ran, so the rule that only the thread's own node's templates count went untested here. `src/images.test.ts` covers it.
 
 ## Rerun
