@@ -12,7 +12,7 @@ The control plane writes every record. Probes send facts in observations, and th
 | Project | `repoUrl`, `defaultBranch`, `defaultNode`, `resources`, `allowedHosts`, `secrets`, `logins`, `preSetup`, optional `gitIdentity` | You |
 | Image | `id`, `pins`, `builtOn`, `builtAt` | The results of `build-image` jobs |
 | Template | `id`, `key`, `state`, `node`, `builtAt` | The results of `build-template` jobs |
-| Thread | `id`, `title`, `project`, `status`, `conversationId`, `pylonId`, `startedBy`, `seenAt`, `lastReplyAt` | You, and the harness |
+| Thread | `id`, `title`, `project`, `status`, `conversationId`, `pylonId`, `startedBy`, `seenAt`, `lastReplyAt`, `placement` | You, and the harness |
 | Claude transcript | `thread`, `session`, `byte_offset`, `skipping`, `dropped`, `read_at`, and its entries | Reads of the Claude worker's transcript in the pylon |
 | Pylon | `id`, `thread`, `node`, `template` | Thread start |
 | Session | `pylon`, `id`, `herdrPane`, `harness`, `harnessSessionId`, `status`, `title`, `state`, `message` | Observations. Panes opened by hand in Herdr are adopted. A paused pylon's sessions keep their records |
@@ -28,6 +28,8 @@ One setting sits beside the records: `current`, the image every new pylon uses. 
 - A pylon `id` is `pylon-<thread id>`, at most 40 characters.
 - `Node.tailnetNodeId` is Tailscale's stable node ID. Probes compare callers against it.
 - `Node.state` is `online` or `offline`. A node that is asleep or powered off is `offline`. That is not an error.
+- A node's capacity is its CPUs and memory, its free disk, and what its pylons hold of them: `committedCpus`, `committedMemoryGiB` and `committedDiskGiB`. A pylon holds its CPUs and memory while its VM is up, from launch until it stops, and its disk size until it is deleted. A paused pylon therefore counts toward committed disk only. Its memory is free until it wakes, which is how pausing idle pylons frees a node. Docker's backend reserves nothing, so its pylons count for nothing.
+- `Thread.placement` says which node the thread's pylon boots on and why: the project's default node, the node the start named, or the node `auto` chose, with the room each node would have had left after the pylon or why it could not run it. A thread started before placements were recorded has none.
 - `Project.repoUrl` is an SSH or HTTPS git URL, or null for a scratch project. A scratch project's pylons start from `git init` on the branch, fetch nothing, and keep nothing once the thread is deleted, so their agents publish what is worth keeping. A scratch project never has a template.
 - A pylon's repository is fixed when its thread starts: a clone of `repoUrl` at the branch, or at `start --commit`, or an empty repository on the branch. Its boot records which, so a pylon keeps the repository it started with.
 - `Project.secrets` holds names and the hosts each value may be sent to. The values live only in each node's secret file. A `GH_TOKEN` granted to `api.github.com` and `github.com`, which the dashboard's GitHub access sets, lets the project's agents create GitHub repositories with `gh` and push to them over HTTPS.
