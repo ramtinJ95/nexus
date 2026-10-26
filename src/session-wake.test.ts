@@ -2,8 +2,11 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { seedClaudeState } from "./claude-state.ts";
 import { fakeGuest, herdrError, herdrOk, herdrPane, herdrSnapshot, type ExecReply } from "./fake-guest.ts";
-import { recordBeforePause, relaunchAfterWake } from "./session-wake.ts";
+import type { PylonId } from "./protocol.ts";
+import { onePerClaudeSession, recordBeforePause, relaunchAfterWake } from "./session-wake.ts";
 import { sendToClaude, sessionFacts, sessionsFile, type SessionRecord } from "./sessions.ts";
+
+const pylonId = "pyl-session-wake" as PylonId;
 
 function logged() {
   const lines: string[] = [];
@@ -31,7 +34,7 @@ test("a wake logs each session's outcome, and one that does not come back fails 
     throw new Error(`unscripted ${sub}`);
   });
   const { lines, log } = logged();
-  const outcomes = await relaunchAfterWake(guest, log);
+  const outcomes = await relaunchAfterWake(pylonId, guest, log);
   assert.deepEqual(outcomes.map((o) => o.result), ["present", "failed"]);
   assert.deepEqual(lines, [
     'sessions: "sh" (shell) was already running in w1:p1',
@@ -50,12 +53,12 @@ test("a wake whose Herdr server does not start still succeeds, and its pylon lis
   });
   const { lines, log } = logged();
   const why = "starting the Herdr server failed with exit 127: tini: not found";
-  assert.deepEqual(await relaunchAfterWake(guest, log), [{ record: shell, result: "failed", herdrPane: null, message: why }]);
+  assert.deepEqual(await relaunchAfterWake(pylonId, guest, log), [{ record: shell, result: "failed", herdrPane: null, message: why }]);
   assert.deepEqual(lines, [`sessions: "sh" (shell) did not come back: ${why}`]);
   const [fact] = await sessionFacts(guest);
   assert.ok(fact?.state === "failed");
   assert.deepEqual({ ...fact, id: fact.id.slice(0, 7) }, { id: "failed-", state: "failed", herdrPane: null, harness: "shell", harnessSessionId: null, status: "unknown", title: "sh", message: why });
-  assert.deepEqual(await relaunchAfterWake(guest, log), [{ record: shell, result: "failed", herdrPane: null, message: why }], "the next wake tries it again");
+  assert.deepEqual(await relaunchAfterWake(pylonId, guest, log), [{ record: shell, result: "failed", herdrPane: null, message: why }], "the next wake tries it again");
 });
 
 test("a wake whose sessions file cannot be read logs it and leaves the file as it was", async () => {
@@ -65,7 +68,7 @@ test("a wake whose sessions file cannot be read logs it and leaves the file as i
     return { exitCode: 1, output: "cat: Input/output error" };
   });
   const { lines, log } = logged();
-  assert.deepEqual(await relaunchAfterWake(guest, log), []);
+  assert.deepEqual(await relaunchAfterWake(pylonId, guest, log), []);
   assert.deepEqual(lines, [`sessions: the relaunch failed, and the sessions file keeps every session for the next wake: reading ${sessionsFile} failed with exit 1: cat: Input/output error`]);
   assert.deepEqual(guest.written, []);
 });
@@ -161,16 +164,66 @@ function pylon(restores = true) {
 const worker = "0b5e3a52-5d0f-4c1e-9a43-1f2a6c7d8e90";
 const quiet = async () => {};
 
+/** A worker launched in its thread's workspace, as the control plane's prompted launch leaves it. */
+async function launched(p: ReturnType<typeof pylon>): Promise<void> {
+  const herdr = (...args: string[]) => p.guest.exec(["herdr", "--session", "nexus", ...args], { cwd: "/home/user", timeoutMs: 1 });
+  await herdr("workspace", "create", "--cwd", "/home/user/workspace/repo", "--label", "Fix the login page", "--no-focus");
+  await herdr("agent", "start", "nx-1", "--kind", "claude", "--pane", "w1:p1", "--timeout", "1", "--", "--session-id", worker);
+}
+
+/** A pause, then a wake whose relaunch a message reaches at once, through the probe's lock as a send-claude command takes it. */
+async function wakeWithMessage(p: ReturnType<typeof pylon>, text: string) {
+  await recordBeforePause(p.guest, quiet);
+  p.pause();
+  const [outcomes, sent] = await Promise.all([
+    relaunchAfterWake(pylonId, p.guest, quiet),
+    onePerClaudeSession(pylonId, [worker], () => sendToClaude(p.guest, { session: worker, text })),
+  ]);
+  return { outcomes, sent };
+}
+
 test("every wake brings the worker back in its own pane, though a message reaches it while the wake relaunches it", async () => {
   const p = pylon();
-  await p.guest.exec(["herdr", "--session", "nexus", "workspace", "create", "--cwd", "/home/user/workspace/repo", "--label", "Fix the login page", "--no-focus"], { cwd: "/home/user", timeoutMs: 1 });
-  await p.guest.exec(["herdr", "--session", "nexus", "agent", "start", "nx-1", "--kind", "claude", "--pane", "w1:p1", "--timeout", "1", "--", "--session-id", worker], { cwd: "/home/user", timeoutMs: 1 });
+  await launched(p);
   for (const wake of [1, 2, 3]) {
-    await recordBeforePause(p.guest, quiet);
-    p.pause();
-    const [, sent] = await Promise.all([relaunchAfterWake(p.guest, quiet), sendToClaude(p.guest, { session: worker, text: `wake ${wake}` })]);
+    const { sent } = await wakeWithMessage(p, `wake ${wake}`);
     assert.deepEqual(p.running(worker), ["w1:p1"], `after wake ${wake}, one Claude runs the worker's session`);
     assert.equal(sent.herdrPane, "w1:p1", `the message of wake ${wake} went to it`);
   }
   assert.deepEqual(p.workspaces(), ["Fix the login page"]);
+});
+
+test("a wake whose Herdr restored nothing opens the worker once, whichever of the relaunch and a message comes first", async () => {
+  const p = pylon(false);
+  await launched(p);
+  for (const wake of [1, 2]) {
+    const { sent } = await wakeWithMessage(p, `wake ${wake}`);
+    const running = p.running(worker);
+    assert.equal(running.length, 1, `after wake ${wake}, one Claude runs the worker's session, not ${running.length}`);
+    assert.equal(sent.herdrPane, running[0], "and the message went to it");
+  }
+});
+
+test("a pylon whose earlier wakes left the worker in several panes comes back with one, in the first", async () => {
+  const p = pylon();
+  await launched(p);
+  const herdr = (...args: string[]) => p.guest.exec(["herdr", "--session", "nexus", ...args], { cwd: "/home/user", timeoutMs: 1 });
+  for (const w of ["w2", "w3"]) {
+    await herdr("workspace", "create", "--cwd", "/home/user/workspace/repo", "--label", "Claude Code", "--no-focus");
+    await herdr("agent", "start", "nx-2", "--kind", "claude", "--pane", `${w}:p1`, "--timeout", "1", "--", "--resume", worker);
+  }
+  await recordBeforePause(p.guest, quiet);
+  p.pause();
+  const { lines, log } = logged();
+  await relaunchAfterWake(pylonId, p.guest, log);
+  assert.deepEqual(p.running(worker), ["w1:p1"]);
+  assert.deepEqual(p.workspaces(), ["Fix the login page"], "the other panes are closed");
+  assert.deepEqual(lines, [
+    'sessions: relaunched "Fix the login page" (claude-code) in w1:p1',
+    `sessions: dropped "Claude Code" (claude-code), a second record of Claude Code session ${worker}, and closed its pane w2:p1`,
+    `sessions: dropped "Claude Code" (claude-code), a second record of Claude Code session ${worker}, and closed its pane w3:p1`,
+  ]);
+  const file = JSON.parse(p.guest.written.findLast((f) => f.path === sessionsFile)!.content);
+  assert.deepEqual(file.sessions.map((r: SessionRecord) => r.herdrPane), ["w1:p1"], "the next pause records one");
+  assert.deepEqual(file.failed, []);
 });

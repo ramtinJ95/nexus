@@ -530,7 +530,7 @@ export function createPylonVmBackend(options: PylonVmBackendOptions): VmBackend 
             await sandbox({ action: "public-urls", name, urls: publicUrls(pylonId, live.previews, options.previewHost) }, signal);
             const sidecar = await readSidecar(pylonId);
             if (sidecar.relaunch) {
-              await relaunchAfterWake(pylonGuest(pylonId, instanceDir(pylonId), sandbox), controllerLog(instanceDir(pylonId)));
+              await relaunchAfterWake(pylonId, pylonGuest(pylonId, instanceDir(pylonId), sandbox), controllerLog(instanceDir(pylonId)));
               await writeSidecar(pylonId, { checkpoint: sidecar.checkpoint });
             }
             return;

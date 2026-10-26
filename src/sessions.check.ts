@@ -145,7 +145,7 @@ const sessionFiles = (harness: SessionRecord["harness"], id: string): string[] =
 async function checkUnprompted(stage: string, title: string, outcomes: readonly RelaunchOutcome[], facts: readonly SessionFact[]): Promise<void> {
   const o = outcomes.find((x) => x.record.title === title);
   if (o === undefined) return void findings.push(`${stage}: no record of ${title}`);
-  if (o.result === "failed") return void findings.push(`${stage}: ${title} failed to relaunch: ${o.message}`);
+  if (o.result === "failed" || o.result === "dropped") return void findings.push(`${stage}: ${title} did not come back: ${o.result === "failed" ? o.message : "dropped"}`);
   const fact = facts.find((f) => f.herdrPane === o.herdrPane);
   const sameSessionId = fact?.harnessSessionId === o.record.harnessSessionId;
   step(`${stage}_${title}`, { outcome: o.result, fact, sameSessionId });
@@ -178,8 +178,8 @@ async function expectRuns(stage: string, outcomes: readonly RelaunchOutcome[]): 
   for (const o of outcomes) {
     const { harness, harnessSessionId: id, title } = o.record;
     if (harness === "shell" || id === null) continue;
-    if (o.result === "failed") {
-      fail(title, `${stage}: ${title} failed to relaunch: ${o.message}`);
+    if (o.result === "failed" || o.result === "dropped") {
+      fail(title, `${stage}: ${title} did not come back: ${o.result === "failed" ? o.message : "dropped"}`);
       continue;
     }
     if (harness === "pi") {
@@ -299,7 +299,7 @@ const brokenByRestore = await expectRuns("RESTORE", restored);
 const restoredAgain = await relaunchSessions(guest);
 stepRelaunch("RESTORE_RELAUNCH_2", restoredAgain);
 assert.ok(others(restoredAgain).every((o) => o.result === "present"), "a second relaunch opens nothing");
-const restoredPanes = restoredAgain.flatMap((o) => o.result === "failed" ? [] : [o.herdrPane]);
+const restoredPanes = restoredAgain.flatMap((o) => o.result === "present" || o.result === "relaunched" ? [o.herdrPane] : []);
 const afterRestore = await settledFacts(restoredPanes);
 step("RESTORE_FACTS", afterRestore);
 assertResumed("RESTORE", recorded, afterRestore);
@@ -351,7 +351,7 @@ stepRelaunch("FRESH_RELAUNCH_2", freshAgain);
 assert.ok(others(freshAgain).every((o) => o.result === "present"), "a second relaunch after a fresh one opens nothing");
 
 // CLOSE
-for (const o of freshAgain) if (o.result !== "failed") await closeSession(guest, o.herdrPane);
+for (const o of freshAgain) if (o.result === "present" || o.result === "relaunched") await closeSession(guest, o.herdrPane);
 await closeSession(guest, "w999:p999");
 const closed = await sessionFacts(guest);
 step("FACTS_AFTER_CLOSE", closed);

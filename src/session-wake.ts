@@ -6,7 +6,7 @@
  * pause records it again and the next wake retries it.
  */
 import type { Guest } from "./backend.ts";
-import type { PausedSession } from "./protocol.ts";
+import type { PausedSession, PylonId } from "./protocol.ts";
 import { recordSessions, relaunchSessions, type RelaunchOutcome } from "./sessions.ts";
 
 /** Appends one line to the pylon's log: the controller log of a pylon VM, the container log under Docker. */
@@ -29,13 +29,30 @@ export async function recordBeforePause(guest: Guest, log: PylonLog): Promise<re
 }
 
 /**
+ * Calls that start a Claude session or type into it run one at a time per pylon and session: a launch, a send, and a
+ * wake's relaunch, which holds every Claude session it brings back. Each finds the pane the call before it left the
+ * session in, so none starts the session in a second pane. Two sends never interleave their chunks in its prompt, and
+ * a launch sent again while the first still runs, as when the control plane lost its answer, waits for it and then
+ * reads how far it got.
+ */
+export function onePerClaudeSession<T>(pylonId: PylonId, sessions: readonly string[], work: () => Promise<T>): Promise<T> {
+  const keys = [...new Set(sessions)].map((session) => `${pylonId}:${session}`);
+  const next = Promise.all(keys.map((key) => claudeCalls.get(key))).then(work);
+  const settled = next.catch(() => undefined);
+  for (const key of keys) claudeCalls.set(key, settled);
+  void settled.then(() => { for (const key of keys) if (claudeCalls.get(key) === settled) claudeCalls.delete(key); });
+  return next;
+}
+const claudeCalls = new Map<string, Promise<unknown>>();
+
+/**
  * After a boot from an existing disk. Returns the outcomes, also logged. A sessions file that cannot be read or
  * written is an empty list, and the file stays as it was.
  */
-export async function relaunchAfterWake(guest: Guest, log: PylonLog): Promise<readonly RelaunchOutcome[]> {
+export async function relaunchAfterWake(pylonId: PylonId, guest: Guest, log: PylonLog): Promise<readonly RelaunchOutcome[]> {
   let outcomes: readonly RelaunchOutcome[];
   try {
-    outcomes = await relaunchSessions(guest);
+    outcomes = await relaunchSessions(guest, (sessions, work) => onePerClaudeSession(pylonId, sessions, work));
   } catch (err) {
     await log(`sessions: the relaunch failed, and the sessions file keeps every session for the next wake: ${(err as Error).message}`);
     return [];
@@ -50,5 +67,6 @@ function outcomeLine(o: RelaunchOutcome): string {
     case "present": return `sessions: ${session} was already running in ${o.herdrPane}`;
     case "relaunched": return `sessions: relaunched ${session} in ${o.herdrPane}`;
     case "failed": return `sessions: ${session} did not come back${o.herdrPane === null ? "" : `, and its pane ${o.herdrPane} stays open`}: ${o.message}`;
+    case "dropped": return `sessions: dropped ${session}, a second record of Claude Code session ${o.record.harnessSessionId}${o.herdrPane === null ? "" : `, and closed its pane ${o.herdrPane}`}`;
   }
 }

@@ -163,7 +163,7 @@ export function createDockerBackend(options: DockerBackendOptions): VmBackend {
     await guest(pylonId).writeFiles(overlay);
     await services.apply(pylonId, urls, disk !== "running");
     if (await docker(["exec", pylonId, "sh", "-c", 'test -e "$1" && echo marked || true', "sh", relaunchMark]) !== "marked") return;
-    await relaunchAfterWake(guest(pylonId), containerLog(pylonId));
+    await relaunchAfterWake(pylonId, guest(pylonId), containerLog(pylonId));
     await docker(["exec", pylonId, "rm", "-f", relaunchMark]);
   }
 

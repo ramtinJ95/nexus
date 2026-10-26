@@ -20,6 +20,7 @@ import {
 } from "../protocol.ts";
 import type { ServiceName } from "../project.ts";
 import { attachedTerminals, sessionFacts } from "../sessions.ts";
+import { onePerClaudeSession } from "../session-wake.ts";
 import type { Whois } from "../tailscale.ts";
 import { listOutputs } from "../outputs.ts";
 import { listeningFacts } from "../listening.ts";
@@ -352,29 +353,13 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
   }
 
   /**
-   * Sends to one Claude session, and launches of it, run one at a time, from finding its pane to the Enter, so two never
-   * interleave their chunks in its prompt, and a second finds the pane a first one opened or resumed the session into
-   * instead of opening another. A launch sent again while the first still runs, as when the control plane lost its
-   * answer, waits for it and then reads how far it got.
-   */
-  const claudeCalls = new Map<string, Promise<unknown>>();
-  function onePerSession<T>(pylonId: PylonId, session: string, work: () => Promise<T>): Promise<T> {
-    const key = `${pylonId}:${session}`;
-    const next = (claudeCalls.get(key) ?? Promise.resolve()).then(work);
-    const settled = next.catch(() => undefined);
-    claudeCalls.set(key, settled);
-    void settled.then(() => { if (claudeCalls.get(key) === settled) claudeCalls.delete(key); });
-    return next;
-  }
-
-  /**
    * Each send to a Claude session by its request ID, until an hour after it settles, so a control plane whose wait for
    * one ran out, as behind a slow send to the same session, learns what became of it instead of typing it again. They
    * are held in memory, so a restarted probe knows none.
    */
   const claudeSendsById = new Map<string, Promise<CommandResult>>();
   function sendClaude(pylonId: PylonId, command: Extract<PylonCommand, { kind: "send-claude" }>, run: () => Promise<CommandResult>): Promise<CommandResult> {
-    const sending = onePerSession(pylonId, command.session, run);
+    const sending = onePerClaudeSession(pylonId, [command.session], run);
     if (command.requestId === undefined) return sending;
     const key = `${pylonId} ${command.requestId}`;
     claudeSendsById.set(key, sending);
@@ -551,7 +536,7 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
       const links = guestCommand.kind === "link-port" || guestCommand.kind === "unlink-port";
       const run = () => runCommand(pylonId, guestCommand, deps);
       const launch = guestCommand.kind === "open-session" && guestCommand.prompt !== undefined ? guestCommand.resume : undefined;
-      const result = await (links ? betweenReads(run) : guestCommand.kind === "send-claude" ? sendClaude(pylonId, guestCommand, run) : launch !== undefined ? onePerSession(pylonId, launch, run) : run());
+      const result = await (links ? betweenReads(run) : guestCommand.kind === "send-claude" ? sendClaude(pylonId, guestCommand, run) : launch !== undefined ? onePerClaudeSession(pylonId, [launch], run) : run());
       if (result.kind === "link-port") relinked(pylonId, result.service);
       // A linked port is a new service that wants a preview, and an unlinked one a service gone, which the control plane sees in the next read.
       // An opened or closed session is listed in it too, as is one a message resumed.

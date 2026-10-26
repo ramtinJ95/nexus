@@ -873,6 +873,7 @@ echo '{"id":"cli:test","result":{"type":"ok"}}'
       const run = spawnSync(argv[0]!, argv.slice(1), { env: { PATH: `${dir}:/usr/bin:/bin` }, encoding: "utf8" });
       return { exitCode: run.status, output: run.stdout + run.stderr };
     }
+    if (!herdr && argv.at(-1) === sessionsFile) return { exitCode: 3, output: "" };
     if (!herdr) return transcriptLookup(argv, true) ?? assert.fail(`unexpected exec ${argv.join(" ")}`);
     const sub = argv.slice(0, 2).join(" ");
     const flag = (name: string) => argv[argv.indexOf(name) + 1]!;
