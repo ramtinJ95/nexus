@@ -464,10 +464,12 @@ export function openRegistry(path: string, clock = Date.now) {
 
   /** Derived from the newest entries rather than stored, so it holds whichever of the turn's end and the transcript's read comes first. */
   function usageLimitOf(id: ThreadId) {
-    const session = db.prepare("SELECT w.session FROM claude_workers w JOIN claude_transcripts t ON t.thread = w.thread AND t.session = w.session WHERE w.thread = ?").get(id);
-    if (session === undefined) return null;
+    const worker = db.prepare("SELECT w.turn_at FROM claude_workers w JOIN claude_transcripts t ON t.thread = w.thread AND t.session = w.session WHERE w.thread = ?").get(id);
+    if (worker === undefined) return null;
     const entries = db.prepare("SELECT entry FROM claude_entries WHERE thread = ? ORDER BY seq DESC LIMIT 16").all(id).map((r) => json<ClaudeEntry>(r.entry)).reverse();
-    return usageLimitStop(entries);
+    const stop = usageLimitStop(entries);
+    // A turn that started after the stop, by the pylon's clock as the record's time is, ended it, though its prompt may not be read yet.
+    return stop !== null && (worker.turn_at === null || Number(worker.turn_at) <= stop.stoppedAt) ? stop : null;
   }
 
   function updateAttention(id: ThreadId) {
