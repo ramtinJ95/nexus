@@ -4,6 +4,7 @@ import { mkdir, rm } from "node:fs/promises";
 import { homedir, userInfo } from "node:os";
 import { join } from "node:path";
 import { backgroundGroups, backgroundWatch, claimHold, claudeEnviron, heartbeatDue, holdSuperseded, holdTurnEnd, releaseHold, reportedKind, reportsIntoThread } from "./nexus-heartbeat.ts";
+import { enqueue, startSender } from "./nexus-outbox.ts";
 import { claudeTurn, snapshotTurn } from "./nexus-turn.ts";
 import { spawn } from "node:child_process";
 
@@ -32,7 +33,9 @@ async function report() {
   } else if (kind === "session.ended") {
     await rm(path, { force: true });
   }
-  send("/usr/local/bin/nexus", ["event", kind, "--session", session, "--at", String(at)]);
+  // A failed write must not lose the session, which names this turn's snapshot.
+  await enqueue({ kind, at, session }).catch(() => {});
+  startSender();
   return session;
 }
 
