@@ -748,9 +748,11 @@ test("services the probe could not read change nothing: the next diff sees the l
   await until("the pylon runs", () => fake.pylons.get(thread.pylonId)?.phase === "running");
   const web: ServiceFact = { name: "web", state: "ready", port: 8000, declared: true, wantsPreview: true };
   for (const services of [[web], null, null, [web]]) fake.setServices(thread.pylonId, services);
-  const reads = () => seen.map((s) => s.read);
-  await until("the last read is ingested", () => JSON.stringify(reads().slice(-4)) === JSON.stringify([[web], null, null, [web]]));
-  assert.deepEqual(seen.slice(-3).map((s) => s.before), [[web], [web], [web]], "a null read is diffed as the list read before it, never as none");
+  // The spawn that publishes web's preview sends its own snapshot, which can land after these four.
+  const sent = JSON.stringify([[web], null, null, [web]]);
+  const at = () => seen.findIndex((_, i) => JSON.stringify(seen.slice(i, i + 4).map((s) => s.read)) === sent);
+  await until("the four reads are ingested", () => at() !== -1);
+  assert.deepEqual(seen.slice(at() + 1, at() + 4).map((s) => s.before), [[web], [web], [web]], "a null read is diffed as the list read before it, never as none");
 });
 
 test("listening ports the probe could not read are stored as unknown, not as the ports read before", async (t) => {
