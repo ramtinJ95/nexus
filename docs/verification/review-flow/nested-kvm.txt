@@ -1,0 +1,22 @@
+# In pylon-th-e95abd39c28a on rj-firebat, 2026-10-26. Kernel 6.18.58-0-virt, image without kmod.
+$ ls /dev/kvm (before)
+ls: cannot access '/dev/kvm': No such file or directory
+$ grep -o -m1 svm /proc/cpuinfo
+svm
+$ sudo python3 -I insmod.py irqbypass.ko kvm.ko kvm-amd.ko   # modules from /lib/modules/6.18.58-0-virt, gunzipped
+irqbypass.ko ok
+kvm.ko ok
+kvm-amd.ko ok
+$ ls -l /dev/kvm
+crw------- 1 root root 10, 232 Oct 26 01:02 /dev/kvm
+$ sudo dmesg | grep kvm_amd
+[ 2037.070868] kvm_amd: Nested Paging enabled
+[ 2037.071276] kvm_amd: LBR virtualization supported
+[ 2037.071794] kvm_amd: Virtual GIF supported
+[ 2037.072203] kvm_amd: Virtual NMI enabled
+$ sudo python3 -I kvm-probe.py
+api version 12
+guest wrote N then halted
+$ overlay: sudo python3 -I insmod.py overlay.ko
+overlay.ko ok
+nodev	overlay

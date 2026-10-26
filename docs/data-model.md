@@ -59,7 +59,7 @@ The probe reads only running pylons, at most once a minute per boot across snaps
 
 The registry stores each thread's nullable `seenAt` and `lastReplyAt` as Unix milliseconds, added by migration. A turn ending records `lastReplyAt`; streaming and parked tasks do not. Old rows start with null timestamps. If recovery finds a previously running turn ended, its reply is dated at recovery.
 
-The API derives `attention` in order: failed pylon, parked tasks, unread reply (`lastReplyAt > seenAt`, with null seen treated as unread), running harness or session turn, waiting session, then null. Parked tasks are tracked for every conversation at harness recovery, independently of client watches. Both the thread list and detail report this value and both timestamps.
+The API derives `attention` in order: failed pylon, `decision` (the thread's review ended for the person, as [review records](#review-records) say), parked tasks, unread reply (`lastReplyAt > seenAt`, with null seen treated as unread), running harness or session turn, waiting session, then null. Parked tasks are tracked for every conversation at harness recovery, independently of client watches. Both the thread list and detail report this value and both timestamps.
 
 Each recorded reply timestamp is strictly greater than the preceding reply and seen marker, nudged forward by a millisecond if needed, so reply identities and unread ordering survive same-millisecond events and clock corrections.
 
@@ -98,9 +98,22 @@ On every observation and every 5 seconds, the control plane's planner compares e
 
 ## PR watch records
 
-`pr_watches` stores one JSON record per thread in the control-plane registry. `links` holds each GitHub PR snapshot (`repo`, `number`, `title`, `url`, `state`, `checks`, `review`, `conflict`), the event IDs already consumed, and whether a reported failure still awaits recovery. `commentWakes` counts consecutive comment-only messages across that thread's PRs. Only feedback with GitHub `author_association` `OWNER`, `MEMBER` or `COLLABORATOR` enters the event cursor or this count; PR authors have no exemption. `pending` holds a durable request ID and message until the harness admits it; `error` holds a credential-free retry notice. These records survive archive and process restart. Rediscovery changes a reopened link from `closed` to `open` without resetting its event cursor, pending recovery or the thread's comment-wake count. ETags and response bodies are an in-memory, per-resource cache and need not survive restart.
+`pr_watches` stores one JSON record per thread in the control-plane registry. `links` holds each GitHub PR snapshot (`repo`, `number`, `title`, `url`, `state`, `checks`, `review`, `conflict`), the event IDs already consumed, and whether a reported failure still awaits recovery. `commentWakes` counts consecutive comment-only messages across that thread's PRs. Only feedback with GitHub `author_association` `OWNER`, `MEMBER` or `COLLABORATOR` enters the event cursor or this count; PR authors have no exemption. `pending` holds a durable request ID and message until the harness admits it, or until it is typed into a Claude worker's session; `error` holds a credential-free retry notice. These records survive archive and process restart. Rediscovery changes a reopened link from `closed` to `open` without resetting its event cursor, pending recovery or the thread's comment-wake count. ETags and response bodies are an in-memory, per-resource cache and need not survive restart.
 
-A linked PR contributes an `Output` with `kind: "pull-request"` and `ref` equal to its GitHub URL. `ThreadDetail.pullRequests` supplies its structured metadata. GitHub, not a probe or checkout, owns that metadata. The optional control-plane GitHub token is an exception to the node-only tool-secret rule: it is read from a separate protected file and used only for GitHub reads, never sent to a pylon.
+A linked PR contributes an `Output` with `kind: "pull-request"` and `ref` equal to its GitHub URL. `ThreadDetail.pullRequests` supplies its structured metadata. GitHub, not a probe or checkout, owns that metadata. The optional control-plane GitHub token is an exception to the node-only tool-secret rule: it is read from a separate protected file and used only for GitHub reads and a landing's merge, never sent to a pylon.
+
+## Review records
+
+`reviews` stores a builder thread's latest review, one JSON record per builder, with its reviewer thread in a unique column so the PR watch can skip reviewers. `Review` in `src/control/review.ts` is the shape, and `ThreadDetail.review` serves it:
+
+- `id` is `rv-` and eight hex digits. It is in every token the agents echo and every request ID the loop sends under, so a later review of the same thread never matches an earlier one's answers.
+- `builder`, `reviewer`, `pr` (`repo`, `number`, `url`, `title`) and `models` (`builder`, `reviewer`) say who reviews what. `maxRounds` is 1 to 10, 3 by default.
+- `land` is null to stop at approval, or `{ requestedBy }`, the deployer who asked for the landing. `merged` is the merge commit once the PR merged, after which the review never lands again.
+- `rounds` holds one entry per review of a head: `head`, the reviewer's parsed `verdict` (`verdict`, `findings` with `id`, `severity`, `where`, `summary`, `detail`, `reserved` cases, and `notCheckedLive`), the `check` at that head (`passed`, the output's tail), and the builder's `answers` (`id`, `action` fixed or rejected, `reason`).
+- `phase` is one of `reviewing`, `fixing`, `checking` (with `startedAt`), `approved`, `merging`, `deploying` (`commit`, `previous`, `requested`, `deadline`), `landed` (`commit`), or `needs-person` (`reasons`). `approved`, `landed` and `needs-person` have ended.
+- `outbox` is the next message (`to`, `id`, `text`), saved before it is sent. `since` is when the agent the loop waits on was last sent one, and `nudges` how many reminders in a row it has had.
+
+`needs-person` makes the builder's attention `decision`. A new `nexus review` replaces an ended record, and `nexus land` moves an approved one, or one the policy held after its check passed, back to `checking`.
 
 ## Releases and deployment drain
 
@@ -147,6 +160,7 @@ past matching records they have not consumed.
 | `attention.changed` | The new nullable `attention` |
 | `pull-request.feedback` | New batched GitHub feedback; `requestId` |
 | `release.changed` | Desired release (`desired`) or changed component report |
+| `review.changed` | A review started or changed phase or round; `review`, `reviewer`, `phase` and `round` |
 
 Only the five `session.*` kinds may come from a pylon. The strict boundary schema
 rejects extra fields, including a thread or project supplied by the guest. Session

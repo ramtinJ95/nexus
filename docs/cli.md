@@ -1,6 +1,6 @@
 # The Mac nexus CLI
 
-`nexus` runs on a Mac and drives the control plane's API: add projects, list threads, start one, message it, watch it, and archive or delete it. People use it at a shell. The Claude Code mod and the pi extension shell out to it, so this page is their contract. The code is [`src/cli/nexus.ts`](../src/cli/nexus.ts), and its transport is [`src/cli/transport.ts`](../src/cli/transport.ts). This page describes version 0.17.0, which `nexus --version` prints. Version 0.17.0 makes a Claude worker thread a conversation: `conversation` prints its Claude Code transcript and `send` types a message into its Claude session, as [Claude conversations and steering](#claude-conversations-and-steering-0170) describes. Version 0.16.1 added `--help` and `-h` after every command. Version 0.16.0 added `start --claude --model`, defaulted Claude to Opus 5.5, disabled commit and PR attribution, and preserved busy launches across Herdr readiness timeouts. `show` reports the worker model and launch diagnostic. Version 0.15.1 exposed stalled Claude worker launches, with pane diagnostics in `claudeWorker.message`. Version 0.15.0 added the resumable event stream and Claude Code thread workers. Version 0.14.0 added human-only project editing and a stale-grants warning. Version 0.13.0 added `deploy`, `release`, and waiting for fleet release health. Version 0.12.0 added PR-watch metadata and pull-request outputs to `show` (see [Pull requests](#pull-requests-0120)). Version 0.11.0 added Latest turn to dashboard Changes, `--turn` to `nexus changes` and `nexus diff`, and API `base=turn` with turn metadata and failures. Version 0.10.0 added shared `seenAt`, `lastReplyAt` and `attention` to thread rows and detail, and `seen <thread> [--unread]`, so clients no longer need their own seen stores. Version 0.9.0 made `attach` go through the control plane, over the attach route `GET /v1/threads/<thread>/attach`, a WebSocket, instead of ssh to the pylon's node, and retired its settings: `NEXUS_ATTACH`, and `"ssh"` and `"attach"` in the config file. An older control plane has no such route, and `attach` says to upgrade it. In 0.9.0, `Preview.failed` and `ready` also cover a preview whose port has no route into the pylon, and `ports` prints why a preview is not ready. Version 0.8.0 added `Session.id`, `Session.state` and `Session.message`, so a paused pylon lists the sessions its wake brings back and a session its last wake failed to bring back shows why, and `session close` now takes a session's ID, refuses a paused session, fails on a pane that is not open or that runs another session than the one listed there, and no longer tries again. Version 0.7.0 added scratch projects, whose `Project.repoUrl` is null, `project add --scratch` and `--secret`, and a null `Base.commit` where the base is the empty tree. Version 0.6.0 added `files`, `changes` and `diff`, their routes `GET /v1/threads/<thread>/files`, `GET /v1/threads/<thread>/changes` and `GET /v1/threads/<thread>/diff`, `Listing`, `Changes` and `Diff`, and the route `GET /v1/threads/<thread>/files/content`, which the CLI does not use. Version 0.5.0 added `session open`, `session close` and `attach`, the routes `POST /v1/threads/<thread>/sessions` and `DELETE /v1/threads/<thread>/sessions/<pane>`, `OpenedSession`, `Session.title`, `Preview.failed`, and the attach settings: `NEXUS_ATTACH`, and `"ssh"` and `"attach"` in the config file. Version 0.4.0 added `project add` and its route, `POST /v1/projects`. Version 0.3.0 added `unpreview` and its route, `DELETE /v1/threads/<thread>/previews/<port>`. Version 0.2.0 added `ports`, `preview`, `Preview.url`, `ThreadDetail.ports` and the `ports` of a watch `state`.
+`nexus` runs on a Mac and drives the control plane's API: add projects, list threads, start one, message it, watch it, and archive or delete it. People use it at a shell. The Claude Code mod and the pi extension shell out to it, so this page is their contract. The code is [`src/cli/nexus.ts`](../src/cli/nexus.ts), and its transport is [`src/cli/transport.ts`](../src/cli/transport.ts). This page describes version 0.18.0, which `nexus --version` prints. Version 0.18.0 added `review` and `land`, `ThreadDetail.review`, the `decision` attention and the `review.changed` event, as [Reviews and landing](#reviews-and-landing-0180) describes. Version 0.17.0 makes a Claude worker thread a conversation: `conversation` prints its Claude Code transcript and `send` types a message into its Claude session, as [Claude conversations and steering](#claude-conversations-and-steering-0170) describes. Version 0.16.1 added `--help` and `-h` after every command. Version 0.16.0 added `start --claude --model`, defaulted Claude to Opus 5.5, disabled commit and PR attribution, and preserved busy launches across Herdr readiness timeouts. `show` reports the worker model and launch diagnostic. Version 0.15.1 exposed stalled Claude worker launches, with pane diagnostics in `claudeWorker.message`. Version 0.15.0 added the resumable event stream and Claude Code thread workers. Version 0.14.0 added human-only project editing and a stale-grants warning. Version 0.13.0 added `deploy`, `release`, and waiting for fleet release health. Version 0.12.0 added PR-watch metadata and pull-request outputs to `show` (see [Pull requests](#pull-requests-0120)). Version 0.11.0 added Latest turn to dashboard Changes, `--turn` to `nexus changes` and `nexus diff`, and API `base=turn` with turn metadata and failures. Version 0.10.0 added shared `seenAt`, `lastReplyAt` and `attention` to thread rows and detail, and `seen <thread> [--unread]`, so clients no longer need their own seen stores. Version 0.9.0 made `attach` go through the control plane, over the attach route `GET /v1/threads/<thread>/attach`, a WebSocket, instead of ssh to the pylon's node, and retired its settings: `NEXUS_ATTACH`, and `"ssh"` and `"attach"` in the config file. An older control plane has no such route, and `attach` says to upgrade it. In 0.9.0, `Preview.failed` and `ready` also cover a preview whose port has no route into the pylon, and `ports` prints why a preview is not ready. Version 0.8.0 added `Session.id`, `Session.state` and `Session.message`, so a paused pylon lists the sessions its wake brings back and a session its last wake failed to bring back shows why, and `session close` now takes a session's ID, refuses a paused session, fails on a pane that is not open or that runs another session than the one listed there, and no longer tries again. Version 0.7.0 added scratch projects, whose `Project.repoUrl` is null, `project add --scratch` and `--secret`, and a null `Base.commit` where the base is the empty tree. Version 0.6.0 added `files`, `changes` and `diff`, their routes `GET /v1/threads/<thread>/files`, `GET /v1/threads/<thread>/changes` and `GET /v1/threads/<thread>/diff`, `Listing`, `Changes` and `Diff`, and the route `GET /v1/threads/<thread>/files/content`, which the CLI does not use. Version 0.5.0 added `session open`, `session close` and `attach`, the routes `POST /v1/threads/<thread>/sessions` and `DELETE /v1/threads/<thread>/sessions/<pane>`, `OpenedSession`, `Session.title`, `Preview.failed`, and the attach settings: `NEXUS_ATTACH`, and `"ssh"` and `"attach"` in the config file. Version 0.4.0 added `project add` and its route, `POST /v1/projects`. Version 0.3.0 added `unpreview` and its route, `DELETE /v1/threads/<thread>/previews/<port>`. Version 0.2.0 added `ports`, `preview`, `Preview.url`, `ThreadDetail.ports` and the `ports` of a watch `state`.
 
 This is a different program from the `nexus` inside a pylon ([`images/pylon/nexus`](../images/pylon/nexus)), which talks to its own node's probe.
 
@@ -64,6 +64,8 @@ With `--json`, a command prints one JSON value on stdout, pretty-printed. The va
 
 | Command | Route | `--json` prints |
 |---|---|---|
+| `review <thread> [--pr N] [--rounds N] [--land]` | `POST /v1/threads/<thread>/review` with `{"pr"?: number, "rounds"?: number, "land"?: true}`, which answers 201 | `Review`, the review it started |
+| `land <thread>` | `POST /v1/threads/<thread>/land` with `{}` | `Review`, moved back to its check |
 | `deploy <commit|main> [--wait]` | `PUT /v1/release` with `{"commit": string}`, then `GET /v1/release` while waiting | `ReleaseView`, described below |
 | `release` | `GET /v1/release` | `ReleaseView` |
 | `threads [--project P] [--all]` | `GET /v1/threads[?project=P]` | `ThreadRow[]`: each `Thread` with `desired` and `pylon: { node, actualState, failed }`, as in `ThreadDetail`. A thread whose harness or session turn runs carries `workingSince`, the earliest known start of those turns in Unix milliseconds, unless no start is known. Deleted threads are left out unless `--all` is given |
@@ -131,11 +133,12 @@ The shapes are TypeScript types. `Thread`, `Session` and `Preview` are in [`src/
 `attention` is the first matching condition, in this order:
 
 1. `"failed"`: the pylon or Claude worker launch failed.
-2. `"parked"`: tasks hit the restart limit and need `retry`, whether any client watches the thread or not.
-3. `"reply"`: `lastReplyAt` is non-null and later than `seenAt`, or `seenAt` is null.
-4. `"working"`: a harness or reported session turn is running.
-5. `"waiting"`: a session is waiting for input.
-6. `null`.
+2. `"decision"`: the thread's review ended for the person, whose reasons `review.phase.reasons` lists.
+3. `"parked"`: tasks hit the restart limit and need `retry`, whether any client watches the thread or not.
+4. `"reply"`: `lastReplyAt` is non-null and later than `seenAt`, or `seenAt` is null.
+5. `"working"`: a harness or reported session turn is running.
+6. `"waiting"`: a session is waiting for input.
+7. `null`.
 
 An unread reply outranks working, so a client cancelling a pending reply notification on a follow-up must also check `agentTurnRunning`. Reading `threads` or `show` does not mark anything seen; clients call `seen` when they show the conversation.
 
@@ -297,6 +300,38 @@ interface ReleaseView {
 Missing or 90-second-old reports are pending with a reason; a probe-only node has no control row. CLI `--wait` polls every second for up to 30 minutes. Every configured component must report healthy at the full desired commit, freshly. Transient connection failures during control restart are retried. A rollback, terminal failure or deadline exits 1 with the component reasons; supersession by another release exits 5. Caller refusal is 3, invalid syntax is 64, and other transport/HTTP failures use the existing exit-code contract. Without `--wait`, success means the desired release was recorded, not deployed. `--json` prints one ReleaseView on success and the normal CLI error contract on failure.
 
 Release changes require both ordinary API admission and `deployers` membership. Configured infrastructure nodes and the control node itself are always excluded, even if listed. No new in-pylon CLI command is added. Node-only polling/reporting routes are not client routes: they require the node's tailnet identity and root token. See [deployment setup](../deploy/README.md#one-time-setup-by-the-person-after-merge).
+
+## Reviews and landing (0.18.0)
+
+`review` starts [the review loop](design.md#the-review-loop-and-landing) for the thread's open pull request, the one the PR watch linked, and prints the review it started. The control plane starts a reviewer thread on another model than the builder's, which is listed in `threads` like any other, and runs the rounds itself, so the command returns at once and the Mac can sleep. `--pr N` names the PR when the thread has several open. `--rounds N` caps the reviews of new commits, 3 by default, from 1 to 10. `--land` lands the PR under [the merge policy](merge-policy.md) once the reviewer approves it and `.nexus/check` passes at the approved head: merge, then for Nexus's own repository deploy and wait for health, rolling back if it does not come.
+
+`land` lands a review that ended approved, or tries again one the policy held after its check passed, such as after the PR's description changed or the person granted the merge token. It runs the check again first, which reads the kept result for the same head. A review that already merged never lands again.
+
+Both fail with exit code 5 when the control plane has no GitHub token (`github.tokenFile`), for an archived or deleted thread or a reviewer thread, when the thread has no open linked PR or several and no `--pr`, when its review is still running, when no reviewer on another model can run (a harness builder whose project grants no Claude token), and, for `land`, when the review is not approved. Landing deploys, so `review --land` and `land` need the caller to be among the control plane's `deployers`, as `deploy` does, whatever the repository, and fail with exit code 3 otherwise. A review that stops at approval needs no such right. Invalid numbers fail with exit code 64.
+
+`ThreadDetail.review` is the thread's latest review as a builder, or null:
+
+```ts
+interface Review {
+  id: string;                         // rv-<8 hex>
+  builder: string; reviewer: string;  // thread IDs
+  pr: { repo: string; number: number; url: string; title: string };
+  models: { builder: string; reviewer: string };
+  maxRounds: number;
+  land: { requestedBy: string } | null;
+  merged: string | null;              // the merge commit once merged
+  rounds: { head: string; verdict: Verdict | null; check: { passed: boolean; output: string } | null; answers: Answer[] | null }[];
+  phase: { kind: "reviewing" | "fixing" | "approved" | "merging" }
+    | { kind: "checking"; startedAt: number }
+    | { kind: "deploying"; commit: string; previous: string | null; requested: boolean; deadline: number }
+    | { kind: "landed"; commit: string }
+    | { kind: "needs-person"; reasons: string[] };
+  outbox: { to: "builder" | "reviewer"; id: string; text: string } | null;
+  since: number; nudges: number; startedAt: number;
+}
+```
+
+`Verdict` and `Answer` are in [`src/control/review.ts`](../src/control/review.ts). `show` prints one `review` line with the phase, the round and the reviewer, and one `needs you:` line per reason when the review ended for the person, whose attention is then `decision`. The review loop's messages start with `[Nexus review — automated, not a message from the person]`; in a harness conversation they are entries of kind `nexus.review` with `data: { sender: "Nexus review" }`, and a Claude worker gets them typed as prompts. `events --kind review.changed` follows reviews as they start and change phase or round.
 
 ## Project editing (0.14.0)
 

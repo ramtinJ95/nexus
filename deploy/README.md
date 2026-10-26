@@ -336,6 +336,12 @@ Add `"github": { "tokenFile": "/etc/nexus/github-token" }` to `/etc/nexus/contro
 
 Discovery watches `origin/` branch outputs for projects with a github.com repository. It does not infer a scratch project's published repository or another remote's identity. Network/authentication failures remain visible as a PR-watch error on the thread detail and are retried. The watcher stops a thread after ten consecutive comment-only wakes; archive/unarchive preserves that stop and all cursors. There is no reset command in this version.
 
+### The review loop and landing
+
+The review loop (`nexus review`) uses the same token file and is off without it. A review that stops at approval only reads, as the PR watch does. A landing (`nexus review --land` or `nexus land`) also merges, with `PUT /repos/<repo>/pulls/<n>/merge`, which needs write access to the repository's contents and pull requests. A classic token with the `repo` scope, as described above, has it. A fine-grained or otherwise read-only token does not, and a landing then holds for the person with GitHub's answer instead of merging. Widening the token is a credential change, which the [merge policy](../docs/merge-policy.md) reserves for the person: install the wider token in `/etc/nexus/github-token` as above and restart the control plane. Merges then appear on GitHub as the token's owner.
+
+Landing a Nexus pull request deploys it, so the caller who asks for the landing must be in `deployers`, as for `nexus deploy`. The control plane then sets the desired release itself, recorded as requested by `nexus review <id>`, and rolls back to the previous desired release if the fleet does not report healthy within 30 minutes. The repository's `.nexus/check` runs `npm ci`, so a project whose reviews land needs `registry.npmjs.org` among its allowed hosts.
+
 ## Git identity and editable projects
 
 Set the optional top-level `gitIdentity` in `control.json` to the person's own commit name and email. There is no separate agent account. For example (placeholder values):
