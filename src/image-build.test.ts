@@ -2,9 +2,9 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { existsSync } from "node:fs";
-import { chmod, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readdir, readFile, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, relative } from "node:path";
 import { JobFailure } from "./backend.ts";
 import {
   buildImage, debugfsErrors, debugfsModeCommands, debugfsStatCommands, loadImageRecipe, modeMismatches,
@@ -112,7 +112,7 @@ test("a build job under the probe's 077 umask gives Docker each recipe file with
   t.after(() => rm(root, { recursive: true }));
   const docker = join(root, "bin", "docker");
   await mkdir(join(root, "bin"));
-  await writeFile(docker, `#!/bin/sh\n[ "$1" = build ] || exit 0\nfor context; do :; done\ncd "$context" && find . -mindepth 1 -printf '%m %p\\n' > ${root}/modes\nexit 1\n`);
+  await writeFile(docker, `#!/bin/sh\n[ "$1" = build ] || exit 0\nfor context; do :; done\nprintf %s "$context" > ${root}/context\nexit 1\n`);
   await chmod(docker, 0o755);
   const recipe = await loadImageRecipe();
   const path = process.env.PATH;
@@ -124,10 +124,12 @@ test("a build job under the probe's 077 umask gives Docker each recipe file with
     process.umask(umask);
     process.env.PATH = path;
   }
-  const modes = new Map((await readFile(join(root, "modes"), "utf8")).trim().split("\n").map((line) => {
-    const [mode, file] = line.split(" ");
-    return [file!.slice(2), mode!];
-  }));
+  const context = await readFile(join(root, "context"), "utf8");
+  const modes = new Map<string, string>();
+  for (const entry of await readdir(context, { recursive: true, withFileTypes: true })) {
+    const path = join(entry.parentPath, entry.name);
+    modes.set(relative(context, path), ((await stat(path)).mode & 0o7777).toString(8));
+  }
   assert.deepEqual([modes.get("nexus"), modes.get("nexus-turn.ts"), modes.get("checkout-files.py")], ["755", "644", "644"]);
   for (const file of recipe.files) assert.equal(modes.get(file.path), file.mode.toString(8), file.path);
   for (const dir of ["agent-setup", "dotfiles"]) assert.equal(modes.get(dir), "755", dir);
