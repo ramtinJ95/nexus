@@ -1,0 +1,7 @@
+2026-10-26T00:59:53.691Z thread th-45a0eabfab4b with a shell session
+2026-10-26T00:59:56.268Z from the dashboard's origin, under its CSP: attached, 11252 bytes of Herdr's screen
+2026-10-26T00:59:56.296Z from http://127.0.0.1:7471: refused, 403 {"error":"the attach route does not answer pages from http://127.0.0.1:7471"}
+2026-10-26T01:00:04.035Z typed a command in the browser terminal, and its output came back: "│typed in the dashboard, over the attach route"
+2026-10-26T01:00:05.545Z resized to 90x16, still attached: messages [{"type":"attached"}], 25586 bytes received
+2026-10-26T01:00:07.320Z xterm.js dom renderer under "default-src 'none'; style-src 'self'; script-src 'self'; connect-src 'self'; img-src 'self' data:; base-uri 'none'; form-action 'none'; frame-ancestors 'none'": {"violations":["style-src-elem","style-src-elem","style-src-elem","style-src-elem"],"domColor":"rgb(0, 0, 0)"}
+2026-10-26T01:00:08.952Z xterm.js webgl renderer under "default-src 'none'; style-src 'self'; script-src 'self'; connect-src 'self'; img-src 'self' data:; base-uri 'none'; form-action 'none'; frame-ancestors 'none'": {"violations":["style-src-elem","style-src-elem","style-src-elem","style-src-elem"],"domColor":null}
