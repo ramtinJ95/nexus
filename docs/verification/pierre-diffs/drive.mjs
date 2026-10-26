@@ -1,9 +1,9 @@
 // Drives the stack in stack.ts in headless Chromium and saves what it saw here: the thread page's Changes view and the
 // diff of each kind of change (an edit, a deletion, a rename, a mode change, a binary file and a diff too long to show
-// whole) on each base, in the light and dark themes, with every CSP violation and page error the page reported.
-// Chromium and puppeteer-core come from the npm packages @sparticuz/chromium and puppeteer-core, installed outside the
-// repo, whose node_modules MODULES names. THREAD is the thread ID the stack prints. LABEL prefixes the captures, so
-// the same drive records the page before and after a change.
+// whole) on each base, unified and split where the page offers both, in the light and dark themes, with every CSP
+// violation and page error the page reported. Chromium and puppeteer-core come from the npm packages
+// @sparticuz/chromium and puppeteer-core, installed outside the repo, whose node_modules MODULES names. THREAD is the
+// thread ID the stack prints. LABEL prefixes the captures, so the same drive records the page before and after a change.
 //
 //   MODULES=... THREAD=th-... LABEL=after node docs/verification/pierre-diffs/drive.mjs
 import assert from "node:assert/strict";
@@ -77,10 +77,29 @@ await base(light, "head");
 log(`style.css since the last commit: ${await diff(light, "style.css")}`);
 await shot(light, "head-css");
 
+/** Picks a diff layout and waits until the open diff is drawn in it, where the page offers one. */
+async function layout(page, which) {
+  if (await page.$(".fv-layout") === null) return false;
+  await page.click(`.fv-layout button[value="${which}"]`);
+  await page.waitForFunction((which) => document.querySelector(".diff-view")?.shadowRoot?.querySelector("pre")?.dataset.diffType === (which === "split" ? "split" : "single"), {}, which);
+  return true;
+}
+
+await base(light, "start");
+await diff(light, "src/server.ts");
+if (await layout(light, "split")) {
+  await shot(light, "split-ts");
+  await layout(light, "unified");
+}
+
 const dark = await open("dark");
 await base(dark, "start");
 log(`src/server.ts since boot, dark: ${await diff(dark, "src/server.ts")}`);
 await shot(dark, "dark-modified-ts");
+if (await layout(dark, "split")) {
+  await shot(dark, "dark-split-ts");
+  await layout(dark, "unified");
+}
 
 log(`requests: ${JSON.stringify([...new Set(requests.filter((p) => p.startsWith("/assets/")))])}`);
 log(`problems: ${JSON.stringify(problems)}`);
