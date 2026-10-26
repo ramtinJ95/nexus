@@ -1,0 +1,5 @@
+$ nexus release
+Desired: c9d0829eba878bd4d001280e84423b45c85e515a by verify seed at 2026-10-26T11:01:58.178Z
+verify-node control: c9d0829eba878bd4d001280e84423b45c85e515a pending: deployer report is stale
+verify-node probe: c9d0829eba878bd4d001280e84423b45c85e515a pending: deployer report is stale
+--- exit 0

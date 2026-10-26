@@ -45,7 +45,8 @@ await until("Claude to take the comment", 10, () => JSON.stringify(quiet(["conve
 await until("the comment's turn to end", 20, () => quiet(["show", builder.id]).attention !== "working");
 nexus("conversation-after-comment", ["conversation", builder.id]);
 
-const review = json("review", ["review", builder.id, "--land"]);
+nexus("review-rounds-6", ["review", builder.id, "--rounds", "6"]);
+const review = json("review", ["review", builder.id, "--land", ...process.env.ROUNDS ? ["--rounds", process.env.ROUNDS] : []]);
 note(`review ${review.id} started with reviewer ${review.reviewer} on ${review.models.reviewer}`);
 let seen = "";
 const ended = await until("the review to end", 45, () => {

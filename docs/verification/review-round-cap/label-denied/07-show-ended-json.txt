@@ -1,0 +1,135 @@
+$ nexus show th-0705557bc9a0 --json
+{
+  "thread": {
+    "id": "th-0705557bc9a0",
+    "title": "Greet script",
+    "project": "nexus",
+    "pylonId": "pylon-th-0705557bc9a0",
+    "status": "active",
+    "conversationId": null,
+    "startedBy": "nVERIFY",
+    "createdAt": 1793012649485,
+    "agentTurnRunning": false,
+    "lastAgentActivityAt": 1793012680745,
+    "lastHumanActivityAt": 1793012649485,
+    "seenAt": null,
+    "lastReplyAt": 1793012680745,
+    "placement": {
+      "how": "default",
+      "node": "verify-node"
+    }
+  },
+  "claudeWorker": {
+    "model": "claude-opus-5-5",
+    "state": "started"
+  },
+  "attention": "decision",
+  "seenAt": null,
+  "lastReplyAt": 1793012680745,
+  "desired": "running",
+  "pylon": {
+    "grantsOutdated": false,
+    "id": "pylon-th-0705557bc9a0",
+    "node": "verify-node",
+    "failed": null,
+    "observedAt": "2026-10-26T11:04:45.620Z",
+    "actualState": "running",
+    "retryRefused": null
+  },
+  "sessions": [],
+  "previews": [],
+  "ports": [],
+  "outputs": [
+    {
+      "thread": "th-0705557bc9a0",
+      "kind": "branch",
+      "ref": "origin/feature"
+    },
+    {
+      "thread": "th-0705557bc9a0",
+      "kind": "pull-request",
+      "ref": "https://github.com/ramtinJ95/nexus/pull/1"
+    }
+  ],
+  "prWatch": {
+    "enabled": true,
+    "stopped": false,
+    "error": null
+  },
+  "pullRequests": [
+    {
+      "repo": "ramtinJ95/nexus",
+      "number": 1,
+      "title": "Add greet.sh",
+      "url": "https://github.com/ramtinJ95/nexus/pull/1",
+      "state": "open",
+      "checks": "none",
+      "review": "none",
+      "conflict": false
+    }
+  ],
+  "review": {
+    "id": "rv-d88a30e1",
+    "expect": "rv-d88a30e1:39a09bc6d1da",
+    "sent": 1,
+    "builder": "th-0705557bc9a0",
+    "reviewer": "th-5d045384c787",
+    "pr": {
+      "repo": "ramtinJ95/nexus",
+      "number": 1,
+      "url": "https://github.com/ramtinJ95/nexus/pull/1",
+      "title": "Add greet.sh",
+      "branch": "feature"
+    },
+    "models": {
+      "builder": "claude-opus-5-5",
+      "reviewer": "gpt-6-astra"
+    },
+    "reviewerKind": "harness",
+    "maxRounds": 1,
+    "land": {
+      "requestedBy": "nVERIFY"
+    },
+    "rounds": [
+      {
+        "head": "9ece3d2b0cd76e78ea08f144e0df3df1e777ae7f",
+        "verdict": {
+          "token": "rv-d88a30e1:39a09bc6d1da",
+          "verdict": "changes",
+          "findings": [
+            {
+              "id": "F1",
+              "priority": "P1",
+              "where": "greet.sh:1",
+              "summary": "`sh greet.sh Ada` prints \"hello\", not \"hello Ada\"",
+              "detail": "Greet the name given as the first argument, and keep printing plain `hello` without one."
+            }
+          ],
+          "reserved": [],
+          "notCheckedLive": "greet.sh is a local script, with no service to start."
+        },
+        "check": null,
+        "answers": null
+      }
+    ],
+    "merged": null,
+    "phase": {
+      "kind": "needs-person",
+      "reasons": [
+        "The reviewer still requests changes after 1 rounds, the most this review allows.",
+        "Nexus could not add the label \"needs human review\" to pull request #1 (GitHub answered 403: Resource not accessible by personal access token). Labelling needs a token that may write issues or pull requests, which only the person can grant."
+      ],
+      "label": {
+        "state": "failed",
+        "why": "GitHub answered 403: Resource not accessible by personal access token"
+      }
+    },
+    "outbox": null,
+    "since": 1793012681419,
+    "nudges": 0,
+    "startedAt": 1793012681288
+  },
+  "attach": "herdr --session nexus",
+  "agent": null
+}
+--- exit 0

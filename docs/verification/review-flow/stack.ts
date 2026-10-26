@@ -7,6 +7,9 @@
 //    origin.git, runs it, and requests a change until `sh greet.sh Ada` prints `hello Ada`.
 //  - The probe's git facts are the branch output this stack records once origin.git has `feature`.
 //  - The node's release worker reports each new desired release healthy after 3 s, or rolled back with FAIL_DEPLOY=1.
+//  - Labels are kept per repository and on PR #1. With DENY_LABELS=1 GitHub answers every label write 403, as for a
+//    token that may not write issues or pull requests. With P3=1 the reviewer's approval carries a P3 finding, and with
+//    ALWAYS_CHANGES=1 it never approves, so the review runs out of rounds.
 //  - A check thread's pylon is a fresh clone here at the commit its boot names, made when its pipe opens, so the real
 //    check script and .nexus/check run, and the verdict is the local process's exit status. Each pipe is logged.
 //
@@ -120,7 +123,9 @@ function observe() {
 }
 
 // GitHub, over origin.git.
-const pr = { opened: false, merged: null as string | null, comments: [] as { id: number; body: string }[] };
+const pr = { opened: false, merged: null as string | null, comments: [] as { id: number; body: string }[], labels: new Set<string>() };
+const repoLabels = new Set<string>();
+const denied = () => Response.json({ message: "Resource not accessible by personal access token" }, { status: 403 });
 const branchHead = () => { try { return git(origin, "rev-parse", "--verify", "-q", "refs/heads/feature"); } catch { return null; } };
 const fakeGitHub: typeof fetch = async (input, init) => {
   const url = new URL(String(input));
@@ -142,6 +147,20 @@ const fakeGitHub: typeof fetch = async (input, init) => {
   }
   if (url.pathname === `${base}/issues/1/comments`) return Response.json(pr.comments.map((c) => ({ id: c.id, body: c.body, html_url: `https://github.com/${repo}/pull/1#issuecomment-${c.id}`, user: { login: "ramtinJ95" }, author_association: "OWNER" })));
   if (url.pathname.endsWith("/check-runs")) return Response.json({ check_runs: [] });
+  if (url.pathname === `${base}/labels` && method === "POST") {
+    if (process.env.DENY_LABELS) return denied();
+    const { name } = JSON.parse(String(init!.body));
+    if (repoLabels.has(name)) return Response.json({ message: "Validation Failed", errors: [{ resource: "Label", code: "already_exists", field: "name" }] }, { status: 422 });
+    repoLabels.add(name);
+    log("github.log", `created label ${name}`);
+    return Response.json({ name }, { status: 201 });
+  }
+  if (url.pathname === `${base}/issues/1/labels` && method === "POST") {
+    if (process.env.DENY_LABELS) return denied();
+    for (const name of JSON.parse(String(init!.body)).labels) { if (!repoLabels.has(name)) repoLabels.add(name); pr.labels.add(name); }
+    log("github.log", `PR #1 labels: ${[...pr.labels].join(", ")}`);
+    return Response.json([...pr.labels].map((name) => ({ name })));
+  }
   if (url.pathname === `${base}/pulls/1/merge` && method === "PUT") {
     const { sha } = JSON.parse(String(init!.body));
     if (sha !== head) return Response.json({ message: "Head branch was modified. Review and try the merge again." }, { status: 409 });
@@ -182,10 +201,10 @@ function answer(thread: ThreadId, request: string) {
   } catch (err) {
     greeted = `(failed: ${(err as Error).message.split("\n")[0]})`;
   }
-  const approve = greeted === "hello Ada";
+  const approve = !process.env.ALWAYS_CHANGES && greeted === "hello Ada";
   const verdict = {
     token, verdict: approve ? "approve" : "changes",
-    findings: approve ? [] : [{ id: "F1", severity: "serious", where: "greet.sh:1", summary: `\`sh greet.sh Ada\` prints "${greeted}", not "hello Ada"`, detail: "Greet the name given as the first argument, and keep printing plain `hello` without one." }],
+    findings: approve ? (process.env.P3 ? [{ id: "N1", priority: "P3", where: "greet.sh:1", summary: "Quote the argument in the echo", detail: "A cleanup for a later pull request." }] : []) : [{ id: "F1", priority: "P1", where: "greet.sh:1", summary: `\`sh greet.sh Ada\` prints "${greeted}", not "hello Ada"`, detail: "Greet the name given as the first argument, and keep printing plain `hello` without one." }],
     reserved: [], notCheckedLive: "greet.sh is a local script, with no service to start.",
   };
   const text = `I ran greet.sh at ${head}: \`sh greet.sh Ada\` printed "${greeted}".\n\n\`\`\`nexus-review\n${JSON.stringify(verdict, null, 2)}\n\`\`\``;

@@ -1,0 +1,21 @@
+$ nexus start --project nexus --title Greet script --claude Add a shell script greet.sh at the repository root that prints hello, or hello followed by its first argument when it is given one, so `sh greet.sh Ada` prints `hello Ada`. Commit it on a new branch named feature and push it with `git push -u origin feature`. Do not open a pull request yourself: Nexus opens it for this verification. Keep it minimal, with no subagents, tests or docs. --json
+{
+  "id": "th-933083b5ad47",
+  "title": "Greet script",
+  "project": "nexus",
+  "pylonId": "pylon-th-933083b5ad47",
+  "status": "active",
+  "conversationId": null,
+  "startedBy": "nVERIFY",
+  "createdAt": 1793012705967,
+  "agentTurnRunning": false,
+  "lastAgentActivityAt": 0,
+  "lastHumanActivityAt": 1793012705967,
+  "seenAt": null,
+  "lastReplyAt": null,
+  "placement": {
+    "how": "default",
+    "node": "verify-node"
+  }
+}
+--- exit 0
