@@ -247,9 +247,10 @@ test("the environment a Claude started with is read from its process", { skip: p
   const { claudeEnviron } = await import("../images/pylon/nexus-heartbeat.ts");
   const { spawn } = await import("node:child_process");
   const { once } = await import("node:events");
-  const child = spawn("sleep", ["30"], { env: { PATH: process.env.PATH, CLAUDE_CODE_SESSION_ID: "37c5ec30" } });
+  // The spawn event does not say the exec has set up the environment, which once read empty under load, so the read waits until the child prints.
+  const child = spawn("sh", ["-c", "echo ready; read _"], { env: { PATH: process.env.PATH, CLAUDE_CODE_SESSION_ID: "37c5ec30" } });
   t.after(() => child.kill());
-  await once(child, "spawn");
+  await once(child.stdout, "data");
   assert.match(await claudeEnviron(String(child.pid)), /(^|\0)CLAUDE_CODE_SESSION_ID=37c5ec30\0/);
   assert.equal(await claudeEnviron(undefined), "");
   assert.equal(await claudeEnviron("0"), "");
