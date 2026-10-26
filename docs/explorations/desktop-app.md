@@ -6,14 +6,14 @@ Written on 2026-10-26 against Nexus at `a9a356c`, t3code at [`c58beff`](https://
 
 ## Recommendation: keep the web dashboard and close its gaps
 
-Keep the dashboard as the place to work with threads, and build what it lacks: a terminal on the thread page, pushed updates instead of polling, highlighted diffs with review comments, and an installable window. Copy ideas, and MIT code where it fits, from t3code's web app. Don't fork t3code, and don't adapt t3code or Jetline to show Nexus threads. Leave a native desktop shell for later. Build one only if notifications must arrive when no dashboard window is open and Web Push can't deliver them.
+Keep the dashboard as the place to work with threads, and build what it lacks: a terminal on the thread page, pushed updates instead of polling, highlighted diffs with review comments, and an installable window. Copy ideas, and MIT code where it fits, from t3code's web app. That also covers the best case for a new Nexus client, which option 1b weighs. Don't fork t3code, and don't adapt t3code or Jetline to show Nexus threads. Leave a native desktop shell for later. Build one only if notifications must arrive when no dashboard window is open and Web Push can't deliver them.
 
 The reasons, in short:
 
 - **Neither app can reach a pylon.** t3code's server and Jetline's engine both own the checkout, the terminals and the agent process on the machine they run on. A Nexus thread's checkout and sessions are in a pylon that only the control plane reaches. Either app would need a layer that translates its whole client protocol into Nexus's API. That layer is most of the work of a new client, and it then has to keep pace with someone else's code.
 - **The dashboard already speaks the API and has the hard parts.** It has attention and the seen marker, system notifications, the Claude worker's live conversation from [nexus#86](https://github.com/ramtinJ95/nexus/pull/86), Changes and Latest turn, and previews. It sits behind the same tailnet check as every route.
 - **The terminal works from the dashboard today.** A browser terminal on the thread page attached to a pylon's Herdr session through the attach route. The socket opened under the dashboard's own Content Security Policy. Typing, output and resize all worked. xterm.js needs its WebGL renderer, or a CSP nonce, to draw under that policy. [The verification](../verification/desktop-app/README.md) has the script and the captures.
-- **Most gaps are client work.** The dashboard's own roadmap items cover diffs, review comments, polish and HTTPS previews. The dashboard needs one API addition, events for pylon state, previews and a thread's lifecycle, so that it can stop polling. A JSON stream of a Claude worker's conversation and an interrupt for one are needed only by clients other than the dashboard.
+- **Most gaps are client work.** The dashboard's own roadmap items cover diffs, review comments, polish and HTTPS previews. The dashboard needs two additions below the client. One is events for pylon state, previews and a thread's lifecycle, so that it can stop polling. The other is a latest-turn snapshot for each Claude worker turn, which only harness turns have today. A JSON stream of a Claude worker's conversation and an interrupt for one are needed only by clients other than the dashboard.
 
 The case against this recommendation is feel. t3code and Jetline feel fast because the client keeps a local copy of state that the server pushes to it, and because the terminal, the conversation and the diff share one window with a keyboard model. The dashboard renders HTML on the server and polls every 5 seconds. Closing that gap means more client code in the dashboard, and probably a build step for it. It does not need a new app.
 
@@ -25,7 +25,7 @@ The roadmap names five things. This table says what Nexus already provides for e
 |---|---|---|
 | A real terminal on a pylon's sessions | `GET /v1/threads/<thread>/attach`, a WebSocket that [`src/attach-wire.ts`](../../src/attach-wire.ts) defines and [`src/control/attach.ts`](../../src/control/attach.ts) serves. The CLI uses it. The route admits a page from the dashboard's own origin, or a client that sends no `Origin`, such as the CLI or a desktop app's main process ([`api.ts`](../../src/control/api.ts) line 1041) | A terminal in any graphical client. The attach opens Herdr's own interface, with its list of workspaces, not one session's pane. Output has no byte offsets, so a client that reconnects gets a fresh screen from Herdr rather than the bytes it missed |
 | The Claude worker's conversation | `GET /v1/threads/<thread>/conversation` returns the worker's transcript as JSON. `POST /v1/threads/<thread>/messages` types a message into its session. `GET /v1/events?follow=true` streams `session.*` events. The dashboard streams the conversation as HTML on `/threads/<thread>/stream` | A JSON stream of the transcript. `GET /v1/threads/<thread>/events` refuses a Claude worker thread with 409, because it has no harness conversation (`conversing` in [`api.ts`](../../src/control/api.ts)). An interrupt for a Claude worker. `POST /v1/threads/<thread>/abort` reaches only the harness |
-| Diffs with review comments | `GET /v1/threads/<thread>/changes` and `/diff`, from the boot commit, from HEAD, or from the latest turn | Syntax highlighting and review comments, which are the roadmap items [Syntax-highlighted diffs](../roadmap.md#next) and [Review comments on the diff](../roadmap.md#next). A review goes to the agent as an ordinary message, so it needs no new route. GitHub review comments need the pull request watch to post them |
+| Diffs with review comments | `GET /v1/threads/<thread>/changes` and `/diff`, from the boot commit or from HEAD. From the latest turn too, but only for a harness thread. A Claude worker thread has no harness conversation, so `inCheckout` in [`api.ts`](../../src/control/api.ts) gives it no turn, and the checkout reader refuses `turn:missing` with `no-base` | Latest-turn snapshots for Claude worker turns, which review comments on a Claude thread's latest turn depend on. Syntax highlighting and review comments, which are the roadmap items [Syntax-highlighted diffs](../roadmap.md#next) and [Review comments on the diff](../roadmap.md#next). A review goes to the agent as an ordinary message, so it needs no new route. GitHub review comments need the pull request watch to post them |
 | Previews | The thread detail lists each preview with its tailnet HTTPS URL. `POST` and `DELETE /v1/threads/<thread>/previews` publish and unpublish a port | Every link over HTTPS, which is the roadmap item [Previews and ports over HTTPS](../roadmap.md#next). Showing a preview inside the dashboard, which its CSP forbids today (`default-src 'none'` with no `frame-src`, [`dashboard.ts`](../../src/control/dashboard.ts) line 107) |
 | Native notifications | Attention on every thread row. The dashboard shows a system notification for a failed, parked or replied thread when its window is not focused and it is served over HTTPS ([design](../design.md#shared-attention-and-dashboard-notifications)) | A notification when no dashboard window is open. That takes Web Push or a native app that runs in the background |
 
@@ -77,6 +77,40 @@ That is 10 to 20 PRs before it matches the dashboard, plus permanent upkeep.
 **Risks.** The fork falls behind upstream at once. Its RPC contract, its event-sourced orchestration and its checkpoints duplicate state that the Nexus registry and pi-durable already own, so the two could disagree. Most of the code would be about providers Nexus never runs.
 
 **API.** Everything in the table above, plus a JSON conversation stream for Claude workers and an interrupt for them.
+
+## Option 1b: a small Nexus client that borrows t3code's components
+
+This is the strongest form of option 1. Build a new client on Nexus's own API, such as a React app that the control plane serves, which a native shell could wrap later. Copy only the parts of t3code that stand alone, and leave its server, its contract and its state model behind.
+
+**What can be borrowed.** These counts come from reading the imports at the pinned revision.
+
+- The terminal renderer in [`terminal/ghostty/`](https://github.com/pingdotgg/t3code/blob/c58beff8102e179493d8aae66d5e44c3c8cd0f46/apps/web/src/terminal/ghostty) is about 1,850 lines, libghostty compiled to WASM, and its files import only each other. It copies as it is, with its MIT notice, and it needs `'wasm-unsafe-eval'` in `script-src`.
+- The diff view is the `@pierre/diffs` package itself. t3code's comment layer on top of it, [`AnnotatableCodeView.tsx`](https://github.com/pingdotgg/t3code/blob/c58beff8102e179493d8aae66d5e44c3c8cd0f46/apps/web/src/components/diffs/AnnotatableCodeView.tsx) and `DiffCommentAnnotation.tsx`, is about 450 lines, but it writes to t3code's composer store and uses its contracts. It is a pattern to follow more than code to copy.
+- The larger components are tied to t3code's stores, its Effect state and its client runtime. [`DiffPanel.tsx`](https://github.com/pingdotgg/t3code/blob/c58beff8102e179493d8aae66d5e44c3c8cd0f46/apps/web/src/components/DiffPanel.tsx) has 1,179 lines, [`ThreadTerminalDrawer.tsx`](https://github.com/pingdotgg/t3code/blob/c58beff8102e179493d8aae66d5e44c3c8cd0f46/apps/web/src/components/ThreadTerminalDrawer.tsx) 1,960 and [`MessagesTimeline.tsx`](https://github.com/pingdotgg/t3code/blob/c58beff8102e179493d8aae66d5e44c3c8cd0f46/apps/web/src/components/chat/MessagesTimeline.tsx) 1,457. Each imports between 25 and 45 of t3code's own modules, so they would be rewritten rather than copied. The tool-call grouping is the exception. Its logic is 20 lines.
+
+**Benefits.**
+
+- The client holds its own state and applies pushed updates from the start, which is where t3code's feel comes from.
+- It has a component library and a build from day one.
+- It carries none of the 203-method contract, and none of the upkeep of a fork.
+- A native shell could wrap the same client later.
+
+**Costs.** Before it gives the person anything new, it has to match the dashboard. That means the sidebar, the start and project dialogs, the harness and Claude conversations with streaming, the inspector, archiving, deleting and waking, and attention with the seen marker. The seen marker's rules in [the design](../design.md#shared-attention-and-dashboard-notifications) are subtle. For one example, the watermark comes from the rendered conversation and never from polling. Until the cut-over there are two clients to keep correct. Its conversation also needs a JSON stream of the Claude worker's transcript, or a reuse of the dashboard's HTML stream.
+
+**Steps, each about one PR:**
+
+1. Scaffold the client, its build, and its serving by the control plane.
+2. Add the sidebar and the thread list, on the event stream.
+3. Add the conversation for harness and Claude threads, with streaming. This needs the JSON stream for Claude workers.
+4. Add the inspector, with Changes, Previews and Pylon.
+5. Add the start and project dialogs, and archive, delete and wake.
+6. Add attention, the seen marker and notifications.
+7. Cut over and delete the old dashboard.
+8. Then add the same features as option 3: steps 1, 2 and 4 to 10.
+
+That is about 7 PRs to match the dashboard, then about the same 9 or 10 as option 3.
+
+**Does the dashboard still win?** Yes, as the order of work. Option 3 delivers the same features without the 7 PRs of matching what exists, and each of its PRs reaches the person when it lands. The two options also meet. Borrowing t3code's parts into the dashboard is option 3: the terminal renderer, `@pierre/diffs`, the comment flow and the tool-call grouping. If the dashboard's client outgrows server-rendered HTML and plain JavaScript, it can move to a client-rendered app one page at a time. That is option 1b, reached without a phase that only rebuilds what exists. The real question between them is whether to pay that cost up front for a cleaner client from the start. This page says no, because the person feels the gaps now, not the client's structure.
 
 ## Option 2: adapt t3code or Jetline so Nexus threads appear in them
 
@@ -137,17 +171,18 @@ The catalogue in [`API.swift`](https://github.com/MartinRybergLaude/jetline/blob
 
 **Steps, each one PR, in this order:**
 
-1. **A terminal on the thread page.** Serve xterm.js and its WebGL renderer as dashboard assets, and open the attach route from a drawer under the conversation. The drawer shows `waiting` while the pylon wakes, sends `resize` when its size changes, and shows `exit` and `error`. The sketch in [the verification](../verification/desktop-app/README.md) does this, except that it injects xterm.js instead of serving it. The API needs no change. The CSP's `connect-src 'self'` admits the socket. Its `style-src 'self'` blocks the `<style>` elements xterm.js adds, so xterm.js's default DOM renderer draws text in black on black. The WebGL renderer draws correctly under the same CSP. Use it, or add a per-page nonce to `style-src`. libghostty's WASM build, which t3code uses, would need `'wasm-unsafe-eval'` in `script-src`. Size: medium.
+1. **A terminal on the thread page.** Serve xterm.js and its WebGL renderer as dashboard assets, and open the attach route from a drawer under the conversation. The drawer shows `waiting` while the pylon wakes, sends `resize` when its size changes, and shows `exit` and `error`. The sketch in [the verification](../verification/desktop-app/README.md) does this on the real thread page, with xterm.js added to the page's HTML and loaded from the dashboard's own origin. The API needs no change. The CSP's `connect-src 'self'` admits the socket. Its `style-src 'self'` blocks the `<style>` elements xterm.js adds, so xterm.js's default DOM renderer draws text in black on black. The WebGL renderer draws correctly under the same CSP. Use it, or add a per-page nonce to `style-src`. libghostty's WASM build, which t3code uses, would need `'wasm-unsafe-eval'` in `script-src`. Size: medium.
 2. **Pushed updates.** Follow `GET /v1/events?follow=true` and refresh the regions an event touches, instead of polling every 5 seconds. The route exists, and its events cover sessions, turns, failures, parking and attention ([`events.ts`](../../src/events.ts)). It has no events for a pylon's state, for previews, or for a thread's start, archive and deletion. Add those kinds, or keep a slower poll for them. Size: medium, or two PRs with the new kinds.
 3. **A build step for the dashboard client.** `@pierre/diffs` depends on Shiki, so it can't be vendored as one file the way xterm.js can. Bundle `dashboard/client.js` with esbuild, and keep serving the result from `'self'`. Size: small.
 4. **Syntax-highlighted diffs,** the existing roadmap item, on `@pierre/diffs`. Its licence is Apache-2.0, so its NOTICE goes with it. Size: medium.
-5. **Review comments on the diff,** the existing roadmap item, after t3code's flow. Select lines, write a note, and the notes go to the composer with their file and lines. The review is sent with `POST /messages`. Size: medium.
-6. **Previews over HTTPS,** the existing roadmap item. Keep opening a preview in its own tab. A preview panel inside the page would need `frame-src` in the CSP, and the app in the pylon would have to allow framing. Size: small to medium.
-7. **An installable dashboard.** Add a web app manifest and icons, so that Chrome or Edge **Install** and Safari **Add to Dock** open the dashboard in its own window with a dock icon. Installing needs HTTPS, which the 7443 listener provides. The existing system notifications then come from that window. Size: small.
-8. **Keyboard and polish,** the existing **Dashboard polish** item: a command palette, moving between threads with the keyboard, focusing the terminal, and the live working clock. Size: medium.
-9. **Only if needed: notifications with no window open.** Web Push needs a service worker, a VAPID key pair on the control plane, the subscriptions in the registry, and egress from the control plane to the browser's push service. If Web Push can't do it, build a small native shell that loads the dashboard and runs in the menu bar. Decide after step 7. Size: medium.
+5. **Latest-turn snapshots for Claude worker turns.** The harness snapshots the checkout into `refs/nexus/turn` before a reply's first model request ([design](../design.md#files-and-changes)). A Claude worker's turns have no snapshot, so **Latest turn** refuses a Claude thread. The worker's `UserPromptSubmit` hook, which already reports `session.turn-started`, runs in the pylon before Claude acts on the prompt, so it could take the snapshot there. The control plane could also take it when the event arrives, but by then Claude may have changed files. The read side then needs a turn identity for Claude threads in place of the harness's. Size: medium.
+6. **Review comments on the diff,** the existing roadmap item, after t3code's flow. Select lines, write a note, and the notes go to the composer with their file and lines. The review is sent with `POST /messages`. Size: medium.
+7. **Previews over HTTPS,** the existing roadmap item. Keep opening a preview in its own tab. A preview panel inside the page would need `frame-src` in the CSP, and the app in the pylon would have to allow framing. Size: small to medium.
+8. **An installable dashboard.** Add a web app manifest and icons, so that Chrome or Edge **Install** and Safari **Add to Dock** open the dashboard in its own window with a dock icon. Installing needs HTTPS, which the 7443 listener provides. The existing system notifications then come from that window. Size: small.
+9. **Keyboard and polish,** the existing **Dashboard polish** item: a command palette, moving between threads with the keyboard, focusing the terminal, and the live working clock. Size: medium.
+10. **Only if needed: notifications with no window open.** Web Push needs a service worker, a VAPID key pair on the control plane, the subscriptions in the registry, and egress from the control plane to the browser's push service. If Web Push can't do it, build a small native shell that loads the dashboard and runs in the menu bar. Decide after step 8. Size: medium.
 
-Steps 1 to 8 are 8 or 9 PRs, and step 9 adds one or two. Steps 1, 2, 7 and 8 do not depend on each other.
+Steps 1 to 9 are 9 or 10 PRs, and step 10 adds one or two. Steps 1, 2, 5, 8 and 9 do not depend on each other. Review comments on a Claude thread's latest turn need step 5.
 
 **Risks.**
 
@@ -161,21 +196,21 @@ Steps 1 to 8 are 8 or 9 PRs, and step 9 adds one or two. Steps 1, 2, 7 and 8 do 
 
 ## Comparing the options
 
-| | 1. Fork t3code | 2a. Provider in t3code | 2b. t3code in each pylon | 2c. Jetline bridge | 3. Dashboard |
-|---|---|---|---|---|---|
-| Terminal on the attach route | After a rewrite | No | No, its own PTYs | Yes, through the bridge | Yes, shown in a sketch |
-| Claude worker's conversation | After a mapping | Yes, through the bridge | No | After a translation | Yes, today |
-| Diffs with review comments | Yes, after a mapping | No, the diffs are of the Mac's directory | Yes, but of t3code's own agent | Diffs only | After steps 3 to 5 |
-| Previews | After a mapping | No | Its own browser panel | Port forwarding only | Yes, today |
-| Native notifications | Yes, Electron | Yes, Electron | Yes, Electron | Dock bounce only | Yes in an open window. Web Push or a shell for the rest |
-| PR-sized steps | 10 to 20, large | 4 to 6 | Not estimated, because it fails two needs | 6 to 10 | 8 or 9, plus 1 or 2 |
-| Upkeep | A permanent fork | Follow ACP and t3code | Follow t3code | Follow Jetline's protocol | Nexus's own code |
+| | 1. Fork t3code | 1b. Small Nexus client | 2a. Provider in t3code | 2b. t3code in each pylon | 2c. Jetline bridge | 3. Dashboard |
+|---|---|---|---|---|---|---|
+| Terminal on the attach route | After a rewrite | After its terminal step | No | No, its own PTYs | Yes, through the bridge | Yes, shown in a sketch |
+| Claude worker's conversation | After a mapping | After a rewrite, with a JSON stream | Yes, through the bridge | No | After a translation | Yes, today |
+| Diffs with review comments | Yes, after a mapping | After the same steps as option 3 | No, the diffs are of the Mac's directory | Yes, but of t3code's own agent | Diffs only | After steps 3 to 6 |
+| Previews | After a mapping | After matching the dashboard | No | Its own browser panel | Port forwarding only | Yes, today |
+| Native notifications | Yes, Electron | As the dashboard, or a shell | Yes, Electron | Yes, Electron | Dock bounce only | Yes in an open window. Web Push or a shell for the rest |
+| PR-sized steps | 10 to 20, large | About 7, then option 3's 9 or 10 | 4 to 6 | Not estimated, because it fails two needs | 6 to 10 | 9 or 10, plus 1 or 2 |
+| Upkeep | A permanent fork | Nexus's own code, with copied parts | Follow ACP and t3code | Follow t3code | Follow Jetline's protocol | Nexus's own code |
 
 ## Verification
 
 [The verification folder](../verification/desktop-app/README.md) has the captures and the script for the claims above. In short:
 
 - t3code ran from source in this pylon, on Node 24 rather than the Node 26 it asks for, because Node 26's binary needs `libatomic`, which the pylon image lacks. A real Claude Sonnet 5.5 turn edited a copy of this repository. The captures show the conversation, the folded tool calls, the diff with a line comment that became a composer chip, and the terminal drawer.
-- `attach-terminal.mjs` ran against the local stack from nexus#86. In headless Chromium, the thread page opened the attach route under the dashboard's own CSP. xterm.js rendered Herdr's screen, a typed command's output came back, and a resize kept the terminal attached. A page on another origin got 403. Under the dashboard's CSP, xterm.js's DOM renderer lost its colours, and its WebGL renderer drew them.
+- `attach-terminal.mjs` ran against the local stack from nexus#86. In headless Chromium, the thread page opened the attach route under the dashboard's own CSP. xterm.js rendered Herdr's screen, a typed command's output came back, and a resize kept the terminal attached. A page on another origin got 403. Both renderer checks ran on the real thread page under its real CSP, with xterm.js loaded from the dashboard's origin. The WebGL renderer drew correctly. The DOM renderer lost its colours and layout.
 - Jetline was not run, because it needs macOS 26. Its claims come from its source and README.
 - Not checked: an installed dashboard window, Web Push, and how either app feels in daily use on the Mac.
