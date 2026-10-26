@@ -119,7 +119,7 @@ test("activity timestamps only move forward", async (t) => {
 test("ingest writes fold into records, and applying one twice changes nothing", async (t) => {
   const registry = seeded(tempDb());
   t.after(() => registry.close());
-  const capacity = { memoryGiB: 64, committedMemoryGiB: 8, diskFreeGiB: 400 };
+  const capacity = { cpus: 16, committedCpus: 0, memoryGiB: 64, committedMemoryGiB: 8, diskFreeGiB: 400, committedDiskGiB: 0 };
   const writes = [
     { record: "node", node, state: "online", capacity },
     { record: "sessions", pylonId, sessions: [
@@ -146,8 +146,8 @@ test("ingest writes fold into records, and applying one twice changes nothing", 
 test("an observation is stored only together with the writes derived from it", async (t) => {
   const registry = seeded(tempDb());
   t.after(() => registry.close());
-  const capacity = { memoryGiB: 64, committedMemoryGiB: 8, diskFreeGiB: 400 };
-  const first: NodeObservation = { node, observedAt: "2027-01-01T00:00:00Z", probeBootId: "b", capacity, artifacts: [], jobs: [], pylons: [], previewRoutes: [] };
+  const capacity = { cpus: 16, committedCpus: 0, memoryGiB: 64, committedMemoryGiB: 8, diskFreeGiB: 400, committedDiskGiB: 0 };
+  const first: NodeObservation = { node, observedAt: "2027-01-01T00:00:00Z", probeBootId: "b", capacity, artifacts: [], jobs: [], pylons: [], grants: { secrets: [], gitSsh: false }, previewRoutes: [] };
   registry.ingested(first, [{ record: "node", node, state: "online", capacity }]);
   assert.deepEqual(registry.node(node)?.observation, first);
 
@@ -221,7 +221,7 @@ test("a registry from before failure messages keeps its pylons' attempts", async
     seeded(path).close();
     const db = new DatabaseSync(path);
     db.prepare("UPDATE pylons SET attempts = ?").run(JSON.stringify(attempts));
-    db.exec(`ALTER TABLE pylons DROP COLUMN retrying; ${untitledSessions} ALTER TABLE threads DROP COLUMN seen_at; ALTER TABLE threads DROP COLUMN last_reply_at; ALTER TABLE threads DROP COLUMN agent_turn_started_at; DROP TABLE reviews; DROP TABLE claude_transcripts; DROP TABLE claude_entries; DROP TABLE claude_messages; DROP TABLE session_order; DROP TABLE session_order_floor; DROP TABLE events; DROP TABLE session_activity; DROP TABLE event_receipts; DROP TABLE claude_workers; DROP TABLE thread_attention; DROP TABLE release_reports; DROP TABLE pr_watches; PRAGMA user_version = 1`);
+    db.exec(`ALTER TABLE pylons DROP COLUMN retrying; ${untitledSessions} ALTER TABLE threads DROP COLUMN seen_at; ALTER TABLE threads DROP COLUMN last_reply_at; ALTER TABLE threads DROP COLUMN placement; ALTER TABLE threads DROP COLUMN agent_turn_started_at; DROP TABLE reviews; DROP TABLE claude_transcripts; DROP TABLE claude_entries; DROP TABLE claude_messages; DROP TABLE session_order; DROP TABLE session_order_floor; DROP TABLE events; DROP TABLE session_activity; DROP TABLE event_receipts; DROP TABLE claude_workers; DROP TABLE thread_attention; DROP TABLE release_reports; DROP TABLE pr_watches; PRAGMA user_version = 1`);
     db.close();
     return path;
   };
@@ -241,7 +241,7 @@ test("a registry from before pylon retries opens with no retry under way, and a 
   const path = tempDb();
   seeded(path).close();
   const db = new DatabaseSync(path);
-  db.exec(`ALTER TABLE pylons DROP COLUMN retrying; ${untitledSessions} ALTER TABLE threads DROP COLUMN seen_at; ALTER TABLE threads DROP COLUMN last_reply_at; ALTER TABLE threads DROP COLUMN agent_turn_started_at; DROP TABLE reviews; DROP TABLE claude_transcripts; DROP TABLE claude_entries; DROP TABLE claude_messages; DROP TABLE session_order; DROP TABLE session_order_floor; DROP TABLE events; DROP TABLE session_activity; DROP TABLE event_receipts; DROP TABLE claude_workers; DROP TABLE thread_attention; DROP TABLE release_reports; DROP TABLE pr_watches; PRAGMA user_version = 3`);
+  db.exec(`ALTER TABLE pylons DROP COLUMN retrying; ${untitledSessions} ALTER TABLE threads DROP COLUMN seen_at; ALTER TABLE threads DROP COLUMN last_reply_at; ALTER TABLE threads DROP COLUMN placement; ALTER TABLE threads DROP COLUMN agent_turn_started_at; DROP TABLE reviews; DROP TABLE claude_transcripts; DROP TABLE claude_entries; DROP TABLE claude_messages; DROP TABLE session_order; DROP TABLE session_order_floor; DROP TABLE events; DROP TABLE session_activity; DROP TABLE event_receipts; DROP TABLE claude_workers; DROP TABLE thread_attention; DROP TABLE release_reports; DROP TABLE pr_watches; PRAGMA user_version = 3`);
   db.close();
   const registry = openRegistry(path);
   t.after(() => registry.close());
@@ -344,8 +344,8 @@ test("a published preview is ready only while its running pylon reports its serv
   registry.apply({ record: "preview", pylonId, service: "api", httpsPort: 10200, ready: true });
   registry.apply({ record: "preview", pylonId, service: "web", httpsPort: 10201, ready: true });
   const observe = (observed: NodeObservation["pylons"][number]) => registry.ingested({
-    node, observedAt: "2027-01-01T00:00:00Z", probeBootId: "b", capacity: { memoryGiB: 64, committedMemoryGiB: 8, diskFreeGiB: 400 },
-    artifacts: [], jobs: [], pylons: [observed], previewRoutes: [],
+    node, observedAt: "2027-01-01T00:00:00Z", probeBootId: "b", capacity: { cpus: 16, committedCpus: 0, memoryGiB: 64, committedMemoryGiB: 8, diskFreeGiB: 400, committedDiskGiB: 0 },
+    artifacts: [], jobs: [], pylons: [observed], grants: { secrets: [], gitSsh: false }, previewRoutes: [],
   }, []);
   const running = (webState: ServiceFact["state"] | null) => observe({
     pylonId, phase: "running", liveHash: null, bootedAt: "2027-01-01T00:00:00Z", bootedFrom: { image: image.id, checkpoint: null },
@@ -376,8 +376,8 @@ test("a port the node routes is never handed out, though no row holds it", async
   const registry = seeded(tempDb());
   t.after(() => registry.close());
   const routed = (httpsPort: number, owner: string) => ({ httpsPort, pylonId: owner as PylonId, service: "web" });
-  registry.ingested({ node, observedAt: "2027-01-01T00:00:00Z", probeBootId: "b", capacity: { memoryGiB: 64, committedMemoryGiB: 8, diskFreeGiB: 400 }, artifacts: [], jobs: [], pylons: [],
-    previewRoutes: [routed(10200, "pylon-lost"), routed(10201, pylonId)] }, []);
+  registry.ingested({ node, observedAt: "2027-01-01T00:00:00Z", probeBootId: "b", capacity: { cpus: 16, committedCpus: 0, memoryGiB: 64, committedMemoryGiB: 8, diskFreeGiB: 400, committedDiskGiB: 0 }, artifacts: [], jobs: [], pylons: [],
+    grants: { secrets: [], gitSsh: false }, previewRoutes: [routed(10200, "pylon-lost"), routed(10201, pylonId)] }, []);
   registry.allocatePreviews(pylonId, ["web", "api"], ports);
   assert.deepEqual(portsOf(registry, pylonId), ["api 10203", "web 10202"], "a route left to this pylon from a lost row is refused too");
 });
@@ -387,7 +387,7 @@ test("a registry from before session titles keeps its sessions, untitled until t
   const path = tempDb();
   seeded(path).close();
   const db = new DatabaseSync(path);
-  db.exec(`${untitledSessions} ALTER TABLE threads DROP COLUMN seen_at; ALTER TABLE threads DROP COLUMN last_reply_at; ALTER TABLE threads DROP COLUMN agent_turn_started_at; DROP TABLE reviews; DROP TABLE claude_transcripts; DROP TABLE claude_entries; DROP TABLE claude_messages; DROP TABLE session_order; DROP TABLE session_order_floor; DROP TABLE events; DROP TABLE session_activity; DROP TABLE event_receipts; DROP TABLE claude_workers; DROP TABLE thread_attention; DROP TABLE release_reports; DROP TABLE pr_watches; PRAGMA user_version = 4`);
+  db.exec(`${untitledSessions} ALTER TABLE threads DROP COLUMN seen_at; ALTER TABLE threads DROP COLUMN last_reply_at; ALTER TABLE threads DROP COLUMN placement; ALTER TABLE threads DROP COLUMN agent_turn_started_at; DROP TABLE reviews; DROP TABLE claude_transcripts; DROP TABLE claude_entries; DROP TABLE claude_messages; DROP TABLE session_order; DROP TABLE session_order_floor; DROP TABLE events; DROP TABLE session_activity; DROP TABLE event_receipts; DROP TABLE claude_workers; DROP TABLE thread_attention; DROP TABLE release_reports; DROP TABLE pr_watches; PRAGMA user_version = 4`);
   db.prepare("INSERT INTO sessions VALUES (?, 'w1:p1', 'claude-code', NULL, 'idle')").run(pylonId);
   db.close();
   const registry = openRegistry(path);
@@ -410,7 +410,7 @@ test("a registry from before repository kinds reads every stored repo, booted or
   first.close();
   const db = new DatabaseSync(path);
   db.exec(`UPDATE pylons SET boot = json_remove(boot, '$.repo.kind'), submitted = CASE WHEN json_extract(submitted, '$.job.kind') = 'spawn'
-    THEN json_remove(submitted, '$.job.boot.repo.kind') ELSE submitted END; ALTER TABLE threads DROP COLUMN seen_at; ALTER TABLE threads DROP COLUMN last_reply_at; ALTER TABLE threads DROP COLUMN agent_turn_started_at; DROP TABLE reviews; DROP TABLE claude_transcripts; DROP TABLE claude_entries; DROP TABLE claude_messages; DROP TABLE session_order; DROP TABLE session_order_floor; DROP TABLE events; DROP TABLE session_activity; DROP TABLE event_receipts; DROP TABLE claude_workers; DROP TABLE thread_attention; DROP TABLE release_reports; DROP TABLE pr_watches; PRAGMA user_version = 5`);
+    THEN json_remove(submitted, '$.job.boot.repo.kind') ELSE submitted END; ALTER TABLE threads DROP COLUMN seen_at; ALTER TABLE threads DROP COLUMN last_reply_at; ALTER TABLE threads DROP COLUMN placement; ALTER TABLE threads DROP COLUMN agent_turn_started_at; DROP TABLE reviews; DROP TABLE claude_transcripts; DROP TABLE claude_entries; DROP TABLE claude_messages; DROP TABLE session_order; DROP TABLE session_order_floor; DROP TABLE events; DROP TABLE session_activity; DROP TABLE event_receipts; DROP TABLE claude_workers; DROP TABLE thread_attention; DROP TABLE release_reports; DROP TABLE pr_watches; PRAGMA user_version = 5`);
   assert.equal((db.prepare("SELECT count(*) AS n FROM pylons WHERE boot LIKE '%\"kind\":\"clone\"%' OR submitted LIKE '%\"clone\"%'").get() as { n: number }).n, 0, "the old shape has no kind");
   db.close();
 
@@ -425,7 +425,7 @@ test("a registry from before session states keeps its sessions as running in the
   const path = tempDb();
   seeded(path).close();
   const db = new DatabaseSync(path);
-  db.exec(`${untitledSessions} ALTER TABLE sessions ADD COLUMN title TEXT; ALTER TABLE threads DROP COLUMN seen_at; ALTER TABLE threads DROP COLUMN last_reply_at; ALTER TABLE threads DROP COLUMN agent_turn_started_at; DROP TABLE reviews; DROP TABLE claude_transcripts; DROP TABLE claude_entries; DROP TABLE claude_messages; DROP TABLE session_order; DROP TABLE session_order_floor; DROP TABLE events; DROP TABLE session_activity; DROP TABLE event_receipts; DROP TABLE claude_workers; DROP TABLE thread_attention; DROP TABLE release_reports; DROP TABLE pr_watches; PRAGMA user_version = 6`);
+  db.exec(`${untitledSessions} ALTER TABLE sessions ADD COLUMN title TEXT; ALTER TABLE threads DROP COLUMN seen_at; ALTER TABLE threads DROP COLUMN last_reply_at; ALTER TABLE threads DROP COLUMN placement; ALTER TABLE threads DROP COLUMN agent_turn_started_at; DROP TABLE reviews; DROP TABLE claude_transcripts; DROP TABLE claude_entries; DROP TABLE claude_messages; DROP TABLE session_order; DROP TABLE session_order_floor; DROP TABLE events; DROP TABLE session_activity; DROP TABLE event_receipts; DROP TABLE claude_workers; DROP TABLE thread_attention; DROP TABLE release_reports; DROP TABLE pr_watches; PRAGMA user_version = 6`);
   db.prepare("INSERT INTO sessions VALUES (?, 'w1:p1', 'pi', 's.jsonl', 'working', 'plan')").run(pylonId);
   db.close();
   const registry = openRegistry(path);
@@ -445,7 +445,7 @@ test("a registry from before node-unique preview ports keeps its previews", asyn
     CREATE TABLE previews (pylon TEXT NOT NULL REFERENCES pylons (id), service TEXT NOT NULL, https_port INTEGER NOT NULL, ready INTEGER NOT NULL, PRIMARY KEY (pylon, service)) STRICT;
     ALTER TABLE pylons DROP COLUMN retrying;
     ${untitledSessions}
-    ALTER TABLE threads DROP COLUMN seen_at; ALTER TABLE threads DROP COLUMN last_reply_at; ALTER TABLE threads DROP COLUMN agent_turn_started_at; DROP TABLE reviews; DROP TABLE claude_transcripts; DROP TABLE claude_entries; DROP TABLE claude_messages; DROP TABLE session_order; DROP TABLE session_order_floor; DROP TABLE events; DROP TABLE session_activity; DROP TABLE event_receipts; DROP TABLE claude_workers; DROP TABLE thread_attention; DROP TABLE release_reports; DROP TABLE pr_watches; PRAGMA user_version = 2;`);
+    ALTER TABLE threads DROP COLUMN seen_at; ALTER TABLE threads DROP COLUMN last_reply_at; ALTER TABLE threads DROP COLUMN placement; ALTER TABLE threads DROP COLUMN agent_turn_started_at; DROP TABLE reviews; DROP TABLE claude_transcripts; DROP TABLE claude_entries; DROP TABLE claude_messages; DROP TABLE session_order; DROP TABLE session_order_floor; DROP TABLE events; DROP TABLE session_activity; DROP TABLE event_receipts; DROP TABLE claude_workers; DROP TABLE thread_attention; DROP TABLE release_reports; DROP TABLE pr_watches; PRAGMA user_version = 2;`);
   db.prepare("INSERT INTO previews VALUES (?, 'web', 10200, 1)").run(pylonId);
   db.close();
 
@@ -461,7 +461,7 @@ test("seen and reply timestamps migrate from null and persist without activity",
   const path = tempDb();
   seeded(path).close();
   const db = new DatabaseSync(path);
-  db.exec("ALTER TABLE threads DROP COLUMN seen_at; ALTER TABLE threads DROP COLUMN last_reply_at; ALTER TABLE threads DROP COLUMN agent_turn_started_at; DROP TABLE reviews; DROP TABLE claude_transcripts; DROP TABLE claude_entries; DROP TABLE claude_messages; DROP TABLE session_order; DROP TABLE session_order_floor; DROP TABLE events; DROP TABLE session_activity; DROP TABLE event_receipts; DROP TABLE claude_workers; DROP TABLE thread_attention; DROP TABLE release_reports; DROP TABLE pr_watches; PRAGMA user_version = 7");
+  db.exec("ALTER TABLE threads DROP COLUMN seen_at; ALTER TABLE threads DROP COLUMN last_reply_at; ALTER TABLE threads DROP COLUMN placement; ALTER TABLE threads DROP COLUMN agent_turn_started_at; DROP TABLE reviews; DROP TABLE claude_transcripts; DROP TABLE claude_entries; DROP TABLE claude_messages; DROP TABLE session_order; DROP TABLE session_order_floor; DROP TABLE events; DROP TABLE session_activity; DROP TABLE event_receipts; DROP TABLE claude_workers; DROP TABLE thread_attention; DROP TABLE release_reports; DROP TABLE pr_watches; PRAGMA user_version = 7");
   db.close();
   const registry = openRegistry(path);
   assert.equal(registry.thread(threadId)!.seenAt, null);
@@ -501,7 +501,7 @@ test("adding PR watches preserves the shared seen and reply markers from schema 
   first.markSeen(threadId, false, 3000);
   first.close();
   const db = new DatabaseSync(path);
-  db.exec("ALTER TABLE threads DROP COLUMN agent_turn_started_at; DROP TABLE reviews; DROP TABLE claude_transcripts; DROP TABLE claude_entries; DROP TABLE claude_messages; DROP TABLE session_order; DROP TABLE session_order_floor; DROP TABLE events; DROP TABLE session_activity; DROP TABLE event_receipts; DROP TABLE claude_workers; DROP TABLE thread_attention; DROP TABLE release_reports; DROP TABLE pr_watches; PRAGMA user_version = 8");
+  db.exec("ALTER TABLE threads DROP COLUMN placement; ALTER TABLE threads DROP COLUMN agent_turn_started_at; DROP TABLE reviews; DROP TABLE claude_transcripts; DROP TABLE claude_entries; DROP TABLE claude_messages; DROP TABLE session_order; DROP TABLE session_order_floor; DROP TABLE events; DROP TABLE session_activity; DROP TABLE event_receipts; DROP TABLE claude_workers; DROP TABLE thread_attention; DROP TABLE release_reports; DROP TABLE pr_watches; PRAGMA user_version = 8");
   db.close();
   const registry = openRegistry(path);
   t.after(() => registry.close());
@@ -784,8 +784,8 @@ test("a turn running before turn starts were recorded has no known start", async
   seeded(path, () => now).reportSession(node, { sequence: 1, time: now, pylon: pylonId, event: { kind: "session.turn-started", session: "c1", at: now } });
   const db = new DatabaseSync(path);
   const version = db.prepare("PRAGMA user_version").get()!.user_version as number;
-  db.exec(`UPDATE threads SET agent_turn_running = 1; ALTER TABLE threads DROP COLUMN agent_turn_started_at; ALTER TABLE session_activity DROP COLUMN started_at; DROP TABLE reviews;
-    ALTER TABLE claude_workers DROP COLUMN turn_session; ALTER TABLE claude_workers DROP COLUMN turn_at; PRAGMA user_version = ${version - 3}`);
+  db.exec(`UPDATE threads SET agent_turn_running = 1; ALTER TABLE threads DROP COLUMN placement; ALTER TABLE threads DROP COLUMN agent_turn_started_at; ALTER TABLE session_activity DROP COLUMN started_at; DROP TABLE reviews;
+    ALTER TABLE claude_workers DROP COLUMN turn_session; ALTER TABLE claude_workers DROP COLUMN turn_at; PRAGMA user_version = ${version - 4}`);
   db.close();
   const registry = openRegistry(path, () => now);
   t.after(() => registry.close());

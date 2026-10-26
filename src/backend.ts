@@ -53,6 +53,11 @@ export interface BackendPylon {
    * checkpoint because the checkpoint cannot be read while paused. Null when that pause recorded none.
    */
   sessions?: readonly PausedSession[] | null;
+  /**
+   * What the pylon reserves on its node: CPUs and memory while its VM is up, and its disk for as long as it exists,
+   * paused or not. Absent from a backend that reserves nothing, such as Docker's.
+   */
+  holds?: BootInputs["resources"];
 }
 
 /** Every call runs as `user`. */
@@ -95,7 +100,8 @@ export interface ArtifactStore {
 }
 
 /** Node-local secret values, from a root-owned file such as /etc/nexus/secrets.env. */
-export interface SecretSource { value(name: string): string | undefined }
+/** `names` lists the secrets the node holds, which its probe reports. Values never leave the node. */
+export interface SecretSource { value(name: string): string | undefined; names(): readonly string[] }
 
 export interface ProbeDeps {
   node: NodeName;

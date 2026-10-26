@@ -1,0 +1,3 @@
+bare-node   online  observed 4s ago  0/7.7654571533203125 GiB committed, 17.833202362060547 GiB disk free
+busy-node   online  observed 4s ago  0/7.7654571533203125 GiB committed, 17.833202362060547 GiB disk free
+quiet-node  online  observed 4s ago  0/7.7654571533203125 GiB committed, 17.833202362060547 GiB disk free

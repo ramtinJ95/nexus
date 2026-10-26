@@ -124,7 +124,7 @@ async function pylonVmFixture(): Promise<TemplateFixture> {
   const image = basename(assets) as ImageId;
   const stores = { a: dirname(assets), b: `${dirname(assets)}-tslice-${run}` };
   const states = { a: stateRoot, b: `${stateRoot}-b` };
-  const secrets = { value: () => undefined };
+  const secrets = { value: () => undefined, names: () => [] };
   const backend = (side: Side) => createPylonVmBackend({ stateRoot: states[side], artifacts: stores[side], secrets });
   const home = "/home/user";
   const repoDir = `${home}/workspace/repo`;
@@ -208,7 +208,7 @@ before(async () => {
       auth: { controlPlane: tailnetId, peers: [tailnetId] },
       whois: async () => tailnetId,
       backend: fixture.backends[side],
-      secrets: { value: () => undefined },
+      secrets: { value: () => undefined, names: () => [] },
       peerAddress: (peer) => {
         assert.equal(peer, nodes.a, "only A holds what B fetches");
         return { host: "127.0.0.1", port: probes.a.port };

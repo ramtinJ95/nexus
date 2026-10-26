@@ -336,7 +336,7 @@ function updateStartHint() {
   const tag = (name, text) => Object.assign(document.createElement(name), { textContent: text });
   const image = hint.dataset.image;
   const repo = project.dataset.scratch === undefined ? " and checks out " : " and starts an empty repository on ";
-  hint.replaceChildren("Boots a pylon on ", tag("b", node), ...(image === "" ? [] : [" from image ", tag("code", image)]), repo, tag("code", branch), ".");
+  hint.replaceChildren("Boots a pylon on ", node === "auto" ? "the node with the most room left" : tag("b", node), ...(image === "" ? [] : [" from image ", tag("code", image)]), repo, tag("code", branch), ".");
 }
 
 /**

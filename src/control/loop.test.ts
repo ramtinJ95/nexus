@@ -37,8 +37,8 @@ function fakeNode(options: { autoFinish: boolean; node?: NodeName; reportsRoutes
 
   const observation = (): NodeObservation => ({
     node, observedAt: new Date().toISOString(), probeBootId: "boot-1",
-    capacity: { memoryGiB: 64, committedMemoryGiB: 0, diskFreeGiB: 100 },
-    artifacts: [image], jobs: [...jobs.values()].map((j) => j.status), pylons: [...pylons.values()], previewRoutes: options.reportsRoutes === false ? null : [...routes.values()],
+    capacity: { cpus: 16, committedCpus: 0, memoryGiB: 64, committedMemoryGiB: 0, diskFreeGiB: 100, committedDiskGiB: 0 },
+    artifacts: [image], jobs: [...jobs.values()].map((j) => j.status), pylons: [...pylons.values()], grants: { secrets: [], gitSsh: false }, previewRoutes: options.reportsRoutes === false ? null : [...routes.values()],
   });
   const unroute = (pylonId: PylonId) => { for (const [port, route] of routes) if (route.pylonId === pylonId) routes.delete(port); };
   const emit = (event: ProbeEvent) => { for (const push of streams) push(event); };
@@ -525,7 +525,7 @@ test("an unreachable node gets no jobs, is recorded offline after the grace peri
   fake.disconnect();
   run(t, registry, fake.probe, { offlineAfterMs: 30 });
 
-  registry.apply({ record: "node", node, state: "online", capacity: { memoryGiB: 1, committedMemoryGiB: 0, diskFreeGiB: 1 } });
+  registry.apply({ record: "node", node, state: "online", capacity: { cpus: 16, committedCpus: 0, memoryGiB: 1, committedMemoryGiB: 0, diskFreeGiB: 1, committedDiskGiB: 0 } });
   await until("the node is recorded offline", () => registry.node(node)?.state === "offline");
   assert.equal(fake.submitted.length, 0);
 

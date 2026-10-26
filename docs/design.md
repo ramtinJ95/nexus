@@ -49,7 +49,7 @@ A conversation folds each run of consecutive tool calls between two messages int
 
 ## Lifecycle follows Amp
 
-- Starting a thread boots a fresh pylon from the current image, on the node the request names or else the project's default node. The pylon clones the repository and runs `.nexus/setup` itself. The backend can build templates, which would skip that setup, but starting a thread does not use them yet.
+- Starting a thread boots a fresh pylon from the current image, on the node the request names, on the node where it fits best when the request asks for `auto`, or else on the project's default node, as [Placement](#placement) describes. The pylon clones the repository and runs `.nexus/setup` itself. The backend can build templates, which would skip that setup, but starting a thread does not use them yet.
 - A pylon sleeps when its agents are idle and nobody has used it for a while. Amp uses 5 minutes of agent idleness and 20 minutes without a human. Nexus starts with the same numbers. A terminal attached to the pylon's Herdr session, such as `nexus attach` through the control plane, counts as a human for as long as it stays attached, because the probe counts the guest's Herdr clients in every observation. Close the terminal to let the pylon pause.
 - Sleep is a disk checkpoint. The VM stops and memory is lost.
 - Waking boots the pylon from its checkpoint, runs `.nexus/resume`, restarts services, and relaunches every recorded Herdr session into its prompt. Claude Code runs `claude --resume <session id>` and finds its transcript on disk, or starts afresh under the same ID when the session was never prompted. The command that was running at sleep time shows as cut off.
@@ -57,6 +57,21 @@ A conversation folds each run of consecutive tool calls between two messages int
 - A stopped pylon could move to another node by copying its disk. Disk checkpoints do not depend on the CPU, so moving between the Intel and the AMD node works. Spike S7 tested one round trip by hand. Nexus has no move job yet, so a pylon stays on the node it started on.
 
 Pylons are owned by threads only. Named pylons that outlive a thread are deferred. The pylon record stores its thread, so adding them later changes one field and the delete rule.
+
+## Placement
+
+Each probe reports what its node has and what its pylons hold of it. A VM that is up holds its CPUs and memory, from the moment it launches until it stops. Every pylon holds its disk size until it is deleted. A paused pylon holds no memory, because its VM has stopped. Counting its memory would make a node with many paused pylons look full while it runs none of them. The probe also names the secrets in its node's secret file, without their values, and says whether the node has a git SSH key.
+
+A thread starts on its project's default node unless the start names another node or asks for `auto`. Nothing changes for a person who does not ask. With `auto`, the control plane weighs every node. A node can run the pylon when it is online, holds the current image, has every secret the project grants, and has a git SSH key if the repository or the dotfiles use SSH. The allowlist is the same on every node, so it never rules one out. Of the nodes that can run it, the pylon goes to the one with the most memory left once it boots there, then the most CPUs, then the most free disk. Memory and disk must fit. CPUs may go below zero, because VMs share a node's CPUs and an idle pylon uses little of them. The room left counts pylons the planner is about to boot or wake on the node, which its last observation does not count yet: an unreported pylon holds all it asked for, and a paused one about to wake, or one whose controller died and a person retried, holds its CPUs and memory again. A broken VM that is still up is already counted in the node's capacity. A node whose last observation came from a probe too old to report grants is never chosen. When no node fits, the start fails with each node's reason and starts nothing. The thread records the placement, and `nexus show` prints it. The dashboard's start dialog offers `auto` beside the nodes.
+
+Two `auto` starts that overlap can choose the same node. Each counts the pylons in the registry, but a harness thread's conversation is created between the choice and the registry write.
+
+A scheduler that places work on its own still needs:
+
+- The model tools' `start`, which an agent uses to start another thread, takes no node, so an agent cannot ask for `auto` yet.
+- A move job. A pylon stays on the node it booted on, so a node that fills up stays full until its threads are deleted. [The lifecycle](#lifecycle-follows-amp) describes how a move could copy a stopped pylon's disk, and spike S7 showed that copying checkpoints needs verifying.
+- A reservation, so that overlapping starts cannot choose the same room.
+- A policy for when `auto` becomes the default, such as a project whose default node is `auto`.
 
 ## Network and credentials
 
@@ -121,6 +136,7 @@ A persistent drain lease blocks API and background PR-watch turn entry, and coun
 
 | Date | Decision |
 |---|---|
+| 2026-10-26 | A node's committed capacity counts the CPUs and memory of VMs that are up and the disk of every pylon, paused or not. `start --node auto` is opt-in. It ranks nodes by memory left after the pylon, then CPUs, then disk, refuses a node where memory or disk does not fit, and lets CPUs be oversubscribed |
 | 2026-10-26 | [The merge policy](merge-policy.md), as the person approved it, says when an agent may merge and deploy a pull request without the person, and which changes always need the person |
 | 2026-10-26 | The review loop runs on the control plane, started by `nexus review <thread>`, not for every PR yet. A Claude worker's PR is reviewed by a harness thread on the harness's OpenAI model, and a harness thread's PR by a Claude worker, so the reviewer is always another model family. Agents answer in fenced JSON blocks that echo a random token sent with each request, read from their replies. The control plane runs `.nexus/check` at the approved head itself, in a fresh agentless check thread it deletes afterwards, and takes the verdict from the exit status of the probe's pipe, never from a file the check could write. Only a harness reviewer's approval can land, since a Claude reviewer's verdict is read from a pylon where PR code could run. Landing checks the policy again before every merge attempt, merges only the approved head, deploys only Nexus's own PRs, verifies a rollback before claiming it, and needs a caller with the deploy right |
 | 2026-10-26 | The preview gateway keeps the browser on HTTPS for apps that name their own scheme: it rewrites redirects to the preview's own `http://` address and sends `upgrade-insecure-requests`, which also breaks a preview's links to plain-HTTP ports on the same name. It does not rewrite bodies, and sends no HSTS, which would cover the dashboard's plain HTTP port on the same name |

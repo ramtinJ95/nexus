@@ -51,7 +51,7 @@ const controlPlaneId = "nCHECKCONTROL" as TailnetNodeId;
 const probeId = "nCHECKPROBE" as TailnetNodeId;
 const step = (name: string, value: unknown = "ok") => console.log(`${name}: ${typeof value === "string" ? value : JSON.stringify(value, null, 2)}`);
 
-const backend = createPylonVmBackend({ stateRoot, artifacts: dirname(assets), secrets: { value: () => undefined }, previewHost: nodeHost });
+const backend = createPylonVmBackend({ stateRoot, artifacts: dirname(assets), secrets: { value: () => undefined, names: () => [] }, previewHost: nodeHost });
 const tailscale = fakeTailscale();
 const free = createServer().listen(0, "127.0.0.1");
 await new Promise((resolve) => free.once("listening", resolve));
@@ -62,7 +62,7 @@ const probe = await startProbe({
   auth: { controlPlane: controlPlaneId, peers: [] },
   whois: async () => controlPlaneId,
   backend,
-  secrets: { value: () => undefined },
+  secrets: { value: () => undefined, names: () => [] },
   log: (message) => console.log(`probe: ${message}`),
   previews: { gatewayPort, routesFile: join(stateRoot, `check-${run}-routes.json`), tailscale: tailscale.cli, get: viaGateway(() => `http://127.0.0.1:${gatewayPort}`).get },
 });

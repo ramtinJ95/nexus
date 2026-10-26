@@ -4,13 +4,15 @@ import { effectiveAllowedHosts, hasRemote, liveHashOf, withHttpsHosts, type Boot
 import type { NodeName, PylonId } from "../protocol.ts";
 import { newPylonRecord } from "../tick.ts";
 import { HttpError } from "./http-error.ts";
+import { placeAuto, type Placement } from "./placement.ts";
 import { pylonLive } from "./live.ts";
 import type { Registry, Thread, ThreadId } from "./registry.ts";
 
 /**
  * What starts a thread. `claude` makes it a Claude worker with that first prompt, which gets `/poteto-mode` in front
  * unless `raw`, as for the review loop's reviewers. A `bare` thread has neither agent, as a check thread needs only
- * its pylon. Only the control plane itself asks for `raw` or `bare`.
+ * its pylon. Only the control plane itself asks for `raw` or `bare`. `node` names a node, or is `auto` for the one
+ * where the pylon fits best.
  */
 export interface StartRequest { project: string; title: string; node?: string | undefined; branch?: string | undefined; commit?: string | undefined; claude?: string | undefined; model?: string | undefined; raw?: boolean; bare?: boolean }
 
@@ -28,8 +30,8 @@ export function threadStarter(options: { registry: Registry; harness: Pick<Harne
     if (claudePrompt !== undefined && claudePrompt.length > 16_384) throw new HttpError(400, "Claude prompt including /poteto-mode exceeds 16384 characters");
     const project = registry.project(request.project as ProjectId);
     if (project === undefined) throw new HttpError(404, `no project ${request.project}`);
-    const node = (request.node ?? project.defaultNode) as NodeName;
-    if (registry.node(node) === undefined) throw new HttpError(400, `no node ${node}`);
+    const named = request.node !== undefined && request.node !== "auto";
+    if (named && registry.node(request.node as NodeName) === undefined) throw new HttpError(400, `no node ${request.node}`);
     const image = registry.currentImage();
     if (image === null) throw new HttpError(409, "no image is current yet, so a pylon has nothing to boot");
     const branch = request.branch ?? project.defaultBranch;
@@ -39,15 +41,8 @@ export function threadStarter(options: { registry: Registry; harness: Pick<Harne
       ? { kind: "clone", url: project.repoUrl, checkout: { branch, commit: request.commit ?? `origin/${branch}` } }
       : { kind: "empty", branch };
 
-    const now = Date.now();
     const id = newThreadId();
     const pylonId = `pylon-${id}` as PylonId;
-    const conversationId = request.claude === undefined && request.bare !== true ? await harness.startThread({ threadId: id, pylonId }) : null;
-    const t: Thread = {
-      id, title: request.title, project: project.id, pylonId, status: "active", conversationId: conversationId === null ? null : String(conversationId), startedBy: caller, createdAt: now,
-      // Starting a thread is human activity, so its pylon is wanted at once.
-      agentTurnRunning: false, lastAgentActivityAt: 0, lastHumanActivityAt: now, seenAt: null, lastReplyAt: null,
-    };
     const boot: Omit<BootInputs, "source"> = {
       pylonId, image, resources: project.resources,
       gitIdentity: project.gitIdentity ?? gitIdentity,
@@ -55,6 +50,17 @@ export function threadStarter(options: { registry: Registry; harness: Pick<Harne
       network: { allowedHosts: withHttpsHosts(effectiveAllowedHosts(project), [dotfiles.repo]), secrets: project.secrets },
       repo,
       dotfiles,
+    };
+    const placement: Placement = request.node === "auto" ? placeAuto(registry, boot)
+      : named ? { how: "named", node: request.node as NodeName } : { how: "default", node: project.defaultNode };
+    const { node } = placement;
+
+    const now = Date.now();
+    const conversationId = request.claude === undefined && request.bare !== true ? await harness.startThread({ threadId: id, pylonId }) : null;
+    const t: Thread = {
+      id, title: request.title, project: project.id, pylonId, status: "active", conversationId: conversationId === null ? null : String(conversationId), startedBy: caller, createdAt: now,
+      // Starting a thread is human activity, so its pylon is wanted at once.
+      agentTurnRunning: false, lastAgentActivityAt: 0, lastHumanActivityAt: now, seenAt: null, lastReplyAt: null, placement,
     };
     // Ports are allocated once the pylon reports the services that want a preview.
     const live = pylonLive({ pylonId, thread: id, node, boot }, project, []);

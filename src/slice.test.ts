@@ -116,7 +116,7 @@ function dockerFixture(): SliceFixture {
       await docker("cp", cli, `${pylonId}:/usr/local/bin/nexus`);
       await docker("exec", pylonId, "sh", "-c", `mkdir -p /home/user/.nexus && printf '%s' "$1" > ${pylonInfoFile}`, "sh", pylonJson);
     },
-    secrets: { value: () => undefined },
+    secrets: { value: () => undefined, names: () => [] },
     boot: {
       resources: { cpus: 1, memoryGiB: 1, diskGiB: 1 },
       network: { allowedHosts: [], secrets: [] },
@@ -266,7 +266,7 @@ function pylonVmFixture(): SliceFixture {
       throw err;
     }
   };
-  const secrets: SecretSource = { value: (name) => name === secret.name ? secret.value : undefined };
+  const secrets: SecretSource = { value: (name) => name === secret.name ? secret.value : undefined, names: () => [secret.name] };
   return {
     backend: createPylonVmBackend({ stateRoot, artifacts: dirname(assets), secrets, previewHost: nodeHost, ...(gitSsh === undefined ? {} : { gitSsh }) }),
     image: basename(assets) as ImageId,

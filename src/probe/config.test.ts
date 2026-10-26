@@ -99,6 +99,7 @@ test("a secrets file maps names to verbatim values", () => {
   assert.equal(secrets.value("STRIPE_KEY"), "sk_test_a=b#c");
   assert.equal(secrets.value("GH_TOKEN"), " spaced ");
   assert.equal(secrets.value("MISSING"), undefined);
+  assert.deepEqual(secrets.names(), ["STRIPE_KEY", "GH_TOKEN"]);
 });
 
 test("the shipped example secrets file parses and sets nothing", async () => {

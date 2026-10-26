@@ -8,7 +8,7 @@ import { runningCommit } from "../deploy/health.ts";
 import { randomUUID } from "node:crypto";
 import { mkdir, statfs } from "node:fs/promises";
 import { createServer, STATUS_CODES, type IncomingMessage, type ServerResponse } from "node:http";
-import { totalmem } from "node:os";
+import { availableParallelism, totalmem } from "node:os";
 import type { Duplex } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { JobFailure, runCommand, runJob, type BackendPylon, type ProbeDeps, type SecretSource, type VmBackend } from "../backend.ts";
@@ -38,6 +38,8 @@ export interface ProbeOptions {
   whois: Whois;
   backend: VmBackend;
   secrets: SecretSource;
+  /** Whether the backend has a git SSH key, so a pylon can clone over SSH. Default false. */
+  gitSsh?: boolean;
   jobDeadlineMs?: { readonly [K in Job["kind"]]: number };
   /** The probe's log, which also receives the stderr of raw pipes. Default console.error. */
   log?: (message: string) => void;
@@ -69,6 +71,7 @@ export interface Probe {
 const jobRetentionMs = 10 * 60_000;
 const snapshotIntervalMs = 60_000;
 const maxBodyBytes = 1 << 20;
+const sum = (pylons: readonly BackendPylon[], resource: keyof NonNullable<BackendPylon["holds"]>) => pylons.reduce((total, p) => total + (p.holds?.[resource] ?? 0), 0);
 /** Short, because snapshots are read one at a time and a stuck guest would hold up every observer. */
 const sessionReadTimeoutMs = 3_000;
 /** Longer, because a pylon's supervisor checks each service's health to answer. */
@@ -369,12 +372,16 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
       observedAt: new Date().toISOString(),
       probeBootId: bootId,
       events: journal.recent(),
-      // VmBackend does not report reserved memory yet.
-      capacity: { memoryGiB: totalmem() / 2 ** 30, committedMemoryGiB: 0, diskFreeGiB: (disk.bavail * disk.bsize) / 2 ** 30 },
+      capacity: {
+        cpus: availableParallelism(), committedCpus: sum(pylons, "cpus"),
+        memoryGiB: totalmem() / 2 ** 30, committedMemoryGiB: sum(pylons, "memoryGiB"),
+        diskFreeGiB: (disk.bavail * disk.bsize) / 2 ** 30, committedDiskGiB: sum(pylons, "diskGiB"),
+      },
       artifacts,
       jobs,
       pylons: await Promise.all(pylons.map(observation)),
       previewRoutes: previews === null ? [] : [...previews.gateway.routes].map(([httpsPort, route]) => ({ httpsPort, ...route })),
+      grants: { secrets: options.secrets.names(), gitSsh: options.gitSsh ?? false },
     };
   }
 

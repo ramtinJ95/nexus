@@ -46,8 +46,8 @@ function seeded(t: import("node:test").TestContext) {
 }
 
 function observe(registry: ReturnType<typeof openRegistry>, pylon: PylonObservation) {
-  const capacity = { memoryGiB: 32, committedMemoryGiB: 0, diskFreeGiB: 100 };
-  const observation: NodeObservation = { node, observedAt: new Date().toISOString(), probeBootId: "b", capacity, artifacts: [], jobs: [], pylons: [pylon], previewRoutes: [] };
+  const capacity = { cpus: 16, committedCpus: 0, memoryGiB: 32, committedMemoryGiB: 0, diskFreeGiB: 100, committedDiskGiB: 0 };
+  const observation: NodeObservation = { node, observedAt: new Date().toISOString(), probeBootId: "b", capacity, artifacts: [], jobs: [], pylons: [pylon], grants: { secrets: [], gitSsh: false }, previewRoutes: [] };
   registry.ingested(observation, [{ record: "node", node, state: "online", capacity }]);
 }
 

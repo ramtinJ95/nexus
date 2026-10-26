@@ -389,10 +389,10 @@ function watchLines(t: TestContext, s: Awaited<ReturnType<typeof setup>>, args: 
 
 /** Reports the node online with the thread's pylon running these services and listening on these ports. */
 function observeRunning(s: Awaited<ReturnType<typeof setup>>, thread: Thread, services: ServiceFact[], ports: number[]) {
-  const capacity = { memoryGiB: 64, committedMemoryGiB: 0, diskFreeGiB: 100 };
+  const capacity = { cpus: 16, committedCpus: 0, memoryGiB: 64, committedMemoryGiB: 0, diskFreeGiB: 100, committedDiskGiB: 0 };
   s.registry.apply({ record: "node", node, state: "online", capacity });
   s.registry.ingested({
-    node, observedAt: new Date().toISOString(), probeBootId: "b", capacity, artifacts: [], jobs: [], previewRoutes: [],
+    node, observedAt: new Date().toISOString(), probeBootId: "b", capacity, artifacts: [], jobs: [], grants: { secrets: [], gitSsh: false }, previewRoutes: [],
     pylons: [{
       pylonId: thread.pylonId, phase: "running", liveHash: s.registry.pylon(thread.pylonId)!.liveHash, bootedAt: "2027-01-01T00:00:00Z",
       bootedFrom: { image: image.id, checkpoint: null }, services, listening: ports.map((port) => ({ port })), previews: [], sessions: [], git: null, declaredOutputs: [], attachedClients: 0,
@@ -1171,6 +1171,32 @@ test("seen encodes a thread ID so it cannot become an unarchive request", async 
   }
 });
 
+test("start --node auto picks the node with room, show says why, and nodes prints what pylons hold", async (t) => {
+  const s = await setup(t);
+  s.registry.upsertNode({ name: "spare" as NodeName, tailnetHost: "spare.tail.ts.net", tailnetNodeId: "nSPARE" as TailnetNodeId });
+  const capacity = { cpus: 16, committedCpus: 6, memoryGiB: 62.75, committedMemoryGiB: 16, diskFreeGiB: 180.25, committedDiskGiB: 120 };
+  s.registry.apply({ record: "node", node, state: "online", capacity });
+  s.registry.ingested({ node, observedAt: new Date().toISOString(), probeBootId: "b", capacity, artifacts: [image.id], jobs: [], pylons: [], grants: { secrets: [], gitSsh: false }, previewRoutes: [] }, []);
+  assert.match((await s.nexus(["nodes"])).stdout, /^rj-firebat +online +observed .+ {2}6\/16 CPUs, 16\/62\.8 GiB memory committed, 120 GiB disk committed, 180\.3 GiB disk free$/m);
+
+  const plain: Thread = await s.json(["start", "--project", "acme", "--title", "default"]);
+  assert.match((await s.nexus(["show", plain.id])).stdout, /^placement: rj-firebat, the project's default node$/m);
+  const auto: Thread = await s.json(["start", "--project", "acme", "--title", "auto", "--node", "auto"]);
+  assert.match((await s.nexus(["show", auto.id])).stdout,
+    /^placement: auto chose rj-firebat, which had the most room left after this pylon; rj-firebat had 38\.8 GiB memory, 6 CPUs and 160\.3 GiB disk left; spare is offline$/m,
+    "the default thread's pylon, which the node has yet to report, counts against it");
+});
+
+test("nodes prints what an older probe does not count as unknown, never as 0, with --json or without", async (t) => {
+  const s = await setup(t);
+  const capacity = { memoryGiB: 64, committedMemoryGiB: 0, diskFreeGiB: 100 } as never;
+  s.registry.apply({ record: "node", node, state: "online", capacity });
+  const text = await s.nexus(["nodes"]);
+  assert.equal(text.code, 0, text.stderr);
+  assert.match(text.stdout, /^rj-firebat +online +.+ {2}unknown\/unknown CPUs, unknown\/64 GiB memory committed, unknown GiB disk committed, 100 GiB disk free$/m);
+  assert.deepEqual((await s.json(["nodes"]))[0].capacity, capacity);
+});
+
 test("show prints PR metadata and one disabled-watch notice without waking the pylon", async (t) => {
   const s = await setup(t);
   const thread: Thread = await s.json(["start", "--project", "acme", "--title", "PR"]);
@@ -1189,7 +1215,7 @@ test("show prints PR metadata and one disabled-watch notice without waking the p
 
 test("deploy and release use the shared release view and wait for both roles", async (t) => {
   const s = await setup(t);
-  assert.equal((await s.nexus(["--version"])).stdout.trim(), "nexus 0.19.0");
+  assert.equal((await s.nexus(["--version"])).stdout.trim(), "nexus 0.20.0");
   assert.equal((await s.nexus(["deploy", "bad"])).code, 64);
   const requested = await s.json(["deploy", "main"]);
   assert.equal(requested.desired.commit, "a".repeat(40));

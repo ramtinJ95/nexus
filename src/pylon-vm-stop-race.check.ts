@@ -35,7 +35,7 @@ const settleLimitMs = 8_000;
 const pylonId = `pylon-race-${Date.now().toString(36)}` as PylonId;
 const image = basename(imageDir) as ImageId;
 const signal = () => AbortSignal.timeout(20 * 60_000);
-const backend = createPylonVmBackend({ stateRoot, artifacts: dirname(imageDir), secrets: { value: () => undefined } });
+const backend = createPylonVmBackend({ stateRoot, artifacts: dirname(imageDir), secrets: { value: () => undefined, names: () => [] } });
 const boot = (source: BootInputs["source"]): BootInputs => ({
   pylonId, image, source,
   resources: { cpus: 2, memoryGiB: 4, diskGiB: 8 },

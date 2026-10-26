@@ -31,7 +31,7 @@ import { repoInitCommand } from "../pylon-vm-backend.ts";
 import { attachScript, checkoutDir } from "../sessions.ts";
 import { encodeMessage } from "../attach-wire.ts";
 import { terminalSize } from "../guest-terminal.ts";
-import type { ByteStream, CommandResult, JobId, NodeName, PausedSession, PylonCommand, PylonId, ServiceFact, StreamEnd, TailnetNodeId } from "../protocol.ts";
+import type { ByteStream, CommandResult, JobId, NodeName, NodeObservation, PausedSession, PylonCommand, PylonId, ServiceFact, StreamEnd, TailnetNodeId } from "../protocol.ts";
 
 const node = "rj-firebat" as NodeName;
 const laptop = "nLAPTOP" as TailnetNodeId;
@@ -200,9 +200,9 @@ test("nodes are listed with their state and capacity, without the observation", 
   const s = await setup(t);
   const offline = { name: node, tailnetHost: "rj-firebat.tail.ts.net", tailnetNodeId: "nFIREBAT", state: "offline", capacity: null, observedAt: null };
   assert.deepEqual(await s.call("GET", "/v1/nodes"), { status: 200, body: [offline] });
-  const capacity = { memoryGiB: 64, committedMemoryGiB: 0, diskFreeGiB: 100 };
+  const capacity = { cpus: 16, committedCpus: 0, memoryGiB: 64, committedMemoryGiB: 0, diskFreeGiB: 100, committedDiskGiB: 0 };
   s.registry.apply({ record: "node", node, state: "online", capacity });
-  s.registry.ingested({ node, observedAt: "2027-01-01T00:01:00Z", probeBootId: "b", capacity, artifacts: [], jobs: [], pylons: [], previewRoutes: [] }, []);
+  s.registry.ingested({ node, observedAt: "2027-01-01T00:01:00Z", probeBootId: "b", capacity, artifacts: [], jobs: [], pylons: [], grants: { secrets: [], gitSsh: false }, previewRoutes: [] }, []);
   assert.deepEqual((await s.call("GET", "/v1/nodes")).body, [{ ...offline, state: "online", capacity, observedAt: "2027-01-01T00:01:00Z" }]);
 });
 
@@ -260,6 +260,115 @@ test("starting a thread creates its pylon, boots fresh from the current image, a
   assert.equal(pylon.submitted, null);
 });
 
+/** Puts a node online with this capacity and grants, holding the current image unless told otherwise. */
+function observeNode(s: Awaited<ReturnType<typeof setup>>, name: string, memory: { total: number; committed: number }, over: Partial<NodeObservation> = {}) {
+  const at = name as NodeName;
+  s.registry.upsertNode({ name: at, tailnetHost: `${name}.tail.ts.net`, tailnetNodeId: `n${name.toUpperCase()}` as TailnetNodeId });
+  const capacity = { cpus: 16, committedCpus: 4, memoryGiB: memory.total, committedMemoryGiB: memory.committed, diskFreeGiB: 200, committedDiskGiB: 60 };
+  s.registry.apply({ record: "node", node: at, state: "online", capacity });
+  s.registry.ingested({
+    node: at, observedAt: "2027-01-01T00:01:00Z", probeBootId: "b", capacity, artifacts: [image.id] as NodeObservation["artifacts"], jobs: [], pylons: [],
+    grants: { secrets: ["STRIPE_KEY"], gitSsh: true }, previewRoutes: [], ...over,
+  }, []);
+}
+
+async function withImage(t: import("node:test").TestContext) {
+  const s = await setup(t);
+  assert.equal((await s.call("POST", "/v1/projects", project)).status, 201);
+  assert.equal((await s.call("POST", "/v1/images", image)).status, 201);
+  assert.equal((await s.call("PUT", "/v1/images/current", { image: image.id })).status, 204);
+  return s;
+}
+
+test("--node auto boots the pylon on the node with the most memory left after it, and the thread records why", async (t) => {
+  const s = await withImage(t);
+  observeNode(s, "big", { total: 64, committed: 48 });
+  observeNode(s, "small", { total: 32, committed: 24 });
+  const started = await s.call("POST", "/v1/threads", { project: "acme", title: "Placed", node: "auto" });
+  assert.equal(started.status, 201, JSON.stringify(started.body));
+  const thread = started.body as Thread;
+  assert.deepEqual(thread.placement, {
+    how: "auto", node: "big", weighed: [
+      { node: "big", left: { cpus: 10, memoryGiB: 12, diskGiB: 190 } },
+      { node: "rj-firebat", refused: "is offline" },
+      { node: "small", left: { cpus: 10, memoryGiB: 4, diskGiB: 190 } },
+    ],
+  });
+  assert.equal(s.registry.pylon(thread.pylonId)!.node, "big");
+  assert.deepEqual(s.woken, ["big"]);
+  assert.deepEqual((await s.call("GET", `/v1/threads/${thread.id}`)).body.thread.placement, thread.placement, "show reads it back");
+
+  const next = await s.call("POST", "/v1/threads", { project: "acme", title: "Next", node: "auto" });
+  assert.equal(next.body.placement.node, "big", "big still has 8 GiB left once its unreported pylon is counted, and small 4");
+  const third = await s.call("POST", "/v1/threads", { project: "acme", title: "Third", node: "auto" });
+  assert.equal(third.body.placement.node, "small", "two unreported pylons leave big as little memory as small, and fewer CPUs");
+});
+
+test("--node auto counts the memory of a paused pylon about to wake, and not of one that stays paused", async (t) => {
+  const s = await withImage(t);
+  observeNode(s, "a", { total: 64, committed: 0 });
+  observeNode(s, "b", { total: 64, committed: 2 });
+  const waking = (await s.call("POST", "/v1/threads", { project: "acme", title: "Waking", node: "a" })).body as Thread;
+  observeNode(s, "a", { total: 64, committed: 0 }, { pylons: [{ pylonId: waking.pylonId, phase: "stopped", checkpoint: null, sessions: null }] });
+  assert.equal((await s.call("POST", "/v1/threads", { project: "acme", title: "Placed", node: "auto" })).body.placement.node, "b");
+  assert.equal((await s.call("POST", `/v1/threads/${waking.id}/archive`)).status, 200);
+  assert.equal((await s.call("POST", "/v1/threads", { project: "acme", title: "Placed again", node: "auto" })).body.placement.node, "a",
+    "once Waking stays paused, a has 60 GiB left, and b 54 with Placed still to boot there");
+});
+
+test("--node auto passes over a node whose stored observation is from a probe older than grants", async (t) => {
+  const s = await withImage(t);
+  observeNode(s, "old", { total: 64, committed: 0 }, { grants: undefined as never });
+  observeNode(s, "new", { total: 16, committed: 8 });
+  const started = await s.call("POST", "/v1/threads", { project: "acme", title: "Placed", node: "auto" });
+  assert.equal(started.status, 201, JSON.stringify(started.body));
+  assert.equal(started.body.placement.node, "new");
+  assert.deepEqual(started.body.placement.weighed.find((w: { node: string }) => w.node === "old"), { node: "old", refused: "runs a probe too old to report what its pylons hold" });
+});
+
+test("--node auto counts a crashed pylon a person retried, which boots again, and not one whose VM still holds its memory", async (t) => {
+  const s = await withImage(t);
+  observeNode(s, "b", { total: 16, committed: 10 });
+  observeNode(s, "a", { total: 16, committed: 0 });
+  const t1 = (await s.call("POST", "/v1/threads", { project: "acme", title: "Crashed", node: "a" })).body as Thread;
+  s.registry.savePylon({ ...s.registry.pylon(t1.pylonId)!, boot: { ...s.registry.pylon(t1.pylonId)!.boot, resources: { cpus: 2, memoryGiB: 12, diskGiB: 10 } }, retrying: true });
+  const broken = (cause: "controller" | "services") => ({ pylonId: t1.pylonId, phase: "broken" as const, detail: "the controller exited", cause });
+  observeNode(s, "a", { total: 16, committed: 0 }, { pylons: [broken("controller")] });
+  assert.equal((await s.call("POST", "/v1/threads", { project: "acme", title: "x", node: "auto" })).body.placement.node, "b",
+    "a will boot the retried 12 GiB pylon again, which leaves it 0 GiB, and b 2");
+  observeNode(s, "a", { total: 16, committed: 12 }, { pylons: [broken("services")] });
+  const weighed = (await s.call("POST", "/v1/threads", { project: "acme", title: "y", node: "auto" })).body.placement.weighed;
+  assert.deepEqual(weighed.find((w: { node: string }) => w.node === "a").left.memoryGiB, 0, "a broken VM that is still up is counted once, in the node's capacity");
+});
+
+test("--node auto refuses with each node's reason when none can run the pylon, and starts nothing", async (t) => {
+  const s = await withImage(t);
+  observeNode(s, "full", { total: 32, committed: 30 });
+  observeNode(s, "no-image", { total: 64, committed: 0 }, { artifacts: [] });
+  observeNode(s, "no-secret", { total: 64, committed: 0 }, { grants: { secrets: [], gitSsh: true } });
+  observeNode(s, "no-ssh", { total: 64, committed: 0 }, { grants: { secrets: ["STRIPE_KEY"], gitSsh: false } });
+  observeNode(s, "old-probe", { total: 64, committed: 0 }, { grants: null });
+  const refused = await s.call("POST", "/v1/threads", { project: "acme", title: "Nowhere", node: "auto" });
+  assert.equal(refused.status, 409);
+  assert.equal(refused.body.error, "no node can run this pylon: full has 30 of 32 GiB of memory committed, and the pylon needs 4; "
+    + `no-image does not hold image ${image.id}; no-secret has no secret STRIPE_KEY in its secret file; `
+    + "no-ssh has no git SSH key to reach git@example.com:acme.git and git@github.com:ramtin/dotfiles.git; old-probe runs a probe too old to report what its pylons hold; rj-firebat is offline");
+  assert.deepEqual((await s.call("GET", "/v1/threads")).body, []);
+  assert.deepEqual(s.calls, [], "no conversation was started for it");
+  assert.deepEqual(s.woken, []);
+});
+
+test("without --node a thread still boots on its project's default node, and a named node is taken as named", async (t) => {
+  const s = await withImage(t);
+  observeNode(s, "big", { total: 64, committed: 0 });
+  const plain = await s.call("POST", "/v1/threads", { project: "acme", title: "Default" });
+  assert.deepEqual(plain.body.placement, { how: "default", node }, "even while the default node is offline and another has room");
+  assert.equal(s.registry.pylon(plain.body.pylonId)!.node, node);
+  const named = await s.call("POST", "/v1/threads", { project: "acme", title: "Named", node: "big" });
+  assert.deepEqual(named.body.placement, { how: "named", node: "big" });
+  assert.equal((await s.call("POST", "/v1/threads", { project: "acme", title: "x", node: "nowhere" })).status, 400);
+});
+
 test("a scratch project has no repository, and each of its threads starts an empty one on its branch", async (t) => {
   const s = await setup(t);
   const scratch = { ...project, id: "sketch", repoUrl: null, allowedHosts: [], logins: [], secrets: [githubTokenGrant] };
@@ -307,14 +416,14 @@ test("thread detail derives the actual state from the node's last observation", 
     sessions: [], previews: [], ports: [], outputs: [], prWatch: { enabled: false, stopped: false, error: null }, pullRequests: [], review: null, attach: "herdr --session nexus", agent: { parkedTasks: 0 },
   });
 
-  const capacity = { memoryGiB: 64, committedMemoryGiB: 0, diskFreeGiB: 100 };
+  const capacity = { cpus: 16, committedCpus: 0, memoryGiB: 64, committedMemoryGiB: 0, diskFreeGiB: 100, committedDiskGiB: 0 };
   s.registry.apply({ record: "node", node, state: "online", capacity });
   const pylon = s.registry.pylon(thread.pylonId)!;
   const running = {
     pylonId: thread.pylonId, phase: "running" as const, liveHash: pylon.liveHash, bootedAt: "2027-01-01T00:00:00Z", bootedFrom: { image: image.id as `img-${string}`, checkpoint: null },
     services: [], listening: [], previews: [], sessions: [], git: null, declaredOutputs: [], attachedClients: 0,
   };
-  s.registry.ingested({ node, observedAt: "2027-01-01T00:01:00Z", probeBootId: "b", capacity, artifacts: [], jobs: [], pylons: [running], previewRoutes: [] }, []);
+  s.registry.ingested({ node, observedAt: "2027-01-01T00:01:00Z", probeBootId: "b", capacity, artifacts: [], jobs: [], pylons: [running], grants: { secrets: [], gitSsh: false }, previewRoutes: [] }, []);
   const pause = { jobId: "job-1" as JobId, subject: thread.pylonId, kind: "pause" as const };
   s.registry.apply({ record: "job", status: { ...pause, state: "running", startedAt: "2027-01-01T00:00:59Z" } });
   s.registry.apply({ record: "sessions", pylonId: thread.pylonId, sessions: [{ id: "p1", state: "running", herdrPane: "p1", harness: "pi", harnessSessionId: null, status: "idle", title: "plan", message: null }] });
@@ -337,14 +446,14 @@ test("thread detail derives the actual state from the node's last observation", 
 
 /** Reports the node online with the thread's pylon running these services and listening on these ports. */
 function observeRunning(s: Awaited<ReturnType<typeof withThread>>, facts: { services?: ServiceFact[]; listening?: { port: number }[] | null }) {
-  const capacity = { memoryGiB: 64, committedMemoryGiB: 0, diskFreeGiB: 100 };
+  const capacity = { cpus: 16, committedCpus: 0, memoryGiB: 64, committedMemoryGiB: 0, diskFreeGiB: 100, committedDiskGiB: 0 };
   s.registry.apply({ record: "node", node, state: "online", capacity });
   const running = {
     pylonId: s.thread.pylonId, phase: "running" as const, liveHash: s.registry.pylon(s.thread.pylonId)!.liveHash, bootedAt: "2027-01-01T00:00:00Z",
     bootedFrom: { image: image.id as `img-${string}`, checkpoint: null },
     services: facts.services ?? [], listening: facts.listening === undefined ? [] : facts.listening, previews: [], sessions: [], git: null, declaredOutputs: [], attachedClients: 0,
   };
-  s.registry.ingested({ node, observedAt: new Date().toISOString(), probeBootId: "b", capacity, artifacts: [], jobs: [], pylons: [running], previewRoutes: [] }, []);
+  s.registry.ingested({ node, observedAt: new Date().toISOString(), probeBootId: "b", capacity, artifacts: [], jobs: [], pylons: [running], grants: { secrets: [], gitSsh: false }, previewRoutes: [] }, []);
 }
 
 test("thread detail lists the pylon's listening ports with the service and preview of each", async (t) => {
@@ -654,10 +763,10 @@ test("closing a listed session names it, and a pane that runs another session no
 
 /** Records the thread's pylon stopped with these sessions, as the loop would from the node's observation. */
 function observeStopped(s: Awaited<ReturnType<typeof withThread>>, sessions: readonly PausedSession[]) {
-  const capacity = { memoryGiB: 64, committedMemoryGiB: 0, diskFreeGiB: 100 };
+  const capacity = { cpus: 16, committedCpus: 0, memoryGiB: 64, committedMemoryGiB: 0, diskFreeGiB: 100, committedDiskGiB: 0 };
   s.registry.apply({ record: "node", node, state: "online", capacity });
   const stopped = { pylonId: s.thread.pylonId, phase: "stopped" as const, checkpoint: null, sessions };
-  s.registry.ingested({ node, observedAt: new Date().toISOString(), probeBootId: "b", capacity, artifacts: [], jobs: [], pylons: [stopped], previewRoutes: [] },
+  s.registry.ingested({ node, observedAt: new Date().toISOString(), probeBootId: "b", capacity, artifacts: [], jobs: [], pylons: [stopped], grants: { secrets: [], gitSsh: false }, previewRoutes: [] },
     ingest({ type: "pylon", pylon: stopped }, node, new Map([[s.thread.pylonId, "absent"]]), Date.now()));
 }
 
@@ -730,7 +839,7 @@ test("a failed pylon shows failed with its reason until its thread is deleted, a
   const s = await withThread(t);
   const { thread } = s;
   const detail = async () => (await s.call("GET", `/v1/threads/${thread.id}`)).body as ThreadDetail;
-  const capacity = { memoryGiB: 64, committedMemoryGiB: 0, diskFreeGiB: 100 };
+  const capacity = { cpus: 16, committedCpus: 0, memoryGiB: 64, committedMemoryGiB: 0, diskFreeGiB: 100, committedDiskGiB: 0 };
   s.registry.apply({ record: "node", node, state: "online", capacity });
   const reason = "last job failed with setup-failed, which is not retryable: pylon-x: Setup exited 128\nfatal: unable to access";
   s.registry.savePylon({ ...s.registry.pylon(thread.pylonId)!, failed: reason });
@@ -743,7 +852,7 @@ test("a failed pylon shows failed with its reason until its thread is deleted, a
   s.registry.apply({ record: "job", status: { ...del, state: "running", startedAt: "2027-01-01T00:00:00Z" } });
   assert.equal((await detail()).pylon.actualState, "deleting");
   s.registry.apply({ record: "job", status: { ...del, state: "succeeded", finishedAt: "2027-01-01T00:00:05Z" } });
-  s.registry.ingested({ node, observedAt: "2027-01-01T00:00:06Z", probeBootId: "b", capacity, artifacts: [], jobs: [], pylons: [], previewRoutes: [] }, []);
+  s.registry.ingested({ node, observedAt: "2027-01-01T00:00:06Z", probeBootId: "b", capacity, artifacts: [], jobs: [], pylons: [], grants: { secrets: [], gitSsh: false }, previewRoutes: [] }, []);
   assert.deepEqual((await detail()).pylon, { grantsOutdated: false, id: thread.pylonId, node, actualState: "absent", failed: reason, observedAt: "2027-01-01T00:00:06Z", retryRefused: null });
 });
 
@@ -779,11 +888,11 @@ test("retrying a failed pylon clears the planner's verdict and its attempts, mar
 test("a pylon whose disk holds a failed setup cannot be retried, and its detail says why", async (t) => {
   const s = await withThread(t);
   const { thread } = s;
-  const capacity = { memoryGiB: 64, committedMemoryGiB: 0, diskFreeGiB: 100 };
+  const capacity = { cpus: 16, committedCpus: 0, memoryGiB: 64, committedMemoryGiB: 0, diskFreeGiB: 100, committedDiskGiB: 0 };
   s.registry.apply({ record: "node", node, state: "online", capacity });
   const broken = (cause: "setup" | "saved-setup" | "services") => s.registry.ingested({
     node, observedAt: "2027-01-01T00:01:00Z", probeBootId: "b", capacity, artifacts: [], jobs: [],
-    pylons: [{ pylonId: thread.pylonId, phase: "broken", detail: "Setup exited 128. Read controller logs", cause }], previewRoutes: [],
+    pylons: [{ pylonId: thread.pylonId, phase: "broken", detail: "Setup exited 128. Read controller logs", cause }], grants: { secrets: [], gitSsh: false }, previewRoutes: [],
   }, []);
   broken("saved-setup");
   s.registry.savePylon({ ...s.registry.pylon(thread.pylonId)!, failed: "pylon is broken: Setup exited 128. Read controller logs" });
@@ -1887,9 +1996,9 @@ test("a Claude worker thread takes no messages while archived, deleted or before
 
 /** Records the thread's pylon stopped, as the loop would from its node's observation. */
 function observePaused(s: Awaited<ReturnType<typeof withClaude>>) {
-  const capacity = { memoryGiB: 64, committedMemoryGiB: 0, diskFreeGiB: 100 };
+  const capacity = { cpus: 16, committedCpus: 0, memoryGiB: 64, committedMemoryGiB: 0, diskFreeGiB: 100, committedDiskGiB: 0 };
   const stopped = { pylonId: s.thread.pylonId, phase: "stopped" as const, checkpoint: null, sessions: [] };
-  s.registry.ingested({ node, observedAt: new Date().toISOString(), probeBootId: "b", capacity, artifacts: [], jobs: [], pylons: [stopped], previewRoutes: [] }, []);
+  s.registry.ingested({ node, observedAt: new Date().toISOString(), probeBootId: "b", capacity, artifacts: [], jobs: [], pylons: [stopped], grants: { secrets: [], gitSsh: false }, previewRoutes: [] }, []);
 }
 
 test("a Claude worker thread's conversation is its transcript, read from the running pylon after each session event and kept for when it is paused", async (t) => {

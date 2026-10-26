@@ -16,6 +16,7 @@ import { z } from "zod";
 import type { ImageContent, Message, TextContent } from "@earendil-works/pi-ai";
 import type { ConversationView, EntryRecord, InboxState, LiveState } from "@earendil-works/pi-durable";
 import type { ListeningPort, NodeSummary, OpenedSession, ThreadDetail, ThreadRow, ViewFrame } from "../control/api.ts";
+import type { Placement, Room } from "../control/placement.ts";
 import type { ClaudeSent, Preview, Thread } from "../control/registry.ts";
 import type { Review } from "../control/review.ts";
 import { maxEntries, type ClaudeConversation, type ClaudeEntry, type PromptSource } from "../claude-transcript.ts";
@@ -27,7 +28,7 @@ import type { WebSocket } from "ws";
 import { attachTerminal, processTty } from "./attach.ts";
 import { call, CliError, exitCodes, follow, upgrade, type Endpoint, type HostPort } from "./transport.ts";
 
-const version = "0.19.0";
+const version = "0.20.0";
 const defaults = { url: "http://rj-firebat.tailc817d3.ts.net:7470", socks: "localhost:1055" };
 const configFile = () => join(homedir(), ".config", "nexus", "cli.json");
 
@@ -46,7 +47,7 @@ const usage = `nexus ${version}, the Nexus control plane from this Mac
   nexus session open <thread> [--harness claude-code|pi|shell] [--title T]
   nexus session close <thread> <pane|id>       a session in no pane by its ID, which \`nexus show\` gives
   nexus attach <thread>                        this terminal on the pylon's Herdr sessions, through the control plane
-  nexus start --project P [--title T] [--message M | --claude PROMPT [--model ID]] [--node N] [--branch B] [--commit C]
+  nexus start --project P [--title T] [--message M | --claude PROMPT [--model ID]] [--node N|auto] [--branch B] [--commit C]
   nexus send <thread> <text...> [--steer] [--request-id ID]
     a message to the agent, or typed into the Claude worker's session, which waits for a paused pylon to wake
   nexus watch <thread> [--interval MS]         the conversation, or the Claude worker's transcript, as it grows
@@ -218,6 +219,24 @@ function claudeText(c: ClaudeConversation): string {
   return c.readAt === null ? "Claude's transcript has not been read yet. It is read while the pylon runs." : "Claude has not written a transcript yet.";
 }
 
+const gib = (n: number) => Number(n.toFixed(1));
+/** A probe from before pylons were counted reports no CPUs or committed disk, and always 0 GiB of memory committed. */
+function capacityText(c: Partial<NonNullable<NodeSummary["capacity"]>>): string {
+  const counted = c.committedDiskGiB !== undefined;
+  const n = (v: number | undefined, known = true) => v === undefined || !known ? "unknown" : gib(v);
+  return `${n(c.committedCpus)}/${n(c.cpus)} CPUs, ${n(c.committedMemoryGiB, counted)}/${n(c.memoryGiB)} GiB memory committed, ${n(c.committedDiskGiB)} GiB disk committed, ${n(c.diskFreeGiB)} GiB disk free`;
+}
+
+const roomText = (r: Room) => `${gib(r.memoryGiB)} GiB memory, ${r.cpus} CPUs and ${gib(r.diskGiB)} GiB disk left`;
+function placementText(p: Placement): string {
+  switch (p.how) {
+    case "default": return `${p.node}, the project's default node`;
+    case "named": return `${p.node}, as the start named`;
+    case "auto": return [`auto chose ${p.node}, which had the most room left after this pylon`,
+      ...p.weighed.map((w) => "left" in w ? `${w.node} had ${roomText(w.left)}` : `${w.node} ${w.refused}`)].join("; ");
+  }
+}
+
 /** A review's state for a person: its phase and round, its reviewer, and what it needs from them. */
 function reviewText(r: Review): string {
   const phase = r.phase.kind === "landed" ? `landed as ${r.phase.commit}` : r.phase.kind === "deploying" ? `deploying ${r.phase.commit}` : r.phase.kind;
@@ -236,6 +255,7 @@ function detailText({ thread: t, pylon: p, agent, sessions, previews, ports, out
     `attention: ${attention ?? "none"}`,
     `status: ${t.status}${t.agentTurnRunning ? ", agent working" : ""}`,
     `pylon: ${p.id} on ${p.node}, ${p.actualState}${observed}`,
+    ...t.placement === undefined ? [] : [`placement: ${placementText(t.placement)}`],
     ...(p.grantsOutdated ? ["grants: older than project; start a new thread to apply current grants (archive/unarchive keeps these grants)"] : []),
     ...p.failed === null ? [] : [`failed: ${p.failed}`],
     ...p.retryRefused === null ? [] : [`retry refused: ${p.retryRefused}`],
@@ -961,7 +981,7 @@ const commands: Readonly<Record<string, Command>> = {
         json: nodes,
         text: nodes.length === 0 ? "No nodes." : table(nodes.map((n) => [
           n.name, n.state, n.observedAt === null ? "never observed" : `observed ${ago(Date.parse(n.observedAt))}`,
-          n.capacity === null ? "" : `${n.capacity.committedMemoryGiB}/${n.capacity.memoryGiB} GiB committed, ${n.capacity.diskFreeGiB} GiB disk free`,
+          n.capacity === null ? "" : capacityText(n.capacity),
         ])),
       };
     },

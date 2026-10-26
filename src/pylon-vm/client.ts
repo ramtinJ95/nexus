@@ -181,7 +181,8 @@ async function launch(
 	}
 	try {
 		await publishIdentity(join(lock, "owner"));
-		await saveJson(join(dir, "status.json"), { state: "starting", name });
+		// The boot's resources, so the node counts what a VM still coming up holds.
+		await saveJson(join(dir, "status.json"), { state: "starting", name, resources: spec.resources });
 		await rm(join(dir, "control.sock"), { force: true });
 		const env: NodeJS.ProcessEnv = {};
 		for (const key of ["PATH", "HOME", "XDG_CACHE_HOME"])

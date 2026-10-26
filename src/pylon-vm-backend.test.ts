@@ -36,7 +36,7 @@ let roots = 0;
 async function backendWith(extra: Partial<PylonVmBackendOptions> = {}) {
   const stateRoot = join(scratch, `state-${roots++}`);
   await mkdir(join(stateRoot, "instances"), { recursive: true, mode: 0o700 });
-  const backend = createPylonVmBackend({ stateRoot, artifacts, secrets: { value: () => undefined }, ...extra });
+  const backend = createPylonVmBackend({ stateRoot, artifacts, secrets: { value: () => undefined, names: () => [] }, ...extra });
   return { backend, stateRoot, instances: join(stateRoot, "instances") };
 }
 
@@ -108,7 +108,7 @@ async function fakeController(dir: string, pylonId: string, answer: (action: Rec
     const action = JSON.parse(body) as Record<string, unknown>;
     try {
       const result = action.action === "inspect"
-        ? { name: pylonId, labels: { "nexus.image": image }, status: { name: pylonId, state: state.current } }
+        ? { name: pylonId, labels: { "nexus.image": image }, status: { name: pylonId, state: state.current, resources: { cpus: 2, memoryGiB: 4 } } }
         : (actions.push(action), await answer(action));
       res.end(JSON.stringify({ ok: true, result }));
     } catch (err) {
@@ -126,8 +126,8 @@ const herdrNoServer = JSON.stringify({ id: "cli:x", error: { code: "server_not_r
 
 test("a state root too long for a pylon's control socket is refused when the backend is created", () => {
   const stateRoot = `/var/lib/${"n".repeat(40)}`;
-  assert.throws(() => createPylonVmBackend({ stateRoot, artifacts, secrets: { value: () => undefined } }), /a pylon's control socket would be 113 bytes, and a Unix socket path must stay under 104/);
-  createPylonVmBackend({ stateRoot: "/var/lib/nexus/pylons", artifacts, secrets: { value: () => undefined } });
+  assert.throws(() => createPylonVmBackend({ stateRoot, artifacts, secrets: { value: () => undefined, names: () => [] } }), /a pylon's control socket would be 113 bytes, and a Unix socket path must stay under 104/);
+  createPylonVmBackend({ stateRoot: "/var/lib/nexus/pylons", artifacts, secrets: { value: () => undefined, names: () => [] } });
 });
 
 test("an SSH repo on a node without a git SSH key fails as secret-missing and creates nothing", async () => {
@@ -161,7 +161,7 @@ test("the git SSH key and secret values reach the controller but never the insta
   await writeFile(keyFile, key);
   const { backend, instances } = await backendWith({
     gitSsh: { privateKeyFile: keyFile, knownHostsFile: keyFile },
-    secrets: { value: () => "nexus-test-secret-value" },
+    secrets: { value: () => "nexus-test-secret-value", names: () => [] },
   });
   const boot = bootOf("pylon-key", {
     resources: { cpus: 3, memoryGiB: 5, diskGiB: 8 },
@@ -180,7 +180,7 @@ test("the git SSH key and secret values reach the controller but never the insta
 });
 
 test("a secret grant whose value this node lacks fails as secret-missing", async () => {
-  const { backend, instances } = await backendWith({ secrets: { value: (name) => name === "PRESENT" ? "v" : undefined } });
+  const { backend, instances } = await backendWith({ secrets: { value: (name) => name === "PRESENT" ? "v" : undefined, names: () => ["PRESENT"] } });
   const boot = bootOf("pylon-sec", { network: { allowedHosts: ["api.stripe.com"], secrets: [{ name: "PRESENT", hosts: ["api.stripe.com"] }, { name: "STRIPE_KEY", hosts: ["api.stripe.com"] }] } });
   await assert.rejects(backend.ensureRunning(boot, live, signal()), { code: "secret-missing", message: /STRIPE_KEY/ });
   assert.equal(existsSync(join(instances, "pylon-sec")), false);
@@ -226,6 +226,23 @@ test("a pylon whose controller has yet to publish its PID is booting while its l
   assert.deepEqual((await backend.list()).map((p) => p.vm), ["booting"]);
   await rm(join(dir, "launch.lock"), { recursive: true });
   assert.deepEqual((await backend.list()).map((p) => p.vm), ["broken"]);
+});
+
+test("a pylon holds its CPUs and memory while its VM is up, from launch on, and its disk until it is deleted", async () => {
+  const { backend, instances } = await backendWith();
+  const dir = await leftInstance(instances, "pylon-up", "running", 16);
+  await fakeController(dir, "pylon-up");
+  await leftInstance(instances, "pylon-paused", "stopped", 30);
+  const launching = await leftInstance(instances, "pylon-launching", "starting", 8);
+  // What the launching client writes before its controller listens.
+  await writeFile(join(launching, "status.json"), JSON.stringify({ name: "pylon-launching", state: "starting", resources: { cpus: 2, memoryGiB: 4 } }));
+  await mkdir(join(launching, "launch.lock"));
+  await writeFile(join(launching, "launch.lock", "owner"), JSON.stringify(await identityOf(process.pid)));
+  assert.deepEqual(Object.fromEntries((await backend.list()).map((p) => [p.pylonId, [p.vm, p.holds]])), {
+    "pylon-up": ["running", { cpus: 2, memoryGiB: 4, diskGiB: 16 }],
+    "pylon-paused": ["stopped", { cpus: 0, memoryGiB: 0, diskGiB: 30 }],
+    "pylon-launching": ["booting", { cpus: 2, memoryGiB: 4, diskGiB: 8 }],
+  });
 });
 
 test("a PID handed out again, or one from an earlier boot of the host, is a dead controller and a dead launcher", async () => {
