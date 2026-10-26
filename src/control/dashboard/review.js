@@ -99,8 +99,27 @@ function fence(lines) {
 // A Claude worker refuses a message with a tab, which its prompt would swallow.
 const untab = (text) => text.replaceAll("\t", "    ");
 
-/** The line that opens a note's entry in the review, after its number. A sent message that still holds it carried the note. */
+/** The line that opens a note's entry in the review, after its number. */
 export const noteHeader = (note) => `**[${kinds[note.kind].label.toUpperCase()}]** \`${note.path}\` ${linesLabel(note.lines)}`;
+
+/**
+ * The review after a message is sent: `sent` is what the composer held when the send began, the review composed into
+ * it and its notes as they were then. A note is done if the message holds its entry's header line and the note has
+ * not changed since. Notes whose headers are the same are done only if the message holds that line once for each, so
+ * cutting one of them from the message keeps them all, as the page cannot tell which was cut.
+ */
+export function afterSend(review, sent, text) {
+  if (sent.composed === null) return review;
+  const headers = text.split("\n").map((line) => /^\d+\. (.*)$/.exec(line)?.[1]).filter((header) => header !== undefined);
+  const groups = Map.groupBy(sent.notes, noteHeader);
+  const done = new Map([...groups].filter(([header, group]) => headers.filter((h) => h === header).length >= group.length)
+    .flatMap(([, group]) => group.map((note) => [note.id, JSON.stringify(note)])));
+  return {
+    ...review,
+    notes: review.notes.filter((note) => done.get(note.id) !== JSON.stringify(note)),
+    composed: review.composed === sent.composed ? null : review.composed,
+  };
+}
 
 /** The review as a message for the reader to edit and send: one numbered entry per note, in file and line order. */
 export function formatReview(notes) {

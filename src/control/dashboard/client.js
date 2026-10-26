@@ -4,7 +4,7 @@
 // sends the conversation region as the run streams, and reads its checkout's changes into the inspector, opening
 // each changed file's diff as a tab beside the conversation.
 import { coordinator, notificationChannel, badgeCount, badgeText, seenBody } from "./notifications.js";
-import { emptyReview, formatReview, kinds, linesLabel, noteHeader, noteOn, place, rangeOf, readReview, rowsOf } from "./review.js";
+import { afterSend, emptyReview, formatReview, kinds, linesLabel, noteOn, place, rangeOf, readReview, rowsOf } from "./review.js";
 
 const main = document.querySelector("main");
 const pollMs = Number(main?.dataset.pollMs);
@@ -271,7 +271,8 @@ document.addEventListener("submit", async (event) => {
   const form = event.target;
   const thread = form.dataset.thread;
   const text = form.elements.text.value;
-  const composed = review.composed;
+  // The notes as they are now, so an edit saved while the send is out is not taken as sent.
+  const composed = { composed: review.composed, notes: review.notes.filter((n) => review.composed?.ids.includes(n.id)) };
   if (outgoing?.text !== text) outgoing = { text, requestId: newRequestId() };
   outgoing.inFlight = true;
   form.querySelector("#send").disabled = true;
@@ -1202,15 +1203,11 @@ function composeReview() {
   prompt.setSelectionRange(prompt.value.length, prompt.value.length);
 }
 
-/**
- * After a message from the composer is sent, the notes that went in the review composed before the send are done, if
- * the message still holds their entries. A note the reader cut from the message, or added or edited since, stays.
- */
-function reviewSent(composed, text) {
-  if (composed === null) return;
-  const sent = new Set(review.notes.filter((n) => composed.ids.includes(n.id) && text.includes(noteHeader(n))).map((n) => n.id));
-  if (sent.size === 0) return;
-  review = { ...review, notes: review.notes.filter((n) => !sent.has(n.id)), composed: review.composed === composed ? null : review.composed };
+/** After a message from the composer is sent, drops the notes it carried. A note cut from it, or edited since, stays. */
+function reviewSent(sent, text) {
+  const after = afterSend(review, sent, text);
+  if (after === review) return;
+  review = after;
   saveReview();
   decorate();
 }

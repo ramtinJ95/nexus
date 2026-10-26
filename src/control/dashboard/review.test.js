@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { DiffHunksRenderer } from "@pierre/diffs";
 import { diffOf } from "./diff.js";
-import { emptyReview, formatReview, maxQuoteRows, noteOn, place, readReview, rowsOf } from "./review.js";
+import { afterSend, emptyReview, formatReview, maxQuoteRows, noteOn, place, readReview, rowsOf } from "./review.js";
 
 const patch = `diff --git a/src/a.go b/src/a.go
 --- a/src/a.go
@@ -137,6 +137,48 @@ test("a quote's fence is longer than any run of backticks in it, and a long quot
   const text = formatReview([noteOn({ id: "b", kind: "comment", path: "big.txt", entry: 0, rows: bigRows, first: 0, last: bigRows.length - 1, body: "Too long." })]);
   assert.match(text, new RegExp(`\\+row ${maxQuoteRows - 1}\\n   \`\`\`\\n   \\(5 more lines not quoted\\)\\n`));
   assert.doesNotMatch(text, new RegExp(`row ${maxQuoteRows}\\b`));
+});
+
+/** The review with `notes` composed into the message box, and what the composer held as a send of it began. */
+function composedReview(notes) {
+  const composed = { text: formatReview(notes), ids: notes.map((n) => n.id) };
+  return { review: { notes, draft: null, composed }, sent: { composed, notes } };
+}
+/** The composed text without the numbered entry that starts with `header`, as a reader cuts it before sending. */
+const cut = (text, header) => text.split(/\n(?=\d+\. )/).filter((entry) => !entry.includes(`${header}\n`)).join("\n");
+
+test("a send drops the notes whose entries it holds, and keeps one cut from it and any note not composed", () => {
+  const [one, twelve, later] = [note("comment", at(1), at(1), "One.", "one"), note("comment", at(12), at(12), "Twelve.", "twelve"), note("question", 1, 1, "Later?", "later")];
+  const { review, sent } = composedReview([one, twelve]);
+  const text = cut(review.composed.text, "line 1");
+  assert.doesNotMatch(text, /One\./, "the line 1 entry is cut, though its header is the start of line 12's");
+  const after = afterSend({ ...review, notes: [...review.notes, later] }, sent, text);
+  assert.deepEqual(after.notes.map((n) => n.id), ["one", "later"]);
+  assert.equal(after.composed, null);
+});
+
+test("notes with the same header are dropped only if the message holds an entry for each", () => {
+  const notes = [note("comment", at(11), at(12), "First.", "first"), note("comment", at(11), at(12), "Second.", "second")];
+  const { review, sent } = composedReview(notes);
+  assert.deepEqual(afterSend(review, sent, review.composed.text).notes, []);
+  const one = review.composed.text.split(/\n(?=2\. )/)[0];
+  assert.deepEqual(afterSend(review, sent, one).notes.map((n) => n.id), ["first", "second"]);
+});
+
+test("a note edited while its send was out stays, with its edit, and a review composed meanwhile stays composed", () => {
+  const notes = [note("comment", 0, 0, "Old.", "c"), note("question", 1, 1, "Why?", "q")];
+  const { review, sent } = composedReview(notes);
+  const edited = { ...notes[0], body: "New." };
+  const recomposed = { text: "again", ids: ["c", "q"] };
+  const after = afterSend({ ...review, notes: [edited, notes[1]], composed: recomposed }, sent, review.composed.text);
+  assert.deepEqual(after.notes, [edited]);
+  assert.equal(after.composed, recomposed);
+});
+
+test("a send with no review composed leaves the notes", () => {
+  const notes = [note("comment", 0, 0, "Fine.", "c")];
+  const review = { notes, draft: null, composed: null };
+  assert.equal(afterSend(review, { composed: null, notes: [] }, formatReview(notes)), review);
 });
 
 test("a stored review reads back, and anything else reads as no review", () => {
