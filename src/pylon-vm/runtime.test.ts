@@ -89,10 +89,10 @@ test("an instance whose intent predates the disk marker boots as its intent said
 });
 
 /** A running instance on a fake VM whose file writes to paths `holds` names hold in `phase`. */
-async function runningOnAFakeVm(t: { after(fn: () => Promise<void>): void }, holds: RegExp, phase: WritePhase) {
+async function runningOnAFakeVm(t: { after(fn: () => Promise<void>): void }, holds: RegExp, phase: WritePhase, fails?: (cmd: string) => boolean) {
 	const dir = await mkdtemp(join(tmpdir(), "runtime-stop-"));
 	t.after(() => rm(dir, { recursive: true, force: true }));
-	const fake = fakeVm((path) => (holds.test(path) ? phase : undefined));
+	const fake = fakeVm((path) => (holds.test(path) ? phase : undefined), fails);
 	const record = { name: "pylon-a", createdAt: "2027-01-01T00:00:00.000Z", config: { diskGiB: 8, workspace: "/workspace" } } as SandboxRecord;
 	const spec = { resources: { cpus: 2, memoryGiB: 4 } } as BootSpec;
 	return { dir, fake, runtime: new SandboxRuntime(dir, record, spec, { vm: fake.vm, settleMs: 300 }) };
@@ -112,6 +112,21 @@ test("a stop refuses a file write still waiting for its turn, and then checkpoin
 	await assert.rejects(writing, /operation aborted/, "the write-files was refused, so none of its files were installed");
 	assert.equal(fake.checkpoints.length, 1);
 	await access(join(dir, "disk.qcow2"));
+});
+
+test("a stop turns the guest's disk cache back on and syncs it right before its checkpoint", async (t) => {
+	const { fake, runtime } = await runningOnAFakeVm(t, /^$/, "queued");
+	assert.equal(((await runtime.stop()) as { state: string }).state, "stopped");
+	assert.equal(fake.checkpoints.length, 1);
+	assert.deepEqual(fake.commands.slice(-2), ["echo 'write back' > /sys/block/vda/queue/write_cache", "sync"], "the sync reaches the node's disk, not only the guest's");
+});
+
+test("a stop that cannot turn the guest's disk cache back on never checkpoints, since its sync would not reach the node's disk", async (t) => {
+	const { dir, fake, runtime } = await runningOnAFakeVm(t, /^$/, "queued", (cmd) => cmd.includes("write_cache"));
+	await assert.rejects(runtime.stop(), /Stop failed before its checkpoint completed/);
+	assert.equal(fake.checkpoints.length, 0);
+	assert.equal(fake.commands.at(-1), "echo 'write back' > /sys/block/vda/queue/write_cache");
+	await assert.rejects(access(join(dir, "disk.qcow2")));
 });
 
 test("a stop refuses a file write still sending its data, and then checkpoints", async (t) => {

@@ -1,0 +1,21 @@
+write_cache=write through
+command: sh .nexus/check (npm ci, typecheck, npm test) at bfc5bc5
+
+ℹ tests 1100
+ℹ pass 1100
+ℹ fail 0
+ℹ cancelled 0
+ℹ duration_ms 188215.388829
+exit=0 seconds=201
+
+slowest tests (ms):
+     35405  --help or -h after a command prints its lines of nexus --help and exits 0 without a request
+     20573  session state is capped at sixteen, removed at end and pruned with event retention
+     16224  a quiet filtered stream scans past unrelated events and survives retention rollover
+      9947  unpreview unpublishes a port, waits for a paused pylon to run, and fails with the contract's exit codes
+      9644  files, changes and diff read the pylon's checkout, and wait for a paused pylon to run
+      9168  a Claude worker thread's page stream shows new entries during a turn, read when its session events say so rather than on a timer
+      9155  the CLI runs a thread's life through the SOCKS proxy, and --json prints the API's replies
+      8011  show reports a published preview whose service is starting as not ready, and one whose service failed as not ready, and why
+      6681  session open opens Claude Code by default, waits for a paused pylon, and session close closes a pane or says why not
+      6486  project add creates a project with the contract's defaults or its flags, and maps the API's refusals
