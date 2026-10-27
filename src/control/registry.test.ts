@@ -1,4 +1,5 @@
 import { after, test } from "node:test";
+import { spawn } from "node:child_process";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { mkdtemp, rm } from "node:fs/promises";
@@ -1253,4 +1254,24 @@ test("a read that ends on a usage limit ends the turn that ran into it, though C
   append({ kind: "turn", at: 61, durationMs: 10 });
   assert.equal(registry.thread(threadId)!.sessionTurnRunning, true, "a turn that started after the stop keeps running");
   assert.equal(attention(), "working");
+});
+
+test("a write waits while another process, such as the passkey host command, holds the registry's write lock", async (t) => {
+  const path = tempDb();
+  const registry = openRegistry(path);
+  t.after(() => registry.close());
+  const holder = spawn(process.execPath, ["-e", `
+    const { DatabaseSync } = require("node:sqlite");
+    const db = new DatabaseSync(${JSON.stringify(path)});
+    db.exec("BEGIN IMMEDIATE");
+    console.log("locked");
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 400);
+    db.exec("COMMIT");
+  `], { stdio: ["ignore", "pipe", "inherit"] });
+  await new Promise<void>((resolve) => holder.stdout.once("data", () => resolve()));
+  const started = Date.now();
+  registry.addPasskeyCode("h", 1);
+  assert.ok(Date.now() - started >= 200, "the write waited for the lock rather than failing");
+  assert.equal(registry.passkeyCodeOpen("h", 0), true);
+  await new Promise((resolve) => holder.once("exit", resolve));
 });

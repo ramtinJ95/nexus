@@ -371,7 +371,8 @@ export type Registry = ReturnType<typeof openRegistry>;
 /** Opens the file, creating it if needed, and applies any migrations it has not seen. */
 export function openRegistry(path: string, clock = Date.now) {
   const db = new DatabaseSync(path);
-  db.exec("PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;");
+  // The passkey host command writes the registry from another process, so a write waits out its short transaction.
+  db.exec("PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000;");
   migrate(db);
 
   /**
