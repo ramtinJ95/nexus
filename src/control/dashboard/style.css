@@ -312,11 +312,10 @@ h4.md-h { font-size: 1.07em; }
 .land-steps { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px; }
 .land-step { font-size: 12px; padding: 3px 10px; border-radius: 999px; border: 1px solid var(--line); color: var(--text-3); }
 .land-done { color: var(--add-text); background: var(--add-bg); border-color: transparent; }
-.land-done::before { content: "✓ "; }
+.land-done::before { content: ""; display: inline-block; width: 7px; height: 4px; margin: 0 7px 3px 1px; border: solid currentColor; border-width: 0 0 1.5px 1.5px; transform: rotate(-45deg); }
 .land-now { color: var(--work); border-color: var(--work); }
-.land-now::before { content: "● "; }
+.land-now::before, .land-failed::before { content: ""; display: inline-block; width: 6px; height: 6px; margin: 0 6px 1px 0; border-radius: 50%; background: currentColor; }
 .land-failed { color: var(--del-text); background: var(--del-bg); border-color: transparent; }
-.land-failed::before { content: "✕ "; }
 .land-skipped { text-decoration: line-through; }
 .failed-box { display: grid; gap: 10px; justify-items: start; color: var(--del-text); background: var(--del-bg); border-style: solid; border-color: transparent; }
 .failed-box p { margin: 0; }
