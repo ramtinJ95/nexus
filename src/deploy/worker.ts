@@ -6,6 +6,7 @@ import { planDeploy, type Role } from "./plan.ts";
 import { fullCommit, type ReleaseReport, type ReleaseView } from "./model.ts";
 import { jsonRequest } from "./http.ts";
 import { localApiWhois } from "../tailscale.ts";
+import { tailnetNodeIdSchema } from "../protocol.ts";
 
 export interface WorkerConfig {
   controlUrl: string;
@@ -17,7 +18,7 @@ export interface WorkerConfig {
 export function parseWorkerConfig(value: unknown): WorkerConfig {
   const v = value as WorkerConfig;
   if (typeof v !== "object" || v === null || typeof v.controlUrl !== "string" ||
-      !/^n[A-Za-z0-9]+$/.test(v.controlNodeId) || !/^[0-9a-f]{64}$/.test(v.token) ||
+      !tailnetNodeIdSchema.safeParse(v.controlNodeId).success || !/^[0-9a-f]{64}$/.test(v.token) ||
       !Number.isInteger(v.drainTimeoutMs) || v.drainTimeoutMs < 0 || v.drainTimeoutMs > 600_000 ||
       !Number.isInteger(v.healthTimeoutMs) || v.healthTimeoutMs < 1000 || v.healthTimeoutMs > 60_000) throw new Error("invalid deployer.json");
   const url = new URL(v.controlUrl);

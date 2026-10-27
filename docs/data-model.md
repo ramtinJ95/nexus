@@ -26,6 +26,7 @@ Three settings sit beside the records. `current` is the image every new pylon us
 ## Field values
 
 - A pylon `id` is `pylon-<thread id>`, at most 40 characters.
+- `Node.name` is the node's tailnet machine name: lowercase letters, digits and hyphens, starting with a letter or digit, at most 63 characters, and never `auto`. `control.json` and each node's `probe.json` take a name by the same rule.
 - `Node.tailnetNodeId` is Tailscale's stable node ID. Probes compare callers against it.
 - `Node.state` is `online` or `offline`. A node that is asleep or powered off is `offline`. That is not an error.
 - A node's capacity is its CPUs and memory, its free disk, and what its pylons hold of them: `committedCpus`, `committedMemoryGiB` and `committedDiskGiB`. A pylon holds its CPUs and memory while its VM is up, from launch until it stops, and its disk size until it is deleted. A paused pylon therefore counts toward committed disk only. Its memory is free until it wakes, which is how pausing idle pylons frees a node. Docker's backend reserves nothing, so its pylons count for nothing. Committed CPUs and memory count every VM whose controller is alive, check and reviewer threads and orphaned VMs among them.

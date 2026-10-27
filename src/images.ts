@@ -7,7 +7,7 @@
  */
 import { z } from "zod";
 import { canonicalSha256, effectiveAllowedHosts, type Checkout, type Project, type ProjectId, type RemoteProject } from "./project.ts";
-import type { JobEnvelope, NodeName } from "./protocol.ts";
+import { isImageId, isTemplateId, type JobEnvelope, type NodeName } from "./protocol.ts";
 
 /** img-<sha256 of the recipe>[:12]. The same inputs give the same ID, so a rebuild of unchanged inputs is a no-op. */
 export type ImageId = `img-${string}`;
@@ -276,5 +276,3 @@ export function garbage(held: readonly ArtifactId[], templates: readonly Templat
     ? !keepTemplate(id)
     : isImageId(id) && id !== images.current && !backsTemplate(id));
 }
-const isTemplateId = (id: ArtifactId): id is TemplateId => id.startsWith("tpl-");
-const isImageId = (id: ArtifactId): id is ImageId => id.startsWith("img-");

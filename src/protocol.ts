@@ -1,4 +1,4 @@
-import { reportedEventSchema, type ReportedEvent } from "./events.ts";
+import { pylonEventSchema, type ReportedEvent } from "./events.ts";
 /**
  * Probe contract, control-plane side. The control plane decides, and the probe executes and observes.
  *
@@ -20,6 +20,7 @@ import { once } from "node:events";
 import { Agent, request, type IncomingMessage } from "node:http";
 import { PassThrough, type Duplex, type Readable } from "node:stream";
 import { setTimeout as delay } from "node:timers/promises";
+import { z } from "zod";
 import { localApiWhois, type Whois } from "./tailscale.ts";
 import { chatgptTokenGrant, reservedPorts, type BootInputs, type LiveSpec, type SessionHarness } from "./project.ts";
 import { claudeTextProblem, record, string } from "./sessions.ts";
@@ -29,8 +30,15 @@ declare const brand: unique symbol;
 type Brand<T, B extends string> = T & { readonly [brand]: B };
 
 export type NodeName = Brand<string, "NodeName">; // "rj-firebat", "infra-testbench"
+/** A tailnet machine name, which is one DNS label, so at most 63 characters. */
+export const nodeNameSchema = z.string()
+  .regex(/^[a-z0-9][a-z0-9-]{0,62}$/, "must be a lowercase tailnet machine name of at most 63 characters")
+  .refine((name) => name !== "auto", "auto is what `start --node auto` asks for, so no node may be named it")
+  .transform((name) => name as NodeName);
 /** `pylon-${threadId}`. At most 40 characters, the pi-sandbox name limit, so thread IDs are at most 34. */
 export type PylonId = Brand<string, "PylonId">;
+export const maxPylonIdLength = 40;
+export const pylonIdSchema = z.string().max(maxPylonIdLength).regex(/^[a-z][a-z0-9-]*$/);
 export type JobId = Brand<string, "JobId">; // UUID minted by the control plane
 /** sha256 of the canonical LiveSpec. Observations echo it, so the planner sees drift without a counter. */
 export type LiveHash = Brand<string, "LiveHash">;
@@ -346,6 +354,9 @@ export const heldSecrets: readonly string[] = [chatgptTokenGrant.name];
 
 /** Tailscale's stable node ID, as LocalAPI whois reports it. It survives renames and address changes. */
 export type TailnetNodeId = Brand<string, "TailnetNodeId">;
+export const tailnetNodeIdSchema = z.string()
+  .regex(/^n[A-Za-z0-9]+$/, "must be a Tailscale stable node ID, such as nAbCdEf1CNTRL (tailscale status --json)")
+  .transform((id) => id as TailnetNodeId);
 
 export const probePort = 7480;
 const requestTimeoutMs = 10_000;
@@ -688,6 +699,13 @@ function send(socket: Duplex, bytes: Buffer): Promise<void> {
 export function encodeProbeEvent(event: ProbeEvent): string {
   return JSON.stringify(event) + "\n";
 }
+
+const reportedEventSchema = z.strictObject({
+  sequence: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
+  pylon: pylonIdSchema,
+  event: pylonEventSchema,
+  time: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
+});
 
 export function parseProbeEvent(frame: string): ProbeEvent {
   const event = record(JSON.parse(frame), "probe event");

@@ -19,7 +19,7 @@ import { artifactDirectory, manifestFiles, tarCodec } from "./artifacts.ts";
 import { JobFailure, type ArtifactStore, type BackendPylon, type Guest, type SecretSource, type VmBackend } from "./backend.ts";
 import { buildImage as buildPylonImage } from "./image-build.ts";
 import { chatgptTokenGrant, type BootInputs, type CloneRepo, type LiveSpec, type RepoInit, shellQuote as q } from "./project.ts";
-import { isImageId, isTemplateId, type PausedSession, type PylonId } from "./protocol.ts";
+import { isImageId, isTemplateId, maxPylonIdLength, pylonIdSchema, type PausedSession, type PylonId } from "./protocol.ts";
 import { imageIdOf, type ArtifactId, type CheckpointId, type ImageId, type PortableArtifactId, type TemplateManifest } from "./images.ts";
 import * as templates from "./pylon-vm-templates.ts";
 import { publicUrls } from "./public-urls.ts";
@@ -72,8 +72,6 @@ const pollMs = 500;
 const secretUpdateMs = 5_000;
 /** Measured in the pylon-vm slice: 3 GiB boots, 4, 8, 12 and 16 GiB pass the whole slice, and 2 GiB hangs at "ACPI: Core revision". */
 const minMemoryGiB = 3;
-/** The pi-sandbox instance name limit, which PylonId keeps to. */
-const maxPylonIdLength = 40;
 
 const instanceSchema = z.object({ name: z.string(), labels: z.record(z.string(), z.string()), status: statusSchema });
 type Instance = z.infer<typeof instanceSchema>;
@@ -97,9 +95,9 @@ const failureUnknown = (status: Instance["status"]) => status.startupError !== u
 
 const sessionsOf = (sessions: readonly PausedSession[] | null | undefined): Pick<Sidecar, "sessions"> => sessions === null || sessions === undefined ? {} : { sessions: [...sessions] };
 
-/** The pi-sandbox instance name rule. Pylon IDs are kept within it (see PylonId). */
+/** A pylon's instance is named by its ID, which keeps within the pi-sandbox instance name rule (see PylonId). */
 function instanceName(pylonId: PylonId): string {
-  if (!new RegExp(`^[a-z][a-z0-9-]{0,${maxPylonIdLength - 1}}$`).test(pylonId)) throw new JobFailure("invalid", `pylon ID ${pylonId} is not a valid pylon-vm instance name`);
+  if (!pylonIdSchema.safeParse(pylonId).success) throw new JobFailure("invalid", `pylon ID ${pylonId} is not a valid pylon-vm instance name`);
   return pylonId;
 }
 
