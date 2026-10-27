@@ -28,12 +28,11 @@ import { listeningFacts } from "../listening.ts";
 import { readBody } from "../request-body.ts";
 import { gitFacts } from "../git-facts.ts";
 import { startGateway } from "./gateway.ts";
-import { createPylonApi, type HostBridge } from "./pylon-api.ts";
+import { createPylonApi } from "./pylon-api.ts";
 import { createTailscaleServe, parseServeStatus, readRoutes, type HttpsGet, type TailscaleCli } from "./serve.ts";
 import type { NodeSecrets } from "./config.ts";
 
 export interface ProbeOptions {
-  eventJournal?: string;
   node: NodeName;
   host: string;
   /** 0 picks a free port. */
@@ -42,8 +41,6 @@ export interface ProbeOptions {
   whois: Whois;
   backend: VmBackend;
   secrets: NodeSecrets;
-  /** Whether the backend has a git SSH key, so a pylon can clone over SSH. Default false. */
-  gitSsh?: boolean;
   jobDeadlineMs?: { readonly [K in Job["kind"]]: number };
   /** The probe's log, which also receives the stderr of raw pipes. Default console.error. */
   log?: (message: string) => void;
@@ -59,8 +56,6 @@ export interface ProbeOptions {
   };
   /** Tests only. A peer probe is its tailnet machine name on probePort. */
   peerAddress?: (node: NodeName) => { host: string; port: number };
-  /** The backend's end of NEXUS_API, which the in-pylon `nexus` CLI calls. Omitted: those calls go unanswered. */
-  hostBridge?: HostBridge;
   /** How often each running pylon's listening ports are read for a change between snapshots. Default 10 s. */
   listeningPollMs?: number;
 }
@@ -98,8 +93,8 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
   const deadlines = options.jobDeadlineMs ?? jobDeadlineMs;
   const peerAddress = options.peerAddress ?? ((peer: NodeName) => ({ host: peer, port: probePort }));
   const bootId = randomUUID();
-  if (options.eventJournal !== undefined) await mkdir(dirname(options.eventJournal), { recursive: true, mode: 0o700 });
-  const journal = eventJournal(options.eventJournal ?? ":memory:");
+  if (backend.eventJournal !== undefined) await mkdir(dirname(backend.eventJournal), { recursive: true, mode: 0o700 });
+  const journal = eventJournal(backend.eventJournal ?? ":memory:");
   const shutdown = new AbortController();
   const previews = options.previews === undefined ? null : {
     ...options.previews,
@@ -407,7 +402,7 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
       jobs,
       pylons: await Promise.all(pylons.map(observation)),
       previewRoutes: previews === null ? [] : [...previews.gateway.routes].map(([httpsPort, route]) => ({ httpsPort, ...route })),
-      grants: { secrets: options.secrets.names(), gitSsh: options.gitSsh ?? false },
+      grants: { secrets: options.secrets.names(), gitSsh: backend.gitSsh ?? false },
       claudeLaunchRepeatable: true,
       heldSecrets,
     };
@@ -647,7 +642,7 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
   }
   const address = server.address();
   if (address === null || typeof address === "string") throw new Error(`unexpected server address ${address}`);
-  const bridge = await options.hostBridge?.(api.answer).catch(async (err: unknown) => {
+  const bridge = await backend.hostBridge?.(api.answer).catch(async (err: unknown) => {
     await Promise.all([new Promise((resolve) => server.close(resolve)), previews?.gateway.close()]);
     throw err;
   });

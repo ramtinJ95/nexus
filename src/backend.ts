@@ -17,6 +17,7 @@ import type { ArtifactCopy, BrokenCause, ByteStream, CommandResult, Job, JobErro
 import { checkoutDir, closeSession, dropFailedSession, openSession, sendToClaude } from "./sessions.ts";
 import { linkedName, type BootInputs, type LiveSpec, type OverlayFile, type PreviewAssignment, type ServiceDecl, type ServiceName } from "./project.ts";
 import type { ArtifactId, ArtifactManifest, CheckpointId, ImageId, ImageRecipe, PortableArtifactId, TemplateBuildInputs, TemplateId } from "./images.ts";
+import type { HostBridge } from "./probe/pylon-api.ts";
 
 export interface VmBackend {
   /** Boot from `boot.source` unless already running, then apply `live`. Converges from any partial state. */
@@ -42,6 +43,12 @@ export interface VmBackend {
    * the pylons it could not reach and why. A pylon booting meanwhile starts with whatever value it was given.
    */
   updateSecret(name: string, value: string, signal?: AbortSignal): Promise<readonly { pylonId: PylonId; reason: string }[]>;
+  /** Whether the node has a git SSH key, so a pylon can clone over SSH. Omitted: it has none. */
+  readonly gitSsh?: boolean;
+  /** The SQLite file the probe journals its pylons' events in. Omitted: the journal is in memory, and a restart loses it. */
+  readonly eventJournal?: string;
+  /** Its end of NEXUS_API, which the in-pylon `nexus` CLI calls. Omitted: those calls go unanswered. */
+  readonly hostBridge?: HostBridge;
 }
 
 export interface BackendPylon {

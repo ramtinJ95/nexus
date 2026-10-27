@@ -28,6 +28,7 @@ import { checkoutDir } from "./sessions.ts";
 import { controlSocket, run, socketPathLimit } from "./pylon-vm/client.ts";
 import { statusSchema, type BootSpec, type SandboxConfig } from "./pylon-vm/contracts.ts";
 import { hostBridgeSocket } from "./pylon-vm/host-bridge.ts";
+import { pylonVmHostBridge } from "./probe/pylon-api.ts";
 import { asUser, controllerLog, pylonGuest } from "./pylon-vm/pylon-guest.ts";
 import { readJson, saveJson } from "./json-file.ts";
 import { directory, existsError, readRecord } from "./pylon-vm/storage.ts";
@@ -506,6 +507,9 @@ export function createPylonVmBackend(options: PylonVmBackendOptions): VmBackend 
   return {
     artifacts,
     list,
+    gitSsh: options.gitSsh !== undefined,
+    eventJournal: `${stateRoot}/events.sqlite`,
+    hostBridge: pylonVmHostBridge(stateRoot),
 
     async ensureRunning(bootInputs, live, signal) {
       const { pylonId } = bootInputs;

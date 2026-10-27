@@ -455,7 +455,7 @@ test("an observer learns at once that the probe got a held secret it did not hav
 });
 
 test("observations name the secrets the node holds, never their values, and whether it has a git SSH key", async (t) => {
-  const { client } = await setup(t, { secrets: nodeSecrets({ value: () => "s3cr3t", names: () => ["GH_TOKEN"] }), gitSsh: true });
+  const { client } = await setup(t, { secrets: nodeSecrets({ value: () => "s3cr3t", names: () => ["GH_TOKEN"] }), backend: { ...fakeBackend().backend, gitSsh: true } });
   for await (const e of client.observe(AbortSignal.timeout(5000))) {
     const observation = e.type === "snapshot" ? e.observation : assert.fail();
     assert.deepEqual(observation.grants, { secrets: ["GH_TOKEN"], gitSsh: true });
@@ -916,7 +916,7 @@ test("NEXUS_API calls reach the API as the pylon the bridge named, get the URL o
   const fake = fakeBackend();
   const guest = { ...fakeGuest(() => ({ exitCode: 1, output: "unused" })), linkPort: async () => "web", previewOrigin: () => "http://127.0.0.1:9" as const };
   const previews = { gatewayPort, routesFile: join(dir, "routes.json"), tailscale: fakeTailscale().cli, get: viaGateway(() => `http://127.0.0.1:${gatewayPort}`).get };
-  const { client, probe } = await setup(t, { backend: { ...fake.backend, guest: () => guest }, previews, hostBridge });
+  const { client, probe } = await setup(t, { backend: { ...fake.backend, guest: () => guest, hostBridge }, previews });
   assert.ok(bridge.answer, "the probe started its bridge");
   const preview = bridge.answer(pylonId, JSON.stringify({ op: "preview", port: 3000 }));
   const env = envelope({ ...spawnJob, live: { previews: [{ service: "web", httpsPort: 10101 }], overlay: [] } }, node, Date.now());
