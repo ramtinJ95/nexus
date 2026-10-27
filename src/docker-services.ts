@@ -12,7 +12,7 @@
  */
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { linkedName, parseServicesFile, type ServiceDecl, type ServiceName } from "./project.ts";
+import { linkedName, parseServicesFile, wantsPreview, withPublicUrls, type ServiceDecl, type ServiceName } from "./project.ts";
 import type { ServiceFact } from "./protocol.ts";
 import { checkoutDir } from "./sessions.ts";
 
@@ -23,7 +23,6 @@ export const publishedPorts = { first: 8000, last: 8007 } as const;
 
 const servicesFile = `${checkoutDir}/.nexus/services.yaml`;
 const root = "/run/nexus-services";
-const reference = /\$\{services\.([a-z0-9][a-z0-9-]{0,31})\.publicURL\}/g;
 const pollMs = 200;
 
 interface Known {
@@ -110,14 +109,7 @@ export function dockerServices() {
 
   function environment(k: Known, name: string): { env: Record<string, string>; key: string } {
     const decl = k.declared[name]!;
-    const env: Record<string, string> = {};
-    for (const [key, value] of Object.entries(decl.env ?? {})) {
-      env[key] = value.replace(reference, (_match, dependency: string) => {
-        const url = k.urls[dependency];
-        if (url === undefined) throw new Error(`Service ${name} needs the public URL of ${dependency}, which has no preview assigned yet`);
-        return url;
-      });
-    }
+    const env = withPublicUrls(name, decl.env ?? {}, k.urls);
     env.PORT = String(decl.port);
     const url = k.urls[name];
     if (url !== undefined) env.PUBLIC_URL = url;
@@ -298,4 +290,3 @@ export function dockerServices() {
   };
 }
 
-const wantsPreview = (decl: ServiceDecl) => !!decl.preview || (decl.previews?.length ?? 0) > 0;

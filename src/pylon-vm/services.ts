@@ -1,9 +1,8 @@
 import { readFile } from "node:fs/promises";
 import { join, posix } from "node:path";
 import type { VM } from "@earendil-works/gondolin";
-import { parseDocument } from "yaml";
 import { z } from "zod";
-import { linkedName, relayPorts, reservedPortMessage, reservedPorts, shellQuote as q } from "../project.ts";
+import { linkedName, parseServicesFile, relayPorts, reservedPortMessage, reservedPorts, serviceReference, shellQuote as q, wantsPreview, withPublicUrls } from "../project.ts";
 import { configSchema, type Service } from "./contracts.ts";
 import { checked, guestExists, serviceRunning, startService, stopService } from "./guest.ts";
 import { openPortal } from "./portals.ts";
@@ -11,7 +10,6 @@ import { noRelayStatus, readRelayStatus, relayLog, writeRelayMap } from "./relay
 import { existsError, saveJson } from "./storage.ts";
 
 const relayPortList = Array.from({ length: relayPorts.last - relayPorts.first + 1 }, (_, i) => relayPorts.first + i);
-const reference = /\$\{services\.([a-z0-9][a-z0-9-]{0,31})\.publicURL\}/g;
 type Entry = {
 	service: Service;
 	declared: boolean;
@@ -139,12 +137,7 @@ export class GuestServices {
 		const text = await this.vm.fs.readFile(this.configPath, {
 			encoding: "utf8",
 		});
-		if (Buffer.byteLength(text) > 1048576)
-			throw new Error("Service YAML exceeds 1 MiB");
-		const document = parseDocument(text, { uniqueKeys: true });
-		if (document.errors.length)
-			throw new Error(`Invalid service YAML: ${document.errors[0]?.message}`);
-		return configSchema.parse(document.toJS({ maxAliasCount: 20 })).services;
+		return configSchema.parse(parseServicesFile(text)).services;
 	}
 	private async declarations(): Promise<Record<string, Service>> {
 		const services = await this.declaredFile();
@@ -186,14 +179,14 @@ export class GuestServices {
 				);
 			visiting.add(name);
 			for (const value of Object.values(service.env))
-				for (const match of value.matchAll(reference)) {
+				for (const match of value.matchAll(serviceReference)) {
 					const dependency = match[1];
 					if (!dependency) continue;
 					const target = config[dependency];
 					if (
 						!target ||
 						!this.declaredNames.has(dependency) ||
-						(!target.preview && !target.previews.length)
+						!wantsPreview(target)
 					)
 						throw new Error(
 							`Service ${name} references ${dependency}, which must be declared with a preview`,
@@ -431,20 +424,7 @@ export class GuestServices {
 	}
 	/** The env and PUBLIC_URL a start gives the service. Throws while a URL it needs is unassigned. */
 	private environment(name: string, entry: Entry): { env: Record<string, string>; url: string | undefined } {
-		const env = Object.fromEntries(
-			Object.entries(entry.service.env).map(([key, value]) => [
-				key,
-				value.replace(reference, (_match, dependency: string) => {
-					const url = this.publicUrls[dependency];
-					if (!url)
-						throw new Error(
-							`Service ${name} needs the public URL of ${dependency}, which has no preview assigned yet. It starts once one is`,
-						);
-					return url;
-				}),
-			]),
-		);
-		return { env, url: this.publicUrls[name] };
+		return { env: withPublicUrls(name, entry.service.env, this.publicUrls), url: this.publicUrls[name] };
 	}
 	private envKey(name: string, entry: Entry): string {
 		try {
@@ -719,4 +699,3 @@ export const answersScript = [
 	"print(ok)",
 ].join("\n");
 
-const wantsPreview = (service: Service) => !!service.preview || service.previews.length > 0;
