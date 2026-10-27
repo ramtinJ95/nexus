@@ -723,9 +723,16 @@ test("each command kind waits for the reads or its Claude session or nothing, pu
       return base.exec(argv, options);
     },
     services: async () => ({ services: [] }),
-    linkPort: async (port) => `port-${port}`,
+    async linkPort(port) {
+      if (port === sentinelPort) sentinelReads.push(listed);
+      return `port-${port}`;
+    },
     unlinkPort: async () => null,
   };
+  const sentinelPort = 4000;
+  /** The pylon reads made so far, as each sentinel link found them, which is after every read queued before it ran. */
+  const sentinelReads: number[] = [];
+  let listed = 0;
   const { client, fake } = await setup(t, { listeningPollMs: 600_000 }, guest);
   await running(client);
   const commands: Record<string, PylonCommand> = {
@@ -784,18 +791,24 @@ test("each command kind waits for the reads or its Claude session or nothing, pu
   });
   assert.deepEqual(sessionWaits, ["open-session with prompt and resume", "send-claude"], "only a send and a prompted launch wait for another command to the same Claude session");
 
-  let listed = 0;
   const list = fake.backend.list;
   fake.backend.list = () => { listed++; return list(); };
   const abort = new AbortController();
   t.after(() => abort.abort());
   const events = client.observe(abort.signal)[Symbol.asyncIterator]();
   assert.equal((await events.next()).value?.type, "snapshot");
-  /** Whether answering the command started a snapshot read for the observers, beyond the read of the pylon's state that every command makes first. */
+  /**
+   * Whether answering the command queued a snapshot read for the observers. A link runs in the read queue, so the reads
+   * between two sentinel links are the first one's own publish and pylon read, the command's pylon read, any read it
+   * queued, and the second link's pylon read.
+   */
+  const sentinel = () => client.command(pylonId, { kind: "link-port", port: sentinelPort });
   async function publishes(command: PylonCommand): Promise<boolean> {
-    const before = listed;
+    await sentinel();
+    const before = sentinelReads.at(-1)!;
     await client.command(pylonId, command);
-    return listed - before - 1 > 0;
+    await sentinel();
+    return sentinelReads.at(-1)! - before - 3 > 0;
   }
   const published: Record<string, boolean> = {};
   for (const name of ["exec", "open-session", "close-session", "drop-failed-session", "send-claude-outcome", "service", "link-port", "unlink-port"]) published[name] = await publishes(commands[name]!);
