@@ -326,7 +326,7 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
    */
   function waitOn(r: Review, t: Thread, who: "builder" | "reviewer", missing: string | null = null): Review {
     if (now() - r.since > answerMs) return toPerson(r, `The ${who} gave no answer within ${answerMs / 3_600_000} hours in round ${r.rounds.length}.`);
-    const turnEnded = !t.agentTurnRunning && t.sessionTurnRunning !== true && t.lastReplyAt !== null && t.lastReplyAt > r.since && now() - t.lastReplyAt > replyGraceMs;
+    const turnEnded = !t.working && t.lastReplyAt !== null && t.lastReplyAt > r.since && now() - t.lastReplyAt > replyGraceMs;
     if (!turnEnded) return r;
     if (r.nudges >= maxNudges) return toPerson(r, `The ${who} ended ${maxNudges + 1} turns in a row without an answer Nexus could read, in round ${r.rounds.length}.`);
     return send(r, who, (token) => reminder(who, missing, token), r.phase, r.nudges + 1);

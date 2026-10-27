@@ -28,7 +28,7 @@ function seeded(t: import("node:test").TestContext) {
   const thread: Thread = {
   seenAt: null, lastReplyAt: null,
     id: threadId, title: "t", project: "acme" as ProjectId, pylonId, status: "active", conversationId: "1", startedBy: "nLAPTOP",
-    createdAt: 0, agentTurnRunning: true, lastAgentActivityAt: 0, lastHumanActivityAt: 0,
+    createdAt: 0, agentTurnRunning: true, working: true, lastAgentActivityAt: 0, lastHumanActivityAt: 0,
   };
   const { desired: _, ...pylon } = newPylonRecord({
     thread: threadId, pylonId, node, desired: "running",

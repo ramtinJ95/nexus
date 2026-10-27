@@ -1067,6 +1067,7 @@ test("a Claude worker that works shows its turn's call running, the turn's clock
   s.registry.reportSession(node, { sequence: 1, pylon: thread.pylonId, time: Date.now(), event: { kind: "session.turn-started", session: "s1" } });
 
   const html = (await s.call("GET", `/threads/${thread.id}`)).text;
+  assert.match(html, /<span data-pylon="running" data-turn="true" /, "the client reads the checkout's changes once the turn ends, not on each of its heartbeats");
   const { rows, dock } = conversationOf(html);
   assert.deepEqual(rows, [
     "You Earlier",

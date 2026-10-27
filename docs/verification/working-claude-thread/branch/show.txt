@@ -1,0 +1,11 @@
+$ nexus show th-16dc9f271f3a
+th-16dc9f271f3a  Fix the flaky stream test
+project: nexus
+Claude worker: started, model claude-opus-5-5
+attention: working
+status: active, agent working
+pylon: pylon-th-16dc9f271f3a on verify-node, running, observed 0s ago
+size: 2 CPUs, 4 GiB memory, 10 GiB disk
+placement: verify-node, the project's default node
+setup: fresh boot runs .nexus/setup, because the control plane could not read .nexus/setup at main: the capture reads no remote
+PR watch: off (no control-plane GitHub token configured)

@@ -13,15 +13,15 @@ export function coordinator(notify) {
     const next = new Map(rows.map((row) => [row.id, row]));
     for (const [id] of pending) {
       const row = next.get(id);
-      if (!row || row.attention !== "reply" || row.agentTurnRunning) pending.delete(id);
+      if (!row || row.attention !== "reply" || row.working) pending.delete(id);
     }
     if (previous !== null) {
       for (const row of rows) {
         const before = previous.get(row.id);
         const changed = before?.attention !== row.attention;
         if (changed && (row.attention === "failed" || row.attention === "decision" || row.attention === "parked" || row.attention === "limited")) notify(row);
-        else if (row.attention === "reply" && !row.agentTurnRunning
-          && (changed || before?.lastReplyAt !== row.lastReplyAt || before?.agentTurnRunning)) pending.set(row.id, now + 2000);
+        else if (row.attention === "reply" && !row.working
+          && (changed || before?.lastReplyAt !== row.lastReplyAt || before?.working)) pending.set(row.id, now + 2000);
       }
     }
     for (const [id, due] of pending) if (now >= due) {

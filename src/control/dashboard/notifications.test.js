@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { coordinator, notificationChannel, badgeCount, badgeText, seenBody } from "./notifications.js";
 
-const row = (attention, agentTurnRunning = false, id = "t1") => ({ id, attention, agentTurnRunning });
+const row = (attention, working = false, id = "t1") => ({ id, attention, working });
 test("initial states are silent; failures and parked notify immediately", () => {
   const events = [];
   const update = coordinator((r) => events.push(r));
@@ -34,6 +34,19 @@ test("reply waits two seconds, and a follow-up cancels even when unread reply ou
   update([], 9500);
   update([], 12000);
   assert.equal(events.length, 1);
+});
+test("a Claude worker's follow-up cancels a pending reply, and its next reply gets its own grace period", () => {
+  const events = [];
+  const update = coordinator((r) => events.push(r));
+  const claude = (lastReplyAt, working) => ({ id: "t1", attention: "reply", agentTurnRunning: false, sessionTurnRunning: working || undefined, working, lastReplyAt });
+  update([row(null)], 0);
+  update([claude(100, false)], 100);
+  update([claude(100, true)], 1000);
+  update([claude(100, true)], 5000);
+  assert.deepEqual(events, [], "no reply notifies while the session's turn runs");
+  update([claude(6000, false)], 6000);
+  update([claude(6000, false)], 8000);
+  assert.deepEqual(events, [claude(6000, false)]);
 });
 test("focused other thread gets only toast; background needs secure context and permission", () => {
   assert.equal(notificationChannel(true, "t2", "t1", true, "granted"), "toast");

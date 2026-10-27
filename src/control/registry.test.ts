@@ -26,7 +26,7 @@ const project: RemoteProject = {
 const thread: Thread = {
   seenAt: null, lastReplyAt: null,
   id: threadId, title: "fix it", project: project.id, pylonId, status: "active", conversationId: null, startedBy: "nLAPTOP",
-  createdAt: 1_000, agentTurnRunning: false, lastAgentActivityAt: 0, lastHumanActivityAt: 1_000,
+  createdAt: 1_000, agentTurnRunning: false, working: false, lastAgentActivityAt: 0, lastHumanActivityAt: 1_000,
 };
 const { desired: _, ...pylon } = newPylonRecord({
   thread: threadId, pylonId, node, desired: "running",
@@ -873,6 +873,34 @@ test("a thread is working since the earliest start of its running harness turn a
 
   registry.recordActivity(threadId, { agentTurnRunning: true });
   assert.equal(since(), now, "a turn reported without its activity starts when control hears of it");
+});
+
+test("a thread works while its harness turn or a live session turn runs, such as a Claude worker's", async (t) => {
+  const { sessionActivityTtlMs } = await import("../events.ts");
+  let now = 10_000_000;
+  const registry = seeded(tempDb(), () => now);
+  t.after(() => registry.close());
+  let sequence = 0;
+  const report = (kind: import("../events.ts").PylonEvent["kind"]) => registry.reportSession(node, {
+    sequence: ++sequence, time: now, pylon: pylonId, event: { kind, session: "c1", at: now },
+  });
+  const working = () => registry.thread(threadId)!.working;
+  assert.equal(working(), false, "nothing runs");
+  report("session.turn-started");
+  assert.equal(working(), true, "the session's turn runs while no harness turn does");
+  report("session.waiting");
+  assert.equal(working(), false, "a waiting session is not working");
+  now += 1_000;
+  report("session.heartbeat");
+  assert.equal(working(), true);
+  report("session.turn-ended");
+  assert.equal(working(), false);
+  registry.recordActivity(threadId, { agent: now, agentTurnRunning: true });
+  assert.equal(working(), true, "the harness turn runs");
+  registry.recordActivity(threadId, { agent: now, agentTurnRunning: false });
+  report("session.turn-started");
+  now += sessionActivityTtlMs;
+  assert.equal(working(), false, "a session's turn stops working when its lease runs out");
 });
 
 test("a turn running before turn starts were recorded has no known start", async (t) => {

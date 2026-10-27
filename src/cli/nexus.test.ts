@@ -490,13 +490,13 @@ test("show reports a published preview whose service is starting as not ready, a
   assert.equal((await s.nexus(["ports", thread.id])).stdout, `8003  web  ${preview.url} (not ready: ${unrouted})\n`);
 });
 
-test("a preview from a control plane older than Preview.failed reads as not failed, and a session older than Session.state as running", async (t) => {
+test("a preview from a control plane older than Preview.failed reads as not failed, a session older than Session.state as running, and a thread older than Thread.working as working while its session turn runs", async (t) => {
   const s = await setup(t);
   // That control plane's shapes: a Preview with no `failed`, and a Session with no `id`, `state` or `message`.
   const web = { pylon: "pylon-th-old", service: "web", httpsPort: 10200, ready: true, url: "https://rj-firebat.tail.ts.net:10200/" };
   const api = { ...web, service: "api", httpsPort: 10201, ready: false, url: "https://rj-firebat.tail.ts.net:10201/" };
   const detail = {
-    thread: { id: "th-old", title: "old", project: "acme", status: "active", agentTurnRunning: false },
+    thread: { id: "th-old", title: "old", project: "acme", status: "active", agentTurnRunning: false, sessionTurnRunning: true },
     pylon: { id: "pylon-th-old", node, actualState: "running", failed: null, observedAt: null, retryRefused: null },
     sessions: [{ pylon: "pylon-th-old", herdrPane: "w1:p1", harness: "pi", harnessSessionId: null, status: "idle", title: "plan" }], previews: [api, web], ports: [{ port: 3000, service: "web", preview: web }, { port: 4000, service: "api", preview: api }], outputs: [], agent: null,
   };
@@ -514,6 +514,7 @@ test("a preview from a control plane older than Preview.failed reads as not fail
   assert.match(shown, /^preview: api at https:\/\/rj-firebat\.tail\.ts\.net:10201\/, not ready$/m);
   assert.match(shown, /^preview: web at https:\/\/rj-firebat\.tail\.ts\.net:10200\/$/m);
   assert.match(shown, /^session: pi "plan" in pane w1:p1, idle$/m);
+  assert.match(shown, /^status: active, agent working$/m);
   assert.equal(await run(["ports", "th-old"]), `3000  web  ${web.url}\n4000  api  ${api.url} (not served yet)\n`);
   assert.equal(await run(["preview", "th-old", "3000"]), `${web.url}\n`);
 });
@@ -1580,6 +1581,20 @@ test("show exposes the registry's failed worker and its selected model", async (
   assert.ok(text.includes(message));
   assert.equal(s.registry.events().filter((e) => e.kind === "thread.failed").at(-1)?.payload.message, detail.claudeWorker.message);
   assert.equal((await s.nexus(["start", "--project", "acme", "--title", "no worker", "--model", "x"])).code, 64);
+});
+
+test("threads and show say a Claude worker is working while its session's turn runs", async (t) => {
+  const s = await setup(t);
+  const thread: Thread = await s.json(["start", "--project", "acme", "--claude", "count the lines"]);
+  s.registry.setClaudeWorker(thread.id, "/poteto-mode count the lines", "started", undefined, "s1");
+  const report = (sequence: number, kind: "session.turn-started" | "session.turn-ended") =>
+    s.registry.reportSession(node, { sequence, pylon: thread.pylonId, time: Date.now(), event: { kind, session: "s1" } });
+  report(1, "session.turn-started");
+  assert.match((await s.nexus(["threads"])).stdout, new RegExp(`${thread.id} +active +working +pylon`));
+  assert.match((await s.nexus(["show", thread.id])).stdout, /^status: active, agent working$/m);
+  report(2, "session.turn-ended");
+  assert.match((await s.nexus(["threads"])).stdout, new RegExp(`${thread.id} +active +- +pylon`));
+  assert.match((await s.nexus(["show", thread.id])).stdout, /^status: active$/m);
 });
 
 test("threads, show and conversation say a Claude worker stopped on its usage limit, until when, and how to resume it", async (t) => {

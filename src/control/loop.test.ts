@@ -279,7 +279,7 @@ function seed(registry: Registry, activity: Partial<Pick<Thread, "agentTurnRunni
   const thread: Thread = {
   seenAt: null, lastReplyAt: null,
     id, title: "t", project: "acme" as ProjectId, pylonId, status: "active", conversationId: null, startedBy: "nLAPTOP",
-    createdAt: Date.now(), agentTurnRunning: false, lastAgentActivityAt: 0, lastHumanActivityAt: Date.now(), ...activity,
+    createdAt: Date.now(), agentTurnRunning: false, working: false, lastAgentActivityAt: 0, lastHumanActivityAt: Date.now(), ...activity,
   };
   const { desired: _, ...pylon } = newPylonRecord({
     thread: id, pylonId, node, desired: "running",

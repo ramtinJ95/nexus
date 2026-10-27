@@ -291,6 +291,9 @@ function reviewText(r: Review): string {
   ].join("\n");
 }
 
+/** A control plane older than `Thread.working` sends none. */
+const working = (t: Thread) => t.working ?? (t.agentTurnRunning || t.sessionTurnRunning === true);
+
 function detailText({ thread: t, pylon: p, agent, sessions, previews, ports, outputs, prWatch, pullRequests, claudeWorker, attention, review }: ThreadDetail): string {
   const observed = p.observedAt === null ? "" : `, observed ${ago(Date.parse(p.observedAt))}`;
   return [
@@ -299,7 +302,7 @@ function detailText({ thread: t, pylon: p, agent, sessions, previews, ports, out
     ...(claudeWorker === undefined ? [] : [`Claude worker: ${claudeWorker.state}, model ${claudeWorker.model ?? "unknown"}`, ...(claudeWorker.message === undefined ? [] : [`failed: ${claudeWorker.message}`])]),
     `attention: ${attention ?? "none"}`,
     ...t.usageLimit === undefined ? [] : [`usage limit: ${usageLimitText(t.usageLimit, Date.now())}. \`nexus send ${t.id} continue\` resumes it once the limit resets`],
-    `status: ${t.status}${t.agentTurnRunning ? ", agent working" : ""}`,
+    `status: ${t.status}${working(t) ? ", agent working" : ""}`,
     `pylon: ${p.id} on ${p.node}, ${p.actualState}${observed}`,
     // A control plane older than the size in thread detail sends none.
     ...p.resources === undefined ? [] : [`size: ${p.resources.cpus} CPUs, ${p.resources.memoryGiB} GiB memory, ${p.resources.diskGiB} GiB disk`],
@@ -406,7 +409,7 @@ async function whenRunning<T>(api: Api, id: string, send: () => Promise<T>, undo
   }
 }
 
-const threadRow = (t: ThreadRow) => [t.id, t.status, t.usageLimit !== undefined ? usageLimitText(t.usageLimit, Date.now()) : t.agentTurnRunning ? "working" : "-", `pylon ${t.pylon.actualState}`, t.project, ago(t.createdAt), t.title];
+const threadRow = (t: ThreadRow) => [t.id, t.status, t.usageLimit !== undefined ? usageLimitText(t.usageLimit, Date.now()) : working(t) ? "working" : "-", `pylon ${t.pylon.actualState}`, t.project, ago(t.createdAt), t.title];
 
 /** The first line of a message, as the title of the thread it starts. */
 const titleOf = (message: string) => clip(message.split("\n").find((line) => line.trim() !== "")?.trim() ?? message, 80);
