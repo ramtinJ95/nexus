@@ -55,6 +55,9 @@ export const recordedHolds = (review: Review): string[] => [
  */
 export const holdsAgain = (reason: string) => reason.startsWith(personOnly) || reason === claudeApproved || reason === checkChanged;
 
+/** The one hold the review loop answers itself, by having the builder rebase. */
+export const conflictHold = "The branch conflicts with its base.";
+
 const squash = (text: string) => text.replace(/\s+/g, " ").trim().toLowerCase();
 
 const conditions: readonly ((facts: LandingFacts) => string[])[] = [
@@ -80,7 +83,7 @@ const conditions: readonly ((facts: LandingFacts) => string[])[] = [
     if (pr.pr.state !== "open") return [`Pull request #${pr.pr.number} is ${pr.pr.state}.`];
     return [
       ...pr.detail.head === head ? [] : [`The pull request's head is ${pr.detail.head}, not the approved ${head}.`],
-      ...pr.pr.conflict === true ? ["The branch conflicts with its base."] : [],
+      ...pr.pr.conflict === true ? [conflictHold] : [],
       ...pr.pr.checks === "failed" || pr.pr.checks === "pending" ? [`The pull request's GitHub checks are ${pr.pr.checks}.`] : [],
     ];
   },

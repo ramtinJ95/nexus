@@ -24,7 +24,7 @@ import { defaultClaudeModel } from "../claude-state.ts";
 import type { GitHub, PrSnapshot, PullRequest } from "./github.ts";
 import { HttpError } from "./http-error.ts";
 import type { Inbox } from "./inbox.ts";
-import { landingHolds } from "./policy.ts";
+import { conflictHold, landingHolds } from "./policy.ts";
 import { checkCaller, type CheckRuns } from "./gate.ts";
 import { releaseView } from "./releases.ts";
 import type { Registry, Thread, ThreadId } from "./registry.ts";
@@ -77,8 +77,11 @@ export type Finding = z.output<typeof findingSchema>;
 export type Verdict = z.output<typeof verdictSchema>;
 export type Answer = z.infer<typeof answersSchema>["answers"][number];
 
-/** A round is one review of `head`. `check` is the repository's checks at `head`, run once the reviewer approves it. */
-export interface Round { head: string; verdict: Verdict | null; check: { passed: boolean; output: string } | null; answers: Answer[] | null }
+/**
+ * A round is one review of `head`. `check` is the repository's checks at `head`, run once the reviewer approves it.
+ * `conflict` is the base that `head` conflicted with when the landing tried to merge it, which the builder rebases onto.
+ */
+export interface Round { head: string; verdict: Verdict | null; check: { passed: boolean; output: string } | null; answers: Answer[] | null; conflict?: { base: string } }
 
 export type Phase =
   /** The reviewer has the round's request and owes its verdict. */
@@ -189,8 +192,12 @@ const latest = <T extends { token: string }>(replies: readonly string[], fence: 
 
 const checkFinding = (round: Round): Finding[] => round.check?.passed === false
   ? [{ id: "CHECK", priority: "P0", where: ".nexus/check", summary: `.nexus/check failed at ${round.head}`, detail: round.check.output }] : [];
-/** What the builder must answer for a round: the reviewer's findings and a failed check. */
-export const findingsOf = (round: Round): Finding[] => [...round.verdict?.findings ?? [], ...checkFinding(round)];
+const conflictFinding = (round: Round): Finding[] => round.conflict === undefined ? [] : [{
+  id: "CONFLICT", priority: "P0", where: `origin/${round.conflict.base}`, summary: `The branch conflicts with ${round.conflict.base}, so ${round.head} cannot merge`,
+  detail: `Rebase the branch onto the current base: git fetch origin && git rebase origin/${round.conflict.base}. Resolve each conflict so that both sides' intent survives: keep what ${round.conflict.base} changed and what this pull request adds. Run the typecheck and the full test suite again, then push with git push --force-with-lease. The rebased head gets a new review round. If you cannot resolve a conflict, reject CONFLICT with the reason, and the person takes over.`,
+}];
+/** What the builder must answer for a round: the reviewer's findings, a failed check and a conflict with the base. */
+export const findingsOf = (round: Round): Finding[] => [...round.verdict?.findings ?? [], ...checkFinding(round), ...conflictFinding(round)];
 /** An approval with no blocking finding open, the check included. */
 const approves = (round: Round) => round.verdict?.verdict === "approve" && !findingsOf(round).some(blocks);
 /**
@@ -243,9 +250,10 @@ function builderFindings(r: Review, token: string): string {
   const round = r.rounds.at(-1)!;
   const failed = round.check?.passed === false;
   const findings = findingsOf(round);
-  // The builder got the notes already with the approval that the check then failed.
-  const notes = failed ? [] : findings.filter((f) => !blocks(f));
-  const verdict = failed ? "the repository's checks failed after the reviewer approved" : "changes requested";
+  // The builder got the notes already with the approval that the check then failed, or that the conflict stopped.
+  const notes = failed || round.conflict !== undefined ? [] : findings.filter((f) => !blocks(f));
+  const verdict = failed ? "the repository's checks failed after the reviewer approved"
+    : round.conflict !== undefined ? `the reviewer approved, but the branch conflicts with ${round.conflict.base}, so it cannot merge` : "changes requested";
   return `${reviewPrefix}
 Round ${n} of at most ${r.maxRounds} on pull request #${r.pr.number} (${r.pr.url}), reviewed at ${round.head} by a reviewer on ${r.models.reviewer}: ${verdict}.
 
@@ -267,15 +275,20 @@ ${findingsOf(round).map(findingLine).join("\n\n")}
 You may take them up in a later pull request. Do not push to this pull request's branch: the approved head is what gets checked and landed.`;
 }
 
-function nextRound(r: Review, previous: Round, token: string): string {
+function nextRound(r: Review, previous: Round, token: string, base: string): string {
   const n = roundsSpent(r);
   const head = r.rounds.at(-1)!.head;
-  const answers = previous.answers!.map((a) => `${a.id}: ${a.action}. ${a.reason}`).join("\n");
+  const answered = previous.answers === null ? `New commits were pushed to the branch after you approved ${previous.head}.`
+    : `The builder answered your findings:\n${previous.answers.map((a) => `${a.id}: ${a.action}. ${a.reason}`).join("\n")}`;
+  // A rebase rewrites the commits, so a diff from the old head would show the base's own changes as the builder's.
+  const rewritten = previous.conflict !== undefined || previous.answers === null;
+  const review = head === previous.head ? `It pushed nothing, so the head is still ${head}.`
+    : rewritten ? `Review the new head against the base, and compare its commits with the ones you reviewed:\n  git fetch origin && git checkout --detach ${head}\n  git diff origin/${base}...${head}\n  git range-diff origin/${base} ${previous.head} ${head}`
+    : `Review the new commits:\n  git fetch origin && git checkout --detach ${head}\n  git diff ${previous.head}..${head}`;
   return `${reviewPrefix}
-Round ${n} of at most ${r.maxRounds}. The builder answered your findings:
-${answers}
+Round ${n} of at most ${r.maxRounds}. ${answered}
 
-${head === previous.head ? `It pushed nothing, so the head is still ${head}.` : `Review the new commits:\n  git fetch origin && git checkout --detach ${head}\n  git diff ${previous.head}..${head}`}
+${review}
 Check each fix, judge each rejection, and look for anything the new commits break. Classify the whole change again. End your reply with one nexus-review block as before, with the token "${token}".`;
 }
 
@@ -334,6 +347,20 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
     return { ...r, phase, nudges, expect, sent: r.sent + 1, outbox: { to, id: `${r.id}:${r.sent + 1}`, text: text(expect), attempted: null } };
   };
   const withRound = (r: Review, round: Partial<Round>): Review => ({ ...r, rounds: [...r.rounds.slice(0, -1), { ...r.rounds.at(-1)!, ...round }] });
+  /** The next round reviews `head`, a head the reviewer has not seen, or the person gets it once no round is left. */
+  const newHead = (r: Review, head: string, base: string, why: string): Review => {
+    const n = roundsSpent(r);
+    if (n >= r.maxRounds) return ranOut(r, `${why} after round ${n}, the last this review allows, so ${head} is unreviewed.`);
+    const next: Review = { ...r, rounds: [...r.rounds, { head, verdict: null, check: null, answers: null }] };
+    return send(next, "reviewer", (token) => nextRound(next, r.rounds.at(-1)!, token, base), { kind: "reviewing" });
+  };
+  /** The builder rebases a branch that conflicts with its base, unless no round is left to review the rebase. */
+  const rebase = (r: Review, base: string): Review => {
+    const n = roundsSpent(r);
+    if (n >= r.maxRounds) return ranOut(r, `The branch conflicts with ${base}, and round ${n} was the last this review allows, so a rebase could not be reviewed.`);
+    const next = withRound(r, { conflict: { base } });
+    return send(next, "builder", (token) => builderFindings(next, token), { kind: "fixing" });
+  };
   /**
    * Why the caller a landing merges and deploys for may not, now. A landing the project's setting asked for lands for
    * whoever turned it on, as long as it stays on.
@@ -390,11 +417,15 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
         const answer = found.answers.find((a) => a.id === "CHECK");
         return toPerson(answered, `.nexus/check failed at ${round.head}, and the builder pushed nothing for it${answer === undefined ? "." : `: ${answer.reason}`}`, checkOutput(round.check.output));
       }
+      if (round.conflict !== undefined && snapshot.detail.head === round.head) {
+        const answer = found.answers.find((a) => a.id === "CONFLICT");
+        return toPerson(answered, `The branch conflicts with ${round.conflict.base}, and the builder did not rebase it${answer === undefined ? "." : `: ${answer.reason}`}`);
+      }
       // Commits pushed with answers that fixed nothing are still unreviewed, so only an unmoved head skips a round.
       if (snapshot.detail.head === round.head && approves(round)) return { ...answered, phase: checking(), nudges: 0 };
       if (n >= r.maxRounds) return ranOut(answered, `The builder pushed fixes after round ${n}, the last this review allows, so they are unreviewed.`);
       const next: Review = { ...answered, rounds: [...answered.rounds, { head: snapshot.detail.head, verdict: null, check: null, answers: null }] };
-      return send(next, "reviewer", (token) => nextRound(next, answered.rounds.at(-1)!, token), { kind: "reviewing" });
+      return send(next, "reviewer", (token) => nextRound(next, answered.rounds.at(-1)!, token, snapshot.detail.base), { kind: "reviewing" });
     },
     async checking(r, phase, builder) {
       const round = r.rounds.at(-1)!;
@@ -430,13 +461,18 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
         }
         commit = snapshot.detail.mergeCommit;
       } else {
+        // A head pushed after the approval, such as a rebase on the PR watch's news of a conflict, gets its own round.
+        if (snapshot.detail.head !== head) return newHead(r, snapshot.detail.head, snapshot.detail.base, `The pull request's head moved to ${snapshot.detail.head}`);
         // Every attempt checks the whole policy again with what GitHub says now, since checks and the PR can change
         // between attempts and branch protection may not enforce them.
         const held = await holds();
+        if (held.length === 1 && held[0] === conflictHold) return rebase(r, snapshot.detail.base);
         if (held.length) return toPerson(r, ...held);
         if (phase.authorized !== head) return { ...r, phase: { kind: "merging", authorized: head } };
         const merged = await github.merge(r.pr.repo, r.pr.number, head);
         if (merged.kind !== "merged") {
+          // GitHub may learn of a conflict only when asked to merge.
+          if (merged.kind === "refused" && (await github.poll(r.pr.repo, r.pr.number)).pr.conflict === true) return rebase(r, snapshot.detail.base);
           return toPerson(r, merged.kind === "denied"
             ? `The control plane's GitHub token cannot merge (${merged.message}). Merging needs a token with write access to ${r.pr.repo}'s contents and pull requests, which only the person can grant.`
             : `GitHub refused the merge: ${merged.message}`);

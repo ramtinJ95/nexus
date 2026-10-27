@@ -976,6 +976,92 @@ test("nothing starts on its own without the project's setting, for a thread the 
   assert.equal(again.auto, false);
 });
 
+test("a branch that conflicts at landing goes back to the builder to rebase, and the rebased head is reviewed again, then lands", async (t) => {
+  const f = fixture(t);
+  f.registry.setDesiredRelease({ commit: previous, requestedBy: "person", requestedAt: 1 });
+  const loop = f.loop();
+  await loop.start(f.builder, { land: "nLAPTOP" });
+  await loop.poll();
+  conflicting(f);
+  f.reply(f.review().reviewer, verdict(f.review(), {}));
+  await loop.poll();
+  assert.deepEqual(f.merges, [], "a conflicting branch does not merge");
+  assert.equal(f.review().phase.kind, "fixing");
+  assert.deepEqual(f.review().rounds[0]!.conflict, { base: "main" });
+  const request = f.sent.at(-1)!;
+  assert.equal(request.to, f.builder);
+  assert.match(request.message.text, /the reviewer approved, but the branch conflicts with main, so it cannot merge/);
+  assert.match(request.message.text, /CONFLICT \(P0\) origin\/main: The branch conflicts with main/);
+  assert.match(request.message.text, /git rebase origin\/main/);
+  assert.match(request.message.text, /git push --force-with-lease/);
+
+  rebased(f);
+  f.reply(f.builder, answers(f.review(), [{ id: "CONFLICT", action: "fixed", reason: "Rebased onto main, kept both sides' cache settings, the tests pass." }]));
+  await loop.poll();
+  assert.equal(f.review().phase.kind, "reviewing");
+  assert.equal(f.review().rounds[1]!.head, head2, "the rebased head is a new round");
+  assert.match(f.sent.at(-1)!.message.text, /CONFLICT: fixed\. Rebased onto main/);
+  assert.match(f.sent.at(-1)!.message.text, new RegExp(`git diff origin/main\\.\\.\\.${head2}\\n  git range-diff origin/main ${head1} ${head2}`));
+  f.reply(f.review().reviewer, verdict(f.review(), {}));
+  await loop.poll();
+  assert.deepEqual(f.merges, [head2]);
+  assert.equal(f.review().phase.kind, "deploying");
+});
+
+test("a builder that cannot rebase, or a conflict after the last round, goes to the person with why", async (t) => {
+  const f = fixture(t);
+  const loop = f.loop();
+  await loop.start(f.builder, { land: "nLAPTOP" });
+  await loop.poll();
+  conflicting(f);
+  f.reply(f.review().reviewer, verdict(f.review(), {}));
+  await loop.poll();
+  f.reply(f.builder, answers(f.review(), [{ id: "CONFLICT", action: "rejected", reason: "main rewrote the cache this PR adds, so one side has to go." }]));
+  await loop.poll();
+  assert.deepEqual(f.review().phase, { kind: "needs-person", reasons: ["The branch conflicts with main, and the builder did not rebase it: main rewrote the cache this PR adds, so one side has to go."] });
+
+  const last = fixture(t, { path: join(await mkdtemp(join(tmpdir(), "nexus-review-")), "registry.db") });
+  const capped = last.loop();
+  await capped.start(last.builder, { land: "nLAPTOP", rounds: 1 });
+  await capped.poll();
+  conflicting(last);
+  last.reply(last.review().reviewer, verdict(last.review(), {}));
+  await capped.poll();
+  assert.deepEqual(last.review().phase, { kind: "needs-person", label: { state: "added" }, reasons: ["The branch conflicts with main, and round 1 was the last this review allows, so a rebase could not be reviewed."] });
+  assert.deepEqual(last.sent.filter((s) => s.to === last.builder), [], "the builder is not asked for a rebase no round can review");
+});
+
+test("a merge GitHub refuses for a conflict it only now reports goes to the builder to rebase", async (t) => {
+  const f = fixture(t);
+  f.snapshot = { ...f.snapshot, pr: { ...f.snapshot.pr, conflict: null } };
+  f.mergeAnswer = () => { conflicting(f); return { kind: "refused", message: "GitHub answered 405: Pull Request is not mergeable" }; };
+  const loop = f.loop();
+  await loop.start(f.builder, { land: "nLAPTOP" });
+  await loop.poll();
+  f.reply(f.review().reviewer, verdict(f.review(), {}));
+  await loop.poll();
+  assert.deepEqual(f.merges, [head1]);
+  assert.equal(f.review().phase.kind, "fixing");
+  assert.match(f.sent.at(-1)!.message.text, /git rebase origin\/main/);
+});
+
+test("a head pushed after the approval gets its own round instead of the person", async (t) => {
+  const f = fixture(t);
+  f.check = { kind: "running" };
+  const loop = f.loop();
+  await loop.start(f.builder, { land: "nLAPTOP" });
+  await loop.poll();
+  f.reply(f.review().reviewer, verdict(f.review(), {}));
+  await loop.poll();
+  rebased(f);
+  f.check = { kind: "done", passed: true, output: "ok" };
+  await loop.poll();
+  assert.deepEqual(f.merges, []);
+  assert.equal(f.review().phase.kind, "reviewing");
+  assert.equal(f.review().rounds[1]!.head, head2);
+  assert.match(f.sent.at(-1)!.message.text, new RegExp(`New commits were pushed to the branch after you approved ${head1}`));
+});
+
 test("each landing asks again whether its lander may deploy, and whether the project still lands on its own", async (t) => {
   const f = fixture(t);
   const loop = f.loop();
