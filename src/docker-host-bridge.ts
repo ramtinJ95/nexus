@@ -24,6 +24,9 @@ export function dockerBridgeRunArgs(port: number): string[] {
   ];
 }
 
+/** `docker` filter arguments that select only what carries every label. */
+export const labelFilters = (labels: Readonly<Record<string, string>>): string[] => Object.entries(labels).flatMap(([k, v]) => ["--filter", `label=${k}=${v}`]);
+
 /**
  * Listens on `port` for the containers created with dockerBridgeRunArgs(port). Docker Desktop reaches the Mac's
  * loopback as host.docker.internal. On Linux that name is the bridge gateway, which loopback does not answer, so
@@ -31,7 +34,7 @@ export function dockerBridgeRunArgs(port: number): string[] {
  * DockerBackendOptions.labels does.
  */
 export function dockerHostBridge(port: number, labels: Readonly<Record<string, string>> = {}): HostBridge {
-  const scope = Object.entries(labels).flatMap(([k, v]) => ["--filter", `label=${k}=${v}`]);
+  const scope = labelFilters(labels);
   return listenHostBridge({ host: process.platform === "darwin" ? "127.0.0.1" : "0.0.0.0", port }, async (req) => {
     const token = /^\/([0-9a-f]{32})\/v1\/request$/.exec(req.url ?? "")?.[1];
     if (token === undefined) return null;

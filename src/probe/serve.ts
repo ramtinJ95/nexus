@@ -12,9 +12,9 @@
  *
  * The serve config is one object per node, so converges change it one at a time. Warming runs outside that.
  */
-import { execFile } from "node:child_process";
 import { setTimeout as delay } from "node:timers/promises";
 import { JobFailure, type TailscaleServe } from "../backend.ts";
+import { output } from "../exec.ts";
 import { readJson, saveJson } from "../json-file.ts";
 import type { PreviewAssignment } from "../project.ts";
 import type { PylonId } from "../protocol.ts";
@@ -28,12 +28,7 @@ export type HttpsGet = (url: string, headers: Record<string, string>, signal: Ab
 
 /** The binary is looked up on PATH. On the nodes it is the home tailnet's `tailscale`. */
 export function tailscaleCli(binary = "tailscale"): TailscaleCli {
-  return (args, signal) => new Promise((resolve, reject) => {
-    execFile(binary, args, { signal, timeout: 30_000 }, (err, stdout, stderr) => {
-      if (err) return reject(new Error(`${binary} ${args.join(" ")}: ${stderr.trim() || err.message}`));
-      resolve(stdout);
-    });
-  });
+  return (args, signal) => output(binary, args, { signal, timeout: 30_000 });
 }
 
 export const fetchGet: HttpsGet = async (url, headers, signal) => {
