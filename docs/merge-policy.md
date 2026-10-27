@@ -79,11 +79,13 @@ The control plane identifies callers by their tailnet node, and an agent on the 
 | A reserved path of a Nexus pull request | Yes | The same, for the paths that might touch a reserved case. |
 | A change to `.nexus/check` | Yes | Accepting a new check is the person's call. |
 | A Claude reviewer's approval | No | A Claude reviewer's verdict is read from its pylon, where code the pull request runs could write a forged one. The findings and reserved cases the person would be waiving come from that same verdict, so a passkey would confirm what a forger chose to show. Only a harness reviewer's approval lands, or the person merges on GitHub. |
+| A deployer no longer asking for the landing, or a project that no longer lands on its own | No | The landing needs a deployer who asked for it. |
 | An open P0 to P2 finding, or one the builder left unanswered | No | Findings block until they are fixed or rejected with a reason. |
 | `.nexus/check` failed or did not run at the head | No | Only a passing check at the approved head lands. |
 | Failing or pending GitHub checks | No | They hold every landing until they pass. |
 | A head that moved after the approval, or a merge at another head | No | Only the approved commit lands. |
-| A branch that conflicts, or a pull request that is not open | No | Neither can merge. |
+| A branch that conflicts | No | It cannot merge. When it is the only hold the waiver does not cover, the builder rebases, and the rebased head needs a new review and a new passkey confirmation. |
+| A pull request that is not open | No | It cannot merge. |
 | A reviewer on the builder's own model, or no statement of what was not checked live | No | These are the policy's other conditions, which an agent can meet. |
 
 The Land card on the dashboard marks each hold "you may waive" or not, with the reason. When every hold that would meet the landing again is one a passkey may waive, the button becomes Land with a passkey. Its confirmation names the pull request, the commit and the holds, and the passkey signs a challenge that the control plane made for exactly that review, pull request, commit and list of holds. The challenge expires after two minutes and works once. The control plane checks that the assertion comes from the dashboard's HTTPS origin, for its host, with the person verified, and with a signature counter that moved past the stored one when the authenticator keeps one. The caller must still be a deployer. The landing then checks every condition again, as `nexus land` does, with the named holds met at that commit and nothing else. The review records the waiver, who confirmed it, with which passkey and at which commit, `nexus show` prints it, and the event stream gets a `review.waived` event.
