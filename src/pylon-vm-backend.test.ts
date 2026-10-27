@@ -487,6 +487,18 @@ test("a stopped pylon whose pause recorded nothing reports null", async () => {
   assert.deepEqual((await backend.list()).map((p) => [p.vm, p.sessions]), [["stopped", null]]);
 });
 
+test("the artifacts listed with a list of pylons hold the checkpoints of the stopped ones in it, and no others", async () => {
+  const { backend, instances } = await backendWith();
+  await writeFile(join(await leftInstance(instances, "pylon-held", "stopped"), "nexus-checkpoint.json"), JSON.stringify({ checkpoint: "ckpt-held-1" }));
+  await leftInstance(instances, "pylon-unsaved", "stopped");
+  const pylons = await backend.list();
+  await writeFile(join(await leftInstance(instances, "pylon-later", "stopped"), "nexus-checkpoint.json"), JSON.stringify({ checkpoint: "ckpt-later-1" }));
+  const running = { ...pylons[0]!, pylonId: "pylon-up" as PylonId, vm: "running" as const, checkpoint: "ckpt-booted-1" as const };
+  assert.deepEqual(await backend.artifacts.list([...pylons, running]), [image, "ckpt-held-1"], "a pylon that stopped after the list is not counted");
+  assert.deepEqual(await backend.artifacts.list(await backend.list()), [image, "ckpt-held-1", "ckpt-later-1"]);
+  assert.deepEqual(await backend.artifacts.list([]), [image]);
+});
+
 test("a spawn of a running pylon applies the preview URLs, and finishes a relaunch a wake left pending, once", async () => {
   const { backend, instances } = await backendWith({ previewHost: "node.example.ts.net" });
   const dir = await leftInstance(instances, "pylon-wake", "running");
@@ -589,7 +601,7 @@ test("a build whose setup failed is setup-failed with its log, publishes nothing
     err.code === "setup-failed" && /Setup exited 3/.test(err.message) && err.logTail?.includes("nexus-setup: broken on purpose") === true);
   assert.equal(existsSync(dir), false);
   assert.equal(existsSync(join(artifacts, "tpl-broken000000")), false);
-  assert.ok(!(await backend.artifacts.list()).includes("tpl-broken000000"));
+  assert.ok(!(await backend.artifacts.list([])).includes("tpl-broken000000"));
 });
 
 test("a prepared build that a crash left unpublished is published without booting, and its copy removed", { skip: !gnuTar && "publishing hashes a GNU tar archive" }, async () => {
@@ -601,7 +613,7 @@ test("a prepared build that a crash left unpublished is published without bootin
   assert.equal(await readFile(join(artifacts, "tpl-prepared0000", "disk.qcow2"), "utf8"), "prepared disk");
   const manifest = JSON.parse(await readFile(join(artifacts, "tpl-prepared0000", "template.json"), "utf8"));
   assert.deepEqual([manifest.key, manifest.commit], [key, buildInputs.repo.commit]);
-  assert.ok((await backend.artifacts.list()).includes("tpl-prepared0000"));
+  assert.ok((await backend.artifacts.list([])).includes("tpl-prepared0000"));
   await backend.buildTemplate("tpl-prepared0000", buildInputs, signal());
 });
 
@@ -610,9 +622,9 @@ test("an image a pylon or a template still needs is not dropped, and a template 
   await leftInstance(instances, "pylon-needs", "stopped");
   await publishedTemplate("tpl-dropme000000", image);
   await assert.rejects(backend.artifacts.drop(image), { code: "invalid", message: /img-test00000000 is still needed by pylon pylon-needs, .*template tpl-dropme000000/ });
-  assert.ok((await backend.artifacts.list()).includes(image));
+  assert.ok((await backend.artifacts.list([])).includes(image));
   await backend.artifacts.drop("tpl-dropme000000");
-  assert.ok(!(await backend.artifacts.list()).includes("tpl-dropme000000"));
+  assert.ok(!(await backend.artifacts.list([])).includes("tpl-dropme000000"));
 });
 
 test("an image is not dropped while a template over it is copied in, and a template over an absent image is not copied", async () => {
@@ -623,9 +635,9 @@ test("an image is not dropped while a template over it is copied in, and a templ
   await assert.rejects(backend.artifacts.drop(image), { code: "invalid", message: /img-test00000000 is still needed by a pylon or template that is being created or copied in/ });
   stream.destroy(new Error("the peer went away"));
   await assert.rejects(copying, /the peer went away/);
-  assert.ok((await backend.artifacts.list()).includes(image));
+  assert.ok((await backend.artifacts.list([])).includes(image));
   await assert.rejects(backend.artifacts.import({ ...manifest, key: { ...key, image: "img-absent000000" } }, Readable.from([]), signal()), { code: "artifact-missing", message: /img-absent000000 is not in this node's artifact store/ });
-  assert.ok(!(await backend.artifacts.list()).includes("tpl-arriving0000"));
+  assert.ok(!(await backend.artifacts.list([])).includes("tpl-arriving0000"));
 });
 
 type StartupFailure = { kind: "setup" | "services"; message: string };
