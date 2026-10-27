@@ -19,6 +19,7 @@ import { linkedPort, liveHashOf, type GitIdentity } from "../project.ts";
 import { tick, type TickContext } from "../tick.ts";
 import type { NodeName, NodeObservation, ProbeClient, ProbeError, ProbeEvent, PylonCommand, PylonId, PylonObservation } from "../protocol.ts";
 import type { ArtifactId } from "../images.ts";
+import { defaultClaudeModel } from "../claude-state.ts";
 import { pylonLive } from "./live.ts";
 import type { PortRange, Registry, StoredPylon, Thread, ThreadId } from "./registry.ts";
 import { tickTemplateBuild } from "./template-builds.ts";
@@ -175,7 +176,7 @@ export function startLoop(options: LoopOptions): Loop {
           const session = worker.state === "starting" ? worker.session! : randomUUID();
           registry.setClaudeWorker(thread.id, worker.prompt, "starting", undefined, session);
           try {
-            await launchClaude(node, link, pylonId, { kind: "open-session", harness: "claude-code", title: thread.title.slice(0, 80), resume: session, prompt: worker.prompt, model: worker.model ?? "claude-opus-5-5" });
+            await launchClaude(node, link, pylonId, { kind: "open-session", harness: "claude-code", title: thread.title.slice(0, 80), resume: session, prompt: worker.prompt, model: worker.model ?? defaultClaudeModel });
             registry.setClaudeWorker(thread.id, worker.prompt, "started");
           } catch (err) {
             if (registry.claudeWorker(thread.id)?.state === "started" || shutdown.signal.aborted) continue;

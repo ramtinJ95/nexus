@@ -22,6 +22,7 @@ import type { PylonRecord } from "../tick.ts";
 import type { ImageOperation } from "./image-rollout.ts";
 import { needsPerson, reviewerCaller, storedReview, type Review } from "./review.ts";
 import { claudeTurn } from "../../images/pylon/nexus-turn.ts";
+import { defaultClaudeModel } from "../claude-state.ts";
 import { maxEntries, transcriptStart, usageLimitStop, type ClaudeEntry, type TranscriptCursor } from "../claude-transcript.ts";
 
 declare const brand: unique symbol;
@@ -645,7 +646,7 @@ export function openRegistry(path: string, clock = Date.now) {
     },
     setClaudeWorker(thread: ThreadId, prompt: string, state: string, message?: string, session?: string) {
       transaction(() => {
-        sql("INSERT INTO claude_workers (thread, prompt, state, message, session, model) VALUES (?, ?, ?, ?, ?, 'claude-opus-5-5') ON CONFLICT(thread) DO UPDATE SET state = excluded.state, message = excluded.message, session = coalesce(excluded.session, claude_workers.session)").run(thread, prompt, state, message ?? null, session ?? null);
+        sql("INSERT INTO claude_workers (thread, prompt, state, message, session, model) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(thread) DO UPDATE SET state = excluded.state, message = excluded.message, session = coalesce(excluded.session, claude_workers.session)").run(thread, prompt, state, message ?? null, session ?? null, defaultClaudeModel);
         updateAttention(thread);
       });
     },
@@ -791,7 +792,7 @@ export function openRegistry(path: string, clock = Date.now) {
     },
 
     /** A thread and its pylon are created together, because a thread always has exactly one pylon. */
-    createThread(thread: Omit<Thread, "seenAt" | "lastReplyAt">, pylon: StoredPylon, claudePrompt?: string, model = "claude-opus-5-5") {
+    createThread(thread: Omit<Thread, "seenAt" | "lastReplyAt">, pylon: StoredPylon, claudePrompt?: string, model = defaultClaudeModel) {
       if (pylon.pylonId !== thread.pylonId || pylon.thread !== thread.id) throw new Error(`pylon ${pylon.pylonId} does not belong to thread ${thread.id}`);
       transaction(() => {
         q.insertThread.run(thread.id, thread.title, thread.project, thread.status, thread.conversationId, thread.startedBy, thread.createdAt,

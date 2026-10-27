@@ -20,6 +20,7 @@ import { z } from "zod";
 import { releaseOutcome } from "../deploy/model.ts";
 import type { HarnessHost } from "../harness/host.ts";
 import type { SecretGrant } from "../project.ts";
+import { defaultClaudeModel } from "../claude-state.ts";
 import type { GitHub, PrSnapshot, PullRequest } from "./github.ts";
 import { HttpError } from "./http-error.ts";
 import type { Inbox } from "./inbox.ts";
@@ -288,7 +289,7 @@ export function agentReplies(registry: Registry, harness: Pick<HarnessHost, "wat
 export function reviewerFor(builder: { claude: boolean; model: string }, secrets: readonly SecretGrant[], harnessModel: string): { claude: boolean; model: string } {
   if (builder.claude) return { claude: false, model: harnessModel };
   // A Claude worker logs in from a granted token. Interactive /login needs a person, so it cannot serve a reviewer.
-  if (secrets.some((s) => (s.name === "CLAUDE_CODE_OAUTH_TOKEN" || s.name === "ANTHROPIC_API_KEY") && s.hosts.includes("api.anthropic.com"))) return { claude: true, model: "claude-opus-5-5" };
+  if (secrets.some((s) => (s.name === "CLAUDE_CODE_OAUTH_TOKEN" || s.name === "ANTHROPIC_API_KEY") && s.hosts.includes("api.anthropic.com"))) return { claude: true, model: defaultClaudeModel };
   throw new HttpError(409, `no reviewer on another model can run for this thread: its agent runs ${builder.model} in the harness, and its project grants no Claude token. Grant CLAUDE_CODE_OAUTH_TOKEN for api.anthropic.com to the project (\`nexus project edit\`), or start the builder as a Claude worker`);
 }
 
@@ -537,7 +538,7 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
       const snapshot = await github.poll(repo, number);
       if (snapshot.pr.state !== "open") throw new HttpError(409, `pull request #${number} is ${snapshot.pr.state}`);
       const worker = registry.claudeWorker(builder.id);
-      const builderModel = worker === undefined ? deps.harnessModel : worker.model ?? "claude-opus-5-5";
+      const builderModel = worker === undefined ? deps.harnessModel : worker.model ?? defaultClaudeModel;
       const kind = reviewerFor({ claude: worker !== undefined, model: builderModel }, registry.project(builder.project)!.secrets, deps.harnessModel);
       const models = { builder: builderModel, reviewer: kind.model };
       const id = `rv-${randomBytes(4).toString("hex")}`;

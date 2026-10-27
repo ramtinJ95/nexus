@@ -1,3 +1,5 @@
+export const defaultClaudeModel = "claude-opus-5-5";
+
 /** Runs in the guest before Claude starts, preserving credentials and unrelated user state. */
 export const seedClaudeState = `
 const fs = require('node:fs');
@@ -41,7 +43,7 @@ merge(path.join(home, '.claude.json'), state => {
 });
 merge(path.join(home, '.claude/settings.json'), state => {
   state.theme ??= 'dark';
-  state.model = 'claude-opus-5-5';
+  state.model = '${defaultClaudeModel}';
   state.attribution = { ...state.attribution, commit: '', pr: '' };
   state.skipDangerousModePermissionPrompt = true;
 });
