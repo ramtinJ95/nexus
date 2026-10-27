@@ -1185,24 +1185,30 @@ test("a waiver lets the landing past only the holds it names, and only at the co
   assert.throws(() => loop.land(f.builder, "nLAPTOP", head1, { head: head2, holds: reservedHolds, passkey, by: "nLAPTOP", at: 5 }), { status: 409, message: new RegExp(`is at ${head1}, not ${head2}`) });
   assert.throws(() => loop.waivable(f.builder, head1, ["The pull request's GitHub checks are pending."]), { status: 409, message: /not held by/ });
 
+  const image = "Always needs the person: pylon image rebuilds, as it changes images/pylon/Dockerfile.";
   f.files = [{ path: "src/control/registry.ts", previous: null, patch: "" }, { path: "images/pylon/Dockerfile", previous: null, patch: "" }];
   loop.land(f.builder, "nLAPTOP", head1, { head: head1, holds: reservedHolds, passkey, by: "nLAPTOP", at: 5 });
   await loop.poll();
   assert.deepEqual(f.merges, []);
-  assert.deepEqual(f.review().phase, { kind: "needs-person", reasons: ["Always needs the person: pylon image rebuilds, as it changes images/pylon/Dockerfile."] }, "a hold the waiver did not name still holds");
+  assert.deepEqual(f.review().phase, { kind: "needs-person", reasons: [...reservedHolds, image] },
+    "a hold the waiver did not name still holds, and the person sees every hold again, those waived too, to confirm them together");
 
   f.snapshot = { ...f.snapshot, pr: { ...f.snapshot.pr, checks: "failed" } };
-  const both = ["Always needs the person: pylon image rebuilds, as it changes images/pylon/Dockerfile."];
-  loop.land(f.builder, "nLAPTOP", head1, { head: head1, holds: both, passkey, by: "nLAPTOP", at: 6 });
+  loop.land(f.builder, "nLAPTOP", head1, { head: head1, holds: [...reservedHolds, image], passkey, by: "nLAPTOP", at: 6 });
   await loop.poll();
   assert.deepEqual(f.merges, []);
-  assert.deepEqual(f.review().phase, { kind: "needs-person", reasons: ["The pull request's GitHub checks are failed.", ...reservedHolds] }, "a waiver lasts one landing, and never waives failing checks");
+  assert.deepEqual(f.review().phase, { kind: "needs-person", reasons: ["The pull request's GitHub checks are failed.", ...reservedHolds, image] }, "a waiver never waives failing checks");
   assert.throws(() => loop.waivable(f.builder, head1, ["The pull request's GitHub checks are failed."]), { status: 409, message: /a passkey cannot waive/ });
 
   f.snapshot = { ...f.snapshot, pr: { ...f.snapshot.pr, checks: "passing" } };
   loop.land(f.builder, "nLAPTOP", head1);
   await loop.poll();
   assert.equal(f.review().waiver, null, "a landing without a passkey waives nothing");
+  assert.deepEqual(f.review().phase, { kind: "needs-person", reasons: [...reservedHolds, image] });
+
+  loop.land(f.builder, "nLAPTOP", head1, { head: head1, holds: [...reservedHolds, image], passkey, by: "nLAPTOP", at: 7 });
+  await loop.poll();
+  assert.deepEqual(f.merges, [head1], "confirming every hold the card shows lands it");
 });
 
 test("a Claude reviewer's approval is not waivable, and a change to .nexus/check is", async (t) => {
@@ -1257,4 +1263,23 @@ test("a change to the passkey or WebAuthn code holds a Nexus pull request as a c
   f.files = [{ path: "src/control/webauthn.ts", previous: null, patch: "" }, { path: "src/control/passkeys.ts", previous: null, patch: "" }];
   await approved(f, "nLAPTOP");
   assert.deepEqual(f.review().phase, { kind: "needs-person", reasons: ["Always needs the person: changes to login or auth, as it changes src/control/webauthn.ts, src/control/passkeys.ts."] });
+});
+
+test("a waived landing whose branch conflicts goes back to the builder to rebase, and the rebased head needs the passkey again", async (t) => {
+  const f = fixture(t);
+  f.files = [{ path: "src/control/registry.ts", previous: null, patch: "" }];
+  const loop = await approved(f, "nLAPTOP");
+  conflicting(f);
+  loop.land(f.builder, "nLAPTOP", head1, { head: head1, holds: reservedHolds, passkey, by: "nLAPTOP", at: 5 });
+  await loop.poll();
+  assert.deepEqual(f.merges, []);
+  assert.equal(f.review().phase.kind, "fixing", "the conflict is the only hold the waiver does not get past, so the builder rebases");
+
+  rebased(f);
+  f.reply(f.builder, answers(f.review(), [{ id: "CONFLICT", action: "fixed", reason: "Rebased onto main." }]));
+  await loop.poll();
+  f.reply(f.review().reviewer, verdict(f.review(), {}));
+  await loop.poll();
+  assert.deepEqual(f.merges, []);
+  assert.deepEqual(f.review().phase, { kind: "needs-person", reasons: reservedHolds }, "the waiver was for the head before the rebase");
 });

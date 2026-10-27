@@ -24,7 +24,7 @@ import { defaultClaudeModel } from "../claude-state.ts";
 import type { GitHub, PrSnapshot, PullRequest } from "./github.ts";
 import { HttpError } from "./http-error.ts";
 import type { Inbox } from "./inbox.ts";
-import { conflictHold, heldBy, landingHolds, waivable } from "./policy.ts";
+import { conflictHold, heldBy, landingHolds, unwaived, waivable } from "./policy.ts";
 import { checkCaller, type CheckRuns } from "./gate.ts";
 import { releaseView } from "./releases.ts";
 import type { Registry, Thread, ThreadId } from "./registry.ts";
@@ -460,14 +460,19 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
       const head = r.rounds.at(-1)!.head;
       const snapshot = await github.poll(r.pr.repo, r.pr.number);
       if (snapshot.pr.state === "closed") return end(r, { kind: "closed" });
-      const holds = async () => [...unauthorized(r, builder), ...landingHolds({ review: r, pr: snapshot, files: await github.files(r.pr.repo, r.pr.number), nexus: deploys(r) })];
+      // `left` is what the person's waiver does not get past. A landing that holds goes to the person with every hold,
+      // those it waived too, so the person's next confirmation can name them all.
+      const holds = async () => {
+        const all = [...unauthorized(r, builder), ...landingHolds({ review: r, pr: snapshot, files: await github.files(r.pr.repo, r.pr.number), nexus: deploys(r) })];
+        return { all, left: unwaived(r, all) };
+      };
       let commit: string;
       if (snapshot.detail.mergeCommit !== null) {
         if (snapshot.detail.head !== head) return toPerson(r, `Pull request #${r.pr.number} merged at ${snapshot.detail.head}, not the approved ${head}, so it is not deployed.`);
         // A merge this review did not authorize is someone else's, so it deploys only if the policy would have let this review merge it.
         if (phase.authorized !== head) {
-          const held = await holds();
-          if (held.length) return toPerson(r, `Pull request #${r.pr.number} was merged outside this review, so it is not deployed.`, ...held);
+          const { all, left } = await holds();
+          if (left.length) return toPerson(r, `Pull request #${r.pr.number} was merged outside this review, so it is not deployed.`, ...all);
         }
         commit = snapshot.detail.mergeCommit;
       } else {
@@ -475,9 +480,9 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
         if (snapshot.detail.head !== head) return newHead(r, snapshot.detail.head, snapshot.detail.base, `The pull request's head moved to ${snapshot.detail.head}`);
         // Every attempt checks the whole policy again with what GitHub says now, since checks and the PR can change
         // between attempts and branch protection may not enforce them.
-        const held = await holds();
-        if (held.length === 1 && held[0] === conflictHold) return rebase(r, snapshot.detail.base);
-        if (held.length) return toPerson(r, ...held);
+        const { all, left } = await holds();
+        if (left.length === 1 && left[0] === conflictHold) return rebase(r, snapshot.detail.base);
+        if (left.length) return toPerson(r, ...all);
         if (phase.authorized !== head) return { ...r, phase: { kind: "merging", authorized: head } };
         const merged = await github.merge(r.pr.repo, r.pr.number, head);
         if (merged.kind !== "merged") {

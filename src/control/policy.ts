@@ -133,12 +133,13 @@ const conditions: readonly ((facts: LandingFacts) => string[])[] = [
   },
 ];
 
-/**
- * Why the policy holds this landing for the person, or nothing when an agent may merge and deploy it. A hold the
- * person waived with a passkey at the approved head no longer holds it.
- */
+/** Why the policy holds this landing for the person, or nothing when an agent may merge and deploy it. */
 export function landingHolds(facts: LandingFacts): string[] {
-  const { waiver } = facts.review;
-  const waived = (reason: string) => waiver !== null && waiver.head === facts.review.rounds.at(-1)!.head && waiver.holds.includes(reason) && waivable(reason);
-  return conditions.flatMap((condition) => condition(facts)).filter((reason) => !waived(reason));
+  return conditions.flatMap((condition) => condition(facts));
+}
+
+/** The holds that still hold the review's landing once the person's waiver at the approved head lets it past those it names. */
+export function unwaived(review: Review, holds: readonly string[]): string[] {
+  const { waiver } = review;
+  return holds.filter((reason) => !(waiver !== null && waiver.head === review.rounds.at(-1)!.head && waiver.holds.includes(reason) && waivable(reason)));
 }

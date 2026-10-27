@@ -88,7 +88,7 @@ The control plane identifies callers by their tailnet node, and an agent on the 
 
 The Land card on the dashboard marks each hold "you may waive" or not, with the reason. When every hold that would meet the landing again is one a passkey may waive, the button becomes Land with a passkey. Its confirmation names the pull request, the commit and the holds, and the passkey signs a challenge that the control plane made for exactly that review, pull request, commit and list of holds. The challenge expires after two minutes and works once. The control plane checks that the assertion comes from the dashboard's HTTPS origin, for its host, with the person verified, and with a signature counter that moved past the stored one when the authenticator keeps one. The caller must still be a deployer. The landing then checks every condition again, as `nexus land` does, with the named holds met at that commit and nothing else. The review records the waiver, who confirmed it, with which passkey and at which commit, `nexus show` prints it, and the event stream gets a `review.waived` event.
 
-A waiver lasts for the landing it starts. If that landing holds again for anything else, such as checks that turned pending, the person confirms again.
+A waiver lasts for the landing it starts. If that landing holds again for anything else, such as checks that turned pending or a reserved path the reviewer did not name, the review lists every hold it met, those the person waived too, and the person confirms them all again.
 
 ## Known limits of passkeys
 
