@@ -1,14 +1,14 @@
-$ nexus show th-56eee6d86f4e
-th-56eee6d86f4e  Raise the stream timeout
+$ nexus show th-c479ac8dfa48
+th-c479ac8dfa48  Raise the stream timeout
 project: nexus
 attention: decision
 status: active
-pylon: pylon-th-56eee6d86f4e on verify-node, running, observed 0s ago
+pylon: pylon-th-c479ac8dfa48 on verify-node, running, observed 0s ago
 size: 2 CPUs, 4 GiB memory, 10 GiB disk
 placement: verify-node, the project's default node
 setup: fresh boot runs .nexus/setup, because the control plane could not read .nexus/setup at main: the verify stack reads no remote
 PR watch: on
-review rv-43000000 of PR #43: needs-person, round 2 of 5, reviewer th-5c8914230819 on gpt-6-astra, landing when approved
+review rv-43000000 of PR #43: needs-person, round 2 of 5, reviewer th-0f170b3f9db4 on gpt-6-astra, landing when approved
 needs you: The deploy of aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa failed: verify-node control rolled-back (health check failed: /v1/health answered 502); verify-node probe rolled-back (health check failed: /v1/health answered 502).
 needs you: Rolled back to the previous release, 8888888888888888888888888888888888888888, which every service reports healthy.
 needs you: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa is still on the default branch, so revert it before the next deploy.

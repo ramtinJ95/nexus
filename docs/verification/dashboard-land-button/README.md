@@ -57,7 +57,7 @@ exit 3
 
 ## Unit tests
 
-`unit-main.txt` is the branch's `src/control/dashboard.test.ts` run against main's code, and `unit-branch.txt` the same file on the branch. Its three landing tests fail on main, where the page has no landing region, and pass on the branch.
+`unit-main.txt` is the branch's `src/control/dashboard.test.ts` run against main's code, and `unit-branch.txt` the same file on the branch. Its four landing tests fail on main, where the page has no landing region, and pass on the branch.
 
 ## What this does not prove
 

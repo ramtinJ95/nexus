@@ -2,7 +2,7 @@ held, as a deployer {
   "landing": "Held for you\n#41 Cache the thread list between polls ↗\n\nHead 444444444444 · approved by gpt-6-astra (harness) in round 2 of 5 · .nexus/check passed\n\nWhy it waits for you\nThe pull request's GitHub checks are pending.\nThe reviewer's findings\nP3 N1: Name the poll interval constant\n.nexus/check passed at 444444444444\nLand #41",
   "landButton": "Land #41",
   "error": null,
-  "reviewLine": "Nexus review rv-41000000: needs-person, round 2 of 5, by th-8bfe5d5e29ab on gpt-6-astra, landing when approved"
+  "reviewLine": "Nexus review rv-41000000: needs-person, round 2 of 5, by th-9778777679a0 on gpt-6-astra, landing when approved"
 }
 screenshot 01-held.png
 screenshot 01-held-pylon-tab.png
@@ -10,7 +10,7 @@ reserved, as a deployer {
   "landing": "Held for you\n#42 Rename nexus deploy --wait to --follow ↗\n\nHead 555555555555 · approved by gpt-6-astra (harness) in round 2 of 5 · .nexus/check passed\n\nWhy it waits for you\nAlways needs the person: breaking changes to the CLI's contract, by the reviewer's reading (renames nexus deploy --wait, which scripts call). holds again\nAlways needs the person: changes to login or auth, as it changes src/control/api.ts. holds again\nThe reviewer's findings\nP3 N1: Name the poll interval constant\n.nexus/check passed at 555555555555\n\nLanding checks the merge policy again, and what is marked \"holds again\" holds every landing of this commit. Only you can get past it, by merging the pull request on GitHub and deploying it with nexus deploy.",
   "landButton": "(no Land button)",
   "error": null,
-  "reviewLine": "Nexus review rv-42000000: needs-person, round 2 of 5, by th-a803064dc7be on gpt-6-astra, landing when approved"
+  "reviewLine": "Nexus review rv-42000000: needs-person, round 2 of 5, by th-07b9d78c959e on gpt-6-astra, landing when approved"
 }
 screenshot 02-reserved.png
 screenshot 03-held-phone.png
@@ -18,7 +18,7 @@ refused, as a device that is not a deployer {
   "landing": "Approved, not landed\n#44 Show the node's load in the sidebar ↗\n\nHead 777777777777 · approved by gpt-6-astra (harness) in round 2 of 5 · .nexus/check passed\n\nWhy it waits for you\n\nNothing holds it. The review stopped at approval because it was started without --land.\n\nThe reviewer's findings\nP3 N1: Name the poll interval constant\n.nexus/check passed at 777777777777\nLand #44\n\nThis device cannot land: landing deploys, so only the control plane's deployers may, and this device (tailnet node nPHONE) is not one. Land it from a deployer, or add this node to deployers in the control plane's config.",
   "landButton": "Land #44 (disabled)",
   "error": null,
-  "reviewLine": "Nexus review rv-44000000: approved, round 2 of 5, by th-57cd2530e189 on gpt-6-astra"
+  "reviewLine": "Nexus review rv-44000000: approved, round 2 of 5, by th-4f6bf12d21c9 on gpt-6-astra"
 }
 screenshot 04-not-deployer.png
 the page asked: "Land pull request #44, \"Show the node's load in the sidebar\", at commit 777777777777? Nexus checks the merge policy again, merges that commit and deploys the merge commit.", and the driver chose accept
@@ -26,10 +26,10 @@ refused, pressed on a page loaded as a deployer after whois changed to the phone
   "landing": "Approved, not landed\n#44 Show the node's load in the sidebar ↗\n\nHead 777777777777 · approved by gpt-6-astra (harness) in round 2 of 5 · .nexus/check passed\n\nWhy it waits for you\n\nNothing holds it. The review stopped at approval because it was started without --land.\n\nThe reviewer's findings\nP3 N1: Name the poll interval constant\n.nexus/check passed at 777777777777\nLand #44",
   "landButton": "Land #44",
   "error": "caller may not land a pull request: landing deploys, and only deployers may, never infrastructure nodes or pylons",
-  "reviewLine": "Nexus review rv-44000000: approved, round 2 of 5, by th-57cd2530e189 on gpt-6-astra"
+  "reviewLine": "Nexus review rv-44000000: approved, round 2 of 5, by th-4f6bf12d21c9 on gpt-6-astra"
 }
 screenshot 05-not-deployer-pressed.png
-$ nexus land th-fb82b66a9926
+$ nexus land th-9c7e00535390
 nexus: caller may not land a pull request: landing deploys, and only deployers may, never infrastructure nodes or pylons
 exit 3
 
@@ -42,21 +42,21 @@ the page asked: "Land pull request #41, \"Cache the thread list between polls\",
   "landing": "Landing\n#41 Cache the thread list between polls ↗\nCheck\nMerge\nDeploy\nLanded\n\n.nexus/check runs at 444444444444, or its kept result for that commit is read.",
   "landButton": "(no Land button)",
   "error": null,
-  "reviewLine": "Nexus review rv-41000000: checking, round 2 of 5, by th-8bfe5d5e29ab on gpt-6-astra, landing when approved"
+  "reviewLine": "Nexus review rv-41000000: checking, round 2 of 5, by th-9778777679a0 on gpt-6-astra, landing when approved"
 }
 screenshot 07-land-1-checking.png
 07-land: the review is deploying {
   "landing": "Landing\n#41 Cache the thread list between polls ↗\nCheck\nMerge\nDeploy\nLanded\n\nDeploying the merge commit 888888888888 until every service reports it healthy.",
   "landButton": "(no Land button)",
   "error": null,
-  "reviewLine": "Nexus review rv-41000000: deploying, round 2 of 5, by th-8bfe5d5e29ab on gpt-6-astra, landing when approved"
+  "reviewLine": "Nexus review rv-41000000: deploying, round 2 of 5, by th-9778777679a0 on gpt-6-astra, landing when approved"
 }
 screenshot 07-land-2-deploying.png
 07-land: the review is landed {
   "landing": "Landed\n#41 Cache the thread list between polls ↗\nCheck\nMerge\nDeploy\nLanded\n\nMerged as 888888888888, deployed, and every service reports it healthy.",
   "landButton": "(no Land button)",
   "error": null,
-  "reviewLine": "Nexus review rv-41000000: landed, round 2 of 5, by th-8bfe5d5e29ab on gpt-6-astra, landing when approved"
+  "reviewLine": "Nexus review rv-41000000: landed, round 2 of 5, by th-9778777679a0 on gpt-6-astra, landing when approved"
 }
 screenshot 07-land-3-landed.png
 the page asked: "Land pull request #43, \"Raise the probe's stream timeout\", at commit 666666666666? Nexus checks the merge policy again, merges that commit and deploys the merge commit.", and the driver chose dismiss
@@ -67,82 +67,82 @@ the page asked: "Land pull request #43, \"Raise the probe's stream timeout\", at
   "landing": "Landing\n#43 Raise the probe's stream timeout ↗\nCheck\nMerge\nDeploy\nLanded\n\n.nexus/check runs at 666666666666, or its kept result for that commit is read.",
   "landButton": "(no Land button)",
   "error": null,
-  "reviewLine": "Nexus review rv-43000000: checking, round 2 of 5, by th-119992546664 on gpt-6-astra, landing when approved"
+  "reviewLine": "Nexus review rv-43000000: checking, round 2 of 5, by th-9977fcd90cd6 on gpt-6-astra, landing when approved"
 }
 screenshot 08-rollback-1-checking.png
 08-rollback: the review is deploying {
   "landing": "Landing\n#43 Raise the probe's stream timeout ↗\nCheck\nMerge\nDeploy\nLanded\n\nDeploying the merge commit aaaaaaaaaaaa until every service reports it healthy.",
   "landButton": "(no Land button)",
   "error": null,
-  "reviewLine": "Nexus review rv-43000000: deploying, round 2 of 5, by th-119992546664 on gpt-6-astra, landing when approved"
+  "reviewLine": "Nexus review rv-43000000: deploying, round 2 of 5, by th-9977fcd90cd6 on gpt-6-astra, landing when approved"
 }
 screenshot 08-rollback-2-deploying.png
 08-rollback: the review is rolling-back {
   "landing": "Rolling back\n#43 Raise the probe's stream timeout ↗\nCheck\nMerge\nDeploy\nLanded\n\nThe deploy of aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa failed: verify-node control rolled-back (health check failed: /v1/health answered 502); verify-node probe rolled-back (health check failed: /v1/health answered 502). Rolling back to 888888888888.",
   "landButton": "(no Land button)",
   "error": null,
-  "reviewLine": "Nexus review rv-43000000: rolling-back, round 2 of 5, by th-119992546664 on gpt-6-astra, landing when approved"
+  "reviewLine": "Nexus review rv-43000000: rolling-back, round 2 of 5, by th-9977fcd90cd6 on gpt-6-astra, landing when approved"
 }
 screenshot 08-rollback-3-rolling-back.png
 08-rollback: the review is needs-person {
   "landing": "Merged, not deployed\n#43 Raise the probe's stream timeout ↗\nCheck\nMerge\nDeploy\nLanded\nThe deploy of aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa failed: verify-node control rolled-back (health check failed: /v1/health answered 502); verify-node probe rolled-back (health check failed: /v1/health answered 502).\nRolled back to the previous release, 8888888888888888888888888888888888888888, which every service reports healthy.\naaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa is still on the default branch, so revert it before the next deploy.",
   "landButton": "(no Land button)",
   "error": null,
-  "reviewLine": "Nexus review rv-43000000: needs-person, round 2 of 5, by th-119992546664 on gpt-6-astra, landing when approved"
+  "reviewLine": "Nexus review rv-43000000: needs-person, round 2 of 5, by th-9977fcd90cd6 on gpt-6-astra, landing when approved"
 }
 screenshot 08-rollback-4-needs-person.png
-$ nexus show th-071ced875da9
-th-071ced875da9  Cache the thread list
+$ nexus show th-d1222fa2aece
+th-d1222fa2aece  Cache the thread list
 project: nexus
 attention: none
 status: active
-pylon: pylon-th-071ced875da9 on verify-node, running, observed 0s ago
+pylon: pylon-th-d1222fa2aece on verify-node, running, observed 0s ago
 size: 2 CPUs, 4 GiB memory, 10 GiB disk
 placement: verify-node, the project's default node
 setup: fresh boot runs .nexus/setup, because the control plane could not read .nexus/setup at main: the verify stack reads no remote
 PR watch: on
-review rv-41000000 of PR #41: landed as 8888888888888888888888888888888888888888, round 2 of 5, reviewer th-8bfe5d5e29ab on gpt-6-astra, landing when approved
+review rv-41000000 of PR #41: landed as 8888888888888888888888888888888888888888, round 2 of 5, reviewer th-9778777679a0 on gpt-6-astra, landing when approved
 exit 0
 
-$ nexus events --thread th-071ced875da9 --kind review.changed
-4 2026-10-27T14:29:36.551Z th-071ced875da9 review.changed {"review":"rv-41000000","reviewer":"th-8bfe5d5e29ab","phase":{"kind":"needs-person","reasons":["The pull request's GitHub checks are pending."]},"round":2}
-10 2026-10-27T14:29:44.364Z th-071ced875da9 review.changed {"review":"rv-41000000","reviewer":"th-8bfe5d5e29ab","phase":{"kind":"checking","startedAt":1793111384363,"thread":null},"round":2}
-12 2026-10-27T14:29:50.574Z th-071ced875da9 review.changed {"review":"rv-41000000","reviewer":"th-8bfe5d5e29ab","phase":{"kind":"merging","authorized":null},"round":2}
-13 2026-10-27T14:29:50.577Z th-071ced875da9 review.changed {"review":"rv-41000000","reviewer":"th-8bfe5d5e29ab","phase":{"kind":"deploying","commit":"8888888888888888888888888888888888888888","previous":"1111111111111111111111111111111111111111","requested":false,"deadline":1793113190577},"round":2}
-17 2026-10-27T14:29:59.574Z th-071ced875da9 review.changed {"review":"rv-41000000","reviewer":"th-8bfe5d5e29ab","phase":{"kind":"landed","commit":"8888888888888888888888888888888888888888"},"round":2}
+$ nexus events --thread th-d1222fa2aece --kind review.changed
+4 2026-10-27T14:38:19.221Z th-d1222fa2aece review.changed {"review":"rv-41000000","reviewer":"th-9778777679a0","phase":{"kind":"needs-person","reasons":["The pull request's GitHub checks are pending."]},"round":2}
+10 2026-10-27T14:38:27.078Z th-d1222fa2aece review.changed {"review":"rv-41000000","reviewer":"th-9778777679a0","phase":{"kind":"checking","startedAt":1793111907078,"thread":null},"round":2}
+12 2026-10-27T14:38:33.246Z th-d1222fa2aece review.changed {"review":"rv-41000000","reviewer":"th-9778777679a0","phase":{"kind":"merging","authorized":null},"round":2}
+13 2026-10-27T14:38:33.249Z th-d1222fa2aece review.changed {"review":"rv-41000000","reviewer":"th-9778777679a0","phase":{"kind":"deploying","commit":"8888888888888888888888888888888888888888","previous":"1111111111111111111111111111111111111111","requested":false,"deadline":1793113713249},"round":2}
+17 2026-10-27T14:38:42.247Z th-d1222fa2aece review.changed {"review":"rv-41000000","reviewer":"th-9778777679a0","phase":{"kind":"landed","commit":"8888888888888888888888888888888888888888"},"round":2}
 exit 0
 
-$ nexus show th-08aced2044cf
-th-08aced2044cf  Raise the stream timeout
+$ nexus show th-29cd4282910e
+th-29cd4282910e  Raise the stream timeout
 project: nexus
 attention: decision
 status: active
-pylon: pylon-th-08aced2044cf on verify-node, running, observed 0s ago
+pylon: pylon-th-29cd4282910e on verify-node, running, observed 0s ago
 size: 2 CPUs, 4 GiB memory, 10 GiB disk
 placement: verify-node, the project's default node
 setup: fresh boot runs .nexus/setup, because the control plane could not read .nexus/setup at main: the verify stack reads no remote
 PR watch: on
-review rv-43000000 of PR #43: needs-person, round 2 of 5, reviewer th-119992546664 on gpt-6-astra, landing when approved
+review rv-43000000 of PR #43: needs-person, round 2 of 5, reviewer th-9977fcd90cd6 on gpt-6-astra, landing when approved
 needs you: The deploy of aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa failed: verify-node control rolled-back (health check failed: /v1/health answered 502); verify-node probe rolled-back (health check failed: /v1/health answered 502).
 needs you: Rolled back to the previous release, 8888888888888888888888888888888888888888, which every service reports healthy.
 needs you: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa is still on the default branch, so revert it before the next deploy.
 exit 0
 
-$ nexus land th-c1386eff7b7e
-Landing review rv-42000000 of PR #42: checking, round 2 of 5, reviewer th-a803064dc7be on gpt-6-astra, landing when approved
+$ nexus land th-94cbdf1131d0
+Landing review rv-42000000 of PR #42: checking, round 2 of 5, reviewer th-07b9d78c959e on gpt-6-astra, landing when approved
 exit 0
 
-$ nexus show th-c1386eff7b7e
-th-c1386eff7b7e  Rename the deploy flag
+$ nexus show th-94cbdf1131d0
+th-94cbdf1131d0  Rename the deploy flag
 project: nexus
 attention: decision
 status: active
-pylon: pylon-th-c1386eff7b7e on verify-node, running, observed 0s ago
+pylon: pylon-th-94cbdf1131d0 on verify-node, running, observed 0s ago
 size: 2 CPUs, 4 GiB memory, 10 GiB disk
 placement: verify-node, the project's default node
 setup: fresh boot runs .nexus/setup, because the control plane could not read .nexus/setup at main: the verify stack reads no remote
 PR watch: on
-review rv-42000000 of PR #42: needs-person, round 2 of 5, reviewer th-a803064dc7be on gpt-6-astra, landing when approved
+review rv-42000000 of PR #42: needs-person, round 2 of 5, reviewer th-07b9d78c959e on gpt-6-astra, landing when approved
 needs you: Always needs the person: breaking changes to the CLI's contract, by the reviewer's reading (renames nexus deploy --wait, which scripts call).
 needs you: Always needs the person: changes to login or auth, as it changes src/control/api.ts.
 exit 0

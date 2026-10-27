@@ -1,12 +1,12 @@
-$ nexus show th-72206fc248c0
-th-72206fc248c0  Cache the thread list
+$ nexus show th-b07972b2cd20
+th-b07972b2cd20  Cache the thread list
 project: nexus
 attention: none
 status: active
-pylon: pylon-th-72206fc248c0 on verify-node, running, observed 0s ago
+pylon: pylon-th-b07972b2cd20 on verify-node, running, observed 0s ago
 size: 2 CPUs, 4 GiB memory, 10 GiB disk
 placement: verify-node, the project's default node
 setup: fresh boot runs .nexus/setup, because the control plane could not read .nexus/setup at main: the verify stack reads no remote
 PR watch: on
-review rv-41000000 of PR #41: landed as 8888888888888888888888888888888888888888, round 2 of 5, reviewer th-c471e3812199 on gpt-6-astra, landing when approved
+review rv-41000000 of PR #41: landed as 8888888888888888888888888888888888888888, round 2 of 5, reviewer th-51aa96caa596 on gpt-6-astra, landing when approved
 exit 0
