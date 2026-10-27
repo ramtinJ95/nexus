@@ -42,6 +42,7 @@ import type { ClaudeSent, NodeRecord, Output, PortRange, Preview, Registry, Sess
 import { dashboard, liveFrames } from "./dashboard.ts";
 import { attachScript, checkoutDir, claudeTextProblem, herdrSession } from "../sessions.ts";
 import { claudeConversations, claudeFrames } from "./claude-conversation.ts";
+import { usageFilter } from "./usage.ts";
 import type { ClaudeConversation } from "../claude-transcript.ts";
 import { checkoutReader, CheckoutRefused, contentType, pathsFit, type CheckoutReader, type RefusalKind } from "../checkout-files.ts";
 import { attachRoute, parseAttachQuery } from "../attach-wire.ts";
@@ -887,6 +888,7 @@ export async function startApi(options: ApiOptions): Promise<Api> {
       if (project === undefined) throw new HttpError(404, `no project ${id}`);
       return ok(project);
     }],
+    ["GET", /^\/v1\/usage$/, (_, r) => ok(registry.usageReport(usageFilter(r.query, Date.now())))],
     ["GET", /^\/v1\/projects$/, () => ok(registry.projects())],
     ["POST", /^\/v1\/projects$/, async (_, r) => created(createProject(await r.body()))],
     ["GET", /^\/v1\/nodes$/, () => ok(registry.nodes().map((record): NodeSummary => {
