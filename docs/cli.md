@@ -147,6 +147,7 @@ The shapes are TypeScript types. `Thread`, `Session` and `Preview` are in [`src/
 | `sessionActiveUntil` | optional `number` | When that turn's working lease runs out without another report. Present with `sessionTurnRunning` |
 | `sessionWaiting` | optional `true` | A session in the pylon waits for input, such as a permission prompt |
 | `sessionWaitingMessage` | optional `string` | What the latest waiting session's report said, such as "A background command was still running after 2 hours" |
+| `working` | `boolean` | A turn of the Nexus agent or of a session in the pylon runs: `agentTurnRunning` or `sessionTurnRunning`. `threads` prints `working` for it, and `show` `agent working` |
 | `workingSince` | optional `number` | The earliest known start of the running turns, as `threads` describes |
 | `lastAgentActivityAt`, `lastHumanActivityAt` | `number` | The newest agent and human activity, which decide when the pylon pauses |
 | `seenAt`, `lastReplyAt` | `number \| null` | The shared seen marker and the latest reply, as the next section describes |
@@ -172,7 +173,7 @@ The shapes are TypeScript types. `Thread`, `Session` and `Preview` are in [`src/
 7. `"waiting"`: a session is waiting for input.
 8. `null`.
 
-An unread reply outranks working, so a client cancelling a pending reply notification on a follow-up must also check `agentTurnRunning`. Reading `threads` or `show` does not mark anything seen; clients call `seen` when they show the conversation.
+An unread reply outranks working, so a client cancelling a pending reply notification on a follow-up must also check `working`. Reading `threads` or `show` does not mark anything seen; clients call `seen` when they show the conversation.
 
 `POST /v1/threads/<thread>/seen` accepts an optional JSON body `{ "lastReplyAt": number | null }`. A client rendering asynchronously sends the reply timestamp captured with the conversation it actually rendered, not a newer timestamp from attention polling. The mark cannot advance beyond that timestamp; null marks nothing. A stale mark does not lower an existing seen marker. `nexus seen --last-reply-at MS` sends the field. Omitting it, as `nexus seen` without that flag does, marks the latest reply seen at request time. `/unseen` still marks the latest reply unread.
 

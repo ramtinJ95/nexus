@@ -253,6 +253,8 @@ it as the thread's state.
 
 `Thread.sessionTurnRunning` and `sessionWaiting` are optional current facts;
 `sessionActiveUntil` lets the pure planner enforce expiry even on an older read.
+`Thread.working` is true while the harness turn or a live session turn runs, so a
+Claude worker's turn counts as a harness turn does wherever a thread reads as working.
 `Thread.workingSince` is the earliest known start, in Unix milliseconds, of the
 running harness turn and the live working sessions, and is absent when none runs
 or none has a known start. The harness turn's start, `agent_turn_started_at`, is
