@@ -26,7 +26,7 @@ const project: RemoteProject = {
 const thread: Thread = {
   seenAt: null, lastReplyAt: null,
   id: threadId, title: "fix it", project: project.id, pylonId, status: "active", conversationId: null, startedBy: "nLAPTOP",
-  createdAt: 1_000, agentTurnRunning: false, lastAgentActivityAt: 0, lastHumanActivityAt: 1_000,
+  createdAt: 1_000, agentTurnRunning: false, working: false, lastAgentActivityAt: 0, lastHumanActivityAt: 1_000,
 };
 const { desired: _, ...pylon } = newPylonRecord({
   thread: threadId, pylonId, node, desired: "running",

@@ -111,7 +111,7 @@ export function threadStarter(options: { registry: Registry; harness: Pick<Harne
       const t: Thread = {
         id, title: request.title, project: project.id, pylonId, status: "active", conversationId: conversationId === null ? null : String(conversationId), startedBy: caller, createdAt: now,
         // Starting a thread is human activity, so its pylon is wanted at once.
-        agentTurnRunning: false, lastAgentActivityAt: 0, lastHumanActivityAt: now, seenAt: null, lastReplyAt: null, placement, setup,
+        agentTurnRunning: false, working: false, lastAgentActivityAt: 0, lastHumanActivityAt: now, seenAt: null, lastReplyAt: null, placement, setup,
       };
       // Ports are allocated once the pylon reports the services that want a preview.
       const live = pylonLive({ pylonId, thread: id, node, boot }, project, []);

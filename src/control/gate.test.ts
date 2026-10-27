@@ -47,7 +47,7 @@ async function fixture(t: import("node:test").TestContext, check: string | null)
   let count = 0;
   function add(caller: string): Thread {
     const id = `th-${++count}` as ThreadId;
-    const thread: Thread = { id, title: id, project: project.id, pylonId: `pylon-${id}` as PylonId, status: "active", conversationId: null, startedBy: caller, createdAt: 1, seenAt: null, lastReplyAt: null, lastHumanActivityAt: 1, lastAgentActivityAt: 0, agentTurnRunning: false };
+    const thread: Thread = { id, title: id, project: project.id, pylonId: `pylon-${id}` as PylonId, status: "active", conversationId: null, startedBy: caller, createdAt: 1, seenAt: null, lastReplyAt: null, lastHumanActivityAt: 1, lastAgentActivityAt: 0, agentTurnRunning: false, working: false };
     const { desired: _, ...pylon } = newPylonRecord({ thread: id, pylonId: thread.pylonId, node, desired: "running", boot: { pylonId: thread.pylonId, image: "img-000000000000", resources: project.resources, network: { allowedHosts: [], secrets: [] }, repo: { kind: "clone", url: project.repoUrl, checkout: { branch: "main", commit: head } }, dotfiles: { repo: project.repoUrl, ref: "main" } }, firstBoot: { kind: "fresh", preSetup: null }, live: { previews: [], overlay: [] }, liveHash: "hash" as LiveHash });
     registry.createThread(thread, pylon);
     return thread;

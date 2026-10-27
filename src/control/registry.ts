@@ -43,6 +43,8 @@ export interface Thread extends ActivityFacts {
   sessionWaiting?: boolean;
   /** What the most recently waiting session's report said, when it said anything. */
   sessionWaitingMessage?: string;
+  /** A harness turn or a session's turn runs, such as a Claude worker's. */
+  working: boolean;
   /** The earliest known start of a running harness or session turn. Absent when none runs or no start is known. */
   workingSince?: number;
   id: ThreadId;
@@ -310,7 +312,7 @@ function nodeRow(r: Row): NodeRecord {
   };
 }
 
-function threadRow(r: Row): Thread {
+function threadRow(r: Row): Omit<Thread, "working"> {
   return {
     id: r.id as ThreadId,
     title: r.title as string,
@@ -491,7 +493,8 @@ export function openRegistry(path: string, clock = Date.now) {
     const starts = [thread.agentTurnRunning ? row.agent_turn_started_at : null, live.since].filter((at): at is number => typeof at === "number");
     const usageLimit = working === null ? usageLimitOf(thread.id) : null;
     return {
-      ...thread, ...(working === null ? {} : { sessionTurnRunning: true, sessionActiveUntil: working + sessionActivityTtlMs }), ...(waiting === undefined ? {} : { sessionWaiting: true }),
+      ...thread, working: thread.agentTurnRunning || working !== null,
+      ...(working === null ? {} : { sessionTurnRunning: true, sessionActiveUntil: working + sessionActivityTtlMs }), ...(waiting === undefined ? {} : { sessionWaiting: true }),
       ...(typeof waiting?.message === "string" ? { sessionWaitingMessage: waiting.message } : {}),
       ...(starts.length === 0 ? {} : { workingSince: Math.min(...starts) }), ...(usageLimit === null ? {} : { usageLimit }),
     };

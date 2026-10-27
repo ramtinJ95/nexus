@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { coordinator, notificationChannel, badgeCount, badgeText, seenBody } from "./notifications.js";
 
-const row = (attention, agentTurnRunning = false, id = "t1") => ({ id, attention, agentTurnRunning });
+const row = (attention, working = false, id = "t1") => ({ id, attention, working });
 test("initial states are silent; failures and parked notify immediately", () => {
   const events = [];
   const update = coordinator((r) => events.push(r));

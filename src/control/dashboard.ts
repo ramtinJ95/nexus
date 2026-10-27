@@ -220,7 +220,7 @@ function clock(ms: number): string {
 
 /** How long a thread's running turn has worked, which client.js ticks, or null when no turn runs. */
 function workingFor(t: Thread, now: number): Html | null {
-  if (!t.agentTurnRunning && t.sessionTurnRunning !== true) return null;
+  if (!t.working) return null;
   return t.workingSince === undefined ? html`working` : html`working <time data-since="${t.workingSince}">${clock(now - t.workingSince)}</time>`;
 }
 
@@ -575,7 +575,7 @@ export function liveFrames(t: Thread, claudeModel: string | null = null, now: ()
  * turn that began and ended between two polls.
  */
 function facts({ thread: t, pylon }: ThreadDetail): Html {
-  return html`<span data-pylon="${pylon.actualState}" data-turn="${String(t.agentTurnRunning)}" data-agent-at="${t.lastAgentActivityAt}" data-thread-status="${t.status}"></span>`;
+  return html`<span data-pylon="${pylon.actualState}" data-turn="${String(t.working)}" data-agent-at="${t.lastAgentActivityAt}" data-thread-status="${t.status}"></span>`;
 }
 
 /** The phone's stand-in for the inspector: the pylon, each preview as a link where it has one, and the outputs. */
