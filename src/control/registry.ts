@@ -576,7 +576,11 @@ export function openRegistry(path: string, clock = Date.now) {
 
   pruneSessions();
   // A release that computes attention differently, or a thread from before attention was stored, is right from the start.
-  transaction(() => { for (const { id } of sql("SELECT id FROM threads").all()) updateAttention(id as ThreadId); });
+  // A thread deleted before deletes cleared the parked flag kept it, and the harness no longer tracks it to report.
+  transaction(() => {
+    sql("UPDATE thread_attention SET parked = 0 WHERE thread IN (SELECT id FROM threads WHERE status = 'deleted')").run();
+    for (const { id } of sql("SELECT id FROM threads").all()) updateAttention(id as ThreadId);
+  });
 
   return {
     close() { db.close(); },
