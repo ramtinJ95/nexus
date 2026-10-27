@@ -7,6 +7,8 @@ import { request } from "node:http";
 import { join } from "node:path";
 import { startApi, type ApiOptions } from "./api.ts";
 import { threadStarter } from "./threads.ts";
+import { threadQueue, type QueuedThread } from "./queue.ts";
+import { turnGate } from "./drain.ts";
 import { readEvents } from "./event-reader.ts";
 import { fakeHarness } from "./fake-harness.ts";
 import { openRegistry, type Thread, type ThreadId } from "./registry.ts";
@@ -43,22 +45,26 @@ async function setup(t: TestContext, options: Partial<ApiOptions> = {}) {
   registry.upsertNode({ name: node, tailnetHost: "rj-firebat.tail.ts.net", tailnetNodeId: "nFIREBAT" as TailnetNodeId });
   let caller: TailnetNodeId | null = laptop;
   const fake = fakeHarness({ onParked: (id, parked) => registry.recordParked(id as ThreadId, parked) });
+  const startThread = threadStarter({
+    registry, harness: fake.harness, wake: () => {}, dotfiles: { repo: "git@github.com:ramtin/dotfiles.git", ref: "main" },
+    mirror: { setupInputs: () => Promise.reject(new Error("the dashboard tests read no remote")) },
+  });
+  const queue = threadQueue({ registry, startThread, gate: turnGate(() => false), send: (id, text, requestId) => fake.harness.send(id, text, requestId, "followUp") });
   const api = await startApi({
     registry, host: "127.0.0.1", port: 0,
     whois: async () => caller,
     allowed: new Set([laptop]),
     hostnames: new Set(["127.0.0.1"]),
     harness: fake.harness,
-    startThread: threadStarter({
-      registry, harness: fake.harness, wake: () => {}, dotfiles: { repo: "git@github.com:ramtin/dotfiles.git", ref: "main" },
-      mirror: { setupInputs: () => Promise.reject(new Error("the dashboard tests read no remote")) },
-    }),
+    startThread,
+    queue,
     wake: () => {},
     probes: new Map(),
     previewPorts: { first: 10200, last: 10299 },
     ...options,
   });
   t.after(async () => {
+    await queue.close();
     await api.close();
     registry.close();
   });
@@ -1386,4 +1392,50 @@ test("a Claude worker stopped on its usage limit shows the stop and when the lim
   const page = textOf((await s.call("GET", `/threads/${id}`)).text);
   const until = new Date(resetsAt).toISOString().slice(11, 16);
   assert.ok(page.includes(`stopped on its usage limit until ${until} UTC`), page);
+});
+
+test("a queued and a blocked thread show in the sidebar and the overview as queued, and their page waits for their predecessors and offers Start now", async (t) => {
+  const s = await seeded(t);
+  const fix = await s.start("acme", "Fix checkout");
+  const spike = await s.start("acme", "Spike");
+  const queue = async (title: string, after: Thread[], extra: Record<string, unknown> = {}) => {
+    const res = await s.call("POST", "/v1/threads", { project: "acme", title, after: after.map((a) => a.id), ...extra });
+    assert.equal(res.status, 201, res.text);
+    return JSON.parse(res.text) as QueuedThread;
+  };
+  const next = await queue("Next step", [fix], { message: "Fix the **next** bug." });
+  const stuck = await queue("Stuck step", [spike], { claude: "Do it", node: "auto" });
+  s.registry.savePrWatch(fix.id, { links: [{ pr: { repo: "acme/acme", number: 3, title: "Fix", url: "", state: "open", checks: "none", review: "none", conflict: null }, seen: [], failed: false }], commentWakes: 0, pending: null, error: null });
+  await s.call("POST", `/v1/threads/${spike.id}/archive`);
+
+  const home = (await s.call("GET", "/")).text;
+  const rows = sidebarOf(home).rows;
+  assert.ok(rows.includes("queued Next step queued"), rows.join(" | "));
+  assert.ok(rows.includes("blocked Stuck step blocked"), rows.join(" | "));
+  assert.doesNotMatch(home, new RegExp(`class="row dim" href="/threads/${stuck.id}"`), "a blocked row is never dimmed");
+  assert.match(textOf(sectionOf(home, "project-acme")), new RegExp(`Queued Thread Waits for Node Next step queued Fix checkout: PR #3 is open ${node} Stuck step blocked Spike: is archived and its pull request did not merge auto`));
+
+  const page = await s.call("GET", `/threads/${stuck.id}`);
+  assert.equal(page.status, 200);
+  assert.equal(sidebarOf(page.text).active, stuck.id);
+  assert.match(page.text, /<span class="chip chip-bad">.*?<span class="chip-label">blocked<\/span><\/span>/);
+  assert.match(page.text, new RegExp(`<button type="button" class="btn" id="start-queued" data-action="start-queued" data-thread="${stuck.id}">Start now</button>`));
+  assert.match(page.text, new RegExp(`id="archive" data-action="archive" data-thread="${stuck.id}"`));
+  const body = textOf(page.text.split('id="queued"')[1]!.split('<div class="dock">')[0]!);
+  assert.match(body, /Starts once these threads' pull requests merge blocked Spike : is archived and its pull request did not merge/, "each wait links its predecessor");
+  assert.match(body, /Prompt Do it Worker Claude Code · claude-opus-5-5 Node auto Size 2 CPUs, 4 GiB memory, 10 GiB disk/);
+  assert.doesNotMatch(page.text, /data-activity=/, "a queued thread's page counts no visit, as it has no pylon to wake");
+  assert.match(textOf((await s.call("GET", `/threads/${next.id}`)).text), /queued .*Fix checkout : PR #3 is open .*Message Fix the next bug\./);
+
+  assert.equal((await s.call("POST", `/v1/threads/${stuck.id}/archive`)).status, 200);
+  const cancelled = (await s.call("GET", `/threads/${stuck.id}`)).text;
+  assert.match(cancelled, /<span class="chip-label">cancelled<\/span>/);
+  assert.match(cancelled, /id="unarchive" data-action="unarchive"/);
+  assert.doesNotMatch(cancelled, /id="start-queued"/);
+  assert.ok(!sidebarOf((await s.call("GET", "/")).text).rows.some((r) => r.includes("Stuck step")), "a cancelled thread leaves the sidebar");
+
+  assert.equal((await s.call("POST", `/v1/threads/${next.id}/start`)).status, 201);
+  const started = (await s.call("GET", `/threads/${next.id}`)).text;
+  assert.match(started, /id="convo"/, "once started, its page is a thread's");
+  assert.ok(sidebarOf(started).rows.some((r) => r.endsWith("Next step now")));
 });

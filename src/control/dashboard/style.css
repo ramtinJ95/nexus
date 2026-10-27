@@ -546,3 +546,6 @@ h4.md-h { font-size: 1.07em; }
 
 .attention-toast { position: fixed; bottom: 24px; right: 24px; z-index: 100; display: flex; gap: 16px; padding: 16px; background: #252830; color: white; border: 1px solid #777; border-radius: 8px; }
 .attention-toast a { color: #9dcaff; }
+.ov-sub { margin: 14px 0 6px; font: 500 12px var(--sans); color: var(--text-3); }
+.ov-wait { display: block; overflow: hidden; text-overflow: ellipsis; }
+.queued section h2 { margin: 0 0 10px; font: 600 13px/1.4 var(--sans); color: var(--text); }

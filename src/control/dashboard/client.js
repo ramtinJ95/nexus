@@ -224,6 +224,11 @@ async function whenRunning(thread, send, waiting = () => {}) {
 const actions = {
   archive: (thread) => api("POST", `/v1/threads/${thread}/archive`),
   unarchive: (thread) => api("POST", `/v1/threads/${thread}/unarchive`),
+  // A started thread's page has a conversation and an inspector, which the queued page has no regions for.
+  "start-queued": async (thread) => {
+    await api("POST", `/v1/threads/${thread}/start`);
+    location.assign(`/threads/${thread}`);
+  },
   delete: (thread) => api("DELETE", `/v1/threads/${thread}`),
   abort: (thread) => api("POST", `/v1/threads/${thread}/abort`),
   retry: (thread) => api("POST", `/v1/threads/${thread}/retry`),

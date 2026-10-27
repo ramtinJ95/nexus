@@ -31,6 +31,7 @@ import { queuedOf } from "./claude-conversation.ts";
 import { blocks as blocking, findingsOf, landable, phaseNote, roundsSpent, type Review } from "./review.ts";
 import { heldBy, holdRule, reservedNames } from "./policy.ts";
 import { gib, nodePylons, overcommitted } from "./placement.ts";
+import { queuedView, type QueuedThread, type Wait } from "./queue.ts";
 
 export interface DashboardOptions {
   registry: Registry;
@@ -78,7 +79,11 @@ export function dashboard(options: DashboardOptions): (path: string, query: URLS
     [/^\/passkeys$/, (_, query, context) => ok(passkeysPage(context(), query.get("code")))],
     [/^\/threads\/([^/]+)$/, async (m, _, context) => {
       const thread = registry.thread(m[1]! as ThreadId);
-      if (thread === undefined) return { ...ok(notFound(context(), `No thread ${m[1]!}.`)), status: 404 };
+      if (thread === undefined) {
+        const queued = registry.queuedThread(m[1]! as ThreadId);
+        if (queued !== undefined && queued.status !== "started") return ok(queuedPage(context(), queuedView(registry, queued)));
+        return { ...ok(notFound(context(), `No thread ${m[1]!}.`)), status: 404 };
+      }
       // The reply known before this read is a safe watermark even if another turn ends during it.
       const view = await transcript(thread);
       // After the read, so the facts are no older than the conversation, and a thread deleted meanwhile shows none.
@@ -277,6 +282,16 @@ function threadsOf(c: Context, project: string) {
   const closed = (t: Thread) => t.status === "archived" || t.status === "deleted";
   return { open: threads.filter((t) => !closed(t)), closed: threads.filter(closed) };
 }
+/** A project's threads that wait in the queue, in the order they were queued. */
+const queuedThreadsOf = (c: Context, project: string) =>
+  c.registry.queuedThreads().filter((q) => q.project === project && q.status === "queued").map((q) => queuedView(c.registry, q));
+/** A blocked thread waits for the person, as a review that ended for them does. */
+function queuedLook(q: QueuedThread): [label: string, tone: Tone] {
+  if (q.status !== "queued") return [q.status === "archived" ? "cancelled" : "deleted", "muted"];
+  return q.blocked ? ["blocked", "bad"] : ["queued", "idle"];
+}
+const waitTone: Record<Wait["state"], Tone> = { waiting: "idle", landed: "ok", blocked: "bad" };
+const predecessor = (c: Context, id: ThreadId) => c.registry.thread(id)?.title ?? c.registry.queuedThread(id)?.title ?? id;
 const lastActive = (t: Thread) => Math.max(t.createdAt, t.lastHumanActivityAt, t.lastAgentActivityAt);
 function closedLabel(threads: readonly Thread[]): string {
   const deleted = threads.filter((t) => t.status === "deleted").length;
@@ -292,17 +307,23 @@ function sidebar(c: Context, active: ThreadId | undefined): Html {
     const [label, tone] = threadState(d);
     return html`<li><a class="row${t.id === active && " active"}${dims(d, active) && " dim"}" href="/threads/${t.id}"${t.id === active && html` aria-current="page"`}><span class="row-icon">${icon("branch")}${dot(tone, label)}</span><span class="row-title">${t.title}</span><span class="row-at">${workingFor(t, c.now) ?? span(lastActive(t), c.now) ?? "now"}</span></a></li>`;
   };
+  // A queued thread has no time of its own to show until it starts, so its row says what it is instead.
+  const queuedRow = (q: QueuedThread) => {
+    const [label, tone] = queuedLook(q);
+    return html`<li><a class="row${q.id === active && " active"}" href="/threads/${q.id}"${q.id === active && html` aria-current="page"`}><span class="row-icon">${icon("branch")}${dot(tone, label)}</span><span class="row-title">${q.title}</span><span class="row-at">${label}</span></a></li>`;
+  };
   return html`<aside class="side" aria-label="Threads">
 <div class="side-head"><a class="brand" href="/"><span class="brand-mark" aria-hidden="true">◆</span>nexus</a><a class="btn btn-new" href="/threads/new" data-start>New thread<kbd>N</kbd></a></div>
 <label class="filter"><span aria-hidden="true">⌕</span><input id="filter" type="search" placeholder="Filter threads" aria-label="Filter threads" autocomplete="off"></label>
 <nav class="groups" id="side-threads" data-live aria-label="Threads by project">
 ${projects.length === 0 ? html`<p class="empty side-empty">No projects yet.</p>` : projects.map((p) => {
   const { open, closed } = threadsOf(c, p.id);
+  const queued = queuedThreadsOf(c, p.id);
   // A project folds like a folder. client.js remembers which ones the reader folded.
   return html`<details class="group" id="group-${p.id}" open>
 <summary class="group-h">${icon("chevron")}${icon("folder")}<span class="group-name"><span>${p.id}</span><span class="group-branch">${p.defaultBranch}</span></span></summary>
 <a class="group-new" href="/threads/new?project=${encodeURIComponent(p.id)}" data-start="${p.id}" aria-label="New thread in ${p.id}" title="New thread in ${p.id}">${icon("plus")}</a>
-${open.length > 0 && html`<ul>${open.map(row)}</ul>`}
+${open.length + queued.length > 0 && html`<ul>${open.map(row)}${queued.map(queuedRow)}</ul>`}
 ${closed.length > 0 && html`<details class="archived" id="archived-${p.id}"${closed.some((t) => t.id === active) && " open"}><summary>${closedLabel(closed)}</summary><ul>${closed.map(row)}</ul></details>`}
 </details>`;
 })}
@@ -443,9 +464,21 @@ function home(c: Context, dialogs: Pick<Shell, "start" | "addProject">): Html {
 <div class="scroll"><div class="page" id="overview" data-live>
 ${projects.length === 0 ? html`<div class="first-project"><p class="empty">No projects yet. A project names the repository its threads clone and the node they run on.</p>${newProjectButton}</div>` : projects.map((p) => {
   const { open, closed } = threadsOf(c, p.id);
+  const queued = queuedThreadsOf(c, p.id);
   return html`<section aria-labelledby="project-${p.id}">
 <div class="ov-head"><h2 id="project-${p.id}">${p.id}</h2><code class="dim">${p.repoUrl ?? "scratch, no remote"}</code><a class="btn btn-xs" href="/threads/new?project=${encodeURIComponent(p.id)}" data-start="${p.id}">New thread</a></div>
 ${open.length === 0 ? html`<p class="empty">No open threads.</p>` : table(open)}
+${queued.length > 0 && html`<h3 class="ov-sub">Queued</h3><table class="ov ov-queued">
+<thead><tr><th>Thread</th><th>Waits for</th><th class="wide">Node</th></tr></thead>
+<tbody>${queued.map((q) => {
+  const [label, tone] = queuedLook(q);
+  return html`<tr>
+<td><span class="ov-title">${dot(tone, label)}<a href="/threads/${q.id}">${q.title}</a><span class="tag">${label}</span></span></td>
+<td>${q.waits.map((w) => html`<span class="ov-wait">${predecessor(c, w.thread)}: ${w.why}</span>`)}</td>
+<td class="wide">${q.node}</td>
+</tr>`;
+})}</tbody>
+</table>`}
 ${closed.length > 0 && html`<details class="ov-closed" id="closed-${p.id}"><summary>${closedLabel(closed)}</summary>${table(closed)}</details>`}
 </section>`;
 })}
@@ -643,6 +676,50 @@ ${passkeys.length === 0 ? html`<p class="empty">No passkeys yet.</p>` : html`<ta
 </section>
 <p id="action-error" class="error" role="alert" hidden></p>
 </div></div>`,
+  });
+}
+
+/**
+ * A thread that has not started: what it waits for, what it will start with, and the actions a queued thread has. It
+ * has no conversation or pylon, so it has no inspector and counts no visit.
+ */
+function queuedPage(c: Context, q: QueuedThread): Html {
+  const [label, tone] = queuedLook(q);
+  const { cpus, memoryGiB, diskGiB } = q.resources;
+  const actions = [
+    q.status === "queued" && html`<button type="button" class="btn" id="start-queued" data-action="start-queued" data-thread="${q.id}">Start now</button>`,
+    q.status === "queued" && html`<button type="button" class="btn btn-ghost" id="archive" data-action="archive" data-thread="${q.id}">Archive</button>`,
+    q.status === "archived" && html`<button type="button" class="btn btn-ghost" id="unarchive" data-action="unarchive" data-thread="${q.id}">Unarchive</button>`,
+  ].filter((a) => a !== false);
+  return layout(c, {
+    title: q.title,
+    active: q.id,
+    main: html`<header class="bar" id="bar" data-live>
+<button type="button" class="icon-btn menu" data-open="side" aria-label="Threads">☰</button>
+<div class="crumb"><a class="crumb-p" href="/">${q.project}</a><span class="sep" aria-hidden="true">/</span><h1>${q.title}</h1></div>
+<span class="chip chip-${tone}">${dot(tone)}<span class="chip-label">${label}</span></span>
+${actions.length > 0 && html`<div class="bar-actions" id="thread-actions">${actions}</div><button type="button" class="icon-btn more" data-open="actions" aria-label="Thread actions" aria-controls="thread-actions">⋯</button>`}
+</header>
+<div class="scroll"><div class="page queued" id="queued" data-live>
+<section aria-labelledby="waits-h"><h2 id="waits-h">Starts once these threads' pull requests merge</h2>
+<ul class="list">${q.waits.map((w) => html`<li>${state(w.state, waitTone[w.state])} <a class="link" href="/threads/${w.thread}">${predecessor(c, w.thread)}</a>: ${w.why}</li>`)}</ul>
+${q.status === "queued" && q.blocked && html`<p class="dim">A blocked thread stays queued. Start it now, or archive it to cancel it.</p>`}
+${q.startNow !== null && html`<p class="dim">Start now was asked ${ago(q.startNow.at, c.now)}, so it starts without waiting once it can.</p>`}
+</section>
+<section aria-labelledby="start-h"><h2 id="start-h">What it starts with</h2>
+<dl class="kv">
+<dt>${q.worker === "claude" ? "Prompt" : "Message"}</dt><dd>${q.prompt === null ? html`<span class="dim">none</span>` : prose(q.prompt)}</dd>
+<dt>Worker</dt><dd>${q.worker === "claude" ? `Claude Code · ${q.model ?? "unknown"}` : "Nexus agent"}</dd>
+<dt>Node</dt><dd>${q.node}</dd>
+<dt>Size</dt><dd>${cpus} CPUs, ${memoryGiB} GiB memory, ${diskGiB} GiB disk</dd>
+${q.branch !== null && html`<dt>Branch</dt><dd><code>${q.branch}</code></dd>`}
+${q.commit !== null && html`<dt>Commit</dt><dd><code>${q.commit}</code></dd>`}
+</dl>
+<code class="id">${q.id}</code>
+${q.lastError !== null && html`<p class="error">The last start attempt failed: ${q.lastError}</p>`}
+</section>
+</div></div>
+<div class="dock"><p id="action-error" class="error" role="alert" hidden></p></div>`,
   });
 }
 
