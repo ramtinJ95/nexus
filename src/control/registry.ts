@@ -21,6 +21,7 @@ import type { BuildingTemplate, ImageId, ImageManifest, TemplateId, TemplateReco
 import type { PylonRecord } from "../tick.ts";
 import type { ImageOperation } from "./image-rollout.ts";
 import { needsPerson, reviewerCaller, storedReview, type Review } from "./review.ts";
+import type { Passkey } from "./passkeys.ts";
 import { claudeTurn } from "../../images/pylon/nexus-turn.ts";
 import { defaultClaudeModel } from "../claude-state.ts";
 import { maxEntries, transcriptStart, usageLimitStop, type ClaudeEntry, type TranscriptCursor } from "../claude-transcript.ts";
@@ -287,6 +288,10 @@ const migrations: readonly string[] = [
   // Every pull request a review ever started for, which outlives the builder's record a later review replaces.
   `CREATE TABLE reviewed_prs (repo TEXT NOT NULL, number INTEGER NOT NULL, PRIMARY KEY (repo, number)) STRICT;
    INSERT OR IGNORE INTO reviewed_prs SELECT json_extract(record, '$.pr.repo'), json_extract(record, '$.pr.number') FROM reviews;`,
+  // The person's passkeys, public keys only, and the codes root on the control plane's host makes to enrol one, hashed.
+  // It touches nothing an earlier migration made, so a registry rewound past it applies it again unchanged.
+  `CREATE TABLE IF NOT EXISTS passkeys (id TEXT PRIMARY KEY, credential_id TEXT NOT NULL UNIQUE, record TEXT NOT NULL) STRICT;
+   CREATE TABLE IF NOT EXISTS passkey_codes (hash TEXT PRIMARY KEY, expires_at INTEGER NOT NULL, used_at INTEGER) STRICT;`,
 ];
 
 type Row = Record<string, unknown>;
@@ -366,7 +371,8 @@ export type Registry = ReturnType<typeof openRegistry>;
 /** Opens the file, creating it if needed, and applies any migrations it has not seen. */
 export function openRegistry(path: string, clock = Date.now) {
   const db = new DatabaseSync(path);
-  db.exec("PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;");
+  // The passkey host command writes the registry from another process, so a write waits out its short transaction.
+  db.exec("PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000;");
   migrate(db);
 
   /**
@@ -736,7 +742,7 @@ export function openRegistry(path: string, clock = Date.now) {
     isReviewer: (thread: ThreadId) => sql("SELECT 1 FROM threads WHERE id = ? AND started_by = ? UNION SELECT 1 FROM reviews WHERE reviewer = ?").get(thread, reviewerCaller, thread) !== undefined,
     /** Whether a review ever started for the pull request, including one a later review of its builder replaced. */
     prReviewed: (repo: string, number: number) => sql("SELECT 1 FROM reviewed_prs WHERE repo = ? AND number = ?").get(repo, number) !== undefined,
-    /** Replaces the builder's review, and tells the event log when its phase, round or label changed. */
+    /** Replaces the builder's review, and tells the event log when its phase, round or label changed, or the person waived holds. */
     saveReview(review: Review) {
       transaction(() => {
         const before = jsonOrNull<Review>(sql("SELECT record FROM reviews WHERE builder = ?").get(review.builder)?.record ?? null);
@@ -747,7 +753,37 @@ export function openRegistry(path: string, clock = Date.now) {
         if (before?.id !== review.id || before.phase.kind !== review.phase.kind || before.rounds.length !== review.rounds.length || label(before) !== label(review)) {
           appendEvent("review.changed", review.builder, { review: review.id, reviewer: review.reviewer, phase: review.phase, round: review.rounds.length });
         }
+        if (review.waiver != null && JSON.stringify(before?.waiver ?? null) !== JSON.stringify(review.waiver)) {
+          appendEvent("review.waived", review.builder, { review: review.id, repo: review.pr.repo, pr: review.pr.number, ...review.waiver });
+        }
         updateAttention(review.builder);
+      });
+    },
+    passkeys: (): Passkey[] => sql("SELECT record FROM passkeys ORDER BY id").all().map((r) => json<Passkey>(r.record)),
+    passkeyByCredential: (credentialId: string): Passkey | null => jsonOrNull<Passkey>(sql("SELECT record FROM passkeys WHERE credential_id = ?").get(credentialId)?.record ?? null),
+    addPasskeyCode(hash: string, expiresAt: number) {
+      sql("INSERT INTO passkey_codes (hash, expires_at) VALUES (?, ?)").run(hash, expiresAt);
+    },
+    passkeyCodeOpen: (hash: string, at: number) => sql("SELECT 1 FROM passkey_codes WHERE hash = ? AND used_at IS NULL AND expires_at > ?").get(hash, at) !== undefined,
+    /** Enrols the passkey and uses up its code, or does neither when the code was used or expired meanwhile. */
+    enrolPasskey(passkey: Passkey, codeHash: string): boolean {
+      return transaction(() => {
+        if (sql("UPDATE passkey_codes SET used_at = ? WHERE hash = ? AND used_at IS NULL AND expires_at > ?").run(passkey.createdAt, codeHash, passkey.createdAt).changes === 0) return false;
+        sql("INSERT INTO passkeys (id, credential_id, record) VALUES (?, ?, ?)").run(passkey.id, passkey.credentialId, JSON.stringify(passkey));
+        appendEvent("passkey.enrolled", null, { passkey: passkey.id, name: passkey.name, by: passkey.createdBy });
+        return true;
+      });
+    },
+    savePasskeyUse(passkey: Passkey) {
+      sql("UPDATE passkeys SET record = ? WHERE id = ?").run(JSON.stringify(passkey), passkey.id);
+    },
+    revokePasskey(id: string, by: string): Passkey | null {
+      return transaction(() => {
+        const passkey = jsonOrNull<Passkey>(sql("SELECT record FROM passkeys WHERE id = ?").get(id)?.record ?? null);
+        if (passkey === null) return null;
+        sql("DELETE FROM passkeys WHERE id = ?").run(id);
+        appendEvent("passkey.revoked", null, { passkey: id, name: passkey.name, by });
+        return passkey;
       });
     },
     prWatch(thread: ThreadId): PrWatchState | null {

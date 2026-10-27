@@ -1,0 +1,2 @@
+POST /v1/passkeys/enrolment {"code":"UUQX-55K4-B7VR-ECF8-TM6Q"}
+=> 403 {"error":"that enrolment code is not one the control plane's host made, or it was used or has expired. Make one on the host with `sudo node /opt/nexus/control-current/src/control/passkeys-host.ts /etc/nexus/control.json code`"}

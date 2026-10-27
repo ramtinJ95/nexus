@@ -24,7 +24,7 @@ import { defaultClaudeModel } from "../claude-state.ts";
 import type { GitHub, PrSnapshot, PullRequest } from "./github.ts";
 import { HttpError } from "./http-error.ts";
 import type { Inbox } from "./inbox.ts";
-import { conflictHold, landingHolds } from "./policy.ts";
+import { conflictHold, heldBy, landingHolds, unwaived, waivable } from "./policy.ts";
 import { checkCaller, type CheckRuns } from "./gate.ts";
 import { releaseView } from "./releases.ts";
 import type { Registry, Thread, ThreadId } from "./registry.ts";
@@ -113,6 +113,12 @@ export type Phase =
 export type Label = { state: "adding" } | { state: "added" } | { state: "failed"; why: string };
 export type PhaseKind = Phase["kind"];
 
+/**
+ * The person's waiver of holds the policy reserves for them, confirmed with a passkey for this review at `head`. It
+ * lasts for the landing it started, and a later land replaces it.
+ */
+export interface Waiver { head: string; holds: string[]; passkey: { id: string; name: string }; by: string; at: number }
+
 export interface Review {
   /** Part of every token and request ID, so a later review of the same thread never matches an earlier one's. */
   id: string;
@@ -139,6 +145,7 @@ export interface Review {
   rounds: Round[];
   /** The merge commit once the PR merged, so a later land never merges or deploys it again. */
   merged: string | null;
+  waiver: Waiver | null;
   phase: Phase;
   /**
    * The next message, saved before it is sent. `attempted` is when its first send began, saved before it, so a send
@@ -156,10 +163,13 @@ const endedKinds = ["approved", "landed", "needs-person", "merged", "closed", "c
 export const ended: ReadonlySet<PhaseKind> = new Set(endedKinds);
 export const needsPerson = (r: Review | null) => r?.phase.kind === "needs-person";
 
-/** A stored record as this code reads it: a review saved with more rounds stops at the cap, and old findings get priorities. */
+/**
+ * A stored record as this code reads it: a review saved with more rounds stops at the cap, old findings get
+ * priorities, and one saved before waivers has none.
+ */
 export function storedReview(record: Review): Review {
   return {
-    ...record, maxRounds: Math.min(record.maxRounds, maxRounds), auto: record.auto ?? false,
+    ...record, maxRounds: Math.min(record.maxRounds, maxRounds), auto: record.auto ?? false, waiver: record.waiver ?? null,
     rounds: record.rounds.map((round) => round.verdict === null ? round : { ...round, verdict: { ...round.verdict, findings: round.verdict.findings.map((f) => findingSchema.parse(f)) } }),
   };
 }
@@ -450,14 +460,19 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
       const head = r.rounds.at(-1)!.head;
       const snapshot = await github.poll(r.pr.repo, r.pr.number);
       if (snapshot.pr.state === "closed") return end(r, { kind: "closed" });
-      const holds = async () => [...unauthorized(r, builder), ...landingHolds({ review: r, pr: snapshot, files: await github.files(r.pr.repo, r.pr.number), nexus: deploys(r) })];
+      // `left` is what the person's waiver does not get past. A landing that holds goes to the person with every hold,
+      // those it waived too, so the person's next confirmation can name them all.
+      const holds = async () => {
+        const all = [...unauthorized(r, builder), ...landingHolds({ review: r, pr: snapshot, files: await github.files(r.pr.repo, r.pr.number), nexus: deploys(r) })];
+        return { all, left: unwaived(r, all) };
+      };
       let commit: string;
       if (snapshot.detail.mergeCommit !== null) {
         if (snapshot.detail.head !== head) return toPerson(r, `Pull request #${r.pr.number} merged at ${snapshot.detail.head}, not the approved ${head}, so it is not deployed.`);
         // A merge this review did not authorize is someone else's, so it deploys only if the policy would have let this review merge it.
         if (phase.authorized !== head) {
-          const held = await holds();
-          if (held.length) return toPerson(r, `Pull request #${r.pr.number} was merged outside this review, so it is not deployed.`, ...held);
+          const { all, left } = await holds();
+          if (left.length) return toPerson(r, `Pull request #${r.pr.number} was merged outside this review, so it is not deployed.`, ...all);
         }
         commit = snapshot.detail.mergeCommit;
       } else {
@@ -465,9 +480,9 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
         if (snapshot.detail.head !== head) return newHead(r, snapshot.detail.head, snapshot.detail.base, `The pull request's head moved to ${snapshot.detail.head}`);
         // Every attempt checks the whole policy again with what GitHub says now, since checks and the PR can change
         // between attempts and branch protection may not enforce them.
-        const held = await holds();
-        if (held.length === 1 && held[0] === conflictHold) return rebase(r, snapshot.detail.base);
-        if (held.length) return toPerson(r, ...held);
+        const { all, left } = await holds();
+        if (left.length === 1 && left[0] === conflictHold) return rebase(r, snapshot.detail.base);
+        if (left.length) return toPerson(r, ...all);
         if (phase.authorized !== head) return { ...r, phase: { kind: "merging", authorized: head } };
         const merged = await github.merge(r.pr.repo, r.pr.number, head);
         if (merged.kind !== "merged") {
@@ -597,7 +612,7 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
     const draft: Review = {
       id, expect: mint(id), sent: 1, builder: builder.id, reviewer: "" as ThreadId, pr: { repo, number, url: snapshot.pr.url, title: snapshot.pr.title, branch: snapshot.detail.branch }, models, reviewerKind: kind.claude ? "claude" : "harness",
       maxRounds: request.rounds ?? maxRounds, land: request.land, auto: request.auto,
-      rounds: [{ head: snapshot.detail.head, verdict: null, check: null, answers: null }], merged: null, phase: { kind: "reviewing" }, outbox: null,
+      rounds: [{ head: snapshot.detail.head, verdict: null, check: null, answers: null }], merged: null, waiver: null, phase: { kind: "reviewing" }, outbox: null,
       since: now(), nudges: 0, startedAt: now(),
     };
     const prompt = reviewerRequest(draft, snapshot.detail, draft.expect);
@@ -656,24 +671,45 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
     },
 
     /**
+     * The review the person may land at `head` waiving `holds` with a passkey: it is landable at that head, and each
+     * hold is one it has now and one the person may waive.
+     */
+    waivable(builderId: ThreadId, head: string, holds: readonly string[]): Review {
+      const r = landableAt(builderId, head);
+      const held = heldBy(r);
+      if (holds.length === 0) throw new HttpError(400, "a waiver names at least one hold");
+      for (const hold of holds) {
+        if (!held.includes(hold)) throw new HttpError(409, `review ${r.id} is not held by "${hold}", so there is nothing to waive. Look at it again`);
+        if (!waivable(hold)) throw new HttpError(409, `a passkey cannot waive "${hold}": only the holds the merge policy reserves for the person`);
+      }
+      return r;
+    },
+
+    /**
      * Lands an approved review, or tries again one the policy held, such as after the PR's description changed or the
      * person granted the merge token. It runs the check again first, which finds its result kept for the same head.
      * A PR that already merged is held by the policy, so a land never deploys twice. `head`, when given, is the commit
-     * the person confirmed, so a review that moved on meanwhile is not landed in its place.
+     * the person confirmed, so a review that moved on meanwhile is not landed in its place. A `waiver` the person
+     * confirmed with a passkey lets the landing past the holds it names, and the event log records it.
      */
-    land(builderId: ThreadId, requestedBy: string, head?: string): Review {
-      const r = registry.review(builderId);
-      if (r === null) throw new HttpError(409, `thread ${builderId} has no review. Start one with \`nexus review ${builderId} --land\``);
-      const builder = registry.thread(builderId)!;
-      if (builder.status !== "active") throw new HttpError(409, `thread ${builderId} is ${builder.status}`);
-      if (r.merged !== null) throw new HttpError(409, `review ${r.id} already merged pull request #${r.pr.number} as ${r.merged}, so it does not land again`);
-      if (head !== undefined && r.rounds.at(-1)!.head !== head) throw new HttpError(409, `review ${r.id} of ${builderId} is at ${r.rounds.at(-1)!.head}, not ${head}, so it was not landed. Look at it again before landing it`);
-      if (!landable(r)) throw new HttpError(409, `review ${r.id} of ${builderId} is ${r.phase.kind}${r.phase.kind === "needs-person" ? `: ${r.phase.reasons.join(" ")}` : ""}, not approved with its checks passing`);
-      const next: Review = { ...r, land: { requestedBy }, phase: checking(), outbox: null, nudges: 0 };
+    land(builderId: ThreadId, requestedBy: string, head?: string, waiver?: Waiver): Review {
+      const r = waiver === undefined ? landableAt(builderId, head) : this.waivable(builderId, waiver.head, waiver.holds);
+      const next: Review = { ...r, land: { requestedBy }, waiver: waiver ?? null, phase: checking(), outbox: null, nudges: 0 };
       registry.saveReview(next);
       void poll();
       return next;
     },
   };
+
+  function landableAt(builderId: ThreadId, head: string | undefined): Review {
+    const r = registry.review(builderId);
+    if (r === null) throw new HttpError(409, `thread ${builderId} has no review. Start one with \`nexus review ${builderId} --land\``);
+    const builder = registry.thread(builderId)!;
+    if (builder.status !== "active") throw new HttpError(409, `thread ${builderId} is ${builder.status}`);
+    if (r.merged !== null) throw new HttpError(409, `review ${r.id} already merged pull request #${r.pr.number} as ${r.merged}, so it does not land again`);
+    if (head !== undefined && r.rounds.at(-1)!.head !== head) throw new HttpError(409, `review ${r.id} of ${builderId} is at ${r.rounds.at(-1)!.head}, not ${head}, so it was not landed. Look at it again before landing it`);
+    if (!landable(r)) throw new HttpError(409, `review ${r.id} of ${builderId} is ${r.phase.kind}${r.phase.kind === "needs-person" ? `: ${r.phase.reasons.join(" ")}` : ""}, not approved with its checks passing`);
+    return r;
+  }
 }
 export type ReviewLoop = ReturnType<typeof reviewLoop>;

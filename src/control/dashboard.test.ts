@@ -224,7 +224,7 @@ test("a review the person cancelled says which thread they archived, and asks no
   const fix = await s.start("acme", "Fix checkout");
   s.registry.saveReview({
     id: "rv-1", builder: fix.id, reviewer: "th-reviewer" as Thread["id"], pr: { repo: "acme/repo", number: 7, url: "https://github.com/acme/repo/pull/7", title: "Cache", branch: "cache" }, reviewerKind: "harness",
-    models: { builder: "claude-opus-5-5", reviewer: "gpt-6-astra" }, maxRounds: 5, land: null, auto: false, merged: null, expect: "rv-1:t", sent: 1, outbox: null, since: 0, nudges: 0, startedAt: 0,
+    models: { builder: "claude-opus-5-5", reviewer: "gpt-6-astra" }, maxRounds: 5, land: null, auto: false, merged: null, waiver: null, expect: "rv-1:t", sent: 1, outbox: null, since: 0, nudges: 0, startedAt: 0,
     rounds: [{ head: "1".repeat(40), verdict: null, check: null, answers: null }], phase: { kind: "cancelled", who: "reviewer", status: "archived" },
   });
   const page = textOf((await s.call("GET", `/threads/${fix.id}`)).text);
@@ -245,7 +245,7 @@ const head = "9f".repeat(20);
 /** A review of PR #7 whose reviewer approved `head` with one P3 note and whose check passed there. */
 const approvedReview = (builder: ThreadId, phase: Review["phase"], extra: Partial<Review> = {}): Review => ({
   id: "rv-1", builder, reviewer: "th-reviewer" as ThreadId, pr: { repo: "acme/nexus", number: 7, url: "https://github.com/acme/nexus/pull/7", title: "Cache", branch: "cache" }, reviewerKind: "harness",
-  models: { builder: "claude-opus-5-5", reviewer: "gpt-6-astra" }, maxRounds: 5, land: null, auto: false, merged: null, expect: "rv-1:t", sent: 3, outbox: null, since: 0, nudges: 0, startedAt: 0,
+  models: { builder: "claude-opus-5-5", reviewer: "gpt-6-astra" }, maxRounds: 5, land: null, auto: false, merged: null, waiver: null, expect: "rv-1:t", sent: 3, outbox: null, since: 0, nudges: 0, startedAt: 0,
   rounds: [
     { head: "1".repeat(40), verdict: { token: "a", verdict: "changes", findings: [{ id: "F1", priority: "P1", where: "src/cache.ts:12", summary: "The cache never expires" }], reserved: [], notCheckedLive: null }, check: null, answers: [{ id: "F1", action: "fixed", reason: "" }] },
     { head, verdict: { token: "b", verdict: "approve", findings: [{ id: "F2", priority: "P3", where: null, summary: "Name the TTL" }], reserved: [], notCheckedLive: "The cache's behaviour under load could not be checked live." }, check: { passed: true, output: "ok 412 tests" }, answers: null },
@@ -261,7 +261,7 @@ test("a review held for the person says why on its builder's page, and a deploye
   s.registry.saveReview(approvedReview(fix.id, { kind: "needs-person", reasons: ["The pull request's GitHub checks are pending."] }, { land: { requestedBy: laptop } }));
   const region = landingOf((await s.call("GET", `/threads/${fix.id}`)).text);
   assert.equal(textOf(region), `Held for you #7 Cache ↗ Head ${head.slice(0, 12)} · approved by gpt-6-astra (harness) in round 2 of 5 · .nexus/check passed `
-    + "Why it waits for you The pull request's GitHub checks are pending. The reviewer's findings P3 F2 : Name the TTL "
+    + "Why it waits for you The pull request's GitHub checks are pending. not waivable Failing or pending GitHub checks hold every landing until they pass. The reviewer's findings P3 F2 : Name the TTL "
     + `.nexus/check passed at ${head.slice(0, 12)} ok 412 tests Land #7`);
   assert.match(region, /<a href="https:\/\/github.com\/acme\/nexus\/pull\/7" target="_blank"/, "the PR links to GitHub");
   const button = /<button [^>]*data-action="land"[^>]*>/.exec(region)?.[0];
@@ -299,20 +299,53 @@ test("a review is not offered for landing when its PR closed, or when the contro
   assert.equal(landingOf((await s.call("GET", `/threads/${fix.id}`)).text), "", "a closed PR has nothing to land");
 });
 
-test("a hold that every landing of the commit meets again is marked, and offers no Land button", async (t) => {
-  const s = await seeded(t, landingOptions());
+test("a hold the policy reserves for the person is marked waivable, and lands only with a passkey, which needs the HTTPS address and an enrolled one", async (t) => {
+  const reserved = "Always needs the person: changes to login or auth, as it changes src/control/api.ts.";
+  const held = approvedReview("" as ThreadId, { kind: "needs-person", reasons: ["The pull request's GitHub checks are pending.", reserved] }, { land: { requestedBy: laptop } });
+  const plain = await seeded(t, landingOptions());
+  const off = await plain.start("acme", "Fix checkout");
+  plain.registry.saveReview({ ...held, builder: off.id });
+  const region = textOf(landingOf((await plain.call("GET", `/threads/${off.id}`)).text));
+  assert.match(region, /The pull request's GitHub checks are pending\. not waivable Failing or pending GitHub checks hold every landing until they pass\. /);
+  assert.match(region, /src\/control\/api\.ts\. you may waive The policy reserves this for you, and your passkey shows that you, not an agent, confirmed it\. /);
+  assert.match(region, /Land #7 with a passkey Waiving a hold needs your passkey, and passkeys need the dashboard's HTTPS address, which the control plane's config does not set \(https\.hostname\)\.$/);
+  assert.ok(!region.includes('data-action'), "no button lands it past the hold without a passkey");
+
+  const origin = "https://rj-firebat.example.ts.net:7443";
+  const s = await seeded(t, { ...landingOptions(), passkeys: { id: "rj-firebat.example.ts.net", origin } });
   const fix = await s.start("acme", "Fix checkout");
-  s.registry.saveReview(approvedReview(fix.id, { kind: "needs-person", reasons: [
-    "The pull request's GitHub checks are pending.",
-    "Always needs the person: changes to login or auth, as it changes src/control/api.ts.",
-  ] }, { land: { requestedBy: laptop } }));
-  const region = textOf(landingOf((await s.call("GET", `/threads/${fix.id}`)).text));
-  assert.match(region, /The pull request's GitHub checks are pending\. Always needs the person: changes to login or auth, as it changes src\/control\/api\.ts\. holds again /);
-  assert.match(region, /Only you can get past it, by merging the pull request on GitHub and deploying it with nexus deploy\.$/);
-  assert.ok(!region.includes("Land #7"));
+  s.registry.saveReview({ ...held, builder: fix.id });
+  assert.match(textOf(landingOf((await s.call("GET", `/threads/${fix.id}`)).text)), /Land #7 with a passkey Waiving a hold needs your passkey, and none is enrolled\. Enrol one on the Passkeys page with a code from the control plane's host\.$/);
+
+  s.registry.addPasskeyCode("h", Number.MAX_SAFE_INTEGER);
+  s.registry.enrolPasskey({ id: "pk-0000000a", name: "MacBook Touch ID", credentialId: "c", publicKey: "k", algorithm: -7, signCount: 0, createdAt: 1, createdBy: laptop, lastUsedAt: null }, "h");
+  const page = landingOf((await s.call("GET", `/threads/${fix.id}`)).text);
+  const button = /<button [^>]*data-action="waive"[^>]*>/.exec(page)?.[0];
+  assert.ok(button !== undefined, "an enrolled passkey gets the button");
+  assert.match(button, new RegExp(`data-head="${head}"`));
+  assert.deepEqual(JSON.parse(textOf(/data-holds="([^"]*)"/.exec(button)![1]!)), [reserved], "it waives only what a passkey may");
+  assert.match(button, new RegExp(`data-origin="${origin}"`));
+  assert.equal(textOf(/data-confirm="([^"]*)"/.exec(button)![1]!), `Land pull request #7, "Cache", at commit ${head.slice(0, 12)}, waiving the hold the merge policy reserves for you? Your passkey confirms it was you. Nexus checks everything else again, merges that commit and deploys the merge commit.`);
+  s.callAs(phone);
+  assert.match(textOf(landingOf((await s.call("GET", `/threads/${fix.id}`)).text)), /Land #7 with a passkey This device cannot land/);
+  s.callAs(laptop);
 
   s.registry.saveReview(approvedReview(fix.id, { kind: "approved" }, { reviewerKind: "claude" }));
-  assert.match(textOf(landingOf((await s.call("GET", `/threads/${fix.id}`)).text)), /A Claude reviewer approved it\..* holds again .*Only you can get past it/, "an approval the policy never lands is marked before any landing tries");
+  const claude = textOf(landingOf((await s.call("GET", `/threads/${fix.id}`)).text));
+  assert.match(claude, /A Claude reviewer approved it\..* holds again A passkey cannot stand in for a harness reviewer's approval.*no passkey waives it\. Only you can get past it, by merging the pull request on GitHub and deploying it with nexus deploy\.$/, "an approval the policy never lands is marked before any landing tries");
+  assert.ok(!claude.includes("Land #7"));
+});
+
+test("the Passkeys page lists the person's passkeys and enrols one with the code from the host", async (t) => {
+  const s = await seeded(t, { passkeys: { id: "rj-firebat.example.ts.net", origin: "https://rj-firebat.example.ts.net:7443" } });
+  s.registry.addPasskeyCode("h", Number.MAX_SAFE_INTEGER);
+  s.registry.enrolPasskey({ id: "pk-0000000a", name: "MacBook Touch ID", credentialId: "c", publicKey: "k", algorithm: -7, signCount: 0, createdAt: Date.UTC(2026, 9, 27, 9), createdBy: laptop, lastUsedAt: null }, "h");
+  const page = (await s.call("GET", "/passkeys?code=ABCD-EFGH")).text;
+  assert.match(textOf(page), /MacBook Touch ID pk-0000000a 2026-10-27 09:00 from nLAPTOP never Revoke/);
+  assert.match(page, /data-action="revoke-passkey" data-passkey="pk-0000000a"/);
+  assert.match(page, /<input name="code"[^>]* value="ABCD-EFGH"/, "the address the host command prints fills in its code");
+  assert.match(textOf(page), /sudo node \/opt\/nexus\/control-current\/src\/control\/passkeys-host\.ts \/etc\/nexus\/control\.json code/);
+  assert.match((await s.call("GET", "/")).text, /href="\/passkeys"/, "every page links to it");
 });
 
 test("a landing shows its steps as the review moves through them, until it lands or ends for the person", async (t) => {

@@ -1,0 +1,20 @@
+branch: e81e8c5 docs: what a passkey waives next to the rebase of a conflicting branch, tests from HEAD
+ℹ fail 0
+ℹ pass 16
+ℹ tests 16
+✔ a Claude reviewer's approval is not waivable, and a change to .nexus/check is (15.836434ms)
+✔ a change to the passkey or WebAuthn code holds a Nexus pull request as a change to auth (6.200595ms)
+✔ a held reserved path holds again when landed, and lands once the person waives it with a passkey at the approved head (30.111518ms)
+✔ a hold the policy reserves for the person is marked waivable, and lands only with a passkey, which needs the HTTPS address and an enrolled one (97.704377ms)
+✔ a passkey enrols only with a code from the host, which works once and for ten minutes (10.815204ms)
+✔ a passkey enrols only with the host's code, and waiving with it needs a deployer and an assertion for this commit and these holds, once (104.044723ms)
+✔ a passkey may waive the reserved cases, the reserved paths and a changed .nexus/check, and nothing else the policy holds for (0.527126ms)
+✔ a waived landing whose branch conflicts goes back to the builder to rebase, and the rebased head needs the passkey again (8.765351ms)
+✔ a waiver lets the landing past only the holds it names, and only at the commit it names (11.729123ms)
+✔ an assertion is refused without the person verified, from another origin, from a revoked passkey, or with a counter gone back (10.476982ms)
+✔ an authenticator without a counter always reports 0, which is not a clone (6.367327ms)
+✔ review and land reach the review loop's routes, and show prints a review and what it needs from the person (2119.49781ms)
+✔ the Passkeys page lists the person's passkeys and enrols one with the code from the host (26.641129ms)
+✔ the host command runs only as root, so no API caller can make an enrolment code (1210.426978ms)
+✔ without the dashboard's HTTPS address, passkey routes say why (25.7969ms)
+✔ without the dashboard's HTTPS address, passkeys are off (4.987988ms)

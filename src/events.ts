@@ -5,7 +5,7 @@ export const sessionActivityTtlMs = 30 * 60_000;
 export const maxActiveSessions = 16;
 
 export const sessionKinds = ["session.turn-started", "session.heartbeat", "session.turn-ended", "session.waiting", "session.ended"] as const;
-export const eventKinds = [...sessionKinds, "thread.turn-ended", "thread.failed", "thread.parked", "attention.changed", "pull-request.feedback", "release.changed", "review.changed", "usage-limit.continued"] as const;
+export const eventKinds = [...sessionKinds, "thread.turn-ended", "thread.failed", "thread.parked", "attention.changed", "pull-request.feedback", "release.changed", "review.changed", "review.waived", "passkey.enrolled", "passkey.revoked", "usage-limit.continued"] as const;
 export type EventKind = typeof eventKinds[number];
 
 export const pylonEventSchema = z.strictObject({

@@ -9,7 +9,7 @@ import type { LiveHash, NodeName, PylonId, TailnetNodeId } from "../protocol.ts"
 import type { AutoReview, ProjectId, SecretGrant } from "../project.ts";
 import type { ChangedFile, LabelResult, MergeResult, PrSnapshot } from "./github.ts";
 import type { AutomatedMessage } from "./inbox.ts";
-import { landingHolds } from "./policy.ts";
+import { holdRule, landingHolds } from "./policy.ts";
 import { humanLabel, reviewerCaller, reviewLoop, reviewPrefix, type Review } from "./review.ts";
 import { checkCaller, type CheckState } from "./gate.ts";
 import type { StartRequest } from "./threads.ts";
@@ -306,7 +306,7 @@ test("the policy's review conditions: another model, an approval with no P0 to P
   const round = { head: head1, verdict: { token: "x", verdict: "approve" as const, findings: [], reserved: [], notCheckedLive: "the cache under real traffic" }, check: { passed: true, output: "" }, answers: null };
   const review: Review = {
     id: "rv-1", builder: "th-b" as ThreadId, reviewer: "th-r" as ThreadId, pr: { repo: "acme/shop", number: 7, url: "", title: "", branch: "f" }, models: { builder: "m", reviewer: "m" }, reviewerKind: "harness",
-    maxRounds: 3, land: null, auto: false, merged: null, expect: "rv-1:t", sent: 1, phase: { kind: "checking", startedAt: 0, thread: null }, outbox: null, since: 0, nudges: 0, startedAt: 0,
+    maxRounds: 3, land: null, auto: false, merged: null, waiver: null, expect: "rv-1:t", sent: 1, phase: { kind: "checking", startedAt: 0, thread: null }, outbox: null, since: 0, nudges: 0, startedAt: 0,
     rounds: [{ ...round, verdict: { ...round.verdict, verdict: "changes", findings: [{ id: "F1", priority: "P2", summary: "s" }, { id: "F2", priority: "P2", summary: "s" }, { id: "N1", priority: "P3", summary: "s" }] }, answers: [{ id: "F1", action: "rejected", reason: " " }] }, round],
   };
   const pr: PrSnapshot = { pr: { repo: "acme/shop", number: 7, title: "", url: "", state: "open", checks: "pending", review: "none", conflict: true }, detail: { head: head2, branch: "f", base: "main", body: "Not checked live: the cache under real traffic.", mergeCommit: null }, failures: [], comments: [] };
@@ -1152,4 +1152,134 @@ test("a PR stays reviewed once its builder's record moves on to a review of anot
   await loop.auto(f.registry.thread(f.add("th-twin", true))!, f.pr);
   assert.equal(f.registry.review("th-twin" as ThreadId), null, "the twin's link of the first PR starts nothing");
   assert.equal(f.started.length, 1);
+});
+
+const passkey = { id: "pk-0000000a", name: "MacBook Touch ID" };
+const reservedHolds = [
+  "Always needs the person: anything irreversible, as it changes src/control/registry.ts.",
+];
+
+test("a held reserved path holds again when landed, and lands once the person waives it with a passkey at the approved head", async (t) => {
+  const f = fixture(t);
+  f.files = [{ path: "src/control/registry.ts", previous: null, patch: "@@ -240,3 +240,4 @@ const migrations: readonly string[] = [\n+  `CREATE TABLE x (a TEXT) STRICT;`," }];
+  const loop = await approved(f, "nLAPTOP");
+  assert.deepEqual(f.review().phase, { kind: "needs-person", reasons: reservedHolds });
+  loop.land(f.builder, "nLAPTOP", head1);
+  await loop.poll();
+  assert.deepEqual(f.review().phase, { kind: "needs-person", reasons: reservedHolds }, "landing again meets the same hold");
+  assert.deepEqual(f.merges, []);
+
+  const waiver = { head: head1, holds: reservedHolds, passkey, by: "nLAPTOP", at: 5 };
+  loop.land(f.builder, "nLAPTOP", head1, waiver);
+  await loop.poll();
+  assert.deepEqual(f.merges, [head1]);
+  assert.equal(f.review().phase.kind, "deploying");
+  assert.deepEqual(f.review().waiver, waiver, "the review records who waived which holds with which passkey, at which commit");
+  assert.deepEqual(f.registry.events("0", { kinds: ["review.waived"], thread: f.builder }).map((e) => e.payload), [{ review: f.review().id, repo: "ramtinJ95/nexus", pr: 7, ...waiver }]);
+});
+
+test("a waiver lets the landing past only the holds it names, and only at the commit it names", async (t) => {
+  const f = fixture(t);
+  f.files = [{ path: "src/control/registry.ts", previous: null, patch: "" }];
+  const loop = await approved(f, "nLAPTOP");
+  assert.throws(() => loop.land(f.builder, "nLAPTOP", head1, { head: head2, holds: reservedHolds, passkey, by: "nLAPTOP", at: 5 }), { status: 409, message: new RegExp(`is at ${head1}, not ${head2}`) });
+  assert.throws(() => loop.waivable(f.builder, head1, ["The pull request's GitHub checks are pending."]), { status: 409, message: /not held by/ });
+
+  const image = "Always needs the person: pylon image rebuilds, as it changes images/pylon/Dockerfile.";
+  f.files = [{ path: "src/control/registry.ts", previous: null, patch: "" }, { path: "images/pylon/Dockerfile", previous: null, patch: "" }];
+  loop.land(f.builder, "nLAPTOP", head1, { head: head1, holds: reservedHolds, passkey, by: "nLAPTOP", at: 5 });
+  await loop.poll();
+  assert.deepEqual(f.merges, []);
+  assert.deepEqual(f.review().phase, { kind: "needs-person", reasons: [...reservedHolds, image] },
+    "a hold the waiver did not name still holds, and the person sees every hold again, those waived too, to confirm them together");
+
+  f.snapshot = { ...f.snapshot, pr: { ...f.snapshot.pr, checks: "failed" } };
+  loop.land(f.builder, "nLAPTOP", head1, { head: head1, holds: [...reservedHolds, image], passkey, by: "nLAPTOP", at: 6 });
+  await loop.poll();
+  assert.deepEqual(f.merges, []);
+  assert.deepEqual(f.review().phase, { kind: "needs-person", reasons: ["The pull request's GitHub checks are failed.", ...reservedHolds, image] }, "a waiver never waives failing checks");
+  assert.throws(() => loop.waivable(f.builder, head1, ["The pull request's GitHub checks are failed."]), { status: 409, message: /a passkey cannot waive/ });
+
+  f.snapshot = { ...f.snapshot, pr: { ...f.snapshot.pr, checks: "passing" } };
+  loop.land(f.builder, "nLAPTOP", head1);
+  await loop.poll();
+  assert.equal(f.review().waiver, null, "a landing without a passkey waives nothing");
+  assert.deepEqual(f.review().phase, { kind: "needs-person", reasons: [...reservedHolds, image] });
+
+  loop.land(f.builder, "nLAPTOP", head1, { head: head1, holds: [...reservedHolds, image], passkey, by: "nLAPTOP", at: 7 });
+  await loop.poll();
+  assert.deepEqual(f.merges, [head1], "confirming every hold the card shows lands it");
+});
+
+test("a Claude reviewer's approval is not waivable, and a change to .nexus/check is", async (t) => {
+  const f = fixture(t, { claudeBuilder: false, secrets: [{ name: "CLAUDE_CODE_OAUTH_TOKEN", hosts: ["api.anthropic.com"] }] });
+  const loop = await approved(f, "nLAPTOP");
+  const [claude] = (f.review().phase as { reasons: string[] }).reasons;
+  assert.match(claude!, /A Claude reviewer approved it/);
+  assert.throws(() => loop.waivable(f.builder, head1, [claude!]), { status: 409, message: /a passkey cannot waive/ });
+
+  const g = fixture(t, { path: ":memory:" });
+  g.files = [{ path: ".nexus/check", previous: null, patch: "" }];
+  const gLoop = await approved(g, "nLAPTOP");
+  const holds = (g.review().phase as { reasons: string[] }).reasons;
+  assert.deepEqual(holds, ["The pull request changes .nexus/check, the check this policy relies on."]);
+  gLoop.land(g.builder, "nLAPTOP", head1, { head: head1, holds, passkey, by: "nLAPTOP", at: 5 });
+  await gLoop.poll();
+  assert.deepEqual(g.merges, [head1]);
+});
+
+test("a passkey may waive the reserved cases, the reserved paths and a changed .nexus/check, and nothing else the policy holds for", () => {
+  const waivable = [
+    "Always needs the person: changes to secrets, by the reviewer's reading (rotates the token).",
+    "Always needs the person: changes to login or auth, as it changes src/control/api.ts.",
+    "The pull request changes .nexus/check, the check this policy relies on.",
+  ];
+  const never = [
+    "Findings P0 to P2 are open: F1.",
+    "The reviewer has not approved the latest commits.",
+    "The builder neither fixed nor rejected with a reason finding F1 of round 1.",
+    `.nexus/check failed at ${head1}.`,
+    `.nexus/check has not run at ${head1}.`,
+    "The pull request's GitHub checks are failed.",
+    "The pull request's GitHub checks are pending.",
+    `The pull request's head is ${head2}, not the approved ${head1}.`,
+    "The branch conflicts with its base.",
+    "Pull request #7 is closed.",
+    "A Claude reviewer approved it. Its verdict is read from its transcript in its pylon, where code it runs could write, so only the person can land what it approved.",
+    "The reviewer ran the builder's own model, gpt-6-astra.",
+    "No live check ran, and the pull request does not say what could not be checked live.",
+    "GitHub refused the merge: Base branch was modified.",
+  ];
+  for (const reason of waivable) assert.equal(holdRule(reason).waivable, true, reason);
+  for (const reason of never) {
+    assert.equal(holdRule(reason).waivable, false, reason);
+    assert.notEqual(holdRule(reason).why, "", reason);
+  }
+  assert.match(holdRule(never[10]!).why, /cannot stand in for a harness reviewer's approval/);
+});
+
+test("a change to the passkey or WebAuthn code holds a Nexus pull request as a change to auth", async (t) => {
+  const f = fixture(t);
+  f.files = [{ path: "src/control/webauthn.ts", previous: null, patch: "" }, { path: "src/control/passkeys.ts", previous: null, patch: "" }];
+  await approved(f, "nLAPTOP");
+  assert.deepEqual(f.review().phase, { kind: "needs-person", reasons: ["Always needs the person: changes to login or auth, as it changes src/control/webauthn.ts, src/control/passkeys.ts."] });
+});
+
+test("a waived landing whose branch conflicts goes back to the builder to rebase, and the rebased head needs the passkey again", async (t) => {
+  const f = fixture(t);
+  f.files = [{ path: "src/control/registry.ts", previous: null, patch: "" }];
+  const loop = await approved(f, "nLAPTOP");
+  conflicting(f);
+  loop.land(f.builder, "nLAPTOP", head1, { head: head1, holds: reservedHolds, passkey, by: "nLAPTOP", at: 5 });
+  await loop.poll();
+  assert.deepEqual(f.merges, []);
+  assert.equal(f.review().phase.kind, "fixing", "the conflict is the only hold the waiver does not get past, so the builder rebases");
+
+  rebased(f);
+  f.reply(f.builder, answers(f.review(), [{ id: "CONFLICT", action: "fixed", reason: "Rebased onto main." }]));
+  await loop.poll();
+  f.reply(f.review().reviewer, verdict(f.review(), {}));
+  await loop.poll();
+  assert.deepEqual(f.merges, []);
+  assert.deepEqual(f.review().phase, { kind: "needs-person", reasons: reservedHolds }, "the waiver was for the head before the rebase");
 });
