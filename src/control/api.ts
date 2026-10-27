@@ -545,6 +545,8 @@ export async function startApi(options: ApiOptions): Promise<Api> {
     registry.setThreadStatus(t.id, status);
     wakeThread(t);
     if (status === "deleted") for (const s of open) if (s.thread === t.id) s.end();
+    // A read that finds the thread deleted lets its reader go.
+    if (status === "deleted" && isClaude(t)) void claude.refresh(t);
     // After the status, so the run's wait for a pylon ends: the locator refuses a deleted thread's pylon.
     if (status === "deleted" && t.conversationId !== null) await harness.deleteThread({ threadId: t.id, pylonId: t.pylonId });
     return { ...t, status };
