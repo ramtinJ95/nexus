@@ -10,8 +10,7 @@
  */
 import { imageIdOf, type ImageId, type ImageManifest, type ImageRecipe } from "../images.ts";
 import type { Job, JobId, NodeName, ProbeClient, ProbeError, TailnetNodeId } from "../protocol.ts";
-import { envelope } from "../reconcile.ts";
-import { failureMessage } from "../tick.ts";
+import { failureMessage, jobOutcome, submitJob } from "../tick.ts";
 import { HttpError } from "./http-error.ts";
 import type { NodeRecord, RecordedImage, Registry } from "./registry.ts";
 
@@ -147,11 +146,10 @@ export function startImageRollout(options: ImageRolloutOptions): ImageRollout {
       return null;
     }
     if (step.job !== null) {
-      // Only a lookup that began after notAfter proves the probe can no longer accept the envelope.
-      const askedAt = Date.now();
-      const status = await probe.job(step.job.id);
-      if (status === "unknown") {
-        if (askedAt > Date.parse(step.job.notAfter)) set({ state: "pending", job: null });
+      const status = await jobOutcome(probe, step.job.id, step.job.notAfter);
+      if (status === "wait") return null;
+      if (status === "expired") {
+        set({ state: "pending", job: null });
         return null;
       }
       if (status.state === "failed") return failed(`${status.code}: ${failureMessage(status.message, status.logTail)}`);
@@ -161,13 +159,10 @@ export function startImageRollout(options: ImageRolloutOptions): ImageRollout {
     }
     const job = await jobFor(operation, step.node);
     if (typeof job === "string") return failed(job);
-    const env = envelope(job, step.node, Date.now());
-    set({ job: { id: env.jobId, notAfter: env.notAfter } });
-    const reply = await probe.submit(env);
-    if ("accepted" in reply) set({ state: "running" });
-    else if (reply.rejected === "invalid") return failed(reply.message);
-    // busy: another job on the image runs on the node, such as a pylon's fetch of it. expired: the send outlived its
-    // envelope. Either way the next pass sends again.
+    const sent = await submitJob(probe, job, step.node, (env) => set({ job: { id: env.jobId, notAfter: env.notAfter } }));
+    if (sent === "accepted") set({ state: "running" });
+    else if (sent !== "retry") return failed(sent.invalid);
+    // busy: another job on the image runs on the node, such as a pylon's fetch of it.
     else set({ job: null });
     return null;
   }

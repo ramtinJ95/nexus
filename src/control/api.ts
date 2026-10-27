@@ -1,5 +1,5 @@
 import { eventCursor, eventKinds, type EventFilter } from "../events.ts";
-import { DeployDraining } from "./drain.ts";
+import { DeployDraining, isDraining, turnGate } from "./drain.ts";
 import { runningCommit } from "../deploy/health.ts";
 import { canDeploy, commitSchema, isReporter, releaseView, reportSchema, resolveMain, type DeploymentOptions } from "./releases.ts";
 /**
@@ -22,6 +22,7 @@ import { canDeploy, commitSchema, isReporter, releaseView, reportSchema, resolve
  * wakes the loop for its node, so a start or a dashboard visit acts within one pass rather than 5 seconds.
  */
 import { attentionOf, type Attention } from "./attention.ts";
+import { once } from "node:events";
 import { createServer as createHttpsServer } from "node:https";
 import { TLSSocket } from "node:tls";
 import type { Certificate } from "../tailscale.ts";
@@ -31,11 +32,11 @@ import { setTimeout as sleep } from "node:timers/promises";
 import { WebSocketServer, type WebSocket } from "ws";
 import { z } from "zod";
 import { actualState, desiredPhase, retryRefusal, type ActualState, type DesiredPhase } from "../reconcile.ts";
-import { bootSecrets, chatgptTokenGrant, effectiveAllowedHosts, gitIdentitySchema, gitUrl, linkedName, reservedPorts, withHttpsHosts, type BootInputs, type Project, type ProjectId, type PylonOverlay, type SessionHarness } from "../project.ts";
+import { bootSecrets, chatgptTokenGrant, effectiveAllowedHosts, gitIdentitySchema, gitUrl, linkedName, reservedPorts, withHttpsHosts, type BootInputs, type Project, type ProjectId, type SessionHarness } from "../project.ts";
 import type { CommandResult, NodeName, ProbeClient, ProbeError, PylonCommand, PylonId, TailnetNodeId } from "../protocol.ts";
 import type { ConversationView, EntryRecord, JsonObject } from "@earendil-works/pi-durable";
 import type { HarnessHost } from "../harness/host.ts";
-import { pinsSchema, type ImageId, type ImageManifest, type ProjectMirror } from "../images.ts";
+import { pinsSchema, type ImageId, type ImageManifest } from "../images.ts";
 import type { Whois } from "../tailscale.ts";
 import type { ClaudeSent, NodeRecord, Output, PortRange, Preview, Registry, Session, Thread, ThreadId } from "./registry.ts";
 import { dashboard, liveFrames } from "./dashboard.ts";
@@ -49,8 +50,9 @@ import { openTerminal } from "../guest-terminal.ts";
 import { attachTiming, serveAttach, type AttachTiming, type Ending, type PylonDoor } from "./attach.ts";
 import { typeIntoClaude } from "./inbox.ts";
 import { HttpError } from "./http-error.ts";
+import { BodyTooLarge, readBody } from "../request-body.ts";
 import { imagesView, type ImageOperation, type ImageRollout } from "./image-rollout.ts";
-import { threadStarter } from "./threads.ts";
+import type { StartRequest } from "./threads.ts";
 import { nodePylons, overcommitted, type NodePylons } from "./placement.ts";
 import { maxRounds, needsPerson, type Review, type ReviewLoop } from "./review.ts";
 
@@ -69,12 +71,8 @@ export interface ApiOptions {
   allowed: ReadonlySet<TailnetNodeId>;
   /** Names the API answers to in the Host header. Any other name is a DNS rebinding page on an allowed machine. */
   hostnames: ReadonlySet<string>;
-  /** The common dotfiles layer every new pylon pulls on boot. */
-  dotfiles: PylonOverlay["dotfiles"];
-  gitIdentity?: BootInputs["gitIdentity"];
   harness: ThreadHarness;
-  /** Reads the .nexus/setup a new thread's template is keyed on. */
-  mirror: ProjectMirror;
+  startThread(request: StartRequest, caller: string): Promise<Thread>;
   /** Asks the loop for a pass over the node's pylons. */
   wake(node: NodeName): void;
   /** One client per registry node, for the guest commands and checkout reads a human asks for. */
@@ -287,9 +285,8 @@ const claudeReadMs = 5_000;
 
 
 export async function startApi(options: ApiOptions): Promise<Api> {
-  const { registry, whois, allowed, hostnames, dotfiles, harness, mirror, wake, probes, previewPorts, streamStallMs = 30_000, attachTiming: timing = attachTiming, closeWaitMs = 5_000 } = options;
+  const { registry, whois, allowed, hostnames, harness, startThread, wake, probes, previewPorts, streamStallMs = 30_000, attachTiming: timing = attachTiming, closeWaitMs = 5_000 } = options;
   const claude = claudeConversations({ registry, probes });
-  const startThread = threadStarter({ registry, harness, mirror, dotfiles, gitIdentity: options.gitIdentity, wake });
 
   function thread(id: string): Thread {
     const found = registry.thread(id as ThreadId);
@@ -387,14 +384,14 @@ export async function startApi(options: ApiOptions): Promise<Api> {
     });
   }
 
-  function attention(t: Thread): Attention {
+  function attention(t: Thread, failed: string | null): Attention {
     const parked = t.conversationId !== null && t.status !== "deleted" && harness.activity.parked(t.id).length > 0;
-    return attentionOf(pylonOf(t).failed !== null || ["failed", "stalled"].includes(registry.claudeWorker(t.id)?.state ?? ""), parked, t.lastReplyAt, t.seenAt, t.agentTurnRunning || t.sessionTurnRunning === true, t.sessionWaiting, needsPerson(registry.review(t.id)), t.usageLimit !== undefined);
+    return attentionOf(failed !== null || ["failed", "stalled"].includes(registry.claudeWorker(t.id)?.state ?? ""), parked, t.lastReplyAt, t.seenAt, t.agentTurnRunning || t.sessionTurnRunning === true, t.sessionWaiting, needsPerson(registry.review(t.id)), t.usageLimit !== undefined);
   }
 
   function row(t: Thread): ThreadRow {
     const { node, actualState, failed } = pylonOf(t);
-    return { ...t, attention: attention(t), desired: desiredPhase(t, Date.now()), pylon: { node, actualState, failed } };
+    return { ...t, attention: attention(t, failed), desired: desiredPhase(t, Date.now()), pylon: { node, actualState, failed } };
   }
 
   function detail(t: Thread): ThreadDetail {
@@ -405,7 +402,7 @@ export async function startApi(options: ApiOptions): Promise<Api> {
     return {
       thread: t,
       ...(worker === undefined ? {} : { claudeWorker: { model: worker.model, state: worker.state, ...(worker.message === undefined ? {} : { message: worker.message }) } }),
-      attention: attention(t), seenAt: t.seenAt, lastReplyAt: t.lastReplyAt,
+      attention: attention(t, pylon.failed), seenAt: t.seenAt, lastReplyAt: t.lastReplyAt,
       desired: desiredPhase(t, Date.now()),
       pylon: pylonOf(t),
       sessions: registry.sessions(pylon.pylonId),
@@ -741,10 +738,10 @@ export async function startApi(options: ApiOptions): Promise<Api> {
   const created = (body: unknown): Reply => ({ status: 201, body });
   const noContent: Reply = { status: 204 };
 
-  let startingTurns = 0;
-  const draining = () => registry.drain()?.locked === true || (registry.drain()?.expiresAt ?? 0) > Date.now();
+  const draining = () => isDraining(registry.drain());
+  const turnRequests = turnGate(draining);
   async function turnsRunning(): Promise<boolean> {
-    if (startingTurns > 0 || options.turnsStarting?.()) return true;
+    if (turnRequests.busy() || options.turnsStarting?.()) return true;
     for (const t of registry.threads()) {
       if (t.status === "deleted" || t.conversationId === null) continue;
       const watch = await harness.watch(t.id);
@@ -754,7 +751,7 @@ export async function startApi(options: ApiOptions): Promise<Api> {
         if (live?.run !== undefined || (Array.isArray(inbox?.items) && inbox.items.length > 0)) return true;
       } finally { await watch.stop(); }
     }
-    return startingTurns > 0 || (options.turnsStarting?.() ?? false);
+    return turnRequests.busy() || (options.turnsStarting?.() ?? false);
   }
 
   const routes: readonly [string, RegExp, Route][] = [
@@ -999,11 +996,8 @@ export async function startApi(options: ApiOptions): Promise<Api> {
     const match = matches.find((r) => r.method === req.method);
     if (match === undefined) throw new HttpError(405, `${req.method} is not allowed on ${path}`);
     const startsTurn = req.method === "POST" && (path === "/v1/threads" || /^\/v1\/threads\/[^/]+\/(messages|retry)$/.test(path));
-    if (startsTurn && draining()) throw new HttpError(409, "control plane is draining for deployment; retry after the release completes");
-    if (startsTurn) startingTurns++;
-    let reply: Reply;
-    try { reply = await match.route(match.m, { query: url.searchParams, caller, body: (empty) => readJson(req, empty) }); }
-    finally { if (startsTurn) startingTurns--; }
+    const route = () => match.route(match.m, { query: url.searchParams, caller, body: (empty) => readJson(req, empty) });
+    const reply = startsTurn ? await turnRequests.run(async () => route()) : await route();
     if (reply.file !== undefined) sendFile(res, reply.file, reply.type);
     else if (reply.body === undefined) res.writeHead(reply.status).end();
     else send(res, reply.status, reply.body);
@@ -1092,7 +1086,7 @@ export async function startApi(options: ApiOptions): Promise<Api> {
     server.on("request", (req, res) => {
       handle(req, res).catch((err: unknown) => {
         if (res.headersSent) return res.destroy(err as Error);
-        send(res, err instanceof HttpError ? err.status : err instanceof DeployDraining ? 409 : 500, { error: (err as Error).message });
+        send(res, errorStatus(err), { error: (err as Error).message });
       });
     });
     server.on("upgrade", (req: IncomingMessage, socket: Duplex, head: Buffer) => {
@@ -1100,16 +1094,14 @@ export async function startApi(options: ApiOptions): Promise<Api> {
       socket.on("error", () => undefined);
       upgraded.add(socket);
       socket.once("close", () => upgraded.delete(socket));
-      upgrade(req, socket, head).catch((err: unknown) => refuseUpgrade(socket, err instanceof HttpError ? err.status : err instanceof DeployDraining ? 409 : 500, (err as Error).message));
+      upgrade(req, socket, head).catch((err: unknown) => refuseUpgrade(socket, errorStatus(err), (err as Error).message));
     });
     return server;
   }
   const server = makeServer();
   let secure: ReturnType<typeof makeServer> | null = null;
-  await new Promise<void>((resolve, reject) => {
-    server.once("error", reject);
-    server.listen(options.port, options.host, () => { server.off("error", reject); resolve(); });
-  });
+  server.listen(options.port, options.host);
+  await once(server, "listening");
   let renewal: ReturnType<typeof setTimeout> | null = null;
   let retryMs = options.https?.retryMs ?? 1000;
   function scheduleCertificate(delay: number) {
@@ -1129,10 +1121,8 @@ export async function startApi(options: ApiOptions): Promise<Api> {
         const listener = makeServer(certificate);
         secure = listener;
         try {
-          await new Promise<void>((resolve, reject) => {
-            listener.once("error", reject);
-            listener.listen(options.https!.port, options.host, () => { listener.off("error", reject); resolve(); });
-          });
+          listener.listen(options.https.port, options.host);
+          await once(listener, "listening");
         } catch (err) {
           listener.close();
           secure = null;
@@ -1186,14 +1176,8 @@ function parse<T>(schema: z.ZodType<T>, body: unknown): T {
   return result.data;
 }
 
-const maxBodyBytes = 1 << 20;
 async function readJson(req: IncomingMessage, empty?: unknown): Promise<unknown> {
-  let body = "";
-  req.setEncoding("utf8");
-  for await (const chunk of req as AsyncIterable<string>) {
-    body += chunk;
-    if (body.length > maxBodyBytes) throw new HttpError(413, `request body over ${maxBodyBytes} bytes`);
-  }
+  const body = await readBody(req);
   if (body === "" && empty !== undefined) return empty;
   try {
     return JSON.parse(body);
@@ -1218,6 +1202,8 @@ function pathOf(url: string | undefined): string {
     return "";
   }
 }
+
+const errorStatus = (err: unknown) => err instanceof HttpError ? err.status : err instanceof DeployDraining ? 409 : err instanceof BodyTooLarge ? 413 : 500;
 
 /** An API error reply written on a socket that never upgraded. */
 function refuseUpgrade(socket: Duplex, status: number, message: string) {

@@ -25,7 +25,8 @@ import { nodeSecrets } from "../probe/config.ts";
 import { startProbe, type Probe } from "../probe/server.ts";
 import type { NodeName, PylonId, TailnetNodeId } from "../protocol.ts";
 import type { ImageId } from "../images.ts";
-import { openHarnessHost, pylonRepoPath, type HarnessHost } from "./host.ts";
+import { checkoutDir } from "../sessions.ts";
+import { openHarnessHost, type HarnessHost } from "./host.ts";
 import { pylonEnvs, type PylonLocator } from "./pylon-env.ts";
 import { scriptedModel, scriptedModels, type ChildArgs } from "./test-fixture.ts";
 
@@ -61,7 +62,7 @@ before(async () => {
   await writeFile(join(build, "Dockerfile"), [
     "FROM debian:bookworm-slim",
     "COPY pi-env /usr/local/libexec/nexus/pi-env",
-    `RUN chmod 0755 /usr/local/libexec/nexus/pi-env && mkdir -p ${pylonRepoPath}`,
+    `RUN chmod 0755 /usr/local/libexec/nexus/pi-env && mkdir -p ${checkoutDir}`,
   ].join("\n") + "\n");
   await docker("build", "--quiet", "--label", testLabel, "--tag", tag, build);
 
@@ -155,7 +156,7 @@ test("a thread runs bash in its pylon, and a harness killed mid-tool reports the
   assert.equal((await submission.wait(context)).status, "done");
   const results = toolResults(await transcript(first));
   assert.equal(results.length, 1);
-  assert.match(results[0]!, new RegExp(`hello-from-Linux\\\\n${pylonRepoPath}`));
+  assert.match(results[0]!, new RegExp(`hello-from-Linux\\\\n${checkoutDir}`));
   assert.equal(first.activity.facts(threadId).agentTurnRunning, false);
   assert.ok(first.activity.facts(threadId).lastAgentActivityAt > 0);
   await first.close();

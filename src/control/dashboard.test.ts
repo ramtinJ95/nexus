@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import { request } from "node:http";
 import { join } from "node:path";
 import { startApi } from "./api.ts";
+import { threadStarter } from "./threads.ts";
 import { readEvents } from "./event-reader.ts";
 import { fakeHarness } from "./fake-harness.ts";
 import { openRegistry, type Thread } from "./registry.ts";
@@ -46,9 +47,11 @@ async function setup(t: TestContext) {
     whois: async () => caller,
     allowed: new Set([laptop]),
     hostnames: new Set(["127.0.0.1"]),
-    dotfiles: { repo: "git@github.com:ramtin/dotfiles.git", ref: "main" },
     harness: fake.harness,
-    mirror: { setupInputs: () => Promise.reject(new Error("the dashboard tests read no remote")) },
+    startThread: threadStarter({
+      registry, harness: fake.harness, wake: () => {}, dotfiles: { repo: "git@github.com:ramtin/dotfiles.git", ref: "main" },
+      mirror: { setupInputs: () => Promise.reject(new Error("the dashboard tests read no remote")) },
+    }),
     wake: () => {},
     probes: new Map(),
     previewPorts: { first: 10200, last: 10299 },

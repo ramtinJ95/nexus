@@ -16,6 +16,7 @@ import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite
 import { CodingTools } from "@earendil-works/pi-durable/tools";
 import type { Models } from "@earendil-works/pi-ai/models";
 import { checkoutReader } from "../checkout-files.ts";
+import { checkoutDir } from "../sessions.ts";
 import { localApiWhois } from "../tailscale.ts";
 import { connectProbe, jobDeadlineMs, type PylonId } from "../protocol.ts";
 import { trackActivity, type AgentFacts, type HarnessActivity } from "./activity.ts";
@@ -28,9 +29,6 @@ export type { ConversationId };
 /** Who sent an automated input entry, which the entry's kind, `nexus.<sender>`, and its data name. */
 export type Sender = "pr-watch" | "review" | "usage-limit";
 const senderNames: Readonly<Record<Sender, string>> = { "pr-watch": "Nexus PR watch", review: "Nexus review", "usage-limit": "Nexus usage limit" };
-
-/** Where the repository is checked out in every pylon. */
-export const pylonRepoPath = "/home/user/workspace/repo";
 
 export interface HarnessHostOptions {
   /** For example /var/lib/nexus/harness.sqlite. Its own file, not the registry's. */
@@ -89,7 +87,7 @@ export async function openHarnessHost(options: HarnessHostOptions): Promise<Harn
   registry.install(turnSnapshots(() => harness, async (pylon, turn) => {
     const target = await options.locator.awaitRunning(pylon, Date.now() + jobDeadlineMs.spawn);
     const client = connectProbe(target.node, target.host, target.nodeId, { port: target.port, whois: localApiWhois(options.tailscaled) });
-    await checkoutReader((argv) => client.stream(pylon, argv), pylonRepoPath).snapshot(turn);
+    await checkoutReader((argv) => client.stream(pylon, argv), checkoutDir).snapshot(turn);
   }, log));
   const harness = await Harness.open(await openNodeSqliteStorage(options.storagePath), {
     models: options.models,
@@ -130,7 +128,7 @@ export async function openHarnessHost(options: HarnessHostOptions): Promise<Harn
       if (conversations.has(threadId)) throw new Error(`thread ${threadId} already has conversation ${conversations.get(threadId)}`);
       const created = await harness.createConversation({
         ownership: { kind: "ownerless" },
-        agent: { model: options.model, cwd: pylonRepoPath },
+        agent: { model: options.model, cwd: checkoutDir },
         init: (tx, id) => writeThread(tx, id, { threadId, pylonId }),
       }, context);
       conversations.set(threadId, created.id);

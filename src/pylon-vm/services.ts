@@ -3,12 +3,12 @@ import { join, posix } from "node:path";
 import type { VM } from "@earendil-works/gondolin";
 import { parseDocument } from "yaml";
 import { z } from "zod";
-import { linkedName, relayPorts, reservedPortMessage, reservedPorts } from "../project.ts";
+import { linkedName, relayPorts, reservedPortMessage, reservedPorts, shellQuote as q } from "../project.ts";
 import { configSchema, type Service } from "./contracts.ts";
 import { checked, guestExists, serviceRunning, startService, stopService } from "./guest.ts";
 import { openPortal } from "./portals.ts";
 import { noRelayStatus, readRelayStatus, relayLog, writeRelayMap } from "./relay.ts";
-import { existsError, shellQuote as q, saveJson } from "./storage.ts";
+import { existsError, saveJson } from "./storage.ts";
 
 const relayPortList = Array.from({ length: relayPorts.last - relayPorts.first + 1 }, (_, i) => relayPorts.first + i);
 const reference = /\$\{services\.([a-z0-9][a-z0-9-]{0,31})\.publicURL\}/g;

@@ -23,107 +23,35 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { mkdtemp, rm } from "node:fs/promises";
-import { request } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
-import { z } from "zod";
-import { artifactDirectory, tarCodec } from "../artifacts.ts";
-import { isImageId, probePort } from "../protocol.ts";
-import { scriptedModel, scriptedModels } from "../harness/test-fixture.ts";
-import { parseSelfDnsName, readProbeConfig } from "../probe/config.ts";
-import { tailscaleCli } from "../probe/serve.ts";
-import { relayPorts } from "../project.ts";
+import { relayPorts, shellQuote } from "../project.ts";
 import { relayLog, relayStatus } from "../pylon-vm/relay.ts";
 import type { ThreadDetail } from "./api.ts";
-import { defaultPreviewPorts, startControlPlane, type ControlPlaneConfig } from "./main.ts";
-import { openRegistry } from "./registry.ts";
+import { defaultPreviewPorts } from "./main.ts";
+import { apiClient, fetchUntil, openNodeCheck, passLogger, until } from "./on-node-kit.ts";
 
-const probeConfig = await readProbeConfig(process.argv[2] ?? "/etc/nexus/probe.json");
-if (probeConfig.backend.kind !== "pylon-vm") throw new Error(`the probe runs the ${probeConfig.backend.kind} backend. This check is for pylon-vm`);
-const store = artifactDirectory(probeConfig.backend.artifacts, tarCodec);
-const images = (await store.list()).filter(isImageId);
-const image = process.argv[3] || (images.length === 1 ? images[0] : undefined);
-if (!isImageId(image) || !images.includes(image)) throw new Error(`name one of the images in ${store.root}: ${images.join(", ")}`);
-if (probeConfig.listen.port !== probePort) throw new Error(`the probe listens on port ${probeConfig.listen.port}, and the control plane reaches probes on ${probePort} only`);
-if (probeConfig.previews === undefined) throw new Error("set previews in the probe's config, then restart the probe. This check opens previews");
+const { probeConfig, image, host, serveJson, planeConfig, startPlane } = await openNodeCheck({ image: process.argv[3] || undefined, opens: "previews", resolvesToProbe: false });
 const holdMs = Number(process.argv[4] ?? 45) * 1000;
-const tailscale = tailscaleCli();
-const statusJson = await tailscale(["status", "--json"], AbortSignal.timeout(30_000));
-const self = z.object({ Self: z.object({ ID: z.string() }) }).parse(JSON.parse(statusJson)).Self.ID;
-const dnsName = parseSelfDnsName(statusJson);
-if (probeConfig.auth.controlPlane !== self) throw new Error(`set auth.controlPlane in the probe's config to this node's ID ${self} (it is ${probeConfig.auth.controlPlane}), then restart the probe`);
-const serveStatus = async () => JSON.parse(await tailscale(["serve", "status", "--json"], AbortSignal.timeout(30_000))) as { TCP?: Record<string, unknown> };
+const serveStatus = async () => JSON.parse(await serveJson()) as { TCP?: Record<string, unknown> };
 const serveBefore = await serveStatus();
 // The check's registry is new, so its previews get the first ports. Taking over an entry there would break whatever owns it.
 for (const port of [defaultPreviewPorts.first, defaultPreviewPorts.first + 1]) {
   if (Object.keys(serveBefore.TCP ?? {}).includes(String(port))) throw new Error(`tailscale serve already serves port ${port}, which this check's previews would get. Free it first`);
 }
 
-const host = probeConfig.listen.host;
 const dir = await mkdtemp(join(tmpdir(), "nexus-v6-preview-"));
-const config: ControlPlaneConfig = {
-  db: join(dir, "registry.db"),
-  listen: { host, port: 0, hostnames: [host] },
-  self: { tailnetNodeId: self },
-  nodes: [{ name: probeConfig.node, tailnetHost: dnsName, tailnetNodeId: self }],
-  callers: [],
-  dotfiles: { repo: "https://github.com/octocat/Spoon-Knife.git", ref: "main" },
-  harness: { storage: join(dir, "harness.sqlite"), credentials: join(dir, "unused-credentials.json"), model: scriptedModel },
-  previewPorts: defaultPreviewPorts,
-  resumeAfterUsageLimit: false,
-};
-// A rollout needs a deployer, which the control plane's own node never is, so the check makes the image current in the registry.
-const seed = openRegistry(config.db);
-seed.saveImage((await store.manifest(image))!, null);
-seed.setCurrentImage(image);
-seed.close();
-const controlPlane = await startControlPlane(config, scriptedModels());
-
-function call(method: string, path: string, body?: unknown): Promise<{ status: number; body: any }> {
-  return new Promise((resolve, reject) => {
-    const req = request({
-      host, port: controlPlane.port, method, path: `/v1${path}`,
-      headers: { host: `${host}:${controlPlane.port}`, ...(method === "GET" ? {} : { "content-type": "application/json" }) },
-    }, (res) => {
-      let text = "";
-      res.setEncoding("utf8");
-      res.on("data", (chunk: string) => { text += chunk; });
-      res.on("end", () => resolve({ status: res.statusCode!, body: text === "" ? null : JSON.parse(text) }));
-    });
-    req.on("error", reject);
-    req.end(body === undefined ? undefined : JSON.stringify(body));
-  });
-}
-
-async function expect(status: number, method: string, path: string, body?: unknown) {
-  const res = await call(method, path, body);
-  if (res.status !== status) throw new Error(`${method} ${path}: HTTP ${res.status}, expected ${status}: ${JSON.stringify(res.body)}`);
-  return res.body;
-}
-
-async function until<T>(what: string, timeoutMs: number, check: () => Promise<T | undefined>): Promise<T> {
-  const deadline = Date.now() + timeoutMs;
-  for (;;) {
-    const value = await check();
-    if (value !== undefined) return value;
-    if (Date.now() > deadline) throw new Error(`timed out after ${timeoutMs / 1000} s waiting until ${what}`);
-    await delay(1_000);
-  }
-}
-
-const started = performance.now();
-const pass = (step: string) => console.log(`PASS ${step} (${Math.round((performance.now() - started) / 1000)} s)`);
+const controlPlane = await startPlane(planeConfig(dir));
+const api = apiClient(host, () => controlPlane.port);
+const { expect } = api;
+const pass = passLogger();
 
 let threadId: string | undefined;
 let deleted = false;
-const detail = async () => await expect(200, "GET", `/threads/${threadId}`) as ThreadDetail;
-const reaches = (state: string, timeoutMs: number) => until(`the pylon is ${state}`, timeoutMs, async () => {
-  const d = await detail();
-  if (d.pylon.failed !== null && d.thread.status !== "deleted") throw new Error(`the planner gave up on the pylon: ${d.pylon.failed}`);
-  return d.pylon.actualState === state ? d : undefined;
-});
+const detail = () => api.detail(threadId!);
+const reaches = (state: string, timeoutMs: number) => api.reaches(threadId!, state, timeoutMs);
 
 const stepLimitS = 90;
 type ToolResult = { kind: string; model?: { content: { type: string; text?: string }[] }[] };
@@ -141,7 +69,7 @@ async function runTool(requestId: string, command: string): Promise<string> {
   };
   const results = async () => ((await expect(200, "GET", `/threads/${threadId}/conversation`)).entries as ToolResult[]).filter((e) => e.kind === "pi.tool-result").map(text);
   const seen = (await results()).length;
-  const bounded = `timeout ${stepLimitS} bash -c '${command.replaceAll("'", "'\\''")}'; code=$?; if [ $code = 124 ]; then echo "STEP TIMED OUT"; fi`;
+  const bounded = `timeout ${stepLimitS} bash -c ${shellQuote(command)}; code=$?; if [ $code = 124 ]; then echo "STEP TIMED OUT"; fi`;
   await expect(202, "POST", `/threads/${threadId}/messages`, { text: `bash: ${bounded}`, requestId });
   const result = await until(`the result of ${requestId} is in the conversation`, (stepLimitS + 60) * 1000, async () => (await results())[seen]);
   await until("the run ends", 60_000, async () => (await detail()).thread.agentTurnRunning ? undefined : true);
@@ -216,19 +144,7 @@ const sample = (name: string, tag: string, command: string, seconds: number) => 
 const samples = (result: string, tag: string) => [...result.matchAll(new RegExp(`${tag}#(\\d+) (\\w+)`, "g"))].map((m) => ({ at: Number(m[1]), state: m[2]! }));
 
 /** Fetches the URL from this node until it answers with the body. */
-async function answers(url: string, body: string): Promise<void> {
-  let last = "no answer yet";
-  await until(`${url} answers ${body}`, 2 * 60_000, async () => {
-    try {
-      const res = await fetch(url, { signal: AbortSignal.timeout(15_000) });
-      last = `HTTP ${res.status}: ${(await res.text()).slice(0, 200)}`;
-      return last === `HTTP 200: ${body}` ? true : undefined;
-    } catch (err) {
-      last = (err as Error).message;
-      return undefined;
-    }
-  }).catch((err: Error) => { throw new Error(`${err.message}. Last answer: ${last}`); });
-}
+const answers = (url: string, body: string) => fetchUntil(url, body, (status, text) => status === 200 && text === body ? true : undefined);
 
 async function hold(previews: { url: string; body: string }[]) {
   for (const p of previews) console.log(`CURL ${p.url} ${p.body}`);
@@ -336,11 +252,7 @@ try {
 } catch (err) {
   console.error(`FAIL ${(err as Error).message}`);
 } finally {
-  if (threadId !== undefined && !deleted) {
-    await call("DELETE", `/threads/${threadId}`).then(() => reaches("absent", 5 * 60_000)).catch((err: unknown) => {
-      console.error(`cleanup: could not delete ${threadId}: ${(err as Error).message}. Delete pylon-${threadId} on the probe by hand`);
-    });
-  }
+  if (threadId !== undefined && !deleted) await api.cleanup(threadId);
   await controlPlane.close();
   await rm(dir, { recursive: true, force: true });
 }

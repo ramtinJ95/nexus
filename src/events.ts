@@ -34,11 +34,6 @@ export interface NexusEvent {
   payload: Record<string, unknown>;
 }
 export interface EventFilter { thread?: string; project?: string; kinds?: readonly string[] }
-export function matchesEvent(event: NexusEvent, filter: EventFilter): boolean {
-  return (filter.thread === undefined || event.thread === filter.thread)
-    && (filter.project === undefined || event.project === filter.project)
-    && (!filter.kinds?.length || filter.kinds.includes(event.kind));
-}
 export function eventCursor(value: string): number {
   if (!/^(0|[1-9][0-9]*)$/.test(value) || !Number.isSafeInteger(Number(value))) throw new Error("invalid event cursor");
   return Number(value);

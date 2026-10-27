@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { z } from "zod";
 import type { TailnetNodeId } from "../protocol.ts";
 import type { Registry } from "./registry.ts";
-import type { ReleaseView } from "../deploy/model.ts";
+import { fullCommit, type ReleaseView } from "../deploy/model.ts";
 import { command, repository } from "../deploy/install.ts";
 
 export interface DeploymentOptions {
@@ -11,7 +11,7 @@ export interface DeploymentOptions {
   keys: Readonly<Record<string, string>>;
   resolveMain?: () => Promise<string>;
 }
-export const commitSchema = z.string().regex(/^[0-9a-f]{40}$/);
+export const commitSchema = z.string().regex(fullCommit);
 export const reportSchema = z.strictObject({
   role: z.enum(["control", "probe"]), commit: commitSchema.nullable(), target: commitSchema.nullable(),
   state: z.enum(["pending", "waiting-for-control", "waiting-for-idle", "installing", "healthy", "rolled-back", "failed"]),

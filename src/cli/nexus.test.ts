@@ -18,6 +18,7 @@ import { createInterface } from "node:readline";
 import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
 import { startApi } from "../control/api.ts";
+import { threadStarter } from "../control/threads.ts";
 import { fakeHarness } from "../control/fake-harness.ts";
 import { openRegistry, type Thread, type ThreadId } from "../control/registry.ts";
 import type { Review } from "../control/review.ts";
@@ -135,9 +136,11 @@ async function setup(t: TestContext) {
   const options = (port: number) => ({
     deployment: { self: "nFIREBAT" as TailnetNodeId, deployers: new Set([laptop]), keys: {}, resolveMain: async () => "a".repeat(40) },
     registry, host: "127.0.0.1", port, whois: async () => { requests++; return caller; }, allowed: new Set([laptop]),
-    hostnames: new Set([apiName, "127.0.0.1"]), dotfiles: { repo: "https://github.com/ramtin/dotfiles.git", ref: "main" },
-    harness: fake.harness, wake: () => {}, previewPorts: { first: 10200, last: 10299 }, images,
-    mirror: { setupInputs: (p: RemoteProject, ref: { branch: string } | { commit: string }) => read(p, ref) },
+    hostnames: new Set([apiName, "127.0.0.1"]), harness: fake.harness, wake: () => {}, previewPorts: { first: 10200, last: 10299 }, images,
+    startThread: threadStarter({
+      registry, harness: fake.harness, wake: () => {}, dotfiles: { repo: "https://github.com/ramtin/dotfiles.git", ref: "main" },
+      mirror: { setupInputs: (p: RemoteProject, ref: { branch: string } | { commit: string }) => read(p, ref) },
+    }),
     probes: new Map([[node, {
       command: (_pylonId: PylonId, command: PylonCommand) => { commands.push(command); return answer(command); },
       stream: (_pylonId: PylonId, argv: readonly string[]) => pipe(argv),

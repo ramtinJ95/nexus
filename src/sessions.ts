@@ -23,6 +23,7 @@ import type { SessionHarness } from "./project.ts";
 
 export const herdrSession = "nexus";
 export const sessionsFile = "/home/user/.nexus/sessions.json";
+/** Where the repository is checked out in every pylon. */
 export const checkoutDir = "/home/user/workspace/repo";
 
 const home = "/home/user";
@@ -804,7 +805,7 @@ async function herdr(guest: Guest, args: readonly string[], timeoutMs = callTime
   return reply.result;
 }
 
-function record(value: unknown, what: string): Record<string, unknown> {
+export function record(value: unknown, what: string): Record<string, unknown> {
   if (typeof value !== "object" || value === null || Array.isArray(value)) throw new Error(`${what} is not an object`);
   return value as Record<string, unknown>;
 }
@@ -812,7 +813,7 @@ function array(value: unknown, what: string): readonly unknown[] {
   if (!Array.isArray(value)) throw new Error(`${what} is not an array`);
   return value;
 }
-function string(value: unknown, what: string): string {
+export function string(value: unknown, what: string): string {
   if (typeof value !== "string" || value === "") throw new Error(`${what} is not a non-empty string`);
   return value;
 }

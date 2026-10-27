@@ -798,6 +798,23 @@ test("a newer heartbeat resumes waiting with a fresh lease, while older or equal
   assert.equal(desiredPhase(registry.thread(threadId)!, now), "running", "the renewed lease outlasts ordinary idle grace");
 });
 
+test("a repeated parked report changes nothing, and a later process's report clears a stale one", (t) => {
+  const path = tempDb();
+  const first = seeded(path);
+  const changes = (registry: ReturnType<typeof openRegistry>) => registry.events().filter((e) => e.thread === threadId)
+    .map((e) => e.kind === "attention.changed" ? `attention ${String(e.payload.attention)}` : e.kind);
+  first.recordParked(threadId, true);
+  first.recordParked(threadId, true);
+  assert.deepEqual(changes(first), ["thread.parked", "attention parked"]);
+  first.close();
+
+  const second = openRegistry(path);
+  t.after(() => second.close());
+  second.recordParked(threadId, false);
+  second.recordParked(threadId, false);
+  assert.deepEqual(changes(second), ["thread.parked", "attention parked", "attention null"]);
+});
+
 test("a parked harness run that is retried is working since the retry, as the tracker reports it", async (t) => {
   let now = 10_000_000;
   const registry = seeded(tempDb(), () => now);

@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { command, checkoutMerged, ReleaseInstaller } from "./install.ts";
 import { planDeploy, type Role } from "./plan.ts";
-import type { ReleaseReport, ReleaseView } from "./model.ts";
+import { fullCommit, type ReleaseReport, type ReleaseView } from "./model.ts";
 import { jsonRequest } from "./http.ts";
 import { localApiWhois } from "../tailscale.ts";
 
@@ -38,7 +38,7 @@ async function atomicJson(path: string, value: unknown): Promise<void> {
 async function commitAt(link: string): Promise<string | null> {
   try {
     const commit = (await readFile(join(link, "release-commit"), "utf8")).trim();
-    return /^[0-9a-f]{40}$/.test(commit) ? commit : null;
+    return fullCommit.test(commit) ? commit : null;
   } catch { return null; }
 }
 

@@ -16,15 +16,15 @@ import type { Guest, VmBackend } from "./backend.ts";
 import type { CheckpointId, ImageId } from "./images.ts";
 import type { BootInputs } from "./project.ts";
 import type { PylonId } from "./protocol.ts";
+import { checkoutDir } from "./sessions.ts";
 
 const [step, ...args] = process.argv.slice(2);
 const pylonId = "pylon-legacy-wake" as PylonId;
 const checkpoint = "ckpt-legacy-wake-1" as CheckpointId;
 const secrets = { value: () => undefined, names: () => [] };
 const home = "/home/user";
-const repoDir = `${home}/workspace/repo`;
 const signal = () => AbortSignal.timeout(20 * 60_000);
-const sh = (guest: Guest, script: string) => guest.exec(["sh", "-c", script], { cwd: repoDir, timeoutMs: 60_000 });
+const sh = (guest: Guest, script: string) => guest.exec(["sh", "-c", script], { cwd: checkoutDir, timeoutMs: 60_000 });
 
 function boot(image: ImageId, source: BootInputs["source"]): BootInputs {
   return {

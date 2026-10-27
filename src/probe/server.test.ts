@@ -478,6 +478,18 @@ test("a command for a pylon that is not running is refused as not-running", asyn
   assert.deepEqual(guest.execs, []);
 });
 
+test("a command or job body over a mebibyte is refused and reaches no guest", async (t) => {
+  const guest = fakeGuest(() => { throw new Error("no exec expected"); });
+  const { client, base } = await setup(t, {}, guest);
+  await running(client);
+  const big = "x".repeat((1 << 20) + 1);
+  const command = await fetch(`${base}/v1/pylons/${pylonId}/commands`, { method: "POST", body: big });
+  assert.deepEqual([command.status, await command.text()], [400, "request body over 1048576 bytes"]);
+  const job = await fetch(`${base}/v1/jobs/job-big`, { method: "PUT", body: big });
+  assert.deepEqual([job.status, await job.text()], [500, "request body over 1048576 bytes"]);
+  assert.deepEqual(guest.execs, []);
+});
+
 test("malformed commands get 400 and reach no guest", async (t) => {
   const guest = fakeGuest(() => { throw new Error("no exec expected"); });
   const { client, base } = await setup(t, {}, guest);

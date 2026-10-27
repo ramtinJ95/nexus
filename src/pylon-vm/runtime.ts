@@ -17,7 +17,8 @@ import { openTerminal } from "./portals.ts";
 import { GuestProcesses } from "./processes.ts";
 import { startRelay } from "./relay.ts";
 import { GuestServices } from "./services.ts";
-import { existsError, shellQuote as q, saveJson } from "./storage.ts";
+import { shellQuote as q } from "../project.ts";
+import { existsError, saveJson } from "./storage.ts";
 
 /**
  * Logs a resume's output and then one `resume:` line with its outcome, however long it runs. A failed resume
@@ -48,6 +49,20 @@ export async function reportResume(
 	);
 	return true;
 }
+
+/** Logs the process's output as it comes until it ends, and returns its exit code. */
+async function runToEnd(processes: GuestProcesses, pid: string): Promise<number | undefined> {
+	let result = await processes.status(pid, 60000);
+	while (result.running) {
+		console.log(result.output);
+		result = await processes.status(pid, 60000);
+	}
+	console.log(result.output);
+	return result.exitCode;
+}
+
+/** One script that runs each command in a login shell, and stops at the first that fails with its exit code. */
+const chained = (commands: readonly string[]) => commands.map((cmd) => `/bin/sh -lc ${q(cmd)} || exit $?`).join("\n");
 
 /** Actions that wait on a process, only read, or touch only the host, which run beside the lifecycle queue so that they never wait behind it. */
 const besideQueue = new Set(["inspect", "exec", "exec-status", "exec-kill", "read", "write-files", "logs", "update-secret"]);
@@ -219,14 +234,8 @@ export class SandboxRuntime {
 			...this.spec.files,
 		], this.stopping.signal);
 		for (const hook of this.spec.hooks) {
-			const pid = await this.processes.launch(hook, "/", true, 120);
-			let result = await this.processes.status(pid, 60000);
-			while (result.running) {
-				console.log(result.output);
-				result = await this.processes.status(pid, 60000);
-			}
-			console.log(result.output);
-			if (result.exitCode !== 0) console.error(`Boot hook exited ${result.exitCode}`);
+			const exitCode = await runToEnd(this.processes, await this.processes.launch(hook, "/", true, 120));
+			if (exitCode !== 0) console.error(`Boot hook exited ${exitCode}`);
 		}
 		const marker =
 			resume && (await guestExists(vm, setupMarker))
@@ -239,20 +248,9 @@ export class SandboxRuntime {
 		if (done === null) {
 			const setup = config.setup;
 			if (setup.length) {
-				const pid = await this.processes.launch(
-					setup.map((cmd) => `/bin/sh -lc ${q(cmd)} || exit $?`).join("\n"),
-					config.workspace,
-					true,
-					1200,
-				);
-				let result = await this.processes.status(pid, 60000);
-				while (result.running) {
-					console.log(result.output);
-					result = await this.processes.status(pid, 60000);
-				}
-				console.log(result.output);
-				if (result.exitCode !== 0) {
-					this.failures.push({ kind: "setup", message: `Setup exited ${result.exitCode}. Read controller logs. No prepared template was published` });
+				const exitCode = await runToEnd(this.processes, await this.processes.launch(chained(setup), config.workspace, true, 1200));
+				if (exitCode !== 0) {
+					this.failures.push({ kind: "setup", message: `Setup exited ${exitCode}. Read controller logs. No prepared template was published` });
 					if (prepare) throw new Error(this.setupError);
 				}
 			}
@@ -266,10 +264,7 @@ export class SandboxRuntime {
 		// the whole setup, which leaves its processes running as resume would start them, so it skips resume.
 		const hooks = resume ? config.resume : [];
 		if (hooks.length) {
-			const pid = await this.processes.launch(
-				hooks.map((cmd) => `/bin/sh -lc ${q(cmd)} || exit $?`).join("\n"),
-				config.workspace,
-			);
+			const pid = await this.processes.launch(chained(hooks), config.workspace);
 			if (await reportResume(this.processes, pid, 10000, console.log))
 				this.resumePid = pid;
 		}

@@ -7,7 +7,6 @@
  * rootfs.ext4), so the pylon VM backend boots it as is, plus image.json, the ImageManifest.
  */
 import { spawn } from "node:child_process";
-import { createHash } from "node:crypto";
 import { once } from "node:events";
 import { createReadStream, existsSync, readFileSync } from "node:fs";
 import { chmod, mkdir, mkdtemp, readdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
@@ -19,9 +18,10 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { createHttpHooks, parseBuildConfig, verifyAssets, VM, type AlpineConfig, type BuildConfig } from "@earendil-works/gondolin";
 import { z } from "zod";
 import { agentSetupManifest, installedLayout, parseAgentSetup, type AgentSetup } from "../images/pylon/agent-setup/manifest.ts";
-import { artifactArchive, manifestFiles } from "./artifacts.ts";
+import { artifactArchive, manifestFiles, sha256Of } from "./artifacts.ts";
 import { JobFailure } from "./backend.ts";
 import { imageIdOf, pinsSchema, type ImageId, type ImageManifest, type ImageRecipe } from "./images.ts";
+import { shellQuote } from "./project.ts";
 import type { NodeName } from "./protocol.ts";
 
 export const pylonRecipeDir = fileURLToPath(new URL("../images/pylon/", import.meta.url));
@@ -198,7 +198,10 @@ export async function buildImage(input: ImageRecipe, node: NodeName, out: string
     pins: recipe.pins,
     builtOn: node,
     builtAt: new Date().toISOString(),
-    sha256: await sha256Of(partial, signal),
+    sha256: await Promise.try(() => sha256Of(artifactArchive(partial, imageManifestFile, signal))).catch((err: Error) => {
+      if (signal.aborted) throw signal.reason;
+      throw new JobFailure("backend", err.message);
+    }),
   };
   await writeFile(join(partial, imageManifestFile), `${JSON.stringify(manifest, null, 2)}\n`);
   await rename(partial, outDir);
@@ -385,7 +388,7 @@ export async function restoreModes(tag: string, assets: string, label: string, s
   const { computeAssetBuildId } = (await import(pathToFileURL(join(dirname(gondolinPackageJson), "dist", "src", "assets.js")).href)) as {
     computeAssetBuildId(input: { checksums: GondolinManifest["checksums"]; arch?: string }): string;
   };
-  manifest.checksums.rootfs = await sha256File(rootfs);
+  manifest.checksums.rootfs = await sha256Of(createReadStream(rootfs));
   manifest.buildId = computeAssetBuildId({ checksums: manifest.checksums, arch: manifest.config.arch });
   await writeFile(manifestFile, `${JSON.stringify(manifest, null, 2)}\n`);
   if (!verifyAssets(assets)) throw new JobFailure("backend", `Gondolin's manifest in ${assets} does not verify after the mode fix`);
@@ -396,12 +399,6 @@ interface GondolinManifest {
   config: { arch: string };
   assets: { rootfs: string };
   checksums: { kernel: string; initramfs: string; rootfs: string; krunKernel?: string; krunInitrd?: string };
-}
-
-async function sha256File(path: string): Promise<string> {
-  const hash = createHash("sha256");
-  for await (const chunk of createReadStream(path)) hash.update(chunk as Buffer);
-  return hash.digest("hex");
 }
 
 const smokeHost = "api.anthropic.com";
@@ -415,7 +412,6 @@ export interface SmokeCheck {
 }
 
 const asUser = (script: string): readonly string[] => ["runuser", "-l", "user", "-c", `exec 2>&1; ${script}`];
-const shellQuote = (text: string): string => `'${text.replaceAll("'", "'\\''")}'`;
 const literal = (text: string): string => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 /** The nexus CLI has no pin. Its script declares the version that `nexus --version` prints. */
@@ -655,17 +651,6 @@ async function reapGroup(pid: number, command: string): Promise<void> {
   if (await gone()) return;
   signalGroup(pid, "SIGKILL");
   if (!(await gone())) throw new JobFailure("backend", `processes that ${command} started outlived SIGKILL`);
-}
-
-async function sha256Of(dir: string, signal: AbortSignal): Promise<string> {
-  const hash = createHash("sha256");
-  try {
-    for await (const chunk of artifactArchive(dir, imageManifestFile, signal)) hash.update(chunk as Buffer);
-  } catch (err) {
-    if (signal.aborted) throw signal.reason;
-    throw new JobFailure("backend", (err as Error).message);
-  }
-  return hash.digest("hex");
 }
 
 if (import.meta.main) {

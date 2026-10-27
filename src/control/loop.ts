@@ -19,6 +19,7 @@ import { linkedPort, liveHashOf, type GitIdentity } from "../project.ts";
 import { tick, type TickContext } from "../tick.ts";
 import type { NodeName, NodeObservation, ProbeClient, ProbeError, ProbeEvent, PylonCommand, PylonId, PylonObservation } from "../protocol.ts";
 import type { ArtifactId } from "../images.ts";
+import { defaultClaudeModel } from "../claude-state.ts";
 import { pylonLive } from "./live.ts";
 import type { PortRange, Registry, StoredPylon, Thread, ThreadId } from "./registry.ts";
 import { tickTemplateBuild } from "./template-builds.ts";
@@ -121,8 +122,9 @@ export function startLoop(options: LoopOptions): Loop {
 
   /** The pylon with the LiveSpec its records give now, saved if that changed. */
   function withLive(stored: StoredPylon, thread: Thread): StoredPylon {
-    const observed = observation(stored.node)?.pylons.find((p) => p.pylonId === stored.pylonId);
-    if (observation(stored.node) !== null && (observed === undefined || observed.phase === "stopped") && stored.submitted === null) {
+    const nodeObservation = observation(stored.node);
+    const observed = nodeObservation?.pylons.find((p) => p.pylonId === stored.pylonId);
+    if (nodeObservation !== null && (observed === undefined || observed.phase === "stopped") && stored.submitted === null) {
       const gitIdentity = registry.project(thread.project)!.gitIdentity ?? options.gitIdentity;
       if (JSON.stringify(gitIdentity) !== JSON.stringify(stored.boot.gitIdentity)) {
         stored = { ...stored, boot: { ...stored.boot, gitIdentity } };
@@ -148,23 +150,24 @@ export function startLoop(options: LoopOptions): Loop {
     }
     // Each record is read just before its tick, because an API retry may change it while earlier ticks wait on
     // the probe, and saving an older copy would undo it.
-    for (const { pylonId } of registry.pylonsOn(node)) {
+    for (const pylonId of registry.pylonIdsOn(node)) {
       const found = registry.pylon(pylonId)!;
       const thread = registry.thread(found.thread as ThreadId)!;
       const stored = withLive(found, thread);
       const pylon = { ...stored, desired: desiredPhase(thread, Date.now()) };
+      const nodeObservation = observation(node);
       const ctx: TickContext = {
         probe: link.probe,
-        observation: observation(node),
+        observation: nodeObservation,
         holders: holders(node),
         artifactSha256,
         save: (p) => registry.savePylon(p),
       };
       try {
         const worker = registry.claudeWorker(thread.id);
-        const running = observation(node)?.pylons.some((p) => p.pylonId === pylonId && p.phase === "running") === true;
+        const running = nodeObservation?.pylons.some((p) => p.pylonId === pylonId && p.phase === "running") === true;
         // A launch this process did not finish, as one a control plane restart cut off, goes again only where it is safe to.
-        if (worker?.state === "starting" && observation(node) !== null && (observation(node)!.claudeLaunchRepeatable !== true || worker.session === null)) {
+        if (worker?.state === "starting" && nodeObservation !== null && (nodeObservation.claudeLaunchRepeatable !== true || worker.session === null)) {
           const message = "Claude launch was interrupted; attach to check before starting another session";
           registry.setClaudeWorker(thread.id, worker.prompt, "failed", message);
           registry.appendEvent("thread.failed", thread.id, { message });
@@ -173,7 +176,7 @@ export function startLoop(options: LoopOptions): Loop {
           const session = worker.state === "starting" ? worker.session! : randomUUID();
           registry.setClaudeWorker(thread.id, worker.prompt, "starting", undefined, session);
           try {
-            await launchClaude(node, link, pylonId, { kind: "open-session", harness: "claude-code", title: thread.title.slice(0, 80), resume: session, prompt: worker.prompt, model: worker.model ?? "claude-opus-5-5" });
+            await launchClaude(node, link, pylonId, { kind: "open-session", harness: "claude-code", title: thread.title.slice(0, 80), resume: session, prompt: worker.prompt, model: worker.model ?? defaultClaudeModel });
             registry.setClaudeWorker(thread.id, worker.prompt, "started");
           } catch (err) {
             if (registry.claudeWorker(thread.id)?.state === "started" || shutdown.signal.aborted) continue;
@@ -256,7 +259,7 @@ export function startLoop(options: LoopOptions): Loop {
           silence = setTimeout(() => connection.abort(), silenceMs);
           // The stored observation is the last one ingested, including the one from before a reconnect or a restart.
           const last = registry.node(node)!.observation;
-          const known = new Map(registry.pylonsOn(node).map((p) => [p.pylonId, last?.pylons.find((o) => o.pylonId === p.pylonId) ?? "absent" as const]));
+          const known = new Map(registry.pylonIdsOn(node).map((id) => [id, last?.pylons.find((o) => o.pylonId === id) ?? "absent" as const]));
           for (const report of event.type === "snapshot" ? event.observation.events ?? [] : event.type === "session-event" ? [event.report] : []) registry.reportSession(node, report);
           const current = merge(last, event);
           const writes = ingest(event, node, known, Date.now(), new Set([...known.keys()].filter((id) => !listed.has(id))));

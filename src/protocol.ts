@@ -22,7 +22,7 @@ import { PassThrough, type Duplex, type Readable } from "node:stream";
 import { setTimeout as delay } from "node:timers/promises";
 import { localApiWhois, type Whois } from "./tailscale.ts";
 import { chatgptTokenGrant, reservedPorts, type BootInputs, type LiveSpec, type SessionHarness } from "./project.ts";
-import { claudeTextProblem } from "./sessions.ts";
+import { claudeTextProblem, record, string } from "./sessions.ts";
 import type { ArtifactManifest, CheckpointId, ImageId, ImageRecipe, PortableArtifactId, ArtifactId, TemplateBuildInputs, TemplateId } from "./images.ts";
 
 declare const brand: unique symbol;
@@ -981,13 +981,4 @@ export function parseArtifactManifest(value: unknown): ArtifactManifest {
     throw new Error(`manifest.id ${id} is neither an image nor a template`);
   }
   return m as unknown as ArtifactManifest;
-}
-
-function record(value: unknown, what: string): Record<string, unknown> {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) throw new Error(`${what} is not an object`);
-  return value as Record<string, unknown>;
-}
-function string(value: unknown, what: string): string {
-  if (typeof value !== "string" || value === "") throw new Error(`${what} is not a non-empty string`);
-  return value;
 }

@@ -78,6 +78,20 @@ test("the probe's socket is private to its user, and a request without the contr
   assert.deepEqual(calls, []);
 });
 
+test("a body over a mebibyte is refused with 413 and never answered", async (t) => {
+  const { socket, calls } = await probeSide(t);
+  const reply = await new Promise<{ status: number; type: string | undefined; text: string }>((resolve, reject) => {
+    request({ socketPath: socket, method: "POST", path: "/v1/request", headers: { "x-nexus-pylon": "pylon-t1" } }, (res) => {
+      let text = "";
+      res.setEncoding("utf8");
+      res.on("data", (chunk: string) => { text += chunk; });
+      res.on("end", () => resolve({ status: res.statusCode!, type: res.headers["content-type"], text }));
+    }).on("error", reject).end("x".repeat((1 << 20) + 1));
+  });
+  assert.deepEqual(reply, { status: 413, type: "text/plain; charset=utf-8", text: "request body over 1048576 bytes" });
+  assert.deepEqual(calls, []);
+});
+
 test("a new probe takes over a socket left behind", async (t) => {
   const { stateRoot } = await probeSide(t);
   const second = await pylonVmHostBridge(stateRoot)(async () => ({ status: 200, body: "{}" }));

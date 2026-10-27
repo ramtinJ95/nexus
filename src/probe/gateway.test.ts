@@ -230,3 +230,11 @@ test("a refused upgrade whose body the origin cuts short closes the browser's co
   res.resume();
   await new Promise((resolve) => res.on("close", resolve));
 });
+
+test("a gateway whose port is taken fails to start with the bind error", async (t) => {
+  const taken = createServer().listen(0, "127.0.0.1");
+  await once(taken, "listening");
+  t.after(() => taken.close());
+  const port = (taken.address() as { port: number }).port;
+  await assert.rejects(startGateway({ port, routes: new Map(), origin: () => "http://127.0.0.1:1", onHit: () => {} }), { code: "EADDRINUSE" });
+});

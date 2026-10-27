@@ -19,6 +19,7 @@ import { PassThrough } from "node:stream";
 import { promisify } from "node:util";
 import { WebSocket } from "ws";
 import { maxStreams, startApi, type ThreadDetail, type ThreadRow } from "./api.ts";
+import { threadStarter } from "./threads.ts";
 import type { AttachTiming } from "./attach.ts";
 import type { ReviewLoop } from "./review.ts";
 import { readEvents } from "./event-reader.ts";
@@ -89,6 +90,8 @@ async function setup(t: import("node:test").TestContext, options: { gitIdentity?
   /** What a project's remote answers a setup read with. Tests replace it. */
   let read: ProjectMirror["setupInputs"] = () => Promise.reject(new Error("this test has no remote"));
   const reads: Parameters<ProjectMirror["setupInputs"]>[1][] = [];
+  const wake = (n: NodeName) => { woken.push(n); };
+  const mirror: ProjectMirror = { setupInputs(p, ref) { reads.push(ref); return read(p, ref); } };
   const api = await startApi({
     registry, host: "127.0.0.1", port: 0,
     ...(options.https ? { https: options.https } : {}),
@@ -103,11 +106,9 @@ async function setup(t: import("node:test").TestContext, options: { gitIdentity?
     ...(options.reviews === undefined ? {} : { reviews: options.reviews }),
     ...(images === undefined ? {} : { images }),
     hostnames: new Set(["127.0.0.1"]),
-    dotfiles: options.dotfiles ?? dotfiles,
-    gitIdentity: options.gitIdentity,
     harness,
-    mirror: { setupInputs(p, ref) { reads.push(ref); return read(p, ref); } },
-    wake: (n) => { woken.push(n); },
+    startThread: threadStarter({ registry, harness, mirror, dotfiles: options.dotfiles ?? dotfiles, gitIdentity: options.gitIdentity, wake }),
+    wake,
     probes: new Map([[node, {
       command: (pylonId: PylonId, command: PylonCommand) => { commands.push([pylonId, command]); return answer(command); },
       stream: (pylonId: PylonId, argv: readonly string[]) => { streams.push([pylonId, argv]); return pipe(argv); },
@@ -1799,6 +1800,14 @@ test("pylon traffic under its host identity cannot deploy even if that identity 
   assert.equal((await s.call("PUT", "/v1/release", { commit: deployCommit }, reporterHeaders)).status, 403);
 });
 
+test("a body over a mebibyte is refused with 413 and reaches no route", async (t) => {
+  const s = await setup(t);
+  const refused = await s.call("POST", "/v1/projects", "x".repeat((1 << 20) + 1));
+  assert.equal(refused.status, 413);
+  assert.deepEqual(refused.body, { error: "request body over 1048576 bytes" });
+  assert.deepEqual(s.registry.projects(), []);
+});
+
 test("a root-authenticated drain blocks every turn-entry route and can be released", async (t) => {
   const s = await setup(t, { deployment });
   await s.call("PUT", "/v1/release", { commit: deployCommit });
@@ -1808,7 +1817,9 @@ test("a root-authenticated drain blocks every turn-entry route and can be releas
   assert.equal(drain.body.idle, true);
   s.callAs(laptop);
   for (const path of ["/v1/threads", "/v1/threads/anything/messages", "/v1/threads/anything/retry"]) {
-    assert.equal((await s.call("POST", path, {})).status, 409);
+    const refused = await s.call("POST", path, {});
+    assert.equal(refused.status, 409);
+    assert.deepEqual(refused.body, { error: "control plane is draining for deployment; retry after the release completes" });
   }
   assert.equal((await s.call("PUT", "/v1/release", { commit: "b".repeat(40) })).status, 409);
   s.callAs("nFIREBAT" as TailnetNodeId);

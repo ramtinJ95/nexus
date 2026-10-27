@@ -4,7 +4,7 @@
  * plane's loop saves it to the registry, and the slice test keeps it in memory.
  */
 import { envelope, planPylon, type DesiredPhase, type FailedAttempt, type PlanInput, type PlanStep } from "./reconcile.ts";
-import type { JobEnvelope, JobStatus, NodeObservation, ProbeClient, ProbeError } from "./protocol.ts";
+import type { Job, JobEnvelope, JobId, JobStatus, NodeName, NodeObservation, ProbeClient, ProbeError } from "./protocol.ts";
 import type { CheckpointId } from "./images.ts";
 
 export interface PylonRecord {
@@ -98,17 +98,40 @@ export async function tick(pylon: PylonRecord, ctx: TickContext): Promise<PlanSt
   }
   if (step.kind !== "submit") return step;
 
-  const env = envelope(step.job, pylon.node, Date.now());
-  pylon.submitted = env;
-  ctx.save(pylon);
-  // A throw leaves the envelope recorded. The next tick asks the probe about it.
-  const reply = await probe.submit(env);
-  if ("accepted" in reply) return step;
+  const sent = await submitJob(probe, step.job, pylon.node, (env) => {
+    pylon.submitted = env;
+    ctx.save(pylon);
+  });
+  if (sent === "accepted") return step;
   pylon.submitted = null;
-  if (reply.rejected === "invalid") pylon.attempts = failedAttempt(pylon, "invalid", failureMessage(reply.message, ""));
-  // busy and expired wait for the next tick.
+  if (sent !== "retry") pylon.attempts = failedAttempt(pylon, "invalid", failureMessage(sent.invalid, ""));
   ctx.save(pylon);
   return step;
+}
+
+/**
+ * Sends the job in a new envelope, which `record` saves first, so a send that throws leaves it recorded and the next
+ * pass asks the probe about it. "retry" is a busy or expired refusal, which a later pass sends again.
+ */
+export async function submitJob(probe: Pick<ProbeClient, "submit">, job: Job, node: NodeName, record: (env: JobEnvelope) => void): Promise<"accepted" | { invalid: string } | "retry"> {
+  const env = envelope(job, node, Date.now());
+  record(env);
+  const reply = await probe.submit(env);
+  if ("accepted" in reply) return "accepted";
+  return reply.rejected === "invalid" ? { invalid: reply.message } : "retry";
+}
+
+/**
+ * The status of a sent job: `listed`, the one the node's observation lists, or else the probe's. When the probe does
+ * not know the job it is "wait" while the envelope may still be accepted, and "expired" once it never can be: it was
+ * never accepted, or was lost in a probe restart.
+ */
+export async function jobOutcome(probe: Pick<ProbeClient, "job">, jobId: JobId, notAfter: string, listed?: JobStatus): Promise<JobStatus | "wait" | "expired"> {
+  // Only a lookup that began after notAfter proves the envelope can no longer be accepted.
+  const askedAt = Date.now();
+  const status = listed ?? await probe.job(jobId);
+  if (status !== "unknown") return status;
+  return askedAt > Date.parse(notAfter) ? "expired" : "wait";
 }
 
 /**
@@ -122,12 +145,10 @@ export async function tick(pylon: PylonRecord, ctx: TickContext): Promise<PlanSt
 async function settle(pylon: PylonRecord, probe: ProbeClient, observation: NodeObservation): Promise<JobStatus | "wait" | null> {
   const env = pylon.submitted!;
   const listed = observation.jobs.find((j) => j.jobId === env.jobId);
-  // Only a lookup that began after notAfter proves the envelope can no longer be accepted.
-  const askedAt = Date.now();
-  const status = listed ?? await probe.job(env.jobId);
-  if (status === "unknown") {
-    if (askedAt <= Date.parse(env.notAfter)) return "wait";
-    // Never accepted, or lost in a probe restart. Either way it did not fail, so no attempt is counted.
+  const status = await jobOutcome(probe, env.jobId, env.notAfter, listed);
+  if (status === "wait") return "wait";
+  if (status === "expired") {
+    // It did not fail, so no attempt is counted.
     pylon.submitted = null;
     return null;
   }

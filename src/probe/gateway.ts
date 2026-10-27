@@ -3,6 +3,7 @@
  * owns. Serve keeps the public `Host`, so the port in it names the preview (S6). The gateway forwards to that
  * pylon's preview origin, streaming bodies and passing websocket upgrades through.
  */
+import { once } from "node:events";
 import { STATUS_CODES, createServer, request, type IncomingHttpHeaders, type IncomingMessage, type OutgoingHttpHeader, type OutgoingHttpHeaders, type ServerResponse } from "node:http";
 import type { Socket } from "node:net";
 import { pipeline } from "node:stream";
@@ -126,10 +127,8 @@ export async function startGateway(options: GatewayOptions): Promise<PreviewGate
 
   const server = createServer(forward);
   server.on("upgrade", upgrade);
-  await new Promise<void>((resolve, reject) => {
-    server.once("error", reject);
-    server.listen(options.port, "127.0.0.1", () => { server.off("error", reject); resolve(); });
-  });
+  server.listen(options.port, "127.0.0.1");
+  await once(server, "listening");
   const address = server.address();
   if (address === null || typeof address === "string") throw new Error(`unexpected gateway address ${address}`);
 

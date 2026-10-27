@@ -3,7 +3,7 @@ import { posix } from "node:path";
 import { Writable } from "node:stream";
 import type { VM } from "@earendil-works/gondolin";
 import { commandOutcomeSchema, type GuestFile, type Service } from "./contracts.ts";
-import { shellQuote as q } from "./storage.ts";
+import { shellQuote as q } from "../project.ts";
 
 /**
  * Gondolin refuses a command once 64 are outstanding, and counts one until the guest answers it, also after the host

@@ -1,5 +1,7 @@
 import type { DesiredRelease, Role } from "./plan.ts";
 
+export const fullCommit = /^[0-9a-f]{40}$/;
+
 export interface ReleaseReport {
   node: string;
   role: Role;

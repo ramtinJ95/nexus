@@ -7,6 +7,7 @@ import { runningCommit } from "../deploy/health.ts";
  */
 import { randomUUID } from "node:crypto";
 import { mkdir, statfs } from "node:fs/promises";
+import { once } from "node:events";
 import { createServer, STATUS_CODES, type IncomingMessage, type ServerResponse } from "node:http";
 import { availableParallelism, totalmem } from "node:os";
 import type { Duplex } from "node:stream";
@@ -24,6 +25,7 @@ import { onePerClaudeSession } from "../session-wake.ts";
 import type { Whois } from "../tailscale.ts";
 import { listOutputs } from "../outputs.ts";
 import { listeningFacts } from "../listening.ts";
+import { readBody } from "../request-body.ts";
 import { gitFacts } from "../git-facts.ts";
 import { startGateway } from "./gateway.ts";
 import { createPylonApi, type HostBridge } from "./pylon-api.ts";
@@ -72,7 +74,6 @@ export interface Probe {
 
 const jobRetentionMs = 10 * 60_000;
 const snapshotIntervalMs = 60_000;
-const maxBodyBytes = 1 << 20;
 const maxSecretBytes = 16_384;
 /** RFC 6750's b64token, the alphabet bearer tokens are written in. */
 const tokenAlphabet = /^[A-Za-z0-9\-._~+/]+=*$/;
@@ -639,13 +640,13 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
       refuse(socket, 502, (err as Error).message);
     });
   });
-  await new Promise<void>((resolve, reject) => {
-    server.once("error", reject);
-    server.listen(options.port, options.host, () => { server.off("error", reject); resolve(); });
-  }).catch(async (err: unknown) => {
+  try {
+    server.listen(options.port, options.host);
+    await once(server, "listening");
+  } catch (err) {
     await previews?.gateway.close(); // its port is fixed, so a retry in this process needs it free
     throw err;
-  });
+  }
   const address = server.address();
   if (address === null || typeof address === "string") throw new Error(`unexpected server address ${address}`);
   const bridge = await options.hostBridge?.(api.answer).catch(async (err: unknown) => {
@@ -678,14 +679,4 @@ function refuse(socket: Duplex, status: number, body: string) {
 
 function send(res: ServerResponse, status: number, body: string, contentType = "text/plain; charset=utf-8") {
   res.writeHead(status, { "content-type": contentType }).end(body);
-}
-
-async function readBody(req: IncomingMessage, limit = maxBodyBytes): Promise<string> {
-  let body = "";
-  req.setEncoding("utf8");
-  for await (const chunk of req as AsyncIterable<string>) {
-    body += chunk;
-    if (body.length > limit) throw new Error(`request body over ${limit} bytes`);
-  }
-  return body;
 }

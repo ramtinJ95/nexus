@@ -5,9 +5,8 @@
  * built, where, and which node fetches what. Probes only build, serve, fetch and drop on command.
  * Dependencies run one way: a checkpoint or template depends on its image, never the reverse.
  */
-import { createHash } from "node:crypto";
 import { z } from "zod";
-import { effectiveAllowedHosts, type Checkout, type Project, type ProjectId, type RemoteProject } from "./project.ts";
+import { canonicalSha256, effectiveAllowedHosts, type Checkout, type Project, type ProjectId, type RemoteProject } from "./project.ts";
 import type { JobEnvelope, NodeName } from "./protocol.ts";
 
 /** img-<sha256 of the recipe>[:12]. The same inputs give the same ID, so a rebuild of unchanged inputs is a no-op. */
@@ -107,7 +106,7 @@ export function imageIdOf(recipe: ImageRecipe): ImageId {
   const files = [...recipe.files].sort((a, b) => compare(a.path, b.path));
   const duplicate = files.find((file, i) => i > 0 && files[i - 1]!.path === file.path);
   if (duplicate !== undefined) throw new Error(`the image recipe has two files at ${duplicate.path}`);
-  return `img-${sha256Of({ files, pins: recipe.pins }).slice(0, 12)}`;
+  return `img-${canonicalSha256({ files, pins: recipe.pins }).slice(0, 12)}`;
 }
 
 export interface ImageManifest {
@@ -161,19 +160,12 @@ export interface ProjectMirror {
 /** sha256 of setupBlob, project.preSetup and effectiveAllowedHosts(project), since the hosts setup can reach change what it can install. */
 /** The disk size is in it because a template's disk is the pylon's, and a pylon's disk size is fixed once it exists. */
 export function setupHashOf(project: Project, inputs: SetupInputs): string {
-  return sha256Of({ setupBlob: inputs.setupBlob, preSetup: project.preSetup, allowedHosts: effectiveAllowedHosts(project), diskGiB: project.resources.diskGiB });
+  return canonicalSha256({ setupBlob: inputs.setupBlob, preSetup: project.preSetup, allowedHosts: effectiveAllowedHosts(project), diskGiB: project.resources.diskGiB });
 }
 export function templateIdOf(key: TemplateKey, node: NodeName, startedAt: number): TemplateId {
-  return `tpl-${sha256Of({ project: key.project, image: key.image, setupHash: key.setupHash, node, startedAt }).slice(0, 12)}`;
+  return `tpl-${canonicalSha256({ project: key.project, image: key.image, setupHash: key.setupHash, node, startedAt }).slice(0, 12)}`;
 }
 
-/** Hex sha256 of canonical JSON: object keys sorted, so the same value always gives the same hash. */
-function sha256Of(value: unknown): string {
-  const canonical = JSON.stringify(value, (_key, v: unknown) => v !== null && typeof v === "object" && !Array.isArray(v)
-    ? Object.fromEntries(Object.entries(v).sort(([a], [b]) => compare(a, b)))
-    : v);
-  return createHash("sha256").update(canonical).digest("hex");
-}
 const compare = (a: string, b: string): number => a < b ? -1 : a > b ? 1 : 0;
 
 export interface TemplateBuildInputs {

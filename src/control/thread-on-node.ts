@@ -19,7 +19,6 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { lookup } from "node:dns/promises";
 import { mkdtemp, readFile, rm, stat } from "node:fs/promises";
 import { request } from "node:http";
 import { request as httpsRequest } from "node:https";
@@ -29,118 +28,32 @@ import { createInterface } from "node:readline";
 import { DatabaseSync } from "node:sqlite";
 import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
-import { z } from "zod";
-import { artifactDirectory, tarCodec } from "../artifacts.ts";
-import { isImageId, probePort, type JobStatus } from "../protocol.ts";
-import { scriptedModel, scriptedModels, streamedAnswer, streamedWordMs } from "../harness/test-fixture.ts";
-import { parseSelfDnsName, readProbeConfig } from "../probe/config.ts";
-import { tailscaleCli } from "../probe/serve.ts";
+import type { JobStatus } from "../protocol.ts";
+import { scriptedModels, streamedAnswer, streamedWordMs } from "../harness/test-fixture.ts";
 import type { ThreadDetail, ThreadRow } from "./api.ts";
-import { defaultPreviewPorts, startControlPlane, type ControlPlaneConfig } from "./main.ts";
-import { openRegistry } from "./registry.ts";
+import { defaultPreviewPorts, startControlPlane } from "./main.ts";
+import { apiClient, fetchUntil, openNodeCheck, passLogger, until } from "./on-node-kit.ts";
 
-const probeConfig = await readProbeConfig(process.argv[2] ?? "/etc/nexus/probe.json");
-if (probeConfig.backend.kind !== "pylon-vm") throw new Error(`the probe runs the ${probeConfig.backend.kind} backend. This check is for pylon-vm`);
-const { stateRoot } = probeConfig.backend;
-const store = artifactDirectory(probeConfig.backend.artifacts, tarCodec);
-const images = (await store.list()).filter(isImageId);
-const image = process.argv[3] ?? (images.length === 1 ? images[0] : undefined);
-if (!isImageId(image) || !images.includes(image)) throw new Error(`name one of the images in ${store.root}: ${images.join(", ")}`);
-if (probeConfig.listen.port !== probePort) throw new Error(`the probe listens on port ${probeConfig.listen.port}, and the control plane reaches probes on ${probePort} only`);
-if (probeConfig.previews === undefined) throw new Error("set previews in the probe's config, then restart the probe. This check opens a preview");
+const { probeConfig, stateRoot, image, dnsName, host, serveJson, planeConfig, startPlane } = await openNodeCheck({ image: process.argv[3], opens: "a preview", resolvesToProbe: true });
 const holdMs = Number(process.argv[4] ?? 0) * 1000;
-const tailscale = tailscaleCli();
-const statusJson = await tailscale(["status", "--json"], AbortSignal.timeout(30_000));
-const self = z.object({ Self: z.object({ ID: z.string() }) }).parse(JSON.parse(statusJson)).Self.ID;
-// Preview URLs name the node by its MagicDNS name, because that is the name its tailscale serve certificate is for.
-const dnsName = parseSelfDnsName(statusJson);
-if (probeConfig.auth.controlPlane !== self) throw new Error(`set auth.controlPlane in the probe's config to this node's ID ${self} (it is ${probeConfig.auth.controlPlane}), then restart the probe`);
-const manifest = await store.manifest(image);
-
-const host = probeConfig.listen.host;
-const resolved = (await lookup(dnsName, { all: true })).map((a) => a.address);
-if (!resolved.includes(host)) throw new Error(`${dnsName} resolves to ${resolved.join(", ")}, not to the probe's address ${host}`);
-const serveStatus = async () => JSON.parse(await tailscale(["serve", "status", "--json"], AbortSignal.timeout(30_000))) as unknown;
+const serveStatus = async () => JSON.parse(await serveJson()) as { TCP?: Record<string, unknown> };
 const serveBefore = await serveStatus();
 console.log(`tailscale serve status before: ${JSON.stringify(serveBefore)}`);
 // The check's registry is new, so its one preview gets the first port. Taking over an entry there would break whatever owns it.
 const firstPort = String(defaultPreviewPorts.first);
-if (Object.keys((serveBefore as { TCP?: Record<string, unknown> }).TCP ?? {}).includes(firstPort)) throw new Error(`tailscale serve already serves port ${firstPort}, which this check's preview would get. Free it first`);
+if (Object.keys(serveBefore.TCP ?? {}).includes(firstPort)) throw new Error(`tailscale serve already serves port ${firstPort}, which this check's preview would get. Free it first`);
 const dir = await mkdtemp(join(tmpdir(), "nexus-thread-on-node-"));
-const config: ControlPlaneConfig = {
-  db: join(dir, "registry.db"),
-  listen: { host, port: 0, hostnames: [host] },
-  self: { tailnetNodeId: self },
-  nodes: [{ name: probeConfig.node, tailnetHost: dnsName, tailnetNodeId: self }],
-  callers: [],
-  dotfiles: { repo: "https://github.com/octocat/Spoon-Knife.git", ref: "main" },
-  harness: { storage: join(dir, "harness.sqlite"), credentials: join(dir, "unused-credentials.json"), model: scriptedModel },
-  previewPorts: defaultPreviewPorts,
-  resumeAfterUsageLimit: false,
-};
-// A rollout needs a deployer, which the control plane's own node never is, so the check makes the image current in the registry.
-const seed = openRegistry(config.db);
-seed.saveImage(manifest!, null);
-seed.setCurrentImage(image);
-seed.close();
-let controlPlane = await startControlPlane(config, scriptedModels());
-
-function call(method: string, path: string, body?: unknown): Promise<{ status: number; body: any }> {
-  return new Promise((resolve, reject) => {
-    const req = request({
-      host, port: controlPlane.port, method, path: `/v1${path}`,
-      headers: { host: `${host}:${controlPlane.port}`, ...(method === "GET" ? {} : { "content-type": "application/json" }) },
-    }, (res) => {
-      let text = "";
-      res.setEncoding("utf8");
-      res.on("data", (chunk: string) => { text += chunk; });
-      res.on("end", () => resolve({ status: res.statusCode!, body: text === "" ? null : JSON.parse(text) }));
-    });
-    req.on("error", reject);
-    req.end(body === undefined ? undefined : JSON.stringify(body));
-  });
-}
-
-async function expect(status: number, method: string, path: string, body?: unknown) {
-  const res = await call(method, path, body);
-  if (res.status !== status) throw new Error(`${method} ${path}: HTTP ${res.status}, expected ${status}: ${JSON.stringify(res.body)}`);
-  return res.body;
-}
-
-async function until<T>(what: string, timeoutMs: number, check: () => Promise<T | undefined>): Promise<T> {
-  const deadline = Date.now() + timeoutMs;
-  for (;;) {
-    const value = await check();
-    if (value !== undefined) return value;
-    if (Date.now() > deadline) throw new Error(`timed out after ${timeoutMs / 1000} s waiting until ${what}`);
-    await delay(1_000);
-  }
-}
-
-const started = performance.now();
-function pass(step: string) {
-  console.log(`PASS ${step} (${Math.round((performance.now() - started) / 1000)} s)`);
-}
+const config = planeConfig(dir);
+let controlPlane = await startPlane(config);
+const api = apiClient(host, () => controlPlane.port);
+const { call, expect } = api;
+const pass = passLogger();
 
 let threadId: string | undefined;
 let deleted = false;
-const detail = async () => await expect(200, "GET", `/threads/${threadId}`) as ThreadDetail;
-/** The planner deletes a failed pylon all the same, so a deleted thread's wait ignores an earlier failure. */
-const reaches = (state: string, timeoutMs: number) => until(`the pylon is ${state}`, timeoutMs, async () => {
-  const d = await detail();
-  if (d.pylon.failed !== null && d.thread.status !== "deleted") throw new Error(`the planner gave up on the pylon: ${d.pylon.failed}`);
-  return d.pylon.actualState === state ? d : undefined;
-});
-
-/** Sends `bash: <command>`, which the scripted model turns into one bash call, and returns that call's result. */
-async function runTool(requestId: string, command: string): Promise<string> {
-  const seen = toolResults(await expect(200, "GET", `/threads/${threadId}/conversation`)).length;
-  await expect(202, "POST", `/threads/${threadId}/messages`, { text: `bash: ${command}`, requestId });
-  const result = await until("the tool result is in the conversation", 6 * 60_000, async () => toolResults(await expect(200, "GET", `/threads/${threadId}/conversation`))[seen]);
-  await until("the run ends", 60_000, async () => (await detail()).thread.agentTurnRunning ? undefined : true);
-  return result;
-}
-const toolResults = (view: { entries: readonly { kind: string }[] }) => view.entries.filter((e) => e.kind === "pi.tool-result").map((e) => JSON.stringify(e));
+const detail = () => api.detail(threadId!);
+const reaches = (state: string, timeoutMs: number) => api.reaches(threadId!, state, timeoutMs);
+const runTool = (requestId: string, command: string) => api.runTool(threadId!, requestId, command);
 
 /** The dashboard's thread page, which the API serves outside /v1 under the same host check. */
 function threadPage(): Promise<string> {
@@ -258,20 +171,11 @@ const workerPort = 3458;
 async function openPreview(token: string): Promise<{ url: string; httpsPort: number }> {
   const preview = await until("the preview of web is ready", 3 * 60_000, async () => (await detail()).previews.find((p) => p.service === "web" && p.ready));
   const url = `https://${dnsName}:${preview.httpsPort}/`;
-  let last = "no answer yet";
-  const body = await until(`${url} answers with the check service`, 2 * 60_000, async () => {
-    try {
-      const res = await fetch(url, { signal: AbortSignal.timeout(15_000) });
-      const text = await res.text();
-      last = `HTTP ${res.status}: ${text.slice(0, 200)}`;
-      // A service started before its port was assigned runs without PUBLIC_URL, and the assignment restarts it.
-      const json = res.status === 200 && text.includes(token) ? JSON.parse(text) as { publicUrl: unknown } : undefined;
-      return json?.publicUrl === null ? undefined : json;
-    } catch (err) {
-      last = (err as Error).message;
-      return undefined;
-    }
-  }).catch((err: Error) => { throw new Error(`${err.message}. Last answer: ${last}`); });
+  const body = await fetchUntil(url, "with the check service", (status, text) => {
+    // A service started before its port was assigned runs without PUBLIC_URL, and the assignment restarts it.
+    const json = status === 200 && text.includes(token) ? JSON.parse(text) as { publicUrl: unknown } : undefined;
+    return json?.publicUrl === null ? undefined : json;
+  });
   assert.deepEqual(body, { token, publicUrl: url.slice(0, -1) }, "the service answers on its preview URL and knows that URL as PUBLIC_URL");
   return { url, httpsPort: preview.httpsPort };
 }
@@ -287,19 +191,7 @@ const startServer = `mkdir -p /tmp/node-check-http && echo ${marker} > /tmp/node
 
 /** Fetches the marker through a linked port's preview URL from this node until the server answers with it. */
 async function fetchMarker(url: string): Promise<void> {
-  const file = new URL("nexus-proof.txt", url).href;
-  let last = "no answer yet";
-  await until(`${file} answers with the marker`, 2 * 60_000, async () => {
-    try {
-      const res = await fetch(file, { signal: AbortSignal.timeout(15_000) });
-      const text = await res.text();
-      last = `HTTP ${res.status}: ${text.slice(0, 200)}`;
-      return res.status === 200 && text.trim() === marker ? true : undefined;
-    } catch (err) {
-      last = (err as Error).message;
-      return undefined;
-    }
-  }).catch((err: Error) => { throw new Error(`${err.message}. Last answer: ${last}`); });
+  await fetchUntil(new URL("nexus-proof.txt", url).href, "with the marker", (status, text) => status === 200 && text.trim() === marker ? true : undefined);
 }
 
 /**
@@ -321,7 +213,7 @@ function dial(url: string): Promise<string> {
   });
 }
 
-const served = async (httpsPort: number) => Object.keys((await serveStatus() as { TCP?: Record<string, unknown> }).TCP ?? {}).includes(String(httpsPort));
+const served = async (httpsPort: number) => Object.keys((await serveStatus()).TCP ?? {}).includes(String(httpsPort));
 
 /**
  * Unpublishes the linked port with the real CLI while its server answers, and checks what the CLI's contract promises:
@@ -350,7 +242,7 @@ async function checkUnpublish(pylonId: string, linked: { url: string; httpsPort:
   // Every poll's https ports, so a failure shows whether serve dropped the port at all.
   const polls: string[] = [];
   const dropped = await until(`tailscale serve no longer serves ${linked.httpsPort}`, 60_000, async () => {
-    const ports = Object.keys((await serveStatus() as { TCP?: Record<string, unknown> }).TCP ?? {});
+    const ports = Object.keys((await serveStatus()).TCP ?? {});
     const at = Math.round(performance.now() - returned);
     polls.push(`${at} ms: ${ports.join(",") || "none"}`);
     return ports.includes(String(linked.httpsPort)) ? undefined : at;
@@ -584,7 +476,7 @@ try {
   // An archived thread stays paused whatever the activity, so this visit cannot wake it.
   const asleep = await fetch(preview.url, { signal: AbortSignal.timeout(30_000) });
   assert.equal(asleep.status, 503, `a paused pylon's preview answers with the waking page: ${await asleep.text()}`);
-  assert.ok(Object.keys((await serveStatus() as { TCP?: Record<string, unknown> }).TCP ?? {}).includes(String(preview.httpsPort)), "tailscale serve keeps a paused pylon's preview");
+  assert.ok(Object.keys((await serveStatus()).TCP ?? {}).includes(String(preview.httpsPort)), "tailscale serve keeps a paused pylon's preview");
   pass(`while paused, ${preview.url} answers 503 with the waking page`);
 
   await expect(200, "POST", `/threads/${threadId}/unarchive`);
@@ -632,9 +524,7 @@ try {
   }
 } finally {
   if (threadId !== undefined && !deleted) {
-    await call("DELETE", `/threads/${threadId}`).then(() => reaches("absent", 5 * 60_000)).catch((err: unknown) => {
-      console.error(`cleanup: could not delete ${threadId}: ${(err as Error).message}. Delete pylon-${threadId} on the probe by hand`);
-    });
+    await api.cleanup(threadId);
     console.error(`tailscale serve status after cleanup: ${JSON.stringify(await serveStatus())}`);
   }
   await controlPlane.close();

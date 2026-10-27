@@ -18,17 +18,18 @@ import { z } from "zod";
 import { artifactDirectory, manifestFiles, tarCodec } from "./artifacts.ts";
 import { JobFailure, type ArtifactStore, type BackendPylon, type Guest, type SecretSource, type VmBackend } from "./backend.ts";
 import { buildImage as buildPylonImage } from "./image-build.ts";
-import { chatgptTokenGrant, type BootInputs, type CloneRepo, type LiveSpec, type RepoInit } from "./project.ts";
+import { chatgptTokenGrant, type BootInputs, type CloneRepo, type LiveSpec, type RepoInit, shellQuote as q } from "./project.ts";
 import { isImageId, isTemplateId, type PausedSession, type PylonId } from "./protocol.ts";
-import { imageIdOf, type ArtifactId, type CheckpointId, type ImageId, type PortableArtifactId, type TemplateId, type TemplateManifest } from "./images.ts";
+import { imageIdOf, type ArtifactId, type CheckpointId, type ImageId, type PortableArtifactId, type TemplateManifest } from "./images.ts";
 import * as templates from "./pylon-vm-templates.ts";
 import { publicUrls } from "./public-urls.ts";
 import { recordBeforePause, relaunchAfterWake } from "./session-wake.ts";
+import { checkoutDir } from "./sessions.ts";
 import { controlSocket, run, socketPathLimit } from "./pylon-vm/client.ts";
 import { statusSchema, type BootSpec, type SandboxConfig } from "./pylon-vm/contracts.ts";
 import { hostBridgeSocket } from "./pylon-vm/host-bridge.ts";
 import { asUser, controllerLog, pylonGuest } from "./pylon-vm/pylon-guest.ts";
-import { directory, existsError, readRecord, saveJson, shellQuote as q } from "./pylon-vm/storage.ts";
+import { directory, existsError, readRecord, saveJson } from "./pylon-vm/storage.ts";
 
 export interface PylonVmBackendOptions {
   /**
@@ -61,7 +62,6 @@ export interface PylonVmBackendOptions {
 }
 
 const workspace = "/home/user/workspace";
-const repoDir = `${workspace}/repo`;
 const dotfilesDir = "/home/user/.nexus/dotfiles";
 /** Where the image bakes the common dotfiles layer, as a git repository owned by user. */
 const bakedDotfiles = "/opt/nexus/dotfiles";
@@ -214,13 +214,13 @@ function setupCommands(repo: RepoInit, preSetup: string | null): string[] {
   return [
     `chown user:user ${q(workspace)}`,
     asUser(repoInitCommand(repo), workspace),
-    ...(preSetup === null ? [] : [asUser(`bash -c ${q(preSetup)}`, repoDir)]),
-    asUser("if test -e .nexus/setup; then ./.nexus/setup; fi", repoDir),
+    ...(preSetup === null ? [] : [asUser(`bash -c ${q(preSetup)}`, checkoutDir)]),
+    asUser("if test -e .nexus/setup; then ./.nexus/setup; fi", checkoutDir),
   ];
 }
 
 /** Makes the pylon's checkout at `dir` on its first boot. Tests run it to make a checkout as a pylon does. */
-export function repoInitCommand(repo: RepoInit, dir = repoDir): string {
+export function repoInitCommand(repo: RepoInit, dir = checkoutDir): string {
   switch (repo.kind) {
     case "clone": return `git clone --no-checkout ${q(repo.url)} ${q(dir)} && git -C ${q(dir)} checkout -B ${q(repo.checkout.branch)} ${q(repo.checkout.commit)} && ${recordBase(dir, "HEAD")}`;
     case "empty": return `git init --quiet --initial-branch=${q(repo.branch)} ${q(dir)} && ${recordBase(dir, `"$(git -C ${q(dir)} hash-object -t tree -w /dev/null)"`)}`;
@@ -236,7 +236,7 @@ function bootRemotes(repo: RepoInit): string[] {
 
 /** The setup of a pylon booted from a template, run once: the template's clone moves to the pylon's remote and commit. */
 function checkoutCommands({ url, checkout }: CloneRepo): string[] {
-  return [asUser(`git remote set-url origin ${q(url)} && git fetch --quiet origin && git checkout --quiet -B ${q(checkout.branch)} ${q(checkout.commit)} && ${recordBase(repoDir, "HEAD")}`, repoDir)];
+  return [asUser(`git remote set-url origin ${q(url)} && git fetch --quiet origin && git checkout --quiet -B ${q(checkout.branch)} ${q(checkout.commit)} && ${recordBase(checkoutDir, "HEAD")}`, checkoutDir)];
 }
 
 export function createPylonVmBackend(options: PylonVmBackendOptions): VmBackend {
@@ -371,7 +371,7 @@ export function createPylonVmBackend(options: PylonVmBackendOptions): VmBackend 
         setup,
         retrySetup: boot.source.kind === "template",
         // The fork runs resume on every boot from a disk: each wake, and a template boot after its checkout.
-        resume: [asUser("if test -e .nexus/resume; then ./.nexus/resume; fi", repoDir)],
+        resume: [asUser("if test -e .nexus/resume; then ./.nexus/resume; fi", checkoutDir)],
         services: {},
       };
       const spec = await bootSpec(boot, live);

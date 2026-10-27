@@ -68,9 +68,6 @@ export async function readLogTail(
 export function existsError(error: unknown, code: string): boolean {
 	return error instanceof Error && "code" in error && error.code === code;
 }
-export function shellQuote(value: string): string {
-	return `'${value.replaceAll("'", "'\\''")}'`;
-}
 
 export function agentError(error: unknown): unknown {
 	const code =

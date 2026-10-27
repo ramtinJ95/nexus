@@ -289,10 +289,14 @@ export interface LiveSpec {
 }
 /** sha256 of the LiveSpec with sorted keys, so equal specs hash equally however they were built. */
 export function liveHashOf(live: LiveSpec): LiveHash {
-  const canonical = (value: unknown): unknown => typeof value !== "object" || value === null ? value
-    : Array.isArray(value) ? value.map(canonical)
-    : Object.fromEntries(Object.keys(value).sort().map((key) => [key, canonical((value as Record<string, unknown>)[key])]));
-  return createHash("sha256").update(JSON.stringify(canonical(live))).digest("hex") as LiveHash;
+  return canonicalSha256(live) as LiveHash;
+}
+/** Hex sha256 of canonical JSON: object keys sorted, so the same value always gives the same hash. */
+export function canonicalSha256(value: unknown): string {
+  const canonical = (v: unknown): unknown => typeof v !== "object" || v === null ? v
+    : Array.isArray(v) ? v.map(canonical)
+    : Object.fromEntries(Object.keys(v).sort().map((key) => [key, canonical((v as Record<string, unknown>)[key])]));
+  return createHash("sha256").update(JSON.stringify(canonical(value))).digest("hex");
 }
 
 /** The control plane allocates https ports from a per-node range. The probe publishes them with `tailscale serve`. */
@@ -361,7 +365,7 @@ export function renderOverlay(overlay: PylonOverlay): readonly OverlayFile[] {
 /** What NEXUS_API is set to. See PylonApiRequest. */
 export const nexusApi = "http://nexus.pylon";
 
-const shellQuote = (value: string): string => `'${value.replaceAll("'", `'\\''`)}'`;
+export const shellQuote = (value: string): string => `'${value.replaceAll("'", `'\\''`)}'`;
 
 function pylonGuide(o: PylonOverlay): string {
   const list = (items: readonly string[]): string => items.map((item) => `- ${item}\n`).join("");

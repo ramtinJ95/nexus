@@ -199,7 +199,7 @@ export function artifactDirectory(root: string, codec: ArtifactCodec): ArtifactD
   };
 }
 
-async function sha256Of(stream: Readable): Promise<string> {
+export async function sha256Of(stream: Readable): Promise<string> {
   const hash = createHash("sha256");
   for await (const chunk of stream) hash.update(chunk as Buffer);
   return hash.digest("hex");
