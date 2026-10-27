@@ -1,0 +1,3 @@
+$ nexus delete th-7cd2cc359e6e
+Deleted th-7cd2cc359e6e.
+exit 0

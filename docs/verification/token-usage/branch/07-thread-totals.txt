@@ -1,0 +1,1 @@
+<dd id="thread-usage" data-tokens="335927"><span title="335,927">336k</span> <span class="dim">(<span title="1,947">in 1.9k</span> · <span title="1,533">out 1.5k</span> · <span title="37,665">cache write 37.7k</span> · <span title="294,782">cache read 295k</span>)</span></dd>

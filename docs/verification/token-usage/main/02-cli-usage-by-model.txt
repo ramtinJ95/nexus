@@ -1,0 +1,3 @@
+$ nexus usage --since all --by model
+nexus: unknown command usage. Run nexus --help for usage
+exit 64

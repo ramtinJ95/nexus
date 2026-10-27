@@ -1,0 +1,4 @@
+The stack was stopped and started again on the same registry and harness storage.
+total after the restart: {"calls":14,"input":5649,"output":1701,"cacheWrite":40335,"cacheRead":315782,"total":363467}
+expected:  {"calls":14,"input":5649,"output":1701,"cacheWrite":40335,"cacheRead":315782,"total":363467}
+MATCH

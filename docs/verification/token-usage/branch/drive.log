@@ -1,0 +1,226 @@
+Claude worker transcript: {"calls":9,"input":20,"output":1523,"cacheWrite":37665,"cacheRead":293246}
+pi reviewer session:      {"calls":2,"input":1927,"output":10,"cacheWrite":0,"cacheRead":1536}
+3 scripted answers:       3 × {"calls":1,"input":1234,"output":56,"cacheWrite":890,"cacheRead":7000}
+hand sum:                 {"calls":14,"input":5649,"output":1701,"cacheWrite":40335,"cacheRead":315782,"total":363467}
+
+$ nexus usage --since all
+Usage of all projects for all time. Counting started 2026-10-27 22:59 UTC.
+
+       Input  Output  Cache write  Cache read  Total  Calls
+Total  5.6k   1.7k    40.3k        316k        363k   14
+
+By model
+Model              Input  Output  Cache write  Cache read  Total  Calls
+claude-sonnet-5-5  20     1.5k    37.7k        293k        332k   9
+scripted           3.7k   168     2.7k         21k         27.5k  3
+gpt-6-astra        1.9k   10      0            1.5k        3.5k   2
+
+By project
+Project  Input  Output  Cache write  Cache read  Total  Calls
+nexus    4.4k   1.6k    39.4k        309k        354k   13
+spoon    1.2k   56      890          7k          9.2k   1
+
+By agent
+Agent   Input  Output  Cache write  Cache read  Total  Calls
+claude  20     1.5k    37.7k        293k        332k   9
+pi      5.6k   178     2.7k         22.5k       31k    5
+
+By role
+Role      Input  Output  Cache write  Cache read  Total  Calls
+builder   4.4k   1.6k    39.4k        309k        354k   13
+reviewer  1.2k   56      890          7k          9.2k   1
+
+By day (UTC)
+Day         Input  Output  Cache write  Cache read  Total  Calls
+2026-10-27  5.6k   178     2.7k         22.5k       31k    5
+2026-10-25  20     1.5k    37.7k        293k        332k   9
+exit 0
+
+$ nexus usage --since all --json
+{
+  "since": null,
+  "countingSince": 1793141977000,
+  "project": null,
+  "thread": null,
+  "total": {
+    "input": 5649,
+    "output": 1701,
+    "cacheWrite": 40335,
+    "cacheRead": 315782,
+    "total": 363467,
+    "calls": 14
+  },
+  "by": {
+    "model": [
+      {
+        "key": "claude-sonnet-5-5",
+        "input": 20,
+        "output": 1523,
+        "cacheWrite": 37665,
+        "cacheRead": 293246,
+        "total": 332454,
+        "calls": 9
+      },
+      {
+        "key": "scripted",
+        "input": 3702,
+        "output": 168,
+        "cacheWrite": 2670,
+        "cacheRead": 21000,
+        "total": 27540,
+        "calls": 3
+      },
+      {
+        "key": "gpt-6-astra",
+        "input": 1927,
+        "output": 10,
+        "cacheWrite": 0,
+        "cacheRead": 1536,
+        "total": 3473,
+        "calls": 2
+      }
+    ],
+    "project": [
+      {
+        "key": "nexus",
+        "input": 4415,
+        "output": 1645,
+        "cacheWrite": 39445,
+        "cacheRead": 308782,
+        "total": 354287,
+        "calls": 13
+      },
+      {
+        "key": "spoon",
+        "input": 1234,
+        "output": 56,
+        "cacheWrite": 890,
+        "cacheRead": 7000,
+        "total": 9180,
+        "calls": 1
+      }
+    ],
+    "kind": [
+      {
+        "key": "claude",
+        "input": 20,
+        "output": 1523,
+        "cacheWrite": 37665,
+        "cacheRead": 293246,
+        "total": 332454,
+        "calls": 9
+      },
+      {
+        "key": "pi",
+        "input": 5629,
+        "output": 178,
+        "cacheWrite": 2670,
+        "cacheRead": 22536,
+        "total": 31013,
+        "calls": 5
+      }
+    ],
+    "role": [
+      {
+        "key": "builder",
+        "input": 4415,
+        "output": 1645,
+        "cacheWrite": 39445,
+        "cacheRead": 308782,
+        "total": 354287,
+        "calls": 13
+      },
+      {
+        "key": "reviewer",
+        "input": 1234,
+        "output": 56,
+        "cacheWrite": 890,
+        "cacheRead": 7000,
+        "total": 9180,
+        "calls": 1
+      }
+    ],
+    "day": [
+      {
+        "key": "2026-10-27",
+        "input": 5629,
+        "output": 178,
+        "cacheWrite": 2670,
+        "cacheRead": 22536,
+        "total": 31013,
+        "calls": 5
+      },
+      {
+        "key": "2026-10-25",
+        "input": 20,
+        "output": 1523,
+        "cacheWrite": 37665,
+        "cacheRead": 293246,
+        "total": 332454,
+        "calls": 9
+      }
+    ]
+  }
+}
+exit 0
+
+$ nexus usage --since all --by model
+Usage of all projects for all time. Counting started 2026-10-27 22:59 UTC.
+
+       Input  Output  Cache write  Cache read  Total  Calls
+Total  5.6k   1.7k    40.3k        316k        363k   14
+
+By model
+Model              Input  Output  Cache write  Cache read  Total  Calls
+claude-sonnet-5-5  20     1.5k    37.7k        293k        332k   9
+scripted           3.7k   168     2.7k         21k         27.5k  3
+gpt-6-astra        1.9k   10      0            1.5k        3.5k   2
+exit 0
+
+GET /v1/usage total: {"calls":14,"input":5649,"output":1701,"cacheWrite":40335,"cacheRead":315782,"total":363467}
+expected:  {"calls":14,"input":5649,"output":1701,"cacheWrite":40335,"cacheRead":315782,"total":363467}
+MATCH
+
+GET /usage?period=all answered 200
+screenshot 04-usage-all.png
+the Usage page's totals row, from its data-tokens attributes:
+{"input":5649,"output":1701,"cacheWrite":40335,"cacheRead":315782,"total":363467}
+hand sum: {"calls":14,"input":5649,"output":1701,"cacheWrite":40335,"cacheRead":315782,"total":363467}
+
+screenshot 05-usage-today.png
+screenshot 06-home-nav.png
+screenshot 07-thread-claude.png
+<dd id="thread-usage" data-tokens="335927"><span title="335,927">336k</span> <span class="dim">(<span title="1,947">in 1.9k</span> · <span title="1,533">out 1.5k</span> · <span title="37,665">cache write 37.7k</span> · <span title="294,782">cache read 295k</span>)</span></dd>
+The stack appended the Claude worker's transcript to itself and reported its turn's end.
+total after the read: {"calls":14,"input":5649,"output":1701,"cacheWrite":40335,"cacheRead":315782,"total":363467}
+expected:  {"calls":14,"input":5649,"output":1701,"cacheWrite":40335,"cacheRead":315782,"total":363467}
+MATCH
+
+The stack was stopped and started again on the same registry and harness storage.
+total after the restart: {"calls":14,"input":5649,"output":1701,"cacheWrite":40335,"cacheRead":315782,"total":363467}
+expected:  {"calls":14,"input":5649,"output":1701,"cacheWrite":40335,"cacheRead":315782,"total":363467}
+MATCH
+
+$ nexus delete th-7cd2cc359e6e
+Deleted th-7cd2cc359e6e.
+exit 0
+
+total after deleting the Claude worker thread: {"calls":14,"input":5649,"output":1701,"cacheWrite":40335,"cacheRead":315782,"total":363467}
+expected:  {"calls":14,"input":5649,"output":1701,"cacheWrite":40335,"cacheRead":315782,"total":363467}
+MATCH
+
+$ nexus usage --since all --by project
+Usage of all projects for all time. Counting started 2026-10-27 22:59 UTC.
+
+       Input  Output  Cache write  Cache read  Total  Calls
+Total  5.6k   1.7k    40.3k        316k        363k   14
+
+By project
+Project  Input  Output  Cache write  Cache read  Total  Calls
+nexus    4.4k   1.6k    39.4k        309k        354k   13
+spoon    1.2k   56      890          7k          9.2k   1
+exit 0
+
+screenshot 11-usage-after-restart-and-delete.png
+screenshot 12-usage-project-spoon.png
+screenshot 13-usage-phone.png

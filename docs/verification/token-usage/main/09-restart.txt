@@ -1,0 +1,2 @@
+The stack was stopped and started again on the same registry and harness storage.
+total after the restart: nothing to compare, as GET /v1/usage answered 404

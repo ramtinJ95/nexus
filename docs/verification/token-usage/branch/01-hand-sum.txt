@@ -1,0 +1,4 @@
+Claude worker transcript: {"calls":9,"input":20,"output":1523,"cacheWrite":37665,"cacheRead":293246}
+pi reviewer session:      {"calls":2,"input":1927,"output":10,"cacheWrite":0,"cacheRead":1536}
+3 scripted answers:       3 × {"calls":1,"input":1234,"output":56,"cacheWrite":890,"cacheRead":7000}
+hand sum:                 {"calls":14,"input":5649,"output":1701,"cacheWrite":40335,"cacheRead":315782,"total":363467}

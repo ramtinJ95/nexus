@@ -1,0 +1,48 @@
+Claude worker transcript: {"calls":9,"input":20,"output":1523,"cacheWrite":37665,"cacheRead":293246}
+pi reviewer session:      {"calls":2,"input":1927,"output":10,"cacheWrite":0,"cacheRead":1536}
+3 scripted answers:       3 × {"calls":1,"input":1234,"output":56,"cacheWrite":890,"cacheRead":7000}
+hand sum:                 {"calls":14,"input":5649,"output":1701,"cacheWrite":40335,"cacheRead":315782,"total":363467}
+
+$ nexus usage --since all
+nexus: unknown command usage. Run nexus --help for usage
+exit 64
+
+$ nexus usage --since all --json
+{"error":"unknown command usage","kind":"invalid","status":null}
+exit 64
+
+$ nexus usage --since all --by model
+nexus: unknown command usage. Run nexus --help for usage
+exit 64
+
+GET /v1/usage total: nothing to compare, as GET /v1/usage answered 404
+
+GET /usage?period=all answered 404
+screenshot 04-usage-all.png
+the Usage page's totals row, from its data-tokens attributes:
+"no totals on the page, which says: {\"error\":\"no route /usage\"}"
+hand sum: {"calls":14,"input":5649,"output":1701,"cacheWrite":40335,"cacheRead":315782,"total":363467}
+
+screenshot 05-usage-today.png
+screenshot 06-home-nav.png
+screenshot 07-thread-claude.png
+no #thread-usage on the thread page
+The stack appended the Claude worker's transcript to itself and reported its turn's end.
+total after the read: nothing to compare, as GET /v1/usage answered 404
+
+The stack was stopped and started again on the same registry and harness storage.
+total after the restart: nothing to compare, as GET /v1/usage answered 404
+
+$ nexus delete th-b87cf15d8bbb
+Deleted th-b87cf15d8bbb.
+exit 0
+
+total after deleting the Claude worker thread: nothing to compare, as GET /v1/usage answered 404
+
+$ nexus usage --since all --by project
+nexus: unknown command usage. Run nexus --help for usage
+exit 64
+
+screenshot 11-usage-after-restart-and-delete.png
+screenshot 12-usage-project-spoon.png
+screenshot 13-usage-phone.png
