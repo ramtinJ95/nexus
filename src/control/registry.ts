@@ -663,6 +663,11 @@ export function openRegistry(path: string, clock = Date.now) {
         updateAttention(thread);
       });
     },
+    /** The highest journal sequence applied from the node, or null before its first. */
+    eventReceipt(node: NodeName): number | null {
+      const receipt = sql("SELECT sequence FROM event_receipts WHERE node = ?").get(node);
+      return receipt === undefined ? null : Number(receipt.sequence);
+    },
     reportSession(node: NodeName, report: ReportedEvent) {
       const event = pylonEventSchema.parse(report.event);
       const pylon = q.pylon.get(report.pylon);
@@ -965,10 +970,12 @@ export function openRegistry(path: string, clock = Date.now) {
     /**
      * Stores the node's new observation together with the writes ingest derived from it. One transaction,
      * because ingest diffs the next event against this observation: a crash between the two would lose the writes.
+     * The observation is null when the event left it as it was.
      */
-    ingested(observation: NodeObservation, writes: readonly RegistryWrite[]) {
+    ingested(observation: NodeObservation | null, writes: readonly RegistryWrite[]) {
+      if (observation === null && writes.length === 0) return;
       transaction(() => {
-        q.observation.run(JSON.stringify(observation), observation.node);
+        if (observation !== null) q.observation.run(JSON.stringify(observation), observation.node);
         for (const write of writes) apply(write);
       });
     },

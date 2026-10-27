@@ -259,11 +259,18 @@ export function startLoop(options: LoopOptions): Loop {
           silence = setTimeout(() => connection.abort(), silenceMs);
           // The stored observation is the last one ingested, including the one from before a reconnect or a restart.
           const last = registry.node(node)!.observation;
-          const known = new Map(registry.pylonIdsOn(node).map((id) => [id, last?.pylons.find((o) => o.pylonId === id) ?? "absent" as const]));
-          for (const report of event.type === "snapshot" ? event.observation.events ?? [] : event.type === "session-event" ? [event.report] : []) registry.reportSession(node, report);
+          const known = readsKnown[event.type]
+            ? new Map(registry.pylonIdsOn(node).map((id) => [id, last?.pylons.find((o) => o.pylonId === id) ?? "absent" as const]))
+            : new Map<PylonId, PylonObservation | "absent">();
+          if (event.type === "snapshot") {
+            // The journal replays reports the node already sent, and the receipt only grows, so reportSession would drop these.
+            const receipt = registry.eventReceipt(node);
+            for (const report of event.observation.events ?? []) if (receipt === null || report.sequence > receipt) registry.reportSession(node, report);
+          }
+          if (event.type === "session-event") registry.reportSession(node, event.report);
           const current = merge(last, event);
           const writes = ingest(event, node, known, Date.now(), new Set([...known.keys()].filter((id) => !listed.has(id))));
-          registry.ingested(current, writes);
+          registry.ingested(current === last ? null : current, writes);
           for (const w of writes) if (w.record === "sessions" || w.record === "sessions-paused") listed.add(w.pylonId);
           reconcilePreviews(node, event.type === "snapshot" ? event.observation.pylons : event.type === "pylon" ? [event.pylon] : []);
           if (event.type === "snapshot") {
@@ -302,6 +309,9 @@ export function startLoop(options: LoopOptions): Loop {
  * The node's current state: a snapshot replaces it, and a pylon event updates its pylon. Job events stay out,
  * because a job listed as finished promises that the pylons already show its result. ingest records them.
  */
+/** The events ingest reads `known` and `unlisted` for. */
+const readsKnown: Record<ProbeEvent["type"], boolean> = { snapshot: true, pylon: true, "preview-hit": true, job: false, "session-event": false };
+
 function merge(last: NodeObservation | null, event: ProbeEvent): NodeObservation {
   if (event.type === "snapshot") return { ...event.observation, pylons: event.observation.pylons.map((p) => keepLastRead(last, p)) };
   if (last === null) throw new Error(`observe sent a ${event.type} event before its first snapshot`);

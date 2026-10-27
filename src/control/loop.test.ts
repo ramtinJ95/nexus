@@ -14,6 +14,7 @@ import type {
 } from "../protocol.ts";
 import { chatgptTokenGrant, liveHashOf, type LiveSpec, type ProjectId } from "../project.ts";
 import type { CheckpointId, ImageId } from "../images.ts";
+import type { ReportedEvent } from "../events.ts";
 
 const firebat = "rj-firebat" as NodeName;
 const node = firebat;
@@ -224,8 +225,9 @@ function fakeNode(options: { autoFinish: boolean; node?: NodeName; reportsRoutes
     setListening: (pylonId: PylonId, listening: readonly ListeningFact[] | null) => setFacts(pylonId, { listening }),
     /** Settles once the loop has taken every event sent so far, which it ingests before it asks for the next. */
     delivered: () => new Promise<void>((resolve) => { delivered.push(resolve); checkDelivered(); }),
-    /** Sends a snapshot of the node as it is, after a test changed it by hand. */
-    announce: () => emit({ type: "snapshot", observation: observation() }),
+    /** Sends a snapshot of the node as it is, after a test changed it by hand, with the probe's journal of session reports. */
+    announce: (events?: readonly ReportedEvent[]) => emit({ type: "snapshot", observation: { ...observation(), ...(events === undefined ? {} : { events }) } }),
+    send: emit,
     running: () => [...jobs.values()].filter((j) => j.status.state === "running").map((j) => j.env.jobId),
     /** Holds every submit until the returned release is called, so a test can act while a pass waits on the probe. */
     holdSubmits(): () => void {
@@ -796,8 +798,10 @@ test("each snapshot is ingested against the last observation ingested for each k
   const previous: string[][] = [];
   run(t, registry, fake.probe, {
     ingest: (event, eventNode, known, now, unlisted) => {
-      assert.deepEqual([...known.keys()], [thread.pylonId]);
-      if (event.type === "snapshot") previous.push([...known.values()].map((o) => o === "absent" ? "absent" : o.phase));
+      if (event.type === "snapshot") {
+        assert.deepEqual([...known.keys()], [thread.pylonId]);
+        previous.push([...known.values()].map((o) => o === "absent" ? "absent" : o.phase));
+      }
       return ingest(event, eventNode, known, now, unlisted);
     },
   });
@@ -807,6 +811,55 @@ test("each snapshot is ingested against the last observation ingested for each k
   await until("the snapshot after the pause is ingested", () => previous.length === 3);
   // On connect nothing was observed yet, after the spawn the last observation had no pylon, and after the pause it ran.
   assert.deepEqual(previous, [["absent"], ["absent"], ["running"]]);
+});
+
+test("a snapshot's journal applies each report past the node's receipt in order, and the reports before it change nothing", async (t) => {
+  const registry = openRegistry(tempDb());
+  const thread = seed(registry);
+  const fake = fakeNode({ autoFinish: false });
+  const loop = run(t, registry, fake.probe, { ingest: realIngest });
+  const at = Date.now();
+  const report = (sequence: number, kind: ReportedEvent["event"]["kind"], session: string, offset: number): ReportedEvent =>
+    ({ sequence, pylon: thread.pylonId, time: at + offset, event: { kind, session, at: at + offset } });
+  const started = report(1, "session.turn-started", "s1", 0);
+  fake.send({ type: "session-event", report: started });
+  await settled(fake, loop);
+  assert.equal(registry.thread(thread.id)!.working, true);
+
+  const ended = report(2, "session.turn-ended", "s1", 1);
+  const waiting = report(3, "session.waiting", "s2", 2);
+  fake.announce([started, ended, waiting]);
+  await settled(fake, loop);
+  const after = registry.thread(thread.id)!;
+  assert.equal(after.working, false);
+  assert.equal(after.sessionWaiting, true);
+
+  // The next snapshot replays all three, and a live report that came after them still applies.
+  fake.announce([started, ended, waiting]);
+  fake.send({ type: "session-event", report: report(4, "session.turn-ended", "s2", 3) });
+  await settled(fake, loop);
+  const last = registry.thread(thread.id)!;
+  assert.equal(last.working, false);
+  assert.equal(last.sessionWaiting, undefined);
+});
+
+test("session, job and preview-hit events apply their writes and leave the stored observation as the last snapshot stored it", async (t) => {
+  const registry = openRegistry(tempDb());
+  const thread = seed(registry);
+  const fake = fakeNode({ autoFinish: false });
+  const loop = run(t, registry, fake.probe, { ingest: realIngest });
+  await until("the spawn's job event is ingested", () => registry.job(thread.pylonId)?.state === "running");
+  await settled(fake, loop);
+  const stored = registry.node(node)!.observation;
+  assert.deepEqual(stored?.jobs, [], "the job event came after the snapshot");
+
+  const hit = Date.now() + 1000;
+  fake.send({ type: "preview-hit", pylonId: thread.pylonId, service: "web", at: new Date(hit).toISOString(), login: null });
+  fake.send({ type: "session-event", report: { sequence: 1, pylon: thread.pylonId, time: hit, event: { kind: "session.turn-started", session: "s1", at: hit } } });
+  await settled(fake, loop);
+  assert.equal(registry.thread(thread.id)!.lastHumanActivityAt, hit);
+  assert.equal(registry.thread(thread.id)!.working, true);
+  assert.deepEqual(registry.node(node)!.observation, stored);
 });
 
 test("a job in flight survives a control-plane restart: the new process asks the probe and sends nothing twice", async (t) => {

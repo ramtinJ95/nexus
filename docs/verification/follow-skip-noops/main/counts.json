@@ -1,0 +1,20 @@
+{
+  "events": {
+    "snapshot": 68,
+    "session-event": 550,
+    "preview-hit": 27,
+    "job": 22,
+    "pylon": 11
+  },
+  "connections": 2,
+  "calls": {
+    "node": 678,
+    "pylonIdsOn": 678,
+    "ingested": 678,
+    "reportSession": 6670
+  },
+  "statements": 45046,
+  "transactions": 7348,
+  "observationWrites": 678,
+  "observationBytes": 11340554
+}
