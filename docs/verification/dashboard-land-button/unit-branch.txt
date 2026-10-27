@@ -1,0 +1,12 @@
+✔ a review held for the person says why on its builder's page, and a deployer can land it after confirming the PR and commit (47.412902ms)
+✔ a review is not offered for landing when its PR closed, or when the control plane has no review loop (27.983108ms)
+✔ a hold that every landing of the commit meets again is marked, and offers no Land button (23.4384ms)
+✔ a landing shows its steps as the review moves through them, until it lands or ends for the person (31.761304ms)
+ℹ tests 4
+ℹ suites 0
+ℹ pass 4
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 342.073037

@@ -232,13 +232,15 @@ const actions = {
   "link-port": (thread, { port }) => api("POST", `/v1/threads/${thread}/previews`, { port: Number(port) }),
   // As `nexus unpreview`.
   unpublish: (thread, { port }) => whenRunning(thread, () => api("DELETE", `/v1/threads/${thread}/previews/${port}`, {})),
+  // As `nexus land`, for the commit the confirmation named. The page then shows the landing's steps as the review moves through them.
+  land: (thread, { head }) => api("POST", `/v1/threads/${thread}/land`, { head }),
 };
 
 document.addEventListener("click", async (event) => {
   const button = event.target instanceof Element ? event.target.closest("button[data-action]") : null;
   if (button === null) return;
-  const { action, thread, title } = button.dataset;
-  if (action === "delete" && !confirm(`Delete "${title}"? Its pylon and disk are removed.`)) return;
+  const { action, thread } = button.dataset;
+  if (button.dataset.confirm !== undefined && !confirm(button.dataset.confirm)) return;
   button.disabled = true;
   setOpen(null);
   try {

@@ -2506,13 +2506,15 @@ test("a review needs the GitHub token's loop, and landing, at its start or later
   const asked: unknown[] = [];
   const reviews = {
     async start(builder: string, request: unknown) { asked.push(["start", builder, request]); return { id: "rv-1" }; },
-    land(builder: string, by: string) { asked.push(["land", builder, by]); return { id: "rv-1" }; },
+    land(builder: string, by: string, head?: string) { asked.push(["land", builder, by, head]); return { id: "rv-1" }; },
   } as never as ReviewLoop;
   const s = await withThread(t, { reviews, deployment: { self: "nFIREBAT" as TailnetNodeId, deployers: new Set([laptop, "nFIREBAT" as TailnetNodeId]), keys: {} } });
   assert.equal((await s.call("POST", `/v1/threads/${s.thread.id}/review`, { rounds: 6 })).status, 400, "a review runs at most 5 rounds");
   assert.equal((await s.call("POST", `/v1/threads/${s.thread.id}/review`, { pr: 7, rounds: 5 })).status, 201);
   assert.equal((await s.call("POST", `/v1/threads/${s.thread.id}/review`, { land: true })).status, 201);
   assert.equal((await s.call("POST", `/v1/threads/${s.thread.id}/land`)).status, 200);
+  assert.equal((await s.call("POST", `/v1/threads/${s.thread.id}/land`, { head: "a".repeat(40) })).status, 200, "the dashboard names the commit it confirmed");
+  assert.equal((await s.call("POST", `/v1/threads/${s.thread.id}/land`, { head: "main" })).status, 400);
   s.callAs("nFIREBAT" as TailnetNodeId);
   assert.equal((await s.call("POST", `/v1/threads/${s.thread.id}/review`, { land: true })).status, 403, "the control node itself never lands, even listed as a deployer");
   assert.equal((await s.call("POST", `/v1/threads/${s.thread.id}/land`)).status, 403);
@@ -2520,7 +2522,8 @@ test("a review needs the GitHub token's loop, and landing, at its start or later
   assert.deepEqual(asked, [
     ["start", s.thread.id, { pr: 7, rounds: 5, land: null }],
     ["start", s.thread.id, { pr: undefined, rounds: undefined, land: laptop }],
-    ["land", s.thread.id, laptop],
+    ["land", s.thread.id, laptop, undefined],
+    ["land", s.thread.id, laptop, "a".repeat(40)],
     ["start", s.thread.id, { pr: undefined, rounds: undefined, land: null }],
   ]);
 });

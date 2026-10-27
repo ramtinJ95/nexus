@@ -25,9 +25,11 @@ import { githubTokenGrant, linkedPort, type SessionHarness } from "../project.ts
 import type { ThreadDetail } from "./api.ts";
 import { attentions, needsPerson } from "./attention.ts";
 import type { NodeRecord, Output, Preview, Registry, Thread, ThreadId } from "./registry.ts";
+import type { TailnetNodeId } from "../protocol.ts";
 import { usageLimitText, type ClaudeConversation, type ClaudeEntry, type PromptSource } from "../claude-transcript.ts";
 import { queuedOf } from "./claude-conversation.ts";
-import { phaseNote, roundsSpent } from "./review.ts";
+import { blocks as blocking, findingsOf, landable, phaseNote, roundsSpent, type Review } from "./review.ts";
+import { holdsAgain, recordedHolds, reservedNames } from "./policy.ts";
 import { gib, nodePylons, overcommitted } from "./placement.ts";
 
 export interface DashboardOptions {
@@ -36,6 +38,10 @@ export interface DashboardOptions {
   detail(thread: Thread): ThreadDetail;
   /** The API's conversation view, or a Claude worker's transcript, for a thread that has one and is not deleted. */
   conversation(thread: Thread): Promise<Conversation>;
+  /** Why the land route would refuse the caller, or null when it would take the request. */
+  landRefusal(caller: TailnetNodeId): LandRefusal | null;
+  /** Whether the review's pull request deploys once it merges. */
+  deploys(review: Review): boolean;
   now?: () => number;
 }
 
@@ -48,13 +54,14 @@ const isClaude = (view: Conversation): view is ClaudeConversation => (view as Pa
 /** How often the client refetches a page. The loop ticks every 5 s, so polling faster shows nothing new. */
 export const pollMs = 5_000;
 
+export type LandRefusal = "no review loop" | "not a deployer";
+
 /** What every part of a page reads. */
-interface Context { registry: Registry; detail: DashboardOptions["detail"]; now: number }
+interface Context { registry: Registry; detail: DashboardOptions["detail"]; deploys: DashboardOptions["deploys"]; now: number; caller: TailnetNodeId; landRefusal: LandRefusal | null }
 
 /** Returns the page for a GET of `path`, or undefined when the path is not the dashboard's. */
-export function dashboard(options: DashboardOptions): (path: string, query: URLSearchParams) => Promise<Page | undefined> {
-  const { registry, detail } = options;
-  const context = (): Context => ({ registry, detail, now: (options.now ?? Date.now)() });
+export function dashboard(options: DashboardOptions): (path: string, query: URLSearchParams, caller: TailnetNodeId) => Promise<Page | undefined> {
+  const { registry, detail, deploys } = options;
 
   /** A failed read shows in the conversation, so the rest of the page still says what the pylon is doing. */
   async function transcript(t: Thread): Promise<Conversation | Error | null> {
@@ -62,11 +69,11 @@ export function dashboard(options: DashboardOptions): (path: string, query: URLS
     return options.conversation(t).catch((err: unknown) => err as Error);
   }
 
-  const pages: readonly [RegExp, (m: RegExpExecArray, query: URLSearchParams) => Page | Promise<Page>][] = [
-    [/^\/$/, () => ok(home(context(), {}))],
-    [/^\/threads\/new$/, (_, query) => ok(home(context(), { start: { project: query.get("project") } }))],
-    [/^\/projects\/new$/, () => ok(home(context(), { addProject: true }))],
-    [/^\/threads\/([^/]+)$/, async (m) => {
+  const pages: readonly [RegExp, (m: RegExpExecArray, query: URLSearchParams, context: () => Context) => Page | Promise<Page>][] = [
+    [/^\/$/, (_, __, context) => ok(home(context(), {}))],
+    [/^\/threads\/new$/, (_, query, context) => ok(home(context(), { start: { project: query.get("project") } }))],
+    [/^\/projects\/new$/, (_, __, context) => ok(home(context(), { addProject: true }))],
+    [/^\/threads\/([^/]+)$/, async (m, _, context) => {
       const thread = registry.thread(m[1]! as ThreadId);
       if (thread === undefined) return { ...ok(notFound(context(), `No thread ${m[1]!}.`)), status: 404 };
       // The reply known before this read is a safe watermark even if another turn ends during it.
@@ -75,7 +82,7 @@ export function dashboard(options: DashboardOptions): (path: string, query: URLS
       const d = detail(registry.thread(thread.id)!);
       return ok(threadPage(context(), d, registry.node(d.pylon.node)!, d.thread.status === "deleted" ? null : view, thread.lastReplyAt));
     }],
-    [/^\/assets\/([\w.-]+)$/, (m, query) => {
+    [/^\/assets\/([\w.-]+)$/, (m, query, context) => {
       const asset = assets.get(m[1]!);
       if (asset === undefined) return { ...ok(notFound(context(), `No asset ${m[1]!}.`)), status: 404 };
       // Pages link each asset with its hash, and a chunk's name has its hash, so neither URL ever changes and the
@@ -85,10 +92,11 @@ export function dashboard(options: DashboardOptions): (path: string, query: URLS
     }],
   ];
 
-  return async (path, query) => {
+  return async (path, query, caller) => {
+    const context = (): Context => ({ registry, detail, deploys, now: (options.now ?? Date.now)(), caller, landRefusal: options.landRefusal(caller) });
     for (const [pattern, page] of pages) {
       const m = pattern.exec(path);
-      if (m !== null) return page(m, query);
+      if (m !== null) return page(m, query, context);
     }
     return undefined;
   };
@@ -477,7 +485,7 @@ function threadPage(c: Context, d: ThreadDetail, node: NodeRecord, view: Convers
   const actions = [
     open && html`<button type="button" class="btn btn-ghost" id="archive" data-action="archive" data-thread="${t.id}">Archive</button>`,
     t.status === "archived" && html`<button type="button" class="btn btn-ghost" id="unarchive" data-action="unarchive" data-thread="${t.id}">Unarchive</button>`,
-    t.status !== "deleted" && html`<button type="button" class="btn btn-ghost danger" id="delete" data-action="delete" data-thread="${t.id}" data-title="${t.title}">Delete</button>`,
+    t.status !== "deleted" && html`<button type="button" class="btn btn-ghost danger" id="delete" data-action="delete" data-thread="${t.id}" data-confirm="Delete &quot;${t.title}&quot;? Its pylon and disk are removed.">Delete</button>`,
   ].filter((a) => a !== false);
   return layout(c, {
     title: t.title,
@@ -497,11 +505,95 @@ ${actions.length > 0 && html`<div class="bar-actions" id="thread-actions">${acti
 <div class="dock">
 <p id="action-error" class="error" role="alert" hidden></p>
 <p id="action-status" class="comp-note" role="status" hidden></p>
+<div id="landing" data-live>${landing(c, d)}</div>
 <div id="run" data-live>${runBar(t, run, c.now)}</div>
 <div id="composer" data-live>${composer(d, run, model, read !== null && isClaude(read) ? read : null, c.now)}</div>
 </div>`,
     inspector: inspector(d, node, c.now),
   });
+}
+
+/** The steps of a landing, in order. */
+const landingSteps = [["checking", "Check"], ["merging", "Merge"], ["deploying", "Deploy"], ["landed", "Landed"]] as const;
+type Step = typeof landingSteps[number][0];
+/**
+ * The step a landing is at, and whether it failed there. A landing held after its merge stopped at the deploy, which
+ * failed or rolled back. One held before its merge is not on its way anywhere, and is landable again or not at all.
+ */
+function landingAt(r: Review): { step: Step; failed: boolean } | null {
+  switch (r.phase.kind) {
+    case "checking": return r.land === null ? null : { step: "checking", failed: false };
+    case "merging": case "deploying": case "landed": return { step: r.phase.kind, failed: false };
+    case "rolling-back": return { step: "deploying", failed: true };
+    case "needs-person": return r.merged !== null && r.land !== null ? { step: "deploying", failed: true } : null;
+    default: return null;
+  }
+}
+
+const landRefusals: Record<LandRefusal, (caller: TailnetNodeId) => string> = {
+  "not a deployer": (caller) => `This device cannot land: landing deploys, so only the control plane's deployers may, and this device (tailnet node ${caller}) is not one. Land it from a deployer, or add this node to deployers in the control plane's config.`,
+  "no review loop": () => "Nexus cannot land it now: the review loop needs the control plane's GitHub token (github.tokenFile), which is not configured.",
+};
+
+const short = (commit: string) => html`<code title="${commit}">${commit.slice(0, 12)}</code>`;
+
+/**
+ * Above the composer, for a builder whose review the person can land or is landing: why it waits for them, with the
+ * Land button, and then the landing's steps until it lands or ends for them again. The land route decides who may
+ * land, and the page says so up front rather than offer a button that fails.
+ */
+function landing(c: Context, d: ThreadDetail): Html | null {
+  const r = d.review;
+  if (r == null) return null;
+  const prLink = html`<a href="${r.pr.url}" target="_blank" rel="noreferrer">#${r.pr.number} ${r.pr.title} ↗</a>`;
+  const at = landingAt(r);
+  if (at !== null) {
+    const deploys = c.deploys(r);
+    const index = landingSteps.findIndex(([step]) => step === at.step);
+    const stateOf = (step: Step, i: number) => step === "deploying" && !deploys ? "skipped"
+      : i < index || at.step === "landed" ? "done" : i > index ? "todo" : at.failed ? "failed" : "now";
+    const title = at.step === "landed" ? "Landed" : r.phase.kind === "needs-person" ? "Merged, not deployed" : r.phase.kind === "rolling-back" ? "Rolling back" : "Landing";
+    const phase = r.phase;
+    return html`<section class="landing" aria-labelledby="landing-h">
+<div class="land-top"><h2 id="landing-h">${title}</h2>${prLink}</div>
+<ol class="land-steps">${landingSteps.map(([step, label], i) => {
+  const state = stateOf(step, i);
+  return html`<li class="land-step land-${state}"${state === "now" && html` aria-current="step"`}>${label}${state === "skipped" && " (nothing to deploy)"}</li>`;
+})}</ol>
+${phase.kind === "checking" ? html`<p class="land-note">.nexus/check runs at ${short(r.rounds.at(-1)!.head)}, or its kept result for that commit is read.</p>`
+  : phase.kind === "merging" ? html`<p class="land-note">Checking the merge policy again with what GitHub says now, then merging ${short(r.rounds.at(-1)!.head)}.</p>`
+  : phase.kind === "deploying" ? html`<p class="land-note">Deploying the merge commit ${short(phase.commit)} until every service reports it healthy.</p>`
+  : phase.kind === "rolling-back" ? html`<p class="error">${phase.why} Rolling back to ${short(phase.previous)}.</p>`
+  : phase.kind === "landed" ? html`<p class="land-note">Merged as ${short(phase.commit)}${deploys && ", deployed, and every service reports it healthy"}.</p>`
+  : phase.kind === "needs-person" && html`<ul class="error">${phase.reasons.map((reason) => html`<li>${reason}</li>`)}</ul>`}
+</section>`;
+  }
+  // A PR closed or merged outside the review leaves it held, but there is nothing left to land.
+  const pr = d.pullRequests?.find((p) => p.repo === r.pr.repo && p.number === r.pr.number);
+  if (!landable(r) || d.thread.status !== "active" || (pr !== undefined && pr.state !== "open")) return null;
+  const round = r.rounds.at(-1)!;
+  const held = r.phase.kind === "needs-person";
+  const reasons = r.phase.kind === "needs-person" ? r.phase.reasons : recordedHolds(r);
+  const stuck = reasons.some(holdsAgain);
+  const findings = findingsOf(round);
+  const confirm = `Land pull request #${r.pr.number}, "${r.pr.title}", at commit ${round.head.slice(0, 12)}? Nexus checks the merge policy again, merges that commit${c.deploys(r) ? " and deploys the merge commit" : ""}.`;
+  return html`<section class="landing" aria-labelledby="landing-h">
+<div class="land-top"><h2 id="landing-h">${held ? "Held for you" : "Approved, not landed"}</h2>${prLink}</div>
+<p class="land-meta">Head ${short(round.head)} · approved by ${r.models.reviewer} (${r.reviewerKind}) in round ${roundsSpent(r)} of ${r.maxRounds} · .nexus/check passed</p>
+<details id="land-why" open><summary>Why it waits for you</summary>
+${reasons.length === 0 ? html`<p class="land-note">Nothing holds it. The review stopped at approval because it was started without --land.</p>`
+  : html`<ul class="land-reasons">${reasons.map((reason) => html`<li>${reason}${holdsAgain(reason) && html` <span class="tag">holds again</span>`}</li>`)}</ul>`}
+<h3>The reviewer's findings</h3>
+${findings.length === 0 ? html`<p class="land-note">None.</p>` : html`<ul class="land-findings">${findings.map((f) => {
+  const answer = r.rounds.flatMap((rd) => rd.answers ?? []).findLast((a) => a.id === f.id);
+  return html`<li><span class="tag${blocking(f) ? " tag-bad" : ""}">${f.priority}</span> <b>${f.id}</b>${f.where && html` <code>${f.where}</code>`}: ${f.summary}${answer && html` <span class="dim">(builder: ${answer.action}${answer.reason && `, ${answer.reason}`})</span>`}</li>`;
+})}</ul>`}
+${round.check !== null && html`<details id="land-check"><summary>.nexus/check ${round.check.passed ? "passed" : "failed"} at ${round.head.slice(0, 12)}</summary><pre>${round.check.output}</pre></details>`}
+</details>
+${stuck ? html`<p class="land-note">Landing checks the merge policy again, and what is marked "holds again" holds every landing of this commit. Only you can get past it, by merging the pull request on GitHub${c.deploys(r) && " and deploying it with nexus deploy"}.</p>`
+  : c.landRefusal === null ? html`<div class="land-act"><button type="button" class="btn btn-primary" id="land" data-action="land" data-thread="${d.thread.id}" data-head="${round.head}" data-confirm="${confirm}">Land #${r.pr.number}</button></div>`
+  : html`<div class="land-act"><button type="button" class="btn" id="land" disabled>Land #${r.pr.number}</button><p class="error">${landRefusals[c.landRefusal](c.caller)}</p></div>`}
+</section>`;
 }
 
 /**

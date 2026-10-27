@@ -39,11 +39,26 @@ const reservedPaths: readonly { case: ReservedCase; matches(path: string, patch:
   { case: "irreversible", matches: (p, patch) => p === "package.json" && (patch === "" || /^[+-].*@earendil-works\/pi-durable/m.test(patch)) },
 ];
 
+const personOnly = "Always needs the person: ";
+const claudeApproved = "A Claude reviewer approved it. Its verdict is read from its transcript in its pylon, where code it runs could write, so only the person can land what it approved.";
+const checkChanged = "The pull request changes .nexus/check, the check this policy relies on.";
+
+/** The holds the review's record alone decides: they hold every landing of its approved head, whatever GitHub says. */
+export const recordedHolds = (review: Review): string[] => [
+  ...review.reviewerKind === "claude" ? [claudeApproved] : [],
+  ...(review.rounds.at(-1)!.verdict?.reserved ?? []).map((r) => `${personOnly}${reservedNames[r.case]}, by the reviewer's reading (${r.why}).`),
+];
+
+/**
+ * Whether a reason holds every landing of the same approved head again: a reserved case, a reserved path, a Claude
+ * reviewer or a changed check. Landing again cannot get past it. The person merging the pull request can.
+ */
+export const holdsAgain = (reason: string) => reason.startsWith(personOnly) || reason === claudeApproved || reason === checkChanged;
+
 const squash = (text: string) => text.replace(/\s+/g, " ").trim().toLowerCase();
 
 const conditions: readonly ((facts: LandingFacts) => string[])[] = [
   ({ review }) => review.models.reviewer === review.models.builder ? [`The reviewer ran the builder's own model, ${review.models.builder}.`] : [],
-  ({ review }) => review.reviewerKind === "claude" ? ["A Claude reviewer approved it. Its verdict is read from its transcript in its pylon, where code it runs could write, so only the person can land what it approved."] : [],
   ({ review }) => {
     const round = review.rounds.at(-1)!;
     if (round.verdict?.verdict !== "approve") return ["The reviewer has not approved the latest commits."];
@@ -75,8 +90,8 @@ const conditions: readonly ((facts: LandingFacts) => string[])[] = [
     if (quoted === null || squash(quoted).length < 20) return ["No live check ran, and the pull request does not say what could not be checked live."];
     return squash(pr.detail.body).includes(squash(quoted)) ? [] : ["The reviewer's quote of what could not be checked live is not in the pull request's description."];
   },
-  ({ review }) => (review.rounds.at(-1)!.verdict?.reserved ?? []).map((r) => `Always needs the person: ${reservedNames[r.case]}, by the reviewer's reading (${r.why}).`),
-  ({ files }) => files.some((f) => f.path === ".nexus/check" || f.previous === ".nexus/check") ? ["The pull request changes .nexus/check, the check this policy relies on."] : [],
+  ({ review }) => recordedHolds(review),
+  ({ files }) => files.some((f) => f.path === ".nexus/check" || f.previous === ".nexus/check") ? [checkChanged] : [],
   ({ files, nexus }) => {
     if (!nexus) return [];
     const hits = new Map<ReservedCase, string[]>();
@@ -85,7 +100,7 @@ const conditions: readonly ((facts: LandingFacts) => string[])[] = [
         for (const rule of reservedPaths) if (rule.matches(path, file.patch)) hits.set(rule.case, [...new Set([...hits.get(rule.case) ?? [], path])]);
       }
     }
-    return [...hits].map(([c, paths]) => `Always needs the person: ${reservedNames[c]}, as it changes ${paths.join(", ")}.`);
+    return [...hits].map(([c, paths]) => `${personOnly}${reservedNames[c]}, as it changes ${paths.join(", ")}.`);
   },
 ];
 
