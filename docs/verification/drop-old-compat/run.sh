@@ -15,7 +15,7 @@ branch=${3:-HEAD}
 deployed=${4:-82a703f}
 work=$(mktemp -d)
 trees=()
-trap 'for t in "${trees[@]}"; do git -C "$repo" worktree remove --force "$t" 2>/dev/null; done; rm -rf "$work"' EXIT
+trap 'for t in "${trees[@]}"; do git -C "$repo" worktree remove --force "$t" 2>/dev/null; done; rm -rf "$work"; git -C "$repo" worktree prune' EXIT
 
 checkout() {
   local tree="$work/$1"
