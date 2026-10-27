@@ -18,6 +18,7 @@ import { linkedName, serviceDecl, type PreviewAssignment, type PylonApiRequest, 
 import type { DeclaredOutput, PylonId, ServiceFact } from "../protocol.ts";
 import { bridgePylonHeader, hostBridgeSocket } from "../pylon-vm/host-bridge.ts";
 import { privateDirectory } from "../pylon-vm/storage.ts";
+import { BodyTooLarge, readBody } from "../request-body.ts";
 
 /** What `nexus info --json` prints: /home/user/.nexus/pylon.json, which renderOverlay writes. */
 export const pylonInfoFile = "/home/user/.nexus/pylon.json";
@@ -229,8 +230,6 @@ export function createPylonApi(deps: PylonApiDeps): PylonApi {
   };
 }
 
-const maxBodyBytes = 1 << 20;
-
 /**
  * An HTTP listener for NEXUS_API calls. `identify` names the calling pylon from what the bridge attached to the
  * request, or returns null for a request no bridge sent, which gets a 404.
@@ -245,17 +244,11 @@ export function listenHostBridge(
         const pylonId = await identify(req);
         if (pylonId === null) return { status: 404, body: `no route ${req.method} ${req.url}` };
         if (req.method !== "POST") return { status: 405, body: "NEXUS_API takes POST only" };
-        let body = "";
-        req.setEncoding("utf8");
-        for await (const chunk of req as AsyncIterable<string>) {
-          body += chunk;
-          if (body.length > maxBodyBytes) return { status: 413, body: `request body over ${maxBodyBytes} bytes` };
-        }
-        return answer(pylonId, body);
+        return answer(pylonId, await readBody(req));
       };
       reply().then(
         ({ status, body }) => res.writeHead(status, { "content-type": status === 200 ? "application/json" : "text/plain; charset=utf-8" }).end(body),
-        (err: unknown) => res.writeHead(500, { "content-type": "text/plain; charset=utf-8" }).end((err as Error).message),
+        (err: unknown) => res.writeHead(err instanceof BodyTooLarge ? 413 : 500, { "content-type": "text/plain; charset=utf-8" }).end((err as Error).message),
       );
     });
     await new Promise<void>((resolve, reject) => {

@@ -49,6 +49,7 @@ import { openTerminal } from "../guest-terminal.ts";
 import { attachTiming, serveAttach, type AttachTiming, type Ending, type PylonDoor } from "./attach.ts";
 import { typeIntoClaude } from "./inbox.ts";
 import { HttpError } from "./http-error.ts";
+import { BodyTooLarge, readBody } from "../request-body.ts";
 import { imagesView, type ImageOperation, type ImageRollout } from "./image-rollout.ts";
 import type { StartRequest } from "./threads.ts";
 import { nodePylons, overcommitted, type NodePylons } from "./placement.ts";
@@ -1178,14 +1179,8 @@ function parse<T>(schema: z.ZodType<T>, body: unknown): T {
   return result.data;
 }
 
-const maxBodyBytes = 1 << 20;
 async function readJson(req: IncomingMessage, empty?: unknown): Promise<unknown> {
-  let body = "";
-  req.setEncoding("utf8");
-  for await (const chunk of req as AsyncIterable<string>) {
-    body += chunk;
-    if (body.length > maxBodyBytes) throw new HttpError(413, `request body over ${maxBodyBytes} bytes`);
-  }
+  const body = await readBody(req);
   if (body === "" && empty !== undefined) return empty;
   try {
     return JSON.parse(body);
@@ -1211,7 +1206,7 @@ function pathOf(url: string | undefined): string {
   }
 }
 
-const errorStatus = (err: unknown) => err instanceof HttpError ? err.status : err instanceof DeployDraining ? 409 : 500;
+const errorStatus = (err: unknown) => err instanceof HttpError ? err.status : err instanceof DeployDraining ? 409 : err instanceof BodyTooLarge ? 413 : 500;
 
 /** An API error reply written on a socket that never upgraded. */
 function refuseUpgrade(socket: Duplex, status: number, message: string) {
