@@ -430,6 +430,10 @@ export function openRegistry(path: string, clock = Date.now) {
     pylon: db.prepare("SELECT * FROM pylons WHERE id = ?"),
     pylonsOn: db.prepare("SELECT * FROM pylons WHERE node = ? ORDER BY id"),
     pylonIdsOn: db.prepare("SELECT id FROM pylons WHERE node = ? ORDER BY id"),
+    pylonIdsToTick: db.prepare(`SELECT p.id FROM pylons p JOIN threads t ON t.id = p.thread WHERE p.node = $node AND (t.status != 'deleted'
+      OR p.submitted IS NOT NULL OR p.retrying = 1 OR p.id IN (SELECT value FROM json_each($present))
+      OR EXISTS (SELECT 1 FROM previews WHERE pylon = p.id) OR EXISTS (SELECT 1 FROM claude_workers WHERE thread = t.id AND state = 'starting'))
+      ORDER BY p.id`),
     // A null status keeps the one the row has.
     upsertSession: db.prepare(`INSERT INTO sessions (pylon, id, herdr_pane, harness, harness_session_id, status, title, state, message)
       VALUES ($pylon, $id, $herdrPane, $harness, $harnessSessionId, coalesce($status, 'unknown'), $title, $state, $message)
@@ -928,6 +932,12 @@ export function openRegistry(path: string, clock = Date.now) {
     },
     pylonsOn: (node: NodeName) => (q.pylonsOn.all(node) as Row[]).map(pylonRow),
     pylonIdsOn: (node: NodeName) => (q.pylonIdsOn.all(node) as Row[]).map((r) => r.id as PylonId),
+    /**
+     * The node's pylons less those of deleted threads with nothing left to tear down: the node neither has nor routes
+     * them, as `present` says, and no job, preview, retry or Claude launch is left to settle, so a tick would change nothing.
+     */
+    pylonIdsToTick: (node: NodeName, present: readonly PylonId[]) =>
+      (q.pylonIdsToTick.all({ $node: node, $present: JSON.stringify(present) }) as Row[]).map((r) => r.id as PylonId),
     /** Returns what releases it, once the pylon's row counts it or the start failed. */
     reserve(pylonId: PylonId, node: NodeName, resources: BootInputs["resources"]): () => void {
       reservations.set(pylonId, { node, resources });

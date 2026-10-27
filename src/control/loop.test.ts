@@ -1062,6 +1062,52 @@ test("a deleted thread whose pylon was removed by hand gets a delete that unpubl
   assert.equal(deletes(), sent, "once the node has neither the pylon nor its routes, no delete follows");
 });
 
+test("a deleted thread's pylon that is gone is torn down again whenever its node lists or routes it again", async (t) => {
+  const registry = openRegistry(tempDb());
+  const thread = seed(registry);
+  const fake = fakeNode({ autoFinish: true });
+  const loop = run(t, registry, fake.probe, { ingest: realIngest });
+  await until("the pylon runs", () => fake.pylons.get(thread.pylonId)?.phase === "running");
+  registry.setThreadStatus(thread.id, "deleted");
+  await until("the pylon is gone", () => !fake.pylons.has(thread.pylonId) && registry.pylon(thread.pylonId)?.submitted === null);
+  const deletes = () => fake.submitted.filter((job) => job.kind === "delete").length;
+  await settled(fake, loop);
+  assert.equal(deletes(), 1);
+
+  const stopped: PylonObservation = { pylonId: thread.pylonId, phase: "stopped", checkpoint: null, sessions: null };
+  fake.pylons.set(thread.pylonId, stopped);
+  fake.announce();
+  await until("the listed pylon is deleted again", () => deletes() === 2 && !fake.pylons.has(thread.pylonId));
+
+  fake.routes.set(10200, { httpsPort: 10200, pylonId: thread.pylonId, service: "web" });
+  fake.announce();
+  await until("the routed pylon is deleted again", () => deletes() === 3 && fake.routes.size === 0);
+  await settled(fake, loop);
+  assert.equal(deletes(), 3, "once the node lets go of it again, no delete follows");
+});
+
+test("a deleted thread's ports go back after a restart between its delete and their release", async (t) => {
+  const registry = openRegistry(tempDb());
+  const thread = seed(registry);
+  registry.allocatePreviews(thread.pylonId, ["web"], previewPorts);
+  registry.setThreadStatus(thread.id, "deleted");
+  const fake = fakeNode({ autoFinish: true });
+  run(t, registry, fake.probe);
+  await until("the port is released", () => registry.previews(thread.pylonId).length === 0);
+  assert.deepEqual(fake.submitted, []);
+});
+
+test("a deleted thread whose Claude launch was cut off has the launch failed, though its pylon is gone", async (t) => {
+  const registry = openRegistry(tempDb());
+  const thread = seed(registry);
+  registry.setThreadStatus(thread.id, "deleted");
+  registry.setClaudeWorker(thread.id, "hello", "starting", undefined, "6f1c2a9e-3b7d-4e05-8c21-9d4b7a1e5f30");
+  const fake = fakeNode({ autoFinish: true });
+  run(t, registry, fake.probe);
+  await until("worker failed", () => registry.claudeWorker(thread.id)?.state === "failed");
+  assert.deepEqual(fake.submitted, []);
+});
+
 test("a probe that reports no routes still gets planned for, with ports allocated by the registry alone", async (t) => {
   const registry = openRegistry(tempDb());
   const thread = seed(registry);
