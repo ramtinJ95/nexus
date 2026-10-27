@@ -412,7 +412,11 @@ export async function startApi(options: ApiOptions): Promise<Api> {
     };
   }
 
-  const page = dashboard({ registry, detail, conversation });
+  const page = dashboard({
+    registry, detail, conversation,
+    mayLand: (caller) => canDeploy(registry, options.deployment, caller),
+    deploys: (r) => options.reviews?.deploys(r) ?? false,
+  });
 
   /** Each open stream's and terminal's thread and how to end it, so a delete ends its thread's streams. */
   const open = new Set<{ thread: ThreadId; end(): void }>();
@@ -975,7 +979,7 @@ export async function startApi(options: ApiOptions): Promise<Api> {
       flush(first);
       return;
     }
-    const view = req.method === "GET" ? await page(path, url.searchParams) : undefined;
+    const view = req.method === "GET" ? await page(path, url.searchParams, caller) : undefined;
     if (view !== undefined) return void res.writeHead(view.status, view.headers).end(view.body);
     for (const [pattern, serve] of streams) {
       const m = pattern.exec(path);

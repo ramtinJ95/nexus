@@ -5,11 +5,12 @@ import { mkdtemp, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { request } from "node:http";
 import { join } from "node:path";
-import { startApi } from "./api.ts";
+import { startApi, type ApiOptions } from "./api.ts";
 import { threadStarter } from "./threads.ts";
 import { readEvents } from "./event-reader.ts";
 import { fakeHarness } from "./fake-harness.ts";
 import { openRegistry, type Thread, type ThreadId } from "./registry.ts";
+import type { Review, ReviewLoop } from "./review.ts";
 import type { JobId, NodeName, PylonObservation, ServiceFact, TailnetNodeId } from "../protocol.ts";
 import type { ImageId } from "../images.ts";
 import { githubTokenGrant } from "../project.ts";
@@ -37,7 +38,7 @@ after(() => rm(dir, { recursive: true }));
 
 interface Reply { status: number; headers: Record<string, string | string[] | undefined>; text: string }
 
-async function setup(t: TestContext) {
+async function setup(t: TestContext, options: Partial<ApiOptions> = {}) {
   const registry = openRegistry(join(dir, `${randomUUID()}.db`));
   registry.upsertNode({ name: node, tailnetHost: "rj-firebat.tail.ts.net", tailnetNodeId: "nFIREBAT" as TailnetNodeId });
   let caller: TailnetNodeId | null = laptop;
@@ -55,6 +56,7 @@ async function setup(t: TestContext) {
     wake: () => {},
     probes: new Map(),
     previewPorts: { first: 10200, last: 10299 },
+    ...options,
   });
   t.after(async () => {
     await api.close();
@@ -100,8 +102,8 @@ async function setup(t: TestContext) {
   };
 }
 
-async function seeded(t: TestContext) {
-  const s = await setup(t);
+async function seeded(t: TestContext, options: Partial<ApiOptions> = {}) {
+  const s = await setup(t, options);
   for (const id of ["acme", "beta"]) assert.equal((await s.call("POST", "/v1/projects", project(id))).status, 201);
   assert.equal((await s.call("POST", "/v1/images", image)).status, 201);
   s.registry.setCurrentImage(image.id as ImageId);
@@ -227,6 +229,101 @@ test("a review the person cancelled says which thread they archived, and asks no
   });
   const page = textOf((await s.call("GET", `/threads/${fix.id}`)).text);
   assert.match(page, /Nexus review rv-1: cancelled, round 1 of 5, by th-reviewer on gpt-6-astra, the reviewer thread th-reviewer was archived/);
+});
+
+const phone = "nPHONE" as TailnetNodeId;
+/** A control plane whose deployers are the laptop only, with a review loop whose PRs from acme/nexus deploy. */
+const landingOptions = (landed: string[] = []): Partial<ApiOptions> => ({
+  allowed: new Set([laptop, phone]),
+  deployment: { self: "nFIREBAT" as TailnetNodeId, deployers: new Set([laptop]), keys: {} },
+  reviews: {
+    deploys: (r: Review) => r.pr.repo === "acme/nexus",
+    land(builder: string) { landed.push(builder); return {}; },
+  } as never as ReviewLoop,
+});
+const head = "9f".repeat(20);
+/** A review of PR #7 whose reviewer approved `head` with one P3 note and whose check passed there. */
+const approvedReview = (builder: ThreadId, phase: Review["phase"], extra: Partial<Review> = {}): Review => ({
+  id: "rv-1", builder, reviewer: "th-reviewer" as ThreadId, pr: { repo: "acme/nexus", number: 7, url: "https://github.com/acme/nexus/pull/7", title: "Cache", branch: "cache" }, reviewerKind: "harness",
+  models: { builder: "claude-opus-5-5", reviewer: "gpt-6-astra" }, maxRounds: 5, land: null, merged: null, expect: "rv-1:t", sent: 3, outbox: null, since: 0, nudges: 0, startedAt: 0,
+  rounds: [
+    { head: "1".repeat(40), verdict: { token: "a", verdict: "changes", findings: [{ id: "F1", priority: "P1", where: "src/cache.ts:12", summary: "The cache never expires" }], reserved: [], notCheckedLive: null }, check: null, answers: [{ id: "F1", action: "fixed", reason: "" }] },
+    { head, verdict: { token: "b", verdict: "approve", findings: [{ id: "F2", priority: "P3", where: null, summary: "Name the TTL" }], reserved: [], notCheckedLive: "The cache's behaviour under load could not be checked live." }, check: { passed: true, output: "ok 412 tests" }, answers: null },
+  ],
+  phase, ...extra,
+});
+const landingOf = (page: string) => /<div id="landing" data-live>([\s\S]*?)<\/div>\n<div id="run"/.exec(page)![1]!;
+
+test("a review held for the person says why on its builder's page, and a deployer can land it after confirming the PR and commit", async (t) => {
+  const landed: string[] = [];
+  const s = await seeded(t, landingOptions(landed));
+  const fix = await s.start("acme", "Fix checkout");
+  s.registry.saveReview(approvedReview(fix.id, { kind: "needs-person", reasons: ["The pull request's GitHub checks are pending."] }, { land: { requestedBy: laptop } }));
+  const region = landingOf((await s.call("GET", `/threads/${fix.id}`)).text);
+  assert.equal(textOf(region), `Held for you #7 Cache ↗ Head ${head.slice(0, 12)} · approved by gpt-6-astra (harness) in round 2 of 5 · .nexus/check passed `
+    + "Why it waits for you The pull request's GitHub checks are pending. The reviewer's findings P3 F2 : Name the TTL "
+    + `.nexus/check passed at ${head.slice(0, 12)} ok 412 tests Land #7`);
+  assert.match(region, /<a href="https:\/\/github.com\/acme\/nexus\/pull\/7" target="_blank"/, "the PR links to GitHub");
+  const button = /<button [^>]*data-action="land"[^>]*>/.exec(region)?.[0];
+  assert.ok(button !== undefined, "a deployer gets the Land button");
+  assert.match(button, new RegExp(`data-thread="${fix.id}"`));
+  assert.equal(textOf(/data-confirm="([^"]*)"/.exec(button)![1]!), `Land pull request #7, "Cache", at commit ${head.slice(0, 12)}? Nexus checks the merge policy again, merges that commit and deploys the merge commit.`);
+  assert.equal((await s.call("POST", `/v1/threads/${fix.id}/land`, {})).status, 200, "the button's route lands for a deployer");
+  assert.deepEqual(landed, [fix.id]);
+
+  s.registry.saveReview(approvedReview(fix.id, { kind: "approved" }));
+  assert.match(textOf(landingOf((await s.call("GET", `/threads/${fix.id}`)).text)), /^Approved, not landed .* Nothing holds it\. The review stopped at approval because it was started without --land\. .* Land #7$/,
+    "a review that stopped at approval can be landed too");
+
+  s.callAs(phone);
+  const refused = landingOf((await s.call("GET", `/threads/${fix.id}`)).text);
+  assert.ok(!refused.includes('data-action="land"'), "a device that is not a deployer gets no working button");
+  assert.match(textOf(refused), /Land #7 This device cannot land: landing deploys, so only the control plane's deployers may, and this device \(tailnet node nPHONE\) is not one\./);
+  const post = await s.call("POST", `/v1/threads/${fix.id}/land`, {});
+  assert.equal(post.status, 403, "the route refuses it whatever the page shows");
+  assert.match(post.text, /only deployers may/);
+  assert.deepEqual(landed, [fix.id]);
+});
+
+test("a hold that every landing of the commit meets again is marked, and offers no Land button", async (t) => {
+  const s = await seeded(t, landingOptions());
+  const fix = await s.start("acme", "Fix checkout");
+  s.registry.saveReview(approvedReview(fix.id, { kind: "needs-person", reasons: [
+    "The pull request's GitHub checks are pending.",
+    "Always needs the person: changes to login or auth, as it changes src/control/api.ts.",
+  ] }, { land: { requestedBy: laptop } }));
+  const region = textOf(landingOf((await s.call("GET", `/threads/${fix.id}`)).text));
+  assert.match(region, /The pull request's GitHub checks are pending\. Always needs the person: changes to login or auth, as it changes src\/control\/api\.ts\. holds again /);
+  assert.match(region, /Only you can get past it, by merging the pull request on GitHub and deploying it with nexus deploy\.$/);
+  assert.ok(!region.includes("Land #7"));
+
+  s.registry.saveReview(approvedReview(fix.id, { kind: "approved" }, { reviewerKind: "claude" }));
+  assert.match(textOf(landingOf((await s.call("GET", `/threads/${fix.id}`)).text)), /A Claude reviewer approved it\..* holds again .*Only you can get past it/, "an approval the policy never lands is marked before any landing tries");
+});
+
+test("a landing shows its steps as the review moves through them, until it lands or ends for the person", async (t) => {
+  const s = await seeded(t, landingOptions());
+  const fix = await s.start("acme", "Fix checkout");
+  const steps = async (phase: Review["phase"], extra: Partial<Review> = {}) => {
+    s.registry.saveReview(approvedReview(fix.id, phase, { land: { requestedBy: laptop }, ...extra }));
+    const region = landingOf((await s.call("GET", `/threads/${fix.id}`)).text);
+    return { states: [...region.matchAll(/<li class="land-step land-(\w+)"/g)].map((m) => m[1]).join(" "), text: textOf(region).replace(/ ([,.])(?= |$)/g, "$1") };
+  };
+  const merge = "4".repeat(40);
+  assert.deepEqual(await steps({ kind: "checking", startedAt: 0, thread: null }), {
+    states: "now todo todo todo", text: `Landing #7 Cache ↗ Check Merge Deploy Landed .nexus/check runs at ${head.slice(0, 12)}, or its kept result for that commit is read.` });
+  assert.equal((await steps({ kind: "merging", authorized: head })).states, "done now todo todo");
+  assert.deepEqual(await steps({ kind: "deploying", commit: merge, previous: "3".repeat(40), requested: true, deadline: 0 }, { merged: merge }), {
+    states: "done done now todo", text: `Landing #7 Cache ↗ Check Merge Deploy Landed Deploying the merge commit ${merge.slice(0, 12)} until every service reports it healthy.` });
+  assert.deepEqual(await steps({ kind: "rolling-back", commit: merge, previous: "3".repeat(40), why: "The deploy of 4444 failed: rj-firebat control failed.", requested: true, deadline: 0 }, { merged: merge }), {
+    states: "done done failed todo", text: `Rolling back #7 Cache ↗ Check Merge Deploy Landed The deploy of 4444 failed: rj-firebat control failed. Rolling back to ${"3".repeat(12)}.` });
+  assert.deepEqual(await steps({ kind: "needs-person", reasons: ["The deploy of 4444 failed.", "Rolled back to the previous release, 3333, which every service reports healthy."] }, { merged: merge }), {
+    states: "done done failed todo", text: "Merged, not deployed #7 Cache ↗ Check Merge Deploy Landed The deploy of 4444 failed. Rolled back to the previous release, 3333, which every service reports healthy." });
+  assert.deepEqual(await steps({ kind: "landed", commit: merge }, { merged: merge }), {
+    states: "done done done done", text: `Landed #7 Cache ↗ Check Merge Deploy Landed Merged as ${merge.slice(0, 12)}, deployed, and every service reports it healthy.` });
+  const other = await steps({ kind: "landed", commit: merge }, { merged: merge, pr: { repo: "acme/web", number: 7, url: "https://github.com/acme/web/pull/7", title: "Cache", branch: "cache" } });
+  assert.deepEqual(other, { states: "done done skipped done", text: `Landed #7 Cache ↗ Check Merge Deploy (nothing to deploy) Landed Merged as ${merge.slice(0, 12)}.` }, "a PR that does not deploy skips the step");
+  assert.equal((await steps({ kind: "fixing" })).text, "", "a review that is not landing has nothing to land");
 });
 
 test("a waiting session's message replaces the waiting label, such as a background command still running at the cap", async (t) => {
