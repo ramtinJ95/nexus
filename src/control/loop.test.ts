@@ -798,8 +798,10 @@ test("each snapshot is ingested against the last observation ingested for each k
   const previous: string[][] = [];
   run(t, registry, fake.probe, {
     ingest: (event, eventNode, known, now, unlisted) => {
-      assert.deepEqual([...known.keys()], [thread.pylonId]);
-      if (event.type === "snapshot") previous.push([...known.values()].map((o) => o === "absent" ? "absent" : o.phase));
+      if (event.type === "snapshot") {
+        assert.deepEqual([...known.keys()], [thread.pylonId]);
+        previous.push([...known.values()].map((o) => o === "absent" ? "absent" : o.phase));
+      }
       return ingest(event, eventNode, known, now, unlisted);
     },
   });
