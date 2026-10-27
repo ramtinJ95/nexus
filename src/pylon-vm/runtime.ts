@@ -18,7 +18,8 @@ import { GuestProcesses } from "./processes.ts";
 import { startRelay } from "./relay.ts";
 import { GuestServices } from "./services.ts";
 import { shellQuote as q } from "../project.ts";
-import { existsError, saveJson } from "./storage.ts";
+import { saveJson } from "../json-file.ts";
+import { existsError } from "./storage.ts";
 
 /**
  * Logs a resume's output and then one `resume:` line with its outcome, however long it runs. A failed resume

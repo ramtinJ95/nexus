@@ -9,7 +9,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
-import { directory, privateDirectory, saveJson } from "./storage.ts";
+import { saveJson } from "../json-file.ts";
+import { directory, privateDirectory } from "./storage.ts";
 
 const name = "pylon-t1";
 const spec = { resources: { cpus: 1, memoryGiB: 1 }, allowedHosts: [], secrets: {}, ssh: null, files: [], hooks: [], publicUrls: {}, hostBridge: null };

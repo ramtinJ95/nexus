@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { JobFailure } from "../backend.ts";
@@ -124,6 +124,14 @@ test("the routes file is a JSON list of { httpsPort, pylonId, service }, with no
   assert.deepEqual(await readdir(dirname(routesFile)), ["routes.json"]);
 });
 
+test("the routes file is readable by its owner only, whatever the umask", async (t) => {
+  const { serve, signal, routesFile } = await setup(t);
+  const umask = process.umask(0o022);
+  t.after(() => process.umask(umask));
+  await serve.converge(a, [{ service: "web", httpsPort: 10000 }], signal);
+  assert.equal((await stat(routesFile)).mode & 0o777, 0o600);
+});
+
 test("tailscaleCli resolves with stdout as printed, and a failure names the command and its stderr, or else Node's reason", async (t) => {
   const bin = await mkdtemp(join(tmpdir(), "nexus-tailscale-bin-"));
   t.after(() => rm(bin, { recursive: true }));
@@ -199,9 +207,9 @@ test("a withdraw whose write failed writes the table when it is asked again", as
   const { serve, signal, routesFile } = await setup(t);
   await serve.converge(a, [{ service: "web", httpsPort: 10000 }, { service: "port-6006", httpsPort: 10001 }], signal);
   // A directory where the write's temporary file goes makes the write fail.
-  await mkdir(`${routesFile}.tmp`);
+  await mkdir(`${routesFile}.${process.pid}.tmp`);
   await assert.rejects(serve.withdraw(a, "port-6006"), { code: "EISDIR" });
-  await rm(`${routesFile}.tmp`, { recursive: true });
+  await rm(`${routesFile}.${process.pid}.tmp`, { recursive: true });
   await serve.withdraw(a, "port-6006");
   assert.deepEqual(await readRoutes(routesFile), new Map([[10000, { pylonId: a, service: "web" }]]));
 });

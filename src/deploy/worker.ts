@@ -5,6 +5,7 @@ import { command, checkoutMerged, ReleaseInstaller } from "./install.ts";
 import { planDeploy, type Role } from "./plan.ts";
 import { fullCommit, type ReleaseReport, type ReleaseView } from "./model.ts";
 import { jsonRequest } from "./http.ts";
+import { readJson, saveJson } from "../json-file.ts";
 import { localApiWhois } from "../tailscale.ts";
 import { tailnetNodeIdSchema } from "../protocol.ts";
 
@@ -28,14 +29,6 @@ export function parseWorkerConfig(value: unknown): WorkerConfig {
 
 const prefix = "/opt/nexus";
 const configPath = "/etc/nexus/deployer.json";
-async function jsonFile<T>(path: string, fallback: T): Promise<T> {
-  try { return JSON.parse(await readFile(path, "utf8")) as T; }
-  catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return fallback; throw error; }
-}
-async function atomicJson(path: string, value: unknown): Promise<void> {
-  await writeFile(`${path}.new`, JSON.stringify(value) + "\n", { mode: 0o600 });
-  await rename(`${path}.new`, path);
-}
 async function commitAt(link: string): Promise<string | null> {
   try {
     const commit = (await readFile(join(link, "release-commit"), "utf8")).trim();
@@ -47,7 +40,7 @@ export async function runWorker(check = false): Promise<void> {
   if (process.getuid?.() !== 0) throw new Error("deployer must run as root");
   const mode = await stat(configPath);
   if (mode.uid !== 0 || (mode.mode & 0o077) !== 0) throw new Error("deployer.json must be root-owned mode 0600");
-  const config = parseWorkerConfig(await jsonFile(configPath, null));
+  const config = parseWorkerConfig(await readJson(configPath, null));
   const peer = { id: config.controlNodeId, whois: localApiWhois() };
   const api = (path: string, body?: unknown) => jsonRequest(new URL(`/v1/deployer/${path}`, config.controlUrl), body === undefined ? "GET" : "POST", body, config.token, peer);
   if (check) { await api("release"); return; }
@@ -72,7 +65,7 @@ export async function reconcileRole(role: Role, config: WorkerConfig, api: Api, 
   const savedUnit = join(prefix, `${role}-deploy.unit`);
   const reportPath = join(prefix, `${role}-deploy-report.json`);
   const repo = join(prefix, "deployer", "repo");
-  const local = await jsonFile<{ listen: { host: string; port: number } }>(join(etc, `${role}.json`), null!);
+  const local = await readJson(join(etc, `${role}.json`), null) as { listen: { host: string; port: number } };
   const healthUrl = new URL(`http://${local.listen.host.includes(":") ? `[${local.listen.host}]` : local.listen.host}:${local.listen.port}/v1/health`);
   const healthy = async () => {
     const expected = await commitAt(link);
@@ -88,7 +81,7 @@ export async function reconcileRole(role: Role, config: WorkerConfig, api: Api, 
   };
   const report = async (state: ReleaseReport["state"], target: string | null, reason: string | null = null) => {
     const value = { role, commit: await commitAt(link), target, state, reason, observedAt: Date.now() };
-    await atomicJson(reportPath, value);
+    await saveJson(reportPath, value);
     const { observedAt: _, ...wire } = value;
     await api("report", wire).catch(() => { console.error(`could not report ${role} release; retained locally for the next poll`); });
   };
@@ -146,7 +139,7 @@ export async function reconcileRole(role: Role, config: WorkerConfig, api: Api, 
   }
   const view = await api("release") as ReleaseView;
   desired = view.desired?.commit ?? null;
-  const prior = await jsonFile<ReleaseReport | null>(reportPath, null);
+  const prior = await readJson(reportPath, null) as ReleaseReport | null;
   if (desired !== null && prior?.target === desired && (prior.state === "failed" || prior.state === "rolled-back")) {
     await report(prior.state, desired, prior.reason);
     if (role === "control") await api("drain", { commit: desired, release: true }).catch(() => {});

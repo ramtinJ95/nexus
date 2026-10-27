@@ -13,9 +13,9 @@
  * The serve config is one object per node, so converges change it one at a time. Warming runs outside that.
  */
 import { execFile } from "node:child_process";
-import { readFile, rename, writeFile } from "node:fs/promises";
 import { setTimeout as delay } from "node:timers/promises";
 import { JobFailure, type TailscaleServe } from "../backend.ts";
+import { readJson, saveJson } from "../json-file.ts";
 import type { PreviewAssignment } from "../project.ts";
 import type { PylonId } from "../protocol.ts";
 import { warmHeader, type PreviewGateway, type PreviewRoute } from "./gateway.ts";
@@ -135,25 +135,15 @@ interface RouteRecord extends PreviewRoute { httpsPort: number }
 
 /** A missing file is an empty table: the probe's first start on this node. */
 export async function readRoutes(file: string): Promise<Map<number, PreviewRoute>> {
-  let text: string;
-  try {
-    text = await readFile(file, "utf8");
-  } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === "ENOENT") return new Map();
-    throw err;
-  }
-  const records = JSON.parse(text) as unknown;
+  const records = await readJson(file, []);
   const valid = (r: Partial<Record<keyof RouteRecord, unknown>>) =>
     Number.isInteger(r.httpsPort) && typeof r.pylonId === "string" && typeof r.service === "string";
   if (!Array.isArray(records) || !records.every(valid)) throw new Error(`${file} is not a list of { httpsPort, pylonId, service }`);
   return new Map((records as RouteRecord[]).map(({ httpsPort, pylonId, service }) => [httpsPort, { pylonId, service }]));
 }
 
-/** Converges run one at a time, so one temp name is enough. The rename makes the write atomic. */
 async function writeRoutes(file: string, routes: ReadonlyMap<number, PreviewRoute>): Promise<void> {
-  const records: RouteRecord[] = [...routes].map(([httpsPort, route]) => ({ httpsPort, ...route }));
-  await writeFile(`${file}.tmp`, `${JSON.stringify(records, null, 2)}\n`);
-  await rename(`${file}.tmp`, file);
+  await saveJson(file, [...routes].map(([httpsPort, route]): RouteRecord => ({ httpsPort, ...route })));
 }
 
 /** What `tailscale serve status --json` says about one https port. */

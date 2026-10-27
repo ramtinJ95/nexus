@@ -2,7 +2,8 @@ import { execFile } from "node:child_process";
 import { readFile } from "node:fs/promises";
 import { promisify } from "node:util";
 import { z } from "zod";
-import { existsError, saveJson } from "./storage.ts";
+import { saveJson } from "../json-file.ts";
+import { existsError } from "./storage.ts";
 
 const execFileAsync = promisify(execFile);
 

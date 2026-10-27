@@ -7,7 +7,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { run } from "./client.ts";
-import { directory, privateDirectory, saveJson } from "./storage.ts";
+import { saveJson } from "../json-file.ts";
+import { directory, privateDirectory } from "./storage.ts";
 
 type Inspection = { connected: boolean; status: { state: string } };
 

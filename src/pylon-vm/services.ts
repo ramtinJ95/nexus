@@ -1,4 +1,3 @@
-import { readFile } from "node:fs/promises";
 import { join, posix } from "node:path";
 import type { VM } from "@earendil-works/gondolin";
 import { z } from "zod";
@@ -7,7 +6,7 @@ import { configSchema, type Service } from "./contracts.ts";
 import { checked, guestExists, serviceRunning, startService, stopService } from "./guest.ts";
 import { openPortal } from "./portals.ts";
 import { noRelayStatus, readRelayStatus, relayLog, writeRelayMap } from "./relay.ts";
-import { existsError, saveJson } from "./storage.ts";
+import { readJson, saveJson } from "../json-file.ts";
 
 const relayPortList = Array.from({ length: relayPorts.last - relayPorts.first + 1 }, (_, i) => relayPorts.first + i);
 type Entry = {
@@ -93,36 +92,22 @@ export class GuestServices {
 		this.publicUrls = publicUrls;
 	}
 	async initialize(): Promise<void> {
-		try {
-			this.assignments = assignmentsSchema.parse(
-				JSON.parse(await readFile(join(this.dir, "services.json"), "utf8")),
-			);
-		} catch (error) {
-			if (!existsError(error, "ENOENT")) throw error;
-		}
+		const assignments = await readJson(join(this.dir, "services.json"));
+		if (assignments !== undefined) this.assignments = assignmentsSchema.parse(assignments);
 		// Saved by a controller that let Nexus's own ports through, they are dropped rather than failing the wake.
 		for (const [name, assignment] of Object.entries(this.assignments))
 			if (reservedPorts.has(assignment.port)) {
 				console.log(`services: ${name}'s saved port ${assignment.port} ${reservedPortMessage}, so it gets another`);
 				delete this.assignments[name];
 			}
-		try {
-			const saved = z.record(z.string(), z.unknown()).parse(JSON.parse(await readFile(join(this.dir, "adhoc.json"), "utf8")));
-			for (const [name, service] of Object.entries(saved)) {
-				const parsed = configSchema.safeParse({ services: { [name]: service } });
-				if (parsed.success) this.adHocConfig[name] = parsed.data.services[name]!;
-				else console.log(`services: ad hoc service ${name} is not restored: ${parsed.error.issues.map((issue) => `${issue.path.join(".")} ${issue.message}`).join("; ")}`);
-			}
-		} catch (error) {
-			if (!existsError(error, "ENOENT")) throw error;
+		const adHoc = await readJson(join(this.dir, "adhoc.json"));
+		for (const [name, service] of Object.entries(adHoc === undefined ? {} : z.record(z.string(), z.unknown()).parse(adHoc))) {
+			const parsed = configSchema.safeParse({ services: { [name]: service } });
+			if (parsed.success) this.adHocConfig[name] = parsed.data.services[name]!;
+			else console.log(`services: ad hoc service ${name} is not restored: ${parsed.error.issues.map((issue) => `${issue.path.join(".")} ${issue.message}`).join("; ")}`);
 		}
 		// A linked port outlives the boot, because the control plane keeps its preview for the thread's life.
-		let linked: number[] = [];
-		try {
-			linked = linkedSchema.parse(JSON.parse(await readFile(join(this.dir, "linked.json"), "utf8")));
-		} catch (error) {
-			if (!existsError(error, "ENOENT")) throw error;
-		}
+		const linked = linkedSchema.parse(await readJson(join(this.dir, "linked.json"), []));
 		for (const port of linked) {
 			if (reservedPorts.has(port)) console.log(`services: linked port ${port} ${reservedPortMessage}, so it is not routed`);
 			else this.attached.set(port, await openPortal(await this.ingress(), `/${linkedName(port)}`));

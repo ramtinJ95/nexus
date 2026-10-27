@@ -145,7 +145,7 @@ The probe runs as the system user `nexus`. These are its paths:
 | `/etc/nexus/secrets.env` | Secret values, `NAME=value` per line. Mode 0640, owner `root:nexus`. |
 | `/var/lib/nexus/pylons` | Pylon instances, their disks and checkpoints. |
 | `/var/lib/nexus/artifacts` | Images and templates, one directory per ID, which `backend.artifacts` in `probe.json` names. A `probe.json` from before the store, with a `backend.images` map of `<store>/<image ID>` directories, is read as that store. |
-| `/var/lib/nexus/preview-routes.json` | Which pylon each published preview port belongs to. |
+| `/var/lib/nexus/preview-routes.json` | Which pylon each published preview port belongs to. Mode 0600. |
 | `/opt/nexus/current` | The release the probe runs. |
 
 ### GitHub access for a project's agents

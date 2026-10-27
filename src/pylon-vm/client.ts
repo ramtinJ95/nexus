@@ -29,8 +29,8 @@ import {
 	privateDirectory,
 	readLogTail,
 	readRecord,
-	saveJson,
 } from "./storage.ts";
+import { saveJson } from "../json-file.ts";
 
 /** sun_path holds 104 bytes on macOS and 108 on Linux, including the terminating NUL. The shorter rules. */
 export const socketPathLimit = 104;
