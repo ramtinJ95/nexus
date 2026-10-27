@@ -1,4 +1,4 @@
 $ sudo node src/control/passkeys-host.ts /etc/nexus/control.json code
-https://rj-firebat.example.ts.net:7443/passkeys?code=9JDA-C9TE-6T9T-TSUX-XMKE
-The code 9JDA-C9TE-6T9T-TSUX-XMKE enrols one passkey until 2026-10-27T15:41:24.739Z.
+https://rj-firebat.example.ts.net:7443/passkeys?code=HDK3-YM46-BHKB-NL2X-CEND
+The code HDK3-YM46-BHKB-NL2X-CEND enrols one passkey until 2026-10-27T15:53:19.394Z.
 exit 0

@@ -23,10 +23,10 @@ for run in main branch; do
   cp "$here/stack.ts" "$here/drive.mjs" "$tree/docs/verification/passkey-land/"
   (cd "$tree" && npm run build >/dev/null)
   echo "$run: $(git -C "$tree" log --oneline -1)" | tee "$here/$run/commit.txt"
-  (cd "$tree" && EVIDENCE="$here/$run" exec node docs/verification/passkey-land/stack.ts) > "$work/$run.log" 2>&1 &
+  (cd "$tree" && EVIDENCE="$here/$run" exec node docs/verification/passkey-land/stack.ts) > "$here/$run/stack.out" 2>&1 &
   stack=$!
-  until grep -q '^{' "$work/$run.log"; do kill -0 "$stack" || { cat "$work/$run.log"; exit 1; }; sleep 0.5; done
-  OUT="$here/$run" ROOT="$tree" STACK=$(grep '^{' "$work/$run.log") node "$here/drive.mjs"
+  until grep -q '^{' "$here/$run/stack.out"; do kill -0 "$stack" || { cat "$here/$run/stack.out"; exit 1; }; sleep 0.5; done
+  OUT="$here/$run" ROOT="$tree" STACK=$(grep '^{' "$here/$run/stack.out") node "$here/drive.mjs"
   kill "$stack"; wait "$stack" || true
   stack=
 done

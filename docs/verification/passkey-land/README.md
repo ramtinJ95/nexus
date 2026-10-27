@@ -4,7 +4,7 @@ Verified in this task's pylon on 2026-10-27, on branch `feat/passkey-land`, agai
 
 ## How to rerun
 
-`run.sh` checks out main and the branch into two worktrees, copies `stack.ts` and `drive.mjs` into each, builds the dashboard, starts the stack and drives it. Each run's captures land in `main/` or `branch/`, with the commit in `commit.txt`. Both runs use the same two files, so the captures differ only by the code under test. `unit.sh` runs the branch's passkey tests against main's code and the branch's, into `unit-main.txt` and `unit-branch.txt`.
+`run.sh` checks out main and the branch into two worktrees, copies `stack.ts` and `drive.mjs` into each, builds the dashboard, starts the stack and drives it. Each run's captures land in `main/` or `branch/`, with the commit in `commit.txt` and the stack's own output in `stack.out`. Both runs use the same two files, so the captures differ only by the code under test. `unit.sh` runs the branch's passkey tests against main's code and the branch's, into `unit-main.txt` and `unit-branch.txt`.
 
 ```sh
 MODULES=<node_modules with @sparticuz/chromium and puppeteer-core> LD_LIBRARY_PATH=<its al2023 lib> FONTCONFIG_PATH=<its fonts.conf dir> \
@@ -52,11 +52,11 @@ The virtual authenticator verifies the person whenever it is asked, as a passkey
 What `nexus show` and the event stream record of the passkey landing, `branch/11-show-landed.txt` and `branch/12-events-waived.txt`:
 
 ```
-review rv-42000000 of PR #42: landed as 8888888888888888888888888888888888888888, round 1 of 5, reviewer th-ae00af258228 on gpt-6-astra, landing when approved
-waived by nLAPTOP with the passkey "MacBook Touch ID" (pk-3c6f7795) at 4444444444444444444444444444444444444444, 2026-10-27T15:31:06.601Z:
+review rv-42000000 of PR #42: landed as 8888888888888888888888888888888888888888, round 1 of 5, reviewer th-bee557b0a65b on gpt-6-astra, landing when approved
+waived by nLAPTOP with the passkey "MacBook Touch ID" (pk-f565caa9) at 4444444444444444444444444444444444444444, 2026-10-27T15:43:00.793Z:
   Always needs the person: anything irreversible, as it changes src/control/registry.ts.
 
-20 2026-10-27T15:31:06.601Z th-07abfb29be09 review.waived {"review":"rv-42000000","repo":"ramtinJ95/nexus","pr":42,"head":"4444444444444444444444444444444444444444","holds":["Always needs the person: anything irreversible, as it changes src/control/registry.ts."],"passkey":{"id":"pk-3c6f7795","name":"MacBook Touch ID"},"by":"nLAPTOP","at":1793115066601}
+20 2026-10-27T15:43:00.794Z th-257a6019d501 review.waived {"review":"rv-42000000","repo":"ramtinJ95/nexus","pr":42,"head":"4444444444444444444444444444444444444444","holds":["Always needs the person: anything irreversible, as it changes src/control/registry.ts."],"passkey":{"id":"pk-f565caa9","name":"MacBook Touch ID"},"by":"nLAPTOP","at":1793115780793}
 ```
 
 `branch/12-events-review.txt` shows #42's phases: held, `checking` after `nexus land`, held again 5 seconds later, then `checking`, `merging`, `deploying` and `landed` after the passkey, 12 seconds from the press. `branch/22-events-passkeys.txt` shows both enrolments and both revocations, the first `by nLAPTOP with Spare YubiKey` and the second `by root on the control plane's host`.
@@ -64,6 +64,10 @@ waived by nLAPTOP with the passkey "MacBook Touch ID" (pk-3c6f7795) at 444444444
 ## Unit tests
 
 `unit-main.txt` is the branch's passkey tests run against main's code: `passkeys.test.ts`, `review.test.ts` and `api.test.ts` fail to load, since the modules they test do not exist on main, and the dashboard and CLI tests fail. `unit-branch.txt` is the same 15 tests on the branch, all passing.
+
+## A bug the capture found
+
+The first runs of `run.sh` lost the branch's stack partway, once before the last enrolment and once before the last `nexus events`. `stack.out` then ended in `Error: database is locked`, thrown by the stack's registry write while the host command, another process, held the registry's write lock. The control plane on `rj-firebat` would meet the same collision. The registry now waits up to 5 seconds for another process's lock, and `src/control/registry.test.ts` holds the lock from a child process to show that a write waits rather than failing. It fails without the fix. The captures here are from a run after it, with neither stack stopping early.
 
 ## What this does not prove
 

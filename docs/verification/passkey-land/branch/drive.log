@@ -9,18 +9,18 @@ passkeys: run this as root on the control plane's host. The code it makes is wha
 exit 77
 
 $ sudo node src/control/passkeys-host.ts /etc/nexus/control.json code
-https://rj-firebat.example.ts.net:7443/passkeys?code=DQHV-QM9F-GZ4X-HZZA-255X
-The code DQHV-QM9F-GZ4X-HZZA-255X enrols one passkey until 2026-10-27T15:40:50.780Z.
+https://rj-firebat.example.ts.net:7443/passkeys?code=CTAH-5A9D-JV2L-HLPG-BQJH
+The code CTAH-5A9D-JV2L-HLPG-BQJH enrols one passkey until 2026-10-27T15:52:44.900Z.
 exit 0
 
 screenshot 05-enrol-0-with-code.png
 enrolled: {"landing":null,"landButton":"(no Land button)","error":null}
 screenshot 05-enrol-1-enrolled.png
 screenshot 06-code-used-twice.png
-POST /v1/passkeys/enrolment {"code":"DQHV-QM9F-GZ4X-HZZA-255X"}
+POST /v1/passkeys/enrolment {"code":"CTAH-5A9D-JV2L-HLPG-BQJH"}
 => 403 {"error":"that enrolment code is not one the control plane's host made, or it was used or has expired. Make one on the host with `sudo node /opt/nexus/control-current/src/control/passkeys-host.ts /etc/nexus/control.json code`"}
 $ sudo node src/control/passkeys-host.ts /etc/nexus/control.json list
-pk-3c6f7795  MacBook Touch ID  enrolled 2026-10-27T15:30:51.551Z from nLAPTOP
+pk-f565caa9  MacBook Touch ID  enrolled 2026-10-27T15:42:45.704Z from nLAPTOP
 exit 0
 
 reserved, held: {
@@ -29,8 +29,8 @@ reserved, held: {
   "error": null
 }
 screenshot 08-held-reserved.png
-$ nexus land th-07abfb29be09
-Landing review rv-42000000 of PR #42: checking, round 1 of 5, reviewer th-ae00af258228 on gpt-6-astra, landing when approved
+$ nexus land th-257a6019d501
+Landing review rv-42000000 of PR #42: checking, round 1 of 5, reviewer th-bee557b0a65b on gpt-6-astra, landing when approved
 exit 0
 
 09-land: the review is checking {
@@ -45,17 +45,17 @@ screenshot 09-land-1-checking.png
   "error": null
 }
 screenshot 09-land-2-needs-person.png
-$ nexus show th-07abfb29be09
-th-07abfb29be09  Cache the thread list
+$ nexus show th-257a6019d501
+th-257a6019d501  Cache the thread list
 project: nexus
 attention: decision
 status: active
-pylon: pylon-th-07abfb29be09 on verify-node, running, observed 0s ago
+pylon: pylon-th-257a6019d501 on verify-node, running, observed 0s ago
 size: 2 CPUs, 4 GiB memory, 10 GiB disk
 placement: verify-node, the project's default node
 setup: fresh boot runs .nexus/setup, because the control plane could not read .nexus/setup at main: the verify stack reads no remote
 PR watch: on
-review rv-42000000 of PR #42: needs-person, round 1 of 5, reviewer th-ae00af258228 on gpt-6-astra, landing when approved
+review rv-42000000 of PR #42: needs-person, round 1 of 5, reviewer th-bee557b0a65b on gpt-6-astra, landing when approved
 needs you: Always needs the person: anything irreversible, as it changes src/control/registry.ts.
 exit 0
 
@@ -79,40 +79,40 @@ screenshot 10-passkey-2-deploying.png
   "error": null
 }
 screenshot 10-passkey-3-landed.png
-the page sent: {"head":"4444444444444444444444444444444444444444","waiver":{"holds":["Always needs the person: anything irreversible, as it changes src/control/registry.ts."],"assertion":{"id":"dRcgb0LkvI7rXKk1yTTPRyGzpLHKtkz_8Y_uJqckiLw","clientDataJSON":"eyJ0eXBlIjoid2ViYXV0aG4uZ2V0IiwiY2hhbGxlbmdlIjoiVWFVOG5Ea3ZXTm5CenpnYmhWN1lyMGhBQ1J4cVcydHZycklyVFVTY0tyYyIsIm9yaWdpbiI6Imh0dHBzOi8vcmotZmlyZWJhdC5leGFtcGxlLnRzLm5ldDo3NDQzIiwiY3Jvc3NPcmlnaW4iOmZhbHNlfQ","authenticatorData":"A6D0gXHM_E5UP5GeVit3-GUmaQrcsxqzXW_SldytIZQFAAAAAg","signature":"MEYCIQD3uOnw4owgxVr5UvaLeLG9d5ezLq-MpcljktLBlG7WDwIhAIc3p0zy8HAhF16wWd_O_vLt_DuBcfUlKPvt27-GGJ4A"}}}
-$ nexus show th-07abfb29be09
-th-07abfb29be09  Cache the thread list
+the page sent: {"head":"4444444444444444444444444444444444444444","waiver":{"holds":["Always needs the person: anything irreversible, as it changes src/control/registry.ts."],"assertion":{"id":"I0VQ6D5_9KZZZmoyC9Cmskr3jajgT0HQ3o_hD0i36Ts","clientDataJSON":"eyJ0eXBlIjoid2ViYXV0aG4uZ2V0IiwiY2hhbGxlbmdlIjoibWJLWkYxZTNFaFM5VzYyODZnTEtWakVJaFZMOUVHWnpJQUJzcUYydTFXOCIsIm9yaWdpbiI6Imh0dHBzOi8vcmotZmlyZWJhdC5leGFtcGxlLnRzLm5ldDo3NDQzIiwiY3Jvc3NPcmlnaW4iOmZhbHNlLCJvdGhlcl9rZXlzX2Nhbl9iZV9hZGRlZF9oZXJlIjoiZG8gbm90IGNvbXBhcmUgY2xpZW50RGF0YUpTT04gYWdhaW5zdCBhIHRlbXBsYXRlLiBTZWUgaHR0cHM6Ly9nb28uZ2wveWFiUGV4In0","authenticatorData":"A6D0gXHM_E5UP5GeVit3-GUmaQrcsxqzXW_SldytIZQFAAAAAg","signature":"MEYCIQCr7_XSzip3SiOCjI8IacU5EAZjujUC4MlfzD2stap00AIhAO5vK3h8Rngi4-RpERAwBJsYRj3peP2O_bQgjEZJPBWo"}}}
+$ nexus show th-257a6019d501
+th-257a6019d501  Cache the thread list
 project: nexus
 attention: none
 status: active
-pylon: pylon-th-07abfb29be09 on verify-node, running, observed 0s ago
+pylon: pylon-th-257a6019d501 on verify-node, running, observed 0s ago
 size: 2 CPUs, 4 GiB memory, 10 GiB disk
 placement: verify-node, the project's default node
 setup: fresh boot runs .nexus/setup, because the control plane could not read .nexus/setup at main: the verify stack reads no remote
 PR watch: on
-review rv-42000000 of PR #42: landed as 8888888888888888888888888888888888888888, round 1 of 5, reviewer th-ae00af258228 on gpt-6-astra, landing when approved
-waived by nLAPTOP with the passkey "MacBook Touch ID" (pk-3c6f7795) at 4444444444444444444444444444444444444444, 2026-10-27T15:31:06.601Z:
+review rv-42000000 of PR #42: landed as 8888888888888888888888888888888888888888, round 1 of 5, reviewer th-bee557b0a65b on gpt-6-astra, landing when approved
+waived by nLAPTOP with the passkey "MacBook Touch ID" (pk-f565caa9) at 4444444444444444444444444444444444444444, 2026-10-27T15:43:00.793Z:
   Always needs the person: anything irreversible, as it changes src/control/registry.ts.
 exit 0
 
-$ nexus events --thread th-07abfb29be09 --kind review.waived
-20 2026-10-27T15:31:06.601Z th-07abfb29be09 review.waived {"review":"rv-42000000","repo":"ramtinJ95/nexus","pr":42,"head":"4444444444444444444444444444444444444444","holds":["Always needs the person: anything irreversible, as it changes src/control/registry.ts."],"passkey":{"id":"pk-3c6f7795","name":"MacBook Touch ID"},"by":"nLAPTOP","at":1793115066601}
+$ nexus events --thread th-257a6019d501 --kind review.waived
+20 2026-10-27T15:43:00.794Z th-257a6019d501 review.waived {"review":"rv-42000000","repo":"ramtinJ95/nexus","pr":42,"head":"4444444444444444444444444444444444444444","holds":["Always needs the person: anything irreversible, as it changes src/control/registry.ts."],"passkey":{"id":"pk-f565caa9","name":"MacBook Touch ID"},"by":"nLAPTOP","at":1793115780793}
 exit 0
 
-$ nexus events --thread th-07abfb29be09 --kind review.changed
-4 2026-10-27T15:30:47.216Z th-07abfb29be09 review.changed {"review":"rv-42000000","reviewer":"th-ae00af258228","phase":{"kind":"merging","authorized":null},"round":1}
-11 2026-10-27T15:30:47.243Z th-07abfb29be09 review.changed {"review":"rv-42000000","reviewer":"th-ae00af258228","phase":{"kind":"needs-person","reasons":["Always needs the person: anything irreversible, as it changes src/control/registry.ts."]},"round":1}
-14 2026-10-27T15:30:56.487Z th-07abfb29be09 review.changed {"review":"rv-42000000","reviewer":"th-ae00af258228","phase":{"kind":"checking","startedAt":1793115056487,"thread":null},"round":1}
-16 2026-10-27T15:31:01.247Z th-07abfb29be09 review.changed {"review":"rv-42000000","reviewer":"th-ae00af258228","phase":{"kind":"merging","authorized":null},"round":1}
-17 2026-10-27T15:31:01.248Z th-07abfb29be09 review.changed {"review":"rv-42000000","reviewer":"th-ae00af258228","phase":{"kind":"needs-person","reasons":["Always needs the person: anything irreversible, as it changes src/control/registry.ts."]},"round":1}
-19 2026-10-27T15:31:06.601Z th-07abfb29be09 review.changed {"review":"rv-42000000","reviewer":"th-ae00af258228","phase":{"kind":"checking","startedAt":1793115066601,"thread":null},"round":1}
-22 2026-10-27T15:31:11.248Z th-07abfb29be09 review.changed {"review":"rv-42000000","reviewer":"th-ae00af258228","phase":{"kind":"merging","authorized":null},"round":1}
-23 2026-10-27T15:31:11.250Z th-07abfb29be09 review.changed {"review":"rv-42000000","reviewer":"th-ae00af258228","phase":{"kind":"deploying","commit":"8888888888888888888888888888888888888888","previous":"1111111111111111111111111111111111111111","requested":false,"deadline":1793116871250},"round":1}
-27 2026-10-27T15:31:18.250Z th-07abfb29be09 review.changed {"review":"rv-42000000","reviewer":"th-ae00af258228","phase":{"kind":"landed","commit":"8888888888888888888888888888888888888888"},"round":1}
+$ nexus events --thread th-257a6019d501 --kind review.changed
+4 2026-10-27T15:42:41.258Z th-257a6019d501 review.changed {"review":"rv-42000000","reviewer":"th-bee557b0a65b","phase":{"kind":"merging","authorized":null},"round":1}
+9 2026-10-27T15:42:41.275Z th-257a6019d501 review.changed {"review":"rv-42000000","reviewer":"th-bee557b0a65b","phase":{"kind":"needs-person","reasons":["Always needs the person: anything irreversible, as it changes src/control/registry.ts."]},"round":1}
+14 2026-10-27T15:42:50.700Z th-257a6019d501 review.changed {"review":"rv-42000000","reviewer":"th-bee557b0a65b","phase":{"kind":"checking","startedAt":1793115770700,"thread":null},"round":1}
+16 2026-10-27T15:42:55.288Z th-257a6019d501 review.changed {"review":"rv-42000000","reviewer":"th-bee557b0a65b","phase":{"kind":"merging","authorized":null},"round":1}
+17 2026-10-27T15:42:55.289Z th-257a6019d501 review.changed {"review":"rv-42000000","reviewer":"th-bee557b0a65b","phase":{"kind":"needs-person","reasons":["Always needs the person: anything irreversible, as it changes src/control/registry.ts."]},"round":1}
+19 2026-10-27T15:43:00.794Z th-257a6019d501 review.changed {"review":"rv-42000000","reviewer":"th-bee557b0a65b","phase":{"kind":"checking","startedAt":1793115780794,"thread":null},"round":1}
+22 2026-10-27T15:43:05.295Z th-257a6019d501 review.changed {"review":"rv-42000000","reviewer":"th-bee557b0a65b","phase":{"kind":"merging","authorized":null},"round":1}
+23 2026-10-27T15:43:05.299Z th-257a6019d501 review.changed {"review":"rv-42000000","reviewer":"th-bee557b0a65b","phase":{"kind":"deploying","commit":"8888888888888888888888888888888888888888","previous":"1111111111111111111111111111111111111111","requested":false,"deadline":1793117585299},"round":1}
+27 2026-10-27T15:43:12.296Z th-257a6019d501 review.changed {"review":"rv-42000000","reviewer":"th-bee557b0a65b","phase":{"kind":"landed","commit":"8888888888888888888888888888888888888888"},"round":1}
 exit 0
 
 The driver sends the page's own land request again, assertion and all.
-POST /v1/threads/th-07abfb29be09/land {"head":"4444444444444444444444444444444444444444","waiver":{"holds":["Always needs the person: anything irreversible, as it changes src/control/registry.ts."],"assertion":"<assertion from credential dRcgb0Lk>"}}
+POST /v1/threads/th-257a6019d501/land {"head":"4444444444444444444444444444444444444444","waiver":{"holds":["Always needs the person: anything irreversible, as it changes src/control/registry.ts."],"assertion":"<assertion from credential I0VQ6D5_>"}}
 => 403 {"error":"the passkey's confirmation was used already or has expired, so it confirms nothing. Confirm again"}
 The review is still landed.
 claude, held: {
@@ -122,44 +122,44 @@ claude, held: {
 }
 screenshot 14-not-waivable.png
 The driver asks to waive the Claude reviewer's hold anyway.
-POST /v1/threads/th-0109634b6ead/land/challenge {"head":"5555555555555555555555555555555555555555","holds":["A Claude reviewer approved it. Its verdict is read from its transcript in its pylon, where code it runs could write, so only the person can land what it approved.","Always needs the person: changes to login or auth, as it changes src/control/api.ts."]}
+POST /v1/threads/th-041f7bbd92dc/land/challenge {"head":"5555555555555555555555555555555555555555","holds":["A Claude reviewer approved it. Its verdict is read from its transcript in its pylon, where code it runs could write, so only the person can land what it approved.","Always needs the person: changes to login or auth, as it changes src/control/api.ts."]}
 => 409 {"error":"a passkey cannot waive \"A Claude reviewer approved it. Its verdict is read from its transcript in its pylon, where code it runs could write, so only the person can land what it approved.\": only the holds the merge policy reserves for the person"}
 screenshot 15-other-commit-0-held.png
 screenshot 15-other-commit-1-moved.png
-POST /v1/threads/th-06b9fba86066/land/challenge {"head":"6666666666666666666666666666666666666666","holds":["Always needs the person: pylon image rebuilds, as it changes images/pylon/Dockerfile."]}
-=> 200 {"challenge":"TOC0HaUHp9GGCtIBjR8zQf10AWnNHFGuEVQA06gmMvc","rpId":"rj-firebat.example.ts.net","timeout":120000,"userVerification":"required","allowCredentials":[{"type":"public-key","id":"dRcgb0LkvI7rXKk1yTTPRyGzpLHKtkz_8Y_uJqckiLw"}]}
-(the virtual authenticator verified the person and signed the challenge TOC0HaUHp9GGCtIBjR8zQf10AWnNHFGuEVQA06gmMvc for https://rj-firebat.example.ts.net:7443)
+POST /v1/threads/th-7d735f7ebdd7/land/challenge {"head":"6666666666666666666666666666666666666666","holds":["Always needs the person: pylon image rebuilds, as it changes images/pylon/Dockerfile."]}
+=> 200 {"challenge":"yDnWDapgI_7livIL6IJQb7_Pi-_TIWtgadZCSWRb7U4","rpId":"rj-firebat.example.ts.net","timeout":120000,"userVerification":"required","allowCredentials":[{"type":"public-key","id":"I0VQ6D5_9KZZZmoyC9Cmskr3jajgT0HQ3o_hD0i36Ts"}]}
+(the virtual authenticator verified the person and signed the challenge yDnWDapgI_7livIL6IJQb7_Pi-_TIWtgadZCSWRb7U4 for https://rj-firebat.example.ts.net:7443)
 PR #46 moved to 7777777777777777777777777777777777777777, and the reviewer approved it there. The driver sends the assertion for 6666666666666666666666666666666666666666 to land 7777777777777777777777777777777777777777:
-POST /v1/threads/th-06b9fba86066/land {"head":"7777777777777777777777777777777777777777","waiver":{"holds":["Always needs the person: pylon image rebuilds, as it changes images/pylon/Dockerfile."],"assertion":"<assertion from credential dRcgb0Lk>"}}
+POST /v1/threads/th-7d735f7ebdd7/land {"head":"7777777777777777777777777777777777777777","waiver":{"holds":["Always needs the person: pylon image rebuilds, as it changes images/pylon/Dockerfile."],"assertion":"<assertion from credential I0VQ6D5_>"}}
 => 403 {"error":"the passkey confirmed landing commit 6666666666666666666666666666666666666666, not 7777777777777777777777777777777777777777"}
 The review is still needs-person at 7777777777777777777777777777777777777777.
 screenshot 16-not-deployer.png
 As the laptop, a deployer, the driver had the passkey sign a waiver for 7777777777777777777777777777777777777777:
-POST /v1/threads/th-06b9fba86066/land/challenge {"head":"7777777777777777777777777777777777777777","holds":["Always needs the person: pylon image rebuilds, as it changes images/pylon/Dockerfile."]}
-=> 200 {"challenge":"N2Uj9-FnKyJxPHJWK9DAZo09TuEgSAXFXyn54CxU5Mw","rpId":"rj-firebat.example.ts.net","timeout":120000,"userVerification":"required","allowCredentials":[{"type":"public-key","id":"dRcgb0LkvI7rXKk1yTTPRyGzpLHKtkz_8Y_uJqckiLw"}]}
-(the virtual authenticator verified the person and signed the challenge N2Uj9-FnKyJxPHJWK9DAZo09TuEgSAXFXyn54CxU5Mw for https://rj-firebat.example.ts.net:7443)
+POST /v1/threads/th-7d735f7ebdd7/land/challenge {"head":"7777777777777777777777777777777777777777","holds":["Always needs the person: pylon image rebuilds, as it changes images/pylon/Dockerfile."]}
+=> 200 {"challenge":"gDphnuaZnMBL1sJuSEhxWUWYb0DlEb8Vw6pGlE807as","rpId":"rj-firebat.example.ts.net","timeout":120000,"userVerification":"required","allowCredentials":[{"type":"public-key","id":"I0VQ6D5_9KZZZmoyC9Cmskr3jajgT0HQ3o_hD0i36Ts"}]}
+(the virtual authenticator verified the person and signed the challenge gDphnuaZnMBL1sJuSEhxWUWYb0DlEb8Vw6pGlE807as for https://rj-firebat.example.ts.net:7443)
 Then, as the phone:
-POST /v1/threads/th-06b9fba86066/land/challenge {"head":"7777777777777777777777777777777777777777","holds":["Always needs the person: pylon image rebuilds, as it changes images/pylon/Dockerfile."]}
+POST /v1/threads/th-7d735f7ebdd7/land/challenge {"head":"7777777777777777777777777777777777777777","holds":["Always needs the person: pylon image rebuilds, as it changes images/pylon/Dockerfile."]}
 => 403 {"error":"caller may not land a pull request: landing deploys, and only deployers may, never infrastructure nodes or pylons"}
-POST /v1/threads/th-06b9fba86066/land {"head":"7777777777777777777777777777777777777777","waiver":{"holds":["Always needs the person: pylon image rebuilds, as it changes images/pylon/Dockerfile."],"assertion":"<assertion from credential dRcgb0Lk>"}}
+POST /v1/threads/th-7d735f7ebdd7/land {"head":"7777777777777777777777777777777777777777","waiver":{"holds":["Always needs the person: pylon image rebuilds, as it changes images/pylon/Dockerfile."],"assertion":"<assertion from credential I0VQ6D5_>"}}
 => 403 {"error":"caller may not land a pull request: landing deploys, and only deployers may, never infrastructure nodes or pylons"}
 The review is still needs-person.
 $ sudo node src/control/passkeys-host.ts /etc/nexus/control.json code
-https://rj-firebat.example.ts.net:7443/passkeys?code=9JDA-C9TE-6T9T-TSUX-XMKE
-The code 9JDA-C9TE-6T9T-TSUX-XMKE enrols one passkey until 2026-10-27T15:41:24.739Z.
+https://rj-firebat.example.ts.net:7443/passkeys?code=HDK3-YM46-BHKB-NL2X-CEND
+The code HDK3-YM46-BHKB-NL2X-CEND enrols one passkey until 2026-10-27T15:53:19.394Z.
 exit 0
 
 screenshot 17-two-passkeys.png
 the page asked: "Revoke the passkey \"MacBook Touch ID\"? A passkey confirms it.", and the driver accepted
 screenshot 18-revoked-from-dashboard.png
-POST /v1/passkeys/pk-2d3b8ab1/revoke {}
+POST /v1/passkeys/pk-a2de156a/revoke {}
 => 400 {"error":"✖ Invalid input: expected object, received undefined\n  → at assertion"}
 $ sudo node src/control/passkeys-host.ts /etc/nexus/control.json list
-pk-2d3b8ab1  Spare YubiKey  enrolled 2026-10-27T15:31:25.428Z from nLAPTOP, last used 2026-10-27T15:31:27.513Z
+pk-a2de156a  Spare YubiKey  enrolled 2026-10-27T15:43:20.117Z from nLAPTOP, last used 2026-10-27T15:43:22.201Z
 exit 0
 
-$ sudo node src/control/passkeys-host.ts /etc/nexus/control.json revoke pk-2d3b8ab1
-Revoked pk-2d3b8ab1, Spare YubiKey.
+$ sudo node src/control/passkeys-host.ts /etc/nexus/control.json revoke pk-a2de156a
+Revoked pk-a2de156a, Spare YubiKey.
 exit 0
 
 $ sudo node src/control/passkeys-host.ts /etc/nexus/control.json list
@@ -167,9 +167,9 @@ No passkeys.
 exit 0
 
 $ nexus events --kind passkey.enrolled --kind passkey.revoked
-13 2026-10-27T15:30:51.551Z - passkey.enrolled {"passkey":"pk-3c6f7795","name":"MacBook Touch ID","by":"nLAPTOP"}
-29 2026-10-27T15:31:25.428Z - passkey.enrolled {"passkey":"pk-2d3b8ab1","name":"Spare YubiKey","by":"nLAPTOP"}
-30 2026-10-27T15:31:27.513Z - passkey.revoked {"passkey":"pk-3c6f7795","name":"MacBook Touch ID","by":"nLAPTOP with Spare YubiKey"}
-31 2026-10-27T15:31:30.468Z - passkey.revoked {"passkey":"pk-2d3b8ab1","name":"Spare YubiKey","by":"root on the control plane's host"}
+13 2026-10-27T15:42:45.704Z - passkey.enrolled {"passkey":"pk-f565caa9","name":"MacBook Touch ID","by":"nLAPTOP"}
+29 2026-10-27T15:43:20.117Z - passkey.enrolled {"passkey":"pk-a2de156a","name":"Spare YubiKey","by":"nLAPTOP"}
+30 2026-10-27T15:43:22.202Z - passkey.revoked {"passkey":"pk-f565caa9","name":"MacBook Touch ID","by":"nLAPTOP with Spare YubiKey"}
+31 2026-10-27T15:43:25.601Z - passkey.revoked {"passkey":"pk-a2de156a","name":"Spare YubiKey","by":"root on the control plane's host"}
 exit 0
 
