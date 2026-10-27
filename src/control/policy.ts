@@ -8,8 +8,8 @@
  * reserved case holds the landing for the person, who can merge it themselves. It is a list, so a reserved change in
  * a file it does not name still rests on the reviewer alone.
  *
- * The holds that always need the person are theirs to waive, with a passkey (passkeys.ts). Every other condition is
- * one no person can waive: it clears only when what failed changes.
+ * The holds that always need the person are theirs to waive, by pressing Land on the dashboard. Every other condition
+ * is one no person can waive: it clears only when what failed changes.
  */
 import type { ChangedFile, PrSnapshot } from "./github.ts";
 import { blocks, findingsOf, type ReservedCase, type Review } from "./review.ts";
@@ -35,7 +35,7 @@ export interface LandingFacts {
 const reservedPaths: readonly { case: ReservedCase; matches(path: string, patch: string): boolean }[] = [
   { case: "secrets", matches: (p) => /secret|credential/i.test(p) || p.startsWith("deploy/") },
   { case: "egress", matches: (p) => ["src/project.ts", "src/control/threads.ts", "src/control/live.ts"].includes(p) || p.startsWith("src/pylon-vm") || /network|egress|allowlist/i.test(p) },
-  { case: "auth", matches: (p) => ["src/control/api.ts", "src/control/main.ts", "src/control/login.ts", "src/control/releases.ts", "src/control/attach.ts", "src/control/policy.ts"].includes(p) || p.startsWith("src/probe/") || p.startsWith("src/deploy/") || /auth|login|whois|passkey|webauthn/i.test(p) },
+  { case: "auth", matches: (p) => ["src/control/api.ts", "src/control/main.ts", "src/control/login.ts", "src/control/releases.ts", "src/control/attach.ts", "src/control/policy.ts"].includes(p) || p.startsWith("src/probe/") || p.startsWith("src/deploy/") || /auth|login|whois/i.test(p) },
   { case: "tailnet", matches: (p) => /tailnet|tailscale/i.test(p) },
   { case: "image-rebuild", matches: (p) => p.startsWith("images/") || p === "src/agent-setup.ts" },
   { case: "irreversible", matches: (p, patch) => p === "src/control/registry.ts" && (patch === "" || /^@@.*\bmigrations\b|^\+.*\b(CREATE|ALTER|DROP) (TABLE|INDEX)\b/im.test(patch)) },
@@ -56,15 +56,15 @@ export const recordedHolds = (review: Review): string[] => [
 export const heldBy = (review: Review): string[] => review.phase.kind === "needs-person" ? review.phase.reasons : recordedHolds(review);
 
 /**
- * Whether a hold meets every landing of the same approved head again, and whether the person may waive it with a
- * passkey, and why. The first rule a reason matches decides. A reason none matches, such as a deploy's failure, is
- * the loop's own and nothing to waive.
+ * Whether a hold meets every landing of the same approved head again, and whether the person may waive it, and why.
+ * The first rule a reason matches decides. A reason none matches, such as a deploy's failure, is the loop's own and
+ * nothing to waive.
  */
 export interface HoldRule { holdsAgain: boolean; waivable: boolean; why: string }
 const holdRules: readonly [(reason: string) => boolean, HoldRule][] = [
-  [(r) => r.startsWith(personOnly), { holdsAgain: true, waivable: true, why: "The policy reserves this for you, and your passkey shows that you, not an agent, confirmed it." }],
-  [(r) => r === checkChanged, { holdsAgain: true, waivable: true, why: "Accepting a new .nexus/check is yours, and your passkey shows that you, not an agent, confirmed it." }],
-  [(r) => r === claudeApproved, { holdsAgain: true, waivable: false, why: "A passkey cannot stand in for a harness reviewer's approval: the Claude reviewer's verdict, its findings and reserved cases included, could have been written by code in its pylon." }],
+  [(r) => r.startsWith(personOnly), { holdsAgain: true, waivable: true, why: "The policy reserves this for you, and pressing Land here is you waiving it." }],
+  [(r) => r === checkChanged, { holdsAgain: true, waivable: true, why: "Accepting a new .nexus/check is yours, and pressing Land here is you accepting it." }],
+  [(r) => r === claudeApproved, { holdsAgain: true, waivable: false, why: "Nothing here stands in for a harness reviewer's approval: the Claude reviewer's verdict, its findings and reserved cases included, could have been written by code in its pylon." }],
   [(r) => /^Findings P0 to P2 are open|^The reviewer has not approved/.test(r), { holdsAgain: false, waivable: false, why: "Open P0 to P2 findings hold every landing until they are fixed and the reviewer approves." }],
   [(r) => r.startsWith("The builder neither fixed nor rejected"), { holdsAgain: false, waivable: false, why: "Every P0 to P2 finding needs the builder's fix or its reason to reject." }],
   [(r) => r.startsWith(".nexus/check "), { holdsAgain: false, waivable: false, why: "Only a .nexus/check that passed at the approved head lands." }],
@@ -75,7 +75,7 @@ const holdRules: readonly [(reason: string) => boolean, HoldRule][] = [
   [(r) => r.startsWith("The reviewer ran the builder's own model"), { holdsAgain: false, waivable: false, why: "The policy needs a reviewer on another model than the builder's." }],
   [(r) => /could not be checked live/.test(r), { holdsAgain: false, waivable: false, why: "The description must say what could not be checked live, which the builder can add." }],
 ];
-const otherHold: HoldRule = { holdsAgain: false, waivable: false, why: "A passkey waives only what the policy reserves for you." };
+const otherHold: HoldRule = { holdsAgain: false, waivable: false, why: "Only what the policy reserves for you can be waived." };
 export const holdRule = (reason: string): HoldRule => holdRules.find(([matches]) => matches(reason))?.[1] ?? otherHold;
 /** Whether a reason holds every landing of the same approved head again. Landing again gets past it only if the person waives it. */
 export const holdsAgain = (reason: string) => holdRule(reason).holdsAgain;

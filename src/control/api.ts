@@ -56,8 +56,6 @@ import type { StartRequest } from "./threads.ts";
 import { queuedView, type QueuedRecord, type ThreadQueue } from "./queue.ts";
 import { nodePylons, overcommitted, type NodePylons } from "./placement.ts";
 import { maxRounds, type Review, type ReviewLoop } from "./review.ts";
-import { passkeyGate, passkeyList, type Purpose } from "./passkeys.ts";
-import type { RelyingParty } from "./webauthn.ts";
 
 export interface ApiOptions {
   https?: { port: number; certificate(): Promise<Certificate>; renewalMs?: number; retryMs?: number };
@@ -86,8 +84,6 @@ export interface ApiOptions {
   previewPorts: PortRange;
   /** Image builds and rollouts. Without it, their routes answer 409. */
   images?: ImageRollout;
-  /** The dashboard's HTTPS origin and host, which passkeys are bound to. Without it, passkey routes answer 409. */
-  passkeys?: RelyingParty;
   /** How long a stream's client may leave what was sent unread before it is dropped. 30 s by default. */
   streamStallMs?: number;
   /** How attached terminals ping and wait. Tests shorten it. */
@@ -441,17 +437,8 @@ export async function startApi(options: ApiOptions): Promise<Api> {
     };
   }
 
-  const passkeys = passkeyGate({ registry, rp: options.passkeys ?? null });
-  /** What a waiver's passkey confirms: landing this builder's review at `head` with exactly these holds waived. */
-  const waive = (t: Thread, head: string, holds: string[]): Purpose => {
-    const r = registry.review(t.id);
-    if (r === null) throw new HttpError(409, `thread ${t.id} has no review`);
-    return { kind: "waive", review: r.id, repo: r.pr.repo, pr: r.pr.number, head, holds };
-  };
-
   const page = dashboard({
     registry, detail, conversation,
-    passkeyOrigin: options.passkeys?.origin ?? null,
     landRefusal: (caller) => !options.reviews ? "no review loop" : canDeploy(registry, options.deployment, caller) ? null : "not a deployer",
     deploys: (r) => options.reviews?.deploys(r) ?? false,
   });
@@ -861,38 +848,11 @@ export async function startApi(options: ApiOptions): Promise<Api> {
       if (body.land) mayLand(r.caller);
       return created(await reviewsOrRefuse().start(t.id, { pr: body.pr, rounds: body.rounds, land: body.land ? r.caller : null }));
     }],
-    ["POST", /^\/v1\/threads\/([^/]+)\/land\/challenge$/, async (m, r) => {
-      const body = parse(waiverChallengeSchema, await r.body());
-      const t = thread(m[1]!);
-      mayLand(r.caller);
-      reviewsOrRefuse().waivable(t.id, body.head, body.holds);
-      return ok(passkeys.challenge(waive(t, body.head, body.holds)));
-    }],
     ["POST", /^\/v1\/threads\/([^/]+)\/land$/, async (m, r) => {
       const body = parse(landSchema, await r.body({}));
       const t = thread(m[1]!);
       mayLand(r.caller);
-      if (body.waiver === undefined) return ok(reviewsOrRefuse().land(t.id, r.caller, body.head));
-      // The assertion is checked before the review, so a replay is refused for what it is, whatever the review does now.
-      const passkey = passkeys.confirm(body.waiver.assertion, waive(t, body.head!, body.waiver.holds));
-      return ok(reviewsOrRefuse().land(t.id, r.caller, body.head, { head: body.head!, holds: body.waiver.holds, passkey: { id: passkey.id, name: passkey.name }, by: r.caller, at: Date.now() }));
-    }],
-    ["GET", /^\/v1\/passkeys$/, () => ok(passkeyList(registry))],
-    ["POST", /^\/v1\/passkeys\/enrolment$/, async (_, r) => ok(passkeys.enrolment(parse(z.strictObject({ code: z.string().max(64) }), await r.body()).code))],
-    ["POST", /^\/v1\/passkeys$/, async (_, r) => {
-      const body = parse(enrolSchema, await r.body());
-      const { publicKey: _key, ...passkey } = passkeys.enrol(body.credential, body.name, r.caller);
-      return created(passkey);
-    }],
-    ["POST", /^\/v1\/passkeys\/(pk-[0-9a-f]{8})\/revoke\/challenge$/, ([, id]) => {
-      if (!registry.passkeys().some((p) => p.id === id)) throw new HttpError(404, `no passkey ${id}`);
-      return ok(passkeys.challenge({ kind: "revoke", passkey: id! }));
-    }],
-    ["POST", /^\/v1\/passkeys\/(pk-[0-9a-f]{8})\/revoke$/, async ([, id], r) => {
-      const { assertion } = parse(z.strictObject({ assertion: assertionSchema }), await r.body());
-      const by = passkeys.confirm(assertion, { kind: "revoke", passkey: id! });
-      if (registry.revokePasskey(id!, `${r.caller} with ${by.name}`) === null) throw new HttpError(404, `no passkey ${id}`);
-      return noContent;
+      return ok(reviewsOrRefuse().land(t.id, r.caller, body.head, body.waive));
     }],
     ["POST", /^\/v1\/threads\/([^/]+)\/abort$/, async (m) => { await harness.abort(conversing(thread(m[1]!)).id); return noContent; }],
     ["POST", /^\/v1\/threads\/([^/]+)\/retry$/, async (m) => { await harness.retry(runnable(thread(m[1]!)).id); return noContent; }],
@@ -1256,14 +1216,10 @@ export async function startApi(options: ApiOptions): Promise<Api> {
   };
 }
 
-const base64url = (max: number) => z.string().regex(/^[A-Za-z0-9_-]*$/).max(max);
-const assertionSchema = z.strictObject({ id: base64url(1_400), clientDataJSON: base64url(4_000), authenticatorData: base64url(4_000), signature: base64url(2_000) });
 const holdsSchema = z.array(z.string().min(1).max(4_000)).min(1).max(20);
-const waiverChallengeSchema = z.strictObject({ head: commitSchema, holds: holdsSchema });
-/** A waiver names the commit it confirmed, which its assertion is bound to. */
-const landSchema = z.strictObject({ head: commitSchema.optional(), waiver: z.strictObject({ holds: holdsSchema, assertion: assertionSchema }).optional() })
-  .refine((b) => b.waiver === undefined || b.head !== undefined, "a waiver needs the head it confirmed");
-const enrolSchema = z.strictObject({ name: z.string().trim().min(1).max(60), credential: z.strictObject({ clientDataJSON: base64url(4_000), attestationObject: base64url(16_000) }) });
+/** A waiver names the commit the person saw, so a review that moved on is not landed past holds they did not see. */
+const landSchema = z.strictObject({ head: commitSchema.optional(), waive: holdsSchema.optional() })
+  .refine((b) => b.waive === undefined || b.head !== undefined, "a waiver needs the head it confirmed");
 
 function parse<T>(schema: z.ZodType<T>, body: unknown): T {
   const result = schema.safeParse(body);

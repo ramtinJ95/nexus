@@ -198,10 +198,7 @@ export async function startControlPlane(config: ControlPlaneConfig, models: Mode
   const queueTimer = setInterval(() => { void queue?.poll(); }, 15_000);
   void queue?.poll();
   const api = await startApi({
-    ...(config.https ? {
-      https: { port: 7443, certificate: () => localApiCertificate(config.https!.hostname, tailscaled) },
-      passkeys: { id: config.https.hostname, origin: `https://${config.https.hostname}:7443` },
-    } : {}),
+    ...(config.https ? { https: { port: 7443, certificate: () => localApiCertificate(config.https!.hostname, tailscaled) } } : {}),
     prWatchEnabled: token !== null,
     reviews,
     queue,

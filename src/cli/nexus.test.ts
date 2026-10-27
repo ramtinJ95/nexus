@@ -1316,7 +1316,7 @@ test("show prints PR metadata and one disabled-watch notice without waking the p
 
 test("deploy and release use the shared release view and wait for both roles", async (t) => {
   const s = await setup(t);
-  assert.equal((await s.nexus(["--version"])).stdout.trim(), "nexus 0.29.0");
+  assert.equal((await s.nexus(["--version"])).stdout.trim(), "nexus 0.30.0");
   assert.equal((await s.nexus(["deploy", "bad"])).code, 64);
   const requested = await s.json(["deploy", "main"]);
   assert.equal(requested.desired.commit, "a".repeat(40));
@@ -1392,9 +1392,9 @@ test("review and land reach the review loop's routes, and show prints a review a
   assert.match((await s.nexus(["show", thread.id])).stdout, /^review rv-1 of PR #7: merged, round 1 of 5, reviewer th-reviewer on claude-opus-5-5$/m);
 
   const hold = "Always needs the person: changes to login or auth, as it changes src/control/api.ts.";
-  s.registry.saveReview({ ...review, land: { requestedBy: "nLAPTOP" }, phase: { kind: "landed", commit: "4".repeat(40) }, waiver: { head: "1".repeat(40), holds: [hold], passkey: { id: "pk-0000000a", name: "MacBook Touch ID" }, by: "nLAPTOP", at: Date.UTC(2026, 9, 27, 9) } });
+  s.registry.saveReview({ ...review, land: { requestedBy: "nLAPTOP" }, phase: { kind: "landed", commit: "4".repeat(40) }, waiver: { head: "1".repeat(40), holds: [hold], by: "nLAPTOP", at: Date.UTC(2026, 9, 27, 9) } });
   const waived = await s.nexus(["show", thread.id]);
-  assert.match(waived.stdout, new RegExp(`^waived by nLAPTOP with the passkey "MacBook Touch ID" \\(pk-0000000a\\) at ${"1".repeat(40)}, 2026-10-27T09:00:00.000Z:\n  ${hold.replace(/[.()]/g, "\\$&")}$`, "m"));
+  assert.match(waived.stdout, new RegExp(`^waived by nLAPTOP at ${"1".repeat(40)}, 2026-10-27T09:00:00.000Z:\n  ${hold.replace(/[.()]/g, "\\$&")}$`, "m"));
   const events = await s.nexus(["events", "--thread", thread.id, "--kind", "review.waived"]);
   assert.match(events.stdout, /review.waived/);
 });

@@ -239,64 +239,10 @@ const actions = {
   "link-port": (thread, { port }) => api("POST", `/v1/threads/${thread}/previews`, { port: Number(port) }),
   // As `nexus unpreview`.
   unpublish: (thread, { port }) => whenRunning(thread, () => api("DELETE", `/v1/threads/${thread}/previews/${port}`, {})),
-  // As `nexus land`, for the commit the confirmation named. The page then shows the landing's steps as the review moves through them.
-  land: (thread, { head }) => api("POST", `/v1/threads/${thread}/land`, { head }),
-  // The same landing, waiving the holds the card named, with an assertion whose challenge the server bound to them.
-  async waive(thread, { head, holds, origin }) {
-    const waived = JSON.parse(holds);
-    const options = await api("POST", `/v1/threads/${thread}/land/challenge`, { head, holds: waived });
-    const assertion = await passkeyAssertion(origin, options);
-    return api("POST", `/v1/threads/${thread}/land`, { head, waiver: { holds: waived, assertion } });
-  },
-  async "revoke-passkey"(_, { passkey, origin }) {
-    const options = await api("POST", `/v1/passkeys/${passkey}/revoke/challenge`);
-    return api("POST", `/v1/passkeys/${passkey}/revoke`, { assertion: await passkeyAssertion(origin, options) });
-  },
+  // As `nexus land`, for the commit the confirmation named, waiving the holds the card names the person may waive. The
+  // page then shows the landing's steps as the review moves through them.
+  land: (thread, { head, holds }) => api("POST", `/v1/threads/${thread}/land`, holds === undefined ? { head } : { head, waive: JSON.parse(holds) }),
 };
-
-const fromB64 = (text) => Uint8Array.from(atob(text.replace(/-/g, "+").replace(/_/g, "/")), (c) => c.charCodeAt(0));
-const toB64 = (buffer) => btoa(String.fromCharCode(...new Uint8Array(buffer))).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
-/** Passkeys are bound to the dashboard's HTTPS address, so they work only on a page loaded from it. */
-function passkeyOrigin(origin) {
-  if (origin === "") throw new Error("Passkeys need the dashboard's HTTPS address, which the control plane's config does not set.");
-  if (location.origin !== origin) throw new Error(`Passkeys work only on ${origin}. Open this page there.`);
-}
-async function passkeyAssertion(origin, options) {
-  passkeyOrigin(origin);
-  const credential = await navigator.credentials.get({ publicKey: {
-    ...options, challenge: fromB64(options.challenge), allowCredentials: options.allowCredentials.map((c) => ({ ...c, id: fromB64(c.id) })),
-  } });
-  const r = credential.response;
-  return { id: credential.id, clientDataJSON: toB64(r.clientDataJSON), authenticatorData: toB64(r.authenticatorData), signature: toB64(r.signature) };
-}
-
-document.addEventListener("submit", async (event) => {
-  if (!event.target.matches("#enrol")) return;
-  event.preventDefault();
-  const form = event.target;
-  const button = form.querySelector("#enrol-submit");
-  button.disabled = true;
-  try {
-    passkeyOrigin(form.dataset.origin);
-    const options = await api("POST", "/v1/passkeys/enrolment", { code: form.elements.code.value });
-    const credential = await navigator.credentials.create({ publicKey: {
-      ...options, challenge: fromB64(options.challenge), user: { ...options.user, id: fromB64(options.user.id) },
-      excludeCredentials: options.excludeCredentials.map((c) => ({ ...c, id: fromB64(c.id) })),
-    } });
-    const passkey = await api("POST", "/v1/passkeys", { name: form.elements.name.value, credential: {
-      clientDataJSON: toB64(credential.response.clientDataJSON), attestationObject: toB64(credential.response.attestationObject),
-    } });
-    // The code is used up, though the address the host printed filled it in.
-    for (const field of [form.elements.code, form.elements.name]) field.value = field.defaultValue = "";
-    showStatus(`Enrolled ${passkey.name}.`, "enrol-status");
-    showError("action-error", null);
-    await refreshAfter();
-  } catch (err) {
-    showError("action-error", err);
-  } finally {
-    button.disabled = false;
-  }
-});
 
 document.addEventListener("click", async (event) => {
   const button = event.target instanceof Element ? event.target.closest("button[data-action]") : null;
@@ -318,8 +264,8 @@ document.addEventListener("click", async (event) => {
 // crypto.randomUUID needs a secure context, and the dashboard is plain HTTP on the tailnet.
 const newRequestId = () => `msg:${[...crypto.getRandomValues(new Uint8Array(16))].map((b) => b.toString(16).padStart(2, "0")).join("")}`;
 
-function showStatus(text, id = "action-status") {
-  const el = document.getElementById(id);
+function showStatus(text) {
+  const el = document.getElementById("action-status");
   if (el === null) return;
   el.textContent = text ?? "";
   el.hidden = text === null;

@@ -39,10 +39,6 @@ import { attachScript, checkoutDir } from "../sessions.ts";
 import { encodeMessage } from "../attach-wire.ts";
 import { terminalSize } from "../guest-terminal.ts";
 import type { ByteStream, CommandResult, JobId, NodeName, NodeObservation, PausedSession, PylonCommand, PylonId, ServiceFact, StreamEnd, TailnetNodeId } from "../protocol.ts";
-import type { RelyingParty } from "./webauthn.ts";
-import { HttpError } from "./http-error.ts";
-import { fakeAuthenticator } from "./fake-passkey.ts";
-import { newCode } from "./passkeys.ts";
 
 const node = "rj-firebat" as NodeName;
 const laptop = "nLAPTOP" as TailnetNodeId;
@@ -70,7 +66,7 @@ const claudeSession = "11111111-2222-4333-8444-555555555501";
 const fixture = (await readFile(new URL("../fixtures/claude-transcript.jsonl", import.meta.url), "utf8")).split("\n").filter((line) => line !== "").map((line) => `${line}\n`);
 const usageLimitRecord = (await readFile(new URL("../fixtures/claude-api-errors.jsonl", import.meta.url), "utf8")).split("\n")[0]! + "\n";
 
-async function setup(t: import("node:test").TestContext, options: { gitIdentity?: { name: string; email: string }; https?: import("./api.ts").ApiOptions["https"]; whois?: import("../tailscale.ts").Whois; deployment?: DeploymentOptions; dotfiles?: typeof dotfiles; streamStallMs?: number; attachTiming?: AttachTiming; closeWaitMs?: number; reviews?: ReviewLoop; images?: (registry: Registry) => ImageRollout; passkeys?: RelyingParty; queue?: boolean } = {}) {
+async function setup(t: import("node:test").TestContext, options: { gitIdentity?: { name: string; email: string }; https?: import("./api.ts").ApiOptions["https"]; whois?: import("../tailscale.ts").Whois; deployment?: DeploymentOptions; dotfiles?: typeof dotfiles; streamStallMs?: number; attachTiming?: AttachTiming; closeWaitMs?: number; reviews?: ReviewLoop; images?: (registry: Registry) => ImageRollout; queue?: boolean } = {}) {
   const registry = openRegistry(join(dir, `${randomUUID()}.db`));
   const images = options.images?.(registry);
   registry.upsertNode({ name: node, tailnetHost: "rj-firebat.tail.ts.net", tailnetNodeId: "nFIREBAT" as TailnetNodeId });
@@ -115,7 +111,6 @@ async function setup(t: import("node:test").TestContext, options: { gitIdentity?
     ...(options.reviews === undefined ? {} : { reviews: options.reviews }),
     ...(queue === null ? {} : { queue }),
     ...(images === undefined ? {} : { images }),
-    ...(options.passkeys === undefined ? {} : { passkeys: options.passkeys }),
     hostnames: new Set(["127.0.0.1"]),
     harness,
     startThread,
@@ -189,7 +184,7 @@ async function setup(t: import("node:test").TestContext, options: { gitIdentity?
   };
 }
 
-async function withThread(t: import("node:test").TestContext, options: { gitIdentity?: { name: string; email: string }; deployment?: DeploymentOptions; reviews?: ReviewLoop; passkeys?: RelyingParty; project?: typeof project; dotfiles?: typeof dotfiles; streamStallMs?: number; attachTiming?: AttachTiming; closeWaitMs?: number } = {}) {
+async function withThread(t: import("node:test").TestContext, options: { gitIdentity?: { name: string; email: string }; deployment?: DeploymentOptions; reviews?: ReviewLoop; project?: typeof project; dotfiles?: typeof dotfiles; streamStallMs?: number; attachTiming?: AttachTiming; closeWaitMs?: number } = {}) {
   const s = await setup(t, options);
   assert.equal((await s.call("POST", "/v1/projects", options.project ?? project)).status, 201);
   assert.equal((await s.call("POST", "/v1/images", image)).status, 201);
@@ -2556,72 +2551,23 @@ test("only a project edit turns on reviews of its own, landing needs a deployer,
   assert.equal((await s.call("GET", "/v1/projects")).body.find((p: { id: string }) => p.id === "acme").autoReview, undefined);
 });
 
-test("a passkey enrols only with the host's code, and waiving with it needs a deployer and an assertion for this commit and these holds, once", async (t) => {
-  const rp = { id: "rj-firebat.example.ts.net", origin: "https://rj-firebat.example.ts.net:7443" };
+test("a deployer's land names the holds it waives at the commit it confirmed, and the review loop decides whether they may be waived", async (t) => {
   const held = "Always needs the person: changes to login or auth, as it changes src/control/api.ts.";
   const head = "a".repeat(40);
-  const landed: unknown[] = [];
-  const reviews = {
-    waivable(builder: string, at: string, holds: string[]) {
-      if (holds.some((h) => h !== held)) throw new HttpError(409, `a passkey cannot waive "${holds[0]}"`);
-      return { id: "rv-1" };
-    },
-    land(builder: string, by: string, at?: string, waiver?: unknown) { landed.push([builder, by, at, waiver]); return { id: "rv-1" }; },
-  } as never as ReviewLoop;
-  const s = await withThread(t, { reviews, passkeys: rp, deployment: { self: "nFIREBAT" as TailnetNodeId, deployers: new Set([laptop]), keys: {} } });
-  s.registry.saveReview({
-    id: "rv-1", builder: s.thread.id, reviewer: "th-reviewer" as ThreadId, pr: { repo: "ramtinJ95/nexus", number: 7, url: "", title: "Auth", branch: "auth" }, reviewerKind: "harness",
-    models: { builder: "claude-opus-5-5", reviewer: "gpt-6-astra" }, maxRounds: 5, land: null, auto: false, merged: null, waiver: null, expect: "x", sent: 1, outbox: null, since: 0, nudges: 0, startedAt: 0,
-    rounds: [{ head, verdict: null, check: null, answers: null }], phase: { kind: "needs-person", reasons: [held] },
-  });
-
-  const refused = await s.call("POST", "/v1/passkeys/enrolment", { code: "ABCD-EFGH-JKLM-NPQR-STUV" });
-  assert.equal(refused.status, 403);
-  assert.match(refused.body.error, /not one the control plane's host made/);
-  const authenticator = fakeAuthenticator({ origin: rp.origin });
-  const options = await s.call("POST", "/v1/passkeys/enrolment", { code: newCode(s.registry).code });
-  assert.equal(options.status, 200);
-  const enrolled = await s.call("POST", "/v1/passkeys", { name: "MacBook Touch ID", credential: authenticator.create(options.body) });
-  assert.equal(enrolled.status, 201);
-  assert.equal(enrolled.body.publicKey, undefined);
-  assert.deepEqual((await s.call("GET", "/v1/passkeys")).body.map((p: { name: string }) => p.name), ["MacBook Touch ID"]);
-
-  const challenge = (holds = [held]) => s.call("POST", `/v1/threads/${s.thread.id}/land/challenge`, { head, holds });
-  const notWaivable = await challenge(["The pull request's GitHub checks are failed."]);
-  assert.equal(notWaivable.status, 409);
-  assert.match(notWaivable.body.error, /a passkey cannot waive/);
-
-  const assertion = authenticator.get((await challenge()).body);
+  const landed: unknown[][] = [];
+  const reviews = { land(...args: unknown[]) { landed.push(args); return { id: "rv-1" }; } } as never as ReviewLoop;
+  const s = await withThread(t, { reviews, deployment: { self: "nFIREBAT" as TailnetNodeId, deployers: new Set([laptop]), keys: {} } });
   const land = (body: unknown) => s.call("POST", `/v1/threads/${s.thread.id}/land`, body);
+
   s.callAs("nFIREBAT" as TailnetNodeId);
-  assert.equal((await challenge()).status, 403, "only a deployer asks to waive");
-  assert.equal((await land({ head, waiver: { holds: [held], assertion } })).status, 403, "only a deployer lands with a passkey");
+  assert.equal((await land({ head, waive: [held] })).status, 403, "only a deployer waives");
+  assert.deepEqual(landed, [], "a refused waiver never reaches the review loop");
   s.callAs(laptop);
-  assert.equal((await land({ waiver: { holds: [held], assertion } })).status, 400, "a waiver names its commit");
-  const elsewhere = await land({ head: "b".repeat(40), waiver: { holds: [held], assertion } });
-  assert.equal(elsewhere.status, 403);
-  assert.match(elsewhere.body.error, new RegExp(`confirmed landing commit ${head}, not ${"b".repeat(40)}`));
-
-  const fresh = authenticator.get((await challenge()).body);
-  assert.equal((await land({ head, waiver: { holds: [held], assertion: fresh } })).status, 200);
-  const replay = await land({ head, waiver: { holds: [held], assertion: fresh } });
-  assert.equal(replay.status, 403);
-  assert.match(replay.body.error, /used already/);
-  assert.deepEqual(landed.map((l) => (l as unknown[]).slice(0, 3)), [[s.thread.id, laptop, head]]);
-  assert.deepEqual((landed[0] as [string, string, string, { holds: string[]; passkey: unknown; by: string }])[3], { head, holds: [held], passkey: { id: enrolled.body.id, name: "MacBook Touch ID" }, by: laptop, at: (landed[0] as [unknown, unknown, unknown, { at: number }])[3].at });
-
-  const revoke = `/v1/passkeys/${enrolled.body.id}/revoke`;
-  assert.equal((await s.call("POST", revoke, {})).status, 400, "revoking needs a passkey");
-  const confirm = authenticator.get((await s.call("POST", `${revoke}/challenge`)).body);
-  assert.equal((await s.call("POST", revoke, { assertion: confirm })).status, 204);
-  assert.deepEqual((await s.call("GET", "/v1/passkeys")).body, []);
-});
-
-test("without the dashboard's HTTPS address, passkey routes say why", async (t) => {
-  const s = await setup(t);
-  const refused = await s.call("POST", "/v1/passkeys/enrolment", { code: newCode(s.registry).code });
-  assert.equal(refused.status, 409);
-  assert.match(refused.body.error, /https.hostname/);
+  assert.equal((await land({ waive: [held] })).status, 400, "a waiver names the commit it confirmed");
+  assert.equal((await land({ head, waive: [] })).status, 400, "a waiver names at least one hold");
+  assert.equal((await land({ head, waive: [held] })).status, 200);
+  assert.equal((await land({ head })).status, 200);
+  assert.deepEqual(landed, [[s.thread.id, laptop, head, [held]], [s.thread.id, laptop, head, undefined]]);
 });
 
 async function withQueue(t: import("node:test").TestContext) {
