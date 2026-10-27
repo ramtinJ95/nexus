@@ -12,7 +12,7 @@ import { createServer, STATUS_CODES, type IncomingMessage, type ServerResponse }
 import { availableParallelism, totalmem } from "node:os";
 import type { Duplex } from "node:stream";
 import { pipeline } from "node:stream/promises";
-import { JobFailure, runCommand, runJob, type BackendPylon, type ProbeDeps, type VmBackend } from "../backend.ts";
+import { commandPolicies, JobFailure, runCommand, runJob, type BackendPylon, type CommandPolicy, type ProbeDeps, type VmBackend } from "../backend.ts";
 import type { PortableArtifactId } from "../images.ts";
 import {
   artifactHeaders, encodeProbeEvent, encodeSubmitReply, fetchArtifact, heldSecrets, isPortableArtifactId, jobDeadlineMs, probePort, jobSubject, parseJobEnvelope, parsePylonCommand, parseStreamRequest, routeAuth, serveByteStream, streamUpgradeResponse,
@@ -28,12 +28,11 @@ import { listeningFacts } from "../listening.ts";
 import { readBody } from "../request-body.ts";
 import { gitFacts } from "../git-facts.ts";
 import { startGateway } from "./gateway.ts";
-import { createPylonApi, type HostBridge } from "./pylon-api.ts";
+import { createPylonApi } from "./pylon-api.ts";
 import { createTailscaleServe, parseServeStatus, readRoutes, type HttpsGet, type TailscaleCli } from "./serve.ts";
 import type { NodeSecrets } from "./config.ts";
 
 export interface ProbeOptions {
-  eventJournal?: string;
   node: NodeName;
   host: string;
   /** 0 picks a free port. */
@@ -42,8 +41,6 @@ export interface ProbeOptions {
   whois: Whois;
   backend: VmBackend;
   secrets: NodeSecrets;
-  /** Whether the backend has a git SSH key, so a pylon can clone over SSH. Default false. */
-  gitSsh?: boolean;
   jobDeadlineMs?: { readonly [K in Job["kind"]]: number };
   /** The probe's log, which also receives the stderr of raw pipes. Default console.error. */
   log?: (message: string) => void;
@@ -59,8 +56,6 @@ export interface ProbeOptions {
   };
   /** Tests only. A peer probe is its tailnet machine name on probePort. */
   peerAddress?: (node: NodeName) => { host: string; port: number };
-  /** The backend's end of NEXUS_API, which the in-pylon `nexus` CLI calls. Omitted: those calls go unanswered. */
-  hostBridge?: HostBridge;
   /** How often each running pylon's listening ports are read for a change between snapshots. Default 10 s. */
   listeningPollMs?: number;
 }
@@ -98,8 +93,8 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
   const deadlines = options.jobDeadlineMs ?? jobDeadlineMs;
   const peerAddress = options.peerAddress ?? ((peer: NodeName) => ({ host: peer, port: probePort }));
   const bootId = randomUUID();
-  if (options.eventJournal !== undefined) await mkdir(dirname(options.eventJournal), { recursive: true, mode: 0o700 });
-  const journal = eventJournal(options.eventJournal ?? ":memory:");
+  if (backend.eventJournal !== undefined) await mkdir(dirname(backend.eventJournal), { recursive: true, mode: 0o700 });
+  const journal = eventJournal(backend.eventJournal ?? ":memory:");
   const shutdown = new AbortController();
   const previews = options.previews === undefined ? null : {
     ...options.previews,
@@ -369,13 +364,10 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
    * are held in memory, so a restarted probe knows none.
    */
   const claudeSendsById = new Map<string, Promise<CommandResult>>();
-  function sendClaude(pylonId: PylonId, command: Extract<PylonCommand, { kind: "send-claude" }>, run: () => Promise<CommandResult>): Promise<CommandResult> {
-    const sending = onePerClaudeSession(pylonId, [command.session], run);
-    if (command.requestId === undefined) return sending;
-    const key = `${pylonId} ${command.requestId}`;
+  function remember(pylonId: PylonId, requestId: string, sending: Promise<CommandResult>) {
+    const key = `${pylonId} ${requestId}`;
     claudeSendsById.set(key, sending);
     void sending.catch(() => undefined).then(() => setTimeout(() => { if (claudeSendsById.get(key) === sending) claudeSendsById.delete(key); }, claudeSendMemoryMs).unref());
-    return sending;
   }
   async function outcomeOf(pylonId: PylonId, requestId: string): Promise<CommandResult> {
     const sending = claudeSendsById.get(`${pylonId} ${requestId}`);
@@ -410,7 +402,7 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
       jobs,
       pylons: await Promise.all(pylons.map(observation)),
       previewRoutes: previews === null ? [] : [...previews.gateway.routes].map(([httpsPort, route]) => ({ httpsPort, ...route })),
-      grants: { secrets: options.secrets.names(), gitSsh: options.gitSsh ?? false },
+      grants: { secrets: options.secrets.names(), gitSsh: backend.gitSsh ?? false },
       claudeLaunchRepeatable: true,
       heldSecrets,
     };
@@ -544,16 +536,16 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
       }
       const pylon = (await backend.list()).find((p) => p.pylonId === pylonId);
       if (pylon?.vm !== "running") return send(res, 409, `${pylonId} is ${pylon?.vm ?? "absent"}, not running`);
-      if (command.kind === "send-claude-outcome") return send(res, 200, JSON.stringify(await outcomeOf(pylonId, command.requestId)), "application/json");
-      const guestCommand = command;
-      const links = guestCommand.kind === "link-port" || guestCommand.kind === "unlink-port";
-      const run = () => runCommand(pylonId, guestCommand, deps);
-      const launch = guestCommand.kind === "open-session" && guestCommand.prompt !== undefined ? guestCommand.resume : undefined;
-      const result = await (links ? betweenReads(run) : guestCommand.kind === "send-claude" ? sendClaude(pylonId, guestCommand, run) : launch !== undefined ? onePerClaudeSession(pylonId, [launch], run) : run());
+      const asked = command;
+      // Each kind's policy takes its own kind of command and result, which command.kind picks.
+      const policy = commandPolicies[command.kind] as CommandPolicy<PylonCommand["kind"]>;
+      const run = () => asked.kind === "send-claude-outcome" ? outcomeOf(pylonId, asked.requestId) : runCommand(pylonId, asked, deps);
+      const session = typeof policy.lock === "function" ? policy.lock(command) : undefined;
+      const running = policy.lock === "reads" ? betweenReads(run) : session !== undefined ? onePerClaudeSession(pylonId, [session], run) : run();
+      if (policy.remembered && "requestId" in command && command.requestId !== undefined) remember(pylonId, command.requestId, running);
+      const result = await running;
       if (result.kind === "link-port") relinked(pylonId, result.service);
-      // A linked port is a new service that wants a preview, and an unlinked one a service gone, which the control plane sees in the next read.
-      // An opened or closed session is listed in it too, as is one a message resumed.
-      if (links || command.kind === "open-session" || command.kind === "close-session" || (result.kind === "send-claude" && result.resumed)) void publishSnapshot();
+      if (typeof policy.publishes === "function" ? policy.publishes(result) : policy.publishes) void publishSnapshot();
       return send(res, 200, JSON.stringify(result), "application/json");
     }
     const manifestMatch = /^\/v1\/manifests\/([^/]+)$/.exec(path);
@@ -650,7 +642,7 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
   }
   const address = server.address();
   if (address === null || typeof address === "string") throw new Error(`unexpected server address ${address}`);
-  const bridge = await options.hostBridge?.(api.answer).catch(async (err: unknown) => {
+  const bridge = await backend.hostBridge?.(api.answer).catch(async (err: unknown) => {
     await Promise.all([new Promise((resolve) => server.close(resolve)), previews?.gateway.close()]);
     throw err;
   });

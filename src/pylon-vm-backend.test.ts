@@ -137,6 +137,16 @@ test("an SSH repo on a node without a git SSH key fails as secret-missing and cr
   assert.equal(existsSync(join(instances, "pylon-ssh")), false);
 });
 
+test("the backend tells the probe whether it has a git SSH key, journals events in its state root, and answers NEXUS_API on a socket there", async (t) => {
+  const keyed = await backendWith({ gitSsh: { privateKeyFile: join(scratch, "id_ed25519"), knownHostsFile: join(scratch, "known_hosts") } });
+  const plain = await backendWith();
+  assert.deepEqual([keyed.backend.gitSsh, plain.backend.gitSsh], [true, false]);
+  assert.equal(plain.backend.eventJournal, `${plain.stateRoot}/events.sqlite`);
+  const bridge = await plain.backend.hostBridge!(async () => ({ status: 200, body: "{}" }));
+  t.after(() => bridge.close());
+  assert.ok((await stat(join(plain.stateRoot, "host-bridge.sock"))).isSocket());
+});
+
 test("an SSH dotfiles repo needs the key too, and a missing known_hosts file is named", async () => {
   const keyFile = join(scratch, "id_ed25519");
   await writeFile(keyFile, "not a real key\n");

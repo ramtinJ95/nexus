@@ -16,7 +16,7 @@ import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { artifactDirectory, fileCodec, type ArtifactDirectory } from "./artifacts.ts";
 import { JobFailure, type ArtifactStore, type BackendPylon, type Guest, type VmBackend } from "./backend.ts";
-import { dockerBridgeRunArgs, labelFilters } from "./docker-host-bridge.ts";
+import { dockerBridgeRunArgs, dockerHostBridge, labelFilters } from "./docker-host-bridge.ts";
 import { exit, output } from "./exec.ts";
 import { dockerServices, publishedPorts } from "./docker-services.ts";
 import { processStream } from "./process-stream.ts";
@@ -258,6 +258,8 @@ export function createDockerBackend(options: DockerBackendOptions): VmBackend {
 
   return {
     artifacts,
+    // Each container's NEXUS_API names the port, so only a backend given a fixed one answers it.
+    ...(options.hostBridgePort === undefined ? {} : { hostBridge: dockerHostBridge(options.hostBridgePort, options.labels) }),
 
     async ensureRunning(boot, live, signal) {
       const urls = publicUrls(boot.pylonId, live.previews, options.previewHost);

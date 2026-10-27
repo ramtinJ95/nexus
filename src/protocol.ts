@@ -250,12 +250,12 @@ export type ProbeEvent =
 
 // Synchronous guest operations. They are not reconciled and not queued behind lifecycle jobs.
 // Everything runs as `user`. pi-sandbox fixes the shell user for the life of an instance, and `user`
-// has passwordless sudo, so a root command is `["sudo", ...]`.
+// has passwordless sudo, so a root command is `["sudo", ...]`. What each kind waits for, whether it publishes a
+// snapshot and whether a caller may send it again is commandPolicies in backend.ts.
 
 export type PylonCommand =
   /** When the timeout passes, the probe calls pi-sandbox's exec-kill and returns exitCode null. Timeout at most 60 s. */
   | { kind: "exec"; argv: readonly string[]; cwd: string; timeoutMs: number }
-  /** With a `prompt` and a `resume` ID, safe to send again from a probe whose snapshot says `claudeLaunchRepeatable`. */
   | { kind: "open-session"; harness: SessionHarness; title: string; resume?: string; prompt?: string; model?: string }
   /**
    * `session` is who the control plane last saw in the pane, so a pane a wake has since given to another session is
@@ -276,9 +276,9 @@ export type PylonCommand =
    */
   | { kind: "send-claude-outcome"; requestId: string }
   | { kind: "service"; op: "ensure" | "restart" | "stop" | "logs"; name?: string; lines?: number }
-  /** Previews a port that already listens, or will, as `nexus preview <port>` in the pylon does. Safe to repeat. */
+  /** Previews a port that already listens, or will, as `nexus preview <port>` in the pylon does. */
   | { kind: "link-port"; port: number }
-  /** Stops previewing a linked port. A port not linked succeeds, and a port a service's preview owns is refused. Safe to repeat. */
+  /** Stops previewing a linked port. A port not linked succeeds, and a port a service's preview owns is refused. */
   | { kind: "unlink-port"; port: number };
 
 export type SendClaudeOutcome = "sent" | "queued" | "blocked" | "starting" | "moved";
@@ -299,7 +299,7 @@ export type CommandResult =
    * typed. `blocked`: Claude waits at a prompt in its terminal, such as a trust or permission dialog, which typing would
    * answer. `starting`: Herdr could not yet tell Claude's state. `moved`: the pane stopped running the session before
    * anything was typed, as when another agent started in it. These mean nothing was typed, so the message can be sent
-   * again. A failed command may have typed part of the message, so the control plane never retries one on its own.
+   * again. A failed command may have typed part of the message.
    * `herdrPane` is the pane Claude runs in, and `resumed` says the session had no live pane and was resumed into it first.
    */
   | { kind: "send-claude"; outcome: SendClaudeOutcome; herdrPane: string; resumed: boolean }
@@ -441,7 +441,7 @@ export function connectProbe(node: NodeName, tailnetHost: string, expected: Tail
       res.socket.setTimeout(0);
       for await (const line of lines(res)) yield parseProbeEvent(line);
     },
-    /** Never retried here: an exec or a session open is not safe to run twice, except as `claudeLaunchRepeatable` says. */
+    /** Never retried here. commandPolicies in backend.ts says which kinds a caller may send again. */
     async command(pylonId, command) {
       const path = `/v1/pylons/${encodeURIComponent(pylonId)}/commands`;
       const res = await call("POST", path, JSON.stringify(command), commandTimeoutMs);

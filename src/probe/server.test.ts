@@ -11,10 +11,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { startProbe, type Probe, type ProbeOptions } from "./server.ts";
 import { nodeSecrets } from "./config.ts";
-import { connectProbe, fetchArtifact, jobDeadlineMs, type ByteStream, type DeclaredOutput, type GitFacts, type Job, type JobEnvelope, type JobId, type JobStatus, type LiveHash, type NodeName, type ProbeEvent, type PylonId, type ServiceFact, type TailnetNodeId } from "../protocol.ts";
+import { connectProbe, fetchArtifact, jobDeadlineMs, type ByteStream, type DeclaredOutput, type GitFacts, type Job, type JobEnvelope, type JobId, type JobStatus, type LiveHash, type NodeName, type ProbeEvent, type CommandResult, type PylonCommand, type PylonId, type ServiceFact, type TailnetNodeId } from "../protocol.ts";
 import { envelope, ingest } from "../reconcile.ts";
 import { processStream } from "../process-stream.ts";
-import type { BackendPylon, Guest, VmBackend } from "../backend.ts";
+import { commandPolicies, type BackendPylon, type CommandPolicy, type Guest, type VmBackend } from "../backend.ts";
 import { fakeTailscale, nodeHost, viaGateway } from "./fake-tailscale.ts";
 import type { BootInputs, ProjectId } from "../project.ts";
 import type { ArtifactId, ArtifactManifest, ImageId, ImageManifest, PortableArtifactId, TemplateId, TemplateManifest } from "../images.ts";
@@ -455,7 +455,7 @@ test("an observer learns at once that the probe got a held secret it did not hav
 });
 
 test("observations name the secrets the node holds, never their values, and whether it has a git SSH key", async (t) => {
-  const { client } = await setup(t, { secrets: nodeSecrets({ value: () => "s3cr3t", names: () => ["GH_TOKEN"] }), gitSsh: true });
+  const { client } = await setup(t, { secrets: nodeSecrets({ value: () => "s3cr3t", names: () => ["GH_TOKEN"] }), backend: { ...fakeBackend().backend, gitSsh: true } });
   for await (const e of client.observe(AbortSignal.timeout(5000))) {
     const observation = e.type === "snapshot" ? e.observation : assert.fail();
     assert.deepEqual(observation.grants, { secrets: ["GH_TOKEN"], gitSsh: true });
@@ -688,6 +688,185 @@ test("a prompted Claude launch sent again while the first still runs waits for i
   }
 });
 
+test("each command kind waits for the reads or its Claude session or nothing, publishes a snapshot or not, and a send is remembered by its request ID", async (t) => {
+  const session = "0b5e3a52-5d0f-4c1e-9a43-1f2a6c7d8e90";
+  const working = [herdrPane("w1:p1", "w1", "claude", "working", { kind: "id", value: session })];
+  let panes: ReturnType<typeof herdrPane>[] = working;
+  const base = fakeGuest((argv, herdr) => {
+    if (!herdr) {
+      if (argv.at(-1) === sessionsFile) return { exitCode: 3, output: "" };
+      // A prompted launch fails at once on reading its record, so it never polls for a submission here.
+      if (argv[0] === "sh" && argv[2]?.includes("/opened")) return { exitCode: 1, output: "no launch records in this guest" };
+      return { exitCode: 0, output: "" };
+    }
+    const sub = argv.slice(0, 2).join(" ");
+    if (sub === "api snapshot") return herdrOk(herdrSnapshot([{ id: "w1", label: "Claude Code" }], panes));
+    if (sub === "workspace list") return herdrOk({ type: "workspace_list", workspaces: [] });
+    if (sub === "workspace create") return herdrOk({ type: "workspace_created", workspace: { workspace_id: "w1" }, tab: { tab_id: "w1:t1" }, root_pane: { pane_id: "w1:p1" } });
+    if (sub === "pane process-info") return herdrOk({ type: "pane_process_info", process_info: { pane_id: "w1:p1", shell_pid: 100, foreground_processes: [{ pid: 101, name: "claude", argv: ["claude", "--resume", session] }] } });
+    if (sub === "agent start") {
+      panes = [herdrPane("w1:p1", "w1", "claude", "idle", { kind: "id", value: session })];
+      return herdrOk({ type: "agent_started", agent: {}, argv: [] });
+    }
+    if (sub === "pane close") return herdrError("pane_not_found");
+    throw new Error(`unscripted ${sub}`);
+  });
+  let typing: PromiseWithResolvers<void> | null = null;
+  const typingHeld = Promise.withResolvers<void>();
+  const guest: Guest = {
+    ...base,
+    async exec(argv, options) {
+      if (argv[3] === "claude-type" && argv[5] === "hold") {
+        typingHeld.resolve();
+        await typing?.promise;
+      }
+      return base.exec(argv, options);
+    },
+    services: async () => ({ services: [] }),
+    async linkPort(port) {
+      if (port === sentinelPort) sentinelReads.push(listed);
+      return `port-${port}`;
+    },
+    unlinkPort: async () => null,
+  };
+  const sentinelPort = 4000;
+  /** The pylon reads made so far, as each sentinel link found them, which is after every read queued before it ran. */
+  const sentinelReads: number[] = [];
+  let listed = 0;
+  const { client, fake } = await setup(t, { listeningPollMs: 600_000 }, guest);
+  await running(client);
+  const commands: Record<string, PylonCommand> = {
+    "exec": { kind: "exec", argv: ["true"], cwd: "/", timeoutMs: 1000 },
+    "open-session": { kind: "open-session", harness: "shell", title: "shell" },
+    "open-session with resume": { kind: "open-session", harness: "claude-code", title: "Claude Code", resume: session },
+    "open-session with prompt and resume": { kind: "open-session", harness: "claude-code", title: "Claude Code", resume: session, prompt: "go" },
+    "close-session": { kind: "close-session", herdrPane: "w1:p9" },
+    "drop-failed-session": { kind: "drop-failed-session", id: "s1" },
+    "send-claude": { kind: "send-claude", session, text: "hi" },
+    "send-claude-outcome": { kind: "send-claude-outcome", requestId: "msg:never" },
+    "service": { kind: "service", op: "ensure" },
+    "link-port": { kind: "link-port", port: 3000 },
+    "unlink-port": { kind: "unlink-port", port: 3000 },
+  };
+  /** Which commands answer nothing while `hold` holds the probe, sent all at once. The rest answer, done or failed. */
+  async function waiting(hold: () => Promise<() => void>): Promise<string[]> {
+    const release = await hold();
+    const sent = Object.entries(commands).map(([name, command]) => {
+      const answered = client.command(pylonId, command).then(() => true, () => true);
+      return { name, answered, waits: Promise.race([answered.then(() => false), new Promise<boolean>((resolve) => setTimeout(resolve, 1_000, true))]) };
+    });
+    const waits = await Promise.all(sent.map((s) => s.waits));
+    release();
+    await Promise.all(sent.map((s) => s.answered));
+    return sent.filter((_, i) => waits[i]).map((s) => s.name);
+  }
+
+  const artifacts = fake.backend.artifacts.list;
+  const reads = new AbortController();
+  t.after(() => reads.abort());
+  const readsWait = await waiting(async () => {
+    const held = Promise.withResolvers<void>();
+    const reached = Promise.withResolvers<void>();
+    fake.backend.artifacts.list = async (listed) => {
+      reached.resolve();
+      await held.promise;
+      return artifacts(listed);
+    };
+    void client.observe(reads.signal)[Symbol.asyncIterator]().next().catch(() => undefined);
+    await reached.promise;
+    return () => {
+      fake.backend.artifacts.list = artifacts;
+      held.resolve();
+    };
+  });
+  reads.abort();
+  assert.deepEqual(readsWait, ["link-port", "unlink-port"], "a link or unlink waits for a read in flight, and nothing else does");
+
+  panes = working;
+  const sessionWaits = await waiting(async () => {
+    typing = Promise.withResolvers<void>();
+    void client.command(pylonId, { kind: "send-claude", session, text: "hold" }).catch(() => undefined);
+    await typingHeld.promise;
+    return () => typing!.resolve();
+  });
+  assert.deepEqual(sessionWaits, ["open-session with prompt and resume", "send-claude"], "only a send and a prompted launch wait for another command to the same Claude session");
+
+  const list = fake.backend.list;
+  fake.backend.list = () => { listed++; return list(); };
+  const abort = new AbortController();
+  t.after(() => abort.abort());
+  const events = client.observe(abort.signal)[Symbol.asyncIterator]();
+  assert.equal((await events.next()).value?.type, "snapshot");
+  /**
+   * Whether answering the command queued a snapshot read for the observers. A link runs in the read queue, so the reads
+   * between two sentinel links are the first one's own publish and pylon read, the command's pylon read, any read it
+   * queued, and the second link's pylon read.
+   */
+  const sentinel = () => client.command(pylonId, { kind: "link-port", port: sentinelPort });
+  async function publishes(command: PylonCommand): Promise<boolean> {
+    await sentinel();
+    const before = sentinelReads.at(-1)!;
+    await client.command(pylonId, command);
+    await sentinel();
+    return sentinelReads.at(-1)! - before - 3 > 0;
+  }
+  const published: Record<string, boolean> = {};
+  for (const name of ["exec", "open-session", "close-session", "drop-failed-session", "send-claude-outcome", "service", "link-port", "unlink-port"]) published[name] = await publishes(commands[name]!);
+  panes = working;
+  published["send-claude to a running session"] = await publishes(commands["send-claude"]!);
+  panes = [];
+  published["send-claude that resumes its session"] = await publishes(commands["send-claude"]!);
+  assert.deepEqual(published, {
+    "exec": false, "open-session": true, "close-session": true, "drop-failed-session": false, "send-claude-outcome": false, "service": false, "link-port": true, "unlink-port": true,
+    "send-claude to a running session": false, "send-claude that resumes its session": true,
+  });
+
+  panes = working;
+  await client.command(pylonId, { kind: "send-claude", session, text: "kept", requestId: "msg:kept" });
+  assert.deepEqual(await client.command(pylonId, { kind: "send-claude-outcome", requestId: "msg:kept" }), { kind: "send-claude-outcome", send: { outcome: "queued", herdrPane: "w1:p1", resumed: false } }, "a send-claude is remembered under its request ID");
+  await client.command(pylonId, { kind: "exec", argv: ["true"], cwd: "/", timeoutMs: 1000 });
+  assert.deepEqual(await client.command(pylonId, { kind: "send-claude-outcome", requestId: "msg:never" }), { kind: "send-claude-outcome", send: "unknown" });
+});
+
+test("the command policy table gives each kind its lock, its memory by request ID, its snapshot publishing and whether it may be sent again", () => {
+  const session = "0b5e3a52-5d0f-4c1e-9a43-1f2a6c7d8e90";
+  const sent = (resumed: boolean): CommandResult => ({ kind: "send-claude", outcome: "sent", herdrPane: "w1:p1", resumed });
+  const samples: [string, PylonCommand, CommandResult?][] = [
+    ["exec", { kind: "exec", argv: ["true"], cwd: "/", timeoutMs: 1000 }],
+    ["open-session", { kind: "open-session", harness: "shell", title: "shell" }],
+    ["open-session with resume", { kind: "open-session", harness: "claude-code", title: "Claude Code", resume: session }],
+    ["open-session with prompt and resume", { kind: "open-session", harness: "claude-code", title: "Claude Code", resume: session, prompt: "go" }],
+    ["close-session", { kind: "close-session", herdrPane: "w1:p1" }],
+    ["drop-failed-session", { kind: "drop-failed-session", id: "s1" }],
+    ["send-claude that resumes its session", { kind: "send-claude", session, text: "hi" }, sent(true)],
+    ["send-claude to a running session", { kind: "send-claude", session, text: "hi" }, sent(false)],
+    ["send-claude-outcome", { kind: "send-claude-outcome", requestId: "msg:1" }],
+    ["service", { kind: "service", op: "ensure" }],
+    ["link-port", { kind: "link-port", port: 3000 }],
+    ["unlink-port", { kind: "unlink-port", port: 3000 }],
+  ];
+  const listed = samples.map(([name, command, result]) => {
+    const { lock, remembered, publishes, retrySafe } = commandPolicies[command.kind] as CommandPolicy<PylonCommand["kind"]>;
+    const waits = typeof lock === "function" ? lock(command) : lock;
+    return `${name}: waits for ${waits === session ? "its Claude session" : waits ?? "nothing"}, ${remembered ? "remembered" : "not remembered"}, ${(typeof publishes === "function" ? publishes(result!) : publishes) ? "publishes" : "does not publish"}, retry safe: ${retrySafe}`;
+  });
+  assert.deepEqual(listed, [
+    "exec: waits for nothing, not remembered, does not publish, retry safe: false",
+    "open-session: waits for nothing, not remembered, publishes, retry safe: claudeLaunchRepeatable",
+    "open-session with resume: waits for nothing, not remembered, publishes, retry safe: claudeLaunchRepeatable",
+    "open-session with prompt and resume: waits for its Claude session, not remembered, publishes, retry safe: claudeLaunchRepeatable",
+    "close-session: waits for nothing, not remembered, publishes, retry safe: false",
+    "drop-failed-session: waits for nothing, not remembered, does not publish, retry safe: false",
+    "send-claude that resumes its session: waits for its Claude session, remembered, publishes, retry safe: false",
+    "send-claude to a running session: waits for its Claude session, remembered, does not publish, retry safe: false",
+    "send-claude-outcome: waits for nothing, not remembered, does not publish, retry safe: true",
+    "service: waits for nothing, not remembered, does not publish, retry safe: false",
+    "link-port: waits for reads, not remembered, publishes, retry safe: true",
+    "unlink-port: waits for reads, not remembered, publishes, retry safe: true",
+  ]);
+  assert.deepEqual(Object.keys(commandPolicies).sort(), [...new Set(samples.map(([, c]) => c.kind))].sort(), "every kind is listed");
+});
+
 test("a failing command rejects with the guest's error", async (t) => {
   const guest = fakeGuest((_argv, herdr) => herdr ? herdrError("invalid_params", "pane w9:p9 is malformed") : { exitCode: 0, output: "" });
   const { client } = await setup(t, {}, guest);
@@ -750,7 +929,7 @@ test("NEXUS_API calls reach the API as the pylon the bridge named, get the URL o
   const fake = fakeBackend();
   const guest = { ...fakeGuest(() => ({ exitCode: 1, output: "unused" })), linkPort: async () => "web", previewOrigin: () => "http://127.0.0.1:9" as const };
   const previews = { gatewayPort, routesFile: join(dir, "routes.json"), tailscale: fakeTailscale().cli, get: viaGateway(() => `http://127.0.0.1:${gatewayPort}`).get };
-  const { client, probe } = await setup(t, { backend: { ...fake.backend, guest: () => guest }, previews, hostBridge });
+  const { client, probe } = await setup(t, { backend: { ...fake.backend, guest: () => guest, hostBridge }, previews });
   assert.ok(bridge.answer, "the probe started its bridge");
   const preview = bridge.answer(pylonId, JSON.stringify({ op: "preview", port: 3000 }));
   const env = envelope({ ...spawnJob, live: { previews: [{ service: "web", httpsPort: 10101 }], overlay: [] } }, node, Date.now());

@@ -158,6 +158,7 @@ export interface ViewFrame {
 
 /** Maps each view to what one client has not seen yet, or null when nothing it shows changed. */
 export type Frames<V = ConversationView> = (view: V) => unknown;
+type EventBatch = ReturnType<Registry["eventBatch"]>;
 
 /** What a stream follows: a harness conversation's watch, or a Claude worker's. */
 interface Watch<V> {
@@ -443,56 +444,80 @@ export async function startApi(options: ApiOptions): Promise<Api> {
     deploys: (r) => options.reviews?.deploys(r) ?? false,
   });
 
-  /** Each open stream's and terminal's thread and how to end it, so a delete ends its thread's streams. */
-  const open = new Set<{ thread: ThreadId; end(): void }>();
+  /**
+   * Each open stream's and terminal's thread and how to end it, so a delete ends its thread's streams. The event log's
+   * followers belong to no thread.
+   */
+  const open = new Set<{ thread: ThreadId | null; end(): void }>();
 
   /**
-   * Sends `frames` of each commit to the thread's conversation as server-sent events. A client that reads slowly
-   * leaves bytes in the socket: until it drains, commits only replace the view to send, and the next event carries
-   * everything since the last one. So the harness's listener never waits on a client. A client that leaves bytes
-   * unread for `streamStallMs` is dropped, and one that still listens connects again.
+   * Takes one of the streams' places for a server-sent event stream, or refuses with `full`. A client that leaves
+   * bytes unread for `streamStallMs` is dropped, and one that still listens connects again. `end` runs once, whichever
+   * comes first: the client leaves, `thread` is deleted, or the source ends. The source's `onEnd`, the timer and the
+   * place go at once, and the response ends once the client reads what it holds, or is dropped after the stall limit.
    */
-  async function stream<V>(res: ServerResponse, t: Thread, follow: () => Promise<Watch<V>>, frames: Frames<V>) {
-    if (open.size >= maxStreams) throw new HttpError(503, `${maxStreams} streams are open, the most this control plane serves at once`);
-    let watch: Watch<V> | null = null;
-    let ping: NodeJS.Timeout | undefined;
+  function eventStream(res: ServerResponse, thread: ThreadId | null, full: string, onEnd: () => void = () => {}) {
+    if (open.size >= maxStreams) throw new HttpError(503, full);
+    let timer: NodeJS.Timeout | undefined;
     let stalled: NodeJS.Timeout | undefined;
     let ended = false;
     const stall = () => { stalled ??= setTimeout(() => res.destroy(), streamStallMs); };
-    const send = (text: string) => { if (!res.write(text)) stall(); };
-    /**
-     * Once, whichever comes first: the client leaves, the thread is deleted, or the harness ends the watch. The
-     * watch, the ping and the stream's place go at once. The response ends once the client reads what it holds,
-     * or is dropped after the stall limit.
-     */
     const end = () => {
       if (ended) return;
       ended = true;
       open.delete(handle);
-      clearInterval(ping);
-      void watch?.stop();
+      clearInterval(timer);
+      onEnd();
       res.end();
       if (!res.closed) stall();
     };
-    const handle = { thread: t.id, end };
+    const handle = { thread, end };
     open.add(handle);
     res.on("close", () => {
       clearTimeout(stalled);
       end();
     });
+    return {
+      get ended() { return ended; },
+      end,
+      /** For a source that failed to open. Its error reply ends the response. */
+      abandon() {
+        ended = true;
+        open.delete(handle);
+      },
+      send(text: string) { if (!res.write(text)) stall(); },
+      /** Sends the headers, then calls `tick` every `everyMs`, and `drained` each time a client that fell behind catches up. */
+      begin(everyMs: number, tick: () => void, drained: () => void) {
+        res.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-store" });
+        res.on("drain", () => {
+          clearTimeout(stalled);
+          stalled = undefined;
+          drained();
+        });
+        timer = setInterval(tick, everyMs);
+      },
+    };
+  }
+
+  /**
+   * Sends `frames` of each commit to the thread's conversation. A client that reads slowly leaves bytes in the socket:
+   * until it drains, commits only replace the view to send, and the next event carries everything since the last one.
+   * So the harness's listener never waits on a client.
+   */
+  async function stream<V>(res: ServerResponse, t: Thread, follow: () => Promise<Watch<V>>, frames: Frames<V>) {
+    let watch: Watch<V> | null = null;
+    const sse = eventStream(res, t.id, `${maxStreams} streams are open, the most this control plane serves at once`, () => void watch?.stop());
     try {
       watch = await follow();
     } catch (err) {
-      // The error reply ends the response.
-      ended = true;
-      open.delete(handle);
+      sse.abandon();
       throw err;
     }
-    if (ended) return void watch.stop();
+    if (sse.ended) return void watch.stop();
     let latest = watch.value;
     /** Whether bytes are on their way, so the stream needs no ping. A view that cannot be rendered ends the stream. */
     const flush = () => {
-      if (ended || res.writableNeedDrain) return true;
+      if (sse.ended || res.writableNeedDrain) return true;
       let frame: unknown;
       try {
         frame = frames(latest);
@@ -500,32 +525,42 @@ export async function startApi(options: ApiOptions): Promise<Api> {
         res.destroy(err as Error);
         return true;
       }
-      if (frame !== null) send(`data: ${JSON.stringify(frame)}\n\n`);
+      if (frame !== null) sse.send(`data: ${JSON.stringify(frame)}\n\n`);
       return frame !== null;
     };
-    res.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-store" });
+    sse.begin(pingMs, () => { if (!flush()) sse.send(": ping\n\n"); }, flush);
     flush();
-    res.on("drain", () => {
-      clearTimeout(stalled);
-      stalled = undefined;
-      flush();
-    });
-    ping = setInterval(() => { if (!flush()) send(": ping\n\n"); }, pingMs);
     watch.start(async (view) => {
       latest = view;
       flush();
     });
-    void watch.closed.then(end);
+    void watch.closed.then(sse.end);
   }
 
-  /** Each stream's route, and how it serves a thread. */
-  const streams: readonly [RegExp, (res: ServerResponse, t: Thread) => Promise<void>][] = [
-    [/^\/v1\/threads\/([^/]+)\/events$/, (res, t) => stream(res, conversing(t), () => harness.watch(t.id), viewFrames())],
-    [/^\/v1\/threads\/([^/]+)\/claude\/events$/, (res, t) => stream(res, claudeWorker(t), () => claude.watch(t), claudeFrames())],
-    [/^\/threads\/([^/]+)\/stream$/, (res, t) => isClaude(t)
-      ? stream<ClaudeConversation>(res, refuseDeleted(t), () => claude.watch(t), liveFrames(t, registry.claudeWorker(t.id)?.model ?? null))
-      : stream<ConversationView>(res, conversing(t), () => harness.watch(t.id), liveFrames(t))],
-  ];
+  /**
+   * Sends each event of `first`, then of each later read, as its ID and its data, then the ID of the newest event read
+   * as a ping, every second. A client that reads slowly gets the rest of a batch on the first tick after it caught up,
+   * from the last event it was sent.
+   */
+  function followEvents(res: ServerResponse, first: EventBatch, read: (since: string) => EventBatch) {
+    const sse = eventStream(res, null, "too many streams");
+    let since: string;
+    const flush = (batch = read(since)) => {
+      for (const event of batch.events) {
+        sse.send(`id: ${event.id}\ndata: ${JSON.stringify(event)}\n\n`);
+        since = event.id;
+        if (res.writableNeedDrain) return;
+      }
+      since = batch.watermark;
+      sse.send(`id: ${since}\n: ping\n\n`);
+    };
+    sse.begin(1000, () => {
+      if (res.writableNeedDrain) return;
+      try { flush(); }
+      catch { res.destroy(); }
+    }, () => {});
+    flush(first);
+  }
 
   async function setStatus(t: Thread, status: "archived" | "deleted"): Promise<Thread> {
     if (t.status === "deleted") throw new HttpError(409, `thread ${t.id} is deleted`);
@@ -758,7 +793,10 @@ export async function startApi(options: ApiOptions): Promise<Api> {
   const started = (operation: ImageOperation): Reply => ({ status: operation.state === "running" ? 202 : 200, body: operation });
 
   /** A file is served as its bytes, everything else as JSON. */
-  type Reply = { status: number; body?: unknown; file?: never } | { status: number; file: Buffer; type: string };
+  type Reply =
+    | { status: number; body?: unknown; file?: never; stream?: never }
+    | { status: number; file: Buffer; type: string; stream?: never }
+    | { stream(res: ServerResponse): Promise<void> | void; status?: never; file?: never };
   type Route = (match: RegExpExecArray, req: { query: URLSearchParams; body(empty?: unknown): Promise<unknown>; caller: TailnetNodeId }) => Reply | Promise<Reply>;
   const ok = (body: unknown): Reply => ({ status: 200, body });
   const created = (body: unknown): Reply => ({ status: 201, body });
@@ -781,6 +819,62 @@ export async function startApi(options: ApiOptions): Promise<Api> {
   }
 
   const routes: readonly [string, RegExp, Route][] = [
+    ["GET", /^\/v1\/health$/, () => ok(health())],
+    ["GET", /^\/v1\/release$/, () => ok(releaseView(registry, options.deployment?.self))],
+    ["PUT", /^\/v1\/release$/, async (_, r) => {
+      if (!canDeploy(registry, options.deployment, r.caller)) throw new HttpError(403, "caller may not deploy; infrastructure nodes and pylons cannot deploy");
+      const input = parse(z.strictObject({ commit: z.union([z.literal("main"), commitSchema]) }), await r.body());
+      const commit = input.commit === "main" ? await (options.deployment?.resolveMain ?? resolveMain)() : input.commit;
+      if (draining()) throw new HttpError(409, "control plane is draining; wait for this deployment to finish");
+      registry.setDesiredRelease({ commit: commitSchema.parse(commit), requestedBy: r.caller, requestedAt: Date.now() });
+      return ok(releaseView(registry, options.deployment?.self));
+    }],
+    // admit lets only a node with its deployer key reach these.
+    ["GET", /^\/v1\/deployer\/release$/, () => ok(releaseView(registry, options.deployment?.self))],
+    ["POST", /^\/v1\/deployer\/report$/, async (_, r) => {
+      const node = registry.nodes().find((n) => n.tailnetNodeId === r.caller)!;
+      const report = parse(reportSchema, await r.body());
+      if (report.role === "control" && r.caller !== options.deployment?.self) throw new HttpError(403, "only the control node reports control health");
+      registry.reportRelease({ ...report, node: node.name, observedAt: Date.now() });
+      return ok({ ok: true });
+    }],
+    ["POST", /^\/v1\/deployer\/drain$/, async (_, r) => {
+      if (r.caller !== options.deployment?.self) throw new HttpError(403, "only the control node drains");
+      const body = parse(z.strictObject({ commit: commitSchema, release: z.boolean().optional(), hold: z.boolean().optional() }), await r.body());
+      if (body.commit !== registry.desiredRelease()?.commit) throw new HttpError(409, "release was superseded");
+      registry.setDrain(body.release ? null : { commit: body.commit, expiresAt: Date.now() + 120_000, locked: registry.drain()?.locked ?? false });
+      const idle = body.release ? false : !await turnsRunning();
+      if (body.hold && idle) registry.setDrain({ commit: body.commit, expiresAt: Date.now() + 120_000, locked: true });
+      return ok({ idle, expiresAt: registry.drain()?.expiresAt ?? null });
+    }],
+    ["GET", /^\/v1\/events$/, (_, r) => {
+      const since = r.query.get("since") ?? "0";
+      try { eventCursor(since); } catch { throw new HttpError(400, "invalid event cursor"); }
+      const kinds = r.query.getAll("kind");
+      if (kinds.some((k) => !(eventKinds as readonly string[]).includes(k))) throw new HttpError(400, "unknown event kind");
+      const filter: EventFilter = { kinds, ...(r.query.has("thread") ? { thread: r.query.get("thread")! } : {}), ...(r.query.has("project") ? { project: r.query.get("project")! } : {}) };
+      const read = (from: string) => {
+        try { return registry.eventBatch(from, filter); }
+        catch (err) { throw new HttpError(409, (err as Error).message); }
+      };
+      const first = read(since);
+      if (r.query.get("follow") !== "true") return ok(first.events);
+      return { stream: (res) => followEvents(res, first, read) };
+    }],
+    ["GET", /^\/v1\/threads\/([^/]+)\/events$/, ([, id]) => {
+      const t = thread(id!);
+      return { stream: (res) => stream(res, conversing(t), () => harness.watch(t.id), viewFrames()) };
+    }],
+    ["GET", /^\/v1\/threads\/([^/]+)\/claude\/events$/, ([, id]) => {
+      const t = thread(id!);
+      return { stream: (res) => stream(res, claudeWorker(t), () => claude.watch(t), claudeFrames()) };
+    }],
+    ["GET", /^\/threads\/([^/]+)\/stream$/, ([, id]) => {
+      const t = thread(id!);
+      return { stream: (res) => isClaude(t)
+        ? stream<ClaudeConversation>(res, refuseDeleted(t), () => claude.watch(t), liveFrames(t, registry.claudeWorker(t.id)?.model ?? null))
+        : stream<ConversationView>(res, conversing(t), () => harness.watch(t.id), liveFrames(t)) };
+    }],
     ["PATCH", /^\/v1\/projects\/([^/]+)$/, async ([, id], r) => {
       const { autoReview, ...patch } = parse(projectEditSchema, await r.body());
       if (autoReview?.land) mayLand(r.caller);
@@ -952,98 +1046,19 @@ export async function startApi(options: ApiOptions): Promise<Api> {
 
     const url = new URL(req.url ?? "/", "http://nexus");
     const path = decodeURIComponent(url.pathname);
-    if (path === "/v1/health" && req.method === "GET") return send(res, 200, health());
-    if (path === "/v1/release" && req.method === "GET") return send(res, 200, releaseView(registry, options.deployment?.self));
-    if (path === "/v1/release" && req.method === "PUT") {
-      if (!canDeploy(registry, options.deployment, caller)) throw new HttpError(403, "caller may not deploy; infrastructure nodes and pylons cannot deploy");
-      const input = parse(z.strictObject({ commit: z.union([z.literal("main"), commitSchema]) }), await readJson(req));
-      const commit = input.commit === "main" ? await (options.deployment?.resolveMain ?? resolveMain)() : input.commit;
-      if (draining()) throw new HttpError(409, "control plane is draining; wait for this deployment to finish");
-      registry.setDesiredRelease({ commit: commitSchema.parse(commit), requestedBy: caller, requestedAt: Date.now() });
-      return send(res, 200, releaseView(registry, options.deployment?.self));
-    }
-    if (path.startsWith("/v1/deployer/")) {
-      const node = registry.nodes().find((n) => n.tailnetNodeId === caller)!;
-      if (path === "/v1/deployer/release" && req.method === "GET") return send(res, 200, releaseView(registry, options.deployment?.self));
-      if (path === "/v1/deployer/report" && req.method === "POST") {
-        const report = parse(reportSchema, await readJson(req));
-        if (report.role === "control" && caller !== options.deployment?.self) throw new HttpError(403, "only the control node reports control health");
-        registry.reportRelease({ ...report, node: node.name, observedAt: Date.now() });
-        return send(res, 200, { ok: true });
-      }
-      if (path === "/v1/deployer/drain" && req.method === "POST") {
-        if (caller !== options.deployment?.self) throw new HttpError(403, "only the control node drains");
-        const body = parse(z.strictObject({ commit: commitSchema, release: z.boolean().optional(), hold: z.boolean().optional() }), await readJson(req));
-        if (body.commit !== registry.desiredRelease()?.commit) throw new HttpError(409, "release was superseded");
-        registry.setDrain(body.release ? null : { commit: body.commit, expiresAt: Date.now() + 120_000, locked: registry.drain()?.locked ?? false });
-        const idle = body.release ? false : !await turnsRunning();
-        if (body.hold && idle) registry.setDrain({ commit: body.commit, expiresAt: Date.now() + 120_000, locked: true });
-        return send(res, 200, { idle, expiresAt: registry.drain()?.expiresAt ?? null });
-      }
-      throw new HttpError(404, `no deployer route ${path}`);
-    }
-    if (path === "/v1/events" && req.method === "GET") {
-      const query = url.searchParams;
-      let since = query.get("since") ?? "0";
-      try { eventCursor(since); } catch { throw new HttpError(400, "invalid event cursor"); }
-      const kinds = query.getAll("kind");
-      if (kinds.some((k) => !(eventKinds as readonly string[]).includes(k))) throw new HttpError(400, "unknown event kind");
-      const filter: EventFilter = { kinds, ...(query.has("thread") ? { thread: query.get("thread")! } : {}), ...(query.has("project") ? { project: query.get("project")! } : {}) };
-      const read = () => {
-        try { return registry.eventBatch(since, filter); }
-        catch (err) { throw new HttpError(409, (err as Error).message); }
-      };
-      const first = read();
-      if (query.get("follow") !== "true") return send(res, 200, first.events);
-      if (open.size >= maxStreams) throw new HttpError(503, "too many streams");
-      res.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-store" });
-      let blocked = false;
-      let stall: ReturnType<typeof setTimeout> | undefined;
-      const write = (text: string) => {
-        if (!res.write(text)) {
-          blocked = true;
-          stall ??= setTimeout(() => res.destroy(), streamStallMs);
-        }
-      };
-      const flush = (batch = read()) => {
-        for (const event of batch.events) {
-          write(`id: ${event.id}\ndata: ${JSON.stringify(event)}\n\n`);
-          since = event.id;
-          if (blocked) return;
-        }
-        since = batch.watermark;
-        write(`id: ${since}\n: ping\n\n`);
-      };
-      res.on("drain", () => { blocked = false; clearTimeout(stall); stall = undefined; });
-      const registration = { thread: "" as ThreadId, end: () => res.end() };
-      open.add(registration);
-      const timer = setInterval(() => {
-        if (blocked) return;
-        try { flush(); }
-        catch { res.destroy(); }
-      }, 1000);
-      res.once("close", () => { open.delete(registration); clearInterval(timer); clearTimeout(stall); });
-      flush(first);
-      return;
-    }
     const view = req.method === "GET" ? await page(path, url.searchParams, caller) : undefined;
     if (view !== undefined) return void res.writeHead(view.status, view.headers).end(view.body);
-    for (const [pattern, serve] of streams) {
-      const m = pattern.exec(path);
-      if (m === null) continue;
-      if (req.method !== "GET") throw new HttpError(405, `${req.method} is not allowed on ${path}`);
-      return serve(res, thread(m[1]!));
-    }
     const matches = routes.flatMap(([method, pattern, route]) => {
       const m = pattern.exec(path);
       return m === null ? [] : [{ method, m, route }];
     });
-    if (matches.length === 0) throw new HttpError(404, `no route ${path}`);
+    if (matches.length === 0) throw new HttpError(404, path.startsWith("/v1/deployer/") ? `no deployer route ${path}` : `no route ${path}`);
     const match = matches.find((r) => r.method === req.method);
     if (match === undefined) throw new HttpError(405, `${req.method} is not allowed on ${path}`);
     const startsTurn = req.method === "POST" && (path === "/v1/threads" || /^\/v1\/threads\/[^/]+\/(messages|retry|start)$/.test(path));
     const route = () => match.route(match.m, { query: url.searchParams, caller, body: (empty) => readJson(req, empty) });
     const reply = startsTurn ? await turnRequests.run(async () => route()) : await route();
+    if (reply.stream !== undefined) return reply.stream(res);
     if (reply.file !== undefined) sendFile(res, reply.file, reply.type);
     else if (reply.body === undefined) res.writeHead(reply.status).end();
     else send(res, reply.status, reply.body);

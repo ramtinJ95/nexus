@@ -2141,6 +2141,304 @@ test("project add and edit refuse duplicate secret names instead of merging thei
   assert.deepEqual(edited.body.secrets, secrets);
 });
 
+test("the health, release, deployer and event routes answer each caller and method as listed", async (t) => {
+  const report = { role: "probe", commit: deployCommit, target: deployCommit, state: "healthy", reason: null };
+  const off = await setup(t);
+  const otherToken = "other-node-token";
+  const on = await setup(t, { deployment: { ...deployment, keys: { ...deployment.keys, nOTHER: createHash("sha256").update(otherToken).digest("hex") } } });
+  on.registry.upsertNode({ name: "rj-other" as NodeName, tailnetHost: "rj-other.tail.ts.net", tailnetNodeId: "nOTHER" as TailnetNodeId });
+  const notDeployer = await setup(t, { deployment: { ...deployment, deployers: new Set(["nFIREBAT" as TailnetNodeId]) } });
+  const callers: [string, Awaited<ReturnType<typeof setup>>, string, Record<string, string>][] = [
+    ["a deployer", on, laptop, {}],
+    ["an allowed caller who is not a deployer", notDeployer, laptop, {}],
+    ["an allowed caller while deploys are off", off, laptop, {}],
+    ["the control node", on, "nFIREBAT", {}],
+    ["the control node with its deployer key", on, "nFIREBAT", reporterHeaders],
+    ["the control node with another key", on, "nFIREBAT", { authorization: "Bearer not-the-key" }],
+    ["an allowed laptop with the control node's key", on, laptop, reporterHeaders],
+    ["another node with its deployer key", on, "nOTHER", { authorization: `Bearer ${otherToken}` }],
+    ["a stranger", on, "nSTRANGER", {}],
+    ["a stranger with the control node's key", on, "nSTRANGER", reporterHeaders],
+  ];
+  const requests: [string, string, unknown?][] = [
+    ["GET", "/v1/health?past=admission"],
+    ["POST", "/v1/health", {}],
+    ["GET", "/v1/release"],
+    ["PUT", "/v1/release", { commit: "main" }],
+    ["PUT", "/v1/release", { commit: "--evil" }],
+    ["POST", "/v1/release", { commit: "main" }],
+    ["GET", "/v1/deployer/release"],
+    ["POST", "/v1/deployer/release", {}],
+    ["POST", "/v1/deployer/report", report],
+    ["POST", "/v1/deployer/report", { ...report, role: "control" }],
+    ["POST", "/v1/deployer/report", { ...report, state: "fine" }],
+    ["GET", "/v1/deployer/report"],
+    ["POST", "/v1/deployer/drain", { commit: "b".repeat(40) }],
+    ["POST", "/v1/deployer/drain", { commit: deployCommit, release: true }],
+    ["GET", "/v1/deployer/drain"],
+    ["POST", "/v1/deployer/nothing", {}],
+    ["GET", "/v1/deployer/nothing"],
+    ["GET", "/v1/events?kind=release.changed"],
+    ["GET", "/v1/events?since=-1"],
+    ["GET", "/v1/events?kind=unknown"],
+    ["DELETE", "/v1/events"],
+  ];
+  const answers: Record<string, string[]> = {};
+  for (const [who, s, id, headers] of callers) {
+    s.callAs(id as TailnetNodeId);
+    answers[who] = [];
+    for (const [method, path, body] of requests) {
+      const reply = await s.call(method, path, body, headers);
+      answers[who].push(`${method} ${path} ${reply.status}${reply.status < 300 ? "" : ` ${reply.body.error}`}`);
+    }
+  }
+  const deployer = [
+    "GET /v1/health?past=admission 200",
+    "POST /v1/health 405 POST is not allowed on /v1/health",
+    "GET /v1/release 200",
+    "PUT /v1/release 200",
+    "PUT /v1/release 400 ✖ Invalid string: must match pattern /^[0-9a-f]{40}$/\n  → at commit",
+    "POST /v1/release 405 POST is not allowed on /v1/release",
+    "GET /v1/deployer/release 403 caller is not a tailnet node this control plane allows",
+    "POST /v1/deployer/release 403 caller is not a tailnet node this control plane allows",
+    "POST /v1/deployer/report 403 caller is not a tailnet node this control plane allows",
+    "POST /v1/deployer/report 403 caller is not a tailnet node this control plane allows",
+    "POST /v1/deployer/report 403 caller is not a tailnet node this control plane allows",
+    "GET /v1/deployer/report 403 caller is not a tailnet node this control plane allows",
+    "POST /v1/deployer/drain 403 caller is not a tailnet node this control plane allows",
+    "POST /v1/deployer/drain 403 caller is not a tailnet node this control plane allows",
+    "GET /v1/deployer/drain 403 caller is not a tailnet node this control plane allows",
+    "POST /v1/deployer/nothing 403 caller is not a tailnet node this control plane allows",
+    "GET /v1/deployer/nothing 403 caller is not a tailnet node this control plane allows",
+    "GET /v1/events?kind=release.changed 200",
+    "GET /v1/events?since=-1 400 invalid event cursor",
+    "GET /v1/events?kind=unknown 400 unknown event kind",
+    "DELETE /v1/events 405 DELETE is not allowed on /v1/events",
+  ];
+  const allowed = [
+    "GET /v1/health?past=admission 200",
+    "POST /v1/health 405 POST is not allowed on /v1/health",
+    "GET /v1/release 200",
+    "PUT /v1/release 403 caller may not deploy; infrastructure nodes and pylons cannot deploy",
+    "PUT /v1/release 403 caller may not deploy; infrastructure nodes and pylons cannot deploy",
+    "POST /v1/release 405 POST is not allowed on /v1/release",
+    "GET /v1/deployer/release 403 caller is not a tailnet node this control plane allows",
+    "POST /v1/deployer/release 403 caller is not a tailnet node this control plane allows",
+    "POST /v1/deployer/report 403 caller is not a tailnet node this control plane allows",
+    "POST /v1/deployer/report 403 caller is not a tailnet node this control plane allows",
+    "POST /v1/deployer/report 403 caller is not a tailnet node this control plane allows",
+    "GET /v1/deployer/report 403 caller is not a tailnet node this control plane allows",
+    "POST /v1/deployer/drain 403 caller is not a tailnet node this control plane allows",
+    "POST /v1/deployer/drain 403 caller is not a tailnet node this control plane allows",
+    "GET /v1/deployer/drain 403 caller is not a tailnet node this control plane allows",
+    "POST /v1/deployer/nothing 403 caller is not a tailnet node this control plane allows",
+    "GET /v1/deployer/nothing 403 caller is not a tailnet node this control plane allows",
+    "GET /v1/events?kind=release.changed 200",
+    "GET /v1/events?since=-1 400 invalid event cursor",
+    "GET /v1/events?kind=unknown 400 unknown event kind",
+    "DELETE /v1/events 405 DELETE is not allowed on /v1/events",
+  ];
+  const controlKey = [
+    "GET /v1/health?past=admission 200",
+    "POST /v1/health 405 POST is not allowed on /v1/health",
+    "GET /v1/release 200",
+    "PUT /v1/release 403 caller may not deploy; infrastructure nodes and pylons cannot deploy",
+    "PUT /v1/release 403 caller may not deploy; infrastructure nodes and pylons cannot deploy",
+    "POST /v1/release 405 POST is not allowed on /v1/release",
+    "GET /v1/deployer/release 200",
+    "POST /v1/deployer/release 405 POST is not allowed on /v1/deployer/release",
+    "POST /v1/deployer/report 200",
+    "POST /v1/deployer/report 200",
+    "POST /v1/deployer/report 400 ✖ Invalid option: expected one of \"pending\"|\"waiting-for-control\"|\"waiting-for-idle\"|\"installing\"|\"healthy\"|\"rolled-back\"|\"failed\"\n  → at state",
+    "GET /v1/deployer/report 405 GET is not allowed on /v1/deployer/report",
+    "POST /v1/deployer/drain 409 release was superseded",
+    "POST /v1/deployer/drain 200",
+    "GET /v1/deployer/drain 405 GET is not allowed on /v1/deployer/drain",
+    "POST /v1/deployer/nothing 404 no deployer route /v1/deployer/nothing",
+    "GET /v1/deployer/nothing 404 no deployer route /v1/deployer/nothing",
+    "GET /v1/events?kind=release.changed 200",
+    "GET /v1/events?since=-1 400 invalid event cursor",
+    "GET /v1/events?kind=unknown 400 unknown event kind",
+    "DELETE /v1/events 405 DELETE is not allowed on /v1/events",
+  ];
+  const otherKey = [
+    "GET /v1/health?past=admission 403 caller is not a tailnet node this control plane allows",
+    "POST /v1/health 403 caller is not a tailnet node this control plane allows",
+    "GET /v1/release 403 caller is not a tailnet node this control plane allows",
+    "PUT /v1/release 403 caller is not a tailnet node this control plane allows",
+    "PUT /v1/release 403 caller is not a tailnet node this control plane allows",
+    "POST /v1/release 403 caller is not a tailnet node this control plane allows",
+    "GET /v1/deployer/release 200",
+    "POST /v1/deployer/release 405 POST is not allowed on /v1/deployer/release",
+    "POST /v1/deployer/report 200",
+    "POST /v1/deployer/report 403 only the control node reports control health",
+    "POST /v1/deployer/report 400 ✖ Invalid option: expected one of \"pending\"|\"waiting-for-control\"|\"waiting-for-idle\"|\"installing\"|\"healthy\"|\"rolled-back\"|\"failed\"\n  → at state",
+    "GET /v1/deployer/report 405 GET is not allowed on /v1/deployer/report",
+    "POST /v1/deployer/drain 403 only the control node drains",
+    "POST /v1/deployer/drain 403 only the control node drains",
+    "GET /v1/deployer/drain 405 GET is not allowed on /v1/deployer/drain",
+    "POST /v1/deployer/nothing 404 no deployer route /v1/deployer/nothing",
+    "GET /v1/deployer/nothing 404 no deployer route /v1/deployer/nothing",
+    "GET /v1/events?kind=release.changed 403 caller is not a tailnet node this control plane allows",
+    "GET /v1/events?since=-1 403 caller is not a tailnet node this control plane allows",
+    "GET /v1/events?kind=unknown 403 caller is not a tailnet node this control plane allows",
+    "DELETE /v1/events 403 caller is not a tailnet node this control plane allows",
+  ];
+  const stranger = [
+    "GET /v1/health?past=admission 403 caller is not a tailnet node this control plane allows",
+    "POST /v1/health 403 caller is not a tailnet node this control plane allows",
+    "GET /v1/release 403 caller is not a tailnet node this control plane allows",
+    "PUT /v1/release 403 caller is not a tailnet node this control plane allows",
+    "PUT /v1/release 403 caller is not a tailnet node this control plane allows",
+    "POST /v1/release 403 caller is not a tailnet node this control plane allows",
+    "GET /v1/deployer/release 403 caller is not a tailnet node this control plane allows",
+    "POST /v1/deployer/release 403 caller is not a tailnet node this control plane allows",
+    "POST /v1/deployer/report 403 caller is not a tailnet node this control plane allows",
+    "POST /v1/deployer/report 403 caller is not a tailnet node this control plane allows",
+    "POST /v1/deployer/report 403 caller is not a tailnet node this control plane allows",
+    "GET /v1/deployer/report 403 caller is not a tailnet node this control plane allows",
+    "POST /v1/deployer/drain 403 caller is not a tailnet node this control plane allows",
+    "POST /v1/deployer/drain 403 caller is not a tailnet node this control plane allows",
+    "GET /v1/deployer/drain 403 caller is not a tailnet node this control plane allows",
+    "POST /v1/deployer/nothing 403 caller is not a tailnet node this control plane allows",
+    "GET /v1/deployer/nothing 403 caller is not a tailnet node this control plane allows",
+    "GET /v1/events?kind=release.changed 403 caller is not a tailnet node this control plane allows",
+    "GET /v1/events?since=-1 403 caller is not a tailnet node this control plane allows",
+    "GET /v1/events?kind=unknown 403 caller is not a tailnet node this control plane allows",
+    "DELETE /v1/events 403 caller is not a tailnet node this control plane allows",
+  ];
+  assert.deepEqual(answers, {
+    "a deployer": deployer,
+    "an allowed caller who is not a deployer": allowed,
+    "an allowed caller while deploys are off": allowed,
+    "the control node": allowed,
+    "the control node with its deployer key": controlKey,
+    "the control node with another key": allowed,
+    "an allowed laptop with the control node's key": deployer,
+    "another node with its deployer key": otherKey,
+    "a stranger": stranger,
+    "a stranger with the control node's key": stranger,
+  });
+});
+
+test("an event follower gets each event as an id and its data, then the watermark as a ping, every second, and a plain read gets them as JSON", async (t) => {
+  const s = await setup(t);
+  const first = s.registry.appendEvent("release.changed", null, { state: "pending" });
+  const unrelated = s.registry.appendEvent("thread.failed", null, {});
+  const plain = await s.raw("/v1/events?kind=release.changed");
+  assert.equal(plain.status, 200);
+  assert.deepEqual([plain.headers["content-type"], plain.headers["cache-control"]], ["application/json", "no-store"]);
+  assert.deepEqual(JSON.parse(plain.body.toString()), [first]);
+
+  const chunks: string[] = [];
+  const res = await new Promise<import("node:http").IncomingMessage>((resolve, reject) => {
+    request({ host: "127.0.0.1", port: s.port, path: "/v1/events?follow=true&kind=release.changed", headers: { host: `127.0.0.1:${s.port}` } }, resolve).on("error", reject).end();
+  });
+  t.after(() => res.destroy());
+  res.setEncoding("utf8");
+  res.on("data", (chunk: string) => chunks.push(chunk));
+  assert.equal(res.statusCode, 200);
+  assert.deepEqual([res.headers["content-type"], res.headers["cache-control"]], ["text/event-stream", "no-store"]);
+  const frame = (event: { id: string }) => `id: ${event.id}\ndata: ${JSON.stringify(event)}\n\n`;
+  const ping = (id: string) => `id: ${id}\n: ping\n\n`;
+  await until(() => chunks.join("").length >= (frame(first) + ping(unrelated.id)).length, "the first batch arrived");
+  assert.equal(chunks.join(""), frame(first) + ping(unrelated.id), "the watermark passes the unrelated event the filter left out");
+  await until(() => chunks.join("").length > (frame(first) + ping(unrelated.id)).length, "a second passed");
+  const second = s.registry.appendEvent("release.changed", null, { state: "installing" });
+  const expected = frame(first) + ping(unrelated.id) + ping(unrelated.id) + frame(second) + ping(second.id);
+  await until(() => chunks.join("").length >= expected.length, "the next event arrived");
+  assert.equal(chunks.join("").slice(0, expected.length), expected);
+});
+
+test("an event follower open across a deploy drain gets every event in order, and the drain neither ends nor refuses it", async (t) => {
+  const s = await setup(t, { deployment });
+  const stream = s.events("/v1/events?follow=true");
+  t.after(() => stream.close());
+  assert.equal((await s.call("PUT", "/v1/release", { commit: deployCommit })).status, 200);
+  s.callAs("nFIREBAT" as TailnetNodeId);
+  const report = (state: string) => s.call("POST", "/v1/deployer/report", { role: "control", commit: null, target: deployCommit, state, reason: null }, reporterHeaders);
+  assert.equal((await report("waiting-for-idle")).status, 200);
+  assert.equal((await s.call("POST", "/v1/deployer/drain", { commit: deployCommit }, reporterHeaders)).body.idle, true);
+  assert.equal((await report("installing")).status, 200);
+  s.callAs(laptop);
+  assert.equal((await s.call("POST", "/v1/threads", {})).status, 409, "the drain holds");
+  const during = s.events("/v1/events?follow=true&kind=release.changed");
+  t.after(() => during.close());
+  s.callAs("nFIREBAT" as TailnetNodeId);
+  assert.equal((await s.call("POST", "/v1/deployer/drain", { commit: deployCommit, release: true }, reporterHeaders)).status, 200);
+  assert.equal((await report("healthy")).status, 200);
+  const states = async (reader: typeof stream, n: number) => {
+    const seen: unknown[] = [];
+    while (seen.length < n) seen.push((await reader.next()).payload.state ?? null);
+    return seen;
+  };
+  assert.deepEqual(await states(stream, 4), [null, "waiting-for-idle", "installing", "healthy"], "the release asked for, then each report, in order");
+  assert.deepEqual(await states(during, 4), [null, "waiting-for-idle", "installing", "healthy"], "a follower opened during the drain is served from the start");
+  assert.equal(await Promise.race([stream.ended, new Promise((resolve) => setTimeout(resolve, 1_500, "open"))]), "open", "the follower stays open past the next ping");
+});
+
+test("a slow event follower gets every event once and in order, and one that stops reading is dropped after the stall limit with its place", async (t) => {
+  const s = await setup(t, { streamStallMs: 1000 });
+  const slow = s.events("/v1/events?follow=true&kind=release.changed");
+  t.after(() => slow.close());
+  const firstId = s.registry.appendEvent("release.changed", null, { n: 0 }).id;
+  assert.equal((await slow.next()).id, firstId);
+  slow.pause();
+  // A megabyte each, so the paused client's socket fills in a few events and the follower stops partway through a batch.
+  const ids = [firstId];
+  for (let n = 1; n <= 12; n++) ids.push(s.registry.appendEvent("release.changed", null, { n, pad: "x".repeat(1 << 20) }).id);
+  await sleep(1_500);
+  slow.resume();
+  const seen = [firstId];
+  while (seen.length < ids.length) seen.push((await slow.next()).id);
+  assert.deepEqual(seen, ids, "each event once, in order");
+
+  const stalled = s.events("/v1/events?follow=true");
+  await stalled.response;
+  stalled.pause();
+  const others = Array.from({ length: maxStreams - 2 }, () => s.events("/v1/events?follow=true&kind=release.changed"));
+  t.after(() => { for (const other of others) other.close(); });
+  await Promise.all(others.map((other) => other.response));
+  assert.equal((await s.events("/v1/events?follow=true&kind=release.changed").response).statusCode, 503, "every place is taken");
+  for (let n = 0; n < 24; n++) s.registry.appendEvent("thread.failed", null, { n, pad: "x".repeat(1 << 20) });
+  let freed = s.events("/v1/events?follow=true&kind=release.changed");
+  while ((await freed.response).statusCode === 503) {
+    await sleep(100);
+    freed = s.events("/v1/events?follow=true&kind=release.changed");
+  }
+  t.after(() => freed.close());
+  stalled.resume();
+  assert.equal(await stalled.ended, "dropped", "the follower that stopped reading was dropped, which gave its place to the next");
+});
+
+test("event followers share the streams' places with thread streams, past which each is refused with its own error, and a thread's delete leaves them open", async (t) => {
+  const s = await withThread(t);
+  const { thread } = s;
+  const followers = Array.from({ length: maxStreams - 1 }, () => s.events("/v1/events?follow=true"));
+  t.after(() => { for (const follower of followers) follower.close(); });
+  await Promise.all(followers.map((follower) => follower.response));
+  const page = s.events(`/v1/threads/${thread.id}/events`);
+  await page.next();
+  const follow = await s.call("GET", "/v1/events?follow=true");
+  assert.deepEqual(follow, { status: 503, body: { error: "too many streams" } });
+  const threadStream = await s.call("GET", `/v1/threads/${thread.id}/events`);
+  assert.deepEqual(threadStream, { status: 503, body: { error: `${maxStreams} streams are open, the most this control plane serves at once` } });
+  assert.deepEqual(await s.call("GET", "/v1/events?since=-1&follow=true"), { status: 400, body: { error: "invalid event cursor" } }, "a bad cursor is refused before the place is counted");
+  assert.equal((await s.call("DELETE", `/v1/threads/${thread.id}`)).status, 200);
+  assert.equal(await page.ended, "end");
+  const after = s.registry.appendEvent("release.changed", null, {});
+  for (const follower of followers) assert.equal((await follower.next()).id, after.id, "every follower is still open after the delete");
+  assert.equal((await s.events("/v1/events?follow=true").response).statusCode, 200, "the deleted thread's stream gave its place back, and the followers kept theirs");
+});
+
+test("an event cursor older than what the log retains is refused with 409", async (t) => {
+  const s = await setup(t);
+  for (let i = 0; i < 10_002; i++) s.registry.appendEvent("release.changed", null, {});
+  for (const path of ["/v1/events?since=1", "/v1/events?since=1&follow=true"]) {
+    assert.deepEqual(await s.call("GET", path), { status: 409, body: { error: "event cursor expired; retained events cannot fill the gap" } });
+  }
+});
+
 test("event followers replay a disconnect gap with since and filter without losing order", async (t) => {
   const s = await setup(t);
   const first = s.registry.appendEvent("release.changed", null, { state: "pending" });

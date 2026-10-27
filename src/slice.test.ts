@@ -28,13 +28,12 @@ import { homedir, tmpdir } from "node:os";
 import { basename, dirname, join, posix } from "node:path";
 import { promisify } from "node:util";
 import { createDockerBackend } from "./docker-backend.ts";
-import { dockerHostBridge } from "./docker-host-bridge.ts";
 import { createPylonVmBackend } from "./pylon-vm-backend.ts";
 import { run as pylonVm } from "./pylon-vm/client.ts";
 import { nodeSecrets, type NodeSecrets } from "./probe/config.ts";
 import { startProbe, type Probe } from "./probe/server.ts";
 import { fakeTailscale, nodeHost, viaGateway } from "./probe/fake-tailscale.ts";
-import { pylonInfoFile, pylonVmHostBridge, type HostBridge } from "./probe/pylon-api.ts";
+import { pylonInfoFile } from "./probe/pylon-api.ts";
 import { connectProbe, type DeclaredOutput, type LiveHash, type NodeName, type ProbeClient, type PylonId, type ServiceFact, type TailnetNodeId } from "./protocol.ts";
 import { envelope, type PlanStep } from "./reconcile.ts";
 import { newPylonRecord, nextCheckpoint, snapshot, tick, type PylonRecord } from "./tick.ts";
@@ -56,7 +55,6 @@ const cli = new URL("../images/pylon/nexus", import.meta.url).pathname;
 interface SliceFixture {
   backend: VmBackend;
   image: ImageId;
-  hostBridge: HostBridge;
   /** Puts this checkout's CLI and the given pylon.json into the running pylon, whatever its image has. */
   installCli(pylonJson: string): Promise<void>;
   /** The node's secret file, shared by the probe and the backend as on a real node. */
@@ -112,7 +110,6 @@ function dockerFixture(): SliceFixture {
   return {
     backend: createDockerBackend({ images: { [image]: tag }, labels, hostBridgePort: bridgePort, previewHost: nodeHost }),
     image,
-    hostBridge: dockerHostBridge(bridgePort, labels),
     async installCli(pylonJson) {
       await docker("cp", cli, `${pylonId}:/usr/local/bin/nexus`);
       await docker("exec", pylonId, "sh", "-c", `mkdir -p /home/user/.nexus && printf '%s' "$1" > ${pylonInfoFile}`, "sh", pylonJson);
@@ -271,7 +268,6 @@ function pylonVmFixture(): SliceFixture {
   return {
     backend: createPylonVmBackend({ stateRoot, artifacts: dirname(assets), secrets, previewHost: nodeHost, ...(gitSsh === undefined ? {} : { gitSsh }) }),
     image: basename(assets) as ImageId,
-    hostBridge: pylonVmHostBridge(stateRoot),
     async installCli(pylonJson) {
       await this.backend.guest(pylonId).writeFiles([
         { path: "/usr/local/bin/nexus", mode: 0o755, owner: "root", content: readFileSync(cli, "utf8") },
@@ -405,7 +401,6 @@ async function startTestProbe(b: VmBackend = backend) {
     backend: b,
     secrets: fixture.secrets,
     previews: { gatewayPort, routesFile: join(stateDir, "routes.json"), tailscale: tailscale.cli, get: viaGateway(() => `http://127.0.0.1:${gatewayPort}`).get },
-    hostBridge: fixture.hostBridge,
   });
   port = probe.port;
   client ??= connectProbe(node, "127.0.0.1", probeId, { port, whois: async () => probeId });
