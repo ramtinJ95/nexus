@@ -18,6 +18,7 @@ import type { ConversationView, EntryRecord, InboxState, LiveState } from "@eare
 import type { ListeningPort, NodeSummary, OpenedSession, ThreadDetail, ThreadRow, ViewFrame } from "../control/api.ts";
 import type { ImageEntry, ImageOperation, ImagesView } from "../control/image-rollout.ts";
 import type { NodePylons, Placement, Room } from "../control/placement.ts";
+import type { QueuedThread, Wait } from "../control/queue.ts";
 import type { ClaudeSent, Preview, Thread } from "../control/registry.ts";
 import type { Review } from "../control/review.ts";
 import { maxEntries, usageLimitText, type ClaudeConversation, type ClaudeEntry, type PromptSource } from "../claude-transcript.ts";
@@ -38,7 +39,8 @@ const configFile = () => join(homedir(), ".config", "nexus", "cli.json");
 const usage = `nexus ${version}, the Nexus control plane from this Mac
 
   nexus events [--follow] [--since ID] [--thread T] [--project P] [--kind K]...
-  nexus threads [--project P] [--all]          threads, without deleted ones unless --all
+  nexus threads [--project P] [--all] [--queued]
+    threads, then queued ones; deleted ones and cancelled queued ones only with --all, and --queued lists only queued ones
   nexus show <thread>                          a thread with its pylon, sessions, previews and outputs
   nexus ports <thread>                         the TCP ports the pylon listens on, and each one's preview
   nexus preview <thread> <port> [--wait]       publish a port as a preview, and print its URL
@@ -51,7 +53,9 @@ const usage = `nexus ${version}, the Nexus control plane from this Mac
   nexus session close <thread> <pane|id>       a session in no pane by its ID, which \`nexus show\` gives
   nexus attach <thread>                        this terminal on the pylon's Herdr sessions, through the control plane
   nexus start --project P [--title T] [--message M | --claude PROMPT [--model ID]] [--node N|auto] [--branch B] [--commit C]
-              [--cpus n] [--memory GiB] [--disk GiB]
+              [--cpus n] [--memory GiB] [--disk GiB] [--after THREAD[,THREAD...]]
+    --after queues it to start once each of those threads' pull requests has merged
+  nexus start-queued <thread>                  start a queued thread now, without waiting for the threads it is queued after
   nexus send <thread> <text...> [--steer] [--request-id ID]
     a message to the agent, or typed into the Claude worker's session, which waits for a paused pylon to wake
   nexus watch <thread> [--interval MS]         the conversation, or the Claude worker's transcript, as it grows
@@ -416,6 +420,47 @@ async function whenRunning<T>(api: Api, id: string, send: () => Promise<T>, undo
   }
 }
 
+/** What a queued thread's row and `show` call its status: an archived one is cancelled. */
+const queuedState = (q: QueuedThread) => q.status === "archived" ? "cancelled" : q.status === "deleted" ? "deleted" : q.blocked ? "blocked" : "queued";
+const waitText = (w: Wait) => `${w.state === "waiting" ? "waits for" : w.state === "landed" ? "landed" : "blocked by"} ${w.thread}: ${w.why}`;
+const queuedRow = (q: QueuedThread) => {
+  const next = q.waits.find((w) => w.state === "blocked") ?? q.waits.find((w) => w.state === "waiting");
+  return [q.id, queuedState(q), next === undefined ? `starting${q.lastError === null ? "" : `: ${clip(q.lastError, 80)}`}` : waitText(next), `node ${q.node}`, q.project, ago(q.createdAt), q.title];
+};
+
+function queuedText(q: QueuedThread): string {
+  const { cpus, memoryGiB, diskGiB } = q.resources;
+  return [
+    `${q.id}  ${q.title}`,
+    `project: ${q.project}`,
+    `status: ${queuedState(q)}`,
+    `node: ${q.node === "auto" ? "auto, the node with the most room once it starts" : q.node}`,
+    `worker: ${q.worker === "claude" ? `Claude worker, model ${q.model ?? "unknown"}` : "Nexus agent"}`,
+    `size: ${cpus} CPUs, ${memoryGiB} GiB memory, ${diskGiB} GiB disk`,
+    ...q.branch === null ? [] : [`branch: ${q.branch}`],
+    ...q.commit === null ? [] : [`commit: ${q.commit}`],
+    ...q.prompt === null ? [] : [`${q.worker === "claude" ? "prompt" : "first message"}: ${clip(q.prompt.split("\n").find((line) => line.trim() !== "")?.trim() ?? "", 120)}`],
+    ...q.waits.map(waitText),
+    ...q.startNow === null ? [] : [`start-queued by ${q.startNow.by} ${ago(q.startNow.at)}, so it starts without waiting`],
+    ...q.lastError === null ? [] : [`last start attempt: ${q.lastError}`],
+    ...q.status === "queued" && q.blocked ? [`nexus start-queued ${q.id} starts it now; nexus archive ${q.id} cancels it.`] : [],
+    ...q.status === "archived" ? [`nexus unarchive ${q.id} queues it again.`] : [],
+  ].join("\n");
+}
+
+/** "A", "A and B", or "A, B and C". */
+const listed = (names: readonly string[]) => names.length < 2 ? names.join("") : `${names.slice(0, -1).join(", ")} and ${names.at(-1)}`;
+
+/** A control plane older than queued threads has no such route, so it has none queued. */
+async function queuedThreads(api: Api, query: string): Promise<QueuedThread[]> {
+  try {
+    return await api("GET", `/v1/queued${query}`) as QueuedThread[];
+  } catch (err) {
+    if (err instanceof CliError && err.status === 404 && err.message.startsWith("no route ")) return [];
+    throw err;
+  }
+}
+
 const threadRow = (t: ThreadRow) => [t.id, t.status, t.usageLimit !== undefined ? usageLimitText(t.usageLimit, Date.now()) : working(t) ? "working" : "-", `pylon ${t.pylon.actualState}`, t.project, ago(t.createdAt), t.title];
 
 /** The first line of a message, as the title of the thread it starts. */
@@ -434,12 +479,12 @@ const action = (path: string, done: string, body?: unknown): Command => ({
   },
 });
 
-/** A thread action whose route answers the thread. */
-const statusChange = (method: string, path: string, done: string): Command => ({
+/** A thread action whose route answers the thread, or the queued thread when it has not started. */
+const statusChange = (method: string, path: string, done: string, queued: string): Command => ({
   args: [1, 1],
   async run(api, [id]) {
-    const t = await api(method, `${thread(id!)}${path}`) as Thread;
-    return { json: t, text: `${done} ${t.id}.` };
+    const t = await api(method, `${thread(id!)}${path}`) as Thread | QueuedThread;
+    return { json: t, text: `${done} ${t.id}.${"waits" in t ? ` ${queued}` : ""}` };
   },
 });
 
@@ -877,18 +922,30 @@ const commands: Readonly<Record<string, Command>> = {
   },
   threads: {
     args: [0, 0],
-    options: { project: { type: "string" }, all: { type: "boolean" } },
+    options: { project: { type: "string" }, all: { type: "boolean" }, queued: { type: "boolean" } },
     async run(api, _, v) {
       const project = str(v, "project");
-      const threads = await api("GET", `/v1/threads${project === undefined ? "" : `?project=${encodeURIComponent(project)}`}`) as ThreadRow[];
+      const query = project === undefined ? "" : `?project=${encodeURIComponent(project)}`;
+      const queued = (await queuedThreads(api, query)).filter((q) => v.all === true || q.status === "queued");
+      if (v.queued === true) return { json: queued, text: queued.length === 0 ? "No queued threads." : table(queued.map(queuedRow)) };
+      const threads = await api("GET", `/v1/threads${query}`) as ThreadRow[];
       const shown = v.all === true ? threads : threads.filter((t) => t.status !== "deleted");
-      return { json: shown, text: shown.length === 0 ? "No threads." : table(shown.map(threadRow)) };
+      const rows = [...shown.map(threadRow), ...queued.map(queuedRow)];
+      return { json: shown, text: rows.length === 0 ? "No threads." : table(rows) };
     },
   },
   show: {
     args: [1, 1],
     async run(api, [id]) {
-      const d = await api("GET", thread(id!)) as ThreadDetail;
+      let d: ThreadDetail;
+      try {
+        d = await api("GET", thread(id!)) as ThreadDetail;
+      } catch (err) {
+        // A queued thread has no row, which the thread route answers with a 409, and an older control plane with a 404.
+        if (!(err instanceof CliError) || (err.status !== 404 && err.status !== 409)) throw err;
+        const q = await api("GET", `/v1/queued/${encodeURIComponent(id!)}`).catch(() => { throw err; }) as QueuedThread;
+        return { json: q, text: queuedText(q) };
+      }
       return { json: d, text: detailText(d) };
     },
   },
@@ -980,7 +1037,7 @@ const commands: Readonly<Record<string, Command>> = {
     args: [0, 0],
     options: {
       model: { type: "string" }, claude: { type: "string" }, project: { type: "string" }, title: { type: "string" }, message: { type: "string" }, node: { type: "string" }, branch: { type: "string" }, commit: { type: "string" },
-      cpus: { type: "string" }, memory: { type: "string" }, disk: { type: "string" },
+      cpus: { type: "string" }, memory: { type: "string" }, disk: { type: "string" }, after: { type: "string" },
     },
     async run(api, _, v) {
       const project = str(v, "project");
@@ -993,13 +1050,28 @@ const commands: Readonly<Record<string, Command>> = {
       if (title === undefined) throw new CliError("invalid", "start needs --title, --message or --claude");
       const optional = Object.fromEntries((["node", "branch", "commit", "claude", "model"] as const).flatMap((key) => v[key] === undefined ? [] : [[key, v[key]]]));
       const resources = resourcesOf(v);
-      const t = await api("POST", "/v1/threads", { project, title, ...optional, ...resources === undefined ? {} : { resources } }) as Thread;
+      const body = { project, title, ...optional, ...resources === undefined ? {} : { resources } };
+      const after = str(v, "after")?.split(",").map((id) => id.trim()).filter((id) => id !== "");
+      if (after !== undefined) {
+        if (after.length === 0) throw new CliError("invalid", "--after needs a thread");
+        // One request: the control plane keeps the first message and sends it once the thread starts.
+        const q = await api("POST", "/v1/threads", { ...body, after, ...message === undefined ? {} : { message } }) as QueuedThread;
+        return { json: q, text: `Queued ${q.id} on ${q.project}: ${q.title}. It starts once ${listed(q.after)} ${q.after.length === 1 ? "has merged its pull request" : "have merged their pull requests"}.` };
+      }
+      const t = await api("POST", "/v1/threads", body) as Thread;
       if (message !== undefined) {
         await send(api, t.id, message, false, `msg:${randomUUID()}`).catch((err: unknown) => {
           throw err instanceof CliError ? new CliError(err.kind, `started ${t.id}, but its first message was not sent: ${err.message}`, err.status) : err;
         });
       }
       return { json: t, text: `Started ${t.id} on ${t.project}: ${t.title}${message === undefined ? "" : "\nSent the first message."}` };
+    },
+  },
+  "start-queued": {
+    args: [1, 1],
+    async run(api, [id]) {
+      const t = await api("POST", `${thread(id!)}/start`) as Thread;
+      return { json: t, text: `Started ${t.id} on ${t.project}: ${t.title}` };
     },
   },
   send: {
@@ -1043,9 +1115,9 @@ const commands: Readonly<Record<string, Command>> = {
   retry: action("retry", "Retried the parked tasks of"),
   "retry-pylon": action("pylon/retry", "Retried the pylon of"),
   wake: action("activity", "Recorded activity on", { kind: "human" }),
-  archive: statusChange("POST", "/archive", "Archived"),
-  unarchive: statusChange("POST", "/unarchive", "Unarchived"),
-  delete: statusChange("DELETE", "", "Deleted"),
+  archive: statusChange("POST", "/archive", "Archived", "Its queued start is cancelled."),
+  unarchive: statusChange("POST", "/unarchive", "Unarchived", "It is queued again."),
+  delete: statusChange("DELETE", "", "Deleted", "It will never start."),
   projects: {
     args: [0, 0],
     async run(api) {
