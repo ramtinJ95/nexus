@@ -1,9 +1,12 @@
 /**
  * Installs the agent setup in manifest.json into the image, as user, during docker build:
  *   node /opt/nexus/agent-setup/install.ts
- * and checks an installed setup against the layout the smoke boot derived from the recipe's manifest:
+ * and checks an installed setup against the layout the smoke boot derived from the recipe's manifest, with pi
+ * loading every extension:
  *   node /opt/nexus/agent-setup/install.ts check '<InstalledAgentSetup as JSON>'
- * Each prints `ok` when the install matches, or one line per mismatch and exits 1.
+ * Each prints `ok` when the install matches, or one line per mismatch and exits 1. Only the smoke boot starts pi,
+ * because pi starts Claude through pi-claude-delegation, and the image would keep that session, its hook events
+ * included, which every pylon booted from it would send to its thread.
  */
 import { execFile } from "node:child_process";
 import { existsSync } from "node:fs";
@@ -251,7 +254,7 @@ if (import.meta.main) {
   if (command === undefined) {
     const setup = parseAgentSetup(await readFile(join(import.meta.dirname, "manifest.json"), "utf8"));
     await install(setup);
-    mismatches = await check(installedLayout(setup));
+    mismatches = installMismatches(installedLayout(setup), await observe());
   } else if (command === "check" && layout !== undefined) {
     await herdrIntegrations();
     mismatches = await check(JSON.parse(layout) as InstalledAgentSetup);
