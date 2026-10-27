@@ -116,6 +116,41 @@ test("polling reconciles a desired control release, reports rollback and leaves 
   assert.equal(calls.length, 0, "bad commits remain quarantined, including across polling cycles");
 });
 
+test("a poll leaves its report as JSON private to its owner, with no temporary file beside it, and a role without its local config is refused", async (t) => {
+  const { createServer } = await import("node:http");
+  const { once } = await import("node:events");
+  const { readdir, stat } = await import("node:fs/promises");
+  const { reconcileRole } = await import("./worker.ts");
+  const dir = await mkdtemp(join(tmpdir(), "nexus-report-"));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  for (const path of ["etc", "units", "deployer", `releases/${commit}`]) await mkdir(join(dir, path), { recursive: true });
+  await writeFile(join(dir, `releases/${commit}/release-commit`), commit);
+  await symlink(`releases/${commit}`, join(dir, "current"));
+  const server = createServer((_req, res) => res.end(JSON.stringify({ commit }))).listen(0, "127.0.0.1");
+  await once(server, "listening");
+  t.after(() => { server.closeAllConnections(); server.close(); });
+  const api = async (path: string) => {
+    if (path === "release") return { desired: { commit, requestedBy: "nMac", requestedAt: 0 }, nodes: [] };
+    if (path === "report") return { ok: true };
+    assert.fail(path);
+  };
+  const config = { controlUrl: "http://control/", controlNodeId: "nControl", token: "a".repeat(64), healthTimeoutMs: 1000, drainTimeoutMs: 0 };
+  const boundary = { prefix: dir, etc: join(dir, "etc"), units: join(dir, "units"), async checkout() {}, async run() { return ""; } };
+
+  await assert.rejects(reconcileRole("probe", config, api, boundary));
+  assert.equal(existsSync(join(dir, "probe-deploy-report.json")), false);
+
+  await writeFile(join(dir, "etc/probe.json"), JSON.stringify({ listen: { host: "127.0.0.1", port: (server.address() as { port: number }).port } }));
+  const before = new Set(await readdir(dir));
+  const start = Date.now();
+  await reconcileRole("probe", config, api, boundary);
+  const { observedAt, ...report } = JSON.parse(await readFile(join(dir, "probe-deploy-report.json"), "utf8"));
+  assert.deepEqual(report, { role: "probe", commit, target: commit, state: "healthy", reason: null });
+  assert.ok(observedAt >= start && observedAt <= Date.now());
+  assert.equal((await stat(join(dir, "probe-deploy-report.json"))).mode & 0o777, 0o600);
+  assert.deepEqual((await readdir(dir)).filter((name) => !before.has(name)), ["probe-deploy-report.json"]);
+});
+
 for (const readiness of ["stale", "unhealthy", "unreachable"] as const) test(`probe retries when control becomes ${readiness} during preparation, without switching or quarantining`, async (t) => {
   const { createServer } = await import("node:http");
   const { once } = await import("node:events");

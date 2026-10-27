@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, readlink, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readdir, readFile, readlink, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test, type TestContext } from "node:test";
@@ -127,4 +127,20 @@ test("deployment child commands include the administrative paths the probe insta
   const dir = await directory(t);
   const path = await command(process.execPath, ["-p", "process.env.PATH"], dir);
   assert.deepEqual(path.split(":"), ["/usr/local/sbin", "/usr/local/bin", "/usr/sbin", "/usr/bin", "/sbin", "/bin"]);
+});
+
+test("an install leaves its journal as the transaction's JSON, private to its owner, with no temporary file beside it", async (t) => {
+  const { prefix, installer } = await fixture(t);
+  const before = new Set(await readdir(prefix));
+  const result = await installer.install(commit);
+  assert.deepEqual(JSON.parse(await readFile(join(prefix, "control-deploy.json"), "utf8")), result);
+  assert.equal((await stat(join(prefix, "control-deploy.json"))).mode & 0o777, 0o600);
+  assert.deepEqual((await readdir(prefix)).filter((name) => !before.has(name)), ["control-deploy.json"]);
+});
+
+test("a journal that is not JSON is refused rather than read as no deployment", async (t) => {
+  const { prefix, installer } = await fixture(t);
+  await writeFile(join(prefix, "control-deploy.json"), "{\"commit\":");
+  await assert.rejects(installer.observed(), SyntaxError);
+  await assert.rejects(installer.install(commit), SyntaxError);
 });
