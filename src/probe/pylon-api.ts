@@ -10,6 +10,7 @@ import { pylonEventSchema, type PylonEvent } from "../events.ts";
  * guest's own refusals (an unknown service, a declared name given to `service start`) come through in.
  */
 import { chmod, rm } from "node:fs/promises";
+import { once } from "node:events";
 import { createServer, type IncomingMessage } from "node:http";
 import { z } from "zod";
 import type { Guest } from "../backend.ts";
@@ -251,12 +252,9 @@ export function listenHostBridge(
         (err: unknown) => res.writeHead(err instanceof BodyTooLarge ? 413 : 500, { "content-type": "text/plain; charset=utf-8" }).end((err as Error).message),
       );
     });
-    await new Promise<void>((resolve, reject) => {
-      server.once("error", reject);
-      const done = () => { server.off("error", reject); resolve(); };
-      if ("path" in at) server.listen(at.path, done);
-      else server.listen(at.port, at.host, done);
-    });
+    if ("path" in at) server.listen(at.path);
+    else server.listen(at.port, at.host);
+    await once(server, "listening");
     return {
       close: () => new Promise<void>((resolve) => {
         server.close(() => resolve());

@@ -22,6 +22,7 @@ import { canDeploy, commitSchema, isReporter, releaseView, reportSchema, resolve
  * wakes the loop for its node, so a start or a dashboard visit acts within one pass rather than 5 seconds.
  */
 import { attentionOf, type Attention } from "./attention.ts";
+import { once } from "node:events";
 import { createServer as createHttpsServer } from "node:https";
 import { TLSSocket } from "node:tls";
 import type { Certificate } from "../tailscale.ts";
@@ -1099,10 +1100,8 @@ export async function startApi(options: ApiOptions): Promise<Api> {
   }
   const server = makeServer();
   let secure: ReturnType<typeof makeServer> | null = null;
-  await new Promise<void>((resolve, reject) => {
-    server.once("error", reject);
-    server.listen(options.port, options.host, () => { server.off("error", reject); resolve(); });
-  });
+  server.listen(options.port, options.host);
+  await once(server, "listening");
   let renewal: ReturnType<typeof setTimeout> | null = null;
   let retryMs = options.https?.retryMs ?? 1000;
   function scheduleCertificate(delay: number) {
@@ -1122,10 +1121,8 @@ export async function startApi(options: ApiOptions): Promise<Api> {
         const listener = makeServer(certificate);
         secure = listener;
         try {
-          await new Promise<void>((resolve, reject) => {
-            listener.once("error", reject);
-            listener.listen(options.https!.port, options.host, () => { listener.off("error", reject); resolve(); });
-          });
+          listener.listen(options.https.port, options.host);
+          await once(listener, "listening");
         } catch (err) {
           listener.close();
           secure = null;

@@ -7,6 +7,7 @@ import { runningCommit } from "../deploy/health.ts";
  */
 import { randomUUID } from "node:crypto";
 import { mkdir, statfs } from "node:fs/promises";
+import { once } from "node:events";
 import { createServer, STATUS_CODES, type IncomingMessage, type ServerResponse } from "node:http";
 import { availableParallelism, totalmem } from "node:os";
 import type { Duplex } from "node:stream";
@@ -639,13 +640,13 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
       refuse(socket, 502, (err as Error).message);
     });
   });
-  await new Promise<void>((resolve, reject) => {
-    server.once("error", reject);
-    server.listen(options.port, options.host, () => { server.off("error", reject); resolve(); });
-  }).catch(async (err: unknown) => {
+  try {
+    server.listen(options.port, options.host);
+    await once(server, "listening");
+  } catch (err) {
     await previews?.gateway.close(); // its port is fixed, so a retry in this process needs it free
     throw err;
-  });
+  }
   const address = server.address();
   if (address === null || typeof address === "string") throw new Error(`unexpected server address ${address}`);
   const bridge = await options.hostBridge?.(api.answer).catch(async (err: unknown) => {
