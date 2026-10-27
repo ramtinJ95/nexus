@@ -1,0 +1,40 @@
+$ git checkout abd4fdd  # the test, with main's daemon.ts
+$ node --test src/pylon-vm/daemon.test.ts
+✖ the controller logs each server error after it listens, and keeps serving (808.655799ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 0
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+
+✖ failing tests:
+
+test at src/pylon-vm/daemon.test.ts:54:1
+✖ the controller logs each server error after it listens, and keeps serving (808.655799ms)
+  AssertionError [ERR_ASSERTION]: The input did not match the regular expression /accept ENOBUFS[\s\S]*injected accept error 1/. Input:
+  
+  'injected accept error 1\n'
+  
+      at TestContext.<anonymous> (file://<repo>/src/pylon-vm/daemon.test.ts:58:9)
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 'injected accept error 1\n',
+    expected: /accept ENOBUFS[\s\S]*injected accept error 1/,
+    operator: 'match',
+    diff: 'simple'
+  }
+exit 1
+
+$ git checkout db703a9  # the fix
+$ node --test src/pylon-vm/daemon.test.ts
+✔ the controller logs each server error after it listens, and keeps serving (717.296627ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 1
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+exit 0

@@ -1,0 +1,30 @@
+ref: origin/main (137242d), node v24.22.1
+inspect before any error: {"ok":true,"result":{"name":"pylon-t1","status":{"name":"pylon-t1","state":"running"}}}
+accept error 1: injected
+controller after accept error 1: alive
+inspect after accept error 1: {"ok":true,"result":{"name":"pylon-t1","status":{"name":"pylon-t1","state":"running"}}}
+accept error 2: injected
+controller after accept error 2: gone
+inspect after accept error 2: no answer (curl exit 7)
+controller exit code: 1
+left in the instance directory: control.sock controller.pid 
+controller.log:
+  injected accept error 1
+  node:events:505
+      throw er; // Unhandled 'error' event
+      ^
+  
+  Error: accept ENOBUFS
+      at Pipe.onconnection (node:net:2764:24)
+      at process.<anonymous> (file://<work>/tree/src/pylon-vm/fake-runtime.ts:49:9)
+      at process.emit (node:events:514:28)
+  Emitted 'error' event on Server instance at:
+      at Pipe.onconnection (node:net:2764:10)
+      at process.<anonymous> (file://<work>/tree/src/pylon-vm/fake-runtime.ts:49:9)
+      at process.emit (node:events:514:28) {
+    errno: -105,
+    code: 'ENOBUFS',
+    syscall: 'accept'
+  }
+  
+  Node.js v24.22.1
