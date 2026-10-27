@@ -643,8 +643,8 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
     async auto(t: Thread, pr: Pick<PullRequest, "repo" | "number">): Promise<void> {
       const setting = registry.project(t.project)?.autoReview;
       if (setting == null || t.startedBy === reviewerCaller || t.startedBy === checkCaller || registry.isReviewer(t.id)) return;
-      // Another thread on the same branch links the same PR, which has its review already.
-      if (registry.reviews().some((r) => r.pr.repo === pr.repo && r.pr.number === pr.number)) return;
+      // Another thread on the same branch links the same PR, which has had its review, even one its builder's next replaced.
+      if (registry.prReviewed(pr.repo, pr.number)) return;
       const existing = registry.review(t.id);
       try {
         if (existing !== null && !ended.has(existing.phase.kind)) throw new HttpError(409, `review ${existing.id} of pull request #${existing.pr.number} is ${existing.phase.kind}`);

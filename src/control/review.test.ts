@@ -1139,3 +1139,17 @@ test("a PR that another thread on its branch has a review of gets none on its ow
   assert.equal(f.registry.review("th-twin" as ThreadId), null);
   assert.equal(f.started.length, 1);
 });
+
+test("a PR stays reviewed once its builder's record moves on to a review of another PR", async (t) => {
+  const f = fixture(t, { autoReview: { land: false, enabledBy: "nLAPTOP" } });
+  const loop = f.loop();
+  await loop.auto(f.registry.thread(f.builder)!, f.pr);
+  await loop.poll();
+  f.reply(f.review().reviewer, verdict(f.review(), {}));
+  await loop.poll();
+  assert.equal(f.review().phase.kind, "approved");
+  f.registry.saveReview({ ...f.review(), id: "rv-next", pr: { ...f.review().pr, number: f.pr.number + 1 }, phase: { kind: "reviewing" } });
+  await loop.auto(f.registry.thread(f.add("th-twin", true))!, f.pr);
+  assert.equal(f.registry.review("th-twin" as ThreadId), null, "the twin's link of the first PR starts nothing");
+  assert.equal(f.started.length, 1);
+});
