@@ -18,6 +18,7 @@
 import { randomBytes } from "node:crypto";
 import { z } from "zod";
 import { releaseOutcome } from "../deploy/model.ts";
+import { singleFlight } from "../single-flight.ts";
 import type { HarnessHost } from "../harness/host.ts";
 import type { SecretGrant } from "../project.ts";
 import { defaultClaudeModel } from "../claude-state.ts";
@@ -332,7 +333,8 @@ export function reviewerFor(builder: { claude: boolean; model: string }, secrets
 export function reviewLoop(deps: ReviewDeps & { startThread(request: StartRequest, caller: string): Promise<Thread>; harnessModel: string }) {
   const { registry, github, inbox, replies, checks, release, log } = deps;
   const now = deps.now ?? Date.now;
-  let running: Promise<void> | null = null;
+  const passes = singleFlight(pass);
+  const poll = passes.join;
 
   /** Whether a turn of `t` ended since its last message from the loop, the only time its replies can hold an answer. */
   const answeredSince = (r: Review, t: Thread) => t.lastReplyAt !== null && t.lastReplyAt > r.since;
@@ -626,15 +628,10 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
     return review;
   }
 
-  function poll(): Promise<void> {
-    if (running === null) running = pass().finally(() => { running = null; });
-    return running;
-  }
-
   return {
     poll,
     deploys,
-    async close() { await running; },
+    close: passes.settled,
 
     /** Starts a review of the builder's open PR: the reviewer thread, its first request, and the record. */
     async start(builderId: ThreadId, request: { pr?: number | undefined; rounds?: number | undefined; land: string | null }): Promise<Review> {

@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import type { Inbox } from "./inbox.ts";
 import { githubRepo, type GitHub, type PrSnapshot, type PullRequest } from "./github.ts";
 import type { Registry, Thread, ThreadId } from "./registry.ts";
+import { singleFlight } from "../single-flight.ts";
 
 export const prWatchPrefix = "[Nexus PR watch — automated, not a message from the person]";
 export interface PrLink {
@@ -24,7 +25,6 @@ const active = (t: Thread | undefined) => t !== undefined && t.status !== "archi
  */
 export function prWatcher(options: { registry: Registry; github: Pick<GitHub, "find" | "poll"> | null; inbox: Inbox; linked?: ((t: Thread, pr: PullRequest) => Promise<void>) | undefined }) {
   const { registry, github, inbox } = options;
-  let running: Promise<void> | null = null;
   async function deliver(id: ThreadId, state: PrWatchState) {
     const t = registry.thread(id);
     if (!active(t) || state.pending === null) return;
@@ -141,11 +141,6 @@ export function prWatcher(options: { registry: Registry; github: Pick<GitHub, "f
       }
     }
   }
-  return {
-    async close() { await running; },
-    poll(): Promise<void> {
-      if (running === null) running = tick().finally(() => { running = null; });
-      return running;
-    },
-  };
+  const ticks = singleFlight(tick);
+  return { close: ticks.settled, poll: ticks.join };
 }

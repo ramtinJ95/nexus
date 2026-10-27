@@ -6,12 +6,10 @@
  */
 import { chatgptTokenGrant } from "../project.ts";
 import type { NodeObservation, ProbeClient } from "../protocol.ts";
+import { singleFlight } from "../single-flight.ts";
 
 export function chatgptTokenHandoff(options: { probes: readonly Pick<ProbeClient, "node" | "putSecret">[]; token(): Promise<string | undefined>; log?: (message: string) => void }) {
   const { probes, token, log = (message: string) => console.error(message) } = options;
-  let running: Promise<void> | null = null;
-  /** A probe without the token showed up while a poll ran, which may have failed to reach it before it restarted. */
-  let again = false;
   async function tick() {
     let value: string | undefined;
     try {
@@ -29,22 +27,14 @@ export function chatgptTokenHandoff(options: { probes: readonly Pick<ProbeClient
       }
     }));
   }
-  function poll(): Promise<void> {
-    running ??= (async () => {
-      do {
-        again = false;
-        await tick();
-      } while (again);
-    })().finally(() => { running = null; });
-    return running;
-  }
+  const ticks = singleFlight(tick);
   return {
-    async close() { await running; },
-    poll,
+    close: ticks.settled,
+    poll: ticks.join,
+    /** A probe without the token showed up, which a poll in flight may have failed to reach before it restarted. */
     observed(o: Pick<NodeObservation, "grants" | "heldSecrets">) {
       if (!o.heldSecrets?.includes(chatgptTokenGrant.name) || o.grants?.secrets.includes(chatgptTokenGrant.name)) return;
-      if (running !== null) again = true;
-      else void poll();
+      void ticks.rerun();
     },
   };
 }
