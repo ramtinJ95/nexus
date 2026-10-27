@@ -1,0 +1,89 @@
+# main: f2f6a8d test: pin JSON files and exec wrappers before merging them
+## deploy journal: ReleaseInstaller.install, then observed() on a missing and a malformed journal
+install: resolves {"commit":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","previous":"old","target":"new","state":"healthy","reason":null}
+  control-current symlink
+  control-deploy.json 600 "{\"commit\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"previous\":\"old\",\"target\":\"new\",\"state\":\"healthy\",\"reason\":null}\n"
+observed, probe journal missing: resolves null
+observed, probe journal malformed: rejects SyntaxError "Expected property name or '}' in JSON at position 1 (line 1 column 2)"
+
+## deploy report: reconcileRole on a healthy release, and with its role's local config missing
+reconcileRole control: resolves undefined
+  sent [{"role":"control","commit":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","target":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","state":"healthy","reason":null}]
+  control-deploy-report.json 600 "{\"role\":\"control\",\"commit\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"target\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"state\":\"healthy\",\"reason\":null,\"observedAt\":<now>}\n"
+reconcileRole probe, etc/probe.json missing: rejects TypeError "Cannot read properties of null (reading 'listen')"
+
+## preview routes: a converge's routes file under umask 022 and 077, and readRoutes of a missing and a malformed file
+converge under umask 22: resolves undefined
+  preview-routes.json 644 "[\n  {\n    \"httpsPort\": 10000,\n    \"pylonId\": \"pylon-a\",\n    \"service\": \"web\"\n  },\n  {\n    \"httpsPort\": 10001,\n    \"pylonId\": \"pylon-a\",\n    \"service\": \"port-6006\"\n  }\n]\n"
+readRoutes of it: resolves [[10000,{"pylonId":"pylon-a","service":"web"}],[10001,{"pylonId":"pylon-a","service":"port-6006"}]]
+converge under umask 77: resolves undefined
+  preview-routes.json 600 "[\n  {\n    \"httpsPort\": 10000,\n    \"pylonId\": \"pylon-a\",\n    \"service\": \"web\"\n  },\n  {\n    \"httpsPort\": 10001,\n    \"pylonId\": \"pylon-a\",\n    \"service\": \"port-6006\"\n  }\n]\n"
+readRoutes of it: resolves [[10000,{"pylonId":"pylon-a","service":"web"}],[10001,{"pylonId":"pylon-a","service":"port-6006"}]]
+readRoutes, missing: resolves []
+readRoutes, malformed: rejects SyntaxError "Expected property name or '}' in JSON at position 1 (line 1 column 2)"
+readRoutes, not a list: rejects Error "<tmp>/wrong-routes.json is not a list of { httpsPort, pylonId, service }"
+
+## pylon-vm saveJson, which the pylon controller writes status.json, services.json, linked.json and the checkpoint sidecar with
+  status.json 600 "{\n  \"state\": \"running\",\n  \"ports\": [\n    3000\n  ]\n}\n"
+
+## deploy bootstrap: the files install-deployer.sh copies, then the bootstrap worker's --check
+  copies src/tailscale.ts
+node src/deploy/worker.ts --check: resolves "exit 1: Error [ERR_MODULE_NOT_FOUND]: Cannot find module '<tmp>/bootstrap/src/protocol.ts' imported from <tmp>/bootstrap/src/deploy/worker.ts"
+
+## deploy worker's module graph: the repo files and packages src/deploy/worker.ts loads
+  files ["src/claude-state.ts","src/deploy/http.ts","src/deploy/install.ts","src/deploy/model.ts","src/deploy/plan.ts","src/deploy/worker.ts","src/events.ts","src/project.ts","src/protocol.ts","src/sessions.ts","src/tailscale.ts"]
+  packages ["yaml","zod"]
+
+## probe tailscaleCli: stdout, a nonzero exit with and without stderr, an abort
+exit 0: resolves "  {\"TCP\":{}}\n\n"
+exit 1 with stderr: rejects Error "tailscale serve --bg --https=443 http://127.0.0.1:7481: error: port 443 is taken"
+exit 2 without stderr: rejects Error "tailscale serve --https=443 off: Command failed: tailscale serve --https=443 off\n"
+aborted: rejects Error "tailscale serve status --json: The operation was aborted"
+missing binary: rejects Error "<tmp>/no-tailscale version: spawn <tmp>/no-tailscale ENOENT"
+  ran tailscale serve status --json
+  ran tailscale serve --bg --https=443 http://127.0.0.1:7481
+  ran tailscale serve --https=443 off
+  ran tailscale serve status --json
+
+## Docker backend: label filters, a failing docker command, and a guest exec's exit code, output and timeout
+artifacts.list: resolves []
+  ran docker images -q --no-trunc --filter label=nexus.checkpoint --filter label=nexus.test=capture --filter label=nexus.run=1
+artifacts.list, docker down: rejects Error "docker images -q --no-trunc --filter label=nexus.checkpoint --filter label=nexus.test=capture --filter label=nexus.run=1: Cannot connect to the Docker daemon at unix:///var/run/docker.sock"
+artifacts.list, docker exits 1 silently: rejects Error "docker images -q --no-trunc --filter label=nexus.checkpoint --filter label=nexus.test=capture --filter label=nexus.run=1: Command failed: docker images -q --no-trunc --filter label=nexus.checkpoint --filter label=nexus.test=capture --filter label=nexus.run=1\n"
+  ran docker images -q --no-trunc --filter label=nexus.checkpoint --filter label=nexus.test=capture --filter label=nexus.run=1
+  ran docker images -q --no-trunc --filter label=nexus.checkpoint --filter label=nexus.test=capture --filter label=nexus.run=1
+exec exit 0: resolves {"exitCode":0,"output":"out\nerr\n","truncated":false}
+exec exit 7: resolves {"exitCode":7,"output":"partial\nfailed\n","truncated":false}
+exec past its timeout: resolves {"exitCode":null,"output":"","truncated":false}
+  ran docker ps -a -q --no-trunc --filter label=nexus.pylon=pylon-a --filter label=nexus.test=capture --filter label=nexus.run=1
+  ran docker container inspect cid-1
+  ran docker exec --workdir /workspace pylon-a sh -c true
+  ran docker ps -a -q --no-trunc --filter label=nexus.pylon=pylon-a --filter label=nexus.test=capture --filter label=nexus.run=1
+  ran docker container inspect cid-1
+  ran docker exec --workdir /workspace pylon-a false
+  ran docker ps -a -q --no-trunc --filter label=nexus.pylon=pylon-a --filter label=nexus.test=capture --filter label=nexus.run=1
+  ran docker container inspect cid-1
+  ran docker exec --workdir / pylon-a sleep 60
+
+## Docker services: a missing services file is exit 3, a result; a checked script that fails
+apply to a booted container: rejects Error "in pylon-a, rm -f /run/nexus-services/*.pid /run/nexus-services/*.stopped exited 1: rm: cannot remove: Read-only file system"
+apply to a running container, then list: resolves []
+  ran docker port pylon-a
+  ran docker exec pylon-a sh -c test -e "$1" || exit 3; exec cat -- "$1" sh /home/user/workspace/repo/.nexus/services.yaml
+  ran docker exec pylon-a sh -c cat /run/nexus-services/linked 2>/dev/null || true sh
+  ran docker exec pylon-a sh -c rm -f /run/nexus-services/*.pid /run/nexus-services/*.stopped sh
+  ran docker port pylon-a
+  ran docker exec pylon-a sh -c test -e "$1" || exit 3; exec cat -- "$1" sh /home/user/workspace/repo/.nexus/services.yaml
+  ran docker exec pylon-a sh -c cat /run/nexus-services/linked 2>/dev/null || true sh
+  ran docker exec pylon-a sh -c test -e "$1" || exit 3; exec cat -- "$1" sh /home/user/workspace/repo/.nexus/services.yaml
+
+## Docker host bridge: the docker ps a NEXUS_API request runs, with its label filters
+  answered 200 {"pylonId":"pylon-a","body":"{}"}
+  ran docker ps --filter label=nexus.bridge-token=00000000000000000000000000000000 --filter label=nexus.test=capture --format {{.Label "nexus.pylon"}}
+
+## project mirror: git exits that are results, a git failure's text, an abort
+main, no .nexus/setup: resolves {"commit":"60a2a29db3b150567a8b78fa6d524c4e3a7d5974","setupBlob":null}
+with-setup: resolves {"commit":"26149740ed8f720375dd174115fd65af6977f008","setupBlob":"1a2485251c33a70432394c93fb89330ef214bfc9"}
+a branch the remote lacks: rejects Error "git fetch exited 128: fatal: couldn't find remote ref refs/heads/gone"
+an ssh remote: rejects Error "the control plane reads only https:// remotes, and holds no SSH key for git@github.com:o/r.git"
+aborted: rejects AbortError "The operation was aborted"

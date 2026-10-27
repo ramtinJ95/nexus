@@ -1,0 +1,40 @@
+--- /home/user/workspace/repo/docs/verification/shared-helpers/main.txt	2026-10-27 19:26:42.973391427 +0000
++++ /home/user/workspace/repo/docs/verification/shared-helpers/branch.txt	2026-10-27 19:26:57.724391427 +0000
+@@ -1,20 +1,20 @@
+-# main: f2f6a8d test: pin JSON files and exec wrappers before merging them
++# branch: 57d6ae9 refactor: run programs through exec.ts, and share the Docker label filter
+ ## deploy journal: ReleaseInstaller.install, then observed() on a missing and a malformed journal
+ install: resolves {"commit":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","previous":"old","target":"new","state":"healthy","reason":null}
+   control-current symlink
+-  control-deploy.json 600 "{\"commit\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"previous\":\"old\",\"target\":\"new\",\"state\":\"healthy\",\"reason\":null}\n"
++  control-deploy.json 600 "{\n  \"commit\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\n  \"previous\": \"old\",\n  \"target\": \"new\",\n  \"state\": \"healthy\",\n  \"reason\": null\n}\n"
+ observed, probe journal missing: resolves null
+ observed, probe journal malformed: rejects SyntaxError "Expected property name or '}' in JSON at position 1 (line 1 column 2)"
+ 
+ ## deploy report: reconcileRole on a healthy release, and with its role's local config missing
+ reconcileRole control: resolves undefined
+   sent [{"role":"control","commit":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","target":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","state":"healthy","reason":null}]
+-  control-deploy-report.json 600 "{\"role\":\"control\",\"commit\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"target\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"state\":\"healthy\",\"reason\":null,\"observedAt\":<now>}\n"
++  control-deploy-report.json 600 "{\n  \"role\": \"control\",\n  \"commit\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\n  \"target\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\n  \"state\": \"healthy\",\n  \"reason\": null,\n  \"observedAt\":<now>\n}\n"
+ reconcileRole probe, etc/probe.json missing: rejects TypeError "Cannot read properties of null (reading 'listen')"
+ 
+ ## preview routes: a converge's routes file under umask 022 and 077, and readRoutes of a missing and a malformed file
+ converge under umask 22: resolves undefined
+-  preview-routes.json 644 "[\n  {\n    \"httpsPort\": 10000,\n    \"pylonId\": \"pylon-a\",\n    \"service\": \"web\"\n  },\n  {\n    \"httpsPort\": 10001,\n    \"pylonId\": \"pylon-a\",\n    \"service\": \"port-6006\"\n  }\n]\n"
++  preview-routes.json 600 "[\n  {\n    \"httpsPort\": 10000,\n    \"pylonId\": \"pylon-a\",\n    \"service\": \"web\"\n  },\n  {\n    \"httpsPort\": 10001,\n    \"pylonId\": \"pylon-a\",\n    \"service\": \"port-6006\"\n  }\n]\n"
+ readRoutes of it: resolves [[10000,{"pylonId":"pylon-a","service":"web"}],[10001,{"pylonId":"pylon-a","service":"port-6006"}]]
+ converge under umask 77: resolves undefined
+   preview-routes.json 600 "[\n  {\n    \"httpsPort\": 10000,\n    \"pylonId\": \"pylon-a\",\n    \"service\": \"web\"\n  },\n  {\n    \"httpsPort\": 10001,\n    \"pylonId\": \"pylon-a\",\n    \"service\": \"port-6006\"\n  }\n]\n"
+@@ -28,10 +28,11 @@
+ 
+ ## deploy bootstrap: the files install-deployer.sh copies, then the bootstrap worker's --check
+   copies src/tailscale.ts
++  copies src/json-file.ts
+ node src/deploy/worker.ts --check: resolves "exit 1: Error [ERR_MODULE_NOT_FOUND]: Cannot find module '<tmp>/bootstrap/src/protocol.ts' imported from <tmp>/bootstrap/src/deploy/worker.ts"
+ 
+ ## deploy worker's module graph: the repo files and packages src/deploy/worker.ts loads
+-  files ["src/claude-state.ts","src/deploy/http.ts","src/deploy/install.ts","src/deploy/model.ts","src/deploy/plan.ts","src/deploy/worker.ts","src/events.ts","src/project.ts","src/protocol.ts","src/sessions.ts","src/tailscale.ts"]
++  files ["src/claude-state.ts","src/deploy/http.ts","src/deploy/install.ts","src/deploy/model.ts","src/deploy/plan.ts","src/deploy/worker.ts","src/events.ts","src/json-file.ts","src/project.ts","src/protocol.ts","src/sessions.ts","src/tailscale.ts"]
+   packages ["yaml","zod"]
+ 
+ ## probe tailscaleCli: stdout, a nonzero exit with and without stderr, an abort
