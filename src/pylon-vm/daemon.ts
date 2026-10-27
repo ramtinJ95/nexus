@@ -1,3 +1,4 @@
+import { once } from "node:events";
 import { chmod, rm } from "node:fs/promises";
 import http from "node:http";
 import { join } from "node:path";
@@ -80,10 +81,10 @@ async function main(): Promise<void> {
 			else void queue.run(handle);
 		});
 	});
-	await new Promise<void>((accept, reject) => {
-		server.once("error", reject);
-		server.listen(socket, accept);
-	});
+	server.listen(socket);
+	await once(server, "listening");
+	// A failed accept leaves the server listening, and the VM lives in this process, so an exit would only break the pylon.
+	server.on("error", (error) => console.error(error));
 	await chmod(socket, 0o600);
 	server.once("close", () => {
 		void readIdentity(pidFile)

@@ -1,0 +1,5 @@
+listening
+open-file limit: 3
+client with the limit at 3: no answer (curl exit 28)
+client with the limit restored: ok
+server errors: 0
