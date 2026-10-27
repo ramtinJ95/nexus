@@ -1,0 +1,15 @@
+$ git log --oneline -1
+a75ccf0 fix(dashboard): one attention table for the rows, the badge and notifications
+$ node --test --test-name-pattern="waiting on the person|event stream last reported|never stored" src/control/dashboard/notifications.test.js src/control/api.test.ts src/control/registry.test.ts
+✔ the API reports the attention the event stream last reported, and a deleted thread's run is not parked (115.174272ms)
+✔ a session waiting on the person counts in the badge and notifies at once, as its row stays bright (3.408355ms)
+✔ opening the registry stores the attention of a thread whose attention was never stored (52.917878ms)
+ℹ tests 3
+ℹ suites 0
+ℹ pass 3
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 1232.519901
+exit 0

@@ -1,0 +1,2 @@
+$ nexus delete th-7c44308f1d39
+Deleted th-7c44308f1d39.

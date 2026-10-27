@@ -1,0 +1,2 @@
+$ nexus delete th-fece7c457db9
+Deleted th-fece7c457db9.
