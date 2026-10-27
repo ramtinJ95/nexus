@@ -155,12 +155,14 @@ export function backgroundWatch(session: string, shells: readonly string[], grou
 }
 
 /**
- * Whether a Claude reports into the thread: one Nexus started, under the pylon user's own HOME. Claude Code puts
- * CLAUDE_CODE_SESSION_ID in the environment of everything it runs, so a Claude whose process started with it runs
- * inside another session, such as one a worker starts to verify its work.
+ * Whether a Claude reports into the thread: one Nexus started, under the pylon user's own HOME, in a pylon a thread
+ * owns. Claude Code puts CLAUDE_CODE_SESSION_ID in the environment of everything it runs, so a Claude whose process
+ * started with it runs inside another session, such as one a worker starts to verify its work. Only a thread's pylon
+ * has the overlay's pylon.json, so a Claude in a template build queues no events that its disk would carry into
+ * every pylon booted from it.
  */
-export function reportsIntoThread(env: NodeJS.ProcessEnv, claudeEnviron: string, home: string): boolean {
-  return env.HOME === home && !claudeEnviron.split("\0").some((variable) => variable.startsWith("CLAUDE_CODE_SESSION_ID="));
+export function reportsIntoThread(env: NodeJS.ProcessEnv, claudeEnviron: string, home: string, owned: boolean): boolean {
+  return owned && env.HOME === home && !claudeEnviron.split("\0").some((variable) => variable.startsWith("CLAUDE_CODE_SESSION_ID="));
 }
 
 /** The environment the Claude running a hook started with, which CLAUDE_PID names, or nothing when it is not known. */

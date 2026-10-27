@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { createHash } from "node:crypto";
+import { existsSync } from "node:fs";
 import { mkdir, rm } from "node:fs/promises";
 import { homedir, userInfo } from "node:os";
 import { join } from "node:path";
@@ -67,7 +68,8 @@ if (process.argv[2] === "hold") {
   await releaseHold(owner, Number(stamp), process.pid);
   process.exit(0);
 }
-if (!reportsIntoThread(process.env, await claudeEnviron(process.env.CLAUDE_PID), userInfo().homedir)) process.exit(0);
+const home = userInfo().homedir;
+if (!reportsIntoThread(process.env, await claudeEnviron(process.env.CLAUDE_PID), home, existsSync(join(home, ".nexus", "pylon.json")))) process.exit(0);
 const session = await report().catch(() => null);
 // A turn whose session is unknown reports no start, so its snapshot is named for none, and the previous turn's
 // snapshot cannot pass for its own.
