@@ -1,1 +1,1 @@
-branch: 0bc9bed docs(verification): record the fixed probe pin on main's code and on the branch, and the full suite
+branch: 5248f08 docs(verification): wait for the page stream's ping before counting its frames

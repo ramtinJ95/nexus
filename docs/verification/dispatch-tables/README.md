@@ -66,7 +66,7 @@ commits on top of the pins commit, so `tests-pins.txt` runs the fixed pin on mai
   mutant that made `service` wait for the reads failed it.
 
 The branch adds a test that lists `commandPolicies` for each kind. It also adds a test that the pylon-vm backend reports
-its key, journal and bridge. Typecheck and the full suite pass on the branch, 1240 of 1240 (`tests-full-branch.txt`).
+its key, journal and bridge. Typecheck and the full suite pass on the branch, 1273 of 1273 (`tests-full-branch.txt`).
 
 ## How the merged copies differed
 

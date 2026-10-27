@@ -1,9 +1,9 @@
-commit: d343f1f
+commit: 5248f08
 node: v24.22.1
 npm run typecheck: passed
 npm test:
-ℹ tests 1240
-ℹ pass 1240
+ℹ tests 1273
+ℹ pass 1273
 ℹ fail 0
 ℹ cancelled 0
 ℹ skipped 0

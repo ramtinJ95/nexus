@@ -410,7 +410,7 @@ stalled follower: dropped
 view stream 200 content-type=text/event-stream cache-control=no-store
 the next write after 15 s
 view stream: "data: {\"entries\":[]}\n\ndata: {\"docs\":{\"pi.live\":{\"seq\":1}}}\n\n: ping\n\n"
-page stream frames: 1, ends in a ping: false
+page stream frames: 2, ends in a ping: true
 POST to a stream: 405 content-type=application/json cache-control=no-store {"error":"POST is not allowed on /v1/threads/<thread>/events"}
 an unknown thread's stream: 404 content-type=application/json cache-control=no-store {"error":"no thread th-missing"}
 a Claude stream of a harness thread: 409 content-type=application/json cache-control=no-store {"error":"thread <thread> has no Claude worker"}
