@@ -444,3 +444,40 @@ test("the review loop hears of each PR the watch links open, once, and again aft
   assert.equal(f.registry.prWatch("th-2" as ThreadId)?.links[0]?.pr.state, "closed");
   assert.equal(heard.length, 2, "a PR first read closed is not news");
 });
+
+test("a thread a queued thread waits for has its PR's merge seen when archived, capped or closed, and only then", async (t) => {
+  const f = fixture(); t.after(() => f.registry.close());
+  const queued = (after: ThreadId[], status: "queued" | "archived" = "queued") => f.registry.saveQueued({
+    id: `th-q${after.length}${status}` as ThreadId, title: "after", project: "project" as ProjectId, startedBy: "test", createdAt: 1, after,
+    request: { project: "project", title: "after", resources: { cpus: 2, memoryGiB: 4, diskGiB: 10 } }, message: null, status, startNow: null, lastError: null, startedAt: null, firstMessage: null,
+  });
+  const merged = (id: ThreadId) => f.registry.prWatch(id)?.links[0]?.pr.state;
+  await f.watcher.poll();
+  f.registry.setThreadStatus(f.id, "archived");
+  f.snapshot = { ...f.snapshot, pr: { ...f.snapshot.pr, state: "merged" } };
+  await f.watcher.poll();
+  assert.equal(merged(f.id), "open", "an archived thread nothing waits for is not polled");
+  queued([f.id], "archived");
+  await f.watcher.poll();
+  assert.equal(merged(f.id), "open", "a cancelled queued thread waits for nothing");
+  queued([f.id]);
+  await f.watcher.poll();
+  assert.equal(merged(f.id), "merged", "an archived predecessor's merge is seen");
+
+  const capped = f.add("th-capped");
+  f.snapshot = { ...f.snapshot, pr: { ...f.snapshot.pr, state: "open" } };
+  await f.watcher.poll();
+  f.registry.savePrWatch(capped, { ...f.registry.prWatch(capped)!, commentWakes: 10 });
+  queued([f.id, capped]);
+  f.snapshot = { ...f.snapshot, pr: { ...f.snapshot.pr, state: "merged" } };
+  await f.watcher.poll();
+  assert.equal(merged(capped), "merged", "a capped watch still sees the merge");
+
+  const reopened = f.add("th-reopened");
+  f.snapshot = { ...f.snapshot, pr: { ...f.snapshot.pr, state: "closed" } };
+  f.registry.savePrWatch(reopened, { links: [{ pr: { ...f.snapshot.pr }, seen: [], failed: false }], commentWakes: 0, pending: null, error: null });
+  queued([f.id, capped, reopened]);
+  f.snapshot = { ...f.snapshot, pr: { ...f.snapshot.pr, state: "merged" } };
+  await f.watcher.poll();
+  assert.equal(merged(reopened), "merged", "a PR reopened and merged between two reads is seen merged");
+});

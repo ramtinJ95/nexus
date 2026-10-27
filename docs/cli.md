@@ -311,7 +311,7 @@ pullRequests: {
 }[];
 ```
 
-`enabled` means a control-plane token is configured; `stopped` means the durable ten-comment-only-wake cap was reached, not that the thread is archived. `error` reports a retryable read or delivery failure. Archived/deleted threads retain their last snapshots without polling. Terminal PRs retain their last check/review summary. A closed PR rediscovered as open resumes watching with its existing cursor, without replaying old feedback or resetting the comment-wake cap. `outputs` also includes `{ thread, kind: "pull-request", ref: <PR URL> }` for each link.
+`enabled` means a control-plane token is configured; `stopped` means the durable ten-comment-only-wake cap was reached, not that the thread is archived. `error` reports a retryable read or delivery failure. Archived/deleted threads retain their last snapshots without polling, except that the merge state of a thread a queued thread waits for is still read, as [Queued threads](#queued-threads-0270) describes. Terminal PRs retain their last check/review summary. A closed PR rediscovered as open resumes watching with its existing cursor, without replaying old feedback or resetting the comment-wake cap. `outputs` also includes `{ thread, kind: "pull-request", ref: <PR URL> }` for each link.
 
 Automated wake entries have `kind: "nexus.pr-watch"` and `data: { sender: "Nexus PR watch" }`, and their user-model message text starts with `[Nexus PR watch — automated, not a message from the person]`. This attribution is preserved in `conversation` and `watch` entries and is shown by the dashboard. It does not count as human activity. Consumers must not interpret every user-model message as coming from the person. A Claude worker thread gets the same text typed into its session, so its `conversation` shows it as a prompt starting with that prefix.
 
@@ -525,7 +525,7 @@ Each thread in `after` is one `Wait`. The control plane reads it from the predec
 | A linked pull request is open | `waiting` | `PR #<n> is open` |
 | Has no linked pull request | `waiting` | `has no pull request yet` |
 
-A review loop's reviewer or check thread merges nothing of its own, so `--after` refuses one. A queued thread may wait for another queued thread, which lands once it has started and its own pull request merged, so queued threads can form a chain.
+The PR watch reads a pull request every two minutes, so a queued thread starts up to about two minutes after the merge, plus one pass of the queue. It stops reading the pull requests of an archived or deleted thread, of one whose watch reached its ten comment-only wakes, and a closed one it does not find open again. For a thread a queued thread waits for, it still reads each pull request that has not merged, without sending anything, so a predecessor merged and archived before the watch saw the merge, or reopened and merged between two reads, still lands. A review loop's reviewer or check thread merges nothing of its own, so `--after` refuses one. A queued thread may wait for another queued thread, which lands once it has started and its own pull request merged, so queued threads can form a chain.
 
 ### When it starts
 

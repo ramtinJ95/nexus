@@ -36,13 +36,40 @@ export function prWatcher(options: { registry: Registry; github: Pick<GitHub, "f
     if (github === null) return;
     const finds = new Map<string, Promise<number[]>>();
     const polls = new Map<string, Promise<PrSnapshot>>();
+    const poll = (link: PrLink) => {
+      const key = `${link.pr.repo}:${link.pr.number}`;
+      if (!polls.has(key)) polls.set(key, github.poll(link.pr.repo, link.pr.number));
+      return polls.get(key)!;
+    };
+    // A queued thread starts when these threads' pull requests merge, which the watch must see even where it sends nothing.
+    const awaited = new Set(registry.queuedThreads().flatMap((q) => q.status === "queued" ? q.after : []));
+    /** A closed PR may have been reopened and merged between two reads, and the watch rediscovers only open ones. */
+    async function settle(id: ThreadId, links: readonly PrLink[]) {
+      for (const link of links) {
+        if (link.pr.state === "merged") continue;
+        const { pr } = await poll(link);
+        if (pr.state === link.pr.state) continue;
+        const saved = registry.prWatch(id);
+        const stored = saved?.links.find((l) => l.pr.repo === pr.repo && l.pr.number === pr.number);
+        if (saved === null || stored === undefined) continue;
+        stored.pr = { ...pr, checks: stored.pr.checks, review: stored.pr.review, conflict: stored.pr.conflict };
+        registry.savePrWatch(id, saved);
+      }
+    }
     for (const t of registry.threads()) {
       // A reviewer checks out the builder's branch, so its outputs would link it to the PR it reviews.
-      if (!active(t) || registry.isReviewer(t.id)) continue;
+      if (registry.isReviewer(t.id)) continue;
       const state = registry.prWatch(t.id) ?? empty();
+      if (!active(t)) {
+        if (awaited.has(t.id)) await settle(t.id, state.links).catch(() => {});
+        continue;
+      }
       try {
         if (state.pending) { await deliver(t.id, state); continue; }
-        if (state.commentWakes >= 10) continue;
+        if (state.commentWakes >= 10) {
+          if (awaited.has(t.id)) await settle(t.id, state.links);
+          continue;
+        }
         const repo = githubRepo(registry.project(t.project)?.repoUrl ?? null);
         if (repo === null) continue;
         for (const output of registry.outputs(t.id).filter((o) => o.kind === "branch")) {
@@ -64,10 +91,14 @@ export function prWatcher(options: { registry: Registry; github: Pick<GitHub, "f
         const fresh: PullRequest[] = [];
         let nonComment = false;
         for (const link of state.links) {
-          if (link.pr.state !== "open") continue;
-          const key = `${link.pr.repo}:${link.pr.number}`;
-          if (!polls.has(key)) polls.set(key, github.poll(link.pr.repo, link.pr.number));
-          const snapshot = await polls.get(key)!;
+          if (link.pr.state !== "open") {
+            if (link.pr.state === "closed" && awaited.has(t.id)) {
+              const { pr } = await poll(link);
+              if (pr.state === "merged") link.pr = { ...pr, checks: link.pr.checks, review: link.pr.review, conflict: link.pr.conflict };
+            }
+            continue;
+          }
+          const snapshot = await poll(link);
           const initial = link.pr.url === "";
           const before = link.pr;
           link.pr = { ...snapshot.pr, conflict: snapshot.pr.conflict ?? before.conflict };
