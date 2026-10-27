@@ -13,7 +13,7 @@ import type { Drain, ReleaseReport } from "../deploy/model.ts";
  */
 import type { PrWatchState } from "./pr-watch.ts";
 import type { Placement } from "./placement.ts";
-import { DatabaseSync } from "node:sqlite";
+import { DatabaseSync, type StatementSync } from "node:sqlite";
 import type { ActivityFacts, RegistryWrite, ThreadStatus } from "../reconcile.ts";
 import type { HerdrStatus, JobStatus, NodeName, NodeObservation, PylonId, Subject, TailnetNodeId } from "../protocol.ts";
 import type { BootInputs, Project, ProjectId, SessionHarness } from "../project.ts";
@@ -374,6 +374,12 @@ export function openRegistry(path: string, clock = Date.now) {
     transactionDepth++;
     try { return inTransaction(db, body); } finally { transactionDepth--; }
   };
+  const statements = new Map<string, StatementSync>();
+  const sql = (text: string): StatementSync => {
+    let statement = statements.get(text);
+    if (statement === undefined) statements.set(text, statement = db.prepare(text));
+    return statement;
+  };
 
   const q = {
     upsertNode: db.prepare(`INSERT INTO nodes (name, tailnet_host, tailnet_node_id, state) VALUES (?, ?, ?, 'offline')
@@ -477,9 +483,9 @@ export function openRegistry(path: string, clock = Date.now) {
 
   function withSessions(row: Row): Thread {
     const thread = threadRow(row);
-    const live = db.prepare("SELECT max(updated_at) AS at, min(started_at) AS since FROM session_activity WHERE thread = ? AND state = 'session.turn-started' AND updated_at > ?").get(thread.id, clock() - sessionActivityTtlMs)!;
+    const live = sql("SELECT max(updated_at) AS at, min(started_at) AS since FROM session_activity WHERE thread = ? AND state = 'session.turn-started' AND updated_at > ?").get(thread.id, clock() - sessionActivityTtlMs)!;
     const working = live.at as number | null;
-    const waiting = db.prepare("SELECT message FROM session_activity WHERE thread = ? AND state = 'session.waiting' ORDER BY updated_at DESC, rowid DESC LIMIT 1").get(thread.id);
+    const waiting = sql("SELECT message FROM session_activity WHERE thread = ? AND state = 'session.waiting' ORDER BY updated_at DESC, rowid DESC LIMIT 1").get(thread.id);
     const starts = [thread.agentTurnRunning ? row.agent_turn_started_at : null, live.since].filter((at): at is number => typeof at === "number");
     const usageLimit = working === null ? usageLimitOf(thread.id) : null;
     return {
@@ -491,9 +497,9 @@ export function openRegistry(path: string, clock = Date.now) {
 
   /** Derived from the newest entries rather than stored, so it holds whichever of the turn's end and the transcript's read comes first. */
   function usageLimitOf(id: ThreadId) {
-    const worker = db.prepare("SELECT w.turn_at FROM claude_workers w JOIN claude_transcripts t ON t.thread = w.thread AND t.session = w.session WHERE w.thread = ?").get(id);
+    const worker = sql("SELECT w.turn_at FROM claude_workers w JOIN claude_transcripts t ON t.thread = w.thread AND t.session = w.session WHERE w.thread = ?").get(id);
     if (worker === undefined) return null;
-    const entries = db.prepare("SELECT entry FROM claude_entries WHERE thread = ? ORDER BY seq DESC LIMIT 16").all(id).map((r) => json<ClaudeEntry>(r.entry)).reverse();
+    const entries = sql("SELECT entry FROM claude_entries WHERE thread = ? ORDER BY seq DESC LIMIT 16").all(id).map((r) => json<ClaudeEntry>(r.entry)).reverse();
     const stop = usageLimitStop(entries);
     // A turn that started after the stop, by the pylon's clock as the record's time is, ended it, though its prompt may not be read yet.
     return stop !== null && (worker.turn_at === null || Number(worker.turn_at) <= stop.stoppedAt) ? stop : null;
@@ -503,19 +509,19 @@ export function openRegistry(path: string, clock = Date.now) {
     const row = q.thread.get(id);
     if (row === undefined) return;
     const t = withSessions(row);
-    const old = db.prepare("SELECT * FROM thread_attention WHERE thread = ?").get(id);
+    const old = sql("SELECT * FROM thread_attention WHERE thread = ?").get(id);
     const p = q.pylon.get(t.pylonId);
-    const workerFailed = ["failed", "stalled"].includes(String(db.prepare("SELECT state FROM claude_workers WHERE thread = ?").get(id)?.state));
-    const decision = needsPerson(jsonOrNull<Review>(db.prepare("SELECT record FROM reviews WHERE builder = ?").get(id)?.record ?? null));
+    const workerFailed = ["failed", "stalled"].includes(String(sql("SELECT state FROM claude_workers WHERE thread = ?").get(id)?.state));
+    const decision = needsPerson(jsonOrNull<Review>(sql("SELECT record FROM reviews WHERE builder = ?").get(id)?.record ?? null));
     const attention = attentionOf(p?.failed != null || workerFailed, old?.parked === 1, t.lastReplyAt, t.seenAt, t.agentTurnRunning || t.sessionTurnRunning === true, t.sessionWaiting, decision, t.usageLimit !== undefined);
     if ((old?.attention ?? null) === attention) return;
-    db.prepare("INSERT INTO thread_attention (thread, attention) VALUES (?, ?) ON CONFLICT(thread) DO UPDATE SET attention = excluded.attention").run(id, attention);
+    sql("INSERT INTO thread_attention (thread, attention) VALUES (?, ?) ON CONFLICT(thread) DO UPDATE SET attention = excluded.attention").run(id, attention);
     appendEvent("attention.changed", id, { attention });
   }
 
   function pruneSessions() {
     transaction(() => {
-      const expired = db.prepare("DELETE FROM session_activity WHERE state = 'session.turn-started' AND updated_at <= ? RETURNING thread").all(clock() - sessionActivityTtlMs);
+      const expired = sql("DELETE FROM session_activity WHERE state = 'session.turn-started' AND updated_at <= ? RETURNING thread").all(clock() - sessionActivityTtlMs);
       for (const thread of new Set(expired.map((r) => r.thread as ThreadId))) updateAttention(thread);
     });
   }
@@ -524,17 +530,17 @@ export function openRegistry(path: string, clock = Date.now) {
     return transaction(() => {
       pruneSessions();
       const project = thread === null ? null : (q.thread.get(thread)?.project as string | undefined) ?? null;
-      const result = db.prepare("INSERT INTO events (time, thread, project, kind, payload) VALUES (?, ?, ?, ?, ?)").run(time, thread, project, kind, JSON.stringify(payload));
+      const result = sql("INSERT INTO events (time, thread, project, kind, payload) VALUES (?, ?, ?, ?, ?)").run(time, thread, project, kind, JSON.stringify(payload));
       const id = Number(result.lastInsertRowid);
-      db.prepare("DELETE FROM events WHERE id <= ?").run(id - 10_000);
+      sql("DELETE FROM events WHERE id <= ?").run(id - 10_000);
       return { id: String(id), time, thread, project, kind, payload };
     });
   }
 
   function eventBatch(since = "0", filter: EventFilter = {}): { events: NexusEvent[]; watermark: string } {
     const cursor = eventCursor(since);
-    const oldest = db.prepare("SELECT min(id) AS id FROM events").get()?.id as number | null;
-    const newest = db.prepare("SELECT max(id) AS id FROM events").get()?.id as number | null;
+    const oldest = sql("SELECT min(id) AS id FROM events").get()?.id as number | null;
+    const newest = sql("SELECT max(id) AS id FROM events").get()?.id as number | null;
     if (cursor !== 0 && oldest !== null && cursor < oldest - 1) throw new Error("event cursor expired; retained events cannot fill the gap");
     const clauses = ["id > ?"];
     const params: (string | number)[] = [cursor];
@@ -547,7 +553,7 @@ export function openRegistry(path: string, clock = Date.now) {
       clauses.push(`kind IN (${filter.kinds.map(() => "?").join(",")})`);
       params.push(...filter.kinds);
     }
-    const events = db.prepare(`SELECT * FROM events WHERE ${clauses.join(" AND ")} ORDER BY id`).all(...params).map((r): NexusEvent => ({
+    const events = sql(`SELECT * FROM events WHERE ${clauses.join(" AND ")} ORDER BY id`).all(...params).map((r): NexusEvent => ({
       id: String(r.id), time: r.time as number, thread: r.thread as string | null, project: r.project as string | null,
       kind: r.kind as EventKind, payload: json<Record<string, unknown>>(r.payload),
     }));
@@ -555,7 +561,7 @@ export function openRegistry(path: string, clock = Date.now) {
   }
 
   function claudeTranscript(thread: ThreadId): ClaudeTranscript | undefined {
-    const row = db.prepare("SELECT * FROM claude_transcripts WHERE thread = ?").get(thread);
+    const row = sql("SELECT * FROM claude_transcripts WHERE thread = ?").get(thread);
     return row === undefined ? undefined : {
       session: row.session as string, cursor: { offset: row.byte_offset as number, skipping: row.skipping === 1, before: row.before_hash as string }, dropped: row.dropped as number, readAt: row.read_at as number,
     };
@@ -571,15 +577,15 @@ export function openRegistry(path: string, clock = Date.now) {
     pruneSessions,
     recordParked(id: ThreadId, parked: boolean) {
       transaction(() => {
-        const old = db.prepare("SELECT parked FROM thread_attention WHERE thread = ?").get(id)?.parked === 1;
-        db.prepare("INSERT INTO thread_attention (thread, parked) VALUES (?, ?) ON CONFLICT(thread) DO UPDATE SET parked = excluded.parked").run(id, parked ? 1 : 0);
+        const old = sql("SELECT parked FROM thread_attention WHERE thread = ?").get(id)?.parked === 1;
+        sql("INSERT INTO thread_attention (thread, parked) VALUES (?, ?) ON CONFLICT(thread) DO UPDATE SET parked = excluded.parked").run(id, parked ? 1 : 0);
         if (parked && !old) appendEvent("thread.parked", id, {});
         updateAttention(id);
       });
     },
     /** `session` is the Claude Code session its launch opened, null until the launch names one. */
     claudeWorker(thread: ThreadId): { prompt: string; state: string; model: string | null; session: string | null; message?: string } | undefined {
-      const row = db.prepare("SELECT prompt, state, message, model, session FROM claude_workers WHERE thread = ?").get(thread);
+      const row = sql("SELECT prompt, state, message, model, session FROM claude_workers WHERE thread = ?").get(thread);
       return row === undefined ? undefined : {
         model: row.model as string | null, prompt: row.prompt as string, state: row.state as string, session: row.session as string | null,
         ...(row.message == null ? {} : { message: row.message as string }),
@@ -587,11 +593,11 @@ export function openRegistry(path: string, clock = Date.now) {
     },
     /** The snapshot ID of the latest session.turn-started of any session on a Claude worker thread. */
     latestClaudeTurn(thread: ThreadId): string | null {
-      const row = db.prepare("SELECT turn_session, turn_at FROM claude_workers WHERE thread = ? AND turn_at IS NOT NULL").get(thread);
+      const row = sql("SELECT turn_session, turn_at FROM claude_workers WHERE thread = ? AND turn_at IS NOT NULL").get(thread);
       return row === undefined ? null : claudeTurn(row.turn_session as string, row.turn_at as number);
     },
     claudeTranscript,
-    claudeEntries: (thread: ThreadId): ClaudeEntry[] => db.prepare("SELECT entry FROM claude_entries WHERE thread = ? ORDER BY seq").all(thread).map((r) => json<ClaudeEntry>(r.entry)),
+    claudeEntries: (thread: ThreadId): ClaudeEntry[] => sql("SELECT entry FROM claude_entries WHERE thread = ? ORDER BY seq").all(thread).map((r) => json<ClaudeEntry>(r.entry)),
     /**
      * Appends what a read found and keeps the newest maxEntries. A read of another session than the stored one, or of
      * a file that was replaced, replaces the stored entries. A read that did not start where the stored reader stands, such
@@ -604,21 +610,21 @@ export function openRegistry(path: string, clock = Date.now) {
         const at = same ? stored!.cursor : transcriptStart;
         if (at.offset !== read.from.offset || at.skipping !== read.from.skipping || at.before !== read.from.before) return false;
         const replace = !same || read.reset;
-        if (replace) db.prepare("DELETE FROM claude_entries WHERE thread = ?").run(thread);
-        const base = replace ? 0 : Number(db.prepare("SELECT coalesce(max(seq) + 1, 0) AS next FROM claude_entries WHERE thread = ?").get(thread)!.next);
+        if (replace) sql("DELETE FROM claude_entries WHERE thread = ?").run(thread);
+        const base = replace ? 0 : Number(sql("SELECT coalesce(max(seq) + 1, 0) AS next FROM claude_entries WHERE thread = ?").get(thread)!.next);
         const total = base + read.entries.length;
-        const insert = db.prepare("INSERT INTO claude_entries (thread, seq, entry) VALUES (?, ?, ?)");
+        const insert = sql("INSERT INTO claude_entries (thread, seq, entry) VALUES (?, ?, ?)");
         const first = Math.max(0, read.entries.length - maxEntries);
         read.entries.slice(first).forEach((entry, i) => insert.run(thread, base + first + i, JSON.stringify(entry)));
-        db.prepare("DELETE FROM claude_entries WHERE thread = ? AND seq < ?").run(thread, total - maxEntries);
-        db.prepare(`INSERT INTO claude_transcripts (thread, session, byte_offset, skipping, before_hash, dropped, read_at) VALUES (?, ?, ?, ?, ?, ?, ?)
+        sql("DELETE FROM claude_entries WHERE thread = ? AND seq < ?").run(thread, total - maxEntries);
+        sql(`INSERT INTO claude_transcripts (thread, session, byte_offset, skipping, before_hash, dropped, read_at) VALUES (?, ?, ?, ?, ?, ?, ?)
           ON CONFLICT (thread) DO UPDATE SET session = excluded.session, byte_offset = excluded.byte_offset, skipping = excluded.skipping, before_hash = excluded.before_hash,
             dropped = excluded.dropped, read_at = excluded.read_at`)
           .run(thread, read.session, read.cursor.offset, read.cursor.skipping ? 1 : 0, read.cursor.before, Math.max(0, total - maxEntries), read.readAt);
         // An image without the StopFailure hook reports no end to the turn a usage limit stopped, so the transcript ends it.
         const stop = usageLimitOf(thread);
         if (stop !== null) {
-          db.prepare("DELETE FROM session_activity WHERE thread = ? AND session = ? AND state = 'session.turn-started' AND EXISTS (SELECT 1 FROM session_order o WHERE o.thread = ? AND o.session = ? AND o.at <= ?)")
+          sql("DELETE FROM session_activity WHERE thread = ? AND session = ? AND state = 'session.turn-started' AND EXISTS (SELECT 1 FROM session_order o WHERE o.thread = ? AND o.session = ? AND o.at <= ?)")
             .run(thread, read.session, thread, read.session, stop.stoppedAt);
         }
         updateAttention(thread);
@@ -626,18 +632,18 @@ export function openRegistry(path: string, clock = Date.now) {
       });
     },
     claudeMessage(thread: ThreadId, requestId: string): ClaudeMessage | undefined {
-      const row = db.prepare("SELECT state, result FROM claude_messages WHERE thread = ? AND request_id = ?").get(thread, requestId);
+      const row = sql("SELECT state, result FROM claude_messages WHERE thread = ? AND request_id = ?").get(thread, requestId);
       return row === undefined ? undefined : row.state === "sent" ? { state: "sent", result: json<ClaudeSent>(row.result) } : { state: "sending" };
     },
     /** Null forgets the message, as for a send that typed nothing. */
     setClaudeMessage(thread: ThreadId, requestId: string, message: ClaudeMessage | null) {
-      if (message === null) return void db.prepare("DELETE FROM claude_messages WHERE thread = ? AND request_id = ?").run(thread, requestId);
-      db.prepare("INSERT INTO claude_messages (thread, request_id, state, result) VALUES (?, ?, ?, ?) ON CONFLICT (thread, request_id) DO UPDATE SET state = excluded.state, result = excluded.result")
+      if (message === null) return void sql("DELETE FROM claude_messages WHERE thread = ? AND request_id = ?").run(thread, requestId);
+      sql("INSERT INTO claude_messages (thread, request_id, state, result) VALUES (?, ?, ?, ?) ON CONFLICT (thread, request_id) DO UPDATE SET state = excluded.state, result = excluded.result")
         .run(thread, requestId, message.state, message.state === "sent" ? JSON.stringify(message.result) : null);
     },
     setClaudeWorker(thread: ThreadId, prompt: string, state: string, message?: string, session?: string) {
       transaction(() => {
-        db.prepare("INSERT INTO claude_workers (thread, prompt, state, message, session, model) VALUES (?, ?, ?, ?, ?, 'claude-opus-5-5') ON CONFLICT(thread) DO UPDATE SET state = excluded.state, message = excluded.message, session = coalesce(excluded.session, claude_workers.session)").run(thread, prompt, state, message ?? null, session ?? null);
+        sql("INSERT INTO claude_workers (thread, prompt, state, message, session, model) VALUES (?, ?, ?, ?, ?, 'claude-opus-5-5') ON CONFLICT(thread) DO UPDATE SET state = excluded.state, message = excluded.message, session = coalesce(excluded.session, claude_workers.session)").run(thread, prompt, state, message ?? null, session ?? null);
         updateAttention(thread);
       });
     },
@@ -647,50 +653,50 @@ export function openRegistry(path: string, clock = Date.now) {
       if (pylon === undefined || pylon.node !== node) return;
       const thread = pylon.thread as ThreadId;
       transaction(() => {
-        const receipt = db.prepare("SELECT sequence FROM event_receipts WHERE node = ?").get(node);
+        const receipt = sql("SELECT sequence FROM event_receipts WHERE node = ?").get(node);
         if (receipt !== undefined && Number(receipt.sequence) >= report.sequence) return;
-        db.prepare("INSERT INTO event_receipts VALUES (?, ?) ON CONFLICT(node) DO UPDATE SET sequence = excluded.sequence").run(node, report.sequence);
+        sql("INSERT INTO event_receipts VALUES (?, ?) ON CONFLICT(node) DO UPDATE SET sequence = excluded.sequence").run(node, report.sequence);
         pruneSessions();
         const session = event.session ?? "default";
         const status = q.thread.get(thread)?.status;
         if (status === "archived" || status === "deleted") return;
         const at = event.at ?? report.time;
-        const previous = db.prepare("SELECT at, kind, event_ids FROM session_order WHERE thread = ? AND session = ?").get(thread, session);
+        const previous = sql("SELECT at, kind, event_ids FROM session_order WHERE thread = ? AND session = ?").get(thread, session);
         const previousIds = previous?.event_ids == null ? [] : json<string[]>(previous.event_ids);
-        const floor = db.prepare("SELECT at FROM session_order_floor WHERE thread = ?").get(thread)?.at as number | undefined;
+        const floor = sql("SELECT at FROM session_order_floor WHERE thread = ?").get(thread)?.at as number | undefined;
         if (previous !== undefined) {
           if (at < Number(previous.at)) return;
           // The pylon's outbox sends an event again when its acknowledgement was lost, under the ID it was applied with.
           if (event.id !== undefined && at === previous.at && previousIds.includes(event.id)) return;
           if (at === previous.at && (event.kind === "session.turn-started" || event.kind === "session.heartbeat") && previous.kind !== "session.turn-started" && previous.kind !== "session.heartbeat") return;
         } else if (floor !== undefined && at <= floor) return;
-        const current = db.prepare("SELECT state, started_at FROM session_activity WHERE thread = ? AND session = ?").get(thread, session);
+        const current = sql("SELECT state, started_at FROM session_activity WHERE thread = ? AND session = ?").get(thread, session);
         if (event.kind === "session.heartbeat" && current?.state !== "session.turn-started" && current?.state !== "session.waiting") return;
         if (event.kind === "session.turn-started" && event.session !== undefined) {
-          db.prepare("UPDATE claude_workers SET state = 'started', message = NULL WHERE thread = ? AND session = ? AND state IN ('starting', 'stalled', 'failed')").run(thread, event.session);
+          sql("UPDATE claude_workers SET state = 'started', message = NULL WHERE thread = ? AND session = ? AND state IN ('starting', 'stalled', 'failed')").run(thread, event.session);
         }
         if (event.kind === "session.turn-started") {
-          db.prepare("UPDATE claude_workers SET turn_session = ?, turn_at = ? WHERE thread = ? AND (turn_at IS NULL OR turn_at < ?)").run(session, at, thread, at);
+          sql("UPDATE claude_workers SET turn_session = ?, turn_at = ? WHERE thread = ? AND (turn_at IS NULL OR turn_at < ?)").run(session, at, thread, at);
         }
         // Only reports at the cursor's own stamp can still be resent and pass the stamp checks, so only their IDs are kept.
         const ids = [...(previous !== undefined && at === previous.at ? previousIds : []), ...(event.id === undefined ? [] : [event.id])];
-        db.prepare("INSERT INTO session_order (thread, session, at, kind, event_ids) VALUES (?, ?, ?, ?, ?) ON CONFLICT(thread, session) DO UPDATE SET at = excluded.at, kind = excluded.kind, event_ids = excluded.event_ids")
+        sql("INSERT INTO session_order (thread, session, at, kind, event_ids) VALUES (?, ?, ?, ?, ?) ON CONFLICT(thread, session) DO UPDATE SET at = excluded.at, kind = excluded.kind, event_ids = excluded.event_ids")
           .run(thread, session, at, event.kind, ids.length === 0 ? null : JSON.stringify(ids));
         // Keep tombstones after activity rows end, with a floor guarding reports older than evicted cursors.
-        const evicted = db.prepare("DELETE FROM session_order WHERE thread = ? AND session NOT IN (SELECT session FROM session_order WHERE thread = ? ORDER BY at DESC, rowid DESC LIMIT ?) RETURNING at")
+        const evicted = sql("DELETE FROM session_order WHERE thread = ? AND session NOT IN (SELECT session FROM session_order WHERE thread = ? ORDER BY at DESC, rowid DESC LIMIT ?) RETURNING at")
           .all(thread, thread, maxActiveSessions * 2);
-        if (evicted.length > 0) db.prepare("INSERT INTO session_order_floor VALUES (?, ?) ON CONFLICT(thread) DO UPDATE SET at = max(at, excluded.at)").run(thread, Math.max(...evicted.map((r) => Number(r.at))));
+        if (evicted.length > 0) sql("INSERT INTO session_order_floor VALUES (?, ?) ON CONFLICT(thread) DO UPDATE SET at = max(at, excluded.at)").run(thread, Math.max(...evicted.map((r) => Number(r.at))));
         if (event.kind === "session.ended" || event.kind === "session.turn-ended") {
-          db.prepare("DELETE FROM session_activity WHERE thread = ? AND session = ?").run(thread, session);
+          sql("DELETE FROM session_activity WHERE thread = ? AND session = ?").run(thread, session);
         } else {
           // A heartbeat keeps a running turn's start and starts a new turn for a waiting session.
           const startedAt = event.kind === "session.waiting" ? null
             : event.kind === "session.heartbeat" && current?.state === "session.turn-started" ? current.started_at as number | null
             : clock();
-          db.prepare(`INSERT INTO session_activity (thread, session, state, updated_at, started_at, message) VALUES (?, ?, ?, ?, ?, ?)
+          sql(`INSERT INTO session_activity (thread, session, state, updated_at, started_at, message) VALUES (?, ?, ?, ?, ?, ?)
             ON CONFLICT(thread, session) DO UPDATE SET state = excluded.state, updated_at = excluded.updated_at, started_at = excluded.started_at, message = excluded.message`)
             .run(thread, session, event.kind === "session.heartbeat" ? "session.turn-started" : event.kind, clock(), startedAt, event.kind === "session.waiting" ? event.message ?? null : null);
-          db.prepare("DELETE FROM session_activity WHERE thread = ? AND session NOT IN (SELECT session FROM session_activity WHERE thread = ? ORDER BY updated_at DESC, rowid DESC LIMIT ?)").run(thread, thread, maxActiveSessions);
+          sql("DELETE FROM session_activity WHERE thread = ? AND session NOT IN (SELECT session FROM session_activity WHERE thread = ? ORDER BY updated_at DESC, rowid DESC LIMIT ?)").run(thread, thread, maxActiveSessions);
         }
         if (event.kind !== "session.waiting") q.agentActivity.run(clock(), thread);
         if (event.kind === "session.turn-ended") q.recordReply.run(clock(), thread);
@@ -701,17 +707,17 @@ export function openRegistry(path: string, clock = Date.now) {
     eventBatch,
     events: (since = "0", filter: EventFilter = {}) => eventBatch(since, filter).events,
     review(builder: ThreadId): Review | null {
-      const record = jsonOrNull<Review>(db.prepare("SELECT record FROM reviews WHERE builder = ?").get(builder)?.record ?? null);
+      const record = jsonOrNull<Review>(sql("SELECT record FROM reviews WHERE builder = ?").get(builder)?.record ?? null);
       return record === null ? null : storedReview(record);
     },
-    reviews: (): Review[] => db.prepare("SELECT record FROM reviews ORDER BY builder").all().map((r) => storedReview(json<Review>(r.record))),
+    reviews: (): Review[] => sql("SELECT record FROM reviews ORDER BY builder").all().map((r) => storedReview(json<Review>(r.record))),
     /** A thread a review started, whether or not a later review replaced the record that names it. */
-    isReviewer: (thread: ThreadId) => db.prepare("SELECT 1 FROM threads WHERE id = ? AND started_by = ? UNION SELECT 1 FROM reviews WHERE reviewer = ?").get(thread, reviewerCaller, thread) !== undefined,
+    isReviewer: (thread: ThreadId) => sql("SELECT 1 FROM threads WHERE id = ? AND started_by = ? UNION SELECT 1 FROM reviews WHERE reviewer = ?").get(thread, reviewerCaller, thread) !== undefined,
     /** Replaces the builder's review, and tells the event log when its phase, round or label changed. */
     saveReview(review: Review) {
       transaction(() => {
-        const before = jsonOrNull<Review>(db.prepare("SELECT record FROM reviews WHERE builder = ?").get(review.builder)?.record ?? null);
-        db.prepare("INSERT INTO reviews (builder, reviewer, record) VALUES (?, ?, ?) ON CONFLICT (builder) DO UPDATE SET reviewer = excluded.reviewer, record = excluded.record")
+        const before = jsonOrNull<Review>(sql("SELECT record FROM reviews WHERE builder = ?").get(review.builder)?.record ?? null);
+        sql("INSERT INTO reviews (builder, reviewer, record) VALUES (?, ?, ?) ON CONFLICT (builder) DO UPDATE SET reviewer = excluded.reviewer, record = excluded.record")
           .run(review.builder, review.reviewer, JSON.stringify(review));
         const label = (r: Review | null) => r?.phase.kind === "needs-person" ? r.phase.label?.state : undefined;
         if (before?.id !== review.id || before.phase.kind !== review.phase.kind || before.rounds.length !== review.rounds.length || label(before) !== label(review)) {
@@ -721,38 +727,38 @@ export function openRegistry(path: string, clock = Date.now) {
       });
     },
     prWatch(thread: ThreadId): PrWatchState | null {
-      const row = db.prepare("SELECT record FROM pr_watches WHERE thread = ?").get(thread) as Row | undefined;
+      const row = sql("SELECT record FROM pr_watches WHERE thread = ?").get(thread) as Row | undefined;
       return row ? json<PrWatchState>(row.record) : null;
     },
     savePrWatch(thread: ThreadId, state: PrWatchState) {
-      const previous = db.prepare("SELECT record FROM pr_watches WHERE thread = ?").get(thread);
+      const previous = sql("SELECT record FROM pr_watches WHERE thread = ?").get(thread);
       if (state.pending !== null && (previous === undefined || json<PrWatchState>(previous.record).pending?.id !== state.pending.id)) appendEvent("pull-request.feedback", thread, { requestId: state.pending.id });
-      db.prepare("INSERT INTO pr_watches (thread, record) VALUES (?, ?) ON CONFLICT (thread) DO UPDATE SET record = excluded.record").run(thread, JSON.stringify(state));
+      sql("INSERT INTO pr_watches (thread, record) VALUES (?, ?) ON CONFLICT (thread) DO UPDATE SET record = excluded.record").run(thread, JSON.stringify(state));
     },
     desiredRelease(): DesiredRelease | null {
-      const row = db.prepare("SELECT value FROM settings WHERE key = 'release'").get();
+      const row = sql("SELECT value FROM settings WHERE key = 'release'").get();
       return row === undefined ? null : JSON.parse(row.value as string) as DesiredRelease;
     },
     setDesiredRelease(release: DesiredRelease) {
       appendEvent("release.changed", null, { desired: release });
-      db.prepare("INSERT INTO settings VALUES ('release', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value").run(JSON.stringify(release));
+      sql("INSERT INTO settings VALUES ('release', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value").run(JSON.stringify(release));
     },
     releaseReports(): ReleaseReport[] {
-      return db.prepare("SELECT record FROM release_reports ORDER BY node, role").all().map((r) => JSON.parse(r.record as string) as ReleaseReport);
+      return sql("SELECT record FROM release_reports ORDER BY node, role").all().map((r) => JSON.parse(r.record as string) as ReleaseReport);
     },
     reportRelease(report: ReleaseReport) {
-      const previous = db.prepare("SELECT record FROM release_reports WHERE node = ? AND role = ?").get(report.node, report.role);
+      const previous = sql("SELECT record FROM release_reports WHERE node = ? AND role = ?").get(report.node, report.role);
       const { observedAt: _, ...state } = report;
       const before = previous === undefined ? null : json<ReleaseReport>(previous.record);
       if (before === null || before.state !== report.state || before.commit !== report.commit || before.target !== report.target || before.reason !== report.reason) appendEvent("release.changed", null, state);
-      db.prepare("INSERT INTO release_reports VALUES (?, ?, ?) ON CONFLICT(node, role) DO UPDATE SET record = excluded.record").run(report.node, report.role, JSON.stringify(report));
+      sql("INSERT INTO release_reports VALUES (?, ?, ?) ON CONFLICT(node, role) DO UPDATE SET record = excluded.record").run(report.node, report.role, JSON.stringify(report));
     },
     drain(): Drain | null {
-      const row = db.prepare("SELECT value FROM settings WHERE key = 'deploy-drain'").get();
+      const row = sql("SELECT value FROM settings WHERE key = 'deploy-drain'").get();
       return row === undefined ? null : JSON.parse(row.value as string) as Drain;
     },
     setDrain(drain: Drain | null) {
-      db.prepare("INSERT INTO settings VALUES ('deploy-drain', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value").run(JSON.stringify(drain));
+      sql("INSERT INTO settings VALUES ('deploy-drain', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value").run(JSON.stringify(drain));
     },
 
     /** Nodes come from the config file. Their state and capacity come from observations. */
@@ -770,11 +776,11 @@ export function openRegistry(path: string, clock = Date.now) {
         const row = q.project.get(id) as Row | undefined;
         if (row === undefined) return undefined;
         const project = edit(json<Project>(row.record));
-        db.prepare("UPDATE projects SET record = ? WHERE id = ?").run(JSON.stringify(project), id);
+        sql("UPDATE projects SET record = ? WHERE id = ?").run(JSON.stringify(project), id);
         return project;
       });
     },
-    updateProject(project: Project) { db.prepare("UPDATE projects SET record = ? WHERE id = ?").run(JSON.stringify(project), project.id); },
+    updateProject(project: Project) { sql("UPDATE projects SET record = ? WHERE id = ?").run(JSON.stringify(project), project.id); },
     createProject(project: Project) { q.insertProject.run(project.id, JSON.stringify(project)); },
     projects: () => (q.projects.all() as Row[]).map((r) => json<Project>(r.record)),
     project(id: ProjectId): Project | undefined {
@@ -790,7 +796,7 @@ export function openRegistry(path: string, clock = Date.now) {
           thread.agentTurnRunning ? 1 : 0, thread.lastAgentActivityAt, thread.lastHumanActivityAt, thread.placement === undefined ? null : JSON.stringify(thread.placement),
           thread.setup === undefined ? null : JSON.stringify(thread.setup));
         q.insertPylon.run(pylonParams(pylon));
-        if (claudePrompt !== undefined) db.prepare("INSERT INTO claude_workers (thread, prompt, state, model) VALUES (?, ?, 'pending', ?)").run(thread.id, claudePrompt, model);
+        if (claudePrompt !== undefined) sql("INSERT INTO claude_workers (thread, prompt, state, model) VALUES (?, ?, 'pending', ?)").run(thread.id, claudePrompt, model);
       });
     },
     threads: (project?: ProjectId) => ((project === undefined ? q.threads.all() : q.threadsOf.all(project)) as Row[]).map(withSessions),
@@ -812,9 +818,9 @@ export function openRegistry(path: string, clock = Date.now) {
     setThreadStatus(id: ThreadId, status: ThreadStatus) {
       transaction(() => {
         q.threadStatus.run(status, id);
-        if (status === "archived" || status === "deleted") db.prepare("DELETE FROM session_activity WHERE thread = ?").run(id);
+        if (status === "archived" || status === "deleted") sql("DELETE FROM session_activity WHERE thread = ?").run(id);
         if (status === "deleted") {
-          for (const table of ["session_order", "session_order_floor", "claude_transcripts", "claude_entries", "claude_messages"]) db.prepare(`DELETE FROM ${table} WHERE thread = ?`).run(id);
+          for (const table of ["session_order", "session_order_floor", "claude_transcripts", "claude_entries", "claude_messages"]) sql(`DELETE FROM ${table} WHERE thread = ?`).run(id);
         }
         updateAttention(id);
       });
@@ -892,7 +898,7 @@ export function openRegistry(path: string, clock = Date.now) {
     releasePreview(pylonId: PylonId, service: string) { q.deletePreview.run(pylonId, service); },
     previews,
     outputs(thread: ThreadId): Output[] {
-      const row = db.prepare("SELECT record FROM pr_watches WHERE thread = ?").get(thread) as Row | undefined;
+      const row = sql("SELECT record FROM pr_watches WHERE thread = ?").get(thread) as Row | undefined;
       return [
         ...(q.outputs.all(thread) as Row[]).map((r): Output => ({ thread, kind: r.kind as Output["kind"], ref: r.ref as string })),
         ...(row ? json<PrWatchState>(row.record).links.filter((l) => l.pr.url !== "").map((l): Output => ({ thread, kind: "pull-request", ref: l.pr.url })) : []),
