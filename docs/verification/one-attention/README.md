@@ -54,7 +54,7 @@ Attention from the API against attention from the event stream, for a thread del
 
 `tests-main.txt` runs the two new behaviour tests at e994812, which adds them on top of main's code. Both fail: the
 API says `null` where the event stream says `parked`, and a change to waiting notifies nothing. `tests-branch.txt`
-runs them, and the registry test for threads whose attention was never stored, on the branch. All three pass.
+runs them on the branch with the two registry tests for opening a database: a thread whose attention was never stored, and one deleted while parked before this branch. All four pass.
 
 ## Not verified
 

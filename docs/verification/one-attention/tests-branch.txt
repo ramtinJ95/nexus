@@ -1,15 +1,16 @@
 $ git log --oneline -1
-a75ccf0 fix(dashboard): one attention table for the rows, the badge and notifications
-$ node --test --test-name-pattern="waiting on the person|event stream last reported|never stored" src/control/dashboard/notifications.test.js src/control/api.test.ts src/control/registry.test.ts
-✔ the API reports the attention the event stream last reported, and a deleted thread's run is not parked (115.174272ms)
-✔ a session waiting on the person counts in the badge and notifies at once, as its row stays bright (3.408355ms)
-✔ opening the registry stores the attention of a thread whose attention was never stored (52.917878ms)
-ℹ tests 3
+8b5df23 fix(control): clear the parked flag that threads deleted while parked kept
+$ node --test --test-name-pattern="waiting on the person|event stream last reported|never stored|deleted while parked kept" src/control/dashboard/notifications.test.js src/control/api.test.ts src/control/registry.test.ts
+✔ the API reports the attention the event stream last reported, and a deleted thread's run is not parked (162.008718ms)
+✔ a session waiting on the person counts in the badge and notifies at once, as its row stays bright (3.602266ms)
+✔ opening the registry stores the attention of a thread whose attention was never stored (58.313218ms)
+✔ opening the registry clears the parked flag a thread deleted while parked kept (54.317085ms)
+ℹ tests 4
 ℹ suites 0
-ℹ pass 3
+ℹ pass 4
 ℹ fail 0
 ℹ cancelled 0
 ℹ skipped 0
 ℹ todo 0
-ℹ duration_ms 1232.519901
+ℹ duration_ms 1294.117229
 exit 0
