@@ -62,10 +62,12 @@ export function prWatcher(options: { registry: Registry; github: Pick<GitHub, "f
       }
       for (const number of numbers) {
         const { pr } = await poll(repo, number);
-        if (pr.state !== "merged") continue;
         const saved = registry.prWatch(t.id) ?? empty();
         const stored = saved.links.find((l) => l.pr.repo === repo && l.pr.number === number);
-        if (stored === undefined) saved.links.push({ pr, seen: [], failed: false });
+        // An open PR is linked as discovery links one, unread, so the watch baselines its comments and the merged one beside it does not land the thread.
+        if (pr.state === "open" && stored === undefined) saved.links.push({ pr: { repo, number, title: "", url: "", state: "open", checks: "none", review: "none", conflict: null }, seen: [], failed: false });
+        else if (pr.state !== "merged") continue;
+        else if (stored === undefined) saved.links.push({ pr, seen: [], failed: false });
         else stored.pr = { ...pr, checks: stored.pr.checks, review: stored.pr.review, conflict: stored.pr.conflict };
         registry.savePrWatch(t.id, saved);
       }

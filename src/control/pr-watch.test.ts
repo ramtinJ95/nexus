@@ -10,6 +10,7 @@ import type { CommandResult, NodeName, PylonCommand, PylonId, TailnetNodeId, Liv
 import type { ProjectId } from "../project.ts";
 import { githubClient, githubRepo, type PrSnapshot } from "./github.ts";
 import { prWatcher, prWatchPrefix } from "./pr-watch.ts";
+import { waitOf } from "./queue.ts";
 import { agentInbox } from "./inbox.ts";
 import type { HarnessHost } from "../harness/host.ts";
 
@@ -504,4 +505,19 @@ test("a predecessor's PR that opened and merged between two reads, or behind a m
   await f.watcher.poll();
   assert.equal(f.registry.prWatch(held)?.pending?.id, "pr-watch:held", "the message still waits");
   assert.equal(f.registry.prWatch(held)?.links.find((l) => l.pr.number === 2)?.pr.state, "merged", "its PR's merge is seen all the same");
+});
+
+test("a predecessor with one PR merged and another open, neither linked yet, still waits", async (t) => {
+  const f = fixture(); t.after(() => f.registry.close());
+  f.registry.saveQueued({
+    id: "th-queued" as ThreadId, title: "after", project: "project" as ProjectId, startedBy: "test", createdAt: 1, after: [f.id],
+    request: { project: "project", title: "after", resources: { cpus: 2, memoryGiB: 4, diskGiB: 10 } }, message: null, status: "queued", startNow: null, lastError: null, startedAt: null, firstMessage: null,
+  });
+  f.registry.savePrWatch(f.id, { links: [], commentWakes: 10, pending: null, error: null });
+  const pr = (number: number, state: "open" | "merged") => ({ ...structuredClone(f.snapshot), pr: { ...f.snapshot.pr, number, state, url: `https://github.com/acme/repo/pull/${number}` } });
+  const watcher = prWatcher({ ...f.options, github: { find: async (_repo: string, _branch: string, state = "open") => state === "all" ? [1, 2] : [2], poll: async (_repo: string, n: number) => pr(n, n === 1 ? "merged" : "open") } });
+  await watcher.poll();
+  const links = f.registry.prWatch(f.id)!.links;
+  assert.deepEqual(links.map((l) => [l.pr.number, l.pr.state, l.pr.url === ""]), [[1, "merged", false], [2, "open", true]], "the open PR is linked unread, so the watch baselines it");
+  assert.deepEqual(waitOf(f.registry, f.id), { thread: f.id, state: "waiting", why: "PR #2 is open" });
 });
