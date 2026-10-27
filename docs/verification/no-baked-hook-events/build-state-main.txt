@@ -1,0 +1,15 @@
+ok
+outbox 0001793094240876-6845-000000-3193a25c.json {"kind":"session.turn-started","at":1793094240876,"session":"2ba403cf-03db-476a-ba0e-ece6cfde8bca","id":"0001793094240876-6845-000000-3193a25c"}
+outbox 0001793094241643-6888-000000-5ef5fe62.json {"kind":"session.ended","at":1793094241643,"session":"2ba403cf-03db-476a-ba0e-ece6cfde8bca","id":"0001793094241643-6888-000000-5ef5fe62"}
+state ~/.nexus/outbox
+state ~/.nexus/outbox/0001793094240876-6845-000000-3193a25c.json
+state ~/.nexus/outbox/0001793094241643-6888-000000-5ef5fe62.json
+state ~/.claude/projects/-
+state ~/.claude/projects/-/2ba403cf-03db-476a-ba0e-ece6cfde8bca.jsonl
+state ~/.claude/session-env/2ba403cf-03db-476a-ba0e-ece6cfde8bca
+state ~/.pi/agent/sessions/----
+state ~/.pi/agent/sessions/----/2026-10-27T09-43-46-176Z_01a17cbe-90ff-712e-9bb8-c5851a4e50fc.jsonl
+state ~/.local/share/claude-notes-compaction/sessions/2ba403cf-03db-476a-ba0e-ece6cfde8bca
+state ~/.local/share/claude-notes-compaction/sessions/2ba403cf-03db-476a-ba0e-ece6cfde8bca/state.json
+process 6857 /usr/local/bin/node /usr/local/bin/nexus-outbox.ts
+end

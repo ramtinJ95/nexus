@@ -1,0 +1,3 @@
+outbox after image hook (main), no pylon.json: 1 entries {"kind":"session.ended","at":1793093788469,"session":"build-old","id":"0001793093788469-17415-000000-5e72e3fc"}
+outbox after branch hook, no pylon.json: 0 entries 
+outbox after branch hook, with pylon.json: 1 entries {"kind":"session.ended","at":1793093791323,"session":"thread-new","id":"0001793093791323-17477-000000-b6034916"}

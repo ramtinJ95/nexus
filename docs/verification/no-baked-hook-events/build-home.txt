@@ -1,0 +1,29 @@
+# Files in this pylon's home with whole-second mtimes, which Gondolin's copy of the image gives every image file,
+# written between 08:27:27 and 08:27:44 UTC on 2026-10-27. ~/.claude/hooks and ~/.pi/agent/settings.json (Herdr's
+# integrations, which merge the nexus hooks into ~/.claude/settings.json) are 08:27:26; nothing session-shaped is
+# older than the pi session's start at 08:27:28. ~/.claude/CLAUDE.md, the Dockerfile's next RUN, is 08:27:44.
+$ find ~ -xdev -newermt '2026-10-27 08:27:27' ! -newermt '2026-10-27 08:27:44' -printf '%TY-%Tm-%Td %TT %p\n' | grep '\.0000000000 '
+2026-10-27 08:27:28.0000000000 ./.pi/agent/models-store.json
+2026-10-27 08:27:28.0000000000 ./.pi/agent/sessions
+2026-10-27 08:27:32.0000000000 ./.pi/agent/pi-auto-trees.json
+2026-10-27 08:27:32.0000000000 ./.pi/agent/pi-subagent-review.json
+2026-10-27 08:27:33.0000000000 ./.pi/agent/pi-gpt-switcher.json
+2026-10-27 08:27:39.0000000000 ./.pi/agent/ask.json
+2026-10-27 08:27:39.0000000000 ./.pi/agent/cache
+2026-10-27 08:27:39.0000000000 ./.pi/agent/cache/pi-codex-conversion
+2026-10-27 08:27:39.0000000000 ./.pi/agent/cache/pi-codex-conversion/notebook-mode
+2026-10-27 08:27:39.0000000000 ./.pi/agent/cache/pi-codex-conversion/notebook-mode/storage-maintenance
+2026-10-27 08:27:40.0000000000 ./.claude/session-env/2c7eb86f-bf2e-4416-b70f-28600c27c4fa
+2026-10-27 08:27:41.0000000000 ./.claude/backups/.claude.json.backup.1793089661797
+2026-10-27 08:27:41.0000000000 ./.claude/plugins/store
+2026-10-27 08:27:41.0000000000 ./.claude/plugins/store/cc-plugin-agents-md_builtin-b049b47b3618.json
+2026-10-27 08:27:41.0000000000 ./.claude/projects/-
+2026-10-27 08:27:41.0000000000 ./.claude/projects/-/2c7eb86f-bf2e-4416-b70f-28600c27c4fa.jsonl
+2026-10-27 08:27:41.0000000000 ./.local/share/claude-notes-compaction
+2026-10-27 08:27:41.0000000000 ./.local/share/claude-notes-compaction/sessions/2c7eb86f-bf2e-4416-b70f-28600c27c4fa
+2026-10-27 08:27:41.0000000000 ./.local/share/claude-notes-compaction/sessions/2c7eb86f-bf2e-4416-b70f-28600c27c4fa/state.json
+2026-10-27 08:27:42.0000000000 ./.pi/agent/cache/pi-codex-conversion/notebook-mode/active-sessions
+2026-10-27 08:27:42.0000000000 ./.pi/agent/sessions/----
+2026-10-27 08:27:42.0000000000 ./.pi/agent/sessions/----/2026-10-27T08-27-28-200Z_01a17c78-b647-7680-9b26-b73281b69f00.jsonl
+2026-10-27 08:27:43.0000000000 ./.npm/_logs/2026-10-27T08_27_42_588Z-debug-0.log
+2026-10-27 08:27:44.0000000000 ./.claude/CLAUDE.md

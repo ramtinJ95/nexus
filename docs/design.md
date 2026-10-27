@@ -163,6 +163,7 @@ A persistent drain lease blocks API and background PR-watch turn entry, and coun
 
 | Date | Decision |
 |---|---|
+| 2026-10-27 | No build leaves a session on a disk that pylons boot from. The image build installs the agent setup without starting pi, whose `claude-delegation` provider starts a Claude session, and pi's load check runs only in the smoke boot, whose disk is thrown away. The smoke boot refuses an image whose home has `~/.nexus`, Claude projects or session environments, or pi sessions. The hook reports only in a pylon with the overlay's `pylon.json`, which a template build has not. Before this, every pylon booted within a day of an image build sent the build's turn start and session end to its new thread |
 | 2026-10-26 | A review whose pull request is closed, or merged outside a review that does not land it, ends `closed` or `merged`, and one whose builder or reviewer thread the person archived or deleted ends `cancelled`. Neither asks for the person, adds the label or runs another step. The loop trusts the PR watch's state between steps, which may be two minutes old, and asks GitHub itself only before it acts or ends the review, so a merge it has not seen yet costs a few reads, not a check or a decision. `needs-person` stays for failures the person did not cause |
 | 2026-10-26 | New projects default to `auto`, and a project's default node may be `auto`. Existing projects keep theirs. Every start reserves its pylon's room in memory until the pylon's row exists. `auto` refuses an overcommitted node |
 | 2026-10-26 | A running pylon's guest treats its disk as having no volatile write cache, so it sends QEMU no flushes and an fsync in the pylon waits on no fdatasync on the node. QEMU runs Gondolin's drive in its default writeback mode, which turns every guest flush into an fdatasync of the overlay in the node's temporary directory. In a pylon on `infra-testbench` that took 24 ms a synced write, and builders saw 120 ms on both nodes, so the SQLite tests took minutes and `.nexus/check` took 1302 s against 201 s without flushes (`docs/verification/pylon-disk-sync-writes/`). Those flushes made nothing durable: a boot resumes the last checkpoint and never the overlay a running VM wrote to, so a crash of the node, QEMU or the guest loses the work since the last pause either way. A stop turns the cache back on before its `sync`, which flushes, so a checkpoint is written as before. QEMU's own `cache=unsafe` would say the same at the drive, but Gondolin 0.13 takes no drive options |
@@ -340,7 +341,10 @@ event once the probe answers, which it does only after journaling the event. A
 probe that is down or restarting delays reports instead of losing them, and an
 event sent again after a lost answer carries the ID control already applied, so
 control ignores it. Every boot, a wake included, starts a sender too, for the
-events a pause left behind. Running session state is a 30-minute lease independent of
+events a pause left behind. So an outbox on a disk that pylons boot from would
+reach every one of them: the image build starts no agent, and the hook writes
+only in a pylon a thread owns, which has the overlay's `~/.nexus/pylon.json`, so
+neither an image nor a template carries one. Running session state is a 30-minute lease independent of
 the retained log and of harness activity. Throttled PostToolUse heartbeats renew
 it; a dead or silent worker cannot keep its pylon awake indefinitely. At most 16
 session states per thread are kept, and ended or expired working rows are removed.
@@ -405,7 +409,8 @@ Every Claude in the pylon reads the same hooks, including one a worker starts to
 verify its work, whose turn end would otherwise give the thread a reply while the
 worker still works. The hook reports, and snapshots a turn, only for a Claude under
 the pylon user's own HOME whose process started without `CLAUDE_CODE_SESSION_ID`, which Claude Code puts
-in the environment of everything it runs, even after `env -u CLAUDECODE`. Sessions
+in the environment of everything it runs, even after `env -u CLAUDECODE`, and only in a pylon with `~/.nexus/pylon.json`,
+which a template build lacks. Sessions
 Nexus opens in Herdr panes, the worker's and the person's, start without it.
 Captures are in `docs/verification/claude-activity-accuracy/`.
 
