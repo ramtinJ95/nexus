@@ -25,6 +25,7 @@ import { needsPerson, reviewerCaller, storedReview, type Review } from "./review
 import { claudeTurn } from "../../images/pylon/nexus-turn.ts";
 import { defaultClaudeModel } from "../claude-state.ts";
 import { maxEntries, transcriptStart, usageLimitStop, type ClaudeEntry, type TranscriptCursor } from "../claude-transcript.ts";
+import { roleOf, type AgentCall, type Breakdown, type UsageReport, type UsageTotals } from "./usage.ts";
 
 declare const brand: unique symbol;
 /** At most 34 characters, so `pylon-<id>` fits pi-sandbox's 40. */
@@ -97,6 +98,11 @@ export interface PortRange { first: number; last: number }
 export interface Output { thread: ThreadId; kind: Extract<RegistryWrite, { record: "output" }>["kind"] | "pull-request"; ref: string }
 export interface Orphan { node: NodeName; pylonId: PylonId }
 
+/**
+ * How far a source of usage was read: a pylon's transcript, by its path, to a byte offset with the SHA-256 of the up
+ * to 4 KiB before it, or a harness conversation to an entry, with no hash.
+ */
+export interface UsageCursor { source: string; key: string; position: number; before: string }
 /** Where the reader of a Claude worker's transcript is in its session's file, how many entries it dropped to keep maxEntries, and when it last read. */
 export interface ClaudeTranscript { session: string; cursor: TranscriptCursor; dropped: number; readAt: number }
 /** What one read of a Claude worker's transcript found, from `from` to `cursor`. `reset` says the file was replaced, so `entries` start it over. */
@@ -299,6 +305,19 @@ const migrations: readonly string[] = [
   // them touches nothing an earlier migration needs, so a registry rewound past it applies it again unchanged.
   `DROP TABLE IF EXISTS passkeys;
    DROP TABLE IF EXISTS passkey_codes;`,
+  // Every model call an agent made, by the ID its own record gives it, their sums per UTC day, and how far each source
+  // was read. usage_since holds when counting started. It touches nothing an earlier migration made, so a registry rewound past it applies it
+  // again unchanged.
+  `CREATE TABLE IF NOT EXISTS usage_records (id TEXT PRIMARY KEY, thread TEXT NOT NULL, project TEXT NOT NULL, role TEXT NOT NULL, agent TEXT NOT NULL,
+     model TEXT NOT NULL, at INTEGER NOT NULL, input INTEGER NOT NULL, output INTEGER NOT NULL, cache_write INTEGER NOT NULL, cache_read INTEGER NOT NULL) STRICT;
+   CREATE INDEX IF NOT EXISTS usage_records_at ON usage_records(at);
+   CREATE INDEX IF NOT EXISTS usage_records_thread ON usage_records(thread);
+   CREATE TABLE IF NOT EXISTS usage_days (day TEXT NOT NULL, project TEXT NOT NULL, role TEXT NOT NULL, agent TEXT NOT NULL, model TEXT NOT NULL,
+     input INTEGER NOT NULL, output INTEGER NOT NULL, cache_write INTEGER NOT NULL, cache_read INTEGER NOT NULL, calls INTEGER NOT NULL,
+     PRIMARY KEY (day, project, role, agent, model)) STRICT;
+   CREATE TABLE IF NOT EXISTS usage_cursors (source TEXT NOT NULL, key TEXT NOT NULL, position INTEGER NOT NULL, before TEXT NOT NULL, PRIMARY KEY (source, key)) STRICT;
+   CREATE TABLE IF NOT EXISTS usage_since (at INTEGER NOT NULL) STRICT;
+   INSERT INTO usage_since SELECT CAST(strftime('%s', 'now') AS INTEGER) * 1000 WHERE NOT EXISTS (SELECT 1 FROM usage_since);`,
 ];
 
 type Row = Record<string, unknown>;
@@ -611,8 +630,76 @@ export function openRegistry(path: string, clock = Date.now) {
     for (const { id } of sql("SELECT id FROM threads").all()) updateAttention(id as ThreadId);
   });
 
+  /**
+   * Each breakdown's grouping, and its order: biggest first, or newest day first. A report over threads reads the
+   * calls, and any other the sums per day, which stay few however many calls there are.
+   */
+  const groupings: Readonly<Record<Breakdown, { key: string; order: string }>> = {
+    model: { key: "model", order: "total DESC, key" },
+    project: { key: "project", order: "total DESC, key" },
+    kind: { key: "agent", order: "total DESC, key" },
+    role: { key: "role", order: "total DESC, key" },
+    day: { key: "day", order: "key DESC" },
+  };
+  const day = (at: number) => new Date(at).toISOString().slice(0, 10);
+  const totalsOf = (r: Row): UsageTotals => {
+    const [input, output, cacheWrite, cacheRead] = [r.input, r.output, r.cache_write, r.cache_read] as number[];
+    return { input: input!, output: output!, cacheWrite: cacheWrite!, cacheRead: cacheRead!, total: input! + output! + cacheWrite! + cacheRead!, calls: r.calls as number };
+  };
+  const sums = (calls: string) => `coalesce(sum(input), 0) AS input, coalesce(sum(output), 0) AS output, coalesce(sum(cache_write), 0) AS cache_write,
+    coalesce(sum(cache_read), 0) AS cache_read, ${calls} AS calls, coalesce(sum(input + output + cache_write + cache_read), 0) AS total`;
+
   return {
     close() { db.close(); },
+    /**
+     * Records each call under the thread it was read from, with the thread's project and role, and moves each cursor
+     * to where its read ended. A call recorded before keeps its thread and time, and each count the larger of the two
+     * reads, since every record of one call carries the same usage.
+     */
+    recordUsage(thread: ThreadId, calls: readonly AgentCall[], cursors: readonly UsageCursor[] = []) {
+      const t = q.thread.get(thread) as Row | undefined;
+      if (t === undefined) throw new Error(`no thread ${thread} to record usage under`);
+      const role = roleOf(t.started_by as string);
+      transaction(() => {
+        for (const c of calls) {
+          const stored = sql("SELECT * FROM usage_records WHERE id = ?").get(c.id);
+          // Another thread's read of a call, as of a session copied into its pylon, changes nothing.
+          if (stored !== undefined && stored.thread !== thread) continue;
+          const was = stored === undefined ? { input: 0, output: 0, cacheWrite: 0, cacheRead: 0 } : totalsOf({ ...stored, calls: 1 });
+          const now = { input: Math.max(was.input, c.input), output: Math.max(was.output, c.output), cacheWrite: Math.max(was.cacheWrite, c.cacheWrite), cacheRead: Math.max(was.cacheRead, c.cacheRead) };
+          const at = (stored?.at as number | undefined) ?? c.at;
+          const key = stored === undefined ? [thread, t.project as string, role, c.agent, c.model] : [thread, stored.project, stored.role, stored.agent, stored.model] as string[];
+          sql("INSERT OR REPLACE INTO usage_records VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)").run(c.id, ...key, at, now.input, now.output, now.cacheWrite, now.cacheRead);
+          sql(`INSERT INTO usage_days VALUES ($day, $project, $role, $agent, $model, $input, $output, $cacheWrite, $cacheRead, $calls)
+            ON CONFLICT DO UPDATE SET input = input + $input, output = output + $output, cache_write = cache_write + $cacheWrite, cache_read = cache_read + $cacheRead, calls = calls + $calls`).run({
+            $day: day(at), $project: key[1]!, $role: key[2]!, $agent: key[3]!, $model: key[4]!, $calls: stored === undefined ? 1 : 0,
+            $input: now.input - was.input, $output: now.output - was.output, $cacheWrite: now.cacheWrite - was.cacheWrite, $cacheRead: now.cacheRead - was.cacheRead,
+          });
+        }
+        for (const { source, key, position, before } of cursors) {
+          sql("INSERT INTO usage_cursors VALUES (?, ?, ?, ?) ON CONFLICT (source, key) DO UPDATE SET position = excluded.position, before = excluded.before").run(source, key, position, before);
+        }
+      });
+    },
+    /** Where each of the source's files or conversations was last read to. */
+    usageCursors: (source: string): Map<string, UsageCursor> =>
+      new Map(sql("SELECT * FROM usage_cursors WHERE source = ?").all(source).map((r) => [r.key as string, { source, key: r.key as string, position: r.position as number, before: r.before as string }])),
+    /** `since` is a UTC day's start, or null for all. */
+    usageReport(filter: { since: number | null; project?: ProjectId | null; thread?: ThreadId | null; by?: readonly Breakdown[] }): UsageReport {
+      const params = { $since: filter.since === null ? null : day(filter.since), $project: filter.project ?? null, $thread: filter.thread ?? null };
+      const [from, calls, dayOf] = params.$thread === null ? ["usage_days", "coalesce(sum(calls), 0)", "day"] : ["usage_records", "count(*)", "date(at / 1000, 'unixepoch')"];
+      const where = `WHERE ($since IS NULL OR ${dayOf} >= $since) AND ($project IS NULL OR project = $project)${params.$thread === null ? " AND $thread IS NULL" : " AND thread = $thread"}`;
+      const by: UsageReport["by"] = {};
+      for (const breakdown of filter.by ?? []) {
+        const { key, order } = groupings[breakdown];
+        by[breakdown] = sql(`SELECT ${key === "day" ? dayOf : key} AS key, ${sums(calls)} FROM ${from} ${where} GROUP BY 1 ORDER BY ${order}`)
+          .all(params).map((r) => ({ key: r.key as string, ...totalsOf(r) }));
+      }
+      return {
+        since: filter.since, countingSince: sql("SELECT at FROM usage_since").get()!.at as number, project: params.$project, thread: params.$thread,
+        total: totalsOf(sql(`SELECT ${sums(calls)} FROM ${from} ${where}`).get(params)!), by,
+      };
+    },
     appendEvent,
     pruneSessions,
     attention: (id: ThreadId): Attention => (sql("SELECT attention FROM thread_attention WHERE thread = ?").get(id)?.attention ?? null) as Attention,

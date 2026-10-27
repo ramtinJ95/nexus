@@ -21,6 +21,7 @@ The control plane writes every record. Probes send facts in observations, and th
 | Output | `thread`, `kind`, `ref` | Observations, including outputs the agent declares with `nexus output add` |
 | NexusEvent | `id`, `time`, `thread`, `project`, `kind`, `payload` | Accepted pylon lifecycle reports and control-plane changes |
 | Orphan | `node`, `pylonId` | Observations of a pylon the registry does not know. Only you delete it |
+| Usage record | `id`, `thread`, `project`, `role`, `agent`, `model`, `at`, `input`, `output`, `cacheWrite`, `cacheRead` | Reads of the harness and of the agents' transcripts in each pylon. [Token usage records](#token-usage-records) describes it |
 
 Three settings sit beside the records. `current` is the image every new pylon uses, and only `nexus image rollout` or `rollback` changes it, once every online node holds the image. `previous-image` is the image current before the last change, which `rollback` makes current again. `image-operation` is the running image build or rollout, or the last one, with each node's step and the probe job it last sent.
 
@@ -138,6 +139,32 @@ A check thread is a bare thread, with no conversation and no Claude worker, whos
 - `startNow` is who asked `start-queued` and when, or null. `lastError` is why the latest start attempt failed, cleared by the start.
 
 What blocks a queued thread is not stored. Each pass and each view derives every predecessor's `Wait` from its thread, its `reviews` record and its `pr_watches` links.
+
+## Token usage records
+
+`usage_records` holds one row per model call an agent made, keyed by `id`, the call's own ID in the agent's record. `AgentCall` and `UsageRecord` in `src/control/usage.ts` are the shapes.
+
+| Source | `id` | `agent` | Read from |
+|---|---|---|---|
+| A Claude Code session in a pylon, such as a Claude worker, its subagents and a Claude reviewer | `claude:<message.id>` | `claude` | Each `assistant` record's `message.usage` in every `*.jsonl` under `~/.claude/projects` |
+| A pi session in a pylon, such as a harness reviewer | `pi:<responseId>`, or `pi:<entry id>@<entry timestamp>` for an entry without one, which a fork copies unchanged | `pi` | Each assistant `message` entry and each `usage` entry under `~/.pi/agent/sessions` |
+| The Nexus agent | `harness:<conversation>/<entry>` | `pi` | Each assistant message in the conversation's pi-durable entries |
+
+- `input`, `output`, `cacheWrite` and `cacheRead` are token counts. For Claude Code they are `input_tokens`, `output_tokens`, `cache_creation_input_tokens` and `cache_read_input_tokens`. A call's total is their sum.
+- `model` is the model the record names. `at` is the call's time in Unix milliseconds.
+- `thread` is the thread the call was read under, and `project` its project. `role` is `reviewer` or `check` for a thread the review loop started, `builder` for one a person started from a tailnet node, and `other` for any other starter.
+- A call already recorded keeps its `thread`, `project`, `role` and `at`, and each count keeps the larger of the stored value and the new one. A read under another thread changes nothing, so a session copied into another pylon stays with the thread that first recorded it. Claude Code writes one record per content block, and each record carries the call's whole usage, so a call read again, read by two reads, or copied into another file by a resume or a fork counts once.
+- A call with no tokens, and Claude Code's own `<synthetic>` messages, give no record. A pylon's read is refused whole when a call's ID does not start with its own agent's prefix, `claude:` or `pi:`, or a count is over 10⁹, so a pylon cannot write a harness call or a sum SQLite cannot hold.
+
+`usage_days` holds the sums of the calls per UTC day, project, role, agent and model, with how many calls each sum holds, and changes in the same transaction as the calls. `GET /v1/usage` reads it, so a report costs the same however many calls there are. A report for one thread reads that thread's calls instead.
+
+`usage_cursors` holds how far each source was read: per pylon, the byte offset past the last whole line of each transcript with `before`, the SHA-256 of the up to 4 KiB before it, and for the harness, the last entry read of each conversation. A file shorter than its offset, or whose bytes before it no longer match `before`, was replaced and is read again from the start. `usage_since` holds when the migration ran, which is when counting started. Deleting or archiving a thread keeps its records.
+
+The control plane reads a pylon only while its node's last observation reports it running, so a read never wakes a pylon. `src/agent-usage.py` runs in the guest over one raw pipe, prints at most about 1 MiB of calls a read, and a pylon with more is read again, at most 16 times in a row. A read follows each `session.turn-ended` and `session.ended` event, a harness read follows each `thread.turn-ended`, and every thread is read when the control plane starts and every 10 minutes. The harness keeps a deleted thread's conversation, so its reads cover the Nexus agent's calls of every thread since the first. A pylon's transcripts go with the pylon, so a thread deleted before this was deployed, or a call made after the last read of a pylon that was then deleted, is not counted.
+
+pi-durable records two kinds of spend only in its running total, the `pi.usage` document, and not per call: the summaries a compaction writes, and model calls a tool makes. Neither is counted.
+
+`GET /v1/usage` answers a `UsageReport`: the start of the period's first UTC day (`since`), `countingSince`, the `total`, and rows `by` model, project, kind, role and UTC day.
 
 ## Releases and deployment drain
 

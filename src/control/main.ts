@@ -29,6 +29,7 @@ import { prWatcher } from "./pr-watch.ts";
 import { threadQueue } from "./queue.ts";
 import { agentInbox } from "./inbox.ts";
 import { usageLimitResumer } from "./usage-limit.ts";
+import { usageCounter } from "./usage-counter.ts";
 import { startImageRollout } from "./image-rollout.ts";
 import { loadImageRecipe } from "../image-build.ts";
 import { runningCommit } from "../deploy/health.ts";
@@ -165,6 +166,7 @@ export async function startControlPlane(config: ControlPlaneConfig, models: Mode
     registry, probes: probeMap, buildNode: (config.imageBuildNode ?? "infra-testbench") as NodeName, recipe: () => loadImageRecipe(), release: runningCommit,
   });
   const inbox = agentInbox({ registry, harness, probes: probeMap, wake: wakeThread });
+  const usage = usageCounter({ registry, probes: probeMap, harness });
   const github = token === null ? null : githubClient(token);
   const handoffTimer = setInterval(() => { void handoff?.poll(); }, 60_000);
   handoffTimer.unref();
@@ -230,6 +232,7 @@ export async function startControlPlane(config: ControlPlaneConfig, models: Mode
       await reviews?.close();
       await queue?.close();
       await api.close();
+      await usage.close();
       await harness.close();
       await loop.close();
       await images.close();

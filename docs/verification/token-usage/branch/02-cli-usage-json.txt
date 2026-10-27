@@ -1,0 +1,127 @@
+$ nexus usage --since all --json
+{
+  "since": null,
+  "countingSince": 1793142565000,
+  "project": null,
+  "thread": null,
+  "total": {
+    "input": 5649,
+    "output": 1701,
+    "cacheWrite": 40335,
+    "cacheRead": 315782,
+    "total": 363467,
+    "calls": 14
+  },
+  "by": {
+    "model": [
+      {
+        "key": "claude-sonnet-5-5",
+        "input": 20,
+        "output": 1523,
+        "cacheWrite": 37665,
+        "cacheRead": 293246,
+        "total": 332454,
+        "calls": 9
+      },
+      {
+        "key": "scripted",
+        "input": 3702,
+        "output": 168,
+        "cacheWrite": 2670,
+        "cacheRead": 21000,
+        "total": 27540,
+        "calls": 3
+      },
+      {
+        "key": "gpt-6-astra",
+        "input": 1927,
+        "output": 10,
+        "cacheWrite": 0,
+        "cacheRead": 1536,
+        "total": 3473,
+        "calls": 2
+      }
+    ],
+    "project": [
+      {
+        "key": "nexus",
+        "input": 4415,
+        "output": 1645,
+        "cacheWrite": 39445,
+        "cacheRead": 308782,
+        "total": 354287,
+        "calls": 13
+      },
+      {
+        "key": "spoon",
+        "input": 1234,
+        "output": 56,
+        "cacheWrite": 890,
+        "cacheRead": 7000,
+        "total": 9180,
+        "calls": 1
+      }
+    ],
+    "kind": [
+      {
+        "key": "claude",
+        "input": 20,
+        "output": 1523,
+        "cacheWrite": 37665,
+        "cacheRead": 293246,
+        "total": 332454,
+        "calls": 9
+      },
+      {
+        "key": "pi",
+        "input": 5629,
+        "output": 178,
+        "cacheWrite": 2670,
+        "cacheRead": 22536,
+        "total": 31013,
+        "calls": 5
+      }
+    ],
+    "role": [
+      {
+        "key": "builder",
+        "input": 4415,
+        "output": 1645,
+        "cacheWrite": 39445,
+        "cacheRead": 308782,
+        "total": 354287,
+        "calls": 13
+      },
+      {
+        "key": "reviewer",
+        "input": 1234,
+        "output": 56,
+        "cacheWrite": 890,
+        "cacheRead": 7000,
+        "total": 9180,
+        "calls": 1
+      }
+    ],
+    "day": [
+      {
+        "key": "2026-10-27",
+        "input": 5629,
+        "output": 178,
+        "cacheWrite": 2670,
+        "cacheRead": 22536,
+        "total": 31013,
+        "calls": 5
+      },
+      {
+        "key": "2026-10-25",
+        "input": 20,
+        "output": 1523,
+        "cacheWrite": 37665,
+        "cacheRead": 293246,
+        "total": 332454,
+        "calls": 9
+      }
+    ]
+  }
+}
+exit 0

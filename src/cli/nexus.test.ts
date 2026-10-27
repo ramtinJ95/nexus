@@ -245,7 +245,7 @@ test("--help or -h after a command prints its lines of nexus --help and exits 0 
   const all = new Set((await s.nexus(["--help"])).stdout.split("\n"));
   const names = ["events", "threads", "show", "ports", "preview", "unpreview", "files", "changes", "diff", "conversation", "session open", "session close",
     "attach", "start", "start-queued", "send", "watch", "seen", "abort", "retry", "retry-pylon", "wake", "archive", "unarchive", "delete", "projects", "project edit",
-    "project add", "review", "land", "deploy", "release", "image build", "image rollout", "image rollback", "image list", "image current", "nodes"];
+    "project add", "review", "land", "deploy", "release", "image build", "image rollout", "image rollback", "image list", "image current", "nodes", "usage"];
   for (const name of names) {
     for (const flag of ["--help", "-h"]) {
       const res = await s.nexus([...name.split(" "), flag]);
@@ -1326,7 +1326,7 @@ test("show prints PR metadata and one disabled-watch notice without waking the p
 
 test("deploy and release use the shared release view and wait for both roles", async (t) => {
   const s = await setup(t);
-  assert.equal((await s.nexus(["--version"])).stdout.trim(), "nexus 0.31.0");
+  assert.equal((await s.nexus(["--version"])).stdout.trim(), "nexus 0.32.0");
   assert.equal((await s.nexus(["deploy", "bad"])).code, 64);
   const requested = await s.json(["deploy", "main"]);
   assert.equal(requested.desired.commit, "a".repeat(40));
@@ -1766,4 +1766,43 @@ test("start --after against a control plane without its GitHub token exits 5 and
   assert.match(refused.stderr, /queued threads need the control plane's GitHub token \(github.tokenFile\)/);
   assert.equal((await s.nexus(["threads"])).stdout, "No threads.\n");
   assert.equal((await s.nexus(["threads", "--queued"])).stdout, "No queued threads.\n");
+});
+
+test("usage prints the tokens of the last 7 days in all and by each breakdown, --since, --project and --by narrow it, and --json is the API's report", async (t) => {
+  const s = await setup(t);
+  const thread: Thread = await s.json(["start", "--project", "acme", "--title", "Usage"]);
+  const hour = 3_600_000;
+  const call = (id: string, agent: "claude" | "pi", model: string, ago: number, [input, output, cacheWrite, cacheRead]: number[]) =>
+    ({ id, agent, model, at: Date.now() - ago, input: input!, output: output!, cacheWrite: cacheWrite!, cacheRead: cacheRead! });
+  s.registry.recordUsage(thread.id, [
+    call("claude:m1", "claude", "claude-opus-5-5", hour, [1_200, 300, 50_000, 1_250_000]),
+    call("pi:r1", "pi", "gpt-6-astra", 72 * hour, [10_000, 2_000, 0, 30_000]),
+    call("pi:r2", "pi", "gpt-6-astra", 20 * 24 * hour, [5_000_000, 0, 0, 0]),
+  ]);
+
+  const text = await s.nexus(["usage"]);
+  assert.equal(text.code, 0, text.stderr);
+  assert.match(text.stdout, /^Usage of all projects since \d{4}-\d\d-\d\d \d\d:\d\d UTC\. Counting started \d{4}-\d\d-\d\d \d\d:\d\d UTC\.\n\n/);
+  const since = Date.parse(`${/since (\S+ \S+) UTC/.exec(text.stdout)![1]!.replace(" ", "T")}Z`);
+  assert.equal(since, Date.now() - (Date.now() % (24 * hour)) - 6 * 24 * hour, "the period is today and the 6 UTC days before it unless --since says otherwise");
+  assert.match(text.stdout, /\n +Input +Output +Cache write +Cache read +Total +Calls\nTotal +11\.2k +2\.3k +50k +1\.3M +1\.3M +2\n/, "the call 20 days ago is outside the period");
+  assert.match(text.stdout, /\nBy model\nModel +Input +Output +Cache write +Cache read +Total +Calls\nclaude-opus-5-5 +1\.2k +300 +50k +1\.3M +1\.3M +1\ngpt-6-astra +10k +2k +0 +30k +42k +1\n/);
+  assert.deepEqual([...text.stdout.matchAll(/^By .*$/gm)].map((m) => m[0]), ["By model", "By project", "By agent", "By role", "By day (UTC)"]);
+  assert.match(text.stdout, /\nBy role\nRole +Input.*\nbuilder +11\.2k +2\.3k +50k +1\.3M +1\.3M +2\n/);
+
+  const all = await s.json(["usage", "--since", "all"]);
+  assert.deepEqual([all.since, all.project, all.thread], [null, null, null]);
+  assert.deepEqual(all.total, { input: 5_011_200, output: 2_300, cacheWrite: 50_000, cacheRead: 1_280_000, total: 6_343_500, calls: 3 });
+  assert.deepEqual(Object.keys(all.by), ["model", "project", "kind", "role", "day"]);
+  assert.deepEqual(all.by.project, [{ key: "acme", input: 5_011_200, output: 2_300, cacheWrite: 50_000, cacheRead: 1_280_000, total: 6_343_500, calls: 3 }]);
+
+  const byModel = await s.nexus(["usage", "--since", "30d", "--by", "model"]);
+  assert.match(byModel.stdout, /\nTotal +5M .* 3\n\nBy model\n/);
+  assert.deepEqual([...byModel.stdout.matchAll(/^By .*$/gm)].map((m) => m[0]), ["By model"], "--by prints only that breakdown");
+  assert.deepEqual(Object.keys((await s.json(["usage", "--by", "day"])).by), ["day"]);
+
+  const other = await s.nexus(["usage", "--project", "other", "--since", "2020-01-01"]);
+  assert.match(other.stdout, /^Usage of project other since 2020-01-01 00:00 UTC\. Counting started .*\nNo model calls were counted in this period\.\n$/);
+  assert.equal((await s.nexus(["usage", "--by", "week"])).code, 64, "the API refuses an unknown breakdown");
+  assert.equal((await s.nexus(["usage", "--since", "last week"])).code, 64, "and an unknown period");
 });

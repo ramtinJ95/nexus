@@ -13,6 +13,7 @@ import { readEvents } from "./event-reader.ts";
 import { fakeHarness } from "./fake-harness.ts";
 import { openRegistry, type Thread, type ThreadId } from "./registry.ts";
 import type { Review, ReviewLoop } from "./review.ts";
+import type { AgentCall } from "./usage.ts";
 import type { JobId, NodeName, PylonObservation, ServiceFact, TailnetNodeId } from "../protocol.ts";
 import type { ImageId } from "../images.ts";
 import { githubTokenGrant } from "../project.ts";
@@ -482,7 +483,7 @@ test("the thread page shows its pylon, sessions with how to attach, previews as 
   assert.equal(res.status, 200);
   assert.equal(textOf(res.text.split('id="bar"')[1]!.split("</header>")[0]!.replace(/^[^>]*>/, "")), "☰ acme / Fix checkout running Archive Delete ⋯");
   assert.match(conversationOf(res.text).text, new RegExp(`^${fix.id} · started just now`));
-  assert.equal(textOf(sectionOf(res.text, "pylon-h")), `Pylon Desired running Observed running Node rj-firebat Last seen just now Human just now Agent never ${fix.pylonId}`);
+  assert.equal(textOf(sectionOf(res.text, "pylon-h")), `Pylon Desired running Observed running Node rj-firebat Last seen just now Human just now Agent never Tokens none counted ${fix.pylonId}`);
 
   const sessions = textOf(sectionOf(res.text, "sessions-h"));
   assert.match(sessions, /^Sessions 3 /);
@@ -1055,7 +1056,7 @@ test("a scratch project shows as scratch, and starting a thread on it starts an 
 test("every page has somewhere to say a refresh failed", async (t) => {
   const s = await seeded(t);
   const fix = await s.start("acme", "Fix checkout");
-  for (const path of ["/", "/threads/new", `/threads/${fix.id}`, "/threads/th-missing"]) {
+  for (const path of ["/", "/threads/new", `/threads/${fix.id}`, "/threads/th-missing", "/usage"]) {
     assert.equal([...(await s.call("GET", path)).text.matchAll(/<p id="refresh-state" class="refresh-state" role="status"><\/p>/g)].length, 1, `${path} has one refresh status`);
   }
 });
@@ -1426,4 +1427,98 @@ test("a queued and a blocked thread show in the sidebar and the overview as queu
   const started = (await s.call("GET", `/threads/${next.id}`)).text;
   assert.match(started, /id="convo"/, "once started, its page is a thread's");
   assert.ok(sidebarOf(started).rows.some((r) => r.endsWith("Next step now")));
+});
+
+/** A usage table's rows as a reader takes them in, and the exact token counts each row carries for a script. */
+function usageTableOf(html: string, id: string) {
+  const table = html.split(`id="${id}">`)[1]?.split("</table>")[0];
+  assert.ok(table !== undefined, `no table ${id}`);
+  const rows = table.split("<tbody>")[1]!.split("</tr>").slice(0, -1);
+  return { rows: rows.map((row) => textOf(row)), tokens: rows.map((row) => [...row.matchAll(/data-tokens="(\d+)"/g)].map((m) => Number(m[1]))) };
+}
+
+const hour = 3_600_000;
+const day = 24 * hour;
+const usageCall = (id: string, agent: AgentCall["agent"], model: string, at: number, [input, output, cacheWrite, cacheRead]: number[]): AgentCall =>
+  ({ id, agent, model, at, input: input!, output: output!, cacheWrite: cacheWrite!, cacheRead: cacheRead! });
+
+test("the Usage page shows the period's tokens in all and by model, project, agent, role and UTC day, each exact in its title", async (t) => {
+  const now = Date.parse("2027-03-10T12:00:00Z");
+  t.mock.timers.enable({ apis: ["Date"], now });
+  const s = await seeded(t);
+  const fix = await s.start("acme", "Fix checkout");
+  const docs = await s.start("beta", "Write docs");
+  s.registry.recordUsage(fix.id, [
+    usageCall("claude:m1", "claude", "claude-opus-5-5", now - hour, [1_200, 300, 50_000, 1_250_000]),
+    usageCall("claude:m2", "claude", "claude-opus-5-5", now - 2 * day, [800, 700, 0, 0]),
+  ]);
+  s.registry.recordUsage(docs.id, [
+    usageCall("pi:r1", "pi", "gpt-6-astra", now - 3 * day, [10_000, 2_000, 0, 30_000]),
+    usageCall("pi:r2", "pi", "gpt-6-astra", now - 20 * day, [5_000_000, 0, 0, 0]),
+  ]);
+
+  const page = (await s.call("GET", "/usage")).text;
+  assert.match(page, /<a class="side-link active" href="\/usage" aria-current="page">/, "the sidebar marks Usage as the open page");
+  assert.match(page, /<div class="page usage" id="usage" data-live>/, "the page refreshes with the poll");
+  assert.deepEqual([...page.matchAll(/<a class="seg-tab" href="([^"]+)"( aria-current="page")?>([^<]+)<\/a>/g)].map((m) => [m[3], m[1], m[2] !== undefined]), [
+    ["Today", "/usage?period=today", false], ["7 days", "/usage?period=7d", true], ["30 days", "/usage?period=30d", false], ["All", "/usage?period=all", false],
+    ["All projects", "/usage?period=7d", true], ["acme", "/usage?period=7d&amp;project=acme", false], ["beta", "/usage?period=7d&amp;project=beta", false],
+  ], "the period is 7 days unless picked, over every project");
+  assert.match(textOf(page), /Counting started \d{4}-\d\d-\d\d \d\d:\d\d UTC ?\. The calls of threads that existed then were counted from the transcripts they still had\./);
+  assert.match(textOf(page), /The summaries the Nexus agent's compactions write, and model calls its tools make, are not counted\./);
+
+  const totals = usageTableOf(page, "usage-totals");
+  assert.deepEqual(totals.rows, ["7 days 12k 3k 50k 1.3M 1.3M 3"], "the call 20 days ago is outside the period");
+  assert.deepEqual(totals.tokens, [[12_000, 3_000, 50_000, 1_280_000, 1_345_000]]);
+  assert.match(page.split('id="usage-totals"')[1]!, /^[^]*?<td data-column="input" data-tokens="12000" title="12,000">12k<\/td>/, "the exact count is the title");
+  assert.deepEqual(usageTableOf(page, "usage-by-model").rows, ["claude-opus-5-5 2k 1k 50k 1.3M 1.3M 2", "gpt-6-astra 10k 2k 0 30k 42k 1"]);
+  assert.deepEqual(usageTableOf(page, "usage-by-project").rows, ["acme 2k 1k 50k 1.3M 1.3M 2", "beta 10k 2k 0 30k 42k 1"]);
+  assert.match(page.split('id="usage-by-project"')[1]!, /<a class="link" href="\/usage\?period=7d&amp;project=acme">acme<\/a>/, "a project's row picks it");
+  assert.deepEqual(usageTableOf(page, "usage-by-kind").rows, ["claude 2k 1k 50k 1.3M 1.3M 2", "pi 10k 2k 0 30k 42k 1"]);
+  assert.deepEqual(usageTableOf(page, "usage-by-role").rows, ["builder 12k 3k 50k 1.3M 1.3M 3"], "a person's threads are builders");
+  assert.deepEqual(usageTableOf(page, "usage-by-day").rows, ["2027-03-10 1.2k 300 50k 1.3M 1.3M 1", "2027-03-08 800 700 0 0 1.5k 1", "2027-03-07 10k 2k 0 30k 42k 1"], "days are UTC, newest first");
+  assert.match(page.split('id="usage-totals"')[1]!.split("</thead>")[0]!, /<th>Input<\/th><th>Output<\/th><th class="wide">Cache write<\/th><th class="wide">Cache read<\/th><th>Total<\/th><th class="wide">Calls<\/th>/, "a phone hides the cache and call columns");
+
+  const all = (await s.call("GET", "/usage?period=all")).text;
+  assert.deepEqual(usageTableOf(all, "usage-totals").tokens, [[5_012_000, 3_000, 50_000, 1_280_000, 6_345_000]]);
+  assert.deepEqual(usageTableOf(all, "usage-by-day").rows.at(-1), "2027-02-18 5M 0 0 0 5M 1");
+  assert.deepEqual(usageTableOf((await s.call("GET", "/usage?period=today")).text, "usage-totals").rows, ["Today 1.2k 300 50k 1.3M 1.3M 1"]);
+
+  const beta = (await s.call("GET", "/usage?period=30d&project=beta")).text;
+  assert.match(beta, /<a class="seg-tab" href="\/usage\?period=30d&amp;project=beta" aria-current="page">beta<\/a>/);
+  assert.deepEqual(usageTableOf(beta, "usage-totals").rows, ["30 days 5M 2k 0 30k 5M 2"], "the project narrows every table");
+  assert.deepEqual(usageTableOf(beta, "usage-by-model").rows, ["gpt-6-astra 5M 2k 0 30k 5M 2"]);
+  assert.deepEqual(usageTableOf((await s.call("GET", "/usage?period=fortnight")).text, "usage-totals").rows, ["7 days 12k 3k 50k 1.3M 1.3M 3"], "an unknown period is the default");
+
+  const home = (await s.call("GET", "/")).text;
+  assert.match(home, /<a class="side-link" href="\/usage">.*Usage<\/a>/, "every page links to Usage");
+});
+
+test("the Usage page with no calls in the period says so, and its totals are zero", async (t) => {
+  const s = await seeded(t);
+  const page = (await s.call("GET", "/usage?period=today")).text;
+  assert.deepEqual(usageTableOf(page, "usage-totals"), { rows: ["Today 0 0 0 0 0 0"], tokens: [[0, 0, 0, 0, 0]] });
+  assert.match(textOf(page), /No model calls were counted in this period\./);
+  assert.ok(!page.includes('id="usage-by-model"'), "no breakdown is drawn empty");
+});
+
+test("a thread page's pylon pane says what tokens the thread's agents spent, refreshed with the poll", async (t) => {
+  const s = await seeded(t);
+  const fix = await s.start("acme", "Fix checkout");
+  const other = await s.start("acme", "Other");
+  s.observe(fix);
+  const tokens = async () => {
+    const page = (await s.call("GET", `/threads/${fix.id}`)).text;
+    const live = page.split('<div class="pane-live" id="inspect" data-live>')[1]!.split("</aside>")[0]!;
+    const row = /<dd id="thread-usage" data-tokens="(\d+)">(.*?)<\/dd>/.exec(live);
+    assert.ok(row !== null, "the tokens row is in the live inspector");
+    return [Number(row[1]), textOf(row[2]!).replace(/\( /, "(").replace(/ \)/, ")")];
+  };
+  assert.deepEqual(await tokens(), [0, "none counted"]);
+  s.registry.recordUsage(fix.id, [
+    usageCall("claude:m1", "claude", "claude-opus-5-5", Date.now() - 40 * day, [300_000, 20_000, 100_000, 800_000]),
+    usageCall("claude:m2", "claude", "claude-opus-5-5", Date.now(), [1_000, 500, 0, 0]),
+  ]);
+  s.registry.recordUsage(other.id, [usageCall("claude:m3", "claude", "claude-opus-5-5", Date.now(), [9_000_000, 0, 0, 0])]);
+  assert.deepEqual(await tokens(), [1_221_500, "1.2M (in 301k · out 20.5k · cache write 100k · cache read 800k)"], "every call of the thread, however old, and no other thread's");
 });

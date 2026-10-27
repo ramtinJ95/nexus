@@ -1,0 +1,11 @@
+$ nexus usage --since all --by project
+Usage of all projects for all time. Counting started 2026-10-27 23:09 UTC.
+
+       Input  Output  Cache write  Cache read  Total  Calls
+Total  5.6k   1.7k    40.3k        316k        363k   14
+
+By project
+Project  Input  Output  Cache write  Cache read  Total  Calls
+nexus    4.4k   1.6k    39.4k        309k        354k   13
+spoon    1.2k   56      890          7k          9.2k   1
+exit 0
