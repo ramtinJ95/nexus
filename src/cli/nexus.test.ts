@@ -490,13 +490,13 @@ test("show reports a published preview whose service is starting as not ready, a
   assert.equal((await s.nexus(["ports", thread.id])).stdout, `8003  web  ${preview.url} (not ready: ${unrouted})\n`);
 });
 
-test("a preview from a control plane older than Preview.failed reads as not failed, a session older than Session.state as running, and a thread older than Thread.working as working while its harness turn runs", async (t) => {
+test("a preview from a control plane older than Preview.failed reads as not failed, a session older than Session.state as running, and a thread older than Thread.working as working while its session turn runs", async (t) => {
   const s = await setup(t);
   // That control plane's shapes: a Preview with no `failed`, and a Session with no `id`, `state` or `message`.
   const web = { pylon: "pylon-th-old", service: "web", httpsPort: 10200, ready: true, url: "https://rj-firebat.tail.ts.net:10200/" };
   const api = { ...web, service: "api", httpsPort: 10201, ready: false, url: "https://rj-firebat.tail.ts.net:10201/" };
   const detail = {
-    thread: { id: "th-old", title: "old", project: "acme", status: "active", agentTurnRunning: true },
+    thread: { id: "th-old", title: "old", project: "acme", status: "active", agentTurnRunning: false, sessionTurnRunning: true },
     pylon: { id: "pylon-th-old", node, actualState: "running", failed: null, observedAt: null, retryRefused: null },
     sessions: [{ pylon: "pylon-th-old", herdrPane: "w1:p1", harness: "pi", harnessSessionId: null, status: "idle", title: "plan" }], previews: [api, web], ports: [{ port: 3000, service: "web", preview: web }, { port: 4000, service: "api", preview: api }], outputs: [], agent: null,
   };

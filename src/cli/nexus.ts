@@ -291,8 +291,8 @@ function reviewText(r: Review): string {
   ].join("\n");
 }
 
-/** A control plane older than `Thread.working` sends none, and knows only its harness turn. */
-const working = (t: Thread) => t.working ?? t.agentTurnRunning;
+/** A control plane older than `Thread.working` sends none. */
+const working = (t: Thread) => t.working ?? (t.agentTurnRunning || t.sessionTurnRunning === true);
 
 function detailText({ thread: t, pylon: p, agent, sessions, previews, ports, outputs, prWatch, pullRequests, claudeWorker, attention, review }: ThreadDetail): string {
   const observed = p.observedAt === null ? "" : `, observed ${ago(Date.parse(p.observedAt))}`;
