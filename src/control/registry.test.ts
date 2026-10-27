@@ -945,7 +945,7 @@ test("a turn running before turn starts were recorded has no known start", async
   const db = new DatabaseSync(path);
   const version = db.prepare("PRAGMA user_version").get()!.user_version as number;
   db.exec(`UPDATE threads SET agent_turn_running = 1; ALTER TABLE threads DROP COLUMN placement; ALTER TABLE threads DROP COLUMN setup; ALTER TABLE threads DROP COLUMN agent_turn_started_at; ALTER TABLE session_activity DROP COLUMN started_at; DROP TABLE reviews; DROP TABLE reviewed_prs;
-    ALTER TABLE claude_workers DROP COLUMN turn_session; ALTER TABLE claude_workers DROP COLUMN turn_at; ALTER TABLE session_activity DROP COLUMN message; ALTER TABLE session_order DROP COLUMN event_ids; PRAGMA user_version = ${version - 10}`);
+    ALTER TABLE claude_workers DROP COLUMN turn_session; ALTER TABLE claude_workers DROP COLUMN turn_at; ALTER TABLE session_activity DROP COLUMN message; ALTER TABLE session_order DROP COLUMN event_ids; PRAGMA user_version = ${version - 11}`);
   db.close();
   const registry = openRegistry(path, () => now);
   t.after(() => registry.close());
@@ -1258,7 +1258,7 @@ test("a read that ends on a usage limit ends the turn that ran into it, though C
   assert.equal(attention(), "working");
 });
 
-test("a write waits while another process, such as the passkey host command, holds the registry's write lock", async (t) => {
+test("a write waits while another process, such as a second open of the registry, holds its write lock", async (t) => {
   const path = tempDb();
   const registry = openRegistry(path);
   t.after(() => registry.close());
@@ -1278,9 +1278,24 @@ test("a write waits while another process, such as the passkey host command, hol
   t.after(() => { holder.kill(); holder.stdout.destroy(); });
   await new Promise<void>((resolve) => holder.stdout.once("data", () => resolve()));
   writeFileSync(writing, "");
-  registry.addPasskeyCode("h", 1);
-  assert.equal(registry.passkeyCodeOpen("h", 0), true, "the write waited for the lock rather than failing");
+  registry.upsertNode({ name: node, tailnetHost: "rj-firebat.tail.ts.net", tailnetNodeId: "nFIREBAT" as TailnetNodeId });
+  assert.deepEqual(registry.nodes().map((n) => n.name), [node], "the write waited for the lock rather than failing");
   await new Promise((resolve) => holder.once("exit", resolve));
+});
+
+test("a registry made when landing asked for a passkey keeps neither passkey table", (t) => {
+  const path = tempDb();
+  openRegistry(path).close();
+  const db = new DatabaseSync(path);
+  const version = db.prepare("PRAGMA user_version").get()!.user_version as number;
+  db.exec(`CREATE TABLE passkeys (id TEXT PRIMARY KEY, credential_id TEXT NOT NULL UNIQUE, record TEXT NOT NULL) STRICT;
+    CREATE TABLE passkey_codes (hash TEXT PRIMARY KEY, expires_at INTEGER NOT NULL, used_at INTEGER) STRICT; PRAGMA user_version = ${version - 1}`);
+  db.close();
+  openRegistry(path).close();
+  const reopened = new DatabaseSync(path);
+  t.after(() => reopened.close());
+  assert.deepEqual(reopened.prepare("SELECT name FROM sqlite_master WHERE name LIKE 'passkey%'").all(), []);
+  assert.equal(reopened.prepare("PRAGMA user_version").get()!.user_version, version);
 });
 
 test("a queued thread's row and its queue record's start commit together, and a record no longer queued starts nothing", (t) => {
