@@ -1,17 +1,17 @@
 $ nexus start --project nexus-manual --title Greet quietly --claude push greet-quiet conflict --json
 {
-  "id": "th-5bdf10ad82b7",
+  "id": "th-13fa23287674",
   "title": "Greet quietly",
   "project": "nexus-manual",
-  "pylonId": "pylon-th-5bdf10ad82b7",
+  "pylonId": "pylon-th-13fa23287674",
   "status": "active",
   "conversationId": null,
   "startedBy": "nLAPTOP",
-  "createdAt": 1793112339499,
+  "createdAt": 1793113283907,
   "agentTurnRunning": false,
   "working": false,
   "lastAgentActivityAt": 0,
-  "lastHumanActivityAt": 1793112339499,
+  "lastHumanActivityAt": 1793113283907,
   "seenAt": null,
   "lastReplyAt": null,
   "placement": {

@@ -1,19 +1,19 @@
-$ nexus show th-5bdf10ad82b7 --json
+$ nexus show th-13fa23287674 --json
 {
   "thread": {
-    "id": "th-5bdf10ad82b7",
+    "id": "th-13fa23287674",
     "title": "Greet quietly",
     "project": "nexus-manual",
-    "pylonId": "pylon-th-5bdf10ad82b7",
+    "pylonId": "pylon-th-13fa23287674",
     "status": "active",
     "conversationId": null,
     "startedBy": "nLAPTOP",
-    "createdAt": 1793112339499,
+    "createdAt": 1793113283907,
     "agentTurnRunning": false,
-    "lastAgentActivityAt": 1793112339812,
-    "lastHumanActivityAt": 1793112339499,
+    "lastAgentActivityAt": 1793113285734,
+    "lastHumanActivityAt": 1793113283907,
     "seenAt": null,
-    "lastReplyAt": 1793112339701,
+    "lastReplyAt": 1793113284056,
     "placement": {
       "how": "default",
       "node": "verify-node"
@@ -30,14 +30,14 @@ $ nexus show th-5bdf10ad82b7 --json
   },
   "attention": "decision",
   "seenAt": null,
-  "lastReplyAt": 1793112339701,
+  "lastReplyAt": 1793113284056,
   "desired": "running",
   "pylon": {
     "grantsOutdated": false,
-    "id": "pylon-th-5bdf10ad82b7",
+    "id": "pylon-th-13fa23287674",
     "node": "verify-node",
     "failed": null,
-    "observedAt": "2026-10-27T14:45:45.311Z",
+    "observedAt": "2026-10-27T15:01:30.866Z",
     "resources": {
       "cpus": 1,
       "memoryGiB": 1,
@@ -51,12 +51,12 @@ $ nexus show th-5bdf10ad82b7 --json
   "ports": [],
   "outputs": [
     {
-      "thread": "th-5bdf10ad82b7",
+      "thread": "th-13fa23287674",
       "kind": "branch",
       "ref": "origin/greet-quiet"
     },
     {
-      "thread": "th-5bdf10ad82b7",
+      "thread": "th-13fa23287674",
       "kind": "pull-request",
       "ref": "https://github.com/ramtinJ95/nexus/pull/4"
     }
@@ -79,11 +79,11 @@ $ nexus show th-5bdf10ad82b7 --json
     }
   ],
   "review": {
-    "id": "rv-77fad122",
-    "expect": "rv-77fad122:9636a50206e6",
+    "id": "rv-fcfb3e0b",
+    "expect": "rv-fcfb3e0b:ddadcddd514b",
     "sent": 1,
-    "builder": "th-5bdf10ad82b7",
-    "reviewer": "th-343a1976fc91",
+    "builder": "th-13fa23287674",
+    "reviewer": "th-ffaf92aefd34",
     "pr": {
       "repo": "ramtinJ95/nexus",
       "number": 4,
@@ -104,7 +104,7 @@ $ nexus show th-5bdf10ad82b7 --json
       {
         "head": "cccc000500000000000000000000000000000000",
         "verdict": {
-          "token": "rv-77fad122:9636a50206e6",
+          "token": "rv-fcfb3e0b:ddadcddd514b",
           "verdict": "approve",
           "findings": [],
           "reserved": [],
@@ -125,9 +125,9 @@ $ nexus show th-5bdf10ad82b7 --json
       ]
     },
     "outbox": null,
-    "since": 1793112340276,
+    "since": 1793113286766,
     "nudges": 0,
-    "startedAt": 1793112340270
+    "startedAt": 1793113286759
   },
   "attach": "herdr --session nexus",
   "agent": null

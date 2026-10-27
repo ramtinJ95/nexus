@@ -1,17 +1,17 @@
 $ nexus start --project nexus --title Greet loudly --claude push greet-loud conflict --json
 {
-  "id": "th-6eb3278737a2",
+  "id": "th-e59737fc268c",
   "title": "Greet loudly",
   "project": "nexus",
-  "pylonId": "pylon-th-6eb3278737a2",
+  "pylonId": "pylon-th-e59737fc268c",
   "status": "active",
   "conversationId": null,
   "startedBy": "nLAPTOP",
-  "createdAt": 1793112379627,
+  "createdAt": 1793113325068,
   "agentTurnRunning": false,
   "working": false,
   "lastAgentActivityAt": 0,
-  "lastHumanActivityAt": 1793112379627,
+  "lastHumanActivityAt": 1793113325068,
   "seenAt": null,
   "lastReplyAt": null,
   "placement": {

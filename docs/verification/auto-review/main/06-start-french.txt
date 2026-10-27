@@ -1,17 +1,17 @@
 $ nexus start --project nexus-manual --title Greet in French --claude push greet-french --json
 {
-  "id": "th-390b138b858f",
+  "id": "th-200bbc3f38d9",
   "title": "Greet in French",
   "project": "nexus-manual",
-  "pylonId": "pylon-th-390b138b858f",
+  "pylonId": "pylon-th-200bbc3f38d9",
   "status": "active",
   "conversationId": null,
   "startedBy": "nLAPTOP",
-  "createdAt": 1793112297233,
+  "createdAt": 1793113242497,
   "agentTurnRunning": false,
   "working": false,
   "lastAgentActivityAt": 0,
-  "lastHumanActivityAt": 1793112297233,
+  "lastHumanActivityAt": 1793113242497,
   "seenAt": null,
   "lastReplyAt": null,
   "placement": {

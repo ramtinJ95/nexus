@@ -1,6 +1,6 @@
 # Reviews that start on their own and finish what they start
 
-Verified in this task's pylon on 2026-10-27, on branch `feat/auto-review-and-rebase`, against main at 918e471, with headless Chromium 138. No live control plane, node, image, GitHub repository or other thread was touched.
+Verified in this task's pylon on 2026-10-27, on branch `feat/auto-review-and-rebase` at c44d59a, against main at 918e471, with headless Chromium 138. No live control plane, node, image, GitHub repository or other thread was touched.
 
 ## How to rerun
 
@@ -37,10 +37,10 @@ MODULES=<node_modules with @sparticuz/chromium and puppeteer-core> LD_LIBRARY_PA
 On the branch, `github.log` shows each landing and each rebase, with no merge attempt of a conflicting head:
 
 ```
-th-6eb3278737a2 pushed greet-loud at cccc0004..., opening PR #3, which conflicts with main
+th-e59737fc268c pushed greet-loud at cccc0004..., opening PR #3, which conflicts with main
 PUT /repos/ramtinJ95/nexus/pulls/1/merge {"sha":"cccc0002...","merge_method":"squash"}
 merged PR #1 at cccc0002... as eeee0005...
-th-6eb3278737a2 pushed greet-loud rebased onto main at bbbb0006...
+th-e59737fc268c pushed greet-loud rebased onto main at bbbb0006...
 PUT /repos/ramtinJ95/nexus/pulls/3/merge {"sha":"bbbb0006...","merge_method":"squash"}
 merged PR #3 at bbbb0006... as eeee0007...
 ```
@@ -55,7 +55,7 @@ Branch, "Greet quietly":
 
 ![branch, the builder rebased and the PR landed](https://raw.githubusercontent.com/ramtinJ95/nexus/feat/auto-review-and-rebase/docs/verification/auto-review/branch/04-quietly.png)
 
-`tests-main.txt` runs this branch's eleven new tests against main's code: all eleven fail. `tests-branch.txt` runs them on the branch: all pass.
+`tests-main.txt` runs the thirteen tests this branch adds against main's code: all thirteen fail. `tests-branch.txt` runs them on the branch: all pass.
 
 ## Not verified
 

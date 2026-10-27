@@ -1,13 +1,13 @@
 $ nexus threads
-th-e6c9c30ef0fc  active    -  pylon running  nexus         55s ago  Greet by name
-th-e3ce06c863c6  active    -  pylon running  nexus-manual  54s ago  Greet in French
-th-6eb3278737a2  active    -  pylon running  nexus         54s ago  Greet loudly
-th-d6727f4fe0b4  active    -  pylon running  nexus         53s ago  Review of #1: Greet by name
-th-2c3344e6cb26  active    -  pylon running  nexus         53s ago  Review of #3: Greet loudly
-th-53a33bc49f05  active    -  pylon running  nexus-manual  35s ago  Greet quietly
-th-2cf75271d084  active    -  pylon running  nexus-manual  32s ago  Review of #4: Greet quietly
-th-0e915d0a1a22  active    -  pylon running  nexus-manual  20s ago  Rebuild the image
-th-fe4200f55814  archived  -  pylon running  nexus-manual  19s ago  Rebuild the image again
-th-5014db8bdd0a  active    -  pylon running  nexus-manual  16s ago  Review of #5: Rebuild the image
-th-827726f961e3  active    -  pylon running  nexus-manual  16s ago  Review of #6: Rebuild the image again
+th-02dd0d124ca4  active    -  pylon running  nexus         53s ago  Greet by name
+th-b0d27688bbf3  active    -  pylon running  nexus-manual  52s ago  Greet in French
+th-e59737fc268c  active    -  pylon running  nexus         52s ago  Greet loudly
+th-880f0613fe7d  active    -  pylon running  nexus         51s ago  Review of #1: Greet by name
+th-d0625e3f1753  active    -  pylon running  nexus         51s ago  Review of #3: Greet loudly
+th-d822af775137  active    -  pylon running  nexus-manual  32s ago  Greet quietly
+th-6db1571368b7  active    -  pylon running  nexus-manual  30s ago  Review of #4: Greet quietly
+th-5a563e085bc4  active    -  pylon running  nexus-manual  19s ago  Rebuild the image
+th-eac05ddf01bf  archived  -  pylon running  nexus-manual  18s ago  Rebuild the image again
+th-9f3ebf6097a2  active    -  pylon running  nexus-manual  16s ago  Review of #5: Rebuild the image
+th-c5f06b6a8f71  active    -  pylon running  nexus-manual  16s ago  Review of #6: Rebuild the image again
 [exit 0]

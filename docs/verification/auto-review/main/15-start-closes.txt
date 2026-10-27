@@ -1,17 +1,17 @@
 $ nexus start --project nexus-manual --title Rebuild the image --claude push image-close reserved --json
 {
-  "id": "th-030dd8f0035c",
+  "id": "th-a733462743a8",
   "title": "Rebuild the image",
   "project": "nexus-manual",
-  "pylonId": "pylon-th-030dd8f0035c",
+  "pylonId": "pylon-th-a733462743a8",
   "status": "active",
   "conversationId": null,
   "startedBy": "nLAPTOP",
-  "createdAt": 1793112345852,
+  "createdAt": 1793113291359,
   "agentTurnRunning": false,
   "working": false,
   "lastAgentActivityAt": 0,
-  "lastHumanActivityAt": 1793112345852,
+  "lastHumanActivityAt": 1793113291359,
   "seenAt": null,
   "lastReplyAt": null,
   "placement": {

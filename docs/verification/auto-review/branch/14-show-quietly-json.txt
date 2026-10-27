@@ -1,19 +1,19 @@
-$ nexus show th-53a33bc49f05 --json
+$ nexus show th-d822af775137 --json
 {
   "thread": {
-    "id": "th-53a33bc49f05",
+    "id": "th-d822af775137",
     "title": "Greet quietly",
     "project": "nexus-manual",
-    "pylonId": "pylon-th-53a33bc49f05",
+    "pylonId": "pylon-th-d822af775137",
     "status": "active",
     "conversationId": null,
     "startedBy": "nLAPTOP",
-    "createdAt": 1793112398476,
+    "createdAt": 1793113344732,
     "agentTurnRunning": false,
-    "lastAgentActivityAt": 1793112405279,
-    "lastHumanActivityAt": 1793112398476,
+    "lastAgentActivityAt": 1793113349800,
+    "lastHumanActivityAt": 1793113344732,
     "seenAt": null,
-    "lastReplyAt": 1793112406786,
+    "lastReplyAt": 1793113351311,
     "placement": {
       "how": "default",
       "node": "verify-node"
@@ -30,14 +30,14 @@ $ nexus show th-53a33bc49f05 --json
   },
   "attention": "reply",
   "seenAt": null,
-  "lastReplyAt": 1793112406786,
+  "lastReplyAt": 1793113351311,
   "desired": "running",
   "pylon": {
     "grantsOutdated": false,
-    "id": "pylon-th-53a33bc49f05",
+    "id": "pylon-th-d822af775137",
     "node": "verify-node",
     "failed": null,
-    "observedAt": "2026-10-27T14:46:53.193Z",
+    "observedAt": "2026-10-27T15:02:37.712Z",
     "resources": {
       "cpus": 1,
       "memoryGiB": 1,
@@ -51,12 +51,12 @@ $ nexus show th-53a33bc49f05 --json
   "ports": [],
   "outputs": [
     {
-      "thread": "th-53a33bc49f05",
+      "thread": "th-d822af775137",
       "kind": "branch",
       "ref": "origin/greet-quiet"
     },
     {
-      "thread": "th-53a33bc49f05",
+      "thread": "th-d822af775137",
       "kind": "pull-request",
       "ref": "https://github.com/ramtinJ95/nexus/pull/4"
     }
@@ -79,11 +79,11 @@ $ nexus show th-53a33bc49f05 --json
     }
   ],
   "review": {
-    "id": "rv-566ff28d",
-    "expect": "rv-566ff28d:9347a25b5c46",
+    "id": "rv-77421b34",
+    "expect": "rv-77421b34:f775f33256d5",
     "sent": 3,
-    "builder": "th-53a33bc49f05",
-    "reviewer": "th-2cf75271d084",
+    "builder": "th-d822af775137",
+    "reviewer": "th-6db1571368b7",
     "pr": {
       "repo": "ramtinJ95/nexus",
       "number": 4,
@@ -105,7 +105,7 @@ $ nexus show th-53a33bc49f05 --json
       {
         "head": "cccc000800000000000000000000000000000000",
         "verdict": {
-          "token": "rv-566ff28d:4226b9af2cb9",
+          "token": "rv-77421b34:c60310b97613",
           "verdict": "approve",
           "findings": [],
           "reserved": [],
@@ -129,7 +129,7 @@ $ nexus show th-53a33bc49f05 --json
       {
         "head": "bbbb000900000000000000000000000000000000",
         "verdict": {
-          "token": "rv-566ff28d:9347a25b5c46",
+          "token": "rv-77421b34:f775f33256d5",
           "verdict": "approve",
           "findings": [],
           "reserved": [],
@@ -148,9 +148,9 @@ $ nexus show th-53a33bc49f05 --json
       "commit": "eeee001000000000000000000000000000000000"
     },
     "outbox": null,
-    "since": 1793112407284,
+    "since": 1793113351783,
     "nudges": 0,
-    "startedAt": 1793112401539
+    "startedAt": 1793113346584
   },
   "attach": "herdr --session nexus",
   "agent": null

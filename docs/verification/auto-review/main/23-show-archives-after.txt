@@ -1,16 +1,16 @@
-$ nexus show th-d27c4d723992
-th-d27c4d723992  Rebuild the image again
+$ nexus show th-0f894b23de17
+th-0f894b23de17  Rebuild the image again
 project: nexus-manual
 Claude worker: started, model claude-opus-5-5
 attention: decision
 status: archived
-pylon: pylon-th-d27c4d723992 on verify-node, running, observed 0s ago
+pylon: pylon-th-0f894b23de17 on verify-node, running, observed 0s ago
 size: 1 CPUs, 1 GiB memory, 10 GiB disk
 placement: verify-node, the project's default node
 setup: fresh boot runs .nexus/setup, because the control plane could not read .nexus/setup at main: the verify stack reads no remote, so every thread boots fresh
 PR watch: on
 PR #6: Rebuild the image again — open, checks none, review none https://github.com/ramtinJ95/nexus/pull/6
-review rv-2e826643 of PR #6: needs-person, round 1 of 5, reviewer th-c4c9dff82976 on gpt-6-astra, landing when approved
+review rv-a00c82de of PR #6: needs-person, round 1 of 5, reviewer th-549e83aceafc on gpt-6-astra, landing when approved
 needs you: Always needs the person: pylon image rebuilds, as it changes images/pylon/image-archive.Dockerfile.
 output: branch origin/image-archive
 output: pull-request https://github.com/ramtinJ95/nexus/pull/6
