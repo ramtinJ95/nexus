@@ -1,0 +1,8 @@
+✔ a deleted thread's ports go back only once its node no longer has the pylon (133.109923ms)
+✔ a deleted thread whose pylon was removed by hand gets a delete that unpublishes its previews, and only then its ports back (99.986872ms)
+✔ a deleted thread's pylon that is gone is torn down again whenever its node lists or routes it again (126.957217ms)
+✔ a deleted thread's ports go back after a restart between its delete and their release (44.94595ms)
+✔ a deleted thread whose Claude launch was cut off has the launch failed, though its pylon is gone (49.58505ms)
+ℹ tests 5
+ℹ pass 5
+ℹ fail 0

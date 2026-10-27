@@ -1,0 +1,13 @@
+## without the node lists or routes it
+✖ a deleted thread's pylon that is gone is torn down again whenever its node lists or routes it again (20002.494203ms)
+
+## without a job is sent
+✖ a deleted thread's pylon that is gone is torn down again whenever its node lists or routes it again (20003.015214ms)
+✖ a thread's pylon follows its thread: spawn, pause on archive, resume on activity, delete (20005.715103ms)
+
+## without a preview port is kept
+✖ a deleted thread's ports go back after a restart between its delete and their release (20002.719554ms)
+
+## without a Claude launch is starting
+✖ a deleted thread whose Claude launch was cut off has the launch failed, though its pylon is gone (20007.471115ms)
+
