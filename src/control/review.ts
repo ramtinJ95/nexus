@@ -126,8 +126,13 @@ export interface Review {
    */
   reviewerKind: "harness" | "claude";
   maxRounds: number;
-  /** Who asked for the PR to land once approved, or null to stop at approval. */
-  land: { requestedBy: string } | null;
+  /**
+   * Who asked for the PR to land once approved, or null to stop at approval. `fromProject` when the project's setting
+   * asked, so each landing reads that setting again and lands for whoever it names.
+   */
+  land: { requestedBy: string; fromProject?: true } | null;
+  /** Started on its own when the PR watch first linked the PR, as the project asks. */
+  auto: boolean;
   rounds: Round[];
   /** The merge commit once the PR merged, so a later land never merges or deploys it again. */
   merged: string | null;
@@ -151,7 +156,7 @@ export const needsPerson = (r: Review | null) => r?.phase.kind === "needs-person
 /** A stored record as this code reads it: a review saved with more rounds stops at the cap, and old findings get priorities. */
 export function storedReview(record: Review): Review {
   return {
-    ...record, maxRounds: Math.min(record.maxRounds, maxRounds),
+    ...record, maxRounds: Math.min(record.maxRounds, maxRounds), auto: record.auto ?? false,
     rounds: record.rounds.map((round) => round.verdict === null ? round : { ...round, verdict: { ...round.verdict, findings: round.verdict.findings.map((f) => findingSchema.parse(f)) } }),
   };
 }
@@ -165,6 +170,8 @@ export interface ReviewDeps {
   checks: CheckRuns;
   /** The control plane's own node, for the release view, and the repository its releases come from. */
   release: { self: string | undefined; repo: string };
+  /** Whether `caller` may land, which takes the right to deploy. A landing asks again before every merge. */
+  mayLand(caller: string): boolean;
   log(message: string): void;
   now?: () => number;
 }
@@ -327,6 +334,16 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
     return { ...r, phase, nudges, expect, sent: r.sent + 1, outbox: { to, id: `${r.id}:${r.sent + 1}`, text: text(expect), attempted: null } };
   };
   const withRound = (r: Review, round: Partial<Round>): Review => ({ ...r, rounds: [...r.rounds.slice(0, -1), { ...r.rounds.at(-1)!, ...round }] });
+  /**
+   * Why the caller a landing merges and deploys for may not, now. A landing the project's setting asked for lands for
+   * whoever turned it on, as long as it stays on.
+   */
+  const unauthorized = (r: Review, builder: Thread): string[] => {
+    const setting = registry.project(builder.project)?.autoReview;
+    if (r.land?.fromProject && setting?.land !== true) return [`Project ${builder.project} no longer lands its builders' pull requests on its own, so this one is the person's to land.`];
+    const by = r.land?.fromProject ? setting!.enabledBy : r.land!.requestedBy;
+    return deps.mayLand(by) ? [] : [`${by}, who ${r.land?.fromProject ? `turned on landing for project ${builder.project}` : "asked for this landing"}, is not among the control plane's deployers, so only the person can land it.`];
+  };
 
   /**
    * Waits on `t`. Once a turn of it ended after the loop's last message without the answer the loop needs, it gets a
@@ -398,11 +415,11 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
       if (again.length) return toPerson(next, ...again, checkOutput(state.output));
       return send(next, "builder", (token) => builderFindings(next, token), { kind: "fixing" });
     },
-    async merging(r, phase) {
+    async merging(r, phase, builder) {
       const head = r.rounds.at(-1)!.head;
       const snapshot = await github.poll(r.pr.repo, r.pr.number);
       if (snapshot.pr.state === "closed") return end(r, { kind: "closed" });
-      const holds = async () => landingHolds({ review: r, pr: snapshot, files: await github.files(r.pr.repo, r.pr.number), nexus: deploys(r) });
+      const holds = async () => [...unauthorized(r, builder), ...landingHolds({ review: r, pr: snapshot, files: await github.files(r.pr.repo, r.pr.number), nexus: deploys(r) })];
       let commit: string;
       if (snapshot.detail.mergeCommit !== null) {
         if (snapshot.detail.head !== head) return toPerson(r, `Pull request #${r.pr.number} merged at ${snapshot.detail.head}, not the approved ${head}, so it is not deployed.`);
@@ -522,6 +539,32 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
     }
   }
 
+  /** Starts a review of `pr`, a PR of the builder's: the reviewer thread, its first request, and the record. */
+  async function begin(builder: Thread, { repo, number }: Pick<PullRequest, "repo" | "number">, request: { rounds?: number | undefined; land: Review["land"]; auto: boolean }): Promise<Review> {
+    const snapshot = await github.poll(repo, number);
+    if (snapshot.pr.state !== "open") throw new HttpError(409, `pull request #${number} is ${snapshot.pr.state}`);
+    const worker = registry.claudeWorker(builder.id);
+    const builderModel = worker === undefined ? deps.harnessModel : worker.model ?? defaultClaudeModel;
+    const kind = reviewerFor({ claude: worker !== undefined, model: builderModel }, registry.project(builder.project)!.secrets, deps.harnessModel);
+    const models = { builder: builderModel, reviewer: kind.model };
+    const id = `rv-${randomBytes(4).toString("hex")}`;
+    const draft: Review = {
+      id, expect: mint(id), sent: 1, builder: builder.id, reviewer: "" as ThreadId, pr: { repo, number, url: snapshot.pr.url, title: snapshot.pr.title, branch: snapshot.detail.branch }, models, reviewerKind: kind.claude ? "claude" : "harness",
+      maxRounds: request.rounds ?? maxRounds, land: request.land, auto: request.auto,
+      rounds: [{ head: snapshot.detail.head, verdict: null, check: null, answers: null }], merged: null, phase: { kind: "reviewing" }, outbox: null,
+      since: now(), nudges: 0, startedAt: now(),
+    };
+    const prompt = reviewerRequest(draft, snapshot.detail, draft.expect);
+    const reviewer = await deps.startThread({
+      project: builder.project, title: `Review of #${number}: ${snapshot.pr.title}`.slice(0, 200), node: registry.pylon(builder.pylonId)!.node, branch: snapshot.detail.branch,
+      ...(kind.claude ? { claude: prompt, model: kind.model, raw: true } : {}),
+    }, reviewerCaller);
+    const review: Review = { ...draft, reviewer: reviewer.id, ...(kind.claude ? {} : { outbox: { to: "reviewer", id: `${id}:1`, text: prompt, attempted: null } }) };
+    registry.saveReview(review);
+    void poll();
+    return review;
+  }
+
   function poll(): Promise<void> {
     if (running === null) running = pass().finally(() => { running = null; });
     return running;
@@ -543,29 +586,26 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
       const open = (registry.prWatch(builder.id)?.links ?? []).filter((l) => l.pr.state === "open" && (request.pr === undefined || l.pr.number === request.pr));
       if (open.length === 0) throw new HttpError(409, `thread ${builder.id} has no open pull request${request.pr === undefined ? "" : ` #${request.pr}`} that the PR watch linked`);
       if (open.length > 1) throw new HttpError(409, `thread ${builder.id} has ${open.length} open pull requests, so name one: ${open.map((l) => `#${l.pr.number}`).join(", ")}`);
-      const { repo, number } = open[0]!.pr;
-      const snapshot = await github.poll(repo, number);
-      if (snapshot.pr.state !== "open") throw new HttpError(409, `pull request #${number} is ${snapshot.pr.state}`);
-      const worker = registry.claudeWorker(builder.id);
-      const builderModel = worker === undefined ? deps.harnessModel : worker.model ?? defaultClaudeModel;
-      const kind = reviewerFor({ claude: worker !== undefined, model: builderModel }, registry.project(builder.project)!.secrets, deps.harnessModel);
-      const models = { builder: builderModel, reviewer: kind.model };
-      const id = `rv-${randomBytes(4).toString("hex")}`;
-      const draft: Review = {
-        id, expect: mint(id), sent: 1, builder: builder.id, reviewer: "" as ThreadId, pr: { repo, number, url: snapshot.pr.url, title: snapshot.pr.title, branch: snapshot.detail.branch }, models, reviewerKind: kind.claude ? "claude" : "harness",
-        maxRounds: request.rounds ?? maxRounds, land: request.land === null ? null : { requestedBy: request.land },
-        rounds: [{ head: snapshot.detail.head, verdict: null, check: null, answers: null }], merged: null, phase: { kind: "reviewing" }, outbox: null,
-        since: now(), nudges: 0, startedAt: now(),
-      };
-      const prompt = reviewerRequest(draft, snapshot.detail, draft.expect);
-      const reviewer = await deps.startThread({
-        project: builder.project, title: `Review of #${number}: ${snapshot.pr.title}`.slice(0, 200), node: registry.pylon(builder.pylonId)!.node, branch: snapshot.detail.branch,
-        ...(kind.claude ? { claude: prompt, model: kind.model, raw: true } : {}),
-      }, reviewerCaller);
-      const review: Review = { ...draft, reviewer: reviewer.id, ...(kind.claude ? {} : { outbox: { to: "reviewer", id: `${id}:1`, text: prompt, attempted: null } }) };
-      registry.saveReview(review);
-      void poll();
-      return review;
+      return await begin(builder, open[0]!.pr, { rounds: request.rounds, land: request.land === null ? null : { requestedBy: request.land }, auto: false });
+    },
+
+    /**
+     * Starts a review of a PR the PR watch has just linked, when the builder's project asks for it, and lands it when
+     * the project says so. It never starts for a thread the loop started, nor twice for one PR, so a review that ended
+     * stays ended until the person starts one. A refusal, such as no reviewer on another model, is logged and final.
+     */
+    async auto(t: Thread, pr: Pick<PullRequest, "repo" | "number">): Promise<void> {
+      const setting = registry.project(t.project)?.autoReview;
+      if (setting == null || t.startedBy === reviewerCaller || t.startedBy === checkCaller || registry.isReviewer(t.id)) return;
+      const existing = registry.review(t.id);
+      if (existing !== null && existing.pr.repo === pr.repo && existing.pr.number === pr.number) return;
+      try {
+        if (existing !== null && !ended.has(existing.phase.kind)) throw new HttpError(409, `review ${existing.id} of pull request #${existing.pr.number} is ${existing.phase.kind}`);
+        await begin(t, pr, { land: setting.land ? { requestedBy: setting.enabledBy, fromProject: true } : null, auto: true });
+      } catch (err) {
+        if (!(err instanceof HttpError)) throw err;
+        log(`${t.id}: no review started on its own for pull request #${pr.number}: ${err.message}`);
+      }
     },
 
     /**

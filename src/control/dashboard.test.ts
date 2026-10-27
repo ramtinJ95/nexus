@@ -224,7 +224,7 @@ test("a review the person cancelled says which thread they archived, and asks no
   const fix = await s.start("acme", "Fix checkout");
   s.registry.saveReview({
     id: "rv-1", builder: fix.id, reviewer: "th-reviewer" as Thread["id"], pr: { repo: "acme/repo", number: 7, url: "https://github.com/acme/repo/pull/7", title: "Cache", branch: "cache" }, reviewerKind: "harness",
-    models: { builder: "claude-opus-5-5", reviewer: "gpt-6-astra" }, maxRounds: 5, land: null, merged: null, expect: "rv-1:t", sent: 1, outbox: null, since: 0, nudges: 0, startedAt: 0,
+    models: { builder: "claude-opus-5-5", reviewer: "gpt-6-astra" }, maxRounds: 5, land: null, auto: false, merged: null, expect: "rv-1:t", sent: 1, outbox: null, since: 0, nudges: 0, startedAt: 0,
     rounds: [{ head: "1".repeat(40), verdict: null, check: null, answers: null }], phase: { kind: "cancelled", who: "reviewer", status: "archived" },
   });
   const page = textOf((await s.call("GET", `/threads/${fix.id}`)).text);
@@ -245,7 +245,7 @@ const head = "9f".repeat(20);
 /** A review of PR #7 whose reviewer approved `head` with one P3 note and whose check passed there. */
 const approvedReview = (builder: ThreadId, phase: Review["phase"], extra: Partial<Review> = {}): Review => ({
   id: "rv-1", builder, reviewer: "th-reviewer" as ThreadId, pr: { repo: "acme/nexus", number: 7, url: "https://github.com/acme/nexus/pull/7", title: "Cache", branch: "cache" }, reviewerKind: "harness",
-  models: { builder: "claude-opus-5-5", reviewer: "gpt-6-astra" }, maxRounds: 5, land: null, merged: null, expect: "rv-1:t", sent: 3, outbox: null, since: 0, nudges: 0, startedAt: 0,
+  models: { builder: "claude-opus-5-5", reviewer: "gpt-6-astra" }, maxRounds: 5, land: null, auto: false, merged: null, expect: "rv-1:t", sent: 3, outbox: null, since: 0, nudges: 0, startedAt: 0,
   rounds: [
     { head: "1".repeat(40), verdict: { token: "a", verdict: "changes", findings: [{ id: "F1", priority: "P1", where: "src/cache.ts:12", summary: "The cache never expires" }], reserved: [], notCheckedLive: null }, check: null, answers: [{ id: "F1", action: "fixed", reason: "" }] },
     { head, verdict: { token: "b", verdict: "approve", findings: [{ id: "F2", priority: "P3", where: null, summary: "Name the TTL" }], reserved: [], notCheckedLive: "The cache's behaviour under load could not be checked live." }, check: { passed: true, output: "ok 412 tests" }, answers: null },

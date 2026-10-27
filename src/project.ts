@@ -209,7 +209,13 @@ export interface Project {
   logins: readonly LoginKind[];
   /** A script stored in Nexus, not the repo. It runs as user before .nexus/setup, so a project can be set up without a commit. */
   preSetup: string | null;
+  /**
+   * Whether the review loop starts on its own for each builder's pull request, and lands it once approved. Only a
+   * person sets it, and `enabledBy` is the caller who did, on whose behalf a landing merges and deploys.
+   */
+  autoReview?: AutoReview | null | undefined;
 }
+export interface AutoReview { land: boolean; enabledBy: string }
 /** Templates mirror a remote, so they take a project that has one. */
 export type RemoteProject = Project & { repoUrl: string };
 export const hasRemote = (project: Project): project is RemoteProject => project.repoUrl !== null;

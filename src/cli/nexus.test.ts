@@ -253,7 +253,8 @@ test("--help or -h after a command prints its lines of nexus --help and exits 0 
   assert.equal((await s.nexus(["project", "edit", "--help"])).stdout,
     "  nexus project edit <id> [--node N|auto] [--branch B] [--cpus n] [--memory GiB] [--disk GiB]\n"
     + "    [--allow-host HOST]... [--login claude|chatgpt]... [--secret NAME:HOST[,HOST]...]...\n"
-    + "    [--clear-hosts] [--clear-logins] [--clear-secrets] [--git-name NAME --git-email EMAIL | --clear-git-identity]\n");
+    + "    [--clear-hosts] [--clear-logins] [--clear-secrets] [--git-name NAME --git-email EMAIL | --clear-git-identity]\n"
+    + "    [--auto-review off|review|land]   review each builder's PR on its own, and land it too; land needs a deployer\n");
   assert.equal((await s.nexus(["retry", "-h"])).stdout, "  nexus abort|retry|retry-pylon|wake <thread>\n");
   const show = await s.nexus(["show", "--help"]);
   assert.deepEqual([show.code, show.stdout], [0, "  nexus show <thread>                          a thread with its pylon, sessions, previews and outputs\n"], "help needs no thread");
@@ -371,7 +372,7 @@ test("project add --scratch makes a project with no repository, --secret grants 
     id: "sketch", repoUrl: null, defaultBranch: "main", defaultNode: node, resources: { cpus: 2, memoryGiB: 6, diskGiB: 10 }, allowedHosts: [],
     secrets: [{ name: "GH_TOKEN", hosts: ["api.github.com", "github.com"] }, { name: "EXA_API_KEY", hosts: ["api.exa.ai"] }], logins: [], preSetup: null,
   });
-  assert.match((await s.nexus(["projects"])).stdout, /^sketch +node rj-firebat +branch main +scratch$/m);
+  assert.match((await s.nexus(["projects"])).stdout, /^sketch +node rj-firebat +branch main +auto review off +scratch$/m);
 
   const pinned = await s.nexus(["start", "--project", "sketch", "--title", "x", "--commit", "abc123", "--json"]);
   assert.equal(pinned.code, 64);
@@ -1309,7 +1310,7 @@ test("show prints PR metadata and one disabled-watch notice without waking the p
 
 test("deploy and release use the shared release view and wait for both roles", async (t) => {
   const s = await setup(t);
-  assert.equal((await s.nexus(["--version"])).stdout.trim(), "nexus 0.26.0");
+  assert.equal((await s.nexus(["--version"])).stdout.trim(), "nexus 0.27.0");
   assert.equal((await s.nexus(["deploy", "bad"])).code, 64);
   const requested = await s.json(["deploy", "main"]);
   assert.equal(requested.desired.commit, "a".repeat(40));
@@ -1365,7 +1366,7 @@ test("review and land reach the review loop's routes, and show prints a review a
   assert.equal((await s.nexus(["review", thread.id, "--rounds", "6"])).code, 64, "a review runs at most 5 rounds");
   const review: Review = {
     id: "rv-1", builder: thread.id, reviewer: "th-reviewer" as ThreadId, pr: { repo: "octocat/Spoon-Knife", number: 7, url: "https://github.com/octocat/Spoon-Knife/pull/7", title: "Cache", branch: "cache" }, reviewerKind: "claude",
-    models: { builder: "gpt-6-astra", reviewer: "claude-opus-5-5" }, maxRounds: 5, land: null, merged: null, expect: "rv-1:t", sent: 1, outbox: null, since: 0, nudges: 0, startedAt: 0,
+    models: { builder: "gpt-6-astra", reviewer: "claude-opus-5-5" }, maxRounds: 5, land: null, auto: false, merged: null, expect: "rv-1:t", sent: 1, outbox: null, since: 0, nudges: 0, startedAt: 0,
     rounds: [{ head: "1".repeat(40), verdict: null, check: null, answers: null }],
     phase: { kind: "needs-person", reasons: ["The reviewer still requests changes after 5 rounds, the most this review allows.", "Nexus could not add the label \"needs human review\" to pull request #7 (GitHub answered 403: Forbidden)."], label: { state: "failed", why: "GitHub answered 403: Forbidden" } },
   };
@@ -1402,6 +1403,18 @@ test("project edit replaces supplied grants and preserves omitted settings", asy
   assert.equal(cleared.code, 0, cleared.stderr);
   assert.deepEqual(JSON.parse(cleared.stdout).secrets, []);
   assert.equal(JSON.parse(cleared.stdout).gitIdentity, null);
+});
+
+test("project edit turns reviews of its own on and off, and projects shows who turned them on", async (t) => {
+  const s = await setup(t);
+  await s.nexus(["project", "add", "auto", "--scratch", "--node", node]);
+  assert.match((await s.nexus(["projects"])).stdout, new RegExp(`^auto +node ${node} +branch main +auto review off +scratch$`, "m"));
+  assert.equal((await s.nexus(["project", "edit", "auto", "--auto-review", "always"])).code, 64);
+  const landing = await s.nexus(["project", "edit", "auto", "--auto-review", "land"]);
+  assert.equal(landing.stdout, `Updated project auto, auto review and land, for ${laptop}. Existing threads keep their boot settings and grants; start a new thread to apply them.\n`);
+  assert.match((await s.nexus(["projects"])).stdout, new RegExp(`^auto +node ${node} +branch main +auto review and land, for ${laptop} +scratch$`, "m"));
+  assert.deepEqual((await s.json(["project", "edit", "auto", "--auto-review", "review"])).autoReview, { land: false, enabledBy: laptop });
+  assert.equal((await s.json(["project", "edit", "auto", "--auto-review", "off"])).autoReview, undefined);
 });
 
 test("concurrent project edits preserve independently changed resources", async (t) => {
