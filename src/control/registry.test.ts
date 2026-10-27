@@ -1,5 +1,6 @@
 import { after, test } from "node:test";
 import { spawn } from "node:child_process";
+import { writeFileSync } from "node:fs";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { mkdtemp, rm } from "node:fs/promises";
@@ -1260,18 +1261,23 @@ test("a write waits while another process, such as the passkey host command, hol
   const path = tempDb();
   const registry = openRegistry(path);
   t.after(() => registry.close());
+  const writing = `${path}.writing`;
+  // The holder keeps the lock until this process says it is writing, so the write always meets the lock.
   const holder = spawn(process.execPath, ["-e", `
+    const { existsSync } = require("node:fs");
     const { DatabaseSync } = require("node:sqlite");
     const db = new DatabaseSync(${JSON.stringify(path)});
     db.exec("BEGIN IMMEDIATE");
     console.log("locked");
-    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 400);
+    const pause = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+    while (!existsSync(${JSON.stringify(writing)})) pause(10);
+    pause(200);
     db.exec("COMMIT");
   `], { stdio: ["ignore", "pipe", "inherit"] });
+  t.after(() => { holder.kill(); holder.stdout.destroy(); });
   await new Promise<void>((resolve) => holder.stdout.once("data", () => resolve()));
-  const started = Date.now();
+  writeFileSync(writing, "");
   registry.addPasskeyCode("h", 1);
-  assert.ok(Date.now() - started >= 200, "the write waited for the lock rather than failing");
-  assert.equal(registry.passkeyCodeOpen("h", 0), true);
+  assert.equal(registry.passkeyCodeOpen("h", 0), true, "the write waited for the lock rather than failing");
   await new Promise((resolve) => holder.once("exit", resolve));
 });
