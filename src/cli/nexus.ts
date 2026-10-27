@@ -24,6 +24,7 @@ import type { Review } from "../control/review.ts";
 import { maxEntries, usageLimitText, type ClaudeConversation, type ClaudeEntry, type PromptSource } from "../claude-transcript.ts";
 import { claudeFrames, queuedOf, type ClaudeFrame } from "../control/claude-conversation.ts";
 import { phaseNote, roundsSpent } from "../control/review.ts";
+import { breakdownLook, breakdowns, tokenColumns, tokenCount, type UsageReport, type UsageTotals } from "../control/usage.ts";
 import type { Changes, Diff, Listing } from "../checkout-files.ts";
 import type { ThreadSetup } from "../images.ts";
 import type { Project, SecretGrant } from "../project.ts";
@@ -32,7 +33,7 @@ import type { WebSocket } from "ws";
 import { attachTerminal, processTty } from "./attach.ts";
 import { call, CliError, exitCodes, follow, upgrade, type Endpoint, type HostPort } from "./transport.ts";
 
-const version = "0.31.0";
+const version = "0.32.0";
 const defaults = { url: "http://rj-firebat.tailc817d3.ts.net:7470", socks: "localhost:1055" };
 const configFile = () => join(homedir(), ".config", "nexus", "cli.json");
 
@@ -81,6 +82,8 @@ const usage = `nexus ${version}, the Nexus control plane from this Mac
   nexus image list                             recorded images, the nodes that hold each, and the last image operation
   nexus image current                          the current image and the one before it
   nexus nodes
+  nexus usage [--since today|7d|30d|all|DATE] [--project P] [--by model|project|kind|role|day]
+    the tokens the agents spent, in all and by model, project, agent, role and day, or only --by's; --since is 7d by default
   nexus --version
 
 Every command takes --json, --url URL and --socks HOST:PORT|none. The URL and proxy come from those flags,
@@ -150,6 +153,19 @@ function ago(at: number, now = Date.now()): string {
 function table(rows: readonly (readonly string[])[]): string {
   const widths = rows[0]!.map((_, i) => Math.max(...rows.map((r) => r[i]!.length)));
   return rows.map((r) => r.map((cell, i) => i === r.length - 1 ? cell : cell.padEnd(widths[i]!)).join("  ")).join("\n");
+}
+
+const utc = (at: number) => `${new Date(at).toISOString().slice(0, 16).replace("T", " ")} UTC`;
+
+function usageText(r: UsageReport): string {
+  const rows = (keyHead: string, of: readonly (UsageTotals & { key: string })[]) =>
+    table([[keyHead, ...tokenColumns.map((col) => col.label), "Calls"], ...of.map((row) => [row.key, ...tokenColumns.map((col) => tokenCount(row[col.field])), String(row.calls)])]);
+  const head = `Usage of ${r.project === null ? "all projects" : `project ${r.project}`} ${r.since === null ? "for all time" : `since ${utc(r.since)}`}. Counting started ${utc(r.countingSince)}.`;
+  if (r.total.calls === 0) return `${head}\nNo model calls were counted in this period.`;
+  return [head, rows("", [{ key: "Total", ...r.total }]), ...breakdowns.flatMap((b) => {
+    const { title, key } = breakdownLook[b];
+    return r.by[b] === undefined ? [] : [`${title}\n${rows(key, r.by[b])}`];
+  })].join("\n\n");
 }
 
 /** Why the preview cannot answer, such as its service failed, or null. A control plane older than `Preview.failed` sends none, which is no failure. */
@@ -1172,6 +1188,16 @@ const commands: Readonly<Record<string, Command>> = {
         allowedHosts: strs(v, "allow-host"), secrets, logins: strs(v, "login"), preSetup: null,
       }) as Project;
       return { json: p, text: p.repoUrl === null ? `Added scratch project ${p.id} on ${p.defaultNode}` : `Added project ${p.id} (${p.repoUrl}) on ${p.defaultNode}` };
+    },
+  },
+  usage: {
+    args: [0, 0],
+    options: { since: { type: "string" }, project: { type: "string" }, by: { type: "string" } },
+    async run(api, _, v) {
+      const query = new URLSearchParams({ since: str(v, "since") ?? "7d" });
+      for (const key of ["project", "by"]) if (str(v, key) !== undefined) query.set(key, str(v, key)!);
+      const report = await api("GET", `/v1/usage?${query}`) as UsageReport;
+      return { json: report, text: usageText(report) };
     },
   },
   nodes: {
