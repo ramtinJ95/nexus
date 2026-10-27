@@ -12,7 +12,7 @@ import { createServer, STATUS_CODES, type IncomingMessage, type ServerResponse }
 import { availableParallelism, totalmem } from "node:os";
 import type { Duplex } from "node:stream";
 import { pipeline } from "node:stream/promises";
-import { JobFailure, runCommand, runJob, type BackendPylon, type ProbeDeps, type VmBackend } from "../backend.ts";
+import { commandPolicies, JobFailure, runCommand, runJob, type BackendPylon, type CommandPolicy, type ProbeDeps, type VmBackend } from "../backend.ts";
 import type { PortableArtifactId } from "../images.ts";
 import {
   artifactHeaders, encodeProbeEvent, encodeSubmitReply, fetchArtifact, heldSecrets, isPortableArtifactId, jobDeadlineMs, probePort, jobSubject, parseJobEnvelope, parsePylonCommand, parseStreamRequest, routeAuth, serveByteStream, streamUpgradeResponse,
@@ -369,13 +369,10 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
    * are held in memory, so a restarted probe knows none.
    */
   const claudeSendsById = new Map<string, Promise<CommandResult>>();
-  function sendClaude(pylonId: PylonId, command: Extract<PylonCommand, { kind: "send-claude" }>, run: () => Promise<CommandResult>): Promise<CommandResult> {
-    const sending = onePerClaudeSession(pylonId, [command.session], run);
-    if (command.requestId === undefined) return sending;
-    const key = `${pylonId} ${command.requestId}`;
+  function remember(pylonId: PylonId, requestId: string, sending: Promise<CommandResult>) {
+    const key = `${pylonId} ${requestId}`;
     claudeSendsById.set(key, sending);
     void sending.catch(() => undefined).then(() => setTimeout(() => { if (claudeSendsById.get(key) === sending) claudeSendsById.delete(key); }, claudeSendMemoryMs).unref());
-    return sending;
   }
   async function outcomeOf(pylonId: PylonId, requestId: string): Promise<CommandResult> {
     const sending = claudeSendsById.get(`${pylonId} ${requestId}`);
@@ -544,16 +541,16 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
       }
       const pylon = (await backend.list()).find((p) => p.pylonId === pylonId);
       if (pylon?.vm !== "running") return send(res, 409, `${pylonId} is ${pylon?.vm ?? "absent"}, not running`);
-      if (command.kind === "send-claude-outcome") return send(res, 200, JSON.stringify(await outcomeOf(pylonId, command.requestId)), "application/json");
-      const guestCommand = command;
-      const links = guestCommand.kind === "link-port" || guestCommand.kind === "unlink-port";
-      const run = () => runCommand(pylonId, guestCommand, deps);
-      const launch = guestCommand.kind === "open-session" && guestCommand.prompt !== undefined ? guestCommand.resume : undefined;
-      const result = await (links ? betweenReads(run) : guestCommand.kind === "send-claude" ? sendClaude(pylonId, guestCommand, run) : launch !== undefined ? onePerClaudeSession(pylonId, [launch], run) : run());
+      const asked = command;
+      // Each kind's policy takes its own kind of command and result, which command.kind picks.
+      const policy = commandPolicies[command.kind] as CommandPolicy<PylonCommand["kind"]>;
+      const run = () => asked.kind === "send-claude-outcome" ? outcomeOf(pylonId, asked.requestId) : runCommand(pylonId, asked, deps);
+      const session = typeof policy.lock === "function" ? policy.lock(command) : undefined;
+      const running = policy.lock === "reads" ? betweenReads(run) : session !== undefined ? onePerClaudeSession(pylonId, [session], run) : run();
+      if (policy.remembered && "requestId" in command && command.requestId !== undefined) remember(pylonId, command.requestId, running);
+      const result = await running;
       if (result.kind === "link-port") relinked(pylonId, result.service);
-      // A linked port is a new service that wants a preview, and an unlinked one a service gone, which the control plane sees in the next read.
-      // An opened or closed session is listed in it too, as is one a message resumed.
-      if (links || command.kind === "open-session" || command.kind === "close-session" || (result.kind === "send-claude" && result.resumed)) void publishSnapshot();
+      if (typeof policy.publishes === "function" ? policy.publishes(result) : policy.publishes) void publishSnapshot();
       return send(res, 200, JSON.stringify(result), "application/json");
     }
     const manifestMatch = /^\/v1\/manifests\/([^/]+)$/.exec(path);

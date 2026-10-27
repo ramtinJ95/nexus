@@ -194,6 +194,40 @@ export async function runJob(job: Job, deps: ProbeDeps, signal: AbortSignal): Pr
   }
 }
 
+type CommandKind = PylonCommand["kind"];
+
+/** How the probe runs one kind of command, and whether a caller may send it again. */
+export interface CommandPolicy<K extends CommandKind> {
+  /**
+   * What it waits for. "reads" runs it in the node's read queue, so no read overlaps it and each read queued before it
+   * is published before it starts. A function names the Claude session it waits on, if any, so the sends and launches
+   * of one session run one at a time.
+   */
+  lock: "reads" | ((command: Extract<PylonCommand, { kind: K }>) => string | undefined) | null;
+  /** Held under its requestId, so a send-claude-outcome answers for it. */
+  remembered: boolean;
+  /** Whether its answer changes what the next snapshot lists, so the probe publishes one at once. */
+  publishes: boolean | ((result: Extract<CommandResult, { kind: K }>) => boolean);
+  /**
+   * Whether a caller that lost the answer may send it again, which may run it twice. The probe client never does on
+   * its own. "claudeLaunchRepeatable": only a prompted launch with a resume ID, to a probe whose snapshot says
+   * `claudeLaunchRepeatable` (sessions.ts openSession).
+   */
+  retrySafe: boolean | "claudeLaunchRepeatable";
+}
+
+export const commandPolicies: { readonly [K in CommandKind]: CommandPolicy<K> } = {
+  "exec": { lock: null, remembered: false, publishes: false, retrySafe: false },
+  "open-session": { lock: (c) => c.prompt === undefined ? undefined : c.resume, remembered: false, publishes: true, retrySafe: "claudeLaunchRepeatable" },
+  "close-session": { lock: null, remembered: false, publishes: true, retrySafe: false },
+  "drop-failed-session": { lock: null, remembered: false, publishes: false, retrySafe: false },
+  "send-claude": { lock: (c) => c.session, remembered: true, publishes: (r) => r.resumed, retrySafe: false },
+  "send-claude-outcome": { lock: null, remembered: false, publishes: false, retrySafe: true },
+  "service": { lock: null, remembered: false, publishes: false, retrySafe: false },
+  "link-port": { lock: "reads", remembered: false, publishes: true, retrySafe: true },
+  "unlink-port": { lock: "reads", remembered: false, publishes: true, retrySafe: true },
+};
+
 /**
  * The caller has checked that the pylon runs. Sessions open in the checkout. A send-claude-outcome never comes here,
  * since the probe answers it from its own record of its sends.

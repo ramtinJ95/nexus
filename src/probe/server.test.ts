@@ -11,10 +11,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { startProbe, type Probe, type ProbeOptions } from "./server.ts";
 import { nodeSecrets } from "./config.ts";
-import { connectProbe, fetchArtifact, jobDeadlineMs, type ByteStream, type DeclaredOutput, type GitFacts, type Job, type JobEnvelope, type JobId, type JobStatus, type LiveHash, type NodeName, type ProbeEvent, type PylonCommand, type PylonId, type ServiceFact, type TailnetNodeId } from "../protocol.ts";
+import { connectProbe, fetchArtifact, jobDeadlineMs, type ByteStream, type DeclaredOutput, type GitFacts, type Job, type JobEnvelope, type JobId, type JobStatus, type LiveHash, type NodeName, type ProbeEvent, type CommandResult, type PylonCommand, type PylonId, type ServiceFact, type TailnetNodeId } from "../protocol.ts";
 import { envelope, ingest } from "../reconcile.ts";
 import { processStream } from "../process-stream.ts";
-import type { BackendPylon, Guest, VmBackend } from "../backend.ts";
+import { commandPolicies, type BackendPylon, type CommandPolicy, type Guest, type VmBackend } from "../backend.ts";
 import { fakeTailscale, nodeHost, viaGateway } from "./fake-tailscale.ts";
 import type { BootInputs, ProjectId } from "../project.ts";
 import type { ArtifactId, ArtifactManifest, ImageId, ImageManifest, PortableArtifactId, TemplateId, TemplateManifest } from "../images.ts";
@@ -813,6 +813,45 @@ test("each command kind waits for the reads or its Claude session or nothing, pu
   assert.deepEqual(await client.command(pylonId, { kind: "send-claude-outcome", requestId: "msg:kept" }), { kind: "send-claude-outcome", send: { outcome: "queued", herdrPane: "w1:p1", resumed: false } }, "a send-claude is remembered under its request ID");
   await client.command(pylonId, { kind: "exec", argv: ["true"], cwd: "/", timeoutMs: 1000 });
   assert.deepEqual(await client.command(pylonId, { kind: "send-claude-outcome", requestId: "msg:never" }), { kind: "send-claude-outcome", send: "unknown" });
+});
+
+test("the command policy table gives each kind its lock, its memory by request ID, its snapshot publishing and whether it may be sent again", () => {
+  const session = "0b5e3a52-5d0f-4c1e-9a43-1f2a6c7d8e90";
+  const sent = (resumed: boolean): CommandResult => ({ kind: "send-claude", outcome: "sent", herdrPane: "w1:p1", resumed });
+  const samples: [string, PylonCommand, CommandResult?][] = [
+    ["exec", { kind: "exec", argv: ["true"], cwd: "/", timeoutMs: 1000 }],
+    ["open-session", { kind: "open-session", harness: "shell", title: "shell" }],
+    ["open-session with resume", { kind: "open-session", harness: "claude-code", title: "Claude Code", resume: session }],
+    ["open-session with prompt and resume", { kind: "open-session", harness: "claude-code", title: "Claude Code", resume: session, prompt: "go" }],
+    ["close-session", { kind: "close-session", herdrPane: "w1:p1" }],
+    ["drop-failed-session", { kind: "drop-failed-session", id: "s1" }],
+    ["send-claude that resumes its session", { kind: "send-claude", session, text: "hi" }, sent(true)],
+    ["send-claude to a running session", { kind: "send-claude", session, text: "hi" }, sent(false)],
+    ["send-claude-outcome", { kind: "send-claude-outcome", requestId: "msg:1" }],
+    ["service", { kind: "service", op: "ensure" }],
+    ["link-port", { kind: "link-port", port: 3000 }],
+    ["unlink-port", { kind: "unlink-port", port: 3000 }],
+  ];
+  const listed = samples.map(([name, command, result]) => {
+    const { lock, remembered, publishes, retrySafe } = commandPolicies[command.kind] as CommandPolicy<PylonCommand["kind"]>;
+    const waits = typeof lock === "function" ? lock(command) : lock;
+    return `${name}: waits for ${waits === session ? "its Claude session" : waits ?? "nothing"}, ${remembered ? "remembered" : "not remembered"}, ${(typeof publishes === "function" ? publishes(result!) : publishes) ? "publishes" : "does not publish"}, retry safe: ${retrySafe}`;
+  });
+  assert.deepEqual(listed, [
+    "exec: waits for nothing, not remembered, does not publish, retry safe: false",
+    "open-session: waits for nothing, not remembered, publishes, retry safe: claudeLaunchRepeatable",
+    "open-session with resume: waits for nothing, not remembered, publishes, retry safe: claudeLaunchRepeatable",
+    "open-session with prompt and resume: waits for its Claude session, not remembered, publishes, retry safe: claudeLaunchRepeatable",
+    "close-session: waits for nothing, not remembered, publishes, retry safe: false",
+    "drop-failed-session: waits for nothing, not remembered, does not publish, retry safe: false",
+    "send-claude that resumes its session: waits for its Claude session, remembered, publishes, retry safe: false",
+    "send-claude to a running session: waits for its Claude session, remembered, does not publish, retry safe: false",
+    "send-claude-outcome: waits for nothing, not remembered, does not publish, retry safe: true",
+    "service: waits for nothing, not remembered, does not publish, retry safe: false",
+    "link-port: waits for reads, not remembered, publishes, retry safe: true",
+    "unlink-port: waits for reads, not remembered, publishes, retry safe: true",
+  ]);
+  assert.deepEqual(Object.keys(commandPolicies).sort(), [...new Set(samples.map(([, c]) => c.kind))].sort(), "every kind is listed");
 });
 
 test("a failing command rejects with the guest's error", async (t) => {
