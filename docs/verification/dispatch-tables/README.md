@@ -50,7 +50,10 @@ and no journal or bridge for Docker.
 ## Pin tests
 
 These pin tests came first, in their own commits, and pass on main's code (`tests-pins.txt`, 177 of 177) and on the
-branch (`tests-branch.txt`, 178 of 178):
+branch (`tests-branch.txt`, 178 of 178): A later test-only commit fixed a race in the probe pin, which counted a
+snapshot read as published by the next command when the read queue was busy. It now reads the count between two
+sentinel links, which run in the read queue after every read queued before them. `run.sh` applies such later `test(`
+commits on top of the pins commit, so `tests-pins.txt` runs the fixed pin on main's code.
 
 - `src/control/api.test.ts` lists the answer of each of 9 callers to 21 requests on the health, release, deployer and
   event routes. The callers include an allowed caller who is not a deployer and a laptop holding the control node's
