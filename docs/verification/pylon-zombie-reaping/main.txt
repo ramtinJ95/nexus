@@ -1,0 +1,11 @@
+$ run.sh <main's rootfs-init-extra.sh>
+init tail: exec /usr/bin/sandboxd;
+smoke check "PID 1 reaps orphans": failed, expected "tini\nreaped\n", got "sandboxd\nZ\n"
+SIGPIPE in a plain exec and in one started through Python: exit 0
+  SigIgn:	0000000000000000
+  SigIgn:	0000000000000000
+stdin written after the command closed it: exit 0
+  ready
+after 20 guest commands and a detached start: exit 0
+  PID 1 is sandboxd
+  zombies: 22

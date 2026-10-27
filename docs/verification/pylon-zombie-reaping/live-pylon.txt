@@ -1,0 +1,20 @@
+This pylon (pylon-th-0ef1c0ecde82 on infra-testbench), booted 05:56:54 UTC, read at 06:25:34 UTC.
+PID 1:
+  PID COMMAND         COMMAND
+    1 sandboxd        /usr/bin/sandboxd
+
+Zombies by parent and name:
+    607 ppid 1 root python3
+      1 ppid 1 user MainThread
+     19 ppid 1 user sshd
+
+A worker caught alive, orphaned to PID 1 once its launcher exited, and the same pids later:
+  5806     1  5806 Ss   python3 .../commands/551bfb45-.../worker.py runuser -l user -c '... cat /proc/net/tcp ...'
+  later: 5806 1 Zs python3
+
+An sshd session caught alive, then its user half orphaned:
+28515  4118 28515 Ss   root     sshd: [accepted]
+28515  4118 28515 Ss   root     sshd: user [priv]
+28517 28515 28515 S    sshd     sshd: [net]
+28528 28515 28515 S    user     sshd: user@notty
+  later: 28528 1 Z sshd

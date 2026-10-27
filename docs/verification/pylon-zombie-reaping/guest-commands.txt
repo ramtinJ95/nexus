@@ -1,0 +1,13 @@
+Guest commands the exec workers ran, sampled every 50 ms from ps (worker.py's argv).
+idle, 60 s:
+      6 runuser -l user -c 'cd '\''/'\'' && '\''sh'\'' '\''-c'\'' '\''cat /proc/net/tcp && { cat /proc/net/tcp6 2>/dev
+      1 runuser -l user -c 'cd '\''/home/user/workspace/repo'\'' && '\''python3'\'' '\''-c'\'' '\''import json import 
+      1 runuser -l user -c 'cd '\''/home/user'\'' && '\''sh'\'' '\''-c'\'' '\''test -e "$0" || exit 3; exec cat -- "$0
+      1 runuser -l user -c 'cd '\''/home/user'\'' && '\''herdr'\'' '\''--session'\'' '\''nexus'\'' '\''api'\'' '\''sna
+      1 runuser -l user -c 'cd '\''/'\'' && '\''sh'\'' '\''-c'\'' '\''for f in /home/user/.nexus/outputs/*.json; do te
+during npm test, 150 s:
+     27 runuser -l user -c 'cd '\''/'\'' && '\''sh'\'' '\''-c'\'' '\''cat /proc/net/tcp && { cat /proc/net/tcp6 2>/dev
+     14 runuser -l user -c 'cd '\''/'\'' && '\''sh'\'' '\''-c'\'' '\''for f in /home/user/.nexus/outputs/*.json; do te
+     12 runuser -l user -c 'cd '\''/home/user'\'' && '\''sh'\'' '\''-c'\'' '\''test -e "$0" || exit 3; exec cat -- "$0
+     12 runuser -l user -c 'cd '\''/home/user'\'' && '\''herdr'\'' '\''--session'\'' '\''nexus'\'' '\''api'\'' '\''sna
+      2 runuser -l user -c 'cd '\''/home/user/workspace/repo'\'' && '\''python3'\'' '\''-c'\'' '\''import json import 
