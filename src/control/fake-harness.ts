@@ -20,7 +20,8 @@ export interface FakeTranscript {
   entries?: EntryRecord[];
 }
 
-export function fakeHarness() {
+/** `onParked` is told each park, as the control plane's harness host tells the registry. */
+export function fakeHarness(options: { onParked?: (threadId: string, parked: boolean) => void } = {}) {
   const calls: unknown[][] = [];
   let conversations = 0;
   const parked = new Map<string, number>();
@@ -102,6 +103,9 @@ export function fakeHarness() {
     /** How many watches of the thread are open. */
     watching: (threadId: string) => watchers.get(threadId)?.size ?? 0,
     /** Makes the thread's run hold this many tasks the restart limit parked. */
-    park(threadId: string, tasks: number) { parked.set(threadId, tasks); },
+    park(threadId: string, tasks: number) {
+      parked.set(threadId, tasks);
+      options.onParked?.(threadId, tasks > 0);
+    },
   };
 }

@@ -24,7 +24,7 @@ import type { AttachTiming } from "./attach.ts";
 import type { ReviewLoop } from "./review.ts";
 import { readEvents } from "./event-reader.ts";
 import { fakeHarness } from "./fake-harness.ts";
-import { openRegistry, type Registry, type Thread } from "./registry.ts";
+import { openRegistry, type Registry, type Thread, type ThreadId } from "./registry.ts";
 import { startImageRollout, type ImageRollout } from "./image-rollout.ts";
 import { imageIdOf, type ImageId, type ImageRecipe } from "../images.ts";
 import { githubTokenGrant, liveHashOf, type ProjectId } from "../project.ts";
@@ -73,7 +73,7 @@ async function setup(t: import("node:test").TestContext, options: { gitIdentity?
   let admitted = Promise.resolve();
   let asked = () => {};
   const woken: NodeName[] = [];
-  const fake = fakeHarness();
+  const fake = fakeHarness({ onParked: (id, parked) => registry.recordParked(id as ThreadId, parked) });
   const { harness, calls } = fake;
   const commands: [PylonId, PylonCommand][] = [];
   /** What the node's probe answers a guest command with. Tests replace it. */
@@ -1676,6 +1676,17 @@ test("attention ranks failure, unwatched parked tasks, unread reply, then work; 
   }
 });
 
+
+test("the API reports the attention the event stream last reported, and a deleted thread's run is not parked", async (t) => {
+  const s = await withThread(t);
+  const id = s.thread.id;
+  const reported = () => s.registry.events("0", { kinds: ["attention.changed"], thread: id }).at(-1)?.payload.attention ?? null;
+  const shown = async () => ((await s.call("GET", `/v1/threads/${id}`)).body as ThreadDetail).attention;
+  s.fake.park(id, 1);
+  assert.deepEqual([await shown(), reported()], ["parked", "parked"]);
+  assert.equal((await s.call("DELETE", `/v1/threads/${id}`)).status, 200);
+  assert.deepEqual([await shown(), reported()], [null, null]);
+});
 
 test("attention takes the first matching state in every combination", () => {
   for (const failed of [false, true]) for (const parked of [false, true]) for (const decision of [false, true]) for (const limited of [false, true]) {
