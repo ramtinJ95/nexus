@@ -3,10 +3,10 @@
  * shallow and without blobs into a bare repository the call makes for itself and removes after. Concurrent starts
  * share nothing, so one start's FETCH_HEAD can never hand another start its commit.
  */
-import { execFile } from "node:child_process";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { exit, type Exit } from "../exec.ts";
 import type { ProjectMirror } from "../images.ts";
 
 /** A thread's start waits on the read, so a slow remote boots the thread fresh instead of holding its start. */
@@ -25,7 +25,7 @@ export function projectMirror(options: { githubToken: string | null }): ProjectM
       const bounded = signal === undefined ? deadline : AbortSignal.any([deadline, signal]);
       const env = gitEnv(project.repoUrl, options.githubToken);
       const dir = await mkdtemp(join(tmpdir(), "nexus-mirror-"));
-      const git = (args: readonly string[]) => run([`--git-dir=${dir}`, ...args], env, bounded);
+      const git = (args: readonly string[]) => exit("git", [`--git-dir=${dir}`, ...args], { env, signal: bounded });
       const ok = async (args: readonly string[]) => {
         const result = await git(args);
         if (result.code !== 0) throw failed(args, result);
@@ -57,21 +57,8 @@ function gitEnv(url: string, githubToken: string | null): NodeJS.ProcessEnv {
   return { ...env, GIT_CONFIG_COUNT: "1", GIT_CONFIG_KEY_0: "http.https://github.com/.extraheader", GIT_CONFIG_VALUE_0: `AUTHORIZATION: basic ${basic}` };
 }
 
-interface Run { code: number; stdout: string; stderr: string }
-
-/** Resolves with git's exit code, and rejects only when git could not run to an exit, as on an abort. */
-function run(args: readonly string[], env: NodeJS.ProcessEnv, signal: AbortSignal): Promise<Run> {
-  return new Promise((resolve, reject) => {
-    execFile("git", args, { env, signal, encoding: "utf8" }, (err, stdout, stderr) => {
-      if (err === null) return resolve({ code: 0, stdout, stderr });
-      if (typeof err.code === "number") return resolve({ code: err.code, stdout, stderr });
-      reject(err);
-    });
-  });
-}
-
 /** git's stderr on one line, as a thread's setup reason shows only its first. */
-function failed(args: readonly string[], { code, stderr }: Run): Error {
+function failed(args: readonly string[], { code, stderr }: Exit): Error {
   const said = stderr.split("\n").map((line) => line.trim()).filter((line) => line !== "").join(" ").slice(-500);
   return new Error(`git ${args[0]} exited ${code}${said === "" ? "" : `: ${said}`}`);
 }

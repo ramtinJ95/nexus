@@ -1,7 +1,8 @@
 import { execFile } from "node:child_process";
-import { mkdir, readFile, readlink, rename, symlink, unlink, writeFile } from "node:fs/promises";
+import { mkdir, readlink, rename, symlink, unlink } from "node:fs/promises";
 import { join } from "node:path";
 import { promisify } from "node:util";
+import { readJson, saveJson } from "../json-file.ts";
 import { fullCommit } from "./model.ts";
 import type { Attempt, Role } from "./plan.ts";
 
@@ -61,18 +62,11 @@ export class ReleaseInstaller {
   }
 
   async observed(): Promise<Transaction | null> {
-    let text: string;
-    try { text = await readFile(this.journal, "utf8"); }
-    catch (error) {
-      if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
-      throw error;
-    }
-    return JSON.parse(text) as Transaction;
+    return await readJson(this.journal, null) as Transaction | null;
   }
 
   private async record(value: Transaction): Promise<Transaction> {
-    await writeFile(`${this.journal}.new`, JSON.stringify(value) + "\n", { mode: 0o600 });
-    await rename(`${this.journal}.new`, this.journal);
+    await saveJson(this.journal, value);
     return value;
   }
 

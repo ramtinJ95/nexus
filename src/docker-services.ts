@@ -12,6 +12,7 @@
  */
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
+import { exit } from "./exec.ts";
 import { linkedName, parseServicesFile, wantsPreview, withPublicUrls, type ServiceDecl, type ServiceName } from "./project.ts";
 import type { ServiceFact } from "./protocol.ts";
 import { checkoutDir } from "./sessions.ts";
@@ -39,15 +40,9 @@ interface Known {
 }
 
 /** Runs a script in the container. A nonzero exit is a result, not an error. */
-async function inContainer(container: string, script: string, args: readonly string[] = []): Promise<{ code: number; output: string }> {
-  try {
-    const { stdout, stderr } = await execFileAsync("docker", ["exec", container, "sh", "-c", script, "sh", ...args], { maxBuffer: 16 << 20 });
-    return { code: 0, output: stdout + stderr };
-  } catch (err) {
-    const { code, stdout = "", stderr = "" } = err as { code?: unknown; stdout?: string; stderr?: string };
-    if (typeof code !== "number") throw err;
-    return { code, output: stdout + stderr };
-  }
+async function inContainer(container: string, script: string, args: readonly string[] = []): Promise<{ code: number | null; output: string }> {
+  const { code, stdout, stderr } = await exit("docker", ["exec", container, "sh", "-c", script, "sh", ...args], { maxBuffer: 16 << 20 });
+  return { code, output: stdout + stderr };
 }
 
 async function checked(container: string, script: string, args: readonly string[] = []): Promise<string> {

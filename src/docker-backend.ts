@@ -10,14 +10,14 @@
  * template that arrived as an archive is loaded into Docker on its first boot. The double clones nothing: its
  * setup is the project's preSetup, run as root in the build container.
  */
-import { execFile, spawn } from "node:child_process";
+import { spawn } from "node:child_process";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
-import { promisify } from "node:util";
 import { artifactDirectory, fileCodec, type ArtifactDirectory } from "./artifacts.ts";
 import { JobFailure, type ArtifactStore, type BackendPylon, type Guest, type VmBackend } from "./backend.ts";
-import { dockerBridgeRunArgs } from "./docker-host-bridge.ts";
+import { dockerBridgeRunArgs, labelFilters } from "./docker-host-bridge.ts";
+import { exit, output } from "./exec.ts";
 import { dockerServices, publishedPorts } from "./docker-services.ts";
 import { processStream } from "./process-stream.ts";
 import type { OverlayFile } from "./project.ts";
@@ -26,8 +26,6 @@ import type { ArtifactId, CheckpointId, ImageId, PortableArtifactId, TemplateId 
 import { publicUrls } from "./public-urls.ts";
 import { recordBeforePause, relaunchAfterWake, type PylonLog } from "./session-wake.ts";
 import { pausedSessionsIn, sessionsFile } from "./sessions.ts";
-
-const execFileAsync = promisify(execFile);
 
 /** `sessions` on a checkpoint is what its pause recorded, as base64url JSON, or empty when it recorded none. */
 const label = { pylon: "nexus.pylon", image: "nexus.image", bootedFrom: "nexus.booted-from", checkpoint: "nexus.checkpoint", sessions: "nexus.sessions", templateBuild: "nexus.template-build" } as const;
@@ -60,7 +58,7 @@ interface ImageInfo {
 
 export function createDockerBackend(options: DockerBackendOptions): VmBackend {
   const scope = Object.entries(options.labels ?? {});
-  const scopeFilters = scope.flatMap(([k, v]) => ["--filter", `label=${k}=${v}`]);
+  const scopeFilters = labelFilters(options.labels ?? {});
 
   /**
    * The signal is checked before each call, never passed to the CLI: killing the CLI does not stop the
@@ -80,13 +78,7 @@ export function createDockerBackend(options: DockerBackendOptions): VmBackend {
 
   async function docker(args: readonly string[], signal?: AbortSignal): Promise<string> {
     signal?.throwIfAborted();
-    try {
-      const { stdout } = await execFileAsync("docker", args, { maxBuffer: 64 << 20 });
-      return stdout.trim();
-    } catch (err) {
-      const stderr = (err as { stderr?: string }).stderr?.trim();
-      throw new Error(`docker ${args.join(" ")}: ${stderr || (err as Error).message}`);
-    }
+    return (await output("docker", args, { maxBuffer: 64 << 20 })).trim();
   }
 
   /** Inspects each ID. One removed since it was listed is absent now, so it is left out. */
@@ -401,15 +393,8 @@ export function createDockerBackend(options: DockerBackendOptions): VmBackend {
 
 /** A timeout reports exitCode null, as a pylon's exec does. */
 async function execIn(container: string, cwd: string, argv: readonly string[], timeoutMs: number): Promise<{ exitCode: number | null; output: string; truncated: boolean }> {
-  try {
-    const { stdout, stderr } = await execFileAsync("docker", ["exec", "--workdir", cwd, container, ...argv], { timeout: timeoutMs, maxBuffer: 64 << 20 });
-    return { exitCode: 0, output: stdout + stderr, truncated: false };
-  } catch (err) {
-    const { code, killed, stdout = "", stderr = "" } = err as { code?: unknown; killed?: boolean; stdout?: string; stderr?: string };
-    if (killed) return { exitCode: null, output: stdout + stderr, truncated: false };
-    if (typeof code !== "number") throw err;
-    return { exitCode: code, output: stdout + stderr, truncated: false };
-  }
+  const { code, stdout, stderr } = await exit("docker", ["exec", "--workdir", cwd, container, ...argv], { timeout: timeoutMs, maxBuffer: 64 << 20 });
+  return { exitCode: code, output: stdout + stderr, truncated: false };
 }
 
 /**

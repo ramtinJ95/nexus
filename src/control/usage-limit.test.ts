@@ -106,3 +106,53 @@ test("a thread archived or continued while an earlier thread's message is being 
   assert.deepEqual(f.continued().map((e) => e.thread), ["th-1"], "only the thread that was still stopped when its turn came was told to continue");
   assert.equal(f.typed.length, 1);
 });
+
+/** Reads whether the promise has settled, after the turns of the event loop it would need to. */
+function watch(promise: Promise<unknown>) {
+  let settled = false;
+  void promise.then(() => { settled = true; });
+  return async () => { await new Promise((resolve) => setImmediate(resolve)); return settled; };
+}
+
+test("a poll while a pass runs joins it and settles after it, and a poll after it settles runs a new pass", async (t) => {
+  const f = fixture(t);
+  f.setOutcome("blocked");
+  const released = Promise.withResolvers<void>();
+  f.hold(released.promise);
+  const first = f.resumer.poll();
+  const second = watch(f.resumer.poll());
+  assert.equal(await second(), false, "the joined poll waits for the pass it joined");
+  released.resolve();
+  await first;
+  assert.equal(await second(), true);
+  assert.equal(f.typed.length, 1, "one pass ran for both polls");
+  await f.resumer.poll();
+  assert.equal(f.typed.length, 2);
+});
+
+test("close waits for the pass in flight", async (t) => {
+  const f = fixture(t);
+  const released = Promise.withResolvers<void>();
+  f.hold(released.promise);
+  void f.resumer.poll();
+  const closed = watch(f.resumer.close());
+  assert.equal(await closed(), false);
+  assert.equal(f.typed.length, 0);
+  released.resolve();
+  assert.equal(await closed(), true);
+  assert.equal(f.typed.length, 1, "the pass finished before close resolved");
+});
+
+test("a pass that throws rejects every poll that joined it, and the next poll runs a new pass", async (t) => {
+  const f = fixture(t);
+  const threads = f.registry.threads;
+  f.registry.threads = () => { throw new Error("database is locked"); };
+  await Promise.all([
+    assert.rejects(f.resumer.poll(), /database is locked/),
+    assert.rejects(f.resumer.poll(), /database is locked/),
+  ]);
+  f.registry.threads = threads;
+  await f.resumer.poll();
+  assert.equal(f.typed.length, 1);
+  await f.resumer.close();
+});

@@ -218,6 +218,25 @@ test("a wake drops restored ports that are Nexus's own and routes the rest, rath
 	]);
 });
 
+test("a first boot, with no saved services, ad hoc services or linked ports, wakes as one that saved none, and a saved file that is not JSON fails the wake", async (t) => {
+	const wake = async (saved: Record<string, string>) => {
+		const root = await mkdtemp(join(tmpdir(), "nexus-services-"));
+		t.after(() => rm(root, { recursive: true, force: true }));
+		for (const [file, text] of Object.entries(saved)) await writeFile(join(root, file), text);
+		const fake = fakeVm();
+		const services = new GuestServices(fake.vm, root, configPath, "/workspace/repo", "agent", {});
+		t.after(() => services.close());
+		await services.initialize();
+		return { routes: fake.targets.at(-1), status: await services.operate("status") };
+	};
+	const none = { "services.json": "{}", "adhoc.json": "{}", "linked.json": "[]" };
+	assert.deepEqual(await wake({}), await wake(none));
+	assert.deepEqual(await wake({}), { routes: {}, status: [] });
+	for (const file of Object.keys(none)) {
+		await assert.rejects(wake({ ...none, [file]: "{\"web\":" }), SyntaxError, `${file} that is not JSON`);
+	}
+});
+
 test("a port past the relay's 100 is refused before anything is saved, and a wake that restores more than 100 routes 100 and still runs", async (t) => {
 	const root = await mkdtemp(join(tmpdir(), "nexus-services-"));
 	t.after(() => rm(root, { recursive: true, force: true }));

@@ -5,6 +5,7 @@
  */
 import type { Inbox } from "./inbox.ts";
 import type { Registry } from "./registry.ts";
+import { singleFlight } from "../single-flight.ts";
 
 export const usageLimitPrefix = "[Nexus usage limit — automated, not a message from the person]";
 const text = `${usageLimitPrefix} The usage limit reset. Continue where you stopped.`;
@@ -13,7 +14,6 @@ const defaultGraceMs = 180_000;
 
 export function usageLimitResumer(options: { registry: Registry; inbox: Inbox; clock?: () => number; graceMs?: number }) {
   const { registry, inbox, clock = Date.now, graceMs = defaultGraceMs } = options;
-  let running: Promise<void> | null = null;
   async function tick() {
     for (const { id: thread } of registry.threads()) {
       // Read again after the sends before it, which another thread's archive or continue may have outrun. From here to
@@ -35,11 +35,6 @@ export function usageLimitResumer(options: { registry: Registry; inbox: Inbox; c
       }
     }
   }
-  return {
-    async close() { await running; },
-    poll(): Promise<void> {
-      if (running === null) running = tick().finally(() => { running = null; });
-      return running;
-    },
-  };
+  const ticks = singleFlight(tick);
+  return { close: ticks.settled, poll: ticks.join };
 }

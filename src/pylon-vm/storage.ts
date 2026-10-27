@@ -1,11 +1,4 @@
-import {
-	mkdir,
-	open,
-	readFile,
-	rename,
-	stat,
-	writeFile,
-} from "node:fs/promises";
+import { mkdir, open, readFile, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { recordSchema, type SandboxRecord } from "./contracts.ts";
 
@@ -15,13 +8,6 @@ export function directory(
 	name: string,
 ): string {
 	return join(root, kind, name);
-}
-export async function saveJson(path: string, value: unknown): Promise<void> {
-	const temporary = `${path}.${process.pid}.tmp`;
-	await writeFile(temporary, `${JSON.stringify(value, null, 2)}\n`, {
-		mode: 0o600,
-	});
-	await rename(temporary, path);
 }
 export async function readRecord(dir: string): Promise<SandboxRecord> {
 	return recordSchema.parse(

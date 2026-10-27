@@ -63,3 +63,16 @@ test("an SSH or other non-HTTPS remote is refused before git runs, whatever keys
     await assert.rejects(mirror.setupInputs({ ...project, repoUrl }, { branch: "main" }), new RegExp(`^Error: the control plane reads only https:// remotes, and holds no SSH key for ${repoUrl}$`));
   }
 });
+
+test("git's stderr over several lines is told on one line, after the subcommand and its exit code", async () => {
+  const missing = { ...project, repoUrl: pathToFileURL(join(dir, "missing")).href };
+  await assert.rejects(mirror.setupInputs(missing, { branch: "main" }), (err: Error) => {
+    assert.match(err.message, /^git fetch exited 128: fatal: .*does not appear to be a git repository fatal: Could not read from remote repository\. Please make sure/);
+    assert.doesNotMatch(err.message, /\n/);
+    return true;
+  });
+});
+
+test("an aborted read rejects", async () => {
+  await assert.rejects(mirror.setupInputs(project, { branch: "main" }, AbortSignal.abort()), { name: "AbortError" });
+});

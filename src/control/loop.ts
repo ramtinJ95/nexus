@@ -19,6 +19,7 @@ import { randomUUID } from "node:crypto";
 import { setTimeout as delay } from "node:timers/promises";
 import { desiredPhase, type RegistryWrite } from "../reconcile.ts";
 import { linkedPort, liveHashOf, type GitIdentity } from "../project.ts";
+import { singleFlight, type SingleFlight } from "../single-flight.ts";
 import { tick, type TickContext } from "../tick.ts";
 import { isImageId, type NodeName, type NodeObservation, type ProbeClient, type ProbeError, type ProbeEvent, type PylonCommand, type PylonId, type PylonObservation } from "../protocol.ts";
 import type { ArtifactId } from "../images.ts";
@@ -66,8 +67,7 @@ interface Link {
   /** The planner acts on a node only while its observe stream is open. */
   up: boolean;
   snapshots: number;
-  pass: Promise<void> | null;
-  again: boolean;
+  passes: SingleFlight;
   offline: NodeJS.Timeout | null;
 }
 
@@ -85,7 +85,8 @@ export function startLoop(options: LoopOptions): Loop {
   const links = new Map<NodeName, Link>();
   for (const probe of options.probes) {
     if (registry.node(probe.node) === undefined) throw new Error(`probe for ${probe.node}, which the registry does not know`);
-    links.set(probe.node, { probe, up: false, snapshots: 0, pass: null, again: false, offline: null });
+    const link: Link = { probe, up: false, snapshots: 0, passes: singleFlight(() => pass(probe.node, link), () => shutdown.signal.aborted), offline: null };
+    links.set(probe.node, link);
   }
 
   const observation = (node: NodeName): NodeObservation | null => links.get(node)?.up ? registry.node(node)?.observation ?? null : null;
@@ -227,20 +228,7 @@ export function startLoop(options: LoopOptions): Loop {
   }
 
   function wake(node: NodeName): Promise<void> {
-    const link = links.get(node);
-    if (link === undefined || shutdown.signal.aborted) return Promise.resolve();
-    link.again = true;
-    link.pass ??= (async () => {
-      try {
-        while (link.again && !shutdown.signal.aborted) {
-          link.again = false;
-          await pass(node, link);
-        }
-      } finally {
-        link.pass = null;
-      }
-    })();
-    return link.pass;
+    return links.get(node)?.passes.rerun() ?? Promise.resolve();
   }
 
   function linkDown(node: NodeName, link: Link) {
@@ -305,7 +293,7 @@ export function startLoop(options: LoopOptions): Loop {
       shutdown.abort();
       clearInterval(timer);
       for (const link of links.values()) if (link.offline !== null) clearTimeout(link.offline);
-      await Promise.all([...followers, ...[...links.values()].map((link) => link.pass)]);
+      await Promise.all([...followers, ...[...links.values()].map((link) => link.passes.settled())]);
     },
   };
 }

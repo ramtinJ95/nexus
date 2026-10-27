@@ -10,6 +10,7 @@
  */
 import { imageIdOf, type ImageId, type ImageManifest, type ImageRecipe } from "../images.ts";
 import type { Job, JobId, NodeName, ProbeClient, ProbeError, TailnetNodeId } from "../protocol.ts";
+import { singleFlight } from "../single-flight.ts";
 import { failureMessage, jobOutcome, submitJob } from "../tick.ts";
 import { HttpError } from "./http-error.ts";
 import type { NodeRecord, RecordedImage, Registry } from "./registry.ts";
@@ -214,24 +215,9 @@ export function startImageRollout(options: ImageRolloutOptions): ImageRollout {
     }
   }
 
-  let passing: Promise<void> | null = null;
-  let again = false;
   let closed = false;
-  function wake(): Promise<void> {
-    if (closed) return Promise.resolve();
-    again = true;
-    passing ??= (async () => {
-      try {
-        while (again && !closed) {
-          again = false;
-          await pass();
-        }
-      } finally {
-        passing = null;
-      }
-    })();
-    return passing;
-  }
+  const passes = singleFlight(pass, () => closed);
+  const wake = passes.rerun;
   const timer = setInterval(() => void wake(), options.intervalMs ?? 2_000);
 
   return {
@@ -259,7 +245,7 @@ export function startImageRollout(options: ImageRolloutOptions): ImageRollout {
     async close() {
       closed = true;
       clearInterval(timer);
-      await passing;
+      await passes.settled();
     },
   };
 }
