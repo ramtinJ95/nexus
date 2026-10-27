@@ -516,9 +516,15 @@ export async function startApi(options: ApiOptions): Promise<Api> {
     }
     if (sse.ended) return void watch.stop();
     let latest = watch.value;
-    /** Whether bytes are on their way, so the stream needs no ping. A view that cannot be rendered ends the stream. */
+    let framed: V | undefined;
+    /**
+     * Whether bytes are on their way, so the stream needs no ping. A view already framed has nothing to send. A view
+     * that cannot be rendered ends the stream.
+     */
     const flush = () => {
       if (sse.ended || res.writableNeedDrain) return true;
+      if (latest === framed) return false;
+      framed = latest;
       let frame: unknown;
       try {
         frame = frames(latest);

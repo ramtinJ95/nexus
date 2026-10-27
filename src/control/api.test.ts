@@ -2765,6 +2765,30 @@ test("a Claude worker thread's page stream shows new entries during a turn, read
   assert.equal(s.streams.length, ended, "the reads stop with the turn");
 });
 
+/** The page's conversation region: its opening tag's watermark and named view, and whether it holds a rendering. */
+async function convoRegion(s: Awaited<ReturnType<typeof withClaude>>, query = "") {
+  const html = (await s.raw(`/threads/${s.thread.id}${query}`)).body.toString();
+  const tag = /<div class="convo" id="convo" data-rendered-reply-at="(\d*)"(?: data-shows="([^"]+)")? data-live[^>]*>/.exec(html)!;
+  return { replyAt: tag[1], named: tag[2], inside: html.slice(tag.index + tag[0].length).split('<section class="file-view"')[0]!.replace(/<\/div><\/div>\s*$/, "") };
+}
+
+test("a Claude worker's page stream sends nothing while its conversation is unchanged, its pings included, though an age in it changed", async (t) => {
+  t.mock.timers.enable({ apis: ["setInterval", "Date"], now: Date.parse("2026-10-27T12:00:00Z") });
+  const s = await withClaude(t);
+  await writeFile(s.transcript, fixture.slice(0, 22).join(""));
+  const stream = s.events(`/threads/${s.thread.id}/stream`);
+  t.after(() => stream.close());
+  for (let next = await stream.next(); !/Do these steps one at a time/.test(next.convo ?? ""); next = await stream.next());
+  for (let pings = 0; pings < 4; pings++) t.mock.timers.tick(15_000);
+  assert.match((await convoRegion(s)).inside, /started <time [^>]*data-ago>1 min ago<\/time>/, "a minute on, a render says so");
+
+  await appendFile(s.transcript, fixture.slice(22, 24).join(""));
+  // No turn runs, so the event's read is the only change the stream can show.
+  s.registry.reportSession(node, { sequence: 1, pylon: s.thread.pylonId, time: Date.now(), event: { kind: "session.turn-ended", session: claudeSession } });
+  t.mock.timers.tick(1_000);
+  assert.match((await stream.next()).convo, /Changed a file/, "the first frame after the pings is the read's, not one for the age");
+});
+
 test("a Claude worker's transcript streams to the CLI as its entries whole, then each read's new entries and the turn's start and end", async (t) => {
   const s = await withClaude(t);
   await writeFile(s.transcript, fixture.slice(0, 22).join(""));
