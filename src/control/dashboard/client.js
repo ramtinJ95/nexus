@@ -279,7 +279,8 @@ document.addEventListener("submit", async (event) => {
     const passkey = await api("POST", "/v1/passkeys", { name: form.elements.name.value, credential: {
       clientDataJSON: toB64(credential.response.clientDataJSON), attestationObject: toB64(credential.response.attestationObject),
     } });
-    form.reset();
+    // The code is used up, though the address the host printed filled it in.
+    for (const field of [form.elements.code, form.elements.name]) field.value = field.defaultValue = "";
     showStatus(`Enrolled ${passkey.name}.`, "enrol-status");
     showError("action-error", null);
     await refreshAfter();
