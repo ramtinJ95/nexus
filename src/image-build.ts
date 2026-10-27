@@ -140,7 +140,7 @@ function dockerBuildArgs(pins: ImageRecipe["pins"]): Record<string, string> {
  *    the agent setup installed exactly as the recipe's manifest says with pi loading every extension offline,
  *    the PYLON.md import for Claude Code and pi, gh at its pin answering git's credential requests from GH_TOKEN,
  *    curl and Node fetch to an allowed host through TLS interception, tini reaping an orphan it adopts as
- *    subreaper, and a Herdr server as user. Any failure is setup-failed and publishes nothing.
+ *    subreaper and as PID 1, sandboxd surviving a write to an exec's closed stdin, and a Herdr server as user. Any failure is setup-failed and publishes nothing.
  * 5. Write image.json, then rename outDir.partial to outDir.
  * A crash leaves only outDir.partial, which the next attempt removes. An existing outDir is the finished
  * image, because its ID names its inputs.
@@ -496,6 +496,13 @@ export function smokeChecks(recipe: ImageRecipe): readonly SmokeCheck[] {
       expect: /^tini version \d+\.\d+\.\d+[^\n]*\n[^Z\n]+\n$/,
     },
     {
+      // A plain exec runs under sandboxd, outside any tini -s tree, so the subshell's `sleep 0` is orphaned to
+      // PID 1, which must reap it.
+      name: "PID 1 reaps orphans",
+      argv: ["sh", "-c", 'ps -o comm= -p 1; pid="$( (sleep 0 >/dev/null & echo $!) )"; sleep 1; ps -o stat= -p "$pid" || echo reaped'],
+      expect: "tini\nreaped\n",
+    },
+    {
       name: "baked dotfiles",
       argv: asUser("stat -c %U /opt/nexus/dotfiles && git clone -q /opt/nexus/dotfiles \"$(mktemp -d)/dotfiles\" && echo cloned && git -C /opt/nexus/dotfiles log -1 --format=%s"),
       expect: new RegExp(`^user\\ncloned\\ndotfiles common layer at ${literal(pins.dotfilesCommon)}\\n$`),
@@ -552,6 +559,17 @@ async function smokeBoot(assets: string, checks: readonly SmokeCheck[], id: Imag
       const failure = smokeFailure(check, exitCode, output);
       if (failure !== undefined) fail(check.name, failure, output);
     }
+
+    // sandboxd as tini's child has no PID 1 immunity to the SIGPIPE that this write raises in it.
+    const closed = vm.exec(["sh", "-c", "exec 0<&-; echo ready; sleep 1"], { stdin: true, stdout: "pipe", signal: AbortSignal.any([signal, AbortSignal.timeout(120_000)]) });
+    const written = closed.result.catch((err: Error) => fail("stdin to a closed pipe", err.message));
+    const ready = await Promise.race([once(closed.stdout!, "data").then(() => true, () => false), written.then(() => false)]);
+    if (!ready) fail("stdin to a closed pipe", "the exec ended before it printed ready");
+    closed.write("x\n");
+    const result = await written;
+    if (result.exitCode !== 0) fail("stdin to a closed pipe", `exited ${result.exitCode}`, result.stdout + result.stderr);
+    const after = await exec(["true"]).catch((err: Error) => fail("stdin to a closed pipe", `the next exec failed: ${err.message}`));
+    if (after.exitCode !== 0) fail("stdin to a closed pipe", `the next exec exited ${after.exitCode}`, after.output);
 
     const server = vm.exec([...asUser(`exec herdr --session ${smokeSession} server`)], { signal: AbortSignal.any([signal, stopServer.signal]) });
     server.catch(() => {});

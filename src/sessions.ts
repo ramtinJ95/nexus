@@ -648,9 +648,9 @@ async function launchedClaudeSession(guest: Guest, pane: string): Promise<string
 
 /**
  * setsid detaches the server from the exec, and the redirects let the exec return without waiting on its output.
- * PID 1 in a pylon is Gondolin's sandboxd, which never reaps the orphans it adopts, so an agent whose pane
- * shell exits first would stay a zombie. tini -s is the subreaper for everything under Herdr instead. It
- * is unconditional because the base image guarantees /usr/bin/tini.
+ * In an image built before rootfs-init-extra.sh made tini PID 1, PID 1 is Gondolin's sandboxd, which never
+ * reaps the orphans it adopts, so an agent whose pane shell exits first would stay a zombie. tini -s is the
+ * subreaper for everything under Herdr there. It is unconditional because the base image guarantees /usr/bin/tini.
  */
 const startServer = `setsid -f tini -s -- herdr --session ${herdrSession} server </dev/null >/dev/null 2>&1`;
 
