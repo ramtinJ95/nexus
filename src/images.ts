@@ -32,8 +32,8 @@ export type PortableArtifactId = Exclude<ArtifactId, CheckpointId>;
  *   2. apt: bash, coreutils, util-linux, ca-certificates, git, python3, openssh-server (S2: enableSsh
  *      needs a real sshd), openssh-client (git over Gondolin's SSH proxy), sudo, curl. The service is installed but not enabled. Also procps (enableSsh's
  *      script runs ps), e2fsprogs (rootfs growth runs resize2fs), ripgrep and fd (pi cannot download them
- *      through the allowlist), xz-utils for the Node tarball, and tini: sandboxd is PID 1 and does not reap
- *      the orphans it adopts, so long-lived trees such as the Herdr server run under `tini -s --`.
+ *      through the allowlist), xz-utils for the Node tarball, and tini, which rootfs-init-extra.sh makes PID 1
+ *      because sandboxd does not reap the orphans it adopts.
  *   3. `user`, UID 1000, passwordless sudo, /home/user/workspace.
  *   4. Node from the checksum-verified official tarball into /usr/local.
  *   5. Claude Code and pi from npm, Herdr from its official installer into /usr/local/bin,
@@ -55,7 +55,9 @@ export type PortableArtifactId = Exclude<ArtifactId, CheckpointId>;
  *   so execs and login shells both see it. buildImage adds oci.image = the Docker build, and postBuild.copy
  *   of the kernel module seed into /lib/modules (the S1 workaround), and init.rootfsInitExtra.
  * - rootfs-init-extra.sh: run as root by Gondolin's /init before sandboxd. It sets the hostname pylon and
- *   writes /etc/hostname and /etc/hosts, because Gondolin sets no hostname and sudo warns without one.
+ *   writes /etc/hostname and /etc/hosts, because Gondolin sets no hostname and sudo warns without one. It then
+ *   execs tini as PID 1 with sandboxd as its child, so every orphan in the guest is reaped, and ignores SIGPIPE
+ *   first, which sandboxd does not handle and as PID 1 never received.
  * - pins.json: ImageRecipe.pins. Every other file except build.sh is in ImageRecipe.files, with the mode git gives
  *   it, 0755 when executable and 0644 otherwise, because Docker's COPY keeps a file's mode.
  * Logins and secrets are never in the image.

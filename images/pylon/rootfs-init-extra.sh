@@ -11,3 +11,12 @@ printf 'pylon' > /proc/sys/kernel/hostname
 # A pause stops the outbox's sender, and Claude's hooks start one only when they next run, so every boot, a wake
 # included, starts one for the events a pause left behind. /init runs under set -e, which a failure must not end.
 runuser -u user -- setsid -f /usr/local/bin/node /usr/local/bin/nexus-outbox.ts </dev/null >/dev/null 2>&1 || true
+# sandboxd never reaps the orphans it adopts as PID 1, and guest commands orphan processes all the time: every
+# exec's worker outlives its launcher (src/pylon-vm/processes.ts), sshd sessions outlive their monitors, and the
+# outbox sender above starts detached. tini as PID 1 reaps them all and runs sandboxd as its child. Gondolin
+# inserts this file just before its own `exec /usr/bin/sandboxd`, so this exec takes that one's place.
+# sandboxd sets no SIGPIPE disposition, which PID 1 did not need, and as tini's child a write to an exec's closed
+# stdin would kill it and the guest. Its execs inherit the ignore, and Python, which runs a running pylon's guest
+# commands (src/pylon-vm/guest.ts), restores SIGPIPE for the commands it starts.
+trap '' PIPE
+exec /usr/bin/tini -- /usr/bin/sandboxd
