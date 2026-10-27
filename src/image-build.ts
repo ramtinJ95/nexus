@@ -22,6 +22,7 @@ import { agentSetupManifest, installedLayout, parseAgentSetup, type AgentSetup }
 import { artifactArchive, manifestFiles } from "./artifacts.ts";
 import { JobFailure } from "./backend.ts";
 import { imageIdOf, pinsSchema, type ImageId, type ImageManifest, type ImageRecipe } from "./images.ts";
+import { shellQuote } from "./project.ts";
 import type { NodeName } from "./protocol.ts";
 
 export const pylonRecipeDir = fileURLToPath(new URL("../images/pylon/", import.meta.url));
@@ -415,7 +416,6 @@ export interface SmokeCheck {
 }
 
 const asUser = (script: string): readonly string[] => ["runuser", "-l", "user", "-c", `exec 2>&1; ${script}`];
-const shellQuote = (text: string): string => `'${text.replaceAll("'", "'\\''")}'`;
 const literal = (text: string): string => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 /** The nexus CLI has no pin. Its script declares the version that `nexus --version` prints. */

@@ -361,7 +361,7 @@ export function renderOverlay(overlay: PylonOverlay): readonly OverlayFile[] {
 /** What NEXUS_API is set to. See PylonApiRequest. */
 export const nexusApi = "http://nexus.pylon";
 
-const shellQuote = (value: string): string => `'${value.replaceAll("'", `'\\''`)}'`;
+export const shellQuote = (value: string): string => `'${value.replaceAll("'", `'\\''`)}'`;
 
 function pylonGuide(o: PylonOverlay): string {
   const list = (items: readonly string[]): string => items.map((item) => `- ${item}\n`).join("");
