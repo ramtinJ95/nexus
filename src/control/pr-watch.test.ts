@@ -142,6 +142,46 @@ test("without a token the watcher is off", async (t) => {
   assert.deepEqual(f.calls, []); assert.equal(f.wakes, 0); assert.equal(f.registry.prWatch(f.id), null);
 });
 
+/** A watcher whose GitHub searches wait for `released`, and a reader of whether a promise has settled yet. */
+function held(f: ReturnType<typeof fixture>) {
+  const released = Promise.withResolvers<void>();
+  const searched = Promise.withResolvers<void>();
+  const watcher = prWatcher({ ...f.options, github: { ...f.github, async find(...args: Parameters<typeof f.github.find>) { searched.resolve(); await released.promise; return f.github.find(...args); } } });
+  const watch = (promise: Promise<unknown>) => {
+    let settled = false;
+    void promise.then(() => { settled = true; });
+    return async () => { await new Promise((resolve) => setImmediate(resolve)); return settled; };
+  };
+  return { watcher, release: released.resolve, searched: searched.promise, watch };
+}
+
+test("a poll while a pass runs joins it and settles after it, and a poll after it settles runs a new pass", async (t) => {
+  const f = fixture(); t.after(() => f.registry.close());
+  const h = held(f);
+  const first = h.watcher.poll();
+  await h.searched;
+  const second = h.watch(h.watcher.poll());
+  assert.equal(await second(), false, "the joined poll waits for the pass it joined");
+  h.release();
+  await first;
+  assert.equal(await second(), true);
+  assert.deepEqual(f.calls, ["find:acme/repo:feature", "poll"], "one pass ran for both polls");
+  await h.watcher.poll();
+  assert.deepEqual(f.calls, ["find:acme/repo:feature", "poll", "find:acme/repo:feature", "poll"]);
+});
+
+test("close waits for the pass in flight", async (t) => {
+  const f = fixture(); t.after(() => f.registry.close());
+  const h = held(f);
+  void h.watcher.poll();
+  await h.searched;
+  const closed = h.watch(h.watcher.close());
+  assert.equal(await closed(), false);
+  h.release();
+  assert.equal(await closed(), true);
+  assert.deepEqual(f.calls, ["find:acme/repo:feature", "poll"], "the pass finished before close resolved");
+});
+
 test("GitHub reads use per-resource ETags, paginate, and include the owner's reviews", async () => {
   const seen: { path: string; etag: string | null }[] = [];
   const fake: typeof fetch = async (input, init) => {

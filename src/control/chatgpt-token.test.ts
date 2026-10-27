@@ -101,3 +101,53 @@ test("a probe that shows up without the token while a poll runs gets it from one
   await handoff.close();
   assert.ok(p.put.some(([node]) => node === "rj-firebat"), "the restarted probe got the token without waiting for the timer");
 });
+
+/** A token source whose reads each wait for the test to release them, until it frees them all. */
+function heldReads() {
+  const reads: { began: PromiseWithResolvers<void>; released: PromiseWithResolvers<void> }[] = [];
+  const nth = (i: number) => reads[i] ??= { began: Promise.withResolvers(), released: Promise.withResolvers() };
+  let count = 0;
+  let free = false;
+  return {
+    get count() { return count; },
+    async token() { const read = nth(count++); read.began.resolve(); if (!free) await read.released.promise; return token; },
+    began: (i: number) => nth(i).began.promise,
+    release: (i: number) => nth(i).released.resolve(),
+    free() { free = true; for (const read of reads) read.released.resolve(); },
+  };
+}
+
+const missing = { grants: { secrets: [], gitSsh: false }, heldSecrets: ["NEXUS_CHATGPT_TOKEN"] };
+
+test("probes that show up without the token during one poll cause one more poll, not one each", async () => {
+  const p = probes("rj-firebat");
+  const reads = heldReads();
+  const handoff = chatgptTokenHandoff({ probes: p.clients, token: () => reads.token(), log: () => {} });
+  void handoff.poll();
+  await reads.began(0);
+  handoff.observed(missing);
+  handoff.observed(missing);
+  handoff.observed(missing);
+  reads.free();
+  await handoff.close();
+  assert.equal(reads.count, 2);
+});
+
+test("a poll while one more poll is due resolves only after that one", async () => {
+  const p = probes("rj-firebat");
+  const reads = heldReads();
+  const handoff = chatgptTokenHandoff({ probes: p.clients, token: () => reads.token(), log: () => {} });
+  void handoff.poll();
+  await reads.began(0);
+  handoff.observed(missing);
+  let settled = false;
+  const joined = handoff.poll().then(() => { settled = true; });
+  reads.release(0);
+  await reads.began(1);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(settled, false, "the poll waits for the token read that began after it");
+  reads.release(1);
+  await joined;
+  assert.equal(reads.count, 2);
+  assert.deepEqual(p.put, [["rj-firebat", "NEXUS_CHATGPT_TOKEN", token], ["rj-firebat", "NEXUS_CHATGPT_TOKEN", token]]);
+});

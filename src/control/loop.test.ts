@@ -298,11 +298,11 @@ function seed(registry: Registry, activity: Partial<Pick<Thread, "agentTurnRunni
   return thread;
 }
 
-function run(t: import("node:test").TestContext, registry: Registry, probe: ProbeClient, overrides: { gitIdentity?: { name: string; email: string }; offlineAfterMs?: number; silenceMs?: number; ingest?: Ingest; previewPorts?: PortRange; log?: (line: string) => void; claudeLaunchRetryMs?: number } = {}): Loop {
+function run(t: import("node:test").TestContext, registry: Registry, probe: ProbeClient | readonly ProbeClient[], overrides: { gitIdentity?: { name: string; email: string }; offlineAfterMs?: number; silenceMs?: number; ingest?: Ingest; previewPorts?: PortRange; log?: (line: string) => void; claudeLaunchRetryMs?: number; intervalMs?: number } = {}): Loop {
   const loop = startLoop({
     ...(overrides.claudeLaunchRetryMs === undefined ? {} : { claudeLaunchRetryMs: overrides.claudeLaunchRetryMs }),
     gitIdentity: overrides.gitIdentity,
-    registry, probes: [probe], ingest: overrides.ingest ?? ingest, previewPorts: overrides.previewPorts ?? previewPorts, intervalMs: 10, reconnectMs: 10,
+    registry, probes: Array.isArray(probe) ? probe : [probe], ingest: overrides.ingest ?? ingest, previewPorts: overrides.previewPorts ?? previewPorts, intervalMs: overrides.intervalMs ?? 10, reconnectMs: 10,
     offlineAfterMs: overrides.offlineAfterMs ?? 30_000, silenceMs: overrides.silenceMs ?? 30_000, log: overrides.log ?? assert.fail,
   });
   t.after(async () => {
@@ -908,6 +908,106 @@ test("an envelope saved by a control plane that died mid-submit holds the pylon 
   await until("the pylon runs", () => fake.pylons.get(thread.pylonId)?.phase === "running");
   assert.deepEqual(fake.submitted.map((job) => job.kind), ["spawn"]);
   assert.equal(registry.pylon(thread.pylonId)?.attempts.count, 0);
+});
+
+/**
+ * A loop over rj-firebat and infra-testbench whose only timer never fires within a test. rj-firebat holds a pylon whose
+ * envelope may still be on its way to the probe, so each of its passes asks the probe about that job once. Once `hold`
+ * is called, each lookup waits for the test to release it.
+ */
+async function heldLoop(t: import("node:test").TestContext) {
+  const registry = openRegistry(tempDb());
+  const thread = seed(registry);
+  registry.savePylon({ ...registry.pylon(thread.pylonId)!, submitted: envelope({ kind: "delete", pylonId: thread.pylonId }, node, Date.now()) });
+  const testbench = "infra-testbench" as NodeName;
+  registry.upsertNode({ name: testbench, tailnetHost: "infra-testbench.tail.ts.net", tailnetNodeId: "nTESTBENCH" as TailnetNodeId });
+  const fake = fakeNode({ autoFinish: false });
+  const other = fakeNode({ autoFinish: false, node: testbench });
+  const lookups: { began: PromiseWithResolvers<void>; released: PromiseWithResolvers<void> }[] = [];
+  const nth = (i: number) => lookups[i] ??= { began: Promise.withResolvers(), released: Promise.withResolvers() };
+  let count = 0;
+  let holding = false;
+  const probe: ProbeClient = {
+    ...fake.probe,
+    async job(jobId) {
+      const lookup = nth(count++);
+      lookup.began.resolve();
+      if (holding) await lookup.released.promise;
+      return fake.probe.job(jobId);
+    },
+  };
+  const loop = run(t, registry, [probe, other.probe], { intervalMs: 600_000 });
+  await other.delivered();
+  await settled(fake, loop);
+  assert.equal(registry.node(node)?.state, "online");
+  count = 0;
+  lookups.length = 0;
+  return {
+    loop, testbench,
+    get passes() { return count; },
+    hold() { holding = true; },
+    began: (i: number) => nth(i).began.promise,
+    release: (i: number) => nth(i).released.resolve(),
+    free() { holding = false; for (const lookup of lookups) lookup.released.resolve(); },
+  };
+}
+
+/** Reads whether the promise has settled, after the turns of the event loop it would need to. */
+function watch(promise: Promise<unknown>) {
+  let settled = false;
+  void promise.then(() => { settled = true; });
+  return async () => { await new Promise((resolve) => setImmediate(resolve)); return settled; };
+}
+
+test("wakes of a node during its pass give exactly one more pass after it, and resolve once that pass has finished", async (t) => {
+  const h = await heldLoop(t);
+  h.hold();
+  const first = h.loop.wake(node);
+  await h.began(0);
+  const second = watch(h.loop.wake(node));
+  void h.loop.wake(node);
+  void h.loop.wake(node);
+  h.release(0);
+  await Promise.race([h.began(1), first]);
+  assert.equal(h.passes, 2, "another pass began after the one the wakes came during");
+  assert.equal(await second(), false, "a wake waits for the pass that began after it");
+  h.free();
+  await first;
+  assert.equal(await second(), true);
+  assert.equal(h.passes, 2, "three wakes during one pass gave one more pass");
+});
+
+test("a wake of one node does not wait for another node's pass, and a wake of an unknown node resolves at once", async (t) => {
+  const h = await heldLoop(t);
+  h.hold();
+  const first = h.loop.wake(node);
+  await h.began(0);
+  assert.equal(await watch(h.loop.wake(h.testbench))(), true, "infra-testbench's pass ran while rj-firebat's waits");
+  assert.equal(await watch(h.loop.wake("rj-nuc" as NodeName))(), true);
+  assert.equal(h.passes, 1, "neither wake ran a pass of rj-firebat");
+  h.free();
+  await first;
+});
+
+test("a wake after close resolves at once and runs no pass", async (t) => {
+  const h = await heldLoop(t);
+  await h.loop.close();
+  await h.loop.wake(node);
+  assert.equal(h.passes, 0);
+});
+
+test("close waits for the pass in flight, and a wake asked for during that pass runs no other", async (t) => {
+  const h = await heldLoop(t);
+  h.hold();
+  const first = h.loop.wake(node);
+  await h.began(0);
+  void h.loop.wake(node);
+  const closed = watch(h.loop.close());
+  assert.equal(await closed(), false);
+  h.free();
+  await first;
+  assert.equal(await closed(), true);
+  assert.equal(h.passes, 1);
 });
 
 const web: ServiceFact = { name: "web", state: "ready", port: 8000, declared: true, wantsPreview: true };

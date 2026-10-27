@@ -56,6 +56,8 @@ function fixture(t: import("node:test").TestContext, options: { path?: string; r
   const checkThreads: ThreadId[] = [];
   const discarded: ThreadId[] = [];
   let delivery: "delivered" | "later" = "delivered";
+  let delivering = 0;
+  let held: { entered: () => void; released: Promise<void> } | null = null;
   const deployers = new Set(["nLAPTOP"]);
   const loop = () => reviewLoop({
     registry, harnessModel: "gpt-6-astra",
@@ -66,7 +68,7 @@ function fixture(t: import("node:test").TestContext, options: { path?: string; r
       async label(_, __, name) { labelCalls.push(name); return labelAnswer(name); },
       async merge(_, __, sha) { merges.push(sha); const answer = mergeAnswer(); if (answer.kind === "merged") snapshot = { ...snapshot, pr: { ...snapshot.pr, state: "merged" }, detail: { ...snapshot.detail, mergeCommit: answer.commit } }; return answer; },
     },
-    inbox: async (target, message) => { if (delivery === "delivered") sent.push({ to: target.id, message }); return delivery; },
+    inbox: async (target, message) => { delivering++; if (held !== null) { held.entered(); await held.released; } if (delivery === "delivered") sent.push({ to: target.id, message }); return delivery; },
     replies: async (target) => replies.get(target.id) ?? [],
     checks: {
       async start() { const id = add(`th-check-${checkThreads.length + 1}`, false, checkCaller); checkThreads.push(id); return id; },
@@ -94,6 +96,15 @@ function fixture(t: import("node:test").TestContext, options: { path?: string; r
     set check(c: CheckState) { check = c; },
     checkThreads, discarded,
     set delivery(d: "delivered" | "later") { delivery = d; },
+    /** How many deliveries the loop has begun, including one still held. */
+    get delivering() { return delivering; },
+    /** Holds every delivery until the returned release is called, so a test can act while a pass waits on the inbox. */
+    holdDeliveries() {
+      const entered = Promise.withResolvers<void>();
+      const released = Promise.withResolvers<void>();
+      held = { entered: entered.resolve, released: released.promise };
+      return { entered: entered.promise, release() { held = null; released.resolve(); } };
+    },
     tick(ms: number) { clock += ms; },
     review: () => registry.review(builder)!,
     watched(state: "open" | "merged" | "closed") { registry.savePrWatch(builder, { links: [{ pr: { ...pr, state }, seen: [], failed: false }], commentWakes: 0, pending: null, error: null }); },
@@ -195,6 +206,52 @@ test("a message the inbox cannot deliver yet is sent again under the same reques
   await loop.poll();
   await loop.poll();
   assert.deepEqual(f.sent.map((s) => s.message.id), [`${f.review().id}:1`]);
+});
+
+/** Reads whether the promise has settled, after the turns of the event loop it would need to. */
+function watch(promise: Promise<unknown>) {
+  let settled = false;
+  void promise.then(() => { settled = true; });
+  return async () => { await new Promise((resolve) => setImmediate(resolve)); return settled; };
+}
+
+/** A review whose request to the reviewer the inbox keeps putting off, so each pass tries to deliver it once. */
+async function undelivered(t: import("node:test").TestContext) {
+  const f = fixture(t);
+  const loop = f.loop();
+  f.delivery = "later";
+  await loop.start(f.builder, { land: null });
+  await loop.close();
+  return { f, loop, before: f.delivering };
+}
+
+test("a poll while a pass runs joins it and settles after it, and a poll after it settles runs a new pass", async (t) => {
+  const { f, loop, before } = await undelivered(t);
+  const held = f.holdDeliveries();
+  const first = loop.poll();
+  await held.entered;
+  const second = watch(loop.poll());
+  assert.equal(await second(), false, "the joined poll waits for the pass it joined");
+  held.release();
+  await first;
+  assert.equal(await second(), true);
+  assert.equal(f.delivering, before + 1, "one pass ran for both polls");
+  await loop.poll();
+  assert.equal(f.delivering, before + 2);
+});
+
+test("close waits for the pass in flight", async (t) => {
+  const { f, loop, before } = await undelivered(t);
+  const held = f.holdDeliveries();
+  void loop.poll();
+  await held.entered;
+  const closed = watch(loop.close());
+  assert.equal(await closed(), false);
+  f.delivery = "delivered";
+  held.release();
+  assert.equal(await closed(), true);
+  assert.equal(f.delivering, before + 1);
+  assert.equal(f.sent.length, 1, "the pass delivered before close resolved");
 });
 
 test("a harness builder gets a Claude reviewer only where the project grants a Claude token, and its prompt runs as given", async (t) => {

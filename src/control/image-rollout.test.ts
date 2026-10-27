@@ -101,8 +101,8 @@ function setup(t: TestContext, names: readonly NodeName[]) {
     registry.close();
   });
   /** A worker, as a control plane starts one. Its interval never fires within a test, so each pass is one the test asks for. */
-  function start(runs = release): ImageRollout {
-    const worker = startImageRollout({ registry, probes: nodes.probes, buildNode: testbench, recipe: async () => recipe, release: runs, intervalMs: 600_000, log: (line) => logged.push(line) });
+  function start(runs = release, probes = nodes.probes): ImageRollout {
+    const worker = startImageRollout({ registry, probes, buildNode: testbench, recipe: async () => recipe, release: runs, intervalMs: 600_000, log: (line) => logged.push(line) });
     workers.push(worker);
     return worker;
   }
@@ -291,4 +291,101 @@ test("one operation runs at a time, and one that no node could carry out is refu
   assert.equal(worker.rollout(next, "nPHONE" as TailnetNodeId).requestedBy, laptop, "asking again returns the running rollout");
   assert.throws(() => worker.rollout(old, laptop), { status: 409, message: `a rollout of ${next} is running. Wait for it to finish` });
   await assert.rejects(worker.build(laptop), { status: 409, message: `a rollout of ${next} is running. Wait for it to finish` });
+});
+
+/**
+ * A rollout whose fetch on rj-firebat runs, so each pass asks the probe about that job once. Once `hold` is called,
+ * each lookup waits for the test to release it.
+ */
+async function heldRollout(t: TestContext) {
+  const s = withTwoImages(t, [firebat, testbench]);
+  const lookups: { began: PromiseWithResolvers<void>; released: PromiseWithResolvers<void> }[] = [];
+  const nth = (i: number) => lookups[i] ??= { began: Promise.withResolvers(), released: Promise.withResolvers() };
+  let count = 0;
+  let holding = false;
+  const probes = new Map([...s.nodes.probes].map(([node, probe]) => [node, {
+    ...probe,
+    async job(id: JobId) {
+      const lookup = nth(count++);
+      lookup.began.resolve();
+      if (holding) await lookup.released.promise;
+      return probe.job(id);
+    },
+  }]));
+  const worker = s.start(release, probes);
+  worker.rollout(next, laptop);
+  await worker.wake();
+  assert.deepEqual(stepsOf(s.registry.imageOperation()), [[testbench, "done", null], [firebat, "running", null]]);
+  count = 0;
+  lookups.length = 0;
+  return {
+    worker,
+    get passes() { return count; },
+    hold() { holding = true; },
+    began: (i: number) => nth(i).began.promise,
+    release: (i: number) => nth(i).released.resolve(),
+    free() { holding = false; for (const lookup of lookups) lookup.released.resolve(); },
+  };
+}
+
+/** Reads whether the promise has settled, after the turns of the event loop it would need to. */
+function watch(promise: Promise<unknown>) {
+  let settled = false;
+  void promise.then(() => { settled = true; });
+  return async () => { await new Promise((resolve) => setImmediate(resolve)); return settled; };
+}
+
+test("wakes during a pass give exactly one more pass after it, and resolve once that pass has finished", async (t) => {
+  const h = await heldRollout(t);
+  h.hold();
+  const first = h.worker.wake();
+  await h.began(0);
+  const second = watch(h.worker.wake());
+  void h.worker.wake();
+  void h.worker.wake();
+  h.release(0);
+  await Promise.race([h.began(1), first]);
+  assert.equal(h.passes, 2, "another pass began after the one the wakes came during");
+  assert.equal(await second(), false, "a wake waits for the pass that began after it");
+  h.free();
+  await first;
+  assert.equal(await second(), true);
+  assert.equal(h.passes, 2, "three wakes during one pass gave one more pass");
+});
+
+test("a wake after close resolves at once and runs no pass", async (t) => {
+  const h = await heldRollout(t);
+  await h.worker.close();
+  await h.worker.wake();
+  assert.equal(h.passes, 0);
+});
+
+test("close waits for the pass in flight, and a wake asked for during that pass runs no other", async (t) => {
+  const h = await heldRollout(t);
+  h.hold();
+  const first = h.worker.wake();
+  await h.began(0);
+  void h.worker.wake();
+  const closed = watch(h.worker.close());
+  assert.equal(await closed(), false);
+  h.free();
+  await first;
+  assert.equal(await closed(), true);
+  assert.equal(h.passes, 1);
+});
+
+test("a pass that throws rejects its wakes, and the next wake runs a new pass", async (t) => {
+  const s = setup(t, [testbench]);
+  const worker = s.start();
+  const imageOperation = s.registry.imageOperation;
+  let reads = 0;
+  s.registry.imageOperation = () => { reads++; throw new Error("database is locked"); };
+  await Promise.all([
+    assert.rejects(worker.wake(), /database is locked/),
+    assert.rejects(worker.wake(), /database is locked/),
+  ]);
+  assert.equal(reads, 1, "the wake during the pass that threw ran no other");
+  s.registry.imageOperation = () => { reads++; return imageOperation.call(s.registry); };
+  await worker.wake();
+  assert.equal(reads, 2);
 });
