@@ -531,6 +531,46 @@ test("a spawn of a running pylon applies the preview URLs, and finishes a relaun
   assert.deepEqual(actions.map((a) => a.action), ["write-files", "public-urls", "exec", "write-files", "public-urls"], "the relaunch ran once");
 });
 
+test("a spawn for reading leaves the relaunch a wake left pending, with the paused list, and the next spawn finishes it", async () => {
+  const { backend, instances } = await backendWith();
+  const dir = await leftInstance(instances, "pylon-read", "running");
+  const paused = [{ id: "w1:p1", herdrPane: "w1:p1", harness: "shell", harnessSessionId: null, title: "sh" }];
+  await writeFile(join(dir, "nexus-checkpoint.json"), JSON.stringify({ checkpoint: "ckpt-read-1", relaunch: true, sessions: paused }));
+  const { actions } = await fakeController(dir, "pylon-read", (action) => {
+    if (action.action === "write-files" || action.action === "public-urls") return {};
+    if (action.action === "exec") return finished(3);
+    return assert.fail(`unexpected ${action.action}`);
+  });
+  await backend.ensureRunning(bootOf("pylon-read"), live, signal(), false);
+  assert.deepEqual(actions.map((a) => a.action), ["write-files", "public-urls"]);
+  assert.deepEqual(JSON.parse(await readFile(join(dir, "nexus-checkpoint.json"), "utf8")), { checkpoint: "ckpt-read-1", relaunch: true, sessions: paused });
+
+  await backend.ensureRunning(bootOf("pylon-read"), live, signal());
+  assert.deepEqual(actions.map((a) => a.action), ["write-files", "public-urls", "write-files", "public-urls", "exec"]);
+  assert.deepEqual(JSON.parse(await readFile(join(dir, "nexus-checkpoint.json"), "utf8")), { checkpoint: "ckpt-read-1" });
+});
+
+test("a pause of a pylon whose sessions never came back records nothing, also when its stop is tried again, and keeps the list it had", async () => {
+  const { backend, instances } = await backendWith();
+  const dir = await leftInstance(instances, "pylon-unread", "running");
+  await writeFile(join(dir, "controller.log"), "");
+  const paused = [{ id: "w1:p1", herdrPane: "w1:p1", harness: "shell", harnessSessionId: null, title: "sh" }];
+  await writeFile(join(dir, "nexus-checkpoint.json"), JSON.stringify({ checkpoint: "ckpt-unread-1", relaunch: true, sessions: paused }));
+  let stops = 0;
+  const controller = await fakeController(dir, "pylon-unread", (action) => {
+    if (action.action !== "stop") return assert.fail(`unexpected ${action.action}`);
+    if (++stops === 1) throw new Error("the disk is busy");
+    controller.state.current = "stopped";
+    return { name: "pylon-unread", state: "stopped" };
+  });
+  await assert.rejects(backend.ensurePaused("pylon-unread" as PylonId, "ckpt-unread-2", signal()), { code: "checkpoint-failed" });
+  await backend.ensurePaused("pylon-unread" as PylonId, "ckpt-unread-2", signal());
+  assert.deepEqual(controller.actions.map((a) => a.action), ["stop", "stop"]);
+  assert.equal(await readFile(join(dir, "controller.log"), "utf8"), "");
+  assert.deepEqual(JSON.parse(await readFile(join(dir, "nexus-checkpoint.json"), "utf8")), { checkpoint: "ckpt-unread-2", sessions: paused });
+  assert.deepEqual((await backend.list()).map((p) => [p.vm, p.checkpoint, p.sessions]), [["stopped", "ckpt-unread-2", paused]]);
+});
+
 test("a pylon boots only from a template on this node that is a disk over its own image", async () => {
   const { backend, instances } = await backendWith();
   const missing = bootOf("pylon-tpl", { source: { kind: "template", template: "tpl-absent000000" } });

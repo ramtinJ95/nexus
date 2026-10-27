@@ -18,7 +18,8 @@ import type { BootInputs, LiveSpec, PylonSource, SessionHarness } from "./projec
 import type { ArtifactId, CheckpointId } from "./images.ts";
 
 export type ThreadStatus = "active" | "idle" | "archived" | "deleted";
-export type DesiredPhase = "running" | "paused" | "deleted";
+/** `reading` runs an archived thread's pylon for the usage backfill without bringing its sessions back. */
+export type DesiredPhase = "running" | "reading" | "paused" | "deleted";
 
 export interface ActivityFacts {
   status: ThreadStatus;
@@ -27,6 +28,8 @@ export interface ActivityFacts {
   agentTurnRunning: boolean; // the pi-durable turn for this thread, known locally
   lastAgentActivityAt: number; // pi-durable turns, Claude hooks and other observed sessions in `working`
   lastHumanActivityAt: number; // messages, attached terminals, preview hits, dashboard opens
+  /** The usage backfill reads this archived thread's pylon now. */
+  readingUsage?: boolean;
 }
 
 /** Amp's numbers. */
@@ -34,7 +37,7 @@ export const idlePolicy = { agentIdleMs: 5 * 60_000, humanIdleMs: 20 * 60_000 } 
 
 export function desiredPhase(a: ActivityFacts, now: number): DesiredPhase {
   if (a.status === "deleted") return "deleted";
-  if (a.status === "archived") return "paused";
+  if (a.status === "archived") return a.readingUsage === true ? "reading" : "paused";
   // A preview hit on a paused pylon updates lastHumanActivityAt, which is what wakes it.
   const busy = a.agentTurnRunning || (a.sessionActiveUntil ?? 0) > now
     || now - a.lastAgentActivityAt < idlePolicy.agentIdleMs
@@ -107,6 +110,8 @@ const planRules: readonly Rule[] = [
   (i) => i.inFlight?.state === "running" ? wait("in-flight") : null,
   // 3. Delete ignores the attempt budget. A pylon removed by hand is absent but may still have previews published.
   (i) => i.desired !== "deleted" ? null : i.observed === "absent" && !i.previewsRouted ? done : submit({ kind: "delete", pylonId: i.pylonId }),
+  // A failed wake for reading is tried once and never fails the pylon. The backfill gives up on it and clears the attempt.
+  (i) => i.desired === "reading" && i.attempts.last !== null ? wait("backoff") : null,
   // 4.
   ({ attempts: { last } }) => last !== null && !retryable[last.code] ? fail(`last job failed with ${last.code}, which is not retryable: ${last.message}`) : null,
   ({ attempts: { count, last } }) => last !== null && count >= maxAttempts ? fail(`gave up after ${count} failed attempts, the last with ${last.code}: ${last.message}`) : null,
@@ -140,12 +145,13 @@ const planRules: readonly Rule[] = [
     if (from === undefined) return fail(`artifact-missing: no online node holds ${missing}`);
     return submit({ kind: "fetch-artifact", artifact: missing, from, sha256: i.artifactSha256(missing) });
   },
-  // 7c.
-  ({ observed: o, liveHash }) => o !== "absent" && o.phase === "running" && o.liveHash === liveHash ? done : null,
+  // 7c. A pylon woken for reading needs nothing of `live`, and its probe reports no liveHash for a spawn that did not
+  // bring the sessions back, so the spawn once its thread runs again brings them back.
+  ({ observed: o, liveHash, desired }) => o !== "absent" && o.phase === "running" && (o.liveHash === liveHash || desired === "reading") ? done : null,
   // 7d. A probe older than a held secret fails the spawn for good, as in a deploy that upgrades the control plane first,
   // and one that has not been handed it yet, as after a restart, would boot a pylon whose first requests are refused.
   (i) => i.boot.network.secrets.some((s) => heldSecrets.includes(s.name) && !i.nodeSecrets.has(s.name)) ? wait("held-secret") : null,
-  (i) => submit({ kind: "spawn", pylonId: i.pylonId, boot: { ...i.boot, source: bootSource(i) }, live: i.live, liveHash: i.liveHash }),
+  (i) => submit({ kind: "spawn", pylonId: i.pylonId, boot: { ...i.boot, source: bootSource(i) }, live: i.live, liveHash: i.liveHash, ...(i.desired === "reading" ? { relaunch: false } : {}) }),
 ];
 
 /**

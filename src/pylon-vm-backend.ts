@@ -83,7 +83,8 @@ const pausedSessionSchema = z.strictObject({
 });
 /**
  * `relaunch` is set before a boot from the instance's own disk and cleared once its sessions are relaunched.
- * `sessions` is what the last pause recorded, which list() reports while the instance is stopped. Every boot drops it.
+ * `sessions` is what the last pause recorded, which list() reports while the instance is stopped. Every boot drops it,
+ * but one that leaves the relaunch for a later spawn, whose sessions never came back, so its pause keeps the list.
  */
 const sidecarSchema = z.strictObject({
   checkpoint: checkpointId.nullable(), pausing: checkpointId.optional(), relaunch: z.literal(true).optional(), sessions: z.array(pausedSessionSchema).optional(),
@@ -289,8 +290,8 @@ export function createPylonVmBackend(options: PylonVmBackendOptions): VmBackend 
 
   /** Before a boot. A pause that reached stopped wrote its checkpoint. Any other pending pause did not. */
   async function settleSidecar(pylonId: PylonId, stopped: boolean): Promise<void> {
-    const { checkpoint, pausing } = await readSidecar(pylonId);
-    if (pausing !== undefined) await writeSidecar(pylonId, { checkpoint: stopped ? pausing : checkpoint });
+    const { pausing, ...sidecar } = await readSidecar(pylonId);
+    if (pausing !== undefined) await writeSidecar(pylonId, { ...sidecar, checkpoint: stopped ? pausing : sidecar.checkpoint });
   }
 
   /** A published image only. Gondolin checks the assets themselves when it boots them. */
@@ -511,7 +512,7 @@ export function createPylonVmBackend(options: PylonVmBackendOptions): VmBackend 
     eventJournal: `${stateRoot}/events.sqlite`,
     hostBridge: pylonVmHostBridge(stateRoot),
 
-    async ensureRunning(bootInputs, live, signal) {
+    async ensureRunning(bootInputs, live, signal, relaunch = true) {
       const { pylonId } = bootInputs;
       const name = instanceName(pylonId);
       for (;;) {
@@ -528,7 +529,7 @@ export function createPylonVmBackend(options: PylonVmBackendOptions): VmBackend 
             await sandbox({ action: "write-files", name, files: live.overlay }, signal);
             await sandbox({ action: "public-urls", name, urls: publicUrls(pylonId, live.previews, options.previewHost) }, signal);
             const sidecar = await readSidecar(pylonId);
-            if (sidecar.relaunch) {
+            if (sidecar.relaunch && relaunch) {
               await relaunchAfterWake(pylonId, pylonGuest(pylonId, instanceDir(pylonId), sandbox), controllerLog(instanceDir(pylonId)));
               await writeSidecar(pylonId, { checkpoint: sidecar.checkpoint });
             }
@@ -541,7 +542,8 @@ export function createPylonVmBackend(options: PylonVmBackendOptions): VmBackend 
             await refuseFixedChanges(bootInputs, instance);
             const spec = await bootSpec(bootInputs, live);
             await settleSidecar(pylonId, instance.status.state === "stopped");
-            await writeSidecar(pylonId, { checkpoint: (await readSidecar(pylonId)).checkpoint, relaunch: true });
+            const sidecar = await readSidecar(pylonId);
+            await writeSidecar(pylonId, { checkpoint: sidecar.checkpoint, relaunch: true, ...relaunch ? {} : sessionsOf(sidecar.sessions) });
             await boot(pylonId, () => sandbox({ action: "start", name, boot: spec }, signal), signal);
             continue;
           }
@@ -566,11 +568,14 @@ export function createPylonVmBackend(options: PylonVmBackendOptions): VmBackend 
           await sandbox({ action: "destroy", kind: "instances", name, confirm: name });
           return;
         }
-        // While the guest still runs, so the checkpoint carries the record. A dead controller's disk keeps its last one.
-        const recorded = instance.status.state === "running" ? await recordBeforePause(pylonGuest(pylonId, instanceDir(pylonId), sandbox), controllerLog(instanceDir(pylonId))) : null;
-        // A list already here is from an earlier try of this pause, since every boot drops it, and the disk still holds that record.
+        // A list already here is from an earlier try of this pause, or from before a boot whose sessions never came back,
+        // and the disk still holds that record.
         const sidecar = await readSidecar(pylonId);
-        await writeSidecar(pylonId, { checkpoint: sidecar.checkpoint, pausing: checkpoint, ...sessionsOf(recorded ?? sidecar.sessions) });
+        // While the guest still runs, so the checkpoint carries the record. A dead controller's disk keeps its last one,
+        // and so does a guest whose sessions never came back, which Herdr would record as none.
+        const recorded = instance.status.state === "running" && !sidecar.relaunch
+          ? await recordBeforePause(pylonGuest(pylonId, instanceDir(pylonId), sandbox), controllerLog(instanceDir(pylonId))) : null;
+        await writeSidecar(pylonId, { ...sidecar, pausing: checkpoint, ...sessionsOf(recorded ?? sidecar.sessions) });
         switch (instance.status.state) {
           // A running VM checkpoints its disk. One whose controller died settles on its last completed checkpoint.
           case "running": case "interrupted": case "failed":

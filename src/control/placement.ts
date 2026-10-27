@@ -39,7 +39,7 @@ function weigh(registry: Registry, node: NodeRecord, need: Need): Weighed {
   if (ssh.length > 0 && !o.grants.gitSsh) return refused(`has no git SSH key to reach ${ssh.join(" and ")}`);
   const now = Date.now();
   const pending = [...registry.pylonsOn(node.name)
-    .filter((p) => p.failed === null && desiredPhase(registry.thread(p.thread as ThreadId)!, now) === "running")
+    .filter((p) => p.failed === null && ["running", "reading"].includes(desiredPhase(registry.thread(p.thread as ThreadId)!, now)))
     .map((p) => uncounted(p, o.pylons.find((seen) => seen.pylonId === p.pylonId))), ...registry.reserved(node.name)]
     .reduce((total, r) => ({ cpus: total.cpus + r.cpus, memoryGiB: total.memoryGiB + r.memoryGiB, diskGiB: total.diskGiB + r.diskGiB }), { cpus: 0, memoryGiB: 0, diskGiB: 0 });
   const { capacity: c } = o;

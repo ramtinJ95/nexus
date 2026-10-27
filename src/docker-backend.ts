@@ -132,6 +132,7 @@ export function createDockerBackend(options: DockerBackendOptions): VmBackend {
    */
   const relaunchMark = "/var/lib/nexus/relaunch";
   const markRelaunch = (pylonId: PylonId) => docker(["exec", pylonId, "sh", "-c", 'mkdir -p "${1%/*}" && touch "$1"', "sh", relaunchMark]);
+  const relaunchPending = async (pylonId: PylonId) => await docker(["exec", pylonId, "sh", "-c", 'test -e "$1" && echo marked || true', "sh", relaunchMark]) === "marked";
 
   /** The sessions a stopped container's sessions file holds, by way of a host copy. None when it has no file. */
   async function stoppedSessions(id: string, signal: AbortSignal): Promise<readonly PausedSession[]> {
@@ -147,14 +148,17 @@ export function createDockerBackend(options: DockerBackendOptions): VmBackend {
     }
   }
 
-  /** Writes the overlay, applies the live spec's URLs to the services, and relaunches the sessions of a boot from an existing disk. */
-  async function afterBoot(pylonId: PylonId, overlay: readonly OverlayFile[], urls: Record<string, string>, disk: "fresh" | "existing" | "running"): Promise<void> {
+  /**
+   * Writes the overlay, applies the live spec's URLs to the services, and relaunches the sessions of a boot from an
+   * existing disk, unless `relaunch` is false, which leaves the mark for a later spawn.
+   */
+  async function afterBoot(pylonId: PylonId, overlay: readonly OverlayFile[], urls: Record<string, string>, disk: "fresh" | "existing" | "running", relaunch: boolean): Promise<void> {
     // A checkpoint carries the mark from its pause. A container stopped some other way gets it here.
     if (disk === "existing") await markRelaunch(pylonId);
     // Before the services and sessions start, as in a pylon, so both read this spawn's files.
     await guest(pylonId).writeFiles(overlay);
     await services.apply(pylonId, urls, disk !== "running");
-    if (await docker(["exec", pylonId, "sh", "-c", 'test -e "$1" && echo marked || true', "sh", relaunchMark]) !== "marked") return;
+    if (!relaunch || !await relaunchPending(pylonId)) return;
     await relaunchAfterWake(pylonId, guest(pylonId), containerLog(pylonId));
     await docker(["exec", pylonId, "rm", "-f", relaunchMark]);
   }
@@ -261,14 +265,14 @@ export function createDockerBackend(options: DockerBackendOptions): VmBackend {
     // Each container's NEXUS_API names the port, so only a backend given a fixed one answers it.
     ...(options.hostBridgePort === undefined ? {} : { hostBridge: dockerHostBridge(options.hostBridgePort, options.labels) }),
 
-    async ensureRunning(boot, live, signal) {
+    async ensureRunning(boot, live, signal, relaunch = true) {
       const urls = publicUrls(boot.pylonId, live.previews, options.previewHost);
       const existing = await container(boot.pylonId, signal);
-      if (existing?.State.Status === "running") return afterBoot(boot.pylonId, live.overlay, urls, "running");
+      if (existing?.State.Status === "running") return afterBoot(boot.pylonId, live.overlay, urls, "running", relaunch);
       // A container that exists holds the newest disk, newer than any checkpoint, so it is started as it is.
       if (existing !== null) {
         await docker(["start", existing.Id], signal);
-        return afterBoot(boot.pylonId, live.overlay, urls, "existing");
+        return afterBoot(boot.pylonId, live.overlay, urls, "existing", relaunch);
       }
       let from: string;
       let bootedFrom: CheckpointId | null = null;
@@ -296,24 +300,27 @@ export function createDockerBackend(options: DockerBackendOptions): VmBackend {
         ...(options.hostBridgePort === undefined ? [] : dockerBridgeRunArgs(options.hostBridgePort)),
         from, "sleep", "infinity",
       ], signal);
-      await afterBoot(boot.pylonId, live.overlay, urls, bootedFrom === null ? "fresh" : "existing");
+      await afterBoot(boot.pylonId, live.overlay, urls, bootedFrom === null ? "fresh" : "existing", relaunch);
     },
 
     async ensurePaused(pylonId, checkpoint, signal) {
       const existing = await container(pylonId, signal);
       // No container: only checkpoints remain, or nothing does. Both are already paused.
       if (existing === null) return;
-      let recorded: readonly PausedSession[] | null;
-      if (existing.State.Status === "running") {
-        recorded = await recordBeforePause(guest(pylonId), containerLog(pylonId));
-        await markRelaunch(pylonId);
-      } else {
+      const encoded = (recorded: readonly PausedSession[] | null) => recorded === null ? "" : Buffer.from(JSON.stringify(recorded)).toString("base64url");
+      let sessions: string;
+      if (existing.State.Status !== "running") {
         // Such as a pause that died after its stop: the file on the disk is what the wake relaunches.
-        recorded = await stoppedSessions(existing.Id, signal);
+        sessions = encoded(await stoppedSessions(existing.Id, signal));
+      } else if (await relaunchPending(pylonId)) {
+        // Its sessions never came back, so Herdr would record none, and the checkpoint it booted from has their list.
+        sessions = labelsOf(existing)[label.sessions] ?? "";
+      } else {
+        sessions = encoded(await recordBeforePause(guest(pylonId), containerLog(pylonId)));
+        await markRelaunch(pylonId);
       }
       await docker(["stop", existing.Id], signal);
       // Set either way, because a container booted from a checkpoint carries that checkpoint's labels.
-      const sessions = recorded === null ? "" : Buffer.from(JSON.stringify(recorded)).toString("base64url");
       const labels = { ...labelsOf(existing), [label.checkpoint]: checkpoint, [label.sessions]: sessions };
       await docker([
         "commit",
