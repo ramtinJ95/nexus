@@ -58,7 +58,8 @@ export interface HarnessHostOptions {
 export interface HarnessHost {
   /**
    * Creates the thread's conversation and returns its ID. Write the registry row with that ID afterwards: a
-   * crash in between leaves an empty conversation that nothing points to, which is harmless.
+   * crash in between leaves an empty conversation that nothing points to, which is harmless. A thread that already
+   * has one gets it back, so a queued thread's start that failed after this can run again.
    */
   startThread(thread: { threadId: string; pylonId: PylonId }): Promise<ConversationId>;
   /**
@@ -125,7 +126,8 @@ export async function openHarnessHost(options: HarnessHostOptions): Promise<Harn
   return {
     activity,
     async startThread({ threadId, pylonId }) {
-      if (conversations.has(threadId)) throw new Error(`thread ${threadId} already has conversation ${conversations.get(threadId)}`);
+      const existing = conversations.get(threadId);
+      if (existing !== undefined) return existing;
       const created = await harness.createConversation({
         ownership: { kind: "ownerless" },
         agent: { model: options.model, cwd: checkoutDir },

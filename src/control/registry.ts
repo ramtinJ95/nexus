@@ -12,6 +12,7 @@ import type { Drain, ReleaseReport } from "../deploy/model.ts";
  * the control plane reads them, always whole, so they need no columns of their own.
  */
 import type { PrWatchState } from "./pr-watch.ts";
+import type { QueuedRecord } from "./queue.ts";
 import type { Placement } from "./placement.ts";
 import { DatabaseSync, type StatementSync } from "node:sqlite";
 import type { ActivityFacts, RegistryWrite, ThreadStatus } from "../reconcile.ts";
@@ -292,6 +293,9 @@ const migrations: readonly string[] = [
   // It touches nothing an earlier migration made, so a registry rewound past it applies it again unchanged.
   `CREATE TABLE IF NOT EXISTS passkeys (id TEXT PRIMARY KEY, credential_id TEXT NOT NULL UNIQUE, record TEXT NOT NULL) STRICT;
    CREATE TABLE IF NOT EXISTS passkey_codes (hash TEXT PRIMARY KEY, expires_at INTEGER NOT NULL, used_at INTEGER) STRICT;`,
+  // Threads queued to start once other threads' pull requests merge, keyed by the ID the thread gets when it starts.
+  // It touches nothing an earlier migration made, so a registry rewound past it applies it again unchanged.
+  `CREATE TABLE IF NOT EXISTS queued_threads (id TEXT PRIMARY KEY, record TEXT NOT NULL) STRICT;`,
 ];
 
 type Row = Record<string, unknown>;
@@ -488,6 +492,15 @@ export function openRegistry(path: string, clock = Date.now) {
         url: `https://${r.tailnet_host as string}:${r.https_port as number}/`,
       };
     });
+  }
+
+  function queuedThread(id: ThreadId): QueuedRecord | undefined {
+    const row = sql("SELECT record FROM queued_threads WHERE id = ?").get(id);
+    return row === undefined ? undefined : json<QueuedRecord>(row.record);
+  }
+
+  function saveQueued(record: QueuedRecord) {
+    sql("INSERT INTO queued_threads (id, record) VALUES (?, ?) ON CONFLICT (id) DO UPDATE SET record = excluded.record").run(record.id, JSON.stringify(record));
   }
 
   function threadOfPylon(pylonId: PylonId): ThreadId | undefined {
@@ -848,10 +861,18 @@ export function openRegistry(path: string, clock = Date.now) {
       return row && json<Project>(row.record);
     },
 
-    /** A thread and its pylon are created together, because a thread always has exactly one pylon. */
-    createThread(thread: Omit<Thread, "seenAt" | "lastReplyAt">, pylon: StoredPylon, claudePrompt?: string, model = defaultClaudeModel) {
+    /**
+     * A thread and its pylon are created together, because a thread always has exactly one pylon. A `queued` thread's
+     * queue record is marked started in the same transaction, so a queued thread starts at most once.
+     */
+    createThread(thread: Omit<Thread, "seenAt" | "lastReplyAt">, pylon: StoredPylon, claudePrompt?: string, model = defaultClaudeModel, queued = false) {
       if (pylon.pylonId !== thread.pylonId || pylon.thread !== thread.id) throw new Error(`pylon ${pylon.pylonId} does not belong to thread ${thread.id}`);
       transaction(() => {
+        if (queued) {
+          const record = queuedThread(thread.id);
+          if (record === undefined || record.status !== "queued") throw new Error(`thread ${thread.id} is no longer queued`);
+          saveQueued({ ...record, status: "started", startedAt: thread.createdAt, lastError: null, firstMessage: record.message === null ? null : "pending" });
+        }
         q.insertThread.run(thread.id, thread.title, thread.project, thread.status, thread.conversationId, thread.startedBy, thread.createdAt,
           thread.agentTurnRunning ? 1 : 0, thread.lastAgentActivityAt, thread.lastHumanActivityAt, thread.placement === undefined ? null : JSON.stringify(thread.placement),
           thread.setup === undefined ? null : JSON.stringify(thread.setup));
@@ -859,6 +880,9 @@ export function openRegistry(path: string, clock = Date.now) {
         if (claudePrompt !== undefined) sql("INSERT INTO claude_workers (thread, prompt, state, model) VALUES (?, ?, 'pending', ?)").run(thread.id, claudePrompt, model);
       });
     },
+    queuedThreads: (): QueuedRecord[] => sql("SELECT record FROM queued_threads ORDER BY rowid").all().map((r) => json<QueuedRecord>(r.record)),
+    queuedThread,
+    saveQueued,
     threads: (project?: ProjectId) => ((project === undefined ? q.threads.all() : q.threadsOf.all(project)) as Row[]).map(withSessions),
     thread(id: ThreadId): Thread | undefined {
       const row = q.thread.get(id) as Row | undefined;
