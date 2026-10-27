@@ -115,10 +115,10 @@ export type Label = { state: "adding" } | { state: "added" } | { state: "failed"
 export type PhaseKind = Phase["kind"];
 
 /**
- * The person's waiver of holds the policy reserves for them, confirmed with a passkey for this review at `head`. It
- * lasts for the landing it started, and a later land replaces it.
+ * The person's waiver of holds the policy reserves for them, for this review at `head`. It lasts for the landing it
+ * started, and a later land replaces it.
  */
-export interface Waiver { head: string; holds: string[]; passkey: { id: string; name: string }; by: string; at: number }
+export interface Waiver { head: string; holds: string[]; by: string; at: number }
 
 export interface Review {
   /** Part of every token and request ID, so a later review of the same thread never matches an earlier one's. */
@@ -668,30 +668,25 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
     },
 
     /**
-     * The review the person may land at `head` waiving `holds` with a passkey: it is landable at that head, and each
-     * hold is one it has now and one the person may waive.
-     */
-    waivable(builderId: ThreadId, head: string, holds: readonly string[]): Review {
-      const r = landableAt(builderId, head);
-      const held = heldBy(r);
-      if (holds.length === 0) throw new HttpError(400, "a waiver names at least one hold");
-      for (const hold of holds) {
-        if (!held.includes(hold)) throw new HttpError(409, `review ${r.id} is not held by "${hold}", so there is nothing to waive. Look at it again`);
-        if (!waivable(hold)) throw new HttpError(409, `a passkey cannot waive "${hold}": only the holds the merge policy reserves for the person`);
-      }
-      return r;
-    },
-
-    /**
      * Lands an approved review, or tries again one the policy held, such as after the PR's description changed or the
      * person granted the merge token. It runs the check again first, which finds its result kept for the same head.
      * A PR that already merged is held by the policy, so a land never deploys twice. `head`, when given, is the commit
-     * the person confirmed, so a review that moved on meanwhile is not landed in its place. A `waiver` the person
-     * confirmed with a passkey lets the landing past the holds it names, and the event log records it.
+     * the person confirmed, so a review that moved on meanwhile is not landed in its place. The holds the person
+     * `waive`s, each one the review has now and the policy lets them waive, no longer hold the landing at that head, and
+     * the event log records the waiver.
      */
-    land(builderId: ThreadId, requestedBy: string, head?: string, waiver?: Waiver): Review {
-      const r = waiver === undefined ? landableAt(builderId, head) : this.waivable(builderId, waiver.head, waiver.holds);
-      const next: Review = { ...r, land: { requestedBy }, waiver: waiver ?? null, phase: checking(), outbox: null, nudges: 0 };
+    land(builderId: ThreadId, requestedBy: string, head?: string, waive?: readonly string[]): Review {
+      const r = landableAt(builderId, head);
+      if (waive !== undefined) {
+        const held = heldBy(r);
+        if (waive.length === 0) throw new HttpError(400, "a waiver names at least one hold");
+        for (const hold of waive) {
+          if (!held.includes(hold)) throw new HttpError(409, `review ${r.id} is not held by "${hold}", so there is nothing to waive. Look at it again`);
+          if (!waivable(hold)) throw new HttpError(409, `"${hold}" cannot be waived: only the holds the merge policy reserves for the person`);
+        }
+      }
+      const waiver: Waiver | null = waive === undefined ? null : { head: r.rounds.at(-1)!.head, holds: [...waive], by: requestedBy, at: now() };
+      const next: Review = { ...r, land: { requestedBy }, waiver, phase: checking(), outbox: null, nudges: 0 };
       registry.saveReview(next);
       void poll();
       return next;

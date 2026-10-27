@@ -305,53 +305,41 @@ test("a review is not offered for landing when its PR closed, or when the contro
   assert.equal(landingOf((await s.call("GET", `/threads/${fix.id}`)).text), "", "a closed PR has nothing to land");
 });
 
-test("a hold the policy reserves for the person is marked waivable, and lands only with a passkey, which needs the HTTPS address and an enrolled one", async (t) => {
+test("a hold the policy reserves for the person is marked waivable, and pressing Land waives it", async (t) => {
   const reserved = "Always needs the person: changes to login or auth, as it changes src/control/api.ts.";
-  const held = approvedReview("" as ThreadId, { kind: "needs-person", reasons: ["The pull request's GitHub checks are pending.", reserved] }, { land: { requestedBy: laptop } });
-  const plain = await seeded(t, landingOptions());
-  const off = await plain.start("acme", "Fix checkout");
-  plain.registry.saveReview({ ...held, builder: off.id });
-  const region = textOf(landingOf((await plain.call("GET", `/threads/${off.id}`)).text));
-  assert.match(region, /The pull request's GitHub checks are pending\. not waivable Failing or pending GitHub checks hold every landing until they pass\. /);
-  assert.match(region, /src\/control\/api\.ts\. you may waive The policy reserves this for you, and your passkey shows that you, not an agent, confirmed it\. /);
-  assert.match(region, /Land #7 with a passkey Waiving a hold needs your passkey, and passkeys need the dashboard's HTTPS address, which the control plane's config does not set \(https\.hostname\)\.$/);
-  assert.ok(!region.includes('data-action'), "no button lands it past the hold without a passkey");
-
-  const origin = "https://rj-firebat.example.ts.net:7443";
-  const s = await seeded(t, { ...landingOptions(), passkeys: { id: "rj-firebat.example.ts.net", origin } });
+  const s = await seeded(t, landingOptions());
   const fix = await s.start("acme", "Fix checkout");
-  s.registry.saveReview({ ...held, builder: fix.id });
-  assert.match(textOf(landingOf((await s.call("GET", `/threads/${fix.id}`)).text)), /Land #7 with a passkey Waiving a hold needs your passkey, and none is enrolled\. Enrol one on the Passkeys page with a code from the control plane's host\.$/);
-
-  s.registry.addPasskeyCode("h", Number.MAX_SAFE_INTEGER);
-  s.registry.enrolPasskey({ id: "pk-0000000a", name: "MacBook Touch ID", credentialId: "c", publicKey: "k", algorithm: -7, signCount: 0, createdAt: 1, createdBy: laptop, lastUsedAt: null }, "h");
+  s.registry.saveReview(approvedReview(fix.id, { kind: "needs-person", reasons: ["The pull request's GitHub checks are pending.", reserved] }, { land: { requestedBy: laptop } }));
   const page = landingOf((await s.call("GET", `/threads/${fix.id}`)).text);
-  const button = /<button [^>]*data-action="waive"[^>]*>/.exec(page)?.[0];
-  assert.ok(button !== undefined, "an enrolled passkey gets the button");
-  assert.match(button, new RegExp(`data-head="${head}"`));
-  assert.deepEqual(JSON.parse(textOf(/data-holds="([^"]*)"/.exec(button)![1]!)), [reserved], "it waives only what a passkey may");
-  assert.match(button, new RegExp(`data-origin="${origin}"`));
-  assert.equal(textOf(/data-confirm="([^"]*)"/.exec(button)![1]!), `Land pull request #7, "Cache", at commit ${head.slice(0, 12)}, waiving the hold the merge policy reserves for you? Your passkey confirms it was you. Nexus checks everything else again, merges that commit and deploys the merge commit.`);
+  const region = textOf(page);
+  assert.match(region, /The pull request's GitHub checks are pending\. not waivable Failing or pending GitHub checks hold every landing until they pass\. /);
+  assert.match(region, /src\/control\/api\.ts\. you may waive The policy reserves this for you, and pressing Land here is you waiving it\. /);
+  const button = /<button [^>]*data-action="land"[^>]*>([^<]*)<\/button>/.exec(page);
+  assert.ok(button !== null, "a deployer gets the button");
+  assert.equal(button[1], "Land #7");
+  assert.match(button[0], new RegExp(`data-head="${head}"`));
+  assert.deepEqual(JSON.parse(textOf(/data-holds="([^"]*)"/.exec(button[0])![1]!)), [reserved], "it waives only what the person may");
+  assert.equal(textOf(/data-confirm="([^"]*)"/.exec(button[0])![1]!), `Land pull request #7, "Cache", at commit ${head.slice(0, 12)}, waiving the hold the merge policy reserves for you? Nexus checks everything else again, merges that commit and deploys the merge commit.`);
+  assert.match(region, /Land #7 Pressing Land waives what is marked "you may waive", for commit 9f9f9f9f9f9f only\. Landing checks everything else again\.$/);
   s.callAs(phone);
-  assert.match(textOf(landingOf((await s.call("GET", `/threads/${fix.id}`)).text)), /Land #7 with a passkey This device cannot land/);
+  const refused = landingOf((await s.call("GET", `/threads/${fix.id}`)).text);
+  assert.ok(!refused.includes("data-action"), "a device that is not a deployer gets no working button");
+  assert.match(textOf(refused), /Land #7 This device cannot land/);
   s.callAs(laptop);
+
+  s.registry.saveReview(approvedReview(fix.id, { kind: "approved" }, { land: { requestedBy: laptop } }));
+  assert.ok(!landingOf((await s.call("GET", `/threads/${fix.id}`)).text).includes("data-holds"), "a card with nothing to waive waives nothing");
 
   s.registry.saveReview(approvedReview(fix.id, { kind: "approved" }, { reviewerKind: "claude" }));
   const claude = textOf(landingOf((await s.call("GET", `/threads/${fix.id}`)).text));
-  assert.match(claude, /A Claude reviewer approved it\..* holds again A passkey cannot stand in for a harness reviewer's approval.*no passkey waives it\. Only you can get past it, by merging the pull request on GitHub and deploying it with nexus deploy\.$/, "an approval the policy never lands is marked before any landing tries");
+  assert.match(claude, /A Claude reviewer approved it\..* holds again Nothing here stands in for a harness reviewer's approval.* holds every landing of this commit\. Only you can get past it, by merging the pull request on GitHub and deploying it with nexus deploy\.$/, "an approval the policy never lands is marked before any landing tries");
   assert.ok(!claude.includes("Land #7"));
 });
 
-test("the Passkeys page lists the person's passkeys and enrols one with the code from the host", async (t) => {
-  const s = await seeded(t, { passkeys: { id: "rj-firebat.example.ts.net", origin: "https://rj-firebat.example.ts.net:7443" } });
-  s.registry.addPasskeyCode("h", Number.MAX_SAFE_INTEGER);
-  s.registry.enrolPasskey({ id: "pk-0000000a", name: "MacBook Touch ID", credentialId: "c", publicKey: "k", algorithm: -7, signCount: 0, createdAt: Date.UTC(2026, 9, 27, 9), createdBy: laptop, lastUsedAt: null }, "h");
-  const page = (await s.call("GET", "/passkeys?code=ABCD-EFGH")).text;
-  assert.match(textOf(page), /MacBook Touch ID pk-0000000a 2026-10-27 09:00 from nLAPTOP never Revoke/);
-  assert.match(page, /data-action="revoke-passkey" data-passkey="pk-0000000a"/);
-  assert.match(page, /<input name="code"[^>]* value="ABCD-EFGH"/, "the address the host command prints fills in its code");
-  assert.match(textOf(page), /sudo node \/opt\/nexus\/control-current\/src\/control\/passkeys-host\.ts \/etc\/nexus\/control\.json code/);
-  assert.match((await s.call("GET", "/")).text, /href="\/passkeys"/, "every page links to it");
+test("the dashboard has no Passkeys page and links to none", async (t) => {
+  const s = await seeded(t, {});
+  assert.equal((await s.call("GET", "/passkeys")).status, 404);
+  assert.doesNotMatch((await s.call("GET", "/")).text, /passkey/i);
 });
 
 test("a landing shows its steps as the review moves through them, until it lands or ends for the person", async (t) => {

@@ -1,0 +1,4 @@
+As the phone:
+POST /v1/threads/th-46ee49cb51dd/land {"head":"7777777777777777777777777777777777777777","waive":["Always needs the person: pylon image rebuilds, as it changes images/pylon/Dockerfile."]}
+=> 403 {"error":"caller may not land a pull request: landing deploys, and only deployers may, never infrastructure nodes or pylons"}
+The review is still needs-person.

@@ -1,0 +1,2 @@
+$ nexus events --thread th-055cc0f3298e --kind review.waived
+exit 0

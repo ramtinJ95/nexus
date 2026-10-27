@@ -1,0 +1,118 @@
+GET /passkeys answered 200
+screenshot 01-passkeys-page.png
+reserved, held: {
+  "landing": "Held for you\n#42 Keep the thread list cache in the registry ↗\n\nHead 444444444444 · approved by gpt-6-astra (harness) in round 1 of 5 · .nexus/check passed\n\nWhy it waits for you\nAlways needs the person: anything irreversible, as it changes src/control/registry.ts. you may waive\nThe policy reserves this for you, and your passkey shows that you, not an agent, confirmed it.\nThe reviewer's findings\nP3 N1: Name the constant\n.nexus/check passed at 444444444444\nLand #42 with a passkey\n\nWaiving a hold needs your passkey, and none is enrolled. Enrol one on the Passkeys page with a code from the control plane's host.",
+  "landButton": "Land #42 with a passkey (disabled)",
+  "error": null
+}
+screenshot 02-held-reserved.png
+$ nexus land th-055cc0f3298e
+Landing review rv-42000000 of PR #42: checking, round 1 of 5, reviewer th-d72d5869115c on gpt-6-astra, landing when approved
+exit 0
+
+03-cli-land: the review is checking {
+  "landing": "Landing\n#42 Keep the thread list cache in the registry ↗\nCheck\nMerge\nDeploy\nLanded\n\n.nexus/check runs at 444444444444, or its kept result for that commit is read.",
+  "landButton": "(no Land button)",
+  "error": null
+}
+screenshot 03-cli-land-1-checking.png
+03-cli-land: the review is needs-person {
+  "landing": "Held for you\n#42 Keep the thread list cache in the registry ↗\n\nHead 444444444444 · approved by gpt-6-astra (harness) in round 1 of 5 · .nexus/check passed\n\nWhy it waits for you\nAlways needs the person: anything irreversible, as it changes src/control/registry.ts. you may waive\nThe policy reserves this for you, and your passkey shows that you, not an agent, confirmed it.\nThe reviewer's findings\nP3 N1: Name the constant\n.nexus/check passed at 444444444444\nLand #42 with a passkey\n\nWaiving a hold needs your passkey, and none is enrolled. Enrol one on the Passkeys page with a code from the control plane's host.",
+  "landButton": "Land #42 with a passkey (disabled)",
+  "error": null
+}
+screenshot 03-cli-land-2-needs-person.png
+$ nexus show th-055cc0f3298e
+th-055cc0f3298e  Cache the thread list
+project: nexus
+attention: decision
+status: active
+pylon: pylon-th-055cc0f3298e on verify-node, running, observed 0s ago
+size: 2 CPUs, 4 GiB memory, 10 GiB disk
+placement: verify-node, the project's default node
+setup: fresh boot runs .nexus/setup, because the control plane could not read .nexus/setup at main: the verify stack reads no remote
+PR watch: on
+review rv-42000000 of PR #42: needs-person, round 1 of 5, reviewer th-d72d5869115c on gpt-6-astra, landing when approved
+needs you: Always needs the person: anything irreversible, as it changes src/control/registry.ts.
+exit 0
+
+the card has no Land button the driver can press: {"landing":"Held for you\n#42 Keep the thread list cache in the registry ↗\n\nHead 444444444444 · approved by gpt-6-astra (harness) in round 1 of 5 · .nexus/check passed\n\nWhy it waits for you\nAlways needs the person: anything irreversible, as it changes src/control/registry.ts. you may waive\nThe policy reserves this for you, and your passkey shows that you, not an agent, confirmed it.\nThe reviewer's findings\nP3 N1: Name the constant\n.nexus/check passed at 444444444444\nLand #42 with a passkey\n\nWaiving a hold needs your passkey, and none is enrolled. Enrol one on the Passkeys page with a code from the control plane's host.","landButton":"Land #42 with a passkey (disabled)","error":null}
+screenshot 04-press-0-needs-passkey.png
+The driver sends the branch's waiving land request from this page.
+POST /v1/threads/th-055cc0f3298e/land {"head":"4444444444444444444444444444444444444444","waive":["Always needs the person: anything irreversible, as it changes src/control/registry.ts."]}
+=> 400 {"error":"✖ Unrecognized key: \"waive\""}
+The review is still needs-person.
+$ nexus show th-055cc0f3298e
+th-055cc0f3298e  Cache the thread list
+project: nexus
+attention: decision
+status: active
+pylon: pylon-th-055cc0f3298e on verify-node, running, observed 0s ago
+size: 2 CPUs, 4 GiB memory, 10 GiB disk
+placement: verify-node, the project's default node
+setup: fresh boot runs .nexus/setup, because the control plane could not read .nexus/setup at main: the verify stack reads no remote
+PR watch: on
+review rv-42000000 of PR #42: needs-person, round 1 of 5, reviewer th-d72d5869115c on gpt-6-astra, landing when approved
+needs you: Always needs the person: anything irreversible, as it changes src/control/registry.ts.
+exit 0
+
+$ nexus events --thread th-055cc0f3298e --kind review.waived
+exit 0
+
+$ nexus events --thread th-055cc0f3298e --kind review.changed
+4 2026-10-27T19:26:19.891Z th-055cc0f3298e review.changed {"review":"rv-42000000","reviewer":"th-d72d5869115c","phase":{"kind":"merging","authorized":null},"round":1}
+11 2026-10-27T19:26:19.916Z th-055cc0f3298e review.changed {"review":"rv-42000000","reviewer":"th-d72d5869115c","phase":{"kind":"needs-person","reasons":["Always needs the person: anything irreversible, as it changes src/control/registry.ts."]},"round":1}
+19 2026-10-27T19:26:21.790Z th-055cc0f3298e review.changed {"review":"rv-42000000","reviewer":"th-d72d5869115c","phase":{"kind":"checking","startedAt":1793129181790,"thread":null},"round":1}
+21 2026-10-27T19:26:25.923Z th-055cc0f3298e review.changed {"review":"rv-42000000","reviewer":"th-d72d5869115c","phase":{"kind":"merging","authorized":null},"round":1}
+22 2026-10-27T19:26:25.925Z th-055cc0f3298e review.changed {"review":"rv-42000000","reviewer":"th-d72d5869115c","phase":{"kind":"needs-person","reasons":["Always needs the person: anything irreversible, as it changes src/control/registry.ts."]},"round":1}
+exit 0
+
+failing GitHub checks, held: {
+  "landing": "Held for you\n#47 Say where the merge token lives ↗\n\nHead aaaaaaaaaaaa · approved by gpt-6-astra (harness) in round 1 of 5 · .nexus/check passed\n\nWhy it waits for you\nThe pull request's GitHub checks are failed. not waivable\nFailing or pending GitHub checks hold every landing until they pass.\nAlways needs the person: changes to secrets, as it changes deploy/README.md. you may waive\nThe policy reserves this for you, and your passkey shows that you, not an agent, confirmed it.\nThe reviewer's findings\nP3 N1: Name the constant\n.nexus/check passed at aaaaaaaaaaaa\nLand #47 with a passkey\n\nWaiving a hold needs your passkey, and none is enrolled. Enrol one on the Passkeys page with a code from the control plane's host.",
+  "landButton": "Land #47 with a passkey (disabled)",
+  "error": null
+}
+screenshot 07-failing-checks-held.png
+$ nexus show th-042423121126
+th-042423121126  Document the merge token
+project: nexus
+attention: decision
+status: active
+pylon: pylon-th-042423121126 on verify-node, running, observed 0s ago
+size: 2 CPUs, 4 GiB memory, 10 GiB disk
+placement: verify-node, the project's default node
+setup: fresh boot runs .nexus/setup, because the control plane could not read .nexus/setup at main: the verify stack reads no remote
+PR watch: on
+review rv-47000000 of PR #47: needs-person, round 1 of 5, reviewer th-189455e914f8 on gpt-6-astra, landing when approved
+needs you: The pull request's GitHub checks are failed.
+needs you: Always needs the person: changes to secrets, as it changes deploy/README.md.
+exit 0
+
+failed .nexus/check, held: {
+  "landing": "",
+  "landButton": "(no Land button)",
+  "error": null
+}
+screenshot 08-failed-check.png
+The driver asks to waive every hold on the review whose .nexus/check failed.
+POST /v1/threads/th-6e5eb452be04/land {"head":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","waive":["Findings P0 to P2 are open: CHECK.","The builder neither fixed nor rejected with a reason finding CHECK of round 1.",".nexus/check failed at bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb.","Always needs the person: changes to secrets, as it changes deploy/control.json."]}
+=> 400 {"error":"✖ Unrecognized key: \"waive\""}
+The review is still needs-person.
+claude, held: {
+  "landing": "Held for you\n#45 Name the caller in API errors ↗\n\nHead 555555555555 · approved by claude-opus-5-5 (claude) in round 1 of 5 · .nexus/check passed\n\nWhy it waits for you\nA Claude reviewer approved it. Its verdict is read from its transcript in its pylon, where code it runs could write, so only the person can land what it approved. holds again\nA passkey cannot stand in for a harness reviewer's approval: the Claude reviewer's verdict, its findings and reserved cases included, could have been written by code in its pylon.\nAlways needs the person: changes to login or auth, as it changes src/control/api.ts. you may waive\nThe policy reserves this for you, and your passkey shows that you, not an agent, confirmed it.\nThe reviewer's findings\nP3 N1: Name the constant\n.nexus/check passed at 555555555555\n\nLanding checks the merge policy again, and what is marked \"holds again\" holds every landing of this commit, and no passkey waives it. Only you can get past it, by merging the pull request on GitHub and deploying it with nexus deploy.",
+  "landButton": "(no Land button)",
+  "error": null
+}
+screenshot 09-claude-approved.png
+The driver asks to waive the Claude reviewer's hold anyway.
+POST /v1/threads/th-62d3cea41ff5/land {"head":"5555555555555555555555555555555555555555","waive":["A Claude reviewer approved it. Its verdict is read from its transcript in its pylon, where code it runs could write, so only the person can land what it approved.","Always needs the person: changes to login or auth, as it changes src/control/api.ts."]}
+=> 400 {"error":"✖ Unrecognized key: \"waive\""}
+PR #46 moved from 6666666666666666666666666666666666666666 to 7777777777777777777777777777777777777777, and the reviewer approved it there. The driver sends a waiver confirmed for 6666666666666666666666666666666666666666:
+POST /v1/threads/th-fd7047351384/land {"head":"6666666666666666666666666666666666666666","waive":["Always needs the person: pylon image rebuilds, as it changes images/pylon/Dockerfile."]}
+=> 400 {"error":"✖ Unrecognized key: \"waive\""}
+The review is still needs-person at 7777777777777777777777777777777777777777.
+screenshot 11-not-deployer.png
+As the phone:
+POST /v1/threads/th-fd7047351384/land {"head":"7777777777777777777777777777777777777777","waive":["Always needs the person: pylon image rebuilds, as it changes images/pylon/Dockerfile."]}
+=> 400 {"error":"✖ Unrecognized key: \"waive\""}
+The review is still needs-person.

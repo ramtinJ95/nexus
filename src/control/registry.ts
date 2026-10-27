@@ -22,7 +22,6 @@ import type { BuildingTemplate, ImageId, ImageManifest, TemplateId, TemplateReco
 import type { PylonRecord } from "../tick.ts";
 import type { ImageOperation } from "./image-rollout.ts";
 import { needsPerson, reviewerCaller, storedReview, type Review } from "./review.ts";
-import type { Passkey } from "./passkeys.ts";
 import { claudeTurn } from "../../images/pylon/nexus-turn.ts";
 import { defaultClaudeModel } from "../claude-state.ts";
 import { maxEntries, transcriptStart, usageLimitStop, type ClaudeEntry, type TranscriptCursor } from "../claude-transcript.ts";
@@ -296,6 +295,10 @@ const migrations: readonly string[] = [
   // Threads queued to start once other threads' pull requests merge, keyed by the ID the thread gets when it starts.
   // It touches nothing an earlier migration made, so a registry rewound past it applies it again unchanged.
   `CREATE TABLE IF NOT EXISTS queued_threads (id TEXT PRIMARY KEY, record TEXT NOT NULL) STRICT;`,
+  // Landing from the dashboard no longer asks for a passkey, so their tables go. They never held a row, and dropping
+  // them touches nothing an earlier migration needs, so a registry rewound past it applies it again unchanged.
+  `DROP TABLE IF EXISTS passkeys;
+   DROP TABLE IF EXISTS passkey_codes;`,
 ];
 
 type Row = Record<string, unknown>;
@@ -375,7 +378,7 @@ export type Registry = ReturnType<typeof openRegistry>;
 /** Opens the file, creating it if needed, and applies any migrations it has not seen. */
 export function openRegistry(path: string, clock = Date.now) {
   const db = new DatabaseSync(path);
-  // The passkey host command writes the registry from another process, so a write waits out its short transaction.
+  // Another process may write the registry, such as a second open of it, so a write waits out its short transaction.
   db.exec("PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000;");
   migrate(db);
 
@@ -774,33 +777,6 @@ export function openRegistry(path: string, clock = Date.now) {
           appendEvent("review.waived", review.builder, { review: review.id, repo: review.pr.repo, pr: review.pr.number, ...review.waiver });
         }
         updateAttention(review.builder);
-      });
-    },
-    passkeys: (): Passkey[] => sql("SELECT record FROM passkeys ORDER BY id").all().map((r) => json<Passkey>(r.record)),
-    passkeyByCredential: (credentialId: string): Passkey | null => jsonOrNull<Passkey>(sql("SELECT record FROM passkeys WHERE credential_id = ?").get(credentialId)?.record ?? null),
-    addPasskeyCode(hash: string, expiresAt: number) {
-      sql("INSERT INTO passkey_codes (hash, expires_at) VALUES (?, ?)").run(hash, expiresAt);
-    },
-    passkeyCodeOpen: (hash: string, at: number) => sql("SELECT 1 FROM passkey_codes WHERE hash = ? AND used_at IS NULL AND expires_at > ?").get(hash, at) !== undefined,
-    /** Enrols the passkey and uses up its code, or does neither when the code was used or expired meanwhile. */
-    enrolPasskey(passkey: Passkey, codeHash: string): boolean {
-      return transaction(() => {
-        if (sql("UPDATE passkey_codes SET used_at = ? WHERE hash = ? AND used_at IS NULL AND expires_at > ?").run(passkey.createdAt, codeHash, passkey.createdAt).changes === 0) return false;
-        sql("INSERT INTO passkeys (id, credential_id, record) VALUES (?, ?, ?)").run(passkey.id, passkey.credentialId, JSON.stringify(passkey));
-        appendEvent("passkey.enrolled", null, { passkey: passkey.id, name: passkey.name, by: passkey.createdBy });
-        return true;
-      });
-    },
-    savePasskeyUse(passkey: Passkey) {
-      sql("UPDATE passkeys SET record = ? WHERE id = ?").run(JSON.stringify(passkey), passkey.id);
-    },
-    revokePasskey(id: string, by: string): Passkey | null {
-      return transaction(() => {
-        const passkey = jsonOrNull<Passkey>(sql("SELECT record FROM passkeys WHERE id = ?").get(id)?.record ?? null);
-        if (passkey === null) return null;
-        sql("DELETE FROM passkeys WHERE id = ?").run(id);
-        appendEvent("passkey.revoked", null, { passkey: id, name: passkey.name, by });
-        return passkey;
       });
     },
     prWatch(thread: ThreadId): PrWatchState | null {

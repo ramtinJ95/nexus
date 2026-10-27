@@ -390,14 +390,6 @@ The review loop (`nexus review`) uses the same token file and is off without it.
 
 Landing a Nexus pull request deploys it, so the caller who asks for the landing must be in `deployers`, as for `nexus deploy`. The control plane then sets the desired release itself, recorded as requested by `nexus review <id>`, and rolls back to the previous desired release if the fleet does not report healthy within 30 minutes, then waits for the rollback to report healthy before saying so. `.nexus/check` runs in a short-lived check thread of the same project, and Nexus's own runs `npm ci`, so a project whose reviews land needs `registry.npmjs.org` among its allowed hosts.
 
-A landing the merge policy reserves for the person lands from the dashboard only with the person's passkey, which needs the dashboard's HTTPS address (`https.hostname`). To enrol one, run this as root on the control plane's host, open the address it prints on the device that holds the passkey, and name it:
-
-```sh
-sudo node /opt/nexus/control-current/src/control/passkeys-host.ts /etc/nexus/control.json code
-```
-
-The code enrols one passkey within 10 minutes. The same command lists passkeys with `list` and revokes one with `revoke <id>`, and the dashboard's Passkeys page revokes one with a passkey's confirmation. Only root can make a code, so an agent, which can call the API as the person's Mac, cannot enrol a passkey of its own.
-
 ### A Claude worker's shepherdr reviewer
 
 A Claude worker has a shepherdr `reviewer` check its diff before each pull request, as PYLON.md tells it. The reviewer is pi, so it runs only in a pylon whose project has the `chatgpt` login, as [pi's ChatGPT login in pylons](#pis-chatgpt-login-in-pylons) describes. Nobody signs in per thread. Without the login, Claude says the review was skipped and why. Your `reviewer` profile names `openai-codex/gpt-6-astra`, which the image installs as `openai/gpt-6-astra`, the provider that login signs in.

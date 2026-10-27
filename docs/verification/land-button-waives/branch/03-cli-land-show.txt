@@ -1,0 +1,13 @@
+$ nexus show th-0f01ff17611f
+th-0f01ff17611f  Cache the thread list
+project: nexus
+attention: decision
+status: active
+pylon: pylon-th-0f01ff17611f on verify-node, running, observed 0s ago
+size: 2 CPUs, 4 GiB memory, 10 GiB disk
+placement: verify-node, the project's default node
+setup: fresh boot runs .nexus/setup, because the control plane could not read .nexus/setup at main: the verify stack reads no remote
+PR watch: on
+review rv-42000000 of PR #42: needs-person, round 1 of 5, reviewer th-a10a151e0986 on gpt-6-astra, landing when approved
+needs you: Always needs the person: anything irreversible, as it changes src/control/registry.ts.
+exit 0

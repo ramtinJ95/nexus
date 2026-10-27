@@ -1,0 +1,11 @@
+$ nexus events --thread th-0f01ff17611f --kind review.changed
+4 2026-10-27T19:26:36.384Z th-0f01ff17611f review.changed {"review":"rv-42000000","reviewer":"th-a10a151e0986","phase":{"kind":"merging","authorized":null},"round":1}
+9 2026-10-27T19:26:36.414Z th-0f01ff17611f review.changed {"review":"rv-42000000","reviewer":"th-a10a151e0986","phase":{"kind":"needs-person","reasons":["Always needs the person: anything irreversible, as it changes src/control/registry.ts."]},"round":1}
+19 2026-10-27T19:26:38.545Z th-0f01ff17611f review.changed {"review":"rv-42000000","reviewer":"th-a10a151e0986","phase":{"kind":"checking","startedAt":1793129198545,"thread":null},"round":1}
+21 2026-10-27T19:26:43.425Z th-0f01ff17611f review.changed {"review":"rv-42000000","reviewer":"th-a10a151e0986","phase":{"kind":"merging","authorized":null},"round":1}
+22 2026-10-27T19:26:43.426Z th-0f01ff17611f review.changed {"review":"rv-42000000","reviewer":"th-a10a151e0986","phase":{"kind":"needs-person","reasons":["Always needs the person: anything irreversible, as it changes src/control/registry.ts."]},"round":1}
+24 2026-10-27T19:26:48.706Z th-0f01ff17611f review.changed {"review":"rv-42000000","reviewer":"th-a10a151e0986","phase":{"kind":"checking","startedAt":1793129208706,"thread":null},"round":1}
+27 2026-10-27T19:26:53.427Z th-0f01ff17611f review.changed {"review":"rv-42000000","reviewer":"th-a10a151e0986","phase":{"kind":"merging","authorized":null},"round":1}
+28 2026-10-27T19:26:53.430Z th-0f01ff17611f review.changed {"review":"rv-42000000","reviewer":"th-a10a151e0986","phase":{"kind":"deploying","commit":"8888888888888888888888888888888888888888","previous":"1111111111111111111111111111111111111111","requested":false,"deadline":1793131013430},"round":1}
+32 2026-10-27T19:27:00.428Z th-0f01ff17611f review.changed {"review":"rv-42000000","reviewer":"th-a10a151e0986","phase":{"kind":"landed","commit":"8888888888888888888888888888888888888888"},"round":1}
+exit 0

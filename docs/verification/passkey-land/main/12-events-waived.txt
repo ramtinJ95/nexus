@@ -1,3 +1,0 @@
-$ nexus events --thread th-a98d2be8cece --kind review.waived
-nexus: unknown event kind
-exit 64
