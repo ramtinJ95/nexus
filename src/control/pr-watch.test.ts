@@ -10,6 +10,7 @@ import type { CommandResult, NodeName, PylonCommand, PylonId, TailnetNodeId, Liv
 import type { ProjectId } from "../project.ts";
 import { githubClient, githubRepo, type PrSnapshot } from "./github.ts";
 import { prWatcher, prWatchPrefix } from "./pr-watch.ts";
+import { waitOf } from "./queue.ts";
 import { agentInbox } from "./inbox.ts";
 import type { HarnessHost } from "../harness/host.ts";
 
@@ -33,7 +34,7 @@ function fixture(path = ":memory:") {
   const messages: Parameters<HarnessHost["send"]>[] = [];
   let reject = false;
   const harness: Pick<HarnessHost, "send"> = { async send(...args) { messages.push(args); if (reject) throw new Error("delivery interrupted"); return { id: 1 } as never; } };
-  const github = { async find(repo: string, branch: string) { calls.push(`find:${repo}:${branch}`); return snapshot.pr.state === "open" ? [1] : []; }, async poll() { calls.push("poll"); return structuredClone(snapshot); } };
+  const github = { async find(repo: string, branch: string, state = "open") { calls.push(`find:${repo}:${branch}${state === "all" ? ":all" : ""}`); return state === "all" || snapshot.pr.state === "open" ? [1] : []; }, async poll() { calls.push("poll"); return structuredClone(snapshot); } };
   let wakes = 0;
   const inbox = (r = registry, h = harness) => agentInbox({ registry: r, harness: h, probes: new Map(), wake() { wakes++; } });
   const options = { registry, github, inbox: inbox() };
@@ -443,4 +444,117 @@ test("the review loop hears of each PR the watch links open, once, and again aft
   await watcher.poll();
   assert.equal(f.registry.prWatch("th-2" as ThreadId)?.links[0]?.pr.state, "closed");
   assert.equal(heard.length, 2, "a PR first read closed is not news");
+});
+
+test("a thread a queued thread waits for has its PR's merge seen when archived, capped or closed, and only then", async (t) => {
+  const f = fixture(); t.after(() => f.registry.close());
+  const queued = (after: ThreadId[], status: "queued" | "archived" = "queued") => f.registry.saveQueued({
+    id: `th-q${after.length}${status}` as ThreadId, title: "after", project: "project" as ProjectId, startedBy: "test", createdAt: 1, after,
+    request: { project: "project", title: "after", resources: { cpus: 2, memoryGiB: 4, diskGiB: 10 } }, message: null, status, startNow: null, lastError: null, startedAt: null, firstMessage: null,
+  });
+  const merged = (id: ThreadId) => f.registry.prWatch(id)?.links[0]?.pr.state;
+  await f.watcher.poll();
+  f.registry.setThreadStatus(f.id, "archived");
+  f.snapshot = { ...f.snapshot, pr: { ...f.snapshot.pr, state: "merged" } };
+  await f.watcher.poll();
+  assert.equal(merged(f.id), "open", "an archived thread nothing waits for is not polled");
+  queued([f.id], "archived");
+  await f.watcher.poll();
+  assert.equal(merged(f.id), "open", "a cancelled queued thread waits for nothing");
+  queued([f.id]);
+  await f.watcher.poll();
+  assert.equal(merged(f.id), "merged", "an archived predecessor's merge is seen");
+
+  const capped = f.add("th-capped");
+  f.snapshot = { ...f.snapshot, pr: { ...f.snapshot.pr, state: "open" } };
+  await f.watcher.poll();
+  f.registry.savePrWatch(capped, { ...f.registry.prWatch(capped)!, commentWakes: 10 });
+  queued([f.id, capped]);
+  f.snapshot = { ...f.snapshot, pr: { ...f.snapshot.pr, state: "merged" } };
+  await f.watcher.poll();
+  assert.equal(merged(capped), "merged", "a capped watch still sees the merge");
+
+  const reopened = f.add("th-reopened");
+  f.snapshot = { ...f.snapshot, pr: { ...f.snapshot.pr, state: "closed" } };
+  f.registry.savePrWatch(reopened, { links: [{ pr: { ...f.snapshot.pr }, seen: [], failed: false }], commentWakes: 0, pending: null, error: null });
+  queued([f.id, capped, reopened]);
+  f.snapshot = { ...f.snapshot, pr: { ...f.snapshot.pr, state: "merged" } };
+  await f.watcher.poll();
+  assert.equal(merged(reopened), "merged", "a PR reopened and merged between two reads is seen merged");
+});
+
+test("a predecessor's PR that opened and merged between two reads, or behind a message the watch cannot deliver, is seen merged", async (t) => {
+  const f = fixture(); t.after(() => f.registry.close());
+  f.registry.saveQueued({
+    id: "th-queued" as ThreadId, title: "after", project: "project" as ProjectId, startedBy: "test", createdAt: 1, after: [f.id],
+    request: { project: "project", title: "after", resources: { cpus: 2, memoryGiB: 4, diskGiB: 10 } }, message: null, status: "queued", startNow: null, lastError: null, startedAt: null, firstMessage: null,
+  });
+  f.snapshot = { ...f.snapshot, pr: { ...f.snapshot.pr, state: "merged" } };
+  await f.watcher.poll();
+  assert.equal(f.registry.prWatch(f.id)?.links[0]?.pr.state, "merged", "a PR first found after its merge is linked merged");
+  assert.ok(f.calls.includes("find:acme/repo:feature:all"));
+
+  const held = f.add("th-held");
+  f.snapshot = { ...f.snapshot, pr: { ...f.snapshot.pr, number: 2, state: "open" } };
+  await f.watcher.poll();
+  f.registry.savePrWatch(held, { ...f.registry.prWatch(held)!, pending: { id: "pr-watch:held", text: "news" } });
+  f.registry.saveQueued({ ...f.registry.queuedThread("th-queued" as ThreadId)!, after: [f.id, held] });
+  f.reject(true);
+  f.snapshot = { ...f.snapshot, pr: { ...f.snapshot.pr, state: "merged" } };
+  await f.watcher.poll();
+  await f.watcher.poll();
+  assert.equal(f.registry.prWatch(held)?.pending?.id, "pr-watch:held", "the message still waits");
+  assert.equal(f.registry.prWatch(held)?.links.find((l) => l.pr.number === 2)?.pr.state, "merged", "its PR's merge is seen all the same");
+});
+
+test("a predecessor with one PR merged and another open, neither linked yet, still waits", async (t) => {
+  const f = fixture(); t.after(() => f.registry.close());
+  f.registry.saveQueued({
+    id: "th-queued" as ThreadId, title: "after", project: "project" as ProjectId, startedBy: "test", createdAt: 1, after: [f.id],
+    request: { project: "project", title: "after", resources: { cpus: 2, memoryGiB: 4, diskGiB: 10 } }, message: null, status: "queued", startNow: null, lastError: null, startedAt: null, firstMessage: null,
+  });
+  f.registry.savePrWatch(f.id, { links: [], commentWakes: 10, pending: null, error: null });
+  const pr = (number: number, state: "open" | "merged") => ({ ...structuredClone(f.snapshot), pr: { ...f.snapshot.pr, number, state, url: `https://github.com/acme/repo/pull/${number}` } });
+  const watcher = prWatcher({ ...f.options, github: { find: async (_repo: string, _branch: string, state = "open") => state === "all" ? [1, 2] : [2], poll: async (_repo: string, n: number) => pr(n, n === 1 ? "merged" : "open") } });
+  await watcher.poll();
+  const links = f.registry.prWatch(f.id)!.links;
+  assert.deepEqual(links.map((l) => [l.pr.number, l.pr.state, l.pr.url === ""]), [[1, "merged", false], [2, "open", true]], "the open PR is linked unread, so the watch baselines it");
+  assert.deepEqual(waitOf(f.registry, f.id), { thread: f.id, state: "waiting", why: "PR #2 is open" });
+});
+
+test("a predecessor's PRs are read before any is saved, and a known one that closes or reopens keeps its state current", async (t) => {
+  const f = fixture(); t.after(() => f.registry.close());
+  f.registry.saveQueued({
+    id: "th-queued" as ThreadId, title: "after", project: "project" as ProjectId, startedBy: "test", createdAt: 1, after: [f.id],
+    request: { project: "project", title: "after", resources: { cpus: 2, memoryGiB: 4, diskGiB: 10 } }, message: null, status: "queued", startNow: null, lastError: null, startedAt: null, firstMessage: null,
+  });
+  f.registry.savePrWatch(f.id, { links: [], commentWakes: 10, pending: null, error: null });
+  const pr = (number: number, state: "open" | "merged" | "closed") => ({ ...structuredClone(f.snapshot), pr: { ...f.snapshot.pr, number, state, url: `https://github.com/acme/repo/pull/${number}` } });
+  const states = new Map<number, "open" | "merged" | "closed">([[1, "merged"], [2, "open"]]);
+  let release = () => {};
+  const held = new Promise<void>((resolve) => { release = resolve; });
+  let asked = () => {};
+  const second = new Promise<void>((resolve) => { asked = resolve; });
+  let hold = true;
+  const watcher = prWatcher({ ...f.options, github: {
+    find: async (_repo: string, _branch: string, state = "open") => state === "all" ? [1, 2] : [],
+    poll: async (_repo: string, n: number) => { if (n === 2 && hold) { asked(); await held; } return pr(n, states.get(n)!); },
+  } });
+  const pass = watcher.poll();
+  await second;
+  assert.equal(waitOf(f.registry, f.id).state, "waiting", "while the open PR's read is under way, the merge beside it lands nothing");
+  release();
+  await pass;
+  hold = false;
+  assert.deepEqual(waitOf(f.registry, f.id), { thread: f.id, state: "waiting", why: "PR #2 is open" });
+
+  states.set(2, "closed");
+  await watcher.poll();
+  assert.deepEqual(f.registry.prWatch(f.id)!.links.map((l) => [l.pr.number, l.pr.state]), [[1, "merged"], [2, "closed"]]);
+  assert.equal(waitOf(f.registry, f.id).state, "landed", "once the open one closes, the merged one lands the thread");
+
+  states.set(2, "open");
+  await watcher.poll();
+  assert.deepEqual(waitOf(f.registry, f.id), { thread: f.id, state: "waiting", why: "PR #2 is open" }, "a reopened PR holds it again");
+  assert.equal(f.registry.prWatch(f.id)!.links[1]!.pr.url, "", "a PR the watch never read stays unread, so its comments are baselined");
 });

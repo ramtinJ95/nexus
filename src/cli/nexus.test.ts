@@ -19,6 +19,8 @@ import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
 import { startApi } from "../control/api.ts";
 import { threadStarter } from "../control/threads.ts";
+import { threadQueue, type QueuedThread } from "../control/queue.ts";
+import { turnGate } from "../control/drain.ts";
 import { fakeHarness } from "../control/fake-harness.ts";
 import { openRegistry, type Thread, type ThreadId } from "../control/registry.ts";
 import type { Review } from "../control/review.ts";
@@ -107,7 +109,7 @@ async function socksProxy(t: TestContext, reply: number | "close" = 0) {
   return { port: await listening(t, server), connects };
 }
 
-async function setup(t: TestContext) {
+async function setup(t: TestContext, setupOptions: { queue?: boolean } = {}) {
   const dir = await mkdtemp(join(tmpdir(), "nexus-cli-"));
   const registry = openRegistry(join(dir, "registry.db"));
   registry.upsertNode({ name: node, tailnetHost: "rj-firebat.tail.ts.net", tailnetNodeId: "nFIREBAT" as TailnetNodeId });
@@ -133,14 +135,17 @@ async function setup(t: TestContext) {
     registry, probes: new Map([[node, { submit: noJobs, job: noJobs, manifest: async (id) => registry.image(id as ImageId) ?? null }]]), buildNode: node,
     recipe: noJobs, release: null, log: () => {},
   });
+  const startThread = threadStarter({
+    registry, harness: fake.harness, wake: () => {}, dotfiles: { repo: "https://github.com/ramtin/dotfiles.git", ref: "main" },
+    mirror: { setupInputs: (p: RemoteProject, ref: { branch: string } | { commit: string }) => read(p, ref) },
+  });
+  const queue = setupOptions.queue === true ? threadQueue({ registry, startThread, gate: turnGate(() => false), send: (id, text, requestId) => fake.harness.send(id, text, requestId, "followUp") }) : null;
   const options = (port: number) => ({
+    queue,
     deployment: { self: "nFIREBAT" as TailnetNodeId, deployers: new Set([laptop]), keys: {}, resolveMain: async () => "a".repeat(40) },
     registry, host: "127.0.0.1", port, whois: async () => { requests++; return caller; }, allowed: new Set([laptop]),
     hostnames: new Set([apiName, "127.0.0.1"]), harness: fake.harness, wake: () => {}, previewPorts: { first: 10200, last: 10299 }, images,
-    startThread: threadStarter({
-      registry, harness: fake.harness, wake: () => {}, dotfiles: { repo: "https://github.com/ramtin/dotfiles.git", ref: "main" },
-      mirror: { setupInputs: (p: RemoteProject, ref: { branch: string } | { commit: string }) => read(p, ref) },
-    }),
+    startThread,
     probes: new Map([[node, {
       command: (_pylonId: PylonId, command: PylonCommand) => { commands.push(command); return answer(command); },
       stream: (_pylonId: PylonId, argv: readonly string[]) => pipe(argv),
@@ -148,6 +153,7 @@ async function setup(t: TestContext) {
   });
   let api = await startApi(options(0));
   t.after(async () => {
+    await queue?.close();
     await api.close();
     await images.close();
     registry.close();
@@ -238,7 +244,7 @@ test("--help or -h after a command prints its lines of nexus --help and exits 0 
   const s = await setup(t);
   const all = new Set((await s.nexus(["--help"])).stdout.split("\n"));
   const names = ["events", "threads", "show", "ports", "preview", "unpreview", "files", "changes", "diff", "conversation", "session open", "session close",
-    "attach", "start", "send", "watch", "seen", "abort", "retry", "retry-pylon", "wake", "archive", "unarchive", "delete", "projects", "project edit",
+    "attach", "start", "start-queued", "send", "watch", "seen", "abort", "retry", "retry-pylon", "wake", "archive", "unarchive", "delete", "projects", "project edit",
     "project add", "review", "land", "deploy", "release", "image build", "image rollout", "image rollback", "image list", "image current", "nodes"];
   for (const name of names) {
     for (const flag of ["--help", "-h"]) {
@@ -1310,7 +1316,7 @@ test("show prints PR metadata and one disabled-watch notice without waking the p
 
 test("deploy and release use the shared release view and wait for both roles", async (t) => {
   const s = await setup(t);
-  assert.equal((await s.nexus(["--version"])).stdout.trim(), "nexus 0.28.0");
+  assert.equal((await s.nexus(["--version"])).stdout.trim(), "nexus 0.29.0");
   assert.equal((await s.nexus(["deploy", "bad"])).code, 64);
   const requested = await s.json(["deploy", "main"]);
   assert.equal(requested.desired.commit, "a".repeat(40));
@@ -1689,4 +1695,65 @@ test("conversation prints a Claude worker's transcript, and send types into its 
   assert.equal((await s.nexus(["send", thread.id, "go", "--steer"])).stdout, `Sent to Claude in ${thread.id}.\n`);
   assert.deepEqual(s.fake.calls.filter(([call]) => call === "send"), [], "the harness is sent nothing");
   assert.match((await s.nexus(["send", "--help"])).stdout, /typed into the Claude worker's session/);
+});
+
+test("start --after queues a thread in one request, and threads, show, start-queued and archive speak of it as queued", async (t) => {
+  const s = await setup(t, { queue: true });
+  const first: Thread = await s.json(["start", "--project", "acme", "--title", "First"]);
+  const second: Thread = await s.json(["start", "--project", "acme", "--title", "Second"]);
+  const before = s.requests();
+  const queuedText = await s.nexus(["start", "--project", "acme", "--message", "Fix the next bug\nthen push", "--after", `${first.id}, ${second.id}`]);
+  assert.equal(queuedText.code, 0, queuedText.stderr);
+  assert.equal(s.requests() - before, 1, "one request queues it with its first message");
+  const [record] = s.registry.queuedThreads();
+  const id = record!.id;
+  assert.equal(queuedText.stdout, `Queued ${id} on acme: Fix the next bug. It starts once ${first.id} and ${second.id} have merged their pull requests.\n`);
+  assert.equal(record!.message, "Fix the next bug\nthen push");
+  assert.deepEqual(s.fake.calls.filter((c) => c[0] === "send"), [], "the first message waits for the start");
+
+  const later: QueuedThread = await s.json(["start", "--project", "acme", "--title", "Later", "--claude", "Do it", "--after", id]);
+  assert.deepEqual([later.worker, later.model, later.prompt], ["claude", "claude-opus-5-5", "Do it"]);
+  assert.deepEqual(later.waits, [{ thread: id, state: "waiting", why: "is queued" }]);
+  assert.equal((await s.nexus(["start", "--project", "acme", "--title", "x", "--after", "th-nope"])).code, 4);
+  assert.equal((await s.nexus(["start", "--project", "acme", "--title", "x", "--after", ","])).code, 64);
+
+  const pr = (number: number, state: "open" | "closed") => ({ pr: { repo: "octocat/Spoon-Knife", number, title: "PR", url: "", state, checks: "none" as const, review: "none", conflict: null }, seen: [], failed: false });
+  s.registry.savePrWatch(first.id, { links: [pr(3, "open")], commentWakes: 0, pending: null, error: null });
+  s.registry.savePrWatch(second.id, { links: [pr(4, "closed")], commentWakes: 0, pending: null, error: null });
+  const rows = (await s.nexus(["threads"])).stdout;
+  assert.match(rows, new RegExp(`^${id}\\s+blocked\\s+blocked by ${second.id}: PR #4 closed without merging\\s+node rj-firebat\\s+acme\\s+\\S+ ago\\s+Fix the next bug$`, "m"));
+  assert.match(rows, new RegExp(`^${later.id}\\s+queued\\s+waits for ${id}: is queued\\s`, "m"));
+  assert.deepEqual((await s.json(["threads"])).map((r: Thread) => r.id), [first.id, second.id], "--json prints the thread rows alone, as before");
+  assert.deepEqual((await s.json(["threads", "--queued"])).map((q: QueuedThread) => q.id), [id, later.id]);
+  assert.doesNotMatch((await s.nexus(["threads", "--queued"])).stdout, new RegExp(first.id));
+
+  assert.equal((await s.nexus(["show", id])).stdout, [
+    `${id}  Fix the next bug`, "project: acme", "status: blocked", "node: rj-firebat", "worker: Nexus agent", "size: 2 CPUs, 4 GiB memory, 10 GiB disk",
+    "first message: Fix the next bug", `waits for ${first.id}: PR #3 is open`, `blocked by ${second.id}: PR #4 closed without merging`,
+    `nexus start-queued ${id} starts it now; nexus archive ${id} cancels it.`, "",
+  ].join("\n"));
+  assert.equal((await s.json(["show", id])).blocked, true);
+  assert.equal((await s.nexus(["show", "th-nope"])).code, 4, "an unknown thread is still not found");
+
+  assert.equal((await s.nexus(["start-queued", id])).stdout, `Started ${id} on acme: Fix the next bug\n`);
+  assert.deepEqual(s.fake.calls.at(-1), ["send", id, "Fix the next bug\nthen push", `queued:${id}`, "followUp"]);
+  assert.equal((await s.json(["show", id])).thread.id, id);
+  assert.equal((await s.nexus(["start-queued", id])).code, 5, "a started thread is not queued");
+
+  assert.equal((await s.nexus(["archive", later.id])).stdout, `Archived ${later.id}. Its queued start is cancelled.\n`);
+  assert.doesNotMatch((await s.nexus(["threads"])).stdout, new RegExp(later.id));
+  assert.match((await s.nexus(["threads", "--all"])).stdout, new RegExp(`^${later.id}\\s+cancelled\\s`, "m"));
+  assert.match((await s.nexus(["show", later.id])).stdout, new RegExp(`^status: cancelled$[^]*^nexus unarchive ${later.id} queues it again\\.$`, "m"));
+  assert.equal((await s.nexus(["start-queued", later.id])).code, 5);
+  assert.equal((await s.nexus(["unarchive", later.id])).stdout, `Unarchived ${later.id}. It is queued again.\n`);
+  assert.equal((await s.json(["delete", later.id])).status, "deleted");
+});
+
+test("start --after against a control plane without its GitHub token exits 5 and says why", async (t) => {
+  const s = await setup(t);
+  const refused = await s.nexus(["start", "--project", "acme", "--title", "x", "--after", "th-any"]);
+  assert.equal(refused.code, 5);
+  assert.match(refused.stderr, /queued threads need the control plane's GitHub token \(github.tokenFile\)/);
+  assert.equal((await s.nexus(["threads"])).stdout, "No threads.\n");
+  assert.equal((await s.nexus(["threads", "--queued"])).stdout, "No queued threads.\n");
 });

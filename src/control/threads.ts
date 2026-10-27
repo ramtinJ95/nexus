@@ -22,7 +22,21 @@ export interface StartRequest {
 }
 
 /** `pylon-<id>` must fit in 40 characters. */
-const newThreadId = () => `th-${randomBytes(6).toString("hex")}` as ThreadId;
+export const newThreadId = () => `th-${randomBytes(6).toString("hex")}` as ThreadId;
+
+const claudePromptOf = (request: StartRequest) =>
+  request.claude === undefined || request.raw === true || /^\/poteto-mode(?:\s|$)/.test(request.claude) ? request.claude : `/poteto-mode ${request.claude}`;
+
+/** What a start refuses before it places anything, which a queued start is checked against when it is queued too. */
+export function checkStart(registry: Registry, request: StartRequest): Project {
+  const claudePrompt = claudePromptOf(request);
+  if (claudePrompt !== undefined && claudePrompt.length > 16_384) throw new HttpError(400, "Claude prompt including /poteto-mode exceeds 16384 characters");
+  const project = registry.project(request.project as ProjectId);
+  if (project === undefined) throw new HttpError(404, `no project ${request.project}`);
+  if (request.node !== undefined && request.node !== "auto" && registry.node(request.node as NodeName) === undefined) throw new HttpError(400, `no node ${request.node}`);
+  if (!hasRemote(project) && request.commit !== undefined) throw new HttpError(400, `project ${project.id} is a scratch project, so it has no commit to check out`);
+  return project;
+}
 
 /** A shorter ID or a ref name may resolve to another commit by the time the pylon boots. */
 
@@ -70,18 +84,17 @@ export function threadStarter(options: { registry: Registry; harness: Pick<Harne
     }
   }
 
-  /** The conversation is created before the registry row, as HarnessHost.startThread requires. */
-  return async function startThread(request: StartRequest, caller: string): Promise<Thread> {
-    const claudePrompt = request.claude === undefined || request.raw === true || /^\/poteto-mode(?:\s|$)/.test(request.claude) ? request.claude : `/poteto-mode ${request.claude}`;
-    if (claudePrompt !== undefined && claudePrompt.length > 16_384) throw new HttpError(400, "Claude prompt including /poteto-mode exceeds 16384 characters");
-    const project = registry.project(request.project as ProjectId);
-    if (project === undefined) throw new HttpError(404, `no project ${request.project}`);
+  /**
+   * The conversation is created before the registry row, as HarnessHost.startThread requires. `queuedId` is a queued
+   * thread's, whose queue record the registry marks started with the row.
+   */
+  return async function startThread(request: StartRequest, caller: string, queuedId?: ThreadId): Promise<Thread> {
+    const project = checkStart(registry, request);
+    const claudePrompt = claudePromptOf(request);
     const named = request.node !== undefined && request.node !== "auto";
-    if (named && registry.node(request.node as NodeName) === undefined) throw new HttpError(400, `no node ${request.node}`);
     const image = registry.currentImage();
     if (image === null) throw new HttpError(409, "no image is current yet, so a pylon has nothing to boot");
     const branch = request.branch ?? project.defaultBranch;
-    if (!hasRemote(project) && request.commit !== undefined) throw new HttpError(400, `project ${project.id} is a scratch project, so it has no commit to check out`);
     // The repository as a fresh boot makes it. setUp pins a template boot's commit, and the pylon's boot freezes either.
     const freshRepo: RepoInit = hasRemote(project)
       ? { kind: "clone", url: project.repoUrl, checkout: { branch, commit: request.commit ?? `origin/${branch}` } }
@@ -91,7 +104,7 @@ export function threadStarter(options: { registry: Registry; harness: Pick<Harne
 
     const size = request.resources ?? {};
     const resources = { cpus: size.cpus ?? project.resources.cpus, memoryGiB: size.memoryGiB ?? project.resources.memoryGiB, diskGiB: size.diskGiB ?? project.resources.diskGiB };
-    const id = newThreadId();
+    const id = queuedId ?? newThreadId();
     const pylonId = `pylon-${id}` as PylonId;
     const placement: Placement = named ? { how: "named", node: request.node as NodeName }
       : (request.node ?? project.defaultNode) === "auto" ? placeAuto(registry, { image, resources, network, repo: freshRepo, dotfiles })
@@ -122,7 +135,7 @@ export function threadStarter(options: { registry: Registry; harness: Pick<Harne
         live,
         liveHash: liveHashOf(live),
       });
-      registry.createThread(t, pylon, claudePrompt, request.model);
+      registry.createThread(t, pylon, claudePrompt, request.model, queuedId !== undefined);
       wake(node);
       return t;
     } finally {

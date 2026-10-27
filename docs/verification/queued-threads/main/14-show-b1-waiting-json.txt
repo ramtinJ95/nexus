@@ -1,0 +1,3 @@
+$ nexus show th-000000000000 --json
+[stderr] {"error":"no thread th-000000000000","kind":"not-found","status":404}
+[exit 4]

@@ -1,0 +1,57 @@
++   0.6s checkout <repo>/src
++   2.7s control plane is up
++   3.3s nexus --version -> exit 0 (01-version.txt)
++   3.9s nexus project add wave git@github.com:verify/wave.git --node node-a --cpus 1 --memory 3 --disk 5 -> exit 0 (02-project-add.txt)
++   4.4s backend: booted pylon-th-1db9615f71ce
++   4.5s nexus start --project wave --title A1: change the shared file --json -> exit 0 (03-start-a1.txt)
++   4.5s A1 th-1db9615f71ce pushed feat-a1, and PR #1 opened
++   4.8s backend: booted pylon-th-8aadc1b76869
++   4.9s nexus start --project wave --title A2: change the shared file --json -> exit 0 (04-start-a2.txt)
++   4.9s A2 th-8aadc1b76869 pushed feat-a2, and PR #2 opened
++   5.4s backend: booted pylon-th-410eda46d2b2
++   5.4s nexus start --project wave --title A3: change the shared file --json -> exit 0 (05-start-a3.txt)
++   5.4s A3 th-410eda46d2b2 pushed feat-a3, and PR #3 opened
++   5.8s backend: booted pylon-th-009bd7fe6050
++   5.8s nexus start --project wave --title A4: change the shared file --json -> exit 0 (06-start-a4.txt)
++   5.8s A4 th-009bd7fe6050 pushed feat-a4, and PR #4 opened
++   6.2s nexus start --project wave --title B1: build on A1 --after th-1db9615f71ce --message B1: build on A1, after the earlier change landed --json -> exit 64 (07-queue-b1.txt)
++   6.6s nexus start --project wave --title B2: build on A2 --after th-8aadc1b76869 --message B2: build on A2, after the earlier change landed --json -> exit 64 (08-queue-b2.txt)
++   7.0s nexus start --project wave --title C: build on A3 --after th-410eda46d2b2 --message C: build on A3, after the earlier change landed --json -> exit 64 (09-queue-c.txt)
++   7.5s nexus start --project wave --title D: build on A4 --after th-009bd7fe6050 --message D: build on A4, after the earlier change landed --json -> exit 64 (10-queue-d.txt)
++   7.9s nexus threads -> exit 0 (11-threads-queued.txt)
++   8.3s nexus show th-000000000000 -> exit 4 (12-show-b1-no-pr-yet.txt)
++   8.3s backend boots so far: B1 0, B2 0, C 0, D 0
++ 244.0s A1's PR is linked after 235.7 s
++ 244.4s A4's PR is linked after 0.4 s
++ 244.9s nexus show th-000000000000 -> exit 4 (13-show-b1-waiting.txt)
++ 245.3s nexus show th-000000000000 --json -> exit 4 (14-show-b1-waiting-json.txt)
++ 247.1s dashboard / -> home-queued.png
++ 247.1s PR #1 (A1) merged outside any review
++ 247.1s PR #2 (A2) closed without merging
++ 247.1s skipped: waiting until B1 started, because the thread was never created
++ 247.1s skipped: waiting until B2 is blocked, because the thread was never created
++ 247.5s nexus show th-1db9615f71ce -> exit 0 (15-show-a1-merged.txt)
++ 247.9s nexus show th-000000000000 -> exit 4 (16-show-b1-started.txt)
++ 247.9s skipped: waiting until B1's first message has its scripted answer, because the thread was never created
++ 248.3s nexus conversation th-000000000000 -> exit 4 (17-conversation-b1.txt)
++ 248.7s nexus show th-000000000000 -> exit 4 (18-show-b2-blocked.txt)
++ 250.4s dashboard / -> home-blocked.png
++ 250.8s nexus start-queued th-000000000000 -> exit 64 (19-start-queued-b2.txt)
++ 251.2s nexus show th-000000000000 -> exit 4 (20-show-b2-started-by-hand.txt)
++ 251.6s nexus show th-000000000000 -> exit 4 (21-show-d-cancelled.txt)
++ 251.6s == restart: the control plane stops and starts again while C waits for PR #3
++ 252.9s control plane is up
++ 253.3s nexus show th-000000000000 -> exit 4 (22-show-c-after-restart.txt)
++ 253.4s control plane stopped
++ 253.4s PR #3 (A3) merged while the control plane was down
++ 254.7s control plane is up
++ 254.7s skipped: waiting until C started, because the thread was never created
++ 254.7s skipped: waiting until C's first message has its scripted answer, because the thread was never created
++ 256.3s control plane is up
++ 276.8s nexus show th-000000000000 -> exit 4 (23-show-c-started.txt)
++ 277.3s nexus conversation th-000000000000 -> exit 4 (24-conversation-c.txt)
++ 277.9s nexus threads --all -> exit 0 (25-threads-all.txt)
++ 278.4s nexus threads --all --json -> exit 0 (26-threads-all-json.txt)
++ 279.0s nexus threads --queued --all --json -> exit 64 (27-threads-queued-json.txt)
++ 280.7s dashboard / -> home-end.png
++ 280.7s backend boots: B1 0, B2 0, C 0, D 0

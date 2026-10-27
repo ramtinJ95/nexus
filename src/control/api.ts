@@ -53,6 +53,7 @@ import { HttpError } from "./http-error.ts";
 import { BodyTooLarge, readBody } from "../request-body.ts";
 import { imagesView, type ImageOperation, type ImageRollout } from "./image-rollout.ts";
 import type { StartRequest } from "./threads.ts";
+import { queuedView, type QueuedRecord, type ThreadQueue } from "./queue.ts";
 import { nodePylons, overcommitted, type NodePylons } from "./placement.ts";
 import { maxRounds, type Review, type ReviewLoop } from "./review.ts";
 import { passkeyGate, passkeyList, type Purpose } from "./passkeys.ts";
@@ -63,6 +64,8 @@ export interface ApiOptions {
   prWatchEnabled?: boolean;
   /** Null without a control-plane GitHub token, which the review loop reads and merges with. */
   reviews?: ReviewLoop | null;
+  /** Null without a control-plane GitHub token, which tells it when a predecessor's pull request merged. */
+  queue?: ThreadQueue | null;
   deployment?: DeploymentOptions;
   turnsStarting?: () => boolean;
   registry: Registry;
@@ -244,6 +247,10 @@ const startSchema = z.strictObject({
   commit: z.string().min(1).optional(),
   /** The thread's size where it differs from its project's. Its pylon boots this size on every wake. */
   resources: projectSchema.shape.resources.partial().optional(),
+  /** Queue the thread to start once each of these threads' pull requests has merged. */
+  after: z.array(z.string().min(1)).min(1).max(32).optional(),
+  /** A queued Nexus agent thread's first message, sent once it starts. */
+  message: z.string().min(1).optional(),
 });
 // Agent activity comes from the harness.
 const seenSchema = z.strictObject({ lastReplyAt: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER).nullable().optional() });
@@ -296,9 +303,25 @@ export async function startApi(options: ApiOptions): Promise<Api> {
 
   function thread(id: string): Thread {
     const found = registry.thread(id as ThreadId);
-    if (found === undefined) throw new HttpError(404, `no thread ${id}`);
-    return found;
+    if (found !== undefined) return found;
+    const queued = queuedRecord(id);
+    if (queued !== undefined) throw new HttpError(409, queued.status === "queued" ? `thread ${id} is queued, so it has no pylon or conversation yet` : `thread ${id} was ${queued.status === "archived" ? "cancelled" : "deleted"} while queued, so it has no pylon or conversation`);
+    throw new HttpError(404, `no thread ${id}`);
   }
+
+  /** A thread that has not started, which has a queue record and no row. */
+  function queuedRecord(id: string): QueuedRecord | undefined {
+    if (registry.thread(id as ThreadId) !== undefined) return undefined;
+    const record = registry.queuedThread(id as ThreadId);
+    return record?.status === "started" ? undefined : record;
+  }
+
+  function queueOrRefuse(): ThreadQueue {
+    if (!options.queue) throw new HttpError(409, "queued threads need the control plane's GitHub token (github.tokenFile), which is not configured");
+    return options.queue;
+  }
+
+  const queuedStatus = (id: string, status: "archived" | "queued" | "deleted") => queuedView(registry, queueOrRefuse().setStatus(id as ThreadId, status));
 
   function wakeThread(t: Thread) {
     wake(registry.pylon(t.pylonId)!.node);
@@ -789,20 +812,37 @@ export async function startApi(options: ApiOptions): Promise<Api> {
     }))],
     ["GET", /^\/v1\/threads$/, (_, r) => ok(registry.threads((r.query.get("project") ?? undefined) as ProjectId | undefined).map(row))],
     ["POST", /^\/v1\/threads$/, async (_, r) => {
-      const request = parse(startSchema, await r.body());
+      const { after, message, ...request } = parse(startSchema, await r.body());
       if (request.model !== undefined && request.claude === undefined) throw new HttpError(400, "model requires claude");
-      return created(await startThread(request, r.caller));
+      if (after === undefined) {
+        if (message !== undefined) throw new HttpError(400, "message is only for a queued start; send it with POST /v1/threads/<id>/messages");
+        return created(await startThread(request, r.caller));
+      }
+      const queue = queueOrRefuse();
+      const record = queue.add(request, message ?? null, after, r.caller);
+      void queue.poll();
+      return created(queuedView(registry, record));
     }],
+    ["GET", /^\/v1\/queued$/, (_, r) => {
+      const project = r.query.get("project");
+      return ok(registry.queuedThreads().filter((q) => q.status !== "started" && (project === null || q.project === project)).map((q) => queuedView(registry, q)));
+    }],
+    ["GET", /^\/v1\/queued\/([^/]+)$/, (m) => {
+      const queued = queuedRecord(m[1]!);
+      if (queued === undefined) throw new HttpError(404, `no queued thread ${m[1]!}`);
+      return ok(queuedView(registry, queued));
+    }],
+    ["POST", /^\/v1\/threads\/([^/]+)\/start$/, async (m, r) => created(await queueOrRefuse().startNow(m[1]! as ThreadId, r.caller))],
     ["GET", /^\/v1\/threads\/([^/]+)$/, (m) => ok(detail(thread(m[1]!)))],
-    ["DELETE", /^\/v1\/threads\/([^/]+)$/, async (m) => ok(await setStatus(thread(m[1]!), "deleted"))],
+    ["DELETE", /^\/v1\/threads\/([^/]+)$/, async (m) => ok(queuedRecord(m[1]!) === undefined ? await setStatus(thread(m[1]!), "deleted") : queuedStatus(m[1]!, "deleted"))],
     ["POST", /^\/v1\/threads\/([^/]+)\/(seen|unseen)$/, async (m, r) => {
       const t = thread(m[1]!);
       const body = parse(seenSchema, await r.body({}));
       registry.markSeen(t.id, m[2] === "unseen", Date.now(), body.lastReplyAt);
       return noContent;
     }],
-    ["POST", /^\/v1\/threads\/([^/]+)\/archive$/, async (m) => ok(await setStatus(thread(m[1]!), "archived"))],
-    ["POST", /^\/v1\/threads\/([^/]+)\/unarchive$/, (m) => ok(unarchive(thread(m[1]!)))],
+    ["POST", /^\/v1\/threads\/([^/]+)\/archive$/, async (m) => ok(queuedRecord(m[1]!) === undefined ? await setStatus(thread(m[1]!), "archived") : queuedStatus(m[1]!, "archived"))],
+    ["POST", /^\/v1\/threads\/([^/]+)\/unarchive$/, (m) => ok(queuedRecord(m[1]!) === undefined ? unarchive(thread(m[1]!)) : queuedStatus(m[1]!, "queued"))],
     ["POST", /^\/v1\/threads\/([^/]+)\/activity$/, async (m, r) => { recordActivity(thread(m[1]!), await r.body()); return noContent; }],
     // The body first, so the thread's status is read after the last await before the message is submitted.
     ["POST", /^\/v1\/threads\/([^/]+)\/messages$/, async (m, r) => {
@@ -1039,7 +1079,7 @@ export async function startApi(options: ApiOptions): Promise<Api> {
     if (matches.length === 0) throw new HttpError(404, `no route ${path}`);
     const match = matches.find((r) => r.method === req.method);
     if (match === undefined) throw new HttpError(405, `${req.method} is not allowed on ${path}`);
-    const startsTurn = req.method === "POST" && (path === "/v1/threads" || /^\/v1\/threads\/[^/]+\/(messages|retry)$/.test(path));
+    const startsTurn = req.method === "POST" && (path === "/v1/threads" || /^\/v1\/threads\/[^/]+\/(messages|retry|start)$/.test(path));
     const route = () => match.route(match.m, { query: url.searchParams, caller, body: (empty) => readJson(req, empty) });
     const reply = startsTurn ? await turnRequests.run(async () => route()) : await route();
     if (reply.file !== undefined) sendFile(res, reply.file, reply.type);

@@ -1,0 +1,53 @@
+GET /
+Threads
+New project
+wave
+git@github.com:verify/wave.git
+New thread
+Thread	Desired	Observed	Node	Human	Agent
+
+A4: change the shared file
+	
+running	
+running	node-a	4 min ago	never
+
+A3: change the shared file
+	
+running	
+running	node-a	4 min ago	never
+
+A2: change the shared file
+	
+running	
+running	node-a	4 min ago	never
+
+A1: change the shared file
+	
+running	
+running	node-a	4 min ago	never
+Queued
+Thread	Waits for	Node
+
+B1: build on A1
+queued
+	
+A1: change the shared file: PR #1 is open
+	node-a
+
+B2: build on A2
+queued
+	
+A2: change the shared file: PR #2 is open
+	node-a
+
+C: build on A3
+queued
+	
+A3: change the shared file: PR #3 is open
+	node-a
+
+D: build on A4
+queued
+	
+A4: change the shared file: PR #4 is open
+	node-a

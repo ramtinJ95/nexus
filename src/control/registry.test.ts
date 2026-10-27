@@ -8,6 +8,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { openRegistry, type StoredPylon, type Thread, type ThreadId } from "./registry.ts";
+import type { QueuedRecord } from "./queue.ts";
 import { newPylonRecord } from "../tick.ts";
 import { trackActivity } from "../harness/activity.ts";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
@@ -944,7 +945,7 @@ test("a turn running before turn starts were recorded has no known start", async
   const db = new DatabaseSync(path);
   const version = db.prepare("PRAGMA user_version").get()!.user_version as number;
   db.exec(`UPDATE threads SET agent_turn_running = 1; ALTER TABLE threads DROP COLUMN placement; ALTER TABLE threads DROP COLUMN setup; ALTER TABLE threads DROP COLUMN agent_turn_started_at; ALTER TABLE session_activity DROP COLUMN started_at; DROP TABLE reviews; DROP TABLE reviewed_prs;
-    ALTER TABLE claude_workers DROP COLUMN turn_session; ALTER TABLE claude_workers DROP COLUMN turn_at; ALTER TABLE session_activity DROP COLUMN message; ALTER TABLE session_order DROP COLUMN event_ids; PRAGMA user_version = ${version - 9}`);
+    ALTER TABLE claude_workers DROP COLUMN turn_session; ALTER TABLE claude_workers DROP COLUMN turn_at; ALTER TABLE session_activity DROP COLUMN message; ALTER TABLE session_order DROP COLUMN event_ids; PRAGMA user_version = ${version - 10}`);
   db.close();
   const registry = openRegistry(path, () => now);
   t.after(() => registry.close());
@@ -1280,4 +1281,28 @@ test("a write waits while another process, such as the passkey host command, hol
   registry.addPasskeyCode("h", 1);
   assert.equal(registry.passkeyCodeOpen("h", 0), true, "the write waited for the lock rather than failing");
   await new Promise((resolve) => holder.once("exit", resolve));
+});
+
+test("a queued thread's row and its queue record's start commit together, and a record no longer queued starts nothing", (t) => {
+  const registry = openRegistry(":memory:");
+  t.after(() => registry.close());
+  registry.upsertNode({ name: node, tailnetHost: "rj-firebat.tail.ts.net", tailnetNodeId: "nFIREBAT" as TailnetNodeId });
+  registry.createProject(project);
+  const record: QueuedRecord = {
+    id: threadId, title: thread.title, project: project.id, startedBy: "nLAPTOP", createdAt: 500, after: ["th-0" as ThreadId],
+    request: { project: project.id, title: thread.title, node, resources: project.resources }, message: "Fix it.",
+    status: "queued", startNow: null, lastError: "no node can run this pylon", startedAt: null, firstMessage: null,
+  };
+  registry.saveQueued({ ...record, status: "archived" });
+  assert.throws(() => registry.createThread(thread, pylon, undefined, undefined, true), /thread th-1 is no longer queued/);
+  assert.equal(registry.thread(threadId), undefined, "a cancelled thread gets no row");
+  assert.equal(registry.pylon(pylonId), undefined);
+
+  registry.saveQueued(record);
+  registry.createThread(thread, pylon, undefined, undefined, true);
+  assert.equal(registry.thread(threadId)?.id, threadId);
+  assert.deepEqual(registry.queuedThread(threadId), { ...record, status: "started", startedAt: thread.createdAt, lastError: null, firstMessage: "pending" });
+  assert.throws(() => registry.createThread(thread, pylon, undefined, undefined, true), /no longer queued/, "a started record never starts again");
+  assert.deepEqual(registry.queuedThreads().map((r) => r.status), ["started"]);
+  assert.throws(() => registry.createThread({ ...thread, id: "th-2" as ThreadId, pylonId: "pylon-th-2" as PylonId }, { ...pylon, pylonId: "pylon-th-2" as PylonId, thread: "th-2" }, undefined, undefined, true), /th-2 is no longer queued/, "a thread with no record is not queued");
 });

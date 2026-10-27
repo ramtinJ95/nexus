@@ -1,0 +1,20 @@
+GET /threads/th-895e15744ce0
+wave
+/
+B2: build on A2
+new reply
+Archive
+Delete
+B2: build on A2
+
+th-895e15744ce0 · started just now · scripted
+
+You
+
+B2: build on A2, after the earlier change landed
+
+scripted answer after user
+
+scripted
+⌘↵ to send
+Send

@@ -13,6 +13,7 @@ The control plane writes every record. Probes send facts in observations, and th
 | Image | `id`, `pins`, `builtOn`, `builtAt`, `sha256`, `release` | `nexus image build`: the manifest the build node's probe wrote, and the control plane release whose recipe it built. `release` is null for an image recorded by hand |
 | Template | `id`, `key`, `state`, `node`, `builtAt`, `commit` | Thread starts, which record a build, and the results of its `build-template` job |
 | Thread | `id`, `title`, `project`, `status`, `conversationId`, `pylonId`, `startedBy`, `seenAt`, `lastReplyAt`, `placement`, `setup` | You, and the harness |
+| Queued thread | `id`, `title`, `project`, `startedBy`, `createdAt`, `after`, `request`, `message`, `status`, `startNow`, `lastError`, `startedAt`, `firstMessage` | `nexus start --after`, until the thread starts. [Queued thread records](#queued-thread-records) describes it |
 | Claude transcript | `thread`, `session`, `byte_offset`, `skipping`, `dropped`, `read_at`, and its entries | Reads of the Claude worker's transcript in the pylon |
 | Pylon | `id`, `thread`, `node`, `template` | Thread start |
 | Session | `pylon`, `id`, `herdrPane`, `harness`, `harnessSessionId`, `status`, `title`, `state`, `message` | Observations. Panes opened by hand in Herdr are adopted. A paused pylon's sessions keep their records |
@@ -124,6 +125,19 @@ A linked PR contributes an `Output` with `kind: "pull-request"` and `ref` equal 
 A check thread is a bare thread, with no conversation and no Claude worker, whose `startedBy` is `nexus-check`. It lives only while its run does, and the review loop deletes any it does not hold.
 
 `needs-person` makes the builder's attention `decision`. A new `nexus review` replaces an ended record, and `nexus land` moves an approved one, or one the policy held after its check passed, back to `checking`.
+
+## Queued thread records
+
+`queued_threads` stores one JSON record per thread queued with `nexus start --after`, keyed by the ID the thread gets when it starts. `QueuedRecord` in `src/control/queue.ts` is the shape, and `QueuedThread` is the API's view of one that has not started.
+
+- `id`, `title`, `project`, `startedBy` (who queued it, the thread's `startedBy` once it starts) and `createdAt` (when it was queued).
+- `after` holds the predecessor thread IDs, without repeats, each a thread or another queued record when it was queued.
+- `request` is the `StartRequest` the start runs, frozen when it was queued: `node` is the start's, or absent for the project's default when it starts, and `resources` is the start's size filled field by field from the project's then.
+- `message` is a Nexus agent thread's first message, and null for a Claude worker, whose prompt is `request.claude`.
+- `status` is `queued`, `archived` (cancelled; unarchive makes it `queued` again), `deleted`, or `started`. Only the transaction that inserts the thread's row sets `started`, together with `startedAt`, the thread's `createdAt`, and `firstMessage`, which is `pending` until the message is sent and `sent` after it, or null with no message. That transaction refuses a record that is not `queued`, so a thread starts at most once.
+- `startNow` is who asked `start-queued` and when, or null. `lastError` is why the latest start attempt failed, cleared by the start.
+
+What blocks a queued thread is not stored. Each pass and each view derives every predecessor's `Wait` from its thread, its `reviews` record and its `pr_watches` links.
 
 ## Releases and deployment drain
 

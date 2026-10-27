@@ -1,0 +1,11 @@
+$ node --test src/control/queue.test.ts src/control/pr-watch.test.ts src/control/registry.test.ts src/control/api.test.ts src/cli/nexus.test.ts src/control/dashboard.test.ts   # main cf2558c with this branch's test files
+ℹ fail 7
+ℹ pass 52
+ℹ tests 59
+✖ a queued thread's row and its queue record's start commit together, and a record no longer queued starts nothing (44.690548ms)
+✖ a turn running before turn starts were recorded has no known start (121.697763ms)
+✖ src/cli/nexus.test.ts (619.385575ms)
+✖ src/control/api.test.ts (730.259089ms)
+✖ src/control/dashboard.test.ts (673.71042ms)
+✖ src/control/pr-watch.test.ts (448.397407ms)
+✖ src/control/queue.test.ts (450.930349ms)

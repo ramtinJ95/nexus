@@ -1,0 +1,10 @@
+$ nexus threads
+th-6dc582b58f06  active  -                                                   pylon running  wave  3s ago  A1: change the shared file
+th-cd4be4a2b4b3  active  -                                                   pylon running  wave  3s ago  A2: change the shared file
+th-d8b878925a42  active  -                                                   pylon running  wave  2s ago  A3: change the shared file
+th-56b7f817ae47  active  -                                                   pylon running  wave  2s ago  A4: change the shared file
+th-dee5606c7472  queued  waits for th-6dc582b58f06: has no pull request yet  node node-a    wave  2s ago  B1: build on A1
+th-895e15744ce0  queued  waits for th-cd4be4a2b4b3: has no pull request yet  node node-a    wave  1s ago  B2: build on A2
+th-139521d6fd54  queued  waits for th-d8b878925a42: has no pull request yet  node node-a    wave  1s ago  C: build on A3
+th-d5d14e4ec90a  queued  waits for th-56b7f817ae47: has no pull request yet  node node-a    wave  0s ago  D: build on A4
+[exit 0]

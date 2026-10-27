@@ -1,0 +1,1 @@
+branch: 551055c fix(control): settling a predecessor's PRs reads them all, then saves every state at once

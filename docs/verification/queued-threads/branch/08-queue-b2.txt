@@ -1,0 +1,34 @@
+$ nexus start --project wave --title "B2: build on A2" --after th-cd4be4a2b4b3 --message "B2: build on A2, after the earlier change landed" --json
+{
+  "id": "th-895e15744ce0",
+  "title": "B2: build on A2",
+  "project": "wave",
+  "startedBy": "nVERIFYCONTROL",
+  "createdAt": 1793120114933,
+  "status": "queued",
+  "after": [
+    "th-cd4be4a2b4b3"
+  ],
+  "waits": [
+    {
+      "thread": "th-cd4be4a2b4b3",
+      "state": "waiting",
+      "why": "has no pull request yet"
+    }
+  ],
+  "blocked": false,
+  "node": "node-a",
+  "worker": "harness",
+  "model": null,
+  "prompt": "B2: build on A2, after the earlier change landed",
+  "branch": null,
+  "commit": null,
+  "resources": {
+    "cpus": 1,
+    "memoryGiB": 3,
+    "diskGiB": 5
+  },
+  "startNow": null,
+  "lastError": null
+}
+[exit 0]

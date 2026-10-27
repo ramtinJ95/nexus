@@ -1,0 +1,5 @@
+$ nexus conversation th-dee5606c7472
+> B1: build on A1, after the earlier change landed
+
+scripted answer after user
+[exit 0]
