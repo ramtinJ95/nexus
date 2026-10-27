@@ -518,7 +518,7 @@ export function openRegistry(path: string, clock = Date.now) {
     const p = q.pylon.get(t.pylonId);
     const workerFailed = ["failed", "stalled"].includes(String(sql("SELECT state FROM claude_workers WHERE thread = ?").get(id)?.state));
     const decision = needsPerson(jsonOrNull<Review>(sql("SELECT record FROM reviews WHERE builder = ?").get(id)?.record ?? null));
-    const attention = attentionOf(p?.failed != null || workerFailed, old?.parked === 1, t.lastReplyAt, t.seenAt, t.agentTurnRunning || t.sessionTurnRunning === true, t.sessionWaiting, decision, t.usageLimit !== undefined);
+    const attention = attentionOf(p?.failed != null || workerFailed, old?.parked === 1, t.lastReplyAt, t.seenAt, t.working, t.sessionWaiting, decision, t.usageLimit !== undefined);
     if ((old?.attention ?? null) === attention) return;
     sql("INSERT INTO thread_attention (thread, attention) VALUES (?, ?) ON CONFLICT(thread) DO UPDATE SET attention = excluded.attention").run(id, attention);
     appendEvent("attention.changed", id, { attention });
