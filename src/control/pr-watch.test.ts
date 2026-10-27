@@ -521,3 +521,40 @@ test("a predecessor with one PR merged and another open, neither linked yet, sti
   assert.deepEqual(links.map((l) => [l.pr.number, l.pr.state, l.pr.url === ""]), [[1, "merged", false], [2, "open", true]], "the open PR is linked unread, so the watch baselines it");
   assert.deepEqual(waitOf(f.registry, f.id), { thread: f.id, state: "waiting", why: "PR #2 is open" });
 });
+
+test("a predecessor's PRs are read before any is saved, and a known one that closes or reopens keeps its state current", async (t) => {
+  const f = fixture(); t.after(() => f.registry.close());
+  f.registry.saveQueued({
+    id: "th-queued" as ThreadId, title: "after", project: "project" as ProjectId, startedBy: "test", createdAt: 1, after: [f.id],
+    request: { project: "project", title: "after", resources: { cpus: 2, memoryGiB: 4, diskGiB: 10 } }, message: null, status: "queued", startNow: null, lastError: null, startedAt: null, firstMessage: null,
+  });
+  f.registry.savePrWatch(f.id, { links: [], commentWakes: 10, pending: null, error: null });
+  const pr = (number: number, state: "open" | "merged" | "closed") => ({ ...structuredClone(f.snapshot), pr: { ...f.snapshot.pr, number, state, url: `https://github.com/acme/repo/pull/${number}` } });
+  const states = new Map<number, "open" | "merged" | "closed">([[1, "merged"], [2, "open"]]);
+  let release = () => {};
+  const held = new Promise<void>((resolve) => { release = resolve; });
+  let asked = () => {};
+  const second = new Promise<void>((resolve) => { asked = resolve; });
+  let hold = true;
+  const watcher = prWatcher({ ...f.options, github: {
+    find: async (_repo: string, _branch: string, state = "open") => state === "all" ? [1, 2] : [],
+    poll: async (_repo: string, n: number) => { if (n === 2 && hold) { asked(); await held; } return pr(n, states.get(n)!); },
+  } });
+  const pass = watcher.poll();
+  await second;
+  assert.equal(waitOf(f.registry, f.id).state, "waiting", "while the open PR's read is under way, the merge beside it lands nothing");
+  release();
+  await pass;
+  hold = false;
+  assert.deepEqual(waitOf(f.registry, f.id), { thread: f.id, state: "waiting", why: "PR #2 is open" });
+
+  states.set(2, "closed");
+  await watcher.poll();
+  assert.deepEqual(f.registry.prWatch(f.id)!.links.map((l) => [l.pr.number, l.pr.state]), [[1, "merged"], [2, "closed"]]);
+  assert.equal(waitOf(f.registry, f.id).state, "landed", "once the open one closes, the merged one lands the thread");
+
+  states.set(2, "open");
+  await watcher.poll();
+  assert.deepEqual(waitOf(f.registry, f.id), { thread: f.id, state: "waiting", why: "PR #2 is open" }, "a reopened PR holds it again");
+  assert.equal(f.registry.prWatch(f.id)!.links[1]!.pr.url, "", "a PR the watch never read stays unread, so its comments are baselined");
+});

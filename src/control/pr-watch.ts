@@ -47,9 +47,9 @@ export function prWatcher(options: { registry: Registry; github: Pick<GitHub, "f
     // A queued thread starts when these threads' pull requests merge, which the watch must see even where it sends nothing.
     const awaited = new Set(registry.queuedThreads().flatMap((q) => q.status === "queued" ? q.after : []));
     /**
-     * Records a merge of a thread a queued thread waits for, whatever else holds its watch: an archive, the comment cap,
-     * a message it cannot deliver yet, a PR it last saw closed, or a PR that opened and merged between two reads, which
-     * a search of open PRs never finds. An open PR it finds is left to the watch's own discovery, which baselines it.
+     * Keeps the state of every PR of a thread a queued thread waits for current, whatever else holds its watch: an
+     * archive, the comment cap, a message it cannot deliver yet, a PR it last saw closed, or a PR that opened and merged
+     * between two reads, which a search of open PRs never finds.
      */
     async function settle(t: Thread) {
       const repo = githubRepo(registry.project(t.project)?.repoUrl ?? null);
@@ -60,17 +60,21 @@ export function prWatcher(options: { registry: Registry; github: Pick<GitHub, "f
         if (!finds.has(`${key}:all`)) finds.set(`${key}:all`, github!.find(repo, branch, "all"));
         for (const number of await finds.get(`${key}:all`)!) if (!known.some((l) => l.pr.number === number)) numbers.add(number);
       }
-      for (const number of numbers) {
-        const { pr } = await poll(repo, number);
-        const saved = registry.prWatch(t.id) ?? empty();
-        const stored = saved.links.find((l) => l.pr.repo === repo && l.pr.number === number);
-        // An open PR is linked as discovery links one, unread, so the watch baselines its comments and the merged one beside it does not land the thread.
-        if (pr.state === "open" && stored === undefined) saved.links.push({ pr: { repo, number, title: "", url: "", state: "open", checks: "none", review: "none", conflict: null }, seen: [], failed: false });
-        else if (pr.state !== "merged") continue;
-        else if (stored === undefined) saved.links.push({ pr, seen: [], failed: false });
-        else stored.pr = { ...pr, checks: stored.pr.checks, review: stored.pr.review, conflict: stored.pr.conflict };
-        registry.savePrWatch(t.id, saved);
+      const read = await Promise.all([...numbers].map((number) => poll(repo, number)));
+      // One synchronous save after every read, so the queue never sees a merge before the open PR beside it.
+      const saved = registry.prWatch(t.id) ?? empty();
+      for (const { pr } of read) {
+        const stored = saved.links.find((l) => l.pr.repo === repo && l.pr.number === pr.number);
+        // A merged PR is never read again. Any other keeps the title, URL and cursors the watch's own reads gave it, so
+        // one it never read stays unread and the watch baselines its comments when it reads it.
+        if (stored === undefined) {
+          if (pr.state === "merged") saved.links.push({ pr, seen: [], failed: false });
+          else if (pr.state === "open") saved.links.push({ pr: { repo, number: pr.number, title: "", url: "", state: "open", checks: "none", review: "none", conflict: null }, seen: [], failed: false });
+        } else {
+          stored.pr = pr.state === "merged" ? { ...pr, checks: stored.pr.checks, review: stored.pr.review, conflict: stored.pr.conflict } : { ...stored.pr, state: pr.state };
+        }
       }
+      registry.savePrWatch(t.id, saved);
     }
     for (const t of registry.threads()) {
       // A reviewer checks out the builder's branch, so its outputs would link it to the PR it reviews.
