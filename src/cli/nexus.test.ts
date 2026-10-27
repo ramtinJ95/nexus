@@ -786,6 +786,14 @@ test("attach to an archived thread exits 5, without a terminal 64, and against a
   assert.match(upgrade.screen, new RegExp(`the control plane at 127\\.0\\.0\\.1:${port} has no attach route\\. Upgrade it, as deploy/README\\.md describes`));
 });
 
+test("attach with a config of only the URL and the proxy prints nothing but its own error", async (t) => {
+  const s = await setup(t);
+  await mkdir(join(s.home, ".config", "nexus"), { recursive: true });
+  await writeFile(join(s.home, ".config", "nexus", "cli.json"), JSON.stringify({ url: s.localUrl, socks: "none" }));
+  const attach = await s.nexus(["attach", "th-0123456789ab"], { NEXUS_URL: "", NEXUS_SOCKS: "" });
+  assert.deepEqual([attach.code, attach.stderr], [64, "nexus: attach needs a terminal, and stdin or stdout is not one. Run nexus --help for usage\n"]);
+});
+
 test("a config that still holds the ssh attach settings runs every command, and attach names them once", async (t) => {
   const s = await setup(t);
   await mkdir(join(s.home, ".config", "nexus"), { recursive: true });
