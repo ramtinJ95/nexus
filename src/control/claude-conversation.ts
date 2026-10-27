@@ -18,7 +18,7 @@ export interface ClaudeConversations {
   view(t: Thread): ClaudeConversation;
   /** Reads what the transcript gained since the last read. It never rejects: a failed read keeps what is stored. */
   refresh(t: Thread): Promise<void>;
-  /** The view now, then the view after each read and whenever a turn starts or ends, until `stop`. */
+  /** The view now, then the view after each read that changed it and whenever a turn starts or ends, until `stop`. */
   watch(t: Thread): Promise<ClaudeWatch>;
   close(): void;
 }
@@ -89,6 +89,11 @@ interface Reader {
   working: boolean;
   /** The failure logged last, so a pylon that keeps failing is logged once. */
   failure: string | null;
+  /**
+   * The newest view while the thread is watched, whose entries the next view reads on from. A read that replaces the
+   * transcript drops it, as only these reads write the transcript.
+   */
+  kept: ClaudeConversation | null;
 }
 
 /** One refresh takes this many reads at most. A transcript with more to read goes on in the refresh after it. */
@@ -101,7 +106,7 @@ export function claudeConversations(options: { registry: Registry; probes: Reado
 
   const readerOf = (id: ThreadId): Reader => {
     let r = readers.get(id);
-    if (r === undefined) readers.set(id, r = { reading: null, next: null, watchers: new Set(), timer: null, working: false, failure: null });
+    if (r === undefined) readers.set(id, r = { reading: null, next: null, watchers: new Set(), timer: null, working: false, failure: null, kept: null });
     return r;
   };
 
@@ -111,11 +116,22 @@ export function claudeConversations(options: { registry: Registry; probes: Reado
     const stored = registry.claudeTranscript(t.id);
     // A transcript of another session than the worker's is one its launch replaced, and the next read replaces it.
     const current = stored !== undefined && stored.session === session ? stored : undefined;
-    return {
+    const r = readers.get(t.id);
+    const kept = r !== undefined && r.watchers.size > 0 ? r.kept : undefined;
+    const value: ClaudeConversation = {
       kind: "claude", session,
-      entries: current === undefined ? [] : registry.claudeEntries(t.id), dropped: current?.dropped ?? 0, readAt: current?.readAt ?? null,
+      entries: current === undefined ? [] : entriesOf(t.id, current.dropped, kept?.session === session ? kept : null), dropped: current?.dropped ?? 0, readAt: current?.readAt ?? null,
       working: now.sessionTurnRunning === true, usageLimit: now.usageLimit ?? null,
     };
+    if (kept !== undefined) r!.kept = value;
+    return value;
+  }
+
+  /** The stored entries, reading only those after `kept`'s, and `kept`'s own while nothing was added or dropped. */
+  function entriesOf(id: ThreadId, dropped: number, kept: ClaudeConversation | null): readonly ClaudeEntry[] {
+    if (kept === null) return registry.claudeEntries(id);
+    const after = registry.claudeEntries(id, kept.dropped + kept.entries.length);
+    return after.length === 0 && dropped === kept.dropped ? kept.entries : [...kept.entries.slice(dropped - kept.dropped), ...after];
   }
 
   /** The probe that can read the thread's pylon now, or null while its node does not report it running. */
@@ -126,7 +142,10 @@ export function claudeConversations(options: { registry: Registry; probes: Reado
     return running ? probes.get(pylon!.node) ?? null : null;
   }
 
-  /** Starts or stops the reads of a watched turn, and tells the watchers after a read or when a turn starts or ends. */
+  /**
+   * Starts or stops the reads of a watched turn, and tells the watchers after a read that changed the transcript or
+   * when a turn starts or ends.
+   */
   function update(id: ThreadId, r: Reader, read: boolean) {
     const t = registry.thread(id);
     const working = t?.sessionTurnRunning === true;
@@ -166,10 +185,12 @@ export function claudeConversations(options: { registry: Registry; probes: Reado
       // A delete meanwhile removed the transcript, which this read must not bring back.
       if (closed || registry.thread(id)?.status === "deleted") return;
       // Null is a session that has written no transcript yet, which the read still dates.
-      registry.appendClaudeRead(id, {
+      const appended = registry.appendClaudeRead(id, {
         session, from, entries: found?.entries ?? [], cursor: found?.cursor ?? from, reset: found?.reset ?? false, readAt: Date.now(),
       });
-      update(id, r, true);
+      if (appended && found?.reset === true) r.kept = null;
+      // A read that found nothing new changes only `readAt`, which no watcher shows once it is set.
+      update(id, r, appended && (stored?.session !== session || (found !== null && (found.entries.length > 0 || found.reset))));
       if (found === null || !found.more) return;
     }
     if (!closed) void refreshOf(id);
@@ -232,6 +253,7 @@ export function claudeConversations(options: { registry: Registry; probes: Reado
         },
         async stop() {
           if (r.watchers.delete(watcher)) {
+            if (r.watchers.size === 0) r.kept = null;
             update(t.id, r, false);
             release(t.id, r);
           }
