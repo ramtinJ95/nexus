@@ -1032,7 +1032,7 @@ test("a caller that resets its stream connection during whois does not take the 
     log: () => reset.resolve(),
   });
   const socket = connect(probe.port, "127.0.0.1");
-  socket.write(`GET /v1/pylons/${pylonId}/stream?request=${encodeURIComponent(JSON.stringify({ pty: null, argv: ["true"] }))} HTTP/1.1\r\nhost: probe\r\nconnection: upgrade\r\nupgrade: nexus-stream\r\n\r\n`);
+  socket.write(`GET /v1/pylons/${pylonId}/stream?request=${encodeURIComponent(JSON.stringify({ argv: ["true"] }))} HTTP/1.1\r\nhost: probe\r\nconnection: upgrade\r\nupgrade: nexus-stream\r\n\r\n`);
   await entered.promise;
   socket.resetAndDestroy();
   await reset.promise;

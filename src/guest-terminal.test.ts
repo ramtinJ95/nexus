@@ -132,6 +132,6 @@ test("the relay goes in on stdin, so Herdr's attach fits the probe's request URL
   assert.deepEqual(await terminal.done, { kind: "exited", code: 0 });
   const attach = [...argvs[0]!.slice(0, -3), "sh", "-c", attachScript];
   // As protocol.ts's streamPath encodes a stream request.
-  const encoded = encodeURIComponent(JSON.stringify({ pty: null, argv: attach })).length;
+  const encoded = encodeURIComponent(JSON.stringify({ argv: attach })).length;
   assert.ok(encoded < 2048, `the attach request is ${encoded} bytes`);
 });
