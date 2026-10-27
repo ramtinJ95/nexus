@@ -6,7 +6,7 @@ home {
   "rows": [
     "dim    Spike: preview over HTTPS now",
     "bright Fix the flaky stream test now",
-    "dim    Pick a migration path working 2s",
+    "dim    Pick a migration path working 3s",
     "bright Rename the fork button now",
     "bright Answer the reviewer now"
   ]
@@ -26,24 +26,24 @@ after "Pick a migration path" moved from working to waiting {
   ]
 }
 screenshot 02-session-waits.png
-$ nexus events --thread th-7c44308f1d39 --kind attention.changed
-8 2026-10-27T12:20:05.906Z th-7c44308f1d39 attention.changed {"attention":"parked"}
+$ nexus events --thread th-1d0e98165fa0 --kind attention.changed
+8 2026-10-27T13:09:36.832Z th-1d0e98165fa0 attention.changed {"attention":"parked"}
 
-$ nexus delete th-7c44308f1d39
-Deleted th-7c44308f1d39.
+$ nexus delete th-1d0e98165fa0
+Deleted th-1d0e98165fa0.
 
-$ nexus show th-7c44308f1d39
-th-7c44308f1d39  Fix the flaky stream test
+$ nexus show th-1d0e98165fa0
+th-1d0e98165fa0  Fix the flaky stream test
 project: nexus
 attention: none
 status: deleted
-pylon: pylon-th-7c44308f1d39 on verify-node, running, observed 0s ago
+pylon: pylon-th-1d0e98165fa0 on verify-node, running, observed 0s ago
 size: 2 CPUs, 4 GiB memory, 10 GiB disk
 placement: verify-node, the project's default node
 setup: fresh boot runs .nexus/setup, because the control plane could not read .nexus/setup at main: the stack reads no remote
 PR watch: off (no control-plane GitHub token configured)
 
-$ nexus events --thread th-7c44308f1d39 --kind attention.changed
-8 2026-10-27T12:20:05.906Z th-7c44308f1d39 attention.changed {"attention":"parked"}
+$ nexus events --thread th-1d0e98165fa0 --kind attention.changed
+8 2026-10-27T13:09:36.832Z th-1d0e98165fa0 attention.changed {"attention":"parked"}
 
 deleted parked thread: show says attention null, the event stream last said "parked", THEY DISAGREE

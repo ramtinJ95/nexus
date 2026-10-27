@@ -1,1 +1,1 @@
-main: 137242d refactor: codebase-wide simplify pass (#144)
+main: 9da62ea fix: a working Claude thread reads as working in the CLI, the dashboard and notifications (#148)

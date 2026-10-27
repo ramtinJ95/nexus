@@ -1,1 +1,1 @@
-branch: a75ccf0 fix(dashboard): one attention table for the rows, the badge and notifications
+branch: ae4bbc2 refactor(control): compute attention's working input from Thread.working

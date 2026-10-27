@@ -1,8 +1,8 @@
 $ git log --oneline -1
-e994812 test: show attention disagreeing between the API and its events, and waiting between row and badge
+c3bd683 test: show attention disagreeing between the API and its events, and waiting between row and badge
 $ node --test --test-name-pattern="waiting on the person|event stream last reported" src/control/dashboard/notifications.test.js src/control/api.test.ts
-✖ the API reports the attention the event stream last reported, and a deleted thread's run is not parked (112.767616ms)
-✖ a session waiting on the person counts in the badge and notifies at once, as its row stays bright (9.627282ms)
+✖ the API reports the attention the event stream last reported, and a deleted thread's run is not parked (107.747878ms)
+✖ a session waiting on the person counts in the badge and notifies at once, as its row stays bright (13.023085ms)
 ℹ tests 2
 ℹ suites 0
 ℹ pass 0
@@ -10,12 +10,12 @@ $ node --test --test-name-pattern="waiting on the person|event stream last repor
 ℹ cancelled 0
 ℹ skipped 0
 ℹ todo 0
-ℹ duration_ms 1207.997702
+ℹ duration_ms 1096.475242
 
 ✖ failing tests:
 
-test at src/control/api.test.ts:1667:1
-✖ the API reports the attention the event stream last reported, and a deleted thread's run is not parked (112.767616ms)
+test at src/control/api.test.ts:1680:1
+✖ the API reports the attention the event stream last reported, and a deleted thread's run is not parked (107.747878ms)
   AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
   + actual - expected
   
@@ -25,7 +25,7 @@ test at src/control/api.test.ts:1667:1
   -   null
     ]
   
-      at TestContext.<anonymous> (file://<worktree>/src/control/api.test.ts:1675:10)
+      at TestContext.<anonymous> (file://<worktree>/src/control/api.test.ts:1688:10)
       at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
       at async Test.run (node:internal/test_runner/test:1409:7)
       at async startSubtestAfterBootstrap (node:internal/test_runner/harness:387:3) {
@@ -38,7 +38,7 @@ test at src/control/api.test.ts:1667:1
   }
 
 test at src/control/dashboard/notifications.test.js:18:1
-✖ a session waiting on the person counts in the badge and notifies at once, as its row stays bright (9.627282ms)
+✖ a session waiting on the person counts in the badge and notifies at once, as its row stays bright (13.023085ms)
   AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
   + actual - expected
   

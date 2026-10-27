@@ -1,6 +1,6 @@
 # One attention verification
 
-Verified in this task's pylon on 2026-10-27, on branch `fix/issue-130-one-attention`, against main at 137242d, with
+Verified in this task's pylon on 2026-10-27, on branch `fix/issue-130-one-attention`, against main at 9da62ea, with
 headless Chromium 153. No live control plane, node, image or other thread was touched.
 
 ## How to rerun
@@ -52,7 +52,7 @@ Attention from the API against attention from the event stream, for a thread del
 | `06-events-deleted.txt` | the last event is still `parked` | a new event says `null` |
 | `drive.log`, last line | `THEY DISAGREE` | `they agree` |
 
-`tests-main.txt` runs the two new behaviour tests at e994812, which adds them on top of main's code. Both fail: the
+`tests-main.txt` runs the two new behaviour tests at c3bd683, which adds them on top of main's code. Both fail: the
 API says `null` where the event stream says `parked`, and a change to waiting notifies nothing. `tests-branch.txt`
 runs them on the branch with the two registry tests for opening a database: a thread whose attention was never stored, and one deleted while parked before this branch. All four pass.
 
