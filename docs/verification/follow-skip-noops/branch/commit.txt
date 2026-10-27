@@ -1,1 +1,1 @@
-branch: 8c50561 perf(loop): skip the journal reports a snapshot replays from before the node's receipt
+branch: d520374 docs(verification): count follow()'s work on main and this branch over one scripted hour

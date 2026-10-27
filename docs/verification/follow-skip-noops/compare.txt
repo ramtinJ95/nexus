@@ -1,4 +1,4 @@
-Stream: 68 snapshot, 550 session-event, 27 preview-hit, 22 job, 11 pylon.
+Stream: 68 snapshot, 550 session-event, 27 preview-hit, 22 job, 11 pylon, over 2 observe connections.
 
 | follow() work                                            | main | branch | change |
 |----------------------------------------------------------|-----:|-------:|-------:|

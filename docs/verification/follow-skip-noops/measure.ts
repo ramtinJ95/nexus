@@ -28,6 +28,7 @@ const pylonCount = 10;
 
 const counts = {
   events: {} as Record<string, number>,
+  connections: 0,
   /** Registry calls whose caller is follow(), by method. */
   calls: {} as Record<string, number>,
   /** SQL that runs inside those calls. */
@@ -106,10 +107,12 @@ const running = (pylonId: import("../../../src/protocol.ts").PylonId, minute: nu
 
 // One hour on a node with ten running pylons. Each minute: ten session reports, a snapshot carrying the journal's last
 // 100 reports, and every other minute a preview hit. Every five minutes a job runs, which the probe announces with a
-// job event when it starts and ends, a pylon event and a snapshot after it. From minute 30 to 34 the link is down: the
-// probe journals that minute's reports and sends nothing, and the snapshot on reconnect brings them.
+// job event when it starts and ends, a pylon event and a snapshot after it. At minute 30 the observe stream ends, and
+// the loop reconnects on its own. The probe journals the reports of minutes 30 to 34 and sends them only in the
+// snapshot that opens the new stream after minute 34.
 const journal: ReportedEvent[] = [];
-const script: ProbeEvent[] = [];
+const streams: ProbeEvent[][] = [[]];
+let script = streams[0]!;
 let sequence = 0;
 const pylons = new Map(pylonIds.map((id) => [id, running(id, 0)]));
 const snapshot = (minute: number): ProbeEvent => ({
@@ -132,7 +135,7 @@ for (let minute = 0; minute < 60; minute++) {
     if (!down) script.push({ type: "session-event", report });
   }
   if (down) {
-    if (minute === 34) script.push(snapshot(minute));
+    if (minute === 34) streams.push(script = [snapshot(minute)]);
     continue;
   }
   if (minute % 2 === 0) script.push({ type: "preview-hit", pylonId: pylonIds[minute % pylonCount]!, service: "web", at: new Date(now - 3_600_000 + minute * 60_000).toISOString(), login: null });
@@ -147,7 +150,7 @@ for (let minute = 0; minute < 60; minute++) {
   }
   script.push(snapshot(minute));
 }
-for (const event of script) counts.events[event.type] = (counts.events[event.type] ?? 0) + 1;
+for (const event of streams.flat()) counts.events[event.type] = (counts.events[event.type] ?? 0) + 1;
 
 let drained!: () => void;
 const allTaken = new Promise<void>((resolve) => { drained = resolve; });
@@ -161,7 +164,10 @@ const probe: ProbeClient = {
   },
   async job(jobId) { return submitted.get(jobId) ?? "unknown"; },
   async *observe(signal) {
-    yield* script;
+    counts.connections++;
+    const stream = streams.shift()!;
+    yield* stream;
+    if (streams.length > 0) return;
     drained();
     await new Promise((resolve) => signal.addEventListener("abort", resolve, { once: true }));
   },
@@ -174,7 +180,7 @@ const probe: ProbeClient = {
 const logged: string[] = [];
 const loop = startLoop({
   registry, probes: [probe], ingest, previewPorts: { first: 10200, last: 10299 },
-  intervalMs: 3_600_000, silenceMs: 3_600_000, offlineAfterMs: 3_600_000, log: (line) => logged.push(line),
+  intervalMs: 3_600_000, silenceMs: 3_600_000, offlineAfterMs: 3_600_000, reconnectMs: 10, log: (line) => logged.push(line),
 });
 await allTaken;
 await loop.wake(node);

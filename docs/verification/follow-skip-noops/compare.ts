@@ -9,7 +9,7 @@ const read = (dir: string, file: string) => readFileSync(join(dir, file), "utf8"
 const main = JSON.parse(read(mainDir, "counts.json"));
 const branch = JSON.parse(read(branchDir, "counts.json"));
 
-const events = (c: typeof main) => Object.entries(c.events).map(([k, v]) => `${v} ${k}`).join(", ");
+const events = (c: typeof main) => `${Object.entries(c.events).map(([k, v]) => `${v} ${k}`).join(", ")}, over ${c.connections} observe connections`;
 if (events(main) !== events(branch)) throw new Error("the two runs were fed different streams");
 console.log(`Stream: ${events(main)}.\n`);
 

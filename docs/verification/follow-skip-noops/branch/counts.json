@@ -6,6 +6,7 @@
     "job": 22,
     "pylon": 11
   },
+  "connections": 2,
   "calls": {
     "node": 678,
     "pylonIdsOn": 106,

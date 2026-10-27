@@ -16,8 +16,9 @@ differ only by the code under test. Each run's output lands in `main/` or `branc
 `measure.ts` starts the real `startLoop` with the real registry, on a SQLite file, and the real `ingest`. A scripted
 probe feeds it one simulated hour of a node with ten running pylons. Each minute brings ten session reports and a
 snapshot carrying the journal's last 100 reports. Every other minute brings a preview hit. Every five minutes a job
-runs: two job events, a pylon event and a snapshot. From minute 30 to 34 the link is down, so those 50 reports reach
-control only through the journal in the snapshot on reconnect. The clock is frozen, so both runs store the same times.
+runs: two job events, a pylon event and a snapshot. At minute 30 the observe stream ends and the loop reconnects on
+its own, so the run spans two observe connections. The 50 reports of minutes 30 to 34 reach control only through the
+journal in the snapshot that opens the second one. The clock is frozen, so both runs store the same times.
 
 The counts cover registry calls whose direct caller is `follow()`, and the SQL statements, transactions and
 observation writes those calls run. The registry methods are wrapped and `StatementSync` and `exec` are patched, the
