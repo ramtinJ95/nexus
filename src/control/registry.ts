@@ -577,10 +577,11 @@ export function openRegistry(path: string, clock = Date.now) {
     appendEvent,
     pruneSessions,
     recordParked(id: ThreadId, parked: boolean) {
+      // The harness reports on every change of a thread's live document, and nearly every report repeats the stored value.
+      if (sql("SELECT parked FROM thread_attention WHERE thread = ?").get(id)?.parked === (parked ? 1 : 0)) return;
       transaction(() => {
-        const old = sql("SELECT parked FROM thread_attention WHERE thread = ?").get(id)?.parked === 1;
         sql("INSERT INTO thread_attention (thread, parked) VALUES (?, ?) ON CONFLICT(thread) DO UPDATE SET parked = excluded.parked").run(id, parked ? 1 : 0);
-        if (parked && !old) appendEvent("thread.parked", id, {});
+        if (parked) appendEvent("thread.parked", id, {});
         updateAttention(id);
       });
     },
