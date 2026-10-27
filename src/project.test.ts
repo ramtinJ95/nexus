@@ -1,12 +1,14 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { parseDocument } from "yaml";
-import { configSchema } from "./pylon-vm/contracts.ts";
-import { bootSecrets, chatgptTokenGrant, effectiveAllowedHosts, githubTokenGrant, parseServicesFile, renderOverlay, type Project, type ProjectId, type PylonOverlay } from "./project.ts";
+import type { Writable } from "node:stream";
+import type { VM } from "@earendil-works/gondolin";
+import { actionSchema } from "./pylon-vm/contracts.ts";
+import { GuestServices } from "./pylon-vm/services.ts";
+import { bootSecrets, chatgptTokenGrant, effectiveAllowedHosts, githubTokenGrant, parseServicesFile, renderOverlay, serviceDecl, type Project, type ProjectId, type PylonOverlay } from "./project.ts";
 import type { NodeName, PylonId } from "./protocol.ts";
 
 const usageExample = `
@@ -103,15 +105,53 @@ test("parseServicesFile accepts a reference chain that is not a cycle", () => {
   assert.deepEqual(Object.keys(file.services), ["a", "b", "c"]);
 });
 
-/** The backend's own path for the file: src/pylon-vm/services.ts declarations(), then configSchema. */
-function backendAccepts(yaml: string): boolean {
-  if (Buffer.byteLength(yaml) > 1_048_576) return false;
-  const document = parseDocument(yaml, { uniqueKeys: true });
-  if (document.errors.length > 0) return false;
+/**
+ * A guest whose only file is `yaml`. Every command it is asked to run succeeds, every port answers, each free port
+ * asked for is the next from 41000, and its preview relay applies each map as it is written.
+ */
+function guestWith(yaml: string): VM {
+  let nextPort = 41000;
+  let relayStatus = "";
+  return {
+    async enableIngress() {
+      return { url: "http://127.0.0.1:9/" };
+    },
+    setIngressRoutes() {},
+    async exec(argv: string[], options: { stdout: Writable }) {
+      const command = argv[3]!;
+      const map = /relays\.json\.new' && mv /.test(command) ? /printf '%s' '([^']*)'/.exec(command) : null;
+      if (map) {
+        const { generation, relays } = JSON.parse(map[1]!);
+        relayStatus = JSON.stringify({ generation, bound: relays, failed: {} });
+      }
+      if (command.startsWith("cat ") && command.includes("relay-status.json")) options.stdout.write(relayStatus);
+      else if (command.includes("connect_ex")) options.stdout.write("True\n");
+      else if (command.includes("getsockname")) options.stdout.write(`${nextPort++}\n`);
+      return { exitCode: 0, stderr: JSON.stringify({ state: "exited", exitCode: 0 }) };
+    },
+    fs: {
+      async stat() {
+        return { size: Buffer.byteLength(yaml) };
+      },
+      async readFile() {
+        return yaml;
+      },
+      async writeFile() {},
+    },
+  } as unknown as VM;
+}
+/** The pylon's own path for the file: the `ensure` its supervisor runs on every boot. */
+async function backendAccepts(yaml: string): Promise<boolean> {
+  const dir = mkdtempSync(join(tmpdir(), "nexus-services-"));
+  const services = new GuestServices(guestWith(yaml), dir, "/workspace/repo/.nexus/services.yaml", "/workspace/repo", "user", { a: "https://a.example/" });
   try {
-    return configSchema.safeParse(document.toJS({ maxAliasCount: 20 })).success;
+    await services.operate("ensure");
+    return true;
   } catch {
     return false;
+  } finally {
+    await services.close();
+    rmSync(dir, { recursive: true, force: true });
   }
 }
 const nexusAccepts = (yaml: string): boolean => {
@@ -124,8 +164,7 @@ const nexusAccepts = (yaml: string): boolean => {
 };
 
 const svc = (fields: string): string => `services:\n  a: { command: x, ${fields} }\n`;
-/** Each row agrees with the backend, unless it names why Nexus is stricter. Nexus never accepts what the backend refuses. */
-const agreement: [name: string, yaml: string, nexusOnly?: string][] = [
+const agreement: [name: string, yaml: string][] = [
   ["the usage example", usageExample],
   ["preview links and every optional field", "services:\n  a:\n    command: x\n    cwd: apps/a\n    port: 3000\n    health: process\n    platforms: [linux, darwin]\n    timeoutMs: 100\n    preview: { url: 'https://example.com/', title: A, description: d }\n    previews: [{ url: /, title: Home }, { folder: F, links: [{ url: /x, title: X }] }]\n"],
   ["AMP_THREAD_ID in env", svc("env: { AMP_THREAD_ID: t }")],
@@ -158,24 +197,39 @@ const agreement: [name: string, yaml: string, nexusOnly?: string][] = [
   ["an unknown platform", svc("platforms: [windows]")],
   ["a timeout under 100 ms", svc("timeoutMs: 50")],
   ["a timeout over 2 minutes", svc("timeoutMs: 120001")],
-  ["a NEXUS_ name in env", svc("env: { NEXUS_NODE: n }"), "NEXUS_* names are managed by Nexus"],
-  ["an absolute cwd", svc("cwd: /etc"), "cwd must stay inside the repo"],
-  ["a cwd that leaves the repo", svc("cwd: ../x"), "cwd must stay inside the repo"],
-  ["an empty preview title", svc("preview: { title: '' }"), "a preview title must not be empty"],
-  ["review: false", svc("review: false"), "Nexus's file has no review field"],
-  ["a top-level version", "version: 1\nservices: {}\n", "Nexus's file holds only services"],
-  ["a reference to a service without a preview", "services:\n  a: { command: x }\n  b: { command: y, env: { U: '${services.a.publicURL}' } }\n", "references are checked at parse time, not at start"],
-  ["an unterminated reference", "services:\n  a: { command: x, preview: true }\n  b: { command: y, env: { U: '${services.a.publicURL' } }\n", "references are checked at parse time, not at start"],
-  ["a reference cycle", "services:\n  a: { command: x, preview: true, env: { U: '${services.a.publicURL}' } }\n", "references are checked at parse time, not at start"],
-  ["service keys that collapse to one string", "services:\n  1: { command: a }\n  '1': { command: b }\n", "the backend would silently keep only the last"],
+  ["a NEXUS_ name in env", svc("env: { NEXUS_NODE: n }")],
+  ["a NEXUS_ name Nexus does not set in env", svc("env: { NEXUS_FOO: n }")],
+  ["an absolute cwd", svc("cwd: /etc")],
+  ["a cwd that leaves the repo", svc("cwd: ../x")],
+  ["an empty preview title", svc("preview: { title: '' }")],
+  ["review: false", svc("review: false")],
+  ["a top-level version", "version: 1\nservices: {}\n"],
+  ["a top-level setup", "setup: [make]\nservices: {}\n"],
+  ["a reference to a service without a preview", "services:\n  a: { command: x }\n  b: { command: y, env: { U: '${services.a.publicURL}' } }\n"],
+  ["an unterminated reference", "services:\n  a: { command: x, preview: true }\n  b: { command: y, env: { U: '${services.a.publicURL' } }\n"],
+  ["a reference cycle", "services:\n  a: { command: x, preview: true, env: { U: '${services.a.publicURL}' } }\n"],
+  ["service keys that collapse to one string", "services:\n  1: { command: a }\n  '1': { command: b }\n"],
 ];
 
-test("parseServicesFile accepts exactly what the backend's schema accepts, except where Nexus is deliberately stricter", () => {
-  for (const [name, yaml, nexusOnly] of agreement) {
-    const backend = backendAccepts(yaml);
-    if (nexusOnly === undefined) assert.equal(nexusAccepts(yaml), backend, `${name}: Nexus and the backend agree`);
-    else assert.deepEqual([nexusAccepts(yaml), backend], [false, true], `${name}: only Nexus refuses it, because ${nexusOnly}`);
-  }
+test("parseServicesFile and the pylon's supervisor accept exactly the same files", async () => {
+  const disagreements: string[] = [];
+  for (const [name, yaml] of agreement) if (nexusAccepts(yaml) !== await backendAccepts(yaml)) disagreements.push(name);
+  assert.deepEqual(disagreements, []);
+});
+
+test("the in-pylon API's serviceDecl and the controller's service-start accept exactly the same services", () => {
+  const decls: [name: string, decl: Record<string, unknown>][] = [
+    ["a plain service", { command: "x", cwd: "apps/a", preview: { title: "A" } }],
+    ["PORT in env", { command: "x", env: { PORT: "1" } }],
+    ["a NEXUS_ name in env", { command: "x", env: { NEXUS_NODE: "n" } }],
+    ["an absolute cwd", { command: "x", cwd: "/etc" }],
+    ["a cwd that leaves the repo", { command: "x", cwd: "../x" }],
+    ["an empty preview title", { command: "x", preview: { title: "" } }],
+    ["review: false", { command: "x", review: false }],
+  ];
+  const disagreements = decls.flatMap(([name, decl]) =>
+    serviceDecl.safeParse(decl).success === actionSchema.safeParse({ action: "service-start", name: "pylon-1", service: "a", ...decl }).success ? [] : [name]);
+  assert.deepEqual(disagreements, []);
 });
 
 const project: Project = {
