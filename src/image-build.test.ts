@@ -204,6 +204,20 @@ test("the smoke boot expects PID 1 to be tini and to reap an exec's orphan, whic
   assert.notEqual(smokeFailure(reaps, 0, "tini\nZ\n"), undefined);
 });
 
+test("the smoke boot refuses a home that carries a hook outbox or an agent session from the build, before any check starts an agent", async (t) => {
+  const checks = smokeChecks({ ...(await loadImageRecipe()), pins });
+  const clean = checks.find((c) => c.name === "no build sessions")!;
+  assert.ok(checks.indexOf(clean) < checks.findIndex((c) => c.name === "agent setup"), "pi, which starts Claude, runs in the agent setup check");
+  const home = await mkdtemp(join(tmpdir(), "nexus-smoke-home-"));
+  t.after(() => rm(home, { recursive: true }));
+  const run = () => execFileSync("sh", ["-c", clean.argv.at(-1)!], { cwd: home, encoding: "utf8" });
+  assert.equal(smokeFailure(clean, 0, run()), undefined);
+  await mkdir(join(home, ".nexus", "outbox"), { recursive: true });
+  await writeFile(join(home, ".nexus", "outbox", "0001793089661334-433-000000-8b97cd5c.json"), '{"kind":"session.turn-started"}');
+  await mkdir(join(home, ".claude", "projects", "-"), { recursive: true });
+  assert.equal(smokeFailure(clean, 0, run()), 'expected "clean\\n", got ".claude/projects\\n.nexus\\nclean\\n"');
+});
+
 test("the mode listing parses into sorted fixes, and one without a setuid or setgid file is refused", () => {
   const listing = 'd 1777 /tmp\nf 4755 /usr/bin/sudo\nf 2755 /usr/bin/ssh-agent\nf 755 /usr/bin/odd "name"\n';
   assert.deepEqual(parseModeListing(listing), [

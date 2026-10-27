@@ -253,15 +253,16 @@ test("a background command that left its group runs while a process writes to it
   assert.equal(await backgroundWatch("c1", ["b6fh14jr7"], [])(), false);
 });
 
-test("only a Claude started outside other Claude sessions, under the pylon user's HOME, reports into the thread", async () => {
+test("only a Claude started outside other Claude sessions, under the pylon user's HOME in a thread's pylon, reports into the thread", async () => {
   const { reportsIntoThread } = await import("../images/pylon/nexus-heartbeat.ts");
   const home = "/home/user";
   const primary = "HOME=/home/user\0HERDR_ENV=1\0";
   const nested = "HOME=/home/user\0CLAUDE_CODE_SESSION_ID=37c5ec30-c691-4b40-992d-75e5cfd4eebc\0CLAUDE_PID=3445\0";
-  assert.equal(reportsIntoThread({ HOME: home, CLAUDE_CODE_SESSION_ID: "336789b3" }, primary, home), true, "Claude sets the variable for its own hooks too");
-  assert.equal(reportsIntoThread({ HOME: home }, nested, home), false, "a Claude another session's tool started");
-  assert.equal(reportsIntoThread({ HOME: "/tmp/verify/home" }, primary, home), false, "a Claude under an isolated HOME");
-  assert.equal(reportsIntoThread({ HOME: home }, "", home), true, "a Claude whose start is not known reports as before");
+  assert.equal(reportsIntoThread({ HOME: home, CLAUDE_CODE_SESSION_ID: "336789b3" }, primary, home, true), true, "Claude sets the variable for its own hooks too");
+  assert.equal(reportsIntoThread({ HOME: home }, nested, home, true), false, "a Claude another session's tool started");
+  assert.equal(reportsIntoThread({ HOME: "/tmp/verify/home" }, primary, home, true), false, "a Claude under an isolated HOME");
+  assert.equal(reportsIntoThread({ HOME: home }, "", home, true), true, "a Claude whose start is not known reports as before");
+  assert.equal(reportsIntoThread({ HOME: home }, primary, home, false), false, "a Claude in a template build, which no thread owns");
 });
 
 test("the environment a Claude started with is read from its process", { skip: process.platform !== "linux" && "reads /proc" }, async (t) => {

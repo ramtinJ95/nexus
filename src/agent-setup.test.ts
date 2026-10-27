@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, readFile, realpath, symlink, writeFile } from "node:fs/promises";
+import { execFileSync } from "node:child_process";
+import { chmod, copyFile, mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import {
@@ -595,4 +596,37 @@ test("the install check names a local pi package whose directory, declared resou
     "missing pi package packages/bare",
     "missing pi package packages/unbuilt",
   ]);
+});
+
+test("the image build installs and checks the agent setup without starting an agent, whose sessions and hook events the image would keep", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "agent-setup-build-"));
+  t.after(() => rm(root, { recursive: true }));
+  const setup = join(root, "setup");
+  await mkdir(setup);
+  for (const file of ["install.ts", "manifest.ts"]) await copyFile(join(pylonRecipeDir, "agent-setup", file), join(setup, file));
+  await writeFile(join(setup, agentSetupManifest.slice("agent-setup/".length)), json({
+    dotfiles: small.dotfiles, claude: { marketplaces: [], plugins: [] }, pi: { packages: [], extensions: [], shepherdrProfiles: [] }, skills: [],
+  }));
+  const home = join(root, "home");
+  await mkdir(join(home, ".claude"), { recursive: true });
+  await writeFile(join(home, ".claude", "settings.json"), "{}\n");
+  await mkdir(join(root, "bin"));
+  const stub = `#!/bin/sh
+echo "$(basename "$0") $*" >> ${root}/calls
+case "$(basename "$0") $*" in
+  git*" rev-parse HEAD") echo ${small.dotfiles.commit} ;;
+  "claude plugin list --json") echo [] ;;
+  "herdr integration install pi") mkdir -p "$HOME/.pi/agent/extensions" && touch "$HOME/.pi/agent/extensions/herdr-agent-state.ts" ;;
+  pi*) echo "No API key found" ;;
+esac
+`;
+  for (const tool of ["git", "claude", "pi", "herdr"]) {
+    await writeFile(join(root, "bin", tool), stub);
+    await chmod(join(root, "bin", tool), 0o755);
+  }
+  const output = execFileSync(process.execPath, [join(setup, "install.ts")], { env: { ...process.env, HOME: home, PATH: `${join(root, "bin")}:${process.env.PATH}` }, encoding: "utf8" });
+  assert.equal(output, "ok\n");
+  const calls = (await readFile(join(root, "calls"), "utf8")).trim().split("\n");
+  assert.ok(calls.includes("herdr integration install claude"), "the build installed the hooks an agent run would fire");
+  assert.deepEqual(calls.filter((call) => /^(claude|pi) /.test(call)), ["claude plugin list --json"]);
 });

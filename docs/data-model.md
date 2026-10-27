@@ -193,7 +193,9 @@ waiting event that control would then prefer. It deletes the event on a 200 or a
 doubling to at most 10. It exits when the outbox is empty. The outbox holds at
 most 1,000 events. A full one drops its oldest, so the newest state, such as the
 latest turn end, is what survives. An event older than a day is dropped unsent,
-and so is a temporary file a killed hook left for more than a minute. Neither
+and so is a temporary file a killed hook left for more than a minute. The hook writes only in a pylon a thread
+owns, one with the overlay's `~/.nexus/pylon.json`, and the image build starts no agent, so no image or template
+disk carries events that every pylon booted from it would send. Neither
 wait holds up Claude, whose hook only writes the file.
 
 From probe to control, the production probe journals its last 100 session
