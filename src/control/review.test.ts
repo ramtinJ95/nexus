@@ -1105,3 +1105,37 @@ test("a review held for the person ends once the person closes its PR or archive
     assert.notEqual(f.attention().at(-1), "decision", "the builder no longer needs a decision");
   }
 });
+
+test("a held review ends before its label is retried, and one whose PR watch stopped asks GitHub whether its PR closed", async (t) => {
+  const f = fixture(t);
+  const loop = f.loop();
+  await loop.start(f.builder, { land: null, rounds: 1 });
+  await loop.poll();
+  f.labelAnswer = () => { throw new Error("GitHub is down"); };
+  f.reply(f.review().reviewer, verdict(f.review(), { verdict: "changes", findings: [serious] }));
+  await loop.poll();
+  assert.deepEqual((f.review().phase as { label?: unknown }).label, { state: "adding" });
+  archive(f.registry, f.builder);
+  await loop.poll();
+  assert.deepEqual(f.review().phase, { kind: "cancelled", who: "builder", status: "archived" });
+
+  const g = fixture(t);
+  const held = g.loop();
+  await held.start(g.builder, { land: null, rounds: 1 });
+  await held.poll();
+  g.reply(g.review().reviewer, verdict(g.review(), { verdict: "changes", findings: [serious] }));
+  await held.poll();
+  g.registry.savePrWatch(g.builder, { ...g.registry.prWatch(g.builder)!, commentWakes: 10 });
+  g.snapshot = { ...g.snapshot, pr: { ...g.snapshot.pr, state: "closed" } };
+  await held.poll();
+  assert.deepEqual(g.review().phase, { kind: "closed" });
+});
+
+test("a PR that another thread on its branch has a review of gets none on its own", async (t) => {
+  const f = fixture(t, { autoReview: { land: false, enabledBy: "nLAPTOP" } });
+  const loop = f.loop();
+  await loop.auto(f.registry.thread(f.builder)!, f.pr);
+  await loop.auto(f.registry.thread(f.add("th-twin", true))!, f.pr);
+  assert.equal(f.registry.review("th-twin" as ThreadId), null);
+  assert.equal(f.started.length, 1);
+});

@@ -517,19 +517,22 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
   };
 
   async function step(r: Review): Promise<Review> {
+    // A review held for the person ends as a running one does once the person closes its PR or archives its builder,
+    // before its label, which the person no longer needs. One that merged is held over its deploy, which neither settles.
+    if (r.phase.kind === "needs-person" && r.merged === null) {
+      const status = registry.thread(r.builder)?.status;
+      if (status === "archived" || status === "deleted") return end(r, { kind: "cancelled", who: "builder", status });
+      const watch = registry.prWatch(r.builder);
+      // A watch stopped by its comment cap reads GitHub no more, so the loop asks GitHub itself.
+      const state = (watch?.commentWakes ?? 0) >= 10 ? (await github.poll(r.pr.repo, r.pr.number)).pr.state : watch?.links.find((l) => l.pr.repo === r.pr.repo && l.pr.number === r.pr.number)?.pr.state;
+      if (state === "closed") return end(r, { kind: "closed" });
+    }
     // A failed call throws, so the pass retries it. GitHub adds a label the PR has already as a no-op.
     if (r.phase.kind === "needs-person" && r.phase.label?.state === "adding") {
       const result = await github.label(r.pr.repo, r.pr.number, humanLabel);
       if (result.kind === "labelled") return { ...r, phase: { ...r.phase, label: { state: "added" } } };
       return { ...r, phase: { ...r.phase, label: { state: "failed", why: result.message }, reasons: [...r.phase.reasons,
         `Nexus could not add the label "${humanLabel}" to pull request #${r.pr.number} (${result.message}). Labelling needs a token that may write issues or pull requests, which only the person can grant.`] } };
-    }
-    // A review held for the person ends as a running one does once the person closes its PR or archives its builder.
-    // One that merged is held over its deploy, which archiving the thread does not settle.
-    if (r.phase.kind === "needs-person" && r.merged === null) {
-      const status = registry.thread(r.builder)?.status;
-      if (status === "archived" || status === "deleted") return end(r, { kind: "cancelled", who: "builder", status });
-      if (registry.prWatch(r.builder)?.links.find((l) => l.pr.repo === r.pr.repo && l.pr.number === r.pr.number)?.pr.state === "closed") return end(r, { kind: "closed" });
     }
     if (ended.has(r.phase.kind) && r.outbox === null) return r;
     const builder = registry.thread(r.builder);
@@ -640,8 +643,9 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
     async auto(t: Thread, pr: Pick<PullRequest, "repo" | "number">): Promise<void> {
       const setting = registry.project(t.project)?.autoReview;
       if (setting == null || t.startedBy === reviewerCaller || t.startedBy === checkCaller || registry.isReviewer(t.id)) return;
+      // Another thread on the same branch links the same PR, which has its review already.
+      if (registry.reviews().some((r) => r.pr.repo === pr.repo && r.pr.number === pr.number)) return;
       const existing = registry.review(t.id);
-      if (existing !== null && existing.pr.repo === pr.repo && existing.pr.number === pr.number) return;
       try {
         if (existing !== null && !ended.has(existing.phase.kind)) throw new HttpError(409, `review ${existing.id} of pull request #${existing.pr.number} is ${existing.phase.kind}`);
         await begin(t, pr, { land: setting.land ? { requestedBy: setting.enabledBy, fromProject: true } : null, auto: true });
