@@ -177,7 +177,7 @@ export function claudeConversations(options: { registry: Registry; probes: Reado
 
   /** A deleted thread's reader goes once nothing reads or watches it. */
   function release(id: ThreadId, r: Reader) {
-    if (r.reading === null && r.next === null && r.watchers.size === 0 && registry.thread(id)?.status === "deleted") readers.delete(id);
+    if (!closed && r.reading === null && r.next === null && r.watchers.size === 0 && registry.thread(id)?.status === "deleted") readers.delete(id);
   }
 
   function refreshOf(id: ThreadId): Promise<void> {
