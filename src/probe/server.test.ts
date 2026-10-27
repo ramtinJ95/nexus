@@ -11,7 +11,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { startProbe, type Probe, type ProbeOptions } from "./server.ts";
 import { nodeSecrets } from "./config.ts";
-import { connectProbe, fetchArtifact, jobDeadlineMs, type ByteStream, type DeclaredOutput, type GitFacts, type Job, type JobEnvelope, type JobId, type JobStatus, type LiveHash, type NodeName, type ProbeEvent, type PylonId, type ServiceFact, type TailnetNodeId } from "../protocol.ts";
+import { connectProbe, fetchArtifact, jobDeadlineMs, type ByteStream, type DeclaredOutput, type GitFacts, type Job, type JobEnvelope, type JobId, type JobStatus, type LiveHash, type NodeName, type ProbeEvent, type PylonCommand, type PylonId, type ServiceFact, type TailnetNodeId } from "../protocol.ts";
 import { envelope, ingest } from "../reconcile.ts";
 import { processStream } from "../process-stream.ts";
 import type { BackendPylon, Guest, VmBackend } from "../backend.ts";
@@ -686,6 +686,133 @@ test("a prompted Claude launch sent again while the first still runs waits for i
     assert.ok(event.type === "snapshot" && event.observation.claudeLaunchRepeatable === true);
     break;
   }
+});
+
+test("each command kind waits for the reads or its Claude session or nothing, publishes a snapshot or not, and a send is remembered by its request ID", async (t) => {
+  const session = "0b5e3a52-5d0f-4c1e-9a43-1f2a6c7d8e90";
+  const working = [herdrPane("w1:p1", "w1", "claude", "working", { kind: "id", value: session })];
+  let panes: ReturnType<typeof herdrPane>[] = working;
+  const base = fakeGuest((argv, herdr) => {
+    if (!herdr) {
+      if (argv.at(-1) === sessionsFile) return { exitCode: 3, output: "" };
+      // A prompted launch fails at once on reading its record, so it never polls for a submission here.
+      if (argv[0] === "sh" && argv[2]?.includes("/opened")) return { exitCode: 1, output: "no launch records in this guest" };
+      return { exitCode: 0, output: "" };
+    }
+    const sub = argv.slice(0, 2).join(" ");
+    if (sub === "api snapshot") return herdrOk(herdrSnapshot([{ id: "w1", label: "Claude Code" }], panes));
+    if (sub === "workspace list") return herdrOk({ type: "workspace_list", workspaces: [] });
+    if (sub === "workspace create") return herdrOk({ type: "workspace_created", workspace: { workspace_id: "w1" }, tab: { tab_id: "w1:t1" }, root_pane: { pane_id: "w1:p1" } });
+    if (sub === "pane process-info") return herdrOk({ type: "pane_process_info", process_info: { pane_id: "w1:p1", shell_pid: 100, foreground_processes: [{ pid: 101, name: "claude", argv: ["claude", "--resume", session] }] } });
+    if (sub === "agent start") {
+      panes = [herdrPane("w1:p1", "w1", "claude", "idle", { kind: "id", value: session })];
+      return herdrOk({ type: "agent_started", agent: {}, argv: [] });
+    }
+    if (sub === "pane close") return herdrError("pane_not_found");
+    throw new Error(`unscripted ${sub}`);
+  });
+  let typing: PromiseWithResolvers<void> | null = null;
+  const typingHeld = Promise.withResolvers<void>();
+  const guest: Guest = {
+    ...base,
+    async exec(argv, options) {
+      if (argv[3] === "claude-type" && argv[5] === "hold") {
+        typingHeld.resolve();
+        await typing?.promise;
+      }
+      return base.exec(argv, options);
+    },
+    services: async () => ({ services: [] }),
+    linkPort: async (port) => `port-${port}`,
+    unlinkPort: async () => null,
+  };
+  const { client, fake } = await setup(t, { listeningPollMs: 600_000 }, guest);
+  await running(client);
+  const commands: Record<string, PylonCommand> = {
+    "exec": { kind: "exec", argv: ["true"], cwd: "/", timeoutMs: 1000 },
+    "open-session": { kind: "open-session", harness: "shell", title: "shell" },
+    "open-session with resume": { kind: "open-session", harness: "claude-code", title: "Claude Code", resume: session },
+    "open-session with prompt and resume": { kind: "open-session", harness: "claude-code", title: "Claude Code", resume: session, prompt: "go" },
+    "close-session": { kind: "close-session", herdrPane: "w1:p9" },
+    "drop-failed-session": { kind: "drop-failed-session", id: "s1" },
+    "send-claude": { kind: "send-claude", session, text: "hi" },
+    "send-claude-outcome": { kind: "send-claude-outcome", requestId: "msg:never" },
+    "service": { kind: "service", op: "ensure" },
+    "link-port": { kind: "link-port", port: 3000 },
+    "unlink-port": { kind: "unlink-port", port: 3000 },
+  };
+  /** Which commands answer nothing while `hold` holds the probe, sent all at once. The rest answer, done or failed. */
+  async function waiting(hold: () => Promise<() => void>): Promise<string[]> {
+    const release = await hold();
+    const sent = Object.entries(commands).map(([name, command]) => {
+      const answered = client.command(pylonId, command).then(() => true, () => true);
+      return { name, answered, waits: Promise.race([answered.then(() => false), new Promise<boolean>((resolve) => setTimeout(resolve, 1_000, true))]) };
+    });
+    const waits = await Promise.all(sent.map((s) => s.waits));
+    release();
+    await Promise.all(sent.map((s) => s.answered));
+    return sent.filter((_, i) => waits[i]).map((s) => s.name);
+  }
+
+  const artifacts = fake.backend.artifacts.list;
+  const reads = new AbortController();
+  t.after(() => reads.abort());
+  const readsWait = await waiting(async () => {
+    const held = Promise.withResolvers<void>();
+    const reached = Promise.withResolvers<void>();
+    fake.backend.artifacts.list = async (listed) => {
+      reached.resolve();
+      await held.promise;
+      return artifacts(listed);
+    };
+    void client.observe(reads.signal)[Symbol.asyncIterator]().next().catch(() => undefined);
+    await reached.promise;
+    return () => {
+      fake.backend.artifacts.list = artifacts;
+      held.resolve();
+    };
+  });
+  reads.abort();
+  assert.deepEqual(readsWait, ["link-port", "unlink-port"], "a link or unlink waits for a read in flight, and nothing else does");
+
+  panes = working;
+  const sessionWaits = await waiting(async () => {
+    typing = Promise.withResolvers<void>();
+    void client.command(pylonId, { kind: "send-claude", session, text: "hold" }).catch(() => undefined);
+    await typingHeld.promise;
+    return () => typing!.resolve();
+  });
+  assert.deepEqual(sessionWaits, ["open-session with prompt and resume", "send-claude"], "only a send and a prompted launch wait for another command to the same Claude session");
+
+  let listed = 0;
+  const list = fake.backend.list;
+  fake.backend.list = () => { listed++; return list(); };
+  const abort = new AbortController();
+  t.after(() => abort.abort());
+  const events = client.observe(abort.signal)[Symbol.asyncIterator]();
+  assert.equal((await events.next()).value?.type, "snapshot");
+  /** Whether answering the command started a snapshot read for the observers, beyond the read of the pylon's state that every command makes first. */
+  async function publishes(command: PylonCommand): Promise<boolean> {
+    const before = listed;
+    await client.command(pylonId, command);
+    return listed - before - 1 > 0;
+  }
+  const published: Record<string, boolean> = {};
+  for (const name of ["exec", "open-session", "close-session", "drop-failed-session", "send-claude-outcome", "service", "link-port", "unlink-port"]) published[name] = await publishes(commands[name]!);
+  panes = working;
+  published["send-claude to a running session"] = await publishes(commands["send-claude"]!);
+  panes = [];
+  published["send-claude that resumes its session"] = await publishes(commands["send-claude"]!);
+  assert.deepEqual(published, {
+    "exec": false, "open-session": true, "close-session": true, "drop-failed-session": false, "send-claude-outcome": false, "service": false, "link-port": true, "unlink-port": true,
+    "send-claude to a running session": false, "send-claude that resumes its session": true,
+  });
+
+  panes = working;
+  await client.command(pylonId, { kind: "send-claude", session, text: "kept", requestId: "msg:kept" });
+  assert.deepEqual(await client.command(pylonId, { kind: "send-claude-outcome", requestId: "msg:kept" }), { kind: "send-claude-outcome", send: { outcome: "queued", herdrPane: "w1:p1", resumed: false } }, "a send-claude is remembered under its request ID");
+  await client.command(pylonId, { kind: "exec", argv: ["true"], cwd: "/", timeoutMs: 1000 });
+  assert.deepEqual(await client.command(pylonId, { kind: "send-claude-outcome", requestId: "msg:never" }), { kind: "send-claude-outcome", send: "unknown" });
 });
 
 test("a failing command rejects with the guest's error", async (t) => {
