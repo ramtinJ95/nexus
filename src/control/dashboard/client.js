@@ -170,6 +170,8 @@ async function refresh() {
     const res = await fetch(location.href, { headers: { accept: "text/html" }, cache: "no-store", signal: AbortSignal.timeout(pollMs * 2) });
     if (!res.ok) throw new Error(`the control plane answered ${res.status}`);
     const next = new DOMParser().parseFromString(await res.text(), "text/html");
+    // A queued thread that started has a thread page, whose regions the queued page has none of.
+    if ((next.getElementById("queued") === null) !== (document.getElementById("queued") === null)) return void location.reload();
     const followed = streaming() || frames !== seen;
     swap([...next.querySelectorAll("[data-live]")].filter((fresh) => !(followed && fresh.id === "convo")).map((fresh) => [document.getElementById(fresh.id), fresh.innerHTML]));
     const freshConvo = next.getElementById("convo");
