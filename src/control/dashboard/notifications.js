@@ -1,5 +1,8 @@
-export const needsAttention = (row) => ["failed", "decision", "parked", "limited", "reply"].includes(row.attention);
-export const badgeCount = (rows) => rows.filter(needsAttention).length;
+import { attentions } from "../attention.ts";
+
+const needsPerson = (row) => attentions[row.attention]?.needsPerson === true;
+export const badgeCount = (rows) => rows.filter(needsPerson).length;
+export const noticeText = (row) => attentions[row.attention].label;
 export const badgeText = (count) => count > 9 ? "9+" : String(count);
 export function notificationChannel(focused, current, id, secure, permission) {
   if (focused) return current === id ? null : "toast";
@@ -19,7 +22,7 @@ export function coordinator(notify) {
       for (const row of rows) {
         const before = previous.get(row.id);
         const changed = before?.attention !== row.attention;
-        if (changed && (row.attention === "failed" || row.attention === "decision" || row.attention === "parked" || row.attention === "limited")) notify(row);
+        if (changed && needsPerson(row) && row.attention !== "reply") notify(row);
         else if (row.attention === "reply" && !row.working
           && (changed || before?.lastReplyAt !== row.lastReplyAt || before?.working)) pending.set(row.id, now + 2000);
       }

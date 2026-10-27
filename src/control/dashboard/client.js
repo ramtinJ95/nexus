@@ -3,7 +3,7 @@
 // and polls the page to swap in each `data-live` region that changed. A thread page also follows its stream, which
 // sends the conversation region as the run streams, and reads its checkout's changes into the inspector, opening
 // each changed file's diff as a tab beside the conversation.
-import { coordinator, notificationChannel, badgeCount, badgeText, seenBody } from "./notifications.js";
+import { coordinator, notificationChannel, badgeCount, badgeText, noticeText, seenBody } from "./notifications.js";
 import { afterSend, emptyReview, formatReview, kinds, linesLabel, noteOn, place, rangeOf, readReview, rowsOf } from "./review.js";
 
 const main = document.querySelector("main");
@@ -1339,11 +1339,11 @@ const notifications = coordinator((row) => {
     window.isSecureContext && "Notification" in window ? Notification.permission : "unavailable");
   const url = `/threads/${row.id}`;
   if (channel === "system") {
-    const notice = new Notification(row.title, { body: row.attention === "reply" ? "New reply" : row.attention === "decision" ? "Needs your decision" : row.attention === "limited" ? "Stopped on its usage limit" : row.attention });
+    const notice = new Notification(row.title, { body: noticeText(row) });
     notice.onclick = () => { window.focus(); location.assign(url); notice.close(); };
   } else if (channel === "toast") {
     const toast = el("div", { className: "attention-toast", role: "status" },
-      el("span", { textContent: `${row.title}: ${row.attention}` }),
+      el("span", { textContent: `${row.title}: ${noticeText(row)}` }),
       el("a", { href: url, textContent: "Open" }));
     const dismiss = el("button", { textContent: "Dismiss", type: "button" });
     dismiss.onclick = () => toast.remove();

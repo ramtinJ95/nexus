@@ -23,7 +23,7 @@ import { desiredPhase, type ActualState, type DesiredPhase } from "../reconcile.
 import type { HerdrStatus } from "../protocol.ts";
 import { githubTokenGrant, linkedPort, type SessionHarness } from "../project.ts";
 import type { ThreadDetail } from "./api.ts";
-import type { Attention } from "./attention.ts";
+import { attentions, needsPerson } from "./attention.ts";
 import type { NodeRecord, Output, Preview, Registry, Thread, ThreadId } from "./registry.ts";
 import { usageLimitText, type ClaudeConversation, type ClaudeEntry, type PromptSource } from "../claude-transcript.ts";
 import { queuedOf } from "./claude-conversation.ts";
@@ -171,25 +171,16 @@ const unseen = (text: string) => html`<span class="vh">${text}</span>`;
 
 /** What a thread is doing, most urgent first: the agent mid-turn hides a running pylon, never a failed one. */
 function threadState({ thread: t, pylon, attention }: ThreadDetail): [label: string, tone: Tone] {
-  if (attention === "failed") return ["failed", "bad"];
-  if (attention === "decision") return ["needs your decision", "bad"];
-  if (attention === "parked") return ["parked", "bad"];
-  if (attention === "limited") return [usageLimitText(t.usageLimit ?? { resetsAt: null }, Date.now()), "bad"];
-  if (attention === "reply") return ["new reply", "ok"];
-  if (attention === "waiting") return [t.sessionWaitingMessage ?? "waiting for input", "idle"];
-  if (attention === "working") return ["agent working", "work"];
+  if (attention === "limited") return [usageLimitText(t.usageLimit ?? { resetsAt: null }, Date.now()), attentions.limited.tone];
+  if (attention === "waiting") return [t.sessionWaitingMessage ?? attentions.waiting.label, attentions.waiting.tone];
+  if (attention !== null) return [attentions[attention].label, attentions[attention].tone];
   if (t.status === "archived" || t.status === "deleted") return [t.status, "muted"];
   return actualBadge[pylon.actualState];
 }
 
-/**
- * Whether a thread needs the person, so its row stays bright: a failure or a parked run to fix, a review's decision,
- * a session stopped on its usage limit, a reply to read, or a session waiting on an answer. Waiting ranks below working, but only waiting is blocked on the person.
- */
-const needsPerson: Record<`${Attention}`, boolean> = { failed: true, decision: true, parked: true, limited: true, reply: true, waiting: true, working: false, null: false };
 /** The open thread's row never dims, nor a closed thread's, which its fold already sets apart. */
 const dims = (d: ThreadDetail, active?: ThreadId) =>
-  d.thread.id !== active && (d.thread.status === "active" || d.thread.status === "idle") && !needsPerson[`${d.attention}`];
+  d.thread.id !== active && (d.thread.status === "active" || d.thread.status === "idle") && !needsPerson(d.attention);
 
 /** "5 min", or null under 45 seconds. */
 function span(at: number, now: number): string | null {
