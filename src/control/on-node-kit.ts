@@ -9,7 +9,7 @@ import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { z } from "zod";
 import { artifactDirectory, tarCodec } from "../artifacts.ts";
-import { isImageId, probePort } from "../protocol.ts";
+import { isImageId, probePort, tailnetNodeIdSchema } from "../protocol.ts";
 import { scriptedModel, scriptedModels } from "../harness/test-fixture.ts";
 import { parseSelfDnsName, readProbeConfig } from "../probe/config.ts";
 import { tailscaleCli } from "../probe/serve.ts";
@@ -34,7 +34,7 @@ export async function openNodeCheck(options: { image: string | undefined; opens:
   if (previews === undefined) throw new Error(`set previews in the probe's config, then restart the probe. This check opens ${options.opens}`);
   const tailscale = tailscaleCli();
   const statusJson = await tailscale(["status", "--json"], AbortSignal.timeout(30_000));
-  const self = z.object({ Self: z.object({ ID: z.string() }) }).parse(JSON.parse(statusJson)).Self.ID;
+  const self = z.object({ Self: z.object({ ID: tailnetNodeIdSchema }) }).parse(JSON.parse(statusJson)).Self.ID;
   // Preview URLs name the node by its MagicDNS name, because that is the name its tailscale serve certificate is for.
   const dnsName = parseSelfDnsName(statusJson);
   if (probeConfig.auth.controlPlane !== self) throw new Error(`set auth.controlPlane in the probe's config to this node's ID ${self} (it is ${probeConfig.auth.controlPlane}), then restart the probe`);

@@ -18,12 +18,6 @@ export const pylonEventSchema = z.strictObject({
 });
 export type PylonEvent = z.infer<typeof pylonEventSchema>;
 export interface ReportedEvent { sequence: number; pylon: PylonId; event: PylonEvent; time: number }
-export const reportedEventSchema = z.strictObject({
-  sequence: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
-  pylon: z.string().regex(/^[a-z][a-z0-9-]{0,39}$/),
-  event: pylonEventSchema,
-  time: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
-});
 
 export interface NexusEvent {
   id: string;

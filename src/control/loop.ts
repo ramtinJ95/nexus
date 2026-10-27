@@ -17,7 +17,7 @@ import { setTimeout as delay } from "node:timers/promises";
 import { desiredPhase, type RegistryWrite } from "../reconcile.ts";
 import { linkedPort, liveHashOf, type GitIdentity } from "../project.ts";
 import { tick, type TickContext } from "../tick.ts";
-import type { NodeName, NodeObservation, ProbeClient, ProbeError, ProbeEvent, PylonCommand, PylonId, PylonObservation } from "../protocol.ts";
+import { isImageId, type NodeName, type NodeObservation, type ProbeClient, type ProbeError, type ProbeEvent, type PylonCommand, type PylonId, type PylonObservation } from "../protocol.ts";
 import type { ArtifactId } from "../images.ts";
 import { defaultClaudeModel } from "../claude-state.ts";
 import { pylonLive } from "./live.ts";
@@ -91,7 +91,7 @@ export function startLoop(options: LoopOptions): Loop {
     [...links.keys()].filter((node) => node !== from && observation(node)?.artifacts.includes(artifact));
 
   function artifactSha256(artifact: ArtifactId): string {
-    const image = artifact.startsWith("img-") ? registry.image(artifact as `img-${string}`) : undefined;
+    const image = isImageId(artifact) ? registry.image(artifact) : undefined;
     if (image === undefined) throw new Error(`the registry has no recorded sha256 for ${artifact}`);
     return image.sha256;
   }

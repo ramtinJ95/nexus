@@ -348,7 +348,7 @@ type ImageOperation = (
   | { kind: "build"; release: string | null }   // the release whose recipe the build sent, which it records
   | { kind: "rollout" }
 ) & {
-  image: string;             // img-<12 hex>
+  image: string;             // img-<12 hex> as `nexus image build` makes it; POST /v1/images takes any img-<1 to 40 lowercase letters or digits>
   requestedBy: string;       // the caller's stable tailnet node ID
   requestedAt: number;       // Unix milliseconds
   steps: Array<{

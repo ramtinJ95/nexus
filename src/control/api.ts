@@ -33,7 +33,7 @@ import { WebSocketServer, type WebSocket } from "ws";
 import { z } from "zod";
 import { actualState, desiredPhase, retryRefusal, type ActualState, type DesiredPhase } from "../reconcile.ts";
 import { bootSecrets, chatgptTokenGrant, effectiveAllowedHosts, gitIdentitySchema, gitUrl, linkedName, reservedPorts, withHttpsHosts, type BootInputs, type Project, type ProjectId, type SessionHarness } from "../project.ts";
-import type { CommandResult, NodeName, ProbeClient, ProbeError, PylonCommand, PylonId, TailnetNodeId } from "../protocol.ts";
+import { isImageId, type CommandResult, type NodeName, type ProbeClient, type ProbeError, type PylonCommand, type PylonId, type TailnetNodeId } from "../protocol.ts";
 import type { ConversationView, EntryRecord, JsonObject } from "@earendil-works/pi-durable";
 import type { HarnessHost } from "../harness/host.ts";
 import { pinsSchema, type ImageId, type ImageManifest } from "../images.ts";
@@ -256,7 +256,7 @@ const reviewSchema = z.strictObject({
   land: z.boolean().default(false),
 });
 const imageSchema = z.strictObject({
-  id: z.string().regex(/^img-[0-9a-f]{12}$/).transform((id) => id as ImageId),
+  id: z.custom<ImageId>(isImageId, "must be an image ID"),
   gondolinBuildId: z.string().min(1),
   pins: pinsSchema,
   builtOn: z.string().min(1).transform((node) => node as NodeName),

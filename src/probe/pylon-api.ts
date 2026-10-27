@@ -16,7 +16,7 @@ import { z } from "zod";
 import type { Guest } from "../backend.ts";
 import { addOutput, listOutputs, OutputRefused } from "../outputs.ts";
 import { linkedName, serviceDecl, type PreviewAssignment, type PylonApiRequest, type ServiceName } from "../project.ts";
-import type { DeclaredOutput, PylonId, ServiceFact } from "../protocol.ts";
+import { pylonIdSchema, type DeclaredOutput, type PylonId, type ServiceFact } from "../protocol.ts";
 import { bridgePylonHeader, hostBridgeSocket } from "../pylon-vm/host-bridge.ts";
 import { privateDirectory } from "../pylon-vm/storage.ts";
 import { BodyTooLarge, readBody } from "../request-body.ts";
@@ -264,8 +264,6 @@ export function listenHostBridge(
   };
 }
 
-const pylonIdPattern = /^[a-z][a-z0-9-]{0,39}$/;
-
 /**
  * The pylon VM backend's bridge: a Unix socket under the state root, which each instance's controller forwards
  * the guest's requests to with the instance name in a header (src/pylon-vm/host-bridge.ts). The socket is
@@ -275,7 +273,7 @@ export function pylonVmHostBridge(stateRoot: string): HostBridge {
   const path = hostBridgeSocket(stateRoot);
   const listen = listenHostBridge({ path }, async (req) => {
     const name = req.headers[bridgePylonHeader];
-    return req.url === "/v1/request" && typeof name === "string" && pylonIdPattern.test(name) ? name as PylonId : null;
+    return req.url === "/v1/request" && pylonIdSchema.safeParse(name).success ? name as PylonId : null;
   });
   return async (answer) => {
     // The probe can start before the backend's first action makes the state root, so the bridge makes it as the fork does.

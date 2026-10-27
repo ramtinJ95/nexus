@@ -7,7 +7,7 @@ import { isDraining, turnGate } from "./drain.ts";
 import { readFile } from "node:fs/promises";
 import { isAbsolute } from "node:path";
 import { z } from "zod";
-import { connectProbe, type NodeName, type TailnetNodeId } from "../protocol.ts";
+import { connectProbe, nodeNameSchema, tailnetNodeIdSchema, type NodeName } from "../protocol.ts";
 import { gitIdentitySchema, gitUrl } from "../project.ts";
 import { ingest } from "../reconcile.ts";
 import { linuxTailscaledSocket, localApiWhois, localApiCertificate } from "../tailscale.ts";
@@ -32,7 +32,6 @@ import { loadImageRecipe } from "../image-build.ts";
 import { runningCommit } from "../deploy/health.ts";
 import { chatgptTokenHandoff } from "./chatgpt-token.ts";
 
-const nodeId = z.string().regex(/^n[A-Za-z0-9]+$/, "a Tailscale stable node ID, such as nAbC123CNTRL");
 const absolutePath = z.string().refine(isAbsolute, "must be an absolute path");
 const port = z.int().min(1).max(65_535);
 
@@ -51,18 +50,18 @@ const configSchema = z.strictObject({
     hostnames: z.array(z.string().min(1)).min(1),
   }),
   /** The control plane's own tailnet node. The CLI on the same machine calls the API as this node. */
-  self: z.strictObject({ tailnetNodeId: nodeId }),
+  self: z.strictObject({ tailnetNodeId: tailnetNodeIdSchema }),
   nodes: z.array(z.strictObject({
-    name: z.string().regex(/^[a-z0-9][a-z0-9-]{0,62}$/).refine((name) => name !== "auto", "auto is what `start --node auto` asks for, so no node may be named it"),
+    name: nodeNameSchema,
     tailnetHost: z.string().min(1),
-    tailnetNodeId: nodeId,
+    tailnetNodeId: tailnetNodeIdSchema,
   })).min(1),
   /** Where `nexus image build` builds: infra-testbench when omitted, where Docker access was first verified. */
-  imageBuildNode: z.string().min(1).optional(),
+  imageBuildNode: nodeNameSchema.optional(),
   /** Other tailnet nodes, such as your laptop and phone, whose callers may use the API. */
-  callers: z.array(nodeId),
-  deployers: z.array(nodeId).optional(),
-  deployKeys: z.record(nodeId, z.string().regex(/^[0-9a-f]{64}$/)).optional(),
+  callers: z.array(tailnetNodeIdSchema),
+  deployers: z.array(tailnetNodeIdSchema).optional(),
+  deployKeys: z.record(tailnetNodeIdSchema, z.string().regex(/^[0-9a-f]{64}$/)).optional(),
   /** The common dotfiles layer every new pylon pulls on boot. */
   dotfiles: z.strictObject({ repo: gitUrl, ref: z.string().min(1) }),
   harness: z.strictObject({
@@ -118,9 +117,9 @@ export async function startControlPlane(config: ControlPlaneConfig, models: Mode
   const whois = localApiWhois(tailscaled);
   const registry = openRegistry(config.db);
   for (const node of config.nodes) {
-    registry.upsertNode({ name: node.name as NodeName, tailnetHost: node.tailnetHost, tailnetNodeId: node.tailnetNodeId as TailnetNodeId });
+    registry.upsertNode({ name: node.name, tailnetHost: node.tailnetHost, tailnetNodeId: node.tailnetNodeId });
   }
-  const probes = config.nodes.map((n) => connectProbe(n.name as NodeName, n.tailnetHost, n.tailnetNodeId as TailnetNodeId, { whois }));
+  const probes = config.nodes.map((n) => connectProbe(n.name, n.tailnetHost, n.tailnetNodeId, { whois }));
   const handoff = chatgptToken === undefined ? null : chatgptTokenHandoff({ probes, token: chatgptToken });
   const loop = startLoop({
     registry, probes, previewPorts: config.previewPorts, gitIdentity: config.gitIdentity,
@@ -192,9 +191,9 @@ export async function startControlPlane(config: ControlPlaneConfig, models: Mode
     prWatchEnabled: token !== null,
     reviews,
     turnsStarting: gate.busy,
-    deployment: { self: config.self.tailnetNodeId as TailnetNodeId, deployers: new Set((config.deployers ?? []) as TailnetNodeId[]), keys: config.deployKeys ?? {} },
+    deployment: { self: config.self.tailnetNodeId, deployers: new Set(config.deployers ?? []), keys: config.deployKeys ?? {} },
     registry, whois, host: config.listen.host, port: config.listen.port,
-    allowed: new Set([config.self.tailnetNodeId, ...config.callers] as TailnetNodeId[]),
+    allowed: new Set([config.self.tailnetNodeId, ...config.callers]),
     hostnames: new Set(config.listen.hostnames),
     harness,
     startThread,

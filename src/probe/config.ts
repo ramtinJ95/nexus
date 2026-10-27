@@ -9,17 +9,13 @@ import { basename, dirname, isAbsolute } from "node:path";
 import { z } from "zod";
 import type { SecretSource } from "../backend.ts";
 import type { ImageId } from "../images.ts";
-import { heldSecrets, probePort, type NodeName, type ProbeAuthConfig, type TailnetNodeId } from "../protocol.ts";
+import { heldSecrets, isImageId, nodeNameSchema, probePort, tailnetNodeIdSchema, type ProbeAuthConfig } from "../protocol.ts";
 
 const absolutePath = z.string().refine(isAbsolute, "must be an absolute path");
-const nodeName = z.string().regex(/^[a-z0-9][a-z0-9-]*$/, "must be a lowercase tailnet machine name").transform((v) => v as NodeName);
-const tailnetNodeId = z.string().regex(/^n[A-Za-z0-9]+$/, "must be a Tailscale stable node ID, such as nAbCdEf1CNTRL (tailscale status --json)").transform((v) => v as TailnetNodeId);
 /** Tailscale's address ranges. BlockList compares parsed addresses, so every spelling of an address matches. */
 const tailnet = new BlockList();
 tailnet.addSubnet("100.64.0.0", 10, "ipv4");
 tailnet.addSubnet("fd7a:115c:a1e0::", 48, "ipv6");
-
-const imageId = z.custom<ImageId>((v) => typeof v === "string" && /^img-[0-9a-f]{12}$/.test(v), "must be an image ID, such as img-000000000000");
 
 /**
  * Before the artifact store, a pylon-vm backend named each image's directory in `images`, and each was
@@ -39,12 +35,12 @@ function imagesAsStore(backend: unknown, ctx: z.RefinementCtx): unknown {
 }
 
 const configSchema = z.strictObject({
-  node: nodeName,
+  node: nodeNameSchema,
   listen: z.strictObject({
     host: z.union([z.ipv4(), z.ipv6()]).refine((h) => tailnet.check(h, isIPv6(h) ? "ipv6" : "ipv4"), "must be this node's tailnet address, in 100.64.0.0/10 or fd7a:115c:a1e0::/48"),
     port: z.int().min(1).max(65535).default(probePort),
   }),
-  auth: z.strictObject({ controlPlane: tailnetNodeId, peers: z.array(tailnetNodeId) }) satisfies z.ZodType<ProbeAuthConfig>,
+  auth: z.strictObject({ controlPlane: tailnetNodeIdSchema, peers: z.array(tailnetNodeIdSchema) }) satisfies z.ZodType<ProbeAuthConfig>,
   backend: z.preprocess(imagesAsStore, z.discriminatedUnion("kind", [
     z.strictObject({
       kind: z.literal("pylon-vm"),
@@ -55,7 +51,7 @@ const configSchema = z.strictObject({
       gitSsh: z.strictObject({ privateKeyFile: absolutePath, knownHostsFile: absolutePath }).optional(),
     }),
     /** Local development only: Docker containers stand in for pylon VMs. Without `artifacts` it builds and holds no templates. */
-    z.strictObject({ kind: z.literal("docker"), images: z.record(imageId, z.string()), labels: z.record(z.string(), z.string()).default({}), artifacts: absolutePath.optional() }),
+    z.strictObject({ kind: z.literal("docker"), images: z.record(z.custom<ImageId>(isImageId, "must be an image ID, such as img-000000000000"), z.string()), labels: z.record(z.string(), z.string()).default({}), artifacts: absolutePath.optional() }),
   ])),
   secretsFile: absolutePath,
   /** Omitted: the probe publishes no previews, and a spawn that assigns one fails. */

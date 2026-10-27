@@ -19,13 +19,13 @@ import { pipeline } from "node:stream/promises";
 import { promisify } from "node:util";
 import { JobFailure } from "./backend.ts";
 import type { ArtifactManifest, ImageId, ImageManifest, PortableArtifactId, TemplateManifest } from "./images.ts";
-import { isPortableArtifactId, parseArtifactManifest } from "./protocol.ts";
+import { isImageId, isPortableArtifactId, parseArtifactManifest } from "./protocol.ts";
 
 const execFileAsync = promisify(execFile);
 
 /** Each kind's manifest file. It stays out of the archive, because it holds the archive's sha256. */
 export const manifestFiles = { image: "image.json", template: "template.json" } as const;
-const manifestFileOf = (id: PortableArtifactId) => id.startsWith("img-") ? manifestFiles.image : manifestFiles.template;
+const manifestFileOf = (id: PortableArtifactId) => isImageId(id) ? manifestFiles.image : manifestFiles.template;
 
 /**
  * The sparse archive peers fetch: every file of an artifact directory except its manifest, as a byte-stable

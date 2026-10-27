@@ -1,0 +1,56 @@
+# fix/issue-129-one-id-schemas is fda8da9, on node v24.22.1
+
+## node name "rj-firebat" (10 characters)
+$ node src/probe/main.ts probe.json
+exit 1
+Error: listen EADDRNOTAVAIL: address not available 100.64.0.7:7480
+$ node src/control/main.ts control.json
+exit 1
+Error: the harness is not signed in to openai, so it has no model. Sign it in with src/control/login.ts
+
+## node name "nnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnn" (63 characters)
+$ node src/probe/main.ts probe.json
+exit 1
+Error: listen EADDRNOTAVAIL: address not available 100.64.0.7:7480
+$ node src/control/main.ts control.json
+exit 1
+Error: the harness is not signed in to openai, so it has no model. Sign it in with src/control/login.ts
+
+## node name "nnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnn" (64 characters)
+$ node src/probe/main.ts probe.json
+exit 1
+Error: $WORK/probe.json: ✖ must be a lowercase tailnet machine name of at most 63 characters
+  → at node
+$ node src/control/main.ts control.json
+exit 1
+Error: $WORK/control.json: invalid control plane config:
+✖ must be a lowercase tailnet machine name of at most 63 characters
+  → at nodes[0].name
+
+## node name "auto" (4 characters)
+$ node src/probe/main.ts probe.json
+exit 1
+Error: $WORK/probe.json: ✖ auto is what `start --node auto` asks for, so no node may be named it
+  → at node
+$ node src/control/main.ts control.json
+exit 1
+Error: $WORK/control.json: invalid control plane config:
+✖ auto is what `start --node auto` asks for, so no node may be named it
+  → at nodes[0].name
+
+## garbage() over an artifact store with malformed directory names
+"img-0123456789ab"                                 kept
+"img-00000000aaaa"                                 dropped, and the probe takes its drop job
+"tpl-00000000bbbb"                                 dropped, and the probe takes its drop job
+"ckpt-pylon-t1-1"                                  kept
+"img-Old.partial"                                  kept
+"img-"                                             kept
+"tpl-.."                                           kept
+"tpl-UPPER"                                        kept
+"img-00000000000000000000000000000000000000000"    kept
+
+## the branch's regression tests against fix/issue-129-one-id-schemas's code
+✔ a probe takes a node name exactly when the control plane does
+✔ garbage leaves a directory name that is no image or template ID, which no drop job may name
+ℹ pass 2
+ℹ fail 0

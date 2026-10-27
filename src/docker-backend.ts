@@ -21,7 +21,7 @@ import { dockerBridgeRunArgs } from "./docker-host-bridge.ts";
 import { dockerServices, publishedPorts } from "./docker-services.ts";
 import { processStream } from "./process-stream.ts";
 import type { OverlayFile } from "./project.ts";
-import type { PausedSession, PylonId } from "./protocol.ts";
+import { isTemplateId, type PausedSession, type PylonId } from "./protocol.ts";
 import type { ArtifactId, CheckpointId, ImageId, PortableArtifactId, TemplateId } from "./images.ts";
 import { publicUrls } from "./public-urls.ts";
 import { recordBeforePause, relaunchAfterWake, type PylonLog } from "./session-wake.ts";
@@ -218,8 +218,8 @@ export function createDockerBackend(options: DockerBackendOptions): VmBackend {
   }
   /** Docker images stand in for Nexus images and are configured per node, so only templates move or go. */
   function templateId(id: PortableArtifactId): TemplateId {
-    if (!id.startsWith("tpl-")) throw new JobFailure("invalid", `the Docker backend's images are configured Docker images, so ${id} is neither copied nor dropped`);
-    return id as TemplateId;
+    if (!isTemplateId(id)) throw new JobFailure("invalid", `the Docker backend's images are configured Docker images, so ${id} is neither copied nor dropped`);
+    return id;
   }
 
   async function imageRef(image: ImageId, signal?: AbortSignal): Promise<string> {

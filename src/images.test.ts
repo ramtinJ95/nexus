@@ -154,6 +154,11 @@ test("garbage drops aged templates that are not their project's newest ready one
   ]);
 });
 
+test("garbage leaves a directory name that is no image or template ID, which no drop job may name", () => {
+  const malformed = ["img-Old.partial", "img-", "tpl-..", "tpl-UPPER", `img-${"0".repeat(41)}`] as ArtifactId[];
+  assert.deepEqual(garbage([image, oldImage, ...malformed], [], { imageBuildNode: node, current: image }, now), [oldImage]);
+});
+
 test("a rebuild after expiry gets a new ID, and garbage keeps the old one until the rebuild is ready", () => {
   const expired = ready(now - templateMaxAgeMs - hour);
   const choice = chooseTemplate(project, key, checkout, [expired], node, [expired.id], now);

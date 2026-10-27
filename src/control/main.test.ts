@@ -1,9 +1,11 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
+import { parseProbeConfig } from "../probe/config.ts";
 import { parseConfig } from "./main.ts";
 
 const example = await readFile(new URL("../../deploy/control.example.json", import.meta.url), "utf8");
+const probeExample = await readFile(new URL("../../deploy/probe.example.json", import.meta.url), "utf8");
 
 test("the shipped example config parses", () => {
   const config = parseConfig(example);
@@ -20,6 +22,17 @@ test("a config without the harness, or with a relative harness path, is refused"
 test("no node may be named auto, which start --node auto asks for", () => {
   const config = JSON.parse(example);
   assert.throws(() => parseConfig(JSON.stringify({ ...config, nodes: [{ ...config.nodes[0], name: "auto" }] })), /no node may be named it/);
+});
+
+test("a probe takes a node name exactly when the control plane does", () => {
+  const config = JSON.parse(example);
+  const probe = JSON.parse(probeExample);
+  const parses = (parse: () => unknown) => { try { parse(); return true; } catch { return false; } };
+  const plane = (name: string) => parses(() => parseConfig(JSON.stringify({ ...config, nodes: [{ ...config.nodes[0], name }] })));
+  const node = (name: string) => parses(() => parseProbeConfig(JSON.stringify({ ...probe, node: name })));
+  const names = ["infra-testbench", "a".repeat(63), "a".repeat(64), "auto", "-lead", "Upper"];
+  for (const name of names) assert.equal(node(name), plane(name), name);
+  assert.deepEqual(names.filter(plane), ["infra-testbench", "a".repeat(63)]);
 });
 
 test("preview ports default to 10200 to 10999, and a range that ends before it starts is refused", () => {
