@@ -1,5 +1,5 @@
 $ nexus usage --since all
-Usage of all projects for all time. Counting started 2026-10-27 22:59 UTC.
+Usage of all projects for all time. Counting started 2026-10-27 23:09 UTC.
 
        Input  Output  Cache write  Cache read  Total  Calls
 Total  5.6k   1.7k    40.3k        316k        363k   14

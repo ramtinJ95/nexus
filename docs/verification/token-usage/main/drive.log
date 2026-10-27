@@ -33,8 +33,8 @@ total after the read: nothing to compare, as GET /v1/usage answered 404
 The stack was stopped and started again on the same registry and harness storage.
 total after the restart: nothing to compare, as GET /v1/usage answered 404
 
-$ nexus delete th-b87cf15d8bbb
-Deleted th-b87cf15d8bbb.
+$ nexus delete th-dae52590fd40
+Deleted th-dae52590fd40.
 exit 0
 
 total after deleting the Claude worker thread: nothing to compare, as GET /v1/usage answered 404

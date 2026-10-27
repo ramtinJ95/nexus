@@ -1,7 +1,7 @@
 $ nexus usage --since all --json
 {
   "since": null,
-  "countingSince": 1793141977000,
+  "countingSince": 1793142565000,
   "project": null,
   "thread": null,
   "total": {

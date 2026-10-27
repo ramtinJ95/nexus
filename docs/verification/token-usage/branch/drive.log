@@ -4,7 +4,7 @@ pi reviewer session:      {"calls":2,"input":1927,"output":10,"cacheWrite":0,"ca
 hand sum:                 {"calls":14,"input":5649,"output":1701,"cacheWrite":40335,"cacheRead":315782,"total":363467}
 
 $ nexus usage --since all
-Usage of all projects for all time. Counting started 2026-10-27 22:59 UTC.
+Usage of all projects for all time. Counting started 2026-10-27 23:09 UTC.
 
        Input  Output  Cache write  Cache read  Total  Calls
 Total  5.6k   1.7k    40.3k        316k        363k   14
@@ -39,7 +39,7 @@ exit 0
 $ nexus usage --since all --json
 {
   "since": null,
-  "countingSince": 1793141977000,
+  "countingSince": 1793142565000,
   "project": null,
   "thread": null,
   "total": {
@@ -165,7 +165,7 @@ $ nexus usage --since all --json
 exit 0
 
 $ nexus usage --since all --by model
-Usage of all projects for all time. Counting started 2026-10-27 22:59 UTC.
+Usage of all projects for all time. Counting started 2026-10-27 23:09 UTC.
 
        Input  Output  Cache write  Cache read  Total  Calls
 Total  5.6k   1.7k    40.3k        316k        363k   14
@@ -201,8 +201,8 @@ total after the restart: {"calls":14,"input":5649,"output":1701,"cacheWrite":403
 expected:  {"calls":14,"input":5649,"output":1701,"cacheWrite":40335,"cacheRead":315782,"total":363467}
 MATCH
 
-$ nexus delete th-7cd2cc359e6e
-Deleted th-7cd2cc359e6e.
+$ nexus delete th-2d56cb3495a8
+Deleted th-2d56cb3495a8.
 exit 0
 
 total after deleting the Claude worker thread: {"calls":14,"input":5649,"output":1701,"cacheWrite":40335,"cacheRead":315782,"total":363467}
@@ -210,7 +210,7 @@ expected:  {"calls":14,"input":5649,"output":1701,"cacheWrite":40335,"cacheRead"
 MATCH
 
 $ nexus usage --since all --by project
-Usage of all projects for all time. Counting started 2026-10-27 22:59 UTC.
+Usage of all projects for all time. Counting started 2026-10-27 23:09 UTC.
 
        Input  Output  Cache write  Cache read  Total  Calls
 Total  5.6k   1.7k    40.3k        316k        363k   14
