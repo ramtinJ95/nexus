@@ -1,88 +1,19 @@
 import { z } from "zod";
-import { reservedPortMessage, reservedPorts } from "../project.ts";
+import { previewText, serviceDecl, serviceName } from "../project.ts";
 
 const nameSchema = z.string().regex(/^[a-z][a-z0-9-]{0,39}$/);
 const guestPath = z
 	.string()
 	.startsWith("/")
 	.refine((s) => !s.includes("\0"));
-const serviceName = z.string().regex(/^[a-z0-9][a-z0-9-]{0,31}$/);
-const cwd = z
-	.string()
-	.refine((s) => !s.includes("\0"))
-	.default(".");
-const previewUrl = z
-	.string()
-	.refine((s) => {
-		if (s.startsWith("/") && !s.startsWith("//")) return true;
-		try {
-			return ["http:", "https:"].includes(new URL(s).protocol);
-		} catch {
-			return false;
-		}
-	})
-	.refine(
-		(s) => !s.includes("$AMP_USER_EMAIL"),
-		"Amp identity placeholders are unavailable locally",
-	);
-const previewText = z
-	.string()
-	.refine(
-		(s) => !s.includes("$AMP_USER_EMAIL"),
-		"Amp identity placeholders are unavailable locally",
-	);
-const linkSchema = z.strictObject({
-	url: previewUrl,
-	title: previewText.min(1),
-	description: previewText.optional(),
-});
-const previewSchema = z.union([
-	z.boolean(),
-	z.strictObject({
-		url: previewUrl.default("/"),
-		title: previewText.optional(),
-		description: previewText.optional(),
-	}),
-]);
-const serviceSchema = z.strictObject({
-	command: z.string().min(1),
-	cwd,
-	port: z.number().int().min(1).max(65535).refine((port) => !reservedPorts.has(port), reservedPortMessage).optional(),
-	env: z
-		.record(z.string().regex(/^[A-Za-z_][A-Za-z0-9_]*$/), z.string())
-		.default({})
-		.refine(
-			(env) =>
-				!("PORT" in env || "PUBLIC_URL" in env || "AMP_THREAD_ID" in env),
-			"PORT and PUBLIC_URL are managed; Amp identity is unavailable locally",
-		),
-	health: z
-		.union([z.string().startsWith("/"), z.literal("process")])
-		.optional(),
-	preview: previewSchema.default(false),
-	previews: z
-		.array(
-			z.union([
-				linkSchema,
-				z.strictObject({
-					folder: z.string().min(1),
-					links: z.array(linkSchema).min(1),
-				}),
-			]),
-		)
-		.default([])
-		.refine((links) => {
-			const folders = links
-				.filter((link) => "folder" in link)
-				.map((link) => link.folder);
-			return new Set(folders).size === folders.length;
-		}, "Preview folder names must be unique"),
-	platforms: z
-		.array(z.enum(["linux", "darwin"]))
-		.min(1)
-		.optional(),
-	review: z.literal(false).optional(),
-	timeoutMs: z.number().int().min(100).max(120000).default(30000),
+const cwd = z.string().refine((s) => !s.includes("\0"));
+/** serviceDecl, with the defaults the supervisor runs a service with. */
+const serviceSchema = serviceDecl.extend({
+	cwd: serviceDecl.shape.cwd.default("."),
+	env: serviceDecl.shape.env.default({}),
+	preview: serviceDecl.shape.preview.default(false),
+	previews: serviceDecl.shape.previews.default([]),
+	timeoutMs: serviceDecl.shape.timeoutMs.default(30000),
 });
 export const configSchema = z
 	.strictObject({

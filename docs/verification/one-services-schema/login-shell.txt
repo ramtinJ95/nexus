@@ -1,0 +1,5 @@
+# What a pylon's service script does with env from services.yaml (src/pylon-vm/guest.ts startService):
+# export each env name, then run the command in a login shell.
+$ sh -c "export NEXUS_THREAD_ID=from-services-yaml NEXUS_FOO=from-services-yaml; /bin/sh -lc 'env | grep -E ^NEXUS_\(THREAD_ID\|FOO\)= | sort'"
+NEXUS_FOO=from-services-yaml
+NEXUS_THREAD_ID=th-2baadece381d

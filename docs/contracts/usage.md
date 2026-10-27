@@ -88,7 +88,7 @@ services:
       API_URL: ${services.api.publicURL}
 ```
 
-The schema starts from pi-sandbox's `services` schema. `PUBLIC_URL` is the `https://` tailnet address of the preview. `PORT`, `PUBLIC_URL` and every `NEXUS_*` name are managed. A fixed `port` may not be one of Nexus's own, 22 for sshd or 700 to 799 for the preview relay, and a file that fixes one is refused whole, as one with a duplicate fixed port is.
+The schema starts from pi-sandbox's `services` schema, and `parseServicesFile` in `src/project.ts` is its one parser: a real pylon, the Docker backend and the in-pylon API all accept exactly the same files. The file holds only `services`. A `cwd` is a relative path inside the repo. `PUBLIC_URL` is the `https://` tailnet address of the preview. `PORT`, `PUBLIC_URL` and every `NEXUS_*` name are managed, and a service may not set them. A service runs in a login shell, which sets Nexus's own `NEXUS_*` names again over any value the file gives. A fixed `port` may not be one of Nexus's own, 22 for sshd or 700 to 799 for the preview relay, and a file that fixes one is refused whole, as one with a duplicate fixed port is. A pylon that refuses the file starts none of its services, and reports why as a `services` startup failure.
 
 ### In Nexus
 

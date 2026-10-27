@@ -12,7 +12,7 @@ Nexus calls it only through `run` in `client.ts`, from `src/pylon-vm-backend.ts`
 
 - The controller is started from `daemon.ts` with Node's type stripping, so there is no `dist/` build.
 - `run` takes the state root as an argument instead of reading `PI_SANDBOX_HOME`.
-- `create` and `prepare` take a typed config object, not a YAML path. The YAML config loader is gone. The guest's `.sandbox.yaml` services file is still read with `yaml`.
+- `create` and `prepare` take a typed config object, not a YAML path. The YAML config loader is gone. The guest's services file, `.nexus/services.yaml`, is read with Nexus's own parser, `parseServicesFile` in `src/project.ts`, and the service schema is its `serviceDecl` with upstream's defaults on top, so a pylon accepts exactly the files the rest of Nexus does. Upstream's `review: false`, top-level config keys, a `cwd` outside the repo and any `NEXUS_*` env name are refused.
 - `create` always takes its config, plus optionally the path of a prepared template's disk, which it copies in (as a reflink where the filesystem has them). Upstream names a template and reuses its recorded config. Nexus publishes prepared templates into its own artifact store (`src/artifacts.ts`), so records carry no template name.
 - `create` builds a new instance in a hidden staging directory and renames it into place, so a crash never leaves an instance directory without its record and intent.
 - `destroy` renames the instance to a hidden tombstone before removing it, also sweeps a leftover staging directory, and succeeds when the instance is absent. `list` skips hidden directories, removes tombstones a dead destroy left behind, and drops an instance destroyed while it was listing.

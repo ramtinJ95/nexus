@@ -15,7 +15,7 @@ import { createServer, type IncomingMessage } from "node:http";
 import { z } from "zod";
 import type { Guest } from "../backend.ts";
 import { addOutput, listOutputs, OutputRefused } from "../outputs.ts";
-import { linkedName, serviceDecl, type PreviewAssignment, type PylonApiRequest, type ServiceName } from "../project.ts";
+import { linkedName, serviceDecl, serviceName, type PreviewAssignment, type PylonApiRequest, type ServiceName } from "../project.ts";
 import { pylonIdSchema, type DeclaredOutput, type PylonId, type ServiceFact } from "../protocol.ts";
 import { bridgePylonHeader, hostBridgeSocket } from "../pylon-vm/host-bridge.ts";
 import { privateDirectory } from "../pylon-vm/storage.ts";
@@ -86,7 +86,6 @@ class Invalid extends Error {}
 /** A request the pylon turns down for a reason the agent can act on, such as a port a service's preview owns. */
 class Refused extends Error {}
 
-const serviceName = z.string().regex(/^[a-z0-9][a-z0-9-]{0,31}$/);
 const requestSchema = z.discriminatedUnion("op", [
   pylonEventSchema.extend({ op: z.literal("event") }),
   z.strictObject({ op: z.literal("info") }),

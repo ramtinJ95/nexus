@@ -70,9 +70,8 @@ export const managedEnv = ["PORT", "PUBLIC_URL"] as const; // plus every NEXUS_*
  * keys, a key that is not a string (`1:` and `"1":` would collapse), more than 20 alias expansions, any field
  * or value the schema does not allow, a duplicate fixed port, and an env value whose `${services.`
  * reference is malformed, names a service without a preview, or closes a cycle.
- * Every file it accepts is one the pi-sandbox-derived backend in src/pylon-vm/contracts.ts accepts, so this
- * mirrors that schema's restrictions, its Amp-derived ones included. Omitted fields stay omitted: the
- * defaults in ServiceDecl are applied where the service runs.
+ * The pylon's supervisor (src/pylon-vm/services.ts) reads the file with it too, so every backend accepts the
+ * same files. Omitted fields stay omitted: the defaults in ServiceDecl are applied where the service runs.
  */
 export function parseServicesFile(yamlText: string): ServicesFile {
   if (Buffer.byteLength(yamlText) > maxServicesFileBytes) throw new Error(`invalid .nexus/services.yaml: larger than ${maxServicesFileBytes} bytes`);
@@ -90,7 +89,7 @@ export function parseServicesFile(yamlText: string): ServicesFile {
 }
 
 const maxServicesFileBytes = 1_048_576;
-const serviceName = z.string().regex(/^[a-z0-9][a-z0-9-]{0,31}$/);
+export const serviceName = z.string().regex(/^[a-z0-9][a-z0-9-]{0,31}$/);
 const isManaged = (name: string): boolean => (managedEnv as readonly string[]).includes(name) || name.startsWith("NEXUS_");
 // The name checks are on the record, not the key schema, because Zod reports a failed key only as "Invalid key in record".
 const env = z.record(z.string().regex(/^[A-Za-z_][A-Za-z0-9_]*$/), z.string()).superRefine((vars, ctx) => {
@@ -101,7 +100,7 @@ const env = z.record(z.string().regex(/^[A-Za-z_][A-Za-z0-9_]*$/), z.string()).s
   }
 });
 /** The backend refuses Amp's identity placeholder in any preview url, title or description. */
-const previewText = z.string().refine((s) => !s.includes("$AMP_USER_EMAIL"), "$AMP_USER_EMAIL is not available");
+export const previewText = z.string().refine((s) => !s.includes("$AMP_USER_EMAIL"), "$AMP_USER_EMAIL is not available");
 /** A path on the service's own origin, or an absolute http(s) URL, as pi-sandbox allows. */
 const previewUrl = previewText.refine((s) => {
   if (s.startsWith("/")) return !s.startsWith("//");
@@ -130,8 +129,17 @@ export const serviceDecl = z.strictObject({
 });
 
 /** Matches every `${services.`. The group is set only for a whole reference, so a typo or a missing `}` cannot pass as a literal. */
-const serviceReference = /\$\{services\.(?:([a-z0-9][a-z0-9-]{0,31})\.publicURL\})?/g;
-const hasPreview = (decl: z.output<typeof serviceDecl>): boolean => Boolean(decl.preview) || (decl.previews?.length ?? 0) > 0;
+export const serviceReference = /\$\{services\.(?:([a-z0-9][a-z0-9-]{0,31})\.publicURL\})?/g;
+export const wantsPreview = (decl: { preview?: unknown; previews?: readonly unknown[] | undefined }): boolean => Boolean(decl.preview) || (decl.previews?.length ?? 0) > 0;
+/** `env` with each `${services.<name>.publicURL}` replaced by that service's public URL. Throws while one it names has none. */
+export function withPublicUrls(service: ServiceName, env: Record<string, string>, urls: Record<ServiceName, string>): Record<string, string> {
+  return Object.fromEntries(Object.entries(env).map(([key, value]) => [key, value.replace(serviceReference, (whole, dependency: string | undefined) => {
+    if (dependency === undefined) return whole;
+    const url = urls[dependency];
+    if (url === undefined) throw new Error(`Service ${service} needs the public URL of ${dependency}, which has no preview assigned yet. It starts once one is`);
+    return url;
+  })]));
+}
 
 const servicesFileSchema = z.strictObject({ services: z.record(serviceName, serviceDecl) }).superRefine(({ services }, ctx) => {
   const portOwner = new Map<number, string>();
@@ -149,7 +157,7 @@ const servicesFileSchema = z.strictObject({ services: z.record(serviceName, serv
       for (const [whole, target] of value.matchAll(serviceReference)) {
         const path = ["services", name, "env", key];
         if (target === undefined) ctx.addIssue({ code: "custom", path, message: `${JSON.stringify(value)} has a \${services. that is not a whole \${services.<name>.publicURL} reference` });
-        else if (services[target] === undefined || !hasPreview(services[target])) ctx.addIssue({ code: "custom", path, message: `${whole} names ${target}, which is not a declared service with a preview` });
+        else if (services[target] === undefined || !wantsPreview(services[target])) ctx.addIssue({ code: "custom", path, message: `${whole} names ${target}, which is not a declared service with a preview` });
         else names.push(target);
       }
     }

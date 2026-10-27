@@ -1,0 +1,13 @@
+$ node --test --test-name-pattern 'accept exactly the same' src/project.test.ts   # branch, this branch's test file
+services: web failed: Service web needs the public URL of api, which has no preview assigned yet. It starts once one is
+✔ parseServicesFile and the pylon's supervisor accept exactly the same files (150.41025ms)
+✔ the in-pylon API's serviceDecl and the controller's service-start accept exactly the same services (3.358939ms)
+ℹ tests 2
+ℹ suites 0
+ℹ pass 2
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 633.521304
+exit code: 0
