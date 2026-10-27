@@ -11,7 +11,7 @@
  * and its transcript stays in the file.
  */
 import { BACKGROUND_CONTEXT as context } from "@earendil-works/chord/context";
-import { createRegistry, Harness, type ConversationId, type ConversationWatch, type ModelRef, type Submission } from "@earendil-works/pi-durable";
+import { createRegistry, Harness, type ConversationId, type ConversationWatch, type Cursor, type EntryId, type ModelRef, type Submission } from "@earendil-works/pi-durable";
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
 import { CodingTools } from "@earendil-works/pi-durable/tools";
 import type { Models } from "@earendil-works/pi-ai/models";
@@ -23,6 +23,7 @@ import { trackActivity, type AgentFacts, type HarnessActivity } from "./activity
 import { pylonEnvs, type PylonLocator } from "./pylon-env.ts";
 import { latestTurn, turnSnapshots } from "./turn-snapshot.ts";
 import { writeThread } from "./thread-doc.ts";
+import type { AgentCall } from "../control/usage.ts";
 
 export type { ConversationId };
 
@@ -75,6 +76,11 @@ export interface HarnessHost {
   watch(threadId: string): Promise<ConversationWatch>;
   /** Aborts the thread's run and stops its pylon's daemon. Its conversation stays in storage, unreachable. */
   deleteThread(thread: { threadId: string; pylonId: PylonId }): Promise<void>;
+  /**
+   * The model calls of the conversation's assistant entries after entry `after`, and the last entry read. A deleted
+   * thread's conversation is still in storage, so it is read too.
+   */
+  usage(conversationId: ConversationId, after: number | null): Promise<{ calls: AgentCall[]; last: number | null }>;
   readonly activity: HarnessActivity;
   close(): Promise<void>;
 }
@@ -155,6 +161,26 @@ export async function openHarnessHost(options: HarnessHostOptions): Promise<Harn
     },
     async watch(threadId) {
       return (await conversation(threadId)).watch(context);
+    },
+    async usage(conversationId, after) {
+      const found = await harness.conversation(conversationId, context);
+      const calls: AgentCall[] = [];
+      let last = after;
+      let cursor: Cursor | undefined;
+      do {
+        if (found === undefined) break;
+        const page = await found.entries({ order: "ascending", ...(after === null ? {} : { minEntryId: (after + 1) as EntryId }) }, 500, cursor, context);
+        for (const entry of page.items) {
+          last = entry.id;
+          for (const m of entry.model ?? []) {
+            if (m.role !== "assistant") continue;
+            const { input, output, cacheWrite, cacheRead } = m.usage;
+            if (input + output + cacheWrite + cacheRead > 0) calls.push({ id: `harness:${conversationId}/${entry.id}`, agent: "pi", model: m.model, at: m.timestamp, input, output, cacheWrite, cacheRead });
+          }
+        }
+        cursor = page.next;
+      } while (cursor !== undefined);
+      return { calls, last };
     },
     async deleteThread({ threadId, pylonId }) {
       await (await conversation(threadId)).abort(context);

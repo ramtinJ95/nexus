@@ -1,7 +1,8 @@
 /**
  * Test support for src/harness/slice.test.ts. A scripted model that needs no network: a user message
  * `bash: <command>` becomes one bash tool call, and a tool result becomes a short final answer. A user message
- * `stream: <n>` is answered `word0 word1 ...` up to n words, written one word every 20 ms, as a model streams.
+ * `stream: <n>` is answered `word0 word1 ...` up to n words, written one word every 20 ms, as a model streams. Every
+ * answer reports `scriptedUsage`.
  *
  * Run as a program, it is the harness process the test kills mid-tool:
  *   node src/harness/test-fixture.ts <ChildArgs JSON>
@@ -15,6 +16,8 @@ import { openHarnessHost } from "./host.ts";
 import type { ProbeAddress } from "./pylon-env.ts";
 
 export const scriptedModel: ModelRef = { provider: "nexus-fixture", modelId: "scripted" };
+/** What each scripted answer reports it used. */
+export const scriptedUsage = { input: 1_234, output: 56, cacheWrite: 890, cacheRead: 7_000 } as const;
 /** How often a streamed answer gets its next word. */
 export const streamedWordMs = 20;
 export const streamedAnswer = (words: number) => Array.from({ length: words }, (_, i) => `word${i}`).join(" ");
@@ -41,7 +44,7 @@ export function scriptedModels(): Models {
       const message = {
         role: "assistant", api: model.api, provider: model.provider, model: model.id, timestamp: Date.now(),
         stopReason: command === undefined ? "stop" : "toolUse",
-        usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { ...model.cost, total: 0 } },
+        usage: { ...scriptedUsage, totalTokens: 9_180, cost: { ...model.cost, total: 0 } },
         content: command === undefined
           ? [{ type: "text", text: `scripted answer after ${last.role}` }]
           : [{ type: "toolCall", id: `call-${input.messages.length}`, name: "bash", arguments: { command, timeout: 600 } }],
