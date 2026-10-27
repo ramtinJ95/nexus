@@ -121,8 +121,8 @@ test("the host command runs only as root, so no API caller can make an enrolment
   if (process.getuid?.() === 0) return t.skip("runs as root");
   const dir = await mkdtemp(join(tmpdir(), "nexus-passkeys-")); t.after(() => rm(dir, { recursive: true }));
   await writeFile(join(dir, "control.json"), "{}");
-  const run = spawnSync(process.execPath, [new URL("./passkeys.ts", import.meta.url).pathname, join(dir, "control.json"), "code"], { encoding: "utf8" });
+  const run = spawnSync(process.execPath, [new URL("./passkeys-host.ts", import.meta.url).pathname, join(dir, "control.json"), "code"], { encoding: "utf8" });
   assert.equal(run.status, 77);
   assert.match(run.stderr, /run this as root on the control plane's host/);
-  assert.equal(spawnSync(process.execPath, [new URL("./passkeys.ts", import.meta.url).pathname, join(dir, "control.json"), "revoke"], { encoding: "utf8" }).status, 64);
+  assert.equal(spawnSync(process.execPath, [new URL("./passkeys-host.ts", import.meta.url).pathname, join(dir, "control.json"), "revoke"], { encoding: "utf8" }).status, 64);
 });

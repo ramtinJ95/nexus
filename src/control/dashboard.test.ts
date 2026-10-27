@@ -344,7 +344,7 @@ test("the Passkeys page lists the person's passkeys and enrols one with the code
   assert.match(textOf(page), /MacBook Touch ID pk-0000000a 2026-10-27 09:00 from nLAPTOP never Revoke/);
   assert.match(page, /data-action="revoke-passkey" data-passkey="pk-0000000a"/);
   assert.match(page, /<input name="code"[^>]* value="ABCD-EFGH"/, "the address the host command prints fills in its code");
-  assert.match(textOf(page), /sudo node \/opt\/nexus\/control-current\/src\/control\/passkeys\.ts \/etc\/nexus\/control\.json code/);
+  assert.match(textOf(page), /sudo node \/opt\/nexus\/control-current\/src\/control\/passkeys-host\.ts \/etc\/nexus\/control\.json code/);
   assert.match((await s.call("GET", "/")).text, /href="\/passkeys"/, "every page links to it");
 });
 

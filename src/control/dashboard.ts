@@ -610,7 +610,7 @@ ${stuck ? html`<p class="land-note">Landing checks the merge policy again, and w
 </section>`;
 }
 
-const hostCommand = "sudo node /opt/nexus/control-current/src/control/passkeys.ts /etc/nexus/control.json";
+const hostCommand = "sudo node /opt/nexus/control-current/src/control/passkeys-host.ts /etc/nexus/control.json";
 
 /**
  * The person's passkeys, which confirm a landing the merge policy reserves for them, and the form that enrols one
