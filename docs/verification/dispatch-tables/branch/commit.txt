@@ -1,1 +1,1 @@
-branch: d343f1f docs(verification): run the later test-only fixes with the pins on main's code
+branch: 0bc9bed docs(verification): record the fixed probe pin on main's code and on the branch, and the full suite

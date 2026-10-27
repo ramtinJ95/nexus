@@ -310,6 +310,7 @@ log("# Thread streams, their limit and a delete");
   const before = view.state.text.length;
   const started15 = performance.now();
   await until(() => view.state.text.length > before, "a ping");
+  await until(() => page.state.text.endsWith(": ping\n\n"), "the page stream's ping");
   log(`the next write after ${Math.round((performance.now() - started15) / 1000)} s`);
   log(`view stream: ${scrub(JSON.stringify(view.state.text.replace(/"(createdAt|updatedAt|at|time|startedAt)":\d+/g, '"$1":0')))}`);
   log(`page stream frames: ${page.state.text.split("\n\n").length - 1}, ends in a ping: ${page.state.text.endsWith(": ping\n\n")}`);

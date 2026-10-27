@@ -1,1 +1,1 @@
-main: 7cdf2bf perf(control): skip deleted threads' pylons that are gone, and drop their Claude readers (#156)
+main: 10481a5 refactor: share single-flight polls, JSON file helpers and exec wrappers (#157)
