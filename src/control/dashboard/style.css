@@ -171,6 +171,10 @@ a.link { color: var(--accent); }
 .nodes .i { color: var(--text-3); }
 .nodes em { font-style: normal; margin-left: auto; color: var(--text-3); }
 .side-add { margin: 2px 12px 14px; justify-content: center; }
+.side-nav { padding: 0 8px 4px; }
+.side-link { display: flex; align-items: center; gap: 9px; height: 32px; padding: 0 10px; border-radius: 8px; color: var(--text-2); font-size: 14px; }
+.side-link:hover { background: var(--hover); }
+.side-link.active { background: var(--selected); color: var(--accent); }
 
 /* main column */
 .main { display: flex; flex-direction: column; min-width: 0; min-height: 0; position: relative; background: var(--bg); }
@@ -453,6 +457,17 @@ h4.md-h { font-size: 1.07em; }
 .ov-closed { margin-top: 8px; }
 .ov-closed > summary { cursor: pointer; font-size: 12px; color: var(--text-3); padding: 2px 10px; }
 
+/* the usage page: its period and project are links in the inspector's segmented look */
+.usage-filters { display: flex; flex-wrap: wrap; gap: 8px; }
+.usage-seg { max-width: 100%; overflow-x: auto; scrollbar-width: none; }
+.usage-seg .seg-tab { flex: 1 0 auto; padding: 0 12px; white-space: nowrap; }
+.usage-seg .seg-tab:hover { color: var(--text); }
+.usage-seg .seg-tab[aria-current="page"] { background: var(--bg); color: var(--text); box-shadow: var(--shadow); }
+.ov.usage-t th:first-child { width: 30%; }
+.usage-t :is(th, td):not(:first-child) { text-align: right; font-variant-numeric: tabular-nums; }
+.usage-notes { margin-top: 10px; display: grid; gap: 4px; font-size: 12px; color: var(--text-3); }
+.usage-notes p { margin: 0; }
+
 /* the start-a-thread and new-project dialogs */
 .modal { margin: 96px auto auto; width: 540px; max-width: calc(100vw - 24px); padding: 0; color: var(--text); background: var(--bg); border: 1px solid var(--line); border-radius: 14px; box-shadow: var(--pop); }
 .modal::backdrop { background: rgba(0, 0, 0, 0.28); backdrop-filter: blur(2px); }
@@ -536,6 +551,8 @@ h4.md-h { font-size: 1.07em; }
   .ov th:first-child { width: 62%; }
   .ov-head code { display: none; }
   .ov td { white-space: normal; }
+  .ov.usage-t th:first-child { width: 40%; }
+  .usage-t td:first-child { overflow-wrap: anywhere; }
 
   .modal { margin-top: 12px; }
   .seg, .two { grid-template-columns: 1fr; }

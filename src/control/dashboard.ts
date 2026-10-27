@@ -21,7 +21,7 @@ import type { AssistantMessage, ImageContent, TextContent, UserMessage } from "@
 import type { ConversationView, InboxState, LiveState } from "@earendil-works/pi-durable";
 import { desiredPhase, type ActualState, type DesiredPhase } from "../reconcile.ts";
 import type { HerdrStatus } from "../protocol.ts";
-import { githubTokenGrant, linkedPort, type SessionHarness } from "../project.ts";
+import { githubTokenGrant, linkedPort, type ProjectId, type SessionHarness } from "../project.ts";
 import type { ThreadDetail } from "./api.ts";
 import { attentions, needsPerson } from "./attention.ts";
 import type { NodeRecord, Output, Preview, Registry, Thread, ThreadId } from "./registry.ts";
@@ -32,6 +32,7 @@ import { blocks as blocking, findingsOf, landable, phaseNote, roundsSpent, type 
 import { heldBy, holdRule, reservedNames } from "./policy.ts";
 import { gib, nodePylons, overcommitted } from "./placement.ts";
 import { queuedView, type QueuedThread, type Wait } from "./queue.ts";
+import { breakdownLook, breakdowns, periods, periodStart, tokenColumns, tokenCount, type Period, type UsageTotals } from "./usage.ts";
 
 export interface DashboardOptions {
   registry: Registry;
@@ -74,6 +75,10 @@ export function dashboard(options: DashboardOptions): (path: string, query: URLS
     [/^\/$/, (_, __, context) => ok(home(context(), {}))],
     [/^\/threads\/new$/, (_, query, context) => ok(home(context(), { start: { project: query.get("project") } }))],
     [/^\/projects\/new$/, (_, __, context) => ok(home(context(), { addProject: true }))],
+    [/^\/usage$/, (_, query, context) => {
+      const period = query.get("period") ?? "";
+      return ok(usagePage(context(), Object.hasOwn(periods, period) ? period as Period : "7d", (query.get("project") || null) as ProjectId | null));
+    }],
     [/^\/threads\/([^/]+)$/, async (m, _, context) => {
       const thread = registry.thread(m[1]! as ThreadId);
       if (thread === undefined) {
@@ -176,6 +181,7 @@ const iconPaths = {
   server: "M3 3h10v4H3zM3 9h10v4H3zM5.5 5h.01M5.5 11h.01",
   plus: "M8 3v10M3 8h10",
   up: "M8 13V3M4 7l4-4 4 4",
+  chart: "M3 13.5h10M4.5 11V8M8 11V3.5M11.5 11V6",
 } as const;
 type IconName = keyof typeof iconPaths;
 const icon = (name: IconName) => html`<svg class="i i-${name}" viewBox="0 0 16 16" aria-hidden="true"><path d="${iconPaths[name]}"/></svg>`;
@@ -232,6 +238,8 @@ interface Shell {
   title: string;
   /** The thread the sidebar marks as open. */
   active?: ThreadId;
+  /** Marks the sidebar's Usage link as the open page. */
+  usage?: boolean;
   main: Html;
   inspector?: Html;
   /** The thread whose visits count as human activity: an open thread's page. */
@@ -256,7 +264,7 @@ function layout(c: Context, page: Shell): Html {
 </head>
 <body>
 <div class="app${page.inspector !== undefined && " has-inspect"}">
-${sidebar(c, page.active)}
+${sidebar(c, page.active, page.usage === true)}
 <main class="main" data-poll-ms="${pollMs}"${page.activity !== undefined && html` data-activity="${page.activity}"`}>
 ${page.main}
 </main>
@@ -296,7 +304,7 @@ function closedLabel(threads: readonly Thread[]): string {
   return [archived > 0 && `${archived} archived`, deleted > 0 && `${deleted} deleted`].filter(Boolean).join(", ");
 }
 
-function sidebar(c: Context, active: ThreadId | undefined): Html {
+function sidebar(c: Context, active: ThreadId | undefined, usage: boolean): Html {
   const projects = c.registry.projects();
   // A thread works in its own checkout, as a Jetline workspace does, so its row shows a branch with its state as a badge.
   const row = (t: Thread) => {
@@ -312,6 +320,7 @@ function sidebar(c: Context, active: ThreadId | undefined): Html {
   return html`<aside class="side" aria-label="Threads">
 <div class="side-head"><a class="brand" href="/"><span class="brand-mark" aria-hidden="true">◆</span>nexus</a><a class="btn btn-new" href="/threads/new" data-start>New thread<kbd>N</kbd></a></div>
 <label class="filter"><span aria-hidden="true">⌕</span><input id="filter" type="search" placeholder="Filter threads" aria-label="Filter threads" autocomplete="off"></label>
+<nav class="side-nav" aria-label="Pages"><a class="side-link${usage && " active"}" href="/usage"${usage && html` aria-current="page"`}>${icon("chart")}Usage</a></nav>
 <nav class="groups" id="side-threads" data-live aria-label="Threads by project">
 ${projects.length === 0 ? html`<p class="empty side-empty">No projects yet.</p>` : projects.map((p) => {
   const { open, closed } = threadsOf(c, p.id);
@@ -482,6 +491,48 @@ ${closed.length > 0 && html`<details class="ov-closed" id="closed-${p.id}"><summ
   });
 }
 
+/** A phone hides the wide columns of a usage table. */
+const usageColumns = tokenColumns.map((col) => ({ ...col, wide: col.field === "cacheWrite" || col.field === "cacheRead" }));
+const exact = (n: number) => n.toLocaleString("en-US");
+const utc = (at: number) => `${new Date(at).toISOString().slice(0, 16).replace("T", " ")} UTC`;
+
+/** Each token count reads as 1.2M, with the exact number in its title and, for a script, in `data-tokens`. */
+function usageTable(id: string, keyHead: string, rows: readonly (UsageTotals & { key: Part })[]): Html {
+  const wide = (yes: boolean) => yes && html` class="wide"`;
+  return html`<table class="ov usage-t" id="${id}">
+<thead><tr><th>${keyHead}</th>${usageColumns.map((col) => html`<th${wide(col.wide)}>${col.label}</th>`)}<th class="wide">Calls</th></tr></thead>
+<tbody>${rows.map((r) => html`<tr><td>${r.key}</td>${usageColumns.map((col) => html`<td${wide(col.wide)} data-column="${col.field}" data-tokens="${r[col.field]}" title="${exact(r[col.field])}">${tokenCount(r[col.field])}</td>`)}<td class="wide">${exact(r.calls)}</td></tr>`)}</tbody>
+</table>`;
+}
+
+/** The tokens every agent spent in the period, in all and by each breakdown, as `GET /v1/usage` reports them. */
+function usagePage(c: Context, period: Period, project: ProjectId | null): Html {
+  const report = c.registry.usageReport({ since: periodStart(period, c.now), project, by: breakdowns });
+  const href = (p: Period, of: string | null) => `/usage?period=${p}${of === null ? "" : `&project=${encodeURIComponent(of)}`}`;
+  const seg = (label: string, to: string, current: boolean) => html`<a class="seg-tab" href="${to}"${current && html` aria-current="page"`}>${label}</a>`;
+  return layout(c, {
+    title: "Usage",
+    usage: true,
+    main: html`<header class="bar"><button type="button" class="icon-btn menu" data-open="side" aria-label="Threads">☰</button><div class="crumb"><h1>Usage</h1></div></header>
+<div class="scroll"><div class="page usage" id="usage" data-live>
+<div class="usage-filters">
+<nav class="seg-bar usage-seg" aria-label="Period">${(Object.keys(periods) as Period[]).map((p) => seg(periods[p], href(p, project), p === period))}</nav>
+<nav class="seg-bar usage-seg" aria-label="Project">${seg("All projects", href(period, null), project === null)}${c.registry.projects().map((p) => seg(p.id, href(period, p.id), p.id === project))}</nav>
+</div>
+<section aria-labelledby="usage-totals-h"><div class="ov-head"><h2 id="usage-totals-h">Tokens${project !== null && ` in ${project}`}</h2></div>
+${usageTable("usage-totals", "Period", [{ key: periods[period], ...report.total }])}
+<div class="usage-notes">
+<p>Counting started <time datetime="${new Date(report.countingSince).toISOString()}">${utc(report.countingSince)}</time>. The calls of threads that existed then were counted from the transcripts they still had. Threads deleted before then are not counted, except for the Nexus agent's calls, which the harness keeps.</p>
+<p>The summaries the Nexus agent's compactions write, and model calls its tools make, are not counted.</p>
+</div>
+</section>
+${report.total.calls === 0 ? html`<p class="empty">No model calls were counted in this period.</p>` : breakdowns.map((b) => html`<section aria-labelledby="usage-by-${b}-h"><div class="ov-head"><h2 id="usage-by-${b}-h">${breakdownLook[b].title}</h2></div>
+${usageTable(`usage-by-${b}`, breakdownLook[b].key, report.by[b]!.map((r) => b === "project" ? { ...r, key: html`<a class="link" href="${href(period, r.key)}">${r.key}</a>` } : r))}
+</section>`)}
+</div></div>`,
+  });
+}
+
 /**
  * A paused pylon's preview keeps its link, because a visit wakes the pylon. An archived thread's pylon is
  * paused or about to be, and stays so whatever the visit, so its preview would only show the waking page. A
@@ -542,7 +593,7 @@ ${actions.length > 0 && html`<div class="bar-actions" id="thread-actions">${acti
 <div id="run" data-live>${runBar(t, run, c.now)}</div>
 <div id="composer" data-live>${composer(d, run, model, read !== null && isClaude(read) ? read : null, c.now)}</div>
 </div>`,
-    inspector: inspector(d, node, c.now),
+    inspector: inspector(d, node, c.now, c.registry.usageReport({ since: null, thread: t.id }).total),
   });
 }
 
@@ -765,7 +816,7 @@ const panes = [["changes", "Changes", "changes"], ["previews", "Previews", "glob
  * The inspector's tabs are radios, so the one picked stays picked while the regions under it are swapped, and
  * shows its pane without a script. The Changes pane is filled by client.js, so it is outside every live region.
  */
-function inspector(d: ThreadDetail, node: NodeRecord, now: number): Html {
+function inspector(d: ThreadDetail, node: NodeRecord, now: number, usage: UsageTotals): Html {
   // The Previews tab counts what its pane lists: the previews and the ports without one.
   const listed = d.previews.length + (d.ports?.filter((l) => l.preview === null).length ?? 0);
   return html`<aside class="inspect" aria-label="Thread details">
@@ -777,11 +828,11 @@ function inspector(d: ThreadDetail, node: NodeRecord, now: number): Html {
 <p class="ch-base dim small" id="changes-base">Since the pylon booted</p>
 <div id="changes-body"><p class="empty">The changes show once the page's script loads.</p></div>
 </section>
-<div class="pane-live" id="inspect" data-live>${inspectorPanes(d, node, now)}</div>
+<div class="pane-live" id="inspect" data-live>${inspectorPanes(d, node, now, usage)}</div>
 </aside>`;
 }
 
-function inspectorPanes(d: ThreadDetail, node: NodeRecord, now: number): Html {
+function inspectorPanes(d: ThreadDetail, node: NodeRecord, now: number, usage: UsageTotals): Html {
   const { thread: t, pylon } = d;
   const count = (n: number) => html`<span class="count">${n}</span>`;
   const desired = desiredPhase(t, now);
@@ -822,6 +873,8 @@ ${unpublished === null ? html`<p class="empty">The pylon's ports could not be re
 <dt>Last seen</dt><dd>${pylon.observedAt === null ? "never" : ago(Date.parse(pylon.observedAt), now)}${node.state === "offline" && pylon.observedAt !== null && " (stale)"}</dd>
 <dt>Human</dt><dd>${ago(t.lastHumanActivityAt, now)}</dd>
 <dt>Agent</dt><dd>${workingFor(t, now) ?? ago(t.lastAgentActivityAt, now)}</dd>
+<dt>Tokens</dt><dd id="thread-usage" data-tokens="${usage.total}">${usage.calls === 0 ? "none counted"
+  : html`<span title="${exact(usage.total)}">${tokenCount(usage.total)}</span> <span class="dim">(${usageColumns.filter((col) => col.field !== "total").map((col, i) => html`${i > 0 && " · "}<span title="${exact(usage[col.field])}">${col.short} ${tokenCount(usage[col.field])}</span>`)})</span>`}</dd>
 </dl>
 <code class="id">${pylon.id}</code>
 ${pylon.failed !== null && html`<p class="error">The planner gave up: ${pylon.failed}</p>`}
