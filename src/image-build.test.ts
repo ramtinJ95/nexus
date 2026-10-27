@@ -197,6 +197,13 @@ test("the smoke boot expects gh at its pin, answering git's credential request w
   assert.notEqual(smokeFailure(gh, 0, "gh version 2.103.2 (2026-10-23)\nprotocol=https\nhost=github.com\n"), undefined);
 });
 
+test("the smoke boot expects PID 1 to be tini and to reap an exec's orphan, which sandboxd leaves a zombie", async () => {
+  const reaps = smokeChecks({ ...(await loadImageRecipe()), pins }).find((c) => c.name === "PID 1 reaps orphans")!;
+  assert.equal(smokeFailure(reaps, 0, "tini\nreaped\n"), undefined);
+  assert.notEqual(smokeFailure(reaps, 0, "sandboxd\nZ\n"), undefined);
+  assert.notEqual(smokeFailure(reaps, 0, "tini\nZ\n"), undefined);
+});
+
 test("the mode listing parses into sorted fixes, and one without a setuid or setgid file is refused", () => {
   const listing = 'd 1777 /tmp\nf 4755 /usr/bin/sudo\nf 2755 /usr/bin/ssh-agent\nf 755 /usr/bin/odd "name"\n';
   assert.deepEqual(parseModeListing(listing), [

@@ -140,7 +140,7 @@ function dockerBuildArgs(pins: ImageRecipe["pins"]): Record<string, string> {
  *    the agent setup installed exactly as the recipe's manifest says with pi loading every extension offline,
  *    the PYLON.md import for Claude Code and pi, gh at its pin answering git's credential requests from GH_TOKEN,
  *    curl and Node fetch to an allowed host through TLS interception, tini reaping an orphan it adopts as
- *    subreaper, and a Herdr server as user. Any failure is setup-failed and publishes nothing.
+ *    subreaper and as PID 1, and a Herdr server as user. Any failure is setup-failed and publishes nothing.
  * 5. Write image.json, then rename outDir.partial to outDir.
  * A crash leaves only outDir.partial, which the next attempt removes. An existing outDir is the finished
  * image, because its ID names its inputs.
@@ -494,6 +494,13 @@ export function smokeChecks(recipe: ImageRecipe): readonly SmokeCheck[] {
       name: "tini reaps orphans",
       argv: asUser(`tini --version; tini -s -- sh -c '(sleep 0 &); sleep 1; ps -o stat= --ppid "$PPID"'`),
       expect: /^tini version \d+\.\d+\.\d+[^\n]*\n[^Z\n]+\n$/,
+    },
+    {
+      // A plain exec runs under sandboxd, outside any tini -s tree, so the subshell's `sleep 0` is orphaned to
+      // PID 1, which must reap it.
+      name: "PID 1 reaps orphans",
+      argv: ["sh", "-c", 'ps -o comm= -p 1; pid="$( (sleep 0 >/dev/null & echo $!) )"; sleep 1; ps -o stat= -p "$pid" || echo reaped'],
+      expect: "tini\nreaped\n",
     },
     {
       name: "baked dotfiles",
