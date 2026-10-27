@@ -413,6 +413,7 @@ export function openRegistry(path: string, clock = Date.now) {
     retryPylon: db.prepare(`UPDATE pylons SET failed = NULL, attempts = '{"count":0,"last":null}', retrying = 1 WHERE id = ? AND failed IS NOT NULL`),
     pylon: db.prepare("SELECT * FROM pylons WHERE id = ?"),
     pylonsOn: db.prepare("SELECT * FROM pylons WHERE node = ? ORDER BY id"),
+    pylonIdsOn: db.prepare("SELECT id FROM pylons WHERE node = ? ORDER BY id"),
     // A null status keeps the one the row has.
     upsertSession: db.prepare(`INSERT INTO sessions (pylon, id, herdr_pane, harness, harness_session_id, status, title, state, message)
       VALUES ($pylon, $id, $herdrPane, $harness, $harnessSessionId, coalesce($status, 'unknown'), $title, $state, $message)
@@ -841,6 +842,7 @@ export function openRegistry(path: string, clock = Date.now) {
       return row && pylonRow(row);
     },
     pylonsOn: (node: NodeName) => (q.pylonsOn.all(node) as Row[]).map(pylonRow),
+    pylonIdsOn: (node: NodeName) => (q.pylonIdsOn.all(node) as Row[]).map((r) => r.id as PylonId),
     /** Returns what releases it, once the pylon's row counts it or the start failed. */
     reserve(pylonId: PylonId, node: NodeName, resources: BootInputs["resources"]): () => void {
       reservations.set(pylonId, { node, resources });
@@ -881,7 +883,7 @@ export function openRegistry(path: string, clock = Date.now) {
       const node = (q.pylon.get(pylonId) as Row | undefined)?.node as NodeName | undefined;
       if (node === undefined) throw new Error(`no pylon ${pylonId} to allocate previews for`);
       const routed = (observationOf((q.node.get(node) as Row).observation)?.previewRoutes ?? []).map((r) => r.httpsPort);
-      const held = new Set(previews(pylonId).map((p) => p.service));
+      const held = new Set((q.previews.all(pylonId) as Row[]).map((r) => r.service as string));
       for (const service of services) {
         if (held.has(service)) continue;
         const taken = new Set([...routed, ...(q.portsOn.all(node) as Row[]).map((r) => r.https_port as number)]);
