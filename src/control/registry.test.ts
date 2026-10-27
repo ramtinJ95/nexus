@@ -815,6 +815,22 @@ test("a repeated parked report changes nothing, and a later process's report cle
   assert.deepEqual(changes(second), ["thread.parked", "attention parked", "attention null"]);
 });
 
+test("opening the registry stores the attention of a thread whose attention was never stored", (t) => {
+  const path = tempDb();
+  const first = seeded(path);
+  first.recordReply(threadId, 1000);
+  assert.equal(first.attention(threadId), "reply");
+  first.close();
+  const db = new DatabaseSync(path);
+  db.exec("DELETE FROM thread_attention");
+  db.close();
+
+  const second = openRegistry(path);
+  t.after(() => second.close());
+  assert.equal(second.attention(threadId), "reply");
+  assert.equal(second.events("0", { kinds: ["attention.changed"], thread: threadId }).at(-1)!.payload.attention, "reply");
+});
+
 test("a parked harness run that is retried is working since the retry, as the tracker reports it", async (t) => {
   let now = 10_000_000;
   const registry = seeded(tempDb(), () => now);

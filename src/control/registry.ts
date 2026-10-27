@@ -1,4 +1,4 @@
-import { attentionOf } from "./attention.ts";
+import { attentionOf, type Attention } from "./attention.ts";
 import { pylonEventSchema } from "../events.ts";
 import type { ReportedEvent } from "../events.ts";
 import { eventCursor, sessionActivityTtlMs, maxActiveSessions, type EventFilter, type EventKind, type NexusEvent } from "../events.ts";
@@ -575,11 +575,14 @@ export function openRegistry(path: string, clock = Date.now) {
   const setting = (key: string): string | null => ((q.setting.get(key) as Row | undefined)?.value ?? null) as string | null;
 
   pruneSessions();
+  // A release that computes attention differently, or a thread from before attention was stored, is right from the start.
+  transaction(() => { for (const { id } of sql("SELECT id FROM threads").all()) updateAttention(id as ThreadId); });
 
   return {
     close() { db.close(); },
     appendEvent,
     pruneSessions,
+    attention: (id: ThreadId): Attention => (sql("SELECT attention FROM thread_attention WHERE thread = ?").get(id)?.attention ?? null) as Attention,
     recordParked(id: ThreadId, parked: boolean) {
       // The harness reports on every change of a thread's live document, and nearly every report repeats the stored value.
       if (sql("SELECT parked FROM thread_attention WHERE thread = ?").get(id)?.parked === (parked ? 1 : 0)) return;
@@ -826,6 +829,8 @@ export function openRegistry(path: string, clock = Date.now) {
         q.threadStatus.run(status, id);
         if (status === "archived" || status === "deleted") sql("DELETE FROM session_activity WHERE thread = ?").run(id);
         if (status === "deleted") {
+          // The delete aborts the run, so nothing is left to retry, and the harness stops tracking the thread without a report.
+          sql("UPDATE thread_attention SET parked = 0 WHERE thread = ?").run(id);
           for (const table of ["session_order", "session_order_floor", "claude_transcripts", "claude_entries", "claude_messages"]) sql(`DELETE FROM ${table} WHERE thread = ?`).run(id);
         }
         updateAttention(id);
