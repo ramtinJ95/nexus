@@ -135,7 +135,7 @@ function dockerBuildArgs(pins: ImageRecipe["pins"]): Record<string, string> {
  *    removed. Delete this step, like the seed, once the Gondolin pin moves to a release that keeps modes.
  * 4. Smoke boot at 4 GiB (2 GiB hangs): plain exec PATH, CA and the offline switches for pi and Claude Code's
  *    official marketplace, `user` with a setuid sudo that prints no warning and the hostname pylon, which
- *    resolves through /etc/hosts, the exact pinned versions of node, claude, pi, herdr, pi-env and nvim and the nexus
+ *    resolves through /etc/hosts, a home with no hook outbox and no Claude or pi session from the build, the exact pinned versions of node, claude, pi, herdr, pi-env and nvim and the nexus
  *    CLI's declared version as user, sshd and sandboxssh, Herdr's pi integration with its own resume turned off,
  *    the agent setup installed exactly as the recipe's manifest says with pi loading every extension offline,
  *    the PYLON.md import for Claude Code and pi, gh at its pin answering git's credential requests from GH_TOKEN,
@@ -456,6 +456,12 @@ export function smokeChecks(recipe: ImageRecipe): readonly SmokeCheck[] {
       name: "user",
       argv: asUser("id; stat -c '%a %U' /usr/bin/sudo; sudo -n true && echo sudo ok; stat -c '%U %a' workspace; cat /proc/sys/kernel/hostname; getent hosts pylon; getent ahostsv4 pylon | head -n 1"),
       expect: /^uid=1000\(user\) gid=1000\(user\) [^\n]*\n4755 root\nsudo ok\nuser 755\npylon\n::1\s+pylon\n127\.0\.[01]\.1\s+STREAM pylon\n$/,
+    },
+    {
+      // Before any check that starts an agent, whose own sessions this disk does not keep.
+      name: "no build sessions",
+      argv: asUser("ls -d .nexus .claude/projects .claude/session-env .pi/agent/sessions 2>/dev/null; echo clean"),
+      expect: "clean\n",
     },
     ...versionChecks(recipe),
     {
