@@ -9,7 +9,7 @@ The control plane writes every record. Probes send facts in observations, and th
 | Record | Fields | Comes from |
 |---|---|---|
 | Node | `name`, `tailnetHost`, `tailnetNodeId`, `cpuVendor`, `memoryGiB`, `state` | You add a node. Capacity and `state` come from its probe's observations |
-| Project | `repoUrl`, `defaultBranch`, `defaultNode`, `resources`, `allowedHosts`, `secrets`, `logins`, `preSetup`, optional `gitIdentity` | You |
+| Project | `repoUrl`, `defaultBranch`, `defaultNode`, `resources`, `allowedHosts`, `secrets`, `logins`, `preSetup`, optional `gitIdentity` and `autoReview` | You |
 | Image | `id`, `pins`, `builtOn`, `builtAt`, `sha256`, `release` | `nexus image build`: the manifest the build node's probe wrote, and the control plane release whose recipe it built. `release` is null for an image recorded by hand |
 | Template | `id`, `key`, `state`, `node`, `builtAt`, `commit` | Thread starts, which record a build, and the results of its `build-template` job |
 | Thread | `id`, `title`, `project`, `status`, `conversationId`, `pylonId`, `startedBy`, `seenAt`, `lastReplyAt`, `placement`, `setup` | You, and the harness |
@@ -116,8 +116,8 @@ A linked PR contributes an `Output` with `kind: "pull-request"` and `ref` equal 
 
 - `id` is `rv-` and eight hex digits. It starts every token the agents echo and every request ID the loop sends under. `expect` is the token the awaited answer must echo, random per request, and `sent` counts the review's messages, numbering their request IDs `<id>:<n>`.
 - `builder`, `reviewer`, `pr` (`repo`, `number`, `url`, `title`, `branch`) and `models` (`builder`, `reviewer`) say who reviews what. `reviewerKind` is `harness` or `claude`, and only a harness reviewer's approval can land. `maxRounds` is 1 to 5, 5 by default. A record stored with a higher cap reads as 5.
-- `land` is null to stop at approval, or `{ requestedBy }`, the deployer who asked for the landing. `merged` is the merge commit once the PR merged, after which the review never lands again.
-- `rounds` holds one entry per review of a head: `head`, the reviewer's parsed `verdict` (`verdict`, `findings` with `id`, `priority` (`P0` to `P3`), `where`, `summary`, `detail`, `reserved` cases, and `notCheckedLive`), the `check` at that head (`passed`, the output's tail), and the builder's `answers` (`id`, `action` fixed or rejected, `reason`).
+- `land` is null to stop at approval, or `{ requestedBy }`, the deployer who asked for the landing, with `fromProject: true` when the project's `autoReview` asked for it, so each landing reads that setting again. `auto` is true for a review the loop started on its own. A record stored before it reads as false. `merged` is the merge commit once the PR merged, after which the review never lands again.
+- `rounds` holds one entry per review of a head: `head`, the reviewer's parsed `verdict` (`verdict`, `findings` with `id`, `priority` (`P0` to `P3`), `where`, `summary`, `detail`, `reserved` cases, and `notCheckedLive`), the `check` at that head (`passed`, the output's tail), the builder's `answers` (`id`, `action` fixed or rejected, `reason`), and `conflict` (`base`) once the landing found that head conflicting with its base, which makes it a `CONFLICT` finding for the builder to rebase.
 - `phase` is one of `reviewing`, `fixing`, `checking` (`startedAt`, and `thread`, the check thread of the run in progress or null), `approved`, `merging` (`authorized`, the head the review is about to merge, saved before the merge call, or null), `deploying` (`commit`, `previous`, `requested`, `deadline`), `rolling-back` (`commit`, `previous`, `why`, `requested`, `deadline`), `landed` (`commit`), or `needs-person` (`reasons`, and `label`, the state of the `needs human review` label for a review whose rounds ran out: `adding`, `added`, or `failed` with `why`). `approved`, `landed` and `needs-person` have ended.
 - `outbox` is the next message (`to`, `id`, `text`, and `attempted`, when its first send began, saved before that send), saved before it is sent. `since` is when the agent the loop waits on was last sent one, and `nudges` how many reminders in a row it has had.
 
@@ -136,6 +136,8 @@ The settings key `deploy-drain` holds `{commit, expiresAt, locked?}` or null. Th
 On each node, root owns `/opt/nexus/<role>-deploy.json`: `{commit, previous, target, state, reason}`, where previous/target are symlink targets and state is installing, healthy, rolled-back or failed. Installing is recorded before activation. A restart recovers it before contacting control. `<role>-deploy.unit` saves the previous unit and `<role>-deploy-report.json` retains terminal failures for later reporting and avoids automatic retries. Those files are separate from service-user-writable state and are not registry records.
 
 ## Project edits and boot identity
+
+`Project.autoReview` is optional `{ land: boolean, enabledBy: string }`, absent when off. `enabledBy` is the caller who turned it on, which only a project edit sets, and a landing it asks for merges and deploys for that caller.
 
 `Project.gitIdentity` is optional `{ name: string, email: string }` (null also means inherit). The optional control.json `gitIdentity` has the same shape without null. Project values override the control default. Only name and email are carried: no credentials. Before a fresh or checkpoint boot, reconciliation resolves the identity into `BootInputs.gitIdentity`. The boot hook applies it globally for `user` after common dotfiles. The saved value renders PYLON.md while the pylon runs. With neither configured, no git config is changed; an earlier identity on disk remains.
 
