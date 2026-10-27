@@ -131,6 +131,8 @@ function swap(regions) {
 // older text back. Its frames come in order: the region whole, then the parts that grew since.
 let stream = null;
 let frames = 0;
+// Which Claude view the stream last rendered, which a poll of a streaming page names instead of rendering it.
+let shows = null;
 const streaming = () => stream?.readyState === EventSource.OPEN;
 function follow(url) {
   // A hidden page keeps none of the control plane's few streams, even when a refresh it began finishes later.
@@ -138,6 +140,7 @@ function follow(url) {
   // EventSource reconnects by itself after a dropped connection. A refused one is closed for good, so the next
   // poll opens another.
   stream = new EventSource(url);
+  shows = null;
   stream.addEventListener("message", (event) => {
     frames += 1;
     const frame = JSON.parse(event.data);
@@ -147,19 +150,21 @@ function follow(url) {
       // Parsed and serialized as the poll's regions are, so an unchanged region compares equal.
       const fresh = document.createElement("template");
       fresh.innerHTML = frame.convo;
-      return swap([[convo, fresh.innerHTML]]);
+      swap([[convo, fresh.innerHTML]]);
+    } else if (frame.grow !== undefined) {
+      const slots = convo.querySelectorAll("[data-grow]");
+      const restoreScroll = anchor();
+      for (const [i, inside] of frame.grow) {
+        const slot = slots[i];
+        if (slot === undefined) continue;
+        // A running tool's output scrolls by itself. A reader at its end follows it, as at the conversation's end.
+        const stick = atBottom(slot);
+        slot.innerHTML = inside;
+        if (stick) slot.scrollTop = slot.scrollHeight;
+      }
+      restoreScroll();
     }
-    const slots = convo.querySelectorAll("[data-grow]");
-    const restoreScroll = anchor();
-    for (const [i, inside] of frame.grow) {
-      const slot = slots[i];
-      if (slot === undefined) continue;
-      // A running tool's output scrolls by itself. A reader at its end follows it, as at the conversation's end.
-      const stick = atBottom(slot);
-      slot.innerHTML = inside;
-      if (stick) slot.scrollTop = slot.scrollHeight;
-    }
-    restoreScroll();
+    if (frame.shows !== undefined) shows = frame.shows;
   });
 }
 
@@ -168,17 +173,21 @@ async function refresh() {
   const state = document.getElementById("refresh-state");
   try {
     const seen = frames;
+    const url = new URL(location.href);
+    if (streaming()) url.searchParams.set("streaming", "1");
     // A link that stalls mid-body would otherwise hold the refresh lock forever.
-    const res = await fetch(location.href, { headers: { accept: "text/html" }, cache: "no-store", signal: AbortSignal.timeout(pollMs * 2) });
+    const res = await fetch(url, { headers: { accept: "text/html" }, cache: "no-store", signal: AbortSignal.timeout(pollMs * 2) });
     if (!res.ok) throw new Error(`the control plane answered ${res.status}`);
     const next = new DOMParser().parseFromString(await res.text(), "text/html");
     // A queued thread that started has a thread page, whose regions the queued page has none of.
     if ((next.getElementById("queued") === null) !== (document.getElementById("queued") === null)) return void location.reload();
-    const followed = streaming() || frames !== seen;
-    swap([...next.querySelectorAll("[data-live]")].filter((fresh) => !(followed && fresh.id === "convo")).map((fresh) => [document.getElementById(fresh.id), fresh.innerHTML]));
     const freshConvo = next.getElementById("convo");
+    // A poll of a streaming page names the view it would show rather than rendering it.
+    const named = freshConvo?.dataset.shows;
+    const followed = streaming() || frames !== seen || named !== undefined;
+    swap([...next.querySelectorAll("[data-live]")].filter((fresh) => !(followed && fresh.id === "convo")).map((fresh) => [document.getElementById(fresh.id), fresh.innerHTML]));
     // A stream owns its patch indices. Certify its rendered snapshot without replacing it under those patches.
-    if (freshConvo && (!followed || served.get("convo") === comparable(freshConvo.innerHTML))) {
+    if (freshConvo && (named !== undefined ? named === shows : !followed || served.get("convo") === comparable(freshConvo.innerHTML))) {
       document.getElementById("convo").dataset.renderedReplyAt = freshConvo.dataset.renderedReplyAt ?? "";
     }
     follow(next.getElementById("convo")?.dataset.stream);

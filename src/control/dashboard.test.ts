@@ -18,7 +18,8 @@ import type { JobId, NodeName, PylonObservation, ServiceFact, TailnetNodeId } fr
 import type { ImageId } from "../images.ts";
 import { githubTokenGrant } from "../project.ts";
 import type { AssistantMessage, Message, ToolCall } from "@earendil-works/pi-ai";
-import { transcriptStart, type ClaudeEntry } from "../claude-transcript.ts";
+import { transcriptStart, type ClaudeConversation, type ClaudeEntry } from "../claude-transcript.ts";
+import { liveFrames } from "./dashboard.ts";
 
 const node = "rj-firebat" as NodeName;
 const laptop = "nLAPTOP" as TailnetNodeId;
@@ -1126,6 +1127,22 @@ async function claudeThread(s: Awaited<ReturnType<typeof seeded>>, entries: Clau
   assert.ok(s.registry.appendClaudeRead(thread.id, { session: "s1", from: transcriptStart, entries, cursor: { ...transcriptStart, offset: 1 }, reset: false, readAt }));
   return thread;
 }
+
+test("a Claude worker's page stream names one view for one conversation, and another for any other entry", async (t) => {
+  const s = await seeded(t);
+  const thread = await claudeThread(s, []);
+  const reply = (text: string): ClaudeEntry => ({ kind: "reply", at: 1, text });
+  const view = (entries: ClaudeEntry[]): ClaudeConversation => ({ kind: "claude", session: "s1", entries, dropped: 0, readAt: 1, working: false, usageLimit: null });
+  const shows = (entries: ClaudeEntry[]) => (liveFrames(thread)(view(entries)) as { shows: string }).shows;
+  assert.equal(shows([reply("A"), reply("Z")]), shows([reply("A"), reply("Z")]), "the same entries in another array");
+  assert.notEqual(shows([reply("A"), reply("Z")]), shows([reply("B"), reply("Z")]), "a replaced transcript that ends as the old one did");
+  const frames = liveFrames(thread);
+  const first = frames(view([reply("A")])) as { convo: string; shows: string };
+  const named = frames({ ...view([reply("A")]), working: true });
+  assert.deepEqual(Object.keys(named ?? {}), ["shows"], "a view whose region reads as before gets a frame of its name alone");
+  assert.notEqual((named as { shows: string }).shows, first.shows);
+  assert.equal(frames({ ...view([reply("A")]), working: true }), null, "and a view named before gets none");
+});
 
 test("an age the client ticks reads as a render of the page at the same time would", async (t) => {
   t.mock.timers.enable({ apis: ["Date"], now: Date.parse("2026-10-27T12:00:00Z") });

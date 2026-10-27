@@ -2738,7 +2738,7 @@ test("a Claude worker thread's page stream shows new entries during a turn, read
   const frame = async (pattern: RegExp, what: string) => {
     for (;;) {
       const next = await stream.next();
-      assert.ok(next.convo !== undefined || next.grow !== undefined, what);
+      assert.ok(next.convo !== undefined || next.grow !== undefined || next.shows !== undefined, what);
       if (next.convo !== undefined && pattern.test(next.convo)) return next.convo as string;
     }
   };
@@ -2771,6 +2771,38 @@ async function convoRegion(s: Awaited<ReturnType<typeof withClaude>>, query = ""
   const tag = /<div class="convo" id="convo" data-rendered-reply-at="(\d*)"(?: data-shows="([^"]+)")? data-live[^>]*>/.exec(html)!;
   return { replyAt: tag[1], named: tag[2], inside: html.slice(tag.index + tag[0].length).split('<section class="file-view"')[0]!.replace(/<\/div><\/div>\s*$/, "") };
 }
+
+test("a poll of a Claude worker's streaming page names the view its stream shows rather than render it, and names a reply's view only once a frame showed the reply", async (t) => {
+  t.mock.timers.enable({ apis: ["setInterval"] });
+  const s = await withClaude(t);
+  await writeFile(s.transcript, fixture.slice(0, 30).join(""));
+  const stream = s.events(`/threads/${s.thread.id}/stream`);
+  t.after(() => stream.close());
+  let shows: string | undefined;
+  const frame = async (pattern: RegExp) => {
+    for (;;) {
+      const next = await stream.next();
+      shows = next.shows ?? shows;
+      if (next.convo !== undefined && pattern.test(next.convo)) return;
+    }
+  };
+  await frame(/Do these steps one at a time/);
+  assert.deepEqual(await convoRegion(s, "?streaming=1"), { replyAt: "", named: shows, inside: "" }, "the poll names the view the stream's last frame shows and renders none");
+  const unstreamed = await convoRegion(s);
+  assert.equal(unstreamed.named, undefined);
+  assert.match(unstreamed.inside, /Do these steps one at a time/, "a poll from a page that does not stream renders the conversation");
+
+  await appendFile(s.transcript, fixture.slice(30, 43).join(""));
+  s.registry.reportSession(node, { sequence: 1, pylon: s.thread.pylonId, time: Date.now(), event: { kind: "session.turn-ended", session: claudeSession } });
+  const replyAt = String(s.registry.thread(s.thread.id)!.lastReplyAt);
+  t.mock.timers.tick(1_000);
+  await until(() => s.registry.claudeEntries(s.thread.id).some((e) => e.kind === "reply" && e.text.startsWith("The subagent reported 1 line")), "the read after the turn's end stores the reply");
+  const read = await convoRegion(s, "?streaming=1");
+  assert.equal(read.replyAt, replyAt);
+  assert.notEqual(read.named, shows, "the page has not shown the reply yet, so the poll names another view than it shows");
+  await frame(/The subagent reported 1 line/);
+  assert.equal(shows, read.named, "the frame that shows the reply is of the view the poll named");
+});
 
 test("a Claude worker's page stream sends nothing while its conversation is unchanged, its pings included, though an age in it changed", async (t) => {
   t.mock.timers.enable({ apis: ["setInterval", "Date"], now: Date.parse("2026-10-27T12:00:00Z") });
