@@ -29,7 +29,7 @@ import type { TailnetNodeId } from "../protocol.ts";
 import { usageLimitText, type ClaudeConversation, type ClaudeEntry, type PromptSource } from "../claude-transcript.ts";
 import { queuedOf } from "./claude-conversation.ts";
 import { blocks as blocking, findingsOf, landable, phaseNote, roundsSpent, type Review } from "./review.ts";
-import { holdsAgain, recordedHolds, reservedNames } from "./policy.ts";
+import { heldBy, holdRule, reservedNames } from "./policy.ts";
 import { gib, nodePylons, overcommitted } from "./placement.ts";
 
 export interface DashboardOptions {
@@ -42,6 +42,8 @@ export interface DashboardOptions {
   landRefusal(caller: TailnetNodeId): LandRefusal | null;
   /** Whether the review's pull request deploys once it merges. */
   deploys(review: Review): boolean;
+  /** The dashboard's HTTPS origin, where passkeys work, or null when the control plane has none. */
+  passkeyOrigin: string | null;
   now?: () => number;
 }
 
@@ -57,11 +59,11 @@ export const pollMs = 5_000;
 export type LandRefusal = "no review loop" | "not a deployer";
 
 /** What every part of a page reads. */
-interface Context { registry: Registry; detail: DashboardOptions["detail"]; deploys: DashboardOptions["deploys"]; now: number; caller: TailnetNodeId; landRefusal: LandRefusal | null }
+interface Context { registry: Registry; detail: DashboardOptions["detail"]; deploys: DashboardOptions["deploys"]; passkeyOrigin: string | null; now: number; caller: TailnetNodeId; landRefusal: LandRefusal | null }
 
 /** Returns the page for a GET of `path`, or undefined when the path is not the dashboard's. */
 export function dashboard(options: DashboardOptions): (path: string, query: URLSearchParams, caller: TailnetNodeId) => Promise<Page | undefined> {
-  const { registry, detail, deploys } = options;
+  const { registry, detail, deploys, passkeyOrigin } = options;
 
   /** A failed read shows in the conversation, so the rest of the page still says what the pylon is doing. */
   async function transcript(t: Thread): Promise<Conversation | Error | null> {
@@ -73,6 +75,7 @@ export function dashboard(options: DashboardOptions): (path: string, query: URLS
     [/^\/$/, (_, __, context) => ok(home(context(), {}))],
     [/^\/threads\/new$/, (_, query, context) => ok(home(context(), { start: { project: query.get("project") } }))],
     [/^\/projects\/new$/, (_, __, context) => ok(home(context(), { addProject: true }))],
+    [/^\/passkeys$/, (_, query, context) => ok(passkeysPage(context(), query.get("code")))],
     [/^\/threads\/([^/]+)$/, async (m, _, context) => {
       const thread = registry.thread(m[1]! as ThreadId);
       if (thread === undefined) return { ...ok(notFound(context(), `No thread ${m[1]!}.`)), status: 404 };
@@ -93,7 +96,7 @@ export function dashboard(options: DashboardOptions): (path: string, query: URLS
   ];
 
   return async (path, query, caller) => {
-    const context = (): Context => ({ registry, detail, deploys, now: (options.now ?? Date.now)(), caller, landRefusal: options.landRefusal(caller) });
+    const context = (): Context => ({ registry, detail, deploys, passkeyOrigin, now: (options.now ?? Date.now)(), caller, landRefusal: options.landRefusal(caller) });
     for (const [pattern, page] of pages) {
       const m = pattern.exec(path);
       if (m !== null) return page(m, query, context);
@@ -306,6 +309,7 @@ ${closed.length > 0 && html`<details class="archived" id="archived-${p.id}"${clo
 </nav>
 <div class="nodes" id="side-nodes" data-live aria-label="Nodes"><h2>Nodes</h2><small>Desired release: ${c.registry.desiredRelease()?.commit.slice(0, 12) ?? "manual"}</small>${c.registry.nodes().map((n) => html`<span>${icon("server")}${n.name}${dot(n.state === "online" ? "ok" : "muted")}${n.state === "offline" && html`<em>offline</em>`}${overcommitted(n.capacity) && html`<em>overcommitted</em>`}</span>${memoryLine(c, n)}${c.registry.releaseReports().filter((r) => r.node === n.name).map((r) => html`<small title="${r.reason ?? ""}">${r.role}: ${r.commit?.slice(0, 12) ?? "unknown"} · ${c.now - r.observedAt >= 90_000 ? "stale" : r.state}</small>`)}`)}</div>
 <a class="btn side-add" href="/projects/new" data-new-project>New project</a>
+<a class="btn btn-ghost side-add" href="/passkeys">Passkeys</a>
 </aside>`;
 }
 
@@ -573,16 +577,23 @@ ${phase.kind === "checking" ? html`<p class="land-note">.nexus/check runs at ${s
   if (!landable(r) || d.thread.status !== "active" || (pr !== undefined && pr.state !== "open")) return null;
   const round = r.rounds.at(-1)!;
   const held = r.phase.kind === "needs-person";
-  const reasons = r.phase.kind === "needs-person" ? r.phase.reasons : recordedHolds(r);
-  const stuck = reasons.some(holdsAgain);
+  const reasons = heldBy(r);
+  const rules = reasons.map((reason) => ({ reason, ...holdRule(reason) }));
+  const waived = rules.filter((h) => h.waivable).map((h) => h.reason);
+  // A hold that meets every landing again, and that no passkey waives, leaves only merging on GitHub.
+  const stuck = rules.some((h) => h.holdsAgain && !h.waivable);
   const findings = findingsOf(round);
-  const confirm = `Land pull request #${r.pr.number}, "${r.pr.title}", at commit ${round.head.slice(0, 12)}? Nexus checks the merge policy again, merges that commit${c.deploys(r) ? " and deploys the merge commit" : ""}.`;
+  const deploys = c.deploys(r) ? " and deploys the merge commit" : "";
+  const confirm = waived.length === 0
+    ? `Land pull request #${r.pr.number}, "${r.pr.title}", at commit ${round.head.slice(0, 12)}? Nexus checks the merge policy again, merges that commit${deploys}.`
+    : `Land pull request #${r.pr.number}, "${r.pr.title}", at commit ${round.head.slice(0, 12)}, waiving ${waived.length === 1 ? "the hold" : `the ${waived.length} holds`} the merge policy reserves for you? Your passkey confirms it was you. Nexus checks everything else again, merges that commit${deploys}.`;
+  const disabled = (why: Html | string) => html`<div class="land-act"><button type="button" class="btn" id="land" disabled>Land #${r.pr.number}${waived.length > 0 && " with a passkey"}</button><p class="error">${why}</p></div>`;
   return html`<section class="landing" aria-labelledby="landing-h">
 <div class="land-top"><h2 id="landing-h">${held ? "Held for you" : "Approved, not landed"}</h2>${prLink}</div>
 <p class="land-meta">Head ${short(round.head)} · approved by ${r.models.reviewer} (${r.reviewerKind}) in round ${roundsSpent(r)} of ${r.maxRounds} · .nexus/check passed</p>
 <details id="land-why" open><summary>Why it waits for you</summary>
 ${reasons.length === 0 ? html`<p class="land-note">Nothing holds it. The review stopped at approval because it was started without --land.</p>`
-  : html`<ul class="land-reasons">${reasons.map((reason) => html`<li>${reason}${holdsAgain(reason) && html` <span class="tag">holds again</span>`}</li>`)}</ul>`}
+  : html`<ul class="land-reasons">${rules.map((h) => html`<li>${h.reason} ${h.waivable ? html`<span class="tag tag-ok">you may waive</span>` : html`<span class="tag">${h.holdsAgain ? "holds again" : "not waivable"}</span>`}<br><span class="dim">${h.why}</span></li>`)}</ul>`}
 <h3>The reviewer's findings</h3>
 ${findings.length === 0 ? html`<p class="land-note">None.</p>` : html`<ul class="land-findings">${findings.map((f) => {
   const answer = r.rounds.flatMap((rd) => rd.answers ?? []).findLast((a) => a.id === f.id);
@@ -590,10 +601,49 @@ ${findings.length === 0 ? html`<p class="land-note">None.</p>` : html`<ul class=
 })}</ul>`}
 ${round.check !== null && html`<details id="land-check"><summary>.nexus/check ${round.check.passed ? "passed" : "failed"} at ${round.head.slice(0, 12)}</summary><pre>${round.check.output}</pre></details>`}
 </details>
-${stuck ? html`<p class="land-note">Landing checks the merge policy again, and what is marked "holds again" holds every landing of this commit. Only you can get past it, by merging the pull request on GitHub${c.deploys(r) && " and deploying it with nexus deploy"}.</p>`
-  : c.landRefusal === null ? html`<div class="land-act"><button type="button" class="btn btn-primary" id="land" data-action="land" data-thread="${d.thread.id}" data-head="${round.head}" data-confirm="${confirm}">Land #${r.pr.number}</button></div>`
-  : html`<div class="land-act"><button type="button" class="btn" id="land" disabled>Land #${r.pr.number}</button><p class="error">${landRefusals[c.landRefusal](c.caller)}</p></div>`}
+${stuck ? html`<p class="land-note">Landing checks the merge policy again, and what is marked "holds again" holds every landing of this commit, and no passkey waives it. Only you can get past it, by merging the pull request on GitHub${c.deploys(r) && " and deploying it with nexus deploy"}.</p>`
+  : c.landRefusal !== null ? disabled(landRefusals[c.landRefusal](c.caller))
+  : waived.length === 0 ? html`<div class="land-act"><button type="button" class="btn btn-primary" id="land" data-action="land" data-thread="${d.thread.id}" data-head="${round.head}" data-confirm="${confirm}">Land #${r.pr.number}</button></div>`
+  : c.passkeyOrigin === null ? disabled("Waiving a hold needs your passkey, and passkeys need the dashboard's HTTPS address, which the control plane's config does not set (https.hostname).")
+  : c.registry.passkeys().length === 0 ? disabled(html`Waiving a hold needs your passkey, and none is enrolled. Enrol one on the <a class="link" href="/passkeys">Passkeys</a> page with a code from the control plane's host.`)
+  : html`<div class="land-act"><button type="button" class="btn btn-primary" id="land" data-action="waive" data-thread="${d.thread.id}" data-head="${round.head}" data-holds="${JSON.stringify(waived)}" data-origin="${c.passkeyOrigin}" data-confirm="${confirm}">Land #${r.pr.number} with a passkey</button><p class="land-note">Your passkey shows that you, not an agent, waive what is marked "you may waive", for commit ${short(round.head)} only. Landing checks everything else again.</p></div>`}
 </section>`;
+}
+
+const hostCommand = "sudo node /opt/nexus/control-current/src/control/passkeys.ts /etc/nexus/control.json";
+
+/**
+ * The person's passkeys, which confirm a landing the merge policy reserves for them, and the form that enrols one
+ * with a code from the control plane's host. Revoking takes a passkey too, or the host command.
+ */
+function passkeysPage(c: Context, code: string | null): Html {
+  const passkeys = c.registry.passkeys();
+  const day = (at: number) => new Date(at).toISOString().slice(0, 16).replace("T", " ");
+  return layout(c, {
+    title: "Passkeys",
+    main: html`<header class="bar"><button type="button" class="icon-btn menu" data-open="side" aria-label="Threads">☰</button><div class="crumb"><h1>Passkeys</h1></div></header>
+<div class="scroll"><div class="page">
+<p>A passkey shows Nexus that you, not an agent, pressed Land on a pull request the merge policy reserves for you. Agents on your Mac call Nexus as the same device you do, but cannot use your passkey, which asks for your fingerprint, face or PIN.</p>
+${c.passkeyOrigin === null && html`<p class="error">Passkeys need the dashboard's HTTPS address, which the control plane's config does not set (https.hostname).</p>`}
+<section id="passkeys" data-live aria-labelledby="passkeys-h"><h2 id="passkeys-h">Enrolled</h2>
+${passkeys.length === 0 ? html`<p class="empty">No passkeys yet.</p>` : html`<table class="ov"><thead><tr><th>Name</th><th class="wide">Enrolled</th><th class="wide">Last used</th><th></th></tr></thead><tbody>${passkeys.map((p) => html`<tr>
+<td>${p.name} <code class="dim">${p.id}</code></td><td class="wide">${day(p.createdAt)} from ${p.createdBy}</td><td class="wide">${p.lastUsedAt === null ? "never" : day(p.lastUsedAt)}</td>
+<td><button type="button" class="btn btn-xs btn-ghost danger" data-action="revoke-passkey" data-passkey="${p.id}" data-origin="${c.passkeyOrigin ?? ""}" data-confirm="Revoke the passkey &quot;${p.name}&quot;? A passkey confirms it.">Revoke</button></td></tr>`)}</tbody></table>`}
+</section>
+<section aria-labelledby="enrol-h"><h2 id="enrol-h">Enrol a passkey</h2>
+<p>Enrolling needs a code that only root on the control plane's host can make, so an agent cannot enrol a passkey of its own. Run this there, and open the address it prints or type its code here. A code enrols one passkey, within 10 minutes.</p>
+<pre>${hostCommand} code</pre>
+<form id="enrol" class="enrol" data-origin="${c.passkeyOrigin ?? ""}">
+<label>Code <input name="code" required autocomplete="off" spellcheck="false" value="${code ?? ""}" placeholder="XXXX-XXXX-XXXX-XXXX-XXXX"></label>
+<label>Name <input name="name" required maxlength="60" placeholder="MacBook Touch ID"></label>
+<button type="submit" class="btn btn-primary" id="enrol-submit">Enrol a passkey</button>
+</form>
+<p id="enrol-status" class="comp-note" role="status" hidden></p>
+<p>The same command lists and revokes passkeys: <code>${hostCommand} list</code>, and <code>${hostCommand} revoke &lt;id&gt;</code>.</p>
+</section>
+<p id="action-error" class="error" role="alert" hidden></p>
+</div></div>`,
+  });
 }
 
 /**

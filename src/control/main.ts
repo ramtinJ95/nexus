@@ -190,7 +190,10 @@ export async function startControlPlane(config: ControlPlaneConfig, models: Mode
   const reviewTimer = setInterval(() => { void reviews?.poll(); }, 15_000);
   void reviews?.poll();
   const api = await startApi({
-    ...(config.https ? { https: { port: 7443, certificate: () => localApiCertificate(config.https!.hostname, tailscaled) } } : {}),
+    ...(config.https ? {
+      https: { port: 7443, certificate: () => localApiCertificate(config.https!.hostname, tailscaled) },
+      passkeys: { id: config.https.hostname, origin: `https://${config.https.hostname}:7443` },
+    } : {}),
     prWatchEnabled: token !== null,
     reviews,
     turnsStarting: gate.busy,
