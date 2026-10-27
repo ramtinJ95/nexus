@@ -53,9 +53,10 @@ The tests below pin what a person or the node would see. `new-tests-main.txt` ru
 
 - a deleted thread's pylon that is gone is torn down again whenever its node lists or routes it again,
 - a deleted thread's ports go back after a restart between its delete and their release,
-- a deleted thread whose pylon was retried just before the delete settles the retry, though its pylon is gone,
 - a deleted thread whose Claude launch was cut off has the launch failed, though its pylon is gone,
 - and the existing deleted-thread tests.
+
+A later loop test pins the `retrying` clause: a deleted thread whose pylon was retried just before the delete settles the retry, though its pylon is gone, and only then is left out. It checks the new query, which main lacks, so it runs only on the branch.
 
 `src/control/claude-conversation.test.ts` pins the reader's lifecycle against a probe whose transcript reads wait until the test ends them:
 
@@ -64,6 +65,6 @@ The tests below pin what a person or the node would see. `new-tests-main.txt` ru
 - a watch of a deleted thread keeps its reader, so closing the service still ends the watch,
 - and a deleted thread's reader goes once its last read and its last watch end, while an active thread's stays.
 
-`mutations.sh` removes each clause of the query, and each guard and call of the reader's release, in turn, and runs those tests. Each removal fails at least one test (`mutations.txt`). The API refuses a retry of a deleted thread's pylon, so the `retrying` clause covers a retry made just before the delete, which a loop test pins: the pass settles the retry, and only then leaves the pylon out.
+`mutations.sh` removes each clause of the query, and each guard and call of the reader's release, in turn, and runs those tests. Each removal fails at least one test (`mutations.txt`). The API refuses a retry of a deleted thread's pylon, so the `retrying` clause covers only a retry made just before the delete.
 
 The full suite, `npm test`, passed with 1231 tests on the branch rebased onto eab6631, and `npm run typecheck` passed.
