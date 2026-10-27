@@ -1,1 +1,1 @@
-branch: 15b0192 fix(control): the PR watch finds a predecessor's merge it never saw open, and one behind an undelivered message
+branch: 551055c fix(control): settling a predecessor's PRs reads them all, then saves every state at once

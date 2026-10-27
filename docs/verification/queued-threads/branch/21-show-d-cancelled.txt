@@ -1,11 +1,11 @@
-$ nexus show th-b729843864bc
-th-b729843864bc  D: build on A4
+$ nexus show th-d5d14e4ec90a
+th-d5d14e4ec90a  D: build on A4
 project: wave
 status: cancelled
 node: node-a
 worker: Nexus agent
 size: 1 CPUs, 3 GiB memory, 5 GiB disk
 first message: D: build on A4, after the earlier change landed
-waits for th-6b1ac5bdae60: PR #4 is open
-nexus unarchive th-b729843864bc queues it again.
+waits for th-56b7f817ae47: PR #4 is open
+nexus unarchive th-d5d14e4ec90a queues it again.
 [exit 0]

@@ -1,7 +1,7 @@
-+   2.1s control: nexus control plane: API on 127.0.0.1:7470, following node-a
-+ 363.9s control: latest-turn snapshot failed: node-a: GET /v1/pylons/pylon-th-62b16c46a84b/stream?request=%7B%22pty%22%3Anull%2C%22argv%22%3A%5B%22python3%22%2C%22-%22%2C%22%2Fhome%2Fuser%2Fworkspace%2Frepo%22%2C%22snapshot%22%2C%22input%3A38%22%5D%7D: HTTP 502: the stand-in guest runs only the pi-env daemon, not python3 - /home/user/workspace/repo snapshot input:38
-+ 373.8s control: latest-turn snapshot failed: node-a: GET /v1/pylons/pylon-th-63f1918e50ff/stream?request=%7B%22pty%22%3Anull%2C%22argv%22%3A%5B%22python3%22%2C%22-%22%2C%22%2Fhome%2Fuser%2Fworkspace%2Frepo%22%2C%22snapshot%22%2C%22input%3A51%22%5D%7D: HTTP 502: the stand-in guest runs only the pi-env daemon, not python3 - /home/user/workspace/repo snapshot input:51
-+ 379.6s control: nexus control plane: API on 127.0.0.1:7470, following node-a
-+ 381.6s control: nexus control plane: API on 127.0.0.1:7470, following node-a
-+ 397.0s control: latest-turn snapshot failed: node-a: GET /v1/pylons/pylon-th-ce568d459575/stream?request=%7B%22pty%22%3Anull%2C%22argv%22%3A%5B%22python3%22%2C%22-%22%2C%22%2Fhome%2Fuser%2Fworkspace%2Frepo%22%2C%22snapshot%22%2C%22input%3A64%22%5D%7D: HTTP 502: the stand-in guest runs only the pi-env daemon, not python3 - /home/user/workspace/repo snapshot input:64
-+ 406.8s control: nexus control plane: API on 127.0.0.1:7470, following node-a
++   2.6s control: nexus control plane: API on 127.0.0.1:7470, following node-a
++ 363.0s control: latest-turn snapshot failed: node-a: GET /v1/pylons/pylon-th-dee5606c7472/stream?request=%7B%22pty%22%3Anull%2C%22argv%22%3A%5B%22python3%22%2C%22-%22%2C%22%2Fhome%2Fuser%2Fworkspace%2Frepo%22%2C%22snapshot%22%2C%22input%3A38%22%5D%7D: HTTP 502: the stand-in guest runs only the pi-env daemon, not python3 - /home/user/workspace/repo snapshot input:38
++ 370.3s control: latest-turn snapshot failed: node-a: GET /v1/pylons/pylon-th-895e15744ce0/stream?request=%7B%22pty%22%3Anull%2C%22argv%22%3A%5B%22python3%22%2C%22-%22%2C%22%2Fhome%2Fuser%2Fworkspace%2Frepo%22%2C%22snapshot%22%2C%22input%3A51%22%5D%7D: HTTP 502: the stand-in guest runs only the pi-env daemon, not python3 - /home/user/workspace/repo snapshot input:51
++ 376.0s control: nexus control plane: API on 127.0.0.1:7470, following node-a
++ 378.4s control: nexus control plane: API on 127.0.0.1:7470, following node-a
++ 393.8s control: latest-turn snapshot failed: node-a: GET /v1/pylons/pylon-th-139521d6fd54/stream?request=%7B%22pty%22%3Anull%2C%22argv%22%3A%5B%22python3%22%2C%22-%22%2C%22%2Fhome%2Fuser%2Fworkspace%2Frepo%22%2C%22snapshot%22%2C%22input%3A64%22%5D%7D: HTTP 502: the stand-in guest runs only the pi-env daemon, not python3 - /home/user/workspace/repo snapshot input:64
++ 405.3s control: nexus control plane: API on 127.0.0.1:7470, following node-a

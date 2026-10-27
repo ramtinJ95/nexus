@@ -1,4 +1,4 @@
-GET /threads/th-62b16c46a84b
+GET /threads/th-dee5606c7472
 wave
 /
 B1: build on A1
@@ -18,4 +18,4 @@ Node
 node-a
 Size
 1 CPUs, 3 GiB memory, 5 GiB disk
-th-62b16c46a84b
+th-dee5606c7472

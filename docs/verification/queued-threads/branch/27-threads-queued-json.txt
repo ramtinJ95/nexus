@@ -1,18 +1,18 @@
 $ nexus threads --queued --all --json
 [
   {
-    "id": "th-b729843864bc",
+    "id": "th-d5d14e4ec90a",
     "title": "D: build on A4",
     "project": "wave",
     "startedBy": "nVERIFYCONTROL",
-    "createdAt": 1793118120026,
+    "createdAt": 1793120116067,
     "status": "archived",
     "after": [
-      "th-6b1ac5bdae60"
+      "th-56b7f817ae47"
     ],
     "waits": [
       {
-        "thread": "th-6b1ac5bdae60",
+        "thread": "th-56b7f817ae47",
         "state": "waiting",
         "why": "PR #4 is open"
       }

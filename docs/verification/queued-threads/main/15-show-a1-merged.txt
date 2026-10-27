@@ -1,9 +1,9 @@
-$ nexus show th-9d7ed0db65d9
-th-9d7ed0db65d9  A1: change the shared file
+$ nexus show th-1db9615f71ce
+th-1db9615f71ce  A1: change the shared file
 project: wave
 attention: none
 status: active
-pylon: pylon-th-9d7ed0db65d9 on node-a, running, observed 3s ago
+pylon: pylon-th-1db9615f71ce on node-a, running, observed 4s ago
 size: 1 CPUs, 3 GiB memory, 5 GiB disk
 placement: node-a, the project's default node
 setup: fresh boot runs .nexus/setup, because the control plane could not read .nexus/setup at main: the control plane reads only https:// remotes, and holds no SSH key for git@github.com:verify/wave.git

@@ -1,4 +1,4 @@
 $ node --test src/control/queue.test.ts src/control/pr-watch.test.ts src/control/registry.test.ts src/control/api.test.ts src/cli/nexus.test.ts src/control/dashboard.test.ts   # this branch
-ℹ tests 322
-ℹ pass 322
+ℹ tests 328
+ℹ pass 328
 ℹ fail 0

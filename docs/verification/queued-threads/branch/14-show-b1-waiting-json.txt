@@ -1,17 +1,17 @@
-$ nexus show th-62b16c46a84b --json
+$ nexus show th-dee5606c7472 --json
 {
-  "id": "th-62b16c46a84b",
+  "id": "th-dee5606c7472",
   "title": "B1: build on A1",
   "project": "wave",
   "startedBy": "nVERIFYCONTROL",
-  "createdAt": 1793118118624,
+  "createdAt": 1793120114449,
   "status": "queued",
   "after": [
-    "th-008fa7219806"
+    "th-6dc582b58f06"
   ],
   "waits": [
     {
-      "thread": "th-008fa7219806",
+      "thread": "th-6dc582b58f06",
       "state": "waiting",
       "why": "PR #1 is open"
     }

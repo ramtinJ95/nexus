@@ -1,20 +1,11 @@
-$ node --test src/control/queue.test.ts src/control/pr-watch.test.ts src/control/registry.test.ts src/control/api.test.ts src/cli/nexus.test.ts src/control/dashboard.test.ts   # main 59308ee with this branch's test files
-ℹ fail 16
-ℹ pass 73
-ℹ tests 89
-✖ a predecessor's PR that opened and merged between two reads, or behind a message the watch cannot deliver, is seen merged (12.394962ms)
-✖ a queued thread's row and its queue record's start commit together, and a record no longer queued starts nothing (12.627289ms)
-✖ a registry from before failure messages keeps its pylons' attempts (129.66235ms)
-✖ a registry from before node-unique preview ports keeps its previews (130.52078ms)
-✖ a registry from before pylon retries opens with no retry under way, and a retry marks only a failed pylon (134.103803ms)
-✖ a registry from before repository kinds reads every stored repo, booted or submitted, as a clone (58.863694ms)
-✖ a registry from before session states keeps its sessions as running in their panes, and holds each state to its fields (92.711981ms)
-✖ a registry from before session titles keeps its sessions, untitled until they are observed again (63.110252ms)
-✖ a thread a queued thread waits for has its PR's merge seen when archived, capped or closed, and only then (13.660168ms)
-✖ a turn running before turn starts were recorded has no known start (129.773286ms)
-✖ adding PR watches preserves the shared seen and reply markers from schema 8 (120.970219ms)
-✖ seen and reply timestamps migrate from null and persist without activity (124.948706ms)
-✖ src/cli/nexus.test.ts (702.682141ms)
-✖ src/control/api.test.ts (732.614286ms)
-✖ src/control/dashboard.test.ts (687.105378ms)
-✖ src/control/queue.test.ts (508.35407ms)
+$ node --test src/control/queue.test.ts src/control/pr-watch.test.ts src/control/registry.test.ts src/control/api.test.ts src/cli/nexus.test.ts src/control/dashboard.test.ts   # main cf2558c with this branch's test files
+ℹ fail 7
+ℹ pass 52
+ℹ tests 59
+✖ a queued thread's row and its queue record's start commit together, and a record no longer queued starts nothing (44.690548ms)
+✖ a turn running before turn starts were recorded has no known start (121.697763ms)
+✖ src/cli/nexus.test.ts (619.385575ms)
+✖ src/control/api.test.ts (730.259089ms)
+✖ src/control/dashboard.test.ts (673.71042ms)
+✖ src/control/pr-watch.test.ts (448.397407ms)
+✖ src/control/queue.test.ts (450.930349ms)
