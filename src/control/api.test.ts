@@ -32,6 +32,7 @@ import type { ProjectMirror, TemplateRecord } from "../images.ts";
 import { ingest } from "../reconcile.ts";
 import { processStream } from "../process-stream.ts";
 import { repoInitCommand } from "../pylon-vm-backend.ts";
+import { parseProbeConfig } from "../probe/config.ts";
 import { attachScript, checkoutDir } from "../sessions.ts";
 import { encodeMessage } from "../attach-wire.ts";
 import { terminalSize } from "../guest-terminal.ts";
@@ -249,6 +250,18 @@ test("an image is recorded only with every pin, gh included, each in its pinned 
   assert.deepEqual((await s.call("GET", "/v1/images")).body.images, [], "a refused image is not recorded");
   assert.equal((await s.call("POST", "/v1/images", image)).status, 201);
   assert.deepEqual((await s.call("GET", "/v1/images")).body.images, [{ ...image, release: null, nodes: [] }], "an image recorded by hand comes from no known release");
+});
+
+test("an image is recorded exactly when a probe's Docker backend can name it", async (t) => {
+  const s = await setup(t);
+  const probe = JSON.parse(await readFile(new URL("../../deploy/probe.example.json", import.meta.url), "utf8"));
+  const parses = (parse: () => unknown) => { try { parse(); return true; } catch { return false; } };
+  for (const id of ["img-0123456789ab", "img-custom", "img-Custom", "img-", "img-a.b", `img-${"0".repeat(41)}`]) {
+    const named = parses(() => parseProbeConfig(JSON.stringify({ ...probe, backend: { kind: "docker", images: { [id]: "nexus-pylon:test" } } })));
+    const recorded = (await s.call("POST", "/v1/images", { ...image, id })).status === 201;
+    assert.equal(recorded, named, id);
+  }
+  assert.deepEqual((await s.call("GET", "/v1/images")).body.images.map((i: { id: string }) => i.id).sort(), ["img-0123456789ab", "img-custom"]);
 });
 
 test("starting a thread creates its pylon, boots fresh from the current image, and wakes its node", async (t) => {

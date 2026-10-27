@@ -17,6 +17,8 @@ What the logs show:
 - On main, `garbage()` drops all five malformed names, and the probe refuses each of those drop jobs with `job.artifact is not an image or template ID`. On the branch, `garbage()` keeps them, so it never emits a job the probe refuses. The valid old image and unknown template are dropped on both, and the current image and the checkpoint are kept on both.
 - The regression tests fail on main's code and pass on the branch.
 
+The control plane's `POST /v1/images` kept a third image-ID rule, `img-` and 12 hex digits, which the review of this PR found. It now uses `isImageId` too. The test `an image is recorded exactly when a probe's Docker backend can name it` in `src/control/api.test.ts` drives the real API server over HTTP and the probe's config parser with the same IDs. It fails at the fix commit, before that change, and passes after it. `run.sh` does not cover it, because recording an image needs a running control plane, and this one stops at its harness login.
+
 Nothing in production calls `garbage()` yet, and the probe's `ArtifactStore.list()` already skips any directory name `isPortableArtifactId` refuses. So no deployed node has hit the malformed-name case. The change makes `garbage()` agree with the store that feeds it and the job parser that reads its output.
 
 Rerun it from the repository root after `npm ci`:
