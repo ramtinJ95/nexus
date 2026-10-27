@@ -1326,7 +1326,7 @@ test("a deleted thread whose Claude launch was cut off has the launch failed, th
   const thread = seed(registry);
   registry.setThreadStatus(thread.id, "deleted");
   registry.setClaudeWorker(thread.id, "hello", "starting", undefined, "6f1c2a9e-3b7d-4e05-8c21-9d4b7a1e5f30");
-  const fake = fakeNode({ autoFinish: true });
+  const fake = fakeNode({ autoFinish: true, claudeLaunchRepeatable: true });
   run(t, registry, fake.probe);
   await until("worker failed", () => registry.claudeWorker(thread.id)?.state === "failed");
   assert.deepEqual(fake.submitted, []);

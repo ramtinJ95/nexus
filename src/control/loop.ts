@@ -172,8 +172,9 @@ export function startLoop(options: LoopOptions): Loop {
       try {
         const worker = registry.claudeWorker(thread.id);
         const running = nodeObservation?.pylons.some((p) => p.pylonId === pylonId && p.phase === "running") === true;
-        // A launch this process did not finish, as one a control plane restart cut off, goes again only where it is safe to.
-        if (worker?.state === "starting" && nodeObservation !== null && (nodeObservation.claudeLaunchRepeatable !== true || worker.session === null)) {
+        // A launch this process did not finish, as one a control plane restart cut off, goes again only where it is safe to,
+        // and never for a deleted thread, whose pylon does not run again.
+        if (worker?.state === "starting" && nodeObservation !== null && (nodeObservation.claudeLaunchRepeatable !== true || worker.session === null || thread.status === "deleted")) {
           const message = "Claude launch was interrupted; attach to check before starting another session";
           registry.setClaudeWorker(thread.id, worker.prompt, "failed", message);
           registry.appendEvent("thread.failed", thread.id, { message });
