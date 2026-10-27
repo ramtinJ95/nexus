@@ -1,0 +1,3 @@
+$ nexus archive th-eac05ddf01bf
+Archived th-eac05ddf01bf.
+[exit 0]

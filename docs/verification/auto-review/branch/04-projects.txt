@@ -1,0 +1,4 @@
+$ nexus projects
+nexus         node verify-node  branch main  auto review and land, for nLAPTOP  https://github.com/ramtinJ95/nexus.git
+nexus-manual  node verify-node  branch main  auto review off                    https://github.com/ramtinJ95/nexus.git
+[exit 0]

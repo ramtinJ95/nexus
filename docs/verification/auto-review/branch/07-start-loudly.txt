@@ -1,0 +1,26 @@
+$ nexus start --project nexus --title Greet loudly --claude push greet-loud conflict --json
+{
+  "id": "th-e59737fc268c",
+  "title": "Greet loudly",
+  "project": "nexus",
+  "pylonId": "pylon-th-e59737fc268c",
+  "status": "active",
+  "conversationId": null,
+  "startedBy": "nLAPTOP",
+  "createdAt": 1793113325068,
+  "agentTurnRunning": false,
+  "working": false,
+  "lastAgentActivityAt": 0,
+  "lastHumanActivityAt": 1793113325068,
+  "seenAt": null,
+  "lastReplyAt": null,
+  "placement": {
+    "how": "default",
+    "node": "verify-node"
+  },
+  "setup": {
+    "how": "fresh",
+    "reason": "the control plane could not read .nexus/setup at main: the verify stack reads no remote, so every thread boots fresh"
+  }
+}
+[exit 0]

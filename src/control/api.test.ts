@@ -2527,3 +2527,20 @@ test("a review needs the GitHub token's loop, and landing, at its start or later
     ["start", s.thread.id, { pr: undefined, rounds: undefined, land: null }],
   ]);
 });
+
+test("only a project edit turns on reviews of its own, landing needs a deployer, and the project records who turned it on", async (t) => {
+  const s = await setup(t, { deployment });
+  assert.equal((await s.call("POST", "/v1/projects", project)).status, 201);
+  assert.equal((await s.call("POST", "/v1/projects", { ...project, id: "other", autoReview: { land: true, enabledBy: laptop } })).status, 400, "a new project cannot name who turned it on");
+  s.callAs("nFIREBAT" as TailnetNodeId);
+  assert.deepEqual(await s.call("PATCH", "/v1/projects/acme", { autoReview: { land: true } }), { status: 403, body: { error: "caller may not land a pull request: landing deploys, and only deployers may, never infrastructure nodes or pylons" } });
+  const reviewing = await s.call("PATCH", "/v1/projects/acme", { autoReview: { land: false } });
+  assert.deepEqual(reviewing.body.autoReview, { land: false, enabledBy: "nFIREBAT" }, "reviewing alone lands nothing, so it needs no deployer");
+  s.callAs(laptop);
+  assert.deepEqual((await s.call("PATCH", "/v1/projects/acme", { autoReview: { land: true } })).body.autoReview, { land: true, enabledBy: laptop });
+  assert.deepEqual((await s.call("PATCH", "/v1/projects/acme", { defaultBranch: "trunk" })).body.autoReview, { land: true, enabledBy: laptop }, "another edit keeps it");
+  assert.equal((await s.call("PATCH", "/v1/projects/acme", { autoReview: { land: true, enabledBy: "nPHONE" } })).status, 400);
+  const off = await s.call("PATCH", "/v1/projects/acme", { autoReview: null });
+  assert.equal(off.body.autoReview, undefined);
+  assert.equal((await s.call("GET", "/v1/projects")).body.find((p: { id: string }) => p.id === "acme").autoReview, undefined);
+});

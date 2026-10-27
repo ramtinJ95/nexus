@@ -31,7 +31,7 @@ import type { WebSocket } from "ws";
 import { attachTerminal, processTty } from "./attach.ts";
 import { call, CliError, exitCodes, follow, upgrade, type Endpoint, type HostPort } from "./transport.ts";
 
-const version = "0.26.0";
+const version = "0.27.0";
 const defaults = { url: "http://rj-firebat.tailc817d3.ts.net:7470", socks: "localhost:1055" };
 const configFile = () => join(homedir(), ".config", "nexus", "cli.json");
 
@@ -63,6 +63,7 @@ const usage = `nexus ${version}, the Nexus control plane from this Mac
   nexus project edit <id> [--node N|auto] [--branch B] [--cpus n] [--memory GiB] [--disk GiB]
     [--allow-host HOST]... [--login claude|chatgpt]... [--secret NAME:HOST[,HOST]...]...
     [--clear-hosts] [--clear-logins] [--clear-secrets] [--git-name NAME --git-email EMAIL | --clear-git-identity]
+    [--auto-review off|review|land]   review each builder's PR on its own, and land it too; land needs a deployer
   nexus project add <id> (<repo-url> | --scratch) [--node N|auto] [--branch B] [--cpus n] [--memory GiB] [--disk GiB]
                     [--allow-host HOST]... [--login claude|chatgpt]... [--secret NAME:HOST[,HOST]...]...
   nexus review <thread> [--pr N] [--rounds N] [--land]
@@ -286,10 +287,14 @@ function setupText(s: ThreadSetup): string {
 function reviewText(r: Review): string {
   const phase = r.phase.kind === "landed" ? `landed as ${r.phase.commit}` : r.phase.kind === "deploying" ? `deploying ${r.phase.commit}` : r.phase.kind;
   return [
-    `review ${r.id} of PR #${r.pr.number}: ${phase}, round ${roundsSpent(r)} of ${r.maxRounds}, reviewer ${r.reviewer} on ${r.models.reviewer}${r.land === null ? "" : ", landing when approved"}${phaseNote(r)}`,
+    `review ${r.id} of PR #${r.pr.number}${r.auto ? ", started on its own" : ""}: ${phase}, round ${roundsSpent(r)} of ${r.maxRounds}, reviewer ${r.reviewer} on ${r.models.reviewer}${r.land === null ? "" : ", landing when approved"}${phaseNote(r)}`,
     ...r.phase.kind === "needs-person" ? r.phase.reasons.map((reason) => `needs you: ${reason}`) : [],
   ].join("\n");
 }
+
+const autoReviews = { off: null, review: { land: false }, land: { land: true } } as const;
+/** A control plane older than `Project.autoReview` sends none, and reviews nothing on its own. */
+const autoReviewText = (p: Project) => p.autoReview == null ? "auto review off" : p.autoReview.land ? `auto review and land, for ${p.autoReview.enabledBy}` : `auto review, set by ${p.autoReview.enabledBy}`;
 
 /** A control plane older than `Thread.working` sends none. */
 const working = (t: Thread) => t.working ?? (t.agentTurnRunning || t.sessionTurnRunning === true);
@@ -1043,7 +1048,7 @@ const commands: Readonly<Record<string, Command>> = {
     args: [0, 0],
     async run(api) {
       const projects = await api("GET", "/v1/projects") as Project[];
-      return { json: projects, text: projects.length === 0 ? "No projects." : table(projects.map((p) => [p.id, `node ${p.defaultNode}`, `branch ${p.defaultBranch}`, p.repoUrl ?? "scratch"])) };
+      return { json: projects, text: projects.length === 0 ? "No projects." : table(projects.map((p) => [p.id, `node ${p.defaultNode}`, `branch ${p.defaultBranch}`, autoReviewText(p), p.repoUrl ?? "scratch"])) };
     },
   },
   "project edit": {
@@ -1053,6 +1058,7 @@ const commands: Readonly<Record<string, Command>> = {
       "allow-host": { type: "string", multiple: true }, login: { type: "string", multiple: true }, secret: { type: "string", multiple: true },
       "clear-hosts": { type: "boolean" }, "clear-logins": { type: "boolean" }, "clear-secrets": { type: "boolean" },
       "git-name": { type: "string" }, "git-email": { type: "string" }, "clear-git-identity": { type: "boolean" },
+      "auto-review": { type: "string" },
     },
     async run(api, [id], v) {
       const patch: Record<string, unknown> = {};
@@ -1069,8 +1075,13 @@ const commands: Readonly<Record<string, Command>> = {
       if ((name === undefined) !== (email === undefined) || (v["clear-git-identity"] && name !== undefined)) throw new CliError("invalid", "use --git-name with --git-email, or --clear-git-identity");
       if (v["clear-git-identity"]) patch.gitIdentity = null;
       else if (name !== undefined) patch.gitIdentity = { name, email };
+      const auto = str(v, "auto-review");
+      if (auto !== undefined) {
+        if (!(auto in autoReviews)) throw new CliError("invalid", "--auto-review takes off, review or land");
+        patch.autoReview = autoReviews[auto as keyof typeof autoReviews];
+      }
       const p = await api("PATCH", `/v1/projects/${encodeURIComponent(id!)}`, patch) as Project;
-      return { json: p, text: `Updated project ${p.id}. Existing threads keep their boot settings and grants; start a new thread to apply them.` };
+      return { json: p, text: `Updated project ${p.id}, ${autoReviewText(p)}. Existing threads keep their boot settings and grants; start a new thread to apply them.` };
     },
   },
   "project add": {

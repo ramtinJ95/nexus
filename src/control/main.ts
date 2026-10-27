@@ -7,7 +7,8 @@ import { isDraining, turnGate } from "./drain.ts";
 import { readFile } from "node:fs/promises";
 import { isAbsolute } from "node:path";
 import { z } from "zod";
-import { connectProbe, nodeNameSchema, tailnetNodeIdSchema, type NodeName } from "../protocol.ts";
+import { connectProbe, nodeNameSchema, tailnetNodeIdSchema, type NodeName, type TailnetNodeId } from "../protocol.ts";
+import { canDeploy } from "./releases.ts";
 import { gitIdentitySchema, gitUrl } from "../project.ts";
 import { ingest } from "../reconcile.ts";
 import { linuxTailscaledSocket, localApiWhois, localApiCertificate } from "../tailscale.ts";
@@ -164,9 +165,6 @@ export async function startControlPlane(config: ControlPlaneConfig, models: Mode
   });
   const inbox = agentInbox({ registry, harness, probes: probeMap, wake: wakeThread });
   const github = token === null ? null : githubClient(token);
-  const watch = prWatcher({ registry, github, inbox });
-  const watchTimer = setInterval(() => { void watch.poll(); }, 120_000);
-  void watch.poll();
   const handoffTimer = setInterval(() => { void handoff?.poll(); }, 60_000);
   handoffTimer.unref();
   void handoff?.poll();
@@ -177,13 +175,18 @@ export async function startControlPlane(config: ControlPlaneConfig, models: Mode
   const mirror = projectMirror({ githubToken: token });
   const wake = (node: NodeName) => { void loop.wake(node); };
   const startThread = threadStarter({ registry, harness, mirror, dotfiles: config.dotfiles, gitIdentity: config.gitIdentity, wake });
+  const deployment = { self: config.self.tailnetNodeId, deployers: new Set(config.deployers ?? []), keys: config.deployKeys ?? {} };
   const reviews = github === null ? null : reviewLoop({
     registry, github, inbox, harnessModel: config.harness.model.modelId, startThread,
     replies: agentReplies(registry, harness),
     checks: checkRuns({ registry, probes: probeMap, startThread, wake: wakeThread }),
     release: { self: config.self.tailnetNodeId, repo: githubRepo(repository)! },
+    mayLand: (caller) => canDeploy(registry, deployment, caller as TailnetNodeId),
     log: (message) => console.error(message),
   });
+  const watch = prWatcher({ registry, github, inbox, linked: reviews?.auto });
+  const watchTimer = setInterval(() => { void watch.poll(); }, 120_000);
+  void watch.poll();
   const reviewTimer = setInterval(() => { void reviews?.poll(); }, 15_000);
   void reviews?.poll();
   const api = await startApi({
@@ -191,7 +194,7 @@ export async function startControlPlane(config: ControlPlaneConfig, models: Mode
     prWatchEnabled: token !== null,
     reviews,
     turnsStarting: gate.busy,
-    deployment: { self: config.self.tailnetNodeId, deployers: new Set(config.deployers ?? []), keys: config.deployKeys ?? {} },
+    deployment,
     registry, whois, host: config.listen.host, port: config.listen.port,
     allowed: new Set([config.self.tailnetNodeId, ...config.callers]),
     hostnames: new Set(config.listen.hostnames),

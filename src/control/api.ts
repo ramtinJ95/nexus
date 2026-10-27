@@ -223,7 +223,9 @@ const projectSchema = z.strictObject({
   preSetup: z.string().nullable(),
   gitIdentity: gitIdentitySchema.nullable().optional(),
 });
-const projectEditSchema = projectSchema.omit({ id: true, repoUrl: true, preSetup: true }).extend({ resources: projectSchema.shape.resources.partial() }).partial();
+/** Only an edit sets `autoReview`, and the API records its caller in it, so a project's add cannot name someone else. */
+const projectEditSchema = projectSchema.omit({ id: true, repoUrl: true, preSetup: true })
+  .extend({ resources: projectSchema.shape.resources.partial(), autoReview: z.strictObject({ land: z.boolean() }).nullable() }).partial();
 const startSchema = z.strictObject({
   model: z.string().trim().min(1).max(200).optional(),
   claude: z.string().trim().min(1).max(16_384).refine((prompt) => !prompt.includes("\0"), "a Claude prompt cannot hold a NUL character, which no command-line argument can").optional(),
@@ -755,11 +757,13 @@ export async function startApi(options: ApiOptions): Promise<Api> {
 
   const routes: readonly [string, RegExp, Route][] = [
     ["PATCH", /^\/v1\/projects\/([^/]+)$/, async ([, id], r) => {
-      const patch = parse(projectEditSchema, await r.body());
-      const project = registry.editProject(id as ProjectId, (previous) => {
+      const { autoReview, ...patch } = parse(projectEditSchema, await r.body());
+      if (autoReview?.land) mayLand(r.caller);
+      const project = registry.editProject(id as ProjectId, ({ autoReview: kept, ...previous }) => {
         const updated: Project = parse(projectSchema, { ...previous, ...patch, resources: { ...previous.resources, ...patch.resources } });
         refuseUnknownNode(updated);
-        return updated;
+        const review = autoReview === undefined ? kept : autoReview === null ? null : { land: autoReview.land, enabledBy: r.caller };
+        return review == null ? updated : { ...updated, autoReview: review };
       });
       if (project === undefined) throw new HttpError(404, `no project ${id}`);
       return ok(project);

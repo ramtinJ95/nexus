@@ -1,0 +1,35 @@
+$ nexus events --kind review.changed
+10 2026-10-27T15:02:05.695Z th-02dd0d124ca4 review.changed {"review":"rv-b8957d6d","reviewer":"th-880f0613fe7d","phase":{"kind":"reviewing"},"round":1}
+11 2026-10-27T15:02:05.732Z th-e59737fc268c review.changed {"review":"rv-e33457f2","reviewer":"th-d0625e3f1753","phase":{"kind":"reviewing"},"round":1}
+17 2026-10-27T15:02:06.773Z th-02dd0d124ca4 review.changed {"review":"rv-b8957d6d","reviewer":"th-880f0613fe7d","phase":{"kind":"checking","startedAt":1793113326772,"thread":null},"round":1}
+18 2026-10-27T15:02:06.778Z th-e59737fc268c review.changed {"review":"rv-e33457f2","reviewer":"th-d0625e3f1753","phase":{"kind":"checking","startedAt":1793113326778,"thread":null},"round":1}
+19 2026-10-27T15:02:08.772Z th-02dd0d124ca4 review.changed {"review":"rv-b8957d6d","reviewer":"th-880f0613fe7d","phase":{"kind":"merging","authorized":null},"round":1}
+20 2026-10-27T15:02:08.789Z th-02dd0d124ca4 review.changed {"review":"rv-b8957d6d","reviewer":"th-880f0613fe7d","phase":{"kind":"deploying","commit":"eeee000500000000000000000000000000000000","previous":"aaaa000100000000000000000000000000000000","requested":false,"deadline":1793115128789},"round":1}
+22 2026-10-27T15:02:08.801Z th-e59737fc268c review.changed {"review":"rv-e33457f2","reviewer":"th-d0625e3f1753","phase":{"kind":"merging","authorized":null},"round":1}
+23 2026-10-27T15:02:08.807Z th-e59737fc268c review.changed {"review":"rv-e33457f2","reviewer":"th-d0625e3f1753","phase":{"kind":"fixing"},"round":1}
+26 2026-10-27T15:02:09.773Z th-02dd0d124ca4 review.changed {"review":"rv-b8957d6d","reviewer":"th-880f0613fe7d","phase":{"kind":"landed","commit":"eeee000500000000000000000000000000000000"},"round":1}
+28 2026-10-27T15:02:10.778Z th-e59737fc268c review.changed {"review":"rv-e33457f2","reviewer":"th-d0625e3f1753","phase":{"kind":"reviewing"},"round":2}
+30 2026-10-27T15:02:12.773Z th-e59737fc268c review.changed {"review":"rv-e33457f2","reviewer":"th-d0625e3f1753","phase":{"kind":"checking","startedAt":1793113332773,"thread":null},"round":2}
+31 2026-10-27T15:02:14.774Z th-e59737fc268c review.changed {"review":"rv-e33457f2","reviewer":"th-d0625e3f1753","phase":{"kind":"merging","authorized":null},"round":2}
+32 2026-10-27T15:02:14.779Z th-e59737fc268c review.changed {"review":"rv-e33457f2","reviewer":"th-d0625e3f1753","phase":{"kind":"deploying","commit":"eeee000700000000000000000000000000000000","previous":"eeee000500000000000000000000000000000000","requested":false,"deadline":1793115134779},"round":2}
+36 2026-10-27T15:02:15.775Z th-e59737fc268c review.changed {"review":"rv-e33457f2","reviewer":"th-d0625e3f1753","phase":{"kind":"landed","commit":"eeee000700000000000000000000000000000000"},"round":2}
+40 2026-10-27T15:02:26.586Z th-d822af775137 review.changed {"review":"rv-77421b34","reviewer":"th-6db1571368b7","phase":{"kind":"reviewing"},"round":1}
+43 2026-10-27T15:02:27.776Z th-d822af775137 review.changed {"review":"rv-77421b34","reviewer":"th-6db1571368b7","phase":{"kind":"checking","startedAt":1793113347776,"thread":null},"round":1}
+44 2026-10-27T15:02:29.778Z th-d822af775137 review.changed {"review":"rv-77421b34","reviewer":"th-6db1571368b7","phase":{"kind":"merging","authorized":null},"round":1}
+45 2026-10-27T15:02:29.789Z th-d822af775137 review.changed {"review":"rv-77421b34","reviewer":"th-6db1571368b7","phase":{"kind":"fixing"},"round":1}
+47 2026-10-27T15:02:31.779Z th-d822af775137 review.changed {"review":"rv-77421b34","reviewer":"th-6db1571368b7","phase":{"kind":"reviewing"},"round":2}
+49 2026-10-27T15:02:33.777Z th-d822af775137 review.changed {"review":"rv-77421b34","reviewer":"th-6db1571368b7","phase":{"kind":"checking","startedAt":1793113353777,"thread":null},"round":2}
+50 2026-10-27T15:02:35.777Z th-d822af775137 review.changed {"review":"rv-77421b34","reviewer":"th-6db1571368b7","phase":{"kind":"merging","authorized":null},"round":2}
+51 2026-10-27T15:02:35.788Z th-d822af775137 review.changed {"review":"rv-77421b34","reviewer":"th-6db1571368b7","phase":{"kind":"deploying","commit":"eeee001000000000000000000000000000000000","previous":"eeee000700000000000000000000000000000000","requested":false,"deadline":1793115155788},"round":2}
+55 2026-10-27T15:02:36.778Z th-d822af775137 review.changed {"review":"rv-77421b34","reviewer":"th-6db1571368b7","phase":{"kind":"landed","commit":"eeee001000000000000000000000000000000000"},"round":2}
+60 2026-10-27T15:02:40.949Z th-5a563e085bc4 review.changed {"review":"rv-7eef001d","reviewer":"th-9f3ebf6097a2","phase":{"kind":"reviewing"},"round":1}
+61 2026-10-27T15:02:41.302Z th-eac05ddf01bf review.changed {"review":"rv-5cbf2e29","reviewer":"th-c5f06b6a8f71","phase":{"kind":"reviewing"},"round":1}
+66 2026-10-27T15:02:42.781Z th-5a563e085bc4 review.changed {"review":"rv-7eef001d","reviewer":"th-9f3ebf6097a2","phase":{"kind":"checking","startedAt":1793113362781,"thread":null},"round":1}
+67 2026-10-27T15:02:42.787Z th-eac05ddf01bf review.changed {"review":"rv-5cbf2e29","reviewer":"th-c5f06b6a8f71","phase":{"kind":"checking","startedAt":1793113362787,"thread":null},"round":1}
+68 2026-10-27T15:02:44.780Z th-5a563e085bc4 review.changed {"review":"rv-7eef001d","reviewer":"th-9f3ebf6097a2","phase":{"kind":"merging","authorized":null},"round":1}
+69 2026-10-27T15:02:44.783Z th-5a563e085bc4 review.changed {"review":"rv-7eef001d","reviewer":"th-9f3ebf6097a2","phase":{"kind":"needs-person","reasons":["Always needs the person: pylon image rebuilds, as it changes images/pylon/image-close.Dockerfile."]},"round":1}
+71 2026-10-27T15:02:44.784Z th-eac05ddf01bf review.changed {"review":"rv-5cbf2e29","reviewer":"th-c5f06b6a8f71","phase":{"kind":"merging","authorized":null},"round":1}
+72 2026-10-27T15:02:44.785Z th-eac05ddf01bf review.changed {"review":"rv-5cbf2e29","reviewer":"th-c5f06b6a8f71","phase":{"kind":"needs-person","reasons":["Always needs the person: pylon image rebuilds, as it changes images/pylon/image-archive.Dockerfile."]},"round":1}
+74 2026-10-27T15:02:47.781Z th-5a563e085bc4 review.changed {"review":"rv-7eef001d","reviewer":"th-9f3ebf6097a2","phase":{"kind":"closed"},"round":1}
+76 2026-10-27T15:02:47.784Z th-eac05ddf01bf review.changed {"review":"rv-5cbf2e29","reviewer":"th-c5f06b6a8f71","phase":{"kind":"cancelled","who":"builder","status":"archived"},"round":1}
+[exit 0]

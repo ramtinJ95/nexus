@@ -6,11 +6,11 @@ import { join } from "node:path";
 import { openRegistry, type Thread, type ThreadId } from "./registry.ts";
 import { newPylonRecord } from "../tick.ts";
 import type { LiveHash, NodeName, PylonId, TailnetNodeId } from "../protocol.ts";
-import type { ProjectId, SecretGrant } from "../project.ts";
+import type { AutoReview, ProjectId, SecretGrant } from "../project.ts";
 import type { ChangedFile, LabelResult, MergeResult, PrSnapshot } from "./github.ts";
 import type { AutomatedMessage } from "./inbox.ts";
 import { landingHolds } from "./policy.ts";
-import { humanLabel, reviewLoop, reviewPrefix, type Review } from "./review.ts";
+import { humanLabel, reviewerCaller, reviewLoop, reviewPrefix, type Review } from "./review.ts";
 import { checkCaller, type CheckState } from "./gate.ts";
 import type { StartRequest } from "./threads.ts";
 
@@ -21,11 +21,11 @@ const head2 = "2".repeat(40);
 const merged = "m".repeat(40);
 const previous = "p".repeat(40);
 
-function fixture(t: import("node:test").TestContext, options: { path?: string; repo?: string; secrets?: SecretGrant[]; claudeBuilder?: boolean } = {}) {
+function fixture(t: import("node:test").TestContext, options: { path?: string; repo?: string; secrets?: SecretGrant[]; claudeBuilder?: boolean; autoReview?: AutoReview } = {}) {
   const registry = openRegistry(options.path ?? ":memory:");
   t.after(() => { try { registry.close(); } catch { /* closed by a restart */ } });
   const repo = options.repo ?? "ramtinJ95/nexus";
-  const project = { id: "nexus" as ProjectId, repoUrl: `https://github.com/${repo}.git`, defaultBranch: "main", defaultNode: node, resources: { cpus: 2, memoryGiB: 4, diskGiB: 10 }, allowedHosts: [], secrets: options.secrets ?? [], logins: [], preSetup: null };
+  const project = { id: "nexus" as ProjectId, repoUrl: `https://github.com/${repo}.git`, defaultBranch: "main", defaultNode: node, resources: { cpus: 2, memoryGiB: 4, diskGiB: 10 }, allowedHosts: [], secrets: options.secrets ?? [], logins: [], preSetup: null, autoReview: options.autoReview ?? null };
   if (registry.project(project.id) === undefined) {
     registry.upsertNode({ name: node, tailnetHost: "node.ts.net", tailnetNodeId: self });
     registry.createProject(project);
@@ -56,6 +56,7 @@ function fixture(t: import("node:test").TestContext, options: { path?: string; r
   const checkThreads: ThreadId[] = [];
   const discarded: ThreadId[] = [];
   let delivery: "delivered" | "later" = "delivered";
+  const deployers = new Set(["nLAPTOP"]);
   const loop = () => reviewLoop({
     registry, harnessModel: "gpt-6-astra",
     github: {
@@ -73,6 +74,7 @@ function fixture(t: import("node:test").TestContext, options: { path?: string; r
       discard(id) { discarded.push(id); registry.setThreadStatus(id, "deleted"); },
     },
     release: { self, repo: "ramtinJ95/nexus" },
+    mayLand: (caller) => deployers.has(caller),
     log: () => {},
     now: () => clock,
     async startThread(request, caller) { started.push(request); return registry.thread(add(`th-reviewer-${started.length}`, request.claude !== undefined, caller))!; },
@@ -84,7 +86,7 @@ function fixture(t: import("node:test").TestContext, options: { path?: string; r
     clock += 61_000;
   };
   return {
-    registry, builder, loop, add, sent, started, merges, replies, reply,
+    registry, builder, pr, loop, add, sent, started, merges, replies, reply, deployers,
     get snapshot() { return snapshot; }, set snapshot(s) { snapshot = s; },
     set files(f: ChangedFile[]) { files = f; },
     set mergeAnswer(a: () => MergeResult) { mergeAnswer = a; },
@@ -304,7 +306,7 @@ test("the policy's review conditions: another model, an approval with no P0 to P
   const round = { head: head1, verdict: { token: "x", verdict: "approve" as const, findings: [], reserved: [], notCheckedLive: "the cache under real traffic" }, check: { passed: true, output: "" }, answers: null };
   const review: Review = {
     id: "rv-1", builder: "th-b" as ThreadId, reviewer: "th-r" as ThreadId, pr: { repo: "acme/shop", number: 7, url: "", title: "", branch: "f" }, models: { builder: "m", reviewer: "m" }, reviewerKind: "harness",
-    maxRounds: 3, land: null, merged: null, expect: "rv-1:t", sent: 1, phase: { kind: "checking", startedAt: 0, thread: null }, outbox: null, since: 0, nudges: 0, startedAt: 0,
+    maxRounds: 3, land: null, auto: false, merged: null, expect: "rv-1:t", sent: 1, phase: { kind: "checking", startedAt: 0, thread: null }, outbox: null, since: 0, nudges: 0, startedAt: 0,
     rounds: [{ ...round, verdict: { ...round.verdict, verdict: "changes", findings: [{ id: "F1", priority: "P2", summary: "s" }, { id: "F2", priority: "P2", summary: "s" }, { id: "N1", priority: "P3", summary: "s" }] }, answers: [{ id: "F1", action: "rejected", reason: " " }] }, round],
   };
   const pr: PrSnapshot = { pr: { repo: "acme/shop", number: 7, title: "", url: "", state: "open", checks: "pending", review: "none", conflict: true }, detail: { head: head2, branch: "f", base: "main", body: "Not checked live: the cache under real traffic.", mergeCommit: null }, failures: [], comments: [] };
@@ -928,4 +930,226 @@ test("a check that passes after the PR merged or closed, before the PR watch saw
     assert.deepEqual(f.review().phase, { kind: state });
     assert.deepEqual(f.discarded, f.checkThreads, "the check thread is still thrown away");
   }
+});
+
+const conflicting = (f: ReturnType<typeof fixture>) => { f.snapshot = { ...f.snapshot, pr: { ...f.snapshot.pr, conflict: true } }; };
+const rebased = (f: ReturnType<typeof fixture>) => { f.snapshot = { ...f.snapshot, pr: { ...f.snapshot.pr, conflict: false }, detail: { ...f.snapshot.detail, head: head2 } }; };
+
+test("a builder's PR in a project that lands on its own is reviewed with no command and lands for whoever turned it on", async (t) => {
+  const f = fixture(t, { autoReview: { land: true, enabledBy: "nLAPTOP" } });
+  f.registry.setDesiredRelease({ commit: previous, requestedBy: "person", requestedAt: 1 });
+  const loop = f.loop();
+  await loop.auto(f.registry.thread(f.builder)!, f.pr);
+  assert.equal(f.review().auto, true);
+  assert.deepEqual(f.review().land, { requestedBy: "nLAPTOP", fromProject: true });
+  await loop.poll();
+  f.reply(f.review().reviewer, verdict(f.review(), {}));
+  await loop.poll();
+  assert.deepEqual(f.merges, [head1]);
+  assert.equal(f.review().phase.kind, "deploying");
+  assert.equal(f.registry.desiredRelease()?.commit, merged);
+});
+
+test("nothing starts on its own without the project's setting, for a thread the loop started, or twice for one PR", async (t) => {
+  const off = fixture(t);
+  await off.loop().auto(off.registry.thread(off.builder)!, off.pr);
+  assert.equal(off.registry.review(off.builder), null, "a project without the setting");
+
+  const f = fixture(t, { path: join(await mkdtemp(join(tmpdir(), "nexus-review-")), "registry.db"), autoReview: { land: false, enabledBy: "nPHONE" } });
+  const loop = f.loop();
+  for (const [id, by] of [["th-reviewing", reviewerCaller], ["th-checking", checkCaller]] as const) {
+    await loop.auto(f.registry.thread(f.add(id, true, by))!, f.pr);
+    assert.equal(f.registry.review(id as ThreadId), null, `a thread started by ${by}`);
+  }
+  await loop.auto(f.registry.thread(f.builder)!, f.pr);
+  assert.equal(f.review().land, null, "a project that only reviews stops at approval");
+  const first = f.review().id;
+  await loop.poll();
+  f.reply(f.review().reviewer, verdict(f.review(), {}));
+  await loop.poll();
+  assert.equal(f.review().phase.kind, "approved");
+  await loop.auto(f.registry.thread(f.builder)!, f.pr);
+  assert.equal(f.review().id, first, "a review that ended stays ended");
+  assert.equal(f.started.length, 1);
+  const again = await loop.start(f.builder, { land: null });
+  assert.notEqual(again.id, first, "the person can still start one");
+  assert.equal(again.auto, false);
+});
+
+test("a branch that conflicts at landing goes back to the builder to rebase, and the rebased head is reviewed again, then lands", async (t) => {
+  const f = fixture(t);
+  f.registry.setDesiredRelease({ commit: previous, requestedBy: "person", requestedAt: 1 });
+  const loop = f.loop();
+  await loop.start(f.builder, { land: "nLAPTOP" });
+  await loop.poll();
+  conflicting(f);
+  f.reply(f.review().reviewer, verdict(f.review(), {}));
+  await loop.poll();
+  assert.deepEqual(f.merges, [], "a conflicting branch does not merge");
+  assert.equal(f.review().phase.kind, "fixing");
+  assert.deepEqual(f.review().rounds[0]!.conflict, { base: "main" });
+  const request = f.sent.at(-1)!;
+  assert.equal(request.to, f.builder);
+  assert.match(request.message.text, /the reviewer approved, but the branch conflicts with main, so it cannot merge/);
+  assert.match(request.message.text, /CONFLICT \(P0\) origin\/main: The branch conflicts with main/);
+  assert.match(request.message.text, /git rebase origin\/main/);
+  assert.match(request.message.text, /git push --force-with-lease/);
+
+  rebased(f);
+  f.reply(f.builder, answers(f.review(), [{ id: "CONFLICT", action: "fixed", reason: "Rebased onto main, kept both sides' cache settings, the tests pass." }]));
+  await loop.poll();
+  assert.equal(f.review().phase.kind, "reviewing");
+  assert.equal(f.review().rounds[1]!.head, head2, "the rebased head is a new round");
+  assert.match(f.sent.at(-1)!.message.text, /CONFLICT: fixed\. Rebased onto main/);
+  assert.match(f.sent.at(-1)!.message.text, new RegExp(`git diff origin/main\\.\\.\\.${head2}\\n  git range-diff origin/main ${head1} ${head2}`));
+  f.reply(f.review().reviewer, verdict(f.review(), {}));
+  await loop.poll();
+  assert.deepEqual(f.merges, [head2]);
+  assert.equal(f.review().phase.kind, "deploying");
+});
+
+test("a builder that cannot rebase, or a conflict after the last round, goes to the person with why", async (t) => {
+  const f = fixture(t);
+  const loop = f.loop();
+  await loop.start(f.builder, { land: "nLAPTOP" });
+  await loop.poll();
+  conflicting(f);
+  f.reply(f.review().reviewer, verdict(f.review(), {}));
+  await loop.poll();
+  f.reply(f.builder, answers(f.review(), [{ id: "CONFLICT", action: "rejected", reason: "main rewrote the cache this PR adds, so one side has to go." }]));
+  await loop.poll();
+  assert.deepEqual(f.review().phase, { kind: "needs-person", reasons: ["The branch conflicts with main, and the builder did not rebase it: main rewrote the cache this PR adds, so one side has to go."] });
+
+  const last = fixture(t, { path: join(await mkdtemp(join(tmpdir(), "nexus-review-")), "registry.db") });
+  const capped = last.loop();
+  await capped.start(last.builder, { land: "nLAPTOP", rounds: 1 });
+  await capped.poll();
+  conflicting(last);
+  last.reply(last.review().reviewer, verdict(last.review(), {}));
+  await capped.poll();
+  assert.deepEqual(last.review().phase, { kind: "needs-person", label: { state: "added" }, reasons: ["The branch conflicts with main, and round 1 was the last this review allows, so a rebase could not be reviewed."] });
+  assert.deepEqual(last.sent.filter((s) => s.to === last.builder), [], "the builder is not asked for a rebase no round can review");
+});
+
+test("a merge GitHub refuses for a conflict it only now reports goes to the builder to rebase", async (t) => {
+  const f = fixture(t);
+  f.snapshot = { ...f.snapshot, pr: { ...f.snapshot.pr, conflict: null } };
+  f.mergeAnswer = () => { conflicting(f); return { kind: "refused", message: "GitHub answered 405: Pull Request is not mergeable" }; };
+  const loop = f.loop();
+  await loop.start(f.builder, { land: "nLAPTOP" });
+  await loop.poll();
+  f.reply(f.review().reviewer, verdict(f.review(), {}));
+  await loop.poll();
+  assert.deepEqual(f.merges, [head1]);
+  assert.equal(f.review().phase.kind, "fixing");
+  assert.match(f.sent.at(-1)!.message.text, /git rebase origin\/main/);
+});
+
+test("a head pushed after the approval gets its own round instead of the person", async (t) => {
+  const f = fixture(t);
+  f.check = { kind: "running" };
+  const loop = f.loop();
+  await loop.start(f.builder, { land: "nLAPTOP" });
+  await loop.poll();
+  f.reply(f.review().reviewer, verdict(f.review(), {}));
+  await loop.poll();
+  rebased(f);
+  f.check = { kind: "done", passed: true, output: "ok" };
+  await loop.poll();
+  assert.deepEqual(f.merges, []);
+  assert.equal(f.review().phase.kind, "reviewing");
+  assert.equal(f.review().rounds[1]!.head, head2);
+  assert.match(f.sent.at(-1)!.message.text, new RegExp(`New commits were pushed to the branch after you approved ${head1}`));
+});
+
+test("each landing asks again whether its lander may deploy, and whether the project still lands on its own", async (t) => {
+  const f = fixture(t);
+  const loop = f.loop();
+  await loop.start(f.builder, { land: "nLAPTOP" });
+  await loop.poll();
+  f.deployers.delete("nLAPTOP");
+  f.reply(f.review().reviewer, verdict(f.review(), {}));
+  await loop.poll();
+  assert.deepEqual(f.merges, []);
+  assert.deepEqual(f.review().phase, { kind: "needs-person", reasons: ["nLAPTOP, who asked for this landing, is not among the control plane's deployers, so only the person can land it."] });
+
+  const auto = fixture(t, { path: join(await mkdtemp(join(tmpdir(), "nexus-review-")), "registry.db"), autoReview: { land: true, enabledBy: "nLAPTOP" } });
+  const own = auto.loop();
+  await own.auto(auto.registry.thread(auto.builder)!, auto.pr);
+  await own.poll();
+  auto.registry.editProject("nexus" as ProjectId, ({ autoReview: _, ...p }) => p);
+  auto.reply(auto.review().reviewer, verdict(auto.review(), {}));
+  await own.poll();
+  assert.deepEqual(auto.merges, []);
+  assert.deepEqual(auto.review().phase, { kind: "needs-person", reasons: ["Project nexus no longer lands its builders' pull requests on its own, so this one is the person's to land."] });
+});
+
+test("a review held for the person ends once the person closes its PR or archives or deletes its builder, and asks nothing more", async (t) => {
+  for (const [how, ending] of [
+    ["closed", { kind: "closed" }],
+    ["archived", { kind: "cancelled", who: "builder", status: "archived" }],
+    ["deleted", { kind: "cancelled", who: "builder", status: "deleted" }],
+  ] as const) {
+    const f = fixture(t);
+    const loop = f.loop();
+    await loop.start(f.builder, { land: null, rounds: 1 });
+    await loop.poll();
+    f.reply(f.review().reviewer, verdict(f.review(), { verdict: "changes", findings: [serious] }));
+    await loop.poll();
+    assert.equal(f.review().phase.kind, "needs-person");
+    assert.equal(f.attention().at(-1), "decision");
+    if (how === "closed") f.watched("closed");
+    else f.registry.setThreadStatus(f.builder, how);
+    await loop.poll();
+    assert.deepEqual(f.review().phase, ending, `a held review whose ${how === "closed" ? "PR was closed" : `builder was ${how}`}`);
+    assert.notEqual(f.attention().at(-1), "decision", "the builder no longer needs a decision");
+  }
+});
+
+test("a held review ends before its label is retried, and one whose PR watch stopped asks GitHub whether its PR closed", async (t) => {
+  const f = fixture(t);
+  const loop = f.loop();
+  await loop.start(f.builder, { land: null, rounds: 1 });
+  await loop.poll();
+  f.labelAnswer = () => { throw new Error("GitHub is down"); };
+  f.reply(f.review().reviewer, verdict(f.review(), { verdict: "changes", findings: [serious] }));
+  await loop.poll();
+  assert.deepEqual((f.review().phase as { label?: unknown }).label, { state: "adding" });
+  archive(f.registry, f.builder);
+  await loop.poll();
+  assert.deepEqual(f.review().phase, { kind: "cancelled", who: "builder", status: "archived" });
+
+  const g = fixture(t);
+  const held = g.loop();
+  await held.start(g.builder, { land: null, rounds: 1 });
+  await held.poll();
+  g.reply(g.review().reviewer, verdict(g.review(), { verdict: "changes", findings: [serious] }));
+  await held.poll();
+  g.registry.savePrWatch(g.builder, { ...g.registry.prWatch(g.builder)!, commentWakes: 10 });
+  g.snapshot = { ...g.snapshot, pr: { ...g.snapshot.pr, state: "closed" } };
+  await held.poll();
+  assert.deepEqual(g.review().phase, { kind: "closed" });
+});
+
+test("a PR that another thread on its branch has a review of gets none on its own", async (t) => {
+  const f = fixture(t, { autoReview: { land: false, enabledBy: "nLAPTOP" } });
+  const loop = f.loop();
+  await loop.auto(f.registry.thread(f.builder)!, f.pr);
+  await loop.auto(f.registry.thread(f.add("th-twin", true))!, f.pr);
+  assert.equal(f.registry.review("th-twin" as ThreadId), null);
+  assert.equal(f.started.length, 1);
+});
+
+test("a PR stays reviewed once its builder's record moves on to a review of another PR", async (t) => {
+  const f = fixture(t, { autoReview: { land: false, enabledBy: "nLAPTOP" } });
+  const loop = f.loop();
+  await loop.auto(f.registry.thread(f.builder)!, f.pr);
+  await loop.poll();
+  f.reply(f.review().reviewer, verdict(f.review(), {}));
+  await loop.poll();
+  assert.equal(f.review().phase.kind, "approved");
+  f.registry.saveReview({ ...f.review(), id: "rv-next", pr: { ...f.review().pr, number: f.pr.number + 1 }, phase: { kind: "reviewing" } });
+  await loop.auto(f.registry.thread(f.add("th-twin", true))!, f.pr);
+  assert.equal(f.registry.review("th-twin" as ThreadId), null, "the twin's link of the first PR starts nothing");
+  assert.equal(f.started.length, 1);
 });

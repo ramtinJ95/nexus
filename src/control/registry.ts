@@ -284,6 +284,9 @@ const migrations: readonly string[] = [
   `ALTER TABLE session_activity ADD COLUMN message TEXT;`,
   `ALTER TABLE session_order ADD COLUMN event_ids TEXT;`,
   `ALTER TABLE threads ADD COLUMN setup TEXT;`,
+  // Every pull request a review ever started for, which outlives the builder's record a later review replaces.
+  `CREATE TABLE reviewed_prs (repo TEXT NOT NULL, number INTEGER NOT NULL, PRIMARY KEY (repo, number)) STRICT;
+   INSERT OR IGNORE INTO reviewed_prs SELECT json_extract(record, '$.pr.repo'), json_extract(record, '$.pr.number') FROM reviews;`,
 ];
 
 type Row = Record<string, unknown>;
@@ -726,12 +729,15 @@ export function openRegistry(path: string, clock = Date.now) {
     reviews: (): Review[] => sql("SELECT record FROM reviews ORDER BY builder").all().map((r) => storedReview(json<Review>(r.record))),
     /** A thread a review started, whether or not a later review replaced the record that names it. */
     isReviewer: (thread: ThreadId) => sql("SELECT 1 FROM threads WHERE id = ? AND started_by = ? UNION SELECT 1 FROM reviews WHERE reviewer = ?").get(thread, reviewerCaller, thread) !== undefined,
+    /** Whether a review ever started for the pull request, including one a later review of its builder replaced. */
+    prReviewed: (repo: string, number: number) => sql("SELECT 1 FROM reviewed_prs WHERE repo = ? AND number = ?").get(repo, number) !== undefined,
     /** Replaces the builder's review, and tells the event log when its phase, round or label changed. */
     saveReview(review: Review) {
       transaction(() => {
         const before = jsonOrNull<Review>(sql("SELECT record FROM reviews WHERE builder = ?").get(review.builder)?.record ?? null);
         sql("INSERT INTO reviews (builder, reviewer, record) VALUES (?, ?, ?) ON CONFLICT (builder) DO UPDATE SET reviewer = excluded.reviewer, record = excluded.record")
           .run(review.builder, review.reviewer, JSON.stringify(review));
+        sql("INSERT OR IGNORE INTO reviewed_prs (repo, number) VALUES (?, ?)").run(review.pr.repo, review.pr.number);
         const label = (r: Review | null) => r?.phase.kind === "needs-person" ? r.phase.label?.state : undefined;
         if (before?.id !== review.id || before.phase.kind !== review.phase.kind || before.rounds.length !== review.rounds.length || label(before) !== label(review)) {
           appendEvent("review.changed", review.builder, { review: review.id, reviewer: review.reviewer, phase: review.phase, round: review.rounds.length });

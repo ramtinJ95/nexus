@@ -1,0 +1,26 @@
+$ nexus start --project nexus-manual --title Rebuild the image again --claude push image-archive reserved --json
+{
+  "id": "th-eac05ddf01bf",
+  "title": "Rebuild the image again",
+  "project": "nexus-manual",
+  "pylonId": "pylon-th-eac05ddf01bf",
+  "status": "active",
+  "conversationId": null,
+  "startedBy": "nLAPTOP",
+  "createdAt": 1793113358655,
+  "agentTurnRunning": false,
+  "working": false,
+  "lastAgentActivityAt": 0,
+  "lastHumanActivityAt": 1793113358655,
+  "seenAt": null,
+  "lastReplyAt": null,
+  "placement": {
+    "how": "default",
+    "node": "verify-node"
+  },
+  "setup": {
+    "how": "fresh",
+    "reason": "the control plane could not read .nexus/setup at main: the verify stack reads no remote, so every thread boots fresh"
+  }
+}
+[exit 0]

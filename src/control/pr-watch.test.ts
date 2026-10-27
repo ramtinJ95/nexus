@@ -423,3 +423,24 @@ test("the client creates the label once, adds it to the PR, and reports a token 
   add = () => Response.json({ message: "Server Error" }, { status: 502 });
   await assert.rejects(client.label("acme/repo", 1, "needs human review"), /HTTP 502/, "a server error is retried, not reported as a denial");
 });
+
+test("the review loop hears of each PR the watch links open, once, and again after a call that failed", async (t) => {
+  const f = fixture(); t.after(() => f.registry.close());
+  const heard: string[] = [];
+  let fail = true;
+  // GitHub's search can list a PR that its own read already reports closed.
+  const watcher = prWatcher({ ...f.options, github: { ...f.github, find: async () => [1] }, async linked(thread, pr) { heard.push(`${thread.id} #${pr.number} ${pr.state}`); if (fail) throw new Error("GitHub read failed"); } });
+  await watcher.poll();
+  assert.deepEqual(heard, ["th-1 #1 open"]);
+  assert.equal(f.registry.prWatch(f.id)?.links.length ?? 0, 0, "the link waits until the review loop heard of it");
+  fail = false;
+  await watcher.poll();
+  await watcher.poll();
+  assert.deepEqual(heard, ["th-1 #1 open", "th-1 #1 open"], "a saved link is not news again");
+  assert.equal(f.registry.prWatch(f.id)?.links[0]?.pr.number, 1);
+  f.snapshot = { ...f.snapshot, pr: { ...f.snapshot.pr, state: "closed" } };
+  f.add("th-2");
+  await watcher.poll();
+  assert.equal(f.registry.prWatch("th-2" as ThreadId)?.links[0]?.pr.state, "closed");
+  assert.equal(heard.length, 2, "a PR first read closed is not news");
+});

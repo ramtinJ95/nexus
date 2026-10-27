@@ -18,7 +18,11 @@ export interface PrWatchState {
 const empty = (): PrWatchState => ({ links: [], commentWakes: 0, pending: null, error: null });
 const active = (t: Thread | undefined) => t !== undefined && t.status !== "archived" && t.status !== "deleted";
 
-export function prWatcher(options: { registry: Registry; github: Pick<GitHub, "find" | "poll"> | null; inbox: Inbox }) {
+/**
+ * `linked` hears of each PR the watch links that is open at its first read, before the link is saved, so a failed
+ * call is made again on the next pass.
+ */
+export function prWatcher(options: { registry: Registry; github: Pick<GitHub, "find" | "poll"> | null; inbox: Inbox; linked?: ((t: Thread, pr: PullRequest) => Promise<void>) | undefined }) {
   const { registry, github, inbox } = options;
   let running: Promise<void> | null = null;
   async function deliver(id: ThreadId, state: PrWatchState) {
@@ -57,6 +61,7 @@ export function prWatcher(options: { registry: Registry; github: Pick<GitHub, "f
           }
         }
         const news: string[] = [];
+        const fresh: PullRequest[] = [];
         let nonComment = false;
         for (const link of state.links) {
           if (link.pr.state !== "open") continue;
@@ -67,6 +72,7 @@ export function prWatcher(options: { registry: Registry; github: Pick<GitHub, "f
           const before = link.pr;
           link.pr = { ...snapshot.pr, conflict: snapshot.pr.conflict ?? before.conflict };
           if (snapshot.pr.state !== "open") { link.pr.checks = before.checks; link.pr.review = before.review; continue; }
+          if (initial) fresh.push(link.pr);
           const seen = new Set(link.seen);
           const events: string[] = [];
           for (const f of snapshot.failures) if (!seen.has(f.id)) { events.push(f.text); link.failed = true; nonComment = true; }
@@ -82,6 +88,7 @@ export function prWatcher(options: { registry: Registry; github: Pick<GitHub, "f
         }
         // An archive can race any GitHub await. Keep the cursor unchanged until the thread is eligible again.
         if (!active(registry.thread(t.id))) continue;
+        for (const pr of fresh) await options.linked?.(registry.thread(t.id)!, pr);
         state.error = null;
         if (news.length) {
           state.commentWakes = nonComment ? 0 : state.commentWakes + 1;

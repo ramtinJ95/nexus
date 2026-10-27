@@ -1,0 +1,26 @@
+$ nexus start --project nexus-manual --title Greet quietly --claude push greet-quiet conflict --json
+{
+  "id": "th-13fa23287674",
+  "title": "Greet quietly",
+  "project": "nexus-manual",
+  "pylonId": "pylon-th-13fa23287674",
+  "status": "active",
+  "conversationId": null,
+  "startedBy": "nLAPTOP",
+  "createdAt": 1793113283907,
+  "agentTurnRunning": false,
+  "working": false,
+  "lastAgentActivityAt": 0,
+  "lastHumanActivityAt": 1793113283907,
+  "seenAt": null,
+  "lastReplyAt": null,
+  "placement": {
+    "how": "default",
+    "node": "verify-node"
+  },
+  "setup": {
+    "how": "fresh",
+    "reason": "the control plane could not read .nexus/setup at main: the verify stack reads no remote, so every thread boots fresh"
+  }
+}
+[exit 0]
