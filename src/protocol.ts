@@ -582,8 +582,7 @@ const frameType = { data: 0, eof: 1, exit: 3 } as const;
 const maxFrameBytes = 16 << 20;
 
 function streamPath(pylonId: PylonId, argv: readonly string[]): string {
-  // Probes older than raw-pipe-only streams require the `pty` key. It can go once every node runs a newer probe.
-  return `/v1/pylons/${encodeURIComponent(pylonId)}/stream?request=${encodeURIComponent(JSON.stringify({ pty: null, argv }))}`;
+  return `/v1/pylons/${encodeURIComponent(pylonId)}/stream?request=${encodeURIComponent(JSON.stringify({ argv }))}`;
 }
 
 /** The probe's side of the stream route: `null` unless the request asks to upgrade to `nexus-stream`. Throws with a message for a 400. */

@@ -7,7 +7,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fakeVm, type WritePhase } from "./fake-vm.ts";
 import { networkOptions } from "./network.ts";
-import { readIntent, reportResume, SandboxRuntime, setupMarkerOf, setupOnDisk, setupState } from "./runtime.ts";
+import { readIntent, reportResume, SandboxRuntime, setupMarkerOf, setupOnDisk } from "./runtime.ts";
 
 type Status = Awaited<ReturnType<Parameters<typeof reportResume>[0]["status"]>>;
 
@@ -65,27 +65,27 @@ test("setup reruns unless the disk holds this instance's own finished setup", ()
 	assert.equal(setupOnDisk(setupMarkerOf({ ...record, createdAt: "2027-02-01T00:00:00.000Z" }, undefined), record), null, "an instance of the same name created again");
 });
 
-test("an instance whose intent predates the disk marker boots as its intent said, and its disk is marked", async (t) => {
+test("an intent reads back as the client wrote it, and any other shape is refused", async (t) => {
 	const dir = await mkdtemp(join(tmpdir(), "nexus-intent-"));
 	t.after(() => rm(dir, { recursive: true, force: true }));
 	const intentOf = async (intent: object) => {
 		await writeFile(join(dir, "intent.json"), JSON.stringify(intent));
 		return readIntent(dir);
 	};
-	const record = { name: "pylon-old", createdAt: "2026-10-01T00:00:00.000Z" } as SandboxRecord;
-	// A pylon main created and checkpointed after its setup: before the marker, this boot would rerun setup over its checkout.
-	const ran = await intentOf({ prepare: false, fresh: false });
-	assert.deepEqual(ran, { prepare: false, setupRan: {} });
-	assert.deepEqual(setupState(true, null, record, ran.setupRan), { done: {}, mark: true });
-	const failed = await intentOf({ prepare: false, fresh: false, setupError: "Setup exited 1" });
-	assert.deepEqual(setupState(true, null, record, failed.setupRan), { done: { setupError: "Setup exited 1" }, mark: true });
-	// Setup had not run, or a boot from no disk, which ran setup then too.
-	assert.deepEqual(setupState(true, null, record, (await intentOf({ prepare: false, fresh: true })).setupRan), { done: null, mark: false });
-	assert.deepEqual(setupState(false, null, record, ran.setupRan), { done: null, mark: false });
-	// Once a checkpoint holds the marker, the disk answers.
-	assert.deepEqual(setupState(true, setupMarkerOf(record, undefined), record, ran.setupRan), { done: {}, mark: false });
+	assert.deepEqual(await intentOf({ prepare: false }), { prepare: false });
 	assert.deepEqual(await intentOf({ prepare: true }), { prepare: true });
-	await assert.rejects(intentOf({ prepare: false, fresh: "yes" }));
+	await assert.rejects(intentOf({}));
+	await assert.rejects(intentOf({ prepare: "yes" }));
+	await assert.rejects(intentOf({ prepare: false, templates: true }));
+});
+
+test("an intent written before setup was recorded on the disk is refused", async (t) => {
+	const dir = await mkdtemp(join(tmpdir(), "nexus-intent-"));
+	t.after(() => rm(dir, { recursive: true, force: true }));
+	for (const intent of [{ prepare: false, fresh: false }, { prepare: false, fresh: false, setupError: "Setup exited 1" }, { prepare: false, fresh: true }]) {
+		await writeFile(join(dir, "intent.json"), JSON.stringify(intent));
+		await assert.rejects(readIntent(dir), /Unrecognized key/);
+	}
 });
 
 /** A running instance on a fake VM whose file writes to paths `holds` names hold in `phase`. */

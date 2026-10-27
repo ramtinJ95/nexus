@@ -32,7 +32,7 @@ import type { WebSocket } from "ws";
 import { attachTerminal, processTty } from "./attach.ts";
 import { call, CliError, exitCodes, follow, upgrade, type Endpoint, type HostPort } from "./transport.ts";
 
-const version = "0.30.0";
+const version = "0.31.0";
 const defaults = { url: "http://rj-firebat.tailc817d3.ts.net:7470", socks: "localhost:1055" };
 const configFile = () => join(homedir(), ".config", "nexus", "cli.json");
 
@@ -98,8 +98,6 @@ interface Result { json: unknown; text: string }
 interface Local {
   /** A WebSocket to the API, over the same connection as every call. */
   connect(path: string): Promise<WebSocket>;
-  /** The settings for attach over ssh that are set, which attach names once, because they do nothing now. */
-  retired: readonly string[];
 }
 interface Command {
   args: readonly [min: number, max: number];
@@ -1028,8 +1026,6 @@ const commands: Readonly<Record<string, Command>> = {
   attach: {
     args: [1, 1],
     async run(_api, [id], _values, _follow, local) {
-      const { retired } = local;
-      if (retired.length > 0) process.stderr.write(`nexus: attach ignores ${retired.join(" and ")} now that it goes through the control plane. Remove ${retired.length === 1 ? "it" : "them"}\n`);
       await attachTerminal(local.connect, id!, processTty());
     },
   },
@@ -1196,15 +1192,7 @@ const commands: Readonly<Record<string, Command>> = {
   },
 };
 
-/**
- * Keys that CLIs before 0.9.0 read for attach over ssh. They still parse, so a config that has them keeps working,
- * and attach names the ones that are set.
- */
-const retiredKeys = ["ssh", "attach"] as const;
-const configSchema = z.strictObject({
-  url: z.string().optional(), socks: z.string().optional(),
-  ...Object.fromEntries(retiredKeys.map((key) => [key, z.unknown().optional()])) as Record<(typeof retiredKeys)[number], z.ZodOptional<z.ZodUnknown>>,
-});
+const configSchema = z.strictObject({ url: z.string().optional(), socks: z.string().optional() });
 
 async function readConfig(file: string): Promise<z.infer<typeof configSchema>> {
   let text: string;
@@ -1226,13 +1214,9 @@ async function readConfig(file: string): Promise<z.infer<typeof configSchema>> {
 }
 
 /** Each setting from its flag, then the environment, then the config file, then the default. */
-async function settings(v: Values): Promise<{ endpoint: Endpoint; retired: string[] }> {
+async function settings(v: Values): Promise<Endpoint> {
   const config = await readConfig(configFile());
   const env = (name: string) => process.env[name] || undefined;
-  const retired = [
-    ...retiredKeys.filter((key) => config[key] !== undefined).map((key) => `"${key}" in ${configFile()}`),
-    ...env("NEXUS_ATTACH") === undefined ? [] : ["NEXUS_ATTACH"],
-  ];
   const url = str(v, "url") ?? env("NEXUS_URL") ?? config.url ?? defaults.url;
   const socks = str(v, "socks") ?? env("NEXUS_SOCKS") ?? config.socks ?? defaults.socks;
   let parsed: URL;
@@ -1242,7 +1226,7 @@ async function settings(v: Values): Promise<{ endpoint: Endpoint; retired: strin
     throw new CliError("invalid", `the control plane URL ${url} is not a URL`);
   }
   if (parsed.protocol !== "http:") throw new CliError("invalid", `the control plane URL ${url} must be http://, which is what the API serves on the tailnet`);
-  return { endpoint: { url: parsed, socks: socks === "none" ? null : hostPort(socks) }, retired };
+  return { url: parsed, socks: socks === "none" ? null : hostPort(socks) };
 }
 
 function hostPort(value: string): HostPort {
@@ -1286,9 +1270,9 @@ async function run(argv: readonly string[]): Promise<void> {
   if (positionals.length < min || positionals.length > max) {
     throw new CliError("invalid", `${name} takes ${min === max ? min : max === Infinity ? `at least ${min}` : `${min} to ${max}`} argument${max === 1 ? "" : "s"}, got ${positionals.length}`);
   }
-  const { endpoint: target, retired } = await settings(values);
+  const target = await settings(values);
   const result = await command.run((method, path, body, idleMs) => call(target, method, path, body, idleMs), positionals, values,
-    (path, onEvent, signal, onCursor) => follow(target, path, onEvent, signal, onCursor), { connect: (path) => upgrade(target, path), retired });
+    (path, onEvent, signal, onCursor) => follow(target, path, onEvent, signal, onCursor), { connect: (path) => upgrade(target, path) });
   if (result !== undefined) process.stdout.write(`${values.json === true ? JSON.stringify(result.json, null, 2) : result.text}\n`);
 }
 

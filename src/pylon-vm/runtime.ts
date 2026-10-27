@@ -166,7 +166,7 @@ export class SandboxRuntime {
 			this.state = "running";
 		}
 	}
-	async boot(prepare: boolean, setupRan?: SetupRun): Promise<void> {
+	async boot(prepare: boolean): Promise<void> {
 		const config = this.record.config;
 		const { resources } = this.spec;
 		this.network = networkOptions(this.spec, this.record.name);
@@ -242,10 +242,9 @@ export class SandboxRuntime {
 			resume && (await guestExists(vm, setupMarker))
 				? await vm.fs.readFile(setupMarker, { encoding: "utf8" })
 				: null;
-		const { done, mark } = setupState(resume, marker, this.record, setupRan);
+		const done = setupOnDisk(marker, this.record);
 		this.setupRecorded = done !== null;
 		this.failures = done?.setupError ? [{ kind: "setup", message: done.setupError }] : [];
-		if (mark) await this.recordSetup(vm);
 		if (done === null) {
 			const setup = config.setup;
 			if (setup.length) {
@@ -586,27 +585,7 @@ export function setupOnDisk(marker: string | null, record: SandboxRecord): Setup
 	if (ran.instance !== record.name || ran.createdAt !== record.createdAt) return null;
 	return ran.setupError === undefined ? {} : { setupError: ran.setupError };
 }
-/**
- * Whether a boot runs setup (`done` null), and whether it writes the marker. An instance created before setup
- * was recorded on its disk keeps what its intent said, `setupRan`, and the boot writes the marker its disk lacks,
- * which the next checkpoint keeps. A boot from no disk always runs setup, as it did then.
- */
-export function setupState(disk: boolean, marker: string | null, record: SandboxRecord, setupRan: SetupRun | undefined): { done: SetupRun | null; mark: boolean } {
-	if (!disk) return { done: null, mark: false };
-	const onDisk = setupOnDisk(marker, record);
-	if (onDisk !== null || setupRan === undefined) return { done: onDisk, mark: false };
-	return { done: setupRan, mark: true };
-}
-
-export async function readIntent(dir: string): Promise<{ prepare: boolean; setupRan?: SetupRun }> {
+export async function readIntent(dir: string): Promise<{ prepare: boolean }> {
 	const { z } = await import("zod");
-	const intent = z
-		.union([
-			z.strictObject({ prepare: z.boolean() }),
-			// Written before setup was recorded on the disk: fresh is false once setup ran, with its error if it failed.
-			z.strictObject({ prepare: z.boolean(), fresh: z.boolean(), setupError: z.string().optional() }),
-		])
-		.parse(JSON.parse(await readFile(join(dir, "intent.json"), "utf8")));
-	if (!("fresh" in intent) || intent.fresh) return { prepare: intent.prepare };
-	return { prepare: intent.prepare, setupRan: intent.setupError === undefined ? {} : { setupError: intent.setupError } };
+	return z.strictObject({ prepare: z.boolean() }).parse(JSON.parse(await readFile(join(dir, "intent.json"), "utf8")));
 }

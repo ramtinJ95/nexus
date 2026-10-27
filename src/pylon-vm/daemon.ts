@@ -21,7 +21,7 @@ async function main(): Promise<void> {
 	try {
 		const intent = await readIntent(dir);
 		prepare = intent.prepare;
-		await runtime.boot(intent.prepare, intent.setupRan);
+		await runtime.boot(intent.prepare);
 	} catch (error) {
 		await runtime.fail(error);
 		await rm(pidFile, { force: true });
