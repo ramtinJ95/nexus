@@ -59,7 +59,7 @@ waived by nLAPTOP with the passkey "MacBook Touch ID" (pk-5f309068) at 444444444
 20 2026-10-27T15:58:30.503Z th-f42a2fdcb6cc review.waived {"review":"rv-42000000","repo":"ramtinJ95/nexus","pr":42,"head":"4444444444444444444444444444444444444444","holds":["Always needs the person: anything irreversible, as it changes src/control/registry.ts."],"passkey":{"id":"pk-5f309068","name":"MacBook Touch ID"},"by":"nLAPTOP","at":1793116710502}
 ```
 
-`branch/12-events-review.txt` shows #42's phases: held, `checking` after `nexus land`, held again 5 seconds later, then `checking`, `merging`, `deploying` and `landed` after the passkey, 12 seconds from the press. `branch/22-events-passkeys.txt` shows both enrolments and both revocations, the first `by nLAPTOP with Spare YubiKey` and the second `by root on the control plane's host`.
+`branch/12-events-review.txt` shows #42's phases: held, `checking` after `nexus land`, held again 5 seconds later, then `checking`, `merging`, `deploying` and `landed` after the passkey, 11 seconds from the press. `branch/22-events-passkeys.txt` shows both enrolments and both revocations, the first `by nLAPTOP with Spare YubiKey` and the second `by root on the control plane's host`.
 
 ## Unit tests
 
