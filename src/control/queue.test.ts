@@ -137,7 +137,7 @@ test("a predecessor is waiting, landed or blocked by what its thread, review and
   assert.equal(wait(f.registry, d), "blocked: is deleted and its pull request did not merge");
 });
 
-test("a queue record is checked as a start is, and freezes the node and size the project has then", async (t) => {
+test("a queue record is checked as a start is, and freezes the size the project has then", async (t) => {
   const f = fixture(t);
   const q = f.queue();
   const a = f.thread("th-a");
@@ -154,9 +154,10 @@ test("a queue record is checked as a start is, and freezes the node and size the
 
   const record = q.add(f.request({ resources: { cpus: 4 } }), "Fix it.", [a, a], laptop);
   assert.deepEqual(record.after, [a]);
-  assert.deepEqual(record.request, { project: project.id, title: "After", node, resources: { cpus: 4, memoryGiB: 4, diskGiB: 10 } });
+  assert.deepEqual(record.request, { project: project.id, title: "After", resources: { cpus: 4, memoryGiB: 4, diskGiB: 10 } });
   assert.match(record.id, /^th-[0-9a-f]{12}$/);
   assert.deepEqual(f.registry.queuedThread(record.id), record);
+  assert.equal(queuedView(f.registry, record).node, node, "a start that names no node shows the project's default");
   assert.equal(f.registry.thread(record.id), undefined, "a queued thread has no row");
   assert.deepEqual(f.registry.threads().map((x) => x.id).sort(), ["th-a", "th-check", "th-review"]);
   const claude = q.add(f.request({ claude: "Fix it", node: "auto" }), null, [record.id], laptop);
@@ -186,7 +187,7 @@ test("a queued thread starts once its predecessor's PR merged, as the PR watch o
   assert.equal(started.title, "After A");
   assert.equal(started.startedBy, laptop, "the person who queued it started it");
   assert.equal(started.pylonId, `pylon-${first.id}`);
-  assert.deepEqual(started.placement, { how: "named", node });
+  assert.deepEqual(started.placement, { how: "default", node }, "a start that named no node is placed as one on the project's default");
   assert.deepEqual(f.registry.pylon(started.pylonId)!.boot.resources, project.resources);
   assert.equal(f.registry.queuedThread(first.id)!.status, "started");
   assert.deepEqual(f.fake.calls[0], ["start", { threadId: first.id, pylonId: started.pylonId }]);

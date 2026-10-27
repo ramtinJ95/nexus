@@ -132,7 +132,7 @@ A check thread is a bare thread, with no conversation and no Claude worker, whos
 
 - `id`, `title`, `project`, `startedBy` (who queued it, the thread's `startedBy` once it starts) and `createdAt` (when it was queued).
 - `after` holds the predecessor thread IDs, without repeats, each a thread or another queued record when it was queued.
-- `request` is the `StartRequest` the start runs, frozen when it was queued: `node` is the start's or the project's default then, a node or `auto`, and `resources` is the start's size filled field by field from the project's then.
+- `request` is the `StartRequest` the start runs, frozen when it was queued: `node` is the start's, or absent for the project's default when it starts, and `resources` is the start's size filled field by field from the project's then.
 - `message` is a Nexus agent thread's first message, and null for a Claude worker, whose prompt is `request.claude`.
 - `status` is `queued`, `archived` (cancelled; unarchive makes it `queued` again), `deleted`, or `started`. Only the transaction that inserts the thread's row sets `started`, together with `startedAt`, the thread's `createdAt`, and `firstMessage`, which is `pending` until the message is sent and `sent` after it, or null with no message. That transaction refuses a record that is not `queued`, so a thread starts at most once.
 - `startNow` is who asked `start-queued` and when, or null. `lastError` is why the latest start attempt failed, cleared by the start.

@@ -503,7 +503,7 @@ type Label = { state: "adding" } | { state: "added" } | { state: "failed"; why: 
 
 A queued thread is not a thread yet. It has no row in `GET /v1/threads`, no pylon, no conversation and no Claude worker, and it holds no room on any node. It is a record that keeps the ID the thread gets when it starts, its title, project, who queued it (the thread's `startedBy` when it starts), the threads it waits for, and the start as it was asked for, frozen then:
 
-- Its node is `--node` as given, or the project's default node at the time it was queued: a node's name, or `auto`.
+- Its node is `--node` as given. Without `--node` it starts on the project's default node as it is when the thread starts, as any start does, and `node` shows that default meanwhile.
 - Its size is `--cpus`, `--memory` and `--disk` where given, and the project's size at the time for the rest.
 - Its branch, commit, Claude prompt and model are as given, and a Nexus agent thread's first message is `--message`.
 

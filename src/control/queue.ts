@@ -14,7 +14,7 @@ import { HttpError } from "./http-error.ts";
 import type { Registry, Thread, ThreadId } from "./registry.ts";
 import { checkStart, newThreadId, type StartRequest } from "./threads.ts";
 
-/** What the queue keeps of a thread until it starts. `request` is frozen when queued: its node is the start's, or the project's default then (a node or "auto"), and its resources are filled field by field from the project's. */
+/** What the queue keeps of a thread until it starts. `request` is frozen when queued, its resources filled field by field from the project's. A request that names no node starts on the project's default when it starts, as any start does. */
 export interface QueuedRecord {
   id: ThreadId;
   title: string;
@@ -22,7 +22,7 @@ export interface QueuedRecord {
   startedBy: string;
   createdAt: number;
   after: readonly ThreadId[];
-  request: StartRequest & { node: string; resources: BootInputs["resources"] };
+  request: StartRequest & { resources: BootInputs["resources"] };
   /** A harness thread's first message, sent as the person's once it starts. Null for a Claude worker, whose prompt is request.claude. */
   message: string | null;
   status: "queued" | "archived" | "deleted" | "started";
@@ -115,7 +115,7 @@ export function queuedView(registry: Registry, record: QueuedRecord): QueuedThre
   const claude = request.claude !== undefined;
   return {
     id: record.id, title: record.title, project: record.project, startedBy: record.startedBy, createdAt: record.createdAt, status: record.status,
-    after: record.after, waits, blocked: waits.some((w) => w.state === "blocked"), node: request.node,
+    after: record.after, waits, blocked: waits.some((w) => w.state === "blocked"), node: request.node ?? registry.project(record.project)?.defaultNode ?? "auto",
     worker: claude ? "claude" : "harness", model: claude ? request.model ?? defaultClaudeModel : null,
     prompt: record.message ?? request.claude ?? null, branch: request.branch ?? null, commit: request.commit ?? null,
     resources: request.resources, startNow: record.startNow, lastError: record.lastError,
@@ -208,7 +208,7 @@ export function threadQueue(options: {
       const record: QueuedRecord = {
         id: newThreadId(), title: request.title, project: project.id, startedBy: caller, createdAt: Date.now(), after: ids,
         request: {
-          ...request, node: request.node ?? project.defaultNode,
+          ...request,
           resources: { cpus: size.cpus ?? project.resources.cpus, memoryGiB: size.memoryGiB ?? project.resources.memoryGiB, diskGiB: size.diskGiB ?? project.resources.diskGiB },
         },
         message, status: "queued", startNow: null, lastError: null, startedAt: null, firstMessage: null,
