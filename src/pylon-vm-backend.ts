@@ -20,7 +20,7 @@ import { JobFailure, type ArtifactStore, type BackendPylon, type Guest, type Sec
 import { buildImage as buildPylonImage } from "./image-build.ts";
 import { chatgptTokenGrant, type BootInputs, type CloneRepo, type LiveSpec, type RepoInit } from "./project.ts";
 import { isImageId, isTemplateId, type PausedSession, type PylonId } from "./protocol.ts";
-import { imageIdOf, type ArtifactId, type CheckpointId, type ImageId, type PortableArtifactId, type TemplateId, type TemplateManifest } from "./images.ts";
+import { imageIdOf, type ArtifactId, type CheckpointId, type ImageId, type PortableArtifactId, type TemplateManifest } from "./images.ts";
 import * as templates from "./pylon-vm-templates.ts";
 import { publicUrls } from "./public-urls.ts";
 import { recordBeforePause, relaunchAfterWake } from "./session-wake.ts";
