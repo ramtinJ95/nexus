@@ -524,6 +524,13 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
       return { ...r, phase: { ...r.phase, label: { state: "failed", why: result.message }, reasons: [...r.phase.reasons,
         `Nexus could not add the label "${humanLabel}" to pull request #${r.pr.number} (${result.message}). Labelling needs a token that may write issues or pull requests, which only the person can grant.`] } };
     }
+    // A review held for the person ends as a running one does once the person closes its PR or archives its builder.
+    // One that merged is held over its deploy, which archiving the thread does not settle.
+    if (r.phase.kind === "needs-person" && r.merged === null) {
+      const status = registry.thread(r.builder)?.status;
+      if (status === "archived" || status === "deleted") return end(r, { kind: "cancelled", who: "builder", status });
+      if (registry.prWatch(r.builder)?.links.find((l) => l.pr.repo === r.pr.repo && l.pr.number === r.pr.number)?.pr.state === "closed") return end(r, { kind: "closed" });
+    }
     if (ended.has(r.phase.kind) && r.outbox === null) return r;
     const builder = registry.thread(r.builder);
     const reviewer = registry.thread(r.reviewer);

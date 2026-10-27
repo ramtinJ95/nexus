@@ -1083,3 +1083,25 @@ test("each landing asks again whether its lander may deploy, and whether the pro
   assert.deepEqual(auto.merges, []);
   assert.deepEqual(auto.review().phase, { kind: "needs-person", reasons: ["Project nexus no longer lands its builders' pull requests on its own, so this one is the person's to land."] });
 });
+
+test("a review held for the person ends once the person closes its PR or archives or deletes its builder, and asks nothing more", async (t) => {
+  for (const [how, ending] of [
+    ["closed", { kind: "closed" }],
+    ["archived", { kind: "cancelled", who: "builder", status: "archived" }],
+    ["deleted", { kind: "cancelled", who: "builder", status: "deleted" }],
+  ] as const) {
+    const f = fixture(t);
+    const loop = f.loop();
+    await loop.start(f.builder, { land: null, rounds: 1 });
+    await loop.poll();
+    f.reply(f.review().reviewer, verdict(f.review(), { verdict: "changes", findings: [serious] }));
+    await loop.poll();
+    assert.equal(f.review().phase.kind, "needs-person");
+    assert.equal(f.attention().at(-1), "decision");
+    if (how === "closed") f.watched("closed");
+    else f.registry.setThreadStatus(f.builder, how);
+    await loop.poll();
+    assert.deepEqual(f.review().phase, ending, `a held review whose ${how === "closed" ? "PR was closed" : `builder was ${how}`}`);
+    assert.notEqual(f.attention().at(-1), "decision", "the builder no longer needs a decision");
+  }
+});
