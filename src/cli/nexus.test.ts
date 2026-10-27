@@ -1582,6 +1582,20 @@ test("show exposes the registry's failed worker and its selected model", async (
   assert.equal((await s.nexus(["start", "--project", "acme", "--title", "no worker", "--model", "x"])).code, 64);
 });
 
+test("threads and show say a Claude worker is working while its session's turn runs", async (t) => {
+  const s = await setup(t);
+  const thread: Thread = await s.json(["start", "--project", "acme", "--claude", "count the lines"]);
+  s.registry.setClaudeWorker(thread.id, "/poteto-mode count the lines", "started", undefined, "s1");
+  const report = (sequence: number, kind: "session.turn-started" | "session.turn-ended") =>
+    s.registry.reportSession(node, { sequence, pylon: thread.pylonId, time: Date.now(), event: { kind, session: "s1" } });
+  report(1, "session.turn-started");
+  assert.match((await s.nexus(["threads"])).stdout, new RegExp(`${thread.id} +active +working +pylon`));
+  assert.match((await s.nexus(["show", thread.id])).stdout, /^status: active, agent working$/m);
+  report(2, "session.turn-ended");
+  assert.match((await s.nexus(["threads"])).stdout, new RegExp(`${thread.id} +active +- +pylon`));
+  assert.match((await s.nexus(["show", thread.id])).stdout, /^status: active$/m);
+});
+
 test("threads, show and conversation say a Claude worker stopped on its usage limit, until when, and how to resume it", async (t) => {
   const s = await setup(t);
   const thread: Thread = await s.json(["start", "--project", "acme", "--claude", "count the lines"]);

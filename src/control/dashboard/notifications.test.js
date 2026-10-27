@@ -35,6 +35,19 @@ test("reply waits two seconds, and a follow-up cancels even when unread reply ou
   update([], 12000);
   assert.equal(events.length, 1);
 });
+test("a Claude worker's follow-up cancels a pending reply, and its next reply gets its own grace period", () => {
+  const events = [];
+  const update = coordinator((r) => events.push(r));
+  const claude = (lastReplyAt, working) => ({ id: "t1", attention: "reply", agentTurnRunning: false, sessionTurnRunning: working || undefined, working, lastReplyAt });
+  update([row(null)], 0);
+  update([claude(100, false)], 100);
+  update([claude(100, true)], 1000);
+  update([claude(100, true)], 5000);
+  assert.deepEqual(events, [], "no reply notifies while the session's turn runs");
+  update([claude(6000, false)], 6000);
+  update([claude(6000, false)], 8000);
+  assert.deepEqual(events, [claude(6000, false)]);
+});
 test("focused other thread gets only toast; background needs secure context and permission", () => {
   assert.equal(notificationChannel(true, "t2", "t1", true, "granted"), "toast");
   assert.equal(notificationChannel(true, "t1", "t1", true, "granted"), null);
