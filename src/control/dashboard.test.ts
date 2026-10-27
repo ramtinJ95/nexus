@@ -102,7 +102,7 @@ async function setup(t: TestContext, options: Partial<ApiOptions> = {}) {
       bootedFrom: { image: image.id as `img-${string}`, checkpoint: null },
       services: facts.services ?? [], listening: (facts.listening ?? []).map((port) => ({ port })), previews: [], sessions: [], git: null, declaredOutputs: [], attachedClients: 0,
     }));
-    registry.ingested({ node, observedAt: new Date().toISOString(), probeBootId: "b", capacity, artifacts: [], jobs: [], pylons, grants: { secrets: [], gitSsh: false }, previewRoutes: [] }, []);
+    registry.ingested({ node, observedAt: new Date().toISOString(), probeBootId: "b", capacity, artifacts: [], jobs: [], pylons, grants: { secrets: [], gitSsh: false }, previewRoutes: [], heldSecrets: [] }, []);
   }
   return {
     registry, fake, call, start, observe, observeWith, callAs(id: TailnetNodeId | null) { caller = id; },
@@ -418,7 +418,7 @@ test("the side nodes show each node's committed memory, mark an overcommitted on
   const over = { ...capacity, memoryGiB: 22.8, committedMemoryGiB: 40, committedDiskGiB: 20 };
   s.registry.apply({ record: "node", node, state: "online", capacity: over });
   const stopped = (t: Thread): PylonObservation => ({ pylonId: t.pylonId, phase: "stopped", checkpoint: null, sessions: null });
-  s.registry.ingested({ node, observedAt: new Date().toISOString(), probeBootId: "b", capacity: over, artifacts: [], jobs: [], pylons: [stopped(fix), stopped(docs)], grants: { secrets: [], gitSsh: false }, previewRoutes: [] }, []);
+  s.registry.ingested({ node, observedAt: new Date().toISOString(), probeBootId: "b", capacity: over, artifacts: [], jobs: [], pylons: [stopped(fix), stopped(docs)], grants: { secrets: [], gitSsh: false }, previewRoutes: [], heldSecrets: [] }, []);
   assert.equal((await s.call("POST", `/v1/threads/${docs.id}/archive`)).status, 200);
   const nodes = (await s.call("GET", "/")).text.split('id="side-nodes"')[1]!.split("</div>")[0]!;
   assert.match(nodes, /<em>overcommitted<\/em>/, "the marker uses the offline marker's style");
@@ -576,7 +576,7 @@ test("a paused pylon's preview keeps its link, labelled paused, unless the threa
   };
   assert.deepEqual(await previews(), { previews: "Previews 1 web starting rj-firebat.tail.ts.net:8443", linked: false }, "a running pylon's preview that is not ready has no link yet");
 
-  s.registry.ingested({ node, observedAt: new Date().toISOString(), probeBootId: "b", capacity, artifacts: [], jobs: [], pylons: [{ pylonId: fix.pylonId, phase: "stopped", checkpoint: null, sessions: null }], grants: { secrets: [], gitSsh: false }, previewRoutes: [] }, []);
+  s.registry.ingested({ node, observedAt: new Date().toISOString(), probeBootId: "b", capacity, artifacts: [], jobs: [], pylons: [{ pylonId: fix.pylonId, phase: "stopped", checkpoint: null, sessions: null }], grants: { secrets: [], gitSsh: false }, previewRoutes: [], heldSecrets: [] }, []);
   assert.deepEqual(await previews(), { previews: "Previews 1 web paused Open ↗ rj-firebat.tail.ts.net:8443 Opening it wakes the pylon.", linked: true });
 
   await s.call("POST", `/v1/threads/${fix.id}/archive`);
@@ -824,7 +824,7 @@ test("a paused pylon's prompt box says a message wakes it", async (t) => {
   const s = await seeded(t);
   const fix = await s.start("acme", "Fix checkout");
   s.observe(fix);
-  s.registry.ingested({ node, observedAt: new Date().toISOString(), probeBootId: "b", capacity, artifacts: [], jobs: [], pylons: [{ pylonId: fix.pylonId, phase: "stopped", checkpoint: null, sessions: null }], grants: { secrets: [], gitSsh: false }, previewRoutes: [] }, []);
+  s.registry.ingested({ node, observedAt: new Date().toISOString(), probeBootId: "b", capacity, artifacts: [], jobs: [], pylons: [{ pylonId: fix.pylonId, phase: "stopped", checkpoint: null, sessions: null }], grants: { secrets: [], gitSsh: false }, previewRoutes: [], heldSecrets: [] }, []);
   assert.equal(conversationOf((await s.call("GET", `/threads/${fix.id}`)).text).dock, "The pylon is paused. Sending a message wakes it. ⌘↵ to send Send");
 });
 
@@ -944,7 +944,7 @@ test("a failed pylon whose disk holds a failed setup offers no retry, and says t
   const fix = await s.start("acme", "Fix checkout");
   s.registry.ingested({
     node, observedAt: new Date().toISOString(), probeBootId: "b", capacity: { cpus: 16, committedCpus: 0, memoryGiB: 64, committedMemoryGiB: 0, diskFreeGiB: 100, committedDiskGiB: 0 }, artifacts: [], jobs: [],
-    pylons: [{ pylonId: fix.pylonId, phase: "broken", detail: "Setup exited 128. Read controller logs", cause: "saved-setup" }], grants: { secrets: [], gitSsh: false }, previewRoutes: [],
+    pylons: [{ pylonId: fix.pylonId, phase: "broken", detail: "Setup exited 128. Read controller logs", cause: "saved-setup" }], grants: { secrets: [], gitSsh: false }, previewRoutes: [], heldSecrets: [],
   }, []);
   s.registry.savePylon({ ...s.registry.pylon(fix.pylonId)!, failed: "pylon is broken: Setup exited 128. Read controller logs" });
   const html = (await s.call("GET", `/threads/${fix.id}`)).text;

@@ -44,7 +44,7 @@ function fakeNodes(registry: Registry, names: readonly NodeName[]) {
     registry.apply({ record: "node", node, state: "online", capacity });
     registry.ingested({
       node, observedAt: new Date().toISOString(), probeBootId: "b", capacity, artifacts: [...stores.get(node)!.keys()], jobs: [], pylons: [],
-      grants: { secrets: [], gitSsh: false }, previewRoutes: [],
+      grants: { secrets: [], gitSsh: false }, previewRoutes: [], heldSecrets: [],
     }, []);
   }
 

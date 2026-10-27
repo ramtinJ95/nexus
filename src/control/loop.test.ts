@@ -12,6 +12,7 @@ import { envelope, ingest as realIngest } from "../reconcile.ts";
 import type {
   BrokenCause, CommandResult, Job, JobEnvelope, JobErrorCode, JobId, JobStatus, ListeningFact, LiveHash, NodeName, NodeObservation, PreviewRouteFact, ProbeClient, ProbeEvent, PylonCommand, PylonId, PylonObservation, RunningFacts, ServiceFact, SessionFact, SubmitReply, TailnetNodeId,
 } from "../protocol.ts";
+import { upgradeObservation } from "../protocol.ts";
 import { chatgptTokenGrant, liveHashOf, type LiveSpec, type ProjectId } from "../project.ts";
 import type { CheckpointId, ImageId } from "../images.ts";
 import type { ReportedEvent } from "../events.ts";
@@ -47,7 +48,8 @@ function fakeNode(options: { autoFinish: boolean; node?: NodeName; reportsRoutes
   };
   let reachable = true;
 
-  const observation = (): NodeObservation => ({
+  /** As the probe client hands it to the loop, upgraded from what the probe sent. */
+  const observation = (): NodeObservation => upgradeObservation({
     node, observedAt: new Date().toISOString(), probeBootId: "boot-1",
     capacity: { cpus: 16, committedCpus: 0, memoryGiB: 64, committedMemoryGiB: 0, diskFreeGiB: 100, committedDiskGiB: 0 },
     artifacts: options.artifacts ?? [image], jobs: [...jobs.values()].map((j) => j.status), pylons: [...pylons.values()], grants: { secrets: [...handed], gitSsh: false }, previewRoutes: options.reportsRoutes === false ? null : [...routes.values()],

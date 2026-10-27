@@ -73,7 +73,7 @@ function setup(t: TestContext) {
       const observation: NodeObservation | null = over === null ? null : {
         node, observedAt: new Date().toISOString(), probeBootId: "boot-1",
         capacity: { cpus: 16, committedCpus: 0, memoryGiB: 64, committedMemoryGiB: 0, diskFreeGiB: 100, committedDiskGiB: 0 },
-        artifacts: [image], jobs: [], pylons: [], previewRoutes: [], grants: { secrets: [], gitSsh: false }, ...over,
+        artifacts: [image], jobs: [], pylons: [], previewRoutes: [], grants: { secrets: [], gitSsh: false }, heldSecrets: [], ...over,
       };
       for (const record of registry.buildingTemplates(node)) await tickTemplateBuild(record, { probe: fake.probe, observation, registry, log: (line) => logged.push(line) });
     },

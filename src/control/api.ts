@@ -403,10 +403,8 @@ export async function startApi(options: ApiOptions): Promise<Api> {
   function portsOf(pylonId: PylonId, previews: readonly Preview[]): ThreadDetail["ports"] {
     const observed = observedPylon(pylonId);
     if (observed === "absent" || observed.phase !== "running") return [];
-    // An observation stored before the field existed has none.
-    const listening = observed.listening ?? null;
-    if (listening === null) return null;
-    return listening.map(({ port }) => {
+    if (observed.listening === null) return null;
+    return observed.listening.map(({ port }) => {
       // A port linked a moment ago has its preview before the node's next read lists its service.
       const service = observed.services?.find((s) => s.port === port)?.name
         ?? (previews.some((p) => p.service === linkedName(port)) ? linkedName(port) : null);

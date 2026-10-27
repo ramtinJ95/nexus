@@ -430,7 +430,7 @@ function observeRunning(s: Awaited<ReturnType<typeof setup>>, thread: Thread, se
   const capacity = { cpus: 16, committedCpus: 0, memoryGiB: 64, committedMemoryGiB: 0, diskFreeGiB: 100, committedDiskGiB: 0 };
   s.registry.apply({ record: "node", node, state: "online", capacity });
   s.registry.ingested({
-    node, observedAt: new Date().toISOString(), probeBootId: "b", capacity, artifacts: [], jobs: [], grants: { secrets: [], gitSsh: false }, previewRoutes: [],
+    node, observedAt: new Date().toISOString(), probeBootId: "b", capacity, artifacts: [], jobs: [], grants: { secrets: [], gitSsh: false }, previewRoutes: [], heldSecrets: [],
     pylons: [{
       pylonId: thread.pylonId, phase: "running", liveHash: s.registry.pylon(thread.pylonId)!.liveHash, bootedAt: "2027-01-01T00:00:00Z",
       bootedFrom: { image: image.id, checkpoint: null }, services, listening: ports.map((port) => ({ port })), previews: [], sessions: [], git: null, declaredOutputs: [], attachedClients: 0,
@@ -1229,7 +1229,7 @@ test("start --node auto picks the node with room, show says why, and nodes print
   s.registry.upsertNode({ name: "spare" as NodeName, tailnetHost: "spare.tail.ts.net", tailnetNodeId: "nSPARE" as TailnetNodeId });
   const capacity = { cpus: 16, committedCpus: 6, memoryGiB: 62.75, committedMemoryGiB: 16, diskFreeGiB: 180.25, committedDiskGiB: 120 };
   s.registry.apply({ record: "node", node, state: "online", capacity });
-  s.registry.ingested({ node, observedAt: new Date().toISOString(), probeBootId: "b", capacity, artifacts: [image.id], jobs: [], pylons: [], grants: { secrets: [], gitSsh: false }, previewRoutes: [] }, []);
+  s.registry.ingested({ node, observedAt: new Date().toISOString(), probeBootId: "b", capacity, artifacts: [image.id], jobs: [], pylons: [], grants: { secrets: [], gitSsh: false }, previewRoutes: [], heldSecrets: [] }, []);
   assert.match((await s.nexus(["nodes"])).stdout, /^rj-firebat +online +observed .+ {2}6\/16 CPUs, 16\/62\.8 GiB memory committed, 120 GiB disk committed, 180\.3 GiB disk free$/m);
 
   const plain: Thread = await s.json(["start", "--project", "acme", "--title", "default"]);
@@ -1261,7 +1261,7 @@ test("show says how the pylon got its setup: fresh and why, with the build it as
 
   s.registry.saveTemplate({ id: building!.id, key: building!.key, state: "ready", builtOn: node, builtAt: Date.now() - 3 * 60_000, commit: "2".repeat(40) });
   const capacity = { cpus: 16, committedCpus: 0, memoryGiB: 64, committedMemoryGiB: 0, diskFreeGiB: 100, committedDiskGiB: 0 };
-  s.registry.ingested({ node, observedAt: new Date().toISOString(), probeBootId: "b", capacity, artifacts: [image.id, building!.id], jobs: [], pylons: [], grants: { secrets: [], gitSsh: false }, previewRoutes: [] }, []);
+  s.registry.ingested({ node, observedAt: new Date().toISOString(), probeBootId: "b", capacity, artifacts: [image.id, building!.id], jobs: [], pylons: [], grants: { secrets: [], gitSsh: false }, previewRoutes: [], heldSecrets: [] }, []);
   assert.equal((await shown("reused")).line, `setup: from template ${building!.id}, built 3m ago, then checked out 222222222222`);
 });
 
@@ -1294,7 +1294,7 @@ test("nodes marks an overcommitted node and says what its pylons hold", async (t
     node, observedAt: new Date().toISOString(), probeBootId: "b", capacity, artifacts: [image.id], jobs: [],
     pylons: [{ pylonId: up!.pylonId, phase: "booting" }, stopped(paused!), stopped(archived!), { pylonId: "pylon-x" as PylonId, phase: "booting" },
       { pylonId: crashed!.pylonId, phase: "broken", detail: "the controller exited", cause: "controller" }],
-    grants: { secrets: [], gitSsh: false }, previewRoutes: [],
+    grants: { secrets: [], gitSsh: false }, previewRoutes: [], heldSecrets: [],
   }, []);
   const text = (await s.nexus(["nodes"])).stdout;
   assert.match(text, /^rj-firebat +online +observed .+ {2}2\/8 CPUs, 40\/22\.8 GiB memory committed, overcommitted, 30 GiB disk committed, 100 GiB disk free$/m);
@@ -1349,7 +1349,7 @@ test("image list and current print each image's role, build, release and nodes, 
   s.registry.saveImage(older, "f".repeat(40));
   const capacity = { cpus: 16, committedCpus: 0, memoryGiB: 64, committedMemoryGiB: 0, diskFreeGiB: 100, committedDiskGiB: 0 };
   s.registry.apply({ record: "node", node, state: "online", capacity });
-  s.registry.ingested({ node, observedAt: new Date().toISOString(), probeBootId: "b", capacity, artifacts: [image.id, older.id], jobs: [], pylons: [], grants: { secrets: [], gitSsh: false }, previewRoutes: [] }, []);
+  s.registry.ingested({ node, observedAt: new Date().toISOString(), probeBootId: "b", capacity, artifacts: [image.id, older.id], jobs: [], pylons: [], grants: { secrets: [], gitSsh: false }, previewRoutes: [], heldSecrets: [] }, []);
   const entry = { ...image, release: null, nodes: [node] };
   const olderEntry = { ...older, release: "f".repeat(40), nodes: [node] };
 

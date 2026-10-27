@@ -32,7 +32,7 @@ function fixture(t: import("node:test").TestContext, limit: { resetsAt: number |
   const capacity = { cpus: 16, committedCpus: 0, memoryGiB: 64, committedMemoryGiB: 0, diskFreeGiB: 100, committedDiskGiB: 0 };
   const running = (pylonId: PylonId) => ({ pylonId, phase: "running" as const, liveHash: "hash" as LiveHash, bootedAt: "2027-01-01T00:00:00Z", bootedFrom: { image: "img-000000000000" as const, checkpoint: null }, services: [], listening: [], previews: [], sessions: [], git: null, declaredOutputs: [], attachedClients: 0 });
   registry.apply({ record: "node", node, state: "online", capacity });
-  registry.ingested({ node, observedAt: new Date().toISOString(), probeBootId: "b", capacity, artifacts: [], jobs: [], pylons: threads.map((th) => running(th.pylonId)), grants: { secrets: [], gitSsh: false }, previewRoutes: [] }, []);
+  registry.ingested({ node, observedAt: new Date().toISOString(), probeBootId: "b", capacity, artifacts: [], jobs: [], pylons: threads.map((th) => running(th.pylonId)), grants: { secrets: [], gitSsh: false }, previewRoutes: [], heldSecrets: [] }, []);
   const typed: Extract<PylonCommand, { kind: "send-claude" }>[] = [];
   let outcome: "sent" | "blocked" = "sent";
   const probe = { async command(_: PylonId, command: PylonCommand): Promise<CommandResult> { typed.push(command as Extract<PylonCommand, { kind: "send-claude" }>); return { kind: "send-claude", outcome, herdrPane: "w1:p1", resumed: false }; } };

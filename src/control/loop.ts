@@ -153,7 +153,7 @@ export function startLoop(options: LoopOptions): Loop {
       }
     }
     const seen = observation(node);
-    const present = [...seen?.pylons.map((p) => p.pylonId) ?? [], ...seen?.previewRoutes?.map((r) => r.pylonId) ?? []];
+    const present = [...seen?.pylons.map((p) => p.pylonId) ?? [], ...seen?.previewRoutes.map((r) => r.pylonId) ?? []];
     // Each record is read just before its tick, because an API retry may change it while earlier ticks wait on
     // the probe, and saving an older copy would undo it.
     for (const pylonId of registry.pylonIdsToTick(node, present)) {

@@ -311,7 +311,7 @@ test("an auto start with no node that has room stays queued, then starts once ro
   assert.equal(f.registry.queuedThread(record.id)!.status, "queued");
   const capacity = { cpus: 16, committedCpus: 0, memoryGiB: 64, committedMemoryGiB: 0, diskFreeGiB: 200, committedDiskGiB: 0 };
   f.registry.apply({ record: "node", node, state: "online", capacity });
-  f.registry.ingested({ node, observedAt: "2027-01-01T00:01:00Z", probeBootId: "b", capacity, artifacts: [image.id] as NodeObservation["artifacts"], jobs: [], pylons: [], grants: { secrets: [], gitSsh: false }, previewRoutes: [] }, []);
+  f.registry.ingested({ node, observedAt: "2027-01-01T00:01:00Z", probeBootId: "b", capacity, artifacts: [image.id] as NodeObservation["artifacts"], jobs: [], pylons: [], grants: { secrets: [], gitSsh: false }, previewRoutes: [], heldSecrets: [] }, []);
   await q.poll();
   assert.equal(f.registry.thread(record.id)?.placement?.how, "auto");
 });

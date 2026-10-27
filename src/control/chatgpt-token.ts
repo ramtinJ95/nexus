@@ -33,7 +33,7 @@ export function chatgptTokenHandoff(options: { probes: readonly Pick<ProbeClient
     poll: ticks.join,
     /** A probe without the token showed up, which a poll in flight may have failed to reach before it restarted. */
     observed(o: Pick<NodeObservation, "grants" | "heldSecrets">) {
-      if (!o.heldSecrets?.includes(chatgptTokenGrant.name) || o.grants?.secrets.includes(chatgptTokenGrant.name)) return;
+      if (!o.heldSecrets.includes(chatgptTokenGrant.name) || o.grants.secrets.includes(chatgptTokenGrant.name)) return;
       void ticks.rerun();
     },
   };

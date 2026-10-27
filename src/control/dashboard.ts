@@ -20,7 +20,7 @@ import { existsSync, readdirSync, readFileSync } from "node:fs";
 import type { AssistantMessage, ImageContent, TextContent, UserMessage } from "@earendil-works/pi-ai";
 import type { ConversationView, InboxState, LiveState } from "@earendil-works/pi-durable";
 import { desiredPhase, type ActualState, type DesiredPhase } from "../reconcile.ts";
-import type { HerdrStatus } from "../protocol.ts";
+import { countedCapacity, type HerdrStatus } from "../protocol.ts";
 import { githubTokenGrant, linkedPort, type ProjectId, type SessionHarness } from "../project.ts";
 import type { ThreadDetail } from "./api.ts";
 import { attentions, needsPerson } from "./attention.ts";
@@ -343,14 +343,12 @@ ${closed.length > 0 && html`<details class="archived" id="archived-${p.id}"${clo
 </aside>`;
 }
 
-/**
- * A node's committed and total memory, and what its paused pylons need to wake. A probe from before pylons were
- * counted reports no committed memory, so its node shows none.
- */
+/** A node's committed and total memory, and what its paused pylons need to wake. */
 function memoryLine(c: Context, n: NodeRecord): Html | false {
-  if (n.capacity?.committedDiskGiB === undefined) return false;
+  const capacity = countedCapacity(n.capacity);
+  if (capacity === null) return false;
   const paused = nodePylons(c.registry, n)?.paused.memoryGiB ?? 0;
-  return html`<small>${gib(n.capacity.committedMemoryGiB)}/${gib(n.capacity.memoryGiB)} GiB memory${paused > 0 && ` · ${gib(paused)} GiB to wake paused`}</small>`;
+  return html`<small>${gib(capacity.committedMemoryGiB)}/${gib(capacity.memoryGiB)} GiB memory${paused > 0 && ` · ${gib(paused)} GiB to wake paused`}</small>`;
 }
 
 /**

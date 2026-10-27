@@ -315,8 +315,7 @@ function sessionsOf(o: PylonObservation | "absent"): readonly SessionRow[] | "pa
       ? { ...common(s), state: "failed", herdrPane: s.herdrPane, status: null, message: s.message }
       : { ...common(s), state: "running", herdrPane: s.herdrPane, status: s.status, message: null }) ?? null;
     case "stopped": {
-      // An observation stored before the field existed has none.
-      const paused = o.sessions ?? null;
+      const paused = o.sessions;
       return paused === null ? "paused" : paused.map((s): SessionRow => ({ ...common(s), state: "paused", herdrPane: s.herdrPane, status: null, message: null }));
     }
     default: return null;
