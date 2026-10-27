@@ -1800,6 +1800,14 @@ test("pylon traffic under its host identity cannot deploy even if that identity 
   assert.equal((await s.call("PUT", "/v1/release", { commit: deployCommit }, reporterHeaders)).status, 403);
 });
 
+test("a body over a mebibyte is refused with 413 and reaches no route", async (t) => {
+  const s = await setup(t);
+  const refused = await s.call("POST", "/v1/projects", "x".repeat((1 << 20) + 1));
+  assert.equal(refused.status, 413);
+  assert.deepEqual(refused.body, { error: "request body over 1048576 bytes" });
+  assert.deepEqual(s.registry.projects(), []);
+});
+
 test("a root-authenticated drain blocks every turn-entry route and can be released", async (t) => {
   const s = await setup(t, { deployment });
   await s.call("PUT", "/v1/release", { commit: deployCommit });
