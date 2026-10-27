@@ -1,10 +1,10 @@
-$ nexus show th-f33c35115749
-th-f33c35115749  B1: build on A1
+$ nexus show th-62b16c46a84b
+th-62b16c46a84b  B1: build on A1
 project: wave
 status: queued
 node: node-a
 worker: Nexus agent
 size: 1 CPUs, 3 GiB memory, 5 GiB disk
 first message: B1: build on A1, after the earlier change landed
-waits for th-6c2b44fd9bf0: has no pull request yet
+waits for th-008fa7219806: has no pull request yet
 [exit 0]

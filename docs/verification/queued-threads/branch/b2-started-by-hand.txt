@@ -1,4 +1,4 @@
-GET /threads/th-72c21d60b261
+GET /threads/th-63f1918e50ff
 wave
 /
 B2: build on A2
@@ -7,7 +7,7 @@ Archive
 Delete
 B2: build on A2
 
-th-72c21d60b261 · started just now · scripted
+th-63f1918e50ff · started just now · scripted
 
 You
 

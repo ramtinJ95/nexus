@@ -124,7 +124,7 @@ function fakeGitHub(log: (line: string) => void) {
     const base = `/repos/${repo}`;
     if (url.pathname === `${base}/pulls`) {
       const head = url.searchParams.get("head")?.split(":")[1];
-      return reply(200, prs.filter((p) => p.state === "open" && p.branch === head).map(json));
+      return reply(200, prs.filter((p) => (url.searchParams.get("state") === "all" || p.state === "open") && p.branch === head).map(json));
     }
     const pr = /^\/repos\/verify\/wave\/pulls\/(\d+)$/.exec(url.pathname);
     if (pr !== null) {

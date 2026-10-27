@@ -1,6 +1,6 @@
 # Queued threads
 
-Verified in this task's pylon on 2026-10-27, on branch `feat/queued-threads` against main at `918e471`, with Node 24.22.1 and headless Chromium from `@sparticuz/chromium`. No live control plane, node, image, GitHub repository or other thread was touched.
+Verified in this task's pylon on 2026-10-27, on branch `feat/queued-threads` against main at `59308ee`, with Node 24.22.1 and headless Chromium from `@sparticuz/chromium`. No live control plane, node, image, GitHub repository or other thread was touched.
 
 ## How to rerun
 
@@ -30,7 +30,7 @@ The driver starts four threads, A1 to A4, on project `wave`, pushes a branch for
 
 ## Main (`main/`) and this branch (`branch/`)
 
-| Step | main, 918e471 | this branch |
+| Step | main, 59308ee | this branch |
 |---|---|---|
 | `07-queue-b1.txt`, `start --after A1 --message ...` | exit 64, `Unknown option '--after'` | exit 0, a `QueuedThread` with `"status": "queued"` and the wait `has no pull request yet` |
 | `backend.log` right after queueing | the four A pylons | the four A pylons only. No queued thread booted a pylon |
@@ -38,7 +38,7 @@ The driver starts four threads, A1 to A4, on project `wave`, pushes a branch for
 | `13-show-b1-waiting.txt` once PR #1 is linked | exit 4, no thread | `status: queued`, `waits for <A1>: PR #1 is open` |
 | `home-queued.png` | the four A threads | the A threads, and a Queued table: each queued thread, what it waits for and its node. The sidebar lists them as `queued` |
 | `b1-queued.png` | not taken: there is no B1 | B1's page: "Starts once these threads' pull requests merge", A1's PR #1 open, what it starts with, Start now and Archive |
-| After PR #1 merged (`timeline.txt`) | nothing starts | `backend: booted pylon-<B1>` 114 s after the merge, the PR watch's 2-minute read plus one queue pass |
+| After PR #1 merged (`timeline.txt`) | nothing starts | `backend: booted pylon-<B1>` 116 s after the merge, the PR watch's 2-minute read plus one queue pass |
 | `16-show-b1-started.txt`, `17-conversation-b1.txt` | exit 4 | a normal thread: `status: active`, `placement: node-a, the project's default node`, and its conversation is the queued message and `scripted answer after user` |
 | `18-show-b2-blocked.txt` after PR #2 closed | exit 4 | `status: blocked`, `blocked by <A2>: PR #2 closed without merging`, and `nexus start-queued <B2> starts it now; nexus archive <B2> cancels it.` |
 | `home-blocked.png`, `b2-blocked.png` | the A threads | B1 now an ordinary row, B2 `blocked` in red in the sidebar, the overview and its own page with the reason |
@@ -53,7 +53,7 @@ The driver starts four threads, A1 to A4, on project `wave`, pushes a branch for
 
 ## Unit tests
 
-`tests-main.txt` is the branch's queue, PR watch, registry, API, CLI and dashboard tests run against main's code. On main, `queue.test.ts`, `api.test.ts`, `nexus.test.ts` and `dashboard.test.ts` fail to load. The PR watch's test of a merge an archived, capped or closed predecessor made fails. The registry's queued-start test fails, and so do its downgrade tests, which now drop the `queued_threads` table that main never creates. `tests-branch.txt` is the same files on the branch, all passing. The full suite passes on the branch, 1181 tests.
+`tests-main.txt` is the branch's queue, PR watch, registry, API, CLI and dashboard tests run against main's code. On main, `queue.test.ts`, `api.test.ts`, `nexus.test.ts` and `dashboard.test.ts` fail to load. The PR watch's test of a merge an archived, capped or closed predecessor made fails. The registry's queued-start test fails, and so do its downgrade tests, which now drop the `queued_threads` table that main never creates. `tests-branch.txt` is the same files on the branch, all passing. The full suite passes on the branch, 1202 tests.
 
 ## What this does not prove
 

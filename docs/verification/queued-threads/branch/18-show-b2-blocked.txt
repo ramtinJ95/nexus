@@ -1,11 +1,11 @@
-$ nexus show th-72c21d60b261
-th-72c21d60b261  B2: build on A2
+$ nexus show th-63f1918e50ff
+th-63f1918e50ff  B2: build on A2
 project: wave
 status: blocked
 node: node-a
 worker: Nexus agent
 size: 1 CPUs, 3 GiB memory, 5 GiB disk
 first message: B2: build on A2, after the earlier change landed
-blocked by th-618c907b24f6: PR #2 closed without merging
-nexus start-queued th-72c21d60b261 starts it now; nexus archive th-72c21d60b261 cancels it.
+blocked by th-eb903bab63d2: PR #2 closed without merging
+nexus start-queued th-63f1918e50ff starts it now; nexus archive th-63f1918e50ff cancels it.
 [exit 0]

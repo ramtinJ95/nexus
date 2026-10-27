@@ -1,17 +1,17 @@
 $ nexus start --project wave --title "A4: change the shared file" --json
 {
-  "id": "th-a54de3e821b5",
+  "id": "th-42be9e2fa4be",
   "title": "A4: change the shared file",
   "project": "wave",
-  "pylonId": "pylon-th-a54de3e821b5",
+  "pylonId": "pylon-th-42be9e2fa4be",
   "status": "active",
   "conversationId": "23",
   "startedBy": "nVERIFYCONTROL",
-  "createdAt": 1793115809552,
+  "createdAt": 1793117839125,
   "agentTurnRunning": false,
   "working": false,
   "lastAgentActivityAt": 0,
-  "lastHumanActivityAt": 1793115809552,
+  "lastHumanActivityAt": 1793117839125,
   "seenAt": null,
   "lastReplyAt": null,
   "placement": {

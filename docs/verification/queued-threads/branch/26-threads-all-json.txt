@@ -1,17 +1,17 @@
 $ nexus threads --all --json
 [
   {
-    "id": "th-6c2b44fd9bf0",
+    "id": "th-008fa7219806",
     "title": "A1: change the shared file",
     "project": "wave",
-    "pylonId": "pylon-th-6c2b44fd9bf0",
+    "pylonId": "pylon-th-008fa7219806",
     "status": "active",
     "conversationId": "2",
     "startedBy": "nVERIFYCONTROL",
-    "createdAt": 1793116090294,
+    "createdAt": 1793118116711,
     "agentTurnRunning": false,
     "lastAgentActivityAt": 0,
-    "lastHumanActivityAt": 1793116090294,
+    "lastHumanActivityAt": 1793118116711,
     "seenAt": null,
     "lastReplyAt": null,
     "placement": {
@@ -32,17 +32,17 @@ $ nexus threads --all --json
     }
   },
   {
-    "id": "th-618c907b24f6",
+    "id": "th-eb903bab63d2",
     "title": "A2: change the shared file",
     "project": "wave",
-    "pylonId": "pylon-th-618c907b24f6",
+    "pylonId": "pylon-th-eb903bab63d2",
     "status": "active",
     "conversationId": "9",
     "startedBy": "nVERIFYCONTROL",
-    "createdAt": 1793116090733,
+    "createdAt": 1793118117179,
     "agentTurnRunning": false,
     "lastAgentActivityAt": 0,
-    "lastHumanActivityAt": 1793116090733,
+    "lastHumanActivityAt": 1793118117179,
     "seenAt": null,
     "lastReplyAt": null,
     "placement": {
@@ -63,17 +63,17 @@ $ nexus threads --all --json
     }
   },
   {
-    "id": "th-2614619b4937",
+    "id": "th-c3bab5a7a027",
     "title": "A3: change the shared file",
     "project": "wave",
-    "pylonId": "pylon-th-2614619b4937",
+    "pylonId": "pylon-th-c3bab5a7a027",
     "status": "active",
     "conversationId": "16",
     "startedBy": "nVERIFYCONTROL",
-    "createdAt": 1793116091116,
+    "createdAt": 1793118117604,
     "agentTurnRunning": false,
     "lastAgentActivityAt": 0,
-    "lastHumanActivityAt": 1793116091116,
+    "lastHumanActivityAt": 1793118117604,
     "seenAt": null,
     "lastReplyAt": null,
     "placement": {
@@ -94,17 +94,17 @@ $ nexus threads --all --json
     }
   },
   {
-    "id": "th-b3f0eb62dfdb",
+    "id": "th-6b1ac5bdae60",
     "title": "A4: change the shared file",
     "project": "wave",
-    "pylonId": "pylon-th-b3f0eb62dfdb",
+    "pylonId": "pylon-th-6b1ac5bdae60",
     "status": "active",
     "conversationId": "23",
     "startedBy": "nVERIFYCONTROL",
-    "createdAt": 1793116091614,
+    "createdAt": 1793118118001,
     "agentTurnRunning": false,
     "lastAgentActivityAt": 0,
-    "lastHumanActivityAt": 1793116091614,
+    "lastHumanActivityAt": 1793118118001,
     "seenAt": null,
     "lastReplyAt": null,
     "placement": {
@@ -125,50 +125,19 @@ $ nexus threads --all --json
     }
   },
   {
-    "id": "th-f33c35115749",
+    "id": "th-62b16c46a84b",
     "title": "B1: build on A1",
     "project": "wave",
-    "pylonId": "pylon-th-f33c35115749",
+    "pylonId": "pylon-th-62b16c46a84b",
     "status": "active",
     "conversationId": "30",
     "startedBy": "nVERIFYCONTROL",
-    "createdAt": 1793116448675,
+    "createdAt": 1793118476878,
     "agentTurnRunning": false,
-    "lastAgentActivityAt": 1793116449045,
-    "lastHumanActivityAt": 1793116448675,
-    "seenAt": null,
-    "lastReplyAt": 1793116449042,
-    "placement": {
-      "how": "default",
-      "node": "node-a"
-    },
-    "setup": {
-      "how": "fresh",
-      "reason": "the control plane could not read .nexus/setup at main: the control plane reads only https:// remotes, and holds no SSH key for git@github.com:verify/wave.git"
-    },
-    "working": false,
-    "attention": "reply",
-    "desired": "running",
-    "pylon": {
-      "node": "node-a",
-      "actualState": "running",
-      "failed": null
-    }
-  },
-  {
-    "id": "th-72c21d60b261",
-    "title": "B2: build on A2",
-    "project": "wave",
-    "pylonId": "pylon-th-72c21d60b261",
-    "status": "active",
-    "conversationId": "43",
-    "startedBy": "nVERIFYCONTROL",
-    "createdAt": 1793116456611,
-    "agentTurnRunning": false,
-    "lastAgentActivityAt": 1793116456907,
-    "lastHumanActivityAt": 1793116457258,
-    "seenAt": 1793116456905,
-    "lastReplyAt": 1793116456905,
+    "lastAgentActivityAt": 1793118477235,
+    "lastHumanActivityAt": 1793118479825,
+    "seenAt": 1793118477233,
+    "lastReplyAt": 1793118477233,
     "placement": {
       "how": "default",
       "node": "node-a"
@@ -187,19 +156,50 @@ $ nexus threads --all --json
     }
   },
   {
-    "id": "th-ba61c796fe01",
+    "id": "th-63f1918e50ff",
+    "title": "B2: build on A2",
+    "project": "wave",
+    "pylonId": "pylon-th-63f1918e50ff",
+    "status": "active",
+    "conversationId": "43",
+    "startedBy": "nVERIFYCONTROL",
+    "createdAt": 1793118484805,
+    "agentTurnRunning": false,
+    "lastAgentActivityAt": 1793118487159,
+    "lastHumanActivityAt": 1793118487576,
+    "seenAt": 1793118487155,
+    "lastReplyAt": 1793118487155,
+    "placement": {
+      "how": "default",
+      "node": "node-a"
+    },
+    "setup": {
+      "how": "fresh",
+      "reason": "the control plane could not read .nexus/setup at main: the control plane reads only https:// remotes, and holds no SSH key for git@github.com:verify/wave.git"
+    },
+    "working": false,
+    "attention": null,
+    "desired": "running",
+    "pylon": {
+      "node": "node-a",
+      "actualState": "running",
+      "failed": null
+    }
+  },
+  {
+    "id": "th-ce568d459575",
     "title": "C: build on A3",
     "project": "wave",
-    "pylonId": "pylon-th-ba61c796fe01",
+    "pylonId": "pylon-th-ce568d459575",
     "status": "active",
     "conversationId": "56",
     "startedBy": "nVERIFYCONTROL",
-    "createdAt": 1793116479779,
+    "createdAt": 1793118510034,
     "agentTurnRunning": false,
-    "lastAgentActivityAt": 1793116480146,
-    "lastHumanActivityAt": 1793116483458,
-    "seenAt": 1793116480143,
-    "lastReplyAt": 1793116480143,
+    "lastAgentActivityAt": 1793118510367,
+    "lastHumanActivityAt": 1793118513760,
+    "seenAt": 1793118510366,
+    "lastReplyAt": 1793118510366,
     "placement": {
       "how": "default",
       "node": "node-a"

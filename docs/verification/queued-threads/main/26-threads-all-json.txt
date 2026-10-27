@@ -1,17 +1,17 @@
 $ nexus threads --all --json
 [
   {
-    "id": "th-9278de74f13b",
+    "id": "th-9d7ed0db65d9",
     "title": "A1: change the shared file",
     "project": "wave",
-    "pylonId": "pylon-th-9278de74f13b",
+    "pylonId": "pylon-th-9d7ed0db65d9",
     "status": "active",
     "conversationId": "2",
     "startedBy": "nVERIFYCONTROL",
-    "createdAt": 1793115807871,
+    "createdAt": 1793117837483,
     "agentTurnRunning": false,
     "lastAgentActivityAt": 0,
-    "lastHumanActivityAt": 1793115807871,
+    "lastHumanActivityAt": 1793117837483,
     "seenAt": null,
     "lastReplyAt": null,
     "placement": {
@@ -32,17 +32,17 @@ $ nexus threads --all --json
     }
   },
   {
-    "id": "th-f2a20fb930f3",
+    "id": "th-89b3da6c1659",
     "title": "A2: change the shared file",
     "project": "wave",
-    "pylonId": "pylon-th-f2a20fb930f3",
+    "pylonId": "pylon-th-89b3da6c1659",
     "status": "active",
     "conversationId": "9",
     "startedBy": "nVERIFYCONTROL",
-    "createdAt": 1793115808480,
+    "createdAt": 1793117838206,
     "agentTurnRunning": false,
     "lastAgentActivityAt": 0,
-    "lastHumanActivityAt": 1793115808480,
+    "lastHumanActivityAt": 1793117838206,
     "seenAt": null,
     "lastReplyAt": null,
     "placement": {
@@ -63,17 +63,17 @@ $ nexus threads --all --json
     }
   },
   {
-    "id": "th-0f536846fb1b",
+    "id": "th-fb7301b25972",
     "title": "A3: change the shared file",
     "project": "wave",
-    "pylonId": "pylon-th-0f536846fb1b",
+    "pylonId": "pylon-th-fb7301b25972",
     "status": "active",
     "conversationId": "16",
     "startedBy": "nVERIFYCONTROL",
-    "createdAt": 1793115809049,
+    "createdAt": 1793117838630,
     "agentTurnRunning": false,
     "lastAgentActivityAt": 0,
-    "lastHumanActivityAt": 1793115809049,
+    "lastHumanActivityAt": 1793117838630,
     "seenAt": null,
     "lastReplyAt": null,
     "placement": {
@@ -94,17 +94,17 @@ $ nexus threads --all --json
     }
   },
   {
-    "id": "th-a54de3e821b5",
+    "id": "th-42be9e2fa4be",
     "title": "A4: change the shared file",
     "project": "wave",
-    "pylonId": "pylon-th-a54de3e821b5",
+    "pylonId": "pylon-th-42be9e2fa4be",
     "status": "active",
     "conversationId": "23",
     "startedBy": "nVERIFYCONTROL",
-    "createdAt": 1793115809552,
+    "createdAt": 1793117839125,
     "agentTurnRunning": false,
     "lastAgentActivityAt": 0,
-    "lastHumanActivityAt": 1793115809552,
+    "lastHumanActivityAt": 1793117839125,
     "seenAt": null,
     "lastReplyAt": null,
     "placement": {

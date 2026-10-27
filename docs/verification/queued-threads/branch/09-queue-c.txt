@@ -1,17 +1,17 @@
-$ nexus start --project wave --title "C: build on A3" --after th-2614619b4937 --message "C: build on A3, after the earlier change landed" --json
+$ nexus start --project wave --title "C: build on A3" --after th-c3bab5a7a027 --message "C: build on A3, after the earlier change landed" --json
 {
-  "id": "th-ba61c796fe01",
+  "id": "th-ce568d459575",
   "title": "C: build on A3",
   "project": "wave",
   "startedBy": "nVERIFYCONTROL",
-  "createdAt": 1793116093395,
+  "createdAt": 1793118119544,
   "status": "queued",
   "after": [
-    "th-2614619b4937"
+    "th-c3bab5a7a027"
   ],
   "waits": [
     {
-      "thread": "th-2614619b4937",
+      "thread": "th-c3bab5a7a027",
       "state": "waiting",
       "why": "has no pull request yet"
     }
