@@ -66,4 +66,4 @@ The tests below pin what a person or the node would see. `new-tests-main.txt` ru
 
 `mutations.sh` removes each clause of the query, and each guard and call of the reader's release, in turn, and runs those tests. Each removal fails at least one test (`mutations.txt`). The API refuses a retry of a deleted thread's pylon, so the `retrying` clause covers a retry made just before the delete, which a loop test pins: the pass settles the retry, and only then leaves the pylon out.
 
-The full suite, `npm test`, passed with 1208 tests on the branch rebased onto cf2558c, and `npm run typecheck` passed.
+The full suite, `npm test`, passed with 1231 tests on the branch rebased onto eab6631, and `npm run typecheck` passed.
