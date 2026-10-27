@@ -1,6 +1,6 @@
 import { once } from "node:events";
 import type { NexusEvent } from "../events.ts";
-import { releaseOutcome, type ReleaseView } from "../deploy/model.ts";
+import { fullCommit, releaseOutcome, type ReleaseView } from "../deploy/model.ts";
 /**
  * The Mac's nexus CLI: the control plane's API as commands, for a human at a shell and for the Claude Code and pi
  * integrations, which shell out to it. docs/cli.md is the contract: the commands, their JSON, the exit codes and
@@ -830,7 +830,7 @@ const commands: Readonly<Record<string, Command>> = {
   deploy: {
     args: [1, 1], options: { wait: { type: "boolean" } },
     async run(api, [commit], values) {
-      if (commit !== "main" && !/^[0-9a-f]{40}$/.test(commit!)) throw new CliError("invalid", "deploy takes main or a full lower-case commit hash");
+      if (commit !== "main" && !fullCommit.test(commit!)) throw new CliError("invalid", "deploy takes main or a full lower-case commit hash");
       let view = await api("PUT", "/v1/release", { commit }) as ReleaseView;
       const target = view.desired!.commit;
       const deadline = Date.now() + 30 * 60_000;

@@ -1,4 +1,5 @@
 import { randomBytes } from "node:crypto";
+import { fullCommit } from "../deploy/model.ts";
 import type { HarnessHost } from "../harness/host.ts";
 import { chooseTemplate, setupHashOf, type ImageId, type ProjectMirror, type SetupInputs, type TemplateId, type ThreadSetup } from "../images.ts";
 import { bootSecrets, effectiveAllowedHosts, hasRemote, liveHashOf, withHttpsHosts, type BootInputs, type Project, type ProjectId, type PylonOverlay, type RemoteProject, type RepoInit } from "../project.ts";
@@ -24,7 +25,6 @@ export interface StartRequest {
 const newThreadId = () => `th-${randomBytes(6).toString("hex")}` as ThreadId;
 
 /** A shorter ID or a ref name may resolve to another commit by the time the pylon boots. */
-const fullCommitId = /^[0-9a-f]{40}$/;
 
 /** What the mirror read for the thread's ref, or why the thread boots fresh without a template. */
 type SetupRead = { project: RemoteProject; inputs: SetupInputs } | { fresh: string };
@@ -34,7 +34,7 @@ export function threadStarter(options: { registry: Registry; harness: Pick<Harne
 
   async function readSetup(project: Project, branch: string, commit: string | undefined): Promise<SetupRead> {
     if (!hasRemote(project)) return { fresh: "the project is scratch, so it has no template" };
-    if (commit !== undefined && !fullCommitId.test(commit)) return { fresh: `the start named commit ${commit}, and only a full commit ID or a branch tip can use a template` };
+    if (commit !== undefined && !fullCommit.test(commit)) return { fresh: `the start named commit ${commit}, and only a full commit ID or a branch tip can use a template` };
     try {
       return { project, inputs: await mirror.setupInputs(project, commit === undefined ? { branch } : { commit }) };
     } catch (err) {

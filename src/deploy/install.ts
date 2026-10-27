@@ -2,11 +2,11 @@ import { execFile } from "node:child_process";
 import { mkdir, readFile, readlink, rename, symlink, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { promisify } from "node:util";
+import { fullCommit } from "./model.ts";
 import type { Attempt, Role } from "./plan.ts";
 
 const exec = promisify(execFile);
 export const repository = "https://github.com/ramtinJ95/nexus.git";
-const fullCommit = /^[0-9a-f]{40}$/;
 
 /** No inherited credentials, git configuration or npm configuration crosses the process boundary. */
 export async function command(program: string, args: readonly string[], cwd: string, timeoutMs = 300_000): Promise<string> {
