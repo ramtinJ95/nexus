@@ -1,0 +1,14 @@
+$ nexus show th-042423121126
+th-042423121126  Document the merge token
+project: nexus
+attention: decision
+status: active
+pylon: pylon-th-042423121126 on verify-node, running, observed 0s ago
+size: 2 CPUs, 4 GiB memory, 10 GiB disk
+placement: verify-node, the project's default node
+setup: fresh boot runs .nexus/setup, because the control plane could not read .nexus/setup at main: the verify stack reads no remote
+PR watch: on
+review rv-47000000 of PR #47: needs-person, round 1 of 5, reviewer th-189455e914f8 on gpt-6-astra, landing when approved
+needs you: The pull request's GitHub checks are failed.
+needs you: Always needs the person: changes to secrets, as it changes deploy/README.md.
+exit 0

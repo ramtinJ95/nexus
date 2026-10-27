@@ -1,0 +1,4 @@
+The driver asks to waive every hold on the review whose .nexus/check failed.
+POST /v1/threads/th-6e5eb452be04/land {"head":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","waive":["Findings P0 to P2 are open: CHECK.","The builder neither fixed nor rejected with a reason finding CHECK of round 1.",".nexus/check failed at bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb.","Always needs the person: changes to secrets, as it changes deploy/control.json."]}
+=> 400 {"error":"✖ Unrecognized key: \"waive\""}
+The review is still needs-person.

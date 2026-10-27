@@ -1,3 +1,0 @@
-$ nexus land th-f42a2fdcb6cc
-Landing review rv-42000000 of PR #42: checking, round 1 of 5, reviewer th-306f0120b54a on gpt-6-astra, landing when approved
-exit 0

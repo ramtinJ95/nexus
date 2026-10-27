@@ -1,0 +1,3 @@
+The driver asks to waive the Claude reviewer's hold anyway.
+POST /v1/threads/th-62d3cea41ff5/land {"head":"5555555555555555555555555555555555555555","waive":["A Claude reviewer approved it. Its verdict is read from its transcript in its pylon, where code it runs could write, so only the person can land what it approved.","Always needs the person: changes to login or auth, as it changes src/control/api.ts."]}
+=> 400 {"error":"✖ Unrecognized key: \"waive\""}
