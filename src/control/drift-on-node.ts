@@ -18,44 +18,17 @@
  * given that port would fail to publish. It touches no pylon it did not start.
  */
 import assert from "node:assert/strict";
-import { lookup } from "node:dns/promises";
 import { mkdtemp, rm, stat } from "node:fs/promises";
-import { request } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { setTimeout as delay } from "node:timers/promises";
-import { z } from "zod";
-import { artifactDirectory, tarCodec } from "../artifacts.ts";
-import { isImageId, probePort, type JobStatus, type PylonId } from "../protocol.ts";
-import { scriptedModel, scriptedModels } from "../harness/test-fixture.ts";
-import { parseSelfDnsName, readProbeConfig } from "../probe/config.ts";
-import { parseServeStatus, readRoutes, tailscaleCli } from "../probe/serve.ts";
-import type { ThreadDetail } from "./api.ts";
-import { defaultPreviewPorts, startControlPlane, type ControlPlane } from "./main.ts";
-import { openRegistry } from "./registry.ts";
+import type { JobStatus, PylonId } from "../protocol.ts";
+import { parseServeStatus, readRoutes } from "../probe/serve.ts";
+import { defaultPreviewPorts } from "./main.ts";
+import { apiClient, openNodeCheck, passLogger, until } from "./on-node-kit.ts";
 
-const probeConfig = await readProbeConfig(process.argv[2] ?? "/etc/nexus/probe.json");
-if (probeConfig.backend.kind !== "pylon-vm") throw new Error(`the probe runs the ${probeConfig.backend.kind} backend. This check is for pylon-vm`);
-const { stateRoot } = probeConfig.backend;
-const store = artifactDirectory(probeConfig.backend.artifacts, tarCodec);
-const images = (await store.list()).filter(isImageId);
-const image = process.argv[3] ?? (images.length === 1 ? images[0] : undefined);
-if (!isImageId(image) || !images.includes(image)) throw new Error(`name one of the images in ${store.root}: ${images.join(", ")}`);
-if (probeConfig.listen.port !== probePort) throw new Error(`the probe listens on port ${probeConfig.listen.port}, and the control plane reaches probes on ${probePort} only`);
-const previews = probeConfig.previews;
-if (previews === undefined) throw new Error("set previews in the probe's config, then restart the probe. This check opens previews");
-const tailscale = tailscaleCli();
-const statusJson = await tailscale(["status", "--json"], AbortSignal.timeout(30_000));
-const self = z.object({ Self: z.object({ ID: z.string() }) }).parse(JSON.parse(statusJson)).Self.ID;
-const dnsName = parseSelfDnsName(statusJson);
-if (probeConfig.auth.controlPlane !== self) throw new Error(`set auth.controlPlane in the probe's config to this node's ID ${self} (it is ${probeConfig.auth.controlPlane}), then restart the probe`);
-const manifest = await store.manifest(image);
-const host = probeConfig.listen.host;
-const resolved = (await lookup(dnsName, { all: true })).map((a) => a.address);
-if (!resolved.includes(host)) throw new Error(`${dnsName} resolves to ${resolved.join(", ")}, not to the probe's address ${host}`);
+const { probeConfig, stateRoot, previews, host, serveJson, planeConfig, startPlane } = await openNodeCheck({ image: process.argv[3], opens: "previews", resolvesToProbe: true });
 
-const serveJson = () => tailscale(["serve", "status", "--json"], AbortSignal.timeout(30_000));
 const routes = () => readRoutes(previews.routesFile);
 const serveBefore = await serveJson();
 const routesBefore = await routes();
@@ -69,59 +42,10 @@ for (const [port, listener] of parseServeStatus(serveBefore, `http://127.0.0.1:$
 
 /** One control plane over the registry in `dir`, which it creates on first use. */
 async function plane(dir: string) {
-  const db = join(dir, "registry.db");
-  // A rollout needs a deployer, which the control plane's own node never is, so the check makes the image current in the registry.
-  const seed = openRegistry(db);
-  seed.saveImage(manifest!, null);
-  seed.setCurrentImage(manifest!.id);
-  seed.close();
-  const controlPlane: ControlPlane = await startControlPlane({
-    db,
-    listen: { host, port: 0, hostnames: [host] },
-    self: { tailnetNodeId: self },
-    nodes: [{ name: probeConfig.node, tailnetHost: dnsName, tailnetNodeId: self }],
-    callers: [],
-    dotfiles: { repo: "https://github.com/octocat/Spoon-Knife.git", ref: "main" },
-    harness: { storage: join(dir, "harness.sqlite"), credentials: join(dir, "unused-credentials.json"), model: scriptedModel },
-    previewPorts: defaultPreviewPorts,
-    resumeAfterUsageLimit: false,
-  }, scriptedModels());
-
-  function call(method: string, path: string, body?: unknown): Promise<{ status: number; body: any }> {
-    return new Promise((resolve, reject) => {
-      const req = request({
-        host, port: controlPlane.port, method, path: `/v1${path}`,
-        headers: { host: `${host}:${controlPlane.port}`, ...(method === "GET" ? {} : { "content-type": "application/json" }) },
-      }, (res) => {
-        let text = "";
-        res.setEncoding("utf8");
-        res.on("data", (chunk: string) => { text += chunk; });
-        res.on("end", () => resolve({ status: res.statusCode!, body: text === "" ? null : JSON.parse(text) }));
-      });
-      req.on("error", reject);
-      req.end(body === undefined ? undefined : JSON.stringify(body));
-    });
-  }
-  async function expect(status: number, method: string, path: string, body?: unknown) {
-    const res = await call(method, path, body);
-    if (res.status !== status) throw new Error(`${method} ${path}: HTTP ${res.status}, expected ${status}: ${JSON.stringify(res.body)}`);
-    return res.body;
-  }
-  const detail = async (threadId: string) => await expect(200, "GET", `/threads/${threadId}`) as ThreadDetail;
-  const reaches = (threadId: string, state: string, timeoutMs: number) => until(`${threadId}'s pylon is ${state}`, timeoutMs, async () => {
-    const d = await detail(threadId);
-    if (d.pylon.failed !== null && d.thread.status !== "deleted") throw new Error(`the planner gave up on the pylon: ${d.pylon.failed}`);
-    return d.pylon.actualState === state ? d : undefined;
-  });
-
-  /** Sends `bash: <command>`, which the scripted model turns into one bash call, and waits for the run to end. */
-  async function runTool(threadId: string, requestId: string, command: string) {
-    const results = async () => ((await expect(200, "GET", `/threads/${threadId}/conversation`)) as { entries: { kind: string }[] }).entries.filter((e) => e.kind === "pi.tool-result");
-    const seen = (await results()).length;
-    await expect(202, "POST", `/threads/${threadId}/messages`, { text: `bash: ${command}`, requestId });
-    await until("the tool result is in the conversation", 6 * 60_000, async () => (await results())[seen]);
-    await until("the run ends", 60_000, async () => (await detail(threadId)).thread.agentTurnRunning ? undefined : true);
-  }
+  const controlPlane = await startPlane(planeConfig(dir));
+  const api = apiClient(host, () => controlPlane.port);
+  const { call, expect, detail, runTool } = api;
+  const reaches = (threadId: string, state: string, timeoutMs: number) => api.reaches(threadId, state, timeoutMs, `${threadId}'s pylon`);
 
   /** A thread whose pylon runs and publishes a preview of web, and that preview's port once it is ready. */
   async function threadWithPreview(title: string): Promise<{ threadId: string; pylonId: PylonId; httpsPort: number }> {
@@ -167,20 +91,7 @@ class H(http.server.BaseHTTPRequestHandler):
 http.server.ThreadingHTTPServer(("", int(os.environ["PORT"])), H).serve_forever()
 PY`;
 
-async function until<T>(what: string, timeoutMs: number, check: () => Promise<T | undefined>): Promise<T> {
-  const deadline = Date.now() + timeoutMs;
-  for (;;) {
-    const value = await check();
-    if (value !== undefined) return value;
-    if (Date.now() > deadline) throw new Error(`timed out after ${timeoutMs / 1000} s waiting until ${what}`);
-    await delay(1_000);
-  }
-}
-
-const startedAt = performance.now();
-function pass(step: string) {
-  console.log(`PASS ${step} (${Math.round((performance.now() - startedAt) / 1000)} s)`);
-}
+const pass = passLogger();
 
 /** The latest job each registry recorded for the pylon. */
 function lastJob(dir: string, pylonId: PylonId): JobStatus | undefined {
