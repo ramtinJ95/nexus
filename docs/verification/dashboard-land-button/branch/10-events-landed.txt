@@ -1,0 +1,7 @@
+$ nexus events --thread th-071ced875da9 --kind review.changed
+4 2026-10-27T14:29:36.551Z th-071ced875da9 review.changed {"review":"rv-41000000","reviewer":"th-8bfe5d5e29ab","phase":{"kind":"needs-person","reasons":["The pull request's GitHub checks are pending."]},"round":2}
+10 2026-10-27T14:29:44.364Z th-071ced875da9 review.changed {"review":"rv-41000000","reviewer":"th-8bfe5d5e29ab","phase":{"kind":"checking","startedAt":1793111384363,"thread":null},"round":2}
+12 2026-10-27T14:29:50.574Z th-071ced875da9 review.changed {"review":"rv-41000000","reviewer":"th-8bfe5d5e29ab","phase":{"kind":"merging","authorized":null},"round":2}
+13 2026-10-27T14:29:50.577Z th-071ced875da9 review.changed {"review":"rv-41000000","reviewer":"th-8bfe5d5e29ab","phase":{"kind":"deploying","commit":"8888888888888888888888888888888888888888","previous":"1111111111111111111111111111111111111111","requested":false,"deadline":1793113190577},"round":2}
+17 2026-10-27T14:29:59.574Z th-071ced875da9 review.changed {"review":"rv-41000000","reviewer":"th-8bfe5d5e29ab","phase":{"kind":"landed","commit":"8888888888888888888888888888888888888888"},"round":2}
+exit 0

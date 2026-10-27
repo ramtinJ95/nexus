@@ -1,0 +1,144 @@
+held, as a deployer {
+  "landing": "(the page has no landing region)",
+  "landButton": "(no Land button)",
+  "error": null,
+  "reviewLine": "Nexus review rv-41000000: needs-person, round 2 of 5, by th-c471e3812199 on gpt-6-astra, landing when approved"
+}
+screenshot 01-held.png
+screenshot 01-held-pylon-tab.png
+reserved, as a deployer {
+  "landing": "(the page has no landing region)",
+  "landButton": "(no Land button)",
+  "error": null,
+  "reviewLine": "Nexus review rv-42000000: needs-person, round 2 of 5, by th-5f3fbf9c32b0 on gpt-6-astra, landing when approved"
+}
+screenshot 02-reserved.png
+screenshot 03-held-phone.png
+refused, as a device that is not a deployer {
+  "landing": "(the page has no landing region)",
+  "landButton": "(no Land button)",
+  "error": null,
+  "reviewLine": "Nexus review rv-44000000: approved, round 2 of 5, by th-97a552d466df on gpt-6-astra"
+}
+screenshot 04-not-deployer.png
+refused: the page has no Land button to press
+$ nexus land th-50a710d03412
+nexus: caller may not land a pull request: landing deploys, and only deployers may, never infrastructure nodes or pylons
+exit 3
+
+refused: the review is still approved
+07-land: the page has no Land button, so the person lands it from a terminal
+$ nexus land th-72206fc248c0
+Landing review rv-41000000 of PR #41: checking, round 2 of 5, reviewer th-c471e3812199 on gpt-6-astra, landing when approved
+exit 0
+
+07-land: the review is checking {
+  "landing": "(the page has no landing region)",
+  "landButton": "(no Land button)",
+  "error": null,
+  "reviewLine": "Nexus review rv-41000000: checking, round 2 of 5, by th-c471e3812199 on gpt-6-astra, landing when approved"
+}
+screenshot 07-land-1-checking.png
+07-land: the review is deploying {
+  "landing": "(the page has no landing region)",
+  "landButton": "(no Land button)",
+  "error": null,
+  "reviewLine": "Nexus review rv-41000000: deploying, round 2 of 5, by th-c471e3812199 on gpt-6-astra, landing when approved"
+}
+screenshot 07-land-2-deploying.png
+07-land: the review is landed {
+  "landing": "(the page has no landing region)",
+  "landButton": "(no Land button)",
+  "error": null,
+  "reviewLine": "Nexus review rv-41000000: landed, round 2 of 5, by th-c471e3812199 on gpt-6-astra, landing when approved"
+}
+screenshot 07-land-3-landed.png
+08-rollback: the page has no Land button, so the person lands it from a terminal
+$ nexus land th-56eee6d86f4e
+Landing review rv-43000000 of PR #43: checking, round 2 of 5, reviewer th-5c8914230819 on gpt-6-astra, landing when approved
+exit 0
+
+08-rollback: the review is checking {
+  "landing": "(the page has no landing region)",
+  "landButton": "(no Land button)",
+  "error": null,
+  "reviewLine": "Nexus review rv-43000000: checking, round 2 of 5, by th-5c8914230819 on gpt-6-astra, landing when approved"
+}
+screenshot 08-rollback-1-checking.png
+08-rollback: the review is deploying {
+  "landing": "(the page has no landing region)",
+  "landButton": "(no Land button)",
+  "error": null,
+  "reviewLine": "Nexus review rv-43000000: deploying, round 2 of 5, by th-5c8914230819 on gpt-6-astra, landing when approved"
+}
+screenshot 08-rollback-2-deploying.png
+08-rollback: the review is rolling-back {
+  "landing": "(the page has no landing region)",
+  "landButton": "(no Land button)",
+  "error": null,
+  "reviewLine": "Nexus review rv-43000000: rolling-back, round 2 of 5, by th-5c8914230819 on gpt-6-astra, landing when approved"
+}
+screenshot 08-rollback-3-rolling-back.png
+08-rollback: the review is needs-person {
+  "landing": "(the page has no landing region)",
+  "landButton": "(no Land button)",
+  "error": null,
+  "reviewLine": "Nexus review rv-43000000: needs-person, round 2 of 5, by th-5c8914230819 on gpt-6-astra, landing when approved"
+}
+screenshot 08-rollback-4-needs-person.png
+$ nexus show th-72206fc248c0
+th-72206fc248c0  Cache the thread list
+project: nexus
+attention: none
+status: active
+pylon: pylon-th-72206fc248c0 on verify-node, running, observed 0s ago
+size: 2 CPUs, 4 GiB memory, 10 GiB disk
+placement: verify-node, the project's default node
+setup: fresh boot runs .nexus/setup, because the control plane could not read .nexus/setup at main: the verify stack reads no remote
+PR watch: on
+review rv-41000000 of PR #41: landed as 8888888888888888888888888888888888888888, round 2 of 5, reviewer th-c471e3812199 on gpt-6-astra, landing when approved
+exit 0
+
+$ nexus events --thread th-72206fc248c0 --kind review.changed
+4 2026-10-27T14:28:39.087Z th-72206fc248c0 review.changed {"review":"rv-41000000","reviewer":"th-c471e3812199","phase":{"kind":"needs-person","reasons":["The pull request's GitHub checks are pending."]},"round":2}
+10 2026-10-27T14:28:43.719Z th-72206fc248c0 review.changed {"review":"rv-41000000","reviewer":"th-c471e3812199","phase":{"kind":"checking","startedAt":1793111323719,"thread":null},"round":2}
+12 2026-10-27T14:28:50.115Z th-72206fc248c0 review.changed {"review":"rv-41000000","reviewer":"th-c471e3812199","phase":{"kind":"merging","authorized":null},"round":2}
+13 2026-10-27T14:28:50.118Z th-72206fc248c0 review.changed {"review":"rv-41000000","reviewer":"th-c471e3812199","phase":{"kind":"deploying","commit":"8888888888888888888888888888888888888888","previous":"1111111111111111111111111111111111111111","requested":false,"deadline":1793113130118},"round":2}
+17 2026-10-27T14:28:59.116Z th-72206fc248c0 review.changed {"review":"rv-41000000","reviewer":"th-c471e3812199","phase":{"kind":"landed","commit":"8888888888888888888888888888888888888888"},"round":2}
+exit 0
+
+$ nexus show th-56eee6d86f4e
+th-56eee6d86f4e  Raise the stream timeout
+project: nexus
+attention: decision
+status: active
+pylon: pylon-th-56eee6d86f4e on verify-node, running, observed 0s ago
+size: 2 CPUs, 4 GiB memory, 10 GiB disk
+placement: verify-node, the project's default node
+setup: fresh boot runs .nexus/setup, because the control plane could not read .nexus/setup at main: the verify stack reads no remote
+PR watch: on
+review rv-43000000 of PR #43: needs-person, round 2 of 5, reviewer th-5c8914230819 on gpt-6-astra, landing when approved
+needs you: The deploy of aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa failed: verify-node control rolled-back (health check failed: /v1/health answered 502); verify-node probe rolled-back (health check failed: /v1/health answered 502).
+needs you: Rolled back to the previous release, 8888888888888888888888888888888888888888, which every service reports healthy.
+needs you: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa is still on the default branch, so revert it before the next deploy.
+exit 0
+
+$ nexus land th-732696f3230c
+Landing review rv-42000000 of PR #42: checking, round 2 of 5, reviewer th-5f3fbf9c32b0 on gpt-6-astra, landing when approved
+exit 0
+
+$ nexus show th-732696f3230c
+th-732696f3230c  Rename the deploy flag
+project: nexus
+attention: decision
+status: active
+pylon: pylon-th-732696f3230c on verify-node, running, observed 0s ago
+size: 2 CPUs, 4 GiB memory, 10 GiB disk
+placement: verify-node, the project's default node
+setup: fresh boot runs .nexus/setup, because the control plane could not read .nexus/setup at main: the verify stack reads no remote
+PR watch: on
+review rv-42000000 of PR #42: needs-person, round 2 of 5, reviewer th-5f3fbf9c32b0 on gpt-6-astra, landing when approved
+needs you: Always needs the person: breaking changes to the CLI's contract, by the reviewer's reading (renames nexus deploy --wait, which scripts call).
+needs you: Always needs the person: changes to login or auth, as it changes src/control/api.ts.
+exit 0
+

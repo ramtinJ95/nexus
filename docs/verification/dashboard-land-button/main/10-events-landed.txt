@@ -1,0 +1,7 @@
+$ nexus events --thread th-72206fc248c0 --kind review.changed
+4 2026-10-27T14:28:39.087Z th-72206fc248c0 review.changed {"review":"rv-41000000","reviewer":"th-c471e3812199","phase":{"kind":"needs-person","reasons":["The pull request's GitHub checks are pending."]},"round":2}
+10 2026-10-27T14:28:43.719Z th-72206fc248c0 review.changed {"review":"rv-41000000","reviewer":"th-c471e3812199","phase":{"kind":"checking","startedAt":1793111323719,"thread":null},"round":2}
+12 2026-10-27T14:28:50.115Z th-72206fc248c0 review.changed {"review":"rv-41000000","reviewer":"th-c471e3812199","phase":{"kind":"merging","authorized":null},"round":2}
+13 2026-10-27T14:28:50.118Z th-72206fc248c0 review.changed {"review":"rv-41000000","reviewer":"th-c471e3812199","phase":{"kind":"deploying","commit":"8888888888888888888888888888888888888888","previous":"1111111111111111111111111111111111111111","requested":false,"deadline":1793113130118},"round":2}
+17 2026-10-27T14:28:59.116Z th-72206fc248c0 review.changed {"review":"rv-41000000","reviewer":"th-c471e3812199","phase":{"kind":"landed","commit":"8888888888888888888888888888888888888888"},"round":2}
+exit 0
