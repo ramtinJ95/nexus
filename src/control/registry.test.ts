@@ -422,6 +422,14 @@ test("a port the node routes is never handed out, though no row holds it", async
   assert.deepEqual(portsOf(registry, pylonId), ["api 10203", "web 10202"], "a route left to this pylon from a lost row is refused too");
 });
 
+test("an observation stored from a probe older than route reporting routes no port", async (t) => {
+  const registry = seeded(tempDb());
+  t.after(() => registry.close());
+  registry.ingested({ node, observedAt: "2027-01-01T00:00:00Z", probeBootId: "b", capacity: { memoryGiB: 64, committedMemoryGiB: 0, diskFreeGiB: 400 }, artifacts: [], jobs: [], pylons: [] } as never, []);
+  registry.allocatePreviews(pylonId, ["web", "api"], ports);
+  assert.deepEqual(portsOf(registry, pylonId), ["api 10201", "web 10200"]);
+});
+
 test("a registry from before session titles keeps its sessions, untitled until they are observed again", async (t) => {
   const { DatabaseSync } = await import("node:sqlite");
   const path = tempDb();

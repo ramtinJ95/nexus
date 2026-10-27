@@ -761,6 +761,23 @@ test("thread detail lists the pylon's listening ports with the service and previ
   assert.deepEqual(await ports(), [], "nothing listens in a stopped pylon");
 });
 
+test("a node whose stored observation is from a probe before routes, grants, counting and listening ports gets no thread, is not overcommitted, and its pylon's ports are unknown", async (t) => {
+  const s = await withThread(t);
+  const capacity = { memoryGiB: 6, committedMemoryGiB: 8, diskFreeGiB: 100 };
+  s.registry.apply({ record: "node", node, state: "online", capacity: capacity as never });
+  const running = {
+    pylonId: s.thread.pylonId, phase: "running", liveHash: s.registry.pylon(s.thread.pylonId)!.liveHash, bootedAt: "2027-01-01T00:00:00Z",
+    bootedFrom: { image: image.id, checkpoint: null }, services: [], previews: [], sessions: [], git: null, declaredOutputs: [], attachedClients: 0,
+  };
+  s.registry.ingested({ node, observedAt: "2027-01-01T00:01:00Z", probeBootId: "b", capacity, artifacts: [image.id], jobs: [], pylons: [running] } as never, []);
+  assert.equal(((await s.call("GET", `/v1/threads/${s.thread.id}`)).body as ThreadDetail).ports, null, "a probe that read no ports reports them unknown");
+  const nodes = (await s.call("GET", "/v1/nodes")).body as { name: string; overcommitted: boolean }[];
+  assert.equal(nodes.find((n) => n.name === node)!.overcommitted, false, "the committed memory of a probe from before pylons were counted means nothing");
+  const refused = await s.call("POST", "/v1/threads", { project: "acme", title: "Placed", node: "auto" });
+  assert.equal(refused.status, 409);
+  assert.equal(refused.body.error, "no node can run this pylon: rj-firebat runs a probe too old to report what its pylons hold");
+});
+
 test("linking a port goes through the node's probe, gives it an https port at once, and counts as human activity", async (t) => {
   const s = await withThread(t);
   s.registry.recordActivity(s.thread.id, { human: 1 });

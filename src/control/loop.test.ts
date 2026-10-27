@@ -1611,3 +1611,28 @@ test("a Claude launch a control plane restart cut off goes again under its sessi
   assert.equal(older.claudeWorker(other.id)!.message, "Claude launch was interrupted; attach to check before starting another session");
   assert.deepEqual(sent, []);
 });
+
+test("a control plane that opens on an observation stored from a probe older than routes, grants, held secrets and counting boots its pylon from the probe's first snapshot", async (t) => {
+  const registry = openRegistry(tempDb());
+  const thread = seed(registry);
+  registry.ingested({
+    node, observedAt: "2027-01-01T00:00:00Z", probeBootId: "boot-0", capacity: { memoryGiB: 64, committedMemoryGiB: 0, diskFreeGiB: 100 }, artifacts: [image], jobs: [],
+    pylons: [{ pylonId: thread.pylonId, phase: "stopped", checkpoint: null }],
+  } as never, []);
+  const fake = fakeNode({ autoFinish: true });
+  run(t, registry, fake.probe);
+  await until("the pylon runs", () => fake.pylons.get(thread.pylonId)?.phase === "running");
+  assert.deepEqual(fake.submitted.map((job) => job.kind), ["spawn"]);
+});
+
+test("a Claude launch a control plane restart cut off before it recorded a session fails, sent never", async (t) => {
+  const registry = openRegistry(tempDb());
+  const thread = seed(registry);
+  registry.setClaudeWorker(thread.id, "hello", "starting");
+  const fake = fakeNode({ autoFinish: true, claudeLaunchRepeatable: true });
+  const sent: PylonCommand[] = [];
+  run(t, registry, restartingProbe(fake, [], sent));
+  await until("worker failed", () => registry.claudeWorker(thread.id)?.state === "failed");
+  assert.equal(registry.claudeWorker(thread.id)!.message, "Claude launch was interrupted; attach to check before starting another session");
+  assert.deepEqual(sent, []);
+});

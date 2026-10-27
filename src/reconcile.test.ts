@@ -288,6 +288,18 @@ test("a snapshot from a probe older than route reporting parses with its routes 
   assert.throws(() => parseProbeEvent(encodeProbeEvent({ type: "snapshot", observation: { ...observation, previewRoutes: {} } } as unknown as ProbeEvent)), /previewRoutes is not an array/);
 });
 
+test("a snapshot as the probe every node runs sends it, claudeLaunchRepeatable and all, parses with every fact it sent", () => {
+  const observation = {
+    node, observedAt: "2027-01-01T00:00:00Z", probeBootId: "b", events: [], capacity: { cpus: 16, committedCpus: 2, memoryGiB: 64, committedMemoryGiB: 4, diskFreeGiB: 100, committedDiskGiB: 10 },
+    artifacts: [], jobs: [], pylons: [{ pylonId, phase: "stopped", checkpoint: lastCheckpoint, sessions: [] }], previewRoutes: [{ httpsPort: 10200, pylonId, service: "web" }],
+    grants: { secrets: ["GH_TOKEN"], gitSsh: true }, claudeLaunchRepeatable: true, heldSecrets: ["NEXUS_CHATGPT_TOKEN"],
+  };
+  const parsed = parseProbeEvent(JSON.stringify({ type: "snapshot", observation }));
+  assert.ok(parsed.type === "snapshot");
+  const { claudeLaunchRepeatable: _, ...facts } = observation;
+  assert.deepEqual(Object.fromEntries(Object.keys(facts).map((key) => [key, (parsed.observation as unknown as Record<string, unknown>)[key]])), facts);
+});
+
 test("a broken pylon whose cause is missing, as from an older probe, or one this control plane does not know parses with its cause unknown", () => {
   const snapshot = (pylon: Record<string, unknown>) => encodeProbeEvent({ type: "snapshot", observation: {
     node, observedAt: "2027-01-01T00:00:00Z", probeBootId: "b", capacity: { cpus: 16, committedCpus: 0, memoryGiB: 64, committedMemoryGiB: 0, diskFreeGiB: 100, committedDiskGiB: 0 }, artifacts: [], jobs: [], pylons: [pylon], previewRoutes: [],
