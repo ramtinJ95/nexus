@@ -1808,7 +1808,9 @@ test("a root-authenticated drain blocks every turn-entry route and can be releas
   assert.equal(drain.body.idle, true);
   s.callAs(laptop);
   for (const path of ["/v1/threads", "/v1/threads/anything/messages", "/v1/threads/anything/retry"]) {
-    assert.equal((await s.call("POST", path, {})).status, 409);
+    const refused = await s.call("POST", path, {});
+    assert.equal(refused.status, 409);
+    assert.deepEqual(refused.body, { error: "control plane is draining for deployment; retry after the release completes" });
   }
   assert.equal((await s.call("PUT", "/v1/release", { commit: "b".repeat(40) })).status, 409);
   s.callAs("nFIREBAT" as TailnetNodeId);
