@@ -387,14 +387,14 @@ export async function startApi(options: ApiOptions): Promise<Api> {
     });
   }
 
-  function attention(t: Thread): Attention {
+  function attention(t: Thread, failed: string | null): Attention {
     const parked = t.conversationId !== null && t.status !== "deleted" && harness.activity.parked(t.id).length > 0;
-    return attentionOf(pylonOf(t).failed !== null || ["failed", "stalled"].includes(registry.claudeWorker(t.id)?.state ?? ""), parked, t.lastReplyAt, t.seenAt, t.agentTurnRunning || t.sessionTurnRunning === true, t.sessionWaiting, needsPerson(registry.review(t.id)), t.usageLimit !== undefined);
+    return attentionOf(failed !== null || ["failed", "stalled"].includes(registry.claudeWorker(t.id)?.state ?? ""), parked, t.lastReplyAt, t.seenAt, t.agentTurnRunning || t.sessionTurnRunning === true, t.sessionWaiting, needsPerson(registry.review(t.id)), t.usageLimit !== undefined);
   }
 
   function row(t: Thread): ThreadRow {
     const { node, actualState, failed } = pylonOf(t);
-    return { ...t, attention: attention(t), desired: desiredPhase(t, Date.now()), pylon: { node, actualState, failed } };
+    return { ...t, attention: attention(t, failed), desired: desiredPhase(t, Date.now()), pylon: { node, actualState, failed } };
   }
 
   function detail(t: Thread): ThreadDetail {
@@ -405,7 +405,7 @@ export async function startApi(options: ApiOptions): Promise<Api> {
     return {
       thread: t,
       ...(worker === undefined ? {} : { claudeWorker: { model: worker.model, state: worker.state, ...(worker.message === undefined ? {} : { message: worker.message }) } }),
-      attention: attention(t), seenAt: t.seenAt, lastReplyAt: t.lastReplyAt,
+      attention: attention(t, pylon.failed), seenAt: t.seenAt, lastReplyAt: t.lastReplyAt,
       desired: desiredPhase(t, Date.now()),
       pylon: pylonOf(t),
       sessions: registry.sessions(pylon.pylonId),
