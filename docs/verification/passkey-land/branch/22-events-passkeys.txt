@@ -1,6 +1,6 @@
 $ nexus events --kind passkey.enrolled --kind passkey.revoked
-13 2026-10-27T15:42:45.704Z - passkey.enrolled {"passkey":"pk-f565caa9","name":"MacBook Touch ID","by":"nLAPTOP"}
-29 2026-10-27T15:43:20.117Z - passkey.enrolled {"passkey":"pk-a2de156a","name":"Spare YubiKey","by":"nLAPTOP"}
-30 2026-10-27T15:43:22.202Z - passkey.revoked {"passkey":"pk-f565caa9","name":"MacBook Touch ID","by":"nLAPTOP with Spare YubiKey"}
-31 2026-10-27T15:43:25.601Z - passkey.revoked {"passkey":"pk-a2de156a","name":"Spare YubiKey","by":"root on the control plane's host"}
+13 2026-10-27T15:58:15.282Z - passkey.enrolled {"passkey":"pk-5f309068","name":"MacBook Touch ID","by":"nLAPTOP"}
+29 2026-10-27T15:58:49.846Z - passkey.enrolled {"passkey":"pk-d0f9da04","name":"Spare YubiKey","by":"nLAPTOP"}
+30 2026-10-27T15:58:51.929Z - passkey.revoked {"passkey":"pk-5f309068","name":"MacBook Touch ID","by":"nLAPTOP with Spare YubiKey"}
+31 2026-10-27T15:58:54.915Z - passkey.revoked {"passkey":"pk-d0f9da04","name":"Spare YubiKey","by":"root on the control plane's host"}
 exit 0

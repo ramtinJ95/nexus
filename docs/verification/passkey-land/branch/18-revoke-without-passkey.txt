@@ -1,2 +1,2 @@
-POST /v1/passkeys/pk-a2de156a/revoke {}
+POST /v1/passkeys/pk-d0f9da04/revoke {}
 => 400 {"error":"✖ Invalid input: expected object, received undefined\n  → at assertion"}

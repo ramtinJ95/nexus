@@ -1,4 +1,4 @@
 The driver sends the page's own land request again, assertion and all.
-POST /v1/threads/th-257a6019d501/land {"head":"4444444444444444444444444444444444444444","waiver":{"holds":["Always needs the person: anything irreversible, as it changes src/control/registry.ts."],"assertion":"<assertion from credential I0VQ6D5_>"}}
+POST /v1/threads/th-f42a2fdcb6cc/land {"head":"4444444444444444444444444444444444444444","waiver":{"holds":["Always needs the person: anything irreversible, as it changes src/control/registry.ts."],"assertion":"<assertion from credential 3RY_QCOi>"}}
 => 403 {"error":"the passkey's confirmation was used already or has expired, so it confirms nothing. Confirm again"}
 The review is still landed.

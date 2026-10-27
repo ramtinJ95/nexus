@@ -1,1 +1,1 @@
-branch: 1ee9f3b fix(registry): wait out another process's write lock, such as the passkey host command's
+branch: e81e8c5 docs: what a passkey waives next to the rebase of a conflicting branch

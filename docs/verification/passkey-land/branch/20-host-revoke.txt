@@ -1,3 +1,3 @@
-$ sudo node src/control/passkeys-host.ts /etc/nexus/control.json revoke pk-a2de156a
-Revoked pk-a2de156a, Spare YubiKey.
+$ sudo node src/control/passkeys-host.ts /etc/nexus/control.json revoke pk-d0f9da04
+Revoked pk-d0f9da04, Spare YubiKey.
 exit 0

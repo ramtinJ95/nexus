@@ -1,7 +1,7 @@
-POST /v1/threads/th-988c1134d4e2/land/challenge {"head":"6666666666666666666666666666666666666666","holds":["Always needs the person: pylon image rebuilds, as it changes images/pylon/Dockerfile."]}
-=> 404 {"error":"no route /v1/threads/th-988c1134d4e2/land/challenge"}
+POST /v1/threads/th-6754eafed050/land/challenge {"head":"6666666666666666666666666666666666666666","holds":["Always needs the person: pylon image rebuilds, as it changes images/pylon/Dockerfile."]}
+=> 404 {"error":"no route /v1/threads/th-6754eafed050/land/challenge"}
 (there is no challenge to sign)
 PR #46 moved to 7777777777777777777777777777777777777777, and the reviewer approved it there. The driver sends the assertion for 6666666666666666666666666666666666666666 to land 7777777777777777777777777777777777777777:
-POST /v1/threads/th-988c1134d4e2/land {"head":"7777777777777777777777777777777777777777","waiver":{"holds":["Always needs the person: pylon image rebuilds, as it changes images/pylon/Dockerfile."],"assertion":null}}
+POST /v1/threads/th-6754eafed050/land {"head":"7777777777777777777777777777777777777777","waiver":{"holds":["Always needs the person: pylon image rebuilds, as it changes images/pylon/Dockerfile."],"assertion":null}}
 => 400 {"error":"✖ Unrecognized key: \"waiver\""}
 The review is still needs-person at 7777777777777777777777777777777777777777.

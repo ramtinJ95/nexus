@@ -1,3 +1,3 @@
 The driver asks to waive the Claude reviewer's hold anyway.
-POST /v1/threads/th-ced1ad351a84/land/challenge {"head":"5555555555555555555555555555555555555555","holds":["A Claude reviewer approved it. Its verdict is read from its transcript in its pylon, where code it runs could write, so only the person can land what it approved.","Always needs the person: changes to login or auth, as it changes src/control/api.ts."]}
-=> 404 {"error":"no route /v1/threads/th-ced1ad351a84/land/challenge"}
+POST /v1/threads/th-aa9ed42ec88e/land/challenge {"head":"5555555555555555555555555555555555555555","holds":["A Claude reviewer approved it. Its verdict is read from its transcript in its pylon, where code it runs could write, so only the person can land what it approved.","Always needs the person: changes to login or auth, as it changes src/control/api.ts."]}
+=> 404 {"error":"no route /v1/threads/th-aa9ed42ec88e/land/challenge"}

@@ -1,6 +1,6 @@
 # Land with a passkey verification
 
-Verified in this task's pylon on 2026-10-27, on branch `feat/passkey-land`, against main at 0e55dea, with headless Chromium 143 and its WebAuthn virtual authenticator. No live control plane, node, image, GitHub repository or other thread was touched.
+Verified in this task's pylon on 2026-10-27, on branch `feat/passkey-land`, against main at 82a703f, after #151, with headless Chromium 143 and its WebAuthn virtual authenticator. No live control plane, node, image, GitHub repository or other thread was touched.
 
 ## How to rerun
 
@@ -52,18 +52,18 @@ The virtual authenticator verifies the person whenever it is asked, as a passkey
 What `nexus show` and the event stream record of the passkey landing, `branch/11-show-landed.txt` and `branch/12-events-waived.txt`:
 
 ```
-review rv-42000000 of PR #42: landed as 8888888888888888888888888888888888888888, round 1 of 5, reviewer th-bee557b0a65b on gpt-6-astra, landing when approved
-waived by nLAPTOP with the passkey "MacBook Touch ID" (pk-f565caa9) at 4444444444444444444444444444444444444444, 2026-10-27T15:43:00.793Z:
+review rv-42000000 of PR #42: landed as 8888888888888888888888888888888888888888, round 1 of 5, reviewer th-306f0120b54a on gpt-6-astra, landing when approved
+waived by nLAPTOP with the passkey "MacBook Touch ID" (pk-5f309068) at 4444444444444444444444444444444444444444, 2026-10-27T15:58:30.502Z:
   Always needs the person: anything irreversible, as it changes src/control/registry.ts.
 
-20 2026-10-27T15:43:00.794Z th-257a6019d501 review.waived {"review":"rv-42000000","repo":"ramtinJ95/nexus","pr":42,"head":"4444444444444444444444444444444444444444","holds":["Always needs the person: anything irreversible, as it changes src/control/registry.ts."],"passkey":{"id":"pk-f565caa9","name":"MacBook Touch ID"},"by":"nLAPTOP","at":1793115780793}
+20 2026-10-27T15:58:30.503Z th-f42a2fdcb6cc review.waived {"review":"rv-42000000","repo":"ramtinJ95/nexus","pr":42,"head":"4444444444444444444444444444444444444444","holds":["Always needs the person: anything irreversible, as it changes src/control/registry.ts."],"passkey":{"id":"pk-5f309068","name":"MacBook Touch ID"},"by":"nLAPTOP","at":1793116710502}
 ```
 
 `branch/12-events-review.txt` shows #42's phases: held, `checking` after `nexus land`, held again 5 seconds later, then `checking`, `merging`, `deploying` and `landed` after the passkey, 12 seconds from the press. `branch/22-events-passkeys.txt` shows both enrolments and both revocations, the first `by nLAPTOP with Spare YubiKey` and the second `by root on the control plane's host`.
 
 ## Unit tests
 
-`unit-main.txt` is the branch's passkey tests run against main's code: `passkeys.test.ts`, `review.test.ts` and `api.test.ts` fail to load, since the modules they test do not exist on main, and the dashboard and CLI tests fail. `unit-branch.txt` is the same 15 tests on the branch, all passing.
+`unit-main.txt` is the branch's passkey tests run against main's code: `passkeys.test.ts`, `review.test.ts` and `api.test.ts` fail to load, since the modules they test do not exist on main, and the dashboard and CLI tests fail. `unit-branch.txt` is the same 16 tests on the branch, all passing.
 
 ## A bug the capture found
 

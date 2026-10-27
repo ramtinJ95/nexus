@@ -1,3 +1,3 @@
-$ nexus events --thread th-257a6019d501 --kind review.waived
-20 2026-10-27T15:43:00.794Z th-257a6019d501 review.waived {"review":"rv-42000000","repo":"ramtinJ95/nexus","pr":42,"head":"4444444444444444444444444444444444444444","holds":["Always needs the person: anything irreversible, as it changes src/control/registry.ts."],"passkey":{"id":"pk-f565caa9","name":"MacBook Touch ID"},"by":"nLAPTOP","at":1793115780793}
+$ nexus events --thread th-f42a2fdcb6cc --kind review.waived
+20 2026-10-27T15:58:30.503Z th-f42a2fdcb6cc review.waived {"review":"rv-42000000","repo":"ramtinJ95/nexus","pr":42,"head":"4444444444444444444444444444444444444444","holds":["Always needs the person: anything irreversible, as it changes src/control/registry.ts."],"passkey":{"id":"pk-5f309068","name":"MacBook Touch ID"},"by":"nLAPTOP","at":1793116710502}
 exit 0

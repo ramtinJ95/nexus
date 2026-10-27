@@ -1,11 +1,11 @@
-main: 0e55dea feat(dashboard): land a held or approved review from the thread page (#150), tests from HEAD
+main: 82a703f feat(review): reviews start on their own, landings rebase a conflicting branch (#151), tests from HEAD
 ℹ fail 6
 ℹ pass 0
 ℹ tests 6
-✖ a hold the policy reserves for the person is marked waivable, and lands only with a passkey, which needs the HTTPS address and an enrolled one (66.471141ms)
+✖ a hold the policy reserves for the person is marked waivable, and lands only with a passkey, which needs the HTTPS address and an enrolled one (103.825674ms)
 ✖ failing tests:
-✖ review and land reach the review loop's routes, and show prints a review and what it needs from the person (1922.162914ms)
-✖ src/control/api.test.ts (406.016411ms)
-✖ src/control/passkeys.test.ts (85.507189ms)
-✖ src/control/review.test.ts (198.653923ms)
-✖ the Passkeys page lists the person's passkeys and enrols one with the code from the host (31.446134ms)
+✖ review and land reach the review loop's routes, and show prints a review and what it needs from the person (2255.903859ms)
+✖ src/control/api.test.ts (721.231833ms)
+✖ src/control/passkeys.test.ts (129.606424ms)
+✖ src/control/review.test.ts (301.91428ms)
+✖ the Passkeys page lists the person's passkeys and enrols one with the code from the host (55.673309ms)

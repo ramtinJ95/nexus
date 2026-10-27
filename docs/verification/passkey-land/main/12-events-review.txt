@@ -1,7 +1,7 @@
-$ nexus events --thread th-b56f9259b632 --kind review.changed
-4 2026-10-27T15:42:24.603Z th-b56f9259b632 review.changed {"review":"rv-42000000","reviewer":"th-34b8ca67b758","phase":{"kind":"merging","authorized":null},"round":1}
-9 2026-10-27T15:42:24.636Z th-b56f9259b632 review.changed {"review":"rv-42000000","reviewer":"th-34b8ca67b758","phase":{"kind":"needs-person","reasons":["Always needs the person: anything irreversible, as it changes src/control/registry.ts."]},"round":1}
-13 2026-10-27T15:42:26.428Z th-b56f9259b632 review.changed {"review":"rv-42000000","reviewer":"th-34b8ca67b758","phase":{"kind":"checking","startedAt":1793115746428,"thread":null},"round":1}
-15 2026-10-27T15:42:30.639Z th-b56f9259b632 review.changed {"review":"rv-42000000","reviewer":"th-34b8ca67b758","phase":{"kind":"merging","authorized":null},"round":1}
-16 2026-10-27T15:42:30.641Z th-b56f9259b632 review.changed {"review":"rv-42000000","reviewer":"th-34b8ca67b758","phase":{"kind":"needs-person","reasons":["Always needs the person: anything irreversible, as it changes src/control/registry.ts."]},"round":1}
+$ nexus events --thread th-a98d2be8cece --kind review.changed
+4 2026-10-27T15:57:51.588Z th-a98d2be8cece review.changed {"review":"rv-42000000","reviewer":"th-d75bf6118ccd","phase":{"kind":"merging","authorized":null},"round":1}
+9 2026-10-27T15:57:51.609Z th-a98d2be8cece review.changed {"review":"rv-42000000","reviewer":"th-d75bf6118ccd","phase":{"kind":"needs-person","reasons":["Always needs the person: anything irreversible, as it changes src/control/registry.ts."]},"round":1}
+13 2026-10-27T15:57:53.656Z th-a98d2be8cece review.changed {"review":"rv-42000000","reviewer":"th-d75bf6118ccd","phase":{"kind":"checking","startedAt":1793116673656,"thread":null},"round":1}
+15 2026-10-27T15:57:58.627Z th-a98d2be8cece review.changed {"review":"rv-42000000","reviewer":"th-d75bf6118ccd","phase":{"kind":"merging","authorized":null},"round":1}
+16 2026-10-27T15:57:58.629Z th-a98d2be8cece review.changed {"review":"rv-42000000","reviewer":"th-d75bf6118ccd","phase":{"kind":"needs-person","reasons":["Always needs the person: anything irreversible, as it changes src/control/registry.ts."]},"round":1}
 exit 0

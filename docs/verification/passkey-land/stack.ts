@@ -129,7 +129,8 @@ const startThread = threadStarter({ registry, harness: fake.harness, wake, dotfi
 const reviews = reviewLoop({
   registry, github, inbox: agentInbox({ registry, harness: fake.harness, probes: new Map(), wake }), harnessModel: "gpt-6-astra", startThread,
   replies: agentReplies(registry, fake.harness), checks, release: { self: nodeId, repo }, log: (message) => console.error(message),
-});
+  mayLand: (caller: string) => caller === laptop,
+} as Parameters<typeof reviewLoop>[0]);
 const certificate = await testCertificate(work, hostname);
 const api = await startApi({
   registry, host: "127.0.0.1", port: 7470, prWatchEnabled: true, reviews,

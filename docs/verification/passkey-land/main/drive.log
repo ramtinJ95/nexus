@@ -7,7 +7,7 @@ node:internal/modules/cjs/loader:1568
   throw err;
   ^
 
-Error: Cannot find module '/tmp/tmp.EN2qI7M9y3/main/src/control/passkeys-host.ts'
+Error: Cannot find module '/tmp/tmp.cMDzICPAqB/main/src/control/passkeys-host.ts'
     at Module._resolveFilename (node:internal/modules/cjs/loader:1564:15)
     at wrapResolveFilename (node:internal/modules/cjs/loader:1118:27)
     at defaultResolveImplForCJSLoading (node:internal/modules/cjs/loader:1142:10)
@@ -28,7 +28,7 @@ node:internal/modules/cjs/loader:1568
   throw err;
   ^
 
-Error: Cannot find module '/tmp/tmp.EN2qI7M9y3/main/src/control/passkeys-host.ts'
+Error: Cannot find module '/tmp/tmp.cMDzICPAqB/main/src/control/passkeys-host.ts'
     at Module._resolveFilename (node:internal/modules/cjs/loader:1564:15)
     at wrapResolveFilename (node:internal/modules/cjs/loader:1118:27)
     at defaultResolveImplForCJSLoading (node:internal/modules/cjs/loader:1142:10)
@@ -51,8 +51,8 @@ reserved, held: {
   "error": null
 }
 screenshot 08-held-reserved.png
-$ nexus land th-b56f9259b632
-Landing review rv-42000000 of PR #42: checking, round 1 of 5, reviewer th-34b8ca67b758 on gpt-6-astra, landing when approved
+$ nexus land th-a98d2be8cece
+Landing review rv-42000000 of PR #42: checking, round 1 of 5, reviewer th-d75bf6118ccd on gpt-6-astra, landing when approved
 exit 0
 
 09-land: the review is checking {
@@ -67,50 +67,50 @@ screenshot 09-land-1-checking.png
   "error": null
 }
 screenshot 09-land-2-needs-person.png
-$ nexus show th-b56f9259b632
-th-b56f9259b632  Cache the thread list
+$ nexus show th-a98d2be8cece
+th-a98d2be8cece  Cache the thread list
 project: nexus
 attention: decision
 status: active
-pylon: pylon-th-b56f9259b632 on verify-node, running, observed 0s ago
+pylon: pylon-th-a98d2be8cece on verify-node, running, observed 0s ago
 size: 2 CPUs, 4 GiB memory, 10 GiB disk
 placement: verify-node, the project's default node
 setup: fresh boot runs .nexus/setup, because the control plane could not read .nexus/setup at main: the verify stack reads no remote
 PR watch: on
-review rv-42000000 of PR #42: needs-person, round 1 of 5, reviewer th-34b8ca67b758 on gpt-6-astra, landing when approved
+review rv-42000000 of PR #42: needs-person, round 1 of 5, reviewer th-d75bf6118ccd on gpt-6-astra, landing when approved
 needs you: Always needs the person: anything irreversible, as it changes src/control/registry.ts.
 exit 0
 
 the page has no passkey Land button
 screenshot 10-passkey-0-no-button.png
-$ nexus show th-b56f9259b632
-th-b56f9259b632  Cache the thread list
+$ nexus show th-a98d2be8cece
+th-a98d2be8cece  Cache the thread list
 project: nexus
 attention: decision
 status: active
-pylon: pylon-th-b56f9259b632 on verify-node, running, observed 0s ago
+pylon: pylon-th-a98d2be8cece on verify-node, running, observed 0s ago
 size: 2 CPUs, 4 GiB memory, 10 GiB disk
 placement: verify-node, the project's default node
 setup: fresh boot runs .nexus/setup, because the control plane could not read .nexus/setup at main: the verify stack reads no remote
 PR watch: on
-review rv-42000000 of PR #42: needs-person, round 1 of 5, reviewer th-34b8ca67b758 on gpt-6-astra, landing when approved
+review rv-42000000 of PR #42: needs-person, round 1 of 5, reviewer th-d75bf6118ccd on gpt-6-astra, landing when approved
 needs you: Always needs the person: anything irreversible, as it changes src/control/registry.ts.
 exit 0
 
-$ nexus events --thread th-b56f9259b632 --kind review.waived
+$ nexus events --thread th-a98d2be8cece --kind review.waived
 nexus: unknown event kind
 exit 64
 
-$ nexus events --thread th-b56f9259b632 --kind review.changed
-4 2026-10-27T15:42:24.603Z th-b56f9259b632 review.changed {"review":"rv-42000000","reviewer":"th-34b8ca67b758","phase":{"kind":"merging","authorized":null},"round":1}
-9 2026-10-27T15:42:24.636Z th-b56f9259b632 review.changed {"review":"rv-42000000","reviewer":"th-34b8ca67b758","phase":{"kind":"needs-person","reasons":["Always needs the person: anything irreversible, as it changes src/control/registry.ts."]},"round":1}
-13 2026-10-27T15:42:26.428Z th-b56f9259b632 review.changed {"review":"rv-42000000","reviewer":"th-34b8ca67b758","phase":{"kind":"checking","startedAt":1793115746428,"thread":null},"round":1}
-15 2026-10-27T15:42:30.639Z th-b56f9259b632 review.changed {"review":"rv-42000000","reviewer":"th-34b8ca67b758","phase":{"kind":"merging","authorized":null},"round":1}
-16 2026-10-27T15:42:30.641Z th-b56f9259b632 review.changed {"review":"rv-42000000","reviewer":"th-34b8ca67b758","phase":{"kind":"needs-person","reasons":["Always needs the person: anything irreversible, as it changes src/control/registry.ts."]},"round":1}
+$ nexus events --thread th-a98d2be8cece --kind review.changed
+4 2026-10-27T15:57:51.588Z th-a98d2be8cece review.changed {"review":"rv-42000000","reviewer":"th-d75bf6118ccd","phase":{"kind":"merging","authorized":null},"round":1}
+9 2026-10-27T15:57:51.609Z th-a98d2be8cece review.changed {"review":"rv-42000000","reviewer":"th-d75bf6118ccd","phase":{"kind":"needs-person","reasons":["Always needs the person: anything irreversible, as it changes src/control/registry.ts."]},"round":1}
+13 2026-10-27T15:57:53.656Z th-a98d2be8cece review.changed {"review":"rv-42000000","reviewer":"th-d75bf6118ccd","phase":{"kind":"checking","startedAt":1793116673656,"thread":null},"round":1}
+15 2026-10-27T15:57:58.627Z th-a98d2be8cece review.changed {"review":"rv-42000000","reviewer":"th-d75bf6118ccd","phase":{"kind":"merging","authorized":null},"round":1}
+16 2026-10-27T15:57:58.629Z th-a98d2be8cece review.changed {"review":"rv-42000000","reviewer":"th-d75bf6118ccd","phase":{"kind":"needs-person","reasons":["Always needs the person: anything irreversible, as it changes src/control/registry.ts."]},"round":1}
 exit 0
 
 There is no passkey landing to replay. A land request carrying a waiver:
-POST /v1/threads/th-b56f9259b632/land {"head":"4444444444444444444444444444444444444444","waiver":{"holds":["Always needs the person: anything irreversible, as it changes src/control/registry.ts."],"assertion":"<assertion from credential x>"}}
+POST /v1/threads/th-a98d2be8cece/land {"head":"4444444444444444444444444444444444444444","waiver":{"holds":["Always needs the person: anything irreversible, as it changes src/control/registry.ts."],"assertion":"<assertion from credential x>"}}
 => 400 {"error":"✖ Unrecognized key: \"waiver\""}
 claude, held: {
   "landing": "Held for you\n#45 Name the caller in API errors ↗\n\nHead 555555555555 · approved by claude-opus-5-5 (claude) in round 1 of 5 · .nexus/check passed\n\nWhy it waits for you\nA Claude reviewer approved it. Its verdict is read from its transcript in its pylon, where code it runs could write, so only the person can land what it approved. holds again\nAlways needs the person: changes to login or auth, as it changes src/control/api.ts. holds again\nThe reviewer's findings\nP3 N1: Name the constant\n.nexus/check passed at 555555555555\n\nLanding checks the merge policy again, and what is marked \"holds again\" holds every landing of this commit. Only you can get past it, by merging the pull request on GitHub and deploying it with nexus deploy.",
@@ -119,25 +119,25 @@ claude, held: {
 }
 screenshot 14-not-waivable.png
 The driver asks to waive the Claude reviewer's hold anyway.
-POST /v1/threads/th-ced1ad351a84/land/challenge {"head":"5555555555555555555555555555555555555555","holds":["A Claude reviewer approved it. Its verdict is read from its transcript in its pylon, where code it runs could write, so only the person can land what it approved.","Always needs the person: changes to login or auth, as it changes src/control/api.ts."]}
-=> 404 {"error":"no route /v1/threads/th-ced1ad351a84/land/challenge"}
+POST /v1/threads/th-aa9ed42ec88e/land/challenge {"head":"5555555555555555555555555555555555555555","holds":["A Claude reviewer approved it. Its verdict is read from its transcript in its pylon, where code it runs could write, so only the person can land what it approved.","Always needs the person: changes to login or auth, as it changes src/control/api.ts."]}
+=> 404 {"error":"no route /v1/threads/th-aa9ed42ec88e/land/challenge"}
 screenshot 15-other-commit-0-held.png
 screenshot 15-other-commit-1-moved.png
-POST /v1/threads/th-988c1134d4e2/land/challenge {"head":"6666666666666666666666666666666666666666","holds":["Always needs the person: pylon image rebuilds, as it changes images/pylon/Dockerfile."]}
-=> 404 {"error":"no route /v1/threads/th-988c1134d4e2/land/challenge"}
+POST /v1/threads/th-6754eafed050/land/challenge {"head":"6666666666666666666666666666666666666666","holds":["Always needs the person: pylon image rebuilds, as it changes images/pylon/Dockerfile."]}
+=> 404 {"error":"no route /v1/threads/th-6754eafed050/land/challenge"}
 (there is no challenge to sign)
 PR #46 moved to 7777777777777777777777777777777777777777, and the reviewer approved it there. The driver sends the assertion for 6666666666666666666666666666666666666666 to land 7777777777777777777777777777777777777777:
-POST /v1/threads/th-988c1134d4e2/land {"head":"7777777777777777777777777777777777777777","waiver":{"holds":["Always needs the person: pylon image rebuilds, as it changes images/pylon/Dockerfile."],"assertion":null}}
+POST /v1/threads/th-6754eafed050/land {"head":"7777777777777777777777777777777777777777","waiver":{"holds":["Always needs the person: pylon image rebuilds, as it changes images/pylon/Dockerfile."],"assertion":null}}
 => 400 {"error":"✖ Unrecognized key: \"waiver\""}
 The review is still needs-person at 7777777777777777777777777777777777777777.
 screenshot 16-not-deployer.png
 As the laptop, a deployer, the driver had the passkey sign a waiver for 7777777777777777777777777777777777777777:
-POST /v1/threads/th-988c1134d4e2/land/challenge {"head":"7777777777777777777777777777777777777777","holds":["Always needs the person: pylon image rebuilds, as it changes images/pylon/Dockerfile."]}
-=> 404 {"error":"no route /v1/threads/th-988c1134d4e2/land/challenge"}
+POST /v1/threads/th-6754eafed050/land/challenge {"head":"7777777777777777777777777777777777777777","holds":["Always needs the person: pylon image rebuilds, as it changes images/pylon/Dockerfile."]}
+=> 404 {"error":"no route /v1/threads/th-6754eafed050/land/challenge"}
 (there is no challenge to sign)
 Then, as the phone:
-POST /v1/threads/th-988c1134d4e2/land/challenge {"head":"7777777777777777777777777777777777777777","holds":["Always needs the person: pylon image rebuilds, as it changes images/pylon/Dockerfile."]}
-=> 404 {"error":"no route /v1/threads/th-988c1134d4e2/land/challenge"}
-POST /v1/threads/th-988c1134d4e2/land {"head":"7777777777777777777777777777777777777777","waiver":{"holds":["Always needs the person: pylon image rebuilds, as it changes images/pylon/Dockerfile."],"assertion":null}}
+POST /v1/threads/th-6754eafed050/land/challenge {"head":"7777777777777777777777777777777777777777","holds":["Always needs the person: pylon image rebuilds, as it changes images/pylon/Dockerfile."]}
+=> 404 {"error":"no route /v1/threads/th-6754eafed050/land/challenge"}
+POST /v1/threads/th-6754eafed050/land {"head":"7777777777777777777777777777777777777777","waiver":{"holds":["Always needs the person: pylon image rebuilds, as it changes images/pylon/Dockerfile."],"assertion":null}}
 => 400 {"error":"✖ Unrecognized key: \"waiver\""}
 The review is still needs-person.
