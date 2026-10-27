@@ -21,6 +21,7 @@ loop='deleted|Claude launch|pylon follows'
 mutate "the node lists or routes it" registry.ts 's/ OR p.id IN (SELECT value FROM json_each($present))/ OR (0 AND p.id IN (SELECT value FROM json_each($present)))/' src/control/loop.test.ts "$loop"
 mutate "a job is sent" registry.ts 's/ OR p.submitted IS NOT NULL//' src/control/loop.test.ts "$loop"
 mutate "a preview port is kept" registry.ts 's/ OR EXISTS (SELECT 1 FROM previews WHERE pylon = p.id)//' src/control/loop.test.ts "$loop"
+mutate "a retry is pending" registry.ts 's/ OR p.retrying = 1//' src/control/loop.test.ts "$loop"
 mutate "a Claude launch is starting" registry.ts "s/ OR EXISTS (SELECT 1 FROM claude_workers WHERE thread = t.id AND state = 'starting')//" src/control/loop.test.ts "$loop"
 mutate "the reader release's check that the service is open" claude-conversation.ts 's/    if (!closed \&\& r.reading === null/    if (r.reading === null/' src/control/claude-conversation.test.ts .
 mutate "the reader release's check that nothing watches" claude-conversation.ts 's/ \&\& r.watchers.size === 0 \&\& registry/ \&\& registry/' src/control/claude-conversation.test.ts .

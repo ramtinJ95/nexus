@@ -53,6 +53,7 @@ The tests below pin what a person or the node would see. `new-tests-main.txt` ru
 
 - a deleted thread's pylon that is gone is torn down again whenever its node lists or routes it again,
 - a deleted thread's ports go back after a restart between its delete and their release,
+- a deleted thread whose pylon was retried just before the delete settles the retry, though its pylon is gone,
 - a deleted thread whose Claude launch was cut off has the launch failed, though its pylon is gone,
 - and the existing deleted-thread tests.
 
@@ -63,6 +64,6 @@ The tests below pin what a person or the node would see. `new-tests-main.txt` ru
 - a watch of a deleted thread keeps its reader, so closing the service still ends the watch,
 - and a deleted thread's reader goes once its last read and its last watch end, while an active thread's stays.
 
-`mutations.sh` removes each clause of the query, and each guard and call of the reader's release, in turn, and runs those tests. Each removal fails at least one test (`mutations.txt`). The `retrying` clause has no test. The API refuses a retry of a deleted thread's pylon, so the clause covers only a retry made just before the delete.
+`mutations.sh` removes each clause of the query, and each guard and call of the reader's release, in turn, and runs those tests. Each removal fails at least one test (`mutations.txt`). The API refuses a retry of a deleted thread's pylon, so the `retrying` clause covers a retry made just before the delete, which a loop test pins: the pass settles the retry, and only then leaves the pylon out.
 
 The full suite, `npm test`, passed with 1208 tests on the branch rebased onto cf2558c, and `npm run typecheck` passed.

@@ -1097,6 +1097,20 @@ test("a deleted thread's ports go back after a restart between its delete and th
   assert.deepEqual(fake.submitted, []);
 });
 
+test("a deleted thread whose pylon was retried just before the delete settles the retry, though its pylon is gone", async (t) => {
+  const registry = openRegistry(tempDb());
+  const thread = seed(registry);
+  registry.savePylon({ ...registry.pylon(thread.pylonId)!, failed: "gave up" });
+  assert.ok(registry.retryPylon(thread.pylonId));
+  registry.setThreadStatus(thread.id, "deleted");
+  const fake = fakeNode({ autoFinish: true });
+  const loop = run(t, registry, fake.probe);
+  await until("the retry is settled", () => registry.pylon(thread.pylonId)?.retrying === false);
+  await settled(fake, loop);
+  assert.deepEqual(registry.pylonIdsToTick(node, []), [], "once settled, the pass leaves the pylon out");
+  assert.deepEqual(fake.submitted, []);
+});
+
 test("a deleted thread whose Claude launch was cut off has the launch failed, though its pylon is gone", async (t) => {
   const registry = openRegistry(tempDb());
   const thread = seed(registry);
