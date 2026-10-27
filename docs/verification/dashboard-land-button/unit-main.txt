@@ -1,0 +1,41 @@
+✖ a review held for the person says why on its builder's page, and a deployer can land it after confirming the PR and commit (40.178885ms)
+✖ a hold that every landing of the commit meets again is marked, and offers no Land button (20.585946ms)
+✖ a landing shows its steps as the review moves through them, until it lands or ends for the person (22.516847ms)
+ℹ tests 3
+ℹ suites 0
+ℹ pass 0
+ℹ fail 3
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 299.705439
+
+✖ failing tests:
+
+test at src/control/dashboard.test.ts:257:1
+✖ a review held for the person says why on its builder's page, and a deployer can land it after confirming the PR and commit (40.178885ms)
+  TypeError [Error]: Cannot read properties of null (reading '1')
+      at landingOf (file://<main worktree>/src/control/dashboard.test.ts:255:111)
+      at TestContext.<anonymous> (file://<main worktree>/src/control/dashboard.test.ts:262:18)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:387:3)
+
+test at src/control/dashboard.test.ts:288:1
+✖ a hold that every landing of the commit meets again is marked, and offers no Land button (20.585946ms)
+  TypeError [Error]: Cannot read properties of null (reading '1')
+      at landingOf (file://<main worktree>/src/control/dashboard.test.ts:255:111)
+      at TestContext.<anonymous> (file://<main worktree>/src/control/dashboard.test.ts:295:25)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7)
+
+test at src/control/dashboard.test.ts:304:1
+✖ a landing shows its steps as the review moves through them, until it lands or ends for the person (22.516847ms)
+  TypeError [Error]: Cannot read properties of null (reading '1')
+      at landingOf (file://<main worktree>/src/control/dashboard.test.ts:255:111)
+      at steps (file://<main worktree>/src/control/dashboard.test.ts:309:20)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async TestContext.<anonymous> (file://<main worktree>/src/control/dashboard.test.ts:313:20)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7)

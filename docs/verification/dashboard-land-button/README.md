@@ -55,6 +55,10 @@ exit 3
 
 `12-nexus-land-reserved.txt` and `13-show-reserved-after-land.txt` show why reserved holds get no button. `nexus land` on #42 starts a landing, and it ends in `needs-person` with the same two reasons. That is so on main too.
 
+## Unit tests
+
+`unit-main.txt` is the branch's `src/control/dashboard.test.ts` run against main's code, and `unit-branch.txt` the same file on the branch. Its three landing tests fail on main, where the page has no landing region, and pass on the branch.
+
 ## What this does not prove
 
 - Real GitHub, a real check pylon and a real deploy. `review-flow` covers those paths with a real check script and merge on a local repository.
