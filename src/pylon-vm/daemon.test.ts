@@ -42,12 +42,18 @@ async function controller(t: TestContext) {
 			req.on("error", reject);
 			req.end(JSON.stringify({ action: "inspect", name }));
 		});
+	const until = async (done: () => boolean) => {
+		while (!done()) {
+			if (child.exitCode !== null) throw new Error(`controller exited ${child.exitCode}:\n${log}`);
+			await delay(10);
+		}
+	};
 	/** Fails one accept on the controller's server, and resolves once the controller has handled it. */
 	const failAccept = async (n: number) => {
 		child.kill("SIGUSR2");
-		while (!log.includes(`injected accept error ${n}\n`)) await delay(10);
+		await until(() => log.includes(`injected accept error ${n}\n`));
 	};
-	while (!existsSync(join(dir, "control.sock"))) await delay(10);
+	await until(() => existsSync(join(dir, "control.sock")));
 	return { dir, child, exited, inspect, failAccept, log: () => log };
 }
 
