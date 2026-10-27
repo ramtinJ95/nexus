@@ -1,0 +1,128 @@
+$ nexus threads --all --json
+[
+  {
+    "id": "th-9278de74f13b",
+    "title": "A1: change the shared file",
+    "project": "wave",
+    "pylonId": "pylon-th-9278de74f13b",
+    "status": "active",
+    "conversationId": "2",
+    "startedBy": "nVERIFYCONTROL",
+    "createdAt": 1793115807871,
+    "agentTurnRunning": false,
+    "lastAgentActivityAt": 0,
+    "lastHumanActivityAt": 1793115807871,
+    "seenAt": null,
+    "lastReplyAt": null,
+    "placement": {
+      "how": "default",
+      "node": "node-a"
+    },
+    "setup": {
+      "how": "fresh",
+      "reason": "the control plane could not read .nexus/setup at main: the control plane reads only https:// remotes, and holds no SSH key for git@github.com:verify/wave.git"
+    },
+    "working": false,
+    "attention": null,
+    "desired": "running",
+    "pylon": {
+      "node": "node-a",
+      "actualState": "running",
+      "failed": null
+    }
+  },
+  {
+    "id": "th-f2a20fb930f3",
+    "title": "A2: change the shared file",
+    "project": "wave",
+    "pylonId": "pylon-th-f2a20fb930f3",
+    "status": "active",
+    "conversationId": "9",
+    "startedBy": "nVERIFYCONTROL",
+    "createdAt": 1793115808480,
+    "agentTurnRunning": false,
+    "lastAgentActivityAt": 0,
+    "lastHumanActivityAt": 1793115808480,
+    "seenAt": null,
+    "lastReplyAt": null,
+    "placement": {
+      "how": "default",
+      "node": "node-a"
+    },
+    "setup": {
+      "how": "fresh",
+      "reason": "the control plane could not read .nexus/setup at main: the control plane reads only https:// remotes, and holds no SSH key for git@github.com:verify/wave.git"
+    },
+    "working": false,
+    "attention": null,
+    "desired": "running",
+    "pylon": {
+      "node": "node-a",
+      "actualState": "running",
+      "failed": null
+    }
+  },
+  {
+    "id": "th-0f536846fb1b",
+    "title": "A3: change the shared file",
+    "project": "wave",
+    "pylonId": "pylon-th-0f536846fb1b",
+    "status": "active",
+    "conversationId": "16",
+    "startedBy": "nVERIFYCONTROL",
+    "createdAt": 1793115809049,
+    "agentTurnRunning": false,
+    "lastAgentActivityAt": 0,
+    "lastHumanActivityAt": 1793115809049,
+    "seenAt": null,
+    "lastReplyAt": null,
+    "placement": {
+      "how": "default",
+      "node": "node-a"
+    },
+    "setup": {
+      "how": "fresh",
+      "reason": "the control plane could not read .nexus/setup at main: the control plane reads only https:// remotes, and holds no SSH key for git@github.com:verify/wave.git"
+    },
+    "working": false,
+    "attention": null,
+    "desired": "running",
+    "pylon": {
+      "node": "node-a",
+      "actualState": "running",
+      "failed": null
+    }
+  },
+  {
+    "id": "th-a54de3e821b5",
+    "title": "A4: change the shared file",
+    "project": "wave",
+    "pylonId": "pylon-th-a54de3e821b5",
+    "status": "active",
+    "conversationId": "23",
+    "startedBy": "nVERIFYCONTROL",
+    "createdAt": 1793115809552,
+    "agentTurnRunning": false,
+    "lastAgentActivityAt": 0,
+    "lastHumanActivityAt": 1793115809552,
+    "seenAt": null,
+    "lastReplyAt": null,
+    "placement": {
+      "how": "default",
+      "node": "node-a"
+    },
+    "setup": {
+      "how": "fresh",
+      "reason": "the control plane could not read .nexus/setup at main: the control plane reads only https:// remotes, and holds no SSH key for git@github.com:verify/wave.git"
+    },
+    "working": false,
+    "attention": null,
+    "desired": "running",
+    "pylon": {
+      "node": "node-a",
+      "actualState": "running",
+      "failed": null
+    }
+  }
+]
+[exit 0]

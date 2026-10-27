@@ -1,0 +1,19 @@
+$ node --test src/control/queue.test.ts src/control/pr-watch.test.ts src/control/registry.test.ts src/control/api.test.ts src/cli/nexus.test.ts src/control/dashboard.test.ts   # main 918e471 with this branch's test files
+ℹ fail 15
+ℹ pass 72
+ℹ tests 87
+✖ a queued thread's row and its queue record's start commit together, and a record no longer queued starts nothing (25.628856ms)
+✖ a registry from before failure messages keeps its pylons' attempts (139.157946ms)
+✖ a registry from before node-unique preview ports keeps its previews (121.26928ms)
+✖ a registry from before pylon retries opens with no retry under way, and a retry marks only a failed pylon (138.229978ms)
+✖ a registry from before repository kinds reads every stored repo, booted or submitted, as a clone (67.698223ms)
+✖ a registry from before session states keeps its sessions as running in their panes, and holds each state to its fields (65.985085ms)
+✖ a registry from before session titles keeps its sessions, untitled until they are observed again (93.127489ms)
+✖ a thread a queued thread waits for has its PR's merge seen when archived, capped or closed, and only then (13.617189ms)
+✖ a turn running before turn starts were recorded has no known start (124.528264ms)
+✖ adding PR watches preserves the shared seen and reply markers from schema 8 (132.040431ms)
+✖ seen and reply timestamps migrate from null and persist without activity (147.2748ms)
+✖ src/cli/nexus.test.ts (627.918925ms)
+✖ src/control/api.test.ts (636.042953ms)
+✖ src/control/dashboard.test.ts (620.201596ms)
+✖ src/control/queue.test.ts (505.352548ms)

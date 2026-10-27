@@ -1,0 +1,3 @@
+$ nexus start-queued th-000000000000
+[stderr] nexus: unknown command start-queued. Run nexus --help for usage
+[exit 64]

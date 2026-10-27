@@ -1,0 +1,36 @@
+$ nexus threads --queued --all --json
+[
+  {
+    "id": "th-67976bff43f9",
+    "title": "D: build on A4",
+    "project": "wave",
+    "startedBy": "nVERIFYCONTROL",
+    "createdAt": 1793116093841,
+    "status": "archived",
+    "after": [
+      "th-b3f0eb62dfdb"
+    ],
+    "waits": [
+      {
+        "thread": "th-b3f0eb62dfdb",
+        "state": "waiting",
+        "why": "PR #4 is open"
+      }
+    ],
+    "blocked": false,
+    "node": "node-a",
+    "worker": "harness",
+    "model": null,
+    "prompt": "D: build on A4, after the earlier change landed",
+    "branch": null,
+    "commit": null,
+    "resources": {
+      "cpus": 1,
+      "memoryGiB": 3,
+      "diskGiB": 5
+    },
+    "startNow": null,
+    "lastError": null
+  }
+]
+[exit 0]

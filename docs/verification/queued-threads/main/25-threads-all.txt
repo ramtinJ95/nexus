@@ -1,0 +1,6 @@
+$ nexus threads --all
+th-9278de74f13b  active  -  pylon running  wave  4m ago  A1: change the shared file
+th-f2a20fb930f3  active  -  pylon running  wave  4m ago  A2: change the shared file
+th-0f536846fb1b  active  -  pylon running  wave  4m ago  A3: change the shared file
+th-a54de3e821b5  active  -  pylon running  wave  4m ago  A4: change the shared file
+[exit 0]

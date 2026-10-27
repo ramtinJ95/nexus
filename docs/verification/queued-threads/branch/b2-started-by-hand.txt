@@ -1,0 +1,20 @@
+GET /threads/th-72c21d60b261
+wave
+/
+B2: build on A2
+new reply
+Archive
+Delete
+B2: build on A2
+
+th-72c21d60b261 · started just now · scripted
+
+You
+
+B2: build on A2, after the earlier change landed
+
+scripted answer after user
+
+scripted
+⌘↵ to send
+Send

@@ -1,0 +1,3 @@
+$ nexus show th-000000000000
+[stderr] nexus: no thread th-000000000000
+[exit 4]

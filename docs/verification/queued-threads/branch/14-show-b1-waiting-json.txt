@@ -1,0 +1,34 @@
+$ nexus show th-f33c35115749 --json
+{
+  "id": "th-f33c35115749",
+  "title": "B1: build on A1",
+  "project": "wave",
+  "startedBy": "nVERIFYCONTROL",
+  "createdAt": 1793116092058,
+  "status": "queued",
+  "after": [
+    "th-6c2b44fd9bf0"
+  ],
+  "waits": [
+    {
+      "thread": "th-6c2b44fd9bf0",
+      "state": "waiting",
+      "why": "PR #1 is open"
+    }
+  ],
+  "blocked": false,
+  "node": "node-a",
+  "worker": "harness",
+  "model": null,
+  "prompt": "B1: build on A1, after the earlier change landed",
+  "branch": null,
+  "commit": null,
+  "resources": {
+    "cpus": 1,
+    "memoryGiB": 3,
+    "diskGiB": 5
+  },
+  "startNow": null,
+  "lastError": null
+}
+[exit 0]

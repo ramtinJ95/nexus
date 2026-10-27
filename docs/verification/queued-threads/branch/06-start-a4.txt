@@ -1,0 +1,26 @@
+$ nexus start --project wave --title "A4: change the shared file" --json
+{
+  "id": "th-b3f0eb62dfdb",
+  "title": "A4: change the shared file",
+  "project": "wave",
+  "pylonId": "pylon-th-b3f0eb62dfdb",
+  "status": "active",
+  "conversationId": "23",
+  "startedBy": "nVERIFYCONTROL",
+  "createdAt": 1793116091614,
+  "agentTurnRunning": false,
+  "working": false,
+  "lastAgentActivityAt": 0,
+  "lastHumanActivityAt": 1793116091614,
+  "seenAt": null,
+  "lastReplyAt": null,
+  "placement": {
+    "how": "default",
+    "node": "node-a"
+  },
+  "setup": {
+    "how": "fresh",
+    "reason": "the control plane could not read .nexus/setup at main: the control plane reads only https:// remotes, and holds no SSH key for git@github.com:verify/wave.git"
+  }
+}
+[exit 0]

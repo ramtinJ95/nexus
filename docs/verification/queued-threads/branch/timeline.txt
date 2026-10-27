@@ -1,0 +1,67 @@
++   0.5s checkout <repo>/src
++   2.2s control plane is up
++   2.6s nexus --version -> exit 0 (01-version.txt)
++   3.1s nexus project add wave git@github.com:verify/wave.git --node node-a --cpus 1 --memory 3 --disk 5 -> exit 0 (02-project-add.txt)
++   3.9s backend: booted pylon-th-6c2b44fd9bf0
++   3.9s nexus start --project wave --title A1: change the shared file --json -> exit 0 (03-start-a1.txt)
++   3.9s A1 th-6c2b44fd9bf0 pushed feat-a1, and PR #1 opened
++   4.3s backend: booted pylon-th-618c907b24f6
++   4.3s nexus start --project wave --title A2: change the shared file --json -> exit 0 (04-start-a2.txt)
++   4.3s A2 th-618c907b24f6 pushed feat-a2, and PR #2 opened
++   4.7s backend: booted pylon-th-2614619b4937
++   4.7s nexus start --project wave --title A3: change the shared file --json -> exit 0 (05-start-a3.txt)
++   4.7s A3 th-2614619b4937 pushed feat-a3, and PR #3 opened
++   5.2s backend: booted pylon-th-b3f0eb62dfdb
++   5.2s nexus start --project wave --title A4: change the shared file --json -> exit 0 (06-start-a4.txt)
++   5.2s A4 th-b3f0eb62dfdb pushed feat-a4, and PR #4 opened
++   5.6s nexus start --project wave --title B1: build on A1 --after th-6c2b44fd9bf0 --message B1: build on A1, after the earlier change landed --json -> exit 0 (07-queue-b1.txt)
++   6.3s nexus start --project wave --title B2: build on A2 --after th-618c907b24f6 --message B2: build on A2, after the earlier change landed --json -> exit 0 (08-queue-b2.txt)
++   7.0s nexus start --project wave --title C: build on A3 --after th-2614619b4937 --message C: build on A3, after the earlier change landed --json -> exit 0 (09-queue-c.txt)
++   7.4s nexus start --project wave --title D: build on A4 --after th-b3f0eb62dfdb --message D: build on A4, after the earlier change landed --json -> exit 0 (10-queue-d.txt)
++   8.0s nexus threads -> exit 0 (11-threads-queued.txt)
++   8.4s nexus show th-f33c35115749 -> exit 0 (12-show-b1-no-pr-yet.txt)
++   8.4s backend boots so far: B1 0, B2 0, C 0, D 0
++ 243.1s A1's PR is linked after 234.7 s
++ 243.6s A4's PR is linked after 0.5 s
++ 244.0s nexus show th-f33c35115749 -> exit 0 (13-show-b1-waiting.txt)
++ 244.5s nexus show th-f33c35115749 --json -> exit 0 (14-show-b1-waiting-json.txt)
++ 246.7s dashboard / -> home-queued.png
++ 248.4s dashboard /threads/th-f33c35115749 -> b1-queued.png
++ 248.4s PR #1 (A1) merged outside any review
++ 248.4s PR #2 (A2) closed without merging
++ 362.3s backend: booted pylon-th-f33c35115749
++ 363.5s B1 started after 115.1 s
++ 364.0s B2 is blocked after 0.5 s
++ 364.3s nexus show th-6c2b44fd9bf0 -> exit 0 (15-show-a1-merged.txt)
++ 364.7s nexus show th-f33c35115749 -> exit 0 (16-show-b1-started.txt)
++ 365.2s B1's first message has its scripted answer after 0.5 s
++ 365.7s nexus conversation th-f33c35115749 -> exit 0 (17-conversation-b1.txt)
++ 366.1s nexus show th-72c21d60b261 -> exit 0 (18-show-b2-blocked.txt)
++ 367.7s dashboard / -> home-blocked.png
++ 369.5s dashboard /threads/th-72c21d60b261 -> b2-blocked.png
++ 370.2s backend: booted pylon-th-72c21d60b261
++ 370.2s nexus start-queued th-72c21d60b261 -> exit 0 (19-start-queued-b2.txt)
++ 370.7s nexus show th-72c21d60b261 -> exit 0 (20-show-b2-started-by-hand.txt)
++ 372.5s dashboard /threads/th-72c21d60b261 -> b2-started-by-hand.png
++ 374.2s clicked Archive on D's dashboard page
++ 374.7s nexus show th-67976bff43f9 -> exit 0 (21-show-d-cancelled.txt)
++ 374.7s == restart: the control plane stops and starts again while C waits for PR #3
++ 376.2s control plane is up
++ 376.7s nexus show th-ba61c796fe01 -> exit 0 (22-show-c-after-restart.txt)
++ 376.9s C's dashboard page is open, and stays open across the restart and C's start: queued page true
++ 376.9s control plane stopped
++ 376.9s PR #3 (A3) merged while the control plane was down
++ 378.3s control plane is up
++ 393.4s backend: booted pylon-th-ba61c796fe01
++ 394.4s C started after 16.0 s
++ 395.0s C's first message has its scripted answer after 0.6 s
++ 403.0s the page left open on C, without navigating: queued page false, conversation true
++ 403.4s dashboard page left open on C -> c-page-left-open.png
++ 405.1s control plane is up
++ 425.6s nexus show th-ba61c796fe01 -> exit 0 (23-show-c-started.txt)
++ 426.3s nexus conversation th-ba61c796fe01 -> exit 0 (24-conversation-c.txt)
++ 427.0s nexus threads --all -> exit 0 (25-threads-all.txt)
++ 427.6s nexus threads --all --json -> exit 0 (26-threads-all-json.txt)
++ 428.1s nexus threads --queued --all --json -> exit 0 (27-threads-queued-json.txt)
++ 429.8s dashboard / -> home-end.png
++ 429.8s backend boots: B1 1, B2 1, C 1, D 0

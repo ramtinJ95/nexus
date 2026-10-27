@@ -1,0 +1,5 @@
+$ nexus conversation th-ba61c796fe01
+> C: build on A3, after the earlier change landed
+
+scripted answer after user
+[exit 0]
