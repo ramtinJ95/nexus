@@ -1,0 +1,2 @@
+$ nexus delete th-4f68310b1091
+Deleted th-4f68310b1091.

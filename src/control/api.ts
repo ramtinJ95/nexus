@@ -21,7 +21,7 @@ import { canDeploy, commitSchema, isReporter, releaseView, reportSchema, resolve
  * on the allowlist. The API writes only what a human asks for. Every change that can move a pylon
  * wakes the loop for its node, so a start or a dashboard visit acts within one pass rather than 5 seconds.
  */
-import { attentionOf, type Attention } from "./attention.ts";
+import type { Attention } from "./attention.ts";
 import { once } from "node:events";
 import { createServer as createHttpsServer } from "node:https";
 import { TLSSocket } from "node:tls";
@@ -54,7 +54,7 @@ import { BodyTooLarge, readBody } from "../request-body.ts";
 import { imagesView, type ImageOperation, type ImageRollout } from "./image-rollout.ts";
 import type { StartRequest } from "./threads.ts";
 import { nodePylons, overcommitted, type NodePylons } from "./placement.ts";
-import { maxRounds, needsPerson, type Review, type ReviewLoop } from "./review.ts";
+import { maxRounds, type Review, type ReviewLoop } from "./review.ts";
 
 export interface ApiOptions {
   https?: { port: number; certificate(): Promise<Certificate>; renewalMs?: number; retryMs?: number };
@@ -384,14 +384,9 @@ export async function startApi(options: ApiOptions): Promise<Api> {
     });
   }
 
-  function attention(t: Thread, failed: string | null): Attention {
-    const parked = t.conversationId !== null && t.status !== "deleted" && harness.activity.parked(t.id).length > 0;
-    return attentionOf(failed !== null || ["failed", "stalled"].includes(registry.claudeWorker(t.id)?.state ?? ""), parked, t.lastReplyAt, t.seenAt, t.agentTurnRunning || t.sessionTurnRunning === true, t.sessionWaiting, needsPerson(registry.review(t.id)), t.usageLimit !== undefined);
-  }
-
   function row(t: Thread): ThreadRow {
     const { node, actualState, failed } = pylonOf(t);
-    return { ...t, attention: attention(t, failed), desired: desiredPhase(t, Date.now()), pylon: { node, actualState, failed } };
+    return { ...t, attention: registry.attention(t.id), desired: desiredPhase(t, Date.now()), pylon: { node, actualState, failed } };
   }
 
   function detail(t: Thread): ThreadDetail {
@@ -402,7 +397,7 @@ export async function startApi(options: ApiOptions): Promise<Api> {
     return {
       thread: t,
       ...(worker === undefined ? {} : { claudeWorker: { model: worker.model, state: worker.state, ...(worker.message === undefined ? {} : { message: worker.message }) } }),
-      attention: attention(t, pylon.failed), seenAt: t.seenAt, lastReplyAt: t.lastReplyAt,
+      attention: registry.attention(t.id), seenAt: t.seenAt, lastReplyAt: t.lastReplyAt,
       desired: desiredPhase(t, Date.now()),
       pylon: pylonOf(t),
       sessions: registry.sessions(pylon.pylonId),

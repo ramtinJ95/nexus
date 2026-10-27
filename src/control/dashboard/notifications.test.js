@@ -15,6 +15,14 @@ test("initial states are silent; failures and parked notify immediately", () => 
   assert.deepEqual(events.map((r) => r.attention), ["parked", "failed", "decision"]);
   assert.equal(badgeCount([row("decision"), row("working")]), 1);
 });
+test("a session waiting on the person counts in the badge and notifies at once, as its row stays bright", () => {
+  const events = [];
+  const update = coordinator((r) => events.push(r));
+  update([row("working")], 0);
+  update([row("waiting")], 1);
+  assert.deepEqual(events.map((r) => r.attention), ["waiting"]);
+  assert.equal(badgeCount([row("waiting"), row("working"), row(null)]), 1);
+});
 test("reply waits two seconds, and a follow-up cancels even when unread reply outranks working", () => {
   const events = [];
   const update = coordinator((r) => events.push(r));

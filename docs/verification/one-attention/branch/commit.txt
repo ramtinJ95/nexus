@@ -1,0 +1,1 @@
+branch: ae4bbc2 refactor(control): compute attention's working input from Thread.working

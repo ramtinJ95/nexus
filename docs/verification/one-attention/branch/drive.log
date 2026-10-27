@@ -1,0 +1,52 @@
+home {
+  "title": "(3) Nexus",
+  "favicon": "red badge",
+  "toasts": [],
+  "focused": true,
+  "rows": [
+    "dim    Spike: preview over HTTPS now",
+    "bright Fix the flaky stream test now",
+    "dim    Pick a migration path working 3s",
+    "bright Rename the fork button now",
+    "bright Answer the reviewer now"
+  ]
+}
+screenshot 01-home.png
+after "Pick a migration path" moved from working to waiting {
+  "title": "(4) Nexus",
+  "favicon": "red badge",
+  "toasts": [
+    "Pick a migration path: waiting for input"
+  ],
+  "focused": true,
+  "rows": [
+    "dim    Spike: preview over HTTPS now",
+    "bright Fix the flaky stream test now",
+    "bright Pick a migration path now",
+    "bright Rename the fork button now",
+    "bright Answer the reviewer now"
+  ]
+}
+screenshot 02-session-waits.png
+$ nexus events --thread th-4f68310b1091 --kind attention.changed
+8 2026-10-27T13:09:50.213Z th-4f68310b1091 attention.changed {"attention":"parked"}
+
+$ nexus delete th-4f68310b1091
+Deleted th-4f68310b1091.
+
+$ nexus show th-4f68310b1091
+th-4f68310b1091  Fix the flaky stream test
+project: nexus
+attention: none
+status: deleted
+pylon: pylon-th-4f68310b1091 on verify-node, running, observed 0s ago
+size: 2 CPUs, 4 GiB memory, 10 GiB disk
+placement: verify-node, the project's default node
+setup: fresh boot runs .nexus/setup, because the control plane could not read .nexus/setup at main: the stack reads no remote
+PR watch: off (no control-plane GitHub token configured)
+
+$ nexus events --thread th-4f68310b1091 --kind attention.changed
+8 2026-10-27T13:09:50.213Z th-4f68310b1091 attention.changed {"attention":"parked"}
+14 2026-10-27T13:09:58.696Z th-4f68310b1091 attention.changed {"attention":null}
+
+deleted parked thread: show says attention null, the event stream last said null, they agree

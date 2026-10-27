@@ -1,4 +1,4 @@
-import { attentionOf } from "./attention.ts";
+import { attentionOf, type Attention } from "./attention.ts";
 import { pylonEventSchema } from "../events.ts";
 import type { ReportedEvent } from "../events.ts";
 import { eventCursor, sessionActivityTtlMs, maxActiveSessions, type EventFilter, type EventKind, type NexusEvent } from "../events.ts";
@@ -518,7 +518,7 @@ export function openRegistry(path: string, clock = Date.now) {
     const p = q.pylon.get(t.pylonId);
     const workerFailed = ["failed", "stalled"].includes(String(sql("SELECT state FROM claude_workers WHERE thread = ?").get(id)?.state));
     const decision = needsPerson(jsonOrNull<Review>(sql("SELECT record FROM reviews WHERE builder = ?").get(id)?.record ?? null));
-    const attention = attentionOf(p?.failed != null || workerFailed, old?.parked === 1, t.lastReplyAt, t.seenAt, t.agentTurnRunning || t.sessionTurnRunning === true, t.sessionWaiting, decision, t.usageLimit !== undefined);
+    const attention = attentionOf(p?.failed != null || workerFailed, old?.parked === 1, t.lastReplyAt, t.seenAt, t.working, t.sessionWaiting, decision, t.usageLimit !== undefined);
     if ((old?.attention ?? null) === attention) return;
     sql("INSERT INTO thread_attention (thread, attention) VALUES (?, ?) ON CONFLICT(thread) DO UPDATE SET attention = excluded.attention").run(id, attention);
     appendEvent("attention.changed", id, { attention });
@@ -575,11 +575,18 @@ export function openRegistry(path: string, clock = Date.now) {
   const setting = (key: string): string | null => ((q.setting.get(key) as Row | undefined)?.value ?? null) as string | null;
 
   pruneSessions();
+  // A release that computes attention differently, or a thread from before attention was stored, is right from the start.
+  // A thread deleted before deletes cleared the parked flag kept it, and the harness no longer tracks it to report.
+  transaction(() => {
+    sql("UPDATE thread_attention SET parked = 0 WHERE thread IN (SELECT id FROM threads WHERE status = 'deleted')").run();
+    for (const { id } of sql("SELECT id FROM threads").all()) updateAttention(id as ThreadId);
+  });
 
   return {
     close() { db.close(); },
     appendEvent,
     pruneSessions,
+    attention: (id: ThreadId): Attention => (sql("SELECT attention FROM thread_attention WHERE thread = ?").get(id)?.attention ?? null) as Attention,
     recordParked(id: ThreadId, parked: boolean) {
       // The harness reports on every change of a thread's live document, and nearly every report repeats the stored value.
       if (sql("SELECT parked FROM thread_attention WHERE thread = ?").get(id)?.parked === (parked ? 1 : 0)) return;
@@ -826,6 +833,8 @@ export function openRegistry(path: string, clock = Date.now) {
         q.threadStatus.run(status, id);
         if (status === "archived" || status === "deleted") sql("DELETE FROM session_activity WHERE thread = ?").run(id);
         if (status === "deleted") {
+          // The delete aborts the run, so nothing is left to retry, and the harness stops tracking the thread without a report.
+          sql("UPDATE thread_attention SET parked = 0 WHERE thread = ?").run(id);
           for (const table of ["session_order", "session_order_floor", "claude_transcripts", "claude_entries", "claude_messages"]) sql(`DELETE FROM ${table} WHERE thread = ?`).run(id);
         }
         updateAttention(id);

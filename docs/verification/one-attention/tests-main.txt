@@ -1,0 +1,62 @@
+$ git log --oneline -1
+c3bd683 test: show attention disagreeing between the API and its events, and waiting between row and badge
+$ node --test --test-name-pattern="waiting on the person|event stream last reported" src/control/dashboard/notifications.test.js src/control/api.test.ts
+✖ the API reports the attention the event stream last reported, and a deleted thread's run is not parked (107.747878ms)
+✖ a session waiting on the person counts in the badge and notifies at once, as its row stays bright (13.023085ms)
+ℹ tests 2
+ℹ suites 0
+ℹ pass 0
+ℹ fail 2
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 1096.475242
+
+✖ failing tests:
+
+test at src/control/api.test.ts:1680:1
+✖ the API reports the attention the event stream last reported, and a deleted thread's run is not parked (107.747878ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
+  + actual - expected
+  
+    [
+      null,
+  +   'parked'
+  -   null
+    ]
+  
+      at TestContext.<anonymous> (file://<worktree>/src/control/api.test.ts:1688:10)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:387:3) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: [ null, 'parked' ],
+    expected: [ null, null ],
+    operator: 'deepStrictEqual',
+    diff: 'simple'
+  }
+
+test at src/control/dashboard/notifications.test.js:18:1
+✖ a session waiting on the person counts in the badge and notifies at once, as its row stays bright (13.023085ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
+  + actual - expected
+  
+  + []
+  - [
+  -   'waiting'
+  - ]
+  
+      at TestContext.<anonymous> (file://<worktree>/src/control/dashboard/notifications.test.js:23:10)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1402:25)
+      at Test.start (node:internal/test_runner/test:1262:17)
+      at startSubtestAfterBootstrap (node:internal/test_runner/harness:387:17) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: [],
+    expected: [ 'waiting' ],
+    operator: 'deepStrictEqual',
+    diff: 'simple'
+  }
+exit 1

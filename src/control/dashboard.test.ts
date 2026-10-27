@@ -9,7 +9,7 @@ import { startApi } from "./api.ts";
 import { threadStarter } from "./threads.ts";
 import { readEvents } from "./event-reader.ts";
 import { fakeHarness } from "./fake-harness.ts";
-import { openRegistry, type Thread } from "./registry.ts";
+import { openRegistry, type Thread, type ThreadId } from "./registry.ts";
 import type { JobId, NodeName, PylonObservation, ServiceFact, TailnetNodeId } from "../protocol.ts";
 import type { ImageId } from "../images.ts";
 import { githubTokenGrant } from "../project.ts";
@@ -41,7 +41,7 @@ async function setup(t: TestContext) {
   const registry = openRegistry(join(dir, `${randomUUID()}.db`));
   registry.upsertNode({ name: node, tailnetHost: "rj-firebat.tail.ts.net", tailnetNodeId: "nFIREBAT" as TailnetNodeId });
   let caller: TailnetNodeId | null = laptop;
-  const fake = fakeHarness();
+  const fake = fakeHarness({ onParked: (id, parked) => registry.recordParked(id as ThreadId, parked) });
   const api = await startApi({
     registry, host: "127.0.0.1", port: 0,
     whois: async () => caller,
