@@ -23,6 +23,7 @@ import type { SessionHarness } from "./project.ts";
 
 export const herdrSession = "nexus";
 export const sessionsFile = "/home/user/.nexus/sessions.json";
+/** Where the repository is checked out in every pylon. */
 export const checkoutDir = "/home/user/workspace/repo";
 
 const home = "/home/user";

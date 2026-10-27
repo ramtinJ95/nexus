@@ -27,7 +27,6 @@ import type { ConversationId, DocumentReader } from "@earendil-works/pi-durable"
 import type { ExecutionEnv } from "@earendil-works/pi-durable/env";
 import { createEnvConformance } from "@earendil-works/pi-durable/testing";
 import { pylonEnvs } from "./harness/pylon-env.ts";
-import { pylonRepoPath } from "./harness/host.ts";
 import { fakeTailscale, nodeHost, viaGateway } from "./probe/fake-tailscale.ts";
 import { nodeSecrets } from "./probe/config.ts";
 import { startProbe } from "./probe/server.ts";
@@ -123,13 +122,13 @@ async function piEnv(): Promise<void> {
   try {
     const read = { snapshot: async () => ({ threadId: `check-${run}`, pylonId }) } as unknown as DocumentReader;
     const envAt = (cwd: string) => envs.env({ conversationId: 1 as ConversationId, cwd, read }, context) as Promise<ExecutionEnv>;
-    const base = await envAt(pylonRepoPath);
+    const base = await envAt(checkoutDir);
     const started = performance.now();
     let output = "";
     const hello = await base.exec(["sh", "-c", "echo hello; id -un; pwd"], { onOutput: (text) => { output += text; } }, context);
     step("PI_ENV_FIRST_EXEC_MS", String(Math.round(performance.now() - started)));
     assert.ok(hello.ok && hello.value.exitCode === 0, JSON.stringify(hello));
-    assert.equal(output, `hello\nuser\n${pylonRepoPath}\n`, "the daemon runs as user in the checkout");
+    assert.equal(output, `hello\nuser\n${checkoutDir}\n`, "the daemon runs as user in the checkout");
     const cases = createEnvConformance({
       assertions: {
         ok: (value: unknown, message?: string) => message === undefined ? assert.ok(value) : assert.ok(value, message),
