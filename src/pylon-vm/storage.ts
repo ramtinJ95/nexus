@@ -8,7 +8,6 @@ import {
 } from "node:fs/promises";
 import { join } from "node:path";
 import { recordSchema, type SandboxRecord } from "./contracts.ts";
-export { shellQuote } from "../project.ts";
 
 export function directory(
 	root: string,

@@ -3,7 +3,7 @@ import { StringDecoder } from "node:string_decoder";
 import type { VM } from "@earendil-works/gondolin";
 import { z } from "zod";
 import { checked, guestExists } from "./guest.ts";
-import { shellQuote as q } from "./storage.ts";
+import { shellQuote as q } from "../project.ts";
 
 const root = "/var/lib/pi-sandbox/commands";
 const completedLimit = 128;

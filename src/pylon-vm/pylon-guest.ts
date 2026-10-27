@@ -13,7 +13,8 @@ import { processStream } from "../process-stream.ts";
 import type { PylonId } from "../protocol.ts";
 import type { PylonLog } from "../session-wake.ts";
 import { statusSchema } from "./contracts.ts";
-import { existsError, shellQuote as q } from "./storage.ts";
+import { shellQuote as q } from "../project.ts";
+import { existsError } from "./storage.ts";
 
 /** A login shell as `user`, in `cwd`. The fork runs guest commands as root. */
 export const asUser = (script: string, cwd: string) => `runuser -l user -c ${q(`cd ${q(cwd)} && ${script}`)}`;

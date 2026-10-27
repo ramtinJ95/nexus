@@ -18,7 +18,7 @@ import { z } from "zod";
 import { artifactDirectory, manifestFiles, tarCodec } from "./artifacts.ts";
 import { JobFailure, type ArtifactStore, type BackendPylon, type Guest, type SecretSource, type VmBackend } from "./backend.ts";
 import { buildImage as buildPylonImage } from "./image-build.ts";
-import { chatgptTokenGrant, type BootInputs, type CloneRepo, type LiveSpec, type RepoInit } from "./project.ts";
+import { chatgptTokenGrant, type BootInputs, type CloneRepo, type LiveSpec, type RepoInit, shellQuote as q } from "./project.ts";
 import { isImageId, isTemplateId, type PausedSession, type PylonId } from "./protocol.ts";
 import { imageIdOf, type ArtifactId, type CheckpointId, type ImageId, type PortableArtifactId, type TemplateManifest } from "./images.ts";
 import * as templates from "./pylon-vm-templates.ts";
@@ -29,7 +29,7 @@ import { controlSocket, run, socketPathLimit } from "./pylon-vm/client.ts";
 import { statusSchema, type BootSpec, type SandboxConfig } from "./pylon-vm/contracts.ts";
 import { hostBridgeSocket } from "./pylon-vm/host-bridge.ts";
 import { asUser, controllerLog, pylonGuest } from "./pylon-vm/pylon-guest.ts";
-import { directory, existsError, readRecord, saveJson, shellQuote as q } from "./pylon-vm/storage.ts";
+import { directory, existsError, readRecord, saveJson } from "./pylon-vm/storage.ts";
 
 export interface PylonVmBackendOptions {
   /**
