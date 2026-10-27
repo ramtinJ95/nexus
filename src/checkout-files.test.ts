@@ -323,11 +323,19 @@ async function slowFilter(c: Awaited<ReturnType<typeof checkout>>) {
   return { slow, filtered, pid };
 }
 
-/** Waits until the process is gone, which a live filter only is once it wrote its file. The deadline only ends a hang. */
+/**
+ * Waits until the process is gone, which a live filter only is once it wrote its file. A zombie counts as gone,
+ * because a killed filter orphaned to an init that does not reap, as sandboxd is in a pylon, stays one. The deadline
+ * only ends a hang.
+ */
 async function gone(pidFile: string) {
   const pid = Number(await readFile(pidFile, "utf8"));
-  const alive = () => { try { process.kill(pid, 0); return true; } catch { return false; } };
-  for (const deadline = Date.now() + 60_000; alive();) {
+  const zombie = async () => {
+    const stat = await readFile(`/proc/${pid}/stat`, "utf8").catch(() => "");
+    return stat.slice(stat.lastIndexOf(")") + 2).startsWith("Z");
+  };
+  const alive = async () => { try { process.kill(pid, 0); } catch { return false; } return !await zombie(); };
+  for (const deadline = Date.now() + 60_000; await alive();) {
     if (Date.now() > deadline) assert.fail(`process ${pid} is still running`);
     await new Promise((resolve) => setTimeout(resolve, 20));
   }
