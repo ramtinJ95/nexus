@@ -176,7 +176,8 @@ export async function startControlPlane(config: ControlPlaneConfig, models: Mode
   resumeTimer.unref();
   void resumer?.poll();
   const mirror = projectMirror({ githubToken: token });
-  const startThread = threadStarter({ registry, harness, mirror, dotfiles: config.dotfiles, gitIdentity: config.gitIdentity, wake: (node) => { void loop.wake(node); } });
+  const wake = (node: NodeName) => { void loop.wake(node); };
+  const startThread = threadStarter({ registry, harness, mirror, dotfiles: config.dotfiles, gitIdentity: config.gitIdentity, wake });
   const reviews = github === null ? null : reviewLoop({
     registry, github, inbox, harnessModel: config.harness.model.modelId, startThread,
     replies: agentReplies(registry, harness),
@@ -195,11 +196,9 @@ export async function startControlPlane(config: ControlPlaneConfig, models: Mode
     registry, whois, host: config.listen.host, port: config.listen.port,
     allowed: new Set([config.self.tailnetNodeId, ...config.callers] as TailnetNodeId[]),
     hostnames: new Set(config.listen.hostnames),
-    dotfiles: config.dotfiles,
-    gitIdentity: config.gitIdentity,
     harness,
-    mirror,
-    wake: (node) => { void loop.wake(node); },
+    startThread,
+    wake,
     probes: new Map(probes.map((probe) => [probe.node, probe])),
     previewPorts: config.previewPorts,
     images,

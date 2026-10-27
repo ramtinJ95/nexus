@@ -31,11 +31,11 @@ import { setTimeout as sleep } from "node:timers/promises";
 import { WebSocketServer, type WebSocket } from "ws";
 import { z } from "zod";
 import { actualState, desiredPhase, retryRefusal, type ActualState, type DesiredPhase } from "../reconcile.ts";
-import { bootSecrets, chatgptTokenGrant, effectiveAllowedHosts, gitIdentitySchema, gitUrl, linkedName, reservedPorts, withHttpsHosts, type BootInputs, type Project, type ProjectId, type PylonOverlay, type SessionHarness } from "../project.ts";
+import { bootSecrets, chatgptTokenGrant, effectiveAllowedHosts, gitIdentitySchema, gitUrl, linkedName, reservedPorts, withHttpsHosts, type BootInputs, type Project, type ProjectId, type SessionHarness } from "../project.ts";
 import type { CommandResult, NodeName, ProbeClient, ProbeError, PylonCommand, PylonId, TailnetNodeId } from "../protocol.ts";
 import type { ConversationView, EntryRecord, JsonObject } from "@earendil-works/pi-durable";
 import type { HarnessHost } from "../harness/host.ts";
-import { pinsSchema, type ImageId, type ImageManifest, type ProjectMirror } from "../images.ts";
+import { pinsSchema, type ImageId, type ImageManifest } from "../images.ts";
 import type { Whois } from "../tailscale.ts";
 import type { ClaudeSent, NodeRecord, Output, PortRange, Preview, Registry, Session, Thread, ThreadId } from "./registry.ts";
 import { dashboard, liveFrames } from "./dashboard.ts";
@@ -50,7 +50,7 @@ import { attachTiming, serveAttach, type AttachTiming, type Ending, type PylonDo
 import { typeIntoClaude } from "./inbox.ts";
 import { HttpError } from "./http-error.ts";
 import { imagesView, type ImageOperation, type ImageRollout } from "./image-rollout.ts";
-import { threadStarter } from "./threads.ts";
+import type { StartRequest } from "./threads.ts";
 import { nodePylons, overcommitted, type NodePylons } from "./placement.ts";
 import { maxRounds, needsPerson, type Review, type ReviewLoop } from "./review.ts";
 
@@ -69,12 +69,8 @@ export interface ApiOptions {
   allowed: ReadonlySet<TailnetNodeId>;
   /** Names the API answers to in the Host header. Any other name is a DNS rebinding page on an allowed machine. */
   hostnames: ReadonlySet<string>;
-  /** The common dotfiles layer every new pylon pulls on boot. */
-  dotfiles: PylonOverlay["dotfiles"];
-  gitIdentity?: BootInputs["gitIdentity"];
   harness: ThreadHarness;
-  /** Reads the .nexus/setup a new thread's template is keyed on. */
-  mirror: ProjectMirror;
+  startThread(request: StartRequest, caller: string): Promise<Thread>;
   /** Asks the loop for a pass over the node's pylons. */
   wake(node: NodeName): void;
   /** One client per registry node, for the guest commands and checkout reads a human asks for. */
@@ -287,9 +283,8 @@ const claudeReadMs = 5_000;
 
 
 export async function startApi(options: ApiOptions): Promise<Api> {
-  const { registry, whois, allowed, hostnames, dotfiles, harness, mirror, wake, probes, previewPorts, streamStallMs = 30_000, attachTiming: timing = attachTiming, closeWaitMs = 5_000 } = options;
+  const { registry, whois, allowed, hostnames, harness, startThread, wake, probes, previewPorts, streamStallMs = 30_000, attachTiming: timing = attachTiming, closeWaitMs = 5_000 } = options;
   const claude = claudeConversations({ registry, probes });
-  const startThread = threadStarter({ registry, harness, mirror, dotfiles, gitIdentity: options.gitIdentity, wake });
 
   function thread(id: string): Thread {
     const found = registry.thread(id as ThreadId);
