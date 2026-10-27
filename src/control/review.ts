@@ -186,6 +186,12 @@ const checkFinding = (round: Round): Finding[] => round.check?.passed === false
 export const findingsOf = (round: Round): Finding[] => [...round.verdict?.findings ?? [], ...checkFinding(round)];
 /** An approval with no blocking finding open, the check included. */
 const approves = (round: Round) => round.verdict?.verdict === "approve" && !findingsOf(round).some(blocks);
+/**
+ * Whether `nexus land` takes the review: approved, or held for the person after an approval whose check passed. A
+ * review that merged never lands again.
+ */
+export const landable = (r: Review) => r.merged === null
+  && (r.phase.kind === "approved" || (r.phase.kind === "needs-person" && r.rounds.at(-1)!.check?.passed === true && approves(r.rounds.at(-1)!)));
 /** The rounds that count against the limit. One that approves again the head its previous round approved reviewed nothing new. */
 export const roundsSpent = (r: Pick<Review, "rounds">) => r.rounds.filter((round, i) => {
   const previous = r.rounds[i - 1];
@@ -305,6 +311,8 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
     return { ...r, phase, outbox: null };
   };
   const toPerson = (r: Review, ...reasons: string[]): Review => end(r, { kind: "needs-person", reasons });
+  /** Only a PR of the repository releases come from deploys once it merges. */
+  const deploys = (r: Pick<Review, "pr">) => r.pr.repo.toLowerCase() === release.repo.toLowerCase();
   /** A review that lands still decides whether a merge made outside it deploys. */
   const outside = (r: Review, state: PullRequest["state"] | undefined): Review | null =>
     state === "closed" || (state === "merged" && r.land === null) ? end(r, { kind: state }) : null;
@@ -394,7 +402,7 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
       const head = r.rounds.at(-1)!.head;
       const snapshot = await github.poll(r.pr.repo, r.pr.number);
       if (snapshot.pr.state === "closed") return end(r, { kind: "closed" });
-      const holds = async () => landingHolds({ review: r, pr: snapshot, files: await github.files(r.pr.repo, r.pr.number), nexus: r.pr.repo.toLowerCase() === release.repo.toLowerCase() });
+      const holds = async () => landingHolds({ review: r, pr: snapshot, files: await github.files(r.pr.repo, r.pr.number), nexus: deploys(r) });
       let commit: string;
       if (snapshot.detail.mergeCommit !== null) {
         if (snapshot.detail.head !== head) return toPerson(r, `Pull request #${r.pr.number} merged at ${snapshot.detail.head}, not the approved ${head}, so it is not deployed.`);
@@ -418,7 +426,7 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
         }
         commit = merged.commit;
       }
-      if (r.pr.repo.toLowerCase() !== release.repo.toLowerCase()) return { ...r, merged: commit, phase: { kind: "landed", commit } };
+      if (!deploys(r)) return { ...r, merged: commit, phase: { kind: "landed", commit } };
       return { ...r, merged: commit, phase: { kind: "deploying", commit, previous: registry.desiredRelease()?.commit ?? null, requested: false, deadline: now() + deployMs } };
     },
     async deploying(r, phase) {
@@ -521,6 +529,7 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
 
   return {
     poll,
+    deploys,
     async close() { await running; },
 
     /** Starts a review of the builder's open PR: the reviewer thread, its first request, and the record. */
@@ -570,8 +579,7 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
       const builder = registry.thread(builderId)!;
       if (builder.status !== "active") throw new HttpError(409, `thread ${builderId} is ${builder.status}`);
       if (r.merged !== null) throw new HttpError(409, `review ${r.id} already merged pull request #${r.pr.number} as ${r.merged}, so it does not land again`);
-      const approved = r.phase.kind === "approved" || (r.phase.kind === "needs-person" && r.rounds.at(-1)!.check?.passed === true && approves(r.rounds.at(-1)!));
-      if (!approved) throw new HttpError(409, `review ${r.id} of ${builderId} is ${r.phase.kind}${r.phase.kind === "needs-person" ? `: ${r.phase.reasons.join(" ")}` : ""}, not approved with its checks passing`);
+      if (!landable(r)) throw new HttpError(409, `review ${r.id} of ${builderId} is ${r.phase.kind}${r.phase.kind === "needs-person" ? `: ${r.phase.reasons.join(" ")}` : ""}, not approved with its checks passing`);
       const next: Review = { ...r, land: { requestedBy }, phase: checking(), outbox: null, nudges: 0 };
       registry.saveReview(next);
       void poll();
