@@ -25,7 +25,7 @@ const previewPorts: PortRange = { first: 10200, last: 10209 };
  * A node as its probe presents it. Jobs run until `finish` unless `autoFinish` is set. Like the real probe, a
  * finished job is announced by a job event first and by a fresh snapshot a moment later.
  */
-function fakeNode(options: { autoFinish: boolean; node?: NodeName; reportsRoutes?: boolean; claudeLaunchRepeatable?: boolean; heldSecrets?: readonly string[]; artifacts?: readonly ImageId[] }) {
+function fakeNode(options: { autoFinish: boolean; node?: NodeName; reportsRoutes?: boolean; heldSecrets?: readonly string[]; artifacts?: readonly ImageId[] }) {
   const node = options.node ?? firebat;
   /** The held secrets the node's probe takes. A spawn asking for another fails for good, as on a probe older than it. */
   let heldSecrets = options.heldSecrets;
@@ -51,7 +51,6 @@ function fakeNode(options: { autoFinish: boolean; node?: NodeName; reportsRoutes
     node, observedAt: new Date().toISOString(), probeBootId: "boot-1",
     capacity: { cpus: 16, committedCpus: 0, memoryGiB: 64, committedMemoryGiB: 0, diskFreeGiB: 100, committedDiskGiB: 0 },
     artifacts: options.artifacts ?? [image], jobs: [...jobs.values()].map((j) => j.status), pylons: [...pylons.values()], grants: { secrets: [...handed], gitSsh: false }, previewRoutes: options.reportsRoutes === false ? null : [...routes.values()],
-    ...(options.claudeLaunchRepeatable === true ? { claudeLaunchRepeatable: true } : {}),
     ...(heldSecrets === undefined ? {} : { heldSecrets }),
   });
   const unroute = (pylonId: PylonId) => { for (const [port, route] of routes) if (route.pylonId === pylonId) routes.delete(port); };
@@ -1326,7 +1325,7 @@ test("a deleted thread whose Claude launch was cut off has the launch failed, th
   const thread = seed(registry);
   registry.setThreadStatus(thread.id, "deleted");
   registry.setClaudeWorker(thread.id, "hello", "starting", undefined, "6f1c2a9e-3b7d-4e05-8c21-9d4b7a1e5f30");
-  const fake = fakeNode({ autoFinish: true, claudeLaunchRepeatable: true });
+  const fake = fakeNode({ autoFinish: true });
   run(t, registry, fake.probe);
   await until("worker failed", () => registry.claudeWorker(thread.id)?.state === "failed");
   assert.deepEqual(fake.submitted, []);
@@ -1551,7 +1550,7 @@ test("a Claude launch whose probe restarts mid-way is sent again under its sessi
   const registry = openRegistry(tempDb());
   const thread = seed(registry);
   registry.setClaudeWorker(thread.id, "/poteto-mode hello", "pending");
-  const fake = fakeNode({ autoFinish: true, claudeLaunchRepeatable: true });
+  const fake = fakeNode({ autoFinish: true });
   const commands: PylonCommand[] = [];
   const logged: string[] = [];
   run(t, registry, restartingProbe(fake, ["restart", "restart", { kind: "open-session", herdrPane: "w1:p1" }], commands), { log: (line) => logged.push(line) });
@@ -1562,23 +1561,11 @@ test("a Claude launch whose probe restarts mid-way is sent again under its sessi
   assert.ok(logged.some((line) => line.includes("the Claude launch lost its probe (rj-firebat: socket hang up). Sending it again")));
 });
 
-test("a Claude launch whose probe comes back unable to take it again fails as before, sent once", async (t) => {
-  const registry = openRegistry(tempDb());
-  const thread = seed(registry);
-  registry.setClaudeWorker(thread.id, "hello", "pending");
-  const fake = fakeNode({ autoFinish: true });
-  const commands: PylonCommand[] = [];
-  run(t, registry, restartingProbe(fake, ["restart"], commands), { log: () => {} });
-  await until("worker failed", () => registry.claudeWorker(thread.id)?.state === "failed");
-  assert.equal(commands.length, 1);
-  assert.match(registry.claudeWorker(thread.id)!.message!, /^Claude launch did not complete; attach to check before starting another session: .*socket hang up, and the probe that came back cannot take a launch again$/);
-});
-
 test("a Claude launch whose probe stays away fails once the wait is over", async (t) => {
   const registry = openRegistry(tempDb());
   const thread = seed(registry);
   registry.setClaudeWorker(thread.id, "hello", "pending");
-  const fake = fakeNode({ autoFinish: true, claudeLaunchRepeatable: true });
+  const fake = fakeNode({ autoFinish: true });
   const commands: PylonCommand[] = [];
   const probe: ProbeClient = { ...fake.probe, command: async (_pylonId, command) => {
     commands.push(command);
@@ -1592,24 +1579,15 @@ test("a Claude launch whose probe stays away fails once the wait is over", async
   assert.ok(registry.events().some((e) => e.kind === "thread.failed"));
 });
 
-test("a Claude launch a control plane restart cut off goes again under its session, where the probe can take it again", async (t) => {
+test("a Claude launch a control plane restart cut off goes again under its session", async (t) => {
   const registry = openRegistry(tempDb());
   const thread = seed(registry);
   registry.setClaudeWorker(thread.id, "hello", "starting", undefined, "6f1c2a9e-3b7d-4e05-8c21-9d4b7a1e5f30");
-  const fake = fakeNode({ autoFinish: true, claudeLaunchRepeatable: true });
+  const fake = fakeNode({ autoFinish: true });
   const commands: PylonCommand[] = [];
   run(t, registry, restartingProbe(fake, [{ kind: "open-session", herdrPane: "w1:p1" }], commands));
   await until("worker started", () => registry.claudeWorker(thread.id)?.state === "started");
   assert.deepEqual(commands.map((c) => c.kind === "open-session" && c.resume), ["6f1c2a9e-3b7d-4e05-8c21-9d4b7a1e5f30"]);
-
-  const older = openRegistry(tempDb());
-  const other = seed(older);
-  older.setClaudeWorker(other.id, "hello", "starting", undefined, "6f1c2a9e-3b7d-4e05-8c21-9d4b7a1e5f30");
-  const sent: PylonCommand[] = [];
-  run(t, older, restartingProbe(fakeNode({ autoFinish: true }), [], sent));
-  await until("worker failed", () => older.claudeWorker(other.id)?.state === "failed");
-  assert.equal(older.claudeWorker(other.id)!.message, "Claude launch was interrupted; attach to check before starting another session");
-  assert.deepEqual(sent, []);
 });
 
 test("a control plane that opens on an observation stored from a probe older than routes, grants, held secrets and counting boots its pylon from the probe's first snapshot", async (t) => {
@@ -1629,7 +1607,7 @@ test("a Claude launch a control plane restart cut off before it recorded a sessi
   const registry = openRegistry(tempDb());
   const thread = seed(registry);
   registry.setClaudeWorker(thread.id, "hello", "starting");
-  const fake = fakeNode({ autoFinish: true, claudeLaunchRepeatable: true });
+  const fake = fakeNode({ autoFinish: true });
   const sent: PylonCommand[] = [];
   run(t, registry, restartingProbe(fake, [], sent));
   await until("worker failed", () => registry.claudeWorker(thread.id)?.state === "failed");

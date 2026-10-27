@@ -172,9 +172,9 @@ export function startLoop(options: LoopOptions): Loop {
       try {
         const worker = registry.claudeWorker(thread.id);
         const running = nodeObservation?.pylons.some((p) => p.pylonId === pylonId && p.phase === "running") === true;
-        // A launch this process did not finish, as one a control plane restart cut off, goes again only where it is safe to,
-        // and never for a deleted thread, whose pylon does not run again.
-        if (worker?.state === "starting" && nodeObservation !== null && (nodeObservation.claudeLaunchRepeatable !== true || worker.session === null || thread.status === "deleted")) {
+        // A launch this process did not finish, as one a control plane restart cut off, goes again under the session it
+        // recorded. It fails without one, and for a deleted thread, whose pylon does not run again.
+        if (worker?.state === "starting" && nodeObservation !== null && (worker.session === null || thread.status === "deleted")) {
           const message = "Claude launch was interrupted; attach to check before starting another session";
           registry.setClaudeWorker(thread.id, worker.prompt, "failed", message);
           registry.appendEvent("thread.failed", thread.id, { message });
@@ -206,8 +206,8 @@ export function startLoop(options: LoopOptions): Loop {
   /**
    * Sends a prompted Claude launch, and sends it again, under the same session ID, each time the probe connection is
    * lost before it answers, as when a deploy restarts the probe. It waits for a snapshot from after the loss, so the
-   * probe that answers it is one that came back, and sends again only if that probe says the launch is safe to repeat
-   * (sessions.ts openSession), which reads from the pylon how far the launch got.
+   * probe that answers it is one that came back. Sending it again is safe, because the probe reads from the pylon how
+   * far the launch got (sessions.ts openSession).
    */
   async function launchClaude(node: NodeName, link: Link, pylonId: PylonId, command: Extract<PylonCommand, { kind: "open-session" }>): Promise<void> {
     const until = Date.now() + claudeLaunchRetryMs;
@@ -222,7 +222,6 @@ export function startLoop(options: LoopOptions): Loop {
           if (Date.now() >= until) throw new Error(`${(err as Error).message}, and the probe did not come back within ${claudeLaunchRetryMs / 1000} seconds`);
           await delay(250, undefined, { signal: shutdown.signal });
         }
-        if (observation(node)?.claudeLaunchRepeatable !== true) throw new Error(`${(err as Error).message}, and the probe that came back cannot take a launch again`);
         log(`${pylonId}: the Claude launch lost its probe (${(err as Error).message}). Sending it again`);
       }
     }

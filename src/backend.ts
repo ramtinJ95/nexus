@@ -220,15 +220,14 @@ export interface CommandPolicy<K extends CommandKind> {
   publishes: boolean | ((result: Extract<CommandResult, { kind: K }>) => boolean);
   /**
    * Whether a caller that lost the answer may send it again, which may run it twice. The probe client never does on
-   * its own. "claudeLaunchRepeatable": only a prompted launch with a resume ID, to a probe whose snapshot says
-   * `claudeLaunchRepeatable` (sessions.ts openSession).
+   * its own. Of open-sessions, only a prompted launch with a resume ID is (sessions.ts openSession).
    */
-  retrySafe: boolean | "claudeLaunchRepeatable";
+  retrySafe: boolean | ((command: Extract<PylonCommand, { kind: K }>) => boolean);
 }
 
 export const commandPolicies: { readonly [K in CommandKind]: CommandPolicy<K> } = {
   "exec": { lock: null, remembered: false, publishes: false, retrySafe: false },
-  "open-session": { lock: (c) => c.prompt === undefined ? undefined : c.resume, remembered: false, publishes: true, retrySafe: "claudeLaunchRepeatable" },
+  "open-session": { lock: (c) => c.prompt === undefined ? undefined : c.resume, remembered: false, publishes: true, retrySafe: (c) => c.prompt !== undefined && c.resume !== undefined },
   "close-session": { lock: null, remembered: false, publishes: true, retrySafe: false },
   "drop-failed-session": { lock: null, remembered: false, publishes: false, retrySafe: false },
   "send-claude": { lock: (c) => c.session, remembered: true, publishes: (r) => r.resumed, retrySafe: false },

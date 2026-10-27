@@ -156,12 +156,6 @@ export interface NodeObservation {
    */
   grants: { secrets: readonly string[]; gitSsh: boolean } | null;
   /**
-   * True from a probe whose open-session of a prompted Claude Code launch is safe to send again under the same `resume`
-   * ID (sessions.ts openSession). A probe older than the field sends none, and the control plane never sends a launch
-   * to it twice.
-   */
-  claudeLaunchRepeatable?: true;
-  /**
    * True from a probe that takes a spawn's `relaunch: false`. One older than the field ignores it and relaunches the
    * sessions, so the usage backfill never wakes a pylon on its node.
    */

@@ -681,7 +681,7 @@ test("the outcome of a Claude send waits for one queued behind a slow send, type
   assert.deepEqual(typed, ["slow", "queued", "breaks"], "asking for an outcome types nothing");
 });
 
-test("a prompted Claude launch sent again while the first still runs waits for it, and snapshots say a launch can be sent again", async (t) => {
+test("a prompted Claude launch sent again while the first still runs waits for it", async (t) => {
   const execs: string[] = [];
   let release!: () => void;
   const held = new Promise<void>((resolve) => { release = resolve; });
@@ -707,11 +707,6 @@ test("a prompted Claude launch sent again while the first still runs waits for i
   await Promise.all([assert.rejects(first, /starting the Herdr server failed/), assert.rejects(again, /starting the Herdr server failed/)]);
   assert.equal(execs.length, 4);
   assert.deepEqual(execs.slice(0, 2).map((e) => e.split(" ")[0]), ["herdr", "sh"], "the first launch ran to its end before the second began");
-  const stream = client.observe(AbortSignal.timeout(5_000));
-  for await (const event of stream) {
-    assert.ok(event.type === "snapshot" && event.observation.claudeLaunchRepeatable === true);
-    break;
-  }
 });
 
 test("each command kind waits for the reads or its Claude session or nothing, publishes a snapshot or not, and a send is remembered by its request ID", async (t) => {
@@ -874,13 +869,13 @@ test("the command policy table gives each kind its lock, its memory by request I
   const listed = samples.map(([name, command, result]) => {
     const { lock, remembered, publishes, retrySafe } = commandPolicies[command.kind] as CommandPolicy<PylonCommand["kind"]>;
     const waits = typeof lock === "function" ? lock(command) : lock;
-    return `${name}: waits for ${waits === session ? "its Claude session" : waits ?? "nothing"}, ${remembered ? "remembered" : "not remembered"}, ${(typeof publishes === "function" ? publishes(result!) : publishes) ? "publishes" : "does not publish"}, retry safe: ${retrySafe}`;
+    return `${name}: waits for ${waits === session ? "its Claude session" : waits ?? "nothing"}, ${remembered ? "remembered" : "not remembered"}, ${(typeof publishes === "function" ? publishes(result!) : publishes) ? "publishes" : "does not publish"}, retry safe: ${typeof retrySafe === "function" ? retrySafe(command) : retrySafe}`;
   });
   assert.deepEqual(listed, [
     "exec: waits for nothing, not remembered, does not publish, retry safe: false",
-    "open-session: waits for nothing, not remembered, publishes, retry safe: claudeLaunchRepeatable",
-    "open-session with resume: waits for nothing, not remembered, publishes, retry safe: claudeLaunchRepeatable",
-    "open-session with prompt and resume: waits for its Claude session, not remembered, publishes, retry safe: claudeLaunchRepeatable",
+    "open-session: waits for nothing, not remembered, publishes, retry safe: false",
+    "open-session with resume: waits for nothing, not remembered, publishes, retry safe: false",
+    "open-session with prompt and resume: waits for its Claude session, not remembered, publishes, retry safe: true",
     "close-session: waits for nothing, not remembered, publishes, retry safe: false",
     "drop-failed-session: waits for nothing, not remembered, does not publish, retry safe: false",
     "send-claude that resumes its session: waits for its Claude session, remembered, publishes, retry safe: false",
