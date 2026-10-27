@@ -1,5 +1,5 @@
 import { eventCursor, eventKinds, type EventFilter } from "../events.ts";
-import { DeployDraining } from "./drain.ts";
+import { DeployDraining, isDraining, turnGate } from "./drain.ts";
 import { runningCommit } from "../deploy/health.ts";
 import { canDeploy, commitSchema, isReporter, releaseView, reportSchema, resolveMain, type DeploymentOptions } from "./releases.ts";
 /**
@@ -741,10 +741,10 @@ export async function startApi(options: ApiOptions): Promise<Api> {
   const created = (body: unknown): Reply => ({ status: 201, body });
   const noContent: Reply = { status: 204 };
 
-  let startingTurns = 0;
-  const draining = () => registry.drain()?.locked === true || (registry.drain()?.expiresAt ?? 0) > Date.now();
+  const draining = () => isDraining(registry.drain());
+  const turnRequests = turnGate(draining);
   async function turnsRunning(): Promise<boolean> {
-    if (startingTurns > 0 || options.turnsStarting?.()) return true;
+    if (turnRequests.busy() || options.turnsStarting?.()) return true;
     for (const t of registry.threads()) {
       if (t.status === "deleted" || t.conversationId === null) continue;
       const watch = await harness.watch(t.id);
@@ -754,7 +754,7 @@ export async function startApi(options: ApiOptions): Promise<Api> {
         if (live?.run !== undefined || (Array.isArray(inbox?.items) && inbox.items.length > 0)) return true;
       } finally { await watch.stop(); }
     }
-    return startingTurns > 0 || (options.turnsStarting?.() ?? false);
+    return turnRequests.busy() || (options.turnsStarting?.() ?? false);
   }
 
   const routes: readonly [string, RegExp, Route][] = [
@@ -999,11 +999,8 @@ export async function startApi(options: ApiOptions): Promise<Api> {
     const match = matches.find((r) => r.method === req.method);
     if (match === undefined) throw new HttpError(405, `${req.method} is not allowed on ${path}`);
     const startsTurn = req.method === "POST" && (path === "/v1/threads" || /^\/v1\/threads\/[^/]+\/(messages|retry)$/.test(path));
-    if (startsTurn && draining()) throw new HttpError(409, "control plane is draining for deployment; retry after the release completes");
-    if (startsTurn) startingTurns++;
-    let reply: Reply;
-    try { reply = await match.route(match.m, { query: url.searchParams, caller, body: (empty) => readJson(req, empty) }); }
-    finally { if (startsTurn) startingTurns--; }
+    const route = () => match.route(match.m, { query: url.searchParams, caller, body: (empty) => readJson(req, empty) });
+    const reply = startsTurn ? await turnRequests.run(async () => route()) : await route();
     if (reply.file !== undefined) sendFile(res, reply.file, reply.type);
     else if (reply.body === undefined) res.writeHead(reply.status).end();
     else send(res, reply.status, reply.body);
@@ -1092,7 +1089,7 @@ export async function startApi(options: ApiOptions): Promise<Api> {
     server.on("request", (req, res) => {
       handle(req, res).catch((err: unknown) => {
         if (res.headersSent) return res.destroy(err as Error);
-        send(res, err instanceof HttpError ? err.status : err instanceof DeployDraining ? 409 : 500, { error: (err as Error).message });
+        send(res, errorStatus(err), { error: (err as Error).message });
       });
     });
     server.on("upgrade", (req: IncomingMessage, socket: Duplex, head: Buffer) => {
@@ -1100,7 +1097,7 @@ export async function startApi(options: ApiOptions): Promise<Api> {
       socket.on("error", () => undefined);
       upgraded.add(socket);
       socket.once("close", () => upgraded.delete(socket));
-      upgrade(req, socket, head).catch((err: unknown) => refuseUpgrade(socket, err instanceof HttpError ? err.status : err instanceof DeployDraining ? 409 : 500, (err as Error).message));
+      upgrade(req, socket, head).catch((err: unknown) => refuseUpgrade(socket, errorStatus(err), (err as Error).message));
     });
     return server;
   }
@@ -1218,6 +1215,8 @@ function pathOf(url: string | undefined): string {
     return "";
   }
 }
+
+const errorStatus = (err: unknown) => err instanceof HttpError ? err.status : err instanceof DeployDraining ? 409 : 500;
 
 /** An API error reply written on a socket that never upgraded. */
 function refuseUpgrade(socket: Duplex, status: number, message: string) {

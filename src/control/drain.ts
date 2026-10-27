@@ -1,6 +1,10 @@
+import type { Drain } from "../deploy/model.ts";
+
 export class DeployDraining extends Error {
   constructor() { super("control plane is draining for deployment; retry after the release completes"); }
 }
+
+export const isDraining = (drain: Drain | null) => drain?.locked === true || (drain?.expiresAt ?? 0) > Date.now();
 
 /** Shared by human requests and background PR-watch submissions. */
 export function turnGate(draining: () => boolean) {

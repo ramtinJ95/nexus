@@ -1,4 +1,4 @@
-import { turnGate } from "./drain.ts";
+import { isDraining, turnGate } from "./drain.ts";
 /**
  * The control plane process: `node src/control/main.ts <config.json>`, run by deploy/nexus-control.service.
  * It opens the registry, follows every configured node's probe, runs every thread's agent in the harness, and
@@ -152,7 +152,7 @@ export async function startControlPlane(config: ControlPlaneConfig, models: Mode
     log: (message) => console.error(message),
   });
 
-  const gate = turnGate(() => registry.drain()?.locked === true || (registry.drain()?.expiresAt ?? 0) > Date.now());
+  const gate = turnGate(() => isDraining(registry.drain()));
   const harness: typeof rawHarness = {
     ...rawHarness,
     startThread: (...args) => gate.run(() => rawHarness.startThread(...args)),
