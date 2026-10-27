@@ -4,8 +4,7 @@
  * of its own, so a control plane that restarts anywhere picks up where the record stands: the envelope is saved before
  * it is sent, as tick.ts saves a pylon's, and a build sent again converges on what its node's disk already holds.
  */
-import { envelope } from "../reconcile.ts";
-import { failureMessage } from "../tick.ts";
+import { failureMessage, jobOutcome, submitJob } from "../tick.ts";
 import { retryable, type JobErrorCode, type NodeObservation, type ProbeClient } from "../protocol.ts";
 import type { BuildingTemplate } from "../images.ts";
 import type { Registry } from "./registry.ts";
@@ -33,21 +32,17 @@ export async function tickTemplateBuild(record: BuildingTemplate, ctx: BuildCont
   const { probe, observation, registry } = ctx;
   if (observation === null) return;
   if (record.submitted === null) {
-    const submitted = envelope({ kind: "build-template", template: record.id, inputs: record.inputs }, record.on, Date.now());
-    registry.saveTemplate({ ...record, submitted });
-    // A throw leaves the envelope recorded. The next pass asks the probe about it.
-    const reply = await probe.submit(submitted);
-    if ("accepted" in reply) return;
-    if (reply.rejected === "invalid") return failed(record, "invalid", failureMessage(reply.message, ""), ctx);
+    const sent = await submitJob(probe, { kind: "build-template", template: record.id, inputs: record.inputs }, record.on, (submitted) => registry.saveTemplate({ ...record, submitted }));
+    if (sent === "accepted") return;
+    if (sent !== "retry") return failed(record, "invalid", failureMessage(sent.invalid, ""), ctx);
     registry.saveTemplate({ ...record, submitted: null });
     return;
   }
   const { jobId, notAfter } = record.submitted;
-  // Only a lookup that began after notAfter proves the envelope can no longer be accepted.
-  const askedAt = Date.now();
-  const status = observation.jobs.find((j) => j.jobId === jobId) ?? await probe.job(jobId);
-  if (status === "unknown") {
-    if (askedAt > Date.parse(notAfter)) registry.saveTemplate({ ...record, submitted: null });
+  const status = await jobOutcome(probe, jobId, notAfter, observation.jobs.find((j) => j.jobId === jobId));
+  if (status === "wait") return;
+  if (status === "expired") {
+    registry.saveTemplate({ ...record, submitted: null });
     return;
   }
   switch (status.state) {
