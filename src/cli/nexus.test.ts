@@ -794,14 +794,16 @@ test("attach with a config of only the URL and the proxy prints nothing but its 
   assert.deepEqual([attach.code, attach.stderr], [64, "nexus: attach needs a terminal, and stdin or stdout is not one. Run nexus --help for usage\n"]);
 });
 
-test("a config that still holds the ssh attach settings runs every command, and attach names them once", async (t) => {
+test("the attach settings retired in 0.9.0 are unknown keys of the config file, and NEXUS_ATTACH is not read", async (t) => {
   const s = await setup(t);
   await mkdir(join(s.home, ".config", "nexus"), { recursive: true });
   await writeFile(join(s.home, ".config", "nexus", "cli.json"), JSON.stringify({ ssh: { "rj-firebat": "rj-firebat" }, attach: "ssh -t x" }));
   const projects = await s.nexus(["projects"]);
-  assert.deepEqual([projects.code, projects.stderr], [0, ""], "no other command mentions them");
+  assert.equal(projects.code, 64);
+  assert.match(projects.stderr, /cli\.json is not a CLI config: ✖ Unrecognized keys: "ssh", "attach"/);
+  await writeFile(join(s.home, ".config", "nexus", "cli.json"), "{}");
   const attach = await s.nexus(["attach", "th-0123456789ab"], { NEXUS_ATTACH: "ssh -t y" });
-  assert.match(attach.stderr, /^nexus: attach ignores "ssh" in .*cli\.json and "attach" in .*cli\.json and NEXUS_ATTACH now that it goes through the control plane\. Remove them\n/);
+  assert.deepEqual([attach.code, attach.stderr], [64, "nexus: attach needs a terminal, and stdin or stdout is not one. Run nexus --help for usage\n"]);
 });
 
 test("watch prints the backlog, then each new entry and state change, and ends when the thread is deleted", async (t) => {
@@ -1324,7 +1326,7 @@ test("show prints PR metadata and one disabled-watch notice without waking the p
 
 test("deploy and release use the shared release view and wait for both roles", async (t) => {
   const s = await setup(t);
-  assert.equal((await s.nexus(["--version"])).stdout.trim(), "nexus 0.30.0");
+  assert.equal((await s.nexus(["--version"])).stdout.trim(), "nexus 0.31.0");
   assert.equal((await s.nexus(["deploy", "bad"])).code, 64);
   const requested = await s.json(["deploy", "main"]);
   assert.equal(requested.desired.commit, "a".repeat(40));
