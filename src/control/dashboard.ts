@@ -38,8 +38,8 @@ export interface DashboardOptions {
   detail(thread: Thread): ThreadDetail;
   /** The API's conversation view, or a Claude worker's transcript, for a thread that has one and is not deleted. */
   conversation(thread: Thread): Promise<Conversation>;
-  /** Whether the caller may land a pull request, which the land route decides the same way. */
-  mayLand(caller: TailnetNodeId): boolean;
+  /** Why the land route would refuse the caller, or null when it would take the request. */
+  landRefusal(caller: TailnetNodeId): LandRefusal | null;
   /** Whether the review's pull request deploys once it merges. */
   deploys(review: Review): boolean;
   now?: () => number;
@@ -54,8 +54,10 @@ const isClaude = (view: Conversation): view is ClaudeConversation => (view as Pa
 /** How often the client refetches a page. The loop ticks every 5 s, so polling faster shows nothing new. */
 export const pollMs = 5_000;
 
+export type LandRefusal = "no review loop" | "not a deployer";
+
 /** What every part of a page reads. */
-interface Context { registry: Registry; detail: DashboardOptions["detail"]; deploys: DashboardOptions["deploys"]; now: number; caller: TailnetNodeId; mayLand: boolean }
+interface Context { registry: Registry; detail: DashboardOptions["detail"]; deploys: DashboardOptions["deploys"]; now: number; caller: TailnetNodeId; landRefusal: LandRefusal | null }
 
 /** Returns the page for a GET of `path`, or undefined when the path is not the dashboard's. */
 export function dashboard(options: DashboardOptions): (path: string, query: URLSearchParams, caller: TailnetNodeId) => Promise<Page | undefined> {
@@ -91,7 +93,7 @@ export function dashboard(options: DashboardOptions): (path: string, query: URLS
   ];
 
   return async (path, query, caller) => {
-    const context = (): Context => ({ registry, detail, deploys, now: (options.now ?? Date.now)(), caller, mayLand: options.mayLand(caller) });
+    const context = (): Context => ({ registry, detail, deploys, now: (options.now ?? Date.now)(), caller, landRefusal: options.landRefusal(caller) });
     for (const [pattern, page] of pages) {
       const m = pattern.exec(path);
       if (m !== null) return page(m, query, context);
@@ -528,6 +530,11 @@ function landingAt(r: Review): { step: Step; failed: boolean } | null {
   }
 }
 
+const landRefusals: Record<LandRefusal, (caller: TailnetNodeId) => string> = {
+  "not a deployer": (caller) => `This device cannot land: landing deploys, so only the control plane's deployers may, and this device (tailnet node ${caller}) is not one. Land it from a deployer, or add this node to deployers in the control plane's config.`,
+  "no review loop": () => "Nexus cannot land it now: the review loop needs the control plane's GitHub token (github.tokenFile), which is not configured.",
+};
+
 const short = (commit: string) => html`<code title="${commit}">${commit.slice(0, 12)}</code>`;
 
 /**
@@ -561,7 +568,9 @@ ${phase.kind === "checking" ? html`<p class="land-note">.nexus/check runs at ${s
   : phase.kind === "needs-person" && html`<ul class="error">${phase.reasons.map((reason) => html`<li>${reason}</li>`)}</ul>`}
 </section>`;
   }
-  if (!landable(r) || d.thread.status !== "active") return null;
+  // A PR closed or merged outside the review leaves it held, but there is nothing left to land.
+  const pr = d.pullRequests?.find((p) => p.repo === r.pr.repo && p.number === r.pr.number);
+  if (!landable(r) || d.thread.status !== "active" || (pr !== undefined && pr.state !== "open")) return null;
   const round = r.rounds.at(-1)!;
   const held = r.phase.kind === "needs-person";
   const reasons = r.phase.kind === "needs-person" ? r.phase.reasons : recordedHolds(r);
@@ -582,8 +591,8 @@ ${findings.length === 0 ? html`<p class="land-note">None.</p>` : html`<ul class=
 ${round.check !== null && html`<details id="land-check"><summary>.nexus/check ${round.check.passed ? "passed" : "failed"} at ${round.head.slice(0, 12)}</summary><pre>${round.check.output}</pre></details>`}
 </details>
 ${stuck ? html`<p class="land-note">Landing checks the merge policy again, and what is marked "holds again" holds every landing of this commit. Only you can get past it, by merging the pull request on GitHub${c.deploys(r) && " and deploying it with nexus deploy"}.</p>`
-  : c.mayLand ? html`<div class="land-act"><button type="button" class="btn btn-primary" id="land" data-action="land" data-thread="${d.thread.id}" data-confirm="${confirm}">Land #${r.pr.number}</button></div>`
-  : html`<div class="land-act"><button type="button" class="btn" id="land" disabled>Land #${r.pr.number}</button><p class="error">This device cannot land: landing deploys, so only the control plane's deployers may, and this device (tailnet node ${c.caller}) is not one. Land it from a deployer, or add this node to deployers in the control plane's config.</p></div>`}
+  : c.landRefusal === null ? html`<div class="land-act"><button type="button" class="btn btn-primary" id="land" data-action="land" data-thread="${d.thread.id}" data-head="${round.head}" data-confirm="${confirm}">Land #${r.pr.number}</button></div>`
+  : html`<div class="land-act"><button type="button" class="btn" id="land" disabled>Land #${r.pr.number}</button><p class="error">${landRefusals[c.landRefusal](c.caller)}</p></div>`}
 </section>`;
 }
 

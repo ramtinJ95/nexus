@@ -571,14 +571,16 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
     /**
      * Lands an approved review, or tries again one the policy held, such as after the PR's description changed or the
      * person granted the merge token. It runs the check again first, which finds its result kept for the same head.
-     * A PR that already merged is held by the policy, so a land never deploys twice.
+     * A PR that already merged is held by the policy, so a land never deploys twice. `head`, when given, is the commit
+     * the person confirmed, so a review that moved on meanwhile is not landed in its place.
      */
-    land(builderId: ThreadId, requestedBy: string): Review {
+    land(builderId: ThreadId, requestedBy: string, head?: string): Review {
       const r = registry.review(builderId);
       if (r === null) throw new HttpError(409, `thread ${builderId} has no review. Start one with \`nexus review ${builderId} --land\``);
       const builder = registry.thread(builderId)!;
       if (builder.status !== "active") throw new HttpError(409, `thread ${builderId} is ${builder.status}`);
       if (r.merged !== null) throw new HttpError(409, `review ${r.id} already merged pull request #${r.pr.number} as ${r.merged}, so it does not land again`);
+      if (head !== undefined && r.rounds.at(-1)!.head !== head) throw new HttpError(409, `review ${r.id} of ${builderId} is at ${r.rounds.at(-1)!.head}, not ${head}, so it was not landed. Look at it again before landing it`);
       if (!landable(r)) throw new HttpError(409, `review ${r.id} of ${builderId} is ${r.phase.kind}${r.phase.kind === "needs-person" ? `: ${r.phase.reasons.join(" ")}` : ""}, not approved with its checks passing`);
       const next: Review = { ...r, land: { requestedBy }, phase: checking(), outbox: null, nudges: 0 };
       registry.saveReview(next);

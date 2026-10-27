@@ -267,8 +267,9 @@ test("a review held for the person says why on its builder's page, and a deploye
   const button = /<button [^>]*data-action="land"[^>]*>/.exec(region)?.[0];
   assert.ok(button !== undefined, "a deployer gets the Land button");
   assert.match(button, new RegExp(`data-thread="${fix.id}"`));
+  assert.match(button, new RegExp(`data-head="${head}"`), "the button sends the commit its confirmation names, so a review that moved on is not landed");
   assert.equal(textOf(/data-confirm="([^"]*)"/.exec(button)![1]!), `Land pull request #7, "Cache", at commit ${head.slice(0, 12)}? Nexus checks the merge policy again, merges that commit and deploys the merge commit.`);
-  assert.equal((await s.call("POST", `/v1/threads/${fix.id}/land`, {})).status, 200, "the button's route lands for a deployer");
+  assert.equal((await s.call("POST", `/v1/threads/${fix.id}/land`, { head })).status, 200, "the button's route lands for a deployer");
   assert.deepEqual(landed, [fix.id]);
 
   s.registry.saveReview(approvedReview(fix.id, { kind: "approved" }));
@@ -283,6 +284,19 @@ test("a review held for the person says why on its builder's page, and a deploye
   assert.equal(post.status, 403, "the route refuses it whatever the page shows");
   assert.match(post.text, /only deployers may/);
   assert.deepEqual(landed, [fix.id]);
+});
+
+test("a review is not offered for landing when its PR closed, or when the control plane has no review loop", async (t) => {
+  const s = await seeded(t, { ...landingOptions(), reviews: null });
+  const fix = await s.start("acme", "Fix checkout");
+  s.registry.saveReview(approvedReview(fix.id, { kind: "approved" }));
+  const off = landingOf((await s.call("GET", `/threads/${fix.id}`)).text);
+  assert.ok(!off.includes('data-action="land"'));
+  assert.match(textOf(off), /Land #7 Nexus cannot land it now: the review loop needs the control plane's GitHub token \(github\.tokenFile\), which is not configured\.$/);
+
+  const pr = { repo: "acme/nexus", number: 7, title: "Cache", url: "https://github.com/acme/nexus/pull/7", state: "closed" as const, checks: "passing" as const, review: "none" as const, conflict: false };
+  s.registry.savePrWatch(fix.id, { links: [{ pr, seen: [], failed: false }], commentWakes: 0, pending: null, error: null });
+  assert.equal(landingOf((await s.call("GET", `/threads/${fix.id}`)).text), "", "a closed PR has nothing to land");
 });
 
 test("a hold that every landing of the commit meets again is marked, and offers no Land button", async (t) => {

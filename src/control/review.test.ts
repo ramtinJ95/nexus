@@ -270,7 +270,9 @@ test("a token that cannot merge holds the landing for the person, and a later la
   const loop = await approved(f, "nLAPTOP");
   assert.deepEqual(f.review().phase, { kind: "needs-person", reasons: ["The control plane's GitHub token cannot merge (GitHub answered 403: Resource not accessible by personal access token). Merging needs a token with write access to acme/shop's contents and pull requests, which only the person can grant."] });
   f.mergeAnswer = () => ({ kind: "merged", commit: merged });
-  loop.land(f.builder, "nLAPTOP");
+  assert.throws(() => loop.land(f.builder, "nLAPTOP", "f".repeat(40)), /is at [0-9a-f]{40}, not f{40}, so it was not landed/, "a land for another commit than the approved one does nothing");
+  assert.equal(f.review().phase.kind, "needs-person");
+  loop.land(f.builder, "nLAPTOP", head1);
   await loop.poll();
   assert.deepEqual(f.review().phase, { kind: "landed", commit: merged });
   assert.deepEqual(f.merges, [head1, head1]);

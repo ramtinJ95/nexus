@@ -232,8 +232,8 @@ const actions = {
   "link-port": (thread, { port }) => api("POST", `/v1/threads/${thread}/previews`, { port: Number(port) }),
   // As `nexus unpreview`.
   unpublish: (thread, { port }) => whenRunning(thread, () => api("DELETE", `/v1/threads/${thread}/previews/${port}`, {})),
-  // As `nexus land`. The page then shows the landing's steps as the review moves through them.
-  land: (thread) => api("POST", `/v1/threads/${thread}/land`, {}),
+  // As `nexus land`, for the commit the confirmation named. The page then shows the landing's steps as the review moves through them.
+  land: (thread, { head }) => api("POST", `/v1/threads/${thread}/land`, { head }),
 };
 
 document.addEventListener("click", async (event) => {

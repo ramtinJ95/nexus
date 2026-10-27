@@ -414,7 +414,7 @@ export async function startApi(options: ApiOptions): Promise<Api> {
 
   const page = dashboard({
     registry, detail, conversation,
-    mayLand: (caller) => canDeploy(registry, options.deployment, caller),
+    landRefusal: (caller) => !options.reviews ? "no review loop" : canDeploy(registry, options.deployment, caller) ? null : "not a deployer",
     deploys: (r) => options.reviews?.deploys(r) ?? false,
   });
 
@@ -803,9 +803,10 @@ export async function startApi(options: ApiOptions): Promise<Api> {
       return created(await reviewsOrRefuse().start(t.id, { pr: body.pr, rounds: body.rounds, land: body.land ? r.caller : null }));
     }],
     ["POST", /^\/v1\/threads\/([^/]+)\/land$/, async (m, r) => {
+      const body = parse(z.strictObject({ head: commitSchema.optional() }), await r.body({}));
       const t = thread(m[1]!);
       mayLand(r.caller);
-      return ok(reviewsOrRefuse().land(t.id, r.caller));
+      return ok(reviewsOrRefuse().land(t.id, r.caller, body.head));
     }],
     ["POST", /^\/v1\/threads\/([^/]+)\/abort$/, async (m) => { await harness.abort(conversing(thread(m[1]!)).id); return noContent; }],
     ["POST", /^\/v1\/threads\/([^/]+)\/retry$/, async (m) => { await harness.retry(runnable(thread(m[1]!)).id); return noContent; }],
