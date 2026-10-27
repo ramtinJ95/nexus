@@ -1,1 +1,1 @@
-branch: 5248f08 docs(verification): wait for the page stream's ping before counting its frames
+branch: 0136b31 docs(verification): record the full suite after the rebase onto #157
