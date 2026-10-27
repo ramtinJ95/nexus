@@ -23,7 +23,8 @@ export type MergeResult = { kind: "merged"; commit: string } | { kind: "denied" 
 /** `denied` when GitHub refused for good, such as a token that may not write issues or pull requests. */
 export type LabelResult = { kind: "labelled" } | { kind: "denied"; message: string };
 export interface GitHub {
-  find(repo: string, branch: string): Promise<number[]>;
+  /** The PRs from `branch`, open ones unless `state` is `all`. */
+  find(repo: string, branch: string, state?: "open" | "all"): Promise<number[]>;
   poll(repo: string, number: number): Promise<PrSnapshot>;
   /** Each changed file with its patch, empty for a binary file or one too large for GitHub to diff. */
   files(repo: string, number: number): Promise<ChangedFile[]>;
@@ -105,8 +106,8 @@ export function githubClient(token: string, request: typeof fetch = fetch): GitH
     return all;
   }
   return {
-    async find(repo, branch) {
-      const prs = await list<Pr>(`/repos/${repo}/pulls?state=open&head=${encodeURIComponent(`${repo.split("/")[0]}:${branch}`)}`);
+    async find(repo, branch, state = "open") {
+      const prs = await list<Pr>(`/repos/${repo}/pulls?state=${state}&head=${encodeURIComponent(`${repo.split("/")[0]}:${branch}`)}`);
       return prs.filter((p) => p.head.repo?.full_name.toLowerCase() === repo.toLowerCase()).map((p) => p.number);
     },
     async poll(repo, number) {

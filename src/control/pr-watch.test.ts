@@ -33,7 +33,7 @@ function fixture(path = ":memory:") {
   const messages: Parameters<HarnessHost["send"]>[] = [];
   let reject = false;
   const harness: Pick<HarnessHost, "send"> = { async send(...args) { messages.push(args); if (reject) throw new Error("delivery interrupted"); return { id: 1 } as never; } };
-  const github = { async find(repo: string, branch: string) { calls.push(`find:${repo}:${branch}`); return snapshot.pr.state === "open" ? [1] : []; }, async poll() { calls.push("poll"); return structuredClone(snapshot); } };
+  const github = { async find(repo: string, branch: string, state = "open") { calls.push(`find:${repo}:${branch}${state === "all" ? ":all" : ""}`); return state === "all" || snapshot.pr.state === "open" ? [1] : []; }, async poll() { calls.push("poll"); return structuredClone(snapshot); } };
   let wakes = 0;
   const inbox = (r = registry, h = harness) => agentInbox({ registry: r, harness: h, probes: new Map(), wake() { wakes++; } });
   const options = { registry, github, inbox: inbox() };
@@ -480,4 +480,28 @@ test("a thread a queued thread waits for has its PR's merge seen when archived, 
   f.snapshot = { ...f.snapshot, pr: { ...f.snapshot.pr, state: "merged" } };
   await f.watcher.poll();
   assert.equal(merged(reopened), "merged", "a PR reopened and merged between two reads is seen merged");
+});
+
+test("a predecessor's PR that opened and merged between two reads, or behind a message the watch cannot deliver, is seen merged", async (t) => {
+  const f = fixture(); t.after(() => f.registry.close());
+  f.registry.saveQueued({
+    id: "th-queued" as ThreadId, title: "after", project: "project" as ProjectId, startedBy: "test", createdAt: 1, after: [f.id],
+    request: { project: "project", title: "after", resources: { cpus: 2, memoryGiB: 4, diskGiB: 10 } }, message: null, status: "queued", startNow: null, lastError: null, startedAt: null, firstMessage: null,
+  });
+  f.snapshot = { ...f.snapshot, pr: { ...f.snapshot.pr, state: "merged" } };
+  await f.watcher.poll();
+  assert.equal(f.registry.prWatch(f.id)?.links[0]?.pr.state, "merged", "a PR first found after its merge is linked merged");
+  assert.ok(f.calls.includes("find:acme/repo:feature:all"));
+
+  const held = f.add("th-held");
+  f.snapshot = { ...f.snapshot, pr: { ...f.snapshot.pr, number: 2, state: "open" } };
+  await f.watcher.poll();
+  f.registry.savePrWatch(held, { ...f.registry.prWatch(held)!, pending: { id: "pr-watch:held", text: "news" } });
+  f.registry.saveQueued({ ...f.registry.queuedThread("th-queued" as ThreadId)!, after: [f.id, held] });
+  f.reject(true);
+  f.snapshot = { ...f.snapshot, pr: { ...f.snapshot.pr, state: "merged" } };
+  await f.watcher.poll();
+  await f.watcher.poll();
+  assert.equal(f.registry.prWatch(held)?.pending?.id, "pr-watch:held", "the message still waits");
+  assert.equal(f.registry.prWatch(held)?.links.find((l) => l.pr.number === 2)?.pr.state, "merged", "its PR's merge is seen all the same");
 });
