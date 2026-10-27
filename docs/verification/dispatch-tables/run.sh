@@ -44,9 +44,13 @@ for run in pins branch; do
   commit=$pins
   [ "$run" = branch ] && commit=$branch
   tree=$work/branch
-  [ "$run" = pins ] && tree=$(checkout pins "$commit")
+  if [ "$run" = pins ]; then
+    tree=$(checkout pins "$commit")
+    # Later test-only commits fix the pins themselves, so they run on main's code too.
+    for fix in $(git -C "$repo" log --reverse --format=%h --grep '^test(' "$commit..$branch"); do git -C "$tree" cherry-pick --no-commit "$fix" >/dev/null; done
+  fi
   {
-    echo "$(git -C "$tree" log --oneline -1)"
+    echo "$(git -C "$tree" log --oneline -1)$(git -C "$tree" diff --quiet HEAD || echo ", with the later test-only commits applied")"
     (cd "$tree" && node --test src/control/api.test.ts src/probe/server.test.ts 2>&1 | grep -E '^(✔|✖|ℹ (tests|pass|fail))')
   } > "$here/tests-$run.txt"
   tail -3 "$here/tests-$run.txt"
