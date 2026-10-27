@@ -1,0 +1,3 @@
+$ sudo node src/control/passkeys-host.ts /etc/nexus/control.json list
+No passkeys.
+exit 0

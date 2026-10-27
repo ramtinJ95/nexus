@@ -1,0 +1,10 @@
+As the laptop, a deployer, the driver had the passkey sign a waiver for 7777777777777777777777777777777777777777:
+POST /v1/threads/th-06b9fba86066/land/challenge {"head":"7777777777777777777777777777777777777777","holds":["Always needs the person: pylon image rebuilds, as it changes images/pylon/Dockerfile."]}
+=> 200 {"challenge":"N2Uj9-FnKyJxPHJWK9DAZo09TuEgSAXFXyn54CxU5Mw","rpId":"rj-firebat.example.ts.net","timeout":120000,"userVerification":"required","allowCredentials":[{"type":"public-key","id":"dRcgb0LkvI7rXKk1yTTPRyGzpLHKtkz_8Y_uJqckiLw"}]}
+(the virtual authenticator verified the person and signed the challenge N2Uj9-FnKyJxPHJWK9DAZo09TuEgSAXFXyn54CxU5Mw for https://rj-firebat.example.ts.net:7443)
+Then, as the phone:
+POST /v1/threads/th-06b9fba86066/land/challenge {"head":"7777777777777777777777777777777777777777","holds":["Always needs the person: pylon image rebuilds, as it changes images/pylon/Dockerfile."]}
+=> 403 {"error":"caller may not land a pull request: landing deploys, and only deployers may, never infrastructure nodes or pylons"}
+POST /v1/threads/th-06b9fba86066/land {"head":"7777777777777777777777777777777777777777","waiver":{"holds":["Always needs the person: pylon image rebuilds, as it changes images/pylon/Dockerfile."],"assertion":"<assertion from credential dRcgb0Lk>"}}
+=> 403 {"error":"caller may not land a pull request: landing deploys, and only deployers may, never infrastructure nodes or pylons"}
+The review is still needs-person.

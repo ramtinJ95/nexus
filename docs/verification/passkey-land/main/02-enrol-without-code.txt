@@ -1,0 +1,2 @@
+POST /v1/passkeys/enrolment {"code":"ABCD-EFGH-JKLM-NPQR-STUV"}
+=> 404 {"error":"no route /v1/passkeys/enrolment"}

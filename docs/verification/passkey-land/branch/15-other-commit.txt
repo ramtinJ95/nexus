@@ -1,0 +1,7 @@
+POST /v1/threads/th-06b9fba86066/land/challenge {"head":"6666666666666666666666666666666666666666","holds":["Always needs the person: pylon image rebuilds, as it changes images/pylon/Dockerfile."]}
+=> 200 {"challenge":"TOC0HaUHp9GGCtIBjR8zQf10AWnNHFGuEVQA06gmMvc","rpId":"rj-firebat.example.ts.net","timeout":120000,"userVerification":"required","allowCredentials":[{"type":"public-key","id":"dRcgb0LkvI7rXKk1yTTPRyGzpLHKtkz_8Y_uJqckiLw"}]}
+(the virtual authenticator verified the person and signed the challenge TOC0HaUHp9GGCtIBjR8zQf10AWnNHFGuEVQA06gmMvc for https://rj-firebat.example.ts.net:7443)
+PR #46 moved to 7777777777777777777777777777777777777777, and the reviewer approved it there. The driver sends the assertion for 6666666666666666666666666666666666666666 to land 7777777777777777777777777777777777777777:
+POST /v1/threads/th-06b9fba86066/land {"head":"7777777777777777777777777777777777777777","waiver":{"holds":["Always needs the person: pylon image rebuilds, as it changes images/pylon/Dockerfile."],"assertion":"<assertion from credential dRcgb0Lk>"}}
+=> 403 {"error":"the passkey confirmed landing commit 6666666666666666666666666666666666666666, not 7777777777777777777777777777777777777777"}
+The review is still needs-person at 7777777777777777777777777777777777777777.

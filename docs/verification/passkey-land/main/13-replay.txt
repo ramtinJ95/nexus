@@ -1,0 +1,3 @@
+There is no passkey landing to replay. A land request carrying a waiver:
+POST /v1/threads/th-64b950506244/land {"head":"4444444444444444444444444444444444444444","waiver":{"holds":["Always needs the person: anything irreversible, as it changes src/control/registry.ts."],"assertion":"<assertion from credential x>"}}
+=> 400 {"error":"✖ Unrecognized key: \"waiver\""}

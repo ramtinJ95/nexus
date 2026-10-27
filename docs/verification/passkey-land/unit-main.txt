@@ -1,0 +1,11 @@
+main: 0e55dea feat(dashboard): land a held or approved review from the thread page (#150), tests from HEAD
+ℹ fail 6
+ℹ pass 0
+ℹ tests 6
+✖ a hold the policy reserves for the person is marked waivable, and lands only with a passkey, which needs the HTTPS address and an enrolled one (61.011372ms)
+✖ failing tests:
+✖ review and land reach the review loop's routes, and show prints a review and what it needs from the person (1571.271407ms)
+✖ src/control/api.test.ts (331.439602ms)
+✖ src/control/passkeys.test.ts (75.338213ms)
+✖ src/control/review.test.ts (154.689349ms)
+✖ the Passkeys page lists the person's passkeys and enrols one with the code from the host (27.675433ms)

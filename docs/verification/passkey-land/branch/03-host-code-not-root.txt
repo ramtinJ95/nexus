@@ -1,0 +1,3 @@
+$ node src/control/passkeys-host.ts /etc/nexus/control.json code
+passkeys: run this as root on the control plane's host. The code it makes is what lets a passkey enrol, so only root may make one
+exit 77

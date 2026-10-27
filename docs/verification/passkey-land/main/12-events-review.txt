@@ -1,0 +1,7 @@
+$ nexus events --thread th-64b950506244 --kind review.changed
+4 2026-10-27T15:30:27.442Z th-64b950506244 review.changed {"review":"rv-42000000","reviewer":"th-dc60095f06d7","phase":{"kind":"merging","authorized":null},"round":1}
+9 2026-10-27T15:30:27.458Z th-64b950506244 review.changed {"review":"rv-42000000","reviewer":"th-dc60095f06d7","phase":{"kind":"needs-person","reasons":["Always needs the person: anything irreversible, as it changes src/control/registry.ts."]},"round":1}
+13 2026-10-27T15:30:29.336Z th-64b950506244 review.changed {"review":"rv-42000000","reviewer":"th-dc60095f06d7","phase":{"kind":"checking","startedAt":1793115029336,"thread":null},"round":1}
+15 2026-10-27T15:30:33.464Z th-64b950506244 review.changed {"review":"rv-42000000","reviewer":"th-dc60095f06d7","phase":{"kind":"merging","authorized":null},"round":1}
+16 2026-10-27T15:30:33.465Z th-64b950506244 review.changed {"review":"rv-42000000","reviewer":"th-dc60095f06d7","phase":{"kind":"needs-person","reasons":["Always needs the person: anything irreversible, as it changes src/control/registry.ts."]},"round":1}
+exit 0
