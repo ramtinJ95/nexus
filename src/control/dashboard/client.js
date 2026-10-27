@@ -4,6 +4,7 @@
 // sends the conversation region as the run streams, and reads its checkout's changes into the inspector, opening
 // each changed file's diff as a tab beside the conversation.
 import { coordinator, notificationChannel, badgeCount, badgeText, noticeText, seenBody } from "./notifications.js";
+import { agoText } from "./ago.js";
 import { afterSend, emptyReview, formatReview, kinds, linesLabel, noteOn, place, rangeOf, readReview, rowsOf } from "./review.js";
 
 const main = document.querySelector("main");
@@ -49,6 +50,7 @@ function clock(ms) {
 }
 function tick() {
   for (const time of document.querySelectorAll("time[data-since]")) time.textContent = clock(Date.now() - Number(time.dataset.since));
+  for (const time of document.querySelectorAll("time[data-ago]")) time.textContent = agoText(Date.parse(time.dateTime), Date.now());
 }
 
 // What the server last sent for each region. Comparing against it rather than the live DOM means a tool the

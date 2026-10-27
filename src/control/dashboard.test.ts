@@ -1127,6 +1127,22 @@ async function claudeThread(s: Awaited<ReturnType<typeof seeded>>, entries: Clau
   return thread;
 }
 
+test("an age the client ticks reads as a render of the page at the same time would", async (t) => {
+  t.mock.timers.enable({ apis: ["Date"], now: Date.parse("2026-10-27T12:00:00Z") });
+  const s = await seeded(t);
+  const thread = await claudeThread(s, []);
+  const { agoText } = await import(new URL("./dashboard/ago.js", import.meta.url).href);
+  const ages: string[] = [];
+  for (const after of [0, 44_499, 44_500, 89_000, 44 * 60_000 + 29_000, 44 * 60_000 + 30_000, 45 * 60_000, 36 * 3_600_000 - 1_000, 36 * 3_600_000, 30 * 86_400_000]) {
+    t.mock.timers.setTime(thread.createdAt + after);
+    const html = (await s.call("GET", `/threads/${thread.id}`)).text;
+    const [, datetime, age] = /<p class="convo-meta">.*? · started <time datetime="([^"]+)" title="[^"]+" data-ago>([^<]*)<\/time>/.exec(html)!;
+    assert.equal(agoText(Date.parse(datetime!), Date.now()), age, `${after} ms after the thread started`);
+    ages.push(age!);
+  }
+  assert.deepEqual(ages, ["just now", "just now", "1 min ago", "1 min ago", "44 min ago", "45 min ago", "1 h ago", "36 h ago", "2 d ago", "30 d ago"]);
+});
+
 test("a Claude worker's transcript reads as its conversation: prompts by who sent them, replies, folded calls with their results and a subagent's finish, notes, unknown records and what Claude queued", async (t) => {
   const s = await seeded(t);
   const thread = await claudeThread(s, [

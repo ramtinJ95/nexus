@@ -210,11 +210,12 @@ function span(at: number, now: number): string | null {
     : `${Math.round(seconds / 86_400)} d`;
 }
 
+/** "5 min ago", which client.js ticks with the same format. */
 function ago(at: number, now: number): Html {
   if (at === 0) return html`never`;
   const iso = new Date(at).toISOString();
   const label = span(at, now);
-  return html`<time datetime="${iso}" title="${iso}">${label === null ? "just now" : `${label} ago`}</time>`;
+  return html`<time datetime="${iso}" title="${iso}" data-ago>${label === null ? "just now" : `${label} ago`}</time>`;
 }
 
 /** A run's length as a clock reads it, such as 1m 03s. client.js ticks it with the same format. */
