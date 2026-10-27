@@ -1,0 +1,74 @@
+$ node --test --test-name-pattern 'accept exactly the same' src/project.test.ts   # main, this branch's test file
+services: web failed: Service web needs the public URL of api, which has no preview assigned yet. It starts once one is
+✖ parseServicesFile and the pylon's supervisor accept exactly the same files (255.84937ms)
+✖ the in-pylon API's serviceDecl and the controller's service-start accept exactly the same services (4.508397ms)
+ℹ tests 2
+ℹ suites 0
+ℹ pass 0
+ℹ fail 2
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 723.858781
+
+✖ failing tests:
+
+test at src/project.test.ts:214:1
+✖ parseServicesFile and the pylon's supervisor accept exactly the same files (255.84937ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
+  + actual - expected
+  
+  + [
+  +   'a NEXUS_ name in env',
+  +   'a NEXUS_ name Nexus does not set in env',
+  +   'an absolute cwd',
+  +   'a cwd that leaves the repo',
+  +   'an empty preview title',
+  +   'review: false',
+  +   'a top-level version',
+  +   'a top-level setup',
+  +   'an unterminated reference',
+  +   'service keys that collapse to one string'
+  + ]
+  - []
+  
+      at TestContext.<anonymous> (file:///tmp/tmp.VdoGOmsb1B/src/project.test.ts:217:10)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:387:3) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: [ 'a NEXUS_ name in env', 'a NEXUS_ name Nexus does not set in env', 'an absolute cwd', 'a cwd that leaves the repo', 'an empty preview title', 'review: false', 'a top-level version', 'a top-level setup', 'an unterminated reference', 'service keys that collapse to one string' ],
+    expected: [],
+    operator: 'deepStrictEqual',
+    diff: 'simple'
+  }
+
+test at src/project.test.ts:220:1
+✖ the in-pylon API's serviceDecl and the controller's service-start accept exactly the same services (4.508397ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
+  + actual - expected
+  
+  + [
+  +   'a NEXUS_ name in env',
+  +   'an absolute cwd',
+  +   'a cwd that leaves the repo',
+  +   'an empty preview title',
+  +   'review: false'
+  + ]
+  - []
+  
+      at TestContext.<anonymous> (file:///tmp/tmp.VdoGOmsb1B/src/project.test.ts:232:10)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1402:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:974:18)
+      at Test.postRun (node:internal/test_runner/test:1542:19)
+      at Test.run (node:internal/test_runner/test:1467:12)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:387:3) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: [ 'a NEXUS_ name in env', 'an absolute cwd', 'a cwd that leaves the repo', 'an empty preview title', 'review: false' ],
+    expected: [],
+    operator: 'deepStrictEqual',
+    diff: 'simple'
+  }
+exit code: 1
