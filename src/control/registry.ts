@@ -663,6 +663,11 @@ export function openRegistry(path: string, clock = Date.now) {
         updateAttention(thread);
       });
     },
+    /** The highest journal sequence applied from the node, or null before its first. */
+    eventReceipt(node: NodeName): number | null {
+      const receipt = sql("SELECT sequence FROM event_receipts WHERE node = ?").get(node);
+      return receipt === undefined ? null : Number(receipt.sequence);
+    },
     reportSession(node: NodeName, report: ReportedEvent) {
       const event = pylonEventSchema.parse(report.event);
       const pylon = q.pylon.get(report.pylon);

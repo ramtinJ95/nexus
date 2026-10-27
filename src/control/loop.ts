@@ -262,7 +262,12 @@ export function startLoop(options: LoopOptions): Loop {
           const known = readsKnown[event.type]
             ? new Map(registry.pylonIdsOn(node).map((id) => [id, last?.pylons.find((o) => o.pylonId === id) ?? "absent" as const]))
             : new Map<PylonId, PylonObservation | "absent">();
-          for (const report of event.type === "snapshot" ? event.observation.events ?? [] : event.type === "session-event" ? [event.report] : []) registry.reportSession(node, report);
+          if (event.type === "snapshot") {
+            // The journal replays reports the node already sent, and the receipt only grows, so reportSession would drop these.
+            const receipt = registry.eventReceipt(node);
+            for (const report of event.observation.events ?? []) if (receipt === null || report.sequence > receipt) registry.reportSession(node, report);
+          }
+          if (event.type === "session-event") registry.reportSession(node, event.report);
           const current = merge(last, event);
           const writes = ingest(event, node, known, Date.now(), new Set([...known.keys()].filter((id) => !listed.has(id))));
           registry.ingested(current === last ? null : current, writes);
