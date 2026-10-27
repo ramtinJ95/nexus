@@ -175,12 +175,20 @@ export function claudeConversations(options: { registry: Registry; probes: Reado
     if (!closed) void refreshOf(id);
   }
 
+  /** A deleted thread's reader goes once nothing reads or watches it. */
+  function release(id: ThreadId, r: Reader) {
+    if (!closed && r.reading === null && r.next === null && r.watchers.size === 0 && registry.thread(id)?.status === "deleted") readers.delete(id);
+  }
+
   function refreshOf(id: ThreadId): Promise<void> {
     const r = readerOf(id);
     if (r.reading === null) {
       return r.reading = catchUp(id, r)
         .catch((err: unknown) => console.error(`${id}: following Claude's transcript failed: ${(err as Error).message}`))
-        .finally(() => { r.reading = null; });
+        .finally(() => {
+          r.reading = null;
+          release(id, r);
+        });
     }
     return r.next ??= r.reading.then(() => {
       r.next = null;
@@ -223,7 +231,10 @@ export function claudeConversations(options: { registry: Registry; probes: Reado
           void refreshOf(t.id);
         },
         async stop() {
-          if (r.watchers.delete(watcher)) update(t.id, r, false);
+          if (r.watchers.delete(watcher)) {
+            update(t.id, r, false);
+            release(t.id, r);
+          }
           watcher.closed.resolve();
         },
         closed: watcher.closed.promise,

@@ -11,6 +11,9 @@
  * Each pass renders the pylon's LiveSpec from its records before its tick, so a new port changes the liveHash and
  * the planner sends it in a spawn. The ports go back once its node neither has the pylon of a deleted thread nor routes
  * a preview to it.
+ *
+ * A deleted thread's pylon that is gone, with nothing left to settle, is skipped, so passes do not grow with every
+ * thread ever deleted. It is ticked again if its node lists or routes it again.
  */
 import { randomUUID } from "node:crypto";
 import { setTimeout as delay } from "node:timers/promises";
@@ -148,9 +151,11 @@ export function startLoop(options: LoopOptions): Loop {
         log(`${template.id}: template build tick failed: ${(err as Error).message}`);
       }
     }
+    const seen = observation(node);
+    const present = [...seen?.pylons.map((p) => p.pylonId) ?? [], ...seen?.previewRoutes?.map((r) => r.pylonId) ?? []];
     // Each record is read just before its tick, because an API retry may change it while earlier ticks wait on
     // the probe, and saving an older copy would undo it.
-    for (const pylonId of registry.pylonIdsOn(node)) {
+    for (const pylonId of registry.pylonIdsToTick(node, present)) {
       const found = registry.pylon(pylonId)!;
       const thread = registry.thread(found.thread as ThreadId)!;
       const stored = withLive(found, thread);

@@ -1,0 +1,14 @@
+Per pass, averaged over 50 passes after the loop settled. "ids" counts the queries that list the node's pylons. The last column is what ingest writes for pylons per snapshot, averaged over 10 snapshots of the settled node.
+
+| deleted threads | deletes sent to still-held pylons | ids | pylon reads | thread reads | project reads | previews reads | Claude worker reads | pylon saves | releasePreviews | probe calls | ms per pass | pylon writes per snapshot |
+|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| 0 | 2 | 1 | 3 | 3 | 5 | 3 | 3 | 0 | 2 | 0 | 1.31 | 0 |
+| 100 | 2 | 1 | 103 | 103 | 205 | 103 | 103 | 0 | 102 | 0 | 28.16 | 0 |
+| 1000 | 2 | 1 | 1003 | 1003 | 2005 | 1003 | 1003 | 0 | 1002 | 0 | 257.30 | 0 |
+
+Readers the Claude conversation service keeps after reading and watching deleted Claude threads, read from the size of its readers Map.
+
+| deleted Claude threads | readers kept |
+|---:|---:|
+| 1000 | 1000 |
+| 3000 | 3000 |

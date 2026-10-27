@@ -1,0 +1,29 @@
+## without the node lists or routes it
+✖ a deleted thread's pylon that is gone is torn down again whenever its node lists or routes it again (20008.30976ms)
+
+## without a job is sent
+✖ a deleted thread's pylon that is gone is torn down again whenever its node lists or routes it again (20006.383034ms)
+✖ a thread's pylon follows its thread: spawn, pause on archive, resume on activity, delete (20011.658758ms)
+
+## without a preview port is kept
+✖ a deleted thread's ports go back after a restart between its delete and their release (20005.990135ms)
+
+## without a retry is pending
+✖ a deleted thread whose pylon was retried just before the delete settles the retry, though its pylon is gone (20006.57086ms)
+
+## without a Claude launch is starting
+✖ a deleted thread whose Claude launch was cut off has the launch failed, though its pylon is gone (20007.071821ms)
+
+## without the reader release's check that the service is open
+✖ a transcript read that ends after the service and its registry closed settles without touching the registry (52.086971ms)
+
+## without the reader release's check that nothing watches
+✖ a deleted thread's reader goes once its last read and its last watch end, and an active thread's stays (533.726225ms)
+✖ a watch of a deleted thread keeps its reader, so closing the service still ends the watch (20001.410101ms)
+
+## without the release after a read
+✖ a deleted thread's reader goes once its last read and its last watch end, and an active thread's stays (738.597358ms)
+
+## without the release after a watch
+✖ a deleted thread's reader goes once its last read and its last watch end, and an active thread's stays (946.370967ms)
+
