@@ -56,6 +56,13 @@ The tests below pin what a person or the node would see. `new-tests-main.txt` ru
 - a deleted thread whose Claude launch was cut off has the launch failed, though its pylon is gone,
 - and the existing deleted-thread tests.
 
-`mutations.sh` removes each clause of the query in turn and runs those tests. Each removal fails at least one test (`mutations.txt`). The `retrying` clause has no test. The API refuses a retry of a deleted thread's pylon, so the clause covers only a retry made just before the delete.
+`src/control/claude-conversation.test.ts` pins the reader's lifecycle against a probe whose transcript reads wait until the test ends them:
 
-The full suite, `npm test`, passed with 1183 tests, and `npm run typecheck` passed.
+- a read that ends after the service and its registry closed settles without touching the registry,
+- a deleted thread's reader stays while a read runs, so a refresh meanwhile waits for it,
+- a watch of a deleted thread keeps its reader, so closing the service still ends the watch,
+- and a deleted thread's reader goes once its last read and its last watch end, while an active thread's stays.
+
+`mutations.sh` removes each clause of the query, and each guard and call of the reader's release, in turn, and runs those tests. Each removal fails at least one test (`mutations.txt`). The `retrying` clause has no test. The API refuses a retry of a deleted thread's pylon, so the clause covers only a retry made just before the delete.
+
+The full suite, `npm test`, passed with 1187 tests, and `npm run typecheck` passed.

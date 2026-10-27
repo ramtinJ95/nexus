@@ -1,13 +1,26 @@
 ## without the node lists or routes it
-✖ a deleted thread's pylon that is gone is torn down again whenever its node lists or routes it again (20002.494203ms)
+✖ a deleted thread's pylon that is gone is torn down again whenever its node lists or routes it again (20004.720937ms)
 
 ## without a job is sent
-✖ a deleted thread's pylon that is gone is torn down again whenever its node lists or routes it again (20003.015214ms)
-✖ a thread's pylon follows its thread: spawn, pause on archive, resume on activity, delete (20005.715103ms)
+✖ a deleted thread's pylon that is gone is torn down again whenever its node lists or routes it again (20006.247428ms)
+✖ a thread's pylon follows its thread: spawn, pause on archive, resume on activity, delete (20009.39244ms)
 
 ## without a preview port is kept
-✖ a deleted thread's ports go back after a restart between its delete and their release (20002.719554ms)
+✖ a deleted thread's ports go back after a restart between its delete and their release (20005.58652ms)
 
 ## without a Claude launch is starting
-✖ a deleted thread whose Claude launch was cut off has the launch failed, though its pylon is gone (20007.471115ms)
+✖ a deleted thread whose Claude launch was cut off has the launch failed, though its pylon is gone (20002.39892ms)
+
+## without the reader release's check that the service is open
+✖ a transcript read that ends after the service and its registry closed settles without touching the registry (59.077618ms)
+
+## without the reader release's check that nothing watches
+✖ a deleted thread's reader goes once its last read and its last watch end, and an active thread's stays (413.941939ms)
+✖ a watch of a deleted thread keeps its reader, so closing the service still ends the watch (20000.57047ms)
+
+## without the release after a read
+✖ a deleted thread's reader goes once its last read and its last watch end, and an active thread's stays (726.407732ms)
+
+## without the release after a watch
+✖ a deleted thread's reader goes once its last read and its last watch end, and an active thread's stays (1128.400642ms)
 
