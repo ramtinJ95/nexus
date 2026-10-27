@@ -79,7 +79,7 @@ function fakeBackend(guest: Guest | null = null) {
       return unreachable.map((id) => ({ pylonId: id, reason: "its controller did not answer" }));
     },
     artifacts: {
-      list: async () => [image, ...offered.keys(), ...imported.keys()],
+      list: async (listed) => [image, ...offered.keys(), ...imported.keys(), ...listed.flatMap((p) => p.vm === "stopped" && p.checkpoint !== null ? [p.checkpoint] : [])],
       manifest: async (id) => imported.get(id)?.manifest ?? offered.get(id)?.manifest ?? null,
       async export(id) {
         const held = offered.get(id) ?? assert.fail(`export of ${id}, which the fake does not hold`);
@@ -322,6 +322,29 @@ test("a spawn granted a held secret boots before the control plane hands it over
   await client.submit(env);
   assert.equal((await finished(client, env.jobId)).state, "succeeded");
   assert.equal(fake.pylons.get(pylonId)?.vm, "running");
+});
+
+test("a snapshot lists the checkpoints of the stopped pylons it reports, also when a pylon stops while it is read", async (t) => {
+  const { client, fake } = await setup(t);
+  const down = "pylon-down" as PylonId;
+  const up = "pylon-up" as PylonId;
+  fake.pylons.set(down, { pylonId: down, vm: "stopped", checkpoint: "ckpt-down-1", image, bootedAt: null, sessions: null });
+  fake.pylons.set(up, { pylonId: up, vm: "running", checkpoint: null, image, bootedAt: "2027-01-01T00:00:00Z" });
+  fake.backend.list = async () => {
+    const listed = [...fake.pylons.values()];
+    fake.pylons.set(up, { pylonId: up, vm: "stopped", checkpoint: "ckpt-up-1", image, bootedAt: null, sessions: null });
+    return listed;
+  };
+  const observed = async () => {
+    for await (const e of client.observe(AbortSignal.timeout(5000))) return e.type === "snapshot" ? e.observation : assert.fail(e.type);
+    return assert.fail("observe ended");
+  };
+  const first = await observed();
+  assert.deepEqual(first.pylons.map((p) => [p.pylonId, p.phase]), [[down, "stopped"], [up, "running"]]);
+  assert.deepEqual(first.artifacts, [image, "ckpt-down-1"], "the pause that finished after the list shows in the next snapshot, with its pylon");
+  const next = await observed();
+  assert.deepEqual(next.pylons.map((p) => [p.pylonId, p.phase]), [[down, "stopped"], [up, "stopped"]]);
+  assert.deepEqual(next.artifacts, [image, "ckpt-down-1", "ckpt-up-1"]);
 });
 
 test("observe starts with a snapshot carrying the applied liveHash, and a new probe reports none", async (t) => {

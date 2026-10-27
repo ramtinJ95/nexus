@@ -1,0 +1,11 @@
+10 stopped pylons, 8 of them with a checkpoint. Per operation:
+                                    lists  sidecars  records
+snapshot 1                              2        20       40
+snapshot 2                              2        20       40
+snapshot 3                              2        20       40
+snapshot 4                              2        20       40
+snapshot 5                              2        20       40
+GET /v1/artifacts/tpl-absent000000 (404)      1        10       20
+
+What the last snapshot reported:
+{"artifacts":["img-count0000000","ckpt-count-0","ckpt-count-1","ckpt-count-2","ckpt-count-3","ckpt-count-4","ckpt-count-5","ckpt-count-6","ckpt-count-7"],"pylons":[{"pylonId":"pylon-count-0","phase":"stopped","checkpoint":"ckpt-count-0","sessions":null},{"pylonId":"pylon-count-1","phase":"stopped","checkpoint":"ckpt-count-1","sessions":null},{"pylonId":"pylon-count-2","phase":"stopped","checkpoint":"ckpt-count-2","sessions":null},{"pylonId":"pylon-count-3","phase":"stopped","checkpoint":"ckpt-count-3","sessions":null},{"pylonId":"pylon-count-4","phase":"stopped","checkpoint":"ckpt-count-4","sessions":null},{"pylonId":"pylon-count-5","phase":"stopped","checkpoint":"ckpt-count-5","sessions":null},{"pylonId":"pylon-count-6","phase":"stopped","checkpoint":"ckpt-count-6","sessions":null},{"pylonId":"pylon-count-7","phase":"stopped","checkpoint":"ckpt-count-7","sessions":null},{"pylonId":"pylon-count-8","phase":"stopped","checkpoint":null,"sessions":null},{"pylonId":"pylon-count-9","phase":"stopped","checkpoint":null,"sessions":null}]}

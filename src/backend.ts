@@ -93,7 +93,8 @@ export interface Guest {
  * logins and stays in its pylon's instance on its own node.
  */
 export interface ArtifactStore {
-  list(): Promise<readonly ArtifactId[]>;
+  /** `pylons` is what the backend's list() returned. A backend whose checkpoints live in its pylons' instances lists theirs. */
+  list(pylons: readonly BackendPylon[]): Promise<readonly ArtifactId[]>;
   /** The manifest of an image or template this node holds, or null. */
   manifest(id: PortableArtifactId): Promise<ArtifactManifest | null>;
   /** The sparse archive a peer's GET /v1/artifacts/{id} streams, and the manifest whose sha256 it hashes to. */

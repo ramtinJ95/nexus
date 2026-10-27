@@ -468,9 +468,9 @@ export function createPylonVmBackend(options: PylonVmBackendOptions): VmBackend 
   }
 
   const artifacts: ArtifactStore = {
-    async list() {
+    async list(pylons) {
       // A running pylon's disk has moved on from the checkpoint it booted from, so only stopped disks count.
-      const checkpoints = (await list()).flatMap((p) => p.vm === "stopped" && p.checkpoint !== null ? [p.checkpoint] : []);
+      const checkpoints = pylons.flatMap((p) => p.vm === "stopped" && p.checkpoint !== null ? [p.checkpoint] : []);
       return [...await store.list(), ...checkpoints] satisfies ArtifactId[];
     },
     manifest: (id) => store.manifest(id),

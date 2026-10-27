@@ -129,6 +129,10 @@ export interface NodeObservation {
    * holds its disk size until it is deleted, so a paused pylon counts toward `committedDiskGiB` only.
    */
   capacity: { cpus: number; committedCpus: number; memoryGiB: number; committedMemoryGiB: number; diskFreeGiB: number; committedDiskGiB: number };
+  /**
+   * On pylon-vm, its checkpoints are those of the stopped pylons in `pylons`, taken from the same list. A pylon that
+   * stops while the snapshot is read shows as stopped, with its checkpoint, in the next one.
+   */
   artifacts: readonly ArtifactId[];
   /**
    * Running jobs, plus results from the last 10 minutes. Read before `pylons`, so `pylons` shows the result of

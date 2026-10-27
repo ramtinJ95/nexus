@@ -391,7 +391,8 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
   async function readSnapshot(): Promise<NodeObservation> {
     // Jobs before pylons, so the pylons show the result of every job listed as finished. See NodeObservation.jobs.
     const jobs = retainedJobs();
-    const [pylons, artifacts, disk] = await Promise.all([backend.list(), backend.artifacts.list(), statfs("/")]);
+    const [pylons, disk] = await Promise.all([backend.list(), statfs("/")]);
+    const artifacts = await backend.artifacts.list(pylons);
     const present = new Set(pylons.map((p) => p.pylonId));
     for (const id of gitReads.keys()) if (!present.has(id)) gitReads.delete(id);
     for (const id of unreadGit) if (!present.has(id)) unreadGit.delete(id);
@@ -588,7 +589,7 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
       const id = decodeURIComponent(artifactMatch[1]!) as PortableArtifactId;
       const wanted = new URL(req.url ?? "/", "http://probe").searchParams.get("sha256");
       if (wanted === null) return send(res, 400, "name the sha256 the copy must have, as ?sha256=");
-      if (id.startsWith("ckpt-") || !(await backend.artifacts.list()).includes(id)) return send(res, 404, `this node holds no image or template ${id}. A checkpoint never leaves its node`);
+      if (id.startsWith("ckpt-") || !(await backend.artifacts.list([])).includes(id)) return send(res, 404, `this node holds no image or template ${id}. A checkpoint never leaves its node`);
       const held = await backend.artifacts.manifest(id);
       if (held !== null && held.sha256 !== wanted) {
         const reason = `this node holds ${id} with sha256 ${held.sha256}, and the fetch asks for ${wanted}`;
