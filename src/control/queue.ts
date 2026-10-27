@@ -72,7 +72,7 @@ export interface ThreadQueue {
    * queued with startNow, so a later pass starts it once there is room.
    */
   startNow(id: ThreadId, caller: string): Promise<Thread>;
-  /** archive: queued to archived. unarchive: archived to queued. delete: any but deleted to deleted. */
+  /** archive: queued to archived. unarchive: archived to queued. delete: any but deleted to deleted. 404 for none, 409 for a move its status refuses. */
   setStatus(id: ThreadId, status: "archived" | "queued" | "deleted"): QueuedRecord;
   poll(): Promise<void>;
   close(): Promise<void>;
@@ -139,7 +139,8 @@ export function threadQueue(options: {
 
   function queued(id: ThreadId): QueuedRecord {
     const record = registry.queuedThread(id);
-    if (record === undefined || record.status === "started") throw new HttpError(404, `no queued thread ${id}`);
+    if (record === undefined) throw new HttpError(404, `no queued thread ${id}`);
+    if (record.status === "started") throw new HttpError(409, `thread ${id} has started, so it is no longer queued`);
     return record;
   }
 
@@ -162,10 +163,9 @@ export function threadQueue(options: {
     } catch (err) {
       const message = (err as Error).message;
       const now = registry.queuedThread(id);
-      if (now?.status === "queued") {
-        if (now.lastError !== message) log(`queued thread ${id} did not start: ${message}`);
-        registry.saveQueued({ ...now, lastError: message });
-      }
+      if (now?.status !== "queued") throw err instanceof HttpError ? err : new HttpError(409, message);
+      if (now.lastError !== message) log(`queued thread ${id} did not start: ${message}`);
+      registry.saveQueued({ ...now, lastError: message });
       throw err;
     }
     await deliver(id).catch((err: unknown) => log(`queued thread ${id} started, but its first message was not sent yet: ${(err as Error).message}`));

@@ -20,6 +20,8 @@ import { promisify } from "node:util";
 import { WebSocket } from "ws";
 import { maxStreams, startApi, type ThreadDetail, type ThreadRow } from "./api.ts";
 import { threadStarter } from "./threads.ts";
+import { threadQueue, type QueuedThread } from "./queue.ts";
+import { turnGate } from "./drain.ts";
 import type { AttachTiming } from "./attach.ts";
 import type { ReviewLoop } from "./review.ts";
 import { readEvents } from "./event-reader.ts";
@@ -68,7 +70,7 @@ const claudeSession = "11111111-2222-4333-8444-555555555501";
 const fixture = (await readFile(new URL("../fixtures/claude-transcript.jsonl", import.meta.url), "utf8")).split("\n").filter((line) => line !== "").map((line) => `${line}\n`);
 const usageLimitRecord = (await readFile(new URL("../fixtures/claude-api-errors.jsonl", import.meta.url), "utf8")).split("\n")[0]! + "\n";
 
-async function setup(t: import("node:test").TestContext, options: { gitIdentity?: { name: string; email: string }; https?: import("./api.ts").ApiOptions["https"]; whois?: import("../tailscale.ts").Whois; deployment?: DeploymentOptions; dotfiles?: typeof dotfiles; streamStallMs?: number; attachTiming?: AttachTiming; closeWaitMs?: number; reviews?: ReviewLoop; images?: (registry: Registry) => ImageRollout; passkeys?: RelyingParty } = {}) {
+async function setup(t: import("node:test").TestContext, options: { gitIdentity?: { name: string; email: string }; https?: import("./api.ts").ApiOptions["https"]; whois?: import("../tailscale.ts").Whois; deployment?: DeploymentOptions; dotfiles?: typeof dotfiles; streamStallMs?: number; attachTiming?: AttachTiming; closeWaitMs?: number; reviews?: ReviewLoop; images?: (registry: Registry) => ImageRollout; passkeys?: RelyingParty; queue?: boolean } = {}) {
   const registry = openRegistry(join(dir, `${randomUUID()}.db`));
   const images = options.images?.(registry);
   registry.upsertNode({ name: node, tailnetHost: "rj-firebat.tail.ts.net", tailnetNodeId: "nFIREBAT" as TailnetNodeId });
@@ -97,6 +99,8 @@ async function setup(t: import("node:test").TestContext, options: { gitIdentity?
   const reads: Parameters<ProjectMirror["setupInputs"]>[1][] = [];
   const wake = (n: NodeName) => { woken.push(n); };
   const mirror: ProjectMirror = { setupInputs(p, ref) { reads.push(ref); return read(p, ref); } };
+  const startThread = threadStarter({ registry, harness, mirror, dotfiles: options.dotfiles ?? dotfiles, gitIdentity: options.gitIdentity, wake });
+  const queue = options.queue === true ? threadQueue({ registry, startThread, gate: turnGate(() => false), send: (id, text, requestId) => harness.send(id, text, requestId, "followUp") }) : null;
   const api = await startApi({
     registry, host: "127.0.0.1", port: 0,
     ...(options.https ? { https: options.https } : {}),
@@ -109,11 +113,12 @@ async function setup(t: import("node:test").TestContext, options: { gitIdentity?
     allowed: new Set([laptop, "nFIREBAT" as TailnetNodeId]),
     ...(options.deployment === undefined ? {} : { deployment: options.deployment }),
     ...(options.reviews === undefined ? {} : { reviews: options.reviews }),
+    ...(queue === null ? {} : { queue }),
     ...(images === undefined ? {} : { images }),
     ...(options.passkeys === undefined ? {} : { passkeys: options.passkeys }),
     hostnames: new Set(["127.0.0.1"]),
     harness,
-    startThread: threadStarter({ registry, harness, mirror, dotfiles: options.dotfiles ?? dotfiles, gitIdentity: options.gitIdentity, wake }),
+    startThread,
     wake,
     probes: new Map([[node, {
       command: (pylonId: PylonId, command: PylonCommand) => { commands.push([pylonId, command]); return answer(command); },
@@ -125,6 +130,7 @@ async function setup(t: import("node:test").TestContext, options: { gitIdentity?
     ...options.closeWaitMs === undefined ? {} : { closeWaitMs: options.closeWaitMs },
   });
   t.after(async () => {
+    await queue?.close();
     await api.close();
     await images?.close();
     registry.close();
@@ -158,7 +164,7 @@ async function setup(t: import("node:test").TestContext, options: { gitIdentity?
     });
   }
   return {
-    registry, images, call, raw, woken, calls, commands, streams, reads, fake, port: api.port, get httpsPort() { return api.httpsPort; }, close: () => api.close(),
+    registry, images, queue, call, raw, woken, calls, commands, streams, reads, fake, port: api.port, get httpsPort() { return api.httpsPort; }, close: () => api.close(),
     callAs(id: TailnetNodeId | null) { caller = id; },
     /** Holds every request at whois until the returned function is called. */
     /** Holds each whois from now on until `release`. `asked` settles once one is held. */
@@ -2616,4 +2622,90 @@ test("without the dashboard's HTTPS address, passkey routes say why", async (t) 
   const refused = await s.call("POST", "/v1/passkeys/enrolment", { code: newCode(s.registry).code });
   assert.equal(refused.status, 409);
   assert.match(refused.body.error, /https.hostname/);
+});
+
+async function withQueue(t: import("node:test").TestContext) {
+  const s = await setup(t, { queue: true });
+  assert.equal((await s.call("POST", "/v1/projects", project)).status, 201);
+  assert.equal((await s.call("POST", "/v1/images", image)).status, 201);
+  s.registry.setCurrentImage(image.id as ImageId);
+  const first = await s.call("POST", "/v1/threads", { project: "acme", title: "First" });
+  assert.equal(first.status, 201, JSON.stringify(first.body));
+  return { ...s, first: first.body as Thread };
+}
+
+test("a start after other threads is queued with no row or pylon, until start-queued starts it as any start", async (t) => {
+  const s = await withQueue(t);
+  const answer = await s.call("POST", "/v1/threads", { project: "acme", title: "Then", after: [s.first.id], message: "Fix the next bug." });
+  assert.equal(answer.status, 201, JSON.stringify(answer.body));
+  const queued = answer.body as QueuedThread;
+  assert.deepEqual(queued, {
+    id: queued.id, title: "Then", project: "acme", startedBy: laptop, createdAt: queued.createdAt, status: "queued", after: [s.first.id],
+    waits: [{ thread: s.first.id, state: "waiting", why: "has no pull request yet" }], blocked: false, node, worker: "harness", model: null,
+    prompt: "Fix the next bug.", branch: null, commit: null, resources: project.resources, startNow: null, lastError: null,
+  });
+  assert.deepEqual((await s.call("GET", "/v1/threads")).body.map((r: ThreadRow) => r.id), [s.first.id], "the thread list leaves queued threads out");
+  assert.deepEqual(await s.call("GET", "/v1/queued"), { status: 200, body: [queued] });
+  assert.deepEqual((await s.call("GET", "/v1/queued?project=other")).body, []);
+  assert.deepEqual(await s.call("GET", `/v1/queued/${queued.id}`), { status: 200, body: queued });
+  assert.equal((await s.call("GET", `/v1/queued/${s.first.id}`)).status, 404, "a started thread is not queued");
+  const refused = await s.call("GET", `/v1/threads/${queued.id}`);
+  assert.equal(refused.status, 409);
+  assert.match(refused.body.error, /is queued, so it has no pylon or conversation yet/);
+  assert.equal((await s.call("POST", `/v1/threads/${queued.id}/messages`, { text: "hi", requestId: "msg:1" })).status, 409);
+  assert.equal(s.registry.pylon(`pylon-${queued.id}` as PylonId), undefined);
+  assert.equal(s.calls.length, 1, "only the first thread has a conversation");
+
+  const archived = await s.call("POST", `/v1/threads/${queued.id}/archive`);
+  assert.deepEqual(archived, { status: 200, body: { ...queued, status: "archived" } });
+  assert.match((await s.call("GET", `/v1/threads/${queued.id}`)).body.error, /was cancelled while queued/);
+  assert.equal((await s.call("POST", `/v1/threads/${queued.id}/archive`)).status, 409);
+  assert.equal((await s.call("POST", `/v1/threads/${queued.id}/start`)).status, 409, "a cancelled thread starts only once unarchived");
+  assert.equal((await s.call("POST", `/v1/threads/${queued.id}/unarchive`)).body.status, "queued");
+
+  const started = await s.call("POST", `/v1/threads/${queued.id}/start`);
+  assert.equal(started.status, 201, JSON.stringify(started.body));
+  assert.equal((started.body as Thread).id, queued.id);
+  assert.equal((started.body as Thread).startedBy, laptop);
+  assert.deepEqual(s.calls.slice(1), [
+    ["start", { threadId: queued.id, pylonId: `pylon-${queued.id}` }],
+    ["send", queued.id, "Fix the next bug.", `queued:${queued.id}`, "followUp"],
+  ]);
+  assert.deepEqual((await s.call("GET", "/v1/threads")).body.map((r: ThreadRow) => r.id), [s.first.id, queued.id]);
+  assert.deepEqual((await s.call("GET", "/v1/queued")).body, []);
+  assert.equal((await s.call("GET", `/v1/queued/${queued.id}`)).status, 404);
+  assert.equal((await s.call("GET", `/v1/threads/${queued.id}`)).status, 200);
+  assert.match((await s.call("POST", `/v1/threads/${queued.id}/start`)).body.error, /has started/);
+  assert.equal((await s.call("POST", `/v1/threads/${queued.id}/archive`)).body.status, "archived", "a started thread archives as a thread");
+
+  const other = (await s.call("POST", "/v1/threads", { project: "acme", title: "Later", after: [queued.id], claude: "Fix it" })).body as QueuedThread;
+  assert.equal(other.worker, "claude");
+  assert.deepEqual(other.waits, [{ thread: queued.id, state: "blocked", why: "is archived and its pull request did not merge" }]);
+  assert.equal(other.blocked, true);
+  assert.deepEqual(await s.call("DELETE", `/v1/threads/${other.id}`), { status: 200, body: { ...other, status: "deleted" } });
+  assert.equal((await s.call("DELETE", `/v1/threads/${other.id}`)).status, 409);
+  assert.equal((await s.call("POST", "/v1/threads/th-000000000000/start")).status, 404);
+});
+
+test("a queued start is checked as a start is before it is recorded, and needs the GitHub token", async (t) => {
+  const s = await withQueue(t);
+  const refused = async (body: unknown, status: number, error: RegExp) => {
+    const answer = await s.call("POST", "/v1/threads", body);
+    assert.equal(answer.status, status, JSON.stringify(answer.body));
+    assert.match(answer.body.error, error);
+  };
+  await refused({ project: "acme", title: "x", message: "hi" }, 400, /message is only for a queued start; send it with POST \/v1\/threads\/<id>\/messages/);
+  await refused({ project: "acme", title: "x", after: [] }, 400, /after/);
+  await refused({ project: "acme", title: "x", after: Array.from({ length: 33 }, (_, i) => `th-${i}`) }, 400, /after/);
+  await refused({ project: "acme", title: "x", after: ["th-nope"] }, 404, /no thread th-nope/);
+  await refused({ project: "nope", title: "x", after: [s.first.id] }, 404, /no project nope/);
+  await refused({ project: "acme", title: "x", node: "nowhere", after: [s.first.id] }, 400, /no node nowhere/);
+  await refused({ project: "acme", title: "x", claude: "Fix it", message: "hi", after: [s.first.id] }, 400, /message is for a Nexus agent thread/);
+  assert.deepEqual((await s.call("GET", "/v1/queued")).body, []);
+
+  const plain = await withImage(t);
+  const answer = await plain.call("POST", "/v1/threads", { project: "acme", title: "x", after: ["th-any"] });
+  assert.equal(answer.status, 409);
+  assert.match(answer.body.error, /queued threads need the control plane's GitHub token \(github.tokenFile\)/);
+  assert.deepEqual((await plain.call("GET", "/v1/queued")).body, []);
 });

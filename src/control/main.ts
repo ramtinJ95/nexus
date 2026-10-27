@@ -26,6 +26,7 @@ import { projectMirror } from "./mirror.ts";
 import { checkRuns } from "./gate.ts";
 import { repository } from "../deploy/install.ts";
 import { prWatcher } from "./pr-watch.ts";
+import { threadQueue } from "./queue.ts";
 import { agentInbox } from "./inbox.ts";
 import { usageLimitResumer } from "./usage-limit.ts";
 import { startImageRollout } from "./image-rollout.ts";
@@ -189,6 +190,13 @@ export async function startControlPlane(config: ControlPlaneConfig, models: Mode
   void watch.poll();
   const reviewTimer = setInterval(() => { void reviews?.poll(); }, 15_000);
   void reviews?.poll();
+  // Its starts pass the drain gate, so a deploy's drain refuses them, which leaves them queued, and waits for one in flight.
+  const queue = github === null ? null : threadQueue({
+    registry, startThread, gate, log: (message) => console.error(message),
+    send: (id, text, requestId) => harness.send(id, text, requestId, "followUp"),
+  });
+  const queueTimer = setInterval(() => { void queue?.poll(); }, 15_000);
+  void queue?.poll();
   const api = await startApi({
     ...(config.https ? {
       https: { port: 7443, certificate: () => localApiCertificate(config.https!.hostname, tailscaled) },
@@ -196,6 +204,7 @@ export async function startControlPlane(config: ControlPlaneConfig, models: Mode
     } : {}),
     prWatchEnabled: token !== null,
     reviews,
+    queue,
     turnsStarting: gate.busy,
     deployment,
     registry, whois, host: config.listen.host, port: config.listen.port,
@@ -215,12 +224,14 @@ export async function startControlPlane(config: ControlPlaneConfig, models: Mode
     async close() {
       clearInterval(watchTimer);
       clearInterval(reviewTimer);
+      clearInterval(queueTimer);
       clearInterval(resumeTimer);
       clearInterval(handoffTimer);
       await watch.close();
       await handoff?.close();
       await resumer?.close();
       await reviews?.close();
+      await queue?.close();
       await api.close();
       await harness.close();
       await loop.close();

@@ -258,7 +258,7 @@ test("two passes and a start-queued at once start the thread once", async (t) =>
   await assert.rejects(late, /no longer queued/, "another queue's start loses to the transaction that marked it started");
   assert.equal(f.registry.threads().filter((x) => x.id === record.id).length, 1);
   assert.deepEqual(f.registry.queuedThread(record.id)!.startNow, { by: "nPHONE", at: f.registry.queuedThread(record.id)!.startNow!.at });
-  await assert.rejects(one.startNow(record.id, "nPHONE"), (err: { status: number }) => err.status === 404, "a started thread is no longer queued");
+  await assert.rejects(one.startNow(record.id, "nPHONE"), (err: { status: number; message: string }) => err.status === 409 && /has started/.test(err.message), "a started thread is no longer queued");
 });
 
 test("archiving a queued thread while its start is in flight leaves no thread row", async (t) => {
