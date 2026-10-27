@@ -1,0 +1,26 @@
+$ nexus start --project nexus --title Greet by name --claude push greet-name --json
+{
+  "id": "th-e6c9c30ef0fc",
+  "title": "Greet by name",
+  "project": "nexus",
+  "pylonId": "pylon-th-e6c9c30ef0fc",
+  "status": "active",
+  "conversationId": null,
+  "startedBy": "nLAPTOP",
+  "createdAt": 1793112378693,
+  "agentTurnRunning": false,
+  "working": false,
+  "lastAgentActivityAt": 0,
+  "lastHumanActivityAt": 1793112378693,
+  "seenAt": null,
+  "lastReplyAt": null,
+  "placement": {
+    "how": "default",
+    "node": "verify-node"
+  },
+  "setup": {
+    "how": "fresh",
+    "reason": "the control plane could not read .nexus/setup at main: the verify stack reads no remote, so every thread boots fresh"
+  }
+}
+[exit 0]

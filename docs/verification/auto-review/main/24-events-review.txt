@@ -1,0 +1,14 @@
+$ nexus events --kind review.changed
+14 2026-10-27T14:45:40.273Z th-5bdf10ad82b7 review.changed {"review":"rv-77fad122","reviewer":"th-343a1976fc91","phase":{"kind":"reviewing"},"round":1}
+17 2026-10-27T14:45:41.834Z th-5bdf10ad82b7 review.changed {"review":"rv-77fad122","reviewer":"th-343a1976fc91","phase":{"kind":"checking","startedAt":1793112341834,"thread":null},"round":1}
+18 2026-10-27T14:45:43.832Z th-5bdf10ad82b7 review.changed {"review":"rv-77fad122","reviewer":"th-343a1976fc91","phase":{"kind":"merging","authorized":null},"round":1}
+19 2026-10-27T14:45:43.836Z th-5bdf10ad82b7 review.changed {"review":"rv-77fad122","reviewer":"th-343a1976fc91","phase":{"kind":"needs-person","reasons":["The branch conflicts with its base."]},"round":1}
+25 2026-10-27T14:45:49.379Z th-030dd8f0035c review.changed {"review":"rv-06c25133","reviewer":"th-87f9ce99fba2","phase":{"kind":"reviewing"},"round":1}
+26 2026-10-27T14:45:49.885Z th-d27c4d723992 review.changed {"review":"rv-2e826643","reviewer":"th-c4c9dff82976","phase":{"kind":"reviewing"},"round":1}
+29 2026-10-27T14:45:50.833Z th-030dd8f0035c review.changed {"review":"rv-06c25133","reviewer":"th-87f9ce99fba2","phase":{"kind":"checking","startedAt":1793112350833,"thread":null},"round":1}
+32 2026-10-27T14:45:51.833Z th-d27c4d723992 review.changed {"review":"rv-2e826643","reviewer":"th-c4c9dff82976","phase":{"kind":"checking","startedAt":1793112351833,"thread":null},"round":1}
+33 2026-10-27T14:45:52.835Z th-030dd8f0035c review.changed {"review":"rv-06c25133","reviewer":"th-87f9ce99fba2","phase":{"kind":"merging","authorized":null},"round":1}
+34 2026-10-27T14:45:52.840Z th-030dd8f0035c review.changed {"review":"rv-06c25133","reviewer":"th-87f9ce99fba2","phase":{"kind":"needs-person","reasons":["Always needs the person: pylon image rebuilds, as it changes images/pylon/image-close.Dockerfile."]},"round":1}
+36 2026-10-27T14:45:52.842Z th-d27c4d723992 review.changed {"review":"rv-2e826643","reviewer":"th-c4c9dff82976","phase":{"kind":"merging","authorized":null},"round":1}
+37 2026-10-27T14:45:52.843Z th-d27c4d723992 review.changed {"review":"rv-2e826643","reviewer":"th-c4c9dff82976","phase":{"kind":"needs-person","reasons":["Always needs the person: pylon image rebuilds, as it changes images/pylon/image-archive.Dockerfile."]},"round":1}
+[exit 0]

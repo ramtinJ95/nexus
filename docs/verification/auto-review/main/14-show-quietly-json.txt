@@ -1,0 +1,135 @@
+$ nexus show th-5bdf10ad82b7 --json
+{
+  "thread": {
+    "id": "th-5bdf10ad82b7",
+    "title": "Greet quietly",
+    "project": "nexus-manual",
+    "pylonId": "pylon-th-5bdf10ad82b7",
+    "status": "active",
+    "conversationId": null,
+    "startedBy": "nLAPTOP",
+    "createdAt": 1793112339499,
+    "agentTurnRunning": false,
+    "lastAgentActivityAt": 1793112339812,
+    "lastHumanActivityAt": 1793112339499,
+    "seenAt": null,
+    "lastReplyAt": 1793112339701,
+    "placement": {
+      "how": "default",
+      "node": "verify-node"
+    },
+    "setup": {
+      "how": "fresh",
+      "reason": "the control plane could not read .nexus/setup at main: the verify stack reads no remote, so every thread boots fresh"
+    },
+    "working": false
+  },
+  "claudeWorker": {
+    "model": "claude-opus-5-5",
+    "state": "started"
+  },
+  "attention": "decision",
+  "seenAt": null,
+  "lastReplyAt": 1793112339701,
+  "desired": "running",
+  "pylon": {
+    "grantsOutdated": false,
+    "id": "pylon-th-5bdf10ad82b7",
+    "node": "verify-node",
+    "failed": null,
+    "observedAt": "2026-10-27T14:45:45.311Z",
+    "resources": {
+      "cpus": 1,
+      "memoryGiB": 1,
+      "diskGiB": 10
+    },
+    "actualState": "running",
+    "retryRefused": null
+  },
+  "sessions": [],
+  "previews": [],
+  "ports": [],
+  "outputs": [
+    {
+      "thread": "th-5bdf10ad82b7",
+      "kind": "branch",
+      "ref": "origin/greet-quiet"
+    },
+    {
+      "thread": "th-5bdf10ad82b7",
+      "kind": "pull-request",
+      "ref": "https://github.com/ramtinJ95/nexus/pull/4"
+    }
+  ],
+  "prWatch": {
+    "enabled": true,
+    "stopped": false,
+    "error": null
+  },
+  "pullRequests": [
+    {
+      "repo": "ramtinJ95/nexus",
+      "number": 4,
+      "title": "Greet quietly",
+      "url": "https://github.com/ramtinJ95/nexus/pull/4",
+      "state": "open",
+      "checks": "none",
+      "review": "none",
+      "conflict": true
+    }
+  ],
+  "review": {
+    "id": "rv-77fad122",
+    "expect": "rv-77fad122:9636a50206e6",
+    "sent": 1,
+    "builder": "th-5bdf10ad82b7",
+    "reviewer": "th-343a1976fc91",
+    "pr": {
+      "repo": "ramtinJ95/nexus",
+      "number": 4,
+      "url": "https://github.com/ramtinJ95/nexus/pull/4",
+      "title": "Greet quietly",
+      "branch": "greet-quiet"
+    },
+    "models": {
+      "builder": "claude-opus-5-5",
+      "reviewer": "gpt-6-astra"
+    },
+    "reviewerKind": "harness",
+    "maxRounds": 5,
+    "land": {
+      "requestedBy": "nLAPTOP"
+    },
+    "rounds": [
+      {
+        "head": "cccc000500000000000000000000000000000000",
+        "verdict": {
+          "token": "rv-77fad122:9636a50206e6",
+          "verdict": "approve",
+          "findings": [],
+          "reserved": [],
+          "notCheckedLive": "the greeting is printed by a script, with no service to start."
+        },
+        "check": {
+          "passed": true,
+          "output": "typecheck and tests passed"
+        },
+        "answers": null
+      }
+    ],
+    "merged": null,
+    "phase": {
+      "kind": "needs-person",
+      "reasons": [
+        "The branch conflicts with its base."
+      ]
+    },
+    "outbox": null,
+    "since": 1793112340276,
+    "nudges": 0,
+    "startedAt": 1793112340270
+  },
+  "attach": "herdr --session nexus",
+  "agent": null
+}
+[exit 0]

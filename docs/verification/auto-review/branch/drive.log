@@ -1,0 +1,565 @@
+$ nexus --version
+nexus 0.27.0
+[exit 0]
+
+$ nexus project edit nexus --auto-review land
+Updated project nexus, auto review and land, for nLAPTOP. Existing threads keep their boot settings and grants; start a new thread to apply them.
+[exit 0]
+
+$ nexus project edit nexus-manual --auto-review land (as nPHONE, not a deployer)
+[stderr] nexus: caller may not land a pull request: landing deploys, and only deployers may, never infrastructure nodes or pylons
+[exit 3]
+
+$ nexus projects
+nexus         node verify-node  branch main  auto review and land, for nLAPTOP  https://github.com/ramtinJ95/nexus.git
+nexus-manual  node verify-node  branch main  auto review off                    https://github.com/ramtinJ95/nexus.git
+[exit 0]
+
+$ nexus start --project nexus --title Greet by name --claude push greet-name --json
+{
+  "id": "th-e6c9c30ef0fc",
+  "title": "Greet by name",
+  "project": "nexus",
+  "pylonId": "pylon-th-e6c9c30ef0fc",
+  "status": "active",
+  "conversationId": null,
+  "startedBy": "nLAPTOP",
+  "createdAt": 1793112378693,
+  "agentTurnRunning": false,
+  "working": false,
+  "lastAgentActivityAt": 0,
+  "lastHumanActivityAt": 1793112378693,
+  "seenAt": null,
+  "lastReplyAt": null,
+  "placement": {
+    "how": "default",
+    "node": "verify-node"
+  },
+  "setup": {
+    "how": "fresh",
+    "reason": "the control plane could not read .nexus/setup at main: the verify stack reads no remote, so every thread boots fresh"
+  }
+}
+[exit 0]
+
+$ nexus start --project nexus-manual --title Greet in French --claude push greet-french --json
+{
+  "id": "th-e3ce06c863c6",
+  "title": "Greet in French",
+  "project": "nexus-manual",
+  "pylonId": "pylon-th-e3ce06c863c6",
+  "status": "active",
+  "conversationId": null,
+  "startedBy": "nLAPTOP",
+  "createdAt": 1793112379272,
+  "agentTurnRunning": false,
+  "working": false,
+  "lastAgentActivityAt": 0,
+  "lastHumanActivityAt": 1793112379272,
+  "seenAt": null,
+  "lastReplyAt": null,
+  "placement": {
+    "how": "default",
+    "node": "verify-node"
+  },
+  "setup": {
+    "how": "fresh",
+    "reason": "the control plane could not read .nexus/setup at main: the verify stack reads no remote, so every thread boots fresh"
+  }
+}
+[exit 0]
+
+$ nexus start --project nexus --title Greet loudly --claude push greet-loud conflict --json
+{
+  "id": "th-6eb3278737a2",
+  "title": "Greet loudly",
+  "project": "nexus",
+  "pylonId": "pylon-th-6eb3278737a2",
+  "status": "active",
+  "conversationId": null,
+  "startedBy": "nLAPTOP",
+  "createdAt": 1793112379627,
+  "agentTurnRunning": false,
+  "working": false,
+  "lastAgentActivityAt": 0,
+  "lastHumanActivityAt": 1793112379627,
+  "seenAt": null,
+  "lastReplyAt": null,
+  "placement": {
+    "how": "default",
+    "node": "verify-node"
+  },
+  "setup": {
+    "how": "fresh",
+    "reason": "the control plane could not read .nexus/setup at main: the verify stack reads no remote, so every thread boots fresh"
+  }
+}
+[exit 0]
+
+waited: the PR watch linked every PR
+waited: every review that started has ended
+$ nexus show th-e6c9c30ef0fc
+th-e6c9c30ef0fc  Greet by name
+project: nexus
+Claude worker: started, model claude-opus-5-5
+attention: reply
+status: active
+pylon: pylon-th-e6c9c30ef0fc on verify-node, running, observed 0s ago
+size: 1 CPUs, 1 GiB memory, 10 GiB disk
+placement: verify-node, the project's default node
+setup: fresh boot runs .nexus/setup, because the control plane could not read .nexus/setup at main: the verify stack reads no remote, so every thread boots fresh
+PR watch: on
+PR #1: Greet by name — merged, checks none, review none https://github.com/ramtinJ95/nexus/pull/1
+review rv-f1131872 of PR #1, started on its own: landed as eeee000500000000000000000000000000000000, round 1 of 5, reviewer th-d6727f4fe0b4 on gpt-6-astra, landing when approved
+output: branch origin/greet-name
+output: pull-request https://github.com/ramtinJ95/nexus/pull/1
+[exit 0]
+
+$ nexus show th-e3ce06c863c6
+th-e3ce06c863c6  Greet in French
+project: nexus-manual
+Claude worker: started, model claude-opus-5-5
+attention: reply
+status: active
+pylon: pylon-th-e3ce06c863c6 on verify-node, running, observed 0s ago
+size: 1 CPUs, 1 GiB memory, 10 GiB disk
+placement: verify-node, the project's default node
+setup: fresh boot runs .nexus/setup, because the control plane could not read .nexus/setup at main: the verify stack reads no remote, so every thread boots fresh
+PR watch: on
+PR #2: Greet in French — open, checks none, review none https://github.com/ramtinJ95/nexus/pull/2
+output: branch origin/greet-french
+output: pull-request https://github.com/ramtinJ95/nexus/pull/2
+[exit 0]
+
+$ nexus show th-6eb3278737a2
+th-6eb3278737a2  Greet loudly
+project: nexus
+Claude worker: started, model claude-opus-5-5
+attention: reply
+status: active
+pylon: pylon-th-6eb3278737a2 on verify-node, running, observed 0s ago
+size: 1 CPUs, 1 GiB memory, 10 GiB disk
+placement: verify-node, the project's default node
+setup: fresh boot runs .nexus/setup, because the control plane could not read .nexus/setup at main: the verify stack reads no remote, so every thread boots fresh
+PR watch: on
+PR #3: Greet loudly — merged, checks none, review none https://github.com/ramtinJ95/nexus/pull/3
+review rv-9e7a6e1f of PR #3, started on its own: landed as eeee000700000000000000000000000000000000, round 2 of 5, reviewer th-2c3344e6cb26 on gpt-6-astra, landing when approved
+output: branch origin/greet-loud
+output: pull-request https://github.com/ramtinJ95/nexus/pull/3
+[exit 0]
+
+$ nexus start --project nexus-manual --title Greet quietly --claude push greet-quiet conflict --json
+{
+  "id": "th-53a33bc49f05",
+  "title": "Greet quietly",
+  "project": "nexus-manual",
+  "pylonId": "pylon-th-53a33bc49f05",
+  "status": "active",
+  "conversationId": null,
+  "startedBy": "nLAPTOP",
+  "createdAt": 1793112398476,
+  "agentTurnRunning": false,
+  "working": false,
+  "lastAgentActivityAt": 0,
+  "lastHumanActivityAt": 1793112398476,
+  "seenAt": null,
+  "lastReplyAt": null,
+  "placement": {
+    "how": "default",
+    "node": "verify-node"
+  },
+  "setup": {
+    "how": "fresh",
+    "reason": "the control plane could not read .nexus/setup at main: the verify stack reads no remote, so every thread boots fresh"
+  }
+}
+[exit 0]
+
+waited: the PR watch linked Greet quietly's PR
+$ nexus review th-53a33bc49f05 --land
+Started review rv-566ff28d of PR #4: reviewing, round 1 of 5, reviewer th-2cf75271d084 on gpt-6-astra, landing when approved
+[exit 0]
+
+waited: Greet quietly's review ended
+$ nexus show th-53a33bc49f05
+th-53a33bc49f05  Greet quietly
+project: nexus-manual
+Claude worker: started, model claude-opus-5-5
+attention: reply
+status: active
+pylon: pylon-th-53a33bc49f05 on verify-node, running, observed 0s ago
+size: 1 CPUs, 1 GiB memory, 10 GiB disk
+placement: verify-node, the project's default node
+setup: fresh boot runs .nexus/setup, because the control plane could not read .nexus/setup at main: the verify stack reads no remote, so every thread boots fresh
+PR watch: on
+PR #4: Greet quietly — merged, checks none, review none https://github.com/ramtinJ95/nexus/pull/4
+review rv-566ff28d of PR #4: landed as eeee001000000000000000000000000000000000, round 2 of 5, reviewer th-2cf75271d084 on gpt-6-astra, landing when approved
+output: branch origin/greet-quiet
+output: pull-request https://github.com/ramtinJ95/nexus/pull/4
+[exit 0]
+
+$ nexus show th-53a33bc49f05 --json
+{
+  "thread": {
+    "id": "th-53a33bc49f05",
+    "title": "Greet quietly",
+    "project": "nexus-manual",
+    "pylonId": "pylon-th-53a33bc49f05",
+    "status": "active",
+    "conversationId": null,
+    "startedBy": "nLAPTOP",
+    "createdAt": 1793112398476,
+    "agentTurnRunning": false,
+    "lastAgentActivityAt": 1793112405279,
+    "lastHumanActivityAt": 1793112398476,
+    "seenAt": null,
+    "lastReplyAt": 1793112406786,
+    "placement": {
+      "how": "default",
+      "node": "verify-node"
+    },
+    "setup": {
+      "how": "fresh",
+      "reason": "the control plane could not read .nexus/setup at main: the verify stack reads no remote, so every thread boots fresh"
+    },
+    "working": false
+  },
+  "claudeWorker": {
+    "model": "claude-opus-5-5",
+    "state": "started"
+  },
+  "attention": "reply",
+  "seenAt": null,
+  "lastReplyAt": 1793112406786,
+  "desired": "running",
+  "pylon": {
+    "grantsOutdated": false,
+    "id": "pylon-th-53a33bc49f05",
+    "node": "verify-node",
+    "failed": null,
+    "observedAt": "2026-10-27T14:46:53.193Z",
+    "resources": {
+      "cpus": 1,
+      "memoryGiB": 1,
+      "diskGiB": 10
+    },
+    "actualState": "running",
+    "retryRefused": null
+  },
+  "sessions": [],
+  "previews": [],
+  "ports": [],
+  "outputs": [
+    {
+      "thread": "th-53a33bc49f05",
+      "kind": "branch",
+      "ref": "origin/greet-quiet"
+    },
+    {
+      "thread": "th-53a33bc49f05",
+      "kind": "pull-request",
+      "ref": "https://github.com/ramtinJ95/nexus/pull/4"
+    }
+  ],
+  "prWatch": {
+    "enabled": true,
+    "stopped": false,
+    "error": null
+  },
+  "pullRequests": [
+    {
+      "repo": "ramtinJ95/nexus",
+      "number": 4,
+      "title": "Greet quietly",
+      "url": "https://github.com/ramtinJ95/nexus/pull/4",
+      "state": "merged",
+      "checks": "none",
+      "review": "none",
+      "conflict": false
+    }
+  ],
+  "review": {
+    "id": "rv-566ff28d",
+    "expect": "rv-566ff28d:9347a25b5c46",
+    "sent": 3,
+    "builder": "th-53a33bc49f05",
+    "reviewer": "th-2cf75271d084",
+    "pr": {
+      "repo": "ramtinJ95/nexus",
+      "number": 4,
+      "url": "https://github.com/ramtinJ95/nexus/pull/4",
+      "title": "Greet quietly",
+      "branch": "greet-quiet"
+    },
+    "models": {
+      "builder": "claude-opus-5-5",
+      "reviewer": "gpt-6-astra"
+    },
+    "reviewerKind": "harness",
+    "maxRounds": 5,
+    "land": {
+      "requestedBy": "nLAPTOP"
+    },
+    "auto": false,
+    "rounds": [
+      {
+        "head": "cccc000800000000000000000000000000000000",
+        "verdict": {
+          "token": "rv-566ff28d:4226b9af2cb9",
+          "verdict": "approve",
+          "findings": [],
+          "reserved": [],
+          "notCheckedLive": "the greeting is printed by a script, with no service to start."
+        },
+        "check": {
+          "passed": true,
+          "output": "typecheck and tests passed"
+        },
+        "answers": [
+          {
+            "id": "CONFLICT",
+            "action": "fixed",
+            "reason": "Rebased greet-quiet onto main, kept main's change and this greeting, reran the typecheck and the tests, and pushed bbbb000900000000000000000000000000000000."
+          }
+        ],
+        "conflict": {
+          "base": "main"
+        }
+      },
+      {
+        "head": "bbbb000900000000000000000000000000000000",
+        "verdict": {
+          "token": "rv-566ff28d:9347a25b5c46",
+          "verdict": "approve",
+          "findings": [],
+          "reserved": [],
+          "notCheckedLive": "the greeting is printed by a script, with no service to start."
+        },
+        "check": {
+          "passed": true,
+          "output": "typecheck and tests passed"
+        },
+        "answers": null
+      }
+    ],
+    "merged": "eeee001000000000000000000000000000000000",
+    "phase": {
+      "kind": "landed",
+      "commit": "eeee001000000000000000000000000000000000"
+    },
+    "outbox": null,
+    "since": 1793112407284,
+    "nudges": 0,
+    "startedAt": 1793112401539
+  },
+  "attach": "herdr --session nexus",
+  "agent": null
+}
+[exit 0]
+
+$ nexus start --project nexus-manual --title Rebuild the image --claude push image-close reserved --json
+{
+  "id": "th-0e915d0a1a22",
+  "title": "Rebuild the image",
+  "project": "nexus-manual",
+  "pylonId": "pylon-th-0e915d0a1a22",
+  "status": "active",
+  "conversationId": null,
+  "startedBy": "nLAPTOP",
+  "createdAt": 1793112413743,
+  "agentTurnRunning": false,
+  "working": false,
+  "lastAgentActivityAt": 0,
+  "lastHumanActivityAt": 1793112413743,
+  "seenAt": null,
+  "lastReplyAt": null,
+  "placement": {
+    "how": "default",
+    "node": "verify-node"
+  },
+  "setup": {
+    "how": "fresh",
+    "reason": "the control plane could not read .nexus/setup at main: the verify stack reads no remote, so every thread boots fresh"
+  }
+}
+[exit 0]
+
+$ nexus start --project nexus-manual --title Rebuild the image again --claude push image-archive reserved --json
+{
+  "id": "th-fe4200f55814",
+  "title": "Rebuild the image again",
+  "project": "nexus-manual",
+  "pylonId": "pylon-th-fe4200f55814",
+  "status": "active",
+  "conversationId": null,
+  "startedBy": "nLAPTOP",
+  "createdAt": 1793112414262,
+  "agentTurnRunning": false,
+  "working": false,
+  "lastAgentActivityAt": 0,
+  "lastHumanActivityAt": 1793112414262,
+  "seenAt": null,
+  "lastReplyAt": null,
+  "placement": {
+    "how": "default",
+    "node": "verify-node"
+  },
+  "setup": {
+    "how": "fresh",
+    "reason": "the control plane could not read .nexus/setup at main: the verify stack reads no remote, so every thread boots fresh"
+  }
+}
+[exit 0]
+
+waited: the PR watch linked both image PRs
+$ nexus review th-0e915d0a1a22 --land
+Started review rv-6899bcfb of PR #5: reviewing, round 1 of 5, reviewer th-5014db8bdd0a on gpt-6-astra, landing when approved
+[exit 0]
+
+$ nexus review th-fe4200f55814 --land
+Started review rv-e9fe743a of PR #6: reviewing, round 1 of 5, reviewer th-827726f961e3 on gpt-6-astra, landing when approved
+[exit 0]
+
+waited: both image reviews are held for the person
+$ nexus show th-0e915d0a1a22
+th-0e915d0a1a22  Rebuild the image
+project: nexus-manual
+Claude worker: started, model claude-opus-5-5
+attention: decision
+status: active
+pylon: pylon-th-0e915d0a1a22 on verify-node, running, observed 0s ago
+size: 1 CPUs, 1 GiB memory, 10 GiB disk
+placement: verify-node, the project's default node
+setup: fresh boot runs .nexus/setup, because the control plane could not read .nexus/setup at main: the verify stack reads no remote, so every thread boots fresh
+PR watch: on
+PR #5: Rebuild the image — open, checks none, review none https://github.com/ramtinJ95/nexus/pull/5
+review rv-6899bcfb of PR #5: needs-person, round 1 of 5, reviewer th-5014db8bdd0a on gpt-6-astra, landing when approved
+needs you: Always needs the person: pylon image rebuilds, as it changes images/pylon/image-close.Dockerfile.
+output: branch origin/image-close
+output: pull-request https://github.com/ramtinJ95/nexus/pull/5
+[exit 0]
+
+$ nexus show th-fe4200f55814
+th-fe4200f55814  Rebuild the image again
+project: nexus-manual
+Claude worker: started, model claude-opus-5-5
+attention: decision
+status: active
+pylon: pylon-th-fe4200f55814 on verify-node, running, observed 0s ago
+size: 1 CPUs, 1 GiB memory, 10 GiB disk
+placement: verify-node, the project's default node
+setup: fresh boot runs .nexus/setup, because the control plane could not read .nexus/setup at main: the verify stack reads no remote, so every thread boots fresh
+PR watch: on
+PR #6: Rebuild the image again — open, checks none, review none https://github.com/ramtinJ95/nexus/pull/6
+review rv-e9fe743a of PR #6: needs-person, round 1 of 5, reviewer th-827726f961e3 on gpt-6-astra, landing when approved
+needs you: Always needs the person: pylon image rebuilds, as it changes images/pylon/image-archive.Dockerfile.
+output: branch origin/image-archive
+output: pull-request https://github.com/ramtinJ95/nexus/pull/6
+[exit 0]
+
+closed the PR of th-0e915d0a1a22 on GitHub: HTTP 204
+$ nexus archive th-fe4200f55814
+Archived th-fe4200f55814.
+[exit 0]
+
+$ nexus show th-0e915d0a1a22
+th-0e915d0a1a22  Rebuild the image
+project: nexus-manual
+Claude worker: started, model claude-opus-5-5
+attention: reply
+status: active
+pylon: pylon-th-0e915d0a1a22 on verify-node, running, observed 0s ago
+size: 1 CPUs, 1 GiB memory, 10 GiB disk
+placement: verify-node, the project's default node
+setup: fresh boot runs .nexus/setup, because the control plane could not read .nexus/setup at main: the verify stack reads no remote, so every thread boots fresh
+PR watch: on
+PR #5: Rebuild the image — closed, checks none, review none https://github.com/ramtinJ95/nexus/pull/5
+review rv-6899bcfb of PR #5: closed, round 1 of 5, reviewer th-5014db8bdd0a on gpt-6-astra, landing when approved
+output: branch origin/image-close
+output: pull-request https://github.com/ramtinJ95/nexus/pull/5
+[exit 0]
+
+$ nexus show th-fe4200f55814
+th-fe4200f55814  Rebuild the image again
+project: nexus-manual
+Claude worker: started, model claude-opus-5-5
+attention: reply
+status: archived
+pylon: pylon-th-fe4200f55814 on verify-node, running, observed 0s ago
+size: 1 CPUs, 1 GiB memory, 10 GiB disk
+placement: verify-node, the project's default node
+setup: fresh boot runs .nexus/setup, because the control plane could not read .nexus/setup at main: the verify stack reads no remote, so every thread boots fresh
+PR watch: on
+PR #6: Rebuild the image again — open, checks none, review none https://github.com/ramtinJ95/nexus/pull/6
+review rv-e9fe743a of PR #6: cancelled, round 1 of 5, reviewer th-827726f961e3 on gpt-6-astra, landing when approved, the builder thread th-fe4200f55814 was archived
+output: branch origin/image-archive
+output: pull-request https://github.com/ramtinJ95/nexus/pull/6
+[exit 0]
+
+$ nexus events --kind review.changed
+10 2026-10-27T14:46:20.204Z th-e6c9c30ef0fc review.changed {"review":"rv-f1131872","reviewer":"th-d6727f4fe0b4","phase":{"kind":"reviewing"},"round":1}
+11 2026-10-27T14:46:20.234Z th-6eb3278737a2 review.changed {"review":"rv-9e7a6e1f","reviewer":"th-2c3344e6cb26","phase":{"kind":"reviewing"},"round":1}
+17 2026-10-27T14:46:21.267Z th-6eb3278737a2 review.changed {"review":"rv-9e7a6e1f","reviewer":"th-2c3344e6cb26","phase":{"kind":"checking","startedAt":1793112381267,"thread":null},"round":1}
+18 2026-10-27T14:46:21.275Z th-e6c9c30ef0fc review.changed {"review":"rv-f1131872","reviewer":"th-d6727f4fe0b4","phase":{"kind":"checking","startedAt":1793112381275,"thread":null},"round":1}
+19 2026-10-27T14:46:23.263Z th-6eb3278737a2 review.changed {"review":"rv-9e7a6e1f","reviewer":"th-2c3344e6cb26","phase":{"kind":"merging","authorized":null},"round":1}
+20 2026-10-27T14:46:23.270Z th-6eb3278737a2 review.changed {"review":"rv-9e7a6e1f","reviewer":"th-2c3344e6cb26","phase":{"kind":"fixing"},"round":1}
+21 2026-10-27T14:46:23.282Z th-e6c9c30ef0fc review.changed {"review":"rv-f1131872","reviewer":"th-d6727f4fe0b4","phase":{"kind":"merging","authorized":null},"round":1}
+22 2026-10-27T14:46:23.289Z th-e6c9c30ef0fc review.changed {"review":"rv-f1131872","reviewer":"th-d6727f4fe0b4","phase":{"kind":"deploying","commit":"eeee000500000000000000000000000000000000","previous":"aaaa000100000000000000000000000000000000","requested":false,"deadline":1793114183289},"round":1}
+26 2026-10-27T14:46:24.263Z th-e6c9c30ef0fc review.changed {"review":"rv-f1131872","reviewer":"th-d6727f4fe0b4","phase":{"kind":"landed","commit":"eeee000500000000000000000000000000000000"},"round":1}
+28 2026-10-27T14:46:25.266Z th-6eb3278737a2 review.changed {"review":"rv-9e7a6e1f","reviewer":"th-2c3344e6cb26","phase":{"kind":"reviewing"},"round":2}
+30 2026-10-27T14:46:27.263Z th-6eb3278737a2 review.changed {"review":"rv-9e7a6e1f","reviewer":"th-2c3344e6cb26","phase":{"kind":"checking","startedAt":1793112387263,"thread":null},"round":2}
+31 2026-10-27T14:46:29.264Z th-6eb3278737a2 review.changed {"review":"rv-9e7a6e1f","reviewer":"th-2c3344e6cb26","phase":{"kind":"merging","authorized":null},"round":2}
+32 2026-10-27T14:46:29.271Z th-6eb3278737a2 review.changed {"review":"rv-9e7a6e1f","reviewer":"th-2c3344e6cb26","phase":{"kind":"deploying","commit":"eeee000700000000000000000000000000000000","previous":"eeee000500000000000000000000000000000000","requested":false,"deadline":1793114189271},"round":2}
+36 2026-10-27T14:46:30.264Z th-6eb3278737a2 review.changed {"review":"rv-9e7a6e1f","reviewer":"th-2c3344e6cb26","phase":{"kind":"landed","commit":"eeee000700000000000000000000000000000000"},"round":2}
+40 2026-10-27T14:46:41.541Z th-53a33bc49f05 review.changed {"review":"rv-566ff28d","reviewer":"th-2cf75271d084","phase":{"kind":"reviewing"},"round":1}
+43 2026-10-27T14:46:43.275Z th-53a33bc49f05 review.changed {"review":"rv-566ff28d","reviewer":"th-2cf75271d084","phase":{"kind":"checking","startedAt":1793112403275,"thread":null},"round":1}
+44 2026-10-27T14:46:45.273Z th-53a33bc49f05 review.changed {"review":"rv-566ff28d","reviewer":"th-2cf75271d084","phase":{"kind":"merging","authorized":null},"round":1}
+45 2026-10-27T14:46:45.275Z th-53a33bc49f05 review.changed {"review":"rv-566ff28d","reviewer":"th-2cf75271d084","phase":{"kind":"fixing"},"round":1}
+47 2026-10-27T14:46:47.280Z th-53a33bc49f05 review.changed {"review":"rv-566ff28d","reviewer":"th-2cf75271d084","phase":{"kind":"reviewing"},"round":2}
+49 2026-10-27T14:46:49.277Z th-53a33bc49f05 review.changed {"review":"rv-566ff28d","reviewer":"th-2cf75271d084","phase":{"kind":"checking","startedAt":1793112409277,"thread":null},"round":2}
+50 2026-10-27T14:46:51.276Z th-53a33bc49f05 review.changed {"review":"rv-566ff28d","reviewer":"th-2cf75271d084","phase":{"kind":"merging","authorized":null},"round":2}
+51 2026-10-27T14:46:51.281Z th-53a33bc49f05 review.changed {"review":"rv-566ff28d","reviewer":"th-2cf75271d084","phase":{"kind":"deploying","commit":"eeee001000000000000000000000000000000000","previous":"eeee000700000000000000000000000000000000","requested":false,"deadline":1793114211281},"round":2}
+55 2026-10-27T14:46:52.276Z th-53a33bc49f05 review.changed {"review":"rv-566ff28d","reviewer":"th-2cf75271d084","phase":{"kind":"landed","commit":"eeee001000000000000000000000000000000000"},"round":2}
+60 2026-10-27T14:46:57.032Z th-0e915d0a1a22 review.changed {"review":"rv-6899bcfb","reviewer":"th-5014db8bdd0a","phase":{"kind":"reviewing"},"round":1}
+61 2026-10-27T14:46:57.413Z th-fe4200f55814 review.changed {"review":"rv-e9fe743a","reviewer":"th-827726f961e3","phase":{"kind":"reviewing"},"round":1}
+64 2026-10-27T14:46:58.280Z th-0e915d0a1a22 review.changed {"review":"rv-6899bcfb","reviewer":"th-5014db8bdd0a","phase":{"kind":"checking","startedAt":1793112418280,"thread":null},"round":1}
+67 2026-10-27T14:46:59.282Z th-fe4200f55814 review.changed {"review":"rv-e9fe743a","reviewer":"th-827726f961e3","phase":{"kind":"checking","startedAt":1793112419281,"thread":null},"round":1}
+68 2026-10-27T14:47:00.281Z th-0e915d0a1a22 review.changed {"review":"rv-6899bcfb","reviewer":"th-5014db8bdd0a","phase":{"kind":"merging","authorized":null},"round":1}
+69 2026-10-27T14:47:00.287Z th-0e915d0a1a22 review.changed {"review":"rv-6899bcfb","reviewer":"th-5014db8bdd0a","phase":{"kind":"needs-person","reasons":["Always needs the person: pylon image rebuilds, as it changes images/pylon/image-close.Dockerfile."]},"round":1}
+71 2026-10-27T14:47:00.290Z th-fe4200f55814 review.changed {"review":"rv-e9fe743a","reviewer":"th-827726f961e3","phase":{"kind":"merging","authorized":null},"round":1}
+72 2026-10-27T14:47:00.294Z th-fe4200f55814 review.changed {"review":"rv-e9fe743a","reviewer":"th-827726f961e3","phase":{"kind":"needs-person","reasons":["Always needs the person: pylon image rebuilds, as it changes images/pylon/image-archive.Dockerfile."]},"round":1}
+74 2026-10-27T14:47:04.283Z th-0e915d0a1a22 review.changed {"review":"rv-6899bcfb","reviewer":"th-5014db8bdd0a","phase":{"kind":"closed"},"round":1}
+76 2026-10-27T14:47:04.285Z th-fe4200f55814 review.changed {"review":"rv-e9fe743a","reviewer":"th-827726f961e3","phase":{"kind":"cancelled","who":"builder","status":"archived"},"round":1}
+[exit 0]
+
+$ nexus release
+Desired: eeee001000000000000000000000000000000000 by nexus review rv-566ff28d at 2026-10-27T14:46:51.282Z
+verify-node control: eeee001000000000000000000000000000000000 healthy
+verify-node probe: eeee001000000000000000000000000000000000 healthy
+[exit 0]
+
+$ nexus threads
+th-e6c9c30ef0fc  active    -  pylon running  nexus         55s ago  Greet by name
+th-e3ce06c863c6  active    -  pylon running  nexus-manual  54s ago  Greet in French
+th-6eb3278737a2  active    -  pylon running  nexus         54s ago  Greet loudly
+th-d6727f4fe0b4  active    -  pylon running  nexus         53s ago  Review of #1: Greet by name
+th-2c3344e6cb26  active    -  pylon running  nexus         53s ago  Review of #3: Greet loudly
+th-53a33bc49f05  active    -  pylon running  nexus-manual  35s ago  Greet quietly
+th-2cf75271d084  active    -  pylon running  nexus-manual  32s ago  Review of #4: Greet quietly
+th-0e915d0a1a22  active    -  pylon running  nexus-manual  20s ago  Rebuild the image
+th-fe4200f55814  archived  -  pylon running  nexus-manual  19s ago  Rebuild the image again
+th-5014db8bdd0a  active    -  pylon running  nexus-manual  16s ago  Review of #5: Rebuild the image
+th-827726f961e3  active    -  pylon running  nexus-manual  16s ago  Review of #6: Rebuild the image again
+[exit 0]
+
+screenshot 01-by-name.png: PR #1: Greet by name — merged, checks none, review none
+Nexus review rv-f1131872, started on its own: landed, round 1 of 5, by th-d6727f4fe0b4 on gpt-6-astra, landing when approved
+screenshot 02-in-french.png: PR #2: Greet in French — open, checks none, review none
+screenshot 03-loudly.png: PR #3: Greet loudly — merged, checks none, review none
+Nexus review rv-9e7a6e1f, started on its own: landed, round 2 of 5, by th-2c3344e6cb26 on gpt-6-astra, landing when approved
+screenshot 04-quietly.png: PR #4: Greet quietly — merged, checks none, review none
+Nexus review rv-566ff28d: landed, round 2 of 5, by th-2cf75271d084 on gpt-6-astra, landing when approved
+screenshot 05-closed-held.png: PR #5: Rebuild the image — closed, checks none, review none
+Nexus review rv-6899bcfb: closed, round 1 of 5, by th-5014db8bdd0a on gpt-6-astra, landing when approved
+screenshot 06-archived-held.png: PR #6: Rebuild the image again — open, checks none, review none
+Nexus review rv-e9fe743a: cancelled, round 1 of 5, by th-827726f961e3 on gpt-6-astra, landing when approved, the builder thread th-fe4200f55814 was archived

@@ -1,0 +1,17 @@
+$ nexus show th-5bdf10ad82b7
+th-5bdf10ad82b7  Greet quietly
+project: nexus-manual
+Claude worker: started, model claude-opus-5-5
+attention: decision
+status: active
+pylon: pylon-th-5bdf10ad82b7 on verify-node, running, observed 0s ago
+size: 1 CPUs, 1 GiB memory, 10 GiB disk
+placement: verify-node, the project's default node
+setup: fresh boot runs .nexus/setup, because the control plane could not read .nexus/setup at main: the verify stack reads no remote, so every thread boots fresh
+PR watch: on
+PR #4: Greet quietly — open, checks none, review none https://github.com/ramtinJ95/nexus/pull/4
+review rv-77fad122 of PR #4: needs-person, round 1 of 5, reviewer th-343a1976fc91 on gpt-6-astra, landing when approved
+needs you: The branch conflicts with its base.
+output: branch origin/greet-quiet
+output: pull-request https://github.com/ramtinJ95/nexus/pull/4
+[exit 0]

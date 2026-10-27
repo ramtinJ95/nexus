@@ -1,0 +1,11 @@
+$ nexus threads
+th-f309ade176d3  active    -  pylon running  nexus         1m ago   Greet by name
+th-390b138b858f  active    -  pylon running  nexus-manual  1m ago   Greet in French
+th-789eb4e41867  active    -  pylon running  nexus         1m ago   Greet loudly
+th-5bdf10ad82b7  active    -  pylon running  nexus-manual  25s ago  Greet quietly
+th-343a1976fc91  active    -  pylon running  nexus-manual  25s ago  Review of #4: Greet quietly
+th-030dd8f0035c  active    -  pylon running  nexus-manual  19s ago  Rebuild the image
+th-d27c4d723992  archived  -  pylon running  nexus-manual  19s ago  Rebuild the image again
+th-87f9ce99fba2  active    -  pylon running  nexus-manual  16s ago  Review of #5: Rebuild the image
+th-c4c9dff82976  active    -  pylon running  nexus-manual  15s ago  Review of #6: Rebuild the image again
+[exit 0]
