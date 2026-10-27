@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { openRegistry } from "./control/registry.ts";
@@ -149,6 +149,27 @@ test("the newest Stop's hold owns the session whatever order the holds start in,
   assert.equal(await holdSuperseded(owner, 3000, 33), true, "the owner's release frees the session");
 });
 
+test("every background group is found among more processes than a process may hold files open at once", async (t) => {
+  const { execFile } = await import("node:child_process");
+  const { promisify } = await import("node:util");
+  const { mkdirSync, writeFileSync } = await import("node:fs");
+  const proc = mkdtempSync(join(tmpdir(), "nexus-proc-"));
+  t.after(() => rmSync(proc, { recursive: true, force: true }));
+  const rest = Array.from({ length: 13 }, () => "0").join(" ");
+  // Three times the open-file limit the scan runs under, as a pylon holds once its init leaves zombies unreaped.
+  const leaders: number[] = [];
+  for (let pid = 1_000; pid < 4_000; pid++) {
+    const leads = pid % 10 === 0;
+    if (leads) leaders.push(pid);
+    mkdirSync(join(proc, String(pid)));
+    writeFileSync(join(proc, String(pid), "stat"), `${pid} (sleep) S ${leads ? 100 : 1} ${leads ? pid : 1} 0 0 -1 ${rest} 7 0`);
+  }
+  const heartbeat = new URL("../images/pylon/nexus-heartbeat.ts", import.meta.url).href;
+  const scan = `const { backgroundGroups } = await import(${JSON.stringify(heartbeat)}); console.log(JSON.stringify((await backgroundGroups(100, process.argv[1], 200)).map((g) => g.pgid)));`;
+  const { stdout } = await promisify(execFile)("sh", ["-c", 'ulimit -n 1024 && exec "$0" --input-type=module -e "$1" "$2"', process.execPath, scan, proc]);
+  assert.deepEqual(JSON.parse(stdout).toSorted((a: number, b: number) => a - b), leaders);
+});
+
 test("a group counts only while its leader is the one recorded, or, without a leader, while a member of that generation lives", async (t) => {
   const { backgroundWatch } = await import("../images/pylon/nexus-heartbeat.ts");
   const { mkdirSync, writeFileSync } = await import("node:fs");
@@ -201,7 +222,7 @@ test("a background command runs while its process group lives, through exec or c
   };
   const build = await start("exec sleep 30 >/dev/null 2>&1 <&-", true);
   const mcp = await start("exec sleep 30", false);
-  await new Promise((resolve) => setTimeout(resolve, 100));
+  while (!readFileSync(`/proc/${build.pid}/cmdline`, "utf8").startsWith("sleep")) await new Promise((resolve) => setTimeout(resolve, 10));
   const groups = await backgroundGroups(process.pid);
   assert.deepEqual(groups.map((g) => g.pgid), [build.pid]);
   const running = backgroundWatch("c1", ["b6fh14jr7"], groups);
@@ -247,9 +268,10 @@ test("the environment a Claude started with is read from its process", { skip: p
   const { claudeEnviron } = await import("../images/pylon/nexus-heartbeat.ts");
   const { spawn } = await import("node:child_process");
   const { once } = await import("node:events");
-  const child = spawn("sleep", ["30"], { env: { PATH: process.env.PATH, CLAUDE_CODE_SESSION_ID: "37c5ec30" } });
+  // The spawn event does not say the exec has set up the environment, which once read empty under load, so the read waits until the child prints.
+  const child = spawn("sh", ["-c", "echo ready; read _"], { env: { PATH: process.env.PATH, CLAUDE_CODE_SESSION_ID: "37c5ec30" } });
   t.after(() => child.kill());
-  await once(child, "spawn");
+  await once(child.stdout, "data");
   assert.match(await claudeEnviron(String(child.pid)), /(^|\0)CLAUDE_CODE_SESSION_ID=37c5ec30\0/);
   assert.equal(await claudeEnviron(undefined), "");
   assert.equal(await claudeEnviron("0"), "");

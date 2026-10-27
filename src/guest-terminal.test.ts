@@ -23,8 +23,9 @@ function screen(terminal: Terminal) {
     get bytes() { return bytes; },
     get text() { return bytes.toString("latin1"); },
     read,
-    async until(pattern: RegExp, ms = 5000) {
-      const deadline = Date.now() + ms;
+    /** Waits for the pattern. The deadline only ends a hang: a loaded suite can take seconds over what takes milliseconds alone. */
+    async until(pattern: RegExp) {
+      const deadline = Date.now() + 60_000;
       while (!pattern.test(bytes.toString("latin1"))) {
         if (Date.now() > deadline) assert.fail(`the terminal never printed ${pattern}. It printed ${JSON.stringify(bytes.toString("latin1"))}`);
         await sleep(20);
@@ -34,6 +35,9 @@ function screen(terminal: Terminal) {
 }
 
 const size = terminalSize(100, 30);
+
+/** How the terminal ended, or "pending" if it never did. The deadline only ends a hang, as `until`'s does. */
+const ended = (terminal: Terminal) => Promise.race([terminal.done, sleep(60_000, "pending", { ref: false })]);
 
 test("a size outside 1 to 9999 on either side, or not whole, is refused", () => {
   for (const [cols, rows] of [[0, 30], [100, 0], [10000, 30], [1.5, 30], [Number.NaN, 30]] as const) {
@@ -86,18 +90,15 @@ test("a program that stops reading its keys still hangs up when stdin ends", asy
   await out.until(/ready/);
   await terminal.write(Buffer.alloc(2 << 20, "k"));
   await terminal.hangUp();
-  const ended = await Promise.race([terminal.done, sleep(5000, "pending")]);
-  assert.deepEqual(ended, { kind: "exited", code: 42 }, "the relay saw stdin end behind 2 MiB of unread keys");
+  assert.deepEqual(await ended(terminal), { kind: "exited", code: 42 }, "the relay saw stdin end behind 2 MiB of unread keys");
 });
 
 test("a program that ignores the hang-up is killed, which reads as 128 plus SIGKILL", async () => {
   const terminal = await openTerminal(local(), size, "xterm", ["sh", "-c", 'trap "" HUP; echo ready; while :; do sleep 0.05; done']);
   const out = screen(terminal);
   await out.until(/ready/);
-  const hungUp = Date.now();
   await terminal.hangUp();
-  assert.deepEqual(await terminal.done, { kind: "exited", code: 137 });
-  assert.ok(Date.now() - hungUp < 5000, "within the grace period and a little");
+  assert.deepEqual(await ended(terminal), { kind: "exited", code: 137 });
 });
 
 test("output written right before the program exits is not lost", async () => {
@@ -109,10 +110,10 @@ test("output written right before the program exits is not lost", async () => {
 });
 
 test("a background process that still holds the terminal does not keep it open once the program exits", async () => {
-  const terminal = await openTerminal(local(), size, "xterm", ["sh", "-c", "sleep 30 & echo bye; exit 4"]);
+  // Holds the terminal for longer than `ended` waits.
+  const terminal = await openTerminal(local(), size, "xterm", ["sh", "-c", "sleep 90 & echo bye; exit 4"]);
   const out = screen(terminal);
-  const ended = await Promise.race([terminal.done, sleep(3000, "pending")]);
-  assert.deepEqual(ended, { kind: "exited", code: 4 });
+  assert.deepEqual(await ended(terminal), { kind: "exited", code: 4 });
   await out.read;
   assert.equal(out.text, "bye\r\n");
 });

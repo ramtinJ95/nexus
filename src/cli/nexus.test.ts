@@ -66,6 +66,15 @@ async function closedPort(): Promise<number> {
   return port;
 }
 
+/** Waits for the predicate. The deadline only ends a hang: a loaded suite can take seconds over what takes milliseconds alone. */
+async function until(what: string, predicate: () => boolean) {
+  const deadline = Date.now() + 60_000;
+  while (!predicate()) {
+    if (Date.now() > deadline) throw new Error(`timed out waiting until ${what}`);
+    await new Promise((r) => setTimeout(r, 10));
+  }
+}
+
 /**
  * A SOCKS5 proxy without authentication. A `reply` other than 0 refuses every CONNECT with that code, and "close"
  * hangs up after the greeting instead.
@@ -87,7 +96,10 @@ async function socksProxy(t: TestContext, reply: number | "close" = 0) {
           client.write(Buffer.from([5, 0, 0, 1, 127, 0, 0, 1, 0, 0]));
           client.pipe(upstream).pipe(client);
         });
-        upstream.on("error", () => client.destroy());
+        // A pipe only ends the client when the API hangs up, and leaves it paused, so it would never read the CLI's
+        // own end and the proxy's close would wait for it forever.
+        upstream.on("close", () => client.destroy());
+        upstream.on("error", () => {});
       });
     });
   });
@@ -102,6 +114,7 @@ async function setup(t: TestContext) {
   registry.saveImage(image, null);
   registry.setCurrentImage(image.id);
   let caller: TailnetNodeId = laptop;
+  let requests = 0;
   /** What the node's probe answers a guest command with. Tests replace it. */
   let answer = async (command: PylonCommand): Promise<CommandResult> =>
     command.kind === "unlink-port" ? { kind: "unlink-port", refused: null }
@@ -121,7 +134,7 @@ async function setup(t: TestContext) {
   });
   const options = (port: number) => ({
     deployment: { self: "nFIREBAT" as TailnetNodeId, deployers: new Set([laptop]), keys: {}, resolveMain: async () => "a".repeat(40) },
-    registry, host: "127.0.0.1", port, whois: async () => caller, allowed: new Set([laptop]),
+    registry, host: "127.0.0.1", port, whois: async () => { requests++; return caller; }, allowed: new Set([laptop]),
     hostnames: new Set([apiName, "127.0.0.1"]), dotfiles: { repo: "https://github.com/ramtin/dotfiles.git", ref: "main" },
     harness: fake.harness, wake: () => {}, previewPorts: { first: 10200, last: 10299 }, images,
     mirror: { setupInputs: (p: RemoteProject, ref: { branch: string } | { commit: string }) => read(p, ref) },
@@ -158,6 +171,8 @@ async function setup(t: TestContext) {
   }
   return {
     registry, fake, proxy, home, api, env, nexus, json, commands,
+    /** How many requests the API has admitted. */
+    requests: () => requests,
     callAs(id: TailnetNodeId) { caller = id; },
     probeAnswers(next: typeof answer) { answer = next; },
     probePipes(next: typeof pipe) { pipe = next; },
@@ -388,7 +403,8 @@ function watchLines(t: TestContext, s: Awaited<ReturnType<typeof setup>>, args: 
   return {
     child,
     async next(): Promise<any> {
-      const timeout = AbortSignal.timeout(10_000);
+      // The deadline only ends a hang: a loaded suite can take seconds over what takes milliseconds alone.
+      const timeout = AbortSignal.timeout(60_000);
       const line = await Promise.race([lines.next(), once(timeout, "abort").then(() => assert.fail(`no line from watch. stderr: ${stderr}`))]);
       assert.ok(!line.done, `watch ended early. stderr: ${stderr}`);
       return JSON.parse(line.value);
@@ -419,8 +435,9 @@ test("ports lists what the pylon listens on, and preview publishes one and waits
 
   const preview = { pylon: thread.pylonId, service: "port-3000", httpsPort: 10200, ready: false, failed: null, url: "https://rj-firebat.tail.ts.net:10200/" };
   assert.deepEqual(await s.json(["preview", thread.id, "3000"]), preview, "the reply names the URL before it is served");
+  const asked = s.requests();
   const waiting = s.json(["preview", thread.id, "3000", "--wait"]);
-  await new Promise((r) => setTimeout(r, 1500)); // the wait polls a published preview that is not served yet
+  await until("the wait polls a published preview that is not served yet", () => s.requests() >= asked + 2);
   observeRunning(s, thread, [{ name: "port-3000", state: "ready", port: 3000, declared: false, wantsPreview: true }], [3000]);
   s.registry.apply({ record: "preview", pylonId: thread.pylonId, service: "port-3000", httpsPort: 10200, ready: true });
   assert.deepEqual(await waiting, { ...preview, ready: true });
@@ -444,8 +461,9 @@ test("show reports a published preview whose service is starting as not ready, a
   assert.match((await s.nexus(["show", thread.id])).stdout, new RegExp(`^preview: web at ${preview.url}, not ready$`, "m"));
   assert.equal((await s.nexus(["ports", thread.id])).stdout, `8003  web  ${preview.url} (not served yet)\n`);
   s.probeAnswers(async () => ({ kind: "link-port", service: "web" })); // a port a declared service owns is previewed under it
+  const asked = s.requests();
   const waiting = s.json(["preview", thread.id, "8003", "--wait"]);
-  await new Promise((r) => setTimeout(r, 1500)); // the wait polls while the service starts
+  await until("the wait polls while the service starts", () => s.requests() >= asked + 2);
   observeRunning(s, thread, [web("ready")], [8003]);
   assert.deepEqual(await waiting, preview, "--wait returns once the service is ready");
 
@@ -823,14 +841,15 @@ test("a watch whose consumer is killed outright exits, though an idle thread nev
       return !/\) Z /.test(stat);
     } catch { return false; }
   };
-  for (let i = 0; !(await readFile(out, "utf8").catch(() => "")).includes('"type":"state"'); i++) {
-    assert.ok(i < 200, "the watch printed the thread's state");
+  // The deadlines only end a hang: a loaded suite can take seconds over what takes milliseconds alone.
+  for (const deadline = Date.now() + 60_000; !(await readFile(out, "utf8").catch(() => "")).includes('"type":"state"');) {
+    assert.ok(Date.now() < deadline, "the watch printed the thread's state");
     await new Promise((r) => setTimeout(r, 50));
   }
   sh.kill("SIGKILL");
   await once(sh, "exit");
-  for (let i = 0; await alive(); i++) {
-    assert.ok(i < 100, "the orphaned watch exited");
+  for (const deadline = Date.now() + 60_000; await alive();) {
+    assert.ok(Date.now() < deadline, "the orphaned watch exited");
     await new Promise((r) => setTimeout(r, 50));
   }
 });
@@ -913,7 +932,8 @@ test("watch opens a dropped stream again, reports the outage once, and prints th
   const restart = await s.stop();
   const errors = [await watch.next()];
   // The poll and the stream both retry while it is down, every 50 ms.
-  await new Promise((resolve) => setTimeout(resolve, 500));
+  const tried = s.proxy.connects.length;
+  await until("the watch retried a few times", () => s.proxy.connects.length >= tried + 6);
   await restart();
   let back = await watch.next();
   for (; back.type === "error"; back = await watch.next()) errors.push(back);
@@ -1088,7 +1108,7 @@ test("watch ends with the API's exit code when it refuses the stream", async (t)
   assert.equal(JSON.parse(res.stderr).kind, "refused");
 });
 
-test("a stream refused with a reply cut off mid-body fails as unreachable rather than hanging", { timeout: 5_000 }, async (t) => {
+test("a stream refused with a reply cut off mid-body fails as unreachable rather than hanging", { timeout: 60_000 }, async (t) => {
   const server = createServer((socket) => {
     socket.on("error", () => {});
     socket.once("data", () => {
@@ -1101,7 +1121,7 @@ test("a stream refused with a reply cut off mid-body fails as unreachable rather
     (err) => err instanceof CliError && err.kind === "unreachable");
 });
 
-test("an API that stays silent behind a working proxy is named as the culprit, not the proxy", { timeout: 5_000 }, async (t) => {
+test("an API that stays silent behind a working proxy is named as the culprit, not the proxy", { timeout: 60_000 }, async (t) => {
   const held = new Set<Socket>();
   const silent = createServer((socket) => {
     socket.on("error", () => {});
@@ -1460,7 +1480,7 @@ test("the SSE reader waits for its consumer before delivering more data or a cur
   assert.deepEqual(cursors, ["1", "2", "10"]);
 });
 
-test("events resumes from an id-only heartbeat without printing it", { timeout: 10_000 }, async (t) => {
+test("events resumes from an id-only heartbeat without printing it", { timeout: 60_000 }, async (t) => {
   const paths: string[] = [];
   const reconnected = Promise.withResolvers<void>();
   const server = createHttpServer((req, res) => {
@@ -1484,7 +1504,7 @@ test("events resumes from an id-only heartbeat without printing it", { timeout: 
   await once(child, "exit");
 });
 
-test("events bounds stdout buffering when its pipe is not read", { timeout: 10_000 }, async (t) => {
+test("events bounds stdout buffering when its pipe is not read", { timeout: 60_000 }, async (t) => {
   const event = JSON.stringify({ id: "1", time: 0, thread: null, project: null, kind: "release.changed", payload: { message: "x".repeat(2048) } });
   const server = createHttpServer((_req, res) => {
     res.writeHead(200, { "content-type": "text/event-stream" });

@@ -94,12 +94,17 @@ async function attach(door: PylonDoor, options: { timing?: AttachTiming; request
   return {
     client, received, closed, served: served.promise,
     end: (why: Ending) => stop.abort(why),
-    /** Waits until `count` messages have arrived. */
+    /** Waits until `count` messages have arrived. The deadline only ends a hang: a loaded suite can take seconds. */
     async messages(count: number) {
       while (received.length < count) {
-        await once(arrived, "message", { signal: AbortSignal.timeout(5000) }).catch(() => assert.fail(`only ${JSON.stringify(received)} arrived`));
+        await once(arrived, "message", { signal: AbortSignal.timeout(60_000) }).catch(() => assert.fail(`only ${JSON.stringify(received)} arrived`));
       }
       return received.slice(0, count);
+    },
+    /** Settles once serveAttach has handled every message sent before it, as ws answers a ping after the frames ahead of it. */
+    async handled() {
+      client.ping();
+      await once(client, "pong");
     },
   };
 }
@@ -131,7 +136,7 @@ test("keys and resizes after attached reach the terminal in order, and a resize 
   await a.messages(1);
   a.client.send(encodeMessage({ type: "resize", size: terminalSize(140, 40) }));
   a.client.send(Buffer.from("typed too early"));
-  await sleep(50);
+  await a.handled();
   state.look = { kind: "pylon", state: "running" };
   await a.messages(2);
   assert.deepEqual(asked.at(-1)!.size, { cols: 140, rows: 40 }, "the terminal opened at the latest size");
@@ -139,7 +144,7 @@ test("keys and resizes after attached reach the terminal in order, and a resize 
   a.client.send(encodeMessage({ type: "resize", size: terminalSize(80, 24) }));
   a.client.send(JSON.stringify({ type: "something-new" }));
   a.client.send(Buffer.from("exit\r"));
-  await sleep(50);
+  await a.handled();
   program.exit(0);
   await a.served;
   assert.deepEqual(program.calls, [["keys", "ls\r"], ["resize", 80, 24], ["keys", "exit\r"]], "keys before attached are dropped, and an unknown message is ignored");
@@ -198,7 +203,7 @@ test("a terminal that does not end after its hang-up is dropped after hangUpMs, 
   const a = await attach(fakeDoor([program]).door, { timing: { ...fast, hangUpMs: 100 } });
   await a.messages(1);
   a.client.close();
-  assert.equal(await Promise.race([a.served.then(() => "served"), sleep(2_000, "still serving")]), "served");
+  assert.equal(await Promise.race([a.served.then(() => "served"), sleep(60_000, "still serving", { ref: false })]), "served");
   assert.deepEqual(program.calls, [["hangUp"], ["abort"]]);
   assert.deepEqual(await program.terminal.done, { kind: "lost" });
 });
@@ -215,7 +220,7 @@ test("keys the pylon does not take stop the socket being read once they pass max
   await sleep(200);
   assert.ok(a.client.bufferedAmount > chunks * chunk - 2 * maxQueuedKeys, `the control plane read all but ${a.client.bufferedAmount} bytes`);
   taking.resolve();
-  for (const deadline = Date.now() + 5_000; program.keys.taken < chunks * chunk && Date.now() < deadline;) await sleep(20);
+  for (const deadline = Date.now() + 60_000; program.keys.taken < chunks * chunk && Date.now() < deadline;) await sleep(20);
   assert.deepEqual(program.calls, Array.from({ length: chunks }, (_, i) => ["paste", i, chunk]));
   program.exit(0);
   await a.served;
@@ -239,7 +244,7 @@ test("empty key messages are dropped, queued resizes collapse to the latest, and
   await sleep(200);
   assert.ok(a.client.bufferedAmount > keys * 7 / 2, `the control plane read all but ${a.client.bufferedAmount} bytes`);
   taking.resolve();
-  for (const deadline = Date.now() + 5_000; program.keys.taken < 1 + keys && Date.now() < deadline;) await sleep(20);
+  for (const deadline = Date.now() + 60_000; program.keys.taken < 1 + keys && Date.now() < deadline;) await sleep(20);
   assert.deepEqual(program.calls.filter(([kind]) => kind === "resize"), [["resize", 132, 50]]);
   assert.deepEqual(program.calls.filter(([kind, text]) => kind === "keys" && text === ""), []);
   assert.equal(program.keys.taken, 1 + keys);

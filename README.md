@@ -33,4 +33,6 @@ npm test
 
 The control plane serves the dashboard's client from `dist/dashboard`, bundled from `src/control/dashboard`, and does not start without it. `npm test` builds it first. To run the control plane from a checkout, run `npm run build` after `npm ci` and after each change to the client.
 
+The unit suite must pass on a loaded machine, as the review loop's checks run it. A test does not race a fixed sleep or a short deadline. It steps the code's timers with `node:test`'s mock timers, or waits for a signal that the work happened, and a wait for a real condition gives up only after 60 s, to end a hang. `npm test` fails any test still running after 10 minutes, so a hang names its test instead of stalling the suite.
+
 Live slice checks need a suitable VM host and are separate from the unit suite.

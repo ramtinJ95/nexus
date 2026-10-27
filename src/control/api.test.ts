@@ -62,13 +62,14 @@ const claudeSession = "11111111-2222-4333-8444-555555555501";
 const fixture = (await readFile(new URL("../fixtures/claude-transcript.jsonl", import.meta.url), "utf8")).split("\n").filter((line) => line !== "").map((line) => `${line}\n`);
 const usageLimitRecord = (await readFile(new URL("../fixtures/claude-api-errors.jsonl", import.meta.url), "utf8")).split("\n")[0]! + "\n";
 
-async function setup(t: import("node:test").TestContext, options: { gitIdentity?: { name: string; email: string }; https?: import("./api.ts").ApiOptions["https"]; whois?: import("../tailscale.ts").Whois; deployment?: DeploymentOptions; dotfiles?: typeof dotfiles; streamStallMs?: number; attachTiming?: AttachTiming; reviews?: ReviewLoop; images?: (registry: Registry) => ImageRollout } = {}) {
+async function setup(t: import("node:test").TestContext, options: { gitIdentity?: { name: string; email: string }; https?: import("./api.ts").ApiOptions["https"]; whois?: import("../tailscale.ts").Whois; deployment?: DeploymentOptions; dotfiles?: typeof dotfiles; streamStallMs?: number; attachTiming?: AttachTiming; closeWaitMs?: number; reviews?: ReviewLoop; images?: (registry: Registry) => ImageRollout } = {}) {
   const registry = openRegistry(join(dir, `${randomUUID()}.db`));
   const images = options.images?.(registry);
   registry.upsertNode({ name: node, tailnetHost: "rj-firebat.tail.ts.net", tailnetNodeId: "nFIREBAT" as TailnetNodeId });
   let caller: TailnetNodeId | null = laptop;
-  /** Every whois waits for it, so a test can hold a request at admission. */
+  /** Every whois waits for it, so a test can hold a request at admission, and tells `asked` it got there. */
   let admitted = Promise.resolve();
+  let asked = () => {};
   const woken: NodeName[] = [];
   const fake = fakeHarness();
   const { harness, calls } = fake;
@@ -93,6 +94,7 @@ async function setup(t: import("node:test").TestContext, options: { gitIdentity?
     ...(options.https ? { https: options.https } : {}),
     // Every loopback caller is whoever the test says. Tests never ask tailscaled.
     whois: options.whois ?? (async () => {
+      asked();
       await admitted;
       return caller;
     }),
@@ -113,6 +115,7 @@ async function setup(t: import("node:test").TestContext, options: { gitIdentity?
     previewPorts: { first: 10200, last: 10299 },
     ...options.streamStallMs === undefined ? {} : { streamStallMs: options.streamStallMs },
     ...options.attachTiming === undefined ? {} : { attachTiming: options.attachTiming },
+    ...options.closeWaitMs === undefined ? {} : { closeWaitMs: options.closeWaitMs },
   });
   t.after(async () => {
     await api.close();
@@ -151,12 +154,19 @@ async function setup(t: import("node:test").TestContext, options: { gitIdentity?
     registry, images, call, raw, woken, calls, commands, streams, reads, fake, port: api.port, get httpsPort() { return api.httpsPort; }, close: () => api.close(),
     callAs(id: TailnetNodeId | null) { caller = id; },
     /** Holds every request at whois until the returned function is called. */
+    /** Holds each whois from now on until `release`. `asked` settles once one is held. */
     holdWhois() {
       const held = Promise.withResolvers<void>();
+      const waiting = Promise.withResolvers<void>();
       admitted = held.promise;
-      return () => {
-        admitted = Promise.resolve();
-        held.resolve();
+      asked = waiting.resolve;
+      return {
+        asked: waiting.promise,
+        release() {
+          admitted = Promise.resolve();
+          asked = () => {};
+          held.resolve();
+        },
       };
     },
     probeAnswers(next: typeof answer) { answer = next; },
@@ -166,7 +176,7 @@ async function setup(t: import("node:test").TestContext, options: { gitIdentity?
   };
 }
 
-async function withThread(t: import("node:test").TestContext, options: { gitIdentity?: { name: string; email: string }; deployment?: DeploymentOptions; reviews?: ReviewLoop; project?: typeof project; dotfiles?: typeof dotfiles; streamStallMs?: number; attachTiming?: AttachTiming } = {}) {
+async function withThread(t: import("node:test").TestContext, options: { gitIdentity?: { name: string; email: string }; deployment?: DeploymentOptions; reviews?: ReviewLoop; project?: typeof project; dotfiles?: typeof dotfiles; streamStallMs?: number; attachTiming?: AttachTiming; closeWaitMs?: number } = {}) {
   const s = await setup(t, options);
   assert.equal((await s.call("POST", "/v1/projects", options.project ?? project)).status, 201);
   assert.equal((await s.call("POST", "/v1/images", image)).status, 201);
@@ -1219,9 +1229,10 @@ test("a message goes to the thread's conversation and counts as human activity",
 });
 
 /** Polls until `done` holds, for up to 5 s. */
+/** Waits for `done`. The deadline only ends a hang: a loaded suite can take seconds over what takes milliseconds alone. */
 async function until(done: () => boolean, what: string) {
-  for (let i = 0; !done(); i++) {
-    assert.ok(i < 100, what);
+  for (const deadline = Date.now() + 60_000; !done();) {
+    assert.ok(Date.now() < deadline, what);
     await new Promise((resolve) => setTimeout(resolve, 50));
   }
 }
@@ -1339,12 +1350,13 @@ test("deleting a thread whose client stopped reading frees the stream at once, w
   const stream = s.events(`/v1/threads/${thread.id}/events`);
   await stream.next();
   stream.pause();
+  t.mock.timers.enable({ apis: ["setTimeout"] });
   await backUp(s);
   assert.equal((await s.call("DELETE", `/v1/threads/${thread.id}`)).status, 200);
   transcript.docs["pi.live"] = { seq: 10 };
   fake.commit(thread.id);
   assert.equal(fake.watching(thread.id), 0, "the delete stopped the watch at once, though the client has not read the end yet");
-  await new Promise((resolve) => setTimeout(resolve, 1500));
+  t.mock.timers.tick(1000);
   stream.resume();
   assert.equal(await stream.ended, "dropped", "a client that never read up to the end was dropped after the stall limit");
   assert.equal((await s.call("GET", "/v1/projects")).status, 200, "the control plane is still up");
@@ -1556,8 +1568,8 @@ test("deleting a thread ends its attach as a conflict, and a closing API ends on
   assert.equal((stopping.received.at(-1) as { kind: string }).kind, "unreachable");
 });
 
-test("a closing API gives up on a terminal whose node stopped answering after 5 s, and opens none for an upgrade it was admitting", async (t) => {
-  const s = await withThread(t, { attachTiming: fastAttach });
+test("a closing API gives up on a terminal whose node stopped answering after its wait, and opens none for an upgrade it was admitting", async (t) => {
+  const s = await withThread(t, { attachTiming: fastAttach, closeWaitMs: 100 });
   observeRunning(s, {});
   let opened = 0;
   s.probePipes(async () => {
@@ -1569,30 +1581,26 @@ test("a closing API gives up on a terminal whose node stopped answering after 5 
   assert.ok("ws" in stuck);
   await until(() => stuck.received.length === 1, "attached");
 
-  const release = s.holdWhois();
+  const whois = s.holdWhois();
   const admitting = attachTo(s.port, attachPathOf(s.thread.id));
-  await new Promise((resolve) => setTimeout(resolve, 50));
+  await whois.asked;
   const closing = s.close();
-  const started = Date.now();
-  release();
-  await closing;
-  assert.ok(Date.now() - started < 7000, `close waited ${Date.now() - started} ms`);
+  whois.release();
+  assert.equal(await Promise.race([closing.then(() => "closed"), sleep(60_000, "still closing", { ref: false })]), "closed");
   assert.equal(await stuck.closed, 1006, "the stuck terminal's socket is dropped");
   const late = await admitting;
   assert.ok("status" in late && late.status === 503, JSON.stringify("status" in late ? late : "attached"));
   assert.equal(opened, 1, "no terminal opened for the upgrade that was still at whois");
 });
 
-test("a closing API drops an upgrade whose whois never returns after 5 s", async (t) => {
-  const s = await withThread(t, { attachTiming: fastAttach });
-  const release = s.holdWhois();
+test("a closing API drops an upgrade whose whois never returns after its wait", async (t) => {
+  const s = await withThread(t, { attachTiming: fastAttach, closeWaitMs: 100 });
+  const whois = s.holdWhois();
   const stalled = attachTo(s.port, attachPathOf(s.thread.id)).then(() => "answered", () => "dropped");
-  await new Promise((resolve) => setTimeout(resolve, 50));
-  const started = Date.now();
-  const closing = await Promise.race([s.close().then(() => "closed"), new Promise((resolve) => setTimeout(resolve, 8_000, "still closing"))]);
-  release();
+  await whois.asked;
+  const closing = await Promise.race([s.close().then(() => "closed"), sleep(60_000, "still closing", { ref: false })]);
+  whois.release();
   assert.equal(closing, "closed");
-  assert.ok(Date.now() - started < 7_000, `close took ${Date.now() - started} ms`);
   assert.equal(await stalled, "dropped", "the upgrade's socket was dropped, not answered");
 });
 
@@ -1894,10 +1902,7 @@ test("direct TLS uses TCP whois, ignores forged headers, and renews without dist
       req.on("error", reject).end();
     });
   }
-  for (let i = 0; api.httpsPort === undefined; i++) {
-    assert.ok(i < 100, "HTTPS started");
-    await new Promise((resolve) => setTimeout(resolve, 10));
-  }
+  await until(() => api.httpsPort !== undefined, "HTTPS started");
   assert.equal((await tls()).status, 200);
   assert.equal((await tls()).fingerprint, new X509Certificate(first.cert).fingerprint256);
   assert.equal((await api.call("GET", "/v1/threads")).status, 200);
@@ -1915,20 +1920,19 @@ test("direct TLS uses TCP whois, ignores forged headers, and renews without dist
   assert.equal((await tls(attachPathOf("missing"), { ...upgrade, origin: "https://127.0.0.1:10200" })).status, 403);
   fail = true;
   const before = reads;
-  while (reads === before) await new Promise((resolve) => setTimeout(resolve, 10));
+  await until(() => reads !== before, "the renewal read the certificate");
   assert.equal((await tls()).fingerprint, new X509Certificate(first.cert).fingerprint256);
   assert.equal((await api.call("GET", "/v1/health")).body.https.status, "degraded");
   fail = false;
   current = second;
-  for (let i = 0; ; i++) {
-    if ((await tls()).fingerprint === new X509Certificate(second.cert).fingerprint256) break;
-    assert.ok(i < 100, "certificate renewed");
+  for (const deadline = Date.now() + 60_000; (await tls()).fingerprint !== new X509Certificate(second.cert).fingerprint256;) {
+    assert.ok(Date.now() < deadline, "certificate renewed");
     await new Promise((resolve) => setTimeout(resolve, 10));
   }
   assert.equal((await api.call("GET", "/v1/threads")).status, 200);
 });
 
-test("HTTP starts while certificate issuance is pending, survives failure, and HTTPS starts on retry", { timeout: 10_000 }, async (t) => {
+test("HTTP starts while certificate issuance is pending, survives failure, and HTTPS starts on retry", async (t) => {
   const { testCertificate } = await import("../test-certificate.ts");
   const { request: tlsRequest } = await import("node:https");
   const certificate = await testCertificate(await mkdtemp(join(dir, "startup-tls-")));
@@ -1940,20 +1944,14 @@ test("HTTP starts while certificate issuance is pending, survives failure, and H
   assert.equal(api.httpsPort, undefined);
   assert.deepEqual((await api.call("GET", "/v1/health")).body.https, { status: "waiting", error: null, nextAttemptAt: null });
   first.reject(new Error("tailscaled certificate: HTTP 403"));
-  for (let i = 0; attempts < 2; i++) {
-    assert.ok(i < 100, "issuance retried");
-    await new Promise((resolve) => setTimeout(resolve, 10));
-  }
+  await until(() => attempts >= 2, "issuance retried");
   const failed = await api.call("GET", "/v1/health");
   assert.equal(failed.status, 200);
   assert.equal(failed.body.https.status, "waiting");
   assert.equal(failed.body.https.error, "tailscaled certificate: HTTP 403");
   assert.equal((await api.call("GET", "/v1/threads")).status, 200);
   retry.resolve(certificate);
-  for (let i = 0; api.httpsPort === undefined; i++) {
-    assert.ok(i < 100, "HTTPS started after retry");
-    await new Promise((resolve) => setTimeout(resolve, 10));
-  }
+  await until(() => api.httpsPort !== undefined, "HTTPS started after retry");
   const ready = (await api.call("GET", "/v1/health")).body.https;
   assert.equal(ready.status, "ready");
   assert.equal(ready.error, null);
@@ -2392,6 +2390,8 @@ test("a Claude worker thread's conversation is its transcript, read from the run
 });
 
 test("a Claude worker thread's page stream shows new entries during a turn, read when its session events say so rather than on a timer", async (t) => {
+  // The reads follow intervals, which the test steps through, so a slow suite cannot outrun them or fit an extra one in.
+  t.mock.timers.enable({ apis: ["setInterval"] });
   const s = await withClaude(t);
   await writeFile(s.transcript, fixture.slice(0, 22).join(""));
   const stream = s.events(`/threads/${s.thread.id}/stream`);
@@ -2405,22 +2405,24 @@ test("a Claude worker thread's page stream shows new entries during a turn, read
   };
   assert.match(await frame(/Do these steps one at a time/, "the read a watch starts with"), /Claude Code · claude-opus-5-5/);
   const idle = s.streams.length;
-  await sleep(2_500);
+  t.mock.timers.tick(10_000);
   assert.equal(s.streams.length, idle, "an idle thread is not read on a timer");
 
   let sequence = 0;
   const report = (kind: "session.turn-started" | "session.turn-ended") => s.registry.reportSession(node, { sequence: ++sequence, pylon: s.thread.pylonId, time: Date.now(), event: { kind, session: claudeSession } });
   await appendFile(s.transcript, fixture.slice(22, 24).join(""));
   report("session.turn-started");
+  t.mock.timers.tick(1_000);
   await frame(/Changed a file/, "the turn's start is followed by a read");
   await appendFile(s.transcript, fixture[24]!);
+  t.mock.timers.tick(2_000);
   assert.match(await frame(/<span class="t-status run">running<\/span>/, "a turn that runs is read again"), /python3 \/home\/user\/workspace\/repo\/hello.py/);
   await appendFile(s.transcript, fixture.slice(25, 28).join(""));
   report("session.turn-ended");
+  t.mock.timers.tick(1_000);
   assert.doesNotMatch(await frame(/Exit code 1/, "the turn's end is followed by a read"), /t-status run/);
-  await sleep(500);
   const ended = s.streams.length;
-  await sleep(2_500);
+  t.mock.timers.tick(10_000);
   assert.equal(s.streams.length, ended, "the reads stop with the turn");
 });
 

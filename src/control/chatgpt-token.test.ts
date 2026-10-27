@@ -89,10 +89,11 @@ test("a probe that shows up without the token while a poll runs gets it from one
   const p = probes("rj-firebat", "infra-testbench");
   p.down.add("rj-firebat");
   const slow = Promise.withResolvers<void>();
-  const clients = p.clients.map((c) => c.node === "infra-testbench" ? { ...c, putSecret: async (name: string, value: string) => { await slow.promise; return c.putSecret(name, value); } } : c);
+  const putting = Promise.withResolvers<void>();
+  const clients = p.clients.map((c) => c.node === "infra-testbench" ? { ...c, putSecret: async (name: string, value: string) => { putting.resolve(); await slow.promise; return c.putSecret(name, value); } } : c);
   const handoff = chatgptTokenHandoff({ probes: clients, token: async () => token, log: () => {} });
   const first = handoff.poll();
-  await new Promise((r) => setTimeout(r, 10));
+  await putting.promise;
   p.down.delete("rj-firebat");
   handoff.observed({ grants: { secrets: [], gitSsh: false }, heldSecrets: ["NEXUS_CHATGPT_TOKEN"] });
   slow.resolve();

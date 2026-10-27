@@ -5,15 +5,17 @@ import type { VM } from "@earendil-works/gondolin";
 import { fakeVm } from "./fake-vm.ts";
 import { GuestProcesses } from "./processes.ts";
 
-const outcome = (work: Promise<unknown>, ms = 1_000) =>
-	Promise.race([work.then(() => "answered", (err: unknown) => err), delay(ms, "still waiting")]);
+/** The work's error, or "answered". The deadline only ends a hang: a loaded suite can take seconds over what takes milliseconds alone. */
+const outcome = (work: Promise<unknown>) =>
+	Promise.race([work.then(() => "answered", (err: unknown) => err), delay(60_000, "still waiting", { ref: false })]);
 
 test("a status wait on a running command ends as soon as the controller stops, so the stop can settle it", async () => {
 	const stopping = new AbortController();
-	const processes = new GuestProcesses(fakeVm().vm, stopping.signal);
+	const fake = fakeVm();
+	const processes = new GuestProcesses(fake.vm, stopping.signal);
 	const pid = await processes.launch("sleep 600", "/");
 	const waiting = processes.status(pid, 60_000);
-	await delay(200);
+	while (!fake.commands.some((command) => command.endsWith("/done'"))) await delay(10);
 	const reason = new Error("the controller is stopping");
 	stopping.abort(reason);
 	assert.equal(await outcome(waiting), reason, "the wait went on after the stop, so the stop would close the VM under it or wait out its 60 s");

@@ -87,6 +87,8 @@ export interface ApiOptions {
   streamStallMs?: number;
   /** How attached terminals ping and wait. Tests shorten it. */
   attachTiming?: AttachTiming;
+  /** How long close() waits for terminals to hang up and upgrades to pass whois. 5 s by default. */
+  closeWaitMs?: number;
 }
 
 /** A session `POST /v1/threads/<id>/sessions` opened. Its observed state shows in ThreadDetail.sessions. */
@@ -285,7 +287,7 @@ const claudeReadMs = 5_000;
 
 
 export async function startApi(options: ApiOptions): Promise<Api> {
-  const { registry, whois, allowed, hostnames, dotfiles, harness, mirror, wake, probes, previewPorts, streamStallMs = 30_000, attachTiming: timing = attachTiming } = options;
+  const { registry, whois, allowed, hostnames, dotfiles, harness, mirror, wake, probes, previewPorts, streamStallMs = 30_000, attachTiming: timing = attachTiming, closeWaitMs = 5_000 } = options;
   const claude = claudeConversations({ registry, probes });
   const startThread = threadStarter({ registry, harness, mirror, dotfiles, gitIdentity: options.gitIdentity, wake });
 
@@ -1171,7 +1173,7 @@ export async function startApi(options: ApiOptions): Promise<Api> {
       // Each hang-up waits for its node's probe, and an upgrade still at admission for whois. A node that stopped
       // answering, or a whois that never returns, would hold the close forever.
       const ends = [...[...attached].map((session) => session.served), ...[...upgraded].map((socket) => new Promise((resolve) => socket.once("close", resolve)))];
-      await Promise.race([Promise.all(ends), sleep(5_000, undefined, { ref: false })]);
+      await Promise.race([Promise.all(ends), sleep(closeWaitMs, undefined, { ref: false })]);
       for (const socket of upgraded) socket.destroy();
       await closed;
     },

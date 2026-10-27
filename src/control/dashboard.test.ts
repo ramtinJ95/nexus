@@ -161,6 +161,7 @@ function conversationOf(html: string) {
 }
 
 test("the overview lists each project's open threads with their phases, node and activity, and folds the archived", async (t) => {
+  t.mock.timers.enable({ apis: ["Date"], now: Date.now() });
   const s = await seeded(t);
   const fix = await s.start("acme", "Fix checkout");
   const docs = await s.start("beta", "Write docs");
@@ -179,13 +180,14 @@ test("the overview lists each project's open threads with their phases, node and
   assert.ok(acme!.includes(fix.id) && !acme!.includes(docs.id), "each thread is listed under its own project");
   assert.ok(beta!.includes(docs.id));
   assert.equal(overviewRow(res.text, fix), "Fix checkout running running rj-firebat just now never");
-  assert.match(overviewRow(res.text, docs), /^Write docs running not on its node rj-firebat just now working 1m 0[34]s$/);
-  assert.match(beta!, new RegExp(`<td class="wide">working <time data-since="${started}">1m 0[34]s</time></td>`), "the client ticks the turn's clock from its start");
+  assert.match(overviewRow(res.text, docs), /^Write docs running not on its node rj-firebat just now working 1m 03s$/);
+  assert.match(beta!, new RegExp(`<td class="wide">working <time data-since="${started}">1m 03s</time></td>`), "the client ticks the turn's clock from its start");
   assert.match(textOf(acme!), /Thread Desired Observed Node Human Agent Fix checkout .* 1 archived Thread .* Old spike archived paused not on its node/);
   assert.match(acme!, /<details class="ov-closed"[^>]*><summary>1 archived<\/summary>/, "archived threads start folded away");
 });
 
 test("the sidebar lists every project's threads with their state, folds the archived and marks the open one", async (t) => {
+  t.mock.timers.enable({ apis: ["Date"], now: Date.now() });
   const s = await seeded(t);
   const fix = await s.start("acme", "Fix checkout");
   const docs = await s.start("beta", "Write docs");
@@ -201,9 +203,9 @@ test("the sidebar lists every project's threads with their state, folds the arch
     const html = (await s.call("GET", path)).text;
     const sidebar = sidebarOf(html);
     // Threads started in the same millisecond have no order between them.
-    assert.deepEqual(sidebar.rows.toSorted().map((row) => row.replace(/1m 0[34]s$/, "1m 03s")), ["agent working Write docs working 1m 03s", "archived Old spike now", "deleted Gone now", "running Fix checkout now"], `${path} lists the threads`);
-    assert.match(sidebar.text, /^acme main Fix checkout now 1 archived, 1 deleted (Gone now Old spike now|Old spike now Gone now) beta main Write docs working 1m 0[34]s$/);
-    assert.match(html, new RegExp(`<span class="row-at">working <time data-since="${started}">1m 0[34]s</time></span>`), `${path} ticks the working thread's clock`);
+    assert.deepEqual(sidebar.rows.toSorted(), ["agent working Write docs working 1m 03s", "archived Old spike now", "deleted Gone now", "running Fix checkout now"], `${path} lists the threads`);
+    assert.match(sidebar.text, /^acme main Fix checkout now 1 archived, 1 deleted (Gone now Old spike now|Old spike now Gone now) beta main Write docs working 1m 03s$/);
+    assert.match(html, new RegExp(`<span class="row-at">working <time data-since="${started}">1m 03s</time></span>`), `${path} ticks the working thread's clock`);
   }
   const page = (await s.call("GET", `/threads/${fix.id}`)).text;
   assert.equal(sidebarOf(page).active, fix.id);
@@ -546,6 +548,7 @@ test("a fold says what its calls did by action, weightiest first, a changed file
 });
 
 test("a running turn shows its tool's output so far, the partial answer, queued messages and what the run has done", async (t) => {
+  t.mock.timers.enable({ apis: ["Date"], now: Date.now() });
   const s = await seeded(t);
   const fix = await s.start("acme", "Fix checkout");
   const transcript = s.fake.transcript(fix.id);
@@ -569,7 +572,7 @@ test("a running turn shows its tool's output so far, the partial answer, queued 
     "You queued, sends after this run then deploy",
   ]);
   assert.deepEqual(open, [["steps-c1", true], ["tool-c1", true]]);
-  assert.match(dock, /^The agent is working\. 1m 1[2-3]s · 1 tool this turn · new messages queue Abort gpt-test ⌘↵ to queue Queue$/);
+  assert.match(dock, /^The agent is working\. 1m 12s · 1 tool this turn · new messages queue Abort gpt-test ⌘↵ to queue Queue$/);
   assert.match(html, /placeholder="Queue a follow-up…"/);
 });
 
@@ -1047,6 +1050,7 @@ test("a pull request Claude opened shows once, as an escaped link to it, however
 });
 
 test("a Claude worker that works shows its turn's call running, the turn's clock and calls, and a box that queues for Claude", async (t) => {
+  t.mock.timers.enable({ apis: ["Date"], now: Date.now() });
   const s = await seeded(t);
   const thread = await claudeThread(s, [
     { kind: "prompt", at: 1, text: "Earlier", from: "person" },
@@ -1071,7 +1075,7 @@ test("a Claude worker that works shows its turn's call running, the turn's clock
     "Ran a command 1 running ›",
     "› Bash npm test running npm test No output yet.",
   ], "only a call of the running turn runs");
-  assert.match(dock, /^Claude is working\. [01]s · 1 tool this turn · new messages go in at its next step Claude Code takes a message sent during a turn at its next step\. claude-opus-5-5 ⌘↵ to queue Queue$/,
+  assert.match(dock, /^Claude is working\. 0s · 1 tool this turn · new messages go in at its next step Claude Code takes a message sent during a turn at its next step\. claude-opus-5-5 ⌘↵ to queue Queue$/,
     "the turn is timed from when control heard it start, and Claude cannot be aborted");
   const since = s.registry.thread(thread.id)!.workingSince;
   assert.equal(html.split(`<time data-since="${since}">`).length - 1, 3, "the run bar, the sidebar row and the inspector tick the same clock");

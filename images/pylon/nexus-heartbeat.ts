@@ -93,7 +93,13 @@ type Proc = { pid: number; ppid: number; pgid: number; start: number };
 export type Group = { pgid: number; start: number };
 
 async function processes(proc: string): Promise<Proc[]> {
-  const stats = await Promise.all((await readdir(proc)).filter((name) => /^\d+$/.test(name)).map((pid) => readFile(`${proc}/${pid}/stat`, "utf8").catch(() => "")));
+  const pids = (await readdir(proc)).filter((name) => /^\d+$/.test(name));
+  // In batches: thousands of reads at once, as a pylon full of unreaped zombies needs, fail with EMFILE, and a read
+  // that fails drops its process, as one that exited meanwhile is dropped.
+  const stats: string[] = [];
+  for (let i = 0; i < pids.length; i += 256) {
+    stats.push(...await Promise.all(pids.slice(i, i + 256).map((pid) => readFile(`${proc}/${pid}/stat`, "utf8").catch(() => ""))));
+  }
   return stats.flatMap((stat) => {
     const fields = stat.slice(stat.lastIndexOf(")") + 2).split(" ");
     return stat === "" ? [] : [{ pid: Number(stat.slice(0, stat.indexOf(" "))), ppid: Number(fields[1]), pgid: Number(fields[2]), start: Number(fields[19]) }];

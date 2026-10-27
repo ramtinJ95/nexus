@@ -59,8 +59,8 @@ const running: PylonObservation = {
 test("a pylon is located at its node's probe once the node reports it running", async (t) => {
   const registry = seeded(t);
   observe(registry, { pylonId, phase: "booting" });
-  const located = registryLocator(registry).awaitRunning(pylonId, Date.now() + 10_000);
-  setTimeout(() => observe(registry, running), 100);
+  const located = registryLocator(registry).awaitRunning(pylonId, Date.now() + 60_000);
+  observe(registry, running);
   assert.deepEqual(await located, { node, host: "infra-testbench.tail.ts.net", port: probePort, nodeId: "nTESTBENCH" });
 });
 

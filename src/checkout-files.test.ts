@@ -192,9 +192,8 @@ test("a reply the pylon cuts off, one that is not the helper's, or one too long 
 });
 
 test("a read the pylon does not finish within its deadline is refused as slow", async () => {
-  const started = Date.now();
+  // A read that waited for the pipe instead would get its empty reply, which is refused as not JSON.
   await assert.rejects(checkoutReader(printing("sleep 2"), "/repo", 100).changes("head"), refused("slow", /did not finish reading its checkout within 0.1 s/));
-  assert.ok(Date.now() - started < 1500);
 });
 
 test("a read abandoned at its deadline keeps nothing it reads after, and its pipe counts as open until it ends", async () => {
@@ -205,8 +204,8 @@ test("a read abandoned at its deadline keeps nothing it reads after, and its pip
   const kinds = (await Promise.all(opened)).map((err) => err instanceof CheckoutRefused ? err.kind : String(err));
   assert.ok(kinds.includes("slow") && kinds.every((kind) => kind === "slow" || kind === "busy"), kinds.join(", "));
   await assert.rejects(checkoutReader(printing("printf '{}'"), "/repo").changes("head"), refused("busy", /checkout reads are still open/));
-  // Each pipe drains and closes in the background.
-  for (let tries = 0; tries < 100; tries++) {
+  // Each pipe drains and closes in the background. The deadline only ends a hang: a loaded suite can take seconds over what takes milliseconds alone.
+  for (const deadline = Date.now() + 60_000; Date.now() < deadline;) {
     const done = await checkoutReader(printing(`printf '{"path": "", "entries": [], "truncated": false}'`), "/repo").list("").then(() => true, (err: Error) => {
       if (!(err instanceof CheckoutRefused && err.kind === "busy")) throw err;
       return false;
@@ -317,10 +316,41 @@ const helperPath = fileURLToPath(new URL("./checkout-files.py", import.meta.url)
 async function slowFilter(c: Awaited<ReturnType<typeof checkout>>) {
   const slow = join(c.scratch, "slow");
   const filtered = join(c.scratch, "filtered");
-  await c.git("config", "filter.slow.clean", `while [ -e '${slow}' ]; do sleep 0.1; done; touch '${filtered}'; cat`);
+  const pid = join(c.scratch, "filter.pid");
+  await c.git("config", "filter.slow.clean", `echo $$ > '${pid}'; while [ -e '${slow}' ]; do sleep 0.1; done; touch '${filtered}'; cat`);
   await writeFile(join(c.dir, ".gitattributes"), "*.slow filter=slow\n");
   await writeFile(join(c.dir, "big.slow"), "slow\n");
-  return { slow, filtered };
+  return { slow, filtered, pid };
+}
+
+/** Waits until the process is gone, which a live filter only is once it wrote its file. The deadline only ends a hang. */
+async function gone(pidFile: string) {
+  const pid = Number(await readFile(pidFile, "utf8"));
+  const alive = () => { try { process.kill(pid, 0); return true; } catch { return false; } };
+  for (const deadline = Date.now() + 60_000; alive();) {
+    if (Date.now() > deadline) assert.fail(`process ${pid} is still running`);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+}
+
+/**
+ * Runs a snapshot whose deadline passes only once `reached` holds, so a slow machine cannot reach the deadline before
+ * the stage the test is about. The deadline only ends a hang.
+ */
+async function snapshotPastDeadline(t: TestContext, dir: string, turn: string, deadlineMs: number, reached: () => Promise<boolean>): Promise<boolean> {
+  const realTimeout = setTimeout;
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  try {
+    const snapshot = snapshotTurn(dir, turn, deadlineMs, helperPath);
+    for (const deadline = Date.now() + 60_000; !await reached();) {
+      assert.ok(Date.now() < deadline, "the snapshot reached the stage the test needs");
+      await new Promise((resolve) => realTimeout(resolve, 20));
+    }
+    t.mock.timers.tick(deadlineMs);
+    return await snapshot;
+  } finally {
+    t.mock.timers.reset();
+  }
 }
 
 test("the Claude hook's snapshot is the base of its turn", async (t) => {
@@ -335,7 +365,7 @@ test("the Claude hook's snapshot is the base of its turn", async (t) => {
 
 test("a snapshot past its deadline is killed with the git and filters it runs, leaves no temporary index and none under its ID", async (t) => {
   const c = await checkout(t);
-  const { slow, filtered } = await slowFilter(c);
+  const { slow, filtered, pid } = await slowFilter(c);
   await writeFile(slow, "");
   const scratch = join(c.scratch, "tmp");
   await mkdir(scratch);
@@ -343,12 +373,11 @@ test("a snapshot past its deadline is killed with the git and filters it runs, l
   process.env.TMPDIR = scratch;
   t.after(() => { if (tmp === undefined) delete process.env.TMPDIR; else process.env.TMPDIR = tmp; });
   const turn = claudeTurn("s1", 2000);
-  const started = Date.now();
-  assert.equal(await snapshotTurn(c.dir, turn, 500, helperPath), false);
-  assert.ok(Date.now() - started < 1_500, "the snapshot gives up at its deadline");
+  const filtering = async () => (await readFile(pid, "utf8").catch(() => "")) !== "";
+  assert.equal(await snapshotPastDeadline(t, c.dir, turn, 500, filtering), false);
   assert.deepEqual(await readdir(scratch), [], "the temporary index is gone");
   await rm(slow);
-  await new Promise((resolve) => setTimeout(resolve, 500));
+  await gone(pid);
   await assert.rejects(readFile(filtered), { code: "ENOENT" }, "the filter was killed with the snapshot");
   await assert.rejects(checkoutReader(c.open, c.dir, undefined, turn).changes("turn"), refused("no-base", /no latest-turn snapshot/));
 });
@@ -373,10 +402,12 @@ test("a deadline that passes during the ref update lets it finish, so no ref loc
   const c = await checkout(t);
   const hooks = join(c.scratch, "hooks");
   await mkdir(hooks);
-  await writeFile(join(hooks, "reference-transaction"), "#!/bin/sh\n[ \"$1\" = prepared ] && sleep 1\nexit 0\n", { mode: 0o755 });
+  const updating = join(c.scratch, "updating");
+  await writeFile(join(hooks, "reference-transaction"), `#!/bin/sh\n[ "$1" = prepared ] && touch '${updating}' && sleep 1\nexit 0\n`, { mode: 0o755 });
   await c.git("config", "core.hooksPath", hooks);
   const turn = claudeTurn("s1", 1000);
-  assert.equal(await snapshotTurn(c.dir, turn, 300, helperPath), true);
+  const inUpdate = async () => await readFile(updating).then(() => true, () => false);
+  assert.equal(await snapshotPastDeadline(t, c.dir, turn, 300, inUpdate), true);
   for (const lock of ["refs/nexus/turn.lock", "packed-refs.lock"]) await assert.rejects(readFile(join(c.dir, ".git", lock)), { code: "ENOENT" }, `${lock} is gone`);
   assert.equal((await c.git("log", "-1", "--format=%s", "refs/nexus/turn")).trim(), `Nexus turn ${turn}`);
   await c.git("config", "--unset", "core.hooksPath");
@@ -402,7 +433,9 @@ test("a snapshot whose turn a later attempt claimed is refused even to a read ex
   assert.equal(await snapshotTurn(c.dir, older, 30_000, helperPath), true);
   await checkoutReader(c.open, c.dir, undefined, older).changes("turn");
   await writeFile(slow, "");
-  assert.equal(await snapshotTurn(c.dir, claudeTurn("b", 2000), 300, helperPath), false);
+  const later = claudeTurn("b", 2000);
+  const claimed = async () => (await readFile(join(c.dir, ".git/nexus-turn"), "utf8").catch(() => "")) === later;
+  assert.equal(await snapshotPastDeadline(t, c.dir, later, 300, claimed), false);
   assert.equal((await c.git("log", "-1", "--format=%s", "refs/nexus/turn")).trim(), `Nexus turn ${older}`);
   await assert.rejects(checkoutReader(c.open, c.dir, undefined, older).changes("turn"), refused("no-base", /no latest-turn snapshot/));
   await assert.rejects(checkoutReader(c.open, c.dir, undefined, older).diff("turn", []), refused("no-base", /no latest-turn snapshot/));
