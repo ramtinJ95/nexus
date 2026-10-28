@@ -997,7 +997,7 @@ A landed item stays `landed` once the review loop archives its builder and revie
 
 ### Approving, cancelling and listing
 
-`nexus project edit <id> --pipeline approve` makes each item wait for the person. `nexus item approve <item>` records who approved it and when, runs a pass, and answers the `PipelineItem`, whose text is `Approved <id>. It is <phase>: <why>.` Only a person may approve one, as only a person answers a question, so the control plane and the nodes are refused with exit code 3. A project that starts its items on their own, or has the pipeline off, refuses an approval with 409.
+`nexus project edit <id> --pipeline approve` makes each item wait for the person. `nexus item approve <item>` records who approved it and when, runs a pass, and answers the `PipelineItem`, whose text is `Approved <id>. It is <phase>: <why>.` Only a person adds, approves or cancels an item, as only a person answers a question, so the control plane, the nodes and anything in a pylon are refused with exit code 3. No agent adds items: a thread never starts, messages or drives another thread, and only the control plane's passes create threads. A project that starts its items on their own, or has the pipeline off, refuses an approval with 409.
 
 `nexus item cancel <item>` cancels an item that has no thread yet, which then never becomes one, and an item after it is held. An item that is a thread already answers 409 and names it: `nexus archive <thread>` cancels a queued one, as for any queued thread. There is no undo, so add the item again.
 
@@ -1030,7 +1030,7 @@ interface ItemPhase {
 
 | Exit | When |
 |---|---|
-| 3 | `item approve` from a caller that is not a person (403) |
+| 3 | `item add`, `item approve` or `item cancel` from a caller that is not a person (403) |
 | 4 | No such item, or an item in `--after` does not exist (404) |
 | 5 | The project's pipeline is off, the control plane has no GitHub token, `item cancel` or `item approve` of an item that is a thread or was cancelled, or `item approve` in a project that needs no approval (409) |
 | 64 | No brief, `--message` with `--claude`, `--model` without `--claude`, or `--after` naming an item of another project (400) |

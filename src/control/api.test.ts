@@ -3111,7 +3111,7 @@ test("a deployer's land names the holds it waives at the commit it confirmed, an
   assert.deepEqual(landed, [[s.thread.id, laptop, head, [held]], [s.thread.id, laptop, head, undefined]]);
 });
 
-test("an item is added to a project the pipeline runs for, becomes a queued thread behind the items it is after, and only a person approves one", async (t) => {
+test("an item is added to a project the pipeline runs for, becomes a queued thread behind the items it is after, and only a person adds, approves or cancels one", async (t) => {
   const s = await setup(t, { pipeline: true, deployment });
   assert.equal((await s.call("POST", "/v1/projects", project)).status, 201);
   assert.equal((await s.call("POST", "/v1/projects", { ...project, id: "other", pipeline: { autoStart: true } })).status, 400, "only an edit turns the pipeline on");
@@ -3138,6 +3138,8 @@ test("an item is added to a project the pipeline runs for, becomes a queued thre
 
   s.callAs("nFIREBAT" as TailnetNodeId);
   assert.deepEqual(await s.call("POST", `/v1/items/${item.id}/approve`, {}), { status: 403, body: { error: "caller may not approve an item: only a person may, never the control plane, infrastructure nodes or pylons" } });
+  assert.equal((await s.call("POST", "/v1/items", { project: "acme", title: "D", message: "Go." })).status, 403, "the control plane, and so a harness thread, adds no item");
+  assert.equal((await s.call("POST", `/v1/items/${b.id}/cancel`, {})).status, 403);
   s.callAs(laptop);
   const approved = await s.call("POST", `/v1/items/${item.id}/approve`, {});
   assert.equal(approved.status, 200, JSON.stringify(approved.body));

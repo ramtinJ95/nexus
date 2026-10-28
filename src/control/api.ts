@@ -335,6 +335,10 @@ export async function startApi(options: ApiOptions): Promise<Api> {
     if (!options.pipeline) throw new HttpError(409, "pipeline items need the control plane's GitHub token (github.tokenFile), which is not configured");
     return options.pipeline;
   }
+  /** Items are the person's plan, so no pylon, harness thread or the control plane itself adds, approves or cancels one. */
+  function personOnly(caller: TailnetNodeId, action: string) {
+    if (!isPerson(registry, options.deployment, caller)) throw new HttpError(403, `caller may not ${action} an item: only a person may, never the control plane, infrastructure nodes or pylons`);
+  }
   function item(id: string) {
     const record = registry.item(id as ItemId);
     if (record === undefined) throw new HttpError(404, `no item ${id}`);
@@ -1019,6 +1023,7 @@ export async function startApi(options: ApiOptions): Promise<Api> {
       return ok(registry.items().filter((i) => project === null || i.project === project).map((i) => itemView(registry, i)));
     }],
     ["POST", /^\/v1\/items$/, async (_, r) => {
+      personOnly(r.caller, "add");
       const { after, message, ...request } = parse(itemSchema, await r.body());
       const pipeline = pipelineOrRefuse();
       const added = pipeline.add(request, message ?? null, after ?? [], r.caller);
@@ -1026,10 +1031,12 @@ export async function startApi(options: ApiOptions): Promise<Api> {
       return created(itemView(registry, added));
     }],
     ["GET", /^\/v1\/items\/([^/]+)$/, ([, id]) => ok(item(id!))],
-    ["POST", /^\/v1\/items\/([^/]+)\/cancel$/, ([, id], r) => ok(itemView(registry, pipelineOrRefuse().cancel(id!, r.caller)))],
-    // An approval lets a brief start a builder, which the person decides, as they answer a question.
+    ["POST", /^\/v1\/items\/([^/]+)\/cancel$/, ([, id], r) => {
+      personOnly(r.caller, "cancel");
+      return ok(itemView(registry, pipelineOrRefuse().cancel(id!, r.caller)));
+    }],
     ["POST", /^\/v1\/items\/([^/]+)\/approve$/, async ([, id], r) => {
-      if (!isPerson(registry, options.deployment, r.caller)) throw new HttpError(403, "caller may not approve an item: only a person may, never the control plane, infrastructure nodes or pylons");
+      personOnly(r.caller, "approve");
       const pipeline = pipelineOrRefuse();
       const approved = pipeline.approve(id!, r.caller);
       await pipeline.poll();

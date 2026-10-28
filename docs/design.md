@@ -330,6 +330,8 @@ A pass every 15 seconds, beside the queue's, goes through the items in the order
 
 Nothing about an item's progress is stored. Its phase is read from its thread's records on every view: the queued record and what blocks it, the review's phase, the PR watch's links, the thread's status and its attention. So an item moves as soon as the records it reads do, a reopened pull request moves it back, and the phase the dashboard shows is the phase the CLI prints. An item waits on the person, `held`, when it needs an approval, when its queued thread is blocked, when its review ended for the person or stops at approval, or when its thread failed or needs a decision. Each such item holds only itself.
 
+Items are the person's plan. Only a person adds, approves or cancels one, through the API, the CLI or the dashboard, and no route or tool lets a pylon, a harness thread or the control plane's own caller do so. A thread never starts, messages or drives another thread: each piece of work stays in its own thread, an agent that needs helpers runs them in its own pylon, and only the control plane's passes, the pipeline's, the queue's, the review loop's and the watchers', create threads or act across them.
+
 Which projects the pipeline runs for is `Project.pipeline`, set with `nexus project edit --pipeline off|approve|start` as auto-review is. `start` turns briefs into builders without the person approving each, and `approve` keeps a card's worth of work per item for the person. An off pipeline is stored as null rather than dropped, so the registry migration that turned the pipeline on for project `nexus` never turns it on again.
 
 ## Questions for the person
