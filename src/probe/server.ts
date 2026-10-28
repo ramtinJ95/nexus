@@ -27,7 +27,7 @@ import { listeningFacts } from "../listening.ts";
 import { readBody } from "../request-body.ts";
 import { redact } from "./redact.ts";
 import { hostCapacity, readNodeHealth } from "./host.ts";
-import { gitFacts } from "../git-facts.ts";
+import { gitFacts, gitPollMs } from "../git-facts.ts";
 import { startGateway } from "./gateway.ts";
 import { createPylonApi } from "./pylon-api.ts";
 import { createTailscaleServe, parseServeStatus, readRoutes, type HttpsGet, type TailscaleCli } from "./serve.ts";
@@ -80,7 +80,6 @@ const sum = (pylons: readonly BackendPylon[], resource: keyof NonNullable<Backen
 const sessionReadTimeoutMs = 3_000;
 /** Longer, because a pylon's supervisor checks each service's health to answer. */
 const serviceReadTimeoutMs = 5_000;
-const gitPollMs = 60_000;
 const claudeSendMemoryMs = 60 * 60_000;
 
 /** A probe without a preview gateway. An empty set is already converged. */

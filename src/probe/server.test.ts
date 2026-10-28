@@ -21,6 +21,7 @@ import type { ArtifactId, ArtifactManifest, ImageId, ImageManifest, PortableArti
 import { fakeGuest, herdrError, herdrOk, herdrPane, herdrSnapshot } from "../fake-guest.ts";
 import { outputsDir } from "../outputs.ts";
 import { sessionsFile } from "../sessions.ts";
+import { gitPollMs } from "../git-facts.ts";
 import { checkoutReader } from "../checkout-files.ts";
 import type { HostBridge, HostBridgeAnswer } from "./pylon-api.ts";
 
@@ -1636,6 +1637,35 @@ test("probe git observations derive pushed-branch outputs and bound reads across
   readable = false;
   await snapshot();
   assert.equal(logged.filter((line) => line.includes(" git:")).length, 2, "a recovered read allows a later failure to be logged");
+});
+
+test("a branch pushed just after a git read reaches the snapshots only once that read is gitPollMs old", async (t) => {
+  let now = Date.now();
+  t.mock.method(Date, "now", () => now);
+  const before: GitFacts = { head: "a".repeat(40), branch: "feat/x", dirty: false, branches: [{ name: "feat/x", head: "a".repeat(40), pushedAs: null }] };
+  let facts = before;
+  const guest = fakeGuest((argv, herdr) => {
+    if (argv[0] === "python3" && argv[2]?.includes("for-each-ref")) return { exitCode: 0, output: JSON.stringify(facts) };
+    if (herdr) return herdrOk(herdrSnapshot([], []));
+    if (argv.at(-1) === sessionsFile) return { exitCode: 3, output: "" };
+    if (argv[2]?.includes(outputsDir)) return { exitCode: 0, output: "" };
+    return { exitCode: 1, output: "" };
+  });
+  const { client, fake } = await setup(t, {}, guest);
+  fake.pylons.set(pylonId, { pylonId, vm: "running", checkpoint: null, image, bootedAt: "2027-01-01T00:00:00Z" });
+  const branches = async () => {
+    for await (const event of client.observe(AbortSignal.timeout(5000))) {
+      if (event.type !== "snapshot") continue;
+      return ingest(event, node, new Map([[pylonId, "absent"]]), now).flatMap((w) => w.record === "output" && w.kind === "branch" ? [w.ref] : []);
+    }
+    return assert.fail("missing snapshot");
+  };
+  assert.deepEqual(await branches(), []);
+  facts = { ...before, branches: [{ ...before.branches[0]!, pushedAs: "origin/feat/x" }] };
+  now += gitPollMs - 1;
+  assert.deepEqual(await branches(), [], "a snapshot reuses the read from before the push");
+  now += 1;
+  assert.deepEqual(await branches(), ["origin/feat/x"]);
 });
 
 test("stalled controller RPCs cannot hold healthy pylon facts or pile up behind later snapshots", { timeout: 60_000 }, async (t) => {
