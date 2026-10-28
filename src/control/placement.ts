@@ -18,12 +18,20 @@ export interface Room { cpus: number; memoryGiB: number; diskGiB: number }
 type Need = Pick<BootInputs, "image" | "resources" | "network" | "repo" | "dotfiles">;
 
 export function placeAuto(registry: Registry, need: Need): Placement {
-  const weighed = registry.nodes().map((n) => weigh(registry, n, need));
+  const { best, weighed } = weighNodes(registry, need);
+  if (best === null) throw new HttpError(409, `no node can run this pylon: ${refusals(weighed)}`);
+  return { how: "auto", node: best, weighed };
+}
+
+/** Every node but `except` weighed for the pylon, and the one with the most room left once it boots there, if any can run it. */
+export function weighNodes(registry: Registry, need: Need, except?: NodeName): { best: NodeName | null; weighed: Weighed[] } {
+  const weighed = registry.nodes().filter((n) => n.name !== except).map((n) => weigh(registry, n, need));
   const fits = weighed.flatMap((w) => "left" in w ? [w] : [])
     .sort((a, b) => b.left.memoryGiB - a.left.memoryGiB || b.left.cpus - a.left.cpus || b.left.diskGiB - a.left.diskGiB);
-  if (fits.length === 0) throw new HttpError(409, `no node can run this pylon: ${weighed.flatMap((w) => "refused" in w ? [`${w.node} ${w.refused}`] : []).join("; ")}`);
-  return { how: "auto", node: fits[0]!.node, weighed };
+  return { best: fits[0]?.node ?? null, weighed };
 }
+
+export const refusals = (weighed: readonly Weighed[]) => weighed.flatMap((w) => "refused" in w ? [`${w.node} ${w.refused}`] : []).join("; ");
 
 function weigh(registry: Registry, node: NodeRecord, need: Need): Weighed {
   const refused = (why: string): Weighed => ({ node: node.name, refused: why });
