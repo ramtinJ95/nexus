@@ -91,8 +91,8 @@ function fixture(t: import("node:test").TestContext) {
     registry.ingested(observation, ingest({ type: "snapshot", observation }, node, known, now).filter((w) => w.record === "output"));
   }
 
-  async function add(id: string, options: { claude?: boolean; startedBy?: string; project?: string } = {}): Promise<ThreadId> {
-    const thread: Thread = { id: id as ThreadId, title: id, project: (options.project ?? "reviewed") as ProjectId, pylonId: `pylon-${id}` as PylonId, status: "active", conversationId: options.claude ? null : "1", startedBy: options.startedBy ?? "nLAPTOP", createdAt: 1, seenAt: null, lastReplyAt: null, lastHumanActivityAt: 1, lastAgentActivityAt: 0, agentTurnRunning: false, working: false };
+  async function add(id: string, options: { claude?: boolean; startedBy?: string; project?: string; drive?: boolean } = {}): Promise<ThreadId> {
+    const thread: Thread = { id: id as ThreadId, title: id, project: (options.project ?? "reviewed") as ProjectId, pylonId: `pylon-${id}` as PylonId, status: "active", conversationId: options.claude ? null : "1", startedBy: options.startedBy ?? "nLAPTOP", createdAt: 1, seenAt: null, lastReplyAt: null, lastHumanActivityAt: 1, lastAgentActivityAt: 0, agentTurnRunning: false, working: false, ...options.drive ? { drive: true as const } : {} };
     const { desired: _, ...pylon } = newPylonRecord({ thread: thread.id, pylonId: thread.pylonId, node, desired: "running", boot: { pylonId: thread.pylonId, image: "img-000000000000", resources, network: { allowedHosts: [], secrets: [] }, repo: { kind: "clone", url: `https://github.com/${repo}.git`, checkout: { branch: "main", commit: "main" } }, dotfiles: { repo: `https://github.com/${repo}.git`, ref: "main" } }, firstBoot: { kind: "fresh", preSetup: null }, live: { previews: [], overlay: [] }, liveHash: "hash" as LiveHash });
     if (options.claude) {
       registry.createThread(thread, pylon, "build the cache", "claude-opus-5-5");
@@ -175,6 +175,18 @@ test("a builder whose turn ended without a pull request gets one nudge once its 
   await f.pass();
   assert.equal(f.nudges().length, 1, "a turn is nudged once");
   assert.notEqual(f.registry.attention(id), "decision");
+});
+
+test("a thread with the drive tools is no builder, so its turn that ended without a pull request gets no nudge", async (t) => {
+  const f = fixture(t);
+  const planner = await f.add("th-plan", { drive: true });
+  const builder = await f.add("th-build");
+  f.turn(planner);
+  f.turn(builder);
+  f.tick(gitPollMs);
+  await f.pass();
+  assert.deepEqual(f.nudges().map((n) => n.thread), [builder]);
+  assert.equal(f.registry.nudge(planner), null);
 });
 
 test("a pull request opened before the turn ended, whose branch the probe reports after a minute, gets no nudge", async (t) => {

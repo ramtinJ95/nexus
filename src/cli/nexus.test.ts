@@ -1744,6 +1744,19 @@ test("start --request-id starts one thread and sends its first message once, how
   assert.match(other.stderr, new RegExp(`request ID start:cli started thread ${first.id} with another body`));
 });
 
+test("start --drive gives a Nexus agent thread the drive tools, and show names its children and a child's parent", async (t) => {
+  const s = await setup(t);
+  const planner: Thread = await s.json(["start", "--project", "acme", "--title", "Plan", "--drive"]);
+  assert.equal(planner.drive, true);
+  assert.deepEqual(s.fake.calls.find((c) => c[0] === "start")?.[1], { threadId: planner.id, pylonId: planner.pylonId, drive: true }, "its conversation selects the drive tools");
+  const child = await s.startThread({ project: "acme", title: "Build", parent: planner.id }, laptop);
+  assert.match((await s.nexus(["show", planner.id])).stdout, new RegExp(`^drive tools: on, children: ${child.id} \\(active\\)$`, "m"));
+  assert.match((await s.nexus(["show", child.id])).stdout, new RegExp(`^started by thread ${planner.id}, with nexus_start$`, "m"));
+  const claude = await s.nexus(["start", "--project", "acme", "--claude", "Plan", "--drive"]);
+  assert.equal(claude.code, 64);
+  assert.match(claude.stderr, /--drive is for a Nexus agent thread, not a Claude worker/);
+});
+
 test("start --after --request-id answers the queued thread, and the thread once it has started", async (t) => {
   const s = await setup(t, { queue: true });
   const first: Thread = await s.json(["start", "--project", "acme", "--title", "First"]);
