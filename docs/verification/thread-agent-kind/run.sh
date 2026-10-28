@@ -11,7 +11,7 @@ repo=$(git -C "$here" rev-parse --show-toplevel)
 main=${1:-origin/main}
 branch=${2:-HEAD}
 pins=$(git -C "$repo" log --format=%h -1 --grep '^test(control): pin what each agent kind answers' "$branch")
-tests=(src/control/api.test.ts src/control/dashboard.test.ts src/control/review.test.ts src/control/usage-limit.test.ts src/control/pr-watch.test.ts src/control/claude-conversation.test.ts src/cli/nexus.test.ts)
+tests=(src/control/api.test.ts src/control/dashboard.test.ts src/control/review.test.ts src/control/usage-limit.test.ts src/control/pr-watch.test.ts src/control/claude-conversation.test.ts src/control/usage.test.ts src/cli/nexus.test.ts)
 work=$(mktemp -d)
 trees=()
 trap 'for t in "${trees[@]}"; do git -C "$repo" worktree remove --force "$t" 2>/dev/null; done; rm -rf "$work"' EXIT
