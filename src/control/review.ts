@@ -186,6 +186,8 @@ export interface ReviewDeps {
   release: { self: string | undefined; repo: string };
   /** Whether `caller` may land, which takes the right to deploy. A landing asks again before every merge. */
   mayLand(caller: string): boolean;
+  /** Tells the planner a thread's status changed, so an archived thread's pylon pauses at once. */
+  wake(t: Thread): void;
   log(message: string): void;
   now?: () => number;
 }
@@ -358,6 +360,18 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
   /** The rounds ran out without an approval the checks passed, so the PR gets the label that asks for the person. */
   const ranOut = (r: Review, ...reasons: string[]): Review => ({ ...toPerson(r), phase: { kind: "needs-person", reasons, label: { state: "adding" } } });
   const checking = (): Phase => ({ kind: "checking", startedAt: now(), thread: null });
+  /**
+   * A landed PR leaves its builder and reviewer nothing to do, so the step that lands it archives them. A thread in a
+   * turn, such as one the person is talking to, stays open.
+   */
+  const landed = (r: Review, commit: string): Review => {
+    for (const t of [registry.thread(r.builder), registry.thread(r.reviewer)]) {
+      if (t === undefined || t.working || t.status === "archived" || t.status === "deleted") continue;
+      registry.setThreadStatus(t.id, "archived");
+      deps.wake(t);
+    }
+    return { ...r, merged: commit, phase: { kind: "landed", commit } };
+  };
   /** A reminder keeps the awaited token. Anything else is a new request, with a new token and no reminders yet. */
   const send = (r: Review, to: "builder" | "reviewer", text: (token: string) => string, phase: Phase, nudges = 0): Review => {
     const expect = nudges === 0 ? mint(r.id) : r.expect;
@@ -501,7 +515,7 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
         }
         commit = merged.commit;
       }
-      if (!deploys(r)) return { ...r, merged: commit, phase: { kind: "landed", commit } };
+      if (!deploys(r)) return landed(r, commit);
       return { ...r, merged: commit, phase: { kind: "deploying", commit, previous: registry.desiredRelease()?.commit ?? null, requested: false, deadline: now() + deployMs } };
     },
     async deploying(r, phase) {
@@ -511,7 +525,7 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
       }
       const view = releaseView(registry, release.self, now());
       const outcome = releaseOutcome(view, phase.commit, now());
-      if (outcome === "healthy") return { ...r, phase: { kind: "landed", commit: phase.commit } };
+      if (outcome === "healthy") return landed(r, phase.commit);
       if (outcome === "superseded") return toPerson(r, `Another release, ${view.desired?.commit ?? "none"}, replaced ${phase.commit} before every service reported healthy.`);
       if (outcome === "pending" && now() < phase.deadline) return r;
       const why = outcome === "failed"
@@ -568,7 +582,7 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
     }
     for (const [who, t] of [["builder", builder], ["reviewer", reviewer]] as const) {
       if (landing || t?.status === "active") continue;
-      // Only the person archives or deletes a builder or a reviewer.
+      // The loop archives a builder and a reviewer only as their review lands, so here the person did.
       if (t?.status === "archived" || t?.status === "deleted") return end(r, { kind: "cancelled", who, status: t.status });
       return toPerson(r, `The ${who} thread ${t?.id ?? ""} is ${t?.status ?? "gone"}, so the review stopped.`);
     }

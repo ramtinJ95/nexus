@@ -190,6 +190,7 @@ export async function startControlPlane(config: ControlPlaneConfig, models: Mode
     checks: checkRuns({ registry, probes: probeMap, startThread, wake: wakeThread }),
     release: { self: config.self.tailnetNodeId, repo: githubRepo(repository)! },
     mayLand: (caller) => canDeploy(registry, deployment, caller as TailnetNodeId),
+    wake: wakeThread,
     log: (message) => console.error(message),
   });
   const watch = prWatcher({ registry, github, inbox, linked: reviews?.auto });
