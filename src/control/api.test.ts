@@ -225,6 +225,26 @@ test("callers off the allowlist, or unknown to tailscaled, are refused", async (
   assert.deepEqual(await s.call("GET", "/v1/projects"), { status: 200, body: [] });
 });
 
+test("any tailnet node may ask who it is and what it may do, under the API's names only", async (t) => {
+  const s = await setup(t, { deployment });
+  const asks: [string, string][] = [[laptop, "a deployer"], [phone, "a person"], ["nFIREBAT", "the control node, though listed as a deployer"], ["nSTRANGER", "a stranger"]];
+  const answers = [];
+  for (const [id] of asks) {
+    s.callAs(id as TailnetNodeId);
+    answers.push((await s.call("GET", "/v1/whoami")).body);
+  }
+  assert.deepEqual(answers, [
+    { node: laptop, allowed: true, person: true, deployer: true },
+    { node: phone, allowed: true, person: true, deployer: false },
+    { node: "nFIREBAT", allowed: true, person: false, deployer: false },
+    { node: "nSTRANGER", allowed: false, person: false, deployer: false },
+  ], asks.map(([, who]) => who).join(", "));
+  assert.deepEqual(await s.call("GET", "/v1/whoami", undefined, { host: "evil.example" }), { status: 403, body: { error: "the API does not answer to host evil.example" } });
+  assert.deepEqual(await s.call("GET", "/v1/projects"), { status: 403, body: { error: "caller is not a tailnet node this control plane allows" } }, "it opens no other route to a stranger");
+  s.callAs(null);
+  assert.deepEqual(await s.call("GET", "/v1/whoami"), { status: 403, body: { error: "caller is not a tailnet node" } });
+});
+
 test("a web page on an allowed machine cannot change state", async (t) => {
   const s = await setup(t);
   // A cross-origin form or fetch without a preflight can only send a simple content type.
