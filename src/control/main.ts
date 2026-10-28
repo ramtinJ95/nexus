@@ -27,6 +27,7 @@ import { checkRuns } from "./gate.ts";
 import { repository } from "../deploy/install.ts";
 import { prWatcher } from "./pr-watch.ts";
 import { threadQueue } from "./queue.ts";
+import { builderNudger } from "./nudge.ts";
 import { agentInbox } from "./inbox.ts";
 import { usageLimitResumer } from "./usage-limit.ts";
 import { usageCounter } from "./usage-counter.ts";
@@ -201,6 +202,9 @@ export async function startControlPlane(config: ControlPlaneConfig, models: Mode
   });
   const queueTimer = setInterval(() => { void queue?.poll(); }, 15_000);
   void queue?.poll();
+  const nudges = github === null ? null : builderNudger({ registry, github, inbox, harness, log: (message) => console.error(message) });
+  const nudgeTimer = setInterval(() => { void nudges?.poll(); }, 15_000);
+  void nudges?.poll();
   const api = await startApi({
     ...(config.https ? { https: { port: 7443, certificate: () => localApiCertificate(config.https!.hostname, tailscaled) } } : {}),
     prWatchEnabled: token !== null,
@@ -227,6 +231,7 @@ export async function startControlPlane(config: ControlPlaneConfig, models: Mode
       clearInterval(watchTimer);
       clearInterval(reviewTimer);
       clearInterval(queueTimer);
+      clearInterval(nudgeTimer);
       clearInterval(resumeTimer);
       clearInterval(handoffTimer);
       await watch.close();
@@ -234,6 +239,7 @@ export async function startControlPlane(config: ControlPlaneConfig, models: Mode
       await resumer?.close();
       await reviews?.close();
       await queue?.close();
+      await nudges?.close();
       await api.close();
       await backfill.close();
       await usage.close();
