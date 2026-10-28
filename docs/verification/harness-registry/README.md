@@ -17,8 +17,9 @@ directory's scripts in and runs them there. Each ref's imports then resolve to i
 and `diff.txt`. A capture that throws on a ref leaves its error at the end of that ref's file, so `diff.txt` shows the
 failure. `run.sh` then runs the pin tests at the pins commit, found by `git log --grep '^test(sessions): pin each
 harness'`, into `tests-pins.txt`, and on the branch into `tests-branch.txt`. The pins commit is main's code with only
-the pin tests added. The pin tests are `src/sessions.test.ts`, `src/protocol.test.ts`, `src/reconcile.test.ts` and
-`src/cli/nexus.test.ts`. Any later `test(` commit is applied to the pins commit before its tests run. The worktrees are
+the pin tests added. The pin tests are in `src/sessions.test.ts`, `src/protocol.test.ts`, `src/reconcile.test.ts`,
+`src/control/dashboard.test.ts` and `src/cli/nexus.test.ts`, and those files run whole. Any later `test(` or `test:`
+commit is applied to the pins commit before its tests run. The worktrees are
 removed on exit. `run.sh` checks out commits, so it does not see uncommitted changes.
 
 The scripts import only the runtime exports that exist on both sides. They leave out `sessionHarnessSchema`,
@@ -73,11 +74,32 @@ hash. The API capture freezes `Date.now`. Two runs of one commit print the same 
 
 ## What the captures show
 
-<!-- Filled in after the final run of run.sh origin/main HEAD. -->
+`main/` is origin/main at 2795762 and `branch/` is the branch head. Both ran in this thread's pylon on 2026-10-28, on
+Node 24.22.1. The repository asks for Node 26, which the pylon cannot run.
+
+`diff.txt` holds 2 changed lines. They are one guest exec in `sessions.txt`, and it is the one deliberate difference:
+
+| case | main | branch |
+|---|---|---|
+| `openSession` for pi with a prompt | `herdr agent start ... --kind pi ... -- work`, the prompt as a positional argument | `herdr agent start ... --kind pi ...`, the prompt left out |
+
+No caller can send pi a prompt. The probe's `parsePylonCommand` refuses `prompt` on a pi `open-session` with `only a
+Claude Code session takes it` on both sides, as `protocol.txt` shows. A relaunch passes no prompt, and `sendToClaude`
+opens only Claude Code. So the branch deletes the line that added the prompt.
+
+Every other line matches, byte for byte. That covers the 176 lines of `protocol.txt`, including every refusal message
+and `ingest`'s activity for `codex` and the three harnesses in every status. It covers the other 1755 lines of
+`sessions.txt`: every launch argv, every `sessions.json` written, every relaunch outcome and log line, and the paused
+sessions a stopped VM reports. It also covers the 531 lines of `api.txt`: every API status and reply, the dashboard's
+sessions section as text and HTML, and the CLI's help text, output and exit codes.
 
 ## Pin tests
 
-<!-- tests-pins.txt and tests-branch.txt: counts after the final run. -->
+`tests-pins.txt` is the pins commit, 0a46a6e, with the later test-only commit 2bf5e2e applied, so it is main's code
+with every pin. `tests-branch.txt` is the branch head. Both pass 305 of 305, and they list the same tests.
+
+The full suite (`npm run typecheck` and `npm test`) also passes on both. At 2bf5e2e, which is main's code with every
+pin, it passes 1362 of 1362, and it passes 1362 of 1362 on the branch.
 
 ## Not verified
 

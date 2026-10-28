@@ -1,0 +1,11 @@
+--- main/sessions.txt
++++ branch/sessions.txt
+@@ -315,7 +315,7 @@
+ ## pi: a prompt and model, which the protocol refuses before a probe sees them
+ exec ["herdr","--session","nexus","workspace","list"] cwd=/home/user timeoutMs=10000
+ exec ["herdr","--session","nexus","workspace","create","--cwd","/home/user","--label","t","--no-focus"] cwd=/home/user timeoutMs=10000
+-exec ["herdr","--session","nexus","agent","start","<agent-1>","--kind","pi","--pane","w20:p1","--timeout","30000","--","work"] cwd=/home/user timeoutMs=40000
++exec ["herdr","--session","nexus","agent","start","<agent-1>","--kind","pi","--pane","w20:p1","--timeout","30000"] cwd=/home/user timeoutMs=40000
+ returns "w20:p1"
+ 
+ # recordSessions
