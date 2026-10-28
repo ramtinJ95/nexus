@@ -159,7 +159,6 @@ function table(rows: readonly (readonly string[])[]): string {
 
 const utc = (at: number) => `${new Date(at).toISOString().slice(0, 16).replace("T", " ")} UTC`;
 
-/** One line, and the threads a run that ended skipped, with why. */
 function backfillText(b: UsageBackfill): string {
   if (b.state === "never") return "Backfill: not run. A deployer runs `nexus usage backfill` to read archived threads' pylons.";
   const threads = `${b.read} of ${b.of} thread${b.of === 1 ? "" : "s"} read`;
@@ -173,7 +172,6 @@ function backfillText(b: UsageBackfill): string {
   return `${line}\nSkipped:\n${table(b.skipped.map((t) => [t.thread, t.title, t.reason ?? ""]))}`;
 }
 
-/** The threads a start would read, each with why a run before skipped it on the line after. */
 function backfillPlanText(plan: readonly BackfillPlanRow[]): string {
   if (plan.length === 0) return "No archived thread is left to read.";
   const lines = table(plan.map((r) => [r.thread, r.project, r.node, r.title])).split("\n");
@@ -182,7 +180,9 @@ function backfillPlanText(plan: readonly BackfillPlanRow[]): string {
 }
 
 /** A control plane older than 0.33.0 reports no backfill. */
-function usageText(r: UsageReport): string {
+type ReportedUsage = Omit<UsageReport, "backfill"> & Partial<Pick<UsageReport, "backfill">>;
+
+function usageText(r: ReportedUsage): string {
   const rows = (keyHead: string, of: readonly (UsageTotals & { key: string })[]) =>
     table([[keyHead, ...tokenColumns.map((col) => col.label), "Calls"], ...of.map((row) => [row.key, ...tokenColumns.map((col) => tokenCount(row[col.field])), String(row.calls)])]);
   const head = `Usage of ${r.project === null ? "all projects" : `project ${r.project}`} ${r.since === null ? "for all time" : `since ${utc(r.since)}`}. Counting started ${utc(r.countingSince)}.${r.backfill === undefined ? "" : `\n${backfillText(r.backfill)}`}`;
@@ -1221,7 +1221,7 @@ const commands: Readonly<Record<string, Command>> = {
     async run(api, _, v) {
       const query = new URLSearchParams({ since: str(v, "since") ?? "7d" });
       for (const key of ["project", "by"]) if (str(v, key) !== undefined) query.set(key, str(v, key)!);
-      const report = await api("GET", `/v1/usage?${query}`) as UsageReport;
+      const report = await api("GET", `/v1/usage?${query}`) as ReportedUsage;
       return { json: report, text: usageText(report) };
     },
   },

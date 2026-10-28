@@ -52,7 +52,6 @@ function fakeBackend(guest: Guest | null = null) {
   /** Each secret update the backend was asked for, and the pylons it then fails to reach. */
   const secretUpdates: [string, string][] = [];
   const unreachable: PylonId[] = [];
-  /** What each ensureRunning was asked of the sessions. */
   const relaunches: boolean[] = [];
   let gate: PromiseWithResolvers<void> | null = null;
   const held = (signal: AbortSignal) => gate === null ? Promise.resolve() : new Promise<void>((resolve, reject) => {

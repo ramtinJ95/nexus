@@ -84,7 +84,7 @@ const pausedSessionSchema = z.strictObject({
 /**
  * `relaunch` is set before a boot from the instance's own disk and cleared once its sessions are relaunched.
  * `sessions` is what the last pause recorded, which list() reports while the instance is stopped. Every boot drops it,
- * but one that leaves the relaunch for a later spawn, whose sessions never came back, so its pause keeps the list.
+ * except one that leaves the relaunch for a later spawn: its sessions never came back, so its pause keeps the list.
  */
 const sidecarSchema = z.strictObject({
   checkpoint: checkpointId.nullable(), pausing: checkpointId.optional(), relaunch: z.literal(true).optional(), sessions: z.array(pausedSessionSchema).optional(),

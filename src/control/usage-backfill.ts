@@ -47,14 +47,12 @@ export function usageBackfill(options: {
     }
   }, () => shutdown.signal.aborted);
 
-  /** The online node's last observation of the pylon, "absent" when it lists none, or null while the node is offline. */
   function seen(p: StoredPylon): PylonObservation | "absent" | null {
     const node = registry.node(p.node);
     if (node?.state !== "online" || node.observation === null) return null;
     return node.observation.pylons.find((o) => o.pylonId === p.pylonId) ?? "absent";
   }
 
-  /** Why the thread's pylon is never to be read, or null. */
   function unreadable(t: Thread): string | null {
     if (t.status === "deleted") return "it was deleted, and its pylon with it";
     if (t.status !== "archived") return "it is not archived any more, so live counting reads it";
@@ -66,9 +64,8 @@ export function usageBackfill(options: {
   }
 
   /**
-   * Why the run waits before it wakes the pylon, or null. Its node runs one job at a time for it, and keeps room for the
-   * largest project's pylon once it is up, so a person's next start always fits. Only a stopped or running pylon is
-   * woken, since the planner fails a broken one it is asked to run.
+   * Keeps room on the node for the largest project's pylon once this one is up, so a person's next start always fits.
+   * Only a stopped or running pylon is woken, since the planner fails a broken one it is asked to run.
    */
   function blocked(p: StoredPylon): string | null {
     const node = registry.node(p.node);

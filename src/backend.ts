@@ -22,7 +22,7 @@ import type { HostBridge } from "./probe/pylon-api.ts";
 export interface VmBackend {
   /**
    * Boot from `boot.source` unless already running, then apply `live`. Converges from any partial state. `relaunch`
-   * false, true when omitted, leaves the sessions of a boot from an existing disk for the next spawn to bring back.
+   * false (true when omitted) leaves the sessions of a boot from an existing disk for the next spawn to bring back.
    */
   ensureRunning(boot: BootInputs, live: LiveSpec, signal: AbortSignal, relaunch?: boolean): Promise<void>;
   /**

@@ -53,7 +53,6 @@ function addThread(registry: Registry, node: NodeName, title: string, status: Th
   return registry.thread(id)!;
 }
 
-/** The node online with these pylons and `memory`, on a probe that wakes a pylon without its sessions unless `over` says otherwise. */
 function observe(registry: Registry, node: NodeName, pylons: readonly [PylonId, "stopped" | "running"][], over: Partial<NodeObservation> = {}, memory = { total: 64, committed: 0 }) {
   const capacity = { cpus: 16, committedCpus: 0, memoryGiB: memory.total, committedMemoryGiB: memory.committed, diskFreeGiB: 100, committedDiskGiB: 0 };
   const observed = pylons.map(([pylonId, phase]): PylonObservation => phase === "stopped"
@@ -65,7 +64,6 @@ function observe(registry: Registry, node: NodeName, pylons: readonly [PylonId, 
   }, [{ record: "node", node, state: "online", capacity }]);
 }
 
-/** A counter whose whole reads answer what `answer` gives, 3 calls of 100 tokens each unless a test replaces it. */
 function fakeCounter() {
   const counter = {
     reads: [] as ThreadId[],

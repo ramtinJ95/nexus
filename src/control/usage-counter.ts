@@ -46,7 +46,6 @@ export function usageCounter(options: {
   let closed = false;
   const reads = new Map<string, SingleFlight>();
   const failures = new Map<string, string>();
-  /** The keys a whole read holds, whose own reads start none until it is done. */
   const held = new Set<string>();
 
   /** Runs `read` once at a time per key, and logs a failure once until the key reads again. */
@@ -75,7 +74,6 @@ export function usageCounter(options: {
     if (last !== null && last !== after) registry.recordUsage(id, calls, [{ source: "harness", key: conversation, position: last, before: "" }]);
   });
 
-  /** Reads the thread's pylon on from `cursors` and records what it read, while its node's last observation reports it running. */
   async function readOn(id: ThreadId, cursors: (pylon: PylonId) => ReadonlyMap<string, FileCursor>) {
     const t = registry.thread(id);
     const pylon = t === undefined ? undefined : registry.pylon(t.pylonId);

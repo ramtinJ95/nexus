@@ -795,11 +795,14 @@ export async function startApi(options: ApiOptions): Promise<Api> {
     return options.images;
   }
   const started = (operation: ImageOperation): Reply => ({ status: operation.state === "running" ? 202 : 200, body: operation });
-  /** The backfill wakes archived threads' pylons, so starting or stopping it, `writer`, takes the same right as `nexus deploy`. */
-  function usageBackfill(writer?: TailnetNodeId): UsageBackfillJob {
-    if (writer !== undefined && !canDeploy(registry, options.deployment, writer)) throw new HttpError(403, "caller may not start or stop the usage backfill: only deployers may, never infrastructure nodes or pylons");
+  function usageBackfill(): UsageBackfillJob {
     if (options.usageBackfill === undefined) throw new HttpError(409, "the usage backfill is not configured");
     return options.usageBackfill;
+  }
+  /** The backfill wakes archived threads' pylons, so starting or stopping it takes the same right as `nexus deploy`. */
+  function steerUsageBackfill(caller: TailnetNodeId): UsageBackfillJob {
+    if (!canDeploy(registry, options.deployment, caller)) throw new HttpError(403, "caller may not start or stop the usage backfill: only deployers may, never infrastructure nodes or pylons");
+    return usageBackfill();
   }
 
   /** A file is served as its bytes, everything else as JSON. */
@@ -899,8 +902,8 @@ export async function startApi(options: ApiOptions): Promise<Api> {
     }],
     ["GET", /^\/v1\/usage$/, (_, r) => ok(registry.usageReport(usageFilter(r.query, Date.now())))],
     ["GET", /^\/v1\/usage\/backfill$/, () => ok({ backfill: usageBackfill().status(), plan: usageBackfill().plan() })],
-    ["POST", /^\/v1\/usage\/backfill$/, (_, r) => ok(usageBackfill(r.caller).start())],
-    ["DELETE", /^\/v1\/usage\/backfill$/, (_, r) => ok(usageBackfill(r.caller).stop())],
+    ["POST", /^\/v1\/usage\/backfill$/, (_, r) => ok(steerUsageBackfill(r.caller).start())],
+    ["DELETE", /^\/v1\/usage\/backfill$/, (_, r) => ok(steerUsageBackfill(r.caller).stop())],
     ["GET", /^\/v1\/projects$/, () => ok(registry.projects())],
     ["POST", /^\/v1\/projects$/, async (_, r) => created(createProject(await r.body()))],
     ["GET", /^\/v1\/nodes$/, () => ok(registry.nodes().map((record): NodeSummary => {

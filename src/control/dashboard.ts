@@ -505,7 +505,6 @@ function usageTable(id: string, keyHead: string, rows: readonly (UsageTotals & {
 </table>`;
 }
 
-/** What the usage backfill did and does, and the threads it skipped with why. */
 function backfillNote(c: Context, b: UsageBackfill): Html {
   const run = b.state === "never" ? null : b;
   const thread = (id: ThreadId) => html`<a class="link" href="/threads/${id}">${c.registry.thread(id)?.title ?? id}</a>`;
