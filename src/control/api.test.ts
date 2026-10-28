@@ -3236,6 +3236,32 @@ test("a start that failed under a request ID made nothing, so the ID starts a co
   assert.deepEqual(s.calls.at(-1), ["send", (plain.body as Thread).id, "Look around.", `brief:${(plain.body as Thread).id}`, "followUp"], "a start without a request ID sends its first message too");
 });
 
+test("a start whose first message failed keeps its request ID, and a repeat sends the brief to the same thread once", async (t) => {
+  const s = await withImage(t);
+  const send = s.fake.harness.send;
+  t.after(() => { s.fake.harness.send = send; });
+  const cases = [
+    { requestId: "start:refused", fail: () => Promise.reject(new Error("the harness is unreachable")) },
+    { requestId: "start:unacknowledged", fail: async (...args: Parameters<typeof send>) => { await send(...args); throw new Error("the acknowledgement was lost"); } },
+  ];
+  for (const { requestId, fail } of cases) {
+    const body = { project: "acme", title: requestId, message: `Brief for ${requestId}`, requestId };
+    s.fake.harness.send = fail;
+    const failed = await s.call("POST", "/v1/threads", body);
+    s.fake.harness.send = send;
+    assert.equal(failed.status, 500, JSON.stringify(failed.body));
+    const id = s.registry.startRequest(requestId)?.thread;
+    assert.ok(id !== undefined, `${requestId}: the thread committed, so its request ID is kept`);
+    assert.equal(failed.body.error, `started ${id}, but its first message was not sent: ${requestId === "start:refused" ? "the harness is unreachable" : "the acknowledgement was lost"}. Start it again under request ID ${requestId} to send it`);
+    assert.equal((await s.call("POST", "/v1/threads", { ...body, message: "Another brief" })).status, 409, `${requestId}: another body is refused`);
+    const retried = await s.call("POST", "/v1/threads", body);
+    assert.equal(retried.status, 201, JSON.stringify(retried.body));
+    assert.equal((retried.body as Thread).id, id);
+    assert.deepEqual(s.fake.transcript(id).messages.map((m) => m.content), [`Brief for ${requestId}`], `${requestId}: the brief arrived once`);
+  }
+  assert.equal((await s.call("GET", "/v1/threads")).body.length, 2, "one thread per request ID");
+});
+
 test("a queued start repeated under its request ID answers the same queued thread, then the thread it became", async (t) => {
   const s = await withQueue(t);
   const body = { project: "acme", title: "Then", after: [s.first.id], message: "Fix the next bug.", requestId: "start:queued" };
