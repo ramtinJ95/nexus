@@ -265,6 +265,7 @@ test("--help or -h after a command prints its lines of nexus --help and exits 0 
     + "    [--clear-hosts] [--clear-logins] [--clear-secrets] [--git-name NAME --git-email EMAIL | --clear-git-identity]\n"
     + "    [--auto-review off|review|land]   review each builder's PR on its own, and land it too; land needs a deployer\n");
   assert.equal((await s.nexus(["retry", "-h"])).stdout, "  nexus abort|retry|retry-pylon|wake <thread>\n");
+  assert.equal((await s.nexus(["session", "open", "--help"])).stdout, "  nexus session open <thread> [--harness claude-code|pi|shell] [--title T]\n");
   const show = await s.nexus(["show", "--help"]);
   assert.deepEqual([show.code, show.stdout], [0, "  nexus show <thread>                          a thread with its pylon, sessions, previews and outputs\n"], "help needs no thread");
   assert.deepEqual(s.proxy.connects, [], "no help run sent a request");

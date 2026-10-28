@@ -393,6 +393,13 @@ test("ingest: an unchanged observation writes only the activity it still shows",
   assert.deepEqual(ingest({ type: "pylon", pylon: quiet }, node, knows(quiet), now), []);
 });
 
+test("ingest: Herdr's working status is agent activity for pi and a shell, but never for Claude Code, whose hooks report its own", () => {
+  for (const [harness, agent] of [["claude-code", null], ["pi", now], ["shell", now]] as const) {
+    const observed = runningWith({ sessions: [{ ...working, harness }] });
+    assert.deepEqual(ingest({ type: "pylon", pylon: observed }, node, knows(observed), now), agent === null ? [] : [{ record: "activity", pylonId, human: null, agent }], harness);
+  }
+});
+
 test("ingest: changed and closed sessions, and a dirty tree at a new head", () => {
   const before = runningWith({ sessions: [working, idleShell], git: { head: "h1", branch: "main", dirty: true, branches: [] } });
   const after = runningWith({ sessions: [{ ...working, status: "done" }], git: { head: "h2", branch: "main", dirty: true, branches: [] } });
