@@ -1,0 +1,4 @@
+$ nexus events
+1 2026-10-28T03:17:49.608Z th-818fdd0718e0 pull-request.linked {"repo":"ramtinJ95/nexus","number":1,"url":"https://github.com/ramtinJ95/nexus/pull/1","title":"Greet by name","state":"open"}
+2 2026-10-28T03:17:49.614Z th-93f7b5689564 pull-request.linked {"repo":"ramtinJ95/nexus","number":2,"url":"https://github.com/ramtinJ95/nexus/pull/2","title":"Greet loudly","state":"open"}
+[exit 0]
