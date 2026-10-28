@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { turnGate } from "./drain.ts";
 import { fakeHarness } from "./fake-harness.ts";
 import { pipeline } from "./pipeline.ts";
-import { planBlocks, planning, proposalItem } from "./planning.ts";
+import { planBlocks, planning, planningPrefix, proposalItem } from "./planning.ts";
 import { threadQueue } from "./queue.ts";
 import { openRegistry, type Thread } from "./registry.ts";
 import { agentReplies } from "./review.ts";
@@ -109,6 +109,36 @@ test("a block makes each card once, read twice, by passes that overlap, or again
   second.reply(thread, `Revised:\n${block(token, [a, { ...b, brief: "Build B later." }])}`);
   await second.plans.poll();
   assert.equal(second.registry.questions(thread.id).length, 4, "a revised block is a new block, with a card for each of its items");
+});
+
+test("a message the harness did not take leaves the guide and the answers for the next one, and a resend of its ID gets the same text", async (t) => {
+  const f = await fixture(t);
+  const thread = await f.planner();
+  const failed = f.plans.compose(thread, "msg:1", "Plan it.");
+  assert.ok(failed.startsWith(planningPrefix) && failed.includes(f.registry.planning(thread.id)!.token));
+  const retried = f.plans.compose(thread, "msg:2", "Plan it, please.");
+  assert.ok(retried.includes(f.registry.planning(thread.id)!.token), "the guide goes again, since msg:1 was never taken");
+  f.plans.sent(thread, "msg:2");
+  assert.equal(f.plans.compose(thread, "msg:2", "Plan it, please."), retried);
+  assert.equal(f.plans.compose(thread, "msg:3", "And then?"), "And then?");
+
+  f.reply(thread, block(f.registry.planning(thread.id)!.token, [a]));
+  await f.plans.poll();
+  f.registry.answerQuestion(f.registry.questions(thread.id)[0]!.id, { option: "reject", by: laptop, at: 1 });
+  assert.match(f.plans.compose(thread, "msg:4", "Why?"), /rejected "A" \(key a\)/);
+  assert.match(f.plans.compose(thread, "msg:5", "Why?"), /rejected "A" \(key a\)/, "msg:4 was not taken, so msg:5 tells it");
+  f.plans.sent(thread, "msg:5");
+  assert.equal(f.plans.compose(thread, "msg:6", "Go on."), "Go on.");
+});
+
+test("an item waits on a pipeline item named by its ID even when a later proposal of the block has that ID as its key", async (t) => {
+  const f = await fixture(t);
+  const thread = await f.planner();
+  f.reply(thread, block(f.registry.planning(thread.id)!.token, [{ ...a, after: ["it-0123456789ab"] }, { key: "it-0123456789ab", title: "Later", brief: "Build later.", after: ["a"] }]));
+  await f.plans.poll();
+  const [qa] = f.registry.questions(thread.id);
+  assert.match(qa!.text, /It waits on pipeline item it-0123456789ab\./);
+  assert.throws(() => f.registry.answerQuestion(qa!.id, { option: "accept", by: laptop, at: 1 }, f.plans.answered), (err: { status?: number; message: string }) => err.status === 404 && /no item it-0123456789ab/.test(err.message));
 });
 
 test("an accepted proposal adds the item named from its question once, and one after a rejected proposal cannot be accepted", async (t) => {

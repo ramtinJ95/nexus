@@ -28,8 +28,11 @@ export interface PlanningRecord {
   token: string;
   /** The thread's lastReplyAt when its replies were last read through. */
   read: number;
-  /** Each message sent to the thread, by request ID, with the answered proposals it told of. The first got the guide. */
-  sent: readonly { requestId: string; told: readonly string[] }[];
+  /**
+   * Each message composed for the thread, by request ID: whether it carries the guide, the answered proposals it tells
+   * of, and whether the harness took it. Only a taken message counts as telling, so one that failed is told again.
+   */
+  sent: readonly { requestId: string; guide: boolean; told: readonly string[]; delivered: boolean }[];
 }
 
 export const planFence = "nexus-plan";
@@ -75,7 +78,7 @@ export const proposalItem = (question: string) => `it-${createHash("sha256").upd
 
 export function proposalQuestion(t: Thread, p: Proposal, siblings: readonly Proposal[], askedAt: number): Omit<Question, "answer"> {
   const waits = p.after.map((ref) => {
-    const sibling = siblings.find((s) => s.key === ref);
+    const sibling = siblings.find((s) => s.key === ref && s.index < p.index);
     return sibling === undefined ? `pipeline item ${ref}` : `"${sibling.title}", proposed above`;
   });
   return {
@@ -115,7 +118,7 @@ export function planning(options: { registry: Registry; pipeline: Pick<Pipeline,
     for (const { thread } of registry.planningThreads()) {
       const t = registry.thread(thread);
       const read = registry.planning(thread)!.read;
-      if (t === undefined || t.status !== "active" || t.working || t.lastReplyAt === null || t.lastReplyAt <= read) continue;
+      if (t === undefined || t.status === "archived" || t.status === "deleted" || t.working || t.lastReplyAt === null || t.lastReplyAt <= read) continue;
       const through = t.lastReplyAt;
       try {
         for (const block of planBlocks(await replies(t), registry.planning(thread)!.token)) {
@@ -131,7 +134,7 @@ export function planning(options: { registry: Registry; pipeline: Pick<Pipeline,
 
   /** What an accepted proposal waits on, as item IDs: items as named, and earlier proposals of its block by the items they became. */
   function resolveAfter(q: Question & { proposal: Proposal }): ItemId[] {
-    const siblings = registry.questions(q.thread).filter((s) => s.proposal?.block === q.proposal.block);
+    const siblings = registry.questions(q.thread).filter((s) => s.proposal?.block === q.proposal.block && s.proposal.index < q.proposal.index);
     return q.proposal.after.map((ref) => {
       const sibling = siblings.find((s) => s.proposal!.key === ref);
       if (sibling === undefined) return ref as ItemId;
@@ -148,19 +151,28 @@ export function planning(options: { registry: Registry; pipeline: Pick<Pipeline,
       if (registry.agent(t).kind !== "harness") throw new HttpError(400, "a planning thread is a Nexus agent thread, not a Claude worker");
       if (registry.planning(t.id) === null) registry.savePlanning({ thread: t.id, token: `${t.id}:${randomBytes(6).toString("hex")}`, read: 0, sent: [] });
     },
-    /** The text to send to `t` under `requestId`: the guide before a planning thread's first message, and before each later one the answers it was not told of yet. */
+    /**
+     * The text to send to `t` under `requestId`: the guide before a planning thread's first message the harness took,
+     * and the answers no taken message told of. A resend of the ID gets the same text.
+     */
     compose(t: Thread, requestId: string, text: string): string {
       const record = registry.planning(t.id);
       if (record === null) return text;
-      let i = record.sent.findIndex((s) => s.requestId === requestId);
-      if (i === -1) {
-        const told = new Set(record.sent.flatMap((s) => s.told));
-        const untold = registry.questions(t.id).filter((q) => q.proposal !== undefined && q.answer !== null && !told.has(q.id)).map((q) => q.id);
-        registry.savePlanning({ ...record, sent: [...record.sent, { requestId, told: untold }] });
-        i = record.sent.length;
+      let entry = record.sent.find((s) => s.requestId === requestId);
+      if (entry === undefined) {
+        const delivered = record.sent.filter((s) => s.delivered);
+        const told = new Set(delivered.flatMap((s) => s.told));
+        entry = { requestId, guide: delivered.length === 0, told: registry.questions(t.id).filter((q) => q.proposal !== undefined && q.answer !== null && !told.has(q.id)).map((q) => q.id), delivered: false };
+        registry.savePlanning({ ...record, sent: [...record.sent, entry] });
       }
-      const tells = registry.planning(t.id)!.sent[i]!.told.map((id) => registry.question(id)!);
-      return [...i === 0 ? [guide(record.token)] : [], ...tells.length === 0 ? [] : [answers(tells)], text].join("\n\n");
+      const tells = entry.told.map((id) => registry.question(id)!);
+      return [...entry.guide ? [guide(record.token)] : [], ...tells.length === 0 ? [] : [answers(tells)], text].join("\n\n");
+    },
+    /** The harness took the message composed under `requestId`. */
+    sent(t: Thread, requestId: string): void {
+      const record = registry.planning(t.id);
+      if (record === null) return;
+      registry.savePlanning({ ...record, sent: record.sent.map((s) => s.requestId === requestId ? { ...s, delivered: true } : s) });
     },
     /**
      * Runs in the transaction that records an answer, so an accepted proposal and its item are stored together or not

@@ -704,7 +704,7 @@ export async function startApi(options: ApiOptions): Promise<Api> {
       if (planning) options.planning!.begin(t);
       if (message !== undefined && t.status !== "archived" && t.status !== "deleted") {
         const requestId = `brief:${t.id}`;
-        await harness.send(t.id, options.planning?.compose(t, requestId, message) ?? message, requestId, "followUp").catch((err: Error) => {
+        await harness.send(t.id, options.planning?.compose(t, requestId, message) ?? message, requestId, "followUp").then(() => options.planning?.sent(t, requestId), (err: Error) => {
           const why = `started ${t.id}, but its first message was not sent: ${err.message}. ${key === undefined ? `Send it with POST /v1/threads/${t.id}/messages` : `Start it again under request ID ${key.requestId} to send it`}`;
           throw err instanceof HttpError ? new HttpError(err.status, why) : new Error(why);
         });
@@ -724,6 +724,7 @@ export async function startApi(options: ApiOptions): Promise<Api> {
     wakeThread(t);
     const text = options.planning?.compose(t, message.requestId, message.text) ?? message.text;
     const submission = await harness.send(t.id, text, message.requestId, message.mode);
+    options.planning?.sent(t, message.requestId);
     return { submission: submission.id };
   }
 

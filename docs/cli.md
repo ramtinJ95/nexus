@@ -1148,7 +1148,7 @@ Answer a question on the thread's page, or with `POST /v1/questions/<id>/answer`
 | 409 | The project's pipeline is off, or the control plane has no GitHub token | as `item add` |
 | 404 | A pipeline item it waits on does not exist | `no item <id>` |
 
-The next message you send the planning thread starts with what you answered since the last one: each accepted item with the ID of the item it became, and each rejected one, so the agent can revise. A resend under the same request ID sends the same text.
+The next message you send the planning thread starts with what you answered since the last one: each accepted item with the ID of the item it became, and each rejected one, so the agent can revise. A resend under the same request ID sends the same text. A message the harness did not take tells nothing, so the guide and the answers go with the next one. A planning thread is never [nudged](design.md#nudging-a-builder-that-stopped-short) toward a pull request.
 
 ## Node diagnostics (0.36.0)
 

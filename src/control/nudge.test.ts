@@ -310,15 +310,17 @@ test("after two nudges a third stalled turn goes to the person, until the PR wat
   assert.notEqual(f.registry.attention(id), "decision");
 });
 
-test("a reviewer, a check thread, a builder in a project without auto-review, and a running turn are never nudged", async (t) => {
+test("a reviewer, a check thread, a planning thread, a builder in a project without auto-review, and a running turn are never nudged", async (t) => {
   const f = fixture(t);
   const ids = [
     await f.add("th-reviewer", { startedBy: reviewerCaller }),
     await f.add("th-check", { startedBy: checkCaller }),
+    await f.add("th-planning"),
     await f.add("th-plain", { project: "plain" }),
     await f.add("th-working"),
   ];
   for (const id of ids) f.turn(id);
+  f.registry.savePlanning({ thread: "th-planning" as ThreadId, token: "t", read: 0, sent: [] });
   f.registry.recordActivity("th-working" as ThreadId, { agentTurnRunning: true });
   f.tick(gitPollMs);
   await f.pass();
