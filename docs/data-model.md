@@ -9,7 +9,7 @@ The control plane writes every record. Probes send facts in observations, and th
 | Record | Fields | Comes from |
 |---|---|---|
 | Node | `name`, `tailnetHost`, `tailnetNodeId`, `cpuVendor`, `memoryGiB`, `state` | You add a node. Capacity and `state` come from its probe's observations |
-| Project | `repoUrl`, `defaultBranch`, `defaultNode`, `resources`, `allowedHosts`, `secrets`, `logins`, `preSetup`, optional `gitIdentity` and `autoReview` | You |
+| Project | `repoUrl`, `defaultBranch`, `defaultNode`, `resources`, `allowedHosts`, `secrets`, `logins`, `preSetup`, optional `gitIdentity`, `autoReview` and `pipeline` | You |
 | Image | `id`, `pins`, `builtOn`, `builtAt`, `sha256`, `release` | `nexus image build`: the manifest the build node's probe wrote, and the control plane release whose recipe it built. `release` is null for an image recorded by hand |
 | Template | `id`, `key`, `state`, `node`, `builtAt`, `commit` | Thread starts, which record a build, and the results of its `build-template` job |
 | Thread | `id`, `title`, `project`, `status`, `conversationId`, `pylonId`, `startedBy`, `seenAt`, `lastReplyAt`, `placement`, `setup` | You, and the harness |
@@ -158,6 +158,17 @@ A check thread is a bare thread, with no conversation and no Claude worker, whos
 
 What blocks a queued thread is not stored. Each pass and each view derives every predecessor's `Wait` from its thread, its `reviews` record and its `pr_watches` links.
 
+## Pipeline item records
+
+`pipeline_items` stores one JSON record per pipeline item, keyed by its ID, `it-` and 12 hex digits, in the order they were added. `ItemRecord` in `src/control/pipeline.ts` is the shape, and `PipelineItem` is the API's view.
+
+- `id`, `project`, `title`, `addedBy` (who added it, its thread's `startedBy`) and `addedAt`.
+- `request` is the `StartRequest` its queued thread starts with, as checked when it was added, and `message` a Nexus agent thread's first message, null for a Claude worker, whose brief is `request.claude`.
+- `after` holds the IDs of items of the same project, each added before this one.
+- `approved` is who approved it and when, or null. `cancelled` is who cancelled it before it had a thread, or null. `lastError` is why the pass could not queue it last time, cleared once it is queued.
+
+An item's thread is not stored. It is the thread the start request ID `pipeline:<item>` made in `start_requests`, which the transaction that writes the queued record stores. Its phase is not stored either: each view derives it from that thread's `queued_threads` record, row, `reviews` record, `pr_watches` links and `thread_attention`.
+
 ## Token usage records
 
 `usage_records` holds one row per model call an agent made, keyed by `id`, the call's own ID in the agent's record. `AgentCall` and `UsageRecord` in `src/control/usage.ts` are the shapes.
@@ -227,6 +238,8 @@ On each node, root owns `/opt/nexus/<role>-deploy.json`: `{commit, previous, tar
 ## Project edits and boot identity
 
 `Project.autoReview` is optional `{ land: boolean, enabledBy: string }`, absent when off. `enabledBy` is the caller who turned it on, which only a project edit sets, and a landing it asks for merges and deploys for that caller.
+
+`Project.pipeline` is optional `{ autoStart: boolean }`, absent or null when off. Turning it off stores null, so the migration that turned it on for project `nexus` skips it when a registry rewound past that migration applies it again.
 
 `Project.gitIdentity` is optional `{ name: string, email: string }` (null also means inherit). The optional control.json `gitIdentity` has the same shape without null. Project values override the control default. Only name and email are carried: no credentials. Before a fresh or checkpoint boot, reconciliation resolves the identity into `BootInputs.gitIdentity`. The boot hook applies it globally for `user` after common dotfiles. The saved value renders PYLON.md while the pylon runs. With neither configured, no git config is changed; an earlier identity on disk remains.
 

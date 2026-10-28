@@ -65,7 +65,7 @@ const usage = `nexus ${version}, the Nexus control plane from this Mac
     --request-id makes a repeat of the start answer the thread the first made
   nexus start-queued <thread>                  start a queued thread now, without waiting for the threads it is queued after
   nexus items [--project P] [--all]            pipeline items and the phase each is in; cancelled ones only with --all
-  nexus item add --project P --title T (--message M | --claude PROMPT [--model ID]) [--after ITEM[,ITEM...]]
+  nexus item add --project P [--title T] (--message M | --claude PROMPT [--model ID]) [--after ITEM[,ITEM...]]
                  [--node N|auto] [--branch B] [--commit C] [--cpus n] [--memory GiB] [--disk GiB]
     an item becomes a queued thread once the items it is after are, and starts once their pull requests merge
   nexus item show <item>                       an item with its phase, its thread and its brief
