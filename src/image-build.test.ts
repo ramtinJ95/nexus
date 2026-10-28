@@ -16,7 +16,7 @@ import type { NodeName } from "./protocol.ts";
 
 const pins: ImageRecipe["pins"] = {
   debianDigest: `sha256:${"a".repeat(64)}`,
-  node: "24.22.1",
+  node: "26.12.1",
   nodeSha256: "b".repeat(64),
   claudeCode: "2.1.308",
   pi: "1.4.0",
@@ -157,7 +157,7 @@ test("a version check fails on any other version, naming the expected and actual
   assert.equal(smokeFailure(check("claude version"), 0, "2.1.309 (Claude Code)\n"), 'expected "2.1.308 (Claude Code)\\n", got "2.1.309 (Claude Code)\\n"');
   assert.equal(smokeFailure(check("nexus version"), 0, "nexus 0.7.3\n"), undefined);
   assert.equal(smokeFailure(check("nexus version"), 0, "nexus 0.1.0\n"), 'expected "nexus 0.7.3\\n", got "nexus 0.1.0\\n"');
-  assert.equal(smokeFailure(check("node version"), 0, "v24.22.10\n"), 'expected "v24.22.1\\n", got "v24.22.10\\n"');
+  assert.equal(smokeFailure(check("node version"), 0, "v26.12.10\n"), 'expected "v26.12.1\\n", got "v26.12.10\\n"');
   assert.equal(smokeFailure(check("pi version"), 127, "-bash: pi: command not found\n"), "exited 127");
   assert.equal(smokeFailure(check("nvim version"), 0, "NVIM v0.12.6\n"), undefined);
   assert.equal(smokeFailure(check("nvim version"), 0, "NVIM v0.7.2\n"), 'expected "NVIM v0.12.6\\n", got "NVIM v0.7.2\\n"');
@@ -183,8 +183,8 @@ test("a recipe without an agent setup manifest has no smoke checks", () => {
 test("the smoke boot expects the offline switches in every exec, and the PYLON.md import and link", async () => {
   const checks = smokeChecks({ ...(await loadImageRecipe()), pins });
   const check = (name: string) => checks.find((c) => c.name === name)!;
-  assert.equal(smokeFailure(check("exec environment"), 0, "v24.22.1 /run/gondolin/ca-certificates.crt 1 1\n"), undefined);
-  assert.notEqual(smokeFailure(check("exec environment"), 0, "v24.22.1 /run/gondolin/ca-certificates.crt undefined 1\n"), undefined);
+  assert.equal(smokeFailure(check("exec environment"), 0, "v26.12.1 /run/gondolin/ca-certificates.crt 1 1\n"), undefined);
+  assert.notEqual(smokeFailure(check("exec environment"), 0, "v26.12.1 /run/gondolin/ca-certificates.crt undefined 1\n"), undefined);
   assert.equal(smokeFailure(check("pylon guide"), 0, "@~/.nexus/PYLON.md\n/home/user/.nexus/PYLON.md\n"), undefined);
   assert.notEqual(smokeFailure(check("pylon guide"), 0, "@~/.nexus/PYLON.md\n"), undefined);
 });

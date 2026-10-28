@@ -31,8 +31,8 @@ export type PortableArtifactId = Exclude<ArtifactId, CheckpointId>;
  *   2. apt: bash, coreutils, util-linux, ca-certificates, git, python3, openssh-server (S2: enableSsh
  *      needs a real sshd), openssh-client (git over Gondolin's SSH proxy), sudo, curl. The service is installed but not enabled. Also procps (enableSsh's
  *      script runs ps), e2fsprogs (rootfs growth runs resize2fs), ripgrep and fd (pi cannot download them
- *      through the allowlist), xz-utils for the Node tarball, and tini, which rootfs-init-extra.sh makes PID 1
- *      because sandboxd does not reap the orphans it adopts.
+ *      through the allowlist), xz-utils for the Node tarball, libatomic1, which Node 26's binary links, and tini,
+ *      which rootfs-init-extra.sh makes PID 1 because sandboxd does not reap the orphans it adopts.
  *   3. `user`, UID 1000, passwordless sudo, /home/user/workspace.
  *   4. Node from the checksum-verified official tarball into /usr/local.
  *   5. Claude Code and pi from npm, Herdr from its official installer into /usr/local/bin,
@@ -65,7 +65,7 @@ export interface ImageRecipe {
   files: readonly { path: string; mode: 0o644 | 0o755; content: string }[];
   pins: {
     debianDigest: string;
-    node: string; // "24.22.1"
+    node: string; // "26.12.1"
     nodeSha256: string; // of node-v<node>-linux-x64.tar.xz, from that release's SHASUMS256.txt
     claudeCode: string;
     pi: string;
