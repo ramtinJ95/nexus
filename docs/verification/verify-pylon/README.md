@@ -1,6 +1,6 @@
 # Live checks on a verify pylon
 
-Verified in this task's pylon on 2026-10-28, on branch `feat/verify-pylon` at 42d183d (the review's fixes included; the capture's own commit follows it), with headless Chromium 138. No live control plane, node, image, GitHub repository or other thread was touched, and no VM booted.
+Verified in this task's pylon on 2026-10-28, on branch `feat/verify-pylon` at 42d183d (the review's fixes included; the capture's own commit follows it), with headless Chromium 138. No live control plane, node, image, GitHub repository or other thread was touched, and no VM booted. The branch was then rebased onto main at 66e6073, which adds pipeline items and takes 0.37.0, so the commits have new IDs, the CLI this branch ships is 0.38.0, and `01-version.txt` shows the 0.37.0 the capture ran.
 
 ## How to rerun
 
