@@ -1,0 +1,10 @@
+$ nexus node infra-testbench
+node: infra-testbench, read 2026-10-28T07:32:42.314Z
+load: 1.90 2.12 1.84 (1, 5, 15 min) on 4 CPUs
+memory: 4.2 of 5.8 GiB available
+swap: none
+disk: 17.2 of 19.7 GiB free at /tmp/nexus-diag/n
+temperatures: unknown
+pylon: pylon-th-324203ee84fc, 2 processes, 48.9% CPU, 0.5 GiB resident
+pylon: pylon-th-572f9afc0f52, 2 processes, 0% CPU, 0.2 GiB resident
+exit 0

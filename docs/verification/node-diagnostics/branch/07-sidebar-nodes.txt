@@ -1,0 +1,5 @@
+Nodes
+Desired release: manual
+infra-testbench
+4/5.8 GiB memory
+links: /nodes/infra-testbench
