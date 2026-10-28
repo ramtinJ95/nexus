@@ -369,3 +369,38 @@ test("the brief states each fact it is given, and why one could not be read", ()
   ]) assert.ok(brief.includes(fact), fact);
   assert.ok(brief.endsWith('```nexus-judgment\n{"token": "judgment:9:ab", "answer": "retry" or "retry-elsewhere" or "person", "why": "one or two sentences"}\n```'));
 });
+
+test("a judgment whose project turns its pipeline off before Nexus acts asks the person instead of retrying", async (t) => {
+  let release = () => {};
+  const answer = new Promise<void>((r) => { release = r; });
+  const w = await world(t, { held: () => answer });
+  const id = builder(w.registry, "th-off");
+  fail(w.registry, id, brokenWith("retry"));
+  await w.until(() => w.seen.length === 1);
+  w.registry.editProject("nexus" as ProjectId, (p) => ({ ...p, pipeline: null }));
+  release();
+  await w.until(() => phaseOf(w, id) === "asked");
+
+  const j = only(w.registry, id);
+  assert.deepEqual(j.phase, { kind: "asked", verdict: { answer: "person", why: "the judgment answered retry, which cannot run: the project's pipeline was turned off", by: "control plane" } });
+  assert.notEqual(w.registry.pylon(`pylon-${id}` as PylonId)!.failed, null, "nothing retried the pylon");
+});
+
+test("an answer to a judgment whose failure Nexus can no longer tell from a later one with the same reason does nothing", async (t) => {
+  const w = await world(t);
+  const id = builder(w.registry, "th-pruned");
+  fail(w.registry, id, brokenWith("person"));
+  await w.until(() => phaseOf(w, id) === "asked");
+  const { failure } = only(w.registry, id);
+
+  assert.equal(w.registry.retryPylon(`pylon-${id}` as PylonId), true);
+  fail(w.registry, id, brokenWith("person"));
+  for (let i = 0; i < 10_000; i++) w.registry.appendEvent("attention.changed", null, {});
+  assert.equal(w.registry.failure(id), null, "both failures' events are pruned");
+  w.registry.answerQuestion(`judgment:${failure}`, { option: "Retry", by: laptop, at: Date.now() });
+  await w.until(() => phaseOf(w, id) === "done");
+
+  const j = only(w.registry, id);
+  assert.deepEqual(j.phase.kind === "done" && j.phase.outcome, { kind: "left", why: "the event of this failure is gone from the registry's event log, so Nexus cannot tell it from a later failure" });
+  assert.notEqual(w.registry.pylon(`pylon-${id}` as PylonId)!.failed, null, "the later failure stays for the person");
+});

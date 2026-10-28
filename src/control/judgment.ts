@@ -239,8 +239,11 @@ export function judgmentPass(options: {
   function settled(j: Judgment): string | null {
     const t = registry.thread(j.thread)!;
     if (t.status === "archived" || t.status === "deleted") return `the thread is ${t.status}`;
-    // A retry clears `failed`, and a later failure appends a newer event. The failure's own event may be pruned.
-    if (registry.pylon(t.pylonId)?.failed !== j.failed || (registry.failure(t.id)?.event ?? j.failure) !== j.failure) return "the pylon was retried before Nexus acted";
+    if (registry.pylon(t.pylonId)?.failed == null) return "the pylon was retried before Nexus acted";
+    // A retry clears `failed`, and a later failure, even with the same reason, appends a newer event.
+    const current = registry.failure(t.id)?.event;
+    if (current === undefined) return "the event of this failure is gone from the registry's event log, so Nexus cannot tell it from a later failure";
+    if (current !== j.failure) return "the pylon was retried and failed again before Nexus acted, and that failure gets a judgment of its own";
     return null;
   }
 
@@ -397,17 +400,18 @@ export function judgmentPass(options: {
     // Nothing below awaits, so what it reads is what the save acts on.
     const why = settled(j);
     const pylon = registry.pylon(registry.thread(j.thread)!.pylonId)!;
-    const spent = retriesSpent(j.thread) >= maxRetries ? `Nexus already retried this thread's pylon ${maxRetries} times on its own` : null;
+    const withheld = registry.project(registry.thread(j.thread)!.project)?.pipeline == null ? "the project's pipeline was turned off"
+      : retriesSpent(j.thread) >= maxRetries ? `Nexus already retried this thread's pylon ${maxRetries} times on its own` : null;
     const plan = (() => {
       if (why !== null) return done(j, verdict, why);
       switch (verdict.answer) {
         case "retry": {
-          const refused = retryRefusal(observed(pylon)) ?? spent;
+          const refused = retryRefusal(observed(pylon)) ?? withheld;
           return refused === null ? retried(j, verdict, pylon, "verdict") : ask(j, rule(`the judgment answered retry, which cannot run: ${refused}`), pylon);
         }
         case "retry-elsewhere": {
           const where = move(pylon);
-          const refused = "refused" in where ? where.refused : spent;
+          const refused = "refused" in where ? where.refused : withheld;
           return refused === null && "to" in where ? moved(j, verdict, pylon, where, "verdict") : ask(j, rule(`the judgment answered retry-elsewhere, which cannot run: ${refused}`), pylon);
         }
         case "person": return ask(j, verdict, pylon);
