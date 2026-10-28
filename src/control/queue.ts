@@ -11,7 +11,7 @@ import { defaultClaudeModel } from "../claude-state.ts";
 import type { BootInputs, ProjectId } from "../project.ts";
 import { checkCaller } from "./gate.ts";
 import { HttpError } from "./http-error.ts";
-import type { Registry, Thread, ThreadId } from "./registry.ts";
+import type { Registry, StartKey, Thread, ThreadId } from "./registry.ts";
 import { checkStart, newThreadId, type StartRequest } from "./threads.ts";
 
 /** What the queue keeps of a thread until it starts. `request` is frozen when queued, its resources filled field by field from the project's. A request that names no node starts on the project's default when it starts, as any start does. */
@@ -65,8 +65,8 @@ export interface QueuedThread {
 }
 
 export interface ThreadQueue {
-  /** Validates and records; throws HttpError. Does not start it; the route calls poll() after. */
-  add(request: StartRequest, message: string | null, after: readonly string[], caller: string): QueuedRecord;
+  /** Validates and records, with `key` if given; throws HttpError. Does not start it; the route calls poll() after. */
+  add(request: StartRequest, message: string | null, after: readonly string[], caller: string, key?: StartKey): QueuedRecord;
   /**
    * Records startNow, then starts it now and returns the thread, or throws the start's error. The thread then stays
    * queued with startNow, so a later pass starts it once there is room.
@@ -194,7 +194,7 @@ export function threadQueue(options: {
   }
 
   return {
-    add(request, message, after, caller) {
+    add(request, message, after, caller, key) {
       if (message !== null && request.claude !== undefined) throw new HttpError(400, "message is for a Nexus agent thread. A Claude worker's first prompt is its claude");
       const project = checkStart(registry, request);
       const ids = [...new Set(after)] as ThreadId[];
@@ -213,7 +213,7 @@ export function threadQueue(options: {
         },
         message, status: "queued", startNow: null, lastError: null, startedAt: null, firstMessage: null,
       };
-      registry.saveQueued(record);
+      registry.saveQueued(record, key);
       return record;
     },
     async startNow(id, caller) {

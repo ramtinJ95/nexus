@@ -28,6 +28,7 @@ export function fakeHarness(options: { onParked?: (threadId: string, parked: boo
   const transcripts = new Map<string, FakeTranscript & { id: ConversationId }>();
   const committed = new Map<string, ConversationView>();
   const watchers = new Map<string, Set<(view: ConversationView) => void>>();
+  const submitted = new Set<string>();
   let held: Promise<void> | null = null;
   const transcript = (threadId: string) => {
     const found = transcripts.get(threadId);
@@ -58,8 +59,12 @@ export function fakeHarness(options: { onParked?: (threadId: string, parked: boo
       transcripts.set(thread.threadId, { id, messages: [], docs: {} });
       return id;
     },
+    // As pi-durable does, a repeated request ID answers with the first submission and adds nothing.
     async send(...args) {
       calls.push(["send", ...args]);
+      const key = `${args[0]} ${args[2]}`;
+      if (submitted.has(key)) return { id: 7 } as never;
+      submitted.add(key);
       transcript(args[0]).messages.push({ role: "user", content: args[1], timestamp: Date.now() });
       commit(args[0]);
       return { id: 7 } as never;

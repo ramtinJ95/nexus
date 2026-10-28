@@ -3160,7 +3160,6 @@ test("a queued start is checked as a start is before it is recorded, and needs t
     assert.equal(answer.status, status, JSON.stringify(answer.body));
     assert.match(answer.body.error, error);
   };
-  await refused({ project: "acme", title: "x", message: "hi" }, 400, /message is only for a queued start; send it with POST \/v1\/threads\/<id>\/messages/);
   await refused({ project: "acme", title: "x", after: [] }, 400, /after/);
   await refused({ project: "acme", title: "x", after: Array.from({ length: 33 }, (_, i) => `th-${i}`) }, 400, /after/);
   await refused({ project: "acme", title: "x", after: ["th-nope"] }, 404, /no thread th-nope/);
@@ -3174,4 +3173,83 @@ test("a queued start is checked as a start is before it is recorded, and needs t
   assert.equal(answer.status, 409);
   assert.match(answer.body.error, /queued threads need the control plane's GitHub token \(github.tokenFile\)/);
   assert.deepEqual((await plain.call("GET", "/v1/queued")).body, []);
+});
+
+test("a start repeated under its request ID answers the same thread and delivers its first message once", async (t) => {
+  const s = await withImage(t);
+  const body = { project: "acme", title: "Brief", message: "Fix the checkout bug.", requestId: "start:1" };
+  const first = await s.call("POST", "/v1/threads", body);
+  assert.equal(first.status, 201, JSON.stringify(first.body));
+  const id = (first.body as Thread).id;
+  const again = await s.call("POST", "/v1/threads", body);
+  assert.equal(again.status, 201, JSON.stringify(again.body));
+  assert.equal((again.body as Thread).id, id);
+  assert.deepEqual((await s.call("GET", "/v1/threads")).body.map((r: ThreadRow) => r.id), [id], "one thread");
+  const brief = ["send", id, "Fix the checkout bug.", `brief:${id}`, "followUp"];
+  assert.deepEqual(s.calls, [["start", { threadId: id, pylonId: `pylon-${id}` }], brief, brief], "the repeat sends the brief again under the same request ID");
+  assert.deepEqual(s.fake.transcript(id).messages.map((m) => m.content), ["Fix the checkout bug."], "one first message");
+
+  const other = await s.call("POST", "/v1/threads", { ...body, title: "Another" });
+  assert.equal(other.status, 409);
+  assert.match(other.body.error, new RegExp(`request ID start:1 started thread ${id} with another body`));
+  assert.equal((await s.call("POST", "/v1/threads", { ...body, message: "Something else." })).status, 409, "the first message is part of the body");
+  assert.equal((await s.call("GET", "/v1/threads")).body.length, 1);
+
+  assert.equal((await s.call("POST", `/v1/threads/${id}/archive`)).status, 200);
+  const archived = await s.call("POST", "/v1/threads", body);
+  assert.equal((archived.body as Thread).status, "archived", "a repeat answers the thread as it is now");
+  assert.equal(s.calls.filter((c) => c[0] === "send").length, 2, "an archived thread is not sent its brief again");
+});
+
+test("starts repeated at once under one request ID start one thread, and one with another body is refused", async (t) => {
+  const s = await withImage(t);
+  const body = { project: "acme", title: "Twice", requestId: "start:same" };
+  const reading = Promise.withResolvers<void>();
+  const read = Promise.withResolvers<never>();
+  s.remoteReads(() => { reading.resolve(); return read.promise; });
+  const first = s.call("POST", "/v1/threads", body);
+  await reading.promise;
+  const second = s.call("POST", "/v1/threads", body);
+  const other = await s.call("POST", "/v1/threads", { ...body, title: "Other" });
+  read.reject(new Error("no remote"));
+  const [a, b] = await Promise.all([first, second]);
+  assert.equal(a.status, 201, JSON.stringify(a.body));
+  assert.equal(b.status, 201, JSON.stringify(b.body));
+  assert.equal((b.body as Thread).id, (a.body as Thread).id);
+  assert.equal(other.status, 409);
+  assert.match(other.body.error, /request ID start:same is starting a thread with another body/);
+  assert.deepEqual((await s.call("GET", "/v1/threads")).body.map((r: ThreadRow) => r.id), [(a.body as Thread).id]);
+  assert.equal(s.calls.filter((c) => c[0] === "start").length, 1);
+});
+
+test("a start that failed under a request ID made nothing, so the ID starts a corrected body", async (t) => {
+  const s = await withImage(t);
+  assert.equal((await s.call("POST", "/v1/threads", { project: "nope", title: "x", requestId: "start:typo" })).status, 404);
+  const fixed = await s.call("POST", "/v1/threads", { project: "acme", title: "x", requestId: "start:typo" });
+  assert.equal(fixed.status, 201, JSON.stringify(fixed.body));
+  const claude = await s.call("POST", "/v1/threads", { project: "acme", title: "x", claude: "Fix it", message: "hi", requestId: "start:claude" });
+  assert.equal(claude.status, 400);
+  assert.match(claude.body.error, /message is for a Nexus agent thread/);
+  assert.equal(s.registry.startRequest("start:claude"), undefined);
+  const plain = await s.call("POST", "/v1/threads", { project: "acme", title: "No ID", message: "Look around." });
+  assert.equal(plain.status, 201, JSON.stringify(plain.body));
+  assert.deepEqual(s.calls.at(-1), ["send", (plain.body as Thread).id, "Look around.", `brief:${(plain.body as Thread).id}`, "followUp"], "a start without a request ID sends its first message too");
+});
+
+test("a queued start repeated under its request ID answers the same queued thread, then the thread it became", async (t) => {
+  const s = await withQueue(t);
+  const body = { project: "acme", title: "Then", after: [s.first.id], message: "Fix the next bug.", requestId: "start:queued" };
+  const first = await s.call("POST", "/v1/threads", body);
+  assert.equal(first.status, 201, JSON.stringify(first.body));
+  const queued = first.body as QueuedThread;
+  assert.deepEqual(await s.call("POST", "/v1/threads", body), { status: 201, body: queued });
+  assert.deepEqual((await s.call("GET", "/v1/queued")).body, [queued], "one queued thread");
+  assert.equal((await s.call("POST", "/v1/threads", { ...body, after: undefined })).status, 409, "an immediate start under the queued start's ID is another body");
+
+  assert.equal((await s.call("POST", `/v1/threads/${queued.id}/start`)).status, 201);
+  const started = await s.call("POST", "/v1/threads", body);
+  assert.equal(started.status, 201);
+  assert.equal((started.body as Thread).id, queued.id);
+  assert.equal((started.body as Thread).pylonId, `pylon-${queued.id}`, "a repeat after the start answers the thread");
+  assert.deepEqual(s.fake.transcript(queued.id).messages.map((m) => m.content), ["Fix the next bug."]);
 });
