@@ -1,0 +1,3 @@
+$ nexus events --follow --since latest --kind pull-request.linked --json
+2 events
+[exit 0]

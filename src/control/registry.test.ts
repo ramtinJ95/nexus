@@ -9,6 +9,7 @@ import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { openRegistry, type StoredPylon, type Thread, type ThreadId } from "./registry.ts";
 import type { QueuedRecord } from "./queue.ts";
+import type { PullRequest } from "./github.ts";
 import { newPylonRecord } from "../tick.ts";
 import { trackActivity } from "../harness/activity.ts";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
@@ -559,6 +560,24 @@ test("adding PR watches preserves the shared seen and reply markers from schema 
   registry.savePrWatch(threadId, watch);
   assert.deepEqual(registry.prWatch(threadId), watch);
   assert.deepEqual(registry.thread(threadId), { ...thread, lastReplyAt: 2000, seenAt: 3000 });
+});
+
+test("a PR watch's save fires pull-request.linked once for each PR it has read, with the PR", (t) => {
+  const registry = seeded(tempDb());
+  t.after(() => registry.close());
+  const pr: PullRequest = { repo: "acme/repo", number: 1, title: "Fix", url: "https://github.com/acme/repo/pull/1", state: "open", checks: "none", review: "none", conflict: null };
+  const save = (...prs: PullRequest[]) => registry.savePrWatch(threadId, { links: prs.map((p) => ({ pr: p, seen: [], failed: false })), commentWakes: 0, pending: null, error: null });
+  const linked = () => registry.events("0", { kinds: ["pull-request.linked"] }).map((e) => [e.thread, e.payload]);
+  save({ ...pr, title: "", url: "" });
+  assert.deepEqual(linked(), [], "a placeholder the watch has not read is not linked yet");
+  save(pr);
+  save({ ...pr, checks: "passing" });
+  save({ ...pr, state: "closed" });
+  save({ ...pr, state: "open" });
+  assert.deepEqual(linked(), [[threadId, { repo: "acme/repo", number: 1, url: pr.url, title: "Fix", state: "open" }]]);
+  save(pr, { ...pr, number: 2, url: "https://github.com/acme/repo/pull/2", state: "merged" });
+  assert.deepEqual(linked().map(([, p]) => (p as { number: number }).number), [1, 2]);
+  assert.equal((linked()[1]![1] as { state: string }).state, "merged", "a PR first read merged is linked merged");
 });
 
 test("desired release, reports and drain survive reopening the registry", () => {

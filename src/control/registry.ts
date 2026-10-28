@@ -958,10 +958,18 @@ export function openRegistry(path: string, clock = Date.now) {
       const row = sql("SELECT record FROM pr_watches WHERE thread = ?").get(thread) as Row | undefined;
       return row ? json<PrWatchState>(row.record) : null;
     },
+    /** Replaces the thread's PR watch, and tells the event log of new feedback and of each PR linked since the last save. */
     savePrWatch(thread: ThreadId, state: PrWatchState) {
-      const previous = sql("SELECT record FROM pr_watches WHERE thread = ?").get(thread);
-      if (state.pending !== null && (previous === undefined || json<PrWatchState>(previous.record).pending?.id !== state.pending.id)) appendEvent("pull-request.feedback", thread, { requestId: state.pending.id });
-      sql("INSERT INTO pr_watches (thread, record) VALUES (?, ?) ON CONFLICT (thread) DO UPDATE SET record = excluded.record").run(thread, JSON.stringify(state));
+      transaction(() => {
+        const previous = jsonOrNull<PrWatchState>(sql("SELECT record FROM pr_watches WHERE thread = ?").get(thread)?.record ?? null);
+        if (state.pending !== null && previous?.pending?.id !== state.pending.id) appendEvent("pull-request.feedback", thread, { requestId: state.pending.id });
+        // A link counts once the watch has read its PR, as outputs() counts it, so a placeholder never fires.
+        const linked = new Set(previous?.links.filter((l) => l.pr.url !== "").map((l) => `${l.pr.repo}#${l.pr.number}`));
+        for (const { pr } of state.links) {
+          if (pr.url !== "" && !linked.has(`${pr.repo}#${pr.number}`)) appendEvent("pull-request.linked", thread, { repo: pr.repo, number: pr.number, url: pr.url, title: pr.title, state: pr.state });
+        }
+        sql("INSERT INTO pr_watches (thread, record) VALUES (?, ?) ON CONFLICT (thread) DO UPDATE SET record = excluded.record").run(thread, JSON.stringify(state));
+      });
     },
     desiredRelease(): DesiredRelease | null {
       const row = sql("SELECT value FROM settings WHERE key = 'release'").get();

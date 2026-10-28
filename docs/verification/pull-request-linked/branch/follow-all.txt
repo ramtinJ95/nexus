@@ -1,0 +1,3 @@
+$ nexus events --follow --since latest  --json
+2 events
+[exit 0]
