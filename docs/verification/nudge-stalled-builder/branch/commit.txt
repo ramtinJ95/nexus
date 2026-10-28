@@ -1,1 +1,1 @@
-branch: ea09148 fix(control): leave a person's thread alone for good, and skip a usage-limit stop
+branch: 15aa8b4 test(control): a nudge a deploy's drain refuses is sent once the drain ends

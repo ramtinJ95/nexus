@@ -1,17 +1,17 @@
 $ nexus start --project nexus --title Greet quietly --claude push greet-quiet --json
 {
-  "id": "th-e2c0dfc37c8f",
+  "id": "th-59dac478c2b6",
   "title": "Greet quietly",
   "project": "nexus",
-  "pylonId": "pylon-th-e2c0dfc37c8f",
+  "pylonId": "pylon-th-59dac478c2b6",
   "status": "active",
   "conversationId": null,
   "startedBy": "nLAPTOP",
-  "createdAt": 1793161491430,
+  "createdAt": 1793165275209,
   "agentTurnRunning": false,
   "working": false,
   "lastAgentActivityAt": 0,
-  "lastHumanActivityAt": 1793161491430,
+  "lastHumanActivityAt": 1793165275209,
   "seenAt": null,
   "lastReplyAt": null,
   "placement": {

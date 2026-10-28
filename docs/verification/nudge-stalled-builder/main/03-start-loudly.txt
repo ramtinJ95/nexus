@@ -1,17 +1,17 @@
 $ nexus start --project nexus --title Greet loudly --claude stop-before-push greet-loud stay --json
 {
-  "id": "th-89c50cab73b3",
+  "id": "th-5fece76a28b6",
   "title": "Greet loudly",
   "project": "nexus",
-  "pylonId": "pylon-th-89c50cab73b3",
+  "pylonId": "pylon-th-5fece76a28b6",
   "status": "active",
   "conversationId": null,
   "startedBy": "nLAPTOP",
-  "createdAt": 1793161324812,
+  "createdAt": 1793165108239,
   "agentTurnRunning": false,
   "working": false,
   "lastAgentActivityAt": 0,
-  "lastHumanActivityAt": 1793161324812,
+  "lastHumanActivityAt": 1793165108239,
   "seenAt": null,
   "lastReplyAt": null,
   "placement": {

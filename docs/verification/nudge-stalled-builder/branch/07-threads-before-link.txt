@@ -1,6 +1,6 @@
 $ nexus threads
-th-336270703db8  active  -  pylon running  nexus  19s ago  Greet by name
-th-8d1041b32606  active  -  pylon running  nexus  18s ago  Greet loudly
-th-e2c0dfc37c8f  active  -  pylon running  nexus  18s ago  Greet quietly
-th-d29f4324405d  active  -  pylon running  nexus  18s ago  Explain the queue
+th-06f154f5f0da  active  -  pylon running  nexus  19s ago  Greet by name
+th-bf9b30eb6c7f  active  -  pylon running  nexus  19s ago  Greet loudly
+th-59dac478c2b6  active  -  pylon running  nexus  18s ago  Greet quietly
+th-b854be388190  active  -  pylon running  nexus  18s ago  Explain the queue
 [exit 0]

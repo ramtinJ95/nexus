@@ -1,10 +1,10 @@
-$ nexus show th-89c50cab73b3
-th-89c50cab73b3  Greet loudly
+$ nexus show th-5fece76a28b6
+th-5fece76a28b6  Greet loudly
 project: nexus
 Claude worker: started, model claude-opus-5-5
 attention: reply
 status: active
-pylon: pylon-th-89c50cab73b3 on verify-node, running, observed 0s ago
+pylon: pylon-th-5fece76a28b6 on verify-node, running, observed 0s ago
 size: 1 CPUs, 1 GiB memory, 10 GiB disk
 placement: verify-node, the project's default node
 setup: fresh boot runs .nexus/setup, because the control plane could not read .nexus/setup at main: the verify stack reads no remote, so every thread boots fresh
