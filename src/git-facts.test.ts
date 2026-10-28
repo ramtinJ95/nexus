@@ -127,6 +127,19 @@ test("a branch cloned, fetched or checked out from a remote is pushed only once 
   assert.equal((await gitFacts(s.guest)).branches.find((b) => b.name === "later")?.pushedAs, "origin/later", "a push stays recorded across later fetches");
 });
 
+test("a push of a signed commit counts where the configuration shows signatures", async (t) => {
+  const s = await checkout(t);
+  const remote = await mkdtemp(join(tmpdir(), "nexus-git-remote-"));
+  t.after(() => rm(remote, { recursive: true, force: true }));
+  await run("git", ["init", "--bare", "-q", remote]);
+  await s.git("remote", "add", "origin", remote);
+  await run("ssh-keygen", ["-q", "-t", "ed25519", "-N", "", "-f", join(s.dir, ".git", "signing-key")]);
+  for (const [key, value] of [["gpg.format", "ssh"], ["user.signingkey", join(s.dir, ".git", "signing-key")], ["commit.gpgsign", "true"], ["log.showSignature", "true"]]) await s.git("config", key!, value!);
+  const head = await s.commit();
+  await s.git("push", "-q", "origin", "main");
+  assert.deepEqual((await gitFacts(s.guest)).branches, [{ name: "main", head, pushedAs: "origin/main" }]);
+});
+
 test("symbolic remote HEAD and local tracking branches do not imply a pushed branch", async (t) => {
   const s = await checkout(t);
   const head = await s.commit();
