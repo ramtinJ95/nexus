@@ -4,15 +4,19 @@
  * and drives the probe through their HTTP API.
  */
 import { lookup } from "node:dns/promises";
-import { request } from "node:http";
+import { rmSync } from "node:fs";
+import { mkdtemp } from "node:fs/promises";
+import { createServer, request } from "node:http";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { z } from "zod";
 import { artifactDirectory, tarCodec } from "../artifacts.ts";
-import { isImageId, probePort, tailnetNodeIdSchema } from "../protocol.ts";
+import { isImageId, probePort, tailnetNodeIdSchema, type TailnetNodeId } from "../protocol.ts";
 import { scriptedModel, scriptedModels } from "../harness/test-fixture.ts";
 import { parseSelfDnsName, readProbeConfig } from "../probe/config.ts";
 import { tailscaleCli } from "../probe/serve.ts";
+import { localApiWhois } from "../tailscale.ts";
 import type { ThreadDetail } from "./api.ts";
 import { defaultPreviewPorts, startControlPlane, type ControlPlaneConfig } from "./main.ts";
 import { openRegistry } from "./registry.ts";
@@ -38,6 +42,7 @@ export async function openNodeCheck(options: { image: string | undefined; opens:
   // Preview URLs name the node by its MagicDNS name, because that is the name its tailscale serve certificate is for.
   const dnsName = parseSelfDnsName(statusJson);
   if (probeConfig.auth.controlPlane !== self) throw new Error(`set auth.controlPlane in the probe's config to this node's ID ${self} (it is ${probeConfig.auth.controlPlane}), then restart the probe`);
+  const tailscaledSocket = await personWhois(self);
   const manifest = await store.manifest(image);
   const host = probeConfig.listen.host;
   if (options.resolvesToProbe) {
@@ -51,7 +56,8 @@ export async function openNodeCheck(options: { image: string | undefined; opens:
     listen: { host, port: 0, hostnames: [host] },
     self: { tailnetNodeId: self },
     nodes: [{ name: probeConfig.node, tailnetHost: dnsName, tailnetNodeId: self }],
-    callers: [],
+    callers: [checkPerson],
+    tailscaledSocket,
     dotfiles: { repo: "https://github.com/octocat/Spoon-Knife.git", ref: "main" },
     harness: { storage: join(dir, "harness.sqlite"), credentials: join(dir, "unused-credentials.json"), model: scriptedModel },
     previewPorts: defaultPreviewPorts,
@@ -78,6 +84,32 @@ export async function openNodeCheck(options: { image: string | undefined; opens:
     planeConfig,
     startPlane,
   };
+}
+
+/** Who the check is to its control planes: the person who runs it, since only a person starts or messages a thread. */
+const checkPerson = "nNODECHECK" as TailnetNodeId;
+
+/**
+ * A LocalAPI socket that answers whois as tailscaled does, but names this node as `checkPerson` on any port but the
+ * probe's, so the check's own requests reach its control planes as a person's and the probe is still this node.
+ */
+async function personWhois(self: TailnetNodeId): Promise<string> {
+  const whois = localApiWhois();
+  const dir = await mkdtemp(join(tmpdir(), "nexus-node-check-"));
+  process.once("exit", () => rmSync(dir, { recursive: true, force: true }));
+  const socket = join(dir, "tailscaled.sock");
+  const server = createServer((req, res) => {
+    const addr = new URL(req.url ?? "/", "http://local-tailscaled.sock").searchParams.get("addr") ?? "";
+    const at = addr.lastIndexOf(":");
+    const port = Number(addr.slice(at + 1));
+    whois(addr.slice(0, at).replace(/^\[(.*)\]$/, "$1"), port).then((id) => {
+      if (id === null) return void res.writeHead(404).end();
+      res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ Node: { StableID: id === self && port !== probePort ? checkPerson : id } }));
+    }, (err: Error) => res.writeHead(502).end(err.message));
+  });
+  await new Promise<void>((resolve, reject) => server.once("error", reject).listen(socket, resolve));
+  server.unref();
+  return socket;
 }
 
 /** A client of a control plane's API. It reads the port at each request, so it follows a control plane the check replaces. */

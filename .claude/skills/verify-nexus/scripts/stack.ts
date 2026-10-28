@@ -6,7 +6,8 @@
  * startControlPlane (registry, loop, pi-durable harness, API and dashboard) and a probe from startProbe with
  * the Docker backend. Only the production boundaries are doubles:
  * - tailscaled's LocalAPI is a Unix socket in a directory under /tmp, named in <runDir>/socket-dir. whois names 127.0.0.1:7480 as the probe and
- *   every other address as the control plane's own node, which the API allows, as for the CLI on rj-firebat.
+ *   every other address as the person's laptop, which the API allows as a person, as for the CLI on a Mac. The probe's own whois names
+ *   every caller as the control plane.
  * - the model is the scripted one from src/harness/test-fixture.ts: `bash: <command>` runs one bash tool call, and
  *   `stream: <n>` streams an answer of n words.
  * - `tailscale serve` is src/probe/fake-tailscale.ts, so the Mac's work tailnet is never touched.
@@ -29,7 +30,6 @@ import { startControlPlane } from "../../../../src/control/main.ts";
 import { openRegistry } from "../../../../src/control/registry.ts";
 import { fakeTailscale, nodeHost, viaGateway } from "../../../../src/probe/fake-tailscale.ts";
 import { startProbe } from "../../../../src/probe/server.ts";
-import { localApiWhois } from "../../../../src/tailscale.ts";
 import { probePort, type NodeName, type TailnetNodeId } from "../../../../src/protocol.ts";
 import type { ImageId, ImageManifest } from "../../../../src/images.ts";
 import type { Project, ProjectId } from "../../../../src/project.ts";
@@ -48,6 +48,7 @@ const ports = { api: 7470, probe: probePort, gateway: 7481, bridge: 7482 } as co
 const node = "verify-node" as NodeName;
 const controlPlaneId = "nVERIFYCONTROL" as TailnetNodeId;
 const probeId = "nVERIFYPROBE" as TailnetNodeId;
+const laptopId = "nVERIFYLAPTOP" as TailnetNodeId;
 const labels = { "nexus.verify": run };
 const tag = `nexus-verify-pylon:${run}`;
 const imageId = "img-0000000000aa" as ImageId;
@@ -84,11 +85,11 @@ async function buildImage() {
   await docker("build", "--quiet", "--label", `nexus.verify=${run}`, "--build-arg", `HERDR_VERSION=${herdr}`, "--tag", tag, dir);
 }
 
-/** tailscaled's LocalAPI whois, answered by port: the probe's is the probe, everything else is the control plane. */
+/** tailscaled's LocalAPI whois for the control plane, answered by port: the probe's is the probe, everything else is the laptop. */
 async function fakeTailscaled(socket: string) {
   const server = createServer((req, res) => {
     const addr = new URL(req.url ?? "/", "http://local-tailscaled.sock").searchParams.get("addr") ?? "";
-    const id = addr.endsWith(`:${ports.probe}`) ? probeId : controlPlaneId;
+    const id = addr.endsWith(`:${ports.probe}`) ? probeId : laptopId;
     res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ Node: { StableID: id } }));
   });
   await new Promise<void>((resolve, reject) => server.once("error", reject).listen(socket, resolve));
@@ -125,13 +126,12 @@ await writeFile(join(runDir, "socket-dir"), `${socketDir}\n`);
 const socket = join(socketDir, "tailscaled.sock");
 const tailscaled = await fakeTailscaled(socket);
 closers.push(() => { tailscaled.close(); });
-const whois = localApiWhois(socket);
 const serve = fakeTailscale();
 
 const probe = await startProbe({
   node, host: "127.0.0.1", port: ports.probe,
   auth: { controlPlane: controlPlaneId, peers: [] },
-  whois,
+  whois: async () => controlPlaneId,
   backend: createDockerBackend({ images: { [imageId]: tag }, labels, hostBridgePort: ports.bridge, previewHost: nodeHost, artifacts: join(runDir, "artifacts") }),
   secrets: { value: () => undefined, names: () => [] },
   log: (message) => log(`probe: ${message}`),
@@ -141,7 +141,7 @@ const probe = await startProbe({
 closers.push(() => probe.close());
 log(`probe ${node} on 127.0.0.1:${probe.port}, boot ${probe.bootId}`);
 
-// The Docker image, current. A rollout needs a deployer, which this stack's only caller, the control plane's own node, never is.
+// The Docker image, current. A rollout needs a deployer, and the stack lists none.
 const manifest: ImageManifest = {
   id: imageId, gondolinBuildId: `docker:${tag}`, builtOn: node, builtAt: new Date().toISOString(), sha256: "0".repeat(64),
   pins: {
@@ -160,7 +160,7 @@ const controlPlane = await startControlPlane({
   listen: { host: "127.0.0.1", port: ports.api, hostnames: ["127.0.0.1", "localhost"] },
   self: { tailnetNodeId: controlPlaneId },
   nodes: [{ name: node, tailnetHost: "127.0.0.1", tailnetNodeId: probeId }],
-  callers: [],
+  callers: [laptopId],
   dotfiles: { repo: "https://example.com/dotfiles.git", ref: "main" },
   harness: { storage: join(runDir, "harness.sqlite"), credentials: join(runDir, "unused-credentials.json"), model: scriptedModel },
   tailscaledSocket: socket,

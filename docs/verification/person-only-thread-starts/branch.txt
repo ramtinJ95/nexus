@@ -1,0 +1,56 @@
+branch: 7c1ce76 docs(verification): capture the CLI starting and messaging a thread before and after
+
+$ nexus start --project acme --title Capture --json    # as the person's laptop
+exit 0
+{
+  "id": "<thread>",
+  "title": "Capture",
+  "project": "acme",
+  "pylonId": "pylon-<thread>",
+  "status": "active",
+  "conversationId": "2",
+  "startedBy": "nLAPTOP",
+  "createdAt": <time>,
+  "agentTurnRunning": false,
+  "working": false,
+  "lastAgentActivityAt": 0,
+  "lastHumanActivityAt": <time>,
+  "seenAt": null,
+  "lastReplyAt": null,
+  "placement": {
+    "how": "default",
+    "node": "rj-firebat"
+  },
+  "setup": {
+    "how": "fresh",
+    "reason": "the project is scratch, so it has no template"
+  }
+}
+
+$ nexus send <thread> hello    # as the person's laptop
+exit 0
+Sent to <thread>.
+
+$ nexus conversation <thread>    # as the person's laptop
+exit 0
+> hello
+
+scripted answer after user
+
+$ nexus start --project acme --title Started by the control node    # as the control node
+exit 3
+nexus: caller may not start a thread: only a person may, never the control plane, infrastructure nodes or pylons
+
+$ nexus send <thread> hello from the control node    # as the control node
+exit 3
+nexus: caller may not message a thread: only a person may, never the control plane, infrastructure nodes or pylons
+
+$ nexus start --project acme --title Started by an infrastructure node    # as an infrastructure node
+exit 3
+nexus: caller may not start a thread: only a person may, never the control plane, infrastructure nodes or pylons
+
+$ nexus send <thread> hello from an infrastructure node    # as an infrastructure node
+exit 3
+nexus: caller may not message a thread: only a person may, never the control plane, infrastructure nodes or pylons
+
+threads: Capture (startedBy nLAPTOP)
