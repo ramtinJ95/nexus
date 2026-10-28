@@ -388,7 +388,7 @@ function detailText({ thread: t, pylon: p, agent, sessions, previews, ports, out
     `status: ${t.status}${working(t) ? ", agent working" : ""}`,
     `pylon: ${p.id} on ${p.node}, ${p.actualState}${observed}`,
     // A control plane older than the size in thread detail sends none.
-    ...p.resources === undefined ? [] : [`size: ${p.resources.cpus} CPUs, ${p.resources.memoryGiB} GiB memory, ${p.resources.diskGiB} GiB disk`],
+    ...p.resources === undefined ? [] : [`size: ${p.resources.cpus} CPUs, ${p.resources.memoryGiB} GiB memory, ${p.resources.diskGiB} GiB disk${p.resources.nestedVirtualization === true ? ", nested virtualization" : ""}`],
     ...t.placement === undefined ? [] : [`placement: ${placementText(t.placement)}`],
     ...t.setup === undefined ? [] : [`setup: ${setupText(t.setup)}`],
     ...(p.grantsOutdated ? ["grants: older than project; start a new thread to apply current grants (archive/unarchive keeps these grants)"] : []),

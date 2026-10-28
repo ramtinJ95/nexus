@@ -1283,6 +1283,9 @@ test("start --cpus, --memory and --disk size the thread over its project's, and 
   assert.deepEqual(s.registry.pylon(disk.pylonId)!.boot.resources, { cpus: 2, memoryGiB: 4, diskGiB: 40 });
   const plain: Thread = await s.json(["start", "--project", "acme", "--title", "plain"]);
   assert.match((await s.nexus(["show", plain.id])).stdout, /^size: 2 CPUs, 4 GiB memory, 10 GiB disk$/m, "a thread started without them has its project's size");
+  const pylon = s.registry.pylon(plain.pylonId)!;
+  s.registry.savePylon({ ...pylon, boot: { ...pylon.boot, resources: { ...pylon.boot.resources, memoryGiB: 8, nestedVirtualization: true } } });
+  assert.match((await s.nexus(["show", plain.id])).stdout, /^size: 2 CPUs, 8 GiB memory, 10 GiB disk, nested virtualization$/m, "a verify pylon's size says it nests");
 
   for (const [flag, value, status] of [["--memory", "0", 400], ["--cpus", "-2", null], ["--disk", "1.5", null], ["--memory", "lots", null]] as const) {
     const res = await s.nexus(["start", "--project", "acme", "--title", "wrong", flag, value, "--json"]);
