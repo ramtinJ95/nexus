@@ -335,9 +335,12 @@ export async function startApi(options: ApiOptions): Promise<Api> {
     if (!options.pipeline) throw new HttpError(409, "pipeline items need the control plane's GitHub token (github.tokenFile), which is not configured");
     return options.pipeline;
   }
-  /** Items are the person's plan, so no pylon, harness thread or the control plane itself adds, approves or cancels one. */
+  /**
+   * Threads and items are the person's, so no pylon, harness thread or the control plane itself starts or messages a
+   * thread, or adds, approves or cancels an item. The control plane's own passes start and message threads in-process.
+   */
   function personOnly(caller: TailnetNodeId, action: string) {
-    if (!isPerson(registry, options.deployment, caller)) throw new HttpError(403, `caller may not ${action} an item: only a person may, never the control plane, infrastructure nodes or pylons`);
+    if (!isPerson(registry, options.deployment, caller)) throw new HttpError(403, `caller may not ${action}: only a person may, never the control plane, infrastructure nodes or pylons`);
   }
   function item(id: string) {
     const record = registry.item(id as ItemId);
@@ -1010,7 +1013,10 @@ export async function startApi(options: ApiOptions): Promise<Api> {
       const threads = registry.threads((r.query.get("project") ?? undefined) as ProjectId | undefined);
       return ok((r.query.get("deleted") === "false" ? threads.filter((t) => t.status !== "deleted") : threads).map(row));
     }],
-    ["POST", /^\/v1\/threads$/, async (_, r) => created(await start(await r.body(), r.caller))],
+    ["POST", /^\/v1\/threads$/, async (_, r) => {
+      personOnly(r.caller, "start a thread");
+      return created(await start(await r.body(), r.caller));
+    }],
     ["GET", /^\/v1\/queued$/, (_, r) => {
       const project = r.query.get("project");
       return ok(registry.queuedThreads().filter((q) => q.status !== "started" && (project === null || q.project === project)).map((q) => queuedView(registry, q)));
@@ -1025,7 +1031,7 @@ export async function startApi(options: ApiOptions): Promise<Api> {
       return ok(registry.items().filter((i) => project === null || i.project === project).map((i) => itemView(registry, i)));
     }],
     ["POST", /^\/v1\/items$/, async (_, r) => {
-      personOnly(r.caller, "add");
+      personOnly(r.caller, "add an item");
       const { after, message, ...request } = parse(itemSchema, await r.body());
       const pipeline = pipelineOrRefuse();
       const added = pipeline.add(request, message ?? null, after ?? [], r.caller);
@@ -1034,17 +1040,20 @@ export async function startApi(options: ApiOptions): Promise<Api> {
     }],
     ["GET", /^\/v1\/items\/([^/]+)$/, ([, id]) => ok(item(id!))],
     ["POST", /^\/v1\/items\/([^/]+)\/cancel$/, ([, id], r) => {
-      personOnly(r.caller, "cancel");
+      personOnly(r.caller, "cancel an item");
       return ok(itemView(registry, pipelineOrRefuse().cancel(id!, r.caller)));
     }],
     ["POST", /^\/v1\/items\/([^/]+)\/approve$/, async ([, id], r) => {
-      personOnly(r.caller, "approve");
+      personOnly(r.caller, "approve an item");
       const pipeline = pipelineOrRefuse();
       const approved = pipeline.approve(id!, r.caller);
       await pipeline.poll();
       return ok(itemView(registry, approved));
     }],
-    ["POST", /^\/v1\/threads\/([^/]+)\/start$/, async (m, r) => created(await queueOrRefuse().startNow(m[1]! as ThreadId, r.caller))],
+    ["POST", /^\/v1\/threads\/([^/]+)\/start$/, async (m, r) => {
+      personOnly(r.caller, "start a queued thread");
+      return created(await queueOrRefuse().startNow(m[1]! as ThreadId, r.caller));
+    }],
     ["GET", /^\/v1\/threads\/([^/]+)$/, (m) => ok(detail(thread(m[1]!)))],
     ["DELETE", /^\/v1\/threads\/([^/]+)$/, async (m) => ok(queuedRecord(m[1]!) === undefined ? await setStatus(thread(m[1]!), "deleted") : queuedStatus(m[1]!, "deleted"))],
     ["POST", /^\/v1\/threads\/([^/]+)\/(seen|unseen)$/, async (m, r) => {
@@ -1058,6 +1067,7 @@ export async function startApi(options: ApiOptions): Promise<Api> {
     ["POST", /^\/v1\/threads\/([^/]+)\/activity$/, async (m, r) => { recordActivity(thread(m[1]!), await r.body()); return noContent; }],
     // The body first, so the thread's status is read after the last await before the message is submitted.
     ["POST", /^\/v1\/threads\/([^/]+)\/messages$/, async (m, r) => {
+      personOnly(r.caller, "message a thread");
       const body = await r.body();
       const t = thread(m[1]!);
       const agent = registry.agent(t);
