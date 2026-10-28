@@ -19,6 +19,7 @@ import { PassThrough } from "node:stream";
 import { promisify } from "node:util";
 import { WebSocket } from "ws";
 import { maxStreams, startApi, type ThreadDetail, type ThreadRow } from "./api.ts";
+import type { Question } from "./questions.ts";
 import { threadStarter } from "./threads.ts";
 import { threadQueue, type QueuedThread } from "./queue.ts";
 import { turnGate } from "./drain.ts";
@@ -43,6 +44,8 @@ import type { ByteStream, CommandResult, JobId, NodeName, NodeObservation, Pause
 
 const node = "rj-firebat" as NodeName;
 const laptop = "nLAPTOP" as TailnetNodeId;
+/** An allowed person's device that is not a deployer. */
+const phone = "nPHONE" as TailnetNodeId;
 const project = {
   id: "acme", repoUrl: "git@example.com:acme.git", defaultBranch: "main", defaultNode: node,
   resources: { cpus: 2, memoryGiB: 4, diskGiB: 10 }, allowedHosts: ["registry.npmjs.org"],
@@ -108,7 +111,7 @@ async function setup(t: import("node:test").TestContext, options: { gitIdentity?
       await admitted;
       return caller;
     }),
-    allowed: new Set([laptop, "nFIREBAT" as TailnetNodeId]),
+    allowed: new Set([laptop, phone, "nFIREBAT" as TailnetNodeId]),
     ...(options.deployment === undefined ? {} : { deployment: options.deployment }),
     ...(options.reviews === undefined ? {} : { reviews: options.reviews }),
     ...(queue === null ? {} : { queue }),
@@ -700,7 +703,7 @@ test("thread detail derives the actual state from the node's last observation", 
     attention: null, seenAt: null, lastReplyAt: null,
     desired: "running",
     pylon: { grantsOutdated: false, id: thread.pylonId, node, actualState: "unknown", failed: null, observedAt: null, retryRefused: null, resources: project.resources },
-    sessions: [], previews: [], ports: [], outputs: [], prWatch: { enabled: false, stopped: false, error: null }, pullRequests: [], review: null, attach: "herdr --session nexus", agent: { parkedTasks: 0 },
+    sessions: [], previews: [], ports: [], outputs: [], prWatch: { enabled: false, stopped: false, error: null }, pullRequests: [], review: null, questions: [], attach: "herdr --session nexus", agent: { parkedTasks: 0 },
   });
 
   const capacity = { cpus: 16, committedCpus: 0, memoryGiB: 64, committedMemoryGiB: 0, diskFreeGiB: 100, committedDiskGiB: 0 };
@@ -3278,4 +3281,52 @@ test("a queued start repeated under its request ID answers the same queued threa
   assert.equal((started.body as Thread).id, queued.id);
   assert.equal((started.body as Thread).pylonId, `pylon-${queued.id}`, "a repeat after the start answers the thread");
   assert.deepEqual(s.fake.transcript(queued.id).messages.map((m) => m.content), ["Fix the next bug."]);
+});
+
+test("a person answers a question, a deployer question needs a deployer, and no node or pylon answers one", async (t) => {
+  const s = await withThread(t, { deployment });
+  const ask = (id: string, answerer: Question["answerer"]) => s.registry.askQuestion({
+    id, thread: s.thread.id, text: "Rebuild the pylon image?\nIt changes the base layer.", options: ["Rebuild", "Not now"], reserved: "image-rebuild", answerer, askedAt: 1,
+  });
+  ask("qn-person", "person");
+  ask("qn-deployer", "deployer");
+  const answer = (id: string, option: string) => s.call("POST", `/v1/questions/${id}/answer`, { option });
+  const detail = async () => (await s.call("GET", `/v1/threads/${s.thread.id}`)).body as ThreadDetail;
+  assert.equal((await detail()).attention, "decision");
+  assert.deepEqual((await detail()).questions.map((q) => q.id), ["qn-deployer", "qn-person"], "by when they were asked, then by ID");
+
+  s.callAs("nFIREBAT" as TailnetNodeId);
+  for (const id of ["qn-person", "qn-deployer"]) {
+    assert.deepEqual(await answer(id, "Rebuild"), { status: 403, body: { error: "caller may not answer this question: only a person's device may, never infrastructure nodes or pylons" } });
+  }
+  s.callAs(phone);
+  assert.deepEqual(await answer("qn-deployer", "Rebuild"), { status: 403, body: { error: "caller may not answer this question: its answer may deploy, so only deployers may" } });
+  assert.deepEqual(await answer("qn-unknown", "Rebuild"), { status: 404, body: { error: "no question qn-unknown" } });
+  assert.deepEqual(await answer("qn-person", "Maybe"), { status: 400, body: { error: `"Maybe" is not an option of question qn-person, which are "Rebuild", "Not now"` } });
+  assert.equal((await s.call("POST", "/v1/questions/qn-person/answer", { option: "Rebuild", by: laptop })).status, 400, "the answerer is the caller, never the body");
+
+  const answered = await answer("qn-person", "Not now");
+  assert.equal(answered.status, 200);
+  const first = answered.body as Question;
+  assert.deepEqual(first.answer && { option: first.answer.option, by: first.answer.by }, { option: "Not now", by: phone });
+  assert.equal((await detail()).attention, "decision", "the deployer question is still open");
+  s.callAs(laptop);
+  assert.deepEqual(await answer("qn-person", "Not now"), { status: 200, body: first }, "a retried answer gets the first one's record");
+  assert.deepEqual(await answer("qn-person", "Rebuild"), { status: 409, body: { error: `question qn-person was answered "Not now" by ${phone}` } });
+  assert.equal((await answer("qn-deployer", "Rebuild")).status, 200);
+  const after = await detail();
+  assert.notEqual(after.attention, "decision");
+  assert.deepEqual(after.questions.map((q) => [q.id, q.answer?.option, q.answer?.by]), [["qn-deployer", "Rebuild", laptop], ["qn-person", "Not now", phone]]);
+});
+
+test("without deployment options a person still answers a person question, and nobody a deployer question", async (t) => {
+  const s = await withThread(t);
+  for (const answerer of ["person", "deployer"] as const) {
+    s.registry.askQuestion({ id: `qn-${answerer}`, thread: s.thread.id, text: "Go?", options: ["Yes", "No"], reserved: null, answerer, askedAt: 1 });
+  }
+  s.callAs("nFIREBAT" as TailnetNodeId);
+  assert.equal((await s.call("POST", "/v1/questions/qn-person/answer", { option: "Yes" })).status, 403, "a registry node is no person");
+  s.callAs(laptop);
+  assert.equal((await s.call("POST", "/v1/questions/qn-person/answer", { option: "Yes" })).status, 200);
+  assert.equal((await s.call("POST", "/v1/questions/qn-deployer/answer", { option: "Yes" })).status, 403);
 });

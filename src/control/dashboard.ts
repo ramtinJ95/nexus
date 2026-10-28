@@ -31,6 +31,7 @@ import { usageLimitText, type ClaudeConversation, type ClaudeEntry, type PromptS
 import { queuedOf } from "./claude-conversation.ts";
 import { blocks as blocking, findingsOf, landable, phaseNote, roundsSpent, type Review } from "./review.ts";
 import { heldBy, holdRule, reservedNames } from "./policy.ts";
+import type { AnswerRefusal, Question } from "./questions.ts";
 import { gib, nodePylons, overcommitted } from "./placement.ts";
 import { queuedView, type QueuedThread, type Wait } from "./queue.ts";
 import { breakdownLook, breakdowns, periods, periodStart, tokenColumns, tokenCount, type Period, type UsageBackfill, type UsageTotals } from "./usage.ts";
@@ -45,6 +46,8 @@ export interface DashboardOptions {
   conversation(thread: Thread): Promise<Conversation>;
   /** Why the land route would refuse the caller, or null when it would take the request. */
   landRefusal(caller: TailnetNodeId): LandRefusal | null;
+  /** Why the answer route would refuse the caller's answer to the question, or null when it would take it. */
+  answerRefusal(caller: TailnetNodeId, question: Question): AnswerRefusal | null;
   /** Whether the review's pull request deploys once it merges. */
   deploys(review: Review): boolean;
   now?: () => number;
@@ -62,7 +65,10 @@ export const pollMs = 5_000;
 export type LandRefusal = "no review loop" | "not a deployer";
 
 /** What every part of a page reads. */
-interface Context { registry: Registry; row: DashboardOptions["row"]; deploys: DashboardOptions["deploys"]; now: number; caller: TailnetNodeId; landRefusal: LandRefusal | null }
+interface Context {
+  registry: Registry; row: DashboardOptions["row"]; deploys: DashboardOptions["deploys"]; now: number; caller: TailnetNodeId; landRefusal: LandRefusal | null;
+  answerRefusal(question: Question): AnswerRefusal | null;
+}
 
 /** Returns the page for a GET of `path`, or undefined when the path is not the dashboard's. */
 export function dashboard(options: DashboardOptions): (path: string, query: URLSearchParams, caller: TailnetNodeId) => Promise<Page | undefined> {
@@ -113,7 +119,8 @@ export function dashboard(options: DashboardOptions): (path: string, query: URLS
       // The sidebar and the home table show the same threads.
       const rows = new Map<ThreadId, ThreadRow>();
       const row = (t: Thread) => rows.get(t.id) ?? rows.set(t.id, options.row(t)).get(t.id)!;
-      return { registry, row, deploys, now: (options.now ?? Date.now)(), caller, landRefusal: options.landRefusal(caller) };
+      return { registry, row, deploys, now: (options.now ?? Date.now)(), caller, landRefusal: options.landRefusal(caller),
+        answerRefusal: (question) => options.answerRefusal(caller, question) };
     };
     for (const [pattern, page] of pages) {
       const m = pattern.exec(path);
@@ -621,6 +628,7 @@ ${actions.length > 0 && html`<div class="bar-actions" id="thread-actions">${acti
 <div class="dock">
 <p id="action-error" class="error" role="alert" hidden></p>
 <p id="action-status" class="comp-note" role="status" hidden></p>
+<div id="questions" data-live>${questionCards(c, d)}</div>
 <div id="landing" data-live>${landing(c, d)}</div>
 <div id="run" data-live>${runBar(t, run, c.now)}</div>
 <div id="composer" data-live>${composer(d, run, model, read !== null && isClaude(read) ? read : null, c.now)}</div>
@@ -650,6 +658,36 @@ const landRefusals: Record<LandRefusal, (caller: TailnetNodeId) => string> = {
   "not a deployer": (caller) => `This device cannot land: landing deploys, so only the control plane's deployers may, and this device (tailnet node ${caller}) is not one. Land it from a deployer, or add this node to deployers in the control plane's config.`,
   "no review loop": () => "Nexus cannot land it now: the review loop needs the control plane's GitHub token (github.tokenFile), which is not configured.",
 };
+
+const answerRefusals: Record<AnswerRefusal, (caller: TailnetNodeId) => string> = {
+  "not a person": (caller) => `This device cannot answer: tailnet node ${caller} is the control plane or one of its nodes, whose pylons call under its identity, and only a person's device may answer. Answer it from your laptop or phone.`,
+  "not a deployer": (caller) => `This device cannot answer: the answer may deploy, so only the control plane's deployers may, and this device (tailnet node ${caller}) is not one. Answer it from a deployer, or add this node to deployers in the control plane's config.`,
+};
+const answerers: Record<Question["answerer"], string> = { person: "You answer.", deployer: "A deployer answers, as the answer may deploy." };
+
+/**
+ * Above the landing card, each question the thread asked: open ones as a card with a button per option, and answered
+ * ones as a line saying what the answer was. As with landing, the page says up front when the answer route would
+ * refuse this device.
+ */
+function questionCards(c: Context, d: ThreadDetail): Html[] {
+  return (d.questions ?? []).map((q) => {
+    if (q.answer !== null) {
+      return html`<section class="landing question answered" data-question="${q.id}" aria-label="Answered question"><div class="question-text">${prose(q.text)}</div>
+<p class="land-meta">Answered "${q.answer.option}" from ${q.answer.by}, ${ago(q.answer.at, c.now)}</p></section>`;
+    }
+    const refusal = c.answerRefusal(q);
+    const buttons = q.options.map((option) => refusal === null
+      ? html`<button type="button" class="btn" data-action="answer" data-thread="${q.thread}" data-question="${q.id}" data-option="${option}" data-confirm="Answer &quot;${option}&quot;? The answer cannot be changed.">${option}</button>`
+      : html`<button type="button" class="btn" data-question="${q.id}" data-option="${option}" disabled>${option}</button>`);
+    return html`<section class="landing question" data-question="${q.id}" aria-label="Needs your decision">
+<div class="land-top"><h2>Needs your decision</h2>${q.reserved !== null && html`<span class="tag">reserved: ${reservedNames[q.reserved]}</span>`}</div>
+<div class="question-text">${prose(q.text)}</div>
+<p class="land-meta">Asked ${ago(q.askedAt, c.now)}. ${answerers[q.answerer]}</p>
+<div class="land-act"><div class="question-options">${buttons}</div>${refusal !== null && html`<p class="error">${answerRefusals[refusal](c.caller)}</p>`}</div>
+</section>`;
+  });
+}
 
 const short = (commit: string) => html`<code title="${commit}">${commit.slice(0, 12)}</code>`;
 

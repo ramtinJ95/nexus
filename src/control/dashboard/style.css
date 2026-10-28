@@ -312,6 +312,12 @@ h4.md-h { font-size: 1.07em; }
 .land-top a { color: var(--accent); overflow-wrap: anywhere; }
 .land-meta, .land-note { margin: 0; color: var(--text-2); font-size: 12.5px; }
 .land-act { display: grid; gap: 6px; justify-items: start; }
+#questions { display: grid; gap: 6px; }
+#questions:empty { display: none; }
+.question-text { display: grid; gap: 6px; }
+.question-text > * { margin: 0; }
+.question-options { display: flex; flex-wrap: wrap; gap: 6px; }
+.question.answered { gap: 4px; }
 .tag-bad { color: var(--del-text); border-color: color-mix(in srgb, var(--bad) 40%, transparent); }
 .tag-ok { color: var(--add-text); border-color: color-mix(in srgb, var(--ok) 40%, transparent); }
 .land-steps { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px; }

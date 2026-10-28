@@ -294,6 +294,41 @@ test("a review held for the person says why on its builder's page, and a deploye
   assert.deepEqual(landed, [fix.id]);
 });
 
+const questionsOf = (page: string) => /<div id="questions" data-live>([\s\S]*?)<\/div>\n<div id="landing"/.exec(page)![1]!;
+
+test("an open question is a card with a button per option, disabled with the reason for a device that may not answer, and an answered question is one line", async (t) => {
+  const s = await seeded(t, landingOptions());
+  const fix = await s.start("acme", "Fix checkout");
+  assert.equal(questionsOf((await s.call("GET", `/threads/${fix.id}`)).text), "", "a thread that asked nothing shows no question region");
+  s.registry.askQuestion({ id: "qn-image", thread: fix.id, text: "Rebuild the pylon image?\n\nIt changes the **base layer**.", options: ["Rebuild", "Not now"], reserved: "image-rebuild", answerer: "deployer", askedAt: Date.now() });
+
+  const card = questionsOf((await s.call("GET", `/threads/${fix.id}`)).text);
+  assert.match(card, /<section class="landing question" data-question="qn-image"/);
+  assert.equal(textOf(card), "Needs your decision reserved: pylon image rebuilds Rebuild the pylon image? It changes the base layer . Asked just now . A deployer answers, as the answer may deploy. Rebuild Not now");
+  assert.match(card, /<strong>base layer<\/strong>/, "the text renders as the conversation's markdown does");
+  const buttons = card.match(/<button [^>]*>/g)!;
+  assert.deepEqual(buttons.map((b) => /data-option="([^"]*)"/.exec(b)![1]), ["Rebuild", "Not now"]);
+  for (const button of buttons) {
+    assert.match(button, /data-action="answer"/);
+    assert.match(button, new RegExp(`data-thread="${fix.id}" data-question="qn-image"`));
+    assert.ok(!button.includes("disabled"));
+  }
+  assert.equal(textOf(/data-confirm="([^"]*)"/.exec(buttons[0]!)![1]!), 'Answer "Rebuild"? The answer cannot be changed.');
+
+  s.callAs(phone);
+  const refused = questionsOf((await s.call("GET", `/threads/${fix.id}`)).text);
+  assert.ok(!refused.includes("data-action"), "a device that is not a deployer gets no working button");
+  assert.equal(refused.match(/<button [^>]*disabled>/g)?.length, 2);
+  assert.match(textOf(refused), /Rebuild Not now This device cannot answer: the answer may deploy, so only the control plane's deployers may, and this device \(tailnet node nPHONE\) is not one\./);
+
+  s.callAs(laptop);
+  assert.equal((await s.call("POST", "/v1/questions/qn-image/answer", { option: "Not now" })).status, 200);
+  const answered = questionsOf((await s.call("GET", `/threads/${fix.id}`)).text);
+  assert.match(answered, /<section class="landing question answered" data-question="qn-image"/);
+  assert.equal(textOf(answered), `Rebuild the pylon image? It changes the base layer . Answered "Not now" from ${laptop}, just now`);
+  assert.ok(!answered.includes("<button"));
+});
+
 test("a review is not offered for landing when its PR closed, or when the control plane has no review loop", async (t) => {
   const s = await seeded(t, { ...landingOptions(), reviews: null });
   const fix = await s.start("acme", "Fix checkout");
