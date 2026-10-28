@@ -518,10 +518,11 @@ export function createPylonVmBackend(options: PylonVmBackendOptions): VmBackend 
     /** Each instance's controller, as it published itself. Its VM runs as its child. */
     async processes() {
       const names = await readdir(join(stateRoot, "instances")).catch((err: unknown) => existsError(err, "ENOENT") ? [] : Promise.reject(err));
+      // A controller that exits mid-read can answer ESRCH. Health leaves out what it cannot read, as it does a busy sensor.
       const found = await Promise.all(names.map(async (name) => {
         const identity = await readIdentity(join(directory(stateRoot, "instances", name), "controller.pid"));
         return identity !== null && await alive(identity) ? [{ pylonId: name as PylonId, pid: identity.pid }] : [];
-      }));
+      }).map((controller) => controller.catch(() => [])));
       return found.flat();
     },
 
