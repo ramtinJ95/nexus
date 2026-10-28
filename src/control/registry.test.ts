@@ -994,7 +994,7 @@ test("a turn running before turn starts were recorded has no known start", async
   const db = new DatabaseSync(path);
   const version = db.prepare("PRAGMA user_version").get()!.user_version as number;
   db.exec(`UPDATE threads SET agent_turn_running = 1; ALTER TABLE threads DROP COLUMN placement; ALTER TABLE threads DROP COLUMN setup; ALTER TABLE threads DROP COLUMN agent_turn_started_at; ALTER TABLE session_activity DROP COLUMN started_at; DROP TABLE reviews; DROP TABLE reviewed_prs;
-    ALTER TABLE claude_workers DROP COLUMN turn_session; ALTER TABLE claude_workers DROP COLUMN turn_at; ALTER TABLE session_activity DROP COLUMN message; ALTER TABLE session_order DROP COLUMN event_ids; PRAGMA user_version = ${version - 16}`);
+    ALTER TABLE claude_workers DROP COLUMN turn_session; ALTER TABLE claude_workers DROP COLUMN turn_at; ALTER TABLE session_activity DROP COLUMN message; ALTER TABLE session_order DROP COLUMN event_ids; PRAGMA user_version = ${version - 17}`);
   db.close();
   const registry = openRegistry(path, () => now);
   t.after(() => registry.close());
@@ -1339,7 +1339,7 @@ test("a registry made when landing asked for a passkey keeps neither passkey tab
   const db = new DatabaseSync(path);
   const version = db.prepare("PRAGMA user_version").get()!.user_version as number;
   db.exec(`CREATE TABLE passkeys (id TEXT PRIMARY KEY, credential_id TEXT NOT NULL UNIQUE, record TEXT NOT NULL) STRICT;
-    CREATE TABLE passkey_codes (hash TEXT PRIMARY KEY, expires_at INTEGER NOT NULL, used_at INTEGER) STRICT; PRAGMA user_version = ${version - 6}`);
+    CREATE TABLE passkey_codes (hash TEXT PRIMARY KEY, expires_at INTEGER NOT NULL, used_at INTEGER) STRICT; PRAGMA user_version = ${version - 7}`);
   db.close();
   openRegistry(path).close();
   const reopened = new DatabaseSync(path);
@@ -1370,4 +1370,28 @@ test("a queued thread's row and its queue record's start commit together, and a 
   assert.throws(() => registry.createThread(thread, pylon, undefined, undefined, true), /no longer queued/, "a started record never starts again");
   assert.deepEqual(registry.queuedThreads().map((r) => r.status), ["started"]);
   assert.throws(() => registry.createThread({ ...thread, id: "th-2" as ThreadId, pylonId: "pylon-th-2" as PylonId }, { ...pylon, pylonId: "pylon-th-2" as PylonId, thread: "th-2" }, undefined, undefined, true), /th-2 is no longer queued/, "a thread with no record is not queued");
+});
+
+test("the migration that adds pipeline items turns the pipeline on for project nexus once, and never back on once it is off", (t) => {
+  const path = tempDb();
+  const registry = openRegistry(path);
+  for (const id of ["nexus", "other"]) registry.createProject({ ...project, id: id as ProjectId });
+  registry.close();
+  const rewind = () => {
+    const db = new DatabaseSync(path);
+    const version = db.prepare("PRAGMA user_version").get()!.user_version as number;
+    db.exec(`DROP TABLE pipeline_items; PRAGMA user_version = ${version - 1}`);
+    db.close();
+  };
+  rewind();
+  const upgraded = openRegistry(path);
+  assert.deepEqual(upgraded.project("nexus" as ProjectId)?.pipeline, { autoStart: true });
+  assert.equal(upgraded.project("other" as ProjectId)?.pipeline, undefined);
+  assert.deepEqual(upgraded.items(), []);
+  upgraded.editProject("nexus" as ProjectId, (p) => ({ ...p, pipeline: null }));
+  upgraded.close();
+  rewind();
+  const again = openRegistry(path);
+  t.after(() => again.close());
+  assert.equal(again.project("nexus" as ProjectId)?.pipeline, null, "the person turned it off, and a rewound registry keeps it off");
 });

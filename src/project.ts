@@ -213,8 +213,14 @@ export interface Project {
    * person sets it, and `enabledBy` is the caller who did, on whose behalf a landing merges and deploys.
    */
   autoReview?: AutoReview | null | undefined;
+  /**
+   * Whether the pipeline turns this project's items into queued threads, and whether it does so on its own or once the
+   * person approves each item. Null is off, which a person set, and an absent field is off too.
+   */
+  pipeline?: PipelineSetting | null | undefined;
 }
 export interface AutoReview { land: boolean; enabledBy: string }
+export interface PipelineSetting { autoStart: boolean }
 /** Templates mirror a remote, so they take a project that has one. */
 export type RemoteProject = Project & { repoUrl: string };
 export const hasRemote = (project: Project): project is RemoteProject => project.repoUrl !== null;
