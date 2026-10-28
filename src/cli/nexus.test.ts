@@ -209,7 +209,7 @@ test("the CLI runs a thread's life through the SOCKS proxy, and --json prints th
   // The first message is human activity, so only the time of the last one moved since the start replied.
   const stable = ({ lastHumanActivityAt: _, ...rest }: Thread) => rest;
   assert.deepEqual(stable(s.registry.thread(thread.id)!), stable(thread));
-  assert.deepEqual(s.fake.calls.at(-1)?.slice(0, 3), ["send", thread.id, "\n  Fix the build  \nand run the tests"]);
+  assert.deepEqual(s.fake.calls.at(-1), ["send", thread.id, "\n  Fix the build  \nand run the tests", `brief:${thread.id}`, "followUp"]);
   assert.deepEqual((await s.json(["threads"])).map(stable), [{ ...stable(thread), attention: null, desired: "running", pylon: { node, actualState: "unknown", failed: null } }],
     "a row carries what the planner wants of the pylon and what its node last reported");
   assert.deepEqual(await s.json(["threads", "--project", "other"]), []);
@@ -1329,7 +1329,7 @@ test("show prints PR metadata and one disabled-watch notice without waking the p
 
 test("deploy and release use the shared release view and wait for both roles", async (t) => {
   const s = await setup(t);
-  assert.equal((await s.nexus(["--version"])).stdout.trim(), "nexus 0.33.0");
+  assert.equal((await s.nexus(["--version"])).stdout.trim(), "nexus 0.34.0");
   assert.equal((await s.nexus(["deploy", "bad"])).code, 64);
   const requested = await s.json(["deploy", "main"]);
   assert.equal(requested.desired.commit, "a".repeat(40));
@@ -1708,6 +1708,22 @@ test("conversation prints a Claude worker's transcript, and send types into its 
   assert.equal((await s.nexus(["send", thread.id, "go", "--steer"])).stdout, `Sent to Claude in ${thread.id}.\n`);
   assert.deepEqual(s.fake.calls.filter(([call]) => call === "send"), [], "the harness is sent nothing");
   assert.match((await s.nexus(["send", "--help"])).stdout, /typed into the Claude worker's session/);
+});
+
+test("start --request-id starts one thread and sends its first message once, however often it is run", async (t) => {
+  const s = await setup(t);
+  const args = ["start", "--project", "acme", "--message", "Fix the build", "--request-id", "start:cli"];
+  const before = s.requests();
+  const first: Thread = await s.json(args);
+  assert.equal(s.requests() - before, 1, "one request starts it with its first message");
+  const again = await s.nexus(args);
+  assert.equal(again.code, 0, again.stderr);
+  assert.equal(again.stdout, `Started ${first.id} on acme: Fix the build\nSent the first message.\n`);
+  assert.deepEqual((await s.json(["threads"])).map((r: Thread) => r.id), [first.id]);
+  assert.deepEqual(s.fake.transcript(first.id).messages.map((m) => m.content), ["Fix the build"]);
+  const other = await s.nexus(["start", "--project", "acme", "--message", "Fix the tests", "--request-id", "start:cli", "--json"]);
+  assert.equal(other.code, 5, "another start under the same request ID is a conflict");
+  assert.match(other.stderr, new RegExp(`request ID start:cli started thread ${first.id} with another body`));
 });
 
 test("start --after queues a thread in one request, and threads, show, start-queued and archive speak of it as queued", async (t) => {

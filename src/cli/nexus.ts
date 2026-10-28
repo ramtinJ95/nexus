@@ -34,7 +34,7 @@ import type { WebSocket } from "ws";
 import { attachTerminal, processTty } from "./attach.ts";
 import { call, CliError, exitCodes, follow, upgrade, type Endpoint, type HostPort } from "./transport.ts";
 
-const version = "0.33.0";
+const version = "0.34.0";
 const defaults = { url: "http://rj-firebat.tailc817d3.ts.net:7470", socks: "localhost:1055" };
 const configFile = () => join(homedir(), ".config", "nexus", "cli.json");
 
@@ -55,8 +55,9 @@ const usage = `nexus ${version}, the Nexus control plane from this Mac
   nexus session close <thread> <pane|id>       a session in no pane by its ID, which \`nexus show\` gives
   nexus attach <thread>                        this terminal on the pylon's Herdr sessions, through the control plane
   nexus start --project P [--title T] [--message M | --claude PROMPT [--model ID]] [--node N|auto] [--branch B] [--commit C]
-              [--cpus n] [--memory GiB] [--disk GiB] [--after THREAD[,THREAD...]]
+              [--cpus n] [--memory GiB] [--disk GiB] [--after THREAD[,THREAD...]] [--request-id ID]
     --after queues it to start once each of those threads' pull requests has merged
+    --request-id makes a repeat of the start answer the thread the first made
   nexus start-queued <thread>                  start a queued thread now, without waiting for the threads it is queued after
   nexus send <thread> <text...> [--steer] [--request-id ID]
     a message to the agent, or typed into the Claude worker's session, which waits for a paused pylon to wake
@@ -1075,7 +1076,7 @@ const commands: Readonly<Record<string, Command>> = {
     args: [0, 0],
     options: {
       model: { type: "string" }, claude: { type: "string" }, project: { type: "string" }, title: { type: "string" }, message: { type: "string" }, node: { type: "string" }, branch: { type: "string" }, commit: { type: "string" },
-      cpus: { type: "string" }, memory: { type: "string" }, disk: { type: "string" }, after: { type: "string" },
+      cpus: { type: "string" }, memory: { type: "string" }, disk: { type: "string" }, after: { type: "string" }, "request-id": { type: "string" },
     },
     async run(api, _, v) {
       const project = str(v, "project");
@@ -1088,20 +1089,16 @@ const commands: Readonly<Record<string, Command>> = {
       if (title === undefined) throw new CliError("invalid", "start needs --title, --message or --claude");
       const optional = Object.fromEntries((["node", "branch", "commit", "claude", "model"] as const).flatMap((key) => v[key] === undefined ? [] : [[key, v[key]]]));
       const resources = resourcesOf(v);
-      const body = { project, title, ...optional, ...resources === undefined ? {} : { resources } };
+      const requestId = str(v, "request-id");
+      // One request: the control plane sends the first message once the thread starts, as the person's.
+      const body = { project, title, ...optional, ...resources === undefined ? {} : { resources }, ...message === undefined ? {} : { message }, ...requestId === undefined ? {} : { requestId } };
       const after = str(v, "after")?.split(",").map((id) => id.trim()).filter((id) => id !== "");
       if (after !== undefined) {
         if (after.length === 0) throw new CliError("invalid", "--after needs a thread");
-        // One request: the control plane keeps the first message and sends it once the thread starts.
-        const q = await api("POST", "/v1/threads", { ...body, after, ...message === undefined ? {} : { message } }) as QueuedThread;
+        const q = await api("POST", "/v1/threads", { ...body, after }) as QueuedThread;
         return { json: q, text: `Queued ${q.id} on ${q.project}: ${q.title}. It starts once ${listed(q.after)} ${q.after.length === 1 ? "has merged its pull request" : "have merged their pull requests"}.` };
       }
       const t = await api("POST", "/v1/threads", body) as Thread;
-      if (message !== undefined) {
-        await send(api, t.id, message, false, `msg:${randomUUID()}`).catch((err: unknown) => {
-          throw err instanceof CliError ? new CliError(err.kind, `started ${t.id}, but its first message was not sent: ${err.message}`, err.status) : err;
-        });
-      }
       return { json: t, text: `Started ${t.id} on ${t.project}: ${t.title}${message === undefined ? "" : "\nSent the first message."}` };
     },
   },
