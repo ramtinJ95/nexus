@@ -3,21 +3,21 @@
   "landing": "Held for you\n#185 Planning threads whose proposals become decision cards ↗\n\nHead 103598e00000 · approved by gpt-6-astra (harness) in round 1 of 5 · .nexus/check passed · no .nexus/verify, so no live check\n\nWhy it waits for you\nAlways needs the person: anything irreversible, as it changes src/control/registry.ts. you may waive\nThe policy reserves this for you, and pressing Land here is you waiving it.\nThe reviewer's findings\n\nNone.\n\n.nexus/check passed at 103598e00000\nLand #185\n\nPressing Land waives what is marked \"you may waive\", for commit 103598e00000 only. Landing checks everything else again.",
   "landButton": "Land #185 at 103598e000000000000000000000000000000000",
   "review": [
-    "Nexus review rv-e94f1556: needs-person, round 1 of 5, by th-9caeb9190fa1 on gpt-6-astra, landing when approved"
+    "Nexus review rv-e94f1556: needs-person, round 1 of 5, by th-8e3c6d7d9d30 on gpt-6-astra, landing when approved"
   ]
 }
 01-show.txt:
-th-6f1eb217ae73  Planning threads
+th-ef6aa6301fa9  Planning threads
 project: nexus
 attention: decision
 status: active
-pylon: pylon-th-6f1eb217ae73 on verify-node, running, observed 0s ago
+pylon: pylon-th-ef6aa6301fa9 on verify-node, running, observed 0s ago
 size: 1 CPUs, 1 GiB memory, 10 GiB disk
 placement: verify-node, the project's default node
 setup: fresh boot runs .nexus/setup, because the control plane could not read .nexus/setup at main: the verify stack reads no remote, so every thread boots fresh
 PR watch: on
 PR #185: Planning threads whose proposals become decision cards — open, checks passing, review none https://github.com/ramtinJ95/nexus/pull/185
-review rv-e94f1556 of PR #185: needs-person, round 1 of 5, reviewer th-9caeb9190fa1 on gpt-6-astra, landing when approved
+review rv-e94f1556 of PR #185: needs-person, round 1 of 5, reviewer th-8e3c6d7d9d30 on gpt-6-astra, landing when approved
 no live check: 103598e00000 has no .nexus/verify, so the landing reads the pull request's statement of what could not be checked live
 needs you: Always needs the person: anything irreversible, as it changes src/control/registry.ts.
 output: branch origin/feat/planning-threads
@@ -28,7 +28,7 @@ output: pull-request https://github.com/ramtinJ95/nexus/pull/185
   "landing": "Held for you\n#185 Planning threads whose proposals become decision cards ↗\n\nHead 103598e00000 · approved by gpt-6-astra (harness) in round 1 of 5 · .nexus/check passed · no .nexus/verify, so no live check\n\nWhy it waits for you\nAlways needs the person: anything irreversible, as it changes src/control/registry.ts. you may waive\nThe policy reserves this for you, and pressing Land here is you waiving it.\nThe reviewer's findings\n\nNone.\n\n.nexus/check passed at 103598e00000\nLand #185\n\nPressing Land waives what is marked \"you may waive\", for commit 103598e00000 only. Landing checks everything else again.",
   "landButton": "Land #185 at 103598e000000000000000000000000000000000",
   "review": [
-    "Nexus review rv-e94f1556: needs-person, round 1 of 5, by th-9caeb9190fa1 on gpt-6-astra, landing when approved"
+    "Nexus review rv-e94f1556: needs-person, round 1 of 5, by th-8e3c6d7d9d30 on gpt-6-astra, landing when approved"
   ]
 }
 03-watch-read-before-the-loop.png: the review is needs-person at round 1, head 103598e000000000000000000000000000000000
@@ -36,7 +36,7 @@ output: pull-request https://github.com/ramtinJ95/nexus/pull/185
   "landing": "Held for you\n#185 Planning threads whose proposals become decision cards ↗\n\nHead 103598e00000 · approved by gpt-6-astra (harness) in round 1 of 5 · .nexus/check passed · no .nexus/verify, so no live check\n\nWhy it waits for you\nAlways needs the person: anything irreversible, as it changes src/control/registry.ts. you may waive\nThe policy reserves this for you, and pressing Land here is you waiving it.\nThe reviewer's findings\n\nNone.\n\n.nexus/check passed at 103598e00000\n\nThe pull request's head is now b3ee8a600000, so 103598e00000 no longer lands. Nexus reviews the new head in a new round, or holds it for you when no round is left.",
   "landButton": "(no Land button)",
   "review": [
-    "Nexus review rv-e94f1556: needs-person, round 1 of 5, by th-9caeb9190fa1 on gpt-6-astra, landing when approved"
+    "Nexus review rv-e94f1556: needs-person, round 1 of 5, by th-8e3c6d7d9d30 on gpt-6-astra, landing when approved"
   ]
 }
 the loop started a round on b3ee8a6000000000000000000000000000000000: true
@@ -45,22 +45,22 @@ the loop started a round on b3ee8a6000000000000000000000000000000000: true
   "landing": "",
   "landButton": "(no Land button)",
   "review": [
-    "Nexus review rv-e94f1556: reviewing, round 2 of 5, by th-9caeb9190fa1 on gpt-6-astra, landing when approved",
+    "Nexus review rv-e94f1556: reviewing, round 2 of 5, by th-8e3c6d7d9d30 on gpt-6-astra, landing when approved",
     "a new round reviews b3ee8a600000, since the pull request's head moved from 103598e00000 after its approval"
   ]
 }
 04-show.txt:
-th-6f1eb217ae73  Planning threads
+th-ef6aa6301fa9  Planning threads
 project: nexus
 attention: none
 status: active
-pylon: pylon-th-6f1eb217ae73 on verify-node, running, observed 0s ago
+pylon: pylon-th-ef6aa6301fa9 on verify-node, running, observed 0s ago
 size: 1 CPUs, 1 GiB memory, 10 GiB disk
 placement: verify-node, the project's default node
 setup: fresh boot runs .nexus/setup, because the control plane could not read .nexus/setup at main: the verify stack reads no remote, so every thread boots fresh
 PR watch: on
 PR #185: Planning threads whose proposals become decision cards — open, checks passing, review none https://github.com/ramtinJ95/nexus/pull/185
-review rv-e94f1556 of PR #185: reviewing, round 2 of 5, reviewer th-9caeb9190fa1 on gpt-6-astra, landing when approved
+review rv-e94f1556 of PR #185: reviewing, round 2 of 5, reviewer th-8e3c6d7d9d30 on gpt-6-astra, landing when approved
 a new round reviews b3ee8a600000, since the pull request's head moved from 103598e00000 after its approval
 output: branch origin/feat/planning-threads
 output: pull-request https://github.com/ramtinJ95/nexus/pull/185
@@ -72,22 +72,22 @@ the review ended again: true
   "landButton": "Land #185 at b3ee8a6000000000000000000000000000000000",
   "review": [
     "a new round reviews b3ee8a600000, since the pull request's head moved from 103598e00000 after its approval",
-    "Nexus review rv-e94f1556: needs-person, round 2 of 5, by th-9caeb9190fa1 on gpt-6-astra, landing when approved",
+    "Nexus review rv-e94f1556: needs-person, round 2 of 5, by th-8e3c6d7d9d30 on gpt-6-astra, landing when approved",
     "a new round reviews b3ee8a600000, since the pull request's head moved from 103598e00000 after its approval"
   ]
 }
 05-show.txt:
-th-6f1eb217ae73  Planning threads
+th-ef6aa6301fa9  Planning threads
 project: nexus
 attention: decision
 status: active
-pylon: pylon-th-6f1eb217ae73 on verify-node, running, observed 0s ago
+pylon: pylon-th-ef6aa6301fa9 on verify-node, running, observed 0s ago
 size: 1 CPUs, 1 GiB memory, 10 GiB disk
 placement: verify-node, the project's default node
 setup: fresh boot runs .nexus/setup, because the control plane could not read .nexus/setup at main: the verify stack reads no remote, so every thread boots fresh
 PR watch: on
 PR #185: Planning threads whose proposals become decision cards — open, checks passing, review none https://github.com/ramtinJ95/nexus/pull/185
-review rv-e94f1556 of PR #185: needs-person, round 2 of 5, reviewer th-9caeb9190fa1 on gpt-6-astra, landing when approved
+review rv-e94f1556 of PR #185: needs-person, round 2 of 5, reviewer th-8e3c6d7d9d30 on gpt-6-astra, landing when approved
 a new round reviews b3ee8a600000, since the pull request's head moved from 103598e00000 after its approval
 no live check: b3ee8a600000 has no .nexus/verify, so the landing reads the pull request's statement of what could not be checked live
 needs you: Always needs the person: anything irreversible, as it changes src/control/registry.ts.
@@ -95,10 +95,10 @@ output: branch origin/feat/planning-threads
 output: pull-request https://github.com/ramtinJ95/nexus/pull/185
 
 06-events-review.txt:
-5 2026-10-28T15:48:12.547Z th-6f1eb217ae73 review.changed {"review":"rv-e94f1556","reviewer":"th-9caeb9190fa1","phase":{"kind":"merging","authorized":null},"round":1}
-6 2026-10-28T15:48:12.549Z th-6f1eb217ae73 review.changed {"review":"rv-e94f1556","reviewer":"th-9caeb9190fa1","phase":{"kind":"needs-person","reasons":["Always needs the person: anything irreversible, as it changes src/control/registry.ts."]},"round":1}
-8 2026-10-28T15:48:16.552Z th-6f1eb217ae73 review.changed {"review":"rv-e94f1556","reviewer":"th-9caeb9190fa1","phase":{"kind":"reviewing"},"round":2}
-12 2026-10-28T15:48:18.552Z th-6f1eb217ae73 review.changed {"review":"rv-e94f1556","reviewer":"th-9caeb9190fa1","phase":{"kind":"checking","startedAt":1793202498552,"thread":null},"round":2}
-13 2026-10-28T15:48:21.552Z th-6f1eb217ae73 review.changed {"review":"rv-e94f1556","reviewer":"th-9caeb9190fa1","phase":{"kind":"merging","authorized":null},"round":2}
-14 2026-10-28T15:48:21.553Z th-6f1eb217ae73 review.changed {"review":"rv-e94f1556","reviewer":"th-9caeb9190fa1","phase":{"kind":"needs-person","reasons":["Always needs the person: anything irreversible, as it changes src/control/registry.ts."]},"round":2}
+5 2026-10-28T15:58:52.079Z th-ef6aa6301fa9 review.changed {"review":"rv-e94f1556","reviewer":"th-8e3c6d7d9d30","phase":{"kind":"merging","authorized":null},"round":1}
+6 2026-10-28T15:58:52.081Z th-ef6aa6301fa9 review.changed {"review":"rv-e94f1556","reviewer":"th-8e3c6d7d9d30","phase":{"kind":"needs-person","reasons":["Always needs the person: anything irreversible, as it changes src/control/registry.ts."]},"round":1}
+8 2026-10-28T15:58:56.086Z th-ef6aa6301fa9 review.changed {"review":"rv-e94f1556","reviewer":"th-8e3c6d7d9d30","phase":{"kind":"reviewing"},"round":2}
+12 2026-10-28T15:58:58.086Z th-ef6aa6301fa9 review.changed {"review":"rv-e94f1556","reviewer":"th-8e3c6d7d9d30","phase":{"kind":"checking","startedAt":1793203138086,"thread":null},"round":2}
+13 2026-10-28T15:59:01.086Z th-ef6aa6301fa9 review.changed {"review":"rv-e94f1556","reviewer":"th-8e3c6d7d9d30","phase":{"kind":"merging","authorized":null},"round":2}
+14 2026-10-28T15:59:01.088Z th-ef6aa6301fa9 review.changed {"review":"rv-e94f1556","reviewer":"th-8e3c6d7d9d30","phase":{"kind":"needs-person","reasons":["Always needs the person: anything irreversible, as it changes src/control/registry.ts."]},"round":2}
 

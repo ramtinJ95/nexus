@@ -1,8 +1,8 @@
-$ nexus events --thread th-6f1eb217ae73 --kind review.changed
-5 2026-10-28T15:48:12.547Z th-6f1eb217ae73 review.changed {"review":"rv-e94f1556","reviewer":"th-9caeb9190fa1","phase":{"kind":"merging","authorized":null},"round":1}
-6 2026-10-28T15:48:12.549Z th-6f1eb217ae73 review.changed {"review":"rv-e94f1556","reviewer":"th-9caeb9190fa1","phase":{"kind":"needs-person","reasons":["Always needs the person: anything irreversible, as it changes src/control/registry.ts."]},"round":1}
-8 2026-10-28T15:48:16.552Z th-6f1eb217ae73 review.changed {"review":"rv-e94f1556","reviewer":"th-9caeb9190fa1","phase":{"kind":"reviewing"},"round":2}
-12 2026-10-28T15:48:18.552Z th-6f1eb217ae73 review.changed {"review":"rv-e94f1556","reviewer":"th-9caeb9190fa1","phase":{"kind":"checking","startedAt":1793202498552,"thread":null},"round":2}
-13 2026-10-28T15:48:21.552Z th-6f1eb217ae73 review.changed {"review":"rv-e94f1556","reviewer":"th-9caeb9190fa1","phase":{"kind":"merging","authorized":null},"round":2}
-14 2026-10-28T15:48:21.553Z th-6f1eb217ae73 review.changed {"review":"rv-e94f1556","reviewer":"th-9caeb9190fa1","phase":{"kind":"needs-person","reasons":["Always needs the person: anything irreversible, as it changes src/control/registry.ts."]},"round":2}
+$ nexus events --thread th-ef6aa6301fa9 --kind review.changed
+5 2026-10-28T15:58:52.079Z th-ef6aa6301fa9 review.changed {"review":"rv-e94f1556","reviewer":"th-8e3c6d7d9d30","phase":{"kind":"merging","authorized":null},"round":1}
+6 2026-10-28T15:58:52.081Z th-ef6aa6301fa9 review.changed {"review":"rv-e94f1556","reviewer":"th-8e3c6d7d9d30","phase":{"kind":"needs-person","reasons":["Always needs the person: anything irreversible, as it changes src/control/registry.ts."]},"round":1}
+8 2026-10-28T15:58:56.086Z th-ef6aa6301fa9 review.changed {"review":"rv-e94f1556","reviewer":"th-8e3c6d7d9d30","phase":{"kind":"reviewing"},"round":2}
+12 2026-10-28T15:58:58.086Z th-ef6aa6301fa9 review.changed {"review":"rv-e94f1556","reviewer":"th-8e3c6d7d9d30","phase":{"kind":"checking","startedAt":1793203138086,"thread":null},"round":2}
+13 2026-10-28T15:59:01.086Z th-ef6aa6301fa9 review.changed {"review":"rv-e94f1556","reviewer":"th-8e3c6d7d9d30","phase":{"kind":"merging","authorized":null},"round":2}
+14 2026-10-28T15:59:01.088Z th-ef6aa6301fa9 review.changed {"review":"rv-e94f1556","reviewer":"th-8e3c6d7d9d30","phase":{"kind":"needs-person","reasons":["Always needs the person: anything irreversible, as it changes src/control/registry.ts."]},"round":2}
 exit 0
