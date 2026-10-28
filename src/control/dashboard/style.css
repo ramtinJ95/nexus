@@ -312,8 +312,8 @@ h4.md-h { font-size: 1.07em; }
 .land-top a { color: var(--accent); overflow-wrap: anywhere; }
 .land-meta, .land-note { margin: 0; color: var(--text-2); font-size: 12.5px; }
 .land-act { display: grid; gap: 6px; justify-items: start; }
-#questions { display: grid; gap: 6px; max-height: 40vh; overflow-y: auto; }
-#questions:empty { display: none; }
+#questions, #judgments { display: grid; gap: 6px; max-height: 40vh; overflow-y: auto; }
+#questions:empty, #judgments:empty { display: none; }
 .question-text { display: grid; gap: 6px; }
 .question-text > * { margin: 0; }
 .question-options { display: flex; flex-wrap: wrap; gap: 6px; }
