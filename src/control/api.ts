@@ -203,6 +203,9 @@ export const maxStreams = 16;
  */
 const pingMs = 15_000;
 
+/** What `GET /v1/whoami` tells a caller about itself: its tailnet node, and what this control plane lets it do. */
+export interface Whoami { node: TailnetNodeId; allowed: boolean; person: boolean; deployer: boolean }
+
 /**
  * A node without its probe's latest observation, which thread detail already reports per pylon. `pylons` sorts the
  * observation's pylons by what they hold, and is null for a node never observed.
@@ -1186,21 +1189,42 @@ export async function startApi(options: ApiOptions): Promise<Api> {
   };
   const health = () => ({ commit: runningCommit, https: { ...httpsState } });
 
+  const callerOf = (req: IncomingMessage) => {
+    const { remoteAddress, remotePort } = req.socket;
+    return remoteAddress === undefined || remotePort === undefined ? Promise.resolve(null) : whois(remoteAddress, remotePort);
+  };
+  /**
+   * whois names the machine, not the program, so a web page open on an allowed laptop is that laptop too. It can
+   * neither send a JSON content type cross-origin without a preflight, which this API never answers, nor reach the
+   * API under its own name.
+   */
+  function checkHost(req: IncomingMessage) {
+    const host = req.headers.host;
+    const hostname = typeof host === "string" ? new URL(`http://${host}`).hostname : undefined;
+    if (hostname === undefined || !hostnames.has(hostname)) throw new HttpError(403, `the API does not answer to host ${req.headers.host}`);
+  }
+
   /** The caller, once it is allowed and asked under one of the API's names. Every request and upgrade passes here. */
   async function admit(req: IncomingMessage): Promise<TailnetNodeId> {
-    const { remoteAddress, remotePort } = req.socket;
-    const caller = remoteAddress === undefined || remotePort === undefined ? null : await whois(remoteAddress, remotePort);
+    const caller = await callerOf(req);
     const workerRoute = decodeURIComponent(new URL(req.url ?? "/", "http://nexus").pathname).startsWith("/v1/deployer/");
     if (caller === null || (workerRoute
       ? !isReporter(registry, options.deployment, caller, req.headers.authorization)
       : !allowed.has(caller))) throw new HttpError(403, "caller is not a tailnet node this control plane allows");
-    // whois names the machine, not the program, so a web page open on an allowed laptop is that laptop too.
-    // It can neither send a JSON content type cross-origin without a preflight, which this API never answers,
-    // nor reach the API under its own name.
-    const host = req.headers.host;
-    const hostname = typeof host === "string" ? new URL(`http://${host}`).hostname : undefined;
-    if (hostname === undefined || !hostnames.has(hostname)) throw new HttpError(403, `the API does not answer to host ${req.headers.host}`);
+    checkHost(req);
     return caller;
+  }
+
+  /**
+   * Any tailnet node may ask who it is, so a device not yet allowed learns the node ID to allow. It learns only its
+   * own ID and its own access, which `tailscale status` and a refused request already tell it.
+   */
+  async function whoami(req: IncomingMessage): Promise<Whoami> {
+    const node = await callerOf(req);
+    if (node === null) throw new HttpError(403, "caller is not a tailnet node");
+    checkHost(req);
+    const person = allowed.has(node) && isPerson(registry, options.deployment, node);
+    return { node, allowed: allowed.has(node), person, deployer: person && canDeploy(registry, options.deployment, node) };
   }
 
   async function handle(req: IncomingMessage, res: ServerResponse) {
@@ -1208,6 +1232,7 @@ export async function startApi(options: ApiOptions): Promise<Api> {
       res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify(health()));
       return;
     }
+    if (req.method === "GET" && req.url === "/v1/whoami") return void send(res, 200, await whoami(req));
     const caller = await admit(req);
     if (req.method !== "GET" && req.headers["content-type"]?.split(";")[0]?.trim() !== "application/json") {
       throw new HttpError(415, "requests that change state must have content-type application/json");

@@ -3,9 +3,11 @@
  * userspace tailscaled, which offers a SOCKS5 proxy and no routes, so each request opens a SOCKS5 CONNECT
  * tunnel to the API and speaks HTTP over it. The proxy resolves the name, as curl's --socks5-hostname does,
  * because only it knows MagicDNS. Without a proxy the CLI connects directly, as on a machine on the tailnet.
+ * An https:// URL speaks TLS inside that connection, to the dashboard's port.
  */
 import { request } from "node:http";
-import { connect, type Socket } from "node:net";
+import { connect, isIP, type Socket } from "node:net";
+import { connect as tlsConnect } from "node:tls";
 import { WebSocket } from "ws";
 
 /** Every way a command fails. Each has its own exit code, so a caller can tell them apart without parsing text. */
@@ -40,11 +42,32 @@ const idleTimeoutMs = 30_000;
 const statusKinds: Readonly<Record<number, ErrorKind>> = { 400: "invalid", 413: "invalid", 403: "refused", 415: "refused", 404: "not-found", 409: "conflict" };
 
 async function open(endpoint: Endpoint, idleMs = idleTimeoutMs): Promise<Socket> {
-  const target: HostPort = { host: endpoint.url.hostname, port: Number(endpoint.url.port || 80) };
-  const socket = await (endpoint.socks === null ? direct(target) : tunnel(endpoint.socks, target));
+  const secure = endpoint.url.protocol === "https:";
+  const target: HostPort = { host: endpoint.url.hostname, port: Number(endpoint.url.port || (secure ? 443 : 80)) };
+  const raw = await (endpoint.socks === null ? direct(target) : tunnel(endpoint.socks, target));
+  const socket = secure ? await handshake(raw, target.host) : raw;
   // Once connected, a silence is the API's, such as a command queued behind a slow one in its pylon, not the proxy's.
-  socket.removeAllListeners("timeout");
+  raw.removeAllListeners("timeout");
   return withIdleTimeout(socket, `the control plane at ${endpoint.url.host}`, idleMs);
+}
+
+/** The raw socket's idle timeout still covers a handshake that hangs. */
+function handshake(raw: Socket, host: string): Promise<Socket> {
+  return new Promise((resolve, reject) => {
+    // `host` is what the certificate must name. SNI takes only a name, never an IP address.
+    const socket = tlsConnect({ socket: raw, host, ...isIP(host) === 0 ? { servername: host } : {} });
+    const fail = (err: Error) => {
+      raw.destroy();
+      reject(err instanceof CliError ? err : new CliError("unreachable", `the TLS handshake with ${host} failed: ${err.message}`));
+    };
+    socket.once("error", fail);
+    raw.once("error", fail);
+    socket.once("secureConnect", () => {
+      socket.off("error", fail);
+      raw.off("error", fail);
+      resolve(socket);
+    });
+  });
 }
 
 /**
@@ -138,7 +161,7 @@ export async function upgrade(endpoint: Endpoint, path: string): Promise<WebSock
   let failure: Error | null = null;
   socket.on("error", (err) => { failure ??= err; });
   return new Promise((resolve, reject) => {
-    const ws = new WebSocket(`ws://${host}${path}`, { createConnection: () => socket, perMessageDeflate: false });
+    const ws = new WebSocket(`${endpoint.url.protocol === "https:" ? "wss" : "ws"}://${host}${path}`, { createConnection: () => socket, perMessageDeflate: false });
     // ws reports a failed handshake as its own error, and the socket's, kept above, says why.
     const failed = (err: Error) => reject(lost(host, failure ?? err));
     ws.on("error", failed);

@@ -10,6 +10,7 @@ import { randomUUID } from "node:crypto";
 import { once } from "node:events";
 import { appendFile, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { createServer as createHttpServer } from "node:http";
+import { createServer as createHttpsServer } from "node:https";
 import { connect, createServer, type Server, type Socket } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -37,11 +38,14 @@ import { repoInitCommand } from "../pylon-vm-backend.ts";
 import type { ByteStream, CommandResult, NodeHealth, NodeName, PylonCommand, PylonId, ServiceFact, StreamEnd, TailnetNodeId } from "../protocol.ts";
 import { checkoutDir } from "../sessions.ts";
 import { claudeProjects, transcriptStart, type ClaudeEntry } from "../claude-transcript.ts";
+import { testCertificate } from "../test-certificate.ts";
 import { call, CliError, follow } from "./transport.ts";
 
 const cli = fileURLToPath(new URL("./nexus.ts", import.meta.url));
 const node = "rj-firebat" as NodeName;
 const laptop = "nLAPTOP" as TailnetNodeId;
+/** Allowed, and a person, but not a deployer. */
+const phone = "nPHONE" as TailnetNodeId;
 /** Only the fake proxy resolves this name, so a call that reaches the API went through it. */
 const apiName = "nexus.test";
 const project: Project = {
@@ -84,9 +88,10 @@ async function until(what: string, predicate: () => boolean) {
 
 /**
  * A SOCKS5 proxy without authentication. A `reply` other than 0 refuses every CONNECT with that code, and "close"
- * hangs up after the greeting instead.
+ * hangs up after the greeting instead. `ports` sends a CONNECT to one port on to another, as to the control plane's
+ * fixed ports.
  */
-async function socksProxy(t: TestContext, reply: number | "close" = 0) {
+async function socksProxy(t: TestContext, reply: number | "close" = 0, ports: Record<number, number> = {}) {
   const connects: string[] = [];
   const server = createServer((client) => {
     client.on("error", () => {});
@@ -99,7 +104,7 @@ async function socksProxy(t: TestContext, reply: number | "close" = 0) {
         const port = req.readUInt16BE(5 + length);
         connects.push(`${host}:${port}`);
         if (reply !== 0) return void client.end(Buffer.from([5, reply, 0, 1, 0, 0, 0, 0, 0, 0]));
-        const upstream = connect(port, host === apiName ? "127.0.0.1" : host, () => {
+        const upstream = connect(ports[port] ?? port, host === apiName ? "127.0.0.1" : host, () => {
           client.write(Buffer.from([5, 0, 0, 1, 127, 0, 0, 1, 0, 0]));
           client.pipe(upstream).pipe(client);
         });
@@ -113,8 +118,10 @@ async function socksProxy(t: TestContext, reply: number | "close" = 0) {
   return { port: await listening(t, server), connects };
 }
 
-async function setup(t: TestContext, setupOptions: { queue?: boolean } = {}) {
+/** `https` also serves the API over TLS on a port of its own, as the dashboard's port, with a certificate for `apiName`. */
+async function setup(t: TestContext, setupOptions: { queue?: boolean; https?: boolean } = {}) {
   const dir = await mkdtemp(join(tmpdir(), "nexus-cli-"));
+  const certificate = setupOptions.https === true ? await testCertificate(dir, apiName) : null;
   const registry = openRegistry(join(dir, "registry.db"));
   registry.upsertNode({ name: node, tailnetHost: "rj-firebat.tail.ts.net", tailnetNodeId: "nFIREBAT" as TailnetNodeId });
   registry.createProject(project);
@@ -153,7 +160,8 @@ async function setup(t: TestContext, setupOptions: { queue?: boolean } = {}) {
     pipeline: items,
     planning: plans,
     deployment: { self: "nFIREBAT" as TailnetNodeId, deployers: new Set([laptop]), keys: {}, resolveMain: async () => "a".repeat(40) },
-    registry, host: "127.0.0.1", port, whois: async () => { requests++; return caller; }, allowed: new Set([laptop]),
+    ...certificate === null ? {} : { https: { port: 0, certificate: async () => certificate } },
+    registry, host: "127.0.0.1", port, whois: async () => { requests++; return caller; }, allowed: new Set([laptop, phone]),
     hostnames: new Set([apiName, "127.0.0.1"]), harness: fake.harness, wake: () => {}, previewPorts: { first: 10200, last: 10299 }, images, usageBackfill: backfill,
     startThread,
     probes: new Map([[node, {
@@ -201,6 +209,10 @@ async function setup(t: TestContext, setupOptions: { queue?: boolean } = {}) {
     nodeHealth(next: typeof health) { health = next; },
     remoteReads(next: typeof read) { read = next; },
     localUrl: `http://127.0.0.1:${api.port}`,
+    /** The TLS port, once the API serves it. */
+    httpsPort: () => api.httpsPort,
+    /** The certificate's file, for NODE_EXTRA_CA_CERTS, as a tailnet certificate is trusted on a real Mac. */
+    certFile: join(dir, "cert.pem"),
     /** Stops the control plane, which drops every connection, and returns a function that starts it again on its port. */
     async stop() {
       const { port } = api;
@@ -329,6 +341,9 @@ test("the URL and the proxy come from the flags, then the environment, then the 
   const unset = { NEXUS_URL: "", NEXUS_SOCKS: "" };
   const dead = `http://127.0.0.1:${await closedPort()}`;
   const config = join(s.home, ".config", "nexus", "cli.json");
+  const none = await s.nexus(["projects"], unset);
+  assert.deepEqual([none.code, none.stderr], [64, "nexus: no control plane is set. Run nexus connect <host> with its tailnet name, or give --url or NEXUS_URL. Run nexus --help for usage\n"], "no URL is built in");
+  assert.deepEqual(await s.json(["projects"], { ...unset, NEXUS_URL: s.localUrl }), [project], "without a proxy the CLI connects directly");
   await mkdir(join(s.home, ".config", "nexus"), { recursive: true });
 
   await writeFile(config, JSON.stringify({ url: s.localUrl, socks: "none" }));
@@ -1175,6 +1190,133 @@ test("an API that stays silent behind a working proxy is named as the culprit, n
   }
 });
 
+test("connect finds the API on the dashboard's HTTPS port, saves it, and the next command uses it", async (t) => {
+  const s = await setup(t, { https: true });
+  await until("the API serves TLS", () => s.httpsPort() !== undefined);
+  const proxy = await socksProxy(t, 0, { 7443: s.httpsPort()!, 7470: s.api.port });
+  const env = { NEXUS_URL: "", NEXUS_SOCKS: "", NODE_EXTRA_CA_CERTS: s.certFile };
+  const config = join(s.home, ".config", "nexus", "cli.json");
+
+  const connected = await s.nexus(["connect", apiName, "--socks", `127.0.0.1:${proxy.port}`], env);
+  assert.equal(connected.code, 0, connected.stderr);
+  assert.equal(connected.stdout, [
+    `Connected to https://${apiName}:7443, saved in ${config}.`,
+    `This device is tailnet node ${laptop}. It`,
+    "  may read threads, projects and nodes",
+    "  may start and message threads",
+    "  may deploy, land reviews and build images",
+    "",
+  ].join("\n"));
+  assert.deepEqual(JSON.parse(await readFile(config, "utf8")), { url: `https://${apiName}:7443`, socks: `127.0.0.1:${proxy.port}` });
+  assert.deepEqual(await s.json(["projects"], env), [project], "the saved URL and proxy reach the API over TLS");
+  assert.deepEqual(proxy.connects.slice(-1), [`${apiName}:7443`]);
+  const thread: Thread = await s.json(["start", "--project", "acme", "--title", "attach over TLS"], env);
+  await s.json(["archive", thread.id], env);
+  const attach = await inTerminal(s.env(env), ["attach", thread.id]);
+  assert.equal(attach.code, 5, attach.screen);
+  assert.match(attach.screen, /is archived, so its pylon stays paused/, "attach's WebSocket reaches the API over TLS too");
+
+  const plain = await s.nexus(["connect", apiName, "--json"], { ...env, NODE_EXTRA_CA_CERTS: "" });
+  assert.equal(plain.code, 0, plain.stderr);
+  assert.deepEqual(JSON.parse(plain.stdout), {
+    url: `http://${apiName}:7470`, socks: `127.0.0.1:${proxy.port}`, config,
+    caller: { node: laptop, allowed: true, person: true, deployer: true },
+  }, "a certificate this device does not trust falls back to HTTP, and the saved proxy is kept");
+  assert.deepEqual(JSON.parse(await readFile(config, "utf8")), { url: `http://${apiName}:7470`, socks: `127.0.0.1:${proxy.port}` });
+});
+
+test("connect checks an IP address URL's certificate against that address", async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), "nexus-cli-ip-"));
+  t.after(() => rm(dir, { recursive: true }));
+  const server = createHttpsServer(await testCertificate(dir, "127.0.0.1"), (req, res) => {
+    res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify(req.url === "/v1/whoami" ? { node: laptop, allowed: true, person: true, deployer: true } : { commit: "a".repeat(40) }));
+  });
+  const url = `https://127.0.0.1:${await listening(t, server)}`;
+  const env = { PATH: process.env.PATH!, HOME: join(dir, "home"), NODE_EXTRA_CA_CERTS: join(dir, "cert.pem") };
+  const res = await new Promise<{ code: number; stderr: string }>((resolve) => execFile(process.execPath, [cli, "connect", url], { env },
+    (err, _stdout, stderr) => resolve({ code: err === null ? 0 : (err as { code: number }).code, stderr })));
+  assert.equal(res.code, 0, res.stderr);
+});
+
+test("connect says what this device may do, and the line that admits it when it may not", async (t) => {
+  const s = await setup(t);
+  const env = { NEXUS_URL: "", NEXUS_SOCKS: "" };
+  const config = join(s.home, ".config", "nexus", "cli.json");
+  const restart = "in /etc/nexus/control.json on the control plane's machine, then run: sudo systemctl restart nexus-control";
+
+  s.callAs(phone);
+  const person = await s.nexus(["connect", s.localUrl, "--socks", "none"], env);
+  assert.equal(person.code, 0, person.stderr);
+  assert.equal(person.stdout, [
+    `Connected to ${s.localUrl}, saved in ${config}.`,
+    `This device is tailnet node ${phone}. It`,
+    "  may read threads, projects and nodes",
+    "  may start and message threads",
+    "  may not deploy, land reviews and build images",
+    `To let it deploy, add "${phone}" to "deployers" ${restart}`,
+    "",
+  ].join("\n"));
+  assert.equal((await s.nexus(["threads"], env)).code, 0, "a person reads threads");
+
+  s.callAs("nSTRANGER" as TailnetNodeId);
+  const stranger = await s.nexus(["connect", s.localUrl], { ...env, NEXUS_URL: "http://elsewhere:7470" });
+  assert.equal(stranger.code, 0, stranger.stderr);
+  assert.equal(stranger.stdout, [
+    `Connected to ${s.localUrl}, saved in ${config}.`,
+    "This device is tailnet node nSTRANGER. It",
+    "  may not read threads, projects and nodes",
+    "  may not start and message threads",
+    "  may not deploy, land reviews and build images",
+    `To let it use Nexus, add "nSTRANGER" to "callers" ${restart}`,
+    `Add it to "deployers" too to let it deploy.`,
+    `NEXUS_URL is set, so it overrides ${config} until you unset it.`,
+    "",
+  ].join("\n"));
+  assert.deepEqual(JSON.parse(await readFile(config, "utf8")), { url: s.localUrl, socks: "none" }, "the URL is saved for once the device is allowed, with the proxy setting kept");
+  const refused = await s.nexus(["threads"], env);
+  assert.deepEqual([refused.code, refused.stderr], [3, "nexus: caller is not a tailnet node this control plane allows\n"]);
+});
+
+test("connect fails without saving when no control plane answers, or one does not answer to the name", async (t) => {
+  const s = await setup(t);
+  const env = { NEXUS_URL: "", NEXUS_SOCKS: "" };
+  const config = join(s.home, ".config", "nexus", "cli.json");
+  const dead = await closedPort();
+  const proxy = await socksProxy(t, 0, { 7443: dead, 7470: dead });
+
+  const down = await s.nexus(["connect", apiName, "--socks", `127.0.0.1:${proxy.port}`], env);
+  assert.equal(down.code, 2);
+  assert.match(down.stderr, new RegExp(`^nexus: no Nexus control plane answers at ${apiName} through the SOCKS proxy at 127\\.0\\.0\\.1:${proxy.port}:\n  https://${apiName}:7443: the SOCKS proxy .+\n  http://${apiName}:7470: the SOCKS proxy .+\n$`));
+  const direct = await s.nexus(["connect", "127.0.0.1"], env);
+  assert.equal(direct.code, 2);
+  assert.match(direct.stderr, /give it with --socks HOST:PORT\n$/);
+
+  const wrongName = await s.nexus(["connect", `http://localhost:${s.api.port}`, "--json"], env);
+  assert.equal(wrongName.code, 3);
+  assert.deepEqual(JSON.parse(wrongName.stderr), {
+    error: `the control plane at http://localhost:${s.api.port} answers, but the API does not answer to host localhost:${s.api.port}. Connect with the name the control plane lists in listen.hostnames, such as its full MagicDNS name`,
+    kind: "refused", status: 403,
+  });
+  assert.equal((await s.nexus(["connect", "rj firebat"], env)).code, 64);
+  assert.deepEqual(JSON.parse((await s.nexus(["connect", "999.999.999.999", "--json"], env)).stderr),
+    { error: "the control plane URL https://999.999.999.999:7443 is not a URL", kind: "invalid", status: null });
+  await assert.rejects(readFile(config), { code: "ENOENT" });
+});
+
+test("connect to a control plane older than whoami saves it and says it cannot tell what this device may do", async (t) => {
+  const old = createHttpServer((req, res) => {
+    const known = req.url === "/v1/health";
+    res.writeHead(known ? 200 : 404, { "content-type": "application/json" }).end(JSON.stringify(known ? { commit: "a".repeat(40) } : { error: `no route ${req.url}` }));
+  });
+  const url = `http://127.0.0.1:${await listening(t, old)}`;
+  const home = await mkdtemp(join(tmpdir(), "nexus-cli-home-"));
+  t.after(() => rm(home, { recursive: true }));
+  const res = await new Promise<{ code: number; stdout: string }>((resolve) => execFile(process.execPath, [cli, "connect", url], { env: { PATH: process.env.PATH!, HOME: home } },
+    (err, stdout) => resolve({ code: err === null ? 0 : (err as { code: number }).code, stdout })));
+  assert.equal(res.code, 0);
+  assert.match(res.stdout, /^Connected to http:\/\/127\.0\.0\.1:\d+, saved in .*\nThis control plane allows this device, and is too old to say whether it may start threads or deploy\./);
+});
+
 test("a config file that cannot be read fails as invalid, in JSON under --json", async (t) => {
   const s = await setup(t);
   // A directory where the file should be.
@@ -1379,7 +1521,7 @@ judgment of failure 814 on ${node}: no verdict yet\n {2}judging since 2026-10-28
 
 test("deploy and release use the shared release view and wait for both roles", async (t) => {
   const s = await setup(t);
-  assert.equal((await s.nexus(["--version"])).stdout.trim(), "nexus 0.40.0");
+  assert.equal((await s.nexus(["--version"])).stdout.trim(), "nexus 0.41.0");
   assert.equal((await s.nexus(["deploy", "bad"])).code, 64);
   const requested = await s.json(["deploy", "main"]);
   assert.equal(requested.desired.commit, "a".repeat(40));

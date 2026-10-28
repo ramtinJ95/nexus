@@ -7,15 +7,15 @@ import { fullCommit, releaseOutcome, type ReleaseView } from "../deploy/model.ts
  * the watch stream. --json prints the API's reply as it is, except where docs/cli.md says otherwise.
  */
 import { randomUUID } from "node:crypto";
-import { readFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { parseArgs, type ParseArgsOptionsConfig } from "node:util";
 import { z } from "zod";
 import type { ImageContent, Message, TextContent } from "@earendil-works/pi-ai";
 import type { ConversationView, EntryRecord, InboxState, LiveState } from "@earendil-works/pi-durable";
-import type { ListeningPort, NodeSummary, OpenedSession, ThreadDetail, ThreadRow, ViewFrame } from "../control/api.ts";
+import type { ListeningPort, NodeSummary, OpenedSession, ThreadDetail, ThreadRow, ViewFrame, Whoami } from "../control/api.ts";
 import type { ImageEntry, ImageOperation, ImagesView } from "../control/image-rollout.ts";
 import type { NodePylons, Placement, Room } from "../control/placement.ts";
 import type { PipelineItem } from "../control/pipeline.ts";
@@ -39,12 +39,14 @@ import type { WebSocket } from "ws";
 import { attachTerminal, processTty } from "./attach.ts";
 import { call, CliError, exitCodes, follow, upgrade, type Endpoint, type HostPort } from "./transport.ts";
 
-const version = "0.40.0";
-const defaults = { url: "http://rj-firebat.tailc817d3.ts.net:7470", socks: "localhost:1055" };
+const version = "0.41.0";
+/** Where `connect` looks for the API on a host: the dashboard's HTTPS port, then the plain HTTP port. */
+const controlPorts = ["https://{host}:7443", "http://{host}:7470"];
 const configFile = () => join(homedir(), ".config", "nexus", "cli.json");
 
 const usage = `nexus ${version}, the Nexus control plane from this Mac
 
+  nexus connect <host>                         find the control plane on a tailnet name or URL, save it, and say what this device may do
   nexus events [--follow] [--since ID] [--thread T] [--project P] [--kind K]...
   nexus threads [--project P] [--all] [--queued]
     threads, then queued ones; deleted ones and cancelled queued ones only with --all, and --queued lists only queued ones
@@ -106,7 +108,8 @@ const usage = `nexus ${version}, the Nexus control plane from this Mac
   nexus --version
 
 Every command takes --json, --url URL and --socks HOST:PORT|none. The URL and proxy come from those flags,
-then NEXUS_URL and NEXUS_SOCKS, then ${configFile()}, then ${defaults.url} through ${defaults.socks}.
+then NEXUS_URL and NEXUS_SOCKS, then ${configFile()}, which \`nexus connect\` writes. Without a proxy the CLI
+connects directly.
 `;
 
 type Values = Record<string, string | boolean | string[] | undefined>;
@@ -939,7 +942,70 @@ const imageCommand = (path: string, args: Command["args"], body: (positionals: r
   },
 });
 
+/** A URL as given, or a tailnet name at each of the control plane's ports. */
+function candidatesOf(host: string): URL[] {
+  if (host.includes("://")) return [controlUrl(host)];
+  if (!/^[A-Za-z0-9.-]+$/.test(host)) throw new CliError("invalid", `${host} is neither a tailnet name, such as rj-firebat or rj-firebat.example.ts.net, nor a URL`);
+  return controlPorts.map((url) => controlUrl(url.replace("{host}", host)));
+}
+
+function connectText(url: string, file: string, caller: Whoami | null): string {
+  const head = `Connected to ${url}, saved in ${file}.`;
+  const overridden = process.env.NEXUS_URL ? [`NEXUS_URL is set, so it overrides ${file} until you unset it.`] : [];
+  if (caller === null) return [head, "This control plane allows this device, and is too old to say whether it may start threads or deploy. Upgrade it, as deploy/README.md describes, and run nexus connect again.", ...overridden].join("\n");
+  const may = (yes: boolean, what: string) => `  ${yes ? "may" : "may not"} ${what}`;
+  const add = (list: string, why: string) => `To let it ${why}, add "${caller.node}" to "${list}" in /etc/nexus/control.json on the control plane's machine, then run: sudo systemctl restart nexus-control`;
+  return [
+    head,
+    `This device is tailnet node ${caller.node}. It`,
+    may(caller.allowed, "read threads, projects and nodes"),
+    may(caller.person, "start and message threads"),
+    may(caller.deployer, "deploy, land reviews and build images"),
+    ...!caller.allowed ? [add("callers", "use Nexus"), `Add it to "deployers" too to let it deploy.`]
+      : !caller.person ? ["It is the control plane's own node or one of its nodes, which never act as a person. Connect from your own device."]
+      : !caller.deployer ? [add("deployers", "deploy")] : [],
+    ...overridden,
+  ].join("\n");
+}
+
 const commands: Readonly<Record<string, Command>> = {
+  connect: {
+    args: [1, 1],
+    async run(_, [host], v) {
+      const file = configFile();
+      const config = await readConfig(file);
+      const socks = socksOf(v, config);
+      const tried: string[] = [];
+      for (const url of candidatesOf(host!)) {
+        const endpoint = { url, socks };
+        try {
+          await call(endpoint, "GET", "/v1/health");
+        } catch (err) {
+          if (!(err instanceof CliError)) throw err;
+          // A control plane refuses health to a caller it does not allow, which whoami then names.
+          if (err.status !== 403) {
+            tried.push(`${url.origin}: ${(err as Error).message}`);
+            continue;
+          }
+        }
+        let caller: Whoami | null;
+        try {
+          caller = await call(endpoint, "GET", "/v1/whoami") as Whoami;
+        } catch (err) {
+          if (!(err instanceof CliError) || (err.status !== 404 && err.status !== 403)) throw err;
+          if (err.status === 403) throw new CliError("refused", `the control plane at ${url.origin} answers, but ${err.message}. Connect with the name the control plane lists in listen.hostnames, such as its full MagicDNS name`, 403);
+          caller = null;
+        }
+        const saved = { ...config, url: url.origin, ...str(v, "socks") === undefined ? {} : { socks: str(v, "socks") } };
+        await mkdir(dirname(file), { recursive: true });
+        await writeFile(file, `${JSON.stringify(saved, null, 2)}\n`);
+        return { json: { url: url.origin, socks: saved.socks ?? null, config: file, caller }, text: connectText(url.origin, file, caller) };
+      }
+      throw new CliError("unreachable", [`no Nexus control plane answers at ${host}${socks === null ? "" : ` through the SOCKS proxy at ${socks.host}:${socks.port}`}:`,
+        ...tried.map((line) => `  ${line}`),
+        socks === null ? "If this device reaches the tailnet only through a SOCKS5 proxy, such as ts-home's userspace tailscaled, give it with --socks HOST:PORT" : ""].join("\n").trimEnd());
+    },
+  },
   events: {
     args: [0, 0],
     options: { follow: { type: "boolean" }, since: { type: "string" }, thread: { type: "string" }, project: { type: "string" }, kind: { type: "string", multiple: true } },
@@ -1404,7 +1470,7 @@ const commands: Readonly<Record<string, Command>> = {
 
 const configSchema = z.strictObject({ url: z.string().optional(), socks: z.string().optional() });
 
-async function readConfig(file: string): Promise<z.infer<typeof configSchema>> {
+async function readConfig(file: string): Promise<Config> {
   let text: string;
   try {
     text = await readFile(file, "utf8");
@@ -1423,20 +1489,31 @@ async function readConfig(file: string): Promise<z.infer<typeof configSchema>> {
   return result.data;
 }
 
-/** Each setting from its flag, then the environment, then the config file, then the default. */
+type Config = z.infer<typeof configSchema>;
+const env = (name: string) => process.env[name] || undefined;
+
+/** Each setting from its flag, then the environment, then the config file. No URL is set until `connect` saves one. */
 async function settings(v: Values): Promise<Endpoint> {
   const config = await readConfig(configFile());
-  const env = (name: string) => process.env[name] || undefined;
-  const url = str(v, "url") ?? env("NEXUS_URL") ?? config.url ?? defaults.url;
-  const socks = str(v, "socks") ?? env("NEXUS_SOCKS") ?? config.socks ?? defaults.socks;
+  const url = str(v, "url") ?? env("NEXUS_URL") ?? config.url;
+  if (url === undefined) throw new CliError("invalid", "no control plane is set. Run nexus connect <host> with its tailnet name, or give --url or NEXUS_URL");
+  return { url: controlUrl(url), socks: socksOf(v, config) };
+}
+
+function socksOf(v: Values, config: Config): HostPort | null {
+  const socks = str(v, "socks") ?? env("NEXUS_SOCKS") ?? config.socks;
+  return socks === undefined || socks === "none" ? null : hostPort(socks);
+}
+
+function controlUrl(url: string): URL {
   let parsed: URL;
   try {
     parsed = new URL(url);
   } catch {
     throw new CliError("invalid", `the control plane URL ${url} is not a URL`);
   }
-  if (parsed.protocol !== "http:") throw new CliError("invalid", `the control plane URL ${url} must be http://, which is what the API serves on the tailnet`);
-  return { url: parsed, socks: socks === "none" ? null : hostPort(socks) };
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") throw new CliError("invalid", `the control plane URL ${url} must be http:// or https://`);
+  return parsed;
 }
 
 function hostPort(value: string): HostPort {
@@ -1480,9 +1557,11 @@ async function run(argv: readonly string[]): Promise<void> {
   if (positionals.length < min || positionals.length > max) {
     throw new CliError("invalid", `${name} takes ${min === max ? min : max === Infinity ? `at least ${min}` : `${min} to ${max}`} argument${max === 1 ? "" : "s"}, got ${positionals.length}`);
   }
-  const target = await settings(values);
-  const result = await command.run((method, path, body, idleMs) => call(target, method, path, body, idleMs), positionals, values,
-    (path, onEvent, signal, onCursor) => follow(target, path, onEvent, signal, onCursor), { connect: (path) => upgrade(target, path) });
+  // Only once a command calls the API, since connect sets the URL rather than reading it.
+  let target: Promise<Endpoint> | undefined;
+  const endpoint = () => target ??= settings(values);
+  const result = await command.run(async (method, path, body, idleMs) => call(await endpoint(), method, path, body, idleMs), positionals, values,
+    async (path, onEvent, signal, onCursor) => follow(await endpoint(), path, onEvent, signal, onCursor), { connect: async (path) => upgrade(await endpoint(), path) });
   if (result !== undefined) process.stdout.write(`${values.json === true ? JSON.stringify(result.json, null, 2) : result.text}\n`);
 }
 
