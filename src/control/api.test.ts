@@ -71,7 +71,7 @@ const claudeSession = "11111111-2222-4333-8444-555555555501";
 const fixture = (await readFile(new URL("../fixtures/claude-transcript.jsonl", import.meta.url), "utf8")).split("\n").filter((line) => line !== "").map((line) => `${line}\n`);
 const usageLimitRecord = (await readFile(new URL("../fixtures/claude-api-errors.jsonl", import.meta.url), "utf8")).split("\n")[0]! + "\n";
 
-async function setup(t: import("node:test").TestContext, options: { gitIdentity?: { name: string; email: string }; https?: import("./api.ts").ApiOptions["https"]; whois?: import("../tailscale.ts").Whois; deployment?: DeploymentOptions; dotfiles?: typeof dotfiles; streamStallMs?: number; attachTiming?: AttachTiming; closeWaitMs?: number; reviews?: ReviewLoop; images?: (registry: Registry) => ImageRollout; queue?: boolean; pipeline?: boolean; usageBackfill?: (registry: Registry) => UsageBackfillJob } = {}) {
+async function setup(t: import("node:test").TestContext, options: { gitIdentity?: { name: string; email: string }; https?: import("./api.ts").ApiOptions["https"]; whois?: import("../tailscale.ts").Whois; deployment?: DeploymentOptions | null; dotfiles?: typeof dotfiles; streamStallMs?: number; attachTiming?: AttachTiming; closeWaitMs?: number; reviews?: ReviewLoop; images?: (registry: Registry) => ImageRollout; queue?: boolean; pipeline?: boolean; usageBackfill?: (registry: Registry) => UsageBackfillJob } = {}) {
   const registry = openRegistry(join(dir, `${randomUUID()}.db`));
   const images = options.images?.(registry);
   const backfill = options.usageBackfill?.(registry);
@@ -114,8 +114,10 @@ async function setup(t: import("node:test").TestContext, options: { gitIdentity?
       await admitted;
       return caller;
     }),
-    allowed: new Set([laptop, phone, "nFIREBAT" as TailnetNodeId]),
-    ...(options.deployment === undefined ? {} : { deployment: options.deployment }),
+    // infra-testbench is allowed as a node in control.json's callers would be, so a test can show the API still tells it from a person.
+    allowed: new Set([laptop, phone, "nFIREBAT" as TailnetNodeId, "nTESTBENCH" as TailnetNodeId]),
+    // The control plane runs on rj-firebat and deploys nothing unless a test says so. null leaves deployments off.
+    ...(options.deployment === null ? {} : { deployment: options.deployment ?? { self: "nFIREBAT" as TailnetNodeId, deployers: new Set(), keys: {} } }),
     ...(options.reviews === undefined ? {} : { reviews: options.reviews }),
     ...(queue === null ? {} : { queue }),
     ...(items === null ? {} : { pipeline: items }),
@@ -3136,8 +3138,8 @@ test("an item is added to a project the pipeline runs for, becomes a queued thre
 
   s.callAs("nFIREBAT" as TailnetNodeId);
   assert.equal((await s.call("PATCH", "/v1/projects/acme", { pipeline: { autoStart: true } })).status, 403, "the control plane cannot turn approvals off");
-  assert.equal((await s.call("POST", "/v1/threads", { project: "acme", title: "X", requestId: "pipeline:it-000000000000" })).status, 400, "an item's request ID is the pipeline's own");
   s.callAs(laptop);
+  assert.equal((await s.call("POST", "/v1/threads", { project: "acme", title: "X", requestId: "pipeline:it-000000000000" })).status, 400, "an item's request ID is the pipeline's own");
   const approving = await s.call("PATCH", "/v1/projects/acme", { pipeline: { autoStart: false } });
   assert.deepEqual(approving.body.pipeline, { autoStart: false });
   const a = await s.call("POST", "/v1/items", { project: "acme", title: "A", message: "Build A." });
@@ -3188,6 +3190,36 @@ async function withQueue(t: import("node:test").TestContext) {
   assert.equal(first.status, 201, JSON.stringify(first.body));
   return { ...s, first: first.body as Thread };
 }
+
+test("only a person starts a thread, starts a queued one now or messages one, never the control node, an infrastructure node or a pylon", async (t) => {
+  const s = await withQueue(t);
+  const testbench = "nTESTBENCH" as TailnetNodeId;
+  s.registry.upsertNode({ name: "infra-testbench" as NodeName, tailnetHost: "infra-testbench.tail.ts.net", tailnetNodeId: testbench });
+  const queued = (await s.call("POST", "/v1/threads", { project: "acme", title: "Then", after: [s.first.id] })).body as QueuedThread;
+  // A pylon's request leaves through its node, so whois names that node.
+  const pylonNode = s.registry.nodes().find((n) => n.name === s.registry.pylon(s.first.pylonId)!.node)!.tailnetNodeId;
+  const routes = [
+    ["start a thread", "/v1/threads", { project: "acme", title: "Another" }, 201],
+    ["start a queued thread", `/v1/threads/${queued.id}/start`, undefined, 201],
+    ["message a thread", `/v1/threads/${s.first.id}/messages`, { text: "Go.", requestId: "msg:1" }, 202],
+  ] as const;
+  for (const [who, caller] of [["the control node", "nFIREBAT" as TailnetNodeId], ["an infrastructure node", testbench], ["a pylon", pylonNode]] as const) {
+    s.callAs(caller);
+    for (const [action, path, body] of routes) {
+      const error = `caller may not ${action}: only a person may, never the control plane, infrastructure nodes or pylons`;
+      assert.deepEqual(await s.call("POST", path, body), { status: 403, body: { error } }, `${who} may not ${action}`);
+    }
+  }
+  assert.equal(s.calls.length, 1, "no refused request started or messaged a thread");
+  assert.equal(s.registry.queuedThread(queued.id)?.status, "queued");
+
+  s.callAs(phone);
+  for (const [action, path, body, status] of routes) {
+    const answer = await s.call("POST", path, body);
+    assert.equal(answer.status, status, `a person who is not a deployer may ${action}: ${JSON.stringify(answer.body)}`);
+  }
+  assert.deepEqual(s.calls.map((c) => c[0]), ["start", "start", "start", "send"]);
+});
 
 test("a start after other threads is queued with no row or pylon, until start-queued starts it as any start", async (t) => {
   const s = await withQueue(t);
@@ -3405,14 +3437,20 @@ test("a person answers a question, a deployer question needs a deployer, and no 
   assert.deepEqual(after.questions.map((q) => [q.id, q.answer?.option, q.answer?.by]), [["qn-deployer", "Rebuild", laptop], ["qn-person", "Not now", phone]]);
 });
 
-test("without deployment options the control node is unknown, so no one answers a question", async (t) => {
-  const s = await withThread(t);
+test("without deployment options the control node is unknown, so no one answers a question or starts or messages a thread", async (t) => {
+  const s = await setup(t, { deployment: null });
+  assert.equal((await s.call("POST", "/v1/projects", project)).status, 201);
+  assert.equal((await s.call("POST", "/v1/images", image)).status, 201);
+  s.registry.setCurrentImage(image.id as ImageId);
+  const thread = await s.startThread({ project: "acme", title: "Fix checkout" }, laptop);
   for (const answerer of ["person", "deployer"] as const) {
-    s.registry.askQuestion({ id: `qn-${answerer}`, thread: s.thread.id, text: "Go?", options: ["Yes", "No"], reserved: null, answerer, askedAt: 1 });
+    s.registry.askQuestion({ id: `qn-${answerer}`, thread: thread.id, text: "Go?", options: ["Yes", "No"], reserved: null, answerer, askedAt: 1 });
   }
   for (const caller of [laptop, "nFIREBAT" as TailnetNodeId]) {
     s.callAs(caller);
     for (const id of ["qn-person", "qn-deployer"]) assert.equal((await s.call("POST", `/v1/questions/${id}/answer`, { option: "Yes" })).status, 403, `${caller} answered ${id}`);
+    assert.equal((await s.call("POST", "/v1/threads", { project: "acme", title: "Another" })).status, 403, `${caller} started a thread`);
+    assert.equal((await s.call("POST", `/v1/threads/${thread.id}/messages`, { text: "Go." })).status, 403, `${caller} messaged a thread`);
   }
 });
 
