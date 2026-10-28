@@ -6,7 +6,7 @@ bare start => {"id":"<bare>","title":"Bare","project":"acme","pylonId":"<bare py
 harness calls: [["start",{"threadId":"<harness>","pylonId":"<harness pylon>"}],["send","<harness>","first message","brief:<harness>","followUp"]]
 
 ## harness thread, active
-GET /v1/threads/<harness> => 200 application/json {"thread":{"id":"<harness>","title":"Harness","project":"acme","pylonId":"<harness pylon>","status":"active","conversationId":"1","startedBy":"nLAPTOP","createdAt":1793102401000,"agentTurnRunning":false,"lastAgentActivityAt":0,"lastHumanActivityAt":1793102401000,"seenAt":null,"lastReplyAt":null,"placement":{"how":"default","node":"rj-firebat"},"setup":{"how":"fresh","reason":"the control plane could not read .nexus/setup at main: no remote"},"working":false},"attention":null,"seenAt":null,"lastReplyAt":null,"desired":"running","pylon":{"grantsOutdated":false,"id":"<harness pylon>","node":"rj-firebat","failed":null,"observedAt":"<time>","resources":{"cpus":2,"memoryGiB":4,"diskGiB":10},"actualState":"running","retryRefused":null},"sessions":[],"previews":[],"ports":[],"outputs":[],"prWatch":{"enabled":false,"stopped":false,"error":null},"pullRequests":[],"review":null,"attach":"herdr --session nexus","agent":{"parkedTasks":0}}
+GET /v1/threads/<harness> => 200 application/json {"thread":{"id":"<harness>","title":"Harness","project":"acme","pylonId":"<harness pylon>","status":"active","conversationId":"1","startedBy":"nLAPTOP","createdAt":1793102401000,"agentTurnRunning":false,"lastAgentActivityAt":0,"lastHumanActivityAt":1793102401000,"seenAt":null,"lastReplyAt":null,"placement":{"how":"default","node":"rj-firebat"},"setup":{"how":"fresh","reason":"the control plane could not read .nexus/setup at main: no remote"},"working":false},"attention":null,"seenAt":null,"lastReplyAt":null,"desired":"running","pylon":{"grantsOutdated":false,"id":"<harness pylon>","node":"rj-firebat","failed":null,"observedAt":"<time>","resources":{"cpus":2,"memoryGiB":4,"diskGiB":10},"actualState":"running","retryRefused":null},"sessions":[],"previews":[],"ports":[],"outputs":[],"prWatch":{"enabled":false,"stopped":false,"error":null},"pullRequests":[],"review":null,"questions":[],"attach":"herdr --session nexus","agent":{"parkedTasks":0}}
 GET /v1/threads/<harness>/conversation => 200 application/json {"conversation":{"id":1},"entries":[{"id":1,"conversationId":1,"kind":"pi.user","model":[{"role":"user","content":"first message","timestamp":1793102401000}]},{"id":2,"conversationId":1,"kind":"pi.assistant","model":[{"role":"assistant","content":[{"type":"text","text":"On it."}],"api":"x","provider":"openai","model":"gpt-6-astra","usage":{},"stopReason":"stop","timestamp":1793102404000}]}],"docs":{}}
 GET /v1/threads/<harness>/events => 200 text/event-stream no-store 
   first event: data: {"entries":[{"id":1,"conversationId":1,"kind":"pi.user","model":[{"role":"user","content":"first message","timestamp":1793102401000}]},{"id":2,"conversationId":1,"kind":"pi.assistant","model":[{"role":"assistant","content":[{"type":"text","text":"On it."}],"api":"x","provider":"openai","model":"gpt-6-astra","usage":{},"stopReason":"stop","timestamp":1793102404000}]}]}
@@ -22,8 +22,8 @@ GET /threads/<harness> => 200 text/html; charset=utf-8
   | <meta name="color-scheme" content="light dark">
   | <title>Harness · Nexus</title>
   | <link rel="icon" href="/assets/favicon.svg?v=0e503e8ed8b3" type="image/svg+xml">
-  | <link rel="stylesheet" href="/assets/style.css?v=4e3eec062d92">
-  | <script type="module" src="/assets/client.js?v=39600a0a5fb1"></script>
+  | <link rel="stylesheet" href="/assets/style.css?v=3aead6b225ce">
+  | <script type="module" src="/assets/client.js?v=90cd6b1d71be"></script>
   | </head>
   | <body>
   | <div class="app has-inspect">
@@ -63,6 +63,7 @@ GET /threads/<harness> => 200 text/html; charset=utf-8
   | <div class="dock">
   | <p id="action-error" class="error" role="alert" hidden></p>
   | <p id="action-status" class="comp-note" role="status" hidden></p>
+  | <div id="questions" data-live></div>
   | <div id="landing" data-live></div>
   | <div id="run" data-live></div>
   | <div id="composer" data-live><form id="prompt" class="composer" data-thread="<harness>">
@@ -194,7 +195,7 @@ GET /threads/<harness> => 200 text/html; charset=utf-8
   | 
 
 ## claude thread, active
-GET /v1/threads/<claude> => 200 application/json {"thread":{"id":"<claude>","title":"Claude","project":"acme","pylonId":"<claude pylon>","status":"active","conversationId":null,"startedBy":"nLAPTOP","createdAt":1793102402000,"agentTurnRunning":false,"lastAgentActivityAt":0,"lastHumanActivityAt":1793102402000,"seenAt":null,"lastReplyAt":null,"placement":{"how":"default","node":"rj-firebat"},"setup":{"how":"fresh","reason":"the control plane could not read .nexus/setup at main: no remote"},"working":false},"claudeWorker":{"model":"claude-sonnet-5-5","state":"started"},"attention":null,"seenAt":null,"lastReplyAt":null,"desired":"running","pylon":{"grantsOutdated":false,"id":"<claude pylon>","node":"rj-firebat","failed":null,"observedAt":"<time>","resources":{"cpus":2,"memoryGiB":4,"diskGiB":10},"actualState":"running","retryRefused":null},"sessions":[],"previews":[],"ports":[],"outputs":[],"prWatch":{"enabled":false,"stopped":false,"error":null},"pullRequests":[],"review":null,"attach":"herdr --session nexus","agent":null}
+GET /v1/threads/<claude> => 200 application/json {"thread":{"id":"<claude>","title":"Claude","project":"acme","pylonId":"<claude pylon>","status":"active","conversationId":null,"startedBy":"nLAPTOP","createdAt":1793102402000,"agentTurnRunning":false,"lastAgentActivityAt":0,"lastHumanActivityAt":1793102402000,"seenAt":null,"lastReplyAt":null,"placement":{"how":"default","node":"rj-firebat"},"setup":{"how":"fresh","reason":"the control plane could not read .nexus/setup at main: no remote"},"working":false},"claudeWorker":{"model":"claude-sonnet-5-5","state":"started"},"attention":null,"seenAt":null,"lastReplyAt":null,"desired":"running","pylon":{"grantsOutdated":false,"id":"<claude pylon>","node":"rj-firebat","failed":null,"observedAt":"<time>","resources":{"cpus":2,"memoryGiB":4,"diskGiB":10},"actualState":"running","retryRefused":null},"sessions":[],"previews":[],"ports":[],"outputs":[],"prWatch":{"enabled":false,"stopped":false,"error":null},"pullRequests":[],"review":null,"questions":[],"attach":"herdr --session nexus","agent":null}
 GET /v1/threads/<claude>/conversation => 200 application/json {"kind":"claude","session":"<uuid-1>","entries":[{"kind":"prompt","at":1792966490563,"text":"Do these steps one at a time, each as its own tool call: 1) write hello.py printing hi, 2) run python3 hello.py, 3) run the command false (it will fail, that is fine), 4) use the Agent tool with a general-purpose subagent to count lines in hello.py, 5) sleep 40 seconds with Bash, 6) reply with a short summary as a markdown list.","from":"person"},{"kind":"tool","at":1792966493018,"id":"toolu_01RVp1H7t5g1hR9G6LHi7PDN","name":"Write","input":{"file_path":"/home/user/workspace/repo/hello.py","content":"print(\"hi\")\n"}},{"kind":"result","at":1792966493127,"toolUseId":"toolu_01RVp1H7t5g1hR9G6LHi7PDN","output":"File created successfully at: /home/user/workspace/repo/hello.py (file state is current in your context — no need to Read it back)","isError":false},{"kind":"tool","at":1792966494433,"id":"toolu_01X7GimSVATvheFbNYdJpJd9","name":"Bash","input":{"command":"python3 /home/user/workspace/repo/hello.py"}},{"kind":"result","at":1792966494551,"toolUseId":"toolu_01X7GimSVATvheFbNYdJpJd9","output":"hi","isError":false},{"kind":"tool","at":1792966495603,"id":"toolu_01QNi9YpoZobQfT8pisCWg88","name":"Bash","input":{"command":"false"}},{"kind":"result","at":1792966495627,"toolUseId":"toolu_01QNi9YpoZobQfT8pisCWg88","output":"Exit code 1","isError":true},{"kind":"tool","at":1792966497278,"id":"toolu_01C5X2SfNLEsDyRj2CKSyR3E","name":"Agent","input":{"description":"Count lines in hello.py","subagent_type":"general-purpose","prompt":"Count the number of lines in /home/user/workspace/repo/hello.py and report the number."}},{"kind":"result","at":1792966497384,"toolUseId":"toolu_01C5X2SfNLEsDyRj2CKSyR3E","output":"Started in the background","isError":false},{"kind":"tool","at":1792966499009,"id":"toolu_016tWgpGGCnEMvCexbX4CGf9","name":"Bash","input":{"command":"sleep 40","timeout":60000}},{"kind":"result","at":1792966499021,"toolUseId":"toolu_016tWgpGGCnEMvCexbX4CGf9","output":"<tool_use_error>Blocked: standalone sleep 40. To wait for a condition, use Monitor with an until-loop (e.g. `until <check>; do sleep 2; done`). To wait for a command you started, use run_in_background: true. Do not chain shorter sleeps to work around this block.</tool_use_error>","isError":true},{"kind":"queue","at":1792966500780,"op":"enqueue","text":"<task-notification>\n<task-id>a121649411f13f507</task-id>\n<tool-use-id>toolu_01C5X2SfNLEsDyRj2CKSyR3E</tool-use-id>\n<output-file>/tmp/claude-1000/-home-user-workspace-repo/<uuid-1>/tasks/a121649411f13f507.output</output-file>\n<status>completed</status>\n<summary>Agent \"Count lines in hello.py\" finished</summary>\n<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>\n<result>The file `/home/user/workspace/repo/hello.py` has **1** line, according to `wc -l`.</result>\n<usage><subagent_tokens>24712</subagent_tokens><tool_uses>1</tool_uses><duration_ms>3486</duration_ms></usage>\n</task-notification>"},{"kind":"reply","at":1792966500838,"text":"The foreground `sleep 40` was blocked, so I'm running it in the background instead. The subagent is still counting lines."},{"kind":"result","at":1792966501288,"toolUseId":"toolu_01S7wDMAwvUA7vjJFKi7mhf7","output":"Command running in background with ID: b0xx2eywe. Output is being written to: /tmp/claude-1000/-home-user-workspace-repo/<uuid-1>/tasks/b0xx2eywe.output. You will be notified when it completes — do not poll that file or sleep while waiting. Read the file only if the user asks for progress, or if you need a line it prints before you can go on, such as a server's ready line or port.","isError":false},{"kind":"queue","at":1792966501380,"op":"remove","text":"<task-notification>\n<task-id>a121649411f13f507</task-id>\n<tool-use-id>toolu_01C5X2SfNLEsDyRj2CKSyR3E</tool-use-id>\n<output-file>/tmp/claude-1000/-home-user-workspace-repo/<uuid-1>/tasks/a121649411f13f507.output</output-file>\n<status>completed</status>\n<summary>Agent \"Count lines in hello.py\" finished</summary>\n<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>\n<result>The file `/home/user/workspace/repo/hello.py` has **1** line, according to `wc -l`.</result>\n<usage><subagent_tokens>24712</subagent_tokens><tool_uses>1</tool_uses><duration_ms>3486</duration_ms></usage>\n</task-notification>"},{"kind":"task","at":1792966500779,"toolUseId":"toolu_01C5X2SfNLEsDyRj2CKSyR3E","status":"completed","summary":"Agent \"Count lines in hello.py\" finished","result":"The file `/home/user/workspace/repo/hello.py` has **1** line, according to `wc -l`."}],"dropped":0,"readAt":1793102404000,"working":false,"usageLimit":null}
 GET /v1/threads/<claude>/events => 409 application/json no-store {"error":"thread <claude> has no conversation"}
 GET /v1/threads/<claude>/claude/events => 200 text/event-stream no-store 
@@ -210,8 +211,8 @@ GET /threads/<claude> => 200 text/html; charset=utf-8
   | <meta name="color-scheme" content="light dark">
   | <title>Claude · Nexus</title>
   | <link rel="icon" href="/assets/favicon.svg?v=0e503e8ed8b3" type="image/svg+xml">
-  | <link rel="stylesheet" href="/assets/style.css?v=4e3eec062d92">
-  | <script type="module" src="/assets/client.js?v=39600a0a5fb1"></script>
+  | <link rel="stylesheet" href="/assets/style.css?v=3aead6b225ce">
+  | <script type="module" src="/assets/client.js?v=90cd6b1d71be"></script>
   | </head>
   | <body>
   | <div class="app has-inspect">
@@ -309,6 +310,7 @@ GET /threads/<claude> => 200 text/html; charset=utf-8
   | <div class="dock">
   | <p id="action-error" class="error" role="alert" hidden></p>
   | <p id="action-status" class="comp-note" role="status" hidden></p>
+  | <div id="questions" data-live></div>
   | <div id="landing" data-live></div>
   | <div id="run" data-live></div>
   | <div id="composer" data-live><form id="prompt" class="composer" data-thread="<claude>" data-claude>
@@ -440,7 +442,7 @@ GET /threads/<claude> => 200 text/html; charset=utf-8
   | 
 
 ## pending thread, active
-GET /v1/threads/<pending> => 200 application/json {"thread":{"id":"<pending>","title":"Pending","project":"acme","pylonId":"<pending pylon>","status":"active","conversationId":null,"startedBy":"nLAPTOP","createdAt":1793102403000,"agentTurnRunning":false,"lastAgentActivityAt":0,"lastHumanActivityAt":1793102403000,"seenAt":null,"lastReplyAt":null,"placement":{"how":"default","node":"rj-firebat"},"setup":{"how":"fresh","reason":"the control plane could not read .nexus/setup at main: no remote"},"working":false},"claudeWorker":{"model":"claude-opus-5-5","state":"pending"},"attention":null,"seenAt":null,"lastReplyAt":null,"desired":"running","pylon":{"grantsOutdated":false,"id":"<pending pylon>","node":"rj-firebat","failed":null,"observedAt":"<time>","resources":{"cpus":2,"memoryGiB":4,"diskGiB":10},"actualState":"running","retryRefused":null},"sessions":[],"previews":[],"ports":[],"outputs":[],"prWatch":{"enabled":false,"stopped":false,"error":null},"pullRequests":[],"review":null,"attach":"herdr --session nexus","agent":null}
+GET /v1/threads/<pending> => 200 application/json {"thread":{"id":"<pending>","title":"Pending","project":"acme","pylonId":"<pending pylon>","status":"active","conversationId":null,"startedBy":"nLAPTOP","createdAt":1793102403000,"agentTurnRunning":false,"lastAgentActivityAt":0,"lastHumanActivityAt":1793102403000,"seenAt":null,"lastReplyAt":null,"placement":{"how":"default","node":"rj-firebat"},"setup":{"how":"fresh","reason":"the control plane could not read .nexus/setup at main: no remote"},"working":false},"claudeWorker":{"model":"claude-opus-5-5","state":"pending"},"attention":null,"seenAt":null,"lastReplyAt":null,"desired":"running","pylon":{"grantsOutdated":false,"id":"<pending pylon>","node":"rj-firebat","failed":null,"observedAt":"<time>","resources":{"cpus":2,"memoryGiB":4,"diskGiB":10},"actualState":"running","retryRefused":null},"sessions":[],"previews":[],"ports":[],"outputs":[],"prWatch":{"enabled":false,"stopped":false,"error":null},"pullRequests":[],"review":null,"questions":[],"attach":"herdr --session nexus","agent":null}
 GET /v1/threads/<pending>/conversation => 200 application/json {"kind":"claude","session":null,"entries":[],"dropped":0,"readAt":null,"working":false,"usageLimit":null}
 GET /v1/threads/<pending>/events => 409 application/json no-store {"error":"thread <pending> has no conversation"}
 GET /v1/threads/<pending>/claude/events => 200 text/event-stream no-store 
@@ -456,8 +458,8 @@ GET /threads/<pending> => 200 text/html; charset=utf-8
   | <meta name="color-scheme" content="light dark">
   | <title>Pending · Nexus</title>
   | <link rel="icon" href="/assets/favicon.svg?v=0e503e8ed8b3" type="image/svg+xml">
-  | <link rel="stylesheet" href="/assets/style.css?v=4e3eec062d92">
-  | <script type="module" src="/assets/client.js?v=39600a0a5fb1"></script>
+  | <link rel="stylesheet" href="/assets/style.css?v=3aead6b225ce">
+  | <script type="module" src="/assets/client.js?v=90cd6b1d71be"></script>
   | </head>
   | <body>
   | <div class="app has-inspect">
@@ -497,6 +499,7 @@ GET /threads/<pending> => 200 text/html; charset=utf-8
   | <div class="dock">
   | <p id="action-error" class="error" role="alert" hidden></p>
   | <p id="action-status" class="comp-note" role="status" hidden></p>
+  | <div id="questions" data-live></div>
   | <div id="landing" data-live></div>
   | <div id="run" data-live></div>
   | <div id="composer" data-live><form id="prompt" class="composer" data-thread="<pending>" data-claude>
@@ -628,7 +631,7 @@ GET /threads/<pending> => 200 text/html; charset=utf-8
   | 
 
 ## bare thread, active
-GET /v1/threads/<bare> => 200 application/json {"thread":{"id":"<bare>","title":"Bare","project":"acme","pylonId":"<bare pylon>","status":"active","conversationId":null,"startedBy":"nLAPTOP","createdAt":1793102404000,"agentTurnRunning":false,"lastAgentActivityAt":0,"lastHumanActivityAt":1793102404000,"seenAt":null,"lastReplyAt":null,"placement":{"how":"default","node":"rj-firebat"},"setup":{"how":"fresh","reason":"the control plane could not read .nexus/setup at main: no remote"},"working":false},"attention":null,"seenAt":null,"lastReplyAt":null,"desired":"running","pylon":{"grantsOutdated":false,"id":"<bare pylon>","node":"rj-firebat","failed":null,"observedAt":"<time>","resources":{"cpus":2,"memoryGiB":4,"diskGiB":10},"actualState":"running","retryRefused":null},"sessions":[],"previews":[],"ports":[],"outputs":[],"prWatch":{"enabled":false,"stopped":false,"error":null},"pullRequests":[],"review":null,"attach":"herdr --session nexus","agent":null}
+GET /v1/threads/<bare> => 200 application/json {"thread":{"id":"<bare>","title":"Bare","project":"acme","pylonId":"<bare pylon>","status":"active","conversationId":null,"startedBy":"nLAPTOP","createdAt":1793102404000,"agentTurnRunning":false,"lastAgentActivityAt":0,"lastHumanActivityAt":1793102404000,"seenAt":null,"lastReplyAt":null,"placement":{"how":"default","node":"rj-firebat"},"setup":{"how":"fresh","reason":"the control plane could not read .nexus/setup at main: no remote"},"working":false},"attention":null,"seenAt":null,"lastReplyAt":null,"desired":"running","pylon":{"grantsOutdated":false,"id":"<bare pylon>","node":"rj-firebat","failed":null,"observedAt":"<time>","resources":{"cpus":2,"memoryGiB":4,"diskGiB":10},"actualState":"running","retryRefused":null},"sessions":[],"previews":[],"ports":[],"outputs":[],"prWatch":{"enabled":false,"stopped":false,"error":null},"pullRequests":[],"review":null,"questions":[],"attach":"herdr --session nexus","agent":null}
 GET /v1/threads/<bare>/conversation => 409 application/json {"error":"thread <bare> has no conversation"}
 GET /v1/threads/<bare>/events => 409 application/json no-store {"error":"thread <bare> has no conversation"}
 GET /v1/threads/<bare>/claude/events => 409 application/json no-store {"error":"thread <bare> has no Claude worker"}
@@ -642,8 +645,8 @@ GET /threads/<bare> => 200 text/html; charset=utf-8
   | <meta name="color-scheme" content="light dark">
   | <title>Bare · Nexus</title>
   | <link rel="icon" href="/assets/favicon.svg?v=0e503e8ed8b3" type="image/svg+xml">
-  | <link rel="stylesheet" href="/assets/style.css?v=4e3eec062d92">
-  | <script type="module" src="/assets/client.js?v=39600a0a5fb1"></script>
+  | <link rel="stylesheet" href="/assets/style.css?v=3aead6b225ce">
+  | <script type="module" src="/assets/client.js?v=90cd6b1d71be"></script>
   | </head>
   | <body>
   | <div class="app has-inspect">
@@ -683,6 +686,7 @@ GET /threads/<bare> => 200 text/html; charset=utf-8
   | <div class="dock">
   | <p id="action-error" class="error" role="alert" hidden></p>
   | <p id="action-status" class="comp-note" role="status" hidden></p>
+  | <div id="questions" data-live></div>
   | <div id="landing" data-live></div>
   | <div id="run" data-live></div>
   | <div id="composer" data-live></div>
@@ -1627,7 +1631,7 @@ POST /v1/threads/<pending>/archive => 200 application/json {"id":"<pending>","ti
 POST /v1/threads/<bare>/archive => 200 application/json {"id":"<bare>","title":"Bare","project":"acme","pylonId":"<bare pylon>","status":"archived","conversationId":null,"startedBy":"nLAPTOP","createdAt":1793102404000,"agentTurnRunning":false,"lastAgentActivityAt":0,"lastHumanActivityAt":1793102404000,"seenAt":null,"lastReplyAt":null,"placement":{"how":"default","node":"rj-firebat"},"setup":{"how":"fresh","reason":"the control plane could not read .nexus/setup at main: no remote"},"working":false}
 
 ## harness thread, archived
-GET /v1/threads/<harness> => 200 application/json {"thread":{"id":"<harness>","title":"Harness","project":"acme","pylonId":"<harness pylon>","status":"archived","conversationId":"1","startedBy":"nLAPTOP","createdAt":1793102401000,"agentTurnRunning":false,"lastAgentActivityAt":0,"lastHumanActivityAt":1793102404000,"seenAt":null,"lastReplyAt":null,"placement":{"how":"default","node":"rj-firebat"},"setup":{"how":"fresh","reason":"the control plane could not read .nexus/setup at main: no remote"},"working":false},"attention":null,"seenAt":null,"lastReplyAt":null,"desired":"paused","pylon":{"grantsOutdated":false,"id":"<harness pylon>","node":"rj-firebat","failed":null,"observedAt":"<time>","resources":{"cpus":2,"memoryGiB":4,"diskGiB":10},"actualState":"running","retryRefused":null},"sessions":[],"previews":[],"ports":[],"outputs":[],"prWatch":{"enabled":false,"stopped":false,"error":null},"pullRequests":[],"review":null,"attach":"herdr --session nexus","agent":{"parkedTasks":0}}
+GET /v1/threads/<harness> => 200 application/json {"thread":{"id":"<harness>","title":"Harness","project":"acme","pylonId":"<harness pylon>","status":"archived","conversationId":"1","startedBy":"nLAPTOP","createdAt":1793102401000,"agentTurnRunning":false,"lastAgentActivityAt":0,"lastHumanActivityAt":1793102404000,"seenAt":null,"lastReplyAt":null,"placement":{"how":"default","node":"rj-firebat"},"setup":{"how":"fresh","reason":"the control plane could not read .nexus/setup at main: no remote"},"working":false},"attention":null,"seenAt":null,"lastReplyAt":null,"desired":"paused","pylon":{"grantsOutdated":false,"id":"<harness pylon>","node":"rj-firebat","failed":null,"observedAt":"<time>","resources":{"cpus":2,"memoryGiB":4,"diskGiB":10},"actualState":"running","retryRefused":null},"sessions":[],"previews":[],"ports":[],"outputs":[],"prWatch":{"enabled":false,"stopped":false,"error":null},"pullRequests":[],"review":null,"questions":[],"attach":"herdr --session nexus","agent":{"parkedTasks":0}}
 GET /v1/threads/<harness>/conversation => 200 application/json {"conversation":{"id":1},"entries":[{"id":1,"conversationId":1,"kind":"pi.user","model":[{"role":"user","content":"first message","timestamp":1793102401000}]},{"id":2,"conversationId":1,"kind":"pi.assistant","model":[{"role":"assistant","content":[{"type":"text","text":"On it."}],"api":"x","provider":"openai","model":"gpt-6-astra","usage":{},"stopReason":"stop","timestamp":1793102404000}]},{"id":3,"conversationId":1,"kind":"pi.user","model":[{"role":"user","content":"hello harness","timestamp":1793102404000}]},{"id":4,"conversationId":1,"kind":"pi.user","model":[{"role":"user","content":"and then?","timestamp":1793102404000}]},{"id":5,"conversationId":1,"kind":"pi.user","model":[{"role":"user","content":"from the cli","timestamp":1793102404000}]}],"docs":{}}
 GET /v1/threads/<harness>/events => 200 text/event-stream no-store 
   first event: data: {"entries":[{"id":1,"conversationId":1,"kind":"pi.user","model":[{"role":"user","content":"first message","timestamp":1793102401000}]},{"id":2,"conversationId":1,"kind":"pi.assistant","model":[{"role":"assistant","content":[{"type":"text","text":"On it."}],"api":"x","provider":"openai","model":"gpt-6-astra","usage":{},"stopReason":"stop","timestamp":1793102404000}]},{"id":3,"conversationId":1,"kind":"pi.user","model":[{"role":"user","content":"hello harness","timestamp":1793102404000}]},{"id":4,"conversationId":1,"kind":"pi.user","model":[{"role":"user","content":"and then?","timestamp":1793102404000}]},{"id":5,"conversationId":1,"kind":"pi.user","model":[{"role":"user","content":"from the cli","timestamp":1793102404000}]}]}
@@ -1643,8 +1647,8 @@ GET /threads/<harness> => 200 text/html; charset=utf-8
   | <meta name="color-scheme" content="light dark">
   | <title>Harness · Nexus</title>
   | <link rel="icon" href="/assets/favicon.svg?v=0e503e8ed8b3" type="image/svg+xml">
-  | <link rel="stylesheet" href="/assets/style.css?v=4e3eec062d92">
-  | <script type="module" src="/assets/client.js?v=39600a0a5fb1"></script>
+  | <link rel="stylesheet" href="/assets/style.css?v=3aead6b225ce">
+  | <script type="module" src="/assets/client.js?v=90cd6b1d71be"></script>
   | </head>
   | <body>
   | <div class="app has-inspect">
@@ -1684,6 +1688,7 @@ GET /threads/<harness> => 200 text/html; charset=utf-8
   | <div class="dock">
   | <p id="action-error" class="error" role="alert" hidden></p>
   | <p id="action-status" class="comp-note" role="status" hidden></p>
+  | <div id="questions" data-live></div>
   | <div id="landing" data-live></div>
   | <div id="run" data-live></div>
   | <div id="composer" data-live><p class="note-box">An archived thread takes no messages, because its pylon stays paused. Unarchive the thread to send one.</p></div>
@@ -1809,7 +1814,7 @@ GET /threads/<harness> => 200 text/html; charset=utf-8
   | 
 
 ## claude thread, archived
-GET /v1/threads/<claude> => 200 application/json {"thread":{"id":"<claude>","title":"Claude","project":"acme","pylonId":"<claude pylon>","status":"archived","conversationId":null,"startedBy":"nLAPTOP","createdAt":1793102402000,"agentTurnRunning":false,"lastAgentActivityAt":0,"lastHumanActivityAt":1793102404000,"seenAt":null,"lastReplyAt":null,"placement":{"how":"default","node":"rj-firebat"},"setup":{"how":"fresh","reason":"the control plane could not read .nexus/setup at main: no remote"},"working":false},"claudeWorker":{"model":"claude-sonnet-5-5","state":"started"},"attention":null,"seenAt":null,"lastReplyAt":null,"desired":"paused","pylon":{"grantsOutdated":false,"id":"<claude pylon>","node":"rj-firebat","failed":null,"observedAt":"<time>","resources":{"cpus":2,"memoryGiB":4,"diskGiB":10},"actualState":"running","retryRefused":null},"sessions":[],"previews":[],"ports":[],"outputs":[],"prWatch":{"enabled":false,"stopped":false,"error":null},"pullRequests":[],"review":null,"attach":"herdr --session nexus","agent":null}
+GET /v1/threads/<claude> => 200 application/json {"thread":{"id":"<claude>","title":"Claude","project":"acme","pylonId":"<claude pylon>","status":"archived","conversationId":null,"startedBy":"nLAPTOP","createdAt":1793102402000,"agentTurnRunning":false,"lastAgentActivityAt":0,"lastHumanActivityAt":1793102404000,"seenAt":null,"lastReplyAt":null,"placement":{"how":"default","node":"rj-firebat"},"setup":{"how":"fresh","reason":"the control plane could not read .nexus/setup at main: no remote"},"working":false},"claudeWorker":{"model":"claude-sonnet-5-5","state":"started"},"attention":null,"seenAt":null,"lastReplyAt":null,"desired":"paused","pylon":{"grantsOutdated":false,"id":"<claude pylon>","node":"rj-firebat","failed":null,"observedAt":"<time>","resources":{"cpus":2,"memoryGiB":4,"diskGiB":10},"actualState":"running","retryRefused":null},"sessions":[],"previews":[],"ports":[],"outputs":[],"prWatch":{"enabled":false,"stopped":false,"error":null},"pullRequests":[],"review":null,"questions":[],"attach":"herdr --session nexus","agent":null}
 GET /v1/threads/<claude>/conversation => 200 application/json {"kind":"claude","session":"<uuid-1>","entries":[{"kind":"prompt","at":1792966490563,"text":"Do these steps one at a time, each as its own tool call: 1) write hello.py printing hi, 2) run python3 hello.py, 3) run the command false (it will fail, that is fine), 4) use the Agent tool with a general-purpose subagent to count lines in hello.py, 5) sleep 40 seconds with Bash, 6) reply with a short summary as a markdown list.","from":"person"},{"kind":"tool","at":1792966493018,"id":"toolu_01RVp1H7t5g1hR9G6LHi7PDN","name":"Write","input":{"file_path":"/home/user/workspace/repo/hello.py","content":"print(\"hi\")\n"}},{"kind":"result","at":1792966493127,"toolUseId":"toolu_01RVp1H7t5g1hR9G6LHi7PDN","output":"File created successfully at: /home/user/workspace/repo/hello.py (file state is current in your context — no need to Read it back)","isError":false},{"kind":"tool","at":1792966494433,"id":"toolu_01X7GimSVATvheFbNYdJpJd9","name":"Bash","input":{"command":"python3 /home/user/workspace/repo/hello.py"}},{"kind":"result","at":1792966494551,"toolUseId":"toolu_01X7GimSVATvheFbNYdJpJd9","output":"hi","isError":false},{"kind":"tool","at":1792966495603,"id":"toolu_01QNi9YpoZobQfT8pisCWg88","name":"Bash","input":{"command":"false"}},{"kind":"result","at":1792966495627,"toolUseId":"toolu_01QNi9YpoZobQfT8pisCWg88","output":"Exit code 1","isError":true},{"kind":"tool","at":1792966497278,"id":"toolu_01C5X2SfNLEsDyRj2CKSyR3E","name":"Agent","input":{"description":"Count lines in hello.py","subagent_type":"general-purpose","prompt":"Count the number of lines in /home/user/workspace/repo/hello.py and report the number."}},{"kind":"result","at":1792966497384,"toolUseId":"toolu_01C5X2SfNLEsDyRj2CKSyR3E","output":"Started in the background","isError":false},{"kind":"tool","at":1792966499009,"id":"toolu_016tWgpGGCnEMvCexbX4CGf9","name":"Bash","input":{"command":"sleep 40","timeout":60000}},{"kind":"result","at":1792966499021,"toolUseId":"toolu_016tWgpGGCnEMvCexbX4CGf9","output":"<tool_use_error>Blocked: standalone sleep 40. To wait for a condition, use Monitor with an until-loop (e.g. `until <check>; do sleep 2; done`). To wait for a command you started, use run_in_background: true. Do not chain shorter sleeps to work around this block.</tool_use_error>","isError":true},{"kind":"queue","at":1792966500780,"op":"enqueue","text":"<task-notification>\n<task-id>a121649411f13f507</task-id>\n<tool-use-id>toolu_01C5X2SfNLEsDyRj2CKSyR3E</tool-use-id>\n<output-file>/tmp/claude-1000/-home-user-workspace-repo/<uuid-1>/tasks/a121649411f13f507.output</output-file>\n<status>completed</status>\n<summary>Agent \"Count lines in hello.py\" finished</summary>\n<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>\n<result>The file `/home/user/workspace/repo/hello.py` has **1** line, according to `wc -l`.</result>\n<usage><subagent_tokens>24712</subagent_tokens><tool_uses>1</tool_uses><duration_ms>3486</duration_ms></usage>\n</task-notification>"},{"kind":"reply","at":1792966500838,"text":"The foreground `sleep 40` was blocked, so I'm running it in the background instead. The subagent is still counting lines."},{"kind":"result","at":1792966501288,"toolUseId":"toolu_01S7wDMAwvUA7vjJFKi7mhf7","output":"Command running in background with ID: b0xx2eywe. Output is being written to: /tmp/claude-1000/-home-user-workspace-repo/<uuid-1>/tasks/b0xx2eywe.output. You will be notified when it completes — do not poll that file or sleep while waiting. Read the file only if the user asks for progress, or if you need a line it prints before you can go on, such as a server's ready line or port.","isError":false},{"kind":"queue","at":1792966501380,"op":"remove","text":"<task-notification>\n<task-id>a121649411f13f507</task-id>\n<tool-use-id>toolu_01C5X2SfNLEsDyRj2CKSyR3E</tool-use-id>\n<output-file>/tmp/claude-1000/-home-user-workspace-repo/<uuid-1>/tasks/a121649411f13f507.output</output-file>\n<status>completed</status>\n<summary>Agent \"Count lines in hello.py\" finished</summary>\n<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>\n<result>The file `/home/user/workspace/repo/hello.py` has **1** line, according to `wc -l`.</result>\n<usage><subagent_tokens>24712</subagent_tokens><tool_uses>1</tool_uses><duration_ms>3486</duration_ms></usage>\n</task-notification>"},{"kind":"task","at":1792966500779,"toolUseId":"toolu_01C5X2SfNLEsDyRj2CKSyR3E","status":"completed","summary":"Agent \"Count lines in hello.py\" finished","result":"The file `/home/user/workspace/repo/hello.py` has **1** line, according to `wc -l`."},{"kind":"reply","at":1792966502716,"text":"The subagent reported 1 line. The 40-second sleep is still running, so I'll wait for it to finish before summarizing."},{"kind":"turn","at":1792966502812,"durationMs":12262},{"kind":"prompt","at":1792966514433,"text":"\n\n<pasted_content id=\"cbe0\">\nSteer one: reply with exactly this text quoted back in a code block:\nline two has \"double\" and 'single' quotes\nline three has `backticks` and $HOME and $(echo no) and \\ backslash\n  indented line four ! bang\n</pasted_content id=\"cbe0\">\n","from":"person"},{"kind":"reply","at":1792966516809,"text":"```\nline two has \"double\" and 'single' quotes\nline three has `backticks` and $HOME and $(echo no) and \\ backslash\n  indented line four ! bang\n```\n\nThe background sleep hasn't reported back yet, so I haven't written the summary."},{"kind":"turn","at":1792966516911,"durationMs":2495},{"kind":"queue","at":1792966541227,"op":"enqueue","text":"<task-notification>\n<task-id>b0xx2eywe</task-id>\n<tool-use-id>toolu_01S7wDMAwvUA7vjJFKi7mhf7</tool-use-id>\n<output-file>/tmp/claude-1000/-home-user-workspace-repo/<uuid-1>/tasks/b0xx2eywe.output</output-file>\n<status>completed</status>\n<summary>Background command \"Sleep 40 seconds in background\" completed (exit code 0)</summary>\n</task-notification>"},{"kind":"queue","at":1792966541233,"op":"dequeue","text":null},{"kind":"task","at":1792966541244,"toolUseId":"toolu_01S7wDMAwvUA7vjJFKi7mhf7","status":"completed","summary":"Background command \"Sleep 40 seconds in background\" completed (exit code 0)","result":null},{"kind":"turn","at":1792966543283,"durationMs":2049},{"kind":"prompt","at":1792966554257,"text":"Steer two: say ok.\nsecond line \"q\" 's' `b` $X","from":"person"},{"kind":"prompt","at":1792966584723,"text":"\n\n<pasted_content id=\"cbe0\">\nSteer three: just reply with the word done.\nfiller line 0 with \"quotes\" and `ticks` and $VAR and a tab    here\nfiller line 1 with \"quotes\" and `ticks` and $VAR and a tab    here\nfiller line 2 with \"quotes\" and `ticks` and $VAR and a tab    here\nfiller line 3 with \"quotes\" and `ticks` and $VAR and a tab    here\nfiller line 4 with \"quotes\" and `ticks` and $VAR and a tab    here\nfiller line 5 with \"quotes\" and `ticks` and $VAR and a tab    here\nfiller line 6 with \"quotes\" and `ticks` and $VAR and a tab    here\nfiller line 7 with \"quotes\" and `ticks` and $VAR and a tab    here\nfiller line 8 with \"quotes\" and `ticks` and $VAR and a tab    here\nfiller line 9 with \"quotes\" and `ticks` and $VAR and a tab    here\nfiller line 10 with \"quotes\" and `ticks` and $VAR and a tab    here\nfiller line 11 with \"quotes\" and `ticks` and $VAR and a tab    here\nfiller line 12 with \"quotes\" and `ticks` and $VAR and a tab    here\nfiller line 13 with \"quotes\" and `ticks` and $VAR and a tab    here\nfiller line 14 with \"quotes\" and `ticks` and $VAR and a tab    here\nfiller line 15 with \"quotes\" and `ticks` and $VAR and a tab    here\nfiller line 16 with \"quotes\" and `ticks` and $VAR and a tab    here\nfiller line 17 with \"quotes\" and `ticks` and $VAR and a tab    here\nfiller line 18 with \"quotes\" and `ticks` and $VAR and a tab    here\nfiller line 19 with \"quotes\" and `ticks` and $VAR and a tab    here\nfiller line 20 with \"quotes\" and `ticks` and $VAR and a tab    here\nfiller li…","from":"person"},{"kind":"prompt","at":1792966603371,"text":"Steer four: just reply with the word done.\nfiller line 0 with \"quotes\" and `ticks` and $VAR here\nfiller line 1 with \"quotes\" and `ticks` and $VAR here\nfiller line 2 with \"quotes\" and `ticks` and $VAR here\nfiller line 3 with \"quotes\" and `ticks` and $VAR here\nfiller line 4 with \"quotes\" and `ticks` and $VAR here\nfiller line 5 with \"quotes\" and `ticks` and $VAR here\nfiller line 6 with \"quotes\" and `ticks` and $VAR here\nfiller line 7 with \"quotes\" and `ticks` and $VAR here\nfiller line 8 with \"quotes\" and `ticks` and $VAR here\nfiller line 9 with \"quotes\" and `ticks` and $VAR here\nfiller line 10 with \"quotes\" and `ticks` and $VAR here\nfiller line 11 with \"quotes\" and `ticks` and $VAR here\nfiller line 12 with \"quotes\" and `ticks` and $VAR here\nfiller line 13 with \"quotes\" and `ticks` and $VAR here\nfiller line 14 with \"quotes\" and `ticks` and $VAR here\nfiller line 15 with \"quotes\" and `ticks` and $VAR here\nfiller line 16 with \"quotes\" and `ticks` and $VAR here\nfiller line 17 with \"quotes\" and `ticks` and $VAR here\nfiller line 18 with \"quotes\" and `ticks` and $VAR here\nfiller line 19 with \"quotes\" and `ticks` and $VAR here\nfiller line 20 with \"quotes\" and `ticks` and $VAR here\nfiller line 21 with \"quotes\" and `ticks` and $VAR here\nfiller line 22 with \"quotes\" and `ticks` and $VAR here\nfiller line 23 with \"quotes\" and `ticks` and $VAR here\nfiller line 24 with \"quotes\" and `ticks` and $VAR here\nfiller line 25 with \"quotes\" and `ticks` and $VAR here\nfiller line 26 with \"quotes\" and `tic…","from":"person"},{"kind":"tool","at":1792966643010,"id":"shell:<uuid-2>","name":"shell","input":{"command":"echo bang-mode"}},{"kind":"result","at":1792966643032,"toolUseId":"shell:<uuid-2>","output":"bang-mode","isError":false},{"kind":"queue","at":1792966654105,"op":"enqueue","text":"Steer seven mid-turn: also tell me the word \"banana\" with `ticks` and $DOLLAR.\nSecond line."},{"kind":"queue","at":1792966668468,"op":"remove","text":"Steer seven mid-turn: also tell me the word \"banana\" with `ticks` and $DOLLAR.\nSecond line."},{"kind":"prompt","at":1792966654021,"text":"Steer seven mid-turn: also tell me the word \"banana\" with `ticks` and $DOLLAR.\nSecond line.","from":"person"},{"kind":"result","at":1792966702287,"toolUseId":"toolu_01CeFZPdWfRG4vSjm8x6DBBG","output":"<tool_use_error>Blocked: standalone sleep 30. To wait for a condition, use Monitor with an until-loop (e.g. `until <check>; do sleep 2; done`). To wait for a command you started, use run_in_background: true. Do not chain shorter sleeps to work around this block.</tool_use_error>","isError":true},{"kind":"notice","at":1792966704578,"tone":"info","text":"Interrupted"},{"kind":"notice","at":1792966718442,"tone":"info","text":"No response requested."},{"kind":"prompt","at":1792966934945,"text":"/compact","from":"other"},{"kind":"prompt","at":1792966934982,"text":"/compact","from":"command"},{"kind":"notice","at":1792966934982,"tone":"info","text":"notes-compaction+cc-plugin-agents-md: Saving a notes checkpoint first. The new window opens after it completes."},{"kind":"queue","at":1792966935090,"op":"dequeue","text":null},{"kind":"prompt","at":1792966935104,"text":"The notes-compaction plugin sent a message:\n<context_window_reminder>\nContext checkpoint requested. Save the current state with notes, then finish your response. The new window opens after this turn. Do not call new_context. If saving fails, report the failure without rolling over.\n</context_window_reminder>\n\nThis is how Claude Code surfaces a prompt a plugin submits between turns — it starts this turn in the user's place. Address the message above.","from":"other"},{"kind":"tool","at":1792966939276,"id":"toolu_01Vt3MrvXw8xv3Zg3M4yrQpg","name":"mcp__notes-compaction__notes","input":{"action":"write_file","path":"checkpoint/session-state.md","text":"# Session checkpoint\n\n## Request\nUser ran a series of small \"steer\" tests. No ongoing coding task.\n\n## Done\n- Original 6-step task finished: wrote hello.py (prints hi) in scratchpad exp dir, ran it, ran `false` (exit 1), subagent counted 1 line, 40s sleep (foreground sleep 40/30 blocked by harness; background works; sleep 20 foreground worked), summary given.\n- Steers 1-8 answered (quote-back, ok, done, banana echo, after-sleep, finished). Steer 8 (foreground sleep 30) was blocked by harness and the user interrupted it.\n- Last user message: \"After resume: reply with resumed-ok\" -> answered.\n\n## Constraints\n- Foreground `sleep N` can be blocked by the harness; use run_in_background or Monitor until-loop.\n- hello.py path: /home/user/workspace/repo/hello.py\n\n## Next steps\nNone pending. Await next user instruction.\n"}},{"kind":"result","at":1792966939309,"toolUseId":"toolu_01Vt3MrvXw8xv3Zg3M4yrQpg","output":"{\"path\":\"/root/notes/checkpoint/session-state.md\"}","isError":false},{"kind":"queue","at":1792966941084,"op":"dequeue","text":null},{"kind":"prompt","at":1792966941097,"text":"/compact The agent saved its working state in notes and continues from them in a new context window. Write at most a few lines: the user's latest request in their words, and only what happened after the last notes save that the notes lack. Do not restate saved notes.","from":"other"},{"kind":"notice","at":1792966941144,"tone":"info","text":"Claude compacted the conversation"},{"kind":"prompt","at":1792966941117,"text":"<context_window>\nAgent name: /root\nFirst context window id: <uuid-3>\nCurrent context window id: <uuid-4>\nPrevious context window id: <uuid-3>\nRecent notes (read them with the notes tool): /root/notes/checkpoint/session-state.md\n</context_window>","from":"other"},{"kind":"notice","at":1792966941117,"tone":"info","text":"New context window opened."},{"kind":"prompt","at":1792966941100,"text":"/compact The agent saved its working state in notes and continues from them in a new context window. Write at most a few lines: the user's latest request in their words, and only what happened after the last notes save that the notes lack. Do not restate saved notes.","from":"command"},{"kind":"notice","at":1792966941243,"tone":"info","text":"Compacted (ctrl+o to see full summary)"}],"dropped":0,"readAt":1793102404000,"working":false,"usageLimit":null}
 GET /v1/threads/<claude>/events => 409 application/json no-store {"error":"thread <claude> has no conversation"}
 GET /v1/threads/<claude>/claude/events => 200 text/event-stream no-store 
@@ -1825,8 +1830,8 @@ GET /threads/<claude> => 200 text/html; charset=utf-8
   | <meta name="color-scheme" content="light dark">
   | <title>Claude · Nexus</title>
   | <link rel="icon" href="/assets/favicon.svg?v=0e503e8ed8b3" type="image/svg+xml">
-  | <link rel="stylesheet" href="/assets/style.css?v=4e3eec062d92">
-  | <script type="module" src="/assets/client.js?v=39600a0a5fb1"></script>
+  | <link rel="stylesheet" href="/assets/style.css?v=3aead6b225ce">
+  | <script type="module" src="/assets/client.js?v=90cd6b1d71be"></script>
   | </head>
   | <body>
   | <div class="app has-inspect">
@@ -2028,6 +2033,7 @@ GET /threads/<claude> => 200 text/html; charset=utf-8
   | <div class="dock">
   | <p id="action-error" class="error" role="alert" hidden></p>
   | <p id="action-status" class="comp-note" role="status" hidden></p>
+  | <div id="questions" data-live></div>
   | <div id="landing" data-live></div>
   | <div id="run" data-live></div>
   | <div id="composer" data-live><p class="note-box">An archived thread takes no messages, because its pylon stays paused. Unarchive the thread to send one.</p></div>
@@ -2153,7 +2159,7 @@ GET /threads/<claude> => 200 text/html; charset=utf-8
   | 
 
 ## pending thread, archived
-GET /v1/threads/<pending> => 200 application/json {"thread":{"id":"<pending>","title":"Pending","project":"acme","pylonId":"<pending pylon>","status":"archived","conversationId":null,"startedBy":"nLAPTOP","createdAt":1793102403000,"agentTurnRunning":false,"lastAgentActivityAt":0,"lastHumanActivityAt":1793102403000,"seenAt":null,"lastReplyAt":null,"placement":{"how":"default","node":"rj-firebat"},"setup":{"how":"fresh","reason":"the control plane could not read .nexus/setup at main: no remote"},"working":false},"claudeWorker":{"model":"claude-opus-5-5","state":"pending"},"attention":null,"seenAt":null,"lastReplyAt":null,"desired":"paused","pylon":{"grantsOutdated":false,"id":"<pending pylon>","node":"rj-firebat","failed":null,"observedAt":"<time>","resources":{"cpus":2,"memoryGiB":4,"diskGiB":10},"actualState":"running","retryRefused":null},"sessions":[],"previews":[],"ports":[],"outputs":[],"prWatch":{"enabled":false,"stopped":false,"error":null},"pullRequests":[],"review":null,"attach":"herdr --session nexus","agent":null}
+GET /v1/threads/<pending> => 200 application/json {"thread":{"id":"<pending>","title":"Pending","project":"acme","pylonId":"<pending pylon>","status":"archived","conversationId":null,"startedBy":"nLAPTOP","createdAt":1793102403000,"agentTurnRunning":false,"lastAgentActivityAt":0,"lastHumanActivityAt":1793102403000,"seenAt":null,"lastReplyAt":null,"placement":{"how":"default","node":"rj-firebat"},"setup":{"how":"fresh","reason":"the control plane could not read .nexus/setup at main: no remote"},"working":false},"claudeWorker":{"model":"claude-opus-5-5","state":"pending"},"attention":null,"seenAt":null,"lastReplyAt":null,"desired":"paused","pylon":{"grantsOutdated":false,"id":"<pending pylon>","node":"rj-firebat","failed":null,"observedAt":"<time>","resources":{"cpus":2,"memoryGiB":4,"diskGiB":10},"actualState":"running","retryRefused":null},"sessions":[],"previews":[],"ports":[],"outputs":[],"prWatch":{"enabled":false,"stopped":false,"error":null},"pullRequests":[],"review":null,"questions":[],"attach":"herdr --session nexus","agent":null}
 GET /v1/threads/<pending>/conversation => 200 application/json {"kind":"claude","session":null,"entries":[],"dropped":0,"readAt":null,"working":false,"usageLimit":null}
 GET /v1/threads/<pending>/events => 409 application/json no-store {"error":"thread <pending> has no conversation"}
 GET /v1/threads/<pending>/claude/events => 200 text/event-stream no-store 
@@ -2169,8 +2175,8 @@ GET /threads/<pending> => 200 text/html; charset=utf-8
   | <meta name="color-scheme" content="light dark">
   | <title>Pending · Nexus</title>
   | <link rel="icon" href="/assets/favicon.svg?v=0e503e8ed8b3" type="image/svg+xml">
-  | <link rel="stylesheet" href="/assets/style.css?v=4e3eec062d92">
-  | <script type="module" src="/assets/client.js?v=39600a0a5fb1"></script>
+  | <link rel="stylesheet" href="/assets/style.css?v=3aead6b225ce">
+  | <script type="module" src="/assets/client.js?v=90cd6b1d71be"></script>
   | </head>
   | <body>
   | <div class="app has-inspect">
@@ -2210,6 +2216,7 @@ GET /threads/<pending> => 200 text/html; charset=utf-8
   | <div class="dock">
   | <p id="action-error" class="error" role="alert" hidden></p>
   | <p id="action-status" class="comp-note" role="status" hidden></p>
+  | <div id="questions" data-live></div>
   | <div id="landing" data-live></div>
   | <div id="run" data-live></div>
   | <div id="composer" data-live><p class="note-box">An archived thread takes no messages, because its pylon stays paused. Unarchive the thread to send one.</p></div>
@@ -2335,7 +2342,7 @@ GET /threads/<pending> => 200 text/html; charset=utf-8
   | 
 
 ## bare thread, archived
-GET /v1/threads/<bare> => 200 application/json {"thread":{"id":"<bare>","title":"Bare","project":"acme","pylonId":"<bare pylon>","status":"archived","conversationId":null,"startedBy":"nLAPTOP","createdAt":1793102404000,"agentTurnRunning":false,"lastAgentActivityAt":0,"lastHumanActivityAt":1793102404000,"seenAt":null,"lastReplyAt":null,"placement":{"how":"default","node":"rj-firebat"},"setup":{"how":"fresh","reason":"the control plane could not read .nexus/setup at main: no remote"},"working":false},"attention":null,"seenAt":null,"lastReplyAt":null,"desired":"paused","pylon":{"grantsOutdated":false,"id":"<bare pylon>","node":"rj-firebat","failed":null,"observedAt":"<time>","resources":{"cpus":2,"memoryGiB":4,"diskGiB":10},"actualState":"running","retryRefused":null},"sessions":[],"previews":[],"ports":[],"outputs":[],"prWatch":{"enabled":false,"stopped":false,"error":null},"pullRequests":[],"review":null,"attach":"herdr --session nexus","agent":null}
+GET /v1/threads/<bare> => 200 application/json {"thread":{"id":"<bare>","title":"Bare","project":"acme","pylonId":"<bare pylon>","status":"archived","conversationId":null,"startedBy":"nLAPTOP","createdAt":1793102404000,"agentTurnRunning":false,"lastAgentActivityAt":0,"lastHumanActivityAt":1793102404000,"seenAt":null,"lastReplyAt":null,"placement":{"how":"default","node":"rj-firebat"},"setup":{"how":"fresh","reason":"the control plane could not read .nexus/setup at main: no remote"},"working":false},"attention":null,"seenAt":null,"lastReplyAt":null,"desired":"paused","pylon":{"grantsOutdated":false,"id":"<bare pylon>","node":"rj-firebat","failed":null,"observedAt":"<time>","resources":{"cpus":2,"memoryGiB":4,"diskGiB":10},"actualState":"running","retryRefused":null},"sessions":[],"previews":[],"ports":[],"outputs":[],"prWatch":{"enabled":false,"stopped":false,"error":null},"pullRequests":[],"review":null,"questions":[],"attach":"herdr --session nexus","agent":null}
 GET /v1/threads/<bare>/conversation => 409 application/json {"error":"thread <bare> has no conversation"}
 GET /v1/threads/<bare>/events => 409 application/json no-store {"error":"thread <bare> has no conversation"}
 GET /v1/threads/<bare>/claude/events => 409 application/json no-store {"error":"thread <bare> has no Claude worker"}
@@ -2349,8 +2356,8 @@ GET /threads/<bare> => 200 text/html; charset=utf-8
   | <meta name="color-scheme" content="light dark">
   | <title>Bare · Nexus</title>
   | <link rel="icon" href="/assets/favicon.svg?v=0e503e8ed8b3" type="image/svg+xml">
-  | <link rel="stylesheet" href="/assets/style.css?v=4e3eec062d92">
-  | <script type="module" src="/assets/client.js?v=39600a0a5fb1"></script>
+  | <link rel="stylesheet" href="/assets/style.css?v=3aead6b225ce">
+  | <script type="module" src="/assets/client.js?v=90cd6b1d71be"></script>
   | </head>
   | <body>
   | <div class="app has-inspect">
@@ -2390,6 +2397,7 @@ GET /threads/<bare> => 200 text/html; charset=utf-8
   | <div class="dock">
   | <p id="action-error" class="error" role="alert" hidden></p>
   | <p id="action-status" class="comp-note" role="status" hidden></p>
+  | <div id="questions" data-live></div>
   | <div id="landing" data-live></div>
   | <div id="run" data-live></div>
   | <div id="composer" data-live></div>
@@ -3340,7 +3348,7 @@ DELETE /v1/threads/<pending> => 200 application/json {"id":"<pending>","title":"
 DELETE /v1/threads/<bare> => 200 application/json {"id":"<bare>","title":"Bare","project":"acme","pylonId":"<bare pylon>","status":"deleted","conversationId":null,"startedBy":"nLAPTOP","createdAt":1793102404000,"agentTurnRunning":false,"lastAgentActivityAt":0,"lastHumanActivityAt":1793102404000,"seenAt":null,"lastReplyAt":null,"placement":{"how":"default","node":"rj-firebat"},"setup":{"how":"fresh","reason":"the control plane could not read .nexus/setup at main: no remote"},"working":false} harness got []
 
 ## harness thread, deleted
-GET /v1/threads/<harness> => 200 application/json {"thread":{"id":"<harness>","title":"Harness","project":"acme","pylonId":"<harness pylon>","status":"deleted","conversationId":"1","startedBy":"nLAPTOP","createdAt":1793102401000,"agentTurnRunning":false,"lastAgentActivityAt":0,"lastHumanActivityAt":1793102404000,"seenAt":null,"lastReplyAt":null,"placement":{"how":"default","node":"rj-firebat"},"setup":{"how":"fresh","reason":"the control plane could not read .nexus/setup at main: no remote"},"working":false},"attention":null,"seenAt":null,"lastReplyAt":null,"desired":"deleted","pylon":{"grantsOutdated":false,"id":"<harness pylon>","node":"rj-firebat","failed":null,"observedAt":"<time>","resources":{"cpus":2,"memoryGiB":4,"diskGiB":10},"actualState":"running","retryRefused":null},"sessions":[],"previews":[],"ports":[],"outputs":[],"prWatch":{"enabled":false,"stopped":false,"error":null},"pullRequests":[],"review":null,"attach":"herdr --session nexus","agent":null}
+GET /v1/threads/<harness> => 200 application/json {"thread":{"id":"<harness>","title":"Harness","project":"acme","pylonId":"<harness pylon>","status":"deleted","conversationId":"1","startedBy":"nLAPTOP","createdAt":1793102401000,"agentTurnRunning":false,"lastAgentActivityAt":0,"lastHumanActivityAt":1793102404000,"seenAt":null,"lastReplyAt":null,"placement":{"how":"default","node":"rj-firebat"},"setup":{"how":"fresh","reason":"the control plane could not read .nexus/setup at main: no remote"},"working":false},"attention":null,"seenAt":null,"lastReplyAt":null,"desired":"deleted","pylon":{"grantsOutdated":false,"id":"<harness pylon>","node":"rj-firebat","failed":null,"observedAt":"<time>","resources":{"cpus":2,"memoryGiB":4,"diskGiB":10},"actualState":"running","retryRefused":null},"sessions":[],"previews":[],"ports":[],"outputs":[],"prWatch":{"enabled":false,"stopped":false,"error":null},"pullRequests":[],"review":null,"questions":[],"attach":"herdr --session nexus","agent":null}
 GET /v1/threads/<harness>/conversation => 409 application/json {"error":"thread <harness> is deleted"}
 GET /v1/threads/<harness>/events => 409 application/json no-store {"error":"thread <harness> is deleted"}
 GET /v1/threads/<harness>/claude/events => 409 application/json no-store {"error":"thread <harness> is deleted"}
@@ -3354,8 +3362,8 @@ GET /threads/<harness> => 200 text/html; charset=utf-8
   | <meta name="color-scheme" content="light dark">
   | <title>Harness · Nexus</title>
   | <link rel="icon" href="/assets/favicon.svg?v=0e503e8ed8b3" type="image/svg+xml">
-  | <link rel="stylesheet" href="/assets/style.css?v=4e3eec062d92">
-  | <script type="module" src="/assets/client.js?v=39600a0a5fb1"></script>
+  | <link rel="stylesheet" href="/assets/style.css?v=3aead6b225ce">
+  | <script type="module" src="/assets/client.js?v=90cd6b1d71be"></script>
   | </head>
   | <body>
   | <div class="app has-inspect">
@@ -3395,6 +3403,7 @@ GET /threads/<harness> => 200 text/html; charset=utf-8
   | <div class="dock">
   | <p id="action-error" class="error" role="alert" hidden></p>
   | <p id="action-status" class="comp-note" role="status" hidden></p>
+  | <div id="questions" data-live></div>
   | <div id="landing" data-live></div>
   | <div id="run" data-live></div>
   | <div id="composer" data-live></div>
@@ -3520,7 +3529,7 @@ GET /threads/<harness> => 200 text/html; charset=utf-8
   | 
 
 ## claude thread, deleted
-GET /v1/threads/<claude> => 200 application/json {"thread":{"id":"<claude>","title":"Claude","project":"acme","pylonId":"<claude pylon>","status":"deleted","conversationId":null,"startedBy":"nLAPTOP","createdAt":1793102402000,"agentTurnRunning":false,"lastAgentActivityAt":0,"lastHumanActivityAt":1793102404000,"seenAt":null,"lastReplyAt":null,"placement":{"how":"default","node":"rj-firebat"},"setup":{"how":"fresh","reason":"the control plane could not read .nexus/setup at main: no remote"},"working":false},"claudeWorker":{"model":"claude-sonnet-5-5","state":"started"},"attention":null,"seenAt":null,"lastReplyAt":null,"desired":"deleted","pylon":{"grantsOutdated":false,"id":"<claude pylon>","node":"rj-firebat","failed":null,"observedAt":"<time>","resources":{"cpus":2,"memoryGiB":4,"diskGiB":10},"actualState":"running","retryRefused":null},"sessions":[],"previews":[],"ports":[],"outputs":[],"prWatch":{"enabled":false,"stopped":false,"error":null},"pullRequests":[],"review":null,"attach":"herdr --session nexus","agent":null}
+GET /v1/threads/<claude> => 200 application/json {"thread":{"id":"<claude>","title":"Claude","project":"acme","pylonId":"<claude pylon>","status":"deleted","conversationId":null,"startedBy":"nLAPTOP","createdAt":1793102402000,"agentTurnRunning":false,"lastAgentActivityAt":0,"lastHumanActivityAt":1793102404000,"seenAt":null,"lastReplyAt":null,"placement":{"how":"default","node":"rj-firebat"},"setup":{"how":"fresh","reason":"the control plane could not read .nexus/setup at main: no remote"},"working":false},"claudeWorker":{"model":"claude-sonnet-5-5","state":"started"},"attention":null,"seenAt":null,"lastReplyAt":null,"desired":"deleted","pylon":{"grantsOutdated":false,"id":"<claude pylon>","node":"rj-firebat","failed":null,"observedAt":"<time>","resources":{"cpus":2,"memoryGiB":4,"diskGiB":10},"actualState":"running","retryRefused":null},"sessions":[],"previews":[],"ports":[],"outputs":[],"prWatch":{"enabled":false,"stopped":false,"error":null},"pullRequests":[],"review":null,"questions":[],"attach":"herdr --session nexus","agent":null}
 GET /v1/threads/<claude>/conversation => 409 application/json {"error":"thread <claude> is deleted"}
 GET /v1/threads/<claude>/events => 409 application/json no-store {"error":"thread <claude> is deleted"}
 GET /v1/threads/<claude>/claude/events => 409 application/json no-store {"error":"thread <claude> is deleted"}
@@ -3534,8 +3543,8 @@ GET /threads/<claude> => 200 text/html; charset=utf-8
   | <meta name="color-scheme" content="light dark">
   | <title>Claude · Nexus</title>
   | <link rel="icon" href="/assets/favicon.svg?v=0e503e8ed8b3" type="image/svg+xml">
-  | <link rel="stylesheet" href="/assets/style.css?v=4e3eec062d92">
-  | <script type="module" src="/assets/client.js?v=39600a0a5fb1"></script>
+  | <link rel="stylesheet" href="/assets/style.css?v=3aead6b225ce">
+  | <script type="module" src="/assets/client.js?v=90cd6b1d71be"></script>
   | </head>
   | <body>
   | <div class="app has-inspect">
@@ -3575,6 +3584,7 @@ GET /threads/<claude> => 200 text/html; charset=utf-8
   | <div class="dock">
   | <p id="action-error" class="error" role="alert" hidden></p>
   | <p id="action-status" class="comp-note" role="status" hidden></p>
+  | <div id="questions" data-live></div>
   | <div id="landing" data-live></div>
   | <div id="run" data-live></div>
   | <div id="composer" data-live></div>
@@ -3700,7 +3710,7 @@ GET /threads/<claude> => 200 text/html; charset=utf-8
   | 
 
 ## pending thread, deleted
-GET /v1/threads/<pending> => 200 application/json {"thread":{"id":"<pending>","title":"Pending","project":"acme","pylonId":"<pending pylon>","status":"deleted","conversationId":null,"startedBy":"nLAPTOP","createdAt":1793102403000,"agentTurnRunning":false,"lastAgentActivityAt":0,"lastHumanActivityAt":1793102404000,"seenAt":null,"lastReplyAt":null,"placement":{"how":"default","node":"rj-firebat"},"setup":{"how":"fresh","reason":"the control plane could not read .nexus/setup at main: no remote"},"working":false},"claudeWorker":{"model":"claude-opus-5-5","state":"pending"},"attention":null,"seenAt":null,"lastReplyAt":null,"desired":"deleted","pylon":{"grantsOutdated":false,"id":"<pending pylon>","node":"rj-firebat","failed":null,"observedAt":"<time>","resources":{"cpus":2,"memoryGiB":4,"diskGiB":10},"actualState":"running","retryRefused":null},"sessions":[],"previews":[],"ports":[],"outputs":[],"prWatch":{"enabled":false,"stopped":false,"error":null},"pullRequests":[],"review":null,"attach":"herdr --session nexus","agent":null}
+GET /v1/threads/<pending> => 200 application/json {"thread":{"id":"<pending>","title":"Pending","project":"acme","pylonId":"<pending pylon>","status":"deleted","conversationId":null,"startedBy":"nLAPTOP","createdAt":1793102403000,"agentTurnRunning":false,"lastAgentActivityAt":0,"lastHumanActivityAt":1793102404000,"seenAt":null,"lastReplyAt":null,"placement":{"how":"default","node":"rj-firebat"},"setup":{"how":"fresh","reason":"the control plane could not read .nexus/setup at main: no remote"},"working":false},"claudeWorker":{"model":"claude-opus-5-5","state":"pending"},"attention":null,"seenAt":null,"lastReplyAt":null,"desired":"deleted","pylon":{"grantsOutdated":false,"id":"<pending pylon>","node":"rj-firebat","failed":null,"observedAt":"<time>","resources":{"cpus":2,"memoryGiB":4,"diskGiB":10},"actualState":"running","retryRefused":null},"sessions":[],"previews":[],"ports":[],"outputs":[],"prWatch":{"enabled":false,"stopped":false,"error":null},"pullRequests":[],"review":null,"questions":[],"attach":"herdr --session nexus","agent":null}
 GET /v1/threads/<pending>/conversation => 409 application/json {"error":"thread <pending> is deleted"}
 GET /v1/threads/<pending>/events => 409 application/json no-store {"error":"thread <pending> is deleted"}
 GET /v1/threads/<pending>/claude/events => 409 application/json no-store {"error":"thread <pending> is deleted"}
@@ -3714,8 +3724,8 @@ GET /threads/<pending> => 200 text/html; charset=utf-8
   | <meta name="color-scheme" content="light dark">
   | <title>Pending · Nexus</title>
   | <link rel="icon" href="/assets/favicon.svg?v=0e503e8ed8b3" type="image/svg+xml">
-  | <link rel="stylesheet" href="/assets/style.css?v=4e3eec062d92">
-  | <script type="module" src="/assets/client.js?v=39600a0a5fb1"></script>
+  | <link rel="stylesheet" href="/assets/style.css?v=3aead6b225ce">
+  | <script type="module" src="/assets/client.js?v=90cd6b1d71be"></script>
   | </head>
   | <body>
   | <div class="app has-inspect">
@@ -3755,6 +3765,7 @@ GET /threads/<pending> => 200 text/html; charset=utf-8
   | <div class="dock">
   | <p id="action-error" class="error" role="alert" hidden></p>
   | <p id="action-status" class="comp-note" role="status" hidden></p>
+  | <div id="questions" data-live></div>
   | <div id="landing" data-live></div>
   | <div id="run" data-live></div>
   | <div id="composer" data-live></div>
@@ -3880,7 +3891,7 @@ GET /threads/<pending> => 200 text/html; charset=utf-8
   | 
 
 ## bare thread, deleted
-GET /v1/threads/<bare> => 200 application/json {"thread":{"id":"<bare>","title":"Bare","project":"acme","pylonId":"<bare pylon>","status":"deleted","conversationId":null,"startedBy":"nLAPTOP","createdAt":1793102404000,"agentTurnRunning":false,"lastAgentActivityAt":0,"lastHumanActivityAt":1793102404000,"seenAt":null,"lastReplyAt":null,"placement":{"how":"default","node":"rj-firebat"},"setup":{"how":"fresh","reason":"the control plane could not read .nexus/setup at main: no remote"},"working":false},"attention":null,"seenAt":null,"lastReplyAt":null,"desired":"deleted","pylon":{"grantsOutdated":false,"id":"<bare pylon>","node":"rj-firebat","failed":null,"observedAt":"<time>","resources":{"cpus":2,"memoryGiB":4,"diskGiB":10},"actualState":"running","retryRefused":null},"sessions":[],"previews":[],"ports":[],"outputs":[],"prWatch":{"enabled":false,"stopped":false,"error":null},"pullRequests":[],"review":null,"attach":"herdr --session nexus","agent":null}
+GET /v1/threads/<bare> => 200 application/json {"thread":{"id":"<bare>","title":"Bare","project":"acme","pylonId":"<bare pylon>","status":"deleted","conversationId":null,"startedBy":"nLAPTOP","createdAt":1793102404000,"agentTurnRunning":false,"lastAgentActivityAt":0,"lastHumanActivityAt":1793102404000,"seenAt":null,"lastReplyAt":null,"placement":{"how":"default","node":"rj-firebat"},"setup":{"how":"fresh","reason":"the control plane could not read .nexus/setup at main: no remote"},"working":false},"attention":null,"seenAt":null,"lastReplyAt":null,"desired":"deleted","pylon":{"grantsOutdated":false,"id":"<bare pylon>","node":"rj-firebat","failed":null,"observedAt":"<time>","resources":{"cpus":2,"memoryGiB":4,"diskGiB":10},"actualState":"running","retryRefused":null},"sessions":[],"previews":[],"ports":[],"outputs":[],"prWatch":{"enabled":false,"stopped":false,"error":null},"pullRequests":[],"review":null,"questions":[],"attach":"herdr --session nexus","agent":null}
 GET /v1/threads/<bare>/conversation => 409 application/json {"error":"thread <bare> is deleted"}
 GET /v1/threads/<bare>/events => 409 application/json no-store {"error":"thread <bare> is deleted"}
 GET /v1/threads/<bare>/claude/events => 409 application/json no-store {"error":"thread <bare> is deleted"}
@@ -3894,8 +3905,8 @@ GET /threads/<bare> => 200 text/html; charset=utf-8
   | <meta name="color-scheme" content="light dark">
   | <title>Bare · Nexus</title>
   | <link rel="icon" href="/assets/favicon.svg?v=0e503e8ed8b3" type="image/svg+xml">
-  | <link rel="stylesheet" href="/assets/style.css?v=4e3eec062d92">
-  | <script type="module" src="/assets/client.js?v=39600a0a5fb1"></script>
+  | <link rel="stylesheet" href="/assets/style.css?v=3aead6b225ce">
+  | <script type="module" src="/assets/client.js?v=90cd6b1d71be"></script>
   | </head>
   | <body>
   | <div class="app has-inspect">
@@ -3935,6 +3946,7 @@ GET /threads/<bare> => 200 text/html; charset=utf-8
   | <div class="dock">
   | <p id="action-error" class="error" role="alert" hidden></p>
   | <p id="action-status" class="comp-note" role="status" hidden></p>
+  | <div id="questions" data-live></div>
   | <div id="landing" data-live></div>
   | <div id="run" data-live></div>
   | <div id="composer" data-live></div>
