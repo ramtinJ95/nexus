@@ -10,7 +10,10 @@ import type { AutoReview, ProjectId, SecretGrant } from "../project.ts";
 import type { ChangedFile, LabelResult, MergeResult, PrSnapshot } from "./github.ts";
 import type { AutomatedMessage } from "./inbox.ts";
 import { holdRule, landingHolds } from "./policy.ts";
-import { humanLabel, reviewerCaller, reviewLoop, reviewPrefix, type Review } from "./review.ts";
+import { agentReplies, humanLabel, reviewerCaller, reviewLoop, reviewPrefix, type Review } from "./review.ts";
+import { agentInbox } from "./inbox.ts";
+import { fakeHarness } from "./fake-harness.ts";
+import { transcriptStart } from "../claude-transcript.ts";
 import { checkCaller, type CheckState } from "./gate.ts";
 import type { StartRequest } from "./threads.ts";
 
@@ -30,9 +33,10 @@ function fixture(t: import("node:test").TestContext, options: { path?: string; r
     registry.upsertNode({ name: node, tailnetHost: "node.ts.net", tailnetNodeId: self });
     registry.createProject(project);
   }
-  function add(id: string, claude: boolean, startedBy = "test"): ThreadId {
+  /** A Claude worker thread, a harness thread, or with `bare` one with neither agent. */
+  function add(id: string, claude: boolean, startedBy = "test", bare = false): ThreadId {
     if (registry.thread(id as ThreadId) !== undefined) return id as ThreadId;
-    const thread: Thread = { id: id as ThreadId, title: id, project: project.id, pylonId: `pylon-${id}` as PylonId, status: "active", conversationId: claude ? null : "1", startedBy, createdAt: 1, seenAt: null, lastReplyAt: null, lastHumanActivityAt: 1, lastAgentActivityAt: 0, agentTurnRunning: false, working: false };
+    const thread: Thread = { id: id as ThreadId, title: id, project: project.id, pylonId: `pylon-${id}` as PylonId, status: "active", conversationId: claude || bare ? null : "1", startedBy, createdAt: 1, seenAt: null, lastReplyAt: null, lastHumanActivityAt: 1, lastAgentActivityAt: 0, agentTurnRunning: false, working: false };
     const { desired: _, ...pylon } = newPylonRecord({ thread: id, pylonId: thread.pylonId, node, desired: "running", boot: { pylonId: thread.pylonId, image: "img-000000000000", resources: project.resources, network: { allowedHosts: [], secrets: [] }, repo: { kind: "clone", url: project.repoUrl, checkout: { branch: "feature", commit: "origin/feature" } }, dotfiles: { repo: project.repoUrl, ref: "main" } }, firstBoot: { kind: "fresh", preSetup: null }, live: { previews: [], overlay: [] }, liveHash: "hash" as LiveHash });
     registry.createThread(thread, pylon, claude ? "fix it" : undefined, claude ? "claude-opus-5-5" : undefined);
     return thread.id;
@@ -1335,4 +1339,35 @@ test("a waived landing whose branch conflicts goes back to the builder to rebase
   await loop.poll();
   assert.deepEqual(f.merges, []);
   assert.deepEqual(f.review().phase, { kind: "needs-person", reasons: reservedHolds }, "the waiver was for the head before the rebase");
+});
+
+test("a harness, a Claude worker and a bare thread each give the replies and take the messages of their kind", async (t) => {
+  const f = fixture(t, { claudeBuilder: false });
+  const fake = fakeHarness();
+  const harness = f.registry.thread(f.builder)!;
+  await fake.harness.startThread({ threadId: harness.id, pylonId: harness.pylonId });
+  fake.transcript(harness.id).messages.push(
+    { role: "user", content: "fix it", timestamp: 1 },
+    { role: "assistant", content: [{ type: "text", text: "Fixed" }, { type: "thinking", thinking: "no" }, { type: "text", text: " it." }], timestamp: 2 } as never,
+  );
+  const claude = f.registry.thread(f.add("th-claude", true))!;
+  f.registry.setClaudeWorker(claude.id, "fix it", "started", undefined, "s1");
+  f.registry.appendClaudeRead(claude.id, { session: "s1", from: transcriptStart, entries: [{ kind: "prompt", at: 1, text: "fix it", from: "person" }, { kind: "reply", at: 2, text: "Done." }], cursor: { ...transcriptStart, offset: 1 }, reset: false, readAt: 3 });
+  const bare = f.registry.thread(f.add("th-check-bare", false, checkCaller, true))!;
+
+  const replies = agentReplies(f.registry, fake.harness);
+  assert.deepEqual(await replies(harness), ["Fixed it."]);
+  assert.deepEqual(await replies(claude), ["Done."], "a Claude worker's replies are its transcript's, and never reach the harness");
+  await assert.rejects(replies(bare), "a bare thread has no replies to read");
+  assert.ok(!fake.calls.some(([, id]) => id === claude.id), "nothing of a Claude worker's reaches the harness");
+
+  const woken: ThreadId[] = [];
+  const inbox = agentInbox({ registry: f.registry, harness: fake.harness, probes: new Map(), wake: (th) => { woken.push(th.id); } });
+  const message = { id: "rv-1:1", text: "Review this", sender: "review" as const };
+  assert.equal(await inbox(harness, message), "delivered");
+  assert.deepEqual(fake.calls.at(-1), ["send", harness.id, "Review this", "rv-1:1", "followUp", "review"]);
+  assert.equal(await inbox(claude, message), "later", "a Claude worker whose pylon does not run takes it later");
+  await assert.rejects(inbox(bare, message), "a bare thread takes no message");
+  assert.deepEqual(woken, [harness.id, claude.id], "a message a bare thread refused wakes nothing");
+  assert.ok(f.registry.thread(claude.id)!.lastAgentActivityAt > 0);
 });
