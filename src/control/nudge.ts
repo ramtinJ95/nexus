@@ -1,16 +1,20 @@
 /**
  * Nudges a builder whose turn ended short of a pull request, in a project that reviews its builders' pull requests on
- * its own. Each stalled turn gets one fixed message under a request ID of the thread and the turn's end, which the
- * inbox never delivers twice, so a pass after a crash between the send and its record sends nothing new. A third
- * stalled turn after two nudges hands the thread to the person through its `decision` attention. A pull request ends
- * it, and the person writing to the thread leaves the thread alone for good.
+ * its own. A turn stalled once the registry holds the branches the thread pushed before it ended, a PR watch pass that
+ * started after that linked no pull request on them, and GitHub finds none that merged or closed. Each stalled turn gets
+ * one fixed message under a request ID of the thread and the turn's end, which the inbox never delivers twice, so a
+ * pass after a crash between the send and its record sends nothing new. A third stalled turn after two nudges hands the
+ * thread to the person through its `decision` attention. A pull request ends it, and the person writing to the thread
+ * leaves the thread alone for good.
  */
 import type { HarnessHost } from "../harness/host.ts";
+import { gitPollMs } from "../git-facts.ts";
 import { singleFlight } from "../single-flight.ts";
 import { checkCaller } from "./gate.ts";
 import { githubRepo, type GitHub } from "./github.ts";
 import type { Inbox } from "./inbox.ts";
-import type { Registry, Thread } from "./registry.ts";
+import type { prWatcher } from "./pr-watch.ts";
+import type { Registry, Thread, ThreadId } from "./registry.ts";
 import { reviewerCaller } from "./review.ts";
 
 export const nudgePrefix = "[Nexus nudge — automated, not a message from the person]";
@@ -38,12 +42,12 @@ export type Nudge =
    */
   | { state: "left-alone" };
 
-/** A branch pushed and a pull request opened just before the turn ended reach the registry's outputs and GitHub's search within it. */
-const turnGraceMs = 60_000;
 const maxNudges = 2;
 
-export function builderNudger(options: { registry: Registry; github: Pick<GitHub, "find">; inbox: Inbox; harness: Pick<HarnessHost, "watch">; now?: () => number; graceMs?: number; log?: (message: string) => void }) {
-  const { registry, github, inbox, harness, now = Date.now, graceMs = turnGraceMs, log = (message: string) => console.error(message) } = options;
+export function builderNudger(options: { registry: Registry; github: Pick<GitHub, "find">; inbox: Inbox; harness: Pick<HarnessHost, "watch">; watch: Pick<ReturnType<typeof prWatcher>, "passes">; log?: (message: string) => void }) {
+  const { registry, github, inbox, harness, watch, log = (message: string) => console.error(message) } = options;
+  /** The PR watch pass each thread's latest ended turn waits for. A restart only makes a turn wait for another. */
+  const awaited = new Map<ThreadId, { turn: number; pass: number }>();
 
   /** The repository of a builder whose project reviews its pull requests on its own, or null for any other thread. */
   function builderRepo(t: Thread): string | null {
@@ -76,7 +80,29 @@ export function builderNudger(options: { registry: Registry; github: Pick<GitHub
     }
   }
 
-  /** The PR watch links pull requests only every two minutes, so GitHub is asked for the builder's branches first. */
+  /**
+   * Whether the registry's outputs hold every branch the thread pushed before `turn` ended. The probe takes a snapshot's
+   * observedAt before it reads any pylon, so a running pylon's snapshot holds those pushed gitPollMs before it. A pylon
+   * pauses only long after its agent's last activity, so a paused one's last snapshot held them, and it pushes nothing
+   * more.
+   */
+  function pushedKnown(t: Thread, turn: number): boolean {
+    const pylon = registry.pylon(t.pylonId);
+    const observation = pylon === undefined ? null : registry.node(pylon.node)?.observation ?? null;
+    const facts = observation?.pylons.find((p) => p.pylonId === t.pylonId);
+    if (facts?.phase === "stopped") return true;
+    return facts?.phase === "running" && facts.git !== null && Date.parse(observation!.observedAt) - gitPollMs >= turn;
+  }
+
+  /** Whether a PR watch pass that started once the registry knew the turn's branches has finished. */
+  function watched(t: Thread, turn: number): boolean {
+    const wait = awaited.get(t.id);
+    if (wait?.turn === turn) return watch.passes().finished >= wait.pass;
+    if (pushedKnown(t, turn)) awaited.set(t.id, { turn, pass: watch.passes().started + 1 });
+    return false;
+  }
+
+  /** The PR watch links only pull requests it finds open, so GitHub is asked for any on the builder's branches. */
   async function opened(t: Thread, repo: string): Promise<boolean> {
     const branches = registry.outputs(t.id).flatMap((o) => o.kind === "branch" && o.ref.startsWith("origin/") ? [o.ref.slice(7)] : []);
     for (const branch of branches) if ((await github.find(repo, branch, "all")).length > 0) return true;
@@ -110,7 +136,7 @@ export function builderNudger(options: { registry: Registry; github: Pick<GitHub
       if ((t.working || (turn ?? 0) > record.turn) && await personWrote(t)) leaveAlone();
       return;
     }
-    if (t.working || turn === null || now() - turn < graceMs || (record !== null && record.turn >= turn)) return;
+    if (t.working || turn === null || (record !== null && record.turn >= turn) || !watched(t, turn)) return;
     if (await personWrote(t)) return leaveAlone();
     try {
       if (await opened(t, repo)) return registry.saveNudge(t.id, { state: "opened", turn });

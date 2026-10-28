@@ -204,7 +204,7 @@ export async function startControlPlane(config: ControlPlaneConfig, models: Mode
   });
   const queueTimer = setInterval(() => { void queue?.poll(); }, 15_000);
   void queue?.poll();
-  const nudges = github === null ? null : builderNudger({ registry, github, inbox, harness, log: (message) => console.error(message) });
+  const nudges = github === null ? null : builderNudger({ registry, github, inbox, harness, watch, log: (message) => console.error(message) });
   const nudgeTimer = setInterval(() => { void nudges?.poll(); }, 15_000);
   void nudges?.poll();
   const api = await startApi({

@@ -32,8 +32,11 @@ export function prWatcher(options: { registry: Registry; github: Pick<GitHub, "f
     state.pending = null;
     registry.savePrWatch(id, state);
   }
+  let started = 0;
+  let finished = 0;
   async function tick() {
     if (github === null) return;
+    const pass = ++started;
     const finds = new Map<string, Promise<number[]>>();
     const polls = new Map<string, Promise<PrSnapshot>>();
     const poll = (repo: string, number: number) => {
@@ -140,7 +143,10 @@ export function prWatcher(options: { registry: Registry; github: Pick<GitHub, "f
         registry.savePrWatch(t.id, saved);
       }
     }
+    finished = pass;
   }
   const ticks = singleFlight(tick);
-  return { close: ticks.settled, poll: ticks.join };
+  /** The number of the latest pass to start, and of the latest to finish. Passes run one at a time, in order. */
+  const passes = () => ({ started, finished });
+  return { close: ticks.settled, poll: ticks.join, passes };
 }
