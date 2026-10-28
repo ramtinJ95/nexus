@@ -90,9 +90,12 @@ try {
     await nexus(who, id, "send", started.id, `hello from ${who}`);
   }
   console.log(`threads: ${registry.threads().map((t) => `${t.title} (startedBy ${t.startedBy})`).join(", ")}`);
+} catch (err) {
+  console.error(err);
+  process.exitCode = 1;
 } finally {
   await api.close();
   registry.close();
   await rm(dir, { recursive: true, force: true });
-  process.exit(0);
+  process.exit();
 }
