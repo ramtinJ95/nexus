@@ -19,8 +19,9 @@ const patterns: readonly [RegExp, string][] = [
   [/\b(?:sk-ant-|sk-proj-|sk-|xox[abposr]-)[A-Za-z0-9_-]{16,}/g, "[redacted]"],
   [/\bAKIA[0-9A-Z]{16}\b/g, "[redacted]"],
   [/\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}/g, "[redacted]"],
-  [/\b((?:proxy-)?authorization["']?\s*[:=]\s*["']?)[^\s"',]+(?: [^\s"',]+)?/gi, "$1[redacted]"],
-  [/\b((?:Bearer|Basic)\s+)[A-Za-z0-9._~+/=-]{8,}/g, "$1[redacted]"],
+  // The scheme and its credential, however many spaces or tabs part them, never past the line's end.
+  [/\b((?:proxy-)?authorization["']?[ \t]*[:=][ \t]*["']?)[^\s"',]+(?:[ \t]+[^\s"',]+)?/gi, "$1[redacted]"],
+  [/\b((?:Bearer|Basic)[ \t]+)[A-Za-z0-9._~+/=-]{8,}/g, "$1[redacted]"],
   // Userinfo in a URL, as git prints for a remote with a token in it.
   [/\b([a-z][a-z0-9+.-]*:\/\/)[^\s/@:]+(?::[^\s/@]*)?@/gi, "$1[redacted]@"],
   // A quoted value whole, escapes and spaces included. An unquoted one ends at a space, as a shell's would.
