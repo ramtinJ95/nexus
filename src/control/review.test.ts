@@ -1639,3 +1639,111 @@ test("a harness, a Claude worker and a bare thread each give the replies and tak
   assert.deepEqual(woken, [harness.id, claude.id], "a message a bare thread refused wakes nothing");
   assert.ok(f.registry.thread(claude.id)!.lastAgentActivityAt > 0);
 });
+
+/** A push of `head` to the PR's branch, as GitHub and then the PR watch's next read see it. */
+const pushed = (f: ReturnType<typeof fixture>, head: string) => {
+  f.snapshot = { ...f.snapshot, pr: { ...f.snapshot.pr, conflict: false }, detail: { ...f.snapshot.detail, head } };
+  f.registry.savePrWatch(f.builder, { ...f.registry.prWatch(f.builder)!, links: [{ pr: { ...f.pr, head }, seen: [], failed: false }] });
+};
+
+test("a landing held for the person reviews a head pushed after the hold in a new round, and holds again there without the old head's waiver", async (t) => {
+  const f = fixture(t);
+  const image = "Always needs the person: pylon image rebuilds, as it changes images/pylon/Dockerfile.";
+  f.files = [{ path: "src/control/registry.ts", previous: null, patch: "" }, { path: "images/pylon/Dockerfile", previous: null, patch: "" }];
+  const loop = await approved(f, "nLAPTOP");
+  loop.land(f.builder, "nLAPTOP", head1, reservedHolds);
+  await loop.poll();
+  assert.deepEqual(f.review().phase, { kind: "needs-person", reasons: [...reservedHolds, image] });
+  pushed(f, head1);
+  await loop.poll();
+  assert.equal(f.review().phase.kind, "needs-person", "a read of the same head changes nothing");
+
+  f.files = [{ path: "src/control/registry.ts", previous: null, patch: "" }];
+  pushed(f, head2);
+  await loop.poll();
+  assert.equal(f.review().phase.kind, "reviewing");
+  assert.deepEqual(f.review().rounds.map((round) => round.head), [head1, head2]);
+  const request = f.sent.at(-1)!;
+  assert.equal(request.to, f.review().reviewer);
+  assert.match(request.message.text, new RegExp(`New commits were pushed to the branch after you approved ${head1}\\.`));
+  assert.match(request.message.text, new RegExp(`git range-diff origin/main ${head1} ${head2}`));
+
+  f.reply(f.review().reviewer, verdict(f.review(), {}));
+  await loop.poll();
+  assert.deepEqual(f.review().rounds[1]!.check, { passed: true, output: "ok" }, "the check runs at the new head");
+  assert.deepEqual(f.merges, []);
+  assert.deepEqual(f.review().phase, { kind: "needs-person", reasons: reservedHolds }, "the waiver named the head before the push");
+  await loop.poll();
+  assert.equal(f.review().rounds.length, 2);
+  loop.land(f.builder, "nLAPTOP", head2, reservedHolds);
+  await loop.poll();
+  assert.deepEqual(f.merges, [head2]);
+});
+
+test("a review that stopped at approval reviews a head pushed after it in a new round, and stops at approval again", async (t) => {
+  const f = fixture(t);
+  const loop = await approved(f, null);
+  assert.deepEqual(f.review().phase, { kind: "approved" });
+  pushed(f, head2);
+  await loop.poll();
+  assert.equal(f.review().phase.kind, "reviewing");
+  assert.equal(f.review().rounds[1]!.head, head2);
+  f.reply(f.review().reviewer, verdict(f.review(), {}));
+  await loop.poll();
+  assert.deepEqual(f.review().phase, { kind: "approved" });
+  assert.deepEqual(f.review().rounds[1]!.check, { passed: true, output: "ok" });
+  assert.deepEqual(f.merges, []);
+});
+
+test("a held review with no round left, or one the loop gave up on, names the head pushed after it and starts no round", async (t) => {
+  const f = fixture(t);
+  f.files = [{ path: "src/control/registry.ts", previous: null, patch: "" }];
+  const loop = f.loop();
+  await loop.start(f.builder, { land: "nLAPTOP", rounds: 1 });
+  await loop.poll();
+  f.reply(f.review().reviewer, verdict(f.review(), {}));
+  await loop.poll();
+  assert.deepEqual(f.review().phase, { kind: "needs-person", reasons: reservedHolds });
+  pushed(f, head2);
+  await loop.poll();
+  await loop.poll();
+  const phase = f.review().phase as Extract<Review["phase"], { kind: "needs-person" }>;
+  assert.equal(phase.kind, "needs-person");
+  assert.deepEqual(phase.reasons, [`The pull request's head moved to ${head2} after round 1, the last this review allows, so ${head2} is unreviewed.`]);
+  assert.deepEqual(phase.label, { state: "added" });
+  assert.deepEqual(f.labelCalls, [humanLabel], "the label is added once");
+  assert.equal(f.review().rounds.length, 1);
+  assert.equal(f.sent.filter((s) => s.to === f.review().reviewer).length, 1, "the reviewer gets no round");
+  assert.throws(() => loop.land(f.builder, "nLAPTOP", head1), { status: 409 }, "the old head is no longer offered for landing");
+
+  const g = fixture(t);
+  g.check = { kind: "done", passed: false, output: "1 test failed" };
+  const gave = await approved(g, null);
+  g.reply(g.builder, answers(g.review(), [{ id: "CHECK", action: "rejected", reason: "The test is flaky." }]));
+  await gave.poll();
+  const reasons = [`.nexus/check failed at ${head1}, and the builder pushed nothing for it: The test is flaky.`, "The check's output:\n1 test failed"];
+  assert.deepEqual(g.review().phase, { kind: "needs-person", reasons });
+  pushed(g, head2);
+  await gave.poll();
+  await gave.poll();
+  assert.deepEqual((g.review().phase as { reasons: string[] }).reasons, [...reasons,
+    `The pull request's head moved to ${head2} after this review was held, so none of its rounds reviewed that commit. Run nexus review ${g.builder} to review it.`]);
+  assert.equal(g.review().rounds.length, 1);
+  assert.deepEqual(g.labelCalls, []);
+});
+
+test("a review that merged and is held over its deploy stays as it is whatever the PR watch reads", async (t) => {
+  const f = fixture(t);
+  f.registry.setDesiredRelease({ commit: previous, requestedBy: "person", requestedAt: 1 });
+  const loop = await approved(f, "nLAPTOP");
+  f.registry.reportRelease({ node, role: "control", commit: previous, target: merged, state: "failed", reason: "unit failed", observedAt: Date.now() });
+  await loop.poll();
+  for (const role of ["control", "probe"] as const) f.registry.reportRelease({ node, role, commit: previous, target: previous, state: "healthy", reason: null, observedAt: Date.now() });
+  await loop.poll();
+  const held = f.review();
+  assert.equal(held.phase.kind, "needs-person");
+  assert.equal(held.merged, merged);
+  pushed(f, head2);
+  await loop.poll();
+  assert.deepEqual(f.review(), held);
+});
