@@ -708,6 +708,25 @@ test("a retry made while a pass waits on the probe for another pylon is not undo
   assert.equal(retried.live.previews.length, 1);
 });
 
+test("a pylon moved to another node while a pass waits on the probe for another pylon gets no job from its old node", async (t) => {
+  const registry = openRegistry(tempDb());
+  const [first, second] = [seed(registry), seed(registry)].sort((a, b) => a.pylonId.localeCompare(b.pylonId));
+  registry.savePylon({ ...registry.pylon(second!.pylonId)!, failed: "gave up after 5 failed attempts", attempts: { count: 5, last: { at: 1, code: "backend", message: "boot failed" } } });
+  const other = "infra-testbench" as NodeName;
+  registry.upsertNode({ name: other, tailnetHost: "infra-testbench.tail.ts.net", tailnetNodeId: "nTESTBENCH" as TailnetNodeId });
+  const fake = fakeNode({ autoFinish: false });
+  const release = fake.holdSubmits();
+  const loop = run(t, registry, fake.probe, { log: () => {} });
+  await until("the first pylon's tick waits on its submit", () => registry.pylon(first!.pylonId)?.submitted !== null);
+
+  const stored = registry.pylon(second!.pylonId)!;
+  assert.equal(registry.movePylon(second!.pylonId, node, { node: other, firstBoot: stored.firstBoot, live: stored.live, liveHash: stored.liveHash, placement: { how: "named", node: other }, setup: { how: "fresh", reason: "moved" } }), true);
+  release();
+  await loop.wake(node);
+  assert.deepEqual(fake.submitted.filter((job) => "pylonId" in job && job.pylonId === second!.pylonId), [], "the old node's pass left the moved pylon alone");
+  assert.equal(registry.pylon(second!.pylonId)!.node, other);
+});
+
 test("a pylon pauses once its agent turn ends and nobody has used it for a while", async (t) => {
   const registry = openRegistry(tempDb());
   const longAgo = Date.now() - 60 * 60_000;
