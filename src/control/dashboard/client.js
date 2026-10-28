@@ -3,7 +3,7 @@
 // and polls the page to swap in each `data-live` region that changed. A thread page also follows its stream, which
 // sends the conversation region as the run streams, and reads its checkout's changes into the inspector, opening
 // each changed file's diff as a tab beside the conversation.
-import { coordinator, notificationChannel, badgeCount, badgeText, noticeText, seenBody } from "./notifications.js";
+import { coordinator, notificationChannel, badgeCount, badgeText, noticeText, owedSeen } from "./notifications.js";
 import { agoText } from "./ago.js";
 import { afterSend, emptyReview, formatReview, kinds, linesLabel, noteOn, place, rangeOf, readReview, rowsOf } from "./review.js";
 
@@ -1382,7 +1382,7 @@ if (window.isSecureContext && "Notification" in window) {
 }
 document.querySelector("aside")?.append(permission);
 let attentionPolling = false;
-let lastSeen = 0;
+let marked = null;
 async function pollAttention() {
   if (attentionPolling) return;
   attentionPolling = true;
@@ -1394,9 +1394,10 @@ async function pollAttention() {
     const favicon = document.querySelector('link[rel="icon"]');
     favicon.href = count ? `data:image/svg+xml,${encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><rect width="32" height="32" rx="8" fill="#d44"/><text x="16" y="23" text-anchor="middle" font-size="22" fill="white">${badgeText(count)}</text></svg>`)}` : "/assets/favicon.svg";
     const id = currentThread();
-    if (id && focused() && activeTab === null && document.getElementById("convo") && !document.querySelector("#convo .error") && Date.now() - lastSeen >= 3000) {
-      lastSeen = Date.now();
-      await api("POST", `/v1/threads/${id}/seen`, seenBody(document.getElementById("convo")), AbortSignal.timeout(10_000));
+    const body = owedSeen(document.getElementById("convo"), marked);
+    if (id && focused() && activeTab === null && body !== null && !document.querySelector("#convo .error")) {
+      await api("POST", `/v1/threads/${id}/seen`, body, AbortSignal.timeout(10_000));
+      marked = body.lastReplyAt;
     }
   } catch { /* The page's refresh reports connection failures. */ }
   finally { attentionPolling = false; }

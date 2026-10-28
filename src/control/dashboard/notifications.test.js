@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { coordinator, notificationChannel, badgeCount, badgeText, seenBody } from "./notifications.js";
+import { coordinator, notificationChannel, badgeCount, badgeText, owedSeen, seenBody } from "./notifications.js";
 
 const row = (attention, working = false, id = "t1") => ({ id, attention, working });
 test("initial states are silent; failures and parked notify immediately", () => {
@@ -106,6 +106,16 @@ test("seen payload stays at the rendered reply while attention polls find newer 
   assert.deepEqual(seenBody({ dataset: { renderedReplyAt: "" } }), { lastReplyAt: null });
 });
 
+test("a page owes a seen mark once for each reply it shows, so one marked unseen elsewhere stays unseen", () => {
+  const conversation = { dataset: { renderedReplyAt: "1000" } };
+  assert.deepEqual(owedSeen(conversation, null), { lastReplyAt: 1000 });
+  assert.equal(owedSeen(conversation, 1000), null, "the reply it marked already");
+  conversation.dataset.renderedReplyAt = "2000";
+  assert.deepEqual(owedSeen(conversation, 1000), { lastReplyAt: 2000 });
+  assert.equal(owedSeen({ dataset: { renderedReplyAt: "" } }, null), null, "a page that shows no reply marks nothing");
+  assert.equal(owedSeen(null, null), null);
+});
+
 test("stalled attention requests time out, release the poll lock and retry", async (t) => {
   const { readFile } = await import("node:fs/promises");
   const { runInNewContext } = await import("node:vm");
@@ -142,7 +152,7 @@ test("stalled attention requests time out, release the poll lock and retry", asy
           querySelector: (selector) => selector === 'link[rel="icon"]' ? favicon : null,
         },
         notifications: (rows) => updates.push(rows),
-        badgeCount, badgeText, seenBody,
+        badgeCount, badgeText, owedSeen,
         currentThread: () => "t1", focused: () => true, activeTab: null,
       });
       // AbortSignal's timer is unref'ed in Node; keep this simulated browser alive until it fires.
