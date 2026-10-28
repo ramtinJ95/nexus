@@ -1,0 +1,3 @@
+$ nexus items --all
+No pipeline items.
+[exit 0]

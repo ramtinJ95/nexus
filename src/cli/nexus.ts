@@ -39,7 +39,7 @@ import type { WebSocket } from "ws";
 import { attachTerminal, processTty } from "./attach.ts";
 import { call, CliError, exitCodes, follow, upgrade, type Endpoint, type HostPort } from "./transport.ts";
 
-const version = "0.39.0";
+const version = "0.40.0";
 const defaults = { url: "http://rj-firebat.tailc817d3.ts.net:7470", socks: "localhost:1055" };
 const configFile = () => join(homedir(), ".config", "nexus", "cli.json");
 
@@ -60,8 +60,9 @@ const usage = `nexus ${version}, the Nexus control plane from this Mac
   nexus session close <thread> <pane|id>       a session in no pane by its ID, which \`nexus show\` gives
   nexus attach <thread>                        this terminal on the pylon's Herdr sessions, through the control plane
   nexus start --project P [--title T] [--message M | --claude PROMPT [--model ID]] [--node N|auto] [--branch B] [--commit C]
-              [--cpus n] [--memory GiB] [--disk GiB] [--after THREAD[,THREAD...]] [--request-id ID]
+              [--cpus n] [--memory GiB] [--disk GiB] [--after THREAD[,THREAD...]] [--request-id ID] [--plan]
     --after queues it to start once each of those threads' pull requests has merged
+    --plan makes it a planning thread, whose proposed items become questions you accept or reject
     --request-id makes a repeat of the start answer the thread the first made
   nexus start-queued <thread>                  start a queued thread now, without waiting for the threads it is queued after
   nexus items [--project P] [--all]            pipeline items and the phase each is in; cancelled ones only with --all
@@ -385,11 +386,13 @@ const autoReviewText = (p: Project) => p.autoReview == null ? "auto review off" 
 /** A control plane older than `Thread.working` sends none. */
 const working = (t: Thread) => t.working ?? (t.agentTurnRunning || t.sessionTurnRunning === true);
 
-function detailText({ thread: t, pylon: p, agent, sessions, previews, ports, outputs, prWatch, pullRequests, claudeWorker, attention, review, questions, judgments }: ThreadDetail): string {
+function detailText({ thread: t, pylon: p, agent, sessions, previews, ports, outputs, prWatch, pullRequests, claudeWorker, attention, review, questions, judgments, planning }: ThreadDetail): string {
   const observed = p.observedAt === null ? "" : `, observed ${ago(Date.parse(p.observedAt))}`;
   return [
     `${t.id}  ${t.title}`,
     `project: ${t.project}`,
+    // A control plane older than 0.40.0 sends no planning.
+    ...planning === true ? ["planning: its proposed items become questions you accept or reject"] : [],
     ...(claudeWorker === undefined ? [] : [`Claude worker: ${claudeWorker.state}, model ${claudeWorker.model ?? "unknown"}`, ...(claudeWorker.message === undefined ? [] : [`failed: ${claudeWorker.message}`])]),
     `attention: ${attention ?? "none"}`,
     ...t.usageLimit === undefined ? [] : [`usage limit: ${usageLimitText(t.usageLimit, Date.now())}. \`nexus send ${t.id} continue\` resumes it once the limit resets`],
@@ -1153,10 +1156,11 @@ const commands: Readonly<Record<string, Command>> = {
     args: [0, 0],
     options: {
       model: { type: "string" }, claude: { type: "string" }, project: { type: "string" }, title: { type: "string" }, message: { type: "string" }, node: { type: "string" }, branch: { type: "string" }, commit: { type: "string" },
-      cpus: { type: "string" }, memory: { type: "string" }, disk: { type: "string" }, after: { type: "string" }, "request-id": { type: "string" },
+      cpus: { type: "string" }, memory: { type: "string" }, disk: { type: "string" }, after: { type: "string" }, "request-id": { type: "string" }, plan: { type: "boolean" },
     },
     async run(api, _, v) {
       const project = str(v, "project");
+      if (v.plan === true && (v.claude !== undefined || v.after !== undefined)) throw new CliError("invalid", "--plan starts a Nexus agent thread now, so it takes neither --claude nor --after");
       const message = str(v, "message");
       const claude = str(v, "claude");
       if (v.model !== undefined && claude === undefined) throw new CliError("invalid", "--model requires --claude");
@@ -1168,7 +1172,7 @@ const commands: Readonly<Record<string, Command>> = {
       const resources = resourcesOf(v);
       const requestId = str(v, "request-id");
       // One request: the control plane sends the first message once the thread starts, as the person's.
-      const body = { project, title, ...optional, ...resources === undefined ? {} : { resources }, ...message === undefined ? {} : { message }, ...requestId === undefined ? {} : { requestId } };
+      const body = { project, title, ...optional, ...resources === undefined ? {} : { resources }, ...message === undefined ? {} : { message }, ...requestId === undefined ? {} : { requestId }, ...v.plan === true ? { planning: true } : {} };
       const after = str(v, "after")?.split(",").map((id) => id.trim()).filter((id) => id !== "");
       if (after !== undefined) {
         if (after.length === 0) throw new CliError("invalid", "--after needs a thread");
@@ -1178,7 +1182,7 @@ const commands: Readonly<Record<string, Command>> = {
         return { json: q, text: `Queued ${q.id} on ${q.project}: ${q.title}. It starts once ${listed(q.after)} ${q.after.length === 1 ? "has merged its pull request" : "have merged their pull requests"}.` };
       }
       const t = await api("POST", "/v1/threads", body) as Thread;
-      return { json: t, text: `Started ${t.id} on ${t.project}: ${t.title}${message === undefined ? "" : "\nSent the first message."}` };
+      return { json: t, text: `Started ${v.plan === true ? "planning thread " : ""}${t.id} on ${t.project}: ${t.title}${message === undefined ? "" : "\nSent the first message."}` };
     },
   },
   items: {

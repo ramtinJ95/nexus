@@ -1,0 +1,3 @@
+$ nexus threads --all
+th-52cd48a32792  active  -  pylon running  wave  14s ago  Plan the orchestration wave
+[exit 0]

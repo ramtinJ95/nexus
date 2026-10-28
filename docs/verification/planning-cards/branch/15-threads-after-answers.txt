@@ -1,0 +1,4 @@
+$ nexus threads --all
+th-52cd48a32792  active  -  pylon running  wave  26s ago  Plan the orchestration wave
+th-ad16b10af5f3  active  -  pylon running  wave  4s ago   Wake the passes from the event stream
+[exit 0]

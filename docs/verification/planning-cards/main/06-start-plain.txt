@@ -1,0 +1,26 @@
+$ nexus start --project wave --title "Plan the orchestration wave" --message "Plan the next two items of the roadmap's orchestration wave: wake-ups from the event stream, and asking the person through the attention status." --json
+{
+  "id": "th-8a3a6a971dae",
+  "title": "Plan the orchestration wave",
+  "project": "wave",
+  "pylonId": "pylon-th-8a3a6a971dae",
+  "status": "active",
+  "conversationId": "2",
+  "startedBy": "nVERIFYLAPTOP",
+  "createdAt": 1793192898322,
+  "agentTurnRunning": false,
+  "working": false,
+  "lastAgentActivityAt": 0,
+  "lastHumanActivityAt": 1793192898322,
+  "seenAt": null,
+  "lastReplyAt": null,
+  "placement": {
+    "how": "default",
+    "node": "node-a"
+  },
+  "setup": {
+    "how": "fresh",
+    "reason": "the control plane could not read .nexus/setup at main: the control plane reads only https:// remotes, and holds no SSH key for git@github.com:verify/wave.git"
+  }
+}
+[exit 0]

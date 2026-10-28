@@ -1,0 +1,10 @@
+✖ src/cli/nexus.test.ts
+✖ src/control/api.test.ts
+✖ the start dialog picks Claude Code for a prompt unless the reader picks the Nexus agent, whose thread needs a title
+✖ a reviewer, a check thread, a planning thread, a builder in a project without auto-review, and a running turn are never nudged
+✖ src/control/planning.test.ts
+ℹ tests 5
+ℹ pass 0
+ℹ fail 5
+ℹ cancelled 0
+✖ failing tests:

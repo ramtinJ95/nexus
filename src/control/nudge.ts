@@ -52,7 +52,7 @@ export function builderNudger(options: { registry: Registry; github: Pick<GitHub
   /** The repository of a builder whose project reviews its pull requests on its own, or null for any other thread. */
   function builderRepo(t: Thread): string | null {
     if (t.status !== "active" && t.status !== "idle") return null;
-    if (t.startedBy === reviewerCaller || t.startedBy === checkCaller || t.startedBy === verifyCaller || registry.isReviewer(t.id)) return null;
+    if (t.startedBy === reviewerCaller || t.startedBy === checkCaller || t.startedBy === verifyCaller || registry.isReviewer(t.id) || registry.planning(t.id) !== null) return null;
     const project = registry.project(t.project);
     return project?.autoReview == null ? null : githubRepo(project.repoUrl);
   }

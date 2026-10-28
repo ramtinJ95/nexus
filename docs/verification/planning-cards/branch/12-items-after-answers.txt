@@ -1,0 +1,3 @@
+$ nexus items --all
+it-0e53ba1609d2  building  no pull request yet  th-ad16b10af5f3  wave  2s ago  Wake the passes from the event stream
+[exit 0]

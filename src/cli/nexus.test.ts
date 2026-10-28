@@ -20,11 +20,12 @@ import { fileURLToPath } from "node:url";
 import { startApi } from "../control/api.ts";
 import { threadStarter } from "../control/threads.ts";
 import { pipeline, type PipelineItem } from "../control/pipeline.ts";
+import { planning, planningPrefix } from "../control/planning.ts";
 import { threadQueue, type QueuedThread } from "../control/queue.ts";
 import { turnGate } from "../control/drain.ts";
 import { fakeHarness } from "../control/fake-harness.ts";
 import { openRegistry, type Thread, type ThreadId } from "../control/registry.ts";
-import type { Review } from "../control/review.ts";
+import { agentReplies, type Review } from "../control/review.ts";
 import type { Judgment } from "../control/judgment.ts";
 import { startImageRollout } from "../control/image-rollout.ts";
 import { usageBackfill } from "../control/usage-backfill.ts";
@@ -146,9 +147,11 @@ async function setup(t: TestContext, setupOptions: { queue?: boolean } = {}) {
   const backfill = usageBackfill({ registry, counter: { readWhole: () => Promise.reject(new Error("the CLI tests read no pylon")) }, wake: () => {}, intervalMs: 3_600_000, log: () => {} });
   const queue = setupOptions.queue === true ? threadQueue({ registry, startThread, gate: turnGate(() => false), send: (id, text, requestId) => fake.harness.send(id, text, requestId, "followUp") }) : null;
   const items = queue === null ? null : pipeline({ registry, queue });
+  const plans = planning({ registry, pipeline: items, replies: agentReplies(registry, fake.harness) });
   const options = (port: number) => ({
     queue,
     pipeline: items,
+    planning: plans,
     deployment: { self: "nFIREBAT" as TailnetNodeId, deployers: new Set([laptop]), keys: {}, resolveMain: async () => "a".repeat(40) },
     registry, host: "127.0.0.1", port, whois: async () => { requests++; return caller; }, allowed: new Set([laptop]),
     hostnames: new Set([apiName, "127.0.0.1"]), harness: fake.harness, wake: () => {}, previewPorts: { first: 10200, last: 10299 }, images, usageBackfill: backfill,
@@ -1376,7 +1379,7 @@ judgment of failure 814 on ${node}: no verdict yet\n {2}judging since 2026-10-28
 
 test("deploy and release use the shared release view and wait for both roles", async (t) => {
   const s = await setup(t);
-  assert.equal((await s.nexus(["--version"])).stdout.trim(), "nexus 0.39.0");
+  assert.equal((await s.nexus(["--version"])).stdout.trim(), "nexus 0.40.0");
   assert.equal((await s.nexus(["deploy", "bad"])).code, 64);
   const requested = await s.json(["deploy", "main"]);
   assert.equal(requested.desired.commit, "a".repeat(40));
@@ -1784,6 +1787,19 @@ test("start --request-id starts one thread and sends its first message once, how
   const other = await s.nexus(["start", "--project", "acme", "--message", "Fix the tests", "--request-id", "start:cli", "--json"]);
   assert.equal(other.code, 5, "another start under the same request ID is a conflict");
   assert.match(other.stderr, new RegExp(`request ID start:cli started thread ${first.id} with another body`));
+});
+
+test("start --plan starts a planning thread, whose first message carries the guide, and show says it plans", async (t) => {
+  const s = await setup(t);
+  assert.equal((await s.nexus(["start", "--project", "acme", "--plan", "--claude", "Plan it"])).code, 64);
+  const started = await s.nexus(["start", "--project", "acme", "--plan", "--message", "Plan the orchestration wave"]);
+  assert.equal(started.code, 0, started.stderr);
+  const id = /^Started planning thread (th-[0-9a-f]+) on acme: Plan the orchestration wave\nSent the first message\.$/.exec(started.stdout.trim())?.[1];
+  assert.ok(id !== undefined, started.stdout);
+  const first = s.fake.transcript(id).messages[0]!.content as string;
+  assert.ok(first.startsWith(planningPrefix) && first.endsWith("Plan the orchestration wave"));
+  assert.match((await s.nexus(["show", id])).stdout, /^planning: its proposed items become questions you accept or reject$/m);
+  assert.equal((await s.json(["show", id])).planning, true);
 });
 
 test("start --after --request-id answers the queued thread, and the thread once it has started", async (t) => {

@@ -1,0 +1,3 @@
+$ nexus conversation th-ad16b10af5f3
+> Make the review loop, the queue and the pipeline pass run as soon as the registry appends an event that matters to them (thread.turn-ended, thread.failed, review.changed, release.changed), not only on their 15-second timers. Keep the timers as the fallback, so a missed event costs at most one pass. Add a registry test that an appended event runs the pass at once.
+[exit 0]

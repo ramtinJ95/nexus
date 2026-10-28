@@ -1219,6 +1219,8 @@ test("the start dialog picks Claude Code for a prompt unless the reader picks th
   assert.doesNotMatch(field("title")!, /required/, "a Claude worker's title defaults to its prompt's first line");
   const claudeFields = textOf(dialog.split('<div id="start-claude-fields">')[1]!.split("</div>")[0]!);
   assert.equal(claudeFields, "Prompt Runs /poteto-mode with this prompt, as nexus start --claude does. Model (optional) Opus 5.5 unless you name another.");
+  const harnessFields = dialog.split('<div id="start-harness-fields" hidden>')[1]!.split("</div>")[0]!;
+  assert.match(harnessFields, /<input type="checkbox" id="start-planning" name="planning" value="true" disabled> Planning thread/, "the Nexus agent's planning box, sent only once that worker is picked");
 });
 
 /** Starts a Claude worker thread whose launch opened session s1, and stores these entries as its transcript's last read. */

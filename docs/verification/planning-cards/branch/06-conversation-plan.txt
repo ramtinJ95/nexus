@@ -1,0 +1,35 @@
+$ nexus conversation th-52cd48a32792
+> [Nexus planning: automated, not a message from the person]
+> This is a planning thread. You plan the work and the person decides it: you have no tool that starts, messages or waits on another thread or adds work, and nothing you write starts a builder. When you have a plan, end your turn with exactly one block like this, with JSON in it:
+> ```nexus-plan
+> {"token": "th-52cd48a32792:bfceb6b49214", "items": [{"key": "a", "title": "one line", "brief": "the builder's whole first message", "after": []}]}
+> ```
+> Each item becomes a card the person accepts or rejects. An accepted item is queued as a builder thread whose first message is its brief, and the builder knows nothing else of this conversation, so write each brief as a complete instruction. "after" lists the keys of earlier items in the same block, or the IDs of pipeline items (it-...), whose pull requests must merge first. Your next message from the person starts with what they accepted, with each new item's ID, and what they rejected. Revise if they ask you to, and propose only new or changed items in a later block.
+> The person's message follows.
+> 
+> Plan the next two items of the roadmap's orchestration wave: wake-ups from the event stream, and asking the person through the attention status.
+
+Two items from the wave, the second after the first.
+
+```nexus-plan
+{
+  "token": "th-52cd48a32792:bfceb6b49214",
+  "items": [
+    {
+      "key": "wake",
+      "title": "Wake the passes from the event stream",
+      "brief": "Make the review loop, the queue and the pipeline pass run as soon as the registry appends an event that matters to them (thread.turn-ended, thread.failed, review.changed, release.changed), not only on their 15-second timers. Keep the timers as the fallback, so a missed event costs at most one pass. Add a registry test that an appended event runs the pass at once.",
+      "after": []
+    },
+    {
+      "key": "ask",
+      "title": "Ask the person through the attention status",
+      "brief": "When a pipeline item reaches a call the merge policy reserves for the person, such as an image rebuild or a secret, ask a question on its thread instead of stalling the pipeline, and act on the answer on the next pass. Hold only that item.",
+      "after": [
+        "wake"
+      ]
+    }
+  ]
+}
+```
+[exit 0]
