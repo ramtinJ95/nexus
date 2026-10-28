@@ -5,9 +5,10 @@ import { canDeploy, commitSchema, isPerson, isReporter, releaseView, reportSchem
 /**
  * The control plane's HTTP API for the dashboard and the CLI. JSON in and out.
  *
- * Each thread's agent is a conversation in the control plane's harness, or a Claude Code worker in its pylon. The API
- * creates a harness conversation with the thread, forwards messages, aborts and retries to it, and serves its view. A
- * Claude worker's messages are typed into its session, and its view is its transcript as claude-conversation.ts reads it.
+ * Each thread's agent is a conversation in the control plane's harness, a Claude Code worker in its pylon, or none, as
+ * the registry's `agent` says, and thread-agent.ts holds what each kind does. The API creates a harness conversation
+ * with the thread, forwards messages, aborts and retries to it, and serves its view. A Claude worker's messages are
+ * typed into its session, and its view is its transcript as claude-conversation.ts reads it.
  *
  * A thread's conversation also streams, as server-sent events: its view, or a Claude worker's transcript, for the
  * CLI, and the thread page's conversation for the dashboard. Each stream holds one watch, on the harness or on a
@@ -43,6 +44,7 @@ import type { ClaudeSent, NodeRecord, Output, PortRange, Preview, Registry, Sess
 import { dashboard, liveFrames } from "./dashboard.ts";
 import { attachScript, checkoutDir, claudeTextProblem, herdrSession, sessionHarnessSchema, type SessionHarness } from "../sessions.ts";
 import { claudeConversations, claudeFrames } from "./claude-conversation.ts";
+import { threadAgents, type AgentView, type Watch } from "./thread-agent.ts";
 import { usageFilter } from "./usage.ts";
 import type { UsageBackfillJob } from "./usage-backfill.ts";
 import type { ClaudeConversation } from "../claude-transcript.ts";
@@ -167,14 +169,6 @@ export interface ViewFrame {
 /** Maps each view to what one client has not seen yet, or null when nothing it shows changed. */
 export type Frames<V = ConversationView> = (view: V) => unknown;
 type EventBatch = ReturnType<Registry["eventBatch"]>;
-
-/** What a stream follows: a harness conversation's watch, or a Claude worker's. */
-interface Watch<V> {
-  readonly value: V;
-  start(listener: (view: V) => void | Promise<void>): void;
-  stop(): Promise<unknown>;
-  readonly closed: Promise<unknown>;
-}
 
 /** The frames of one client of a thread's event stream. pi-durable's views share every part a commit left alone. */
 export function viewFrames(): Frames {
@@ -307,6 +301,7 @@ const claudeReadMs = 5_000;
 export async function startApi(options: ApiOptions): Promise<Api> {
   const { registry, whois, allowed, hostnames, harness, startThread, wake, probes, previewPorts, streamStallMs = 30_000, attachTiming: timing = attachTiming, closeWaitMs = 5_000 } = options;
   const claude = claudeConversations({ registry, probes });
+  const agents = threadAgents({ registry, harness, claude });
 
   function thread(id: string): Thread {
     const found = registry.thread(id as ThreadId);
@@ -351,19 +346,16 @@ export async function startApi(options: ApiOptions): Promise<Api> {
     return t;
   }
 
-  /** Threads from before the harness ran on the control plane have no conversation, and a deleted thread's is gone. */
+  /** Only a harness thread has a harness conversation, and a deleted thread's is gone. */
   function conversing(t: Thread): Thread {
     refuseDeleted(t);
-    if (t.conversationId === null) throw new HttpError(409, `thread ${t.id} has no conversation`);
+    if (registry.agent(t).kind !== "harness") throw new HttpError(409, `thread ${t.id} has no conversation`);
     return t;
   }
 
-  /** A Claude worker thread has no harness conversation, so nothing for it ever reaches the harness. */
-  const isClaude = (t: Thread) => registry.claudeWorker(t.id) !== undefined;
-
   function claudeWorker(t: Thread): Thread {
     refuseDeleted(t);
-    if (!isClaude(t)) throw new HttpError(409, `thread ${t.id} has no Claude worker`);
+    if (registry.agent(t).kind !== "claude") throw new HttpError(409, `thread ${t.id} has no Claude worker`);
     return t;
   }
 
@@ -431,10 +423,10 @@ export async function startApi(options: ApiOptions): Promise<Api> {
     const pylon = registry.pylon(t.pylonId)!;
     const previews = registry.previews(pylon.pylonId);
     const watch = registry.prWatch(t.id);
-    const worker = registry.claudeWorker(t.id);
+    const agent = registry.agent(t);
     return {
       thread: t,
-      ...(worker === undefined ? {} : { claudeWorker: { model: worker.model, state: worker.state, ...(worker.message === undefined ? {} : { message: worker.message }) } }),
+      ...(agent.kind !== "claude" ? {} : { claudeWorker: { model: agent.worker.model, state: agent.worker.state, ...(agent.worker.message === undefined ? {} : { message: agent.worker.message }) } }),
       attention: registry.attention(t.id), seenAt: t.seenAt, lastReplyAt: t.lastReplyAt,
       desired: desiredPhase(t, Date.now()),
       pylon: pylonOf(t),
@@ -447,7 +439,7 @@ export async function startApi(options: ApiOptions): Promise<Api> {
       review: registry.review(t.id),
       questions: registry.questions(t.id),
       attach: `herdr --session ${herdrSession}`,
-      agent: t.conversationId === null || t.status === "deleted" ? null : { parkedTasks: harness.activity.parked(t.id).length },
+      agent: agent.kind !== "harness" || t.status === "deleted" ? null : { parkedTasks: harness.activity.parked(t.id).length },
     };
   }
 
@@ -586,11 +578,12 @@ export async function startApi(options: ApiOptions): Promise<Api> {
     if (t.status === "deleted") throw new HttpError(409, `thread ${t.id} is deleted`);
     registry.setThreadStatus(t.id, status);
     wakeThread(t);
-    if (status === "deleted") for (const s of open) if (s.thread === t.id) s.end();
-    // A read that finds the thread deleted lets its reader go.
-    if (status === "deleted" && isClaude(t)) void claude.refresh(t);
-    // After the status, so the run's wait for a pylon ends: the locator refuses a deleted thread's pylon.
-    if (status === "deleted" && t.conversationId !== null) await harness.deleteThread({ threadId: t.id, pylonId: t.pylonId });
+    if (status === "deleted") {
+      for (const s of open) if (s.thread === t.id) s.end();
+      // After the status, which each agent's delete relies on.
+      const agent = registry.agent(t);
+      if (agent.kind !== "none") await agents[agent.kind].delete(t);
+    }
     return { ...t, status };
   }
 
@@ -756,7 +749,8 @@ export async function startApi(options: ApiOptions): Promise<Api> {
 
   /** Reads the pylon's checkout for the Files and Changes views, over one raw pipe per read. */
   async function inCheckout<T>(t: Thread, read: (checkout: CheckoutReader) => Promise<T>): Promise<T> {
-    const turn = t.conversationId === null ? registry.latestClaudeTurn(t.id) : await harness.latestTurn(t.id);
+    const agent = registry.agent(t);
+    const turn = agent.kind === "none" ? null : await agents[agent.kind].latestTurn(t);
     return inPylon(t, (probe, pylonId) => read(checkoutReader((argv) => probe.stream(pylonId, argv), checkoutDir, undefined, turn)));
   }
 
@@ -830,14 +824,13 @@ export async function startApi(options: ApiOptions): Promise<Api> {
     if (outcome === "moved") throw new HttpError(404, `pane ${id} of pylon ${t.pylonId} runs another session now, so it was left open. A wake moved session ${id} to another pane, which the thread's sessions list`);
   }
 
-  /** What a thread page shows: a Claude worker's transcript as last read, or the harness conversation's view. */
-  async function conversation(t: Thread): Promise<ConversationView | ClaudeConversation> {
-    if (isClaude(t)) return claude.view(t);
-    const watch = await harness.watch(t.id);
-    try {
-      return watch.value;
-    } finally {
-      await watch.stop();
+  /** What a thread page shows: a Claude worker's transcript as last read, the harness conversation's view, or none. */
+  async function conversation(t: Thread): Promise<AgentView | null> {
+    const agent = registry.agent(t);
+    switch (agent.kind) {
+      case "harness": return { kind: "harness", view: await agents.harness.view(t) };
+      case "claude": return { kind: "claude", view: await agents.claude.view(t) };
+      case "none": return null;
     }
   }
 
@@ -879,13 +872,11 @@ export async function startApi(options: ApiOptions): Promise<Api> {
   async function turnsRunning(): Promise<boolean> {
     if (turnRequests.busy() || options.turnsStarting?.()) return true;
     for (const t of registry.threads()) {
-      if (t.status === "deleted" || t.conversationId === null) continue;
-      const watch = await harness.watch(t.id);
-      try {
-        const live = watch.value.docs["pi.live"];
-        const inbox = watch.value.docs["pi.inbox"];
-        if (live?.run !== undefined || (Array.isArray(inbox?.items) && inbox.items.length > 0)) return true;
-      } finally { await watch.stop(); }
+      if (t.status === "deleted" || registry.agent(t).kind !== "harness") continue;
+      const { docs } = await agents.harness.view(t);
+      const live = docs["pi.live"];
+      const inbox = docs["pi.inbox"];
+      if (live?.run !== undefined || (Array.isArray(inbox?.items) && inbox.items.length > 0)) return true;
     }
     return turnRequests.busy() || (options.turnsStarting?.() ?? false);
   }
@@ -936,17 +927,22 @@ export async function startApi(options: ApiOptions): Promise<Api> {
     }],
     ["GET", /^\/v1\/threads\/([^/]+)\/events$/, ([, id]) => {
       const t = thread(id!);
-      return { stream: (res) => stream(res, conversing(t), () => harness.watch(t.id), viewFrames()) };
+      return { stream: (res) => stream(res, conversing(t), () => agents.harness.watch(t), viewFrames()) };
     }],
     ["GET", /^\/v1\/threads\/([^/]+)\/claude\/events$/, ([, id]) => {
       const t = thread(id!);
-      return { stream: (res) => stream(res, claudeWorker(t), () => claude.watch(t), claudeFrames()) };
+      return { stream: (res) => stream(res, claudeWorker(t), () => agents.claude.watch(t), claudeFrames()) };
     }],
     ["GET", /^\/threads\/([^/]+)\/stream$/, ([, id]) => {
       const t = thread(id!);
-      return { stream: (res) => isClaude(t)
-        ? stream<ClaudeConversation>(res, refuseDeleted(t), () => claude.watch(t), liveFrames(t, registry.claudeWorker(t.id)?.model ?? null))
-        : stream<ConversationView>(res, conversing(t), () => harness.watch(t.id), liveFrames(t)) };
+      return {
+        stream(res) {
+          const agent = registry.agent(t);
+          return agent.kind === "claude"
+            ? stream<ClaudeConversation>(res, refuseDeleted(t), () => agents.claude.watch(t), liveFrames(t, agent.worker.model))
+            : stream<ConversationView>(res, conversing(t), () => agents.harness.watch(t), liveFrames(t));
+        },
+      };
     }],
     ["PATCH", /^\/v1\/projects\/([^/]+)$/, async ([, id], r) => {
       const { autoReview, ...patch } = parse(projectEditSchema, await r.body());
@@ -1000,10 +996,10 @@ export async function startApi(options: ApiOptions): Promise<Api> {
     ["POST", /^\/v1\/threads\/([^/]+)\/messages$/, async (m, r) => {
       const body = await r.body();
       const t = thread(m[1]!);
-      const worker = registry.claudeWorker(t.id);
-      if (worker === undefined) return { status: 202, body: await sendMessage(runnable(t), body) };
+      const agent = registry.agent(t);
+      if (agent.kind !== "claude") return { status: 202, body: await sendMessage(runnable(t), body) };
       if (t.status === "archived") throw new HttpError(409, `thread ${t.id} is archived`);
-      return { status: 202, body: await sendClaude(refuseDeleted(t), worker.session, worker.model, body) };
+      return { status: 202, body: await sendClaude(refuseDeleted(t), agent.worker.session, agent.worker.model, body) };
     }],
     ["POST", /^\/v1\/threads\/([^/]+)\/review$/, async (m, r) => {
       const body = parse(reviewSchema, await r.body({}));
@@ -1065,7 +1061,7 @@ export async function startApi(options: ApiOptions): Promise<Api> {
     }],
     ["GET", /^\/v1\/threads\/([^/]+)\/conversation$/, async (m) => {
       const t = thread(m[1]!);
-      if (!isClaude(t)) return ok(await conversation(conversing(t)));
+      if (registry.agent(t).kind !== "claude") return ok(await agents.harness.view(conversing(t)));
       await Promise.race([claude.refresh(refuseDeleted(t)), sleep(claudeReadMs, undefined, { ref: false })]);
       return ok(claude.view(t));
     }],

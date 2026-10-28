@@ -25,6 +25,7 @@ import type { Question } from "../control/questions.ts";
 import { reservedNames } from "../control/policy.ts";
 import { maxEntries, usageLimitText, type ClaudeConversation, type ClaudeEntry, type PromptSource } from "../claude-transcript.ts";
 import { claudeFrames, queuedOf, type ClaudeFrame } from "../control/claude-conversation.ts";
+import { agentView } from "../control/thread-agent.ts";
 import { phaseNote, roundsSpent } from "../control/review.ts";
 import { breakdownLook, breakdowns, tokenColumns, tokenCount, type BackfillPlanRow, type UsageBackfill, type UsageReport, type UsageTotals } from "../control/usage.ts";
 import type { Changes, Diff, Listing } from "../checkout-files.ts";
@@ -1058,8 +1059,8 @@ const commands: Readonly<Record<string, Command>> = {
   conversation: {
     args: [1, 1],
     async run(api, [id]) {
-      const view = await api("GET", `${thread(id!)}/conversation`) as ConversationView | ClaudeConversation;
-      return { json: view, text: (view as Partial<ClaudeConversation>).kind === "claude" ? claudeText(view as ClaudeConversation) : conversationText(view as ConversationView) };
+      const served = agentView(await api("GET", `${thread(id!)}/conversation`) as ConversationView | ClaudeConversation);
+      return { json: served.view, text: served.kind === "claude" ? claudeText(served.view) : conversationText(served.view) };
     },
   },
   "session open": {

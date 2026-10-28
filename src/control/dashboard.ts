@@ -25,7 +25,8 @@ import { githubTokenGrant, linkedPort, type ProjectId } from "../project.ts";
 import { harnessNamed } from "../sessions.ts";
 import type { ThreadDetail, ThreadRow } from "./api.ts";
 import { attentions, needsPerson } from "./attention.ts";
-import type { NodeRecord, Output, Preview, Registry, Thread, ThreadId } from "./registry.ts";
+import type { NodeRecord, Output, Preview, Registry, Thread, ThreadAgent, ThreadId } from "./registry.ts";
+import { agentView, type AgentView } from "./thread-agent.ts";
 import type { TailnetNodeId } from "../protocol.ts";
 import { usageLimitText, type ClaudeConversation, type ClaudeEntry, type PromptSource } from "../claude-transcript.ts";
 import { queuedOf } from "./claude-conversation.ts";
@@ -42,8 +43,8 @@ export interface DashboardOptions {
   detail(thread: Thread): ThreadDetail;
   /** The API's thread row, which is all a thread's line in the sidebar or the home table shows. */
   row(thread: Thread): ThreadRow;
-  /** The API's conversation view, or a Claude worker's transcript, for a thread that has one and is not deleted. */
-  conversation(thread: Thread): Promise<Conversation>;
+  /** The API's conversation view, a Claude worker's transcript, or null for a thread with no agent. */
+  conversation(thread: Thread): Promise<AgentView | null>;
   /** Why the land route would refuse the caller, or null when it would take the request. */
   landRefusal(caller: TailnetNodeId): LandRefusal | null;
   /** Why the answer route would refuse the caller's answer to the question, or null when it would take it. */
@@ -54,10 +55,6 @@ export interface DashboardOptions {
 }
 
 export interface Page { status: number; headers: Record<string, string>; body: string }
-
-/** What a thread page shows as its conversation: the harness conversation's view, or a Claude worker's transcript. */
-type Conversation = ConversationView | ClaudeConversation;
-const isClaude = (view: Conversation): view is ClaudeConversation => (view as Partial<ClaudeConversation>).kind === "claude";
 
 /** How often the client refetches a page. The loop ticks every 5 s, so polling faster shows nothing new. */
 export const pollMs = 5_000;
@@ -75,8 +72,8 @@ export function dashboard(options: DashboardOptions): (path: string, query: URLS
   const { registry, detail, deploys } = options;
 
   /** A failed read shows in the conversation, so the rest of the page still says what the pylon is doing. */
-  async function transcript(t: Thread): Promise<Conversation | Error | null> {
-    if ((t.conversationId === null && registry.claudeWorker(t.id) === undefined) || t.status === "deleted") return null;
+  async function transcript(t: Thread): Promise<AgentView | Error | null> {
+    if (t.status === "deleted") return null;
     return options.conversation(t).catch((err: unknown) => err as Error);
   }
 
@@ -99,7 +96,7 @@ export function dashboard(options: DashboardOptions): (path: string, query: URLS
       // transcript is as of its last read that reached its end, which holds the reply only if it started after the
       // reply was recorded.
       const view = await transcript(thread);
-      const repliedAt = view !== null && !(view instanceof Error) && isClaude(view) && (view.readAt ?? 0) < (thread.lastReplyAt ?? 0) ? null : thread.lastReplyAt;
+      const repliedAt = view !== null && !(view instanceof Error) && view.kind === "claude" && (view.view.readAt ?? 0) < (thread.lastReplyAt ?? 0) ? null : thread.lastReplyAt;
       // After the read, so the facts are no older than the conversation, and a thread deleted meanwhile shows none.
       const d = detail(registry.thread(thread.id)!);
       return ok(threadPage(context(), d, registry.node(d.pylon.node)!, d.thread.status === "deleted" ? null : view, repliedAt, query.has("streaming")));
@@ -596,13 +593,14 @@ function lookOf(d: ThreadDetail, p: Preview) {
 }
 
 /** `streaming` is a poll from a page whose stream shows the conversation. */
-function threadPage(c: Context, d: ThreadDetail, node: NodeRecord, view: Conversation | Error | null, renderedReplyAt: number | null, streaming = false): Html {
+function threadPage(c: Context, d: ThreadDetail, node: NodeRecord, view: AgentView | Error | null, renderedReplyAt: number | null, streaming = false): Html {
   const { thread: t } = d;
+  const agent = c.registry.agent(t).kind;
   const read = view === null || view instanceof Error ? null : view;
   const items = read === null ? [] : itemsOf(read);
   const run = runOf(d, read, items);
-  const model = d.claudeWorker !== undefined ? d.claudeWorker.model : read === null || isClaude(read) ? null : modelOf(read);
-  const shows = streaming && read !== null && isClaude(read) ? shownKey(read, model) : null;
+  const model = d.claudeWorker !== undefined ? d.claudeWorker.model : read === null || read.kind === "claude" ? null : modelOf(read.view);
+  const shows = streaming && read?.kind === "claude" ? shownKey(read.view, model) : null;
   const [label, tone] = threadState({ ...t, attention: d.attention, desired: d.desired, pylon: d.pylon });
   const open = t.status === "active" || t.status === "idle";
   const actions = [
@@ -623,7 +621,7 @@ ${actions.length > 0 && html`<div class="bar-actions" id="thread-actions">${acti
 <div class="tabs" id="tabs" role="tablist" aria-label="Open views" data-thread="${t.id}"><button type="button" class="tab active" role="tab" aria-selected="true" aria-controls="scroll" data-tab="convo">${icon("chat")}<span class="tab-name">${t.title}</span></button></div>
 <div class="strip" id="strip" data-live>${strip(d)}</div>
 <div id="facts" data-live hidden>${facts(d)}</div>
-<div class="scroll" id="scroll" role="tabpanel"><div class="convo" id="convo" data-rendered-reply-at="${read === null ? "" : renderedReplyAt ?? ""}"${shows !== null && html` data-shows="${shows}"`} data-live${(t.conversationId !== null || d.claudeWorker !== undefined) && t.status !== "deleted" && html` data-stream="/threads/${t.id}/stream"`}>${shows === null && convo(t, view, items, model, c.now)}</div></div>
+<div class="scroll" id="scroll" role="tabpanel"><div class="convo" id="convo" data-rendered-reply-at="${read === null ? "" : renderedReplyAt ?? ""}"${shows !== null && html` data-shows="${shows}"`} data-live${agent !== "none" && t.status !== "deleted" && html` data-stream="/threads/${t.id}/stream"`}>${shows === null && convo(t, view, items, model, c.now)}</div></div>
 <section class="file-view" id="file-view" role="tabpanel" aria-label="File diff" hidden></section>
 <div class="dock">
 <p id="action-error" class="error" role="alert" hidden></p>
@@ -631,7 +629,7 @@ ${actions.length > 0 && html`<div class="bar-actions" id="thread-actions">${acti
 <div id="questions" data-live>${questionCards(c, d)}</div>
 <div id="landing" data-live>${landing(c, d)}</div>
 <div id="run" data-live>${runBar(t, run, c.now)}</div>
-<div id="composer" data-live>${composer(d, run, model, read !== null && isClaude(read) ? read : null, c.now)}</div>
+<div id="composer" data-live>${composer(d, agent, run, model, read?.kind === "claude" ? read.view : null, c.now)}</div>
 </div>`,
     inspector: inspector(d, node, c.now, c.registry.usageReport({ since: null, thread: t.id }).total),
   });
@@ -810,8 +808,8 @@ const outputsOf = (d: ThreadDetail) => d.outputs.filter((o) => o.kind !== "pull-
  * The inside of the conversation region, which the page's stream sends again whenever it changed. `model` is the
  * model the next message goes to, or a Claude worker's.
  */
-function convo(t: Thread, view: Conversation | Error | null, items: readonly Item[], model: string | null, now: number): Html {
-  const claude = view !== null && !(view instanceof Error) && isClaude(view) ? view : null;
+function convo(t: Thread, view: AgentView | Error | null, items: readonly Item[], model: string | null, now: number): Html {
+  const claude = view !== null && !(view instanceof Error) && view.kind === "claude" ? view.view : null;
   return html`
 <p class="convo-meta"><code>${t.id}</code> · started ${ago(t.createdAt, now)}${claude !== null && " · Claude Code"}${model !== null && html` · ${model}`}</p>
 ${view === null ? html`<p class="empty">${t.status === "deleted" ? "The thread is deleted, so its conversation is gone." : "This thread has no agent conversation."}</p>`
@@ -853,19 +851,20 @@ const grown = /<!--grow-->([\s\S]*?)<!--\/grow-->/g;
  * its growing parts changed, such as a new entry or a tool call that finished, and otherwise only the parts that
  * grew. Each frame is the change since the one this reader got last, so a reader that fell behind skips ahead.
  */
-export function liveFrames(t: Thread, claudeModel: string | null = null, now: () => number = Date.now): (view: Conversation) => LiveFrame | null {
+export function liveFrames(t: Thread, claudeModel: string | null = null, now: () => number = Date.now): (view: ConversationView | ClaudeConversation) => LiveFrame | null {
   let shape: string | null = null;
   let parts: string[] = [];
   let shown: string | null = null;
-  return (view) => {
-    const region = convo(t, view, itemsOf(view), isClaude(view) ? claudeModel : modelOf(view), now()).text;
+  return (served) => {
+    const view = agentView(served);
+    const region = convo(t, view, itemsOf(view), view.kind === "claude" ? claudeModel : modelOf(view.view), now()).text;
     const next = [...region.matchAll(grown)].map((m) => m[1]!);
     const nextShape = region.replace(grown, "<!--grow-->");
     const grew = next.flatMap((inside, i): [number, string][] => inside === parts[i] ? [] : [[i, inside]]);
     const changed = nextShape !== shape;
     shape = nextShape;
     parts = next;
-    const key = isClaude(view) ? shownKey(view, claudeModel) : null;
+    const key = view.kind === "claude" ? shownKey(view.view, claudeModel) : null;
     const rekeyed = key !== shown;
     shown = key;
     const shows = key === null ? {} : { shows: key };
@@ -1061,7 +1060,7 @@ function conversationItems(view: ConversationView): Item[] {
   return items;
 }
 
-const itemsOf = (view: Conversation): Item[] => isClaude(view) ? claudeItems(view) : conversationItems(view);
+const itemsOf = (view: AgentView): Item[] => view.kind === "claude" ? claudeItems(view.view) : conversationItems(view.view);
 
 /**
  * A Claude worker's transcript as the rows a harness conversation shows. Each result goes on its call, and a
@@ -1130,9 +1129,9 @@ type Run =
   | { kind: "idle" }
   | { kind: "working"; since: number | null; tools: number; claude: boolean }
   | { kind: "parked"; tasks: number; busy: boolean };
-function runOf(d: ThreadDetail, view: Conversation | null, items: readonly Item[]): Run {
-  if (view !== null && isClaude(view)) return view.working ? working(d, items, (item) => item.from === "person", true) : { kind: "idle" };
-  const busy = (view?.docs["pi.live"] as LiveState | undefined)?.run !== undefined;
+function runOf(d: ThreadDetail, view: AgentView | null, items: readonly Item[]): Run {
+  if (view?.kind === "claude") return view.view.working ? working(d, items, (item) => item.from === "person", true) : { kind: "idle" };
+  const busy = (view?.view.docs["pi.live"] as LiveState | undefined)?.run !== undefined;
   const parked = d.agent?.parkedTasks ?? 0;
   if (parked > 0) return { kind: "parked", tasks: parked, busy };
   if (!busy) return { kind: "idle" };
@@ -1159,9 +1158,9 @@ function runBar(t: Thread, run: Run, now: number): Html {
  * worker's box is marked for client.js, which tries a send again while the pylon wakes, and says how old the
  * transcript is while the pylon does not run.
  */
-function composer(d: ThreadDetail, run: Run, model: string | null, claude: ClaudeConversation | null, now: number): Html {
+function composer(d: ThreadDetail, agent: ThreadAgent["kind"], run: Run, model: string | null, claude: ClaudeConversation | null, now: number): Html {
   const { thread: t } = d;
-  if (t.status === "deleted" || (t.conversationId === null && claude === null)) return html``;
+  if (t.status === "deleted" || (agent !== "harness" && claude === null)) return html``;
   const asOf = claude === null || d.pylon.actualState === "running" ? null
     : claude.readAt === null ? html`The pylon is not running, and Claude's transcript has not been read yet.`
     : html`The pylon is not running, so the transcript is as of its last read, ${ago(claude.readAt, now)}.`;
