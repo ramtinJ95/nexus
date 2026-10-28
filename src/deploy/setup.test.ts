@@ -228,11 +228,17 @@ const freshControl: Facts = {
   role: "control", port: 7470, signedIn: false, admitted: false, docker: { kind: "missing" }, dockerGroup: false, image: false,
 };
 
-test("a fresh control machine is left every step, the ChatGPT login first and the Mac CLI before any step that runs it", () => {
-  const runs = left(freshControl).map((item) => item.run);
+test("a fresh control machine is left every step: setup, then the agents' credentials, then the first image", () => {
+  const items = left(freshControl);
+  const runs = items.map((item) => item.run);
   assert.equal(runs.length, 9);
-  assert.match(runs[0]![0]!, /control\/login\.ts \/etc\/nexus\/control\.json$/);
-  assert.equal(runs[0]![1], "sudo systemctl start nexus-control");
+  assert.deepEqual(items.map((item) => item.stage), ["setup", "setup", "setup", "setup", "credentials", "credentials", "credentials", "credentials", "image"]);
+  const login = items.find((item) => item.run.some((command) => command.includes("control/login.ts")))!;
+  assert.equal(login.stage, "credentials");
+  assert.deepEqual(login.run.slice(-1), ["sudo systemctl start nexus-control"]);
+  assert.deepEqual(items.filter((item) => item.stage === "credentials").map((item) => item.say.split(/[:,.]/)[0]), [
+    "Sign the harness in with ChatGPT", "Give pylons a Claude login", "Give pylons GitHub access", "Give pylons an SSH key for git",
+  ]);
   const all = runs.flat().join("\n");
   assert.match(all, /--admit <your Mac's tailnet name>/);
   assert.match(all, /^claude setup-token$/m);
@@ -274,6 +280,14 @@ test("a Docker without buildx is told the buildx package of its own package mana
   const item = other.find((i) => i.say.includes("buildx plugin"))!;
   assert.deepEqual(item.run, []);
   assert.match(item.say, /https:\/\/docs\.docker\.com\/go\/buildx\//);
+});
+
+test("the credentials are printed under their own heading as the next step, and the image after them", () => {
+  const text = formatLeft(left(freshControl));
+  assert.match(text, /^What is left:\n1\. /);
+  assert.match(text, /\n\nNext, give the agents their credentials, on this machine:\n5\. Sign the harness in with ChatGPT/);
+  assert.match(text, /\n\nThen, with the control plane running:\n9\. Build the first pylon image/);
+  assert.doesNotMatch(formatLeft(left({ ...freshControl, secretNames: ["CLAUDE_CODE_OAUTH_TOKEN", "GH_TOKEN"], gitKey: true, signedIn: true })), /credentials/);
 });
 
 test("a finished control machine is left only the Mac CLI", () => {

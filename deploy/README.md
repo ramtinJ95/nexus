@@ -8,6 +8,8 @@ CLI 0.11.0 adds `nexus changes <thread> --turn` and `nexus diff <thread> --turn`
 
 ## Install on a new machine
 
+The installer sets Nexus up on your own machines, for a person or a team starting from nothing. An existing install, such as the home lab's, needs no migration: it keeps running, and `nexus deploy` keeps upgrading it.
+
 On a Linux machine that boots with systemd, from a checkout of this repository:
 
 ```sh
@@ -43,7 +45,7 @@ Then `src/deploy/setup.ts` writes the configs from `tailscale status --json`:
 
 Then it installs the release and the units with `deploy/install-control.sh`, `deploy/install-probe.sh` and `deploy/install-deployer.sh`, and starts the probe and the deployer's timer. The control plane refuses to start before its harness is signed in, so on a first install its unit is left stopped.
 
-The installer ends with what is left and the command for each, in the order to do them: signing the harness in with ChatGPT and starting the control plane, the `nexus` CLI on the Mac, the Claude token and the GitHub token in `secrets.env`, a git SSH key, Docker with buildx for image builds and the probe's access to it, and the first image. A rerun lists only what is still missing.
+The installer ends with what is left and the command for each, in the order to do them. First come the rest of the setup: admitting your Mac or registering the node, the `nexus` CLI on the Mac, and Docker with buildx for image builds and the probe's access to it. Next come the agents' credentials, which the installer does not set up: the harness's ChatGPT login, which the control plane needs before it starts, the Claude token and the GitHub token in `secrets.env`, and a git SSH key. You set these up on the machine, over SSH. Last comes the first image, which needs the control plane running. A rerun lists only what is still missing.
 
 ### Rerun to upgrade, admit or recover
 

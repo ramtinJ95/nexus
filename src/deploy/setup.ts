@@ -293,7 +293,9 @@ export type Facts = {
   | { role: "node"; control: Device; digest: string }
 );
 
-export interface Item { say: string; run: readonly string[] }
+/** Credentials come after the setup steps, and the first image after both, since building one needs the control plane running. */
+const stages = ["setup", "credentials", "image"] as const;
+export interface Item { stage: (typeof stages)[number]; say: string; run: readonly string[] }
 
 const addSecret = (name: string, value: string) =>
   `echo '${name}=${value}' | sudo tee -a ${paths.secrets} >/dev/null && sudo systemctl restart nexus-probe`;
@@ -305,6 +307,7 @@ export function left(facts: Facts): Item[] {
   const control = facts.role === "control" ? { name: self.name, url: `http://${self.host}:${facts.port}` } : { name: facts.control.name, url: `http://${facts.control.host}:${controlPort}` };
   const rerun = facts.role === "control" ? "sudo deploy/install.sh" : `sudo deploy/install.sh --node ${control.name}`;
   if (facts.role === "control" && !facts.signedIn) items.push({
+    stage: "credentials",
     say: "Sign the harness in with ChatGPT, then start the control plane. The browser's last step goes to port 1455 on this machine, so when that page fails to load, paste the address it ended on.",
     run: [
       `sudo -u nexus-control env PATH=/usr/local/bin:/usr/bin node /opt/nexus/control-current/src/control/login.ts ${paths.control}`,
@@ -312,10 +315,12 @@ export function left(facts: Facts): Item[] {
     ],
   });
   if (facts.role === "control" && !facts.admitted) items.push({
+    stage: "setup",
     say: "Admit your Mac, so its nexus CLI may call the control plane.",
     run: ["sudo deploy/install.sh --admit <your Mac's tailnet name>"],
   });
   if (facts.role === "node") items.push({
+    stage: "setup",
     say: `Register this node: run the first command on ${control.name}, the second on each other probe-only node, and the third here, naming each of those nodes, since probes fetch images from each other.`,
     run: [
       `sudo deploy/install.sh --add-node ${self.name}=${facts.digest}`,
@@ -324,6 +329,7 @@ export function left(facts: Facts): Item[] {
     ],
   });
   items.push({
+    stage: "setup",
     say: `Set up the nexus CLI on your Mac, in a nexus checkout with Node 26, before the steps below that run nexus there. ~/.local/bin must be on the Mac's PATH. When the Mac runs the Tailscale app rather than a SOCKS proxy on localhost:1055, add "socks": "none" to cli.json.`,
     run: [
       `npm ci && mkdir -p ~/.local/bin && ln -sf "$PWD/deploy/mac/nexus" ~/.local/bin/nexus`,
@@ -332,14 +338,17 @@ export function left(facts: Facts): Item[] {
     ],
   });
   if (!facts.secretNames.includes("CLAUDE_CODE_OAUTH_TOKEN")) items.push({
-    say: "Give pylons a Claude login: run the first command on your Mac, then the second here with the token it printed.",
+    stage: "credentials",
+    say: "Give pylons a Claude login: run the first command wherever Claude Code is installed and you can open a browser, then the second here with the token it printed.",
     run: ["claude setup-token", addSecret("CLAUDE_CODE_OAUTH_TOKEN", "<token>")],
   });
   if (!facts.secretNames.includes("GH_TOKEN")) items.push({
+    stage: "credentials",
     say: "Give pylons GitHub access: make a fine-grained token for all repositories with Administration and Contents read and write, then run this here.",
     run: [addSecret("GH_TOKEN", "<token>")],
   });
   if (!facts.gitKey) items.push({
+    stage: "credentials",
     say: `Give pylons an SSH key for git: make it, trust github.com, add the public key the third command prints to GitHub, then rerun the installer, which adds gitSsh to probe.json.`,
     run: [
       `sudo ssh-keygen -t ed25519 -N '' -C nexus@${self.name} -f ${paths.gitKey} && sudo chown nexus:nexus ${paths.gitKey} && sudo chmod 0400 ${paths.gitKey}`,
@@ -349,6 +358,7 @@ export function left(facts: Facts): Item[] {
     ],
   });
   if (facts.role === "control" && facts.docker.kind === "missing") items.push({
+    stage: "setup",
     say: "Image builds run here and need Docker with its buildx plugin. Docker's install script installs both, and systemd starts the daemon.",
     run: ["curl -fsSL https://get.docker.com | sudo sh", "sudo systemctl enable --now docker"],
   });
@@ -356,26 +366,40 @@ export function left(facts: Facts): Item[] {
     const { manager, from } = facts.docker;
     const source = from === "docker" ? "Docker's repository" : "the distribution";
     items.push(manager === "other" ? {
-      say: "Docker here lacks the buildx plugin, which image builds use. Install it as https://docs.docker.com/go/buildx/ describes.",
+      stage: "setup",
+    say: "Docker here lacks the buildx plugin, which image builds use. Install it as https://docs.docker.com/go/buildx/ describes.",
       run: [],
     } : {
-      say: `Docker here lacks the buildx plugin, which image builds use. This Docker came from ${source}, whose buildx package is ${buildxPackage[from]}.`,
+      stage: "setup",
+    say: `Docker here lacks the buildx plugin, which image builds use. This Docker came from ${source}, whose buildx package is ${buildxPackage[from]}.`,
       run: [`${packageInstall[manager]} ${buildxPackage[from]}`],
     });
   }
   if (facts.role === "control" && !facts.dockerGroup) items.push({
+    stage: "setup",
     say: "Image builds run here and need Docker. Membership of the docker group is root-equivalent, so adding nexus to it is your call.",
     run: ["sudo usermod --append --groups docker nexus && sudo systemctl restart nexus-probe"],
   });
   if (facts.role === "control" && !facts.image) items.push({
+    stage: "image",
     say: "Build the first pylon image from your Mac, then roll out the image ID it printed.",
     run: ["nexus image build --wait", "nexus image rollout <image ID it printed> --wait"],
   });
-  return items;
+  return stages.flatMap((stage) => items.filter((item) => item.stage === stage));
 }
 
+const headings = {
+  setup: "What is left:",
+  credentials: "Next, give the agents their credentials, on this machine:",
+  image: "Then, with the control plane running:",
+} as const;
+
 export function formatLeft(items: readonly Item[]): string {
-  return ["What is left:", ...items.flatMap((item, i) => [`${i + 1}. ${item.say}`, ...item.run.map((command) => `     ${command}`)])].join("\n");
+  return items.flatMap((item, i) => [
+    ...item.stage !== items[i - 1]?.stage ? [...i === 0 ? [] : [""], headings[item.stage]] : [],
+    `${i + 1}. ${item.say}`,
+    ...item.run.map((command) => `     ${command}`),
+  ]).join("\n");
 }
 
 async function readJsonFile(path: string, errors: string[]): Promise<Json | undefined> {
