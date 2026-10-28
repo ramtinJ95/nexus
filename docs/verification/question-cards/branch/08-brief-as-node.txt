@@ -1,0 +1,4 @@
+As verify-node, the control plane's own node:
+POST /v1/questions/qn-brief/answer {"option":"Start it"}
+=> 403 {"error":"caller may not answer this question: only a person's device may, never infrastructure nodes or pylons"}
+attention "decision", questions [{"id":"qn-brief","thread":"th-5850688c4c82","text":"The planning thread wrote a brief for \"Archive what landed\". Start a builder with it?","options":["Start it","Rewrite the brief","Drop the item"],"reserved":null,"answerer":"person","askedAt":1793164221433,"answer":null}]

@@ -1,0 +1,4 @@
+As verify-node, the control plane's own node:
+POST /v1/questions/qn-brief/answer {"option":"Start it"}
+=> 404 {"error":"no route /v1/questions/qn-brief/answer"}
+attention null, questions "(none in ThreadDetail)"

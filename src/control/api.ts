@@ -1,7 +1,7 @@
 import { eventCursor, eventKinds, type EventFilter } from "../events.ts";
 import { DeployDraining, isDraining, turnGate } from "./drain.ts";
 import { runningCommit } from "../deploy/health.ts";
-import { canDeploy, commitSchema, isReporter, releaseView, reportSchema, resolveMain, type DeploymentOptions } from "./releases.ts";
+import { canDeploy, commitSchema, isPerson, isReporter, releaseView, reportSchema, resolveMain, type DeploymentOptions } from "./releases.ts";
 /**
  * The control plane's HTTP API for the dashboard and the CLI. JSON in and out.
  *
@@ -53,6 +53,7 @@ import { openTerminal } from "../guest-terminal.ts";
 import { attachTiming, serveAttach, type AttachTiming, type Ending, type PylonDoor } from "./attach.ts";
 import { typeIntoClaude } from "./inbox.ts";
 import { HttpError } from "./http-error.ts";
+import { answerRefusal, type AnswerRefusal, type Question } from "./questions.ts";
 import { BodyTooLarge, readBody } from "../request-body.ts";
 import { imagesView, type ImageOperation, type ImageRollout } from "./image-rollout.ts";
 import type { StartRequest } from "./threads.ts";
@@ -136,6 +137,8 @@ export interface ThreadDetail {
   pullRequests: readonly PullRequest[];
   /** The thread's latest review as a builder, or null. */
   review: Review | null;
+  /** Every question the thread asked, answered or not, in the order they were asked. */
+  questions: readonly Question[];
   /** The command that attaches to the pylon's Herdr sessions from a shell in the pylon. */
   attach: string;
   /** Null for a thread that has no conversation. A parked task holds the run until it is retried. */
@@ -380,6 +383,10 @@ export async function startApi(options: ApiOptions): Promise<Api> {
     if (!canDeploy(registry, options.deployment, caller)) throw new HttpError(403, "caller may not land a pull request: landing deploys, and only deployers may, never infrastructure nodes or pylons");
   }
 
+  function refusalOf(caller: TailnetNodeId, question: Question): AnswerRefusal | null {
+    return answerRefusal(question, { person: isPerson(registry, options.deployment, caller), deployer: canDeploy(registry, options.deployment, caller) });
+  }
+
   /** The pylon as its node's last observation reports it. */
   function observedPylon(pylonId: PylonId) {
     const node = registry.node(registry.pylon(pylonId)!.node)!;
@@ -438,6 +445,7 @@ export async function startApi(options: ApiOptions): Promise<Api> {
       prWatch: { enabled: options.prWatchEnabled ?? false, stopped: (watch?.commentWakes ?? 0) >= 10, error: watch?.error ?? null },
       pullRequests: watch?.links.map((l) => l.pr) ?? [],
       review: registry.review(t.id),
+      questions: registry.questions(t.id),
       attach: `herdr --session ${herdrSession}`,
       agent: t.conversationId === null || t.status === "deleted" ? null : { parkedTasks: harness.activity.parked(t.id).length },
     };
@@ -446,6 +454,7 @@ export async function startApi(options: ApiOptions): Promise<Api> {
   const page = dashboard({
     registry, detail, row, conversation,
     landRefusal: (caller) => !options.reviews ? "no review loop" : canDeploy(registry, options.deployment, caller) ? null : "not a deployer",
+    answerRefusal: refusalOf,
     deploys: (r) => options.reviews?.deploys(r) ?? false,
   });
 
@@ -1008,6 +1017,17 @@ export async function startApi(options: ApiOptions): Promise<Api> {
       mayLand(r.caller);
       return ok(reviewsOrRefuse().land(t.id, r.caller, body.head, body.waive));
     }],
+    ["POST", /^\/v1\/questions\/([^/]+)\/answer$/, async ([, id], r) => {
+      const { option } = parse(answerSchema, await r.body());
+      const question = registry.question(id!);
+      if (question === null) throw new HttpError(404, `no question ${id}`);
+      const refused = refusalOf(r.caller, question);
+      if (refused !== null) throw new HttpError(403, `caller may not answer this question: ${answerRefusals[refused]}`);
+      if (!question.options.includes(option)) throw new HttpError(400, `${JSON.stringify(option)} is not an option of question ${question.id}, which are ${question.options.map((o) => JSON.stringify(o)).join(", ")}`);
+      const answered = registry.answerQuestion(question.id, { option, by: r.caller, at: Date.now() });
+      if (answered.answer!.option !== option) throw new HttpError(409, `question ${question.id} was answered ${JSON.stringify(answered.answer!.option)} by ${answered.answer!.by}`);
+      return ok(answered);
+    }],
     ["POST", /^\/v1\/threads\/([^/]+)\/abort$/, async (m) => { await harness.abort(conversing(thread(m[1]!)).id); return noContent; }],
     ["POST", /^\/v1\/threads\/([^/]+)\/retry$/, async (m) => { await harness.retry(runnable(thread(m[1]!)).id); return noContent; }],
     ["POST", /^\/v1\/threads\/([^/]+)\/pylon\/retry$/, (m) => { retryPylon(thread(m[1]!)); return noContent; }],
@@ -1295,6 +1315,12 @@ const holdsSchema = z.array(z.string().min(1).max(4_000)).min(1).max(20);
 /** A waiver names the commit the person saw, so a review that moved on is not landed past holds they did not see. */
 const landSchema = z.strictObject({ head: commitSchema.optional(), waive: holdsSchema.optional() })
   .refine((b) => b.waive === undefined || b.head !== undefined, "a waiver needs the head it confirmed");
+
+const answerSchema = z.strictObject({ option: z.string() });
+const answerRefusals: Record<AnswerRefusal, string> = {
+  "not a person": "only a person's device may, never infrastructure nodes or pylons",
+  "not a deployer": "its answer may deploy, so only deployers may",
+};
 
 function parse<T>(schema: z.ZodType<T>, body: unknown): T {
   const result = schema.safeParse(body);

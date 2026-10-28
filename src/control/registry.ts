@@ -12,6 +12,7 @@ import type { Drain, ReleaseReport } from "../deploy/model.ts";
  * the control plane reads them, always whole, so they need no columns of their own.
  */
 import type { PrWatchState } from "./pr-watch.ts";
+import type { Question } from "./questions.ts";
 import type { QueuedRecord } from "./queue.ts";
 import type { Placement } from "./placement.ts";
 import { DatabaseSync, type StatementSync } from "node:sqlite";
@@ -334,6 +335,9 @@ const migrations: readonly string[] = [
   // Each start's request ID, the thread it made, started or queued, and a hash of the body it was asked with. It touches
   // nothing an earlier migration made, so a registry rewound past it applies it again unchanged.
   `CREATE TABLE IF NOT EXISTS start_requests (request_id TEXT PRIMARY KEY, thread TEXT NOT NULL, body TEXT NOT NULL) STRICT;`,
+  // Each question a thread asked the person, keyed by the ID its asker chose, with its answer once there is one. It
+  // touches nothing an earlier migration made, so a registry rewound past it applies it again unchanged.
+  `CREATE TABLE IF NOT EXISTS questions (id TEXT PRIMARY KEY, thread TEXT NOT NULL REFERENCES threads (id), record TEXT NOT NULL) STRICT;`,
 ];
 
 type Row = Record<string, unknown>;
@@ -582,6 +586,10 @@ export function openRegistry(path: string, clock = Date.now) {
     return stop !== null && (worker.turn_at === null || Number(worker.turn_at) <= stop.stoppedAt) ? stop : null;
   }
 
+  function questionRecord(id: string): Question | null {
+    return jsonOrNull<Question>(sql("SELECT record FROM questions WHERE id = ?").get(id)?.record ?? null);
+  }
+
   function updateAttention(id: ThreadId) {
     const row = q.thread.get(id);
     if (row === undefined) return;
@@ -589,7 +597,8 @@ export function openRegistry(path: string, clock = Date.now) {
     const old = sql("SELECT * FROM thread_attention WHERE thread = ?").get(id);
     const p = q.pylon.get(t.pylonId);
     const workerFailed = ["failed", "stalled"].includes(String(sql("SELECT state FROM claude_workers WHERE thread = ?").get(id)?.state));
-    const decision = needsPerson(jsonOrNull<Review>(sql("SELECT record FROM reviews WHERE builder = ?").get(id)?.record ?? null));
+    const decision = needsPerson(jsonOrNull<Review>(sql("SELECT record FROM reviews WHERE builder = ?").get(id)?.record ?? null))
+      || sql("SELECT 1 FROM questions WHERE thread = ? AND json_extract(record, '$.answer') IS NULL").get(id) !== undefined;
     const attention = attentionOf(p?.failed != null || workerFailed, old?.parked === 1, t.lastReplyAt, t.seenAt, t.working, t.sessionWaiting, decision, t.usageLimit !== undefined);
     if ((old?.attention ?? null) === attention) return;
     sql("INSERT INTO thread_attention (thread, attention) VALUES (?, ?) ON CONFLICT(thread) DO UPDATE SET attention = excluded.attention").run(id, attention);
@@ -966,6 +975,28 @@ export function openRegistry(path: string, clock = Date.now) {
           appendEvent("review.waived", review.builder, { review: review.id, repo: review.pr.repo, pr: review.pr.number, ...review.waiver });
         }
         updateAttention(review.builder);
+      });
+    },
+    /** Stores the question unless one with its ID exists, and answers the stored one either way. */
+    askQuestion(question: Omit<Question, "answer">): Question {
+      return transaction(() => {
+        sql("INSERT OR IGNORE INTO questions (id, thread, record) VALUES (?, ?, ?)").run(question.id, question.thread, JSON.stringify({ ...question, answer: null }));
+        updateAttention(question.thread);
+        return questionRecord(question.id)!;
+      });
+    },
+    question: (id: string): Question | null => questionRecord(id),
+    questions: (thread: ThreadId): Question[] => sql("SELECT record FROM questions WHERE thread = ? ORDER BY json_extract(record, '$.askedAt'), id").all(thread).map((r) => json<Question>(r.record)),
+    /** Records the answer to an open question. An answered one keeps its first answer, which this returns. */
+    answerQuestion(id: string, answer: NonNullable<Question["answer"]>): Question {
+      return transaction(() => {
+        const stored = questionRecord(id);
+        if (stored === null) throw new Error(`no question ${id}`);
+        if (stored.answer !== null) return stored;
+        const answered = { ...stored, answer };
+        sql("UPDATE questions SET record = ? WHERE id = ?").run(JSON.stringify(answered), id);
+        updateAttention(stored.thread);
+        return answered;
       });
     },
     prWatch(thread: ThreadId): PrWatchState | null {

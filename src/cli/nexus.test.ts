@@ -1328,9 +1328,23 @@ test("show prints PR metadata and one disabled-watch notice without waking the p
   assert.equal(s.registry.thread(thread.id)!.lastHumanActivityAt, before);
 });
 
+test("show prints each question with its options, its reserved case, and who must answer it or how it was answered", async (t) => {
+  const s = await setup(t);
+  const thread: Thread = await s.json(["start", "--project", "acme", "--title", "Image"]);
+  s.registry.askQuestion({ id: "qn-image", thread: thread.id, text: "Rebuild the pylon image?\nIt changes the base layer.", options: ["Rebuild", "Not now"], reserved: "image-rebuild", answerer: "deployer", askedAt: 1 });
+  s.registry.askQuestion({ id: "qn-brief", thread: thread.id, text: "Start the next brief?", options: ["Yes", "No"], reserved: null, answerer: "person", askedAt: 2 });
+  const shown = await s.nexus(["show", thread.id]);
+  assert.equal(shown.code, 0, shown.stderr);
+  assert.match(shown.stdout, /^attention: decision$/m);
+  assert.match(shown.stdout, /^question qn-image: Rebuild the pylon image\?\n {2}options: "Rebuild", "Not now"\n {2}reserved: pylon image rebuilds\n {2}needs a deployer\nquestion qn-brief: Start the next brief\?\n {2}options: "Yes", "No"\n {2}needs you$/m);
+  s.registry.answerQuestion("qn-brief", { option: "Yes", by: laptop, at: Date.UTC(2026, 9, 28, 9) });
+  assert.match((await s.nexus(["show", thread.id])).stdout, /^question qn-brief: Start the next brief\?\n {2}options: "Yes", "No"\n {2}answered "Yes" by nLAPTOP at 2026-10-28T09:00:00.000Z$/m);
+  assert.deepEqual((await s.json(["show", thread.id])).questions.map((q: { id: string }) => q.id), ["qn-image", "qn-brief"]);
+});
+
 test("deploy and release use the shared release view and wait for both roles", async (t) => {
   const s = await setup(t);
-  assert.equal((await s.nexus(["--version"])).stdout.trim(), "nexus 0.34.0");
+  assert.equal((await s.nexus(["--version"])).stdout.trim(), "nexus 0.35.0");
   assert.equal((await s.nexus(["deploy", "bad"])).code, 64);
   const requested = await s.json(["deploy", "main"]);
   assert.equal(requested.desired.commit, "a".repeat(40));

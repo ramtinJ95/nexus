@@ -580,6 +580,28 @@ test("a PR watch's save fires pull-request.linked once for each PR it has read, 
   assert.equal((linked()[1]![1] as { state: string }).state, "merged", "a PR first read merged is linked merged");
 });
 
+test("asking a question twice keeps one, its thread needs a decision until it is answered, and an answer is never replaced", (t) => {
+  const path = tempDb();
+  const registry = seeded(path);
+  const ask = { id: "qn-1", thread: threadId, text: "Rebuild the image?", options: ["Rebuild", "Not now"], reserved: "image-rebuild" as const, answerer: "deployer" as const, askedAt: 5 };
+  const asked = registry.askQuestion(ask);
+  assert.deepEqual(asked, { ...ask, answer: null });
+  assert.deepEqual(registry.askQuestion({ ...ask, text: "Something else?", askedAt: 6 }), asked, "asking again under one ID answers the first question");
+  assert.deepEqual(registry.questions(threadId), [asked]);
+  assert.equal(registry.attention(threadId), "decision");
+
+  const answer = { option: "Not now", by: "nLAPTOP" as TailnetNodeId, at: 7 };
+  assert.deepEqual(registry.answerQuestion("qn-1", answer), { ...asked, answer });
+  assert.equal(registry.attention(threadId), null);
+  assert.deepEqual(registry.answerQuestion("qn-1", { option: "Rebuild", by: "nPHONE" as TailnetNodeId, at: 8 }).answer, answer, "the first answer stays");
+  assert.deepEqual(registry.events("0", { kinds: ["attention.changed"] }).map((e) => e.payload), [{ attention: "decision" }, { attention: null }]);
+  registry.close();
+  const reopened = openRegistry(path);
+  t.after(() => reopened.close());
+  assert.deepEqual(reopened.question("qn-1"), { ...asked, answer });
+  assert.equal(reopened.question("qn-2"), null);
+});
+
 test("desired release, reports and drain survive reopening the registry", () => {
   const path = join(dir, `${randomUUID()}.db`);
   const first = openRegistry(path);
@@ -972,7 +994,7 @@ test("a turn running before turn starts were recorded has no known start", async
   const db = new DatabaseSync(path);
   const version = db.prepare("PRAGMA user_version").get()!.user_version as number;
   db.exec(`UPDATE threads SET agent_turn_running = 1; ALTER TABLE threads DROP COLUMN placement; ALTER TABLE threads DROP COLUMN setup; ALTER TABLE threads DROP COLUMN agent_turn_started_at; ALTER TABLE session_activity DROP COLUMN started_at; DROP TABLE reviews; DROP TABLE reviewed_prs;
-    ALTER TABLE claude_workers DROP COLUMN turn_session; ALTER TABLE claude_workers DROP COLUMN turn_at; ALTER TABLE session_activity DROP COLUMN message; ALTER TABLE session_order DROP COLUMN event_ids; PRAGMA user_version = ${version - 14}`);
+    ALTER TABLE claude_workers DROP COLUMN turn_session; ALTER TABLE claude_workers DROP COLUMN turn_at; ALTER TABLE session_activity DROP COLUMN message; ALTER TABLE session_order DROP COLUMN event_ids; PRAGMA user_version = ${version - 15}`);
   db.close();
   const registry = openRegistry(path, () => now);
   t.after(() => registry.close());
@@ -1317,7 +1339,7 @@ test("a registry made when landing asked for a passkey keeps neither passkey tab
   const db = new DatabaseSync(path);
   const version = db.prepare("PRAGMA user_version").get()!.user_version as number;
   db.exec(`CREATE TABLE passkeys (id TEXT PRIMARY KEY, credential_id TEXT NOT NULL UNIQUE, record TEXT NOT NULL) STRICT;
-    CREATE TABLE passkey_codes (hash TEXT PRIMARY KEY, expires_at INTEGER NOT NULL, used_at INTEGER) STRICT; PRAGMA user_version = ${version - 4}`);
+    CREATE TABLE passkey_codes (hash TEXT PRIMARY KEY, expires_at INTEGER NOT NULL, used_at INTEGER) STRICT; PRAGMA user_version = ${version - 5}`);
   db.close();
   openRegistry(path).close();
   const reopened = new DatabaseSync(path);

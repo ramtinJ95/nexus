@@ -20,6 +20,7 @@ The control plane writes every record. Probes send facts in observations, and th
 | Preview | `pylon`, `service`, `httpsPort` | The control plane allocates the port, never one its node's probe still routes. Observations report when it is ready |
 | Output | `thread`, `kind`, `ref` | Observations, including outputs the agent declares with `nexus output add` |
 | NexusEvent | `id`, `time`, `thread`, `project`, `kind`, `payload` | Accepted pylon lifecycle reports and control-plane changes |
+| Question | `id`, `thread`, `text`, `options`, `reserved`, `answerer`, `askedAt`, `answer` | Whatever asks the person, which nothing does yet, and the person's answer. [Question records](#question-records) describes it |
 | Orphan | `node`, `pylonId` | Observations of a pylon the registry does not know. Only you delete it |
 | Usage record | `id`, `thread`, `project`, `role`, `agent`, `model`, `at`, `input`, `output`, `cacheWrite`, `cacheRead` | Reads of the harness and of the agents' transcripts in each pylon. [Token usage records](#token-usage-records) describes it |
 
@@ -69,7 +70,7 @@ The probe reads only running pylons, at most once a minute per boot across snaps
 
 The registry stores each thread's nullable `seenAt` and `lastReplyAt` as Unix milliseconds, added by migration. A turn ending records `lastReplyAt`; streaming and parked tasks do not. Old rows start with null timestamps. If recovery finds a previously running turn ended, its reply is dated at recovery.
 
-The registry derives `attention` in order: failed pylon, `decision` (the thread's review ended for the person, as [review records](#review-records) say), parked tasks, `limited` (the Claude worker's session stopped on its usage limit, as [Claude worker conversations](#claude-worker-conversations) say), unread reply (`lastReplyAt > seenAt`, with null seen treated as unread), running harness or session turn, waiting session, then null. Parked tasks are tracked for every conversation at harness recovery, independently of client watches, and the harness reports each change to the registry's parked flag. Deleting a thread clears its flag, because the delete aborts its run, and opening the registry clears it for threads deleted before that. The registry recomputes attention whenever one of its inputs changes, stores it, and appends `attention.changed` when it differs, and opening the registry recomputes every thread's. Both the thread list and detail report the stored value and both timestamps, so they match the thread's latest `attention.changed` event.
+The registry derives `attention` in order: failed pylon, `decision` (the thread's review ended for the person, as [review records](#review-records) say, or one of its questions has no answer, as [question records](#question-records) say), parked tasks, `limited` (the Claude worker's session stopped on its usage limit, as [Claude worker conversations](#claude-worker-conversations) say), unread reply (`lastReplyAt > seenAt`, with null seen treated as unread), running harness or session turn, waiting session, then null. Parked tasks are tracked for every conversation at harness recovery, independently of client watches, and the harness reports each change to the registry's parked flag. Deleting a thread clears its flag, because the delete aborts its run, and opening the registry clears it for threads deleted before that. The registry recomputes attention whenever one of its inputs changes, stores it, and appends `attention.changed` when it differs, and opening the registry recomputes every thread's. Both the thread list and detail report the stored value and both timestamps, so they match the thread's latest `attention.changed` event.
 
 Each recorded reply timestamp is strictly greater than the preceding reply and seen marker, nudged forward by a millisecond if needed, so reply identities and unread ordering survive same-millisecond events and clock corrections.
 
@@ -130,6 +131,10 @@ A linked PR contributes an `Output` with `kind: "pull-request"` and `ref` equal 
 A check thread is a bare thread, with no conversation and no Claude worker, whose `startedBy` is `nexus-check`. It lives only while its run does, and the review loop deletes any it does not hold.
 
 `needs-person` makes the builder's attention `decision`. A new `nexus review` replaces an ended record, and `nexus land` moves an approved one, or one the policy held after its check passed, back to `checking`.
+
+## Question records
+
+`questions` stores each question a thread asked the person, one JSON record per question, keyed by the ID its asker chose, with its thread in a column. `Question` in `src/control/questions.ts` is the shape, and `ThreadDetail.questions` serves a thread's, ordered by `askedAt` and then ID. Asking again with an ID that exists keeps the stored record. `answer` is null until the person answers, then `{ option, by, at }`, which is never replaced, so a second answer reads the first. An unanswered question makes its thread's attention `decision`, recomputed in the transaction that asks or answers it. `answerer` is `person` or `deployer`, and [the answer route](cli.md#questions-0350) checks it against the caller.
 
 ## Start request IDs
 
