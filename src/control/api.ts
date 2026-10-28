@@ -441,7 +441,7 @@ export async function startApi(options: ApiOptions): Promise<Api> {
   }
 
   const page = dashboard({
-    registry, detail, conversation,
+    registry, detail, row, conversation,
     landRefusal: (caller) => !options.reviews ? "no review loop" : canDeploy(registry, options.deployment, caller) ? null : "not a deployer",
     deploys: (r) => options.reviews?.deploys(r) ?? false,
   });
