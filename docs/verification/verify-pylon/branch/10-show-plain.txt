@@ -1,0 +1,17 @@
+$ nexus show th-678b7074ad3b
+th-678b7074ad3b  Greet warmly
+project: greeter
+Claude worker: started, model claude-opus-5-5
+attention: reply
+status: archived
+pylon: pylon-th-678b7074ad3b on verify-node, paused, observed 0s ago
+size: 2 CPUs, 4 GiB memory, 10 GiB disk
+placement: verify-node, the project's default node
+setup: fresh boot runs .nexus/setup, because the control plane could not read .nexus/setup at main: the verify stack reads no remote, so every thread boots fresh
+PR watch: on
+PR #3: Greet warmly — open, checks none, review none https://github.com/ramtinJ95/greeter/pull/3
+review rv-b8148f4c of PR #3, started on its own: landed as 462e371641f2d4baaa277f15a00f5867235ad657, round 1 of 5, reviewer th-55c3bfa9c56c on gpt-6-astra, landing when approved
+no live check: e6abb6fd3d2f has no .nexus/verify, so the landing reads the pull request's statement of what could not be checked live
+output: branch origin/greet-warm
+output: pull-request https://github.com/ramtinJ95/greeter/pull/3
+[exit 0]

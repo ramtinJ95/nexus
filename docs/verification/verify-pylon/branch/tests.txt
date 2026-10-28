@@ -1,0 +1,21 @@
+✔ src/cli/nexus.test.ts (524.872862ms)
+✔ a pylon that asks for nested virtualization goes only to a node whose probe reports it (73.871029ms)
+✔ a held landing whose live check passed says so with its output, and the review's line says how the live check went (62.384058ms)
+✔ a live check runs .nexus/verify in a fresh verify pylon that asks for nested virtualization, which is archived afterwards (168.91469ms)
+✔ GitHub says whether a commit has a file, and a failure other than 404 says nothing (6.784717ms)
+✔ a head with a .nexus/verify lands once its live check passes in a verify pylon, which stands in for the statement of what was not checked live (29.297436ms)
+✔ a live check that fails holds the landing like a failed check: the builder answers it as a P0, and a failure it does not push for goes to the person (23.242804ms)
+✔ a verify pylon no node can take yet is tried again, and the person hears why once the live check's hour is up (20.308667ms)
+✔ a live check its pylon cannot run goes to the person, and a verify pylon no review holds is archived (8.319147ms)
+✔ the policy reads a live check: a failure holds, a pass needs no statement, and a change to .nexus/verify is the person's to waive (9.323124ms)
+✔ observations say the node nests KVM only when its backend does (33.864757ms)
+✔ a boot that asks for nested virtualization hands the controller that flag, and an ordinary boot does not (1054.822678ms)
+✔ a host nests KVM when its AMD or Intel module's nested parameter is Y or 1 (0.303157ms)
+ℹ tests 13
+ℹ suites 0
+ℹ pass 13
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 2386.876659

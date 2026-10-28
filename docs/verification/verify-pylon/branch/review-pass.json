@@ -1,0 +1,56 @@
+{
+  "id": "rv-3136b7b5",
+  "expect": "rv-3136b7b5:57ab5461f4e2",
+  "sent": 1,
+  "builder": "th-27f8203a404f",
+  "reviewer": "th-f5d81a96bf98",
+  "pr": {
+    "repo": "ramtinJ95/nexus",
+    "number": 1,
+    "url": "https://github.com/ramtinJ95/nexus/pull/1",
+    "title": "Greet by name",
+    "branch": "greet-name"
+  },
+  "models": {
+    "builder": "claude-opus-5-5",
+    "reviewer": "gpt-6-astra"
+  },
+  "reviewerKind": "harness",
+  "maxRounds": 5,
+  "land": {
+    "requestedBy": "nLAPTOP",
+    "fromProject": true
+  },
+  "auto": true,
+  "rounds": [
+    {
+      "head": "1c7d4c145c6f69a1edbe052ca7548f286e4813b7",
+      "verdict": {
+        "token": "rv-3136b7b5:57ab5461f4e2",
+        "verdict": "approve",
+        "findings": [],
+        "reserved": [],
+        "notCheckedLive": null
+      },
+      "check": {
+        "passed": true,
+        "output": "typecheck ok\n3 tests pass"
+      },
+      "answers": null,
+      "live": {
+        "passed": true,
+        "output": "booting 1c7d4c1 as a fleet: a control plane, a probe and one pylon\nthe pylon answered: Hello, Ramtin"
+      }
+    }
+  ],
+  "merged": "1cf0127281f2890ecc0295047e86a9b0dfde962f",
+  "waiver": null,
+  "phase": {
+    "kind": "landed",
+    "commit": "1cf0127281f2890ecc0295047e86a9b0dfde962f"
+  },
+  "outbox": null,
+  "since": 1793180158537,
+  "nudges": 0,
+  "startedAt": 1793180158533
+}

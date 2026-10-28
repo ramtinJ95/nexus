@@ -1,0 +1,17 @@
+$ nexus events --kind review.changed
+11 2026-10-28T09:35:58.535Z th-27f8203a404f review.changed {"review":"rv-3136b7b5","reviewer":"th-f5d81a96bf98","phase":{"kind":"reviewing"},"round":1}
+13 2026-10-28T09:35:58.542Z th-e0bed361cbf3 review.changed {"review":"rv-235dc578","reviewer":"th-0c452df8be34","phase":{"kind":"reviewing"},"round":1}
+15 2026-10-28T09:35:58.546Z th-678b7074ad3b review.changed {"review":"rv-b8148f4c","reviewer":"th-55c3bfa9c56c","phase":{"kind":"reviewing"},"round":1}
+23 2026-10-28T09:35:59.550Z th-27f8203a404f review.changed {"review":"rv-3136b7b5","reviewer":"th-f5d81a96bf98","phase":{"kind":"checking","startedAt":1793180159550,"thread":null},"round":1}
+24 2026-10-28T09:35:59.553Z th-678b7074ad3b review.changed {"review":"rv-b8148f4c","reviewer":"th-55c3bfa9c56c","phase":{"kind":"checking","startedAt":1793180159553,"thread":null},"round":1}
+25 2026-10-28T09:35:59.556Z th-e0bed361cbf3 review.changed {"review":"rv-235dc578","reviewer":"th-0c452df8be34","phase":{"kind":"checking","startedAt":1793180159556,"thread":null},"round":1}
+26 2026-10-28T09:36:01.555Z th-27f8203a404f review.changed {"review":"rv-3136b7b5","reviewer":"th-f5d81a96bf98","phase":{"kind":"verifying","startedAt":1793180161555,"thread":null},"round":1}
+27 2026-10-28T09:36:01.564Z th-678b7074ad3b review.changed {"review":"rv-b8148f4c","reviewer":"th-55c3bfa9c56c","phase":{"kind":"merging","authorized":null},"round":1}
+28 2026-10-28T09:36:01.594Z th-678b7074ad3b review.changed {"review":"rv-b8148f4c","reviewer":"th-55c3bfa9c56c","phase":{"kind":"landed","commit":"462e371641f2d4baaa277f15a00f5867235ad657"},"round":1}
+29 2026-10-28T09:36:01.599Z th-e0bed361cbf3 review.changed {"review":"rv-235dc578","reviewer":"th-0c452df8be34","phase":{"kind":"verifying","startedAt":1793180161599,"thread":null},"round":1}
+30 2026-10-28T09:36:03.550Z th-27f8203a404f review.changed {"review":"rv-3136b7b5","reviewer":"th-f5d81a96bf98","phase":{"kind":"merging","authorized":null},"round":1}
+31 2026-10-28T09:36:03.595Z th-27f8203a404f review.changed {"review":"rv-3136b7b5","reviewer":"th-f5d81a96bf98","phase":{"kind":"deploying","commit":"1cf0127281f2890ecc0295047e86a9b0dfde962f","previous":"4a3f7f350c4bc6d9b870595bca9f474dc01dcfd8","requested":false,"deadline":1793181963595},"round":1}
+33 2026-10-28T09:36:03.601Z th-e0bed361cbf3 review.changed {"review":"rv-235dc578","reviewer":"th-0c452df8be34","phase":{"kind":"fixing"},"round":1}
+37 2026-10-28T09:36:04.550Z th-27f8203a404f review.changed {"review":"rv-3136b7b5","reviewer":"th-f5d81a96bf98","phase":{"kind":"landed","commit":"1cf0127281f2890ecc0295047e86a9b0dfde962f"},"round":1}
+39 2026-10-28T09:36:05.551Z th-e0bed361cbf3 review.changed {"review":"rv-235dc578","reviewer":"th-0c452df8be34","phase":{"kind":"needs-person","reasons":["The live check failed at 3203f8e70f1e92655d48a6785971209749408540, and the builder pushed nothing for it: The greeting is meant to say goodbye; the live check's script is wrong.","The live check's output:\nbooting 3203f8e as a fleet: a control plane, a probe and one pylon\nthe pylon answered: Goodbye, which is not a greeting"]},"round":1}
+[exit 0]
