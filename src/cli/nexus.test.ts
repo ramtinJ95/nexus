@@ -19,6 +19,7 @@ import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
 import { startApi } from "../control/api.ts";
 import { threadStarter } from "../control/threads.ts";
+import { pipeline, type PipelineItem } from "../control/pipeline.ts";
 import { threadQueue, type QueuedThread } from "../control/queue.ts";
 import { turnGate } from "../control/drain.ts";
 import { fakeHarness } from "../control/fake-harness.ts";
@@ -143,8 +144,10 @@ async function setup(t: TestContext, setupOptions: { queue?: boolean } = {}) {
   });
   const backfill = usageBackfill({ registry, counter: { readWhole: () => Promise.reject(new Error("the CLI tests read no pylon")) }, wake: () => {}, intervalMs: 3_600_000, log: () => {} });
   const queue = setupOptions.queue === true ? threadQueue({ registry, startThread, gate: turnGate(() => false), send: (id, text, requestId) => fake.harness.send(id, text, requestId, "followUp") }) : null;
+  const items = queue === null ? null : pipeline({ registry, queue });
   const options = (port: number) => ({
     queue,
+    pipeline: items,
     deployment: { self: "nFIREBAT" as TailnetNodeId, deployers: new Set([laptop]), keys: {}, resolveMain: async () => "a".repeat(40) },
     registry, host: "127.0.0.1", port, whois: async () => { requests++; return caller; }, allowed: new Set([laptop]),
     hostnames: new Set([apiName, "127.0.0.1"]), harness: fake.harness, wake: () => {}, previewPorts: { first: 10200, last: 10299 }, images, usageBackfill: backfill,
@@ -157,6 +160,7 @@ async function setup(t: TestContext, setupOptions: { queue?: boolean } = {}) {
   });
   let api = await startApi(options(0));
   t.after(async () => {
+    await items?.close();
     await queue?.close();
     await api.close();
     await images.close();
@@ -250,7 +254,7 @@ test("--help or -h after a command prints its lines of nexus --help and exits 0 
   const s = await setup(t);
   const all = new Set((await s.nexus(["--help"])).stdout.split("\n"));
   const names = ["events", "threads", "show", "ports", "preview", "unpreview", "files", "changes", "diff", "conversation", "session open", "session close",
-    "attach", "start", "start-queued", "send", "watch", "seen", "abort", "retry", "retry-pylon", "wake", "archive", "unarchive", "delete", "projects", "project edit",
+    "attach", "start", "start-queued", "items", "item add", "item show", "item approve", "item cancel", "send", "watch", "seen", "abort", "retry", "retry-pylon", "wake", "archive", "unarchive", "delete", "projects", "project edit",
     "project add", "review", "land", "deploy", "release", "image build", "image rollout", "image rollback", "image list", "image current", "nodes", "usage", "usage backfill"];
   for (const name of names) {
     for (const flag of ["--help", "-h"]) {
@@ -266,7 +270,8 @@ test("--help or -h after a command prints its lines of nexus --help and exits 0 
     "  nexus project edit <id> [--node N|auto] [--branch B] [--cpus n] [--memory GiB] [--disk GiB]\n"
     + "    [--allow-host HOST]... [--login claude|chatgpt]... [--secret NAME:HOST[,HOST]...]...\n"
     + "    [--clear-hosts] [--clear-logins] [--clear-secrets] [--git-name NAME --git-email EMAIL | --clear-git-identity]\n"
-    + "    [--auto-review off|review|land]   review each builder's PR on its own, and land it too; land needs a deployer\n");
+    + "    [--auto-review off|review|land]   review each builder's PR on its own, and land it too; land needs a deployer\n"
+    + "    [--pipeline off|approve|start]    turn pipeline items into threads, once the person approves each or on their own\n");
   assert.equal((await s.nexus(["retry", "-h"])).stdout, "  nexus abort|retry|retry-pylon|wake <thread>\n");
   assert.equal((await s.nexus(["session", "open", "--help"])).stdout, "  nexus session open <thread> [--harness claude-code|pi|shell] [--title T]\n");
   const show = await s.nexus(["show", "--help"]);
@@ -385,7 +390,7 @@ test("project add --scratch makes a project with no repository, --secret grants 
     id: "sketch", repoUrl: null, defaultBranch: "main", defaultNode: node, resources: { cpus: 2, memoryGiB: 6, diskGiB: 10 }, allowedHosts: [],
     secrets: [{ name: "GH_TOKEN", hosts: ["api.github.com", "github.com"] }, { name: "EXA_API_KEY", hosts: ["api.exa.ai"] }], logins: [], preSetup: null,
   });
-  assert.match((await s.nexus(["projects"])).stdout, /^sketch +node rj-firebat +branch main +auto review off +scratch$/m);
+  assert.match((await s.nexus(["projects"])).stdout, /^sketch +node rj-firebat +branch main +auto review off +pipeline off +scratch$/m);
 
   const pinned = await s.nexus(["start", "--project", "sketch", "--title", "x", "--commit", "abc123", "--json"]);
   assert.equal(pinned.code, 64);
@@ -1347,7 +1352,7 @@ test("show prints each question with its options, its reserved case, and who mus
 
 test("deploy and release use the shared release view and wait for both roles", async (t) => {
   const s = await setup(t);
-  assert.equal((await s.nexus(["--version"])).stdout.trim(), "nexus 0.36.0");
+  assert.equal((await s.nexus(["--version"])).stdout.trim(), "nexus 0.37.0");
   assert.equal((await s.nexus(["deploy", "bad"])).code, 64);
   const requested = await s.json(["deploy", "main"]);
   assert.equal(requested.desired.commit, "a".repeat(40));
@@ -1452,11 +1457,11 @@ test("project edit replaces supplied grants and preserves omitted settings", asy
 test("project edit turns reviews of its own on and off, and projects shows who turned them on", async (t) => {
   const s = await setup(t);
   await s.nexus(["project", "add", "auto", "--scratch", "--node", node]);
-  assert.match((await s.nexus(["projects"])).stdout, new RegExp(`^auto +node ${node} +branch main +auto review off +scratch$`, "m"));
+  assert.match((await s.nexus(["projects"])).stdout, new RegExp(`^auto +node ${node} +branch main +auto review off +pipeline off +scratch$`, "m"));
   assert.equal((await s.nexus(["project", "edit", "auto", "--auto-review", "always"])).code, 64);
   const landing = await s.nexus(["project", "edit", "auto", "--auto-review", "land"]);
-  assert.equal(landing.stdout, `Updated project auto, auto review and land, for ${laptop}. Existing threads keep their boot settings and grants; start a new thread to apply them.\n`);
-  assert.match((await s.nexus(["projects"])).stdout, new RegExp(`^auto +node ${node} +branch main +auto review and land, for ${laptop} +scratch$`, "m"));
+  assert.equal(landing.stdout, `Updated project auto, auto review and land, for ${laptop}, pipeline off. Existing threads keep their boot settings and grants; start a new thread to apply them.\n`);
+  assert.match((await s.nexus(["projects"])).stdout, new RegExp(`^auto +node ${node} +branch main +auto review and land, for ${laptop} +pipeline off +scratch$`, "m"));
   assert.deepEqual((await s.json(["project", "edit", "auto", "--auto-review", "review"])).autoReview, { land: false, enabledBy: laptop });
   assert.equal((await s.json(["project", "edit", "auto", "--auto-review", "off"])).autoReview, undefined);
 });
@@ -1754,6 +1759,46 @@ test("start --after --request-id answers the queued thread, and the thread once 
   const again = await s.nexus(args);
   assert.equal(again.code, 0, again.stderr);
   assert.equal(again.stdout, `Started ${queued.id} on acme: Then this\n`);
+});
+
+test("item add lines up items behind each other, project edit --pipeline decides whether they start on their own, and items and item show say each one's phase", async (t) => {
+  const s = await setup(t, { queue: true });
+  const off = await s.nexus(["item", "add", "--project", "acme", "--message", "Build A"]);
+  assert.deepEqual([off.code, off.stderr], [5, "nexus: the pipeline does not run for project acme. nexus project edit acme --pipeline start turns it on\n"]);
+  assert.equal((await s.nexus(["item", "add", "--project", "acme", "--title", "No brief"])).code, 64);
+  assert.equal((await s.nexus(["project", "edit", "acme", "--pipeline", "sometimes"])).code, 64);
+  assert.match((await s.nexus(["project", "edit", "acme", "--pipeline", "approve"])).stdout, /^Updated project acme, auto review off, pipeline waits for approval\./);
+  assert.match((await s.nexus(["projects"])).stdout, /^acme\s+node rj-firebat\s+branch main\s+auto review off\s+pipeline waits for approval\s/m);
+
+  const added = await s.nexus(["item", "add", "--project", "acme", "--message", "Build A\nwith tests"]);
+  assert.equal(added.code, 0, added.stderr);
+  const [a] = s.registry.items();
+  assert.equal(added.stdout, `Added ${a!.id} to acme: Build A. It is held: project acme waits for the person to approve each item: nexus item approve ${a!.id}.\n`);
+  const b: PipelineItem = await s.json(["item", "add", "--project", "acme", "--title", "B", "--claude", "Build B", "--model", "claude-sonnet-5-5", "--after", a!.id]);
+  assert.deepEqual([b.worker, b.model, b.brief, b.after, b.phase.kind], ["claude", "claude-sonnet-5-5", "Build B", [a!.id], "planned"]);
+  assert.equal((await s.nexus(["item", "add", "--project", "acme", "--message", "x", "--after", "it-000000000000"])).code, 4);
+
+  const approved = await s.nexus(["item", "approve", a!.id]);
+  assert.equal(approved.code, 0, approved.stderr);
+  const thread = s.registry.queuedThread(s.registry.queuedThreads()[0]!.id)!;
+  assert.match(approved.stdout, new RegExp(`^Approved ${a!.id}\\. It is (queued|building): `));
+  assert.equal(thread.message, "Build A\nwith tests", "the brief is the queued thread's first message");
+  const cancelled = await s.nexus(["item", "cancel", b.id]);
+  assert.equal(cancelled.stdout, `Cancelled ${b.id}. It will never become a thread.\n`);
+  assert.equal((await s.nexus(["item", "cancel", a!.id])).code, 5, "an item that is a thread is cancelled by archiving its thread");
+
+  const rows = (await s.nexus(["items"])).stdout;
+  assert.match(rows, new RegExp(`^${a!.id}\\s+(queued|building)\\s+.+\\s+${thread.id}\\s+acme\\s+\\S+ ago\\s+Build A$`, "m"));
+  assert.doesNotMatch(rows, new RegExp(b.id), "a cancelled item is listed only with --all");
+  assert.match((await s.nexus(["items", "--all"])).stdout, new RegExp(`^${b.id}\\s+cancelled\\s+cancelled by nLAPTOP\\s+no thread yet\\s`, "m"));
+  assert.deepEqual((await s.json(["items", "--project", "other"])), []);
+  const shown = (await s.nexus(["item", "show", b.id])).stdout;
+  assert.equal(shown, [
+    `${b.id}  B`, "project: acme", "phase: cancelled, cancelled by nLAPTOP", "thread: none yet", "worker: Claude worker, model claude-sonnet-5-5", `after: ${a!.id}`, "brief: Build B",
+    shown.split("\n")[7], "",
+  ].join("\n"));
+  assert.match(shown.split("\n")[7]!, /^added by nLAPTOP \S+ ago$/);
+  assert.equal((await s.nexus(["item", "show", "it-000000000000"])).code, 4);
 });
 
 test("start --after queues a thread in one request, and threads, show, start-queued and archive speak of it as queued", async (t) => {
