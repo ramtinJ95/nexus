@@ -1,0 +1,26 @@
+25 page polls over 120 simulated seconds of a watched Claude turn of about 630 entries.
+
+| Work                                          | main | branch | change |
+|-----------------------------------------------|-----:|-------:|-------:|
+| Entries parsed for the stream's views         | 37857 | 25 | -99.9% |
+| Entries parsed for the page polls' views      | 15514 | 0 | -100% |
+| Whole-conversation renders for the stream     | 84 | 14 | -83% |
+| Whole-conversation renders for the page polls | 25 | 0 | -100% |
+| Blocks rendered to HTML, stream               | 51577 | 8630 | -83% |
+| Blocks rendered to HTML, page polls           | 15339 | 0 | -100% |
+| Stream frames sent                            | 15 | 14 | -7% |
+| Stream frames that changed only an age        | 2 | 0 | -100% |
+| Stream frames that only name the view shown   | 0 | 1 | new |
+| Stream bytes sent                             | 2404403 | 2085229 | -13% |
+| Page poll bytes sent                          | 4331909 | 435228 | -90% |
+| Bare pings                                    | 6 | 8 | 33% |
+| Transcript reads from the pylon               | 63 | 63 | 0% |
+| Usage-limit check entries (not this path)     | 1392 | 1392 | 0% |
+Conversation states the client showed, in order (16 on main): identical.
+The conversation the client showed last: identical.
+Each poll's page outside the conversation: identical.
+The watermark each other poll let the client certify: identical.
+Polls that let the client certify a reply it had not shown: main 119 s (1793102518000), branch none.
+
+Polls that rendered the conversation: main 25, branch 0.
+Polls that certified a reply's watermark: 120 s (1793102519000) on the branch, 119 s (1793102518000), 120 s (1793102519000) on main.

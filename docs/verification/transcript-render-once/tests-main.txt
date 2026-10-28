@@ -1,0 +1,9 @@
+src/control/claude-conversation.test.ts from the branch, run against main's code at 637e93f:
+✔ a transcript read that ends after the service and its registry closed settles without touching the registry
+✔ a deleted thread's reader stays while a read runs, so a refresh meanwhile waits for it rather than reading at once
+✔ a watch of a deleted thread keeps its reader, so closing the service still ends the watch
+✔ a deleted thread's reader goes once its last read and its last watch end, and an active thread's stays
+✔ a watched thread's view, which reads on from the last one, holds what the registry stores as reads append, drop, replace or change session
+ℹ tests 5
+ℹ pass 5
+ℹ fail 0

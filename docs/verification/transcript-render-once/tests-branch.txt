@@ -1,0 +1,18 @@
+npm run typecheck: passed
+npm test on the branch:
+ℹ tests 1291
+ℹ pass 1291
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+
+The new and changed tests:
+✔ a Claude worker thread's page stream shows new entries during a turn, read when its session events say so rather than on a timer
+✔ a poll of a Claude worker's streaming page names the view its stream shows rather than render it, and names a reply's view only once a frame showed the reply
+✔ a Claude worker's page names no reply watermark until the transcript holds a read that started after the reply
+✔ a Claude worker's page names no reply watermark while the reads after the reply have not reached the transcript's end
+✔ a Claude worker's page stream sends nothing while its conversation is unchanged, its pings included, though an age in it changed
+✔ a watched thread's view, which reads on from the last one, holds what the registry stores as reads append, drop, replace or change session
+✔ a Claude worker's page stream names one view for one conversation, and another for any other entry
+✔ an age the client ticks reads as a render of the page at the same time would
+✔ a Claude worker's transcript survives reopening, keeps its newest entries, and starts over for a new session or a replaced file

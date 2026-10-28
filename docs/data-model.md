@@ -398,7 +398,8 @@ shows as a `record` rather than disappearing. Prompts are cut at 32 KiB, replies
 The registry keeps what was read. `claude_transcripts` holds per thread the session it
 read, the cursor (`byte_offset` past the last complete line, `skipping` while a
 record over 512 KiB is passed over, and `before_hash`, the SHA-256 of the up to 4 KiB
-just before the offset), how many entries were `dropped`, and `read_at`.
+just before the offset), how many entries were `dropped`, and `read_at`, when the
+last read that reached the transcript's end started.
 `claude_entries` holds the newest 3,000 entries in order. A read appends only its new
 entries and is applied only where the stored cursor stands, so a read applied twice
 changes nothing. A new session ID, a file smaller than the cursor, or bytes before the
