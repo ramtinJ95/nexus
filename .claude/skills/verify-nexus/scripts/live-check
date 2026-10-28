@@ -1,0 +1,34 @@
+#!/usr/bin/env bash
+# Nexus's live check: boots the checkout as the local stack and drives one thread through its life with the real CLI,
+# start, a tool call, archive, unarchive and delete. Exits 0 only if every step did what it should. It needs what
+# `verify-nexus up` needs, Docker among it, so a verify pylon cannot run it until its image has a backend for the
+# stack's pylons (docs/design.md, open questions), and Nexus has no .nexus/verify that calls it yet.
+set -euo pipefail
+V="$(cd "$(dirname "$0")" && pwd)/verify-nexus"
+fail() { echo "live check: $*" >&2; exit 1; }
+# Polls a CLI step every 3 s, for up to $2 s, until jq's filter $3 on its stdout is true.
+until_json() {
+  local step=$1 seconds=$2 filter=$3; shift 3
+  for _ in $(seq 1 $((seconds / 3))); do
+    "$V" cli "$step" -- "$@" --json 2>/dev/null | jq -e "$filter" >/dev/null && return 0
+    sleep 3
+  done
+  fail "$step: $filter never held"
+}
+
+trap '"$V" down >&2 || true' EXIT
+"$V" up
+"$V" doctor
+T=$("$V" cli live-start -- start --project spoon --title "live check" --json | jq -r .id)
+until_json live-running 120 '.pylon.actualState == "running"' show "$T"
+"$V" cli live-send -- send "$T" "bash: echo live > live.txt && cat live.txt" --request-id live:1 --json >/dev/null
+for _ in $(seq 1 20); do [ "$("$V" pylon live-disk "$T" -- cat live.txt 2>/dev/null)" = live ] && break; sleep 3; done
+[ "$("$V" pylon live-disk "$T" -- cat live.txt)" = live ] || fail "the tool call left no live.txt"
+"$V" cli live-archive -- archive "$T" --json >/dev/null
+until_json live-paused 120 '.pylon.actualState == "paused"' show "$T"
+"$V" cli live-unarchive -- unarchive "$T" --json >/dev/null
+until_json live-woken 120 '.pylon.actualState == "running"' show "$T"
+[ "$("$V" pylon live-disk-after-wake "$T" -- cat live.txt)" = live ] || fail "live.txt did not survive the archive"
+"$V" cli live-delete -- delete "$T" --json >/dev/null
+until_json live-deleted 60 '.[] | select(.id == "'"$T"'") | .status == "deleted"' threads --all
+echo "live check: a thread started, ran a tool, was archived, woke with its disk, and was deleted"
