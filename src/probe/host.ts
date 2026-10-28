@@ -52,13 +52,16 @@ export function parseResident(text: string): number {
 /** USER_HZ, which /proc reports CPU times in. Linux fixes it at 100 on every architecture Nexus runs on. */
 const ticksPerSecond = 100;
 
-const read = (path: string) => readFile(path, "utf8").catch((err: NodeJS.ErrnoException) => {
-  if (err.code === "ENOENT" || err.code === "ESRCH" || err.code === "ENODEV" || err.code === "EIO") return null;
-  throw err;
-});
-const entries = (dir: string) => readdir(dir).catch((err: NodeJS.ErrnoException) => {
-  if (err.code === "ENOENT") return [];
-  throw err;
+/**
+ * A sensor or a process's file. A driver may answer EBUSY or EIO, as an AMD GPU's sensor does while the GPU sleeps, and a
+ * process may exit mid-read, so any failure leaves that reading out rather than failing the rest.
+ */
+const read = (path: string) => readFile(path, "utf8").catch(() => null);
+const entries = (dir: string) => readdir(dir).catch(() => []);
+/** Load or memory, which only a host without /proc lacks. */
+const basic = (reading: string, path: string) => readFile(path, "utf8").catch((err: NodeJS.ErrnoException) => {
+  if (err.code === "ENOENT") return null;
+  throw new Error(`cannot read the node's ${reading}: ${err.message}`);
 });
 const numbered = (names: readonly string[], prefix: string) =>
   names.filter((n) => new RegExp(`^${prefix}\\d+$`).test(n)).sort((a, b) => Number(a.slice(prefix.length)) - Number(b.slice(prefix.length)));
@@ -112,10 +115,10 @@ async function pylonProcesses(proc: string, roots: readonly { pylonId: PylonId; 
   // A stalled event loop or a slow /proc read stretches the sample, so CPU is over the time it took.
   const seconds = (now() - sampled) / 1000;
   return Promise.all(trees.map(async ({ pylonId, pids }) => {
-    const living = pids.filter((pid) => after.has(pid));
-    const ticks = living.reduce((sum, pid) => sum + after.get(pid)!.cpuTicks - all.get(pid)!.cpuTicks, 0);
-    const resident = await Promise.all(living.map(async (pid) => parseResident(await read(join(proc, String(pid), "status")) ?? "")));
-    return { pylonId, processes: living.length, cpuPercent: seconds > 0 ? (ticks / ticksPerSecond) / seconds * 100 : 0, residentGiB: resident.reduce((a, b) => a + b, 0) };
+    const statuses = await Promise.all(pids.filter((pid) => after.has(pid)).map(async (pid) => ({ pid, status: await read(join(proc, String(pid), "status")) })));
+    const living = statuses.flatMap(({ pid, status }) => status === null ? [] : [{ pid, residentGiB: parseResident(status) }]);
+    const ticks = living.reduce((sum, { pid }) => sum + after.get(pid)!.cpuTicks - all.get(pid)!.cpuTicks, 0);
+    return { pylonId, processes: living.length, cpuPercent: seconds > 0 ? (ticks / ticksPerSecond) / seconds * 100 : 0, residentGiB: living.reduce((sum, p) => sum + p.residentGiB, 0) };
   }));
 }
 
@@ -134,7 +137,7 @@ export interface HealthSources {
 export async function readNodeHealth(node: NodeName, sources: HealthSources): Promise<NodeHealth> {
   const proc = join(sources.root, "proc");
   const [capacity, loadavg, meminfo, temps, pylons] = await Promise.all([
-    hostCapacity(sources.storage), read(join(proc, "loadavg")), read(join(proc, "meminfo")), temperatures(join(sources.root, "sys")),
+    hostCapacity(sources.storage), basic("load", join(proc, "loadavg")), basic("memory", join(proc, "meminfo")), temperatures(join(sources.root, "sys")),
     sources.pylons === null ? null : pylonProcesses(proc, sources.pylons, sources.sampleMs, sources.wait ?? delay, sources.now ?? performance.now.bind(performance)),
   ]);
   return {
