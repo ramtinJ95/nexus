@@ -1,1 +1,1 @@
-branch: 22b13f5 docs: a landed review archives its threads, and the orchestration decisions of 2026-10-28
+branch: 50c9dd9 fix(control): archive a landed review's threads in the transaction that saves the landing

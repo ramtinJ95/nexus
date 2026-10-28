@@ -1,6 +1,6 @@
 # Archive what landed
 
-Verified in this task's pylon on 2026-10-28, on branch `feat/archive-landed` at 22b13f5 (code and docs; the capture's own commit follows it), against main at 76522f5, with headless Chromium 138. No live control plane, node, image, GitHub repository or other thread was touched.
+Verified in this task's pylon on 2026-10-28, on branch `feat/archive-landed` at 50c9dd9 (code, docs and the review's fix; the capture's own commit follows it), against main at 76522f5, with headless Chromium 138. No live control plane, node, image, GitHub repository or other thread was touched.
 
 ## How to rerun
 
@@ -28,16 +28,16 @@ MODULES=<node_modules with @sparticuz/chromium and puppeteer-core> LD_LIBRARY_PA
 | "Rebuild the image", review `needs-person`, `09-show-image.txt` | `active`, attention `decision` | `active`, attention `decision`, its reviewer `active`, and the Land card still offered |
 | "Greet in French", review `approved`, `10-show-french.txt` | `active` | `active`, and its reviewer `active` |
 | `unarchive` of "Greet by name", `15-unarchive-byName.txt`, `17-threads-after-unarchive.txt` | exit 5: `thread ... is active, not archived` | exit 0, and five seconds of passes later it is still `active`: the loop archives a landed review's threads once, as it lands |
-| `tests.txt` | 62 of 64 pass. The two new archive tests fail | 64 of 64 pass |
+| `tests.txt` | 63 of 65 pass. Two of the four new archive tests fail | 65 of 65 pass |
 
 `wake.log` on the branch:
 
 ```
-08:15:16.091Z the review loop woke the planner for th-e370fae35ac2 (Greet by name), now archived
-08:15:16.093Z the review loop woke the planner for th-46a62661fcde (Review of #1: Greet by name), now archived
+08:25:46.884Z the review loop woke the planner for th-4997a10f7e5c (Greet by name), now archived
+08:25:46.885Z the review loop woke the planner for th-109527441a5b (Review of #1: Greet by name), now archived
 ```
 
-The tests in `tests.txt` that name the step's own Verify sentence are "a review that lands archives its builder and reviewer, once, whether its PR deploys or not" and "a review held for the person, or one that stops at approval, archives nothing". The second passes on main too, since main archives nothing at all. A third, "a thread in a turn as its review lands stays open, and the other is archived", covers the one exception.
+The tests in `tests.txt` that name the step's own Verify sentence are "a review that lands archives its builder and reviewer, once, whether its PR deploys or not" and "a review held for the person, or one that stops at approval, archives nothing". The second passes on main too, since main archives nothing at all. "A thread in a turn as its review lands stays open, and the other is archived" covers the one exception. "A landing whose save fails archives nothing, so a release that supersedes it before the retry leaves both threads open" covers the review's finding, and also passes on main, which archives nothing. It fails on the branch's first version, which archived in the step before the pass saved the landing.
 
 Main, "Greet by name" after it landed:
 

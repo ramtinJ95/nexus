@@ -1,17 +1,17 @@
 $ nexus start --project nexus --title Greet by name --claude push greet-name --json
 {
-  "id": "th-8a6cbfe030a3",
+  "id": "th-fc2e02bf17c0",
   "title": "Greet by name",
   "project": "nexus",
-  "pylonId": "pylon-th-8a6cbfe030a3",
+  "pylonId": "pylon-th-fc2e02bf17c0",
   "status": "active",
   "conversationId": null,
   "startedBy": "nLAPTOP",
-  "createdAt": 1793175274018,
+  "createdAt": 1793175903594,
   "agentTurnRunning": false,
   "working": false,
   "lastAgentActivityAt": 0,
-  "lastHumanActivityAt": 1793175274018,
+  "lastHumanActivityAt": 1793175903594,
   "seenAt": null,
   "lastReplyAt": null,
   "placement": {

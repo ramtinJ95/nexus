@@ -1,9 +1,9 @@
-$ nexus show th-69a961479f7b
-th-69a961479f7b  Review of #3: Greet in French
+$ nexus show th-05f126bfe2b6
+th-05f126bfe2b6  Review of #3: Greet in French
 project: nexus-review
 attention: reply
 status: active
-pylon: pylon-th-69a961479f7b on verify-node, running, observed 0s ago
+pylon: pylon-th-05f126bfe2b6 on verify-node, running, observed 0s ago
 size: 1 CPUs, 1 GiB memory, 10 GiB disk
 placement: verify-node, as the start named
 setup: fresh boot runs .nexus/setup, because the control plane could not read .nexus/setup at greet-french: the verify stack reads no remote, so every thread boots fresh
