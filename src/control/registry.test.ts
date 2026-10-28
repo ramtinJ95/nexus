@@ -994,7 +994,7 @@ test("a turn running before turn starts were recorded has no known start", async
   const db = new DatabaseSync(path);
   const version = db.prepare("PRAGMA user_version").get()!.user_version as number;
   db.exec(`UPDATE threads SET agent_turn_running = 1; ALTER TABLE threads DROP COLUMN placement; ALTER TABLE threads DROP COLUMN setup; ALTER TABLE threads DROP COLUMN agent_turn_started_at; ALTER TABLE session_activity DROP COLUMN started_at; DROP TABLE reviews; DROP TABLE reviewed_prs;
-    ALTER TABLE claude_workers DROP COLUMN turn_session; ALTER TABLE claude_workers DROP COLUMN turn_at; ALTER TABLE session_activity DROP COLUMN message; ALTER TABLE session_order DROP COLUMN event_ids; PRAGMA user_version = ${version - 18}`);
+    ALTER TABLE claude_workers DROP COLUMN turn_session; ALTER TABLE claude_workers DROP COLUMN turn_at; ALTER TABLE session_activity DROP COLUMN message; ALTER TABLE session_order DROP COLUMN event_ids; PRAGMA user_version = ${version - 19}`);
   db.close();
   const registry = openRegistry(path, () => now);
   t.after(() => registry.close());
@@ -1339,7 +1339,7 @@ test("a registry made when landing asked for a passkey keeps neither passkey tab
   const db = new DatabaseSync(path);
   const version = db.prepare("PRAGMA user_version").get()!.user_version as number;
   db.exec(`CREATE TABLE passkeys (id TEXT PRIMARY KEY, credential_id TEXT NOT NULL UNIQUE, record TEXT NOT NULL) STRICT;
-    CREATE TABLE passkey_codes (hash TEXT PRIMARY KEY, expires_at INTEGER NOT NULL, used_at INTEGER) STRICT; PRAGMA user_version = ${version - 8}`);
+    CREATE TABLE passkey_codes (hash TEXT PRIMARY KEY, expires_at INTEGER NOT NULL, used_at INTEGER) STRICT; PRAGMA user_version = ${version - 9}`);
   db.close();
   openRegistry(path).close();
   const reopened = new DatabaseSync(path);
@@ -1380,7 +1380,7 @@ test("the migration that adds pipeline items turns the pipeline on for project n
   const rewind = () => {
     const db = new DatabaseSync(path);
     const version = db.prepare("PRAGMA user_version").get()!.user_version as number;
-    db.exec(`DROP TABLE pipeline_items; PRAGMA user_version = ${version - 2}`);
+    db.exec(`DROP TABLE pipeline_items; PRAGMA user_version = ${version - 3}`);
     db.close();
   };
   rewind();
@@ -1406,7 +1406,7 @@ test("judgments begin at the newest event, so failures from before are never jud
   const rewind = () => {
     const db = new DatabaseSync(path);
     const version = db.prepare("PRAGMA user_version").get()!.user_version as number;
-    db.exec(`DROP TABLE judgments; DROP TABLE judgment_since; PRAGMA user_version = ${version - 1}`);
+    db.exec(`DROP TABLE judgments; DROP TABLE judgment_since; PRAGMA user_version = ${version - 2}`);
     db.close();
   };
   rewind();
@@ -1418,7 +1418,7 @@ test("judgments begin at the newest event, so failures from before are never jud
   upgraded.close();
   const db = new DatabaseSync(path);
   const version = db.prepare("PRAGMA user_version").get()!.user_version as number;
-  db.exec(`PRAGMA user_version = ${version - 1}`);
+  db.exec(`PRAGMA user_version = ${version - 2}`);
   db.close();
   const again = openRegistry(path);
   t.after(() => again.close());
