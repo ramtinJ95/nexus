@@ -4,18 +4,18 @@ Updated project nexus, auto review, set by nLAPTOP. Existing threads keep their 
 
 $ nexus start --project nexus --title Greet by name --claude stop-before-push greet-name --json
 {
-  "id": "th-ce0bc9a36d03",
+  "id": "th-32cc26208c59",
   "title": "Greet by name",
   "project": "nexus",
-  "pylonId": "pylon-th-ce0bc9a36d03",
+  "pylonId": "pylon-th-32cc26208c59",
   "status": "active",
   "conversationId": null,
   "startedBy": "nLAPTOP",
-  "createdAt": 1793160555580,
+  "createdAt": 1793161324627,
   "agentTurnRunning": false,
   "working": false,
   "lastAgentActivityAt": 0,
-  "lastHumanActivityAt": 1793160555580,
+  "lastHumanActivityAt": 1793161324627,
   "seenAt": null,
   "lastReplyAt": null,
   "placement": {
@@ -31,18 +31,18 @@ $ nexus start --project nexus --title Greet by name --claude stop-before-push gr
 
 $ nexus start --project nexus --title Greet loudly --claude stop-before-push greet-loud stay --json
 {
-  "id": "th-c8e6dd0c6624",
+  "id": "th-89c50cab73b3",
   "title": "Greet loudly",
   "project": "nexus",
-  "pylonId": "pylon-th-c8e6dd0c6624",
+  "pylonId": "pylon-th-89c50cab73b3",
   "status": "active",
   "conversationId": null,
   "startedBy": "nLAPTOP",
-  "createdAt": 1793160555742,
+  "createdAt": 1793161324812,
   "agentTurnRunning": false,
   "working": false,
   "lastAgentActivityAt": 0,
-  "lastHumanActivityAt": 1793160555742,
+  "lastHumanActivityAt": 1793161324812,
   "seenAt": null,
   "lastReplyAt": null,
   "placement": {
@@ -58,18 +58,18 @@ $ nexus start --project nexus --title Greet loudly --claude stop-before-push gre
 
 $ nexus start --project nexus --title Greet quietly --claude push greet-quiet --json
 {
-  "id": "th-b0b802f2d150",
+  "id": "th-aaf8e6869d0f",
   "title": "Greet quietly",
   "project": "nexus",
-  "pylonId": "pylon-th-b0b802f2d150",
+  "pylonId": "pylon-th-aaf8e6869d0f",
   "status": "active",
   "conversationId": null,
   "startedBy": "nLAPTOP",
-  "createdAt": 1793160555908,
+  "createdAt": 1793161325000,
   "agentTurnRunning": false,
   "working": false,
   "lastAgentActivityAt": 0,
-  "lastHumanActivityAt": 1793160555908,
+  "lastHumanActivityAt": 1793161325000,
   "seenAt": null,
   "lastReplyAt": null,
   "placement": {
@@ -85,18 +85,18 @@ $ nexus start --project nexus --title Greet quietly --claude push greet-quiet --
 
 $ nexus start --project nexus --title Explain the queue --claude investigate --json
 {
-  "id": "th-43cde7f5d7e9",
+  "id": "th-9362a281b392",
   "title": "Explain the queue",
   "project": "nexus",
-  "pylonId": "pylon-th-43cde7f5d7e9",
+  "pylonId": "pylon-th-9362a281b392",
   "status": "active",
   "conversationId": null,
   "startedBy": "nLAPTOP",
-  "createdAt": 1793160556071,
+  "createdAt": 1793161325182,
   "agentTurnRunning": false,
   "working": false,
   "lastAgentActivityAt": 0,
-  "lastHumanActivityAt": 1793160556071,
+  "lastHumanActivityAt": 1793161325182,
   "seenAt": null,
   "lastReplyAt": null,
   "placement": {
@@ -112,52 +112,52 @@ $ nexus start --project nexus --title Explain the queue --claude investigate --j
 
 gave up waiting after 30 s: Greet loudly needs the person
 gave up waiting after 10 s: Explain the queue was nudged once
-$ nexus send th-43cde7f5d7e9 Thanks. This one needs no pull request. Which file holds the queue?
-Sent to Claude in th-43cde7f5d7e9.
+$ nexus send th-9362a281b392 Thanks. This one needs no pull request. Which file holds the queue?
+Sent to Claude in th-9362a281b392.
 [exit 0]
 
 $ nexus threads
-th-ce0bc9a36d03  active  -  pylon running  nexus  50s ago  Greet by name
-th-c8e6dd0c6624  active  -  pylon running  nexus  50s ago  Greet loudly
-th-b0b802f2d150  active  -  pylon running  nexus  50s ago  Greet quietly
-th-43cde7f5d7e9  active  -  pylon running  nexus  50s ago  Explain the queue
+th-32cc26208c59  active  -  pylon running  nexus  51s ago  Greet by name
+th-89c50cab73b3  active  -  pylon running  nexus  51s ago  Greet loudly
+th-aaf8e6869d0f  active  -  pylon running  nexus  50s ago  Greet quietly
+th-9362a281b392  active  -  pylon running  nexus  50s ago  Explain the queue
 [exit 0]
 
-waiting for the PR watch's second pass, 74 s from now
+waiting for the PR watch's second pass, 73 s from now
 gave up waiting after 30 s: the PR watch linked every opened PR
-$ nexus show th-ce0bc9a36d03
-th-ce0bc9a36d03  Greet by name
+$ nexus show th-32cc26208c59
+th-32cc26208c59  Greet by name
 project: nexus
 Claude worker: started, model claude-opus-5-5
 attention: reply
 status: active
-pylon: pylon-th-ce0bc9a36d03 on verify-node, running, observed 0s ago
+pylon: pylon-th-32cc26208c59 on verify-node, running, observed 0s ago
 size: 1 CPUs, 1 GiB memory, 10 GiB disk
 placement: verify-node, the project's default node
 setup: fresh boot runs .nexus/setup, because the control plane could not read .nexus/setup at main: the verify stack reads no remote, so every thread boots fresh
 PR watch: on
 [exit 0]
 
-$ nexus show th-c8e6dd0c6624
-th-c8e6dd0c6624  Greet loudly
+$ nexus show th-89c50cab73b3
+th-89c50cab73b3  Greet loudly
 project: nexus
 Claude worker: started, model claude-opus-5-5
 attention: reply
 status: active
-pylon: pylon-th-c8e6dd0c6624 on verify-node, running, observed 0s ago
+pylon: pylon-th-89c50cab73b3 on verify-node, running, observed 0s ago
 size: 1 CPUs, 1 GiB memory, 10 GiB disk
 placement: verify-node, the project's default node
 setup: fresh boot runs .nexus/setup, because the control plane could not read .nexus/setup at main: the verify stack reads no remote, so every thread boots fresh
 PR watch: on
 [exit 0]
 
-$ nexus show th-b0b802f2d150
-th-b0b802f2d150  Greet quietly
+$ nexus show th-aaf8e6869d0f
+th-aaf8e6869d0f  Greet quietly
 project: nexus
 Claude worker: started, model claude-opus-5-5
 attention: reply
 status: active
-pylon: pylon-th-b0b802f2d150 on verify-node, running, observed 0s ago
+pylon: pylon-th-aaf8e6869d0f on verify-node, running, observed 0s ago
 size: 1 CPUs, 1 GiB memory, 10 GiB disk
 placement: verify-node, the project's default node
 setup: fresh boot runs .nexus/setup, because the control plane could not read .nexus/setup at main: the verify stack reads no remote, so every thread boots fresh
@@ -167,13 +167,13 @@ output: branch origin/greet-quiet
 output: pull-request https://github.com/ramtinJ95/nexus/pull/1
 [exit 0]
 
-$ nexus show th-43cde7f5d7e9
-th-43cde7f5d7e9  Explain the queue
+$ nexus show th-9362a281b392
+th-9362a281b392  Explain the queue
 project: nexus
 Claude worker: started, model claude-opus-5-5
 attention: reply
 status: active
-pylon: pylon-th-43cde7f5d7e9 on verify-node, running, observed 0s ago
+pylon: pylon-th-9362a281b392 on verify-node, running, observed 0s ago
 size: 1 CPUs, 1 GiB memory, 10 GiB disk
 placement: verify-node, the project's default node
 setup: fresh boot runs .nexus/setup, because the control plane could not read .nexus/setup at main: the verify stack reads no remote, so every thread boots fresh
@@ -181,23 +181,23 @@ PR watch: on
 [exit 0]
 
 $ nexus threads
-th-ce0bc9a36d03  active  -  pylon running  nexus  2m ago  Greet by name
-th-c8e6dd0c6624  active  -  pylon running  nexus  2m ago  Greet loudly
-th-b0b802f2d150  active  -  pylon running  nexus  2m ago  Greet quietly
-th-43cde7f5d7e9  active  -  pylon running  nexus  2m ago  Explain the queue
+th-32cc26208c59  active  -  pylon running  nexus  2m ago  Greet by name
+th-89c50cab73b3  active  -  pylon running  nexus  2m ago  Greet loudly
+th-aaf8e6869d0f  active  -  pylon running  nexus  2m ago  Greet quietly
+th-9362a281b392  active  -  pylon running  nexus  2m ago  Explain the queue
 [exit 0]
 
 $ nexus events --kind attention.changed
-2 2026-10-28T04:09:15.761Z th-ce0bc9a36d03 attention.changed {"attention":"reply"}
-4 2026-10-28T04:09:15.762Z th-c8e6dd0c6624 attention.changed {"attention":"reply"}
-6 2026-10-28T04:09:15.965Z th-b0b802f2d150 attention.changed {"attention":"reply"}
-8 2026-10-28T04:09:16.161Z th-43cde7f5d7e9 attention.changed {"attention":"reply"}
+2 2026-10-28T04:22:04.811Z th-32cc26208c59 attention.changed {"attention":"reply"}
+4 2026-10-28T04:22:05.009Z th-89c50cab73b3 attention.changed {"attention":"reply"}
+6 2026-10-28T04:22:05.012Z th-aaf8e6869d0f attention.changed {"attention":"reply"}
+8 2026-10-28T04:22:05.211Z th-9362a281b392 attention.changed {"attention":"reply"}
 [exit 0]
 
-byName (th-ce0bc9a36d03): 0 nudges typed, attention reply
-loudly (th-c8e6dd0c6624): 0 nudges typed, attention reply
-quietly (th-b0b802f2d150): 0 nudges typed, attention reply
-explain (th-43cde7f5d7e9): 0 nudges typed, attention reply
+byName (th-32cc26208c59): 0 nudges typed, attention reply
+loudly (th-89c50cab73b3): 0 nudges typed, attention reply
+quietly (th-aaf8e6869d0f): 0 nudges typed, attention reply
+explain (th-9362a281b392): 0 nudges typed, attention reply
 screenshot 01-home.png of /
-screenshot 02-loudly.png of /threads/th-c8e6dd0c6624
-screenshot 03-by-name.png of /threads/th-ce0bc9a36d03
+screenshot 02-loudly.png of /threads/th-89c50cab73b3
+screenshot 03-by-name.png of /threads/th-32cc26208c59

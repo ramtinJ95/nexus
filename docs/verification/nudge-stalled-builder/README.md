@@ -1,6 +1,6 @@
 # Nudge a builder that stopped short of a pull request
 
-Verified in this task's pylon on 2026-10-28, on branch `feat/nudge-stalled-builder` at 91016bf (code and docs; the capture's own commit follows it), against main at 716a624, with headless Chromium 138. No live control plane, node, image, GitHub repository or other thread was touched.
+Verified in this task's pylon on 2026-10-28, on branch `feat/nudge-stalled-builder` at ea09148 (code and docs; the capture's own commit follows it), against main at 716a624, with headless Chromium 138. No live control plane, node, image, GitHub repository or other thread was touched.
 
 ## How to rerun
 
@@ -30,17 +30,17 @@ MODULES=<node_modules with @sparticuz/chromium and puppeteer-core> LD_LIBRARY_PA
 | "Greet loudly", told to stop and stay stopped | no nudge, attention `reply` | two nudges, then attention `decision`, `needs your decision` on the dashboard, and no third message |
 | "Greet quietly", PR opened as its turn ended | no nudge, PR #1 linked | no nudge: the pass searched `greet-quiet` once, found PR #1 and sent nothing, two minutes before the PR watch linked it |
 | "Explain the queue", the person writes to it | no nudge | two nudges before the person's message arrived, then nothing more, and no `decision`, though its next turn opened no PR either |
-| `tests.txt` | `nudge.test.ts` fails: `src/control/nudge.ts` does not exist | 9 of 9 pass |
+| `tests.txt` | `nudge.test.ts` fails: `src/control/nudge.ts` does not exist | 12 of 12 pass |
 
 The branch's `github.log` shows one search per stalled turn, and the PR watch's own searches two minutes later:
 
 ```
-04:12:02.237Z th-e256d4fa3e25 pushed greet-quiet, opening PR #1
-04:12:04.239Z searched greet-quiet (state all)
-04:12:04.737Z th-ff330bc6d4b4 pushed greet-name, opening PR #2
-04:12:07.235Z searched greet-name (state all)
-04:14:01.233Z searched greet-name (state open)
-04:14:01.237Z searched greet-quiet (state open)
+04:24:51.455Z th-e2c0dfc37c8f pushed greet-quiet, opening PR #1
+04:24:53.459Z searched greet-quiet (state all)
+04:24:53.957Z th-336270703db8 pushed greet-name, opening PR #2
+04:24:56.454Z searched greet-name (state all)
+04:26:50.450Z searched greet-name (state open)
+04:26:50.454Z searched greet-quiet (state open)
 ```
 
 The first capture of this branch searched on every pass, once a second in the stack, until the PR watch linked the PR. The fix records the turn as judged, which the capture above shows. `typed.log` holds every message typed into each worker. `13-events-attention.txt` has `"decision"` for "Greet loudly" only.

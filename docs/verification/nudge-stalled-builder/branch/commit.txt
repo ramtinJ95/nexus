@@ -1,1 +1,1 @@
-branch: 91016bf docs: describe nudging a builder that stopped short of a pull request
+branch: ea09148 fix(control): leave a person's thread alone for good, and skip a usage-limit stop

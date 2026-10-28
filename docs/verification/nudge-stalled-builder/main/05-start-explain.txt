@@ -1,17 +1,17 @@
 $ nexus start --project nexus --title Explain the queue --claude investigate --json
 {
-  "id": "th-43cde7f5d7e9",
+  "id": "th-9362a281b392",
   "title": "Explain the queue",
   "project": "nexus",
-  "pylonId": "pylon-th-43cde7f5d7e9",
+  "pylonId": "pylon-th-9362a281b392",
   "status": "active",
   "conversationId": null,
   "startedBy": "nLAPTOP",
-  "createdAt": 1793160556071,
+  "createdAt": 1793161325182,
   "agentTurnRunning": false,
   "working": false,
   "lastAgentActivityAt": 0,
-  "lastHumanActivityAt": 1793160556071,
+  "lastHumanActivityAt": 1793161325182,
   "seenAt": null,
   "lastReplyAt": null,
   "placement": {
