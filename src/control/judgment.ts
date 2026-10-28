@@ -27,8 +27,8 @@ import type { Registry, StoredPylon, Thread, ThreadId } from "./registry.ts";
 import { latest, mint } from "./review.ts";
 import { roleOf } from "./usage.ts";
 
-export const judgmentPrefix = "[Nexus judgment — automated, not a message from the person]";
-export const answers = ["retry", "retry-elsewhere", "person"] as const;
+const judgmentPrefix = "[Nexus judgment — automated, not a message from the person]";
+const answers = ["retry", "retry-elsewhere", "person"] as const;
 export type Answer = typeof answers[number];
 
 /** What was decided and by whom: the judgment's answer, or the control plane's own rule when no judgment ran or its answer could not stand. */
@@ -86,17 +86,17 @@ export interface JudgmentView {
 }
 
 /** How many times Nexus retries one thread's pylon on its own. Every later failure goes to the person. */
-export const maxRetries = 2;
+const maxRetries = 2;
 const answerMs = 15 * 60_000;
 const healthMs = 5_000;
 const maxReply = 8_000;
 const answerSchema = z.object({ token: z.string(), answer: z.enum(answers), why: z.string().min(1).max(2_000) });
 
 /** The brief's request ID and the question's ID. */
-export const judgmentId = (failure: number) => `judgment:${failure}`;
+const judgmentId = (failure: number) => `judgment:${failure}`;
 const labels = { retry: "Retry", move: "Retry on another node", leave: "Leave it failed" } as const;
 
-export function outcomeText(o: Outcome): string {
+function outcomeText(o: Outcome): string {
   const answered = o.kind !== "left" && o.on === "answer" ? ", as the person answered" : "";
   switch (o.kind) {
     case "retried": return `retried the pylon on ${o.node}${answered}`;
@@ -115,7 +115,6 @@ export function judgmentView(j: Judgment): JudgmentView {
 
 /** Every fact a judgment's brief states. */
 export interface Facts {
-  failure: number;
   token: string;
   thread: Pick<Thread, "id" | "title" | "project">;
   agent: "a Nexus agent" | "a Claude worker" | "none";
@@ -183,8 +182,8 @@ Node ${pylon.node} is ${f.online ? "online" : "offline"}. ${"unread" in f.health
 The other nodes, weighed for this pylon as Nexus places one:
 ${f.others.length === 0 ? "- none: Nexus has no other node." : f.others.map((w) => "left" in w ? `- ${w.node} would have ${gib(w.left.memoryGiB)} GiB memory, ${w.left.cpus} CPUs and ${gib(w.left.diskGiB)} GiB disk left` : `- ${w.node} cannot take it: it ${w.refused}`).join("\n")}
 
-This thread's earlier failures: ${f.earlier.length === 0 ? "none." : `\n${f.earlier.map((j) => `- judged at ${iso(j.startedAt)}: ${j.phase.kind === "judging" ? "still judging" : verdictText(j.phase.verdict)}${j.phase.kind === "done" ? `. Nexus ${outcomeText(j.phase.outcome)}` : ""}`).join("\n")}`}
-Nexus retries a thread's pylon on its own at most ${maxRetries} times, and ${f.retriesLeft} of those are left.
+This thread's earlier failures: ${f.earlier.length === 0 ? "none." : `\n${f.earlier.map((j) => `- judged at ${iso(j.startedAt)}: ${j.phase.kind === "judging" ? "still judging" : verdictText(j.phase.verdict)}${j.phase.kind === "done" ? `; then Nexus ${outcomeText(j.phase.outcome)}` : ""}`).join("\n")}`}
+Nexus retries a thread's pylon on its own at most ${maxRetries} times, and can retry this one ${f.retriesLeft} more ${f.retriesLeft === 1 ? "time" : "times"}.
 
 What each answer makes Nexus do:
 - retry: it clears the failure, and the pylon boots again on ${pylon.node}, from its disk if it has one. ${f.retry === null ? "This can run now." : `This cannot run now: ${f.retry}. Nexus would ask the person instead.`}
@@ -262,7 +261,7 @@ export function judgmentPass(options: {
     const node = registry.node(pylon.node);
     const agent = registry.agent(t).kind;
     return {
-      failure, token, thread: t, agent: agent === "harness" ? "a Nexus agent" : agent === "claude" ? "a Claude worker" : "none", pylon,
+      token, thread: t, agent: agent === "harness" ? "a Nexus agent" : agent === "claude" ? "a Claude worker" : "none", pylon,
       listed: node?.observation == null ? null : observed(pylon), online: node?.state === "online", health: await health(pylon.node),
       others: weighNodes(registry, pylon.boot, pylon.node).weighed, earlier: registry.judgments(t.id).filter((j) => j.failure < failure),
       retriesLeft: maxRetries - retriesSpent(t.id), retry: retryRefusal(observed(pylon)), move: move(pylon),
@@ -286,7 +285,9 @@ export function judgmentPass(options: {
     const pylon = registry.pylon(t.pylonId)!;
     const base = { failure, thread: t.id, node: pylon.node, failed: pylon.failed!, startedAt: now(), conversation: null, reply: null };
     if (retriesSpent(t.id) >= maxRetries) {
-      save(null, { ...base, request: null, phase: { kind: "acting", verdict: rule(`Nexus already retried this thread's pylon ${maxRetries} times on its own, so this failure is the person's`) } });
+      const verdict = rule(`Nexus already retried this thread's pylon ${maxRetries} times on its own, so this failure is the person's`);
+      const record: Judgment = { ...base, request: null, phase: { kind: "acting", verdict } };
+      if (save(null, record)) await acting(record, verdict);
       return;
     }
     const token = mint(judgmentId(failure));

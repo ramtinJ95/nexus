@@ -11,7 +11,7 @@ import { newPylonRecord } from "../tick.ts";
 import type { LiveHash, NodeHealth, NodeName, PylonId, PylonObservation, TailnetNodeId } from "../protocol.ts";
 import type { ProjectId } from "../project.ts";
 import { checkCaller, verifyCaller } from "./gate.ts";
-import { judgmentPass, type Judgment, type JudgmentPass } from "./judgment.ts";
+import { briefOf, judgmentPass, type Judgment, type JudgmentPass } from "./judgment.ts";
 import { openRegistry, type Registry, type Thread, type ThreadId } from "./registry.ts";
 import { reviewerCaller } from "./review.ts";
 
@@ -341,4 +341,31 @@ test("failures from before judgments, projects without the pipeline and threads 
   const now = builder(w.registry, "th-now");
   fail(w.registry, now, brokenWith("retry"));
   await w.until(() => phaseOf(w, now) === "done");
+});
+
+test("the brief states each fact it is given, and why one could not be read", () => {
+  const pylonId = "pylon-th-1" as PylonId;
+  const brief = briefOf({
+    token: "judgment:9:ab", thread: { id: "th-1" as ThreadId, title: "Build it", project: "nexus" as ProjectId }, agent: "a Claude worker",
+    pylon: { pylonId, node: nodeA, failed: "pylon is broken: setup failed\nnpm ERR! 404", pauses: 3, attempts: { count: 1, last: { at: Date.UTC(2026, 9, 28, 9), code: "backend", message: "setup exited 1" } } },
+    listed: { pylonId, phase: "broken", detail: "setup failed", cause: "saved-setup", logTail: "" }, online: false, health: { unread: "its probe did not answer within 5 s" },
+    others: [{ node: nodeB, refused: "is offline" }],
+    earlier: [{ startedAt: Date.UTC(2026, 9, 27, 9), phase: { kind: "done", verdict: { answer: "retry", why: "A flaky boot.", by: "judgment" }, outcome: { kind: "retried", node: nodeA, on: "verdict" } } }],
+    retriesLeft: 1, retry: "Its disk holds the failed setup", move: { refused: "its disk is on node-a, and Nexus has no move job" },
+  });
+  for (const fact of [
+    "The thread: th-1, \"Build it\", in project nexus. Its agent: a Claude worker.",
+    "<failure>\npylon is broken: setup failed\nnpm ERR! 404\n</failure>",
+    "Failed jobs in a row: 1, the last at 2026-10-28T09:00:00.000Z with backend: setup exited 1.",
+    "node-a's latest observation lists the pylon broken, cause saved-setup: setup failed",
+    "Its disk holds the checkpoint of its pause 3, on node-a.",
+    "Node node-a is offline. Its health could not be read: its probe did not answer within 5 s.",
+    "- node-b cannot take it: it is offline",
+    "- judged at 2026-10-27T09:00:00.000Z: retry, by the judgment: A flaky boot.; then Nexus retried the pylon on node-a",
+    "at most 2 times, and can retry this one 1 more time.",
+    "This cannot run now: Its disk holds the failed setup. Nexus would ask the person instead.",
+    "retry-elsewhere: it would move the pylon to another node, but this cannot run now: its disk is on node-a, and Nexus has no move job.",
+    "If a fact you need is missing, answer person and name the fact.",
+  ]) assert.ok(brief.includes(fact), fact);
+  assert.ok(brief.endsWith('```nexus-judgment\n{"token": "judgment:9:ab", "answer": "retry" or "retry-elsewhere" or "person", "why": "one or two sentences"}\n```'));
 });
