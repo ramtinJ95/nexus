@@ -313,12 +313,17 @@ ${missing ?? `Your last reply had no ${block} block with the token "${token}", s
 /** An agent's replies, oldest first: a Claude worker's transcript as last read, or its harness conversation's answers. */
 export function agentReplies(registry: Registry, harness: Pick<HarnessHost, "watch">): (t: Thread) => Promise<string[]> {
   return async (t) => {
-    if (registry.claudeWorker(t.id) !== undefined) return registry.claudeEntries(t.id).flatMap((e) => e.kind === "reply" ? [e.text] : []);
-    const watch = await harness.watch(t.id);
-    try {
-      return watch.value.entries.flatMap((entry) => entry.model ?? []).flatMap((m) => m.role === "assistant" ? [m.content.flatMap((c) => c.type === "text" ? [c.text] : []).join("")] : []);
-    } finally {
-      await watch.stop();
+    switch (registry.agent(t).kind) {
+      case "claude": return registry.claudeEntries(t.id).flatMap((e) => e.kind === "reply" ? [e.text] : []);
+      case "none": throw new Error(`thread ${t.id} has no agent, so it has no replies`);
+      case "harness": {
+        const watch = await harness.watch(t.id);
+        try {
+          return watch.value.entries.flatMap((entry) => entry.model ?? []).flatMap((m) => m.role === "assistant" ? [m.content.flatMap((c) => c.type === "text" ? [c.text] : []).join("")] : []);
+        } finally {
+          await watch.stop();
+        }
+      }
     }
   };
 }
@@ -606,9 +611,9 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
   async function begin(builder: Thread, { repo, number }: Pick<PullRequest, "repo" | "number">, request: { rounds?: number | undefined; land: Review["land"]; auto: boolean }): Promise<Review> {
     const snapshot = await github.poll(repo, number);
     if (snapshot.pr.state !== "open") throw new HttpError(409, `pull request #${number} is ${snapshot.pr.state}`);
-    const worker = registry.claudeWorker(builder.id);
-    const builderModel = worker === undefined ? deps.harnessModel : worker.model ?? defaultClaudeModel;
-    const kind = reviewerFor({ claude: worker !== undefined, model: builderModel }, registry.project(builder.project)!.secrets, deps.harnessModel);
+    const agent = registry.agent(builder);
+    const builderModel = agent.kind === "claude" ? agent.worker.model ?? defaultClaudeModel : deps.harnessModel;
+    const kind = reviewerFor({ claude: agent.kind === "claude", model: builderModel }, registry.project(builder.project)!.secrets, deps.harnessModel);
     const models = { builder: builderModel, reviewer: kind.model };
     const id = `rv-${randomBytes(4).toString("hex")}`;
     const draft: Review = {

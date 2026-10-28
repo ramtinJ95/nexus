@@ -182,7 +182,7 @@ async function setup(t: TestContext, setupOptions: { queue?: boolean } = {}) {
     return JSON.parse(res.stdout);
   }
   return {
-    registry, fake, proxy, home, api, env, nexus, json, commands,
+    registry, fake, proxy, home, api, env, nexus, json, commands, startThread,
     /** How many requests the API has admitted. */
     requests: () => requests,
     callAs(id: TailnetNodeId) { caller = id; },
@@ -1895,4 +1895,27 @@ test("usage prints the tokens of the last 7 days in all and by each breakdown, -
   assert.match(other.stdout, /^Usage of project other since 2020-01-01 00:00 UTC\. Counting started .*\nBackfill: not run\. .*\nNo model calls were counted in this period\.\n$/);
   assert.equal((await s.nexus(["usage", "--by", "week"])).code, 64, "the API refuses an unknown breakdown");
   assert.equal((await s.nexus(["usage", "--since", "last week"])).code, 64, "and an unknown period");
+});
+
+test("a bare thread has no conversation to print, send to or watch", async (t) => {
+  const s = await setup(t);
+  const bare = await s.startThread({ project: "acme", title: "Check", bare: true }, "nLAPTOP");
+  const refused = { code: 5, stdout: "", stderr: `nexus: thread ${bare.id} has no conversation\n` };
+  const run = async (args: string[]) => {
+    const { code, stdout, stderr } = await s.nexus(args);
+    return { code, stdout, stderr };
+  };
+  assert.deepEqual(await run(["conversation", bare.id]), refused);
+  assert.deepEqual(await run(["send", bare.id, "hi"]), refused);
+  assert.deepEqual(await run(["abort", bare.id]), refused);
+  const watch = watchLines(t, s, [bare.id]);
+  const printed = [await watch.next()];
+  const exited = once(watch.child, "exit");
+  await s.json(["delete", bare.id]);
+  for (let line = await watch.next(); ; line = await watch.next()) {
+    printed.push(line);
+    if (line.type === "state" && line.status === "deleted") break;
+  }
+  assert.deepEqual((await exited)[0], 0);
+  assert.deepEqual(printed.map((l) => `${l.type} ${l.status ?? ""}`), ["reset ", "state active", "live ", "state deleted"], "a bare thread's watch prints its state and an empty conversation, and ends once it is deleted");
 });

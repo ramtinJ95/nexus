@@ -105,7 +105,7 @@ async function setup(t: TestContext, options: Partial<ApiOptions> = {}) {
     registry.ingested({ node, observedAt: new Date().toISOString(), probeBootId: "b", events: [], capacity, artifacts: [], jobs: [], pylons, grants: { secrets: [], gitSsh: false }, previewRoutes: [], heldSecrets: [] }, []);
   }
   return {
-    registry, fake, call, start, observe, observeWith, callAs(id: TailnetNodeId | null) { caller = id; },
+    registry, fake, call, start, startThread, observe, observeWith, callAs(id: TailnetNodeId | null) { caller = id; },
     events: (path: string) => readEvents(api.port, path),
   };
 }
@@ -1649,4 +1649,44 @@ test("a thread page's pylon pane says what tokens the thread's agents spent, ref
   ]);
   s.registry.recordUsage(other.id, [usageCall("claude:m3", "claude", "claude-opus-5-5", Date.now(), [9_000_000, 0, 0, 0])]);
   assert.deepEqual(await tokens(), [1_221_500, "1.2M (in 301k · out 20.5k · cache write 100k · cache read 800k)"], "every call of the thread, however old, and no other thread's");
+});
+
+test("a harness, a Claude worker and a bare thread each show the conversation, stream and composer of their kind", async (t) => {
+  t.mock.timers.enable({ apis: ["Date"], now: Date.now() });
+  const s = await seeded(t);
+  const harness = await s.start("acme", "Harness");
+  const claude = await claudeThread(s, [{ kind: "reply", at: 1, text: "Done." }]);
+  const bare = await s.startThread({ project: "acme", title: "Check", bare: true }, laptop);
+  s.observe(harness, claude, bare);
+  /** What the thread page shows of its agent: the conversation region's stream, its text, the run bar and the composer. */
+  const agentParts = async (thread: Thread) => {
+    const html = (await s.call("GET", `/threads/${thread.id}`)).text;
+    const convo = html.split('id="convo"')[1]!;
+    return {
+      stream: /^[^>]*data-stream="([^"]*)"/.exec(convo)?.[1]?.replace(thread.id, "<id>") ?? null,
+      convo: textOf(convo.split('<div class="dock">')[0]!.replace(/^[^>]*>/, "")).replace(thread.id, "<id>"),
+      run: textOf(html.split('<div id="run" data-live>')[1]!.split('<div id="composer"')[0]!),
+      composer: /<div id="composer" data-live>\s*(<[^/>][^>]*>)?/.exec(html)?.[1] ?? null,
+    };
+  };
+  assert.deepEqual(await agentParts(harness), {
+    stream: "/threads/<id>/stream", convo: "<id> · started just now No messages yet.", run: "",
+    composer: `<form id="prompt" class="composer" data-thread="${harness.id}">`,
+  });
+  assert.deepEqual(await agentParts(claude), {
+    stream: "/threads/<id>/stream", convo: "<id> · started just now · Claude Code · claude-opus-5-5 Done.", run: "",
+    composer: `<form id="prompt" class="composer" data-thread="${claude.id}" data-claude>`,
+  });
+  assert.deepEqual(await agentParts(bare), { stream: null, convo: "<id> · started just now This thread has no agent conversation.", run: "", composer: null });
+
+  s.fake.transcript(harness.id).docs["pi.live"] = { run: { taskId: 1, inputs: [] } };
+  s.registry.reportSession(node, { sequence: 1, pylon: claude.pylonId, time: Date.now(), event: { kind: "session.turn-started", session: "s1", at: Date.now() } });
+  assert.equal((await agentParts(harness)).run, "The agent is working. 0 tools this turn · new messages queue Abort");
+  assert.equal((await agentParts(claude)).run, "Claude is working. 0s · 0 tools this turn · new messages go in at its next step");
+  for (const thread of [harness, claude, bare]) assert.equal((await s.call("DELETE", `/v1/threads/${thread.id}`)).status, 200);
+  for (const thread of [harness, claude, bare]) {
+    // A Claude worker's model comes from its worker, which outlives the delete.
+    const model = thread === claude ? " · claude-opus-5-5" : "";
+    assert.deepEqual(await agentParts(thread), { stream: null, convo: `<id> · started just now${model} The thread is deleted, so its conversation is gone.`, run: "", composer: null }, thread.title);
+  }
 });

@@ -166,7 +166,7 @@ async function setup(t: import("node:test").TestContext, options: { gitIdentity?
     });
   }
   return {
-    registry, images, queue, call, raw, woken, calls, commands, streams, reads, fake, port: api.port, get httpsPort() { return api.httpsPort; }, close: () => api.close(),
+    registry, images, queue, call, raw, woken, calls, commands, streams, reads, fake, startThread, port: api.port, get httpsPort() { return api.httpsPort; }, close: () => api.close(),
     callAs(id: TailnetNodeId | null) { caller = id; },
     /** Holds every request at whois until the returned function is called. */
     /** Holds each whois from now on until `release`. `asked` settles once one is held. */
@@ -1963,6 +1963,17 @@ test("drain reads committed live and queued work rather than a lagging activity 
   assert.equal((await s.call("POST", "/v1/deployer/drain", { commit: deployCommit }, reporterHeaders)).body.idle, true);
 });
 
+test("drain reads only harness conversations, so Claude worker and bare threads never reach the harness", async (t) => {
+  const s = await withThread(t, { deployment });
+  await s.call("POST", "/v1/threads", { project: "acme", title: "Claude worker", claude: "fix it" });
+  await s.startThread({ project: "acme", title: "Check", bare: true }, laptop);
+  await s.call("PUT", "/v1/release", { commit: deployCommit });
+  s.callAs("nFIREBAT" as TailnetNodeId);
+  s.calls.length = 0;
+  assert.equal((await s.call("POST", "/v1/deployer/drain", { commit: deployCommit }, reporterHeaders)).body.idle, true);
+  assert.deepEqual(s.calls, [["watch", s.thread.id], ["unwatch", s.thread.id]]);
+});
+
 test("expired drain leases no longer block callers", async (t) => {
   const s = await withThread(t, { deployment });
   s.registry.setDrain({ commit: deployCommit, expiresAt: Date.now() - 1 });
@@ -3327,5 +3338,68 @@ test("without deployment options the control node is unknown, so no one answers 
   for (const caller of [laptop, "nFIREBAT" as TailnetNodeId]) {
     s.callAs(caller);
     for (const id of ["qn-person", "qn-deployer"]) assert.equal((await s.call("POST", `/v1/questions/${id}/answer`, { option: "Yes" })).status, 403, `${caller} answered ${id}`);
+  }
+});
+
+test("a harness, a Claude worker and a bare thread each answer every agent route as their kind does", async (t) => {
+  const s = await withThread(t);
+  const claude = (await s.call("POST", "/v1/threads", { project: "acme", title: "Claude worker", claude: "fix it" })).body as Thread;
+  const bare = await s.startThread({ project: "acme", title: "Check", bare: true }, laptop);
+  const threads = { harness: s.thread, claude, bare };
+  /** Each route's status, with its error or what its body is. A stream that opens is closed at once. */
+  const answer = async (method: string, path: string, body?: unknown) => {
+    if (path.endsWith("events") || path.endsWith("/stream")) {
+      const stream = s.events(path);
+      const { statusCode } = await stream.response;
+      stream.close();
+      if (statusCode === 200) return "200 stream";
+    }
+    const res = await s.call(method, path, body);
+    return `${res.status} ${res.body === null ? "" : res.body.error ?? (res.body.kind === "claude" ? "claude view" : Array.isArray(res.body.entries) ? "harness view" : JSON.stringify(res.body))}`;
+  };
+  const routes = async (t: Thread, requestId: string) => ({
+    detail: await (async () => {
+      const d = (await s.call("GET", `/v1/threads/${t.id}`)).body as ThreadDetail;
+      return { claudeWorker: d.claudeWorker ?? null, agent: d.agent };
+    })(),
+    conversation: await answer("GET", `/v1/threads/${t.id}/conversation`),
+    events: await answer("GET", `/v1/threads/${t.id}/events`),
+    claudeEvents: await answer("GET", `/v1/threads/${t.id}/claude/events`),
+    page: await answer("GET", `/threads/${t.id}/stream`),
+    message: await answer("POST", `/v1/threads/${t.id}/messages`, { text: "hi", requestId }),
+    abort: await answer("POST", `/v1/threads/${t.id}/abort`),
+    retry: await answer("POST", `/v1/threads/${t.id}/retry`),
+  });
+  const noConversation = (t: Thread) => `409 thread ${t.id} has no conversation`;
+  const noWorker = (t: Thread) => `409 thread ${t.id} has no Claude worker`;
+  const deleted = (t: Thread) => `409 thread ${t.id} is deleted`;
+  const archived = (t: Thread) => `409 thread ${t.id} is archived`;
+  assert.deepEqual(await routes(threads.harness, "msg:h"), {
+    detail: { claudeWorker: null, agent: { parkedTasks: 0 } }, conversation: "200 harness view", events: "200 stream", claudeEvents: noWorker(threads.harness),
+    page: "200 stream", message: '202 {"submission":7}', abort: "204 ", retry: "204 ",
+  });
+  assert.deepEqual(await routes(threads.claude, "msg:c"), {
+    detail: { claudeWorker: { model: "claude-opus-5-5", state: "pending" }, agent: null }, conversation: "200 claude view", events: noConversation(threads.claude), claudeEvents: "200 stream",
+    page: "200 stream", message: `409 the Claude worker of ${threads.claude.id} has not started a session yet, so it takes no messages. Send it once it has started`,
+    abort: noConversation(threads.claude), retry: noConversation(threads.claude),
+  });
+  assert.deepEqual(await routes(threads.bare, "msg:b"), {
+    detail: { claudeWorker: null, agent: null }, conversation: noConversation(threads.bare), events: noConversation(threads.bare), claudeEvents: noWorker(threads.bare),
+    page: noConversation(threads.bare), message: noConversation(threads.bare), abort: noConversation(threads.bare), retry: noConversation(threads.bare),
+  });
+
+  for (const t of Object.values(threads)) assert.equal((await s.call("POST", `/v1/threads/${t.id}/archive`)).status, 200);
+  assert.deepEqual(await Promise.all(Object.values(threads).map((t) => answer("POST", `/v1/threads/${t.id}/messages`, { text: "hi", requestId: "msg:archived" }))), Object.values(threads).map(archived));
+  assert.deepEqual(await Promise.all(Object.values(threads).map((t) => answer("POST", `/v1/threads/${t.id}/retry`))), Object.values(threads).map(archived));
+  for (const t of Object.values(threads)) assert.equal((await s.call("POST", `/v1/threads/${t.id}/unarchive`)).status, 200);
+
+  s.calls.length = 0;
+  for (const t of Object.values(threads)) assert.equal((await s.call("DELETE", `/v1/threads/${t.id}`)).status, 200);
+  assert.deepEqual(s.calls, [["delete", { threadId: threads.harness.id, pylonId: threads.harness.pylonId }]], "only the harness thread's conversation is deleted");
+  for (const t of Object.values(threads)) {
+    assert.deepEqual(await routes(t, "msg:deleted"), {
+      detail: { claudeWorker: t === claude ? { model: "claude-opus-5-5", state: "pending" } : null, agent: null }, conversation: deleted(t), events: deleted(t), claudeEvents: deleted(t),
+      page: deleted(t), message: deleted(t), abort: deleted(t), retry: deleted(t),
+    }, t.title);
   }
 });

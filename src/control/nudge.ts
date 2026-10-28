@@ -55,19 +55,24 @@ export function builderNudger(options: { registry: Registry; github: Pick<GitHub
 
   /** The person talking to a thread after its first reply makes it theirs, so it is left alone. */
   async function personWrote(t: Thread): Promise<boolean> {
-    if (registry.claudeWorker(t.id) !== undefined) {
-      const entries = registry.claudeEntries(t.id);
-      const first = entries.findIndex((e) => e.kind === "reply");
-      // Nexus types its messages into the session as the person would, so only their prefix tells them apart.
-      return first !== -1 && entries.slice(first).some((e) => e.kind === "prompt" && e.from === "person" && !e.text.startsWith("[Nexus "));
-    }
-    const watch = await harness.watch(t.id);
-    try {
-      const messages = watch.value.entries.flatMap((entry) => (entry.model ?? []).map((message) => ({ entry, message })));
-      const first = messages.findIndex(({ message }) => message.role === "assistant");
-      return first !== -1 && messages.slice(first).some(({ entry, message }) => message.role === "user" && !entry.kind.startsWith("nexus."));
-    } finally {
-      await watch.stop();
+    switch (registry.agent(t).kind) {
+      case "claude": {
+        const entries = registry.claudeEntries(t.id);
+        const first = entries.findIndex((e) => e.kind === "reply");
+        // Nexus types its messages into the session as the person would, so only their prefix tells them apart.
+        return first !== -1 && entries.slice(first).some((e) => e.kind === "prompt" && e.from === "person" && !e.text.startsWith("[Nexus "));
+      }
+      case "none": throw new Error(`thread ${t.id} has no agent, so no one wrote to it`);
+      case "harness": {
+        const watch = await harness.watch(t.id);
+        try {
+          const messages = watch.value.entries.flatMap((entry) => (entry.model ?? []).map((message) => ({ entry, message })));
+          const first = messages.findIndex(({ message }) => message.role === "assistant");
+          return first !== -1 && messages.slice(first).some(({ entry, message }) => message.role === "user" && !entry.kind.startsWith("nexus."));
+        } finally {
+          await watch.stop();
+        }
+      }
     }
   }
 

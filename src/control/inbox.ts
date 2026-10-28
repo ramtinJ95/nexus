@@ -87,11 +87,13 @@ export function typeable(text: string): string {
 export function agentInbox(options: { registry: Registry; harness: Pick<HarnessHost, "send">; probes: ReadonlyMap<NodeName, Pick<ProbeClient, "command">>; wake(t: Thread): void }): Inbox {
   const { registry, harness, probes, wake } = options;
   return async (t, message) => {
-    const worker = registry.claudeWorker(t.id);
-    if (worker === undefined) await harness.send(t.id, message.text, message.id, "followUp", message.sender);
+    const agent = registry.agent(t);
+    if (agent.kind === "none") throw new Error(`thread ${t.id} has no agent to take a message`);
+    if (agent.kind === "harness") await harness.send(t.id, message.text, message.id, "followUp", message.sender);
     registry.recordActivity(t.id, { agent: Date.now() });
     wake(t);
-    if (worker === undefined) return "delivered";
+    if (agent.kind === "harness") return "delivered";
+    const { worker } = agent;
     const pylon = registry.pylon(t.pylonId)!;
     const node = registry.node(pylon.node);
     const running = node?.state === "online" && node.observation?.pylons.some((p) => p.pylonId === t.pylonId && p.phase === "running") === true;

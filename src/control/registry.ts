@@ -70,6 +70,15 @@ export interface Thread extends ActivityFacts {
   setup?: ThreadSetup;
 }
 
+/** A Claude worker thread's worker. `session` is the Claude Code session its launch opened, null until the launch names one. */
+export interface ClaudeWorker { prompt: string; state: string; model: string | null; session: string | null; message?: string }
+
+/**
+ * A thread's agent: a conversation in the control plane's harness, a Claude Code worker in its pylon, or none, as a
+ * check thread has. A thread's start gives it a conversation ID or a Claude worker, never both.
+ */
+export type ThreadAgent = { kind: "harness"; conversationId: string } | { kind: "claude"; worker: ClaudeWorker } | { kind: "none" };
+
 /**
  * An image's manifest and `release`, the full commit of the control plane release whose recipe built it. Null when that is
  * unknown, as for a build from a dev checkout or an image recorded through POST /v1/images.
@@ -651,6 +660,14 @@ export function openRegistry(path: string, clock = Date.now) {
     return { events, watermark: String(Math.max(cursor, newest ?? 0)) };
   }
 
+  function claudeWorker(thread: ThreadId): ClaudeWorker | undefined {
+    const row = sql("SELECT prompt, state, message, model, session FROM claude_workers WHERE thread = ?").get(thread);
+    return row === undefined ? undefined : {
+      model: row.model as string | null, prompt: row.prompt as string, state: row.state as string, session: row.session as string | null,
+      ...(row.message == null ? {} : { message: row.message as string }),
+    };
+  }
+
   function claudeTranscript(thread: ThreadId): ClaudeTranscript | undefined {
     const row = sql("SELECT * FROM claude_transcripts WHERE thread = ?").get(thread);
     return row === undefined ? undefined : {
@@ -825,13 +842,10 @@ export function openRegistry(path: string, clock = Date.now) {
         updateAttention(id);
       });
     },
-    /** `session` is the Claude Code session its launch opened, null until the launch names one. */
-    claudeWorker(thread: ThreadId): { prompt: string; state: string; model: string | null; session: string | null; message?: string } | undefined {
-      const row = sql("SELECT prompt, state, message, model, session FROM claude_workers WHERE thread = ?").get(thread);
-      return row === undefined ? undefined : {
-        model: row.model as string | null, prompt: row.prompt as string, state: row.state as string, session: row.session as string | null,
-        ...(row.message == null ? {} : { message: row.message as string }),
-      };
+    claudeWorker,
+    agent(t: Pick<Thread, "id" | "conversationId">): ThreadAgent {
+      const worker = claudeWorker(t.id);
+      return worker !== undefined ? { kind: "claude", worker } : t.conversationId !== null ? { kind: "harness", conversationId: t.conversationId } : { kind: "none" };
     },
     /** The snapshot ID of the latest session.turn-started of any session on a Claude worker thread. */
     latestClaudeTurn(thread: ThreadId): string | null {
