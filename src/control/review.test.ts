@@ -1747,3 +1747,36 @@ test("a review that merged and is held over its deploy stays as it is whatever t
   await loop.poll();
   assert.deepEqual(f.review(), held);
 });
+
+test("a held review settles on the head GitHub reports when the PR watch read an older push, and still gets its label", async (t) => {
+  const f = fixture(t);
+  const head3 = "3".repeat(40);
+  f.files = [{ path: "src/control/registry.ts", previous: null, patch: "" }];
+  const loop = f.loop();
+  await loop.start(f.builder, { land: "nLAPTOP", rounds: 1 });
+  await loop.poll();
+  f.reply(f.review().reviewer, verdict(f.review(), {}));
+  await loop.poll();
+  pushed(f, head2);
+  f.snapshot = { ...f.snapshot, detail: { ...f.snapshot.detail, head: head3 } };
+  await loop.poll();
+  const settled = f.review();
+  assert.deepEqual((settled.phase as { reasons: string[] }).reasons, [`The pull request's head moved to ${head3} after round 1, the last this review allows, so ${head3} is unreviewed.`]);
+  assert.deepEqual((settled.phase as { label?: unknown }).label, { state: "added" }, "the label is added while the watch still reads the older push");
+  await loop.poll();
+  assert.deepEqual(f.review(), settled);
+});
+
+test("a review that stopped at approval under a stopped PR watch waits for its landing, which reviews the moved head", async (t) => {
+  const f = fixture(t);
+  const loop = await approved(f, null);
+  pushed(f, head2);
+  f.registry.savePrWatch(f.builder, { ...f.registry.prWatch(f.builder)!, commentWakes: 10 });
+  await loop.poll();
+  assert.deepEqual(f.review().phase, { kind: "approved" }, "a stopped watch's head is not current, so nothing reads it");
+  loop.land(f.builder, "nLAPTOP", head1);
+  await loop.poll();
+  assert.equal(f.review().phase.kind, "reviewing");
+  assert.equal(f.review().rounds[1]!.head, head2);
+  assert.deepEqual(f.merges, []);
+});

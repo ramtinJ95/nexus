@@ -30,7 +30,7 @@ import { agentView, type AgentView } from "./thread-agent.ts";
 import type { TailnetNodeId } from "../protocol.ts";
 import { usageLimitText, type ClaudeConversation, type ClaudeEntry, type PromptSource } from "../claude-transcript.ts";
 import { queuedOf } from "./claude-conversation.ts";
-import { blocks as blocking, findingsOf, landable, liveNote, phaseNote, roundNote, roundsSpent, type Review } from "./review.ts";
+import { blocks as blocking, findingsOf, landable, liveNote, phaseNote, pushedHead, roundNote, roundsSpent, type Review } from "./review.ts";
 import { heldBy, holdRule, reservedNames } from "./policy.ts";
 import type { AnswerRefusal, Question } from "./questions.ts";
 import { gib, nodePylons, overcommitted } from "./placement.ts";
@@ -837,8 +837,8 @@ ${phase.kind === "checking" ? html`<p class="land-note">.nexus/check runs at ${s
   const pr = d.pullRequests?.find((p) => p.repo === r.pr.repo && p.number === r.pr.number);
   if (!landable(r) || d.thread.status !== "active" || (pr !== undefined && pr.state !== "open")) return null;
   const round = r.rounds.at(-1)!;
-  // The PR watch can read a push before the loop's next pass starts a round on it.
-  const moved = pr?.head !== undefined && pr.head !== round.head ? pr.head : null;
+  // The PR watch can read a push before the loop's next pass starts a round on it. A stopped watch reads nothing new.
+  const moved = d.prWatch?.stopped ? null : pushedHead(r, pr);
   const held = r.phase.kind === "needs-person";
   const reasons = heldBy(r);
   const rules = reasons.map((reason) => ({ reason, ...holdRule(reason) }));

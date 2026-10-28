@@ -393,6 +393,11 @@ test("a held review whose PR the watch read at a new head offers no Land for the
   assert.ok(!card.includes("<button"), "no Land for a head that is no longer the PR's");
   assert.match(textOf(card), new RegExp(`The pull request's head is now ${moved.slice(0, 12)} , so ${head.slice(0, 12)} no longer lands\\. Nexus reviews the new head in a new round, or holds it for you when no round is left\\.$`));
 
+  for (const [watched, commentWakes] of [[moved, 10], ["1".repeat(40), 0]] as const) {
+    s.registry.savePrWatch(fix.id, { links: [{ pr: { ...pr, head: watched }, seen: [], failed: false }], commentWakes, pending: null, error: null });
+    assert.match(landingOf((await s.call("GET", `/threads/${fix.id}`)).text), /data-action="land"/, "a stopped watch's head, or one an earlier round reviewed, takes no Land away");
+  }
+
   s.registry.saveReview({ ...held, rounds: [...held.rounds, { head: moved, verdict: null, check: null, answers: null }], phase: { kind: "reviewing" } });
   const page = textOf((await s.call("GET", `/threads/${fix.id}`)).text);
   assert.match(page, new RegExp(`Nexus review rv-1: reviewing, round 3 of 5, .* a new round reviews ${moved.slice(0, 12)}, since the pull request's head moved from ${head.slice(0, 12)} after its approval`));

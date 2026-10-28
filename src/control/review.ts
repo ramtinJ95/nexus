@@ -252,6 +252,12 @@ export const roundsSpent = (r: Pick<Review, "rounds">) => r.rounds.filter((round
   const previous = r.rounds[i - 1];
   return !(previous?.head === round.head && previous.verdict?.verdict === "approve" && round.verdict?.verdict === "approve" && !round.verdict.findings.some(blocks));
 }).length;
+/**
+ * The head `pr` was read at, when it is open there and no round of the review reviewed that head nor its hold named it.
+ * A head an earlier round reviewed is one the PR watch read before the review moved on from it.
+ */
+export const pushedHead = (r: Review, pr: Pick<PullRequest, "state" | "head"> | undefined): string | null =>
+  pr?.state !== "open" || pr.head === undefined || r.rounds.some((round) => round.head === pr.head) || (r.phase.kind === "needs-person" && r.phase.unreviewed === pr.head) ? null : pr.head;
 /** Why the latest round started, when it reviews a head pushed after the previous round's approval rather than the builder's fixes. */
 export function roundNote(r: Review): string | null {
   const [previous, round] = r.rounds.slice(-2);
@@ -639,11 +645,9 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
    * A head pushed after the review approved its last round or held it for the person. A review that would land gets a
    * new round, as a landing does. One the loop gave up on stays the person's, and its reasons name the new head.
    */
-  async function pushedAfter(r: Review): Promise<Review> {
-    // The PR watch reads GitHub only every two minutes, so the loop acts on what GitHub says now.
-    const snapshot = await github.poll(r.pr.repo, r.pr.number);
-    const head = snapshot.detail.head;
-    if (snapshot.pr.state !== "open" || head === r.rounds.at(-1)!.head) return r;
+  function pushedAfter(r: Review, snapshot: PrSnapshot): Review | null {
+    const head = pushedHead(r, { ...snapshot.pr, head: snapshot.detail.head });
+    if (head === null) return null;
     const phase = r.phase;
     if (phase.kind !== "needs-person" || landable(r)) return newHead(r, head, snapshot.detail.base, `The pull request's head moved to ${head}`);
     const stale = (moved: string) => `The pull request's head moved to ${moved} after this review was held, so none of its rounds reviewed that commit. Run nexus review ${r.builder} to review it.`;
@@ -663,11 +667,12 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
       // A watch stopped by its comment cap reads GitHub no more, so the loop asks GitHub itself about a held review. One
       // that stopped at approval is left to the landing, which reads GitHub before it merges.
       const capped = (watch?.commentWakes ?? 0) >= 10;
-      const pr = !capped ? watch?.links.find((l) => l.pr.repo === r.pr.repo && l.pr.number === r.pr.number)?.pr
-        : held ? await github.poll(r.pr.repo, r.pr.number).then((s) => ({ ...s.pr, head: s.detail.head })) : undefined;
+      const read = capped && held ? await github.poll(r.pr.repo, r.pr.number) : null;
+      const pr = read !== null ? { ...read.pr, head: read.detail.head } : capped ? undefined : watch?.links.find((l) => l.pr.repo === r.pr.repo && l.pr.number === r.pr.number)?.pr;
       if (held && pr?.state === "closed") return end(r, { kind: "closed" });
-      const unreviewed = r.phase.kind === "needs-person" ? r.phase.unreviewed : undefined;
-      if (pr?.state === "open" && pr.head !== undefined && pr.head !== r.rounds.at(-1)!.head && pr.head !== unreviewed) return await pushedAfter(r);
+      // The PR watch reads GitHub only every two minutes, so the loop acts on what GitHub says now.
+      const moved = pushedHead(r, pr) === null ? null : pushedAfter(r, read ?? await github.poll(r.pr.repo, r.pr.number));
+      if (moved !== null) return moved;
     }
     // A failed call throws, so the pass retries it. GitHub adds a label the PR has already as a no-op.
     if (r.phase.kind === "needs-person" && r.phase.label?.state === "adding") {
