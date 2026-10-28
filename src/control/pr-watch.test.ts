@@ -547,6 +547,7 @@ test("a predecessor's PR that opened and merged between two reads, or behind a m
   f.snapshot = { ...f.snapshot, pr: { ...f.snapshot.pr, state: "merged" } };
   await f.watcher.poll();
   assert.equal(f.registry.prWatch(f.id)?.links[0]?.pr.state, "merged", "a PR first found after its merge is linked merged");
+  assert.deepEqual(f.registry.events("0", { kinds: ["pull-request.linked"] }).map((e) => e.payload.state), ["merged"], "and its event says so");
   assert.ok(f.calls.includes("find:acme/repo:feature:all"));
 
   const held = f.add("th-held");
