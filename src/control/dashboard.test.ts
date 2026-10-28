@@ -381,6 +381,23 @@ test("a review is not offered for landing when its PR closed, or when the contro
   assert.equal(landingOf((await s.call("GET", `/threads/${fix.id}`)).text), "", "a closed PR has nothing to land");
 });
 
+test("a held review whose PR the watch read at a new head offers no Land for the old one, and its new round says why it started", async (t) => {
+  const s = await seeded(t, landingOptions());
+  const fix = await s.start("acme", "Fix checkout");
+  const held = approvedReview(fix.id, { kind: "needs-person", reasons: ["Always needs the person: changes to login or auth, as it changes src/control/api.ts."] }, { land: { requestedBy: laptop } });
+  s.registry.saveReview(held);
+  const moved = "b3".repeat(20);
+  const pr = { repo: "acme/nexus", number: 7, title: "Cache", url: "https://github.com/acme/nexus/pull/7", state: "open" as const, checks: "passing" as const, review: "none" as const, conflict: false, head: moved };
+  s.registry.savePrWatch(fix.id, { links: [{ pr, seen: [], failed: false }], commentWakes: 0, pending: null, error: null });
+  const card = landingOf((await s.call("GET", `/threads/${fix.id}`)).text);
+  assert.ok(!card.includes("<button"), "no Land for a head that is no longer the PR's");
+  assert.match(textOf(card), new RegExp(`The pull request's head is now ${moved.slice(0, 12)} , so ${head.slice(0, 12)} no longer lands\\. Nexus reviews the new head in a new round, or holds it for you when no round is left\\.$`));
+
+  s.registry.saveReview({ ...held, rounds: [...held.rounds, { head: moved, verdict: null, check: null, answers: null }], phase: { kind: "reviewing" } });
+  const page = textOf((await s.call("GET", `/threads/${fix.id}`)).text);
+  assert.match(page, new RegExp(`Nexus review rv-1: reviewing, round 3 of 5, .* a new round reviews ${moved.slice(0, 12)}, since the pull request's head moved from ${head.slice(0, 12)} after its approval`));
+});
+
 test("a hold the policy reserves for the person is marked waivable, and pressing Land waives it", async (t) => {
   const reserved = "Always needs the person: changes to login or auth, as it changes src/control/api.ts.";
   const s = await seeded(t, landingOptions());

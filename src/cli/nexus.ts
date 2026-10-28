@@ -27,7 +27,7 @@ import { reservedNames } from "../control/policy.ts";
 import { maxEntries, usageLimitText, type ClaudeConversation, type ClaudeEntry, type PromptSource } from "../claude-transcript.ts";
 import { claudeFrames, queuedOf, type ClaudeFrame } from "../control/claude-conversation.ts";
 import { agentView } from "../control/thread-agent.ts";
-import { liveNote, phaseNote, roundsSpent } from "../control/review.ts";
+import { liveNote, phaseNote, roundNote, roundsSpent } from "../control/review.ts";
 import { breakdownLook, breakdowns, tokenColumns, tokenCount, type BackfillPlanRow, type UsageBackfill, type UsageReport, type UsageTotals } from "../control/usage.ts";
 import type { Changes, Diff, Listing } from "../checkout-files.ts";
 import type { ThreadSetup } from "../images.ts";
@@ -347,9 +347,11 @@ function setupText(s: ThreadSetup): string {
 function reviewText(r: Review): string {
   const { live } = r.rounds.at(-1)!;
   const note = liveNote(r);
+  const round = roundNote(r);
   const phase = r.phase.kind === "landed" ? `landed as ${r.phase.commit}` : r.phase.kind === "deploying" ? `deploying ${r.phase.commit}` : r.phase.kind;
   return [
     `review ${r.id} of PR #${r.pr.number}${r.auto ? ", started on its own" : ""}: ${phase}, round ${roundsSpent(r)} of ${r.maxRounds}, reviewer ${r.reviewer} on ${r.models.reviewer}${r.land === null ? "" : ", landing when approved"}${phaseNote(r)}`,
+    ...round === null ? [] : [round],
     ...note === null ? [] : [note],
     ...live?.kind === "ran" && !live.passed ? live.output.split("\n").slice(-20).map((line) => `  ${line}`) : [],
     ...r.phase.kind === "needs-person" ? r.phase.reasons.map((reason) => `needs you: ${reason}`) : [],

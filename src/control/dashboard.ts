@@ -30,7 +30,7 @@ import { agentView, type AgentView } from "./thread-agent.ts";
 import type { TailnetNodeId } from "../protocol.ts";
 import { usageLimitText, type ClaudeConversation, type ClaudeEntry, type PromptSource } from "../claude-transcript.ts";
 import { queuedOf } from "./claude-conversation.ts";
-import { blocks as blocking, findingsOf, landable, liveNote, phaseNote, roundsSpent, type Review } from "./review.ts";
+import { blocks as blocking, findingsOf, landable, liveNote, phaseNote, roundNote, roundsSpent, type Review } from "./review.ts";
 import { heldBy, holdRule, reservedNames } from "./policy.ts";
 import type { AnswerRefusal, Question } from "./questions.ts";
 import { gib, nodePylons, overcommitted } from "./placement.ts";
@@ -837,6 +837,8 @@ ${phase.kind === "checking" ? html`<p class="land-note">.nexus/check runs at ${s
   const pr = d.pullRequests?.find((p) => p.repo === r.pr.repo && p.number === r.pr.number);
   if (!landable(r) || d.thread.status !== "active" || (pr !== undefined && pr.state !== "open")) return null;
   const round = r.rounds.at(-1)!;
+  // The PR watch can read a push before the loop's next pass starts a round on it.
+  const moved = pr?.head !== undefined && pr.head !== round.head ? pr.head : null;
   const held = r.phase.kind === "needs-person";
   const reasons = heldBy(r);
   const rules = reasons.map((reason) => ({ reason, ...holdRule(reason) }));
@@ -850,6 +852,7 @@ ${phase.kind === "checking" ? html`<p class="land-note">.nexus/check runs at ${s
     : `Land pull request #${r.pr.number}, "${r.pr.title}", at commit ${round.head.slice(0, 12)}, waiving ${waived.length === 1 ? "the hold" : `the ${waived.length} holds`} the merge policy reserves for you? Nexus checks everything else again, merges that commit${deploys}.`;
   return html`<section class="landing" aria-labelledby="landing-h">
 <div class="land-top"><h2 id="landing-h">${held ? "Held for you" : "Approved, not landed"}</h2>${prLink}</div>
+${roundNote(r) !== null && html`<p class="land-note">${roundNote(r)}</p>`}
 <p class="land-meta">Head ${short(round.head)} · approved by ${r.models.reviewer} (${r.reviewerKind}) in round ${roundsSpent(r)} of ${r.maxRounds} · .nexus/check passed · ${round.live === undefined ? "no live check ran" : round.live.kind === "absent" ? "no .nexus/verify, so no live check" : `live check ${round.live.passed ? "passed" : "failed"}`}</p>
 <details id="land-why" open><summary>Why it waits for you</summary>
 ${reasons.length === 0 ? html`<p class="land-note">Nothing holds it. The review stopped at approval because it was started without --land.</p>`
@@ -862,7 +865,8 @@ ${findings.length === 0 ? html`<p class="land-note">None.</p>` : html`<ul class=
 ${round.check !== null && html`<details id="land-check"><summary>.nexus/check ${round.check.passed ? "passed" : "failed"} at ${round.head.slice(0, 12)}</summary><pre>${round.check.output}</pre></details>`}
 ${round.live?.kind === "ran" && html`<details id="land-live"><summary>The live check ${round.live.passed ? "passed" : "failed"} at ${round.head.slice(0, 12)}</summary><pre>${round.live.output}</pre></details>`}
 </details>
-${stuck ? html`<p class="land-note">Landing checks the merge policy again, and what is marked "holds again" holds every landing of this commit. Only you can get past it, by merging the pull request on GitHub${c.deploys(r) && " and deploying it with nexus deploy"}.</p>`
+${moved !== null ? html`<p class="land-note">The pull request's head is now ${short(moved)}, so ${short(round.head)} no longer lands. Nexus reviews the new head in a new round, or holds it for you when no round is left.</p>`
+  : stuck ? html`<p class="land-note">Landing checks the merge policy again, and what is marked "holds again" holds every landing of this commit. Only you can get past it, by merging the pull request on GitHub${c.deploys(r) && " and deploying it with nexus deploy"}.</p>`
   : c.landRefusal === null ? html`<div class="land-act"><button type="button" class="btn btn-primary" id="land" data-action="land" data-thread="${d.thread.id}" data-head="${round.head}"${waived.length > 0 && html` data-holds="${JSON.stringify(waived)}"`} data-confirm="${confirm}">Land #${r.pr.number}</button>${waived.length > 0 && html`<p class="land-note">Pressing Land waives what is marked "you may waive", for commit ${short(round.head)} only. Landing checks everything else again.</p>`}</div>`
   : html`<div class="land-act"><button type="button" class="btn" id="land" disabled>Land #${r.pr.number}</button><p class="error">${landRefusals[c.landRefusal](c.caller)}</p></div>`}
 </section>`;
@@ -1084,7 +1088,7 @@ ${pylon.failed !== null && html`<p class="error">The planner gave up: ${pylon.fa
 <section aria-labelledby="outputs-h"><h2 id="outputs-h">Outputs ${count(outputs.length + (d.pullRequests?.length ?? 0))}</h2>
 ${!d.prWatch?.enabled ? html`<p class="empty">PR watch: off (no control-plane GitHub token configured).</p>` : html`<p>PR watch: ${d.prWatch.stopped ? "stopped (10 comment-only wakes)" : "on"}${d.prWatch.error && html` — ${d.prWatch.error}`}</p>`}
 ${(d.pullRequests ?? []).map((pr) => html`<p><a href="${pr.url}" target="_blank" rel="noreferrer">PR #${pr.number}: ${pr.title}</a> — ${pr.state}, checks ${pr.checks}, review ${pr.review}</p>`)}
-${d.review != null && html`<p>Nexus review ${d.review.id}${d.review.auto && ", started on its own"}: ${d.review.phase.kind}, round ${roundsSpent(d.review)} of ${d.review.maxRounds}, by <a href="/threads/${d.review.reviewer}">${d.review.reviewer}</a> on ${d.review.models.reviewer}${d.review.land !== null && ", landing when approved"}${phaseNote(d.review)}</p>${liveNote(d.review) !== null && html`<p class="dim">${liveNote(d.review)}</p>`}${d.review.phase.kind === "needs-person" && html`<ul class="error">${d.review.phase.reasons.map((reason) => html`<li>${reason}</li>`)}</ul>`}`}
+${d.review != null && html`<p>Nexus review ${d.review.id}${d.review.auto && ", started on its own"}: ${d.review.phase.kind}, round ${roundsSpent(d.review)} of ${d.review.maxRounds}, by <a href="/threads/${d.review.reviewer}">${d.review.reviewer}</a> on ${d.review.models.reviewer}${d.review.land !== null && ", landing when approved"}${phaseNote(d.review)}</p>${roundNote(d.review) !== null && html`<p class="dim">${roundNote(d.review)}</p>`}${liveNote(d.review) !== null && html`<p class="dim">${liveNote(d.review)}</p>`}${d.review.phase.kind === "needs-person" && html`<ul class="error">${d.review.phase.reasons.map((reason) => html`<li>${reason}</li>`)}</ul>`}`}
 ${outputs.length === 0 ? html`<p class="empty">No other outputs yet.</p>` : html`<ul class="list outs">${outputs.map((o) => html`<li><span class="o-kind">${outputLabel[o.kind]}</span><code>${o.ref}</code></li>`)}</ul>`}
 </section>
 ${d.claudeWorker === undefined ? "" : html`<section><h2>Claude worker</h2><p>${d.claudeWorker.state} · ${d.claudeWorker.model ?? "unknown"}</p>${d.claudeWorker.message === undefined ? "" : html`<pre>${d.claudeWorker.message}</pre>`}</section>`}
