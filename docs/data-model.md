@@ -12,7 +12,7 @@ The control plane writes every record. Probes send facts in observations, and th
 | Project | `repoUrl`, `defaultBranch`, `defaultNode`, `resources`, `allowedHosts`, `secrets`, `logins`, `preSetup`, optional `gitIdentity` and `autoReview` | You |
 | Image | `id`, `pins`, `builtOn`, `builtAt`, `sha256`, `release` | `nexus image build`: the manifest the build node's probe wrote, and the control plane release whose recipe it built. `release` is null for an image recorded by hand |
 | Template | `id`, `key`, `state`, `node`, `builtAt`, `commit` | Thread starts, which record a build, and the results of its `build-template` job |
-| Thread | `id`, `title`, `project`, `status`, `conversationId`, `pylonId`, `startedBy`, `seenAt`, `lastReplyAt`, `placement`, `setup` | You, and the harness |
+| Thread | `id`, `title`, `project`, `status`, `conversationId`, `pylonId`, `startedBy`, `seenAt`, `lastReplyAt`, `placement`, `setup`, optional `drive` and `parent` | You, the harness, and a drive tool's `nexus_start`. [Drive tools and watches](#drive-tools-and-watches) describes `drive` and `parent` |
 | Queued thread | `id`, `title`, `project`, `startedBy`, `createdAt`, `after`, `request`, `message`, `status`, `startNow`, `lastError`, `startedAt`, `firstMessage` | `nexus start --after`, until the thread starts. [Queued thread records](#queued-thread-records) describes it |
 | Claude transcript | `thread`, `session`, `byte_offset`, `skipping`, `dropped`, `read_at`, and its entries | Reads of the Claude worker's transcript in the pylon |
 | Pylon | `id`, `thread`, `node`, `template` | Thread start |
@@ -20,6 +20,7 @@ The control plane writes every record. Probes send facts in observations, and th
 | Preview | `pylon`, `service`, `httpsPort` | The control plane allocates the port, never one its node's probe still routes. Observations report when it is ready |
 | Output | `thread`, `kind`, `ref` | Observations, including outputs the agent declares with `nexus output add` |
 | NexusEvent | `id`, `time`, `thread`, `project`, `kind`, `payload` | Accepted pylon lifecycle reports and control-plane changes |
+| Watch | `id`, `waiter`, `thread`, `until`, `since`, `createdAt`, `delivered` | A drive tool's `nexus_wait`, and the watch pass that delivers it. [Drive tools and watches](#drive-tools-and-watches) describes it |
 | Question | `id`, `thread`, `text`, `options`, `reserved`, `answerer`, `askedAt`, `answer` | Whatever asks the person, which nothing does yet, and the person's answer. [Question records](#question-records) describes it |
 | Orphan | `node`, `pylonId` | Observations of a pylon the registry does not know. Only you delete it |
 | Usage record | `id`, `thread`, `project`, `role`, `agent`, `model`, `at`, `input`, `output`, `cacheWrite`, `cacheRead` | Reads of the harness and of the agents' transcripts in each pylon. [Token usage records](#token-usage-records) describes it |
@@ -140,6 +141,12 @@ A check thread is a bare thread, with no conversation and no Claude worker, whos
 ## Start request IDs
 
 `start_requests` stores each request ID a `POST /v1/threads` came with, keyed by the ID. `thread` is the thread it started, or the ID a queued start's record keeps, and `body` is the SHA-256 of the rest of the start's body as the API parsed it. The row is written in the transaction that inserts the thread's row or the queued record, so a start that failed stores none, and a repeat of the ID finds the thread exactly when one exists. A repeat with another `body` is refused.
+
+## Drive tools and watches
+
+`thread_tools` holds a row for each thread that has the drive tools or was started by one, keyed by the thread: `drive`, 1 when it has them, and `parent`, the thread whose `nexus_start` started it. A check holds that a thread with a parent has no tools, so a child never starts a child. The row is written in the transaction that inserts the thread's row, and the registry reads both fields with the thread, as `Thread.drive` and `Thread.parent`. A thread with no row has neither. A parent's live children are its children that are not archived or deleted, which the start counts against the cap of 3, as [the CLI reference](cli.md#drive-tools-0370) says.
+
+`watches` stores each watch `nexus_wait` made, one JSON record per watch, keyed by the call's request ID, with its waiting thread in a column. `Watch` in `src/control/watches.ts` is the shape. `since` is what the watched thread showed when the watch started: its `lastReplyAt`, and the ID of its review if that review had already ended, so neither counts as the change the watch waits for. `delivered` is null until the watch's message was sent, then `{ at, what }`, what the message said happened. A watch whose waiter was deleted is saved delivered with no message. A second `nexus_wait` call under the same request ID keeps the stored record.
 
 ## Nudge records
 

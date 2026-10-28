@@ -86,7 +86,7 @@ With `--json`, a command prints one JSON value on stdout, pretty-printed. The va
 | `session open <thread> [--harness claude-code\|pi\|shell] [--title T]` | `POST /v1/threads/<thread>/sessions` with `{"harness"?: string, "title"?: string}`, which answers 201. While the pylon is not running, it tries again once a second | `OpenedSession`, the session it opened |
 | `session close <thread> <pane\|id>` | `DELETE /v1/threads/<thread>/sessions/<id>` with `{}`, which answers 204. It does not try again | `null` |
 | `attach <thread>` | `GET /v1/threads/<thread>/attach`, a WebSocket, as [the attach route](#the-attach-route) describes | Nothing. The terminal is the session's |
-| `start --project P [--title T] [--message M] [--node N\|auto] [--branch B] [--commit C] [--cpus n] [--memory GiB] [--disk GiB] [--request-id ID]` | One `POST /v1/threads`, with `"message": string` when `--message` is given and `"requestId": string` when `--request-id` is, which answers 201 | `Thread`, the thread that was started, with its `placement` |
+| `start --project P [--title T] [--message M] [--node N\|auto] [--branch B] [--commit C] [--cpus n] [--memory GiB] [--disk GiB] [--request-id ID] [--drive]` | One `POST /v1/threads`, with `"message": string` when `--message` is given, `"requestId": string` when `--request-id` is, and `"drive": true` when `--drive` is, which answers 201 | `Thread`, the thread that was started, with its `placement` |
 | `start ... --after THREAD[,THREAD...]` | One `POST /v1/threads` with `"after": string[]`, and `"message"` and `"requestId"` as for any start, which answers 201 | `QueuedThread`, the thread that was queued |
 | `start-queued <thread>` | `POST /v1/threads/<thread>/start` with no body, which answers 201 | `Thread`, the thread that was started |
 | `send <thread> <text...> [--steer] [--request-id ID]` | `POST /v1/threads/<thread>/messages`. For a Claude worker thread, while the pylon is not running, it tries again once a second | `{ "submission": number }`, or `{ "claude": ClaudeSent }` for a Claude worker thread |
@@ -146,7 +146,7 @@ The shapes are TypeScript types. `Thread`, `Session` and `Preview` are in [`src/
 | `id`, `title`, `project`, `pylonId` | `string` | The thread, its title, its project and its pylon |
 | `status` | `"active" \| "idle" \| "archived" \| "deleted"` | The thread's status |
 | `conversationId` | `string \| null` | The Nexus agent's conversation. Null for a thread without one, such as a Claude worker thread |
-| `startedBy` | `string` | The tailnet node ID of the caller that started the thread, or `nexus-review` or `nexus-check` for a reviewer or check thread that the review loop started |
+| `startedBy` | `string` | The tailnet node ID of the caller that started the thread, or `nexus-review` or `nexus-check` for a reviewer or check thread that the review loop started. A thread a drive tool started has its parent's `startedBy` |
 | `createdAt` | `number` | When the thread started |
 | `agentTurnRunning` | `boolean` | A turn of the Nexus agent runs |
 | `sessionTurnRunning` | optional `true` | A turn of a session in the pylon runs, as its hooks report, such as the Claude worker's. A Claude worker thread works while this is present |
@@ -161,9 +161,11 @@ The shapes are TypeScript types. `Thread`, `Session` and `Preview` are in [`src/
 | `usageLimit` | optional `{ stoppedAt: number, resetsAt: number \| null }` | The Claude worker's session stopped on its usage limit at `stoppedAt`, and nothing has run since. `resetsAt` is when the limit resets, null when Claude Code did not say. [Usage-limit stops](#usage-limit-stops-0210) describes it |
 | `setup` | optional `ThreadSetup` | Whether the pylon boots from a template or fresh, and why, as [Templates at thread start](#templates-at-thread-start-0230) describes. Left out for a thread started before 0.23.0 |
 | `readingUsage` | optional `true` | The usage backfill reads this archived thread's pylon now, so its `desired` is `reading`, as [Usage backfill](#usage-backfill-0330) describes |
+| `drive` | optional `true` | The thread has the drive tools, as [Drive tools](#drive-tools-0370) describes |
+| `parent` | optional `string` | The thread whose `nexus_start` started this one |
 | `attention`, `desired`, `pylon` | | In `ThreadRow` only. `ThreadDetail` has them at its top level, beside `thread` |
 
-`ThreadDetail` has `thread`, `attention`, `seenAt`, `lastReplyAt`, `desired`, `pylon` (`id`, `node`, `actualState`, `failed`, `observedAt`, `grantsOutdated` and `retryRefused`, why a retry cannot help or null), `sessions`, `previews`, `ports`, `outputs`, `prWatch`, `pullRequests`, `review`, `questions` (every question the thread asked, answered or not, as [Questions](#questions-0350) describes), `attach`, `agent` (`{ parkedTasks }`, or null for a thread without a Nexus agent conversation), and for a Claude worker thread `claudeWorker` (`model`, `state`, optional `message`).
+`ThreadDetail` has `thread`, `attention`, `seenAt`, `lastReplyAt`, `desired`, `pylon` (`id`, `node`, `actualState`, `failed`, `observedAt`, `grantsOutdated` and `retryRefused`, why a retry cannot help or null), `sessions`, `previews`, `ports`, `outputs`, `prWatch`, `pullRequests`, `review`, `questions` (every question the thread asked, answered or not, as [Questions](#questions-0350) describes), `children` (the `id`, `title` and `status` of each thread its drive tools started, oldest first), `attach`, `agent` (`{ parkedTasks }`, or null for a thread without a Nexus agent conversation), and for a Claude worker thread `claudeWorker` (`model`, `state`, optional `message`).
 
 ### Attention and shared seen state
 
@@ -1003,6 +1005,41 @@ interface NodeHealth {
 A reading the host does not expose is null, and plain `node` prints `unknown`, never 0. Load and memory come from `/proc/loadavg` and `/proc/meminfo`, so a probe on a host without Linux's `/proc` reports them unknown. Temperatures come from every hwmon sensor, named by the sensor's `name` and its label, or by the thermal zones on a host without hwmon, since a zone usually repeats a sensor. A VM often exposes neither. A sensor the host lists but cannot read, such as an AMD GPU's that answers `EBUSY` while the GPU sleeps, is left out of `temperatures`, and the rest of the reading stays. A pylon's processes are its controller and what the controller started, such as QEMU. `cpuPercent` is the percent of one CPU they used over the probe's sample, which asks for one second and is divided by the time it took, so four busy CPUs read 400. `residentGiB` sums their `VmRSS`. A process whose `/proc` files cannot be read, such as one that exits mid-read, is not counted, and a pylon whose controller's cannot be read is not listed. Load and memory fail the whole read when `/proc` has them but cannot read them, and the route answers 500 with `cannot read the node's load` or `memory` and the reason. Free disk fails it too when the filesystem of the pylons' disks cannot be read, with the error that names its path. No other reading fails it. `pylons` lists only running pylons whose controller is alive, and is null from a backend that cannot name its pylons' processes, such as Docker's. The capacity in `nodes` reads the same CPUs and free disk, so its `diskFreeGiB` is now the filesystem of the pylons' disks rather than `/`.
 
 The reply takes about a second, for the CPU sample. Only a deployer may read it, because it lists what runs on the node. Being allowed to call the API is not enough, though it is for `nodes`, and an infrastructure node or the control node never is a deployer. A caller that is not one fails with exit code 3, an unknown node with exit code 4, and a node whose probe does not answer with exit code 1. The dashboard links each node in its sidebar to a page with the same reading, which polls like any other page and shows a caller that is not a deployer why it cannot read it. Nothing on the route or the page acts on the node: the probe's route takes only `GET`, and there is no restart, kill or retry through it.
+
+## Drive tools (0.37.0)
+
+`nexus start --project P --title T --drive` starts a Nexus agent thread with the drive tools, with which its agent reads, starts, messages and watches other threads. The person can then tell it to plan work and start the builders. Only a start that asks for them gives a thread the tools: `"drive": true` on `POST /v1/threads`, for a Nexus agent thread. `"drive"` with `"claude"` is refused with 400, as `--drive` with `--claude` is in the CLI with exit code 64. A Claude worker in a pylon never has them. A thread the tools start never has them either.
+
+The tools run in the control plane's harness and never reach the thread's pylon, so they answer while it is paused. The thread's turn still waits for its pylon to wake before the model answers, as every Nexus agent turn does, to snapshot the checkout. Each call's request ID is `tool:<conversation>:<call>`, which a control plane restart keeps, and the control plane makes every call idempotent under it. So a call that a restart cut off runs again and answers what the first attempt did: the same thread, message or watch, never a second one.
+
+| Tool | Arguments | What it does |
+|---|---|---|
+| `nexus_read` | `thread` | Answers the thread's `id`, `title`, `project`, `status`, `attention`, `agent` (`harness`, `claude` or `none`), `working`, `parent` and `drive` when present, `pylonFailed`, `pullRequests` (`url`, `title`, `state`, `checks`), `review` (`pr`, `phase`, `rounds`, or null), `openQuestions` (`text`, `options`), `children` (`id`, `title`, `status`) and `conversation`, the last 10 messages as `{ from, text }`, each text cut to 2,000 characters. `from` is `person`, `agent`, or the Nexus sender, such as `thread`, `watch` or `nudge` |
+| `nexus_start` | `project`, `title`, `brief`, `agent` (`claude` or `nexus`), optional `model` for a Claude worker and `branch` | Starts a thread as a child of the calling thread, through `POST /v1/threads`'s retry-safe start under the call's request ID. A Nexus agent thread gets the brief as its first message, under `brief:<thread>` and of kind `nexus.thread`, and a Claude worker as its prompt, after `/poteto-mode`. Either way the brief starts `From thread <parent> "<title>", which started this thread with nexus_start:`. The child's `startedBy` is the parent's, so it counts as that person's builder. Answers the child's `id`, `title`, `project`, `status` and `agent` |
+| `nexus_send` | `thread`, `text` | Sends the text to another thread's agent, through the same inbox the PR watch and the nudge use, so it waits for a running turn to end, and wakes a paused pylon as agent activity. It starts `[Nexus thread <sender> "<title>" — sent with nexus_send, not by the person]`, and a Nexus agent thread gets it as an entry of kind `nexus.thread` with `data: { sender: "Nexus thread" }`. Answers `{ thread, delivered: true }`, or `delivered: false` and why when a Claude worker's pylon is not running yet, in which case nothing was typed |
+| `nexus_wait` | `thread`, `until` (`turn-ended`, `review-ended`, `merged` or `failed`) | Saves a watch and answers at once with `{ watch, thread, until, delivered }`. It holds no turn: the agent ends its turn, and Nexus sends it a message when the watch fires |
+
+The rules are the control plane's, read from the calling thread's record, so the thread's model cannot widen them. A tool answers an error, with the reason as its text, when:
+
+- the calling thread has no drive tools: `thread <id> has no drive tools`, or for a start, `... Only a thread a person starts with them may start threads, and a thread a tool started never has them`. So a child starts no children;
+- the calling thread is archived or deleted;
+- the start would give the parent a fourth live child: `thread <id> has 3 live children (<ids>), the most a thread may have. A child counts until it is archived or deleted`. The control plane checks the cap before the start and again just before it writes the thread's row, so two starts at once cannot both take the last place;
+- a start names `model` for a Nexus agent thread, a send or a watch names the calling thread itself, a send goes to an archived, deleted or agentless thread, or the thread or project does not exist;
+- the calling thread already waits on 10 watches that have not fired;
+- a start fails as any start does, such as a project with no node that has room, or a repeat of its request ID with another body.
+
+A pass every 15 seconds, and one right after each `nexus_wait`, reads every watch that has not fired. A watch fires once its condition holds of the watched thread since the watch started, or once the watched thread is archived or deleted:
+
+| `until` | Fires when |
+|---|---|
+| `turn-ended` | The thread's `lastReplyAt` changed since the watch started |
+| `review-ended` | The thread's review ended, as `approved`, `landed`, `needs-person`, `merged`, `closed` or `cancelled`, and it is not a review that had already ended when the watch started |
+| `merged` | One of the thread's linked pull requests merged, which may be before the watch started |
+| `failed` | The thread's attention is `failed` |
+
+The message goes to the waiting thread under the request ID `watch:<watch>`, as an entry of kind `nexus.watch` with `data: { sender: "Nexus watch" }`, and reads `[Nexus watch — automated, not a message from the person]`, then `Thread <id> "<title>", which you watched until <until>: <what happened>. nexus_read <id> says more.` The watch is saved as fired after the send, so a pass after a crash between the two sends the same request ID again, which the harness drops: the waiting thread gets the message once. A waiting thread that is archived keeps its watches until it is unarchived. One that is deleted ends them without a message.
+
+`show` prints `drive tools: on, children: <id> (<status>), ...`, or `children: none`, for a thread with the tools, and `started by thread <parent>, with nexus_start` for a child. A control plane older than 0.37.0 sends no `children`, and refuses `"drive"` with 400. `nexus_start` cannot queue a thread with `after`.
 
 ## Usage backfill (0.33.0)
 
