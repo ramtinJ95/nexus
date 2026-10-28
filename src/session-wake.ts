@@ -7,7 +7,7 @@
  */
 import type { Guest } from "./backend.ts";
 import type { PausedSession, PylonId } from "./protocol.ts";
-import { recordSessions, relaunchSessions, type RelaunchOutcome } from "./sessions.ts";
+import { harnesses, recordSessions, relaunchSessions, type RelaunchOutcome } from "./sessions.ts";
 
 /** Appends one line to the pylon's log: the controller log of a pylon VM, the container log under Docker. */
 export type PylonLog = (line: string) => Promise<void>;
@@ -67,6 +67,6 @@ function outcomeLine(o: RelaunchOutcome): string {
     case "present": return `sessions: ${session} was already running in ${o.herdrPane}`;
     case "relaunched": return `sessions: relaunched ${session} in ${o.herdrPane}`;
     case "failed": return `sessions: ${session} did not come back${o.herdrPane === null ? "" : `, and its pane ${o.herdrPane} stays open`}: ${o.message}`;
-    case "dropped": return `sessions: dropped ${session}, a second record of Claude Code session ${o.record.harnessSessionId}${o.herdrPane === null ? "" : `, and closed its pane ${o.herdrPane}`}`;
+    case "dropped": return `sessions: dropped ${session}, a second record of ${harnesses[o.record.harness].label} session ${o.record.harnessSessionId}${o.herdrPane === null ? "" : `, and closed its pane ${o.herdrPane}`}`;
   }
 }

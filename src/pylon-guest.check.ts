@@ -34,8 +34,8 @@ import { connectProbe, type Job, type JobId, type NodeName, type PylonId, type T
 import { createPylonVmBackend } from "./pylon-vm-backend.ts";
 import { envelope } from "./reconcile.ts";
 import { snapshot } from "./tick.ts";
-import { checkoutDir, herdrSession, sessionFacts, sessionsFile } from "./sessions.ts";
-import { loginHosts, type BootInputs, type LiveSpec, type OverlayFile, type SessionHarness } from "./project.ts";
+import { checkoutDir, harnesses as harnessTable, herdrSession, sessionFacts, sessionsFile, type SessionHarness } from "./sessions.ts";
+import { loginHosts, type BootInputs, type LiveSpec, type OverlayFile } from "./project.ts";
 import type { ImageId } from "./images.ts";
 
 const [assets, stateRoot] = process.argv.slice(2);
@@ -210,8 +210,9 @@ try {
   step("FACTS_AFTER_WAKE", facts);
   assert.deepEqual(facts.map((f) => f.harness).sort(), [...harnesses].sort());
   for (const record of file.sessions as { herdrPane: string; harness: SessionHarness }[]) {
-    if (record.harness === "shell") continue;
-    assert.ok(await agentRuns(record.herdrPane, record.harness === "pi" ? "pi" : "claude"), `${record.harness}'s pane ${record.herdrPane} runs its agent`);
+    const { agent } = harnessTable[record.harness];
+    if (agent === null) continue;
+    assert.ok(await agentRuns(record.herdrPane, agent.kind), `${record.harness}'s pane ${record.herdrPane} runs its agent`);
   }
   const again = await visit(web.httpsPort);
   assert.deepEqual(answer(again), [200, expected], "the wake started the service again");
