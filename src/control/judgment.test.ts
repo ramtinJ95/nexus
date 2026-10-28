@@ -164,7 +164,7 @@ test("a retry-elsewhere answer moves a pylon its node holds nothing of to the ot
   fail(w.registry, id, brokenWith("retry-elsewhere"));
   await w.until(() => phaseOf(w, id) === "done");
 
-  assert.deepEqual(only(w.registry, id).phase.kind === "done" && only(w.registry, id).phase, {
+  assert.deepEqual(only(w.registry, id).phase, {
     kind: "done", verdict: { answer: "retry-elsewhere", why: "scripted judgment: the brief says judge: retry-elsewhere", by: "judgment" }, outcome: { kind: "moved", from: nodeA, to: nodeB, on: "verdict" },
   });
   const pylon = w.registry.pylon(`pylon-${id}` as PylonId)!;
@@ -245,7 +245,7 @@ test("a judgment that does not answer in time is closed and goes to the person, 
   w.registry.setThreadStatus(deleted, "deleted");
   await w.until(() => phaseOf(w, deleted) === "done");
   const ended = only(w.registry, deleted);
-  assert.deepEqual(ended.phase.kind === "done" && ended.phase.outcome, { kind: "left", why: "the thread is deleted" });
+  assert.deepEqual(ended.phase, { kind: "done", verdict: { answer: "person", why: "the thread was deleted before the judgment answered", by: "control plane" }, outcome: { kind: "left", why: "the thread is deleted" } });
   assert.notEqual(await w.host.judgmentReplies(ended.conversation as ConversationId), null, "its conversation is closed");
 
   late = 15 * 60_000;
