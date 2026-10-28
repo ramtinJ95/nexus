@@ -1434,11 +1434,13 @@ test("review and land reach the review loop's routes, and show prints a review a
   const checked = { ...review.rounds[0]!, check: { passed: true, output: "ok" } };
   s.registry.saveReview({ ...review, rounds: [checked], phase: { kind: "verifying", startedAt: 0, thread: "th-0123456789ab" as ThreadId } });
   assert.match((await s.nexus(["show", thread.id])).stdout, /^review rv-1 of PR #7: verifying, .*\nlive check running \.nexus\/verify at 111111111111 in verify pylon th-0123456789ab$/m);
-  s.registry.saveReview({ ...review, rounds: [{ ...checked, live: { passed: false, output: "booting the fleet\nthe thread never reported running" } }], phase: { kind: "fixing" } });
+  s.registry.saveReview({ ...review, rounds: [{ ...checked, live: { kind: "ran", thread: "th-0123456789ab" as ThreadId, passed: false, output: "booting the fleet\nthe thread never reported running" } }], phase: { kind: "fixing" } });
   assert.match((await s.nexus(["show", thread.id])).stdout, /^live check failed at 111111111111\n {2}booting the fleet\n {2}the thread never reported running$/m);
-  s.registry.saveReview({ ...review, rounds: [{ ...checked, live: { passed: true, output: "fleet ok" } }], phase: { kind: "approved" } });
+  s.registry.saveReview({ ...review, rounds: [{ ...checked, live: { kind: "ran", thread: "th-0123456789ab" as ThreadId, passed: true, output: "fleet ok" } }], phase: { kind: "approved" } });
   assert.match((await s.nexus(["show", thread.id])).stdout, /^live check passed at 111111111111$/m);
-  s.registry.saveReview({ ...review, rounds: [checked], phase: { kind: "approved" } });
+  s.registry.saveReview({ ...review, rounds: [checked], phase: { kind: "needs-person", reasons: [`The live check could not run at ${head}.`] } });
+  assert.match((await s.nexus(["show", thread.id])).stdout, /^no live check ran at 111111111111$/m, "a live check that gave no verdict is not a missing script");
+  s.registry.saveReview({ ...review, rounds: [{ ...checked, live: { kind: "absent" } }], phase: { kind: "approved" } });
   assert.match((await s.nexus(["show", thread.id])).stdout, new RegExp(`^no live check: ${head.slice(0, 12)} has no \\.nexus/verify, so the landing reads the pull request's statement of what could not be checked live$`, "m"));
 
   const hold = "Always needs the person: changes to login or auth, as it changes src/control/api.ts.";

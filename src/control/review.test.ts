@@ -465,7 +465,7 @@ test("the policy names every condition that fails and every reserved case, and h
 });
 
 test("the policy's review conditions: another model, an approval with no P0 to P2 open, and every blocking finding answered", () => {
-  const round = { head: head1, verdict: { token: "x", verdict: "approve" as const, findings: [], reserved: [], notCheckedLive: "the cache under real traffic" }, check: { passed: true, output: "" }, answers: null };
+  const round = { head: head1, verdict: { token: "x", verdict: "approve" as const, findings: [], reserved: [], notCheckedLive: "the cache under real traffic" }, check: { passed: true, output: "" }, live: { kind: "absent" as const }, answers: null };
   const review: Review = {
     id: "rv-1", builder: "th-b" as ThreadId, reviewer: "th-r" as ThreadId, pr: { repo: "acme/shop", number: 7, url: "", title: "", branch: "f" }, models: { builder: "m", reviewer: "m" }, reviewerKind: "harness",
     maxRounds: 3, land: null, auto: false, merged: null, waiver: null, expect: "rv-1:t", sent: 1, phase: { kind: "checking", startedAt: 0, thread: null }, outbox: null, since: 0, nudges: 0, startedAt: 0,
@@ -674,7 +674,7 @@ test("a head with a .nexus/verify lands once its live check passes in a verify p
   f.reply(f.review().reviewer, verdict(f.review(), { notCheckedLive: null }));
   await loop.poll();
   assert.deepEqual(f.merges, [head1]);
-  assert.deepEqual(f.review().rounds.at(-1)!.live, { passed: true, output: "fleet ok" });
+  assert.deepEqual(f.review().rounds.at(-1)!.live, { kind: "ran", thread: f.liveThreads[0], passed: true, output: "fleet ok" });
   assert.equal(f.liveThreads.length, 1);
   assert.deepEqual(f.archived, f.liveThreads, "the verify pylon is archived once it gave its verdict");
   assert.deepEqual(f.registry.events("0", { kinds: ["review.changed"] }).map((e) => (e.payload.phase as { kind: string }).kind).slice(0, 4), ["reviewing", "checking", "verifying", "merging"]);
@@ -688,8 +688,34 @@ test("a head with a .nexus/verify lands once its live check passes in a verify p
   await gLoop.poll();
   assert.deepEqual(g.merges, [], "a head without .nexus/verify still needs the statement");
   assert.deepEqual(g.liveThreads, []);
-  assert.equal(g.review().rounds.at(-1)!.live, undefined);
+  assert.deepEqual(g.review().rounds.at(-1)!.live, { kind: "absent" });
   assert.deepEqual(g.review().phase, { kind: "needs-person", reasons: ["No live check ran, and the pull request does not say what could not be checked live."] });
+});
+
+test("a landing stored before live checks, whose head has a .nexus/verify, is held until a landing runs its live check", async (t) => {
+  const f = fixture(t);
+  const loop = await approved(f, null);
+  const { live: _, ...unverified } = f.review().rounds[0]!;
+  f.registry.saveReview({ ...f.review(), land: { requestedBy: "nLAPTOP" }, rounds: [unverified], phase: { kind: "merging", authorized: null } });
+  f.verifies = true;
+  await loop.poll();
+  assert.deepEqual(f.merges, []);
+  assert.deepEqual(f.review().phase, { kind: "needs-person", reasons: [`The live check has not run at ${head1}.`] });
+  loop.land(f.builder, "nLAPTOP");
+  await loop.poll();
+  assert.equal(f.liveThreads.length, 1, "landing again ran the live check");
+  assert.deepEqual(f.merges, [head1]);
+});
+
+test("a verify pylon the person unarchives after its verdict stays open", async (t) => {
+  const f = fixture(t);
+  f.verifies = true;
+  const loop = await approved(f, null);
+  assert.deepEqual(f.archived, f.liveThreads);
+  f.registry.setThreadStatus(f.liveThreads[0]!, "active");
+  await loop.poll();
+  assert.equal(f.registry.thread(f.liveThreads[0]!)!.status, "active");
+  assert.equal(f.archived.length, 1);
 });
 
 test("a live check that fails holds the landing like a failed check: the builder answers it as a P0, and a failure it does not push for goes to the person", async (t) => {
@@ -779,7 +805,7 @@ test("the policy reads a live check: a failure holds, a pass needs no statement,
   assert.deepEqual(f.merges, [head1]);
   assert.equal(f.liveThreads.length, 1, "the landing kept the live check that passed at the same head");
 
-  const review = { ...f.review(), rounds: [{ ...f.review().rounds[0]!, live: { passed: false, output: "boom" } }] };
+  const review = { ...f.review(), rounds: [{ ...f.review().rounds[0]!, live: { kind: "ran" as const, thread: f.liveThreads[0]!, passed: false, output: "boom" } }] };
   const pr: PrSnapshot = { ...f.snapshot, pr: { ...f.snapshot.pr, state: "open" }, detail: { ...f.snapshot.detail, mergeCommit: null } };
   assert.deepEqual(landingHolds({ review, pr, files: [], nexus: false }), [
     "Findings P0 to P2 are open: LIVE.", "The builder neither fixed nor rejected with a reason finding LIVE of round 1.", `The live check failed at ${head1}.`,

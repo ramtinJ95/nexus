@@ -81,11 +81,16 @@ export type Answer = z.infer<typeof answersSchema>["answers"][number];
 
 /**
  * A round is one review of `head`. `check` is the repository's checks at `head`, run once the reviewer approves it.
- * `live` is its `.nexus/verify` run in a verify pylon once the checks pass, unset when `head` has none, so the landing
- * reads the PR's statement of what it could not check live instead. `conflict` is the base that `head` conflicted with
- * when the landing tried to merge it, which the builder rebases onto.
+ * `live` is the live check at `head`, recorded once the checks pass, and unset until a live check gave a verdict or
+ * found no `.nexus/verify`. `conflict` is the base that `head` conflicted with when the landing tried to merge it, which
+ * the builder rebases onto.
  */
-export interface Round { head: string; verdict: Verdict | null; check: { passed: boolean; output: string } | null; live?: { passed: boolean; output: string }; answers: Answer[] | null; conflict?: { base: string } }
+export interface Round { head: string; verdict: Verdict | null; check: { passed: boolean; output: string } | null; live?: LiveCheck; answers: Answer[] | null; conflict?: { base: string } }
+/**
+ * `absent` when `head` has no `.nexus/verify`, so the landing reads the PR's statement of what it could not check live
+ * instead. `ran` when the script gave its verdict in verify pylon `thread`.
+ */
+export type LiveCheck = { kind: "absent" } | { kind: "ran"; thread: ThreadId; passed: boolean; output: string };
 
 export type Phase =
   /** The reviewer has the round's request and owes its verdict. */
@@ -215,7 +220,7 @@ const latest = <T extends { token: string }>(replies: readonly string[], fence: 
 
 const checkFinding = (round: Round): Finding[] => round.check?.passed === false
   ? [{ id: "CHECK", priority: "P0", where: ".nexus/check", summary: `.nexus/check failed at ${round.head}`, detail: round.check.output }] : [];
-const liveFailed = (round: Round): round is Round & { live: { passed: false } } => round.live?.passed === false;
+const liveFailed = (round: Round): round is Round & { live: { kind: "ran"; passed: false } } => round.live?.kind === "ran" && !round.live.passed;
 const liveFinding = (round: Round): Finding[] => liveFailed(round)
   ? [{ id: "LIVE", priority: "P0", where: ".nexus/verify", summary: `The live check failed at ${round.head}`, detail: round.live.output }] : [];
 const conflictFinding = (round: Round): Finding[] => round.conflict === undefined ? [] : [{
@@ -249,8 +254,9 @@ export function liveNote(r: Review): string | null {
     if (r.phase.thread !== null) return `live check running .nexus/verify at ${head} in verify pylon ${r.phase.thread}`;
     return r.phase.refused === undefined ? `live check starting at ${head}` : `live check waiting for a node to take its verify pylon: ${r.phase.refused}`;
   }
-  if (round.live !== undefined) return `live check ${round.live.passed ? "passed" : "failed"} at ${head}`;
-  return round.check?.passed === true ? `no live check: ${head} has no .nexus/verify, so the landing reads the pull request's statement of what could not be checked live` : null;
+  if (round.live?.kind === "absent") return `no live check: ${head} has no .nexus/verify, so the landing reads the pull request's statement of what could not be checked live`;
+  if (round.live?.kind === "ran") return `live check ${round.live.passed ? "passed" : "failed"} at ${head}`;
+  return round.check?.passed === true ? `no live check ran at ${head}` : null;
 }
 const checkOutput = (output: string) => `The check's output:\n${output}`;
 const liveOutput = (output: string) => `The live check's output:\n${output}`;
@@ -506,7 +512,8 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
       const verifies = state.passed && round.live === undefined && await github.has(r.pr.repo, round.head, ".nexus/verify");
       checks.discard(phase.thread);
       const next = withRound({ ...r, phase: { ...phase, thread: null } }, { check: { passed: state.passed, output: state.output } });
-      if (state.passed) return verifies ? { ...next, phase: { kind: "verifying", startedAt: now(), thread: null } } : checked(next);
+      if (verifies) return { ...next, phase: { kind: "verifying", startedAt: now(), thread: null } };
+      if (state.passed) return checked(round.live === undefined ? withRound(next, { live: { kind: "absent" } }) : next);
       return gateFailed(r, next, ".nexus/check", (earlier) => earlier.check?.passed === false, checkOutput(state.output));
     },
     async verifying(r, phase, builder) {
@@ -532,7 +539,7 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
       if (state.kind === "unrunnable") return toPerson(r, `The live check could not run at ${round.head}.`, liveOutput(state.output));
       if (state.kind !== "done") return r;
       live.discard(phase.thread);
-      const next = withRound({ ...r, phase: { kind: "verifying", startedAt: phase.startedAt, thread: null } }, { live: { passed: state.passed, output: state.output } });
+      const next = withRound({ ...r, phase: { kind: "verifying", startedAt: phase.startedAt, thread: null } }, { live: { kind: "ran", thread: phase.thread, passed: state.passed, output: state.output } });
       if (state.passed) return checked(next);
       return gateFailed(r, next, "The live check", liveFailed, liveOutput(state.output));
     },
@@ -667,8 +674,12 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
 
   async function pass() {
     const reviews = registry.reviews();
-    // A check thread no review holds, such as one started just before a crash, has nothing left to give.
-    const held = new Set(reviews.flatMap((r) => (r.phase.kind === "checking" || r.phase.kind === "verifying") && r.phase.thread !== null ? [r.phase.thread] : []));
+    // A check thread no review holds, such as one started just before a crash, has nothing left to give. A verify pylon
+    // whose verdict a round recorded stays as the person leaves it, so one they unarchive to look at stays open.
+    const held = new Set(reviews.flatMap((r) => [
+      ...(r.phase.kind === "checking" || r.phase.kind === "verifying") && r.phase.thread !== null ? [r.phase.thread] : [],
+      ...r.rounds.flatMap((round) => round.live?.kind === "ran" ? [round.live.thread] : []),
+    ]));
     for (const t of registry.threads()) {
       if (t.startedBy === checkCaller && t.status !== "deleted" && !held.has(t.id)) checks.discard(t.id);
       if (t.startedBy === verifyCaller && t.status === "active" && !held.has(t.id)) live.discard(t.id);

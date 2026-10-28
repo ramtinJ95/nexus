@@ -261,7 +261,7 @@ const approvedReview = (builder: ThreadId, phase: Review["phase"], extra: Partia
   models: { builder: "claude-opus-5-5", reviewer: "gpt-6-astra" }, maxRounds: 5, land: null, auto: false, merged: null, waiver: null, expect: "rv-1:t", sent: 3, outbox: null, since: 0, nudges: 0, startedAt: 0,
   rounds: [
     { head: "1".repeat(40), verdict: { token: "a", verdict: "changes", findings: [{ id: "F1", priority: "P1", where: "src/cache.ts:12", summary: "The cache never expires" }], reserved: [], notCheckedLive: null }, check: null, answers: [{ id: "F1", action: "fixed", reason: "" }] },
-    { head, verdict: { token: "b", verdict: "approve", findings: [{ id: "F2", priority: "P3", where: null, summary: "Name the TTL" }], reserved: [], notCheckedLive: "The cache's behaviour under load could not be checked live." }, check: { passed: true, output: "ok 412 tests" }, answers: null },
+    { head, verdict: { token: "b", verdict: "approve", findings: [{ id: "F2", priority: "P3", where: null, summary: "Name the TTL" }], reserved: [], notCheckedLive: "The cache's behaviour under load could not be checked live." }, check: { passed: true, output: "ok 412 tests" }, live: { kind: "absent" }, answers: null },
   ],
   phase, ...extra,
 });
@@ -303,7 +303,7 @@ test("a held landing whose live check passed says so with its output, and the re
   const s = await seeded(t, landingOptions());
   const fix = await s.start("acme", "Fix checkout");
   const review = approvedReview(fix.id, { kind: "needs-person", reasons: ["The pull request's GitHub checks are pending."] }, { land: { requestedBy: laptop } });
-  s.registry.saveReview({ ...review, rounds: [review.rounds[0]!, { ...review.rounds[1]!, live: { passed: true, output: "verify-nexus: thread started, answered, archived" } }] });
+  s.registry.saveReview({ ...review, rounds: [review.rounds[0]!, { ...review.rounds[1]!, live: { kind: "ran", thread: "th-0123456789ab" as ThreadId, passed: true, output: "verify-nexus: thread started, answered, archived" } }] });
   const page = (await s.call("GET", `/threads/${fix.id}`)).text;
   const card = textOf(landingOf(page));
   assert.match(card, new RegExp(`· \\.nexus/check passed · live check passed Why it waits`));
@@ -405,7 +405,8 @@ test("a landing shows its steps as the review moves through them, until it lands
     return { states: [...region.matchAll(/<li class="land-step land-(\w+)"/g)].map((m) => m[1]).join(" "), text: textOf(region).replace(/ ([,.])(?= |$)/g, "$1") };
   };
   const merge = "4".repeat(40);
-  assert.deepEqual(await steps({ kind: "checking", startedAt: 0, thread: null }), {
+  const { live: _, ...unchecked } = approvedReview(fix.id, { kind: "approved" }).rounds[1]!;
+  assert.deepEqual(await steps({ kind: "checking", startedAt: 0, thread: null }, { rounds: [unchecked] }), {
     states: "now todo todo todo todo", text: `Landing #7 Cache ↗ Check Live check Merge Deploy Landed .nexus/check runs at ${head.slice(0, 12)}, or its kept result for that commit is read.` });
   assert.equal((await steps({ kind: "merging", authorized: head })).states, "done skipped now todo todo", "a head with no .nexus/verify skips the live check");
   assert.deepEqual(await steps({ kind: "deploying", commit: merge, previous: "3".repeat(40), requested: true, deadline: 0 }, { merged: merge }), {
@@ -419,12 +420,13 @@ test("a landing shows its steps as the review moves through them, until it lands
   const other = await steps({ kind: "landed", commit: merge }, { merged: merge, pr: { repo: "acme/web", number: 7, url: "https://github.com/acme/web/pull/7", title: "Cache", branch: "cache" } });
   assert.deepEqual(other, { states: "done skipped done skipped done", text: `Landed #7 Cache ↗ Check Live check (no .nexus/verify) Merge Deploy (nothing to deploy) Landed Merged as ${merge.slice(0, 12)}.` }, "a PR that does not deploy skips the step");
   const verifier = "th-0123456789ab" as ThreadId;
-  assert.deepEqual(await steps({ kind: "verifying", startedAt: 0, thread: verifier }), {
+  assert.deepEqual(await steps({ kind: "verifying", startedAt: 0, thread: verifier }, { rounds: [unchecked] }), {
     states: "done now todo todo todo", text: `Landing #7 Cache ↗ Check Live check Merge Deploy Landed .nexus/verify runs at ${head.slice(0, 12)} in a verify pylon, ${verifier}.` });
-  assert.equal((await steps({ kind: "verifying", startedAt: 0, thread: null, refused: "no node can run this pylon: rj-firebat is offline" })).text,
+  assert.equal((await steps({ kind: "verifying", startedAt: 0, thread: null, refused: "no node can run this pylon: rj-firebat is offline" }, { rounds: [unchecked] })).text,
     "Landing #7 Cache ↗ Check Live check Merge Deploy Landed No node can take the verify pylon yet: no node can run this pylon: rj-firebat is offline");
-  const verified = (live: { passed: boolean; output: string }): Partial<Review> => ({ rounds: [{ ...approvedReview(fix.id, { kind: "approved" }).rounds[1]!, live }] });
-  assert.equal((await steps({ kind: "merging", authorized: head }, verified({ passed: true, output: "fleet ok" }))).states, "done done now todo todo", "a live check that passed is done");
+  const verified = (live: Review["rounds"][number]["live"]): Partial<Review> => ({ rounds: [{ ...unchecked, ...live === undefined ? {} : { live } }] });
+  assert.equal((await steps({ kind: "merging", authorized: head }, verified({ kind: "ran", thread: verifier, passed: true, output: "fleet ok" }))).states, "done done now todo todo", "a live check that passed is done");
+  assert.equal((await steps({ kind: "merging", authorized: head }, verified(undefined))).text, `Landing #7 Cache ↗ Check Live check (not run) Merge Deploy Landed Checking the merge policy again with what GitHub says now, then merging ${head.slice(0, 12)}.`, "a landing from before live checks says it ran none");
   assert.equal((await steps({ kind: "fixing" })).text, "", "a review that is not landing has nothing to land");
 });
 

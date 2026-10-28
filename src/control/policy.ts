@@ -119,7 +119,8 @@ const conditions: readonly ((facts: LandingFacts) => string[])[] = [
   // A live check that ran decides. A head with no .nexus/verify ran none, and lands on the statement of what it could not check live.
   ({ review, pr }) => {
     const round = review.rounds.at(-1)!;
-    if (round.live !== undefined) return round.live.passed ? [] : [`The live check failed at ${round.head}.`];
+    if (round.live === undefined) return [`The live check has not run at ${round.head}.`];
+    if (round.live.kind === "ran") return round.live.passed ? [] : [`The live check failed at ${round.head}.`];
     const quoted = round.verdict?.notCheckedLive ?? null;
     if (quoted === null || squash(quoted).length < 20) return ["No live check ran, and the pull request does not say what could not be checked live."];
     return squash(pr.detail.body).includes(squash(quoted)) ? [] : ["The reviewer's quote of what could not be checked live is not in the pull request's description."];

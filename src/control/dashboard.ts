@@ -789,9 +789,10 @@ function landing(c: Context, d: ThreadDetail): Html | null {
   if (at !== null) {
     const deploys = c.deploys(r);
     const index = landingSteps.findIndex(([step]) => step === at.step);
-    // Past the check, a landing with no live check recorded skipped it: its head has no .nexus/verify.
-    const unverified = index > 1 && r.rounds.at(-1)!.live === undefined;
-    const stateOf = (step: Step, i: number) => (step === "deploying" && !deploys) || (step === "verifying" && unverified) ? "skipped"
+    const { live } = r.rounds.at(-1)!;
+    // A landing past the live check with none recorded is one from before live checks.
+    const unverified = live?.kind === "absent" ? " (no .nexus/verify)" : live === undefined && index > 1 ? " (not run)" : null;
+    const stateOf = (step: Step, i: number) => (step === "deploying" && !deploys) || (step === "verifying" && unverified !== null) ? "skipped"
       : i < index || at.step === "landed" ? "done" : i > index ? "todo" : at.failed ? "failed" : "now";
     const title = at.step === "landed" ? "Landed" : r.phase.kind === "needs-person" ? "Merged, not deployed" : r.phase.kind === "rolling-back" ? "Rolling back" : "Landing";
     const phase = r.phase;
@@ -799,7 +800,7 @@ function landing(c: Context, d: ThreadDetail): Html | null {
 <div class="land-top"><h2 id="landing-h">${title}</h2>${prLink}</div>
 <ol class="land-steps">${landingSteps.map(([step, label], i) => {
   const state = stateOf(step, i);
-  return html`<li class="land-step land-${state}"${state === "now" && html` aria-current="step"`}>${label}${state === "skipped" && (step === "verifying" ? " (no .nexus/verify)" : " (nothing to deploy)")}</li>`;
+  return html`<li class="land-step land-${state}"${state === "now" && html` aria-current="step"`}>${label}${state === "skipped" && (step === "verifying" ? unverified : " (nothing to deploy)")}</li>`;
 })}</ol>
 ${phase.kind === "checking" ? html`<p class="land-note">.nexus/check runs at ${short(r.rounds.at(-1)!.head)}, or its kept result for that commit is read.</p>`
   : phase.kind === "verifying" ? html`<p class="land-note">${phase.thread === null && phase.refused !== undefined ? html`No node can take the verify pylon yet: ${phase.refused}` : html`.nexus/verify runs at ${short(r.rounds.at(-1)!.head)} in a verify pylon${phase.thread !== null && html`, <a href="/threads/${phase.thread}">${phase.thread}</a>`}.`}</p>`
@@ -827,7 +828,7 @@ ${phase.kind === "checking" ? html`<p class="land-note">.nexus/check runs at ${s
     : `Land pull request #${r.pr.number}, "${r.pr.title}", at commit ${round.head.slice(0, 12)}, waiving ${waived.length === 1 ? "the hold" : `the ${waived.length} holds`} the merge policy reserves for you? Nexus checks everything else again, merges that commit${deploys}.`;
   return html`<section class="landing" aria-labelledby="landing-h">
 <div class="land-top"><h2 id="landing-h">${held ? "Held for you" : "Approved, not landed"}</h2>${prLink}</div>
-<p class="land-meta">Head ${short(round.head)} · approved by ${r.models.reviewer} (${r.reviewerKind}) in round ${roundsSpent(r)} of ${r.maxRounds} · .nexus/check passed · ${round.live === undefined ? "no .nexus/verify, so no live check" : `live check ${round.live.passed ? "passed" : "failed"}`}</p>
+<p class="land-meta">Head ${short(round.head)} · approved by ${r.models.reviewer} (${r.reviewerKind}) in round ${roundsSpent(r)} of ${r.maxRounds} · .nexus/check passed · ${round.live === undefined ? "no live check ran" : round.live.kind === "absent" ? "no .nexus/verify, so no live check" : `live check ${round.live.passed ? "passed" : "failed"}`}</p>
 <details id="land-why" open><summary>Why it waits for you</summary>
 ${reasons.length === 0 ? html`<p class="land-note">Nothing holds it. The review stopped at approval because it was started without --land.</p>`
   : html`<ul class="land-reasons">${rules.map((h) => html`<li>${h.reason} ${h.waivable ? html`<span class="tag tag-ok">you may waive</span>` : html`<span class="tag">${h.holdsAgain ? "holds again" : "not waivable"}</span>`}<br><span class="dim">${h.why}</span></li>`)}</ul>`}
@@ -837,7 +838,7 @@ ${findings.length === 0 ? html`<p class="land-note">None.</p>` : html`<ul class=
   return html`<li><span class="tag${blocking(f) ? " tag-bad" : ""}">${f.priority}</span> <b>${f.id}</b>${f.where && html` <code>${f.where}</code>`}: ${f.summary}${answer && html` <span class="dim">(builder: ${answer.action}${answer.reason && `, ${answer.reason}`})</span>`}</li>`;
 })}</ul>`}
 ${round.check !== null && html`<details id="land-check"><summary>.nexus/check ${round.check.passed ? "passed" : "failed"} at ${round.head.slice(0, 12)}</summary><pre>${round.check.output}</pre></details>`}
-${round.live !== undefined && html`<details id="land-live"><summary>The live check ${round.live.passed ? "passed" : "failed"} at ${round.head.slice(0, 12)}</summary><pre>${round.live.output}</pre></details>`}
+${round.live?.kind === "ran" && html`<details id="land-live"><summary>The live check ${round.live.passed ? "passed" : "failed"} at ${round.head.slice(0, 12)}</summary><pre>${round.live.output}</pre></details>`}
 </details>
 ${stuck ? html`<p class="land-note">Landing checks the merge policy again, and what is marked "holds again" holds every landing of this commit. Only you can get past it, by merging the pull request on GitHub${c.deploys(r) && " and deploying it with nexus deploy"}.</p>`
   : c.landRefusal === null ? html`<div class="land-act"><button type="button" class="btn btn-primary" id="land" data-action="land" data-thread="${d.thread.id}" data-head="${round.head}"${waived.length > 0 && html` data-holds="${JSON.stringify(waived)}"`} data-confirm="${confirm}">Land #${r.pr.number}</button>${waived.length > 0 && html`<p class="land-note">Pressing Land waives what is marked "you may waive", for commit ${short(round.head)} only. Landing checks everything else again.</p>`}</div>`
