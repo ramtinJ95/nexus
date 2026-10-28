@@ -423,6 +423,32 @@ test("a wake for reading that fails after the backfill let go of its pylon fails
   assert.ok(next.kind === "spawn" && next.relaunch === undefined, "the wake brings the sessions back");
 });
 
+test("a wake for reading the planner gives up on, as for an image no online node holds, is an attempt the backfill skips, never a failed pylon", async (t) => {
+  const registry = openRegistry(tempDb());
+  const thread = seed(registry);
+  const fake = fakeNode({ autoFinish: false });
+  const logged: string[] = [];
+  const loop = run(t, registry, fake.probe, { log: (line) => logged.push(line) });
+  await until("the spawn runs", () => fake.running().length === 1);
+  fake.finish(fake.running()[0]!);
+  await archive(registry, fake, loop, thread);
+  const pylon = registry.pylon(thread.pylonId)!;
+  registry.savePylon({ ...pylon, boot: { ...pylon.boot, image: "img-111111111111" } });
+
+  registry.startUsageBackfill([thread.id], Date.now());
+  registry.holdUsageBackfill(thread.id, Date.now());
+  await until("the planner gives up", () => registry.pylon(thread.pylonId)!.attempts.last !== null || registry.pylon(thread.pylonId)!.failed !== null);
+  await settled(fake, loop);
+  const read = registry.pylon(thread.pylonId)!;
+  assert.deepEqual([read.failed, read.attempts.count, read.attempts.last?.code, read.attempts.last?.message, read.attempts.last?.reading], [null, 1, "artifact-missing", "no online node holds img-111111111111", true]);
+  assert.deepEqual(kinds(fake.submitted), ["spawn fresh", "pause"]);
+  assert.deepEqual(logged, []);
+
+  registry.stopUsageBackfill(Date.now());
+  await settled(fake, loop);
+  assert.equal(registry.pylon(thread.pylonId)!.failed, null, "the paused pylon needs no image");
+});
+
 test("a human retry of a pylon whose fresh setup failed spawns it fresh again, and the new setup's failure is the verdict", async (t) => {
   const registry = openRegistry(tempDb());
   const thread = seed(registry);

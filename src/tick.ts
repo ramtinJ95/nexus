@@ -87,6 +87,14 @@ export async function tick(pylon: PylonRecord, ctx: TickContext): Promise<PlanSt
     artifactSha256: ctx.artifactSha256,
   }, Date.now());
 
+  if (step.kind === "fail" && pylon.desired === "reading") {
+    // A pylon woken only to be read is never failed. The backfill skips its thread with the reason and clears the attempt.
+    const missing = "artifact-missing: ";
+    const [code, message] = step.reason.startsWith(missing) ? ["artifact-missing", step.reason.slice(missing.length)] as const : ["backend", step.reason] as const;
+    pylon.attempts = failedAttempt(pylon, code, message, true);
+    ctx.save(pylon);
+    return { kind: "wait", reason: "backoff" };
+  }
   if (step.kind === "fail") {
     pylon.failed = step.reason;
     pylon.retrying = false;
@@ -104,7 +112,7 @@ export async function tick(pylon: PylonRecord, ctx: TickContext): Promise<PlanSt
   });
   if (sent === "accepted") return step;
   pylon.submitted = null;
-  if (sent !== "retry") pylon.attempts = failedAttempt(pylon, step.job, "invalid", failureMessage(sent.invalid, ""));
+  if (sent !== "retry") pylon.attempts = failedAttempt(pylon, "invalid", failureMessage(sent.invalid, ""), wakesForReading(step.job));
   ctx.save(pylon);
   return step;
 }
@@ -156,7 +164,7 @@ async function settle(pylon: PylonRecord, probe: ProbeClient, observation: NodeO
   if (listed === undefined) return "wait";
   pylon.submitted = null;
   if (status.state === "failed") {
-    pylon.attempts = failedAttempt(pylon, env.job, status.code, failureMessage(status.message, status.logTail));
+    pylon.attempts = failedAttempt(pylon, status.code, failureMessage(status.message, status.logTail), wakesForReading(env.job));
     return null;
   }
   pylon.attempts = { count: 0, last: null };
@@ -165,8 +173,9 @@ async function settle(pylon: PylonRecord, probe: ProbeClient, observation: NodeO
   return null;
 }
 
-function failedAttempt(pylon: PylonRecord, job: Job, code: FailedAttempt["code"], message: string): PylonRecord["attempts"] {
-  const reading = job.kind === "spawn" && job.relaunch === false;
+const wakesForReading = (job: Job): boolean => job.kind === "spawn" && job.relaunch === false;
+
+function failedAttempt(pylon: PylonRecord, code: FailedAttempt["code"], message: string, reading: boolean): PylonRecord["attempts"] {
   return { count: pylon.attempts.count + 1, last: { at: Date.now(), code, message, ...(reading ? { reading } : {}) } };
 }
 
