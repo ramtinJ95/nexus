@@ -946,7 +946,7 @@ const imageCommand = (path: string, args: Command["args"], body: (positionals: r
 function candidatesOf(host: string): URL[] {
   if (host.includes("://")) return [controlUrl(host)];
   if (!/^[A-Za-z0-9.-]+$/.test(host)) throw new CliError("invalid", `${host} is neither a tailnet name, such as rj-firebat or rj-firebat.example.ts.net, nor a URL`);
-  return controlPorts.map((url) => new URL(url.replace("{host}", host)));
+  return controlPorts.map((url) => controlUrl(url.replace("{host}", host)));
 }
 
 function connectText(url: string, file: string, caller: Whoami | null): string {

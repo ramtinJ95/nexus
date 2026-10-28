@@ -10,6 +10,7 @@ import { randomUUID } from "node:crypto";
 import { once } from "node:events";
 import { appendFile, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { createServer as createHttpServer } from "node:http";
+import { createServer as createHttpsServer } from "node:https";
 import { connect, createServer, type Server, type Socket } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -1224,6 +1225,19 @@ test("connect finds the API on the dashboard's HTTPS port, saves it, and the nex
   assert.deepEqual(JSON.parse(await readFile(config, "utf8")), { url: `http://${apiName}:7470`, socks: `127.0.0.1:${proxy.port}` });
 });
 
+test("connect checks an IP address URL's certificate against that address", async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), "nexus-cli-ip-"));
+  t.after(() => rm(dir, { recursive: true }));
+  const server = createHttpsServer(await testCertificate(dir, "127.0.0.1"), (req, res) => {
+    res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify(req.url === "/v1/whoami" ? { node: laptop, allowed: true, person: true, deployer: true } : { commit: "a".repeat(40) }));
+  });
+  const url = `https://127.0.0.1:${await listening(t, server)}`;
+  const env = { PATH: process.env.PATH!, HOME: join(dir, "home"), NODE_EXTRA_CA_CERTS: join(dir, "cert.pem") };
+  const res = await new Promise<{ code: number; stderr: string }>((resolve) => execFile(process.execPath, [cli, "connect", url], { env },
+    (err, _stdout, stderr) => resolve({ code: err === null ? 0 : (err as { code: number }).code, stderr })));
+  assert.equal(res.code, 0, res.stderr);
+});
+
 test("connect says what this device may do, and the line that admits it when it may not", async (t) => {
   const s = await setup(t);
   const env = { NEXUS_URL: "", NEXUS_SOCKS: "" };
@@ -1284,6 +1298,8 @@ test("connect fails without saving when no control plane answers, or one does no
     kind: "refused", status: 403,
   });
   assert.equal((await s.nexus(["connect", "rj firebat"], env)).code, 64);
+  assert.deepEqual(JSON.parse((await s.nexus(["connect", "999.999.999.999", "--json"], env)).stderr),
+    { error: "the control plane URL https://999.999.999.999:7443 is not a URL", kind: "invalid", status: null });
   await assert.rejects(readFile(config), { code: "ENOENT" });
 });
 

@@ -54,7 +54,8 @@ async function open(endpoint: Endpoint, idleMs = idleTimeoutMs): Promise<Socket>
 /** The raw socket's idle timeout still covers a handshake that hangs. */
 function handshake(raw: Socket, host: string): Promise<Socket> {
   return new Promise((resolve, reject) => {
-    const socket = tlsConnect({ socket: raw, ...isIP(host) === 0 ? { servername: host } : {} });
+    // `host` is what the certificate must name. SNI takes only a name, never an IP address.
+    const socket = tlsConnect({ socket: raw, host, ...isIP(host) === 0 ? { servername: host } : {} });
     const fail = (err: Error) => {
       raw.destroy();
       reject(err instanceof CliError ? err : new CliError("unreachable", `the TLS handshake with ${host} failed: ${err.message}`));
