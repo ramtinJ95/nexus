@@ -538,6 +538,21 @@ test("a thread a queued thread waits for has its PR's merge seen when archived, 
   assert.equal(merged(reopened), "merged", "a PR reopened and merged between two reads is seen merged");
 });
 
+test("a thread a merge watch waits on has its PR's merge seen with its watch capped, and a turn watch keeps nothing current", async (t) => {
+  const f = fixture(); t.after(() => f.registry.close());
+  const waiter = f.add("th-waiter");
+  await f.watcher.poll();
+  f.registry.savePrWatch(f.id, { ...f.registry.prWatch(f.id)!, commentWakes: 10 });
+  const watch = (id: string, until: "merged" | "turn-ended") => f.registry.addWatch({ id, waiter, thread: f.id, until, since: { lastReplyAt: null, endedReview: null }, createdAt: 1, fired: null, delivered: null });
+  watch("tool:1:turn", "turn-ended");
+  f.snapshot = { ...f.snapshot, pr: { ...f.snapshot.pr, state: "merged" } };
+  await f.watcher.poll();
+  assert.equal(f.registry.prWatch(f.id)?.links[0]?.pr.state, "open", "a capped watch nothing waits on to merge is not polled");
+  watch("tool:1:merged", "merged");
+  await f.watcher.poll();
+  assert.equal(f.registry.prWatch(f.id)?.links[0]?.pr.state, "merged");
+});
+
 test("a predecessor's PR that opened and merged between two reads, or behind a message the watch cannot deliver, is seen merged", async (t) => {
   const f = fixture(); t.after(() => f.registry.close());
   f.registry.saveQueued({

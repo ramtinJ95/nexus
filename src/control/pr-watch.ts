@@ -47,10 +47,14 @@ export function prWatcher(options: { registry: Registry; github: Pick<GitHub, "f
     const branches = (t: Thread, repo: string) => registry.outputs(t.id).flatMap((o) =>
       // pushedAs is a remote-tracking name, not a URL. Only origin belongs to the project's repository.
       o.kind === "branch" && o.ref.startsWith("origin/") ? [o.ref.slice(7)] : []).map((branch) => ({ branch, key: `${repo}:${branch}` }));
-    // A queued thread starts when these threads' pull requests merge, which the watch must see even where it sends nothing.
-    const awaited = new Set(registry.queuedThreads().flatMap((q) => q.status === "queued" ? q.after : []));
+    // A queued thread starts, and a merge watch fires, when these threads' pull requests merge, which the watch must see
+    // even where it sends nothing.
+    const awaited = new Set([
+      ...registry.queuedThreads().flatMap((q) => q.status === "queued" ? q.after : []),
+      ...registry.pendingWatches().flatMap((w) => w.until === "merged" ? [w.thread] : []),
+    ]);
     /**
-     * Keeps the state of every PR of a thread a queued thread waits for current, whatever else holds its watch: an
+     * Keeps the state of every PR of a thread a queued thread or a merge watch waits for current, whatever else holds its watch: an
      * archive, the comment cap, a message it cannot deliver yet, a PR it last saw closed, or a PR that opened and merged
      * between two reads, which a search of open PRs never finds.
      */
