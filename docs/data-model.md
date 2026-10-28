@@ -29,6 +29,7 @@ Three settings sit beside the records. `current` is the image every new pylon us
 ## Field values
 
 - A pylon `id` is `pylon-<thread id>`, at most 40 characters.
+- A thread's agent is a harness conversation, a Claude worker, or none, as a check thread has. The registry stores no kind: a harness thread has a `conversationId`, a Claude worker thread has a row in `claude_workers`, and a start gives a thread one or the other, never both. `Registry.agent` derives the kind from those two facts and is the only code that reads them for it. The API, the dashboard, the inbox and the review loop take what each kind does from it, through `src/control/thread-agent.ts`. The wire still carries each kind's own shapes: `conversationId`, `ThreadDetail.claudeWorker`, a `ConversationView` or a `ClaudeConversation`, and `/events` or `/claude/events`.
 - `Node.name` is the node's tailnet machine name: lowercase letters, digits and hyphens, starting with a letter or digit, at most 63 characters, and never `auto`. `control.json` and each node's `probe.json` take a name by the same rule.
 - `Node.tailnetNodeId` is Tailscale's stable node ID. Probes compare callers against it.
 - `Node.state` is `online` or `offline`. A node that is asleep or powered off is `offline`. That is not an error.
