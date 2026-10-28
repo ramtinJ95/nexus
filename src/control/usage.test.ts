@@ -57,7 +57,8 @@ function addThread(registry: Registry, options: { startedBy?: string; conversati
     },
     firstBoot: { kind: "fresh", preSetup: null }, live: { previews: [], overlay: [] }, liveHash: "hash-1" as LiveHash,
   });
-  registry.createThread(thread, pylon, "hello");
+  // As a start does: a harness thread has no Claude worker.
+  registry.createThread(thread, pylon, thread.conversationId === null ? "hello" : undefined);
   observe(registry, pylonId, options.phase ?? "running");
   return registry.thread(id)!;
 }
