@@ -27,7 +27,7 @@ import { reservedNames } from "../control/policy.ts";
 import { maxEntries, usageLimitText, type ClaudeConversation, type ClaudeEntry, type PromptSource } from "../claude-transcript.ts";
 import { claudeFrames, queuedOf, type ClaudeFrame } from "../control/claude-conversation.ts";
 import { agentView } from "../control/thread-agent.ts";
-import { phaseNote, roundsSpent } from "../control/review.ts";
+import { liveNote, phaseNote, roundsSpent } from "../control/review.ts";
 import { breakdownLook, breakdowns, tokenColumns, tokenCount, type BackfillPlanRow, type UsageBackfill, type UsageReport, type UsageTotals } from "../control/usage.ts";
 import type { Changes, Diff, Listing } from "../checkout-files.ts";
 import type { ThreadSetup } from "../images.ts";
@@ -344,9 +344,13 @@ function setupText(s: ThreadSetup): string {
 
 /** A review's state for a person: its phase and round, its reviewer, and what it needs from them. */
 function reviewText(r: Review): string {
+  const { live } = r.rounds.at(-1)!;
+  const note = liveNote(r);
   const phase = r.phase.kind === "landed" ? `landed as ${r.phase.commit}` : r.phase.kind === "deploying" ? `deploying ${r.phase.commit}` : r.phase.kind;
   return [
     `review ${r.id} of PR #${r.pr.number}${r.auto ? ", started on its own" : ""}: ${phase}, round ${roundsSpent(r)} of ${r.maxRounds}, reviewer ${r.reviewer} on ${r.models.reviewer}${r.land === null ? "" : ", landing when approved"}${phaseNote(r)}`,
+    ...note === null ? [] : [note],
+    ...live?.passed === false ? live.output.split("\n").slice(-20).map((line) => `  ${line}`) : [],
     ...r.phase.kind === "needs-person" ? r.phase.reasons.map((reason) => `needs you: ${reason}`) : [],
     // A control plane older than waivers sends none.
     ...r.waiver == null ? [] : [`waived by ${r.waiver.by} at ${r.waiver.head}, ${new Date(r.waiver.at).toISOString()}:`, ...r.waiver.holds.map((hold) => `  ${hold}`)],

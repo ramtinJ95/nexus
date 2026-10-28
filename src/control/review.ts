@@ -241,6 +241,17 @@ const labelStates = { adding: `, adding the label "${humanLabel}"`, added: `, la
 /** How a review's line in `nexus show` and the dashboard ends. A refused label's why is already one of the reasons. */
 export const phaseNote = (r: Review) => r.phase.kind === "cancelled" ? `, the ${r.phase.who} thread ${r[r.phase.who]} was ${r.phase.status}`
   : r.phase.kind === "needs-person" && r.phase.label ? labelStates[r.phase.label.state] : "";
+/** The latest round's live check, as `nexus show` and the dashboard say it, or null before its checks passed. */
+export function liveNote(r: Review): string | null {
+  const round = r.rounds.at(-1)!;
+  const head = round.head.slice(0, 12);
+  if (r.phase.kind === "verifying") {
+    if (r.phase.thread !== null) return `live check running .nexus/verify at ${head} in verify pylon ${r.phase.thread}`;
+    return r.phase.refused === undefined ? `live check starting at ${head}` : `live check waiting for a node to take its verify pylon: ${r.phase.refused}`;
+  }
+  if (round.live !== undefined) return `live check ${round.live.passed ? "passed" : "failed"} at ${head}`;
+  return round.check?.passed === true ? `no live check: ${head} has no .nexus/verify, so the landing reads the pull request's statement of what could not be checked live` : null;
+}
 const checkOutput = (output: string) => `The check's output:\n${output}`;
 const liveOutput = (output: string) => `The live check's output:\n${output}`;
 const findingLine = (f: Finding) => `${f.id} (${f.priority})${f.where ? ` ${f.where}` : ""}: ${f.summary}${f.detail ? `\n${f.detail.split("\n").map((l) => `    ${l}`).join("\n")}` : ""}`;
