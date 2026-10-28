@@ -21,6 +21,8 @@ import type { NodePylons, Placement, Room } from "../control/placement.ts";
 import type { QueuedThread, Wait } from "../control/queue.ts";
 import type { ClaudeSent, Preview, Thread } from "../control/registry.ts";
 import type { Review } from "../control/review.ts";
+import type { Question } from "../control/questions.ts";
+import { reservedNames } from "../control/policy.ts";
 import { maxEntries, usageLimitText, type ClaudeConversation, type ClaudeEntry, type PromptSource } from "../claude-transcript.ts";
 import { claudeFrames, queuedOf, type ClaudeFrame } from "../control/claude-conversation.ts";
 import { phaseNote, roundsSpent } from "../control/review.ts";
@@ -35,7 +37,7 @@ import type { WebSocket } from "ws";
 import { attachTerminal, processTty } from "./attach.ts";
 import { call, CliError, exitCodes, follow, upgrade, type Endpoint, type HostPort } from "./transport.ts";
 
-const version = "0.34.0";
+const version = "0.35.0";
 const defaults = { url: "http://rj-firebat.tailc817d3.ts.net:7470", socks: "localhost:1055" };
 const configFile = () => join(homedir(), ".config", "nexus", "cli.json");
 
@@ -340,6 +342,16 @@ function reviewText(r: Review): string {
   ].join("\n");
 }
 
+/** A question's first line, its options and reserved case, and who must answer it or how it was answered. */
+function questionText(q: Question): string {
+  return [
+    `question ${q.id}: ${q.text.split("\n")[0]}`,
+    `  options: ${q.options.map((o) => JSON.stringify(o)).join(", ")}`,
+    ...q.reserved === null ? [] : [`  reserved: ${reservedNames[q.reserved]}`],
+    q.answer !== null ? `  answered ${JSON.stringify(q.answer.option)} by ${q.answer.by} at ${new Date(q.answer.at).toISOString()}` : q.answerer === "deployer" ? "  needs a deployer" : "  needs you",
+  ].join("\n");
+}
+
 const autoReviews = { off: null, review: { land: false }, land: { land: true } } as const;
 /** A control plane older than `Project.autoReview` sends none, and reviews nothing on its own. */
 const autoReviewText = (p: Project) => p.autoReview == null ? "auto review off" : p.autoReview.land ? `auto review and land, for ${p.autoReview.enabledBy}` : `auto review, set by ${p.autoReview.enabledBy}`;
@@ -347,7 +359,7 @@ const autoReviewText = (p: Project) => p.autoReview == null ? "auto review off" 
 /** A control plane older than `Thread.working` sends none. */
 const working = (t: Thread) => t.working ?? (t.agentTurnRunning || t.sessionTurnRunning === true);
 
-function detailText({ thread: t, pylon: p, agent, sessions, previews, ports, outputs, prWatch, pullRequests, claudeWorker, attention, review }: ThreadDetail): string {
+function detailText({ thread: t, pylon: p, agent, sessions, previews, ports, outputs, prWatch, pullRequests, claudeWorker, attention, review, questions }: ThreadDetail): string {
   const observed = p.observedAt === null ? "" : `, observed ${ago(Date.parse(p.observedAt))}`;
   return [
     `${t.id}  ${t.title}`,
@@ -373,6 +385,8 @@ function detailText({ thread: t, pylon: p, agent, sessions, previews, ports, out
     ...(prWatch?.enabled ? [prWatch.stopped ? "PR watch: stopped (10 comment-only wakes)" : "PR watch: on", ...(prWatch.error ? [prWatch.error] : [])] : ["PR watch: off (no control-plane GitHub token configured)"]),
     ...(pullRequests ?? []).map((pr) => `PR #${pr.number}: ${pr.title} — ${pr.state}, checks ${pr.checks}, review ${pr.review} ${pr.url}`),
     ...review == null ? [] : [reviewText(review)],
+    // A control plane older than 0.35.0 sends no questions.
+    ...(questions ?? []).map(questionText),
     ...outputs.map((o) => `output: ${o.kind} ${o.ref}`),
   ].join("\n");
 }
