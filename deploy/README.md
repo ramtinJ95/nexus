@@ -244,7 +244,7 @@ If the earlier, unmerged private-socket version was manually tried, remove `serv
 
 Source references at the reviewed upstream revision: [certificate endpoint](https://github.com/tailscale/tailscale/blob/b71e0f30a781894c9508d2903e939c5ca1a1361a/ipn/localapi/cert.go), [cert-only user permission](https://github.com/tailscale/tailscale/blob/b71e0f30a781894c9508d2903e939c5ca1a1361a/ipn/ipnserver/server.go) (`CanFetchCerts`), and [Serve local-admin requirement](https://github.com/tailscale/tailscale/blob/b71e0f30a781894c9508d2903e939c5ca1a1361a/ipn/localapi/serve.go). Tests use a fake LocalAPI and locally generated certificates; real tailscaled issuance/renewal, cert-only permission, preview operations and browser notifications cannot be verified from the development pylon and need the person's post-merge checks above.
 
-The CLI, mod, pi-nexus, probes and root deployers keep using `http://<control>:7470`. Tailnet transport is already encrypted; these clients do not need a browser secure context, and retaining their direct path avoids changing endpoint identity checks or depending on certificate provisioning. No CLI contract changes are needed.
+Probes and root deployers keep using `http://<control>:7470`. Tailnet transport is already encrypted; these clients do not need a browser secure context, and retaining their direct path avoids changing endpoint identity checks or depending on certificate provisioning. The Mac CLI, and the mod and pi-nexus, which shell out to it, use the URL `nexus connect` saved, which tries this HTTPS port first and then 7470, as [docs/cli.md](../docs/cli.md#connecting-a-device-0410) describes.
 
 ### Sign the harness in
 
