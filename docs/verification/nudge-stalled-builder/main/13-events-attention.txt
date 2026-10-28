@@ -1,0 +1,6 @@
+$ nexus events --kind attention.changed
+2 2026-10-28T04:09:15.761Z th-ce0bc9a36d03 attention.changed {"attention":"reply"}
+4 2026-10-28T04:09:15.762Z th-c8e6dd0c6624 attention.changed {"attention":"reply"}
+6 2026-10-28T04:09:15.965Z th-b0b802f2d150 attention.changed {"attention":"reply"}
+8 2026-10-28T04:09:16.161Z th-43cde7f5d7e9 attention.changed {"attention":"reply"}
+[exit 0]

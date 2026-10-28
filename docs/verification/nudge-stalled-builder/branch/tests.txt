@@ -1,0 +1,17 @@
+✔ a builder whose turn ended without a pull request gets one nudge after the grace, under the turn's request ID (8.337902ms)
+✔ a pull request opened just before the turn ended, which the PR watch has not linked yet, gets no nudge (4.447988ms)
+✔ a GitHub search that fails sends nothing and logs no error text (4.536052ms)
+✔ after two nudges a third stalled turn goes to the person, until the PR watch links a pull request (5.062426ms)
+✔ a reviewer, a check thread, a builder in a project without auto-review, and a running turn are never nudged (4.783445ms)
+✔ the person writing after the first reply leaves a builder alone, and takes back one held for them (8.635819ms)
+✔ a Claude worker builder is nudged by typing into its session, and a person's prompt after its first reply leaves it alone (7.205895ms)
+✔ a nudge the session could not take yet saves nothing and is sent again under the same request ID (4.511907ms)
+✔ archiving a thread held for the person clears the hold (4.46557ms)
+ℹ tests 9
+ℹ suites 0
+ℹ pass 9
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 229.102201

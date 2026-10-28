@@ -1,0 +1,15 @@
+$ nexus show th-ff330bc6d4b4
+th-ff330bc6d4b4  Greet by name
+project: nexus
+Claude worker: started, model claude-opus-5-5
+attention: reply
+status: active
+pylon: pylon-th-ff330bc6d4b4 on verify-node, running, observed 0s ago
+size: 1 CPUs, 1 GiB memory, 10 GiB disk
+placement: verify-node, the project's default node
+setup: fresh boot runs .nexus/setup, because the control plane could not read .nexus/setup at main: the verify stack reads no remote, so every thread boots fresh
+PR watch: on
+PR #2: Greet by name — open, checks none, review none https://github.com/ramtinJ95/nexus/pull/2
+output: branch origin/greet-name
+output: pull-request https://github.com/ramtinJ95/nexus/pull/2
+[exit 0]

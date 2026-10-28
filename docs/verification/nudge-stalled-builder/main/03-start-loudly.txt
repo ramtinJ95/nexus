@@ -1,0 +1,26 @@
+$ nexus start --project nexus --title Greet loudly --claude stop-before-push greet-loud stay --json
+{
+  "id": "th-c8e6dd0c6624",
+  "title": "Greet loudly",
+  "project": "nexus",
+  "pylonId": "pylon-th-c8e6dd0c6624",
+  "status": "active",
+  "conversationId": null,
+  "startedBy": "nLAPTOP",
+  "createdAt": 1793160555742,
+  "agentTurnRunning": false,
+  "working": false,
+  "lastAgentActivityAt": 0,
+  "lastHumanActivityAt": 1793160555742,
+  "seenAt": null,
+  "lastReplyAt": null,
+  "placement": {
+    "how": "default",
+    "node": "verify-node"
+  },
+  "setup": {
+    "how": "fresh",
+    "reason": "the control plane could not read .nexus/setup at main: the verify stack reads no remote, so every thread boots fresh"
+  }
+}
+[exit 0]
