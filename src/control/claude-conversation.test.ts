@@ -1,13 +1,15 @@
 import { after, test } from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { mkdtemp, rm } from "node:fs/promises";
+import { appendFile, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { queryObjects } from "node:v8";
 import { claudeConversations } from "./claude-conversation.ts";
 import { openRegistry, type Registry, type Thread, type ThreadId } from "./registry.ts";
 import { newPylonRecord } from "../tick.ts";
+import { claudeProjects, maxEntries, type ClaudeEntry } from "../claude-transcript.ts";
+import { processStream } from "../process-stream.ts";
 import type { ByteStream, LiveHash, NodeName, ProbeClient, PylonId, TailnetNodeId } from "../protocol.ts";
 import type { ProjectId } from "../project.ts";
 import type { ImageId } from "../images.ts";
@@ -154,4 +156,48 @@ test("a deleted thread's reader goes once its last read and its last watch end, 
   assert.equal(readersBesides(active), 1, "the read ended, so its thread's reader went");
   await watch.stop();
   assert.equal(readersBesides(active), 0, "the watch ended, so its thread's reader went");
+});
+
+test("a watched thread's view, which reads on from the last one, holds what the registry stores as reads append, drop, replace or change session", async (t) => {
+  const registry = openOnline();
+  t.after(() => registry.close());
+  const thread = claudeThread(registry);
+  const projects = await mkdtemp(join(dir, "projects-"));
+  await mkdir(join(projects, "-home-user-workspace-repo"));
+  const file = (id: string) => join(projects, "-home-user-workspace-repo", `${id}.jsonl`);
+  const probe: Pick<ProbeClient, "stream"> = {
+    stream: async (_, argv) => processStream(argv[0]!, argv.slice(1).map((arg) => arg === claudeProjects ? projects : arg), () => {}),
+  };
+  const conversations = claudeConversations({ registry, probes: new Map([[node, probe]]), followMs: 3_600_000 });
+  t.after(() => conversations.close());
+  const reply = JSON.parse((await readFile(new URL("../fixtures/claude-transcript.jsonl", import.meta.url), "utf8")).split("\n")[40]!);
+  const lines = (...texts: string[]) => texts.map((text, i) => `${JSON.stringify({ ...reply, uuid: `${text}-${i}`, message: { ...reply.message, id: `msg-${text}-${i}`, content: [{ type: "text", text }] } })}\n`).join("");
+  const stored = () => ({ entries: registry.claudeEntries(thread.id), dropped: registry.claudeTranscript(thread.id)!.dropped });
+  const shown = async () => {
+    await conversations.refresh(thread);
+    const { entries, dropped } = conversations.view(thread);
+    return { entries, dropped };
+  };
+  const texts = (view: { entries: readonly ClaudeEntry[] }) => view.entries.map((e) => e.kind === "reply" ? e.text : e.kind);
+
+  await writeFile(file(session), lines("A", "Z"));
+  const watch = await conversations.watch(thread);
+  watch.start(() => undefined);
+  assert.deepEqual(texts(await shown()), ["A", "Z"]);
+  await appendFile(file(session), lines("C", "D"));
+  assert.deepEqual(await shown(), stored(), "the entries a read appended");
+  assert.deepEqual(texts(stored()), ["A", "Z", "C", "D"]);
+  assert.deepEqual(await shown(), stored(), "a view with nothing new to read");
+  await writeFile(file(session), lines("B", "Z"));
+  assert.deepEqual(texts(await shown()), ["B", "Z"], "a replaced transcript that ends as the old one did");
+  await appendFile(file(session), lines(...Array.from({ length: maxEntries }, (_, i) => `R${i}`)));
+  const many = await shown();
+  assert.deepEqual(many, stored());
+  assert.deepEqual([many.dropped, texts(many)[0]], [2, "R0"], "a read past the most kept drops the oldest");
+  await writeFile(file("another-session"), lines("E"));
+  registry.setClaudeWorker(thread.id, "hello", "started", undefined, "another-session");
+  assert.deepEqual(texts(await shown()), ["E"], "another session's transcript");
+  await watch.stop();
+  await appendFile(file("another-session"), lines("F"));
+  assert.deepEqual(await shown(), stored(), "an unwatched thread's view");
 });

@@ -79,18 +79,21 @@ export function dashboard(options: DashboardOptions): (path: string, query: URLS
       const period = query.get("period") ?? "";
       return ok(usagePage(context(), Object.hasOwn(periods, period) ? period as Period : "7d", (query.get("project") || null) as ProjectId | null));
     }],
-    [/^\/threads\/([^/]+)$/, async (m, _, context) => {
+    [/^\/threads\/([^/]+)$/, async (m, query, context) => {
       const thread = registry.thread(m[1]! as ThreadId);
       if (thread === undefined) {
         const queued = registry.queuedThread(m[1]! as ThreadId);
         if (queued !== undefined && queued.status !== "started") return ok(queuedPage(context(), queuedView(registry, queued)));
         return { ...ok(notFound(context(), `No thread ${m[1]!}.`)), status: 404 };
       }
-      // The reply known before this read is a safe watermark even if another turn ends during it.
+      // The reply known before this read is a safe watermark even if another turn ends during it. A Claude worker's
+      // transcript is as of its last read that reached its end, which holds the reply only if it started after the
+      // reply was recorded.
       const view = await transcript(thread);
+      const repliedAt = view !== null && !(view instanceof Error) && isClaude(view) && (view.readAt ?? 0) < (thread.lastReplyAt ?? 0) ? null : thread.lastReplyAt;
       // After the read, so the facts are no older than the conversation, and a thread deleted meanwhile shows none.
       const d = detail(registry.thread(thread.id)!);
-      return ok(threadPage(context(), d, registry.node(d.pylon.node)!, d.thread.status === "deleted" ? null : view, thread.lastReplyAt));
+      return ok(threadPage(context(), d, registry.node(d.pylon.node)!, d.thread.status === "deleted" ? null : view, repliedAt, query.has("streaming")));
     }],
     [/^\/assets\/([\w.-]+)$/, (m, query, context) => {
       const asset = assets.get(m[1]!);
@@ -210,11 +213,12 @@ function span(at: number, now: number): string | null {
     : `${Math.round(seconds / 86_400)} d`;
 }
 
+/** "5 min ago", which client.js ticks with the same format. */
 function ago(at: number, now: number): Html {
   if (at === 0) return html`never`;
   const iso = new Date(at).toISOString();
   const label = span(at, now);
-  return html`<time datetime="${iso}" title="${iso}">${label === null ? "just now" : `${label} ago`}</time>`;
+  return html`<time datetime="${iso}" title="${iso}" data-ago>${label === null ? "just now" : `${label} ago`}</time>`;
 }
 
 /** A run's length as a clock reads it, such as 1m 03s. client.js ticks it with the same format. */
@@ -558,12 +562,14 @@ function lookOf(d: ThreadDetail, p: Preview) {
   return state === "failed" ? { ...previewLook.failed, hint: p.failed } : previewLook[state];
 }
 
-function threadPage(c: Context, d: ThreadDetail, node: NodeRecord, view: Conversation | Error | null, renderedReplyAt: number | null): Html {
+/** `streaming` is a poll from a page whose stream shows the conversation. */
+function threadPage(c: Context, d: ThreadDetail, node: NodeRecord, view: Conversation | Error | null, renderedReplyAt: number | null, streaming = false): Html {
   const { thread: t } = d;
   const read = view === null || view instanceof Error ? null : view;
   const items = read === null ? [] : itemsOf(read);
   const run = runOf(d, read, items);
   const model = d.claudeWorker !== undefined ? d.claudeWorker.model : read === null || isClaude(read) ? null : modelOf(read);
+  const shows = streaming && read !== null && isClaude(read) ? shownKey(read, model) : null;
   const [label, tone] = threadState(d);
   const open = t.status === "active" || t.status === "idle";
   const actions = [
@@ -584,7 +590,7 @@ ${actions.length > 0 && html`<div class="bar-actions" id="thread-actions">${acti
 <div class="tabs" id="tabs" role="tablist" aria-label="Open views" data-thread="${t.id}"><button type="button" class="tab active" role="tab" aria-selected="true" aria-controls="scroll" data-tab="convo">${icon("chat")}<span class="tab-name">${t.title}</span></button></div>
 <div class="strip" id="strip" data-live>${strip(d)}</div>
 <div id="facts" data-live hidden>${facts(d)}</div>
-<div class="scroll" id="scroll" role="tabpanel"><div class="convo" id="convo" data-rendered-reply-at="${read === null ? "" : renderedReplyAt ?? ""}" data-live${(t.conversationId !== null || d.claudeWorker !== undefined) && t.status !== "deleted" && html` data-stream="/threads/${t.id}/stream"`}>${convo(t, view, items, model, c.now)}</div></div>
+<div class="scroll" id="scroll" role="tabpanel"><div class="convo" id="convo" data-rendered-reply-at="${read === null ? "" : renderedReplyAt ?? ""}"${shows !== null && html` data-shows="${shows}"`} data-live${(t.conversationId !== null || d.claudeWorker !== undefined) && t.status !== "deleted" && html` data-stream="/threads/${t.id}/stream"`}>${shows === null && convo(t, view, items, model, c.now)}</div></div>
 <section class="file-view" id="file-view" role="tabpanel" aria-label="File diff" hidden></section>
 <div class="dock">
 <p id="action-error" class="error" role="alert" hidden></p>
@@ -754,9 +760,22 @@ ${view === null ? html`<p class="empty">${t.status === "deleted" ? "The thread i
 
 /**
  * One event of a thread page's stream: the conversation region's inside, or the new inside of each part that grew,
- * by its place among the region's `data-grow` elements.
+ * by its place among the region's `data-grow` elements. A Claude worker's frames say which view the region then
+ * shows, and a frame with only that comes when the view changed and the region did not.
  */
-export type LiveFrame = { convo: string } | { grow: [index: number, inside: string][] };
+export type LiveFrame = { convo: string; shows?: string } | { grow: [index: number, inside: string][]; shows?: string } | { shows: string };
+
+const digest = (text: string) => createHash("sha256").update(text).digest("base64url").slice(0, 22);
+const entryDigests = new WeakMap<readonly ClaudeEntry[], string>();
+/**
+ * Which Claude view a conversation region shows, so a poll from a page whose stream shows it can say so without
+ * rendering it. A watched thread's views keep one entries array until an entry changes, so each is digested once.
+ */
+function shownKey(view: ClaudeConversation, model: string | null): string {
+  let entries = entryDigests.get(view.entries);
+  if (entries === undefined) entryDigests.set(view.entries, entries = digest(JSON.stringify(view.entries)));
+  return digest(JSON.stringify([view.session, view.dropped, entries, view.readAt === null, view.working, view.usageLimit, model]));
+}
 
 /**
  * The inside of a `data-grow` element, which grows in place while the run streams. Every string in a page is
@@ -773,6 +792,7 @@ const grown = /<!--grow-->([\s\S]*?)<!--\/grow-->/g;
 export function liveFrames(t: Thread, claudeModel: string | null = null, now: () => number = Date.now): (view: Conversation) => LiveFrame | null {
   let shape: string | null = null;
   let parts: string[] = [];
+  let shown: string | null = null;
   return (view) => {
     const region = convo(t, view, itemsOf(view), isClaude(view) ? claudeModel : modelOf(view), now()).text;
     const next = [...region.matchAll(grown)].map((m) => m[1]!);
@@ -781,8 +801,13 @@ export function liveFrames(t: Thread, claudeModel: string | null = null, now: ()
     const changed = nextShape !== shape;
     shape = nextShape;
     parts = next;
-    if (changed) return { convo: region };
-    return grew.length === 0 ? null : { grow: grew };
+    const key = isClaude(view) ? shownKey(view, claudeModel) : null;
+    const rekeyed = key !== shown;
+    shown = key;
+    const shows = key === null ? {} : { shows: key };
+    if (changed) return { convo: region, ...shows };
+    if (grew.length > 0) return { grow: grew, ...shows };
+    return rekeyed ? { shows: key! } : null;
   };
 }
 

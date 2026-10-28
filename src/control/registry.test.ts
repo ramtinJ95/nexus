@@ -1160,6 +1160,7 @@ test("a Claude worker's transcript survives reopening, keeps its newest entries,
   assert.equal(second.appendClaudeRead(threadId, read(200, [reply(maxEntries + 7)], 300)), false, "a read must start where the reader stands, skipping included");
   assert.equal(second.appendClaudeRead(threadId, { ...read(200, [reply(maxEntries + 7)], 300), from: cursorAt(200, true) }), true);
   assert.deepEqual([second.claudeEntries(threadId)[0], second.claudeEntries(threadId).length, second.claudeTranscript(threadId)!.dropped], [reply(8), maxEntries, 8]);
+  assert.deepEqual(second.claudeEntries(threadId, 8 + maxEntries - 2), [reply(maxEntries + 6), reply(maxEntries + 7)], "the entries from one, numbered on from the dropped");
 
   second.appendClaudeRead(threadId, read(300, [reply(-1)], 10, { reset: true }));
   assert.deepEqual(second.claudeEntries(threadId), [reply(-1)], "a file that shrank starts the transcript over");

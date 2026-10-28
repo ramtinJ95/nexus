@@ -726,7 +726,8 @@ export function openRegistry(path: string, clock = Date.now) {
       return row === undefined ? null : claudeTurn(row.turn_session as string, row.turn_at as number);
     },
     claudeTranscript,
-    claudeEntries: (thread: ThreadId): ClaudeEntry[] => sql("SELECT entry FROM claude_entries WHERE thread = ? ORDER BY seq").all(thread).map((r) => json<ClaudeEntry>(r.entry)),
+    /** The stored entries from the one numbered `from`, where the oldest kept is numbered as the transcript's `dropped`. */
+    claudeEntries: (thread: ThreadId, from = 0): ClaudeEntry[] => sql("SELECT entry FROM claude_entries WHERE thread = ? AND seq >= ? ORDER BY seq").all(thread, from).map((r) => json<ClaudeEntry>(r.entry)),
     /**
      * Appends what a read found and keeps the newest maxEntries. A read of another session than the stored one, or of
      * a file that was replaced, replaces the stored entries. A read that did not start where the stored reader stands, such

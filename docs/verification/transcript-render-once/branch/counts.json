@@ -1,0 +1,23 @@
+{
+  "entriesParsed": {
+    "stream": 25,
+    "poll": 0
+  },
+  "usageLimitEntries": 1392,
+  "convoRenders": {
+    "stream": 14,
+    "poll": 0
+  },
+  "blocksRendered": {
+    "stream": 8630,
+    "poll": 0
+  },
+  "frames": 14,
+  "ageOnlyFrames": 0,
+  "namingFrames": 1,
+  "pings": 8,
+  "streamBytes": 2085229,
+  "polls": 25,
+  "pollBytes": 435228,
+  "transcriptReads": 63
+}
