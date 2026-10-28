@@ -38,6 +38,7 @@ export interface Verdict { answer: Answer; why: string; by: "judgment" | "contro
 export type Outcome =
   | { kind: "retried"; node: NodeName; on: "verdict" | "answer" }
   | { kind: "moved"; from: NodeName; to: NodeName; on: "verdict" | "answer" }
+  /** Nothing, for `why`. */
   | { kind: "left"; why: string };
 
 export type Phase =
@@ -71,6 +72,7 @@ export interface Judgment {
 export interface JudgmentView {
   failure: number;
   node: NodeName;
+  failed: string;
   startedAt: number;
   phase: Phase["kind"];
   /** Null while it judges. */
@@ -99,13 +101,13 @@ export function outcomeText(o: Outcome): string {
   switch (o.kind) {
     case "retried": return `retried the pylon on ${o.node}${answered}`;
     case "moved": return `moved the pylon from ${o.from} to ${o.to} and retried it${answered}`;
-    case "left": return o.why;
+    case "left": return `did nothing, as ${o.why}`;
   }
 }
 
 export function judgmentView(j: Judgment): JudgmentView {
   return {
-    failure: j.failure, node: j.node, startedAt: j.startedAt, phase: j.phase.kind, verdict: j.phase.kind === "judging" ? null : j.phase.verdict,
+    failure: j.failure, node: j.node, failed: j.failed, startedAt: j.startedAt, phase: j.phase.kind, verdict: j.phase.kind === "judging" ? null : j.phase.verdict,
     outcome: j.phase.kind === "done" ? outcomeText(j.phase.outcome) : null, question: j.phase.kind === "asked" ? judgmentId(j.failure) : null,
     brief: j.request?.brief ?? null, reply: j.reply,
   };
@@ -237,9 +239,9 @@ export function judgmentPass(options: {
   /** Why the failure needs nothing more from Nexus, or null while its pylon still holds it. */
   function settled(j: Judgment): string | null {
     const t = registry.thread(j.thread)!;
-    if (t.status === "archived" || t.status === "deleted") return `nothing to do: the thread is ${t.status}`;
+    if (t.status === "archived" || t.status === "deleted") return `the thread is ${t.status}`;
     // A retry clears `failed`, and a later failure appends a newer event. The failure's own event may be pruned.
-    if (registry.pylon(t.pylonId)?.failed !== j.failed || (registry.failure(t.id)?.event ?? j.failure) !== j.failure) return "nothing to do: the pylon was retried before Nexus acted";
+    if (registry.pylon(t.pylonId)?.failed !== j.failed || (registry.failure(t.id)?.event ?? j.failure) !== j.failure) return "the pylon was retried before Nexus acted";
     return null;
   }
 
@@ -360,7 +362,7 @@ export function judgmentPass(options: {
   function ask(j: Judgment, verdict: Verdict, pylon: StoredPylon): { next: Judgment; act?: () => void; nodes: NodeName[] } {
     const retry = retryRefusal(observed(pylon));
     const where = move(pylon);
-    if (retry !== null && "refused" in where) return done(j, verdict, `left for the person, as neither a retry nor a move can run: ${retry}; ${where.refused}`);
+    if (retry !== null && "refused" in where) return done(j, verdict, `neither a retry nor a move can run, so the failure is the person's: ${retry}; ${where.refused}`);
     const choices = [...retry === null ? [labels.retry] : [], ..."to" in where ? [labels.move] : [], labels.leave];
     const text = [
       `The pylon failed on ${pylon.node}: ${j.failed.split("\n")[0]}`,

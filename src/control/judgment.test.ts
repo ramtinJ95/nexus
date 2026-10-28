@@ -245,7 +245,7 @@ test("a judgment that does not answer in time is closed and goes to the person, 
   w.registry.setThreadStatus(deleted, "deleted");
   await w.until(() => phaseOf(w, deleted) === "done");
   const ended = only(w.registry, deleted);
-  assert.deepEqual(ended.phase.kind === "done" && ended.phase.outcome, { kind: "left", why: "nothing to do: the thread is deleted" });
+  assert.deepEqual(ended.phase.kind === "done" && ended.phase.outcome, { kind: "left", why: "the thread is deleted" });
   assert.notEqual(await w.host.judgmentReplies(ended.conversation as ConversationId), null, "its conversation is closed");
 
   late = 15 * 60_000;
