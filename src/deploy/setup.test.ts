@@ -225,7 +225,7 @@ test("a name two devices share is ambiguous, and the full MagicDNS name picks on
 
 const freshControl: Facts = {
   self: tailnet.self, secretNames: [], gitKey: false,
-  role: "control", port: 7470, signedIn: false, admitted: false, docker: "missing", dockerGroup: false, image: false,
+  role: "control", port: 7470, signedIn: false, admitted: false, docker: { kind: "missing" }, dockerGroup: false, image: false,
 };
 
 test("a fresh control machine is left every step, the ChatGPT login first and the Mac CLI before any step that runs it", () => {
@@ -254,15 +254,30 @@ test("a host without Docker is told to install Docker with buildx and start it, 
   assert.ok(install >= 0);
   assert.equal(commands[install + 1], "sudo systemctl enable --now docker");
   assert.ok(commands.findIndex((command) => command.includes("usermod --append --groups docker nexus")) > install);
-  const noBuildx = left({ ...freshControl, docker: "no-buildx" }).flatMap((item) => item.run);
-  assert.ok(noBuildx.includes("sudo apt-get install -y docker-buildx-plugin"));
-  assert.ok(!noBuildx.some((command) => command.includes("get.docker.com")));
-  const ready = left({ ...freshControl, docker: "ready" }).flatMap((item) => item.run);
+  const ready = left({ ...freshControl, docker: { kind: "ready" } }).flatMap((item) => item.run);
   assert.ok(!ready.some((command) => /get\.docker\.com|buildx/.test(command)));
 });
 
+test("a Docker without buildx is told the buildx package of its own package manager and source", () => {
+  const cases = [
+    ["apt", "docker", "sudo apt-get install -y docker-buildx-plugin"],
+    ["apt", "distribution", "sudo apt-get install -y docker-buildx"],
+    ["dnf", "docker", "sudo dnf install -y docker-buildx-plugin"],
+    ["dnf", "distribution", "sudo dnf install -y docker-buildx"],
+  ] as const;
+  for (const [manager, from, command] of cases) {
+    const commands: readonly string[] = left({ ...freshControl, docker: { kind: "no-buildx", manager, from } }).flatMap((item) => item.run);
+    assert.ok(commands.includes(command), `${manager} ${from}`);
+    assert.ok(!commands.some((c) => c.includes("get.docker.com") || (c.includes("buildx") && c !== command)), `${manager} ${from} gets one buildx command`);
+  }
+  const other = left({ ...freshControl, docker: { kind: "no-buildx", manager: "other", from: "distribution" } });
+  const item = other.find((i) => i.say.includes("buildx plugin"))!;
+  assert.deepEqual(item.run, []);
+  assert.match(item.say, /https:\/\/docs\.docker\.com\/go\/buildx\//);
+});
+
 test("a finished control machine is left only the Mac CLI", () => {
-  const items = left({ ...freshControl, secretNames: ["CLAUDE_CODE_OAUTH_TOKEN", "GH_TOKEN"], gitKey: true, signedIn: true, admitted: true, docker: "ready", dockerGroup: true, image: true });
+  const items = left({ ...freshControl, secretNames: ["CLAUDE_CODE_OAUTH_TOKEN", "GH_TOKEN"], gitKey: true, signedIn: true, admitted: true, docker: { kind: "ready" }, dockerGroup: true, image: true });
   assert.equal(items.length, 1);
   assert.match(items[0]!.run.join("\n"), /mkdir -p ~\/\.local\/bin && ln -sf "\$PWD\/deploy\/mac\/nexus" ~\/\.local\/bin\/nexus/);
 });

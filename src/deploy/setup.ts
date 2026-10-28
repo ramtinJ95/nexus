@@ -275,7 +275,13 @@ export function report(files: readonly FileWrite[]): string {
 }
 
 /** What image builds need here: the Docker daemon and its buildx plugin, which images/pylon/build.sh calls. */
-export type Docker = "missing" | "no-buildx" | "ready";
+export type Docker =
+  | { kind: "missing" | "ready" }
+  /** `from` is where this Docker's packages came from: Docker's repository or the distribution's, which name buildx differently. */
+  | { kind: "no-buildx"; manager: "apt" | "dnf" | "other"; from: "docker" | "distribution" };
+
+const buildxPackage = { docker: "docker-buildx-plugin", distribution: "docker-buildx" } as const;
+const packageInstall = { apt: "sudo apt-get install -y", dnf: "sudo dnf install -y" } as const;
 
 export type Facts = {
   self: Device;
@@ -342,14 +348,21 @@ export function left(facts: Facts): Item[] {
       rerun,
     ],
   });
-  if (facts.role === "control" && facts.docker === "missing") items.push({
+  if (facts.role === "control" && facts.docker.kind === "missing") items.push({
     say: "Image builds run here and need Docker with its buildx plugin. Docker's install script installs both, and systemd starts the daemon.",
     run: ["curl -fsSL https://get.docker.com | sudo sh", "sudo systemctl enable --now docker"],
   });
-  if (facts.role === "control" && facts.docker === "no-buildx") items.push({
-    say: "Docker here lacks the buildx plugin, which image builds use. Install docker-buildx-plugin from Docker's repository, or docker-buildx from Debian's.",
-    run: ["sudo apt-get install -y docker-buildx-plugin"],
-  });
+  if (facts.role === "control" && facts.docker.kind === "no-buildx") {
+    const { manager, from } = facts.docker;
+    const source = from === "docker" ? "Docker's repository" : "the distribution";
+    items.push(manager === "other" ? {
+      say: "Docker here lacks the buildx plugin, which image builds use. Install it as https://docs.docker.com/go/buildx/ describes.",
+      run: [],
+    } : {
+      say: `Docker here lacks the buildx plugin, which image builds use. This Docker came from ${source}, whose buildx package is ${buildxPackage[from]}.`,
+      run: [`${packageInstall[manager]} ${buildxPackage[from]}`],
+    });
+  }
   if (facts.role === "control" && !facts.dockerGroup) items.push({
     say: "Image builds run here and need Docker. Membership of the docker group is root-equivalent, so adding nexus to it is your call.",
     run: ["sudo usermod --append --groups docker nexus && sudo systemctl restart nexus-probe"],
@@ -415,6 +428,16 @@ async function write(flags: Flags): Promise<number> {
   return 0;
 }
 
+/** The package manager, and whether Docker's own docker-ce-cli package is installed or the distribution's Docker is. */
+async function dockerSource(): Promise<Docker> {
+  const env = { PATH: "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" };
+  const succeeds = (program: string, args: string[]) => exec(program, args, { env }).then(() => true, () => false);
+  const from = (installed: boolean) => installed ? "docker" as const : "distribution" as const;
+  if (await succeeds("sh", ["-c", "command -v apt-get"])) return { kind: "no-buildx", manager: "apt", from: from(await exec("dpkg-query", ["-W", "-f=${db:Status-Status}", "docker-ce-cli"], { env }).then(({ stdout }) => stdout === "installed", () => false)) };
+  if (await succeeds("sh", ["-c", "command -v dnf"])) return { kind: "no-buildx", manager: "dnf", from: from(await succeeds("rpm", ["-q", "docker-ce-cli"])) };
+  return { kind: "no-buildx", manager: "other", from: "distribution" };
+}
+
 async function gather(flags: Flags): Promise<Facts> {
   const net = await tailnet();
   const secretNames = await readFile(paths.secrets, "utf8").then(
@@ -436,7 +459,7 @@ async function gather(flags: Flags): Promise<Facts> {
   );
   const groups = await exec("id", ["-nG", "nexus"]).then(({ stdout }) => stdout.trim().split(/\s+/), (): string[] => []);
   const succeeds = (args: string[]) => exec("docker", args, { env: { PATH: "/usr/local/bin:/usr/bin" } }).then(() => true, () => false);
-  const docker: Docker = !await succeeds(["--version"]) ? "missing" : !await succeeds(["buildx", "version"]) ? "no-buildx" : "ready";
+  const docker: Docker = !await succeeds(["--version"]) ? { kind: "missing" } : await succeeds(["buildx", "version"]) ? { kind: "ready" } : await dockerSource();
   const image = await readdir(paths.artifacts).then((entries) => entries.some((e) => e.startsWith("img-")), () => false);
   return {
     ...common, role: "control", port: config.listen.port, signedIn: credentials,
