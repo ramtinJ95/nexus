@@ -1,0 +1,566 @@
+13700 cases
+
+entry point | same outcome | same verdict and status, new error text | verdict, status or value changed
+parseJobEnvelope | 1004 | 1661 | 0
+PUT /v1/jobs | 991 | 1661 | 0
+parsePylonCommand | 83 | 669 | 0
+POST commands | 83 | 669 | 0
+parseStreamRequest | 16 | 69 | 0
+GET stream | 16 | 69 | 0
+parseProbeEvent | 2263 | 1065 | 2
+parseSubmitReply | 32 | 143 | 0
+parseArtifactManifest | 24 | 152 | 0
+client.command | 150 | 356 | 0
+client.job | 65 | 148 | 1
+client.manifest | 24 | 152 | 0
+client.submit | 17 | 59 | 0
+pausedSessionsIn | 41 | 327 | 2
+sessionFacts | 207 | 625 | 2
+openSession | 58 | 226 | 0
+recordSessions | 148 | 136 | 0
+closeSession | 257 | 27 | 0
+
+7 cases changed verdict, status or value:
+parseProbeEvent event edge job code toString
+  main:   ok 883c4d633c412a6e
+  branch: threw "event.status.code: Invalid option: expected one of \"deadline\"|\"backend\"|\"checkpoint-failed\"|\"artifact-missing\"|\"capacity\"|\"setup-failed\"|\"secret-missing\"|\"invalid\""
+parseProbeEvent event edge job code constructor
+  main:   ok 4b5bab771d21f92f
+  branch: threw "event.status.code: Invalid option: expected one of \"deadline\"|\"backend\"|\"checkpoint-failed\"|\"artifact-missing\"|\"capacity\"|\"setup-failed\"|\"secret-missing\"|\"invalid\""
+client.job status edge code toString
+  main:   ok f1f9bc7e30684a52
+  branch: threw "status.code: Invalid option: expected one of \"deadline\"|\"backend\"|\"checkpoint-failed\"|\"artifact-missing\"|\"capacity\"|\"setup-failed\"|\"secret-missing\"|\"invalid\""
+pausedSessionsIn sessions-file edge harness toString
+  main:   ok 91c73ebb6809731c
+  branch: threw "/home/user/.nexus/sessions.json.sessions[1].harness: Invalid option: expected one of \"claude-code\"|\"pi\"|\"shell\""
+sessionFacts file sessions-file edge harness toString
+  main:   ok 580ada31df06f1b9
+  branch: threw "/home/user/.nexus/sessions.json.sessions[1].harness: Invalid option: expected one of \"claude-code\"|\"pi\"|\"shell\""
+pausedSessionsIn sessions-file edge harness constructor
+  main:   ok d7b01e2a10c2ee0a
+  branch: threw "/home/user/.nexus/sessions.json.sessions[1].harness: Invalid option: expected one of \"claude-code\"|\"pi\"|\"shell\""
+sessionFacts file sessions-file edge harness constructor
+  main:   ok 580ada31df06f1b9
+  branch: threw "/home/user/.nexus/sessions.json.sessions[1].harness: Invalid option: expected one of \"claude-code\"|\"pi\"|\"shell\""
+
+130 distinct error answers from the probe's routes on main, each with the branch's answer to the same request:
+
+PUT /v1/jobs envelope spawn-fresh-clone jobId removed
+  main:   400 "{\"rejected\":\"invalid\",\"message\":\"jobId is not a non-empty string\"}"
+  branch: 400 "{\"rejected\":\"invalid\",\"message\":\"envelope.jobId: Invalid input: expected string, received undefined\"}"
+
+PUT /v1/jobs envelope spawn-fresh-clone node removed
+  main:   400 "{\"rejected\":\"invalid\",\"message\":\"node is not a non-empty string\"}"
+  branch: 400 "{\"rejected\":\"invalid\",\"message\":\"envelope.node: Invalid input: expected string, received undefined\"}"
+
+PUT /v1/jobs envelope spawn-fresh-clone issuedAt removed
+  main:   400 "{\"rejected\":\"invalid\",\"message\":\"issuedAt is not a non-empty string\"}"
+  branch: 400 "{\"rejected\":\"invalid\",\"message\":\"envelope.issuedAt: Invalid input: expected string, received undefined\"}"
+
+PUT /v1/jobs envelope spawn-fresh-clone issuedAt=text
+  main:   400 "{\"rejected\":\"invalid\",\"message\":\"issuedAt is not a timestamp\"}"
+  branch: 400 "{\"rejected\":\"invalid\",\"message\":\"envelope.issuedAt: expected a timestamp\"}"
+
+PUT /v1/jobs envelope spawn-fresh-clone notAfter removed
+  main:   400 "{\"rejected\":\"invalid\",\"message\":\"notAfter is not a non-empty string\"}"
+  branch: 400 "{\"rejected\":\"invalid\",\"message\":\"envelope.notAfter: Invalid input: expected string, received undefined\"}"
+
+PUT /v1/jobs envelope spawn-fresh-clone notAfter=text
+  main:   400 "{\"rejected\":\"invalid\",\"message\":\"notAfter is not a timestamp\"}"
+  branch: 400 "{\"rejected\":\"invalid\",\"message\":\"envelope.notAfter: expected a timestamp\"}"
+
+PUT /v1/jobs envelope spawn-fresh-clone job removed
+  main:   400 "{\"rejected\":\"invalid\",\"message\":\"job is not an object\"}"
+  branch: 400 "{\"rejected\":\"invalid\",\"message\":\"envelope.job: Invalid input: expected object, received undefined\"}"
+
+PUT /v1/jobs envelope spawn-fresh-clone job=object
+  main:   400 "{\"rejected\":\"invalid\",\"message\":\"unknown job kind undefined\"}"
+  branch: 400 "{\"rejected\":\"invalid\",\"message\":\"envelope.job.kind: Invalid discriminator value. Expected 'spawn' | 'pause' | 'delete' | 'build-image' | 'build-template' | 'fetch-artifact' | 'drop-artifact'\"}"
+
+PUT /v1/jobs envelope spawn-fresh-clone job.kind=null
+  main:   400 "{\"rejected\":\"invalid\",\"message\":\"unknown job kind null\"}"
+  branch: 400 "{\"rejected\":\"invalid\",\"message\":\"envelope.job.kind: Invalid discriminator value. Expected 'spawn' | 'pause' | 'delete' | 'build-image' | 'build-template' | 'fetch-artifact' | 'drop-artifact'\"}"
+
+PUT /v1/jobs envelope spawn-fresh-clone job.kind=empty
+  main:   400 "{\"rejected\":\"invalid\",\"message\":\"unknown job kind \\\"\\\"\"}"
+  branch: 400 "{\"rejected\":\"invalid\",\"message\":\"envelope.job.kind: Invalid discriminator value. Expected 'spawn' | 'pause' | 'delete' | 'build-image' | 'build-template' | 'fetch-artifact' | 'drop-artifact'\"}"
+
+PUT /v1/jobs envelope spawn-fresh-clone job.kind=text
+  main:   400 "{\"rejected\":\"invalid\",\"message\":\"unknown job kind \\\"x\\\"\"}"
+  branch: 400 "{\"rejected\":\"invalid\",\"message\":\"envelope.job.kind: Invalid discriminator value. Expected 'spawn' | 'pause' | 'delete' | 'build-image' | 'build-template' | 'fetch-artifact' | 'drop-artifact'\"}"
+
+PUT /v1/jobs envelope spawn-fresh-clone job.kind=zero
+  main:   400 "{\"rejected\":\"invalid\",\"message\":\"unknown job kind 0\"}"
+  branch: 400 "{\"rejected\":\"invalid\",\"message\":\"envelope.job.kind: Invalid discriminator value. Expected 'spawn' | 'pause' | 'delete' | 'build-image' | 'build-template' | 'fetch-artifact' | 'drop-artifact'\"}"
+
+PUT /v1/jobs envelope spawn-fresh-clone job.kind=negative
+  main:   400 "{\"rejected\":\"invalid\",\"message\":\"unknown job kind -1\"}"
+  branch: 400 "{\"rejected\":\"invalid\",\"message\":\"envelope.job.kind: Invalid discriminator value. Expected 'spawn' | 'pause' | 'delete' | 'build-image' | 'build-template' | 'fetch-artifact' | 'drop-artifact'\"}"
+
+PUT /v1/jobs envelope spawn-fresh-clone job.kind=fraction
+  main:   400 "{\"rejected\":\"invalid\",\"message\":\"unknown job kind 1.5\"}"
+  branch: 400 "{\"rejected\":\"invalid\",\"message\":\"envelope.job.kind: Invalid discriminator value. Expected 'spawn' | 'pause' | 'delete' | 'build-image' | 'build-template' | 'fetch-artifact' | 'drop-artifact'\"}"
+
+PUT /v1/jobs envelope spawn-fresh-clone job.kind=true
+  main:   400 "{\"rejected\":\"invalid\",\"message\":\"unknown job kind true\"}"
+  branch: 400 "{\"rejected\":\"invalid\",\"message\":\"envelope.job.kind: Invalid discriminator value. Expected 'spawn' | 'pause' | 'delete' | 'build-image' | 'build-template' | 'fetch-artifact' | 'drop-artifact'\"}"
+
+PUT /v1/jobs envelope spawn-fresh-clone job.kind=array
+  main:   400 "{\"rejected\":\"invalid\",\"message\":\"unknown job kind []\"}"
+  branch: 400 "{\"rejected\":\"invalid\",\"message\":\"envelope.job.kind: Invalid discriminator value. Expected 'spawn' | 'pause' | 'delete' | 'build-image' | 'build-template' | 'fetch-artifact' | 'drop-artifact'\"}"
+
+PUT /v1/jobs envelope spawn-fresh-clone job.kind=object
+  main:   400 "{\"rejected\":\"invalid\",\"message\":\"unknown job kind {}\"}"
+  branch: 400 "{\"rejected\":\"invalid\",\"message\":\"envelope.job.kind: Invalid discriminator value. Expected 'spawn' | 'pause' | 'delete' | 'build-image' | 'build-template' | 'fetch-artifact' | 'drop-artifact'\"}"
+
+PUT /v1/jobs envelope spawn-fresh-clone job.pylonId removed
+  main:   400 "{\"rejected\":\"invalid\",\"message\":\"job.pylonId is not a non-empty string\"}"
+  branch: 400 "{\"rejected\":\"invalid\",\"message\":\"envelope.job.pylonId: Invalid input: expected string, received undefined\"}"
+
+PUT /v1/jobs envelope spawn-fresh-clone job.pylonId=text
+  main:   400 "{\"rejected\":\"invalid\",\"message\":\"job.boot.pylonId differs from job.pylonId\"}"
+  branch: 400 "{\"rejected\":\"invalid\",\"message\":\"envelope.job.boot.pylonId: differs from job.pylonId\"}"
+
+PUT /v1/jobs envelope spawn-fresh-clone job.boot removed
+  main:   400 "{\"rejected\":\"invalid\",\"message\":\"job.boot is not an object\"}"
+  branch: 400 "{\"rejected\":\"invalid\",\"message\":\"envelope.job.boot: Invalid input: expected object, received undefined\"}"
+
+PUT /v1/jobs envelope spawn-fresh-clone job.boot.image removed
+  main:   400 "{\"rejected\":\"invalid\",\"message\":\"job.boot.image is not a non-empty string\"}"
+  branch: 400 "{\"rejected\":\"invalid\",\"message\":\"envelope.job.boot.image: Invalid input: expected string, received undefined\"}"
+
+PUT /v1/jobs envelope spawn-fresh-clone job.boot.image=text
+  main:   400 "{\"rejected\":\"invalid\",\"message\":\"job.boot.image is not an image ID\"}"
+  branch: 400 "{\"rejected\":\"invalid\",\"message\":\"envelope.job.boot.image: expected an image ID\"}"
+
+PUT /v1/jobs envelope spawn-fresh-clone job.boot.source removed
+  main:   400 "{\"rejected\":\"invalid\",\"message\":\"job.boot.source is not an object\"}"
+  branch: 400 "{\"rejected\":\"invalid\",\"message\":\"envelope.job.boot.source: Invalid input: expected object, received undefined\"}"
+
+PUT /v1/jobs envelope spawn-fresh-clone job.boot.source=object
+  main:   400 "{\"rejected\":\"invalid\",\"message\":\"job.boot.source.kind is not template, resume or fresh\"}"
+  branch: 400 "{\"rejected\":\"invalid\",\"message\":\"envelope.job.boot.source.kind: Invalid discriminator value. Expected 'template' | 'resume' | 'fresh'\"}"
+
+PUT /v1/jobs envelope spawn-fresh-clone job.boot.source.preSetup removed
+  main:   400 "{\"rejected\":\"invalid\",\"message\":\"job.boot.source.preSetup is not a non-empty string\"}"
+  branch: 400 "{\"rejected\":\"invalid\",\"message\":\"envelope.job.boot.source.preSetup: Invalid input: expected string, received undefined\"}"
+
+PUT /v1/jobs envelope spawn-fresh-clone job.boot.repo removed
+  main:   400 "{\"rejected\":\"invalid\",\"message\":\"job.boot.repo is not an object\"}"
+  branch: 400 "{\"rejected\":\"invalid\",\"message\":\"envelope.job.boot.repo: Invalid input: expected object, received undefined\"}"
+
+PUT /v1/jobs envelope spawn-fresh-clone job.boot.repo=object
+  main:   400 "{\"rejected\":\"invalid\",\"message\":\"job.boot.repo has no kind, so the control plane that sent it is older than this probe. Upgrade the control plane, then its probes\"}"
+  branch: 400 "{\"rejected\":\"invalid\",\"message\":\"envelope.job.boot.repo.kind: missing, so the control plane that sent it is older than this probe. Upgrade the control plane, then its probes\"}"
+
+PUT /v1/jobs envelope spawn-fresh-clone job.boot.repo.kind=null
+  main:   400 "{\"rejected\":\"invalid\",\"message\":\"job.boot.repo.kind is not clone or empty\"}"
+  branch: 400 "{\"rejected\":\"invalid\",\"message\":\"envelope.job.boot.repo.kind: Invalid discriminator value. Expected 'clone' | 'empty'\"}"
+
+PUT /v1/jobs envelope spawn-fresh-clone job.boot.repo.url removed
+  main:   400 "{\"rejected\":\"invalid\",\"message\":\"job.boot.repo.url is not a non-empty string\"}"
+  branch: 400 "{\"rejected\":\"invalid\",\"message\":\"envelope.job.boot.repo.url: Invalid input: expected string, received undefined\"}"
+
+PUT /v1/jobs envelope spawn-fresh-clone job.boot.repo.checkout removed
+  main:   400 "{\"rejected\":\"invalid\",\"message\":\"job.boot.repo.checkout is not an object\"}"
+  branch: 400 "{\"rejected\":\"invalid\",\"message\":\"envelope.job.boot.repo.checkout: Invalid input: expected object, received undefined\"}"
+
+PUT /v1/jobs envelope spawn-fresh-clone job.boot.repo.checkout=object
+  main:   400 "{\"rejected\":\"invalid\",\"message\":\"job.boot.repo.checkout.branch is not a non-empty string\"}"
+  branch: 400 "{\"rejected\":\"invalid\",\"message\":\"envelope.job.boot.repo.checkout.branch: Invalid input: expected string, received undefined; envelope.job.boot.repo.checkout.commit: Invalid input: expected string, received undefined\"}"
+
+PUT /v1/jobs envelope spawn-fresh-clone job.boot.repo.checkout.commit removed
+  main:   400 "{\"rejected\":\"invalid\",\"message\":\"job.boot.repo.checkout.commit is not a non-empty string\"}"
+  branch: 400 "{\"rejected\":\"invalid\",\"message\":\"envelope.job.boot.repo.checkout.commit: Invalid input: expected string, received undefined\"}"
+
+PUT /v1/jobs envelope spawn-fresh-clone job.live removed
+  main:   400 "{\"rejected\":\"invalid\",\"message\":\"job.live is not an object\"}"
+  branch: 400 "{\"rejected\":\"invalid\",\"message\":\"envelope.job.live: Invalid input: expected object, received undefined\"}"
+
+PUT /v1/jobs envelope spawn-fresh-clone job.live=object
+  main:   400 "{\"rejected\":\"invalid\",\"message\":\"job.live needs previews and overlay arrays\"}"
+  branch: 400 "{\"rejected\":\"invalid\",\"message\":\"envelope.job.live.previews: Invalid input: expected array, received undefined; envelope.job.live.overlay: Invalid input: expected array, received undefined\"}"
+
+PUT /v1/jobs envelope spawn-fresh-clone job.liveHash removed
+  main:   400 "{\"rejected\":\"invalid\",\"message\":\"job.liveHash is not a non-empty string\"}"
+  branch: 400 "{\"rejected\":\"invalid\",\"message\":\"envelope.job.liveHash: Invalid input: expected string, received undefined\"}"
+
+PUT /v1/jobs envelope spawn-fresh-clone (root)=null
+  main:   400 "{\"rejected\":\"invalid\",\"message\":\"envelope is not an object\"}"
+  branch: 400 "{\"rejected\":\"invalid\",\"message\":\"envelope: Invalid input: expected object, received null\"}"
+
+PUT /v1/jobs envelope spawn-fresh-presetup job.boot.repo.branch removed
+  main:   400 "{\"rejected\":\"invalid\",\"message\":\"job.boot.repo.branch is not a non-empty string\"}"
+  branch: 400 "{\"rejected\":\"invalid\",\"message\":\"envelope.job.boot.repo.branch: Invalid input: expected string, received undefined\"}"
+
+PUT /v1/jobs envelope spawn-fresh-presetup job.relaunch=null
+  main:   400 "{\"rejected\":\"invalid\",\"message\":\"job.relaunch is neither absent nor false\"}"
+  branch: 400 "{\"rejected\":\"invalid\",\"message\":\"envelope.job.relaunch: Invalid input: expected false\"}"
+
+PUT /v1/jobs envelope spawn-template job.boot.source.template removed
+  main:   400 "{\"rejected\":\"invalid\",\"message\":\"job.boot.source.template is not a non-empty string\"}"
+  branch: 400 "{\"rejected\":\"invalid\",\"message\":\"envelope.job.boot.source.template: Invalid input: expected string, received undefined\"}"
+
+PUT /v1/jobs envelope spawn-template job.boot.source.template=text
+  main:   400 "{\"rejected\":\"invalid\",\"message\":\"job.boot.source.template is not a template ID\"}"
+  branch: 400 "{\"rejected\":\"invalid\",\"message\":\"envelope.job.boot.source.template: expected a template ID\"}"
+
+PUT /v1/jobs envelope pause job.checkpoint removed
+  main:   400 "{\"rejected\":\"invalid\",\"message\":\"job.checkpoint is not a non-empty string\"}"
+  branch: 400 "{\"rejected\":\"invalid\",\"message\":\"envelope.job.checkpoint: Invalid input: expected string, received undefined\"}"
+
+PUT /v1/jobs envelope pause job.checkpoint=text
+  main:   400 "{\"rejected\":\"invalid\",\"message\":\"job.checkpoint is not a checkpoint ID\"}"
+  branch: 400 "{\"rejected\":\"invalid\",\"message\":\"envelope.job.checkpoint: expected a checkpoint ID\"}"
+
+PUT /v1/jobs envelope build-image job.image removed
+  main:   400 "{\"rejected\":\"invalid\",\"message\":\"job.image is not a non-empty string\"}"
+  branch: 400 "{\"rejected\":\"invalid\",\"message\":\"envelope.job.image: Invalid input: expected string, received undefined\"}"
+
+PUT /v1/jobs envelope build-image job.image=text
+  main:   400 "{\"rejected\":\"invalid\",\"message\":\"job.image is not an image ID\"}"
+  branch: 400 "{\"rejected\":\"invalid\",\"message\":\"envelope.job.image: expected an image ID\"}"
+
+PUT /v1/jobs envelope build-image job.recipe removed
+  main:   400 "{\"rejected\":\"invalid\",\"message\":\"job.recipe is not an object\"}"
+  branch: 400 "{\"rejected\":\"invalid\",\"message\":\"envelope.job.recipe: expected an object\"}"
+
+PUT /v1/jobs envelope build-template job.template removed
+  main:   400 "{\"rejected\":\"invalid\",\"message\":\"job.template is not a non-empty string\"}"
+  branch: 400 "{\"rejected\":\"invalid\",\"message\":\"envelope.job.template: Invalid input: expected string, received undefined\"}"
+
+PUT /v1/jobs envelope build-template job.template=text
+  main:   400 "{\"rejected\":\"invalid\",\"message\":\"job.template is not a template ID\"}"
+  branch: 400 "{\"rejected\":\"invalid\",\"message\":\"envelope.job.template: expected a template ID\"}"
+
+PUT /v1/jobs envelope build-template job.inputs removed
+  main:   400 "{\"rejected\":\"invalid\",\"message\":\"job.inputs is not an object\"}"
+  branch: 400 "{\"rejected\":\"invalid\",\"message\":\"envelope.job.inputs: expected an object\"}"
+
+PUT /v1/jobs envelope fetch-image job.artifact removed
+  main:   400 "{\"rejected\":\"invalid\",\"message\":\"job.artifact is not a non-empty string\"}"
+  branch: 400 "{\"rejected\":\"invalid\",\"message\":\"envelope.job.artifact: Invalid input: expected string, received undefined\"}"
+
+PUT /v1/jobs envelope fetch-image job.artifact=text
+  main:   400 "{\"rejected\":\"invalid\",\"message\":\"job.artifact is not an artifact ID\"}"
+  branch: 400 "{\"rejected\":\"invalid\",\"message\":\"envelope.job.artifact: expected an artifact ID\"}"
+
+PUT /v1/jobs envelope fetch-image job.from removed
+  main:   400 "{\"rejected\":\"invalid\",\"message\":\"job.from is not a non-empty string\"}"
+  branch: 400 "{\"rejected\":\"invalid\",\"message\":\"envelope.job.from: Invalid input: expected string, received undefined\"}"
+
+PUT /v1/jobs envelope fetch-image job.sha256 removed
+  main:   400 "{\"rejected\":\"invalid\",\"message\":\"job.sha256 is not a non-empty string\"}"
+  branch: 400 "{\"rejected\":\"invalid\",\"message\":\"envelope.job.sha256: Invalid input: expected string, received undefined\"}"
+
+PUT /v1/jobs envelope fetch-image job.sha256=text
+  main:   400 "{\"rejected\":\"invalid\",\"message\":\"job.sha256 is not a hex sha256\"}"
+  branch: 400 "{\"rejected\":\"invalid\",\"message\":\"envelope.job.sha256: expected a hex sha256\"}"
+
+PUT /v1/jobs envelope drop-image job.artifact=text
+  main:   400 "{\"rejected\":\"invalid\",\"message\":\"job.artifact is not an image or template ID, and no job drops a checkpoint\"}"
+  branch: 400 "{\"rejected\":\"invalid\",\"message\":\"envelope.job.artifact: expected an image or template ID, and no job drops a checkpoint\"}"
+
+PUT /v1/jobs envelope edge kind unknown
+  main:   400 "{\"rejected\":\"invalid\",\"message\":\"unknown job kind \\\"migrate\\\"\"}"
+  branch: 400 "{\"rejected\":\"invalid\",\"message\":\"envelope.job.kind: Invalid discriminator value. Expected 'spawn' | 'pause' | 'delete' | 'build-image' | 'build-template' | 'fetch-artifact' | 'drop-artifact'\"}"
+
+PUT /v1/jobs body ""
+  main:   400 "{\"rejected\":\"invalid\",\"message\":\"Unexpected end of JSON input\"}"
+  branch: 400 "{\"rejected\":\"invalid\",\"message\":\"envelope: Unexpected end of JSON input\"}"
+
+PUT /v1/jobs body "{"
+  main:   400 "{\"rejected\":\"invalid\",\"message\":\"Expected property name or '}' in JSON at position 1 (line 1 column 2)\"}"
+  branch: 400 "{\"rejected\":\"invalid\",\"message\":\"envelope: Expected property name or '}' in JSON at position 1 (line 1 column 2)\"}"
+
+PUT /v1/jobs body "not json"
+  main:   400 "{\"rejected\":\"invalid\",\"message\":\"Unexpected token 'o', \\\"not json\\\" is not valid JSON\"}"
+  branch: 400 "{\"rejected\":\"invalid\",\"message\":\"envelope: Unexpected token 'o', \\\"not json\\\" is not valid JSON\"}"
+
+POST commands command exec kind removed
+  main:   400 "unknown command kind undefined"
+  branch: 400 "command.kind: Invalid discriminator value. Expected 'exec' | 'open-session' | 'close-session' | 'drop-failed-session' | 'send-claude' | 'send-claude-outcome' | 'service' | 'link-port' | 'unlink-port'"
+
+POST commands command exec kind=null
+  main:   400 "unknown command kind null"
+  branch: 400 "command.kind: Invalid discriminator value. Expected 'exec' | 'open-session' | 'close-session' | 'drop-failed-session' | 'send-claude' | 'send-claude-outcome' | 'service' | 'link-port' | 'unlink-port'"
+
+POST commands command exec kind=empty
+  main:   400 "unknown command kind \"\""
+  branch: 400 "command.kind: Invalid discriminator value. Expected 'exec' | 'open-session' | 'close-session' | 'drop-failed-session' | 'send-claude' | 'send-claude-outcome' | 'service' | 'link-port' | 'unlink-port'"
+
+POST commands command exec kind=text
+  main:   400 "unknown command kind \"x\""
+  branch: 400 "command.kind: Invalid discriminator value. Expected 'exec' | 'open-session' | 'close-session' | 'drop-failed-session' | 'send-claude' | 'send-claude-outcome' | 'service' | 'link-port' | 'unlink-port'"
+
+POST commands command exec kind=zero
+  main:   400 "unknown command kind 0"
+  branch: 400 "command.kind: Invalid discriminator value. Expected 'exec' | 'open-session' | 'close-session' | 'drop-failed-session' | 'send-claude' | 'send-claude-outcome' | 'service' | 'link-port' | 'unlink-port'"
+
+POST commands command exec kind=negative
+  main:   400 "unknown command kind -1"
+  branch: 400 "command.kind: Invalid discriminator value. Expected 'exec' | 'open-session' | 'close-session' | 'drop-failed-session' | 'send-claude' | 'send-claude-outcome' | 'service' | 'link-port' | 'unlink-port'"
+
+POST commands command exec kind=fraction
+  main:   400 "unknown command kind 1.5"
+  branch: 400 "command.kind: Invalid discriminator value. Expected 'exec' | 'open-session' | 'close-session' | 'drop-failed-session' | 'send-claude' | 'send-claude-outcome' | 'service' | 'link-port' | 'unlink-port'"
+
+POST commands command exec kind=true
+  main:   400 "unknown command kind true"
+  branch: 400 "command.kind: Invalid discriminator value. Expected 'exec' | 'open-session' | 'close-session' | 'drop-failed-session' | 'send-claude' | 'send-claude-outcome' | 'service' | 'link-port' | 'unlink-port'"
+
+POST commands command exec kind=array
+  main:   400 "unknown command kind []"
+  branch: 400 "command.kind: Invalid discriminator value. Expected 'exec' | 'open-session' | 'close-session' | 'drop-failed-session' | 'send-claude' | 'send-claude-outcome' | 'service' | 'link-port' | 'unlink-port'"
+
+POST commands command exec kind=object
+  main:   400 "unknown command kind {}"
+  branch: 400 "command.kind: Invalid discriminator value. Expected 'exec' | 'open-session' | 'close-session' | 'drop-failed-session' | 'send-claude' | 'send-claude-outcome' | 'service' | 'link-port' | 'unlink-port'"
+
+POST commands command exec argv removed
+  main:   400 "command.argv is not a non-empty array"
+  branch: 400 "command.argv: Invalid input: expected array, received undefined"
+
+POST commands command exec argv.0=null
+  main:   400 "command.argv[0] is not a string"
+  branch: 400 "command.argv[0]: Invalid input: expected string, received null"
+
+POST commands command exec argv.1=null
+  main:   400 "command.argv[1] is not a string"
+  branch: 400 "command.argv[1]: Invalid input: expected string, received null"
+
+POST commands command exec cwd removed
+  main:   400 "command.cwd is not a non-empty string"
+  branch: 400 "command.cwd: Invalid input: expected string, received undefined"
+
+POST commands command exec cwd=text
+  main:   400 "command.cwd is not an absolute path"
+  branch: 400 "command.cwd: expected an absolute path"
+
+POST commands command exec timeoutMs removed
+  main:   400 "command.timeoutMs is not an integer from 1 to 60000"
+  branch: 400 "command.timeoutMs: Invalid input: expected number, received undefined"
+
+POST commands command exec (root)=null
+  main:   400 "command is not an object"
+  branch: 400 "command: Invalid input: expected object, received null"
+
+POST commands command open-claude harness removed
+  main:   400 "unknown harness undefined"
+  branch: 400 "command.harness: Invalid discriminator value. Expected 'claude-code' | 'pi' | 'shell'"
+
+POST commands command open-claude harness=null
+  main:   400 "unknown harness null"
+  branch: 400 "command.harness: Invalid discriminator value. Expected 'claude-code' | 'pi' | 'shell'"
+
+POST commands command open-claude harness=empty
+  main:   400 "unknown harness \"\""
+  branch: 400 "command.harness: Invalid discriminator value. Expected 'claude-code' | 'pi' | 'shell'"
+
+POST commands command open-claude harness=text
+  main:   400 "unknown harness \"x\""
+  branch: 400 "command.harness: Invalid discriminator value. Expected 'claude-code' | 'pi' | 'shell'"
+
+POST commands command open-claude harness=zero
+  main:   400 "unknown harness 0"
+  branch: 400 "command.harness: Invalid discriminator value. Expected 'claude-code' | 'pi' | 'shell'"
+
+POST commands command open-claude harness=negative
+  main:   400 "unknown harness -1"
+  branch: 400 "command.harness: Invalid discriminator value. Expected 'claude-code' | 'pi' | 'shell'"
+
+POST commands command open-claude harness=fraction
+  main:   400 "unknown harness 1.5"
+  branch: 400 "command.harness: Invalid discriminator value. Expected 'claude-code' | 'pi' | 'shell'"
+
+POST commands command open-claude harness=true
+  main:   400 "unknown harness true"
+  branch: 400 "command.harness: Invalid discriminator value. Expected 'claude-code' | 'pi' | 'shell'"
+
+POST commands command open-claude harness=array
+  main:   400 "unknown harness []"
+  branch: 400 "command.harness: Invalid discriminator value. Expected 'claude-code' | 'pi' | 'shell'"
+
+POST commands command open-claude harness=object
+  main:   400 "unknown harness {}"
+  branch: 400 "command.harness: Invalid discriminator value. Expected 'claude-code' | 'pi' | 'shell'"
+
+POST commands command open-claude title removed
+  main:   400 "command.title is not a non-empty string"
+  branch: 400 "command.title: Invalid input: expected string, received undefined"
+
+POST commands command open-claude resume=null
+  main:   400 "command.resume is not a non-empty string"
+  branch: 400 "command.resume: Invalid input: expected string, received null"
+
+POST commands command open-claude prompt=null
+  main:   400 "command.prompt is not a non-empty string"
+  branch: 400 "command.prompt: Invalid input: expected string, received null"
+
+POST commands command open-claude model=null
+  main:   400 "command.model is not a non-empty string"
+  branch: 400 "command.model: Invalid input: expected string, received null"
+
+POST commands command close-bare herdrPane removed
+  main:   400 "command.herdrPane is not a non-empty string"
+  branch: 400 "command.herdrPane: Invalid input: expected string, received undefined"
+
+POST commands command close-named session=null
+  main:   400 "command.session is not an object"
+  branch: 400 "command.session: Invalid input: expected object, received null"
+
+POST commands command close-named session.harnessSessionId removed
+  main:   400 "command.session.harnessSessionId is not a non-empty string"
+  branch: 400 "command.session.harnessSessionId: Invalid input: expected string, received undefined"
+
+POST commands command close-named session.title removed
+  main:   400 "command.session.title is not a non-empty string"
+  branch: 400 "command.session.title: Invalid input: expected string, received undefined"
+
+POST commands command drop-failed id removed
+  main:   400 "command.id is not a non-empty string"
+  branch: 400 "command.id: Invalid input: expected string, received undefined"
+
+POST commands command send-claude session removed
+  main:   400 "command.session is not a Claude Code session ID"
+  branch: 400 "command.session: Invalid input: expected string, received undefined"
+
+POST commands command send-claude text removed
+  main:   400 "command.text is not a non-empty string"
+  branch: 400 "command.text: Invalid input: expected string, received undefined"
+
+POST commands command send-claude requestId=null
+  main:   400 "command.requestId is not a non-empty string"
+  branch: 400 "command.requestId: Invalid input: expected string, received null"
+
+POST commands command service-logs op removed
+  main:   400 "unknown service op undefined"
+  branch: 400 "command.op: Invalid option: expected one of \"ensure\"|\"restart\"|\"stop\"|\"logs\""
+
+POST commands command service-logs op=null
+  main:   400 "unknown service op null"
+  branch: 400 "command.op: Invalid option: expected one of \"ensure\"|\"restart\"|\"stop\"|\"logs\""
+
+POST commands command service-logs op=empty
+  main:   400 "unknown service op \"\""
+  branch: 400 "command.op: Invalid option: expected one of \"ensure\"|\"restart\"|\"stop\"|\"logs\""
+
+POST commands command service-logs op=text
+  main:   400 "unknown service op \"x\""
+  branch: 400 "command.op: Invalid option: expected one of \"ensure\"|\"restart\"|\"stop\"|\"logs\""
+
+POST commands command service-logs op=zero
+  main:   400 "unknown service op 0"
+  branch: 400 "command.op: Invalid option: expected one of \"ensure\"|\"restart\"|\"stop\"|\"logs\""
+
+POST commands command service-logs op=negative
+  main:   400 "unknown service op -1"
+  branch: 400 "command.op: Invalid option: expected one of \"ensure\"|\"restart\"|\"stop\"|\"logs\""
+
+POST commands command service-logs op=fraction
+  main:   400 "unknown service op 1.5"
+  branch: 400 "command.op: Invalid option: expected one of \"ensure\"|\"restart\"|\"stop\"|\"logs\""
+
+POST commands command service-logs op=true
+  main:   400 "unknown service op true"
+  branch: 400 "command.op: Invalid option: expected one of \"ensure\"|\"restart\"|\"stop\"|\"logs\""
+
+POST commands command service-logs op=array
+  main:   400 "unknown service op []"
+  branch: 400 "command.op: Invalid option: expected one of \"ensure\"|\"restart\"|\"stop\"|\"logs\""
+
+POST commands command service-logs op=object
+  main:   400 "unknown service op {}"
+  branch: 400 "command.op: Invalid option: expected one of \"ensure\"|\"restart\"|\"stop\"|\"logs\""
+
+POST commands command service-logs name=null
+  main:   400 "command.name is not a non-empty string"
+  branch: 400 "command.name: Invalid input: expected string, received null"
+
+POST commands command service-logs lines=null
+  main:   400 "command.lines is not a positive integer"
+  branch: 400 "command.lines: Invalid input: expected number, received null"
+
+POST commands command link-port port removed
+  main:   400 "command.port is not an integer from 1 to 65535"
+  branch: 400 "command.port: Invalid input: expected number, received undefined"
+
+POST commands command edge open harness codex
+  main:   400 "unknown harness \"codex\""
+  branch: 400 "command.harness: Invalid discriminator value. Expected 'claude-code' | 'pi' | 'shell'"
+
+POST commands command edge open pi with a model
+  main:   400 "invalid Claude model"
+  branch: 400 "command.model: only a Claude Code session takes it"
+
+POST commands command edge open pi with a prompt
+  main:   400 "invalid Claude prompt"
+  branch: 400 "command.prompt: only a Claude Code session takes it"
+
+POST commands command edge open shell with resume
+  main:   400 "a shell session has nothing to resume"
+  branch: 400 "command.resume: a shell session has nothing to resume"
+
+POST commands command edge send text 16385
+  main:   400 "command.text is longer than 16384 characters"
+  branch: 400 "command.text: Too big: expected string to have <=16384 characters"
+
+POST commands command edge send text with escape
+  main:   400 "the message holds control character U+001B at offset 1, which Claude's prompt cannot take as typed. Remove it"
+  branch: 400 "command.text: the message holds control character U+001B at offset 1, which Claude's prompt cannot take as typed. Remove it"
+
+POST commands command edge send text with tab
+  main:   400 "the message holds a tab, which Claude's prompt swallows. Replace tabs with spaces"
+  branch: 400 "command.text: the message holds a tab, which Claude's prompt swallows. Replace tabs with spaces"
+
+POST commands command edge send text with carriage return
+  main:   400 "the message holds a carriage return, which would submit it early. End lines with a newline alone"
+  branch: 400 "command.text: the message holds a carriage return, which would submit it early. End lines with a newline alone"
+
+POST commands command edge send text whitespace only
+  main:   400 "the message is blank, and Claude ignores a blank prompt"
+  branch: 400 "command.text: the message is blank, and Claude ignores a blank prompt"
+
+POST commands command edge send model 201
+  main:   400 "command.model is longer than 200 characters"
+  branch: 400 "command.model: Too big: expected string to have <=200 characters"
+
+POST commands command edge service op start
+  main:   400 "unknown service op \"start\""
+  branch: 400 "command.op: Invalid option: expected one of \"ensure\"|\"restart\"|\"stop\"|\"logs\""
+
+POST commands command edge unlink port 22
+  main:   400 "command.port 22 is Nexus's own"
+  branch: 400 "command.port: is Nexus's own: sshd's 22, or the preview relay's 700 to 799"
+
+POST commands command edge kind unknown
+  main:   400 "unknown command kind \"reboot\""
+  branch: 400 "command.kind: Invalid discriminator value. Expected 'exec' | 'open-session' | 'close-session' | 'drop-failed-session' | 'send-claude' | 'send-claude-outcome' | 'service' | 'link-port' | 'unlink-port'"
+
+POST commands body ""
+  main:   400 "Unexpected end of JSON input"
+  branch: 400 "command: Unexpected end of JSON input"
+
+POST commands body "{"
+  main:   400 "Expected property name or '}' in JSON at position 1 (line 1 column 2)"
+  branch: 400 "command: Expected property name or '}' in JSON at position 1 (line 1 column 2)"
+
+POST commands body "not json"
+  main:   400 "Unexpected token 'o', \"not json\" is not valid JSON"
+  branch: 400 "command: Unexpected token 'o', \"not json\" is not valid JSON"
+
+GET stream stream argv removed
+  main:   "HTTP/1.1 400 Bad Request\r\ncontent-type: text/plain; charset=utf-8\r\ncontent-length: 51\r\nconnection: close\r\n\r\nstream request argv is not a non-empty string array"
+  branch: "HTTP/1.1 400 Bad Request\r\ncontent-type: text/plain; charset=utf-8\r\ncontent-length: 63\r\nconnection: close\r\n\r\nrequest.argv: Invalid input: expected array, received undefined"
+
+GET stream stream (root)=null
+  main:   "HTTP/1.1 400 Bad Request\r\ncontent-type: text/plain; charset=utf-8\r\ncontent-length: 31\r\nconnection: close\r\n\r\nstream request is not an object"
+  branch: "HTTP/1.1 400 Bad Request\r\ncontent-type: text/plain; charset=utf-8\r\ncontent-length: 54\r\nconnection: close\r\n\r\nrequest: Invalid input: expected object, received null"
+
+GET stream stream with pty pty=empty
+  main:   "HTTP/1.1 400 Bad Request\r\ncontent-type: text/plain; charset=utf-8\r\ncontent-length: 124\r\nconnection: close\r\n\r\nstreams are raw pipes only, so a stream request has no pty. A terminal's pty is made in the guest, as guest-terminal.ts does"
+  branch: "HTTP/1.1 400 Bad Request\r\ncontent-type: text/plain; charset=utf-8\r\ncontent-length: 137\r\nconnection: close\r\n\r\nrequest.pty: streams are raw pipes only, so a stream request has no pty. A terminal's pty is made in the guest, as guest-terminal.ts does"
+
+GET stream stream request not JSON
+  main:   "HTTP/1.1 400 Bad Request\r\ncontent-type: text/plain; charset=utf-8\r\ncontent-length: 69\r\nconnection: close\r\n\r\nExpected property name or '}' in JSON at position 1 (line 1 column 2)"
+  branch: "HTTP/1.1 400 Bad Request\r\ncontent-type: text/plain; charset=utf-8\r\ncontent-length: 78\r\nconnection: close\r\n\r\nrequest: Expected property name or '}' in JSON at position 1 (line 1 column 2)"

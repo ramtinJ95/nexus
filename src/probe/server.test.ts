@@ -213,7 +213,7 @@ test("build and drop jobs reach the backend, and one that names a checkpoint or 
   }
   assert.deepEqual(fake.calls, [`drop ${image}`, `build-template ${template}`, `build-image ${image} on ${node}`]);
   const checkpoint = envelope({ kind: "drop-artifact", artifact: "ckpt-unit-1" } as unknown as Job, node, Date.now());
-  assert.deepEqual(await client.submit(checkpoint), { rejected: "invalid", message: "job.artifact is not an image or template ID, and no job drops a checkpoint" });
+  assert.deepEqual(await client.submit(checkpoint), { rejected: "invalid", message: "envelope.job.artifact: expected an image or template ID, and no job drops a checkpoint" });
   const outside = [
     { kind: "drop-artifact", artifact: "tpl-x/../../pylons" },
     { kind: "fetch-artifact", artifact: "img-x/..", from: node, sha256: "0".repeat(64) },
@@ -223,7 +223,7 @@ test("build and drop jobs reach the backend, and one that names a checkpoint or 
   ];
   for (const job of outside) {
     const reply = await client.submit(envelope(job as unknown as Job, node, Date.now()));
-    assert.ok("rejected" in reply && reply.rejected === "invalid" && / is not an? (image or template|template|image|artifact) ID/.test(reply.message ?? ""), JSON.stringify(reply));
+    assert.ok("rejected" in reply && reply.rejected === "invalid" && /^envelope\.job\.[a-z.]+: expected an? (image or template|template|image|artifact) ID/.test(reply.message ?? ""), JSON.stringify(reply));
   }
   assert.equal(fake.calls.length, 3, "nothing outside the store reached the backend");
 });
@@ -1275,8 +1275,8 @@ test("a link-port command links the port in the guest, answers its service, and 
   assert.deepEqual(await client.command(pylonId, { kind: "link-port", port: 3000 }), { kind: "link-port", service: "port-3000" });
   assert.deepEqual(linked, [3000]);
   assert.equal((await events.next()).value?.type, "snapshot", "the control plane sees the new service without waiting a minute");
-  await assert.rejects(client.command(pylonId, { kind: "link-port", port: 0 }), /HTTP 400: command.port is not an integer from 1 to 65535/);
-  await assert.rejects(client.command(pylonId, { kind: "link-port", port: 22 }), /HTTP 400: command.port 22 is Nexus's own/);
+  await assert.rejects(client.command(pylonId, { kind: "link-port", port: 0 }), /HTTP 400: command.port: Too small: expected number to be >=1$/);
+  await assert.rejects(client.command(pylonId, { kind: "link-port", port: 22 }), /HTTP 400: command.port: is Nexus's own: sshd's 22/);
   assert.deepEqual(linked, [3000], "a refused port reaches no guest");
 });
 
@@ -1373,7 +1373,7 @@ test("an unlink-port command waits for a read in flight, which is published befo
   assert.deepEqual(linked, []);
   await until("the next read is published", () => seen.at(-1) === "read none");
   assert.deepEqual(seen, ["read port-3000", "read port-3000", "reply", "read none"]);
-  await assert.rejects(client.command(pylonId, { kind: "unlink-port", port: 22 }), /HTTP 400: command.port 22 is Nexus's own/);
+  await assert.rejects(client.command(pylonId, { kind: "unlink-port", port: 22 }), /HTTP 400: command.port: is Nexus's own: sshd's 22/);
 });
 
 test("observations report the previews of the pylon's last successful spawn, not of a spawn that failed", async (t) => {

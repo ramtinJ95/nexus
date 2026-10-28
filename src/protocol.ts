@@ -15,6 +15,12 @@ import { pylonEventSchema, type ReportedEvent } from "./events.ts";
  *   private to this module. Callers see the domain types below. The control plane reads through
  *   `parseProbeEvent` and `parseSubmitReply`, and the probe through `parseJobEnvelope`, `encodeSubmitReply`,
  *   `encodeProbeEvent`, `parseStreamRequest` and `serveByteStream`.
+ * - A peer of another release may send a field this one does not know, as during a deploy. It is not refused: a
+ *   parser that hands its payload on hands the field on with it, and one that builds a value of its own leaves it out.
+ *   A reported session event is the exception, checked as strictly as the pylon that sent it is, which only a probe
+ *   newer than its control plane could break. Deploys upgrade the control plane first.
+ * - A bad payload keeps its status (400, or the `invalid` submit reply) and gets one line that names each wrong field
+ *   from the top of the payload, and what is wrong with it: `command.timeoutMs: Too big: expected number to be <=60000`.
  */
 import { once } from "node:events";
 import { Agent, request, type IncomingMessage } from "node:http";
@@ -22,9 +28,12 @@ import { PassThrough, type Duplex, type Readable } from "node:stream";
 import { setTimeout as delay } from "node:timers/promises";
 import { z } from "zod";
 import { localApiWhois, type Whois } from "./tailscale.ts";
-import { chatgptTokenGrant, reservedPorts, type BootInputs, type LiveSpec, type SessionHarness } from "./project.ts";
-import { claudeTextProblem, record, string } from "./sessions.ts";
-import type { ArtifactManifest, CheckpointId, ImageId, ImageRecipe, PortableArtifactId, ArtifactId, TemplateBuildInputs, TemplateId } from "./images.ts";
+import { chatgptTokenGrant, reservedPortMessage, reservedPorts, sessionHarnessSchema, type BootInputs, type LiveSpec, type ProjectId, type SessionHarness } from "./project.ts";
+import { claudeTextProblem } from "./sessions.ts";
+import { asSent, named, nonEmpty, parse, parseJson, unchecked } from "./parse.ts";
+import type {
+  ArtifactManifest, CheckpointId, ImageId, ImageManifest, ImageRecipe, PortableArtifactId, ArtifactId, TemplateBuildInputs, TemplateId, TemplateManifest,
+} from "./images.ts";
 
 declare const brand: unique symbol;
 type Brand<T, B extends string> = T & { readonly [brand]: B };
@@ -39,6 +48,13 @@ export const nodeNameSchema = z.string()
 export type PylonId = Brand<string, "PylonId">;
 export const maxPylonIdLength = 40;
 export const pylonIdSchema = z.string().max(maxPylonIdLength).regex(/^[a-z][a-z0-9-]*$/);
+/**
+ * Image and template IDs as the control plane mints them, a kind and a few lowercase letters or digits. They
+ * name directories in a node's artifact store, so an ID with a separator or a dot is refused before it is used.
+ */
+export const isImageId = (id: unknown): id is ImageId => typeof id === "string" && /^img-[a-z0-9]{1,40}$/.test(id);
+export const isTemplateId = (id: unknown): id is TemplateId => typeof id === "string" && /^tpl-[a-z0-9]{1,40}$/.test(id);
+export const isPortableArtifactId = (id: unknown): id is PortableArtifactId => isImageId(id) || isTemplateId(id);
 export type JobId = Brand<string, "JobId">; // UUID minted by the control plane
 /** sha256 of the canonical LiveSpec. Observations echo it, so the planner sees drift without a counter. */
 export type LiveHash = Brand<string, "LiveHash">;
@@ -434,7 +450,7 @@ export function connectProbe(node: NodeName, tailnetHost: string, expected: Tail
       const res = await call("GET", `/v1/jobs/${encodeURIComponent(jobId)}`);
       if (res.status === 404) return "unknown";
       if (res.status !== 200) throw new Error(`${node}: GET /v1/jobs/${jobId}: HTTP ${res.status}: ${res.body}`);
-      return parseJobStatus(JSON.parse(res.body));
+      return parseJson(asSent(jobStatusSchema), res.body, "status");
     },
     async *observe(signal) {
       const res = await open("GET", "/v1/observe", null, signal);
@@ -563,15 +579,6 @@ export function encodeSubmitReply(reply: SubmitReply): { status: number; body: s
   return { status: "accepted" in reply ? submitStatus.accepted : submitStatus[reply.rejected], body: JSON.stringify(reply) };
 }
 
-export function parseSubmitReply(status: number, body: string): SubmitReply {
-  const reply = record(JSON.parse(body), "submit reply");
-  if (status === submitStatus.accepted) return { accepted: parseJobStatus(reply.accepted) };
-  if (status === submitStatus.busy && reply.rejected === "busy") return { rejected: "busy", inFlight: string(reply.inFlight, "inFlight") as JobId };
-  if (status === submitStatus.expired && reply.rejected === "expired") return { rejected: "expired" };
-  if (status === submitStatus.invalid && reply.rejected === "invalid") return { rejected: "invalid", message: string(reply.message, "message") };
-  throw new Error(`unexpected submit reply, HTTP ${status}: ${body}`);
-}
-
 /**
  * GET /v1/pylons/{id}/stream?request={"argv": [...]} upgrades the connection to `nexus-stream`, a sequence of
  * frames: a type byte, a 4-byte big-endian length, then the payload. The control plane sends stdin and end of
@@ -587,14 +594,17 @@ function streamPath(pylonId: PylonId, argv: readonly string[]): string {
   return `/v1/pylons/${encodeURIComponent(pylonId)}/stream?request=${encodeURIComponent(JSON.stringify({ argv }))}`;
 }
 
+const streamRequestSchema = z.object({
+  argv: z.array(z.string()).min(1),
+  pty: z.null({ error: "streams are raw pipes only, so a stream request has no pty. A terminal's pty is made in the guest, as guest-terminal.ts does" }).optional(),
+});
+
 /** The probe's side of the stream route: `null` unless the request asks to upgrade to `nexus-stream`. Throws with a message for a 400. */
 export function parseStreamRequest(upgrade: string | undefined, url: URL): { pylonId: PylonId; argv: readonly string[] } | null {
   const match = /^\/v1\/pylons\/([^/]+)\/stream$/.exec(url.pathname);
   if (match === null || upgrade?.toLowerCase() !== streamProtocol) return null;
-  const req = record(JSON.parse(url.searchParams.get("request") ?? "null"), "stream request");
-  if (!Array.isArray(req.argv) || req.argv.length === 0 || !req.argv.every((a) => typeof a === "string")) throw new Error("stream request argv is not a non-empty string array");
-  if (req.pty !== undefined && req.pty !== null) throw new Error("streams are raw pipes only, so a stream request has no pty. A terminal's pty is made in the guest, as guest-terminal.ts does");
-  return { pylonId: decodeURIComponent(match[1]!) as PylonId, argv: req.argv as string[] };
+  const { argv } = parseJson(streamRequestSchema, url.searchParams.get("request") ?? "null", "request");
+  return { pylonId: decodeURIComponent(match[1]!) as PylonId, argv };
 }
 
 export const streamUpgradeResponse = `HTTP/1.1 101 Switching Protocols\r\nconnection: upgrade\r\nupgrade: ${streamProtocol}\r\n\r\n`;
@@ -707,214 +717,195 @@ export function encodeProbeEvent(event: ProbeEvent): string {
 
 const reportedEventSchema = z.strictObject({
   sequence: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
-  pylon: pylonIdSchema,
+  pylon: pylonIdSchema.pipe(z.custom<PylonId>()),
   event: pylonEventSchema,
   time: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
-});
+}) satisfies z.ZodType<ReportedEvent>;
+
+const imageId = z.string().pipe(z.custom<ImageId>(isImageId, "expected an image ID"));
+const templateId = z.string().pipe(z.custom<TemplateId>(isTemplateId, "expected a template ID"));
+const checkpointId = z.string().startsWith("ckpt-", "expected a checkpoint ID").pipe(z.custom<CheckpointId>());
+const sha256 = z.string().regex(/^[0-9a-f]{64}$/, "expected a hex sha256");
+/** An object, whatever it holds, which the receiver hands on as `T`. */
+const objectAs = <T>() => z.custom<T>((value) => typeof value === "object" && value !== null && !Array.isArray(value), "expected an object");
+
+const jobStatusFields = { jobId: named<JobId>(), subject: named<Subject>(), kind: named<Job["kind"]>() };
+const jobStatusSchema = z.discriminatedUnion("state", [
+  z.looseObject({ ...jobStatusFields, state: z.literal("running"), startedAt: unchecked<string>() }),
+  z.looseObject({ ...jobStatusFields, state: z.literal("succeeded"), finishedAt: unchecked<string>() }),
+  z.looseObject({
+    ...jobStatusFields, state: z.literal("failed"), finishedAt: unchecked<string>(),
+    code: z.enum(Object.keys(retryable) as JobErrorCode[]), message: unchecked<string>(), logTail: unchecked<string>(),
+  }),
+]) satisfies z.ZodType<JobStatus>;
+
+const submitReplySchemas: Partial<Record<number, z.ZodType<SubmitReply>>> = {
+  [submitStatus.accepted]: z.object({ accepted: asSent(jobStatusSchema) }),
+  [submitStatus.busy]: z.object({ rejected: z.literal("busy"), inFlight: named<JobId>() }),
+  [submitStatus.expired]: z.object({ rejected: z.literal("expired") }),
+  [submitStatus.invalid]: z.object({ rejected: z.literal("invalid"), message: nonEmpty }),
+};
+
+export function parseSubmitReply(status: number, body: string): SubmitReply {
+  const schema = submitReplySchemas[status];
+  if (schema === undefined) throw new Error(`unexpected submit reply, HTTP ${status}: ${body}`);
+  return parseJson(schema, body, "reply");
+}
+
+const pylonIdField = named<PylonId>();
+const olderPylonSchema = z.discriminatedUnion("phase", [
+  z.looseObject({ pylonId: pylonIdField, phase: z.enum(["booting", "stopping", "deleting"]) }),
+  z.looseObject({ pylonId: pylonIdField, phase: z.literal("stopped"), checkpoint: unchecked<CheckpointId | null>(), sessions: unchecked<readonly PausedSession[] | null>() }),
+  z.looseObject({ pylonId: pylonIdField, phase: z.literal("broken"), detail: unchecked<string>(), cause: unchecked<string>() }),
+  z.looseObject({
+    pylonId: pylonIdField, phase: z.literal("running"), liveHash: unchecked<LiveHash | null>(), bootedAt: unchecked<string>(),
+    bootedFrom: unchecked<RunningFacts["bootedFrom"]>(), services: unchecked<RunningFacts["services"]>(), listening: unchecked<RunningFacts["listening"]>(),
+    previews: unchecked<RunningFacts["previews"]>(), sessions: unchecked<readonly (SessionFact | OlderSession)[] | null>(), git: unchecked<GitFacts | null>(),
+    declaredOutputs: unchecked<readonly DeclaredOutput[]>(), attachedClients: unchecked<number>(),
+  }),
+]) satisfies z.ZodType<OlderPylonObservation>;
+
+const olderObservationSchema = z.looseObject({
+  node: unchecked<NodeName>(), observedAt: unchecked<string>(), probeBootId: unchecked<string>(),
+  events: z.array(reportedEventSchema).max(100).exactOptional(),
+  capacity: unchecked<ReportedCapacity | null>(),
+  artifacts: z.array(unchecked<ArtifactId>()),
+  jobs: z.array(jobStatusSchema),
+  pylons: z.array(olderPylonSchema),
+  previewRoutes: z.array(unchecked<PreviewRouteFact>()).nullable().exactOptional(),
+  grants: unchecked<NodeObservation["grants"] | null>(),
+  spawnsWithoutRelaunch: unchecked<true>(),
+  heldSecrets: unchecked<readonly string[]>(),
+}) satisfies z.ZodType<OlderObservation>;
+
+const probeEventSchema = z.discriminatedUnion("type", [
+  z.looseObject({ type: z.literal("snapshot"), observation: olderObservationSchema }),
+  z.looseObject({ type: z.literal("session-event"), report: reportedEventSchema }),
+  z.looseObject({ type: z.literal("pylon"), pylon: olderPylonSchema }),
+  z.looseObject({ type: z.literal("job"), status: jobStatusSchema }),
+  z.looseObject({ type: z.literal("preview-hit"), pylonId: pylonIdField, service: unchecked<string>(), at: unchecked<string>(), login: unchecked<string | null>() }),
+]);
 
 export function parseProbeEvent(frame: string): ProbeEvent {
-  const event = record(JSON.parse(frame), "probe event");
+  const event = parseJson(asSent(probeEventSchema), frame, "event");
   switch (event.type) {
-    case "snapshot": {
-      const o = record(event.observation, "observation");
-      for (const key of ["artifacts", "jobs", "pylons"] as const) {
-        if (!Array.isArray(o[key])) throw new Error(`observation.${key} is not an array`);
-      }
-      if (o.previewRoutes != null && !Array.isArray(o.previewRoutes)) throw new Error("observation.previewRoutes is not an array");
-      (o.jobs as unknown[]).forEach(parseJobStatus);
-      (o.pylons as unknown[]).forEach(parsePylonObservation);
-      if (o.events !== undefined) {
-        if (!Array.isArray(o.events) || o.events.length > 100) throw new Error("invalid event backlog");
-        o.events.forEach((report) => reportedEventSchema.parse(report));
-      }
-      return { type: "snapshot", observation: upgradeObservation(o as unknown as OlderObservation) };
-    }
-    case "session-event": {
-      reportedEventSchema.parse(event.report);
-      return event as ProbeEvent;
-    }
-    case "pylon": return { type: "pylon", pylon: upgradePylon(parsePylonObservation(event.pylon)) };
-    case "job": parseJobStatus(event.status); return event as ProbeEvent;
-    case "preview-hit": string(event.pylonId, "pylonId"); return event as ProbeEvent;
-    default: throw new Error(`unknown probe event type ${JSON.stringify(event.type)}`);
+    case "snapshot": return { type: "snapshot", observation: upgradeObservation(event.observation) };
+    case "pylon": return { type: "pylon", pylon: upgradePylon(event.pylon) };
+    default: return event;
   }
 }
+
+const fresh = z.looseObject({ kind: z.literal("fresh"), preSetup: nonEmpty.nullable() });
+const bootSchema = z.looseObject({
+  gitIdentity: unchecked<BootInputs["gitIdentity"]>(),
+  pylonId: pylonIdField,
+  image: imageId,
+  source: z.discriminatedUnion("kind", [
+    z.looseObject({ kind: z.literal("template"), template: templateId }),
+    z.looseObject({ kind: z.literal("resume"), checkpoint: unchecked<CheckpointId>() }),
+    fresh,
+  ]),
+  resources: unchecked<BootInputs["resources"]>(),
+  network: unchecked<BootInputs["network"]>(),
+  repo: z.discriminatedUnion("kind", [
+    z.looseObject({ kind: z.literal("clone"), url: nonEmpty, checkout: z.looseObject({ branch: nonEmpty, commit: nonEmpty }) }),
+    z.looseObject({ kind: z.literal("empty"), branch: nonEmpty }),
+  ], {
+    error: (issue) => issue.code === "invalid_union" && (issue.input as { kind?: unknown }).kind === undefined
+      ? "missing, so the control plane that sent it is older than this probe. Upgrade the control plane, then its probes" : undefined,
+  }),
+  dotfiles: unchecked<BootInputs["dotfiles"]>(),
+}) satisfies z.ZodType<BootInputs>;
+
+const jobSchema = z.discriminatedUnion("kind", [
+  z.looseObject({
+    kind: z.literal("spawn"), pylonId: pylonIdField, boot: bootSchema,
+    live: z.looseObject({ previews: z.array(unchecked<LiveSpec["previews"][number]>()), overlay: z.array(unchecked<LiveSpec["overlay"][number]>()) }),
+    liveHash: named<LiveHash>(), relaunch: z.literal(false).exactOptional(),
+  }).refine((job) => job.boot.pylonId === job.pylonId, { path: ["boot", "pylonId"], message: "differs from job.pylonId" }),
+  z.looseObject({ kind: z.literal("pause"), pylonId: pylonIdField, checkpoint: checkpointId }),
+  z.looseObject({ kind: z.literal("delete"), pylonId: pylonIdField }),
+  z.looseObject({ kind: z.literal("build-image"), image: imageId, recipe: objectAs<ImageRecipe>() }),
+  z.looseObject({ kind: z.literal("build-template"), template: templateId, inputs: objectAs<TemplateBuildInputs>() }),
+  z.looseObject({
+    kind: z.literal("fetch-artifact"),
+    // A checkpoint passes, for runJob to refuse with its reason.
+    artifact: z.string().refine((id) => isPortableArtifactId(id) || id.startsWith("ckpt-"), "expected an artifact ID").pipe(z.custom<ArtifactId>()),
+    from: named<NodeName>(), sha256,
+  }),
+  z.looseObject({ kind: z.literal("drop-artifact"), artifact: z.string().pipe(z.custom<PortableArtifactId>(isPortableArtifactId, "expected an image or template ID, and no job drops a checkpoint")) }),
+]) satisfies z.ZodType<Job>;
+
+const timestamp = z.string().min(1).refine((t) => !Number.isNaN(Date.parse(t)), "expected a timestamp");
+const jobEnvelopeSchema = z.looseObject({
+  jobId: named<JobId>(), node: named<NodeName>(), issuedAt: timestamp, notAfter: timestamp, job: jobSchema,
+}) satisfies z.ZodType<JobEnvelope>;
 
 /** The probe's side of PUT /v1/jobs/{jobId}. Throws with a message for the `invalid` reply. */
 export function parseJobEnvelope(body: string): JobEnvelope {
-  const env = record(JSON.parse(body), "envelope");
-  for (const key of ["issuedAt", "notAfter"] as const) {
-    if (Number.isNaN(Date.parse(string(env[key], key)))) throw new Error(`${key} is not a timestamp`);
-  }
-  string(env.jobId, "jobId");
-  string(env.node, "node");
-  const job = record(env.job, "job");
-  switch (job.kind) {
-    case "spawn": {
-      const pylonId = string(job.pylonId, "job.pylonId");
-      const boot = record(job.boot, "job.boot");
-      if (boot.pylonId !== pylonId) throw new Error("job.boot.pylonId differs from job.pylonId");
-      if (!isImageId(string(boot.image, "job.boot.image"))) throw new Error("job.boot.image is not an image ID");
-      const source = record(boot.source, "job.boot.source");
-      if (source.kind !== "template" && source.kind !== "resume" && source.kind !== "fresh") throw new Error("job.boot.source.kind is not template, resume or fresh");
-      if (source.kind === "template" && !isTemplateId(string(source.template, "job.boot.source.template"))) throw new Error("job.boot.source.template is not a template ID");
-      if (source.kind === "fresh" && source.preSetup !== null) string(source.preSetup, "job.boot.source.preSetup");
-      const repo = record(boot.repo, "job.boot.repo");
-      switch (repo.kind) {
-        case "clone": {
-          string(repo.url, "job.boot.repo.url");
-          const checkout = record(repo.checkout, "job.boot.repo.checkout");
-          string(checkout.branch, "job.boot.repo.checkout.branch");
-          string(checkout.commit, "job.boot.repo.checkout.commit");
-          break;
-        }
-        case "empty":
-          string(repo.branch, "job.boot.repo.branch");
-          break;
-        case undefined: throw new Error("job.boot.repo has no kind, so the control plane that sent it is older than this probe. Upgrade the control plane, then its probes");
-        default: throw new Error("job.boot.repo.kind is not clone or empty");
-      }
-      const live = record(job.live, "job.live");
-      if (!Array.isArray(live.previews) || !Array.isArray(live.overlay)) throw new Error("job.live needs previews and overlay arrays");
-      string(job.liveHash, "job.liveHash");
-      if (job.relaunch !== undefined && job.relaunch !== false) throw new Error("job.relaunch is neither absent nor false");
-      break;
-    }
-    case "pause":
-      string(job.pylonId, "job.pylonId");
-      if (!string(job.checkpoint, "job.checkpoint").startsWith("ckpt-")) throw new Error("job.checkpoint is not a checkpoint ID");
-      break;
-    case "delete":
-      string(job.pylonId, "job.pylonId");
-      break;
-    case "build-image":
-      if (!isImageId(string(job.image, "job.image"))) throw new Error("job.image is not an image ID");
-      record(job.recipe, "job.recipe");
-      break;
-    case "build-template":
-      if (!isTemplateId(string(job.template, "job.template"))) throw new Error("job.template is not a template ID");
-      record(job.inputs, "job.inputs");
-      break;
-    case "fetch-artifact": {
-      // A checkpoint passes, for runJob to refuse with its reason.
-      const artifact = string(job.artifact, "job.artifact");
-      if (!isImageId(artifact) && !isTemplateId(artifact) && !artifact.startsWith("ckpt-")) throw new Error("job.artifact is not an artifact ID");
-      string(job.from, "job.from");
-      if (!/^[0-9a-f]{64}$/.test(string(job.sha256, "job.sha256"))) throw new Error("job.sha256 is not a hex sha256");
-      break;
-    }
-    case "drop-artifact":
-      if (!isPortableArtifactId(string(job.artifact, "job.artifact"))) throw new Error("job.artifact is not an image or template ID, and no job drops a checkpoint");
-      break;
-    default: throw new Error(`unknown job kind ${JSON.stringify(job.kind)}`);
-  }
-  return env as unknown as JobEnvelope;
+  return parseJson(asSent(jobEnvelopeSchema), body, "envelope");
 }
 
-const harnesses: ReadonlySet<unknown> = new Set(["claude-code", "pi", "shell"] satisfies SessionHarness[]);
-const serviceOps: ReadonlySet<unknown> = new Set(["ensure", "restart", "stop", "logs"] satisfies Extract<PylonCommand, { kind: "service" }>["op"][]);
+const port = z.int().min(1).max(65535).refine((p) => !reservedPorts.has(p), reservedPortMessage);
+const claudeOnly = z.never({ error: "only a Claude Code session takes it" }).exactOptional();
+const openSession = { kind: z.literal("open-session"), title: nonEmpty };
+const pylonCommandSchema = z.discriminatedUnion("kind", [
+  z.looseObject({ kind: z.literal("exec"), argv: z.array(z.string()).min(1), cwd: z.string().startsWith("/", "expected an absolute path"), timeoutMs: z.int().min(1).max(60_000) }),
+  z.discriminatedUnion("harness", [
+    z.looseObject({ ...openSession, harness: z.literal("claude-code"), resume: nonEmpty.exactOptional(), prompt: nonEmpty.max(16_384).exactOptional(), model: nonEmpty.max(200).exactOptional() }),
+    z.looseObject({ ...openSession, harness: z.literal("pi"), resume: nonEmpty.exactOptional(), prompt: claudeOnly, model: claudeOnly }),
+    z.looseObject({ ...openSession, harness: z.literal("shell"), resume: z.never({ error: "a shell session has nothing to resume" }).exactOptional(), prompt: claudeOnly, model: claudeOnly }),
+  ]),
+  z.looseObject({
+    kind: z.literal("close-session"), herdrPane: nonEmpty,
+    session: z.looseObject({ harness: sessionHarnessSchema, harnessSessionId: nonEmpty.nullable(), title: nonEmpty.nullable() }).exactOptional(),
+  }),
+  z.looseObject({ kind: z.literal("drop-failed-session"), id: nonEmpty }),
+  z.looseObject({
+    kind: z.literal("send-claude"),
+    session: z.string().regex(/^[A-Za-z0-9-]{1,200}$/, "expected a Claude Code session ID"),
+    text: nonEmpty.max(16_384).superRefine((t, ctx) => {
+      const problem = claudeTextProblem(t);
+      if (problem !== null) ctx.addIssue({ code: "custom", message: problem });
+    }),
+    model: nonEmpty.max(200).exactOptional(),
+    requestId: nonEmpty.exactOptional(),
+  }),
+  z.looseObject({ kind: z.literal("send-claude-outcome"), requestId: nonEmpty }),
+  z.looseObject({
+    kind: z.literal("service"), op: z.enum(["ensure", "restart", "stop", "logs"]), name: nonEmpty.exactOptional(),
+    lines: z.number().min(1).refine(Number.isInteger, "expected an integer").exactOptional(),
+  }),
+  z.looseObject({ kind: z.literal("link-port"), port }),
+  z.looseObject({ kind: z.literal("unlink-port"), port }),
+]) satisfies z.ZodType<PylonCommand>;
 
 /**
  * The probe's side of POST /v1/pylons/{id}/commands. Throws with a message for a 400. A pylon that is
  * not running gets a 409, which the client reports as not-running.
  */
 export function parsePylonCommand(body: string): PylonCommand {
-  const c = record(JSON.parse(body), "command");
-  switch (c.kind) {
-    case "exec":
-      if (!Array.isArray(c.argv) || c.argv.length === 0) throw new Error("command.argv is not a non-empty array");
-      c.argv.forEach((arg, i) => { if (typeof arg !== "string") throw new Error(`command.argv[${i}] is not a string`); });
-      if (!string(c.cwd, "command.cwd").startsWith("/")) throw new Error("command.cwd is not an absolute path");
-      if (!Number.isInteger(c.timeoutMs) || (c.timeoutMs as number) < 1 || (c.timeoutMs as number) > 60_000) throw new Error("command.timeoutMs is not an integer from 1 to 60000");
-      break;
-    case "open-session":
-      if (!harnesses.has(c.harness)) throw new Error(`unknown harness ${JSON.stringify(c.harness)}`);
-      string(c.title, "command.title");
-      if (c.model !== undefined && (c.harness !== "claude-code" || string(c.model, "command.model").length > 200)) throw new Error("invalid Claude model");
-      if (c.prompt !== undefined && (c.harness !== "claude-code" || string(c.prompt, "command.prompt").length > 16_384)) throw new Error("invalid Claude prompt");
-      if (c.resume !== undefined) {
-        string(c.resume, "command.resume");
-        if (c.harness === "shell") throw new Error("a shell session has nothing to resume");
-      }
-      break;
-    case "close-session": {
-      string(c.herdrPane, "command.herdrPane");
-      if (c.session === undefined) break;
-      const s = record(c.session, "command.session");
-      if (!harnesses.has(s.harness)) throw new Error(`unknown harness ${JSON.stringify(s.harness)}`);
-      if (s.harnessSessionId !== null) string(s.harnessSessionId, "command.session.harnessSessionId");
-      if (s.title !== null) string(s.title, "command.session.title");
-      break;
-    }
-    case "drop-failed-session":
-      string(c.id, "command.id");
-      break;
-    case "send-claude": {
-      if (typeof c.session !== "string" || !/^[A-Za-z0-9-]{1,200}$/.test(c.session)) throw new Error("command.session is not a Claude Code session ID");
-      if (string(c.text, "command.text").length > 16_384) throw new Error("command.text is longer than 16384 characters");
-      const problem = claudeTextProblem(c.text as string);
-      if (problem !== null) throw new Error(problem);
-      if (c.model !== undefined && string(c.model, "command.model").length > 200) throw new Error("command.model is longer than 200 characters");
-      if (c.requestId !== undefined) string(c.requestId, "command.requestId");
-      break;
-    }
-    case "send-claude-outcome":
-      string(c.requestId, "command.requestId");
-      break;
-    case "service":
-      if (!serviceOps.has(c.op)) throw new Error(`unknown service op ${JSON.stringify(c.op)}`);
-      if (c.name !== undefined) string(c.name, "command.name");
-      if (c.lines !== undefined && (!Number.isInteger(c.lines) || (c.lines as number) < 1)) throw new Error("command.lines is not a positive integer");
-      break;
-    case "link-port":
-    case "unlink-port":
-      if (!Number.isInteger(c.port) || (c.port as number) < 1 || (c.port as number) > 65535) throw new Error("command.port is not an integer from 1 to 65535");
-      if (reservedPorts.has(c.port as number)) throw new Error(`command.port ${c.port as number} is Nexus's own`);
-      break;
-    default: throw new Error(`unknown command kind ${JSON.stringify(c.kind)}`);
-  }
-  return c as unknown as PylonCommand;
+  return parseJson(asSent(pylonCommandSchema), body, "command");
 }
 
-const closeOutcomes: ReadonlySet<unknown> = new Set(["closed", "not-open", "moved"] satisfies Extract<CommandResult, { kind: "close-session" }>["outcome"][]);
-const sendOutcomes: ReadonlySet<unknown> = new Set(["sent", "queued", "blocked", "starting", "moved"] satisfies SendClaudeOutcome[]);
-function parseSend(r: Record<string, unknown>) {
-  if (!sendOutcomes.has(r.outcome)) throw new Error(`unknown send outcome ${JSON.stringify(r.outcome)}`);
-  string(r.herdrPane, "result.herdrPane");
-  if (typeof r.resumed !== "boolean") throw new Error("result.resumed is not a boolean");
-}
+const sendSchema = z.looseObject({ outcome: z.enum(["sent", "queued", "blocked", "starting", "moved"] satisfies SendClaudeOutcome[]), herdrPane: nonEmpty, resumed: z.boolean() });
+const commandResultSchema = z.discriminatedUnion("kind", [
+  z.looseObject({ kind: z.literal("exec"), exitCode: unchecked<number | null>(), output: unchecked<string>(), truncated: unchecked<boolean>() }),
+  z.looseObject({ kind: z.literal("open-session"), herdrPane: nonEmpty }),
+  z.looseObject({ kind: z.literal("close-session"), outcome: z.enum(["closed", "not-open", "moved"]).nullish() }),
+  z.looseObject({ kind: z.literal("drop-failed-session"), dropped: z.boolean() }),
+  z.looseObject({ kind: z.literal("send-claude"), ...sendSchema.shape }),
+  z.looseObject({ kind: z.literal("send-claude-outcome"), send: z.union([z.enum(["failed", "unknown"]), sendSchema], { error: "expected failed, unknown or what the send became" }) }),
+  z.looseObject({ kind: z.literal("service"), services: unchecked<readonly ServiceFact[]>(), logs: unchecked<string>() }),
+  z.looseObject({ kind: z.literal("link-port"), service: nonEmpty }),
+  z.looseObject({ kind: z.literal("unlink-port"), refused: nonEmpty.nullable() }),
+]);
+
 function parseCommandResult(command: PylonCommand, body: string): CommandResult {
-  const r = record(JSON.parse(body), "command result");
-  if (r.kind !== command.kind) throw new Error(`a ${command.kind} command got a ${JSON.stringify(r.kind)} result`);
-  if (r.kind === "open-session") string(r.herdrPane, "result.herdrPane");
-  if (r.kind === "close-session") {
-    r.outcome ??= "closed"; // from a probe that reported every close as done
-    if (!closeOutcomes.has(r.outcome)) throw new Error(`unknown close outcome ${JSON.stringify(r.outcome)}`);
-  }
-  if (r.kind === "drop-failed-session" && typeof r.dropped !== "boolean") throw new Error("result.dropped is not a boolean");
-  if (r.kind === "send-claude") parseSend(r);
-  if (r.kind === "send-claude-outcome" && r.send !== "failed" && r.send !== "unknown") parseSend(record(r.send, "result.send"));
-  if (r.kind === "link-port") string(r.service, "result.service");
-  if (r.kind === "unlink-port" && r.refused !== null) string(r.refused, "result.refused");
-  return r as unknown as CommandResult;
-}
-
-function parseJobStatus(value: unknown): JobStatus {
-  const s = record(value, "job status");
-  string(s.jobId, "status.jobId");
-  string(s.subject, "status.subject");
-  string(s.kind, "status.kind");
-  if (s.state !== "running" && s.state !== "succeeded" && s.state !== "failed") throw new Error(`unknown job state ${JSON.stringify(s.state)}`);
-  if (s.state === "failed" && !(string(s.code, "status.code") in retryable)) throw new Error(`unknown job error code ${JSON.stringify(s.code)}`);
-  return s as unknown as JobStatus;
-}
-
-const pylonPhases: ReadonlySet<unknown> = new Set(["booting", "stopping", "deleting", "stopped", "broken", "running"] satisfies PylonObservation["phase"][]);
-function parsePylonObservation(value: unknown): OlderPylonObservation {
-  const p = record(value, "pylon observation");
-  string(p.pylonId, "pylon.pylonId");
-  if (!pylonPhases.has(p.phase)) throw new Error(`unknown pylon phase ${JSON.stringify(p.phase)}`);
-  return p as unknown as OlderPylonObservation;
+  const result = parseJson(asSent(commandResultSchema), body, "result");
+  if (result.kind !== command.kind) throw new Error(`a ${command.kind} command got a ${result.kind} result`);
+  // A probe that reported every close as done sends no outcome.
+  return result.kind === "close-session" ? { ...result, outcome: result.outcome ?? "closed" } : result;
 }
 
 /** An observation as a probe older than some of its fields sent it, which the registry may still hold, or an upgraded one. */
@@ -1025,31 +1016,17 @@ export function fetchArtifact(peer: { host: string; port: number }, artifact: Po
   });
 }
 
-/**
- * Image and template IDs as the control plane mints them, a kind and a few lowercase letters or digits. They
- * name directories in a node's artifact store, so an ID with a separator or a dot is refused before it is used.
- */
-export const isImageId = (id: unknown): id is ImageId => typeof id === "string" && /^img-[a-z0-9]{1,40}$/.test(id);
-export const isTemplateId = (id: unknown): id is TemplateId => typeof id === "string" && /^tpl-[a-z0-9]{1,40}$/.test(id);
-export const isPortableArtifactId = (id: unknown): id is PortableArtifactId => isImageId(id) || isTemplateId(id);
+const imageManifestSchema = z.looseObject({
+  id: imageId, gondolinBuildId: nonEmpty, pins: objectAs<ImageRecipe["pins"]>(), builtOn: named<NodeName>(), builtAt: nonEmpty, sha256,
+}) satisfies z.ZodType<ImageManifest>;
+const templateManifestSchema = z.looseObject({
+  id: templateId, key: z.looseObject({ project: named<ProjectId>(), image: imageId, setupHash: nonEmpty }), commit: nonEmpty, builtAt: nonEmpty, sha256,
+}) satisfies z.ZodType<TemplateManifest>;
 
 /** A manifest from a peer's header or from an artifact directory. */
 export function parseArtifactManifest(value: unknown): ArtifactManifest {
-  const m = record(value, "artifact manifest");
-  const id = string(m.id, "manifest.id");
-  if (!/^[0-9a-f]{64}$/.test(string(m.sha256, "manifest.sha256"))) throw new Error("manifest.sha256 is not a hex sha256");
-  string(m.builtAt, "manifest.builtAt");
-  if (isImageId(id)) {
-    string(m.gondolinBuildId, "manifest.gondolinBuildId");
-    string(m.builtOn, "manifest.builtOn");
-    record(m.pins, "manifest.pins");
-  } else if (isTemplateId(id)) {
-    const key = record(m.key, "manifest.key");
-    for (const field of ["project", "image", "setupHash"] as const) string(key[field], `manifest.key.${field}`);
-    if (!isImageId(key.image)) throw new Error("manifest.key.image is not an image ID");
-    string(m.commit, "manifest.commit");
-  } else {
-    throw new Error(`manifest.id ${id} is neither an image nor a template`);
-  }
-  return m as unknown as ArtifactManifest;
+  const { id } = parse(z.looseObject({ id: nonEmpty }), value, "manifest");
+  if (isImageId(id)) return parse(asSent(imageManifestSchema), value, "manifest");
+  if (isTemplateId(id)) return parse(asSent(templateManifestSchema), value, "manifest");
+  throw new Error(`manifest.id: ${id} is neither an image nor a template ID`);
 }

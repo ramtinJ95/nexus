@@ -16,10 +16,12 @@
  */
 import { createHash, randomUUID } from "node:crypto";
 import { setTimeout as delay } from "node:timers/promises";
+import { z } from "zod";
 import { seedClaudeState } from "./claude-state.ts";
 import type { Guest } from "./backend.ts";
 import type { CommandResult, HerdrStatus, PausedSession, SessionFact, SessionIdentity } from "./protocol.ts";
-import type { SessionHarness } from "./project.ts";
+import { sessionHarnessSchema, type SessionHarness } from "./project.ts";
+import { nonEmpty, parse, parseJson } from "./parse.ts";
 
 export const herdrSession = "nexus";
 export const sessionsFile = "/home/user/.nexus/sessions.json";
@@ -145,8 +147,8 @@ export async function openSession(guest: Guest, session: { harness: SessionHarne
   }
   let opened: { workspace: string; pane: string } | null = launch?.progress === "opened" && (await livePanes(guest)).some((p) => p.herdrPane === launch.pane) ? launch : null;
   if (opened === null) {
-    const created = record(await herdr(guest, ["workspace", "create", "--cwd", session.cwd, "--label", session.title, "--no-focus"]), "workspace create");
-    opened = { workspace: string(record(created.workspace, "workspace create .workspace").workspace_id, "workspace_id"), pane: string(record(created.root_pane, "workspace create .root_pane").pane_id, "pane_id") };
+    const created = parse(workspaceCreated, await herdr(guest, ["workspace", "create", "--cwd", session.cwd, "--label", session.title, "--no-focus"]), "herdr workspace create result");
+    opened = { workspace: created.workspace.workspace_id, pane: created.root_pane.pane_id };
     if (launch !== null) await guest.writeFiles([{ path: `${launch.dir}/opened`, mode: 0o644, owner: "user", content: `${opened.workspace} ${opened.pane}\n` }]);
   }
   try {
@@ -182,7 +184,8 @@ async function claudeLaunch(guest: Guest, session: string): Promise<ClaudeLaunch
   const [opened, ...stages] = output.trim().split("\n");
   if (opened === undefined || opened === "") return { dir, progress: "none" };
   const [workspace, pane] = opened.split(" ");
-  return { dir, progress: stages.includes("typed") ? "typed" : "opened", workspace: string(workspace, `${dir}/opened workspace`), pane: string(pane, `${dir}/opened pane`) };
+  if (!workspace || !pane) throw new Error(`${dir}/opened names no workspace and pane: ${JSON.stringify(opened)}`);
+  return { dir, progress: stages.includes("typed") ? "typed" : "opened", workspace, pane };
 }
 
 /** Starts at the shell prompt; prompted Claude launches use submission evidence instead of readiness. */
@@ -254,8 +257,7 @@ async function awaitSubmission(guest: Guest, pane: string, launchDir: string, ty
  * can roll the pane back.
  */
 async function awaitShellPrompt(guest: Guest, pane: string): Promise<void> {
-  const shell = record(record(await herdr(guest, ["pane", "process-info", "--pane", pane]), "pane process-info").process_info, "process_info").shell_pid;
-  if (typeof shell !== "number") throw new Error(`Herdr pane ${pane} reports no shell_pid`);
+  const shell = parse(shellOf, await herdr(guest, ["pane", "process-info", "--pane", pane]), `herdr pane process-info ${pane} result`).process_info.shell_pid;
   const ready = await guest.exec(["sh", "-c", shellPrompt, "shell-ready", String(shell)], { cwd: home, timeoutMs: shellPromptMs + callTimeoutMs });
   if (ready.exitCode !== 0) throw new Error(`the pane's shell did not reach an idle prompt within ${shellPromptMs / 1000} seconds, so the Claude launch was not typed. The pane showed:\n${await screen(guest, pane)}`);
 }
@@ -605,9 +607,8 @@ async function runsAgent(guest: Guest, pane: string, kind: string): Promise<bool
 
 /** The argv of each foreground process in the pane that is the agent's executable. */
 async function agentProcesses(guest: Guest, pane: string, kind: string): Promise<readonly (readonly unknown[])[]> {
-  const info = record(record(await herdr(guest, ["pane", "process-info", "--pane", pane]), "pane process-info").process_info, "process_info");
-  return array(info.foreground_processes ?? [], "foreground_processes").flatMap((value) => {
-    const p = record(value, "foreground process");
+  const info = parse(foregroundOf, await herdr(guest, ["pane", "process-info", "--pane", pane]), `herdr pane process-info ${pane} result`).process_info;
+  return (info.foreground_processes ?? []).flatMap((p) => {
     const argv: readonly unknown[] = Array.isArray(p.argv) ? p.argv : [p.argv0, p.name];
     // An agent run by node, such as pi, shows its script as the second argument.
     return argv.slice(0, 2).some((arg) => typeof arg === "string" && arg.split("/").at(-1) === kind) ? [argv] : [];
@@ -708,30 +709,42 @@ interface LivePane {
   status: HerdrStatus;
 }
 
-const statuses: ReadonlySet<unknown> = new Set(["working", "idle", "blocked", "done", "unknown"] satisfies HerdrStatus[]);
+const workspaceCreated = z.object({ workspace: z.object({ workspace_id: nonEmpty }), root_pane: z.object({ pane_id: nonEmpty }) });
+const shellOf = z.object({ process_info: z.object({ shell_pid: z.custom<number>((pid) => typeof pid === "number", "expected a number") }) });
+const foregroundOf = z.object({ process_info: z.object({ foreground_processes: z.array(z.looseObject({})).nullish() }) });
+
+/** A pane's agent session and cwd are checked where they are read, as only some panes' are. */
+const herdrSnapshotSchema = z.object({
+  snapshot: z.object({
+    workspaces: z.array(z.object({ workspace_id: nonEmpty, label: nonEmpty })),
+    panes: z.array(z.object({
+      pane_id: nonEmpty,
+      workspace_id: nonEmpty,
+      agent: nonEmpty.nullish(),
+      agent_status: z.enum(["working", "idle", "blocked", "done", "unknown"] satisfies HerdrStatus[]),
+      agent_session: z.looseObject({}).nullish(),
+      foreground_cwd: nonEmpty.nullish(),
+      cwd: z.unknown().optional(),
+    })),
+  }),
+});
 
 async function livePanes(guest: Guest, timeoutMs = callTimeoutMs): Promise<LivePane[]> {
-  const snapshot = record(record(await herdr(guest, ["api", "snapshot"], timeoutMs), "api snapshot").snapshot, "api snapshot .snapshot");
-  const labels = new Map(array(snapshot.workspaces, "workspaces").map((w) => {
-    const workspace = record(w, "workspace");
-    return [string(workspace.workspace_id, "workspace_id"), string(workspace.label, "workspace label")] as const;
-  }));
-  return array(snapshot.panes, "panes").map((value): LivePane => {
-    const pane = record(value, "pane");
-    const herdrPane = string(pane.pane_id, "pane_id");
-    const agent = nullableString(pane.agent, `${herdrPane} agent`);
+  const { snapshot } = parse(herdrSnapshotSchema, await herdr(guest, ["api", "snapshot"], timeoutMs), "herdr api snapshot result");
+  const labels = new Map(snapshot.workspaces.map((w) => [w.workspace_id, w.label]));
+  return snapshot.panes.map((pane, i): LivePane => {
+    const at = `herdr api snapshot result.snapshot.panes[${i}]`;
+    const agent = pane.agent ?? null;
     const harness = harnessOf(agent);
-    if (!statuses.has(pane.agent_status)) throw new Error(`Herdr pane ${herdrPane} has unknown status ${JSON.stringify(pane.agent_status)}`);
-    const session = pane.agent_session === null || pane.agent_session === undefined ? null : record(pane.agent_session, `${herdrPane} agent_session`);
-    const title = labels.get(string(pane.workspace_id, "workspace_id"));
-    if (title === undefined) throw new Error(`Herdr pane ${herdrPane} is in a workspace the snapshot does not list`);
+    const title = labels.get(pane.workspace_id);
+    if (title === undefined) throw new Error(`Herdr pane ${pane.pane_id} is in a workspace the snapshot does not list`);
     return {
-      herdrPane,
+      herdrPane: pane.pane_id,
       harness,
       title,
-      cwd: nullableString(pane.foreground_cwd, "foreground_cwd") ?? nullableString(pane.cwd, "cwd") ?? checkoutDir,
-      harnessSessionId: harness !== "shell" && session !== null && session.agent === agent ? string(session.value, "agent_session.value") : null,
-      status: pane.agent_status as HerdrStatus,
+      cwd: pane.foreground_cwd ?? parse(nonEmpty.nullish(), pane.cwd, `${at}.cwd`) ?? checkoutDir,
+      harnessSessionId: harness !== "shell" && pane.agent_session != null && pane.agent_session.agent === agent ? parse(nonEmpty, pane.agent_session.value, `${at}.agent_session.value`) : null,
+      status: pane.agent_status,
     };
   });
 }
@@ -744,32 +757,23 @@ async function readSessionsFile(guest: Guest, timeoutMs = callTimeoutMs): Promis
   return parseSessionsFile(output);
 }
 
-function parseSessionsFile(text: string): SessionsFile {
-  const file = record(JSON.parse(text), sessionsFile);
-  if (file.version !== 1) throw new Error(`${sessionsFile} has unknown version ${JSON.stringify(file.version)}`);
-  return {
-    version: 1,
-    recordedAt: string(file.recordedAt, "recordedAt"),
-    sessions: array(file.sessions, "sessions").map(sessionRecord),
-    failed: array(file.failed, "failed").map((value): FailedRecord => {
-      const f = record(value, "failed record");
-      if (typeof f.inPane !== "boolean") throw new Error(`${sessionsFile} has a failed record without inPane`);
-      return { record: sessionRecord(f.record), inPane: f.inPane, message: string(f.message, "message") };
-    }),
-  };
-}
+const sessionRecordSchema = z.object({
+  herdrPane: nonEmpty,
+  harness: sessionHarnessSchema,
+  title: nonEmpty,
+  cwd: nonEmpty,
+  harnessSessionId: nonEmpty.nullish().transform((id) => id ?? null),
+  model: nonEmpty.exactOptional(),
+}) satisfies z.ZodType<SessionRecord>;
+const sessionsFileSchema = z.object({
+  version: z.literal(1),
+  recordedAt: nonEmpty,
+  sessions: z.array(sessionRecordSchema),
+  failed: z.array(z.object({ record: sessionRecordSchema, inPane: z.boolean(), message: nonEmpty })),
+}) satisfies z.ZodType<SessionsFile>;
 
-function sessionRecord(value: unknown): SessionRecord {
-  const r = record(value, "session record");
-  if (typeof r.harness !== "string" || !(r.harness in agents)) throw new Error(`${sessionsFile} names unknown harness ${JSON.stringify(r.harness)}`);
-  return {
-    herdrPane: string(r.herdrPane, "herdrPane"),
-    harness: r.harness as SessionHarness,
-    title: string(r.title, "title"),
-    cwd: string(r.cwd, "cwd"),
-    harnessSessionId: nullableString(r.harnessSessionId, "harnessSessionId"),
-    ...(r.model === undefined ? {} : { model: string(r.model, "model") }),
-  };
+function parseSessionsFile(text: string): SessionsFile {
+  return parseJson(sessionsFileSchema, text, sessionsFile);
 }
 
 async function writeSessionsFile(guest: Guest, file: SessionsFile): Promise<void> {
@@ -781,6 +785,8 @@ async function writeSessionsFile(guest: Guest, file: SessionsFile): Promise<void
  * probe outlived is never typed again by a later probe. Exits 75 when another exec created it first.
  */
 const claimThenRun = 'mkdir "$0" 2>/dev/null && exec "$@"; test -d "$0" && exit 75; mkdir "$0"';
+
+const herdrReply = z.object({ error: z.object({ code: nonEmpty, message: nonEmpty }).optional(), result: z.unknown().optional() });
 
 /**
  * One Herdr CLI call. Control commands print one JSON line, `{ id, result }` or `{ id, error }`, and the
@@ -796,27 +802,8 @@ async function herdr(guest: Guest, args: readonly string[], timeoutMs = callTime
   // `pane run` succeeds silently.
   if (line === undefined && exitCode === 0 && output.trim() === "") return undefined;
   if (line === undefined) throw new Error(`${what} exited ${exitCode} without a JSON reply: ${output.slice(-500)}`);
-  const reply = record(JSON.parse(line), `${what} reply`);
-  if (reply.error !== undefined) {
-    const error = record(reply.error, `${what} error`);
-    throw new HerdrError(string(error.code, "error code"), `${what}: ${string(error.message, "error message")}`);
-  }
+  const reply = parseJson(herdrReply, line, `${what} reply`);
+  if (reply.error !== undefined) throw new HerdrError(reply.error.code, `${what}: ${reply.error.message}`);
   if (exitCode !== 0) throw new Error(`${what} exited ${exitCode}: ${output.slice(-500)}`);
   return reply.result;
-}
-
-export function record(value: unknown, what: string): Record<string, unknown> {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) throw new Error(`${what} is not an object`);
-  return value as Record<string, unknown>;
-}
-function array(value: unknown, what: string): readonly unknown[] {
-  if (!Array.isArray(value)) throw new Error(`${what} is not an array`);
-  return value;
-}
-export function string(value: unknown, what: string): string {
-  if (typeof value !== "string" || value === "") throw new Error(`${what} is not a non-empty string`);
-  return value;
-}
-function nullableString(value: unknown, what: string): string | null {
-  return value === null || value === undefined ? null : string(value, what);
 }
