@@ -59,7 +59,10 @@ export function usageBackfill(options: {
     const p = registry.pylon(t.pylonId);
     if (p === undefined) return "its pylon has no record";
     if (p.failed !== null) return `its pylon failed: ${p.failed}`;
-    if (seen(p) === "absent") return `${p.node} holds no disk for its pylon`;
+    const o = seen(p);
+    if (o === "absent") return `${p.node} holds no disk for its pylon`;
+    const held = registry.nodes().some((n) => n.state === "online" && n.observation?.artifacts.includes(p.boot.image) === true);
+    if (o !== null && o.phase === "stopped" && !held) return `no online node holds its image ${p.boot.image}`;
     return null;
   }
 

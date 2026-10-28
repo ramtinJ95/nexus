@@ -228,6 +228,22 @@ test("a wake that fails, or does not boot in time, is skipped with why, its atte
   assert.ok(run.state === "done" && run.read === 2 && run.skipped.length === 2);
 });
 
+test("a thread whose pylon's image no online node holds is skipped, and woken once another node holds it", async (t) => {
+  const registry = opened();
+  t.after(() => registry.close());
+  const a = addThread(registry, n1, "no image");
+  observe(registry, n1, [[a.pylonId, "stopped"]], { artifacts: [] });
+  const { job } = backfill(t, registry);
+  job.start();
+  await until("the run is done", () => registry.usageBackfill().state, (s) => s === "done");
+  assert.deepEqual([row(registry, a)!.state, row(registry, a)!.reason], ["skipped", `no online node holds its image ${image}`]);
+  assert.equal(desired(registry, a), "paused");
+
+  observe(registry, n2, []);
+  job.start();
+  await held(registry, a, "reading");
+});
+
 test("a read that fails skips the thread with its error, and one a stop cut short leaves it for the next run", async (t) => {
   const registry = opened();
   t.after(() => registry.close());
