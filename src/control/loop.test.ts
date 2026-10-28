@@ -25,7 +25,7 @@ const previewPorts: PortRange = { first: 10200, last: 10209 };
  * A node as its probe presents it. Jobs run until `finish` unless `autoFinish` is set. Like the real probe, a
  * finished job is announced by a job event first and by a fresh snapshot a moment later.
  */
-function fakeNode(options: { autoFinish: boolean; node?: NodeName; reportsRoutes?: boolean; claudeLaunchRepeatable?: boolean; heldSecrets?: readonly string[] }) {
+function fakeNode(options: { autoFinish: boolean; node?: NodeName; reportsRoutes?: boolean; claudeLaunchRepeatable?: boolean; heldSecrets?: readonly string[]; artifacts?: readonly ImageId[] }) {
   const node = options.node ?? firebat;
   /** The held secrets the node's probe takes. A spawn asking for another fails for good, as on a probe older than it. */
   let heldSecrets = options.heldSecrets;
@@ -50,7 +50,7 @@ function fakeNode(options: { autoFinish: boolean; node?: NodeName; reportsRoutes
   const observation = (): NodeObservation => ({
     node, observedAt: new Date().toISOString(), probeBootId: "boot-1",
     capacity: { cpus: 16, committedCpus: 0, memoryGiB: 64, committedMemoryGiB: 0, diskFreeGiB: 100, committedDiskGiB: 0 },
-    artifacts: [image], jobs: [...jobs.values()].map((j) => j.status), pylons: [...pylons.values()], grants: { secrets: [...handed], gitSsh: false }, previewRoutes: options.reportsRoutes === false ? null : [...routes.values()],
+    artifacts: options.artifacts ?? [image], jobs: [...jobs.values()].map((j) => j.status), pylons: [...pylons.values()], grants: { secrets: [...handed], gitSsh: false }, previewRoutes: options.reportsRoutes === false ? null : [...routes.values()],
     ...(options.claudeLaunchRepeatable === true ? { claudeLaunchRepeatable: true } : {}),
     ...(heldSecrets === undefined ? {} : { heldSecrets }),
   });
@@ -450,6 +450,46 @@ test("a wake for reading the planner gives up on, as for an image no online node
   registry.stopUsageBackfill(Date.now());
   await settled(fake, loop);
   assert.equal(registry.pylon(thread.pylonId)!.failed, null, "the paused pylon needs no image");
+});
+
+test("a fetch of its image for a wake for reading that fails after the backfill let go of the pylon fails nothing, and the thread's next wake has every try", async (t) => {
+  const registry = openRegistry(tempDb());
+  const thread = seed(registry);
+  const testbench = "infra-testbench" as NodeName;
+  const other: ImageId = "img-111111111111";
+  registry.upsertNode({ name: testbench, tailnetHost: "infra-testbench.tail.ts.net", tailnetNodeId: "nTESTBENCH" as TailnetNodeId });
+  registry.saveImage({ id: other, gondolinBuildId: "b2", builtOn: testbench, builtAt: "2026-10-27T00:00:00Z", sha256: "b".repeat(64), pins: {} } as never, null);
+  const fake = fakeNode({ autoFinish: false });
+  const peer = fakeNode({ autoFinish: false, node: testbench, artifacts: [image, other] });
+  const logged: string[] = [];
+  const loop = run(t, registry, [fake.probe, peer.probe], { log: (line) => logged.push(line) });
+  await until("the spawn runs", () => fake.running().length === 1);
+  fake.finish(fake.running()[0]!);
+  await archive(registry, fake, loop, thread);
+  const pylon = registry.pylon(thread.pylonId)!;
+  registry.savePylon({ ...pylon, boot: { ...pylon.boot, image: other } });
+
+  registry.startUsageBackfill([thread.id], Date.now());
+  registry.holdUsageBackfill(thread.id, Date.now());
+  void loop.wake(node);
+  await until("the fetch for reading runs", () => fake.running().length === 1);
+  assert.equal(fake.submitted.at(-1)!.kind, "fetch-artifact");
+  registry.stopUsageBackfill(Date.now());
+  fake.finish(fake.running()[0]!, { code: "invalid", message: `${testbench} refuses the copy`, logTail: "" });
+  await until("the failure is folded in", () => registry.pylon(thread.pylonId)!.attempts.count === 1);
+  await settled(fake, loop);
+  const read = registry.pylon(thread.pylonId)!;
+  assert.deepEqual([read.failed, read.attempts.last?.code, read.attempts.last?.reading], [null, "invalid", true], "a failure the backfill no longer waits on fails nothing");
+  assert.deepEqual(logged, []);
+
+  registry.setThreadStatus(thread.id, "active");
+  registry.recordActivity(thread.id, { human: Date.now() });
+  void loop.wake(node);
+  await until("the thread's wake fetches its image", () => fake.running().length === 1);
+  assert.deepEqual(kinds(fake.submitted), ["spawn fresh", "pause", "fetch-artifact", "fetch-artifact"]);
+  fake.finish(fake.running()[0]!, { code: "backend", message: "the copy was cut short", logTail: "" });
+  await until("the wake's failure is folded in", () => registry.pylon(thread.pylonId)!.attempts.last?.reading === undefined);
+  assert.equal(registry.pylon(thread.pylonId)!.attempts.count, 1, "the failed fetch for reading is not one of the wake's tries");
 });
 
 test("a human retry of a pylon whose fresh setup failed spawns it fresh again, and the new setup's failure is the verdict", async (t) => {

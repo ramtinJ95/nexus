@@ -19,8 +19,11 @@ export interface PylonRecord {
   liveHash: PlanInput["liveHash"];
   /** Completed pauses. The next checkpoint is numbered after them. */
   pauses: number;
-  /** Saved before it is sent, so a control plane that restarts mid-submit still asks the probe about it. */
-  submitted: JobEnvelope | null;
+  /**
+   * Saved before it is sent, so a control plane that restarts mid-submit still asks the probe about it. `reading` marks
+   * a job the planner sent to wake the pylon for reading, which the envelope the probe gets does not carry.
+   */
+  submitted: (JobEnvelope & { reading?: true }) | null;
   attempts: PlanInput["attempts"];
   /** Set when the planner gives up. Only a human clears it, through the API's pylon retry. */
   failed: string | null;
@@ -107,12 +110,12 @@ export async function tick(pylon: PylonRecord, ctx: TickContext): Promise<PlanSt
   if (step.kind !== "submit") return step;
 
   const sent = await submitJob(probe, step.job, pylon.node, (env) => {
-    pylon.submitted = env;
+    pylon.submitted = pylon.desired === "reading" ? { ...env, reading: true } : env;
     ctx.save(pylon);
   });
   if (sent === "accepted") return step;
   pylon.submitted = null;
-  if (sent !== "retry") pylon.attempts = failedAttempt(pylon, "invalid", failureMessage(sent.invalid, ""), wakesForReading(step.job));
+  if (sent !== "retry") pylon.attempts = failedAttempt(pylon, "invalid", failureMessage(sent.invalid, ""), pylon.desired === "reading");
   ctx.save(pylon);
   return step;
 }
@@ -164,7 +167,7 @@ async function settle(pylon: PylonRecord, probe: ProbeClient, observation: NodeO
   if (listed === undefined) return "wait";
   pylon.submitted = null;
   if (status.state === "failed") {
-    pylon.attempts = failedAttempt(pylon, status.code, failureMessage(status.message, status.logTail), wakesForReading(env.job));
+    pylon.attempts = failedAttempt(pylon, status.code, failureMessage(status.message, status.logTail), env.reading === true);
     return null;
   }
   pylon.attempts = { count: 0, last: null };
@@ -172,8 +175,6 @@ async function settle(pylon: PylonRecord, probe: ProbeClient, observation: NodeO
   if (status.kind === "pause") pylon.pauses += 1;
   return null;
 }
-
-const wakesForReading = (job: Job): boolean => job.kind === "spawn" && job.relaunch === false;
 
 function failedAttempt(pylon: PylonRecord, code: FailedAttempt["code"], message: string, reading: boolean): PylonRecord["attempts"] {
   // A wake for reading's failure is not one of a normal wake's tries.
