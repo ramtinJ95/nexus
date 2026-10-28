@@ -140,8 +140,8 @@ test("a pull request opened just before the turn ended, which the PR watch has n
     await f.nudger.poll();
   }
   assert.deepEqual(f.nudges(), []);
-  assert.equal(f.registry.nudge(id), null);
-  assert.ok(f.finds.length > 0 && f.finds.every((call) => call === `${repo} nexus/cache all`), "only the branch pushed to origin is searched, in every state");
+  assert.deepEqual(f.registry.nudge(id), { state: "opened", turn: f.registry.thread(id)!.lastReplyAt });
+  assert.deepEqual(f.finds, [`${repo} nexus/cache all`], "only the branch pushed to origin is searched, in every state, once per turn");
 });
 
 test("a GitHub search that fails sends nothing and logs no error text", async (t) => {

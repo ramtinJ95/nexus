@@ -21,7 +21,12 @@ export type Nudge =
   /** `turn` is the end (the thread's lastReplyAt) of the stalled turn the latest nudge answered; `count` nudges in a row. */
   | { state: "nudged"; turn: number; count: number }
   /** The turn after the last nudge stalled too, so the thread waits on the person. */
-  | { state: "person"; turn: number };
+  | { state: "person"; turn: number }
+  /**
+   * GitHub found a pull request on the thread's branches after the turn that ended at `turn`, which the PR watch has
+   * not linked yet. It may never link one that merged or closed first, so the turn is not searched again.
+   */
+  | { state: "opened"; turn: number };
 
 /** A branch pushed and a pull request opened just before the turn ended reach the registry's outputs and GitHub's search within it. */
 const turnGraceMs = 60_000;
@@ -76,7 +81,7 @@ export function builderNudger(options: { registry: Registry; github: Pick<GitHub
     }
     if (t.working || turn === null || now() - turn < graceMs || (record !== null && record.turn >= turn)) return;
     try {
-      if (await opened(t, repo)) return;
+      if (await opened(t, repo)) return registry.saveNudge(t.id, { state: "opened", turn });
     } catch (err) {
       // Never log transport errors' text: a fetch implementation may put authorization headers in them.
       log(`${t.id}: nudge could not search GitHub for its pull request and will retry (${(err as Error).name})`);
@@ -86,9 +91,10 @@ export function builderNudger(options: { registry: Registry; github: Pick<GitHub
     // The awaits above may have let a turn start, or an archive in.
     const fresh = registry.thread(t.id);
     if (fresh === undefined || builderRepo(fresh) === null || fresh.working || fresh.lastReplyAt !== turn) return;
-    if (record !== null && record.count >= maxNudges) return registry.saveNudge(t.id, { state: "person", turn });
+    const count = record?.state === "nudged" ? record.count : 0;
+    if (count >= maxNudges) return registry.saveNudge(t.id, { state: "person", turn });
     if (await inbox(fresh, { id: `nudge:${t.id}:${turn}`, text, sender: "nudge" }) === "delivered") {
-      registry.saveNudge(t.id, { state: "nudged", turn, count: (record?.count ?? 0) + 1 });
+      registry.saveNudge(t.id, { state: "nudged", turn, count: count + 1 });
     }
   }
 
