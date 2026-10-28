@@ -1,0 +1,14 @@
+$ nexus show th-5850688c4c82
+th-5850688c4c82  Plan the pipeline items
+project: nexus
+attention: none
+status: active
+pylon: pylon-th-5850688c4c82 on verify-node, running, observed 0s ago
+size: 2 CPUs, 4 GiB memory, 10 GiB disk
+placement: verify-node, the project's default node
+setup: fresh boot runs .nexus/setup, because the control plane could not read .nexus/setup at main: the verify stack reads no remote
+PR watch: off (no control-plane GitHub token configured)
+question qn-brief: The planning thread wrote a brief for "Archive what landed". Start a builder with it?
+  options: "Start it", "Rewrite the brief", "Drop the item"
+  answered "Start it" by nPHONE at 2026-10-28T05:11:31.131Z
+exit 0

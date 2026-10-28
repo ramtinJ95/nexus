@@ -1,0 +1,1 @@
+branch: 015712d fix(dashboard): cap the question cards' height so the conversation keeps its room

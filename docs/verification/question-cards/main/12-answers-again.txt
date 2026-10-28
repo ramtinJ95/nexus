@@ -1,0 +1,9 @@
+As the laptop, the same answer again, another answer, an unknown question, and an option the question does not offer:
+POST /v1/questions/qn-image-rebuild/answer {"option":"Rebuild and roll out"}
+=> 404 {"error":"no route /v1/questions/qn-image-rebuild/answer"}
+POST /v1/questions/qn-image-rebuild/answer {"option":"Leave the image as it is"}
+=> 404 {"error":"no route /v1/questions/qn-image-rebuild/answer"}
+POST /v1/questions/qn-unknown/answer {"option":"Start it"}
+=> 404 {"error":"no route /v1/questions/qn-unknown/answer"}
+POST /v1/questions/qn-merge-token/answer {"option":"Rotate later"}
+=> 404 {"error":"no route /v1/questions/qn-merge-token/answer"}

@@ -1,0 +1,9 @@
+As the laptop, the same answer again, another answer, an unknown question, and an option the question does not offer:
+POST /v1/questions/qn-image-rebuild/answer {"option":"Rebuild and roll out"}
+=> 200 {"id":"qn-image-rebuild","thread":"th-090e5f31f75e","text":"The builder's pull request changes images/pylon/Dockerfile. Rebuild the pylon image and roll it out once it lands?","options":["Rebuild and roll out","Leave the image as it is"],"reserved":"image-rebuild","answerer":"deployer","askedAt":1793164161433,"answer":{"option":"Rebuild and roll out","by":"nLAPTOP","at":1793164286466}}
+POST /v1/questions/qn-image-rebuild/answer {"option":"Leave the image as it is"}
+=> 409 {"error":"question qn-image-rebuild was answered \"Rebuild and roll out\" by nLAPTOP"}
+POST /v1/questions/qn-unknown/answer {"option":"Start it"}
+=> 404 {"error":"no question qn-unknown"}
+POST /v1/questions/qn-merge-token/answer {"option":"Rotate later"}
+=> 400 {"error":"\"Rotate later\" is not an option of question qn-merge-token, which are \"Rotate now\", \"Not now\""}
