@@ -421,6 +421,9 @@ test("a wake for reading that fails after the backfill let go of its pylon fails
   const next = fake.submitted.at(-1)!;
   assert.deepEqual(kinds(fake.submitted), ["spawn fresh", "pause", "spawn resume", "spawn resume"]);
   assert.ok(next.kind === "spawn" && next.relaunch === undefined, "the wake brings the sessions back");
+  fake.finish(fake.running()[0]!, setupFailed(thread.pylonId, 1));
+  await until("the wake's failure is folded in", () => registry.pylon(thread.pylonId)!.attempts.last?.reading === undefined);
+  assert.equal(registry.pylon(thread.pylonId)!.attempts.count, 1, "the failed wake for reading is not one of the wake's tries");
 });
 
 test("a wake for reading the planner gives up on, as for an image no online node holds, is an attempt the backfill skips, never a failed pylon", async (t) => {

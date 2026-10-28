@@ -176,7 +176,8 @@ async function settle(pylon: PylonRecord, probe: ProbeClient, observation: NodeO
 const wakesForReading = (job: Job): boolean => job.kind === "spawn" && job.relaunch === false;
 
 function failedAttempt(pylon: PylonRecord, code: FailedAttempt["code"], message: string, reading: boolean): PylonRecord["attempts"] {
-  return { count: pylon.attempts.count + 1, last: { at: Date.now(), code, message, ...(reading ? { reading } : {}) } };
+  // A wake for reading's failure is not one of a normal wake's tries.
+  return { count: (pylon.attempts.last?.reading === true ? 0 : pylon.attempts.count) + 1, last: { at: Date.now(), code, message, ...(reading ? { reading } : {}) } };
 }
 
 const maxMessageChars = 500;
