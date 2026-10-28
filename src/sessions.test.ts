@@ -114,6 +114,25 @@ test("a pane whose shell is still starting is retried until the agent starts", a
   assert.equal(guest.herdrCalls().filter((c) => c === "agent start").length, 3);
 });
 
+test("only a Claude Code start seeds Claude's state, and pi or a shell seeds nothing", async () => {
+  for (const [harness, seeds] of [["claude-code", 1], ["pi", 0], ["shell", 0]] as const) {
+    const guest = herdrUp();
+    await openSession(guest, { harness, title: "t", cwd: "/home/user" });
+    assert.equal(guest.execs.filter((a) => a[2] === seedClaudeState).length, seeds, harness);
+  }
+});
+
+test("a start Herdr fails keeps a Claude Code pane that runs Claude, but rolls back a pi pane even though it runs pi", async () => {
+  const failing = (agent: readonly string[]) => herdrUp({ "agent start": () => herdrError("timeout", "timed out waiting for agent"), "pane process-info": processInfo({ "w1:p1": agent }) });
+  const claude = failing(["claude", "--session-id", "bd2c2d6b"]);
+  assert.equal(await openSession(claude, { harness: "claude-code", title: "t", cwd: "/home/user" }), "w1:p1");
+  assert.ok(!claude.herdrCalls().includes("workspace close"), "the running Claude keeps its pane");
+
+  const pi = failing(["pi"]);
+  await assert.rejects(openSession(pi, { harness: "pi", title: "t", cwd: "/home/user" }), /timed out waiting for agent/);
+  assert.deepEqual(pi.herdrCalls().filter((c) => c === "pane process-info" || c === "workspace close"), ["workspace close"], "pi's pane is not inspected before the rollback");
+});
+
 test("opening a session starts a detached Herdr server when none runs", async () => {
   let running = false;
   const guest = fakeGuest((argv, herdr) => {
@@ -216,6 +235,20 @@ test("Herdr's own report of a Claude Code session wins over its command line, wh
   const guest = herdrUp({ "api snapshot": () => herdrOk(snapshot) });
   assert.deepEqual((await recordSessions(guest))!.map((r) => r.harnessSessionId), ["after-clear"]);
   assert.equal(guest.herdrCalls().filter((c) => c === "pane process-info").length, 1, "only the explicit model is read from the command line");
+});
+
+test("recording reads the session ID and model back from a Claude Code pane's command line, and never from a pi pane's", async () => {
+  const snapshot = herdrSnapshot([{ id: "w1", label: "review" }, { id: "w2", label: "plan" }], [herdrPane("w1:p1", "w1", "claude", "idle"), herdrPane("w2:p1", "w2", "pi", "idle")]);
+  const guest = herdrUp({
+    "api snapshot": () => herdrOk(snapshot),
+    "pane process-info": processInfo({ "w1:p1": ["claude", "--session-id", "bd2c2d6b", "--model", "opus"], "w2:p1": ["pi", "--session-id", "d778fc1b", "--model", "gpt"] }),
+  });
+  await recordSessions(guest);
+  assert.deepEqual(JSON.parse(guest.written[0]!.content).sessions, [
+    { herdrPane: "w1:p1", harness: "claude-code", title: "review", cwd: "/home/user/workspace/repo", model: "opus", harnessSessionId: "bd2c2d6b" },
+    { herdrPane: "w2:p1", harness: "pi", title: "plan", cwd: "/home/user/workspace/repo", harnessSessionId: null },
+  ]);
+  assert.deepEqual(guest.execs.filter((a) => a[4] === "process-info").map((a) => a.at(-1)), ["w1:p1", "w1:p1"], "pi's pane is never inspected");
 });
 
 test("recording with no Herdr server leaves the last sessions file in place", async () => {
@@ -341,6 +374,28 @@ test("pi run by node counts as running from its script's name", async () => {
     throw new Error(`unscripted ${sub}`);
   });
   assert.deepEqual((await relaunchSessions(guest)).map((o) => o.result), ["present"]);
+});
+
+test("pi records of one session each come back in a pane of their own, and only Claude Code sessions are held while the relaunch runs", async () => {
+  const records: SessionRecord[] = [
+    { herdrPane: "w1:p1", harness: "pi", title: "plan", cwd: "/home/user", harnessSessionId: "/home/user/.pi/agent/sessions/s.jsonl", model: "gpt" },
+    { herdrPane: "w2:p1", harness: "pi", title: "plan again", cwd: "/home/user", harnessSessionId: "/home/user/.pi/agent/sessions/s.jsonl" },
+    { herdrPane: "w3:p1", harness: "claude-code", title: "review", cwd: "/home/user", harnessSessionId: "bd2c2d6b", model: "opus" },
+    { herdrPane: "w4:p1", harness: "shell", title: "sh", cwd: "/home/user", harnessSessionId: null },
+  ];
+  const guest = pylon(records, []);
+  const held: (readonly string[])[] = [];
+  const outcomes = await relaunchSessions(guest, (sessions, work) => {
+    held.push(sessions);
+    return work();
+  });
+  assert.deepEqual(held, [["bd2c2d6b"]]);
+  assert.deepEqual(placed(outcomes), [["plan", "relaunched", "w20:p1"], ["plan again", "relaunched", "w21:p1"], ["review", "relaunched", "w22:p1"], ["sh", "relaunched", "w23:p1"]]);
+  assert.deepEqual(guest.execs.filter((a) => a[3] === "agent").map((a) => [a[a.indexOf("--kind") + 1], ...a.slice(a.indexOf("--") + 1)]), [
+    ["pi", "--session", "/home/user/.pi/agent/sessions/s.jsonl"],
+    ["pi", "--session", "/home/user/.pi/agent/sessions/s.jsonl"],
+    ["claude", "--resume", "bd2c2d6b", "--model", "opus", "--permission-mode", "bypassPermissions"],
+  ], "a recorded model reaches only Claude Code's launch");
 });
 
 interface FakePane { workspace: string; label: string; pane: string; cwd: string; argv: readonly string[]; agent: string | null; session: { kind: "id" | "path"; value: string } | null }

@@ -87,6 +87,32 @@ test("a job error code or a harness is one Nexus names, not any key an object ho
   assert.throws(() => parsePylonCommand(JSON.stringify({ kind: "open-session", harness: "toString", title: "x" })), { message: /^command\.harness: / });
 });
 
+test("a probe names the harness field a session open or close fails on, and why", () => {
+  const messages = [
+    { kind: "open-session", harness: "codex", title: "x" },
+    { kind: "open-session", harness: "pi", title: "x", model: "m" },
+    { kind: "open-session", harness: "pi", title: "x", prompt: "p" },
+    { kind: "open-session", harness: "shell", title: "x", model: "m" },
+    { kind: "open-session", harness: "shell", title: "x", resume: "s" },
+    { kind: "close-session", herdrPane: "w1:p1", session: { harness: "codex", harnessSessionId: null, title: null } },
+  ].map((command) => {
+    try {
+      parsePylonCommand(JSON.stringify(command));
+    } catch (err) {
+      return (err as Error).message;
+    }
+    return assert.fail(`${JSON.stringify(command)} was taken`);
+  });
+  assert.deepEqual(messages, [
+    "command.harness: Invalid discriminator value. Expected 'claude-code' | 'pi' | 'shell'",
+    "command.model: only a Claude Code session takes it",
+    "command.prompt: only a Claude Code session takes it",
+    "command.model: only a Claude Code session takes it",
+    "command.resume: a shell session has nothing to resume",
+    'command.session.harness: Invalid option: expected one of "claude-code"|"pi"|"shell"',
+  ]);
+});
+
 const commands: PylonCommand[] = [
   { kind: "exec", argv: ["git", "status"], cwd: "/home/user", timeoutMs: 60_000 },
   { kind: "exec", argv: ["true"], cwd: "/", timeoutMs: 1 },

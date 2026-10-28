@@ -21,7 +21,8 @@ import type { AssistantMessage, ImageContent, TextContent, UserMessage } from "@
 import type { ConversationView, InboxState, LiveState } from "@earendil-works/pi-durable";
 import { desiredPhase, type ActualState, type DesiredPhase } from "../reconcile.ts";
 import { countedCapacity, type HerdrStatus } from "../protocol.ts";
-import { githubTokenGrant, linkedPort, type ProjectId, type SessionHarness } from "../project.ts";
+import { githubTokenGrant, linkedPort, type ProjectId } from "../project.ts";
+import { harnessNamed } from "../sessions.ts";
 import type { ThreadDetail, ThreadRow } from "./api.ts";
 import { attentions, needsPerson } from "./attention.ts";
 import type { NodeRecord, Output, Preview, Registry, Thread, ThreadId } from "./registry.ts";
@@ -171,7 +172,6 @@ const actualBadge: Record<ActualState, [label: string, tone: Tone]> = {
 };
 const desiredTone: Record<DesiredPhase, Tone> = { running: "ok", reading: "work", paused: "idle", deleted: "muted" };
 const sessionTone: Record<HerdrStatus, Tone> = { working: "work", idle: "idle", blocked: "bad", done: "ok", unknown: "muted" };
-const harnessLabel: Record<SessionHarness, string> = { "claude-code": "Claude Code", pi: "pi", shell: "Shell" };
 const outputLabel: Record<Output["kind"], string> = { branch: "branch", diff: "diff", preview: "preview", file: "file", "pull-request": "pull request" };
 
 /** A dot alone carries its meaning in its accessible name. One beside its label is decoration. */
@@ -939,7 +939,7 @@ ${outputs.length === 0 ? html`<p class="empty">No other outputs yet.</p>` : html
 ${d.claudeWorker === undefined ? "" : html`<section><h2>Claude worker</h2><p>${d.claudeWorker.state} · ${d.claudeWorker.model ?? "unknown"}</p>${d.claudeWorker.message === undefined ? "" : html`<pre>${d.claudeWorker.message}</pre>`}</section>`}
 <section aria-labelledby="sessions-h"><h2 id="sessions-h">Sessions ${count(d.sessions.length)}</h2>
 ${d.sessions.length === 0 ? html`<p class="empty">No sessions.</p>` : html`<ul class="list outs">${d.sessions.map((s) => html`<li>
-<span class="o-kind">${harnessLabel[s.harness]}</span>${s.title !== null && html`<span class="s-title">${s.title}</span>`}${s.state === "running" ? state(s.status, sessionTone[s.status])
+<span class="o-kind">${harnessNamed(s.harness)?.label}</span>${s.title !== null && html`<span class="s-title">${s.title}</span>`}${s.state === "running" ? state(s.status, sessionTone[s.status])
   : s.state === "paused" ? state(t.status === "archived" ? "paused, resumes on unarchive" : "paused, resumes on wake", "idle")
   : state("failed", "bad")}${s.herdrPane !== null && html`<code class="dim pane">${s.herdrPane}</code>`}
 ${s.harnessSessionId !== null && html`<code class="dim sid" title="${s.harnessSessionId}">session ${s.harnessSessionId}</code>`}

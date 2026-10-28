@@ -28,8 +28,8 @@ import { PassThrough, type Duplex, type Readable } from "node:stream";
 import { setTimeout as delay } from "node:timers/promises";
 import { z } from "zod";
 import { localApiWhois, type Whois } from "./tailscale.ts";
-import { chatgptTokenGrant, reservedPortMessage, reservedPorts, sessionHarnessSchema, type BootInputs, type LiveSpec, type ProjectId, type SessionHarness } from "./project.ts";
-import { claudeTextProblem } from "./sessions.ts";
+import { chatgptTokenGrant, reservedPortMessage, reservedPorts, type BootInputs, type LiveSpec, type ProjectId } from "./project.ts";
+import { claudeTextProblem, harnesses, sessionHarnessSchema, type SessionHarness } from "./sessions.ts";
 import { asSent, named, nonEmpty, parse, parseJson, unchecked } from "./parse.ts";
 import type {
   ArtifactManifest, CheckpointId, ImageId, ImageManifest, ImageRecipe, PortableArtifactId, ArtifactId, TemplateBuildInputs, TemplateId, TemplateManifest,
@@ -847,15 +847,23 @@ export function parseJobEnvelope(body: string): JobEnvelope {
 }
 
 const port = z.int().min(1).max(65535).refine((p) => !reservedPorts.has(p), reservedPortMessage);
-const claudeOnly = z.never({ error: "only a Claude Code session takes it" }).exactOptional();
-const openSession = { kind: z.literal("open-session"), title: nonEmpty };
+/** Refuses an open-session field that only the harnesses whose agent has `takes` accept, and names them. */
+function onlyFor(takes: "promptReceipt" | "modelFlag") {
+  const labels = sessionHarnessSchema.options.filter((h) => harnesses[h].agent?.[takes] !== undefined).map((h) => harnesses[h].label);
+  return z.never({ error: `only a ${labels.join(" or ")} session takes it` }).exactOptional();
+}
+const openSession = (harness: SessionHarness) => {
+  const { agent } = harnesses[harness];
+  return z.looseObject({
+    kind: z.literal("open-session"), title: nonEmpty, harness: z.literal(harness),
+    resume: agent === null ? z.never({ error: `a ${harness} session has nothing to resume` }).exactOptional() : nonEmpty.exactOptional(),
+    prompt: agent?.promptReceipt === undefined ? onlyFor("promptReceipt") : nonEmpty.max(16_384).exactOptional(),
+    model: agent?.modelFlag === undefined ? onlyFor("modelFlag") : nonEmpty.max(200).exactOptional(),
+  });
+};
 const pylonCommandSchema = z.discriminatedUnion("kind", [
   z.looseObject({ kind: z.literal("exec"), argv: z.array(z.string()).min(1), cwd: z.string().startsWith("/", "expected an absolute path"), timeoutMs: z.int().min(1).max(60_000) }),
-  z.discriminatedUnion("harness", [
-    z.looseObject({ ...openSession, harness: z.literal("claude-code"), resume: nonEmpty.exactOptional(), prompt: nonEmpty.max(16_384).exactOptional(), model: nonEmpty.max(200).exactOptional() }),
-    z.looseObject({ ...openSession, harness: z.literal("pi"), resume: nonEmpty.exactOptional(), prompt: claudeOnly, model: claudeOnly }),
-    z.looseObject({ ...openSession, harness: z.literal("shell"), resume: z.never({ error: "a shell session has nothing to resume" }).exactOptional(), prompt: claudeOnly, model: claudeOnly }),
-  ]),
+  z.discriminatedUnion("harness", sessionHarnessSchema.options.map(openSession) as [ReturnType<typeof openSession>, ...ReturnType<typeof openSession>[]]),
   z.looseObject({
     kind: z.literal("close-session"), herdrPane: nonEmpty,
     session: z.looseObject({ harness: sessionHarnessSchema, harnessSessionId: nonEmpty.nullable(), title: nonEmpty.nullable() }).exactOptional(),

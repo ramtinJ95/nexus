@@ -1,0 +1,176 @@
+# parsePylonCommand: open-session, one field at a time
+{"kind":"open-session","harness":"claude-code","title":"t"} => ok {"kind":"open-session","harness":"claude-code","title":"t"}
+{"kind":"open-session","harness":"claude-code","title":"t","resume":"bd2c2d6b"} => ok {"kind":"open-session","harness":"claude-code","title":"t","resume":"bd2c2d6b"}
+{"kind":"open-session","harness":"claude-code","title":"t","resume":""} => refused command.resume: Too small: expected string to have >=1 characters
+{"kind":"open-session","harness":"claude-code","title":"t","resume":"<r x 20000>"} => ok {"kind":"open-session","harness":"claude-code","title":"t","resume":"<r x 20000>"}
+{"kind":"open-session","harness":"claude-code","title":"t","resume":42} => refused command.resume: Invalid input: expected string, received number
+{"kind":"open-session","harness":"claude-code","title":"t","resume":null} => refused command.resume: Invalid input: expected string, received null
+{"kind":"open-session","harness":"claude-code","title":"t","prompt":"work"} => ok {"kind":"open-session","harness":"claude-code","title":"t","prompt":"work"}
+{"kind":"open-session","harness":"claude-code","title":"t","prompt":""} => refused command.prompt: Too small: expected string to have >=1 characters
+{"kind":"open-session","harness":"claude-code","title":"t","prompt":"<p x 16384>"} => ok {"kind":"open-session","harness":"claude-code","title":"t","prompt":"<p x 16384>"}
+{"kind":"open-session","harness":"claude-code","title":"t","prompt":"<p x 16385>"} => refused command.prompt: Too big: expected string to have <=16384 characters
+{"kind":"open-session","harness":"claude-code","title":"t","prompt":42} => refused command.prompt: Invalid input: expected string, received number
+{"kind":"open-session","harness":"claude-code","title":"t","prompt":null} => refused command.prompt: Invalid input: expected string, received null
+{"kind":"open-session","harness":"claude-code","title":"t","model":"opus"} => ok {"kind":"open-session","harness":"claude-code","title":"t","model":"opus"}
+{"kind":"open-session","harness":"claude-code","title":"t","model":""} => refused command.model: Too small: expected string to have >=1 characters
+{"kind":"open-session","harness":"claude-code","title":"t","model":"<m x 200>"} => ok {"kind":"open-session","harness":"claude-code","title":"t","model":"<m x 200>"}
+{"kind":"open-session","harness":"claude-code","title":"t","model":"<m x 201>"} => refused command.model: Too big: expected string to have <=200 characters
+{"kind":"open-session","harness":"claude-code","title":"t","model":42} => refused command.model: Invalid input: expected string, received number
+{"kind":"open-session","harness":"claude-code","title":"t","model":null} => refused command.model: Invalid input: expected string, received null
+{"kind":"open-session","harness":"pi","title":"t"} => ok {"kind":"open-session","harness":"pi","title":"t"}
+{"kind":"open-session","harness":"pi","title":"t","resume":"bd2c2d6b"} => ok {"kind":"open-session","harness":"pi","title":"t","resume":"bd2c2d6b"}
+{"kind":"open-session","harness":"pi","title":"t","resume":""} => refused command.resume: Too small: expected string to have >=1 characters
+{"kind":"open-session","harness":"pi","title":"t","resume":"<r x 20000>"} => ok {"kind":"open-session","harness":"pi","title":"t","resume":"<r x 20000>"}
+{"kind":"open-session","harness":"pi","title":"t","resume":42} => refused command.resume: Invalid input: expected string, received number
+{"kind":"open-session","harness":"pi","title":"t","resume":null} => refused command.resume: Invalid input: expected string, received null
+{"kind":"open-session","harness":"pi","title":"t","prompt":"work"} => refused command.prompt: only a Claude Code session takes it
+{"kind":"open-session","harness":"pi","title":"t","prompt":""} => refused command.prompt: only a Claude Code session takes it
+{"kind":"open-session","harness":"pi","title":"t","prompt":"<p x 16384>"} => refused command.prompt: only a Claude Code session takes it
+{"kind":"open-session","harness":"pi","title":"t","prompt":"<p x 16385>"} => refused command.prompt: only a Claude Code session takes it
+{"kind":"open-session","harness":"pi","title":"t","prompt":42} => refused command.prompt: only a Claude Code session takes it
+{"kind":"open-session","harness":"pi","title":"t","prompt":null} => refused command.prompt: only a Claude Code session takes it
+{"kind":"open-session","harness":"pi","title":"t","model":"opus"} => refused command.model: only a Claude Code session takes it
+{"kind":"open-session","harness":"pi","title":"t","model":""} => refused command.model: only a Claude Code session takes it
+{"kind":"open-session","harness":"pi","title":"t","model":"<m x 200>"} => refused command.model: only a Claude Code session takes it
+{"kind":"open-session","harness":"pi","title":"t","model":"<m x 201>"} => refused command.model: only a Claude Code session takes it
+{"kind":"open-session","harness":"pi","title":"t","model":42} => refused command.model: only a Claude Code session takes it
+{"kind":"open-session","harness":"pi","title":"t","model":null} => refused command.model: only a Claude Code session takes it
+{"kind":"open-session","harness":"shell","title":"t"} => ok {"kind":"open-session","harness":"shell","title":"t"}
+{"kind":"open-session","harness":"shell","title":"t","resume":"bd2c2d6b"} => refused command.resume: a shell session has nothing to resume
+{"kind":"open-session","harness":"shell","title":"t","resume":""} => refused command.resume: a shell session has nothing to resume
+{"kind":"open-session","harness":"shell","title":"t","resume":"<r x 20000>"} => refused command.resume: a shell session has nothing to resume
+{"kind":"open-session","harness":"shell","title":"t","resume":42} => refused command.resume: a shell session has nothing to resume
+{"kind":"open-session","harness":"shell","title":"t","resume":null} => refused command.resume: a shell session has nothing to resume
+{"kind":"open-session","harness":"shell","title":"t","prompt":"work"} => refused command.prompt: only a Claude Code session takes it
+{"kind":"open-session","harness":"shell","title":"t","prompt":""} => refused command.prompt: only a Claude Code session takes it
+{"kind":"open-session","harness":"shell","title":"t","prompt":"<p x 16384>"} => refused command.prompt: only a Claude Code session takes it
+{"kind":"open-session","harness":"shell","title":"t","prompt":"<p x 16385>"} => refused command.prompt: only a Claude Code session takes it
+{"kind":"open-session","harness":"shell","title":"t","prompt":42} => refused command.prompt: only a Claude Code session takes it
+{"kind":"open-session","harness":"shell","title":"t","prompt":null} => refused command.prompt: only a Claude Code session takes it
+{"kind":"open-session","harness":"shell","title":"t","model":"opus"} => refused command.model: only a Claude Code session takes it
+{"kind":"open-session","harness":"shell","title":"t","model":""} => refused command.model: only a Claude Code session takes it
+{"kind":"open-session","harness":"shell","title":"t","model":"<m x 200>"} => refused command.model: only a Claude Code session takes it
+{"kind":"open-session","harness":"shell","title":"t","model":"<m x 201>"} => refused command.model: only a Claude Code session takes it
+{"kind":"open-session","harness":"shell","title":"t","model":42} => refused command.model: only a Claude Code session takes it
+{"kind":"open-session","harness":"shell","title":"t","model":null} => refused command.model: only a Claude Code session takes it
+
+# parsePylonCommand: open-session, fields together
+{"kind":"open-session","harness":"claude-code","title":"t","resume":"bd2c2d6b","prompt":"work","model":"opus"} => ok {"kind":"open-session","harness":"claude-code","title":"t","resume":"bd2c2d6b","prompt":"work","model":"opus"}
+{"kind":"open-session","harness":"claude-code","title":"t","prompt":"work","model":"opus"} => ok {"kind":"open-session","harness":"claude-code","title":"t","prompt":"work","model":"opus"}
+{"kind":"open-session","harness":"claude-code","title":"t","resume":"bd2c2d6b","model":"opus"} => ok {"kind":"open-session","harness":"claude-code","title":"t","resume":"bd2c2d6b","model":"opus"}
+{"kind":"open-session","harness":"claude-code","title":"t","extra":true} => ok {"kind":"open-session","harness":"claude-code","title":"t","extra":true}
+{"kind":"open-session","harness":"claude-code"} => refused command.title: Invalid input: expected string, received undefined
+{"kind":"open-session","harness":"claude-code","title":""} => refused command.title: Too small: expected string to have >=1 characters
+{"kind":"open-session","harness":"pi","title":"t","resume":"bd2c2d6b","prompt":"work","model":"opus"} => refused command.prompt: only a Claude Code session takes it; command.model: only a Claude Code session takes it
+{"kind":"open-session","harness":"pi","title":"t","prompt":"work","model":"opus"} => refused command.prompt: only a Claude Code session takes it; command.model: only a Claude Code session takes it
+{"kind":"open-session","harness":"pi","title":"t","resume":"bd2c2d6b","model":"opus"} => refused command.model: only a Claude Code session takes it
+{"kind":"open-session","harness":"pi","title":"t","extra":true} => ok {"kind":"open-session","harness":"pi","title":"t","extra":true}
+{"kind":"open-session","harness":"pi"} => refused command.title: Invalid input: expected string, received undefined
+{"kind":"open-session","harness":"pi","title":""} => refused command.title: Too small: expected string to have >=1 characters
+{"kind":"open-session","harness":"shell","title":"t","resume":"bd2c2d6b","prompt":"work","model":"opus"} => refused command.resume: a shell session has nothing to resume; command.prompt: only a Claude Code session takes it; command.model: only a Claude Code session takes it
+{"kind":"open-session","harness":"shell","title":"t","prompt":"work","model":"opus"} => refused command.prompt: only a Claude Code session takes it; command.model: only a Claude Code session takes it
+{"kind":"open-session","harness":"shell","title":"t","resume":"bd2c2d6b","model":"opus"} => refused command.resume: a shell session has nothing to resume; command.model: only a Claude Code session takes it
+{"kind":"open-session","harness":"shell","title":"t","extra":true} => ok {"kind":"open-session","harness":"shell","title":"t","extra":true}
+{"kind":"open-session","harness":"shell"} => refused command.title: Invalid input: expected string, received undefined
+{"kind":"open-session","harness":"shell","title":""} => refused command.title: Too small: expected string to have >=1 characters
+
+# parsePylonCommand: open-session with a harness Nexus does not name
+{"kind":"open-session","title":"t"} => refused command.harness: Invalid discriminator value. Expected 'claude-code' | 'pi' | 'shell'
+{"kind":"open-session","harness":"codex","title":"t"} => refused command.harness: Invalid discriminator value. Expected 'claude-code' | 'pi' | 'shell'
+{"kind":"open-session","harness":"codex","title":"t","model":"opus"} => refused command.harness: Invalid discriminator value. Expected 'claude-code' | 'pi' | 'shell'
+{"kind":"open-session","harness":"codex","title":"t","resume":"s"} => refused command.harness: Invalid discriminator value. Expected 'claude-code' | 'pi' | 'shell'
+{"kind":"open-session","harness":"codex","title":"t","prompt":"work"} => refused command.harness: Invalid discriminator value. Expected 'claude-code' | 'pi' | 'shell'
+{"kind":"open-session","harness":"toString","title":"t"} => refused command.harness: Invalid discriminator value. Expected 'claude-code' | 'pi' | 'shell'
+{"kind":"open-session","harness":"constructor","title":"t"} => refused command.harness: Invalid discriminator value. Expected 'claude-code' | 'pi' | 'shell'
+{"kind":"open-session","harness":"__proto__","title":"t"} => refused command.harness: Invalid discriminator value. Expected 'claude-code' | 'pi' | 'shell'
+{"kind":"open-session","harness":"Claude-Code","title":"t"} => refused command.harness: Invalid discriminator value. Expected 'claude-code' | 'pi' | 'shell'
+{"kind":"open-session","harness":"claude","title":"t"} => refused command.harness: Invalid discriminator value. Expected 'claude-code' | 'pi' | 'shell'
+{"kind":"open-session","harness":"","title":"t"} => refused command.harness: Invalid discriminator value. Expected 'claude-code' | 'pi' | 'shell'
+{"kind":"open-session","harness":null,"title":"t"} => refused command.harness: Invalid discriminator value. Expected 'claude-code' | 'pi' | 'shell'
+{"kind":"open-session","harness":42,"title":"t"} => refused command.harness: Invalid discriminator value. Expected 'claude-code' | 'pi' | 'shell'
+{"kind":"open-session","harness":["pi"],"title":"t"} => refused command.harness: Invalid discriminator value. Expected 'claude-code' | 'pi' | 'shell'
+
+# parsePylonCommand: close-session
+{"kind":"close-session","herdrPane":"w1:p1"} => ok {"kind":"close-session","herdrPane":"w1:p1"}
+{"kind":"close-session","herdrPane":"w1:p1","session":{"harness":"claude-code","harnessSessionId":"s1","title":"review"}} => ok {"kind":"close-session","herdrPane":"w1:p1","session":{"harness":"claude-code","harnessSessionId":"s1","title":"review"}}
+{"kind":"close-session","herdrPane":"w1:p1","session":{"harness":"claude-code","harnessSessionId":null,"title":null}} => ok {"kind":"close-session","herdrPane":"w1:p1","session":{"harness":"claude-code","harnessSessionId":null,"title":null}}
+{"kind":"close-session","herdrPane":"w1:p1","session":{"harness":"claude-code","harnessSessionId":"","title":"review"}} => refused command.session.harnessSessionId: Too small: expected string to have >=1 characters
+{"kind":"close-session","herdrPane":"w1:p1","session":{"harness":"claude-code","title":"review"}} => refused command.session.harnessSessionId: Invalid input: expected string, received undefined
+{"kind":"close-session","herdrPane":"w1:p1","session":{"harness":"pi","harnessSessionId":"s1","title":"review"}} => ok {"kind":"close-session","herdrPane":"w1:p1","session":{"harness":"pi","harnessSessionId":"s1","title":"review"}}
+{"kind":"close-session","herdrPane":"w1:p1","session":{"harness":"pi","harnessSessionId":null,"title":null}} => ok {"kind":"close-session","herdrPane":"w1:p1","session":{"harness":"pi","harnessSessionId":null,"title":null}}
+{"kind":"close-session","herdrPane":"w1:p1","session":{"harness":"pi","harnessSessionId":"","title":"review"}} => refused command.session.harnessSessionId: Too small: expected string to have >=1 characters
+{"kind":"close-session","herdrPane":"w1:p1","session":{"harness":"pi","title":"review"}} => refused command.session.harnessSessionId: Invalid input: expected string, received undefined
+{"kind":"close-session","herdrPane":"w1:p1","session":{"harness":"shell","harnessSessionId":"s1","title":"review"}} => ok {"kind":"close-session","herdrPane":"w1:p1","session":{"harness":"shell","harnessSessionId":"s1","title":"review"}}
+{"kind":"close-session","herdrPane":"w1:p1","session":{"harness":"shell","harnessSessionId":null,"title":null}} => ok {"kind":"close-session","herdrPane":"w1:p1","session":{"harness":"shell","harnessSessionId":null,"title":null}}
+{"kind":"close-session","herdrPane":"w1:p1","session":{"harness":"shell","harnessSessionId":"","title":"review"}} => refused command.session.harnessSessionId: Too small: expected string to have >=1 characters
+{"kind":"close-session","herdrPane":"w1:p1","session":{"harness":"shell","title":"review"}} => refused command.session.harnessSessionId: Invalid input: expected string, received undefined
+{"kind":"close-session","herdrPane":"w1:p1","session":{"harness":"codex","harnessSessionId":null,"title":null}} => refused command.session.harness: Invalid option: expected one of "claude-code"|"pi"|"shell"
+{"kind":"close-session","herdrPane":"w1:p1","session":{"harness":"toString","harnessSessionId":null,"title":null}} => refused command.session.harness: Invalid option: expected one of "claude-code"|"pi"|"shell"
+{"kind":"close-session","herdrPane":"w1:p1","session":{"harnessSessionId":null,"title":null}} => refused command.session.harness: Invalid option: expected one of "claude-code"|"pi"|"shell"
+{"kind":"close-session","herdrPane":"w1:p1","session":{"harness":null,"harnessSessionId":null,"title":null}} => refused command.session.harness: Invalid option: expected one of "claude-code"|"pi"|"shell"
+{"kind":"close-session","herdrPane":"w1:p1","session":{"harness":42,"harnessSessionId":null,"title":null}} => refused command.session.harness: Invalid option: expected one of "claude-code"|"pi"|"shell"
+{"kind":"close-session","herdrPane":"w1:p1","session":null} => refused command.session: Invalid input: expected object, received null
+
+# parseProbeEvent
+a running pylon with a session of each harness => ok pylon, sessions [{"id":"w1:p1","state":"running","herdrPane":"w1:p1","harness":"claude-code","harnessSessionId":"claude-code-session","status":"working","title":"claude-code title"},{"id":"w2:p1","state":"running","herdrPane":"w2:p1","harness":"pi","harnessSessionId":"pi-session","status":"working","title":"pi title"},{"id":"w3:p1","state":"running","herdrPane":"w3:p1","harness":"shell","harnessSessionId":null,"status":"working","title":"shell title"}]
+a running pylon with a failed session of each harness => ok pylon, sessions [{"id":"failed-0","state":"failed","herdrPane":null,"harness":"claude-code","harnessSessionId":"claude-code-session","status":"unknown","title":"claude-code title","message":"did not start"},{"id":"failed-1","state":"failed","herdrPane":null,"harness":"pi","harnessSessionId":"pi-session","status":"unknown","title":"pi title","message":"did not start"},{"id":"failed-2","state":"failed","herdrPane":null,"harness":"shell","harnessSessionId":null,"status":"unknown","title":"shell title","message":"did not start"}]
+a running pylon from before session states, a session of each harness => ok pylon, sessions [{"herdrPane":"w1:p1","harness":"claude-code","harnessSessionId":"claude-code-session","status":"working","title":"claude-code title","state":"running","id":"w1:p1"},{"herdrPane":"w2:p1","harness":"pi","harnessSessionId":"pi-session","status":"working","title":"pi title","state":"running","id":"w2:p1"},{"herdrPane":"w3:p1","harness":"shell","harnessSessionId":null,"status":"working","title":"shell title","state":"running","id":"w3:p1"}]
+a running pylon with a codex session => ok pylon, sessions [{"id":"w1:p1","state":"running","herdrPane":"w1:p1","harness":"codex","harnessSessionId":"codex-session","status":"working","title":"codex title"}]
+a running pylon with a session of no harness => ok pylon, sessions [{"id":"w1:p1","state":"running","herdrPane":"w1:p1","harnessSessionId":"pi-session","status":"working","title":"pi title"}]
+a stopped pylon with a paused session of each harness => ok pylon, sessions [{"id":"w1:p1","herdrPane":"w1:p1","harness":"claude-code","harnessSessionId":null,"title":"claude-code"},{"id":"w2:p1","herdrPane":"w2:p1","harness":"pi","harnessSessionId":null,"title":"pi"},{"id":"w3:p1","herdrPane":"w3:p1","harness":"shell","harnessSessionId":null,"title":"shell"}]
+a stopped pylon with a paused codex session => ok pylon, sessions [{"id":"w1:p1","herdrPane":"w1:p1","harness":"codex","harnessSessionId":null,"title":"x"}]
+a snapshot with a running pylon with a session of each harness => ok snapshot, sessions [{"id":"w1:p1","state":"running","herdrPane":"w1:p1","harness":"claude-code","harnessSessionId":"claude-code-session","status":"working","title":"claude-code title"},{"id":"w2:p1","state":"running","herdrPane":"w2:p1","harness":"pi","harnessSessionId":"pi-session","status":"working","title":"pi title"},{"id":"w3:p1","state":"running","herdrPane":"w3:p1","harness":"shell","harnessSessionId":null,"status":"working","title":"shell title"},{"id":"w4:p1","state":"running","herdrPane":"w4:p1","harness":"codex","harnessSessionId":"codex-session","status":"working","title":"codex title"}]
+
+# ingest: one running session, a pylon whose last observation was the same, so only activity is new
+claude-code running working => []
+claude-code running idle => []
+claude-code running blocked => []
+claude-code running done => []
+claude-code running unknown => []
+claude-code failed working => []
+claude-code failed idle => []
+claude-code failed blocked => []
+claude-code failed done => []
+claude-code failed unknown => []
+pi running working => [{"record":"activity","pylonId":"pylon-th-000000000001","human":null,"agent":1800000000000}]
+pi running idle => []
+pi running blocked => []
+pi running done => []
+pi running unknown => []
+pi failed working => []
+pi failed idle => []
+pi failed blocked => []
+pi failed done => []
+pi failed unknown => []
+shell running working => [{"record":"activity","pylonId":"pylon-th-000000000001","human":null,"agent":1800000000000}]
+shell running idle => []
+shell running blocked => []
+shell running done => []
+shell running unknown => []
+shell failed working => []
+shell failed idle => []
+shell failed blocked => []
+shell failed done => []
+shell failed unknown => []
+codex running working => [{"record":"activity","pylonId":"pylon-th-000000000001","human":null,"agent":1800000000000}]
+codex running idle => []
+codex running blocked => []
+codex running done => []
+codex running unknown => []
+codex failed working => []
+codex failed idle => []
+codex failed blocked => []
+codex failed done => []
+codex failed unknown => []
+
+# ingest: activity from several sessions at once
+claude-code:working, pi:idle => []
+claude-code:working, shell:idle => []
+claude-code:idle, pi:working => [{"record":"activity","pylonId":"pylon-th-000000000001","human":null,"agent":1800000000000}]
+claude-code:working, claude-code:working => []
+
+# ingest: the session rows written for a new list
+running, a session of each harness, after none => [{"record":"sessions","pylonId":"pylon-th-000000000001","sessions":[{"id":"w1:p1","harness":"claude-code","harnessSessionId":"claude-code-session","title":"claude-code title","state":"running","herdrPane":"w1:p1","status":"idle","message":null},{"id":"w2:p1","harness":"pi","harnessSessionId":"pi-session","title":"pi title","state":"running","herdrPane":"w2:p1","status":"idle","message":null},{"id":"w3:p1","harness":"shell","harnessSessionId":null,"title":"shell title","state":"running","herdrPane":"w3:p1","status":"idle","message":null},{"id":"w4:p1","harness":"codex","harnessSessionId":"codex-session","title":"codex title","state":"running","herdrPane":"w4:p1","status":"idle","message":null}]}]
+running, a failed session of each harness, after none => [{"record":"sessions","pylonId":"pylon-th-000000000001","sessions":[{"id":"w1:p1","harness":"claude-code","harnessSessionId":"claude-code-session","title":"claude-code title","state":"failed","herdrPane":null,"status":null,"message":"did not start"},{"id":"w2:p1","harness":"pi","harnessSessionId":"pi-session","title":"pi title","state":"failed","herdrPane":"w2:p1","status":null,"message":"did not start"},{"id":"w3:p1","harness":"shell","harnessSessionId":null,"title":"shell title","state":"failed","herdrPane":"w3:p1","status":null,"message":"did not start"}]}]
+stopped, a paused session of each harness, after running => [{"record":"sessions","pylonId":"pylon-th-000000000001","sessions":[{"id":"w1:p1","harness":"claude-code","harnessSessionId":"s","title":"claude-code","state":"paused","herdrPane":"w1:p1","status":null,"message":null},{"id":"w2:p1","harness":"pi","harnessSessionId":"s","title":"pi","state":"paused","herdrPane":"w2:p1","status":null,"message":null},{"id":"w3:p1","harness":"shell","harnessSessionId":null,"title":"shell","state":"paused","herdrPane":"w3:p1","status":null,"message":null}]}]
+running, a session of each harness, a pylon whose last observation is absent => [{"record":"sessions","pylonId":"pylon-th-000000000001","sessions":[{"id":"w1:p1","harness":"claude-code","harnessSessionId":"claude-code-session","title":"claude-code title","state":"running","herdrPane":"w1:p1","status":"working","message":null},{"id":"w2:p1","harness":"pi","harnessSessionId":"pi-session","title":"pi title","state":"running","herdrPane":"w2:p1","status":"working","message":null},{"id":"w3:p1","harness":"shell","harnessSessionId":null,"title":"shell title","state":"running","herdrPane":"w3:p1","status":"working","message":null}]},{"record":"activity","pylonId":"pylon-th-000000000001","human":null,"agent":1800000000000}]

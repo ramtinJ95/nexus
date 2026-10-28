@@ -20,7 +20,6 @@ import { z } from "zod";
 import { seedClaudeState } from "./claude-state.ts";
 import type { Guest } from "./backend.ts";
 import type { CommandResult, HerdrStatus, PausedSession, SessionFact, SessionIdentity } from "./protocol.ts";
-import { sessionHarnessSchema, type SessionHarness } from "./project.ts";
 import { nonEmpty, parse, parseJson } from "./parse.ts";
 
 export const herdrSession = "nexus";
@@ -36,21 +35,78 @@ const serverStartMs = 5_000;
 const paneBusyRetryMs = 3_000;
 const shellPromptMs = 10_000;
 
-/**
- * The agent each harness starts in its pane: Herdr's agent kind, the launch arguments that resume a harness
- * session ID, and those of a fresh start. A shell is the pane's own login shell, so it starts nothing and
- * resumes nothing.
- */
-const agents: { readonly [H in SessionHarness]: { kind: string; resume(guest: Guest, id: string): Promise<readonly string[]>; fresh(): readonly string[] } | null } = {
-  // Herdr learns a Claude Code session's ID from Claude's SessionStart hook, which does not run while Claude
-  // waits at its login or trust screen, nor again once the human is past it. So every Claude Code start
-  // names its ID, and recordSessions reads it back from the pane's command line when Herdr has none.
-  "claude-code": { kind: "claude", resume: claudeResume, fresh: () => ["--session-id", randomUUID()] },
-  // pi 1.4.0 opens a missing --session path as a new session that it first writes there on its first
-  // message, so unlike a Claude Code ID the path needs no check. pi reports its session file at once.
-  pi: { kind: "pi", resume: async (_guest, sessionFile) => ["--session", sessionFile], fresh: () => [] },
-  shell: null,
-};
+/** A session harness: everything Nexus does differently for one kind of session. */
+interface Harness {
+  /** Its name on the dashboard. */
+  label: string;
+  /** What tells the control plane its agent is working: Herdr's status of the pane, or the agent's own hooks. */
+  activity: "herdr" | "hooks";
+  /** The agent it starts in its pane. A shell is the pane's own login shell, so it starts nothing and resumes nothing. */
+  agent: Agent | null;
+}
+
+interface Agent {
+  /** Herdr's agent kind, which Herdr names after the agent's executable. */
+  kind: string;
+  /** The launch arguments that resume a harness session ID. */
+  resume(guest: Guest, id: string): Promise<readonly string[]>;
+  /** The launch arguments of a fresh start. */
+  fresh(): readonly string[];
+  /** Arguments every launch passes, after those and any model. */
+  flags: readonly string[];
+  /** The flag a launch passes a model with, which recordSessions reads back. A harness without one takes no model. */
+  modelFlag?: string;
+  /** The flags its command line names its session ID with, which recordSessions reads when Herdr has learned none. */
+  sessionFlags?: readonly string[];
+  /** Launch arguments that make the agent run `command` as it takes its first prompt. A harness without them takes no prompt. */
+  promptReceipt?(command: string): readonly string[];
+  /** Runs before each start. */
+  seed?(guest: Guest): Promise<void>;
+  /**
+   * A session runs in one pane only. A relaunch brings it back in one and holds it from sends and launches meanwhile,
+   * and a start Herdr reports failed is kept while its pane runs the agent, so the session is never started twice.
+   */
+  onePane: boolean;
+}
+
+const sessionHarnesses = {
+  "claude-code": {
+    label: "Claude Code",
+    // Herdr can retain a dead Claude's working status; only its expiring hook lease keeps it awake.
+    activity: "hooks",
+    agent: {
+      kind: "claude",
+      resume: claudeResume,
+      // Herdr learns a Claude Code session's ID from Claude's SessionStart hook, which does not run while Claude
+      // waits at its login or trust screen, nor again once the human is past it. So every Claude Code start
+      // names its ID, and recordSessions reads it back from the pane's command line when Herdr has none.
+      fresh: () => ["--session-id", randomUUID()],
+      flags: ["--permission-mode", "bypassPermissions"],
+      modelFlag: "--model",
+      sessionFlags: ["--session-id", "--resume"],
+      promptReceipt: (command) => ["--settings", JSON.stringify({ hooks: { UserPromptSubmit: [{ hooks: [{ type: "command", command }] }] } })],
+      seed: seedClaude,
+      onePane: true,
+    },
+  },
+  pi: {
+    label: "pi",
+    activity: "herdr",
+    // pi 1.4.0 opens a missing --session path as a new session that it first writes there on its first
+    // message, so unlike a Claude Code ID the path needs no check. pi reports its session file at once.
+    agent: { kind: "pi", resume: async (_guest, sessionFile) => ["--session", sessionFile], fresh: () => [], flags: [], onePane: false },
+  },
+  shell: { label: "Shell", activity: "herdr", agent: null },
+} satisfies Record<string, Harness>;
+
+export type SessionHarness = keyof typeof sessionHarnesses;
+export const harnesses: { readonly [H in SessionHarness]: Harness } = sessionHarnesses;
+export const sessionHarnessSchema = z.enum(Object.keys(harnesses) as [SessionHarness, ...SessionHarness[]]);
+
+/** The entry of a harness an observation or a stored row names, which can be one this build does not know, as a newer probe's. */
+export function harnessNamed(name: string): Harness | undefined {
+  return Object.hasOwn(harnesses, name) ? harnesses[name as SessionHarness] : undefined;
+}
 
 /**
  * Claude Code writes no transcript until its first prompt, and `--resume` of an ID without one exits, so
@@ -64,9 +120,14 @@ async function claudeResume(guest: Guest, id: string): Promise<readonly string[]
   throw new Error(`looking for Claude Code transcript ${id} failed with exit ${exitCode}: ${output}`);
 }
 
+async function seedClaude(guest: Guest): Promise<void> {
+  const seeded = await guest.exec(["node", "-e", seedClaudeState, checkoutDir], { cwd: home, timeoutMs: callTimeoutMs });
+  if (seeded.exitCode !== 0) throw new Error(`seeding Claude state failed: ${seeded.output}`);
+}
+
 /** Agents Nexus does not launch, such as Codex started by hand, read as shells. */
 function harnessOf(herdrAgent: string | null): SessionHarness {
-  return (Object.keys(agents) as SessionHarness[]).find((h) => agents[h] !== null && agents[h].kind === herdrAgent) ?? "shell";
+  return sessionHarnessSchema.options.find((h) => harnesses[h].agent?.kind === herdrAgent) ?? "shell";
 }
 
 /** What ~/.nexus/sessions.json holds for each session. The checkpoint carries the file. */
@@ -133,11 +194,11 @@ export class HerdrError extends Error {
  */
 export async function openSession(guest: Guest, session: { harness: SessionHarness; title: string; cwd: string; resume?: string; prompt?: string; model?: string }): Promise<string> {
   await ensureServer(guest);
-  const prompted = session.harness === "claude-code" && session.prompt !== undefined;
+  const prompted = session.prompt !== undefined && harnesses[session.harness].agent?.promptReceipt !== undefined;
   const resume = prompted ? session.resume ?? randomUUID() : session.resume;
   const launch = prompted ? await claudeLaunch(guest, resume!) : null;
   if (launch?.progress === "typed") {
-    await awaitSubmission(guest, launch.pane, launch.dir, " before the probe lost the launch");
+    await awaitSubmission(guest, launch.pane, launch.dir, harnesses[session.harness].agent!.kind, " before the probe lost the launch");
     return launch.pane;
   }
   if (launch !== null) {
@@ -188,31 +249,24 @@ async function claudeLaunch(guest: Guest, session: string): Promise<ClaudeLaunch
   return { dir, progress: stages.includes("typed") ? "typed" : "opened", workspace, pane };
 }
 
-/** Starts at the shell prompt; prompted Claude launches use submission evidence instead of readiness. */
+/** Starts at the shell prompt; prompted launches use submission evidence instead of readiness. */
 async function startHarness(guest: Guest, pane: string, harness: SessionHarness, resume: string | undefined, prompt?: string, model?: string, launchDir?: string): Promise<void> {
-  const agent = agents[harness];
+  const { agent } = harnesses[harness];
   if (agent === null) return;
-  if (harness === "claude-code") {
-    const seeded = await guest.exec(["node", "-e", seedClaudeState, checkoutDir], { cwd: home, timeoutMs: callTimeoutMs });
-    if (seeded.exitCode !== 0) throw new Error(`seeding Claude state failed: ${seeded.output}`);
-  }
+  await agent.seed?.(guest);
   const args = resume === undefined ? agent.fresh() : await agent.resume(guest, resume);
-  const launch = [...args];
-  if (harness === "claude-code" && model !== undefined) launch.push("--model", model);
-  if (harness === "claude-code") launch.push("--permission-mode", "bypassPermissions");
-  if (harness === "claude-code" && prompt !== undefined && launchDir !== undefined) {
+  const launch = [...args, ...(model === undefined || agent.modelFlag === undefined ? [] : [agent.modelFlag, model]), ...agent.flags];
+  if (prompt !== undefined && launchDir !== undefined && agent.promptReceipt !== undefined) {
     if (args[0] === "--resume") throw new Error(`Claude session ${resume} already has a transcript, so its first prompt went in before this launch, which typed nothing. Attach to check before starting another session`);
-    const command = `mkdir -p ${launchDir} && touch ${launchDir}/submitted`;
-    launch.push("--settings", JSON.stringify({ hooks: { UserPromptSubmit: [{ hooks: [{ type: "command", command }] }] } }), prompt);
+    launch.push(...agent.promptReceipt(`mkdir -p ${launchDir} && touch ${launchDir}/submitted`), prompt);
     await awaitShellPrompt(guest, pane);
     // Herdr 0.9.5's agent start refuses an argument holding a newline or another control character, as a multi-line
     // prompt does, so this launch types its own command. Once typed, any error is as uncertain as a readiness timeout:
     // the receipt decides, and the pane and the submission fence stay.
     const typed = await herdr(guest, ["pane", "run", pane, [agent.kind, ...launch].map(shellWord).join(" ")], callTimeoutMs, `${launchDir}/typed`).then(() => "", (err: Error) => ` after ${err.message}`);
-    await awaitSubmission(guest, pane, launchDir, typed);
+    await awaitSubmission(guest, pane, launchDir, agent.kind, typed);
     return;
   }
-  if (prompt !== undefined) launch.push(prompt);
   const argv = ["agent", "start", `nx-${randomUUID().slice(0, 8)}`, "--kind", agent.kind, "--pane", pane, "--timeout", String(agentStartTimeoutMs)];
   if (launch.length > 0) argv.push("--", ...launch);
   const busyUntil = Date.now() + paneBusyRetryMs;
@@ -228,8 +282,8 @@ async function startHarness(guest: Guest, pane: string, harness: SessionHarness,
         await new Promise((resolve) => setTimeout(resolve, 100));
         continue;
       }
-      if (harness === "claude-code") {
-        const running = await runsAgent(guest, pane, "claude").catch(() => null);
+      if (agent.onePane) {
+        const running = await runsAgent(guest, pane, agent.kind).catch(() => null);
         if (running === true) return;
         if (running === null) throw new ClaudeLaunchStalled(`Claude launch stalled: ${(err as Error).message}; attach before starting another session`, pane);
       }
@@ -243,10 +297,10 @@ async function startHarness(guest: Guest, pane: string, harness: SessionHarness,
  * Waits up to 30 seconds for the launch's UserPromptSubmit receipt. A live, working Claude in the pane also shows the
  * launch went in. Anything else leaves the pane as it is for the person, since Claude may still be starting.
  */
-async function awaitSubmission(guest: Guest, pane: string, launchDir: string, typed: string): Promise<void> {
+async function awaitSubmission(guest: Guest, pane: string, launchDir: string, kind: string, typed: string): Promise<void> {
   const submitted = await guest.exec(["sh", "-c", 'i=0; until test -f "$1"; do i=$((i+1)); test "$i" -lt 300 || exit 1; sleep 0.1; done', "claude-submitted", `${launchDir}/submitted`], { cwd: home, timeoutMs: 35_000 }).catch(() => ({ exitCode: null }));
   if (submitted.exitCode === 0) return;
-  if (await runsAgent(guest, pane, "claude").catch(() => false) && (await livePanes(guest).catch(() => [])).some((p) => p.herdrPane === pane && p.status === "working")) return;
+  if (await runsAgent(guest, pane, kind).catch(() => false) && (await livePanes(guest).catch(() => [])).some((p) => p.herdrPane === pane && p.status === "working")) return;
   throw new ClaudeLaunchStalled(`Claude launch stalled: no UserPromptSubmit within 30 seconds${typed}; attach before starting another session. The pane showed:\n${await screen(guest, pane)}`, pane);
 }
 
@@ -417,8 +471,8 @@ async function restoredPane(guest: Guest, session: string): Promise<{ pane: Live
 /** Whether Claude runs `session` in the pane: Herdr reports the session and Claude in its foreground, or, before Herdr learns an ID, Claude's command line names it. */
 async function runsSession(guest: Guest, pane: LivePane, session: string): Promise<boolean> {
   if (pane.harness !== "claude-code") return false;
-  if (pane.harnessSessionId === null) return await launchedClaudeSession(guest, pane.herdrPane) === session;
-  return pane.harnessSessionId === session && await runsAgent(guest, pane.herdrPane, agents["claude-code"]!.kind);
+  if (pane.harnessSessionId === null) return await launchedSession(guest, pane.herdrPane, harnesses["claude-code"].agent!) === session;
+  return pane.harnessSessionId === session && await runsAgent(guest, pane.herdrPane, harnesses["claude-code"].agent!.kind);
 }
 
 async function livePane(guest: Guest, herdrPane: string): Promise<LivePane> {
@@ -471,11 +525,14 @@ export async function recordSessions(guest: Guest): Promise<readonly RecordedSes
   const failed = standing(await readSessionsFile(guest), panes);
   const standsFor = new Set(failed.flatMap((f) => f.inPane ? [f.record.herdrPane] : []));
   const sessions = await Promise.all(panes.filter((p) => !standsFor.has(p.herdrPane))
-    .map(async ({ herdrPane, harness, title, cwd, harnessSessionId }): Promise<SessionRecord> => ({
-      herdrPane, harness, title, cwd,
-      ...(harness === "claude-code" ? await launchedClaudeModel(guest, herdrPane) : {}),
-      harnessSessionId: harnessSessionId ?? (harness === "claude-code" ? await launchedClaudeSession(guest, herdrPane) : null),
-    })));
+    .map(async ({ herdrPane, harness, title, cwd, harnessSessionId }): Promise<SessionRecord> => {
+      const { agent } = harnesses[harness];
+      return {
+        herdrPane, harness, title, cwd,
+        ...(agent?.modelFlag === undefined ? {} : await launchedModel(guest, herdrPane, agent)),
+        harnessSessionId: harnessSessionId ?? (agent?.sessionFlags === undefined ? null : await launchedSession(guest, herdrPane, agent)),
+      };
+    }));
   const file: SessionsFile = { version: 1, recordedAt: new Date().toISOString(), sessions, failed };
   await writeSessionsFile(guest, file);
   return relaunchedFrom(file);
@@ -501,16 +558,17 @@ function relaunchedFrom(file: SessionsFile): RecordedSession[] {
  * file is rewritten with each session's pane and with the failures, so a later record keeps them. A Herdr that
  * does not start fails every session, for its reason.
  *
- * A Claude Code session comes back in one pane only: the first record of it whose pane still runs it, or else its
- * first record. Every other record of it is dropped and its pane closed. `exclusive` runs the relaunch while no send
- * or launch of those sessions does, so none of them starts a session the relaunch is bringing back.
+ * A session of a one-pane harness, such as Claude Code, comes back in one pane only: the first record of it whose pane
+ * still runs it, or else its first record. Every other record of it is dropped and its pane closed. `exclusive` runs
+ * the relaunch while no send or launch of those sessions does, so none of them starts a session the relaunch is
+ * bringing back.
  */
 export async function relaunchSessions(guest: Guest, exclusive: <T>(claudeSessions: readonly string[], work: () => Promise<T>) => Promise<T> = (_, work) => work()): Promise<readonly RelaunchOutcome[]> {
   const file = await readSessionsFile(guest);
   if (file === null) return [];
   const records = [...file.sessions, ...file.failed.map((f) => f.record)];
   if (records.length === 0) return [];
-  return exclusive(records.flatMap((r) => r.harness === "claude-code" && r.harnessSessionId !== null ? [r.harnessSessionId] : []), () => relaunch(guest, file, records));
+  return exclusive(records.flatMap((r) => harnesses[r.harness].agent?.onePane && r.harnessSessionId !== null ? [r.harnessSessionId] : []), () => relaunch(guest, file, records));
 }
 
 async function relaunch(guest: Guest, file: SessionsFile, records: readonly SessionRecord[]): Promise<readonly RelaunchOutcome[]> {
@@ -550,15 +608,15 @@ async function relaunch(guest: Guest, file: SessionsFile, records: readonly Sess
   const present = new Set<SessionRecord>();
   const unreadable = new Map<SessionRecord, Error>();
   for (const [r, pane] of claimed) {
-    const agent = agents[r.harness];
+    const { agent } = harnesses[r.harness];
     try {
       if (agent === null ? pane.harness === "shell" : await runsAgent(guest, pane.herdrPane, agent.kind)) present.add(r);
     } catch (err) {
       unreadable.set(r, err as Error);
     }
   }
-  const recordsOf = (r: SessionRecord) => r.harness === "claude-code" && r.harnessSessionId !== null
-    ? records.filter((other) => other.harness === "claude-code" && other.harnessSessionId === r.harnessSessionId) : [r];
+  const recordsOf = (r: SessionRecord) => harnesses[r.harness].agent?.onePane && r.harnessSessionId !== null
+    ? records.filter((other) => other.harness === r.harness && other.harnessSessionId === r.harnessSessionId) : [r];
   // Any of a session's panes might still run it, so none of them is started or closed.
   const doubt = (r: SessionRecord) => recordsOf(r).flatMap((other) => unreadable.has(other) ? [{ pane: claimed.get(other)!.herdrPane, err: unreadable.get(other)! }] : [])[0];
   const kept = (r: SessionRecord) => r === (recordsOf(r).find((other) => present.has(other)) ?? recordsOf(r)[0]);
@@ -616,32 +674,32 @@ async function agentProcesses(guest: Guest, pane: string, kind: string): Promise
 }
 
 /** Keep an explicit model override across checkpoint relaunches. */
-async function launchedClaudeModel(guest: Guest, pane: string): Promise<{ model?: string }> {
-  for (const argv of await agentProcesses(guest, pane, "claude").catch((err) => {
+async function launchedModel(guest: Guest, pane: string, { kind, modelFlag }: Agent): Promise<{ model?: string }> {
+  for (const argv of await agentProcesses(guest, pane, kind).catch((err) => {
     if (err instanceof HerdrError && err.code === "pane_not_found") return [];
     throw err;
   })) {
-    const i = argv.indexOf("--model");
+    const i = argv.indexOf(modelFlag);
     if (i !== -1 && typeof argv[i + 1] === "string") return { model: argv[i + 1] as string };
   }
   return {};
 }
 
 /**
- * The session ID a Claude Code pane was started under, `--session-id <id>` or `--resume <id>` on its command
- * line, for a pane Herdr reports no ID for. Null when its Claude was started without one, such as by hand, or
- * when the pane closed meanwhile.
+ * The session ID a pane's agent was started under, such as Claude Code's `--session-id <id>` or `--resume <id>` on
+ * its command line, for a pane Herdr reports no ID for. Null when its agent was started without one, such as by hand,
+ * or when the pane closed meanwhile.
  */
-async function launchedClaudeSession(guest: Guest, pane: string): Promise<string | null> {
+async function launchedSession(guest: Guest, pane: string, { kind, sessionFlags = [] }: Agent): Promise<string | null> {
   let processes: Awaited<ReturnType<typeof agentProcesses>>;
   try {
-    processes = await agentProcesses(guest, pane, agents["claude-code"]!.kind);
+    processes = await agentProcesses(guest, pane, kind);
   } catch (err) {
     if (err instanceof HerdrError && err.code === "pane_not_found") return null;
     throw err;
   }
   for (const argv of processes) {
-    const i = argv.findIndex((arg) => arg === "--session-id" || arg === "--resume");
+    const i = argv.findIndex((arg) => sessionFlags.includes(arg as string));
     const id = i === -1 ? undefined : argv[i + 1];
     if (typeof id === "string" && id !== "" && !id.startsWith("-")) return id;
   }
