@@ -79,15 +79,17 @@ Mark seen changes only `seenAt`. An optional `lastReplyAt` in the request caps t
 
 A pylon's desired and actual states are computed on every reconcile tick and never stored.
 
-The desired phase is `running`, `paused`, or `deleted`. It follows the thread:
+The desired phase is `running`, `reading`, `paused`, or `deleted`. It follows the thread:
 
 | Thread state | Desired phase |
 |---|---|
 | `active` or `idle` | `running` while a harness or reported session turn runs, or the agent was active in the last 5 minutes, or a human in the last 20. Otherwise `paused` |
-| `archived` | `paused` at once |
+| `archived` | `reading` while the usage backfill reads its pylon (`Thread.readingUsage`), and `paused` otherwise, at once |
 | `deleted` | `deleted` |
 
 A message, an attached terminal, a dashboard visit or a preview hit counts as human activity, so each one wakes a paused pylon.
+
+`reading` runs the pylon without its sessions, so no agent starts. The planner sends its `spawn` with `relaunch: false`, which boots the disk and leaves the sessions for the next spawn to bring back: the pylon VM backend keeps `relaunch` set beside the checkpoint, with the session list the last pause recorded, and the Docker backend keeps its relaunch mark. A pause before that spawn records no sessions, since Herdr would list none of them, and keeps the list it had, on the disk and beside the checkpoint. The probe reports no `liveHash` for a pylon such a spawn booted, so once a person unarchives the thread, the planner sends a normal spawn, which brings the sessions back. A running pylon is done for `reading` whatever its `liveHash`. A failed wake for `reading` is never tried again and never fails the pylon: the backfill skips the thread and clears the attempt, and the pylon pauses. A probe that takes `relaunch: false` says `spawnsWithoutRelaunch` in its snapshot, and the backfill wakes no pylon on a node whose probe does not. Placement counts a pylon woken for `reading` as about to boot, as it does one wanted `running`.
 
 The actual state comes from the probe's last observation and the job in flight:
 
@@ -160,11 +162,41 @@ What blocks a queued thread is not stored. Each pass and each view derives every
 
 `usage_cursors` holds how far each source was read: per pylon, the byte offset past the last whole line of each transcript with `before`, the SHA-256 of the up to 4 KiB before it, and for the harness, the last entry read of each conversation. A file shorter than its offset, or whose bytes before it no longer match `before`, was replaced and is read again from the start. `usage_since` holds when the migration ran, which is when counting started. Deleting or archiving a thread keeps its records.
 
-The control plane reads a pylon only while its node's last observation reports it running, so a read never wakes a pylon. `src/agent-usage.py` runs in the guest over one raw pipe, prints at most about 1 MiB of calls a read, and a pylon with more is read again, at most 16 times in a row. A read follows each `session.turn-ended` and `session.ended` event, a harness read follows each `thread.turn-ended`, and every thread is read when the control plane starts and every 10 minutes. The harness keeps a deleted thread's conversation, so its reads cover the Nexus agent's calls of every thread since the first. A pylon's transcripts go with the pylon, so a thread deleted before this was deployed, or a call made after the last read of a pylon that was then deleted, is not counted.
+Counting reads a pylon only while its node's last observation reports it running, so a read never wakes a pylon. Only the usage backfill, below, wakes one to read it. `src/agent-usage.py` runs in the guest over one raw pipe, prints at most about 1 MiB of calls a read, and a pylon with more is read again, at most 16 times in a row. A read follows each `session.turn-ended` and `session.ended` event, a harness read follows each `thread.turn-ended`, and every thread is read when the control plane starts and every 10 minutes. The harness keeps a deleted thread's conversation, so its reads cover the Nexus agent's calls of every thread since the first. A pylon's transcripts go with the pylon, so a thread deleted before this was deployed, or a call made after the last read of a pylon that was then deleted, is not counted. An archived thread's pylon is paused, so its calls from before counting started, or after its last read, are counted once the backfill reads it.
 
 pi-durable records two kinds of spend only in its running total, the `pi.usage` document, and not per call: the summaries a compaction writes, and model calls a tool makes. Neither is counted.
 
-`GET /v1/usage` answers a `UsageReport`: the start of the period's first UTC day (`since`), `countingSince`, the `total`, and rows `by` model, project, kind, role and UTC day.
+`GET /v1/usage` answers a `UsageReport`: the start of the period's first UTC day (`since`), `countingSince`, the `total`, rows `by` model, project, kind, role and UTC day, and the `backfill`.
+
+### Usage backfill
+
+The backfill reads every Claude Code transcript and pi session on archived threads' pylons from the start, one pylon at a time. `usage_backfill` holds its run, one row at most, and `usage_backfill_threads` a row for each thread a run listed. `UsageBackfill`, `BackfillThread` and `BackfillPlanRow` in `src/control/usage.ts` are the shapes, and `src/control/usage-backfill.ts` is the job.
+
+| `usage_backfill` | Meaning |
+|---|---|
+| `state` | `running`, `stopped` or `done` |
+| `started_at`, `finished_at` | When the run started, and when it stopped or finished. `finished_at` is null while it runs |
+| `thread`, `phase`, `since` | The pylon the run holds, all null when it holds none. `phase` is `reading`, woken to be read, or `pausing`, read or given up on and waiting for its pause, since `since` |
+| `waiting` | Why the run waits before it wakes the next pylon, or null |
+
+| `usage_backfill_threads` | Meaning |
+|---|---|
+| `thread` | The thread |
+| `state` | `pending`, `done` or `skipped` |
+| `reason` | Why a skipped thread was not read. Null otherwise |
+| `calls`, `tokens` | What reading it recovered: the calls no read had counted, and the tokens they added |
+| `at` | When it was done or skipped. Null while pending |
+
+A start, `POST /v1/usage/backfill` from a deployer, lists every archived thread with a pylon that has no `done` row, gives each a `pending` row, makes a `skipped` one `pending` again, and sets the run `running`. A start while one runs changes nothing, and a `done` thread is never read again. A stop, `DELETE /v1/usage/backfill`, sets a running run `stopped` and lets go of its pylon, whose desired phase is `paused` again. A thread whose read the stop cut short stays `pending`.
+
+Every 2 seconds, and at once after a start or a stop, a step reads the run and does what is left of it, so a control plane that restarts or deploys mid-run goes on with the pylon it held:
+
+1. A run that is not `running` does nothing.
+2. With no pylon held, it takes the oldest thread still `pending`. A thread no longer archived, deleted, with no pylon record, whose pylon failed, or whose node holds no disk for its pylon is skipped with that reason, and the step takes the next. The run then waits, with `waiting` set, while the pylon's node is offline, its probe does not report `spawnsWithoutRelaunch`, the node runs a job or a registry pylon there has one submitted, its pylon is neither stopped nor running, or the node's memory left with the pylon up would be less than the largest project's `resources.memoryGiB`, so a start always fits. Placement's own arithmetic counts the room. Otherwise it clears the pylon's attempts, since a failure from before the thread was archived would hold the wake back, and holds it `reading`, which makes its desired phase `reading`. With none left `pending`, the run is `done`.
+3. A pylon held `reading` is skipped when its thread was unarchived or deleted, when its last attempt failed, whose attempt the step clears, or when it has not run 10 minutes after the hold. Once its node reports it running, the step reads it from the start of every file, as many reads as it takes, through `recordUsage` and the cursors as counting does, and counting starts no read of that pylon until it is done. The thread is `done` with what the read recovered, or `skipped` with the read's error, and the pylon is held `pausing`.
+4. A pylon held `pausing` is let go once its node reports it stopped or absent, its thread is no longer archived, or 10 minutes have passed. Only then is the next pylon woken, so one is up at a time across every node.
+
+`GET /v1/usage/backfill` answers `{ backfill: UsageBackfill, plan: BackfillPlanRow[] }`, the run and the threads a start would read, with the node of each and why a run skipped it before.
 
 ## Releases and deployment drain
 
