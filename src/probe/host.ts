@@ -114,12 +114,13 @@ async function pylonProcesses(proc: string, roots: readonly { pylonId: PylonId; 
   const after = await stats(trees.flatMap((t) => t.pids));
   // A stalled event loop or a slow /proc read stretches the sample, so CPU is over the time it took.
   const seconds = (now() - sampled) / 1000;
-  return Promise.all(trees.map(async ({ pylonId, pids }) => {
+  return (await Promise.all(trees.map(async ({ pylonId, pid: root, pids }) => {
     const statuses = await Promise.all(pids.filter((pid) => after.has(pid)).map(async (pid) => ({ pid, status: await read(join(proc, String(pid), "status")) })));
     const living = statuses.flatMap(({ pid, status }) => status === null ? [] : [{ pid, residentGiB: parseResident(status) }]);
+    if (!living.some(({ pid }) => pid === root)) return [];
     const ticks = living.reduce((sum, { pid }) => sum + after.get(pid)!.cpuTicks - all.get(pid)!.cpuTicks, 0);
-    return { pylonId, processes: living.length, cpuPercent: seconds > 0 ? (ticks / ticksPerSecond) / seconds * 100 : 0, residentGiB: living.reduce((sum, p) => sum + p.residentGiB, 0) };
-  }));
+    return [{ pylonId, processes: living.length, cpuPercent: seconds > 0 ? (ticks / ticksPerSecond) / seconds * 100 : 0, residentGiB: living.reduce((sum, p) => sum + p.residentGiB, 0) }];
+  }))).flat();
 }
 
 export interface HealthSources {
