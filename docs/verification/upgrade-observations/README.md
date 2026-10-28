@@ -26,14 +26,15 @@ differ only in the code under test.
   It writes `main.txt` and `branch.txt`, and `capture.diff` is their diff.
 - The pin tests ran on the pins commit, which is main's code with only the pin tests added, and on the branch. Each
   run covers the eight test files this change touches, then the full suite. `tests-pins.txt` and `tests-branch.txt`
-  hold the results, and `tests.diff` is the names of the tests that passed in each. Both full suites ran 1297 tests,
+  hold the results, and `tests.diff` is the names of the tests that passed in each. Both full suites ran 1330 tests,
   and all passed. The branch deletes the two tests that only a probe without `claudeLaunchRepeatable` could pass, and
   adds one for the upgrade itself.
 
 ## What the captures show
 
-The release every node runs sends the same frame as main (`probe-deployed.json`, `probe-main.json`). The branch's
-probe sends the same frame without `"claudeLaunchRepeatable": true` (`probe-frames.diff`).
+The release every node runs sends main's frame without `"spawnsWithoutRelaunch": true`, which #164 added
+(`probe-deployed.json`, `probe-main.json`). The branch's probe sends main's frame without
+`"claudeLaunchRepeatable": true` (`probe-frames.diff`).
 
 The three real frames and both probe shapes that send every field read the same on main and on the branch, as frames
 and as stored rows. So does every stored row from an older probe, except two. One is a broken pylon stored without a

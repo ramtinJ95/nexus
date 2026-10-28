@@ -5,6 +5,6 @@
     "gitSsh": false
    },
 -  "claudeLaunchRepeatable": true,
+   "spawnsWithoutRelaunch": true,
    "heldSecrets": [
     "NEXUS_CHATGPT_TOKEN"
-   ]

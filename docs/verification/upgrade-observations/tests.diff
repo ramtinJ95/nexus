@@ -1,6 +1,6 @@
 --- tests-pins.txt
 +++ tests-branch.txt
-@@ -13,8 +13,7 @@
+@@ -14,8 +14,7 @@
  ✔ NEXUS_API calls reach the API as the pylon the bridge named, get the URL once a spawn publishes the preview, and end with the probe
  ✔ PR outputs show GitHub metadata and automated entries are not labelled as the person
  ✔ a Claude launch a control plane restart cut off before it recorded a session fails, sent never
@@ -10,7 +10,7 @@
  ✔ a Claude launch whose probe restarts mid-way is sent again under its session once the probe is back, and starts once
  ✔ a Claude launch whose probe stays away fails once the wait is over
  ✔ a Claude worker start stores its first prompt without starting a harness conversation
-@@ -122,7 +121,7 @@
+@@ -126,7 +125,7 @@
  ✔ a probe that takes the token and has not got it, as one that just started, gets it at once
  ✔ a process that closes its stdin still delivers its output and exit code
  ✔ a project whose default node is auto places each thread that names none, and a named node still pins
@@ -19,7 +19,7 @@
  ✔ a published preview is ready only while its running pylon reports its service ready, or does not list it
  ✔ a published preview whose service is starting shows starting and one whose service failed shows failed, with why, neither with a link
  ✔ a pull request Claude opened shows once, as an escaped link to it, however often its transcript names it
-@@ -169,7 +168,7 @@
+@@ -173,7 +172,7 @@
  ✔ a session of a pylon that is not running, or of an archived or deleted thread, is refused with 409
  ✔ a slow event follower gets every event once and in order, and one that stops reading is dropped after the stall limit with its place
  ✔ a snapshot as the probe every node runs sends it, claudeLaunchRepeatable and all, parses with every fact it sent
@@ -28,7 +28,7 @@
  ✔ a snapshot lists the checkpoints of the stopped pylons it reports, also when a pylon stops while it is read
  ✔ a snapshot's journal applies each report past the node's receipt in order, and the reports before it change nothing
  ✔ a spawn granted a held secret boots before the control plane hands it over, rather than failing for good
-@@ -231,6 +230,7 @@
+@@ -238,6 +237,7 @@
  ✔ an image is recorded exactly when a probe's Docker backend can name it
  ✔ an image is recorded only with every pin, gh included, each in its pinned format
  ✔ an image recorded before images carried their release reads as of no known release
@@ -36,3 +36,11 @@
  ✔ an observation is stored only together with the writes derived from it
  ✔ an observation stored from a probe older than route reporting routes no port
  ✔ an observer learns at once that the probe got a held secret it did not have
+@@ -478,6 +478,7 @@
+ ✔ the control plane reads the manifest of an artifact the node holds, and a peer may not
+ ✔ the dashboard has no Passkeys page and links to none
+ ✔ the final idle fence holds across lease expiry until rollback or success releases it
++✔ the first start of a setup builds its template on the node, the next waits for it, and one after it is ready boots from it at the commit read
+ ✔ the health, release, deployer and event routes answer each caller and method as listed
+ ✔ the image a new current one replaces becomes previous, and making it current again swaps them
+ ✔ the inspector lists each listening port once: under Ports with an Open button until it has a preview, then under Previews
