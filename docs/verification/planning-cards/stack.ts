@@ -236,7 +236,7 @@ async function drive(out: string) {
   const chromiumModule = require("@sparticuz/chromium");
   const chromium = chromiumModule.default ?? chromiumModule;
   const puppeteer = require("puppeteer-core");
-  const browser = await puppeteer.launch({ args: chromium.args, executablePath: await chromium.executablePath(), headless: true, defaultViewport: { width: 1360, height: 820 } });
+  const browser = await puppeteer.launch({ args: chromium.args, executablePath: await chromium.executablePath(), headless: true, defaultViewport: { width: 1360, height: 1180 } });
   const page = await browser.newPage();
   async function shot(name: string, path: string) {
     // A thread page keeps its conversation's stream open, so the network never goes idle.
@@ -301,7 +301,6 @@ async function drive(out: string) {
 
     page.on("dialog", async (dialog: { message(): string; accept(): Promise<void> }) => { log(`the page asked: ${JSON.stringify(dialog.message())}, and the driver accepted`); await dialog.accept(); });
     await shot("01-plan-cards", `/threads/${tp}`);
-    await page.screenshot({ path: join(out, "01-plan-cards-full.png"), fullPage: true });
     const questions = tp === null ? [] : (JSON.parse((await run(process.execPath, [join(src, "cli/nexus.ts"), "show", tp, "--json"], { env: { ...process.env, NEXUS_URL: api, NEXUS_SOCKS: "none" } })).stdout).questions ?? []) as { id: string }[];
     /** Presses the option's button on the dashboard, as the person does, and waits until the card reads as answered. */
     async function press(question: string | undefined, option: string, name: string) {
@@ -314,7 +313,7 @@ async function drive(out: string) {
         if (answered) break;
         await sleep(250);
       }
-      await page.screenshot({ path: join(out, `${name}.png`), fullPage: true });
+      await page.screenshot({ path: join(out, `${name}.png`) });
       log(`pressed ${option} on ${question} -> ${name}.png`);
     }
     await press(questions[0]?.id, "accept", "02-accepted-first");
@@ -333,6 +332,9 @@ async function drive(out: string) {
     await nexus("items-after-answers", "items", "--all");
     if (accepted !== null) {
       await nexus("item-show-accepted", "item", "show", accepted.id);
+      const queued = await fetch(`${api}/v1/queued/${accepted.thread}`);
+      writeFileSync(join(out, "queued-record.txt"), `GET /v1/queued/${accepted.thread}\n${queued.status} ${JSON.stringify(await queued.json(), null, 2)}\n`);
+      log(`GET /v1/queued/${accepted.thread} -> ${queued.status} (queued-record.txt)`);
       await until("the accepted item's builder has its scripted answer", accepted.thread, (d) => d.lastReplyAt !== null, 60_000);
       await nexus("conversation-builder", "conversation", accepted.thread!);
     }
@@ -343,7 +345,23 @@ async function drive(out: string) {
     await nexus("send-plan", "send", tp ?? "th-000000000000", "Hold the second one until the first has landed.");
     await until("the planning thread answered the person's next message", tp, (d) => d.lastReplyAt > (replied ?? 0), 30_000);
     await nexus("conversation-plan-after", "conversation", tp ?? "th-000000000000");
-    await shot("05-home-end", "/");
+    await page.goto(`${api}/threads/new`, { waitUntil: "load" });
+    await sleep(1000);
+    await page.click('input[name="worker"][value="harness"]');
+    const box = await page.$("#start-planning");
+    if (box === null) log("the start dialog has no planning box");
+    else {
+      await box.click();
+      await page.type("#start-title", "Plan the dashboard wave");
+      await page.screenshot({ path: join(out, "05-start-dialog.png") });
+      log("start dialog with the planning box ticked -> 05-start-dialog.png");
+      await Promise.all([page.waitForNavigation(), page.click('#start button[type="submit"]')]);
+      await sleep(1500);
+      await page.screenshot({ path: join(out, "06-dashboard-planning-thread.png") });
+      log(`the dialog started ${page.url()} -> 06-dashboard-planning-thread.png`);
+      await nexus("show-dashboard-plan", "show", page.url().split("/").at(-1)!);
+    }
+    await shot("07-home-end", "/");
     log(`backend boots: ${readFileSync(join(out, "backend.log"), "utf8").trim().split("\n").filter((l) => l !== "").length}`);
     await stop(cp);
     await stop(probeChild);
