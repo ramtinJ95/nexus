@@ -1,0 +1,11 @@
+GET /threads/th-ef79854c9260 (the thread page's dock)
+The planner gave up on this thread's pylon, so its agent cannot run tools and the thread takes no messages. Fix the cause, such as the project's git access, and retry, or start again from the same project. A retry runs setup again on a new pylon whose setup failed, and resumes a broken pylon from its newest disk.
+
+pylon is broken: the VM stopped outside a completed pause
+2026-10-28T09:58:01.204Z controller: booting the VM from checkpoint ck-1
+2026-10-28T09:58:03.911Z controller: guest agent connected
+2026-10-28T10:02:14.377Z controller: Error: Guest command got no answer within 13000 ms
+2026-10-28T10:02:14.380Z controller: qemu exited with signal 9 while the host was out of memory
+2026-10-28T10:02:14.381Z controller: stand-in marker for the scripted model: judge: malformed
+Retry
+Start again

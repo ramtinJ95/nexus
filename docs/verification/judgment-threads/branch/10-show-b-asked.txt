@@ -1,0 +1,22 @@
+$ nexus show th-d9156a95de26
+th-d9156a95de26  B: controller crash with a malformed judgment
+project: wave
+attention: failed
+status: active
+pylon: pylon-th-d9156a95de26 on node-a, failed, observed 31s ago
+size: 1 CPUs, 1 GiB memory, 5 GiB disk
+placement: node-a, as the start named
+setup: fresh boot runs .nexus/setup, because the control plane could not read .nexus/setup at main: the control plane reads only https:// remotes, and holds no SSH key for git@github.com:verify/wave.git
+failed: pylon is broken: the VM stopped outside a completed pause
+  2026-10-28T09:58:01.204Z controller: booting the VM from checkpoint ck-1
+  2026-10-28T09:58:03.911Z controller: guest agent connected
+  2026-10-28T10:02:14.377Z controller: Error: Guest command got no answer within 13000 ms
+  2026-10-28T10:02:14.380Z controller: qemu exited with signal 9 while the host was out of memory
+  2026-10-28T10:02:14.381Z controller: stand-in marker for the scripted model: judge: malformed
+PR watch: on
+question judgment:4: The pylon failed on node-a: pylon is broken: the VM stopped outside a completed pause
+  options: "Retry", "Leave it failed"
+  needs you
+judgment of failure 4 on node-a: person, by the control plane: the judgment's reply had no valid nexus-judgment block with its token
+  waits for your answer to question judgment:4
+[exit 0]

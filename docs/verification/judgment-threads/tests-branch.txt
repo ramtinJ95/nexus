@@ -1,0 +1,16 @@
+✔ a retry answer retries the pylon on its node, closes the judgment and counts what it used under the builder
+✔ a retry-elsewhere answer moves a pylon its node holds nothing of to the other node, to boot fresh there
+✔ a move goes to the person when the failed node still lists the pylon or holds its disk
+✔ a person answer asks with the actions that can run, and each answer does what it says
+✔ a reply with a malformed block or none goes to the person, by the control plane's rule
+✔ a judgment that does not answer in time is closed and goes to the person, and one whose thread is deleted ends
+✔ a judgment the control plane stopped before its answer goes on after a restart, briefed once and acted on once
+✔ concurrent passes and a restart judge a failure once, a later failure gets its own judgment, and a third retry is the person's
+✔ failures from before judgments, projects without the pipeline and threads no person started as builders are never judged
+✔ the brief states each fact it is given, and why one could not be read
+✔ the usage of a conversation's answers reads on from the last entry read, and stays readable after its thread is deleted
+✔ a judgment's conversation is offered no tools, needs no pylon, and has replies once its run ends, across a reopen
+ℹ tests 12
+ℹ pass 12
+ℹ fail 0
+ℹ cancelled 0

@@ -1,0 +1,13 @@
++   3.2s control: nexus control plane: API on 127.0.0.1:7470, following node-a, node-b
++  63.2s control: pylon-th-d27dd04c14ea: the planner gave up: pylon is broken: the VM stopped outside a completed pause
+2026-10-28T09:58:01.204Z controller: booting the VM from checkpoint ck-1
+2026-10-28T09:58:03.911Z controller: guest agent connected
+2026-10-28T10:02:14.377Z controller: Error: Guest command got no answer within 13000 ms
+2026-10-28T10:02:14.380Z controller: qemu exited with signal 9 while the host was out of memory
+2026-10-28T10:02:14.381Z controller: stand-in marker for the scripted model: judge: retry
++ 183.2s control: pylon-th-ef79854c9260: the planner gave up: pylon is broken: the VM stopped outside a completed pause
+2026-10-28T09:58:01.204Z controller: booting the VM from checkpoint ck-1
+2026-10-28T09:58:03.911Z controller: guest agent connected
+2026-10-28T10:02:14.377Z controller: Error: Guest command got no answer within 13000 ms
+2026-10-28T10:02:14.380Z controller: qemu exited with signal 9 while the host was out of memory
+2026-10-28T10:02:14.381Z controller: stand-in marker for the scripted model: judge: malformed

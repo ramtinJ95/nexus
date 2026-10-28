@@ -1,0 +1,26 @@
+$ nexus start --project wave --title "B: controller crash with a malformed judgment" --node node-a --json
+{
+  "id": "th-d9156a95de26",
+  "title": "B: controller crash with a malformed judgment",
+  "project": "wave",
+  "pylonId": "pylon-th-d9156a95de26",
+  "status": "active",
+  "conversationId": "20",
+  "startedBy": "nVERIFYLAPTOP",
+  "createdAt": 1793193462610,
+  "agentTurnRunning": false,
+  "working": false,
+  "lastAgentActivityAt": 0,
+  "lastHumanActivityAt": 1793193462610,
+  "seenAt": null,
+  "lastReplyAt": null,
+  "placement": {
+    "how": "named",
+    "node": "node-a"
+  },
+  "setup": {
+    "how": "fresh",
+    "reason": "the control plane could not read .nexus/setup at main: the control plane reads only https:// remotes, and holds no SSH key for git@github.com:verify/wave.git"
+  }
+}
+[exit 0]

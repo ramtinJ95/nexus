@@ -1,0 +1,13 @@
+$ nexus show th-0e5566d9f9d3
+th-0e5566d9f9d3  A: controller crash the judgment retries
+project: wave
+attention: none
+status: active
+pylon: pylon-th-0e5566d9f9d3 on node-a, running, observed 1s ago
+size: 1 CPUs, 1 GiB memory, 5 GiB disk
+placement: node-a, as the start named
+setup: fresh boot runs .nexus/setup, because the control plane could not read .nexus/setup at main: the control plane reads only https:// remotes, and holds no SSH key for git@github.com:verify/wave.git
+PR watch: on
+judgment of failure 1 on node-a: retry, by the judgment: scripted judgment: the brief says judge: retry
+  retried the pylon on node-a
+[exit 0]

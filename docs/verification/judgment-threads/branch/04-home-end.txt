@@ -1,0 +1,17 @@
+GET / (the thread page's dock)
+Threads
+New project
+wave
+git@github.com:verify/wave.git
+New thread
+Thread	Desired	Observed	Node	Human	Agent
+
+B: controller crash with a malformed judgment
+	
+running	
+running	node-a	just now	never
+
+A: controller crash the judgment retries
+	
+running	
+running	node-a	1 min ago	1 min ago

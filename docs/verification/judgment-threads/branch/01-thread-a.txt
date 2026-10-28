@@ -1,0 +1,13 @@
+GET /threads/th-0e5566d9f9d3 (the thread page's dock)
+Failed on node-a
+judged just now
+
+pylon is broken: the VM stopped outside a completed pause
+
+retry, by the judgment: scripted judgment: the brief says judge: retry
+
+Nexus retried the pylon on node-a.
+
+What the judgment was asked and answered
+⌘↵ to send
+Send

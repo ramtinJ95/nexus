@@ -1,0 +1,4 @@
+$ nexus threads --all
+th-0e5566d9f9d3  active  -  pylon running  wave  2m ago  A: controller crash the judgment retries
+th-d9156a95de26  active  -  pylon running  wave  1m ago  B: controller crash with a malformed judgment
+[exit 0]

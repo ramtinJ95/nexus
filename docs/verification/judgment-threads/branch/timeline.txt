@@ -1,0 +1,40 @@
++   0.8s checkout <repo>/src
++   3.5s control plane is up
++   3.9s nexus --version -> exit 0 (01-version.txt)
++   4.3s nexus project add wave git@github.com:verify/wave.git --node node-a --cpus 1 --memory 1 --disk 5 -> exit 0 (02-project-add.txt)
++   4.9s nexus project edit wave --pipeline start -> exit 0 (03-project-edit-pipeline.txt)
++   5.3s nexus projects -> exit 0 (04-projects.txt)
++   6.0s backend: node-a booted pylon-th-0e5566d9f9d3 from fresh
++   6.0s nexus start --project wave --title A: controller crash the judgment retries --node node-a --json -> exit 0 (05-start-a.txt)
++   6.8s A: controller crash the judgment retries: its pylon runs after 0.7 s
++   6.8s A: controller crash the judgment retries: the backend now reports pylon-th-0e5566d9f9d3 broken by its controller, its log ending in "judge: retry"
++  64.1s A: controller crash the judgment retries: its pylon failed after 57.4 s
++  93.4s backend: node-a paused broken pylon-th-0e5566d9f9d3 onto checkpoint ckpt-th-0e5566d9f9d3-1
++  93.5s backend: node-a booted pylon-th-0e5566d9f9d3 from checkpoint ckpt-th-0e5566d9f9d3-1
++  94.2s A: its judgment is done after 30.1 s
++  94.7s nexus show th-0e5566d9f9d3 -> exit 0 (06-show-a-judged.txt)
++  95.2s A: its pylon runs again after 0.5 s
++  95.7s nexus show th-0e5566d9f9d3 -> exit 0 (07-show-a-end.txt)
++  96.2s nexus show th-0e5566d9f9d3 --json -> exit 0 (08-show-a-json.txt)
++  98.5s dashboard /threads/th-0e5566d9f9d3 -> 01-thread-a.png
++  98.5s A: the backend booted its pylon 2 times
++  99.1s backend: node-a booted pylon-th-d9156a95de26 from fresh
++  99.1s nexus start --project wave --title B: controller crash with a malformed judgment --node node-a --json -> exit 0 (09-start-b.txt)
++  99.7s B: controller crash with a malformed judgment: its pylon runs after 0.6 s
++  99.7s B: controller crash with a malformed judgment: the backend now reports pylon-th-d9156a95de26 broken by its controller, its log ending in "judge: malformed"
++ 124.2s B: controller crash with a malformed judgment: its pylon failed after 24.5 s
++ 154.3s B: its judgment asks the person after 30.1 s
++ 154.8s nexus show th-d9156a95de26 -> exit 0 (10-show-b-asked.txt)
++ 156.8s dashboard /threads/th-d9156a95de26 -> 02-thread-b-card.png
++ 157.8s the page asked "Answer \"Retry\"? The answer cannot be changed.", and the driver accepted
++ 157.8s B: the driver pressed Retry on the question card
++ 168.4s backend: node-a paused broken pylon-th-d9156a95de26 onto checkpoint ckpt-th-d9156a95de26-1
++ 168.4s backend: node-a booted pylon-th-d9156a95de26 from checkpoint ckpt-th-d9156a95de26-1
++ 169.4s B: its judgment is done after 11.6 s
++ 170.0s B: its pylon runs again after 0.6 s
++ 170.7s nexus show th-d9156a95de26 -> exit 0 (11-show-b-end.txt)
++ 171.3s nexus show th-d9156a95de26 --json -> exit 0 (12-show-b-json.txt)
++ 173.2s dashboard /threads/th-d9156a95de26 -> 03-thread-b-answered.png
++ 173.2s B: the backend booted its pylon 2 times
++ 173.8s nexus threads --all -> exit 0 (13-threads-end.txt)
++ 175.7s dashboard / -> 04-home-end.png
