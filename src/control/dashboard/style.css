@@ -467,6 +467,7 @@ h4.md-h { font-size: 1.07em; }
 .usage-t :is(th, td):not(:first-child) { text-align: right; font-variant-numeric: tabular-nums; }
 .usage-notes { margin-top: 10px; display: grid; gap: 4px; font-size: 12px; color: var(--text-3); }
 .usage-notes p { margin: 0; }
+.usage-notes .ov { margin-top: 6px; font-size: 12px; }
 
 /* the start-a-thread and new-project dialogs */
 .modal { margin: 96px auto auto; width: 540px; max-width: calc(100vw - 24px); padding: 0; color: var(--text); background: var(--bg); border: 1px solid var(--line); border-radius: 14px; box-shadow: var(--pop); }

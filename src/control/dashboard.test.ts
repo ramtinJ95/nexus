@@ -1464,7 +1464,7 @@ test("the Usage page shows the period's tokens in all and by model, project, age
     ["Today", "/usage?period=today", false], ["7 days", "/usage?period=7d", true], ["30 days", "/usage?period=30d", false], ["All", "/usage?period=all", false],
     ["All projects", "/usage?period=7d", true], ["acme", "/usage?period=7d&amp;project=acme", false], ["beta", "/usage?period=7d&amp;project=beta", false],
   ], "the period is 7 days unless picked, over every project");
-  assert.match(textOf(page), /Counting started \d{4}-\d\d-\d\d \d\d:\d\d UTC ?\. The calls of threads that existed then were counted from the transcripts they still had\./);
+  assert.match(textOf(page), /Counting started \d{4}-\d\d-\d\d \d\d:\d\d UTC ?\. The calls of threads that ran then were counted from the transcripts their pylons had\. Threads deleted before then are not counted, as their Claude and pi transcripts went with their pylons, except for the Nexus agent's calls, which the harness keeps\./);
   assert.match(textOf(page), /The summaries the Nexus agent's compactions write, and model calls its tools make, are not counted\./);
 
   const totals = usageTableOf(page, "usage-totals");
@@ -1492,6 +1492,43 @@ test("the Usage page shows the period's tokens in all and by model, project, age
 
   const home = (await s.call("GET", "/")).text;
   assert.match(home, /<a class="side-link" href="\/usage">.*Usage<\/a>/, "every page links to Usage");
+});
+
+test("the Usage page says what the usage backfill did and does, with the threads it skipped and why", async (t) => {
+  const s = await seeded(t);
+  const old = await s.start("acme", "Old work");
+  const gone = await s.start("acme", "Gone");
+  for (const thread of [old, gone]) s.registry.setThreadStatus(thread.id, "archived");
+  const note = async () => {
+    const m = /<div id="usage-backfill" ([^>]*)>([^]*?)<\/div>/.exec((await s.call("GET", "/usage")).text);
+    assert.ok(m !== null, "the backfill note is on the page");
+    return { attributes: m[1]!, text: textOf(m[2]!), html: m[2]! };
+  };
+  const never = await note();
+  assert.equal(never.attributes, 'data-backfill-state="never"');
+  assert.equal(never.text, "The calls archived threads made before then are counted once a deployer runs nexus usage backfill , which wakes their pylons one at a time to read them.");
+
+  s.registry.startUsageBackfill([old.id, gone.id], Date.now());
+  s.registry.waitUsageBackfill("rj-firebat is busy with a job");
+  const waiting = await note();
+  assert.equal(waiting.attributes, 'data-backfill-state="running" data-read="0" data-of="2" data-recovered-calls="0" data-recovered-tokens="0"');
+  assert.equal(waiting.text, "The backfill reads archived threads' pylons, one at a time: 0 of 2 threads read, 0 calls and 0 tokens recovered so far. It waits: rj-firebat is busy with a job.");
+  s.registry.holdUsageBackfill(old.id, Date.now());
+  assert.ok((await note()).html.includes(`It reads <a class="link" href="/threads/${old.id}">Old work</a>.`));
+  assert.match(textOf((await s.call("GET", `/threads/${old.id}`)).text), /Desired reading/, "the thread's pylon wants to run for reading");
+  s.registry.finishUsageBackfillThread(old.id, "done", null, { calls: 1234, tokens: 5_600_000 }, Date.now());
+  assert.equal((await note()).text, "The backfill reads archived threads' pylons, one at a time: 1 of 2 threads read, 1,234 calls and 5.6M tokens recovered so far. It waits for the pylon of Old work to pause.");
+  s.registry.stopUsageBackfill(Date.now());
+  assert.equal((await note()).text, "The backfill stopped at 1 of 2 threads read, with 1,234 calls and 5.6M tokens recovered. A deployer goes on with nexus usage backfill .");
+
+  s.registry.startUsageBackfill([gone.id], Date.now());
+  s.registry.finishUsageBackfillThread(gone.id, "skipped", "rj-firebat holds no disk for its pylon", { calls: 0, tokens: 0 }, Date.now());
+  s.registry.finishUsageBackfill(Date.parse("2027-03-10T12:00:00Z"));
+  const done = await note();
+  assert.equal(done.attributes, 'data-backfill-state="done" data-read="2" data-of="2" data-recovered-calls="1234" data-recovered-tokens="5600000"');
+  assert.equal(textOf(done.html.split("<table")[0]!), "The backfill read archived threads' pylons and finished 2027-03-10 12:00 UTC : 2 of 2 threads read, 1 skipped, 1,234 calls and 5.6M tokens recovered.");
+  assert.deepEqual(usageTableOf(done.html, "usage-backfill-skipped").rows, ["Gone rj-firebat holds no disk for its pylon"]);
+  assert.ok(done.html.includes(`<a class="link" href="/threads/${gone.id}">Gone</a>`), "a skipped thread links to its page");
 });
 
 test("the Usage page with no calls in the period says so, and its totals are zero", async (t) => {
