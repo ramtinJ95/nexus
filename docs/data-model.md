@@ -20,7 +20,7 @@ The control plane writes every record. Probes send facts in observations, and th
 | Preview | `pylon`, `service`, `httpsPort` | The control plane allocates the port, never one its node's probe still routes. Observations report when it is ready |
 | Output | `thread`, `kind`, `ref` | Observations, including outputs the agent declares with `nexus output add` |
 | NexusEvent | `id`, `time`, `thread`, `project`, `kind`, `payload` | Accepted pylon lifecycle reports and control-plane changes |
-| Question | `id`, `thread`, `text`, `options`, `reserved`, `answerer`, `askedAt`, `answer` | A failure judgment that leaves its failure to the person, and the person's answer. [Question records](#question-records) describes it |
+| Question | `id`, `thread`, `text`, `options`, `reserved`, `answerer`, `askedAt`, `answer` | A failure judgment that leaves its failure to the person, or one item a planning thread proposed, and the person's answer. [Question records](#question-records) describes it |
 | Judgment | `failure`, `thread`, `node`, `failed`, `startedAt`, `request`, `conversation`, `reply`, `phase` | The judgment pass, for a builder's failed pylon. [Judgment records](#judgment-records) describes it |
 | Orphan | `node`, `pylonId` | Observations of a pylon the registry does not know. Only you delete it |
 | Usage record | `id`, `thread`, `project`, `role`, `agent`, `model`, `at`, `input`, `output`, `cacheWrite`, `cacheRead` | Reads of the harness and of the agents' transcripts in each pylon. [Token usage records](#token-usage-records) describes it |
