@@ -31,13 +31,15 @@ export type PortableArtifactId = Exclude<ArtifactId, CheckpointId>;
  *   2. apt: bash, coreutils, util-linux, ca-certificates, git, python3, openssh-server (S2: enableSsh
  *      needs a real sshd), openssh-client (git over Gondolin's SSH proxy), sudo, curl. The service is installed but not enabled. Also procps (enableSsh's
  *      script runs ps), e2fsprogs (rootfs growth runs resize2fs), ripgrep and fd (pi cannot download them
- *      through the allowlist), xz-utils for the Node tarball, libatomic1, which Node 26's binary links, and tini,
- *      which rootfs-init-extra.sh makes PID 1 because sandboxd does not reap the orphans it adopts.
+ *      through the allowlist), xz-utils for the Node tarball, libatomic1, which Node 26's binary links, tini,
+ *      which rootfs-init-extra.sh makes PID 1 because sandboxd does not reap the orphans it adopts, and kmod for
+ *      nexus-kvm.
  *   3. `user`, UID 1000, passwordless sudo, /home/user/workspace.
  *   4. Node from the checksum-verified official tarball into /usr/local.
  *   5. Claude Code and pi from npm, Herdr from its official installer into /usr/local/bin,
  *      `herdr integration install` for pi and Claude Code as user (the sessions stream reads harness session
- *      IDs through them), the pi-env daemon at /usr/local/libexec/nexus/pi-env, the in-pylon `nexus` CLI, and
+ *      IDs through them), the pi-env daemon at /usr/local/libexec/nexus/pi-env, the in-pylon `nexus` CLI,
+ *      nexus-kvm at /usr/local/libexec/nexus/nexus-kvm, and
  *      the fallback copy of the common dotfiles layer as a git repository at /opt/nexus/dotfiles, owned by
  *      user, which boots clone and then fetch.
  *      `gondolin build` itself installs the `sandboxssh` helper that pi-sandbox's shell needs.
@@ -57,6 +59,9 @@ export type PortableArtifactId = Exclude<ArtifactId, CheckpointId>;
  *   writes /etc/hostname and /etc/hosts, because Gondolin sets no hostname and sudo warns without one. It then
  *   execs tini as PID 1 with sandboxd as its child, so every orphan in the guest is reaped, and ignores SIGPIPE
  *   first, which sandboxd does not handle and as PID 1 never received.
+ * - nexus-kvm: run as root by the pylon-vm controller on every boot of a pylon whose boot spec asks for
+ *   nestedVirtualization (src/pylon-vm/runtime.ts). It loads kvm_intel or kvm_amd for the guest's CPU, with kvm and
+ *   irqbypass, and overlay, and opens /dev/kvm to user, or fails the boot with the reason. An ordinary pylon never runs it.
  * - pins.json: ImageRecipe.pins. Every other file except build.sh is in ImageRecipe.files, with the mode git gives
  *   it, 0755 when executable and 0644 otherwise, because Docker's COPY keeps a file's mode.
  * Logins and secrets are never in the image.

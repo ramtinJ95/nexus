@@ -50,7 +50,7 @@ test("the checked-in recipe loads, with pins.json as its pins and build.sh left 
   for (const path of ["Dockerfile", "gondolin.json", "nexus", "nexus-turn.ts", "checkout-files.py", "rootfs-init-extra.sh"]) assert.ok(paths.includes(path), `${path} is an image input`);
   assert.ok(!paths.includes("build.sh") && !paths.includes("pins.json"));
   const modes = Object.fromEntries(recipe.files.map((f) => [f.path, f.mode.toString(8)]));
-  assert.deepEqual([modes["nexus"], modes["nexus-claude-hook"], modes["nexus-turn.ts"], modes["checkout-files.py"]], ["755", "755", "644", "644"]);
+  assert.deepEqual([modes["nexus"], modes["nexus-claude-hook"], modes["nexus-kvm"], modes["nexus-turn.ts"], modes["checkout-files.py"]], ["755", "755", "755", "644", "644"]);
 });
 
 test("a recipe is every file under its directory and the shared checkout helper, nested ones by posix path, sorted", async (t) => {
@@ -202,6 +202,19 @@ test("the smoke boot expects PID 1 to be tini and to reap an exec's orphan, whic
   assert.equal(smokeFailure(reaps, 0, "tini\nreaped\n"), undefined);
   assert.notEqual(smokeFailure(reaps, 0, "sandboxd\nZ\n"), undefined);
   assert.notEqual(smokeFailure(reaps, 0, "tini\nZ\n"), undefined);
+});
+
+test("the smoke boot expects no KVM in an ordinary boot, then has nexus-kvm load it for user as its last check", async () => {
+  const checks = smokeChecks({ ...(await loadImageRecipe()), pins });
+  const ordinary = checks.find((c) => c.name === "no KVM without nested virtualization")!;
+  const load = checks.find((c) => c.name === "nexus-kvm loads KVM for user")!;
+  assert.equal(checks.at(-1), load, "no later check sees a guest with KVM loaded");
+  assert.equal(smokeFailure(ordinary, 0, "unloaded\n"), undefined);
+  assert.equal(smokeFailure(ordinary, 1, ""), "exited 1");
+  assert.equal(smokeFailure(load, 0, "irqbypass\nkvm\nkvm_intel\noverlay\nuser opens /dev/kvm\n"), undefined);
+  assert.equal(smokeFailure(load, 0, "irqbypass\nkvm\nkvm_amd\noverlay\nuser opens /dev/kvm\n"), undefined);
+  assert.notEqual(smokeFailure(load, 0, "irqbypass\nkvm\nkvm_intel\noverlay\n"), undefined, "a /dev/kvm only root can open");
+  assert.equal(smokeFailure(load, 1, "insmod: ERROR: could not insert module /tmp/tmp.x/kvm_intel.ko: Operation not supported\n"), "exited 1");
 });
 
 test("the smoke boot refuses a home that carries a hook outbox or an agent session from the build, before any check starts an agent", async (t) => {

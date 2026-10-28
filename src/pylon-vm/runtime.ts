@@ -62,6 +62,19 @@ async function runToEnd(processes: GuestProcesses, pid: string): Promise<number 
 	return result.exitCode;
 }
 
+/**
+ * The image's boot step for a pylon that asks for nested virtualization (images/pylon/nexus-kvm). A guest left
+ * without /dev/kvm fails the boot with the step's reason, before setup or anything that would need the device.
+ */
+export async function loadKvm(vm: VM, resources: BootSpec["resources"]): Promise<void> {
+	if (!resources.nestedVirtualization) return;
+	try {
+		await checked(vm, "/usr/local/libexec/nexus/nexus-kvm", "/", 60000);
+	} catch (error) {
+		throw new Error(`This pylon asked for nested virtualization, and its guest has no /dev/kvm. ${error instanceof Error ? error.message : String(error)}`);
+	}
+}
+
 /** One script that runs each command in a login shell, and stops at the first that fails with its exit code. */
 const chained = (commands: readonly string[]) => commands.map((cmd) => `/bin/sh -lc ${q(cmd)} || exit $?`).join("\n");
 
@@ -206,6 +219,7 @@ export class SandboxRuntime {
 		// Disabling scratch tmpfs preserves HOME on disk. OCI images still need
 		// normal Unix temporary-directory permissions for unprivileged tools.
 		await checked(vm, "mkdir -p /tmp /var/tmp; chmod 1777 /tmp /var/tmp");
+		await loadKvm(vm, resources);
 		await checked(vm, `echo 'write through' > ${writeCache}`);
 		await checked(vm, `mkdir -p ${q(config.workspace)}`);
 		// A checkpoint restores filesystem files, not processes. Old service pid
