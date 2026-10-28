@@ -207,9 +207,12 @@ export interface ReviewDeps {
   now?: () => number;
 }
 
-/** The text of each block fenced as `fence` in the replies, oldest first. */
+/**
+ * The text of each block fenced as `fence` in the replies, oldest first. The closing fence starts a line, which no
+ * JSON string can, so a brief or a finding that quotes fenced code stays in its block.
+ */
 export const fencedBlocks = (replies: readonly string[], fence: string): string[] =>
-  replies.flatMap((text) => [...text.matchAll(new RegExp("```" + fence + "[ \\t]*\\r?\\n([\\s\\S]*?)```", "g"))].map((m) => m[1]!));
+  replies.flatMap((text) => [...text.matchAll(new RegExp("```" + fence + "[ \\t]*\\r?\\n([\\s\\S]*?)\\r?\\n[ \\t]*```", "g"))].map((m) => m[1]!));
 
 /** The newest fenced `fence` block in the replies whose JSON matches `schema` and echoes `token`, or null when none does. */
 export const latest = <T extends { token: string }>(replies: readonly string[], fence: string, schema: z.ZodType<T>, token: string): T | null => {

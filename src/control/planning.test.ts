@@ -47,6 +47,9 @@ test("a plan block is read only with its thread's token, as an ordered list of i
   assert.deepEqual(planBlocks([block("tok", [{ ...a, after: ["nope"] }])], "tok"), [], "an item waits on neither a key nor an item ID");
   assert.deepEqual(planBlocks([block("tok", [{ ...a, title: " " }])], "tok"), [], "a blank title");
   assert.equal(planBlocks([block("tok", [a]), "No change.", block("tok", [a, b])], "tok").length, 2, "every block, oldest first");
+  const fenced = "Add this:\n```ts\nexport const x = 1;\n```\nThen test it.";
+  assert.equal(planBlocks([block("tok", [{ ...a, brief: fenced }])], "tok")[0]?.[0]?.brief, fenced, "a brief that quotes fenced code stays whole");
+  assert.equal(planBlocks([`\`\`\`nexus-plan\n${JSON.stringify({ token: "tok", items: [{ ...a, brief: fenced }] }, null, 2)}\n\`\`\``], "tok")[0]?.[0]?.brief, fenced, "and in pretty-printed JSON");
 });
 
 /** `fake` stands for the harness storage, which outlives a restart of the control plane. */
