@@ -1,0 +1,56 @@
+main: 8a94974 docs: a thread never drives another thread, and the orchestration plan around it (#182)
+
+$ nexus start --project acme --title Capture --json    # as the person's laptop
+exit 0
+{
+  "id": "<thread>",
+  "title": "Capture",
+  "project": "acme",
+  "pylonId": "pylon-<thread>",
+  "status": "active",
+  "conversationId": "2",
+  "startedBy": "nLAPTOP",
+  "createdAt": <time>,
+  "agentTurnRunning": false,
+  "working": false,
+  "lastAgentActivityAt": 0,
+  "lastHumanActivityAt": <time>,
+  "seenAt": null,
+  "lastReplyAt": null,
+  "placement": {
+    "how": "default",
+    "node": "rj-firebat"
+  },
+  "setup": {
+    "how": "fresh",
+    "reason": "the project is scratch, so it has no template"
+  }
+}
+
+$ nexus send <thread> hello    # as the person's laptop
+exit 0
+Sent to <thread>.
+
+$ nexus conversation <thread>    # as the person's laptop
+exit 0
+> hello
+
+scripted answer after user
+
+$ nexus start --project acme --title Started by the control node    # as the control node
+exit 0
+Started <thread> on acme: Started by the control node
+
+$ nexus send <thread> hello from the control node    # as the control node
+exit 0
+Sent to <thread>.
+
+$ nexus start --project acme --title Started by an infrastructure node    # as an infrastructure node
+exit 0
+Started <thread> on acme: Started by an infrastructure node
+
+$ nexus send <thread> hello from an infrastructure node    # as an infrastructure node
+exit 0
+Sent to <thread>.
+
+threads: Capture (startedBy nLAPTOP), Started by the control node (startedBy nFIREBAT), Started by an infrastructure node (startedBy nTESTBENCH)
