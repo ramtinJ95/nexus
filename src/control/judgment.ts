@@ -302,8 +302,7 @@ export function judgmentPass(options: {
   async function judging(j: Judgment, phase: Extract<Phase, { kind: "judging" }>) {
     const t = registry.thread(j.thread)!;
     if (t.status === "archived" || t.status === "deleted") {
-      save(j, { ...j, phase: { kind: "acting", verdict: rule(`the thread was ${t.status} before the judgment answered`) } });
-      return;
+      return decided(j, { ...j, phase: { kind: "acting", verdict: rule(`the thread was ${t.status} before the judgment answered`) } });
     }
     if (j.conversation === null) {
       const conversation = await harness.startJudgment();
@@ -322,13 +321,18 @@ export function judgmentPass(options: {
     }
     const replies = await harness.judgmentReplies(conversation);
     if (replies === null) {
-      if (now() >= phase.deadline!) save(j, { ...j, phase: { kind: "acting", verdict: rule(`the judgment did not answer within ${answerMs / 60_000} minutes`) } });
+      if (now() >= phase.deadline!) await decided(j, { ...j, phase: { kind: "acting", verdict: rule(`the judgment did not answer within ${answerMs / 60_000} minutes`) } });
       return;
     }
     const answer = latest(replies, "nexus-judgment", answerSchema, j.request!.token);
     const verdict: Verdict = answer !== null ? { answer: answer.answer, why: answer.why, by: "judgment" }
       : rule(replies.length === 0 ? "the judgment ended without a reply" : "the judgment's reply had no valid nexus-judgment block with its token");
-    save(j, { ...j, reply: replies.join("\n\n").slice(-maxReply), phase: { kind: "acting", verdict } });
+    await decided(j, { ...j, reply: replies.join("\n\n").slice(-maxReply), phase: { kind: "acting", verdict } });
+  }
+
+  /** Saves the verdict, then acts on it in the same pass. */
+  async function decided(j: Judgment, next: Judgment & { phase: { kind: "acting" } }) {
+    if (save(j, next)) await acting(next, next.phase.verdict);
   }
 
   /** The record once Nexus retried the pylon on its node, and the retry, which the save writes with it. */
