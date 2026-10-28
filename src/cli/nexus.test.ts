@@ -1910,8 +1910,8 @@ test("a bare thread has no conversation to print, send to or watch", async (t) =
   assert.deepEqual(await run(["abort", bare.id]), refused);
   const watch = watchLines(t, s, [bare.id]);
   const printed = [await watch.next()];
-  await s.json(["delete", bare.id]);
   const exited = once(watch.child, "exit");
+  await s.json(["delete", bare.id]);
   for (let line = await watch.next(); ; line = await watch.next()) {
     printed.push(line);
     if (line.type === "state" && line.status === "deleted") break;
