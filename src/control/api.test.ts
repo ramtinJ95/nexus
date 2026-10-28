@@ -1160,6 +1160,16 @@ test("a failed pylon shows failed with its reason until its thread is deleted, a
   assert.deepEqual((await detail()).pylon, { grantsOutdated: false, id: thread.pylonId, node, actualState: "absent", failed: reason, observedAt: "2027-01-01T00:00:06Z", retryRefused: null, resources: project.resources });
 });
 
+test("the thread list leaves deleted threads out when asked, as the dashboard asks and `threads --all` does not", async (t) => {
+  const s = await withThread(t);
+  const gone = (await s.call("POST", "/v1/threads", { project: "acme", title: "Old spike" })).body as Thread;
+  assert.equal((await s.call("DELETE", `/v1/threads/${gone.id}`)).status, 200);
+  const ids = async (path: string) => ((await s.call("GET", path)).body as ThreadRow[]).map((r) => r.id);
+  assert.deepEqual(await ids("/v1/threads"), [s.thread.id, gone.id]);
+  assert.deepEqual(await ids("/v1/threads?deleted=false"), [s.thread.id]);
+  assert.deepEqual(await ids("/v1/threads?project=acme&deleted=false"), [s.thread.id]);
+});
+
 test("retrying a failed pylon clears the planner's verdict and its attempts, marks the retry, counts as human activity and wakes its node", async (t) => {
   const s = await withThread(t);
   const { thread } = s;

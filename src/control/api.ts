@@ -914,7 +914,10 @@ export async function startApi(options: ApiOptions): Promise<Api> {
       const { observation, ...n } = record;
       return { ...n, observedAt: observation?.observedAt ?? null, overcommitted: overcommitted(n.capacity), pylons: nodePylons(registry, record) };
     }))],
-    ["GET", /^\/v1\/threads$/, (_, r) => ok(registry.threads((r.query.get("project") ?? undefined) as ProjectId | undefined).map(row))],
+    ["GET", /^\/v1\/threads$/, (_, r) => {
+      const threads = registry.threads((r.query.get("project") ?? undefined) as ProjectId | undefined);
+      return ok((r.query.get("deleted") === "false" ? threads.filter((t) => t.status !== "deleted") : threads).map(row));
+    }],
     ["POST", /^\/v1\/threads$/, async (_, r) => {
       const { after, message, ...request } = parse(startSchema, await r.body());
       if (request.model !== undefined && request.claude === undefined) throw new HttpError(400, "model requires claude");

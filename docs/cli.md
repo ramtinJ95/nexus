@@ -179,7 +179,7 @@ The shapes are TypeScript types. `Thread`, `Session` and `Preview` are in [`src/
 7. `"waiting"`: a session is waiting for input.
 8. `null`.
 
-It is the value the thread's latest `attention.changed` event carries. An unread reply outranks working, so a client cancelling a pending reply notification on a follow-up must also check `working`. Reading `threads` or `show` does not mark anything seen; clients call `seen` when they show the conversation.
+It is the value the thread's latest `attention.changed` event carries. An unread reply outranks working, so a client cancelling a pending reply notification on a follow-up must also check `working`. Reading `threads` or `show` does not mark anything seen; clients call `seen` when they show the conversation. `GET /v1/threads?deleted=false` leaves deleted threads out, as the dashboard reads the list; without it the list has them, which `threads --all` prints.
 
 `POST /v1/threads/<thread>/seen` accepts an optional JSON body `{ "lastReplyAt": number | null }`. A client rendering asynchronously sends the reply timestamp captured with the conversation it actually rendered, not a newer timestamp from attention polling. The mark cannot advance beyond that timestamp; null marks nothing. A stale mark does not lower an existing seen marker. `nexus seen --last-reply-at MS` sends the field. Omitting it, as `nexus seen` without that flag does, marks the latest reply seen at request time. `/unseen` still marks the latest reply unread.
 

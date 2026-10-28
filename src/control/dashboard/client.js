@@ -1387,7 +1387,7 @@ async function pollAttention() {
   if (attentionPolling) return;
   attentionPolling = true;
   try {
-    const rows = (await api("GET", "/v1/threads", undefined, AbortSignal.timeout(10_000))).filter((row) => row.status !== "deleted");
+    const rows = await api("GET", "/v1/threads?deleted=false", undefined, AbortSignal.timeout(10_000));
     notifications(rows, Date.now());
     const count = badgeCount(rows);
     document.title = `${count ? `(${badgeText(count)}) ` : ""}Nexus`;
