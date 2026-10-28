@@ -5,7 +5,7 @@ import { chmod, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
-import { checkCaller, checkRuns, imageEnv, type CheckRuns, type CheckState } from "./gate.ts";
+import { checkCaller, checkRuns, imageEnv, verifyCaller, verifyGate, verifyMemoryGiB, type CheckRuns, type CheckState } from "./gate.ts";
 import { openRegistry, type Thread, type ThreadId } from "./registry.ts";
 import { newPylonRecord } from "../tick.ts";
 import { processStream } from "../process-stream.ts";
@@ -18,10 +18,10 @@ const node = "node" as NodeName;
 
 /**
  * A registry whose check threads' pylons run here: each pipe runs its argv as a local process, in a checkout with one
- * commit whose `.nexus/check` is `check`, so the script and the exit status are real. The image's environment is
+ * commit whose `.nexus/check` is `check` and `.nexus/verify` is `verify`, so the script and the exit status are real. The image's environment is
  * read from the file `image`, NUL-separated as /proc/1/environ is. `stream` can be replaced.
  */
-async function fixture(t: import("node:test").TestContext, check: string | null) {
+async function fixture(t: import("node:test").TestContext, check: string | null, verify: string | null = null) {
   const root = await mkdtemp(join(tmpdir(), "nexus-gate-"));
   t.after(() => rm(root, { recursive: true, force: true }));
   const repo = join(root, "repo");
@@ -32,6 +32,10 @@ async function fixture(t: import("node:test").TestContext, check: string | null)
     await mkdir(join(repo, ".nexus"));
     await writeFile(join(repo, ".nexus", "check"), `#!/bin/sh\n${check}\n`);
     await chmod(join(repo, ".nexus", "check"), 0o755);
+  }
+  if (verify !== null) {
+    await writeFile(join(repo, ".nexus", "verify"), `#!/bin/sh\n${verify}\n`);
+    await chmod(join(repo, ".nexus", "verify"), 0o755);
   }
   git("add", "-A");
   git("commit", "-qm", "init");
@@ -62,8 +66,8 @@ async function fixture(t: import("node:test").TestContext, check: string | null)
   const started: StartRequest[] = [];
   const local = (argv: readonly string[]) => argv.map((a) => a.replaceAll(checkoutDir, repo).replace(imageEnv, `cat ${image}`));
   let stream = async (_: PylonId, argv: readonly string[]): Promise<ByteStream> => processStream(argv[0]!, local(argv).slice(1), () => {});
-  const runs = (): CheckRuns => checkRuns({
-    registry, wake: () => {},
+  const runs = (gate?: typeof verifyGate): CheckRuns => checkRuns({
+    registry, wake: () => {}, ...gate === undefined ? {} : { gate },
     probes: new Map([[node, { stream: (pylon: PylonId, argv: readonly string[]) => stream(pylon, argv) }]]),
     async startThread(request, caller) { started.push(request); return add(caller); },
   });
@@ -91,6 +95,27 @@ test("a check runs in a fresh bare check thread at the commit, and its verdict i
   assert.deepEqual(await settle(() => runs.poll(id, f.head)), { kind: "done", passed: true, output: "typecheck ok\ntests ok" });
   runs.discard(id);
   assert.equal(f.registry.thread(id)!.status, "deleted");
+});
+
+test("a live check runs .nexus/verify in a fresh verify pylon that asks for nested virtualization, which is archived afterwards", async (t) => {
+  const f = await fixture(t, "echo tests ok", "echo fleet booted; exit 4");
+  const runs = f.runs(verifyGate);
+  const id = await runs.start(f.builder, "feature", f.head);
+  assert.deepEqual(f.started, [{
+    project: "p", title: `Live check of feature at ${f.head.slice(0, 12)}`, node: "auto", branch: "feature", commit: f.head, bare: true,
+    resources: { memoryGiB: verifyMemoryGiB, nestedVirtualization: true },
+  }]);
+  assert.equal(f.registry.thread(id)!.startedBy, verifyCaller);
+  f.running(f.registry.thread(id)!);
+  assert.deepEqual(await settle(() => runs.poll(id, f.head)), { kind: "done", passed: false, output: "fleet booted" }, ".nexus/verify ran, not .nexus/check");
+  runs.discard(id);
+  assert.equal(f.registry.thread(id)!.status, "archived");
+
+  const none = await fixture(t, "echo tests ok");
+  const missing = none.runs(verifyGate);
+  const unrunnable = await missing.start(none.builder, "feature", none.head);
+  none.running(none.registry.thread(unrunnable)!);
+  assert.deepEqual(await settle(() => missing.poll(unrunnable, none.head)), { kind: "unrunnable", output: `The repository has no executable .nexus/verify at ${none.head}.` });
 });
 
 test("what the check writes cannot pass it: a forged exit file or a printed status counts for nothing", async (t) => {

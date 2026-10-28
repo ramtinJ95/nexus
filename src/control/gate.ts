@@ -1,6 +1,7 @@
 /**
  * Runs the repository's `.nexus/check`, its typecheck and full test suite, at an approved commit, for the merge
- * policy's "the typecheck and the full test suite pass".
+ * policy's "the typecheck and the full test suite pass". The live check runs the repository's `.nexus/verify` the same
+ * way, in a verify pylon: one that asks for nested virtualization, so its script can boot the change as a small fleet.
  *
  * The check runs the pull request's own code, so nothing it can write may decide the verdict. Each run gets a fresh
  * check thread, a bare one with no agent, whose pylon clones the repository at the commit. The check is the process
@@ -18,6 +19,10 @@ import type { StartRequest } from "./threads.ts";
 
 /** Who starts a check thread, as its `startedBy`. */
 export const checkCaller = "nexus-check";
+/** Who starts a verify pylon's thread, as its `startedBy`. */
+export const verifyCaller = "nexus-verify";
+/** pylon-vm's 3 GiB floor for each of two inner pylons, and 2 GiB for the verify stack's control plane and probe. */
+export const verifyMemoryGiB = 8;
 const tailBytes = 6_000;
 /** The pipe's exit status when the pylon was not fit to run the check, which says nothing of the change. */
 const unfit = 125;
@@ -29,19 +34,37 @@ const missing = new Set([126, 127]);
  */
 export const imageEnv = "sudo -n cat /proc/1/environ";
 
-/** `$1` is the commit. The check replaces the shell, so the pipe's process is the check's and its status the check's. */
-export const checkScript = `cd ${checkoutDir} || exit ${unfit}
-[ "$(git rev-parse HEAD)" = "$1" ] || { echo "The check pylon's checkout is not at $1."; exit ${unfit}; }
-[ -x .nexus/check ] || { echo "The repository has no executable .nexus/check at $1."; exit 127; }
+/** `$1` is the commit. The script replaces the shell, so the pipe's process is the script's and its status the script's. */
+const scriptOf = (file: string, pylon: string) => `cd ${checkoutDir} || exit ${unfit}
+[ "$(git rev-parse HEAD)" = "$1" ] || { echo "The ${pylon} pylon's checkout is not at $1."; exit ${unfit}; }
+[ -x ${file} ] || { echo "The repository has no executable ${file} at $1."; exit 127; }
 image=$(${imageEnv} | tr '\\0' '\\n')
-[ -n "$image" ] || { echo "The check pylon's image environment could not be read."; exit 127; }
+[ -n "$image" ] || { echo "The ${pylon} pylon's image environment could not be read."; exit 127; }
 set -f
 IFS='
 '
 for v in $image; do case \${v%%=*} in HOME|PWD|OLDPWD|SHLVL|TERM) ;; *) export "$v" ;; esac; done
 unset IFS
 set +f
-exec ./.nexus/check </dev/null 2>&1`;
+exec ./${file} </dev/null 2>&1`;
+
+/**
+ * What a run is: the script, who starts its pylon and how, and what becomes of the pylon afterwards. A check thread is
+ * deleted. A verify pylon is archived, so the person can unarchive one to see what its live check left.
+ */
+interface Gate { caller: string; pylon: string; script: string; request(builder: Thread, branch: string, head: string): StartRequest; after: "deleted" | "archived" }
+export const checkGate: Gate = {
+  caller: checkCaller, pylon: "check", script: scriptOf(".nexus/check", "check"), after: "deleted",
+  request: (builder, branch, head) => ({ project: builder.project, title: `Check of ${branch} at ${head.slice(0, 12)}`, branch, commit: head, bare: true }),
+};
+export const verifyGate: Gate = {
+  caller: verifyCaller, pylon: "verify", script: scriptOf(".nexus/verify", "verify"), after: "archived",
+  request: (builder, branch, head) => ({
+    project: builder.project, title: `Live check of ${branch} at ${head.slice(0, 12)}`, node: "auto", branch, commit: head, bare: true,
+    resources: { memoryGiB: verifyMemoryGiB, nestedVirtualization: true },
+  }),
+};
+export const checkScript = checkGate.script;
 
 /**
  * A check run's state. `waiting` while its pylon boots. `void` when this run cannot give a verdict, because its pipe was
@@ -55,10 +78,10 @@ export type CheckState =
   | { kind: "unrunnable"; output: string };
 
 export interface CheckRuns {
-  /** Starts a fresh check thread at `head` on the PR's branch, in the builder's project and node. */
+  /** Starts a fresh check thread at `head` on the PR's branch, in the builder's project and node, or a verify pylon on a node that nests KVM. */
   start(builder: Thread, branch: string, head: string): Promise<ThreadId>;
   poll(thread: ThreadId, head: string): CheckState;
-  /** Deletes the check thread and its pylon. Safe to repeat. */
+  /** Deletes the check thread and its pylon, or archives the verify pylon. Safe to repeat. */
   discard(thread: ThreadId): void;
 }
 
@@ -69,8 +92,9 @@ export function checkRuns(options: {
   probes: ReadonlyMap<NodeName, Pick<ProbeClient, "stream">>;
   startThread(request: StartRequest, caller: string): Promise<Thread>;
   wake(t: Thread): void;
+  gate?: Gate;
 }): CheckRuns {
-  const { registry, probes, startThread, wake } = options;
+  const { registry, probes, startThread, wake, gate = checkGate } = options;
   const runs = new Map<ThreadId, Run>();
 
   function open(t: Thread, head: string, probe: Pick<ProbeClient, "stream">) {
@@ -80,7 +104,7 @@ export function checkRuns(options: {
     void (async () => {
       let stream: ByteStream;
       try {
-        stream = await probe.stream(t.pylonId, ["sh", "-c", checkScript, "nexus-check", head]);
+        stream = await probe.stream(t.pylonId, ["sh", "-c", gate.script, gate.caller, head]);
       } catch (err) {
         // Nothing ran in a pylon that was not running, so the run may open its pipe again.
         if ((err as Partial<ProbeError>).code === "not-running") return settle({ kind: "waiting", output: Buffer.alloc(0) });
@@ -110,14 +134,14 @@ export function checkRuns(options: {
 
   function remove(id: ThreadId) {
     const t = registry.thread(id);
-    if (t === undefined || t.status === "deleted") return;
-    registry.setThreadStatus(id, "deleted");
+    if (t === undefined || t.status === "deleted" || t.status === gate.after) return;
+    registry.setThreadStatus(id, gate.after);
     wake(t);
   }
 
   return {
     async start(builder, branch, head) {
-      const t = await startThread({ project: builder.project, title: `Check of ${branch} at ${head.slice(0, 12)}`, node: registry.pylon(builder.pylonId)!.node, branch, commit: head, bare: true }, checkCaller);
+      const t = await startThread({ node: registry.pylon(builder.pylonId)!.node, ...gate.request(builder, branch, head) }, gate.caller);
       runs.set(t.id, { kind: "waiting", output: Buffer.alloc(0) });
       return t.id;
     },
@@ -127,7 +151,7 @@ export function checkRuns(options: {
       if (run === undefined || t === undefined || t.status !== "active") return { kind: "void" };
       if (run.kind === "done" || run.kind === "void" || run.kind === "unrunnable") return run;
       const pylon = registry.pylon(t.pylonId)!;
-      if (pylon.failed !== null) return { kind: "unrunnable", output: `The check pylon did not boot: ${pylon.failed}` };
+      if (pylon.failed !== null) return { kind: "unrunnable", output: `The ${gate.pylon} pylon did not boot: ${pylon.failed}` };
       // Agent activity keeps the pylon running while the check does.
       registry.recordActivity(id, { agent: Date.now() });
       wake(t);
