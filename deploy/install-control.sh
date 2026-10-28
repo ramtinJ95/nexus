@@ -1,15 +1,14 @@
 #!/usr/bin/env bash
-# Installs or upgrades the Nexus control plane on this machine from the checkout this script is in. It runs
-# on rj-firebat, beside that node's probe. Run as root:
-#   sudo deploy/install-control.sh
+# Installs or upgrades the Nexus control plane on this machine from the checkout this script is in. deploy/install.sh
+# runs it after writing /etc/nexus/control.json, and the deployer runs it with NEXUS_PREPARE=1 from each release it
+# installs, by this name.
 #
 # Safe to rerun. The release becomes /opt/nexus/releases/<content hash> (see deploy/release.sh), and
 # /opt/nexus/control-current points at the newest, apart from the probe's /opt/nexus/current.
 #
-# It never overwrites /etc/nexus/control.json. The first run installs it from the example and leaves the unit
-# stopped until the config is edited. The control plane restarts only when its release or unit file differs
-# from what it was last started with (/opt/nexus/control-active-release). Restart it yourself after editing
-# the config.
+# The control plane restarts only when its release, unit file or config differs from what it was last started with
+# (/opt/nexus/control-active-release). It refuses to start before its harness is signed in, so until then the unit
+# is installed and enabled but left stopped.
 set -euo pipefail
 
 repo="$(cd "$(dirname "$0")/.." && pwd)"
@@ -18,8 +17,7 @@ repo="$(cd "$(dirname "$0")/.." && pwd)"
 state=/var/lib/nexus-control
 etc=/etc/nexus
 
-[ "$(id -u)" = 0 ] || fail "run as root: sudo $0"
-require_node
+[ "$(id -u)" = 0 ] || fail "run as root: sudo deploy/install.sh"
 
 make_state nexus-control "$state"
 install -d -o root -g root -m 0755 "$etc"
@@ -32,17 +30,19 @@ fi
 install_release "$repo"
 [ "${NEXUS_PREPARE:-0}" = 1 ] || link_release "$prefix/control-current"
 
-[ -e "$etc/control.json" ] || install -o root -g root -m 0644 "$repo/deploy/control.example.json" "$etc/control.json"
 install_unit "$repo/deploy/nexus-control.service" nexus-control.service
 
 [ "${NEXUS_PREPARE:-0}" != 1 ] || exit 0
 
-if cmp -s "$repo/deploy/control.example.json" "$etc/control.json"; then
-  echo "$etc/control.json is still the example. Edit it, sign the harness in with"
-  echo "  sudo -u nexus-control env PATH=$service_path node $prefix/control-current/src/control/login.ts $etc/control.json"
-  echo "then rerun $0"
-  exit 0
+signed_in() {
+  PATH=$service_path node -e '
+    const { readFileSync } = require("node:fs");
+    const { harness } = JSON.parse(readFileSync(process.argv[1], "utf8"));
+    process.exit(Object.keys(JSON.parse(readFileSync(harness.credentials, "utf8")).credentials ?? {}).length > 0 ? 0 : 1);
+  ' "$etc/control.json" 2>/dev/null
+}
+if signed_in; then
+  start_unit nexus-control.service "$prefix/control-active-release" "$etc/control.json"
+else
+  echo "nexus-control.service is installed and waits for the harness's ChatGPT login"
 fi
-start_unit nexus-control.service "$prefix/control-active-release"
-
-bash "$repo/deploy/install-deployer.sh" control

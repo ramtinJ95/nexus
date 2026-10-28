@@ -1,5 +1,6 @@
 # shellcheck shell=bash
-# Shared by deploy/install-probe.sh and deploy/install-control.sh, which source it as root.
+# Shared by deploy/install.sh and the role installers it runs, deploy/install-control.sh and deploy/install-probe.sh,
+# which source it as root.
 #
 # Each distinct source tree becomes /opt/nexus/releases/<content hash>, root-owned. A release is never changed
 # or removed in place, because a pylon controller keeps running the release it started from after the probe
@@ -10,10 +11,9 @@ service_path=/usr/local/bin:/usr/bin
 
 fail() { echo "$(basename "$0" .sh): $*" >&2; exit 1; }
 
-require_node() {
-  local major
-  major=$(PATH=$service_path node -p 'process.versions.node.split(".")[0]' 2>/dev/null) || major=none
-  [ "$major" != none ] && [ "$major" -ge 26 ] || fail "the unit needs Node 26 or newer in $service_path, found $major"
+# The major version of the Node the units run, or none.
+node_major() {
+  PATH=$service_path node -p 'process.versions.node.split(".")[0]' 2>/dev/null || echo none
 }
 
 # Installs the checkout at $1 as a release, unless an identical one exists, and sets $release to its hash.
@@ -70,12 +70,12 @@ install_unit() {
   systemctl enable "$2"
 }
 
-# Starts the unit $1, restarting it when $release or its unit file differs from what the file $2 says it was
-# last started with. The file is written only once the unit runs, so a run that died between the link swap
-# and the restart leaves it stale, and the next run still restarts.
+# Starts the unit $1, restarting it when $release, its unit file or its config file $3 differs from what the file $2
+# says it was last started with. The file is written only once the unit runs, so a run that died between the link
+# swap and the restart leaves it stale, and the next run still restarts.
 start_unit() {
-  local unit=$1 active_file=$2 active
-  active="$release $(sha256sum < "/etc/systemd/system/$unit" | cut -c1-12)"
+  local unit=$1 active_file=$2 config=$3 active
+  active="$release $(sha256sum < "/etc/systemd/system/$unit" | cut -c1-12) $(sha256sum < "$config" | cut -c1-12)"
   if [ "$(cat "$active_file" 2>/dev/null || true)" != "$active" ]; then
     systemctl restart "$unit"
   else
