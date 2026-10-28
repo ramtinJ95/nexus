@@ -12,8 +12,9 @@ import { join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { json, normaliser } from "./normalise.ts";
 
-// One fixed clock, so the two checkouts store and print the same times.
-const now = Date.parse("2026-10-27T12:00:00Z");
+// A clock that moves only when the script moves it, so the two checkouts store and print the same times. Each start
+// moves it a second, so threads list in the order they started, not by their random IDs.
+let now = Date.parse("2026-10-27T12:00:00Z");
 Date.now = () => now;
 
 const { startApi } = await import("../../../src/control/api.ts");
@@ -141,6 +142,7 @@ registry.setCurrentImage(image.id as ImageId);
 
 log("# POST /v1/threads for a harness thread with a first message, a Claude worker and a pending Claude worker, and the bare thread's start");
 const started = async (body: object, name: string) => {
+  now += 1_000;
   const res = await call("POST", "/v1/threads", body);
   const t = named(JSON.parse(res.text) as Thread, name);
   log(scrub(`${json(body)} => ${res.status} ${res.type} ${res.text}`));
@@ -149,6 +151,7 @@ const started = async (body: object, name: string) => {
 const harness = await started({ project: "acme", title: "Harness", message: "first message" }, "harness");
 const claude = await started({ project: "acme", title: "Claude", claude: "fix it", model: "claude-sonnet-5-5" }, "claude");
 const pending = await started({ project: "acme", title: "Pending", claude: "later" }, "pending");
+now += 1_000;
 const bare = named(await startThread({ project: "acme", title: "Bare", bare: true }, laptop), "bare");
 log(scrub(`bare start => ${JSON.stringify(bare)}`));
 const threads = { harness, claude, pending, bare };
