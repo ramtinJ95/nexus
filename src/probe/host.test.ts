@@ -1,8 +1,9 @@
-import { test } from "node:test";
+import { test, type TestContext } from "node:test";
 import assert from "node:assert/strict";
-import { cp, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import fs, { cp, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { syncBuiltinESMExports } from "node:module";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, relative } from "node:path";
 import { parseLoadavg, parseMeminfo, parseResident, parseStat, readNodeHealth } from "./host.ts";
 import type { NodeName, PylonId } from "../protocol.ts";
 
@@ -63,4 +64,65 @@ test("a host with only thermal zones reports them, and one without /proc or sens
   assert.equal(thermal.pylons, null, "a backend that cannot name its pylons' processes");
   const bare = await readNodeHealth(node, { root: join(fixtures, "absent"), storage: fixtures, pylons: [], sampleMs: 0 });
   assert.deepEqual([bare.load, bare.memory, bare.temperatures, bare.pylons], [null, null, null, []]);
+});
+
+/** Has the files under `root` that `fails` names answer an errno, as a driver or an exiting process makes them. */
+function failReads(t: TestContext, root: string, fails: Record<string, string>) {
+  const original = fs.readFile;
+  t.mock.method(fs, "readFile", (path: string, ...rest: unknown[]) => {
+    const code = fails[relative(root, path)];
+    if (code === undefined) return (original as (...args: unknown[]) => Promise<unknown>)(path, ...rest);
+    return Promise.reject(Object.assign(new Error(`${code}: read '${path}'`), { code, syscall: "read", path }));
+  });
+  syncBuiltinESMExports();
+  t.after(() => {
+    t.mock.restoreAll();
+    syncBuiltinESMExports();
+  });
+}
+
+test("a sensor its driver keeps busy, or one it cannot read, is left out and the rest of the health stays", async (t) => {
+  failReads(t, fixtures, { "hwmon/sys/class/hwmon/hwmon0/temp1_input": "EBUSY", "hwmon/sys/class/hwmon/hwmon1/temp2_input": "EACCES", "hwmon/sys/class/hwmon/hwmon1/temp1_label": "ENODATA" });
+  const health = await readNodeHealth(node, { root: join(fixtures, "hwmon"), storage: fixtures, pylons: null, sampleMs: 0 });
+  assert.deepEqual(health.temperatures, [{ sensor: "k10temp Tccd1", celsius: 51 }, { sensor: "nvme temp1", celsius: 41.85 }], "a label that cannot be read names the sensor by its input");
+  assert.deepEqual(health.load, { one: 1.22, five: 1.51, fifteen: 1.29 });
+});
+
+test("a pylon's process that exits mid-read, or whose files refuse, is not counted, and the rest of the tree is", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "nexus-host-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  await cp(join(fixtures, "hwmon"), root, { recursive: true });
+  failReads(t, root, { "proc/4122/status": "ESRCH", "proc/4200/stat": "EACCES" });
+  let clock = 0;
+  const wait = async () => {
+    clock += 1_000;
+    const file = join(root, "proc", "4122", "stat");
+    const fields = (await readFile(file, "utf8")).split(" ");
+    fields[13] = String(Number(fields[13]) + 100);
+    await writeFile(file, fields.join(" "));
+  };
+  const health = await readNodeHealth(node, { root, storage: root, pylons: [{ pylonId: "pylon-th-aaaaaaaaaaaa" as PylonId, pid: 4100 }], sampleMs: 1000, wait, now: () => clock });
+  assert.deepEqual(health.pylons, [{ pylonId: "pylon-th-aaaaaaaaaaaa", processes: 1, cpuPercent: 0, residentGiB: kib(102400) }]);
+});
+
+test("a pylon whose controller cannot be read at the end of the sample is not listed, though its children can be", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "nexus-host-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  await cp(join(fixtures, "hwmon"), root, { recursive: true });
+  failReads(t, root, { "proc/4100/status": "ESRCH" });
+  let clock = 0;
+  const wait = async () => {
+    clock += 1_000;
+    await rm(join(root, "proc", "5000"), { recursive: true });
+  };
+  const pylons = [{ pylonId: "pylon-th-aaaaaaaaaaaa" as PylonId, pid: 4100 }, { pylonId: "pylon-th-bbbbbbbbbbbb" as PylonId, pid: 5000 }, { pylonId: "pylon-th-cccccccccccc" as PylonId, pid: 4122 }];
+  const health = await readNodeHealth(node, { root, storage: root, pylons, sampleMs: 1000, wait, now: () => clock });
+  assert.deepEqual(health.pylons, [{ pylonId: "pylon-th-cccccccccccc", processes: 2, cpuPercent: 0, residentGiB: 4 }],
+    "a controller whose status fails, and one whose stat fails in the second sample, leave their pylons out");
+});
+
+test("load or memory that the host has but cannot read fails the health, and names the reading", async (t) => {
+  failReads(t, fixtures, { "hwmon/proc/meminfo": "EIO", "thermal/proc/loadavg": "EBUSY" });
+  await assert.rejects(readNodeHealth(node, { root: join(fixtures, "hwmon"), storage: fixtures, pylons: null, sampleMs: 0 }), /^Error: cannot read the node's memory: EIO: read '.*\/proc\/meminfo'$/);
+  await assert.rejects(readNodeHealth(node, { root: join(fixtures, "thermal"), storage: fixtures, pylons: null, sampleMs: 0 }), /^Error: cannot read the node's load: EBUSY: read '.*\/proc\/loadavg'$/);
 });
