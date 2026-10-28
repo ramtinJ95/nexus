@@ -483,9 +483,11 @@ shell workspace stays beside it. Captures are in
 runs the launches, the sends and a wake's relaunch of one session one at a time, so
 a launch sent again while the first still runs waits for it and reads what it did.
 
-Only a probe whose snapshot says `claudeLaunchRepeatable` gets a launch twice. A
-probe from before this change would open a second workspace and type the launch
-again, so the control plane fails the launch against it as before. Any other
+Every node runs a probe that reads these files, so the control plane sends the
+launch again to whichever probe comes back. Snapshots once said so with
+`claudeLaunchRepeatable`, which every probe sent as true. Probes no longer send
+it, and the control plane ignores it from one that still does. A launch left
+`starting` for a deleted thread fails, since its pylon never runs again. Any other
 error, or a probe that does not come back in time, fails the launch with the same
 diagnostic as before.
 

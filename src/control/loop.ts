@@ -153,7 +153,7 @@ export function startLoop(options: LoopOptions): Loop {
       }
     }
     const seen = observation(node);
-    const present = [...seen?.pylons.map((p) => p.pylonId) ?? [], ...seen?.previewRoutes?.map((r) => r.pylonId) ?? []];
+    const present = [...seen?.pylons.map((p) => p.pylonId) ?? [], ...seen?.previewRoutes.map((r) => r.pylonId) ?? []];
     // Each record is read just before its tick, because an API retry may change it while earlier ticks wait on
     // the probe, and saving an older copy would undo it.
     for (const pylonId of registry.pylonIdsToTick(node, present)) {
@@ -172,8 +172,9 @@ export function startLoop(options: LoopOptions): Loop {
       try {
         const worker = registry.claudeWorker(thread.id);
         const running = nodeObservation?.pylons.some((p) => p.pylonId === pylonId && p.phase === "running") === true;
-        // A launch this process did not finish, as one a control plane restart cut off, goes again only where it is safe to.
-        if (worker?.state === "starting" && nodeObservation !== null && (nodeObservation.claudeLaunchRepeatable !== true || worker.session === null)) {
+        // A launch this process did not finish, as one a control plane restart cut off, goes again under the session it
+        // recorded. It fails without one, and for a deleted thread, whose pylon does not run again.
+        if (worker?.state === "starting" && nodeObservation !== null && (worker.session === null || thread.status === "deleted")) {
           const message = "Claude launch was interrupted; attach to check before starting another session";
           registry.setClaudeWorker(thread.id, worker.prompt, "failed", message);
           registry.appendEvent("thread.failed", thread.id, { message });
@@ -205,8 +206,8 @@ export function startLoop(options: LoopOptions): Loop {
   /**
    * Sends a prompted Claude launch, and sends it again, under the same session ID, each time the probe connection is
    * lost before it answers, as when a deploy restarts the probe. It waits for a snapshot from after the loss, so the
-   * probe that answers it is one that came back, and sends again only if that probe says the launch is safe to repeat
-   * (sessions.ts openSession), which reads from the pylon how far the launch got.
+   * probe that answers it is one that came back. Sending it again is safe, because the probe reads from the pylon how
+   * far the launch got (sessions.ts openSession).
    */
   async function launchClaude(node: NodeName, link: Link, pylonId: PylonId, command: Extract<PylonCommand, { kind: "open-session" }>): Promise<void> {
     const until = Date.now() + claudeLaunchRetryMs;
@@ -221,7 +222,6 @@ export function startLoop(options: LoopOptions): Loop {
           if (Date.now() >= until) throw new Error(`${(err as Error).message}, and the probe did not come back within ${claudeLaunchRetryMs / 1000} seconds`);
           await delay(250, undefined, { signal: shutdown.signal });
         }
-        if (observation(node)?.claudeLaunchRepeatable !== true) throw new Error(`${(err as Error).message}, and the probe that came back cannot take a launch again`);
         log(`${pylonId}: the Claude launch lost its probe (${(err as Error).message}). Sending it again`);
       }
     }
@@ -258,7 +258,7 @@ export function startLoop(options: LoopOptions): Loop {
           if (event.type === "snapshot") {
             // The journal replays reports the node already sent, and the receipt only grows, so reportSession would drop these.
             const receipt = registry.eventReceipt(node);
-            for (const report of event.observation.events ?? []) if (receipt === null || report.sequence > receipt) registry.reportSession(node, report);
+            for (const report of event.observation.events) if (receipt === null || report.sequence > receipt) registry.reportSession(node, report);
           }
           if (event.type === "session-event") registry.reportSession(node, event.report);
           const current = merge(last, event);

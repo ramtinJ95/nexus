@@ -16,7 +16,7 @@ import type { QueuedRecord } from "./queue.ts";
 import type { Placement } from "./placement.ts";
 import { DatabaseSync, type StatementSync } from "node:sqlite";
 import type { ActivityFacts, RegistryWrite, ThreadStatus } from "../reconcile.ts";
-import type { HerdrStatus, JobStatus, NodeName, NodeObservation, PylonId, Subject, TailnetNodeId } from "../protocol.ts";
+import { upgradeObservation, type HerdrStatus, type JobStatus, type NodeName, type NodeObservation, type OlderObservation, type PylonId, type ReportedCapacity, type Subject, type TailnetNodeId } from "../protocol.ts";
 import type { BootInputs, Project, ProjectId, SessionHarness } from "../project.ts";
 import type { BuildingTemplate, ImageId, ImageManifest, TemplateId, TemplateRecord, ThreadSetup } from "../images.ts";
 import type { PylonRecord } from "../tick.ts";
@@ -36,7 +36,8 @@ export interface NodeRecord {
   tailnetHost: string;
   tailnetNodeId: TailnetNodeId;
   state: "online" | "offline";
-  capacity: NodeObservation["capacity"] | null;
+  /** As the probe reported it, which the API sends. Null for a node never observed. */
+  capacity: ReportedCapacity | null;
   /** The probe's latest observation. While the node is offline the dashboard shows it, marked stale. */
   observation: NodeObservation | null;
 }
@@ -331,10 +332,9 @@ const migrations: readonly string[] = [
 type Row = Record<string, unknown>;
 const json = <T>(value: unknown): T => JSON.parse(value as string) as T;
 const jsonOrNull = <T>(value: unknown): T | null => value === null ? null : json<T>(value);
-/** An observation stored from a probe older than `grants` has none, which reads as such a probe's null. */
 function observationOf(value: unknown): NodeObservation | null {
-  const o = jsonOrNull<NodeObservation>(value);
-  return o === null ? null : { ...o, grants: o.grants ?? null };
+  const o = jsonOrNull<OlderObservation>(value);
+  return o === null ? null : upgradeObservation(o);
 }
 
 /** A row written before images recorded their release has none. */

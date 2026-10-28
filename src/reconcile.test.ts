@@ -5,7 +5,8 @@ import {
   type ActivityFacts, type DesiredPhase, type PlanInput, type PlanStep, type RegistryWrite, type SessionRow,
 } from "./reconcile.ts";
 import {
-  encodeProbeEvent, encodeSubmitReply, jobSubject, parseJobEnvelope, parseProbeEvent, parseSubmitReply,
+  encodeProbeEvent, encodeSubmitReply, jobSubject, parseJobEnvelope, parseProbeEvent, parseSubmitReply, upgradeObservation,
+  type OlderObservation,
   type Job, type JobErrorCode, type JobId, type JobStatus, type LiveHash, type NodeName, type NodeObservation, type ProbeEvent, type PylonId, type PylonObservation,
   type PausedSession, type RunningFacts, type SessionFact,
 } from "./protocol.ts";
@@ -277,20 +278,33 @@ test("submit replies round-trip through the wire encoding", () => {
   }
 });
 
-test("a snapshot from a probe older than route reporting parses with its routes unknown", () => {
-  const observation = { node, observedAt: "2027-01-01T00:00:00Z", probeBootId: "b", capacity: { cpus: 16, committedCpus: 0, memoryGiB: 64, committedMemoryGiB: 0, diskFreeGiB: 100, committedDiskGiB: 0 }, artifacts: [], jobs: [], pylons: [] };
+test("a snapshot from a probe older than route reporting parses as routing nothing the registry does not know", () => {
+  const observation = { node, observedAt: "2027-01-01T00:00:00Z", probeBootId: "b", events: [], capacity: { cpus: 16, committedCpus: 0, memoryGiB: 64, committedMemoryGiB: 0, diskFreeGiB: 100, committedDiskGiB: 0 }, artifacts: [], jobs: [], pylons: [] };
   const old = parseProbeEvent(encodeProbeEvent({ type: "snapshot", observation } as unknown as ProbeEvent));
-  assert.ok(old.type === "snapshot" && old.observation.previewRoutes === null);
+  assert.ok(old.type === "snapshot");
+  assert.deepEqual(old.observation.previewRoutes, []);
   const routes = [{ httpsPort: 10200, pylonId, service: "web" }];
-  const current = parseProbeEvent(encodeProbeEvent({ type: "snapshot", observation: { ...observation, grants: { secrets: [], gitSsh: false }, previewRoutes: routes } }));
-  assert.ok(current.type === "snapshot" && current.observation.previewRoutes !== null);
+  const current = parseProbeEvent(encodeProbeEvent({ type: "snapshot", observation: { ...observation, grants: { secrets: [], gitSsh: false }, previewRoutes: routes, heldSecrets: [] } }));
+  assert.ok(current.type === "snapshot");
   assert.deepEqual(current.observation.previewRoutes, routes);
   assert.throws(() => parseProbeEvent(encodeProbeEvent({ type: "snapshot", observation: { ...observation, previewRoutes: {} } } as unknown as ProbeEvent)), /previewRoutes is not an array/);
 });
 
+test("a snapshot as the probe every node runs sends it, claudeLaunchRepeatable and all, parses with every fact it sent", () => {
+  const observation = {
+    node, observedAt: "2027-01-01T00:00:00Z", probeBootId: "b", events: [], capacity: { cpus: 16, committedCpus: 2, memoryGiB: 64, committedMemoryGiB: 4, diskFreeGiB: 100, committedDiskGiB: 10 },
+    artifacts: [], jobs: [], pylons: [{ pylonId, phase: "stopped", checkpoint: lastCheckpoint, sessions: [] }], previewRoutes: [{ httpsPort: 10200, pylonId, service: "web" }],
+    grants: { secrets: ["GH_TOKEN"], gitSsh: true }, claudeLaunchRepeatable: true, heldSecrets: ["NEXUS_CHATGPT_TOKEN"],
+  };
+  const parsed = parseProbeEvent(JSON.stringify({ type: "snapshot", observation }));
+  assert.ok(parsed.type === "snapshot");
+  const { claudeLaunchRepeatable: _, ...facts } = observation;
+  assert.deepEqual(Object.fromEntries(Object.keys(facts).map((key) => [key, (parsed.observation as unknown as Record<string, unknown>)[key]])), facts);
+});
+
 test("a broken pylon whose cause is missing, as from an older probe, or one this control plane does not know parses with its cause unknown", () => {
   const snapshot = (pylon: Record<string, unknown>) => encodeProbeEvent({ type: "snapshot", observation: {
-    node, observedAt: "2027-01-01T00:00:00Z", probeBootId: "b", capacity: { cpus: 16, committedCpus: 0, memoryGiB: 64, committedMemoryGiB: 0, diskFreeGiB: 100, committedDiskGiB: 0 }, artifacts: [], jobs: [], pylons: [pylon], previewRoutes: [],
+    node, observedAt: "2027-01-01T00:00:00Z", probeBootId: "b", events: [], capacity: { cpus: 16, committedCpus: 0, memoryGiB: 64, committedMemoryGiB: 0, diskFreeGiB: 100, committedDiskGiB: 0 }, artifacts: [], jobs: [], pylons: [pylon], previewRoutes: [], heldSecrets: [],
   } } as unknown as ProbeEvent);
   const old = parseProbeEvent(snapshot({ pylonId, phase: "broken", detail: "Setup exited 128. Read controller logs" }));
   assert.ok(old.type === "snapshot");
@@ -312,6 +326,33 @@ test("sessions from a probe older than session states parse as running in their 
   const old = parseProbeEvent(JSON.stringify({ type: "pylon", pylon: { ...running(liveHash), sessions: [{ herdrPane: "w1:p1", harness: "shell", harnessSessionId: null, status: "idle" }] } }));
   assert.ok(old.type === "pylon" && old.pylon.phase === "running");
   assert.deepEqual(old.pylon.sessions, [{ id: "w1:p1", state: "running", herdrPane: "w1:p1", harness: "shell", harnessSessionId: null, status: "idle" }]);
+});
+
+test("an observation from the oldest probe upgrades to what each field it left out meant, and an upgraded one stays as it is", () => {
+  const oldest = {
+    node, observedAt: "2027-01-01T00:00:00Z", probeBootId: "b", capacity: { memoryGiB: 64, committedMemoryGiB: 0, diskFreeGiB: 100 }, artifacts: [], jobs: [],
+    pylons: [
+      { ...running(liveHash), listening: undefined, sessions: [{ herdrPane: "w1:p1", harness: "shell", harnessSessionId: null, status: "idle" }] },
+      { pylonId: "pylon-t2", phase: "stopped", checkpoint: lastCheckpoint },
+      { pylonId: "pylon-t3", phase: "broken", detail: "x" },
+    ],
+  } as unknown as OlderObservation;
+  const upgraded = upgradeObservation(oldest);
+  assert.deepEqual(upgraded, {
+    node, observedAt: "2027-01-01T00:00:00Z", probeBootId: "b", events: [], capacity: null, artifacts: [], jobs: [],
+    pylons: [
+      { ...running(liveHash), listening: null, sessions: [{ id: "w1:p1", state: "running", herdrPane: "w1:p1", harness: "shell", harnessSessionId: null, status: "idle" }] },
+      { pylonId: "pylon-t2", phase: "stopped", checkpoint: lastCheckpoint, sessions: null },
+      { pylonId: "pylon-t3", phase: "broken", detail: "x", cause: "unknown" },
+    ],
+    previewRoutes: [], grants: { secrets: [], gitSsh: false }, heldSecrets: [],
+  });
+  assert.deepEqual(upgradeObservation(upgraded), upgraded);
+  const counted = { cpus: 16, committedCpus: 2, memoryGiB: 64, committedMemoryGiB: 4, diskFreeGiB: 100, committedDiskGiB: 10 };
+  assert.equal(upgradeObservation({ ...oldest, capacity: counted }).capacity, null, "a probe that reports no grants is from before pylons were counted");
+  const { cpus: _, committedCpus: __, committedDiskGiB: ___, ...uncounted } = counted;
+  assert.equal(upgradeObservation({ ...oldest, capacity: uncounted, grants: { secrets: [], gitSsh: false } }).capacity, null, "so is one that reports no committed disk");
+  assert.deepEqual(upgradeObservation({ ...oldest, capacity: counted, grants: { secrets: [], gitSsh: false } }).capacity, counted);
 });
 
 const working: SessionFact = { id: "w1:p1", state: "running", herdrPane: "w1:p1", harness: "claude-code", harnessSessionId: "s1", status: "working", title: "review" };
@@ -388,9 +429,6 @@ test("ingest: a stopped pylon lists what its pause recorded as paused, under the
 test("ingest: a stopped pylon that says nothing of its sessions pauses every session it had", () => {
   assert.deepEqual(ingest({ type: "pylon", pylon: stopped(lastCheckpoint) }, node, knows(phase("stopping")), now), [{ record: "sessions-paused", pylonId }]);
   assert.deepEqual(ingest({ type: "pylon", pylon: stopped(lastCheckpoint) }, node, knows(stopped(lastCheckpoint)), now), []);
-  // Stored before stopped observations had the field.
-  const older = { pylonId, phase: "stopped", checkpoint: lastCheckpoint } as PylonObservation;
-  assert.deepEqual(ingest({ type: "pylon", pylon: older }, node, knows(phase("stopping")), now), [{ record: "sessions-paused", pylonId }]);
 });
 
 test("ingest: an unlisted pylon's list is written though the previous observation has the same one, and only a list is", () => {
@@ -422,8 +460,8 @@ test("ingest: a pylon that runs again before its sessions are read resumes the p
 
 test("ingest: a deleted pylon drops its sessions", () => {
   assert.deepEqual(ingest({ type: "snapshot", observation: {
-    node, observedAt: "2027-01-01T00:00:00Z", probeBootId: "b1", capacity: { cpus: 16, committedCpus: 0, memoryGiB: 64, committedMemoryGiB: 8, diskFreeGiB: 500, committedDiskGiB: 0 },
-    artifacts: [], jobs: [], pylons: [], grants: { secrets: [], gitSsh: false }, previewRoutes: [],
+    node, observedAt: "2027-01-01T00:00:00Z", probeBootId: "b1", events: [], capacity: { cpus: 16, committedCpus: 0, memoryGiB: 64, committedMemoryGiB: 8, diskFreeGiB: 500, committedDiskGiB: 0 },
+    artifacts: [], jobs: [], pylons: [], grants: { secrets: [], gitSsh: false }, previewRoutes: [], heldSecrets: [],
   } }, node, knows(phase("deleting")), now).filter((w) => w.record === "sessions"), [{ record: "sessions", pylonId, sessions: [] }]);
 });
 
@@ -447,11 +485,11 @@ test("ingest: a snapshot writes the node, its jobs, its pylons, and closes known
   const status: JobStatus = { jobId: "j" as JobId, subject: pylonId, kind: "spawn", state: "running", startedAt: "2027-01-01T00:00:00Z" };
   const gone = "pylon-gone" as PylonId;
   const observation: NodeObservation = {
-    node, observedAt: "2027-01-01T00:00:00Z", probeBootId: "b1",
+    node, observedAt: "2027-01-01T00:00:00Z", probeBootId: "b1", events: [],
     capacity: { cpus: 16, committedCpus: 0, memoryGiB: 64, committedMemoryGiB: 8, diskFreeGiB: 500, committedDiskGiB: 0 },
     artifacts: [image], jobs: [status],
     pylons: [runningWith({ attachedClients: 2 }), { pylonId: "pylon-x" as PylonId, phase: "booting" }],
-    grants: { secrets: [], gitSsh: false }, previewRoutes: [],
+    grants: { secrets: [], gitSsh: false }, previewRoutes: [], heldSecrets: [],
   };
   const known = new Map<PylonId, PylonObservation | "absent">([[pylonId, "absent"], [gone, { ...runningWith({ sessions: [idleShell] }), pylonId: gone }]]);
   assert.deepEqual(ingest({ type: "snapshot", observation }, node, known, now), [

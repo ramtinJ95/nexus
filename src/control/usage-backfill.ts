@@ -73,12 +73,12 @@ export function usageBackfill(options: {
     const node = registry.node(p.node);
     const o = node?.state === "online" ? node.observation : null;
     if (o == null) return `${p.node} is offline`;
-    if (o.spawnsWithoutRelaunch !== true) return `${p.node} runs a probe too old to wake a pylon without its sessions`;
+    if (o.spawnsWithoutRelaunch !== true || o.capacity === null) return `${p.node} runs a probe too old to wake a pylon without its sessions`;
     if (o.jobs.some((j) => j.state === "running") || registry.pylonsOn(p.node).some((other) => other.submitted !== null)) return `${p.node} is busy with a job`;
     const observed = o.pylons.find((seen) => seen.pylonId === p.pylonId);
     if (observed !== undefined && observed.phase !== "stopped" && observed.phase !== "running") return `its pylon is ${observed.phase}`;
     const largest = Math.max(0, ...registry.projects().map((project) => project.resources.memoryGiB));
-    const { left } = roomLeft(registry, p.node, o, uncounted(p, observed));
+    const { left } = roomLeft(registry, p.node, o, o.capacity, uncounted(p, observed));
     if (left.memoryGiB < largest) return `${p.node} would have ${gib(left.memoryGiB)} GiB of memory left with it up, less than the ${largest} GiB of the largest project's pylon`;
     return null;
   }

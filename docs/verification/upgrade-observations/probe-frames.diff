@@ -1,0 +1,10 @@
+--- probe-main.json
++++ probe-branch.json
+@@ -23,7 +23,6 @@
+    ],
+    "gitSsh": false
+   },
+-  "claudeLaunchRepeatable": true,
+   "spawnsWithoutRelaunch": true,
+   "heldSecrets": [
+    "NEXUS_CHATGPT_TOKEN"

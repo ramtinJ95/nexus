@@ -72,8 +72,7 @@ test("a poll while one runs joins it instead of reading the token twice", async 
 test("a probe that takes the token and has not got it, as one that just started, gets it at once", async () => {
   const p = probes("rj-firebat", "infra-testbench");
   const handoff = chatgptTokenHandoff({ probes: p.clients, token: async () => token, log: () => {} });
-  const seen = (node: string, holds: readonly string[], takes?: readonly string[]) =>
-    ({ node: node as NodeName, grants: { secrets: holds, gitSsh: false }, ...takes === undefined ? {} : { heldSecrets: takes } });
+  const seen = (node: string, holds: readonly string[], takes: readonly string[] = []) => ({ node: node as NodeName, grants: { secrets: holds, gitSsh: false }, heldSecrets: takes });
   handoff.observed(seen("rj-firebat", ["GH_TOKEN", "NEXUS_CHATGPT_TOKEN"], ["NEXUS_CHATGPT_TOKEN"]));
   handoff.observed(seen("rj-firebat", [], []));
   handoff.observed(seen("rj-firebat", []));

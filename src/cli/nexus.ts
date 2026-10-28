@@ -29,6 +29,7 @@ import type { Changes, Diff, Listing } from "../checkout-files.ts";
 import type { ThreadSetup } from "../images.ts";
 import type { Project, SecretGrant } from "../project.ts";
 import type { ActualState } from "../reconcile.ts";
+import type { NodeCapacity } from "../protocol.ts";
 import type { WebSocket } from "ws";
 import { attachTerminal, processTty } from "./attach.ts";
 import { call, CliError, exitCodes, follow, upgrade, type Endpoint, type HostPort } from "./transport.ts";
@@ -285,7 +286,7 @@ function claudeText(c: ClaudeConversation): string {
 
 const gib = (n: number) => Number(n.toFixed(1));
 /** A probe from before pylons were counted reports no CPUs or committed disk, and always 0 GiB of memory committed. */
-function capacityText(c: Partial<NonNullable<NodeSummary["capacity"]>>, overcommitted: boolean): string {
+function capacityText(c: Partial<NodeCapacity>, overcommitted: boolean): string {
   const counted = c.committedDiskGiB !== undefined;
   const n = (v: number | undefined, known = true) => v === undefined || !known ? "unknown" : gib(v);
   return `${n(c.committedCpus)}/${n(c.cpus)} CPUs, ${n(c.committedMemoryGiB, counted)}/${n(c.memoryGiB)} GiB memory committed${overcommitted ? ", overcommitted" : ""}, ${n(c.committedDiskGiB)} GiB disk committed, ${n(c.diskFreeGiB)} GiB disk free`;

@@ -120,16 +120,13 @@ export type SubmitReply =
 // Observations: facts only. The control plane turns them into records.
 
 export interface NodeObservation {
-  events?: readonly ReportedEvent[];
+  events: readonly ReportedEvent[];
   node: NodeName;
   observedAt: string;
   /** A new value after every probe restart. It tells the control plane that in-memory job results are gone. */
   probeBootId: string;
-  /**
-   * What the node has, and what its pylons reserve of it. A VM that is up holds its CPUs and memory, and every pylon
-   * holds its disk size until it is deleted, so a paused pylon counts toward `committedDiskGiB` only.
-   */
-  capacity: { cpus: number; committedCpus: number; memoryGiB: number; committedMemoryGiB: number; diskFreeGiB: number; committedDiskGiB: number };
+  /** Null from a probe from before pylons were counted (upgradeObservation). */
+  capacity: NodeCapacity | null;
   /**
    * On pylon-vm, its checkpoints are those of the stopped pylons in `pylons`, taken from the same list. A pylon that
    * stops while the snapshot is read shows as stopped, with its checkpoint, in the next one.
@@ -145,33 +142,32 @@ export interface NodeObservation {
   pylons: readonly PylonObservation[];
   /**
    * The https ports the probe's gateway routes, each to a pylon's service. A paused pylon keeps its routes. The
-   * control plane gives none of these ports to another preview, whether or not the registry holds it. Null from a
-   * probe older than this field, whose routes are unknown: allocation then goes by the registry alone, and a deleted
-   * pylon the node reports absent counts as gone.
+   * control plane gives none of these ports to another preview, whether or not the registry holds it.
    */
-  previewRoutes: readonly PreviewRouteFact[] | null;
-  /**
-   * What the node can give a pylon: the names of the secrets in its secret file, and whether it has a git SSH key.
-   * Null from a probe older than this field, whose capacity also counts no pylons.
-   */
-  grants: { secrets: readonly string[]; gitSsh: boolean } | null;
-  /**
-   * True from a probe whose open-session of a prompted Claude Code launch is safe to send again under the same `resume`
-   * ID (sessions.ts openSession). A probe older than the field sends none, and the control plane never sends a launch
-   * to it twice.
-   */
-  claudeLaunchRepeatable?: true;
+  previewRoutes: readonly PreviewRouteFact[];
+  /** What the node can give a pylon: the names of the secrets in its secret file, and whether it has a git SSH key. */
+  grants: { secrets: readonly string[]; gitSsh: boolean };
   /**
    * True from a probe that takes a spawn's `relaunch: false`. One older than the field ignores it and relaunches the
    * sessions, so the usage backfill never wakes a pylon on its node.
    */
   spawnsWithoutRelaunch?: true;
-  /**
-   * The heldSecrets this probe takes from the control plane. A probe older than the field takes none: it looks for one
-   * in its secret file and fails the spawn for good, so the control plane holds a boot that needs one (reconcile.ts).
-   */
-  heldSecrets?: readonly string[];
+  /** The heldSecrets this probe takes from the control plane. */
+  heldSecrets: readonly string[];
 }
+
+/**
+ * What a node has, and what its pylons reserve of it. A VM that is up holds its CPUs and memory, and every pylon holds
+ * its disk size until it is deleted, so a paused pylon counts toward `committedDiskGiB` only.
+ */
+export interface NodeCapacity { cpus: number; committedCpus: number; memoryGiB: number; committedMemoryGiB: number; diskFreeGiB: number; committedDiskGiB: number }
+/**
+ * A node's capacity as its probe reported it. A probe from before pylons were counted reports no CPUs and no committed
+ * disk, and its committed memory is always 0.
+ */
+export type ReportedCapacity = NodeCapacity | Pick<NodeCapacity, "memoryGiB" | "committedMemoryGiB" | "diskFreeGiB">;
+/** The capacity, or null where its probe was from before pylons were counted. */
+export const countedCapacity = (c: ReportedCapacity | null): NodeCapacity | null => c !== null && "committedDiskGiB" in c ? c : null;
 
 export interface PreviewRouteFact { httpsPort: number; pylonId: PylonId; service: string }
 
@@ -724,22 +720,20 @@ export function parseProbeEvent(frame: string): ProbeEvent {
       for (const key of ["artifacts", "jobs", "pylons"] as const) {
         if (!Array.isArray(o[key])) throw new Error(`observation.${key} is not an array`);
       }
-      o.previewRoutes ??= null;
-      if (o.previewRoutes !== null && !Array.isArray(o.previewRoutes)) throw new Error("observation.previewRoutes is not an array");
-      o.grants ??= null;
+      if (o.previewRoutes != null && !Array.isArray(o.previewRoutes)) throw new Error("observation.previewRoutes is not an array");
       (o.jobs as unknown[]).forEach(parseJobStatus);
       (o.pylons as unknown[]).forEach(parsePylonObservation);
       if (o.events !== undefined) {
         if (!Array.isArray(o.events) || o.events.length > 100) throw new Error("invalid event backlog");
         o.events.forEach((report) => reportedEventSchema.parse(report));
       }
-      return event as ProbeEvent;
+      return { type: "snapshot", observation: upgradeObservation(o as unknown as OlderObservation) };
     }
     case "session-event": {
       reportedEventSchema.parse(event.report);
       return event as ProbeEvent;
     }
-    case "pylon": parsePylonObservation(event.pylon); return event as ProbeEvent;
+    case "pylon": return { type: "pylon", pylon: upgradePylon(parsePylonObservation(event.pylon)) };
     case "job": parseJobStatus(event.status); return event as ProbeEvent;
     case "preview-hit": string(event.pylonId, "pylonId"); return event as ProbeEvent;
     default: throw new Error(`unknown probe event type ${JSON.stringify(event.type)}`);
@@ -916,18 +910,67 @@ function parseJobStatus(value: unknown): JobStatus {
 }
 
 const pylonPhases: ReadonlySet<unknown> = new Set(["booting", "stopping", "deleting", "stopped", "broken", "running"] satisfies PylonObservation["phase"][]);
-function parsePylonObservation(value: unknown): PylonObservation {
+function parsePylonObservation(value: unknown): OlderPylonObservation {
   const p = record(value, "pylon observation");
   string(p.pylonId, "pylon.pylonId");
   if (!pylonPhases.has(p.phase)) throw new Error(`unknown pylon phase ${JSON.stringify(p.phase)}`);
-  if (p.phase === "broken" && !brokenCauses.has(p.cause)) p.cause = "unknown";
-  if (p.phase === "running") {
-    p.listening ??= null; // from a probe older than the field
-    // From a probe older than session states, which reported only sessions in panes.
-    if (Array.isArray(p.sessions)) for (const s of p.sessions as Record<string, unknown>[]) if (s.state === undefined) Object.assign(s, { state: "running", id: s.herdrPane });
+  return p as unknown as OlderPylonObservation;
+}
+
+/** An observation as a probe older than some of its fields sent it, which the registry may still hold, or an upgraded one. */
+export type OlderObservation = Omit<NodeObservation, "events" | "capacity" | "previewRoutes" | "grants" | "heldSecrets" | "pylons"> & {
+  events?: readonly ReportedEvent[];
+  capacity: ReportedCapacity | null;
+  previewRoutes?: readonly PreviewRouteFact[] | null;
+  grants?: NodeObservation["grants"] | null;
+  heldSecrets?: readonly string[];
+  pylons: readonly OlderPylonObservation[];
+};
+type OlderPylonObservation =
+  | Exclude<PylonObservation, { phase: "running" | "stopped" | "broken" }>
+  | (Omit<Extract<PylonObservation, { phase: "running" }>, "listening" | "sessions"> & { listening?: readonly ListeningFact[] | null; sessions: readonly (SessionFact | OlderSession)[] | null })
+  | (Omit<Extract<PylonObservation, { phase: "stopped" }>, "sessions"> & { sessions?: readonly PausedSession[] | null })
+  | (Omit<Extract<PylonObservation, { phase: "broken" }>, "cause"> & { cause?: string });
+/** A session from a probe older than session states, which reported only sessions in panes. */
+type OlderSession = Omit<Extract<SessionFact, { state: "running" }>, "id" | "state"> & { state?: undefined };
+
+/**
+ * The only place that reads an observation from an older probe, at parse and on every registry read. What such a probe
+ * left out reads as what it meant:
+ * - No event backlog: none to replay.
+ * - No preview routes: it routes none the registry does not know, so allocation goes by the registry alone, and a
+ *   deleted pylon the node reports absent counts as gone.
+ * - No grants, or no committed disk: it was from before pylons were counted, so its capacity is null, and placement
+ *   never chooses its node.
+ * - No held secrets: it takes none from the control plane. It would look for one in its secret file and fail the
+ *   spawn for good, so the planner holds a boot that needs one (reconcile.ts).
+ * - A running pylon's listening ports unknown, and sessions from before session states as running in their panes.
+ * - A stopped pylon's sessions null, as from a pause that recorded nothing.
+ * - A broken pylon's cause unknown, as is one this control plane does not know.
+ * An observation it returned comes back unchanged.
+ */
+export function upgradeObservation(o: OlderObservation): NodeObservation {
+  return {
+    ...o,
+    events: o.events ?? [],
+    capacity: o.grants == null ? null : countedCapacity(o.capacity),
+    previewRoutes: o.previewRoutes ?? [],
+    grants: o.grants ?? { secrets: [], gitSsh: false },
+    heldSecrets: o.heldSecrets ?? [],
+    pylons: o.pylons.map(upgradePylon),
+  };
+}
+
+function upgradePylon(p: OlderPylonObservation): PylonObservation {
+  switch (p.phase) {
+    case "running": return {
+      ...p, listening: p.listening ?? null,
+      sessions: p.sessions?.map((s): SessionFact => s.state === undefined ? { ...s, state: "running", id: s.herdrPane } : s) ?? null,
+    };
+    case "stopped": return { ...p, sessions: p.sessions ?? null };
+    case "broken": return { ...p, cause: brokenCauses.has(p.cause) ? p.cause as BrokenCause | "unknown" : "unknown" };
+    default: return p;
   }
-  if (p.phase === "stopped") p.sessions ??= null; // from a probe older than the field
-  return p as unknown as PylonObservation;
 }
 
 // Probe-to-probe artifact copies: GET /v1/artifacts/{id} answers with the manifest in a header and the archive as the body.

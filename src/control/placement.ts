@@ -1,5 +1,5 @@
 import type { BootInputs } from "../project.ts";
-import { heldSecrets, type NodeName, type NodeObservation, type PylonId, type PylonObservation } from "../protocol.ts";
+import { countedCapacity, heldSecrets, type NodeCapacity, type NodeName, type NodeObservation, type PylonId, type PylonObservation } from "../protocol.ts";
 import { desiredPhase } from "../reconcile.ts";
 import { HttpError } from "./http-error.ts";
 import type { NodeRecord, Registry, StoredPylon, ThreadId } from "./registry.ts";
@@ -29,16 +29,16 @@ function weigh(registry: Registry, node: NodeRecord, need: Need): Weighed {
   const refused = (why: string): Weighed => ({ node: node.name, refused: why });
   const o = node.observation;
   if (node.state !== "online" || o === null) return refused("is offline");
-  if (o.grants === null) return refused("runs a probe too old to report what its pylons hold");
+  const { capacity: c } = o;
+  if (c === null) return refused("runs a probe too old to report what its pylons hold");
   if (!o.artifacts.includes(need.image)) return refused(`does not hold image ${need.image}`);
   // A probe gets a held secret soon after it starts, and the planner holds the boot until then.
-  const missing = need.network.secrets.map((s) => s.name).filter((name) => !o.grants!.secrets.includes(name) && !o.heldSecrets?.includes(name));
+  const missing = need.network.secrets.map((s) => s.name).filter((name) => !o.grants.secrets.includes(name) && !o.heldSecrets.includes(name));
   const from = (name: string) => heldSecrets.includes(name) ? `${name}, which its probe is too old to take from the control plane` : `${name} in its secret file`;
   if (missing.length > 0) return refused(`has no secret ${missing.map(from).join(", ")}`);
   const ssh = [...need.repo.kind === "clone" ? [need.repo.url] : [], need.dotfiles.repo].filter((url) => !url.startsWith("https://"));
   if (ssh.length > 0 && !o.grants.gitSsh) return refused(`has no git SSH key to reach ${ssh.join(" and ")}`);
-  const { left, pending } = roomLeft(registry, node.name, o, need.resources);
-  const { capacity: c } = o;
+  const { left, pending } = roomLeft(registry, node.name, o, c, need.resources);
   const committed = `${gib(c.committedMemoryGiB + pending.memoryGiB)} of ${gib(c.memoryGiB)} GiB of memory committed`;
   if (c.committedMemoryGiB + pending.memoryGiB > c.memoryGiB) return refused(`is overcommitted, with ${committed}`);
   if (left.memoryGiB < 0) return refused(`has ${committed}, and the pylon needs ${need.resources.memoryGiB}`);
@@ -50,13 +50,12 @@ function weigh(registry: Registry, node: NodeRecord, need: Need): Weighed {
  * The room the node has left once a pylon that holds `need` more boots there: what its observation does not count as
  * committed, less what its pylons about to boot or wake and the starts placed there will hold (`pending`).
  */
-export function roomLeft(registry: Registry, node: NodeName, o: NodeObservation, need: Room): { left: Room; pending: Room } {
+export function roomLeft(registry: Registry, node: NodeName, o: NodeObservation, c: NodeCapacity, need: Room): { left: Room; pending: Room } {
   const now = Date.now();
   const pending = [...registry.pylonsOn(node)
     .filter((p) => p.failed === null && ["running", "reading"].includes(desiredPhase(registry.thread(p.thread as ThreadId)!, now)))
     .map((p) => uncounted(p, o.pylons.find((seen) => seen.pylonId === p.pylonId))), ...registry.reserved(node)]
     .reduce((total, r) => ({ cpus: total.cpus + r.cpus, memoryGiB: total.memoryGiB + r.memoryGiB, diskGiB: total.diskGiB + r.diskGiB }), { cpus: 0, memoryGiB: 0, diskGiB: 0 });
-  const { capacity: c } = o;
   const left: Room = {
     cpus: c.cpus - c.committedCpus - pending.cpus - need.cpus,
     memoryGiB: c.memoryGiB - c.committedMemoryGiB - pending.memoryGiB - need.memoryGiB,
@@ -79,11 +78,11 @@ export function uncounted(p: StoredPylon, seen: PylonObservation | undefined): R
 
 export const gib = (n: number) => Number(n.toFixed(1));
 
-/**
- * A node's committed memory exceeds its memory. A probe from before pylons were counted reports no committed disk,
- * and its committed memory is always 0, so such a node is never overcommitted.
- */
-export const overcommitted = (c: NodeRecord["capacity"]): boolean => c !== null && c.committedDiskGiB !== undefined && c.committedMemoryGiB > c.memoryGiB;
+/** A node's committed memory exceeds its memory. */
+export function overcommitted(reported: NodeRecord["capacity"]): boolean {
+  const c = countedCapacity(reported);
+  return c !== null && c.committedMemoryGiB > c.memoryGiB;
+}
 
 export interface Tally { pylons: number; cpus: number; memoryGiB: number }
 /**

@@ -181,7 +181,7 @@ test("an observation is stored only together with the writes derived from it", a
   const registry = seeded(tempDb());
   t.after(() => registry.close());
   const capacity = { cpus: 16, committedCpus: 0, memoryGiB: 64, committedMemoryGiB: 8, diskFreeGiB: 400, committedDiskGiB: 0 };
-  const first: NodeObservation = { node, observedAt: "2027-01-01T00:00:00Z", probeBootId: "b", capacity, artifacts: [], jobs: [], pylons: [], grants: { secrets: [], gitSsh: false }, previewRoutes: [] };
+  const first: NodeObservation = { node, observedAt: "2027-01-01T00:00:00Z", probeBootId: "b", events: [], capacity, artifacts: [], jobs: [], pylons: [], grants: { secrets: [], gitSsh: false }, previewRoutes: [], heldSecrets: [] };
   registry.ingested(first, [{ record: "node", node, state: "online", capacity }]);
   assert.deepEqual(registry.node(node)?.observation, first);
 
@@ -384,8 +384,8 @@ test("a published preview is ready only while its running pylon reports its serv
   registry.apply({ record: "preview", pylonId, service: "api", httpsPort: 10200, ready: true });
   registry.apply({ record: "preview", pylonId, service: "web", httpsPort: 10201, ready: true });
   const observe = (observed: NodeObservation["pylons"][number]) => registry.ingested({
-    node, observedAt: "2027-01-01T00:00:00Z", probeBootId: "b", capacity: { cpus: 16, committedCpus: 0, memoryGiB: 64, committedMemoryGiB: 8, diskFreeGiB: 400, committedDiskGiB: 0 },
-    artifacts: [], jobs: [], pylons: [observed], grants: { secrets: [], gitSsh: false }, previewRoutes: [],
+    node, observedAt: "2027-01-01T00:00:00Z", probeBootId: "b", events: [], capacity: { cpus: 16, committedCpus: 0, memoryGiB: 64, committedMemoryGiB: 8, diskFreeGiB: 400, committedDiskGiB: 0 },
+    artifacts: [], jobs: [], pylons: [observed], grants: { secrets: [], gitSsh: false }, previewRoutes: [], heldSecrets: [],
   }, []);
   const running = (webState: ServiceFact["state"] | null) => observe({
     pylonId, phase: "running", liveHash: null, bootedAt: "2027-01-01T00:00:00Z", bootedFrom: { image: image.id, checkpoint: null },
@@ -416,10 +416,18 @@ test("a port the node routes is never handed out, though no row holds it", async
   const registry = seeded(tempDb());
   t.after(() => registry.close());
   const routed = (httpsPort: number, owner: string) => ({ httpsPort, pylonId: owner as PylonId, service: "web" });
-  registry.ingested({ node, observedAt: "2027-01-01T00:00:00Z", probeBootId: "b", capacity: { cpus: 16, committedCpus: 0, memoryGiB: 64, committedMemoryGiB: 8, diskFreeGiB: 400, committedDiskGiB: 0 }, artifacts: [], jobs: [], pylons: [],
-    grants: { secrets: [], gitSsh: false }, previewRoutes: [routed(10200, "pylon-lost"), routed(10201, pylonId)] }, []);
+  registry.ingested({ node, observedAt: "2027-01-01T00:00:00Z", probeBootId: "b", events: [], capacity: { cpus: 16, committedCpus: 0, memoryGiB: 64, committedMemoryGiB: 8, diskFreeGiB: 400, committedDiskGiB: 0 }, artifacts: [], jobs: [], pylons: [],
+    grants: { secrets: [], gitSsh: false }, previewRoutes: [routed(10200, "pylon-lost"), routed(10201, pylonId)], heldSecrets: [] }, []);
   registry.allocatePreviews(pylonId, ["web", "api"], ports);
   assert.deepEqual(portsOf(registry, pylonId), ["api 10203", "web 10202"], "a route left to this pylon from a lost row is refused too");
+});
+
+test("an observation stored from a probe older than route reporting routes no port", async (t) => {
+  const registry = seeded(tempDb());
+  t.after(() => registry.close());
+  registry.ingested({ node, observedAt: "2027-01-01T00:00:00Z", probeBootId: "b", events: [], capacity: { memoryGiB: 64, committedMemoryGiB: 0, diskFreeGiB: 400 }, artifacts: [], jobs: [], pylons: [] } as never, []);
+  registry.allocatePreviews(pylonId, ["web", "api"], ports);
+  assert.deepEqual(portsOf(registry, pylonId), ["api 10201", "web 10200"]);
 });
 
 test("a registry from before session titles keeps its sessions, untitled until they are observed again", async (t) => {
