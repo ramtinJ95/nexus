@@ -12,6 +12,7 @@ import type { Drain, ReleaseReport } from "../deploy/model.ts";
  * the control plane reads them, always whole, so they need no columns of their own.
  */
 import type { PrWatchState } from "./pr-watch.ts";
+import type { PlanningRecord } from "./planning.ts";
 import type { Question } from "./questions.ts";
 import type { Nudge } from "./nudge.ts";
 import type { Judgment } from "./judgment.ts";
@@ -363,6 +364,9 @@ const migrations: readonly string[] = [
   `CREATE TABLE IF NOT EXISTS judgments (failure INTEGER PRIMARY KEY, thread TEXT NOT NULL REFERENCES threads (id), record TEXT NOT NULL) STRICT;
    CREATE TABLE IF NOT EXISTS judgment_since (event INTEGER NOT NULL) STRICT;
    INSERT INTO judgment_since SELECT (SELECT coalesce(max(id), 0) FROM events) WHERE NOT EXISTS (SELECT 1 FROM judgment_since);`,
+  // Each planning thread's token and what the control plane read from it and told it. It touches nothing an earlier
+  // migration made, so a registry rewound past it applies it again unchanged.
+  `CREATE TABLE IF NOT EXISTS planning_threads (thread TEXT PRIMARY KEY REFERENCES threads (id), record TEXT NOT NULL) STRICT;`,
 ];
 
 type Row = Record<string, unknown>;
@@ -1035,17 +1039,26 @@ export function openRegistry(path: string, clock = Date.now) {
     },
     question: (id: string): Question | null => questionRecord(id),
     questions: (thread: ThreadId): Question[] => sql("SELECT record FROM questions WHERE thread = ? ORDER BY json_extract(record, '$.askedAt'), id").all(thread).map((r) => json<Question>(r.record)),
-    /** Records the answer to an open question. An answered one keeps its first answer, which this returns. */
-    answerQuestion(id: string, answer: NonNullable<Question["answer"]>): Question {
+    /**
+     * Records the answer to an open question. An answered one keeps its first answer, which this returns. `then` runs
+     * in the same transaction once the answer is recorded, and a throw from it records nothing.
+     */
+    answerQuestion(id: string, answer: NonNullable<Question["answer"]>, then?: (answered: Question) => void): Question {
       return transaction(() => {
         const stored = questionRecord(id);
         if (stored === null) throw new Error(`no question ${id}`);
         if (stored.answer !== null) return stored;
         const answered = { ...stored, answer };
         sql("UPDATE questions SET record = ? WHERE id = ?").run(JSON.stringify(answered), id);
+        then?.(answered);
         updateAttention(stored.thread);
         return answered;
       });
+    },
+    planning: (thread: ThreadId): PlanningRecord | null => jsonOrNull<PlanningRecord>(sql("SELECT record FROM planning_threads WHERE thread = ?").get(thread)?.record ?? null),
+    planningThreads: (): PlanningRecord[] => sql("SELECT record FROM planning_threads ORDER BY rowid").all().map((r) => json<PlanningRecord>(r.record)),
+    savePlanning(record: PlanningRecord) {
+      sql("INSERT INTO planning_threads (thread, record) VALUES (?, ?) ON CONFLICT (thread) DO UPDATE SET record = excluded.record").run(record.thread, JSON.stringify(record));
     },
     prWatch(thread: ThreadId): PrWatchState | null {
       const row = sql("SELECT record FROM pr_watches WHERE thread = ?").get(thread) as Row | undefined;

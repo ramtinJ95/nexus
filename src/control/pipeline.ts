@@ -173,8 +173,11 @@ export function pipeline(options: { registry: Registry; queue: Pick<ThreadQueue,
 
   const passes = singleFlight(pass);
   return {
-    /** Validates and records. The route polls after, so an item with nothing ahead of it is queued at once. */
-    add(request: StartRequest, message: string | null, after: readonly string[], caller: string): ItemRecord {
+    /**
+     * Validates and records. The route polls after, so an item with nothing ahead of it is queued at once. An accepted
+     * proposal's item takes an ID made from its question, which the planning thread is told.
+     */
+    add(request: StartRequest, message: string | null, after: readonly string[], caller: string, id = newItemId()): ItemRecord {
       if (request.model !== undefined && request.claude === undefined) throw new HttpError(400, "model requires claude");
       if (message !== null && request.claude !== undefined) throw new HttpError(400, "message is for a Nexus agent thread. A Claude worker's brief is its claude");
       if (message === null && request.claude === undefined) throw new HttpError(400, "an item needs a brief: message for a Nexus agent thread, or claude for a Claude worker");
@@ -187,7 +190,7 @@ export function pipeline(options: { registry: Registry; queue: Pick<ThreadQueue,
         if (ahead.project !== project.id) throw new HttpError(400, `item ${id} is in project ${ahead.project}, not ${project.id}`);
       }
       const record: ItemRecord = {
-        id: newItemId(), project: project.id, title: request.title, request, message, after: ids, addedBy: caller, addedAt: Date.now(),
+        id, project: project.id, title: request.title, request, message, after: ids, addedBy: caller, addedAt: Date.now(),
         approved: null, cancelled: null, lastError: null,
       };
       registry.saveItem(record);

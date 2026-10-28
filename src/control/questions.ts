@@ -1,6 +1,6 @@
 /**
  * A question a thread asks the person, answered on its card on the dashboard. Its thread's attention is `decision`
- * while it is open. Nothing asks one yet.
+ * while it is open. The planning pass asks one per item a planning thread proposes (planning.ts).
  */
 import type { TailnetNodeId } from "../protocol.ts";
 import type { ThreadId } from "./registry.ts";
@@ -18,8 +18,13 @@ export interface Question {
   /** A deployer question needs the right `nexus deploy` takes, since its answer may deploy. */
   answerer: "person" | "deployer";
   askedAt: number;
+  /** The item a planning thread proposed, which an answer to accept adds to the pipeline. */
+  proposal?: Proposal;
   answer: { option: string; by: TailnetNodeId; at: number } | null;
 }
+
+/** One item of a planning thread's block. `after` holds keys of earlier items of the block, or pipeline item IDs. */
+export interface Proposal { block: string; index: number; key: string; title: string; brief: string; after: readonly string[] }
 
 export type AnswerRefusal = "not a person" | "not a deployer";
 

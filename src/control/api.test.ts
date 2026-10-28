@@ -23,10 +23,11 @@ import type { Question } from "./questions.ts";
 import type { Judgment } from "./judgment.ts";
 import { threadStarter } from "./threads.ts";
 import { pipeline, type PipelineItem } from "./pipeline.ts";
+import { planning, planningPrefix } from "./planning.ts";
 import { threadQueue, type QueuedThread } from "./queue.ts";
 import { turnGate } from "./drain.ts";
 import type { AttachTiming } from "./attach.ts";
-import type { ReviewLoop } from "./review.ts";
+import { agentReplies, type ReviewLoop } from "./review.ts";
 import { readEvents } from "./event-reader.ts";
 import { fakeHarness } from "./fake-harness.ts";
 import { openRegistry, type Registry, type Thread, type ThreadId } from "./registry.ts";
@@ -106,6 +107,7 @@ async function setup(t: import("node:test").TestContext, options: { gitIdentity?
   const startThread = threadStarter({ registry, harness, mirror, dotfiles: options.dotfiles ?? dotfiles, gitIdentity: options.gitIdentity, wake });
   const queue = options.queue === true || options.pipeline === true ? threadQueue({ registry, startThread, gate: turnGate(() => false), send: (id, text, requestId) => harness.send(id, text, requestId, "followUp") }) : null;
   const items = options.pipeline === true ? pipeline({ registry, queue: queue! }) : null;
+  const plans = items === null ? null : planning({ registry, pipeline: items, replies: agentReplies(registry, harness) });
   const api = await startApi({
     registry, host: "127.0.0.1", port: 0,
     ...(options.https ? { https: options.https } : {}),
@@ -122,6 +124,7 @@ async function setup(t: import("node:test").TestContext, options: { gitIdentity?
     ...(options.reviews === undefined ? {} : { reviews: options.reviews }),
     ...(queue === null ? {} : { queue }),
     ...(items === null ? {} : { pipeline: items }),
+    ...(plans === null ? {} : { planning: plans }),
     ...(images === undefined ? {} : { images }),
     ...(backfill === undefined ? {} : { usageBackfill: backfill }),
     hostnames: new Set(["127.0.0.1"]),
@@ -139,6 +142,7 @@ async function setup(t: import("node:test").TestContext, options: { gitIdentity?
     ...options.closeWaitMs === undefined ? {} : { closeWaitMs: options.closeWaitMs },
   });
   t.after(async () => {
+    await plans?.close();
     await items?.close();
     await queue?.close();
     await api.close();
@@ -175,7 +179,7 @@ async function setup(t: import("node:test").TestContext, options: { gitIdentity?
     });
   }
   return {
-    registry, images, queue, call, raw, woken, calls, commands, streams, reads, fake, startThread, port: api.port, get httpsPort() { return api.httpsPort; }, close: () => api.close(),
+    registry, images, queue, plans, call, raw, woken, calls, commands, streams, reads, fake, startThread, port: api.port, get httpsPort() { return api.httpsPort; }, close: () => api.close(),
     callAs(id: TailnetNodeId | null) { caller = id; },
     nodeHealth(next: typeof health) { health = next; },
     /** Holds every request at whois until the returned function is called. */
@@ -727,7 +731,7 @@ test("thread detail derives the actual state from the node's last observation", 
     attention: null, seenAt: null, lastReplyAt: null,
     desired: "running",
     pylon: { grantsOutdated: false, id: thread.pylonId, node, actualState: "unknown", failed: null, observedAt: null, retryRefused: null, resources: project.resources },
-    sessions: [], previews: [], ports: [], outputs: [], prWatch: { enabled: false, stopped: false, error: null }, pullRequests: [], review: null, questions: [], judgments: [], attach: "herdr --session nexus", agent: { parkedTasks: 0 },
+    sessions: [], previews: [], ports: [], outputs: [], prWatch: { enabled: false, stopped: false, error: null }, pullRequests: [], review: null, questions: [], judgments: [], planning: false, attach: "herdr --session nexus", agent: { parkedTasks: 0 },
   });
 
   const capacity = { cpus: 16, committedCpus: 0, memoryGiB: 64, committedMemoryGiB: 0, diskFreeGiB: 100, committedDiskGiB: 0 };
@@ -3417,6 +3421,60 @@ test("thread detail lists the judgments of the thread's failed pylon, oldest fai
     { failure: 900, node, failed: "pylon is broken: the controller exited", startedAt: 5, phase: "acting", verdict: { answer: "person", why: "Nexus already retried this thread's pylon 2 times on its own", by: "control plane" },
       outcome: null, question: null, brief: null, reply: null },
   ]);
+});
+
+test("a planning thread's proposals become cards only a person answers, an accepted one becomes the person's item and queued thread, and the next message tells the thread", async (t) => {
+  const s = await setup(t, { pipeline: true, deployment });
+  assert.equal((await s.call("POST", "/v1/projects", project)).status, 201);
+  assert.equal((await s.call("POST", "/v1/images", image)).status, 201);
+  s.registry.setCurrentImage(image.id as ImageId);
+  assert.equal((await s.call("PATCH", "/v1/projects/acme", { pipeline: { autoStart: true } })).status, 200);
+  assert.equal((await s.call("POST", "/v1/threads", { project: "acme", title: "Plan", planning: true, claude: "Plan it" })).status, 400, "a Claude worker cannot plan");
+  assert.equal((await s.call("POST", "/v1/threads", { project: "acme", title: "Plan", planning: true, after: ["th-000000000000"] })).status, 400, "a planning thread starts now");
+  assert.equal((await s.call("POST", "/v1/items", { project: "acme", title: "Plan", message: "Go.", planning: true })).status, 400, "an item is no planning thread");
+  const started = await s.call("POST", "/v1/threads", { project: "acme", title: "Plan the wave", planning: true, message: "Plan the orchestration wave." });
+  assert.equal(started.status, 201, JSON.stringify(started.body));
+  const id = (started.body as Thread).id;
+  assert.equal(((await s.call("GET", `/v1/threads/${id}`)).body as ThreadDetail).planning, true);
+  const first = s.fake.transcript(id).messages[0]!.content as string;
+  assert.ok(first.startsWith(planningPrefix) && first.endsWith("Plan the orchestration wave."), "the guide goes before the person's first message");
+  const token = /"token": "([^"]+)"/.exec(first)![1]!;
+
+  s.fake.transcript(id).messages.push({ role: "assistant", content: [{ type: "text", text: `Two items.\n\`\`\`nexus-plan\n${JSON.stringify({ token, items: [
+    { key: "a", title: "A: archive what landed", brief: "Archive the builder once its review lands." },
+    { key: "b", title: "B: nudge a stalled builder", brief: "Nudge a builder that stopped short.", after: ["a"] },
+  ] })}\n\`\`\`` }] } as never);
+  s.fake.commit(id);
+  s.registry.recordReply(id, Date.now());
+  await s.plans!.poll();
+  const detail = async () => (await s.call("GET", `/v1/threads/${id}`)).body as ThreadDetail;
+  const [a, b] = (await detail()).questions;
+  assert.deepEqual([a!.proposal?.title, b!.proposal?.title], ["A: archive what landed", "B: nudge a stalled builder"]);
+  assert.ok(a!.text.includes("Archive the builder once its review lands."), "the card shows the brief in full");
+  assert.equal((await detail()).attention, "decision");
+  assert.deepEqual([s.registry.items().length, s.registry.queuedThreads().length], [0, 0], "nothing the thread wrote adds or starts work, though the project's items start on their own");
+
+  const answer = (q: Question, option: string) => s.call("POST", `/v1/questions/${q.id}/answer`, { option });
+  s.callAs("nFIREBAT" as TailnetNodeId);
+  assert.deepEqual(await answer(a!, "accept"), { status: 403, body: { error: "caller may not answer this question: only a person's device may, never infrastructure nodes or pylons" } });
+  s.callAs(phone);
+  assert.deepEqual(await answer(b!, "accept"), { status: 409, body: { error: `"B: nudge a stalled builder" waits on "A: archive what landed", which is not answered yet. Accept that one first` } });
+  assert.equal(s.registry.question(b!.id)!.answer, null, "a refused accept leaves the card open");
+  assert.equal((await answer(a!, "accept")).status, 200);
+  assert.equal((await answer(b!, "reject")).status, 200);
+  const items = (await s.call("GET", "/v1/items")).body as PipelineItem[];
+  assert.deepEqual(items.map((i) => [i.title, i.addedBy, i.brief]), [["A: archive what landed", phone, "Archive the builder once its review lands."]], "only the accepted proposal is an item, the person's");
+  assert.equal(s.registry.queuedThread(items[0]!.thread!)?.startedBy, phone, "and is queued as the person's at once");
+  assert.notEqual((await detail()).attention, "decision");
+
+  s.callAs(laptop);
+  assert.equal((await s.call("POST", `/v1/threads/${id}/messages`, { text: "B is too early.", requestId: "msg:1" })).status, 202);
+  assert.equal((await s.call("POST", `/v1/threads/${id}/messages`, { text: "B is too early.", requestId: "msg:1" })).status, 202);
+  assert.equal((await s.call("POST", `/v1/threads/${id}/messages`, { text: "Go on.", requestId: "msg:2" })).status, 202);
+  assert.deepEqual(s.fake.transcript(id).messages.slice(2).map((m) => m.content), [
+    `${planningPrefix}\nThe person answered your proposals:\n- accepted "A: archive what landed" (key a), now pipeline item ${items[0]!.id}\n- rejected "B: nudge a stalled builder" (key b)\nThe person's message follows.\n\nB is too early.`,
+    "Go on.",
+  ], "the next message tells what the person answered, once");
 });
 
 test("a person answers a question, a deployer question needs a deployer, and no node or pylon answers one", async (t) => {

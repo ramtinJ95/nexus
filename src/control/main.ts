@@ -30,6 +30,7 @@ import { threadQueue } from "./queue.ts";
 import { builderNudger } from "./nudge.ts";
 import { judgmentPass } from "./judgment.ts";
 import { pipeline } from "./pipeline.ts";
+import { planning } from "./planning.ts";
 import { agentInbox } from "./inbox.ts";
 import { usageLimitResumer } from "./usage-limit.ts";
 import { usageCounter } from "./usage-counter.ts";
@@ -213,6 +214,9 @@ export async function startControlPlane(config: ControlPlaneConfig, models: Mode
   const items = queue === null ? null : pipeline({ registry, queue, log: (message) => console.error(message) });
   const itemTimer = setInterval(() => { void items?.poll(); }, 15_000);
   void items?.poll();
+  const plans = planning({ registry, pipeline: items, replies: agentReplies(registry, harness), log: (message) => console.error(message) });
+  const planTimer = setInterval(() => { void plans.poll(); }, 15_000);
+  void plans.poll();
   const nudges = github === null ? null : builderNudger({ registry, github, inbox, harness, watch, log: (message) => console.error(message) });
   const nudgeTimer = setInterval(() => { void nudges?.poll(); }, 15_000);
   void nudges?.poll();
@@ -226,6 +230,7 @@ export async function startControlPlane(config: ControlPlaneConfig, models: Mode
     reviews,
     queue,
     pipeline: items,
+    planning: plans,
     turnsStarting: gate.busy,
     deployment,
     registry, whois, host: config.listen.host, port: config.listen.port,
@@ -248,6 +253,7 @@ export async function startControlPlane(config: ControlPlaneConfig, models: Mode
       clearInterval(reviewTimer);
       clearInterval(queueTimer);
       clearInterval(itemTimer);
+      clearInterval(planTimer);
       clearInterval(nudgeTimer);
       clearInterval(judgmentTimer);
       clearInterval(resumeTimer);
@@ -256,6 +262,7 @@ export async function startControlPlane(config: ControlPlaneConfig, models: Mode
       await handoff?.close();
       await resumer?.close();
       await reviews?.close();
+      await plans.close();
       await items?.close();
       await queue?.close();
       await nudges?.close();

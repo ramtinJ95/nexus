@@ -59,6 +59,7 @@ import { BodyTooLarge, readBody } from "../request-body.ts";
 import { imagesView, type ImageOperation, type ImageRollout } from "./image-rollout.ts";
 import { startKey, type StartRequest } from "./threads.ts";
 import { itemView, type ItemId, type Pipeline } from "./pipeline.ts";
+import type { Planning } from "./planning.ts";
 import { queuedView, type QueuedRecord, type QueuedThread, type ThreadQueue } from "./queue.ts";
 import { nodePylons, overcommitted, type NodePylons } from "./placement.ts";
 import { maxRounds, type Review, type ReviewLoop } from "./review.ts";
@@ -73,6 +74,8 @@ export interface ApiOptions {
   queue?: ThreadQueue | null;
   /** Null without the queue, which starts its items' threads. */
   pipeline?: Pipeline | null;
+  /** Marks planning threads, writes what their messages start with, and adds the items the person accepts from them. */
+  planning?: Planning | null;
   deployment?: DeploymentOptions;
   turnsStarting?: () => boolean;
   registry: Registry;
@@ -146,6 +149,8 @@ export interface ThreadDetail {
   questions: readonly Question[];
   /** Every judgment of the thread's failed pylon, oldest failure first. */
   judgments: readonly JudgmentView[];
+  /** A planning thread's proposals become questions, and the items the person accepts. */
+  planning: boolean;
   /** The command that attaches to the pylon's Herdr sessions from a shell in the pylon. */
   attach: string;
   /** Null for a thread that has no conversation. A parked task holds the run until it is retried. */
@@ -259,9 +264,11 @@ const startSchema = z.strictObject({
   message: z.string().min(1).optional(),
   /** Minted by the client per start, such as start:<uuid>. A retry with the same ID and body is the same start. */
   requestId: z.string().min(1).max(200).optional(),
+  /** A Nexus agent thread that plans: its proposals become questions for the person. */
+  planning: z.literal(true).optional(),
 });
 /** A pipeline item: what its queued thread starts with, after the items whose threads must merge first. */
-const itemSchema = startSchema.omit({ after: true, requestId: true }).extend({ after: z.array(z.string().min(1)).max(32).optional() });
+const itemSchema = startSchema.omit({ after: true, requestId: true, planning: true }).extend({ after: z.array(z.string().min(1)).max(32).optional() });
 // Agent activity comes from the harness.
 const seenSchema = z.strictObject({ lastReplyAt: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER).nullable().optional() });
 const activitySchema = z.strictObject({ kind: z.literal("human") });
@@ -465,6 +472,7 @@ export async function startApi(options: ApiOptions): Promise<Api> {
       review: registry.review(t.id),
       questions: registry.questions(t.id),
       judgments: registry.judgments(t.id).map(judgmentView),
+      planning: registry.planning(t.id) !== null,
       attach: `herdr --session ${herdrSession}`,
       agent: agent.kind !== "harness" || t.status === "deleted" ? null : { parkedTasks: harness.activity.parked(t.id).length },
     };
@@ -686,13 +694,17 @@ export async function startApi(options: ApiOptions): Promise<Api> {
     return answer;
   }
 
-  async function startOnce({ after, message, ...request }: Omit<z.infer<typeof startSchema>, "requestId">, caller: string, key?: StartKey, made?: ThreadId): Promise<Thread | QueuedThread> {
+  async function startOnce({ after, message, planning, ...request }: Omit<z.infer<typeof startSchema>, "requestId">, caller: string, key?: StartKey, made?: ThreadId): Promise<Thread | QueuedThread> {
     if (request.model !== undefined && request.claude === undefined) throw new HttpError(400, "model requires claude");
+    if (planning && (request.claude !== undefined || after !== undefined)) throw new HttpError(400, "a planning thread is a Nexus agent thread that starts now, so it takes neither claude nor after");
+    if (planning && !options.planning) throw new HttpError(409, "this control plane has no planning pass");
     if (after === undefined) {
       if (message !== undefined && request.claude !== undefined) throw new HttpError(400, "message is for a Nexus agent thread. A Claude worker's first prompt is its claude");
       const t = made === undefined ? await startThread(request, caller, undefined, key) : registry.thread(made)!;
+      if (planning) options.planning!.begin(t);
       if (message !== undefined && t.status !== "archived" && t.status !== "deleted") {
-        await harness.send(t.id, message, `brief:${t.id}`, "followUp").catch((err: Error) => {
+        const requestId = `brief:${t.id}`;
+        await harness.send(t.id, options.planning?.compose(t, requestId, message) ?? message, requestId, "followUp").catch((err: Error) => {
           const why = `started ${t.id}, but its first message was not sent: ${err.message}. ${key === undefined ? `Send it with POST /v1/threads/${t.id}/messages` : `Start it again under request ID ${key.requestId} to send it`}`;
           throw err instanceof HttpError ? new HttpError(err.status, why) : new Error(why);
         });
@@ -710,7 +722,8 @@ export async function startApi(options: ApiOptions): Promise<Api> {
     const message = parse(messageSchema, body);
     registry.recordActivity(t.id, { human: Date.now() });
     wakeThread(t);
-    const submission = await harness.send(t.id, message.text, message.requestId, message.mode);
+    const text = options.planning?.compose(t, message.requestId, message.text) ?? message.text;
+    const submission = await harness.send(t.id, text, message.requestId, message.mode);
     return { submission: submission.id };
   }
 
@@ -1098,8 +1111,9 @@ export async function startApi(options: ApiOptions): Promise<Api> {
       const refused = refusalOf(r.caller, question);
       if (refused !== null) throw new HttpError(403, `caller may not answer this question: ${answerRefusals[refused]}`);
       if (!question.options.includes(option)) throw new HttpError(400, `${JSON.stringify(option)} is not an option of question ${question.id}, which are ${question.options.map((o) => JSON.stringify(o)).join(", ")}`);
-      const answered = registry.answerQuestion(question.id, { option, by: r.caller, at: Date.now() });
+      const answered = registry.answerQuestion(question.id, { option, by: r.caller, at: Date.now() }, options.planning?.answered);
       if (answered.answer!.option !== option) throw new HttpError(409, `question ${question.id} was answered ${JSON.stringify(answered.answer!.option)} by ${answered.answer!.by}`);
+      if (answered.proposal !== undefined) await options.pipeline?.poll();
       return ok(answered);
     }],
     ["POST", /^\/v1\/threads\/([^/]+)\/abort$/, async (m) => { await harness.abort(conversing(thread(m[1]!)).id); return noContent; }],
