@@ -1,0 +1,7 @@
+$ nexus threads
+<thread 1>  active  -  pylon running  scratch  5s ago  Plain
+<thread 2>  active  -  pylon running  scratch  4s ago  Plan
+<thread 3>  active  -  pylon running  scratch  3s ago  Build 1
+<thread 4>  active  -  pylon running  scratch  3s ago  Build 2
+<thread 5>  active  -  pylon running  scratch  2s ago  Build 3
+[exit 0]

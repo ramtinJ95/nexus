@@ -1,0 +1,10 @@
+$ nexus conversation <thread 1>
+> tool: nexus_start {"project":"scratch","title":"Build 0","brief":"Build 0: say hello and stop.","agent":"nexus"}
+
+[tool] nexus_start {"project":"scratch","title":"Build 0","brief":"Build 0: say hello and stop.","agent":"nexus"}
+
+[tool error] nexus_start: <harness>
+[error] Tool nexus_start is not available
+</harness>
+
+scripted answer after toolResult

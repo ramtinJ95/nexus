@@ -1,0 +1,9 @@
+nexus --version -> exit 0 (01-version.txt)
+nexus project add scratch --scratch --node node-a --cpus 1 --memory 1 --disk 1 -> exit 0 (02-project-add.txt)
+== a thread started without --drive calls nexus_start
+nexus start --project scratch --title Plain --message tool: nexus_start {"project":"scratch","title":"Build 0","brief":"Build 0: say hello and stop.","agent":"nexus"} --json -> exit 0 (03-start-plain.txt)
+backend: booted pylon-<thread 1>
+conversation of <thread 1> (04-plain-conversation.txt)
+== a planning thread started with --drive starts builders, up to 3 live ones
+nexus start --project scratch --title Plan --drive --message tool: nexus_start {"project":"scratch","title":"Build 1","brief":"Build 1: say hello and stop.","agent":"nexus"} --json -> exit 64 (05-start-planner.txt)
+no planning thread started, so the steps that drive one are skipped

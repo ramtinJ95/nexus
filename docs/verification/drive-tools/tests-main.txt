@@ -1,0 +1,9 @@
+Error [ERR_MODULE_NOT_FOUND]: Cannot find module '<checkout>/src/control/drive.ts' imported from <checkout>/src/control/drive.test.ts
+✖ src/control/drive.test.ts
+Error [ERR_MODULE_NOT_FOUND]: Cannot find module '<checkout>/src/control/drive.ts' imported from <checkout>/src/harness/drive-fixture.ts
+✖ src/harness/drive-tools.test.ts
+ℹ tests 2
+ℹ pass 0
+ℹ fail 2
+ℹ cancelled 0
+✖ failing tests:

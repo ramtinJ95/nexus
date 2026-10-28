@@ -1,0 +1,20 @@
+$ nexus conversation <thread 3>
+> From thread <thread 2> "Plan", which started this thread with nexus_start:
+> 
+> Build 1: say hello and stop.
+
+scripted answer after user
+
+> tool: nexus_start {"project":"scratch","title":"Grandchild","brief":"Grandchild: say hello and stop.","agent":"nexus"}
+
+[tool] nexus_start {"project":"scratch","title":"Grandchild","brief":"Grandchild: say hello and stop.","agent":"nexus"}
+
+[tool error] nexus_start: <harness>
+[error] Tool nexus_start is not available
+</harness>
+
+scripted answer after toolResult
+
+> Again.
+
+scripted answer after user

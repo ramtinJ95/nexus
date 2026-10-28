@@ -1,0 +1,15 @@
+✔ a thread with the drive tools starts children up to the cap, and an archived child gives its place back
+✔ two starts at once for a parent's last place start one thread
+✔ only a person's start gives a thread the drive tools, and a thread without them starts, sends and watches nothing
+✔ a nexus_start repeated under its request ID answers the same child and sends its brief once, from the parent
+✔ nexus_send marks its message as the sending thread's, and nexus_read reads a thread's children and conversation
+✔ each watch sends its waiter one message once its condition holds of the watched thread, and not before
+✔ a watch whose message could not be sent sends what fired on a later pass, though the condition stopped holding
+✔ a review that had ended before the watch started does not end it, and a waiter's watches are capped
+✔ the drive tools answer while the thread's pylon is paused, where bash cannot run
+✔ a control plane killed mid nexus_start, after the child's row was written, starts no second thread
+✔ a watch whose message was sent just before the control plane was killed delivers once
+ℹ tests 16
+ℹ pass 16
+ℹ fail 0
+ℹ cancelled 0

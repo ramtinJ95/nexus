@@ -1,0 +1,3 @@
+$ nexus send <thread 2> "tool: nexus_read {\"thread\":\"<thread 3>\"}"
+Sent to <thread 2>.
+[exit 0]

@@ -1,0 +1,12 @@
+$ nexus show <thread 3>
+<thread 3>  Build 1
+project: scratch
+started by thread <thread 2>, with nexus_start
+attention: reply
+status: active
+pylon: pylon-<thread 3> on node-a, running, observed <time> ago
+size: 1 CPUs, 1 GiB memory, 1 GiB disk
+placement: node-a, the project's default node
+setup: fresh boot runs .nexus/setup, because the project is scratch, so it has no template
+PR watch: off (no control-plane GitHub token configured)
+[exit 0]

@@ -1,0 +1,6 @@
+$ nexus conversation <thread 3>
+> From thread <thread 2> "Plan", which started this thread with nexus_start:
+> 
+> Build 1: say hello and stop.
+
+scripted answer after user

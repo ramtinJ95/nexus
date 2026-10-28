@@ -1,0 +1,14 @@
+$ nexus conversation <thread 2>
+> tool: nexus_start {"project":"scratch","title":"Build 1","brief":"Build 1: say hello and stop.","agent":"nexus"}
+
+[tool] nexus_start {"project":"scratch","title":"Build 1","brief":"Build 1: say hello and stop.","agent":"nexus"}
+
+[result] nexus_start: {
+  "id": "<thread 3>",
+  "title": "Build 1",
+  "project": "scratch",
+  "status": "active",
+  "agent": "nexus"
+}
+
+scripted answer after toolResult

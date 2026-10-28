@@ -1,0 +1,37 @@
+nexus --version -> exit 0 (01-version.txt)
+nexus project add scratch --scratch --node node-a --cpus 1 --memory 1 --disk 1 -> exit 0 (02-project-add.txt)
+== a thread started without --drive calls nexus_start
+nexus start --project scratch --title Plain --message tool: nexus_start {"project":"scratch","title":"Build 0","brief":"Build 0: say hello and stop.","agent":"nexus"} --json -> exit 0 (03-start-plain.txt)
+backend: booted pylon-<thread 1>
+conversation of <thread 1> (04-plain-conversation.txt)
+== a planning thread started with --drive starts builders, up to 3 live ones
+backend: booted pylon-<thread 2>
+nexus start --project scratch --title Plan --drive --message tool: nexus_start {"project":"scratch","title":"Build 1","brief":"Build 1: say hello and stop.","agent":"nexus"} --json -> exit 0 (05-start-planner.txt)
+backend: booted pylon-<thread 3>
+conversation of <thread 2> (06-planner-after-first-start.txt)
+nexus send <thread 2> tool: nexus_start {"project":"scratch","title":"Build 2","brief":"Build 2: say hello and stop.","agent":"nexus"} -> exit 0 (07-send-start-2.txt)
+backend: booted pylon-<thread 4>
+conversation of <thread 2> (08-planner-after-start-2.txt)
+nexus send <thread 2> tool: nexus_start {"project":"scratch","title":"Build 3","brief":"Build 3: say hello and stop.","agent":"nexus"} -> exit 0 (09-send-start-3.txt)
+backend: booted pylon-<thread 5>
+conversation of <thread 2> (10-planner-after-start-3.txt)
+nexus send <thread 2> tool: nexus_start {"project":"scratch","title":"Build 4","brief":"Build 4: say hello and stop.","agent":"nexus"} -> exit 0 (11-send-start-4.txt)
+conversation of <thread 2> (12-planner-after-start-4.txt)
+nexus threads -> exit 0 (13-threads.txt)
+nexus show <thread 2> -> exit 0 (14-show-planner.txt)
+nexus show <thread 3> -> exit 0 (15-show-builder.txt)
+conversation of <thread 3> (16-builder-conversation.txt)
+== a builder has no drive tools, so it starts no thread of its own
+nexus send <thread 3> tool: nexus_start {"project":"scratch","title":"Grandchild","brief":"Grandchild: say hello and stop.","agent":"nexus"} -> exit 0 (17-builder-tries-start.txt)
+conversation of <thread 3> (18-builder-after-try.txt)
+== the planner reads its builder and watches it
+nexus send <thread 2> tool: nexus_read {"thread":"<thread 3>"} -> exit 0 (19-send-read.txt)
+conversation of <thread 2> (20-planner-after-read.txt)
+nexus send <thread 2> tool: nexus_wait {"thread":"<thread 3>","until":"turn-ended"} -> exit 0 (21-send-wait.txt)
+conversation of <thread 2> (22-planner-after-wait.txt)
+control plane restarted, with the watch pending
+nexus send <thread 3> Again. -> exit 0 (23-builder-next-turn.txt)
+conversation of <thread 3> (24-builder-after-next-turn.txt)
+conversation of <thread 2> (25-planner-after-watch.txt)
+control plane restarted after the watch's message; waiting two watch passes
+the planner holds 1 watch message(s) after the second restart

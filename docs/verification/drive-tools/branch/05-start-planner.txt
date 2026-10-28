@@ -1,0 +1,27 @@
+$ nexus start --project scratch --title Plan --drive --message "tool: nexus_start {\"project\":\"scratch\",\"title\":\"Build 1\",\"brief\":\"Build 1: say hello and stop.\",\"agent\":\"nexus\"}" --json
+{
+  "id": "<thread 2>",
+  "title": "Plan",
+  "project": "scratch",
+  "pylonId": "pylon-<thread 2>",
+  "status": "active",
+  "conversationId": "18",
+  "startedBy": "nVERIFYCONTROL",
+  "createdAt": <time>,
+  "agentTurnRunning": false,
+  "working": false,
+  "lastAgentActivityAt": <time>,
+  "lastHumanActivityAt": <time>,
+  "seenAt": null,
+  "lastReplyAt": null,
+  "placement": {
+    "how": "default",
+    "node": "node-a"
+  },
+  "setup": {
+    "how": "fresh",
+    "reason": "the project is scratch, so it has no template"
+  },
+  "drive": true
+}
+[exit 0]
