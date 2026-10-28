@@ -9,7 +9,7 @@
  * question with an ID that exists asks nothing. So a pass reads every reply of a thread whose turn ended since its last
  * read, and a block read twice, or a pass cut short by a restart, makes each card once.
  *
- * The person learns of the format only through the thread: the control plane puts the guide, with the token, in front
+ * The thread learns of the format only from its messages: the control plane puts the guide, with the token, in front
  * of the thread's first message, and what the person answered since in front of each later one. What each message got
  * is stored under its request ID before it is sent, so a resend of the ID sends the same text.
  */
@@ -73,7 +73,7 @@ export function planBlocks(replies: readonly string[], token: string): Proposal[
 
 /** The index is padded, so the cards of one block, asked together, list in the block's order. */
 export const proposalId = (thread: ThreadId, p: Pick<Proposal, "block" | "index">) => `plan:${thread}:${p.block}:${String(p.index).padStart(2, "0")}`;
-/** The item an accepted proposal became. Made from the question, so the answer that adds it can only add it once. */
+/** The item an accepted proposal became. Made from the question, so the thread can be told it without a stored link. */
 export const proposalItem = (question: string) => `it-${createHash("sha256").update(question).digest("hex").slice(0, 12)}` as ItemId;
 
 export function proposalQuestion(t: Thread, p: Proposal, siblings: readonly Proposal[], askedAt: number): Omit<Question, "answer"> {
