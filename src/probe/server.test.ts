@@ -462,6 +462,25 @@ test("a broken pylon's log tail and a failed job's log leave the node with the v
   assert.deepEqual(status.state === "failed" && [status.message, status.logTail], ["setup failed with [redacted]", redactedLog]);
 });
 
+test("node health is the control plane's to read, read-only, with the backend's storage and its pylons' processes", { skip: process.platform !== "linux" && "node health reads Linux's /proc" }, async (t) => {
+  const storage = await mkdtemp(join(tmpdir(), "nexus-storage-"));
+  t.after(() => rm(storage, { recursive: true, force: true }));
+  const backend: VmBackend = { ...fakeBackend().backend, storage, processes: async () => [{ pylonId, pid: process.pid }] };
+  const { base, client, callAs } = await setup(t, { backend });
+  const health = await client.health();
+  assert.equal(health.node, node);
+  assert.equal(health.disk.path, storage);
+  assert.ok(health.load !== null && health.memory !== null && health.memory.availableGiB <= health.memory.totalGiB);
+  assert.equal(health.pylons?.length, 1);
+  assert.deepEqual([health.pylons![0]!.pylonId, health.pylons![0]!.processes >= 1, health.pylons![0]!.residentGiB > 0], [pylonId, true, true], "this test's own process stands in for a controller");
+  for (const method of ["POST", "PUT", "DELETE"]) assert.equal((await fetch(`${base}/v1/node-health`, { method })).status, 405, `${method} changes nothing`);
+  callAs(peer);
+  assert.equal((await fetch(`${base}/v1/node-health`)).status, 403, "a peer probe may not read it");
+  delete backend.processes;
+  callAs(controlPlane);
+  assert.equal((await client.health()).pylons, null, "a backend that cannot name its pylons' processes");
+});
+
 test("a held secret from the control plane is held, applied to the running pylons, and then reported as one the node holds", async (t) => {
   const secrets = nodeSecrets({ value: () => undefined, names: () => [] });
   const logged: string[] = [];

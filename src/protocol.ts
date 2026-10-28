@@ -373,7 +373,30 @@ export interface ProbeClient {
   manifest(artifact: PortableArtifactId): Promise<ArtifactManifest | null>;
   /** PUT /v1/secrets/{name}: the current value of one of heldSecrets. The probe holds it in memory and applies it to its running pylons. */
   putSecret(name: string, value: string): Promise<void>;
+  /** GET /v1/node-health: the node's host as the probe reads it now. It answers after sampling its pylons' CPU for a second. */
+  health(): Promise<NodeHealth>;
 }
+
+/**
+ * A node's host, read when asked. A reading is null where the host does not expose it, such as temperatures in a VM, or
+ * load and memory on a host without Linux's /proc. `disk` is the filesystem the backend keeps its pylons' disks on.
+ * `pylons` lists each running pylon's processes, its controller and what it started, such as QEMU, with the percent of
+ * one CPU they used over the sample and their resident memory. It is null from a backend that cannot name them.
+ */
+export interface NodeHealth {
+  node: NodeName;
+  readAt: string;
+  cpus: number;
+  load: { one: number; five: number; fifteen: number } | null;
+  memory: { totalGiB: number; availableGiB: number; swapTotalGiB: number; swapFreeGiB: number } | null;
+  disk: { path: string; totalGiB: number; freeGiB: number };
+  temperatures: readonly { sensor: string; celsius: number }[] | null;
+  pylons: readonly { pylonId: PylonId; processes: number; cpuPercent: number; residentGiB: number }[] | null;
+}
+const nodeHealthSchema = z.looseObject({
+  node: named<NodeName>(), readAt: unchecked<string>(), cpus: unchecked<number>(), load: unchecked<NodeHealth["load"]>(), memory: unchecked<NodeHealth["memory"]>(),
+  disk: unchecked<NodeHealth["disk"]>(), temperatures: unchecked<NodeHealth["temperatures"]>(), pylons: unchecked<NodeHealth["pylons"]>(),
+}) satisfies z.ZodType<NodeHealth>;
 
 /** The secrets whose values the control plane holds and hands to every probe, which no node's secret file may set. */
 export const heldSecrets: readonly string[] = [chatgptTokenGrant.name];
@@ -471,6 +494,11 @@ export function connectProbe(node: NodeName, tailnetHost: string, expected: Tail
       if (res.status !== 200) throw new Error(`${node}: POST ${path}: HTTP ${res.status}: ${res.body}`);
       return parseCommandResult(command, res.body);
     },
+    async health() {
+      const res = await call("GET", "/v1/node-health");
+      if (res.status !== 200) throw new Error(`${node}: GET /v1/node-health: HTTP ${res.status}: ${res.body}`);
+      return parseJson(asSent(nodeHealthSchema), res.body, "health");
+    },
     async putSecret(name, value) {
       const path = `/v1/secrets/${encodeURIComponent(name)}`;
       const res = await call("PUT", path, value, requestTimeoutMs, "text/plain; charset=utf-8");
@@ -566,6 +594,7 @@ export const routeAuth = {
   "/v1/pylons": "control-plane",
   "/v1/manifests": "control-plane",
   "/v1/secrets": "control-plane",
+  "/v1/node-health": "control-plane",
   "/v1/artifacts": "peer-probe", // checkpoints hold the pylon's logins, so only the other probe may read them
 } as const satisfies Record<string, CallerRole>;
 

@@ -282,6 +282,15 @@ test("a pylon whose controller failed carries its controller log's last 60 lines
   assert.equal((await backend.list()).find((p) => p.pylonId === "pylon-failed")!.logTail, "", "a controller that left no log");
 });
 
+test("a pylon's process is its controller while it lives, and node health reads disk free where the instances are", async () => {
+  const { backend, instances, stateRoot } = await backendWith();
+  await writeFile(join(await leftInstance(instances, "pylon-up", "running"), "controller.pid"), JSON.stringify(await identityOf(process.pid)));
+  await writeFile(join(await leftInstance(instances, "pylon-dead", "running"), "controller.pid"), JSON.stringify({ ...(await identityOf(process.pid))!, start: "1" }));
+  await leftInstance(instances, "pylon-paused", "stopped");
+  assert.deepEqual(await backend.processes!(), [{ pylonId: "pylon-up", pid: process.pid }], "a PID handed out again is no controller");
+  assert.equal(backend.storage, stateRoot);
+});
+
 test("a pylon whose controller has yet to publish its PID is booting while its launcher lives, and broken after", async () => {
   const { backend, instances } = await backendWith();
   const dir = await leftInstance(instances, "pylon-launching", "starting");

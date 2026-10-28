@@ -52,6 +52,10 @@ export interface VmBackend {
   readonly eventJournal?: string;
   /** Its end of NEXUS_API, which the in-pylon `nexus` CLI calls. Omitted: those calls go unanswered. */
   readonly hostBridge?: HostBridge;
+  /** The directory it keeps pylon disks in, whose filesystem's free space the node reports. Omitted: `/`. */
+  readonly storage?: string;
+  /** The process each running pylon runs under on the host. Omitted: a backend that cannot name them. */
+  processes?(): Promise<readonly { pylonId: PylonId; pid: number }[]>;
 }
 
 export interface BackendPylon {

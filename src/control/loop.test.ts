@@ -192,6 +192,7 @@ function fakeNode(options: { autoFinish: boolean; node?: NodeName; reportsRoutes
     command: () => Promise.reject(new Error("unused")),
     stream: () => Promise.reject(new Error("unused")),
     manifest: () => Promise.reject(new Error("unused")),
+    health: () => Promise.reject(new Error("unused")),
     async putSecret(name) {
       if (!reachable) throw Object.assign(new Error("probe unreachable"), { code: "unreachable" });
       if (!heldSecrets?.includes(name)) throw new Error(`${name} is not a secret the control plane hands over`);
