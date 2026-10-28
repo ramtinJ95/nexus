@@ -112,6 +112,8 @@ On every observation and every 5 seconds, the control plane's planner compares e
 
 `pr_watches` stores one JSON record per thread in the control-plane registry. `links` holds each GitHub PR snapshot (`repo`, `number`, `title`, `url`, `state`, `checks`, `review`, `conflict`), the event IDs already consumed, and whether a reported failure still awaits recovery. `commentWakes` counts consecutive comment-only messages across that thread's PRs. Only feedback with GitHub `author_association` `OWNER`, `MEMBER` or `COLLABORATOR` enters the event cursor or this count; PR authors have no exemption. `pending` holds a durable request ID and message until the harness admits it, or until it is typed into a Claude worker's session; `error` holds a credential-free retry notice. These records survive archive and process restart. Rediscovery changes a reopened link from `closed` to `open` without resetting its event cursor, pending recovery or the thread's comment-wake count. ETags and response bodies are an in-memory, per-resource cache and need not survive restart.
 
+The save that first stores a PR read from GitHub appends a `pull-request.linked` event in the same transaction, so a follower hears of each PR once, and a crash cannot keep one without the other. A placeholder the watch has not read yet, with an empty `url`, fires nothing, and neither does a later change of state, a reopen or new feedback.
+
 A linked PR contributes an `Output` with `kind: "pull-request"` and `ref` equal to its GitHub URL. `ThreadDetail.pullRequests` supplies its structured metadata. GitHub, not a probe or checkout, owns that metadata. The optional control-plane GitHub token is an exception to the node-only tool-secret rule: it is read from a separate protected file and used only for GitHub reads and a landing's merge, never sent to a pylon.
 
 ## Review records
@@ -244,6 +246,7 @@ past matching records they have not consumed.
 | `thread.parked` | The harness has parked tasks |
 | `attention.changed` | The new nullable `attention` |
 | `pull-request.feedback` | New batched GitHub feedback; `requestId` |
+| `pull-request.linked` | The PR watch linked a pull request to the thread, written once per pull request when the watch first saves it read from GitHub; `repo`, `number`, `url`, `title` and `state` |
 | `release.changed` | Desired release (`desired`) or changed component report |
 | `review.changed` | A review started or changed phase or round; `review`, `reviewer`, `phase` and `round` |
 | `usage-limit.continued` | The control plane typed its continue into a Claude worker whose usage limit reset; `session`, `stoppedAt`, `resetsAt` and `requestId` |
