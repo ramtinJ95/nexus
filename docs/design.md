@@ -74,7 +74,6 @@ Every start reserves the room it placed its pylon in, whichever way the node was
 
 A scheduler that places work on its own still needs:
 
-- The model tools' `start`, which an agent would use to start another thread, does not exist yet. A thread such a tool starts without a node would follow its project's default, which may be `auto`.
 - A move job. A pylon stays on the node it booted on, so a node that fills up stays full until its threads are deleted. [The lifecycle](#lifecycle-follows-amp) describes how a move could copy a stopped pylon's disk, and spike S7 showed that copying checkpoints needs verifying.
 
 ## Node diagnostics
