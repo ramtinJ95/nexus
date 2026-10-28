@@ -20,7 +20,8 @@ The control plane writes every record. Probes send facts in observations, and th
 | Preview | `pylon`, `service`, `httpsPort` | The control plane allocates the port, never one its node's probe still routes. Observations report when it is ready |
 | Output | `thread`, `kind`, `ref` | Observations, including outputs the agent declares with `nexus output add` |
 | NexusEvent | `id`, `time`, `thread`, `project`, `kind`, `payload` | Accepted pylon lifecycle reports and control-plane changes |
-| Question | `id`, `thread`, `text`, `options`, `reserved`, `answerer`, `askedAt`, `answer` | Whatever asks the person, which nothing does yet, and the person's answer. [Question records](#question-records) describes it |
+| Question | `id`, `thread`, `text`, `options`, `reserved`, `answerer`, `askedAt`, `answer` | A failure judgment that leaves its failure to the person, and the person's answer. [Question records](#question-records) describes it |
+| Judgment | `failure`, `thread`, `node`, `failed`, `startedAt`, `request`, `conversation`, `reply`, `phase` | The judgment pass, for a builder's failed pylon. [Judgment records](#judgment-records) describes it |
 | Orphan | `node`, `pylonId` | Observations of a pylon the registry does not know. Only you delete it |
 | Usage record | `id`, `thread`, `project`, `role`, `agent`, `model`, `at`, `input`, `output`, `cacheWrite`, `cacheRead` | Reads of the harness and of the agents' transcripts in each pylon. [Token usage records](#token-usage-records) describes it |
 
@@ -146,6 +147,19 @@ A node's latest observation has `nestedVirtualization: true` from a probe whose 
 ## Nudge records
 
 `nudges` stores what the nudge pass in `src/control/nudge.ts` knows of a builder that stopped short of a pull request, one JSON record per thread. `{ "state": "nudged", "turn", "count" }` says the latest nudge answered the turn that ended at `turn` (the thread's `lastReplyAt` then), and `count` nudges went out in a row. `{ "state": "sending", "turn", "count" }` is that nudge saved before it is sent, so a pass after a crash sends it again under its own request ID before it judges a later turn, and a crash never costs the count. `{ "state": "person", "turn" }` says the turn after the second nudge stalled too, which makes the thread's attention `decision`. `{ "state": "opened", "turn" }` says GitHub found a pull request on the thread's branches after that turn, which the PR watch had not linked, as it does not one that merged or closed before it saw it open, so the pass does not search again until another turn ends. `{ "state": "left-alone" }` says the person sent the thread a message after its first reply, and is kept for good, since the transcript that showed the message may later drop it. The pass deletes any other record once the thread has a pull request or a review, or is archived or deleted. [Nudging a builder that stopped short](design.md#nudging-a-builder-that-stopped-short) has the rule.
+
+## Judgment records
+
+`judgments` stores one JSON record per judged failure, keyed by `failure`, the ID of the `thread.failed` event that the pylon's failure appended, with its thread in a column. `Judgment` in `src/control/judgment.ts` is the shape, and `JudgmentView` is the API's view, which `ThreadDetail.judgments` serves oldest failure first.
+
+- `node` is where the pylon failed, `failed` the failure's reason as the registry held it, and `startedAt` when the judgment started.
+- `request` is the brief and the token its answer echoes, saved before the brief is sent, or null when the control plane decided without a judgment because the thread's retries were spent.
+- `conversation` is the judgment's harness conversation, null until it is created. `reply` is the judgment's reply, its last 8,000 characters, once read.
+- `phase` is `{ "kind": "judging", "deadline" }`, with `deadline` null until the brief is sent and then when the answer is due, `{ "kind": "acting", "verdict" }`, saved before the control plane acts, `{ "kind": "asked", "verdict" }`, while question `judgment:<failure>` waits for the person, or `{ "kind": "done", "verdict", "outcome" }`.
+- A `verdict` is `{ answer, why, by }`: the answer `retry`, `retry-elsewhere` or `person`, why, and `by` `judgment` or `control plane`, for the control plane's own rule.
+- An `outcome` is `{ "kind": "retried", node, on }`, `{ "kind": "moved", from, to, on }`, with `on` `verdict` or `answer`, the person's, or `{ "kind": "left", why }`. A retry or a move on the verdict counts against the thread's two retries.
+
+A save replaces the stored record only when it is still the record the pass read, in the transaction that runs the action it records. `judgment_since` holds one row, the newest event's ID when the migration that adds `judgments` ran, and no failure at or below it is judged.
 
 ## Queued thread records
 
