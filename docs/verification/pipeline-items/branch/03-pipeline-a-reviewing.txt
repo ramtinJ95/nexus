@@ -1,0 +1,19 @@
+GET /pipeline
+Pipeline
+wave
+Each item becomes a queued thread on its own once the items it is after are queued.
+Item	Phase	After	Thread	
+
+A: greet by name
+it-f943645e7be3	
+reviewing
+PR #1 is open, before its review
+	nothing	A: greet by name	
+
+B: greet in French, after A
+it-6c9b088757fe	
+queued
+waits for A: greet by name: PR #1 is open
+	
+A: greet by name
+	B: greet in French, after A	

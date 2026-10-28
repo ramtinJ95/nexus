@@ -1,0 +1,19 @@
+GET /pipeline
+Pipeline
+wave
+Each item becomes a queued thread on its own once the items it is after are queued.
+Item	Phase	After	Thread	
+
+A: greet by name
+it-f943645e7be3	
+landed
+PR #1 merged
+	nothing	A: greet by name	
+
+B: greet in French, after A
+it-6c9b088757fe	
+building
+no pull request yet
+	
+A: greet by name
+	B: greet in French, after A	

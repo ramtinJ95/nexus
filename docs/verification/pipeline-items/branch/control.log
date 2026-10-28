@@ -1,0 +1,115 @@
++   0.9s control: nexus control plane: API on 127.0.0.1:7470, following node-a
++   3.6s control: latest-turn snapshot failed: node-a: GET /v1/pylons/pylon-th-8726dcaf924c/stream?request=%7B%22argv%22%3A%5B%22python3%22%2C%22-%22%2C%22%2Fhome%2Fuser%2Fworkspace%2Frepo%22%2C%22snapshot%22%2C%22input%3A10%22%5D%7D: HTTP 502: the stand-in guest runs only the pi-env daemon, not python3 - /home/user/workspace/repo snapshot input:10
++   6.9s control: nexus control plane: API on 127.0.0.1:7470, following node-a
++   6.9s control: th-8726dcaf924c/pylon: reading token usage failed, so the counts keep what was read before: node-a: GET /v1/pylons/pylon-th-8726dcaf924c/stream?request=%7B%22argv%22%3A%5B%22python3%22%2C%22-c%22%2C%22%5C%22%5C%22%5C%22Reads%20the%20model%20calls%20agents%20in%20this%20pylon%20recorded%2C%20from%20where%20the%20last%20read%20of%20each%20transcript%20stopped.%5Cn%5CnTakes%20%7B%5C%22claude%5C%22%3A%20dir%2C%20%5C%22pi%5C%22%3A%20dir%2C%20%5C%22offsets%5C%22%3A%20%7Bpath%3A%20%5Boffset%2C%20before%5D%7D%2C%20%5C%22limit%5C%22%3A%20bytes%7D%20on%20stdin%2C%20where%20%60before%60%20is%20the%5CnSHA-256%20of%20the%20up%20to%204%20KiB%20just%20before%20the%20offset.%20Every%20*.jsonl%20under%20the%20Claude%20dir%20is%20a%20Claude%20Code%20transcript%2C%20a%5Cnsubagent's%20included%2C%20and%20every%20one%20under%20the%20pi%20dir%20a%20pi%20session.%20Prints%20one%20JSON%20line%20per%20call%2C%20then%5Cn%7B%5C%22offsets%5C%22%3A%20%7B...%7D%2C%20%5C%22more%5C%22%3A%20bool%7D%20with%20each%20file%20read%20further.%20A%20file%20shorter%20than%20its%20offset%2C%20or%20whose%20bytes%20before%5Cnit%20no%20longer%20hash%20to%20%60before%60%2C%20was%20replaced%2C%20so%20it%20is%20read%20from%20the%20start.%20Only%20whole%20lines%20are%20read.%20Once%20the%20calls%5Cnprinted%20pass%20%60limit%60%20bytes%2C%20the%20files%20left%20keep%20their%20offsets%20and%20%60more%60%20is%20true.%5Cn%5C%22%5C%22%5C%22%5Cnimport%20hashlib%5Cnimport%20json%5Cnimport%20os%5Cnimport%20sys%5Cnfrom%20datetime%20import%20datetime%5Cn%5Cnstate%20%3D%20json.load(sys.stdin)%5Cnoffsets%20%3D%20state%5B%5C%22offsets%5C%22%5D%5Cnlimit%20%3D%20state%5B%5C%22limit%5C%22%5D%5Cncalls%20%3D%20%7B%7D%5Cnmoved%20%3D%20%7B%7D%5Cnprinted%20%3D%200%5Cn%5Cn%5Cndef%20count(value)%3A%5Cn%20%20%20%20return%20value%20if%20type(value)%20is%20int%20and%20value%20%3E%3D%200%20else%200%5Cn%5Cn%5Cndef%20millis(stamp)%3A%5Cn%20%20%20%20try%3A%5Cn%20%20%20%20%20%20%20%20return%20int(datetime.fromisoformat(stamp.replace(%5C%22Z%5C%22%2C%20%5C%22%2B00%3A00%5C%22)).timestamp()%20*%201000)%5Cn%20%20%20%20except%20(AttributeError%2C%20ValueError)%3A%5Cn%20%20%20%20%20%20%20%20return%20None%5Cn%5Cn%5Cndef%20add(call_id%2C%20agent%2C%20model%2C%20at%2C%20tokens)%3A%5Cn%20%20%20%20global%20printed%5Cn%20%20%20%20if%20not%20isinstance(call_id%2C%20str)%20or%20not%20isinstance(model%2C%20str)%20or%20model%20%3D%3D%20%5C%22%3Csynthetic%3E%5C%22%20or%20at%20is%20None%20or%20sum(tokens)%20%3D%3D%200%3A%5Cn%20%20%20%20%20%20%20%20return%5Cn%20%20%20%20seen%20%3D%20calls.get(call_id)%5Cn%20%20%20%20if%20seen%20is%20None%3A%5Cn%20%20%20%20%20%20%20%20printed%20%2B%3D%20len(call_id)%20%2B%20len(model)%20%2B%20120%5Cn%20%20%20%20%20%20%20%20calls%5Bcall_id%5D%20%3D%20%5Bagent%2C%20model%2C%20at%2C%20*tokens%5D%5Cn%20%20%20%20else%3A%5Cn%20%20%20%20%20%20%20%20seen%5B3%3A%5D%20%3D%20%5Bmax(a%2C%20b)%20for%20a%2C%20b%20in%20zip(seen%5B3%3A%5D%2C%20tokens)%5D%5Cn%5Cn%5Cndef%20claude(record)%3A%5Cn%20%20%20%20message%20%3D%20record.get(%5C%22message%5C%22)%5Cn%20%20%20%20if%20record.get(%5C%22type%5C%22)%20!%3D%20%5C%22assistant%5C%22%20or%20not%20isinstance(message%2C%20dict)%20or%20not%20isinstance(message.get(%5C%22usage%5C%22)%2C%20dict)%3A%5Cn%20%20%20%20%20%20%20%20return%5Cn%20%20%20%20u%20%3D%20message%5B%5C%22usage%5C%22%5D%5Cn%20%20%20%20tokens%20%3D%20%5Bcount(u.get(k))%20for%20k%20in%20(%5C%22input_tokens%5C%22%2C%20%5C%22output_tokens%5C%22%2C%20%5C%22cache_creation_input_tokens%5C%22%2C%20%5C%22cache_read_input_tokens%5C%22)%5D%5Cn%20%20%20%20add(f%5C%22claude%3A%7Bmessage.get('id')%7D%5C%22%20if%20isinstance(message.get(%5C%22id%5C%22)%2C%20str)%20else%20None%2C%20%5C%22claude%5C%22%2C%20message.get(%5C%22model%5C%22)%2C%20millis(record.get(%5C%22timestamp%5C%22))%2C%20tokens)%5Cn%5Cn%5Cndef%20pi(record)%3A%5Cn%20%20%20%20kind%20%3D%20record.get(%5C%22type%5C%22)%5Cn%20%20%20%20message%20%3D%20record.get(%5C%22message%5C%22)%20if%20kind%20%3D%3D%20%5C%22message%5C%22%20else%20record%5Cn%20%20%20%20if%20kind%20not%20in%20(%5C%22message%5C%22%2C%20%5C%22usage%5C%22)%20or%20not%20isinstance(message%2C%20dict)%20or%20not%20isinstance(message.get(%5C%22usage%5C%22)%2C%20dict)%3A%5Cn%20%20%20%20%20%20%20%20return%5Cn%20%20%20%20if%20kind%20%3D%3D%20%5C%22message%5C%22%20and%20message.get(%5C%22role%5C%22)%20!%3D%20%5C%22assistant%5C%22%3A%5Cn%20%20%20%20%20%20%20%20return%5Cn%20%20%20%20u%20%3D%20message%5B%5C%22usage%5C%22%5D%5Cn%20%20%20%20tokens%20%3D%20%5Bcount(u.get(k))%20for%20k%20in%20(%5C%22input%5C%22%2C%20%5C%22output%5C%22%2C%20%5C%22cacheWrite%5C%22%2C%20%5C%22cacheRead%5C%22)%5D%5Cn%20%20%20%20%23%20A%20fork%20copies%20entries%20with%20their%20IDs%20and%20times%20into%20a%20new%20session%2C%20so%20an%20entry's%20ID%20and%20time%20name%20its%20call.%5Cn%20%20%20%20response%20%3D%20message.get(%5C%22responseId%5C%22)%20if%20kind%20%3D%3D%20%5C%22message%5C%22%20else%20None%5Cn%20%20%20%20entry%2C%20stamp%20%3D%20record.get(%5C%22id%5C%22)%2C%20record.get(%5C%22timestamp%5C%22)%5Cn%20%20%20%20call_id%20%3D%20f%5C%22pi%3A%7Bresponse%7D%5C%22%20if%20isinstance(response%2C%20str)%20else%20f%5C%22pi%3A%7Bentry%7D%40%7Bstamp%7D%5C%22%20if%20isinstance(entry%2C%20str)%20and%20isinstance(stamp%2C%20str)%20else%20None%5Cn%20%20%20%20at%20%3D%20message.get(%5C%22timestamp%5C%22)%20if%20type(message.get(%5C%22timestamp%5C%22))%20is%20int%20else%20millis(record.get(%5C%22timestamp%5C%22))%5Cn%20%20%20%20add(call_id%2C%20%5C%22pi%5C%22%2C%20message.get(%5C%22model%5C%22)%2C%20at%2C%20tokens)%5Cn%5Cn%5Cndef%20before(f%2C%20offset)%3A%5Cn%20%20%20%20start%20%3D%20max(0%2C%20offset%20-%204096)%5Cn%20%20%20%20f.seek(start)%5Cn%20%20%20%20return%20hashlib.sha256(f.read(offset%20-%20start)).hexdigest()%5Cn%5Cn%5Cndef%20read(path%2C%20parse)%3A%5Cn%20%20%20%20size%20%3D%20os.path.getsize(path)%5Cn%20%20%20%20start%2C%20hashed%20%3D%20offsets.get(path%2C%20%5B0%2C%20None%5D)%5Cn%20%20%20%20with%20open(path%2C%20%5C%22rb%5C%22)%20as%20f%3A%5Cn%20%20%20%20%20%20%20%20if%20start%20%3E%20size%20or%20(start%20%3E%200%20and%20before(f%2C%20start)%20!%3D%20hashed)%3A%5Cn%20%20%20%20%20%20%20%20%20%20%20%20start%20%3D%200%5Cn%20%20%20%20%20%20%20%20f.seek(start)%5Cn%20%20%20%20%20%20%20%20position%20%3D%20start%5Cn%20%20%20%20%20%20%20%20for%20line%20in%20f%3A%5Cn%20%20%20%20%20%20%20%20%20%20%20%20if%20not%20line.endswith(b%5C%22%5C%5Cn%5C%22)%20or%20printed%20%3E%20limit%3A%5Cn%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20break%5Cn%20%20%20%20%20%20%20%20%20%20%20%20position%20%2B%3D%20len(line)%5Cn%20%20%20%20%20%20%20%20%20%20%20%20try%3A%5Cn%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20record%20%3D%20json.loads(line)%5Cn%20%20%20%20%20%20%20%20%20%20%20%20except%20ValueError%3A%5Cn%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20continue%5Cn%20%20%20%20%20%20%20%20%20%20%20%20if%20isinstance(record%2C%20dict)%3A%5Cn%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20parse(record)%5Cn%20%20%20%20%20%20%20%20if%20position%20!%3D%20offsets.get(path%2C%20%5BNone%5D)%5B0%5D%3A%5Cn%20%20%20%20%20%20%20%20%20%20%20%20moved%5Bpath%5D%20%3D%20%5Bposition%2C%20before(f%2C%20position)%5D%5Cn%5Cn%5Cnfor%20root%2C%20parse%20in%20((state%5B%5C%22claude%5C%22%5D%2C%20claude)%2C%20(state%5B%5C%22pi%5C%22%5D%2C%20pi))%3A%5Cn%20%20%20%20for%20directory%2C%20_%2C%20files%20in%20sorted(os.walk(root))%3A%5Cn%20%20%20%20%20%20%20%20for%20name%20in%20sorted(files)%3A%5Cn%20%20%20%20%20%20%20%20%20%20%20%20if%20name.endswith(%5C%22.jsonl%5C%22)%20and%20printed%20%3C%3D%20limit%3A%5Cn%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20read(os.path.join(directory%2C%20name)%2C%20parse)%5Cn%5Cnout%20%3D%20sys.stdout%5Cnfor%20call_id%2C%20(agent%2C%20model%2C%20at%2C%20*tokens)%20in%20calls.items()%3A%5Cn%20%20%20%20out.write(json.dumps(%7B%5C%22id%5C%22%3A%20call_id%2C%20%5C%22agent%5C%22%3A%20agent%2C%20%5C%22model%5C%22%3A%20model%2C%20%5C%22at%5C%22%3A%20at%2C%20%5C%22input%5C%22%3A%20tokens%5B0%5D%2C%20%5C%22output%5C%22%3A%20tokens%5B1%5D%2C%20%5C%22cacheWrite%5C%22%3A%20tokens%5B2%5D%2C%20%5C%22cacheRead%5C%22%3A%20tokens%5B3%5D%7D)%20%2B%20%5C%22%5C%5Cn%5C%22)%5Cnout.write(json.dumps(%7B%5C%22offsets%5C%22%3A%20moved%2C%20%5C%22more%5C%22%3A%20printed%20%3E%20limit%7D)%20%2B%20%5C%22%5C%5Cn%5C%22)%5Cn%22%5D%7D: HTTP 502: the stand-in guest runs only the pi-env daemon, not python3 -c """Reads the model calls agents in this pylon recorded, from where the last read of each transcript stopped.
+
+Takes {"claude": dir, "pi": dir, "offsets": {path: [offset, before]}, "limit": bytes} on stdin, where `before` is the
+SHA-256 of the up to 4 KiB just before the offset. Every *.jsonl under the Claude dir is a Claude Code transcript, a
+subagent's included, and every one under the pi dir a pi session. Prints one JSON line per call, then
+{"offsets": {...}, "more": bool} with each file read further. A file shorter than its offset, or whose bytes before
+it no longer hash to `before`, was replaced, so it is read from the start. Only whole lines are read. Once the calls
+printed pass `limit` bytes, the files left keep their offsets and `more` is true.
+"""
+import hashlib
+import json
+import os
+import sys
+from datetime import datetime
+
+state = json.load(sys.stdin)
+offsets = state["offsets"]
+limit = state["limit"]
+calls = {}
+moved = {}
+printed = 0
+
+
+def count(value):
+    return value if type(value) is int and value >= 0 else 0
+
+
+def millis(stamp):
+    try:
+        return int(datetime.fromisoformat(stamp.replace("Z", "+00:00")).timestamp() * 1000)
+    except (AttributeError, ValueError):
+        return None
+
+
+def add(call_id, agent, model, at, tokens):
+    global printed
+    if not isinstance(call_id, str) or not isinstance(model, str) or model == "<synthetic>" or at is None or sum(tokens) == 0:
+        return
+    seen = calls.get(call_id)
+    if seen is None:
+        printed += len(call_id) + len(model) + 120
+        calls[call_id] = [agent, model, at, *tokens]
+    else:
+        seen[3:] = [max(a, b) for a, b in zip(seen[3:], tokens)]
+
+
+def claude(record):
+    message = record.get("message")
+    if record.get("type") != "assistant" or not isinstance(message, dict) or not isinstance(message.get("usage"), dict):
+        return
+    u = message["usage"]
+    tokens = [count(u.get(k)) for k in ("input_tokens", "output_tokens", "cache_creation_input_tokens", "cache_read_input_tokens")]
+    add(f"claude:{message.get('id')}" if isinstance(message.get("id"), str) else None, "claude", message.get("model"), millis(record.get("timestamp")), tokens)
+
+
+def pi(record):
+    kind = record.get("type")
+    message = record.get("message") if kind == "message" else record
+    if kind not in ("message", "usage") or not isinstance(message, dict) or not isinstance(message.get("usage"), dict):
+        return
+    if kind == "message" and message.get("role") != "assistant":
+        return
+    u = message["usage"]
+    tokens = [count(u.get(k)) for k in ("input", "output", "cacheWrite", "cacheRead")]
+    # A fork copies entries with their IDs and times into a new session, so an entry's ID and time name its call.
+    response = message.get("responseId") if kind == "message" else None
+    entry, stamp = record.get("id"), record.get("timestamp")
+    call_id = f"pi:{response}" if isinstance(response, str) else f"pi:{entry}@{stamp}" if isinstance(entry, str) and isinstance(stamp, str) else None
+    at = message.get("timestamp") if type(message.get("timestamp")) is int else millis(record.get("timestamp"))
+    add(call_id, "pi", message.get("model"), at, tokens)
+
+
+def before(f, offset):
+    start = max(0, offset - 4096)
+    f.seek(start)
+    return hashlib.sha256(f.read(offset - start)).hexdigest()
+
+
+def read(path, parse):
+    size = os.path.getsize(path)
+    start, hashed = offsets.get(path, [0, None])
+    with open(path, "rb") as f:
+        if start > size or (start > 0 and before(f, start) != hashed):
+            start = 0
+        f.seek(start)
+        position = start
+        for line in f:
+            if not line.endswith(b"\n") or printed > limit:
+                break
+            position += len(line)
+            try:
+                record = json.loads(line)
+            except ValueError:
+                continue
+            if isinstance(record, dict):
+                parse(record)
+        if position != offsets.get(path, [None])[0]:
+            moved[path] = [position, before(f, position)]
+
+
+for root, parse in ((state["claude"], claude), (state["pi"], pi)):
+    for directory, _, files in sorted(os.walk(root)):
+        for name in sorted(files):
+            if name.endswith(".jsonl") and printed <= limit:
+                read(os.path.join(directory, name), parse)
+
+out = sys.stdout
+for call_id, (agent, model, at, *tokens) in calls.items():
+    out.write(json.dumps({"id": call_id, "agent": agent, "model": model, "at": at, "input": tokens[0], "output": tokens[1], "cacheWrite": tokens[2], "cacheRead": tokens[3]}) + "\n")
+out.write(json.dumps({"offsets": moved, "more": printed > limit}) + "\n")
+
++ 247.2s control: latest-turn snapshot failed: node-a: GET /v1/pylons/pylon-th-cfb3227e9ca2/stream?request=%7B%22argv%22%3A%5B%22python3%22%2C%22-%22%2C%22%2Fhome%2Fuser%2Fworkspace%2Frepo%22%2C%22snapshot%22%2C%22input%3A23%22%5D%7D: HTTP 502: the stand-in guest runs only the pi-env daemon, not python3 - /home/user/workspace/repo snapshot input:23

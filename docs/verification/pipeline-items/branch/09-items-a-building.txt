@@ -1,0 +1,4 @@
+$ nexus items
+it-f943645e7be3  building  no pull request yet                                  th-8726dcaf924c  wave  0s ago  A: greet by name
+it-6c9b088757fe  queued    waits for A: greet by name: has no pull request yet  th-cfb3227e9ca2  wave  0s ago  B: greet in French, after A
+[exit 0]

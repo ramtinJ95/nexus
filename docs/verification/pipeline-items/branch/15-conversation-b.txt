@@ -1,0 +1,5 @@
+$ nexus conversation th-cfb3227e9ca2
+> B: greet in French, after A. Commit, push branch feat-b and open a pull request.
+
+scripted answer after user
+[exit 0]

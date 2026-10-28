@@ -1,0 +1,21 @@
+$ nexus item add --project wave --title "B: greet in French, after A" --message "B: greet in French, after A. Commit, push branch feat-b and open a pull request." --after it-f943645e7be3 --json
+{
+  "id": "it-6c9b088757fe",
+  "project": "wave",
+  "title": "B: greet in French, after A",
+  "addedBy": "nVERIFYCONTROL",
+  "addedAt": 1793178482964,
+  "after": [
+    "it-f943645e7be3"
+  ],
+  "worker": "harness",
+  "model": null,
+  "brief": "B: greet in French, after A. Commit, push branch feat-b and open a pull request.",
+  "thread": "th-cfb3227e9ca2",
+  "phase": {
+    "kind": "queued",
+    "why": "waits for A: greet by name: has no pull request yet"
+  },
+  "approved": null
+}
+[exit 0]

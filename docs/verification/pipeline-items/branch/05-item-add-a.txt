@@ -1,0 +1,19 @@
+$ nexus item add --project wave --title "A: greet by name" --message "A: greet by name. Commit, push branch feat-a and open a pull request." --json
+{
+  "id": "it-f943645e7be3",
+  "project": "wave",
+  "title": "A: greet by name",
+  "addedBy": "nVERIFYCONTROL",
+  "addedAt": 1793178482786,
+  "after": [],
+  "worker": "harness",
+  "model": null,
+  "brief": "A: greet by name. Commit, push branch feat-a and open a pull request.",
+  "thread": "th-8726dcaf924c",
+  "phase": {
+    "kind": "queued",
+    "why": "starts on the queue's next pass"
+  },
+  "approved": null
+}
+[exit 0]

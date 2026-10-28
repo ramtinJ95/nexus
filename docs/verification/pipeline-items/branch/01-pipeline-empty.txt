@@ -1,0 +1,6 @@
+GET /pipeline
+Pipeline
+wave
+Each item becomes a queued thread on its own once the items it is after are queued.
+
+No items. nexus item add --project wave lines one up.

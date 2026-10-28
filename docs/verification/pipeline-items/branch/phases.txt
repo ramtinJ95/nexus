@@ -1,0 +1,6 @@
++   3.9s A: greet by name: building: no pull request yet (thread th-8726dcaf924c)
++   3.9s B: greet in French, after A: queued: waits for A: greet by name: has no pull request yet (thread th-cfb3227e9ca2)
++ 127.9s A: greet by name: reviewing: PR #1 is open, before its review (thread th-8726dcaf924c)
++ 127.9s B: greet in French, after A: queued: waits for A: greet by name: PR #1 is open (thread th-cfb3227e9ca2)
++ 247.8s A: greet by name: landed: PR #1 merged (thread th-8726dcaf924c)
++ 247.8s B: greet in French, after A: building: no pull request yet (thread th-cfb3227e9ca2)

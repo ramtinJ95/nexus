@@ -1,0 +1,39 @@
++   0.2s checkout <repo>/src
++   0.9s control plane is up
++   1.0s nexus --version -> exit 0 (01-version.txt)
++   1.2s nexus project add wave git@github.com:verify/wave.git --node node-a --cpus 1 --memory 3 --disk 5 -> exit 0 (02-project-add.txt)
++   1.4s nexus project edit wave --pipeline start -> exit 0 (03-project-edit-pipeline.txt)
++   1.6s nexus projects -> exit 0 (04-projects.txt)
++   3.2s dashboard /pipeline -> 01-pipeline-empty.png
++   3.3s nexus item add --project wave --title A: greet by name --message A: greet by name. Commit, push branch feat-a and open a pull request. --json -> exit 0 (05-item-add-a.txt)
++   3.3s backend: booted pylon-th-8726dcaf924c
++   3.5s nexus item add --project wave --title B: greet in French, after A --message B: greet in French, after A. Commit, push branch feat-b and open a pull request. --after it-f943645e7be3 --json -> exit 0 (06-item-add-b.txt)
++   3.7s nexus items -> exit 0 (07-items-added.txt)
++   3.9s nexus item show it-6c9b088757fe -> exit 0 (08-item-show-b-added.txt)
++   4.1s A's thread started after 0.2 s: building, no pull request yet
++   4.3s nexus items -> exit 0 (09-items-a-building.txt)
++   4.5s nexus threads -> exit 0 (10-threads-a-building.txt)
++   6.0s dashboard /pipeline -> 02-pipeline-a-building.png
++   6.2s A's first message has its scripted answer after 0.2 s
++   6.4s nexus conversation th-8726dcaf924c -> exit 0 (11-conversation-a.txt)
++   6.4s A's thread th-8726dcaf924c pushed feat-a, and PR #1 opened
++   6.4s == restart: the control plane stops and starts again while B waits for A
++   6.9s control plane is up
++   7.1s nexus items -> exit 0 (12-items-after-restart.txt)
++ 128.0s A's PR is linked after 120.8 s: reviewing, PR #1 is open, before its review
++ 128.1s nexus item show it-f943645e7be3 -> exit 0 (13-item-show-a-reviewing.txt)
++ 128.3s nexus item show it-6c9b088757fe -> exit 0 (14-item-show-b-waiting.txt)
++ 129.9s dashboard /pipeline -> 03-pipeline-a-reviewing.png
++ 129.9s PR #1 (A) merged outside any review
++ 246.9s backend: booted pylon-th-cfb3227e9ca2
++ 247.8s A landed after 117.9 s: landed, PR #1 merged
++ 248.0s B's thread started after 0.2 s: building, no pull request yet
++ 248.2s B's first message has its scripted answer after 0.2 s
++ 248.3s nexus conversation th-cfb3227e9ca2 -> exit 0 (15-conversation-b.txt)
++ 248.5s nexus show th-cfb3227e9ca2 -> exit 0 (16-show-b-thread.txt)
++ 248.7s nexus items -> exit 0 (17-items-end.txt)
++ 248.9s nexus items --json -> exit 0 (18-items-end-json.txt)
++ 249.1s nexus threads --all -> exit 0 (19-threads-end.txt)
++ 250.7s dashboard /pipeline -> 04-pipeline-b-building.png
++ 252.2s dashboard / -> 05-home-end.png
++ 252.2s backend boots: A 1, B 1

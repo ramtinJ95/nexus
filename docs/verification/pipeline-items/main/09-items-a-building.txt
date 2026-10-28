@@ -1,0 +1,3 @@
+$ nexus items
+[stderr] nexus: unknown command items. Run nexus --help for usage
+[exit 64]

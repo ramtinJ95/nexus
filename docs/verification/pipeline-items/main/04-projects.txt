@@ -1,0 +1,3 @@
+$ nexus projects
+wave  node node-a  branch main  auto review off  git@github.com:verify/wave.git
+[exit 0]
