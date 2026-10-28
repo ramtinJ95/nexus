@@ -120,7 +120,7 @@ export type SubmitReply =
 // Observations: facts only. The control plane turns them into records.
 
 export interface NodeObservation {
-  events?: readonly ReportedEvent[];
+  events: readonly ReportedEvent[];
   node: NodeName;
   observedAt: string;
   /** A new value after every probe restart. It tells the control plane that in-memory job results are gone. */
@@ -918,7 +918,8 @@ function parsePylonObservation(value: unknown): OlderPylonObservation {
 }
 
 /** An observation as a probe older than some of its fields sent it, which the registry may still hold, or an upgraded one. */
-export type OlderObservation = Omit<NodeObservation, "capacity" | "previewRoutes" | "grants" | "heldSecrets" | "pylons"> & {
+export type OlderObservation = Omit<NodeObservation, "events" | "capacity" | "previewRoutes" | "grants" | "heldSecrets" | "pylons"> & {
+  events?: readonly ReportedEvent[];
   capacity: ReportedCapacity | null;
   previewRoutes?: readonly PreviewRouteFact[] | null;
   grants?: NodeObservation["grants"] | null;
@@ -936,6 +937,7 @@ type OlderSession = Omit<Extract<SessionFact, { state: "running" }>, "id" | "sta
 /**
  * The only place that reads an observation from an older probe, at parse and on every registry read. What such a probe
  * left out reads as what it meant:
+ * - No event backlog: none to replay.
  * - No preview routes: it routes none the registry does not know, so allocation goes by the registry alone, and a
  *   deleted pylon the node reports absent counts as gone.
  * - No grants, or no committed disk: it was from before pylons were counted, so its capacity is null, and placement
@@ -950,6 +952,7 @@ type OlderSession = Omit<Extract<SessionFact, { state: "running" }>, "id" | "sta
 export function upgradeObservation(o: OlderObservation): NodeObservation {
   return {
     ...o,
+    events: o.events ?? [],
     capacity: o.grants == null ? null : countedCapacity(o.capacity),
     previewRoutes: o.previewRoutes ?? [],
     grants: o.grants ?? { secrets: [], gitSsh: false },

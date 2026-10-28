@@ -71,7 +71,7 @@ function setup(t: TestContext) {
     /** One pass of the node's loop: every building record on the node, as the registry holds it, with this observation. */
     async pass(over: Partial<NodeObservation> | null = {}) {
       const observation: NodeObservation | null = over === null ? null : {
-        node, observedAt: new Date().toISOString(), probeBootId: "boot-1",
+        node, observedAt: new Date().toISOString(), probeBootId: "boot-1", events: [],
         capacity: { cpus: 16, committedCpus: 0, memoryGiB: 64, committedMemoryGiB: 0, diskFreeGiB: 100, committedDiskGiB: 0 },
         artifacts: [image], jobs: [], pylons: [], previewRoutes: [], grants: { secrets: [], gitSsh: false }, heldSecrets: [], ...over,
       };

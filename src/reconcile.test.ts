@@ -279,7 +279,7 @@ test("submit replies round-trip through the wire encoding", () => {
 });
 
 test("a snapshot from a probe older than route reporting parses as routing nothing the registry does not know", () => {
-  const observation = { node, observedAt: "2027-01-01T00:00:00Z", probeBootId: "b", capacity: { cpus: 16, committedCpus: 0, memoryGiB: 64, committedMemoryGiB: 0, diskFreeGiB: 100, committedDiskGiB: 0 }, artifacts: [], jobs: [], pylons: [] };
+  const observation = { node, observedAt: "2027-01-01T00:00:00Z", probeBootId: "b", events: [], capacity: { cpus: 16, committedCpus: 0, memoryGiB: 64, committedMemoryGiB: 0, diskFreeGiB: 100, committedDiskGiB: 0 }, artifacts: [], jobs: [], pylons: [] };
   const old = parseProbeEvent(encodeProbeEvent({ type: "snapshot", observation } as unknown as ProbeEvent));
   assert.ok(old.type === "snapshot");
   assert.deepEqual(old.observation.previewRoutes, []);
@@ -304,7 +304,7 @@ test("a snapshot as the probe every node runs sends it, claudeLaunchRepeatable a
 
 test("a broken pylon whose cause is missing, as from an older probe, or one this control plane does not know parses with its cause unknown", () => {
   const snapshot = (pylon: Record<string, unknown>) => encodeProbeEvent({ type: "snapshot", observation: {
-    node, observedAt: "2027-01-01T00:00:00Z", probeBootId: "b", capacity: { cpus: 16, committedCpus: 0, memoryGiB: 64, committedMemoryGiB: 0, diskFreeGiB: 100, committedDiskGiB: 0 }, artifacts: [], jobs: [], pylons: [pylon], previewRoutes: [], heldSecrets: [],
+    node, observedAt: "2027-01-01T00:00:00Z", probeBootId: "b", events: [], capacity: { cpus: 16, committedCpus: 0, memoryGiB: 64, committedMemoryGiB: 0, diskFreeGiB: 100, committedDiskGiB: 0 }, artifacts: [], jobs: [], pylons: [pylon], previewRoutes: [], heldSecrets: [],
   } } as unknown as ProbeEvent);
   const old = parseProbeEvent(snapshot({ pylonId, phase: "broken", detail: "Setup exited 128. Read controller logs" }));
   assert.ok(old.type === "snapshot");
@@ -339,7 +339,7 @@ test("an observation from the oldest probe upgrades to what each field it left o
   } as unknown as OlderObservation;
   const upgraded = upgradeObservation(oldest);
   assert.deepEqual(upgraded, {
-    node, observedAt: "2027-01-01T00:00:00Z", probeBootId: "b", capacity: null, artifacts: [], jobs: [],
+    node, observedAt: "2027-01-01T00:00:00Z", probeBootId: "b", events: [], capacity: null, artifacts: [], jobs: [],
     pylons: [
       { ...running(liveHash), listening: null, sessions: [{ id: "w1:p1", state: "running", herdrPane: "w1:p1", harness: "shell", harnessSessionId: null, status: "idle" }] },
       { pylonId: "pylon-t2", phase: "stopped", checkpoint: lastCheckpoint, sessions: null },
@@ -460,7 +460,7 @@ test("ingest: a pylon that runs again before its sessions are read resumes the p
 
 test("ingest: a deleted pylon drops its sessions", () => {
   assert.deepEqual(ingest({ type: "snapshot", observation: {
-    node, observedAt: "2027-01-01T00:00:00Z", probeBootId: "b1", capacity: { cpus: 16, committedCpus: 0, memoryGiB: 64, committedMemoryGiB: 8, diskFreeGiB: 500, committedDiskGiB: 0 },
+    node, observedAt: "2027-01-01T00:00:00Z", probeBootId: "b1", events: [], capacity: { cpus: 16, committedCpus: 0, memoryGiB: 64, committedMemoryGiB: 8, diskFreeGiB: 500, committedDiskGiB: 0 },
     artifacts: [], jobs: [], pylons: [], grants: { secrets: [], gitSsh: false }, previewRoutes: [], heldSecrets: [],
   } }, node, knows(phase("deleting")), now).filter((w) => w.record === "sessions"), [{ record: "sessions", pylonId, sessions: [] }]);
 });
@@ -485,7 +485,7 @@ test("ingest: a snapshot writes the node, its jobs, its pylons, and closes known
   const status: JobStatus = { jobId: "j" as JobId, subject: pylonId, kind: "spawn", state: "running", startedAt: "2027-01-01T00:00:00Z" };
   const gone = "pylon-gone" as PylonId;
   const observation: NodeObservation = {
-    node, observedAt: "2027-01-01T00:00:00Z", probeBootId: "b1",
+    node, observedAt: "2027-01-01T00:00:00Z", probeBootId: "b1", events: [],
     capacity: { cpus: 16, committedCpus: 0, memoryGiB: 64, committedMemoryGiB: 8, diskFreeGiB: 500, committedDiskGiB: 0 },
     artifacts: [image], jobs: [status],
     pylons: [runningWith({ attachedClients: 2 }), { pylonId: "pylon-x" as PylonId, phase: "booting" }],

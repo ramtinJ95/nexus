@@ -237,7 +237,7 @@ test("nodes are listed with their state and capacity, without the observation", 
   const capacity = { cpus: 16, committedCpus: 0, memoryGiB: 64, committedMemoryGiB: 0, diskFreeGiB: 100, committedDiskGiB: 0 };
   const none = { pylons: 0, cpus: 0, memoryGiB: 0 };
   s.registry.apply({ record: "node", node, state: "online", capacity });
-  s.registry.ingested({ node, observedAt: "2027-01-01T00:01:00Z", probeBootId: "b", capacity, artifacts: [], jobs: [], pylons: [], grants: { secrets: [], gitSsh: false }, previewRoutes: [], heldSecrets: [] }, []);
+  s.registry.ingested({ node, observedAt: "2027-01-01T00:01:00Z", probeBootId: "b", events: [], capacity, artifacts: [], jobs: [], pylons: [], grants: { secrets: [], gitSsh: false }, previewRoutes: [], heldSecrets: [] }, []);
   assert.deepEqual((await s.call("GET", "/v1/nodes")).body, [{ ...offline, state: "online", capacity, observedAt: "2027-01-01T00:01:00Z", pylons: { up: none, paused: none, archived: none, crashed: none, orphaned: [] } }]);
 });
 
@@ -315,7 +315,7 @@ function observeNode(s: Awaited<ReturnType<typeof setup>>, name: string, memory:
   const capacity = { cpus: 16, committedCpus: 4, memoryGiB: memory.total, committedMemoryGiB: memory.committed, diskFreeGiB: 200, committedDiskGiB: 60 };
   s.registry.apply({ record: "node", node: at, state: "online", capacity });
   s.registry.ingested({
-    node: at, observedAt: "2027-01-01T00:01:00Z", probeBootId: "b", capacity, artifacts: [image.id] as NodeObservation["artifacts"], jobs: [], pylons: [],
+    node: at, observedAt: "2027-01-01T00:01:00Z", probeBootId: "b", events: [], capacity, artifacts: [image.id] as NodeObservation["artifacts"], jobs: [], pylons: [],
     grants: { secrets: ["STRIPE_KEY", "NEXUS_CHATGPT_TOKEN"], gitSsh: true }, previewRoutes: [], heldSecrets: [], ...over,
   }, []);
 }
@@ -710,7 +710,7 @@ test("thread detail derives the actual state from the node's last observation", 
     pylonId: thread.pylonId, phase: "running" as const, liveHash: pylon.liveHash, bootedAt: "2027-01-01T00:00:00Z", bootedFrom: { image: image.id as `img-${string}`, checkpoint: null },
     services: [], listening: [], previews: [], sessions: [], git: null, declaredOutputs: [], attachedClients: 0,
   };
-  s.registry.ingested({ node, observedAt: "2027-01-01T00:01:00Z", probeBootId: "b", capacity, artifacts: [], jobs: [], pylons: [running], grants: { secrets: [], gitSsh: false }, previewRoutes: [], heldSecrets: [] }, []);
+  s.registry.ingested({ node, observedAt: "2027-01-01T00:01:00Z", probeBootId: "b", events: [], capacity, artifacts: [], jobs: [], pylons: [running], grants: { secrets: [], gitSsh: false }, previewRoutes: [], heldSecrets: [] }, []);
   const pause = { jobId: "job-1" as JobId, subject: thread.pylonId, kind: "pause" as const };
   s.registry.apply({ record: "job", status: { ...pause, state: "running", startedAt: "2027-01-01T00:00:59Z" } });
   s.registry.apply({ record: "sessions", pylonId: thread.pylonId, sessions: [{ id: "p1", state: "running", herdrPane: "p1", harness: "pi", harnessSessionId: null, status: "idle", title: "plan", message: null }] });
@@ -740,7 +740,7 @@ function observeRunning(s: Awaited<ReturnType<typeof withThread>>, facts: { serv
     bootedFrom: { image: image.id as `img-${string}`, checkpoint: null },
     services: facts.services ?? [], listening: facts.listening === undefined ? [] : facts.listening, previews: [], sessions: [], git: null, declaredOutputs: [], attachedClients: 0,
   };
-  s.registry.ingested({ node, observedAt: new Date().toISOString(), probeBootId: "b", capacity, artifacts: [], jobs: [], pylons: [running], grants: { secrets: [], gitSsh: false }, previewRoutes: [], heldSecrets: [] }, []);
+  s.registry.ingested({ node, observedAt: new Date().toISOString(), probeBootId: "b", events: [], capacity, artifacts: [], jobs: [], pylons: [running], grants: { secrets: [], gitSsh: false }, previewRoutes: [], heldSecrets: [] }, []);
 }
 
 test("thread detail lists the pylon's listening ports with the service and preview of each", async (t) => {
@@ -769,7 +769,7 @@ test("a node whose stored observation is from a probe before routes, grants, cou
     pylonId: s.thread.pylonId, phase: "running", liveHash: s.registry.pylon(s.thread.pylonId)!.liveHash, bootedAt: "2027-01-01T00:00:00Z",
     bootedFrom: { image: image.id, checkpoint: null }, services: [], previews: [], sessions: [], git: null, declaredOutputs: [], attachedClients: 0,
   };
-  s.registry.ingested({ node, observedAt: "2027-01-01T00:01:00Z", probeBootId: "b", capacity, artifacts: [image.id], jobs: [], pylons: [running] } as never, []);
+  s.registry.ingested({ node, observedAt: "2027-01-01T00:01:00Z", probeBootId: "b", events: [], capacity, artifacts: [image.id], jobs: [], pylons: [running] } as never, []);
   assert.equal(((await s.call("GET", `/v1/threads/${s.thread.id}`)).body as ThreadDetail).ports, null, "a probe that read no ports reports them unknown");
   const nodes = (await s.call("GET", "/v1/nodes")).body as { name: string; overcommitted: boolean }[];
   assert.equal(nodes.find((n) => n.name === node)!.overcommitted, false, "the committed memory of a probe from before pylons were counted means nothing");
@@ -1070,7 +1070,7 @@ function observeStopped(s: Awaited<ReturnType<typeof withThread>>, sessions: rea
   const capacity = { cpus: 16, committedCpus: 0, memoryGiB: 64, committedMemoryGiB: 0, diskFreeGiB: 100, committedDiskGiB: 0 };
   s.registry.apply({ record: "node", node, state: "online", capacity });
   const stopped = { pylonId: s.thread.pylonId, phase: "stopped" as const, checkpoint: null, sessions };
-  s.registry.ingested({ node, observedAt: new Date().toISOString(), probeBootId: "b", capacity, artifacts: [], jobs: [], pylons: [stopped], grants: { secrets: [], gitSsh: false }, previewRoutes: [], heldSecrets: [] },
+  s.registry.ingested({ node, observedAt: new Date().toISOString(), probeBootId: "b", events: [], capacity, artifacts: [], jobs: [], pylons: [stopped], grants: { secrets: [], gitSsh: false }, previewRoutes: [], heldSecrets: [] },
     ingest({ type: "pylon", pylon: stopped }, node, new Map([[s.thread.pylonId, "absent"]]), Date.now()));
 }
 
@@ -1156,7 +1156,7 @@ test("a failed pylon shows failed with its reason until its thread is deleted, a
   s.registry.apply({ record: "job", status: { ...del, state: "running", startedAt: "2027-01-01T00:00:00Z" } });
   assert.equal((await detail()).pylon.actualState, "deleting");
   s.registry.apply({ record: "job", status: { ...del, state: "succeeded", finishedAt: "2027-01-01T00:00:05Z" } });
-  s.registry.ingested({ node, observedAt: "2027-01-01T00:00:06Z", probeBootId: "b", capacity, artifacts: [], jobs: [], pylons: [], grants: { secrets: [], gitSsh: false }, previewRoutes: [], heldSecrets: [] }, []);
+  s.registry.ingested({ node, observedAt: "2027-01-01T00:00:06Z", probeBootId: "b", events: [], capacity, artifacts: [], jobs: [], pylons: [], grants: { secrets: [], gitSsh: false }, previewRoutes: [], heldSecrets: [] }, []);
   assert.deepEqual((await detail()).pylon, { grantsOutdated: false, id: thread.pylonId, node, actualState: "absent", failed: reason, observedAt: "2027-01-01T00:00:06Z", retryRefused: null, resources: project.resources });
 });
 
@@ -1195,7 +1195,7 @@ test("a pylon whose disk holds a failed setup cannot be retried, and its detail 
   const capacity = { cpus: 16, committedCpus: 0, memoryGiB: 64, committedMemoryGiB: 0, diskFreeGiB: 100, committedDiskGiB: 0 };
   s.registry.apply({ record: "node", node, state: "online", capacity });
   const broken = (cause: "setup" | "saved-setup" | "services") => s.registry.ingested({
-    node, observedAt: "2027-01-01T00:01:00Z", probeBootId: "b", capacity, artifacts: [], jobs: [],
+    node, observedAt: "2027-01-01T00:01:00Z", probeBootId: "b", events: [], capacity, artifacts: [], jobs: [],
     pylons: [{ pylonId: thread.pylonId, phase: "broken", detail: "Setup exited 128. Read controller logs", cause }], grants: { secrets: [], gitSsh: false }, previewRoutes: [], heldSecrets: [],
   }, []);
   broken("saved-setup");
@@ -1862,7 +1862,7 @@ test("a deployer's image operations answer 200 once done and 202 while running, 
   for (const manifest of [image, built]) assert.equal((await s.call("POST", "/v1/images", manifest)).status, 201);
   const capacity = { cpus: 16, committedCpus: 0, memoryGiB: 64, committedMemoryGiB: 0, diskFreeGiB: 100, committedDiskGiB: 0 };
   s.registry.apply({ record: "node", node, state: "online", capacity });
-  s.registry.ingested({ node, observedAt: "2027-01-01T00:01:00Z", probeBootId: "b", capacity, artifacts: [image.id as ImageId], jobs: [], pylons: [], grants: { secrets: [], gitSsh: false }, previewRoutes: [], heldSecrets: [] }, []);
+  s.registry.ingested({ node, observedAt: "2027-01-01T00:01:00Z", probeBootId: "b", events: [], capacity, artifacts: [image.id as ImageId], jobs: [], pylons: [], grants: { secrets: [], gitSsh: false }, previewRoutes: [], heldSecrets: [] }, []);
   const entries = [{ ...built, release: null, nodes: [] }, { ...image, release: null, nodes: [node] }];
   assert.deepEqual((await s.call("GET", "/v1/images")).body, { current: null, previous: null, images: entries, operation: null }, "newest build first");
 
@@ -2751,7 +2751,7 @@ test("a Claude worker thread takes no messages while archived, deleted or before
 function observePaused(s: Awaited<ReturnType<typeof withClaude>>) {
   const capacity = { cpus: 16, committedCpus: 0, memoryGiB: 64, committedMemoryGiB: 0, diskFreeGiB: 100, committedDiskGiB: 0 };
   const stopped = { pylonId: s.thread.pylonId, phase: "stopped" as const, checkpoint: null, sessions: [] };
-  s.registry.ingested({ node, observedAt: new Date().toISOString(), probeBootId: "b", capacity, artifacts: [], jobs: [], pylons: [stopped], grants: { secrets: [], gitSsh: false }, previewRoutes: [], heldSecrets: [] }, []);
+  s.registry.ingested({ node, observedAt: new Date().toISOString(), probeBootId: "b", events: [], capacity, artifacts: [], jobs: [], pylons: [stopped], grants: { secrets: [], gitSsh: false }, previewRoutes: [], heldSecrets: [] }, []);
 }
 
 test("a Claude worker stopped on its usage limit lists as limited, with the stop in its row and its conversation", async (t) => {

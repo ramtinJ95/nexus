@@ -59,7 +59,7 @@ function observe(registry: Registry, node: NodeName, pylons: readonly [PylonId, 
     ? { pylonId, phase, checkpoint: `ckpt-${pylonId}-1`, sessions: [] }
     : { pylonId, phase, liveHash: null, bootedAt: "2027-01-01T00:00:00Z", bootedFrom: { image, checkpoint: null }, services: [], listening: [], previews: [], sessions: [], git: null, declaredOutputs: [], attachedClients: 0 });
   registry.ingested({
-    node, observedAt: new Date().toISOString(), probeBootId: "boot-1", capacity, artifacts: [image], jobs: [], pylons: observed,
+    node, observedAt: new Date().toISOString(), probeBootId: "boot-1", events: [], capacity, artifacts: [image], jobs: [], pylons: observed,
     grants: { secrets: [], gitSsh: false }, previewRoutes: [], heldSecrets: [], spawnsWithoutRelaunch: true, ...over,
   }, [{ record: "node", node, state: "online", capacity }]);
 }

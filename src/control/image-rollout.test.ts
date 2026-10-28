@@ -43,7 +43,7 @@ function fakeNodes(registry: Registry, names: readonly NodeName[]) {
     const capacity = { cpus: 16, committedCpus: 0, memoryGiB: 64, committedMemoryGiB: 0, diskFreeGiB: 200, committedDiskGiB: 0 };
     registry.apply({ record: "node", node, state: "online", capacity });
     registry.ingested({
-      node, observedAt: new Date().toISOString(), probeBootId: "b", capacity, artifacts: [...stores.get(node)!.keys()], jobs: [], pylons: [],
+      node, observedAt: new Date().toISOString(), probeBootId: "b", events: [], capacity, artifacts: [...stores.get(node)!.keys()], jobs: [], pylons: [],
       grants: { secrets: [], gitSsh: false }, previewRoutes: [], heldSecrets: [],
     }, []);
   }

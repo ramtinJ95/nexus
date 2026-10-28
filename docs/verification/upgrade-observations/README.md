@@ -27,15 +27,17 @@ differ only in the code under test.
 - The pin tests ran on the pins commit, which is main's code with only the pin tests added, and on the branch. Each
   run covers the eight test files this change touches, then the full suite. `tests-pins.txt` and `tests-branch.txt`
   hold the results, and `tests.diff` is the names of the tests that passed in each. Both full suites ran 1273 tests,
-  and all passed.
+  and all passed. The branch deletes the two tests that only a probe without `claudeLaunchRepeatable` could pass, and
+  adds one for the upgrade itself.
 
 ## What the captures show
 
 The release every node runs sends the same frame as main (`probe-deployed.json`, `probe-main.json`). The branch's
 probe sends the same frame without `"claudeLaunchRepeatable": true` (`probe-frames.diff`).
 
-Every case a control plane meets today reads the same on main and on the branch. That covers the three real frames,
-both probe shapes that send every field, and every registry row an older probe left. `capture.diff` holds 38 changed
+The three real frames and both probe shapes that send every field read the same on main and on the branch, as frames
+and as stored rows. So does every stored row from an older probe, except two. One is a broken pylon stored without a
+cause. The other is a row with grants and no committed disk, which no probe sent. `capture.diff` holds 38 changed
 lines, all in these cases:
 
 | case | main | branch |
@@ -55,6 +57,7 @@ lines, all in these cases:
 | `api.ts` `portsOf`: `listening ?? null`, `reconcile.ts` `sessionsOf`: `sessions ?? null` | re-guarded rows stored before the parse upgraded them | read the field as typed |
 | `loop.ts`, `tick.ts`, `registry.ts` `previewRoutes?.` and `?? []`, `tick.ts` `grants?.` | read null routes as none and null grants as no secrets | the upgrade gives `[]` and empty grants, and the readers drop the guard |
 | `placement.ts` `grants === null`, `grants!`, `heldSecrets?.` | told a probe from before counting apart by its missing grants | refuses on a null capacity, with the same text |
+| `loop.ts` `events ?? []` | read a missing event backlog as none | the upgrade gives `[]` |
 | `chatgpt-token.ts` `heldSecrets?.`, `grants?.` | read missing fields as none | reads `[]` |
 | "no `committedDiskGiB` means an old probe": `placement.ts` `overcommitted`, `dashboard.ts` `memoryLine`, `cli/nexus.ts` `capacityText` | three derivations | `countedCapacity` in `protocol.ts` serves the first two and the upgrade. The CLI keeps its own, because it reads the API's reply, which still sends the capacity as reported (`docs/cli.md`). |
 | `claudeLaunchRepeatable`: probe sent `true`, `loop.ts` checked it twice | always true on every node | gone. A launch goes again to whichever probe comes back. `retrySafe` is a function of the command. |
@@ -64,6 +67,7 @@ lines, all in these cases:
 These runs use Node 24.22.1, since Node 26 does not run in the pylon this was made in. Nothing here boots a VM or
 reads the live control plane, the nodes or their registries. The captures cannot show that no registry row from a
 probe before pylons were counted exists. A row like that reads the same on both sides, as the stored cases show.
-Nothing here tests a control plane on main reading the branch's probe. That happens only if a person rolls the
-control plane back by hand after the probes upgrade. Such a control plane fails a cut-off Claude launch instead of
-sending it again.
+`main.txt` shows main reading the branch's probe frame the same way it reads 82a703f's. Nothing here runs main's Claude
+launch recovery against the branch's probe. That happens only if a person rolls the control plane back by hand after
+the probes upgrade. Main then reads the missing `claudeLaunchRepeatable` as a probe that cannot take a launch again,
+and fails a cut-off launch instead of sending it again.

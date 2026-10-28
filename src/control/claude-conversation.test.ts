@@ -56,7 +56,7 @@ function claudeThread(registry: Registry): Thread {
   }];
   const capacity = { cpus: 16, committedCpus: 0, memoryGiB: 64, committedMemoryGiB: 0, diskFreeGiB: 100, committedDiskGiB: 0 };
   registry.ingested(
-    { node, observedAt: new Date().toISOString(), probeBootId: "boot-1", capacity, artifacts: [image], jobs: [], pylons, grants: { secrets: [], gitSsh: false }, previewRoutes: [], heldSecrets: [] },
+    { node, observedAt: new Date().toISOString(), probeBootId: "boot-1", events: [], capacity, artifacts: [image], jobs: [], pylons, grants: { secrets: [], gitSsh: false }, previewRoutes: [], heldSecrets: [] },
     [{ record: "node", node, state: "online", capacity }],
   );
   return registry.thread(id)!;
