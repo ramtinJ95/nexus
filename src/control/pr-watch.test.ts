@@ -1,16 +1,20 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { execFile } from "node:child_process";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { promisify } from "node:util";
 import { openRegistry, type Thread, type ThreadId } from "./registry.ts";
 import { newPylonRecord } from "../tick.ts";
-import { desiredPhase } from "../reconcile.ts";
-import type { CommandResult, NodeName, PylonCommand, PylonId, TailnetNodeId, LiveHash } from "../protocol.ts";
+import { desiredPhase, ingest } from "../reconcile.ts";
+import { fakeGuest } from "../fake-guest.ts";
+import { gitFacts } from "../git-facts.ts";
+import type { CommandResult, NodeName, PylonCommand, PylonId, TailnetNodeId, LiveHash, PylonObservation } from "../protocol.ts";
 import type { ProjectId } from "../project.ts";
 import { githubClient, githubRepo, type PrSnapshot } from "./github.ts";
 import { prWatcher, prWatchPrefix } from "./pr-watch.ts";
-import { waitOf } from "./queue.ts";
+import { threadQueue, waitOf } from "./queue.ts";
 import { agentInbox } from "./inbox.ts";
 import type { HarnessHost } from "../harness/host.ts";
 
@@ -20,12 +24,12 @@ function fixture(path = ":memory:") {
   const project = { id: "project" as ProjectId, repoUrl: "https://github.com/acme/repo.git", defaultBranch: "main", defaultNode: node, resources: { cpus: 2, memoryGiB: 4, diskGiB: 10 }, allowedHosts: [], secrets: [], logins: [], preSetup: null };
   registry.upsertNode({ name: node, tailnetHost: "node.ts.net", tailnetNodeId: "nNODE" as TailnetNodeId });
   registry.createProject(project);
-  function add(id = "th-1", claude = false) {
+  function add(id = "th-1", claude = false, output: string | null = "origin/feature") {
     const thread: Thread = { id: id as ThreadId, title: "test", project: project.id, pylonId: `pylon-${id}` as PylonId, status: "active", conversationId: claude ? null : "1", startedBy: "test", createdAt: 1, seenAt: null, lastReplyAt: null, lastHumanActivityAt: 1, lastAgentActivityAt: 0, agentTurnRunning: false, working: false };
     const { desired: _, ...pylon } = newPylonRecord({ thread: id, pylonId: thread.pylonId, node, desired: "paused", boot: { pylonId: thread.pylonId, image: "img-000000000000", resources: project.resources, network: { allowedHosts: [], secrets: [] }, repo: { kind: "clone", url: project.repoUrl, checkout: { branch: "main", commit: "main" } }, dotfiles: { repo: project.repoUrl, ref: "main" } }, firstBoot: { kind: "fresh", preSetup: null }, live: { previews: [], overlay: [] }, liveHash: "hash" as LiveHash });
     registry.createThread(thread, pylon, claude ? "/poteto-mode fix it" : undefined);
     if (claude) registry.setClaudeWorker(thread.id, "/poteto-mode fix it", "started", undefined, "c0ffee00-0000-4000-8000-000000000000");
-    registry.apply({ record: "output", pylonId: thread.pylonId, kind: "branch", ref: "origin/feature" });
+    if (output !== null) registry.apply({ record: "output", pylonId: thread.pylonId, kind: "branch", ref: output });
     return thread.id;
   }
   const id = add();
@@ -626,4 +630,78 @@ test("a predecessor's PRs are read before any is saved, and a known one that clo
   await watcher.poll();
   assert.deepEqual(waitOf(f.registry, f.id), { thread: f.id, state: "waiting", why: "PR #2 is open" }, "a reopened PR holds it again");
   assert.equal(f.registry.prWatch(f.id)!.links[1]!.pr.url, "", "a PR the watch never read stays unread, so its comments are baselined");
+});
+
+test("a branch a thread checks out links no PR, so a thread queued after it waits; the branch it pushes, force-pushed too, links its own", async (t) => {
+  const f = fixture(); t.after(() => f.registry.close());
+  const dir = await mkdtemp(join(tmpdir(), "nexus-pr-watch-git-"));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const env = { ...process.env, GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_NOSYSTEM: "1" };
+  const git = async (cwd: string, ...args: string[]) => (await promisify(execFile)("git", ["-c", "user.name=test", "-c", "user.email=test@example.com", ...args], { cwd, env, encoding: "utf8" })).stdout.trim();
+  await git(dir, "init", "-q", "--bare", "remote.git");
+  await git(dir, "clone", "-q", "remote.git", "seed");
+  const seed = join(dir, "seed");
+  await git(seed, "commit", "-q", "--allow-empty", "-m", "main");
+  await git(seed, "push", "-q", "origin", "HEAD:main");
+  await git(seed, "checkout", "-qb", "feat/pipeline-items");
+  await git(seed, "commit", "-q", "--allow-empty", "-m", "an earlier thread's work, merged as #180");
+  await git(seed, "push", "-q", "origin", "feat/pipeline-items");
+  // As pylon-vm-backend clones a thread's checkout.
+  await git(dir, "clone", "-q", "--no-checkout", "remote.git", "checkout");
+  const checkout = join(dir, "checkout");
+  await git(checkout, "checkout", "-q", "-B", "main", "origin/main");
+
+  const builder = f.add("th-builder", true, null);
+  const pylonId = f.registry.thread(builder)!.pylonId;
+  const guest = fakeGuest(() => { throw new Error("unused"); });
+  guest.exec = async (argv) => ({ exitCode: 0, output: (await promisify(execFile)(argv[0]!, argv.slice(1), { cwd: checkout, env, encoding: "utf8" })).stdout, truncated: false });
+  let previous: PylonObservation | "absent" = "absent";
+  async function observe() {
+    const pylon: PylonObservation = { pylonId, phase: "running", liveHash: "hash" as LiveHash, bootedAt: "2027-01-01T00:00:00Z", bootedFrom: { image: "img-000000000000", checkpoint: null }, services: [], listening: [], previews: [], sessions: [], git: await gitFacts(guest), declaredOutputs: [], attachedClients: 0 };
+    f.registry.ingested(null, ingest({ type: "pylon", pylon }, f.node, new Map([[pylonId, previous]]), Date.now()));
+    previous = pylon;
+  }
+  const prs = new Map<string, PrSnapshot>();
+  const pr = (number: number, branch: string, state: "open" | "merged") => prs.set(branch, { pr: { repo: "acme/repo", number, title: branch, url: `https://github.com/acme/repo/pull/${number}`, state, checks: "passing", review: "none", conflict: false }, detail: { head: "1".repeat(40), branch, base: "main", body: "", mergeCommit: null }, failures: [], comments: [] });
+  const github = {
+    async find(_repo: string, branch: string, state = "open") { const s = prs.get(branch); return s !== undefined && (state === "all" || s.pr.state === "open") ? [s.pr.number] : []; },
+    async poll(_repo: string, number: number) { return structuredClone([...prs.values()].find((s) => s.pr.number === number)!); },
+  };
+  const watcher = prWatcher({ registry: f.registry, github, inbox: f.inbox() });
+  const starts: ThreadId[] = [];
+  const queue = threadQueue({ registry: f.registry, gate: { run: (action) => action() }, send: async () => {}, async startThread(_request, _caller, id) { starts.push(id!); throw new Error("not started in this test"); } });
+  f.registry.saveQueued({
+    id: "th-after" as ThreadId, title: "after", project: "project" as ProjectId, startedBy: "test", createdAt: 1, after: [builder],
+    request: { project: "project", title: "after", resources: { cpus: 2, memoryGiB: 4, diskGiB: 10 } }, message: null, status: "queued", startNow: null, lastError: null, startedAt: null, firstMessage: null,
+  });
+  pr(180, "feat/pipeline-items", "merged");
+
+  await observe();
+  await git(checkout, "checkout", "-q", "feat/pipeline-items");
+  await git(checkout, "fetch", "-q", "origin");
+  await observe();
+  await watcher.poll();
+  await queue.poll();
+  assert.deepEqual(starts, [], "the queued thread stays queued");
+  assert.deepEqual(waitOf(f.registry, builder), { thread: builder, state: "waiting", why: "has no pull request yet" });
+  assert.deepEqual(f.registry.prWatch(builder)?.links ?? [], []);
+  assert.deepEqual(f.registry.outputs(builder).filter((o) => o.kind === "branch"), [], "a branch read from origin is not the thread's output");
+
+  await git(checkout, "checkout", "-q", "-b", "fix/own-branches", "main");
+  await git(checkout, "commit", "-q", "--allow-empty", "-m", "the builder's work");
+  await git(checkout, "-c", "push.default=current", "push", "-q", "origin");
+  await observe();
+  pr(181, "fix/own-branches", "open");
+  await watcher.poll();
+  assert.deepEqual(waitOf(f.registry, builder), { thread: builder, state: "waiting", why: "PR #181 is open" });
+  await git(checkout, "commit", "-q", "--amend", "--allow-empty", "-m", "the builder's work, rebased");
+  await git(checkout, "push", "-q", "--force", "origin", "fix/own-branches");
+  await git(checkout, "fetch", "-q", "origin");
+  await observe();
+  pr(181, "fix/own-branches", "merged");
+  await watcher.poll();
+  await queue.poll();
+  assert.deepEqual(f.registry.outputs(builder).filter((o) => o.kind === "branch").map((o) => o.ref), ["origin/fix/own-branches"]);
+  assert.deepEqual(f.registry.prWatch(builder)?.links.map((l) => [l.pr.number, l.pr.state]), [[181, "merged"]]);
+  assert.deepEqual(starts, ["th-after"], "the queued thread starts once the builder's own PR merges");
 });

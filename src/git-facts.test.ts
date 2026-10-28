@@ -85,24 +85,59 @@ test("existing upstreams, same-named remote refs and ambiguity have deterministi
   const s = await checkout(t);
   const head = await s.commit();
   for (const remote of ["origin", "fork", "other"]) await s.git("remote", "add", remote, `https://example.com/${remote}.git`);
+  // As a push records a remote-tracking ref it updates.
+  const push = (ref: string) => s.git("update-ref", "-m", "update by push", ref, head);
   await s.git("branch", "topic/nested");
   await s.git("branch", "unpublished");
-  await s.git("update-ref", "refs/remotes/origin/main", head);
-  await s.git("update-ref", "refs/remotes/origin/renamed", head);
+  await push("refs/remotes/origin/main");
+  await push("refs/remotes/origin/renamed");
   await s.git("branch", "--set-upstream-to=origin/renamed", "main");
-  await s.git("update-ref", "refs/remotes/fork/topic/nested", head);
+  await push("refs/remotes/fork/topic/nested");
   const published = async (name: string) => (await gitFacts(s.guest)).branches.find((b) => b.name === name)?.pushedAs;
   assert.equal(await published("main"), "origin/renamed");
   assert.equal(await published("topic/nested"), "fork/topic/nested");
   assert.equal(await published("unpublished"), null, "a shared commit alone never identifies a published branch");
-  await s.git("update-ref", "refs/remotes/other/topic/nested", head);
+  await push("refs/remotes/other/topic/nested");
   assert.equal(await published("topic/nested"), null, "ambiguous non-origin names are not guessed");
-  await s.git("update-ref", "refs/remotes/origin/topic/nested", head);
+  await push("refs/remotes/origin/topic/nested");
   assert.equal(await published("topic/nested"), "origin/topic/nested");
   await s.git("update-ref", "-d", "refs/remotes/origin/renamed");
   assert.equal(await published("main"), "origin/main", "a missing upstream ref does not block fallback");
   await s.git("update-ref", "-d", "refs/remotes/origin/main");
   assert.equal(await published("main"), null);
+});
+
+test("a branch cloned, fetched or checked out from a remote is pushed only once this checkout pushes it", async (t) => {
+  const s = await checkout(t);
+  const remote = await mkdtemp(join(tmpdir(), "nexus-git-remote-"));
+  t.after(() => rm(remote, { recursive: true, force: true }));
+  await run("git", ["init", "--bare", "-q", "--initial-branch=main", remote]);
+  await s.git("remote", "add", "origin", remote);
+  await s.commit();
+  await s.git("push", "-q", "origin", "main:main", "main:merged", "main:later");
+  await rm(s.dir, { recursive: true, force: true });
+  await run("git", ["clone", "-q", remote, s.dir]);
+  await s.git("checkout", "-q", "merged");
+  await s.git("fetch", "-q", "origin");
+  await s.git("checkout", "-q", "later");
+  assert.deepEqual((await gitFacts(s.guest)).branches.map((b) => [b.name, b.pushedAs]), [["later", null], ["main", null], ["merged", null]]);
+  await s.commit();
+  await s.git("push", "-q", "origin", "later");
+  await s.git("fetch", "-q", "origin");
+  assert.equal((await gitFacts(s.guest)).branches.find((b) => b.name === "later")?.pushedAs, "origin/later", "a push stays recorded across later fetches");
+});
+
+test("a push of a signed commit counts where the configuration shows signatures", async (t) => {
+  const s = await checkout(t);
+  const remote = await mkdtemp(join(tmpdir(), "nexus-git-remote-"));
+  t.after(() => rm(remote, { recursive: true, force: true }));
+  await run("git", ["init", "--bare", "-q", remote]);
+  await s.git("remote", "add", "origin", remote);
+  await run("ssh-keygen", ["-q", "-t", "ed25519", "-N", "", "-f", join(s.dir, ".git", "signing-key")]);
+  for (const [key, value] of [["gpg.format", "ssh"], ["user.signingkey", join(s.dir, ".git", "signing-key")], ["commit.gpgsign", "true"], ["log.showSignature", "true"]]) await s.git("config", key!, value!);
+  const head = await s.commit();
+  await s.git("push", "-q", "origin", "main");
+  assert.deepEqual((await gitFacts(s.guest)).branches, [{ name: "main", head, pushedAs: "origin/main" }]);
 });
 
 test("symbolic remote HEAD and local tracking branches do not imply a pushed branch", async (t) => {
@@ -142,7 +177,7 @@ test("branch names are unambiguous beside a same-named tag and preserve Unicode 
   const remote = "remote\u2028name";
   await s.git("checkout", "-qb", branch);
   await s.git("remote", "add", remote, "https://example.com/repo.git");
-  await s.git("update-ref", `refs/remotes/${remote}/${branch}`, head);
+  await s.git("update-ref", "-m", "update by push", `refs/remotes/${remote}/${branch}`, head);
   const facts = await gitFacts(s.guest);
   assert.equal(facts.branch, branch);
   assert.deepEqual(facts.branches.find((b) => b.name === branch), { name: branch, head, pushedAs: `${remote}/${branch}` });
