@@ -486,6 +486,21 @@ test("the review loop hears of each PR the watch links open, once, and again aft
   assert.equal(heard.length, 2, "a PR first read closed is not news");
 });
 
+test("the watch fires pull-request.linked once for each PR when it saves the link, and not for a link it could not save", async (t) => {
+  const f = fixture(); t.after(() => f.registry.close());
+  const linked = () => f.registry.events("0", { kinds: ["pull-request.linked"] }).map((e) => `${e.thread} #${e.payload.number} ${e.payload.state}`);
+  let fail = true;
+  const watcher = prWatcher({ ...f.options, async linked() { if (fail) throw new Error("GitHub read failed"); } });
+  await watcher.poll();
+  assert.deepEqual(linked(), [], "a link the watch did not save is not linked");
+  fail = false;
+  await watcher.poll();
+  f.snapshot.comments.push({ id: "comment:1", text: "Looks good" });
+  await watcher.poll();
+  assert.deepEqual(linked(), ["th-1 #1 open"]);
+  assert.equal(f.registry.events("0", { kinds: ["pull-request.feedback"] }).length, 1, "feedback on a linked PR is its own event");
+});
+
 test("a thread a queued thread waits for has its PR's merge seen when archived, capped or closed, and only then", async (t) => {
   const f = fixture(); t.after(() => f.registry.close());
   const queued = (after: ThreadId[], status: "queued" | "archived" = "queued") => f.registry.saveQueued({
