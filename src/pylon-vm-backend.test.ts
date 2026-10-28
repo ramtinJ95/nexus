@@ -7,7 +7,8 @@ import { after, test } from "node:test";
 import assert from "node:assert/strict";
 import { existsSync } from "node:fs";
 import { spawnSync } from "node:child_process";
-import { chmod, mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
+import fs, { chmod, mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { syncBuiltinESMExports } from "node:module";
 import { createServer } from "node:http";
 import { join } from "node:path";
 import { PassThrough, Readable } from "node:stream";
@@ -289,6 +290,23 @@ test("a pylon's process is its controller while it lives, and node health reads 
   await leftInstance(instances, "pylon-paused", "stopped");
   assert.deepEqual(await backend.processes!(), [{ pylonId: "pylon-up", pid: process.pid }], "a PID handed out again is no controller");
   assert.equal(backend.storage, stateRoot);
+});
+
+test("a controller whose /proc files refuse, as one that exits mid-read does, is left out of the pylons' processes", async (t) => {
+  const { backend, instances } = await backendWith();
+  await writeFile(join(await leftInstance(instances, "pylon-up", "running"), "controller.pid"), JSON.stringify(await identityOf(process.pid)));
+  await writeFile(join(await leftInstance(instances, "pylon-exiting", "running"), "controller.pid"), JSON.stringify(await identityOf(process.ppid)));
+  const exiting = `/proc/${process.ppid}/stat`;
+  const original = fs.readFile;
+  t.mock.method(fs, "readFile", (path: unknown, ...rest: unknown[]) => path === exiting
+    ? Promise.reject(Object.assign(new Error(`ESRCH: no such process, read '${exiting}'`), { code: "ESRCH", syscall: "read", path }))
+    : (original as (...args: unknown[]) => Promise<unknown>)(path, ...rest));
+  syncBuiltinESMExports();
+  t.after(() => {
+    t.mock.restoreAll();
+    syncBuiltinESMExports();
+  });
+  assert.deepEqual(await backend.processes!(), [{ pylonId: "pylon-up", pid: process.pid }]);
 });
 
 test("a pylon whose controller has yet to publish its PID is booting while its launcher lives, and broken after", async () => {
