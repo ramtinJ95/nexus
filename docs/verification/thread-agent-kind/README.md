@@ -20,7 +20,7 @@ that ref's file, so `diff.txt` shows the failure. It then runs the pin tests at 
 `git log --grep '^test(control): pin what each agent kind answers'`, into `tests-pins.txt`, and on the branch into
 `tests-branch.txt`. The pins commit is main's code with only the pin tests added. Later `test(` commits are applied to
 it before its tests run. The test files run whole: `api`, `dashboard`, `review`, `usage-limit`, `pr-watch`,
-`claude-conversation` and `usage` under `src/control`, and `src/cli/nexus.test.ts`. The worktrees are removed on exit.
+`claude-conversation`, `usage` and `nudge` under `src/control`, and `src/cli/nexus.test.ts`. The worktrees are removed on exit.
 `run.sh` checks out commits, so it does not see uncommitted changes. One run takes about 20 minutes in a pylon.
 
 The capture starts the real `startApi` on loopback with a real registry, the tests' fake harness, and a fake probe. The
