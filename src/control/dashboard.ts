@@ -20,7 +20,7 @@ import { existsSync, readdirSync, readFileSync } from "node:fs";
 import type { AssistantMessage, ImageContent, TextContent, UserMessage } from "@earendil-works/pi-ai";
 import type { ConversationView, InboxState, LiveState } from "@earendil-works/pi-durable";
 import { desiredPhase, type ActualState, type DesiredPhase } from "../reconcile.ts";
-import { countedCapacity, type HerdrStatus } from "../protocol.ts";
+import { countedCapacity, type HerdrStatus, type NodeHealth, type NodeName } from "../protocol.ts";
 import { githubTokenGrant, linkedPort, type ProjectId } from "../project.ts";
 import { harnessNamed } from "../sessions.ts";
 import type { ThreadDetail, ThreadRow } from "./api.ts";
@@ -51,6 +51,8 @@ export interface DashboardOptions {
   answerRefusal(caller: TailnetNodeId, question: Question): AnswerRefusal | null;
   /** Whether the review's pull request deploys once it merges. */
   deploys(review: Review): boolean;
+  /** The API's read of a node's health, which refuses a caller that is not a deployer. */
+  nodeHealth(caller: TailnetNodeId, node: NodeName): Promise<NodeHealth>;
   now?: () => number;
 }
 
@@ -100,6 +102,12 @@ export function dashboard(options: DashboardOptions): (path: string, query: URLS
       // After the read, so the facts are no older than the conversation, and a thread deleted meanwhile shows none.
       const d = detail(registry.thread(thread.id)!);
       return ok(threadPage(context(), d, registry.node(d.pylon.node)!, d.thread.status === "deleted" ? null : view, repliedAt, query.has("streaming")));
+    }],
+    [/^\/nodes\/([^/]+)$/, async (m, _, context) => {
+      const c = context();
+      const name = m[1]! as NodeName;
+      if (c.registry.node(name) === undefined) return { ...ok(notFound(c, `No node ${name}.`)), status: 404 };
+      return ok(nodePage(c, name, await options.nodeHealth(c.caller, name).catch((err: unknown) => err as Error)));
     }],
     [/^\/assets\/([\w.-]+)$/, (m, query, context) => {
       const asset = assets.get(m[1]!);
@@ -350,7 +358,7 @@ ${closed.length > 0 && html`<details class="archived" id="archived-${p.id}"${clo
 </details>`;
 })}
 </nav>
-<div class="nodes" id="side-nodes" data-live aria-label="Nodes"><h2>Nodes</h2><small>Desired release: ${c.registry.desiredRelease()?.commit.slice(0, 12) ?? "manual"}</small>${c.registry.nodes().map((n) => html`<span>${icon("server")}${n.name}${dot(n.state === "online" ? "ok" : "muted")}${n.state === "offline" && html`<em>offline</em>`}${overcommitted(n.capacity) && html`<em>overcommitted</em>`}</span>${memoryLine(c, n)}${c.registry.releaseReports().filter((r) => r.node === n.name).map((r) => html`<small title="${r.reason ?? ""}">${r.role}: ${r.commit?.slice(0, 12) ?? "unknown"} · ${c.now - r.observedAt >= 90_000 ? "stale" : r.state}</small>`)}`)}</div>
+<div class="nodes" id="side-nodes" data-live aria-label="Nodes"><h2>Nodes</h2><small>Desired release: ${c.registry.desiredRelease()?.commit.slice(0, 12) ?? "manual"}</small>${c.registry.nodes().map((n) => html`<span>${icon("server")}<a class="link" href="/nodes/${encodeURIComponent(n.name)}" title="Health of ${n.name}">${n.name}</a>${dot(n.state === "online" ? "ok" : "muted")}${n.state === "offline" && html`<em>offline</em>`}${overcommitted(n.capacity) && html`<em>overcommitted</em>`}</span>${memoryLine(c, n)}${c.registry.releaseReports().filter((r) => r.node === n.name).map((r) => html`<small title="${r.reason ?? ""}">${r.role}: ${r.commit?.slice(0, 12) ?? "unknown"} · ${c.now - r.observedAt >= 90_000 ? "stale" : r.state}</small>`)}`)}</div>
 <a class="btn side-add" href="/projects/new" data-new-project>New project</a>
 </aside>`;
 }
@@ -563,6 +571,41 @@ ${backfillNote(c, report.backfill)}
 ${report.total.calls === 0 ? html`<p class="empty">No model calls were counted in this period.</p>` : breakdowns.map((b) => html`<section aria-labelledby="usage-by-${b}-h"><div class="ov-head"><h2 id="usage-by-${b}-h">${breakdownLook[b].title}</h2></div>
 ${usageTable(`usage-by-${b}`, breakdownLook[b].key, report.by[b]!.map((r) => b === "project" ? { ...r, key: html`<a class="link" href="${href(period, r.key)}">${r.key}</a>` } : r))}
 </section>`)}
+</div></div>`,
+  });
+}
+
+const unknown = html`<span class="dim">unknown</span>`;
+
+/** What the node's probe reads of its host when the page loads. Nothing here acts on the node. */
+function nodePage(c: Context, name: NodeName, health: NodeHealth | Error): Html {
+  const pylonOf = new Map(c.registry.pylonsOn(name).map((p) => [p.pylonId, p.thread]));
+  const reading = html`<section aria-labelledby="node-health-h"><div class="ov-head"><h2 id="node-health-h">Health</h2></div>
+${health instanceof Error ? html`<p class="error" role="alert">${health.message}</p>` : html`<dl class="kv node-health">
+<dt>Read</dt><dd><time datetime="${health.readAt}">${utc(Date.parse(health.readAt))}</time></dd>
+<dt>Load</dt><dd>${health.load === null ? unknown : `${health.load.one.toFixed(2)} · ${health.load.five.toFixed(2)} · ${health.load.fifteen.toFixed(2)} over 1, 5 and 15 minutes, on ${health.cpus} CPUs`}</dd>
+<dt>Memory</dt><dd>${health.memory === null ? unknown : `${gib(health.memory.availableGiB)} of ${gib(health.memory.totalGiB)} GiB available`}</dd>
+<dt>Swap</dt><dd>${health.memory === null ? unknown : health.memory.swapTotalGiB === 0 ? "none" : `${gib(health.memory.swapTotalGiB - health.memory.swapFreeGiB)} of ${gib(health.memory.swapTotalGiB)} GiB used`}</dd>
+<dt>Disk</dt><dd>${gib(health.disk.freeGiB)} of ${gib(health.disk.totalGiB)} GiB free at <code>${health.disk.path}</code></dd>
+<dt>Temperatures</dt><dd>${health.temperatures === null ? unknown : health.temperatures.map((t, i) => html`${i > 0 && html`<br>`}${t.sensor} ${t.celsius.toFixed(1)} °C`)}</dd>
+</dl>`}
+</section>`;
+  const pylons = health instanceof Error ? html`` : html`<section aria-labelledby="node-pylons-h"><div class="ov-head"><h2 id="node-pylons-h">Pylon processes ${health.pylons !== null && html`<span class="count">${health.pylons.length}</span>`}</h2></div>
+${health.pylons === null ? html`<p class="empty">This node's backend does not say which processes are its pylons'.</p>` : health.pylons.length === 0 ? html`<p class="empty">No pylon runs on this node.</p>` : html`<table class="ov" id="node-pylons">
+<thead><tr><th class="wide">Pylon</th><th>Thread</th><th class="wide">Processes</th><th>CPU</th><th>Resident</th></tr></thead>
+<tbody>${health.pylons.map((p) => {
+  const thread = pylonOf.get(p.pylonId);
+  return html`<tr><td class="wide"><code>${p.pylonId}</code></td><td>${thread === undefined ? html`<span class="dim">${p.pylonId}, not in the registry</span>` : html`<a class="link" href="/threads/${thread}" title="${p.pylonId}">${c.registry.thread(thread as ThreadId)?.title ?? thread}</a>`}</td><td class="wide">${p.processes}</td><td>${p.cpuPercent.toFixed(1)}%</td><td>${gib(p.residentGiB)} GiB</td></tr>`;
+})}</tbody>
+</table>`}
+<p class="dim small">CPU is the percent of one CPU a pylon's processes used over the second the probe sampled, so four busy CPUs read 400%.</p>
+</section>`;
+  return layout(c, {
+    title: `Node ${name}`,
+    main: html`<header class="bar"><button type="button" class="icon-btn menu" data-open="side" aria-label="Threads">☰</button><div class="crumb"><h1>${name}</h1></div></header>
+<div class="scroll"><div class="page" id="node-health" data-live>
+${reading}
+${pylons}
 </div></div>`,
   });
 }

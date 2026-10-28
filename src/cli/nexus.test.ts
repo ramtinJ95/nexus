@@ -31,7 +31,7 @@ import type { Project, ProjectId, RemoteProject } from "../project.ts";
 import { openTerminal, terminalSize } from "../guest-terminal.ts";
 import { processStream } from "../process-stream.ts";
 import { repoInitCommand } from "../pylon-vm-backend.ts";
-import type { ByteStream, CommandResult, NodeName, PylonCommand, PylonId, ServiceFact, StreamEnd, TailnetNodeId } from "../protocol.ts";
+import type { ByteStream, CommandResult, NodeHealth, NodeName, PylonCommand, PylonId, ServiceFact, StreamEnd, TailnetNodeId } from "../protocol.ts";
 import { checkoutDir } from "../sessions.ts";
 import { claudeProjects, transcriptStart, type ClaudeEntry } from "../claude-transcript.ts";
 import { call, CliError, follow } from "./transport.ts";
@@ -128,6 +128,7 @@ async function setup(t: TestContext, setupOptions: { queue?: boolean } = {}) {
   const commands: PylonCommand[] = [];
   /** What the node's probe opens a pipe to. Tests replace it. */
   let pipe = async (argv: readonly string[]): Promise<ByteStream> => { throw new Error(`unexpected stream ${argv[0]}`); };
+  let health = async (): Promise<NodeHealth> => { throw new Error("unexpected node health read"); };
   /** What the project's remote answers a setup read with. Tests replace it. */
   let read: ProjectMirror["setupInputs"] = () => Promise.reject(new Error("this test has no remote"));
   const fake = fakeHarness();
@@ -151,6 +152,7 @@ async function setup(t: TestContext, setupOptions: { queue?: boolean } = {}) {
     probes: new Map([[node, {
       command: (_pylonId: PylonId, command: PylonCommand) => { commands.push(command); return answer(command); },
       stream: (_pylonId: PylonId, argv: readonly string[]) => pipe(argv),
+      health: () => health(),
     }]]),
   });
   let api = await startApi(options(0));
@@ -188,6 +190,7 @@ async function setup(t: TestContext, setupOptions: { queue?: boolean } = {}) {
     callAs(id: TailnetNodeId) { caller = id; },
     probeAnswers(next: typeof answer) { answer = next; },
     probePipes(next: typeof pipe) { pipe = next; },
+    nodeHealth(next: typeof health) { health = next; },
     remoteReads(next: typeof read) { read = next; },
     localUrl: `http://127.0.0.1:${api.port}`,
     /** Stops the control plane, which drops every connection, and returns a function that starts it again on its port. */
@@ -1344,7 +1347,7 @@ test("show prints each question with its options, its reserved case, and who mus
 
 test("deploy and release use the shared release view and wait for both roles", async (t) => {
   const s = await setup(t);
-  assert.equal((await s.nexus(["--version"])).stdout.trim(), "nexus 0.35.0");
+  assert.equal((await s.nexus(["--version"])).stdout.trim(), "nexus 0.36.0");
   assert.equal((await s.nexus(["deploy", "bad"])).code, 64);
   const requested = await s.json(["deploy", "main"]);
   assert.equal(requested.desired.commit, "a".repeat(40));
@@ -1927,4 +1930,29 @@ test("show prints a failed pylon's log under its reason, indented, and --json ca
   s.registry.savePylon({ ...s.registry.pylon(thread.pylonId)!, failed });
   assert.match((await s.nexus(["show", thread.id])).stdout, /^failed: pylon is broken: the controller failed to boot the VM\n {2}qemu: booting\n {2}Error: Guest command got no answer within 13000 ms$/m);
   assert.equal((await s.json(["show", thread.id])).pylon.failed, failed);
+});
+
+test("node prints a node's health, unknown where the host exposes nothing, and --json the API's reply", async (t) => {
+  const s = await setup(t);
+  const health: NodeHealth = {
+    node, readAt: "2027-01-01T00:00:00.000Z", cpus: 16, load: { one: 2.5, five: 1.75, fifteen: 1 },
+    memory: { totalGiB: 62.8, availableGiB: 40.24, swapTotalGiB: 8, swapFreeGiB: 6 }, disk: { path: "/var/lib/nexus", totalGiB: 457.1, freeGiB: 180.33 },
+    temperatures: [{ sensor: "k10temp Tctl", celsius: 54.125 }, { sensor: "nvme Composite", celsius: 41.85 }],
+    pylons: [{ pylonId: "pylon-th-aaaaaaaaaaaa" as PylonId, processes: 2, cpuPercent: 112.46, residentGiB: 6.25 }, { pylonId: "pylon-th-bbbbbbbbbbbb" as PylonId, processes: 1, cpuPercent: 0, residentGiB: 0.1 }],
+  };
+  s.nodeHealth(async () => health);
+  assert.deepEqual(await s.json(["node", node]), health);
+  assert.equal((await s.nexus(["node", node])).stdout, [
+    `node: ${node}, read 2027-01-01T00:00:00.000Z`,
+    "load: 2.50 1.75 1.00 (1, 5, 15 min) on 16 CPUs",
+    "memory: 40.2 of 62.8 GiB available",
+    "swap: 2 of 8 GiB used",
+    "disk: 180.3 of 457.1 GiB free at /var/lib/nexus",
+    "temperatures: k10temp Tctl 54.1 °C, nvme Composite 41.9 °C",
+    "pylon: pylon-th-aaaaaaaaaaaa, 2 processes, 112.5% CPU, 6.3 GiB resident",
+    "pylon: pylon-th-bbbbbbbbbbbb, 1 process, 0% CPU, 0.1 GiB resident",
+    "",
+  ].join("\n"));
+  s.nodeHealth(async () => ({ ...health, load: null, memory: null, temperatures: null, pylons: null }));
+  assert.match((await s.nexus(["node", node])).stdout, /^load: unknown on 16 CPUs\nmemory: unknown\nswap: unknown\n.*\ntemperatures: unknown\npylons: unknown\n$/m);
 });

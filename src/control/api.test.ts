@@ -40,7 +40,7 @@ import { parseProbeConfig } from "../probe/config.ts";
 import { attachScript, checkoutDir } from "../sessions.ts";
 import { encodeMessage } from "../attach-wire.ts";
 import { terminalSize } from "../guest-terminal.ts";
-import type { ByteStream, CommandResult, JobId, NodeName, NodeObservation, PausedSession, PylonCommand, PylonId, ServiceFact, StreamEnd, TailnetNodeId } from "../protocol.ts";
+import type { ByteStream, CommandResult, JobId, NodeHealth, NodeName, NodeObservation, PausedSession, PylonCommand, PylonId, ServiceFact, StreamEnd, TailnetNodeId } from "../protocol.ts";
 
 const node = "rj-firebat" as NodeName;
 const laptop = "nLAPTOP" as TailnetNodeId;
@@ -95,6 +95,7 @@ async function setup(t: import("node:test").TestContext, options: { gitIdentity?
   const streams: [PylonId, readonly string[]][] = [];
   /** What the node's probe opens a pipe to. Tests replace it. */
   let pipe = async (argv: readonly string[]): Promise<ByteStream> => { throw new Error(`unexpected stream ${argv[0]}`); };
+  let health = async (): Promise<NodeHealth> => { throw new Error("unexpected node health read"); };
   /** What a project's remote answers a setup read with. Tests replace it. */
   let read: ProjectMirror["setupInputs"] = () => Promise.reject(new Error("this test has no remote"));
   const reads: Parameters<ProjectMirror["setupInputs"]>[1][] = [];
@@ -124,6 +125,7 @@ async function setup(t: import("node:test").TestContext, options: { gitIdentity?
     probes: new Map([[node, {
       command: (pylonId: PylonId, command: PylonCommand) => { commands.push([pylonId, command]); return answer(command); },
       stream: (pylonId: PylonId, argv: readonly string[]) => { streams.push([pylonId, argv]); return pipe(argv); },
+      health: () => health(),
     }]]),
     previewPorts: { first: 10200, last: 10299 },
     ...options.streamStallMs === undefined ? {} : { streamStallMs: options.streamStallMs },
@@ -168,6 +170,7 @@ async function setup(t: import("node:test").TestContext, options: { gitIdentity?
   return {
     registry, images, queue, call, raw, woken, calls, commands, streams, reads, fake, startThread, port: api.port, get httpsPort() { return api.httpsPort; }, close: () => api.close(),
     callAs(id: TailnetNodeId | null) { caller = id; },
+    nodeHealth(next: typeof health) { health = next; },
     /** Holds every request at whois until the returned function is called. */
     /** Holds each whois from now on until `release`. `asked` settles once one is held. */
     holdWhois() {
@@ -3402,4 +3405,29 @@ test("a harness, a Claude worker and a bare thread each answer every agent route
       page: deleted(t), message: deleted(t), abort: deleted(t), retry: deleted(t),
     }, t.title);
   }
+});
+
+const health: NodeHealth = {
+  node, readAt: "2027-01-01T00:00:00.000Z", cpus: 16, load: { one: 2.5, five: 1.75, fifteen: 1 },
+  memory: { totalGiB: 62.8, availableGiB: 40.2, swapTotalGiB: 8, swapFreeGiB: 8 }, disk: { path: "/var/lib/nexus", totalGiB: 457, freeGiB: 180.3 },
+  temperatures: null, pylons: [{ pylonId: "pylon-th-aaaaaaaaaaaa" as PylonId, processes: 2, cpuPercent: 12.5, residentGiB: 6.2 }],
+};
+
+test("only a deployer reads a node's health, which the node's probe answers, and no route under it changes the node", async (t) => {
+  const s = await setup(t, { deployment });
+  let reads = 0;
+  s.nodeHealth(async () => { reads++; return health; });
+  assert.deepEqual(await s.call("GET", `/v1/nodes/${node}/health`), { status: 200, body: health });
+  s.callAs(phone);
+  assert.deepEqual(await s.call("GET", `/v1/nodes/${node}/health`), { status: 403, body: { error: "caller may not read a node's health: only deployers may, never infrastructure nodes or pylons" } });
+  s.callAs("nFIREBAT" as TailnetNodeId);
+  assert.equal((await s.call("GET", `/v1/nodes/${node}/health`)).status, 403, "the control node is never a deployer, though listed");
+  s.callAs(laptop);
+  assert.deepEqual(await s.call("GET", "/v1/nodes/nowhere/health"), { status: 404, body: { error: "no node nowhere" } });
+  for (const method of ["POST", "PUT", "DELETE"]) assert.equal((await s.call(method, `/v1/nodes/${node}/health`, {})).status, 405, `${method} is no route`);
+  s.nodeHealth(async () => { throw Object.assign(new Error(`${node}: connect ECONNREFUSED`), { code: "unreachable" }); });
+  assert.deepEqual(await s.call("GET", `/v1/nodes/${node}/health`), { status: 503, body: { error: `${node}: connect ECONNREFUSED` } });
+  assert.equal(reads, 1, "a refused caller reaches no probe");
+  const off = await setup(t);
+  assert.equal((await off.call("GET", `/v1/nodes/${node}/health`)).status, 403, "with no deployers configured, nobody reads it");
 });

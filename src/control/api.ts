@@ -35,7 +35,7 @@ import { WebSocketServer, type WebSocket } from "ws";
 import { z } from "zod";
 import { actualState, desiredPhase, retryRefusal, type ActualState, type DesiredPhase } from "../reconcile.ts";
 import { bootSecrets, chatgptTokenGrant, effectiveAllowedHosts, gitIdentitySchema, gitUrl, linkedName, reservedPorts, withHttpsHosts, type BootInputs, type Project, type ProjectId } from "../project.ts";
-import { isImageId, type CommandResult, type NodeName, type ProbeClient, type ProbeError, type PylonCommand, type PylonId, type TailnetNodeId } from "../protocol.ts";
+import { isImageId, type CommandResult, type NodeHealth, type NodeName, type ProbeClient, type ProbeError, type PylonCommand, type PylonId, type TailnetNodeId } from "../protocol.ts";
 import type { ConversationView, EntryRecord, JsonObject } from "@earendil-works/pi-durable";
 import type { HarnessHost } from "../harness/host.ts";
 import { pinsSchema, type ImageId, type ImageManifest } from "../images.ts";
@@ -84,8 +84,8 @@ export interface ApiOptions {
   startThread(request: StartRequest, caller: string, queuedId?: ThreadId, key?: StartKey): Promise<Thread>;
   /** Asks the loop for a pass over the node's pylons. */
   wake(node: NodeName): void;
-  /** One client per registry node, for the guest commands and checkout reads a human asks for. */
-  probes: ReadonlyMap<NodeName, Pick<ProbeClient, "command" | "stream">>;
+  /** One client per registry node, for the guest commands, checkout reads and node health a human asks for. */
+  probes: ReadonlyMap<NodeName, Pick<ProbeClient, "command" | "stream" | "health">>;
   /** The https ports each node's previews are allocated from, the loop's range. */
   previewPorts: PortRange;
   /** Image builds and rollouts. Without it, their routes answer 409. */
@@ -448,7 +448,21 @@ export async function startApi(options: ApiOptions): Promise<Api> {
     landRefusal: (caller) => !options.reviews ? "no review loop" : canDeploy(registry, options.deployment, caller) ? null : "not a deployer",
     answerRefusal: refusalOf,
     deploys: (r) => options.reviews?.deploys(r) ?? false,
+    nodeHealth,
   });
+
+  /** A node's health says what runs on it, so only a deployer reads it. Nothing reached from here acts on the node. */
+  async function nodeHealth(caller: TailnetNodeId, name: NodeName): Promise<NodeHealth> {
+    if (!canDeploy(registry, options.deployment, caller)) throw new HttpError(403, "caller may not read a node's health: only deployers may, never infrastructure nodes or pylons");
+    const probe = registry.node(name) === undefined ? undefined : probes.get(name);
+    if (probe === undefined) throw new HttpError(404, `no node ${name}`);
+    try {
+      return await probe.health();
+    } catch (err) {
+      if ((err as Partial<ProbeError>).code === "unreachable") throw new HttpError(503, (err as Error).message);
+      throw err;
+    }
+  }
 
   /**
    * Each open stream's and terminal's thread and how to end it, so a delete ends its thread's streams. The event log's
@@ -966,6 +980,7 @@ export async function startApi(options: ApiOptions): Promise<Api> {
       const { observation, ...n } = record;
       return { ...n, observedAt: observation?.observedAt ?? null, overcommitted: overcommitted(n.capacity), pylons: nodePylons(registry, record) };
     }))],
+    ["GET", /^\/v1\/nodes\/([^/]+)\/health$/, async ([, name], r) => ok(await nodeHealth(r.caller, name as NodeName))],
     ["GET", /^\/v1\/threads$/, (_, r) => {
       const threads = registry.threads((r.query.get("project") ?? undefined) as ProjectId | undefined);
       return ok((r.query.get("deleted") === "false" ? threads.filter((t) => t.status !== "deleted") : threads).map(row));

@@ -14,7 +14,7 @@ import { fakeHarness } from "./fake-harness.ts";
 import { openRegistry, type Thread, type ThreadId } from "./registry.ts";
 import type { Review, ReviewLoop } from "./review.ts";
 import type { AgentCall } from "./usage.ts";
-import type { JobId, NodeName, PylonObservation, ServiceFact, TailnetNodeId } from "../protocol.ts";
+import type { JobId, NodeHealth, NodeName, PylonId, PylonObservation, ServiceFact, TailnetNodeId } from "../protocol.ts";
 import type { ImageId } from "../images.ts";
 import { githubTokenGrant } from "../project.ts";
 import type { AssistantMessage, Message, ToolCall } from "@earendil-works/pi-ai";
@@ -1689,4 +1689,27 @@ test("a harness, a Claude worker and a bare thread each show the conversation, s
     const model = thread === claude ? " · claude-opus-5-5" : "";
     assert.deepEqual(await agentParts(thread), { stream: null, convo: `<id> · started just now${model} The thread is deleted, so its conversation is gone.`, run: "", composer: null }, thread.title);
   }
+});
+
+test("a node's page shows its health as its probe reads it, unknown where the host exposes nothing, and only to a deployer", async (t) => {
+  let health: NodeHealth = {
+    node, readAt: "2027-01-01T00:00:00.000Z", cpus: 16, load: { one: 2.5, five: 1.75, fifteen: 1 },
+    memory: { totalGiB: 62.8, availableGiB: 40.24, swapTotalGiB: 0, swapFreeGiB: 0 }, disk: { path: "/var/lib/nexus", totalGiB: 457.1, freeGiB: 180.33 },
+    temperatures: null, pylons: [],
+  };
+  const probe = { command: () => Promise.reject(new Error("unused")), stream: () => Promise.reject(new Error("unused")), health: async () => health };
+  const s = await seeded(t, { ...landingOptions(), probes: new Map([[node, probe]]) });
+  const started = await s.start("acme", "Busy thread");
+  assert.match((await s.call("GET", "/")).text.split('id="side-nodes"')[1]!.split("</div>")[0]!, /<a class="link" href="\/nodes\/rj-firebat"/, "the sidebar's node links its page");
+  health = { ...health, pylons: [{ pylonId: started.pylonId, processes: 2, cpuPercent: 112.46, residentGiB: 6.25 }, { pylonId: "pylon-orphan" as PylonId, processes: 1, cpuPercent: 0, residentGiB: 0.1 }] };
+  const page = await s.call("GET", `/nodes/${node}`);
+  assert.equal(page.status, 200);
+  const text = textOf(page.text.split('id="node-health"')[1]!);
+  for (const shown of ["2.50 · 1.75 · 1.00 over 1, 5 and 15 minutes, on 16 CPUs", "40.2 of 62.8 GiB available", "Swap none", "180.3 of 457.1 GiB free at /var/lib/nexus", "Temperatures unknown", `${started.pylonId} Busy thread 2 112.5% 6.3 GiB`, "pylon-orphan pylon-orphan, not in the registry 1 0.0% 0.1 GiB"]) {
+    assert.ok(text.includes(shown), `${shown} in: ${text}`);
+  }
+  s.callAs(phone);
+  assert.match(textOf((await s.call("GET", `/nodes/${node}`)).text.split('id="node-health"')[1]!), /caller may not read a node's health: only deployers may/);
+  s.callAs(laptop);
+  assert.equal((await s.call("GET", "/nodes/nowhere")).status, 404);
 });
