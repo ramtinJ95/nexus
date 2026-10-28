@@ -1,9 +1,9 @@
-$ nexus show th-cfb3227e9ca2
-th-cfb3227e9ca2  B: greet in French, after A
+$ nexus show th-3026e9b9bc74
+th-3026e9b9bc74  B: greet in French, after A
 project: wave
 attention: reply
 status: active
-pylon: pylon-th-cfb3227e9ca2 on node-a, running, observed 1s ago
+pylon: pylon-th-3026e9b9bc74 on node-a, running, observed 1s ago
 size: 1 CPUs, 3 GiB memory, 5 GiB disk
 placement: node-a, the project's default node
 setup: fresh boot runs .nexus/setup, because the control plane could not read .nexus/setup at main: the control plane reads only https:// remotes, and holds no SSH key for git@github.com:verify/wave.git

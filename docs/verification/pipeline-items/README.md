@@ -1,6 +1,6 @@
 # Pipeline items
 
-Verified in this task's pylon on 2026-10-28, on branch `feat/pipeline-items` at 66aa19a against main at b996fb0, with Node 24.22.1 and headless Chromium from `@sparticuz/chromium` 138. No live control plane, node, image, GitHub repository or other thread was touched. The branch was then rebased onto main at 63695a3, which changes only the pylon image, so its commits have new IDs.
+Verified in this task's pylon on 2026-10-28, on branch `feat/pipeline-items` at 151644a against main at 63695a3, with Node 24.22.1 and headless Chromium from `@sparticuz/chromium` 138. No live control plane, node, image, GitHub repository or other thread was touched.
 
 ## How to rerun
 
@@ -13,7 +13,7 @@ MODULES=<node_modules with @sparticuz/chromium and puppeteer-core> LD_LIBRARY_PA
 
 ## The stack
 
-Docker is not available in this pylon, so the verify-nexus stack could not run. `stack.ts` is [the queued-threads stack](../queued-threads/README.md) with a new driver: the real `startControlPlane` from the checkout under test in one child process, with its registry, loop, harness, PR watch, review loop, queue, pipeline pass, API and dashboard, and the real probe server in another, so a restart is a process exit and the registry file survives it. Every command goes through the real `nexus` CLI and every page through headless Chromium. The stand-ins are tailscaled's whois, the scripted model, which answers a message with `scripted answer after user`, GitHub as an HTTP server in the driver, and a VM backend that boots nothing and logs each pylon it is asked to boot to `backend.log`. Its guest answers the probe's git read with the branch the driver says the agent pushed, and runs the pi-env daemon for the harness. It runs nothing else, so `control.log` has the turn snapshots and token-usage reads it refused.
+Docker is not available in this pylon, so the verify-nexus stack could not run. `stack.ts` is [the queued-threads stack](../queued-threads/README.md) with a new driver: the real `startControlPlane` from the checkout under test in one child process, with its registry, loop, harness, PR watch, review loop, queue, pipeline pass, API and dashboard, and the real probe server in another, so a restart is a process exit and the registry file survives it. Every command goes through the real `nexus` CLI and every page through headless Chromium. The stand-ins are tailscaled's whois, which answers the probe as the node and every other caller as the person's laptop, `nVERIFYLAPTOP`, since only a person adds an item, the scripted model, which answers a message with `scripted answer after user`, GitHub as an HTTP server in the driver, and a VM backend that boots nothing and logs each pylon it is asked to boot to `backend.log`. Its guest answers the probe's git read with the branch the driver says the agent pushed, and runs the pi-env daemon for the harness. It runs nothing else, so `control.log` has the turn snapshots and token-usage reads it refused.
 
 The driver adds project `wave`, turns its pipeline on with `project edit wave --pipeline start`, and adds two items: A, and B after A, each with a brief. Then:
 
@@ -25,11 +25,11 @@ A watcher reads `items --all --json` once a second throughout and writes each it
 
 ## Main (`main/`) and this branch (`branch/`)
 
-| Step | main, b996fb0 | this branch |
+| Step | main, 63695a3 | this branch |
 |---|---|---|
 | `03-project-edit-pipeline.txt` | exit 64, `Unknown option '--pipeline'` | exit 0, and `04-projects.txt` says `pipeline starts items` |
 | `05-item-add-a.txt`, `06-item-add-b.txt` | exit 64, `unknown command item` | exit 0. A is `queued: starts on the queue's next pass`, and B is `queued: waits for A: greet by name: has no pull request yet` |
-| `backend.log` | no boots | A's pylon booted at the moment `item add` answered, as the add's own pass queued it and the queue started it. B's booted once, 117 s after PR #1 merged: the PR watch's 2-minute read plus one pass |
+| `backend.log` | no boots | A's pylon booted at the moment `item add` answered, as the add's own pass queued it and the queue started it. B's booted once, 118 s after PR #1 merged: the PR watch's 2-minute read plus one pass |
 | `12-items-after-restart.txt` | exit 64 | after the restart, A `building` and B `queued`, on the same two threads |
 | `phases.txt` | empty | A: `building`, `reviewing: PR #1 is open, before its review`, `landed: PR #1 merged`. B: `queued: waits for A ... has no pull request yet`, `... PR #1 is open`, then `building` |
 | `14-item-show-b-waiting.txt` | exit 64 | B's phase, thread, worker, the item it is after and its brief |

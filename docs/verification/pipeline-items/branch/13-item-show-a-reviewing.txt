@@ -1,10 +1,10 @@
-$ nexus item show it-f943645e7be3
-it-f943645e7be3  A: greet by name
+$ nexus item show it-516281a236bb
+it-516281a236bb  A: greet by name
 project: wave
 phase: reviewing, PR #1 is open, before its review
-thread: th-8726dcaf924c
+thread: th-c3c6053e0d94
 worker: Nexus agent
 brief: A: greet by name. Commit, push branch feat-a and open a pull request.
-added by nVERIFYCONTROL 2m ago
-nexus show th-8726dcaf924c shows its thread.
+added by nVERIFYLAPTOP 2m ago
+nexus show th-c3c6053e0d94 shows its thread.
 [exit 0]

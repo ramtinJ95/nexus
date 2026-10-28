@@ -1,4 +1,4 @@
 $ nexus threads
-th-8726dcaf924c  active  -                                                   pylon running  wave  1s ago  A: greet by name
-th-cfb3227e9ca2  queued  waits for th-8726dcaf924c: has no pull request yet  node node-a    wave  0s ago  B: greet in French, after A
+th-c3c6053e0d94  active  -                                                   pylon running  wave  1s ago  A: greet by name
+th-3026e9b9bc74  queued  waits for th-c3c6053e0d94: has no pull request yet  node node-a    wave  1s ago  B: greet in French, after A
 [exit 0]

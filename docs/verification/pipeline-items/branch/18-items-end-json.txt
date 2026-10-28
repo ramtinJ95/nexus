@@ -1,16 +1,16 @@
 $ nexus items --json
 [
   {
-    "id": "it-f943645e7be3",
+    "id": "it-516281a236bb",
     "project": "wave",
     "title": "A: greet by name",
-    "addedBy": "nVERIFYCONTROL",
-    "addedAt": 1793178482786,
+    "addedBy": "nVERIFYLAPTOP",
+    "addedAt": 1793178971319,
     "after": [],
     "worker": "harness",
     "model": null,
     "brief": "A: greet by name. Commit, push branch feat-a and open a pull request.",
-    "thread": "th-8726dcaf924c",
+    "thread": "th-c3c6053e0d94",
     "phase": {
       "kind": "landed",
       "why": "PR #1 merged"
@@ -18,18 +18,18 @@ $ nexus items --json
     "approved": null
   },
   {
-    "id": "it-6c9b088757fe",
+    "id": "it-7b3ad974e2d6",
     "project": "wave",
     "title": "B: greet in French, after A",
-    "addedBy": "nVERIFYCONTROL",
-    "addedAt": 1793178482964,
+    "addedBy": "nVERIFYLAPTOP",
+    "addedAt": 1793178971503,
     "after": [
-      "it-f943645e7be3"
+      "it-516281a236bb"
     ],
     "worker": "harness",
     "model": null,
     "brief": "B: greet in French, after A. Commit, push branch feat-b and open a pull request.",
-    "thread": "th-cfb3227e9ca2",
+    "thread": "th-3026e9b9bc74",
     "phase": {
       "kind": "building",
       "why": "no pull request yet"

@@ -28,6 +28,8 @@ const [mode, srcArg, ...rest] = process.argv.slice(2) as [string, string, ...str
 const src = resolve(srcArg);
 const image = "img-0000000000aa" as ImageId;
 const controlId = "nVERIFYCONTROL" as TailnetNodeId;
+/** Every caller of the API but the probe is the person's laptop, as the CLI on a Mac is. */
+const laptop = "nVERIFYLAPTOP" as TailnetNodeId;
 const node = { name: "node-a" as NodeName, host: "127.0.0.1", id: "nVERIFYA" as TailnetNodeId };
 const api = "http://127.0.0.1:7470";
 const githubPort = 7499;
@@ -88,7 +90,7 @@ async function control(runDir: string) {
   rmSync(socket, { force: true });
   await new Promise<void>((done) => createServer((req, res) => {
     const addr = new URL(req.url ?? "/", "http://local-tailscaled.sock").searchParams.get("addr") ?? "";
-    res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ Node: { StableID: addr === `${node.host}:7480` ? node.id : controlId } }));
+    res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ Node: { StableID: addr === `${node.host}:7480` ? node.id : laptop } }));
   }).listen(socket, done));
   writeFileSync(join(runDir, "github-token"), "verifytoken\n");
   const cp = await startControlPlane({
@@ -97,7 +99,7 @@ async function control(runDir: string) {
     listen: { host: "127.0.0.1", port: 7470, hostnames: ["127.0.0.1"] },
     self: { tailnetNodeId: controlId },
     nodes: [{ name: node.name, tailnetHost: node.host, tailnetNodeId: node.id }],
-    callers: [],
+    callers: [laptop],
     dotfiles: { repo: "https://example.com/dotfiles.git", ref: "main" },
     harness: { storage: join(runDir, "harness.sqlite"), credentials: join(runDir, "unused-credentials.json"), model: scriptedModel },
     tailscaledSocket: socket,

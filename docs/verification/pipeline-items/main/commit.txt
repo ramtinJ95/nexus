@@ -1,1 +1,1 @@
-main: b996fb0 feat(control): archive a landed review's builder and reviewer (#177)
+main: 63695a3 feat(image): Node 26 and KVM on request in the pylon image (#178)
