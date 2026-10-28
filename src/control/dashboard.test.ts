@@ -1516,13 +1516,14 @@ test("the Usage page says what the usage backfill did and does, with the threads
   s.registry.holdUsageBackfill(old.id, Date.now());
   assert.ok((await note()).html.includes(`It reads <a class="link" href="/threads/${old.id}">Old work</a>.`));
   assert.match(textOf((await s.call("GET", `/threads/${old.id}`)).text), /Desired reading/, "the thread's pylon wants to run for reading");
-  s.registry.finishUsageBackfillThread(old.id, "done", null, { calls: 1234, tokens: 5_600_000 }, Date.now());
+  s.registry.recordUsage(old.id, Array.from({ length: 1234 }, (_, i) => ({ id: `claude:msg_${i}`, agent: "claude" as const, model: "claude-opus-5-5", at: 1_000, input: i === 0 ? 5_600_000 - 1233 : 1, output: 0, cacheWrite: 0, cacheRead: 0 })), [], true);
+  s.registry.finishUsageBackfillThread(old.id, "done", null, Date.now());
   assert.equal((await note()).text, "The backfill reads archived threads' pylons, one at a time: 1 of 2 threads read, 1,234 calls and 5.6M tokens recovered so far. It waits for the pylon of Old work to pause.");
   s.registry.stopUsageBackfill(Date.now());
   assert.equal((await note()).text, "The backfill stopped at 1 of 2 threads read, with 1,234 calls and 5.6M tokens recovered. A deployer goes on with nexus usage backfill .");
 
   s.registry.startUsageBackfill([gone.id], Date.now());
-  s.registry.finishUsageBackfillThread(gone.id, "skipped", "rj-firebat holds no disk for its pylon", { calls: 0, tokens: 0 }, Date.now());
+  s.registry.finishUsageBackfillThread(gone.id, "skipped", "rj-firebat holds no disk for its pylon", Date.now());
   s.registry.finishUsageBackfill(Date.parse("2027-03-10T12:00:00Z"));
   const done = await note();
   assert.equal(done.attributes, 'data-backfill-state="done" data-read="2" data-of="2" data-recovered-calls="1234" data-recovered-tokens="5600000"');

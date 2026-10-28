@@ -684,9 +684,9 @@ export function openRegistry(path: string, clock = Date.now) {
      * Records each call under the thread it was read from, with the thread's project and role, and moves each cursor
      * to where its read ended. A call recorded before keeps its thread and time, and each count the larger of the two
      * reads, since every record of one call carries the same usage. Returns how many calls were new, and the tokens
-     * the recorded counts grew by.
+     * the recorded counts grew by. `backfill` adds them to the thread's usage backfill row in the same transaction.
      */
-    recordUsage(thread: ThreadId, calls: readonly AgentCall[], cursors: readonly UsageCursor[] = []): { calls: number; tokens: number } {
+    recordUsage(thread: ThreadId, calls: readonly AgentCall[], cursors: readonly UsageCursor[] = [], backfill = false): { calls: number; tokens: number } {
       const t = q.thread.get(thread) as Row | undefined;
       if (t === undefined) throw new Error(`no thread ${thread} to record usage under`);
       const role = roleOf(t.started_by as string);
@@ -712,6 +712,7 @@ export function openRegistry(path: string, clock = Date.now) {
         for (const { source, key, position, before } of cursors) {
           sql("INSERT INTO usage_cursors VALUES (?, ?, ?, ?) ON CONFLICT (source, key) DO UPDATE SET position = excluded.position, before = excluded.before").run(source, key, position, before);
         }
+        if (backfill) sql("UPDATE usage_backfill_threads SET calls = calls + ?, tokens = tokens + ? WHERE thread = ?").run(added.calls, added.tokens, thread);
       });
       return added;
     },
@@ -774,10 +775,13 @@ export function openRegistry(path: string, clock = Date.now) {
     releaseUsageBackfill() {
       sql("UPDATE usage_backfill SET thread = NULL, phase = NULL, since = NULL").run();
     },
-    /** The thread was read, or skipped for `reason`. A run that holds its pylon now waits for its pause. */
-    finishUsageBackfillThread(thread: ThreadId, state: "done" | "skipped", reason: string | null, recovered: { calls: number; tokens: number }, now: number) {
+    /**
+     * The thread was read, or skipped for `reason`, and keeps what its reads recovered. A run that holds its pylon now
+     * waits for its pause.
+     */
+    finishUsageBackfillThread(thread: ThreadId, state: "done" | "skipped", reason: string | null, now: number) {
       transaction(() => {
-        sql("UPDATE usage_backfill_threads SET state = ?, reason = ?, calls = ?, tokens = ?, at = ? WHERE thread = ?").run(state, reason, recovered.calls, recovered.tokens, now, thread);
+        sql("UPDATE usage_backfill_threads SET state = ?, reason = ?, at = ? WHERE thread = ?").run(state, reason, now, thread);
         sql("UPDATE usage_backfill SET phase = 'pausing', since = ? WHERE state = 'running' AND thread = ?").run(now, thread);
       });
     },

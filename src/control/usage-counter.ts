@@ -18,7 +18,8 @@ export interface UsageCounter {
   sweep(): Promise<void>;
   /**
    * Reads every transcript of the thread's running pylon from its start, as the usage backfill does, and records each
-   * read as a sweep would. Returns the calls no read had counted and the tokens they added. Throws when the pylon is
+   * read as a sweep would, adding what each recovered to the thread's backfill row with it, so a read cut short keeps
+   * what it recorded. Returns the calls no read had counted and the tokens they added. Throws when the pylon is
    * not running, a read fails, or `signal` aborts it between reads. No other read of the pylon starts until it is done.
    */
   readWhole(id: ThreadId, signal?: AbortSignal): Promise<{ calls: number; tokens: number }>;
@@ -74,7 +75,7 @@ export function usageCounter(options: {
     if (last !== null && last !== after) registry.recordUsage(id, calls, [{ source: "harness", key: conversation, position: last, before: "" }]);
   });
 
-  async function readOn(id: ThreadId, cursors: (pylon: PylonId) => ReadonlyMap<string, FileCursor>) {
+  async function readOn(id: ThreadId, cursors: (pylon: PylonId) => ReadonlyMap<string, FileCursor>, backfill = false) {
     const t = registry.thread(id);
     const pylon = t === undefined ? undefined : registry.pylon(t.pylonId);
     const node = pylon === undefined ? undefined : registry.node(pylon.node);
@@ -82,7 +83,7 @@ export function usageCounter(options: {
     const probe = running ? probes.get(pylon!.node) : undefined;
     if (t === undefined || t.status === "deleted" || probe === undefined) return null;
     const read = await readAgentUsage((argv) => probe.stream(t.pylonId, argv), cursors(t.pylonId), logs);
-    const added = registry.recordUsage(id, read.calls, [...read.offsets].map(([key, [position, before]]) => ({ source: t.pylonId, key, position, before })));
+    const added = registry.recordUsage(id, read.calls, [...read.offsets].map(([key, [position, before]]) => ({ source: t.pylonId, key, position, before })), backfill);
     return { ...added, offsets: read.offsets, more: read.more };
   }
 
@@ -104,7 +105,7 @@ export function usageCounter(options: {
       for (let n = 0; n < maxWholeReads; n++) {
         signal?.throwIfAborted();
         if (closed) throw new Error("the control plane is stopping");
-        const read = await readOn(id, () => cursors);
+        const read = await readOn(id, () => cursors, true);
         if (read === null) throw new Error("its pylon is not running");
         added.calls += read.calls;
         added.tokens += read.tokens;

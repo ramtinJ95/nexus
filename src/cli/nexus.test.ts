@@ -1793,8 +1793,9 @@ test("usage backfill starts a run, --dry-run lists what it would read, --stop st
   assert.equal((await s.nexus(["usage", "backfill", "--dry-run", "--stop"])).code, 64);
 
   s.registry.startUsageBackfill([old.id, gone.id], Date.parse("2026-10-28T09:00:00Z"));
-  s.registry.finishUsageBackfillThread(old.id, "done", null, { calls: 1234, tokens: 5_600_000 }, Date.parse("2026-10-28T09:10:00Z"));
-  s.registry.finishUsageBackfillThread(gone.id, "skipped", "rj-firebat holds no disk for its pylon", { calls: 0, tokens: 0 }, Date.parse("2026-10-28T09:11:00Z"));
+  s.registry.recordUsage(old.id, Array.from({ length: 1234 }, (_, i) => ({ id: `claude:msg_${i}`, agent: "claude" as const, model: "claude-opus-5-5", at: 1_000, input: i === 0 ? 5_600_000 - 1233 : 1, output: 0, cacheWrite: 0, cacheRead: 0 })), [], true);
+  s.registry.finishUsageBackfillThread(old.id, "done", null, Date.parse("2026-10-28T09:10:00Z"));
+  s.registry.finishUsageBackfillThread(gone.id, "skipped", "rj-firebat holds no disk for its pylon", Date.parse("2026-10-28T09:11:00Z"));
   s.registry.finishUsageBackfill(Date.parse("2026-10-28T09:12:00Z"));
   assert.equal(await backfillLine(), `Backfill: done at 2026-10-28 09:12 UTC, 2 of 2 threads read, 1 skipped, recovered 1234 calls and 5.6M tokens.\nSkipped:\n${gone.id}  Gone  rj-firebat holds no disk for its pylon`);
   assert.equal((await s.nexus(["usage", "backfill", "--dry-run"])).stdout, `A start reads 1 archived thread, one pylon at a time:\n${gone.id}  acme  rj-firebat  Gone\n  skipped before: rj-firebat holds no disk for its pylon\n`);

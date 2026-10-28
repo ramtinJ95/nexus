@@ -64,10 +64,15 @@ function observe(registry: Registry, node: NodeName, pylons: readonly [PylonId, 
   }, [{ record: "node", node, state: "online", capacity }]);
 }
 
-function fakeCounter() {
+/** Records `calls` calls no read had counted, `tokens` in all, as a backfill's read of the thread does. */
+const recover = (registry: Registry, thread: ThreadId, calls: number, tokens: number) => registry.recordUsage(thread, Array.from({ length: calls }, (_, i) => ({
+  id: `claude:msg_${thread}_${i}`, agent: "claude" as const, model: "claude-opus-5-5", at: 1_000, input: i === 0 ? tokens - calls + 1 : 1, output: 0, cacheWrite: 0, cacheRead: 0,
+})), [], true);
+
+function fakeCounter(registry: Registry) {
   const counter = {
     reads: [] as ThreadId[],
-    answer: async (_: ThreadId) => ({ calls: 3, tokens: 300 }),
+    answer: async (id: ThreadId) => recover(registry, id, 3, 300),
     readWhole(id: ThreadId) {
       counter.reads.push(id);
       return counter.answer(id);
@@ -76,7 +81,7 @@ function fakeCounter() {
   return counter;
 }
 
-function backfill(t: TestContext, registry: Registry, counter = fakeCounter(), over: { bootMs?: number; pauseMs?: number } = {}) {
+function backfill(t: TestContext, registry: Registry, counter = fakeCounter(registry), over: { bootMs?: number; pauseMs?: number } = {}) {
   const woken: NodeName[] = [];
   const job = usageBackfill({ registry, counter, wake: (node) => woken.push(node), intervalMs: 5, log: () => {}, ...over });
   t.after(() => job.close());
@@ -115,8 +120,9 @@ test("a start lists each thread once and leaves a running run as it is, and a la
   });
   assert.deepEqual(registry.startUsageBackfill([a!.id, b!.id, c!.id], 200), registry.usageBackfill(), "a second start while one runs changes nothing");
   assert.deepEqual(registry.usageBackfillThreads().map((r) => r.title), ["a", "b"]);
-  registry.finishUsageBackfillThread(a!.id, "done", null, { calls: 5, tokens: 500 }, 300);
-  registry.finishUsageBackfillThread(b!.id, "skipped", "its node holds no disk for its pylon", nothing, 310);
+  recover(registry, a!.id, 5, 500);
+  registry.finishUsageBackfillThread(a!.id, "done", null, 300);
+  registry.finishUsageBackfillThread(b!.id, "skipped", "its node holds no disk for its pylon", 310);
   registry.finishUsageBackfill(400);
   const skippedB = { thread: b!.id, title: "b", state: "skipped", reason: "its node holds no disk for its pylon", calls: 0, tokens: 0, at: 310 };
   assert.deepEqual(registry.usageBackfill(), {
@@ -134,7 +140,7 @@ test("a start lists each thread once and leaves a running run as it is, and a la
   registry.holdUsageBackfill(c!.id, 600);
   assert.deepEqual([desired(registry, a!), desired(registry, c!)], ["paused", "reading"]);
   assert.equal(registry.thread(c!.id)!.readingUsage, true);
-  registry.finishUsageBackfillThread(c!.id, "done", null, { calls: 1, tokens: 10 }, 700);
+  registry.finishUsageBackfillThread(c!.id, "done", null, 700);
   assert.deepEqual(current(registry), { thread: c!.id, phase: "pausing", since: 700 });
   assert.equal(desired(registry, c!), "paused", "a read pylon's desired phase is paused again, while the run waits for its pause");
   assert.equal(registry.stopUsageBackfill(800).state, "stopped");
@@ -208,7 +214,7 @@ test("a wake that fails, or does not boot in time, is skipped with why, its atte
   observe(registry, n1, [[a.pylonId, "stopped"], [b.pylonId, "stopped"]]);
   const before = { at: Date.now(), code: "backend" as const, message: "a failure from before the thread was archived" };
   registry.savePylon({ ...registry.pylon(a.pylonId)!, attempts: { count: 2, last: before } });
-  const { job } = backfill(t, registry, fakeCounter(), { bootMs: 200 });
+  const { job } = backfill(t, registry, fakeCounter(registry), { bootMs: 200 });
   job.start();
 
   await held(registry, a, "reading");
@@ -250,7 +256,7 @@ test("a read that fails skips the thread with its error, and one a stop cut shor
   const a = addThread(registry, n1, "broken transcript");
   const b = addThread(registry, n1, "stopped mid-read");
   observe(registry, n1, [[a.pylonId, "running"], [b.pylonId, "running"]]);
-  const counter = fakeCounter();
+  const counter = fakeCounter(registry);
   const reading = Promise.withResolvers<{ calls: number; tokens: number }>();
   counter.answer = async (id) => id === a.id ? Promise.reject(new Error("the pipe to the pylon was lost")) : reading.promise;
   const { job, woken } = backfill(t, registry, counter);
@@ -295,7 +301,7 @@ test("a control plane restarted mid-run goes on with the pylon it held, and a se
   const a = addThread(first, n1, "first");
   const b = addThread(first, n1, "second");
   observe(first, n1, [[a.pylonId, "stopped"], [b.pylonId, "stopped"]]);
-  const before = usageBackfill({ registry: first, counter: fakeCounter(), wake: () => {}, intervalMs: 5, log: () => {} });
+  const before = usageBackfill({ registry: first, counter: fakeCounter(first), wake: () => {}, intervalMs: 5, log: () => {} });
   before.start();
   await held(first, a, "reading");
   await before.close();
@@ -329,8 +335,8 @@ test("the dry run lists each archived thread a start would read, with its node a
   addThread(registry, n1, "active", "idle");
   addThread(registry, n1, "deleted", "deleted");
   registry.startUsageBackfill([skipped.id, done.id], 1);
-  registry.finishUsageBackfillThread(skipped.id, "skipped", "infra-testbench holds no disk for its pylon", nothing, 2);
-  registry.finishUsageBackfillThread(done.id, "done", null, { calls: 1, tokens: 1 }, 3);
+  registry.finishUsageBackfillThread(skipped.id, "skipped", "infra-testbench holds no disk for its pylon", 2);
+  registry.finishUsageBackfillThread(done.id, "done", null, 3);
   registry.stopUsageBackfill(4);
   const { job } = backfill(t, registry);
   assert.deepEqual(job.plan(), [

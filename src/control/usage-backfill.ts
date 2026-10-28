@@ -22,7 +22,6 @@ export interface UsageBackfillJob {
   close(): Promise<void>;
 }
 
-const nothing = { calls: 0, tokens: 0 };
 const minutes = (ms: number) => `${ms / 60_000} minutes`;
 
 export function usageBackfill(options: {
@@ -90,7 +89,7 @@ export function usageBackfill(options: {
       const t = registry.thread(row.thread)!;
       const why = unreadable(t);
       if (why !== null) {
-        registry.finishUsageBackfillThread(t.id, "skipped", why, nothing, now);
+        registry.finishUsageBackfillThread(t.id, "skipped", why, now);
         continue;
       }
       const p = registry.pylon(t.pylonId)!;
@@ -109,8 +108,8 @@ export function usageBackfill(options: {
   async function reading(id: ThreadId, since: number, now: number) {
     const t = registry.thread(id)!;
     const p = registry.pylon(t.pylonId);
-    const finish = (state: "done" | "skipped", reason: string | null, recovered = nothing) => {
-      registry.finishUsageBackfillThread(id, state, reason, recovered, Date.now());
+    const finish = (state: "done" | "skipped", reason: string | null) => {
+      registry.finishUsageBackfillThread(id, state, reason, Date.now());
       if (p !== undefined) wake(p.node);
     };
     if (t.status === "deleted") return finish("skipped", "it was deleted while it was read");
@@ -124,16 +123,15 @@ export function usageBackfill(options: {
     }
     const o = seen(p);
     if (o !== null && o !== "absent" && o.phase === "running") {
-      let recovered: { calls: number; tokens: number };
       try {
-        recovered = await counter.readWhole(id, shutdown.signal);
+        await counter.readWhole(id, shutdown.signal);
       } catch (err) {
         // A stop or a shutdown cut the read short, so the thread waits for the next run.
         const run = registry.usageBackfill();
         if (shutdown.signal.aborted || run.state !== "running" || run.current?.thread !== id) return;
         return finish("skipped", `reading it failed: ${(err as Error).message}`);
       }
-      return finish("done", null, recovered);
+      return finish("done", null);
     }
     if (now - since >= bootMs) finish("skipped", `its pylon did not boot within ${minutes(bootMs)}`);
   }
