@@ -116,8 +116,11 @@ export type Phase =
   | { kind: "rolling-back"; commit: string; previous: string; why: string; requested: boolean; deadline: number }
   /** `commit` is the merge commit, deployed when the PR is Nexus's own. */
   | { kind: "landed"; commit: string }
-  /** Ended, for the person to decide. `reasons` say exactly which condition failed or which reserved case applies. */
-  | { kind: "needs-person"; reasons: string[]; label?: Label }
+  /**
+   * Ended, for the person to decide. `reasons` say exactly which condition failed or which reserved case applies.
+   * `unreviewed` is a head the PR moved to after the last round, which no round of this review reviews.
+   */
+  | { kind: "needs-person"; reasons: string[]; label?: Label; unreviewed?: string }
   /** The PR merged or closed outside a review that does not land it, so nothing was left to review. */
   | { kind: "merged" }
   | { kind: "closed" }
@@ -239,16 +242,22 @@ export const findingsOf = (round: Round): Finding[] => [...round.verdict?.findin
 /** An approval with no blocking finding open, the check included. */
 const approves = (round: Round) => round.verdict?.verdict === "approve" && !findingsOf(round).some(blocks);
 /**
- * Whether `nexus land` takes the review: approved, or held for the person after an approval whose check passed. A
- * review that merged never lands again.
+ * Whether `nexus land` takes the review: approved, or held for the person after an approval whose check passed, at
+ * the PR's head as far as the loop knows. A review that merged never lands again.
  */
-export const landable = (r: Review) => r.merged === null
-  && (r.phase.kind === "approved" || (r.phase.kind === "needs-person" && r.rounds.at(-1)!.check?.passed === true && approves(r.rounds.at(-1)!)));
+export const landable = (r: Review) => r.merged === null && (r.phase.kind === "approved"
+  || (r.phase.kind === "needs-person" && r.phase.unreviewed === undefined && r.rounds.at(-1)!.check?.passed === true && approves(r.rounds.at(-1)!)));
 /** The rounds that count against the limit. One that approves again the head its previous round approved reviewed nothing new. */
 export const roundsSpent = (r: Pick<Review, "rounds">) => r.rounds.filter((round, i) => {
   const previous = r.rounds[i - 1];
   return !(previous?.head === round.head && previous.verdict?.verdict === "approve" && round.verdict?.verdict === "approve" && !round.verdict.findings.some(blocks));
 }).length;
+/** Why the latest round started, when it reviews a head pushed after the previous round's approval rather than the builder's fixes. */
+export function roundNote(r: Review): string | null {
+  const [previous, round] = r.rounds.slice(-2);
+  if (round === undefined || previous!.answers !== null || previous!.verdict?.verdict !== "approve") return null;
+  return `a new round reviews ${round.head.slice(0, 12)}, since the pull request's head moved from ${previous!.head.slice(0, 12)} after its approval`;
+}
 const labelStates = { adding: `, adding the label "${humanLabel}"`, added: `, labelled "${humanLabel}"`, failed: `, label "${humanLabel}" not added` } as const;
 /** How a review's line in `nexus show` and the dashboard ends. A refused label's why is already one of the reasons. */
 export const phaseNote = (r: Review) => r.phase.kind === "cancelled" ? `, the ${r.phase.who} thread ${r[r.phase.who]} was ${r.phase.status}`
@@ -423,7 +432,7 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
   /** The next round reviews `head`, a head the reviewer has not seen, or the person gets it once no round is left. */
   const newHead = (r: Review, head: string, base: string, why: string): Review => {
     const n = roundsSpent(r);
-    if (n >= r.maxRounds) return ranOut(r, `${why} after round ${n}, the last this review allows, so ${head} is unreviewed.`);
+    if (n >= r.maxRounds) return end(r, { kind: "needs-person", reasons: [`${why} after round ${n}, the last this review allows, so ${head} is unreviewed.`], label: { state: "adding" }, unreviewed: head });
     const next: Review = { ...r, rounds: [...r.rounds, { head, verdict: null, check: null, answers: null }] };
     return send(next, "reviewer", (token) => nextRound(next, r.rounds.at(-1)!, token, base), { kind: "reviewing" });
   };
@@ -626,16 +635,39 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
     },
   };
 
+  /**
+   * A head pushed after the review approved its last round or held it for the person. A review that would land gets a
+   * new round, as a landing does. One the loop gave up on stays the person's, and its reasons name the new head.
+   */
+  async function pushedAfter(r: Review): Promise<Review> {
+    // The PR watch reads GitHub only every two minutes, so the loop acts on what GitHub says now.
+    const snapshot = await github.poll(r.pr.repo, r.pr.number);
+    const head = snapshot.detail.head;
+    if (snapshot.pr.state !== "open" || head === r.rounds.at(-1)!.head) return r;
+    const phase = r.phase;
+    if (phase.kind !== "needs-person" || landable(r)) return newHead(r, head, snapshot.detail.base, `The pull request's head moved to ${head}`);
+    const stale = (moved: string) => `The pull request's head moved to ${moved} after this review was held, so none of its rounds reviewed that commit. Run nexus review ${r.builder} to review it.`;
+    return { ...r, phase: { ...phase, unreviewed: head, reasons: [...phase.reasons.filter((reason) => phase.unreviewed === undefined || reason !== stale(phase.unreviewed)), stale(head)] } };
+  }
+
   async function step(r: Review): Promise<Review> {
     // A review held for the person ends as a running one does once the person closes its PR or archives its builder,
     // before its label, which the person no longer needs. One that merged is held over its deploy, which neither settles.
-    if (r.phase.kind === "needs-person" && r.merged === null) {
+    const held = r.phase.kind === "needs-person" && r.merged === null;
+    if (held) {
       const status = registry.thread(r.builder)?.status;
       if (status === "archived" || status === "deleted") return end(r, { kind: "cancelled", who: "builder", status });
+    }
+    if (held || r.phase.kind === "approved") {
       const watch = registry.prWatch(r.builder);
-      // A watch stopped by its comment cap reads GitHub no more, so the loop asks GitHub itself.
-      const state = (watch?.commentWakes ?? 0) >= 10 ? (await github.poll(r.pr.repo, r.pr.number)).pr.state : watch?.links.find((l) => l.pr.repo === r.pr.repo && l.pr.number === r.pr.number)?.pr.state;
-      if (state === "closed") return end(r, { kind: "closed" });
+      // A watch stopped by its comment cap reads GitHub no more, so the loop asks GitHub itself about a held review. One
+      // that stopped at approval is left to the landing, which reads GitHub before it merges.
+      const capped = (watch?.commentWakes ?? 0) >= 10;
+      const pr = !capped ? watch?.links.find((l) => l.pr.repo === r.pr.repo && l.pr.number === r.pr.number)?.pr
+        : held ? await github.poll(r.pr.repo, r.pr.number).then((s) => ({ ...s.pr, head: s.detail.head })) : undefined;
+      if (held && pr?.state === "closed") return end(r, { kind: "closed" });
+      const unreviewed = r.phase.kind === "needs-person" ? r.phase.unreviewed : undefined;
+      if (pr?.state === "open" && pr.head !== undefined && pr.head !== r.rounds.at(-1)!.head && pr.head !== unreviewed) return await pushedAfter(r);
     }
     // A failed call throws, so the pass retries it. GitHub adds a label the PR has already as a no-op.
     if (r.phase.kind === "needs-person" && r.phase.label?.state === "adding") {
