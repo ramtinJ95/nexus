@@ -1,19 +1,19 @@
-2026-10-28T01:06:56.864Z pylon-th-8d3716c0c105: spawn booted from ckpt-th-8d3716c0c105-1 without relaunching its sessions, which wait for the next spawn
-2026-10-28T01:06:58.861Z pylon-th-8d3716c0c105: pipe python3 -c ...
-2026-10-28T01:06:58.887Z pylon-th-8d3716c0c105: pause wrote ckpt-th-8d3716c0c105-2 and kept the sessions its last pause recorded, as they never came back
-2026-10-28T01:07:02.863Z pylon-th-cf933c6de8d8: spawn booted from ckpt-th-cf933c6de8d8-1 without relaunching its sessions, which wait for the next spawn
-2026-10-28T01:07:04.860Z pylon-th-cf933c6de8d8: pipe python3 -c ...
-2026-10-28T01:07:05.003Z pylon-th-cf933c6de8d8: pause wrote ckpt-th-cf933c6de8d8-2 and kept the sessions its last pause recorded, as they never came back
-2026-10-28T01:07:08.863Z pylon-th-a2b5b8291305: spawn booted from ckpt-th-a2b5b8291305-1 without relaunching its sessions, which wait for the next spawn
-2026-10-28T01:07:10.860Z pylon-th-a2b5b8291305: pipe python3 -c ...
-2026-10-28T01:07:10.883Z pylon-th-a2b5b8291305: pause wrote ckpt-th-a2b5b8291305-2 and kept the sessions its last pause recorded, as they never came back
-2026-10-28T01:07:14.863Z pylon-th-9b17a94298f6: spawn without relaunch held until hold-boot is removed
-2026-10-28T01:07:17.068Z pylon-th-9b17a94298f6: spawn booted from ckpt-th-9b17a94298f6-1 without relaunching its sessions, which wait for the next spawn
-2026-10-28T01:07:18.838Z pylon-th-9b17a94298f6: pipe python3 -c ...
-2026-10-28T01:07:18.865Z pylon-th-9b17a94298f6: pause wrote ckpt-th-9b17a94298f6-2 and kept the sessions its last pause recorded, as they never came back
-2026-10-28T01:07:22.841Z pylon-th-687f6412f6b7: spawn without relaunch failed: pylon-vm: the VM did not boot: gondolin exited 1 before the guest answered
-2026-10-28T01:07:28.841Z pylon-th-07d3e82d371d: spawn booted from ckpt-th-07d3e82d371d-1 without relaunching its sessions, which wait for the next spawn
-2026-10-28T01:07:30.839Z pylon-th-07d3e82d371d: pipe python3 -c ... fails, as fail-read asks
-2026-10-28T01:07:30.846Z pylon-th-07d3e82d371d: pause wrote ckpt-th-07d3e82d371d-2 and kept the sessions its last pause recorded, as they never came back
+2026-10-28T01:15:43.958Z pylon-th-573e8dd61ea5: spawn booted from ckpt-th-573e8dd61ea5-1 without relaunching its sessions, which wait for the next spawn
+2026-10-28T01:15:45.954Z pylon-th-573e8dd61ea5: pipe python3 -c ...
+2026-10-28T01:15:45.976Z pylon-th-573e8dd61ea5: pause wrote ckpt-th-573e8dd61ea5-2 and kept the sessions its last pause recorded, as they never came back
+2026-10-28T01:15:49.957Z pylon-th-07cff3e513ad: spawn booted from ckpt-th-07cff3e513ad-1 without relaunching its sessions, which wait for the next spawn
+2026-10-28T01:15:51.955Z pylon-th-07cff3e513ad: pipe python3 -c ...
+2026-10-28T01:15:52.096Z pylon-th-07cff3e513ad: pause wrote ckpt-th-07cff3e513ad-2 and kept the sessions its last pause recorded, as they never came back
+2026-10-28T01:15:55.958Z pylon-th-e22039e3191f: spawn booted from ckpt-th-e22039e3191f-1 without relaunching its sessions, which wait for the next spawn
+2026-10-28T01:15:57.955Z pylon-th-e22039e3191f: pipe python3 -c ...
+2026-10-28T01:15:57.976Z pylon-th-e22039e3191f: pause wrote ckpt-th-e22039e3191f-2 and kept the sessions its last pause recorded, as they never came back
+2026-10-28T01:16:01.959Z pylon-th-14a1c3eb9987: spawn without relaunch held until hold-boot is removed
+2026-10-28T01:16:03.964Z pylon-th-14a1c3eb9987: spawn booted from ckpt-th-14a1c3eb9987-1 without relaunching its sessions, which wait for the next spawn
+2026-10-28T01:16:05.819Z pylon-th-14a1c3eb9987: pipe python3 -c ...
+2026-10-28T01:16:05.844Z pylon-th-14a1c3eb9987: pause wrote ckpt-th-14a1c3eb9987-2 and kept the sessions its last pause recorded, as they never came back
+2026-10-28T01:16:09.823Z pylon-th-e2d1b22d3832: spawn without relaunch failed: pylon-vm: the VM did not boot: gondolin exited 1 before the guest answered
+2026-10-28T01:16:15.825Z pylon-th-2efe9f7b9b2b: spawn booted from ckpt-th-2efe9f7b9b2b-1 without relaunching its sessions, which wait for the next spawn
+2026-10-28T01:16:17.822Z pylon-th-2efe9f7b9b2b: pipe python3 -c ... fails, as fail-read asks
+2026-10-28T01:16:17.831Z pylon-th-2efe9f7b9b2b: pause wrote ckpt-th-2efe9f7b9b2b-2 and kept the sessions its last pause recorded, as they never came back
 
 boots that relaunched the sessions, which starts an agent: 0

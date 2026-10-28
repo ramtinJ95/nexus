@@ -1,1 +1,1 @@
-branch: 43fc35f fix(reconcile): a failed wake for reading is not one of the next wake's tries
+branch: e2a081b fix(reconcile): mark every job sent to wake a pylon for reading, its image's fetch too

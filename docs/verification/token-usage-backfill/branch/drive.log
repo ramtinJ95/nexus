@@ -17,46 +17,46 @@ exit 0
 
 wrote the live thread's transcript into its running pylon, and restarted the control plane, whose start reads every running pylon
 --- 00-archive-live.txt
-$ nexus archive th-8d3716c0c105
-Archived th-8d3716c0c105.
+$ nexus archive th-573e8dd61ea5
+Archived th-573e8dd61ea5.
 exit 0
 
 --- 00-archive-big.txt
-$ nexus archive th-cf933c6de8d8
-Archived th-cf933c6de8d8.
+$ nexus archive th-07cff3e513ad
+Archived th-07cff3e513ad.
 exit 0
 
 --- 00-archive-pi.txt
-$ nexus archive th-a2b5b8291305
-Archived th-a2b5b8291305.
+$ nexus archive th-e22039e3191f
+Archived th-e22039e3191f.
 exit 0
 
 --- 00-archive-both.txt
-$ nexus archive th-9b17a94298f6
-Archived th-9b17a94298f6.
+$ nexus archive th-14a1c3eb9987
+Archived th-14a1c3eb9987.
 exit 0
 
 --- 00-archive-noboot.txt
-$ nexus archive th-687f6412f6b7
-Archived th-687f6412f6b7.
+$ nexus archive th-e2d1b22d3832
+Archived th-e2d1b22d3832.
 exit 0
 
 --- 00-archive-noread.txt
-$ nexus archive th-07d3e82d371d
-Archived th-07d3e82d371d.
+$ nexus archive th-2efe9f7b9b2b
+Archived th-2efe9f7b9b2b.
 exit 0
 
 --- 00-archive-deleted.txt
-$ nexus archive th-601a326e7b72
-Archived th-601a326e7b72.
+$ nexus archive th-9d0b9b51cc16
+Archived th-9d0b9b51cc16.
 exit 0
 
 --- 00-delete.txt
-$ nexus delete th-601a326e7b72
-Deleted th-601a326e7b72.
+$ nexus delete th-9d0b9b51cc16
+Deleted th-9d0b9b51cc16.
 exit 0
 
-wrote the archived pylons' histories; live=th-8d3716c0c105 big=th-cf933c6de8d8 pi=th-a2b5b8291305 both=th-9b17a94298f6 noboot=th-687f6412f6b7 noread=th-07d3e82d371d deleted=th-601a326e7b72
+wrote the archived pylons' histories; live=th-573e8dd61ea5 big=th-07cff3e513ad pi=th-e22039e3191f both=th-14a1c3eb9987 noboot=th-e2d1b22d3832 noread=th-2efe9f7b9b2b deleted=th-9d0b9b51cc16
 --- 02-threads-before.json
 {
   "live": {
@@ -65,7 +65,7 @@ wrote the archived pylons' histories; live=th-8d3716c0c105 big=th-cf933c6de8d8 p
     "desired": "paused",
     "actual": "paused",
     "failed": null,
-    "lastHumanActivityAt": 1793149607347,
+    "lastHumanActivityAt": 1793150132223,
     "seenAt": null,
     "lastReplyAt": null
   },
@@ -75,7 +75,7 @@ wrote the archived pylons' histories; live=th-8d3716c0c105 big=th-cf933c6de8d8 p
     "desired": "paused",
     "actual": "paused",
     "failed": null,
-    "lastHumanActivityAt": 1793149607512,
+    "lastHumanActivityAt": 1793150132396,
     "seenAt": null,
     "lastReplyAt": null
   },
@@ -85,7 +85,7 @@ wrote the archived pylons' histories; live=th-8d3716c0c105 big=th-cf933c6de8d8 p
     "desired": "paused",
     "actual": "paused",
     "failed": null,
-    "lastHumanActivityAt": 1793149607678,
+    "lastHumanActivityAt": 1793150132565,
     "seenAt": null,
     "lastReplyAt": null
   },
@@ -95,7 +95,7 @@ wrote the archived pylons' histories; live=th-8d3716c0c105 big=th-cf933c6de8d8 p
     "desired": "paused",
     "actual": "paused",
     "failed": null,
-    "lastHumanActivityAt": 1793149607862,
+    "lastHumanActivityAt": 1793150132743,
     "seenAt": null,
     "lastReplyAt": null
   },
@@ -105,7 +105,7 @@ wrote the archived pylons' histories; live=th-8d3716c0c105 big=th-cf933c6de8d8 p
     "desired": "paused",
     "actual": "paused",
     "failed": null,
-    "lastHumanActivityAt": 1793149608037,
+    "lastHumanActivityAt": 1793150132914,
     "seenAt": null,
     "lastReplyAt": null
   },
@@ -115,7 +115,7 @@ wrote the archived pylons' histories; live=th-8d3716c0c105 big=th-cf933c6de8d8 p
     "desired": "paused",
     "actual": "paused",
     "failed": null,
-    "lastHumanActivityAt": 1793149608202,
+    "lastHumanActivityAt": 1793150133113,
     "seenAt": null,
     "lastReplyAt": null
   }
@@ -136,7 +136,7 @@ MATCH
 
 --- 03-usage-before.txt
 $ nexus usage --since all --by kind
-Usage of all projects for all time. Counting started 2026-10-28 01:06 UTC.
+Usage of all projects for all time. Counting started 2026-10-28 01:15 UTC.
 Backfill: not run. A deployer runs `nexus usage backfill` to read archived threads' pylons.
 
        Input  Output  Cache write  Cache read  Total  Calls
@@ -151,12 +151,12 @@ exit 0
 --- 04-dry-run.txt
 $ nexus usage backfill --dry-run
 A start reads 6 archived threads, one pylon at a time:
-th-8d3716c0c105  nexus  verify-node  Counted live before archive
-th-cf933c6de8d8  nexus  verify-node  Long Claude history
-th-a2b5b8291305  nexus  verify-node  Harness review in pi
-th-9b17a94298f6  nexus  verify-node  Claude and pi, held at boot
-th-687f6412f6b7  nexus  verify-node  Pylon fails to boot
-th-07d3e82d371d  nexus  verify-node  Transcripts fail to read
+th-573e8dd61ea5  nexus  verify-node  Counted live before archive
+th-07cff3e513ad  nexus  verify-node  Long Claude history
+th-e22039e3191f  nexus  verify-node  Harness review in pi
+th-14a1c3eb9987  nexus  verify-node  Claude and pi, held at boot
+th-e2d1b22d3832  nexus  verify-node  Pylon fails to boot
+th-2efe9f7b9b2b  nexus  verify-node  Transcripts fail to read
 exit 0
 
 --- 05-project-big.txt
@@ -173,7 +173,7 @@ exit 0
 after 5 s with project big asking 5 GiB of the node's 5.8 GiB:
 {
   "state": "running",
-  "startedAt": 1793149611670,
+  "startedAt": 1793150136850,
   "finishedAt": null,
   "current": null,
   "waiting": "verify-node would have 4.8 GiB of memory left with it up, less than the 5 GiB of the largest project's pylon",
@@ -194,8 +194,8 @@ exit 0
 
 --- 06-usage-running.txt
 $ nexus usage --since all --by kind
-Usage of all projects for all time. Counting started 2026-10-28 01:06 UTC.
-Backfill: running, 3 of 6 threads read, recovered 6012 calls and 7.5M tokens. It reads the pylon of th-9b17a94298f6.
+Usage of all projects for all time. Counting started 2026-10-28 01:15 UTC.
+Backfill: running, 3 of 6 threads read, recovered 6012 calls and 7.5M tokens. It reads the pylon of th-14a1c3eb9987.
 
        Input  Output  Cache write  Cache read  Total  Calls
 Total  20k    302k    1.2M         6.3M        7.9M   6021
@@ -208,7 +208,7 @@ exit 0
 
 --- 06-usage-running.png: HTTP 200, running: The backfill reads archived threads' pylons, one at a time: 3 of 6 threads read, 6,012 calls and 7.5M tokens recovered so far. It reads Claude and pi, held at boot.
 --- 07-restart.txt
-before the restart: {"state":"running","startedAt":1793149611670,"finishedAt":null,"current":{"thread":"th-9b17a94298f6","phase":"reading","since":1793149634858},"waiting":null,"read":3,"of":6,"recovered":{"calls":6012,"tokens":7525723},"skipped":[]}
+before the restart: {"state":"running","startedAt":1793150136850,"finishedAt":null,"current":{"thread":"th-14a1c3eb9987","phase":"reading","since":1793150161954},"waiting":null,"read":3,"of":6,"recovered":{"calls":6012,"tokens":7525723},"skipped":[]}
 total: {"calls":6021,"input":19997,"output":301733,"cacheWrite":1237665,"cacheRead":6298782,"total":7858177}
 
 stopped the control plane while the probe holds the boot of the thread both
@@ -220,11 +220,11 @@ MATCH
 
 --- 08-usage-after.txt
 $ nexus usage --since all --by kind
-Usage of all projects for all time. Counting started 2026-10-28 01:06 UTC.
-Backfill: done at 2026-10-28 01:07 UTC, 6 of 6 threads read, 2 skipped, recovered 6044 calls and 7.6M tokens.
+Usage of all projects for all time. Counting started 2026-10-28 01:15 UTC.
+Backfill: done at 2026-10-28 01:16 UTC, 6 of 6 threads read, 2 skipped, recovered 6044 calls and 7.6M tokens.
 Skipped:
-th-687f6412f6b7  Pylon fails to boot       the pylon did not boot: backend: pylon-vm: the VM did not boot: gondolin exited 1 before the guest answered
-th-07d3e82d371d  Transcripts fail to read  reading it failed: reading the agents' usage exited 1
+th-e2d1b22d3832  Pylon fails to boot       the pylon did not boot: backend: pylon-vm: the VM did not boot: gondolin exited 1 before the guest answered
+th-2efe9f7b9b2b  Transcripts fail to read  reading it failed: reading the agents' usage exited 1
 
        Input  Output  Cache write  Cache read  Total  Calls
 Total  22.3k  305k    1.3M         6.4M        7.9M   6053
@@ -240,8 +240,8 @@ $ nexus usage backfill --dry-run --json
 {
   "backfill": {
     "state": "done",
-    "startedAt": 1793149611670,
-    "finishedAt": 1793149654837,
+    "startedAt": 1793150136850,
+    "finishedAt": 1793150181820,
     "current": null,
     "waiting": null,
     "read": 6,
@@ -252,35 +252,35 @@ $ nexus usage backfill --dry-run --json
     },
     "skipped": [
       {
-        "thread": "th-687f6412f6b7",
+        "thread": "th-e2d1b22d3832",
         "title": "Pylon fails to boot",
         "state": "skipped",
         "reason": "the pylon did not boot: backend: pylon-vm: the VM did not boot: gondolin exited 1 before the guest answered",
         "calls": 0,
         "tokens": 0,
-        "at": 1793149644837
+        "at": 1793150171818
       },
       {
-        "thread": "th-07d3e82d371d",
+        "thread": "th-2efe9f7b9b2b",
         "title": "Transcripts fail to read",
         "state": "skipped",
         "reason": "reading it failed: reading the agents' usage exited 1",
         "calls": 0,
         "tokens": 0,
-        "at": 1793149650843
+        "at": 1793150177826
       }
     ]
   },
   "plan": [
     {
-      "thread": "th-687f6412f6b7",
+      "thread": "th-e2d1b22d3832",
       "project": "nexus",
       "node": "verify-node",
       "title": "Pylon fails to boot",
       "reason": "the pylon did not boot: backend: pylon-vm: the VM did not boot: gondolin exited 1 before the guest answered"
     },
     {
-      "thread": "th-07d3e82d371d",
+      "thread": "th-2efe9f7b9b2b",
       "project": "nexus",
       "node": "verify-node",
       "title": "Transcripts fail to read",
@@ -290,8 +290,8 @@ $ nexus usage backfill --dry-run --json
 }
 exit 0
 
---- 09-usage-done.png: HTTP 200, done: The backfill read archived threads' pylons and finished 2026-10-28 01:07 UTC: 6 of 6 threads read, 2 skipped, 6,044 calls and 7.6M tokens recovered. Skipped thread Why Pylon fails to boot the pylon did not boot: backend: pylon-vm: the VM did not boot: gondolin exited 1 before the guest answered Transcripts fail to read reading it failed: reading the agents' usage exited 1
---- 09-usage-done-phone.png: HTTP 200, done: The backfill read archived threads' pylons and finished 2026-10-28 01:07 UTC: 6 of 6 threads read, 2 skipped, 6,044 calls and 7.6M tokens recovered. Skipped thread Why Pylon fails to boot the pylon did not boot: backend: pylon-vm: the VM did not boot: gondolin exited 1 before the guest answered Transcripts fail to read reading it failed: reading the agents' usage exited 1
+--- 09-usage-done.png: HTTP 200, done: The backfill read archived threads' pylons and finished 2026-10-28 01:16 UTC: 6 of 6 threads read, 2 skipped, 6,044 calls and 7.6M tokens recovered. Skipped thread Why Pylon fails to boot the pylon did not boot: backend: pylon-vm: the VM did not boot: gondolin exited 1 before the guest answered Transcripts fail to read reading it failed: reading the agents' usage exited 1
+--- 09-usage-done-phone.png: HTTP 200, done: The backfill read archived threads' pylons and finished 2026-10-28 01:16 UTC: 6 of 6 threads read, 2 skipped, 6,044 calls and 7.6M tokens recovered. Skipped thread Why Pylon fails to boot the pylon did not boot: backend: pylon-vm: the VM did not boot: gondolin exited 1 before the guest answered Transcripts fail to read reading it failed: reading the agents' usage exited 1
 --- 10-threads-after.json
 {
   "live": {
@@ -300,7 +300,7 @@ exit 0
     "desired": "paused",
     "actual": "paused",
     "failed": null,
-    "lastHumanActivityAt": 1793149607347,
+    "lastHumanActivityAt": 1793150132223,
     "seenAt": null,
     "lastReplyAt": null
   },
@@ -310,7 +310,7 @@ exit 0
     "desired": "paused",
     "actual": "paused",
     "failed": null,
-    "lastHumanActivityAt": 1793149607512,
+    "lastHumanActivityAt": 1793150132396,
     "seenAt": null,
     "lastReplyAt": null
   },
@@ -320,7 +320,7 @@ exit 0
     "desired": "paused",
     "actual": "paused",
     "failed": null,
-    "lastHumanActivityAt": 1793149607678,
+    "lastHumanActivityAt": 1793150132565,
     "seenAt": null,
     "lastReplyAt": null
   },
@@ -330,7 +330,7 @@ exit 0
     "desired": "paused",
     "actual": "paused",
     "failed": null,
-    "lastHumanActivityAt": 1793149607862,
+    "lastHumanActivityAt": 1793150132743,
     "seenAt": null,
     "lastReplyAt": null
   },
@@ -340,7 +340,7 @@ exit 0
     "desired": "paused",
     "actual": "paused",
     "failed": null,
-    "lastHumanActivityAt": 1793149608037,
+    "lastHumanActivityAt": 1793150132914,
     "seenAt": null,
     "lastReplyAt": null
   },
@@ -350,7 +350,7 @@ exit 0
     "desired": "paused",
     "actual": "paused",
     "failed": null,
-    "lastHumanActivityAt": 1793149608202,
+    "lastHumanActivityAt": 1793150133113,
     "seenAt": null,
     "lastReplyAt": null
   }
@@ -373,23 +373,23 @@ noboot: claude-code paused
 noread: claude-code paused
 
 --- 11-pylon-lifecycle.txt
-2026-10-28T01:06:56.864Z pylon-th-8d3716c0c105: spawn booted from ckpt-th-8d3716c0c105-1 without relaunching its sessions, which wait for the next spawn
-2026-10-28T01:06:58.861Z pylon-th-8d3716c0c105: pipe python3 -c ...
-2026-10-28T01:06:58.887Z pylon-th-8d3716c0c105: pause wrote ckpt-th-8d3716c0c105-2 and kept the sessions its last pause recorded, as they never came back
-2026-10-28T01:07:02.863Z pylon-th-cf933c6de8d8: spawn booted from ckpt-th-cf933c6de8d8-1 without relaunching its sessions, which wait for the next spawn
-2026-10-28T01:07:04.860Z pylon-th-cf933c6de8d8: pipe python3 -c ...
-2026-10-28T01:07:05.003Z pylon-th-cf933c6de8d8: pause wrote ckpt-th-cf933c6de8d8-2 and kept the sessions its last pause recorded, as they never came back
-2026-10-28T01:07:08.863Z pylon-th-a2b5b8291305: spawn booted from ckpt-th-a2b5b8291305-1 without relaunching its sessions, which wait for the next spawn
-2026-10-28T01:07:10.860Z pylon-th-a2b5b8291305: pipe python3 -c ...
-2026-10-28T01:07:10.883Z pylon-th-a2b5b8291305: pause wrote ckpt-th-a2b5b8291305-2 and kept the sessions its last pause recorded, as they never came back
-2026-10-28T01:07:14.863Z pylon-th-9b17a94298f6: spawn without relaunch held until hold-boot is removed
-2026-10-28T01:07:17.068Z pylon-th-9b17a94298f6: spawn booted from ckpt-th-9b17a94298f6-1 without relaunching its sessions, which wait for the next spawn
-2026-10-28T01:07:18.838Z pylon-th-9b17a94298f6: pipe python3 -c ...
-2026-10-28T01:07:18.865Z pylon-th-9b17a94298f6: pause wrote ckpt-th-9b17a94298f6-2 and kept the sessions its last pause recorded, as they never came back
-2026-10-28T01:07:22.841Z pylon-th-687f6412f6b7: spawn without relaunch failed: pylon-vm: the VM did not boot: gondolin exited 1 before the guest answered
-2026-10-28T01:07:28.841Z pylon-th-07d3e82d371d: spawn booted from ckpt-th-07d3e82d371d-1 without relaunching its sessions, which wait for the next spawn
-2026-10-28T01:07:30.839Z pylon-th-07d3e82d371d: pipe python3 -c ... fails, as fail-read asks
-2026-10-28T01:07:30.846Z pylon-th-07d3e82d371d: pause wrote ckpt-th-07d3e82d371d-2 and kept the sessions its last pause recorded, as they never came back
+2026-10-28T01:15:43.958Z pylon-th-573e8dd61ea5: spawn booted from ckpt-th-573e8dd61ea5-1 without relaunching its sessions, which wait for the next spawn
+2026-10-28T01:15:45.954Z pylon-th-573e8dd61ea5: pipe python3 -c ...
+2026-10-28T01:15:45.976Z pylon-th-573e8dd61ea5: pause wrote ckpt-th-573e8dd61ea5-2 and kept the sessions its last pause recorded, as they never came back
+2026-10-28T01:15:49.957Z pylon-th-07cff3e513ad: spawn booted from ckpt-th-07cff3e513ad-1 without relaunching its sessions, which wait for the next spawn
+2026-10-28T01:15:51.955Z pylon-th-07cff3e513ad: pipe python3 -c ...
+2026-10-28T01:15:52.096Z pylon-th-07cff3e513ad: pause wrote ckpt-th-07cff3e513ad-2 and kept the sessions its last pause recorded, as they never came back
+2026-10-28T01:15:55.958Z pylon-th-e22039e3191f: spawn booted from ckpt-th-e22039e3191f-1 without relaunching its sessions, which wait for the next spawn
+2026-10-28T01:15:57.955Z pylon-th-e22039e3191f: pipe python3 -c ...
+2026-10-28T01:15:57.976Z pylon-th-e22039e3191f: pause wrote ckpt-th-e22039e3191f-2 and kept the sessions its last pause recorded, as they never came back
+2026-10-28T01:16:01.959Z pylon-th-14a1c3eb9987: spawn without relaunch held until hold-boot is removed
+2026-10-28T01:16:03.964Z pylon-th-14a1c3eb9987: spawn booted from ckpt-th-14a1c3eb9987-1 without relaunching its sessions, which wait for the next spawn
+2026-10-28T01:16:05.819Z pylon-th-14a1c3eb9987: pipe python3 -c ...
+2026-10-28T01:16:05.844Z pylon-th-14a1c3eb9987: pause wrote ckpt-th-14a1c3eb9987-2 and kept the sessions its last pause recorded, as they never came back
+2026-10-28T01:16:09.823Z pylon-th-e2d1b22d3832: spawn without relaunch failed: pylon-vm: the VM did not boot: gondolin exited 1 before the guest answered
+2026-10-28T01:16:15.825Z pylon-th-2efe9f7b9b2b: spawn booted from ckpt-th-2efe9f7b9b2b-1 without relaunching its sessions, which wait for the next spawn
+2026-10-28T01:16:17.822Z pylon-th-2efe9f7b9b2b: pipe python3 -c ... fails, as fail-read asks
+2026-10-28T01:16:17.831Z pylon-th-2efe9f7b9b2b: pause wrote ckpt-th-2efe9f7b9b2b-2 and kept the sessions its last pause recorded, as they never came back
 
 boots that relaunched the sessions, which starts an agent: 0
 
@@ -399,10 +399,10 @@ Backfill: running, 4 of 6 threads read, recovered 6044 calls and 7.6M tokens.
 exit 0
 
 --- 12-second-run-pylons.txt
-2026-10-28T01:07:35.797Z pylon-th-687f6412f6b7: spawn without relaunch failed: pylon-vm: the VM did not boot: gondolin exited 1 before the guest answered
-2026-10-28T01:07:40.844Z pylon-th-07d3e82d371d: spawn booted from ckpt-th-07d3e82d371d-2 without relaunching its sessions, which wait for the next spawn
-2026-10-28T01:07:42.841Z pylon-th-07d3e82d371d: pipe python3 -c ... fails, as fail-read asks
-2026-10-28T01:07:42.848Z pylon-th-07d3e82d371d: pause wrote ckpt-th-07d3e82d371d-3 and kept the sessions its last pause recorded, as they never came back
+2026-10-28T01:16:22.854Z pylon-th-e2d1b22d3832: spawn without relaunch failed: pylon-vm: the VM did not boot: gondolin exited 1 before the guest answered
+2026-10-28T01:16:27.826Z pylon-th-2efe9f7b9b2b: spawn booted from ckpt-th-2efe9f7b9b2b-2 without relaunching its sessions, which wait for the next spawn
+2026-10-28T01:16:29.824Z pylon-th-2efe9f7b9b2b: pipe python3 -c ... fails, as fail-read asks
+2026-10-28T01:16:29.833Z pylon-th-2efe9f7b9b2b: pause wrote ckpt-th-2efe9f7b9b2b-3 and kept the sessions its last pause recorded, as they never came back
 
 --- 12-second-run-total.txt
 GET /v1/usage total after a second run: {"calls":6053,"input":22347,"output":304513,"cacheWrite":1250165,"cacheRead":6357182,"total":7934207}
@@ -411,11 +411,11 @@ MATCH
 
 --- 12-usage-after-second-run.txt
 $ nexus usage --since all --by kind
-Usage of all projects for all time. Counting started 2026-10-28 01:06 UTC.
-Backfill: done at 2026-10-28 01:07 UTC, 6 of 6 threads read, 2 skipped, recovered 6044 calls and 7.6M tokens.
+Usage of all projects for all time. Counting started 2026-10-28 01:15 UTC.
+Backfill: done at 2026-10-28 01:16 UTC, 6 of 6 threads read, 2 skipped, recovered 6044 calls and 7.6M tokens.
 Skipped:
-th-687f6412f6b7  Pylon fails to boot       the pylon did not boot: backend: pylon-vm: the VM did not boot: gondolin exited 1 before the guest answered
-th-07d3e82d371d  Transcripts fail to read  reading it failed: reading the agents' usage exited 1
+th-e2d1b22d3832  Pylon fails to boot       the pylon did not boot: backend: pylon-vm: the VM did not boot: gondolin exited 1 before the guest answered
+th-2efe9f7b9b2b  Transcripts fail to read  reading it failed: reading the agents' usage exited 1
 
        Input  Output  Cache write  Cache read  Total  Calls
 Total  22.3k  305k    1.3M         6.4M        7.9M   6053
