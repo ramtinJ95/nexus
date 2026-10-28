@@ -619,6 +619,19 @@ export function openRegistry(path: string, clock = Date.now) {
     appendEvent("attention.changed", id, { attention });
   }
 
+  function setThreadStatus(id: ThreadId, status: ThreadStatus) {
+    transaction(() => {
+      q.threadStatus.run(status, id);
+      if (status === "archived" || status === "deleted") sql("DELETE FROM session_activity WHERE thread = ?").run(id);
+      if (status === "deleted") {
+        // The delete aborts the run, so nothing is left to retry, and the harness stops tracking the thread without a report.
+        sql("UPDATE thread_attention SET parked = 0 WHERE thread = ?").run(id);
+        for (const table of ["session_order", "session_order_floor", "claude_transcripts", "claude_entries", "claude_messages"]) sql(`DELETE FROM ${table} WHERE thread = ?`).run(id);
+      }
+      updateAttention(id);
+    });
+  }
+
   function pruneSessions() {
     transaction(() => {
       const expired = sql("DELETE FROM session_activity WHERE state = 'session.turn-started' AND updated_at <= ? RETURNING thread").all(clock() - sessionActivityTtlMs);
@@ -979,9 +992,13 @@ export function openRegistry(path: string, clock = Date.now) {
     isReviewer: (thread: ThreadId) => sql("SELECT 1 FROM threads WHERE id = ? AND started_by = ? UNION SELECT 1 FROM reviews WHERE reviewer = ?").get(thread, reviewerCaller, thread) !== undefined,
     /** Whether a review ever started for the pull request, including one a later review of its builder replaced. */
     prReviewed: (repo: string, number: number) => sql("SELECT 1 FROM reviewed_prs WHERE repo = ? AND number = ?").get(repo, number) !== undefined,
-    /** Replaces the builder's review, and tells the event log when its phase, round or label changed, or the person waived holds. */
-    saveReview(review: Review) {
+    /**
+     * Replaces the builder's review, and tells the event log when its phase, round or label changed, or the person waived
+     * holds. The threads in `archive` are archived in the same transaction.
+     */
+    saveReview(review: Review, archive: readonly ThreadId[] = []) {
       transaction(() => {
+        for (const id of archive) setThreadStatus(id, "archived");
         const before = jsonOrNull<Review>(sql("SELECT record FROM reviews WHERE builder = ?").get(review.builder)?.record ?? null);
         sql("INSERT INTO reviews (builder, reviewer, record) VALUES (?, ?, ?) ON CONFLICT (builder) DO UPDATE SET reviewer = excluded.reviewer, record = excluded.record")
           .run(review.builder, review.reviewer, JSON.stringify(review));
@@ -1141,18 +1158,7 @@ export function openRegistry(path: string, clock = Date.now) {
     recordReply(id: ThreadId, at: number) {
       transaction(() => { q.recordReply.run(at, id); appendEvent("thread.turn-ended", id, {} , at); updateAttention(id); });
     },
-    setThreadStatus(id: ThreadId, status: ThreadStatus) {
-      transaction(() => {
-        q.threadStatus.run(status, id);
-        if (status === "archived" || status === "deleted") sql("DELETE FROM session_activity WHERE thread = ?").run(id);
-        if (status === "deleted") {
-          // The delete aborts the run, so nothing is left to retry, and the harness stops tracking the thread without a report.
-          sql("UPDATE thread_attention SET parked = 0 WHERE thread = ?").run(id);
-          for (const table of ["session_order", "session_order_floor", "claude_transcripts", "claude_entries", "claude_messages"]) sql(`DELETE FROM ${table} WHERE thread = ?`).run(id);
-        }
-        updateAttention(id);
-      });
-    },
+    setThreadStatus,
     /** Timestamps only move forward, so a late or repeated report cannot make a thread look idle sooner. */
     recordActivity(id: ThreadId, activity: { human?: number; agent?: number; agentTurnRunning?: boolean }) {
       transaction(() => {

@@ -63,6 +63,7 @@ function fixture(t: import("node:test").TestContext, options: { path?: string; r
   let delivering = 0;
   let held: { entered: () => void; released: Promise<void> } | null = null;
   const deployers = new Set(["nLAPTOP"]);
+  const woken: ThreadId[] = [];
   const loop = () => reviewLoop({
     registry, harnessModel: "gpt-6-astra",
     github: {
@@ -81,6 +82,7 @@ function fixture(t: import("node:test").TestContext, options: { path?: string; r
     },
     release: { self, repo: "ramtinJ95/nexus" },
     mayLand: (caller) => deployers.has(caller),
+    wake: (target) => { woken.push(target.id); },
     log: () => {},
     now: () => clock,
     async startThread(request, caller) { started.push(request); return registry.thread(add(`th-reviewer-${started.length}`, request.claude !== undefined, caller))!; },
@@ -92,7 +94,7 @@ function fixture(t: import("node:test").TestContext, options: { path?: string; r
     clock += 61_000;
   };
   return {
-    registry, builder, pr, loop, add, sent, started, merges, replies, reply, deployers,
+    registry, builder, pr, loop, add, sent, started, merges, replies, reply, deployers, woken,
     get snapshot() { return snapshot; }, set snapshot(s) { snapshot = s; },
     set files(f: ChangedFile[]) { files = f; },
     set mergeAnswer(a: () => MergeResult) { mergeAnswer = a; },
@@ -113,6 +115,8 @@ function fixture(t: import("node:test").TestContext, options: { path?: string; r
     review: () => registry.review(builder)!,
     watched(state: "open" | "merged" | "closed") { registry.savePrWatch(builder, { links: [{ pr: { ...pr, state }, seen: [], failed: false }], commentWakes: 0, pending: null, error: null }); },
     attention: () => registry.events("0", { kinds: ["attention.changed"], thread: builder }).map((e) => e.payload.attention),
+    /** The statuses of the builder and of the review's reviewer. */
+    statuses: () => [builder, registry.review(builder)!.reviewer].map((id) => registry.thread(id)!.status),
   };
 }
 
@@ -325,6 +329,83 @@ test("another repository's PR merges without a deploy", async (t) => {
   await approved(f, "nLAPTOP");
   assert.deepEqual(f.review().phase, { kind: "landed", commit: merged });
   assert.equal(f.registry.desiredRelease(), null);
+});
+
+test("a review that lands archives its builder and reviewer, once, whether its PR deploys or not", async (t) => {
+  for (const repo of ["ramtinJ95/nexus", "acme/shop"]) {
+    const f = fixture(t, { repo });
+    f.registry.setDesiredRelease({ commit: previous, requestedBy: "person", requestedAt: 1 });
+    const loop = await approved(f, "nLAPTOP");
+    if (repo === "ramtinJ95/nexus") {
+      assert.equal(f.review().phase.kind, "deploying");
+      assert.deepEqual(f.statuses(), ["active", "active"], "a landing that still deploys archives nothing");
+      for (const role of ["control", "probe"] as const) f.registry.reportRelease({ node, role, commit: merged, target: merged, state: "healthy", reason: null, observedAt: Date.now() });
+      await loop.poll();
+    }
+    assert.deepEqual(f.review().phase, { kind: "landed", commit: merged });
+    assert.deepEqual(f.statuses(), ["archived", "archived"], `${repo}: both threads are archived once the review lands`);
+    assert.deepEqual(f.woken, [f.builder, f.review().reviewer], "the planner hears of each archive, so their pylons pause");
+    f.registry.setThreadStatus(f.builder, "active");
+    await loop.poll();
+    assert.deepEqual(f.statuses(), ["active", "archived"], "a landed builder the person unarchives stays open");
+  }
+});
+
+test("a landing whose save fails archives nothing, so a release that supersedes it before the retry leaves both threads open", async (t) => {
+  const f = fixture(t);
+  f.registry.setDesiredRelease({ commit: previous, requestedBy: "person", requestedAt: 1 });
+  const loop = await approved(f, "nLAPTOP");
+  const save = f.registry.saveReview;
+  f.registry.saveReview = (review, archive) => {
+    if (review.phase.kind === "landed") throw new Error("disk I/O error");
+    save(review, archive);
+  };
+  for (const role of ["control", "probe"] as const) f.registry.reportRelease({ node, role, commit: merged, target: merged, state: "healthy", reason: null, observedAt: Date.now() });
+  await loop.poll();
+  assert.equal(f.review().phase.kind, "deploying");
+  assert.deepEqual(f.statuses(), ["active", "active"], "no thread is archived while the landing is unsaved");
+  f.registry.saveReview = save;
+  f.registry.setDesiredRelease({ commit: "n".repeat(40), requestedBy: "person", requestedAt: 2 });
+  await loop.poll();
+  assert.equal(f.review().phase.kind, "needs-person");
+  assert.deepEqual(f.statuses(), ["active", "active"]);
+  assert.deepEqual(f.woken, []);
+});
+
+test("a review held for the person, or one that stops at approval, archives nothing", async (t) => {
+  const held = fixture(t);
+  held.files = [{ path: "images/pylon/Dockerfile", previous: null, patch: "@@ -1 +1 @@\n-FROM a\n+FROM b" }];
+  await approved(held, "nLAPTOP");
+  assert.equal(held.review().phase.kind, "needs-person");
+  assert.deepEqual(held.merges, []);
+  assert.deepEqual(held.statuses(), ["active", "active"], "a landing the policy holds");
+
+  const rolledBack = fixture(t);
+  rolledBack.registry.setDesiredRelease({ commit: previous, requestedBy: "person", requestedAt: 1 });
+  const loop = await approved(rolledBack, "nLAPTOP");
+  rolledBack.registry.reportRelease({ node, role: "control", commit: previous, target: merged, state: "failed", reason: "unit failed", observedAt: Date.now() });
+  await loop.poll();
+  for (const role of ["control", "probe"] as const) rolledBack.registry.reportRelease({ node, role, commit: previous, target: previous, state: "healthy", reason: null, observedAt: Date.now() });
+  await loop.poll();
+  assert.equal(rolledBack.review().phase.kind, "needs-person");
+  assert.deepEqual(rolledBack.statuses(), ["active", "active"], "a merge whose deploy rolled back");
+
+  const approval = fixture(t);
+  await approved(approval, null);
+  assert.equal(approval.review().phase.kind, "approved");
+  assert.deepEqual(approval.statuses(), ["active", "active"], "a review without a landing");
+  assert.deepEqual([...held.woken, ...rolledBack.woken, ...approval.woken], []);
+});
+
+test("a thread in a turn as its review lands stays open, and the other is archived", async (t) => {
+  const f = fixture(t, { repo: "acme/shop" });
+  f.registry.recordActivity(f.builder, { agent: 1, agentTurnRunning: true });
+  const loop = await approved(f, "nLAPTOP");
+  assert.deepEqual(f.review().phase, { kind: "landed", commit: merged });
+  assert.deepEqual(f.statuses(), ["active", "archived"]);
+  f.registry.recordActivity(f.builder, { agent: 2, agentTurnRunning: false });
+  await loop.poll();
+  assert.deepEqual(f.statuses(), ["active", "archived"], "the person archives a builder that was busy as it landed");
 });
 
 test("a token that cannot merge holds the landing for the person, and a later land tries again", async (t) => {

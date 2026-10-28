@@ -186,6 +186,8 @@ export interface ReviewDeps {
   release: { self: string | undefined; repo: string };
   /** Whether `caller` may land, which takes the right to deploy. A landing asks again before every merge. */
   mayLand(caller: string): boolean;
+  /** Tells the planner a thread's status changed, so an archived thread's pylon pauses at once. */
+  wake(t: Thread): void;
   log(message: string): void;
   now?: () => number;
 }
@@ -568,7 +570,7 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
     }
     for (const [who, t] of [["builder", builder], ["reviewer", reviewer]] as const) {
       if (landing || t?.status === "active") continue;
-      // Only the person archives or deletes a builder or a reviewer.
+      // The loop archives a builder and a reviewer only as their review lands, so here the person did.
       if (t?.status === "archived" || t?.status === "deleted") return end(r, { kind: "cancelled", who, status: t.status });
       return toPerson(r, `The ${who} thread ${t?.id ?? ""} is ${t?.status ?? "gone"}, so the review stopped.`);
     }
@@ -585,6 +587,13 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
     return live && ended.has(next.phase.kind) ? await endedOnGitHub(next) ?? next : next;
   }
 
+  /**
+   * A landed PR leaves its builder and reviewer nothing to do, so they are archived in the transaction that saves the
+   * landing, and never later. A thread in a turn, such as one the person is talking to, stays open.
+   */
+  const finished = (r: Review): Thread[] => [registry.thread(r.builder), registry.thread(r.reviewer)]
+    .filter((t): t is Thread => t !== undefined && !t.working && t.status !== "archived" && t.status !== "deleted");
+
   async function pass() {
     const reviews = registry.reviews();
     // A check thread no review holds, such as one started just before a crash, has nothing left to give.
@@ -597,7 +606,9 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
         for (let i = 0; i < 8; i++) {
           const next = await step(r);
           if (next === r) break;
-          registry.saveReview(next);
+          const archive = next.phase.kind === "landed" && r.phase.kind !== "landed" ? finished(next) : [];
+          registry.saveReview(next, archive.map((t) => t.id));
+          for (const t of archive) deps.wake(t);
           r = next;
         }
       } catch (err) {

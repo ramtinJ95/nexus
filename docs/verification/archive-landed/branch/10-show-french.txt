@@ -1,0 +1,16 @@
+$ nexus show th-48491bed6337
+th-48491bed6337  Greet in French
+project: nexus-review
+Claude worker: started, model claude-opus-5-5
+attention: reply
+status: active
+pylon: pylon-th-48491bed6337 on verify-node, running, observed 0s ago
+size: 1 CPUs, 1 GiB memory, 10 GiB disk
+placement: verify-node, the project's default node
+setup: fresh boot runs .nexus/setup, because the control plane could not read .nexus/setup at main: the verify stack reads no remote, so every thread boots fresh
+PR watch: on
+PR #3: Greet in French — open, checks none, review none https://github.com/ramtinJ95/nexus/pull/3
+review rv-5c29dfbb of PR #3, started on its own: approved, round 1 of 5, reviewer th-68e5010cbf04 on gpt-6-astra
+output: branch origin/greet-french
+output: pull-request https://github.com/ramtinJ95/nexus/pull/3
+[exit 0]
