@@ -8,6 +8,7 @@ import { fakeHarness } from "./fake-harness.ts";
 import { builderNudger, nudgePrefix } from "./nudge.ts";
 import { reviewerCaller } from "./review.ts";
 import { checkCaller } from "./gate.ts";
+import { turnGate } from "./drain.ts";
 import { transcriptStart, type ClaudeEntry } from "../claude-transcript.ts";
 import type { CommandResult, LiveHash, NodeName, PylonCommand, PylonId, PylonObservation, TailnetNodeId } from "../protocol.ts";
 import type { ProjectId } from "../project.ts";
@@ -357,4 +358,24 @@ test("archiving a thread held for the person clears the hold", async (t) => {
   await f.nudger.poll();
   assert.equal(f.registry.nudge(id), null);
   assert.notEqual(f.registry.attention(id), "decision");
+});
+
+test("a harness builder's nudge refused by a deploy's drain saves nothing and goes out once the drain ends", async (t) => {
+  const f = fixture(t);
+  const id = await f.add("th-1");
+  let draining = true;
+  const gate = turnGate(() => draining);
+  const gated = builderNudger({
+    registry: f.registry, harness: f.fake.harness, now: () => f.now, log: () => {}, github: { async find() { return []; } },
+    inbox: agentInbox({ registry: f.registry, harness: { send: (...args) => gate.run(() => f.fake.harness.send(...args)) }, probes: new Map(), wake() {} }),
+  });
+  f.turn(id);
+  f.tick(graceMs);
+  await gated.poll();
+  assert.deepEqual(f.nudges(), []);
+  assert.equal(f.registry.nudge(id), null);
+  draining = false;
+  await gated.poll();
+  assert.equal(f.nudges().length, 1);
+  assert.equal(f.registry.nudge(id)?.state, "nudged");
 });
