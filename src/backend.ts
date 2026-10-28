@@ -48,6 +48,8 @@ export interface VmBackend {
   updateSecret(name: string, value: string, signal?: AbortSignal): Promise<readonly { pylonId: PylonId; reason: string }[]>;
   /** Whether the node has a git SSH key, so a pylon can clone over SSH. Omitted: it has none. */
   readonly gitSsh?: boolean;
+  /** Whether a pylon whose boot asks for nested virtualization gets KVM of its own here. Omitted: it does not. */
+  readonly nestedVirtualization?: boolean;
   /** The SQLite file the probe journals its pylons' events in. Omitted: the journal is in memory, and a restart loses it. */
   readonly eventJournal?: string;
   /** Its end of NEXUS_API, which the in-pylon `nexus` CLI calls. Omitted: those calls go unanswered. */
@@ -78,7 +80,7 @@ export interface BackendPylon {
    * What the pylon reserves on its node: CPUs and memory while its VM is up, and its disk for as long as it exists,
    * paused or not. Absent from a backend that reserves nothing, such as Docker's.
    */
-  holds?: BootInputs["resources"];
+  holds?: Pick<BootInputs["resources"], "cpus" | "memoryGiB" | "diskGiB">;
 }
 
 /** Every call runs as `user`. */

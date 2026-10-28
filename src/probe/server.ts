@@ -411,6 +411,7 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
       previewRoutes: previews === null ? [] : [...previews.gateway.routes].map(([httpsPort, route]) => ({ httpsPort, ...route })),
       grants: { secrets: options.secrets.names(), gitSsh: backend.gitSsh ?? false },
       spawnsWithoutRelaunch: true,
+      ...backend.nestedVirtualization === true ? { nestedVirtualization: true as const } : {},
       heldSecrets,
     };
   }

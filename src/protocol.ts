@@ -168,6 +168,11 @@ export interface NodeObservation {
    * sessions, so the usage backfill never wakes a pylon on its node.
    */
   spawnsWithoutRelaunch?: true;
+  /**
+   * True from a probe whose backend can give a pylon KVM of its own: pylon-vm, on a host whose KVM module lets guests
+   * nest. Only such a node takes a pylon whose boot asks for nested virtualization, such as a verify pylon.
+   */
+  nestedVirtualization?: true;
   /** The heldSecrets this probe takes from the control plane. */
   heldSecrets: readonly string[];
 }
@@ -808,6 +813,7 @@ const olderObservationSchema = z.looseObject({
   previewRoutes: z.array(unchecked<PreviewRouteFact>()).nullable().exactOptional(),
   grants: unchecked<NodeObservation["grants"] | null>(),
   spawnsWithoutRelaunch: unchecked<true>(),
+  nestedVirtualization: unchecked<true>(),
   heldSecrets: unchecked<readonly string[]>(),
 }) satisfies z.ZodType<OlderObservation>;
 

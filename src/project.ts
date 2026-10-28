@@ -295,7 +295,8 @@ export interface BootInputs {
   pylonId: PylonId;
   image: ImageId;
   source: PylonSource;
-  resources: Project["resources"];
+  /** `nestedVirtualization` loads the KVM modules at boot, which only a node that reports it can give. */
+  resources: Project["resources"] & { nestedVirtualization?: true };
   network: { allowedHosts: readonly string[]; secrets: readonly SecretGrant[] };
   repo: RepoInit; // set up on template and fresh boots only
   dotfiles: PylonOverlay["dotfiles"]; // pulled on every boot

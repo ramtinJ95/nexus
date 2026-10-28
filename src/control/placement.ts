@@ -32,6 +32,7 @@ function weigh(registry: Registry, node: NodeRecord, need: Need): Weighed {
   const { capacity: c } = o;
   if (c === null) return refused("runs a probe too old to report what its pylons hold");
   if (!o.artifacts.includes(need.image)) return refused(`does not hold image ${need.image}`);
+  if (need.resources.nestedVirtualization === true && o.nestedVirtualization !== true) return refused("cannot give a pylon KVM of its own: its probe does not report nested virtualization");
   // A probe gets a held secret soon after it starts, and the planner holds the boot until then.
   const missing = need.network.secrets.map((s) => s.name).filter((name) => !o.grants.secrets.includes(name) && !o.heldSecrets.includes(name));
   const from = (name: string) => heldSecrets.includes(name) ? `${name}, which its probe is too old to take from the control plane` : `${name} in its secret file`;

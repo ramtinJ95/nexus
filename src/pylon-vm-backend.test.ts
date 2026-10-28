@@ -12,7 +12,7 @@ import { syncBuiltinESMExports } from "node:module";
 import { createServer } from "node:http";
 import { join } from "node:path";
 import { PassThrough, Readable } from "node:stream";
-import { bootHooks, createPylonVmBackend, piChatgptLoginCommand, type PylonVmBackendOptions } from "./pylon-vm-backend.ts";
+import { bootHooks, createPylonVmBackend, hostNestsKvm, piChatgptLoginCommand, type PylonVmBackendOptions } from "./pylon-vm-backend.ts";
 import { identityOf } from "./pylon-vm/identity.ts";
 import { asUser, imageEnv, pylonGuest } from "./pylon-vm/pylon-guest.ts";
 import { chatgptTokenGrant, type BootInputs } from "./project.ts";
@@ -238,6 +238,25 @@ test("a repo URL that is neither SSH nor HTTPS is invalid", async () => {
   const { backend } = await backendWith();
   const boot = bootOf("pylon-url", { repo: { kind: "clone", url: "file:///srv/repo.git", checkout: { branch: "main", commit: "c0ffee" } } });
   await assert.rejects(backend.ensureRunning(boot, live, signal()), { code: "invalid", message: /neither an SSH nor an HTTPS git URL/ });
+});
+
+test("a boot that asks for nested virtualization hands the controller that flag, and an ordinary boot does not", async () => {
+  const { backend, instances } = await backendWith();
+  for (const [pylonId, nested] of [["pylon-nested", true], ["pylon-plain", false]] as const) {
+    const resources = { cpus: 2, memoryGiB: 8, diskGiB: 8, ...nested ? { nestedVirtualization: true as const } : {} };
+    await assert.rejects(backend.ensureRunning(bootOf(pylonId, { resources }), live, AbortSignal.timeout(60_000)));
+    const status = JSON.parse(await readFile(join(instances, pylonId, "status.json"), "utf8"));
+    assert.deepEqual(status.resources, { cpus: 2, memoryGiB: 8, ...nested ? { nestedVirtualization: true } : {} });
+  }
+});
+
+test("a host nests KVM when its AMD or Intel module's nested parameter is Y or 1", () => {
+  const host = (values: Record<string, string>) => (path: string) => values[path] ?? null;
+  assert.equal(hostNestsKvm(host({ "/sys/module/kvm_amd/parameters/nested": "1\n" })), true);
+  assert.equal(hostNestsKvm(host({ "/sys/module/kvm_intel/parameters/nested": "Y\n" })), true);
+  assert.equal(hostNestsKvm(host({ "/sys/module/kvm_intel/parameters/nested": "N\n" })), false);
+  assert.equal(hostNestsKvm(host({ "/sys/module/kvm_amd/parameters/nested": "0\n" })), false);
+  assert.equal(hostNestsKvm(host({})), false, "a host without KVM loaded");
 });
 
 test("a boot under 3 GiB is refused, on a wake as on a create", async () => {
