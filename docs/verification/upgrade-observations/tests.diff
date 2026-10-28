@@ -10,7 +10,7 @@
  ✔ a Claude launch whose probe restarts mid-way is sent again under its session once the probe is back, and starts once
  ✔ a Claude launch whose probe stays away fails once the wait is over
  ✔ a Claude worker start stores its first prompt without starting a harness conversation
-@@ -117,7 +116,7 @@
+@@ -122,7 +121,7 @@
  ✔ a probe that takes the token and has not got it, as one that just started, gets it at once
  ✔ a process that closes its stdin still delivers its output and exit code
  ✔ a project whose default node is auto places each thread that names none, and a named node still pins
@@ -19,7 +19,7 @@
  ✔ a published preview is ready only while its running pylon reports its service ready, or does not list it
  ✔ a published preview whose service is starting shows starting and one whose service failed shows failed, with why, neither with a link
  ✔ a pull request Claude opened shows once, as an escaped link to it, however often its transcript names it
-@@ -164,7 +163,7 @@
+@@ -169,7 +168,7 @@
  ✔ a session of a pylon that is not running, or of an archived or deleted thread, is refused with 409
  ✔ a slow event follower gets every event once and in order, and one that stops reading is dropped after the stall limit with its place
  ✔ a snapshot as the probe every node runs sends it, claudeLaunchRepeatable and all, parses with every fact it sent
@@ -28,7 +28,7 @@
  ✔ a snapshot lists the checkpoints of the stopped pylons it reports, also when a pylon stops while it is read
  ✔ a snapshot's journal applies each report past the node's receipt in order, and the reports before it change nothing
  ✔ a spawn granted a held secret boots before the control plane hands it over, rather than failing for good
-@@ -224,6 +223,7 @@
+@@ -231,6 +230,7 @@
  ✔ an image is recorded exactly when a probe's Docker backend can name it
  ✔ an image is recorded only with every pin, gh included, each in its pinned format
  ✔ an image recorded before images carried their release reads as of no known release
