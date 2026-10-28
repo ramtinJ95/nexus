@@ -1,0 +1,16 @@
+$ nexus show th-3017c77de3d0
+th-3017c77de3d0  B: controller crash with a malformed judgment
+project: wave
+attention: none
+status: active
+pylon: pylon-th-3017c77de3d0 on node-a, running, observed 1s ago
+size: 1 CPUs, 1 GiB memory, 5 GiB disk
+placement: node-a, as the start named
+setup: fresh boot runs .nexus/setup, because the control plane could not read .nexus/setup at main: the control plane reads only https:// remotes, and holds no SSH key for git@github.com:verify/wave.git
+PR watch: on
+question judgment:4: The pylon failed on node-a: pylon is broken: the VM stopped outside a completed pause
+  options: "Retry", "Leave it failed"
+  answered "Retry" by nVERIFYLAPTOP at 2026-10-28T13:37:04.600Z
+judgment of failure 4 on node-a: person, by the control plane: the judgment's reply had no valid nexus-judgment block with its token
+  retried the pylon on node-a, as the person answered
+[exit 0]

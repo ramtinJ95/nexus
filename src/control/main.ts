@@ -28,6 +28,7 @@ import { repository } from "../deploy/install.ts";
 import { prWatcher } from "./pr-watch.ts";
 import { threadQueue } from "./queue.ts";
 import { builderNudger } from "./nudge.ts";
+import { judgmentPass } from "./judgment.ts";
 import { pipeline } from "./pipeline.ts";
 import { agentInbox } from "./inbox.ts";
 import { usageLimitResumer } from "./usage-limit.ts";
@@ -165,6 +166,8 @@ export async function startControlPlane(config: ControlPlaneConfig, models: Mode
     startThread: (...args) => gate.run(() => rawHarness.startThread(...args)),
     send: (...args) => gate.run(() => rawHarness.send(...args)),
     retry: (...args) => gate.run(() => rawHarness.retry(...args)),
+    startJudgment: (...args) => gate.run(() => rawHarness.startJudgment(...args)),
+    sendJudgment: (...args) => gate.run(() => rawHarness.sendJudgment(...args)),
   };
   const probeMap = new Map(probes.map((probe) => [probe.node, probe]));
   const images = startImageRollout({
@@ -213,6 +216,10 @@ export async function startControlPlane(config: ControlPlaneConfig, models: Mode
   const nudges = github === null ? null : builderNudger({ registry, github, inbox, harness, watch, log: (message) => console.error(message) });
   const nudgeTimer = setInterval(() => { void nudges?.poll(); }, 15_000);
   void nudges?.poll();
+  // Judgments need no GitHub, so they run without a token too.
+  const judgments = judgmentPass({ registry, harness, probes: probeMap, wake, log: (message) => console.error(message) });
+  const judgmentTimer = setInterval(() => { void judgments.poll(); }, 15_000);
+  void judgments.poll();
   const api = await startApi({
     ...(config.https ? { https: { port: 7443, certificate: () => localApiCertificate(config.https!.hostname, tailscaled) } } : {}),
     prWatchEnabled: token !== null,
@@ -242,6 +249,7 @@ export async function startControlPlane(config: ControlPlaneConfig, models: Mode
       clearInterval(queueTimer);
       clearInterval(itemTimer);
       clearInterval(nudgeTimer);
+      clearInterval(judgmentTimer);
       clearInterval(resumeTimer);
       clearInterval(handoffTimer);
       await watch.close();
@@ -251,6 +259,7 @@ export async function startControlPlane(config: ControlPlaneConfig, models: Mode
       await items?.close();
       await queue?.close();
       await nudges?.close();
+      await judgments.close();
       await api.close();
       await backfill.close();
       await usage.close();

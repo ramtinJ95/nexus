@@ -62,6 +62,7 @@ import { itemView, type ItemId, type Pipeline } from "./pipeline.ts";
 import { queuedView, type QueuedRecord, type QueuedThread, type ThreadQueue } from "./queue.ts";
 import { nodePylons, overcommitted, type NodePylons } from "./placement.ts";
 import { maxRounds, type Review, type ReviewLoop } from "./review.ts";
+import { judgmentView, type JudgmentView } from "./judgment.ts";
 
 export interface ApiOptions {
   https?: { port: number; certificate(): Promise<Certificate>; renewalMs?: number; retryMs?: number };
@@ -143,6 +144,8 @@ export interface ThreadDetail {
   review: Review | null;
   /** Every question the thread asked, answered or not, in the order they were asked. */
   questions: readonly Question[];
+  /** Every judgment of the thread's failed pylon, oldest failure first. */
+  judgments: readonly JudgmentView[];
   /** The command that attaches to the pylon's Herdr sessions from a shell in the pylon. */
   attach: string;
   /** Null for a thread that has no conversation. A parked task holds the run until it is retried. */
@@ -461,6 +464,7 @@ export async function startApi(options: ApiOptions): Promise<Api> {
       pullRequests: watch?.links.map((l) => l.pr) ?? [],
       review: registry.review(t.id),
       questions: registry.questions(t.id),
+      judgments: registry.judgments(t.id).map(judgmentView),
       attach: `herdr --session ${herdrSession}`,
       agent: agent.kind !== "harness" || t.status === "deleted" ? null : { parkedTasks: harness.activity.parked(t.id).length },
     };

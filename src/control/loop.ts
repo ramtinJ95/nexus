@@ -158,6 +158,8 @@ export function startLoop(options: LoopOptions): Loop {
     // the probe, and saving an older copy would undo it.
     for (const pylonId of registry.pylonIdsToTick(node, present)) {
       const found = registry.pylon(pylonId)!;
+      // A failed pylon a judgment moved meanwhile is its new node's to tick.
+      if (found.node !== node) continue;
       const thread = registry.thread(found.thread as ThreadId)!;
       const stored = withLive(found, thread);
       const pylon = { ...stored, desired: desiredPhase(thread, Date.now()) };

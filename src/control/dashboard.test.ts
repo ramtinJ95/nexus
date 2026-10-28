@@ -15,6 +15,7 @@ import { readEvents } from "./event-reader.ts";
 import { fakeHarness } from "./fake-harness.ts";
 import { openRegistry, type Thread, type ThreadId } from "./registry.ts";
 import type { Review, ReviewLoop } from "./review.ts";
+import type { Judgment } from "./judgment.ts";
 import type { AgentCall } from "./usage.ts";
 import type { JobId, NodeHealth, NodeName, PylonId, PylonObservation, ServiceFact, TailnetNodeId } from "../protocol.ts";
 import type { ImageId } from "../images.ts";
@@ -345,6 +346,26 @@ test("an open question is a card with a button per option, disabled with the rea
   assert.match(answered, /<section class="landing question answered" data-question="qn-image"/);
   assert.equal(textOf(answered), `Rebuild the pylon image? It changes the base layer . Answered "Not now" from ${laptop}, just now`);
   assert.ok(!answered.includes("<button"));
+});
+
+const judgmentsOf = (page: string) => /<div id="judgments" data-live>([\s\S]*?)<\/div>\n<div id="questions"/.exec(page)![1]!;
+
+test("each judgment of a failed pylon is a card above the questions: what failed, the verdict and who gave it, what Nexus did, and what it was asked and answered", async (t) => {
+  const s = await seeded(t, landingOptions());
+  const fix = await s.start("acme", "Fix checkout");
+  assert.equal(judgmentsOf((await s.call("GET", `/threads/${fix.id}`)).text), "", "a thread with no judgment shows no judgment region");
+  const judgment = (failure: number, phase: Judgment["phase"], reply: string | null): Judgment => ({
+    failure, thread: fix.id, node, failed: "pylon is broken: the controller exited\nqemu: terminating <on signal 15>", startedAt: Date.now(),
+    request: { brief: "Is it the node?", token: "t" }, conversation: 3, reply, phase,
+  });
+  s.registry.saveJudgment(judgment(812, { kind: "done", verdict: { answer: "retry", why: "The node was swapping.", by: "judgment" }, outcome: { kind: "retried", node, on: "verdict" } }, "It was the node.\n```nexus-judgment\n{}\n```"), null);
+  s.registry.saveJudgment(judgment(813, { kind: "asked", verdict: { answer: "person", why: "the judgment did not answer within 15 minutes", by: "control plane" } }, null), null);
+
+  const region = judgmentsOf((await s.call("GET", `/threads/${fix.id}`)).text);
+  assert.deepEqual([...region.matchAll(/<section class="landing judgment" data-judgment="(\d+)"/g)].map((m) => m[1]), ["812", "813"]);
+  const [done, asked] = region.split("</section>").map(textOf);
+  assert.equal(done, `Failed on ${node} judged just now pylon is broken: the controller exited retry , by the judgment: The node was swapping. Nexus retried the pylon on ${node}. What the judgment was asked and answered Is it the node? It was the node. \`\`\`nexus-judgment {} \`\`\``);
+  assert.equal(asked, `Failed on ${node} judged just now pylon is broken: the controller exited person , by the control plane: the judgment did not answer within 15 minutes It waits for your answer below. What the judgment was asked and answered Is it the node?`);
 });
 
 test("a review is not offered for landing when its PR closed, or when the control plane has no review loop", async (t) => {

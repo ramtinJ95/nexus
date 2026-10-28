@@ -1,0 +1,20 @@
++   2.9s control: nexus control plane: API on 127.0.0.1:7470, following node-a, node-b
++  63.0s control: pylon-th-78a236a3e44c: the planner gave up: pylon is broken: the VM stopped outside a completed pause
+2026-10-28T09:58:01.204Z controller: booting the VM from checkpoint ck-1
+2026-10-28T09:58:03.911Z controller: guest agent connected
+2026-10-28T10:02:14.377Z controller: Error: Guest command got no answer within 13000 ms
+2026-10-28T10:02:14.380Z controller: qemu exited with signal 9 while the host was out of memory
+2026-10-28T10:02:14.381Z controller: stand-in marker for the scripted model: judge: retry
++  77.9s control: th-78a236a3e44c: judgment of failure 1 on node-a: judging
++  92.9s control: th-78a236a3e44c: judgment of failure 1 on node-a: retry, by the judgment: scripted judgment: the brief says judge: retry
++  92.9s control: th-78a236a3e44c: judgment of failure 1 on node-a: retry, by the judgment: scripted judgment: the brief says judge: retry; retried the pylon on node-a
++ 123.0s control: pylon-th-3017c77de3d0: the planner gave up: pylon is broken: the VM stopped outside a completed pause
+2026-10-28T09:58:01.204Z controller: booting the VM from checkpoint ck-1
+2026-10-28T09:58:03.911Z controller: guest agent connected
+2026-10-28T10:02:14.377Z controller: Error: Guest command got no answer within 13000 ms
+2026-10-28T10:02:14.380Z controller: qemu exited with signal 9 while the host was out of memory
+2026-10-28T10:02:14.381Z controller: stand-in marker for the scripted model: judge: malformed
++ 137.9s control: th-3017c77de3d0: judgment of failure 4 on node-a: judging
++ 152.9s control: th-3017c77de3d0: judgment of failure 4 on node-a: person, by the control plane: the judgment's reply had no valid nexus-judgment block with its token
++ 152.9s control: th-3017c77de3d0: judgment of failure 4 on node-a: person, by the control plane: the judgment's reply had no valid nexus-judgment block with its token; asked the person on question judgment:4
++ 167.9s control: th-3017c77de3d0: judgment of failure 4 on node-a: person, by the control plane: the judgment's reply had no valid nexus-judgment block with its token; retried the pylon on node-a, as the person answered

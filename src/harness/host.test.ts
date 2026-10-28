@@ -4,7 +4,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { openHarnessHost, type ConversationId } from "./host.ts";
-import { scriptedModel, scriptedModels, scriptedUsage } from "./test-fixture.ts";
+import { scriptedModel, scriptedModels, scriptedUsage, type ScriptedRequest } from "./test-fixture.ts";
 import type { PylonId } from "../protocol.ts";
 
 test("the usage of a conversation's answers reads on from the last entry read, and stays readable after its thread is deleted", async (t) => {
@@ -42,4 +42,46 @@ test("the usage of a conversation's answers reads on from the last entry read, a
   const reopened = await open([conversation]);
   t.after(() => reopened.close());
   assert.deepEqual((await reopened.usage(conversation, null)).calls.map((c) => c.id), [first.calls[0]!.id, second.calls[0]!.id]);
+});
+
+test("a judgment's conversation is offered no tools, needs no pylon, and has replies once its run ends, across a reopen", async (t) => {
+  const scratch = await mkdtemp(join(tmpdir(), "nexus-host-judgment-"));
+  t.after(() => rm(scratch, { recursive: true, force: true }));
+  const seen: ScriptedRequest[] = [];
+  let hold: Promise<void> | null = new Promise<void>(() => {});
+  let located = 0;
+  const open = () => openHarnessHost({
+    storagePath: join(scratch, "harness.sqlite"), models: scriptedModels({ seen: (r) => seen.push(r), held: () => hold }), model: scriptedModel,
+    tailscaled: join(scratch, "none.sock"), threads: [], deleted: [], onActivity: () => {}, log: () => {},
+    locator: { awaitRunning: () => { located++; return Promise.reject(new Error("no pylon in this test")); } },
+  });
+  const eventually = async <T>(read: () => T | null | Promise<T | null>): Promise<T> => {
+    for (let i = 0; i < 500; i++) {
+      const value = await read();
+      if (value !== null) return value;
+      await new Promise((r) => setTimeout(r, 10));
+    }
+    return assert.fail("timed out");
+  };
+  const brief = 'Is it the node?\njudge: retry\n```nexus-judgment\n{"token": "judgment:7:abc", "answer": "retry"}\n```';
+  const host = await open();
+  const id = await host.startJudgment();
+  await host.sendJudgment(id, brief, "judgment:7");
+  await host.sendJudgment(id, brief, "judgment:7");
+  await eventually(() => seen[0] ?? null);
+  assert.equal(await host.judgmentReplies(id), null, "no replies while its run is on");
+  await host.close();
+
+  hold = null;
+  const reopened = await open();
+  t.after(() => reopened.close());
+  const replies = await eventually(() => reopened.judgmentReplies(id));
+  assert.equal(replies.length, 1);
+  assert.match(replies[0]!, /```nexus-judgment\n\{"token":"judgment:7:abc","answer":"retry","why":"scripted judgment: the brief says judge: retry"\}\n```/);
+  assert.deepEqual([...seen], [{ tools: [], last: brief }, { tools: [], last: brief }], "the reopen ran the one brief again, and offered no tools either time");
+  assert.equal(located, 0, "nothing looked for a pylon");
+
+  await reopened.startThread({ threadId: "th-tools", pylonId: "pylon-th-tools" as PylonId });
+  await reopened.send("th-tools", "hello", "m1", "followUp");
+  assert.ok((await eventually(() => seen[2] ?? null)).tools.includes("bash"), "a thread's conversation in the same harness is offered the coding tools");
 });

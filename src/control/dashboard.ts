@@ -713,6 +713,7 @@ ${actions.length > 0 && html`<div class="bar-actions" id="thread-actions">${acti
 <div class="dock">
 <p id="action-error" class="error" role="alert" hidden></p>
 <p id="action-status" class="comp-note" role="status" hidden></p>
+<div id="judgments" data-live>${judgmentCards(c, d)}</div>
 <div id="questions" data-live>${questionCards(c, d)}</div>
 <div id="landing" data-live>${landing(c, d)}</div>
 <div id="run" data-live>${runBar(t, run, c.now)}</div>
@@ -749,6 +750,23 @@ const answerRefusals: Record<AnswerRefusal, (caller: TailnetNodeId) => string> =
   "not a deployer": (caller) => `This device cannot answer: the answer may deploy, so only the control plane's deployers may, and this device (tailnet node ${caller}) is not one. Answer it from a deployer, or add this node to deployers in the control plane's config.`,
 };
 const answerers: Record<Question["answerer"], string> = { person: "You answer.", deployer: "A deployer answers, as the answer may deploy." };
+
+/**
+ * Above the questions, each judgment of the thread's failed pylon: what failed, the verdict and who gave it, and what
+ * Nexus did, with what the judgment was asked and what it answered. A question it asks is the question card below.
+ */
+function judgmentCards(c: Context, d: ThreadDetail): Html[] {
+  return (d.judgments ?? []).map((j) => {
+    const did = j.outcome !== null ? `Nexus ${j.outcome}.` : j.question !== null ? "It waits for your answer below." : j.verdict === null ? "Nexus acts on its answer." : "Nexus acts on it now.";
+    return html`<section class="landing judgment" data-judgment="${j.failure}" aria-label="Judgment of a failure">
+<div class="land-top"><h2>Failed on ${j.node}</h2><span class="land-meta">judged ${ago(j.startedAt, c.now)}</span></div>
+<p class="land-note">${j.failed.split("\n")[0]}</p>
+<p class="land-meta">${j.verdict === null ? "The judgment has not answered yet." : html`<b>${j.verdict.answer}</b>, by the ${j.verdict.by}: ${j.verdict.why}`}</p>
+<p class="land-meta">${did}</p>
+${j.brief !== null && html`<details><summary>What the judgment was asked and answered</summary><pre>${j.brief}</pre>${j.reply !== null && html`<pre>${j.reply}</pre>`}</details>`}
+</section>`;
+  });
+}
 
 /**
  * Above the landing card, each question the thread asked: open ones as a card with a button per option, and answered

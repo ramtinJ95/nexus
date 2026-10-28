@@ -1,0 +1,1 @@
+branch: f22e4f4 docs: a verdict waits for the person once the pipeline is off or the failure's event is gone

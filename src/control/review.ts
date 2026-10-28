@@ -207,7 +207,8 @@ export interface ReviewDeps {
   now?: () => number;
 }
 
-const latest = <T extends { token: string }>(replies: readonly string[], fence: string, schema: z.ZodType<T>, token: string): T | null => {
+/** The newest fenced `fence` block in the replies whose JSON matches `schema` and echoes `token`, or null when none does. */
+export const latest = <T extends { token: string }>(replies: readonly string[], fence: string, schema: z.ZodType<T>, token: string): T | null => {
   const blocks = replies.flatMap((text) => [...text.matchAll(new RegExp("```" + fence + "[ \\t]*\\r?\\n([\\s\\S]*?)```", "g"))].map((m) => m[1]!));
   for (const block of blocks.toReversed()) {
     let value: unknown;
@@ -264,7 +265,8 @@ const findingLine = (f: Finding) => `${f.id} (${f.priority})${f.where ? ` ${f.wh
 
 const reservedList = "secrets; the egress allowlist; login or auth; the tailnets; database migrations that delete or rewrite existing data; pylon image rebuilds; breaking changes to the CLI's contract; anything irreversible";
 
-const mint = (id: string) => `${id}:${randomBytes(6).toString("hex")}`;
+/** A token of `id` and random hex, which only the recipient of the request it is in is told. */
+export const mint = (id: string) => `${id}:${randomBytes(6).toString("hex")}`;
 
 function reviewerRequest(r: Review, detail: PrSnapshot["detail"], token: string): string {
   return `${reviewPrefix}

@@ -39,7 +39,7 @@ import type { WebSocket } from "ws";
 import { attachTerminal, processTty } from "./attach.ts";
 import { call, CliError, exitCodes, follow, upgrade, type Endpoint, type HostPort } from "./transport.ts";
 
-const version = "0.38.0";
+const version = "0.39.0";
 const defaults = { url: "http://rj-firebat.tailc817d3.ts.net:7470", socks: "localhost:1055" };
 const configFile = () => join(homedir(), ".config", "nexus", "cli.json");
 
@@ -367,6 +367,14 @@ function questionText(q: Question): string {
   ].join("\n");
 }
 
+/** A judgment's verdict and who gave it, then what Nexus did or what it waits for. */
+function judgmentText(j: ThreadDetail["judgments"][number]): string {
+  return [
+    `judgment of failure ${j.failure} on ${j.node}: ${j.verdict === null ? "no verdict yet" : `${j.verdict.answer}, by the ${j.verdict.by}: ${j.verdict.why}`}`,
+    `  ${j.outcome ?? (j.question !== null ? `waits for your answer to question ${j.question}` : j.verdict === null ? `judging since ${new Date(j.startedAt).toISOString()}` : "Nexus acts on it")}`,
+  ].join("\n");
+}
+
 const autoReviews = { off: null, review: { land: false }, land: { land: true } } as const;
 const pipelines = { off: null, approve: { autoStart: false }, start: { autoStart: true } } as const;
 /** A control plane older than `Project.pipeline` sends none, and has no pipeline. */
@@ -377,7 +385,7 @@ const autoReviewText = (p: Project) => p.autoReview == null ? "auto review off" 
 /** A control plane older than `Thread.working` sends none. */
 const working = (t: Thread) => t.working ?? (t.agentTurnRunning || t.sessionTurnRunning === true);
 
-function detailText({ thread: t, pylon: p, agent, sessions, previews, ports, outputs, prWatch, pullRequests, claudeWorker, attention, review, questions }: ThreadDetail): string {
+function detailText({ thread: t, pylon: p, agent, sessions, previews, ports, outputs, prWatch, pullRequests, claudeWorker, attention, review, questions, judgments }: ThreadDetail): string {
   const observed = p.observedAt === null ? "" : `, observed ${ago(Date.parse(p.observedAt))}`;
   return [
     `${t.id}  ${t.title}`,
@@ -405,6 +413,8 @@ function detailText({ thread: t, pylon: p, agent, sessions, previews, ports, out
     ...review == null ? [] : [reviewText(review)],
     // A control plane older than 0.35.0 sends no questions.
     ...(questions ?? []).map(questionText),
+    // A control plane older than 0.39.0 sends no judgments.
+    ...(judgments ?? []).map(judgmentText),
     ...outputs.map((o) => `output: ${o.kind} ${o.ref}`),
   ].join("\n");
 }

@@ -20,6 +20,7 @@ import { promisify } from "node:util";
 import { WebSocket } from "ws";
 import { maxStreams, startApi, type ThreadDetail, type ThreadRow } from "./api.ts";
 import type { Question } from "./questions.ts";
+import type { Judgment } from "./judgment.ts";
 import { threadStarter } from "./threads.ts";
 import { pipeline, type PipelineItem } from "./pipeline.ts";
 import { threadQueue, type QueuedThread } from "./queue.ts";
@@ -726,7 +727,7 @@ test("thread detail derives the actual state from the node's last observation", 
     attention: null, seenAt: null, lastReplyAt: null,
     desired: "running",
     pylon: { grantsOutdated: false, id: thread.pylonId, node, actualState: "unknown", failed: null, observedAt: null, retryRefused: null, resources: project.resources },
-    sessions: [], previews: [], ports: [], outputs: [], prWatch: { enabled: false, stopped: false, error: null }, pullRequests: [], review: null, questions: [], attach: "herdr --session nexus", agent: { parkedTasks: 0 },
+    sessions: [], previews: [], ports: [], outputs: [], prWatch: { enabled: false, stopped: false, error: null }, pullRequests: [], review: null, questions: [], judgments: [], attach: "herdr --session nexus", agent: { parkedTasks: 0 },
   });
 
   const capacity = { cpus: 16, committedCpus: 0, memoryGiB: 64, committedMemoryGiB: 0, diskFreeGiB: 100, committedDiskGiB: 0 };
@@ -3399,6 +3400,23 @@ test("a queued start repeated under its request ID answers the same queued threa
   assert.equal((started.body as Thread).id, queued.id);
   assert.equal((started.body as Thread).pylonId, `pylon-${queued.id}`, "a repeat after the start answers the thread");
   assert.deepEqual(s.fake.transcript(queued.id).messages.map((m) => m.content), ["Fix the next bug."]);
+});
+
+test("thread detail lists the judgments of the thread's failed pylon, oldest failure first, with what each decided and did", async (t) => {
+  const s = await withThread(t);
+  const judgment = (failure: number, phase: Judgment["phase"]): Judgment => ({
+    failure, thread: s.thread.id, node, failed: "pylon is broken: the controller exited", startedAt: 5, request: failure === 900 ? null : { brief: "Is it the node?", token: "t" },
+    conversation: null, reply: failure === 900 ? null : "No block.", phase,
+  });
+  s.registry.saveJudgment(judgment(900, { kind: "acting", verdict: { answer: "person", why: "Nexus already retried this thread's pylon 2 times on its own", by: "control plane" } }), null);
+  s.registry.saveJudgment(judgment(812, { kind: "done", verdict: { answer: "retry-elsewhere", why: "The node is out of disk.", by: "judgment" }, outcome: { kind: "moved", from: node, to: "rj-other" as NodeName, on: "verdict" } }), null);
+  const { judgments } = (await s.call("GET", `/v1/threads/${s.thread.id}`)).body as ThreadDetail;
+  assert.deepEqual(judgments, [
+    { failure: 812, node, failed: "pylon is broken: the controller exited", startedAt: 5, phase: "done", verdict: { answer: "retry-elsewhere", why: "The node is out of disk.", by: "judgment" },
+      outcome: `moved the pylon from ${node} to rj-other and retried it`, question: null, brief: "Is it the node?", reply: "No block." },
+    { failure: 900, node, failed: "pylon is broken: the controller exited", startedAt: 5, phase: "acting", verdict: { answer: "person", why: "Nexus already retried this thread's pylon 2 times on its own", by: "control plane" },
+      outcome: null, question: null, brief: null, reply: null },
+  ]);
 });
 
 test("a person answers a question, a deployer question needs a deployer, and no node or pylon answers one", async (t) => {

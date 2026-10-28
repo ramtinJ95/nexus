@@ -1,0 +1,62 @@
+$ nexus show th-d27dd04c14ea --json
+{
+  "thread": {
+    "id": "th-d27dd04c14ea",
+    "title": "A: controller crash the judgment retries",
+    "project": "wave",
+    "pylonId": "pylon-th-d27dd04c14ea",
+    "status": "active",
+    "conversationId": "2",
+    "startedBy": "nVERIFYLAPTOP",
+    "createdAt": 1793190827155,
+    "agentTurnRunning": false,
+    "lastAgentActivityAt": 0,
+    "lastHumanActivityAt": 1793190827155,
+    "seenAt": null,
+    "lastReplyAt": null,
+    "placement": {
+      "how": "named",
+      "node": "node-a"
+    },
+    "setup": {
+      "how": "fresh",
+      "reason": "the control plane could not read .nexus/setup at main: the control plane reads only https:// remotes, and holds no SSH key for git@github.com:verify/wave.git"
+    },
+    "working": false
+  },
+  "attention": "failed",
+  "seenAt": null,
+  "lastReplyAt": null,
+  "desired": "running",
+  "pylon": {
+    "grantsOutdated": false,
+    "id": "pylon-th-d27dd04c14ea",
+    "node": "node-a",
+    "failed": "pylon is broken: the VM stopped outside a completed pause\n2026-10-28T09:58:01.204Z controller: booting the VM from checkpoint ck-1\n2026-10-28T09:58:03.911Z controller: guest agent connected\n2026-10-28T10:02:14.377Z controller: Error: Guest command got no answer within 13000 ms\n2026-10-28T10:02:14.380Z controller: qemu exited with signal 9 while the host was out of memory\n2026-10-28T10:02:14.381Z controller: stand-in marker for the scripted model: judge: retry",
+    "observedAt": "2026-10-28T12:35:44.154Z",
+    "resources": {
+      "cpus": 1,
+      "memoryGiB": 1,
+      "diskGiB": 5
+    },
+    "actualState": "failed",
+    "retryRefused": null
+  },
+  "sessions": [],
+  "previews": [],
+  "ports": [],
+  "outputs": [],
+  "prWatch": {
+    "enabled": true,
+    "stopped": false,
+    "error": null
+  },
+  "pullRequests": [],
+  "review": null,
+  "questions": [],
+  "attach": "herdr --session nexus",
+  "agent": {
+    "parkedTasks": 0
+  }
+}
+[exit 0]

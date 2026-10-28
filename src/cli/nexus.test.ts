@@ -25,6 +25,7 @@ import { turnGate } from "../control/drain.ts";
 import { fakeHarness } from "../control/fake-harness.ts";
 import { openRegistry, type Thread, type ThreadId } from "../control/registry.ts";
 import type { Review } from "../control/review.ts";
+import type { Judgment } from "../control/judgment.ts";
 import { startImageRollout } from "../control/image-rollout.ts";
 import { usageBackfill } from "../control/usage-backfill.ts";
 import type { ImageId, ImageManifest, ProjectMirror, TemplateRecord } from "../images.ts";
@@ -1353,9 +1354,29 @@ test("show prints each question with its options, its reserved case, and who mus
   assert.deepEqual((await s.json(["show", thread.id])).questions.map((q: { id: string }) => q.id), ["qn-image", "qn-brief"]);
 });
 
+test("show prints each judgment of a failed pylon: its verdict and who gave it, then what Nexus did or what it waits for", async (t) => {
+  const s = await setup(t);
+  const thread: Thread = await s.json(["start", "--project", "acme", "--title", "Flaky node"]);
+  const judgment = (failure: number, phase: Judgment["phase"]): Judgment => ({
+    failure, thread: thread.id, node, failed: "pylon is broken: the controller exited\nqemu: terminating", startedAt: Date.UTC(2026, 9, 28, 9), request: { brief: "Is it the node?", token: "t" },
+    conversation: 3, reply: null, phase,
+  });
+  s.registry.saveJudgment(judgment(812, { kind: "done", verdict: { answer: "retry", why: "The controller died while the node was swapping.", by: "judgment" }, outcome: { kind: "retried", node, on: "verdict" } }), null);
+  s.registry.saveJudgment(judgment(813, { kind: "asked", verdict: { answer: "person", why: "the judgment did not answer within 15 minutes", by: "control plane" } }), null);
+  s.registry.saveJudgment(judgment(814, { kind: "judging", deadline: null }), null);
+  const shown = await s.nexus(["show", thread.id]);
+  assert.equal(shown.code, 0, shown.stderr);
+  assert.match(shown.stdout, new RegExp(`^judgment of failure 812 on ${node}: retry, by the judgment: The controller died while the node was swapping\\.\n {2}retried the pylon on ${node}
+judgment of failure 813 on ${node}: person, by the control plane: the judgment did not answer within 15 minutes\n {2}waits for your answer to question judgment:813
+judgment of failure 814 on ${node}: no verdict yet\n {2}judging since 2026-10-28T09:00:00\\.000Z$`, "m"));
+  const [done] = (await s.json(["show", thread.id])).judgments;
+  assert.deepEqual(done, { failure: 812, node, failed: "pylon is broken: the controller exited\nqemu: terminating", startedAt: Date.UTC(2026, 9, 28, 9), phase: "done",
+    verdict: { answer: "retry", why: "The controller died while the node was swapping.", by: "judgment" }, outcome: `retried the pylon on ${node}`, question: null, brief: "Is it the node?", reply: null });
+});
+
 test("deploy and release use the shared release view and wait for both roles", async (t) => {
   const s = await setup(t);
-  assert.equal((await s.nexus(["--version"])).stdout.trim(), "nexus 0.38.0");
+  assert.equal((await s.nexus(["--version"])).stdout.trim(), "nexus 0.39.0");
   assert.equal((await s.nexus(["deploy", "bad"])).code, 64);
   const requested = await s.json(["deploy", "main"]);
   assert.equal(requested.desired.commit, "a".repeat(40));

@@ -1,0 +1,26 @@
+$ nexus start --project wave --title "A: controller crash the judgment retries" --node node-a --json
+{
+  "id": "th-78a236a3e44c",
+  "title": "A: controller crash the judgment retries",
+  "project": "wave",
+  "pylonId": "pylon-th-78a236a3e44c",
+  "status": "active",
+  "conversationId": "2",
+  "startedBy": "nVERIFYLAPTOP",
+  "createdAt": 1793194472690,
+  "agentTurnRunning": false,
+  "working": false,
+  "lastAgentActivityAt": 0,
+  "lastHumanActivityAt": 1793194472690,
+  "seenAt": null,
+  "lastReplyAt": null,
+  "placement": {
+    "how": "named",
+    "node": "node-a"
+  },
+  "setup": {
+    "how": "fresh",
+    "reason": "the control plane could not read .nexus/setup at main: the control plane reads only https:// remotes, and holds no SSH key for git@github.com:verify/wave.git"
+  }
+}
+[exit 0]

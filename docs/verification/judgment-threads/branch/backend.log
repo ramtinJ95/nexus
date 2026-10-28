@@ -1,0 +1,6 @@
++   5.5s backend: node-a booted pylon-th-78a236a3e44c from fresh
++  93.0s backend: node-a paused broken pylon-th-78a236a3e44c onto checkpoint ckpt-th-78a236a3e44c-1
++  93.0s backend: node-a booted pylon-th-78a236a3e44c from checkpoint ckpt-th-78a236a3e44c-1
++  98.5s backend: node-a booted pylon-th-3017c77de3d0 from fresh
++ 168.0s backend: node-a paused broken pylon-th-3017c77de3d0 onto checkpoint ckpt-th-3017c77de3d0-1
++ 168.0s backend: node-a booted pylon-th-3017c77de3d0 from checkpoint ckpt-th-3017c77de3d0-1
