@@ -68,8 +68,10 @@ export function usageCounter(options: {
   }
 
   const readHarness = (id: ThreadId) => once(`${id}/harness`, async () => {
-    const conversation = registry.thread(id)?.conversationId;
-    if (conversation == null) return;
+    const t = registry.thread(id);
+    const agent = t === undefined ? undefined : registry.agent(t);
+    if (agent?.kind !== "harness") return;
+    const conversation = agent.conversationId;
     const after = registry.usageCursors("harness").get(conversation)?.position ?? null;
     const { calls, last } = await harness.usage(Number(conversation) as ConversationId, after);
     if (last !== null && last !== after) registry.recordUsage(id, calls, [{ source: "harness", key: conversation, position: last, before: "" }]);

@@ -135,16 +135,18 @@ export async function startControlPlane(config: ControlPlaneConfig, models: Mode
   });
   const wakeThread = (t: Thread) => { void loop.wake(registry.pylon(t.pylonId)!.node); };
 
-  const conversing = registry.threads().filter((t) => t.conversationId !== null);
-  const conversationOf = (t: Thread) => Number(t.conversationId) as ConversationId;
+  const conversations = registry.threads().flatMap((thread) => {
+    const agent = registry.agent(thread);
+    return agent.kind === "harness" ? [{ thread, id: Number(agent.conversationId) as ConversationId }] : [];
+  });
   const rawHarness = await openHarnessHost({
     storagePath: config.harness.storage,
     models,
     model: config.harness.model,
     locator: registryLocator(registry),
     tailscaled,
-    threads: conversing.filter((t) => t.status !== "deleted").map((t) => ({ threadId: t.id, conversationId: conversationOf(t), agentTurnRunning: t.agentTurnRunning })),
-    deleted: conversing.filter((t) => t.status === "deleted").map(conversationOf),
+    threads: conversations.filter(({ thread }) => thread.status !== "deleted").map(({ thread, id }) => ({ threadId: thread.id, conversationId: id, agentTurnRunning: thread.agentTurnRunning })),
+    deleted: conversations.filter(({ thread }) => thread.status === "deleted").map(({ id }) => id),
     // The registry row is what the planner and the dashboard read.
     onParked: (id, parked) => registry.recordParked(id as ThreadId, parked),
     onReply: (id, at) => registry.recordReply(id as ThreadId, at),
