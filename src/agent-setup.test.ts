@@ -90,6 +90,13 @@ test("Claude's notifications count as waiting only for a permission or input pro
   assert.deepEqual(waits, ["permission_prompt", "elicitation_dialog"]);
 });
 
+test("only AskUserQuestion's permission dialog waits for an answer from the dashboard, for as long as a day, and every other hook returns within seconds", () => {
+  const asks = claudeHooks.filter(([, kind]) => kind === "ask");
+  assert.deepEqual(asks.map(([hook, , , timeout]) => [hook, timeout]), [["PermissionRequest", 86_400]]);
+  assert.deepEqual(["AskUserQuestion", "Bash", "Write"].filter((tool) => new RegExp(`^(?:${asks[0]![2]})$`).test(tool)), ["AskUserQuestion"]);
+  assert.ok(claudeHooks.every(([, kind, , timeout]) => kind === "ask" || timeout <= 2));
+});
+
 test("a profile installed in a pylon names the openai provider for a model the Mac reaches through openai-codex, and is otherwise unchanged", () => {
   const astra = JSON.stringify({ description: "Read-only review", blocking: true, model: "openai-codex/gpt-6-astra", thinking: "high", prompt: "prompt.md" }, null, "\t");
   assert.deepEqual(JSON.parse(pylonProfile(astra)), { description: "Read-only review", blocking: true, model: "openai/gpt-6-astra", thinking: "high", prompt: "prompt.md" });

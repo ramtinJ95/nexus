@@ -83,14 +83,19 @@ export function pylonProfile(json: string): string {
   return `${JSON.stringify({ ...profile, model: `openai/${profile.model.slice("openai-codex/".length)}` }, null, "\t")}\n`;
 }
 
-/** Each Claude hook nexus-claude-hook runs for, the kind it reports and its matcher. Claude's idle prompt, 60 seconds after every turn, waits for no one. */
+/**
+ * Each Claude hook nexus-claude-hook runs for, the kind it reports or `ask`, its matcher and its timeout in seconds.
+ * Claude's idle prompt, 60 seconds after every turn, waits for no one. AskUserQuestion's PermissionRequest waits for an
+ * answer from the dashboard while the terminal dialog shows, for as long as a person may take.
+ */
 export const claudeHooks = [
-  ["UserPromptSubmit", "session.turn-started", ""],
-  ["PostToolUse", "session.heartbeat", ""],
-  ["Stop", "session.turn-ended", ""],
-  ["StopFailure", "session.turn-ended", ""],
-  ["Notification", "session.waiting", "permission_prompt|elicitation_dialog"],
-  ["SessionEnd", "session.ended", ""],
+  ["UserPromptSubmit", "session.turn-started", "", 2],
+  ["PostToolUse", "session.heartbeat", "", 2],
+  ["Stop", "session.turn-ended", "", 2],
+  ["StopFailure", "session.turn-ended", "", 2],
+  ["Notification", "session.waiting", "permission_prompt|elicitation_dialog", 2],
+  ["SessionEnd", "session.ended", "", 2],
+  ["PermissionRequest", "ask", "AskUserQuestion", 86_400],
 ] as const;
 
 async function herdrIntegrations(): Promise<void> {
@@ -99,9 +104,9 @@ async function herdrIntegrations(): Promise<void> {
   const path = join(home, ".claude/settings.json");
   const settings = JSON.parse(await readFile(path, "utf8"));
   settings.hooks ??= {};
-  for (const [hook, kind, matcher] of claudeHooks) {
+  for (const [hook, kind, matcher, timeout] of claudeHooks) {
     settings.hooks[hook] = (settings.hooks[hook] ?? []).filter((entry: { hooks?: { command?: string }[] }) => !entry.hooks?.some((h) => h.command?.includes("nexus-claude-hook")));
-    settings.hooks[hook].push({ matcher, hooks: [{ type: "command", command: `/usr/local/bin/nexus-claude-hook ${kind}`, timeout: 2 }] });
+    settings.hooks[hook].push({ matcher, hooks: [{ type: "command", command: `/usr/local/bin/nexus-claude-hook ${kind}`, timeout }] });
   }
   await writeFile(path, JSON.stringify(settings, null, 2) + "\n");
 }

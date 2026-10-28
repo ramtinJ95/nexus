@@ -4,23 +4,31 @@ import { existsSync } from "node:fs";
 import { mkdir, rm } from "node:fs/promises";
 import { homedir, userInfo } from "node:os";
 import { join } from "node:path";
+import { alive, answerDelivered, answerExits, askDecision, askKey, askedTexts, awaitAnswer, deliverAnswer, forgetAsk, parseAskAnswer } from "./nexus-ask.ts";
 import { backgroundGroups, backgroundWatch, claimHold, claudeEnviron, heartbeatDue, holdSuperseded, holdTurnEnd, releaseHold, reportedKind, reportsIntoThread } from "./nexus-heartbeat.ts";
 import { enqueue, startSender } from "./nexus-outbox.ts";
 import { claudeTurn, snapshotTurn } from "./nexus-turn.ts";
 import { spawn } from "node:child_process";
 
 const at = Date.now();
+const asks = join(userInfo().homedir, ".nexus", "asks");
 
-/** Reports the hook's event, and answers its session, or null when the input names none. */
-async function report() {
+/** The hook's input, or null when it is longer than `limit`. */
+async function hookInput(limit = 64 * 1024) {
   let input = "";
   for await (const chunk of process.stdin) {
     input += chunk;
-    if (input.length > 64 * 1024) return null;
+    if (input.length > limit) return null;
   }
-  const payload = JSON.parse(input);
-  const { session_id: session } = payload;
+  return JSON.parse(input);
+}
+
+/** Reports the hook's event, and answers its session, or null when the input names none. */
+async function report() {
+  const payload = await hookInput();
+  const { session_id: session } = payload ?? {};
   if (typeof session !== "string" || session.length > 200) return null;
+  if (payload.hook_event_name === "PostToolUse" && payload.tool_name === "AskUserQuestion") await forgetAsk(asks, session, payload.tool_input).catch(() => {});
   const { kind, shells } = reportedKind(process.argv[2], payload);
   if (shells !== undefined) {
     const groups = process.env.CLAUDE_PID === undefined ? [] : await backgroundGroups(Number(process.env.CLAUDE_PID));
@@ -68,8 +76,27 @@ if (process.argv[2] === "hold") {
   await releaseHold(owner, Number(stamp), process.pid);
   process.exit(0);
 }
+// The control plane runs this through the probe, outside any Claude, with an answer from the dashboard.
+if (process.argv[2] === "answer") {
+  const answer = parseAskAnswer(process.argv[3] ?? "");
+  const code = answer === null ? answerExits.malformed : await deliverAnswer(asks, answer);
+  if (code === answerExits.delivered) process.stdout.write(`${answerDelivered}\n`);
+  process.exit(code);
+}
 const home = userInfo().homedir;
 if (!reportsIntoThread(process.env, await claudeEnviron(process.env.CLAUDE_PID), home, existsSync(join(home, ".nexus", "pylon.json")))) process.exit(0);
+// AskUserQuestion's PermissionRequest runs while Claude's terminal dialog shows, and prints nothing unless the
+// dashboard answers first. A dialog the terminal answers stays the terminal's.
+if (process.argv[2] === "ask") {
+  // AskUserQuestion's input holds every option's preview.
+  const payload = await hookInput(4 << 20).catch(() => null);
+  const texts = askedTexts(payload?.tool_input);
+  if (typeof payload?.session_id !== "string" || texts === null) process.exit(0);
+  const claude = process.env.CLAUDE_PID === undefined ? () => true : () => alive(Number(process.env.CLAUDE_PID));
+  const answer = await awaitAnswer(asks, askKey(payload.session_id, texts), process.pid, claude);
+  if (answer !== null) process.stdout.write(JSON.stringify(askDecision(payload.tool_input, answer)));
+  process.exit(0);
+}
 const session = await report().catch(() => null);
 // A turn whose session is unknown reports no start, so its snapshot is named for none, and the previous turn's
 // snapshot cannot pass for its own.
