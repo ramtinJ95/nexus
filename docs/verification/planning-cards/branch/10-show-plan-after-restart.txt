@@ -1,0 +1,108 @@
+$ nexus show th-52cd48a32792 --json
+{
+  "thread": {
+    "id": "th-52cd48a32792",
+    "title": "Plan the orchestration wave",
+    "project": "wave",
+    "pylonId": "pylon-th-52cd48a32792",
+    "status": "active",
+    "conversationId": "2",
+    "startedBy": "nVERIFYLAPTOP",
+    "createdAt": 1793193032689,
+    "agentTurnRunning": false,
+    "lastAgentActivityAt": 1793193033035,
+    "lastHumanActivityAt": 1793193032689,
+    "seenAt": null,
+    "lastReplyAt": 1793193033032,
+    "placement": {
+      "how": "default",
+      "node": "node-a"
+    },
+    "setup": {
+      "how": "fresh",
+      "reason": "the control plane could not read .nexus/setup at main: the control plane reads only https:// remotes, and holds no SSH key for git@github.com:verify/wave.git"
+    },
+    "working": false
+  },
+  "attention": "decision",
+  "seenAt": null,
+  "lastReplyAt": 1793193033032,
+  "desired": "running",
+  "pylon": {
+    "grantsOutdated": false,
+    "id": "pylon-th-52cd48a32792",
+    "node": "node-a",
+    "failed": null,
+    "observedAt": "2026-10-28T13:10:48.552Z",
+    "resources": {
+      "cpus": 1,
+      "memoryGiB": 3,
+      "diskGiB": 5
+    },
+    "actualState": "running",
+    "retryRefused": null
+  },
+  "sessions": [],
+  "previews": [],
+  "ports": null,
+  "outputs": [],
+  "prWatch": {
+    "enabled": true,
+    "stopped": false,
+    "error": null
+  },
+  "pullRequests": [],
+  "review": null,
+  "questions": [
+    {
+      "id": "plan:th-52cd48a32792:3f2102bba008:01",
+      "thread": "th-52cd48a32792",
+      "reserved": null,
+      "answerer": "person",
+      "askedAt": 1793193044859,
+      "proposal": {
+        "block": "3f2102bba008",
+        "index": 1,
+        "key": "wake",
+        "title": "Wake the passes from the event stream",
+        "brief": "Make the review loop, the queue and the pipeline pass run as soon as the registry appends an event that matters to them (thread.turn-ended, thread.failed, review.changed, release.changed), not only on their 15-second timers. Keep the timers as the fallback, so a missed event costs at most one pass. Add a registry test that an appended event runs the pass at once.",
+        "after": []
+      },
+      "options": [
+        "accept",
+        "reject"
+      ],
+      "text": "The planning thread proposes a pipeline item: Wake the passes from the event stream\n\nMake the review loop, the queue and the pipeline pass run as soon as the registry appends an event that matters to them (thread.turn-ended, thread.failed, review.changed, release.changed), not only on their 15-second timers. Keep the timers as the fallback, so a missed event costs at most one pass. Add a registry test that an appended event runs the pass at once.\n\nIt waits on no other item. Accept adds it to project wave's pipeline as yours, as nexus item add does. Reject tells the planning thread in your next message to it.",
+      "answer": null
+    },
+    {
+      "id": "plan:th-52cd48a32792:3f2102bba008:02",
+      "thread": "th-52cd48a32792",
+      "reserved": null,
+      "answerer": "person",
+      "askedAt": 1793193044859,
+      "proposal": {
+        "block": "3f2102bba008",
+        "index": 2,
+        "key": "ask",
+        "title": "Ask the person through the attention status",
+        "brief": "When a pipeline item reaches a call the merge policy reserves for the person, such as an image rebuild or a secret, ask a question on its thread instead of stalling the pipeline, and act on the answer on the next pass. Hold only that item.",
+        "after": [
+          "wake"
+        ]
+      },
+      "options": [
+        "accept",
+        "reject"
+      ],
+      "text": "The planning thread proposes a pipeline item: Ask the person through the attention status\n\nWhen a pipeline item reaches a call the merge policy reserves for the person, such as an image rebuild or a secret, ask a question on its thread instead of stalling the pipeline, and act on the answer on the next pass. Hold only that item.\n\nIt waits on \"Wake the passes from the event stream\", proposed above. Accept adds it to project wave's pipeline as yours, as nexus item add does. Reject tells the planning thread in your next message to it.",
+      "answer": null
+    }
+  ],
+  "planning": true,
+  "attach": "herdr --session nexus",
+  "agent": {
+    "parkedTasks": 0
+  }
+}
+[exit 0]

@@ -1,0 +1,10 @@
+$ nexus item show it-0e53ba1609d2
+it-0e53ba1609d2  Wake the passes from the event stream
+project: wave
+phase: building, no pull request yet
+thread: th-ad16b10af5f3
+worker: Nexus agent
+brief: Make the review loop, the queue and the pipeline pass run as soon as the registry appends an event that matters to them ...
+added by nVERIFYLAPTOP 3s ago
+nexus show th-ad16b10af5f3 shows its thread.
+[exit 0]

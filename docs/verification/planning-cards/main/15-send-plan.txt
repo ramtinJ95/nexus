@@ -1,0 +1,3 @@
+$ nexus send th-8a3a6a971dae "Hold the second one until the first has landed."
+Sent to th-8a3a6a971dae.
+[exit 0]

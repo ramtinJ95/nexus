@@ -1,0 +1,18 @@
+$ nexus show th-52cd48a32792
+th-52cd48a32792  Plan the orchestration wave
+project: wave
+planning: its proposed items become questions you accept or reject
+attention: decision
+status: active
+pylon: pylon-th-52cd48a32792 on node-a, running, observed 13s ago
+size: 1 CPUs, 3 GiB memory, 5 GiB disk
+placement: node-a, the project's default node
+setup: fresh boot runs .nexus/setup, because the control plane could not read .nexus/setup at main: the control plane reads only https:// remotes, and holds no SSH key for git@github.com:verify/wave.git
+PR watch: on
+question plan:th-52cd48a32792:3f2102bba008:01: The planning thread proposes a pipeline item: Wake the passes from the event stream
+  options: "accept", "reject"
+  needs you
+question plan:th-52cd48a32792:3f2102bba008:02: The planning thread proposes a pipeline item: Ask the person through the attention status
+  options: "accept", "reject"
+  needs you
+[exit 0]
