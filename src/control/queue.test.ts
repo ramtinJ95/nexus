@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { turnGate } from "./drain.ts";
 import { fakeHarness } from "./fake-harness.ts";
-import { checkCaller } from "./gate.ts";
+import { checkCaller, verifyCaller } from "./gate.ts";
 import type { PullRequest } from "./github.ts";
 import { openRegistry, type Registry, type Thread, type ThreadId } from "./registry.ts";
 import { queuedView, threadQueue, waitOf, type QueuedRecord } from "./queue.ts";
@@ -149,6 +149,7 @@ test("a queue record is checked as a start is, and freezes the size the project 
   refused(() => q.add(f.request({ claude: "fix it" }), "Fix it.", [a], laptop), 400, /message is for a Nexus agent thread/);
   refused(() => q.add(f.request(), null, [f.thread("th-review", reviewerCaller)], laptop), 400, /reviewer or check thread/);
   refused(() => q.add(f.request(), null, [f.thread("th-check", checkCaller)], laptop), 400, /reviewer or check thread/);
+  refused(() => q.add(f.request(), null, [f.thread("th-verify", verifyCaller)], laptop), 400, /reviewer or check thread/);
   assert.deepEqual(f.registry.queuedThreads(), [], "a refused start records nothing");
 
   const record = q.add(f.request({ resources: { cpus: 4 } }), "Fix it.", [a, a], laptop);
@@ -158,7 +159,7 @@ test("a queue record is checked as a start is, and freezes the size the project 
   assert.deepEqual(f.registry.queuedThread(record.id), record);
   assert.equal(queuedView(f.registry, record).node, node, "a start that names no node shows the project's default");
   assert.equal(f.registry.thread(record.id), undefined, "a queued thread has no row");
-  assert.deepEqual(f.registry.threads().map((x) => x.id).sort(), ["th-a", "th-check", "th-review"]);
+  assert.deepEqual(f.registry.threads().map((x) => x.id).sort(), ["th-a", "th-check", "th-review", "th-verify"]);
   const claude = q.add(f.request({ claude: "Fix it", node: "auto" }), null, [record.id], laptop);
   assert.deepEqual(queuedView(f.registry, f.registry.queuedThread(claude.id)!), {
     id: claude.id, title: "After", project: project.id, startedBy: laptop, createdAt: claude.createdAt, status: "queued", after: [record.id],

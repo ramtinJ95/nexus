@@ -45,6 +45,7 @@ const reservedPaths: readonly { case: ReservedCase; matches(path: string, patch:
 const personOnly = "Always needs the person: ";
 const claudeApproved = "A Claude reviewer approved it. Its verdict is read from its transcript in its pylon, where code it runs could write, so only the person can land what it approved.";
 const checkChanged = "The pull request changes .nexus/check, the check this policy relies on.";
+const verifyChanged = "The pull request changes .nexus/verify, the live check this policy relies on.";
 
 /** The holds the review's record alone decides: they hold every landing of its approved head, whatever GitHub says. */
 export const recordedHolds = (review: Review): string[] => [
@@ -64,10 +65,12 @@ export interface HoldRule { holdsAgain: boolean; waivable: boolean; why: string 
 const holdRules: readonly [(reason: string) => boolean, HoldRule][] = [
   [(r) => r.startsWith(personOnly), { holdsAgain: true, waivable: true, why: "The policy reserves this for you, and pressing Land here is you waiving it." }],
   [(r) => r === checkChanged, { holdsAgain: true, waivable: true, why: "Accepting a new .nexus/check is yours, and pressing Land here is you accepting it." }],
+  [(r) => r === verifyChanged, { holdsAgain: true, waivable: true, why: "Accepting a new .nexus/verify is yours, and pressing Land here is you accepting it." }],
   [(r) => r === claudeApproved, { holdsAgain: true, waivable: false, why: "Nothing here stands in for a harness reviewer's approval: the Claude reviewer's verdict, its findings and reserved cases included, could have been written by code in its pylon." }],
   [(r) => /^Findings P0 to P2 are open|^The reviewer has not approved/.test(r), { holdsAgain: false, waivable: false, why: "Open P0 to P2 findings hold every landing until they are fixed and the reviewer approves." }],
   [(r) => r.startsWith("The builder neither fixed nor rejected"), { holdsAgain: false, waivable: false, why: "Every P0 to P2 finding needs the builder's fix or its reason to reject." }],
   [(r) => r.startsWith(".nexus/check "), { holdsAgain: false, waivable: false, why: "Only a .nexus/check that passed at the approved head lands." }],
+  [(r) => r.startsWith("The live check "), { holdsAgain: false, waivable: false, why: "A repository with a .nexus/verify lands only once its live check passed at the approved head." }],
   [(r) => /GitHub checks are/.test(r), { holdsAgain: false, waivable: false, why: "Failing or pending GitHub checks hold every landing until they pass." }],
   [(r) => /, not the approved /.test(r), { holdsAgain: false, waivable: false, why: "Only the commit the reviewer approved lands." }],
   [(r) => r === "The branch conflicts with its base.", { holdsAgain: false, waivable: false, why: "A branch that conflicts with its base cannot merge." }],
@@ -113,14 +116,17 @@ const conditions: readonly ((facts: LandingFacts) => string[])[] = [
       ...pr.pr.checks === "failed" || pr.pr.checks === "pending" ? [`The pull request's GitHub checks are ${pr.pr.checks}.`] : [],
     ];
   },
-  // No verify stack exists yet (docs/design.md, open questions), so every PR lands on its statement of what it could not check live.
+  // A live check that ran decides. A head with no .nexus/verify ran none, and lands on the statement of what it could not check live.
   ({ review, pr }) => {
-    const quoted = review.rounds.at(-1)!.verdict?.notCheckedLive ?? null;
+    const round = review.rounds.at(-1)!;
+    if (round.live !== undefined) return round.live.passed ? [] : [`The live check failed at ${round.head}.`];
+    const quoted = round.verdict?.notCheckedLive ?? null;
     if (quoted === null || squash(quoted).length < 20) return ["No live check ran, and the pull request does not say what could not be checked live."];
     return squash(pr.detail.body).includes(squash(quoted)) ? [] : ["The reviewer's quote of what could not be checked live is not in the pull request's description."];
   },
   ({ review }) => recordedHolds(review),
   ({ files }) => files.some((f) => f.path === ".nexus/check" || f.previous === ".nexus/check") ? [checkChanged] : [],
+  ({ files }) => files.some((f) => f.path === ".nexus/verify" || f.previous === ".nexus/verify") ? [verifyChanged] : [],
   ({ files, nexus }) => {
     if (!nexus) return [];
     const hits = new Map<ReservedCase, string[]>();

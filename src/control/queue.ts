@@ -10,7 +10,7 @@
  */
 import { defaultClaudeModel } from "../claude-state.ts";
 import type { BootInputs, ProjectId } from "../project.ts";
-import { checkCaller } from "./gate.ts";
+import { checkCaller, verifyCaller } from "./gate.ts";
 import { HttpError } from "./http-error.ts";
 import type { Registry, StartKey, Thread, ThreadId } from "./registry.ts";
 import { checkStart, newThreadId, type StartRequest } from "./threads.ts";
@@ -202,7 +202,7 @@ export function threadQueue(options: {
       for (const id of ids) {
         const t = registry.thread(id);
         if (t === undefined && registry.queuedThread(id) === undefined) throw new HttpError(404, `no thread ${id}`);
-        if (t !== undefined && (registry.isReviewer(id) || t.startedBy === checkCaller)) throw new HttpError(400, `thread ${id} is a review loop's reviewer or check thread, which merges no pull request of its own`);
+        if (t !== undefined && (registry.isReviewer(id) || t.startedBy === checkCaller || t.startedBy === verifyCaller)) throw new HttpError(400, `thread ${id} is a review loop's reviewer or check thread, which merges no pull request of its own`);
       }
       const size = request.resources ?? {};
       const record: QueuedRecord = {
