@@ -9,13 +9,14 @@ FROM debian:bookworm-slim@${DEBIAN_DIGEST}
 # gets its own from enableSsh's ssh-keygen -A. openssh-client is for git over Gondolin's SSH proxy, and the
 # boot path adds its config under the stock ssh_config's Include of /etc/ssh/ssh_config.d. procps gives
 # enableSsh's script `ps`, e2fsprogs gives Gondolin resize2fs for rootfs growth, and ripgrep and fd are
-# installed because pi's own download of them cannot pass the allowlist. xz-utils unpacks Node. tini is PID 1
-# (rootfs-init-extra.sh), because sandboxd, which Gondolin's /init would exec there, does not reap the orphans
-# it adopts.
+# installed because pi's own download of them cannot pass the allowlist. xz-utils unpacks Node, and Node 26's
+# binary links libatomic. tini is PID 1 (rootfs-init-extra.sh), because sandboxd, which Gondolin's /init would
+# exec there, does not reap the orphans it adopts. kmod is for nexus-kvm, which loads the KVM modules only in a
+# pylon that asks for nested virtualization.
 RUN apt-get update \
  && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
       bash coreutils util-linux ca-certificates git python3 openssh-server openssh-client sudo curl \
-      procps e2fsprogs ripgrep fd-find xz-utils tini \
+      procps e2fsprogs ripgrep fd-find xz-utils libatomic1 tini kmod \
  && rm -rf /var/lib/apt/lists/* /etc/ssh/ssh_host_* \
  && ln -s /usr/bin/fdfind /usr/local/bin/fd
 
@@ -86,6 +87,7 @@ COPY nexus-claude-hook /usr/local/bin/nexus-claude-hook
 COPY nexus-heartbeat.ts /usr/local/bin/nexus-heartbeat.ts
 COPY nexus-outbox.ts /usr/local/bin/nexus-outbox.ts
 COPY nexus-turn.ts /usr/local/bin/nexus-turn.ts
+COPY nexus-kvm /usr/local/libexec/nexus/nexus-kvm
 COPY checkout-files.py /usr/local/lib/nexus/checkout-files.py
 # The common dotfiles layer as a git repository, which the boot path clones into ~/.nexus/dotfiles and then
 # updates by fetch. It is owned by user because git refuses to clone a local repository another user owns.

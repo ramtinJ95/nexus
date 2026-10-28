@@ -1,13 +1,13 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import type { Action, BootSpec, SandboxRecord } from "./contracts.ts";
+import { bootSchema, type Action, type BootSpec, type SandboxRecord } from "./contracts.ts";
 import { access, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { setTimeout as delay } from "node:timers/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fakeVm, type WritePhase } from "./fake-vm.ts";
 import { networkOptions } from "./network.ts";
-import { readIntent, reportResume, SandboxRuntime, setupMarkerOf, setupOnDisk } from "./runtime.ts";
+import { loadKvm, readIntent, reportResume, SandboxRuntime, setupMarkerOf, setupOnDisk } from "./runtime.ts";
 
 type Status = Awaited<ReturnType<Parameters<typeof reportResume>[0]["status"]>>;
 
@@ -86,6 +86,25 @@ test("an intent written before setup was recorded on the disk is refused", async
 		await writeFile(join(dir, "intent.json"), JSON.stringify(intent));
 		await assert.rejects(readIntent(dir), /Unrecognized key/);
 	}
+});
+
+test("only a boot that asks for nested virtualization runs the image's KVM step, and a guest it leaves without /dev/kvm fails the boot", async () => {
+	const step = "/usr/local/libexec/nexus/nexus-kvm";
+	const ordinary = fakeVm();
+	await loadKvm(ordinary.vm, { cpus: 2, memoryGiB: 4 });
+	assert.deepEqual(ordinary.commands, [], "an ordinary pylon keeps the guest without KVM modules");
+
+	const verify = fakeVm();
+	await loadKvm(verify.vm, { cpus: 2, memoryGiB: 4, nestedVirtualization: true });
+	assert.deepEqual(verify.commands, [step]);
+
+	const without = fakeVm(undefined, (cmd) => cmd === step);
+	await assert.rejects(loadKvm(without.vm, { cpus: 2, memoryGiB: 4, nestedVirtualization: true }), /^Error: This pylon asked for nested virtualization, and its guest has no \/dev\/kvm\. Guest command exited 1/);
+
+	const spec = { allowedHosts: [], secrets: {}, ssh: null, files: [], hooks: [], publicUrls: {}, hostBridge: null };
+	assert.equal(bootSchema.parse({ ...spec, resources: { cpus: 2, memoryGiB: 4, nestedVirtualization: true } }).resources.nestedVirtualization, true);
+	assert.equal(bootSchema.parse({ ...spec, resources: { cpus: 2, memoryGiB: 4 } }).resources.nestedVirtualization, undefined);
+	assert.throws(() => bootSchema.parse({ ...spec, resources: { cpus: 2, memoryGiB: 4, nestedVirtualization: false } }), "a pylon asks by setting it, so there is one way not to");
 });
 
 /** A running instance on a fake VM whose file writes to paths `holds` names hold in `phase`. */

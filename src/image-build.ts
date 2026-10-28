@@ -137,11 +137,12 @@ function dockerBuildArgs(pins: ImageRecipe["pins"]): Record<string, string> {
  *    official marketplace, `user` with a setuid sudo that prints no warning and the hostname pylon, which
  *    resolves through /etc/hosts, a home with no hook outbox and no Claude or pi session from the build, the exact
  *    pinned versions of node, claude, pi, herdr, pi-env and nvim and the nexus CLI's declared version as user,
- *    sshd and sandboxssh, Herdr's pi integration with its own resume turned off,
+ *    sshd and sandboxssh, Herdr's pi integration with its own resume turned off, no KVM module loaded,
  *    the agent setup installed exactly as the recipe's manifest says with pi loading every extension offline,
  *    the PYLON.md import for Claude Code and pi, gh at its pin answering git's credential requests from GH_TOKEN,
  *    curl and Node fetch to an allowed host through TLS interception, tini reaping an orphan it adopts as
- *    subreaper and as PID 1, sandboxd surviving a write to an exec's closed stdin, and a Herdr server as user. Any failure is setup-failed and publishes nothing.
+ *    subreaper and as PID 1, nexus-kvm giving user /dev/kvm, which needs a build node that passes nested
+ *    virtualization through, sandboxd surviving a write to an exec's closed stdin, and a Herdr server as user. Any failure is setup-failed and publishes nothing.
  * 5. Write image.json, then rename outDir.partial to outDir.
  * A crash leaves only outDir.partial, which the next attempt removes. An existing outDir is the finished
  * image, because its ID names its inputs.
@@ -467,6 +468,12 @@ export function smokeChecks(recipe: ImageRecipe): readonly SmokeCheck[] {
       expect: /^\/usr\/bin\/ssh\n\/usr\/sbin\/sshd\n\/usr\/bin\/sandboxssh\n\/usr\/bin\/rg\n\/usr\/local\/bin\/fd\n1\npi: current[^\n]*\nclaude: current/,
     },
     {
+      // nexus-kvm runs only when the boot spec asks for it, and this boot did not.
+      name: "no KVM without nested virtualization",
+      argv: ["sh", "-c", "test ! -e /dev/kvm && ! grep -q '^kvm' /proc/modules && echo unloaded"],
+      expect: "unloaded\n",
+    },
+    {
       // The check reruns Herdr's integrations first, as every boot does, so it proves that the settings.json they
       // rewrite still holds the plugins. The layout comes from the recipe's manifest, not the copy in the image.
       name: "agent setup",
@@ -525,6 +532,13 @@ export function smokeChecks(recipe: ImageRecipe): readonly SmokeCheck[] {
       name: "TLS through Gondolin's interception",
       argv: asUser(`curl -sS -o /dev/null -w '%{http_code}\\n' https://${smokeHost}/v1/models && node -e "fetch('https://${smokeHost}/v1/models').then((r) => console.log(r.status))"`),
       expect: /^401\n401\n$/,
+    },
+    {
+      // Last, because it leaves the guest with KVM loaded. The build node's host must pass nested virtualization
+      // through, as infra-testbench's does, or no verify pylon could run on it either.
+      name: "nexus-kvm loads KVM for user",
+      argv: ["sh", "-c", "/usr/local/libexec/nexus/nexus-kvm && cut -d ' ' -f 1 /proc/modules | grep -E '^(irqbypass|kvm|kvm_intel|kvm_amd|overlay)$' | sort && runuser -u user -- python3 -c 'import os; os.close(os.open(\"/dev/kvm\", os.O_RDWR))' && echo user opens /dev/kvm"],
+      expect: /^irqbypass\nkvm\nkvm_(?:intel|amd)\noverlay\nuser opens \/dev\/kvm\n$/,
     },
   ];
 }

@@ -1,0 +1,4 @@
+#!/bin/sh
+# Stands in for kmod's `insmod <file>`: finit_module through insmod.py, which takes the uncompressed file kmod would.
+out=$(python3 -I "$(dirname "$0")/../insmod.py" "$1")
+case "$out" in *" ok") ;; *) echo "insmod: ERROR: could not insert module $1: $out" >&2; exit 1 ;; esac

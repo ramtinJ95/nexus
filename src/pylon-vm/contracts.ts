@@ -57,6 +57,8 @@ export const bootSchema = z.strictObject({
 	resources: z.strictObject({
 		cpus: z.number().int().positive(),
 		memoryGiB: z.number().positive(),
+		/** Loads the KVM modules at boot, so the guest can run VMs of its own. The boot fails when no /dev/kvm results. */
+		nestedVirtualization: z.literal(true).optional(),
 	}),
 	allowedHosts: z.array(hostPattern),
 	/**

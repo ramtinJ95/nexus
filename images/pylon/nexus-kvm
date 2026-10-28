@@ -1,0 +1,31 @@
+#!/bin/sh
+# Gives a pylon that asks for nested virtualization /dev/kvm from the modules its kernel ships. The pylon-vm
+# controller runs it as root on every boot of such a pylon (src/pylon-vm/runtime.ts), and a failure fails the boot
+# with what this printed. overlay is loaded too, as docs/design.md's verify pylon has it.
+set -eu
+if grep -qw vmx /proc/cpuinfo; then
+  module=kvm_intel
+elif grep -qw svm /proc/cpuinfo; then
+  module=kvm_amd
+else
+  echo "the guest CPU has neither vmx nor svm, so this node's host does not pass nested virtualization through" >&2
+  exit 1
+fi
+# Debian's kmod reads no gzip and the Alpine kernel's modules are .ko.gz, so modprobe only resolves the load order
+# from the index, and insmod gets each module decompressed.
+kvm=$(modprobe --show-depends "$module")
+overlay=$(modprobe --show-depends overlay)
+scratch=$(mktemp -d)
+trap 'rm -rf "$scratch"' EXIT
+for path in $(printf '%s\n%s\n' "$kvm" "$overlay" | awk '$1 == "insmod" { print $2 }'); do
+  name=$(basename "$path" .ko.gz | tr - _)
+  if [ -d "/sys/module/$name" ]; then continue; fi
+  zcat "$path" > "$scratch/$name.ko"
+  insmod "$scratch/$name.ko"
+done
+if [ ! -c /dev/kvm ]; then
+  echo "$module loaded, but no /dev/kvm appeared" >&2
+  exit 1
+fi
+# 0666, as systemd's udev rules give it, so QEMU as user opens it without sudo.
+chmod 0666 /dev/kvm

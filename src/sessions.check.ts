@@ -1,6 +1,6 @@
 /**
  * Node validation for sessions.ts against a real Herdr, which the unit tests only fake. Run it inside a
- * scratch pylon as `user`, from a copy of src/, with the image's Node 24:
+ * scratch pylon as `user`, from a copy of src/, with the image's Node:
  *
  *   node src/sessions.check.ts
  *
