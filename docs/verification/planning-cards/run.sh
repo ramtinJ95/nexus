@@ -11,7 +11,7 @@ here=$(cd "$(dirname "$0")" && pwd)
 repo=$(git -C "$here" rev-parse --show-toplevel)
 work=$(mktemp -d)
 trap 'for run in main branch; do git -C "$repo" worktree remove --force "$work/$run" 2>/dev/null || true; done; rm -rf "$work"' EXIT
-tests="src/control/planning.test.ts src/control/api.test.ts src/control/dashboard.test.ts src/cli/nexus.test.ts"
+tests="src/control/planning.test.ts src/control/nudge.test.ts src/control/api.test.ts src/control/dashboard.test.ts src/cli/nexus.test.ts"
 
 for run in ${RUNS:-main branch}; do
   commit=${1:-origin/main}
@@ -28,5 +28,5 @@ for run in ${RUNS:-main branch}; do
   (cd "$tree" && node docs/verification/planning-cards/stack.ts drive src "$here/$run")
   for file in $tests; do git -C "$repo" show "${2:-HEAD}:$file" >"$tree/$file"; done
   # shellcheck disable=SC2086
-  (cd "$tree" && node --test --test-timeout=60000 --test-name-pattern="planning|plan block|start --plan|start dialog picks|makes each card once|accepted proposal" $tests 2>&1 | grep -E '^(✔|✖|ℹ (tests|pass|fail|cancelled))' | sed -E 's/ \([0-9.]+ms\)$//' | awk '!seen[$0]++') >"$here/tests-$run.txt" || true
+  (cd "$tree" && node --test --test-timeout=60000 --test-name-pattern="planning|plan block|start --plan|start dialog picks|makes each card once|accepted proposal|did not take|pipeline item named" $tests 2>&1 | grep -E '^(✔|✖|ℹ (tests|pass|fail|cancelled))' | sed -E 's/ \([0-9.]+ms\)$//' | awk '!seen[$0]++') >"$here/tests-$run.txt" || true
 done
