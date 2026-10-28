@@ -253,6 +253,8 @@ const actions = {
   // As `nexus land`, for the commit the confirmation named, waiving the holds the card names the person may waive. The
   // page then shows the landing's steps as the review moves through them.
   land: (thread, { head, holds }) => api("POST", `/v1/threads/${thread}/land`, holds === undefined ? { head } : { head, waive: JSON.parse(holds) }),
+  "approve-item": (_, { item }) => api("POST", `/v1/items/${encodeURIComponent(item)}/approve`, {}),
+  "cancel-item": (_, { item }) => api("POST", `/v1/items/${encodeURIComponent(item)}/cancel`, {}),
   answer: (_, { question, option }) => api("POST", `/v1/questions/${encodeURIComponent(question)}/answer`, { option }),
 };
 

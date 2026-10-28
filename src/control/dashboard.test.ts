@@ -7,6 +7,8 @@ import { request } from "node:http";
 import { join } from "node:path";
 import { startApi, type ApiOptions } from "./api.ts";
 import { threadStarter } from "./threads.ts";
+import { itemThread, pipeline, type PipelineItem } from "./pipeline.ts";
+import type { ProjectId } from "../project.ts";
 import { threadQueue, type QueuedThread } from "./queue.ts";
 import { turnGate } from "./drain.ts";
 import { readEvents } from "./event-reader.ts";
@@ -52,6 +54,7 @@ async function setup(t: TestContext, options: Partial<ApiOptions> = {}) {
     mirror: { setupInputs: () => Promise.reject(new Error("the dashboard tests read no remote")) },
   });
   const queue = threadQueue({ registry, startThread, gate: turnGate(() => false), send: (id, text, requestId) => fake.harness.send(id, text, requestId, "followUp") });
+  const items = pipeline({ registry, queue });
   const api = await startApi({
     registry, host: "127.0.0.1", port: 0,
     whois: async () => caller,
@@ -60,12 +63,14 @@ async function setup(t: TestContext, options: Partial<ApiOptions> = {}) {
     harness: fake.harness,
     startThread,
     queue,
+    pipeline: items,
     wake: () => {},
     probes: new Map(),
     previewPorts: { first: 10200, last: 10299 },
     ...options,
   });
   t.after(async () => {
+    await items.close();
     await queue.close();
     await api.close();
     registry.close();
@@ -1112,7 +1117,7 @@ test("a scratch project shows as scratch, and starting a thread on it starts an 
 test("every page has somewhere to say a refresh failed", async (t) => {
   const s = await seeded(t);
   const fix = await s.start("acme", "Fix checkout");
-  for (const path of ["/", "/threads/new", `/threads/${fix.id}`, "/threads/th-missing", "/usage"]) {
+  for (const path of ["/", "/threads/new", `/threads/${fix.id}`, "/threads/th-missing", "/usage", "/pipeline"]) {
     assert.equal([...(await s.call("GET", path)).text.matchAll(/<p id="refresh-state" class="refresh-state" role="status"><\/p>/g)].length, 1, `${path} has one refresh status`);
   }
 });
@@ -1712,4 +1717,31 @@ test("a node's page shows its health as its probe reads it, unknown where the ho
   assert.match(textOf((await s.call("GET", `/nodes/${node}`)).text.split('id="node-health"')[1]!), /caller may not read a node's health: only deployers may/);
   s.callAs(laptop);
   assert.equal((await s.call("GET", "/nodes/nowhere")).status, 404);
+});
+
+test("the pipeline page lists each project's items with the phase their records put them in, what each is after, its thread, and Approve and Cancel while it has none", async (t) => {
+  const s = await seeded(t, { deployment: { self: "nFIREBAT" as TailnetNodeId, deployers: new Set(), keys: {} } });
+  const empty = textOf((await s.call("GET", "/pipeline")).text);
+  assert.match(empty, /No project runs the pipeline\. nexus project edit <id> --pipeline start turns it on/);
+  s.registry.editProject("acme" as ProjectId, (p) => ({ ...p, pipeline: { autoStart: false } }));
+  const add = async (title: string, after: string[] = []) => {
+    const res = await s.call("POST", "/v1/items", { project: "acme", title, message: `Build ${title}.`, after });
+    assert.equal(res.status, 201, res.text);
+    return JSON.parse(res.text) as PipelineItem;
+  };
+  const a = await add("Greet by name");
+  const b = await add("Greet in French", [a.id]);
+  assert.equal((await s.call("POST", `/v1/items/${a.id}/approve`, {})).status, 200);
+  const thread = itemThread(s.registry, a.id)!;
+  const page = (await s.call("GET", "/pipeline")).text;
+  assert.match(page, /<a class="side-link active" href="\/pipeline" aria-current="page">/);
+  const section = sectionOf(page, "pipeline-acme");
+  assert.match(textOf(section), /^acme Each item waits for the person to approve it before it becomes a queued thread\. Item Phase After Thread/);
+  const row = (id: string) => textOf(section.split(`<tr data-item="${id}"`)[1]!.split("</tr>")[0]!.replace(/^[^>]*>/, ""));
+  assert.match(row(a.id), new RegExp(`^Greet by name ${a.id} (queued|building) .+ nothing Greet by name$`));
+  assert.equal(row(b.id), `Greet in French ${b.id} held project acme waits for the person to approve each item: nexus item approve ${b.id} Greet by name none yet Approve Cancel`);
+  assert.match(section, new RegExp(`<a class="link" href="/threads/${thread}">Greet by name</a>`));
+  assert.match(section, new RegExp(`<button type="button" class="btn btn-xs" data-action="approve-item" data-item="${b.id}">Approve</button>`));
+  assert.doesNotMatch(section, new RegExp(`data-action="(approve|cancel)-item" data-item="${a.id}"`), "an item that is a thread has no item actions");
+  assert.doesNotMatch(page, /aria-labelledby="pipeline-beta"/, "a project without the pipeline or items is left out");
 });
