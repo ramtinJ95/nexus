@@ -1294,7 +1294,7 @@ test("nodes marks an overcommitted node and says what its pylons hold", async (t
   s.registry.ingested({
     node, observedAt: new Date().toISOString(), probeBootId: "b", events: [], capacity, artifacts: [image.id], jobs: [],
     pylons: [{ pylonId: up!.pylonId, phase: "booting" }, stopped(paused!), stopped(archived!), { pylonId: "pylon-x" as PylonId, phase: "booting" },
-      { pylonId: crashed!.pylonId, phase: "broken", detail: "the controller exited", cause: "controller" }],
+      { pylonId: crashed!.pylonId, phase: "broken", detail: "the controller exited", cause: "controller", logTail: "" }],
     grants: { secrets: [], gitSsh: false }, previewRoutes: [], heldSecrets: [],
   }, []);
   const text = (await s.nexus(["nodes"])).stdout;
@@ -1918,4 +1918,13 @@ test("a bare thread has no conversation to print, send to or watch", async (t) =
   }
   assert.deepEqual((await exited)[0], 0);
   assert.deepEqual(printed.map((l) => `${l.type} ${l.status ?? ""}`), ["reset ", "state active", "live ", "state deleted"], "a bare thread's watch prints its state and an empty conversation, and ends once it is deleted");
+});
+
+test("show prints a failed pylon's log under its reason, indented, and --json carries the failure whole", async (t) => {
+  const s = await setup(t);
+  const thread: Thread = await s.json(["start", "--project", "acme", "--title", "x"]);
+  const failed = "pylon is broken: the controller failed to boot the VM\nqemu: booting\nError: Guest command got no answer within 13000 ms";
+  s.registry.savePylon({ ...s.registry.pylon(thread.pylonId)!, failed });
+  assert.match((await s.nexus(["show", thread.id])).stdout, /^failed: pylon is broken: the controller failed to boot the VM\n {2}qemu: booting\n {2}Error: Guest command got no answer within 13000 ms$/m);
+  assert.equal((await s.json(["show", thread.id])).pylon.failed, failed);
 });

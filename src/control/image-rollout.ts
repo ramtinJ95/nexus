@@ -11,7 +11,8 @@
 import { imageIdOf, type ImageId, type ImageManifest, type ImageRecipe } from "../images.ts";
 import type { Job, JobId, NodeName, ProbeClient, ProbeError, TailnetNodeId } from "../protocol.ts";
 import { singleFlight } from "../single-flight.ts";
-import { failureMessage, jobOutcome, submitJob } from "../tick.ts";
+import { failureMessage } from "../reconcile.ts";
+import { jobOutcome, submitJob } from "../tick.ts";
 import { HttpError } from "./http-error.ts";
 import type { NodeRecord, RecordedImage, Registry } from "./registry.ts";
 

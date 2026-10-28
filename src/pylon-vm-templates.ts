@@ -68,9 +68,9 @@ export async function buildTemplate(stateRoot: string, store: ArtifactDirectory,
   }
 }
 
-/** The end of a build's or an instance's controller log, for a JobFailure's logTail. */
+/** The end of a build's or an instance's controller log, for a JobFailure's or a broken pylon's logTail. */
 export async function controllerLogTail(dir: string): Promise<string> {
-  return (await readLogTail(join(dir, "controller.log"), 60)).output.slice(-4096);
+  return (await readLogTail(join(dir, "controller.log"), 60)).output.slice(-8192);
 }
 
 /** The disk a pylon booted from `template` copies in. The template must be over the pylon's image. */

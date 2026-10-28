@@ -10,11 +10,11 @@ import { Readable } from "node:stream";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { startProbe, type Probe, type ProbeOptions } from "./server.ts";
-import { nodeSecrets } from "./config.ts";
+import { nodeSecrets, parseSecretsEnv } from "./config.ts";
 import { connectProbe, fetchArtifact, jobDeadlineMs, type ByteStream, type DeclaredOutput, type GitFacts, type Job, type JobEnvelope, type JobId, type JobStatus, type LiveHash, type NodeName, type ProbeEvent, type CommandResult, type PylonCommand, type PylonId, type ServiceFact, type TailnetNodeId } from "../protocol.ts";
 import { envelope, ingest } from "../reconcile.ts";
 import { processStream } from "../process-stream.ts";
-import { commandPolicies, type BackendPylon, type CommandPolicy, type Guest, type VmBackend } from "../backend.ts";
+import { commandPolicies, JobFailure, type BackendPylon, type CommandPolicy, type Guest, type VmBackend } from "../backend.ts";
 import { fakeTailscale, nodeHost, viaGateway } from "./fake-tailscale.ts";
 import type { BootInputs, ProjectId } from "../project.ts";
 import type { ArtifactId, ArtifactManifest, ImageId, ImageManifest, PortableArtifactId, TemplateId, TemplateManifest } from "../images.ts";
@@ -427,6 +427,39 @@ test("capacity counts the CPUs and memory of VMs that are up and the disk of eve
     assert.ok(capacity.cpus > 0 && capacity.memoryGiB > 0);
     break;
   }
+});
+
+test("a broken pylon's log tail and a failed job's log leave the node with the values it holds and secret-shaped text redacted", async (t) => {
+  const secrets = nodeSecrets(parseSecretsEnv("STRIPE_KEY=rk_live_0123456789abcdef\n"));
+  secrets.hold("NEXUS_CHATGPT_TOKEN", "held-token-value-0123");
+  const { base, client, fake } = await setup(t, { secrets });
+  assert.equal((await fetch(`${base}/v1/secrets/NEXUS_CHATGPT_TOKEN`, { method: "PUT", body: "held-token-value-0123" })).status, 204);
+  const log = [
+    "request to api.stripe.com with rk_live_0123456789abcdef failed",
+    "pi: refresh with held-token-value-0123",
+    "guest env GH_TOKEN=GONDOLIN_SECRET_0123456789abcdef0123456789abcdef0123456789abcdef",
+    "curl sent 0123456789abcdef0123456789abcdef0123456789abcdef.stripe_key",
+    "Error: Guest command got no answer within 13000 ms",
+  ].join("\n");
+  const redactedLog = [
+    "request to api.stripe.com with [redacted] failed",
+    "pi: refresh with [redacted]",
+    "guest env GH_TOKEN=[redacted]",
+    "curl sent [redacted].stripe_key",
+    "Error: Guest command got no answer within 13000 ms",
+  ].join("\n");
+  const broken = "pylon-broken" as PylonId;
+  fake.pylons.set(broken, { pylonId: broken, vm: "broken", checkpoint: null, image, bootedAt: null, detail: "the controller failed to boot the VM", cause: "controller", logTail: log });
+  for await (const e of client.observe(AbortSignal.timeout(5000))) {
+    const observed = (e.type === "snapshot" ? e.observation : assert.fail()).pylons.find((p) => p.pylonId === broken);
+    assert.deepEqual(observed, { pylonId: broken, phase: "broken", detail: "the controller failed to boot the VM", cause: "controller", logTail: redactedLog });
+    break;
+  }
+  fake.backend.ensureRunning = async () => { throw new JobFailure("setup-failed", "setup failed with rk_live_0123456789abcdef", log); };
+  const env = envelope(spawnJob, node, Date.now());
+  await client.submit(env);
+  const status = await finished(client, env.jobId);
+  assert.deepEqual(status.state === "failed" && [status.message, status.logTail], ["setup failed with [redacted]", redactedLog]);
 });
 
 test("a held secret from the control plane is held, applied to the running pylons, and then reported as one the node holds", async (t) => {

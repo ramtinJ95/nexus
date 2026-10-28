@@ -63,6 +63,8 @@ export interface BackendPylon {
   detail?: string;
   /** Set exactly when `vm` is broken. `unknown` when the backend cannot tell why. */
   cause?: BrokenCause | "unknown";
+  /** Set when `vm` is broken, from a backend that keeps a log of the VM's controller: that log's last lines, as read. */
+  logTail?: string;
   /**
    * Set exactly when `vm` is stopped: the sessions its last pause recorded, which the backend keeps beside the
    * checkpoint because the checkpoint cannot be read while paused. Null when that pause recorded none.

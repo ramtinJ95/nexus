@@ -38,8 +38,8 @@ const running = (hash: LiveHash | null): PylonObservation => ({
   services: [], listening: [], previews: [], sessions: [], git: null, declaredOutputs: [], attachedClients: 0,
 });
 const stopped = (checkpoint: CheckpointId | null, sessions: readonly PausedSession[] | null = null): PylonObservation => ({ pylonId, phase: "stopped", checkpoint, sessions });
-const broken: PylonObservation = { pylonId, phase: "broken", detail: "qcow2 header unreadable", cause: "controller" };
-const brokenSetup: PylonObservation = { pylonId, phase: "broken", detail: "Setup exited 128. Read controller logs", cause: "setup" };
+const broken: PylonObservation = { pylonId, phase: "broken", detail: "qcow2 header unreadable", cause: "controller", logTail: "" };
+const brokenSetup: PylonObservation = { pylonId, phase: "broken", detail: "Setup exited 128. Read controller logs", cause: "setup", logTail: "" };
 const brokenSavedSetup: PylonObservation = { ...brokenSetup, cause: "saved-setup" };
 const brokenUnknown: PylonObservation = { ...broken, cause: "unknown" };
 const phase = (p: "booting" | "stopping" | "deleting"): PylonObservation => ({ pylonId, phase: p });
@@ -125,6 +125,7 @@ const rows: Record<string, Row> = {
   "running and stopped resumes from the checkpoint": { desired: "running", observed: stopped(lastCheckpoint), inFlight: null, attempts: none, online: true, present: imageOnly, expect: spawn({ kind: "resume", checkpoint: lastCheckpoint }) },
   "running and stopped without a checkpoint boots the first source": { desired: "running", observed: stopped(null), inFlight: null, attempts: none, online: true, present: imageOnly, expect: spawn(fresh) },
   "running and broken fails, never booting over the disk": { desired: "running", observed: broken, inFlight: null, attempts: none, online: true, present: imageOnly, expect: { kind: "fail", reason: "pylon is broken: qcow2 header unreadable" } },
+  "a broken pylon's failure ends with the last lines of its controller log, trimmed": { desired: "running", observed: { ...broken, logTail: "\nqemu: booting\nError: Guest command got no answer within 13000 ms\n" }, inFlight: null, attempts: none, online: true, present: imageOnly, expect: { kind: "fail", reason: "pylon is broken: qcow2 header unreadable\nqemu: booting\nError: Guest command got no answer within 13000 ms" } },
   "a retried broken pylon pauses, to resume its newest disk": { desired: "running", observed: broken, inFlight: null, attempts: none, online: true, present: imageOnly, retrying: true, expect: pause },
   "a retried pylon whose setup failed on this boot pauses, which removes the VM and its failure": { desired: "running", observed: brokenSetup, inFlight: null, attempts: none, online: true, present: imageOnly, retrying: true, expect: pause },
   "a retried pylon whose disk holds a failed setup fails, since a resume would fail the same way": { desired: "running", observed: brokenSavedSetup, inFlight: null, attempts: none, online: true, present: imageOnly, retrying: true, expect: { kind: "fail", reason: "pylon is broken: Setup exited 128. Read controller logs. Its disk holds the failed setup, and every boot of that disk fails the same way, so a retry cannot help. Start again from the project" } },
@@ -308,7 +309,7 @@ test("a broken pylon whose cause is missing, as from an older probe, or one this
   } } as unknown as ProbeEvent);
   const old = parseProbeEvent(snapshot({ pylonId, phase: "broken", detail: "Setup exited 128. Read controller logs" }));
   assert.ok(old.type === "snapshot");
-  assert.deepEqual(old.observation.pylons, [{ pylonId, phase: "broken", detail: "Setup exited 128. Read controller logs", cause: "unknown" }]);
+  assert.deepEqual(old.observation.pylons, [{ pylonId, phase: "broken", detail: "Setup exited 128. Read controller logs", cause: "unknown", logTail: "" }], "an older probe sends no log tail");
   const current = parseProbeEvent(snapshot({ pylonId, phase: "broken", detail: "Setup exited 128. Read controller logs", cause: "saved-setup" }));
   assert.ok(current.type === "snapshot" && current.observation.pylons[0]?.phase === "broken" && current.observation.pylons[0].cause === "saved-setup");
   const newer = parseProbeEvent(snapshot({ pylonId, phase: "broken", detail: "x", cause: "cosmic-ray" }));
@@ -343,7 +344,7 @@ test("an observation from the oldest probe upgrades to what each field it left o
     pylons: [
       { ...running(liveHash), listening: null, sessions: [{ id: "w1:p1", state: "running", herdrPane: "w1:p1", harness: "shell", harnessSessionId: null, status: "idle" }] },
       { pylonId: "pylon-t2", phase: "stopped", checkpoint: lastCheckpoint, sessions: null },
-      { pylonId: "pylon-t3", phase: "broken", detail: "x", cause: "unknown" },
+      { pylonId: "pylon-t3", phase: "broken", detail: "x", cause: "unknown", logTail: "" },
     ],
     previewRoutes: [], grants: { secrets: [], gitSsh: false }, heldSecrets: [],
   });

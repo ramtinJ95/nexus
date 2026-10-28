@@ -26,6 +26,7 @@ import type { Whois } from "../tailscale.ts";
 import { listOutputs } from "../outputs.ts";
 import { listeningFacts } from "../listening.ts";
 import { readBody } from "../request-body.ts";
+import { redact } from "./redact.ts";
 import { gitFacts } from "../git-facts.ts";
 import { startGateway } from "./gateway.ts";
 import { createPylonApi } from "./pylon-api.ts";
@@ -290,6 +291,9 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
     }
   }
 
+  /** What leaves the node in a failure, with every value this probe holds, and what looks like a secret, redacted. */
+  const redacted = (text: string) => redact(text, options.secrets.names().flatMap((name) => options.secrets.value(name) ?? []));
+
   const gitReads = new Map<PylonId, { bootedAt: string; at: number; facts: GitFacts | null }>();
   const unreadGit = new Set<PylonId>();
   async function git(pylonId: PylonId, bootedAt: string): Promise<GitFacts | null> {
@@ -321,7 +325,7 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
         return { pylonId, phase: "stopped", checkpoint: p.checkpoint, sessions: p.sessions };
       case "broken":
         if (p.cause === undefined) throw new Error(`backend reports ${pylonId} broken with no cause`);
-        return { pylonId, phase: "broken", detail: p.detail ?? "the backend gave no detail", cause: p.cause };
+        return { pylonId, phase: "broken", detail: redacted(p.detail ?? "the backend gave no detail"), cause: p.cause, logTail: redacted(p.logTail ?? "") };
       case "running": {
         if (p.bootedAt === null) throw new Error(`backend reports ${pylonId} running with no boot time`);
         const [ports, serviceFacts, sessionFacts, checkout, outputs, attachedClients] = await Promise.all([
@@ -439,7 +443,7 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
       },
       (err: unknown) => {
         if (!(err instanceof JobFailure)) throw err;
-        setStatus({ ...base, state: "failed", finishedAt: new Date().toISOString(), code: err.code, message: err.message, logTail: err.logTail }, Date.now());
+        setStatus({ ...base, state: "failed", finishedAt: new Date().toISOString(), code: err.code, message: redacted(err.message), logTail: redacted(err.logTail) }, Date.now());
       },
     ).finally(() => {
       busy.delete(subject);

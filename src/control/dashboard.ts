@@ -965,7 +965,7 @@ ${unpublished === null ? html`<p class="empty">The pylon's ports could not be re
   : html`<span title="${exact(usage.total)}">${tokenCount(usage.total)}</span> <span class="dim">(${usageColumns.filter((col) => col.field !== "total").map((col, i) => html`${i > 0 && " · "}<span title="${exact(usage[col.field])}">${col.short} ${tokenCount(usage[col.field])}</span>`)})</span>`}</dd>
 </dl>
 <code class="id">${pylon.id}</code>
-${pylon.failed !== null && html`<p class="error">The planner gave up: ${pylon.failed}</p>`}
+${pylon.failed !== null && html`<p class="error">The planner gave up: ${pylon.failed.split("\n")[0]}</p>`}
 </section>
 <section aria-labelledby="outputs-h"><h2 id="outputs-h">Outputs ${count(outputs.length + (d.pullRequests?.length ?? 0))}</h2>
 ${!d.prWatch?.enabled ? html`<p class="empty">PR watch: off (no control-plane GitHub token configured).</p>` : html`<p>PR watch: ${d.prWatch.stopped ? "stopped (10 comment-only wakes)" : "on"}${d.prWatch.error && html` — ${d.prWatch.error}`}</p>`}

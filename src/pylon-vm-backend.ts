@@ -458,6 +458,7 @@ export function createPylonVmBackend(options: PylonVmBackendOptions): VmBackend 
         ...state,
         checkpoint: state.vm === "stopped" ? sidecar.pausing ?? sidecar.checkpoint : sidecar.checkpoint,
         ...state.vm === "stopped" ? { sessions: sidecar.sessions ?? null } : {},
+        ...state.vm === "broken" ? { logTail: await templates.controllerLogTail(instanceDir(pylonId)) } : {},
         image: image as ImageId,
         bootedAt: state.vm === "running" ? instance.status.bootedAt ?? null : null,
         holds: { cpus: up.data?.cpus ?? 0, memoryGiB: up.data?.memoryGiB ?? 0, diskGiB: record.config.diskGiB },

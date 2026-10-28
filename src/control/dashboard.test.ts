@@ -991,7 +991,7 @@ test("a failed pylon whose disk holds a failed setup offers no retry, and says t
   const fix = await s.start("acme", "Fix checkout");
   s.registry.ingested({
     node, observedAt: new Date().toISOString(), probeBootId: "b", events: [], capacity: { cpus: 16, committedCpus: 0, memoryGiB: 64, committedMemoryGiB: 0, diskFreeGiB: 100, committedDiskGiB: 0 }, artifacts: [], jobs: [],
-    pylons: [{ pylonId: fix.pylonId, phase: "broken", detail: "Setup exited 128. Read controller logs", cause: "saved-setup" }], grants: { secrets: [], gitSsh: false }, previewRoutes: [], heldSecrets: [],
+    pylons: [{ pylonId: fix.pylonId, phase: "broken", detail: "Setup exited 128. Read controller logs", cause: "saved-setup", logTail: "" }], grants: { secrets: [], gitSsh: false }, previewRoutes: [], heldSecrets: [],
   }, []);
   s.registry.savePylon({ ...s.registry.pylon(fix.pylonId)!, failed: "pylon is broken: Setup exited 128. Read controller logs" });
   const html = (await s.call("GET", `/threads/${fix.id}`)).text;

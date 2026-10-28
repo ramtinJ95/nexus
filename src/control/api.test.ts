@@ -397,7 +397,7 @@ test("--node auto counts a crashed pylon a person retried, which boots again, an
   observeNode(s, "a", { total: 16, committed: 0 });
   const t1 = (await s.call("POST", "/v1/threads", { project: "acme", title: "Crashed", node: "a" })).body as Thread;
   s.registry.savePylon({ ...s.registry.pylon(t1.pylonId)!, boot: { ...s.registry.pylon(t1.pylonId)!.boot, resources: { cpus: 2, memoryGiB: 12, diskGiB: 10 } }, retrying: true });
-  const broken = (cause: "controller" | "services") => ({ pylonId: t1.pylonId, phase: "broken" as const, detail: "the controller exited", cause });
+  const broken = (cause: "controller" | "services") => ({ pylonId: t1.pylonId, phase: "broken" as const, detail: "the controller exited", cause, logTail: "" });
   observeNode(s, "a", { total: 16, committed: 0 }, { pylons: [broken("controller")] });
   assert.equal((await s.call("POST", "/v1/threads", { project: "acme", title: "x", node: "auto" })).body.placement.node, "b",
     "a will boot the retried 12 GiB pylon again, which leaves it 0 GiB, and b 2");
@@ -640,9 +640,9 @@ test("nodes report whether they are overcommitted, and their observed pylons as 
   const stopped = (t: Thread) => ({ pylonId: t.pylonId, phase: "stopped" as const, checkpoint: null, sessions: null });
   observeNode(s, "a", { total: 6, committed: 8 }, {
     pylons: [{ pylonId: up.pylonId, phase: "booting" }, stopped(paused), stopped(archived), { pylonId: "pylon-gone" as PylonId, phase: "booting" },
-      { pylonId: failing.pylonId, phase: "broken", detail: "a service did not start", cause: "services" },
-      { pylonId: crashed.pylonId, phase: "broken", detail: "the controller exited", cause: "controller" },
-      { pylonId: given.pylonId, phase: "broken", detail: "the controller exited", cause: "controller" }],
+      { pylonId: failing.pylonId, phase: "broken", detail: "a service did not start", cause: "services", logTail: "" },
+      { pylonId: crashed.pylonId, phase: "broken", detail: "the controller exited", cause: "controller", logTail: "" },
+      { pylonId: given.pylonId, phase: "broken", detail: "the controller exited", cause: "controller", logTail: "" }],
   });
   observeNode(s, "old", { total: 6, committed: 8 });
   s.registry.apply({ record: "node", node: "old" as NodeName, state: "online", capacity: { memoryGiB: 6, committedMemoryGiB: 8, diskFreeGiB: 100 } as never });
@@ -1222,7 +1222,7 @@ test("a pylon whose disk holds a failed setup cannot be retried, and its detail 
   s.registry.apply({ record: "node", node, state: "online", capacity });
   const broken = (cause: "setup" | "saved-setup" | "services") => s.registry.ingested({
     node, observedAt: "2027-01-01T00:01:00Z", probeBootId: "b", events: [], capacity, artifacts: [], jobs: [],
-    pylons: [{ pylonId: thread.pylonId, phase: "broken", detail: "Setup exited 128. Read controller logs", cause }], grants: { secrets: [], gitSsh: false }, previewRoutes: [], heldSecrets: [],
+    pylons: [{ pylonId: thread.pylonId, phase: "broken", detail: "Setup exited 128. Read controller logs", cause, logTail: "" }], grants: { secrets: [], gitSsh: false }, previewRoutes: [], heldSecrets: [],
   }, []);
   broken("saved-setup");
   s.registry.savePylon({ ...s.registry.pylon(thread.pylonId)!, failed: "pylon is broken: Setup exited 128. Read controller logs" });

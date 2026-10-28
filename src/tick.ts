@@ -3,7 +3,7 @@
  * the node's latest observation, and submits it. The caller owns where the record lives: the control
  * plane's loop saves it to the registry, and the slice test keeps it in memory.
  */
-import { envelope, planPylon, type DesiredPhase, type FailedAttempt, type PlanInput, type PlanStep } from "./reconcile.ts";
+import { envelope, failureMessage, planPylon, type DesiredPhase, type FailedAttempt, type PlanInput, type PlanStep } from "./reconcile.ts";
 import type { Job, JobEnvelope, JobId, JobStatus, NodeName, NodeObservation, ProbeClient, ProbeError } from "./protocol.ts";
 import type { CheckpointId } from "./images.ts";
 
@@ -179,19 +179,6 @@ async function settle(pylon: PylonRecord, probe: ProbeClient, observation: NodeO
 function failedAttempt(pylon: PylonRecord, code: FailedAttempt["code"], message: string, reading: boolean): PylonRecord["attempts"] {
   // A wake for reading's failure is not one of a normal wake's tries.
   return { count: (pylon.attempts.last?.reading === true ? 0 : pylon.attempts.count) + 1, last: { at: Date.now(), code, message, ...(reading ? { reading } : {}) } };
-}
-
-const maxMessageChars = 500;
-const maxLogLines = 20;
-const maxLogChars = 1_500;
-
-/**
- * A failed job's message and the last lines of its log, trimmed and bounded. The record carries it into
- * the planner's reason, so the API, the dashboard and the loop's log say why without the probe's logs.
- */
-export function failureMessage(message: string, logTail: string): string {
-  const log = logTail.trim().split("\n").slice(-maxLogLines).join("\n").slice(-maxLogChars);
-  return [message.trim().slice(0, maxMessageChars), log].filter((part) => part !== "").join("\n");
 }
 
 /** One snapshot from a new observe stream, whose first event is always a snapshot. Null when the probe is unreachable. */

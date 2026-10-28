@@ -84,7 +84,7 @@ function bootOf(pylonId: string, changes: Partial<BootInputs> = {}): BootInputs 
 }
 
 /** What a pi-sandbox-format instance looks like on disk after its controller died or stopped. */
-async function leftInstance(instances: string, pylonId: string, state: "stopped" | "running" | "starting", diskGiB = 8, retrySetup = false) {
+async function leftInstance(instances: string, pylonId: string, state: "stopped" | "running" | "starting" | "failed", diskGiB = 8, retrySetup = false) {
   const dir = join(instances, pylonId);
   await mkdir(dir, { mode: 0o700 });
   const config = { version: 1, diskGiB, image: assets, workspace: "/home/user/workspace", setup: [], retrySetup, resume: [], services: {} };
@@ -263,6 +263,23 @@ test("pausing a pylon whose controller died settles it on its last disk without 
   assert.equal(pylon?.vm, "stopped");
   assert.equal(pylon.checkpoint, "ckpt-dead-1");
   assert.equal(existsSync(join(instances, "pylon-dead", "controller.pid")), false, "no controller was launched");
+});
+
+test("a pylon whose controller failed carries its controller log's last 60 lines, at most 8 KiB, and a stopped one no log", async () => {
+  const { backend, instances } = await backendWith();
+  const dir = await leftInstance(instances, "pylon-failed", "failed");
+  const lines = Array.from({ length: 100 }, (_, i) => `line ${i}`);
+  await writeFile(join(dir, "controller.log"), [...lines, "Error: Guest command got no answer within 13000 ms", ""].join("\n"));
+  await writeFile(join(await leftInstance(instances, "pylon-stopped", "stopped"), "controller.log"), "stopped cleanly\n");
+  const listed = new Map((await backend.list()).map((p) => [p.pylonId, p]));
+  const failed = listed.get("pylon-failed" as PylonId)!;
+  assert.deepEqual([failed.vm, failed.cause], ["broken", "controller"]);
+  assert.equal(failed.logTail, `${[...lines.slice(42), "Error: Guest command got no answer within 13000 ms"].join("\n")}\n`);
+  assert.equal(listed.get("pylon-stopped" as PylonId)!.logTail, undefined);
+  await writeFile(join(dir, "controller.log"), `${"x".repeat(200)}\n`.repeat(60));
+  assert.equal((await backend.list()).find((p) => p.pylonId === "pylon-failed")!.logTail!.length, 8192);
+  await rm(join(dir, "controller.log"));
+  assert.equal((await backend.list()).find((p) => p.pylonId === "pylon-failed")!.logTail, "", "a controller that left no log");
 });
 
 test("a pylon whose controller has yet to publish its PID is booting while its launcher lives, and broken after", async () => {
