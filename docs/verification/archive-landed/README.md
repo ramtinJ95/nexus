@@ -1,6 +1,6 @@
 # Archive what landed
 
-Verified in this task's pylon on 2026-10-28, on branch `feat/archive-landed` at 50c9dd9 (code, docs and the review's fix; the capture's own commit follows it), against main at 76522f5, with headless Chromium 138. No live control plane, node, image, GitHub repository or other thread was touched.
+Verified in this task's pylon on 2026-10-28, on branch `feat/archive-landed` at 50c9dd9 (code, docs and the review's fix; the capture's own commit follows it), against main at 76522f5, with headless Chromium 138. The branch was then rebased onto main at 63eba3b, which changes only the nudge pass and the PR watch's branch reads, so the commits above have new IDs. No live control plane, node, image, GitHub repository or other thread was touched.
 
 ## How to rerun
 
