@@ -33,8 +33,8 @@ A watcher reads `show --json` of both threads twice a second and writes each cha
 | A: `08-show-a-json.txt` | no `judgments` field | one judgment whose `brief` holds the failure with the controller log's tail, the node's health read through its probe (load, memory, swap, disk; this host reports no temperatures), `node-b` weighed and refused for this project, the retries left, and what each answer would do. Its `reply` is the scripted block |
 | B: `10-show-b-asked.txt` | the failure, nothing else | `question judgment:4` with options `"Retry", "Leave it failed"`, and `person, by the control plane: the judgment's reply had no valid nexus-judgment block with its token` |
 | B: `11-show-b-end.txt` | the same failure | the question answered `"Retry"` by the laptop, `retried the pylon on node-a, as the person answered`, and the pylon running |
-| `judgments.txt` | each pylon `failed` for good, `judgments []` | A: `judging`, then `done`. B: `judging`, `acting`, `asked`, then `done` once the card is answered |
-| `tests-*.txt` | the test files do not load | 12 of 12 pass |
+| `judgments.txt` | each pylon `failed` for good, `judgments []` | A: `judging`, then `done`. B: `judging`, `asked`, then `done` once the card is answered |
+| `tests-*.txt` | the test files do not load | 14 of 14 pass |
 
 "Retry on another node" is not on B's card, because `node-a` still lists the broken pylon and Nexus has no job that moves a disk. The brief says the same of `retry-elsewhere`. The red error in the Changes panel of A's page comes from the stand-in guest, which runs nothing but the pi-env daemon.
 
@@ -56,7 +56,7 @@ Branch, thread B's page once the person answered Retry:
 
 ## Unit tests
 
-`src/control/judgment.test.ts` runs the real harness host with the scripted model and a real registry file. It covers each answer (retry, retry on another node, and the move refused while the old node lists the pylon or holds a checkpoint), the person's answer to each option, a malformed and a missing block, a conversation offered no tools whose environment factory is never called, a crash between the brief and its answer that ends in one judgment, one brief and one action after a reopen, concurrent passes and a reopen that judge one failure once, the retry cap, and the failures, projects and threads that are never judged. `src/harness/host.test.ts` covers the judgment conversation across a reopen. The full suite passes, 1468 of 1468.
+`src/control/judgment.test.ts` runs the real harness host with the scripted model and a real registry file. It covers each answer (retry, retry on another node, and the move refused while the old node lists the pylon or holds a checkpoint), the person's answer to each option, a malformed and a missing block, a conversation offered no tools whose environment factory is never called, a crash between the brief and its answer that ends in one judgment, one brief and one action after a reopen, concurrent passes and a reopen that judge one failure once, the retry cap, a pipeline turned off before Nexus acts, a failure whose event was pruned, and the failures, projects and threads that are never judged. `src/harness/host.test.ts` covers the judgment conversation across a reopen. `src/control/loop.test.ts` covers a pylon moved off a node while that node's pass waits on another pylon. The full suite passes, 1471 of 1471.
 
 ## What this does not prove
 

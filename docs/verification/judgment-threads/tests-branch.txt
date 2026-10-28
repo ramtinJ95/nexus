@@ -8,9 +8,11 @@
 ✔ concurrent passes and a restart judge a failure once, a later failure gets its own judgment, and a third retry is the person's
 ✔ failures from before judgments, projects without the pipeline and threads no person started as builders are never judged
 ✔ the brief states each fact it is given, and why one could not be read
+✔ a judgment whose project turns its pipeline off before Nexus acts asks the person instead of retrying
+✔ an answer to a judgment whose failure Nexus can no longer tell from a later one with the same reason does nothing
 ✔ the usage of a conversation's answers reads on from the last entry read, and stays readable after its thread is deleted
 ✔ a judgment's conversation is offered no tools, needs no pylon, and has replies once its run ends, across a reopen
-ℹ tests 12
-ℹ pass 12
+ℹ tests 14
+ℹ pass 14
 ℹ fail 0
 ℹ cancelled 0

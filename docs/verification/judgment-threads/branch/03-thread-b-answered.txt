@@ -1,4 +1,4 @@
-GET /threads/th-d9156a95de26 (the thread page's dock)
+GET /threads/th-3017c77de3d0 (the thread page's dock)
 Failed on node-a
 judged just now
 

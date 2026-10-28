@@ -1,9 +1,9 @@
-$ nexus show th-d9156a95de26
-th-d9156a95de26  B: controller crash with a malformed judgment
+$ nexus show th-3017c77de3d0
+th-3017c77de3d0  B: controller crash with a malformed judgment
 project: wave
 attention: failed
 status: active
-pylon: pylon-th-d9156a95de26 on node-a, failed, observed 31s ago
+pylon: pylon-th-3017c77de3d0 on node-a, failed, observed 31s ago
 size: 1 CPUs, 1 GiB memory, 5 GiB disk
 placement: node-a, as the start named
 setup: fresh boot runs .nexus/setup, because the control plane could not read .nexus/setup at main: the control plane reads only https:// remotes, and holds no SSH key for git@github.com:verify/wave.git

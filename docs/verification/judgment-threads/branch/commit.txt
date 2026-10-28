@@ -1,1 +1,1 @@
-branch: 254290e fix(control): act on a judgment's verdict in the pass that read it
+branch: f22e4f4 docs: a verdict waits for the person once the pipeline is off or the failure's event is gone

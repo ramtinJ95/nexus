@@ -1,6 +1,6 @@
-+   6.0s backend: node-a booted pylon-th-0e5566d9f9d3 from fresh
-+  93.4s backend: node-a paused broken pylon-th-0e5566d9f9d3 onto checkpoint ckpt-th-0e5566d9f9d3-1
-+  93.5s backend: node-a booted pylon-th-0e5566d9f9d3 from checkpoint ckpt-th-0e5566d9f9d3-1
-+  99.1s backend: node-a booted pylon-th-d9156a95de26 from fresh
-+ 168.4s backend: node-a paused broken pylon-th-d9156a95de26 onto checkpoint ckpt-th-d9156a95de26-1
-+ 168.4s backend: node-a booted pylon-th-d9156a95de26 from checkpoint ckpt-th-d9156a95de26-1
++   5.5s backend: node-a booted pylon-th-78a236a3e44c from fresh
++  93.0s backend: node-a paused broken pylon-th-78a236a3e44c onto checkpoint ckpt-th-78a236a3e44c-1
++  93.0s backend: node-a booted pylon-th-78a236a3e44c from checkpoint ckpt-th-78a236a3e44c-1
++  98.5s backend: node-a booted pylon-th-3017c77de3d0 from fresh
++ 168.0s backend: node-a paused broken pylon-th-3017c77de3d0 onto checkpoint ckpt-th-3017c77de3d0-1
++ 168.0s backend: node-a booted pylon-th-3017c77de3d0 from checkpoint ckpt-th-3017c77de3d0-1

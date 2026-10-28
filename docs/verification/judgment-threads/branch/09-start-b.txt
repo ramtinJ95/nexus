@@ -1,17 +1,17 @@
 $ nexus start --project wave --title "B: controller crash with a malformed judgment" --node node-a --json
 {
-  "id": "th-d9156a95de26",
+  "id": "th-3017c77de3d0",
   "title": "B: controller crash with a malformed judgment",
   "project": "wave",
-  "pylonId": "pylon-th-d9156a95de26",
+  "pylonId": "pylon-th-3017c77de3d0",
   "status": "active",
   "conversationId": "20",
   "startedBy": "nVERIFYLAPTOP",
-  "createdAt": 1793193462610,
+  "createdAt": 1793194565677,
   "agentTurnRunning": false,
   "working": false,
   "lastAgentActivityAt": 0,
-  "lastHumanActivityAt": 1793193462610,
+  "lastHumanActivityAt": 1793194565677,
   "seenAt": null,
   "lastReplyAt": null,
   "placement": {
