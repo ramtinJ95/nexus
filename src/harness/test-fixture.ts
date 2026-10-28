@@ -1,6 +1,7 @@
 /**
  * Test support for src/harness/slice.test.ts. A scripted model that needs no network: a user message
- * `bash: <command>` becomes one bash tool call, and a tool result becomes a short final answer. A user message
+ * `bash: <command>` becomes one bash tool call, `tool: <name> <JSON arguments>` one call of that tool, and a tool result
+ * becomes a short final answer. A user message
  * `stream: <n>` is answered `word0 word1 ...` up to n words, written one word every 20 ms, as a model streams. Every
  * answer reports `scriptedUsage`.
  *
@@ -40,14 +41,16 @@ export function scriptedModels(): Models {
       const last = input.messages.at(-1);
       if (last === undefined) throw new Error("the scripted model got no messages");
       const command = last.role === "user" ? /^bash: ([\s\S]*)$/.exec(text(last))?.[1] : undefined;
+      const tool = last.role === "user" ? /^tool: (\S+) ([\s\S]*)$/.exec(text(last)) : null;
+      const call = command !== undefined ? { name: "bash", arguments: { command, timeout: 600 } } : tool ? { name: tool[1]!, arguments: JSON.parse(tool[2]!) } : undefined;
       const streamed = last.role === "user" ? /^stream: (\d+)$/.exec(text(last))?.[1] : undefined;
       const message = {
         role: "assistant", api: model.api, provider: model.provider, model: model.id, timestamp: Date.now(),
-        stopReason: command === undefined ? "stop" : "toolUse",
+        stopReason: call === undefined ? "stop" : "toolUse",
         usage: { ...scriptedUsage, totalTokens: 9_180, cost: { ...model.cost, total: 0 } },
-        content: command === undefined
+        content: call === undefined
           ? [{ type: "text", text: `scripted answer after ${last.role}` }]
-          : [{ type: "toolCall", id: `call-${input.messages.length}`, name: "bash", arguments: { command, timeout: 600 } }],
+          : [{ type: "toolCall", id: `call-${input.messages.length}`, ...call }],
       };
       const stream = new AssistantMessageEventStream();
       if (streamed === undefined) {
