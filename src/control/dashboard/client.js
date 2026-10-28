@@ -1349,6 +1349,7 @@ document.addEventListener("visibilitychange", () => {
   recordVisit();
   follow(document.getElementById("convo")?.dataset.stream);
   if (pollMs > 0) void refreshNow();
+  askRows();
   // The visit wakes the pylon anyway, so a running one is worth reading again on return.
   if (changesPane !== null && canRead(factsNow())) void readChanges();
 });
@@ -1381,26 +1382,93 @@ if (window.isSecureContext && "Notification" in window) {
   permission.textContent = "System notifications need HTTPS";
 }
 document.querySelector("aside")?.append(permission);
-let attentionPolling = false;
-let marked = null;
-async function pollAttention() {
-  if (attentionPolling) return;
-  attentionPolling = true;
-  try {
-    const rows = await api("GET", "/v1/threads?deleted=false", undefined, AbortSignal.timeout(10_000));
-    notifications(rows, Date.now());
-    const count = badgeCount(rows);
-    document.title = `${count ? `(${badgeText(count)}) ` : ""}Nexus`;
-    const favicon = document.querySelector('link[rel="icon"]');
-    favicon.href = count ? `data:image/svg+xml,${encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><rect width="32" height="32" rx="8" fill="#d44"/><text x="16" y="23" text-anchor="middle" font-size="22" fill="white">${badgeText(count)}</text></svg>`)}` : "/assets/favicon.svg";
-    const id = currentThread();
-    const body = owedSeen(document.getElementById("convo"), marked);
-    if (id && focused() && activeTab === null && body !== null && !document.querySelector("#convo .error")) {
-      await api("POST", `/v1/threads/${id}/seen`, body, AbortSignal.timeout(10_000));
-      marked = body.lastReplyAt;
-    }
-  } catch { /* The page's refresh reports connection failures. */ }
-  finally { attentionPolling = false; }
+// The events that change a row's attention, its reply or whether it works.
+const rowEvents = ["attention.changed", "thread.turn-ended", "session.turn-started", "session.turn-ended", "session.waiting", "session.ended"];
+// One tab of the browser holds the lock, follows those events and reads the thread list, and the other tabs show the
+// rows it hands them, so a hidden tab notifies without a request or a stream of its own. Every tab showing that one
+// tab's reads, in order, means none shows older rows over newer ones, and each holds a reply back to the same moment.
+const rowsChannel = "BroadcastChannel" in window ? new BroadcastChannel("nexus-rows") : null;
+const sharing = rowsChannel !== null && navigator.locks !== undefined;
+let leading = false;
+let due;
+function showRows(rows, now) {
+  const held = notifications(rows, now);
+  // A turn over an unread reply may stop with no event, and the reply notifies once a read finds it stopped.
+  const next = rows.some((row) => row.attention === "reply" && row.working) ? Math.min(held ?? Infinity, now + 1000) : held;
+  // A held-back reply notifies once a read at its time finds no turn running.
+  clearTimeout(due);
+  if (leading && next !== null) due = setTimeout(readRows, next - Date.now());
+  const count = badgeCount(rows);
+  document.title = `${count ? `(${badgeText(count)}) ` : ""}Nexus`;
+  const favicon = document.querySelector('link[rel="icon"]');
+  favicon.href = count ? `data:image/svg+xml,${encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><rect width="32" height="32" rx="8" fill="#d44"/><text x="16" y="23" text-anchor="middle" font-size="22" fill="white">${badgeText(count)}</text></svg>`)}` : "/assets/favicon.svg";
 }
-void pollAttention();
-setInterval(pollAttention, 1000);
+let readingRows = false;
+let stale = false;
+let retry;
+async function readRows() {
+  // An event during a read may have come after the list was read.
+  if (readingRows) return void (stale = true);
+  readingRows = true;
+  try {
+    do {
+      stale = false;
+      const rows = await api("GET", "/v1/threads?deleted=false", undefined, AbortSignal.timeout(10_000));
+      const now = Date.now();
+      if (leading) rowsChannel.postMessage({ rows, now });
+      showRows(rows, now);
+    } while (stale);
+  } catch {
+    // The event that asked for the read may be the last for a while.
+    clearTimeout(retry);
+    if (leading) retry = setTimeout(readRows, 1000);
+  } finally { readingRows = false; }
+}
+const askRows = () => sharing && !leading ? rowsChannel.postMessage("read") : void readRows();
+rowsChannel?.addEventListener("message", ({ data }) => {
+  if (data === "read") {
+    if (leading) void readRows();
+  } else showRows(data.rows, data.now);
+});
+function followRows() {
+  leading = true;
+  const open = () => {
+    // Each connection reads the list, so it needs none of the events before it.
+    const query = new URLSearchParams([["follow", "true"], ["since", "latest"], ...rowEvents.map((kind) => ["kind", kind])]);
+    const events = new EventSource(`/v1/events?${query}`);
+    events.onopen = () => void readRows();
+    events.onmessage = () => void readRows();
+    events.onerror = () => {
+      events.close();
+      setTimeout(() => { void readRows(); open(); }, 3000);
+    };
+  };
+  open();
+  // A delete, a harness turn that starts or stops without a reply, or a session whose lease lapsed sends no event.
+  setInterval(readRows, 10_000);
+}
+if (sharing) {
+  void navigator.locks.request("nexus-rows", () => { followRows(); return new Promise(() => {}); });
+  askRows();
+} else {
+  // Web Locks need a secure context, so each tab of a page over plain HTTP reads the list itself.
+  void readRows();
+  setInterval(readRows, 1000);
+}
+
+let marking = false;
+let marked = null;
+async function markSeen() {
+  const convo = document.getElementById("convo");
+  const id = currentThread();
+  if (marking || id === null || !focused() || activeTab !== null || convo === null || convo.querySelector(".error")) return;
+  const body = owedSeen(convo, marked);
+  if (body === null) return;
+  marking = true;
+  try {
+    await api("POST", `/v1/threads/${id}/seen`, body, AbortSignal.timeout(10_000));
+    marked = body.lastReplyAt;
+  } catch { /* The page's refresh reports connection failures. */ }
+  finally { marking = false; }
+}
+setInterval(markSeen, 1000);

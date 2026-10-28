@@ -865,7 +865,8 @@ export async function startApi(options: ApiOptions): Promise<Api> {
       return ok({ idle, expiresAt: registry.drain()?.expiresAt ?? null });
     }],
     ["GET", /^\/v1\/events$/, (_, r) => {
-      const since = r.query.get("since") ?? "0";
+      // A follower that reads the state itself whenever it connects needs no history.
+      const since = r.query.get("since") === "latest" ? registry.newestEvent() : r.query.get("since") ?? "0";
       try { eventCursor(since); } catch { throw new HttpError(400, "invalid event cursor"); }
       const kinds = r.query.getAll("kind");
       if (kinds.some((k) => !(eventKinds as readonly string[]).includes(k))) throw new HttpError(400, "unknown event kind");

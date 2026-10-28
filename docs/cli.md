@@ -664,7 +664,8 @@ with exit 5 (HTTP 409), rather than hiding a retention gap. Stop with Ctrl-C;
 closing the output pipe or exiting the parent also stops a follower.
 
 The shared API is `GET /v1/events?since=ID&thread=T&project=P&kind=K&follow=true`.
-Without `follow=true` it returns a JSON array. Following uses SSE, with the record
+`since=latest` starts after the newest event, for a follower that reads the state
+itself whenever it connects. Without `follow=true` it returns a JSON array. Following uses SSE, with the record
 ID in `id:` and the JSON record in `data:`. One-second keep-alives have an `id:`
 watermark but no `data:`: they advance past events skipped by the filters and print
 nothing. The CLI remembers these IDs for reconnects. It writes one record at a

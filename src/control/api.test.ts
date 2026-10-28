@@ -1170,6 +1170,19 @@ test("the thread list leaves deleted threads out when asked, as the dashboard as
   assert.deepEqual(await ids("/v1/threads?project=acme&deleted=false"), [s.thread.id]);
 });
 
+test("a follow from the latest event gets a reply's events and none from before it", async (t) => {
+  const s = await withThread(t);
+  s.registry.recordReply(s.thread.id, Date.now());
+  const kinds = ["attention.changed", "thread.turn-ended", "session.turn-started", "session.turn-ended", "session.waiting", "session.ended"];
+  const stream = s.events(`/v1/events?follow=true&since=latest&${kinds.map((k) => `kind=${k}`).join("&")}`);
+  t.after(() => stream.close());
+  await stream.response;
+  assert.equal((await s.call("POST", `/v1/threads/${s.thread.id}/seen`, {})).status, 204);
+  s.registry.recordReply(s.thread.id, Date.now());
+  assert.deepEqual([(await stream.next()).payload, (await stream.next()).kind, (await stream.next()).payload], [{ attention: null }, "thread.turn-ended", { attention: "reply" }]);
+  assert.deepEqual((await s.call("GET", "/v1/events?since=latest")).body, [], "nothing comes after the latest event");
+});
+
 test("retrying a failed pylon clears the planner's verdict and its attempts, marks the retry, counts as human activity and wakes its node", async (t) => {
   const s = await withThread(t);
   const { thread } = s;
