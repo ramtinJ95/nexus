@@ -27,7 +27,6 @@ import { once } from "node:events";
 import { createServer as createHttpsServer } from "node:https";
 import { TLSSocket } from "node:tls";
 import type { Certificate } from "../tailscale.ts";
-import { createHash } from "node:crypto";
 import { createServer, STATUS_CODES, type IncomingMessage, type ServerResponse } from "node:http";
 import type { Duplex } from "node:stream";
 import { setTimeout as sleep } from "node:timers/promises";
@@ -58,7 +57,8 @@ import { HttpError } from "./http-error.ts";
 import { answerRefusal, type AnswerRefusal, type Question } from "./questions.ts";
 import { BodyTooLarge, readBody } from "../request-body.ts";
 import { imagesView, type ImageOperation, type ImageRollout } from "./image-rollout.ts";
-import type { StartRequest } from "./threads.ts";
+import { startKey, type StartRequest } from "./threads.ts";
+import { itemView, type ItemId, type Pipeline } from "./pipeline.ts";
 import { queuedView, type QueuedRecord, type QueuedThread, type ThreadQueue } from "./queue.ts";
 import { nodePylons, overcommitted, type NodePylons } from "./placement.ts";
 import { maxRounds, type Review, type ReviewLoop } from "./review.ts";
@@ -70,6 +70,8 @@ export interface ApiOptions {
   reviews?: ReviewLoop | null;
   /** Null without a control-plane GitHub token, which tells it when a predecessor's pull request merged. */
   queue?: ThreadQueue | null;
+  /** Null without the queue, which starts its items' threads. */
+  pipeline?: Pipeline | null;
   deployment?: DeploymentOptions;
   turnsStarting?: () => boolean;
   registry: Registry;
@@ -231,7 +233,9 @@ const projectSchema = z.strictObject({
 });
 /** Only an edit sets `autoReview`, and the API records its caller in it, so a project's add cannot name someone else. */
 const projectEditSchema = projectSchema.omit({ id: true, repoUrl: true, preSetup: true })
-  .extend({ resources: projectSchema.shape.resources.partial(), autoReview: z.strictObject({ land: z.boolean() }).nullable() }).partial();
+  .extend({
+    resources: projectSchema.shape.resources.partial(), autoReview: z.strictObject({ land: z.boolean() }).nullable(), pipeline: z.strictObject({ autoStart: z.boolean() }).nullable(),
+  }).partial();
 const startSchema = z.strictObject({
   model: z.string().trim().min(1).max(200).optional(),
   claude: z.string().trim().min(1).max(16_384).refine((prompt) => !prompt.includes("\0"), "a Claude prompt cannot hold a NUL character, which no command-line argument can").optional(),
@@ -253,6 +257,8 @@ const startSchema = z.strictObject({
   /** Minted by the client per start, such as start:<uuid>. A retry with the same ID and body is the same start. */
   requestId: z.string().min(1).max(200).optional(),
 });
+/** A pipeline item: what its queued thread starts with, after the items whose threads must merge first. */
+const itemSchema = startSchema.omit({ after: true, requestId: true }).extend({ after: z.array(z.string().min(1)).max(32).optional() });
 // Agent activity comes from the harness.
 const seenSchema = z.strictObject({ lastReplyAt: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER).nullable().optional() });
 const activitySchema = z.strictObject({ kind: z.literal("human") });
@@ -324,6 +330,20 @@ export async function startApi(options: ApiOptions): Promise<Api> {
   }
 
   const queuedStatus = (id: string, status: "archived" | "queued" | "deleted") => queuedView(registry, queueOrRefuse().setStatus(id as ThreadId, status));
+
+  function pipelineOrRefuse(): Pipeline {
+    if (!options.pipeline) throw new HttpError(409, "pipeline items need the control plane's GitHub token (github.tokenFile), which is not configured");
+    return options.pipeline;
+  }
+  /** Items are the person's plan, so no pylon, harness thread or the control plane itself adds, approves or cancels one. */
+  function personOnly(caller: TailnetNodeId, action: string) {
+    if (!isPerson(registry, options.deployment, caller)) throw new HttpError(403, `caller may not ${action} an item: only a person may, never the control plane, infrastructure nodes or pylons`);
+  }
+  function item(id: string) {
+    const record = registry.item(id as ItemId);
+    if (record === undefined) throw new HttpError(404, `no item ${id}`);
+    return itemView(registry, record);
+  }
 
   function wakeThread(t: Thread) {
     wake(registry.pylon(t.pylonId)!.node);
@@ -644,8 +664,9 @@ export async function startApi(options: ApiOptions): Promise<Api> {
    */
   function start(body: unknown, caller: string): Promise<Thread | QueuedThread> {
     const { requestId, ...fields } = parse(startSchema, body);
+    if (requestId?.startsWith("pipeline:")) throw new HttpError(400, "request IDs that start with pipeline: are the pipeline's own, which names each item's thread by one");
     if (requestId === undefined) return startOnce(fields, caller);
-    const key: StartKey = { requestId, body: createHash("sha256").update(JSON.stringify(fields)).digest("hex") };
+    const key = startKey(requestId, fields);
     const pending = starting.get(requestId);
     const made = registry.startRequest(requestId);
     const earlier = pending ?? made;
@@ -959,14 +980,18 @@ export async function startApi(options: ApiOptions): Promise<Api> {
       };
     }],
     ["PATCH", /^\/v1\/projects\/([^/]+)$/, async ([, id], r) => {
-      const { autoReview, ...patch } = parse(projectEditSchema, await r.body());
+      const { autoReview, pipeline, ...patch } = parse(projectEditSchema, await r.body());
       if (autoReview?.land) mayLand(r.caller);
-      const project = registry.editProject(id as ProjectId, ({ autoReview: kept, ...previous }) => {
+      if (pipeline !== undefined && !isPerson(registry, options.deployment, r.caller)) throw new HttpError(403, "caller may not set a project's pipeline: whether briefs start builders is the person's, never the control plane's, an infrastructure node's or a pylon's");
+      const project = registry.editProject(id as ProjectId, ({ autoReview: kept, pipeline: running, ...previous }) => {
         const updated: Project = parse(projectSchema, { ...previous, ...patch, resources: { ...previous.resources, ...patch.resources } });
         refuseUnknownNode(updated);
         const review = autoReview === undefined ? kept : autoReview === null ? null : { land: autoReview.land, enabledBy: r.caller };
-        return review == null ? updated : { ...updated, autoReview: review };
+        // An off pipeline stays null, so the migration that turns it on for project nexus never turns it back on.
+        const items = pipeline === undefined ? running : pipeline;
+        return { ...updated, ...review == null ? {} : { autoReview: review }, ...items === undefined ? {} : { pipeline: items } };
       });
+      if (pipeline !== undefined) void options.pipeline?.poll();
       if (project === undefined) throw new HttpError(404, `no project ${id}`);
       return ok(project);
     }],
@@ -994,6 +1019,30 @@ export async function startApi(options: ApiOptions): Promise<Api> {
       const queued = queuedRecord(m[1]!);
       if (queued === undefined) throw new HttpError(404, `no queued thread ${m[1]!}`);
       return ok(queuedView(registry, queued));
+    }],
+    ["GET", /^\/v1\/items$/, (_, r) => {
+      const project = r.query.get("project");
+      return ok(registry.items().filter((i) => project === null || i.project === project).map((i) => itemView(registry, i)));
+    }],
+    ["POST", /^\/v1\/items$/, async (_, r) => {
+      personOnly(r.caller, "add");
+      const { after, message, ...request } = parse(itemSchema, await r.body());
+      const pipeline = pipelineOrRefuse();
+      const added = pipeline.add(request, message ?? null, after ?? [], r.caller);
+      await pipeline.poll();
+      return created(itemView(registry, added));
+    }],
+    ["GET", /^\/v1\/items\/([^/]+)$/, ([, id]) => ok(item(id!))],
+    ["POST", /^\/v1\/items\/([^/]+)\/cancel$/, ([, id], r) => {
+      personOnly(r.caller, "cancel");
+      return ok(itemView(registry, pipelineOrRefuse().cancel(id!, r.caller)));
+    }],
+    ["POST", /^\/v1\/items\/([^/]+)\/approve$/, async ([, id], r) => {
+      personOnly(r.caller, "approve");
+      const pipeline = pipelineOrRefuse();
+      const approved = pipeline.approve(id!, r.caller);
+      await pipeline.poll();
+      return ok(itemView(registry, approved));
     }],
     ["POST", /^\/v1\/threads\/([^/]+)\/start$/, async (m, r) => created(await queueOrRefuse().startNow(m[1]! as ThreadId, r.caller))],
     ["GET", /^\/v1\/threads\/([^/]+)$/, (m) => ok(detail(thread(m[1]!)))],

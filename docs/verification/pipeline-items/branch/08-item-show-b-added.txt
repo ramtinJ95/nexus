@@ -1,0 +1,11 @@
+$ nexus item show it-7b3ad974e2d6
+it-7b3ad974e2d6  B: greet in French, after A
+project: wave
+phase: queued, waits for A: greet by name: has no pull request yet
+thread: th-3026e9b9bc74
+worker: Nexus agent
+after: it-516281a236bb
+brief: B: greet in French, after A. Commit, push branch feat-b and open a pull request.
+added by nVERIFYLAPTOP 0s ago
+nexus show th-3026e9b9bc74 shows its thread.
+[exit 0]

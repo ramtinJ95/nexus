@@ -18,6 +18,7 @@ import type { ConversationView, EntryRecord, InboxState, LiveState } from "@eare
 import type { ListeningPort, NodeSummary, OpenedSession, ThreadDetail, ThreadRow, ViewFrame } from "../control/api.ts";
 import type { ImageEntry, ImageOperation, ImagesView } from "../control/image-rollout.ts";
 import type { NodePylons, Placement, Room } from "../control/placement.ts";
+import type { PipelineItem } from "../control/pipeline.ts";
 import type { QueuedThread, Wait } from "../control/queue.ts";
 import type { ClaudeSent, Preview, Thread } from "../control/registry.ts";
 import type { Review } from "../control/review.ts";
@@ -38,7 +39,7 @@ import type { WebSocket } from "ws";
 import { attachTerminal, processTty } from "./attach.ts";
 import { call, CliError, exitCodes, follow, upgrade, type Endpoint, type HostPort } from "./transport.ts";
 
-const version = "0.36.0";
+const version = "0.37.0";
 const defaults = { url: "http://rj-firebat.tailc817d3.ts.net:7470", socks: "localhost:1055" };
 const configFile = () => join(homedir(), ".config", "nexus", "cli.json");
 
@@ -63,6 +64,13 @@ const usage = `nexus ${version}, the Nexus control plane from this Mac
     --after queues it to start once each of those threads' pull requests has merged
     --request-id makes a repeat of the start answer the thread the first made
   nexus start-queued <thread>                  start a queued thread now, without waiting for the threads it is queued after
+  nexus items [--project P] [--all]            pipeline items and the phase each is in; cancelled ones only with --all
+  nexus item add --project P [--title T] (--message M | --claude PROMPT [--model ID]) [--after ITEM[,ITEM...]]
+                 [--node N|auto] [--branch B] [--commit C] [--cpus n] [--memory GiB] [--disk GiB]
+    an item becomes a queued thread once the items it is after are, and starts once their pull requests merge
+  nexus item show <item>                       an item with its phase, its thread and its brief
+  nexus item approve <item>                    let an item become a thread, in a project whose pipeline waits for approval
+  nexus item cancel <item>                     an item that is not a thread yet, which then never becomes one
   nexus send <thread> <text...> [--steer] [--request-id ID]
     a message to the agent, or typed into the Claude worker's session, which waits for a paused pylon to wake
   nexus watch <thread> [--interval MS]         the conversation, or the Claude worker's transcript, as it grows
@@ -75,6 +83,7 @@ const usage = `nexus ${version}, the Nexus control plane from this Mac
     [--allow-host HOST]... [--login claude|chatgpt]... [--secret NAME:HOST[,HOST]...]...
     [--clear-hosts] [--clear-logins] [--clear-secrets] [--git-name NAME --git-email EMAIL | --clear-git-identity]
     [--auto-review off|review|land]   review each builder's PR on its own, and land it too; land needs a deployer
+    [--pipeline off|approve|start]    turn pipeline items into threads, once the person approves each or on their own
   nexus project add <id> (<repo-url> | --scratch) [--node N|auto] [--branch B] [--cpus n] [--memory GiB] [--disk GiB]
                     [--allow-host HOST]... [--login claude|chatgpt]... [--secret NAME:HOST[,HOST]...]...
   nexus review <thread> [--pr N] [--rounds N] [--land]
@@ -355,6 +364,9 @@ function questionText(q: Question): string {
 }
 
 const autoReviews = { off: null, review: { land: false }, land: { land: true } } as const;
+const pipelines = { off: null, approve: { autoStart: false }, start: { autoStart: true } } as const;
+/** A control plane older than `Project.pipeline` sends none, and has no pipeline. */
+const pipelineText = (p: Project) => p.pipeline == null ? "pipeline off" : p.pipeline.autoStart ? "pipeline starts items" : "pipeline waits for approval";
 /** A control plane older than `Project.autoReview` sends none, and reviews nothing on its own. */
 const autoReviewText = (p: Project) => p.autoReview == null ? "auto review off" : p.autoReview.land ? `auto review and land, for ${p.autoReview.enabledBy}` : `auto review, set by ${p.autoReview.enabledBy}`;
 
@@ -503,6 +515,23 @@ function queuedText(q: QueuedThread): string {
     ...q.lastError === null ? [] : [`last start attempt: ${q.lastError}`],
     ...q.status === "queued" && q.blocked ? [`nexus start-queued ${q.id} starts it now; nexus archive ${q.id} cancels it.`] : [],
     ...q.status === "archived" ? [`nexus unarchive ${q.id} queues it again.`] : [],
+  ].join("\n");
+}
+
+const itemRow = (i: PipelineItem) => [i.id, i.phase.kind, i.phase.why, i.thread ?? "no thread yet", i.project, ago(i.addedAt), i.title];
+
+function itemText(i: PipelineItem): string {
+  return [
+    `${i.id}  ${i.title}`,
+    `project: ${i.project}`,
+    `phase: ${i.phase.kind}, ${i.phase.why}`,
+    `thread: ${i.thread ?? "none yet"}`,
+    `worker: ${i.worker === "claude" ? `Claude worker, model ${i.model ?? "unknown"}` : "Nexus agent"}`,
+    ...i.after.map((id) => `after: ${id}`),
+    ...i.brief === null ? [] : [`brief: ${clip(i.brief.split("\n").find((line) => line.trim() !== "")?.trim() ?? "", 120)}`],
+    `added by ${i.addedBy} ${ago(i.addedAt)}`,
+    ...i.approved === null ? [] : [`approved by ${i.approved.by} ${ago(i.approved.at)}`],
+    ...i.thread === null ? [] : [`nexus show ${i.thread} shows its thread.`],
   ].join("\n");
 }
 
@@ -1138,6 +1167,57 @@ const commands: Readonly<Record<string, Command>> = {
       return { json: t, text: `Started ${t.id} on ${t.project}: ${t.title}${message === undefined ? "" : "\nSent the first message."}` };
     },
   },
+  items: {
+    args: [0, 0],
+    options: { project: { type: "string" }, all: { type: "boolean" } },
+    async run(api, _, v) {
+      const project = str(v, "project");
+      const items = (await api("GET", `/v1/items${project === undefined ? "" : `?project=${encodeURIComponent(project)}`}`) as PipelineItem[]).filter((i) => v.all === true || i.phase.kind !== "cancelled");
+      return { json: items, text: items.length === 0 ? "No pipeline items." : table(items.map(itemRow)) };
+    },
+  },
+  "item add": {
+    args: [0, 0],
+    options: {
+      model: { type: "string" }, claude: { type: "string" }, project: { type: "string" }, title: { type: "string" }, message: { type: "string" }, node: { type: "string" }, branch: { type: "string" }, commit: { type: "string" },
+      cpus: { type: "string" }, memory: { type: "string" }, disk: { type: "string" }, after: { type: "string" },
+    },
+    async run(api, _, v) {
+      const project = str(v, "project");
+      const message = str(v, "message");
+      const claude = str(v, "claude");
+      if (v.model !== undefined && claude === undefined) throw new CliError("invalid", "--model requires --claude");
+      if (message !== undefined && claude !== undefined) throw new CliError("invalid", "--claude and --message are mutually exclusive");
+      if (project === undefined) throw new CliError("invalid", "item add needs --project");
+      if (message === undefined && claude === undefined) throw new CliError("invalid", "item add needs a brief: --message, or --claude for a Claude worker");
+      const optional = Object.fromEntries((["node", "branch", "commit", "claude", "model", "message"] as const).flatMap((key) => v[key] === undefined ? [] : [[key, v[key]]]));
+      const resources = resourcesOf(v);
+      const after = str(v, "after")?.split(",").map((id) => id.trim()).filter((id) => id !== "");
+      const i = await api("POST", "/v1/items", { project, title: str(v, "title") ?? titleOf(message ?? claude!), ...optional, ...resources === undefined ? {} : { resources }, ...after === undefined ? {} : { after } }) as PipelineItem;
+      return { json: i, text: `Added ${i.id} to ${i.project}: ${i.title}. It is ${i.phase.kind}: ${i.phase.why}.` };
+    },
+  },
+  "item show": {
+    args: [1, 1],
+    async run(api, [id]) {
+      const i = await api("GET", `/v1/items/${encodeURIComponent(id!)}`) as PipelineItem;
+      return { json: i, text: itemText(i) };
+    },
+  },
+  "item approve": {
+    args: [1, 1],
+    async run(api, [id]) {
+      const i = await api("POST", `/v1/items/${encodeURIComponent(id!)}/approve`, {}) as PipelineItem;
+      return { json: i, text: `Approved ${i.id}. It is ${i.phase.kind}: ${i.phase.why}.` };
+    },
+  },
+  "item cancel": {
+    args: [1, 1],
+    async run(api, [id]) {
+      const i = await api("POST", `/v1/items/${encodeURIComponent(id!)}/cancel`, {}) as PipelineItem;
+      return { json: i, text: `Cancelled ${i.id}. It will never become a thread.` };
+    },
+  },
   "start-queued": {
     args: [1, 1],
     async run(api, [id]) {
@@ -1193,7 +1273,7 @@ const commands: Readonly<Record<string, Command>> = {
     args: [0, 0],
     async run(api) {
       const projects = await api("GET", "/v1/projects") as Project[];
-      return { json: projects, text: projects.length === 0 ? "No projects." : table(projects.map((p) => [p.id, `node ${p.defaultNode}`, `branch ${p.defaultBranch}`, autoReviewText(p), p.repoUrl ?? "scratch"])) };
+      return { json: projects, text: projects.length === 0 ? "No projects." : table(projects.map((p) => [p.id, `node ${p.defaultNode}`, `branch ${p.defaultBranch}`, autoReviewText(p), pipelineText(p), p.repoUrl ?? "scratch"])) };
     },
   },
   "project edit": {
@@ -1203,7 +1283,7 @@ const commands: Readonly<Record<string, Command>> = {
       "allow-host": { type: "string", multiple: true }, login: { type: "string", multiple: true }, secret: { type: "string", multiple: true },
       "clear-hosts": { type: "boolean" }, "clear-logins": { type: "boolean" }, "clear-secrets": { type: "boolean" },
       "git-name": { type: "string" }, "git-email": { type: "string" }, "clear-git-identity": { type: "boolean" },
-      "auto-review": { type: "string" },
+      "auto-review": { type: "string" }, pipeline: { type: "string" },
     },
     async run(api, [id], v) {
       const patch: Record<string, unknown> = {};
@@ -1225,8 +1305,13 @@ const commands: Readonly<Record<string, Command>> = {
         if (!(auto in autoReviews)) throw new CliError("invalid", "--auto-review takes off, review or land");
         patch.autoReview = autoReviews[auto as keyof typeof autoReviews];
       }
+      const items = str(v, "pipeline");
+      if (items !== undefined) {
+        if (!(items in pipelines)) throw new CliError("invalid", "--pipeline takes off, approve or start");
+        patch.pipeline = pipelines[items as keyof typeof pipelines];
+      }
       const p = await api("PATCH", `/v1/projects/${encodeURIComponent(id!)}`, patch) as Project;
-      return { json: p, text: `Updated project ${p.id}, ${autoReviewText(p)}. Existing threads keep their boot settings and grants; start a new thread to apply them.` };
+      return { json: p, text: `Updated project ${p.id}, ${autoReviewText(p)}, ${pipelineText(p)}. Existing threads keep their boot settings and grants; start a new thread to apply them.` };
     },
   },
   "project add": {

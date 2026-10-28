@@ -143,7 +143,6 @@ test("a queue record is checked as a start is, and freezes the size the project 
   const a = f.thread("th-a");
   const refused = (fn: () => unknown, status: number, message: RegExp) => assert.throws(fn, (err: { status?: number; message: string }) => err.status === status && message.test(err.message));
   refused(() => q.add(f.request(), null, ["th-none"], laptop), 404, /no thread th-none/);
-  refused(() => q.add(f.request(), null, [], laptop), 400, /names no thread/);
   refused(() => q.add(f.request({ project: "nope" }), null, [a], laptop), 404, /no project nope/);
   refused(() => q.add(f.request({ node: "nowhere" }), null, [a], laptop), 400, /no node nowhere/);
   refused(() => q.add(f.request({ commit: "abc" }), null, [a], laptop), 400, /scratch project/);

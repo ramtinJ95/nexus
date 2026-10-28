@@ -1,0 +1,10 @@
+✖ src/cli/nexus.test.ts
+✖ src/control/api.test.ts
+✖ src/control/dashboard.test.ts
+✖ src/control/pipeline.test.ts
+✖ the migration that adds pipeline items turns the pipeline on for project nexus once, and never back on once it is off
+ℹ tests 5
+ℹ pass 0
+ℹ fail 5
+ℹ cancelled 0
+✖ failing tests:

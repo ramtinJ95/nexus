@@ -21,6 +21,7 @@ import { WebSocket } from "ws";
 import { maxStreams, startApi, type ThreadDetail, type ThreadRow } from "./api.ts";
 import type { Question } from "./questions.ts";
 import { threadStarter } from "./threads.ts";
+import { pipeline, type PipelineItem } from "./pipeline.ts";
 import { threadQueue, type QueuedThread } from "./queue.ts";
 import { turnGate } from "./drain.ts";
 import type { AttachTiming } from "./attach.ts";
@@ -70,7 +71,7 @@ const claudeSession = "11111111-2222-4333-8444-555555555501";
 const fixture = (await readFile(new URL("../fixtures/claude-transcript.jsonl", import.meta.url), "utf8")).split("\n").filter((line) => line !== "").map((line) => `${line}\n`);
 const usageLimitRecord = (await readFile(new URL("../fixtures/claude-api-errors.jsonl", import.meta.url), "utf8")).split("\n")[0]! + "\n";
 
-async function setup(t: import("node:test").TestContext, options: { gitIdentity?: { name: string; email: string }; https?: import("./api.ts").ApiOptions["https"]; whois?: import("../tailscale.ts").Whois; deployment?: DeploymentOptions; dotfiles?: typeof dotfiles; streamStallMs?: number; attachTiming?: AttachTiming; closeWaitMs?: number; reviews?: ReviewLoop; images?: (registry: Registry) => ImageRollout; queue?: boolean; usageBackfill?: (registry: Registry) => UsageBackfillJob } = {}) {
+async function setup(t: import("node:test").TestContext, options: { gitIdentity?: { name: string; email: string }; https?: import("./api.ts").ApiOptions["https"]; whois?: import("../tailscale.ts").Whois; deployment?: DeploymentOptions; dotfiles?: typeof dotfiles; streamStallMs?: number; attachTiming?: AttachTiming; closeWaitMs?: number; reviews?: ReviewLoop; images?: (registry: Registry) => ImageRollout; queue?: boolean; pipeline?: boolean; usageBackfill?: (registry: Registry) => UsageBackfillJob } = {}) {
   const registry = openRegistry(join(dir, `${randomUUID()}.db`));
   const images = options.images?.(registry);
   const backfill = options.usageBackfill?.(registry);
@@ -102,7 +103,8 @@ async function setup(t: import("node:test").TestContext, options: { gitIdentity?
   const wake = (n: NodeName) => { woken.push(n); };
   const mirror: ProjectMirror = { setupInputs(p, ref) { reads.push(ref); return read(p, ref); } };
   const startThread = threadStarter({ registry, harness, mirror, dotfiles: options.dotfiles ?? dotfiles, gitIdentity: options.gitIdentity, wake });
-  const queue = options.queue === true ? threadQueue({ registry, startThread, gate: turnGate(() => false), send: (id, text, requestId) => harness.send(id, text, requestId, "followUp") }) : null;
+  const queue = options.queue === true || options.pipeline === true ? threadQueue({ registry, startThread, gate: turnGate(() => false), send: (id, text, requestId) => harness.send(id, text, requestId, "followUp") }) : null;
+  const items = options.pipeline === true ? pipeline({ registry, queue: queue! }) : null;
   const api = await startApi({
     registry, host: "127.0.0.1", port: 0,
     ...(options.https ? { https: options.https } : {}),
@@ -116,6 +118,7 @@ async function setup(t: import("node:test").TestContext, options: { gitIdentity?
     ...(options.deployment === undefined ? {} : { deployment: options.deployment }),
     ...(options.reviews === undefined ? {} : { reviews: options.reviews }),
     ...(queue === null ? {} : { queue }),
+    ...(items === null ? {} : { pipeline: items }),
     ...(images === undefined ? {} : { images }),
     ...(backfill === undefined ? {} : { usageBackfill: backfill }),
     hostnames: new Set(["127.0.0.1"]),
@@ -133,6 +136,7 @@ async function setup(t: import("node:test").TestContext, options: { gitIdentity?
     ...options.closeWaitMs === undefined ? {} : { closeWaitMs: options.closeWaitMs },
   });
   t.after(async () => {
+    await items?.close();
     await queue?.close();
     await api.close();
     await images?.close();
@@ -3105,6 +3109,60 @@ test("a deployer's land names the holds it waives at the commit it confirmed, an
   assert.equal((await land({ head, waive: [held] })).status, 200);
   assert.equal((await land({ head })).status, 200);
   assert.deepEqual(landed, [[s.thread.id, laptop, head, [held]], [s.thread.id, laptop, head, undefined]]);
+});
+
+test("an item is added to a project the pipeline runs for, becomes a queued thread behind the items it is after, and only a person adds, approves or cancels one", async (t) => {
+  const s = await setup(t, { pipeline: true, deployment });
+  assert.equal((await s.call("POST", "/v1/projects", project)).status, 201);
+  assert.equal((await s.call("POST", "/v1/projects", { ...project, id: "other", pipeline: { autoStart: true } })).status, 400, "only an edit turns the pipeline on");
+  assert.equal((await s.call("POST", "/v1/images", image)).status, 201);
+  s.registry.setCurrentImage(image.id as ImageId);
+  const off = await s.call("POST", "/v1/items", { project: "acme", title: "A", message: "Build A." });
+  assert.deepEqual(off, { status: 409, body: { error: "the pipeline does not run for project acme. nexus project edit acme --pipeline start turns it on" } });
+
+  s.callAs("nFIREBAT" as TailnetNodeId);
+  assert.equal((await s.call("PATCH", "/v1/projects/acme", { pipeline: { autoStart: true } })).status, 403, "the control plane cannot turn approvals off");
+  assert.equal((await s.call("POST", "/v1/threads", { project: "acme", title: "X", requestId: "pipeline:it-000000000000" })).status, 400, "an item's request ID is the pipeline's own");
+  s.callAs(laptop);
+  const approving = await s.call("PATCH", "/v1/projects/acme", { pipeline: { autoStart: false } });
+  assert.deepEqual(approving.body.pipeline, { autoStart: false });
+  const a = await s.call("POST", "/v1/items", { project: "acme", title: "A", message: "Build A." });
+  assert.equal(a.status, 201, JSON.stringify(a.body));
+  const item = a.body as PipelineItem;
+  assert.deepEqual(item, {
+    id: item.id, project: "acme", title: "A", addedBy: laptop, addedAt: item.addedAt, after: [], worker: "harness", model: null, brief: "Build A.", thread: null,
+    phase: { kind: "held", why: `project acme waits for the person to approve each item: nexus item approve ${item.id}` }, approved: null,
+  });
+  assert.match(item.id, /^it-[0-9a-f]{12}$/);
+  const b = (await s.call("POST", "/v1/items", { project: "acme", title: "B", claude: "Build B", after: [item.id] })).body as PipelineItem;
+  assert.deepEqual(b.phase, { kind: "planned", why: "waits for A to be queued" });
+  assert.equal((await s.call("POST", "/v1/items", { project: "acme", title: "C", message: "Go.", after: ["it-000000000000"] })).status, 404);
+  assert.equal((await s.call("POST", "/v1/items", { project: "acme", title: "C", message: "Go.", after: [] })).status, 201, "an empty after is nothing ahead");
+  assert.equal((await s.call("POST", "/v1/items", { project: "acme", title: "C", message: "Go.", requestId: "x" })).status, 400, "an item takes no request ID");
+
+  s.callAs("nFIREBAT" as TailnetNodeId);
+  assert.deepEqual(await s.call("POST", `/v1/items/${item.id}/approve`, {}), { status: 403, body: { error: "caller may not approve an item: only a person may, never the control plane, infrastructure nodes or pylons" } });
+  assert.equal((await s.call("POST", "/v1/items", { project: "acme", title: "D", message: "Go." })).status, 403, "the control plane, and so a harness thread, adds no item");
+  assert.equal((await s.call("POST", `/v1/items/${b.id}/cancel`, {})).status, 403);
+  s.callAs(laptop);
+  const approved = await s.call("POST", `/v1/items/${item.id}/approve`, {});
+  assert.equal(approved.status, 200, JSON.stringify(approved.body));
+  assert.deepEqual((approved.body as PipelineItem).approved?.by, laptop);
+  const thread = (approved.body as PipelineItem).thread!;
+  assert.match(thread, /^th-/, "the approval queues it at once");
+  assert.equal(s.registry.queuedThread(thread)?.startedBy, laptop);
+  assert.equal((await s.call("POST", `/v1/items/${item.id}/cancel`, {})).status, 409, "a queued item is cancelled by archiving its thread");
+  assert.equal((await s.call("POST", `/v1/items/${b.id}/approve`, {})).status, 200);
+  const shown = (await s.call("GET", `/v1/items/${b.id}`)).body as PipelineItem;
+  assert.notEqual(shown.thread, null);
+  assert.deepEqual(s.registry.queuedThread(shown.thread!)?.after, [thread], "the second item's thread waits for the first's");
+  assert.equal((await s.call("GET", "/v1/items")).body.length, 3);
+  assert.deepEqual((await s.call("GET", "/v1/items?project=other")).body, []);
+  assert.equal((await s.call("GET", "/v1/items/it-000000000000")).status, 404);
+
+  const offAgain = await s.call("PATCH", "/v1/projects/acme", { pipeline: null });
+  assert.equal(offAgain.body.pipeline, null, "an off pipeline is kept as null, so the migration never turns it on again");
+  assert.equal((await s.call("PATCH", "/v1/projects/acme", { defaultBranch: "trunk" })).body.pipeline, null, "another edit keeps it");
 });
 
 async function withQueue(t: import("node:test").TestContext) {

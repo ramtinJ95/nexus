@@ -14,6 +14,7 @@ import type { Drain, ReleaseReport } from "../deploy/model.ts";
 import type { PrWatchState } from "./pr-watch.ts";
 import type { Question } from "./questions.ts";
 import type { Nudge } from "./nudge.ts";
+import type { ItemId, ItemRecord } from "./pipeline.ts";
 import type { QueuedRecord } from "./queue.ts";
 import type { Placement } from "./placement.ts";
 import { DatabaseSync, type StatementSync } from "node:sqlite";
@@ -351,6 +352,10 @@ const migrations: readonly string[] = [
   // Each builder's nudges toward a pull request. It touches nothing an earlier migration made, so a registry rewound
   // past it applies it again unchanged.
   `CREATE TABLE IF NOT EXISTS nudges (thread TEXT PRIMARY KEY REFERENCES threads (id), record TEXT NOT NULL) STRICT;`,
+  // Pipeline items, and the pipeline on for project nexus, whose items start on their own. A project whose pipeline the
+  // person turned off keeps it as null, so a registry rewound past this applies it again without turning it back on.
+  `CREATE TABLE IF NOT EXISTS pipeline_items (id TEXT PRIMARY KEY, record TEXT NOT NULL) STRICT;
+   UPDATE projects SET record = json_set(record, '$.pipeline', json('{"autoStart":true}')) WHERE id = 'nexus' AND json_type(record, '$.pipeline') IS NULL;`,
 ];
 
 type Row = Record<string, unknown>;
@@ -1138,6 +1143,14 @@ export function openRegistry(path: string, clock = Date.now) {
     startRequest(requestId: string): { thread: ThreadId; body: string } | undefined {
       const row = sql("SELECT thread, body FROM start_requests WHERE request_id = ?").get(requestId);
       return row === undefined ? undefined : { thread: row.thread as ThreadId, body: row.body as string };
+    },
+    items: (): ItemRecord[] => sql("SELECT record FROM pipeline_items ORDER BY rowid").all().map((r) => json<ItemRecord>(r.record)),
+    item(id: ItemId): ItemRecord | undefined {
+      const row = sql("SELECT record FROM pipeline_items WHERE id = ?").get(id);
+      return row === undefined ? undefined : json<ItemRecord>(row.record);
+    },
+    saveItem(record: ItemRecord) {
+      sql("INSERT INTO pipeline_items (id, record) VALUES (?, ?) ON CONFLICT (id) DO UPDATE SET record = excluded.record").run(record.id, JSON.stringify(record));
     },
     queuedThreads: (): QueuedRecord[] => sql("SELECT record FROM queued_threads ORDER BY rowid").all().map((r) => json<QueuedRecord>(r.record)),
     queuedThread,

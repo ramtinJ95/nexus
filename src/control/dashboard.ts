@@ -21,7 +21,7 @@ import type { AssistantMessage, ImageContent, TextContent, UserMessage } from "@
 import type { ConversationView, InboxState, LiveState } from "@earendil-works/pi-durable";
 import { desiredPhase, type ActualState, type DesiredPhase } from "../reconcile.ts";
 import { countedCapacity, type HerdrStatus, type NodeHealth, type NodeName } from "../protocol.ts";
-import { githubTokenGrant, linkedPort, type ProjectId } from "../project.ts";
+import { githubTokenGrant, linkedPort, type Project, type ProjectId } from "../project.ts";
 import { harnessNamed } from "../sessions.ts";
 import type { ThreadDetail, ThreadRow } from "./api.ts";
 import { attentions, needsPerson } from "./attention.ts";
@@ -34,6 +34,7 @@ import { blocks as blocking, findingsOf, landable, phaseNote, roundsSpent, type 
 import { heldBy, holdRule, reservedNames } from "./policy.ts";
 import type { AnswerRefusal, Question } from "./questions.ts";
 import { gib, nodePylons, overcommitted } from "./placement.ts";
+import { itemView, type ItemPhase, type PipelineItem } from "./pipeline.ts";
 import { queuedView, type QueuedThread, type Wait } from "./queue.ts";
 import { breakdownLook, breakdowns, periods, periodStart, tokenColumns, tokenCount, type Period, type UsageBackfill, type UsageTotals } from "./usage.ts";
 
@@ -87,6 +88,7 @@ export function dashboard(options: DashboardOptions): (path: string, query: URLS
       const period = query.get("period") ?? "";
       return ok(usagePage(context(), Object.hasOwn(periods, period) ? period as Period : "7d", (query.get("project") || null) as ProjectId | null));
     }],
+    [/^\/pipeline$/, (_, __, context) => ok(pipelinePage(context()))],
     [/^\/threads\/([^/]+)$/, async (m, query, context) => {
       const thread = registry.thread(m[1]! as ThreadId);
       if (thread === undefined) {
@@ -204,6 +206,7 @@ const iconPaths = {
   plus: "M8 3v10M3 8h10",
   up: "M8 13V3M4 7l4-4 4 4",
   chart: "M3 13.5h10M4.5 11V8M8 11V3.5M11.5 11V6",
+  list: "M5.5 4h8M5.5 8h8M5.5 12h8M2.5 4h.01M2.5 8h.01M2.5 12h.01",
 } as const;
 type IconName = keyof typeof iconPaths;
 const icon = (name: IconName) => html`<svg class="i i-${name}" viewBox="0 0 16 16" aria-hidden="true"><path d="${iconPaths[name]}"/></svg>`;
@@ -262,8 +265,8 @@ interface Shell {
   title: string;
   /** The thread the sidebar marks as open. */
   active?: ThreadId;
-  /** Marks the sidebar's Usage link as the open page. */
-  usage?: boolean;
+  /** The sidebar's link to mark as the open page. */
+  nav?: "usage" | "pipeline";
   main: Html;
   inspector?: Html;
   /** The thread whose visits count as human activity: an open thread's page. */
@@ -288,7 +291,7 @@ function layout(c: Context, page: Shell): Html {
 </head>
 <body>
 <div class="app${page.inspector !== undefined && " has-inspect"}">
-${sidebar(c, page.active, page.usage === true)}
+${sidebar(c, page.active, page.nav)}
 <main class="main" data-poll-ms="${pollMs}"${page.activity !== undefined && html` data-activity="${page.activity}"`}>
 ${page.main}
 </main>
@@ -328,7 +331,7 @@ function closedLabel(threads: readonly Thread[]): string {
   return [archived > 0 && `${archived} archived`, deleted > 0 && `${deleted} deleted`].filter(Boolean).join(", ");
 }
 
-function sidebar(c: Context, active: ThreadId | undefined, usage: boolean): Html {
+function sidebar(c: Context, active: ThreadId | undefined, nav: Shell["nav"]): Html {
   const projects = c.registry.projects();
   // A thread works in its own checkout, as a Jetline workspace does, so its row shows a branch with its state as a badge.
   const row = (t: Thread) => {
@@ -344,7 +347,7 @@ function sidebar(c: Context, active: ThreadId | undefined, usage: boolean): Html
   return html`<aside class="side" aria-label="Threads">
 <div class="side-head"><a class="brand" href="/"><span class="brand-mark" aria-hidden="true">◆</span>nexus</a><a class="btn btn-new" href="/threads/new" data-start>New thread<kbd>N</kbd></a></div>
 <label class="filter"><span aria-hidden="true">⌕</span><input id="filter" type="search" placeholder="Filter threads" aria-label="Filter threads" autocomplete="off"></label>
-<nav class="side-nav" aria-label="Pages"><a class="side-link${usage && " active"}" href="/usage"${usage && html` aria-current="page"`}>${icon("chart")}Usage</a></nav>
+<nav class="side-nav" aria-label="Pages">${([["pipeline", "Pipeline", "list"], ["usage", "Usage", "chart"]] as const).map(([to, label, glyph]) => html`<a class="side-link${nav === to && " active"}" href="/${to}"${nav === to && html` aria-current="page"`}>${icon(glyph)}${label}</a>`)}</nav>
 <nav class="groups" id="side-threads" data-live aria-label="Threads by project">
 ${projects.length === 0 ? html`<p class="empty side-empty">No projects yet.</p>` : projects.map((p) => {
   const { open, closed } = threadsOf(c, p.id);
@@ -553,7 +556,7 @@ function usagePage(c: Context, period: Period, project: ProjectId | null): Html 
   const seg = (label: string, to: string, current: boolean) => html`<a class="seg-tab" href="${to}"${current && html` aria-current="page"`}>${label}</a>`;
   return layout(c, {
     title: "Usage",
-    usage: true,
+    nav: "usage",
     main: html`<header class="bar"><button type="button" class="icon-btn menu" data-open="side" aria-label="Threads">☰</button><div class="crumb"><h1>Usage</h1></div></header>
 <div class="scroll"><div class="page usage" id="usage" data-live>
 <div class="usage-filters">
@@ -572,6 +575,47 @@ ${report.total.calls === 0 ? html`<p class="empty">No model calls were counted i
 ${usageTable(`usage-by-${b}`, breakdownLook[b].key, report.by[b]!.map((r) => b === "project" ? { ...r, key: html`<a class="link" href="${href(period, r.key)}">${r.key}</a>` } : r))}
 </section>`)}
 </div></div>`,
+  });
+}
+
+const phaseTone: Record<ItemPhase["kind"], Tone> = {
+  planned: "idle", queued: "idle", building: "work", reviewing: "work", landing: "busy", landed: "ok", held: "bad", archived: "muted", cancelled: "muted",
+};
+const pipelineSetting = (p: Project) => p.pipeline == null ? "The pipeline is off for this project, so its items stay planned."
+  : p.pipeline.autoStart ? "Each item becomes a queued thread on its own once the items it is after are queued." : "Each item waits for the person to approve it before it becomes a queued thread.";
+
+/** Each project's items in the order they were added, with the phase their records put them in. */
+function pipelinePage(c: Context): Html {
+  const items = c.registry.items().map((i) => itemView(c.registry, i));
+  const title = (id: string) => items.find((i) => i.id === id)?.title ?? id;
+  const projects = c.registry.projects().filter((p) => p.pipeline != null || items.some((i) => i.project === p.id));
+  const actions = (i: PipelineItem, p: Project) => i.thread === null && i.phase.kind !== "cancelled" && [
+    p.pipeline?.autoStart === false && i.approved === null && html`<button type="button" class="btn btn-xs" data-action="approve-item" data-item="${i.id}">Approve</button>`,
+    html`<button type="button" class="btn btn-xs btn-ghost" data-action="cancel-item" data-item="${i.id}" data-confirm="Cancel ${i.title}? It never becomes a thread.">Cancel</button>`,
+  ];
+  return layout(c, {
+    title: "Pipeline",
+    nav: "pipeline",
+    main: html`<header class="bar"><button type="button" class="icon-btn menu" data-open="side" aria-label="Threads">☰</button><div class="crumb"><h1>Pipeline</h1></div></header>
+<div class="scroll"><div class="page pipeline" id="pipeline" data-live>
+${projects.length === 0 ? html`<p class="empty">No project runs the pipeline. <code>nexus project edit &lt;id&gt; --pipeline start</code> turns it on, and <code>nexus item add</code> lines up an item.</p>` : projects.map((p) => {
+  const own = items.filter((i) => i.project === p.id);
+  return html`<section aria-labelledby="pipeline-${p.id}">
+<div class="ov-head"><h2 id="pipeline-${p.id}">${p.id}</h2><span class="dim">${pipelineSetting(p)}</span></div>
+${own.length === 0 ? html`<p class="empty">No items. <code>nexus item add --project ${p.id}</code> lines one up.</p>` : html`<table class="ov ov-items">
+<thead><tr><th>Item</th><th>Phase</th><th class="wide">After</th><th class="wide">Thread</th><th class="ov-act"></th></tr></thead>
+<tbody>${own.map((i) => html`<tr data-item="${i.id}" data-phase="${i.phase.kind}">
+<td><span class="ov-title">${dot(phaseTone[i.phase.kind], i.phase.kind)}<span>${i.title}</span></span><code class="dim">${i.id}</code></td>
+<td>${state(i.phase.kind, phaseTone[i.phase.kind])}<span class="ov-why">${i.phase.why}</span></td>
+<td class="wide">${i.after.length === 0 ? html`<span class="dim">nothing</span>` : i.after.map((id) => html`<span class="ov-wait">${title(id)}</span>`)}</td>
+<td class="wide">${i.thread === null ? html`<span class="dim">none yet</span>` : html`<a class="link" href="/threads/${i.thread}">${c.registry.thread(i.thread)?.title ?? c.registry.queuedThread(i.thread)?.title ?? i.thread}</a>`}</td>
+<td>${actions(i, p)}</td>
+</tr>`)}</tbody>
+</table>`}
+</section>`;
+})}
+</div></div>
+<div class="dock"><p id="action-error" class="error" role="alert" hidden></p></div>`,
   });
 }
 

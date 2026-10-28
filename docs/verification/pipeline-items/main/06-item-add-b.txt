@@ -1,0 +1,3 @@
+$ nexus item add --project wave --title "B: greet in French, after A" --message "B: greet in French, after A. Commit, push branch feat-b and open a pull request." --json
+[stderr] {"error":"unknown command item","kind":"invalid","status":null}
+[exit 64]

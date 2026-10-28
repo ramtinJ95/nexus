@@ -1,6 +1,7 @@
 /**
  * Queued threads: a thread recorded now, with everything its start needs, that starts once each thread it is queued
- * after has merged its pull request, whether the review loop landed it or someone merged it outside the loop.
+ * after has merged its pull request, whether the review loop landed it or someone merged it outside the loop. One
+ * queued after no thread, as a pipeline item with no item ahead of it is, starts on the next pass.
  *
  * A queued thread has no `threads` row, so the planner, PR watch, the review loop and placement never see it. Its
  * record keeps the ID the thread gets, and the transaction that inserts the thread's row marks the record started,
@@ -65,7 +66,7 @@ export interface QueuedThread {
 }
 
 export interface ThreadQueue {
-  /** Validates and records, with `key` if given; throws HttpError. Does not start it; the route calls poll() after. */
+  /** Validates and records, with `key` if given; throws HttpError. Does not start it; the caller calls poll() after. */
   add(request: StartRequest, message: string | null, after: readonly string[], caller: string, key?: StartKey): QueuedRecord;
   /**
    * Records startNow, then starts it now and returns the thread, or throws the start's error. The thread then stays
@@ -198,7 +199,6 @@ export function threadQueue(options: {
       if (message !== null && request.claude !== undefined) throw new HttpError(400, "message is for a Nexus agent thread. A Claude worker's first prompt is its claude");
       const project = checkStart(registry, request);
       const ids = [...new Set(after)] as ThreadId[];
-      if (ids.length === 0) throw new HttpError(400, "after names no thread");
       for (const id of ids) {
         const t = registry.thread(id);
         if (t === undefined && registry.queuedThread(id) === undefined) throw new HttpError(404, `no thread ${id}`);

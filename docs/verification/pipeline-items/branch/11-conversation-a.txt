@@ -1,0 +1,5 @@
+$ nexus conversation th-c3c6053e0d94
+> A: greet by name. Commit, push branch feat-a and open a pull request.
+
+scripted answer after user
+[exit 0]
