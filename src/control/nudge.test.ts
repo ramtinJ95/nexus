@@ -42,11 +42,12 @@ function fixture(t: import("node:test").TestContext) {
   const prs = new Map<string, number[]>();
   const finds: string[] = [];
   let findFails = false;
+  let searching = () => {};
   const logs: string[] = [];
   let now = 1_000_000;
   const nudger = builderNudger({
     registry, inbox, harness: fake.harness, now: () => now, log: (message) => logs.push(message),
-    github: { async find(r, branch, state) { finds.push(`${r} ${branch} ${state}`); if (findFails) throw new Error("401 Authorization: Bearer secret"); return prs.get(branch) ?? []; } },
+    github: { async find(r, branch, state) { finds.push(`${r} ${branch} ${state}`); searching(); if (findFails) throw new Error("401 Authorization: Bearer secret"); return prs.get(branch) ?? []; } },
   });
   const claudes = new Set<ThreadId>();
   const claudeSeq = new Map<ThreadId, number>();
@@ -70,9 +71,10 @@ function fixture(t: import("node:test").TestContext) {
     }
     return thread.id;
   }
-  function transcript(id: ThreadId, entries: ClaudeEntry[]) {
+  /** A read of the worker's transcript. `reset` replaces every entry kept so far, as a read of a new session does. */
+  function transcript(id: ThreadId, entries: ClaudeEntry[], reset = false) {
     const from = claudeSeq.get(id)!;
-    registry.appendClaudeRead(id, { session, from: { ...transcriptStart, offset: from }, entries, cursor: { ...transcriptStart, offset: from + 1 }, reset: false, readAt: now });
+    registry.appendClaudeRead(id, { session, from: { ...transcriptStart, offset: from }, entries, cursor: { ...transcriptStart, offset: from + 1 }, reset, readAt: now });
     claudeSeq.set(id, from + 1);
   }
   /** The agent answers and its turn ends now. */
@@ -98,6 +100,7 @@ function fixture(t: import("node:test").TestContext) {
     get now() { return now; },
     set outcome(o: "sent" | "blocked") { outcome = o; },
     set findFails(v: boolean) { findFails = v; },
+    set searching(v: () => void) { searching = v; },
     branch(id: ThreadId, ref: string) { registry.apply({ record: "output", pylonId: registry.thread(id)!.pylonId, kind: "branch", ref }); },
     link(id: ThreadId, number: number) {
       registry.savePrWatch(id, { links: [{ pr: { repo, number, title: "Add the cache", url: `https://github.com/${repo}/pull/${number}`, state: "open", checks: "none", review: "none", conflict: false }, seen: [], failed: false }], commentWakes: 0, pending: null, error: null });
@@ -221,7 +224,7 @@ test("the person writing after the first reply leaves a builder alone, and takes
   assert.equal(f.registry.attention(held), "decision");
   await f.personWrites(held, "I'll take it from here.");
   await f.nudger.poll();
-  assert.equal(f.registry.nudge(held), null);
+  assert.deepEqual(f.registry.nudge(held), { state: "left-alone" });
   assert.notEqual(f.registry.attention(held), "decision", "the person's message ends the hold while the turn it started runs");
   f.registry.recordActivity(held, { agentTurnRunning: false });
   f.turn(held);
@@ -256,7 +259,54 @@ test("a Claude worker builder is nudged by typing into its session, and a person
   f.tick(graceMs);
   await f.nudger.poll();
   assert.equal(f.typed.length, 2);
-  assert.equal(f.registry.nudge(theirs), null);
+  assert.deepEqual(f.registry.nudge(theirs), { state: "left-alone" });
+  f.transcript(theirs, [{ kind: "prompt", at: f.now, text: "build the cache", from: "person" }], true);
+  assert.ok(!f.registry.claudeEntries(theirs).some((e) => e.kind === "prompt" && e.text.startsWith("Wait for me")));
+  f.tick(1_000);
+  f.turn(theirs);
+  f.tick(graceMs);
+  await f.nudger.poll();
+  assert.equal(f.typed.length, 2, "it stays the person's after the transcript that showed their message is gone");
+});
+
+test("a thread the person took over is never searched on GitHub again", async (t) => {
+  const f = fixture(t);
+  const id = await f.add("th-1");
+  f.branch(id, "origin/nexus/cache");
+  f.turn(id);
+  await f.personWrites(id, "Let me look at it first.");
+  f.registry.recordActivity(id, { agentTurnRunning: false });
+  f.tick(1_000);
+  f.turn(id);
+  for (let i = 0; i < 3; i++) {
+    f.tick(graceMs);
+    await f.nudger.poll();
+  }
+  assert.deepEqual(f.finds, []);
+  assert.deepEqual(f.nudges(), []);
+});
+
+test("a pull request the PR watch links while GitHub is searched gets no nudge", async (t) => {
+  const f = fixture(t);
+  const id = await f.add("th-1");
+  f.branch(id, "origin/nexus/cache");
+  f.searching = () => f.link(id, 12);
+  f.turn(id);
+  f.tick(graceMs);
+  await f.nudger.poll();
+  assert.deepEqual(f.nudges(), []);
+});
+
+test("a Claude worker stopped on its usage limit is not nudged", async (t) => {
+  const f = fixture(t);
+  const id = await f.add("th-claude", { claude: true });
+  f.transcript(id, [{ kind: "notice", at: f.now, tone: "error", text: "You've hit your session limit", usageLimit: { resetsAt: null } }]);
+  f.registry.recordReply(id, f.now);
+  assert.notEqual(f.registry.thread(id)!.usageLimit, undefined);
+  f.tick(graceMs);
+  await f.nudger.poll();
+  assert.deepEqual(f.typed, []);
+  assert.equal(f.registry.attention(id), "limited");
 });
 
 test("a nudge the session could not take yet saves nothing and is sent again under the same request ID", async (t) => {

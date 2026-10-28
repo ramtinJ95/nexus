@@ -2,8 +2,8 @@
  * Nudges a builder whose turn ended short of a pull request, in a project that reviews its builders' pull requests on
  * its own. Each stalled turn gets one fixed message under a request ID of the thread and the turn's end, which the
  * inbox never delivers twice, so a pass after a crash between the send and its record sends nothing new. A third
- * stalled turn after two nudges hands the thread to the person through its `decision` attention. A pull request, or
- * the person writing to the thread, ends it.
+ * stalled turn after two nudges hands the thread to the person through its `decision` attention. A pull request ends
+ * it, and the person writing to the thread leaves the thread alone for good.
  */
 import type { HarnessHost } from "../harness/host.ts";
 import { singleFlight } from "../single-flight.ts";
@@ -26,7 +26,12 @@ export type Nudge =
    * GitHub found a pull request on the thread's branches after the turn that ended at `turn`, which the PR watch has
    * not linked yet. It may never link one that merged or closed first, so the turn is not searched again.
    */
-  | { state: "opened"; turn: number };
+  | { state: "opened"; turn: number }
+  /**
+   * The person wrote to the thread after its first reply, which makes it theirs for good. It is kept, since the
+   * transcript that showed the message may drop it.
+   */
+  | { state: "left-alone" };
 
 /** A branch pushed and a pull request opened just before the turn ended reach the registry's outputs and GitHub's search within it. */
 const turnGraceMs = 60_000;
@@ -68,18 +73,25 @@ export function builderNudger(options: { registry: Registry; github: Pick<GitHub
     return false;
   }
 
+  const hasPullRequest = (t: Thread) => (registry.prWatch(t.id)?.links.length ?? 0) > 0 || registry.review(t.id) !== null;
+
   async function judge(t: Thread) {
     const record = registry.nudge(t.id);
+    if (record?.state === "left-alone") return;
     const clear = () => { if (record !== null) registry.saveNudge(t.id, null); };
+    const leaveAlone = () => registry.saveNudge(t.id, { state: "left-alone" });
     const repo = builderRepo(t);
-    if (repo === null || (registry.prWatch(t.id)?.links.length ?? 0) > 0 || registry.review(t.id) !== null) return clear();
+    if (repo === null || hasPullRequest(t)) return clear();
+    // A turn its usage limit stopped did not stall, and the next turn ends the limit.
+    if (t.usageLimit !== undefined) return;
     const turn = t.lastReplyAt;
     if (record?.state === "person") {
       // The person's message starts a turn, so only a thread that worked since the hold can have one.
-      if ((t.working || (turn ?? 0) > record.turn) && await personWrote(t)) clear();
+      if ((t.working || (turn ?? 0) > record.turn) && await personWrote(t)) leaveAlone();
       return;
     }
     if (t.working || turn === null || now() - turn < graceMs || (record !== null && record.turn >= turn)) return;
+    if (await personWrote(t)) return leaveAlone();
     try {
       if (await opened(t, repo)) return registry.saveNudge(t.id, { state: "opened", turn });
     } catch (err) {
@@ -87,10 +99,9 @@ export function builderNudger(options: { registry: Registry; github: Pick<GitHub
       log(`${t.id}: nudge could not search GitHub for its pull request and will retry (${(err as Error).name})`);
       return;
     }
-    if (await personWrote(t)) return clear();
-    // The awaits above may have let a turn start, or an archive in.
+    // The awaits above may have let a turn start, a pull request link, or an archive in.
     const fresh = registry.thread(t.id);
-    if (fresh === undefined || builderRepo(fresh) === null || fresh.working || fresh.lastReplyAt !== turn) return;
+    if (fresh === undefined || builderRepo(fresh) === null || hasPullRequest(fresh) || fresh.usageLimit !== undefined || fresh.working || fresh.lastReplyAt !== turn) return;
     const count = record?.state === "nudged" ? record.count : 0;
     if (count >= maxNudges) return registry.saveNudge(t.id, { state: "person", turn });
     if (await inbox(fresh, { id: `nudge:${t.id}:${turn}`, text, sender: "nudge" }) === "delivered") {
