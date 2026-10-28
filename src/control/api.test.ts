@@ -3319,14 +3319,13 @@ test("a person answers a question, a deployer question needs a deployer, and no 
   assert.deepEqual(after.questions.map((q) => [q.id, q.answer?.option, q.answer?.by]), [["qn-deployer", "Rebuild", laptop], ["qn-person", "Not now", phone]]);
 });
 
-test("without deployment options a person still answers a person question, and nobody a deployer question", async (t) => {
+test("without deployment options the control node is unknown, so no one answers a question", async (t) => {
   const s = await withThread(t);
   for (const answerer of ["person", "deployer"] as const) {
     s.registry.askQuestion({ id: `qn-${answerer}`, thread: s.thread.id, text: "Go?", options: ["Yes", "No"], reserved: null, answerer, askedAt: 1 });
   }
-  s.callAs("nFIREBAT" as TailnetNodeId);
-  assert.equal((await s.call("POST", "/v1/questions/qn-person/answer", { option: "Yes" })).status, 403, "a registry node is no person");
-  s.callAs(laptop);
-  assert.equal((await s.call("POST", "/v1/questions/qn-person/answer", { option: "Yes" })).status, 200);
-  assert.equal((await s.call("POST", "/v1/questions/qn-deployer/answer", { option: "Yes" })).status, 403);
+  for (const caller of [laptop, "nFIREBAT" as TailnetNodeId]) {
+    s.callAs(caller);
+    for (const id of ["qn-person", "qn-deployer"]) assert.equal((await s.call("POST", `/v1/questions/${id}/answer`, { option: "Yes" })).status, 403, `${caller} answered ${id}`);
+  }
 });

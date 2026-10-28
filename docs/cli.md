@@ -927,7 +927,7 @@ A question is something a thread asks the person, with a fixed set of answers. T
 | `askedAt` | `number` | When it was asked |
 | `answer` | `{ option: string, by: string, at: number } \| null` | The option chosen, the tailnet node ID of the device that chose it, and when. Null until it is answered |
 
-`POST /v1/questions/<id>/answer` with `{"option": string}` answers it, and answers 200 with the `Question` as stored. The answerer is always the caller, so the body has no other field. Only a person's device answers: an allowed caller that is neither the control node nor any node's tailnet identity, since a pylon's requests carry its node's. A `deployer` question also needs a deployer, as [`deploy`](#deployments-0130) does. The route answers:
+`POST /v1/questions/<id>/answer` with `{"option": string}` answers it, and answers 200 with the `Question` as stored. The answerer is always the caller, so the body has no other field. Only a person's device answers: an allowed caller that is neither the control node nor any node's tailnet identity, since a pylon's requests carry its node's. A `deployer` question also needs a deployer, as [`deploy`](#deployments-0130) does. A control plane with no deployment settings does not know its own node, so it refuses every answer. The route answers:
 
 | Status | When | Error |
 |---|---|---|

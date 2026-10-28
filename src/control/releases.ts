@@ -18,9 +18,12 @@ export const reportSchema = z.strictObject({
   reason: z.string().max(20_000).nullable(),
 });
 
-/** Whether the caller is a person's device: neither the control node nor a node, whose pylons call as their node. */
+/**
+ * Whether the caller is a person's device: neither the control node nor a node, whose pylons call as their node. Without
+ * deployment options the control node is unknown, so no caller is.
+ */
 export function isPerson(registry: Registry, options: DeploymentOptions | undefined, caller: TailnetNodeId): boolean {
-  return caller !== options?.self && !registry.nodes().some((n) => n.tailnetNodeId === caller);
+  return options !== undefined && caller !== options.self && !registry.nodes().some((n) => n.tailnetNodeId === caller);
 }
 export function canDeploy(registry: Registry, options: DeploymentOptions | undefined, caller: TailnetNodeId): boolean {
   return options !== undefined && options.deployers.has(caller) && isPerson(registry, options, caller);
