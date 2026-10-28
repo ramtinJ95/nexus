@@ -2,7 +2,8 @@
  * The control plane's one pi-durable harness. It runs inside the control-plane process, over one SQLite file
  * that only this process opens, because pi-durable has no cross-process locking. Each thread is one
  * ownerless conversation whose `nexus.thread` document names its pylon. The control plane addresses threads
- * by ID and never imports pi-durable itself.
+ * by ID and never imports pi-durable itself. A judgment is an ownerless conversation too, with no thread, no
+ * pylon, no tools and no extensions, which the control plane addresses by its conversation ID.
  *
  * After a crash, opening the same file resumes every unfinished run. A tool call that was in flight is not
  * rerun: the model gets pi-durable's `interrupted` result instead.
@@ -11,7 +12,7 @@
  * and its transcript stays in the file.
  */
 import { BACKGROUND_CONTEXT as context } from "@earendil-works/chord/context";
-import { createRegistry, Harness, type ConversationId, type ConversationWatch, type Cursor, type EntryId, type ModelRef, type Submission } from "@earendil-works/pi-durable";
+import { createRegistry, Harness, LiveDoc, type ConversationId, type ConversationWatch, type Cursor, type EntryId, type ModelRef, type Submission } from "@earendil-works/pi-durable";
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
 import { CodingTools } from "@earendil-works/pi-durable/tools";
 import type { Models } from "@earendil-works/pi-ai/models";
@@ -81,6 +82,17 @@ export interface HarnessHost {
    * thread's conversation is still in storage, so it is read too.
    */
   usage(conversationId: ConversationId, after: number | null): Promise<{ calls: AgentCall[]; last: number | null }>;
+  /**
+   * Creates a judgment's conversation and returns its ID. It has no tools, no extensions and no cwd, so its model can
+   * reach nothing, and no `nexus.thread` document, so it has no pylon. Save the ID once this returns: a crash in between
+   * leaves an empty conversation that is never sent a brief, so it never calls a model.
+   */
+  startJudgment(): Promise<ConversationId>;
+  /** A retry with the same `requestId` returns the first submission. */
+  sendJudgment(conversationId: ConversationId, brief: string, requestId: string): Promise<void>;
+  /** The text of each of the judgment's answers, oldest first, once its run has ended. Null while it runs. */
+  judgmentReplies(conversationId: ConversationId): Promise<string[] | null>;
+  abortJudgment(conversationId: ConversationId): Promise<void>;
   readonly activity: HarnessActivity;
   close(): Promise<void>;
 }
@@ -126,6 +138,12 @@ export async function openHarnessHost(options: HarnessHostOptions): Promise<Harn
     const id = conversations.get(threadId);
     const found = id === undefined ? undefined : await harness.conversation(id, context);
     if (found === undefined) throw new Error(`the harness has no conversation for thread ${threadId}`);
+    return found;
+  }
+
+  async function judgment(id: ConversationId) {
+    const found = await harness.conversation(id, context);
+    if (found === undefined) throw new Error(`the harness has no judgment conversation ${id}`);
     return found;
   }
 
@@ -181,6 +199,30 @@ export async function openHarnessHost(options: HarnessHostOptions): Promise<Harn
         cursor = page.next;
       } while (cursor !== undefined);
       return { calls, last };
+    },
+    async startJudgment() {
+      return (await harness.createConversation({ ownership: { kind: "ownerless" }, agent: { model: options.model, extensions: [], tools: [] } }, context)).id;
+    },
+    async sendJudgment(id, brief, requestId) {
+      await (await judgment(id)).submit({ type: "input", content: brief, requestId }, context);
+    },
+    async judgmentReplies(id) {
+      const found = await judgment(id);
+      // A submit starts the run in the commit that admits it, so a run that is gone has ended.
+      if (await found.commit(async (tx) => (await tx.doc(LiveDoc, id)).run !== undefined, context)) return null;
+      const replies: string[] = [];
+      let cursor: Cursor | undefined;
+      do {
+        const page = await found.entries({ order: "ascending" }, 500, cursor, context);
+        for (const m of page.items.flatMap((entry) => entry.model ?? [])) {
+          if (m.role === "assistant") replies.push(m.content.flatMap((c) => c.type === "text" ? [c.text] : []).join(""));
+        }
+        cursor = page.next;
+      } while (cursor !== undefined);
+      return replies;
+    },
+    async abortJudgment(id) {
+      await (await judgment(id)).abort(context);
     },
     async deleteThread({ threadId, pylonId }) {
       await (await conversation(threadId)).abort(context);
