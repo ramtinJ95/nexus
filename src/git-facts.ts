@@ -4,6 +4,8 @@ import type { Guest } from "./backend.ts";
 import type { GitFacts } from "./protocol.ts";
 import { checkoutDir } from "./sessions.ts";
 
+/** How long the probe reuses a pylon's git read, so a snapshot holds the branches pushed that long before it was taken. */
+export const gitPollMs = 60_000;
 const helper = readFileSync(new URL("./git-facts.py", import.meta.url), "utf8");
 const hash = z.string().regex(/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/);
 const schema = z.strictObject({
