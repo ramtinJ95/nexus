@@ -105,6 +105,22 @@ test("a pylon's process that exits mid-read, or whose files refuse, is not count
   assert.deepEqual(health.pylons, [{ pylonId: "pylon-th-aaaaaaaaaaaa", processes: 1, cpuPercent: 0, residentGiB: kib(102400) }]);
 });
 
+test("a pylon whose controller cannot be read at the end of the sample is not listed, though its children can be", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "nexus-host-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  await cp(join(fixtures, "hwmon"), root, { recursive: true });
+  failReads(t, root, { "proc/4100/status": "ESRCH" });
+  let clock = 0;
+  const wait = async () => {
+    clock += 1_000;
+    await rm(join(root, "proc", "5000"), { recursive: true });
+  };
+  const pylons = [{ pylonId: "pylon-th-aaaaaaaaaaaa" as PylonId, pid: 4100 }, { pylonId: "pylon-th-bbbbbbbbbbbb" as PylonId, pid: 5000 }, { pylonId: "pylon-th-cccccccccccc" as PylonId, pid: 4122 }];
+  const health = await readNodeHealth(node, { root, storage: root, pylons, sampleMs: 1000, wait, now: () => clock });
+  assert.deepEqual(health.pylons, [{ pylonId: "pylon-th-cccccccccccc", processes: 2, cpuPercent: 0, residentGiB: 4 }],
+    "a controller whose status fails, and one whose stat fails in the second sample, leave their pylons out");
+});
+
 test("load or memory that the host has but cannot read fails the health, and names the reading", async (t) => {
   failReads(t, fixtures, { "hwmon/proc/meminfo": "EIO", "thermal/proc/loadavg": "EBUSY" });
   await assert.rejects(readNodeHealth(node, { root: join(fixtures, "hwmon"), storage: fixtures, pylons: null, sampleMs: 0 }), /^Error: cannot read the node's memory: EIO: read '.*\/proc\/meminfo'$/);
