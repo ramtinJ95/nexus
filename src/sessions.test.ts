@@ -1051,6 +1051,7 @@ test("a sessions file is read as the sessions it records, without fields Nexus d
     null, [], { ...file, version: 2 }, { ...file, recordedAt: "" }, { ...file, sessions: null }, { ...file, failed: undefined },
     { ...file, sessions: [{ ...shell, harness: "codex" }] }, { ...file, sessions: [{ ...shell, title: "" }] }, { ...file, sessions: [{ ...shell, cwd: 1 }] }, { ...file, sessions: [{ ...shell, herdrPane: undefined }] },
     { ...file, sessions: [{ ...claude, model: "" }] }, { ...file, sessions: [{ ...shell, harnessSessionId: "" }] }, { ...file, sessions: [null] },
+    { ...file, sessions: [{ ...shell, harness: "toString" }] }, { ...file, sessions: [{ ...shell, harness: "constructor" }] },
     { ...file, failed: [{ ...failed, inPane: "no" }] }, { ...file, failed: [{ ...failed, message: "" }] }, { ...file, failed: [{ ...failed, record: null }] },
   ];
   for (const value of bad) assert.throws(() => pausedSessionsIn(JSON.stringify(value)), Error, JSON.stringify(value));
@@ -1085,4 +1086,16 @@ test("a Herdr reply without the fields Nexus reads rejects, and an error reply n
     await assert.rejects(close({ exitCode: 1, output: `${JSON.stringify({ id: "cli:1", error })}\n` }), (err: Error) => err.name === "Error", JSON.stringify(error));
   }
   await assert.rejects(close({ exitCode: 0, output: "[1]\n" }), Error);
+});
+
+test("a prompted launch waits on the shell_pid Herdr gave, whatever number it is", async () => {
+  const pylon = launchPylon();
+  const guest = pylon.probe();
+  const exec = guest.exec.bind(guest);
+  guest.exec = async (argv, options) => {
+    const reply = await exec(argv, options);
+    return argv[3] === "pane" && argv[4] === "process-info" ? { ...reply, output: reply.output.replace('"shell_pid":100', '"shell_pid":1e400') } : reply;
+  };
+  assert.equal(await openSession(guest, prompted), "w1:p1");
+  assert.ok(pylon.execs.some((argv) => argv[3] === "shell-ready" && argv[4] === "Infinity"));
 });
