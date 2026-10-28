@@ -401,6 +401,10 @@ ${image === null && html`<p class="error">No image is current yet, so a new pylo
 <input id="start-model" name="model" autocomplete="off" placeholder="claude-opus-5-5">
 <p class="hint">Opus 5.5 unless you name another.</p>
 </div>
+<div id="start-harness-fields" hidden>
+<label class="check"><input type="checkbox" id="start-planning" name="planning" value="true" disabled> Planning thread</label>
+<p class="hint">It plans with you and proposes items. Each becomes a card here that you accept into the pipeline or reject, as <code>nexus start --plan</code> does.</p>
+</div>
 <label for="start-title" id="start-title-label">Title (optional)</label>
 <input id="start-title" name="title" autocomplete="off" placeholder="The prompt's first line">
 <fieldset class="seg"><legend>Project</legend>
@@ -701,7 +705,7 @@ function threadPage(c: Context, d: ThreadDetail, node: NodeRecord, view: AgentVi
     ...(open ? { activity: t.id } : {}),
     main: html`<header class="bar" id="bar" data-live>
 <button type="button" class="icon-btn menu" data-open="side" aria-label="Threads">☰</button>
-<div class="crumb"><a class="crumb-p" href="/">${t.project}</a><span class="sep" aria-hidden="true">/</span><h1>${t.title}</h1></div>
+<div class="crumb"><a class="crumb-p" href="/">${t.project}</a><span class="sep" aria-hidden="true">/</span><h1>${t.title}</h1>${d.planning === true && html` <span class="tag" id="planning" title="Its proposed items become cards you accept or reject">planning</span>`}</div>
 <span class="chip chip-${tone}">${dot(tone)}<span class="chip-label">${label}</span></span>
 ${actions.length > 0 && html`<div class="bar-actions" id="thread-actions">${actions}</div><button type="button" class="icon-btn more" data-open="actions" aria-label="Thread actions" aria-controls="thread-actions">⋯</button>`}
 </header>

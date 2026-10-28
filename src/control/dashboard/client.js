@@ -378,8 +378,10 @@ function updateStartHint() {
 function syncWorker(form) {
   const claude = form.elements.worker.value === "claude";
   form.querySelector("#start-claude-fields").hidden = !claude;
+  form.querySelector("#start-harness-fields").hidden = claude;
   form.elements.claude.disabled = !claude;
   form.elements.model.disabled = !claude;
+  form.elements.planning.disabled = claude;
   form.elements.title.required = !claude;
   form.elements.title.placeholder = claude ? "The prompt's first line" : "What should this thread do?";
   form.querySelector("#start-title-label").textContent = claude ? "Title (optional)" : "Title";
@@ -435,7 +437,7 @@ function startState() {
   const form = document.getElementById("start");
   if (form === null) return null;
   const project = form.querySelector("input[name=project]:checked")?.value ?? null;
-  return { form, project, worker: form.elements.worker.value, title: form.elements.title.value, claude: form.elements.claude.value, model: form.elements.model.value, node: form.elements.node.value, branch: form.elements.branch.value,
+  return { form, project, worker: form.elements.worker.value, title: form.elements.title.value, claude: form.elements.claude.value, model: form.elements.model.value, planning: form.elements.planning.checked, node: form.elements.node.value, branch: form.elements.branch.value,
     cpus: form.elements.cpus.value, memoryGiB: form.elements.memoryGiB.value, diskGiB: form.elements.diskGiB.value };
 }
 function restoreStart(saved) {
@@ -446,6 +448,7 @@ function restoreStart(saved) {
   form.elements.title.value = saved.title;
   form.elements.claude.value = saved.claude;
   form.elements.model.value = saved.model;
+  form.elements.planning.checked = saved.planning;
   form.elements.branch.value = saved.branch;
   for (const field of ["cpus", "memoryGiB", "diskGiB"]) form.elements[field].value = saved[field];
   if ([...form.elements.node.options].some((o) => o.value === saved.node)) form.elements.node.value = saved.node;
@@ -467,6 +470,7 @@ document.addEventListener("submit", async (event) => {
   const resources = Object.fromEntries(Object.entries({ cpus, memoryGiB, diskGiB }).flatMap(([key, value]) => value === undefined ? [] : [[key, Number(value)]]));
   if (Object.keys(resources).length > 0) body.resources = resources;
   if (body.claude !== undefined && body.title === undefined) body.title = titleOf(body.claude);
+  if (body.planning !== undefined) body.planning = true;
   form.querySelector("button[type=submit]").disabled = true;
   try {
     const thread = await api("POST", "/v1/threads", body);
