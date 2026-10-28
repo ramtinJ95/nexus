@@ -1,0 +1,83 @@
+{
+  "setup": {
+    "sqlReads": 101973,
+    "sqlWrites": 476,
+    "calls": {
+      "row": 704,
+      "detail": 266,
+      "followEvents": 0,
+      "sidebar": 4,
+      "memoryLine": 4,
+      "home": 2,
+      "threadPage": 2,
+      "withSessions": 1088,
+      "updateAttention": 40,
+      "eventBatch": 4,
+      "markSeen": 1
+    },
+    "requests": {
+      "hidden home: GET /": 1,
+      "hidden home: GET /v1/threads": 4,
+      "hidden thread page: GET /threads/<thread>": 1,
+      "hidden thread page: POST /v1/threads/<thread>/activity": 1,
+      "hidden thread page: GET /v1/threads": 41,
+      "focused thread page: GET /threads/<thread>": 9,
+      "focused thread page: POST /v1/threads/<thread>/activity": 1,
+      "focused thread page: GET /v1/threads": 41,
+      "focused thread page: GET /threads/<thread>/stream": 1,
+      "focused thread page: POST /v1/threads/<thread>/seen": 12,
+      "visible home: GET /": 9,
+      "visible home: GET /v1/threads": 40
+    }
+  },
+  "idle": {
+    "sqlReads": 162720,
+    "sqlWrites": 18,
+    "calls": {
+      "row": 10560,
+      "detail": 1596,
+      "sidebar": 24,
+      "memoryLine": 24,
+      "home": 12,
+      "threadPage": 12,
+      "withSessions": 12204,
+      "updateAttention": 18,
+      "eventBatch": 60,
+      "markSeen": 18
+    },
+    "requests": {
+      "hidden home: GET /v1/threads": 60,
+      "hidden thread page: GET /v1/threads": 60,
+      "focused thread page: GET /v1/threads": 60,
+      "focused thread page: POST /v1/threads/<thread>/seen": 18,
+      "visible home: GET /v1/threads": 60,
+      "focused thread page: GET /threads/<thread>": 12,
+      "visible home: GET /": 12
+    }
+  },
+  "attention": {
+    "sqlReads": 369162,
+    "sqlWrites": 376,
+    "calls": {
+      "row": 23936,
+      "detail": 3591,
+      "sidebar": 54,
+      "memoryLine": 54,
+      "home": 27,
+      "threadPage": 27,
+      "withSessions": 27714,
+      "updateAttention": 72,
+      "eventBatch": 136,
+      "markSeen": 48
+    },
+    "requests": {
+      "hidden home: GET /v1/threads": 136,
+      "hidden thread page: GET /v1/threads": 136,
+      "focused thread page: GET /v1/threads": 136,
+      "visible home: GET /v1/threads": 136,
+      "focused thread page: GET /threads/<thread>": 27,
+      "focused thread page: POST /v1/threads/<thread>/seen": 40,
+      "visible home: GET /": 27
+    }
+  }
+}

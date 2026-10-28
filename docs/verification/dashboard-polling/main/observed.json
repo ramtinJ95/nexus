@@ -1,0 +1,929 @@
+{
+  "rounds": [
+    {
+      "kind": "new reply",
+      "thread": "Replies thread",
+      "open": [
+        "hidden home",
+        "hidden thread page",
+        "focused thread page",
+        "visible home"
+      ],
+      "titlesAfter5s": {
+        "hidden home": "(1) Nexus",
+        "hidden thread page": "(1) Nexus",
+        "focused thread page": "(1) Nexus",
+        "visible home": "(1) Nexus"
+      }
+    },
+    {
+      "kind": "waiting for input",
+      "thread": "Waits thread",
+      "open": [
+        "hidden home",
+        "hidden thread page",
+        "focused thread page",
+        "visible home"
+      ],
+      "titlesAfter5s": {
+        "hidden home": "(1) Nexus",
+        "hidden thread page": "(1) Nexus",
+        "focused thread page": "(1) Nexus",
+        "visible home": "(1) Nexus"
+      }
+    },
+    {
+      "kind": "new reply",
+      "thread": "Replies thread",
+      "open": [
+        "hidden home",
+        "hidden thread page",
+        "focused thread page",
+        "visible home"
+      ],
+      "titlesAfter5s": {
+        "hidden home": "(1) Nexus",
+        "hidden thread page": "(1) Nexus",
+        "focused thread page": "(1) Nexus",
+        "visible home": "(1) Nexus"
+      }
+    },
+    {
+      "kind": "waiting for input",
+      "thread": "Waits thread",
+      "open": [
+        "hidden home",
+        "hidden thread page",
+        "focused thread page",
+        "visible home"
+      ],
+      "titlesAfter5s": {
+        "hidden home": "(1) Nexus",
+        "hidden thread page": "(1) Nexus",
+        "focused thread page": "(1) Nexus",
+        "visible home": "(1) Nexus"
+      }
+    },
+    {
+      "kind": "new reply",
+      "thread": "Replies thread",
+      "open": [
+        "hidden home",
+        "hidden thread page",
+        "focused thread page",
+        "visible home"
+      ],
+      "titlesAfter5s": {
+        "hidden home": "(1) Nexus",
+        "hidden thread page": "(1) Nexus",
+        "focused thread page": "(1) Nexus",
+        "visible home": "(1) Nexus"
+      }
+    },
+    {
+      "kind": "waiting for input",
+      "thread": "Waits thread",
+      "open": [
+        "hidden home",
+        "hidden thread page",
+        "focused thread page",
+        "visible home"
+      ],
+      "titlesAfter5s": {
+        "hidden home": "(1) Nexus",
+        "hidden thread page": "(1) Nexus",
+        "focused thread page": "(1) Nexus",
+        "visible home": "(1) Nexus"
+      }
+    },
+    {
+      "kind": "new reply",
+      "thread": "Replies thread",
+      "open": [
+        "hidden home",
+        "hidden thread page",
+        "focused thread page",
+        "visible home"
+      ],
+      "titlesAfter5s": {
+        "hidden home": "(1) Nexus",
+        "hidden thread page": "(1) Nexus",
+        "focused thread page": "(1) Nexus",
+        "visible home": "(1) Nexus"
+      }
+    },
+    {
+      "kind": "waiting for input",
+      "thread": "Waits thread",
+      "open": [
+        "hidden home",
+        "hidden thread page",
+        "focused thread page",
+        "visible home"
+      ],
+      "titlesAfter5s": {
+        "hidden home": "(1) Nexus",
+        "hidden thread page": "(1) Nexus",
+        "focused thread page": "(1) Nexus",
+        "visible home": "(1) Nexus"
+      }
+    },
+    {
+      "kind": "new reply",
+      "thread": "Replies thread",
+      "open": [
+        "hidden home",
+        "hidden thread page",
+        "focused thread page",
+        "visible home"
+      ],
+      "titlesAfter5s": {
+        "hidden home": "(1) Nexus",
+        "hidden thread page": "(1) Nexus",
+        "focused thread page": "(1) Nexus",
+        "visible home": "(1) Nexus"
+      }
+    },
+    {
+      "kind": "waiting for input",
+      "thread": "Waits thread",
+      "open": [
+        "hidden home",
+        "hidden thread page",
+        "focused thread page",
+        "visible home"
+      ],
+      "titlesAfter5s": {
+        "hidden home": "(1) Nexus",
+        "hidden thread page": "(1) Nexus",
+        "focused thread page": "(1) Nexus",
+        "visible home": "(1) Nexus"
+      }
+    },
+    {
+      "kind": "new reply",
+      "thread": "Replies thread",
+      "open": [
+        "hidden home",
+        "hidden thread page",
+        "focused thread page",
+        "visible home"
+      ],
+      "titlesAfter5s": {
+        "hidden home": "(1) Nexus",
+        "hidden thread page": "(1) Nexus",
+        "focused thread page": "(1) Nexus",
+        "visible home": "(1) Nexus"
+      }
+    },
+    {
+      "kind": "waiting for input",
+      "thread": "Waits thread",
+      "open": [
+        "hidden home",
+        "hidden thread page",
+        "focused thread page",
+        "visible home"
+      ],
+      "titlesAfter5s": {
+        "hidden home": "(1) Nexus",
+        "hidden thread page": "(1) Nexus",
+        "focused thread page": "(1) Nexus",
+        "visible home": "(1) Nexus"
+      }
+    },
+    {
+      "kind": "new reply",
+      "thread": "Replies thread",
+      "open": [
+        "hidden home",
+        "hidden thread page",
+        "focused thread page",
+        "visible home"
+      ],
+      "titlesAfter5s": {
+        "hidden home": "(1) Nexus",
+        "hidden thread page": "(1) Nexus",
+        "focused thread page": "(1) Nexus",
+        "visible home": "(1) Nexus"
+      }
+    },
+    {
+      "kind": "waiting for input",
+      "thread": "Waits thread",
+      "open": [
+        "hidden home",
+        "hidden thread page",
+        "focused thread page",
+        "visible home"
+      ],
+      "titlesAfter5s": {
+        "hidden home": "(1) Nexus",
+        "hidden thread page": "(1) Nexus",
+        "focused thread page": "(1) Nexus",
+        "visible home": "(1) Nexus"
+      }
+    },
+    {
+      "kind": "new reply",
+      "thread": "Replies thread",
+      "open": [
+        "hidden home",
+        "hidden thread page",
+        "focused thread page",
+        "visible home"
+      ],
+      "titlesAfter5s": {
+        "hidden home": "(1) Nexus",
+        "hidden thread page": "(1) Nexus",
+        "focused thread page": "(1) Nexus",
+        "visible home": "(1) Nexus"
+      }
+    },
+    {
+      "kind": "waiting for input",
+      "thread": "Waits thread",
+      "open": [
+        "hidden home",
+        "hidden thread page",
+        "focused thread page",
+        "visible home"
+      ],
+      "titlesAfter5s": {
+        "hidden home": "(1) Nexus",
+        "hidden thread page": "(1) Nexus",
+        "focused thread page": "(1) Nexus",
+        "visible home": "(1) Nexus"
+      }
+    },
+    {
+      "kind": "new reply",
+      "thread": "Replies thread",
+      "open": [
+        "hidden thread page",
+        "focused thread page",
+        "visible home"
+      ],
+      "titlesAfter5s": {
+        "hidden thread page": "(1) Nexus",
+        "focused thread page": "(1) Nexus",
+        "visible home": "(1) Nexus"
+      }
+    },
+    {
+      "kind": "waiting for input",
+      "thread": "Waits thread",
+      "open": [
+        "hidden thread page",
+        "focused thread page",
+        "visible home"
+      ],
+      "titlesAfter5s": {
+        "hidden thread page": "(1) Nexus",
+        "focused thread page": "(1) Nexus",
+        "visible home": "(1) Nexus"
+      }
+    }
+  ],
+  "notices": [
+    {
+      "tab": "focused thread page",
+      "channel": "toast",
+      "text": "Replies thread: new reply",
+      "round": 0,
+      "afterMs": 3755,
+      "trigger": "list read",
+      "triggerAfterMs": 3748
+    },
+    {
+      "tab": "hidden home",
+      "channel": "system",
+      "text": "Replies thread: new reply",
+      "round": 0,
+      "afterMs": 2554,
+      "trigger": "list read",
+      "triggerAfterMs": 2547
+    },
+    {
+      "tab": "hidden thread page",
+      "channel": "system",
+      "text": "Replies thread: new reply",
+      "round": 0,
+      "afterMs": 2684,
+      "trigger": "list read",
+      "triggerAfterMs": 2677
+    },
+    {
+      "tab": "visible home",
+      "channel": "system",
+      "text": "Replies thread: new reply",
+      "round": 0,
+      "afterMs": 3841,
+      "trigger": "list read",
+      "triggerAfterMs": 3829
+    },
+    {
+      "tab": "focused thread page",
+      "channel": "toast",
+      "text": "Waits thread: waiting for input",
+      "round": 1,
+      "afterMs": 944,
+      "trigger": "list read",
+      "triggerAfterMs": 934
+    },
+    {
+      "tab": "hidden home",
+      "channel": "system",
+      "text": "Waits thread: waiting for input",
+      "round": 1,
+      "afterMs": 741,
+      "trigger": "list read",
+      "triggerAfterMs": 733
+    },
+    {
+      "tab": "hidden thread page",
+      "channel": "system",
+      "text": "Waits thread: waiting for input",
+      "round": 1,
+      "afterMs": 869,
+      "trigger": "list read",
+      "triggerAfterMs": 863
+    },
+    {
+      "tab": "visible home",
+      "channel": "system",
+      "text": "Waits thread: waiting for input",
+      "round": 1,
+      "afterMs": 22,
+      "trigger": "list read",
+      "triggerAfterMs": 15
+    },
+    {
+      "tab": "focused thread page",
+      "channel": "toast",
+      "text": "Replies thread: new reply",
+      "round": 2,
+      "afterMs": 2534,
+      "trigger": "list read",
+      "triggerAfterMs": 2527
+    },
+    {
+      "tab": "hidden home",
+      "channel": "system",
+      "text": "Replies thread: new reply",
+      "round": 2,
+      "afterMs": 2337,
+      "trigger": "list read",
+      "triggerAfterMs": 2328
+    },
+    {
+      "tab": "hidden thread page",
+      "channel": "system",
+      "text": "Replies thread: new reply",
+      "round": 2,
+      "afterMs": 2463,
+      "trigger": "list read",
+      "triggerAfterMs": 2456
+    },
+    {
+      "tab": "visible home",
+      "channel": "system",
+      "text": "Replies thread: new reply",
+      "round": 2,
+      "afterMs": 2614,
+      "trigger": "list read",
+      "triggerAfterMs": 2608
+    },
+    {
+      "tab": "focused thread page",
+      "channel": "toast",
+      "text": "Waits thread: waiting for input",
+      "round": 3,
+      "afterMs": 587,
+      "trigger": "list read",
+      "triggerAfterMs": 573
+    },
+    {
+      "tab": "hidden home",
+      "channel": "system",
+      "text": "Waits thread: waiting for input",
+      "round": 3,
+      "afterMs": 382,
+      "trigger": "list read",
+      "triggerAfterMs": 373
+    },
+    {
+      "tab": "hidden thread page",
+      "channel": "system",
+      "text": "Waits thread: waiting for input",
+      "round": 3,
+      "afterMs": 507,
+      "trigger": "list read",
+      "triggerAfterMs": 501
+    },
+    {
+      "tab": "visible home",
+      "channel": "system",
+      "text": "Waits thread: waiting for input",
+      "round": 3,
+      "afterMs": 679,
+      "trigger": "list read",
+      "triggerAfterMs": 653
+    },
+    {
+      "tab": "focused thread page",
+      "channel": "toast",
+      "text": "Replies thread: new reply",
+      "round": 4,
+      "afterMs": 2311,
+      "trigger": "list read",
+      "triggerAfterMs": 2299
+    },
+    {
+      "tab": "hidden home",
+      "channel": "system",
+      "text": "Replies thread: new reply",
+      "round": 4,
+      "afterMs": 2105,
+      "trigger": "list read",
+      "triggerAfterMs": 2098
+    },
+    {
+      "tab": "hidden thread page",
+      "channel": "system",
+      "text": "Replies thread: new reply",
+      "round": 4,
+      "afterMs": 2234,
+      "trigger": "list read",
+      "triggerAfterMs": 2228
+    },
+    {
+      "tab": "visible home",
+      "channel": "system",
+      "text": "Replies thread: new reply",
+      "round": 4,
+      "afterMs": 2407,
+      "trigger": "list read",
+      "triggerAfterMs": 2380
+    },
+    {
+      "tab": "focused thread page",
+      "channel": "toast",
+      "text": "Waits thread: waiting for input",
+      "round": 5,
+      "afterMs": 612,
+      "trigger": "list read",
+      "triggerAfterMs": 606
+    },
+    {
+      "tab": "hidden home",
+      "channel": "system",
+      "text": "Waits thread: waiting for input",
+      "round": 5,
+      "afterMs": 413,
+      "trigger": "list read",
+      "triggerAfterMs": 406
+    },
+    {
+      "tab": "hidden thread page",
+      "channel": "system",
+      "text": "Waits thread: waiting for input",
+      "round": 5,
+      "afterMs": 541,
+      "trigger": "list read",
+      "triggerAfterMs": 534
+    },
+    {
+      "tab": "visible home",
+      "channel": "system",
+      "text": "Waits thread: waiting for input",
+      "round": 5,
+      "afterMs": 693,
+      "trigger": "list read",
+      "triggerAfterMs": 685
+    },
+    {
+      "tab": "focused thread page",
+      "channel": "toast",
+      "text": "Replies thread: new reply",
+      "round": 6,
+      "afterMs": 3559,
+      "trigger": "list read",
+      "triggerAfterMs": 3553
+    },
+    {
+      "tab": "hidden home",
+      "channel": "system",
+      "text": "Replies thread: new reply",
+      "round": 6,
+      "afterMs": 2360,
+      "trigger": "list read",
+      "triggerAfterMs": 2352
+    },
+    {
+      "tab": "hidden thread page",
+      "channel": "system",
+      "text": "Replies thread: new reply",
+      "round": 6,
+      "afterMs": 2488,
+      "trigger": "list read",
+      "triggerAfterMs": 2482
+    },
+    {
+      "tab": "visible home",
+      "channel": "system",
+      "text": "Replies thread: new reply",
+      "round": 6,
+      "afterMs": 3640,
+      "trigger": "list read",
+      "triggerAfterMs": 3633
+    },
+    {
+      "tab": "focused thread page",
+      "channel": "toast",
+      "text": "Waits thread: waiting for input",
+      "round": 7,
+      "afterMs": 977,
+      "trigger": "list read",
+      "triggerAfterMs": 971
+    },
+    {
+      "tab": "hidden home",
+      "channel": "system",
+      "text": "Waits thread: waiting for input",
+      "round": 7,
+      "afterMs": 777,
+      "trigger": "list read",
+      "triggerAfterMs": 770
+    },
+    {
+      "tab": "hidden thread page",
+      "channel": "system",
+      "text": "Waits thread: waiting for input",
+      "round": 7,
+      "afterMs": 907,
+      "trigger": "list read",
+      "triggerAfterMs": 900
+    },
+    {
+      "tab": "visible home",
+      "channel": "system",
+      "text": "Waits thread: waiting for input",
+      "round": 7,
+      "afterMs": 59,
+      "trigger": "list read",
+      "triggerAfterMs": 51
+    },
+    {
+      "tab": "focused thread page",
+      "channel": "toast",
+      "text": "Replies thread: new reply",
+      "round": 8,
+      "afterMs": 2640,
+      "trigger": "list read",
+      "triggerAfterMs": 2633
+    },
+    {
+      "tab": "hidden home",
+      "channel": "system",
+      "text": "Replies thread: new reply",
+      "round": 8,
+      "afterMs": 3439,
+      "trigger": "list read",
+      "triggerAfterMs": 3432
+    },
+    {
+      "tab": "hidden thread page",
+      "channel": "system",
+      "text": "Replies thread: new reply",
+      "round": 8,
+      "afterMs": 2568,
+      "trigger": "list read",
+      "triggerAfterMs": 2562
+    },
+    {
+      "tab": "visible home",
+      "channel": "system",
+      "text": "Replies thread: new reply",
+      "round": 8,
+      "afterMs": 2723,
+      "trigger": "list read",
+      "triggerAfterMs": 2713
+    },
+    {
+      "tab": "focused thread page",
+      "channel": "toast",
+      "text": "Waits thread: waiting for input",
+      "round": 9,
+      "afterMs": 727,
+      "trigger": "list read",
+      "triggerAfterMs": 720
+    },
+    {
+      "tab": "hidden home",
+      "channel": "system",
+      "text": "Waits thread: waiting for input",
+      "round": 9,
+      "afterMs": 526,
+      "trigger": "list read",
+      "triggerAfterMs": 519
+    },
+    {
+      "tab": "hidden thread page",
+      "channel": "system",
+      "text": "Waits thread: waiting for input",
+      "round": 9,
+      "afterMs": 655,
+      "trigger": "list read",
+      "triggerAfterMs": 649
+    },
+    {
+      "tab": "visible home",
+      "channel": "system",
+      "text": "Waits thread: waiting for input",
+      "round": 9,
+      "afterMs": 810,
+      "trigger": "list read",
+      "triggerAfterMs": 800
+    },
+    {
+      "tab": "focused thread page",
+      "channel": "toast",
+      "text": "Replies thread: new reply",
+      "round": 10,
+      "afterMs": 4002,
+      "trigger": "list read",
+      "triggerAfterMs": 3995
+    },
+    {
+      "tab": "hidden home",
+      "channel": "system",
+      "text": "Replies thread: new reply",
+      "round": 10,
+      "afterMs": 3803,
+      "trigger": "list read",
+      "triggerAfterMs": 3796
+    },
+    {
+      "tab": "hidden thread page",
+      "channel": "system",
+      "text": "Replies thread: new reply",
+      "round": 10,
+      "afterMs": 2930,
+      "trigger": "list read",
+      "triggerAfterMs": 2924
+    },
+    {
+      "tab": "visible home",
+      "channel": "system",
+      "text": "Replies thread: new reply",
+      "round": 10,
+      "afterMs": 2086,
+      "trigger": "list read",
+      "triggerAfterMs": 2075
+    },
+    {
+      "tab": "focused thread page",
+      "channel": "toast",
+      "text": "Waits thread: waiting for input",
+      "round": 11,
+      "afterMs": 984,
+      "trigger": "list read",
+      "triggerAfterMs": 977
+    },
+    {
+      "tab": "hidden home",
+      "channel": "system",
+      "text": "Waits thread: waiting for input",
+      "round": 11,
+      "afterMs": 786,
+      "trigger": "list read",
+      "triggerAfterMs": 778
+    },
+    {
+      "tab": "hidden thread page",
+      "channel": "system",
+      "text": "Waits thread: waiting for input",
+      "round": 11,
+      "afterMs": 912,
+      "trigger": "list read",
+      "triggerAfterMs": 906
+    },
+    {
+      "tab": "visible home",
+      "channel": "system",
+      "text": "Waits thread: waiting for input",
+      "round": 11,
+      "afterMs": 64,
+      "trigger": "list read",
+      "triggerAfterMs": 57
+    },
+    {
+      "tab": "focused thread page",
+      "channel": "toast",
+      "text": "Replies thread: new reply",
+      "round": 12,
+      "afterMs": 2495,
+      "trigger": "list read",
+      "triggerAfterMs": 2486
+    },
+    {
+      "tab": "hidden home",
+      "channel": "system",
+      "text": "Replies thread: new reply",
+      "round": 12,
+      "afterMs": 2294,
+      "trigger": "list read",
+      "triggerAfterMs": 2287
+    },
+    {
+      "tab": "hidden thread page",
+      "channel": "system",
+      "text": "Replies thread: new reply",
+      "round": 12,
+      "afterMs": 2421,
+      "trigger": "list read",
+      "triggerAfterMs": 2415
+    },
+    {
+      "tab": "visible home",
+      "channel": "system",
+      "text": "Replies thread: new reply",
+      "round": 12,
+      "afterMs": 2573,
+      "trigger": "list read",
+      "triggerAfterMs": 2566
+    },
+    {
+      "tab": "focused thread page",
+      "channel": "toast",
+      "text": "Waits thread: waiting for input",
+      "round": 13,
+      "afterMs": 631,
+      "trigger": "list read",
+      "triggerAfterMs": 619
+    },
+    {
+      "tab": "hidden home",
+      "channel": "system",
+      "text": "Waits thread: waiting for input",
+      "round": 13,
+      "afterMs": 424,
+      "trigger": "list read",
+      "triggerAfterMs": 417
+    },
+    {
+      "tab": "hidden thread page",
+      "channel": "system",
+      "text": "Waits thread: waiting for input",
+      "round": 13,
+      "afterMs": 554,
+      "trigger": "list read",
+      "triggerAfterMs": 547
+    },
+    {
+      "tab": "visible home",
+      "channel": "system",
+      "text": "Waits thread: waiting for input",
+      "round": 13,
+      "afterMs": 722,
+      "trigger": "list read",
+      "triggerAfterMs": 698
+    },
+    {
+      "tab": "focused thread page",
+      "channel": "toast",
+      "text": "Replies thread: new reply",
+      "round": 14,
+      "afterMs": 2427,
+      "trigger": "list read",
+      "triggerAfterMs": 2414
+    },
+    {
+      "tab": "hidden home",
+      "channel": "system",
+      "text": "Replies thread: new reply",
+      "round": 14,
+      "afterMs": 2220,
+      "trigger": "list read",
+      "triggerAfterMs": 2212
+    },
+    {
+      "tab": "hidden thread page",
+      "channel": "system",
+      "text": "Replies thread: new reply",
+      "round": 14,
+      "afterMs": 2348,
+      "trigger": "list read",
+      "triggerAfterMs": 2342
+    },
+    {
+      "tab": "visible home",
+      "channel": "system",
+      "text": "Replies thread: new reply",
+      "round": 14,
+      "afterMs": 2520,
+      "trigger": "list read",
+      "triggerAfterMs": 2493
+    },
+    {
+      "tab": "focused thread page",
+      "channel": "toast",
+      "text": "Waits thread: waiting for input",
+      "round": 15,
+      "afterMs": 774,
+      "trigger": "list read",
+      "triggerAfterMs": 767
+    },
+    {
+      "tab": "hidden home",
+      "channel": "system",
+      "text": "Waits thread: waiting for input",
+      "round": 15,
+      "afterMs": 573,
+      "trigger": "list read",
+      "triggerAfterMs": 566
+    },
+    {
+      "tab": "hidden thread page",
+      "channel": "system",
+      "text": "Waits thread: waiting for input",
+      "round": 15,
+      "afterMs": 702,
+      "trigger": "list read",
+      "triggerAfterMs": 696
+    },
+    {
+      "tab": "visible home",
+      "channel": "system",
+      "text": "Waits thread: waiting for input",
+      "round": 15,
+      "afterMs": 854,
+      "trigger": "list read",
+      "triggerAfterMs": 847
+    },
+    {
+      "tab": "focused thread page",
+      "channel": "toast",
+      "text": "Replies thread: new reply",
+      "round": 16,
+      "afterMs": 3384,
+      "trigger": "list read",
+      "triggerAfterMs": 3377
+    },
+    {
+      "tab": "hidden thread page",
+      "channel": "system",
+      "text": "Replies thread: new reply",
+      "round": 16,
+      "afterMs": 2313,
+      "trigger": "list read",
+      "triggerAfterMs": 2305
+    },
+    {
+      "tab": "visible home",
+      "channel": "system",
+      "text": "Replies thread: new reply",
+      "round": 16,
+      "afterMs": 3466,
+      "trigger": "list read",
+      "triggerAfterMs": 3457
+    },
+    {
+      "tab": "focused thread page",
+      "channel": "toast",
+      "text": "Waits thread: waiting for input",
+      "round": 17,
+      "afterMs": 420,
+      "trigger": "list read",
+      "triggerAfterMs": 413
+    },
+    {
+      "tab": "hidden thread page",
+      "channel": "system",
+      "text": "Waits thread: waiting for input",
+      "round": 17,
+      "afterMs": 348,
+      "trigger": "list read",
+      "triggerAfterMs": 341
+    },
+    {
+      "tab": "visible home",
+      "channel": "system",
+      "text": "Waits thread: waiting for input",
+      "round": 17,
+      "afterMs": 501,
+      "trigger": "list read",
+      "triggerAfterMs": 493
+    }
+  ],
+  "newReplySeenAfterMs": [
+    6282,
+    2194,
+    6592
+  ],
+  "unseenElsewhere": {
+    "seenAgainAfterMs": 1993,
+    "attentionAtEnd": null
+  }
+}
