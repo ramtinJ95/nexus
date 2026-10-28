@@ -38,8 +38,8 @@ import { connectProbe, type DeclaredOutput, type LiveHash, type NodeName, type P
 import { envelope, type PlanStep } from "./reconcile.ts";
 import { newPylonRecord, nextCheckpoint, snapshot, tick, type PylonRecord } from "./tick.ts";
 import type { BackendPylon, Guest, VmBackend } from "./backend.ts";
-import { loginHosts, renderOverlay, type BootInputs, type CloneRepo, type OverlayFile, type PreviewAssignment, type ProjectId, type SessionHarness } from "./project.ts";
-import { checkoutDir, sessionFacts, sessionsFile } from "./sessions.ts";
+import { loginHosts, renderOverlay, type BootInputs, type CloneRepo, type OverlayFile, type PreviewAssignment, type ProjectId } from "./project.ts";
+import { checkoutDir, sessionFacts, sessionsFile, type SessionHarness } from "./sessions.ts";
 import type { CheckpointId, ImageId } from "./images.ts";
 
 const execFileAsync = promisify(execFile);

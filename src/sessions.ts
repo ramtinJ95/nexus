@@ -103,6 +103,11 @@ export type SessionHarness = keyof typeof sessionHarnesses;
 export const harnesses: { readonly [H in SessionHarness]: Harness } = sessionHarnesses;
 export const sessionHarnessSchema = z.enum(Object.keys(harnesses) as [SessionHarness, ...SessionHarness[]]);
 
+/** The entry of a harness an observation or a stored row names, which can be one this build does not know, as a newer probe's. */
+export function harnessNamed(name: string): Harness | undefined {
+  return Object.hasOwn(harnesses, name) ? harnesses[name as SessionHarness] : undefined;
+}
+
 /**
  * Claude Code writes no transcript until its first prompt, and `--resume` of an ID without one exits, so
  * a session that was opened but never prompted would not come back. `--session-id` starts it fresh under

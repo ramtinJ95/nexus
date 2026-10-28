@@ -24,7 +24,7 @@ import { imageIdOf, type ArtifactId, type CheckpointId, type ImageId, type Porta
 import * as templates from "./pylon-vm-templates.ts";
 import { publicUrls } from "./public-urls.ts";
 import { recordBeforePause, relaunchAfterWake } from "./session-wake.ts";
-import { checkoutDir } from "./sessions.ts";
+import { checkoutDir, sessionHarnessSchema } from "./sessions.ts";
 import { controlSocket, run, socketPathLimit } from "./pylon-vm/client.ts";
 import { statusSchema, type BootSpec, type SandboxConfig } from "./pylon-vm/contracts.ts";
 import { hostBridgeSocket } from "./pylon-vm/host-bridge.ts";
@@ -79,7 +79,7 @@ const instanceSchema = z.object({ name: z.string(), labels: z.record(z.string(),
 type Instance = z.infer<typeof instanceSchema>;
 const checkpointId = z.custom<CheckpointId>((v) => typeof v === "string" && v.startsWith("ckpt-"));
 const pausedSessionSchema = z.strictObject({
-  id: z.string(), herdrPane: z.string().nullable(), harness: z.enum(["claude-code", "pi", "shell"]), harnessSessionId: z.string().nullable(), title: z.string(),
+  id: z.string(), herdrPane: z.string().nullable(), harness: sessionHarnessSchema, harnessSessionId: z.string().nullable(), title: z.string(),
 });
 /**
  * `relaunch` is set before a boot from the instance's own disk and cleared once its sessions are relaunched.

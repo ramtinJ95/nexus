@@ -32,7 +32,7 @@ import { setTimeout as sleep } from "node:timers/promises";
 import { WebSocketServer, type WebSocket } from "ws";
 import { z } from "zod";
 import { actualState, desiredPhase, retryRefusal, type ActualState, type DesiredPhase } from "../reconcile.ts";
-import { bootSecrets, chatgptTokenGrant, effectiveAllowedHosts, gitIdentitySchema, gitUrl, linkedName, reservedPorts, withHttpsHosts, type BootInputs, type Project, type ProjectId, type SessionHarness } from "../project.ts";
+import { bootSecrets, chatgptTokenGrant, effectiveAllowedHosts, gitIdentitySchema, gitUrl, linkedName, reservedPorts, withHttpsHosts, type BootInputs, type Project, type ProjectId } from "../project.ts";
 import { isImageId, type CommandResult, type NodeName, type ProbeClient, type ProbeError, type PylonCommand, type PylonId, type TailnetNodeId } from "../protocol.ts";
 import type { ConversationView, EntryRecord, JsonObject } from "@earendil-works/pi-durable";
 import type { HarnessHost } from "../harness/host.ts";
@@ -40,7 +40,7 @@ import { pinsSchema, type ImageId, type ImageManifest } from "../images.ts";
 import type { Whois } from "../tailscale.ts";
 import type { ClaudeSent, NodeRecord, Output, PortRange, Preview, Registry, Session, Thread, ThreadId } from "./registry.ts";
 import { dashboard, liveFrames } from "./dashboard.ts";
-import { attachScript, checkoutDir, claudeTextProblem, herdrSession } from "../sessions.ts";
+import { attachScript, checkoutDir, claudeTextProblem, herdrSession, sessionHarnessSchema, type SessionHarness } from "../sessions.ts";
 import { claudeConversations, claudeFrames } from "./claude-conversation.ts";
 import { usageFilter } from "./usage.ts";
 import type { UsageBackfillJob } from "./usage-backfill.ts";
@@ -281,7 +281,7 @@ const rolloutSchema = z.strictObject({ image: imageSchema.shape.id });
 const noFields = z.strictObject({});
 const previewSchema = z.strictObject({ port: z.int().min(1).max(65535).refine((port) => !reservedPorts.has(port), "is Nexus's own") });
 const sessionSchema = z.strictObject({
-  harness: z.enum(["claude-code", "pi", "shell"]).default("claude-code"),
+  harness: sessionHarnessSchema.default("claude-code"),
   /** The Herdr workspace's label. The harness's name by default. */
   title: z.string().trim().min(1).max(80).optional(),
 });

@@ -14,7 +14,8 @@ import { randomUUID } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
 import { heldSecrets, retryable } from "./protocol.ts";
 import type { HerdrStatus, Job, JobEnvelope, JobErrorCode, JobId, JobStatus, LiveHash, NodeName, NodeObservation, PausedSession, ProbeEvent, PylonId, PylonObservation, RunningFacts, SessionFact } from "./protocol.ts";
-import type { BootInputs, LiveSpec, PylonSource, SessionHarness } from "./project.ts";
+import type { BootInputs, LiveSpec, PylonSource } from "./project.ts";
+import { harnessNamed, type SessionHarness } from "./sessions.ts";
 import type { ArtifactId, CheckpointId } from "./images.ts";
 
 export type ThreadStatus = "active" | "idle" | "archived" | "deleted";
@@ -273,8 +274,9 @@ export type SessionRow = { id: string; harness: SessionHarness; harnessSessionId
  *   never retracted, so only new ones are written.
  * - A preview is ready while a running pylon reports it published and warmed on its port. It stops being ready
  *   when the report drops it or the pylon stops running.
- * - A working non-Claude session is agent activity and an attached client is human activity, both at `now`, the time
- *   the control plane received the event. A preview hit is human activity at its own time.
+ * - A working session is agent activity, unless its harness's hooks report its activity, as Claude Code's do. One of a
+ *   harness this build does not know counts. An attached client is human activity. Both are at `now`, the time the
+ *   control plane received the event. A preview hit is human activity at its own time.
  */
 export function ingest(event: ProbeEvent, node: NodeName, known: ReadonlyMap<PylonId, PylonObservation | "absent">, now: number, unlisted: ReadonlySet<PylonId> = new Set()): readonly RegistryWrite[] {
   const observed = (pylon: PylonObservation): RegistryWrite[] => {
@@ -344,8 +346,7 @@ function pylonWrites(pylonId: PylonId, previous: PylonObservation | "absent", cu
   for (const [key, p] of isReady) if (!wasReady.has(key)) writes.push({ record: "preview", pylonId, ...p, ready: true });
   for (const [key, p] of wasReady) if (!isReady.has(key)) writes.push({ record: "preview", pylonId, ...p, ready: false });
 
-  // Herdr can retain a dead Claude's working status; only its expiring hook lease keeps it awake.
-  const agent = after.sessions?.some((s) => s.harness !== "claude-code" && s.state === "running" && s.status === "working") ? now : null;
+  const agent = after.sessions?.some((s) => harnessNamed(s.harness)?.activity !== "hooks" && s.state === "running" && s.status === "working") ? now : null;
   const human = after.attachedClients > 0 ? now : null;
   if (agent !== null || human !== null) writes.push({ record: "activity", pylonId, human, agent });
   return writes;

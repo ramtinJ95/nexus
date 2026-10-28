@@ -30,6 +30,7 @@ import type { ThreadSetup } from "../images.ts";
 import type { Project, SecretGrant } from "../project.ts";
 import type { ActualState } from "../reconcile.ts";
 import type { NodeCapacity } from "../protocol.ts";
+import { sessionHarnessSchema } from "../sessions.ts";
 import type { WebSocket } from "ws";
 import { attachTerminal, processTty } from "./attach.ts";
 import { call, CliError, exitCodes, follow, upgrade, type Endpoint, type HostPort } from "./transport.ts";
@@ -51,7 +52,7 @@ const usage = `nexus ${version}, the Nexus control plane from this Mac
   nexus changes <thread> [--uncommitted | --turn]       the files changed since boot, HEAD, or the latest turn
   nexus diff <thread> [path...] [--uncommitted | --turn]
   nexus conversation <thread>                  the agent's transcript, or the Claude worker's
-  nexus session open <thread> [--harness claude-code|pi|shell] [--title T]
+  nexus session open <thread> [--harness ${sessionHarnessSchema.options.join("|")}] [--title T]
   nexus session close <thread> <pane|id>       a session in no pane by its ID, which \`nexus show\` gives
   nexus attach <thread>                        this terminal on the pylon's Herdr sessions, through the control plane
   nexus start --project P [--title T] [--message M | --claude PROMPT [--model ID]] [--node N|auto] [--branch B] [--commit C]
