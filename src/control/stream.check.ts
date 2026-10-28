@@ -70,6 +70,7 @@ registry.saveImage({
 registry.setCurrentImage(image);
 const api = await startApi({
   registry, host: "127.0.0.1", port: 0, whois: async () => laptop, allowed: new Set([laptop]), hostnames: new Set(["127.0.0.1"]),
+  deployment: { self: "nFIREBAT" as TailnetNodeId, deployers: new Set(), keys: {} },
   harness: threads, wake: () => {},
   startThread: threadStarter({
     registry, harness: threads, wake: () => {}, dotfiles: { repo: "https://github.com/ramtin/dotfiles.git", ref: "main" },
