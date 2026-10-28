@@ -55,7 +55,10 @@ def observe():
     if len(rows) > 1000:
         raise ValueError("git observation exceeds 1000 refs")
     remotes = git("remote").split("\n")
-    published = {row[0] for row in rows if row[0].startswith("refs/remotes/") and not row[3]}
+    tracking = [row[0] for row in rows if row[0].startswith("refs/remotes/") and not row[3]]
+    # A clone, fetch or checkout writes these refs too. Only a push from this checkout logs this message.
+    pushes = git("log", "-z", "--walk-reflogs", "--fixed-strings", "--grep-reflog=update by push", "--format=%gD", *tracking, "--") if tracking else ""
+    published = {entry.rpartition("@{")[0] for entry in pushes.split("\0")} & set(tracking)
     branches = []
     for ref, commit, upstream, symref in rows:
         if not ref.startswith("refs/heads/"):
