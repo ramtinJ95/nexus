@@ -1726,6 +1726,18 @@ test("start --request-id starts one thread and sends its first message once, how
   assert.match(other.stderr, new RegExp(`request ID start:cli started thread ${first.id} with another body`));
 });
 
+test("start --after --request-id answers the queued thread, and the thread once it has started", async (t) => {
+  const s = await setup(t, { queue: true });
+  const first: Thread = await s.json(["start", "--project", "acme", "--title", "First"]);
+  const args = ["start", "--project", "acme", "--message", "Then this", "--after", first.id, "--request-id", "start:queued"];
+  const queued: QueuedThread = await s.json(args);
+  assert.deepEqual(await s.json(args), queued);
+  assert.equal((await s.nexus(["start-queued", queued.id])).code, 0);
+  const again = await s.nexus(args);
+  assert.equal(again.code, 0, again.stderr);
+  assert.equal(again.stdout, `Started ${queued.id} on acme: Then this\n`);
+});
+
 test("start --after queues a thread in one request, and threads, show, start-queued and archive speak of it as queued", async (t) => {
   const s = await setup(t, { queue: true });
   const first: Thread = await s.json(["start", "--project", "acme", "--title", "First"]);

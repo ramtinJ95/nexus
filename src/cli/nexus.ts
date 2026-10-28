@@ -1095,7 +1095,9 @@ const commands: Readonly<Record<string, Command>> = {
       const after = str(v, "after")?.split(",").map((id) => id.trim()).filter((id) => id !== "");
       if (after !== undefined) {
         if (after.length === 0) throw new CliError("invalid", "--after needs a thread");
-        const q = await api("POST", "/v1/threads", { ...body, after }) as QueuedThread;
+        const q = await api("POST", "/v1/threads", { ...body, after }) as QueuedThread | Thread;
+        // A repeat of the request ID after the queued thread started answers the thread.
+        if (!("after" in q)) return { json: q, text: `Started ${q.id} on ${q.project}: ${q.title}` };
         return { json: q, text: `Queued ${q.id} on ${q.project}: ${q.title}. It starts once ${listed(q.after)} ${q.after.length === 1 ? "has merged its pull request" : "have merged their pull requests"}.` };
       }
       const t = await api("POST", "/v1/threads", body) as Thread;
