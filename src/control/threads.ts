@@ -1,4 +1,4 @@
-import { randomBytes } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { fullCommit } from "../deploy/model.ts";
 import type { HarnessHost } from "../harness/host.ts";
 import { chooseTemplate, setupHashOf, type ImageId, type ProjectMirror, type SetupInputs, type TemplateId, type ThreadSetup } from "../images.ts";
@@ -20,6 +20,9 @@ export interface StartRequest {
   project: string; title: string; node?: string | undefined; branch?: string | undefined; commit?: string | undefined; claude?: string | undefined; model?: string | undefined; raw?: boolean; bare?: boolean;
   resources?: { [K in keyof BootInputs["resources"]]?: BootInputs["resources"][K] | undefined } | undefined;
 }
+
+/** A start's request ID with a hash of what it asks for, so a repeat of the ID with another body is told apart. */
+export const startKey = (requestId: string, fields: unknown): StartKey => ({ requestId, body: createHash("sha256").update(JSON.stringify(fields)).digest("hex") });
 
 /** `pylon-<id>` must fit in 40 characters. */
 export const newThreadId = () => `th-${randomBytes(6).toString("hex")}` as ThreadId;
