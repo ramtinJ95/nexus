@@ -225,12 +225,12 @@ test("a name two devices share is ambiguous, and the full MagicDNS name picks on
 
 const freshControl: Facts = {
   self: tailnet.self, secretNames: [], gitKey: false,
-  role: "control", port: 7470, signedIn: false, admitted: false, dockerGroup: false, image: false,
+  role: "control", port: 7470, signedIn: false, admitted: false, docker: "missing", dockerGroup: false, image: false,
 };
 
-test("a fresh control machine is left every step, the ChatGPT login first and the Mac CLI last", () => {
+test("a fresh control machine is left every step, the ChatGPT login first and the Mac CLI before any step that runs it", () => {
   const runs = left(freshControl).map((item) => item.run);
-  assert.equal(runs.length, 8);
+  assert.equal(runs.length, 9);
   assert.match(runs[0]![0]!, /control\/login\.ts \/etc\/nexus\/control\.json$/);
   assert.equal(runs[0]![1], "sudo systemctl start nexus-control");
   const all = runs.flat().join("\n");
@@ -241,13 +241,30 @@ test("a fresh control machine is left every step, the ChatGPT login first and th
   assert.match(all, /ssh-keygen -t ed25519 -N '' -C nexus@rj-firebat -f \/etc\/nexus\/git_ed25519/);
   assert.match(all, /usermod --append --groups docker nexus/);
   assert.match(all, /nexus image rollout <image ID it printed> --wait/);
-  assert.match(runs.at(-1)!.join("\n"), /printf '\{"url":"http:\/\/rj-firebat\.tail1234\.ts\.net:7470"\}\\n' > ~\/\.config\/nexus\/cli\.json/);
+  const cli = runs.findIndex((run) => run.some((command) => command.includes("~/.config/nexus/cli.json")));
+  assert.match(runs[cli]!.join("\n"), /printf '\{"url":"http:\/\/rj-firebat\.tail1234\.ts\.net:7470"\}\\n' > ~\/\.config\/nexus\/cli\.json/);
+  assert.match(runs[cli]![0]!, /mkdir -p ~\/\.local\/bin && ln -sf/, "the bin directory is made before the link");
+  assert.ok(runs.every((run, i) => i > cli || !run.some((command) => command.startsWith("nexus image"))), "no nexus command before the CLI is set up");
+  assert.ok(runs.findIndex((run) => run.some((command) => command.startsWith("nexus image"))) > cli);
+});
+
+test("a host without Docker is told to install Docker with buildx and start it, before joining its group", () => {
+  const commands = left(freshControl).flatMap((item) => item.run);
+  const install = commands.indexOf("curl -fsSL https://get.docker.com | sudo sh");
+  assert.ok(install >= 0);
+  assert.equal(commands[install + 1], "sudo systemctl enable --now docker");
+  assert.ok(commands.findIndex((command) => command.includes("usermod --append --groups docker nexus")) > install);
+  const noBuildx = left({ ...freshControl, docker: "no-buildx" }).flatMap((item) => item.run);
+  assert.ok(noBuildx.includes("sudo apt-get install -y docker-buildx-plugin"));
+  assert.ok(!noBuildx.some((command) => command.includes("get.docker.com")));
+  const ready = left({ ...freshControl, docker: "ready" }).flatMap((item) => item.run);
+  assert.ok(!ready.some((command) => /get\.docker\.com|buildx/.test(command)));
 });
 
 test("a finished control machine is left only the Mac CLI", () => {
-  const items = left({ ...freshControl, secretNames: ["CLAUDE_CODE_OAUTH_TOKEN", "GH_TOKEN"], gitKey: true, signedIn: true, admitted: true, dockerGroup: true, image: true });
+  const items = left({ ...freshControl, secretNames: ["CLAUDE_CODE_OAUTH_TOKEN", "GH_TOKEN"], gitKey: true, signedIn: true, admitted: true, docker: "ready", dockerGroup: true, image: true });
   assert.equal(items.length, 1);
-  assert.match(items[0]!.run.join("\n"), /ln -sf "\$PWD\/deploy\/mac\/nexus" ~\/\.local\/bin\/nexus/);
+  assert.match(items[0]!.run.join("\n"), /mkdir -p ~\/\.local\/bin && ln -sf "\$PWD\/deploy\/mac\/nexus" ~\/\.local\/bin\/nexus/);
 });
 
 test("a node is told how to register itself with the control plane and its peers", () => {

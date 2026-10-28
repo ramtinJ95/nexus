@@ -274,13 +274,16 @@ export function report(files: readonly FileWrite[]): string {
   ]).join("\n");
 }
 
+/** What image builds need here: the Docker daemon and its buildx plugin, which images/pylon/build.sh calls. */
+export type Docker = "missing" | "no-buildx" | "ready";
+
 export type Facts = {
   self: Device;
   /** The names in secrets.env, never their values. */
   secretNames: readonly string[];
   gitKey: boolean;
 } & (
-  | { role: "control"; port: number; signedIn: boolean; admitted: boolean; dockerGroup: boolean; image: boolean }
+  | { role: "control"; port: number; signedIn: boolean; admitted: boolean; docker: Docker; dockerGroup: boolean; image: boolean }
   | { role: "node"; control: Device; digest: string }
 );
 
@@ -314,6 +317,14 @@ export function left(facts: Facts): Item[] {
       `sudo deploy/install.sh --node ${control.name} --peer <other node> --peer <another node>`,
     ],
   });
+  items.push({
+    say: `Set up the nexus CLI on your Mac, in a nexus checkout with Node 26, before the steps below that run nexus there. ~/.local/bin must be on the Mac's PATH. When the Mac runs the Tailscale app rather than a SOCKS proxy on localhost:1055, add "socks": "none" to cli.json.`,
+    run: [
+      `npm ci && mkdir -p ~/.local/bin && ln -sf "$PWD/deploy/mac/nexus" ~/.local/bin/nexus`,
+      `mkdir -p ~/.config/nexus && printf '{"url":"${control.url}"}\\n' > ~/.config/nexus/cli.json`,
+      `nexus --version`,
+    ],
+  });
   if (!facts.secretNames.includes("CLAUDE_CODE_OAUTH_TOKEN")) items.push({
     say: "Give pylons a Claude login: run the first command on your Mac, then the second here with the token it printed.",
     run: ["claude setup-token", addSecret("CLAUDE_CODE_OAUTH_TOKEN", "<token>")],
@@ -331,6 +342,14 @@ export function left(facts: Facts): Item[] {
       rerun,
     ],
   });
+  if (facts.role === "control" && facts.docker === "missing") items.push({
+    say: "Image builds run here and need Docker with its buildx plugin. Docker's install script installs both, and systemd starts the daemon.",
+    run: ["curl -fsSL https://get.docker.com | sudo sh", "sudo systemctl enable --now docker"],
+  });
+  if (facts.role === "control" && facts.docker === "no-buildx") items.push({
+    say: "Docker here lacks the buildx plugin, which image builds use. Install docker-buildx-plugin from Docker's repository, or docker-buildx from Debian's.",
+    run: ["sudo apt-get install -y docker-buildx-plugin"],
+  });
   if (facts.role === "control" && !facts.dockerGroup) items.push({
     say: "Image builds run here and need Docker. Membership of the docker group is root-equivalent, so adding nexus to it is your call.",
     run: ["sudo usermod --append --groups docker nexus && sudo systemctl restart nexus-probe"],
@@ -338,13 +357,6 @@ export function left(facts: Facts): Item[] {
   if (facts.role === "control" && !facts.image) items.push({
     say: "Build the first pylon image from your Mac, then roll out the image ID it printed.",
     run: ["nexus image build --wait", "nexus image rollout <image ID it printed> --wait"],
-  });
-  items.push({
-    say: `Set up the nexus CLI on your Mac, in a nexus checkout with Node 26. When the Mac runs the Tailscale app rather than a SOCKS proxy on localhost:1055, add "socks": "none" to cli.json.`,
-    run: [
-      `npm ci && ln -sf "$PWD/deploy/mac/nexus" ~/.local/bin/nexus`,
-      `mkdir -p ~/.config/nexus && printf '{"url":"${control.url}"}\\n' > ~/.config/nexus/cli.json`,
-    ],
   });
   return items;
 }
@@ -423,10 +435,12 @@ async function gather(flags: Flags): Promise<Facts> {
     () => false,
   );
   const groups = await exec("id", ["-nG", "nexus"]).then(({ stdout }) => stdout.trim().split(/\s+/), (): string[] => []);
+  const succeeds = (args: string[]) => exec("docker", args, { env: { PATH: "/usr/local/bin:/usr/bin" } }).then(() => true, () => false);
+  const docker: Docker = !await succeeds(["--version"]) ? "missing" : !await succeeds(["buildx", "version"]) ? "no-buildx" : "ready";
   const image = await readdir(paths.artifacts).then((entries) => entries.some((e) => e.startsWith("img-")), () => false);
   return {
     ...common, role: "control", port: config.listen.port, signedIn: credentials,
-    admitted: config.callers.length > 0, dockerGroup: groups.includes("docker"), image,
+    admitted: config.callers.length > 0, docker, dockerGroup: groups.includes("docker"), image,
   };
 }
 

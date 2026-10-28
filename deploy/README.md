@@ -43,7 +43,7 @@ Then `src/deploy/setup.ts` writes the configs from `tailscale status --json`:
 
 Then it installs the release and the units with `deploy/install-control.sh`, `deploy/install-probe.sh` and `deploy/install-deployer.sh`, and starts the probe and the deployer's timer. The control plane refuses to start before its harness is signed in, so on a first install its unit is left stopped.
 
-The installer ends with what is left and the command for each: signing the harness in with ChatGPT and starting the control plane, the Claude token and the GitHub token in `secrets.env`, a git SSH key, Docker for image builds, the first image, and the `nexus` CLI on the Mac. A rerun lists only what is still missing.
+The installer ends with what is left and the command for each, in the order to do them: signing the harness in with ChatGPT and starting the control plane, the `nexus` CLI on the Mac, the Claude token and the GitHub token in `secrets.env`, a git SSH key, Docker with buildx for image builds and the probe's access to it, and the first image. A rerun lists only what is still missing.
 
 ### Rerun to upgrade, admit or recover
 
