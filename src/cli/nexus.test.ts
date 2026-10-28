@@ -25,6 +25,7 @@ import { fakeHarness } from "../control/fake-harness.ts";
 import { openRegistry, type Thread, type ThreadId } from "../control/registry.ts";
 import type { Review } from "../control/review.ts";
 import { startImageRollout } from "../control/image-rollout.ts";
+import { usageBackfill } from "../control/usage-backfill.ts";
 import type { ImageId, ImageManifest, ProjectMirror, TemplateRecord } from "../images.ts";
 import type { Project, ProjectId, RemoteProject } from "../project.ts";
 import { openTerminal, terminalSize } from "../guest-terminal.ts";
@@ -139,12 +140,13 @@ async function setup(t: TestContext, setupOptions: { queue?: boolean } = {}) {
     registry, harness: fake.harness, wake: () => {}, dotfiles: { repo: "https://github.com/ramtin/dotfiles.git", ref: "main" },
     mirror: { setupInputs: (p: RemoteProject, ref: { branch: string } | { commit: string }) => read(p, ref) },
   });
+  const backfill = usageBackfill({ registry, counter: { readWhole: () => Promise.reject(new Error("the CLI tests read no pylon")) }, wake: () => {}, intervalMs: 3_600_000, log: () => {} });
   const queue = setupOptions.queue === true ? threadQueue({ registry, startThread, gate: turnGate(() => false), send: (id, text, requestId) => fake.harness.send(id, text, requestId, "followUp") }) : null;
   const options = (port: number) => ({
     queue,
     deployment: { self: "nFIREBAT" as TailnetNodeId, deployers: new Set([laptop]), keys: {}, resolveMain: async () => "a".repeat(40) },
     registry, host: "127.0.0.1", port, whois: async () => { requests++; return caller; }, allowed: new Set([laptop]),
-    hostnames: new Set([apiName, "127.0.0.1"]), harness: fake.harness, wake: () => {}, previewPorts: { first: 10200, last: 10299 }, images,
+    hostnames: new Set([apiName, "127.0.0.1"]), harness: fake.harness, wake: () => {}, previewPorts: { first: 10200, last: 10299 }, images, usageBackfill: backfill,
     startThread,
     probes: new Map([[node, {
       command: (_pylonId: PylonId, command: PylonCommand) => { commands.push(command); return answer(command); },
@@ -156,6 +158,7 @@ async function setup(t: TestContext, setupOptions: { queue?: boolean } = {}) {
     await queue?.close();
     await api.close();
     await images.close();
+    await backfill.close();
     registry.close();
     await rm(dir, { recursive: true });
   });
@@ -245,7 +248,7 @@ test("--help or -h after a command prints its lines of nexus --help and exits 0 
   const all = new Set((await s.nexus(["--help"])).stdout.split("\n"));
   const names = ["events", "threads", "show", "ports", "preview", "unpreview", "files", "changes", "diff", "conversation", "session open", "session close",
     "attach", "start", "start-queued", "send", "watch", "seen", "abort", "retry", "retry-pylon", "wake", "archive", "unarchive", "delete", "projects", "project edit",
-    "project add", "review", "land", "deploy", "release", "image build", "image rollout", "image rollback", "image list", "image current", "nodes", "usage"];
+    "project add", "review", "land", "deploy", "release", "image build", "image rollout", "image rollback", "image list", "image current", "nodes", "usage", "usage backfill"];
   for (const name of names) {
     for (const flag of ["--help", "-h"]) {
       const res = await s.nexus([...name.split(" "), flag]);
@@ -1326,7 +1329,7 @@ test("show prints PR metadata and one disabled-watch notice without waking the p
 
 test("deploy and release use the shared release view and wait for both roles", async (t) => {
   const s = await setup(t);
-  assert.equal((await s.nexus(["--version"])).stdout.trim(), "nexus 0.32.0");
+  assert.equal((await s.nexus(["--version"])).stdout.trim(), "nexus 0.33.0");
   assert.equal((await s.nexus(["deploy", "bad"])).code, 64);
   const requested = await s.json(["deploy", "main"]);
   assert.equal(requested.desired.commit, "a".repeat(40));
@@ -1768,6 +1771,35 @@ test("start --after against a control plane without its GitHub token exits 5 and
   assert.equal((await s.nexus(["threads", "--queued"])).stdout, "No queued threads.\n");
 });
 
+test("usage backfill starts a run, --dry-run lists what it would read, --stop stops it, and usage prints the run in a line, with what it skipped once done", async (t) => {
+  const s = await setup(t);
+  const old: Thread = await s.json(["start", "--project", "acme", "--title", "Old work"]);
+  const gone: Thread = await s.json(["start", "--project", "acme", "--title", "Gone"]);
+  await s.json(["start", "--project", "acme", "--title", "Still going"]);
+  for (const thread of [old, gone]) await s.json(["archive", thread.id]);
+  const backfillLine = async () => (await s.nexus(["usage"])).stdout.split("\n").slice(1).join("\n").replace(/\nNo model calls[^]*$/, "");
+  assert.equal(await backfillLine(), "Backfill: not run. A deployer runs `nexus usage backfill` to read archived threads' pylons.");
+
+  const dry = await s.nexus(["usage", "backfill", "--dry-run"]);
+  assert.equal(dry.stdout, `A start reads 2 archived threads, one pylon at a time:\n${old.id}  acme  rj-firebat  Old work\n${gone.id}  acme  rj-firebat  Gone\n`);
+  assert.deepEqual(await s.json(["usage", "backfill", "--dry-run"]), {
+    backfill: { state: "never" },
+    plan: [{ thread: old.id, project: "acme", node, title: "Old work", reason: null }, { thread: gone.id, project: "acme", node, title: "Gone", reason: null }],
+  });
+  assert.equal((await s.nexus(["usage", "backfill"])).stdout, "Backfill: running, 0 of 2 threads read, recovered 0 calls and 0 tokens.\n");
+  assert.equal(await backfillLine(), "Backfill: running, 0 of 2 threads read, recovered 0 calls and 0 tokens. It waits: rj-firebat is offline.");
+  assert.equal((await s.nexus(["usage", "backfill", "--stop"])).stdout, "Backfill: stopped at 0 of 2 threads read, recovered 0 calls and 0 tokens.\n");
+  assert.equal((await s.json(["usage", "backfill", "--stop"])).state, "stopped", "--json prints the API's state");
+  assert.equal((await s.nexus(["usage", "backfill", "--dry-run", "--stop"])).code, 64);
+
+  s.registry.startUsageBackfill([old.id, gone.id], Date.parse("2026-10-28T09:00:00Z"));
+  s.registry.finishUsageBackfillThread(old.id, "done", null, { calls: 1234, tokens: 5_600_000 }, Date.parse("2026-10-28T09:10:00Z"));
+  s.registry.finishUsageBackfillThread(gone.id, "skipped", "rj-firebat holds no disk for its pylon", { calls: 0, tokens: 0 }, Date.parse("2026-10-28T09:11:00Z"));
+  s.registry.finishUsageBackfill(Date.parse("2026-10-28T09:12:00Z"));
+  assert.equal(await backfillLine(), `Backfill: done at 2026-10-28 09:12 UTC, 2 of 2 threads read, 1 skipped, recovered 1234 calls and 5.6M tokens.\nSkipped:\n${gone.id}  Gone  rj-firebat holds no disk for its pylon`);
+  assert.equal((await s.nexus(["usage", "backfill", "--dry-run"])).stdout, `A start reads 1 archived thread, one pylon at a time:\n${gone.id}  acme  rj-firebat  Gone\n  skipped before: rj-firebat holds no disk for its pylon\n`);
+});
+
 test("usage prints the tokens of the last 7 days in all and by each breakdown, --since, --project and --by narrow it, and --json is the API's report", async (t) => {
   const s = await setup(t);
   const thread: Thread = await s.json(["start", "--project", "acme", "--title", "Usage"]);
@@ -1782,7 +1814,7 @@ test("usage prints the tokens of the last 7 days in all and by each breakdown, -
 
   const text = await s.nexus(["usage"]);
   assert.equal(text.code, 0, text.stderr);
-  assert.match(text.stdout, /^Usage of all projects since \d{4}-\d\d-\d\d \d\d:\d\d UTC\. Counting started \d{4}-\d\d-\d\d \d\d:\d\d UTC\.\n\n/);
+  assert.match(text.stdout, /^Usage of all projects since \d{4}-\d\d-\d\d \d\d:\d\d UTC\. Counting started \d{4}-\d\d-\d\d \d\d:\d\d UTC\.\nBackfill: not run\. .*\n\n/);
   const since = Date.parse(`${/since (\S+ \S+) UTC/.exec(text.stdout)![1]!.replace(" ", "T")}Z`);
   assert.equal(since, Date.now() - (Date.now() % (24 * hour)) - 6 * 24 * hour, "the period is today and the 6 UTC days before it unless --since says otherwise");
   assert.match(text.stdout, /\n +Input +Output +Cache write +Cache read +Total +Calls\nTotal +11\.2k +2\.3k +50k +1\.3M +1\.3M +2\n/, "the call 20 days ago is outside the period");
@@ -1802,7 +1834,7 @@ test("usage prints the tokens of the last 7 days in all and by each breakdown, -
   assert.deepEqual(Object.keys((await s.json(["usage", "--by", "day"])).by), ["day"]);
 
   const other = await s.nexus(["usage", "--project", "other", "--since", "2020-01-01"]);
-  assert.match(other.stdout, /^Usage of project other since 2020-01-01 00:00 UTC\. Counting started .*\nNo model calls were counted in this period\.\n$/);
+  assert.match(other.stdout, /^Usage of project other since 2020-01-01 00:00 UTC\. Counting started .*\nBackfill: not run\. .*\nNo model calls were counted in this period\.\n$/);
   assert.equal((await s.nexus(["usage", "--by", "week"])).code, 64, "the API refuses an unknown breakdown");
   assert.equal((await s.nexus(["usage", "--since", "last week"])).code, 64, "and an unknown period");
 });

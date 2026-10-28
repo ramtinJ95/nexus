@@ -28,6 +28,7 @@ import { readEvents } from "./event-reader.ts";
 import { fakeHarness } from "./fake-harness.ts";
 import { openRegistry, type Registry, type Thread, type ThreadId } from "./registry.ts";
 import { startImageRollout, type ImageRollout } from "./image-rollout.ts";
+import { usageBackfill, type UsageBackfillJob } from "./usage-backfill.ts";
 import { imageIdOf, type ImageId, type ImageRecipe } from "../images.ts";
 import { githubTokenGrant, liveHashOf, type ProjectId } from "../project.ts";
 import type { ProjectMirror, TemplateRecord } from "../images.ts";
@@ -66,9 +67,10 @@ const claudeSession = "11111111-2222-4333-8444-555555555501";
 const fixture = (await readFile(new URL("../fixtures/claude-transcript.jsonl", import.meta.url), "utf8")).split("\n").filter((line) => line !== "").map((line) => `${line}\n`);
 const usageLimitRecord = (await readFile(new URL("../fixtures/claude-api-errors.jsonl", import.meta.url), "utf8")).split("\n")[0]! + "\n";
 
-async function setup(t: import("node:test").TestContext, options: { gitIdentity?: { name: string; email: string }; https?: import("./api.ts").ApiOptions["https"]; whois?: import("../tailscale.ts").Whois; deployment?: DeploymentOptions; dotfiles?: typeof dotfiles; streamStallMs?: number; attachTiming?: AttachTiming; closeWaitMs?: number; reviews?: ReviewLoop; images?: (registry: Registry) => ImageRollout; queue?: boolean } = {}) {
+async function setup(t: import("node:test").TestContext, options: { gitIdentity?: { name: string; email: string }; https?: import("./api.ts").ApiOptions["https"]; whois?: import("../tailscale.ts").Whois; deployment?: DeploymentOptions; dotfiles?: typeof dotfiles; streamStallMs?: number; attachTiming?: AttachTiming; closeWaitMs?: number; reviews?: ReviewLoop; images?: (registry: Registry) => ImageRollout; queue?: boolean; usageBackfill?: (registry: Registry) => UsageBackfillJob } = {}) {
   const registry = openRegistry(join(dir, `${randomUUID()}.db`));
   const images = options.images?.(registry);
+  const backfill = options.usageBackfill?.(registry);
   registry.upsertNode({ name: node, tailnetHost: "rj-firebat.tail.ts.net", tailnetNodeId: "nFIREBAT" as TailnetNodeId });
   let caller: TailnetNodeId | null = laptop;
   /** Every whois waits for it, so a test can hold a request at admission, and tells `asked` it got there. */
@@ -111,6 +113,7 @@ async function setup(t: import("node:test").TestContext, options: { gitIdentity?
     ...(options.reviews === undefined ? {} : { reviews: options.reviews }),
     ...(queue === null ? {} : { queue }),
     ...(images === undefined ? {} : { images }),
+    ...(backfill === undefined ? {} : { usageBackfill: backfill }),
     hostnames: new Set(["127.0.0.1"]),
     harness,
     startThread,
@@ -128,6 +131,7 @@ async function setup(t: import("node:test").TestContext, options: { gitIdentity?
     await queue?.close();
     await api.close();
     await images?.close();
+    await backfill?.close();
     registry.close();
   });
   /** Sends JSON as the dashboard and CLI do. `headers` overrides any header, so tests can pose as a browser page. */
@@ -1798,6 +1802,36 @@ test("only a deployer may build, roll out or roll back an image, never the contr
   for (const [path, body] of routes) assert.equal((await on.call("POST", path, body)).status, 403, `the control node may not POST ${path}`);
   on.callAs(laptop);
   for (const [path, body] of routes) assert.deepEqual(await on.call("POST", path, body), { status: 409, body: { error: "image builds are not configured" } });
+});
+
+test("anyone allowed reads the usage backfill and its dry run, only a deployer starts or stops it, and without one its routes answer 409", async (t) => {
+  const off = await setup(t, { deployment });
+  for (const method of ["GET", "POST", "DELETE"]) assert.deepEqual(await off.call(method, "/v1/usage/backfill"), { status: 409, body: { error: "the usage backfill is not configured" } });
+  const s = await setup(t, {
+    deployment,
+    usageBackfill: (registry) => usageBackfill({ registry, counter: { readWhole: () => assert.fail("nothing is read") }, wake: () => {}, intervalMs: 3_600_000, log: () => {} }),
+  });
+  assert.equal((await s.call("POST", "/v1/projects", project)).status, 201);
+  assert.equal((await s.call("POST", "/v1/images", image)).status, 201);
+  s.registry.setCurrentImage(image.id as ImageId);
+  const thread = (await s.call("POST", "/v1/threads", { project: "acme", title: "Old work" })).body as Thread;
+  assert.equal((await s.call("POST", `/v1/threads/${thread.id}/archive`)).status, 200);
+  assert.deepEqual(await s.call("GET", "/v1/usage/backfill"), {
+    status: 200, body: { backfill: { state: "never" }, plan: [{ thread: thread.id, project: "acme", node, title: "Old work", reason: null }] },
+  });
+
+  s.callAs("nFIREBAT" as TailnetNodeId);
+  const refused = { status: 403, body: { error: "caller may not start or stop the usage backfill: only deployers may, never infrastructure nodes or pylons" } };
+  assert.deepEqual(await s.call("POST", "/v1/usage/backfill"), refused);
+  assert.deepEqual(await s.call("DELETE", "/v1/usage/backfill"), refused);
+  assert.deepEqual((await s.call("GET", "/v1/usage/backfill")).body.backfill, { state: "never" });
+  s.callAs(laptop);
+  const started = await s.call("POST", "/v1/usage/backfill");
+  assert.equal(started.status, 200);
+  assert.deepEqual([started.body.state, started.body.read, started.body.of, started.body.current], ["running", 0, 1, null]);
+  assert.equal((await s.call("GET", "/v1/usage?since=all")).body.backfill.state, "running", "the usage report carries the backfill");
+  const stopped = await s.call("DELETE", "/v1/usage/backfill");
+  assert.deepEqual([stopped.status, stopped.body.state], [200, "stopped"]);
 });
 
 test("a deployer's image operations answer 200 once done and 202 while running, and the image routes show each image, its nodes and the operation", async (t) => {

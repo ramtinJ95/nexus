@@ -217,6 +217,7 @@ export async function startControlPlane(config: ControlPlaneConfig, models: Mode
     probes: new Map(probes.map((probe) => [probe.node, probe])),
     previewPorts: config.previewPorts,
     images,
+    usageBackfill: backfill,
   });
   console.error(`nexus control plane: API on ${config.listen.host}:${api.port}, following ${config.nodes.map((n) => n.name).join(", ")}`);
 

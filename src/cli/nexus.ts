@@ -24,7 +24,7 @@ import type { Review } from "../control/review.ts";
 import { maxEntries, usageLimitText, type ClaudeConversation, type ClaudeEntry, type PromptSource } from "../claude-transcript.ts";
 import { claudeFrames, queuedOf, type ClaudeFrame } from "../control/claude-conversation.ts";
 import { phaseNote, roundsSpent } from "../control/review.ts";
-import { breakdownLook, breakdowns, tokenColumns, tokenCount, type UsageReport, type UsageTotals } from "../control/usage.ts";
+import { breakdownLook, breakdowns, tokenColumns, tokenCount, type BackfillPlanRow, type UsageBackfill, type UsageReport, type UsageTotals } from "../control/usage.ts";
 import type { Changes, Diff, Listing } from "../checkout-files.ts";
 import type { ThreadSetup } from "../images.ts";
 import type { Project, SecretGrant } from "../project.ts";
@@ -33,7 +33,7 @@ import type { WebSocket } from "ws";
 import { attachTerminal, processTty } from "./attach.ts";
 import { call, CliError, exitCodes, follow, upgrade, type Endpoint, type HostPort } from "./transport.ts";
 
-const version = "0.32.0";
+const version = "0.33.0";
 const defaults = { url: "http://rj-firebat.tailc817d3.ts.net:7470", socks: "localhost:1055" };
 const configFile = () => join(homedir(), ".config", "nexus", "cli.json");
 
@@ -84,6 +84,8 @@ const usage = `nexus ${version}, the Nexus control plane from this Mac
   nexus nodes
   nexus usage [--since today|7d|30d|all|DATE] [--project P] [--by model|project|kind|role|day]
     the tokens the agents spent, in all and by model, project, agent, role and day, or only --by's; --since is 7d by default
+  nexus usage backfill [--dry-run | --stop]
+    read archived threads' transcripts from their start, waking one pylon at a time, or list what it would read, or stop; deployers only
   nexus --version
 
 Every command takes --json, --url URL and --socks HOST:PORT|none. The URL and proxy come from those flags,
@@ -157,10 +159,32 @@ function table(rows: readonly (readonly string[])[]): string {
 
 const utc = (at: number) => `${new Date(at).toISOString().slice(0, 16).replace("T", " ")} UTC`;
 
+/** One line, and the threads a run that ended skipped, with why. */
+function backfillText(b: UsageBackfill): string {
+  if (b.state === "never") return "Backfill: not run. A deployer runs `nexus usage backfill` to read archived threads' pylons.";
+  const threads = `${b.read} of ${b.of} thread${b.of === 1 ? "" : "s"} read`;
+  const recovered = `recovered ${b.recovered.calls} call${b.recovered.calls === 1 ? "" : "s"} and ${tokenCount(b.recovered.tokens)} tokens`;
+  const doing = b.current === null ? b.waiting === null ? "" : ` It waits: ${b.waiting}.`
+    : b.current.phase === "reading" ? ` It reads the pylon of ${b.current.thread}.` : ` It waits for the pylon of ${b.current.thread} to pause.`;
+  const line = b.state === "running" ? `Backfill: running, ${threads}, ${recovered}.${doing}`
+    : b.state === "stopped" ? `Backfill: stopped at ${threads}, ${recovered}.`
+    : `Backfill: done at ${utc(b.finishedAt!)}, ${threads}, ${b.skipped.length} skipped, ${recovered}.`;
+  if (b.state === "running" || b.skipped.length === 0) return line;
+  return `${line}\nSkipped:\n${table(b.skipped.map((t) => [t.thread, t.title, t.reason ?? ""]))}`;
+}
+
+/** The threads a start would read, each with why a run before skipped it on the line after. */
+function backfillPlanText(plan: readonly BackfillPlanRow[]): string {
+  if (plan.length === 0) return "No archived thread is left to read.";
+  const lines = table(plan.map((r) => [r.thread, r.project, r.node, r.title])).split("\n");
+  return [`A start reads ${plan.length} archived thread${plan.length === 1 ? "" : "s"}, one pylon at a time:`,
+    ...lines.flatMap((line, i) => plan[i]!.reason === null ? [line] : [line, `  skipped before: ${plan[i]!.reason}`])].join("\n");
+}
+
 function usageText(r: UsageReport): string {
   const rows = (keyHead: string, of: readonly (UsageTotals & { key: string })[]) =>
     table([[keyHead, ...tokenColumns.map((col) => col.label), "Calls"], ...of.map((row) => [row.key, ...tokenColumns.map((col) => tokenCount(row[col.field])), String(row.calls)])]);
-  const head = `Usage of ${r.project === null ? "all projects" : `project ${r.project}`} ${r.since === null ? "for all time" : `since ${utc(r.since)}`}. Counting started ${utc(r.countingSince)}.`;
+  const head = `Usage of ${r.project === null ? "all projects" : `project ${r.project}`} ${r.since === null ? "for all time" : `since ${utc(r.since)}`}. Counting started ${utc(r.countingSince)}.\n${backfillText(r.backfill)}`;
   if (r.total.calls === 0) return `${head}\nNo model calls were counted in this period.`;
   return [head, rows("", [{ key: "Total", ...r.total }]), ...breakdowns.flatMap((b) => {
     const { title, key } = breakdownLook[b];
@@ -1198,6 +1222,19 @@ const commands: Readonly<Record<string, Command>> = {
       for (const key of ["project", "by"]) if (str(v, key) !== undefined) query.set(key, str(v, key)!);
       const report = await api("GET", `/v1/usage?${query}`) as UsageReport;
       return { json: report, text: usageText(report) };
+    },
+  },
+  "usage backfill": {
+    args: [0, 0],
+    options: { "dry-run": { type: "boolean" }, stop: { type: "boolean" } },
+    async run(api, _, v) {
+      if (v["dry-run"] === true && v.stop === true) throw new CliError("invalid", "--dry-run and --stop do not go together");
+      if (v["dry-run"] === true) {
+        const view = await api("GET", "/v1/usage/backfill") as { backfill: UsageBackfill; plan: BackfillPlanRow[] };
+        return { json: view, text: backfillPlanText(view.plan) };
+      }
+      const state = await api(v.stop === true ? "DELETE" : "POST", "/v1/usage/backfill") as UsageBackfill;
+      return { json: state, text: backfillText(state) };
     },
   },
   nodes: {
