@@ -17,8 +17,9 @@ export const attentions = {
 export const needsPerson = (attention: Attention) => attention !== null && attentions[attention].needsPerson;
 
 /**
- * `decision` is a review that ended for the person: rounds that ran out, or a landing the merge policy holds. `limited`
- * is a Claude session stopped on its usage limit, which outranks `reply` because the turn end that recorded the reply is the stop itself.
+ * `decision` is a review that ended for the person, such as rounds that ran out or a landing the merge policy holds,
+ * or a question of the thread's that no one has answered. `limited` is a Claude session stopped on its usage limit,
+ * which outranks `reply` because the turn end that recorded the reply is the stop itself.
  */
 export function attentionOf(failed: boolean, parked: boolean, lastReplyAt: number | null, seenAt: number | null, working: boolean, waiting = false, decision = false, limited = false): Attention {
   if (failed) return "failed";
