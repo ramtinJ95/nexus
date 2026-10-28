@@ -410,3 +410,33 @@ test("a nudge delivered just before a crash still counts after the builder ended
   assert.equal(sent(), 2, "two nudges in all");
   assert.equal(f.registry.attention(id), "decision");
 });
+
+test("a nudge the drain held goes to neither a running turn nor a thread the person wrote to meanwhile", async (t) => {
+  const f = fixture(t);
+  let draining = true;
+  const gate = turnGate(() => draining);
+  const gated = builderNudger({
+    registry: f.registry, harness: f.fake.harness, now: () => f.now, log: () => {}, github: { async find() { return []; } },
+    inbox: agentInbox({ registry: f.registry, harness: { send: (...args) => gate.run(() => f.fake.harness.send(...args)) }, probes: new Map(), wake() {} }),
+  });
+  const running = await f.add("th-running");
+  const theirs = await f.add("th-theirs");
+  for (const id of [running, theirs]) f.turn(id);
+  f.tick(graceMs);
+  await gated.poll();
+  for (const id of [running, theirs]) assert.equal(f.registry.nudge(id)?.state, "sending");
+  f.registry.recordActivity(running, { agentTurnRunning: true });
+  await f.personWrites(theirs, "Hold off, I will look at it.");
+  f.registry.recordActivity(theirs, { agentTurnRunning: false });
+  f.tick(1_000);
+  f.turn(theirs);
+  draining = false;
+  await gated.poll();
+  assert.deepEqual(f.nudges(), [], "nothing reaches the running turn or the person's thread");
+  assert.equal(f.registry.nudge(running)?.state, "sending", "the send waits for the turn to end");
+  assert.deepEqual(f.registry.nudge(theirs), { state: "left-alone" });
+  f.registry.recordActivity(running, { agentTurnRunning: false });
+  f.turn(running);
+  await gated.poll();
+  assert.deepEqual(f.nudges().map((n) => n.thread), [running], "it goes out once the turn ended");
+});

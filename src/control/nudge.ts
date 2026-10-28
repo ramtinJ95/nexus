@@ -89,10 +89,17 @@ export function builderNudger(options: { registry: Registry; github: Pick<GitHub
     if (repo === null || hasPullRequest(t)) return clear();
     // A turn its usage limit stopped did not stall, and the next turn ends the limit.
     if (t.usageLimit !== undefined) return;
-    if (record?.state === "sending") return deliver(t, record);
     const turn = t.lastReplyAt;
     // The turn the person's message starts may outlast the transcript's hold on that message, so look while it runs.
     if (t.working && t.lastHumanActivityAt > (turn ?? 0) && await personWrote(t)) return leaveAlone();
+    if (record?.state === "sending") {
+      // It may never have gone out, so it waits for an ended turn and goes only to a thread that is not the person's.
+      if (t.working) return;
+      if (await personWrote(t)) return leaveAlone();
+      const fresh = registry.thread(t.id);
+      if (fresh === undefined || builderRepo(fresh) === null || hasPullRequest(fresh) || fresh.usageLimit !== undefined || fresh.working) return;
+      return deliver(fresh, record);
+    }
     if (record?.state === "person") {
       // The person's message starts a turn, so only a thread that worked since the hold can have one.
       if ((t.working || (turn ?? 0) > record.turn) && await personWrote(t)) leaveAlone();
