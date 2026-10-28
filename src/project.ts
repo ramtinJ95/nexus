@@ -18,6 +18,7 @@ import type { CheckpointId, ImageId, TemplateId } from "./images.ts";
 
 export type ProjectId = string & { readonly __project: unique symbol };
 export type SessionHarness = "claude-code" | "pi" | "shell";
+export const sessionHarnessSchema = z.enum(["claude-code", "pi", "shell"] satisfies SessionHarness[]);
 
 // The services file, .nexus/services.yaml.
 

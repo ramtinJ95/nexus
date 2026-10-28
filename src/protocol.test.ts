@@ -63,6 +63,30 @@ test("a probe refuses an envelope that fails any check of its fields", () => {
   assert.throws(() => parseJobEnvelope("{"), Error);
 });
 
+test("a bad request's message names each wrong field from the top of the payload, and what is wrong with it", () => {
+  const { jobId: _, ...noJobId } = envelope({ kind: "migrate", pylonId });
+  assert.throws(() => parseJobEnvelope(JSON.stringify(noJobId)), {
+    message: "envelope.jobId: Invalid input: expected string, received undefined; envelope.job.kind: Invalid discriminator value. Expected 'spawn' | 'pause' | 'delete' | 'build-image' | 'build-template' | 'fetch-artifact' | 'drop-artifact'",
+  });
+  assert.throws(() => parseJobEnvelope(JSON.stringify(envelope({ ...spawn, boot: { ...spawn.boot, image: "img-ABC" } }))), { message: "envelope.job.boot.image: expected an image ID" });
+  assert.throws(() => parsePylonCommand(JSON.stringify({ kind: "exec", argv: ["ls", 1], cwd: "home", timeoutMs: 60_001 })), {
+    message: "command.argv[1]: Invalid input: expected string, received number; command.cwd: expected an absolute path; command.timeoutMs: Too big: expected number to be <=60000",
+  });
+  assert.throws(() => parsePylonCommand(JSON.stringify({ kind: "send-claude", session: "s-1", text: "a\tb" })), { message: /^command\.text: .*Replace tabs with spaces/ });
+  assert.throws(() => parsePylonCommand("[]"), { message: "command: Invalid input: expected object, received array" });
+  assert.throws(() => parsePylonCommand("not json"), { message: /^command: Unexpected token/ });
+  const stream = (request: unknown) => new URL(`/v1/pylons/${pylonId}/stream?request=${encodeURIComponent(JSON.stringify(request))}`, "http://probe");
+  assert.throws(() => parseStreamRequest("nexus-stream", stream({ argv: [] })), { message: "request.argv: Too small: expected array to have >=1 items" });
+});
+
+test("a job error code or a harness is one Nexus names, not any key an object holds", () => {
+  const status = { jobId: "job-1", subject: image, kind: "build-image", state: "failed", finishedAt: "2027-01-01T00:00:00Z", message: "m", logTail: "" };
+  for (const code of ["toString", "constructor", "__proto__"]) {
+    assert.throws(() => parseProbeEvent(JSON.stringify({ type: "job", status: { ...status, code } })), { message: /^event\.status\.code: Invalid option/ });
+  }
+  assert.throws(() => parsePylonCommand(JSON.stringify({ kind: "open-session", harness: "toString", title: "x" })), { message: /^command\.harness: / });
+});
+
 const commands: PylonCommand[] = [
   { kind: "exec", argv: ["git", "status"], cwd: "/home/user", timeoutMs: 60_000 },
   { kind: "exec", argv: ["true"], cwd: "/", timeoutMs: 1 },

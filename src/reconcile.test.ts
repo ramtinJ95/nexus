@@ -249,10 +249,10 @@ test("a probe takes a spawn whose repo is a clone or empty, and refuses one from
   const empty = { kind: "empty", branch: "main" };
   const scratch = parseJobEnvelope(spawnBody(empty)).job;
   assert.ok(scratch.kind === "spawn" && scratch.boot.repo.kind === "empty" && scratch.boot.repo.branch === "main");
-  assert.throws(() => parseJobEnvelope(spawnBody({ url: clone.url, checkout: clone.checkout })), { message: "job.boot.repo has no kind, so the control plane that sent it is older than this probe. Upgrade the control plane, then its probes" });
-  assert.throws(() => parseJobEnvelope(spawnBody({ kind: "fork", branch: "main" })), { message: "job.boot.repo.kind is not clone or empty" });
-  assert.throws(() => parseJobEnvelope(spawnBody({ kind: "empty" })), { message: "job.boot.repo.branch is not a non-empty string" });
-  assert.throws(() => parseJobEnvelope(spawnBody({ kind: "clone", url: clone.url })), { message: "job.boot.repo.checkout is not an object" });
+  assert.throws(() => parseJobEnvelope(spawnBody({ url: clone.url, checkout: clone.checkout })), { message: "envelope.job.boot.repo.kind: missing, so the control plane that sent it is older than this probe. Upgrade the control plane, then its probes" });
+  assert.throws(() => parseJobEnvelope(spawnBody({ kind: "fork", branch: "main" })), { message: "envelope.job.boot.repo.kind: Invalid discriminator value. Expected 'clone' | 'empty'" });
+  assert.throws(() => parseJobEnvelope(spawnBody({ kind: "empty" })), { message: "envelope.job.boot.repo.branch: Invalid input: expected string, received undefined" });
+  assert.throws(() => parseJobEnvelope(spawnBody({ kind: "clone", url: clone.url })), { message: "envelope.job.boot.repo.checkout: Invalid input: expected object, received undefined" });
 });
 
 test("a probe takes a spawn that boots without its sessions, and refuses any other relaunch", () => {
@@ -261,7 +261,7 @@ test("a probe takes a spawn that boots without its sessions, and refuses any oth
   assert.ok(parsed.kind === "spawn" && parsed.relaunch === false);
   const plain = parseJobEnvelope(spawnBody(undefined)).job;
   assert.ok(plain.kind === "spawn" && plain.relaunch === undefined);
-  assert.throws(() => parseJobEnvelope(spawnBody(true)), { message: "job.relaunch is neither absent nor false" });
+  assert.throws(() => parseJobEnvelope(spawnBody(true)), { message: "envelope.job.relaunch: Invalid input: expected false" });
 });
 
 test("jobSubject", () => {
@@ -287,7 +287,7 @@ test("a snapshot from a probe older than route reporting parses as routing nothi
   const current = parseProbeEvent(encodeProbeEvent({ type: "snapshot", observation: { ...observation, grants: { secrets: [], gitSsh: false }, previewRoutes: routes, heldSecrets: [] } }));
   assert.ok(current.type === "snapshot");
   assert.deepEqual(current.observation.previewRoutes, routes);
-  assert.throws(() => parseProbeEvent(encodeProbeEvent({ type: "snapshot", observation: { ...observation, previewRoutes: {} } } as unknown as ProbeEvent)), /previewRoutes is not an array/);
+  assert.throws(() => parseProbeEvent(encodeProbeEvent({ type: "snapshot", observation: { ...observation, previewRoutes: {} } } as unknown as ProbeEvent)), { message: "event.observation.previewRoutes: Invalid input: expected array, received object" });
 });
 
 test("a snapshot as the probe every node runs sends it, claudeLaunchRepeatable and all, parses with every fact it sent", () => {
