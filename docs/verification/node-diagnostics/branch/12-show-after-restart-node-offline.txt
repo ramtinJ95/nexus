@@ -1,0 +1,18 @@
+$ nexus show th-b8642b47fc29
+th-b8642b47fc29  Flaky boot
+project: flaky
+attention: failed
+status: active
+pylon: pylon-th-b8642b47fc29 on infra-testbench, unknown, observed 41s ago
+size: 2 CPUs, 2 GiB memory, 10 GiB disk
+placement: infra-testbench, the project's default node
+setup: fresh boot runs .nexus/setup, because the control plane could not read .nexus/setup at main: the verify stack reads no remote
+failed: pylon is broken: the controller failed to boot the VM. Read controller.log in the instance directory
+  2026-10-27T03:11:56.208Z controller: booting pylon-th-b8642b47fc29 from img-0000000000dd, 2 CPUs, 2 GiB
+  2026-10-27T03:11:57.031Z gondolin: qemu started, waiting for the guest agent
+  2026-10-27T03:11:58.442Z dotfiles: git fetch https://[redacted]@github.com/ramtinJ95/dotfiles.git main
+  2026-10-27T03:11:58.443Z env: GH_TOKEN=[redacted]
+  2026-10-27T03:11:59.010Z herdr: waiting for the guest's exec channel
+  2026-10-27T03:12:12.010Z Error: Guest command got no answer within 13000 ms
+PR watch: off (no control-plane GitHub token configured)
+exit 0

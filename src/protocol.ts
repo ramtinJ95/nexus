@@ -195,7 +195,11 @@ export type PylonObservation =
    * relaunches what an earlier record holds, which only the checkpoint knows.
    */
   | { pylonId: PylonId; phase: "stopped"; checkpoint: CheckpointId | null; sessions: readonly PausedSession[] | null }
-  | { pylonId: PylonId; phase: "broken"; detail: string; cause: BrokenCause | "unknown" } // the backend reports it interrupted or failed
+  /**
+   * The backend reports it interrupted or failed. `logTail`: the last lines of its controller's log, at most 60 lines
+   * and 8 KiB, with what looks like a secret redacted on the node. Empty when the backend keeps no such log.
+   */
+  | { pylonId: PylonId; phase: "broken"; detail: string; cause: BrokenCause | "unknown"; logTail: string }
   | ({ pylonId: PylonId; phase: "running" } & RunningFacts);
 
 /**
@@ -369,7 +373,30 @@ export interface ProbeClient {
   manifest(artifact: PortableArtifactId): Promise<ArtifactManifest | null>;
   /** PUT /v1/secrets/{name}: the current value of one of heldSecrets. The probe holds it in memory and applies it to its running pylons. */
   putSecret(name: string, value: string): Promise<void>;
+  /** GET /v1/node-health: the node's host as the probe reads it now. It answers after sampling its pylons' CPU for a second. */
+  health(): Promise<NodeHealth>;
 }
+
+/**
+ * A node's host, read when asked. A reading is null where the host does not expose it, such as temperatures in a VM, or
+ * load and memory on a host without Linux's /proc. `disk` is the filesystem the backend keeps its pylons' disks on.
+ * `pylons` lists each running pylon's processes, its controller and what it started, such as QEMU, with the percent of
+ * one CPU they used over the sample and their resident memory. It is null from a backend that cannot name them.
+ */
+export interface NodeHealth {
+  node: NodeName;
+  readAt: string;
+  cpus: number;
+  load: { one: number; five: number; fifteen: number } | null;
+  memory: { totalGiB: number; availableGiB: number; swapTotalGiB: number; swapFreeGiB: number } | null;
+  disk: { path: string; totalGiB: number; freeGiB: number };
+  temperatures: readonly { sensor: string; celsius: number }[] | null;
+  pylons: readonly { pylonId: PylonId; processes: number; cpuPercent: number; residentGiB: number }[] | null;
+}
+const nodeHealthSchema = z.looseObject({
+  node: named<NodeName>(), readAt: unchecked<string>(), cpus: unchecked<number>(), load: unchecked<NodeHealth["load"]>(), memory: unchecked<NodeHealth["memory"]>(),
+  disk: unchecked<NodeHealth["disk"]>(), temperatures: unchecked<NodeHealth["temperatures"]>(), pylons: unchecked<NodeHealth["pylons"]>(),
+}) satisfies z.ZodType<NodeHealth>;
 
 /** The secrets whose values the control plane holds and hands to every probe, which no node's secret file may set. */
 export const heldSecrets: readonly string[] = [chatgptTokenGrant.name];
@@ -467,6 +494,11 @@ export function connectProbe(node: NodeName, tailnetHost: string, expected: Tail
       if (res.status !== 200) throw new Error(`${node}: POST ${path}: HTTP ${res.status}: ${res.body}`);
       return parseCommandResult(command, res.body);
     },
+    async health() {
+      const res = await call("GET", "/v1/node-health");
+      if (res.status !== 200) throw new Error(`${node}: GET /v1/node-health: HTTP ${res.status}: ${res.body}`);
+      return parseJson(asSent(nodeHealthSchema), res.body, "health");
+    },
     async putSecret(name, value) {
       const path = `/v1/secrets/${encodeURIComponent(name)}`;
       const res = await call("PUT", path, value, requestTimeoutMs, "text/plain; charset=utf-8");
@@ -562,6 +594,7 @@ export const routeAuth = {
   "/v1/pylons": "control-plane",
   "/v1/manifests": "control-plane",
   "/v1/secrets": "control-plane",
+  "/v1/node-health": "control-plane",
   "/v1/artifacts": "peer-probe", // checkpoints hold the pylon's logins, so only the other probe may read them
 } as const satisfies Record<string, CallerRole>;
 
@@ -756,7 +789,7 @@ const pylonIdField = named<PylonId>();
 const olderPylonSchema = z.discriminatedUnion("phase", [
   z.looseObject({ pylonId: pylonIdField, phase: z.enum(["booting", "stopping", "deleting"]) }),
   z.looseObject({ pylonId: pylonIdField, phase: z.literal("stopped"), checkpoint: unchecked<CheckpointId | null>(), sessions: unchecked<readonly PausedSession[] | null>() }),
-  z.looseObject({ pylonId: pylonIdField, phase: z.literal("broken"), detail: unchecked<string>(), cause: unchecked<string>() }),
+  z.looseObject({ pylonId: pylonIdField, phase: z.literal("broken"), detail: unchecked<string>(), cause: unchecked<string>(), logTail: unchecked<string>() }),
   z.looseObject({
     pylonId: pylonIdField, phase: z.literal("running"), liveHash: unchecked<LiveHash | null>(), bootedAt: unchecked<string>(),
     bootedFrom: unchecked<RunningFacts["bootedFrom"]>(), services: unchecked<RunningFacts["services"]>(), listening: unchecked<RunningFacts["listening"]>(),
@@ -929,7 +962,7 @@ type OlderPylonObservation =
   | Exclude<PylonObservation, { phase: "running" | "stopped" | "broken" }>
   | (Omit<Extract<PylonObservation, { phase: "running" }>, "listening" | "sessions"> & { listening?: readonly ListeningFact[] | null; sessions: readonly (SessionFact | OlderSession)[] | null })
   | (Omit<Extract<PylonObservation, { phase: "stopped" }>, "sessions"> & { sessions?: readonly PausedSession[] | null })
-  | (Omit<Extract<PylonObservation, { phase: "broken" }>, "cause"> & { cause?: string });
+  | (Omit<Extract<PylonObservation, { phase: "broken" }>, "cause" | "logTail"> & { cause?: string; logTail?: string });
 /** A session from a probe older than session states, which reported only sessions in panes. */
 type OlderSession = Omit<Extract<SessionFact, { state: "running" }>, "id" | "state"> & { state?: undefined };
 
@@ -945,7 +978,7 @@ type OlderSession = Omit<Extract<SessionFact, { state: "running" }>, "id" | "sta
  *   spawn for good, so the planner holds a boot that needs one (reconcile.ts).
  * - A running pylon's listening ports unknown, and sessions from before session states as running in their panes.
  * - A stopped pylon's sessions null, as from a pause that recorded nothing.
- * - A broken pylon's cause unknown, as is one this control plane does not know.
+ * - A broken pylon's cause unknown, as is one this control plane does not know, and its log tail empty.
  * An observation it returned comes back unchanged.
  */
 export function upgradeObservation(o: OlderObservation): NodeObservation {
@@ -967,7 +1000,7 @@ function upgradePylon(p: OlderPylonObservation): PylonObservation {
       sessions: p.sessions?.map((s): SessionFact => s.state === undefined ? { ...s, state: "running", id: s.herdrPane } : s) ?? null,
     };
     case "stopped": return { ...p, sessions: p.sessions ?? null };
-    case "broken": return { ...p, cause: brokenCauses.has(p.cause) ? p.cause as BrokenCause | "unknown" : "unknown" };
+    case "broken": return { ...p, cause: brokenCauses.has(p.cause) ? p.cause as BrokenCause | "unknown" : "unknown", logTail: p.logTail ?? "" };
     default: return p;
   }
 }

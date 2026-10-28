@@ -1,0 +1,10 @@
+{"node":"infra-testbench","planted":"nexus-planted-gh-token-4f2a9c71","callers":{"laptop":"nLAPTOP","phone":"nPHONE"},"evidence":"/home/user/workspace/repo/docs/verification/node-diagnostics/main","root":"/tmp/nexus-diag"}
+pylon-th-082e7bef58a3 services: no VM runs in this verification, so services has nothing to act on
+pylon-th-082e7bef58a3 sessions: no VM runs in this verification, so exec has nothing to act on. The control plane keeps the last list read until a read succeeds
+pylon-th-082e7bef58a3 git: checkout facts unavailable; retrying on the next git poll
+pylon-th-082e7bef58a3 attached terminals: no VM runs in this verification, so exec has nothing to act on. They count as none until a count succeeds
+pylon-th-082e7bef58a3 services: no VM runs in this verification, so services has nothing to act on
+pylon-th-37e745afef0b services: no VM runs in this verification, so services has nothing to act on
+pylon-th-37e745afef0b sessions: no VM runs in this verification, so exec has nothing to act on. The control plane keeps the last list read until a read succeeds
+pylon-th-37e745afef0b git: checkout facts unavailable; retrying on the next git poll
+pylon-th-37e745afef0b attached terminals: no VM runs in this verification, so exec has nothing to act on. They count as none until a count succeeds

@@ -52,6 +52,10 @@ export interface VmBackend {
   readonly eventJournal?: string;
   /** Its end of NEXUS_API, which the in-pylon `nexus` CLI calls. Omitted: those calls go unanswered. */
   readonly hostBridge?: HostBridge;
+  /** The directory it keeps pylon disks in, whose filesystem's free space the node reports. Omitted: `/`. */
+  readonly storage?: string;
+  /** The process each running pylon runs under on the host. Omitted: a backend that cannot name them. */
+  processes?(): Promise<readonly { pylonId: PylonId; pid: number }[]>;
 }
 
 export interface BackendPylon {
@@ -63,6 +67,8 @@ export interface BackendPylon {
   detail?: string;
   /** Set exactly when `vm` is broken. `unknown` when the backend cannot tell why. */
   cause?: BrokenCause | "unknown";
+  /** Set when `vm` is broken, from a backend that keeps a log of the VM's controller: that log's last lines, as read. */
+  logTail?: string;
   /**
    * Set exactly when `vm` is stopped: the sessions its last pause recorded, which the backend keeps beside the
    * checkpoint because the checkpoint cannot be read while paused. Null when that pause recorded none.

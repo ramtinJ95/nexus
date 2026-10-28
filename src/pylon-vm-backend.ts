@@ -11,7 +11,7 @@
  * only on their own node, one per pylon.
  */
 import { existsSync } from "node:fs";
-import { readFile } from "node:fs/promises";
+import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { z } from "zod";
@@ -31,6 +31,7 @@ import { hostBridgeSocket } from "./pylon-vm/host-bridge.ts";
 import { pylonVmHostBridge } from "./probe/pylon-api.ts";
 import { asUser, controllerLog, pylonGuest } from "./pylon-vm/pylon-guest.ts";
 import { readJson, saveJson } from "./json-file.ts";
+import { alive, readIdentity } from "./pylon-vm/identity.ts";
 import { directory, existsError, readRecord } from "./pylon-vm/storage.ts";
 
 export interface PylonVmBackendOptions {
@@ -458,6 +459,7 @@ export function createPylonVmBackend(options: PylonVmBackendOptions): VmBackend 
         ...state,
         checkpoint: state.vm === "stopped" ? sidecar.pausing ?? sidecar.checkpoint : sidecar.checkpoint,
         ...state.vm === "stopped" ? { sessions: sidecar.sessions ?? null } : {},
+        ...state.vm === "broken" ? { logTail: await templates.controllerLogTail(instanceDir(pylonId)) } : {},
         image: image as ImageId,
         bootedAt: state.vm === "running" ? instance.status.bootedAt ?? null : null,
         holds: { cpus: up.data?.cpus ?? 0, memoryGiB: up.data?.memoryGiB ?? 0, diskGiB: record.config.diskGiB },
@@ -511,6 +513,17 @@ export function createPylonVmBackend(options: PylonVmBackendOptions): VmBackend 
     gitSsh: options.gitSsh !== undefined,
     eventJournal: `${stateRoot}/events.sqlite`,
     hostBridge: pylonVmHostBridge(stateRoot),
+    storage: stateRoot,
+
+    /** Each instance's controller, as it published itself. Its VM runs as its child. */
+    async processes() {
+      const names = await readdir(join(stateRoot, "instances")).catch((err: unknown) => existsError(err, "ENOENT") ? [] : Promise.reject(err));
+      const found = await Promise.all(names.map(async (name) => {
+        const identity = await readIdentity(join(directory(stateRoot, "instances", name), "controller.pid"));
+        return identity !== null && await alive(identity) ? [{ pylonId: name as PylonId, pid: identity.pid }] : [];
+      }));
+      return found.flat();
+    },
 
     async ensureRunning(bootInputs, live, signal, relaunch = true) {
       const { pylonId } = bootInputs;

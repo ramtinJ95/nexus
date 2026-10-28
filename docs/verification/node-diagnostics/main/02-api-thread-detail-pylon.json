@@ -1,0 +1,14 @@
+{
+  "grantsOutdated": false,
+  "id": "pylon-th-0bf45490c55f",
+  "node": "infra-testbench",
+  "failed": "pylon is broken: the controller failed to boot the VM. Read controller.log in the instance directory",
+  "observedAt": "2026-10-28T07:31:41.244Z",
+  "resources": {
+    "cpus": 2,
+    "memoryGiB": 2,
+    "diskGiB": 10
+  },
+  "actualState": "failed",
+  "retryRefused": null
+}

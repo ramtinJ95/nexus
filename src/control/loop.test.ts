@@ -130,7 +130,7 @@ function fakeNode(options: { autoFinish: boolean; node?: NodeName; reportsRoutes
     } else {
       const { broken, ...failed } = failure;
       const pylonId = entry.status.subject as PylonId;
-      if (broken !== undefined) pylons.set(pylonId, { pylonId, phase: "broken", ...broken });
+      if (broken !== undefined) pylons.set(pylonId, { pylonId, phase: "broken", logTail: "", ...broken });
       entry.status = { ...ended, state: "failed", ...failed };
     }
     emit({ type: "job", status: entry.status });
@@ -192,6 +192,7 @@ function fakeNode(options: { autoFinish: boolean; node?: NodeName; reportsRoutes
     command: () => Promise.reject(new Error("unused")),
     stream: () => Promise.reject(new Error("unused")),
     manifest: () => Promise.reject(new Error("unused")),
+    health: () => Promise.reject(new Error("unused")),
     async putSecret(name) {
       if (!reachable) throw Object.assign(new Error("probe unreachable"), { code: "unreachable" });
       if (!heldSecrets?.includes(name)) throw new Error(`${name} is not a secret the control plane hands over`);
@@ -211,7 +212,7 @@ function fakeNode(options: { autoFinish: boolean; node?: NodeName; reportsRoutes
   const setSessions = (pylonId: PylonId, sessions: readonly SessionFact[] | null) => setFacts(pylonId, { sessions });
   /** The VM fails on its own, as when its controller dies, and the probe reports it with a snapshot. */
   function breakPylon(pylonId: PylonId, detail: string, cause: BrokenCause = "controller") {
-    pylons.set(pylonId, { pylonId, phase: "broken", detail, cause });
+    pylons.set(pylonId, { pylonId, phase: "broken", detail, cause, logTail: "" });
     emit({ type: "snapshot", observation: observation() });
   }
   /** Stops the pylon on a checkpoint that holds a failed setup, as a pause by a backend older than the cause did. */
@@ -361,7 +362,7 @@ test("a job that fails for good gives up with the probe's message and the end of
   run(t, registry, fake.probe, { log: (line) => logged.push(line) });
   await until("the spawn runs", () => fake.running().length === 1);
 
-  const setupLines = Array.from({ length: 30 }, (_, i) => `setup line ${i}`);
+  const setupLines = Array.from({ length: 80 }, (_, i) => `setup line ${i}`);
   const fatal = "fatal: unable to access 'https://github.com/octocat/Spoon-Knife.git/': The requested URL returned error: 403";
   fake.finish(fake.running()[0]!, { code: "setup-failed", message: `  ${thread.pylonId}: Setup exited 128. Read controller logs\n`, logTail: `${[...setupLines, fatal].join("\n")}\n\n` });
   await until("the planner gives up", () => registry.pylon(thread.pylonId)?.failed !== null);
@@ -369,7 +370,7 @@ test("a job that fails for good gives up with the probe's message and the end of
   const failed = registry.pylon(thread.pylonId)!.failed;
   assert.equal(failed, [
     `last job failed with setup-failed, which is not retryable: ${thread.pylonId}: Setup exited 128. Read controller logs`,
-    ...setupLines.slice(-19), fatal,
+    ...setupLines.slice(-59), fatal,
   ].join("\n"));
   assert.deepEqual(logged, [`${thread.pylonId}: the planner gave up: ${failed}`]);
   assert.deepEqual(fake.submitted.map((job) => job.kind), ["spawn"], "a setup failure is not retried");
@@ -678,7 +679,7 @@ test("a retry of a pylon whose checkpoint holds a failed setup boots nothing aga
   fake.finish(fake.running()[0]!);
   await until("the planner gives up", () => registry.pylon(thread.pylonId)?.failed !== null);
   assert.match(registry.pylon(thread.pylonId)!.failed!, /^last job failed with setup-failed/);
-  assert.deepEqual(fake.pylons.get(thread.pylonId), { pylonId: thread.pylonId, phase: "broken", detail: "Setup exited 128. Read controller logs", cause: "saved-setup" }, "the checkpoint replays its failed setup");
+  assert.deepEqual(fake.pylons.get(thread.pylonId), { pylonId: thread.pylonId, phase: "broken", logTail: "", detail: "Setup exited 128. Read controller logs", cause: "saved-setup" }, "the checkpoint replays its failed setup");
 
   registry.retryPylon(thread.pylonId);
   void loop.wake(node);

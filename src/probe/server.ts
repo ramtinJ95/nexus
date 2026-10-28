@@ -6,10 +6,9 @@ import { runningCommit } from "../deploy/health.ts";
  * memory only. Everything durable is the backend's, so a restart loses nothing a later job cannot rebuild.
  */
 import { randomUUID } from "node:crypto";
-import { mkdir, statfs } from "node:fs/promises";
+import { mkdir } from "node:fs/promises";
 import { once } from "node:events";
 import { createServer, STATUS_CODES, type IncomingMessage, type ServerResponse } from "node:http";
-import { availableParallelism, totalmem } from "node:os";
 import type { Duplex } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { commandPolicies, JobFailure, runCommand, runJob, type BackendPylon, type CommandPolicy, type ProbeDeps, type VmBackend } from "../backend.ts";
@@ -26,6 +25,8 @@ import type { Whois } from "../tailscale.ts";
 import { listOutputs } from "../outputs.ts";
 import { listeningFacts } from "../listening.ts";
 import { readBody } from "../request-body.ts";
+import { redact } from "./redact.ts";
+import { hostCapacity, readNodeHealth } from "./host.ts";
 import { gitFacts } from "../git-facts.ts";
 import { startGateway } from "./gateway.ts";
 import { createPylonApi } from "./pylon-api.ts";
@@ -69,6 +70,8 @@ export interface Probe {
 
 const jobRetentionMs = 10 * 60_000;
 const snapshotIntervalMs = 60_000;
+/** How long node health samples its pylons' CPU for. */
+const healthSampleMs = 1_000;
 const maxSecretBytes = 16_384;
 /** RFC 6750's b64token, the alphabet bearer tokens are written in. */
 const tokenAlphabet = /^[A-Za-z0-9\-._~+/]+=*$/;
@@ -290,6 +293,11 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
     }
   }
 
+  const storage = backend.storage ?? "/";
+
+  /** What leaves the node in a failure, with every value this probe holds, and what looks like a secret, redacted. */
+  const redacted = (text: string) => redact(text, options.secrets.names().flatMap((name) => options.secrets.value(name) ?? []));
+
   const gitReads = new Map<PylonId, { bootedAt: string; at: number; facts: GitFacts | null }>();
   const unreadGit = new Set<PylonId>();
   async function git(pylonId: PylonId, bootedAt: string): Promise<GitFacts | null> {
@@ -321,7 +329,7 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
         return { pylonId, phase: "stopped", checkpoint: p.checkpoint, sessions: p.sessions };
       case "broken":
         if (p.cause === undefined) throw new Error(`backend reports ${pylonId} broken with no cause`);
-        return { pylonId, phase: "broken", detail: p.detail ?? "the backend gave no detail", cause: p.cause };
+        return { pylonId, phase: "broken", detail: redacted(p.detail ?? "the backend gave no detail"), cause: p.cause, logTail: redacted(p.logTail ?? "") };
       case "running": {
         if (p.bootedAt === null) throw new Error(`backend reports ${pylonId} running with no boot time`);
         const [ports, serviceFacts, sessionFacts, checkout, outputs, attachedClients] = await Promise.all([
@@ -383,7 +391,7 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
   async function readSnapshot(): Promise<NodeObservation> {
     // Jobs before pylons, so the pylons show the result of every job listed as finished. See NodeObservation.jobs.
     const jobs = retainedJobs();
-    const [pylons, disk] = await Promise.all([backend.list(), statfs("/")]);
+    const [pylons, host] = await Promise.all([backend.list(), hostCapacity(storage)]);
     const artifacts = await backend.artifacts.list(pylons);
     const present = new Set(pylons.map((p) => p.pylonId));
     for (const id of gitReads.keys()) if (!present.has(id)) gitReads.delete(id);
@@ -394,9 +402,9 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
       probeBootId: bootId,
       events: journal.recent(),
       capacity: {
-        cpus: availableParallelism(), committedCpus: sum(pylons, "cpus"),
-        memoryGiB: totalmem() / 2 ** 30, committedMemoryGiB: sum(pylons, "memoryGiB"),
-        diskFreeGiB: (disk.bavail * disk.bsize) / 2 ** 30, committedDiskGiB: sum(pylons, "diskGiB"),
+        cpus: host.cpus, committedCpus: sum(pylons, "cpus"),
+        memoryGiB: host.memoryGiB, committedMemoryGiB: sum(pylons, "memoryGiB"),
+        diskFreeGiB: host.disk.freeGiB, committedDiskGiB: sum(pylons, "diskGiB"),
       },
       artifacts,
       jobs,
@@ -439,7 +447,7 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
       },
       (err: unknown) => {
         if (!(err instanceof JobFailure)) throw err;
-        setStatus({ ...base, state: "failed", finishedAt: new Date().toISOString(), code: err.code, message: err.message, logTail: err.logTail }, Date.now());
+        setStatus({ ...base, state: "failed", finishedAt: new Date().toISOString(), code: err.code, message: redacted(err.message), logTail: redacted(err.logTail) }, Date.now());
       },
     ).finally(() => {
       busy.delete(subject);
@@ -593,6 +601,11 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
       res.writeHead(200, artifactHeaders(manifest));
       // A failed archive destroys the response, so the peer's copy breaks off instead of ending as if complete.
       return pipeline(stream, res).catch((err: Error) => log(`artifact ${id}: ${err.message}`));
+    }
+    if (path === "/v1/node-health") {
+      if (req.method !== "GET") return send(res, 405, `${req.method} is not allowed on ${path}: node health is read-only`);
+      const health = await readNodeHealth(node, { root: "/", storage, pylons: await backend.processes?.() ?? null, sampleMs: healthSampleMs });
+      return send(res, 200, JSON.stringify(health), "application/json");
     }
     if (route === "/v1/pylons") return send(res, 501, `${route} is not implemented in this slice`);
     return send(res, 404, `no route ${req.method} ${path}`);

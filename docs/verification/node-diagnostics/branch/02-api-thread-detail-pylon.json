@@ -1,0 +1,14 @@
+{
+  "grantsOutdated": false,
+  "id": "pylon-th-b8642b47fc29",
+  "node": "infra-testbench",
+  "failed": "pylon is broken: the controller failed to boot the VM. Read controller.log in the instance directory\n2026-10-27T03:11:56.208Z controller: booting pylon-th-b8642b47fc29 from img-0000000000dd, 2 CPUs, 2 GiB\n2026-10-27T03:11:57.031Z gondolin: qemu started, waiting for the guest agent\n2026-10-27T03:11:58.442Z dotfiles: git fetch https://[redacted]@github.com/ramtinJ95/dotfiles.git main\n2026-10-27T03:11:58.443Z env: GH_TOKEN=[redacted]\n2026-10-27T03:11:59.010Z herdr: waiting for the guest's exec channel\n2026-10-27T03:12:12.010Z Error: Guest command got no answer within 13000 ms",
+  "observedAt": "2026-10-28T07:32:37.810Z",
+  "resources": {
+    "cpus": 2,
+    "memoryGiB": 2,
+    "diskGiB": 10
+  },
+  "actualState": "failed",
+  "retryRefused": null
+}

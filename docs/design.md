@@ -77,6 +77,14 @@ A scheduler that places work on its own still needs:
 - The model tools' `start`, which an agent would use to start another thread, does not exist yet. A thread such a tool starts without a node would follow its project's default, which may be `auto`.
 - A move job. A pylon stays on the node it booted on, so a node that fills up stays full until its threads are deleted. [The lifecycle](#lifecycle-follows-amp) describes how a move could copy a stopped pylon's disk, and spike S7 showed that copying checkpoints needs verifying.
 
+## Node diagnostics
+
+When a pylon's controller crashed, the only way to see why was to SSH to its node as root and read `controller.log`, and Tailscale SSH's login check stops an agent from doing that on `rj-firebat`. So a coordinator, an agent or the person could not tell a node's failure from the code's, as with the 13-second guest-command timeouts on `infra-testbench` on 2026-10-27 that only an SSH session found. Two read-only paths now answer it.
+
+A broken pylon's observation carries the last 60 lines, at most 8 KiB, of its instance's controller log, and the planner's failure for it ends with them, as a failed job's ends with its log. The registry stores the failure, so the lines outlive the node and a control-plane restart. The probe redacts the text first: the values it holds, Gondolin's placeholders, and the shapes of common credentials. It cannot know a secret it does not hold that has no known shape, so a setup script that prints a password in plain text still leaks it. [The CLI reference](cli.md#node-diagnostics-0360) lists what it catches.
+
+The probe also serves its host's health on request: load, CPUs, memory and swap, free disk where the pylons' disks are, temperatures where the host exposes them, and each running pylon's controller and QEMU with their CPU and resident memory. It is not in the observation, because sampling CPU takes a second and nobody needs it every minute. The control plane passes it on to deployers only, as `nexus node` and the dashboard's node page. Nothing on these paths acts on the node.
+
 ## Network and credentials
 
 - Gondolin blocks all outbound traffic except HTTP, TLS, and SSH to allowed hosts. Each project lists its allowed hosts.

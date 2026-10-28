@@ -1,0 +1,3 @@
+$ nexus node infra-testbench
+nexus: unknown command node. Run nexus --help for usage
+exit 64

@@ -32,13 +32,13 @@ import type { Changes, Diff, Listing } from "../checkout-files.ts";
 import type { ThreadSetup } from "../images.ts";
 import type { Project, SecretGrant } from "../project.ts";
 import type { ActualState } from "../reconcile.ts";
-import type { NodeCapacity } from "../protocol.ts";
+import type { NodeCapacity, NodeHealth } from "../protocol.ts";
 import { sessionHarnessSchema } from "../sessions.ts";
 import type { WebSocket } from "ws";
 import { attachTerminal, processTty } from "./attach.ts";
 import { call, CliError, exitCodes, follow, upgrade, type Endpoint, type HostPort } from "./transport.ts";
 
-const version = "0.35.0";
+const version = "0.36.0";
 const defaults = { url: "http://rj-firebat.tailc817d3.ts.net:7470", socks: "localhost:1055" };
 const configFile = () => join(homedir(), ".config", "nexus", "cli.json");
 
@@ -88,6 +88,7 @@ const usage = `nexus ${version}, the Nexus control plane from this Mac
   nexus image list                             recorded images, the nodes that hold each, and the last image operation
   nexus image current                          the current image and the one before it
   nexus nodes
+  nexus node <name>                            a node's load, memory, disk, temperatures and pylon processes, read now; deployers only
   nexus usage [--since today|7d|30d|all|DATE] [--project P] [--by model|project|kind|role|day]
     the tokens the agents spent, in all and by model, project, agent, role and day, or only --by's; --since is 7d by default
   nexus usage backfill [--dry-run | --stop]
@@ -375,7 +376,7 @@ function detailText({ thread: t, pylon: p, agent, sessions, previews, ports, out
     ...t.placement === undefined ? [] : [`placement: ${placementText(t.placement)}`],
     ...t.setup === undefined ? [] : [`setup: ${setupText(t.setup)}`],
     ...(p.grantsOutdated ? ["grants: older than project; start a new thread to apply current grants (archive/unarchive keeps these grants)"] : []),
-    ...p.failed === null ? [] : [`failed: ${p.failed}`],
+    ...p.failed === null ? [] : [`failed: ${p.failed.replaceAll("\n", "\n  ")}`],
     ...p.retryRefused === null ? [] : [`retry refused: ${p.retryRefused}`],
     ...(agent?.parkedTasks ?? 0) === 0 ? [] : [`parked tasks: ${agent!.parkedTasks}. \`nexus retry ${t.id}\` runs them again`],
     // A session in no pane is closed by its ID. A control plane older than `Session.state` sends none, and every session it lists runs.
@@ -616,10 +617,27 @@ function liveOf(id: string, view: View | null): WatchLive {
   };
 }
 
+const one = (n: number) => Number(n.toFixed(1));
+
+/** Null readings are what the node's host does not expose, so they print as unknown, never as zero. */
+function healthText(h: NodeHealth): string {
+  const { load, memory, temperatures, pylons } = h;
+  return [
+    `node: ${h.node}, read ${h.readAt}`,
+    `load: ${load === null ? "unknown" : `${load.one.toFixed(2)} ${load.five.toFixed(2)} ${load.fifteen.toFixed(2)} (1, 5, 15 min)`} on ${h.cpus} CPUs`,
+    `memory: ${memory === null ? "unknown" : `${one(memory.availableGiB)} of ${one(memory.totalGiB)} GiB available`}`,
+    `swap: ${memory === null ? "unknown" : memory.swapTotalGiB === 0 ? "none" : `${one(memory.swapTotalGiB - memory.swapFreeGiB)} of ${one(memory.swapTotalGiB)} GiB used`}`,
+    `disk: ${one(h.disk.freeGiB)} of ${one(h.disk.totalGiB)} GiB free at ${h.disk.path}`,
+    `temperatures: ${temperatures === null ? "unknown" : temperatures.map((t) => `${t.sensor} ${t.celsius.toFixed(1)} °C`).join(", ")}`,
+    ...pylons === null ? ["pylons: unknown"] : pylons.length === 0 ? ["pylons: none running"]
+      : pylons.map((p) => `pylon: ${p.pylonId}, ${p.processes} ${p.processes === 1 ? "process" : "processes"}, ${one(p.cpuPercent)}% CPU, ${one(p.residentGiB)} GiB resident`),
+  ].join("\n");
+}
+
 function stateText(s: WatchState): string {
   const run = s.run === "working" ? ", agent working" : s.run === "parked" ? `, ${s.parkedTasks} parked tasks hold the run` : "";
   const ports = (s.ports ?? []).map((l: ListeningPort) => l.preview?.ready === true ? `${l.port} at ${l.preview.url}` : String(l.port));
-  return `-- ${s.status}, pylon ${s.pylon}${s.failed === null ? "" : ` (${s.failed})`}${run}${s.queued === 0 ? "" : `, ${s.queued} queued`}${ports.length === 0 ? "" : `, listening on ${ports.join(", ")}`}`;
+  return `-- ${s.status}, pylon ${s.pylon}${s.failed === null ? "" : ` (${s.failed.split("\n")[0]})`}${run}${s.queued === 0 ? "" : `, ${s.queued} queued`}${ports.length === 0 ? "" : `, listening on ${ports.join(", ")}`}`;
 }
 
 /**
@@ -1252,6 +1270,13 @@ const commands: Readonly<Record<string, Command>> = {
       }
       const state = await api(v.stop === true ? "DELETE" : "POST", "/v1/usage/backfill") as UsageBackfill;
       return { json: state, text: backfillText(state) };
+    },
+  },
+  node: {
+    args: [1, 1],
+    async run(api, [name]) {
+      const health = await api("GET", `/v1/nodes/${encodeURIComponent(name!)}/health`) as NodeHealth;
+      return { json: health, text: healthText(health) };
     },
   },
   nodes: {

@@ -75,7 +75,7 @@ export interface PlanInput {
 }
 
 /**
- * `message` is the job's message and the end of its log, bounded by failureMessage in tick.ts. `reading` marks a wake
+ * `message` is the job's message and the end of its log, bounded by failureMessage. `reading` marks a wake
  * for reading that failed, which only the usage backfill acts on, so the planner counts it only while desired is `reading`.
  */
 export interface FailedAttempt { at: number; code: JobErrorCode; message: string; reading?: true }
@@ -172,7 +172,20 @@ export function retryRefusal(observed: PylonObservation | "absent"): string | nu
 }
 
 const brokenFailure = (observed: Extract<PylonObservation, { phase: "broken" }>, refused: string | null): PlanStep =>
-  fail(`pylon is broken: ${observed.detail}${refused === null ? "" : `. ${refused}`}`);
+  fail(failureMessage(`pylon is broken: ${observed.detail}${refused === null ? "" : `. ${refused}`}`, observed.logTail));
+
+const maxMessageChars = 500;
+const maxLogLines = 60;
+const maxLogChars = 8_192;
+
+/**
+ * A failure's message and the last lines of its log, trimmed and bounded as the node reads a controller log. The record
+ * carries it into the planner's reason, so the API, the dashboard and the loop's log say why without the node's logs.
+ */
+export function failureMessage(message: string, logTail: string): string {
+  const log = logTail.trim().split("\n").slice(-maxLogLines).join("\n").slice(-maxLogChars);
+  return [message.trim().slice(0, maxMessageChars), log].filter((part) => part !== "").join("\n");
+}
 
 const noAttempts: PlanInput["attempts"] = { count: 0, last: null };
 
