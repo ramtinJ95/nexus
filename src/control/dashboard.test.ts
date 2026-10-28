@@ -1430,7 +1430,9 @@ test("PR outputs show GitHub metadata and automated entries are not labelled as 
   const pr = { repo: "acme/repo", number: 42, title: "Fix <checkout>", url: "https://github.com/acme/repo/pull/42", state: "merged", checks: "passing", review: "approved", conflict: false } as const;
   s.registry.savePrWatch(thread.id, { links: [{ pr, seen: [], failed: false }], commentWakes: 0, pending: null, error: null });
   s.fake.transcript(thread.id).entries = [{ id: 1, conversationId: 1, kind: "nexus.pr-watch", data: { sender: "Nexus PR watch" }, model: [{ role: "user", content: "Automated feedback", timestamp: 0 }] },
-    { id: 2, conversationId: 1, kind: "nexus.nudge", data: { sender: "Nexus nudge" }, model: [{ role: "user", content: "Open a pull request", timestamp: 0 }] }] as never;
+    { id: 2, conversationId: 1, kind: "nexus.nudge", data: { sender: "Nexus nudge" }, model: [{ role: "user", content: "Open a pull request", timestamp: 0 }] },
+    { id: 3, conversationId: 1, kind: "nexus.watch", data: { sender: "Nexus watch" }, model: [{ role: "user", content: "Its turn ended", timestamp: 0 }] },
+    { id: 4, conversationId: 1, kind: "nexus.thread", data: { sender: "Nexus thread" }, model: [{ role: "user", content: "Rebase on main", timestamp: 0 }] }] as never;
   const page = (await s.call("GET", `/threads/${thread.id}`)).text;
   const outputs = sectionOf(page, "outputs-h");
   assert.match(textOf(outputs), /PR #42: Fix <checkout> — merged, checks passing, review approved/);
@@ -1439,6 +1441,8 @@ test("PR outputs show GitHub metadata and automated entries are not labelled as 
   assert.equal((outputs.match(/PR watch: off/g) ?? []).length, 1);
   assert.match(conversationOf(page).text, /Nexus PR watch Automated feedback/);
   assert.match(conversationOf(page).text, /Nexus nudge Open a pull request/);
+  assert.match(conversationOf(page).text, /Nexus watch Its turn ended/);
+  assert.match(conversationOf(page).text, /Nexus thread Rebase on main/);
   const detail = JSON.parse((await s.call("GET", `/v1/threads/${thread.id}`)).text);
   assert.deepEqual(detail.pullRequests, [pr]);
   assert.ok(detail.outputs.some((o: { kind: string; ref: string }) => o.kind === "pull-request" && o.ref === pr.url));
