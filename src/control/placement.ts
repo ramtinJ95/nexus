@@ -1,5 +1,5 @@
 import type { BootInputs } from "../project.ts";
-import { heldSecrets, type NodeName, type PylonId, type PylonObservation } from "../protocol.ts";
+import { heldSecrets, type NodeName, type NodeObservation, type PylonId, type PylonObservation } from "../protocol.ts";
 import { desiredPhase } from "../reconcile.ts";
 import { HttpError } from "./http-error.ts";
 import type { NodeRecord, Registry, StoredPylon, ThreadId } from "./registry.ts";
@@ -37,17 +37,8 @@ function weigh(registry: Registry, node: NodeRecord, need: Need): Weighed {
   if (missing.length > 0) return refused(`has no secret ${missing.map(from).join(", ")}`);
   const ssh = [...need.repo.kind === "clone" ? [need.repo.url] : [], need.dotfiles.repo].filter((url) => !url.startsWith("https://"));
   if (ssh.length > 0 && !o.grants.gitSsh) return refused(`has no git SSH key to reach ${ssh.join(" and ")}`);
-  const now = Date.now();
-  const pending = [...registry.pylonsOn(node.name)
-    .filter((p) => p.failed === null && ["running", "reading"].includes(desiredPhase(registry.thread(p.thread as ThreadId)!, now)))
-    .map((p) => uncounted(p, o.pylons.find((seen) => seen.pylonId === p.pylonId))), ...registry.reserved(node.name)]
-    .reduce((total, r) => ({ cpus: total.cpus + r.cpus, memoryGiB: total.memoryGiB + r.memoryGiB, diskGiB: total.diskGiB + r.diskGiB }), { cpus: 0, memoryGiB: 0, diskGiB: 0 });
+  const { left, pending } = roomLeft(registry, node.name, o, need.resources);
   const { capacity: c } = o;
-  const left: Room = {
-    cpus: c.cpus - c.committedCpus - pending.cpus - need.resources.cpus,
-    memoryGiB: c.memoryGiB - c.committedMemoryGiB - pending.memoryGiB - need.resources.memoryGiB,
-    diskGiB: c.diskFreeGiB - pending.diskGiB - need.resources.diskGiB,
-  };
   const committed = `${gib(c.committedMemoryGiB + pending.memoryGiB)} of ${gib(c.memoryGiB)} GiB of memory committed`;
   if (c.committedMemoryGiB + pending.memoryGiB > c.memoryGiB) return refused(`is overcommitted, with ${committed}`);
   if (left.memoryGiB < 0) return refused(`has ${committed}, and the pylon needs ${need.resources.memoryGiB}`);
@@ -56,11 +47,30 @@ function weigh(registry: Registry, node: NodeRecord, need: Need): Weighed {
 }
 
 /**
+ * The room the node has left once a pylon that holds `need` more boots there: what its observation does not count as
+ * committed, less what its pylons about to boot or wake and the starts placed there will hold (`pending`).
+ */
+export function roomLeft(registry: Registry, node: NodeName, o: NodeObservation, need: Room): { left: Room; pending: Room } {
+  const now = Date.now();
+  const pending = [...registry.pylonsOn(node)
+    .filter((p) => p.failed === null && ["running", "reading"].includes(desiredPhase(registry.thread(p.thread as ThreadId)!, now)))
+    .map((p) => uncounted(p, o.pylons.find((seen) => seen.pylonId === p.pylonId))), ...registry.reserved(node)]
+    .reduce((total, r) => ({ cpus: total.cpus + r.cpus, memoryGiB: total.memoryGiB + r.memoryGiB, diskGiB: total.diskGiB + r.diskGiB }), { cpus: 0, memoryGiB: 0, diskGiB: 0 });
+  const { capacity: c } = o;
+  const left: Room = {
+    cpus: c.cpus - c.committedCpus - pending.cpus - need.cpus,
+    memoryGiB: c.memoryGiB - c.committedMemoryGiB - pending.memoryGiB - need.memoryGiB,
+    diskGiB: c.diskFreeGiB - pending.diskGiB - need.diskGiB,
+  };
+  return { left, pending };
+}
+
+/**
  * What a pylon the planner is about to boot or wake will hold that its node's capacity does not count yet. One the node
  * has yet to report will hold all it asked for. A stopped VM, or one whose controller died and a person retried, boots
  * again and holds its CPUs and memory again. A broken VM that is still up already holds them.
  */
-function uncounted(p: StoredPylon, seen: PylonObservation | undefined): Room {
+export function uncounted(p: StoredPylon, seen: PylonObservation | undefined): Room {
   const { cpus, memoryGiB, diskGiB } = p.boot.resources;
   if (seen === undefined) return { cpus, memoryGiB, diskGiB };
   const reboots = seen.phase === "stopped" || (seen.phase === "broken" && seen.cause === "controller" && p.retrying);

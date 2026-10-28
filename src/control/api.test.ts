@@ -360,6 +360,20 @@ test("--node auto counts the memory of a paused pylon about to wake, and not of 
     "once Waking stays paused, a has 60 GiB left, and b 54 with Placed still to boot there");
 });
 
+test("--node auto counts the memory of an archived thread's paused pylon the usage backfill wakes to read", async (t) => {
+  const s = await withImage(t);
+  observeNode(s, "a", { total: 64, committed: 0 });
+  observeNode(s, "b", { total: 64, committed: 6 });
+  const archived = (await s.call("POST", "/v1/threads", { project: "acme", title: "Archived", node: "a" })).body as Thread;
+  observeNode(s, "a", { total: 64, committed: 0 }, { pylons: [{ pylonId: archived.pylonId, phase: "stopped", checkpoint: null, sessions: null }] });
+  assert.equal((await s.call("POST", `/v1/threads/${archived.id}/archive`)).status, 200);
+  assert.equal((await s.call("POST", "/v1/threads", { project: "acme", title: "Placed", node: "auto" })).body.placement.node, "a");
+  s.registry.startUsageBackfill([archived.id], Date.now());
+  s.registry.holdUsageBackfill(archived.id, Date.now());
+  assert.equal((await s.call("POST", "/v1/threads", { project: "acme", title: "Placed again", node: "auto" })).body.placement.node, "b",
+    "a has 52 GiB left once Placed and the woken Archived boot, and b 54");
+});
+
 test("--node auto passes over a node whose stored observation is from a probe older than grants", async (t) => {
   const s = await withImage(t);
   observeNode(s, "old", { total: 64, committed: 0 }, { grants: undefined as never });

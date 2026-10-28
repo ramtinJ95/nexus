@@ -8,7 +8,7 @@
 import { readAgentUsage, agentLogs, type FileCursor } from "../agent-usage.ts";
 import type { HarnessHost } from "../harness/host.ts";
 import type { ConversationId } from "../harness/host.ts";
-import type { NodeName, ProbeClient } from "../protocol.ts";
+import type { NodeName, ProbeClient, PylonId } from "../protocol.ts";
 import { singleFlight, type SingleFlight } from "../single-flight.ts";
 import type { EventKind } from "../events.ts";
 import type { Registry, ThreadId } from "./registry.ts";
@@ -16,6 +16,12 @@ import type { Registry, ThreadId } from "./registry.ts";
 export interface UsageCounter {
   /** Reads every thread now. */
   sweep(): Promise<void>;
+  /**
+   * Reads every transcript of the thread's running pylon from its start, as the usage backfill does, and records each
+   * read as a sweep would. Returns the calls no read had counted and the tokens they added. Throws when the pylon is
+   * not running, a read fails, or `signal` aborts it between reads. No other read of the pylon starts until it is done.
+   */
+  readWhole(id: ThreadId, signal?: AbortSignal): Promise<{ calls: number; tokens: number }>;
   close(): Promise<void>;
 }
 
@@ -24,6 +30,8 @@ const pylonKinds: readonly EventKind[] = ["session.turn-ended", "session.ended"]
 const harnessKinds: readonly EventKind[] = ["thread.turn-ended"];
 /** One read of a pylon takes about a megabyte of calls. One with more goes on in the read after it. */
 const maxReadsPerPylon = 16;
+/** A whole read stops past this many, roughly a gigabyte of calls. */
+const maxWholeReads = 1_000;
 
 export function usageCounter(options: {
   registry: Registry;
@@ -38,6 +46,8 @@ export function usageCounter(options: {
   let closed = false;
   const reads = new Map<string, SingleFlight>();
   const failures = new Map<string, string>();
+  /** The keys a whole read holds, whose own reads start none until it is done. */
+  const held = new Set<string>();
 
   /** Runs `read` once at a time per key, and logs a failure once until the key reads again. */
   function once(key: string, read: () => Promise<void>): Promise<void> {
@@ -52,7 +62,7 @@ export function usageCounter(options: {
           if (failures.get(key) !== message) log(`${key}: reading token usage failed, so the counts keep what was read before: ${message}`);
           failures.set(key, message);
         }
-      }, () => closed));
+      }, () => closed || held.has(key)));
     }
     return flight.rerun();
   }
@@ -65,20 +75,49 @@ export function usageCounter(options: {
     if (last !== null && last !== after) registry.recordUsage(id, calls, [{ source: "harness", key: conversation, position: last, before: "" }]);
   });
 
+  /** Reads the thread's pylon on from `cursors` and records what it read, while its node's last observation reports it running. */
+  async function readOn(id: ThreadId, cursors: (pylon: PylonId) => ReadonlyMap<string, FileCursor>) {
+    const t = registry.thread(id);
+    const pylon = t === undefined ? undefined : registry.pylon(t.pylonId);
+    const node = pylon === undefined ? undefined : registry.node(pylon.node);
+    const running = node?.state === "online" && node.observation?.pylons.some((p) => p.pylonId === pylon!.pylonId && p.phase === "running") === true;
+    const probe = running ? probes.get(pylon!.node) : undefined;
+    if (t === undefined || t.status === "deleted" || probe === undefined) return null;
+    const read = await readAgentUsage((argv) => probe.stream(t.pylonId, argv), cursors(t.pylonId), logs);
+    const added = registry.recordUsage(id, read.calls, [...read.offsets].map(([key, [position, before]]) => ({ source: t.pylonId, key, position, before })));
+    return { ...added, offsets: read.offsets, more: read.more };
+  }
+
+  const recorded = (pylon: PylonId) => new Map([...registry.usageCursors(pylon)].map(([path, c]): [string, FileCursor] => [path, [c.position, c.before]]));
   const readPylon = (id: ThreadId) => once(`${id}/pylon`, async () => {
     for (let n = 0; n < maxReadsPerPylon && !closed; n++) {
-      const t = registry.thread(id);
-      const pylon = t === undefined ? undefined : registry.pylon(t.pylonId);
-      const node = pylon === undefined ? undefined : registry.node(pylon.node);
-      const running = node?.state === "online" && node.observation?.pylons.some((p) => p.pylonId === pylon!.pylonId && p.phase === "running") === true;
-      const probe = running ? probes.get(pylon!.node) : undefined;
-      if (t === undefined || t.status === "deleted" || probe === undefined) return;
-      const cursors = new Map([...registry.usageCursors(t.pylonId)].map(([path, c]): [string, FileCursor] => [path, [c.position, c.before]]));
-      const read = await readAgentUsage((argv) => probe.stream(t.pylonId, argv), cursors, logs);
-      registry.recordUsage(id, read.calls, [...read.offsets].map(([key, [position, before]]) => ({ source: t.pylonId, key, position, before })));
-      if (!read.more) return;
+      if ((await readOn(id, recorded))?.more !== true) return;
     }
   });
+
+  async function readWhole(id: ThreadId, signal?: AbortSignal) {
+    const key = `${id}/pylon`;
+    if (held.has(key)) throw new Error(`${id}'s pylon is already being read whole`);
+    held.add(key);
+    try {
+      await reads.get(key)?.settled();
+      let cursors = new Map<string, FileCursor>();
+      const added = { calls: 0, tokens: 0 };
+      for (let n = 0; n < maxWholeReads; n++) {
+        signal?.throwIfAborted();
+        if (closed) throw new Error("the control plane is stopping");
+        const read = await readOn(id, () => cursors);
+        if (read === null) throw new Error("its pylon is not running");
+        added.calls += read.calls;
+        added.tokens += read.tokens;
+        if (!read.more) return added;
+        cursors = new Map([...cursors, ...read.offsets]);
+      }
+      throw new Error(`its transcripts were not read to their end in ${maxWholeReads} reads`);
+    } finally {
+      held.delete(key);
+    }
+  }
 
   async function sweep() {
     await Promise.all(registry.threads().flatMap((t) => [readHarness(t.id), readPylon(t.id)]));
@@ -110,6 +149,7 @@ export function usageCounter(options: {
 
   return {
     sweep,
+    readWhole,
     async close() {
       closed = true;
       clearInterval(follow);

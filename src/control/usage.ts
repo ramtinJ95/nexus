@@ -4,7 +4,7 @@
  * transcript again, a restart, or two readers that see the same call never count it twice.
  */
 import type { ProjectId } from "../project.ts";
-import { tailnetNodeIdSchema } from "../protocol.ts";
+import { tailnetNodeIdSchema, type NodeName } from "../protocol.ts";
 import { checkCaller } from "./gate.ts";
 import { HttpError } from "./http-error.ts";
 import type { ThreadId } from "./registry.ts";
@@ -42,13 +42,41 @@ export type UsageRow = UsageTotals & { key: string };
 export interface UsageReport {
   /** The start of the period in Unix milliseconds, or null for all of it. */
   since: number | null;
-  /** When this registry started counting. Calls before it are only those backfilled from transcripts still readable then. */
+  /**
+   * When this registry started counting. Calls before it are those read from the transcripts still readable then:
+   * running pylons' at once, and archived threads' once the backfill reads them.
+   */
   countingSince: number;
   project: ProjectId | null;
   thread: ThreadId | null;
   total: UsageTotals;
   by: Partial<Record<Breakdown, UsageRow[]>>;
+  backfill: UsageBackfill;
 }
+
+/**
+ * A thread a run of the usage backfill listed. `calls` and `tokens` are what reading it recovered: the calls no read had
+ * counted, and the tokens they added. `reason` says why a skipped one was not read, and `at` when it was done or skipped.
+ */
+export interface BackfillThread { thread: ThreadId; title: string; state: "pending" | "done" | "skipped"; reason: string | null; calls: number; tokens: number; at: number | null }
+
+/**
+ * The usage backfill, which wakes archived threads' pylons one at a time to read their transcripts from the start.
+ * `current` is the pylon a run holds: woken to be read, or read or given up on and waiting for its pause. `read` counts
+ * the threads done or skipped of `of`, every thread a run listed, and `recovered` sums what the done ones recovered.
+ */
+export type UsageBackfill =
+  | { state: "never" }
+  | {
+    state: "running" | "stopped" | "done"; startedAt: number; finishedAt: number | null;
+    current: { thread: ThreadId; phase: "reading" | "pausing"; since: number } | null;
+    /** Why the run waits before the next pylon, such as no room on its node. Null when it does not wait. */
+    waiting: string | null;
+    read: number; of: number; recovered: { calls: number; tokens: number }; skipped: BackfillThread[];
+  };
+
+/** An archived thread a start of the backfill would read, with why a run before skipped it, if one did. */
+export interface BackfillPlanRow { thread: ThreadId; project: ProjectId; node: NodeName; title: string; reason: string | null }
 
 /** The token columns of a usage table, with the short name a thread's one-line total gives each. */
 export const tokenColumns = [
