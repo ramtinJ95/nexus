@@ -13,6 +13,7 @@ import type { Drain, ReleaseReport } from "../deploy/model.ts";
  */
 import type { PrWatchState } from "./pr-watch.ts";
 import type { Question } from "./questions.ts";
+import type { Nudge } from "./nudge.ts";
 import type { QueuedRecord } from "./queue.ts";
 import type { Placement } from "./placement.ts";
 import { DatabaseSync, type StatementSync } from "node:sqlite";
@@ -338,6 +339,9 @@ const migrations: readonly string[] = [
   // Each question a thread asked the person, keyed by the ID its asker chose, with its answer once there is one. It
   // touches nothing an earlier migration made, so a registry rewound past it applies it again unchanged.
   `CREATE TABLE IF NOT EXISTS questions (id TEXT PRIMARY KEY, thread TEXT NOT NULL REFERENCES threads (id), record TEXT NOT NULL) STRICT;`,
+  // Each builder's nudges toward a pull request. It touches nothing an earlier migration made, so a registry rewound
+  // past it applies it again unchanged.
+  `CREATE TABLE IF NOT EXISTS nudges (thread TEXT PRIMARY KEY REFERENCES threads (id), record TEXT NOT NULL) STRICT;`,
 ];
 
 type Row = Record<string, unknown>;
@@ -598,7 +602,8 @@ export function openRegistry(path: string, clock = Date.now) {
     const p = q.pylon.get(t.pylonId);
     const workerFailed = ["failed", "stalled"].includes(String(sql("SELECT state FROM claude_workers WHERE thread = ?").get(id)?.state));
     const decision = needsPerson(jsonOrNull<Review>(sql("SELECT record FROM reviews WHERE builder = ?").get(id)?.record ?? null))
-      || sql("SELECT 1 FROM questions WHERE thread = ? AND json_extract(record, '$.answer') IS NULL").get(id) !== undefined;
+      || sql("SELECT 1 FROM questions WHERE thread = ? AND json_extract(record, '$.answer') IS NULL").get(id) !== undefined
+      || jsonOrNull<Nudge>(sql("SELECT record FROM nudges WHERE thread = ?").get(id)?.record ?? null)?.state === "person";
     const attention = attentionOf(p?.failed != null || workerFailed, old?.parked === 1, t.lastReplyAt, t.seenAt, t.working, t.sessionWaiting, decision, t.usageLimit !== undefined);
     if ((old?.attention ?? null) === attention) return;
     sql("INSERT INTO thread_attention (thread, attention) VALUES (?, ?) ON CONFLICT(thread) DO UPDATE SET attention = excluded.attention").run(id, attention);
@@ -1014,6 +1019,15 @@ export function openRegistry(path: string, clock = Date.now) {
           if (pr.url !== "" && !linked.has(`${pr.repo}#${pr.number}`)) appendEvent("pull-request.linked", thread, { repo: pr.repo, number: pr.number, url: pr.url, title: pr.title, state: pr.state });
         }
         sql("INSERT INTO pr_watches (thread, record) VALUES (?, ?) ON CONFLICT (thread) DO UPDATE SET record = excluded.record").run(thread, JSON.stringify(state));
+      });
+    },
+    nudge: (thread: ThreadId): Nudge | null => jsonOrNull<Nudge>(sql("SELECT record FROM nudges WHERE thread = ?").get(thread)?.record ?? null),
+    /** Replaces the builder's nudge record, or with null deletes it. */
+    saveNudge(thread: ThreadId, nudge: Nudge | null) {
+      transaction(() => {
+        if (nudge === null) sql("DELETE FROM nudges WHERE thread = ?").run(thread);
+        else sql("INSERT INTO nudges (thread, record) VALUES (?, ?) ON CONFLICT (thread) DO UPDATE SET record = excluded.record").run(thread, JSON.stringify(nudge));
+        updateAttention(thread);
       });
     },
     desiredRelease(): DesiredRelease | null {

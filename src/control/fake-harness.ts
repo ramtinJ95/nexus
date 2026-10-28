@@ -30,6 +30,8 @@ export function fakeHarness(options: { onParked?: (threadId: string, parked: boo
   const watchers = new Map<string, Set<(view: ConversationView) => void>>();
   const submitted = new Set<string>();
   let held: Promise<void> | null = null;
+  /** A sent message's entry kind, `nexus.<sender>` for an automated one, as the harness host submits it. */
+  const kinds = new WeakMap<Message, string>();
   const transcript = (threadId: string) => {
     const found = transcripts.get(threadId);
     assert.ok(found !== undefined, `the fake harness has no conversation for thread ${threadId}`);
@@ -38,7 +40,7 @@ export function fakeHarness(options: { onParked?: (threadId: string, parked: boo
   const view = (threadId: string): ConversationView => {
     const { id, messages, docs, entries } = transcript(threadId);
     const before = committed.get(threadId);
-    const fresh = entries ?? messages.map((message, i) => ({ id: i + 1, conversationId: id, kind: `pi.${message.role}`, model: [message] }));
+    const fresh = entries ?? messages.map((message, i) => ({ id: i + 1, conversationId: id, kind: kinds.get(message) ?? `pi.${message.role}`, model: [message] }));
     const next = {
       conversation: { id },
       entries: before !== undefined && JSON.stringify(before.entries) === JSON.stringify(fresh) ? before.entries : fresh,
@@ -65,7 +67,9 @@ export function fakeHarness(options: { onParked?: (threadId: string, parked: boo
       const key = `${args[0]} ${args[2]}`;
       if (submitted.has(key)) return { id: 7 } as never;
       submitted.add(key);
-      transcript(args[0]).messages.push({ role: "user", content: args[1], timestamp: Date.now() });
+      const message: Message = { role: "user", content: args[1], timestamp: Date.now() };
+      if (args[4] !== undefined) kinds.set(message, `nexus.${args[4]}`);
+      transcript(args[0]).messages.push(message);
       commit(args[0]);
       return { id: 7 } as never;
     },

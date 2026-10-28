@@ -1429,7 +1429,8 @@ test("PR outputs show GitHub metadata and automated entries are not labelled as 
   const thread = await s.start("acme", "Review");
   const pr = { repo: "acme/repo", number: 42, title: "Fix <checkout>", url: "https://github.com/acme/repo/pull/42", state: "merged", checks: "passing", review: "approved", conflict: false } as const;
   s.registry.savePrWatch(thread.id, { links: [{ pr, seen: [], failed: false }], commentWakes: 0, pending: null, error: null });
-  s.fake.transcript(thread.id).entries = [{ id: 1, conversationId: 1, kind: "nexus.pr-watch", data: { sender: "Nexus PR watch" }, model: [{ role: "user", content: "Automated feedback", timestamp: 0 }] }] as never;
+  s.fake.transcript(thread.id).entries = [{ id: 1, conversationId: 1, kind: "nexus.pr-watch", data: { sender: "Nexus PR watch" }, model: [{ role: "user", content: "Automated feedback", timestamp: 0 }] },
+    { id: 2, conversationId: 1, kind: "nexus.nudge", data: { sender: "Nexus nudge" }, model: [{ role: "user", content: "Open a pull request", timestamp: 0 }] }] as never;
   const page = (await s.call("GET", `/threads/${thread.id}`)).text;
   const outputs = sectionOf(page, "outputs-h");
   assert.match(textOf(outputs), /PR #42: Fix <checkout> — merged, checks passing, review approved/);
@@ -1437,6 +1438,7 @@ test("PR outputs show GitHub metadata and automated entries are not labelled as 
   assert.ok(outputs.includes("Fix &lt;checkout&gt;"));
   assert.equal((outputs.match(/PR watch: off/g) ?? []).length, 1);
   assert.match(conversationOf(page).text, /Nexus PR watch Automated feedback/);
+  assert.match(conversationOf(page).text, /Nexus nudge Open a pull request/);
   const detail = JSON.parse((await s.call("GET", `/v1/threads/${thread.id}`)).text);
   assert.deepEqual(detail.pullRequests, [pr]);
   assert.ok(detail.outputs.some((o: { kind: string; ref: string }) => o.kind === "pull-request" && o.ref === pr.url));

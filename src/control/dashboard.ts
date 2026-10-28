@@ -1005,11 +1005,11 @@ type ToolResult = { state: "done"; output: string; isError: boolean } | { state:
 type ToolItem = Extract<Item, { kind: "tool" }>;
 type UserItem = Extract<Item, { kind: "user" }>;
 
-/** Who a message came from. Nexus's PR watch and review loop write into a conversation as a user. */
-type PromptFrom = PromptSource | "pr-watch" | "review";
+/** Who a message came from. Nexus's PR watch, review loop and nudge write into a conversation as a user. */
+type PromptFrom = PromptSource | "pr-watch" | "review" | "nudge";
 /** How a bubble names who a message came from. A person's is said only to a screen reader, as the bubble's side shows it. */
 const promptLabel: Record<PromptFrom, string> = {
-  person: "You", "pr-watch": "Nexus PR watch", review: "Nexus review", command: "Slash command", other: "Claude Code",
+  person: "You", "pr-watch": "Nexus PR watch", review: "Nexus review", nudge: "Nexus nudge", command: "Slash command", other: "Claude Code",
 };
 
 const contentText = (content: UserMessage["content"]) => typeof content === "string" ? content
@@ -1039,7 +1039,7 @@ function conversationItems(view: ConversationView): Item[] {
   };
 
   for (const { entry, message } of view.entries.flatMap((entry) => (entry.model ?? []).map((message) => ({ entry, message })))) {
-    if (message.role === "user") items.push({ kind: "user", text: contentText(message.content), queued: null, at: message.timestamp, from: entry.kind === "nexus.pr-watch" ? "pr-watch" : entry.kind === "nexus.review" ? "review" : "person" });
+    if (message.role === "user") items.push({ kind: "user", text: contentText(message.content), queued: null, at: message.timestamp, from: entry.kind === "nexus.pr-watch" ? "pr-watch" : entry.kind === "nexus.review" ? "review" : entry.kind === "nexus.nudge" ? "nudge" : "person" });
     if (message.role === "assistant") answer(message, false);
     if (message.role === "toolResult") {
       const result: ToolResult = { state: "done", output: contentText(message.content), isError: message.isError };
@@ -1202,8 +1202,8 @@ function blocks(items: readonly Item[]): Block[] {
 function blockView(block: Block): Html {
   switch (block.kind) {
     case "user": {
-      const from: PromptFrom = block.from !== "person" ? block.from : block.text.startsWith("[Nexus PR watch") ? "pr-watch" : block.text.startsWith("[Nexus review") ? "review" : "person";
-      const named = from !== "person" && from !== "pr-watch" && from !== "review";
+      const from: PromptFrom = block.from !== "person" ? block.from : block.text.startsWith("[Nexus PR watch") ? "pr-watch" : block.text.startsWith("[Nexus review") ? "review" : block.text.startsWith("[Nexus nudge") ? "nudge" : "person";
+      const named = from !== "person" && from !== "pr-watch" && from !== "review" && from !== "nudge";
       return html`<div class="msg user${block.queued !== null && " queued"}">${!named && unseen(promptLabel[from])}${(named || block.queued !== null) && html`<div class="msg-who">${named && html`<span class="chip chip-from">${promptLabel[from]}</span>`}${block.queued !== null && html`<span class="chip chip-queued">queued, ${block.queued}</span>`}</div>`}<div class="text">${prose(block.text)}</div></div>`;
     }
     case "agent": return block.streaming

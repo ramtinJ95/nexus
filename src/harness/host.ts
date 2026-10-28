@@ -28,8 +28,8 @@ import type { AgentCall } from "../control/usage.ts";
 export type { ConversationId };
 
 /** Who sent an automated input entry, which the entry's kind, `nexus.<sender>`, and its data name. */
-export type Sender = "pr-watch" | "review" | "usage-limit";
-const senderNames: Readonly<Record<Sender, string>> = { "pr-watch": "Nexus PR watch", review: "Nexus review", "usage-limit": "Nexus usage limit" };
+export type Sender = "pr-watch" | "review" | "usage-limit" | "nudge";
+const senderNames: Readonly<Record<Sender, string>> = { "pr-watch": "Nexus PR watch", review: "Nexus review", "usage-limit": "Nexus usage limit", nudge: "Nexus nudge" };
 
 export interface HarnessHostOptions {
   /** For example /var/lib/nexus/harness.sqlite. Its own file, not the registry's. */
