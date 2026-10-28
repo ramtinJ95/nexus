@@ -14,6 +14,7 @@ import type { Drain, ReleaseReport } from "../deploy/model.ts";
 import type { PrWatchState } from "./pr-watch.ts";
 import type { Question } from "./questions.ts";
 import type { Nudge } from "./nudge.ts";
+import type { Judgment } from "./judgment.ts";
 import type { ItemId, ItemRecord } from "./pipeline.ts";
 import type { QueuedRecord } from "./queue.ts";
 import type { Placement } from "./placement.ts";
@@ -356,6 +357,12 @@ const migrations: readonly string[] = [
   // person turned off keeps it as null, so a registry rewound past this applies it again without turning it back on.
   `CREATE TABLE IF NOT EXISTS pipeline_items (id TEXT PRIMARY KEY, record TEXT NOT NULL) STRICT;
    UPDATE projects SET record = json_set(record, '$.pipeline', json('{"autoStart":true}')) WHERE id = 'nexus' AND json_type(record, '$.pipeline') IS NULL;`,
+  // Each failed pylon's judgment, keyed by the thread.failed event of its failure, and the newest event when judgments
+  // began, so no failure from before is ever judged. It touches nothing an earlier migration made, so a registry rewound
+  // past it applies it again unchanged.
+  `CREATE TABLE IF NOT EXISTS judgments (failure INTEGER PRIMARY KEY, thread TEXT NOT NULL REFERENCES threads (id), record TEXT NOT NULL) STRICT;
+   CREATE TABLE IF NOT EXISTS judgment_since (event INTEGER NOT NULL) STRICT;
+   INSERT INTO judgment_since SELECT (SELECT coalesce(max(id), 0) FROM events) WHERE NOT EXISTS (SELECT 1 FROM judgment_since);`,
 ];
 
 type Row = Record<string, unknown>;
@@ -1057,6 +1064,33 @@ export function openRegistry(path: string, clock = Date.now) {
         sql("INSERT INTO pr_watches (thread, record) VALUES (?, ?) ON CONFLICT (thread) DO UPDATE SET record = excluded.record").run(thread, JSON.stringify(state));
       });
     },
+    judgment: (failure: number): Judgment | null => jsonOrNull<Judgment>(sql("SELECT record FROM judgments WHERE failure = ?").get(failure)?.record ?? null),
+    /** The thread's judgments, oldest failure first. */
+    judgments: (thread: ThreadId): Judgment[] => sql("SELECT record FROM judgments WHERE thread = ? ORDER BY failure").all(thread).map((r) => json<Judgment>(r.record)),
+    /**
+     * Replaces the judgment as it was read, `previous`, or adds it when that is null, and runs `alongside` in the same
+     * transaction. False, with nothing written or run, when the stored record is not `previous`: another pass saved first.
+     */
+    saveJudgment(next: Judgment, previous: Judgment | null, alongside: () => void = () => {}): boolean {
+      return transaction(() => {
+        const { changes } = previous === null
+          ? sql("INSERT INTO judgments (failure, thread, record) VALUES (?, ?, ?) ON CONFLICT DO NOTHING").run(next.failure, next.thread, JSON.stringify(next))
+          : sql("UPDATE judgments SET record = ? WHERE failure = ? AND record = ?").run(JSON.stringify(next), next.failure, JSON.stringify(previous));
+        if (changes === 1) alongside();
+        return changes === 1;
+      });
+    },
+    /** The newest event when judgments began. No failure at or below it is judged. */
+    judgmentSince: (): number => sql("SELECT event FROM judgment_since").get()!.event as number,
+    /**
+     * The failure the thread's pylon holds: the thread.failed event its pylon's `failed` appended. Null while the pylon
+     * has not failed, or once that event is pruned. A failed Claude launch appends one too, with another message.
+     */
+    failure(thread: ThreadId): { event: number; at: number } | null {
+      const row = sql(`SELECT e.id, e.time FROM pylons p JOIN events e ON e.thread = p.thread AND e.kind = 'thread.failed' AND json_extract(e.payload, '$.message') = p.failed
+        WHERE p.thread = ? ORDER BY e.id DESC LIMIT 1`).get(thread);
+      return row === undefined ? null : { event: row.id as number, at: row.time as number };
+    },
     nudge: (thread: ThreadId): Nudge | null => jsonOrNull<Nudge>(sql("SELECT record FROM nudges WHERE thread = ?").get(thread)?.record ?? null),
     /** Replaces the builder's nudge record, or with null deletes it. */
     saveNudge(thread: ThreadId, nudge: Nudge | null) {
@@ -1213,6 +1247,22 @@ export function openRegistry(path: string, clock = Date.now) {
     },
     /** Forgets the pylon's failed jobs, and only those, as the usage backfill does for a wake it gave up on. */
     clearPylonAttempts(pylonId: PylonId) { sql(`UPDATE pylons SET attempts = '{"count":0,"last":null}' WHERE id = ?`).run(pylonId); },
+    /**
+     * Moves a failed pylon to another node and clears its failure as retryPylon does, with its thread's new placement and
+     * setup, in one transaction. False when the pylon is not failed on `from`.
+     */
+    movePylon(pylonId: PylonId, from: NodeName, to: Pick<StoredPylon, "node" | "firstBoot" | "live" | "liveHash"> & { placement: Placement; setup: ThreadSetup }): boolean {
+      return transaction(() => {
+        const thread = threadOfPylon(pylonId);
+        if (thread === undefined) return false;
+        const moved = sql(`UPDATE pylons SET node = ?, first_boot = ?, live = ?, live_hash = ?, attempts = '{"count":0,"last":null}', failed = NULL, retrying = 0
+          WHERE id = ? AND node = ? AND failed IS NOT NULL`).run(to.node, JSON.stringify(to.firstBoot), JSON.stringify(to.live), to.liveHash, pylonId, from).changes === 1;
+        if (!moved) return false;
+        sql("UPDATE threads SET placement = ?, setup = ? WHERE id = ?").run(JSON.stringify(to.placement), JSON.stringify(to.setup), thread);
+        updateAttention(thread);
+        return true;
+      });
+    },
     /** Clears a failed pylon's verdict and attempts, and marks a human retry. False when the pylon has not failed. */
     retryPylon: (pylonId: PylonId): boolean => transaction(() => {
       const changed = q.retryPylon.run(pylonId).changes === 1;

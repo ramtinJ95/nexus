@@ -1395,3 +1395,89 @@ test("the migration that adds pipeline items turns the pipeline on for project n
   t.after(() => again.close());
   assert.equal(again.project("nexus" as ProjectId)?.pipeline, null, "the person turned it off, and a rewound registry keeps it off");
 });
+
+test("judgments begin at the newest event, so failures from before are never judged, and a rewound registry keeps that watermark", (t) => {
+  const path = tempDb();
+  const registry = seeded(path);
+  registry.savePylon({ ...pylon, failed: "gave up after 5 failed attempts" });
+  const failed = Number(registry.events("0", { kinds: ["thread.failed"] })[0]!.id);
+  const before = Number(registry.newestEvent());
+  registry.close();
+  const rewind = () => {
+    const db = new DatabaseSync(path);
+    const version = db.prepare("PRAGMA user_version").get()!.user_version as number;
+    db.exec(`DROP TABLE judgments; DROP TABLE judgment_since; PRAGMA user_version = ${version - 1}`);
+    db.close();
+  };
+  rewind();
+  const upgraded = openRegistry(path);
+  assert.equal(upgraded.judgmentSince(), before, "the failure before the upgrade is at the watermark");
+  assert.ok(upgraded.failure(threadId)!.event === failed && failed <= before);
+  upgraded.retryPylon(pylonId);
+  upgraded.savePylon({ ...upgraded.pylon(pylonId)!, failed: "gave up again" });
+  upgraded.close();
+  const db = new DatabaseSync(path);
+  const version = db.prepare("PRAGMA user_version").get()!.user_version as number;
+  db.exec(`PRAGMA user_version = ${version - 1}`);
+  db.close();
+  const again = openRegistry(path);
+  t.after(() => again.close());
+  assert.equal(again.judgmentSince(), before, "applied again, the migration keeps the first watermark");
+  const raw = new DatabaseSync(path);
+  t.after(() => raw.close());
+  assert.equal(raw.prepare("SELECT count(*) AS n FROM judgment_since").get()!.n, 1, "and adds no second one");
+  assert.ok(again.failure(threadId)!.event > before, "and the failure since is above it");
+});
+
+test("a pylon's failure is the thread.failed event its pylon appended, until a retry clears it", (t) => {
+  let now = 1_000;
+  const registry = seeded(tempDb(), () => now);
+  t.after(() => registry.close());
+  assert.equal(registry.failure(threadId), null, "a pylon that has not failed has none");
+  registry.savePylon({ ...pylon, failed: "pylon is broken: the controller exited" });
+  const first = registry.failure(threadId)!;
+  assert.deepEqual(first, { event: Number(registry.events("0", { kinds: ["thread.failed"] })[0]!.id), at: 1_000 });
+  now = 2_000;
+  registry.appendEvent("thread.failed", threadId, { message: "Claude launch was interrupted; attach to check before starting another session" });
+  registry.savePylon({ ...registry.pylon(pylonId)!, attempts: { count: 0, last: null } });
+  assert.deepEqual(registry.failure(threadId), first, "a failed Claude launch and a save that keeps the reason are not new failures");
+  registry.retryPylon(pylonId);
+  assert.equal(registry.failure(threadId), null, "a retry clears it");
+  registry.savePylon({ ...registry.pylon(pylonId)!, failed: "pylon is broken: the controller exited" });
+  assert.ok(registry.failure(threadId)!.event > first.event, "the same reason after a retry is a new failure");
+});
+
+test("a judgment is saved only over the record as it was read, with what it does in the same transaction", (t) => {
+  const registry = seeded(tempDb());
+  t.after(() => registry.close());
+  const judgment = {
+    failure: 7, thread: threadId, node, failed: "broken", startedAt: 1, request: { brief: "Judge it.", token: "judgment:7:aa" }, conversation: null, reply: null,
+    phase: { kind: "judging", deadline: null },
+  } as const;
+  let acted = 0;
+  assert.equal(registry.saveJudgment(judgment, null, () => acted++), true);
+  assert.equal(registry.saveJudgment({ ...judgment, conversation: 9 }, null, () => acted++), false, "a second record of the failure is refused");
+  assert.equal(registry.saveJudgment({ ...judgment, conversation: 9 }, judgment, () => acted++), true);
+  assert.equal(registry.saveJudgment({ ...judgment, conversation: 10 }, judgment, () => acted++), false, "a pass that read the record before that save changes nothing");
+  assert.equal(acted, 2, "only the saves that wrote acted");
+  assert.deepEqual(registry.judgment(7), { ...judgment, conversation: 9 });
+  assert.deepEqual(registry.judgments(threadId).map((j) => j.conversation), [9]);
+});
+
+test("a move takes a failed pylon to another node with a fresh boot, and its thread's placement and setup with it", (t) => {
+  const registry = seeded(tempDb());
+  t.after(() => registry.close());
+  const other = "rj-other" as NodeName;
+  registry.upsertNode({ name: other, tailnetHost: "rj-other.tail.ts.net", tailnetNodeId: "nOTHER" as TailnetNodeId });
+  const to = {
+    node: other, firstBoot: { kind: "fresh", preSetup: "apt-get install -y jq" }, live: { previews: [], overlay: [] }, liveHash: "hash-2" as LiveHash,
+    placement: { how: "auto", node: other, weighed: [{ node: other, left: { cpus: 6, memoryGiB: 20, diskGiB: 90 } }] }, setup: { how: "fresh", reason: "the pylon moved" },
+  } as const;
+  assert.equal(registry.movePylon(pylonId, node, to), false, "a pylon that has not failed stays");
+  registry.savePylon({ ...pylon, failed: "broken", attempts: { count: 5, last: { at: 5, code: "backend", message: "no" } } });
+  assert.equal(registry.movePylon(pylonId, other, to), false, "a pylon on another node than the one named stays");
+  assert.equal(registry.movePylon(pylonId, node, to), true);
+  assert.deepEqual(registry.pylon(pylonId), { ...pylon, node: other, firstBoot: to.firstBoot, live: to.live, liveHash: to.liveHash, failed: null, attempts: { count: 0, last: null }, retrying: false });
+  assert.deepEqual([registry.thread(threadId)!.placement, registry.thread(threadId)!.setup], [to.placement, to.setup]);
+  assert.equal(registry.attention(threadId) === "failed", false);
+});
