@@ -17,46 +17,46 @@ exit 0
 
 wrote the live thread's transcript into its running pylon, and restarted the control plane, whose start reads every running pylon
 --- 00-archive-live.txt
-$ nexus archive th-ee23dfaf5ad9
-Archived th-ee23dfaf5ad9.
+$ nexus archive th-20003f2c575f
+Archived th-20003f2c575f.
 exit 0
 
 --- 00-archive-big.txt
-$ nexus archive th-d72f7acfb078
-Archived th-d72f7acfb078.
+$ nexus archive th-cb250e6d0ea3
+Archived th-cb250e6d0ea3.
 exit 0
 
 --- 00-archive-pi.txt
-$ nexus archive th-e01fed322bd6
-Archived th-e01fed322bd6.
+$ nexus archive th-e62fc008f85b
+Archived th-e62fc008f85b.
 exit 0
 
 --- 00-archive-both.txt
-$ nexus archive th-3da6d21af410
-Archived th-3da6d21af410.
+$ nexus archive th-6c08354eb7bf
+Archived th-6c08354eb7bf.
 exit 0
 
 --- 00-archive-noboot.txt
-$ nexus archive th-87dcc30b093b
-Archived th-87dcc30b093b.
+$ nexus archive th-4e5732442267
+Archived th-4e5732442267.
 exit 0
 
 --- 00-archive-noread.txt
-$ nexus archive th-86433046afb9
-Archived th-86433046afb9.
+$ nexus archive th-ce9d6e1ed315
+Archived th-ce9d6e1ed315.
 exit 0
 
 --- 00-archive-deleted.txt
-$ nexus archive th-37c63350a81a
-Archived th-37c63350a81a.
+$ nexus archive th-2ea465855049
+Archived th-2ea465855049.
 exit 0
 
 --- 00-delete.txt
-$ nexus delete th-37c63350a81a
-Deleted th-37c63350a81a.
+$ nexus delete th-2ea465855049
+Deleted th-2ea465855049.
 exit 0
 
-wrote the archived pylons' histories; live=th-ee23dfaf5ad9 big=th-d72f7acfb078 pi=th-e01fed322bd6 both=th-3da6d21af410 noboot=th-87dcc30b093b noread=th-86433046afb9 deleted=th-37c63350a81a
+wrote the archived pylons' histories; live=th-20003f2c575f big=th-cb250e6d0ea3 pi=th-e62fc008f85b both=th-6c08354eb7bf noboot=th-4e5732442267 noread=th-ce9d6e1ed315 deleted=th-2ea465855049
 --- 02-threads-before.json
 {
   "live": {
@@ -65,7 +65,7 @@ wrote the archived pylons' histories; live=th-ee23dfaf5ad9 big=th-d72f7acfb078 p
     "desired": "paused",
     "actual": "paused",
     "failed": null,
-    "lastHumanActivityAt": 1793147884928,
+    "lastHumanActivityAt": 1793149592713,
     "seenAt": null,
     "lastReplyAt": null
   },
@@ -75,7 +75,7 @@ wrote the archived pylons' histories; live=th-ee23dfaf5ad9 big=th-d72f7acfb078 p
     "desired": "paused",
     "actual": "paused",
     "failed": null,
-    "lastHumanActivityAt": 1793147885099,
+    "lastHumanActivityAt": 1793149592890,
     "seenAt": null,
     "lastReplyAt": null
   },
@@ -85,7 +85,7 @@ wrote the archived pylons' histories; live=th-ee23dfaf5ad9 big=th-d72f7acfb078 p
     "desired": "paused",
     "actual": "paused",
     "failed": null,
-    "lastHumanActivityAt": 1793147885275,
+    "lastHumanActivityAt": 1793149593088,
     "seenAt": null,
     "lastReplyAt": null
   },
@@ -95,7 +95,7 @@ wrote the archived pylons' histories; live=th-ee23dfaf5ad9 big=th-d72f7acfb078 p
     "desired": "paused",
     "actual": "paused",
     "failed": null,
-    "lastHumanActivityAt": 1793147885446,
+    "lastHumanActivityAt": 1793149593285,
     "seenAt": null,
     "lastReplyAt": null
   },
@@ -105,7 +105,7 @@ wrote the archived pylons' histories; live=th-ee23dfaf5ad9 big=th-d72f7acfb078 p
     "desired": "paused",
     "actual": "paused",
     "failed": null,
-    "lastHumanActivityAt": 1793147885620,
+    "lastHumanActivityAt": 1793149593469,
     "seenAt": null,
     "lastReplyAt": null
   },
@@ -115,7 +115,7 @@ wrote the archived pylons' histories; live=th-ee23dfaf5ad9 big=th-d72f7acfb078 p
     "desired": "paused",
     "actual": "paused",
     "failed": null,
-    "lastHumanActivityAt": 1793147885785,
+    "lastHumanActivityAt": 1793149593720,
     "seenAt": null,
     "lastReplyAt": null
   }
@@ -136,7 +136,7 @@ MATCH
 
 --- 03-usage-before.txt
 $ nexus usage --since all --by kind
-Usage of all projects for all time. Counting started 2026-10-28 00:38 UTC.
+Usage of all projects for all time. Counting started 2026-10-28 01:06 UTC.
 
        Input  Output  Cache write  Cache read  Total  Calls
 Total  20     1.5k    37.7k        293k        332k   9
@@ -174,7 +174,7 @@ exit 0
 
 --- 06-usage-running.txt
 $ nexus usage --since all --by kind
-Usage of all projects for all time. Counting started 2026-10-28 00:38 UTC.
+Usage of all projects for all time. Counting started 2026-10-28 01:06 UTC.
 
        Input  Output  Cache write  Cache read  Total  Calls
 Total  20     1.5k    37.7k        293k        332k   9
@@ -198,7 +198,7 @@ DIFFERENT
 
 --- 08-usage-after.txt
 $ nexus usage --since all --by kind
-Usage of all projects for all time. Counting started 2026-10-28 00:38 UTC.
+Usage of all projects for all time. Counting started 2026-10-28 01:06 UTC.
 
        Input  Output  Cache write  Cache read  Total  Calls
 Total  20     1.5k    37.7k        293k        332k   9
@@ -223,7 +223,7 @@ exit 64
     "desired": "paused",
     "actual": "paused",
     "failed": null,
-    "lastHumanActivityAt": 1793147884928,
+    "lastHumanActivityAt": 1793149592713,
     "seenAt": null,
     "lastReplyAt": null
   },
@@ -233,7 +233,7 @@ exit 64
     "desired": "paused",
     "actual": "paused",
     "failed": null,
-    "lastHumanActivityAt": 1793147885099,
+    "lastHumanActivityAt": 1793149592890,
     "seenAt": null,
     "lastReplyAt": null
   },
@@ -243,7 +243,7 @@ exit 64
     "desired": "paused",
     "actual": "paused",
     "failed": null,
-    "lastHumanActivityAt": 1793147885275,
+    "lastHumanActivityAt": 1793149593088,
     "seenAt": null,
     "lastReplyAt": null
   },
@@ -253,7 +253,7 @@ exit 64
     "desired": "paused",
     "actual": "paused",
     "failed": null,
-    "lastHumanActivityAt": 1793147885446,
+    "lastHumanActivityAt": 1793149593285,
     "seenAt": null,
     "lastReplyAt": null
   },
@@ -263,7 +263,7 @@ exit 64
     "desired": "paused",
     "actual": "paused",
     "failed": null,
-    "lastHumanActivityAt": 1793147885620,
+    "lastHumanActivityAt": 1793149593469,
     "seenAt": null,
     "lastReplyAt": null
   },
@@ -273,7 +273,7 @@ exit 64
     "desired": "paused",
     "actual": "paused",
     "failed": null,
-    "lastHumanActivityAt": 1793147885785,
+    "lastHumanActivityAt": 1793149593720,
     "seenAt": null,
     "lastReplyAt": null
   }
@@ -313,7 +313,7 @@ MATCH
 
 --- 12-usage-after-second-run.txt
 $ nexus usage --since all --by kind
-Usage of all projects for all time. Counting started 2026-10-28 00:38 UTC.
+Usage of all projects for all time. Counting started 2026-10-28 01:06 UTC.
 
        Input  Output  Cache write  Cache read  Total  Calls
 Total  20     1.5k    37.7k        293k        332k   9

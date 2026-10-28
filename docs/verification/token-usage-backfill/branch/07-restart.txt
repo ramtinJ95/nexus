@@ -1,4 +1,4 @@
-before the restart: {"state":"running","startedAt":1793147903328,"finishedAt":null,"current":{"thread":"th-c51e900754b4","phase":"reading","since":1793147928342},"waiting":null,"read":3,"of":6,"recovered":{"calls":6012,"tokens":7525723},"skipped":[]}
+before the restart: {"state":"running","startedAt":1793149611670,"finishedAt":null,"current":{"thread":"th-9b17a94298f6","phase":"reading","since":1793149634858},"waiting":null,"read":3,"of":6,"recovered":{"calls":6012,"tokens":7525723},"skipped":[]}
 total: {"calls":6021,"input":19997,"output":301733,"cacheWrite":1237665,"cacheRead":6298782,"total":7858177}
-after the restart: {"state":"running","startedAt":1793147903328,"finishedAt":null,"current":{"thread":"th-c51e900754b4","phase":"reading","since":1793147928342},"waiting":null,"read":3,"of":6,"recovered":{"calls":6012,"tokens":7525723},"skipped":[]}
+after the restart: {"state":"running","startedAt":1793149611670,"finishedAt":null,"current":{"thread":"th-9b17a94298f6","phase":"reading","since":1793149634858},"waiting":null,"read":3,"of":6,"recovered":{"calls":6012,"tokens":7525723},"skipped":[]}
 total: {"calls":6021,"input":19997,"output":301733,"cacheWrite":1237665,"cacheRead":6298782,"total":7858177}
