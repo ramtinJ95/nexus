@@ -23,13 +23,16 @@ import { trackActivity, type AgentFacts, type HarnessActivity } from "./activity
 import { pylonEnvs, type PylonLocator } from "./pylon-env.ts";
 import { latestTurn, turnSnapshots } from "./turn-snapshot.ts";
 import { writeThread } from "./thread-doc.ts";
+import { driveTools, type Drive } from "./drive-tools.ts";
 import type { AgentCall } from "../control/usage.ts";
 
 export type { ConversationId };
 
 /** Who sent an automated input entry, which the entry's kind, `nexus.<sender>`, and its data name. */
-export type Sender = "pr-watch" | "review" | "usage-limit" | "nudge";
-const senderNames: Readonly<Record<Sender, string>> = { "pr-watch": "Nexus PR watch", review: "Nexus review", "usage-limit": "Nexus usage limit", nudge: "Nexus nudge" };
+export type Sender = "pr-watch" | "review" | "usage-limit" | "nudge" | "watch" | "thread";
+const senderNames: Readonly<Record<Sender, string>> = {
+  "pr-watch": "Nexus PR watch", review: "Nexus review", "usage-limit": "Nexus usage limit", nudge: "Nexus nudge", watch: "Nexus watch", thread: "Nexus thread",
+};
 
 export interface HarnessHostOptions {
   /** For example /var/lib/nexus/harness.sqlite. Its own file, not the registry's. */
@@ -54,15 +57,18 @@ export interface HarnessHostOptions {
   onParked?: (threadId: string, parked: boolean) => void;
   onActivity(threadId: string, facts: AgentFacts): void;
   log(message: string): void;
+  /** The drive tools' control-plane side. Without it, no thread can have them. */
+  drive?: Promise<Drive>;
 }
 
 export interface HarnessHost {
   /**
    * Creates the thread's conversation and returns its ID. Write the registry row with that ID afterwards: a
    * crash in between leaves an empty conversation that nothing points to, which is harmless. A thread that already
-   * has one gets it back, so a queued thread's start that failed after this can run again.
+   * has one gets it back, so a queued thread's start that failed after this can run again. `drive` selects the drive tools,
+   * which no other conversation gets.
    */
-  startThread(thread: { threadId: string; pylonId: PylonId }): Promise<ConversationId>;
+  startThread(thread: { threadId: string; pylonId: PylonId; drive?: boolean }): Promise<ConversationId>;
   /**
    * A human message, or an attributed PR-watch input. A retry with the same `requestId` returns the first submission. A busy
    * conversation queues it as a follow-up, or with `steer` places it after the current tool round.
@@ -90,15 +96,17 @@ export async function openHarnessHost(options: HarnessHostOptions): Promise<Harn
   const activity = trackActivity({ onParked: (id, parked) => options.onParked?.(id, parked), onChange: options.onActivity, onReply: (id, at) => options.onReply?.(id, at) });
   const envs = pylonEnvs(options.locator, { tailscaled: options.tailscaled, log });
   const registry = createRegistry();
-  registry.install(CodingTools);
-  registry.install(turnSnapshots(() => harness, async (pylon, turn) => {
+  const snapshots = turnSnapshots(() => harness, async (pylon, turn) => {
     const target = await options.locator.awaitRunning(pylon, Date.now() + jobDeadlineMs.spawn);
     const client = connectProbe(target.node, target.host, target.nodeId, { port: target.port, whois: localApiWhois(options.tailscaled) });
     await checkoutReader((argv) => client.stream(pylon, argv), checkoutDir).snapshot(turn);
-  }, log));
+  }, log);
+  const drive = options.drive === undefined ? undefined : driveTools(options.drive);
+  for (const extension of [CodingTools, snapshots, ...drive === undefined ? [] : [drive]]) registry.install(extension);
   const harness = await Harness.open(await openNodeSqliteStorage(options.storagePath), {
     models: options.models,
     registry,
+    settings: { extensions: [CodingTools, snapshots] },
     env: envs.env,
     onReport(error, info) {
       log(`harness ${info.type}: ${error instanceof Error ? error.message : String(error)}`);
@@ -131,12 +139,13 @@ export async function openHarnessHost(options: HarnessHostOptions): Promise<Harn
 
   return {
     activity,
-    async startThread({ threadId, pylonId }) {
+    async startThread({ threadId, pylonId, drive: wantsDrive = false }) {
       const existing = conversations.get(threadId);
       if (existing !== undefined) return existing;
+      if (wantsDrive && drive === undefined) throw new Error("this harness has no drive tools");
       const created = await harness.createConversation({
         ownership: { kind: "ownerless" },
-        agent: { model: options.model, cwd: checkoutDir },
+        agent: { model: options.model, cwd: checkoutDir, ...wantsDrive ? { extensions: { add: [drive!] } } : {} },
         init: (tx, id) => writeThread(tx, id, { threadId, pylonId }),
       }, context);
       conversations.set(threadId, created.id);

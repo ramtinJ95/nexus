@@ -14,12 +14,17 @@ import type { Registry, StartKey, Thread, ThreadId } from "./registry.ts";
  * What starts a thread. `claude` makes it a Claude worker with that first prompt, which gets `/poteto-mode` in front
  * unless `raw`, as for the review loop's reviewers. A `bare` thread has neither agent, as a check thread needs only
  * its pylon. Only the control plane itself asks for `raw` or `bare`. `node` names a node, or is `auto` for the one
- * where the pylon fits best. `resources` overrides the project's size field by field.
+ * where the pylon fits best. `resources` overrides the project's size field by field. `drive` gives a Nexus agent thread
+ * the drive tools. `parent` is the thread whose `nexus_start` asks, which only the drive tools set.
  */
 export interface StartRequest {
   project: string; title: string; node?: string | undefined; branch?: string | undefined; commit?: string | undefined; claude?: string | undefined; model?: string | undefined; raw?: boolean; bare?: boolean;
   resources?: { [K in keyof BootInputs["resources"]]?: BootInputs["resources"][K] | undefined } | undefined;
+  drive?: boolean | undefined; parent?: ThreadId | undefined;
 }
+
+/** How many children a thread may have that are not archived or deleted. A child has no drive tools, so it starts none. */
+export const maxChildren = 3;
 
 /** `pylon-<id>` must fit in 40 characters. */
 export const newThreadId = () => `th-${randomBytes(6).toString("hex")}` as ThreadId;
@@ -35,7 +40,24 @@ export function checkStart(registry: Registry, request: StartRequest): Project {
   if (project === undefined) throw new HttpError(404, `no project ${request.project}`);
   if (request.node !== undefined && request.node !== "auto" && registry.node(request.node as NodeName) === undefined) throw new HttpError(400, `no node ${request.node}`);
   if (!hasRemote(project) && request.commit !== undefined) throw new HttpError(400, `project ${project.id} is a scratch project, so it has no commit to check out`);
+  checkLineage(registry, request);
   return project;
+}
+
+/**
+ * Who may have the drive tools, and who may start a child. A start checks first and again just before it writes the
+ * thread, with no wait in between, so two starts from one parent at once cannot both take its last place.
+ */
+function checkLineage(registry: Registry, request: StartRequest) {
+  if (request.drive === true && (request.claude !== undefined || request.bare === true)) throw new HttpError(400, "the drive tools are Nexus agent tools, so a Claude worker or a bare thread cannot have them");
+  if (request.parent === undefined) return;
+  if (request.drive === true) throw new HttpError(400, "a thread a tool starts gets no drive tools");
+  const parent = registry.thread(request.parent);
+  if (parent === undefined) throw new HttpError(404, `no thread ${request.parent}`);
+  if (parent.drive !== true) throw new HttpError(403, `thread ${parent.id} has no drive tools. Only a thread a person starts with them may start threads, and a thread a tool started never has them`);
+  if (parent.status === "archived" || parent.status === "deleted") throw new HttpError(409, `thread ${parent.id} is ${parent.status}, so it starts nothing`);
+  const live = registry.children(parent.id).filter((t) => t.status === "active" || t.status === "idle");
+  if (live.length >= maxChildren) throw new HttpError(409, `thread ${parent.id} has ${live.length} live children (${live.map((t) => t.id).join(", ")}), the most a thread may have. A child counts until it is archived or deleted`);
 }
 
 /** A shorter ID or a ref name may resolve to another commit by the time the pylon boots. */
@@ -117,7 +139,7 @@ export function threadStarter(options: { registry: Registry; harness: Pick<Harne
         ? { fresh: `the start asked for a ${resources.diskGiB} GiB disk, and this project's templates have ${project.resources.diskGiB} GiB` }
         : await readSetup(project, branch, request.commit);
 
-      const conversationId = request.claude === undefined && request.bare !== true ? await harness.startThread({ threadId: id, pylonId }) : null;
+      const conversationId = request.claude === undefined && request.bare !== true ? await harness.startThread({ threadId: id, pylonId, ...request.drive === true ? { drive: true } : {} }) : null;
       const now = Date.now();
       const { setup, firstBoot, repo } = setUp(project, read, freshRepo, image, branch, node, now);
       const boot: Omit<BootInputs, "source"> = { pylonId, image, resources, gitIdentity: project.gitIdentity ?? gitIdentity, network, repo, dotfiles };
@@ -125,6 +147,7 @@ export function threadStarter(options: { registry: Registry; harness: Pick<Harne
         id, title: request.title, project: project.id, pylonId, status: "active", conversationId: conversationId === null ? null : String(conversationId), startedBy: caller, createdAt: now,
         // Starting a thread is human activity, so its pylon is wanted at once.
         agentTurnRunning: false, working: false, lastAgentActivityAt: 0, lastHumanActivityAt: now, seenAt: null, lastReplyAt: null, placement, setup,
+        ...request.parent === undefined ? {} : { parent: request.parent }, ...request.drive === true ? { drive: true as const } : {},
       };
       // Ports are allocated once the pylon reports the services that want a preview.
       const live = pylonLive({ pylonId, thread: id, node, boot }, project, []);
@@ -135,6 +158,7 @@ export function threadStarter(options: { registry: Registry; harness: Pick<Harne
         live,
         liveHash: liveHashOf(live),
       });
+      checkLineage(registry, request);
       registry.createThread(t, pylon, claudePrompt, request.model, queuedId !== undefined, key);
       wake(node);
       return t;

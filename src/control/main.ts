@@ -36,6 +36,10 @@ import { startImageRollout } from "./image-rollout.ts";
 import { loadImageRecipe } from "../image-build.ts";
 import { runningCommit } from "../deploy/health.ts";
 import { chatgptTokenHandoff } from "./chatgpt-token.ts";
+import type { Drive } from "../harness/drive-tools.ts";
+import { driveCalls } from "./drive.ts";
+import { threadStarts } from "./starts.ts";
+import { watchPass } from "./watches.ts";
 
 const absolutePath = z.string().refine(isAbsolute, "must be an absolute path");
 const port = z.int().min(1).max(65_535);
@@ -139,7 +143,10 @@ export async function startControlPlane(config: ControlPlaneConfig, models: Mode
     const agent = registry.agent(thread);
     return agent.kind === "harness" ? [{ thread, id: Number(agent.conversationId) as ConversationId }] : [];
   });
+  // Open resumes every run, whose drive tool calls wait for the wiring below.
+  const drive = Promise.withResolvers<Drive>();
   const rawHarness = await openHarnessHost({
+    drive: drive.promise,
     storagePath: config.harness.storage,
     models,
     model: config.harness.model,
@@ -208,6 +215,17 @@ export async function startControlPlane(config: ControlPlaneConfig, models: Mode
   const nudges = github === null ? null : builderNudger({ registry, github, inbox, harness, watch, log: (message) => console.error(message) });
   const nudgeTimer = setInterval(() => { void nudges?.poll(); }, 15_000);
   void nudges?.poll();
+  const watches = watchPass({ registry, inbox, log: (message) => console.error(message) });
+  const watchesTimer = setInterval(() => { void watches.poll(); }, 15_000);
+  void watches.poll();
+  drive.resolve(driveCalls({
+    registry, inbox, harness, watches,
+    start: threadStarts({
+      registry, startThread,
+      send: (id, text, requestId, sender) => harness.send(id, text, requestId, "followUp", ...sender === undefined ? [] : [sender]),
+      queue: () => { throw new Error("nexus_start queues nothing"); },
+    }),
+  }));
   const api = await startApi({
     ...(config.https ? { https: { port: 7443, certificate: () => localApiCertificate(config.https!.hostname, tailscaled) } } : {}),
     prWatchEnabled: token !== null,
@@ -235,6 +253,7 @@ export async function startControlPlane(config: ControlPlaneConfig, models: Mode
       clearInterval(reviewTimer);
       clearInterval(queueTimer);
       clearInterval(nudgeTimer);
+      clearInterval(watchesTimer);
       clearInterval(resumeTimer);
       clearInterval(handoffTimer);
       await watch.close();
@@ -243,6 +262,7 @@ export async function startControlPlane(config: ControlPlaneConfig, models: Mode
       await reviews?.close();
       await queue?.close();
       await nudges?.close();
+      await watches.close();
       await api.close();
       await backfill.close();
       await usage.close();

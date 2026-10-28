@@ -14,6 +14,7 @@ import type { Drain, ReleaseReport } from "../deploy/model.ts";
 import type { PrWatchState } from "./pr-watch.ts";
 import type { Question } from "./questions.ts";
 import type { Nudge } from "./nudge.ts";
+import type { Watch } from "./watches.ts";
 import type { QueuedRecord } from "./queue.ts";
 import type { Placement } from "./placement.ts";
 import { DatabaseSync, type StatementSync } from "node:sqlite";
@@ -68,6 +69,10 @@ export interface Thread extends ActivityFacts {
   usageLimit?: { stoppedAt: number; resetsAt: number | null };
   /** Absent from a thread started before setups were recorded. */
   setup?: ThreadSetup;
+  /** The thread whose `nexus_start` started it. Absent from a thread a person or the control plane started. */
+  parent?: ThreadId;
+  /** It has the drive tools, which only a person's start asks for. A thread with a parent never has them. */
+  drive?: true;
 }
 
 /** A Claude worker thread's worker. `session` is the Claude Code session its launch opened, null until the launch names one. */
@@ -351,6 +356,12 @@ const migrations: readonly string[] = [
   // Each builder's nudges toward a pull request. It touches nothing an earlier migration made, so a registry rewound
   // past it applies it again unchanged.
   `CREATE TABLE IF NOT EXISTS nudges (thread TEXT PRIMARY KEY REFERENCES threads (id), record TEXT NOT NULL) STRICT;`,
+  // Which threads have the drive tools and which thread's tool started each child, and each waiting thread's watches.
+  // It touches nothing an earlier migration made, so a registry rewound past it applies it again unchanged.
+  `CREATE TABLE IF NOT EXISTS thread_tools (thread TEXT PRIMARY KEY REFERENCES threads (id), drive INTEGER NOT NULL CHECK (drive IN (0, 1)),
+     parent TEXT REFERENCES threads (id), CHECK (drive = 0 OR parent IS NULL)) STRICT;
+   CREATE INDEX IF NOT EXISTS thread_tools_parent ON thread_tools (parent);
+   CREATE TABLE IF NOT EXISTS watches (id TEXT PRIMARY KEY, waiter TEXT NOT NULL REFERENCES threads (id), record TEXT NOT NULL) STRICT;`,
 ];
 
 type Row = Record<string, unknown>;
@@ -395,6 +406,8 @@ function threadRow(r: Row): Omit<Thread, "working"> {
     lastReplyAt: r.last_reply_at as number | null,
     ...(r.placement === null ? {} : { placement: json<Placement>(r.placement) }),
     ...(r.setup === null ? {} : { setup: json<ThreadSetup>(r.setup) }),
+    ...(r.parent == null ? {} : { parent: r.parent as ThreadId }),
+    ...(r.drive === 1 ? { drive: true as const } : {}),
   };
 }
 
@@ -464,9 +477,9 @@ export function openRegistry(path: string, clock = Date.now) {
     project: db.prepare("SELECT record FROM projects WHERE id = ?"),
     insertThread: db.prepare(`INSERT INTO threads (id, title, project, status, conversation_id, started_by, created_at,
       agent_turn_running, last_agent_activity_at, last_human_activity_at, placement, setup) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
-    threads: db.prepare("SELECT * FROM threads ORDER BY created_at, id"),
-    threadsOf: db.prepare("SELECT * FROM threads WHERE project = ? ORDER BY created_at, id"),
-    thread: db.prepare("SELECT * FROM threads WHERE id = ?"),
+    threads: db.prepare("SELECT t.*, d.drive, d.parent FROM threads t LEFT JOIN thread_tools d ON d.thread = t.id ORDER BY t.created_at, t.id"),
+    threadsOf: db.prepare("SELECT t.*, d.drive, d.parent FROM threads t LEFT JOIN thread_tools d ON d.thread = t.id WHERE t.project = ? ORDER BY t.created_at, t.id"),
+    thread: db.prepare("SELECT t.*, d.drive, d.parent FROM threads t LEFT JOIN thread_tools d ON d.thread = t.id WHERE t.id = ?"),
     threadOfPylon: db.prepare("SELECT thread FROM pylons WHERE id = ?"),
     threadStatus: db.prepare("UPDATE threads SET status = ? WHERE id = ?"),
     humanActivity: db.prepare("UPDATE threads SET last_human_activity_at = max(last_human_activity_at, ?) WHERE id = ?"),
@@ -1052,6 +1065,18 @@ export function openRegistry(path: string, clock = Date.now) {
         sql("INSERT INTO pr_watches (thread, record) VALUES (?, ?) ON CONFLICT (thread) DO UPDATE SET record = excluded.record").run(thread, JSON.stringify(state));
       });
     },
+    /** The threads `parent`'s tools started, oldest first, archived and deleted ones included. */
+    children: (parent: ThreadId): Thread[] => sql("SELECT t.*, d.drive, d.parent FROM threads t JOIN thread_tools d ON d.thread = t.id WHERE d.parent = ? ORDER BY t.created_at, t.id").all(parent).map(withSessions),
+    /** Stores the watch unless one with its ID exists, and answers the stored one either way. */
+    addWatch(watch: Watch): Watch {
+      sql("INSERT OR IGNORE INTO watches (id, waiter, record) VALUES (?, ?, ?)").run(watch.id, watch.waiter, JSON.stringify(watch));
+      return json<Watch>(sql("SELECT record FROM watches WHERE id = ?").get(watch.id)!.record);
+    },
+    /** Every watch not yet delivered, oldest first, or only `waiter`'s. */
+    pendingWatches: (waiter?: ThreadId): Watch[] => sql(`SELECT record FROM watches WHERE json_extract(record, '$.delivered') IS NULL${waiter === undefined ? "" : " AND waiter = ?"} ORDER BY rowid`)
+      .all(...waiter === undefined ? [] : [waiter]).map((r) => json<Watch>(r.record)),
+    watch: (id: string): Watch | null => jsonOrNull<Watch>(sql("SELECT record FROM watches WHERE id = ?").get(id)?.record ?? null),
+    saveWatch(watch: Watch) { sql("UPDATE watches SET record = ? WHERE id = ?").run(JSON.stringify(watch), watch.id); },
     nudge: (thread: ThreadId): Nudge | null => jsonOrNull<Nudge>(sql("SELECT record FROM nudges WHERE thread = ?").get(thread)?.record ?? null),
     /** Replaces the builder's nudge record, or with null deletes it. */
     saveNudge(thread: ThreadId, nudge: Nudge | null) {
@@ -1132,6 +1157,7 @@ export function openRegistry(path: string, clock = Date.now) {
           thread.setup === undefined ? null : JSON.stringify(thread.setup));
         q.insertPylon.run(pylonParams(pylon));
         if (claudePrompt !== undefined) sql("INSERT INTO claude_workers (thread, prompt, state, model) VALUES (?, ?, 'pending', ?)").run(thread.id, claudePrompt, model);
+        if (thread.drive === true || thread.parent !== undefined) sql("INSERT INTO thread_tools (thread, drive, parent) VALUES (?, ?, ?)").run(thread.id, thread.drive === true ? 1 : 0, thread.parent ?? null);
         if (key !== undefined) saveStartKey(key, thread.id);
       });
     },
