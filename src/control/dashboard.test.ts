@@ -471,6 +471,18 @@ test("the thread page shows a paused session as resuming on wake, or on unarchiv
   assert.match((await sessions()).text, /Claude Code review paused, resumes on unarchive w1:p1/);
 });
 
+test("the thread page lists a session of a harness this control plane does not know, such as a newer probe's, with no label", async (t) => {
+  const s = await seeded(t);
+  const fix = await s.start("acme", "Fix checkout");
+  s.observe(fix);
+  s.registry.apply({ record: "sessions", pylonId: fix.pylonId, sessions: [
+    { id: "w1:p1", state: "running", herdrPane: "w1:p1", harness: "codex" as never, harnessSessionId: null, title: "agent", status: "working", message: null },
+  ] });
+  const res = await s.call("GET", `/threads/${fix.id}`);
+  assert.equal(res.status, 200);
+  assert.match(sectionOf(res.text, "sessions-h"), /<span class="o-kind"><\/span><span class="s-title">agent<\/span>/);
+});
+
 test("the thread page shows its pylon, sessions with how to attach, previews as tailnet links, and outputs", async (t) => {
   const s = await seeded(t);
   const fix = await s.start("acme", "Fix checkout");
