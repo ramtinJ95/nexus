@@ -1474,6 +1474,27 @@ test("unarchiving makes an archived thread active, counts as human activity and 
   assert.equal((await s.call("POST", `/v1/threads/${thread.id}/messages`, { text: "x", requestId: "msg:1" })).status, 202);
 });
 
+test("a start with drive gives a Nexus agent thread the drive tools, and an unarchive that would give its parent a fourth live child is refused", async (t) => {
+  const s = await withThread(t);
+  const planner = await s.call("POST", "/v1/threads", { project: "acme", title: "Plan", drive: true });
+  assert.equal(planner.status, 201, JSON.stringify(planner.body));
+  assert.equal(planner.body.drive, true);
+  assert.deepEqual(s.calls.at(-1), ["start", { threadId: planner.body.id, pylonId: planner.body.pylonId, drive: true }]);
+  assert.equal((await s.call("POST", "/v1/threads", { project: "acme", title: "Claude plan", claude: "Plan.", drive: true })).status, 400);
+  assert.equal((await s.call("POST", "/v1/threads", { project: "acme", title: "Child", parent: planner.body.id })).status, 400, "a caller cannot name a parent");
+
+  const children: Thread[] = [];
+  for (let i = 0; i < 3; i++) children.push(await s.startThread({ project: "acme", title: `Build ${i}`, parent: planner.body.id }, laptop));
+  await s.call("POST", `/v1/threads/${children[0]!.id}/archive`);
+  await s.startThread({ project: "acme", title: "Build 3", parent: planner.body.id }, laptop);
+  const back = await s.call("POST", `/v1/threads/${children[0]!.id}/unarchive`);
+  assert.equal(back.status, 409);
+  assert.match(back.body.error, new RegExp(`thread ${planner.body.id} has 3 live children`));
+  assert.equal(s.registry.thread(children[0]!.id)!.status, "archived");
+  const detail = await s.call("GET", `/v1/threads/${planner.body.id}`);
+  assert.deepEqual(detail.body.children.map((c: Thread) => c.status), ["archived", "active", "active", "active"]);
+});
+
 test("an archived thread takes no messages, and a deleted one has no conversation", async (t) => {
   const s = await withThread(t);
   const { thread } = s;

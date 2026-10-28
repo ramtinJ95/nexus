@@ -57,7 +57,7 @@ import { HttpError } from "./http-error.ts";
 import { answerRefusal, type AnswerRefusal, type Question } from "./questions.ts";
 import { BodyTooLarge, readBody } from "../request-body.ts";
 import { imagesView, type ImageOperation, type ImageRollout } from "./image-rollout.ts";
-import type { StartRequest } from "./threads.ts";
+import { checkRoom, type StartRequest } from "./threads.ts";
 import { queuedView, type QueuedRecord, type ThreadQueue } from "./queue.ts";
 import { threadStarts } from "./starts.ts";
 import { nodePylons, overcommitted, type NodePylons } from "./placement.ts";
@@ -606,9 +606,10 @@ export async function startApi(options: ApiOptions): Promise<Api> {
     return { ...t, status };
   }
 
-  /** Activity never unarchives a thread, because opening its page is activity too. */
+  /** Activity never unarchives a thread, because opening its page is activity too. A child counts against its parent's cap again. */
   function unarchive(t: Thread): Thread {
     if (t.status !== "archived") throw new HttpError(409, `thread ${t.id} is ${t.status}, not archived`);
+    if (t.parent !== undefined) checkRoom(registry, t.parent);
     registry.setThreadStatus(t.id, "active");
     registry.recordActivity(t.id, { human: Date.now() });
     wakeThread(t);

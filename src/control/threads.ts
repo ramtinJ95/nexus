@@ -56,8 +56,13 @@ function checkLineage(registry: Registry, request: StartRequest) {
   if (parent === undefined) throw new HttpError(404, `no thread ${request.parent}`);
   if (parent.drive !== true) throw new HttpError(403, `thread ${parent.id} has no drive tools. Only a thread a person starts with them may start threads, and a thread a tool started never has them`);
   if (parent.status === "archived" || parent.status === "deleted") throw new HttpError(409, `thread ${parent.id} is ${parent.status}, so it starts nothing`);
-  const live = registry.children(parent.id).filter((t) => t.status === "active" || t.status === "idle");
-  if (live.length >= maxChildren) throw new HttpError(409, `thread ${parent.id} has ${live.length} live children (${live.map((t) => t.id).join(", ")}), the most a thread may have. A child counts until it is archived or deleted`);
+  checkRoom(registry, parent.id);
+}
+
+/** Refuses a start or an unarchive that would give `parent` more than maxChildren live children. */
+export function checkRoom(registry: Registry, parent: ThreadId) {
+  const live = registry.children(parent).filter((t) => t.status === "active" || t.status === "idle");
+  if (live.length >= maxChildren) throw new HttpError(409, `thread ${parent} has ${live.length} live children (${live.map((t) => t.id).join(", ")}), the most a thread may have. A child counts until it is archived or deleted`);
 }
 
 /** A shorter ID or a ref name may resolve to another commit by the time the pylon boots. */
