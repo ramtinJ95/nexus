@@ -1,0 +1,21 @@
+2026-10-28T01:06:32.725Z pylon-th-20003f2c575f git: checkout facts unavailable; retrying on the next git poll
+2026-10-28T01:06:32.725Z pylon-th-20003f2c575f attached terminals: the verify node's pylons run only raw pipes. They count as none until a count succeeds
+2026-10-28T01:06:32.725Z pylon-th-20003f2c575f sessions: the verify node's pylons run only raw pipes. The control plane keeps the last list read until a read succeeds
+2026-10-28T01:06:32.898Z pylon-th-cb250e6d0ea3 git: checkout facts unavailable; retrying on the next git poll
+2026-10-28T01:06:32.898Z pylon-th-cb250e6d0ea3 attached terminals: the verify node's pylons run only raw pipes. They count as none until a count succeeds
+2026-10-28T01:06:32.898Z pylon-th-cb250e6d0ea3 sessions: the verify node's pylons run only raw pipes. The control plane keeps the last list read until a read succeeds
+2026-10-28T01:06:33.093Z pylon-th-e62fc008f85b git: checkout facts unavailable; retrying on the next git poll
+2026-10-28T01:06:33.093Z pylon-th-e62fc008f85b attached terminals: the verify node's pylons run only raw pipes. They count as none until a count succeeds
+2026-10-28T01:06:33.093Z pylon-th-e62fc008f85b sessions: the verify node's pylons run only raw pipes. The control plane keeps the last list read until a read succeeds
+2026-10-28T01:06:33.289Z pylon-th-6c08354eb7bf git: checkout facts unavailable; retrying on the next git poll
+2026-10-28T01:06:33.289Z pylon-th-6c08354eb7bf attached terminals: the verify node's pylons run only raw pipes. They count as none until a count succeeds
+2026-10-28T01:06:33.289Z pylon-th-6c08354eb7bf sessions: the verify node's pylons run only raw pipes. The control plane keeps the last list read until a read succeeds
+2026-10-28T01:06:33.475Z pylon-th-4e5732442267 git: checkout facts unavailable; retrying on the next git poll
+2026-10-28T01:06:33.475Z pylon-th-4e5732442267 attached terminals: the verify node's pylons run only raw pipes. They count as none until a count succeeds
+2026-10-28T01:06:33.475Z pylon-th-4e5732442267 sessions: the verify node's pylons run only raw pipes. The control plane keeps the last list read until a read succeeds
+2026-10-28T01:06:33.726Z pylon-th-ce9d6e1ed315 git: checkout facts unavailable; retrying on the next git poll
+2026-10-28T01:06:33.726Z pylon-th-ce9d6e1ed315 attached terminals: the verify node's pylons run only raw pipes. They count as none until a count succeeds
+2026-10-28T01:06:33.726Z pylon-th-ce9d6e1ed315 sessions: the verify node's pylons run only raw pipes. The control plane keeps the last list read until a read succeeds
+2026-10-28T01:06:33.950Z pylon-th-2ea465855049 git: checkout facts unavailable; retrying on the next git poll
+2026-10-28T01:06:33.950Z pylon-th-2ea465855049 attached terminals: the verify node's pylons run only raw pipes. They count as none until a count succeeds
+2026-10-28T01:06:33.951Z pylon-th-2ea465855049 sessions: the verify node's pylons run only raw pipes. The control plane keeps the last list read until a read succeeds

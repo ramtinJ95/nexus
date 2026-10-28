@@ -6,7 +6,7 @@ import {
 } from "./reconcile.ts";
 import {
   encodeProbeEvent, encodeSubmitReply, jobSubject, parseJobEnvelope, parseProbeEvent, parseSubmitReply,
-  type JobErrorCode, type JobId, type JobStatus, type LiveHash, type NodeName, type NodeObservation, type ProbeEvent, type PylonId, type PylonObservation,
+  type Job, type JobErrorCode, type JobId, type JobStatus, type LiveHash, type NodeName, type NodeObservation, type ProbeEvent, type PylonId, type PylonObservation,
   type PausedSession, type RunningFacts, type SessionFact,
 } from "./protocol.ts";
 import { chatgptTokenGrant, type BootInputs, type PylonSource } from "./project.ts";
@@ -46,6 +46,7 @@ const phase = (p: "booting" | "stopping" | "deleting"): PylonObservation => ({ p
 const fresh: PylonSource & { kind: "fresh" } = { kind: "fresh", preSetup: null };
 const fromTemplate: PylonSource & { kind: "template" } = { kind: "template", template };
 const spawn = (source: PylonSource): PlanStep => ({ kind: "submit", job: { kind: "spawn", pylonId, boot: { ...boot, source }, live, liveHash } });
+const spawnForReading = (source: PylonSource): PlanStep => ({ kind: "submit", job: { kind: "spawn", pylonId, boot: { ...boot, source }, live, liveHash, relaunch: false } });
 const asking = (names: readonly string[]): Omit<BootInputs, "source"> => ({ ...boot, network: { allowedHosts: [], secrets: names.map((name) => ({ name, hosts: ["api.example.com"] })) } });
 const spawnAsking = (names: readonly string[], source: PylonSource): PlanStep => ({ kind: "submit", job: { kind: "spawn", pylonId, boot: { ...asking(names), source }, live, liveHash } });
 const pause: PlanStep = { kind: "submit", job: { kind: "pause", pylonId, checkpoint: nextCheckpoint } };
@@ -58,8 +59,8 @@ const jobInFlight = (state: "running" | "succeeded"): JobStatus => state === "ru
   ? { jobId: "j1" as JobId, subject: pylonId, kind: "spawn", state, startedAt: "2027-01-01T00:00:00Z" }
   : { jobId: "j1" as JobId, subject: pylonId, kind: "spawn", state, finishedAt: "2027-01-01T00:00:00Z" };
 
-/** [count, failed this many ms before now, last code]. */
-type Attempts = readonly [number, number | null, JobErrorCode | null];
+/** [count, failed this many ms before now, last code, and "reading" for a failed wake for reading]. */
+type Attempts = readonly [number, number | null, JobErrorCode | null, "reading"?];
 
 interface Row {
   desired: DesiredPhase;
@@ -95,6 +96,11 @@ const rows: Record<string, Row> = {
   "delete of a running pylon submits delete": { desired: "deleted", observed: running(liveHash), inFlight: null, attempts: none, online: true, present: imageOnly, expect: del },
   "delete ignores the attempt budget": { desired: "deleted", observed: stopped(lastCheckpoint), inFlight: null, attempts: [5, 1_000, "setup-failed"], online: true, present: imageOnly, expect: del },
   "delete does not wait for a transition": { desired: "deleted", observed: phase("stopping"), inFlight: null, attempts: none, online: true, present: imageOnly, expect: del },
+  "a failed wake for reading waits rather than failing, whatever its code": { desired: "reading", observed: stopped(lastCheckpoint), inFlight: null, attempts: [1, 600_000, "setup-failed"], online: true, present: imageOnly, expect: wait("backoff") },
+  "a wake for reading that failed past the attempt budget still waits": { desired: "reading", observed: stopped(lastCheckpoint), inFlight: null, attempts: [5, 600_000, "backend"], online: true, present: imageOnly, expect: wait("backoff") },
+  "a failed wake for reading still waits while the thread is read": { desired: "reading", observed: stopped(lastCheckpoint), inFlight: null, attempts: [1, 600_000, "setup-failed", "reading"], online: true, present: imageOnly, expect: wait("backoff") },
+  "a wake for reading that failed once the backfill let go of the pylon neither fails nor holds its pause": { desired: "paused", observed: running(null), inFlight: null, attempts: [1, 1_000, "setup-failed", "reading"], online: true, present: imageOnly, expect: pause },
+  "a wake for reading that failed is no failure for a later wake, which boots at once": { desired: "running", observed: stopped(lastCheckpoint), inFlight: null, attempts: [5, 1_000, "backend", "reading"], online: true, present: imageOnly, expect: spawn({ kind: "resume", checkpoint: lastCheckpoint }) },
   // 4
   "a non-retryable code fails": { desired: "running", observed: "absent", inFlight: null, attempts: [1, 60_000, "setup-failed"], online: true, present: imageOnly, expect: { kind: "fail", reason: "last job failed with setup-failed, which is not retryable: the probe's setup-failed message" } },
   "five failed attempts fail": { desired: "running", observed: "absent", inFlight: null, attempts: [5, 600_000, "backend"], online: true, present: imageOnly, expect: { kind: "fail", reason: "gave up after 5 failed attempts, the last with backend: the probe's backend message" } },
@@ -124,6 +130,8 @@ const rows: Record<string, Row> = {
   "a retried pylon that is not broken plans as usual": { desired: "running", observed: "absent", inFlight: null, attempts: none, online: true, present: imageOnly, retrying: true, expect: spawn(fresh) },
   "a retried pylon whose probe cannot say why it broke fails, never pausing it": { desired: "running", observed: brokenUnknown, inFlight: null, attempts: none, online: true, present: imageOnly, retrying: true, expect: { kind: "fail", reason: "pylon is broken: qcow2 header unreadable. The node did not say why the pylon broke in a way this control plane understands. Upgrade Nexus on the node and the control plane, or start again from the project" } },
   "a retried broken pylon still waits out its backoff": { desired: "running", observed: broken, inFlight: null, attempts: [1, 1_000, "backend"], online: true, present: imageOnly, retrying: true, expect: wait("backoff") },
+  "reading and stopped resumes from the checkpoint without bringing the sessions back": { desired: "reading", observed: stopped(lastCheckpoint), inFlight: null, attempts: none, online: true, present: imageOnly, expect: spawnForReading({ kind: "resume", checkpoint: lastCheckpoint }) },
+  "reading and broken fails like running, which is why the backfill wakes only a stopped pylon": { desired: "reading", observed: broken, inFlight: null, attempts: none, online: true, present: imageOnly, expect: { kind: "fail", reason: "pylon is broken: qcow2 header unreadable" } },
   // 7b
   "a missing image is fetched before the template, from the first holder": {
     desired: "running", observed: "absent", inFlight: null, attempts: none, online: true, present: [], firstBoot: fromTemplate,
@@ -144,6 +152,8 @@ const rows: Record<string, Row> = {
   "a running pylon whose template is gone re-submits spawn without fetching": { desired: "running", observed: running("hash-old" as LiveHash), inFlight: null, attempts: none, online: true, present: imageOnly, firstBoot: fromTemplate, expect: spawn(fromTemplate) },
   "a running pylon with a matching liveHash needs no artifacts": { desired: "running", observed: running(liveHash), inFlight: null, attempts: none, online: true, present: [], firstBoot: fromTemplate, expect: done },
   "liveHash null after a probe restart re-submits spawn": { desired: "running", observed: running(null), inFlight: null, attempts: none, online: true, present: imageOnly, expect: spawn(fresh) },
+  "reading and running is done whatever its liveHash, as a spawn for reading reports none": { desired: "reading", observed: running(null), inFlight: null, attempts: none, online: true, present: imageOnly, expect: done },
+  "a pylon read with its sessions left out gets a spawn that brings them back once its thread runs": { desired: "running", observed: running(null), inFlight: null, attempts: none, online: true, present: imageOnly, expect: spawn(fresh) },
   "absent boots from the template": { desired: "running", observed: "absent", inFlight: null, attempts: none, online: true, present: [image, template], firstBoot: fromTemplate, expect: spawn(fromTemplate) },
   // 7d
   "a boot asking for a held secret waits for a probe that has not got it": { desired: "running", observed: "absent", inFlight: null, attempts: none, online: true, present: imageOnly, secrets: { asked: ["GH_TOKEN", chatgptTokenGrant.name], holds: ["GH_TOKEN"] }, expect: wait("held-secret") },
@@ -156,7 +166,7 @@ const rows: Record<string, Row> = {
 };
 
 function input(row: Row): PlanInput {
-  const [count, failedAgo, lastCode] = row.attempts;
+  const [count, failedAgo, lastCode, reading] = row.attempts;
   return {
     pylonId, node, live, liveHash, nextCheckpoint,
     boot: asking(row.secrets?.asked ?? []),
@@ -168,7 +178,7 @@ function input(row: Row): PlanInput {
     nodeArtifacts: new Set(row.present),
     nodeSecrets: new Set(row.secrets?.holds ?? []),
     inFlight: row.inFlight === null ? null : jobInFlight(row.inFlight),
-    attempts: { count, last: lastCode === null ? null : { at: now - failedAgo!, code: lastCode, message: `the probe's ${lastCode} message` } },
+    attempts: { count, last: lastCode === null ? null : { at: now - failedAgo!, code: lastCode, message: `the probe's ${lastCode} message`, ...(reading === undefined ? {} : { reading: true }) } },
     retrying: row.retrying ?? false,
     holders: (id) => row.holders?.[id] ?? [],
     artifactSha256: (id) => `sha-${id}`,
@@ -192,6 +202,9 @@ test("desiredPhase", () => {
   const cases: [Partial<ActivityFacts>, DesiredPhase][] = [
     [{ status: "deleted", agentTurnRunning: true }, "deleted"],
     [{ status: "archived", lastHumanActivityAt: now }, "paused"],
+    [{ status: "archived", readingUsage: true }, "reading"],
+    [{ status: "deleted", readingUsage: true }, "deleted"],
+    [{ readingUsage: true }, "paused"],
     [{ agentTurnRunning: true }, "running"],
     [{ status: "idle", lastAgentActivityAt: now - idlePolicy.agentIdleMs + 1 }, "running"],
     [{ lastAgentActivityAt: now - idlePolicy.agentIdleMs }, "paused"],
@@ -239,6 +252,15 @@ test("a probe takes a spawn whose repo is a clone or empty, and refuses one from
   assert.throws(() => parseJobEnvelope(spawnBody({ kind: "fork", branch: "main" })), { message: "job.boot.repo.kind is not clone or empty" });
   assert.throws(() => parseJobEnvelope(spawnBody({ kind: "empty" })), { message: "job.boot.repo.branch is not a non-empty string" });
   assert.throws(() => parseJobEnvelope(spawnBody({ kind: "clone", url: clone.url })), { message: "job.boot.repo.checkout is not an object" });
+});
+
+test("a probe takes a spawn that boots without its sessions, and refuses any other relaunch", () => {
+  const spawnBody = (relaunch: unknown) => JSON.stringify(envelope({ kind: "spawn", pylonId, boot: { ...boot, source: fresh }, live, liveHash, relaunch } as Job, node, now));
+  const parsed = parseJobEnvelope(spawnBody(false)).job;
+  assert.ok(parsed.kind === "spawn" && parsed.relaunch === false);
+  const plain = parseJobEnvelope(spawnBody(undefined)).job;
+  assert.ok(plain.kind === "spawn" && plain.relaunch === undefined);
+  assert.throws(() => parseJobEnvelope(spawnBody(true)), { message: "job.relaunch is neither absent nor false" });
 });
 
 test("jobSubject", () => {

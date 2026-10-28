@@ -46,7 +46,7 @@ export type LiveHash = Brand<string, "LiveHash">;
 // Jobs: Amp's spawn, pause and delete, plus the artifact work Amp does on its own servers.
 
 export type Job =
-  | { kind: "spawn"; pylonId: PylonId; boot: BootInputs; live: LiveSpec; liveHash: LiveHash }
+  | { kind: "spawn"; pylonId: PylonId; boot: BootInputs; live: LiveSpec; liveHash: LiveHash; relaunch?: false }
   | { kind: "pause"; pylonId: PylonId; checkpoint: CheckpointId }
   | { kind: "delete"; pylonId: PylonId }
   | { kind: "build-image"; image: ImageId; recipe: ImageRecipe }
@@ -59,6 +59,7 @@ export type Job =
  * live spec". If the VM already runs, `boot` is ignored and only `live` is applied (previews published,
  * overlay files written). That is how a probe restart heals: its observations report `liveHash: null`,
  * so the planner sends spawn again. Unlinking a port withdraws its preview route at once and heals the same way.
+ * `relaunch: false` boots without bringing back the pylon's sessions, and leaves them for the next spawn to bring back.
  *
  * pause records the open Herdr sessions in /home/user/.nexus/sessions.json, stops services, writes the
  * disk checkpoint and stops the VM. The session list is on the disk, so the checkpoint carries it and a
@@ -160,6 +161,11 @@ export interface NodeObservation {
    * to it twice.
    */
   claudeLaunchRepeatable?: true;
+  /**
+   * True from a probe that takes a spawn's `relaunch: false`. One older than the field ignores it and relaunches the
+   * sessions, so the usage backfill never wakes a pylon on its node.
+   */
+  spawnsWithoutRelaunch?: true;
   /**
    * The heldSecrets this probe takes from the control plane. A probe older than the field takes none: it looks for one
    * in its secret file and fails the spawn for good, so the control plane holds a boot that needs one (reconcile.ts).
@@ -777,6 +783,7 @@ export function parseJobEnvelope(body: string): JobEnvelope {
       const live = record(job.live, "job.live");
       if (!Array.isArray(live.previews) || !Array.isArray(live.overlay)) throw new Error("job.live needs previews and overlay arrays");
       string(job.liveHash, "job.liveHash");
+      if (job.relaunch !== undefined && job.relaunch !== false) throw new Error("job.relaunch is neither absent nor false");
       break;
     }
     case "pause":

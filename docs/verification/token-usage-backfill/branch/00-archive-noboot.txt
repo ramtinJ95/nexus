@@ -1,0 +1,3 @@
+$ nexus archive th-e2d1b22d3832
+Archived th-e2d1b22d3832.
+exit 0

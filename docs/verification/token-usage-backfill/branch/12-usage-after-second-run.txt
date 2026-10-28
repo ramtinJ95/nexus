@@ -1,0 +1,15 @@
+$ nexus usage --since all --by kind
+Usage of all projects for all time. Counting started 2026-10-28 01:15 UTC.
+Backfill: done at 2026-10-28 01:16 UTC, 6 of 6 threads read, 2 skipped, recovered 6044 calls and 7.6M tokens.
+Skipped:
+th-e2d1b22d3832  Pylon fails to boot       the pylon did not boot: backend: pylon-vm: the VM did not boot: gondolin exited 1 before the guest answered
+th-2efe9f7b9b2b  Transcripts fail to read  reading it failed: reading the agents' usage exited 1
+
+       Input  Output  Cache write  Cache read  Total  Calls
+Total  22.3k  305k    1.3M         6.4M        7.9M   6053
+
+By agent
+Agent   Input  Output  Cache write  Cache read  Total  Calls
+claude  18.3k  304k    1.3M         6.3M        7.9M   6044
+pi      4k     290     0            9.9k        14.3k  9
+exit 0

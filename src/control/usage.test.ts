@@ -1,6 +1,6 @@
 import { after, test } from "node:test";
 import assert from "node:assert/strict";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { appendFileSync, copyFileSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -130,6 +130,78 @@ test("a pylon's Claude transcripts and pi sessions count each call once, however
   appendFileSync(transcript, `${JSON.stringify(next)}\n{"type":"assistant","message":{"id":"msg_half`);
   await counter.sweep();
   assert.deepEqual(totals(registry), sum(both, { calls: 1, input: 3, output: 40, cacheWrite: 500, cacheRead: 9000 }), "a call appended later counts once, and a half-written line waits");
+});
+
+test("a whole read counts every call from the start of each transcript, past where live counting's cursors stand, once", async (t) => {
+  const registry = openOnline();
+  t.after(() => registry.close());
+  const thread = addThread(registry);
+  const { logs, transcript, session } = pylonHome();
+  const end = (path: string) => {
+    const bytes = readFileSync(path);
+    return { source: thread.pylonId, key: path, position: bytes.length, before: createHash("sha256").update(bytes.subarray(Math.max(0, bytes.length - 4096))).digest("hex") };
+  };
+  registry.recordUsage(thread.id, [], [end(transcript), end(session)]);
+  const probe = localProbe();
+  const counter = usageCounter({ registry, probes: new Map([[node, probe]]), harness: noHarness, logs, sweepMs: 3_600_000 });
+  t.after(() => counter.close());
+  await counter.sweep();
+  assert.deepEqual(totals(registry).calls, 0, "live counting reads on from its cursors, past every call");
+
+  const both = sum(claudeFixture, piFixture);
+  const tokens = both.input + both.output + both.cacheWrite + both.cacheRead;
+  assert.deepEqual(await counter.readWhole(thread.id), { calls: both.calls, tokens });
+  assert.deepEqual(totals(registry), both);
+  assert.deepEqual(await counter.readWhole(thread.id), { calls: 0, tokens: 0 }, "a second whole read recovers nothing");
+  await counter.sweep();
+  assert.deepEqual(totals(registry), both);
+
+  observe(registry, thread.pylonId, "paused");
+  const reads = probe.reads;
+  await assert.rejects(counter.readWhole(thread.id), { message: "its pylon is not running" });
+  assert.equal(probe.reads, reads, "a paused pylon is not read");
+});
+
+test("a whole read cut short keeps what its finished reads recovered on the thread's backfill row, and so does finishing the thread", async (t) => {
+  const registry = openOnline();
+  t.after(() => registry.close());
+  const thread = addThread(registry, { phase: "paused" });
+  const { logs, transcript } = pylonHome();
+  // Over a megabyte of calls, which takes more than one read.
+  const many = Array.from({ length: 8_000 }, (_, i) => JSON.stringify({ type: "assistant", timestamp: "2026-10-27T23:00:00.000Z", message: { id: `msg_many_${i}`, model: "claude-opus-5-5", usage: { input_tokens: 1, output_tokens: 2 } } }));
+  appendFileSync(transcript, `${many.join("\n")}\n`);
+  const probe = localProbe();
+  let lost = true;
+  const stream = probe.stream;
+  probe.stream = (pylon, argv) => probe.reads === 1 && lost ? Promise.reject(new Error("the pipe to the pylon was lost")) : stream(pylon, argv);
+  const counter = usageCounter({ registry, probes: new Map([[node, probe]]), harness: noHarness, logs, sweepMs: 3_600_000 });
+  t.after(() => counter.close());
+  registry.startUsageBackfill([thread.id], Date.now());
+  observe(registry, thread.pylonId, "running");
+  const row = () => {
+    const { calls, tokens } = registry.usageBackfillThreads()[0]!;
+    return { calls, tokens };
+  };
+  const recorded = () => {
+    const { calls, total } = registry.usageReport({ since: null }).total;
+    return { calls, tokens: total };
+  };
+
+  await assert.rejects(counter.readWhole(thread.id), { message: "the pipe to the pylon was lost" });
+  assert.ok(recorded().calls > 0 && recorded().calls < 8_000, `the first read recorded part of the calls: ${recorded().calls}`);
+  assert.deepEqual(row(), recorded(), "the row holds what the read recorded before it failed");
+  registry.finishUsageBackfillThread(thread.id, "skipped", "reading it failed: the pipe to the pylon was lost", Date.now());
+  assert.deepEqual(row(), recorded(), "skipping the thread keeps it");
+
+  lost = false;
+  registry.startUsageBackfill([thread.id], Date.now());
+  await counter.readWhole(thread.id);
+  registry.finishUsageBackfillThread(thread.id, "done", null, Date.now());
+  const all = sum(claudeFixture, piFixture);
+  assert.deepEqual(recorded(), { calls: all.calls + 8_000, tokens: all.input + all.output + all.cacheWrite + all.cacheRead + 8_000 * 3 });
+  assert.deepEqual(row(), recorded(), "the read after it recovered the rest, and the row holds both");
+  const run = registry.usageBackfill();
+  assert.ok(run.state === "running" && run.recovered.calls === recorded().calls);
 });
 
 test("the counts survive a restart, which reads on from where the last read stopped", async (t) => {

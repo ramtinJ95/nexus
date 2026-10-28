@@ -30,6 +30,7 @@ import { threadQueue } from "./queue.ts";
 import { agentInbox } from "./inbox.ts";
 import { usageLimitResumer } from "./usage-limit.ts";
 import { usageCounter } from "./usage-counter.ts";
+import { usageBackfill } from "./usage-backfill.ts";
 import { startImageRollout } from "./image-rollout.ts";
 import { loadImageRecipe } from "../image-build.ts";
 import { runningCommit } from "../deploy/health.ts";
@@ -177,6 +178,7 @@ export async function startControlPlane(config: ControlPlaneConfig, models: Mode
   void resumer?.poll();
   const mirror = projectMirror({ githubToken: token });
   const wake = (node: NodeName) => { void loop.wake(node); };
+  const backfill = usageBackfill({ registry, counter: usage, wake });
   const startThread = threadStarter({ registry, harness, mirror, dotfiles: config.dotfiles, gitIdentity: config.gitIdentity, wake });
   const deployment = { self: config.self.tailnetNodeId, deployers: new Set(config.deployers ?? []), keys: config.deployKeys ?? {} };
   const reviews = github === null ? null : reviewLoop({
@@ -215,6 +217,7 @@ export async function startControlPlane(config: ControlPlaneConfig, models: Mode
     probes: new Map(probes.map((probe) => [probe.node, probe])),
     previewPorts: config.previewPorts,
     images,
+    usageBackfill: backfill,
   });
   console.error(`nexus control plane: API on ${config.listen.host}:${api.port}, following ${config.nodes.map((n) => n.name).join(", ")}`);
 
@@ -232,6 +235,7 @@ export async function startControlPlane(config: ControlPlaneConfig, models: Mode
       await reviews?.close();
       await queue?.close();
       await api.close();
+      await backfill.close();
       await usage.close();
       await harness.close();
       await loop.close();

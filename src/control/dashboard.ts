@@ -32,7 +32,7 @@ import { blocks as blocking, findingsOf, landable, phaseNote, roundsSpent, type 
 import { heldBy, holdRule, reservedNames } from "./policy.ts";
 import { gib, nodePylons, overcommitted } from "./placement.ts";
 import { queuedView, type QueuedThread, type Wait } from "./queue.ts";
-import { breakdownLook, breakdowns, periods, periodStart, tokenColumns, tokenCount, type Period, type UsageTotals } from "./usage.ts";
+import { breakdownLook, breakdowns, periods, periodStart, tokenColumns, tokenCount, type Period, type UsageBackfill, type UsageTotals } from "./usage.ts";
 
 export interface DashboardOptions {
   registry: Registry;
@@ -162,7 +162,7 @@ const actualBadge: Record<ActualState, [label: string, tone: Tone]> = {
   running: ["running", "ok"], spawning: ["spawning", "busy"], pausing: ["pausing", "busy"], deleting: ["deleting", "busy"],
   paused: ["paused", "idle"], absent: ["not on its node", "muted"], failed: ["failed", "bad"], unknown: ["unknown", "muted"],
 };
-const desiredTone: Record<DesiredPhase, Tone> = { running: "ok", paused: "idle", deleted: "muted" };
+const desiredTone: Record<DesiredPhase, Tone> = { running: "ok", reading: "work", paused: "idle", deleted: "muted" };
 const sessionTone: Record<HerdrStatus, Tone> = { working: "work", idle: "idle", blocked: "bad", done: "ok", unknown: "muted" };
 const harnessLabel: Record<SessionHarness, string> = { "claude-code": "Claude Code", pi: "pi", shell: "Shell" };
 const outputLabel: Record<Output["kind"], string> = { branch: "branch", diff: "diff", preview: "preview", file: "file", "pull-request": "pull request" };
@@ -509,6 +509,25 @@ function usageTable(id: string, keyHead: string, rows: readonly (UsageTotals & {
 </table>`;
 }
 
+function backfillNote(c: Context, b: UsageBackfill): Html {
+  const run = b.state === "never" ? null : b;
+  const thread = (id: ThreadId) => html`<a class="link" href="/threads/${id}">${c.registry.thread(id)?.title ?? id}</a>`;
+  const recovered = run === null ? "" : `${exact(run.recovered.calls)} calls and ${tokenCount(run.recovered.tokens)} tokens recovered`;
+  const read = run === null ? "" : `${run.read} of ${run.of} threads read`;
+  const doing = run?.current == null ? run?.waiting == null ? "" : html` It waits: ${run.waiting}.`
+    : run.current.phase === "reading" ? html` It reads ${thread(run.current.thread)}.` : html` It waits for the pylon of ${thread(run.current.thread)} to pause.`;
+  const said = run === null
+    ? html`The calls archived threads made before then are counted once a deployer runs <code>nexus usage backfill</code>, which wakes their pylons one at a time to read them.`
+    : run.state === "running" ? html`The backfill reads archived threads' pylons, one at a time: ${read}, ${recovered} so far.${doing}`
+    : run.state === "stopped" ? html`The backfill stopped at ${read}, with ${recovered}. A deployer goes on with <code>nexus usage backfill</code>.`
+    : html`The backfill read archived threads' pylons and finished <time datetime="${new Date(run.finishedAt!).toISOString()}">${utc(run.finishedAt!)}</time>: ${read}, ${run.skipped.length} skipped, ${recovered}.`;
+  return html`<div id="usage-backfill" data-backfill-state="${b.state}"${run !== null && html` data-read="${run.read}" data-of="${run.of}" data-recovered-calls="${run.recovered.calls}" data-recovered-tokens="${run.recovered.tokens}"`}>
+<p>${said}</p>
+${run !== null && run.skipped.length > 0 && html`<table class="ov" id="usage-backfill-skipped"><thead><tr><th>Skipped thread</th><th>Why</th></tr></thead>
+<tbody>${run.skipped.map((t) => html`<tr data-thread="${t.thread}"><td>${thread(t.thread)}</td><td>${t.reason}</td></tr>`)}</tbody></table>`}
+</div>`;
+}
+
 /** The tokens every agent spent in the period, in all and by each breakdown, as `GET /v1/usage` reports them. */
 function usagePage(c: Context, period: Period, project: ProjectId | null): Html {
   const report = c.registry.usageReport({ since: periodStart(period, c.now), project, by: breakdowns });
@@ -526,7 +545,8 @@ function usagePage(c: Context, period: Period, project: ProjectId | null): Html 
 <section aria-labelledby="usage-totals-h"><div class="ov-head"><h2 id="usage-totals-h">Tokens${project !== null && ` in ${project}`}</h2></div>
 ${usageTable("usage-totals", "Period", [{ key: periods[period], ...report.total }])}
 <div class="usage-notes">
-<p>Counting started <time datetime="${new Date(report.countingSince).toISOString()}">${utc(report.countingSince)}</time>. The calls of threads that existed then were counted from the transcripts they still had. Threads deleted before then are not counted, except for the Nexus agent's calls, which the harness keeps.</p>
+<p>Counting started <time datetime="${new Date(report.countingSince).toISOString()}">${utc(report.countingSince)}</time>. The calls of threads that ran then were counted from the transcripts their pylons had. Threads deleted before then are not counted, as their Claude and pi transcripts went with their pylons, except for the Nexus agent's calls, which the harness keeps.</p>
+${backfillNote(c, report.backfill)}
 <p>The summaries the Nexus agent's compactions write, and model calls its tools make, are not counted.</p>
 </div>
 </section>

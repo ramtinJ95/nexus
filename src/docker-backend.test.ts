@@ -32,7 +32,8 @@ appendFileSync(${JSON.stringify(join(bin, "calls"))}, JSON.stringify(argv) + "\\
 if (argv[0] === "exec") {
   let i = 1, cwd = ${JSON.stringify(bin)};
   for (; argv[i].startsWith("--"); i++) if (argv[i] === "--workdir") cwd = argv[++i]; else if (argv[i] === "--env") i++;
-  const remap = (arg) => arg.replaceAll(${JSON.stringify(checkoutDir)}, ${JSON.stringify(join(root, "checkout"))}).replaceAll("/run/nexus-services", ${JSON.stringify(join(root, "run"))});
+  const remap = (arg) => arg.replaceAll(${JSON.stringify(checkoutDir)}, ${JSON.stringify(join(root, "checkout"))}).replaceAll("/run/nexus-services", ${JSON.stringify(join(root, "run"))})
+    .replaceAll("/var/lib/nexus", ${JSON.stringify(join(root, "var"))}).replaceAll("/home/user/.nexus", ${JSON.stringify(join(root, "nexus"))});
   const [program, ...args] = argv.slice(i + 1).map(remap);
   const child = spawn(program, args, { cwd, stdio: "inherit" });
   process.on("SIGTERM", () => { child.kill("SIGKILL"); process.exit(143); });
@@ -134,6 +135,28 @@ test("a services file the container cannot read, and a failed step in the contai
   await writeFile(join(docker.root, "run"), "");
   await services.apply(pylon, {}, false);
   await assert.rejects(services.link(pylon, 8001), { message: /^in pylon-a, mkdir -p \/run\/nexus-services .* exited 1: mkdir: .*File exists$/ });
+});
+
+test("a spawn for reading leaves a checkpoint's relaunch mark, and the pause after it keeps the sessions that checkpoint carried, recording none", async (t) => {
+  const paused = Buffer.from(JSON.stringify([{ id: "w1:p1", herdrPane: "w1:p1", harness: "shell", harnessSessionId: null, title: "sh" }])).toString("base64url");
+  const labels = { "nexus.pylon": pylon, "nexus.image": "img-test00000000", "nexus.booted-from": "ckpt-a-1", "nexus.checkpoint": "ckpt-a-1", "nexus.sessions": paused };
+  const docker = await fakeDocker(t, { ps: { stdout: "c1\n" }, "container inspect c1": running("c1", labels), "port c1": { stdout: "" }, [`port ${pylon}`]: { stdout: "" } });
+  const mark = join(docker.root, "var", "relaunch");
+  await mkdir(join(mark, ".."), { recursive: true });
+  await writeFile(mark, "");
+  const backend = createDockerBackend({ images });
+  const boot = {
+    pylonId: pylon, image: "img-test00000000" as const, source: { kind: "resume" as const, checkpoint: "ckpt-a-1" as const }, resources: { cpus: 1, memoryGiB: 1, diskGiB: 1 },
+    network: { allowedHosts: [], secrets: [] }, repo: { kind: "empty" as const, branch: "main" }, dotfiles: { repo: "https://example.com/dotfiles.git", ref: "main" },
+  };
+  await backend.ensureRunning(boot, { previews: [], overlay: [] }, AbortSignal.timeout(10_000), false);
+  assert.equal(await readFile(mark, "utf8"), "", "the mark stays for the spawn that brings the sessions back");
+
+  await backend.ensurePaused(pylon, "ckpt-a-2", AbortSignal.timeout(10_000));
+  const calls = await docker.calls();
+  assert.ok(!calls.some((argv) => argv.includes("herdr") || argv.some((arg) => arg.includes("sessions.json"))), "nothing read or recorded the sessions");
+  const commit = calls.find((argv) => argv[0] === "commit")!;
+  assert.ok(hasPair(commit, "--change", `LABEL nexus.sessions="${paused}"`) && hasPair(commit, "--change", 'LABEL nexus.checkpoint="ckpt-a-2"'), commit.join(" "));
 });
 
 async function freePort(): Promise<number> {

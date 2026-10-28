@@ -25,7 +25,7 @@ import { needsPerson, reviewerCaller, storedReview, type Review } from "./review
 import { claudeTurn } from "../../images/pylon/nexus-turn.ts";
 import { defaultClaudeModel } from "../claude-state.ts";
 import { maxEntries, transcriptStart, usageLimitStop, type ClaudeEntry, type TranscriptCursor } from "../claude-transcript.ts";
-import { roleOf, type AgentCall, type Breakdown, type UsageReport, type UsageTotals } from "./usage.ts";
+import { roleOf, type AgentCall, type BackfillThread, type Breakdown, type UsageBackfill, type UsageReport, type UsageTotals } from "./usage.ts";
 
 declare const brand: unique symbol;
 /** At most 34 characters, so `pylon-<id>` fits pi-sandbox's 40. */
@@ -318,6 +318,14 @@ const migrations: readonly string[] = [
    CREATE TABLE IF NOT EXISTS usage_cursors (source TEXT NOT NULL, key TEXT NOT NULL, position INTEGER NOT NULL, before TEXT NOT NULL, PRIMARY KEY (source, key)) STRICT;
    CREATE TABLE IF NOT EXISTS usage_since (at INTEGER NOT NULL) STRICT;
    INSERT INTO usage_since SELECT CAST(strftime('%s', 'now') AS INTEGER) * 1000 WHERE NOT EXISTS (SELECT 1 FROM usage_since);`,
+  // The usage backfill's run, with the pylon it holds and what it waits for, and each thread a run listed. It touches
+  // nothing an earlier migration made, so a registry rewound past it applies it again unchanged.
+  `CREATE TABLE IF NOT EXISTS usage_backfill (id INTEGER PRIMARY KEY CHECK (id = 1), state TEXT NOT NULL CHECK (state IN ('running', 'stopped', 'done')),
+     started_at INTEGER NOT NULL, finished_at INTEGER, thread TEXT, phase TEXT CHECK (phase IN ('reading', 'pausing')), since INTEGER, waiting TEXT,
+     CHECK ((thread IS NULL) = (phase IS NULL) AND (thread IS NULL) = (since IS NULL))) STRICT;
+   CREATE TABLE IF NOT EXISTS usage_backfill_threads (thread TEXT PRIMARY KEY REFERENCES threads (id), state TEXT NOT NULL CHECK (state IN ('pending', 'done', 'skipped')),
+     reason TEXT, calls INTEGER NOT NULL, tokens INTEGER NOT NULL, at INTEGER,
+     CHECK ((state = 'skipped') = (reason IS NOT NULL)), CHECK ((state = 'pending') = (at IS NULL))) STRICT;`,
 ];
 
 type Row = Record<string, unknown>;
@@ -540,11 +548,13 @@ export function openRegistry(path: string, clock = Date.now) {
     const waiting = sql("SELECT message FROM session_activity WHERE thread = ? AND state = 'session.waiting' ORDER BY updated_at DESC, rowid DESC LIMIT 1").get(thread.id);
     const starts = [thread.agentTurnRunning ? row.agent_turn_started_at : null, live.since].filter((at): at is number => typeof at === "number");
     const usageLimit = working === null ? usageLimitOf(thread.id) : null;
+    const readingUsage = sql("SELECT 1 FROM usage_backfill WHERE state = 'running' AND thread = ? AND phase = 'reading'").get(thread.id) !== undefined;
     return {
       ...thread, working: thread.agentTurnRunning || working !== null,
       ...(working === null ? {} : { sessionTurnRunning: true, sessionActiveUntil: working + sessionActivityTtlMs }), ...(waiting === undefined ? {} : { sessionWaiting: true }),
       ...(typeof waiting?.message === "string" ? { sessionWaitingMessage: waiting.message } : {}),
       ...(starts.length === 0 ? {} : { workingSince: Math.min(...starts) }), ...(usageLimit === null ? {} : { usageLimit }),
+      ...(readingUsage ? { readingUsage } : {}),
     };
   }
 
@@ -646,6 +656,25 @@ export function openRegistry(path: string, clock = Date.now) {
     const [input, output, cacheWrite, cacheRead] = [r.input, r.output, r.cache_write, r.cache_read] as number[];
     return { input: input!, output: output!, cacheWrite: cacheWrite!, cacheRead: cacheRead!, total: input! + output! + cacheWrite! + cacheRead!, calls: r.calls as number };
   };
+  function usageBackfillThreads(): BackfillThread[] {
+    return sql("SELECT b.*, t.title FROM usage_backfill_threads b JOIN threads t ON t.id = b.thread ORDER BY t.created_at, t.id").all().map((r) => ({
+      thread: r.thread as ThreadId, title: r.title as string, state: r.state as BackfillThread["state"], reason: r.reason as string | null,
+      calls: r.calls as number, tokens: r.tokens as number, at: r.at as number | null,
+    }));
+  }
+
+  function usageBackfill(): UsageBackfill {
+    const run = sql("SELECT * FROM usage_backfill").get();
+    if (run === undefined) return { state: "never" };
+    const count = sql("SELECT count(*) AS of, coalesce(sum(state <> 'pending'), 0) AS read, coalesce(sum(calls), 0) AS calls, coalesce(sum(tokens), 0) AS tokens FROM usage_backfill_threads").get()!;
+    return {
+      state: run.state as "running" | "stopped" | "done", startedAt: run.started_at as number, finishedAt: run.finished_at as number | null,
+      current: run.thread === null ? null : { thread: run.thread as ThreadId, phase: run.phase as "reading" | "pausing", since: run.since as number },
+      waiting: run.waiting as string | null, read: count.read as number, of: count.of as number,
+      recovered: { calls: count.calls as number, tokens: count.tokens as number }, skipped: usageBackfillThreads().filter((t) => t.state === "skipped"),
+    };
+  }
+
   const sums = (calls: string) => `coalesce(sum(input), 0) AS input, coalesce(sum(output), 0) AS output, coalesce(sum(cache_write), 0) AS cache_write,
     coalesce(sum(cache_read), 0) AS cache_read, ${calls} AS calls, coalesce(sum(input + output + cache_write + cache_read), 0) AS total`;
 
@@ -654,12 +683,14 @@ export function openRegistry(path: string, clock = Date.now) {
     /**
      * Records each call under the thread it was read from, with the thread's project and role, and moves each cursor
      * to where its read ended. A call recorded before keeps its thread and time, and each count the larger of the two
-     * reads, since every record of one call carries the same usage.
+     * reads, since every record of one call carries the same usage. Returns how many calls were new, and the tokens
+     * the recorded counts grew by. `backfill` adds them to the thread's usage backfill row in the same transaction.
      */
-    recordUsage(thread: ThreadId, calls: readonly AgentCall[], cursors: readonly UsageCursor[] = []) {
+    recordUsage(thread: ThreadId, calls: readonly AgentCall[], cursors: readonly UsageCursor[] = [], backfill = false): { calls: number; tokens: number } {
       const t = q.thread.get(thread) as Row | undefined;
       if (t === undefined) throw new Error(`no thread ${thread} to record usage under`);
       const role = roleOf(t.started_by as string);
+      const added = { calls: 0, tokens: 0 };
       transaction(() => {
         for (const c of calls) {
           const stored = sql("SELECT * FROM usage_records WHERE id = ?").get(c.id);
@@ -675,11 +706,15 @@ export function openRegistry(path: string, clock = Date.now) {
             $day: day(at), $project: key[1]!, $role: key[2]!, $agent: key[3]!, $model: key[4]!, $calls: stored === undefined ? 1 : 0,
             $input: now.input - was.input, $output: now.output - was.output, $cacheWrite: now.cacheWrite - was.cacheWrite, $cacheRead: now.cacheRead - was.cacheRead,
           });
+          if (stored === undefined) added.calls++;
+          added.tokens += now.input - was.input + now.output - was.output + now.cacheWrite - was.cacheWrite + now.cacheRead - was.cacheRead;
         }
         for (const { source, key, position, before } of cursors) {
           sql("INSERT INTO usage_cursors VALUES (?, ?, ?, ?) ON CONFLICT (source, key) DO UPDATE SET position = excluded.position, before = excluded.before").run(source, key, position, before);
         }
+        if (backfill) sql("UPDATE usage_backfill_threads SET calls = calls + ?, tokens = tokens + ? WHERE thread = ?").run(added.calls, added.tokens, thread);
       });
+      return added;
     },
     /** Where each of the source's files or conversations was last read to. */
     usageCursors: (source: string): Map<string, UsageCursor> =>
@@ -697,8 +732,58 @@ export function openRegistry(path: string, clock = Date.now) {
       }
       return {
         since: filter.since, countingSince: sql("SELECT at FROM usage_since").get()!.at as number, project: params.$project, thread: params.$thread,
-        total: totalsOf(sql(`SELECT ${sums(calls)} FROM ${from} ${where}`).get(params)!), by,
+        total: totalsOf(sql(`SELECT ${sums(calls)} FROM ${from} ${where}`).get(params)!), by, backfill: usageBackfill(),
       };
+    },
+    usageBackfill,
+    /** Every thread a run of the backfill listed, oldest thread first. */
+    usageBackfillThreads,
+    /**
+     * Starts a run that reads `threads`, unless one runs. Each listed thread with no row gets a pending one, and a
+     * skipped one is pending again. A done thread is never read again.
+     */
+    startUsageBackfill(threads: readonly ThreadId[], now: number): UsageBackfill {
+      transaction(() => {
+        if (sql("SELECT state FROM usage_backfill").get()?.state === "running") return;
+        for (const thread of threads) {
+          sql(`INSERT INTO usage_backfill_threads (thread, state, calls, tokens) VALUES (?, 'pending', 0, 0)
+            ON CONFLICT (thread) DO UPDATE SET state = 'pending', reason = NULL, at = NULL WHERE state = 'skipped'`).run(thread);
+        }
+        sql(`INSERT INTO usage_backfill (id, state, started_at) VALUES (1, 'running', ?) ON CONFLICT (id) DO UPDATE SET state = 'running',
+          started_at = excluded.started_at, finished_at = NULL, thread = NULL, phase = NULL, since = NULL, waiting = NULL`).run(now);
+      });
+      return usageBackfill();
+    },
+    /** A running run stops, and lets go of its pylon, whose desired phase is then paused again. */
+    stopUsageBackfill(now: number): UsageBackfill {
+      sql("UPDATE usage_backfill SET state = 'stopped', finished_at = ?, thread = NULL, phase = NULL, since = NULL, waiting = NULL WHERE state = 'running'").run(now);
+      return usageBackfill();
+    },
+    /** A running run has read every thread it listed. */
+    finishUsageBackfill(now: number) {
+      sql("UPDATE usage_backfill SET state = 'done', finished_at = ?, thread = NULL, phase = NULL, since = NULL, waiting = NULL WHERE state = 'running'").run(now);
+    },
+    /** Why a running run waits before its next pylon, or null when it does not. */
+    waitUsageBackfill(waiting: string | null) {
+      sql("UPDATE usage_backfill SET waiting = ? WHERE state = 'running' AND waiting IS NOT ?").run(waiting, waiting);
+    },
+    /** A running run holds the thread's pylon, which it wants woken to read. */
+    holdUsageBackfill(thread: ThreadId, now: number) {
+      sql("UPDATE usage_backfill SET thread = ?, phase = 'reading', since = ?, waiting = NULL WHERE state = 'running'").run(thread, now);
+    },
+    /** The run lets go of the pylon it holds, once it is paused. */
+    releaseUsageBackfill() {
+      sql("UPDATE usage_backfill SET thread = NULL, phase = NULL, since = NULL").run();
+    },
+    /**
+     * The thread was read, or skipped for `reason`, and keeps what its reads recovered. A run that holds its pylon now
+     * waits for its pause.
+     */
+    finishUsageBackfillThread(thread: ThreadId, state: "done" | "skipped", reason: string | null, now: number) {
+      transaction(() => {
+        sql("UPDATE usage_backfill_threads SET state = ?, reason = ?, at = ? WHERE thread = ?").run(state, reason, now, thread);
+        sql("UPDATE usage_backfill SET phase = 'pausing', since = ? WHERE state = 'running' AND thread = ?").run(now, thread);
+      });
     },
     appendEvent,
     pruneSessions,
@@ -1018,6 +1103,8 @@ export function openRegistry(path: string, clock = Date.now) {
         updateAttention(pylon.thread as ThreadId);
       });
     },
+    /** Forgets the pylon's failed jobs, and only those, as the usage backfill does for a wake it gave up on. */
+    clearPylonAttempts(pylonId: PylonId) { sql(`UPDATE pylons SET attempts = '{"count":0,"last":null}' WHERE id = ?`).run(pylonId); },
     /** Clears a failed pylon's verdict and attempts, and marks a human retry. False when the pylon has not failed. */
     retryPylon: (pylonId: PylonId): boolean => transaction(() => {
       const changed = q.retryPylon.run(pylonId).changes === 1;

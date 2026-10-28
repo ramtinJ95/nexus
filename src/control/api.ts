@@ -43,6 +43,7 @@ import { dashboard, liveFrames } from "./dashboard.ts";
 import { attachScript, checkoutDir, claudeTextProblem, herdrSession } from "../sessions.ts";
 import { claudeConversations, claudeFrames } from "./claude-conversation.ts";
 import { usageFilter } from "./usage.ts";
+import type { UsageBackfillJob } from "./usage-backfill.ts";
 import type { ClaudeConversation } from "../claude-transcript.ts";
 import { checkoutReader, CheckoutRefused, contentType, pathsFit, type CheckoutReader, type RefusalKind } from "../checkout-files.ts";
 import { attachRoute, parseAttachQuery } from "../attach-wire.ts";
@@ -85,6 +86,8 @@ export interface ApiOptions {
   previewPorts: PortRange;
   /** Image builds and rollouts. Without it, their routes answer 409. */
   images?: ImageRollout;
+  /** The usage backfill. Without it, its routes answer 409. */
+  usageBackfill?: UsageBackfillJob;
   /** How long a stream's client may leave what was sent unread before it is dropped. 30 s by default. */
   streamStallMs?: number;
   /** How attached terminals ping and wait. Tests shorten it. */
@@ -798,6 +801,15 @@ export async function startApi(options: ApiOptions): Promise<Api> {
     return options.images;
   }
   const started = (operation: ImageOperation): Reply => ({ status: operation.state === "running" ? 202 : 200, body: operation });
+  function usageBackfill(): UsageBackfillJob {
+    if (options.usageBackfill === undefined) throw new HttpError(409, "the usage backfill is not configured");
+    return options.usageBackfill;
+  }
+  /** The backfill wakes archived threads' pylons, so starting or stopping it takes the same right as `nexus deploy`. */
+  function steerUsageBackfill(caller: TailnetNodeId): UsageBackfillJob {
+    if (!canDeploy(registry, options.deployment, caller)) throw new HttpError(403, "caller may not start or stop the usage backfill: only deployers may, never infrastructure nodes or pylons");
+    return usageBackfill();
+  }
 
   /** A file is served as its bytes, everything else as JSON. */
   type Reply =
@@ -895,6 +907,9 @@ export async function startApi(options: ApiOptions): Promise<Api> {
       return ok(project);
     }],
     ["GET", /^\/v1\/usage$/, (_, r) => ok(registry.usageReport(usageFilter(r.query, Date.now())))],
+    ["GET", /^\/v1\/usage\/backfill$/, () => ok({ backfill: usageBackfill().status(), plan: usageBackfill().plan() })],
+    ["POST", /^\/v1\/usage\/backfill$/, (_, r) => ok(steerUsageBackfill(r.caller).start())],
+    ["DELETE", /^\/v1\/usage\/backfill$/, (_, r) => ok(steerUsageBackfill(r.caller).stop())],
     ["GET", /^\/v1\/projects$/, () => ok(registry.projects())],
     ["POST", /^\/v1\/projects$/, async (_, r) => created(createProject(await r.body()))],
     ["GET", /^\/v1\/nodes$/, () => ok(registry.nodes().map((record): NodeSummary => {

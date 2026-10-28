@@ -1,0 +1,9 @@
+$ nexus usage backfill --dry-run
+A start reads 6 archived threads, one pylon at a time:
+th-573e8dd61ea5  nexus  verify-node  Counted live before archive
+th-07cff3e513ad  nexus  verify-node  Long Claude history
+th-e22039e3191f  nexus  verify-node  Harness review in pi
+th-14a1c3eb9987  nexus  verify-node  Claude and pi, held at boot
+th-e2d1b22d3832  nexus  verify-node  Pylon fails to boot
+th-2efe9f7b9b2b  nexus  verify-node  Transcripts fail to read
+exit 0

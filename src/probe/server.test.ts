@@ -52,13 +52,15 @@ function fakeBackend(guest: Guest | null = null) {
   /** Each secret update the backend was asked for, and the pylons it then fails to reach. */
   const secretUpdates: [string, string][] = [];
   const unreachable: PylonId[] = [];
+  const relaunches: boolean[] = [];
   let gate: PromiseWithResolvers<void> | null = null;
   const held = (signal: AbortSignal) => gate === null ? Promise.resolve() : new Promise<void>((resolve, reject) => {
     gate!.promise.then(resolve);
     signal.addEventListener("abort", () => reject(signal.reason), { once: true });
   });
   const backend: VmBackend = {
-    async ensureRunning(b, _live, signal) {
+    async ensureRunning(b, _live, signal, relaunch) {
+      relaunches.push(relaunch ?? true);
       await held(signal);
       pylons.set(b.pylonId, { pylonId: b.pylonId, vm: "running", checkpoint: null, image: b.image, bootedAt: "2027-01-01T00:00:00Z" });
     },
@@ -90,7 +92,7 @@ function fakeBackend(guest: Guest | null = null) {
     },
   };
   return {
-    backend, pylons, calls, imported, secretUpdates, unreachable,
+    backend, pylons, calls, imported, secretUpdates, unreachable, relaunches,
     offer(manifest: ArtifactManifest, body: string) { offered.set(manifest.id, { manifest, body }); },
     hold() { gate = Promise.withResolvers(); }, release() { gate?.resolve(); gate = null; },
   };
@@ -386,6 +388,30 @@ test("observe starts with a snapshot carrying the applied liveHash, and a new pr
     assert.ok(p?.phase === "running" && p.liveHash === null);
     break;
   }
+});
+
+test("a spawn without its sessions reaches the backend as such, and its pylon reports no liveHash until a spawn that brings them back", async (t) => {
+  const { client, fake } = await setup(t);
+  const run = async (job: Job) => {
+    const env = envelope(job, node, Date.now());
+    await client.submit(env);
+    assert.equal((await finished(client, env.jobId)).state, "succeeded");
+  };
+  const liveHash = async () => {
+    for await (const e of client.observe(AbortSignal.timeout(5000))) {
+      assert.ok(e.type === "snapshot" && e.observation.spawnsWithoutRelaunch === true);
+      const p = e.observation.pylons[0];
+      return p?.phase === "running" ? p.liveHash : assert.fail(`the pylon is ${p?.phase}`);
+    }
+  };
+  await run(spawnJob);
+  assert.equal(await liveHash(), "hash-1");
+  await run({ kind: "pause", pylonId, checkpoint: "ckpt-unit-1" });
+  await run({ ...spawnJob, relaunch: false } as Job);
+  assert.equal(await liveHash(), null);
+  await run(spawnJob);
+  assert.equal(await liveHash(), "hash-1");
+  assert.deepEqual(fake.relaunches, [true, false, true]);
 });
 
 test("capacity counts the CPUs and memory of VMs that are up and the disk of every pylon, paused ones included", async (t) => {

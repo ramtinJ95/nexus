@@ -1,0 +1,29 @@
+2026-10-28T01:15:32.233Z pylon-th-573e8dd61ea5 git: checkout facts unavailable; retrying on the next git poll
+2026-10-28T01:15:32.233Z pylon-th-573e8dd61ea5 attached terminals: the verify node's pylons run only raw pipes. They count as none until a count succeeds
+2026-10-28T01:15:32.233Z pylon-th-573e8dd61ea5 sessions: the verify node's pylons run only raw pipes. The control plane keeps the last list read until a read succeeds
+2026-10-28T01:15:32.400Z pylon-th-07cff3e513ad git: checkout facts unavailable; retrying on the next git poll
+2026-10-28T01:15:32.400Z pylon-th-07cff3e513ad attached terminals: the verify node's pylons run only raw pipes. They count as none until a count succeeds
+2026-10-28T01:15:32.401Z pylon-th-07cff3e513ad sessions: the verify node's pylons run only raw pipes. The control plane keeps the last list read until a read succeeds
+2026-10-28T01:15:32.572Z pylon-th-e22039e3191f git: checkout facts unavailable; retrying on the next git poll
+2026-10-28T01:15:32.572Z pylon-th-e22039e3191f attached terminals: the verify node's pylons run only raw pipes. They count as none until a count succeeds
+2026-10-28T01:15:32.572Z pylon-th-e22039e3191f sessions: the verify node's pylons run only raw pipes. The control plane keeps the last list read until a read succeeds
+2026-10-28T01:15:32.748Z pylon-th-14a1c3eb9987 git: checkout facts unavailable; retrying on the next git poll
+2026-10-28T01:15:32.748Z pylon-th-14a1c3eb9987 attached terminals: the verify node's pylons run only raw pipes. They count as none until a count succeeds
+2026-10-28T01:15:32.748Z pylon-th-14a1c3eb9987 sessions: the verify node's pylons run only raw pipes. The control plane keeps the last list read until a read succeeds
+2026-10-28T01:15:32.920Z pylon-th-e2d1b22d3832 git: checkout facts unavailable; retrying on the next git poll
+2026-10-28T01:15:32.920Z pylon-th-e2d1b22d3832 attached terminals: the verify node's pylons run only raw pipes. They count as none until a count succeeds
+2026-10-28T01:15:32.920Z pylon-th-e2d1b22d3832 sessions: the verify node's pylons run only raw pipes. The control plane keeps the last list read until a read succeeds
+2026-10-28T01:15:33.120Z pylon-th-2efe9f7b9b2b git: checkout facts unavailable; retrying on the next git poll
+2026-10-28T01:15:33.120Z pylon-th-2efe9f7b9b2b attached terminals: the verify node's pylons run only raw pipes. They count as none until a count succeeds
+2026-10-28T01:15:33.120Z pylon-th-2efe9f7b9b2b sessions: the verify node's pylons run only raw pipes. The control plane keeps the last list read until a read succeeds
+2026-10-28T01:15:33.346Z pylon-th-9d0b9b51cc16 git: checkout facts unavailable; retrying on the next git poll
+2026-10-28T01:15:33.346Z pylon-th-9d0b9b51cc16 attached terminals: the verify node's pylons run only raw pipes. They count as none until a count succeeds
+2026-10-28T01:15:33.346Z pylon-th-9d0b9b51cc16 sessions: the verify node's pylons run only raw pipes. The control plane keeps the last list read until a read succeeds
+2026-10-28T01:15:43.959Z pylon-th-573e8dd61ea5 sessions: the verify node's pylons run only raw pipes. The control plane keeps the last list read until a read succeeds
+2026-10-28T01:15:49.958Z pylon-th-07cff3e513ad sessions: the verify node's pylons run only raw pipes. The control plane keeps the last list read until a read succeeds
+2026-10-28T01:15:55.959Z pylon-th-e22039e3191f sessions: the verify node's pylons run only raw pipes. The control plane keeps the last list read until a read succeeds
+2026-10-28T01:16:03.965Z pylon-th-14a1c3eb9987 sessions: the verify node's pylons run only raw pipes. The control plane keeps the last list read until a read succeeds
+2026-10-28T01:16:15.826Z pylon-th-2efe9f7b9b2b sessions: the verify node's pylons run only raw pipes. The control plane keeps the last list read until a read succeeds
+2026-10-28T01:16:17.825Z pylon-th-2efe9f7b9b2b stream python3: the transcripts could not be read
+2026-10-28T01:16:27.828Z pylon-th-2efe9f7b9b2b sessions: the verify node's pylons run only raw pipes. The control plane keeps the last list read until a read succeeds
+2026-10-28T01:16:29.827Z pylon-th-2efe9f7b9b2b stream python3: the transcripts could not be read

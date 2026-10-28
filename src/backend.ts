@@ -20,8 +20,11 @@ import type { ArtifactId, ArtifactManifest, CheckpointId, ImageId, ImageRecipe, 
 import type { HostBridge } from "./probe/pylon-api.ts";
 
 export interface VmBackend {
-  /** Boot from `boot.source` unless already running, then apply `live`. Converges from any partial state. */
-  ensureRunning(boot: BootInputs, live: LiveSpec, signal: AbortSignal): Promise<void>;
+  /**
+   * Boot from `boot.source` unless already running, then apply `live`. Converges from any partial state. `relaunch`
+   * false (true when omitted) leaves the sessions of a boot from an existing disk for the next spawn to bring back.
+   */
+  ensureRunning(boot: BootInputs, live: LiveSpec, signal: AbortSignal, relaunch?: boolean): Promise<void>;
   /**
    * Record sessions, stop services, close terminals, checkpoint the disk, stop the VM. Already stopped: no-op. A disk
    * with a failed setup is never checkpointed: a VM with no checkpoint is removed, and one with a checkpoint is refused.
@@ -154,7 +157,7 @@ export async function runJob(job: Job, deps: ProbeDeps, signal: AbortSignal): Pr
         for (const grant of job.boot.network.secrets) {
           if (deps.secrets.value(grant.name) === undefined) throw new JobFailure("secret-missing", `secret ${grant.name} is not in this node's secret file`);
         }
-        await deps.backend.ensureRunning(job.boot, job.live, signal);
+        await deps.backend.ensureRunning(job.boot, job.live, signal, job.relaunch ?? true);
         await deps.serve.converge(job.pylonId, job.live.previews, signal);
         return;
       case "pause":

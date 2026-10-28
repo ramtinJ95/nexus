@@ -1,0 +1,3 @@
+$ nexus archive th-07cff3e513ad
+Archived th-07cff3e513ad.
+exit 0

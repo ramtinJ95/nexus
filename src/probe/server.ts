@@ -404,6 +404,7 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
       previewRoutes: previews === null ? [] : [...previews.gateway.routes].map(([httpsPort, route]) => ({ httpsPort, ...route })),
       grants: { secrets: options.secrets.names(), gitSsh: backend.gitSsh ?? false },
       claudeLaunchRepeatable: true,
+      spawnsWithoutRelaunch: true,
       heldSecrets,
     };
   }
@@ -430,7 +431,8 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
       () => {
         // A withdraw while it ran may have come after its converge, so the planner spawns again.
         if (job.kind === "spawn" && diverged.get(job.pylonId) === seen) {
-          liveHashes.set(job.pylonId, job.liveHash);
+          // A pylon whose sessions this spawn left out does not yet look like `live`, so the next spawn brings them back.
+          if (job.relaunch !== false) liveHashes.set(job.pylonId, job.liveHash);
           published.set(job.pylonId, job.live.previews);
           api.republished();
         }

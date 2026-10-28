@@ -1,0 +1,3 @@
+$ nexus archive th-20003f2c575f
+Archived th-20003f2c575f.
+exit 0
