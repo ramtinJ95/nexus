@@ -1467,6 +1467,10 @@ test("review and land reach the review loop's routes, and show prints a review a
   s.registry.saveReview({ ...review, rounds: [{ ...checked, live: { kind: "absent" } }], phase: { kind: "approved" } });
   assert.match((await s.nexus(["show", thread.id])).stdout, new RegExp(`^no live check: ${head.slice(0, 12)} has no \\.nexus/verify, so the landing reads the pull request's statement of what could not be checked live$`, "m"));
 
+  const approval = { ...checked, verdict: { token: "a", verdict: "approve" as const, findings: [], reserved: [], notCheckedLive: null } };
+  s.registry.saveReview({ ...review, rounds: [approval, { head: "2".repeat(40), verdict: null, check: null, answers: null }], phase: { kind: "reviewing" } });
+  assert.match((await s.nexus(["show", thread.id])).stdout, /^review rv-1 of PR #7: reviewing, round 2 of 5, .*\na new round reviews 222222222222, since the pull request's head moved from 111111111111 after its approval$/m);
+
   const hold = "Always needs the person: changes to login or auth, as it changes src/control/api.ts.";
   s.registry.saveReview({ ...review, land: { requestedBy: "nLAPTOP" }, phase: { kind: "landed", commit: "4".repeat(40) }, waiver: { head: "1".repeat(40), holds: [hold], by: "nLAPTOP", at: Date.UTC(2026, 9, 27, 9) } });
   const waived = await s.nexus(["show", thread.id]);

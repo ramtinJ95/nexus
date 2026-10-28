@@ -1,0 +1,17 @@
+$ nexus show th-ef6aa6301fa9
+th-ef6aa6301fa9  Planning threads
+project: nexus
+attention: decision
+status: active
+pylon: pylon-th-ef6aa6301fa9 on verify-node, running, observed 0s ago
+size: 1 CPUs, 1 GiB memory, 10 GiB disk
+placement: verify-node, the project's default node
+setup: fresh boot runs .nexus/setup, because the control plane could not read .nexus/setup at main: the verify stack reads no remote, so every thread boots fresh
+PR watch: on
+PR #185: Planning threads whose proposals become decision cards — open, checks passing, review none https://github.com/ramtinJ95/nexus/pull/185
+review rv-e94f1556 of PR #185: needs-person, round 1 of 5, reviewer th-8e3c6d7d9d30 on gpt-6-astra, landing when approved
+no live check: 103598e00000 has no .nexus/verify, so the landing reads the pull request's statement of what could not be checked live
+needs you: Always needs the person: anything irreversible, as it changes src/control/registry.ts.
+output: branch origin/feat/planning-threads
+output: pull-request https://github.com/ramtinJ95/nexus/pull/185
+exit 0

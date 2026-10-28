@@ -381,6 +381,28 @@ test("a review is not offered for landing when its PR closed, or when the contro
   assert.equal(landingOf((await s.call("GET", `/threads/${fix.id}`)).text), "", "a closed PR has nothing to land");
 });
 
+test("a held review whose PR the watch read at a new head offers no Land for the old one, and its new round says why it started", async (t) => {
+  const s = await seeded(t, landingOptions());
+  const fix = await s.start("acme", "Fix checkout");
+  const held = approvedReview(fix.id, { kind: "needs-person", reasons: ["Always needs the person: changes to login or auth, as it changes src/control/api.ts."] }, { land: { requestedBy: laptop } });
+  s.registry.saveReview(held);
+  const moved = "b3".repeat(20);
+  const pr = { repo: "acme/nexus", number: 7, title: "Cache", url: "https://github.com/acme/nexus/pull/7", state: "open" as const, checks: "passing" as const, review: "none" as const, conflict: false, head: moved };
+  s.registry.savePrWatch(fix.id, { links: [{ pr, seen: [], failed: false }], commentWakes: 0, pending: null, error: null });
+  const card = landingOf((await s.call("GET", `/threads/${fix.id}`)).text);
+  assert.ok(!card.includes("<button"), "no Land for a head that is no longer the PR's");
+  assert.match(textOf(card), new RegExp(`The PR watch last read the pull request at ${moved.slice(0, 12)} , not ${head.slice(0, 12)} , so ${head.slice(0, 12)} is not offered for landing\\.`));
+
+  s.registry.savePrWatch(fix.id, { links: [{ pr, seen: [], failed: false }], commentWakes: 10, pending: null, error: null });
+  assert.match(landingOf((await s.call("GET", `/threads/${fix.id}`)).text), /data-action="land"/, "a stopped watch's head takes no Land away");
+  s.registry.savePrWatch(fix.id, { links: [{ pr: { ...pr, head: "1".repeat(40) }, seen: [], failed: false }], commentWakes: 0, pending: null, error: null });
+  assert.ok(!landingOf((await s.call("GET", `/threads/${fix.id}`)).text).includes("<button"), "a force-push back to the head an earlier round reviewed takes Land away too");
+
+  s.registry.saveReview({ ...held, rounds: [...held.rounds, { head: moved, verdict: null, check: null, answers: null }], phase: { kind: "reviewing" } });
+  const page = textOf((await s.call("GET", `/threads/${fix.id}`)).text);
+  assert.match(page, new RegExp(`Nexus review rv-1: reviewing, round 3 of 5, .* a new round reviews ${moved.slice(0, 12)}, since the pull request's head moved from ${head.slice(0, 12)} after its approval`));
+});
+
 test("a hold the policy reserves for the person is marked waivable, and pressing Land waives it", async (t) => {
   const reserved = "Always needs the person: changes to login or auth, as it changes src/control/api.ts.";
   const s = await seeded(t, landingOptions());
