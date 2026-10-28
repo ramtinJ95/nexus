@@ -674,15 +674,12 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
 
   async function pass() {
     const reviews = registry.reviews();
-    // A check thread no review holds, such as one started just before a crash, has nothing left to give. A verify pylon
-    // whose verdict a round recorded stays as the person leaves it, so one they unarchive to look at stays open.
-    const held = new Set(reviews.flatMap((r) => [
-      ...(r.phase.kind === "checking" || r.phase.kind === "verifying") && r.phase.thread !== null ? [r.phase.thread] : [],
-      ...r.rounds.flatMap((round) => round.live?.kind === "ran" ? [round.live.thread] : []),
-    ]));
+    // A check thread no review holds, such as one started just before a crash, has nothing left to give. So has such a
+    // verify pylon, unless the person has been to it since it started, as by unarchiving it to look at what it left.
+    const held = new Set(reviews.flatMap((r) => (r.phase.kind === "checking" || r.phase.kind === "verifying") && r.phase.thread !== null ? [r.phase.thread] : []));
     for (const t of registry.threads()) {
       if (t.startedBy === checkCaller && t.status !== "deleted" && !held.has(t.id)) checks.discard(t.id);
-      if (t.startedBy === verifyCaller && t.status === "active" && !held.has(t.id)) live.discard(t.id);
+      if (t.startedBy === verifyCaller && t.status === "active" && t.lastHumanActivityAt === t.createdAt && !held.has(t.id)) live.discard(t.id);
     }
     for (const stored of reviews) {
       let r = stored;

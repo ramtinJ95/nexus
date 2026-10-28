@@ -707,15 +707,30 @@ test("a landing stored before live checks, whose head has a .nexus/verify, is he
   assert.deepEqual(f.merges, [head1]);
 });
 
-test("a verify pylon the person unarchives after its verdict stays open", async (t) => {
+test("a verify pylon the person unarchives stays open, after its verdict, after its review is replaced, or after it timed out", async (t) => {
+  const unarchive = (f: ReturnType<typeof fixture>, id: ThreadId) => { f.registry.setThreadStatus(id, "active"); f.registry.recordActivity(id, { human: 2 }); };
   const f = fixture(t);
   f.verifies = true;
   const loop = await approved(f, null);
   assert.deepEqual(f.archived, f.liveThreads);
-  f.registry.setThreadStatus(f.liveThreads[0]!, "active");
+  unarchive(f, f.liveThreads[0]!);
   await loop.poll();
-  assert.equal(f.registry.thread(f.liveThreads[0]!)!.status, "active");
+  f.registry.saveReview({ ...f.review(), id: "rv-next", rounds: [{ head: head2, verdict: null, check: null, answers: null }], phase: { kind: "approved" } });
+  await loop.poll();
+  assert.equal(f.registry.thread(f.liveThreads[0]!)!.status, "active", "the review that recorded it is gone");
   assert.equal(f.archived.length, 1);
+
+  const g = fixture(t, { path: ":memory:" });
+  g.verifies = true;
+  g.live = { kind: "running" };
+  const gLoop = await approved(g, null);
+  g.tick(61 * 60_000);
+  await gLoop.poll();
+  assert.equal(g.review().phase.kind, "needs-person");
+  assert.deepEqual(g.archived, g.liveThreads, "the timed-out verify pylon was archived as its review ended");
+  unarchive(g, g.liveThreads[0]!);
+  await gLoop.poll();
+  assert.equal(g.registry.thread(g.liveThreads[0]!)!.status, "active");
 });
 
 test("a live check that fails holds the landing like a failed check: the builder answers it as a P0, and a failure it does not push for goes to the person", async (t) => {
