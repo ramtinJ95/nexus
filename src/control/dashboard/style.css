@@ -570,4 +570,8 @@ h4.md-h { font-size: 1.07em; }
 .attention-toast a { color: #9dcaff; }
 .ov-sub { margin: 14px 0 6px; font: 500 12px var(--sans); color: var(--text-3); }
 .ov-wait { display: block; overflow: hidden; text-overflow: ellipsis; }
+.ov-items th:first-child { width: 26%; }
+.ov-items th:nth-child(2) { width: 34%; }
+.ov-items .ov-act { width: 150px; }
+.ov-why { display: block; color: var(--text-2); font-size: 12px; overflow-wrap: anywhere; }
 .queued section h2 { margin: 0 0 10px; font: 600 13px/1.4 var(--sans); color: var(--text); }

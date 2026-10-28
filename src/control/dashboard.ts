@@ -603,10 +603,10 @@ ${projects.length === 0 ? html`<p class="empty">No project runs the pipeline. <c
   return html`<section aria-labelledby="pipeline-${p.id}">
 <div class="ov-head"><h2 id="pipeline-${p.id}">${p.id}</h2><span class="dim">${pipelineSetting(p)}</span></div>
 ${own.length === 0 ? html`<p class="empty">No items. <code>nexus item add --project ${p.id}</code> lines one up.</p>` : html`<table class="ov ov-items">
-<thead><tr><th>Item</th><th>Phase</th><th class="wide">After</th><th class="wide">Thread</th><th></th></tr></thead>
+<thead><tr><th>Item</th><th>Phase</th><th class="wide">After</th><th class="wide">Thread</th><th class="ov-act"></th></tr></thead>
 <tbody>${own.map((i) => html`<tr data-item="${i.id}" data-phase="${i.phase.kind}">
 <td><span class="ov-title">${dot(phaseTone[i.phase.kind], i.phase.kind)}<span>${i.title}</span></span><code class="dim">${i.id}</code></td>
-<td>${state(i.phase.kind, phaseTone[i.phase.kind])}<span class="ov-wait">${i.phase.why}</span></td>
+<td>${state(i.phase.kind, phaseTone[i.phase.kind])}<span class="ov-why">${i.phase.why}</span></td>
 <td class="wide">${i.after.length === 0 ? html`<span class="dim">nothing</span>` : i.after.map((id) => html`<span class="ov-wait">${title(id)}</span>`)}</td>
 <td class="wide">${i.thread === null ? html`<span class="dim">none yet</span>` : html`<a class="link" href="/threads/${i.thread}">${c.registry.thread(i.thread)?.title ?? c.registry.queuedThread(i.thread)?.title ?? i.thread}</a>`}</td>
 <td>${actions(i, p)}</td>
