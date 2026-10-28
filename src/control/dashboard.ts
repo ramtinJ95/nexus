@@ -86,11 +86,14 @@ export function dashboard(options: DashboardOptions): (path: string, query: URLS
         if (queued !== undefined && queued.status !== "started") return ok(queuedPage(context(), queuedView(registry, queued)));
         return { ...ok(notFound(context(), `No thread ${m[1]!}.`)), status: 404 };
       }
-      // The reply known before this read is a safe watermark even if another turn ends during it.
+      // The reply known before this read is a safe watermark even if another turn ends during it. A Claude worker's
+      // transcript is as of its last read that reached its end, which holds the reply only if it started after the
+      // reply was recorded.
       const view = await transcript(thread);
+      const repliedAt = view !== null && !(view instanceof Error) && isClaude(view) && (view.readAt ?? 0) < (thread.lastReplyAt ?? 0) ? null : thread.lastReplyAt;
       // After the read, so the facts are no older than the conversation, and a thread deleted meanwhile shows none.
       const d = detail(registry.thread(thread.id)!);
-      return ok(threadPage(context(), d, registry.node(d.pylon.node)!, d.thread.status === "deleted" ? null : view, thread.lastReplyAt, query.has("streaming")));
+      return ok(threadPage(context(), d, registry.node(d.pylon.node)!, d.thread.status === "deleted" ? null : view, repliedAt, query.has("streaming")));
     }],
     [/^\/assets\/([\w.-]+)$/, (m, query, context) => {
       const asset = assets.get(m[1]!);

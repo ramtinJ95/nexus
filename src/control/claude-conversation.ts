@@ -171,6 +171,7 @@ export function claudeConversations(options: { registry: Registry; probes: Reado
       const probe = probeOf(t);
       if (probe === null) return;
       const stored = registry.claudeTranscript(id);
+      const startedAt = Date.now();
       const from = stored?.session === session ? stored.cursor : transcriptStart;
       let found: TranscriptRead | null;
       try {
@@ -184,9 +185,12 @@ export function claudeConversations(options: { registry: Registry; probes: Reado
       r.failure = null;
       // A delete meanwhile removed the transcript, which this read must not bring back.
       if (closed || registry.thread(id)?.status === "deleted") return;
-      // Null is a session that has written no transcript yet, which the read still dates.
+      // A read that reaches the transcript's end dates it by its start, so every reply recorded before then is stored.
+      // One that stops short keeps the date of the last that reached the end. Null is a session that has written no
+      // transcript yet, which the read still dates.
+      const readAt = found === null || !found.more ? startedAt : stored?.session === session && !found.reset ? stored.readAt : 0;
       const appended = registry.appendClaudeRead(id, {
-        session, from, entries: found?.entries ?? [], cursor: found?.cursor ?? from, reset: found?.reset ?? false, readAt: Date.now(),
+        session, from, entries: found?.entries ?? [], cursor: found?.cursor ?? from, reset: found?.reset ?? false, readAt,
       });
       if (appended && found?.reset === true) r.kept = null;
       // A read that found nothing new changes only `readAt`, which no watcher shows once it is set.
