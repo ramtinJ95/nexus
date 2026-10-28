@@ -94,6 +94,10 @@ test("an item moves through every phase its records put it in, from planned to l
   assert.equal(phase(r, a), "reviewing: PR #3 is open, before its review");
   f.review(ta, { kind: "reviewing" });
   assert.equal(phase(r, a), "reviewing: PR #9, round 1: reviewing");
+  f.review(ta, { kind: "verifying", startedAt: 0, thread: "th-verify" as ThreadId });
+  assert.equal(phase(r, a), "reviewing: PR #9, round 1: live check running .nexus/verify at h in verify pylon th-verify");
+  f.review(ta, { kind: "verifying", startedAt: 0, thread: null, refused: "no node can run this pylon: rj-firebat is offline" });
+  assert.equal(phase(r, a), "reviewing: PR #9, round 1: live check waiting for a node to take its verify pylon: no node can run this pylon: rj-firebat is offline");
   f.review(ta, { kind: "fixing" });
   assert.equal(phase(r, a), "reviewing: PR #9, round 1: fixing");
   f.review(ta, { kind: "approved" }, laptop);

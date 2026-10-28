@@ -993,7 +993,7 @@ The control plane stores none of an item's progress. It reads `PipelineItem.phas
 | Its review ended for the person | `held` | `its review ended for the person: <the first reason>` |
 | Its review merges, deploys or rolls back, or is approved and lands | `landing` | `PR #<n> is merging`, `deploying`, `rolling back` or `approved` |
 | Its review is approved and stops at approval | `held` | `PR #<n> is approved, and lands once the person runs nexus land <thread>` |
-| Its review reviews, waits on the builder's fixes or runs the checks | `reviewing` | `PR #<n>, round <k>: reviewing`, `fixing` or `checking` |
+| Its review reviews, waits on the builder's fixes or runs the checks | `reviewing` | `PR #<n>, round <k>: reviewing`, `fixing` or `checking`, or, since 0.38.0, the live check's line of `show`, such as `live check running .nexus/verify at <commit> in verify pylon <thread>` |
 | A linked pull request merged and none is open | `landed` | `PR #<n> merged` |
 | Its thread is archived or deleted | `archived` | `its thread is archived` |
 | Its thread's attention is `failed` or `decision` | `held` | `its thread failed`, `its thread needs the person's decision` |
