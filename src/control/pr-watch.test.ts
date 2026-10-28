@@ -310,6 +310,19 @@ test("a repository's ordinary 403 does not cool down other repositories", async 
   assert.deepEqual(calls, ["/repos/denied/repo/pulls", "/repos/allowed/repo/pulls"]);
 });
 
+test("GitHub says whether a commit has a file, and a failure other than 404 says nothing", async () => {
+  const asked: string[] = [];
+  const fake: typeof fetch = async (input) => {
+    const url = new URL(String(input)); asked.push(`${url.pathname}?${url.searchParams}`);
+    return url.searchParams.get("ref") === "c1" ? Response.json({ type: "file" }) : url.searchParams.get("ref") === "c2" ? Response.json({ message: "Not Found" }, { status: 404 }) : new Response(null, { status: 502 });
+  };
+  const client = githubClient("secret", fake);
+  assert.equal(await client.has("acme/repo", "c1", ".nexus/verify"), true);
+  assert.equal(await client.has("acme/repo", "c2", ".nexus/verify"), false);
+  await assert.rejects(client.has("acme/repo", "c3", ".nexus/verify"), /HTTP 502/);
+  assert.deepEqual(asked, ["/repos/acme/repo/contents/.nexus/verify?ref=c1", "/repos/acme/repo/contents/.nexus/verify?ref=c2", "/repos/acme/repo/contents/.nexus/verify?ref=c3"]);
+});
+
 for (const [name, headers, delay] of [
   ["short Retry-After", { "retry-after": "5" }, 5_000],
   ["long Retry-After", { "retry-after": "360" }, 360_000],

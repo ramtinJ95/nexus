@@ -32,6 +32,8 @@ export interface GitHub {
   merge(repo: string, number: number, head: string): Promise<MergeResult>;
   /** Adds the label `name` to the PR, creating it in the repository first if it has none. Adding it twice is harmless. */
   label(repo: string, number: number, name: string): Promise<LabelResult>;
+  /** Whether the repository has a file at `path` in commit `commit`. */
+  has(repo: string, commit: string, path: string): Promise<boolean>;
 }
 
 export function githubRepo(url: string | null): string | null {
@@ -153,6 +155,15 @@ export function githubClient(token: string, request: typeof fetch = fetch): GitH
       if (added.response.status === 200) return { kind: "labelled" };
       if (denies(added.response) || added.response.status === 410 || added.response.status === 422) return { kind: "denied", message: added.message };
       throw new Error(`GitHub label: HTTP ${added.response.status}`);
+    },
+    async has(repo, commit, path) {
+      if (Date.now() < retryAt) throw new Error("GitHub is waiting for its rate limit");
+      const response = await request(`https://api.github.com/repos/${repo}/contents/${path}?ref=${commit}`, { headers, signal: AbortSignal.timeout(30_000), redirect: "error" });
+      await response.body?.cancel();
+      if (response.status === 404) return false;
+      if (response.ok) return true;
+      limited(response);
+      throw new Error(`GitHub contents: HTTP ${response.status}`);
     },
   };
 }
