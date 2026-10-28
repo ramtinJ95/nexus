@@ -1,0 +1,20 @@
+#!/bin/sh
+# Installs the Mac nexus CLI from the checkout this file lives in: its packages, then `nexus` on PATH as a symlink to
+# deploy/mac/nexus, so a git pull updates it. The first argument is the directory for the link, ~/.local/bin by default.
+set -eu
+repo=$(cd "$(dirname "$0")/../.." && pwd)
+bin=${1:-$HOME/.local/bin}
+
+if ! major=$(node -p 'process.versions.node.split(".")[0]' 2>/dev/null) || [ "$major" -lt 26 ]; then
+  echo "install: the nexus CLI needs Node 26 or newer on PATH, such as from \`brew install node\`" >&2
+  exit 1
+fi
+(cd "$repo" && npm ci --no-audit --no-fund)
+mkdir -p "$bin"
+ln -sf "$repo/deploy/mac/nexus" "$bin/nexus"
+"$bin/nexus" --version
+case ":$PATH:" in
+  *":$bin:"*) ;;
+  *) echo "$bin is not on PATH. Add it to your shell's profile, such as with: echo 'export PATH=\"$bin:\$PATH\"' >> ~/.zprofile" ;;
+esac
+echo "Next: nexus connect <host>, with the control plane's tailnet name"

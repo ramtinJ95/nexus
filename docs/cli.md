@@ -6,13 +6,13 @@ This is a different program from the `nexus` inside a pylon ([`images/pylon/nexu
 
 ## Install
 
-From the root of a checkout that has `node_modules`, with Node 26 or newer on `PATH`:
+From the root of a fresh clone, with Node 26 or newer on `PATH`:
 
 ```sh
-ln -sf "$PWD/deploy/mac/nexus" ~/.local/bin/nexus
+deploy/mac/install
 ```
 
-The shim follows its symlink back to the checkout and runs `node src/cli/nexus.ts`.
+It runs `npm ci`, links `~/.local/bin/nexus` to [`deploy/mac/nexus`](../deploy/mac/nexus), prints the version, and says so when `~/.local/bin` is not on `PATH`. Give it another directory as its argument to link there instead. The shim follows its symlink back to the checkout and runs `node src/cli/nexus.ts`, so a `git pull` updates the CLI, and a pull that changes `package-lock.json` needs the script run again. Then run `nexus connect <host>`.
 
 ## Where it connects
 
