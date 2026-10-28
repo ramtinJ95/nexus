@@ -332,9 +332,6 @@ async function drive(out: string) {
     await nexus("items-after-answers", "items", "--all");
     if (accepted !== null) {
       await nexus("item-show-accepted", "item", "show", accepted.id);
-      const queued = await fetch(`${api}/v1/queued/${accepted.thread}`);
-      writeFileSync(join(out, "queued-record.txt"), `GET /v1/queued/${accepted.thread}\n${queued.status} ${JSON.stringify(await queued.json(), null, 2)}\n`);
-      log(`GET /v1/queued/${accepted.thread} -> ${queued.status} (queued-record.txt)`);
       await until("the accepted item's builder has its scripted answer", accepted.thread, (d) => d.lastReplyAt !== null, 60_000);
       await nexus("conversation-builder", "conversation", accepted.thread!);
     }
