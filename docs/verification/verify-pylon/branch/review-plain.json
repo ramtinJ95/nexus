@@ -1,0 +1,55 @@
+{
+  "id": "rv-b2b98d7c",
+  "expect": "rv-b2b98d7c:17a59da42bf2",
+  "sent": 1,
+  "builder": "th-e9101ff29a06",
+  "reviewer": "th-09e9dc6a2eeb",
+  "pr": {
+    "repo": "ramtinJ95/greeter",
+    "number": 3,
+    "url": "https://github.com/ramtinJ95/greeter/pull/3",
+    "title": "Greet warmly",
+    "branch": "greet-warm"
+  },
+  "models": {
+    "builder": "claude-opus-5-5",
+    "reviewer": "gpt-6-astra"
+  },
+  "reviewerKind": "harness",
+  "maxRounds": 5,
+  "land": {
+    "requestedBy": "nLAPTOP",
+    "fromProject": true
+  },
+  "auto": true,
+  "rounds": [
+    {
+      "head": "c9c16c08f675548922fa4355c104ccdc3b9bea0d",
+      "verdict": {
+        "token": "rv-b2b98d7c:17a59da42bf2",
+        "verdict": "approve",
+        "findings": [],
+        "reserved": [],
+        "notCheckedLive": "the greeting is printed by a script, with no service to start."
+      },
+      "check": {
+        "passed": true,
+        "output": "typecheck ok\n3 tests pass"
+      },
+      "answers": null,
+      "live": {
+        "kind": "absent"
+      }
+    }
+  ],
+  "merged": "326d0fba7059b94f8ea2eaab4eb2ad0a4a2c2f7a",
+  "waiver": null,
+  "phase": {
+    "kind": "landed",
+    "commit": "326d0fba7059b94f8ea2eaab4eb2ad0a4a2c2f7a"
+  },
+  "outbox": null,
+  "since": 1793180953627,
+  "nudges": 0,
+  "startedAt": 1793180953625
+}

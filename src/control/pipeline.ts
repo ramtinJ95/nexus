@@ -14,6 +14,7 @@ import { singleFlight } from "../single-flight.ts";
 import type { ProjectId } from "../project.ts";
 import { HttpError } from "./http-error.ts";
 import { queuedView, waitOf, type ThreadQueue } from "./queue.ts";
+import { liveNote } from "./review.ts";
 import type { Registry, ThreadId } from "./registry.ts";
 import { checkStart, startKey, type StartRequest } from "./threads.ts";
 
@@ -103,8 +104,10 @@ function threadPhase(registry: Registry, id: ThreadId): ItemPhase {
     case "merging": case "deploying": case "rolling-back": return phase("landing", `${pr} is ${review.phase.kind.replace("-", " ")}`);
     case "approved": return review.land === null ? phase("held", `${pr} is approved, and lands once the person runs nexus land ${id}`) : phase("landing", `${pr} is approved`);
     case "reviewing": case "fixing": case "checking": return phase("reviewing", `${pr}, round ${review.rounds.length}: ${review.phase.kind}`);
+    case "verifying": return phase("reviewing", `${pr}, round ${review.rounds.length}: ${liveNote(review)}`);
     // A review that ended without landing says nothing of a pull request reopened or merged since, which its links do.
     case "closed": case "cancelled": case undefined: break;
+    default: return review!.phase satisfies never;
   }
   const wait = waitOf(registry, id);
   if (wait.state === "landed") return phase("landed", wait.why);

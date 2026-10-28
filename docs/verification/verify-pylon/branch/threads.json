@@ -1,0 +1,11 @@
+{
+  "builders": {
+    "pass": "th-9a0b9a8719ed",
+    "fail": "th-fa18e5f99c1c",
+    "plain": "th-e9101ff29a06"
+  },
+  "verifiers": [
+    "th-92a93c421176",
+    "th-58ff31bfba2e"
+  ]
+}

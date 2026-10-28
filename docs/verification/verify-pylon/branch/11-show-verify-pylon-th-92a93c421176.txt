@@ -1,0 +1,11 @@
+$ nexus show th-92a93c421176
+th-92a93c421176  Live check of greet-name at bae3c1b0c2fa
+project: nexus
+attention: none
+status: archived
+pylon: pylon-th-92a93c421176 on rj-firebat, paused, observed 0s ago
+size: 2 CPUs, 8 GiB memory, 10 GiB disk, nested virtualization
+placement: auto chose rj-firebat, which had the most room left after this pylon; rj-firebat had 56 GiB memory, 14 CPUs and 90 GiB disk left; verify-node cannot give a pylon KVM of its own: its probe does not report nested virtualization
+setup: fresh boot runs .nexus/setup, because the control plane could not read .nexus/setup at bae3c1b0c2fa636b6f4a182818d493a32b404756: the verify stack reads no remote, so every thread boots fresh
+PR watch: on
+[exit 0]

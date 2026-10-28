@@ -30,7 +30,7 @@ import { agentView, type AgentView } from "./thread-agent.ts";
 import type { TailnetNodeId } from "../protocol.ts";
 import { usageLimitText, type ClaudeConversation, type ClaudeEntry, type PromptSource } from "../claude-transcript.ts";
 import { queuedOf } from "./claude-conversation.ts";
-import { blocks as blocking, findingsOf, landable, phaseNote, roundsSpent, type Review } from "./review.ts";
+import { blocks as blocking, findingsOf, landable, liveNote, phaseNote, roundsSpent, type Review } from "./review.ts";
 import { heldBy, holdRule, reservedNames } from "./policy.ts";
 import type { AnswerRefusal, Question } from "./questions.ts";
 import { gib, nodePylons, overcommitted } from "./placement.ts";
@@ -723,7 +723,7 @@ ${actions.length > 0 && html`<div class="bar-actions" id="thread-actions">${acti
 }
 
 /** The steps of a landing, in order. */
-const landingSteps = [["checking", "Check"], ["merging", "Merge"], ["deploying", "Deploy"], ["landed", "Landed"]] as const;
+const landingSteps = [["checking", "Check"], ["verifying", "Live check"], ["merging", "Merge"], ["deploying", "Deploy"], ["landed", "Landed"]] as const;
 type Step = typeof landingSteps[number][0];
 /**
  * The step a landing is at, and whether it failed there. A landing held after its merge stopped at the deploy, which
@@ -731,7 +731,7 @@ type Step = typeof landingSteps[number][0];
  */
 function landingAt(r: Review): { step: Step; failed: boolean } | null {
   switch (r.phase.kind) {
-    case "checking": return r.land === null ? null : { step: "checking", failed: false };
+    case "checking": case "verifying": return r.land === null ? null : { step: r.phase.kind, failed: false };
     case "merging": case "deploying": case "landed": return { step: r.phase.kind, failed: false };
     case "rolling-back": return { step: "deploying", failed: true };
     case "needs-person": return r.merged !== null && r.land !== null ? { step: "deploying", failed: true } : null;
@@ -789,7 +789,10 @@ function landing(c: Context, d: ThreadDetail): Html | null {
   if (at !== null) {
     const deploys = c.deploys(r);
     const index = landingSteps.findIndex(([step]) => step === at.step);
-    const stateOf = (step: Step, i: number) => step === "deploying" && !deploys ? "skipped"
+    const { live } = r.rounds.at(-1)!;
+    // A landing past the live check with none recorded is one from before live checks.
+    const unverified = live?.kind === "absent" ? " (no .nexus/verify)" : live === undefined && index > 1 ? " (not run)" : null;
+    const stateOf = (step: Step, i: number) => (step === "deploying" && !deploys) || (step === "verifying" && unverified !== null) ? "skipped"
       : i < index || at.step === "landed" ? "done" : i > index ? "todo" : at.failed ? "failed" : "now";
     const title = at.step === "landed" ? "Landed" : r.phase.kind === "needs-person" ? "Merged, not deployed" : r.phase.kind === "rolling-back" ? "Rolling back" : "Landing";
     const phase = r.phase;
@@ -797,9 +800,10 @@ function landing(c: Context, d: ThreadDetail): Html | null {
 <div class="land-top"><h2 id="landing-h">${title}</h2>${prLink}</div>
 <ol class="land-steps">${landingSteps.map(([step, label], i) => {
   const state = stateOf(step, i);
-  return html`<li class="land-step land-${state}"${state === "now" && html` aria-current="step"`}>${label}${state === "skipped" && " (nothing to deploy)"}</li>`;
+  return html`<li class="land-step land-${state}"${state === "now" && html` aria-current="step"`}>${label}${state === "skipped" && (step === "verifying" ? unverified : " (nothing to deploy)")}</li>`;
 })}</ol>
 ${phase.kind === "checking" ? html`<p class="land-note">.nexus/check runs at ${short(r.rounds.at(-1)!.head)}, or its kept result for that commit is read.</p>`
+  : phase.kind === "verifying" ? html`<p class="land-note">${phase.thread === null && phase.refused !== undefined ? html`No node can take the verify pylon yet: ${phase.refused}` : html`.nexus/verify runs at ${short(r.rounds.at(-1)!.head)} in a verify pylon${phase.thread !== null && html`, <a href="/threads/${phase.thread}">${phase.thread}</a>`}.`}</p>`
   : phase.kind === "merging" ? html`<p class="land-note">Checking the merge policy again with what GitHub says now, then merging ${short(r.rounds.at(-1)!.head)}.</p>`
   : phase.kind === "deploying" ? html`<p class="land-note">Deploying the merge commit ${short(phase.commit)} until every service reports it healthy.</p>`
   : phase.kind === "rolling-back" ? html`<p class="error">${phase.why} Rolling back to ${short(phase.previous)}.</p>`
@@ -824,7 +828,7 @@ ${phase.kind === "checking" ? html`<p class="land-note">.nexus/check runs at ${s
     : `Land pull request #${r.pr.number}, "${r.pr.title}", at commit ${round.head.slice(0, 12)}, waiving ${waived.length === 1 ? "the hold" : `the ${waived.length} holds`} the merge policy reserves for you? Nexus checks everything else again, merges that commit${deploys}.`;
   return html`<section class="landing" aria-labelledby="landing-h">
 <div class="land-top"><h2 id="landing-h">${held ? "Held for you" : "Approved, not landed"}</h2>${prLink}</div>
-<p class="land-meta">Head ${short(round.head)} · approved by ${r.models.reviewer} (${r.reviewerKind}) in round ${roundsSpent(r)} of ${r.maxRounds} · .nexus/check passed</p>
+<p class="land-meta">Head ${short(round.head)} · approved by ${r.models.reviewer} (${r.reviewerKind}) in round ${roundsSpent(r)} of ${r.maxRounds} · .nexus/check passed · ${round.live === undefined ? "no live check ran" : round.live.kind === "absent" ? "no .nexus/verify, so no live check" : `live check ${round.live.passed ? "passed" : "failed"}`}</p>
 <details id="land-why" open><summary>Why it waits for you</summary>
 ${reasons.length === 0 ? html`<p class="land-note">Nothing holds it. The review stopped at approval because it was started without --land.</p>`
   : html`<ul class="land-reasons">${rules.map((h) => html`<li>${h.reason} ${h.waivable ? html`<span class="tag tag-ok">you may waive</span>` : html`<span class="tag">${h.holdsAgain ? "holds again" : "not waivable"}</span>`}<br><span class="dim">${h.why}</span></li>`)}</ul>`}
@@ -834,6 +838,7 @@ ${findings.length === 0 ? html`<p class="land-note">None.</p>` : html`<ul class=
   return html`<li><span class="tag${blocking(f) ? " tag-bad" : ""}">${f.priority}</span> <b>${f.id}</b>${f.where && html` <code>${f.where}</code>`}: ${f.summary}${answer && html` <span class="dim">(builder: ${answer.action}${answer.reason && `, ${answer.reason}`})</span>`}</li>`;
 })}</ul>`}
 ${round.check !== null && html`<details id="land-check"><summary>.nexus/check ${round.check.passed ? "passed" : "failed"} at ${round.head.slice(0, 12)}</summary><pre>${round.check.output}</pre></details>`}
+${round.live?.kind === "ran" && html`<details id="land-live"><summary>The live check ${round.live.passed ? "passed" : "failed"} at ${round.head.slice(0, 12)}</summary><pre>${round.live.output}</pre></details>`}
 </details>
 ${stuck ? html`<p class="land-note">Landing checks the merge policy again, and what is marked "holds again" holds every landing of this commit. Only you can get past it, by merging the pull request on GitHub${c.deploys(r) && " and deploying it with nexus deploy"}.</p>`
   : c.landRefusal === null ? html`<div class="land-act"><button type="button" class="btn btn-primary" id="land" data-action="land" data-thread="${d.thread.id}" data-head="${round.head}"${waived.length > 0 && html` data-holds="${JSON.stringify(waived)}"`} data-confirm="${confirm}">Land #${r.pr.number}</button>${waived.length > 0 && html`<p class="land-note">Pressing Land waives what is marked "you may waive", for commit ${short(round.head)} only. Landing checks everything else again.</p>`}</div>`
@@ -1057,7 +1062,7 @@ ${pylon.failed !== null && html`<p class="error">The planner gave up: ${pylon.fa
 <section aria-labelledby="outputs-h"><h2 id="outputs-h">Outputs ${count(outputs.length + (d.pullRequests?.length ?? 0))}</h2>
 ${!d.prWatch?.enabled ? html`<p class="empty">PR watch: off (no control-plane GitHub token configured).</p>` : html`<p>PR watch: ${d.prWatch.stopped ? "stopped (10 comment-only wakes)" : "on"}${d.prWatch.error && html` — ${d.prWatch.error}`}</p>`}
 ${(d.pullRequests ?? []).map((pr) => html`<p><a href="${pr.url}" target="_blank" rel="noreferrer">PR #${pr.number}: ${pr.title}</a> — ${pr.state}, checks ${pr.checks}, review ${pr.review}</p>`)}
-${d.review != null && html`<p>Nexus review ${d.review.id}${d.review.auto && ", started on its own"}: ${d.review.phase.kind}, round ${roundsSpent(d.review)} of ${d.review.maxRounds}, by <a href="/threads/${d.review.reviewer}">${d.review.reviewer}</a> on ${d.review.models.reviewer}${d.review.land !== null && ", landing when approved"}${phaseNote(d.review)}</p>${d.review.phase.kind === "needs-person" && html`<ul class="error">${d.review.phase.reasons.map((reason) => html`<li>${reason}</li>`)}</ul>`}`}
+${d.review != null && html`<p>Nexus review ${d.review.id}${d.review.auto && ", started on its own"}: ${d.review.phase.kind}, round ${roundsSpent(d.review)} of ${d.review.maxRounds}, by <a href="/threads/${d.review.reviewer}">${d.review.reviewer}</a> on ${d.review.models.reviewer}${d.review.land !== null && ", landing when approved"}${phaseNote(d.review)}</p>${liveNote(d.review) !== null && html`<p class="dim">${liveNote(d.review)}</p>`}${d.review.phase.kind === "needs-person" && html`<ul class="error">${d.review.phase.reasons.map((reason) => html`<li>${reason}</li>`)}</ul>`}`}
 ${outputs.length === 0 ? html`<p class="empty">No other outputs yet.</p>` : html`<ul class="list outs">${outputs.map((o) => html`<li><span class="o-kind">${outputLabel[o.kind]}</span><code>${o.ref}</code></li>`)}</ul>`}
 </section>
 ${d.claudeWorker === undefined ? "" : html`<section><h2>Claude worker</h2><p>${d.claudeWorker.state} · ${d.claudeWorker.model ?? "unknown"}</p>${d.claudeWorker.message === undefined ? "" : html`<pre>${d.claudeWorker.message}</pre>`}</section>`}

@@ -10,7 +10,7 @@
  * the pause that wrote it. A resume boots whatever disk the instance holds. Checkpoints therefore exist
  * only on their own node, one per pylon.
  */
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
@@ -75,6 +75,11 @@ const pollMs = 500;
 const secretUpdateMs = 5_000;
 /** Measured in the pylon-vm slice: 3 GiB boots, 4, 8, 12 and 16 GiB pass the whole slice, and 2 GiB hangs at "ACPI: Core revision". */
 const minMemoryGiB = 3;
+
+/** Whether the host's KVM lets a guest run VMs of its own, as its vendor module's `nested` parameter says, `Y` or `1`. */
+export function hostNestsKvm(read: (path: string) => string | null = (path) => { try { return readFileSync(path, "utf8"); } catch { return null; } }): boolean {
+  return ["kvm_amd", "kvm_intel"].some((module) => /^[Y1]$/.test(read(`/sys/module/${module}/parameters/nested`)?.trim() ?? ""));
+}
 
 const instanceSchema = z.object({ name: z.string(), labels: z.record(z.string(), z.string()), status: statusSchema });
 type Instance = z.infer<typeof instanceSchema>;
@@ -330,7 +335,7 @@ export function createPylonVmBackend(options: PylonVmBackendOptions): VmBackend 
     // A scratch pylon has no remote of its own, so a repository it creates later is reached over HTTPS only.
     const remotes = [...bootRemotes(boot.repo), boot.dotfiles.repo].flatMap((url) => sshRemoteOf(url) ?? []);
     return {
-      resources: { cpus: boot.resources.cpus, memoryGiB: boot.resources.memoryGiB },
+      resources: { cpus: boot.resources.cpus, memoryGiB: boot.resources.memoryGiB, ...boot.resources.nestedVirtualization === true ? { nestedVirtualization: true as const } : {} },
       allowedHosts: [...boot.network.allowedHosts],
       secrets,
       ssh: await gitSshOf(boot.pylonId, remotes),
@@ -511,6 +516,7 @@ export function createPylonVmBackend(options: PylonVmBackendOptions): VmBackend 
     artifacts,
     list,
     gitSsh: options.gitSsh !== undefined,
+    nestedVirtualization: hostNestsKvm(),
     eventJournal: `${stateRoot}/events.sqlite`,
     hostBridge: pylonVmHostBridge(stateRoot),
     storage: stateRoot,

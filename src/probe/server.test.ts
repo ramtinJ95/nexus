@@ -533,6 +533,17 @@ test("an observer learns at once that the probe got a held secret it did not hav
   await events.return?.();
 });
 
+test("observations say the node nests KVM only when its backend does", async (t) => {
+  for (const nestedVirtualization of [true, false, undefined]) {
+    const { client } = await setup(t, { backend: { ...fakeBackend().backend, ...nestedVirtualization === undefined ? {} : { nestedVirtualization } } });
+    for await (const e of client.observe(AbortSignal.timeout(5000))) {
+      const observation = e.type === "snapshot" ? e.observation : assert.fail();
+      assert.equal(observation.nestedVirtualization, nestedVirtualization === true ? true : undefined);
+      break;
+    }
+  }
+});
+
 test("observations name the secrets the node holds, never their values, and whether it has a git SSH key", async (t) => {
   const { client } = await setup(t, { secrets: nodeSecrets({ value: () => "s3cr3t", names: () => ["GH_TOKEN"] }), backend: { ...fakeBackend().backend, gitSsh: true } });
   for await (const e of client.observe(AbortSignal.timeout(5000))) {

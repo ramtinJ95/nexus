@@ -23,7 +23,7 @@ import { githubClient, githubRepo } from "./github.ts";
 import { agentReplies, reviewLoop } from "./review.ts";
 import { threadStarter } from "./threads.ts";
 import { projectMirror } from "./mirror.ts";
-import { checkRuns } from "./gate.ts";
+import { checkRuns, verifyGate } from "./gate.ts";
 import { repository } from "../deploy/install.ts";
 import { prWatcher } from "./pr-watch.ts";
 import { threadQueue } from "./queue.ts";
@@ -189,6 +189,7 @@ export async function startControlPlane(config: ControlPlaneConfig, models: Mode
     registry, github, inbox, harnessModel: config.harness.model.modelId, startThread,
     replies: agentReplies(registry, harness),
     checks: checkRuns({ registry, probes: probeMap, startThread, wake: wakeThread }),
+    live: checkRuns({ registry, probes: probeMap, startThread, wake: wakeThread, gate: verifyGate }),
     release: { self: config.self.tailnetNodeId, repo: githubRepo(repository)! },
     mayLand: (caller) => canDeploy(registry, deployment, caller as TailnetNodeId),
     wake: wakeThread,

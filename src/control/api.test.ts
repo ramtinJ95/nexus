@@ -433,6 +433,20 @@ test("--node auto refuses with each node's reason when none can run the pylon, a
   assert.deepEqual(s.woken, []);
 });
 
+test("a pylon that asks for nested virtualization goes only to a node whose probe reports it", async (t) => {
+  const s = await withImage(t);
+  observeNode(s, "flat", { total: 64, committed: 0 });
+  observeNode(s, "nests", { total: 16, committed: 0 }, { nestedVirtualization: true });
+  const nested = await s.startThread({ project: "acme", title: "Verify", node: "auto", bare: true, resources: { memoryGiB: 8, nestedVirtualization: true } }, "nexus-verify");
+  const placement = nested.placement?.how === "auto" ? nested.placement : assert.fail("placed auto");
+  assert.equal(placement.node, "nests");
+  assert.deepEqual(placement.weighed.find((w) => w.node === "flat"), { node: "flat", refused: "cannot give a pylon KVM of its own: its probe does not report nested virtualization" });
+  assert.deepEqual(s.registry.pylon(nested.pylonId)!.boot.resources, { cpus: 2, memoryGiB: 8, diskGiB: 10, nestedVirtualization: true });
+  const plain = (await s.call("POST", "/v1/threads", { project: "acme", title: "Plain", node: "auto" })).body;
+  assert.equal(plain.placement.node, "flat", "an ordinary pylon still goes where it fits best");
+  assert.deepEqual(s.registry.pylon(plain.pylonId)!.boot.resources, { cpus: 2, memoryGiB: 4, diskGiB: 10 });
+});
+
 test("--node auto places a thread that needs the ChatGPT token on a node whose probe takes it and has not got it yet", async (t) => {
   const s = await withImage(t);
   const restarted = { secrets: ["STRIPE_KEY"], gitSsh: true };

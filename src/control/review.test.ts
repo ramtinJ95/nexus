@@ -14,8 +14,9 @@ import { agentReplies, humanLabel, reviewerCaller, reviewLoop, reviewPrefix, typ
 import { agentInbox } from "./inbox.ts";
 import { fakeHarness } from "./fake-harness.ts";
 import { transcriptStart } from "../claude-transcript.ts";
-import { checkCaller, type CheckState } from "./gate.ts";
+import { checkCaller, verifyCaller, type CheckState } from "./gate.ts";
 import type { StartRequest } from "./threads.ts";
+import { HttpError } from "./http-error.ts";
 
 const node = "node" as NodeName;
 const self = "nCONTROL" as TailnetNodeId;
@@ -59,6 +60,11 @@ function fixture(t: import("node:test").TestContext, options: { path?: string; r
   let check: CheckState = { kind: "done", passed: true, output: "ok" };
   const checkThreads: ThreadId[] = [];
   const discarded: ThreadId[] = [];
+  let verifies = false;
+  let live: CheckState = { kind: "done", passed: true, output: "fleet ok" };
+  let refuse: string | null = null;
+  const liveThreads: ThreadId[] = [];
+  const archived: ThreadId[] = [];
   let delivery: "delivered" | "later" = "delivered";
   let delivering = 0;
   let held: { entered: () => void; released: Promise<void> } | null = null;
@@ -70,6 +76,7 @@ function fixture(t: import("node:test").TestContext, options: { path?: string; r
       find: async () => [7],
       poll: async () => structuredClone(snapshot),
       files: async () => files,
+      has: async (_, __, path) => path === ".nexus/verify" && verifies,
       async label(_, __, name) { labelCalls.push(name); return labelAnswer(name); },
       async merge(_, __, sha) { merges.push(sha); const answer = mergeAnswer(); if (answer.kind === "merged") snapshot = { ...snapshot, pr: { ...snapshot.pr, state: "merged" }, detail: { ...snapshot.detail, mergeCommit: answer.commit } }; return answer; },
     },
@@ -79,6 +86,14 @@ function fixture(t: import("node:test").TestContext, options: { path?: string; r
       async start() { const id = add(`th-check-${checkThreads.length + 1}`, false, checkCaller); checkThreads.push(id); return id; },
       poll: () => check,
       discard(id) { discarded.push(id); registry.setThreadStatus(id, "deleted"); },
+    },
+    live: {
+      async start() {
+        if (refuse !== null) throw new HttpError(409, refuse);
+        const id = add(`th-verify-${liveThreads.length + 1}`, false, verifyCaller); liveThreads.push(id); return id;
+      },
+      poll: () => live,
+      discard(id) { archived.push(id); registry.setThreadStatus(id, "archived"); },
     },
     release: { self, repo: "ramtinJ95/nexus" },
     mayLand: (caller) => deployers.has(caller),
@@ -101,6 +116,11 @@ function fixture(t: import("node:test").TestContext, options: { path?: string; r
     labels, labelCalls, set labelAnswer(a: (name: string) => LabelResult) { labelAnswer = a; },
     set check(c: CheckState) { check = c; },
     checkThreads, discarded,
+    /** Whether the PR's head has a .nexus/verify, the live check's state, and why no node takes a verify pylon. */
+    set verifies(v: boolean) { verifies = v; },
+    set live(c: CheckState) { live = c; },
+    set refuse(why: string | null) { refuse = why; },
+    liveThreads, archived,
     set delivery(d: "delivered" | "later") { delivery = d; },
     /** How many deliveries the loop has begun, including one still held. */
     get delivering() { return delivering; },
@@ -445,7 +465,7 @@ test("the policy names every condition that fails and every reserved case, and h
 });
 
 test("the policy's review conditions: another model, an approval with no P0 to P2 open, and every blocking finding answered", () => {
-  const round = { head: head1, verdict: { token: "x", verdict: "approve" as const, findings: [], reserved: [], notCheckedLive: "the cache under real traffic" }, check: { passed: true, output: "" }, answers: null };
+  const round = { head: head1, verdict: { token: "x", verdict: "approve" as const, findings: [], reserved: [], notCheckedLive: "the cache under real traffic" }, check: { passed: true, output: "" }, live: { kind: "absent" as const }, answers: null };
   const review: Review = {
     id: "rv-1", builder: "th-b" as ThreadId, reviewer: "th-r" as ThreadId, pr: { repo: "acme/shop", number: 7, url: "", title: "", branch: "f" }, models: { builder: "m", reviewer: "m" }, reviewerKind: "harness",
     maxRounds: 3, land: null, auto: false, merged: null, waiver: null, expect: "rv-1:t", sent: 1, phase: { kind: "checking", startedAt: 0, thread: null }, outbox: null, since: 0, nudges: 0, startedAt: 0,
@@ -642,6 +662,170 @@ test("each check runs in its own check thread, thrown away after its verdict, an
   const orphan = f.add("th-check-orphan", false, checkCaller);
   await f.loop().poll();
   assert.ok(f.discarded.includes(orphan));
+});
+
+test("a head with a .nexus/verify lands once its live check passes in a verify pylon, which stands in for the statement of what was not checked live", async (t) => {
+  const f = fixture(t);
+  f.verifies = true;
+  f.snapshot = { ...f.snapshot, detail: { ...f.snapshot.detail, body: "Adds a cache." } };
+  const loop = f.loop();
+  await loop.start(f.builder, { land: "nLAPTOP" });
+  await loop.poll();
+  f.reply(f.review().reviewer, verdict(f.review(), { notCheckedLive: null }));
+  await loop.poll();
+  assert.deepEqual(f.merges, [head1]);
+  assert.deepEqual(f.review().rounds.at(-1)!.live, { kind: "ran", thread: f.liveThreads[0], passed: true, output: "fleet ok" });
+  assert.equal(f.liveThreads.length, 1);
+  assert.deepEqual(f.archived, f.liveThreads, "the verify pylon is archived once it gave its verdict");
+  assert.deepEqual(f.registry.events("0", { kinds: ["review.changed"] }).map((e) => (e.payload.phase as { kind: string }).kind).slice(0, 4), ["reviewing", "checking", "verifying", "merging"]);
+
+  const g = fixture(t, { path: ":memory:" });
+  g.snapshot = { ...g.snapshot, detail: { ...g.snapshot.detail, body: "Adds a cache." } };
+  const gLoop = g.loop();
+  await gLoop.start(g.builder, { land: "nLAPTOP" });
+  await gLoop.poll();
+  g.reply(g.review().reviewer, verdict(g.review(), { notCheckedLive: null }));
+  await gLoop.poll();
+  assert.deepEqual(g.merges, [], "a head without .nexus/verify still needs the statement");
+  assert.deepEqual(g.liveThreads, []);
+  assert.deepEqual(g.review().rounds.at(-1)!.live, { kind: "absent" });
+  assert.deepEqual(g.review().phase, { kind: "needs-person", reasons: ["No live check ran, and the pull request does not say what could not be checked live."] });
+});
+
+test("a landing stored before live checks, whose head has a .nexus/verify, is held until a landing runs its live check", async (t) => {
+  const f = fixture(t);
+  const loop = await approved(f, null);
+  const { live: _, ...unverified } = f.review().rounds[0]!;
+  f.registry.saveReview({ ...f.review(), land: { requestedBy: "nLAPTOP" }, rounds: [unverified], phase: { kind: "merging", authorized: null } });
+  f.verifies = true;
+  await loop.poll();
+  assert.deepEqual(f.merges, []);
+  assert.deepEqual(f.review().phase, { kind: "needs-person", reasons: [`The live check has not run at ${head1}.`] });
+  loop.land(f.builder, "nLAPTOP");
+  await loop.poll();
+  assert.equal(f.liveThreads.length, 1, "landing again ran the live check");
+  assert.deepEqual(f.merges, [head1]);
+});
+
+test("a verify pylon the person unarchives stays open, after its verdict, after its review is replaced, or after it timed out", async (t) => {
+  const unarchive = (f: ReturnType<typeof fixture>, id: ThreadId) => { f.registry.setThreadStatus(id, "active"); f.registry.recordActivity(id, { human: 2 }); };
+  const f = fixture(t);
+  f.verifies = true;
+  const loop = await approved(f, null);
+  assert.deepEqual(f.archived, f.liveThreads);
+  unarchive(f, f.liveThreads[0]!);
+  await loop.poll();
+  f.registry.saveReview({ ...f.review(), id: "rv-next", rounds: [{ head: head2, verdict: null, check: null, answers: null }], phase: { kind: "approved" } });
+  await loop.poll();
+  assert.equal(f.registry.thread(f.liveThreads[0]!)!.status, "active", "the review that recorded it is gone");
+  assert.equal(f.archived.length, 1);
+
+  const g = fixture(t, { path: ":memory:" });
+  g.verifies = true;
+  g.live = { kind: "running" };
+  const gLoop = await approved(g, null);
+  g.tick(61 * 60_000);
+  await gLoop.poll();
+  assert.equal(g.review().phase.kind, "needs-person");
+  assert.deepEqual(g.archived, g.liveThreads, "the timed-out verify pylon was archived as its review ended");
+  unarchive(g, g.liveThreads[0]!);
+  await gLoop.poll();
+  assert.equal(g.registry.thread(g.liveThreads[0]!)!.status, "active");
+});
+
+test("a live check that fails holds the landing like a failed check: the builder answers it as a P0, and a failure it does not push for goes to the person", async (t) => {
+  const f = fixture(t);
+  f.verifies = true;
+  f.live = { kind: "done", passed: false, output: "verify-nexus: the thread never reported running" };
+  const loop = await approved(f, "nLAPTOP");
+  assert.deepEqual(f.merges, []);
+  assert.equal(f.review().phase.kind, "fixing");
+  const toBuilder = f.sent.filter((s) => s.to === f.builder).map((s) => s.message.text).at(-1)!;
+  assert.match(toBuilder, /the live check failed after the reviewer approved and the repository's checks passed/);
+  assert.match(toBuilder, /LIVE \(P0\) \.nexus\/verify: The live check failed at 1{40}\n {4}verify-nexus: the thread never reported running/);
+  assert.throws(() => loop.land(f.builder, "nLAPTOP"), { status: 409 });
+  f.reply(f.builder, answers(f.review(), [{ id: "LIVE", action: "rejected", reason: "The stack is flaky." }]));
+  await loop.poll();
+  assert.deepEqual(f.review().phase, { kind: "needs-person", reasons: [
+    `The live check failed at ${head1}, and the builder pushed nothing for it: The stack is flaky.`,
+    "The live check's output:\nverify-nexus: the thread never reported running",
+  ] });
+  assert.throws(() => loop.land(f.builder, "nLAPTOP"), { status: 409, message: /not approved with its checks passing/ });
+  assert.deepEqual(f.archived, f.liveThreads);
+
+  const g = fixture(t, { path: ":memory:" });
+  g.verifies = true;
+  g.live = { kind: "done", passed: false, output: "boom" };
+  const gLoop = await approved(g, "nLAPTOP");
+  g.snapshot = { ...g.snapshot, detail: { ...g.snapshot.detail, head: head2 } };
+  g.reply(g.builder, answers(g.review(), [{ id: "LIVE", action: "fixed", reason: "Fixed the boot." }]));
+  await gLoop.poll();
+  assert.equal(g.review().phase.kind, "reviewing", "a pushed fix gets a new round");
+  g.live = { kind: "done", passed: true, output: "fleet ok" };
+  g.reply(g.review().reviewer, verdict(g.review(), {}));
+  await gLoop.poll();
+  assert.deepEqual(g.merges, [head2]);
+  assert.equal(g.liveThreads.length, 2, "each head gets a fresh verify pylon");
+});
+
+test("a verify pylon no node can take yet is tried again, and the person hears why once the live check's hour is up", async (t) => {
+  const f = fixture(t);
+  f.verifies = true;
+  f.refuse = "no node can run this pylon: rj-firebat is offline";
+  const loop = await approved(f, "nLAPTOP");
+  const { startedAt: _, ...waiting } = f.review().phase as Extract<Review["phase"], { kind: "verifying" }>;
+  assert.deepEqual(waiting, { kind: "verifying", thread: null, refused: "no node can run this pylon: rj-firebat is offline" });
+  f.tick(30 * 60_000);
+  f.refuse = null;
+  await loop.poll();
+  assert.equal(f.liveThreads.length, 1, "a node that came back takes it");
+  assert.deepEqual(f.merges, [head1]);
+
+  const g = fixture(t, { path: ":memory:" });
+  g.verifies = true;
+  g.refuse = "no node can run this pylon: infra-testbench cannot give a pylon KVM of its own: its probe does not report nested virtualization";
+  const gLoop = await approved(g, "nLAPTOP");
+  g.tick(61 * 60_000);
+  await gLoop.poll();
+  assert.deepEqual(g.review().phase, { kind: "needs-person", reasons: [
+    `The live check gave no verdict within 60 minutes at ${head1}.`,
+    "No node could take its verify pylon: no node can run this pylon: infra-testbench cannot give a pylon KVM of its own: its probe does not report nested virtualization",
+  ] });
+});
+
+test("a live check its pylon cannot run goes to the person, and a verify pylon no review holds is archived", async (t) => {
+  const f = fixture(t);
+  f.verifies = true;
+  f.live = { kind: "unrunnable", output: "The verify pylon did not boot: This pylon asked for nested virtualization, and its guest has no /dev/kvm." };
+  await approved(f, "nLAPTOP");
+  assert.deepEqual(f.review().phase, { kind: "needs-person", reasons: [
+    `The live check could not run at ${head1}.`,
+    "The live check's output:\nThe verify pylon did not boot: This pylon asked for nested virtualization, and its guest has no /dev/kvm.",
+  ] });
+  assert.deepEqual(f.merges, []);
+  const orphan = f.add("th-verify-orphan", false, verifyCaller);
+  await f.loop().poll();
+  assert.ok(f.archived.includes(orphan));
+});
+
+test("the policy reads a live check: a failure holds, a pass needs no statement, and a change to .nexus/verify is the person's to waive", async (t) => {
+  const f = fixture(t);
+  f.verifies = true;
+  f.files = [{ path: ".nexus/verify", previous: null, patch: "" }];
+  const loop = await approved(f, "nLAPTOP");
+  const holds = (f.review().phase as { reasons: string[] }).reasons;
+  assert.deepEqual(holds, ["The pull request changes .nexus/verify, the live check this policy relies on."]);
+  loop.land(f.builder, "nLAPTOP", head1, holds);
+  await loop.poll();
+  assert.deepEqual(f.merges, [head1]);
+  assert.equal(f.liveThreads.length, 1, "the landing kept the live check that passed at the same head");
+
+  const review = { ...f.review(), rounds: [{ ...f.review().rounds[0]!, live: { kind: "ran" as const, thread: f.liveThreads[0]!, passed: false, output: "boom" } }] };
+  const pr: PrSnapshot = { ...f.snapshot, pr: { ...f.snapshot.pr, state: "open" }, detail: { ...f.snapshot.detail, mergeCommit: null } };
+  assert.deepEqual(landingHolds({ review, pr, files: [], nexus: false }), [
+    "Findings P0 to P2 are open: LIVE.", "The builder neither fixed nor rejected with a reason finding LIVE of round 1.", `The live check failed at ${head1}.`,
+  ]);
+  assert.equal(holdRule(`The live check failed at ${head1}.`).waivable, false);
 });
 
 test("a check run that cannot give a verdict starts again in a fresh check thread", async (t) => {
@@ -1378,6 +1562,7 @@ test("the person may waive the reserved cases, the reserved paths and a changed 
     "Always needs the person: changes to secrets, by the reviewer's reading (rotates the token).",
     "Always needs the person: changes to login or auth, as it changes src/control/api.ts.",
     "The pull request changes .nexus/check, the check this policy relies on.",
+    "The pull request changes .nexus/verify, the live check this policy relies on.",
   ];
   const never = [
     "Findings P0 to P2 are open: F1.",
@@ -1394,6 +1579,8 @@ test("the person may waive the reserved cases, the reserved paths and a changed 
     "The reviewer ran the builder's own model, gpt-6-astra.",
     "No live check ran, and the pull request does not say what could not be checked live.",
     "GitHub refused the merge: Base branch was modified.",
+    `The live check failed at ${head1}.`,
+    `The live check gave no verdict within 60 minutes at ${head1}.`,
   ];
   for (const reason of waivable) assert.equal(holdRule(reason).waivable, true, reason);
   for (const reason of never) {

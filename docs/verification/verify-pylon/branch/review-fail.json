@@ -1,0 +1,67 @@
+{
+  "id": "rv-574268dd",
+  "expect": "rv-574268dd:ce21ba58cdb5",
+  "sent": 2,
+  "builder": "th-fa18e5f99c1c",
+  "reviewer": "th-aee3a2137441",
+  "pr": {
+    "repo": "ramtinJ95/nexus",
+    "number": 2,
+    "url": "https://github.com/ramtinJ95/nexus/pull/2",
+    "title": "Say goodbye",
+    "branch": "say-goodbye"
+  },
+  "models": {
+    "builder": "claude-opus-5-5",
+    "reviewer": "gpt-6-astra"
+  },
+  "reviewerKind": "harness",
+  "maxRounds": 5,
+  "land": {
+    "requestedBy": "nLAPTOP",
+    "fromProject": true
+  },
+  "auto": true,
+  "rounds": [
+    {
+      "head": "89ef381f6ed3345193b3b24facc1a689ed247835",
+      "verdict": {
+        "token": "rv-574268dd:5f3b81186ef8",
+        "verdict": "approve",
+        "findings": [],
+        "reserved": [],
+        "notCheckedLive": null
+      },
+      "check": {
+        "passed": true,
+        "output": "typecheck ok\n3 tests pass"
+      },
+      "answers": [
+        {
+          "id": "LIVE",
+          "action": "rejected",
+          "reason": "The greeting is meant to say goodbye; the live check's script is wrong."
+        }
+      ],
+      "live": {
+        "kind": "ran",
+        "thread": "th-58ff31bfba2e",
+        "passed": false,
+        "output": "booting 89ef381 as a fleet: a control plane, a probe and one pylon\nthe pylon answered: Goodbye, which is not a greeting"
+      }
+    }
+  ],
+  "merged": null,
+  "waiver": null,
+  "phase": {
+    "kind": "needs-person",
+    "reasons": [
+      "The live check failed at 89ef381f6ed3345193b3b24facc1a689ed247835, and the builder pushed nothing for it: The greeting is meant to say goodbye; the live check's script is wrong.",
+      "The live check's output:\nbooting 89ef381 as a fleet: a control plane, a probe and one pylon\nthe pylon answered: Goodbye, which is not a greeting"
+    ]
+  },
+  "outbox": null,
+  "since": 1793180958660,
+  "nudges": 0,
+  "startedAt": 1793180953621
+}

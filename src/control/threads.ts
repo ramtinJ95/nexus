@@ -106,7 +106,10 @@ export function threadStarter(options: { registry: Registry; harness: Pick<Harne
     const network = { allowedHosts: withHttpsHosts(effectiveAllowedHosts(project), [dotfiles.repo]), secrets: bootSecrets(project) };
 
     const size = request.resources ?? {};
-    const resources = { cpus: size.cpus ?? project.resources.cpus, memoryGiB: size.memoryGiB ?? project.resources.memoryGiB, diskGiB: size.diskGiB ?? project.resources.diskGiB };
+    const resources = {
+      cpus: size.cpus ?? project.resources.cpus, memoryGiB: size.memoryGiB ?? project.resources.memoryGiB, diskGiB: size.diskGiB ?? project.resources.diskGiB,
+      ...size.nestedVirtualization === true ? { nestedVirtualization: true as const } : {},
+    };
     const id = queuedId ?? newThreadId();
     const pylonId = `pylon-${id}` as PylonId;
     const placement: Placement = named ? { how: "named", node: request.node as NodeName }

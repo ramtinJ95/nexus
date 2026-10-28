@@ -261,7 +261,7 @@ const approvedReview = (builder: ThreadId, phase: Review["phase"], extra: Partia
   models: { builder: "claude-opus-5-5", reviewer: "gpt-6-astra" }, maxRounds: 5, land: null, auto: false, merged: null, waiver: null, expect: "rv-1:t", sent: 3, outbox: null, since: 0, nudges: 0, startedAt: 0,
   rounds: [
     { head: "1".repeat(40), verdict: { token: "a", verdict: "changes", findings: [{ id: "F1", priority: "P1", where: "src/cache.ts:12", summary: "The cache never expires" }], reserved: [], notCheckedLive: null }, check: null, answers: [{ id: "F1", action: "fixed", reason: "" }] },
-    { head, verdict: { token: "b", verdict: "approve", findings: [{ id: "F2", priority: "P3", where: null, summary: "Name the TTL" }], reserved: [], notCheckedLive: "The cache's behaviour under load could not be checked live." }, check: { passed: true, output: "ok 412 tests" }, answers: null },
+    { head, verdict: { token: "b", verdict: "approve", findings: [{ id: "F2", priority: "P3", where: null, summary: "Name the TTL" }], reserved: [], notCheckedLive: "The cache's behaviour under load could not be checked live." }, check: { passed: true, output: "ok 412 tests" }, live: { kind: "absent" }, answers: null },
   ],
   phase, ...extra,
 });
@@ -273,7 +273,7 @@ test("a review held for the person says why on its builder's page, and a deploye
   const fix = await s.start("acme", "Fix checkout");
   s.registry.saveReview(approvedReview(fix.id, { kind: "needs-person", reasons: ["The pull request's GitHub checks are pending."] }, { land: { requestedBy: laptop } }));
   const region = landingOf((await s.call("GET", `/threads/${fix.id}`)).text);
-  assert.equal(textOf(region), `Held for you #7 Cache ↗ Head ${head.slice(0, 12)} · approved by gpt-6-astra (harness) in round 2 of 5 · .nexus/check passed `
+  assert.equal(textOf(region), `Held for you #7 Cache ↗ Head ${head.slice(0, 12)} · approved by gpt-6-astra (harness) in round 2 of 5 · .nexus/check passed · no .nexus/verify, so no live check `
     + "Why it waits for you The pull request's GitHub checks are pending. not waivable Failing or pending GitHub checks hold every landing until they pass. The reviewer's findings P3 F2 : Name the TTL "
     + `.nexus/check passed at ${head.slice(0, 12)} ok 412 tests Land #7`);
   assert.match(region, /<a href="https:\/\/github.com\/acme\/nexus\/pull\/7" target="_blank"/, "the PR links to GitHub");
@@ -297,6 +297,18 @@ test("a review held for the person says why on its builder's page, and a deploye
   assert.equal(post.status, 403, "the route refuses it whatever the page shows");
   assert.match(post.text, /only deployers may/);
   assert.deepEqual(landed, [fix.id]);
+});
+
+test("a held landing whose live check passed says so with its output, and the review's line says how the live check went", async (t) => {
+  const s = await seeded(t, landingOptions());
+  const fix = await s.start("acme", "Fix checkout");
+  const review = approvedReview(fix.id, { kind: "needs-person", reasons: ["The pull request's GitHub checks are pending."] }, { land: { requestedBy: laptop } });
+  s.registry.saveReview({ ...review, rounds: [review.rounds[0]!, { ...review.rounds[1]!, live: { kind: "ran", thread: "th-0123456789ab" as ThreadId, passed: true, output: "verify-nexus: thread started, answered, archived" } }] });
+  const page = (await s.call("GET", `/threads/${fix.id}`)).text;
+  const card = textOf(landingOf(page));
+  assert.match(card, new RegExp(`· \\.nexus/check passed · live check passed Why it waits`));
+  assert.match(card, new RegExp(`The live check passed at ${head.slice(0, 12)} verify-nexus: thread started, answered, archived`));
+  assert.match(textOf(page), new RegExp(`live check passed at ${head.slice(0, 12)}`));
 });
 
 const questionsOf = (page: string) => /<div id="questions" data-live>([\s\S]*?)<\/div>\n<div id="landing"/.exec(page)![1]!;
@@ -393,19 +405,28 @@ test("a landing shows its steps as the review moves through them, until it lands
     return { states: [...region.matchAll(/<li class="land-step land-(\w+)"/g)].map((m) => m[1]).join(" "), text: textOf(region).replace(/ ([,.])(?= |$)/g, "$1") };
   };
   const merge = "4".repeat(40);
-  assert.deepEqual(await steps({ kind: "checking", startedAt: 0, thread: null }), {
-    states: "now todo todo todo", text: `Landing #7 Cache ↗ Check Merge Deploy Landed .nexus/check runs at ${head.slice(0, 12)}, or its kept result for that commit is read.` });
-  assert.equal((await steps({ kind: "merging", authorized: head })).states, "done now todo todo");
+  const { live: _, ...unchecked } = approvedReview(fix.id, { kind: "approved" }).rounds[1]!;
+  assert.deepEqual(await steps({ kind: "checking", startedAt: 0, thread: null }, { rounds: [unchecked] }), {
+    states: "now todo todo todo todo", text: `Landing #7 Cache ↗ Check Live check Merge Deploy Landed .nexus/check runs at ${head.slice(0, 12)}, or its kept result for that commit is read.` });
+  assert.equal((await steps({ kind: "merging", authorized: head })).states, "done skipped now todo todo", "a head with no .nexus/verify skips the live check");
   assert.deepEqual(await steps({ kind: "deploying", commit: merge, previous: "3".repeat(40), requested: true, deadline: 0 }, { merged: merge }), {
-    states: "done done now todo", text: `Landing #7 Cache ↗ Check Merge Deploy Landed Deploying the merge commit ${merge.slice(0, 12)} until every service reports it healthy.` });
+    states: "done skipped done now todo", text: `Landing #7 Cache ↗ Check Live check (no .nexus/verify) Merge Deploy Landed Deploying the merge commit ${merge.slice(0, 12)} until every service reports it healthy.` });
   assert.deepEqual(await steps({ kind: "rolling-back", commit: merge, previous: "3".repeat(40), why: "The deploy of 4444 failed: rj-firebat control failed.", requested: true, deadline: 0 }, { merged: merge }), {
-    states: "done done failed todo", text: `Rolling back #7 Cache ↗ Check Merge Deploy Landed The deploy of 4444 failed: rj-firebat control failed. Rolling back to ${"3".repeat(12)}.` });
+    states: "done skipped done failed todo", text: `Rolling back #7 Cache ↗ Check Live check (no .nexus/verify) Merge Deploy Landed The deploy of 4444 failed: rj-firebat control failed. Rolling back to ${"3".repeat(12)}.` });
   assert.deepEqual(await steps({ kind: "needs-person", reasons: ["The deploy of 4444 failed.", "Rolled back to the previous release, 3333, which every service reports healthy."] }, { merged: merge }), {
-    states: "done done failed todo", text: "Merged, not deployed #7 Cache ↗ Check Merge Deploy Landed The deploy of 4444 failed. Rolled back to the previous release, 3333, which every service reports healthy." });
+    states: "done skipped done failed todo", text: "Merged, not deployed #7 Cache ↗ Check Live check (no .nexus/verify) Merge Deploy Landed The deploy of 4444 failed. Rolled back to the previous release, 3333, which every service reports healthy." });
   assert.deepEqual(await steps({ kind: "landed", commit: merge }, { merged: merge }), {
-    states: "done done done done", text: `Landed #7 Cache ↗ Check Merge Deploy Landed Merged as ${merge.slice(0, 12)}, deployed, and every service reports it healthy.` });
+    states: "done skipped done done done", text: `Landed #7 Cache ↗ Check Live check (no .nexus/verify) Merge Deploy Landed Merged as ${merge.slice(0, 12)}, deployed, and every service reports it healthy.` });
   const other = await steps({ kind: "landed", commit: merge }, { merged: merge, pr: { repo: "acme/web", number: 7, url: "https://github.com/acme/web/pull/7", title: "Cache", branch: "cache" } });
-  assert.deepEqual(other, { states: "done done skipped done", text: `Landed #7 Cache ↗ Check Merge Deploy (nothing to deploy) Landed Merged as ${merge.slice(0, 12)}.` }, "a PR that does not deploy skips the step");
+  assert.deepEqual(other, { states: "done skipped done skipped done", text: `Landed #7 Cache ↗ Check Live check (no .nexus/verify) Merge Deploy (nothing to deploy) Landed Merged as ${merge.slice(0, 12)}.` }, "a PR that does not deploy skips the step");
+  const verifier = "th-0123456789ab" as ThreadId;
+  assert.deepEqual(await steps({ kind: "verifying", startedAt: 0, thread: verifier }, { rounds: [unchecked] }), {
+    states: "done now todo todo todo", text: `Landing #7 Cache ↗ Check Live check Merge Deploy Landed .nexus/verify runs at ${head.slice(0, 12)} in a verify pylon, ${verifier}.` });
+  assert.equal((await steps({ kind: "verifying", startedAt: 0, thread: null, refused: "no node can run this pylon: rj-firebat is offline" }, { rounds: [unchecked] })).text,
+    "Landing #7 Cache ↗ Check Live check Merge Deploy Landed No node can take the verify pylon yet: no node can run this pylon: rj-firebat is offline");
+  const verified = (live: Review["rounds"][number]["live"]): Partial<Review> => ({ rounds: [{ ...unchecked, ...live === undefined ? {} : { live } }] });
+  assert.equal((await steps({ kind: "merging", authorized: head }, verified({ kind: "ran", thread: verifier, passed: true, output: "fleet ok" }))).states, "done done now todo todo", "a live check that passed is done");
+  assert.equal((await steps({ kind: "merging", authorized: head }, verified(undefined))).text, `Landing #7 Cache ↗ Check Live check (not run) Merge Deploy Landed Checking the merge policy again with what GitHub says now, then merging ${head.slice(0, 12)}.`, "a landing from before live checks says it ran none");
   assert.equal((await steps({ kind: "fixing" })).text, "", "a review that is not landing has nothing to land");
 });
 
