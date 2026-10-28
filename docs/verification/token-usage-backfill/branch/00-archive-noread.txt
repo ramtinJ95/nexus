@@ -1,0 +1,3 @@
+$ nexus archive th-174963b9ebc2
+Archived th-174963b9ebc2.
+exit 0

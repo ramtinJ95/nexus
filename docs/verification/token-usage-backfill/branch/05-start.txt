@@ -1,0 +1,3 @@
+$ nexus usage backfill
+Backfill: running, 0 of 6 threads read, recovered 0 calls and 0 tokens.
+exit 0

@@ -1,0 +1,62 @@
+{
+  "live": {
+    "status": "archived",
+    "attention": null,
+    "desired": "paused",
+    "actual": "paused",
+    "failed": null,
+    "lastHumanActivityAt": 1793147898758,
+    "seenAt": null,
+    "lastReplyAt": null
+  },
+  "big": {
+    "status": "archived",
+    "attention": null,
+    "desired": "paused",
+    "actual": "paused",
+    "failed": null,
+    "lastHumanActivityAt": 1793147898932,
+    "seenAt": null,
+    "lastReplyAt": null
+  },
+  "pi": {
+    "status": "archived",
+    "attention": null,
+    "desired": "paused",
+    "actual": "paused",
+    "failed": null,
+    "lastHumanActivityAt": 1793147899109,
+    "seenAt": null,
+    "lastReplyAt": null
+  },
+  "both": {
+    "status": "archived",
+    "attention": null,
+    "desired": "paused",
+    "actual": "paused",
+    "failed": null,
+    "lastHumanActivityAt": 1793147899294,
+    "seenAt": null,
+    "lastReplyAt": null
+  },
+  "noboot": {
+    "status": "archived",
+    "attention": null,
+    "desired": "paused",
+    "actual": "paused",
+    "failed": null,
+    "lastHumanActivityAt": 1793147899475,
+    "seenAt": null,
+    "lastReplyAt": null
+  },
+  "noread": {
+    "status": "archived",
+    "attention": null,
+    "desired": "paused",
+    "actual": "paused",
+    "failed": null,
+    "lastHumanActivityAt": 1793147899662,
+    "seenAt": null,
+    "lastReplyAt": null
+  }
+}

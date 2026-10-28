@@ -1,0 +1,16 @@
+after 5 s with project big asking 5 GiB of the node's 5.8 GiB:
+{
+  "state": "running",
+  "startedAt": 1793147903328,
+  "finishedAt": null,
+  "current": null,
+  "waiting": "verify-node would have 4.8 GiB of memory left with it up, less than the 5 GiB of the largest project's pylon",
+  "read": 0,
+  "of": 6,
+  "recovered": {
+    "calls": 0,
+    "tokens": 0
+  },
+  "skipped": []
+}
+no pylon was woken

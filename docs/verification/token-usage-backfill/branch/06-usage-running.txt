@@ -1,0 +1,12 @@
+$ nexus usage --since all --by kind
+Usage of all projects for all time. Counting started 2026-10-28 00:38 UTC.
+Backfill: running, 3 of 6 threads read, recovered 6012 calls and 7.5M tokens. It reads the pylon of th-c51e900754b4.
+
+       Input  Output  Cache write  Cache read  Total  Calls
+Total  20k    302k    1.2M         6.3M        7.9M   6021
+
+By agent
+Agent   Input  Output  Cache write  Cache read  Total  Calls
+claude  18.1k  302k    1.2M         6.3M        7.9M   6019
+pi      1.9k   10      0            1.5k        3.5k   2
+exit 0

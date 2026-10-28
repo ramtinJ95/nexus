@@ -1,0 +1,3 @@
+$ nexus archive th-032fa45cff38
+Archived th-032fa45cff38.
+exit 0

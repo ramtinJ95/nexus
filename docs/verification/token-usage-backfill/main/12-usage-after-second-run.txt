@@ -1,0 +1,10 @@
+$ nexus usage --since all --by kind
+Usage of all projects for all time. Counting started 2026-10-28 00:38 UTC.
+
+       Input  Output  Cache write  Cache read  Total  Calls
+Total  20     1.5k    37.7k        293k        332k   9
+
+By agent
+Agent   Input  Output  Cache write  Cache read  Total  Calls
+claude  20     1.5k    37.7k        293k        332k   9
+exit 0

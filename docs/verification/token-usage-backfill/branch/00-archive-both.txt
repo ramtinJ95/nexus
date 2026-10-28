@@ -1,0 +1,3 @@
+$ nexus archive th-c51e900754b4
+Archived th-c51e900754b4.
+exit 0

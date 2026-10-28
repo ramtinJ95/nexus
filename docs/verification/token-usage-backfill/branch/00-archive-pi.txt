@@ -1,0 +1,3 @@
+$ nexus archive th-3bd747e61462
+Archived th-3bd747e61462.
+exit 0

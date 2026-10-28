@@ -1,0 +1,53 @@
+$ nexus usage backfill --dry-run --json
+{
+  "backfill": {
+    "state": "done",
+    "startedAt": 1793147903328,
+    "finishedAt": 1793147948206,
+    "current": null,
+    "waiting": null,
+    "read": 6,
+    "of": 6,
+    "recovered": {
+      "calls": 6044,
+      "tokens": 7601753
+    },
+    "skipped": [
+      {
+        "thread": "th-d944c141dba2",
+        "title": "Pylon fails to boot",
+        "state": "skipped",
+        "reason": "the pylon did not boot: backend: pylon-vm: the VM did not boot: gondolin exited 1 before the guest answered",
+        "calls": 0,
+        "tokens": 0,
+        "at": 1793147938204
+      },
+      {
+        "thread": "th-174963b9ebc2",
+        "title": "Transcripts fail to read",
+        "state": "skipped",
+        "reason": "reading it failed: reading the agents' usage exited 1",
+        "calls": 0,
+        "tokens": 0,
+        "at": 1793147944210
+      }
+    ]
+  },
+  "plan": [
+    {
+      "thread": "th-d944c141dba2",
+      "project": "nexus",
+      "node": "verify-node",
+      "title": "Pylon fails to boot",
+      "reason": "the pylon did not boot: backend: pylon-vm: the VM did not boot: gondolin exited 1 before the guest answered"
+    },
+    {
+      "thread": "th-174963b9ebc2",
+      "project": "nexus",
+      "node": "verify-node",
+      "title": "Transcripts fail to read",
+      "reason": "reading it failed: reading the agents' usage exited 1"
+    }
+  ]
+}
+exit 0

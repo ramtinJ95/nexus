@@ -1,0 +1,325 @@
+--- 01-hand-sum.txt
+live     Counted live before archive    {"calls":9,"input":20,"output":1523,"cacheWrite":37665,"cacheRead":293246}
+big      Long Claude history            {"calls":6010,"input":18050,"output":300200,"cacheWrite":1200000,"cacheRead":6004000}
+pi       Harness review in pi           {"calls":2,"input":1927,"output":10,"cacheWrite":0,"cacheRead":1536}
+both     Claude and pi, held at boot    {"calls":32,"input":2350,"output":2780,"cacheWrite":12500,"cacheRead":58400}
+noboot   Pylon fails to boot            {"calls":4,"input":4,"output":4,"cacheWrite":4,"cacheRead":4}
+noread   Transcripts fail to read       {"calls":3,"input":6,"output":6,"cacheWrite":6,"cacheRead":6}
+deleted  Deleted before the backfill    {"calls":5,"input":35,"output":35,"cacheWrite":35,"cacheRead":35}
+
+counted live before the backfill (live): {"calls":9,"input":20,"output":1523,"cacheWrite":37665,"cacheRead":293246,"total":332454}
+after a backfill (live, big, pi, both; noboot and noread are skipped, deleted has no pylon): {"calls":6053,"input":22347,"output":304513,"cacheWrite":1250165,"cacheRead":6357182,"total":7934207}
+
+--- 00-project.txt
+$ nexus project add nexus --scratch --node verify-node --cpus 1 --memory 1 --disk 1
+Added scratch project nexus on verify-node
+exit 0
+
+wrote the live thread's transcript into its running pylon, and restarted the control plane, whose start reads every running pylon
+--- 00-archive-live.txt
+$ nexus archive th-ee23dfaf5ad9
+Archived th-ee23dfaf5ad9.
+exit 0
+
+--- 00-archive-big.txt
+$ nexus archive th-d72f7acfb078
+Archived th-d72f7acfb078.
+exit 0
+
+--- 00-archive-pi.txt
+$ nexus archive th-e01fed322bd6
+Archived th-e01fed322bd6.
+exit 0
+
+--- 00-archive-both.txt
+$ nexus archive th-3da6d21af410
+Archived th-3da6d21af410.
+exit 0
+
+--- 00-archive-noboot.txt
+$ nexus archive th-87dcc30b093b
+Archived th-87dcc30b093b.
+exit 0
+
+--- 00-archive-noread.txt
+$ nexus archive th-86433046afb9
+Archived th-86433046afb9.
+exit 0
+
+--- 00-archive-deleted.txt
+$ nexus archive th-37c63350a81a
+Archived th-37c63350a81a.
+exit 0
+
+--- 00-delete.txt
+$ nexus delete th-37c63350a81a
+Deleted th-37c63350a81a.
+exit 0
+
+wrote the archived pylons' histories; live=th-ee23dfaf5ad9 big=th-d72f7acfb078 pi=th-e01fed322bd6 both=th-3da6d21af410 noboot=th-87dcc30b093b noread=th-86433046afb9 deleted=th-37c63350a81a
+--- 02-threads-before.json
+{
+  "live": {
+    "status": "archived",
+    "attention": null,
+    "desired": "paused",
+    "actual": "paused",
+    "failed": null,
+    "lastHumanActivityAt": 1793147884928,
+    "seenAt": null,
+    "lastReplyAt": null
+  },
+  "big": {
+    "status": "archived",
+    "attention": null,
+    "desired": "paused",
+    "actual": "paused",
+    "failed": null,
+    "lastHumanActivityAt": 1793147885099,
+    "seenAt": null,
+    "lastReplyAt": null
+  },
+  "pi": {
+    "status": "archived",
+    "attention": null,
+    "desired": "paused",
+    "actual": "paused",
+    "failed": null,
+    "lastHumanActivityAt": 1793147885275,
+    "seenAt": null,
+    "lastReplyAt": null
+  },
+  "both": {
+    "status": "archived",
+    "attention": null,
+    "desired": "paused",
+    "actual": "paused",
+    "failed": null,
+    "lastHumanActivityAt": 1793147885446,
+    "seenAt": null,
+    "lastReplyAt": null
+  },
+  "noboot": {
+    "status": "archived",
+    "attention": null,
+    "desired": "paused",
+    "actual": "paused",
+    "failed": null,
+    "lastHumanActivityAt": 1793147885620,
+    "seenAt": null,
+    "lastReplyAt": null
+  },
+  "noread": {
+    "status": "archived",
+    "attention": null,
+    "desired": "paused",
+    "actual": "paused",
+    "failed": null,
+    "lastHumanActivityAt": 1793147885785,
+    "seenAt": null,
+    "lastReplyAt": null
+  }
+}
+
+--- 02-sessions-before.txt
+live: claude-code paused
+big: claude-code paused
+pi: claude-code paused
+both: claude-code paused
+noboot: claude-code paused
+noread: claude-code paused
+
+--- 03-api-total-before.txt
+GET /v1/usage total before the backfill: {"calls":9,"input":20,"output":1523,"cacheWrite":37665,"cacheRead":293246,"total":332454}
+expected:  {"calls":9,"input":20,"output":1523,"cacheWrite":37665,"cacheRead":293246,"total":332454}
+MATCH
+
+--- 03-usage-before.txt
+$ nexus usage --since all --by kind
+Usage of all projects for all time. Counting started 2026-10-28 00:38 UTC.
+
+       Input  Output  Cache write  Cache read  Total  Calls
+Total  20     1.5k    37.7k        293k        332k   9
+
+By agent
+Agent   Input  Output  Cache write  Cache read  Total  Calls
+claude  20     1.5k    37.7k        293k        332k   9
+exit 0
+
+--- 03-usage-before.png: HTTP 200, no #usage-backfill on the page
+--- 04-dry-run.txt
+$ nexus usage backfill --dry-run
+nexus: Unknown option '--dry-run'. To specify a positional argument starting with a '-', place it at the end of the command after '--', as in '-- "--dry-run". Run nexus --help for usage
+exit 64
+
+--- 05-project-big.txt
+$ nexus project add big --scratch --node verify-node --cpus 1 --memory 5 --disk 1
+Added scratch project big on verify-node
+exit 0
+
+--- 05-start.txt
+$ nexus usage backfill
+nexus: usage takes 0 arguments, got 1. Run nexus --help for usage
+exit 64
+
+--- 05-waiting.txt
+after 5 s with project big asking 5 GiB of the node's 5.8 GiB:
+"GET /v1/usage/backfill answered 404"
+no pylon was woken
+
+--- 05-project-big-smaller.txt
+$ nexus project edit big --memory 1
+Updated project big, auto review off. Existing threads keep their boot settings and grants; start a new thread to apply them.
+exit 0
+
+--- 06-usage-running.txt
+$ nexus usage --since all --by kind
+Usage of all projects for all time. Counting started 2026-10-28 00:38 UTC.
+
+       Input  Output  Cache write  Cache read  Total  Calls
+Total  20     1.5k    37.7k        293k        332k   9
+
+By agent
+Agent   Input  Output  Cache write  Cache read  Total  Calls
+claude  20     1.5k    37.7k        293k        332k   9
+exit 0
+
+--- 06-usage-running.png: HTTP 200, no #usage-backfill on the page
+--- 07-restart.txt
+before the restart: "GET /v1/usage/backfill answered 404"
+total: {"calls":9,"input":20,"output":1523,"cacheWrite":37665,"cacheRead":293246,"total":332454}
+
+stopped the control plane while the probe holds the boot of the thread both
+released the held boot
+--- 08-api-total-after.txt
+GET /v1/usage total after the backfill: {"calls":9,"input":20,"output":1523,"cacheWrite":37665,"cacheRead":293246,"total":332454}
+expected:  {"calls":6053,"input":22347,"output":304513,"cacheWrite":1250165,"cacheRead":6357182,"total":7934207}
+DIFFERENT
+
+--- 08-usage-after.txt
+$ nexus usage --since all --by kind
+Usage of all projects for all time. Counting started 2026-10-28 00:38 UTC.
+
+       Input  Output  Cache write  Cache read  Total  Calls
+Total  20     1.5k    37.7k        293k        332k   9
+
+By agent
+Agent   Input  Output  Cache write  Cache read  Total  Calls
+claude  20     1.5k    37.7k        293k        332k   9
+exit 0
+
+--- 08-backfill-json.txt
+$ nexus usage backfill --dry-run --json
+{"error":"Unknown option '--dry-run'. To specify a positional argument starting with a '-', place it at the end of the command after '--', as in '-- \"--dry-run\"","kind":"invalid","status":null}
+exit 64
+
+--- 09-usage-done.png: HTTP 200, no #usage-backfill on the page
+--- 09-usage-done-phone.png: HTTP 200, no #usage-backfill on the page
+--- 10-threads-after.json
+{
+  "live": {
+    "status": "archived",
+    "attention": null,
+    "desired": "paused",
+    "actual": "paused",
+    "failed": null,
+    "lastHumanActivityAt": 1793147884928,
+    "seenAt": null,
+    "lastReplyAt": null
+  },
+  "big": {
+    "status": "archived",
+    "attention": null,
+    "desired": "paused",
+    "actual": "paused",
+    "failed": null,
+    "lastHumanActivityAt": 1793147885099,
+    "seenAt": null,
+    "lastReplyAt": null
+  },
+  "pi": {
+    "status": "archived",
+    "attention": null,
+    "desired": "paused",
+    "actual": "paused",
+    "failed": null,
+    "lastHumanActivityAt": 1793147885275,
+    "seenAt": null,
+    "lastReplyAt": null
+  },
+  "both": {
+    "status": "archived",
+    "attention": null,
+    "desired": "paused",
+    "actual": "paused",
+    "failed": null,
+    "lastHumanActivityAt": 1793147885446,
+    "seenAt": null,
+    "lastReplyAt": null
+  },
+  "noboot": {
+    "status": "archived",
+    "attention": null,
+    "desired": "paused",
+    "actual": "paused",
+    "failed": null,
+    "lastHumanActivityAt": 1793147885620,
+    "seenAt": null,
+    "lastReplyAt": null
+  },
+  "noread": {
+    "status": "archived",
+    "attention": null,
+    "desired": "paused",
+    "actual": "paused",
+    "failed": null,
+    "lastHumanActivityAt": 1793147885785,
+    "seenAt": null,
+    "lastReplyAt": null
+  }
+}
+
+--- 10-threads-compare.txt
+live     archived attention=null pylon=paused: UNCHANGED
+big      archived attention=null pylon=paused: UNCHANGED
+pi       archived attention=null pylon=paused: UNCHANGED
+both     archived attention=null pylon=paused: UNCHANGED
+noboot   archived attention=null pylon=paused: UNCHANGED
+noread   archived attention=null pylon=paused: UNCHANGED
+
+--- 10-sessions-after.txt
+live: claude-code paused
+big: claude-code paused
+pi: claude-code paused
+both: claude-code paused
+noboot: claude-code paused
+noread: claude-code paused
+
+--- 11-pylon-lifecycle.txt
+
+boots that relaunched the sessions, which starts an agent: 0
+
+--- 12-second-run.txt
+$ nexus usage backfill
+nexus: usage takes 0 arguments, got 1. Run nexus --help for usage
+exit 64
+
+--- 12-second-run-pylons.txt
+
+--- 12-second-run-total.txt
+GET /v1/usage total after a second run: {"calls":9,"input":20,"output":1523,"cacheWrite":37665,"cacheRead":293246,"total":332454}
+expected:  {"calls":9,"input":20,"output":1523,"cacheWrite":37665,"cacheRead":293246,"total":332454}
+MATCH
+
+--- 12-usage-after-second-run.txt
+$ nexus usage --since all --by kind
+Usage of all projects for all time. Counting started 2026-10-28 00:38 UTC.
+
+       Input  Output  Cache write  Cache read  Total  Calls
+Total  20     1.5k    37.7k        293k        332k   9
+
+By agent
+Agent   Input  Output  Cache write  Cache read  Total  Calls
+claude  20     1.5k    37.7k        293k        332k   9
+exit 0
+

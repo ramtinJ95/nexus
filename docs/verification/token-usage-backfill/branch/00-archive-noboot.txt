@@ -1,0 +1,3 @@
+$ nexus archive th-d944c141dba2
+Archived th-d944c141dba2.
+exit 0

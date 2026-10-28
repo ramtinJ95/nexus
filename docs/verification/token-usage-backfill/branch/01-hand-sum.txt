@@ -1,0 +1,10 @@
+live     Counted live before archive    {"calls":9,"input":20,"output":1523,"cacheWrite":37665,"cacheRead":293246}
+big      Long Claude history            {"calls":6010,"input":18050,"output":300200,"cacheWrite":1200000,"cacheRead":6004000}
+pi       Harness review in pi           {"calls":2,"input":1927,"output":10,"cacheWrite":0,"cacheRead":1536}
+both     Claude and pi, held at boot    {"calls":32,"input":2350,"output":2780,"cacheWrite":12500,"cacheRead":58400}
+noboot   Pylon fails to boot            {"calls":4,"input":4,"output":4,"cacheWrite":4,"cacheRead":4}
+noread   Transcripts fail to read       {"calls":3,"input":6,"output":6,"cacheWrite":6,"cacheRead":6}
+deleted  Deleted before the backfill    {"calls":5,"input":35,"output":35,"cacheWrite":35,"cacheRead":35}
+
+counted live before the backfill (live): {"calls":9,"input":20,"output":1523,"cacheWrite":37665,"cacheRead":293246,"total":332454}
+after a backfill (live, big, pi, both; noboot and noread are skipped, deleted has no pylon): {"calls":6053,"input":22347,"output":304513,"cacheWrite":1250165,"cacheRead":6357182,"total":7934207}

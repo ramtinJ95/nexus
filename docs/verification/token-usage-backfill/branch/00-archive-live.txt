@@ -1,0 +1,3 @@
+$ nexus archive th-6802bb6701c8
+Archived th-6802bb6701c8.
+exit 0

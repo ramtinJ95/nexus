@@ -1,0 +1,3 @@
+$ nexus delete th-37c63350a81a
+Deleted th-37c63350a81a.
+exit 0

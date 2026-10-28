@@ -1,0 +1,3 @@
+$ nexus delete th-290877231c68
+Deleted th-290877231c68.
+exit 0

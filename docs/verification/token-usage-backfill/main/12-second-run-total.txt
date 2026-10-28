@@ -1,0 +1,3 @@
+GET /v1/usage total after a second run: {"calls":9,"input":20,"output":1523,"cacheWrite":37665,"cacheRead":293246,"total":332454}
+expected:  {"calls":9,"input":20,"output":1523,"cacheWrite":37665,"cacheRead":293246,"total":332454}
+MATCH
