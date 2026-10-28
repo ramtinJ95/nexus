@@ -1,11 +1,11 @@
-$ nexus show th-e34e8d228810
-th-e34e8d228810  Live check of say-goodbye at 3203f8e70f1e
+$ nexus show th-58ff31bfba2e
+th-58ff31bfba2e  Live check of say-goodbye at 89ef381f6ed3
 project: nexus
 attention: none
 status: archived
-pylon: pylon-th-e34e8d228810 on rj-firebat, paused, observed 0s ago
+pylon: pylon-th-58ff31bfba2e on rj-firebat, paused, observed 0s ago
 size: 2 CPUs, 8 GiB memory, 10 GiB disk, nested virtualization
 placement: auto chose rj-firebat, which had the most room left after this pylon; rj-firebat had 48 GiB memory, 12 CPUs and 80 GiB disk left; verify-node cannot give a pylon KVM of its own: its probe does not report nested virtualization
-setup: fresh boot runs .nexus/setup, because the control plane could not read .nexus/setup at 3203f8e70f1e92655d48a6785971209749408540: the verify stack reads no remote, so every thread boots fresh
+setup: fresh boot runs .nexus/setup, because the control plane could not read .nexus/setup at 89ef381f6ed3345193b3b24facc1a689ed247835: the verify stack reads no remote, so every thread boots fresh
 PR watch: on
 [exit 0]

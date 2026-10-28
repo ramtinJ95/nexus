@@ -1,9 +1,9 @@
 {
-  "id": "rv-3136b7b5",
-  "expect": "rv-3136b7b5:57ab5461f4e2",
+  "id": "rv-4a98cb91",
+  "expect": "rv-4a98cb91:432f8c1bcae9",
   "sent": 1,
-  "builder": "th-27f8203a404f",
-  "reviewer": "th-f5d81a96bf98",
+  "builder": "th-9a0b9a8719ed",
+  "reviewer": "th-6a5955f3ba4c",
   "pr": {
     "repo": "ramtinJ95/nexus",
     "number": 1,
@@ -24,9 +24,9 @@
   "auto": true,
   "rounds": [
     {
-      "head": "1c7d4c145c6f69a1edbe052ca7548f286e4813b7",
+      "head": "bae3c1b0c2fa636b6f4a182818d493a32b404756",
       "verdict": {
-        "token": "rv-3136b7b5:57ab5461f4e2",
+        "token": "rv-4a98cb91:432f8c1bcae9",
         "verdict": "approve",
         "findings": [],
         "reserved": [],
@@ -38,19 +38,21 @@
       },
       "answers": null,
       "live": {
+        "kind": "ran",
+        "thread": "th-92a93c421176",
         "passed": true,
-        "output": "booting 1c7d4c1 as a fleet: a control plane, a probe and one pylon\nthe pylon answered: Hello, Ramtin"
+        "output": "booting bae3c1b as a fleet: a control plane, a probe and one pylon\nthe pylon answered: Hello, Ramtin"
       }
     }
   ],
-  "merged": "1cf0127281f2890ecc0295047e86a9b0dfde962f",
+  "merged": "e7f4f23a0ab63bfa2bfdee28bd73ef96dfbeb9e7",
   "waiver": null,
   "phase": {
     "kind": "landed",
-    "commit": "1cf0127281f2890ecc0295047e86a9b0dfde962f"
+    "commit": "e7f4f23a0ab63bfa2bfdee28bd73ef96dfbeb9e7"
   },
   "outbox": null,
-  "since": 1793180158537,
+  "since": 1793180953618,
   "nudges": 0,
-  "startedAt": 1793180158533
+  "startedAt": 1793180953615
 }

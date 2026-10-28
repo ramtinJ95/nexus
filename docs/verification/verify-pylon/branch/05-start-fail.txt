@@ -1,17 +1,17 @@
 $ nexus start --project nexus --title Say goodbye --claude push say-goodbye "Goodbye" --json
 {
-  "id": "th-e0bed361cbf3",
+  "id": "th-fa18e5f99c1c",
   "title": "Say goodbye",
   "project": "nexus",
-  "pylonId": "pylon-th-e0bed361cbf3",
+  "pylonId": "pylon-th-fa18e5f99c1c",
   "status": "active",
   "conversationId": null,
   "startedBy": "nLAPTOP",
-  "createdAt": 1793180157730,
+  "createdAt": 1793180952823,
   "agentTurnRunning": false,
   "working": false,
   "lastAgentActivityAt": 0,
-  "lastHumanActivityAt": 1793180157730,
+  "lastHumanActivityAt": 1793180952823,
   "seenAt": null,
   "lastReplyAt": null,
   "placement": {

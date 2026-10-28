@@ -1,17 +1,17 @@
 $ nexus start --project greeter --title Greet warmly --claude push greet-warm "Hello, friend" not checked live: the greeting is printed by a script, with no service to start. --json
 {
-  "id": "th-678b7074ad3b",
+  "id": "th-e9101ff29a06",
   "title": "Greet warmly",
   "project": "greeter",
-  "pylonId": "pylon-th-678b7074ad3b",
+  "pylonId": "pylon-th-e9101ff29a06",
   "status": "active",
   "conversationId": null,
   "startedBy": "nLAPTOP",
-  "createdAt": 1793180157934,
+  "createdAt": 1793180953036,
   "agentTurnRunning": false,
   "working": false,
   "lastAgentActivityAt": 0,
-  "lastHumanActivityAt": 1793180157934,
+  "lastHumanActivityAt": 1793180953036,
   "seenAt": null,
   "lastReplyAt": null,
   "placement": {

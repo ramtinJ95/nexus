@@ -1,5 +1,5 @@
-2026-10-28T09:36:00.580Z pylon-th-98daba80716f on verify-node, {"cpus":2,"memoryGiB":4,"diskGiB":10}, runs nexus-check at 1c7d4c145c6f
-2026-10-28T09:36:00.611Z pylon-th-cd3f97610cc1 on verify-node, {"cpus":2,"memoryGiB":4,"diskGiB":10}, runs nexus-check at e6abb6fd3d2f
-2026-10-28T09:36:00.642Z pylon-th-ec0ee6e28dcb on verify-node, {"cpus":2,"memoryGiB":4,"diskGiB":10}, runs nexus-check at 3203f8e70f1e
-2026-10-28T09:36:02.579Z pylon-th-9876a72551ea on rj-firebat, {"cpus":2,"memoryGiB":8,"diskGiB":10,"nestedVirtualization":true}, runs nexus-verify at 1c7d4c145c6f
-2026-10-28T09:36:02.607Z pylon-th-e34e8d228810 on rj-firebat, {"cpus":2,"memoryGiB":8,"diskGiB":10,"nestedVirtualization":true}, runs nexus-verify at 3203f8e70f1e
+2026-10-28T09:49:15.656Z pylon-th-afbd81684c6a on verify-node, {"cpus":2,"memoryGiB":4,"diskGiB":10}, runs nexus-check at bae3c1b0c2fa
+2026-10-28T09:49:15.687Z pylon-th-8b875be5a3a5 on verify-node, {"cpus":2,"memoryGiB":4,"diskGiB":10}, runs nexus-check at c9c16c08f675
+2026-10-28T09:49:15.724Z pylon-th-52080257be01 on verify-node, {"cpus":2,"memoryGiB":4,"diskGiB":10}, runs nexus-check at 89ef381f6ed3
+2026-10-28T09:49:17.668Z pylon-th-92a93c421176 on rj-firebat, {"cpus":2,"memoryGiB":8,"diskGiB":10,"nestedVirtualization":true}, runs nexus-verify at bae3c1b0c2fa
+2026-10-28T09:49:17.707Z pylon-th-58ff31bfba2e on rj-firebat, {"cpus":2,"memoryGiB":8,"diskGiB":10,"nestedVirtualization":true}, runs nexus-verify at 89ef381f6ed3

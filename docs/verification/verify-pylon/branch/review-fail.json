@@ -1,9 +1,9 @@
 {
-  "id": "rv-235dc578",
-  "expect": "rv-235dc578:dd65ffe35a5e",
+  "id": "rv-574268dd",
+  "expect": "rv-574268dd:ce21ba58cdb5",
   "sent": 2,
-  "builder": "th-e0bed361cbf3",
-  "reviewer": "th-0c452df8be34",
+  "builder": "th-fa18e5f99c1c",
+  "reviewer": "th-aee3a2137441",
   "pr": {
     "repo": "ramtinJ95/nexus",
     "number": 2,
@@ -24,9 +24,9 @@
   "auto": true,
   "rounds": [
     {
-      "head": "3203f8e70f1e92655d48a6785971209749408540",
+      "head": "89ef381f6ed3345193b3b24facc1a689ed247835",
       "verdict": {
-        "token": "rv-235dc578:30f32330cd82",
+        "token": "rv-574268dd:5f3b81186ef8",
         "verdict": "approve",
         "findings": [],
         "reserved": [],
@@ -44,8 +44,10 @@
         }
       ],
       "live": {
+        "kind": "ran",
+        "thread": "th-58ff31bfba2e",
         "passed": false,
-        "output": "booting 3203f8e as a fleet: a control plane, a probe and one pylon\nthe pylon answered: Goodbye, which is not a greeting"
+        "output": "booting 89ef381 as a fleet: a control plane, a probe and one pylon\nthe pylon answered: Goodbye, which is not a greeting"
       }
     }
   ],
@@ -54,12 +56,12 @@
   "phase": {
     "kind": "needs-person",
     "reasons": [
-      "The live check failed at 3203f8e70f1e92655d48a6785971209749408540, and the builder pushed nothing for it: The greeting is meant to say goodbye; the live check's script is wrong.",
-      "The live check's output:\nbooting 3203f8e as a fleet: a control plane, a probe and one pylon\nthe pylon answered: Goodbye, which is not a greeting"
+      "The live check failed at 89ef381f6ed3345193b3b24facc1a689ed247835, and the builder pushed nothing for it: The greeting is meant to say goodbye; the live check's script is wrong.",
+      "The live check's output:\nbooting 89ef381 as a fleet: a control plane, a probe and one pylon\nthe pylon answered: Goodbye, which is not a greeting"
     ]
   },
   "outbox": null,
-  "since": 1793180163602,
+  "since": 1793180958660,
   "nudges": 0,
-  "startedAt": 1793180158541
+  "startedAt": 1793180953621
 }

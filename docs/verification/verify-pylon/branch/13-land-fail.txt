@@ -1,5 +1,5 @@
-$ nexus land th-e0bed361cbf3
-[stderr] nexus: review rv-235dc578 of th-e0bed361cbf3 is needs-person: The live check failed at 3203f8e70f1e92655d48a6785971209749408540, and the builder pushed nothing for it: The greeting is meant to say goodbye; the live check's script is wrong. The live check's output:
-booting 3203f8e as a fleet: a control plane, a probe and one pylon
+$ nexus land th-fa18e5f99c1c
+[stderr] nexus: review rv-574268dd of th-fa18e5f99c1c is needs-person: The live check failed at 89ef381f6ed3345193b3b24facc1a689ed247835, and the builder pushed nothing for it: The greeting is meant to say goodbye; the live check's script is wrong. The live check's output:
+booting 89ef381 as a fleet: a control plane, a probe and one pylon
 the pylon answered: Goodbye, which is not a greeting, not approved with its checks passing
 [exit 5]

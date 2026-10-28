@@ -12,18 +12,18 @@ Updated project greeter, auto review and land, for nLAPTOP. Existing threads kee
 
 $ nexus start --project nexus --title Greet by name --claude push greet-name "Hello, Ramtin" --json
 {
-  "id": "th-27f8203a404f",
+  "id": "th-9a0b9a8719ed",
   "title": "Greet by name",
   "project": "nexus",
-  "pylonId": "pylon-th-27f8203a404f",
+  "pylonId": "pylon-th-9a0b9a8719ed",
   "status": "active",
   "conversationId": null,
   "startedBy": "nLAPTOP",
-  "createdAt": 1793180157536,
+  "createdAt": 1793180952580,
   "agentTurnRunning": false,
   "working": false,
   "lastAgentActivityAt": 0,
-  "lastHumanActivityAt": 1793180157536,
+  "lastHumanActivityAt": 1793180952580,
   "seenAt": null,
   "lastReplyAt": null,
   "placement": {
@@ -39,18 +39,18 @@ $ nexus start --project nexus --title Greet by name --claude push greet-name "He
 
 $ nexus start --project nexus --title Say goodbye --claude push say-goodbye "Goodbye" --json
 {
-  "id": "th-e0bed361cbf3",
+  "id": "th-fa18e5f99c1c",
   "title": "Say goodbye",
   "project": "nexus",
-  "pylonId": "pylon-th-e0bed361cbf3",
+  "pylonId": "pylon-th-fa18e5f99c1c",
   "status": "active",
   "conversationId": null,
   "startedBy": "nLAPTOP",
-  "createdAt": 1793180157730,
+  "createdAt": 1793180952823,
   "agentTurnRunning": false,
   "working": false,
   "lastAgentActivityAt": 0,
-  "lastHumanActivityAt": 1793180157730,
+  "lastHumanActivityAt": 1793180952823,
   "seenAt": null,
   "lastReplyAt": null,
   "placement": {
@@ -66,18 +66,18 @@ $ nexus start --project nexus --title Say goodbye --claude push say-goodbye "Goo
 
 $ nexus start --project greeter --title Greet warmly --claude push greet-warm "Hello, friend" not checked live: the greeting is printed by a script, with no service to start. --json
 {
-  "id": "th-678b7074ad3b",
+  "id": "th-e9101ff29a06",
   "title": "Greet warmly",
   "project": "greeter",
-  "pylonId": "pylon-th-678b7074ad3b",
+  "pylonId": "pylon-th-e9101ff29a06",
   "status": "active",
   "conversationId": null,
   "startedBy": "nLAPTOP",
-  "createdAt": 1793180157934,
+  "createdAt": 1793180953036,
   "agentTurnRunning": false,
   "working": false,
   "lastAgentActivityAt": 0,
-  "lastHumanActivityAt": 1793180157934,
+  "lastHumanActivityAt": 1793180953036,
   "seenAt": null,
   "lastReplyAt": null,
   "placement": {
@@ -94,145 +94,145 @@ $ nexus start --project greeter --title Greet warmly --claude push greet-warm "H
 waited: the PR watch linked every PR
 waited: every review has ended
 $ nexus threads --all
-th-27f8203a404f  archived  -  pylon paused   nexus    12s ago  Greet by name
-th-e0bed361cbf3  active    -  pylon running  nexus    11s ago  Say goodbye
-th-678b7074ad3b  archived  -  pylon paused   greeter  11s ago  Greet warmly
-th-f5d81a96bf98  archived  -  pylon paused   nexus    11s ago  Review of #1: Greet by name
-th-0c452df8be34  active    -  pylon running  nexus    11s ago  Review of #2: Say goodbye
-th-55c3bfa9c56c  archived  -  pylon paused   greeter  10s ago  Review of #3: Greet warmly
-th-98daba80716f  deleted   -  pylon paused   nexus    9s ago   Check of greet-name at 1c7d4c145c6f
-th-cd3f97610cc1  deleted   -  pylon paused   greeter  9s ago   Check of greet-warm at e6abb6fd3d2f
-th-ec0ee6e28dcb  deleted   -  pylon paused   nexus    9s ago   Check of say-goodbye at 3203f8e70f1e
-th-9876a72551ea  archived  -  pylon paused   nexus    7s ago   Live check of greet-name at 1c7d4c145c6f
-th-e34e8d228810  archived  -  pylon paused   nexus    7s ago   Live check of say-goodbye at 3203f8e70f1e
+th-9a0b9a8719ed  archived  -  pylon paused   nexus    11s ago  Greet by name
+th-fa18e5f99c1c  active    -  pylon running  nexus    11s ago  Say goodbye
+th-e9101ff29a06  archived  -  pylon paused   greeter  11s ago  Greet warmly
+th-6a5955f3ba4c  archived  -  pylon paused   nexus    10s ago  Review of #1: Greet by name
+th-aee3a2137441  active    -  pylon running  nexus    10s ago  Review of #2: Say goodbye
+th-09e9dc6a2eeb  archived  -  pylon paused   greeter  10s ago  Review of #3: Greet warmly
+th-afbd81684c6a  deleted   -  pylon paused   nexus    9s ago   Check of greet-name at bae3c1b0c2fa
+th-8b875be5a3a5  deleted   -  pylon paused   greeter  9s ago   Check of greet-warm at c9c16c08f675
+th-52080257be01  deleted   -  pylon paused   nexus    9s ago   Check of say-goodbye at 89ef381f6ed3
+th-92a93c421176  archived  -  pylon paused   nexus    7s ago   Live check of greet-name at bae3c1b0c2fa
+th-58ff31bfba2e  archived  -  pylon paused   nexus    7s ago   Live check of say-goodbye at 89ef381f6ed3
 [exit 0]
 
-$ nexus show th-27f8203a404f
-th-27f8203a404f  Greet by name
+$ nexus show th-9a0b9a8719ed
+th-9a0b9a8719ed  Greet by name
 project: nexus
 Claude worker: started, model claude-opus-5-5
 attention: reply
 status: archived
-pylon: pylon-th-27f8203a404f on verify-node, paused, observed 0s ago
+pylon: pylon-th-9a0b9a8719ed on verify-node, paused, observed 0s ago
 size: 2 CPUs, 4 GiB memory, 10 GiB disk
 placement: verify-node, the project's default node
 setup: fresh boot runs .nexus/setup, because the control plane could not read .nexus/setup at main: the verify stack reads no remote, so every thread boots fresh
 PR watch: on
 PR #1: Greet by name — merged, checks none, review none https://github.com/ramtinJ95/nexus/pull/1
-review rv-3136b7b5 of PR #1, started on its own: landed as 1cf0127281f2890ecc0295047e86a9b0dfde962f, round 1 of 5, reviewer th-f5d81a96bf98 on gpt-6-astra, landing when approved
-live check passed at 1c7d4c145c6f
+review rv-4a98cb91 of PR #1, started on its own: landed as e7f4f23a0ab63bfa2bfdee28bd73ef96dfbeb9e7, round 1 of 5, reviewer th-6a5955f3ba4c on gpt-6-astra, landing when approved
+live check passed at bae3c1b0c2fa
 output: branch origin/greet-name
 output: pull-request https://github.com/ramtinJ95/nexus/pull/1
 [exit 0]
 
-$ nexus show th-e0bed361cbf3
-th-e0bed361cbf3  Say goodbye
+$ nexus show th-fa18e5f99c1c
+th-fa18e5f99c1c  Say goodbye
 project: nexus
 Claude worker: started, model claude-opus-5-5
 attention: decision
 status: active
-pylon: pylon-th-e0bed361cbf3 on verify-node, running, observed 0s ago
+pylon: pylon-th-fa18e5f99c1c on verify-node, running, observed 0s ago
 size: 2 CPUs, 4 GiB memory, 10 GiB disk
 placement: verify-node, the project's default node
 setup: fresh boot runs .nexus/setup, because the control plane could not read .nexus/setup at main: the verify stack reads no remote, so every thread boots fresh
 PR watch: on
 PR #2: Say goodbye — open, checks none, review none https://github.com/ramtinJ95/nexus/pull/2
-review rv-235dc578 of PR #2, started on its own: needs-person, round 1 of 5, reviewer th-0c452df8be34 on gpt-6-astra, landing when approved
-live check failed at 3203f8e70f1e
-  booting 3203f8e as a fleet: a control plane, a probe and one pylon
+review rv-574268dd of PR #2, started on its own: needs-person, round 1 of 5, reviewer th-aee3a2137441 on gpt-6-astra, landing when approved
+live check failed at 89ef381f6ed3
+  booting 89ef381 as a fleet: a control plane, a probe and one pylon
   the pylon answered: Goodbye, which is not a greeting
-needs you: The live check failed at 3203f8e70f1e92655d48a6785971209749408540, and the builder pushed nothing for it: The greeting is meant to say goodbye; the live check's script is wrong.
+needs you: The live check failed at 89ef381f6ed3345193b3b24facc1a689ed247835, and the builder pushed nothing for it: The greeting is meant to say goodbye; the live check's script is wrong.
 needs you: The live check's output:
-booting 3203f8e as a fleet: a control plane, a probe and one pylon
+booting 89ef381 as a fleet: a control plane, a probe and one pylon
 the pylon answered: Goodbye, which is not a greeting
 output: branch origin/say-goodbye
 output: pull-request https://github.com/ramtinJ95/nexus/pull/2
 [exit 0]
 
-$ nexus show th-678b7074ad3b
-th-678b7074ad3b  Greet warmly
+$ nexus show th-e9101ff29a06
+th-e9101ff29a06  Greet warmly
 project: greeter
 Claude worker: started, model claude-opus-5-5
 attention: reply
 status: archived
-pylon: pylon-th-678b7074ad3b on verify-node, paused, observed 0s ago
+pylon: pylon-th-e9101ff29a06 on verify-node, paused, observed 0s ago
 size: 2 CPUs, 4 GiB memory, 10 GiB disk
 placement: verify-node, the project's default node
 setup: fresh boot runs .nexus/setup, because the control plane could not read .nexus/setup at main: the verify stack reads no remote, so every thread boots fresh
 PR watch: on
 PR #3: Greet warmly — open, checks none, review none https://github.com/ramtinJ95/greeter/pull/3
-review rv-b8148f4c of PR #3, started on its own: landed as 462e371641f2d4baaa277f15a00f5867235ad657, round 1 of 5, reviewer th-55c3bfa9c56c on gpt-6-astra, landing when approved
-no live check: e6abb6fd3d2f has no .nexus/verify, so the landing reads the pull request's statement of what could not be checked live
+review rv-b2b98d7c of PR #3, started on its own: landed as 326d0fba7059b94f8ea2eaab4eb2ad0a4a2c2f7a, round 1 of 5, reviewer th-09e9dc6a2eeb on gpt-6-astra, landing when approved
+no live check: c9c16c08f675 has no .nexus/verify, so the landing reads the pull request's statement of what could not be checked live
 output: branch origin/greet-warm
 output: pull-request https://github.com/ramtinJ95/greeter/pull/3
 [exit 0]
 
-$ nexus show th-9876a72551ea
-th-9876a72551ea  Live check of greet-name at 1c7d4c145c6f
+$ nexus show th-92a93c421176
+th-92a93c421176  Live check of greet-name at bae3c1b0c2fa
 project: nexus
 attention: none
 status: archived
-pylon: pylon-th-9876a72551ea on rj-firebat, paused, observed 0s ago
+pylon: pylon-th-92a93c421176 on rj-firebat, paused, observed 0s ago
 size: 2 CPUs, 8 GiB memory, 10 GiB disk, nested virtualization
 placement: auto chose rj-firebat, which had the most room left after this pylon; rj-firebat had 56 GiB memory, 14 CPUs and 90 GiB disk left; verify-node cannot give a pylon KVM of its own: its probe does not report nested virtualization
-setup: fresh boot runs .nexus/setup, because the control plane could not read .nexus/setup at 1c7d4c145c6f69a1edbe052ca7548f286e4813b7: the verify stack reads no remote, so every thread boots fresh
+setup: fresh boot runs .nexus/setup, because the control plane could not read .nexus/setup at bae3c1b0c2fa636b6f4a182818d493a32b404756: the verify stack reads no remote, so every thread boots fresh
 PR watch: on
 [exit 0]
 
-$ nexus show th-e34e8d228810
-th-e34e8d228810  Live check of say-goodbye at 3203f8e70f1e
+$ nexus show th-58ff31bfba2e
+th-58ff31bfba2e  Live check of say-goodbye at 89ef381f6ed3
 project: nexus
 attention: none
 status: archived
-pylon: pylon-th-e34e8d228810 on rj-firebat, paused, observed 0s ago
+pylon: pylon-th-58ff31bfba2e on rj-firebat, paused, observed 0s ago
 size: 2 CPUs, 8 GiB memory, 10 GiB disk, nested virtualization
 placement: auto chose rj-firebat, which had the most room left after this pylon; rj-firebat had 48 GiB memory, 12 CPUs and 80 GiB disk left; verify-node cannot give a pylon KVM of its own: its probe does not report nested virtualization
-setup: fresh boot runs .nexus/setup, because the control plane could not read .nexus/setup at 3203f8e70f1e92655d48a6785971209749408540: the verify stack reads no remote, so every thread boots fresh
+setup: fresh boot runs .nexus/setup, because the control plane could not read .nexus/setup at 89ef381f6ed3345193b3b24facc1a689ed247835: the verify stack reads no remote, so every thread boots fresh
 PR watch: on
 [exit 0]
 
-$ nexus land th-e0bed361cbf3
-[stderr] nexus: review rv-235dc578 of th-e0bed361cbf3 is needs-person: The live check failed at 3203f8e70f1e92655d48a6785971209749408540, and the builder pushed nothing for it: The greeting is meant to say goodbye; the live check's script is wrong. The live check's output:
-booting 3203f8e as a fleet: a control plane, a probe and one pylon
+$ nexus land th-fa18e5f99c1c
+[stderr] nexus: review rv-574268dd of th-fa18e5f99c1c is needs-person: The live check failed at 89ef381f6ed3345193b3b24facc1a689ed247835, and the builder pushed nothing for it: The greeting is meant to say goodbye; the live check's script is wrong. The live check's output:
+booting 89ef381 as a fleet: a control plane, a probe and one pylon
 the pylon answered: Goodbye, which is not a greeting, not approved with its checks passing
 [exit 5]
 
 $ nexus events --kind review.changed
-11 2026-10-28T09:35:58.535Z th-27f8203a404f review.changed {"review":"rv-3136b7b5","reviewer":"th-f5d81a96bf98","phase":{"kind":"reviewing"},"round":1}
-13 2026-10-28T09:35:58.542Z th-e0bed361cbf3 review.changed {"review":"rv-235dc578","reviewer":"th-0c452df8be34","phase":{"kind":"reviewing"},"round":1}
-15 2026-10-28T09:35:58.546Z th-678b7074ad3b review.changed {"review":"rv-b8148f4c","reviewer":"th-55c3bfa9c56c","phase":{"kind":"reviewing"},"round":1}
-23 2026-10-28T09:35:59.550Z th-27f8203a404f review.changed {"review":"rv-3136b7b5","reviewer":"th-f5d81a96bf98","phase":{"kind":"checking","startedAt":1793180159550,"thread":null},"round":1}
-24 2026-10-28T09:35:59.553Z th-678b7074ad3b review.changed {"review":"rv-b8148f4c","reviewer":"th-55c3bfa9c56c","phase":{"kind":"checking","startedAt":1793180159553,"thread":null},"round":1}
-25 2026-10-28T09:35:59.556Z th-e0bed361cbf3 review.changed {"review":"rv-235dc578","reviewer":"th-0c452df8be34","phase":{"kind":"checking","startedAt":1793180159556,"thread":null},"round":1}
-26 2026-10-28T09:36:01.555Z th-27f8203a404f review.changed {"review":"rv-3136b7b5","reviewer":"th-f5d81a96bf98","phase":{"kind":"verifying","startedAt":1793180161555,"thread":null},"round":1}
-27 2026-10-28T09:36:01.564Z th-678b7074ad3b review.changed {"review":"rv-b8148f4c","reviewer":"th-55c3bfa9c56c","phase":{"kind":"merging","authorized":null},"round":1}
-28 2026-10-28T09:36:01.594Z th-678b7074ad3b review.changed {"review":"rv-b8148f4c","reviewer":"th-55c3bfa9c56c","phase":{"kind":"landed","commit":"462e371641f2d4baaa277f15a00f5867235ad657"},"round":1}
-29 2026-10-28T09:36:01.599Z th-e0bed361cbf3 review.changed {"review":"rv-235dc578","reviewer":"th-0c452df8be34","phase":{"kind":"verifying","startedAt":1793180161599,"thread":null},"round":1}
-30 2026-10-28T09:36:03.550Z th-27f8203a404f review.changed {"review":"rv-3136b7b5","reviewer":"th-f5d81a96bf98","phase":{"kind":"merging","authorized":null},"round":1}
-31 2026-10-28T09:36:03.595Z th-27f8203a404f review.changed {"review":"rv-3136b7b5","reviewer":"th-f5d81a96bf98","phase":{"kind":"deploying","commit":"1cf0127281f2890ecc0295047e86a9b0dfde962f","previous":"4a3f7f350c4bc6d9b870595bca9f474dc01dcfd8","requested":false,"deadline":1793181963595},"round":1}
-33 2026-10-28T09:36:03.601Z th-e0bed361cbf3 review.changed {"review":"rv-235dc578","reviewer":"th-0c452df8be34","phase":{"kind":"fixing"},"round":1}
-37 2026-10-28T09:36:04.550Z th-27f8203a404f review.changed {"review":"rv-3136b7b5","reviewer":"th-f5d81a96bf98","phase":{"kind":"landed","commit":"1cf0127281f2890ecc0295047e86a9b0dfde962f"},"round":1}
-39 2026-10-28T09:36:05.551Z th-e0bed361cbf3 review.changed {"review":"rv-235dc578","reviewer":"th-0c452df8be34","phase":{"kind":"needs-person","reasons":["The live check failed at 3203f8e70f1e92655d48a6785971209749408540, and the builder pushed nothing for it: The greeting is meant to say goodbye; the live check's script is wrong.","The live check's output:\nbooting 3203f8e as a fleet: a control plane, a probe and one pylon\nthe pylon answered: Goodbye, which is not a greeting"]},"round":1}
+11 2026-10-28T09:49:13.616Z th-9a0b9a8719ed review.changed {"review":"rv-4a98cb91","reviewer":"th-6a5955f3ba4c","phase":{"kind":"reviewing"},"round":1}
+13 2026-10-28T09:49:13.621Z th-fa18e5f99c1c review.changed {"review":"rv-574268dd","reviewer":"th-aee3a2137441","phase":{"kind":"reviewing"},"round":1}
+15 2026-10-28T09:49:13.626Z th-e9101ff29a06 review.changed {"review":"rv-b2b98d7c","reviewer":"th-09e9dc6a2eeb","phase":{"kind":"reviewing"},"round":1}
+23 2026-10-28T09:49:14.631Z th-9a0b9a8719ed review.changed {"review":"rv-4a98cb91","reviewer":"th-6a5955f3ba4c","phase":{"kind":"checking","startedAt":1793180954631,"thread":null},"round":1}
+24 2026-10-28T09:49:14.634Z th-e9101ff29a06 review.changed {"review":"rv-b2b98d7c","reviewer":"th-09e9dc6a2eeb","phase":{"kind":"checking","startedAt":1793180954634,"thread":null},"round":1}
+25 2026-10-28T09:49:14.636Z th-fa18e5f99c1c review.changed {"review":"rv-574268dd","reviewer":"th-aee3a2137441","phase":{"kind":"checking","startedAt":1793180954636,"thread":null},"round":1}
+26 2026-10-28T09:49:16.636Z th-9a0b9a8719ed review.changed {"review":"rv-4a98cb91","reviewer":"th-6a5955f3ba4c","phase":{"kind":"verifying","startedAt":1793180956636,"thread":null},"round":1}
+27 2026-10-28T09:49:16.643Z th-e9101ff29a06 review.changed {"review":"rv-b2b98d7c","reviewer":"th-09e9dc6a2eeb","phase":{"kind":"merging","authorized":null},"round":1}
+28 2026-10-28T09:49:16.672Z th-e9101ff29a06 review.changed {"review":"rv-b2b98d7c","reviewer":"th-09e9dc6a2eeb","phase":{"kind":"landed","commit":"326d0fba7059b94f8ea2eaab4eb2ad0a4a2c2f7a"},"round":1}
+29 2026-10-28T09:49:16.677Z th-fa18e5f99c1c review.changed {"review":"rv-574268dd","reviewer":"th-aee3a2137441","phase":{"kind":"verifying","startedAt":1793180956677,"thread":null},"round":1}
+30 2026-10-28T09:49:18.631Z th-9a0b9a8719ed review.changed {"review":"rv-4a98cb91","reviewer":"th-6a5955f3ba4c","phase":{"kind":"merging","authorized":null},"round":1}
+31 2026-10-28T09:49:18.656Z th-9a0b9a8719ed review.changed {"review":"rv-4a98cb91","reviewer":"th-6a5955f3ba4c","phase":{"kind":"deploying","commit":"e7f4f23a0ab63bfa2bfdee28bd73ef96dfbeb9e7","previous":"6d3c7e0ae58653c8024440b9a2b69a5e97eecdb7","requested":false,"deadline":1793182758656},"round":1}
+33 2026-10-28T09:49:18.659Z th-fa18e5f99c1c review.changed {"review":"rv-574268dd","reviewer":"th-aee3a2137441","phase":{"kind":"fixing"},"round":1}
+37 2026-10-28T09:49:19.630Z th-9a0b9a8719ed review.changed {"review":"rv-4a98cb91","reviewer":"th-6a5955f3ba4c","phase":{"kind":"landed","commit":"e7f4f23a0ab63bfa2bfdee28bd73ef96dfbeb9e7"},"round":1}
+39 2026-10-28T09:49:20.632Z th-fa18e5f99c1c review.changed {"review":"rv-574268dd","reviewer":"th-aee3a2137441","phase":{"kind":"needs-person","reasons":["The live check failed at 89ef381f6ed3345193b3b24facc1a689ed247835, and the builder pushed nothing for it: The greeting is meant to say goodbye; the live check's script is wrong.","The live check's output:\nbooting 89ef381 as a fleet: a control plane, a probe and one pylon\nthe pylon answered: Goodbye, which is not a greeting"]},"round":1}
 [exit 0]
 
 screenshot 01-home.png: /
   landing card: none
   review lines: none
-screenshot 02-pass.png: /threads/th-27f8203a404f
-  landing card: Landed #1 Greet by name ↗ Check Live check Merge Deploy Landed Merged as 1cf0127281f2, deployed, and every service reports it healthy.
-  review lines: Nexus review rv-3136b7b5, started on its own: landed, round 1 of 5, by th-f5d81a96bf98 on gpt-6-astra, landing when approved | live check passed at 1c7d4c145c6f
-screenshot 03-fail.png: /threads/th-e0bed361cbf3
+screenshot 02-pass.png: /threads/th-9a0b9a8719ed
+  landing card: Landed #1 Greet by name ↗ Check Live check Merge Deploy Landed Merged as e7f4f23a0ab6, deployed, and every service reports it healthy.
+  review lines: Nexus review rv-4a98cb91, started on its own: landed, round 1 of 5, by th-6a5955f3ba4c on gpt-6-astra, landing when approved | live check passed at bae3c1b0c2fa
+screenshot 03-fail.png: /threads/th-fa18e5f99c1c
   landing card: none
   review lines: [Nexus review — automated, not a message from the person]
-Round 1 of at most 5 on pull request #2 (https://github.com/ramtinJ95/nexus/pull/2), reviewed at 3203f8e70f1e92655d48a6785971209749408540 by a reviewer on gpt-6-astra: the live check failed after the reviewer approved and the repository's checks passed. | LIVE (P0) .nexus/verify: The live check failed at 3203f8e70f1e92655d48a6785971209749408540
-    booting 3203f8e as a fleet: a control plane, a probe and one pylon
-    the pylon answered: Goodbye, which is not a greeting | Nexus review rv-235dc578, started on its own: needs-person, round 1 of 5, by th-0c452df8be34 on gpt-6-astra, landing when approved | live check failed at 3203f8e70f1e
-screenshot 04-plain.png: /threads/th-678b7074ad3b
-  landing card: Landed #3 Greet warmly ↗ Check Live check (no .nexus/verify) Merge Deploy (nothing to deploy) Landed Merged as 462e371641f2.
-  review lines: Nexus review rv-b8148f4c, started on its own: landed, round 1 of 5, by th-55c3bfa9c56c on gpt-6-astra, landing when approved | no live check: e6abb6fd3d2f has no .nexus/verify, so the landing reads the pull request's statement of what could not be checked live
-screenshot 05-fail-pylon-tab.png: /threads/th-e0bed361cbf3
+Round 1 of at most 5 on pull request #2 (https://github.com/ramtinJ95/nexus/pull/2), reviewed at 89ef381f6ed3345193b3b24facc1a689ed247835 by a reviewer on gpt-6-astra: the live check failed after the reviewer approved and the repository's checks passed. | LIVE (P0) .nexus/verify: The live check failed at 89ef381f6ed3345193b3b24facc1a689ed247835
+    booting 89ef381 as a fleet: a control plane, a probe and one pylon
+    the pylon answered: Goodbye, which is not a greeting | Nexus review rv-574268dd, started on its own: needs-person, round 1 of 5, by th-aee3a2137441 on gpt-6-astra, landing when approved | live check failed at 89ef381f6ed3
+screenshot 04-plain.png: /threads/th-e9101ff29a06
+  landing card: Landed #3 Greet warmly ↗ Check Live check (no .nexus/verify) Merge Deploy (nothing to deploy) Landed Merged as 326d0fba7059.
+  review lines: Nexus review rv-b2b98d7c, started on its own: landed, round 1 of 5, by th-09e9dc6a2eeb on gpt-6-astra, landing when approved | no live check: c9c16c08f675 has no .nexus/verify, so the landing reads the pull request's statement of what could not be checked live
+screenshot 05-fail-pylon-tab.png: /threads/th-fa18e5f99c1c
   landing card: none
   review lines: [Nexus review — automated, not a message from the person]
-Round 1 of at most 5 on pull request #2 (https://github.com/ramtinJ95/nexus/pull/2), reviewed at 3203f8e70f1e92655d48a6785971209749408540 by a reviewer on gpt-6-astra: the live check failed after the reviewer approved and the repository's checks passed. | LIVE (P0) .nexus/verify: The live check failed at 3203f8e70f1e92655d48a6785971209749408540
-    booting 3203f8e as a fleet: a control plane, a probe and one pylon
-    the pylon answered: Goodbye, which is not a greeting | Nexus review rv-235dc578, started on its own: needs-person, round 1 of 5, by th-0c452df8be34 on gpt-6-astra, landing when approved | live check failed at 3203f8e70f1e
+Round 1 of at most 5 on pull request #2 (https://github.com/ramtinJ95/nexus/pull/2), reviewed at 89ef381f6ed3345193b3b24facc1a689ed247835 by a reviewer on gpt-6-astra: the live check failed after the reviewer approved and the repository's checks passed. | LIVE (P0) .nexus/verify: The live check failed at 89ef381f6ed3345193b3b24facc1a689ed247835
+    booting 89ef381 as a fleet: a control plane, a probe and one pylon
+    the pylon answered: Goodbye, which is not a greeting | Nexus review rv-574268dd, started on its own: needs-person, round 1 of 5, by th-aee3a2137441 on gpt-6-astra, landing when approved | live check failed at 89ef381f6ed3

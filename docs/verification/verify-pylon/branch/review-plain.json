@@ -1,9 +1,9 @@
 {
-  "id": "rv-b8148f4c",
-  "expect": "rv-b8148f4c:bab011b895af",
+  "id": "rv-b2b98d7c",
+  "expect": "rv-b2b98d7c:17a59da42bf2",
   "sent": 1,
-  "builder": "th-678b7074ad3b",
-  "reviewer": "th-55c3bfa9c56c",
+  "builder": "th-e9101ff29a06",
+  "reviewer": "th-09e9dc6a2eeb",
   "pr": {
     "repo": "ramtinJ95/greeter",
     "number": 3,
@@ -24,9 +24,9 @@
   "auto": true,
   "rounds": [
     {
-      "head": "e6abb6fd3d2f61fb1db256e9deaeceb85b1e8c90",
+      "head": "c9c16c08f675548922fa4355c104ccdc3b9bea0d",
       "verdict": {
-        "token": "rv-b8148f4c:bab011b895af",
+        "token": "rv-b2b98d7c:17a59da42bf2",
         "verdict": "approve",
         "findings": [],
         "reserved": [],
@@ -36,17 +36,20 @@
         "passed": true,
         "output": "typecheck ok\n3 tests pass"
       },
-      "answers": null
+      "answers": null,
+      "live": {
+        "kind": "absent"
+      }
     }
   ],
-  "merged": "462e371641f2d4baaa277f15a00f5867235ad657",
+  "merged": "326d0fba7059b94f8ea2eaab4eb2ad0a4a2c2f7a",
   "waiver": null,
   "phase": {
     "kind": "landed",
-    "commit": "462e371641f2d4baaa277f15a00f5867235ad657"
+    "commit": "326d0fba7059b94f8ea2eaab4eb2ad0a4a2c2f7a"
   },
   "outbox": null,
-  "since": 1793180158547,
+  "since": 1793180953627,
   "nudges": 0,
-  "startedAt": 1793180158545
+  "startedAt": 1793180953625
 }
