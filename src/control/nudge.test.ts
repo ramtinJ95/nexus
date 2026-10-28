@@ -87,7 +87,7 @@ function fixture(t: import("node:test").TestContext) {
   async function personWrites(id: ThreadId, text: string) {
     if (claudes.has(id)) transcript(id, [{ kind: "prompt", at: now, text, from: "person" }]);
     else await fake.harness.send(id, text, `person:${now}`, "followUp");
-    registry.recordActivity(id, { agentTurnRunning: true });
+    registry.recordActivity(id, { human: now, agentTurnRunning: true });
   }
   /** Every nudge either path delivered, in order: harness sends with their sender, and messages typed into a Claude worker. */
   const nudges = () => [
@@ -267,6 +267,23 @@ test("a Claude worker builder is nudged by typing into its session, and a person
   f.tick(graceMs);
   await f.nudger.poll();
   assert.equal(f.typed.length, 2, "it stays the person's after the transcript that showed their message is gone");
+});
+
+test("a person's message seen while the turn it started runs keeps the thread theirs after the transcript drops it", async (t) => {
+  const f = fixture(t);
+  const id = await f.add("th-claude", { claude: true });
+  f.turn(id);
+  f.tick(1_000);
+  await f.personWrites(id, "Wait for me before you push.");
+  await f.nudger.poll();
+  assert.deepEqual(f.registry.nudge(id), { state: "left-alone" });
+  f.transcript(id, [{ kind: "prompt", at: f.now, text: "build the cache", from: "person" }], true);
+  f.registry.recordActivity(id, { agentTurnRunning: false });
+  f.tick(1_000);
+  f.turn(id);
+  f.tick(graceMs);
+  await f.nudger.poll();
+  assert.deepEqual(f.typed, []);
 });
 
 test("a thread the person took over is never searched on GitHub again", async (t) => {
