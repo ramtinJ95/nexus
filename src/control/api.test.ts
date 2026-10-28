@@ -1160,6 +1160,29 @@ test("a failed pylon shows failed with its reason until its thread is deleted, a
   assert.deepEqual((await detail()).pylon, { grantsOutdated: false, id: thread.pylonId, node, actualState: "absent", failed: reason, observedAt: "2027-01-01T00:00:06Z", retryRefused: null, resources: project.resources });
 });
 
+test("the thread list leaves deleted threads out when asked, as the dashboard asks and `threads --all` does not", async (t) => {
+  const s = await withThread(t);
+  const gone = (await s.call("POST", "/v1/threads", { project: "acme", title: "Old spike" })).body as Thread;
+  assert.equal((await s.call("DELETE", `/v1/threads/${gone.id}`)).status, 200);
+  const ids = async (path: string) => ((await s.call("GET", path)).body as ThreadRow[]).map((r) => r.id);
+  assert.deepEqual(await ids("/v1/threads"), [s.thread.id, gone.id]);
+  assert.deepEqual(await ids("/v1/threads?deleted=false"), [s.thread.id]);
+  assert.deepEqual(await ids("/v1/threads?project=acme&deleted=false"), [s.thread.id]);
+});
+
+test("a follow from the latest event gets a reply's events and none from before it", async (t) => {
+  const s = await withThread(t);
+  s.registry.recordReply(s.thread.id, Date.now());
+  const kinds = ["attention.changed", "thread.turn-ended", "session.turn-started", "session.turn-ended", "session.waiting", "session.ended"];
+  const stream = s.events(`/v1/events?follow=true&since=latest&${kinds.map((k) => `kind=${k}`).join("&")}`);
+  t.after(() => stream.close());
+  await stream.response;
+  assert.equal((await s.call("POST", `/v1/threads/${s.thread.id}/seen`, {})).status, 204);
+  s.registry.recordReply(s.thread.id, Date.now());
+  assert.deepEqual([(await stream.next()).payload, (await stream.next()).kind, (await stream.next()).payload], [{ attention: null }, "thread.turn-ended", { attention: "reply" }]);
+  assert.deepEqual((await s.call("GET", "/v1/events?since=latest")).body, [], "nothing comes after the latest event");
+});
+
 test("retrying a failed pylon clears the planner's verdict and its attempts, marks the retry, counts as human activity and wakes its node", async (t) => {
   const s = await withThread(t);
   const { thread } = s;

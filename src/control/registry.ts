@@ -925,6 +925,8 @@ export function openRegistry(path: string, clock = Date.now) {
       });
     },
     eventBatch,
+    /** The newest event's ID, a cursor that follows only the events after it. */
+    newestEvent: () => String(sql("SELECT max(id) AS id FROM events").get()?.id ?? 0),
     events: (since = "0", filter: EventFilter = {}) => eventBatch(since, filter).events,
     review(builder: ThreadId): Review | null {
       const record = jsonOrNull<Review>(sql("SELECT record FROM reviews WHERE builder = ?").get(builder)?.record ?? null);

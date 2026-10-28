@@ -22,7 +22,7 @@ import type { ConversationView, InboxState, LiveState } from "@earendil-works/pi
 import { desiredPhase, type ActualState, type DesiredPhase } from "../reconcile.ts";
 import { countedCapacity, type HerdrStatus } from "../protocol.ts";
 import { githubTokenGrant, linkedPort, type ProjectId, type SessionHarness } from "../project.ts";
-import type { ThreadDetail } from "./api.ts";
+import type { ThreadDetail, ThreadRow } from "./api.ts";
 import { attentions, needsPerson } from "./attention.ts";
 import type { NodeRecord, Output, Preview, Registry, Thread, ThreadId } from "./registry.ts";
 import type { TailnetNodeId } from "../protocol.ts";
@@ -38,6 +38,8 @@ export interface DashboardOptions {
   registry: Registry;
   /** The API's thread detail, so the dashboard derives the actual state exactly as the API does. */
   detail(thread: Thread): ThreadDetail;
+  /** The API's thread row, which is all a thread's line in the sidebar or the home table shows. */
+  row(thread: Thread): ThreadRow;
   /** The API's conversation view, or a Claude worker's transcript, for a thread that has one and is not deleted. */
   conversation(thread: Thread): Promise<Conversation>;
   /** Why the land route would refuse the caller, or null when it would take the request. */
@@ -59,7 +61,7 @@ export const pollMs = 5_000;
 export type LandRefusal = "no review loop" | "not a deployer";
 
 /** What every part of a page reads. */
-interface Context { registry: Registry; detail: DashboardOptions["detail"]; deploys: DashboardOptions["deploys"]; now: number; caller: TailnetNodeId; landRefusal: LandRefusal | null }
+interface Context { registry: Registry; row: DashboardOptions["row"]; deploys: DashboardOptions["deploys"]; now: number; caller: TailnetNodeId; landRefusal: LandRefusal | null }
 
 /** Returns the page for a GET of `path`, or undefined when the path is not the dashboard's. */
 export function dashboard(options: DashboardOptions): (path: string, query: URLSearchParams, caller: TailnetNodeId) => Promise<Page | undefined> {
@@ -106,7 +108,12 @@ export function dashboard(options: DashboardOptions): (path: string, query: URLS
   ];
 
   return async (path, query, caller) => {
-    const context = (): Context => ({ registry, detail, deploys, now: (options.now ?? Date.now)(), caller, landRefusal: options.landRefusal(caller) });
+    const context = (): Context => {
+      // The sidebar and the home table show the same threads.
+      const rows = new Map<ThreadId, ThreadRow>();
+      const row = (t: Thread) => rows.get(t.id) ?? rows.set(t.id, options.row(t)).get(t.id)!;
+      return { registry, row, deploys, now: (options.now ?? Date.now)(), caller, landRefusal: options.landRefusal(caller) };
+    };
     for (const [pattern, page] of pages) {
       const m = pattern.exec(path);
       if (m !== null) return page(m, query, context);
@@ -192,7 +199,8 @@ const icon = (name: IconName) => html`<svg class="i i-${name}" viewBox="0 0 16 1
 const unseen = (text: string) => html`<span class="vh">${text}</span>`;
 
 /** What a thread is doing, most urgent first: the agent mid-turn hides a running pylon, never a failed one. */
-function threadState({ thread: t, pylon, attention }: ThreadDetail): [label: string, tone: Tone] {
+function threadState(t: ThreadRow): [label: string, tone: Tone] {
+  const { attention, pylon } = t;
   if (attention === "limited") return [usageLimitText(t.usageLimit ?? { resetsAt: null }, Date.now()), attentions.limited.tone];
   if (attention === "waiting") return [t.sessionWaitingMessage ?? attentions.waiting.label, attentions.waiting.tone];
   if (attention !== null) return [attentions[attention].label, attentions[attention].tone];
@@ -201,8 +209,8 @@ function threadState({ thread: t, pylon, attention }: ThreadDetail): [label: str
 }
 
 /** The open thread's row never dims, nor a closed thread's, which its fold already sets apart. */
-const dims = (d: ThreadDetail, active?: ThreadId) =>
-  d.thread.id !== active && (d.thread.status === "active" || d.thread.status === "idle") && !needsPerson(d.attention);
+const dims = (t: ThreadRow, active?: ThreadId) =>
+  t.id !== active && (t.status === "active" || t.status === "idle") && !needsPerson(t.attention);
 
 /** "5 min", or null under 45 seconds. */
 function span(at: number, now: number): string | null {
@@ -312,9 +320,9 @@ function sidebar(c: Context, active: ThreadId | undefined, usage: boolean): Html
   const projects = c.registry.projects();
   // A thread works in its own checkout, as a Jetline workspace does, so its row shows a branch with its state as a badge.
   const row = (t: Thread) => {
-    const d = c.detail(t);
-    const [label, tone] = threadState(d);
-    return html`<li><a class="row${t.id === active && " active"}${dims(d, active) && " dim"}" href="/threads/${t.id}"${t.id === active && html` aria-current="page"`}><span class="row-icon">${icon("branch")}${dot(tone, label)}</span><span class="row-title">${t.title}</span><span class="row-at">${workingFor(t, c.now) ?? span(lastActive(t), c.now) ?? "now"}</span></a></li>`;
+    const r = c.row(t);
+    const [label, tone] = threadState(r);
+    return html`<li><a class="row${t.id === active && " active"}${dims(r, active) && " dim"}" href="/threads/${t.id}"${t.id === active && html` aria-current="page"`}><span class="row-icon">${icon("branch")}${dot(tone, label)}</span><span class="row-title">${t.title}</span><span class="row-at">${workingFor(t, c.now) ?? span(lastActive(t), c.now) ?? "now"}</span></a></li>`;
   };
   // A queued thread has no time of its own to show until it starts, so its row says what it is instead.
   const queuedRow = (q: QueuedThread) => {
@@ -451,14 +459,14 @@ function home(c: Context, dialogs: Pick<Shell, "start" | "addProject">): Html {
   const table = (threads: readonly Thread[]) => html`<table class="ov">
 <thead><tr><th>Thread</th><th class="wide">Desired</th><th>Observed</th><th class="wide">Node</th><th class="wide">Human</th><th class="wide">Agent</th></tr></thead>
 <tbody>${threads.map((t) => {
-  const d = c.detail(t);
+  const r = c.row(t);
   const desired = desiredPhase(t, c.now);
-  const [label, tone] = threadState(d);
-  return html`<tr${dims(d) && html` class="dim"`}>
+  const [label, tone] = threadState(r);
+  return html`<tr${dims(r) && html` class="dim"`}>
 <td><span class="ov-title">${dot(tone, label)}<a href="/threads/${t.id}">${t.title}</a>${t.status !== "active" && html`<span class="tag">${t.status}</span>`}</span></td>
 <td class="wide">${state(desired, desiredTone[desired])}</td>
-<td>${state(...actualBadge[d.pylon.actualState])}</td>
-<td class="wide">${d.pylon.node}${nodes.get(d.pylon.node)!.state === "offline" && html` <span class="tag">offline</span>`}</td>
+<td>${state(...actualBadge[r.pylon.actualState])}</td>
+<td class="wide">${r.pylon.node}${nodes.get(r.pylon.node)!.state === "offline" && html` <span class="tag">offline</span>`}</td>
 <td class="wide">${ago(t.lastHumanActivityAt, c.now)}</td>
 <td class="wide">${workingFor(t, c.now) ?? ago(t.lastAgentActivityAt, c.now)}</td>
 </tr>`;
@@ -588,7 +596,7 @@ function threadPage(c: Context, d: ThreadDetail, node: NodeRecord, view: Convers
   const run = runOf(d, read, items);
   const model = d.claudeWorker !== undefined ? d.claudeWorker.model : read === null || isClaude(read) ? null : modelOf(read);
   const shows = streaming && read !== null && isClaude(read) ? shownKey(read, model) : null;
-  const [label, tone] = threadState(d);
+  const [label, tone] = threadState({ ...t, attention: d.attention, desired: d.desired, pylon: d.pylon });
   const open = t.status === "active" || t.status === "idle";
   const actions = [
     open && html`<button type="button" class="btn btn-ghost" id="archive" data-action="archive" data-thread="${t.id}">Archive</button>`,

@@ -441,7 +441,7 @@ export async function startApi(options: ApiOptions): Promise<Api> {
   }
 
   const page = dashboard({
-    registry, detail, conversation,
+    registry, detail, row, conversation,
     landRefusal: (caller) => !options.reviews ? "no review loop" : canDeploy(registry, options.deployment, caller) ? null : "not a deployer",
     deploys: (r) => options.reviews?.deploys(r) ?? false,
   });
@@ -865,7 +865,8 @@ export async function startApi(options: ApiOptions): Promise<Api> {
       return ok({ idle, expiresAt: registry.drain()?.expiresAt ?? null });
     }],
     ["GET", /^\/v1\/events$/, (_, r) => {
-      const since = r.query.get("since") ?? "0";
+      // A follower that reads the state itself whenever it connects needs no history.
+      const since = r.query.get("since") === "latest" ? registry.newestEvent() : r.query.get("since") ?? "0";
       try { eventCursor(since); } catch { throw new HttpError(400, "invalid event cursor"); }
       const kinds = r.query.getAll("kind");
       if (kinds.some((k) => !(eventKinds as readonly string[]).includes(k))) throw new HttpError(400, "unknown event kind");
@@ -914,7 +915,10 @@ export async function startApi(options: ApiOptions): Promise<Api> {
       const { observation, ...n } = record;
       return { ...n, observedAt: observation?.observedAt ?? null, overcommitted: overcommitted(n.capacity), pylons: nodePylons(registry, record) };
     }))],
-    ["GET", /^\/v1\/threads$/, (_, r) => ok(registry.threads((r.query.get("project") ?? undefined) as ProjectId | undefined).map(row))],
+    ["GET", /^\/v1\/threads$/, (_, r) => {
+      const threads = registry.threads((r.query.get("project") ?? undefined) as ProjectId | undefined);
+      return ok((r.query.get("deleted") === "false" ? threads.filter((t) => t.status !== "deleted") : threads).map(row));
+    }],
     ["POST", /^\/v1\/threads$/, async (_, r) => {
       const { after, message, ...request } = parse(startSchema, await r.body());
       if (request.model !== undefined && request.claude === undefined) throw new HttpError(400, "model requires claude");

@@ -1,0 +1,128 @@
+Work in the idle minute:
+
+| Work | main | branch | change |
+|---|---:|---:|---:|
+| `GET /v1/threads`, all four tabs | 240 | 6 | -97% |
+| Requests from the two hidden tabs | 120 | 6 | -95% |
+| Thread rows built, `row()` | 10560 | 1140 | -89% |
+| Thread details built, `detail()` | 1596 | 12 | -99% |
+| Session reads per thread, `withSessions()` | 12204 | 1872 | -85% |
+| SQL statements read | 162720 | 17592 | -89% |
+| `POST /v1/threads/<id>/seen` | 18 | 0 | -100% |
+| `markSeen()` write transactions | 18 | 0 | -100% |
+| SQL statements written | 18 | 0 | -100% |
+| Event batches read, `eventBatch()` | 60 | 120 | 100% |
+| Page renders, `sidebar()` | 24 | 24 | 0% |
+
+Work in the sixteen attention rounds:
+
+| Work | main | branch | change |
+|---|---:|---:|---:|
+| `GET /v1/threads`, all four tabs | 544 | 78 | -86% |
+| Requests from the two hidden tabs | 272 | 78 | -71% |
+| Thread rows built, `row()` | 23936 | 3556 | -85% |
+| Thread details built, `detail()` | 3591 | 28 | -99% |
+| Session reads per thread, `withSessions()` | 27714 | 7264 | -74% |
+| SQL statements read | 369162 | 60212 | -84% |
+| `POST /v1/threads/<id>/seen` | 40 | 0 | -100% |
+| `markSeen()` write transactions | 48 | 8 | -83% |
+| SQL statements written | 376 | 336 | -11% |
+| Event batches read, `eventBatch()` | 136 | 272 | 100% |
+| Page renders, `sidebar()` | 54 | 56 | 4% |
+
+Event streams opened over the whole run: main none; branch hidden home: GET /v1/events?follow x1, hidden thread page: GET /v1/events?follow x1.
+
+Notifications, ms after the registry recorded the change (a reply is held back 2000 ms first):
+
+| Round | Change | Tab | Channel | main | branch |
+|---:|---|---|---|---:|---:|
+| 0 | new reply | focused thread page | toast | 3755 | 2638 |
+| 0 | new reply | hidden home | system | 2554 | 2637 |
+| 0 | new reply | hidden thread page | system | 2684 | 2638 |
+| 0 | new reply | visible home | system | 3841 | 2638 |
+| 1 | waiting for input | focused thread page | toast | 944 | 822 |
+| 1 | waiting for input | hidden home | system | 741 | 822 |
+| 1 | waiting for input | hidden thread page | system | 869 | 822 |
+| 1 | waiting for input | visible home | system | 22 | 822 |
+| 2 | new reply | focused thread page | toast | 2534 | 2421 |
+| 2 | new reply | hidden home | system | 2337 | 2421 |
+| 2 | new reply | hidden thread page | system | 2463 | 2421 |
+| 2 | new reply | visible home | system | 2614 | 2421 |
+| 3 | waiting for input | focused thread page | toast | 587 | 461 |
+| 3 | waiting for input | hidden home | system | 382 | 460 |
+| 3 | waiting for input | hidden thread page | system | 507 | 461 |
+| 3 | waiting for input | visible home | system | 679 | 461 |
+| 4 | new reply | focused thread page | toast | 2311 | 2191 |
+| 4 | new reply | hidden home | system | 2105 | 2191 |
+| 4 | new reply | hidden thread page | system | 2234 | 2191 |
+| 4 | new reply | visible home | system | 2407 | 2191 |
+| 5 | waiting for input | focused thread page | toast | 612 | 494 |
+| 5 | waiting for input | hidden home | system | 413 | 493 |
+| 5 | waiting for input | hidden thread page | system | 541 | 493 |
+| 5 | waiting for input | visible home | system | 693 | 494 |
+| 6 | new reply | focused thread page | toast | 3559 | 2448 |
+| 6 | new reply | hidden home | system | 2360 | 2447 |
+| 6 | new reply | hidden thread page | system | 2488 | 2447 |
+| 6 | new reply | visible home | system | 3640 | 2448 |
+| 7 | waiting for input | focused thread page | toast | 977 | 863 |
+| 7 | waiting for input | hidden home | system | 777 | 862 |
+| 7 | waiting for input | hidden thread page | system | 907 | 863 |
+| 7 | waiting for input | visible home | system | 59 | 863 |
+| 8 | new reply | focused thread page | toast | 2640 | 2532 |
+| 8 | new reply | hidden home | system | 3439 | 2531 |
+| 8 | new reply | hidden thread page | system | 2568 | 2531 |
+| 8 | new reply | visible home | system | 2723 | 2532 |
+| 9 | waiting for input | focused thread page | toast | 727 | 613 |
+| 9 | waiting for input | hidden home | system | 526 | 612 |
+| 9 | waiting for input | hidden thread page | system | 655 | 613 |
+| 9 | waiting for input | visible home | system | 810 | 613 |
+| 10 | new reply | focused thread page | toast | 4002 | 2892 |
+| 10 | new reply | hidden home | system | 3803 | 2891 |
+| 10 | new reply | hidden thread page | system | 2930 | 2892 |
+| 10 | new reply | visible home | system | 2086 | 2892 |
+| 11 | waiting for input | focused thread page | toast | 984 | 874 |
+| 11 | waiting for input | hidden home | system | 786 | 873 |
+| 11 | waiting for input | hidden thread page | system | 912 | 873 |
+| 11 | waiting for input | visible home | system | 64 | 874 |
+| 12 | new reply | focused thread page | toast | 2495 | 2389 |
+| 12 | new reply | hidden home | system | 2294 | 2389 |
+| 12 | new reply | hidden thread page | system | 2421 | 2389 |
+| 12 | new reply | visible home | system | 2573 | 2389 |
+| 13 | waiting for input | focused thread page | toast | 631 | 515 |
+| 13 | waiting for input | hidden home | system | 424 | 514 |
+| 13 | waiting for input | hidden thread page | system | 554 | 515 |
+| 13 | waiting for input | visible home | system | 722 | 515 |
+| 14 | new reply | focused thread page | toast | 2427 | 2314 |
+| 14 | new reply | hidden home | system | 2220 | 2314 |
+| 14 | new reply | hidden thread page | system | 2348 | 2314 |
+| 14 | new reply | visible home | system | 2520 | 2314 |
+| 15 | waiting for input | focused thread page | toast | 774 | 668 |
+| 15 | waiting for input | hidden home | system | 573 | 667 |
+| 15 | waiting for input | hidden thread page | system | 702 | 667 |
+| 15 | waiting for input | visible home | system | 854 | 668 |
+| 16 | new reply | focused thread page | toast | 3384 | 2638 |
+| 16 | new reply | hidden thread page | system | 2313 | 2638 |
+| 16 | new reply | visible home | system | 3466 | 2638 |
+| 17 | waiting for input | focused thread page | toast | 420 | 668 |
+| 17 | waiting for input | hidden thread page | system | 348 | 668 |
+| 17 | waiting for input | visible home | system | 501 | 668 |
+
+| Delay, ms | main mean | branch mean | main max | branch max |
+|---|---:|---:|---:|---:|
+| new reply, hidden tabs | 2562 | 2487 | 3803 | 2892 |
+| new reply, all tabs | 2758 | 2492 | 4002 | 2892 |
+| waiting for input, hidden tabs | 625 | 663 | 912 | 873 |
+| waiting for input, all tabs | 619 | 664 | 984 | 874 |
+
+A waiting session's notifications, split at what ended the tab's wait (main: its read of the list; branch: the stream's message):
+
+| Mean, ms | main | branch |
+|---|---:|---:|
+| Change to the trigger | 611 | 659 |
+| Trigger to the notification | 9 | 5 |
+| Triggers | list read | event, list read |
+
+Same notifications and toasts, on the same tabs, for the same rounds: yes (70 on main, 70 on the branch).
+Same tab titles 5 s into every round: yes ((1) Nexus).
+A new reply on the focused page was marked seen after, in ms: main 6282, 2194, 6592; branch 3316, 4181, 4611.
+A reply another client marked unseen while the page shows it: main marked seen again after 1993 ms, attention null; branch stayed unseen for 8 s, attention reply.

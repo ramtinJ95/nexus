@@ -9,6 +9,7 @@ export function notificationChannel(focused, current, id, secure, permission) {
   return secure && permission === "granted" ? "system" : null;
 }
 
+/** Returns a function that takes the latest rows and returns when a reply it holds back comes due, or null. */
 export function coordinator(notify) {
   let previous = null;
   const pending = new Map();
@@ -32,6 +33,7 @@ export function coordinator(notify) {
       notify(next.get(id));
     }
     previous = next;
+    return pending.size === 0 ? null : Math.min(...pending.values());
   };
 }
 
@@ -39,4 +41,13 @@ export function coordinator(notify) {
 export function seenBody(conversation) {
   const at = conversation?.dataset.renderedReplyAt;
   return { lastReplyAt: at === undefined || at === "" ? null : Number(at) };
+}
+
+/**
+ * The seen mark a page owes for the reply it shows, or null when it marked that reply already or shows none. A
+ * reply marked unseen elsewhere stays unseen until the page shows a newer one.
+ */
+export function owedSeen(conversation, marked) {
+  const body = seenBody(conversation);
+  return body.lastReplyAt === null || body.lastReplyAt === marked ? null : body;
 }

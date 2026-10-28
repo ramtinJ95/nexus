@@ -179,7 +179,7 @@ The shapes are TypeScript types. `Thread`, `Session` and `Preview` are in [`src/
 7. `"waiting"`: a session is waiting for input.
 8. `null`.
 
-It is the value the thread's latest `attention.changed` event carries. An unread reply outranks working, so a client cancelling a pending reply notification on a follow-up must also check `working`. Reading `threads` or `show` does not mark anything seen; clients call `seen` when they show the conversation.
+It is the value the thread's latest `attention.changed` event carries. An unread reply outranks working, so a client cancelling a pending reply notification on a follow-up must also check `working`. Reading `threads` or `show` does not mark anything seen; clients call `seen` when they show the conversation. `GET /v1/threads?deleted=false` leaves deleted threads out, as the dashboard reads the list; without it the list has them, which `threads --all` prints.
 
 `POST /v1/threads/<thread>/seen` accepts an optional JSON body `{ "lastReplyAt": number | null }`. A client rendering asynchronously sends the reply timestamp captured with the conversation it actually rendered, not a newer timestamp from attention polling. The mark cannot advance beyond that timestamp; null marks nothing. A stale mark does not lower an existing seen marker. `nexus seen --last-reply-at MS` sends the field. Omitting it, as `nexus seen` without that flag does, marks the latest reply seen at request time. `/unseen` still marks the latest reply unread.
 
@@ -664,7 +664,8 @@ with exit 5 (HTTP 409), rather than hiding a retention gap. Stop with Ctrl-C;
 closing the output pipe or exiting the parent also stops a follower.
 
 The shared API is `GET /v1/events?since=ID&thread=T&project=P&kind=K&follow=true`.
-Without `follow=true` it returns a JSON array. Following uses SSE, with the record
+`since=latest` starts after the newest event, for a follower that reads the state
+itself whenever it connects. Without `follow=true` it returns a JSON array. Following uses SSE, with the record
 ID in `id:` and the JSON record in `data:`. One-second keep-alives have an `id:`
 watermark but no `data:`: they advance past events skipped by the filters and print
 nothing. The CLI remembers these IDs for reconnects. It writes one record at a
