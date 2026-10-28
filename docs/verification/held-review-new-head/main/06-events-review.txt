@@ -1,0 +1,4 @@
+$ nexus events --thread th-0a60a87993e4 --kind review.changed
+5 2026-10-28T15:47:36.506Z th-0a60a87993e4 review.changed {"review":"rv-e94f1556","reviewer":"th-0d2e3c7481b2","phase":{"kind":"merging","authorized":null},"round":1}
+6 2026-10-28T15:47:36.509Z th-0a60a87993e4 review.changed {"review":"rv-e94f1556","reviewer":"th-0d2e3c7481b2","phase":{"kind":"needs-person","reasons":["Always needs the person: anything irreversible, as it changes src/control/registry.ts."]},"round":1}
+exit 0

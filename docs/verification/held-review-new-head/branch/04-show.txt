@@ -1,0 +1,16 @@
+$ nexus show th-6f1eb217ae73
+th-6f1eb217ae73  Planning threads
+project: nexus
+attention: none
+status: active
+pylon: pylon-th-6f1eb217ae73 on verify-node, running, observed 0s ago
+size: 1 CPUs, 1 GiB memory, 10 GiB disk
+placement: verify-node, the project's default node
+setup: fresh boot runs .nexus/setup, because the control plane could not read .nexus/setup at main: the verify stack reads no remote, so every thread boots fresh
+PR watch: on
+PR #185: Planning threads whose proposals become decision cards — open, checks passing, review none https://github.com/ramtinJ95/nexus/pull/185
+review rv-e94f1556 of PR #185: reviewing, round 2 of 5, reviewer th-9caeb9190fa1 on gpt-6-astra, landing when approved
+a new round reviews b3ee8a600000, since the pull request's head moved from 103598e00000 after its approval
+output: branch origin/feat/planning-threads
+output: pull-request https://github.com/ramtinJ95/nexus/pull/185
+exit 0
