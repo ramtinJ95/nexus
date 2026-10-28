@@ -1,8 +1,10 @@
 /**
  * Durable watches, which `nexus_wait` makes. A watch names the waiting thread, the watched thread and what it waits for.
- * Each pass reads every pending watch's thread and, once the condition holds, sends the waiting thread one message under
- * the request ID `watch:<id>`, then saves the watch delivered. The inbox never delivers a request ID twice, so a crash
- * between the send and the save makes the next pass send a message the harness already holds, which adds nothing.
+ * Each pass reads every pending watch's thread and, once the condition holds, saves what happened, sends the waiting
+ * thread one message saying so under the request ID `watch:<id>`, then saves the watch delivered. A condition may stop
+ * holding before a retry, as a failure does once the person retries the pylon, so a retry sends what was saved. The inbox
+ * never delivers a request ID twice, so a crash between the send and the save makes the next pass send a message the
+ * harness already holds, which adds nothing.
  */
 import type { Until } from "../harness/drive-tools.ts";
 import { singleFlight } from "../single-flight.ts";
@@ -19,8 +21,10 @@ export interface Watch {
   /** What the watched thread showed when the watch started: its last reply, and its review if that had already ended. */
   since: { lastReplyAt: number | null; endedReview: string | null };
   createdAt: number;
-  /** What the message said happened, once it was sent. A watch whose waiter was deleted is delivered with no message. */
-  delivered: { at: number; what: string } | null;
+  /** What happened, saved once the condition held and before the message is sent. */
+  fired: { at: number; what: string } | null;
+  /** When the message was sent. A watch whose waiter was deleted is delivered with no message. */
+  delivered: number | null;
 }
 
 export const watchPrefix = "[Nexus watch — automated, not a message from the person]";
@@ -51,14 +55,19 @@ export function watchPass(options: { registry: Registry; inbox: Inbox; now?: () 
 
   async function deliver(watch: Watch) {
     const waiter = registry.thread(watch.waiter)!;
-    if (waiter.status === "deleted") return registry.saveWatch({ ...watch, delivered: { at: now(), what: "the waiting thread was deleted" } });
+    if (waiter.status === "deleted") return registry.saveWatch({ ...watch, delivered: now() });
+    const t = registry.thread(watch.thread)!;
+    let { fired } = watch;
+    if (fired === null) {
+      const what = t.status === "archived" || t.status === "deleted" ? `it was ${t.status}` : conditions[watch.until](registry, t, watch.since);
+      if (what === null) return;
+      fired = { at: now(), what };
+      registry.saveWatch({ ...watch, fired });
+    }
     // An archived thread's agent cannot act on it, and the watch keeps for an unarchive.
     if (waiter.status === "archived") return;
-    const t = registry.thread(watch.thread)!;
-    const what = t.status === "archived" || t.status === "deleted" ? `it was ${t.status}` : conditions[watch.until](registry, t, watch.since);
-    if (what === null) return;
-    const text = `${watchPrefix}\nThread ${t.id} "${t.title}", which you watched until ${watch.until}: ${what}. nexus_read ${t.id} says more.`;
-    if (await inbox(waiter, { id: `watch:${watch.id}`, text, sender: "watch" }) === "delivered") registry.saveWatch({ ...watch, delivered: { at: now(), what } });
+    const text = `${watchPrefix}\nThread ${t.id} "${t.title}", which you watched until ${watch.until}: ${fired.what}. nexus_read ${t.id} says more.`;
+    if (await inbox(waiter, { id: `watch:${watch.id}`, text, sender: "watch" }) === "delivered") registry.saveWatch({ ...watch, fired, delivered: now() });
   }
 
   async function pass() {

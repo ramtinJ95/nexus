@@ -99,7 +99,7 @@ export function driveCalls(options: { registry: Registry; start: ReturnType<type
       if (registry.watch(watchId) === null && registry.pendingWatches(from.id).length >= maxWatches) {
         throw new HttpError(409, `thread ${from.id} already waits on ${maxWatches} watches, the most a thread may. Each ends once Nexus sends its message`);
       }
-      const watch = registry.addWatch({ id: watchId, waiter: from.id, thread: t.id, until, since: sinceOf(registry, t), createdAt: now(), delivered: null });
+      const watch = registry.addWatch({ id: watchId, waiter: from.id, thread: t.id, until, since: sinceOf(registry, t), createdAt: now(), fired: null, delivered: null });
       void watches.poll();
       return { watch: watch.id, thread: t.id, until, delivered: watch.delivered !== null, note: "Nexus sends you a message when it happens. End your turn now rather than polling" };
     },

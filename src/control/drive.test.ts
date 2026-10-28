@@ -36,7 +36,7 @@ function fixture(t: import("node:test").TestContext) {
   const drive = driveCalls({ registry, start, inbox, harness, watches: { poll: async () => {} } });
   const planner = async (title = "Plan") => await start({ project, title, drive: true }, laptop) as Thread;
   const messages = (id: string) => fake.transcript(id).messages.map((m) => m.content as string);
-  return { registry, fake, start, drive, watches, planner, messages, hold() { const gate = Promise.withResolvers<void>(); held = gate.promise; return () => { held = null; gate.resolve(); }; } };
+  return { registry, fake, start, drive, watches, inbox, planner, messages, hold() { const gate = Promise.withResolvers<void>(); held = gate.promise; return () => { held = null; gate.resolve(); }; } };
 }
 
 test("a thread with the drive tools starts children up to the cap, and an archived child gives its place back", async (t) => {
@@ -152,6 +152,24 @@ test("each watch sends its waiter one message once its condition holds of the wa
       assert.equal((await drive.wait(plan.id, child.id, until, "tool:1:call-2") as { delivered: boolean }).delivered, true, "a repeated call finds the delivered watch");
     });
   }
+});
+
+test("a watch whose message could not be sent sends what fired on a later pass, though the condition stopped holding", async (t) => {
+  const { registry, drive, inbox, planner, messages } = fixture(t);
+  const plan = await planner();
+  const child = await drive.start(plan.id, { ...brief("Build"), agent: "claude" }, "tool:1:call-1") as Thread;
+  await drive.wait(plan.id, child.id, "failed", "tool:1:call-2");
+  let draining = true;
+  const watches = watchPass({ registry, inbox: async (t, m) => { if (draining) throw new Error("the control plane is draining"); return inbox(t, m); }, log: () => {} });
+  registry.setClaudeWorker(child.id, "p", "failed", "launch failed");
+  await watches.poll();
+  assert.deepEqual(messages(plan.id), []);
+  registry.setClaudeWorker(child.id, "p", "started");
+  assert.notEqual(registry.attention(child.id), "failed", "the person retried it, so it no longer fails");
+  draining = false;
+  await watches.poll();
+  assert.equal(messages(plan.id).length, 1);
+  assert.match(messages(plan.id)[0]!, /until failed: it failed: launch failed\./);
 });
 
 test("a review that had ended before the watch started does not end it, and a waiter's watches are capped", async (t) => {
