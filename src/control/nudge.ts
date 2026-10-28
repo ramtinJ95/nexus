@@ -20,6 +20,11 @@ Your turn ended, and Nexus finds no pull request from this thread. This project 
 export type Nudge =
   /** `turn` is the end (the thread's lastReplyAt) of the stalled turn the latest nudge answered; `count` nudges in a row. */
   | { state: "nudged"; turn: number; count: number }
+  /**
+   * The nudge that makes `count` for the turn that ended at `turn`, saved before it is sent. A crash after the send
+   * may let the thread end another turn first, so the next pass finishes this one under its own request ID.
+   */
+  | { state: "sending"; turn: number; count: number }
   /** The turn after the last nudge stalled too, so the thread waits on the person. */
   | { state: "person"; turn: number }
   /**
@@ -84,6 +89,7 @@ export function builderNudger(options: { registry: Registry; github: Pick<GitHub
     if (repo === null || hasPullRequest(t)) return clear();
     // A turn its usage limit stopped did not stall, and the next turn ends the limit.
     if (t.usageLimit !== undefined) return;
+    if (record?.state === "sending") return deliver(t, record);
     const turn = t.lastReplyAt;
     // The turn the person's message starts may outlast the transcript's hold on that message, so look while it runs.
     if (t.working && t.lastHumanActivityAt > (turn ?? 0) && await personWrote(t)) return leaveAlone();
@@ -106,9 +112,14 @@ export function builderNudger(options: { registry: Registry; github: Pick<GitHub
     if (fresh === undefined || builderRepo(fresh) === null || hasPullRequest(fresh) || fresh.usageLimit !== undefined || fresh.working || fresh.lastReplyAt !== turn) return;
     const count = record?.state === "nudged" ? record.count : 0;
     if (count >= maxNudges) return registry.saveNudge(t.id, { state: "person", turn });
-    if (await inbox(fresh, { id: `nudge:${t.id}:${turn}`, text, sender: "nudge" }) === "delivered") {
-      registry.saveNudge(t.id, { state: "nudged", turn, count: count + 1 });
-    }
+    const sending: Nudge = { state: "sending", turn, count: count + 1 };
+    registry.saveNudge(t.id, sending);
+    await deliver(fresh, sending);
+  }
+
+  /** A send the inbox could not take yet stays saved, so the next pass sends it again under the same request ID. */
+  async function deliver(t: Thread, { turn, count }: Extract<Nudge, { state: "sending" }>) {
+    if (await inbox(t, { id: `nudge:${t.id}:${turn}`, text, sender: "nudge" }) === "delivered") registry.saveNudge(t.id, { state: "nudged", turn, count });
   }
 
   async function pass() {

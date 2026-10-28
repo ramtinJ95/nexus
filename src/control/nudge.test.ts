@@ -327,7 +327,7 @@ test("a Claude worker stopped on its usage limit is not nudged", async (t) => {
   assert.equal(f.registry.attention(id), "limited");
 });
 
-test("a nudge the session could not take yet saves nothing and is sent again under the same request ID", async (t) => {
+test("a nudge the session could not take yet is kept and sent again under the same request ID", async (t) => {
   const f = fixture(t);
   const id = await f.add("th-claude", { claude: true });
   f.turn(id);
@@ -335,7 +335,7 @@ test("a nudge the session could not take yet saves nothing and is sent again und
   f.outcome = "blocked";
   await f.nudger.poll();
   assert.equal(f.typed.length, 1);
-  assert.equal(f.registry.nudge(id), null);
+  assert.equal(f.registry.nudge(id)?.state, "sending", "the send is kept for the next pass");
   f.outcome = "sent";
   await f.nudger.poll();
   assert.equal(f.typed.length, 2);
@@ -360,7 +360,7 @@ test("archiving a thread held for the person clears the hold", async (t) => {
   assert.notEqual(f.registry.attention(id), "decision");
 });
 
-test("a harness builder's nudge refused by a deploy's drain saves nothing and goes out once the drain ends", async (t) => {
+test("a harness builder's nudge refused by a deploy's drain is kept and goes out once the drain ends", async (t) => {
   const f = fixture(t);
   const id = await f.add("th-1");
   let draining = true;
@@ -373,9 +373,40 @@ test("a harness builder's nudge refused by a deploy's drain saves nothing and go
   f.tick(graceMs);
   await gated.poll();
   assert.deepEqual(f.nudges(), []);
-  assert.equal(f.registry.nudge(id), null);
+  assert.equal(f.registry.nudge(id)?.state, "sending", "the send is kept for the next pass");
   draining = false;
   await gated.poll();
   assert.equal(f.nudges().length, 1);
   assert.equal(f.registry.nudge(id)?.state, "nudged");
+});
+
+test("a nudge delivered just before a crash still counts after the builder ended another turn", async (t) => {
+  const f = fixture(t);
+  const id = await f.add("th-1");
+  const inbox = agentInbox({ registry: f.registry, harness: f.fake.harness, probes: new Map(), wake() {} });
+  const nudger = (crash: boolean) => builderNudger({
+    registry: f.registry, harness: f.fake.harness, now: () => f.now, log: () => {}, github: { async find() { return []; } },
+    inbox: async (th, message) => { const result = await inbox(th, message); if (crash) throw new Error("the control plane stopped"); return result; },
+  });
+  const sent = () => new Set(f.nudges().map((n) => n.requestId)).size;
+  f.turn(id);
+  const first = f.registry.thread(id)!.lastReplyAt!;
+  f.tick(graceMs);
+  await nudger(true).poll();
+  assert.equal(sent(), 1);
+  f.tick(1_000);
+  f.turn(id);
+  f.tick(graceMs);
+  const restarted = nudger(false);
+  await restarted.poll();
+  assert.equal(sent(), 1, "the earlier send is finished under its own request ID, which delivers nothing new");
+  assert.deepEqual(f.registry.nudge(id), { state: "nudged", turn: first, count: 1 });
+  for (let i = 0; i < 2; i++) {
+    await restarted.poll();
+    f.turn(id);
+    f.tick(graceMs);
+  }
+  await restarted.poll();
+  assert.equal(sent(), 2, "two nudges in all");
+  assert.equal(f.registry.attention(id), "decision");
 });
