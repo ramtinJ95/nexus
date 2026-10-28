@@ -319,6 +319,7 @@ pullRequests: {
   checks: "pending" | "passing" | "failed" | "none";
   review: string;                     // currently none, approved, changes_requested
   conflict: boolean | null;          // null until GitHub knows
+  head?: string;                     // the head commit at the PR watch's last read
 }[];
 ```
 
@@ -491,7 +492,7 @@ interface Review {
     | { kind: "deploying"; commit: string; previous: string | null; requested: boolean; deadline: number }
     | { kind: "rolling-back"; commit: string; previous: string; why: string; requested: boolean; deadline: number }
     | { kind: "landed"; commit: string }
-    | { kind: "needs-person"; reasons: string[]; label?: Label }
+    | { kind: "needs-person"; reasons: string[]; label?: Label; unreviewed?: string }
     | { kind: "merged" | "closed" }
     | { kind: "cancelled"; who: "builder" | "reviewer"; status: "archived" | "deleted" };
   outbox: { to: "builder" | "reviewer"; id: string; text: string; attempted: number | null } | null;
@@ -502,6 +503,8 @@ interface Review {
 `Verdict` and `Answer` are in [`src/control/review.ts`](../src/control/review.ts). Each of a verdict's findings has a `priority` of `"P0"` to `"P3"`, as [the merge policy](merge-policy.md) defines them, in place of the `severity` before 0.24.0. A stored finding with `severity` reads `"serious"` as `"P1"` and `"minor"` as `"P3"`. Only P0 to P2 findings block, and the builder answers only those. A verdict's `verdict` is `"approve"` exactly when none of its findings is P0 to P2, whatever the reviewer wrote.
 
 `label` is the pull request's `needs human review` label. Only a review whose rounds ran out has one: the reviewer still requested changes after the last round, the builder pushed fixes after the last round, `.nexus/check` failed after the last round, the head moved after the last round's approval, or the branch conflicts with its base after the last round. A review that went to the person for any other reason has none.
+
+`unreviewed` is a head the pull request moved to after the review's last round, which no round of it reviewed. A held review whose head moved gets it once no round is left, or when the loop had already given up on it, and its reasons then name that head. Such a review offers nothing to land, so `land` refuses it. A held review that would land as it is, and one that stopped at approval, get a new round on the new head instead, and `show` prints `a new round reviews <head>, since the pull request's head moved from <head> after its approval` under the review line while that round is the latest. A control plane that sends no `unreviewed` has none.
 
 ```ts
 type Label = { state: "adding" } | { state: "added" } | { state: "failed"; why: string };  // why is GitHub's answer
