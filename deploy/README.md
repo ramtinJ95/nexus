@@ -1,10 +1,63 @@
 # Deploy Nexus on the home-lab nodes
 
-Each node runs a probe, which runs the pylon VMs. One machine, `rj-firebat`, also runs the control plane: the registry, the reconcile loop, the agent harness and the API. The first install uses a checkout and sudo. After the one-time setup below, `nexus deploy` requests upgrades without sudo or SSH. The manual scripts remain safe to rerun for bootstrapping and recovery.
+Each node runs a probe, which runs the pylon VMs. One machine, `rj-firebat`, also runs the control plane: the registry, the reconcile loop, the agent harness and the API. The first install is `sudo deploy/install.sh` from a checkout, as [Install on a new machine](#install-on-a-new-machine) describes. After it, `nexus deploy` requests upgrades without sudo or SSH. The installer stays safe to rerun for recovery.
 
 Upgrade the control plane before the probes. `nexus deploy` does this on its own. A probe refuses a spawn from a control plane older than itself and says the control plane needs upgrading, while an older probe still runs projects that clone a repository for an upgraded control plane. A boot that needs a secret the control plane hands over, such as `NEXUS_CHATGPT_TOKEN`, goes only to a probe whose snapshot says it takes that secret from the control plane. A probe from before the secret would look for it in its own secret file and fail the thread for good. So in the seconds between the control plane's upgrade and the probe's, such a boot waits, and it goes ahead on the upgraded probe's first snapshot. A probe from before scratch projects cannot start one, so create scratch projects only after every probe is upgraded. A probe that reports a session its last wake failed to bring back, in no pane, stops a control plane from before session states from storing any observation from that node until the control plane is upgraded too.
 
 CLI 0.11.0 adds `nexus changes <thread> --turn` and `nexus diff <thread> --turn`, also available as Latest turn in the dashboard. Upgrade the control plane to capture these start-of-reply snapshots; no image rebuild is needed. Existing pylons gain a snapshot on their next autonomous turn. Until then, Latest turn reports that no snapshot exists. See [the CLI contract](../docs/cli.md) for the JSON base and failures.
+
+## Install on a new machine
+
+On a Linux machine that boots with systemd, from a checkout of this repository:
+
+```sh
+git clone https://github.com/ramtinJ95/nexus.git && cd nexus
+sudo deploy/install.sh --admit <your Mac's tailnet name> --dotfiles <dotfiles git URL>
+```
+
+This installs the control plane, a probe and the deployer on one machine. On each further machine, install only a probe and the deployer, and name the control plane's machine:
+
+```sh
+sudo deploy/install.sh --node <control plane's tailnet name>
+```
+
+A tailnet name is a device's MagicDNS name, short (`macbook`) or full (`macbook.tail1234.ts.net`), as `tailscale status` lists it.
+
+The installer checks every prerequisite first. It reports each one that is missing, with the command that fixes it, and stops before it changes anything:
+
+- a Linux booted with systemd, and root;
+- Node 26 or newer in `/usr/local/bin` or `/usr/bin`, the units' `PATH`;
+- QEMU, `qemu-system-<arch>` and `qemu-img`, because pylons are QEMU VMs;
+- `/dev/kvm`, owned by the `kvm` group;
+- tailscale, installed, running and logged in;
+- MagicDNS and HTTPS certificates turned on for the tailnet;
+- on the control plane's machine, tailscaled started with `TS_PERMIT_CERT_UID=nexus-control`, so the control plane can fetch the dashboard's certificate (see [HTTPS dashboard](#https-dashboard)), and `--dotfiles` on the first install.
+
+Then `src/deploy/setup.ts` writes the configs from `tailscale status --json`:
+
+| File | What the installer puts in it |
+| --- | --- |
+| `/etc/nexus/control.json` | This machine as `self`, the first of `nodes` and `imageBuildNode`; its tailnet IP, short and full MagicDNS names in `listen`; its full name as `https.hostname`; the `--admit` devices as `callers` and `deployers`; and this machine's deploy key digest in `deployKeys`. |
+| `/etc/nexus/probe.json` | This machine's name and tailnet IP, the control plane's node ID as `auth.controlPlane`, and previews on gateway port 7481. `gitSsh` is added once `/etc/nexus/git_ed25519` exists. |
+| `/etc/nexus/deployer.json` | The deployer's control plane URL and node ID, and its token. Root, mode 0600. Only the token's SHA-256 digest leaves this file. |
+
+Then it installs the release and the units with `deploy/install-control.sh`, `deploy/install-probe.sh` and `deploy/install-deployer.sh`, and starts the probe and the deployer's timer. The control plane refuses to start before its harness is signed in, so on a first install its unit is left stopped.
+
+The installer ends with what is left and the command for each: signing the harness in with ChatGPT and starting the control plane, the Claude token and the GitHub token in `secrets.env`, a git SSH key, Docker for image builds, the first image, and the `nexus` CLI on the Mac. A rerun lists only what is still missing.
+
+### Rerun to upgrade, admit or recover
+
+Every run checks the prerequisites and installs the checkout's release, so a rerun from a newer checkout upgrades by hand. A rerun keeps each existing config and secret. It adds only what is missing, such as a new `--admit` device, and says what it left alone, such as a `listen.host` that differs from this machine's address. It never replaces the deployer's token. On the control plane's machine it refreshes what follows from that token and the control plane's address: this machine's digest in `deployKeys`, and `controlUrl` and `controlNodeId` in `deployer.json`. A service restarts only when its release, unit file or config changed.
+
+### Add a node
+
+`sudo deploy/install.sh --node <control>` on the new machine ends by printing its deploy key digest and the command that registers it. Run that on the control plane's machine:
+
+```sh
+sudo deploy/install.sh --add-node <new node's tailnet name>=<digest it printed>
+```
+
+That adds the node to `nodes`, its digest to `deployKeys` and its ID to the control plane machine's probe `auth.peers`, and restarts the control plane. Probes fetch images from each other, and each checks the probe it fetches from against its `auth.peers`. So on every other probe-only node, add the new one as a peer with `sudo deploy/install.sh --node <control> --peer <new node's tailnet name>`, and on the new node, add each of them with `--peer` the same way.
 
 ## Deploy a merged commit
 
@@ -21,22 +74,11 @@ nexus release --json
 
 `--wait` waits up to 30 minutes for fresh healthy reports from every configured node's probe and the control node's control plane, tolerating connection failures while control restarts. A rollback or failure ends the wait with the reason. An offline node remains pending; a report older than 90 seconds is stale. Failed commits are quarantined locally rather than retried every poll. Request a different merged commit to fix one. After a drain refusal, the person may clear `/opt/nexus/control-deploy-report.json` while the deployer service is stopped to retry the same commit when idle; a rolled-back install also has a terminal attempt in `control-deploy.json` (or `probe-deploy.json`). Manual recovery is preferable to clearing a rollback without fixing its cause.
 
-### One-time setup, by the person after merge
+### The deployer's identity
 
-1. Install the control plane first, then every probe, with the existing sudo scripts below. Use an edited service config, not an example. Each script installs the root `nexus-deployer.service` and its 15-second timer, records its role, and creates `/etc/nexus/deployer.json` **only if absent**. On the control node, run both scripts. No pylon image rebuild or Mac CLI installation is part of this flow.
-2. The installer prints the node's stable tailnet ID and a SHA-256 token digest. Add each pair to `deployKeys` in `/etc/nexus/control.json`. The plaintext token remains only in that node's root-owned, mode-0600 `deployer.json`; never put it in a project's secrets or a pylon. The timer refuses access until its digest is configured. If the install was rerun and you missed the printed digest, read it as root with `node --input-type=module -e 'import{readFileSync}from"node:fs";import{createHash}from"node:crypto";console.log(createHash("sha256").update(JSON.parse(readFileSync("/etc/nexus/deployer.json")).token).digest("hex"))'`.
-3. Add the allowed Mac/client stable IDs to both `callers` and `deployers` in control.json. `deployers` missing or empty disables release changes. Never list an infrastructure node as a deployer: the API rejects every configured node and `self` even if listed.
-4. Verify `controlUrl` and `controlNodeId` in each deployer.json. The installer derives the control name from tailscale and assumes port 7470 on probe-only nodes; edit it for a nondefault port. The URL's hostname must be in the control plane's `listen.hostnames`. The worker verifies the endpoint with tailscaled **before sending its token**. Restart the control plane once after configuring the digest map and deployers. Check `nexus release` for fresh reports from every role.
+`deploy/install.sh` installs the root `nexus-deployer.service` and its 15-second timer on every machine, records the machine's roles, and puts the SHA-256 digest of the deployer's token in the control plane's `deployKeys`. On the control plane's machine it does this itself. A node's digest arrives with `--add-node`. The plaintext token remains only in that node's root-owned, mode-0600 `deployer.json`; never put it in a project's secrets or a pylon. To read a node's digest again, run as root `node --input-type=module -e 'import{readFileSync}from"node:fs";import{createHash}from"node:crypto";console.log(createHash("sha256").update(JSON.parse(readFileSync("/etc/nexus/deployer.json")).token).digest("hex"))'`.
 
-For example, these additions to control.json grant the laptop release-setting rights and two nodes reporting rights:
-
-```json
-"deployers": ["nLaptopCNTRL"],
-"deployKeys": {
-  "nFirebatCNTRL": "<64-character SHA-256 digest printed on firebat>",
-  "nTestbenchCNTRL": "<64-character SHA-256 digest printed on testbench>"
-}
-```
+Only the `deployers` in control.json, which `--admit` sets, may change the release. `deployers` missing or empty disables release changes. Never list an infrastructure node as a deployer: the API rejects every configured node and `self` even if listed, and the installer refuses to admit one. The deployer's `controlUrl` names the control plane's tailnet IP on its own machine and its MagicDNS name on port 7470 elsewhere; that name must be in the control plane's `listen.hostnames`. The worker verifies the endpoint with tailscaled **before sending its token**. Check `nexus release` for fresh reports from every role.
 
 Node polling goes directly to the control plane, not through a probe. This keeps root credentials out of the probe and reuses the existing mutual tailnet identity check. Node routes additionally require the root-only token, so pylon egress through its host cannot forge health reports or drain control. Node credentials cannot set a release. The in-pylon CLI bridge accepts only its closed operation schema; it cannot forward an arbitrary API route. Tests cover the bridge, a pylon presenting its host's allowed/deployer identity, spoofed forwarding headers, missing node tokens, and the wrong control endpoint. Do not run an unauthenticated proxy on an allowed deployer: tailnet identity authorizes that machine, not individual programs on it.
 
@@ -128,14 +170,11 @@ Run these on the **control node**, as the person, not from a pylon. Clearing a h
 
 This does not make arbitrary merged root code safe: merged release code and npm lifecycle scripts are trusted. The fixed supervisor protects against broken workers, not a release deliberately deleting its recovery copy.
 
-The old scripts below remain the bootstrapping and recovery path. Before repairing a deployment manually, stop both `nexus-deployer.timer` and `nexus-deployer.service` (stopping a timer alone does not stop its running service), repair/install from a known-good checkout, then start the timer again. They preserve configs and secrets, and the manual path retains content-hash release directories. The pylon test environment cannot run node systemd, tailscaled or real VM hosts: rollback, polling and supervisor recovery are tested with temporary files, local HTTP/git servers and fake service commands. The actual one-time node installation and service restart must be verified by the person after merge.
+`deploy/install.sh` remains the bootstrapping and recovery path. Before repairing a deployment manually, stop both `nexus-deployer.timer` and `nexus-deployer.service` (stopping a timer alone does not stop its running service), rerun the installer from a known-good checkout, then start the timer again. It preserves configs and secrets, and the manual path retains content-hash release directories. The pylon test environment cannot run node systemd, tailscaled or real VM hosts: rollback, polling and supervisor recovery are tested with temporary files, local HTTP/git servers and fake service commands. The actual one-time node installation and service restart must be verified by the person after merge.
 
-## Install or upgrade a probe
+## The probe
 
-1. Copy a checkout to the node and run `sudo deploy/install-probe.sh` from it.
-2. On the first run, edit `/etc/nexus/probe.json` and `/etc/nexus/secrets.env`, then run the script again.
-
-The first run installs both files from `probe.example.json` and `secrets.example.env`, and leaves `nexus-probe.service` stopped until `probe.json` differs from the example. Later runs never overwrite either file. Restart the probe yourself after you edit them: `sudo systemctl restart nexus-probe`.
+`deploy/install.sh` writes `/etc/nexus/probe.json`, and installs `/etc/nexus/secrets.env` from `secrets.example.env` on the first run. Later runs never overwrite secrets.env. Restart the probe yourself after you edit it: `sudo systemctl restart nexus-probe`.
 
 The probe runs as the system user `nexus`. These are its paths:
 
@@ -161,9 +200,9 @@ Use a fine-grained personal access token whose repository access is all reposito
 
 ### Previews need the probe to be the tailscale operator
 
-A preview is a `tailscale serve --https=<port>` entry that the probe adds and removes. Only root and the operator user may change serve entries, so the script runs `tailscale set --operator=nexus` on every run. tailscaled has a single operator, so this takes operator rights from any other user on the node. Run `tailscale` commands that change serve or prefs with `sudo` afterwards.
+A preview is a `tailscale serve --https=<port>` entry that the probe adds and removes. Only root and the operator user may change serve entries, so the installer runs `tailscale set --operator=nexus` on every run. tailscaled has a single operator, so this takes operator rights from any other user on the node. Run `tailscale` commands that change serve or prefs with `sudo` afterwards.
 
-To turn previews on, keep the `previews` block of `probe.json`:
+The installer turns previews on with the `previews` block of `probe.json`:
 
 ```json
 "previews": { "gatewayPort": 7481 }
@@ -171,30 +210,34 @@ To turn previews on, keep the `previews` block of `probe.json`:
 
 `gatewayPort` is the loopback port that every preview entry proxies to. Keep it fixed, because the probe recognizes its own serve entries by that port. Without the block, the probe publishes no previews, and a spawn that assigns one fails.
 
-With the block, the probe reads the node's MagicDNS name from `tailscale status --json` at startup, and each preview's `PUBLIC_URL` is `https://<that name>:<port>`. The probe refuses to start when the tailnet has MagicDNS turned off.
+With the block, the probe reads the node's MagicDNS name from `tailscale status --json` at startup, and each preview's `PUBLIC_URL` is `https://<that name>:<port>`. The probe refuses to start when the tailnet has MagicDNS turned off, which the installer checks first.
 
 ### Clone over SSH
 
-To let pylons clone and push SSH remotes, add the node's git key to the backend in `probe.json`:
+To let pylons clone and push SSH remotes, give the node a git key and rerun the installer, which adds it to the backend in `probe.json`:
+
+```sh
+sudo ssh-keygen -t ed25519 -N '' -C nexus@<node> -f /etc/nexus/git_ed25519
+sudo chown nexus:nexus /etc/nexus/git_ed25519 && sudo chmod 0400 /etc/nexus/git_ed25519
+ssh-keyscan github.com | sudo tee /etc/nexus/git_known_hosts >/dev/null
+sudo deploy/install.sh    # with --node <control> on a probe-only node
+```
 
 ```json
 "gitSsh": { "privateKeyFile": "/etc/nexus/git_ed25519", "knownHostsFile": "/etc/nexus/git_known_hosts" }
 ```
 
-Make the key readable by `nexus` only: `chown nexus:nexus /etc/nexus/git_ed25519 && chmod 0400 /etc/nexus/git_ed25519`. The key never enters a pylon. Without `gitSsh`, the node boots only pylons whose repository and dotfiles URLs are HTTPS.
+Add `/etc/nexus/git_ed25519.pub` to the GitHub account the pylons push as. The key is readable by `nexus` only and never enters a pylon. Without `gitSsh`, the node boots only pylons whose repository and dotfiles URLs are HTTPS.
 
 ### Attach goes through the control plane
 
-`nexus attach <thread>` reaches the pylon's Herdr session through the control plane's attach route, and the control plane runs Herdr's client on a pty in the pylon through the node's probe (see `docs/cli.md`). The node needs nothing for it, and nobody needs ssh access to the node. Before CLI 0.9.0, attach ran ssh to the node and a helper, `nexus-attach`, through a sudo rule for the group `nexus-attach`. The script removes the helper, the rule and the group on every run, because a sudo grant would outlive the helper it names.
+`nexus attach <thread>` reaches the pylon's Herdr session through the control plane's attach route, and the control plane runs Herdr's client on a pty in the pylon through the node's probe (see `docs/cli.md`). The node needs nothing for it, and nobody needs ssh access to the node. Before CLI 0.9.0, attach ran ssh to the node and a helper, `nexus-attach`, through a sudo rule for the group `nexus-attach`. The installer removes the helper, the rule and the group on every run, because a sudo grant would outlive the helper it names.
 
 Upgrade the control plane before the CLI. An older control plane has no attach route, and `nexus attach` says to upgrade it. Any probe works, old or new.
 
-## Install or upgrade the control plane
+## The control plane
 
-1. On `rj-firebat`, run `sudo deploy/install-control.sh` from a checkout.
-2. On the first run, edit `/etc/nexus/control.json`.
-3. Sign the harness in with ChatGPT, as described in the next section.
-4. Run the script again. It starts `nexus-control.service`.
+`deploy/install.sh` without `--node` installs the control plane and writes `/etc/nexus/control.json`. It leaves `nexus-control.service` stopped until the harness is signed in with ChatGPT, as [Sign the harness in](#sign-the-harness-in) describes, and the next run, or `sudo systemctl start nexus-control`, starts it.
 
 The control plane runs as the system user `nexus-control`, apart from the probe's `nexus`, because it holds the model login. These are its paths:
 
@@ -212,18 +255,19 @@ The control plane runs as the system user `nexus-control`, apart from the probe'
 
 The control plane terminates TLS itself at `https://<full control-node MagicDNS name>:7443/`, on the same tailnet address as `listen.host`. Port 7443 avoids privileged port binding or capabilities for `nexus-control`; preview allocation reserves it. The plain HTTP API on 7470 remains unchanged. There is **no dashboard Serve entry**: neither the installer nor the control plane changes the probe's Serve configuration.
 
-After upgrading control, the person does this **once on the control node**, not from a pylon:
+The installer checks the three things this needs before it changes anything, and prints the fix for each that is missing:
 
-1. Enable MagicDNS and HTTPS certificates in the tailnet. Use a Tailscale version supporting the LocalAPI cert endpoint with `type=pair`, `min_validity` and `TS_PERMIT_CERT_UID` (see source references below).
-2. Give the control-plane service user **cert-only** LocalAPI access. Run `sudo systemctl edit tailscaled` and add:
+1. MagicDNS and HTTPS certificates turned on in the tailnet, at https://login.tailscale.com/admin/dns. Use a Tailscale version supporting the LocalAPI cert endpoint with `type=pair`, `min_validity` and `TS_PERMIT_CERT_UID` (see source references below).
+2. The control-plane service user's **cert-only** LocalAPI access, a tailscaled drop-in that tailscaled was restarted with:
 
    ```ini
    [Service]
    Environment=TS_PERMIT_CERT_UID=nexus-control
    ```
 
-   Restart tailscaled during a maintenance window: `sudo systemctl restart tailscaled`. This briefly affects tailnet connections. The setting accepts a username or numeric UID and lets that user fetch certificates for names this node can obtain; it grants neither Serve write access nor general operator rights. The probe stays the sole operator (`nexus`). Do not grant either service sudo access and do not transfer operator rights to control.
-3. Add `"https": { "hostname": "rj-firebat.example.ts.net" }` to `/etc/nexus/control.json`, using the node's **actual full MagicDNS name**, and include that name in `listen.hostnames`. Keep `listen.host` bound to the control node's tailnet IP. The example enables HTTPS; existing configs opt in explicitly. Ensure TCP 7443 is available and allowed by any tailnet grants and host firewall, then restart control in the normal deployment window. HTTP starts first and stays available even if certificate access is denied, issuance times out or HTTPS cannot bind. HTTPS starts independently once a certificate arrives and its port can bind; there is no automatic redirect to HTTP.
+   Restarting tailscaled briefly affects tailnet connections. The setting accepts a username or numeric UID and lets that user fetch certificates for names this node can obtain; it grants neither Serve write access nor general operator rights. The probe stays the sole operator (`nexus`). Do not grant either service sudo access and do not transfer operator rights to control.
+3. `"https": { "hostname": "<full MagicDNS name>" }` in `/etc/nexus/control.json`, with that name in `listen.hostnames`, which the installer writes. Keep `listen.host` bound to the control node's tailnet IP. An existing config without `https` gains it on the next run. Ensure TCP 7443 is available and allowed by any tailnet grants and host firewall. HTTP starts first and stays available even if certificate access is denied, issuance times out or HTTPS cannot bind. HTTPS starts independently once a certificate arrives and its port can bind; there is no automatic redirect to HTTP.
+
 4. Open `https://<full control-node MagicDNS name>:7443/` from a node in `callers`. Enable notifications with the dashboard's permission button; permission belongs to this HTTPS origin, not the old HTTP URL. Verify conversation streaming and terminal attach, and trigger a notification with the dashboard in the background. An unlisted node must receive 403 even if owned by the same Tailscale user. Also publish and withdraw a preview on the control node to verify that the probe still works as an operator without sudo.
 
 After starting HTTP, control fetches the certificate/key pair over tailscaled's Unix socket in the background and refreshes it every 12 hours after a success, requesting at least seven days of remaining validity. Tailscaled handles issuance, its cache and renewal. Nexus validates the hostname, validity dates and key pair before installing a new TLS context without restarting or interrupting existing connections. The private key is held in process memory, not written to Nexus files or logs. Renewal requests have a 60-second deadline and a 128-KiB response limit. Every startup or renewal failure logs its error and retry delay, retaining any previously installed certificate. Attempts are serialized, with exponential backoff from one second to a maximum of 60 seconds between failures; success resets the backoff. HTTPS failures never stop the HTTP API. Persistent failures must be repaired before expiry; after expiry browsers reject new connections rather than bypass TLS validation. Watch `journalctl -u nexus-control` for startup/renewal failures. `GET /v1/health` on HTTP remains 200 and includes `https: { status, error, nextAttemptAt }` alongside the release commit. Status is `disabled` without HTTPS config, `waiting` until HTTPS starts, `ready` after a successful installation, or `degraded` when renewal failed but the previous TLS context remains installed. `error` is the latest failure (cleared on success); `nextAttemptAt` is the next scheduled attempt in epoch milliseconds, or null while fetching/disabled. Health is readable by an admitted tailnet caller, or via the existing same-address local health check. For example, from an allowed client:
