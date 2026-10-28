@@ -1,0 +1,26 @@
+--- tests-pins.txt
++++ tests-branch.txt
+@@ -10,6 +10,7 @@
+ ✔ a Claude session whose pane cannot be inspected is neither started again nor closed in any of its panes
+ ✔ a Claude whose state Herdr cannot tell yet is waited for, and is reported starting with nothing typed if it stays so
+ ✔ a Herdr reply without the fields Nexus reads rejects, and an error reply names Herdr's code
++✔ a bad request's message names each wrong field from the top of the payload, and what is wrong with it
+ ✔ a close that names its session leaves a pane that runs another one open, such as one a wake gave that pane
+ ✔ a command result is read as the probe sent it, a close without an outcome as closed, and a result for another command is refused
+ ✔ a failed chunk stops the typing before Enter, and the error says how far it got
+@@ -17,6 +18,7 @@
+ ✔ a failure left in its restored pane stands for that pane until the pane is closed
+ ✔ a fresh Claude Code session starts under an ID of its own, and a fresh pi or resumed session gets no extra arguments
+ ✔ a harness that fails to start rolls its workspace back, and the failure shows the pane's screen
++✔ a job error code or a harness is one Nexus names, not any key an object holds
+ ✔ a job status is read as the probe sent it, and one that fails a check is refused
+ ✔ a launch an older probe lost before typing starts Claude once, beside the shell it left
+ ✔ a launch an older probe typed records nothing, and its running Claude answers the second launch
+@@ -40,6 +42,7 @@
+ ✔ a probe refuses an envelope that fails any check of its fields
+ ✔ a probe takes a command of every kind as it was sent, with the fields it does not know
+ ✔ a probe takes an envelope of every job kind as it was sent, with the fields it does not know
++✔ a prompted launch waits on the shell_pid Herdr gave, whatever number it is
+ ✔ a pylon that never paused has nothing to relaunch and starts no Herdr server
+ ✔ a receipt read failure preserves the pane rather than rolling back uncertain work
+ ✔ a session in no live pane is resumed in a new workspace in the checkout, then given the message
