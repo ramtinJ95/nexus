@@ -253,11 +253,11 @@ export const roundsSpent = (r: Pick<Review, "rounds">) => r.rounds.filter((round
   return !(previous?.head === round.head && previous.verdict?.verdict === "approve" && round.verdict?.verdict === "approve" && !round.verdict.findings.some(blocks));
 }).length;
 /**
- * The head `pr` was read at, when it is open there and no round of the review reviewed that head nor its hold named it.
- * A head an earlier round reviewed is one the PR watch read before the review moved on from it.
+ * The head `pr` was read at, when it is open there at another head than the latest round's and than the one its hold
+ * named. A PR watch's read may be older than the round, so the loop confirms it with GitHub before it acts.
  */
 export const pushedHead = (r: Review, pr: Pick<PullRequest, "state" | "head"> | undefined): string | null =>
-  pr?.state !== "open" || pr.head === undefined || r.rounds.some((round) => round.head === pr.head) || (r.phase.kind === "needs-person" && r.phase.unreviewed === pr.head) ? null : pr.head;
+  pr?.state !== "open" || pr.head === undefined || r.rounds.at(-1)!.head === pr.head || (r.phase.kind === "needs-person" && r.phase.unreviewed === pr.head) ? null : pr.head;
 /** Why the latest round started, when it reviews a head pushed after the previous round's approval rather than the builder's fixes. */
 export function roundNote(r: Review): string | null {
   const [previous, round] = r.rounds.slice(-2);

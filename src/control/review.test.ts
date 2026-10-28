@@ -1780,3 +1780,18 @@ test("a review that stopped at approval under a stopped PR watch waits for its l
   assert.equal(f.review().rounds[1]!.head, head2);
   assert.deepEqual(f.merges, []);
 });
+
+test("a force-push back to a head an earlier round reviewed gets a new round", async (t) => {
+  const f = fixture(t);
+  f.files = [{ path: "src/control/registry.ts", previous: null, patch: "" }];
+  const loop = await approved(f, "nLAPTOP");
+  pushed(f, head2);
+  await loop.poll();
+  f.reply(f.review().reviewer, verdict(f.review(), {}));
+  await loop.poll();
+  assert.deepEqual(f.review().phase, { kind: "needs-person", reasons: reservedHolds });
+  pushed(f, head1);
+  await loop.poll();
+  assert.equal(f.review().phase.kind, "reviewing");
+  assert.deepEqual(f.review().rounds.map((round) => round.head), [head1, head2, head1]);
+});
