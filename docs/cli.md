@@ -171,7 +171,7 @@ The shapes are TypeScript types. `Thread`, `Session` and `Preview` are in [`src/
 `attention` is the first matching condition, in this order:
 
 1. `"failed"`: the pylon or Claude worker launch failed.
-2. `"decision"`: the thread's review ended for the person, whose reasons `review.phase.reasons` lists, or one of its `questions` has no answer yet.
+2. `"decision"`: the thread's review ended for the person, whose reasons `review.phase.reasons` lists, or one of its `questions` has no answer yet, or, in a project with auto-review, the builder ended three turns in a row without a pull request, two of them after a Nexus nudge, as [the design](design.md#nudging-a-builder-that-stopped-short) describes.
 3. `"parked"`: tasks hit the restart limit and need `retry`, whether any client watches the thread or not.
 4. `"limited"`: the Claude worker's session stopped on its usage limit, so `usageLimit` is present. Seen does not clear it; the next turn does.
 5. `"reply"`: `lastReplyAt` is non-null and later than `seenAt`, or `seenAt` is null.
