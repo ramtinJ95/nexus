@@ -26,6 +26,7 @@ import { once } from "node:events";
 import { createServer as createHttpsServer } from "node:https";
 import { TLSSocket } from "node:tls";
 import type { Certificate } from "../tailscale.ts";
+import { createHash } from "node:crypto";
 import { createServer, STATUS_CODES, type IncomingMessage, type ServerResponse } from "node:http";
 import type { Duplex } from "node:stream";
 import { setTimeout as sleep } from "node:timers/promises";
@@ -38,7 +39,7 @@ import type { ConversationView, EntryRecord, JsonObject } from "@earendil-works/
 import type { HarnessHost } from "../harness/host.ts";
 import { pinsSchema, type ImageId, type ImageManifest } from "../images.ts";
 import type { Whois } from "../tailscale.ts";
-import type { ClaudeSent, NodeRecord, Output, PortRange, Preview, Registry, Session, Thread, ThreadId } from "./registry.ts";
+import type { ClaudeSent, NodeRecord, Output, PortRange, Preview, Registry, Session, StartKey, Thread, ThreadId } from "./registry.ts";
 import { dashboard, liveFrames } from "./dashboard.ts";
 import { attachScript, checkoutDir, claudeTextProblem, herdrSession, sessionHarnessSchema, type SessionHarness } from "../sessions.ts";
 import { claudeConversations, claudeFrames } from "./claude-conversation.ts";
@@ -55,7 +56,7 @@ import { HttpError } from "./http-error.ts";
 import { BodyTooLarge, readBody } from "../request-body.ts";
 import { imagesView, type ImageOperation, type ImageRollout } from "./image-rollout.ts";
 import type { StartRequest } from "./threads.ts";
-import { queuedView, type QueuedRecord, type ThreadQueue } from "./queue.ts";
+import { queuedView, type QueuedRecord, type QueuedThread, type ThreadQueue } from "./queue.ts";
 import { nodePylons, overcommitted, type NodePylons } from "./placement.ts";
 import { maxRounds, type Review, type ReviewLoop } from "./review.ts";
 
@@ -77,7 +78,7 @@ export interface ApiOptions {
   /** Names the API answers to in the Host header. Any other name is a DNS rebinding page on an allowed machine. */
   hostnames: ReadonlySet<string>;
   harness: ThreadHarness;
-  startThread(request: StartRequest, caller: string): Promise<Thread>;
+  startThread(request: StartRequest, caller: string, queuedId?: ThreadId, key?: StartKey): Promise<Thread>;
   /** Asks the loop for a pass over the node's pylons. */
   wake(node: NodeName): void;
   /** One client per registry node, for the guest commands and checkout reads a human asks for. */
@@ -250,8 +251,10 @@ const startSchema = z.strictObject({
   resources: projectSchema.shape.resources.partial().optional(),
   /** Queue the thread to start once each of these threads' pull requests has merged. */
   after: z.array(z.string().min(1)).min(1).max(32).optional(),
-  /** A queued Nexus agent thread's first message, sent once it starts. */
+  /** A Nexus agent thread's first message, sent as the person's once it starts. */
   message: z.string().min(1).optional(),
+  /** Minted by the client per start, such as start:<uuid>. A retry with the same ID and body is the same start. */
+  requestId: z.string().min(1).max(200).optional(),
 });
 // Agent activity comes from the harness.
 const seenSchema = z.strictObject({ lastReplyAt: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER).nullable().optional() });
@@ -615,6 +618,49 @@ export async function startApi(options: ApiOptions): Promise<Api> {
     wakeThread(t);
   }
 
+  /** Starts in flight by request ID, so a repeat that arrives before the first answers shares it. */
+  const starting = new Map<string, { body: string; answer: Promise<Thread | QueuedThread> }>();
+
+  /**
+   * A start with a request ID is stored with the thread or queued record it made, so a repeat of the ID answers that
+   * thread as it is now and sends an immediate start's first message again, which the harness delivers once. A repeat
+   * with another body is refused. A start that failed made nothing, so its ID is free.
+   */
+  function start(body: unknown, caller: string): Promise<Thread | QueuedThread> {
+    const { requestId, ...fields } = parse(startSchema, body);
+    if (requestId === undefined) return startOnce(fields, caller);
+    const key: StartKey = { requestId, body: createHash("sha256").update(JSON.stringify(fields)).digest("hex") };
+    const pending = starting.get(requestId);
+    const made = registry.startRequest(requestId);
+    const earlier = pending ?? made;
+    if (earlier !== undefined && earlier.body !== key.body) {
+      throw new HttpError(409, `request ID ${requestId} ${made === undefined ? "is starting a thread" : `started thread ${made.thread}`} with another body. Start a new thread under a new request ID`);
+    }
+    if (pending !== undefined) return pending.answer;
+    const answer = startOnce(fields, caller, key, made?.thread).finally(() => starting.delete(requestId));
+    starting.set(requestId, { body: key.body, answer });
+    return answer;
+  }
+
+  async function startOnce({ after, message, ...request }: Omit<z.infer<typeof startSchema>, "requestId">, caller: string, key?: StartKey, made?: ThreadId): Promise<Thread | QueuedThread> {
+    if (request.model !== undefined && request.claude === undefined) throw new HttpError(400, "model requires claude");
+    if (after === undefined) {
+      if (message !== undefined && request.claude !== undefined) throw new HttpError(400, "message is for a Nexus agent thread. A Claude worker's first prompt is its claude");
+      const t = made === undefined ? await startThread(request, caller, undefined, key) : registry.thread(made)!;
+      if (message !== undefined && t.status !== "archived" && t.status !== "deleted") {
+        await harness.send(t.id, message, `brief:${t.id}`, "followUp").catch((err: Error) => {
+          const why = `started ${t.id}, but its first message was not sent: ${err.message}. ${key === undefined ? `Send it with POST /v1/threads/${t.id}/messages` : `Start it again under request ID ${key.requestId} to send it`}`;
+          throw err instanceof HttpError ? new HttpError(err.status, why) : new Error(why);
+        });
+      }
+      return t;
+    }
+    const queue = queueOrRefuse();
+    const record = made === undefined ? queue.add(request, message ?? null, after, caller, key) : registry.queuedThread(made)!;
+    void queue.poll();
+    return record.status === "started" ? registry.thread(record.id)! : queuedView(registry, record);
+  }
+
   /** A message is human activity, so the pylon wakes while the model answers. */
   async function sendMessage(t: Thread, body: unknown) {
     const message = parse(messageSchema, body);
@@ -919,18 +965,7 @@ export async function startApi(options: ApiOptions): Promise<Api> {
       const threads = registry.threads((r.query.get("project") ?? undefined) as ProjectId | undefined);
       return ok((r.query.get("deleted") === "false" ? threads.filter((t) => t.status !== "deleted") : threads).map(row));
     }],
-    ["POST", /^\/v1\/threads$/, async (_, r) => {
-      const { after, message, ...request } = parse(startSchema, await r.body());
-      if (request.model !== undefined && request.claude === undefined) throw new HttpError(400, "model requires claude");
-      if (after === undefined) {
-        if (message !== undefined) throw new HttpError(400, "message is only for a queued start; send it with POST /v1/threads/<id>/messages");
-        return created(await startThread(request, r.caller));
-      }
-      const queue = queueOrRefuse();
-      const record = queue.add(request, message ?? null, after, r.caller);
-      void queue.poll();
-      return created(queuedView(registry, record));
-    }],
+    ["POST", /^\/v1\/threads$/, async (_, r) => created(await start(await r.body(), r.caller))],
     ["GET", /^\/v1\/queued$/, (_, r) => {
       const project = r.query.get("project");
       return ok(registry.queuedThreads().filter((q) => q.status !== "started" && (project === null || q.project === project)).map((q) => queuedView(registry, q)));

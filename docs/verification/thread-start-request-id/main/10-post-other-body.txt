@@ -1,0 +1,5 @@
+POST /v1/threads {"project":"scratch","title":"Another title","message":"Read the README","requestId":"start:api"}
+HTTP 400
+{
+  "error": "✖ Unrecognized key: \"requestId\""
+}

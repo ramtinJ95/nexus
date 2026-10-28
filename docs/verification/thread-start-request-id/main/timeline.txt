@@ -1,0 +1,21 @@
+nexus --version -> exit 0 (01-version.txt)
+nexus project add scratch --scratch --node node-a --cpus 1 --memory 1 --disk 1 -> exit 0 (02-project-add.txt)
+== a start whose answer is lost, retried with a request ID
+nexus start --project scratch --message Fix the flaky checkout test --request-id start:lost-answer --json (through the proxy) -> exit 64 (03-start-lost-answer.txt)
+nexus start --project scratch --message Fix the flaky checkout test --request-id start:lost-answer --json -> exit 64 (04-start-retry.txt)
+control plane restarted
+nexus start --project scratch --message Fix the flaky checkout test --request-id start:lost-answer --json -> exit 64 (05-start-retry-after-restart.txt)
+0 thread(s):  (06-threads-after-retries.txt)
+== the same request ID with another body
+nexus start --project scratch --message Fix the login page --request-id start:lost-answer --json -> exit 64 (07-start-other-body.txt)
+== the API repeated directly, the same body twice and then another
+POST /v1/threads {"project":"scratch","title":"Through the API","message":"Read the README","requestId":"start:api"} -> HTTP 400 ✖ Unrecognized key: "requestId" (08-post-first.txt)
+POST /v1/threads {"project":"scratch","title":"Through the API","message":"Read the README","requestId":"start:api"} -> HTTP 400 ✖ Unrecognized key: "requestId" (09-post-repeat.txt)
+POST /v1/threads {"project":"scratch","title":"Another title","message":"Read the README","requestId":"start:api"} -> HTTP 400 ✖ Unrecognized key: "requestId" (10-post-other-body.txt)
+== a start whose answer is lost, retried without a request ID
+proxy: the API answered POST /v1/threads with 201, and the proxy hung up before passing it on
+backend: booted pylon-<thread 1>
+nexus start --project scratch --message Tidy the docs --json (through the proxy) -> exit 2 (11-plain-lost-answer.txt)
+backend: booted pylon-<thread 2>
+nexus start --project scratch --message Tidy the docs --json -> exit 0 (12-plain-retry.txt)
+2 thread(s): <thread 1> "Tidy the docs", <thread 2> "Tidy the docs" (13-threads-at-the-end.txt)

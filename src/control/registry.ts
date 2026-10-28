@@ -118,6 +118,9 @@ export type ClaudeMessage = { state: "sending" } | { state: "sent"; result: Clau
 /** What a send to a Claude worker answers, and answers again for a resend of its request ID. */
 export interface ClaudeSent { session: string; outcome: "sent" | "queued"; resumed: boolean }
 
+/** A start's request ID and a hash of the body it came with, stored with the thread or queued record the start made. */
+export interface StartKey { requestId: string; body: string }
+
 /** Applied in order. The database's user_version counts the ones already applied. Never edit one that has shipped. */
 const migrations: readonly string[] = [
   `
@@ -328,6 +331,9 @@ const migrations: readonly string[] = [
    CREATE TABLE IF NOT EXISTS usage_backfill_threads (thread TEXT PRIMARY KEY REFERENCES threads (id), state TEXT NOT NULL CHECK (state IN ('pending', 'done', 'skipped')),
      reason TEXT, calls INTEGER NOT NULL, tokens INTEGER NOT NULL, at INTEGER,
      CHECK ((state = 'skipped') = (reason IS NOT NULL)), CHECK ((state = 'pending') = (at IS NULL))) STRICT;`,
+  // Each start's request ID, the thread it made, started or queued, and a hash of the body it was asked with. It touches
+  // nothing an earlier migration made, so a registry rewound past it applies it again unchanged.
+  `CREATE TABLE IF NOT EXISTS start_requests (request_id TEXT PRIMARY KEY, thread TEXT NOT NULL, body TEXT NOT NULL) STRICT;`,
 ];
 
 type Row = Record<string, unknown>;
@@ -534,8 +540,15 @@ export function openRegistry(path: string, clock = Date.now) {
     return row === undefined ? undefined : json<QueuedRecord>(row.record);
   }
 
-  function saveQueued(record: QueuedRecord) {
-    sql("INSERT INTO queued_threads (id, record) VALUES (?, ?) ON CONFLICT (id) DO UPDATE SET record = excluded.record").run(record.id, JSON.stringify(record));
+  function saveQueued(record: QueuedRecord, key?: StartKey) {
+    transaction(() => {
+      sql("INSERT INTO queued_threads (id, record) VALUES (?, ?) ON CONFLICT (id) DO UPDATE SET record = excluded.record").run(record.id, JSON.stringify(record));
+      if (key !== undefined) saveStartKey(key, record.id);
+    });
+  }
+
+  function saveStartKey(key: StartKey, thread: ThreadId) {
+    sql("INSERT INTO start_requests (request_id, thread, body) VALUES (?, ?, ?)").run(key.requestId, thread, key.body);
   }
 
   function threadOfPylon(pylonId: PylonId): ThreadId | undefined {
@@ -1027,9 +1040,10 @@ export function openRegistry(path: string, clock = Date.now) {
 
     /**
      * A thread and its pylon are created together, because a thread always has exactly one pylon. A `queued` thread's
-     * queue record is marked started in the same transaction, so a queued thread starts at most once.
+     * queue record is marked started in the same transaction, so a queued thread starts at most once, and so is a
+     * start's `key`, so a repeat of its request ID finds the thread.
      */
-    createThread(thread: Omit<Thread, "seenAt" | "lastReplyAt">, pylon: StoredPylon, claudePrompt?: string, model = defaultClaudeModel, queued = false) {
+    createThread(thread: Omit<Thread, "seenAt" | "lastReplyAt">, pylon: StoredPylon, claudePrompt?: string, model = defaultClaudeModel, queued = false, key?: StartKey) {
       if (pylon.pylonId !== thread.pylonId || pylon.thread !== thread.id) throw new Error(`pylon ${pylon.pylonId} does not belong to thread ${thread.id}`);
       transaction(() => {
         if (queued) {
@@ -1042,7 +1056,12 @@ export function openRegistry(path: string, clock = Date.now) {
           thread.setup === undefined ? null : JSON.stringify(thread.setup));
         q.insertPylon.run(pylonParams(pylon));
         if (claudePrompt !== undefined) sql("INSERT INTO claude_workers (thread, prompt, state, model) VALUES (?, ?, 'pending', ?)").run(thread.id, claudePrompt, model);
+        if (key !== undefined) saveStartKey(key, thread.id);
       });
+    },
+    startRequest(requestId: string): { thread: ThreadId; body: string } | undefined {
+      const row = sql("SELECT thread, body FROM start_requests WHERE request_id = ?").get(requestId);
+      return row === undefined ? undefined : { thread: row.thread as ThreadId, body: row.body as string };
     },
     queuedThreads: (): QueuedRecord[] => sql("SELECT record FROM queued_threads ORDER BY rowid").all().map((r) => json<QueuedRecord>(r.record)),
     queuedThread,

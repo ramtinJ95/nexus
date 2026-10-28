@@ -131,6 +131,10 @@ A check thread is a bare thread, with no conversation and no Claude worker, whos
 
 `needs-person` makes the builder's attention `decision`. A new `nexus review` replaces an ended record, and `nexus land` moves an approved one, or one the policy held after its check passed, back to `checking`.
 
+## Start request IDs
+
+`start_requests` stores each request ID a `POST /v1/threads` came with, keyed by the ID. `thread` is the thread it started, or the ID a queued start's record keeps, and `body` is the SHA-256 of the rest of the start's body as the API parsed it. The row is written in the transaction that inserts the thread's row or the queued record, so a start that failed stores none, and a repeat of the ID finds the thread exactly when one exists. A repeat with another `body` is refused.
+
 ## Queued thread records
 
 `queued_threads` stores one JSON record per thread queued with `nexus start --after`, keyed by the ID the thread gets when it starts. `QueuedRecord` in `src/control/queue.ts` is the shape, and `QueuedThread` is the API's view of one that has not started.

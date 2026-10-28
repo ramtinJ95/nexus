@@ -1,0 +1,26 @@
+$ NEXUS_URL=http://127.0.0.1:7470 nexus start --project scratch --message "Fix the flaky checkout test" --request-id start:lost-answer --json
+{
+  "id": "<thread 1>",
+  "title": "Fix the flaky checkout test",
+  "project": "scratch",
+  "pylonId": "pylon-<thread 1>",
+  "status": "active",
+  "conversationId": "2",
+  "startedBy": "nVERIFYCONTROL",
+  "createdAt": <time>,
+  "agentTurnRunning": false,
+  "lastAgentActivityAt": <time>,
+  "lastHumanActivityAt": <time>,
+  "seenAt": null,
+  "lastReplyAt": <time>,
+  "placement": {
+    "how": "default",
+    "node": "node-a"
+  },
+  "setup": {
+    "how": "fresh",
+    "reason": "the project is scratch, so it has no template"
+  },
+  "working": false
+}
+[exit 0]

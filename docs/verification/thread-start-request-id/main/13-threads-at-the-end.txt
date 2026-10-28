@@ -1,0 +1,10 @@
+$ nexus threads, then nexus conversation <thread> for each
+2 thread(s)
+
+== <thread 1> Tidy the docs
+No messages yet.
+
+== <thread 2> Tidy the docs
+> Tidy the docs
+
+scripted answer after user

@@ -8,7 +8,7 @@ import { newPylonRecord, type PylonRecord } from "../tick.ts";
 import { HttpError } from "./http-error.ts";
 import { placeAuto, type Placement } from "./placement.ts";
 import { pylonLive } from "./live.ts";
-import type { Registry, Thread, ThreadId } from "./registry.ts";
+import type { Registry, StartKey, Thread, ThreadId } from "./registry.ts";
 
 /**
  * What starts a thread. `claude` makes it a Claude worker with that first prompt, which gets `/poteto-mode` in front
@@ -86,9 +86,9 @@ export function threadStarter(options: { registry: Registry; harness: Pick<Harne
 
   /**
    * The conversation is created before the registry row, as HarnessHost.startThread requires. `queuedId` is a queued
-   * thread's, whose queue record the registry marks started with the row.
+   * thread's, whose queue record the registry marks started with the row. `key` is stored with the row.
    */
-  return async function startThread(request: StartRequest, caller: string, queuedId?: ThreadId): Promise<Thread> {
+  return async function startThread(request: StartRequest, caller: string, queuedId?: ThreadId, key?: StartKey): Promise<Thread> {
     const project = checkStart(registry, request);
     const claudePrompt = claudePromptOf(request);
     const named = request.node !== undefined && request.node !== "auto";
@@ -135,7 +135,7 @@ export function threadStarter(options: { registry: Registry; harness: Pick<Harne
         live,
         liveHash: liveHashOf(live),
       });
-      registry.createThread(t, pylon, claudePrompt, request.model, queuedId !== undefined);
+      registry.createThread(t, pylon, claudePrompt, request.model, queuedId !== undefined, key);
       wake(node);
       return t;
     } finally {
