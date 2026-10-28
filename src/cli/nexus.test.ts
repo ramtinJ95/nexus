@@ -1347,7 +1347,7 @@ test("show prints each question with its options, its reserved case, and who mus
 
 test("deploy and release use the shared release view and wait for both roles", async (t) => {
   const s = await setup(t);
-  assert.equal((await s.nexus(["--version"])).stdout.trim(), "nexus 0.36.0");
+  assert.equal((await s.nexus(["--version"])).stdout.trim(), "nexus 0.37.0");
   assert.equal((await s.nexus(["deploy", "bad"])).code, 64);
   const requested = await s.json(["deploy", "main"]);
   assert.equal(requested.desired.commit, "a".repeat(40));

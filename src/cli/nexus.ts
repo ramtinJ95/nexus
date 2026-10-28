@@ -38,7 +38,7 @@ import type { WebSocket } from "ws";
 import { attachTerminal, processTty } from "./attach.ts";
 import { call, CliError, exitCodes, follow, upgrade, type Endpoint, type HostPort } from "./transport.ts";
 
-const version = "0.36.0";
+const version = "0.37.0";
 const defaults = { url: "http://rj-firebat.tailc817d3.ts.net:7470", socks: "localhost:1055" };
 const configFile = () => join(homedir(), ".config", "nexus", "cli.json");
 
@@ -59,9 +59,10 @@ const usage = `nexus ${version}, the Nexus control plane from this Mac
   nexus session close <thread> <pane|id>       a session in no pane by its ID, which \`nexus show\` gives
   nexus attach <thread>                        this terminal on the pylon's Herdr sessions, through the control plane
   nexus start --project P [--title T] [--message M | --claude PROMPT [--model ID]] [--node N|auto] [--branch B] [--commit C]
-              [--cpus n] [--memory GiB] [--disk GiB] [--after THREAD[,THREAD...]] [--request-id ID]
+              [--cpus n] [--memory GiB] [--disk GiB] [--after THREAD[,THREAD...]] [--request-id ID] [--drive]
     --after queues it to start once each of those threads' pull requests has merged
     --request-id makes a repeat of the start answer the thread the first made
+    --drive gives a Nexus agent thread the drive tools, with which it starts up to 3 threads of its own
   nexus start-queued <thread>                  start a queued thread now, without waiting for the threads it is queued after
   nexus send <thread> <text...> [--steer] [--request-id ID]
     a message to the agent, or typed into the Claude worker's session, which waits for a paused pylon to wake
@@ -361,11 +362,14 @@ const autoReviewText = (p: Project) => p.autoReview == null ? "auto review off" 
 /** A control plane older than `Thread.working` sends none. */
 const working = (t: Thread) => t.working ?? (t.agentTurnRunning || t.sessionTurnRunning === true);
 
-function detailText({ thread: t, pylon: p, agent, sessions, previews, ports, outputs, prWatch, pullRequests, claudeWorker, attention, review, questions }: ThreadDetail): string {
+function detailText({ thread: t, pylon: p, agent, sessions, previews, ports, outputs, prWatch, pullRequests, claudeWorker, attention, review, questions, children }: ThreadDetail): string {
   const observed = p.observedAt === null ? "" : `, observed ${ago(Date.parse(p.observedAt))}`;
   return [
     `${t.id}  ${t.title}`,
     `project: ${t.project}`,
+    ...t.parent === undefined ? [] : [`started by thread ${t.parent}, with nexus_start`],
+    // A control plane older than 0.37.0 sends no children.
+    ...t.drive !== true ? [] : [`drive tools: on, children: ${(children ?? []).length === 0 ? "none" : children!.map((c) => `${c.id} (${c.status})`).join(", ")}`],
     ...(claudeWorker === undefined ? [] : [`Claude worker: ${claudeWorker.state}, model ${claudeWorker.model ?? "unknown"}`, ...(claudeWorker.message === undefined ? [] : [`failed: ${claudeWorker.message}`])]),
     `attention: ${attention ?? "none"}`,
     ...t.usageLimit === undefined ? [] : [`usage limit: ${usageLimitText(t.usageLimit, Date.now())}. \`nexus send ${t.id} continue\` resumes it once the limit resets`],
@@ -1110,10 +1114,11 @@ const commands: Readonly<Record<string, Command>> = {
     args: [0, 0],
     options: {
       model: { type: "string" }, claude: { type: "string" }, project: { type: "string" }, title: { type: "string" }, message: { type: "string" }, node: { type: "string" }, branch: { type: "string" }, commit: { type: "string" },
-      cpus: { type: "string" }, memory: { type: "string" }, disk: { type: "string" }, after: { type: "string" }, "request-id": { type: "string" },
+      cpus: { type: "string" }, memory: { type: "string" }, disk: { type: "string" }, after: { type: "string" }, "request-id": { type: "string" }, drive: { type: "boolean" },
     },
     async run(api, _, v) {
       const project = str(v, "project");
+      if (v.drive === true && v.claude !== undefined) throw new CliError("invalid", "--drive is for a Nexus agent thread, not a Claude worker");
       const message = str(v, "message");
       const claude = str(v, "claude");
       if (v.model !== undefined && claude === undefined) throw new CliError("invalid", "--model requires --claude");
@@ -1125,7 +1130,7 @@ const commands: Readonly<Record<string, Command>> = {
       const resources = resourcesOf(v);
       const requestId = str(v, "request-id");
       // One request: the control plane sends the first message once the thread starts, as the person's.
-      const body = { project, title, ...optional, ...resources === undefined ? {} : { resources }, ...message === undefined ? {} : { message }, ...requestId === undefined ? {} : { requestId } };
+      const body = { project, title, ...optional, ...resources === undefined ? {} : { resources }, ...message === undefined ? {} : { message }, ...requestId === undefined ? {} : { requestId }, ...v.drive === true ? { drive: true } : {} };
       const after = str(v, "after")?.split(",").map((id) => id.trim()).filter((id) => id !== "");
       if (after !== undefined) {
         if (after.length === 0) throw new CliError("invalid", "--after needs a thread");
