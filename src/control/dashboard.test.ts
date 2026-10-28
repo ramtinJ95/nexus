@@ -60,6 +60,7 @@ async function setup(t: TestContext, options: Partial<ApiOptions> = {}) {
     whois: async () => caller,
     allowed: new Set([laptop]),
     hostnames: new Set(["127.0.0.1"]),
+    deployment: { self: "nFIREBAT" as TailnetNodeId, deployers: new Set(), keys: {} },
     harness: fake.harness,
     startThread,
     queue,
