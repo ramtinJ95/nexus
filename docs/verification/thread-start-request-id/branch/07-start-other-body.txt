@@ -1,0 +1,3 @@
+$ NEXUS_URL=http://127.0.0.1:7470 nexus start --project scratch --message "Fix the login page" --request-id start:lost-answer --json
+[stderr] {"error":"request ID start:lost-answer started thread <thread 1> with another body. Start a new thread under a new request ID","kind":"conflict","status":409}
+[exit 5]

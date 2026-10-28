@@ -1,0 +1,7 @@
+$ nexus threads, then nexus conversation <thread> for each
+1 thread(s)
+
+== <thread 1> Fix the flaky checkout test
+> Fix the flaky checkout test
+
+scripted answer after user

@@ -1,0 +1,3 @@
+$ NEXUS_URL=http://127.0.0.1:7471 nexus start --project scratch --message "Fix the flaky checkout test" --request-id start:lost-answer --json
+[stderr] {"error":"the connection to 127.0.0.1:7471 failed: socket hang up","kind":"unreachable","status":null}
+[exit 2]

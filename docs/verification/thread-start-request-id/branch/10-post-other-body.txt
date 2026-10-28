@@ -1,0 +1,5 @@
+POST /v1/threads {"project":"scratch","title":"Another title","message":"Read the README","requestId":"start:api"}
+HTTP 409
+{
+  "error": "request ID start:api started thread <thread 2> with another body. Start a new thread under a new request ID"
+}
