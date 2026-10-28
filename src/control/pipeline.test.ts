@@ -152,8 +152,16 @@ test("an archived thread, a cancelled queued thread and a PR merged outside any 
   assert.equal(phase(r, queuedBehind), "cancelled: its queued thread was cancelled");
   f.links(tb, f.pr(5, "merged"));
   assert.equal(phase(r, b), "landed: PR #5 merged");
-  f.review(thread(r, c), { kind: "cancelled", who: "builder", status: "deleted" });
-  assert.equal(phase(r, c), "archived: its builder thread was deleted");
+  const tc = thread(r, c);
+  f.links(tc, f.pr(6, "closed"));
+  f.review(tc, { kind: "closed" });
+  assert.equal(phase(r, c), "held: PR #6 closed without merging");
+  f.links(tc, f.pr(6, "merged"));
+  assert.equal(phase(r, c), "landed: PR #6 merged", "a pull request reopened and merged after its review closed lands the item");
+  f.links(tc, f.pr(6, "open"));
+  f.review(tc, { kind: "cancelled", who: "builder", status: "deleted" });
+  r.setThreadStatus(tc, "deleted");
+  assert.equal(phase(r, c), "archived: its thread is deleted");
   assert.throws(() => f.items.cancel(b, laptop), (err: { status: number; message: string }) => err.status === 409 && err.message.includes(`is thread ${tb} now`));
 });
 

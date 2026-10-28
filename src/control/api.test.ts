@@ -3120,6 +3120,10 @@ test("an item is added to a project the pipeline runs for, becomes a queued thre
   const off = await s.call("POST", "/v1/items", { project: "acme", title: "A", message: "Build A." });
   assert.deepEqual(off, { status: 409, body: { error: "the pipeline does not run for project acme. nexus project edit acme --pipeline start turns it on" } });
 
+  s.callAs("nFIREBAT" as TailnetNodeId);
+  assert.equal((await s.call("PATCH", "/v1/projects/acme", { pipeline: { autoStart: true } })).status, 403, "the control plane cannot turn approvals off");
+  assert.equal((await s.call("POST", "/v1/threads", { project: "acme", title: "X", requestId: "pipeline:it-000000000000" })).status, 400, "an item's request ID is the pipeline's own");
+  s.callAs(laptop);
   const approving = await s.call("PATCH", "/v1/projects/acme", { pipeline: { autoStart: false } });
   assert.deepEqual(approving.body.pipeline, { autoStart: false });
   const a = await s.call("POST", "/v1/items", { project: "acme", title: "A", message: "Build A." });

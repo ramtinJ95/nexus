@@ -664,6 +664,7 @@ export async function startApi(options: ApiOptions): Promise<Api> {
    */
   function start(body: unknown, caller: string): Promise<Thread | QueuedThread> {
     const { requestId, ...fields } = parse(startSchema, body);
+    if (requestId?.startsWith("pipeline:")) throw new HttpError(400, "request IDs that start with pipeline: are the pipeline's own, which names each item's thread by one");
     if (requestId === undefined) return startOnce(fields, caller);
     const key = startKey(requestId, fields);
     const pending = starting.get(requestId);
@@ -981,6 +982,7 @@ export async function startApi(options: ApiOptions): Promise<Api> {
     ["PATCH", /^\/v1\/projects\/([^/]+)$/, async ([, id], r) => {
       const { autoReview, pipeline, ...patch } = parse(projectEditSchema, await r.body());
       if (autoReview?.land) mayLand(r.caller);
+      if (pipeline !== undefined && !isPerson(registry, options.deployment, r.caller)) throw new HttpError(403, "caller may not set a project's pipeline: whether briefs start builders is the person's, never the control plane's, an infrastructure node's or a pylon's");
       const project = registry.editProject(id as ProjectId, ({ autoReview: kept, pipeline: running, ...previous }) => {
         const updated: Project = parse(projectSchema, { ...previous, ...patch, resources: { ...previous.resources, ...patch.resources } });
         refuseUnknownNode(updated);

@@ -103,9 +103,8 @@ function threadPhase(registry: Registry, id: ThreadId): ItemPhase {
     case "merging": case "deploying": case "rolling-back": return phase("landing", `${pr} is ${review.phase.kind.replace("-", " ")}`);
     case "approved": return review.land === null ? phase("held", `${pr} is approved, and lands once the person runs nexus land ${id}`) : phase("landing", `${pr} is approved`);
     case "reviewing": case "fixing": case "checking": return phase("reviewing", `${pr}, round ${review.rounds.length}: ${review.phase.kind}`);
-    case "closed": return phase("held", `${pr} closed without merging`);
-    case "cancelled": return phase("archived", `its ${review.phase.who} thread was ${review.phase.status}`);
-    case undefined: break;
+    // A review that ended without landing says nothing of a pull request reopened or merged since, which its links do.
+    case "closed": case "cancelled": case undefined: break;
   }
   const wait = waitOf(registry, id);
   if (wait.state === "landed") return phase("landed", wait.why);
