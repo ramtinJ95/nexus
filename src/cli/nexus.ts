@@ -181,10 +181,11 @@ function backfillPlanText(plan: readonly BackfillPlanRow[]): string {
     ...lines.flatMap((line, i) => plan[i]!.reason === null ? [line] : [line, `  skipped before: ${plan[i]!.reason}`])].join("\n");
 }
 
+/** A control plane older than 0.33.0 reports no backfill. */
 function usageText(r: UsageReport): string {
   const rows = (keyHead: string, of: readonly (UsageTotals & { key: string })[]) =>
     table([[keyHead, ...tokenColumns.map((col) => col.label), "Calls"], ...of.map((row) => [row.key, ...tokenColumns.map((col) => tokenCount(row[col.field])), String(row.calls)])]);
-  const head = `Usage of ${r.project === null ? "all projects" : `project ${r.project}`} ${r.since === null ? "for all time" : `since ${utc(r.since)}`}. Counting started ${utc(r.countingSince)}.\n${backfillText(r.backfill)}`;
+  const head = `Usage of ${r.project === null ? "all projects" : `project ${r.project}`} ${r.since === null ? "for all time" : `since ${utc(r.since)}`}. Counting started ${utc(r.countingSince)}.${r.backfill === undefined ? "" : `\n${backfillText(r.backfill)}`}`;
   if (r.total.calls === 0) return `${head}\nNo model calls were counted in this period.`;
   return [head, rows("", [{ key: "Total", ...r.total }]), ...breakdowns.flatMap((b) => {
     const { title, key } = breakdownLook[b];

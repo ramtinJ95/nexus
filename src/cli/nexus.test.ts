@@ -1800,6 +1800,20 @@ test("usage backfill starts a run, --dry-run lists what it would read, --stop st
   assert.equal((await s.nexus(["usage", "backfill", "--dry-run"])).stdout, `A start reads 1 archived thread, one pylon at a time:\n${gone.id}  acme  rj-firebat  Gone\n  skipped before: rj-firebat holds no disk for its pylon\n`);
 });
 
+test("a control plane older than the usage backfill reports none, so usage prints no backfill line, and usage backfill fails as for a missing route", async (t) => {
+  const s = await setup(t);
+  const { backfill: _, ...report } = await s.json(["usage", "--since", "all"]);
+  const old = createHttpServer((req, res) => {
+    const path = new URL(req.url!, "http://x").pathname;
+    if (path === "/v1/usage") return void res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify(report));
+    res.writeHead(404, { "content-type": "application/json" }).end(JSON.stringify({ error: `no route ${path}` }));
+  });
+  const env = { NEXUS_URL: `http://127.0.0.1:${await listening(t, old)}`, NEXUS_SOCKS: "none" };
+  const usage = await s.nexus(["usage"], env);
+  assert.match(usage.stdout, /^Usage of all projects for all time\. Counting started [^\n]*\.\nNo model calls were counted in this period\.\n$/);
+  assert.equal((await s.nexus(["usage", "backfill"], env)).code, 4);
+});
+
 test("usage prints the tokens of the last 7 days in all and by each breakdown, --since, --project and --by narrow it, and --json is the API's report", async (t) => {
   const s = await setup(t);
   const thread: Thread = await s.json(["start", "--project", "acme", "--title", "Usage"]);
