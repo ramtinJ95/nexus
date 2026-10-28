@@ -80,11 +80,11 @@ function fixture(t: import("node:test").TestContext) {
    * A snapshot taken now, ingested as the control plane's loop ingests one. `readAt` is when the probe read the
    * checkouts' git, which it reuses for up to a minute, so the snapshot holds only the branches pushed by then.
    */
-  function observe(readAt = now) {
+  function observe(readAt = now, phase: "running" | "unread" | "stopped" = "running") {
     const last = registry.node(node)!.observation;
-    const pylons: PylonObservation[] = [...pushes].map(([pylonId, pushed]) => ({
+    const pylons: PylonObservation[] = [...pushes].map(([pylonId, pushed]) => phase === "stopped" ? { pylonId, phase, checkpoint: null, sessions: [] } : ({
       pylonId, phase: "running" as const, liveHash: "hash" as LiveHash, bootedAt: "2027-01-01T00:00:00Z", bootedFrom: { image: "img-000000000000" as const, checkpoint: null }, services: [], listening: [], previews: [], sessions: [], declaredOutputs: [], attachedClients: 0,
-      git: { head: "a".repeat(40), branch: "main", dirty: false, branches: pushed.filter((p) => p.at <= readAt).map((p) => ({ name: p.ref.slice(p.ref.indexOf("/") + 1), head: "a".repeat(40), pushedAs: p.ref })) },
+      git: phase === "unread" ? null : { head: "a".repeat(40), branch: "main", dirty: false, branches: pushed.filter((p) => p.at <= readAt).map((p) => ({ name: p.ref.slice(p.ref.indexOf("/") + 1), head: "a".repeat(40), pushedAs: p.ref })) },
     }));
     const observation = { node, observedAt: new Date(now).toISOString(), probeBootId: "b", events: [], capacity, artifacts: [], jobs: [], pylons, grants: { secrets: [], gitSsh: false }, previewRoutes: [], heldSecrets: [] };
     const known = new Map(registry.pylonIdsOn(node).map((id) => [id, last?.pylons.find((o) => o.pylonId === id) ?? "absent" as const]));
@@ -224,6 +224,33 @@ test("a PR watch pass already running once the turn's pushes are known does not 
   passes.finished = 2;
   await nudger.poll();
   assert.equal(f.registry.nudge(id)?.state, "nudged");
+});
+
+test("a pylon that paused before a git read after the turn waits for a wake, and one paused after it is still nudged", async (t) => {
+  const f = fixture(t);
+  const id = await f.add("th-1");
+  f.push(id, "origin/nexus/cache");
+  f.prs.set("nexus/cache", [{ number: 12, state: "open" }]);
+  f.turn(id);
+  f.tick(gitPollMs);
+  f.observe(f.now, "unread");
+  await f.nudger.poll();
+  f.observe(f.now, "stopped");
+  await f.nudger.poll();
+  await f.watch.poll();
+  await f.nudger.poll();
+  assert.deepEqual(f.nudges(), [], "the paused pylon's outputs may lack the branch");
+  assert.equal(f.registry.nudge(id), null);
+
+  const paused = await f.add("th-paused");
+  f.turn(paused);
+  f.tick(gitPollMs);
+  f.observe();
+  await f.nudger.poll();
+  f.observe(f.now, "stopped");
+  await f.watch.poll();
+  await f.nudger.poll();
+  assert.deepEqual(f.nudges().map((n) => n.thread), [paused]);
 });
 
 test("a pull request that merged before the PR watch could link it gets no nudge", async (t) => {

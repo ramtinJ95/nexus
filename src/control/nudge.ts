@@ -82,15 +82,13 @@ export function builderNudger(options: { registry: Registry; github: Pick<GitHub
 
   /**
    * Whether the registry's outputs hold every branch the thread pushed before `turn` ended. The probe takes a snapshot's
-   * observedAt before it reads any pylon, so a running pylon's snapshot holds those pushed gitPollMs before it. A pylon
-   * pauses only long after its agent's last activity, so a paused one's last snapshot held them, and it pushes nothing
-   * more.
+   * observedAt before it reads any pylon, so a running pylon's snapshot holds those pushed gitPollMs before it. A paused
+   * pylon's snapshot says nothing of git, so a turn whose pushes were not known before the pause waits for a wake.
    */
   function pushedKnown(t: Thread, turn: number): boolean {
     const pylon = registry.pylon(t.pylonId);
     const observation = pylon === undefined ? null : registry.node(pylon.node)?.observation ?? null;
     const facts = observation?.pylons.find((p) => p.pylonId === t.pylonId);
-    if (facts?.phase === "stopped") return true;
     return facts?.phase === "running" && facts.git !== null && Date.parse(observation!.observedAt) - gitPollMs >= turn;
   }
 
