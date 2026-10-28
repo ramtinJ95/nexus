@@ -1,0 +1,3 @@
+$ nexus unarchive th-8a6cbfe030a3
+[stderr] nexus: thread th-8a6cbfe030a3 is active, not archived
+[exit 5]

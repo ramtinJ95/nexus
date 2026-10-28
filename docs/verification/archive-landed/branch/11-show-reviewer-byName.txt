@@ -1,0 +1,11 @@
+$ nexus show th-46a62661fcde
+th-46a62661fcde  Review of #1: Greet by name
+project: nexus
+attention: reply
+status: archived
+pylon: pylon-th-46a62661fcde on verify-node, running, observed 0s ago
+size: 1 CPUs, 1 GiB memory, 10 GiB disk
+placement: verify-node, as the start named
+setup: fresh boot runs .nexus/setup, because the control plane could not read .nexus/setup at greet-name: the verify stack reads no remote, so every thread boots fresh
+PR watch: on
+[exit 0]

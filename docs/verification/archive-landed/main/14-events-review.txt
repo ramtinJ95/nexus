@@ -1,0 +1,14 @@
+$ nexus events --kind review.changed
+10 2026-10-28T08:14:35.742Z th-8a6cbfe030a3 review.changed {"review":"rv-8a910497","reviewer":"th-fd1551a554f0","phase":{"kind":"reviewing"},"round":1}
+12 2026-10-28T08:14:35.756Z th-9aa49941f64f review.changed {"review":"rv-c45579be","reviewer":"th-483c5ee1a2ab","phase":{"kind":"reviewing"},"round":1}
+14 2026-10-28T08:14:35.768Z th-bd27ee47722e review.changed {"review":"rv-cee3e69e","reviewer":"th-69a961479f7b","phase":{"kind":"reviewing"},"round":1}
+22 2026-10-28T08:14:36.787Z th-8a6cbfe030a3 review.changed {"review":"rv-8a910497","reviewer":"th-fd1551a554f0","phase":{"kind":"checking","startedAt":1793175276787,"thread":null},"round":1}
+23 2026-10-28T08:14:36.799Z th-9aa49941f64f review.changed {"review":"rv-c45579be","reviewer":"th-483c5ee1a2ab","phase":{"kind":"checking","startedAt":1793175276798,"thread":null},"round":1}
+24 2026-10-28T08:14:36.806Z th-bd27ee47722e review.changed {"review":"rv-cee3e69e","reviewer":"th-69a961479f7b","phase":{"kind":"checking","startedAt":1793175276806,"thread":null},"round":1}
+25 2026-10-28T08:14:38.785Z th-8a6cbfe030a3 review.changed {"review":"rv-8a910497","reviewer":"th-fd1551a554f0","phase":{"kind":"merging","authorized":null},"round":1}
+26 2026-10-28T08:14:38.794Z th-8a6cbfe030a3 review.changed {"review":"rv-8a910497","reviewer":"th-fd1551a554f0","phase":{"kind":"deploying","commit":"eeee000500000000000000000000000000000000","previous":"aaaa000100000000000000000000000000000000","requested":false,"deadline":1793177078794},"round":1}
+28 2026-10-28T08:14:38.800Z th-9aa49941f64f review.changed {"review":"rv-c45579be","reviewer":"th-483c5ee1a2ab","phase":{"kind":"merging","authorized":null},"round":1}
+29 2026-10-28T08:14:38.802Z th-9aa49941f64f review.changed {"review":"rv-c45579be","reviewer":"th-483c5ee1a2ab","phase":{"kind":"needs-person","reasons":["Always needs the person: pylon image rebuilds, as it changes images/pylon/image-rebuild.Dockerfile."]},"round":1}
+31 2026-10-28T08:14:38.806Z th-bd27ee47722e review.changed {"review":"rv-cee3e69e","reviewer":"th-69a961479f7b","phase":{"kind":"approved"},"round":1}
+34 2026-10-28T08:14:39.785Z th-8a6cbfe030a3 review.changed {"review":"rv-8a910497","reviewer":"th-fd1551a554f0","phase":{"kind":"landed","commit":"eeee000500000000000000000000000000000000"},"round":1}
+[exit 0]

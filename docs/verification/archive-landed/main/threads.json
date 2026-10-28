@@ -1,0 +1,12 @@
+{
+  "builders": {
+    "byName": "th-8a6cbfe030a3",
+    "image": "th-9aa49941f64f",
+    "french": "th-bd27ee47722e"
+  },
+  "reviewers": {
+    "byName": "th-fd1551a554f0",
+    "image": "th-483c5ee1a2ab",
+    "french": "th-69a961479f7b"
+  }
+}

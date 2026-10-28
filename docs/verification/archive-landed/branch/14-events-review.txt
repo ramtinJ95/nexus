@@ -1,0 +1,14 @@
+$ nexus events --kind review.changed
+10 2026-10-28T08:15:12.045Z th-e370fae35ac2 review.changed {"review":"rv-5be3cf5b","reviewer":"th-46a62661fcde","phase":{"kind":"reviewing"},"round":1}
+12 2026-10-28T08:15:12.064Z th-b582e00c693c review.changed {"review":"rv-5f95bc98","reviewer":"th-ddd0aaa9174e","phase":{"kind":"reviewing"},"round":1}
+14 2026-10-28T08:15:12.078Z th-356654519518 review.changed {"review":"rv-cfca03b4","reviewer":"th-51d74b29eb6c","phase":{"kind":"reviewing"},"round":1}
+22 2026-10-28T08:15:13.089Z th-356654519518 review.changed {"review":"rv-cfca03b4","reviewer":"th-51d74b29eb6c","phase":{"kind":"checking","startedAt":1793175313089,"thread":null},"round":1}
+23 2026-10-28T08:15:13.093Z th-b582e00c693c review.changed {"review":"rv-5f95bc98","reviewer":"th-ddd0aaa9174e","phase":{"kind":"checking","startedAt":1793175313093,"thread":null},"round":1}
+24 2026-10-28T08:15:13.101Z th-e370fae35ac2 review.changed {"review":"rv-5be3cf5b","reviewer":"th-46a62661fcde","phase":{"kind":"checking","startedAt":1793175313101,"thread":null},"round":1}
+25 2026-10-28T08:15:15.090Z th-356654519518 review.changed {"review":"rv-cfca03b4","reviewer":"th-51d74b29eb6c","phase":{"kind":"approved"},"round":1}
+26 2026-10-28T08:15:15.092Z th-b582e00c693c review.changed {"review":"rv-5f95bc98","reviewer":"th-ddd0aaa9174e","phase":{"kind":"merging","authorized":null},"round":1}
+27 2026-10-28T08:15:15.098Z th-b582e00c693c review.changed {"review":"rv-5f95bc98","reviewer":"th-ddd0aaa9174e","phase":{"kind":"needs-person","reasons":["Always needs the person: pylon image rebuilds, as it changes images/pylon/image-rebuild.Dockerfile."]},"round":1}
+29 2026-10-28T08:15:15.099Z th-e370fae35ac2 review.changed {"review":"rv-5be3cf5b","reviewer":"th-46a62661fcde","phase":{"kind":"merging","authorized":null},"round":1}
+30 2026-10-28T08:15:15.106Z th-e370fae35ac2 review.changed {"review":"rv-5be3cf5b","reviewer":"th-46a62661fcde","phase":{"kind":"deploying","commit":"eeee000500000000000000000000000000000000","previous":"aaaa000100000000000000000000000000000000","requested":false,"deadline":1793177115105},"round":1}
+34 2026-10-28T08:15:16.093Z th-e370fae35ac2 review.changed {"review":"rv-5be3cf5b","reviewer":"th-46a62661fcde","phase":{"kind":"landed","commit":"eeee000500000000000000000000000000000000"},"round":1}
+[exit 0]

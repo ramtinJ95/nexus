@@ -1,0 +1,8 @@
+$ nexus threads --all
+th-e370fae35ac2  active    -  pylon running  nexus         27s ago  Greet by name
+th-b582e00c693c  active    -  pylon running  nexus         27s ago  Rebuild the image
+th-356654519518  active    -  pylon running  nexus-review  26s ago  Greet in French
+th-46a62661fcde  archived  -  pylon running  nexus         26s ago  Review of #1: Greet by name
+th-ddd0aaa9174e  active    -  pylon running  nexus         26s ago  Review of #2: Rebuild the image
+th-51d74b29eb6c  active    -  pylon running  nexus-review  26s ago  Review of #3: Greet in French
+[exit 0]

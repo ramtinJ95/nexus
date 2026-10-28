@@ -1,0 +1,3 @@
+$ nexus project edit nexus-review --auto-review review
+Updated project nexus-review, auto review, set by nLAPTOP. Existing threads keep their boot settings and grants; start a new thread to apply them.
+[exit 0]
