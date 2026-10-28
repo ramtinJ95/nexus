@@ -1034,3 +1034,55 @@ test("a message Claude's prompt cannot take exactly is refused with a reason, an
   assert.match(claudeTextProblem("bad \ud800 half")!, /surrogate/);
   assert.match(claudeTextProblem(" \n \n")!, /blank/);
 });
+
+test("a sessions file is read as the sessions it records, without fields Nexus does not know, and one that fails a check is refused", () => {
+  const unknown = { zzUnknown: 1 };
+  const claude = { herdrPane: "w1:p1", harness: "claude-code", title: "review", cwd: "/home/user/workspace/repo", harnessSessionId: "s-1", model: "opus" };
+  const shell = { herdrPane: "w2:p1", harness: "shell", title: "sh", cwd: "/home/user", harnessSessionId: null };
+  const failed = { record: { herdrPane: "w3:p1", harness: "pi", title: "plan", cwd: "/home/user", harnessSessionId: "/s.jsonl" }, inPane: false, message: "pi did not start" };
+  const file = { version: 1, recordedAt: "2027-01-01T00:00:00Z", sessions: [{ ...claude, ...unknown }, { ...shell, ...unknown }], failed: [{ ...failed, record: { ...failed.record, ...unknown }, ...unknown }], ...unknown };
+  assert.deepEqual(pausedSessionsIn(JSON.stringify(file)), [
+    { id: "w1:p1", herdrPane: "w1:p1", harness: "claude-code", title: "review", harnessSessionId: "s-1", model: "opus" },
+    { id: "w2:p1", herdrPane: "w2:p1", harness: "shell", title: "sh", harnessSessionId: null },
+    { id: "failed-f513fc00e70b", herdrPane: null, harness: "pi", title: "plan", harnessSessionId: "/s.jsonl" },
+  ]);
+  const { harnessSessionId: _, ...noSessionId } = shell;
+  const bad: unknown[] = [
+    null, [], { ...file, version: 2 }, { ...file, recordedAt: "" }, { ...file, sessions: null }, { ...file, failed: undefined },
+    { ...file, sessions: [{ ...shell, harness: "codex" }] }, { ...file, sessions: [{ ...shell, title: "" }] }, { ...file, sessions: [{ ...shell, cwd: 1 }] }, { ...file, sessions: [{ ...shell, herdrPane: undefined }] },
+    { ...file, sessions: [{ ...claude, model: "" }] }, { ...file, sessions: [{ ...shell, harnessSessionId: "" }] }, { ...file, sessions: [null] },
+    { ...file, failed: [{ ...failed, inPane: "no" }] }, { ...file, failed: [{ ...failed, message: "" }] }, { ...file, failed: [{ ...failed, record: null }] },
+  ];
+  for (const value of bad) assert.throws(() => pausedSessionsIn(JSON.stringify(value)), Error, JSON.stringify(value));
+  assert.deepEqual(pausedSessionsIn(JSON.stringify({ ...file, sessions: [noSessionId], failed: [] })), [{ id: "w2:p1", herdrPane: "w2:p1", harness: "shell", title: "sh", harnessSessionId: null }], "a missing session ID reads as none");
+});
+
+test("Herdr's panes are read without the fields Nexus does not use, and a snapshot that fails a check rejects", async () => {
+  const pane = { ...herdrPane("w1:p1", "w1", "claude", "working", { kind: "id", value: "s-1" }), zzUnknown: 1 };
+  const snapshot = (panes: unknown[], workspaces: unknown[] = [{ workspace_id: "w1", label: "review", zzUnknown: 1 }]) => ({ type: "snapshot", snapshot: { workspaces, panes, zzUnknown: 1 } });
+  const facts = (value: unknown) => sessionFacts(herdrUp({ "api snapshot": () => herdrOk(value) }));
+  assert.deepEqual(await facts(snapshot([pane])), [{ id: "w1:p1", state: "running", herdrPane: "w1:p1", harness: "claude-code", harnessSessionId: "s-1", status: "working", title: "review" }]);
+  assert.deepEqual(await facts(snapshot([{ ...pane, agent: "codex", agent_session: { agent: "codex", value: 1 } }])), [{ id: "w1:p1", state: "running", herdrPane: "w1:p1", harness: "shell", harnessSessionId: null, status: "working", title: "review" }]);
+  assert.deepEqual(await facts(snapshot([{ ...pane, agent_session: { agent: "pi", value: "p" } }])), [{ id: "w1:p1", state: "running", herdrPane: "w1:p1", harness: "claude-code", harnessSessionId: null, status: "working", title: "review" }]);
+  const bad: unknown[] = [
+    null, { snapshot: null }, snapshot([pane], null as never), snapshot(null as never), snapshot([null]), snapshot([pane], [{ workspace_id: "w1" }]), snapshot([pane], [{ workspace_id: "", label: "x" }]),
+    snapshot([{ ...pane, pane_id: "" }]), snapshot([{ ...pane, agent: "" }]), snapshot([{ ...pane, agent_status: "asleep" }]), snapshot([{ ...pane, agent_session: "s-1" }]),
+    snapshot([{ ...pane, workspace_id: "w9" }]), snapshot([{ ...pane, foreground_cwd: "" }]), snapshot([{ ...pane, foreground_cwd: null, cwd: 1 }]),
+    snapshot([{ ...pane, agent_session: { agent: "claude", value: "" } }]),
+  ];
+  for (const value of bad) await assert.rejects(facts(value), Error, JSON.stringify(value));
+});
+
+test("a Herdr reply without the fields Nexus reads rejects, and an error reply names Herdr's code", async () => {
+  const open = (reply: () => ExecReply) => openSession(herdrUp({ "workspace create": reply }), { harness: "shell", title: "sh", cwd: "/home/user" });
+  assert.equal(await open(() => herdrOk({ workspace: { workspace_id: "w5", zzUnknown: 1 }, root_pane: { pane_id: "w5:p1" } })), "w5:p1");
+  for (const result of [null, {}, { workspace: { workspace_id: "w5" } }, { workspace: { workspace_id: "" }, root_pane: { pane_id: "w5:p1" } }, { workspace: { workspace_id: "w5" }, root_pane: { pane_id: 1 } }]) {
+    await assert.rejects(open(() => herdrOk(result)), Error, JSON.stringify(result));
+  }
+  const close = (reply: ExecReply) => closeSession(herdrUp({ "pane close": () => reply }), "w1:p1");
+  assert.equal(await close(herdrError("pane_not_found")), "not-open");
+  for (const error of [{}, { code: "pane_not_found" }, { code: "", message: "m" }, "pane_not_found"]) {
+    await assert.rejects(close({ exitCode: 1, output: `${JSON.stringify({ id: "cli:1", error })}\n` }), (err: Error) => err.name === "Error", JSON.stringify(error));
+  }
+  await assert.rejects(close({ exitCode: 0, output: "[1]\n" }), Error);
+});
