@@ -382,6 +382,47 @@ const serviceFailed = (pylonId: PylonId) => ({
   code: "setup-failed" as const, message: `${pylonId}: Service web was not ready within 30 s`, logTail: "", broken: { detail: "Service web was not ready within 30 s", cause: "services" as const },
 });
 
+/** Pauses a running pylon of an archived thread, as the planner does, and folds the pause in. */
+async function archive(registry: Registry, fake: ReturnType<typeof fakeNode>, loop: Loop, thread: Thread) {
+  registry.setThreadStatus(thread.id, "archived");
+  void loop.wake(node);
+  await until("the pause runs", () => fake.running().length === 1);
+  fake.finish(fake.running()[0]!);
+  await until("the pause is folded in", () => registry.pylon(thread.pylonId)?.pauses === 1);
+}
+
+test("a wake for reading that fails after the backfill let go of its pylon fails nothing, and the thread's next wake boots at once", async (t) => {
+  const registry = openRegistry(tempDb());
+  const thread = seed(registry);
+  const fake = fakeNode({ autoFinish: false });
+  const logged: string[] = [];
+  const loop = run(t, registry, fake.probe, { log: (line) => logged.push(line) });
+  await until("the spawn runs", () => fake.running().length === 1);
+  fake.finish(fake.running()[0]!);
+  await archive(registry, fake, loop, thread);
+
+  registry.startUsageBackfill([thread.id], Date.now());
+  registry.holdUsageBackfill(thread.id, Date.now());
+  void loop.wake(node);
+  await until("the wake for reading runs", () => fake.running().length === 1);
+  const wake = fake.submitted.at(-1)!;
+  assert.ok(wake.kind === "spawn" && wake.relaunch === false);
+  registry.stopUsageBackfill(Date.now());
+  fake.finish(fake.running()[0]!, setupFailed(thread.pylonId, 1));
+  await until("the failure is folded in", () => registry.pylon(thread.pylonId)!.attempts.count === 1);
+  await settled(fake, loop);
+  assert.equal(registry.pylon(thread.pylonId)!.failed, null, "a failure the backfill no longer waits on fails nothing");
+  assert.deepEqual(logged, []);
+
+  registry.setThreadStatus(thread.id, "active");
+  registry.recordActivity(thread.id, { human: Date.now() });
+  void loop.wake(node);
+  await until("the thread's wake runs", () => fake.running().length === 1);
+  const next = fake.submitted.at(-1)!;
+  assert.deepEqual(kinds(fake.submitted), ["spawn fresh", "pause", "spawn resume", "spawn resume"]);
+  assert.ok(next.kind === "spawn" && next.relaunch === undefined, "the wake brings the sessions back");
+});
+
 test("a human retry of a pylon whose fresh setup failed spawns it fresh again, and the new setup's failure is the verdict", async (t) => {
   const registry = openRegistry(tempDb());
   const thread = seed(registry);

@@ -104,7 +104,7 @@ export async function tick(pylon: PylonRecord, ctx: TickContext): Promise<PlanSt
   });
   if (sent === "accepted") return step;
   pylon.submitted = null;
-  if (sent !== "retry") pylon.attempts = failedAttempt(pylon, "invalid", failureMessage(sent.invalid, ""));
+  if (sent !== "retry") pylon.attempts = failedAttempt(pylon, step.job, "invalid", failureMessage(sent.invalid, ""));
   ctx.save(pylon);
   return step;
 }
@@ -156,7 +156,7 @@ async function settle(pylon: PylonRecord, probe: ProbeClient, observation: NodeO
   if (listed === undefined) return "wait";
   pylon.submitted = null;
   if (status.state === "failed") {
-    pylon.attempts = failedAttempt(pylon, status.code, failureMessage(status.message, status.logTail));
+    pylon.attempts = failedAttempt(pylon, env.job, status.code, failureMessage(status.message, status.logTail));
     return null;
   }
   pylon.attempts = { count: 0, last: null };
@@ -165,8 +165,9 @@ async function settle(pylon: PylonRecord, probe: ProbeClient, observation: NodeO
   return null;
 }
 
-function failedAttempt(pylon: PylonRecord, code: FailedAttempt["code"], message: string): PylonRecord["attempts"] {
-  return { count: pylon.attempts.count + 1, last: { at: Date.now(), code, message } };
+function failedAttempt(pylon: PylonRecord, job: Job, code: FailedAttempt["code"], message: string): PylonRecord["attempts"] {
+  const reading = job.kind === "spawn" && job.relaunch === false;
+  return { count: pylon.attempts.count + 1, last: { at: Date.now(), code, message, ...(reading ? { reading } : {}) } };
 }
 
 const maxMessageChars = 500;

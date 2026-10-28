@@ -73,8 +73,11 @@ export interface PlanInput {
   artifactSha256(artifact: ArtifactId): string;
 }
 
-/** `message` is the job's message and the end of its log, bounded by failureMessage in tick.ts. */
-export interface FailedAttempt { at: number; code: JobErrorCode; message: string }
+/**
+ * `message` is the job's message and the end of its log, bounded by failureMessage in tick.ts. `reading` marks a wake
+ * for reading that failed, which only the usage backfill acts on, so the planner counts it only while desired is `reading`.
+ */
+export interface FailedAttempt { at: number; code: JobErrorCode; message: string; reading?: true }
 
 export type PlanStep =
   | { kind: "done" }
@@ -170,9 +173,13 @@ export function retryRefusal(observed: PylonObservation | "absent"): string | nu
 const brokenFailure = (observed: Extract<PylonObservation, { phase: "broken" }>, refused: string | null): PlanStep =>
   fail(`pylon is broken: ${observed.detail}${refused === null ? "" : `. ${refused}`}`);
 
+const noAttempts: PlanInput["attempts"] = { count: 0, last: null };
+
 export function planPylon(input: PlanInput, now: number): PlanStep {
+  // A wake for reading can fail after the backfill let go of the pylon, as when it stopped or gave up waiting.
+  const i = input.desired !== "reading" && input.attempts.last?.reading === true ? { ...input, attempts: noAttempts } : input;
   for (const rule of planRules) {
-    const step = rule(input, now);
+    const step = rule(i, now);
     if (step !== null) return step;
   }
   throw new Error("unreachable: the last plan rule always returns a step");

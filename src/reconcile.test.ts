@@ -59,8 +59,8 @@ const jobInFlight = (state: "running" | "succeeded"): JobStatus => state === "ru
   ? { jobId: "j1" as JobId, subject: pylonId, kind: "spawn", state, startedAt: "2027-01-01T00:00:00Z" }
   : { jobId: "j1" as JobId, subject: pylonId, kind: "spawn", state, finishedAt: "2027-01-01T00:00:00Z" };
 
-/** [count, failed this many ms before now, last code]. */
-type Attempts = readonly [number, number | null, JobErrorCode | null];
+/** [count, failed this many ms before now, last code, and "reading" for a failed wake for reading]. */
+type Attempts = readonly [number, number | null, JobErrorCode | null, "reading"?];
 
 interface Row {
   desired: DesiredPhase;
@@ -98,6 +98,9 @@ const rows: Record<string, Row> = {
   "delete does not wait for a transition": { desired: "deleted", observed: phase("stopping"), inFlight: null, attempts: none, online: true, present: imageOnly, expect: del },
   "a failed wake for reading waits rather than failing, whatever its code": { desired: "reading", observed: stopped(lastCheckpoint), inFlight: null, attempts: [1, 600_000, "setup-failed"], online: true, present: imageOnly, expect: wait("backoff") },
   "a wake for reading that failed past the attempt budget still waits": { desired: "reading", observed: stopped(lastCheckpoint), inFlight: null, attempts: [5, 600_000, "backend"], online: true, present: imageOnly, expect: wait("backoff") },
+  "a failed wake for reading still waits while the thread is read": { desired: "reading", observed: stopped(lastCheckpoint), inFlight: null, attempts: [1, 600_000, "setup-failed", "reading"], online: true, present: imageOnly, expect: wait("backoff") },
+  "a wake for reading that failed once the backfill let go of the pylon neither fails nor holds its pause": { desired: "paused", observed: running(null), inFlight: null, attempts: [1, 1_000, "setup-failed", "reading"], online: true, present: imageOnly, expect: pause },
+  "a wake for reading that failed is no failure for a later wake, which boots at once": { desired: "running", observed: stopped(lastCheckpoint), inFlight: null, attempts: [5, 1_000, "backend", "reading"], online: true, present: imageOnly, expect: spawn({ kind: "resume", checkpoint: lastCheckpoint }) },
   // 4
   "a non-retryable code fails": { desired: "running", observed: "absent", inFlight: null, attempts: [1, 60_000, "setup-failed"], online: true, present: imageOnly, expect: { kind: "fail", reason: "last job failed with setup-failed, which is not retryable: the probe's setup-failed message" } },
   "five failed attempts fail": { desired: "running", observed: "absent", inFlight: null, attempts: [5, 600_000, "backend"], online: true, present: imageOnly, expect: { kind: "fail", reason: "gave up after 5 failed attempts, the last with backend: the probe's backend message" } },
@@ -163,7 +166,7 @@ const rows: Record<string, Row> = {
 };
 
 function input(row: Row): PlanInput {
-  const [count, failedAgo, lastCode] = row.attempts;
+  const [count, failedAgo, lastCode, reading] = row.attempts;
   return {
     pylonId, node, live, liveHash, nextCheckpoint,
     boot: asking(row.secrets?.asked ?? []),
@@ -175,7 +178,7 @@ function input(row: Row): PlanInput {
     nodeArtifacts: new Set(row.present),
     nodeSecrets: new Set(row.secrets?.holds ?? []),
     inFlight: row.inFlight === null ? null : jobInFlight(row.inFlight),
-    attempts: { count, last: lastCode === null ? null : { at: now - failedAgo!, code: lastCode, message: `the probe's ${lastCode} message` } },
+    attempts: { count, last: lastCode === null ? null : { at: now - failedAgo!, code: lastCode, message: `the probe's ${lastCode} message`, ...(reading === undefined ? {} : { reading: true }) } },
     retrying: row.retrying ?? false,
     holders: (id) => row.holders?.[id] ?? [],
     artifactSha256: (id) => `sha-${id}`,
