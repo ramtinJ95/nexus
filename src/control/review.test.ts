@@ -351,6 +351,27 @@ test("a review that lands archives its builder and reviewer, once, whether its P
   }
 });
 
+test("a landing whose save fails archives nothing, so a release that supersedes it before the retry leaves both threads open", async (t) => {
+  const f = fixture(t);
+  f.registry.setDesiredRelease({ commit: previous, requestedBy: "person", requestedAt: 1 });
+  const loop = await approved(f, "nLAPTOP");
+  const save = f.registry.saveReview;
+  f.registry.saveReview = (review, archive) => {
+    if (review.phase.kind === "landed") throw new Error("disk I/O error");
+    save(review, archive);
+  };
+  for (const role of ["control", "probe"] as const) f.registry.reportRelease({ node, role, commit: merged, target: merged, state: "healthy", reason: null, observedAt: Date.now() });
+  await loop.poll();
+  assert.equal(f.review().phase.kind, "deploying");
+  assert.deepEqual(f.statuses(), ["active", "active"], "no thread is archived while the landing is unsaved");
+  f.registry.saveReview = save;
+  f.registry.setDesiredRelease({ commit: "n".repeat(40), requestedBy: "person", requestedAt: 2 });
+  await loop.poll();
+  assert.equal(f.review().phase.kind, "needs-person");
+  assert.deepEqual(f.statuses(), ["active", "active"]);
+  assert.deepEqual(f.woken, []);
+});
+
 test("a review held for the person, or one that stops at approval, archives nothing", async (t) => {
   const held = fixture(t);
   held.files = [{ path: "images/pylon/Dockerfile", previous: null, patch: "@@ -1 +1 @@\n-FROM a\n+FROM b" }];

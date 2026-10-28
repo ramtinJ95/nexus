@@ -360,18 +360,6 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
   /** The rounds ran out without an approval the checks passed, so the PR gets the label that asks for the person. */
   const ranOut = (r: Review, ...reasons: string[]): Review => ({ ...toPerson(r), phase: { kind: "needs-person", reasons, label: { state: "adding" } } });
   const checking = (): Phase => ({ kind: "checking", startedAt: now(), thread: null });
-  /**
-   * A landed PR leaves its builder and reviewer nothing to do, so the step that lands it archives them. A thread in a
-   * turn, such as one the person is talking to, stays open.
-   */
-  const landed = (r: Review, commit: string): Review => {
-    for (const t of [registry.thread(r.builder), registry.thread(r.reviewer)]) {
-      if (t === undefined || t.working || t.status === "archived" || t.status === "deleted") continue;
-      registry.setThreadStatus(t.id, "archived");
-      deps.wake(t);
-    }
-    return { ...r, merged: commit, phase: { kind: "landed", commit } };
-  };
   /** A reminder keeps the awaited token. Anything else is a new request, with a new token and no reminders yet. */
   const send = (r: Review, to: "builder" | "reviewer", text: (token: string) => string, phase: Phase, nudges = 0): Review => {
     const expect = nudges === 0 ? mint(r.id) : r.expect;
@@ -515,7 +503,7 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
         }
         commit = merged.commit;
       }
-      if (!deploys(r)) return landed(r, commit);
+      if (!deploys(r)) return { ...r, merged: commit, phase: { kind: "landed", commit } };
       return { ...r, merged: commit, phase: { kind: "deploying", commit, previous: registry.desiredRelease()?.commit ?? null, requested: false, deadline: now() + deployMs } };
     },
     async deploying(r, phase) {
@@ -525,7 +513,7 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
       }
       const view = releaseView(registry, release.self, now());
       const outcome = releaseOutcome(view, phase.commit, now());
-      if (outcome === "healthy") return landed(r, phase.commit);
+      if (outcome === "healthy") return { ...r, phase: { kind: "landed", commit: phase.commit } };
       if (outcome === "superseded") return toPerson(r, `Another release, ${view.desired?.commit ?? "none"}, replaced ${phase.commit} before every service reported healthy.`);
       if (outcome === "pending" && now() < phase.deadline) return r;
       const why = outcome === "failed"
@@ -599,6 +587,13 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
     return live && ended.has(next.phase.kind) ? await endedOnGitHub(next) ?? next : next;
   }
 
+  /**
+   * A landed PR leaves its builder and reviewer nothing to do, so they are archived in the transaction that saves the
+   * landing, and never later. A thread in a turn, such as one the person is talking to, stays open.
+   */
+  const finished = (r: Review): Thread[] => [registry.thread(r.builder), registry.thread(r.reviewer)]
+    .filter((t): t is Thread => t !== undefined && !t.working && t.status !== "archived" && t.status !== "deleted");
+
   async function pass() {
     const reviews = registry.reviews();
     // A check thread no review holds, such as one started just before a crash, has nothing left to give.
@@ -611,7 +606,9 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
         for (let i = 0; i < 8; i++) {
           const next = await step(r);
           if (next === r) break;
-          registry.saveReview(next);
+          const archive = next.phase.kind === "landed" && r.phase.kind !== "landed" ? finished(next) : [];
+          registry.saveReview(next, archive.map((t) => t.id));
+          for (const t of archive) deps.wake(t);
           r = next;
         }
       } catch (err) {
