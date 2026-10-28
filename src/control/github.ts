@@ -7,6 +7,8 @@ export interface PullRequest {
   checks: "pending" | "passing" | "failed" | "none";
   review: string;
   conflict: boolean | null;
+  /** The head commit when the PR watch last read the PR, which the review loop compares with the head it reviewed. */
+  head?: string;
 }
 /** What the review loop needs of a PR beyond the watch's summary. `mergeCommit` is null until it is merged. */
 export interface PrDetail { head: string; branch: string; base: string; body: string; mergeCommit: string | null }

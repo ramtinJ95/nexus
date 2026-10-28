@@ -94,6 +94,15 @@ test("batches failures, reviews, inline and issue comments, and conflict; then r
   await f.watcher.poll(); assert.equal(f.messages.length, 2);
 });
 
+test("records the PR's head at each read, so a push shows without another call to GitHub", async (t) => {
+  const f = fixture(); t.after(() => f.registry.close());
+  await f.watcher.poll();
+  assert.equal(f.registry.prWatch(f.id)?.links[0]?.pr.head, "1".repeat(40));
+  f.snapshot.detail.head = "2".repeat(40);
+  await f.watcher.poll();
+  assert.equal(f.registry.prWatch(f.id)?.links[0]?.pr.head, "2".repeat(40));
+});
+
 for (const state of ["merged", "closed"] as const) test(`${state} is recorded and no longer polled`, async (t) => {
   const f = fixture(); t.after(() => f.registry.close()); await f.watcher.poll();
   f.snapshot.pr.state = state; await f.watcher.poll(); f.calls.length = 0;
