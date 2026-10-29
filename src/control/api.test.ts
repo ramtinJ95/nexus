@@ -10,7 +10,7 @@ import { once } from "node:events";
 import { execFile } from "node:child_process";
 import { appendFile, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { setTimeout as sleep } from "node:timers/promises";
-import { claudeProjects, type ClaudeConversation } from "../claude-transcript.ts";
+import { claudeProjects, transcriptStart, type ClaudeConversation } from "../claude-transcript.ts";
 import { tmpdir } from "node:os";
 import { request } from "node:http";
 import { dirname, join } from "node:path";
@@ -3548,6 +3548,83 @@ test("without deployment options the control node is unknown, so no one answers 
     assert.equal((await s.call("POST", "/v1/threads", { project: "acme", title: "Another" })).status, 403, `${caller} started a thread`);
     assert.equal((await s.call("POST", `/v1/threads/${thread.id}/messages`, { text: "Go." })).status, 403, `${caller} messaged a thread`);
   }
+});
+
+const drink = { question: "Which drink?", header: "Drink", multiSelect: false, options: [{ label: "Tea", description: "Hot", preview: "a cup of tea" }, { label: "Coffee", description: "Strong" }] };
+const extras = { question: "What goes in it?", header: "Extras", multiSelect: true, options: [{ label: "Milk", description: "" }, { label: "Sugar", description: "" }] };
+
+/** A Claude worker thread whose running turn's transcript, as last read, ends in an AskUserQuestion call that waits. */
+async function claudeAsking(t: import("node:test").TestContext) {
+  const s = await withClaude(t);
+  const at = Date.now();
+  s.registry.reportSession(node, { sequence: 1, pylon: s.thread.pylonId, time: at, event: { kind: "session.turn-started", session: claudeSession, at } });
+  const call = { kind: "tool" as const, at: at + 1, id: "toolu_1", name: "AskUserQuestion", input: { questions: [drink, extras] } };
+  assert.ok(s.registry.appendClaudeRead(s.thread.id, { session: claudeSession, from: transcriptStart, entries: [call], cursor: { ...transcriptStart, offset: 1 }, reset: false, readAt: at }));
+  const delivered = () => s.commands.filter(([, c]) => c.kind === "exec");
+  const answer = (body: unknown) => s.call("POST", "/v1/questions/ask-toolu_1/answer", body);
+  const detail = async () => (await s.call("GET", `/v1/threads/${s.thread.id}`)).body as ThreadDetail;
+  const exec = (exitCode: number | null, output: string) => s.probeAnswers(async (c) => c.kind === "exec" ? { kind: "exec", exitCode, output, truncated: false } : assert.fail(`unexpected ${c.kind}`));
+  return { ...s, delivered, answer, detail, exec };
+}
+
+test("a person answers a Claude worker's AskUserQuestion with a choice per question, which the hook in its pylon hands to Claude before it is recorded", async (t) => {
+  const s = await claudeAsking(t);
+  const [asked] = (await s.detail()).questions;
+  assert.deepEqual(asked && { id: asked.id, text: asked.text, options: asked.options, ask: asked.ask, answer: asked.answer }, {
+    id: "ask-toolu_1", text: "Drink: Which drink?\nExtras: What goes in it?", options: [], ask: { session: claudeSession, toolUseId: "toolu_1", questions: [drink, extras] }, answer: null,
+  });
+  assert.equal((await s.detail()).attention, "decision");
+  const choices = [{ picked: ["Tea"], notes: "no rush" }, { picked: ["Milk"], own: "Oat cream" }];
+
+  s.callAs("nFIREBAT" as TailnetNodeId);
+  assert.deepEqual(await s.answer({ choices }), { status: 403, body: { error: "caller may not answer this question: only a person's device may, never infrastructure nodes or pylons" } });
+  s.callAs(laptop);
+  assert.deepEqual(await s.answer({ option: "Tea" }), { status: 400, body: { error: `question ask-toolu_1 is a Claude worker's AskUserQuestion, answered with {"choices": [...]}, a choice for each question it asks` } });
+  for (const bad of [{ choices: choices.slice(1) }, { choices: [{ picked: ["Juice"] }, choices[1]] }, { choices: [{ picked: ["Tea"], own: "Water" }, choices[1]] }, { choices, option: "Tea" }]) {
+    assert.equal((await s.answer(bad)).status, 400, JSON.stringify(bad));
+  }
+  assert.deepEqual(s.delivered(), [], "nothing refused reaches the pylon");
+
+  s.exec(0, "delivered\n");
+  const answered = await s.answer({ choices: [{ picked: ["Tea"], notes: " no rush " }, { picked: ["Milk"], own: "Oat cream" }] });
+  assert.equal(answered.status, 200, JSON.stringify(answered.body));
+  const first = answered.body as Question;
+  assert.deepEqual(first.answer && { ...first.answer, at: 0 }, { option: "Drink: Tea; Extras: Milk, Oat cream", by: laptop, at: 0, choices });
+  assert.deepEqual(s.delivered().map(([pylon, c]) => [pylon, c.kind === "exec" && { ...c, argv: c.argv.slice(0, 2) }]), [[s.thread.pylonId, { kind: "exec", argv: ["/usr/local/bin/nexus-claude-hook", "answer"], cwd: "/", timeoutMs: 15_000 }]]);
+  const [, command] = s.delivered()[0]!;
+  assert.deepEqual(JSON.parse(command.kind === "exec" ? command.argv[2]! : ""), {
+    session: claudeSession, questions: ["Which drink?", "What goes in it?"],
+    answers: { "Which drink?": "Tea", "What goes in it?": "Milk, Oat cream" }, annotations: { "Which drink?": { notes: "no rush" } },
+  });
+  assert.notEqual((await s.detail()).attention, "decision");
+
+  s.callAs(phone);
+  assert.deepEqual(await s.answer({ choices }), { status: 200, body: first }, "a retried answer gets the first one's record");
+  assert.deepEqual(await s.answer({ choices: [{ picked: ["Coffee"] }, { picked: ["Sugar"] }] }), { status: 409, body: { error: `question ask-toolu_1 was answered "Drink: Tea; Extras: Milk, Oat cream" by ${laptop}` } });
+  assert.equal(s.delivered().length, 1, "an answered ask is not handed to Claude again");
+  s.registry.askQuestion({ id: "qn-plain", thread: s.thread.id, text: "Go?", options: ["Yes", "No"], reserved: null, answerer: "person", askedAt: 1 });
+  assert.deepEqual(await s.call("POST", "/v1/questions/qn-plain/answer", { choices }), { status: 400, body: { error: `question qn-plain is answered with {"option": "<one of its options>"}` } });
+});
+
+test("an answer to an AskUserQuestion nobody waits for any more withdraws it, and one a pylon's image cannot hand to Claude says to answer in its terminal", async (t) => {
+  const s = await claudeAsking(t);
+  const choices = [{ picked: ["Tea"] }, { picked: ["Milk"] }];
+  const open = async () => (await s.detail()).questions.map((q) => [q.id, q.answer]);
+  const old = `pylon ${s.thread.pylonId} runs an image from before AskUserQuestion could be answered from the dashboard, so answer it in the pylon's terminal (\`nexus attach ${s.thread.id}\`)`;
+  s.exec(127, "sh: 1: /usr/local/bin/nexus-claude-hook: not found\n");
+  assert.deepEqual(await s.answer({ choices }), { status: 409, body: { error: old } });
+  s.exec(0, "");
+  assert.deepEqual(await s.answer({ choices }), { status: 409, body: { error: old } }, "a hook from before asks exits 0 for a kind it does not know");
+  s.exec(21, "");
+  assert.deepEqual(await s.answer({ choices }), { status: 409, body: { error: "another answer to question ask-toolu_1 reached Claude first" } });
+  s.exec(null, "");
+  assert.equal((await s.answer({ choices })).status, 502);
+  assert.deepEqual(await open(), [["ask-toolu_1", null]], "an answer Claude did not get is not recorded");
+
+  s.exec(20, "");
+  assert.deepEqual(await s.answer({ choices }), { status: 409, body: { error: "Claude no longer waits for this answer: it was answered in the terminal, its turn ended, or its pylon paused since. Send it to Claude as a message instead" } });
+  assert.deepEqual(await open(), []);
+  assert.notEqual((await s.detail()).attention, "decision");
 });
 
 test("a harness, a Claude worker and a bare thread each answer every agent route as their kind does", async (t) => {
