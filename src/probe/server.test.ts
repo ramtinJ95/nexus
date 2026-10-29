@@ -967,8 +967,8 @@ test("the command policy table gives each kind its lock, its memory by request I
     "send-claude-outcome: waits for nothing, not remembered, does not publish, retry safe: true",
     "interrupt-claude: waits for its Claude session, not remembered, does not publish, retry safe: false",
     "service: waits for nothing, not remembered, does not publish, retry safe: false",
-    "link-port: waits for reads, not remembered, publishes, retry safe: true",
-    "unlink-port: waits for reads, not remembered, publishes, retry safe: true",
+    "link-port: waits for nothing, not remembered, publishes, retry safe: true",
+    "unlink-port: waits for nothing, not remembered, publishes, retry safe: true",
   ]);
   assert.deepEqual(Object.keys(commandPolicies).sort(), [...new Set(samples.map(([, c]) => c.kind))].sort(), "every kind is listed");
 });
@@ -1218,8 +1218,13 @@ async function previewSetup(t: import("node:test").TestContext, services: Guest[
   await new Promise((resolve) => free.close(resolve));
   const tailscale = fakeTailscale();
   const fake = fakeBackend();
+  let answer: HostBridgeAnswer | undefined;
   const backend: VmBackend = {
     ...fake.backend,
+    hostBridge: async (a) => {
+      answer = a;
+      return { async close() {} };
+    },
     guest: (id) => {
       if (fake.pylons.get(id)?.vm !== "running") throw new Error(`${id} is not running`);
       return { previewOrigin: () => "http://127.0.0.1:9", services, linkPort: async (port: number) => `port-${port}`, unlinkPort: async () => null } as unknown as Guest; // nothing listens there
@@ -1240,7 +1245,12 @@ async function previewSetup(t: import("node:test").TestContext, services: Guest[
       resolve({ status: res.statusCode!, type: res.headers["content-type"], body });
     }).on("error", reject).end();
   });
-  return { tailscale, open, run, visit, gatewayPort, logged, fake };
+  /** A NEXUS_API call from the pylon. */
+  const api = async (request: object) => {
+    assert.ok(answer, "the probe started its bridge");
+    return answer(pylonId, JSON.stringify(request));
+  };
+  return { tailscale, open, run, visit, api, gatewayPort, logged, fake };
 }
 
 const withPreview = (id: PylonId, httpsPort: number): Job =>
@@ -1259,7 +1269,7 @@ test("spawn publishes its previews, a hit arrives on observe, pause keeps them a
   assert.ok(snapshot?.type === "snapshot");
   const observed = snapshot.observation.pylons.find((p) => p.pylonId === pylonId);
   assert.ok(observed?.phase === "running");
-  assert.deepEqual(observed.previews, [{ service: "web", httpsPort: 10000, ready: true }], "observations report the published previews");
+  assert.deepEqual(observed.previews, [{ service: "web", httpsPort: 10000 }], "observations report the published previews");
   assert.deepEqual(snapshot.observation.previewRoutes, [{ httpsPort: 10000, pylonId, service: "web" }], "and the node's routes");
   assert.equal((await visit(10000, { "tailscale-user-login": "someone@example.com" })).status, 502, "the fake guest origin is not listening");
   const hit = (await events.next()).value;
@@ -1477,9 +1487,9 @@ test("observations report the previews of the pylon's last successful spawn, not
   tailscale.failOnce(`serve --bg --https=10001 http://127.0.0.1:${gatewayPort}`);
   const both: Job = { ...spawnJob, live: { previews: [{ service: "web", httpsPort: 10000 }, { service: "api", httpsPort: 10001 }], overlay: [] }, liveHash: "hash-2" as LiveHash };
   await run(client, both, "failed");
-  assert.deepEqual(await observedPreviews(), [{ service: "web", httpsPort: 10000, ready: true }]);
+  assert.deepEqual(await observedPreviews(), [{ service: "web", httpsPort: 10000 }]);
   await run(client, both);
-  assert.deepEqual(await observedPreviews(), [{ service: "web", httpsPort: 10000, ready: true }, { service: "api", httpsPort: 10001, ready: true }]);
+  assert.deepEqual(await observedPreviews(), [{ service: "web", httpsPort: 10000 }, { service: "api", httpsPort: 10001 }]);
 });
 
 test("an unlinked port's route is withdrawn at once, and the pylon counts as unapplied until a spawn that started after it", async (t) => {
@@ -1534,6 +1544,25 @@ test("a spawn planned before an unlink that reaches the probe after it leaves th
   await run(client, linked);
   assert.equal((await visit(10001)).status, 502, "linking it again is what lets a spawn route it");
   assert.deepEqual(await observed(), { liveHash: "hash-1", previews: ["web", "port-3000"], routes: ["web", "port-3000"] });
+});
+
+test("NEXUS_API's unpreview withdraws the port's route and its preview lets a spawn route it again, as the commands do", async (t) => {
+  const { open, run, visit, api } = await previewSetup(t);
+  const { client } = await open();
+  const linked: Job = { ...spawnJob, live: { previews: [{ service: "web", httpsPort: 10000 }, { service: "port-3000", httpsPort: 10001 }], overlay: [] } };
+  await run(client, linked);
+  assert.deepEqual(await api({ op: "unpreview", port: 3000 }), { status: 200, body: JSON.stringify({ port: 3000 }) });
+  assert.equal((await visit(10001)).status, 404, "the route is withdrawn before the reply");
+  await run(client, linked);
+  assert.equal((await visit(10001)).status, 404, "a spawn planned before the unlink leaves it unrouted");
+
+  const preview = api({ op: "preview", port: 3000 });
+  const abort = new AbortController();
+  await client.observe(abort.signal)[Symbol.asyncIterator]().next(); // read after the link, which runs in the read queue
+  abort.abort();
+  await run(client, linked);
+  assert.deepEqual(await preview, { status: 200, body: JSON.stringify({ service: "port-3000", port: 3000, url: `https://${nodeHost}:10001/` }) });
+  assert.equal((await visit(10001)).status, 502, "linking it again is what lets a spawn route it");
 });
 
 test("a spawn that started before an unlink leaves the unlinked port unrouted, so a pause right after keeps no route to it", async (t) => {

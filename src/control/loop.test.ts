@@ -412,9 +412,11 @@ test("a wake for reading that fails after the backfill let go of its pylon fails
   assert.ok(wake.kind === "spawn" && wake.relaunch === false);
   registry.stopUsageBackfill(Date.now());
   fake.finish(fake.running()[0]!, setupFailed(thread.pylonId, 1));
-  await until("the failure is folded in", () => registry.pylon(thread.pylonId)!.attempts.count === 1);
+  await until("the failure is folded in", () => registry.pylon(thread.pylonId)!.attempts.readFailure !== undefined);
   await settled(fake, loop);
-  assert.equal(registry.pylon(thread.pylonId)!.failed, null, "a failure the backfill no longer waits on fails nothing");
+  const read = registry.pylon(thread.pylonId)!;
+  assert.equal(read.failed, null, "a failure the backfill no longer waits on fails nothing");
+  assert.deepEqual([read.attempts.count, read.attempts.last, read.attempts.readFailure?.code], [0, null, "setup-failed"], "the failed wake for reading is kept apart from the wake's tries");
   assert.deepEqual(logged, []);
 
   registry.setThreadStatus(thread.id, "active");
@@ -425,8 +427,27 @@ test("a wake for reading that fails after the backfill let go of its pylon fails
   assert.deepEqual(kinds(fake.submitted), ["spawn fresh", "pause", "spawn resume", "spawn resume"]);
   assert.ok(next.kind === "spawn" && next.relaunch === undefined, "the wake brings the sessions back");
   fake.finish(fake.running()[0]!, setupFailed(thread.pylonId, 1));
-  await until("the wake's failure is folded in", () => registry.pylon(thread.pylonId)!.attempts.last?.reading === undefined);
+  await until("the wake's failure is folded in", () => registry.pylon(thread.pylonId)!.attempts.last !== null);
   assert.equal(registry.pylon(thread.pylonId)!.attempts.count, 1, "the failed wake for reading is not one of the wake's tries");
+});
+
+test("a record from before failed wakes for reading were kept apart, whose last failure is one, plans the thread's next wake at once", async (t) => {
+  const registry = openRegistry(tempDb());
+  const thread = seed(registry);
+  const fake = fakeNode({ autoFinish: false });
+  const loop = run(t, registry, fake.probe);
+  await until("the spawn runs", () => fake.running().length === 1);
+  fake.finish(fake.running()[0]!);
+  await archive(registry, fake, loop, thread);
+  const failure = { at: Date.now(), code: "setup-failed" as const, message: "the disk is full" };
+  registry.savePylon({ ...registry.pylon(thread.pylonId)!, attempts: { count: 1, last: { ...failure, reading: true } as typeof failure } });
+
+  registry.setThreadStatus(thread.id, "active");
+  registry.recordActivity(thread.id, { human: Date.now() });
+  void loop.wake(node);
+  await until("the thread's wake runs", () => fake.running().length === 1);
+  assert.deepEqual(kinds(fake.submitted), ["spawn fresh", "pause", "spawn resume"], "a setup-failed wake for reading neither fails the pylon nor holds its wake");
+  assert.deepEqual(registry.pylon(thread.pylonId)!.attempts, { count: 0, last: null, readFailure: failure });
 });
 
 test("a wake for reading the planner gives up on, as for an image no online node holds, is an attempt the backfill skips, never a failed pylon", async (t) => {
@@ -443,10 +464,10 @@ test("a wake for reading the planner gives up on, as for an image no online node
 
   registry.startUsageBackfill([thread.id], Date.now());
   registry.holdUsageBackfill(thread.id, Date.now());
-  await until("the planner gives up", () => registry.pylon(thread.pylonId)!.attempts.last !== null || registry.pylon(thread.pylonId)!.failed !== null);
+  await until("the planner gives up", () => registry.pylon(thread.pylonId)!.attempts.readFailure !== undefined || registry.pylon(thread.pylonId)!.failed !== null);
   await settled(fake, loop);
   const read = registry.pylon(thread.pylonId)!;
-  assert.deepEqual([read.failed, read.attempts.count, read.attempts.last?.code, read.attempts.last?.message, read.attempts.last?.reading], [null, 1, "artifact-missing", "no online node holds img-111111111111", true]);
+  assert.deepEqual([read.failed, read.attempts.count, read.attempts.last, read.attempts.readFailure?.code, read.attempts.readFailure?.message], [null, 0, null, "artifact-missing", "no online node holds img-111111111111"]);
   assert.deepEqual(kinds(fake.submitted), ["spawn fresh", "pause"]);
   assert.deepEqual(logged, []);
 
@@ -479,10 +500,10 @@ test("a fetch of its image for a wake for reading that fails after the backfill 
   assert.equal(fake.submitted.at(-1)!.kind, "fetch-artifact");
   registry.stopUsageBackfill(Date.now());
   fake.finish(fake.running()[0]!, { code: "invalid", message: `${testbench} refuses the copy`, logTail: "" });
-  await until("the failure is folded in", () => registry.pylon(thread.pylonId)!.attempts.count === 1);
+  await until("the failure is folded in", () => registry.pylon(thread.pylonId)!.attempts.readFailure !== undefined);
   await settled(fake, loop);
   const read = registry.pylon(thread.pylonId)!;
-  assert.deepEqual([read.failed, read.attempts.last?.code, read.attempts.last?.reading], [null, "invalid", true], "a failure the backfill no longer waits on fails nothing");
+  assert.deepEqual([read.failed, read.attempts.count, read.attempts.last, read.attempts.readFailure?.code], [null, 0, null, "invalid"], "a failure the backfill no longer waits on fails nothing");
   assert.deepEqual(logged, []);
 
   registry.setThreadStatus(thread.id, "active");
@@ -491,7 +512,7 @@ test("a fetch of its image for a wake for reading that fails after the backfill 
   await until("the thread's wake fetches its image", () => fake.running().length === 1);
   assert.deepEqual(kinds(fake.submitted), ["spawn fresh", "pause", "fetch-artifact", "fetch-artifact"]);
   fake.finish(fake.running()[0]!, { code: "backend", message: "the copy was cut short", logTail: "" });
-  await until("the wake's failure is folded in", () => registry.pylon(thread.pylonId)!.attempts.last?.reading === undefined);
+  await until("the wake's failure is folded in", () => registry.pylon(thread.pylonId)!.attempts.last !== null);
   assert.equal(registry.pylon(thread.pylonId)!.attempts.count, 1, "the failed fetch for reading is not one of the wake's tries");
 });
 

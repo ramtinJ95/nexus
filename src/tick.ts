@@ -3,7 +3,7 @@
  * the node's latest observation, and submits it. The caller owns where the record lives: the control
  * plane's loop saves it to the registry, and the slice test keeps it in memory.
  */
-import { envelope, failureMessage, planPylon, type DesiredPhase, type FailedAttempt, type PlanInput, type PlanStep } from "./reconcile.ts";
+import { envelope, failureMessage, planPylon, type Attempts, type DesiredPhase, type FailedAttempt, type PlanInput, type PlanStep } from "./reconcile.ts";
 import type { Job, JobEnvelope, JobId, JobStatus, NodeName, NodeObservation, ProbeClient, ProbeError } from "./protocol.ts";
 import type { CheckpointId } from "./images.ts";
 
@@ -51,8 +51,13 @@ export interface TickContext {
 }
 
 export async function tick(pylon: PylonRecord, ctx: TickContext): Promise<PlanStep> {
+  const attempts = upgradeAttempts(pylon.attempts);
+  if (attempts !== pylon.attempts) {
+    pylon.attempts = attempts;
+    ctx.save(pylon);
+  }
   // Delete still reaches the planner, whose rule 3 ignores failures.
-  if (pylon.failed !== null && pylon.desired !== "deleted") return { kind: "fail", reason: pylon.failed };
+  if (pylon.failed !== null && pylon.desired !== "deleted") return { kind: "fail", code: pylon.attempts.last?.code ?? "backend", reason: pylon.failed };
 
   const { probe } = ctx;
   let { observation } = ctx;
@@ -92,9 +97,7 @@ export async function tick(pylon: PylonRecord, ctx: TickContext): Promise<PlanSt
 
   if (step.kind === "fail" && pylon.desired === "reading") {
     // A pylon woken only to be read is never failed. The backfill skips its thread with the reason and clears the attempt.
-    const missing = "artifact-missing: ";
-    const [code, message] = step.reason.startsWith(missing) ? ["artifact-missing", step.reason.slice(missing.length)] as const : ["backend", step.reason] as const;
-    pylon.attempts = failedAttempt(pylon, code, message, true);
+    pylon.attempts = failedAttempt(pylon, step.code, step.reason, true);
     ctx.save(pylon);
     return { kind: "wait", reason: "backoff" };
   }
@@ -176,9 +179,21 @@ async function settle(pylon: PylonRecord, probe: ProbeClient, observation: NodeO
   return null;
 }
 
-function failedAttempt(pylon: PylonRecord, code: FailedAttempt["code"], message: string, reading: boolean): PylonRecord["attempts"] {
-  // A wake for reading's failure is not one of a normal wake's tries.
-  return { count: (pylon.attempts.last?.reading === true ? 0 : pylon.attempts.count) + 1, last: { at: Date.now(), code, message, ...(reading ? { reading } : {}) } };
+/** A wake for reading's failure is not one of a normal wake's tries, so it is kept apart from them. */
+function failedAttempt(pylon: PylonRecord, code: FailedAttempt["code"], message: string, reading: boolean): Attempts {
+  const failure = { at: Date.now(), code, message };
+  return reading ? { ...pylon.attempts, readFailure: failure } : { ...pylon.attempts, count: pylon.attempts.count + 1, last: failure };
+}
+
+/**
+ * A record saved before `readFailure` kept a failed wake for reading in `last`, marked `reading: true`, and the planner
+ * read it as no attempts unless desired was `reading`.
+ */
+function upgradeAttempts(attempts: Attempts): Attempts {
+  const last: (FailedAttempt & { reading?: true }) | null = attempts.last;
+  if (last?.reading !== true) return attempts;
+  const { reading: _, ...readFailure } = last;
+  return { count: 0, last: null, readFailure };
 }
 
 /** One snapshot from a new observe stream, whose first event is always a snapshot. Null when the probe is unreachable. */

@@ -97,7 +97,7 @@ export function usageBackfill(options: {
       registry.waitUsageBackfill(waiting);
       if (waiting !== null) return;
       // A failure from before the thread was archived would hold the wake in backoff, which the run reads as its own.
-      if (p.attempts.last !== null) registry.clearPylonAttempts(p.pylonId);
+      if (p.attempts.last !== null || p.attempts.readFailure !== undefined) registry.clearPylonAttempts(p.pylonId);
       registry.holdUsageBackfill(t.id, now);
       wake(p.node);
       return;
@@ -116,7 +116,7 @@ export function usageBackfill(options: {
     if (t.status !== "archived") return finish("skipped", "it was unarchived while it was read, so live counting reads it");
     if (p === undefined) return finish("skipped", "its pylon has no record");
     if (p.failed !== null) return finish("skipped", `its pylon failed: ${p.failed}`);
-    const last = p.attempts.last;
+    const last = p.attempts.readFailure ?? p.attempts.last;
     if (last !== null) {
       registry.clearPylonAttempts(p.pylonId);
       return finish("skipped", `the pylon did not boot: ${last.code}: ${last.message}`);

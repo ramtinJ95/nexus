@@ -91,7 +91,7 @@ test("a config with a mistake is refused, naming the field", () => {
   for (const [what, change, field] of cases) {
     assert.throws(() => parseProbeConfig(withChange(change)), field, what);
   }
-  assert.throws(() => parseProbeConfig("{"), SyntaxError, "a config that is not JSON");
+  assert.throws(() => parseProbeConfig("{"), /config: Expected property name/, "a config that is not JSON");
 });
 
 test("a secrets file maps names to verbatim values", () => {

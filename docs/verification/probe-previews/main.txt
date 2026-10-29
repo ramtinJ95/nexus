@@ -1,0 +1,12 @@
+main: c5168d6 feat(dashboard): open, close and jump between a pylon's sessions from the thread page (#211)
+host bridge, a body that is not JSON: 400 the request body is not JSON
+host bridge, an op it does not take: 400 not a request this API takes:
+✖ Invalid discriminator value. Expected 'event' | 'info' | 'services' | 'service-logs' | 'service-start' | 'preview' | 'unpreview' | 'output-add' | 'output-list'
+  → at op
+host bridge, a preview port out of range: 400 not a request this API takes:
+✖ Too small: expected number to be >=1
+  → at port
+upgrade to no route: "HTTP/1.1 404 Not Found\r\ncontent-type: text/plain; charset=utf-8\r\ncontent-length: 25\r\nconnection: close\r\n\r\nno upgrade route /v1/nope"
+upgrade for a pylon that does not run: "HTTP/1.1 404 Not Found\r\ncontent-type: text/plain; charset=utf-8\r\ncontent-length: 58\r\nconnection: close\r\n\r\nno upgrade route /v1/pylons/pylon-x/shell for nexus-stream"
+link-port for a pylon that does not run: 409 pylon-x is absent, not running
+probe.json that is not JSON: exit 1, stderr "Error: <dir>/probe.json: Expected property name or '}' in JSON at position 1 (line 1 column 2)"

@@ -8,7 +8,7 @@ import { runningCommit } from "../deploy/health.ts";
 import { randomUUID } from "node:crypto";
 import { mkdir } from "node:fs/promises";
 import { once } from "node:events";
-import { createServer, STATUS_CODES, type IncomingMessage, type ServerResponse } from "node:http";
+import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import type { Duplex } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { commandPolicies, JobFailure, runCommand, runJob, type BackendPylon, type CommandPolicy, type ProbeDeps, type VmBackend } from "../backend.ts";
@@ -18,7 +18,7 @@ import {
   type Job, type JobEnvelope, type JobId, type JobStatus, type LiveHash, type NodeName, type NodeObservation,
   type DeclaredOutput, type GitFacts, type ListeningFact, type ProbeAuthConfig, type CommandResult, type ProbeEvent, type PylonCommand, type PylonId, type PylonObservation, type ServiceFact, type SessionFact, type Subject, type TailnetNodeId,
 } from "../protocol.ts";
-import type { ServiceName } from "../project.ts";
+import { linkedName, type ServiceName } from "../project.ts";
 import { attachedTerminals, sessionFacts } from "../sessions.ts";
 import { onePerClaudeSession } from "../session-wake.ts";
 import type { Whois } from "../tailscale.ts";
@@ -28,7 +28,7 @@ import { readBody } from "../request-body.ts";
 import { redact } from "./redact.ts";
 import { hostCapacity, readNodeHealth } from "./host.ts";
 import { gitFacts, gitPollMs } from "../git-facts.ts";
-import { startGateway } from "./gateway.ts";
+import { rawResponse, startGateway } from "./gateway.ts";
 import { createPylonApi } from "./pylon-api.ts";
 import { createTailscaleServe, parseServeStatus, readRoutes, type HttpsGet, type TailscaleCli } from "./serve.ts";
 import type { NodeSecrets } from "./config.ts";
@@ -146,6 +146,7 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
         if (kept !== undefined) published.set(pylonId, kept);
       },
     },
+    ports: { link: linkPort, unlink: unlinkPort },
     node,
     fetchPeer: (from, artifact, sha256, signal) => fetchArtifact(peerAddress(from), artifact, sha256, { whois, peers }, signal),
   };
@@ -165,12 +166,11 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
     guest: (pylonId) => backend.guest(pylonId),
     published: (pylonId) => published.get(pylonId) ?? [],
     changed: () => void publishSnapshot(),
-    withdraw: (pylonId, service) => deps.serve.withdraw(pylonId, service),
-    linked: relinked,
-    async previewUrl(httpsPort) {
-      if (previews === null) return null;
-      const served = parseServeStatus(await previews.tailscale(["serve", "status", "--json"], shutdown.signal), previews.gateway.origin).get(httpsPort);
-      return served?.kind === "nexus" ? served.url : null;
+    ports: deps.ports,
+    async previewUrls() {
+      if (previews === null) return new Map();
+      const served = parseServeStatus(await previews.tailscale(["serve", "status", "--json"], shutdown.signal), previews.gateway.origin);
+      return new Map([...served].flatMap(([httpsPort, entry]) => entry.kind === "nexus" ? [[httpsPort, entry.url]] : []));
     },
   });
 
@@ -340,7 +340,7 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
         return {
           pylonId, phase: "running", liveHash: liveHashes.get(pylonId) ?? null, bootedAt: p.bootedAt,
           bootedFrom: { image: p.image, checkpoint: p.checkpoint },
-          services: serviceFacts, listening: ports, previews: (published.get(pylonId) ?? []).map((preview) => ({ ...preview, ready: true })), sessions: sessionFacts, git: checkout, declaredOutputs: outputs,
+          services: serviceFacts, listening: ports, previews: published.get(pylonId) ?? [], sessions: sessionFacts, git: checkout, declaredOutputs: outputs,
           attachedClients,
         };
       }
@@ -356,15 +356,30 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
     return betweenReads(readSnapshot);
   }
 
-  /**
-   * Runs `work` in the read queue, so no read overlaps it, and each read queued before it is published before it
-   * starts. A link or unlink runs here: the control plane writes its preview as soon as the command answers, and a
-   * read from before the command, published after that, would undo the write until the next read.
-   */
+  /** Runs `work` in the read queue, so no read overlaps it, and each read queued before it is published before it starts. */
   function betweenReads<T>(work: () => Promise<T>): Promise<T> {
     const next = snapshots.then(work);
     snapshots = next.catch(() => undefined); // the caller handles the error. The queue only needs to move on
     return next;
+  }
+
+  /*
+   * A link or unlink, with its route bookkeeping, runs in the read queue: the control plane writes its preview as soon
+   * as the call answers, and a read from before the call, published after that, would undo the write until the next read.
+   */
+  function linkPort(pylonId: PylonId, port: number, title?: string): Promise<ServiceName> {
+    return betweenReads(async () => {
+      const service = await backend.guest(pylonId).linkPort(port, title);
+      relinked(pylonId, service);
+      return service;
+    });
+  }
+  function unlinkPort(pylonId: PylonId, port: number): Promise<string | null> {
+    return betweenReads(async () => {
+      const refused = await backend.guest(pylonId).unlinkPort(port);
+      if (refused === null) await deps.serve.withdraw(pylonId, linkedName(port));
+      return refused;
+    });
   }
 
   /**
@@ -552,10 +567,9 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
       const policy = commandPolicies[command.kind] as CommandPolicy<PylonCommand["kind"]>;
       const run = () => asked.kind === "send-claude-outcome" ? outcomeOf(pylonId, asked.requestId) : runCommand(pylonId, asked, deps);
       const session = typeof policy.lock === "function" ? policy.lock(command) : undefined;
-      const running = policy.lock === "reads" ? betweenReads(run) : session !== undefined ? onePerClaudeSession(pylonId, [session], run) : run();
+      const running = session !== undefined ? onePerClaudeSession(pylonId, [session], run) : run();
       if (policy.remembered && "requestId" in command && command.requestId !== undefined) remember(pylonId, command.requestId, running);
       const result = await running;
-      if (result.kind === "link-port") relinked(pylonId, result.service);
       if (typeof policy.publishes === "function" ? policy.publishes(result) : policy.publishes) void publishSnapshot();
       return send(res, 200, JSON.stringify(result), "application/json");
     }
@@ -694,8 +708,7 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
 
 /** An HTTP error on a socket that asked to upgrade, which has no ServerResponse. Does nothing once the socket is gone. */
 function refuse(socket: Duplex, status: number, body: string) {
-  if (socket.destroyed) return;
-  socket.end(`HTTP/1.1 ${status} ${STATUS_CODES[status]}\r\ncontent-type: text/plain; charset=utf-8\r\ncontent-length: ${Buffer.byteLength(body)}\r\nconnection: close\r\n\r\n${body}`);
+  if (!socket.destroyed) socket.end(rawResponse(status, { "content-type": "text/plain; charset=utf-8", connection: "close" }, body));
 }
 
 function send(res: ServerResponse, status: number, body: string, contentType = "text/plain; charset=utf-8") {

@@ -9,6 +9,7 @@ import { basename, dirname, isAbsolute } from "node:path";
 import { z } from "zod";
 import type { SecretSource } from "../backend.ts";
 import type { ImageId } from "../images.ts";
+import { parseJson } from "../parse.ts";
 import { heldSecrets, isImageId, nodeNameSchema, probePort, tailnetNodeIdSchema, type ProbeAuthConfig } from "../protocol.ts";
 
 const absolutePath = z.string().refine(isAbsolute, "must be an absolute path");
@@ -66,9 +67,7 @@ const configSchema = z.strictObject({
 export type ProbeConfig = z.infer<typeof configSchema>;
 
 export function parseProbeConfig(text: string): ProbeConfig {
-  const result = configSchema.safeParse(JSON.parse(text));
-  if (!result.success) throw new Error(z.prettifyError(result.error));
-  return result.data;
+  return parseJson(configSchema, text, "config");
 }
 
 export async function readProbeConfig(path: string): Promise<ProbeConfig> {
@@ -149,9 +148,7 @@ const statusSchema = z.object({ Self: z.object({ DNSName: z.string() }) });
  * served under it, so a node without one cannot publish them.
  */
 export function parseSelfDnsName(statusJson: string): string {
-  const result = statusSchema.safeParse(JSON.parse(statusJson));
-  if (!result.success) throw new Error(`tailscale status --json has no Self.DNSName:\n${z.prettifyError(result.error)}`);
-  const name = result.data.Self.DNSName.replace(/\.$/, "");
+  const name = parseJson(statusSchema, statusJson, "tailscale status --json has no Self.DNSName: status").Self.DNSName.replace(/\.$/, "");
   if (name === "") throw new Error("tailscale reports no MagicDNS name for this node, so previews have no host to be served under. Turn on MagicDNS for the tailnet");
   return name;
 }
