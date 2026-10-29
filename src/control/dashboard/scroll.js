@@ -10,7 +10,8 @@ export const atEnd = (el) => el.scrollHeight - el.scrollTop - el.clientHeight < 
 export function endFollower(el, observe) {
   let following = true;
   const toEnd = () => { el.scrollTop = el.scrollHeight; };
-  const read = () => { following = atEnd(el); };
+  // A hidden scroller reads as empty, which says nothing of where the reader left it.
+  const read = () => { if (!el.hidden) following = atEnd(el); };
   el.addEventListener("scroll", read);
   // A fold that opens grows the content without scrolling, and its toggle does not bubble.
   el.addEventListener("toggle", read, true);
