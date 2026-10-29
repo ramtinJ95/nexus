@@ -26,7 +26,7 @@ import { threadQueue, type QueuedThread } from "../control/queue.ts";
 import { turnGate } from "../control/drain.ts";
 import { fakeHarness } from "../control/fake-harness.ts";
 import { openRegistry, type Thread, type ThreadId } from "../control/registry.ts";
-import { agentReplies, type Review } from "../control/review.ts";
+import { agentReplies, type Review, type ReviewLoop } from "../control/review.ts";
 import type { Judgment } from "../control/judgment.ts";
 import { startImageRollout } from "../control/image-rollout.ts";
 import { usageBackfill } from "../control/usage-backfill.ts";
@@ -119,7 +119,7 @@ async function socksProxy(t: TestContext, reply: number | "close" = 0, ports: Re
 }
 
 /** `https` also serves the API over TLS on a port of its own, as the dashboard's port, with a certificate for `apiName`. */
-async function setup(t: TestContext, setupOptions: { queue?: boolean; https?: boolean } = {}) {
+async function setup(t: TestContext, setupOptions: { queue?: boolean; https?: boolean; reviews?: ReviewLoop } = {}) {
   const dir = await mkdtemp(join(tmpdir(), "nexus-cli-"));
   const certificate = setupOptions.https === true ? await testCertificate(dir, apiName) : null;
   const registry = openRegistry(join(dir, "registry.db"));
@@ -159,6 +159,7 @@ async function setup(t: TestContext, setupOptions: { queue?: boolean; https?: bo
     queue,
     pipeline: items,
     planning: plans,
+    ...setupOptions.reviews === undefined ? {} : { reviews: setupOptions.reviews },
     deployment: { self: "nFIREBAT" as TailnetNodeId, deployers: new Set([laptop]), keys: {}, resolveMain: async () => "a".repeat(40) },
     ...certificate === null ? {} : { https: { port: 0, certificate: async () => certificate } },
     registry, host: "127.0.0.1", port, whois: async () => { requests++; return caller; }, allowed: new Set([laptop, phone]),
@@ -1536,7 +1537,7 @@ judgment of failure 814 on ${node}: no verdict yet\n {2}judging since 2026-10-28
 
 test("deploy and release use the shared release view and wait for both roles", async (t) => {
   const s = await setup(t);
-  assert.equal((await s.nexus(["--version"])).stdout.trim(), "nexus 0.44.0");
+  assert.equal((await s.nexus(["--version"])).stdout.trim(), "nexus 0.45.0");
   assert.equal((await s.nexus(["deploy", "bad"])).code, 64);
   const requested = await s.json(["deploy", "main"]);
   assert.equal(requested.desired.commit, "a".repeat(40));
@@ -1634,6 +1635,24 @@ test("review and land reach the review loop's routes, and show prints a review a
   assert.match(waived.stdout, new RegExp(`^waived by nLAPTOP at ${"1".repeat(40)}, 2026-10-27T09:00:00.000Z:\n  ${hold.replace(/[.()]/g, "\\$&")}$`, "m"));
   const events = await s.nexus(["events", "--thread", thread.id, "--kind", "review.waived"]);
   assert.match(events.stdout, /review.waived/);
+});
+
+test("review --cancel ends the thread's running review through its route, and prints who cancelled it", async (t) => {
+  const asked: unknown[][] = [];
+  let review: Review | null = null;
+  const reviews = { cancel(builder: ThreadId, by: string) { asked.push([builder, by]); return { ...review!, phase: { kind: "cancelled", who: "person", by } }; } } as never as ReviewLoop;
+  const s = await setup(t, { reviews });
+  const thread: Thread = await s.json(["start", "--project", "acme", "--title", "Cache"]);
+  review = {
+    id: "rv-1", builder: thread.id, reviewer: "th-reviewer" as ThreadId, pr: { repo: "octocat/Spoon-Knife", number: 7, url: "https://github.com/octocat/Spoon-Knife/pull/7", title: "Cache", branch: "cache" }, reviewerKind: "harness",
+    models: { builder: "claude-opus-5-5", reviewer: "gpt-6-astra" }, maxRounds: 5, land: null, auto: false, merged: null, waiver: null, expect: "rv-1:t", sent: 1, outbox: null, since: 0, nudges: 0, startedAt: 0,
+    rounds: [{ head: "1".repeat(40), verdict: null, check: null, answers: null }], phase: { kind: "reviewing" },
+  };
+  assert.equal((await s.nexus(["review", "--cancel", thread.id])).stdout, `Cancelled review rv-1 of PR #7: cancelled, round 1 of 5, reviewer th-reviewer on gpt-6-astra, cancelled by ${laptop}\n`);
+  assert.deepEqual((await s.json(["review", thread.id, "--cancel"])).phase, { kind: "cancelled", who: "person", by: laptop });
+  assert.deepEqual(asked, [[thread.id, laptop], [thread.id, laptop]]);
+  for (const extra of [["--land"], ["--pr", "7"], ["--rounds", "2"]]) assert.equal((await s.nexus(["review", "--cancel", thread.id, ...extra])).code, 64, `--cancel with ${extra[0]}`);
+  assert.equal(asked.length, 2, "a refused flag sends nothing");
 });
 
 test("project edit replaces supplied grants and preserves omitted settings", async (t) => {
