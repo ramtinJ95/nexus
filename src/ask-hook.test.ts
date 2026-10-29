@@ -55,16 +55,34 @@ async function waitingAsk(dir: string, session: string, { call = "toolu_1" as st
   };
 }
 
+/** Delivers the answer, letting the ask poll each time the delivery waits for it to be taken. */
+const delivered = (dir: string, a: AskAnswer, ask: { poll(): Promise<void> }) => deliverAnswer(dir, a, { sleep: () => ask.poll() });
+
+/** A delivery that waits until `go` for its first poll, and the promise of its exit code once it waits. */
+async function pendingDelivery(dir: string, a: AskAnswer) {
+  const waiting = Promise.withResolvers<void>();
+  const go = Promise.withResolvers<void>();
+  const code = deliverAnswer(dir, a, {
+    sleep: () => {
+      waiting.resolve();
+      return go.promise;
+    },
+  });
+  await Promise.race([waiting.promise, code]);
+  return { code, go: () => go.resolve() };
+}
+
 const stillWaits = (ask: { waited: Promise<unknown> }) => Promise.race([ask.waited.then(() => false), new Promise<boolean>((resolve) => setImmediate(() => resolve(true)))]);
 
 test("the dashboard's answer reaches the waiting ask as Claude's input with it, a retry of it succeeds, and another answer is refused", async (t) => {
   const dir = await asksDir(t);
   const ask = await waitingAsk(dir, "s1");
-  assert.equal(await deliverAnswer(dir, answer("s1")), answerExits.delivered);
-  assert.equal(await deliverAnswer(dir, answer("s1")), answerExits.delivered, "the same answer again before the ask takes it");
+  const first = await pendingDelivery(dir, answer("s1"));
   assert.equal(await deliverAnswer(dir, answer("s1", { extras: "Sugar" })), answerExits.answeredOtherwise);
   assert.equal(await deliverAnswer(dir, answer("s2")), answerExits.nobodyWaits, "the same questions in another session");
-  await ask.poll();
+  assert.equal(await delivered(dir, answer("s1"), ask), answerExits.delivered, "the same answer again before the ask takes it");
+  first.go();
+  assert.equal(await first.code, answerExits.delivered, "the first delivery once the ask took its answer");
   const taken = await ask.waited;
   assert.deepEqual(askDecision(input, taken!), {
     hookSpecificOutput: {
@@ -93,9 +111,30 @@ test("an answer to a call the terminal answered finds nobody waiting, though Cla
   assert.equal(await deliverAnswer(dir, answer("s1", { call: "toolu_1" })), answerExits.nobodyWaits);
   await second.poll();
   assert.ok(await stillWaits(second), "the second call does not take the first call's answer");
-  assert.equal(await deliverAnswer(dir, answer("s1", { call: "toolu_2", extras: "Sugar" })), answerExits.delivered);
-  await second.poll();
+  assert.equal(await delivered(dir, answer("s1", { call: "toolu_2", extras: "Sugar" }), second), answerExits.delivered);
   assert.equal((await second.waited)?.answers["What goes in it?"], "Sugar");
+});
+
+test("an answer the terminal beats to the dialog after it is written is taken back, so the delivery finds nobody waiting", async (t) => {
+  const dir = await asksDir(t);
+  const ask = await waitingAsk(dir, "s1");
+  const delivery = await pendingDelivery(dir, answer("s1"));
+  await forgetAsk(dir, "s1", { ...input, answers: { "Which drink?": "Coffee" } });
+  await ask.poll();
+  assert.equal(await ask.waited, null, "the hook stops with nothing to print");
+  delivery.go();
+  assert.equal(await delivery.code, answerExits.nobodyWaits);
+  assert.equal(await deliverAnswer(dir, answer("s1")), answerExits.nobodyWaits, "a retry is not acknowledged by the answer left behind");
+});
+
+test("an answer the hook does not take in time is taken back, and the hook never hands it to Claude", async (t) => {
+  const dir = await asksDir(t);
+  const ask = await waitingAsk(dir, "s1");
+  assert.equal(await deliverAnswer(dir, answer("s1"), { giveUpMs: 0 }), answerExits.nobodyWaits);
+  await ask.poll();
+  assert.ok(await stillWaits(ask), "the hook still waits, with no answer to take");
+  assert.equal(await delivered(dir, answer("s1", { extras: "Sugar" }), ask), answerExits.delivered, "another answer is not refused for the one taken back");
+  assert.equal((await ask.waited)?.answers["What goes in it?"], "Sugar");
 });
 
 test("the asks that wait name the call PreToolUse recorded, and leave out one whose call is unknown and one whose hook is gone", async (t) => {
@@ -129,12 +168,12 @@ test("an ask the terminal answered stops at its PostToolUse with nothing to prin
 test("a turn's start or end, or its session's end, stops the session's waiting asks and leaves another session's", async (t) => {
   const dir = await asksDir(t);
   const interrupted = await waitingAsk(dir, "s1");
-  await waitingAsk(dir, "s2", { call: "toolu_2" });
+  const others = await waitingAsk(dir, "s2", { call: "toolu_2" });
   await forgetSession(dir, "s1");
   await interrupted.poll();
   assert.equal(await interrupted.waited, null);
   assert.deepEqual((await waitingAsks(dir)).map((a) => [a.session, a.toolUseId]), [["s2", "toolu_2"]]);
-  assert.equal(await deliverAnswer(dir, answer("s2", { call: "toolu_2" })), answerExits.delivered);
+  assert.equal(await delivered(dir, answer("s2", { call: "toolu_2" }), others), answerExits.delivered);
 });
 
 test("an ask whose Claude is gone stops waiting, and an answer then finds nobody waiting", async (t) => {

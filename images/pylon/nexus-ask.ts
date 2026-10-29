@@ -193,29 +193,45 @@ export async function awaitAnswer(
 }
 
 /**
- * Hands the answer to the hook that waits for its call, as `nexus-claude-hook answer` does, and answers the exit code.
- * The answer file is created whole and only once, so of two different answers one is refused, while the same answer
- * again, before or after the hook took it, succeeds.
+ * Hands the answer to the hook that waits for its call, as `nexus-claude-hook answer` does, and answers the exit code
+ * once the hook has taken it. The answer file is created whole and only once, so of two different answers one is
+ * refused, while the same answer again, before or after the hook took it, succeeds. When the call no longer waits, or
+ * its hook has not taken the answer within giveUpMs, the answer is taken back by a rename that races the hook's own,
+ * so exactly one of them has it. A dialog the terminal answered stays open to the hook until its PostToolUse runs,
+ * and an answer the hook takes then is delivered though Claude has the terminal's. Only Claude could close that gap.
  */
-export async function deliverAnswer(dir: string, answer: AskAnswer): Promise<number> {
+export async function deliverAnswer(
+  dir: string, answer: AskAnswer,
+  { sleep = () => new Promise<void>((resolve) => setTimeout(resolve, 50)), giveUpMs = 5_000 }: { sleep?: () => Promise<void>; giveUpMs?: number } = {},
+): Promise<number> {
   const key = askKey(answer.session, answer.questions);
   const answerFile = callFile(dir, key, answer.toolUseId, "answer");
   const content = contentOf(answer);
-  if (await read(callFile(dir, key, answer.toolUseId, "delivered")) === content) return answerExits.delivered;
-  const waiter = waitingOf(await read(file(dir, key, "waiting")));
+  const delivered = async () => await read(callFile(dir, key, answer.toolUseId, "delivered")) === content;
+  if (await delivered()) return answerExits.delivered;
+  const waitingText = await read(file(dir, key, "waiting"));
+  const waiter = waitingOf(waitingText);
   if (waiter?.toolUseId !== answer.toolUseId || !await waits(waiter)) return answerExits.nobodyWaits;
   const temp = `${answerFile}.${process.pid}`;
   await writeFile(temp, content);
   try {
     await link(temp, answerFile);
-    return answerExits.delivered;
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code !== "EEXIST") throw err;
-    const there = await read(answerFile) ?? await read(callFile(dir, key, answer.toolUseId, "delivered"));
-    return there === content ? answerExits.delivered : answerExits.answeredOtherwise;
+    if (await read(answerFile) !== content && !await delivered()) return answerExits.answeredOtherwise;
   } finally {
     await rm(temp, { force: true });
   }
+  const giveUp = Date.now() + giveUpMs;
+  while (!await delivered()) {
+    if (await read(file(dir, key, "waiting")) !== waitingText || !await waits(waiter) || Date.now() >= giveUp) {
+      const back = `${answerFile}.${process.pid}.back`;
+      if (await renamed(answerFile, back)) await rm(back, { force: true });
+      return await delivered() ? answerExits.delivered : answerExits.nobodyWaits;
+    }
+    await sleep();
+  }
+  return answerExits.delivered;
 }
 
 /**
