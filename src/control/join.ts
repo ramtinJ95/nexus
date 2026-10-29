@@ -25,10 +25,11 @@ export function mintJoinToken(registry: Registry, now = Date.now()): { token: st
 
 /**
  * Records the caller as a node, or refuses with nothing recorded. `admitted` is the control plane's machine and every
- * caller, which must stay a person or the control plane, so none of them may become a node. A node control.json names
- * keeps its key there. A joined node may join again with another token, which replaces its deploy key.
+ * caller, which must stay a person or the control plane, so none of them may become a node. `configured` is the nodes
+ * control.json names, which keep their keys there, even one that joined before it was added. A joined node may join
+ * again with another token, which replaces its deploy key.
  */
-export function joinNode(registry: Registry, admitted: ReadonlySet<TailnetNodeId>, caller: { id: TailnetNodeId; host: string }, request: z.infer<typeof joinRequestSchema>, now = Date.now()): JoinedNode {
+export function joinNode(registry: Registry, admitted: ReadonlySet<TailnetNodeId>, configured: ReadonlySet<TailnetNodeId>, caller: { id: TailnetNodeId; host: string }, request: z.infer<typeof joinRequestSchema>, now = Date.now()): JoinedNode {
   const hash = hashOf(request.token);
   const token = registry.joinToken(hash);
   if (token === undefined) throw new HttpError(403, `this join token is not one this control plane minted. ${mint}`);
@@ -36,13 +37,13 @@ export function joinNode(registry: Registry, admitted: ReadonlySet<TailnetNodeId
   if (token.expiresAt <= now) throw new HttpError(403, `this join token expired at ${new Date(token.expiresAt).toISOString()}. ${mint}`);
 
   if (admitted.has(caller.id)) throw new HttpError(409, `${caller.host} is the control plane's machine or a caller in control.json, which never joins as a node`);
+  if (configured.has(caller.id)) throw new HttpError(409, `${caller.host} is a node in control.json, which sets its deploy key`);
   const name = nodeNameSchema.safeParse(caller.host.split(".")[0]);
   if (!name.success) throw new HttpError(409, `tailscale names this machine ${caller.host}, whose first label is not a node name: ${name.error.issues[0]!.message}`);
   const named = registry.node(name.data);
   if (named !== undefined && named.tailnetNodeId !== caller.id) throw new HttpError(409, `a node named ${name.data} is already tailnet node ${named.tailnetNodeId}. Rename this machine in tailscale`);
   const same = registry.nodes().find((n) => n.tailnetNodeId === caller.id);
   if (same !== undefined && same.name !== name.data) throw new HttpError(409, `this machine is already the node ${same.name}, and tailscale now names it ${name.data}`);
-  if (same !== undefined && !registry.joinedNodes().some((n) => n.name === same.name)) throw new HttpError(409, `${same.name} is a node in control.json, which sets its deploy key`);
 
   const node = { name: name.data, tailnetHost: caller.host, tailnetNodeId: caller.id, deployKey: request.deployKey };
   if (!registry.joinNode(hash, node, now)) throw new HttpError(403, `this join token was used or expired meanwhile. ${mint}`);

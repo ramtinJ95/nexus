@@ -87,7 +87,7 @@ export interface ApiOptions {
   whois: Whois;
   allowed: ReadonlySet<TailnetNodeId>;
   /** `POST /v1/join`, the one route a machine that is no node or caller yet may call. Omitted: no machine can join. */
-  joins?: { whois: WhoisNode; joined(node: JoinedNode): void };
+  joins?: { whois: WhoisNode; configured: ReadonlySet<TailnetNodeId>; joined(node: JoinedNode): void };
   /** Names the API answers to in the Host header. Any other name is a DNS rebinding page on an allowed machine. */
   hostnames: ReadonlySet<string>;
   harness: ThreadHarness;
@@ -1285,7 +1285,7 @@ export async function startApi(options: ApiOptions): Promise<Api> {
     if (caller === null) throw new HttpError(403, "caller is not a tailnet node");
     checkHost(req);
     if (req.headers["content-type"]?.split(";")[0]?.trim() !== "application/json") throw new HttpError(415, "requests that change state must have content-type application/json");
-    const node = joinNode(registry, allowed, caller, parse(joinRequestSchema, await readJson(req)));
+    const node = joinNode(registry, allowed, joins.configured, caller, parse(joinRequestSchema, await readJson(req)));
     joins.joined(node);
     return { node: node.name, tailnetNodeId: node.tailnetNodeId };
   }

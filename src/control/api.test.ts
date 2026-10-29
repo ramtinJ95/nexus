@@ -124,7 +124,7 @@ async function setup(t: import("node:test").TestContext, options: { gitIdentity?
     }),
     // infra-testbench is allowed as a node in control.json's callers would be, so a test can show the API still tells it from a person.
     allowed: new Set([laptop, phone, "nFIREBAT" as TailnetNodeId, "nTESTBENCH" as TailnetNodeId]),
-    joins: { whois: async () => caller === null ? null : { id: caller, host: hosts.get(caller) ?? "unnamed.tail.ts.net" }, joined: (n) => { joined.push(n); } },
+    joins: { configured: new Set(["nFIREBAT", "nBENCH"] as TailnetNodeId[]), whois: async () => caller === null ? null : { id: caller, host: hosts.get(caller) ?? "unnamed.tail.ts.net" }, joined: (n) => { joined.push(n); } },
     // The control plane runs on rj-firebat and deploys nothing unless a test says so. null leaves deployments off.
     ...(options.deployment === null ? {} : { deployment: options.deployment ?? { self: "nFIREBAT" as TailnetNodeId, deployers: new Set(), keys: {} } }),
     ...(options.reviews === undefined ? {} : { reviews: options.reviews }),
@@ -291,6 +291,7 @@ test("an unknown or expired token is refused with nothing recorded", async (t) =
 test("a caller, the control plane's machine and a node of control.json never join, and a token they send stays unused", async (t) => {
   const s = await setup(t);
   s.registry.upsertNode({ name: "infra-testbench" as NodeName, tailnetHost: "infra-testbench.tail.ts.net", tailnetNodeId: "nBENCH" as TailnetNodeId });
+  s.registry.upsertNode({ name: "retired" as NodeName, tailnetHost: "retired.tail.ts.net", tailnetNodeId: "nRETIRED" as TailnetNodeId });
   const { token } = mintJoinToken(s.registry);
   const attempts: [TailnetNodeId, string][] = [
     [laptop, "laptop.tail.ts.net"],
@@ -298,6 +299,7 @@ test("a caller, the control plane's machine and a node of control.json never joi
     ["nBENCH" as TailnetNodeId, "infra-testbench.tail.ts.net"],
     ["nIMPOSTOR" as TailnetNodeId, "infra-testbench.tail.ts.net"],
     ["nBENCH" as TailnetNodeId, "renamed.tail.ts.net"],
+    ["nRETIRED" as TailnetNodeId, "renamed.tail.ts.net"],
     ["nUPPER" as TailnetNodeId, "Upper.tail.ts.net"],
   ];
   const answers = [];
@@ -310,9 +312,10 @@ test("a caller, the control plane's machine and a node of control.json never joi
   assert.deepEqual(answers, [
     "409 laptop.tail.ts.net is the control plane's machine or a caller in control.json, which never joins as a node",
     "409 rj-firebat.tail.ts.net is the control plane's machine or a caller in control.json, which never joins as a node",
-    "409 infra-testbench is a node in control.json, which sets its deploy key",
+    "409 infra-testbench.tail.ts.net is a node in control.json, which sets its deploy key",
     "409 a node named infra-testbench is already tailnet node nBENCH. Rename this machine in tailscale",
-    "409 this machine is already the node infra-testbench, and tailscale now names it renamed",
+    "409 renamed.tail.ts.net is a node in control.json, which sets its deploy key",
+    "409 this machine is already the node retired, and tailscale now names it renamed",
     "409 tailscale names this machine Upper.tail.ts.net, whose first label is not a node name: must be a lowercase tailnet machine name of at most 63 characters",
   ]);
   assert.equal(s.registry.joinToken(createHash("sha256").update(token).digest("hex"))?.usedAt, null);

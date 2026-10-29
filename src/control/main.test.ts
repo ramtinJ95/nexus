@@ -263,3 +263,20 @@ test("the host command mints a join token only as root", { skip: process.getuid?
   assert.equal(run.code, 77);
   assert.match(run.stderr, /run this as root on the control plane's machine\. A join token adds a node, so only root may mint one/);
 });
+
+test("a node that joined and was then added to control.json never joins again, and the token it sends stays unused", async (t) => {
+  const infra2 = { name: "infra-2", tailnetHost: "infra-2.example.ts.net", tailnetNodeId: "nJoinerCNTRL" };
+  const plane = await controlPlaneOf(t, { ...today, nodes: [...today.nodes, infra2], deployKeys: { ...today.deployKeys, nJoinerCNTRL: keyOf("config-token") } }, { before: (db) => {
+    const registry = openRegistry(db);
+    const { token } = mintJoinToken(registry);
+    registry.joinNode(createHash("sha256").update(token).digest("hex"), { ...infra2, name: "infra-2" as NodeName, tailnetNodeId: "nJoinerCNTRL" as TailnetNodeId, deployKey: keyOf("joiner-token") }, Date.now());
+    registry.close();
+  } });
+  const registry = openRegistry(plane.db);
+  t.after(() => registry.close());
+  const { token } = mintJoinToken(registry);
+  plane.hosts.set("nJoinerCNTRL", "infra-2.example.ts.net");
+  assert.deepEqual(await plane.call("nJoinerCNTRL", "POST", "/v1/join", { token, deployKey: keyOf("another-token") }), { status: 409, body: { error: "infra-2.example.ts.net is a node in control.json, which sets its deploy key" } });
+  assert.equal(registry.joinToken(createHash("sha256").update(token).digest("hex"))?.usedAt, null);
+  assert.equal(registry.joinedNodes()[0]?.deployKey, keyOf("joiner-token"), "the refused join replaced nothing");
+});

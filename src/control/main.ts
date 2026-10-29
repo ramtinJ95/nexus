@@ -253,6 +253,7 @@ export async function startControlPlane(config: ControlPlaneConfig, models: Mode
     allowed: new Set([config.self.tailnetNodeId, ...config.callers]),
     joins: {
       whois: localApiWhoisNode(tailscaled),
+      configured: new Set(config.nodes.map((n) => n.tailnetNodeId)),
       joined(node) {
         if (!probeMap.has(node.name)) loop.follow(connect(node));
         void peers.all();
