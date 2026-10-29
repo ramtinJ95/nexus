@@ -2,6 +2,7 @@
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { ClipboardAddon } from "@xterm/addon-clipboard";
+import { WebLinksAddon } from "@xterm/addon-web-links";
 import css from "@xterm/xterm/css/xterm.css";
 import { attachUrl, clipboardOf, joinTerminal, keyFor } from "./terminal.js";
 import { onThemeChange, themeValue } from "./theme.js";
@@ -46,6 +47,9 @@ function terminalTheme() {
   };
 }
 
+/** Opens a link in the terminal, a URL or an OSC 8 hyperlink, in a new tab without xterm.js's confirm. */
+const openLink = (event, uri) => window.open(uri, "_blank", "noopener");
+
 /** A terminal in `host` attached to the thread's pylon, fitted to `host` whenever it shows at a new size. */
 export function openTerminal(host, thread, status) {
   const unstyle = adoptStyles(host);
@@ -54,10 +58,12 @@ export function openTerminal(host, thread, status) {
     fontFamily: getComputedStyle(host).fontFamily,
     theme: terminalTheme(),
     macOptionClickForcesSelection: true,
+    linkHandler: { activate: openLink },
   });
   const fit = new FitAddon();
   term.loadAddon(fit);
   term.loadAddon(new ClipboardAddon(undefined, clipboardOf(navigator.clipboard)));
+  term.loadAddon(new WebLinksAddon(openLink));
   // A keypress xterm.js still saw would send a CR of its own, so every event of the key stops here.
   term.attachCustomKeyEventHandler((event) => {
     const bytes = keyFor(event);
