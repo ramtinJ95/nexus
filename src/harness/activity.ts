@@ -24,6 +24,8 @@ interface ThreadActivity {
   parked: Set<TaskId>;
   /** What the registry holds for agentTurnRunning, from the caller or the last onChange. */
   reported: boolean;
+  /** Whether the last onParked said the thread is parked. Unset until the first, so that one always goes out. */
+  reportedParked?: boolean;
 }
 
 export interface ActivityTracker extends HarnessActivity {
@@ -61,7 +63,11 @@ export function trackActivity(options: ActivityOptions): ActivityTracker {
   const factsOf = (a: ThreadActivity): AgentFacts => ({ agentTurnRunning: a.running && a.parked.size === 0, lastAgentActivityAt: a.lastActivityAt });
   function report(a: ThreadActivity) {
     const facts = factsOf(a);
-    options.onParked?.(a.threadId, a.parked.size > 0);
+    const parked = a.parked.size > 0;
+    if (parked !== a.reportedParked) {
+      a.reportedParked = parked;
+      options.onParked?.(a.threadId, parked);
+    }
     if (facts.agentTurnRunning === a.reported) return;
     a.reported = facts.agentTurnRunning;
     options.onChange(a.threadId, facts);

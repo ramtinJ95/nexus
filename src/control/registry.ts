@@ -915,7 +915,7 @@ export function openRegistry(path: string, clock = Date.now) {
     pruneSessions,
     attention: (id: ThreadId): Attention => (sql("SELECT attention FROM thread_attention WHERE thread = ?").get(id)?.attention ?? null) as Attention,
     recordParked(id: ThreadId, parked: boolean) {
-      // The harness reports on every change of a thread's live document, and nearly every report repeats the stored value.
+      // The harness reports each flip, but a process's first report for a thread may repeat what an earlier process stored.
       if (sql("SELECT parked FROM thread_attention WHERE thread = ?").get(id)?.parked === (parked ? 1 : 0)) return;
       transaction(() => {
         sql("INSERT INTO thread_attention (thread, parked) VALUES (?, ?) ON CONFLICT(thread) DO UPDATE SET parked = excluded.parked").run(id, parked ? 1 : 0);
