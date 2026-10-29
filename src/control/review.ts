@@ -573,8 +573,9 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
       const round = r.rounds.at(-1)!;
       const found = answeredSince(r, builder) ? latest(await replies(builder), "nexus-review-answers", answersSchema, r.expect) : null;
       if (found === null) return waitOn(r, phase, builder);
-      // An answer ends the model's failures in a row, though the loop may still wait for the push it promises.
-      if (phase.failing !== undefined) return { ...r, phase: { kind: "fixing" } };
+      // A turn after the request went again that did not fail ends the model's failures in a row, though the loop may
+      // still wait for the push its answer promises. An answer from before, or from the failed turn itself, does not.
+      if (phase.failing !== undefined && r.since >= phase.failing.retryAt && heard(builder, r.since).ended !== null && await modelFailure(builder) === null) return { ...r, phase: { kind: "fixing" } };
       const unanswered = findingsOf(round).filter(blocks).filter((f) => !found.answers.some((a) => a.id === f.id && (a.action === "fixed" || a.reason.trim() !== "")));
       if (unanswered.length) return waitOn(r, phase, builder, `Your answers leave ${unanswered.map((f) => f.id).join(", ")} without a fix or a reason to reject.`);
       const answered = withRound(r, { answers: found.answers });

@@ -385,6 +385,30 @@ test("a failed turn whose end is reported twice, by a Claude worker's transcript
   assert.equal(f.sent.at(-1)!.message.text, findings.message.text, "the findings go again 2 minutes after the failure, not 5");
 });
 
+test("a builder whose turn gives an incomplete answer and then fails on its model gets its findings again at the retry", async (t) => {
+  const f = fixture(t);
+  const loop = f.loop();
+  await loop.start(f.builder, { land: null });
+  await loop.poll();
+  f.reply(f.review().reviewer, verdict(f.review(), { verdict: "changes", findings: [serious] }));
+  await loop.poll();
+  const findings = f.sent.at(-1)!;
+  f.replies.set(f.builder, [answers(f.review(), [])]);
+  f.failedTurn(f.builder, "API Error: Request timed out.");
+  await loop.poll();
+  assert.match(phaseNote(f.review()), /\(1 in a row,/);
+  const failing = structuredClone(f.review().phase);
+  for (let i = 0; i < 3; i++) {
+    f.tick(10_000);
+    await loop.poll();
+    assert.deepEqual(f.review().phase, failing, "the answer from the failed turn neither clears the failure nor moves its retry");
+  }
+  f.tick(2 * 60_000);
+  await loop.poll();
+  assert.equal(f.sent.at(-1)!.message.text, findings.message.text);
+  assert.equal(f.sent.length, 3);
+});
+
 test("a builder that answers after a model failure is no longer failing while the loop waits for its push", async (t) => {
   const f = fixture(t);
   const loop = f.loop();
