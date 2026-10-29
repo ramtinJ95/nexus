@@ -6,7 +6,7 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
-import { answerExits, askDecision, askKey, awaitAnswer, deliverAnswer, forgetAsk, forgetSession, parseAskAnswer, recordCall, waitingAsks, type AskAnswer } from "../images/pylon/nexus-ask.ts";
+import { answerExits, askDecision, askKey, awaitAnswer, deliverAnswer, forgetAsk, forgetSession, hookInput, parseAskAnswer, recordCall, waitingAsks, type AskAnswer } from "../images/pylon/nexus-ask.ts";
 
 const hook = new URL("../images/pylon/nexus-claude-hook", import.meta.url).pathname;
 
@@ -163,6 +163,22 @@ test("an ask the terminal answered stops at its PostToolUse with nothing to prin
   assert.equal(await ask.waited, null);
   assert.equal(await deliverAnswer(dir, answer("s1")), answerExits.nobodyWaits);
   assert.deepEqual(await waitingAsks(dir), []);
+});
+
+test("an ask the terminal answered stops at its PostToolUse though its previews make that input longer than another hook's may be", async (t) => {
+  const dir = await asksDir(t);
+  const ask = await waitingAsk(dir, "s1");
+  const long = { ...input, questions: input.questions.map((q) => ({ ...q, options: q.options.map((o) => ({ ...o, preview: "x".repeat(40 << 10) })) })) };
+  const postToolUse = { session_id: "s1", hook_event_name: "PostToolUse", tool_name: "AskUserQuestion", tool_input: long, tool_response: { ...long, answers: { "Which drink?": "Coffee" } } };
+  const text = JSON.stringify(postToolUse);
+  assert.ok(text.length > 64 << 10, `${text.length} characters`);
+  const payload = await hookInput([text.slice(0, 1000), text.slice(1000)]);
+  await forgetAsk(dir, "s1", payload!.tool_input);
+  await ask.poll();
+  assert.equal(await ask.waited, null);
+  assert.equal(await deliverAnswer(dir, answer("s1")), answerExits.nobodyWaits);
+  assert.equal(await hookInput([JSON.stringify({ session_id: "s1", hook_event_name: "PostToolUse", tool_name: "Bash", tool_response: { stdout: "x".repeat(70 << 10) } })]), null, "another tool's input that long is left unread");
+  assert.equal(await hookInput([JSON.stringify({ ...postToolUse, tool_response: "x".repeat(5 << 20) })]), null, "and an ask's past 4 MiB");
 });
 
 test("a turn's start or end, or its session's end, stops the session's waiting asks and leaves another session's", async (t) => {

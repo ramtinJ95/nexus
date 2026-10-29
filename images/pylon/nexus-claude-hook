@@ -4,7 +4,7 @@ import { existsSync } from "node:fs";
 import { mkdir, rm } from "node:fs/promises";
 import { homedir, userInfo } from "node:os";
 import { join } from "node:path";
-import { alive, answerDelivered, answerExits, askDecision, awaitAnswer, deliverAnswer, forgetAsk, forgetSession, parseAskAnswer, recordCall, waitingAsks } from "./nexus-ask.ts";
+import { alive, answerDelivered, answerExits, askDecision, awaitAnswer, deliverAnswer, forgetAsk, forgetSession, hookInput, parseAskAnswer, recordCall, waitingAsks } from "./nexus-ask.ts";
 import { backgroundGroups, backgroundWatch, claimHold, claudeEnviron, heartbeatDue, holdSuperseded, holdTurnEnd, releaseHold, reportedKind, reportsIntoThread } from "./nexus-heartbeat.ts";
 import { enqueue, startSender } from "./nexus-outbox.ts";
 import { claudeTurn, snapshotTurn } from "./nexus-turn.ts";
@@ -13,19 +13,9 @@ import { spawn } from "node:child_process";
 const at = Date.now();
 const asks = join(userInfo().homedir, ".nexus", "asks");
 
-/** The hook's input, or null when it is longer than `limit`. */
-async function hookInput(limit = 64 * 1024) {
-  let input = "";
-  for await (const chunk of process.stdin) {
-    input += chunk;
-    if (input.length > limit) return null;
-  }
-  return JSON.parse(input);
-}
-
 /** Reports the hook's event, and answers its session, or null when the input names none. */
 async function report() {
-  const payload = await hookInput();
+  const payload = await hookInput(process.stdin);
   const { session_id: session } = payload ?? {};
   if (typeof session !== "string" || session.length > 200) return null;
   const answered = payload.hook_event_name === "PostToolUse" && payload.tool_name === "AskUserQuestion";
@@ -99,8 +89,7 @@ if (!reportsIntoThread(process.env, await claudeEnviron(process.env.CLAUDE_PID),
 // runs while Claude's terminal dialog shows, and prints nothing unless the dashboard answers first. A dialog the
 // terminal answers stays the terminal's.
 if (process.argv[2] === "ask") {
-  // AskUserQuestion's input holds every option's preview.
-  const payload = await hookInput(4 << 20).catch(() => null);
+  const payload = await hookInput(process.stdin).catch(() => null);
   const session = payload?.session_id;
   if (typeof session !== "string" || session.length > 200) process.exit(0);
   if (payload.hook_event_name === "PreToolUse") {

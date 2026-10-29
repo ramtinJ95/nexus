@@ -53,6 +53,24 @@ interface Waiting { pid: number; start: number | null; session: string; toolUseI
 const maxWaitingBytes = 256 << 10;
 export const maxAsksBytes = 1 << 20;
 
+/** How much of a hook's input is read: any hook's up to maxReportInput, and AskUserQuestion's up to maxAskInput, since its previews make it long. */
+const maxReportInput = 64 << 10;
+const maxAskInput = 4 << 20;
+
+/**
+ * A hook's input, or null when it is too long. An AskUserQuestion call's input holds every option's preview, twice in
+ * its PostToolUse, which must still end the wait of an ask the terminal answered.
+ */
+export async function hookInput(chunks: AsyncIterable<string | Buffer> | Iterable<string | Buffer>): Promise<Record<string, unknown> | null> {
+  let input = "";
+  for await (const chunk of chunks) {
+    input += chunk;
+    if (input.length > maxAskInput) return null;
+  }
+  const payload = JSON.parse(input);
+  return input.length <= maxReportInput || payload?.tool_name === "AskUserQuestion" ? payload : null;
+}
+
 export const askKey = (session: string, questions: readonly string[]): string => createHash("sha256").update(`${session}\n${JSON.stringify(questions)}`).digest("hex");
 
 /** The question texts of Claude's AskUserQuestion input, or null for an input that has none. */
