@@ -170,3 +170,32 @@ export function keepAttached(term, open, status, page = document) {
   visibility();
   return () => { if (state.kind !== "over") end(detached); };
 }
+
+/**
+ * Whether the terminal's current connection has landed, from the statuses keepAttached gives and `term`'s writes: Herdr's
+ * client draws after `attached`, once the attach focused its pane. A drop starts the wait again, so a focus asked for
+ * then waits for the reattach, which focuses a pane of its own. `landed()` answers false once the terminal is over.
+ */
+export function landing(term) {
+  let state = "joining";
+  let waiting = [];
+  const settle = (value) => {
+    for (const resolve of waiting) resolve(value);
+    waiting = [];
+  };
+  const drawn = term.onWriteParsed(() => {
+    if (state !== "attached") return;
+    state = "landed";
+    settle(true);
+  });
+  return {
+    heard({ text, over }) {
+      if (state === "over") return;
+      if (!over) return void (state = text === null ? "attached" : "joining");
+      state = "over";
+      drawn.dispose();
+      settle(false);
+    },
+    landed: () => state === "landed" ? Promise.resolve(true) : state === "over" ? Promise.resolve(false) : new Promise((resolve) => waiting.push(resolve)),
+  };
+}

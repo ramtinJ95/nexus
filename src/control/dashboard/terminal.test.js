@@ -1,15 +1,15 @@
 import { mock, test } from "node:test";
 import assert from "node:assert/strict";
-import { attachUrl, clipboardOf, hiddenDetachMs, joinTerminal, keepAttached, keyFor } from "./terminal.js";
+import { attachUrl, clipboardOf, hiddenDetachMs, joinTerminal, keepAttached, keyFor, landing } from "./terminal.js";
 
 /** A terminal as xterm.js exposes it: what it was written, how often it was reset, and the keys and resizes it hands out. */
 function fakeTerm() {
-  const listeners = { data: [], binary: [], resize: [] };
+  const listeners = { data: [], binary: [], resize: [], parsed: [] };
   const on = (kind) => (listener) => {
     listeners[kind].push(listener);
     return { dispose: () => { listeners[kind] = listeners[kind].filter((l) => l !== listener); } };
   };
-  const term = { cols: 80, rows: 24, written: [], focused: 0, resets: 0, write(bytes) { term.written.push(Buffer.from(bytes).toString()); }, focus() { term.focused++; }, reset() { term.resets++; }, onData: on("data"), onBinary: on("binary"), onResize: on("resize") };
+  const term = { cols: 80, rows: 24, written: [], focused: 0, resets: 0, write(bytes) { term.written.push(Buffer.from(bytes).toString()); listeners.parsed.forEach((l) => l()); }, focus() { term.focused++; }, reset() { term.resets++; }, onData: on("data"), onBinary: on("binary"), onResize: on("resize"), onWriteParsed: on("parsed") };
   return { term, type: (text) => listeners.data.forEach((l) => l(text)), resize: (cols, rows) => listeners.resize.forEach((l) => l({ cols, rows })) };
 }
 
@@ -125,13 +125,17 @@ function kept(t) {
   const term = fakeTerm().term;
   const sockets = [];
   const statuses = [];
+  const lands = landing(term);
   const { page, show } = fakePage();
   const close = keepAttached(term, () => {
     const s = fakeSocket();
     sockets.push(s);
     return s.socket;
-  }, (status) => statuses.push(status), page);
-  return { term, sockets, statuses, show, close, tick: (ms) => mock.timers.tick(ms) };
+  }, (status) => {
+    lands.heard(status);
+    statuses.push(status);
+  }, page);
+  return { term, sockets, statuses, lands, show, close, tick: (ms) => mock.timers.tick(ms) };
 }
 
 test("a dropped link attaches again after 1 s, then 2 s while each try is refused, and anew once one attaches", (t) => {
@@ -157,6 +161,25 @@ test("a dropped link attaches again after 1 s, then 2 s while each try is refuse
   k.sockets[2].close();
   assert.deepEqual(k.statuses.at(-1), { text: "The connection dropped. Attaching again in 1 s.", over: false }, "attached, the backoff starts over");
   assert.equal(k.statuses.filter((s) => s.over).length, 0);
+});
+
+test("a session shown while the link reattaches waits for the reattach to draw, so the reattach's own focus cannot undo it", async (t) => {
+  const k = kept(t);
+  const now = (promise) => Promise.race([promise, new Promise((resolve) => setImmediate(() => resolve("waiting")))]);
+  k.sockets[0].text({ type: "attached" });
+  assert.equal(await now(k.lands.landed()), "waiting", "attached, but Herdr's client has not drawn");
+  k.sockets[0].bytes("herdr");
+  assert.equal(await now(k.lands.landed()), true);
+  k.sockets[0].close();
+  const during = k.lands.landed();
+  assert.equal(await now(during), "waiting", "a dropped link has not landed");
+  k.tick(1000);
+  k.sockets[1].text({ type: "attached" });
+  assert.equal(await now(during), "waiting");
+  k.sockets[1].bytes("herdr again");
+  assert.equal(await now(during), true, "lands once the reattach draws");
+  k.close();
+  assert.equal(await now(k.lands.landed()), false, "a detached terminal never lands");
 });
 
 test("an exit, a conflict and a first refusal end the terminal without a second socket", (t) => {

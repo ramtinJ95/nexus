@@ -1053,11 +1053,12 @@ let landing = null;
 
 /**
  * Shows `pane` in the terminal tab. A terminal that is not attached attaches there. An attached one has Herdr focus
- * it, which moves every terminal attached to the pylon, once its own attach has landed, so that focus does not undo it.
+ * it, which moves every terminal attached to the pylon, once its current connection has landed, so that an attach or
+ * a reattach does not undo it.
  */
 async function showSession(thread, pane) {
   const opened = await terminal;
-  if (opened != null && await opened.landed) await api("POST", `/v1/threads/${thread}/sessions/${encodeURIComponent(pane)}/focus`, {});
+  if (opened != null && await opened.landed()) await api("POST", `/v1/threads/${thread}/sessions/${encodeURIComponent(pane)}/focus`, {});
   else landing = pane;
   showTab(terminalTab);
 }

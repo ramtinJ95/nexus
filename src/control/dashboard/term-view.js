@@ -4,7 +4,7 @@ import { FitAddon } from "@xterm/addon-fit";
 import { ClipboardAddon } from "@xterm/addon-clipboard";
 import { WebLinksAddon } from "@xterm/addon-web-links";
 import css from "@xterm/xterm/css/xterm.css";
-import { attachUrl, clipboardOf, keepAttached, keyFor } from "./terminal.js";
+import { attachUrl, clipboardOf, keepAttached, keyFor, landing } from "./terminal.js";
 import { onThemeChange, themeValue } from "./theme.js";
 
 const base = new CSSStyleSheet();
@@ -52,8 +52,8 @@ const openLink = (event, uri) => window.open(uri, "_blank", "noopener");
 
 /**
  * A terminal in `host` attached to the thread's pylon, landing in `pane` when it is not null, and fitted to `host`
- * whenever it shows at a new size. An attach again after a drop lands where any attach does. `landed` resolves true
- * once Herdr's client draws, which is after the attach focused its pane, or false when the terminal ends first.
+ * whenever it shows at a new size. An attach again after a drop lands where any attach does. `landed()` waits for the
+ * current connection to land, as landing says.
  */
 export function openTerminal(host, thread, status, pane) {
   const unstyle = adoptStyles(host);
@@ -80,16 +80,14 @@ export function openTerminal(host, thread, status, pane) {
   });
   term.open(host);
   fit.fit();
-  let land;
-  const landed = new Promise((resolve) => { land = resolve; });
-  const drawn = term.onWriteParsed(() => land(true));
-  let landing = pane;
+  const lands = landing(term);
+  let first = pane;
   const detach = keepAttached(term, () => {
-    const socket = new WebSocket(attachUrl(location, thread, { cols: term.cols, rows: term.rows }, landing));
-    landing = null;
+    const socket = new WebSocket(attachUrl(location, thread, { cols: term.cols, rows: term.rows }, first));
+    first = null;
     return socket;
   }, (s) => {
-    if (s.over) land(false);
+    lands.heard(s);
     status(s);
   });
   const sized = new ResizeObserver(() => { if (host.offsetParent !== null) fit.fit(); });
@@ -97,10 +95,8 @@ export function openTerminal(host, thread, status, pane) {
   const unwatch = onThemeChange(() => { term.options.theme = terminalTheme(); });
   return {
     focus: () => term.focus(),
-    landed,
+    landed: lands.landed,
     close() {
-      drawn.dispose();
-      land(false);
       sized.disconnect();
       unwatch();
       detach();
