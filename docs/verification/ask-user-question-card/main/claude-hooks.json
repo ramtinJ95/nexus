@@ -1,0 +1,86 @@
+{
+  "SessionStart": [
+    {
+      "matcher": "^(startup|resume|clear|compact|fork)$",
+      "hooks": [
+        {
+          "type": "command",
+          "command": "bash '/home/verify/.claude/hooks/herdr-agent-state.sh' session",
+          "timeout": 10
+        }
+      ]
+    }
+  ],
+  "UserPromptSubmit": [
+    {
+      "matcher": "",
+      "hooks": [
+        {
+          "type": "command",
+          "command": "/home/verify/.verify-bin/nexus-claude-hook session.turn-started",
+          "timeout": 2
+        }
+      ]
+    }
+  ],
+  "PostToolUse": [
+    {
+      "matcher": "",
+      "hooks": [
+        {
+          "type": "command",
+          "command": "/home/verify/.verify-bin/nexus-claude-hook session.heartbeat",
+          "timeout": 2
+        }
+      ]
+    }
+  ],
+  "Stop": [
+    {
+      "matcher": "",
+      "hooks": [
+        {
+          "type": "command",
+          "command": "/home/verify/.verify-bin/nexus-claude-hook session.turn-ended",
+          "timeout": 2
+        }
+      ]
+    }
+  ],
+  "StopFailure": [
+    {
+      "matcher": "",
+      "hooks": [
+        {
+          "type": "command",
+          "command": "/home/verify/.verify-bin/nexus-claude-hook session.turn-ended",
+          "timeout": 2
+        }
+      ]
+    }
+  ],
+  "Notification": [
+    {
+      "matcher": "permission_prompt|elicitation_dialog",
+      "hooks": [
+        {
+          "type": "command",
+          "command": "/home/verify/.verify-bin/nexus-claude-hook session.waiting",
+          "timeout": 2
+        }
+      ]
+    }
+  ],
+  "SessionEnd": [
+    {
+      "matcher": "",
+      "hooks": [
+        {
+          "type": "command",
+          "command": "/home/verify/.verify-bin/nexus-claude-hook session.ended",
+          "timeout": 2
+        }
+      ]
+    }
+  ]
+}

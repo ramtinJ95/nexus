@@ -1,0 +1,4 @@
+== 62ceb17810b45616af739cf88cc311bd9ec61a6dfd243e09aadf563288b3ded4.waiting
+{"pid":29779,"start":660835,"session":"0b718297-af65-44df-8012-18bd6bd38c26","toolUseId":"toolu_016wspd7q67eR1SC9oFqF5tk","at":1793237070364,"input":{"questions":[{"question":"Which size?","header":"Size","options":[{"label":"Small","description":"200 ml"},{"label":"Large","description":"400 ml"}],"multiSelect":false}]}}
+== d1cd0f3ee4812f1bd69cc83a753261c3b5473c778a676ccfb62bfa5849b5c738.delivered
+{"answers":{"Tea or coffee?":"Coffee","Which toppings?":"Milk, Oat cream"},"annotations":{"Tea or coffee?":{"notes":"decaf please"}}}

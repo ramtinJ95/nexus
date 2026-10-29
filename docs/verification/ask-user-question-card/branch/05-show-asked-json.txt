@@ -1,0 +1,158 @@
+$ nexus show th-c817b40e7012 --json
+{
+  "thread": {
+    "id": "th-c817b40e7012",
+    "title": "Ask about drinks",
+    "project": "drinks",
+    "pylonId": "pylon-th-c817b40e7012",
+    "status": "active",
+    "conversationId": null,
+    "startedBy": "nVERIFYLAPTOP",
+    "createdAt": 1793237030900,
+    "agentTurnRunning": false,
+    "lastAgentActivityAt": 1793237034389,
+    "lastHumanActivityAt": 1793237030900,
+    "seenAt": null,
+    "lastReplyAt": null,
+    "placement": {
+      "how": "default",
+      "node": "node-a"
+    },
+    "setup": {
+      "how": "fresh",
+      "reason": "the project is scratch, so it has no template"
+    },
+    "working": false,
+    "sessionWaiting": true
+  },
+  "claudeWorker": {
+    "model": "claude-sonnet-5-5",
+    "state": "started"
+  },
+  "attention": "decision",
+  "seenAt": null,
+  "lastReplyAt": null,
+  "desired": "running",
+  "pylon": {
+    "grantsOutdated": false,
+    "id": "pylon-th-c817b40e7012",
+    "node": "node-a",
+    "failed": null,
+    "observedAt": "2026-10-29T01:23:52.367Z",
+    "resources": {
+      "cpus": 1,
+      "memoryGiB": 3,
+      "diskGiB": 5
+    },
+    "actualState": "running",
+    "retryRefused": null
+  },
+  "sessions": [
+    {
+      "pylon": "pylon-th-c817b40e7012",
+      "id": "w1:p1",
+      "herdrPane": "w1:p1",
+      "harness": "claude-code",
+      "harnessSessionId": "0b718297-af65-44df-8012-18bd6bd38c26",
+      "title": "Ask about drinks",
+      "status": "unknown",
+      "state": "running",
+      "message": null
+    }
+  ],
+  "previews": [],
+  "ports": [
+    {
+      "port": 7470,
+      "service": null,
+      "preview": null
+    },
+    {
+      "port": 7480,
+      "service": null,
+      "preview": null
+    },
+    {
+      "port": 7489,
+      "service": null,
+      "preview": null
+    },
+    {
+      "port": 35253,
+      "service": null,
+      "preview": null
+    },
+    {
+      "port": 40393,
+      "service": null,
+      "preview": null
+    }
+  ],
+  "outputs": [],
+  "prWatch": {
+    "enabled": false,
+    "stopped": false,
+    "error": null
+  },
+  "pullRequests": [],
+  "review": null,
+  "questions": [
+    {
+      "id": "ask-toolu_01RDvh19ALeNg3qt41e4LMbi",
+      "thread": "th-c817b40e7012",
+      "text": "Drink: Tea or coffee?\nToppings: Which toppings?",
+      "options": [],
+      "reserved": null,
+      "answerer": "person",
+      "askedAt": 1793237037260,
+      "ask": {
+        "session": "0b718297-af65-44df-8012-18bd6bd38c26",
+        "toolUseId": "toolu_01RDvh19ALeNg3qt41e4LMbi",
+        "questions": [
+          {
+            "question": "Tea or coffee?",
+            "header": "Drink",
+            "multiSelect": false,
+            "options": [
+              {
+                "label": "Tea",
+                "description": "A pot of green tea",
+                "preview": "Green tea\n---------\nsteeped 3 minutes, no milk"
+              },
+              {
+                "label": "Coffee",
+                "description": "A flat white",
+                "preview": "Flat white\n----------\ndouble shot, steamed milk"
+              }
+            ]
+          },
+          {
+            "question": "Which toppings?",
+            "header": "Toppings",
+            "multiSelect": true,
+            "options": [
+              {
+                "label": "Milk",
+                "description": "A splash of milk"
+              },
+              {
+                "label": "Sugar",
+                "description": "One spoon"
+              },
+              {
+                "label": "Honey",
+                "description": "A drizzle"
+              }
+            ]
+          }
+        ]
+      },
+      "answer": null
+    }
+  ],
+  "judgments": [],
+  "planning": false,
+  "attach": "herdr --session nexus",
+  "agent": null
+}
+[exit 0]

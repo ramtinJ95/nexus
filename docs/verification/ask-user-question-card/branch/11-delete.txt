@@ -1,0 +1,3 @@
+$ nexus delete th-c817b40e7012
+Deleted th-c817b40e7012.
+[exit 0]

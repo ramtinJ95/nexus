@@ -1,0 +1,1 @@
+branch: aebdd01 fix(claude): hide the decision record a PermissionRequest hook leaves in the transcript
