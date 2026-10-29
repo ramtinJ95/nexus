@@ -283,7 +283,7 @@ test("a failing read fires one pull-request.error with the retry notice, and the
   assert.deepEqual(events().slice(1), [["pull-request.error-cleared", f.id, {}]]);
 });
 
-test("a failed read of a queued thread's predecessor is the predecessor's error, kept until a read of it succeeds", async (t) => {
+test("a failed read of a queued thread's predecessor is the predecessor's error, kept until a read of it succeeds, archived or capped", async (t) => {
   const f = fixture(); t.after(() => f.registry.close()); await f.watcher.poll();
   f.registry.saveQueued({
     id: "th-q" as ThreadId, title: "after", project: "project" as ProjectId, startedBy: "test", createdAt: 1, after: [f.id],
@@ -300,6 +300,14 @@ test("a failed read of a queued thread's predecessor is the predecessor's error,
   await f.watcher.poll();
   assert.equal(f.registry.prWatch(f.id)?.error, null);
   assert.deepEqual(events(), ["pull-request.error", "pull-request.error-cleared"]);
+
+  f.registry.setThreadStatus(f.id, "active");
+  f.registry.savePrWatch(f.id, { ...f.registry.prWatch(f.id)!, commentWakes: 10 });
+  await settling.poll();
+  assert.deepEqual(events().slice(2), ["pull-request.error"], "a capped watch's failed read");
+  await f.watcher.poll();
+  assert.equal(f.registry.prWatch(f.id)?.error, null, "the cap stops the watch's own pass, so the read for the queued thread clears it");
+  assert.deepEqual(events().slice(3), ["pull-request.error-cleared"]);
 });
 
 test("legacy statuses use the latest context and missing detail URLs still link to GitHub", async () => {

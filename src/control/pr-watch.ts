@@ -84,8 +84,8 @@ export function prWatcher(options: { registry: Registry; github: Pick<GitHub, "f
           stored.pr = pr.state === "merged" ? { ...pr, checks: stored.pr.checks, review: stored.pr.review, conflict: stored.pr.conflict } : { ...stored.pr, state: pr.state };
         }
       }
-      // Only the watch's own pass reads an active thread's PRs, so only it clears that thread's error.
-      if (!active(registry.thread(t.id))) saved.error = null;
+      // The watch's own pass reads an active thread's PRs unless its cap stopped it, so only that pass clears its error.
+      if (!active(registry.thread(t.id)) || saved.commentWakes >= 10) saved.error = null;
       registry.savePrWatch(t.id, saved);
     }
     const failed = (id: ThreadId, error: string) => {
