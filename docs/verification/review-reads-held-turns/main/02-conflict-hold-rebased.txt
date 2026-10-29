@@ -1,0 +1,49 @@
+{
+  "phase": {
+    "kind": "needs-person",
+    "reasons": [
+      "The branch conflicts with main, and the builder did not rebase it: I will rebase once main settles.",
+      "The pull request's head moved to 2132000000000000000000000000000000000000 after this review was held, so none of its rounds reviewed that commit. Run nexus review th-d4d1070e00d0 to review it."
+    ],
+    "unreviewed": "2132000000000000000000000000000000000000"
+  },
+  "nudges": 0,
+  "rounds": [
+    {
+      "head": "2131000000000000000000000000000000000000",
+      "verdict": "approve",
+      "answers": [
+        {
+          "id": "CONFLICT",
+          "action": "rejected",
+          "reason": "I will rebase once main settles."
+        }
+      ],
+      "conflict": {
+        "base": "main"
+      }
+    }
+  ],
+  "working": false,
+  "lastReplyAt": null
+}
+
+$ nexus show th-d4d1070e00d0
+th-d4d1070e00d0  Builder of #213
+project: demo
+Claude worker: started, model claude-opus-5-5
+attention: decision
+status: active
+pylon: pylon-th-d4d1070e00d0 on verify-node, running, observed 0s ago
+attach: nexus attach th-d4d1070e00d0
+size: 1 CPUs, 1 GiB memory, 10 GiB disk
+placement: verify-node, the project's default node
+setup: fresh boot runs .nexus/setup, because the control plane could not read .nexus/setup at main: the verify stack reads no remote, so every thread boots fresh
+PR watch: on
+PR #213: PR 213 — open, checks passing, review none https://github.com/ramtinJ95/demo/pull/213
+review rv-held213 of PR #213: needs-person, round 1 of 5, reviewer th-8f89a2d9f7e1 on gpt-6-astra, landing when approved
+no live check: 213100000000 has no .nexus/verify, so the landing reads the pull request's statement of what could not be checked live
+needs you: The branch conflicts with main, and the builder did not rebase it: I will rebase once main settles.
+needs you: The pull request's head moved to 2132000000000000000000000000000000000000 after this review was held, so none of its rounds reviewed that commit. Run nexus review th-d4d1070e00d0 to review it.
+output: branch origin/fix/pr-213
+output: pull-request https://github.com/ramtinJ95/demo/pull/213

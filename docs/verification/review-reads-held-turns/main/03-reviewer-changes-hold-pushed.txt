@@ -1,0 +1,39 @@
+{
+  "phase": {
+    "kind": "needs-person",
+    "reasons": [
+      "The builder ended 3 turns in a row without an answer Nexus could read, in round 1.",
+      "The pull request's head moved to 2142000000000000000000000000000000000000 after this review was held, so none of its rounds reviewed that commit. Run nexus review th-41100c4bdd5d to review it."
+    ],
+    "unreviewed": "2142000000000000000000000000000000000000"
+  },
+  "nudges": 0,
+  "rounds": [
+    {
+      "head": "2141000000000000000000000000000000000000",
+      "verdict": "changes",
+      "answers": null
+    }
+  ],
+  "working": false,
+  "lastReplyAt": null
+}
+
+$ nexus show th-41100c4bdd5d
+th-41100c4bdd5d  Builder of #214
+project: demo
+Claude worker: started, model claude-opus-5-5
+attention: decision
+status: active
+pylon: pylon-th-41100c4bdd5d on verify-node, running, observed 0s ago
+attach: nexus attach th-41100c4bdd5d
+size: 1 CPUs, 1 GiB memory, 10 GiB disk
+placement: verify-node, the project's default node
+setup: fresh boot runs .nexus/setup, because the control plane could not read .nexus/setup at main: the verify stack reads no remote, so every thread boots fresh
+PR watch: on
+PR #214: PR 214 — open, checks passing, review none https://github.com/ramtinJ95/demo/pull/214
+review rv-held214 of PR #214: needs-person, round 1 of 5, reviewer th-bb8cdd036c8a on gpt-6-astra
+needs you: The builder ended 3 turns in a row without an answer Nexus could read, in round 1.
+needs you: The pull request's head moved to 2142000000000000000000000000000000000000 after this review was held, so none of its rounds reviewed that commit. Run nexus review th-41100c4bdd5d to review it.
+output: branch origin/fix/pr-214
+output: pull-request https://github.com/ramtinJ95/demo/pull/214
