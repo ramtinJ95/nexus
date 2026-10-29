@@ -686,6 +686,39 @@ function el(tag, props = {}, ...children) {
 }
 /** The children that are there, so a child given as `cond && el(...)` is left out rather than written as "false". */
 const present = (children) => children.filter((c) => c !== null && c !== false && c !== undefined);
+/**
+ * An image of the conversation or a diff that does not load becomes a note naming it. It stays, hidden, to load again
+ * once the pylon runs, since a visit that wakes the pylon asks for its images before it runs.
+ */
+function shotGone(img) {
+  const shot = img.closest(".shot");
+  if (shot.hidden) return;
+  shot.hidden = true;
+  shot.after(el("p", { className: "shot-gone", textContent: `${img.alt} can't be shown now: its pylon is paused, or the file is gone` }));
+}
+/**
+ * Each image that failed loads again once while the pylon runs, even one whose failure came after the poll that saw
+ * the pylon start. A pause lets it try once more after the next start.
+ */
+function retryShots(running) {
+  if (!running) {
+    for (const shot of document.querySelectorAll(".shot[data-retried]")) delete shot.dataset.retried;
+    return;
+  }
+  for (const shot of document.querySelectorAll(".shot[hidden]:not([data-retried])")) {
+    shot.dataset.retried = "";
+    if (shot.nextElementSibling?.matches(".shot-gone")) shot.nextElementSibling.remove();
+    shot.hidden = false;
+    const img = shot.querySelector("img");
+    img.src = img.getAttribute("src");
+  }
+}
+document.addEventListener("error", (event) => {
+  if (event.target instanceof HTMLImageElement && event.target.matches(".shot img")) shotGone(event.target);
+}, true);
+// An image that failed before this script ran sent its error to no listener.
+for (const img of document.querySelectorAll(".shot img")) if (img.complete && img.currentSrc !== "" && img.naturalWidth === 0) shotGone(img);
+
 // A template's icons are in its content, outside the document.
 const iconOf = (name) => document.getElementById("icons").content.querySelector(`.i-${name}`).cloneNode(true);
 const statusLetter = { added: "A", modified: "M", deleted: "D", renamed: "R", copied: "C", typechange: "T" };
@@ -866,6 +899,7 @@ function noticeFacts() {
   const before = checkout.facts;
   const now = factsNow();
   checkout.facts = now;
+  if (now !== null) retryShots(now.pylon === "running");
   if (now === null || before === null) return;
   const started = now.pylon === "running" && before.pylon !== "running";
   const agentDone = !now.turn && (before.turn || now.agentAt !== before.agentAt);
@@ -1067,7 +1101,7 @@ void import("./theme.js").then(({ onThemeChange, startThemes }) => {
 /** Shows a diff read from the pylon, once its lines are drawn. */
 async function drawDiff({ read, head, shown, truncated }) {
   try {
-    const { diffView } = await import("./diff.js");
+    const { diffView, imagePair } = await import("./diff.js");
     const view = shown.kind === "lines" ? await diffView(shown.files, narrow.matches ? "unified" : diffLayout) : null;
     if (read !== diffRead) return;
     const typing = document.activeElement?.matches?.(".note-text") ? [document.activeElement.selectionStart, document.activeElement.selectionEnd] : null;
@@ -1075,7 +1109,8 @@ async function drawDiff({ read, head, shown, truncated }) {
     fileView.replaceChildren(...present([head, reviewBox,
       shown.kind !== "none" && shown.meta.length > 0 && el("div", { className: "fv-meta dim small" }, ...shown.meta.map((line) => el("div", { textContent: line }))),
       (truncated || (shown.kind === "lines" && shown.cut)) && el("p", { className: "dim small fv-note", textContent: "Only the start of the diff shows, because the whole of it is too long to show." }),
-      view?.node ?? el("p", { className: "empty fv-note", textContent: shown.kind === "binary" ? "The file is binary, so there is no diff to show." : shown.kind === "meta" ? "No lines changed." : "The file has no changes now." })]));
+      view?.node ?? ((shown.kind === "binary" && imagePair(openTabs.find((f) => f.path === fileView.dataset.path), checkout.base, thread))
+        || el("p", { className: "empty fv-note", textContent: shown.kind === "binary" ? "The file is binary, so there is no diff to show." : shown.kind === "meta" ? "No lines changed." : "The file has no changes now." }))]));
     if (view === null) {
       annotated = null;
       decorate();

@@ -23,6 +23,7 @@ import { canDeploy, commitSchema, isPerson, isReporter, releaseView, reportSchem
  * wakes the loop for its node, so a start or a dashboard visit acts within one pass rather than 5 seconds.
  */
 import type { Attention } from "./attention.ts";
+import { createHash } from "node:crypto";
 import { once } from "node:events";
 import { createServer as createHttpsServer } from "node:https";
 import { TLSSocket } from "node:tls";
@@ -47,8 +48,8 @@ import { claudeConversations, claudeFrames } from "./claude-conversation.ts";
 import { threadAgents, type AgentView, type Watch } from "./thread-agent.ts";
 import { usageFilter } from "./usage.ts";
 import type { UsageBackfillJob } from "./usage-backfill.ts";
-import type { ClaudeConversation } from "../claude-transcript.ts";
-import { checkoutReader, CheckoutRefused, contentType, pathsFit, type CheckoutReader, type RefusalKind } from "../checkout-files.ts";
+import { maxRecordBytes, readTranscriptImage, type ClaudeConversation } from "../claude-transcript.ts";
+import { checkoutReader, CheckoutRefused, contentType, maxFileBytes, pathsFit, type CheckoutReader, type RefusalKind } from "../checkout-files.ts";
 import { attachRoute, parseAttachQuery } from "../attach-wire.ts";
 import type { PullRequest } from "./github.ts";
 import { openTerminal } from "../guest-terminal.ts";
@@ -316,6 +317,21 @@ const diffPaths = z.array(checkoutPath.min(1)).max(100).refine(pathsFit, "are to
 const changesBaseSchema = z.enum(["start", "head", "turn"]).default("start");
 /** What each refusal of a checkout read answers. A missing base is a 422, not a 409, because waiting cannot change it. */
 const refusalStatus: Readonly<Record<RefusalKind, number>> = { missing: 404, outside: 400, kind: 400, large: 413, "no-base": 422, slow: 504, busy: 503, long: 400 };
+
+const queryCount = z.string().regex(/^\d{1,15}$/, "must be a whole number").transform(Number);
+const sha256Schema = z.string().regex(/^[0-9a-f]{64}$/);
+/** Where an image of a thread's conversation is, as the dashboard's image links name it. */
+const imageSourceSchema = z.discriminatedUnion("source", [
+  /** A block of the Claude worker's current transcript, as a prompt or result entry's `images` names it. */
+  z.strictObject({ source: z.literal("transcript"), offset: queryCount, bytes: queryCount.refine((n) => n > 0 && n <= maxRecordBytes, "is not a record's length"), sha256: sha256Schema, index: queryCount }),
+  /** An image part of a harness conversation: the entry's ID, its message, the part, and the SHA-256 of the part's base64 data. */
+  z.strictObject({ source: z.literal("harness"), entry: queryCount, message: queryCount, part: queryCount, sha256: sha256Schema }),
+  /** A file in the checkout, or the file at a base of the Changes view. */
+  z.strictObject({ source: z.literal("file"), path: checkoutPath.min(1), base: z.enum(["start", "head", "turn"]).optional() }),
+]);
+type ImageSource = z.infer<typeof imageSourceSchema>;
+/** A transcript or harness image is named by its hash, so its link never serves other bytes. A file may change. */
+const imageCaching: Readonly<Record<ImageSource["source"], string>> = { transcript: "private, max-age=31536000, immutable", harness: "private, max-age=31536000, immutable", file: "no-cache" };
 
 /** How long a read of a Claude worker's conversation waits for its transcript before answering what is stored. */
 const claudeReadMs = 5_000;
@@ -777,13 +793,15 @@ export async function startApi(options: ApiOptions): Promise<Api> {
    * human activity, as a message is, so a paused pylon is woken, but the request itself needs the pylon running and
    * is refused with a 409 until it is.
    */
-  async function inPylon<T>(t: Thread, act: (probe: Pick<ProbeClient, "command" | "stream">, pylonId: PylonId) => Promise<T>): Promise<T> {
+  async function inPylon<T>(t: Thread, act: (probe: Pick<ProbeClient, "command" | "stream">, pylonId: PylonId) => Promise<T>, wakes = true): Promise<T> {
     refuseClosed(t);
     const pylon = registry.pylon(t.pylonId)!;
     const probe = probes.get(pylon.node);
     if (probe === undefined) throw new HttpError(503, `no probe is configured for ${pylon.node}`);
-    registry.recordActivity(t.id, { human: Date.now() });
-    wake(pylon.node);
+    if (wakes) {
+      registry.recordActivity(t.id, { human: Date.now() });
+      wake(pylon.node);
+    } else if (!running(pylon.pylonId)) throw new HttpError(409, notRunning(pylon.pylonId, false));
     let result: T;
     try {
       result = await act(probe, pylon.pylonId);
@@ -791,7 +809,7 @@ export async function startApi(options: ApiOptions): Promise<Api> {
       // A delete or archive that landed meanwhile stopped the pylon, so the thread's state answers, not the node's failure.
       refuseClosed(registry.thread(t.id)!);
       const code = (err as Partial<ProbeError>).code;
-      if (code === "not-running") throw new HttpError(409, `pylon ${pylon.pylonId} is not running yet. This request wakes it, so ask again once it runs`);
+      if (code === "not-running") throw new HttpError(409, notRunning(pylon.pylonId, wakes));
       if (code === "unreachable") throw new HttpError(503, (err as Error).message);
       if (err instanceof CheckoutRefused) throw new HttpError(refusalStatus[err.kind], err.message);
       throw err;
@@ -799,6 +817,47 @@ export async function startApi(options: ApiOptions): Promise<Api> {
     // A delete that landed meanwhile may have released the pylon's ports already.
     if (registry.thread(t.id)!.status === "deleted") throw new HttpError(409, `thread ${t.id} is deleted`);
     return result;
+  }
+
+  /**
+   * A read a page makes by itself, such as an image's load, runs only while the pylon runs: it never wakes the pylon
+   * or counts as the person's activity, so a page left open lets the pylon sleep.
+   */
+  const whileRunning = <T>(t: Thread, act: (probe: Pick<ProbeClient, "command" | "stream">, pylonId: PylonId) => Promise<T>) => inPylon(t, act, false);
+  const notRunning = (pylonId: PylonId, wakes: boolean) => wakes ? `pylon ${pylonId} is not running yet. This request wakes it, so ask again once it runs`
+    : `pylon ${pylonId} is not running, and this request does not wake it`;
+  /** Whether the node, online, reports the pylon running, as a Claude transcript's reads ask. */
+  function running(pylonId: PylonId): boolean {
+    const observed = observedPylon(pylonId);
+    return registry.node(registry.pylon(pylonId)!.node)?.state === "online" && observed !== "absent" && observed.phase === "running";
+  }
+
+  /** What each source of a conversation's image reads it with. Null is an image that is gone. */
+  const imageReaders: { [K in ImageSource["source"]]: (t: Thread, source: Extract<ImageSource, { source: K }>) => Promise<Buffer | null> } = {
+    async transcript(t, { source: _, ...image }) {
+      const session = registry.claudeWorker(claudeWorker(t).id)?.session ?? null;
+      if (session === null) return null;
+      return whileRunning(t, (probe, pylonId) => readTranscriptImage((argv) => probe.stream(pylonId, argv), session, image));
+    },
+    async harness(t, { entry, message, part, sha256 }) {
+      const view = await agents.harness.view(conversing(t));
+      const content = view.entries.find((e) => e.id === entry)?.model?.[message]?.content;
+      const found = Array.isArray(content) ? content[part] : undefined;
+      if (found?.type !== "image" || createHash("sha256").update(found.data).digest("hex") !== sha256) return null;
+      return Buffer.from(found.data, "base64");
+    },
+    file: (t, { path, base }) => inCheckout(t, (c) => base === undefined ? c.read(path) : c.blob(base, path), whileRunning),
+  };
+
+  /** An image of the thread's conversation, as one of the raster types a browser shows, and never anything that runs. */
+  async function conversationImage(t: Thread, source: ImageSource): Promise<Reply> {
+    const read = imageReaders[source.source] as (t: Thread, source: ImageSource) => Promise<Buffer | null>;
+    const bytes = await read(t, source);
+    if (bytes === null) throw new HttpError(404, "the image is gone: the conversation or file no longer holds it");
+    if (bytes.length > maxFileBytes) throw new HttpError(413, `the image is over the ${maxFileBytes}-byte limit`);
+    const type = imageType(bytes);
+    if (type === null) throw new HttpError(415, "it is not a PNG, JPEG, GIF or WebP image");
+    return { status: 200, file: bytes, type, cache: imageCaching[source.source] };
   }
 
   function refuseClosed(t: Thread) {
@@ -852,10 +911,10 @@ export async function startApi(options: ApiOptions): Promise<Api> {
   }
 
   /** Reads the pylon's checkout for the Files and Changes views, over one raw pipe per read. */
-  async function inCheckout<T>(t: Thread, read: (checkout: CheckoutReader) => Promise<T>): Promise<T> {
+  async function inCheckout<T>(t: Thread, read: (checkout: CheckoutReader) => Promise<T>, via: typeof inPylon = inPylon): Promise<T> {
     const agent = registry.agent(t);
     const turn = agent.kind === "none" ? null : await agents[agent.kind].latestTurn(t);
-    return inPylon(t, (probe, pylonId) => read(checkoutReader((argv) => probe.stream(pylonId, argv), checkoutDir, undefined, turn)));
+    return via(t, (probe, pylonId) => read(checkoutReader((argv) => probe.stream(pylonId, argv), checkoutDir, undefined, turn)));
   }
 
   async function checkoutFile(t: Thread, path: string): Promise<Reply> {
@@ -964,7 +1023,7 @@ export async function startApi(options: ApiOptions): Promise<Api> {
   /** A file is served as its bytes, everything else as JSON. */
   type Reply =
     | { status: number; body?: unknown; file?: never; stream?: never }
-    | { status: number; file: Buffer; type: string; stream?: never }
+    | { status: number; file: Buffer; type: string; cache?: string; stream?: never }
     | { stream(res: ServerResponse): Promise<void> | void; status?: never; file?: never };
   type Route = (match: RegExpExecArray, req: { query: URLSearchParams; body(empty?: unknown): Promise<unknown>; caller: TailnetNodeId }) => Reply | Promise<Reply>;
   const ok = (body: unknown): Reply => ({ status: 200, body });
@@ -1196,6 +1255,7 @@ export async function startApi(options: ApiOptions): Promise<Api> {
       return ok(await inCheckout(thread(m[1]!), (c) => c.list(path)));
     }],
     ["GET", /^\/v1\/threads\/([^/]+)\/files\/content$/, async (m, r) => checkoutFile(thread(m[1]!), parse(checkoutPath.min(1), r.query.get("path") ?? ""))],
+    ["GET", /^\/v1\/threads\/([^/]+)\/image$/, async (m, r) => conversationImage(thread(m[1]!), parse(imageSourceSchema, Object.fromEntries(r.query)))],
     ["GET", /^\/v1\/threads\/([^/]+)\/changes$/, async (m, r) => {
       const base = parse(changesBaseSchema, r.query.get("base") ?? undefined);
       return ok(await inCheckout(thread(m[1]!), (c) => c.changes(base)));
@@ -1317,7 +1377,7 @@ export async function startApi(options: ApiOptions): Promise<Api> {
     const route = () => match.route(match.m, { query: url.searchParams, caller, body: (empty) => readJson(req, empty) });
     const reply = startsTurn ? await turnRequests.run(async () => route()) : await route();
     if (reply.stream !== undefined) return reply.stream(res);
-    if (reply.file !== undefined) sendFile(res, reply.file, reply.type);
+    if (reply.file !== undefined) sendFile(res, reply.file, reply.type, reply.cache);
     else if (reply.body === undefined) res.writeHead(reply.status).end();
     else send(res, reply.status, reply.body);
   }
@@ -1525,11 +1585,21 @@ async function readJson(req: IncomingMessage, empty?: unknown): Promise<unknown>
 }
 
 /** The sandbox keeps a file that a browser opens anyway from running as a page of the API's origin. */
-function sendFile(res: ServerResponse, content: Buffer, type: string) {
+function sendFile(res: ServerResponse, content: Buffer, type: string, cache = "no-store") {
   res.writeHead(200, {
-    "content-type": type, "content-length": content.length, "cache-control": "no-store",
+    "content-type": type, "content-length": content.length, "cache-control": cache,
     "x-content-type-options": "nosniff", "content-security-policy": "default-src 'none'; sandbox",
   }).end(content);
+}
+
+/** The image type the bytes start as, of those a browser shows and none that can run, such as SVG. */
+function imageType(bytes: Buffer): string | null {
+  const starts = (...magic: number[]) => magic.every((b, i) => bytes[i] === b);
+  if (starts(0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a)) return "image/png";
+  if (starts(0xff, 0xd8, 0xff)) return "image/jpeg";
+  if (bytes.subarray(0, 6).toString("latin1") === "GIF87a" || bytes.subarray(0, 6).toString("latin1") === "GIF89a") return "image/gif";
+  if (bytes.subarray(0, 4).toString("latin1") === "RIFF" && bytes.subarray(8, 12).toString("latin1") === "WEBP") return "image/webp";
+  return null;
 }
 
 /** The path a request's URL names, decoded as `handle` matches it, or "" for one that cannot be decoded. */

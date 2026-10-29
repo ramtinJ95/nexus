@@ -1536,7 +1536,7 @@ judgment of failure 814 on ${node}: no verdict yet\n {2}judging since 2026-10-28
 
 test("deploy and release use the shared release view and wait for both roles", async (t) => {
   const s = await setup(t);
-  assert.equal((await s.nexus(["--version"])).stdout.trim(), "nexus 0.43.0");
+  assert.equal((await s.nexus(["--version"])).stdout.trim(), "nexus 0.44.0");
   assert.equal((await s.nexus(["deploy", "bad"])).code, 64);
   const requested = await s.json(["deploy", "main"]);
   assert.equal(requested.desired.commit, "a".repeat(40));
@@ -1880,7 +1880,7 @@ test("conversation prints a Claude worker's transcript, and send types into its 
   const thread: Thread = await s.json(["start", "--project", "acme", "--claude", "count the lines"]);
   s.registry.setClaudeWorker(thread.id, "/poteto-mode count the lines", "started", undefined, "s1");
   const entries: ClaudeEntry[] = [
-    { kind: "prompt", at: 1, text: "Count the lines\nof hello.py", from: "person" },
+    { kind: "prompt", at: 1, text: "Count the lines\nof hello.py", from: "person", images: [{ offset: 0, bytes: 900, sha256: "a".repeat(64), index: 0 }] },
     { kind: "tool", at: 2, id: "t1", name: "Bash", input: { command: "wc -l hello.py" } },
     { kind: "result", at: 3, toolUseId: "t1", output: "1 hello.py", isError: false },
     { kind: "tool", at: 4, id: "t2", name: "Bash", input: { command: "false" } },
@@ -1901,7 +1901,7 @@ test("conversation prints a Claude worker's transcript, and send types into its 
 
   assert.deepEqual(await s.json(["conversation", thread.id]), { kind: "claude", session: "s1", entries, dropped: 0, readAt, working: false, usageLimit: null }, "--json prints the API's reply");
   const transcript = [
-    "> Count the lines\n> of hello.py",
+    "> Count the lines\n> of hello.py\n> [image]",
     '[tool] Bash {"command":"wc -l hello.py"} (ok)',
     '[tool] Bash {"command":"false"} (failed)',
     "It has 1 line.",

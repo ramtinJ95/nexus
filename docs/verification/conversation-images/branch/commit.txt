@@ -1,0 +1,1 @@
+branch: ffdea2c fix(dashboard): retry an image that failed after its pylon's start was seen, the code under test, with this capture's commit on top

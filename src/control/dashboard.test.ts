@@ -22,7 +22,7 @@ import type { ImageId } from "../images.ts";
 import { githubTokenGrant } from "../project.ts";
 import type { AssistantMessage, Message, ToolCall } from "@earendil-works/pi-ai";
 import { parseRecord, transcriptStart, type ClaudeConversation, type ClaudeEntry } from "../claude-transcript.ts";
-import { liveFrames } from "./dashboard.ts";
+import { imagePaths, liveFrames } from "./dashboard.ts";
 
 const node = "rj-firebat" as NodeName;
 const laptop = "nLAPTOP" as TailnetNodeId;
@@ -943,7 +943,7 @@ test("a lone tool call is its own line, and a run of calls folds under a line th
     `– Read src/b.ts › src/b.ts { "offset": 10 } No output.`,
     "! Aborted.",
     "! The model failed: rate limited",
-    "You Look at this [image/png image]",
+    "You Look at this",
     "All 40 pass.",
   ]);
   assert.deepEqual(open, [["tool-c1", false], ["more-c1", false], ["steps-c2", true], ["tool-c2", true], ["tool-c3", true], ["tool-c4", false]], "only a short fold, the failure and the edit start open");
@@ -2136,4 +2136,74 @@ test("the pipeline page lists each project's items with the phase their records 
   assert.match(section, new RegExp(`<button type="button" class="btn btn-xs" data-action="approve-item" data-item="${b.id}">Approve</button>`));
   assert.doesNotMatch(section, new RegExp(`data-action="(approve|cancel)-item" data-item="${a.id}"`), "an item that is a thread has no item actions");
   assert.doesNotMatch(page, /aria-labelledby="pipeline-beta"/, "a project without the pipeline or items is left out");
+});
+
+/** The images a page shows, as each link and image name them, with any caption. */
+const shotsOf = (html: string) => [...html.matchAll(/<a class="shot" href="([^"]*)" target="_blank" rel="noopener"><img src="([^"]*)" alt="([^"]*)" loading="lazy">(?:<span class="shot-cap">([^<]*)<\/span>)?<\/a>/g)]
+  .map(([, href, src, alt, caption]) => {
+    assert.equal(href, src, "each image links to itself at full size");
+    const url = new URL(src!.replaceAll("&amp;", "&"), "http://nexus");
+    return { route: url.pathname, query: Object.fromEntries(url.searchParams), alt, caption: caption ?? null };
+  });
+
+test("a Claude worker's pasted image, a Read's image and an image file it names show as linked images, with no placeholder text", async (t) => {
+  const s = await seeded(t);
+  const png = Buffer.from("png bytes").toString("base64");
+  const [prompt] = parseRecord(JSON.stringify({
+    type: "user", timestamp: "2026-10-28T10:00:00.000Z", origin: { kind: "human" },
+    message: { role: "user", content: [{ type: "text", text: "Why is `shots/home.png` blank?" }, { type: "image", source: { type: "base64", media_type: "image/png", data: png } }] },
+  }));
+  const read = parseRecord(JSON.stringify({
+    type: "user", timestamp: "2026-10-28T10:00:02.000Z",
+    message: { role: "user", content: [{ tool_use_id: "toolu_1", type: "tool_result", content: [{ type: "image", source: { type: "base64", data: png, media_type: "image/png" } }] }] },
+  }));
+  const thread = await claudeThread(s, [
+    prompt!,
+    { kind: "tool", at: Date.parse("2026-10-28T10:00:01.000Z"), id: "toolu_1", name: "Read", input: { file_path: "/home/user/workspace/repo/shots/home.png" } },
+    ...read,
+    { kind: "reply", at: Date.parse("2026-10-28T10:00:03.000Z"), text: "It renders before the data loads. Fixed in ![after](/home/user/workspace/repo/shots/fixed.png), not /tmp/x.png." },
+  ]);
+  const html = (await s.call("GET", `/threads/${thread.id}`)).text;
+  const { rows, open } = conversationOf(html);
+  assert.doesNotMatch(rows.join("\n"), /\[image\]/);
+  assert.doesNotMatch(rows.join("\n"), /No output/, "a call that returned only an image has output to show");
+  const [pasted] = (prompt as Extract<ClaudeEntry, { kind: "prompt" }>).images!;
+  const [shot] = (read[0] as Extract<ClaudeEntry, { kind: "result" }>).images!;
+  const route = `/v1/threads/${thread.id}/image`;
+  const placed = (image: typeof pasted) => ({ source: "transcript", offset: String(image!.offset), bytes: String(image!.bytes), sha256: image!.sha256, index: String(image!.index) });
+  assert.deepEqual(shotsOf(html), [
+    { route, query: placed(pasted), alt: "Image 1", caption: null },
+    { route, query: { source: "file", path: "shots/home.png" }, alt: "shots/home.png", caption: "shots/home.png" },
+    { route, query: placed(shot), alt: "Image 1", caption: null },
+    { route, query: { source: "file", path: "shots/fixed.png" }, alt: "shots/fixed.png", caption: "shots/fixed.png" },
+  ]);
+  assert.deepEqual(open, [["tool-toolu_1", true]], "a call with an image starts open");
+});
+
+test("a harness tool result's image part and a written image file show as linked images", async (t) => {
+  const s = await seeded(t);
+  const fix = await s.start("acme", "Fix checkout");
+  const data = Buffer.from("png bytes").toString("base64");
+  const transcript = s.fake.transcript(fix.id);
+  transcript.messages.push(
+    { role: "user", content: "Take a screenshot", timestamp: 0 },
+    assistant([call("c1", "screenshot", {}), call("c2", "write", { path: "out/chart.webp", content: "…" })]),
+    { role: "toolResult", toolCallId: "c1", toolName: "screenshot", content: [{ type: "text", text: "taken" }, { type: "image", data, mimeType: "image/png" }], isError: false, timestamp: 0 },
+    result("c2", "Wrote out/chart.webp", false, "write"),
+  );
+  const html = (await s.call("GET", `/threads/${fix.id}`)).text;
+  assert.doesNotMatch(conversationOf(html).text, /image\/png image/);
+  const { createHash } = await import("node:crypto");
+  assert.deepEqual(shotsOf(html), [
+    { route: `/v1/threads/${fix.id}/image`, query: { source: "harness", entry: "3", message: "0", part: "1", sha256: createHash("sha256").update(data).digest("hex") }, alt: "Image 1", caption: null },
+    { route: `/v1/threads/${fix.id}/image`, query: { source: "file", path: "out/chart.webp" }, alt: "out/chart.webp", caption: "out/chart.webp" },
+  ]);
+});
+
+test("image paths in prose are the checkout's, each once, at most six", () => {
+  assert.deepEqual(imagePaths("Saved `shots/home.png`, see ![home](./docs/a.JPG) and /home/user/workspace/repo/out/b.webp. Again: shots/home.png"),
+    ["shots/home.png", "docs/a.JPG", "out/b.webp"]);
+  assert.deepEqual(imagePaths("Not https://example.com/x.png, /tmp/c.png, ../d.png, ~/e.png, src/../../f.gif or a.png.bak"), []);
+  assert.deepEqual(imagePaths("1.png 2.gif 3.jpeg 4.jpg 5.webp 6.png 7.png"), ["1.png", "2.gif", "3.jpeg", "4.jpg", "5.webp", "6.png"]);
+  assert.deepEqual(imagePaths(`${"x".repeat(1 << 20)} ${"a.".repeat(1 << 19)}`), [], "a long word takes one pass, as a reply's base64 would");
 });

@@ -10,7 +10,7 @@ import { once } from "node:events";
 import { execFile } from "node:child_process";
 import { appendFile, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { setTimeout as sleep } from "node:timers/promises";
-import { claudeProjects, type ClaudeConversation } from "../claude-transcript.ts";
+import { claudeProjects, maxRecordBytes, type ClaudeConversation } from "../claude-transcript.ts";
 import { claudeHook } from "../../images/pylon/nexus-ask.ts";
 import { tmpdir } from "node:os";
 import { request } from "node:http";
@@ -1135,6 +1135,101 @@ test("a thread's files and changes are read from its checkout through its node's
   assert.ok(s.streams.every(([pylon, argv]) => pylon === s.thread.pylonId && argv[0] === "python3"));
   assert.ok(s.registry.thread(id)!.lastHumanActivityAt > 1);
   assert.ok(s.woken.includes(node));
+});
+
+const pngBytes = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.from("IHDR pixels")]);
+const gifBytes = Buffer.from("GIF89a pixels");
+
+test("a thread's checkout images are served while its pylon runs, sniffed, and the file at a base too", async (t) => {
+  const s = await withThread(t);
+  const { repo, run } = await localCheckout(t, s);
+  observeRunning(s, {});
+  await writeFile(join(repo, "shot.png"), pngBytes);
+  await run("add", "shot.png");
+  await run("commit", "-q", "-m", "shot");
+  await writeFile(join(repo, "shot.png"), gifBytes);
+  const active = s.registry.thread(s.thread.id)!.lastHumanActivityAt;
+  s.woken.length = 0;
+  const image = (query: string) => s.raw(`/v1/threads/${s.thread.id}/image?${query}`);
+
+  const now = await image("source=file&path=shot.png");
+  assert.equal(now.status, 200);
+  assert.deepEqual(now.body, gifBytes);
+  assert.equal(now.headers["content-type"], "image/gif", "the bytes say what it is, not its name");
+  assert.equal(now.headers["x-content-type-options"], "nosniff");
+  assert.equal(now.headers["content-security-policy"], "default-src 'none'; sandbox");
+  assert.equal(now.headers["cache-control"], "no-cache");
+  const before = await image("source=file&path=shot.png&base=head");
+  assert.deepEqual([before.status, before.headers["content-type"]], [200, "image/png"]);
+  assert.deepEqual(before.body, pngBytes);
+  assert.equal((await image("source=file&path=shot.png&base=start")).status, 404, "the file was added after the start");
+
+  await writeFile(join(repo, "logo.svg"), "<svg xmlns='http://www.w3.org/2000/svg'><script>alert(1)</script></svg>");
+  await writeFile(join(repo, "fake.png"), "not a png");
+  for (const path of ["logo.svg", "fake.png", "src/app.ts"]) assert.equal((await image(`source=file&path=${encodeURIComponent(path)}`)).status, 415, path);
+  await writeFile(join(repo, "huge.png"), Buffer.concat([pngBytes, Buffer.alloc(10 << 20)]));
+  assert.equal((await image("source=file&path=huge.png")).status, 413);
+  assert.equal((await image("source=file&path=..%2Fsecret.png")).status, 400);
+  for (const query of ["source=file", "source=disk&path=shot.png", "source=file&path=shot.png&base=yesterday", "source=harness&entry=1&message=0&part=0&sha256=x"]) {
+    assert.equal((await image(query)).status, 400, query);
+  }
+  assert.equal(s.registry.thread(s.thread.id)!.lastHumanActivityAt, active, "an image's load is not the person's activity");
+  assert.deepEqual(s.woken, []);
+});
+
+test("an image is refused with a 409 while the pylon does not run, without waking it, and a caller who may not read files may not read images", async (t) => {
+  const s = await withThread(t);
+  await localCheckout(t, s);
+  const active = s.registry.thread(s.thread.id)!.lastHumanActivityAt;
+  s.woken.length = 0;
+  const route = `/v1/threads/${s.thread.id}/image?source=file&path=src%2Fapp.ts`;
+  const paused = await s.call("GET", route);
+  assert.equal(paused.status, 409);
+  assert.match(paused.body.error, /is not running, and this request does not wake it/);
+  assert.deepEqual(s.streams, [], "the probe is never asked");
+  assert.deepEqual(s.woken, []);
+  assert.equal(s.registry.thread(s.thread.id)!.lastHumanActivityAt, active);
+
+  s.callAs("nSTRANGER" as TailnetNodeId);
+  assert.equal((await s.call("GET", `/v1/threads/${s.thread.id}/files/content?path=src%2Fapp.ts`)).status, 403);
+  assert.equal((await s.call("GET", route)).status, 403);
+  s.callAs(laptop);
+  assert.equal((await s.call("GET", "/v1/threads/th-nope/files/content?path=src%2Fapp.ts")).status, 404);
+  assert.equal((await s.call("GET", "/v1/threads/th-nope/image?source=file&path=src%2Fapp.ts")).status, 404);
+  assert.equal((await s.call("POST", `/v1/threads/${s.thread.id}/archive`)).status, 200);
+  s.woken.length = 0;
+  assert.equal((await s.call("GET", route)).status, 409);
+  assert.deepEqual(s.woken, []);
+});
+
+test("a harness conversation's image part is served by its hash, and a part that changed is gone", async (t) => {
+  const s = await withThread(t);
+  const data = pngBytes.toString("base64");
+  const transcript = s.fake.transcript(s.thread.id);
+  transcript.messages.push({ role: "toolResult", toolCallId: "c1", toolName: "screenshot", content: [{ type: "text", text: "taken" }, { type: "image", data, mimeType: "image/png" }], isError: false, timestamp: 0 });
+  s.fake.commit(s.thread.id);
+  const entry = transcript.messages.length;
+  const sha256 = createHash("sha256").update(data).digest("hex");
+  s.woken.length = 0;
+  const shot = await s.raw(`/v1/threads/${s.thread.id}/image?source=harness&entry=${entry}&message=0&part=1&sha256=${sha256}`);
+  assert.equal(shot.status, 200);
+  assert.deepEqual(shot.body, pngBytes);
+  assert.equal(shot.headers["content-type"], "image/png");
+  assert.equal(shot.headers["cache-control"], "private, max-age=31536000, immutable");
+  assert.equal(shot.headers["x-content-type-options"], "nosniff");
+  assert.equal((await s.raw(`/v1/threads/${s.thread.id}/image?source=harness&entry=${entry}&message=0&part=1&sha256=${"0".repeat(64)}`)).status, 404);
+  assert.equal((await s.raw(`/v1/threads/${s.thread.id}/image?source=harness&entry=${entry}&message=0&part=0&sha256=${sha256}`)).status, 404, "a text part is no image");
+
+  const big = Buffer.concat([pngBytes, Buffer.alloc(10 << 20)]).toString("base64");
+  transcript.messages.push({ role: "user", content: [{ type: "image", data: big, mimeType: "image/png" }], timestamp: 0 });
+  s.fake.commit(s.thread.id);
+  const bigSha = createHash("sha256").update(big).digest("hex");
+  assert.equal((await s.raw(`/v1/threads/${s.thread.id}/image?source=harness&entry=${transcript.messages.length}&message=0&part=0&sha256=${bigSha}`)).status, 413);
+  transcript.messages.push({ role: "user", content: [{ type: "image", data: Buffer.from("<svg/>").toString("base64"), mimeType: "image/svg+xml" }], timestamp: 0 });
+  s.fake.commit(s.thread.id);
+  const svgSha = createHash("sha256").update(Buffer.from("<svg/>").toString("base64")).digest("hex");
+  assert.equal((await s.raw(`/v1/threads/${s.thread.id}/image?source=harness&entry=${transcript.messages.length}&message=0&part=0&sha256=${svgSha}`)).status, 415);
+  assert.deepEqual(s.woken, [], "a harness image needs no pylon");
 });
 
 test("a scratch thread's changes and diff are against the empty tree, before its first commit and after", async (t) => {
@@ -2820,6 +2915,34 @@ async function withClaude(t: import("node:test").TestContext) {
   return { ...c, pylon, transcript: join(projects, "-home-user-workspace-repo", `${claudeSession}.jsonl`) };
 }
 
+test("a Claude worker's pasted image is served from its transcript while the pylon runs, by the place its entry names", async (t) => {
+  const s = await withClaude(t);
+  const record = JSON.stringify({
+    type: "user", timestamp: "2026-10-28T10:00:00.000Z", origin: { kind: "human" },
+    message: { role: "user", content: [{ type: "text", text: "What is wrong here?" }, { type: "image", source: { type: "base64", media_type: "image/png", data: pngBytes.toString("base64") } }] },
+  });
+  await writeFile(s.transcript, `${fixture[0]}${record}\n`);
+  const view = (await s.call("GET", `/v1/threads/${s.thread.id}/conversation`)).body as ClaudeConversation;
+  const prompt = view.entries.find((e) => e.kind === "prompt" && e.text === "What is wrong here?") as Extract<ClaudeConversation["entries"][number], { kind: "prompt" }>;
+  const [place] = prompt.images!;
+  const query = (p: typeof place) => `/v1/threads/${s.thread.id}/image?source=transcript&offset=${p!.offset}&bytes=${p!.bytes}&sha256=${p!.sha256}&index=${p!.index}`;
+  const active = s.registry.thread(s.thread.id)!.lastHumanActivityAt;
+  s.woken.length = 0;
+  const shot = await s.raw(query(place));
+  assert.equal(shot.status, 200);
+  assert.deepEqual(shot.body, pngBytes);
+  assert.equal(shot.headers["content-type"], "image/png");
+  assert.equal(shot.headers["cache-control"], "private, max-age=31536000, immutable");
+  assert.equal(shot.headers["content-security-policy"], "default-src 'none'; sandbox");
+  assert.equal((await s.raw(query({ ...place!, index: 1 }))).status, 404);
+  assert.equal((await s.raw(query({ ...place!, bytes: 5 << 20 }))).status, 400, "no record is longer than one read");
+  s.registry.markOffline(node);
+  const paused = await s.call("GET", query(place));
+  assert.equal(paused.status, 409);
+  assert.deepEqual(s.woken, []);
+  assert.equal(s.registry.thread(s.thread.id)!.lastHumanActivityAt, active);
+});
+
 test("a Claude worker thread's latest turn is the one its newest turn-started names, and a turn without a snapshot is refused", async (t) => {
   const s = await withClaude(t);
   const { repo } = await localCheckout(t, s);
@@ -3177,8 +3300,9 @@ test("a Claude worker's page names no reply watermark while the reads after the 
   await s.call("GET", `/v1/threads/${s.thread.id}/conversation`);
 
   const reply = JSON.parse(fixture[40]!);
-  const long = (i: number) => `${JSON.stringify({ ...reply, uuid: `long-${i}`, message: { ...reply.message, id: `msg-long-${i}`, content: [{ type: "text", text: `Long ${i} ${"x".repeat(4000)}` }] } })}\n`;
-  await appendFile(s.transcript, Array.from({ length: 160 }, (_, i) => long(i)).join("") + fixture.slice(30, 43).join(""));
+  // Two records of more than half of what one read takes, so the reply lies past the first read.
+  const long = (i: number) => `${JSON.stringify({ ...reply, uuid: `long-${i}`, message: { ...reply.message, id: `msg-long-${i}`, content: [{ type: "text", text: `Long ${i} ${"x".repeat(maxRecordBytes * 0.6)}` }] } })}\n`;
+  await appendFile(s.transcript, long(0) + long(1) + fixture.slice(30, 43).join(""));
   held = reads + 2;
   s.registry.reportSession(node, { sequence: 1, pylon: s.thread.pylonId, time: Date.now(), event: { kind: "session.turn-ended", session: claudeSession } });
   t.mock.timers.tick(1_000);

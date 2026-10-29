@@ -86,6 +86,8 @@ export interface CheckoutReader {
   changes(base: ChangesBase): Promise<Changes>;
   /** The whole diff, or only `paths`. Give a renamed file's old path too, or it shows as added. */
   diff(base: ChangesBase, paths: readonly string[]): Promise<Diff>;
+  /** The file's bytes in the base's tree, at most maxFileBytes. Refused as `missing` where the base has no such file. */
+  blob(base: ChangesBase, path: string): Promise<Buffer>;
 }
 
 export function checkoutReader(open: OpenPipe, checkout: string, deadlineMs = readDeadlineMs, expectedTurn?: string | null): CheckoutReader {
@@ -146,6 +148,7 @@ export function checkoutReader(open: OpenPipe, checkout: string, deadlineMs = re
     read: (path) => run([path], ["read", path, String(maxFileBytes)]),
     changes: (base) => json(changesSchema, [], ["changes", scoped(base)]),
     diff: (base, paths) => json(diffSchema, paths, ["diff", scoped(base), ...paths]),
+    blob: (base, path) => run([path], ["blob", scoped(base), path, String(maxFileBytes)]),
   };
 }
 

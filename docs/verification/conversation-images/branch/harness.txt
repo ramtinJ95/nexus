@@ -1,0 +1,19 @@
+th-81d37a46116b · started just now · gpt-6-astra
+
+You
+
+The pipeline's cells cut off mid-word on my phone, like this:
+
+I'll look at the capture of the page with the cells wrapping.
+
+Read
+docs/shots/conversation-desktop.png
+1 line
+41 ms
+›
+docs/shots/conversation-desktop.png
+Read image file [image/png]
+
+Titles and reasons wrap now, and no cell is cut off. The capture is docs/shots/conversation-desktop.png.
+
+docs/shots/conversation-desktop.png

@@ -21,11 +21,11 @@ import type { ByteStream, StreamEnd } from "./protocol.ts";
 export type PromptSource = "person" | "command" | "other";
 
 export type ClaudeEntry =
-  | { kind: "prompt"; at: number; text: string; from: PromptSource }
+  | { kind: "prompt"; at: number; text: string; from: PromptSource; images?: TranscriptImage[] }
   | { kind: "reply"; at: number; text: string }
   /** `input` is the call's arguments, each string cut to its limit. */
   | { kind: "tool"; at: number; id: string; name: string; input: Record<string, unknown> }
-  | { kind: "result"; at: number; toolUseId: string; output: string; isError: boolean }
+  | { kind: "result"; at: number; toolUseId: string; output: string; isError: boolean; images?: TranscriptImage[] }
   /**
    * A background subagent or shell finished, as Claude's `<task-notification>` says. `toolUseId` is the call that
    * started it. `result` is a subagent's final answer, which a shell's notification does not carry.
@@ -43,6 +43,9 @@ export type ClaudeEntry =
   | { kind: "pull-request"; at: number; number: number; url: string; repository: string }
   /** A record the parser does not know, kept visible. `summary` is a short, cut rendering of it. */
   | { kind: "record"; at: number | null; type: string; summary: string };
+
+/** Where an image block's bytes are: the transcript record that holds it, by byte offset, length and SHA-256, and its place among that record's image blocks. */
+export interface TranscriptImage { offset: number; bytes: number; sha256: string; index: number }
 
 /** `resetsAt` is in Unix milliseconds, null when Claude Code did not say. */
 export interface UsageLimit { resetsAt: number | null }
@@ -100,8 +103,11 @@ const sha256 = (bytes: Uint8Array) => createHash("sha256").update(bytes).digest(
 export const transcriptStart: TranscriptCursor = { offset: 0, skipping: false, before: sha256(new Uint8Array()) };
 
 export const maxEntries = 3000;
-/** The most one read takes from the file. A record longer than this is skipped, and a `record` entry says so. */
-export const maxRecordBytes = 512 << 10;
+/**
+ * The most one read takes from the file. A record longer than this is skipped, and a `record` entry says so. A Read of
+ * an image records its base64 twice, so its record is about 2.7 times the image, and one of up to about 1.4 MiB fits.
+ */
+export const maxRecordBytes = 4 << 20;
 /** Cuts for each entry's text, so a transcript of many megabytes keeps to a bounded model. */
 export const textLimits = { prompt: 32 << 10, reply: 64 << 10, input: 4 << 10, output: 8 << 10, summary: 500 } as const;
 
@@ -150,6 +156,50 @@ export async function readTranscript(open: OpenPipe, session: string, cursor: Tr
   return { entries: next.entries, cursor: { ...next.cursor, before }, more: size > start + body.length, reset };
 }
 
+/** Prints at most $3 bytes of the session's transcript from offset $2. Exits 3 when no project holds it. */
+const imageScript = `for f in "$1"/*/"$0".jsonl; do [ -e "$f" ] || continue; tail -c +$(($2 + 1)) "$f" | head -c $3; exit 0; done; exit 3`;
+
+/**
+ * The bytes of an image block in the session's transcript, read over one raw pipe, or null when the record there is
+ * no longer the one `image` names, as after the file was replaced, or holds no such block.
+ */
+export async function readTranscriptImage(open: OpenPipe, session: string, image: TranscriptImage, projects = claudeProjects, deadlineMs = transcriptDeadlineMs): Promise<Buffer | null> {
+  if (!/^[A-Za-z0-9-]{1,200}$/.test(session)) throw new Error(`${JSON.stringify(session.slice(0, 200))} is not a Claude Code session ID`);
+  if (image.bytes > maxRecordBytes) return null;
+  const { end, out } = await drained(await open(["sh", "-c", imageScript, session, projects, String(image.offset), String(image.bytes)]), deadlineMs, image.bytes, "the transcript's image");
+  if (end.kind === "lost") throw new Error("the pipe to the pylon was lost before the transcript's image was read");
+  if (end.code === 3) return null;
+  if (end.code !== 0) throw new Error(`reading the Claude Code transcript's image exited ${end.code}`);
+  if (out.length !== image.bytes || sha256(out) !== image.sha256) return null;
+  let record: unknown;
+  try {
+    record = JSON.parse(out.toString("utf8"));
+  } catch {
+    return null;
+  }
+  const source = recordImages(record)[image.index]?.block.source;
+  return isFields(source) && source.type === "base64" && typeof source.data === "string" ? Buffer.from(source.data, "base64") : null;
+}
+
+/** A record of thousands of tiny images, which only a guest that means harm writes, shows its first few. */
+const maxRecordImages = 32;
+
+/**
+ * The image blocks of a record's `message.content`, in order: each top-level image item, and each image part of a
+ * tool result's list content, up to maxRecordImages. `item` is the content item that holds it. A block's place in this
+ * list is its index.
+ */
+function recordImages(record: unknown): { item: number; block: Fields }[] {
+  const content = isFields(record) && isFields(record.message) ? record.message.content : undefined;
+  if (!Array.isArray(content)) return [];
+  return content.flatMap((part: unknown, item) => {
+    if (!isFields(part)) return [];
+    if (part.type === "image") return [{ item, block: part }];
+    if (part.type !== "tool_result" || !Array.isArray(part.content)) return [];
+    return part.content.flatMap((inner: unknown) => isFields(inner) && inner.type === "image" ? [{ item, block: inner }] : []);
+  }).slice(0, maxRecordImages);
+}
+
 /** The pipe's whole output, as it reads `what`. A pipe that passes the deadline or prints past the cap is dropped. */
 export async function drained(stream: ByteStream, deadlineMs: number, maxBytes = maxReplyBytes, what = "the transcript"): Promise<{ end: StreamEnd; out: Buffer }> {
   const reply = (async () => {
@@ -190,32 +240,37 @@ function consumed(body: Buffer, cursor: Omit<TranscriptCursor, "before">): { ent
     const skipping = cursor.skipping || body.length === maxRecordBytes;
     return { entries: [], cursor: skipping ? { offset: cursor.offset + body.length, skipping } : cursor };
   }
-  const lines = body.subarray(0, last).toString("utf8").split("\n");
   const entries: ClaudeEntry[] = [];
-  if (cursor.skipping) {
-    lines.shift();
-    entries.push({ kind: "record", at: null, type: "oversized", summary: `a record of more than ${maxRecordBytes} bytes was skipped` });
-  }
+  if (cursor.skipping) entries.push({ kind: "record", at: null, type: "oversized", summary: `a record of more than ${maxRecordBytes} bytes was skipped` });
   let at = 0;
-  for (const line of lines) {
-    if (line.trim() === "") continue;
-    const read = entriesOf(line, at);
-    entries.push(...read.entries);
-    at = read.at ?? at;
+  for (let start = cursor.skipping ? body.indexOf(0x0a) + 1 : 0; start <= last; ) {
+    const end = body.indexOf(0x0a, start);
+    const bytes = body.subarray(start, end);
+    const line = bytes.toString("utf8");
+    if (line.trim() !== "") {
+      const read = entriesOf(line, at, { offset: cursor.offset + start, bytes: bytes.length, sha256: sha256(bytes) });
+      entries.push(...read.entries);
+      at = read.at ?? at;
+    }
+    start = end + 1;
   }
   return { entries, cursor: { offset: cursor.offset + last + 1, skipping: false } };
 }
 
-/** Every entry one transcript line gives, in order. A line that is not a JSON object gives one `record` entry. */
+/**
+ * Every entry one transcript line gives, in order. A line that is not a JSON object gives one `record` entry. Its
+ * images are located as if the line were the file's first.
+ */
 export function parseRecord(line: string): ClaudeEntry[] {
-  return entriesOf(line, 0).entries;
+  const bytes = Buffer.from(line);
+  return entriesOf(line, 0, { offset: 0, bytes: bytes.length, sha256: sha256(bytes) }).entries;
 }
 
 /**
  * `at` is the record's timestamp, or `lastAt` for a record without one. Any record that breaks the shape its type
  * promises gives a `record` entry, so no input makes this throw.
  */
-function entriesOf(line: string, lastAt: number): { entries: ClaudeEntry[]; at: number | null } {
+function entriesOf(line: string, lastAt: number, where: Where): { entries: ClaudeEntry[]; at: number | null } {
   let r: unknown;
   try {
     r = JSON.parse(line);
@@ -227,14 +282,16 @@ function entriesOf(line: string, lastAt: number): { entries: ClaudeEntry[]; at: 
   const at = own ?? lastAt;
   const type = typeof r.type === "string" ? r.type : "untyped";
   try {
-    return { entries: (records.get(type) ?? shown(type))(r, at), at: own };
+    return { entries: (records.get(type) ?? shown(type))(r, at, where), at: own };
   } catch {
     return { entries: [record(type, r, at)], at: own };
   }
 }
 
 type Fields = Readonly<Record<string, unknown>>;
-type Parse = (r: Fields, at: number) => ClaudeEntry[];
+/** Where a record's line is in the file. */
+type Where = Omit<TranscriptImage, "index">;
+type Parse = (r: Fields, at: number, where: Where) => ClaudeEntry[];
 /** Parses a string-content form, keyed in `forms` by its leading tag. */
 type Form = (text: string, r: Fields, at: number) => ClaudeEntry[];
 /** Parses an assistant content block. `tone` is set for a message Claude Code made itself, which is a notice rather than a reply. */
@@ -251,13 +308,13 @@ const records = table<Parse>({
     "frame-link", "history-suppression", "bridge-session"),
   user: userRecord,
   assistant: assistantRecord,
-  system: (r, at) => {
+  system: (r, at, where) => {
     const subtype = str(r.subtype, "subtype");
-    return (systems.get(subtype) ?? shown(`system/${subtype}`))(r, at);
+    return (systems.get(subtype) ?? shown(`system/${subtype}`))(r, at, where);
   },
-  attachment: (r, at) => {
+  attachment: (r, at, where) => {
     const type = str(fields(r.attachment, "attachment").type, "attachment.type");
-    return (attachments.get(type) ?? shown(`attachment/${type}`))(r, at);
+    return (attachments.get(type) ?? shown(`attachment/${type}`))(r, at, where);
   },
   "pr-link": (r, at) => {
     if (typeof r.prNumber !== "number" || !Number.isSafeInteger(r.prNumber) || r.prNumber < 1) throw new Error("prNumber is not a pull request's number");
@@ -334,7 +391,7 @@ const blocks = table<Block>({
 
 const interruptions = new Set(["[Request interrupted by user]", "[Request interrupted by user for tool use]"]);
 
-function userRecord(r: Fields, at: number): ClaudeEntry[] {
+function userRecord(r: Fields, at: number, where: Where): ClaudeEntry[] {
   // Claude Code's own continue once a usage limit resets, which it writes as metadata.
   if (isFields(r.origin) && r.origin.kind === "auto-continuation" && isFields(r.message) && typeof r.message.content === "string") return [prompt(at, r.message.content, "other")];
   if (r.isMeta === true) return [];
@@ -351,19 +408,23 @@ function userRecord(r: Fields, at: number): ClaudeEntry[] {
   }
   // Claude's metadata for a subagent it started in the background, which tells Claude not to show it.
   const background = isFields(r.toolUseResult) && r.toolUseResult.status === "async_launched";
+  const located = Map.groupBy(recordImages(r).map(({ item }, index) => ({ item, image: { ...where, index } })), ({ item }) => item);
+  const imagesOf = (item: number): TranscriptImage[] => located.get(item)?.map(({ image }) => image) ?? [];
   const entries: ClaudeEntry[] = [];
   const words: string[] = [];
-  for (const item of list(content, "message.content")) {
+  const pasted: TranscriptImage[] = [];
+  for (const [i, item] of list(content, "message.content").entries()) {
     const part = fields(item, "a content item");
     const type = str(part.type, "a content item's type");
     if (type === "tool_result") {
-      const output = background ? "Started in the background" : cut(typeof part.content === "string" ? part.content : partsText(part.content ?? []), textLimits.output);
-      entries.push({ kind: "result", at, toolUseId: cut(str(part.tool_use_id, "tool_use_id"), textLimits.summary), output, isError: part.is_error === true });
+      const output = background ? "Started in the background" : cut(typeof part.content === "string" ? part.content : partsText(list(part.content ?? [], "content").filter((p) => !isFields(p) || p.type !== "image")), textLimits.output);
+      entries.push({ kind: "result", at, toolUseId: cut(str(part.tool_use_id, "tool_use_id"), textLimits.summary), output, isError: part.is_error === true, ...withImages(imagesOf(i)) });
     } else if (type === "text" && interruptions.has(str(part.text, "text"))) entries.push(notice(at, "info", "Interrupted"));
-    else if (type === "text" || type === "image") words.push(type === "text" ? str(part.text, "text") : "[image]");
+    else if (type === "text") words.push(str(part.text, "text"));
+    else if (type === "image") pasted.push(...imagesOf(i));
     else entries.push(record(`user/${type}`, part, at));
   }
-  if (words.length > 0) entries.push(prompt(at, words.join("\n"), from));
+  if (words.length > 0 || pasted.length > 0) entries.push({ ...prompt(at, words.join("\n"), from), ...withImages(pasted) });
   return entries;
 }
 
@@ -413,6 +474,7 @@ function task(text: string, at: number): ClaudeEntry {
   };
 }
 
+const withImages = (images: TranscriptImage[]): { images?: TranscriptImage[] } => images.length === 0 ? {} : { images };
 const shellId = (r: Fields): string => `shell:${cut(str(r.promptId, "promptId"), textLimits.summary)}`;
 const prompt = (at: number, text: string, from: PromptSource): ClaudeEntry => ({ kind: "prompt", at, text: cut(text, textLimits.prompt), from });
 const notice = (at: number, tone: "info" | "error", text: string): ClaudeEntry => ({ kind: "notice", at, tone, text: cut(text, textLimits.output) });

@@ -39,7 +39,7 @@ import type { WebSocket } from "ws";
 import { attachTerminal, processTty } from "./attach.ts";
 import { call, CliError, exitCodes, follow, upgrade, type Endpoint, type HostPort } from "./transport.ts";
 
-const version = "0.43.0";
+const version = "0.44.0";
 /** Where `connect` looks for the API on a host: the dashboard's HTTPS port, then the plain HTTP port. */
 const controlPorts = ["https://{host}:7443", "http://{host}:7470"];
 const configFile = () => join(homedir(), ".config", "nexus", "cli.json");
@@ -262,7 +262,7 @@ const promptLabel: Record<PromptSource, string> = { person: "", command: "[slash
  */
 function claudeEntryText(e: ClaudeEntry, shown: Set<string>, how?: string): string {
   switch (e.kind) {
-    case "prompt": return `> ${promptLabel[e.from]}${e.text.split("\n").join("\n> ")}`;
+    case "prompt": return `> ${promptLabel[e.from]}${[...e.text === "" ? [] : [e.text], ...(e.images ?? []).map(() => "[image]")].join("\n").split("\n").join("\n> ")}`;
     case "reply": return e.text;
     case "tool": return `[tool] ${e.name} ${clip(JSON.stringify(e.input), 200)}${how === undefined ? "" : ` (${how})`}`;
     case "task": return `[task] ${e.status}: ${e.summary}`;
