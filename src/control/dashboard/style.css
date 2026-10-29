@@ -375,7 +375,7 @@ h4.md-h { font-size: 1.07em; }
 
 /* inspector: a segmented switch over the changes, the previews and the pylon, as Jetline's Changes / PR / Run */
 .inspect { background: var(--inspect); overflow: auto; padding: 12px 12px 20px; display: flex; flex-direction: column; gap: 10px; }
-.seg-bar { display: flex; padding: 3px; border-radius: 10px; background: var(--raised-2); flex: none; }
+.seg-bar { display: flex; padding: 3px; border-radius: 10px; background: var(--raised-2); flex: none; position: sticky; top: 0; z-index: 1; box-shadow: 0 -9px 0 3px var(--inspect); }
 .seg-tab { flex: 1; display: inline-flex; align-items: center; justify-content: center; gap: 6px; height: 28px; border-radius: 8px; color: var(--text-2); font-size: 12px; cursor: pointer; position: relative; }
 .seg-tab input { position: absolute; opacity: 0; pointer-events: none; }
 .seg-tab:has(input:checked) { background: var(--bg); color: var(--text); box-shadow: var(--shadow); }
