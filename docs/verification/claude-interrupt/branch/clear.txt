@@ -1,0 +1,12 @@
+{
+  "error": "/clear ends or replaces Claude's session, and Nexus follows only the session the worker started, so this page would stop showing what Claude does and its messages would go to the old session. Type it in the pylon's terminal (nexus attach th-9498b0f2ad97) if you mean to leave it.",
+  "before": "ab60e737-a852-4c96-b4df-49fe766ed74d",
+  "after": "ab60e737-a852-4c96-b4df-49fe766ed74d",
+  "worker": "ab60e737-a852-4c96-b4df-49fe766ed74d",
+  "commands": [
+    "send-claude",
+    "interrupt-claude",
+    "send-claude",
+    "interrupt-claude"
+  ]
+}

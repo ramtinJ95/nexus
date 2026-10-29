@@ -1,0 +1,11 @@
+{
+  "error": null,
+  "before": "8ca52c66-6317-476a-9db5-465ee12b0ba6",
+  "after": "0239d122-d53b-4cfd-842b-ac584f5a2e07",
+  "worker": "8ca52c66-6317-476a-9db5-465ee12b0ba6",
+  "commands": [
+    "send-claude",
+    "send-claude",
+    "send-claude"
+  ]
+}

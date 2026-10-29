@@ -1,0 +1,16 @@
+ℹ fail 12
+ℹ pass 396
+ℹ tests 408
+✖ a Claude worker that works shows its turn's call running, the turn's clock and calls, and a box that queues for Claude (36.525583ms)
+✖ a Claude worker thread's abort presses Esc in its session's pane through the probe, and says why when nothing was pressed (27.099907ms)
+✖ a command result is read as the probe sent it, a close without an outcome as closed, and a result for another command is refused (54.062156ms)
+✖ a harness, a Claude worker and a bare thread each answer every agent route as their kind does (38.469247ms)
+✖ a harness, a Claude worker and a bare thread each show the conversation, stream and composer of their kind (52.60442ms)
+✖ a probe takes a command of every kind as it was sent, with the fields it does not know (2.382155ms)
+✖ abort interrupts a Claude worker's turn with Esc in its pane, and fails with exit code 5 when Claude was not working (412.975344ms)
+✖ deploy and release use the shared release view and wait for both roles (225.236562ms)
+✖ each command kind waits for the reads or its Claude session or nothing, publishes a snapshot or not, and a send is remembered by its request ID (2018.017482ms)
+✖ failing tests:
+✖ src/control/dashboard/slash.test.js (30.73783ms)
+✖ src/sessions.test.ts (125.250198ms)
+✖ the command policy table gives each kind its lock, its memory by request ID, its snapshot publishing and whether it may be sent again (0.285233ms)
