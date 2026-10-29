@@ -57,7 +57,7 @@ Next the installer asks for each credential the machine lacks, over SSH, and kee
 | The control plane's GitHub token, on its machine | Whether to give it the same GitHub token, for the [PR watch](#control-plane-github-pr-watch) and the review loop | `/etc/nexus/github-token`, `root:nexus-control`, mode 0640, named as `github.tokenFile` in `control.json` |
 | A git SSH key | Whether to make one | `/etc/nexus/git_ed25519`, made on the machine, as [Clone over SSH](#clone-over-ssh) describes |
 
-Each further machine, installed with `--node`, asks for its own Claude token, GitHub token and git key, and copies nothing from the control plane's machine. A credential that is already in place is left as it is: the installer never asks for it, never rewrites or moves it, and never changes its mode or owner, and it says what it left alone. Then it restarts the probe if it runs and `secrets.env` changed, installs the probe again with `gitSsh` once it made a git key, and installs the control plane again once the harness is signed in, which starts it.
+Each further machine, installed with `--node`, asks for its own Claude token, GitHub token and git key, and copies nothing from the control plane's machine. A credential that is already in place is left as it is: the installer never asks for it, never rewrites or moves it, and never changes its mode or owner, and it says what it left alone. Where `control.json` names its own `harness.credentials` or `github.tokenFile`, or `probe.json` its own `secretsFile` or `gitSsh` key, the installer looks there rather than at the paths above. A failed ChatGPT login offers the choice again. Then it restarts the probe if it runs and `secrets.env` changed, installs the probe again with `gitSsh` once it made a git key, and installs the control plane again once the harness is signed in, which starts it.
 
 Without a terminal, or with `--non-interactive`, the installer never prompts. It reads each answer from a variable, or from the file that the variable's name with `_FILE` appended names, and skips what is not given. A value that is not a token fails the run.
 
@@ -207,7 +207,7 @@ This does not make arbitrary merged root code safe: merged release code and npm 
 
 ## The probe
 
-`deploy/install.sh` writes `/etc/nexus/probe.json`, and installs `/etc/nexus/secrets.env` from `secrets.example.env` on the first run. Later runs never overwrite secrets.env. Restart the probe yourself after you edit it: `sudo systemctl restart nexus-probe`.
+`deploy/install.sh` writes `/etc/nexus/probe.json`, and installs `/etc/nexus/secrets.env` from `secrets.example.env` on the first run. Later runs never overwrite secrets.env or change its owner or mode. Restart the probe yourself after you edit it: `sudo systemctl restart nexus-probe`.
 
 The probe runs as the system user `nexus`. These are its paths:
 
