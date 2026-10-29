@@ -11,7 +11,7 @@ Nexus runs coding agents in microVMs on your own Linux machines. The control pla
 
 Thread lists and `nexus show --json` share the control plane's `attention`, `lastReplyAt` and `seenAt`. Mark a reply read from any client with `nexus seen <thread>`, or unread with `nexus seen <thread> --unread`; neither wakes its pylon.
 
-The dashboard marks only rendered replies seen and shows attention in its sidebar and table. New failures and parked tasks notify immediately; replies wait two seconds in case work resumes. A focused dashboard offers an Open toast for another thread. Background system notifications need HTTPS and permission enabled by a click. Use the [HTTPS dashboard setup](deploy/README.md#https-dashboard) for system notifications on the tailnet. The plain HTTP listener remains available to existing clients.
+The dashboard marks only rendered replies seen and shows attention in its sidebar and table. Its home page starts with Needs you, a card for everything that waits on the person with the action on the card, which the sidebar counts. No browser tab's title or icon counts it. New failures and parked tasks notify immediately; replies wait two seconds in case work resumes. A focused dashboard offers an Open toast for another thread, and a notice opens the card for what the thread waits on. Background system notifications need HTTPS and permission enabled by a click. Use the [HTTPS dashboard setup](deploy/README.md#https-dashboard) for system notifications on the tailnet. The plain HTTP listener remains available to existing clients.
 
 ## Pull request watch
 

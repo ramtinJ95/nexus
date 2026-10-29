@@ -1,0 +1,3 @@
+{"held":"th-62e8ad481235","reserved":"th-a8875c5a416b","claudeReviewed":"th-fac19a02a7d5","outOfRounds":"th-eee51c2c532a","question":"th-90fbd59da5dc","deployerQuestion":"th-57247182690f","ask":"th-c5b4af198a16","dialog":"th-565d31560d21","limited":"th-4bbdf6d9526c","failed":"th-6797a37b4ba3","laptop":"nLAPTOP","evidence":"/home/user/workspace/repo/docs/verification/needs-you/main"}
+pylon-th-565d31560d21: reading Claude's transcript failed, so it shows the last read: the verify probe streams nothing
+pylon-th-b1487c1dfebd: reading Claude's transcript failed, so it shows the last read: the verify probe streams nothing

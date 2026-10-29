@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { runInNewContext } from "node:vm";
-import { coordinator, notificationChannel, owedSeen, seenBody } from "./notifications.js";
+import { coordinator, notificationChannel, needSelectors, noticeUrl, owedSeen, seenBody } from "./notifications.js";
 
 const row = (attention, working = false, id = "t1") => ({ id, attention, working });
 test("initial states are silent; failures and parked notify immediately", () => {
@@ -63,6 +63,14 @@ test("focused other thread gets only toast; background needs secure context and 
   assert.equal(notificationChannel(false, null, "t1", false, "granted"), null);
   assert.equal(notificationChannel(false, null, "t1", true, "default"), null);
   assert.equal(notificationChannel(true, null, "t1", false, "unavailable"), "toast");
+});
+test("a notice opens the inbox's card for what its thread waits on, and a reply, which has no card, opens the thread", () => {
+  assert.equal(noticeUrl({ id: "th-0123456789ab", attention: "failed" }), "/#needs-you:th-0123456789ab:failed");
+  assert.equal(noticeUrl({ id: "th-0123456789ab", attention: "decision" }), "/#needs-you:th-0123456789ab:decision");
+  assert.equal(noticeUrl({ id: "th-0123456789ab", attention: "reply" }), "/threads/th-0123456789ab");
+  assert.deepEqual(needSelectors("#needs-you:th-0123456789ab:waiting"), ['.need[data-thread="th-0123456789ab"][data-attention="waiting"]', '.need[data-thread="th-0123456789ab"]'],
+    "the thread's card for that attention, or else any of its cards");
+  for (const hash of ["", "#needs-you", "#terminal", '#needs-you:th-1"],a:failed']) assert.equal(needSelectors(hash), null, hash);
 });
 
 

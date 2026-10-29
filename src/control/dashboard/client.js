@@ -3,7 +3,7 @@
 // and polls the page to swap in each `data-live` region that changed. A thread page also follows its stream, which
 // sends the conversation region as the run streams, and reads its checkout's changes into the inspector, opening
 // each changed file's diff as a tab beside the conversation.
-import { coordinator, notificationChannel, noticeText, owedSeen } from "./notifications.js";
+import { coordinator, notificationChannel, needSelectors, noticeText, noticeUrl, owedSeen } from "./notifications.js";
 import { agoText } from "./ago.js";
 import { atEnd, endFollower } from "./scroll.js";
 import { afterSend, emptyReview, formatReview, kinds, linesLabel, noteOn, place, rangeOf, readReview, rowsOf } from "./review.js";
@@ -1474,6 +1474,7 @@ if (changesPane !== null) {
 }
 end?.toEnd();
 follow(document.getElementById("convo")?.dataset.stream);
+if (location.hash === "#terminal" && tabsBar?.querySelector('[data-tab="term"]')?.hidden === false) showTab(terminalTab);
 if (dialog?.dataset.autoopen !== undefined) void openStart(null);
 if (projectDialog?.dataset.autoopen !== undefined) openProject();
 setInterval(tick, 1000);
@@ -1495,12 +1496,34 @@ document.addEventListener("visibilitychange", () => {
   if (changesPane !== null && canRead(factsNow())) void readChanges();
 });
 
+/**
+ * Brings the inbox card a notice opened into view, or the inbox when that card is gone. A notice can come before the
+ * poll that brings its card, so the page is read once more before it settles for the inbox.
+ */
+async function showNeed() {
+  const selectors = needSelectors(location.hash);
+  if (selectors === null) return;
+  const find = () => selectors.map((s) => document.querySelector(s)).find((found) => found !== null) ?? null;
+  if (find() === null && document.getElementById("needs-you") !== null) await refreshNow();
+  const card = find() ?? document.getElementById("needs-you");
+  for (const picked of document.querySelectorAll(".need.picked")) picked.classList.remove("picked");
+  card?.classList.add("picked");
+  card?.scrollIntoView({ block: "start" });
+  card?.focus({ preventScroll: true });
+}
+void showNeed();
+addEventListener("hashchange", () => void showNeed());
+// On a phone the link is in the drawer, which a jump within the page would leave open over the inbox.
+document.addEventListener("click", (event) => {
+  if (event.target instanceof Element && event.target.closest('a[href^="/#needs-you"]') !== null) setOpen(null);
+});
+
 const currentThread = () => /^\/threads\/([^/]+)$/.exec(location.pathname)?.[1] ?? null;
 const focused = () => document.visibilityState === "visible" && document.hasFocus();
 const notifications = coordinator((row) => {
   const channel = notificationChannel(focused(), currentThread(), row.id, window.isSecureContext,
     window.isSecureContext && "Notification" in window ? Notification.permission : "unavailable");
-  const url = `/threads/${row.id}`;
+  const url = noticeUrl(row);
   if (channel === "system") {
     const notice = new Notification(row.title, { body: noticeText(row) });
     notice.onclick = () => { window.focus(); location.assign(url); notice.close(); };

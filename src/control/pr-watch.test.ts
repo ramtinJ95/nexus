@@ -13,7 +13,7 @@ import { gitFacts } from "../git-facts.ts";
 import type { CommandResult, NodeName, PylonCommand, PylonId, TailnetNodeId, LiveHash, PylonObservation } from "../protocol.ts";
 import type { ProjectId } from "../project.ts";
 import { githubClient, githubRepo, type PrSnapshot } from "./github.ts";
-import { prWatcher, prWatchPrefix } from "./pr-watch.ts";
+import { prWatcher, prWatchPrefix, summaryOf } from "./pr-watch.ts";
 import { threadQueue, waitOf } from "./queue.ts";
 import { agentInbox } from "./inbox.ts";
 import type { HarnessHost } from "../harness/host.ts";
@@ -101,6 +101,23 @@ test("records the PR's head at each read, so a push shows without another call t
   f.snapshot.detail.head = "2".repeat(40);
   await f.watcher.poll();
   assert.equal(f.registry.prWatch(f.id)?.links[0]?.pr.head, "2".repeat(40));
+});
+
+test("keeps the opening of the PR's description at each read, for the dashboard's card of a held review", async (t) => {
+  const f = fixture(); t.after(() => f.registry.close());
+  f.snapshot.detail.body = "## What changes\nThe home page lists what waits on you,\nwith the action on each card.\n\n## Not checked live\n- a real phone";
+  await f.watcher.poll();
+  assert.equal(f.registry.prWatch(f.id)?.links[0]?.pr.summary, "The home page lists what waits on you, with the action on each card.");
+  f.snapshot.detail.body = "Reworded.";
+  await f.watcher.poll();
+  assert.equal(f.registry.prWatch(f.id)?.links[0]?.pr.summary, "Reworded.");
+});
+
+test("a description's summary is its first paragraph past headings, images and comments, cut at 400 characters", () => {
+  assert.equal(summaryOf(""), "");
+  assert.equal(summaryOf("<!-- template -->\n# Title\n\n![shot](x.png)\n\nFirst  paragraph\nwraps.\n\nSecond."), "First paragraph wraps.");
+  assert.equal(summaryOf("## Summary\nRight under its heading."), "Right under its heading.");
+  assert.equal(summaryOf("x".repeat(500)), `${"x".repeat(399)}…`);
 });
 
 for (const state of ["merged", "closed"] as const) test(`${state} is recorded and no longer polled`, async (t) => {
