@@ -1,17 +1,19 @@
-2026-10-29T00:09:33.613Z seeded 52 threads
-2026-10-29T00:10:02.376Z /verify/append {"thread":"th-f1e3e7f774c3","n":1}
-2026-10-29T00:10:03.205Z /verify/stream {"thread":"th-f1e3e7f774c3","words":60}
-2026-10-29T00:10:09.711Z /verify/append {"thread":"th-f1e3e7f774c3","n":1}
-2026-10-29T00:10:11.849Z /verify/append {"thread":"th-f1e3e7f774c3","n":1}
-2026-10-29T00:10:12.959Z /verify/ask {"thread":"th-f1e3e7f774c3"}
-2026-10-29T00:10:19.773Z /verify/append {"thread":"th-f1e3e7f774c3","n":2}
-2026-10-29T00:10:19.783Z /verify/stream {"thread":"th-f1e3e7f774c3","words":60}
-2026-10-29T00:10:38.142Z /verify/append {"thread":"th-f1e3e7f774c3","n":3}
-2026-10-29T00:11:26.670Z /verify/append {"thread":"th-f1e3e7f774c3","n":1}
-2026-10-29T00:11:27.487Z /verify/stream {"thread":"th-f1e3e7f774c3","words":60}
-2026-10-29T00:11:34.026Z /verify/append {"thread":"th-f1e3e7f774c3","n":1}
-2026-10-29T00:11:35.801Z /verify/append {"thread":"th-f1e3e7f774c3","n":1}
-2026-10-29T00:11:36.787Z /verify/ask {"thread":"th-f1e3e7f774c3"}
-2026-10-29T00:11:43.598Z /verify/append {"thread":"th-f1e3e7f774c3","n":2}
-2026-10-29T00:11:43.609Z /verify/stream {"thread":"th-f1e3e7f774c3","words":60}
-2026-10-29T00:12:01.270Z /verify/append {"thread":"th-f1e3e7f774c3","n":3}
+2026-10-29T00:26:57.624Z seeded 52 threads
+2026-10-29T00:27:23.953Z /verify/append {"thread":"th-c8b4c1238cd1","n":1}
+2026-10-29T00:27:29.102Z /verify/append {"thread":"th-33643cf5ba79","n":1}
+2026-10-29T00:27:29.916Z /verify/stream {"thread":"th-33643cf5ba79","words":60}
+2026-10-29T00:27:36.418Z /verify/append {"thread":"th-33643cf5ba79","n":1}
+2026-10-29T00:27:38.701Z /verify/append {"thread":"th-33643cf5ba79","n":1}
+2026-10-29T00:27:39.834Z /verify/ask {"thread":"th-33643cf5ba79"}
+2026-10-29T00:27:46.651Z /verify/append {"thread":"th-33643cf5ba79","n":2}
+2026-10-29T00:27:46.668Z /verify/stream {"thread":"th-33643cf5ba79","words":60}
+2026-10-29T00:28:04.378Z /verify/append {"thread":"th-33643cf5ba79","n":3}
+2026-10-29T00:28:51.985Z /verify/append {"thread":"th-c8b4c1238cd1","n":1}
+2026-10-29T00:28:56.773Z /verify/append {"thread":"th-33643cf5ba79","n":1}
+2026-10-29T00:28:57.585Z /verify/stream {"thread":"th-33643cf5ba79","words":60}
+2026-10-29T00:29:04.129Z /verify/append {"thread":"th-33643cf5ba79","n":1}
+2026-10-29T00:29:05.830Z /verify/append {"thread":"th-33643cf5ba79","n":1}
+2026-10-29T00:29:06.764Z /verify/ask {"thread":"th-33643cf5ba79"}
+2026-10-29T00:29:13.579Z /verify/append {"thread":"th-33643cf5ba79","n":2}
+2026-10-29T00:29:13.588Z /verify/stream {"thread":"th-33643cf5ba79","words":60}
+2026-10-29T00:29:30.760Z /verify/append {"thread":"th-33643cf5ba79","n":3}

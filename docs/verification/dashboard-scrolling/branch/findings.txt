@@ -9,6 +9,7 @@ desktop page pipeline: the document itself scrolls: false -> ok
 desktop page node: the document itself scrolls: false -> ok
 desktop page usage: the document itself scrolls: false -> ok
 desktop long conversation: a wheel over the composer scrolls the window by: 0px -> ok
+desktop long conversation: at the end, the last fold opened, then a reply came, the fold's summary moved by: 0px -> ok
 desktop questions: cards whose option buttons show: 3 of 3 -> ok
 desktop live conversation: loaded, distance from its end: 0px -> ok
 desktop live conversation: at the end, a reply came, distance from the end: 0px -> ok
@@ -35,6 +36,7 @@ phone page pipeline: the document itself scrolls: false -> ok
 phone page node: the document itself scrolls: false -> ok
 phone page usage: the document itself scrolls: false -> ok
 phone long conversation: a wheel over the composer scrolls the window by: 0px -> ok
+phone long conversation: at the end, the last fold opened, then a reply came, the fold's summary moved by: 0px -> ok
 phone questions: cards whose option buttons show: 3 of 3 -> ok
 phone live conversation: loaded, distance from its end: 0px -> ok
 phone live conversation: at the end, a reply came, distance from the end: 0px -> ok

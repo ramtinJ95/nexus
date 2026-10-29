@@ -71,6 +71,20 @@ for (const view of widths) {
   await shot("wheel-over-composer");
   await ev(() => scrollTo(0, 0));
 
+  await open(`/threads/${ids.long}`);
+  const fold = () => ev(() => Math.round([...document.querySelectorAll("#convo .steps")].at(-1).getBoundingClientRect().top));
+  await ev(() => [...document.querySelectorAll("#convo .steps > summary")].at(-1).click());
+  await sleep(300);
+  await ev(() => [...document.querySelectorAll("#convo .steps")].at(-1).querySelector(".tool > summary").click());
+  await sleep(300);
+  log(`${view.name}: the last run of tools and its first call are open, ${(await conversation()).fromEnd}px above the end`);
+  const opened = await fold();
+  await control("append", { thread: ids.long, n: 1 });
+  await sleep(1_000);
+  const after = await fold();
+  finding("long conversation: at the end, the last fold opened, then a reply came, the fold's summary moved by", `${opened - after}px`, Math.abs(opened - after) > 2);
+  await shot("fold-opened-then-reply");
+
   await open(`/threads/${ids.asks}`);
   const cards = await ev(() => [...document.querySelectorAll("#questions .question")].map((card) => {
     const buttons = card.querySelector(".question-options").getBoundingClientRect();

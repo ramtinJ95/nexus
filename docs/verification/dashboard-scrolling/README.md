@@ -32,17 +32,18 @@ Only what a pylon cannot host is a stand-in: whois answers the laptop, a deploye
 |---|---|---|
 | Whether the document itself scrolls, on every page | On the long conversation, at both widths, the page is taller than the window. | No page scrolls. |
 | A mouse wheel over the composer (`11`) | Scrolls the window 3,000 px, into a blank page. | Nothing moves. |
-| Question cards whose option buttons show (`12`) | 0 of 3. Each card is squeezed into its own scroll box. | 3 of 3. The stack of cards scrolls instead. |
-| At the end, then the window shrinks by 300 px as a phone's keyboard opens, then a reply (`13`) | 397 px above the end on the desktop, 413 px on the phone. | At the end. |
-| At the end, six lines typed into the composer, then a reply (`14`) | 186 px and 239 px above the end. | At the end. |
+| At the end, the last run of tools and its first call opened, then a reply (`12`) | The fold stays put. | The fold stays put. Before the reviewer's finding was fixed, the branch moved it 448 px and 527 px. |
+| Question cards whose option buttons show (`13`) | 0 of 3. Each card is squeezed into its own scroll box. | 3 of 3. The stack of cards scrolls instead. |
+| At the end, then the window shrinks by 300 px as a phone's keyboard opens, then a reply (`14`) | 397 px above the end on the desktop, 413 px on the phone. | At the end. |
+| At the end, six lines typed into the composer, then a reply (`15`) | 186 px and 239 px above the end. | At the end. |
 | At the end, a question card joins the dock across a poll | At the end, since the swap that adds the card puts the reader back. | At the end. |
-| Scrolled up to 600 px, replies, a stream and a poll (`15`) | Held at 600 px. | Held at 600 px. |
-| A diff tab scrolled to 4,000 px across a poll (`16`) | Held. | Held. |
-| At the end, open a diff tab, three replies, back to the conversation (`17`) | 291 px and 423 px above the end. | At the end. |
-| The open thread's row in the sidebar (`18`) | Hidden under the notifications button on the desktop, and below the fold when the phone opens the list. | In view. |
+| Scrolled up to 600 px, replies, a stream and a poll (`16`) | Held at 600 px. | Held at 600 px. |
+| A diff tab scrolled to 4,000 px across a poll (`17`) | Held. | Held. |
+| At the end, open a diff tab, three replies, back to the conversation (`18`) | 291 px and 423 px above the end. | At the end. |
+| The open thread's row in the sidebar (`19`) | Hidden under the notifications button on the desktop, and below the fold when the phone opens the list. | In view. |
 | The sidebar and the inspector scrolled across a poll | Held. | Held. |
-| The inspector's Changes, Previews and Pylon tabs while its pane scrolls (`19`) | Scrolled away. | Stay at the top. |
-| Pipeline cells whose text is cut off (`20`) | 19 on the desktop, 2 on the phone, mid-word and with no ellipsis. | None. Titles and reasons wrap. |
+| The inspector's Changes, Previews and Pylon tabs while its pane scrolls (`20`) | Scrolled away. | Stay at the top. |
+| Pipeline cells whose text is cut off (`21`) | 19 on the desktop, 2 on the phone, mid-word and with no ellipsis. | None. Titles and reasons wrap. |
 
 ## Not verified here
 
