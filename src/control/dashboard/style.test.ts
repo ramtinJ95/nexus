@@ -75,3 +75,10 @@ test("every theme's text meets WCAG AA on every surface, but for the pairs macar
     assert.deepEqual(below.map(([pair]) => pair).sort(), (belowBar[name] ?? []).sort(), `${name}: ${below.map(([pair, ratio]) => `${pair} ${ratio.toFixed(2)}:1`).join(", ")}`);
   }
 });
+
+test("the terminal view keeps the dock's state bar and questions, and hides only the composer", () => {
+  const rules = [...css.replace(/\/\*[\s\S]*?\*\//g, "").matchAll(/([^{}]+)\{([^}]*)\}/g)].filter(([, , body]) => /display:\s*none/.test(body!));
+  const hidden = rules.flatMap(([, selector]) => selector!.split(",").map((s) => s.trim())).filter((s) => s.includes('[data-view="term"]'));
+  assert.deepEqual(hidden.filter((s) => s.endsWith(".dock")), []);
+  assert.ok(hidden.some((s) => s.endsWith("#composer")), hidden.join(", "));
+});
