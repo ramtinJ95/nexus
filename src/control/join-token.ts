@@ -6,7 +6,8 @@
  *
  *   sudo node src/control/join-token.ts <config.json>
  */
-import { statSync } from "node:fs";
+import { lstatSync } from "node:fs";
+import { resolve } from "node:path";
 import { mintJoinToken } from "./join.ts";
 import { readConfig } from "./main.ts";
 import { openRegistry } from "./registry.ts";
@@ -22,10 +23,17 @@ async function host(args: string[]) {
     process.exit(77);
   }
   const config = await readConfig(configPath);
-  const owner = statSync(config.db);
+  // As nexus-control.service resolves a relative path, from its WorkingDirectory.
+  const db = resolve("/var/lib/nexus-control", config.db);
+  // The control plane's user could leave a link to a file of root's here, so only its own plain file is opened, as that user.
+  const owner = lstatSync(db);
+  if (!owner.isFile() || owner.uid === 0) {
+    console.error(`join-token: ${db} is not a regular file of the control plane's user, so it is not opened as root`);
+    process.exit(1);
+  }
   process.setgid!(owner.gid);
   process.setuid!(owner.uid);
-  const registry = openRegistry(config.db);
+  const registry = openRegistry(db);
   try {
     const { token, expiresAt } = mintJoinToken(registry);
     const self = config.nodes.find((n) => n.tailnetNodeId === config.self.tailnetNodeId)?.name ?? config.listen.hostnames[0]!;
