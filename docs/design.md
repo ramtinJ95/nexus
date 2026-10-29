@@ -357,7 +357,7 @@ A question is a record the control plane owns, in the registry's `questions` tab
 
 An open question makes its thread's attention `decision`, so it notifies and counts in the badge as a held review does. The thread page shows it as a card above the landing card, with the text and a button per option, each asking for a confirmation, and `nexus show` lists it. The answer is a person-only route, `POST /v1/questions/<id>/answer`, which records the option, the device that chose it and when. An answer never changes: the same option again answers with the stored record, so a retried answer is safe, and another option is refused. As the Land button does, the card asks the route's own question, and a device the route would refuse gets disabled buttons that say why. Acting on the answer is the asker's part: the judgment pass reads the answer to its question on its next pass.
 
-A Claude worker's AskUserQuestion call is a question too. It is a question the agent chose to ask, not an approval prompt, so it does not reopen [the decision against approvals](roadmap.md#not-planned): workers still run with permissions bypassed. Claude Code writes the call to its transcript before its dialog shows, so the registry finds it in the worker's stored transcript. After each transcript read, session event, archive and delete, every AskUserQuestion call among the newest 64 entries of the worker's current session that has no result, while a turn of that session is live or waiting, and that was made in that session's latest turn, is the question `ask-<call ID>`, and every unanswered ask that no longer is one is withdrawn. A call a pause or crash killed has no result, and its session's next turn makes it stale, so it never comes back, while another Claude's turn in the pylon, such as the person's own, leaves it be. The thread page shows an open ask as a form: each asked question with its options as radios, or checkboxes for a multi-select one, their previews, an answer of the person's own and notes. Answering stays person-only, through the same route with the person's choices as its body. The control plane hands the answer to Claude in the pylon first, through [the PermissionRequest hook](#event-stream-and-claude-code-thread-workers), and records it only once Claude has it, so a recorded answer is one Claude got. The terminal's dialog stays open meanwhile, and whichever answers first is the answer. An answer that finds no hook waiting, because the terminal answered, the turn ended or a pause stopped Claude, withdraws the ask for good, since the transcript cannot tell such a call from one that waits. An answered ask leaves the dock, and the conversation shows the call as a card with the choices and the device, or with Claude's result when the terminal answered it.
+A Claude worker's AskUserQuestion call is a question too. It is a question the agent chose to ask, not an approval prompt, so it does not reopen [the decision against approvals](roadmap.md#not-planned): workers still run with permissions bypassed. The pylon's hook says which call waits, because the transcript cannot. Claude Code may write the call to its transcript only once its dialog is answered. In one run on Claude Code 2.1.310, the call's line reached the file 20 seconds after Claude made it, together with its result, so a card opened from the transcript never showed while the dialog waited. So after each transcript read that reaches the transcript's end, while a turn of the thread runs or waits or one of its asks is open, the control plane runs `nexus-claude-hook asks` in the pylon through the probe. The registry stores the asks it prints in `waiting_asks`, in place of the thread's last report, and a run that fails keeps the last report. Each ask the latest report lists for the worker's current session is the question `ask-<call ID>`, unless the stored transcript holds the call's result, and every unanswered ask that is not one is withdrawn. The registry applies that rule after each report, transcript read and worker launch, and archiving or deleting the thread drops its report. The Notification that the dialog waits is a session event, so the read after it opens the card, and the PostToolUse heartbeat of a call the terminal answered makes the read that withdraws it. Another Claude's ask in the pylon, such as the person's own, asks nothing. The thread page shows an open ask as a form: each asked question with its options as radios, or checkboxes for a multi-select one, their previews, an answer of the person's own and notes. Answering stays person-only, through the same route with the person's choices as its body. The control plane hands the answer to Claude in the pylon first, through [the PermissionRequest hook](#event-stream-and-claude-code-thread-workers), and records it only once Claude has it, so a recorded answer is one Claude got. The terminal's dialog stays open meanwhile, and whichever answers first is the answer. An answer that finds no hook waiting, because the terminal answered, the turn ended or a pause stopped Claude, withdraws the ask and drops it from the stored report, so a read before the pylon's next report cannot ask it again. An answered ask leaves the dock, and the conversation shows the call as a card with the choices and the device, or with Claude's result when the terminal answered it.
 
 ## Planning threads
 
@@ -515,29 +515,49 @@ event does not say which notification fired, so the control plane cannot drop an
 idle prompt without risking a real wait whose turn start was lost or late. Until
 the image is rebuilt, the old matcher's idle prompt still counts.
 
-An AskUserQuestion dialog can be answered from the dashboard, as
-[questions for the person](#questions-for-the-person) describes. Claude Code
-2.1.310 runs a PermissionRequest hook while the dialog shows, in
-`bypassPermissions` mode too, and `nexus-claude-hook ask` runs there for
-AskUserQuestion alone, with a timeout of a day. Its input has the session and
-the tool's input but no call ID, so an ask is named by the SHA-256 of the session
-and the questions' texts. The hook writes its pid to `~/.nexus/asks/<key>.waiting`
-and checks every half second for `<key>.answer`. The control plane writes that
-file through the probe with `nexus-claude-hook answer <json>`, which creates it
-whole and only once, and exits 0 and prints `delivered` when the answer is there
-or was delivered already, 20 when no live hook waits, 21 when another answer was
-written first, and 64 for an argument that is not an answer. The hook then prints
-a decision that allows the call with Claude's own input plus `answers` and
-`annotations`, which closes the dialog and gives the tool its result, and renames
-the answer to `<key>.delivered`. A picked option's preview goes in its annotation
-from the hook's own input, as the terminal puts it, since the transcript cuts
-long strings. When the terminal answers first, Claude neither stops the hook nor
+An AskUserQuestion dialog can be answered from the dashboard, as [questions for
+the person](#questions-for-the-person) describes. Claude Code 2.1.310 runs a
+PermissionRequest hook while the dialog shows, in `bypassPermissions` mode too,
+and `nexus-claude-hook ask` runs there for AskUserQuestion alone, with a timeout
+of a day. Its input has the session and the tool's input but no call ID, so an
+ask is named by the SHA-256 of the session and the questions' texts. The call's
+PreToolUse input has the ID, and Claude finishes its PreToolUse hooks before it
+asks for permission, 35 ms earlier in a spike. So `nexus-claude-hook ask` also
+runs at AskUserQuestion's PreToolUse, with a timeout of 2 seconds, and writes
+`{"toolUseId": ...}` to `~/.nexus/asks/<key>.call`. The PermissionRequest hook
+takes that file and writes `<key>.waiting`, a JSON record
+`{pid, start, session, toolUseId, at, input}`: its pid and the pid's start time
+from `/proc`, the session, the call's ID or null when no PreToolUse recorded
+one, when it started waiting, and the tool's input. The start time keeps a pid
+that a pause or a killed hook freed for another process from passing for the
+hook. The hook then checks every half second for `<key>.answer`.
+
+`nexus-claude-hook asks` prints one JSON array, newest first, of
+`{session, toolUseId, at, input}` for each waiting file whose hook still runs
+and names its call, and exits 0. It leaves out a waiting file over 256 KiB, and
+stops before its output passes 1 MiB. The hook of an image from before prints
+nothing for `asks`, which the control plane reads as no asks.
+
+The control plane writes `<key>.answer` through the probe with
+`nexus-claude-hook answer <json>`, which creates it whole and only once, and
+exits 0 and prints `delivered` when the answer is there or was delivered
+already, 20 when no live hook waits, 21 when another answer was written first,
+and 64 for an argument that is not an answer. The hook then prints a decision
+that allows the call with Claude's own input plus `answers` and `annotations`,
+which closes the dialog and gives the tool its result, and renames the answer to
+`<key>.delivered`. A picked option's preview goes in its annotation from the
+hook's own input, as the terminal puts it, since the transcript cuts long
+strings. When the terminal answers first, Claude neither stops the hook nor
 reads what it prints later, so the call's PostToolUse removes the waiting file,
-and the hook exits with nothing printed, as it also does once Claude is gone. A
-blocking PreToolUse hook would work too, but it hides the dialog while it waits,
-so the terminal could no longer answer. The hook of an image from before exits 0
-for `answer` without printing `delivered`, which the control plane takes as an
-image that cannot take answers, as it takes a missing hook's 127.
+and the hook exits with nothing printed, as it also does once Claude is gone.
+The start and end of a turn and the end of a session remove the session's
+waiting files too, before the hook queues their event. No dialog of the session
+shows then, and a dialog the person interrupted may have closed without a
+PostToolUse. A PreToolUse hook that blocks until the answer would work too, but
+it hides the dialog while it waits, so the terminal could no longer answer. The
+hook of an image from before exits 0 for `answer` without printing `delivered`,
+which the control plane takes as an image that cannot take answers, as it takes
+a missing hook's 127.
 
 Every Claude in the pylon reads the same hooks, including one a worker starts to
 verify its work, whose turn end would otherwise give the thread a reply while the

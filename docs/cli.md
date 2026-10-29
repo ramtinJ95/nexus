@@ -749,7 +749,11 @@ Inside a pylon, `nexus event <kind> [--session ID] [--message TEXT] [--at MS]` r
 for that pylon's own thread. The image installs UserPromptSubmit, throttled PostToolUse, Stop, StopFailure (which
 Claude Code runs instead of Stop when an API error ends the turn),
 Notification (permission and input prompts), and SessionEnd hooks,
-merged alongside Herdr's hooks on every agent-setup install. The hooks do not run
+merged alongside Herdr's hooks on every agent-setup install. It also installs
+PreToolUse and PermissionRequest hooks for AskUserQuestion alone, which report no
+event and let the dashboard answer the dialog, as
+[A Claude worker's AskUserQuestion](#a-claude-workers-askuserquestion-0420)
+describes. The hooks do not run
 `nexus event`. They write to an outbox in the pylon, which a sender delivers once
 the local probe answers, so a probe restart delays reports rather than losing
 them; see the data model's outbox and buffer limits. `nexus event` itself sends
@@ -1001,7 +1005,7 @@ The first line has only the text's first line. `reserved:` is printed only for a
 
 ### A Claude worker's AskUserQuestion (0.42.0)
 
-When a Claude worker calls AskUserQuestion, Claude Code shows the questions as a dialog in the pylon's terminal, and the control plane asks a question of the person for the call once it reads the call in the worker's transcript. The question's ID is `ask-<the call's tool use ID>`, its `text` has a line `<header>: <question>` per question the call asks, its `options` are empty, it is a `person` question with no reserved case, and `askedAt` is when Claude made the call. Its `ask` is a `ClaudeAsk`:
+When a Claude worker calls AskUserQuestion, Claude Code shows the questions as a dialog in the pylon's terminal, and the control plane asks a question of the person for the call once the pylon's hook reports that the dialog waits. It does not wait for the call in the worker's transcript, since Claude may write the call there only once the dialog is answered. The question's ID is `ask-<the call's tool use ID>`, its `text` has a line `<header>: <question>` per question the call asks, its `options` are empty, it is a `person` question with no reserved case, and `askedAt` is when the hook started waiting. Its `ask` is a `ClaudeAsk`:
 
 | Field | Type | Meaning |
 |---|---|---|
@@ -1018,7 +1022,7 @@ Each `AskedQuestion` is as Claude's call has it:
 | `multiSelect` | `boolean` | Whether the person may pick several options |
 | `options` | `{ label: string, description: string, preview?: string }[]` | What the person picks from. A preview is a mockup or snippet to show beside its option |
 
-The question stays open while the dialog waits for an answer. It is withdrawn, and leaves `questions`, once the transcript shows the call's result because the terminal answered it, once the turn ends, or once an answer from the dashboard finds that nothing waits for it any more. An answered one is never withdrawn. The terminal's dialog stays open meanwhile, and whichever answers first is the answer.
+The question stays open while the pylon's hook reports the dialog waiting. It is withdrawn, and leaves `questions`, once the hook no longer reports it because the terminal answered it, the turn ended or Claude stopped, once the transcript shows the call's result, or once an answer from the dashboard finds that nothing waits for it any more. An answered one is never withdrawn. The terminal's dialog stays open meanwhile, and whichever answers first is the answer.
 
 `POST /v1/questions/<id>/answer` answers an ask with `{"choices": Choice[]}`, one `Choice` per asked question, in order:
 
