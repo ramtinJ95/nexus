@@ -56,12 +56,13 @@ export interface UsageLimit { resetsAt: number | null }
  * automatically" after the stop.
  */
 export function usageLimitStop(entries: readonly ClaudeEntry[]): { stoppedAt: number; resetsAt: number | null } | null {
-  for (let i = entries.length - 1; i >= 0; i--) {
-    const entry = entries[i]!;
-    if (bookkeeping.has(entry.kind) || (entry.kind === "notice" && entry.tone === "info")) continue;
-    return entry.kind === "notice" && entry.usageLimit !== undefined ? { stoppedAt: entry.at, resetsAt: entry.usageLimit.resetsAt } : null;
-  }
-  return null;
+  const entry = errorStop(entries);
+  return entry?.usageLimit !== undefined ? { stoppedAt: entry.at, resetsAt: entry.usageLimit.resetsAt } : null;
+}
+/** The error notice the newest entry that is not bookkeeping is, such as a model call that failed for good, or null. */
+export function errorStop(entries: readonly ClaudeEntry[]): Extract<ClaudeEntry, { kind: "notice" }> | null {
+  const entry = entries.findLast((e) => !bookkeeping.has(e.kind) && !(e.kind === "notice" && e.tone === "info"));
+  return entry?.kind === "notice" ? entry : null;
 }
 const bookkeeping = new Set<ClaudeEntry["kind"]>(["turn", "queue", "pull-request", "record"]);
 
