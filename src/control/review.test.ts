@@ -9,7 +9,7 @@ import type { LiveHash, NodeName, PylonId, TailnetNodeId } from "../protocol.ts"
 import type { AutoReview, ProjectId, SecretGrant } from "../project.ts";
 import type { ChangedFile, LabelResult, MergeResult, PrSnapshot } from "./github.ts";
 import type { AutomatedMessage } from "./inbox.ts";
-import { holdRule, landingHolds } from "./policy.ts";
+import { holdRule, landingHolds, reservedNames } from "./policy.ts";
 import { agentModelFailure, agentReplies, humanLabel, phaseNote, reviewerCaller, reviewLoop, reviewPrefix, type Review } from "./review.ts";
 import { agentInbox } from "./inbox.ts";
 import { fakeHarness } from "./fake-harness.ts";
@@ -210,6 +210,7 @@ test("a Claude builder's PR gets a harness reviewer, and findings, fixes and new
   assert.equal(f.sent[0]!.to, reviewer);
   assert.ok(f.sent[0]!.message.text.startsWith(reviewPrefix));
   assert.match(f.sent[0]!.message.text, new RegExp(`git checkout --detach ${head1}`));
+  for (const name of Object.values(reservedNames)) assert.ok(f.sent[0]!.message.text.includes(name), `the reviewer is told that ${name} need the person`);
   assert.match(f.sent[0]!.message.text, /Not checked live: the cache under real traffic/, "the description reaches the reviewer");
   assert.equal(f.sent[0]!.message.sender, "review");
   assert.equal(f.registry.isReviewer(reviewer), true);
