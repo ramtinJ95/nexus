@@ -10,7 +10,7 @@ import { createHash, randomBytes } from "node:crypto";
 import { access, chmod, mkdir, readdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import { promisify, isDeepStrictEqual, parseArgs } from "node:util";
-import { claudeNames, gitKnownHosts, provision, scripted, secretNames, stores, system, terminal } from "./credentials.ts";
+import { claudeNames, gitKnownHosts, locations, provision, scripted, secretNames, stores, system, terminal, type FollowUp } from "./credentials.ts";
 
 const exec = promisify(execFile);
 
@@ -444,8 +444,9 @@ async function dockerSource(): Promise<Docker> {
 
 async function gather(flags: Flags): Promise<Facts> {
   const net = await tailnet();
-  const names = await readFile(paths.secrets, "utf8").then(secretNames, () => []);
-  const common = { self: net.self, secretNames: names, gitKey: await exists(paths.gitKey) };
+  const at = await locations(system);
+  const names = await readFile(at.secrets, "utf8").then(secretNames, () => []);
+  const common = { self: net.self, secretNames: names, gitKey: await exists(at.gitKey) };
   const deployer = JSON.parse(await readFile(paths.deployer, "utf8")) as { token: string };
   if (flags.node !== undefined) {
     const errors: string[] = [];
@@ -474,8 +475,12 @@ async function main(args: readonly string[]): Promise<number> {
   if (command === "credentials") {
     if (!flags.nonInteractive && !process.stdin.isTTY) console.error("No terminal, so the credentials come from NEXUS_* variables, as deploy/README.md describes, and the rest are skipped.");
     const answers = flags.nonInteractive || !process.stdin.isTTY ? scripted(process.env) : terminal();
-    const next = await provision(flags.node === undefined ? "control" : "node", system, answers, (line) => console.error(line));
-    for (const step of next) console.log(step);
+    const next = new Set<FollowUp>();
+    try {
+      await provision(flags.node === undefined ? "control" : "node", system, answers, (line) => console.error(line), next);
+    } finally {
+      for (const step of next) console.log(step);
+    }
     return 0;
   }
   if (command === "left") {

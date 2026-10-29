@@ -216,10 +216,12 @@ main --dotfiles https://github.com/example/dotfiles.git`);
   assert.deepEqual(await after([]), [], "a run that changed no credential restarts nothing");
 });
 
-test("a failed credentials step stops the installer before it says what is left", async () => {
+test("a failed credentials step still restarts what its writes need, then stops before it says what is left", async () => {
   const run = await bash(`. "$1/deploy/install.sh"; ${stubs(complete)} ${steps()}
-node() { echo "node \${*//$repo/.}" >&2; [ "$2" != credentials ] || return 1; }
+node() { echo "node \${*//$repo/.}" >&2; [ "$2" != credentials ] || { echo probe; return 1; }; }
 main --node firebat`);
   assert.notEqual(run.code, 0);
+  assert.ok(ran(run.stderr).includes("systemctl try-restart nexus-probe.service"), run.stderr);
+  assert.match(run.stderr, /the credentials step failed/);
   assert.doesNotMatch(run.stderr, /setup\.ts left/);
 });

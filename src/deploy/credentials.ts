@@ -6,7 +6,8 @@
  */
 import { execFile, spawn } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
-import { access, appendFile, chmod, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { constants } from "node:fs";
+import { access, appendFile, open, readFile, rename, rm, type FileHandle } from "node:fs/promises";
 import { promisify } from "node:util";
 
 const exec = promisify(execFile);
@@ -26,9 +27,9 @@ export interface Store {
 /**
  * Where each kind of credential lives and whom it serves. This is the one place a per-person mode would change: it
  * would give a kind a store of scope "person" beside this one, so a shared install keeps its files where they are.
+ * A file here is the default a new install gets. Where an existing config names its own, `locations` reads that.
  */
 export const stores = {
-  /** The default a new control.json names as `harness.credentials`. An existing control.json's own path wins. */
   harness: { scope: "install", machines: "control", file: "/var/lib/nexus-control/harness-credentials.json", owner: "nexus-control:nexus-control", mode: 0o600 },
   claude: { scope: "install", machines: "every", file: "/etc/nexus/secrets.env", owner: "root:nexus", mode: 0o640 },
   github: { scope: "install", machines: "every", file: "/etc/nexus/secrets.env", owner: "root:nexus", mode: 0o640 },
@@ -186,6 +187,15 @@ export interface Host {
   run(program: string, args: readonly string[], options?: { interactive?: boolean }): Promise<string>;
 }
 
+/** Through the open file rather than its path, so an owner of the directory cannot swap in a symlink first. */
+async function ownOpen(file: FileHandle, { mode, owner }: { mode: number; owner: string }): Promise<void> {
+  const [user, group] = owner.split(":");
+  const uid = Number((await exec("id", ["-u", user!])).stdout);
+  const gid = Number((await exec("getent", ["group", group!])).stdout.split(":")[2]);
+  await file.chown(uid, gid);
+  await file.chmod(mode);
+}
+
 export const system: Host = {
   read: (path) => readFile(path, "utf8").catch((err: NodeJS.ErrnoException) => {
     if (err.code === "ENOENT") return undefined;
@@ -195,14 +205,23 @@ export const system: Host = {
   async write(path, text, { mode, owner }) {
     const temporary = `${path}.${process.pid}.tmp`;
     await rm(temporary, { force: true });
-    await writeFile(temporary, text, { mode, flag: "wx" });
-    await system.own(temporary, { mode, owner });
+    const file = await open(temporary, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, mode);
+    try {
+      await ownOpen(file, { mode, owner });
+      await file.writeFile(text);
+    } finally {
+      await file.close();
+    }
     await rename(temporary, path);
   },
   append: (path, text) => appendFile(path, text),
-  async own(path, { mode, owner }) {
-    await exec("chown", [owner, path]);
-    await chmod(path, mode);
+  async own(path, store) {
+    const file = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
+    try {
+      await ownOpen(file, store);
+    } finally {
+      await file.close();
+    }
   },
   async run(program, args, options) {
     if (!options?.interactive) return (await exec(program, [...args], { maxBuffer: 1024 * 1024 })).stdout;
@@ -213,16 +232,31 @@ export const system: Host = {
   },
 };
 
+export interface Locations { harness: string; secrets: string; gitKey: string; githubWatch: string | undefined; node: string | undefined }
+
+/** Where this machine's credentials are: what control.json and probe.json name, or else the stores' files. */
+export async function locations(host: Pick<Host, "read">): Promise<Locations> {
+  const control = JSON.parse(await host.read(controlConfig) ?? "{}") as { harness?: { credentials?: string }; github?: { tokenFile?: string } };
+  const probe = JSON.parse(await host.read(probeConfig) ?? "{}") as { node?: string; secretsFile?: string; backend?: { gitSsh?: { privateKeyFile?: string } } };
+  return {
+    harness: control.harness?.credentials ?? stores.harness.file,
+    secrets: probe.secretsFile ?? stores.claude.file,
+    gitKey: probe.backend?.gitSsh?.privateKeyFile ?? stores.gitKey.file,
+    githubWatch: control.github?.tokenFile,
+    node: probe.node,
+  };
+}
+
 /** What the installer does after: rewrite the configs for a new git key, restart the probe, or install the control plane again. */
 export type FollowUp = "config" | "probe" | "control";
 
-export async function provision(role: "control" | "node", host: Host, answers: Answers, say: (line: string) => void): Promise<Set<FollowUp>> {
-  const next = new Set<FollowUp>();
+/** Fills `next` as it goes, so a run that fails partway still says what its writes need. */
+export async function provision(role: "control" | "node", host: Host, answers: Answers, say: (line: string) => void, next = new Set<FollowUp>()): Promise<Set<FollowUp>> {
   const here = (store: Store) => store.machines === "every" || role === "control";
-  const control = role === "control" ? JSON.parse(await host.read(controlConfig) ?? "{}") as { harness?: { credentials?: string }; github?: { tokenFile?: string } } : {};
+  const at = await locations(host);
 
   if (here(stores.harness)) {
-    const file = control.harness?.credentials ?? stores.harness.file;
+    const file = at.harness;
     const current = JSON.parse(await host.read(file) ?? "{}") as { deviceId?: string; credentials?: Record<string, unknown> };
     if (Object.keys(current.credentials ?? {}).length > 0) say(`Left the harness's login in ${file} alone.`);
     else {
@@ -259,7 +293,7 @@ export async function provision(role: "control" | "node", host: Host, answers: A
   }
 
   const addSecret = async (name: string, value: string) => {
-    const file = stores.claude.file;
+    const file = at.secrets;
     const text = await host.read(file);
     if (text === undefined) await host.write(file, `${name}=${value}\n`, stores.claude);
     else await host.append(file, `${text === "" || text.endsWith("\n") ? "" : "\n"}${name}=${value}\n`);
@@ -267,9 +301,9 @@ export async function provision(role: "control" | "node", host: Host, answers: A
     next.add("probe");
   };
 
-  const names = secretNames(await host.read(stores.claude.file) ?? "");
+  const names = secretNames(await host.read(at.secrets) ?? "");
   const claudeName = claudeNames.find((name) => names.includes(name));
-  if (claudeName !== undefined) say(`Left ${claudeName} in ${stores.claude.file} alone.`);
+  if (claudeName !== undefined) say(`Left ${claudeName} in ${at.secrets} alone.`);
   else {
     const value = await answers.secret({
       key: "NEXUS_CLAUDE_TOKEN",
@@ -279,7 +313,7 @@ export async function provision(role: "control" | "node", host: Host, answers: A
     if (value !== undefined) await addSecret(value.startsWith("sk-ant-api") ? "ANTHROPIC_API_KEY" : "CLAUDE_CODE_OAUTH_TOKEN", value);
   }
 
-  if (names.includes("GH_TOKEN")) say(`Left GH_TOKEN in ${stores.github.file} alone.`);
+  if (names.includes("GH_TOKEN")) say(`Left GH_TOKEN in ${at.secrets} alone.`);
   else {
     const value = await answers.secret({
       key: "NEXUS_GH_TOKEN",
@@ -294,7 +328,7 @@ export async function provision(role: "control" | "node", host: Host, answers: A
 
   async function githubWatch(value: string) {
     const { file } = stores.githubWatch;
-    if (control.github !== undefined) return say(`Left github.tokenFile ${control.github.tokenFile} in ${controlConfig} alone.`);
+    if (at.githubWatch !== undefined) return say(`Left github.tokenFile ${at.githubWatch} in ${controlConfig} alone.`);
     if (await host.exists(file)) return say(`Left ${file} alone. ${controlConfig} does not name it, so the pull request watch stays off.`);
     const watch = await answers.choose({
       key: "NEXUS_GITHUB_WATCH",
@@ -303,13 +337,15 @@ export async function provision(role: "control" | "node", host: Host, answers: A
       unattended: "yes",
     });
     if (watch !== "yes") return;
+    const control = JSON.parse(await host.read(controlConfig) ?? "{}") as Record<string, unknown>;
+    if (control.github !== undefined) return say(`Left github in ${controlConfig} alone, which another run set meanwhile.`);
     await host.write(file, `${value}\n`, stores.githubWatch);
     await host.write(controlConfig, `${JSON.stringify({ ...control, github: { tokenFile: file } }, null, 2)}\n`, { mode: 0o644, owner: "root:root" });
     say(`Wrote the token to ${file} and named it as github.tokenFile in ${controlConfig}.`);
     next.add("control");
   }
 
-  const key = stores.gitKey.file;
+  const key = at.gitKey;
   if (await host.exists(key)) say(`Left the git SSH key ${key} alone.`);
   else if (await answers.choose({
     key: "NEXUS_GIT_KEY",
@@ -326,8 +362,7 @@ export async function provision(role: "control" | "node", host: Host, answers: A
     if (known !== undefined) {
       if (await host.exists(gitKnownHosts)) say(`Left ${gitKnownHosts} alone.`);
       else await host.write(gitKnownHosts, known, { mode: 0o644, owner: "root:root" });
-      const node = (JSON.parse(await host.read(probeConfig) ?? "{}") as { node?: string }).node ?? "node";
-      await host.run("ssh-keygen", ["-q", "-t", "ed25519", "-N", "", "-C", `nexus@${node}`, "-f", key]);
+      await host.run("ssh-keygen", ["-q", "-t", "ed25519", "-N", "", "-C", `nexus@${at.node ?? "node"}`, "-f", key]);
       await host.own(key, stores.gitKey);
       say(`Made the git SSH key ${key}. Add its public key to the GitHub account the pylons push as, at https://github.com/settings/ssh/new:`);
       say((await host.read(`${key}.pub`) ?? "").trim());

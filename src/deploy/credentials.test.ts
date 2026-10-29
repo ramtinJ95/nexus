@@ -1,13 +1,13 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { access, appendFile, chmod, mkdir, mkdtemp, readdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
+import { access, appendFile, chmod, mkdir, mkdtemp, readdir, readFile, rename, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { test, type TestContext } from "node:test";
 import { promisify } from "node:util";
 import { parseConfig } from "../control/main.ts";
 import { harnessModels, openCredentials, requireModel } from "../harness/credentials.ts";
-import { provision, scripted, stores, type Answers, type Host } from "./credentials.ts";
+import { provision, scripted, stores, system, type Answers, type FollowUp, type Host } from "./credentials.ts";
 
 const exec = promisify(execFile);
 const repo = resolve(import.meta.dirname, "../..");
@@ -192,6 +192,35 @@ test("a rerun over credentials already in place asks nothing, runs nothing and c
       "Left the git SSH key /etc/nexus/git_ed25519 alone.",
     ]);
   }
+});
+
+test("a probe.json that names its own secrets file and git key is read where it points, and the defaults are left alone", async (t) => {
+  const m = await machine(t, "node");
+  await m.put("/etc/nexus/probe.json", `${JSON.stringify({ node: "rj-firebat", secretsFile: "/srv/secrets.env", backend: { gitSsh: { privateKeyFile: "/srv/git_key", knownHostsFile: "/srv/known_hosts" } } })}\n`, 0o644);
+  await m.put("/srv/secrets.env", "ANTHROPIC_API_KEY=x\nGH_TOKEN=y\n", 0o640);
+  await m.put("/srv/git_key", "a key\n", 0o400);
+  const before = await snapshot(m.root);
+  const said: string[] = [];
+  assert.deepEqual([...await provision("node", m.host, answering({}).answers, (line) => said.push(line))], []);
+  assert.deepEqual(await snapshot(m.root), before);
+  assert.deepEqual(said, ["Left ANTHROPIC_API_KEY in /srv/secrets.env alone.", "Left GH_TOKEN in /srv/secrets.env alone.", "Left the git SSH key /srv/git_key alone."]);
+});
+
+test("a run that fails partway still says what the writes it made need", async (t) => {
+  const m = await machine(t, "node");
+  const next = new Set<FollowUp>();
+  await assert.rejects(provision("node", m.host, scripted({ NEXUS_CLAUDE_TOKEN: claudeToken, NEXUS_GH_TOKEN: "not a token" }), silent, next), /NEXUS_GH_TOKEN/);
+  assert.match(await readFile(m.at(stores.claude.file), "utf8"), /\nCLAUDE_CODE_OAUTH_TOKEN=/);
+  assert.deepEqual([...next], ["probe"]);
+});
+
+test("root never follows a symlink when it sets a credential's owner and mode", async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), "nexus-credentials-"));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  await writeFile(join(dir, "target"), "root's file\n", { mode: 0o600 });
+  await symlink(join(dir, "target"), join(dir, "harness-credentials.json"));
+  await assert.rejects(system.own(join(dir, "harness-credentials.json"), stores.harness), { code: "ELOOP" });
+  assert.equal((await stat(join(dir, "target"))).mode & 0o777, 0o600);
 });
 
 test("a skipped credential writes nothing, and the next run asks for it again", async (t) => {

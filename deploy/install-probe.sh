@@ -6,9 +6,9 @@
 # Safe to rerun. The release becomes /opt/nexus/releases/<content hash> (see deploy/release.sh), and
 # /opt/nexus/current points at the newest.
 #
-# It never overwrites the values in /etc/nexus/secrets.env, which the first run installs from the example. The probe
-# restarts only when its release, unit file or config differs from what it was last started with
-# (/opt/nexus/active-release). Restart it yourself after editing secrets.env.
+# It installs /etc/nexus/secrets.env from the example on the first run, and never overwrites it or changes its owner
+# or mode after. The probe restarts only when its release, unit file or config differs from what it was last started
+# with (/opt/nexus/active-release). Restart it yourself after editing secrets.env.
 set -euo pipefail
 
 repo="$(cd "$(dirname "$0")/.." && pwd)"
@@ -33,9 +33,7 @@ fi
 install_release "$repo"
 [ "${NEXUS_PREPARE:-0}" = 1 ] || link_release "$prefix/current"
 
-[ -e "$etc/secrets.env" ] || install -m 0640 "$repo/deploy/secrets.example.env" "$etc/secrets.env"
-chown root:nexus "$etc/secrets.env"
-chmod 0640 "$etc/secrets.env"
+[ -e "$etc/secrets.env" ] || install -o root -g nexus -m 0640 "$repo/deploy/secrets.example.env" "$etc/secrets.env"
 
 install_unit "$repo/deploy/nexus-probe.service" nexus-probe.service
 

@@ -111,7 +111,7 @@ check_prerequisites() {
 }
 
 main() {
-  local role=control dotfiles="" roles next
+  local role=control dotfiles="" roles next failed=0
   local args=("$@")
   while [ $# -gt 0 ]; do
     case $1 in
@@ -146,7 +146,7 @@ main() {
 
   echo
   # It runs runuser and chown, which live in the sbin directories the units' PATH lacks.
-  next=$(PATH=$service_path:$PATH node "$repo/src/deploy/setup.ts" credentials "${args[@]}")
+  next=$(PATH=$service_path:$PATH node "$repo/src/deploy/setup.ts" credentials "${args[@]}") || failed=$?
   if grep -qx config <<<"$next"; then
     PATH=$service_path flock -x "$prefix/deployer/lock" node "$repo/src/deploy/setup.ts" write "${args[@]}"
     bash "$repo/deploy/install-probe.sh"
@@ -154,6 +154,7 @@ main() {
     systemctl try-restart nexus-probe.service
   fi
   if grep -qx control <<<"$next"; then bash "$repo/deploy/install-control.sh"; fi
+  [ "$failed" = 0 ] || fail "the credentials step failed, after the restarts its writes needed. Fix what it said, then rerun"
   echo
   PATH=$service_path node "$repo/src/deploy/setup.ts" left "${args[@]}"
 }

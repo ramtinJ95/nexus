@@ -194,7 +194,7 @@ make_state() { echo "make_state $1" >>"${log}"; }
   const harness = join(root, "var", "lib", "nexus-control", "harness-credentials.json");
   await credential(join(etc, "control.json"), `${JSON.stringify({ harness: { credentials: harness }, github: { tokenFile: join(etc, "github-token") } })}\n`, 0o644);
   await credential(harness, `${JSON.stringify({ deviceId: "8c1c3a51-7d5e-4a8e-9a43-2b1f4c1e0d9a", credentials: { openai: { type: "oauth" } } })}\n`, 0o600);
-  await credential(join(etc, "secrets.env"), "CLAUDE_CODE_OAUTH_TOKEN=a\nGH_TOKEN=b\n", 0o640);
+  await credential(join(etc, "secrets.env"), "CLAUDE_CODE_OAUTH_TOKEN=a\nGH_TOKEN=b\n", 0o600);
   await credential(join(etc, "github-token"), "b\n", 0o640);
   await credential(join(etc, "git_ed25519"), "a key\n", 0o400);
   await credential(join(etc, "git_known_hosts"), "github.com ssh-ed25519 AAAA\n", 0o644);
@@ -225,7 +225,7 @@ test("the deployer's preparation runs both role installers without reading input
   const ran = await m.ran();
   assert.ok(!ran.some((line) => /^(node|runuser|ssh-keygen|ssh-keyscan|systemctl (re)?start|start_unit|link_release)\b/.test(line)), ran.join("\n"));
   const credentials = /secrets\.env|github-token|git_ed25519|git_known_hosts|harness-credentials/;
-  assert.deepEqual(ran.filter((line) => credentials.test(line)), [`chown root:nexus ${m.etc}/secrets.env`], "only the owner secrets.env must already have");
+  assert.deepEqual(ran.filter((line) => credentials.test(line)), [], "a secrets.env of another mode keeps it");
 });
 
 test("outside preparation the same stand-ins see the role installers switch and start their services", async (t) => {
