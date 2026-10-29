@@ -55,7 +55,7 @@ import type { PullRequest } from "./github.ts";
 import { openTerminal } from "../guest-terminal.ts";
 import { attachTiming, serveAttach, type AttachTiming, type Ending, type PylonDoor } from "./attach.ts";
 import { typeIntoClaude } from "./inbox.ts";
-import { HttpError } from "./http-error.ts";
+import { HttpError, type ApiErrorCode } from "./http-error.ts";
 import { answerRefusal, askAnswer, choicesSchema, choicesSummary, type AnswerRefusal, type Choice, type ClaudeAsk, type Question } from "./questions.ts";
 import { answerDelivered, answerExits, claudeHook } from "../../images/pylon/nexus-ask.ts";
 import { BodyTooLarge, readBody } from "../request-body.ts";
@@ -770,7 +770,7 @@ export async function startApi(options: ApiOptions): Promise<Api> {
     const text = message.text.replace(/\r\n?/g, "\n").trim();
     const problem = claudeTextProblem(text);
     if (problem !== null) throw new HttpError(400, `Claude cannot take this message as typed: ${problem}`);
-    if (session === null) throw new HttpError(409, `the Claude worker of ${t.id} has not started a session yet, so it takes no messages. Send it once it has started`);
+    if (session === null) throw new HttpError(409, `the Claude worker of ${t.id} has not started a session yet, so it takes no messages. Send it once it has started`, "not-ready");
     const stored = registry.claudeMessage(t.id, message.requestId);
     if (stored?.state === "sent") return { claude: stored.result };
     const typed = await inPylon(t, (probe, pylonId) => typeIntoClaude(registry, t.id, session, model, message.requestId, text, (command) => probe.command(pylonId, command)).catch((err: Partial<ProbeError>) => {
@@ -779,11 +779,12 @@ export async function startApi(options: ApiOptions): Promise<Api> {
     }));
     if (typed.kind === "uncertain") throw new HttpError(422, `an earlier send of request ${message.requestId} failed partway, or its pylon no longer knows how far it got, so Claude may have some or all of it. Check the conversation before sending it again under a new request ID`);
     if (typed.kind === "nothing") {
-      throw new HttpError(409, {
-        blocked: `Claude waits at a prompt in its terminal, so nothing was typed. Attach to the pylon (\`nexus attach ${t.id}\`) and answer it, then send again`,
-        starting: `Claude is not ready to take a message yet, so nothing was typed. Ask again in a moment`,
-        moved: `Herdr pane ${typed.herdrPane} stopped running Claude session ${session} before the message was typed, so nothing was typed. Send again to resume the session`,
-      }[typed.outcome]);
+      const [message, code] = ({
+        blocked: [`Claude waits at a prompt in its terminal, so nothing was typed. Attach to the pylon (\`nexus attach ${t.id}\`) and answer it, then send again`, "blocked"],
+        starting: [`Claude is not ready to take a message yet, so nothing was typed. Ask again in a moment`, "not-ready"],
+        moved: [`Herdr pane ${typed.herdrPane} stopped running Claude session ${session} before the message was typed, so nothing was typed. Send again to resume the session`, "moved"],
+      } as const)[typed.outcome];
+      throw new HttpError(409, message, code);
     }
     void claude.refresh(t);
     return { claude: typed.sent };
@@ -802,7 +803,7 @@ export async function startApi(options: ApiOptions): Promise<Api> {
       idle: `Claude is not working, so there is no turn to interrupt, and nothing was pressed`,
       unknown: `Herdr cannot tell yet whether Claude works or waits at a prompt, so nothing was pressed. Ask again in a moment`,
       "not-running": `no pane runs Claude session ${session}, so there is no turn to interrupt`,
-    }[outcome]);
+    }[outcome], outcome === "blocked" ? "blocked" : undefined);
   }
 
   /**
@@ -818,7 +819,7 @@ export async function startApi(options: ApiOptions): Promise<Api> {
     if (wakes) {
       registry.recordActivity(t.id, { human: Date.now() });
       wake(pylon.node);
-    } else if (!running(pylon.pylonId)) throw new HttpError(409, notRunning(pylon.pylonId, false));
+    } else if (!running(pylon.pylonId)) throw new HttpError(409, notRunning(pylon.pylonId, false), "not-running");
     let result: T;
     try {
       result = await act(probe, pylon.pylonId);
@@ -826,7 +827,7 @@ export async function startApi(options: ApiOptions): Promise<Api> {
       // A delete or archive that landed meanwhile stopped the pylon, so the thread's state answers, not the node's failure.
       refuseClosed(registry.thread(t.id)!);
       const code = (err as Partial<ProbeError>).code;
-      if (code === "not-running") throw new HttpError(409, notRunning(pylon.pylonId, wakes));
+      if (code === "not-running") throw new HttpError(409, notRunning(pylon.pylonId, wakes), "not-running");
       if (code === "unreachable") throw new HttpError(503, (err as Error).message);
       if (err instanceof CheckoutRefused) throw new HttpError(refusalStatus[err.kind], err.message);
       throw err;
@@ -1431,7 +1432,7 @@ export async function startApi(options: ApiOptions): Promise<Api> {
       if (m === null) return [];
       return entry[0] === "GET" ? [{ method: entry[0], m, route: entry[2] }] : [{ method: entry[0], m, policy: entry[2], route: entry[3] }];
     });
-    if (matches.length === 0) throw new HttpError(404, path.startsWith("/v1/deployer/") ? `no deployer route ${path}` : `no route ${path}`);
+    if (matches.length === 0) throw new HttpError(404, path.startsWith("/v1/deployer/") ? `no deployer route ${path}` : `no route ${path}`, "no-route");
     const match = matches.find((r) => r.method === req.method);
     if (match === undefined) throw new HttpError(405, `${req.method} is not allowed on ${path}`);
     if (match.policy !== undefined && "person" in match.policy) personOnly(caller, match.policy.person);
@@ -1533,7 +1534,7 @@ export async function startApi(options: ApiOptions): Promise<Api> {
     server.on("request", (req, res) => {
       handle(req, res).catch((err: unknown) => {
         if (res.headersSent) return res.destroy(err as Error);
-        send(res, errorStatus(err), { error: (err as Error).message });
+        send(res, errorStatus(err), errorBody(err));
       });
     });
     server.on("upgrade", (req: IncomingMessage, socket: Duplex, head: Buffer) => {
@@ -1541,7 +1542,7 @@ export async function startApi(options: ApiOptions): Promise<Api> {
       socket.on("error", () => undefined);
       upgraded.add(socket);
       socket.once("close", () => upgraded.delete(socket));
-      upgrade(req, socket, head).catch((err: unknown) => refuseUpgrade(socket, errorStatus(err), (err as Error).message));
+      upgrade(req, socket, head).catch((err: unknown) => refuseUpgrade(socket, errorStatus(err), errorBody(err)));
     });
     return server;
   }
@@ -1677,12 +1678,14 @@ function pathOf(url: string | undefined): string | null {
   }
 }
 
+const errorBody = (err: unknown): { error: string; code?: ApiErrorCode } =>
+  err instanceof HttpError && err.code !== undefined ? { error: err.message, code: err.code } : { error: (err as Error).message };
 const errorStatus = (err: unknown) => err instanceof HttpError ? err.status : err instanceof DeployDraining ? 409 : err instanceof BodyTooLarge ? 413 : 500;
 
 /** An API error reply written on a socket that never upgraded. */
-function refuseUpgrade(socket: Duplex, status: number, message: string) {
+function refuseUpgrade(socket: Duplex, status: number, error: ReturnType<typeof errorBody>) {
   if (socket.destroyed) return;
-  const body = JSON.stringify({ error: message });
+  const body = JSON.stringify(error);
   socket.end(`HTTP/1.1 ${status} ${STATUS_CODES[status]}\r\ncontent-type: application/json\r\ncache-control: no-store\r\ncontent-length: ${Buffer.byteLength(body)}\r\nconnection: close\r\n\r\n${body}`);
 }
 

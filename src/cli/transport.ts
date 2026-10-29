@@ -22,12 +22,19 @@ export class CliError extends Error {
   readonly kind: ErrorKind;
   /** The API's HTTP status, or null when the CLI failed before or without a reply. */
   readonly status: number | null;
-  constructor(kind: ErrorKind, message: string, status: number | null = null) {
+  /** The `code` of the API's error reply, or null when it sent none, as a control plane older than codes does. */
+  readonly code: string | null;
+  constructor(kind: ErrorKind, message: string, status: number | null = null, code: string | null = null) {
     super(message);
     this.kind = kind;
     this.status = status;
+    this.code = code;
   }
 }
+
+/** Whether the control plane has no such route, which one older than the route says without a code. */
+export const isMissingRoute = (err: unknown): err is CliError => err instanceof CliError && err.status === 404
+  && (err.code === "no-route" || (err.code === null && err.message.startsWith("no route ")));
 
 export interface HostPort { host: string; port: number }
 export interface Endpoint {
@@ -88,8 +95,8 @@ function reply(method: string, path: string, status: number, text: string): unkn
     throw new CliError("failed", `${method} ${path} answered ${status} with a body that is not JSON`, status);
   }
   if (status >= 200 && status < 300) return parsed;
-  const message = (parsed as { error?: unknown } | null)?.error;
-  throw new CliError(statusKinds[status] ?? "failed", typeof message === "string" ? message : `${method} ${path} failed with ${status}`, status);
+  const { error: message, code } = (parsed ?? {}) as { error?: unknown; code?: unknown };
+  throw new CliError(statusKinds[status] ?? "failed", typeof message === "string" ? message : `${method} ${path} failed with ${status}`, status, typeof code === "string" ? code : null);
 }
 
 /**
@@ -176,7 +183,7 @@ export async function upgrade(endpoint: Endpoint, path: string): Promise<WebSock
           reply("GET", path, res.statusCode!, text);
           reject(new CliError("failed", `GET ${path} answered ${res.statusCode} rather than a WebSocket`, res.statusCode!));
         } catch (err) {
-          reject((err as CliError).status === 404 && (err as Error).message.startsWith("no route ")
+          reject(isMissingRoute(err)
             ? new CliError("failed", `the control plane at ${host} has no attach route. Upgrade it, as deploy/README.md describes`, 404)
             : err);
         }

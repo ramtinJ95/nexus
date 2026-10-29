@@ -683,7 +683,7 @@ test("unpreview unpublishes a port, waits for a paused pylon to run, and fails w
   const reason = "Port 5173 is the preview of service web, not a linked port. Remove the preview from /home/user/workspace/repo/.nexus/services.yaml to unpublish it";
   s.probeAnswers(async () => ({ kind: "unlink-port", refused: reason }));
   s.commands.length = 0;
-  assert.deepEqual(await fails(["unpreview", thread.id, "5173"], 1), { error: reason, kind: "failed", status: 422 }, "the refusal is the pylon's reason alone, and is not tried again");
+  assert.deepEqual(await fails(["unpreview", thread.id, "5173"], 1), { error: reason, kind: "failed", status: 422, code: null }, "the refusal is the pylon's reason alone, and is not tried again");
   assert.equal(s.commands.length, 1);
   s.probeAnswers(async () => { throw Object.assign(new Error("rj-firebat: connect ECONNREFUSED"), { code: "unreachable" }); });
   await fails(["unpreview", thread.id, "3000"], 1);
@@ -1297,11 +1297,11 @@ test("connect fails without saving when no control plane answers, or one does no
   assert.equal(wrongName.code, 3);
   assert.deepEqual(JSON.parse(wrongName.stderr), {
     error: `the control plane at http://localhost:${s.api.port} answers, but the API does not answer to host localhost:${s.api.port}. Connect with the name the control plane lists in listen.hostnames, such as its full MagicDNS name`,
-    kind: "refused", status: 403,
+    kind: "refused", status: 403, code: null,
   });
   assert.equal((await s.nexus(["connect", "rj firebat"], env)).code, 64);
   assert.deepEqual(JSON.parse((await s.nexus(["connect", "999.999.999.999", "--json"], env)).stderr),
-    { error: "the control plane URL https://999.999.999.999:7443 is not a URL", kind: "invalid", status: null });
+    { error: "the control plane URL https://999.999.999.999:7443 is not a URL", kind: "invalid", status: null, code: null });
   await assert.rejects(readFile(config), { code: "ENOENT" });
 });
 
@@ -1326,7 +1326,7 @@ test("a config file that cannot be read fails as invalid, in JSON under --json",
   const res = await s.nexus(["projects", "--json"]);
   assert.equal(res.code, 64);
   const { error, ...rest } = JSON.parse(res.stderr);
-  assert.deepEqual(rest, { kind: "invalid", status: null });
+  assert.deepEqual(rest, { kind: "invalid", status: null, code: null });
   assert.match(error, /^cannot read .*cli\.json: EISDIR/);
 });
 test("a thread ID is one path segment", async (t) => {
@@ -1537,7 +1537,7 @@ judgment of failure 814 on ${node}: no verdict yet\n {2}judging since 2026-10-28
 
 test("deploy and release use the shared release view and wait for both roles", async (t) => {
   const s = await setup(t);
-  assert.equal((await s.nexus(["--version"])).stdout.trim(), "nexus 0.50.0");
+  assert.equal((await s.nexus(["--version"])).stdout.trim(), "nexus 0.51.0");
   assert.equal((await s.nexus(["deploy", "bad"])).code, 64);
   const requested = await s.json(["deploy", "main"]);
   assert.equal(requested.desired.commit, "a".repeat(40));
@@ -1579,7 +1579,7 @@ test("image list and current print each image's role, build, release and nodes, 
   assert.deepEqual(await s.json(["image", "current"]), { current: olderEntry, previous: entry });
 
   const unknown = await s.nexus(["image", "rollout", "img-ffffffffffff", "--json"]);
-  assert.deepEqual([unknown.code, JSON.parse(unknown.stderr)], [4, { error: "no image img-ffffffffffff is recorded", kind: "not-found", status: 404 }]);
+  assert.deepEqual([unknown.code, JSON.parse(unknown.stderr)], [4, { error: "no image img-ffffffffffff is recorded", kind: "not-found", status: 404, code: null }]);
 });
 
 test("review and land reach the review loop's routes, and show prints a review and what it needs from the person", async (t) => {
@@ -1951,6 +1951,37 @@ test("conversation prints a Claude worker's transcript, and send types into its 
   assert.equal((await s.nexus(["send", thread.id, "go", "--steer"])).stdout, `Sent to Claude in ${thread.id}.\n`);
   assert.deepEqual(s.fake.calls.filter(([call]) => call === "send"), [], "the harness is sent nothing");
   assert.match((await s.nexus(["send", "--help"])).stdout, /typed into the Claude worker's session/);
+});
+
+test("send to a Claude worker that waits at a prompt in its terminal fails at once with exit code 5, and is typed once", { timeout: 10_000 }, async (t) => {
+  const s = await setup(t);
+  const { thread } = await claudeWatched(t, s);
+  s.probeAnswers(async () => ({ kind: "send-claude", outcome: "blocked", herdrPane: "w1:p1", resumed: false }));
+  s.commands.length = 0;
+  const blocked = await s.nexus(["send", thread.id, "deploy", "--json"]);
+  assert.equal(blocked.code, 5, blocked.stderr);
+  const reported = JSON.parse(blocked.stderr);
+  assert.match(reported.error, /^Claude waits at a prompt in its terminal, so nothing was typed/);
+  assert.deepEqual([reported.kind, reported.status, reported.code], ["conflict", 409, "blocked"]);
+  assert.equal(s.commands.filter((c) => c.kind === "send-claude").length, 1);
+});
+
+test("send to a Claude worker tries a 409 without a code again, as a control plane older than error codes sends it", async (t) => {
+  const s = await setup(t);
+  let refusals = 2;
+  const sends: string[] = [];
+  const old = createHttpServer((req, res) => {
+    const reply = (status: number, body: unknown) => res.writeHead(status, { "content-type": "application/json" }).end(JSON.stringify(body));
+    if (req.method === "GET") return reply(200, { thread: { status: "active" }, claudeWorker: {} });
+    sends.push(req.url!);
+    if (refusals-- > 0) return reply(409, { error: "pylon pylon-x is not running yet. This request wakes it, so ask again once it runs" });
+    reply(202, { claude: { session: "s1", outcome: "sent", resumed: false } });
+  });
+  const port = await listening(t, old);
+  const sent = await s.nexus(["send", "th-0123456789ab", "deploy"], { NEXUS_URL: `http://127.0.0.1:${port}`, NEXUS_SOCKS: "none" });
+  assert.equal(sent.code, 0, sent.stderr);
+  assert.equal(sent.stdout, "Sent to Claude in th-0123456789ab.\n");
+  assert.equal(sends.length, 3);
 });
 
 test("abort interrupts a Claude worker's turn with Esc in its pane, and fails with exit code 5 when Claude was not working", async (t) => {

@@ -2029,7 +2029,7 @@ test("an upgrade the API serves no WebSocket for is handled as an ordinary reque
   const upgrade = { connection: "upgrade", upgrade: "websocket", "sec-websocket-version": "13", "sec-websocket-key": "dGhlIHNhbXBsZSBub25jZQ==" };
   assert.equal((await s.call("GET", "/v1/projects", undefined, upgrade)).status, 200);
   const other = await s.call("GET", attachPathOf(s.thread.id), undefined, { connection: "upgrade", upgrade: "h2c" });
-  assert.deepEqual(other, { status: 404, body: { error: `no route /v1/threads/${s.thread.id}/attach` } });
+  assert.deepEqual(other, { status: 404, body: { error: `no route /v1/threads/${s.thread.id}/attach`, code: "no-route" } });
 });
 
 test("attention ranks failure, unwatched parked tasks, unread reply, then work; seen never wakes", async (t) => {
