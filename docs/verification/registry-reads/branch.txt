@@ -1,0 +1,10 @@
+branch: 69792e5 fix(harness): report a thread's parked state only when it flips
+threads(), 300 threads	6
+thread(id) for each of them	1525
+nodePylons, 225 observed pylons	1
+roomLeft	7
+locator poll of a running pylon	3
+start-up read	1
+deleted conversations the first start aborts	50
+deleted conversations the next start aborts	0
+onParked calls over track, 200 pi.live changes, a park and a retry	3
