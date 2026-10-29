@@ -48,6 +48,7 @@ export function startThemes() {
   picker.addEventListener("change", () => choose(picker.value));
   toggle.addEventListener("click", () => choose(toggled(scheme(), localStorage.getItem(darkKey))));
   deviceDark.addEventListener("change", apply);
-  addEventListener("storage", (event) => { if (event.key === key) apply(); });
+  // Another tab clearing the storage sends no key.
+  addEventListener("storage", (event) => { if (event.key === key || event.key === null) apply(); });
   apply();
 }

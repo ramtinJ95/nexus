@@ -158,8 +158,11 @@ const assetUrl = (file: string) => `/assets/${file}?v=${assets.get(file)!.versio
 
 /** The themes the sidebar's picker offers. Each but System is a block of style.css, and System is the device's light or dark. */
 export const themes = [["system", "System"], ["light", "Light"], ["dark", "Dark"], ["tokyo-night", "Tokyo Night"], ["catppuccin-mocha", "Catppuccin Mocha"], ["kanagawa-wave", "Kanagawa Wave"]] as const;
-/** Sets the stored theme, or the device's light or dark, before the first paint, as theme.js does after it. */
-const themeScript = `document.documentElement.dataset.theme = localStorage.getItem("nexus.theme") ?? (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");`;
+/**
+ * Sets the stored theme, or the device's light or dark, before the first paint, as theme.js does after it. A browser
+ * that refuses the page its storage throws on reading it, and the device's theme stands.
+ */
+const themeScript = `{ let theme = null; try { theme = localStorage.getItem("nexus.theme"); } catch {} document.documentElement.dataset.theme = theme ?? (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light"); }`;
 
 const pageHeaders = {
   "content-type": "text/html; charset=utf-8",
