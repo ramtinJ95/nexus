@@ -3,7 +3,7 @@ import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { ClipboardAddon } from "@xterm/addon-clipboard";
 import css from "@xterm/xterm/css/xterm.css";
-import { attachUrl, clipboardOf, joinTerminal } from "./terminal.js";
+import { attachUrl, clipboardOf, joinTerminal, keyFor } from "./terminal.js";
 import { onThemeChange, themeValue } from "./theme.js";
 
 const base = new CSSStyleSheet();
@@ -58,6 +58,16 @@ export function openTerminal(host, thread, status) {
   const fit = new FitAddon();
   term.loadAddon(fit);
   term.loadAddon(new ClipboardAddon(undefined, clipboardOf(navigator.clipboard)));
+  // A keypress xterm.js still saw would send a CR of its own, so every event of the key stops here.
+  term.attachCustomKeyEventHandler((event) => {
+    const bytes = keyFor(event);
+    if (bytes === undefined) return true;
+    if (event.type === "keydown") {
+      term.input(bytes);
+      event.preventDefault();
+    }
+    return false;
+  });
   term.open(host);
   fit.fit();
   const detach = joinTerminal(term, new WebSocket(attachUrl(location, thread, { cols: term.cols, rows: term.rows })), status);

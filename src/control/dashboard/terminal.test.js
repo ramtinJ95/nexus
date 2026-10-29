@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { attachUrl, clipboardOf, joinTerminal } from "./terminal.js";
+import { attachUrl, clipboardOf, joinTerminal, keyFor } from "./terminal.js";
 
 /** A terminal as xterm.js exposes it: what it was written, and the keys and resizes it hands out. */
 function fakeTerm() {
@@ -81,6 +81,17 @@ test("detaching closes the socket, says Herdr keeps its sessions, and stops send
   assert.deepEqual(s.socket.sent, []);
   assert.deepEqual(statuses.at(-1), { text: "Detached. Herdr keeps its sessions running.", over: true });
   assert.equal(statuses.filter((status) => status.over).length, 1);
+});
+
+const key = (key, mods = {}) => ({ key, shiftKey: false, altKey: false, ctrlKey: false, metaKey: false, ...mods });
+
+test("Shift+Enter and Option+Enter send ESC CR, a newline in Claude Code, and other keys stay xterm.js's", () => {
+  assert.equal(keyFor(key("Enter", { shiftKey: true })), "\x1b\r");
+  assert.equal(keyFor(key("Enter", { altKey: true })), "\x1b\r");
+  assert.equal(keyFor(key("Enter")), undefined, "Enter sends its own CR");
+  assert.equal(keyFor(key("Enter", { ctrlKey: true, shiftKey: true })), undefined);
+  assert.equal(keyFor(key("Enter", { metaKey: true })), undefined);
+  assert.equal(keyFor(key("@", { altKey: true })), undefined, "Option+2 makes @ on a Swedish layout");
 });
 
 test("OSC 52 writes the clipboard but X11's primary, and a query reads nothing from it", async () => {

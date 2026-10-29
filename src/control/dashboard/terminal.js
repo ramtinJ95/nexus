@@ -67,6 +67,12 @@ export function joinTerminal(term, socket, status) {
   };
 }
 
+/** What a key sends in place of xterm.js's own bytes: Shift+Enter and Option+Enter send ESC CR, a newline in Claude Code's prompt. */
+export function keyFor(event) {
+  if (event.key === "Enter" && (event.shiftKey || event.altKey) && !event.ctrlKey && !event.metaKey) return "\x1b\r";
+  return undefined;
+}
+
 /**
  * The clipboard OSC 52 reaches, as @xterm/addon-clipboard asks for one. It writes the browser's one clipboard for
  * every selection but X11's primary, which would clobber it, and never reads it, so output in the pylon cannot see
