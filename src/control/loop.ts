@@ -29,8 +29,9 @@ import type { PortRange, Registry, StoredPylon, Thread, ThreadId } from "./regis
 import { tickTemplateBuild } from "./template-builds.ts";
 
 /**
- * reconcile.ts's ingest. `known` maps each registry pylon on the node to its last ingested observation, and `unlisted`
- * names those whose session list this control plane has not written since it started.
+ * reconcile.ts's ingest. `known` maps each registry pylon on the node that the pass would tick, given what the event and
+ * the last observation say the node has, to its last ingested observation. `unlisted` names those whose session list
+ * this control plane has not written since it started or since they were last left out of `known`.
  */
 export type Ingest = (event: ProbeEvent, node: NodeName, known: ReadonlyMap<PylonId, PylonObservation | "absent">, now: number, unlisted: ReadonlySet<PylonId>) => readonly RegistryWrite[];
 
@@ -82,7 +83,6 @@ export function startLoop(options: LoopOptions): Loop {
   const claudeLaunchRetryMs = options.claudeLaunchRetryMs ?? 3 * 60_000;
   const log = options.log ?? ((message: string) => console.error(message));
   const shutdown = new AbortController();
-  const listed = new Set<PylonId>();
 
   const links = new Map<NodeName, Link>();
   const followers: Promise<void>[] = [];
@@ -251,6 +251,7 @@ export function startLoop(options: LoopOptions): Loop {
   }
 
   async function follow(node: NodeName, link: Link) {
+    const listed = new Set<PylonId>();
     while (!shutdown.signal.aborted) {
       const connection = new AbortController();
       let silence = setTimeout(() => connection.abort(), silenceMs);
@@ -260,16 +261,19 @@ export function startLoop(options: LoopOptions): Loop {
           silence = setTimeout(() => connection.abort(), silenceMs);
           // The stored observation is the last one ingested, including the one from before a reconnect or a restart.
           const last = registry.node(node)!.observation;
+          const current = merge(last, event);
+          // A pylon the last observation lists stays present for this event, so ingest clears its sessions when its node drops it.
+          const present = [...last?.pylons ?? [], ...current.pylons, ...current.previewRoutes, ...event.type === "preview-hit" ? [event] : []].map((p) => p.pylonId);
           const known = readsKnown[event.type]
-            ? new Map(registry.pylonIdsOn(node).map((id) => [id, last?.pylons.find((o) => o.pylonId === id) ?? "absent" as const]))
+            ? new Map(registry.pylonIdsToTick(node, present).map((id) => [id, last?.pylons.find((o) => o.pylonId === id) ?? "absent" as const]))
             : new Map<PylonId, PylonObservation | "absent">();
+          if (readsKnown[event.type]) for (const id of listed) if (!known.has(id)) listed.delete(id);
           if (event.type === "snapshot") {
             // The journal replays reports the node already sent, and the receipt only grows, so reportSession would drop these.
             const receipt = registry.eventReceipt(node);
             for (const report of event.observation.events) if (receipt === null || report.sequence > receipt) registry.reportSession(node, report);
           }
           if (event.type === "session-event") registry.reportSession(node, event.report);
-          const current = merge(last, event);
           const writes = ingest(event, node, known, Date.now(), new Set([...known.keys()].filter((id) => !listed.has(id))));
           registry.ingested(current === last ? null : current, writes);
           for (const w of writes) if (w.record === "sessions" || w.record === "sessions-paused") listed.add(w.pylonId);

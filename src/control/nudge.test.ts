@@ -87,7 +87,7 @@ function fixture(t: import("node:test").TestContext) {
       git: phase === "unread" ? null : { head: "a".repeat(40), branch: "main", dirty: false, branches: pushed.filter((p) => p.at <= readAt).map((p) => ({ name: p.ref.slice(p.ref.indexOf("/") + 1), head: "a".repeat(40), pushedAs: p.ref })) },
     }));
     const observation = { node, observedAt: new Date(now).toISOString(), probeBootId: "b", events: [], capacity, artifacts: [], jobs: [], pylons, grants: { secrets: [], gitSsh: false }, previewRoutes: [], heldSecrets: [] };
-    const known = new Map(registry.pylonIdsOn(node).map((id) => [id, last?.pylons.find((o) => o.pylonId === id) ?? "absent" as const]));
+    const known = new Map(registry.pylonIdsToTick(node, [...last?.pylons ?? [], ...pylons].map((p) => p.pylonId)).map((id) => [id, last?.pylons.find((o) => o.pylonId === id) ?? "absent" as const]));
     registry.ingested(observation, ingest({ type: "snapshot", observation }, node, known, now).filter((w) => w.record === "output"));
   }
 

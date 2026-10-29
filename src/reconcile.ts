@@ -265,14 +265,15 @@ export type SessionRow = { id: string; harness: SessionHarness; harnessSessionId
   | { state: "failed"; herdrPane: string | null; status: null; message: string });
 
 /**
- * `node` is the probe the event came from. `known` maps each registry pylon on that node to the last
- * observation ingested for it, or "absent". Every write is an upsert, so ingesting an event twice is harmless.
+ * `node` is the probe the event came from. `known` maps each registry pylon on that node the pass would tick to the
+ * last observation ingested for it, or "absent". A deleted thread's pylon that the node neither lists nor routes is
+ * left out once nothing is left to tear down. Every write is an upsert, so ingesting an event twice is harmless.
  *
  * - A pylon missing from `known` is an orphan, and nothing else is written for it, not even a preview hit.
  * - A snapshot is the whole node, so a known pylon it omits is ingested as "absent".
  * - Sessions are written as the pylon's whole list whenever it differs from the previous observation's, and whenever
  *   the pylon is in `unlisted`, as loop.ts names each pylon whose list this control plane has not written since it
- *   started. The previous observation may be one an older control plane stored, whose rows do not match it: one from
+ *   started or since it was last left out of `known`. The previous observation may be one an older control plane stored, whose rows do not match it: one from
  *   before paused sessions deleted a paused pylon's rows. A running
  *   pylon lists its panes and the sessions its last wake failed to bring back. A stopped one lists, as paused, what
  *   its pause recorded, under the IDs they ran under, or says nothing (null), and then every session it had is

@@ -509,7 +509,6 @@ export function openRegistry(path: string, clock = Date.now) {
     retryPylon: db.prepare(`UPDATE pylons SET failed = NULL, attempts = '{"count":0,"last":null}', retrying = 1 WHERE id = ? AND failed IS NOT NULL`),
     pylon: db.prepare("SELECT * FROM pylons WHERE id = ?"),
     pylonsOn: db.prepare("SELECT * FROM pylons WHERE node = ? ORDER BY id"),
-    pylonIdsOn: db.prepare("SELECT id FROM pylons WHERE node = ? ORDER BY id"),
     pylonIdsToTick: db.prepare(`SELECT p.id FROM pylons p JOIN threads t ON t.id = p.thread WHERE p.node = $node AND (t.status != 'deleted'
       OR p.submitted IS NOT NULL OR p.retrying = 1 OR p.id IN (SELECT value FROM json_each($present))
       OR EXISTS (SELECT 1 FROM previews WHERE pylon = p.id) OR EXISTS (SELECT 1 FROM claude_workers WHERE thread = t.id AND state = 'starting'))
@@ -1320,7 +1319,6 @@ export function openRegistry(path: string, clock = Date.now) {
       return row && pylonRow(row);
     },
     pylonsOn: (node: NodeName) => (q.pylonsOn.all(node) as Row[]).map(pylonRow),
-    pylonIdsOn: (node: NodeName) => (q.pylonIdsOn.all(node) as Row[]).map((r) => r.id as PylonId),
     /**
      * The node's pylons less those of deleted threads with nothing left to tear down: the node neither has nor routes
      * them, as `present` says, and no job, preview, retry or Claude launch is left to settle, so a tick would change nothing.
