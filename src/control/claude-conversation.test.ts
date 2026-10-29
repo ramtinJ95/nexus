@@ -6,13 +6,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { queryObjects } from "node:v8";
 import { claudeConversations } from "./claude-conversation.ts";
-import { openRegistry, type Registry, type Thread, type ThreadId } from "./registry.ts";
-import { newPylonRecord } from "../tick.ts";
+import { openRegistry, type Registry, type Thread } from "./registry.ts";
+import { addThread, seedRegistry } from "./test-kit.ts";
 import { claudeProjects, maxEntries, type ClaudeEntry } from "../claude-transcript.ts";
 import { processStream } from "../process-stream.ts";
 import { claudeHook } from "../../images/pylon/nexus-ask.ts";
-import type { ByteStream, LiveHash, NodeName, ProbeClient, PylonId, TailnetNodeId } from "../protocol.ts";
-import type { ProjectId } from "../project.ts";
+import type { ByteStream, LiveHash, NodeName, ProbeClient } from "../protocol.ts";
 import type { ImageId } from "../images.ts";
 import { until } from "../test-kit.ts";
 
@@ -25,32 +24,11 @@ after(() => rm(dir, { recursive: true }));
 
 /** A registry whose node is online and runs the pylon of each Claude thread `claudeThread` adds. */
 function openOnline(): Registry {
-  const registry = openRegistry(join(dir, `${randomUUID()}.db`));
-  registry.upsertNode({ name: node, tailnetHost: "rj-firebat.tail.ts.net", tailnetNodeId: "nFIREBAT" as TailnetNodeId });
-  registry.createProject({
-    id: "acme" as ProjectId, repoUrl: "git@example.com:acme.git", defaultBranch: "main", defaultNode: node,
-    resources: { cpus: 2, memoryGiB: 4, diskGiB: 10 }, allowedHosts: [], secrets: [], logins: [], preSetup: null,
-  });
-  return registry;
+  return seedRegistry(openRegistry(join(dir, `${randomUUID()}.db`)), { nodes: [node] });
 }
 
 function claudeThread(registry: Registry): Thread {
-  const id = `th-${randomUUID().slice(0, 8)}` as ThreadId;
-  const pylonId = `pylon-${id}` as PylonId;
-  const thread: Thread = {
-    seenAt: null, lastReplyAt: null, id, title: "t", project: "acme" as ProjectId, pylonId, status: "active", conversationId: null, startedBy: "nLAPTOP",
-    createdAt: Date.now(), agentTurnRunning: false, working: false, lastAgentActivityAt: 0, lastHumanActivityAt: Date.now(),
-  };
-  const { desired: _, ...pylon } = newPylonRecord({
-    thread: id, pylonId, node, desired: "running",
-    boot: {
-      pylonId, image, resources: { cpus: 2, memoryGiB: 4, diskGiB: 10 }, network: { allowedHosts: [], secrets: [] },
-      repo: { kind: "clone", url: "git@example.com:acme.git", checkout: { branch: "main", commit: "origin/main" } },
-      dotfiles: { repo: "https://example.com/dotfiles.git", ref: "main" },
-    },
-    firstBoot: { kind: "fresh", preSetup: null }, live: { previews: [], overlay: [] }, liveHash: "hash-1" as LiveHash,
-  });
-  registry.createThread(thread, pylon, "hello");
+  const { id, pylonId } = addThread(registry, { node, boot: { image }, claudePrompt: "hello" });
   registry.setClaudeWorker(id, "hello", "started", undefined, session);
   const pylons = [...registry.node(node)?.observation?.pylons ?? [], {
     pylonId, phase: "running" as const, liveHash: "hash-1" as LiveHash, bootedAt: new Date().toISOString(), bootedFrom: { image, checkpoint: null },

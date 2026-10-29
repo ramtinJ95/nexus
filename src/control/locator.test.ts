@@ -5,10 +5,9 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { registryLocator } from "./locator.ts";
-import { openRegistry, type Thread, type ThreadId } from "./registry.ts";
-import { newPylonRecord } from "../tick.ts";
-import { probePort, type LiveHash, type NodeName, type NodeObservation, type PylonId, type PylonObservation, type TailnetNodeId } from "../protocol.ts";
-import type { ProjectId } from "../project.ts";
+import { openRegistry, type ThreadId } from "./registry.ts";
+import { addThread, seedRegistry } from "./test-kit.ts";
+import { probePort, type NodeName, type NodeObservation, type PylonId, type PylonObservation } from "../protocol.ts";
 
 const node = "infra-testbench" as NodeName;
 const threadId = "th-1" as ThreadId;
@@ -18,30 +17,9 @@ const dir = await mkdtemp(join(tmpdir(), "nexus-locator-"));
 after(() => rm(dir, { recursive: true }));
 
 function seeded(t: import("node:test").TestContext) {
-  const registry = openRegistry(join(dir, `${randomUUID()}.db`));
+  const registry = seedRegistry(openRegistry(join(dir, `${randomUUID()}.db`)), { nodes: [node] });
   t.after(() => registry.close());
-  registry.upsertNode({ name: node, tailnetHost: "infra-testbench.tail.ts.net", tailnetNodeId: "nTESTBENCH" as TailnetNodeId });
-  registry.createProject({
-    id: "acme" as ProjectId, repoUrl: "git@example.com:acme.git", defaultBranch: "main", defaultNode: node,
-    resources: { cpus: 1, memoryGiB: 1, diskGiB: 1 }, allowedHosts: [], secrets: [], logins: [], preSetup: null,
-  });
-  const thread: Thread = {
-  seenAt: null, lastReplyAt: null,
-    id: threadId, title: "t", project: "acme" as ProjectId, pylonId, status: "active", conversationId: "1", startedBy: "nLAPTOP",
-    createdAt: 0, agentTurnRunning: true, working: true, lastAgentActivityAt: 0, lastHumanActivityAt: 0,
-  };
-  const { desired: _, ...pylon } = newPylonRecord({
-    thread: threadId, pylonId, node, desired: "running",
-    boot: {
-      pylonId, image: "img-000000000000", resources: { cpus: 1, memoryGiB: 1, diskGiB: 1 }, network: { allowedHosts: [], secrets: [] },
-      repo: { kind: "clone", url: "git@example.com:acme.git", checkout: { branch: "main", commit: "origin/main" } },
-      dotfiles: { repo: "https://example.com/dotfiles.git", ref: "main" },
-    },
-    firstBoot: { kind: "fresh", preSetup: null },
-    live: { previews: [], overlay: [] },
-    liveHash: "h" as LiveHash,
-  });
-  registry.createThread(thread, pylon);
+  addThread(registry, { node, thread: { id: threadId, conversationId: "1", createdAt: 0, agentTurnRunning: true, working: true, lastHumanActivityAt: 0 }, liveHash: "h" });
   return registry;
 }
 

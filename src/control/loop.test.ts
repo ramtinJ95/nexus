@@ -6,8 +6,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { chatgptTokenHandoff } from "./chatgpt-token.ts";
 import { startLoop, type Ingest, type Loop } from "./loop.ts";
-import { openRegistry, type PortRange, type Registry, type Thread, type ThreadId } from "./registry.ts";
-import { newPylonRecord } from "../tick.ts";
+import { openRegistry, type PortRange, type Registry, type Thread } from "./registry.ts";
+import { addThread, seedRegistry } from "./test-kit.ts";
 import { envelope, ingest as realIngest } from "../reconcile.ts";
 import type {
   BrokenCause, CommandResult, Job, JobEnvelope, JobErrorCode, JobId, JobStatus, ListeningFact, LiveHash, NodeName, NodeObservation, PreviewRouteFact, ProbeClient, ProbeEvent, PylonCommand, PylonId, PylonObservation, RunningFacts, ServiceFact, SessionFact, SubmitReply, TailnetNodeId,
@@ -266,31 +266,8 @@ after(() => rm(dir, { recursive: true }));
 const tempDb = () => join(dir, `${randomUUID()}.db`);
 
 function seed(registry: Registry, activity: Partial<Pick<Thread, "agentTurnRunning" | "lastAgentActivityAt" | "lastHumanActivityAt">> = {}): Thread {
-  registry.upsertNode({ name: node, tailnetHost: "rj-firebat.tail.ts.net", tailnetNodeId: "nFIREBAT" as TailnetNodeId });
-  if (registry.project("acme" as ProjectId) === undefined) registry.createProject({
-    id: "acme" as ProjectId, repoUrl: "git@example.com:acme.git", defaultBranch: "main", defaultNode: node,
-    resources: { cpus: 2, memoryGiB: 4, diskGiB: 10 }, allowedHosts: [], secrets: [], logins: [], preSetup: null,
-  });
-  const id = `th-${randomUUID().slice(0, 8)}` as ThreadId;
-  const pylonId = `pylon-${id}` as PylonId;
-  const thread: Thread = {
-  seenAt: null, lastReplyAt: null,
-    id, title: "t", project: "acme" as ProjectId, pylonId, status: "active", conversationId: null, startedBy: "nLAPTOP",
-    createdAt: Date.now(), agentTurnRunning: false, working: false, lastAgentActivityAt: 0, lastHumanActivityAt: Date.now(), ...activity,
-  };
-  const { desired: _, ...pylon } = newPylonRecord({
-    thread: id, pylonId, node, desired: "running",
-    boot: {
-      pylonId, image, resources: { cpus: 2, memoryGiB: 4, diskGiB: 10 }, network: { allowedHosts: [], secrets: [] },
-      repo: { kind: "clone", url: "git@example.com:acme.git", checkout: { branch: "main", commit: "origin/main" } },
-      dotfiles: { repo: "https://example.com/dotfiles.git", ref: "main" },
-    },
-    firstBoot: { kind: "fresh", preSetup: null },
-    live: { previews: [], overlay: [] },
-    liveHash: "hash-1" as LiveHash,
-  });
-  registry.createThread(thread, pylon);
-  return thread;
+  seedRegistry(registry, { nodes: [node] });
+  return addThread(registry, { node, boot: { image }, thread: activity });
 }
 
 function run(t: import("node:test").TestContext, registry: Registry, probe: ProbeClient | readonly ProbeClient[], overrides: { gitIdentity?: { name: string; email: string }; offlineAfterMs?: number; silenceMs?: number; ingest?: Ingest; previewPorts?: PortRange; log?: (line: string) => void; claudeLaunchRetryMs?: number; intervalMs?: number } = {}): Loop {
