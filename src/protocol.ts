@@ -27,7 +27,7 @@ import { Agent, request, type IncomingMessage } from "node:http";
 import { PassThrough, type Duplex, type Readable } from "node:stream";
 import { setTimeout as delay } from "node:timers/promises";
 import { z } from "zod";
-import { localApiWhois, type Whois } from "./tailscale.ts";
+import { localApiWhois, tailnetNodeIdPattern, type Whois } from "./tailscale.ts";
 import { chatgptTokenGrant, reservedPortMessage, reservedPorts, type BootInputs, type LiveSpec, type ProjectId } from "./project.ts";
 import { claudeTextProblem, harnesses, sessionHarnessSchema, type SessionHarness } from "./sessions.ts";
 import { asSent, named, nonEmpty, parse, parseJson, unchecked } from "./parse.ts";
@@ -411,7 +411,7 @@ export const heldSecrets: readonly string[] = [chatgptTokenGrant.name];
 /** Tailscale's stable node ID, as LocalAPI whois reports it. It survives renames and address changes. */
 export type TailnetNodeId = Brand<string, "TailnetNodeId">;
 export const tailnetNodeIdSchema = z.string()
-  .regex(/^n[A-Za-z0-9]+$/, "must be a Tailscale stable node ID, such as nAbCdEf1CNTRL (tailscale status --json)")
+  .regex(tailnetNodeIdPattern, "must be a Tailscale stable node ID, such as nAbCdEf1CNTRL (tailscale status --json)")
   .transform((id) => id as TailnetNodeId);
 
 export const probePort = 7480;

@@ -14,7 +14,7 @@ const supervisorLacks = ["flock", "timeout", "node"].filter((tool) => !["/usr/lo
 test("worker config bounds drain and health and rejects credential-bearing endpoints", () => {
   const config = { controlUrl: "http://control:7470/", controlNodeId: "nControl", token: "a".repeat(64), drainTimeoutMs: 300000, healthTimeoutMs: 60000 };
   assert.deepEqual(parseWorkerConfig(config), config);
-  for (const patch of [{ controlUrl: "http://user:pass@control/" }, { healthTimeoutMs: 0 }, { drainTimeoutMs: -1 }, { token: "" }]) assert.throws(() => parseWorkerConfig({ ...config, ...patch }));
+  for (const patch of [{ controlUrl: "http://user:pass@control/" }, { healthTimeoutMs: 0 }, { drainTimeoutMs: -1 }, { token: "" }, { controlNodeId: "control" }, { controlNodeId: ["nControl"] }]) assert.throws(() => parseWorkerConfig({ ...config, ...patch }));
 });
 
 test("wait outcome requires fresh health from every role and detects rollback and supersession", () => {
