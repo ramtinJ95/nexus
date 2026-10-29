@@ -1,0 +1,19 @@
+$ nexus conversation th-7e79c049d338
+> hello
+
+scripted answer after user
+
+> bash: sleep 12
+
+[tool] bash {"command":"sleep 12","timeout":600}
+
+[result] bash: 
+
+> steer: take this after the sleep
+
+scripted answer after user
+
+> queued: after the run
+
+scripted answer after user
+[exit 0]

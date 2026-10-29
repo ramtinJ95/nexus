@@ -1,0 +1,3 @@
+$ nexus session open th-963dcb9f66ef --harness shell --title Shell
+Opened shell session "Shell" in pane w2:p1 of th-963dcb9f66ef. `nexus attach th-963dcb9f66ef` attaches to it.
+[exit 0]

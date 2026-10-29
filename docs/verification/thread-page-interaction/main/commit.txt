@@ -1,0 +1,1 @@
+main: 0abcf9b fix(dashboard): render the diff panel well for every kind of diff (#194)

@@ -1,0 +1,35 @@
+$ nexus conversation th-2029fad5aff1
+> /pstack:poteto-mode This thread only checks Nexus's dashboard. Do nothing else: read no files, write none, start no subagents, ask no reviewer, open no pull request. Reply with the single word READY and end your turn.
+
+READY
+
+[turn] 3s
+
+> Run `sleep 30` in bash, then reply with the word DONE.
+
+[tool] Bash {"command":"sleep 30","description":"Wait 30 seconds"} (failed)
+
+[tool] Bash {"command":"sleep 30","description":"Wait 30 seconds in background","run_in_background":true} (ok)
+
+The sleep is running in the background. I'll reply DONE when it finishes.
+
+[turn] 7s
+
+> Also put the word BANANA in that reply.
+
+The sleep is still running. When it finishes, my reply will have DONE and BANANA in it.
+
+[turn] 3s
+
+[task] completed: Background command "Wait 30 seconds in background" completed (exit code 0)
+
+DONE BANANA
+
+[turn] 2s
+
+> Reply with the word PINEAPPLE.
+
+PINEAPPLE
+
+[turn] 2s
+[exit 0]

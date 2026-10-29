@@ -1,0 +1,17 @@
+$ nexus show th-47f8109c4744
+th-47f8109c4744  Agent thread
+project: drinks
+attention: none
+status: active
+pylon: pylon-th-47f8109c4744 on node-a, running, observed 37s ago
+size: 1 CPUs, 3 GiB memory, 5 GiB disk
+placement: node-a, the project's default node
+setup: fresh boot runs .nexus/setup, because the project is scratch, so it has no template
+session: claude-code "Claude thread" in pane w1:p1, idle
+port: 7470
+port: 7480
+port: 7489
+port: 39995
+port: 43835
+PR watch: off (no control-plane GitHub token configured)
+[exit 0]

@@ -1,0 +1,3 @@
+$ nexus delete th-47f8109c4744
+Deleted th-47f8109c4744.
+[exit 0]

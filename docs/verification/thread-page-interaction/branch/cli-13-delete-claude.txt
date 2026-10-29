@@ -1,0 +1,3 @@
+$ nexus delete th-2029fad5aff1
+Deleted th-2029fad5aff1.
+[exit 0]
