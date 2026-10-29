@@ -881,7 +881,7 @@ test("paths under docs/ hold for no reserved case by their names, while deploy/ 
   const round = { head: head1, verdict: { token: "x", verdict: "approve" as const, findings: [], reserved: [], notCheckedLive: "the cache under real traffic" }, check: { passed: true, output: "" }, live: { kind: "absent" as const }, answers: null };
   const review: Review = {
     id: "rv-1", builder: "th-b" as ThreadId, reviewer: "th-r" as ThreadId, pr: { repo: "ramtinJ95/nexus", number: 199, url: "", title: "", branch: "f" }, models: { builder: "a", reviewer: "b" }, reviewerKind: "harness",
-    maxRounds: 3, land: null, auto: false, merged: null, waiver: null, expect: "rv-1:t", sent: 1, phase: { kind: "merging", authorized: null }, outbox: null, since: 0, nudges: 0, startedAt: 0, rounds: [round],
+    maxRounds: 3, land: null, auto: false, merged: null, waiver: null, expect: "rv-1:t", sent: 1, phase: { kind: "merging", authorized: null }, outbox: null, asked: "", since: 0, nudges: 0, startedAt: 0, rounds: [round],
   };
   const pr: PrSnapshot = { pr: { repo: "ramtinJ95/nexus", number: 199, title: "", url: "", state: "open", checks: "none", review: "none", conflict: false }, detail: { head: head1, branch: "f", base: "main", body: "Not checked live: the cache under real traffic.", mergeCommit: null }, failures: [], comments: [] };
   const holds = (...paths: string[]) => landingHolds({ review, pr, nexus: true, files: paths.map((path) => ({ path, previous: null, patch: "@@ -0,0 +1 @@\n+x" })) });
