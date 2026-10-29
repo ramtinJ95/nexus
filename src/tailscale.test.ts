@@ -4,7 +4,7 @@ import { createServer } from "node:http";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { localApiWhois } from "./tailscale.ts";
+import { localApiWhois, localApiWhoisNode } from "./tailscale.ts";
 
 // A stand-in for tailscaled's LocalAPI on a Unix socket. The real daemon is never contacted.
 test("localApiWhois asks LocalAPI whois for ip:port and returns the stable node ID", async (t) => {
@@ -14,7 +14,7 @@ test("localApiWhois asks LocalAPI whois for ip:port and returns the stable node 
   const server = createServer((req, res) => {
     seen.push({ path: req.url, host: req.headers.host });
     const addr = new URL(req.url!, "http://x").searchParams.get("addr");
-    if (addr === "100.64.0.7:41641") return res.end(JSON.stringify({ Node: { ID: 7, StableID: "nStable7CNTRL" } }));
+    if (addr === "100.64.0.7:41641") return res.end(JSON.stringify({ Node: { ID: 7, StableID: "nStable7CNTRL", Name: "rj-firebat.example.ts.net." } }));
     if (addr === "[fd7a:115c:a1e0::7]:80") return res.end(JSON.stringify({ Node: { StableID: "nStable7v6" } }));
     if (addr === "100.64.0.9:1") return res.writeHead(500).end("boom");
     if (addr === "100.64.0.10:1") return res.end("not json");
@@ -37,6 +37,11 @@ test("localApiWhois asks LocalAPI whois for ip:port and returns the stable node 
   await assert.rejects(whois("100.64.0.9", 1), /HTTP 500: boom/);
   await assert.rejects(whois("100.64.0.10", 1), /tailscaled whois 100\.64\.0\.10:1: .*JSON/);
   assert.deepEqual(seen[0], { path: "/localapi/v0/whois?addr=100.64.0.7%3A41641", host: "local-tailscaled.sock" });
+
+  const whoisNode = localApiWhoisNode(socketPath);
+  assert.deepEqual(await whoisNode("100.64.0.7", 41641), { id: "nStable7CNTRL", host: "rj-firebat.example.ts.net" }, "the MagicDNS name, without its root dot");
+  assert.equal(await whoisNode("100.64.0.8", 5), null);
+  await assert.rejects(whoisNode("fd7a:115c:a1e0::7", 80), /response has no Node\.Name/);
 });
 
 test("LocalAPI certificates use cert-only access, request renewal, and reject invalid replies", async (t) => {
