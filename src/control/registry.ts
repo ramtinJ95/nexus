@@ -1132,7 +1132,10 @@ export function openRegistry(path: string, clock = Date.now) {
       const row = sql("SELECT record FROM pr_watches WHERE thread = ?").get(thread) as Row | undefined;
       return row ? json<PrWatchState>(row.record) : null;
     },
-    /** Replaces the thread's PR watch, and tells the event log of new feedback and of each PR linked since the last save. */
+    /**
+     * Replaces the thread's PR watch, and tells the event log of new feedback, of each PR linked since the last save, and
+     * of an error that starts or clears.
+     */
     savePrWatch(thread: ThreadId, state: PrWatchState) {
       transaction(() => {
         const previous = jsonOrNull<PrWatchState>(sql("SELECT record FROM pr_watches WHERE thread = ?").get(thread)?.record ?? null);
@@ -1142,6 +1145,8 @@ export function openRegistry(path: string, clock = Date.now) {
         for (const { pr } of state.links) {
           if (pr.url !== "" && !linked.has(`${pr.repo}#${pr.number}`)) appendEvent("pull-request.linked", thread, { repo: pr.repo, number: pr.number, url: pr.url, title: pr.title, state: pr.state });
         }
+        if ((previous?.error ?? null) === null && state.error !== null) appendEvent("pull-request.error", thread, { error: state.error });
+        if ((previous?.error ?? null) !== null && state.error === null) appendEvent("pull-request.error-cleared", thread, {});
         sql("INSERT INTO pr_watches (thread, record) VALUES (?, ?) ON CONFLICT (thread) DO UPDATE SET record = excluded.record").run(thread, JSON.stringify(state));
       });
     },

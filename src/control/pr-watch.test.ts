@@ -273,6 +273,35 @@ test("GitHub failures retain the cursor and expose only a credential-free retry 
   await f.watcher.poll(); assert.equal(f.registry.prWatch(f.id)?.error, null);
 });
 
+test("a failing read fires one pull-request.error with the retry notice, and the next good read fires pull-request.error-cleared", async (t) => {
+  const f = fixture(); t.after(() => f.registry.close()); await f.watcher.poll();
+  const events = () => f.registry.events("0", { kinds: ["pull-request.error", "pull-request.error-cleared"] }).map((e) => [e.kind, e.thread, e.payload]);
+  const failing = prWatcher({ ...f.options, github: { ...f.github, async poll() { throw new Error("secret-token"); } } });
+  await failing.poll(); await failing.poll();
+  assert.deepEqual(events(), [["pull-request.error", f.id, { error: "PR watch could not read GitHub or deliver its message; it will retry." }]], "once, however many passes fail");
+  await f.watcher.poll();
+  assert.deepEqual(events().slice(1), [["pull-request.error-cleared", f.id, {}]]);
+});
+
+test("a failed read of a queued thread's predecessor is the predecessor's error, kept until a read of it succeeds", async (t) => {
+  const f = fixture(); t.after(() => f.registry.close()); await f.watcher.poll();
+  f.registry.saveQueued({
+    id: "th-q" as ThreadId, title: "after", project: "project" as ProjectId, startedBy: "test", createdAt: 1, after: [f.id],
+    request: { project: "project", title: "after", resources: { cpus: 2, memoryGiB: 4, diskGiB: 10 } }, message: null, status: "queued", startNow: null, lastError: null, startedAt: null, firstMessage: null,
+  });
+  const events = () => f.registry.events("0", { kinds: ["pull-request.error", "pull-request.error-cleared"] }).map((e) => e.kind);
+  const settling = prWatcher({ ...f.options, github: { ...f.github, async find(repo: string, branch: string, state?: string) { if (state === "all") throw new Error("secret-token"); return f.github.find(repo, branch, state); } } });
+  await settling.poll();
+  assert.equal(f.registry.prWatch(f.id)?.error, "PR watch could not read the pull requests a queued thread waits for; it will retry.", "the watch's own good read does not hide it");
+  assert.deepEqual(events(), ["pull-request.error"]);
+  f.registry.setThreadStatus(f.id, "archived");
+  await settling.poll();
+  assert.deepEqual(events(), ["pull-request.error"]);
+  await f.watcher.poll();
+  assert.equal(f.registry.prWatch(f.id)?.error, null);
+  assert.deepEqual(events(), ["pull-request.error", "pull-request.error-cleared"]);
+});
+
 test("legacy statuses use the latest context and missing detail URLs still link to GitHub", async () => {
   let passing = false;
   const fake: typeof fetch = async (input) => {
