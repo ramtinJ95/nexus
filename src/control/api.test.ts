@@ -3059,14 +3059,14 @@ test("a Claude worker thread's page stream shows new entries during a turn, read
   await appendFile(s.transcript, fixture.slice(22, 24).join(""));
   report("session.turn-started");
   t.mock.timers.tick(1_000);
-  await frame(/Changed a file/, "the turn's start is followed by a read");
+  await frame(/<span class="t-name">Write<\/span>/, "the turn's start is followed by a read");
   await appendFile(s.transcript, fixture[24]!);
   t.mock.timers.tick(2_000);
-  assert.match(await frame(/<span class="t-status run">running<\/span>/, "a turn that runs is read again"), /python3 \/home\/user\/workspace\/repo\/hello.py/);
+  assert.match(await frame(/<span class="t-mark run"/, "a turn that runs is read again"), /python3 \/home\/user\/workspace\/repo\/hello.py/);
   await appendFile(s.transcript, fixture.slice(25, 28).join(""));
   report("session.turn-ended");
   t.mock.timers.tick(1_000);
-  assert.doesNotMatch(await frame(/Exit code 1/, "the turn's end is followed by a read"), /t-status run/);
+  assert.doesNotMatch(await frame(/Exit code 1/, "the turn's end is followed by a read"), /t-mark run/);
   const ended = s.streams.length;
   t.mock.timers.tick(10_000);
   assert.equal(s.streams.length, ended, "the reads stop with the turn");
@@ -3203,7 +3203,7 @@ test("a Claude worker's page stream sends nothing while its conversation is unch
   // No turn runs, so the event's read is the only change the stream can show.
   s.registry.reportSession(node, { sequence: 1, pylon: s.thread.pylonId, time: Date.now(), event: { kind: "session.turn-ended", session: claudeSession } });
   t.mock.timers.tick(1_000);
-  assert.match((await stream.next()).convo, /Changed a file/, "the first frame after the pings is the read's, not one for the age");
+  assert.match((await stream.next()).convo, /<span class="t-name">Write<\/span>/, "the first frame after the pings is the read's, not one for the age");
 });
 
 test("a Claude worker's transcript streams to the CLI as its entries whole, then each read's new entries and the turn's start and end", async (t) => {

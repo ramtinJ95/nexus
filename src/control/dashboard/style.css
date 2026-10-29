@@ -241,40 +241,53 @@ h4.md-h { font-size: 1.07em; }
 .notice-bad { color: var(--del-text); background: var(--del-bg); }
 .note { margin: 0; font-size: 12px; color: var(--text-3); }
 
-/* a run of tool calls is one quiet line, as Jetline's "Ran a command, edited 2 files ›" */
-.steps > summary { list-style: none; display: inline-flex; align-items: center; gap: 8px; min-height: 26px; padding: 0 6px 0 2px; border-radius: 6px; cursor: pointer; font-size: 14px; color: var(--text-3); }
+/* tool calls are quiet monospace lines on a thin rule, set apart so the agent's prose reads between them */
+.convo > .tools, .convo > .steps { margin: 4px 0; }
+.steps > summary { list-style: none; display: inline-flex; align-items: center; gap: 8px; min-height: 24px; padding: 0 6px 0 2px; border-radius: 6px; cursor: pointer; font-size: 13px; color: var(--text-3); }
 .steps > summary::-webkit-details-marker { display: none; }
 .steps > summary:hover { color: var(--text-2); }
 .steps.has-bad > summary { color: var(--bad); }
 .s-names { min-width: 0; }
-.s-bad { color: var(--bad); font-size: 12.5px; }
-.s-run { color: var(--work); font-size: 12.5px; display: inline-flex; align-items: center; gap: 6px; }
+.s-bad { color: var(--bad); font-size: 12px; }
+.s-run { color: var(--work); font-size: 12px; display: inline-flex; align-items: center; gap: 6px; }
+.s-count { color: var(--text-3); font: 11px var(--mono); }
 .chev { color: var(--text-3); width: 10px; flex: none; transition: transform 0.12s; font-size: 15px; }
 .steps[open] > summary .chev, .tool[open] > summary .chev { transform: rotate(90deg); }
-.steps > .tools { margin: 6px 0 2px 2px; }
-.tools { border-left: 1px solid var(--line); margin-left: 3px; padding-left: 10px; display: flex; flex-direction: column; gap: 1px; }
-.tool > summary { list-style: none; display: flex; align-items: center; gap: 8px; min-height: 26px; padding: 0 8px 0 4px; border-radius: 6px; cursor: pointer; font: 12px/1 var(--mono); color: var(--text-2); }
+.steps > .tools { margin: 4px 0 2px 2px; }
+.tools { border-left: 1px solid var(--line); margin-left: 3px; padding-left: 8px; display: flex; flex-direction: column; min-width: 0; }
+.tool > summary { list-style: none; display: flex; align-items: center; gap: 8px; min-height: 24px; padding: 0 6px; border-radius: 6px; cursor: pointer; font: 12px/1 var(--mono); color: var(--text-3); }
 .tool > summary::-webkit-details-marker { display: none; }
-.tool > summary:hover { background: var(--hover); }
-.t-name { color: var(--text-3); min-width: 34px; flex: none; }
-.t-subj { color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
-.t-meta { margin-left: auto; color: var(--text-3); font-size: 11px; white-space: nowrap; padding-left: 8px; }
+.tool > summary:hover { background: var(--hover); color: var(--text-2); }
+.t-mark { flex: none; width: 12px; display: inline-flex; justify-content: center; font-size: 11px; }
+.t-mark.ok { color: var(--ok); }
+.t-mark.bad { color: var(--bad); }
+.t-mark.none { color: var(--text-3); }
+.t-name { color: var(--text-2); flex: none; }
+.t-subj { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.t-meta, .t-time { flex: none; font-size: 11px; white-space: nowrap; display: inline-flex; gap: 8px; }
+.t-time { font-variant-numeric: tabular-nums; }
+.t-size:empty { display: none; }
+.t-exit { color: var(--bad); }
 .add { color: var(--ok); }
 .del { color: var(--bad); }
-.t-status { font-size: 11px; min-width: 44px; text-align: right; flex: none; white-space: nowrap; }
-.t-status.ok { color: var(--ok); }
-.t-status.bad { color: var(--bad); }
-.t-status.run { color: var(--work); }
-.t-status.none { color: var(--text-3); }
-.t-out, .t-args, .t-full { margin: 3px 0 7px 18px; padding: 8px 11px; background: var(--code-bg); border-radius: 8px; font-size: 11.5px; line-height: 1.55; color: var(--text-2); max-height: 240px; overflow: auto; white-space: pre; }
+.t-out, .t-args, .t-full { margin: 2px 0 6px 26px; padding: 7px 10px; background: var(--code-bg); border-radius: 6px; font-size: 11.5px; line-height: 1.5; color: var(--text-2); overflow-x: auto; white-space: pre; }
+.t-args, .t-full { max-height: 240px; overflow: auto; }
+.tool.running .t-out { max-height: 240px; overflow: auto; }
 .t-args { color: var(--text-3); }
 .t-full { white-space: pre-wrap; overflow-wrap: anywhere; color: var(--text); }
-.t-empty { margin: 2px 0 6px 22px; font-size: 11.5px; color: var(--text-3); }
-.t-text { margin: 3px 0 7px 18px; font-size: 13px; line-height: 1.55; color: var(--text-2); white-space: pre-wrap; overflow-wrap: anywhere; max-height: 240px; overflow: auto; }
-.t-task { margin: 2px 0 6px 22px; font-size: 12px; color: var(--text-2); overflow-wrap: anywhere; }
+/* a clipped output's first lines, its Show all line and the rest read as one block */
+.t-out.t-head { margin-bottom: 0; padding-bottom: 0; border-bottom-left-radius: 0; border-bottom-right-radius: 0; }
+.t-out.t-rest { margin-top: 0; padding-top: 0; border-top-left-radius: 0; border-top-right-radius: 0; }
+.t-more > summary { list-style: none; margin: 0 0 6px 26px; padding: 5px 10px 7px; background: var(--code-bg); border-radius: 0 0 6px 6px; cursor: pointer; font: 11px var(--mono); color: var(--text-3); }
+.t-more > summary::-webkit-details-marker { display: none; }
+.t-more > summary:hover { color: var(--text-2); }
+.t-more[open] > summary { display: none; }
+.t-empty { margin: 2px 0 6px 26px; font-size: 11.5px; color: var(--text-3); }
+.t-text { margin: 2px 0 6px 26px; font-size: 13px; line-height: 1.55; color: var(--text-2); white-space: pre-wrap; overflow-wrap: anywhere; max-height: 240px; overflow: auto; }
+.t-task { margin: 2px 0 6px 26px; font-size: 12px; color: var(--text-2); overflow-wrap: anywhere; }
 .tool.failed > summary { background: var(--del-bg); }
 .tool.failed .t-name, .tool.failed .t-subj { color: var(--del-text); }
-.tool.failed .t-out { border-left: 2px solid var(--bad); }
+.tool.failed :is(.t-out, .t-more > summary) { border-left: 2px solid var(--bad); }
 .diff { padding: 6px 0; }
 .d { display: block; padding: 0 11px; }
 .d-add { background: var(--add-bg); color: var(--add-text); }
@@ -592,12 +605,12 @@ h4.md-h { font-size: 1.07em; }
   .convo-meta { display: none; }
   .msg.agent, .msg.user { font-size: 15px; }
   .msg.user { max-width: 90%; }
-  .tools { margin-left: 0; padding-left: 8px; }
+  .tools { margin-left: 0; padding-left: 6px; }
   .tool > summary, .steps > summary { min-height: 34px; }
-  .tool > summary { font-size: 13px; }
-  .t-meta { display: none; }
-  .t-status { min-width: 0; margin-left: auto; padding-left: 8px; }
-  .t-out, .t-args, .t-full { margin-left: 0; font-size: 11.5px; white-space: pre-wrap; overflow-wrap: anywhere; }
+  .tool > summary { font-size: 12.5px; gap: 7px; padding: 0 4px; }
+  .t-size { display: none; }
+  .t-out, .t-args, .t-full, .t-more > summary, .t-empty, .t-text, .t-task { margin-left: 0; }
+  .t-out, .t-args, .t-full { font-size: 11.5px; white-space: pre-wrap; overflow-wrap: anywhere; }
   .d { padding-left: 22px; text-indent: -12px; }
 
   .dock { padding: 8px 12px 10px; padding-bottom: max(10px, env(safe-area-inset-bottom)); }

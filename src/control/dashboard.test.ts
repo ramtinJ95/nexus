@@ -1,7 +1,7 @@
 import { after, test, type TestContext } from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { mkdtemp, readdir, rm } from "node:fs/promises";
+import { mkdtemp, readdir, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { request } from "node:http";
 import { join } from "node:path";
@@ -21,7 +21,7 @@ import type { JobId, NodeHealth, NodeName, PylonId, PylonObservation, ServiceFac
 import type { ImageId } from "../images.ts";
 import { githubTokenGrant } from "../project.ts";
 import type { AssistantMessage, Message, ToolCall } from "@earendil-works/pi-ai";
-import { transcriptStart, type ClaudeConversation, type ClaudeEntry } from "../claude-transcript.ts";
+import { parseRecord, transcriptStart, type ClaudeConversation, type ClaudeEntry } from "../claude-transcript.ts";
 import { liveFrames } from "./dashboard.ts";
 
 const node = "rj-firebat" as NodeName;
@@ -167,14 +167,14 @@ const result = (toolCallId: string, text: string, isError = false, toolName = "b
 
 /**
  * A thread page's conversation as a reader sees it: one row per message, notice, tool call and fold, which
- * tool calls and folds start open, and the dock under it with the run bar and the prompt box.
+ * tool calls, folds and clipped outputs start open, and the dock under it with the run bar and the prompt box.
  */
 function conversationOf(html: string) {
   const convo = html.split('id="convo"')[1]!.split('<section class="file-view"')[0]!;
   const dock = html.split('<div class="dock">')[1]!.split("</main>")[0]!;
   return {
     rows: convo.split(/(?=<div class="msg |<p class="notice|<p class="note"|<details class="tool|<details class="steps)/).slice(1).map((row) => textOf(`<x ${row}`).replace(/^<x /, "")),
-    open: [...convo.matchAll(/<details class="(?:tool|steps)[^"]*" id="([^"]*)"( open)?>/g)].map((m) => [m[1], m[2] !== undefined]),
+    open: [...convo.matchAll(/<details class="(?:tool|steps|t-more)[^"]*" id="([^"]*)"( open)?>/g)].map((m) => [m[1], m[2] !== undefined]),
     text: textOf(convo.replace(/^[^>]*>/, "")),
     dock: textOf(dock),
   };
@@ -793,10 +793,11 @@ test("a published preview whose service is starting shows starting and one whose
   }, "the gateway can only answer 502 for it");
 });
 
-test("a run of tool calls folds into a line that says what it did, over rows where only failures and edits start open", async (t) => {
+test("a lone tool call is its own line, and a run of calls folds under a line that says what it did, over rows where only failures and edits start open", async (t) => {
   const s = await seeded(t);
   const fix = await s.start("acme", "Fix checkout");
-  const long = Array.from({ length: 40 }, (_, i) => `ok ${i + 1} test`).join("\n");
+  const lines = (from: number, to: number) => Array.from({ length: to - from + 1 }, (_, i) => `ok ${from + i} test`).join(" ");
+  const long = lines(1, 40).replace(/ (?=ok)/g, "\n");
   s.fake.transcript(fix.id).messages.push(
     { role: "user", content: "Run the tests", timestamp: 0 },
     assistant([{ type: "thinking", thinking: "not shown" }, { type: "text", text: "Running them with `npm test`." }, bash("c1", "npm test")]),
@@ -815,19 +816,18 @@ test("a run of tool calls folds into a line that says what it did, over rows whe
   assert.deepEqual(rows, [
     "You Run the tests",
     "Running them with npm test .",
-    "Ran a command ›",
-    `› bash npm test 40 lines ✓ npm test ${long.replace(/\n/g, " ")}`,
+    `✓ Bash npm test 40 lines › npm test ${lines(1, 12)} Show all 40 lines ${lines(13, 40)}`,
     "One more.",
-    "Ran a command, changed a file, read a file 1 failed ›",
-    "› bash git status 2 lines exit 128 git status fatal: not a git repository Command exited with code 128",
-    "› edit src/a.ts +1 −2 ✓ src/a.ts − const a = 1; − const b = 2; + const a = 2;",
-    `› read src/b.ts no result src/b.ts { "offset": 10 } No output.`,
+    "Ran a command, changed a file, read a file 1 failed 3 calls ›",
+    "✕ Bash git status 2 lines exit 128 › git status fatal: not a git repository Command exited with code 128",
+    "✓ Edit src/a.ts +1 −2 › src/a.ts − const a = 1; − const b = 2; + const a = 2;",
+    `– Read src/b.ts › src/b.ts { "offset": 10 } No output.`,
     "! Aborted.",
     "! The model failed: rate limited",
     "You Look at this [image/png image]",
     "All 40 pass.",
   ]);
-  assert.deepEqual(open, [["steps-c1", false], ["tool-c1", false], ["steps-c2", true], ["tool-c2", true], ["tool-c3", true], ["tool-c4", false]], "only a fold with a failure, the failure and the edit start open");
+  assert.deepEqual(open, [["tool-c1", false], ["more-c1", false], ["steps-c2", true], ["tool-c2", true], ["tool-c3", true], ["tool-c4", false]], "only a short fold, the failure and the edit start open");
 });
 
 test("a fold counts each kind of call, a file once however often it is read, and opens itself for a failure", async (t) => {
@@ -835,19 +835,19 @@ test("a fold counts each kind of call, a file once however often it is read, and
   const fix = await s.start("acme", "Fix checkout");
   const transcript = s.fake.transcript(fix.id);
   const steps = (prefix: string, failing: boolean): Message[] => [
-    assistant([call(`${prefix}1`, "read", { path: "src/checkout/total.ts" }), call(`${prefix}2`, "grep", { pattern: "applyCoupon" }), bash(`${prefix}3`, "npm test -- --watch=false"), bash(`${prefix}4`, "npm test -- --watch=false"), call(`${prefix}5`, "read", { path: "src/checkout/cart.ts" })]),
-    result(`${prefix}1`, "x"), result(`${prefix}2`, "y"), result(`${prefix}3`, "ok"), result(`${prefix}4`, "1 failed\nCommand exited with code 1", failing), result(`${prefix}5`, "z"),
+    assistant([call(`${prefix}1`, "read", { path: "src/checkout/total.ts" }), call(`${prefix}2`, "grep", { pattern: "applyCoupon" }), bash(`${prefix}3`, "npm test -- --watch=false"), bash(`${prefix}4`, "npm test -- --watch=false"), call(`${prefix}5`, "read", { path: "src/checkout/cart.ts" }), call(`${prefix}6`, "read", { path: "src/checkout/total.ts" })]),
+    result(`${prefix}1`, "x"), result(`${prefix}2`, "y"), result(`${prefix}3`, "ok"), result(`${prefix}4`, "1 failed\nCommand exited with code 1", failing), result(`${prefix}5`, "z"), result(`${prefix}6`, "x"),
   ];
   transcript.messages.push({ role: "user", content: "Look", timestamp: 0 }, ...steps("a", false), assistant([{ type: "text", text: "Found it." }]), ...steps("b", true));
   transcript.messages.push(assistant([{ type: "text", text: "Now the rest." }, bash("c1", "ls"), bash("c2", "pwd"), bash("c3", "id")]), result("c1", "a"), result("c2", "b"), result("c3", "c"));
 
   const { rows, open } = conversationOf((await s.call("GET", `/threads/${fix.id}`)).text);
-  assert.equal(rows[1], "Ran 2 commands, read 2 files, searched the code ›");
-  assert.equal(rows[8], "Ran 2 commands, read 2 files, searched the code 1 failed ›");
-  assert.equal(rows[14], "Now the rest.");
-  assert.equal(rows[15], "Ran 3 commands ›");
-  assert.equal(rows[16], "› bash ls 1 line ✓ ls a");
-  assert.deepEqual(open.filter(([id]) => String(id).startsWith("steps-")), [["steps-a1", false], ["steps-b1", true], ["steps-c1", false]], "a fold with a failure starts open");
+  assert.equal(rows[1], "Ran 2 commands, read 2 files, searched the code 6 calls ›");
+  assert.equal(rows[9], "Ran 2 commands, read 2 files, searched the code 1 failed 6 calls ›");
+  assert.equal(rows[16], "Now the rest.");
+  assert.equal(rows[17], "Ran 3 commands 3 calls ›");
+  assert.equal(rows[18], "✓ Bash ls 1 line › ls a");
+  assert.deepEqual(open.filter(([id]) => String(id).startsWith("steps-")), [["steps-a1", false], ["steps-b1", true], ["steps-c1", true]], "a fold of more than five calls starts open only with a failure");
   assert.deepEqual(open.filter(([id]) => ["tool-b4", "tool-a4"].includes(String(id))), [["tool-a4", false], ["tool-b4", true]]);
 });
 
@@ -868,9 +868,9 @@ test("a fold says what its calls did by action, weightiest first, a changed file
   );
   const { rows } = conversationOf((await s.call("GET", `/threads/${fix.id}`)).text);
   assert.deepEqual(rows.filter((row) => row.endsWith("›") && !row.startsWith("›")), [
-    "Changed 2 files, ran a command, read a file, used 3 other tools ›",
-    "Ran a command, searched the code, used frob ›",
-    "Ran a command, read a file, searched the code 2 times, used another tool ›",
+    "Changed 2 files, ran a command, read a file, used 3 other tools 9 calls ›",
+    "Ran a command, searched the code, used frob 3 calls ›",
+    "Ran a command, read a file, searched the code 2 times, used another tool 5 calls ›",
   ]);
   assert.ok(rows.includes("! Aborted."), "a notice between two runs stays between their folds");
 });
@@ -893,14 +893,14 @@ test("a running turn shows its tool's output so far, the partial answer, queued 
   const { rows, open, dock } = conversationOf(html);
   assert.deepEqual(rows, [
     "You Build it",
-    "Ran a command 1 running ›",
-    "› bash npm run build 1 line running npm run build compiling",
+    "Bash npm run build 1 line › npm run build compiling",
     "Half an ans",
     "! The model request failed and will be retried: overloaded",
     "You queued, sends after this run then deploy",
     "You queued, joins after this tool round skip the docs",
   ]);
-  assert.deepEqual(open, [["steps-c1", true], ["tool-c1", true]]);
+  assert.deepEqual(open, [["tool-c1", true]]);
+  assert.match(html, /<span class="t-mark run" role="img" aria-label="running" title="running"><span class="spin"><\/span><\/span>/, "its mark spins, and a screen reader hears it runs");
   assert.match(dock, new RegExp(`^Working 1m 12s · 1 tool this turn Abort nexus attach ${fix.id} Copy gpt-test Steer joins the run after its current tool round\\. Queue ⌥↵ Steer ⌘↵$`));
   assert.match(html, /placeholder="Steer the run…"/);
   assert.match(html, /<button type="submit" class="btn btn-ghost send-alt" id="queue" name="mode" value="followUp"[^>]*>/, "⌥↵ queues a follow-up after the run");
@@ -924,7 +924,7 @@ test("a thread page's stream sends its conversation, then only the text that gre
   const stream = s.events(`/threads/${fix.id}/stream`);
   const first = await stream.next();
   assert.ok(page.includes(`data-stream="/threads/${fix.id}/stream">${first.convo}</div></div>`), "the first event is the region the page holds");
-  assert.deepEqual(conversationOf(`<div id="convo" ${first.convo}<div class="dock"></main>`).rows.slice(1), ["Ran a command 1 running ›", "› bash npm run build 1 line running npm run build compiling", "Hal"]);
+  assert.deepEqual(conversationOf(`<div id="convo" ${first.convo}<div class="dock"></main>`).rows.slice(1), ["Bash npm run build 1 line › npm run build compiling", "Hal"]);
 
   transcript.docs["pi.live"] = live("Half an <answer>", "compiling\nlinking\n");
   s.fake.commit(fix.id);
@@ -943,7 +943,7 @@ test("a thread page's stream sends its conversation, then only the text that gre
   transcript.docs["pi.live"] = {};
   s.fake.commit(fix.id);
   const done = await stream.next();
-  assert.deepEqual(conversationOf(`<div id="convo" ${done.convo}<div class="dock"></main>`).rows.slice(1), ["Ran a command ›", "› bash npm run build 1 line ✓ npm run build built", "Built."], "a finished call and a committed answer send the region whole");
+  assert.deepEqual(conversationOf(`<div id="convo" ${done.convo}<div class="dock"></main>`).rows.slice(1), ["✓ Bash npm run build 1 line › npm run build built", "Built."], "a finished call and a committed answer send the region whole");
   assert.doesNotMatch(done.convo, /data-grow/);
   stream.close();
 });
@@ -1172,8 +1172,97 @@ test("a tool call's expanded body shows its whole command, path or pattern", asy
   const body = (id: string) => /<pre class="t-full">([^<]*)<\/pre>/.exec(html.split(`id="tool-${id}"`)[1]!)![1]!;
   assert.equal(body("c1"), command.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;"), "the multiline command is whole and escaped");
   assert.equal(body("c2"), "a|b&lt;c&gt;");
-  assert.equal(conversationOf(html).rows[0], "Ran a command, searched the code ›");
-  assert.equal(conversationOf(html).rows[2], `› grep a|b<c> 1 line ✓ a|b<c> { "path": "src" } src/a.ts:1`);
+  assert.equal(conversationOf(html).rows[0], "Ran a command, searched the code 2 calls ›");
+  assert.equal(conversationOf(html).rows[1], `✓ Bash for f in src/*.ts; do … 1 line › ${command.replace(/\s+/g, " ")} ok`, "the row shows a command's first line");
+  assert.equal(conversationOf(html).rows[2], `✓ Grep a|b<c> 1 line › a|b<c> { "path": "src" } src/a.ts:1`);
+});
+
+/** The line each tool call shows, before its body: mark, tool, subject, size and time. */
+const toolLines = (rows: readonly string[]) => rows.filter((row) => /^[✓✕–] /.test(row)).map((row) => row.split(" › ")[0]);
+
+test("a call shows how long it took, a harness call from its result's duration and a Claude call from its result's time less its call's", async (t) => {
+  const s = await seeded(t);
+  const fix = await s.start("acme", "Fix checkout");
+  const timed = (id: string, durationMs?: number) => ({ ...result(id, "ok"), ...(durationMs === undefined ? {} : { durationMs }) }) as Message;
+  s.fake.transcript(fix.id).messages.push(
+    assistant([bash("c1", "a"), bash("c2", "b"), bash("c3", "c"), bash("c4", "d")]),
+    timed("c1", 840), timed("c2", 2_440), timed("c3", 75_000), timed("c4"),
+  );
+  assert.deepEqual(toolLines(conversationOf((await s.call("GET", `/threads/${fix.id}`)).text).rows), [
+    "✓ Bash a 1 line 840 ms", "✓ Bash b 1 line 2.4 s", "✓ Bash c 1 line 1m 15s", "✓ Bash d 1 line",
+  ]);
+
+  const thread = await claudeThread(s, [
+    { kind: "tool", at: 1_000, id: "t1", name: "Bash", input: { command: "npm test" } },
+    { kind: "result", at: 2_234, toolUseId: "t1", output: "ok", isError: false },
+    { kind: "tool", at: 3_000, id: "t2", name: "Bash", input: { command: "date" } },
+    { kind: "result", at: 2_990, toolUseId: "t2", output: "ok", isError: false },
+    { kind: "tool", at: 4_000, id: "t3", name: "Bash", input: { command: "sleep 1" } },
+  ]);
+  assert.deepEqual(toolLines(conversationOf((await s.call("GET", `/threads/${thread.id}`)).text).rows), [
+    "✓ Bash npm test 1 line 1.2 s", "✓ Bash date 1 line", "– Bash sleep 1",
+  ], "a result stamped before its call and a call without a result show no time");
+});
+
+test("pi's bash and Claude's Bash read as one tool, and a path in the checkout reads relative, as pi gives it", async (t) => {
+  const s = await seeded(t);
+  const fix = await s.start("acme", "Fix checkout");
+  s.fake.transcript(fix.id).messages.push(
+    assistant([bash("c1", "npm test"), call("c2", "read", { path: "src/a.ts" }), call("c3", "ls", { path: "src" }), call("c4", "mcp__notes__write_file", { path: "a.md" })]),
+    result("c1", "ok"), result("c2", "x", false, "read"), result("c3", "a.ts", false, "ls"), result("c4", "done", false, "mcp__notes__write_file"),
+  );
+  const thread = await claudeThread(s, [
+    { kind: "tool", at: 1, id: "t1", name: "Bash", input: { command: "npm test" } },
+    { kind: "tool", at: 1, id: "t2", name: "Read", input: { file_path: "/home/user/workspace/repo/src/a.ts" } },
+    { kind: "result", at: 1, toolUseId: "t1", output: "ok", isError: false },
+    { kind: "result", at: 1, toolUseId: "t2", output: "x", isError: false },
+  ]);
+  const harness = (await s.call("GET", `/threads/${fix.id}`)).text;
+  const claude = (await s.call("GET", `/threads/${thread.id}`)).text;
+  assert.deepEqual(toolLines(conversationOf(harness).rows), ["✓ Bash npm test 1 line", "✓ Read src/a.ts 1 line", "✓ List src 1 line", "✓ write_file a.md 1 line"]);
+  assert.deepEqual(toolLines(conversationOf(claude).rows), ["✓ Bash npm test 1 line 0 ms", "✓ Read src/a.ts 1 line 0 ms"]);
+  assert.match(claude, /<pre class="t-full">\/home\/user\/workspace\/repo\/src\/a\.ts<\/pre>/, "the expanded body keeps the path whole");
+  assert.match(harness, /<span class="t-name" title="ls">List<\/span>/, "a renamed tool's own name is a hover away");
+  assert.match(harness, /<span class="t-name" title="mcp__notes__write_file">write_file<\/span>/);
+});
+
+test("a long output shows its first lines with the rest one click away, while a short one and a running one show whole", async (t) => {
+  const s = await seeded(t);
+  const fix = await s.start("acme", "Fix checkout");
+  const numbered = (n: number) => Array.from({ length: n }, (_, i) => `line ${i + 1}`);
+  const transcript = s.fake.transcript(fix.id);
+  transcript.messages.push(
+    { role: "user", content: "Go", timestamp: 0 },
+    assistant([bash("c1", "long"), bash("c2", "short"), call("c3", "write", { path: "big.txt", content: numbered(40).join("\n") }), bash("c4", "build")], "toolUse"),
+    result("c1", `${numbered(31).join("\n")}\n`), result("c2", numbered(30).join("\n")), result("c3", "Wrote big.txt", false, "write"),
+  );
+  transcript.docs["pi.live"] = { run: { taskId: 1, inputs: [1] }, tools: [{ callId: "c4", name: "bash", status: "running", output: numbered(50).join("\n") }] };
+  const html = (await s.call("GET", `/threads/${fix.id}`)).text;
+  const { rows, open } = conversationOf(html);
+  assert.equal(rows[2], `✓ Bash long 31 lines › long ${numbered(12).join(" ")} Show all 31 lines ${numbered(31).slice(12).join(" ")}`, "the whole output is in the page");
+  assert.equal(rows[3], `✓ Bash short 30 lines › short ${numbered(30).join(" ")}`);
+  assert.match(rows[4]!, /^✓ Write big\.txt \+40 −0 › big\.txt (\+ line \d+ ){12}Show all 40 lines (\+ line \d+ ?){28}$/, "a long change is clipped too");
+  assert.ok(rows[5]!.endsWith(numbered(50).join(" ")) && !rows[5]!.includes("Show all"), "a running call's output grows whole");
+  const [, head, rest] = /<pre class="t-out t-head">([^<]*)<\/pre><details class="t-more" id="more-c1"><summary data-more>Show all 31 lines<\/summary><pre class="t-out t-rest">([^<]*)<\/pre><\/details>/.exec(html)!;
+  assert.deepEqual([head, rest], [numbered(12).join("\n"), numbered(31).slice(12).join("\n")]);
+  assert.deepEqual(open.filter(([id]) => String(id).startsWith("more-")), [["more-c1", false], ["more-c3-diff", false]]);
+});
+
+test("a lone call has no fold line, a run of two starts open, and a run of six starts closed unless a call failed", async (t) => {
+  const s = await seeded(t);
+  const fix = await s.start("acme", "Fix checkout");
+  const run = (prefix: string, n: number, failing = false): Message[] => {
+    const ids = Array.from({ length: n }, (_, i) => `${prefix}${i + 1}`);
+    return [assistant(ids.map((id) => bash(id, "ls"))), ...ids.map((id, i) => result(id, "ok", failing && i === n - 1))];
+  };
+  s.fake.transcript(fix.id).messages.push(
+    ...run("a", 1), assistant([{ type: "text", text: "Two." }]), ...run("b", 2), assistant([{ type: "text", text: "Six." }]),
+    ...run("c", 6), assistant([{ type: "text", text: "Six, one failing." }]), ...run("d", 6, true),
+  );
+  const { rows, open } = conversationOf((await s.call("GET", `/threads/${fix.id}`)).text);
+  assert.equal(rows[0], "✓ Bash ls 1 line › ls ok");
+  assert.deepEqual(rows.filter((row) => !row.startsWith("✓ ")), ["Two.", "Ran 2 commands 2 calls ›", "Six.", "Ran 6 commands 6 calls ›", "Six, one failing.", "Ran 6 commands 1 failed 6 calls ›", "✕ Bash ls 1 line failed › ls ok"]);
+  assert.deepEqual(open.filter(([id]) => String(id).startsWith("steps-")), [["steps-b1", true], ["steps-c1", false], ["steps-d1", true]]);
 });
 
 test("the start dialog's projects refresh with the page, so a project added elsewhere can be picked", async (t) => {
@@ -1409,10 +1498,10 @@ test("a Claude worker's transcript reads as its conversation: prompts by who sen
   const { rows, open, dock } = conversationOf(html);
   assert.deepEqual(rows, [
     "You Write hello.py, then count its lines",
-    "Changed a file, ran a command, ran a subagent 1 failed ›",
-    '› Write /repo/hello.py +1 −0 ✓ /repo/hello.py + print("hi")',
-    "› Bash false 1 line exit 1 false Exit code 1",
-    '› Agent Count lines 1 line ✓ Count lines Count the lines of hello.py { "subagent_type": "general-purpose" } Started in the background Background task completed: Agent "Count lines" finished It has 1 line.',
+    "Changed a file, ran a command, ran a subagent 1 failed 3 calls ›",
+    '✓ Write /repo/hello.py +1 −0 1 ms › /repo/hello.py + print("hi")',
+    "✕ Bash false 1 line exit 1 1 ms › false Exit code 1",
+    '✓ Agent Count lines 1 line 1 ms › Count lines Count the lines of hello.py { "subagent_type": "general-purpose" } Started in the background Background task completed: Agent "Count lines" finished It has 1 line.',
     "Counting with wc : wc -l <hello.py>",
     "! A background task failed: Background command failed",
     "Worked for 1m 12s.",
@@ -1464,13 +1553,11 @@ test("a Claude worker that works shows its turn's call running, the turn's clock
   const { rows, dock } = conversationOf(html);
   assert.deepEqual(rows, [
     "You Earlier",
-    "Ran a command ›",
-    "› Bash sleep 1 no result sleep 1 No output.",
+    "– Bash sleep 1 › sleep 1 No output.",
     "Worked for 1s.",
     "You Run the tests",
     "Slash command /compact",
-    "Ran a command 1 running ›",
-    "› Bash npm test running npm test No output yet.",
+    "Bash npm test › npm test No output yet.",
   ], "only a call of the running turn runs");
   assert.match(dock, new RegExp(`^Claude is working 0s · 1 tool this turn nexus attach ${thread.id} Copy claude-opus-5-5 Claude takes it at its next step\\. Steer ⌘↵$`),
     "the turn is timed from when control heard it start, and Claude cannot be aborted");
@@ -1496,10 +1583,31 @@ test("a Claude worker's folds say what their calls did by action, a changed file
   ]);
   const { rows } = conversationOf((await s.call("GET", `/threads/${thread.id}`)).text);
   assert.deepEqual(rows.filter((row) => row.endsWith("›") && !row.startsWith("›")), [
-    "Changed 2 files, ran 3 commands, ran 2 subagents, used 5 other tools ›",
-    "Read 2 files, searched the code 2 times, searched the web ›",
+    "Changed 2 files, ran 3 commands, ran 2 subagents, used 5 other tools 14 calls ›",
+    "Read 2 files, searched the code 2 times, searched the web 6 calls ›",
   ]);
   assert.ok(rows.includes("! Interrupted"), "the interrupt stays between the two folds");
+});
+
+test("a real Claude Code transcript's calls read as one line each: the tool, the subject relative to the checkout, how it went and how long it took", async (t) => {
+  const s = await seeded(t);
+  const fixture = await readFile(new URL("../fixtures/claude-transcript.jsonl", import.meta.url), "utf8");
+  const thread = await claudeThread(s, fixture.split("\n").filter((line) => line !== "").flatMap((line) => parseRecord(line)));
+  const html = (await s.call("GET", `/threads/${thread.id}`)).text;
+  const { rows } = conversationOf(html);
+  assert.ok(rows.includes("Changed a file, ran 3 commands, ran a subagent 2 failed 5 calls ›"));
+  assert.deepEqual(toolLines(rows), [
+    "✓ Write hello.py +1 −0 109 ms",
+    "✓ Bash python3 hello.py 1 line 118 ms",
+    "✕ Bash false 1 line exit 1 24 ms",
+    "✓ Agent Count lines in hello.py 1 line 106 ms",
+    "✕ Bash sleep 40 1 line failed 12 ms",
+    "✓ tool 1 line",
+    "✓ Shell echo bang-mode 1 line 22 ms",
+    "✕ tool 1 line failed",
+    "✓ notes checkpoint/session-state.md 1 line 33 ms",
+  ], "a result whose call the transcript does not hold shows as a bare tool");
+  assert.match(html, /<span class="t-name" title="mcp__notes-compaction__notes">notes<\/span>/);
 });
 
 test("a turn's length reads as a padded clock: seconds, then minutes and seconds, then hours and minutes", async (t) => {
