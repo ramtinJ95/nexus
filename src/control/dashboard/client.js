@@ -302,6 +302,8 @@ document.addEventListener("submit", async (event) => {
   const form = event.target;
   const thread = form.dataset.thread;
   const text = form.elements.text.value;
+  const terminalOnly = form.dataset.claude === undefined || !text.trimStart().startsWith("/") ? null : (await import("./slash.js")).terminalOnlyReason(text, thread);
+  if (terminalOnly !== null) return showError("action-error", new Error(terminalOnly));
   // The notes as they are now, so an edit saved while the send is out is not taken as sent.
   const composed = { composed: review.composed, notes: review.notes.filter((n) => review.composed?.ids.includes(n.id)) };
   // The button pressed, or the one its shortcut stands for, says whether the message steers the run or follows it.
