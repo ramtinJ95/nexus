@@ -1008,7 +1008,7 @@ ${phase.kind === "checking" ? html`<p class="land-note">.nexus/check runs at ${s
   : phase.kind === "rolling-back" ? html`<p class="error">${phase.why} Rolling back to ${short(phase.previous)}.</p>`
   : phase.kind === "landed" ? html`<p class="land-note">Merged as ${short(phase.commit)}${deploys && ", deployed, and every service reports it healthy"}.</p>`
   : phase.kind === "needs-person" && html`<ul class="error">${phase.reasons.map((reason) => html`<li>${reason}</li>`)}</ul>
-<p class="land-note">The merge commit ${short(r.merged!)} is on the default branch, but not deployed. Deploy it from a deployer with nexus deploy ${r.merged!.slice(0, 12)}, or leave the fleet where it is, and cancel the review once nothing more is needed.</p>
+<p class="land-note">The merge commit ${short(r.merged!)} is on the default branch, but not deployed. Deploy it from a deployer with nexus deploy ${r.merged!}, or leave the fleet where it is, and cancel the review once nothing more is needed.</p>
 <div class="land-act need-act">${cancelReview(d.thread.id, r, "btn-ghost")}</div>`}
 </section>`;
   }
