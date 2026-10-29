@@ -1,0 +1,13 @@
+#!/bin/bash
+# Stand-in for journalctl -u <unit> [-n N]: the tail of the log the stand-in systemctl keeps for the unit.
+set -euo pipefail
+unit="" lines=10
+while [ $# -gt 0 ]; do
+  case $1 in
+    -u) unit=$2; shift 2 ;;
+    -n) lines=$2; shift 2 ;;
+    *) shift ;;
+  esac
+done
+case $unit in *.service|*.timer) ;; *) unit=$unit.service ;; esac
+tail -n "$lines" "/var/log/standin-journal/$unit.log" 2>/dev/null || echo "-- No entries --"
