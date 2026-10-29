@@ -338,6 +338,8 @@ document.addEventListener("submit", async (event) => {
 function setOpen(panel) {
   if (panel === null) delete document.body.dataset.open;
   else document.body.dataset.open = panel;
+  // The phone's thread list is hidden until it opens, so the open thread's row is brought into view then.
+  if (panel === "side") document.querySelector(".row.active")?.scrollIntoView({ block: "nearest", inline: "nearest" });
 }
 document.addEventListener("click", (event) => {
   const target = event.target instanceof Element ? event.target : null;
@@ -1340,7 +1342,6 @@ if (changesPane !== null) {
   else changesUnreadable(checkout.facts);
 }
 end?.toEnd();
-document.querySelector(".row.active")?.scrollIntoView({ block: "nearest", inline: "nearest" });
 follow(document.getElementById("convo")?.dataset.stream);
 if (dialog?.dataset.autoopen !== undefined) void openStart(null);
 if (projectDialog?.dataset.autoopen !== undefined) openProject();
@@ -1383,7 +1384,7 @@ const notifications = coordinator((row) => {
     setTimeout(() => toast.remove(), 15000);
   }
 });
-const permission = el("button", { type: "button", className: "btn", textContent: "Enable system notifications" });
+const permission = el("button", { type: "button", className: "btn side-add", textContent: "Enable system notifications" });
 if (window.isSecureContext && "Notification" in window) {
   permission.onclick = async () => { permission.textContent = `Notifications: ${await Notification.requestPermission()}`; };
 } else {
@@ -1391,6 +1392,8 @@ if (window.isSecureContext && "Notification" in window) {
   permission.textContent = "System notifications need HTTPS";
 }
 document.querySelector("aside")?.append(permission);
+// After the button, which shortens the list it joins.
+document.querySelector(".row.active")?.scrollIntoView({ block: "nearest", inline: "nearest" });
 // The events that change a row's attention, its reply or whether it works.
 const rowEvents = ["attention.changed", "thread.turn-ended", "session.turn-started", "session.turn-ended", "session.waiting", "session.ended"];
 // One tab of the browser holds the lock, follows those events and reads the thread list, and the other tabs show the
