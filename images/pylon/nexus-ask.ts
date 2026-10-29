@@ -7,9 +7,10 @@
  * ~/.nexus/asks are:
  *   <key>.call       the call's ID from PreToolUse, which the PermissionRequest hook takes
  *   <key>.waiting    the hook that waits and the ask it waits for, a Waiting
- *   <key>.answer     the answer written for it, which the hook takes
- *   <key>.delivered  the answer the hook handed to Claude, so a retried delivery of it still succeeds
- * Claude Code's PermissionRequest input names no tool call, so the key is the session and the questions' texts.
+ *   <key>.<call>.answer     the answer written for the call, which its hook takes
+ *   <key>.<call>.delivered  the answer the hook handed to Claude, so a retried delivery of it still succeeds
+ * Claude Code's PermissionRequest input names no tool call, so the key is the session and the questions' texts, and
+ * <call> is the SHA-256 of the call's ID, so an answer meant for one call is never another's.
  */
 import { createHash } from "node:crypto";
 import { link, mkdir, readdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
@@ -19,13 +20,14 @@ import { join } from "node:path";
 export const claudeHook = "/usr/local/bin/nexus-claude-hook";
 
 /**
- * What the control plane hands `nexus-claude-hook answer`: the session and question texts that name the ask, and
- * Claude's `answers` and `annotations`. An answer maps each question's text to the picked labels and the person's
- * own answer, joined with ", ".
+ * What the control plane hands `nexus-claude-hook answer`: the session and question texts that name the ask, the
+ * call's ID, and Claude's `answers` and `annotations`. An answer maps each question's text to the picked labels and
+ * the person's own answer, joined with ", ".
  */
 export interface AskAnswer {
   session: string;
   questions: readonly string[];
+  toolUseId: string;
   answers: Readonly<Record<string, string>>;
   annotations: Readonly<Record<string, { notes?: string }>>;
 }
@@ -67,8 +69,9 @@ export function parseAskAnswer(text: string): AskAnswer | null {
   try { value = JSON.parse(text); } catch { return null; }
   const record = (v: unknown, each: (item: unknown) => boolean) => typeof v === "object" && v !== null && !Array.isArray(v) && Object.values(v).every(each);
   const strings = (v: unknown) => record(v, (s) => typeof s === "string");
-  const { session, questions, answers, annotations } = (record(value, () => true) ? value : {}) as Partial<Record<keyof AskAnswer, unknown>>;
+  const { session, questions, toolUseId, answers, annotations } = (record(value, () => true) ? value : {}) as Partial<Record<keyof AskAnswer, unknown>>;
   const valid = typeof session === "string" && Array.isArray(questions) && questions.length > 0 && questions.every((q) => typeof q === "string")
+    && typeof toolUseId === "string"
     && strings(answers) && record(annotations, strings);
   return valid ? value as AskAnswer : null;
 }
@@ -88,7 +91,8 @@ export function askDecision(input: Record<string, unknown>, answer: Pick<AskAnsw
   return { hookSpecificOutput: { hookEventName: "PermissionRequest", decision: { behavior: "allow", updatedInput: { ...input, answers: answer.answers, annotations } } } };
 }
 
-const file = (dir: string, key: string, kind: "call" | "waiting" | "answer" | "delivered") => join(dir, `${key}.${kind}`);
+const file = (dir: string, key: string, kind: "call" | "waiting") => join(dir, `${key}.${kind}`);
+const callFile = (dir: string, key: string, toolUseId: string, kind: "answer" | "delivered") => join(dir, `${key}.${createHash("sha256").update(toolUseId).digest("hex")}.${kind}`);
 const contentOf = (answer: Pick<AskAnswer, "answers" | "annotations">) => JSON.stringify({ answers: answer.answers, annotations: answer.annotations });
 const read = (path: string) => readFile(path, "utf8").catch(() => null);
 
@@ -129,6 +133,12 @@ async function startOf(pid: number): Promise<number | null> {
   return stat === null ? null : Number(stat.slice(stat.lastIndexOf(")") + 2).split(" ")[19]);
 }
 
+/** Renames the file, or answers false when it is not there. */
+const renamed = (from: string, to: string) => rename(from, to).then(() => true, (err: NodeJS.ErrnoException) => {
+  if (err.code === "ENOENT") return false;
+  throw err;
+});
+
 /** Whether the hook that wrote the waiting file still runs. */
 const waits = async (waiting: Waiting) => alive(waiting.pid) && await startOf(waiting.pid) === waiting.start;
 
@@ -147,8 +157,8 @@ export async function recordCall(dir: string, session: string, input: unknown, t
  * Waits, as `nexus-claude-hook ask` does at AskUserQuestion's PermissionRequest, for the ask's answer, and answers it
  * once it is written, or null to leave the dialog to the terminal: at once for an input with no questions, once the
  * waiting file is no longer this hook's, as after PostToolUse removed it when the terminal answered, or once `claude`
- * says Claude is gone. The waiting file takes the call's ID that PreToolUse recorded. An answer or delivery left by an
- * earlier ask of the same questions in the session is removed first, so neither passes for this one's.
+ * says Claude is gone. The waiting file takes the call's ID that PreToolUse recorded, and without one no answer can
+ * name the call. Answers and deliveries left by earlier asks of the same questions in the session are removed first.
  */
 export async function awaitAnswer(
   dir: string, asked: { session: string; input: Record<string, unknown>; pid: number; at: number }, claude: () => boolean,
@@ -158,8 +168,9 @@ export async function awaitAnswer(
   if (texts === null) return null;
   const key = askKey(asked.session, texts);
   await mkdir(dir, { recursive: true });
-  await rm(file(dir, key, "answer"), { force: true });
-  await rm(file(dir, key, "delivered"), { force: true });
+  for (const name of await readdir(dir)) {
+    if (name.startsWith(`${key}.`) && (name.endsWith(".answer") || name.endsWith(".delivered"))) await rm(join(dir, name), { force: true });
+  }
   const call = (jsonOf(await read(file(dir, key, "call"))) as { toolUseId?: unknown } | null)?.toolUseId;
   await rm(file(dir, key, "call"), { force: true });
   const toolUseId = typeof call === "string" ? call : null;
@@ -172,35 +183,35 @@ export async function awaitAnswer(
       await rm(waiting, { force: true });
       return null;
     }
-    const answer = await read(file(dir, key, "answer"));
-    if (answer !== null) {
-      await rename(file(dir, key, "answer"), file(dir, key, "delivered"));
+    if (toolUseId !== null && await renamed(callFile(dir, key, toolUseId, "answer"), callFile(dir, key, toolUseId, "delivered"))) {
+      const answer = await read(callFile(dir, key, toolUseId, "delivered"));
       await rm(waiting, { force: true });
-      return JSON.parse(answer) as Pick<AskAnswer, "answers" | "annotations">;
+      return JSON.parse(answer!) as Pick<AskAnswer, "answers" | "annotations">;
     }
     await sleep();
   }
 }
 
 /**
- * Hands the answer to the hook that waits for its ask, as `nexus-claude-hook answer` does, and answers the exit code.
+ * Hands the answer to the hook that waits for its call, as `nexus-claude-hook answer` does, and answers the exit code.
  * The answer file is created whole and only once, so of two different answers one is refused, while the same answer
  * again, before or after the hook took it, succeeds.
  */
 export async function deliverAnswer(dir: string, answer: AskAnswer): Promise<number> {
   const key = askKey(answer.session, answer.questions);
+  const answerFile = callFile(dir, key, answer.toolUseId, "answer");
   const content = contentOf(answer);
-  if (await read(file(dir, key, "delivered")) === content) return answerExits.delivered;
+  if (await read(callFile(dir, key, answer.toolUseId, "delivered")) === content) return answerExits.delivered;
   const waiter = waitingOf(await read(file(dir, key, "waiting")));
-  if (waiter === null || !await waits(waiter)) return answerExits.nobodyWaits;
-  const temp = `${file(dir, key, "answer")}.${process.pid}`;
+  if (waiter?.toolUseId !== answer.toolUseId || !await waits(waiter)) return answerExits.nobodyWaits;
+  const temp = `${answerFile}.${process.pid}`;
   await writeFile(temp, content);
   try {
-    await link(temp, file(dir, key, "answer"));
+    await link(temp, answerFile);
     return answerExits.delivered;
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code !== "EEXIST") throw err;
-    const there = await read(file(dir, key, "answer")) ?? await read(file(dir, key, "delivered"));
+    const there = await read(answerFile) ?? await read(callFile(dir, key, answer.toolUseId, "delivered"));
     return there === content ? answerExits.delivered : answerExits.answeredOtherwise;
   } finally {
     await rm(temp, { force: true });

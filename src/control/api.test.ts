@@ -3602,7 +3602,7 @@ test("a person answers a Claude worker's AskUserQuestion with a choice per quest
   assert.deepEqual(s.delivered().map(([pylon, c]) => [pylon, c.kind === "exec" && { ...c, argv: c.argv.slice(0, 2) }]), [[s.thread.pylonId, { kind: "exec", argv: ["/usr/local/bin/nexus-claude-hook", "answer"], cwd: "/", timeoutMs: 15_000 }]]);
   const [, command] = s.delivered()[0]!;
   assert.deepEqual(JSON.parse(command.kind === "exec" ? command.argv[2]! : ""), {
-    session: claudeSession, questions: ["Which drink?", "What goes in it?"],
+    session: claudeSession, questions: ["Which drink?", "What goes in it?"], toolUseId: "toolu_1",
     answers: { "Which drink?": "Tea", "What goes in it?": "Milk, Oat cream" }, annotations: { "Which drink?": { notes: "no rush" } },
   });
   assert.notEqual((await s.detail()).attention, "decision");

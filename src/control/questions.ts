@@ -128,6 +128,7 @@ export function askAnswer(ask: ClaudeAsk, choices: readonly Choice[]): AskAnswer
   return {
     session: ask.session,
     questions: asked.map((a) => a.text),
+    toolUseId: ask.toolUseId,
     answers: Object.fromEntries(asked.map(({ text, choice }) => [text, [...choice.picked, ...choice.own === undefined ? [] : [choice.own]].join(", ")])),
     annotations: Object.fromEntries(asked.flatMap(({ text, choice }) => choice.notes === undefined ? [] : [[text, { notes: choice.notes }]])),
   };

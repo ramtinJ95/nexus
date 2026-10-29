@@ -60,10 +60,10 @@ test("the person's choices take an answer per question, picked from its options 
   })) assert.equal(schema.safeParse(choices).success, false, why);
 });
 
-test("Claude gets each answer as the picked labels and the person's own joined as its terminal joins them, notes as annotations, and the summary says all in one line", () => {
+test("Claude gets each answer, for the call that asked, as the picked labels and the person's own joined as its terminal joins them, notes as annotations, and the summary says all in one line", () => {
   const choices = [{ picked: ["Tea"], notes: "no rush" }, { picked: ["Milk"], own: "Oat cream" }];
   assert.deepEqual(askAnswer(ask, choices), {
-    session: "s1", questions: ["Which drink?", "What goes in it?"],
+    session: "s1", questions: ["Which drink?", "What goes in it?"], toolUseId: "toolu_1",
     answers: { "Which drink?": "Tea", "What goes in it?": "Milk, Oat cream" },
     annotations: { "Which drink?": { notes: "no rush" } },
   });

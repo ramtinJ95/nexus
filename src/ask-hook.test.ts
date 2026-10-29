@@ -17,8 +17,8 @@ const input = {
     { question: "What goes in it?", header: "Extras", multiSelect: true, options: [{ label: "Milk", description: "", preview: "milk" }, { label: "Sugar", description: "" }] },
   ],
 };
-const answer = (session: string, extras = "Milk, Oat cream"): AskAnswer => ({
-  session, questions: ["Which drink?", "What goes in it?"],
+const answer = (session: string, { call = "toolu_1", extras = "Milk, Oat cream" } = {}): AskAnswer => ({
+  session, questions: ["Which drink?", "What goes in it?"], toolUseId: call,
   answers: { "Which drink?": "Tea", "What goes in it?": extras }, annotations: { "Which drink?": { notes: "no rush" } },
 });
 
@@ -55,12 +55,14 @@ async function waitingAsk(dir: string, session: string, { call = "toolu_1" as st
   };
 }
 
+const stillWaits = (ask: { waited: Promise<unknown> }) => Promise.race([ask.waited.then(() => false), new Promise<boolean>((resolve) => setImmediate(() => resolve(true)))]);
+
 test("the dashboard's answer reaches the waiting ask as Claude's input with it, a retry of it succeeds, and another answer is refused", async (t) => {
   const dir = await asksDir(t);
   const ask = await waitingAsk(dir, "s1");
   assert.equal(await deliverAnswer(dir, answer("s1")), answerExits.delivered);
   assert.equal(await deliverAnswer(dir, answer("s1")), answerExits.delivered, "the same answer again before the ask takes it");
-  assert.equal(await deliverAnswer(dir, answer("s1", "Sugar")), answerExits.answeredOtherwise);
+  assert.equal(await deliverAnswer(dir, answer("s1", { extras: "Sugar" })), answerExits.answeredOtherwise);
   assert.equal(await deliverAnswer(dir, answer("s2")), answerExits.nobodyWaits, "the same questions in another session");
   await ask.poll();
   const taken = await ask.waited;
@@ -79,7 +81,21 @@ test("the dashboard's answer reaches the waiting ask as Claude's input with it, 
   }, "a single-select pick's preview from Claude's own input, and none for a multi-select one");
   assert.deepEqual(await waitingAsks(dir), [], "an ask that took its answer no longer waits");
   assert.equal(await deliverAnswer(dir, answer("s1")), answerExits.delivered, "the same answer again after Claude has it");
-  assert.equal(await deliverAnswer(dir, answer("s1", "Sugar")), answerExits.nobodyWaits);
+  assert.equal(await deliverAnswer(dir, answer("s1", { extras: "Sugar" })), answerExits.nobodyWaits);
+});
+
+test("an answer to a call the terminal answered finds nobody waiting, though Claude asks the same questions again in another call", async (t) => {
+  const dir = await asksDir(t);
+  const first = await waitingAsk(dir, "s1", { call: "toolu_1" });
+  await forgetAsk(dir, "s1", { ...input, answers: { "Which drink?": "Coffee" } });
+  await first.poll();
+  const second = await waitingAsk(dir, "s1", { call: "toolu_2" });
+  assert.equal(await deliverAnswer(dir, answer("s1", { call: "toolu_1" })), answerExits.nobodyWaits);
+  await second.poll();
+  assert.ok(await stillWaits(second), "the second call does not take the first call's answer");
+  assert.equal(await deliverAnswer(dir, answer("s1", { call: "toolu_2", extras: "Sugar" })), answerExits.delivered);
+  await second.poll();
+  assert.equal((await second.waited)?.answers["What goes in it?"], "Sugar");
 });
 
 test("the asks that wait name the call PreToolUse recorded, and leave out one whose call is unknown and one whose hook is gone", async (t) => {
@@ -118,7 +134,7 @@ test("a turn's start or end, or its session's end, stops the session's waiting a
   await interrupted.poll();
   assert.equal(await interrupted.waited, null);
   assert.deepEqual((await waitingAsks(dir)).map((a) => [a.session, a.toolUseId]), [["s2", "toolu_2"]]);
-  assert.equal(await deliverAnswer(dir, answer("s2")), answerExits.delivered);
+  assert.equal(await deliverAnswer(dir, answer("s2", { call: "toolu_2" })), answerExits.delivered);
 });
 
 test("an ask whose Claude is gone stops waiting, and an answer then finds nobody waiting", async (t) => {
@@ -141,7 +157,7 @@ test("a PermissionRequest takes the call its PreToolUse recorded, so a later ask
 });
 
 test("nexus-claude-hook answer exits 64 for an argument that is not an answer, and 20 with nothing printed when no ask waits, and asks prints a list", async () => {
-  for (const arg of ["", "{", JSON.stringify({ ...answer("s1"), questions: [] }), JSON.stringify({ ...answer("s1"), answers: { "Which drink?": 1 } }), JSON.stringify({ ...answer("s1"), annotations: { "Which drink?": "notes" } })]) {
+  for (const arg of ["", "{", JSON.stringify({ ...answer("s1"), questions: [] }), JSON.stringify({ ...answer("s1"), toolUseId: undefined }), JSON.stringify({ ...answer("s1"), toolUseId: 1 }), JSON.stringify({ ...answer("s1"), answers: { "Which drink?": 1 } }), JSON.stringify({ ...answer("s1"), annotations: { "Which drink?": "notes" } })]) {
     assert.equal(parseAskAnswer(arg), null, arg);
   }
   assert.deepEqual(parseAskAnswer(JSON.stringify(answer("s1"))), answer("s1"));

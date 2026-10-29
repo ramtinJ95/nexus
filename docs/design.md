@@ -530,7 +530,9 @@ takes that file and writes `<key>.waiting`, a JSON record
 from `/proc`, the session, the call's ID or null when no PreToolUse recorded
 one, when it started waiting, and the tool's input. The start time keeps a pid
 that a pause or a killed hook freed for another process from passing for the
-hook. The hook then checks every half second for `<key>.answer`.
+hook. The hook then checks every half second for the answer to its call,
+`<key>.<call>.answer`, where `<call>` is the SHA-256 of the call's ID, so an
+answer meant for one call never reaches another of the same questions.
 
 `nexus-claude-hook asks` prints one JSON array, newest first, of
 `{session, toolUseId, at, input}` for each waiting file whose hook still runs
@@ -538,28 +540,30 @@ and names its call, and exits 0. It leaves out a waiting file over 256 KiB, and
 stops before its output passes 1 MiB. The hook of an image from before prints
 nothing for `asks`, which the control plane reads as no asks.
 
-The control plane writes `<key>.answer` through the probe with
-`nexus-claude-hook answer <json>`, which creates it whole and only once, and
-exits 0 and prints `delivered` when the answer is there or was delivered
-already, 20 when no live hook waits, 21 when another answer was written first,
-and 64 for an argument that is not an answer. The hook then prints a decision
-that allows the call with Claude's own input plus `answers` and `annotations`,
-which closes the dialog and gives the tool its result, and renames the answer to
-`<key>.delivered`. A picked option's preview goes in its annotation from the
-hook's own input, as the terminal puts it, since the transcript cuts long
-strings. When the terminal answers first, Claude neither stops the hook nor
-reads what it prints later, so the call's PostToolUse removes the waiting file,
-and the hook exits with nothing printed, as it also does once Claude is gone.
-That PostToolUse sends its heartbeat even within five minutes of the last, as no
-other heartbeat does, since only the read after it withdraws the question and
-ends the session's wait. The start and end of a turn and the end of a session
-remove the session's waiting files too, before the hook queues their event. No
-dialog of the session shows then, and a dialog the person interrupted may have
-closed without a PostToolUse. A PreToolUse hook that blocks until the answer
-would work too, but it hides the dialog while it waits, so the terminal could no
-longer answer. The hook of an image from before exits 0 for `answer` without
-printing `delivered`, which the control plane takes as an image that cannot take
-answers, as it takes a missing hook's 127.
+The control plane writes the answer through the probe with
+`nexus-claude-hook answer <json>`, whose JSON names the call's ID. It creates
+the answer file whole and only once, and only while the live hook's waiting file
+names that call, and exits 0 and prints `delivered` when the answer is there or
+was delivered already, 20 when no live hook waits for the call, 21 when another
+answer was written first, and 64 for an argument that is not an answer. The hook
+then prints a decision that allows the call with Claude's own input plus
+`answers` and `annotations`, which closes the dialog and gives the tool its
+result, and renames the answer to `<key>.<call>.delivered`. A picked option's
+preview goes in its annotation from the hook's own input, as the terminal puts
+it, since the transcript cuts long strings. When the terminal answers first,
+Claude neither stops the hook nor reads what it prints later, so the call's
+PostToolUse removes the waiting file, and the hook exits with nothing printed,
+as it also does once Claude is gone. That PostToolUse sends its heartbeat even
+within five minutes of the last, as no other heartbeat does, since only the read
+after it withdraws the question and ends the session's wait. The start and end
+of a turn and the end of a session remove the session's waiting files too,
+before the hook queues their event. No dialog of the session shows then, and a
+dialog the person interrupted may have closed without a PostToolUse. A
+PreToolUse hook that blocks until the answer would work too, but it hides the
+dialog while it waits, so the terminal could no longer answer. The hook of an
+image from before exits 0 for `answer` without printing `delivered`, which the
+control plane takes as an image that cannot take answers, as it takes a missing
+hook's 127.
 
 Every Claude in the pylon reads the same hooks, including one a worker starts to
 verify its work, whose turn end would otherwise give the thread a reply while the
