@@ -68,13 +68,14 @@ function fixture(t: import("node:test").TestContext, options: { path?: string; r
   let delivery: "delivered" | "later" = "delivered";
   let delivering = 0;
   let held: { entered: () => void; released: Promise<void> } | null = null;
+  let heldPoll: { skip: number; entered: () => void; released: Promise<void> } | null = null;
   const deployers = new Set(["nLAPTOP"]);
   const woken: ThreadId[] = [];
   const loop = () => reviewLoop({
     registry, harnessModel: "gpt-6-astra",
     github: {
       find: async () => [7],
-      poll: async () => structuredClone(snapshot),
+      async poll() { if (heldPoll !== null && heldPoll.skip-- <= 0) { heldPoll.entered(); await heldPoll.released; } return structuredClone(snapshot); },
       files: async () => files,
       has: async (_, __, path) => path === ".nexus/verify" && verifies,
       async label(_, __, name) { labelCalls.push(name); return labelAnswer(name); },
@@ -130,6 +131,13 @@ function fixture(t: import("node:test").TestContext, options: { path?: string; r
       const released = Promise.withResolvers<void>();
       held = { entered: entered.resolve, released: released.promise };
       return { entered: entered.promise, release() { held = null; released.resolve(); } };
+    },
+    /** Holds every read of the PR from GitHub after the first `skip` until the returned release is called. */
+    holdPolls(skip = 0) {
+      const entered = Promise.withResolvers<void>();
+      const released = Promise.withResolvers<void>();
+      heldPoll = { skip, entered: entered.resolve, released: released.promise };
+      return { entered: entered.promise, release() { heldPoll = null; released.resolve(); } };
     },
     tick(ms: number) { clock += ms; },
     get now() { return clock; },
@@ -1421,6 +1429,25 @@ test("a pass that was stepping a review when the person cancelled it does not sa
   await loop.poll();
   assert.equal(f.review().phase.kind, "cancelled", "the next pass steps from the cancel");
   assert.deepEqual(f.registry.events("0", { kinds: ["review.changed"] }).map((e) => (e.payload.phase as { kind: string }).kind), ["reviewing", "cancelled"]);
+});
+
+test("a message a pass was about to send when the person cancelled the review is never sent", async (t) => {
+  const f = fixture(t);
+  const loop = f.loop();
+  await loop.start(f.builder, { land: null });
+  await loop.poll();
+  f.reply(f.review().reviewer, verdict(f.review(), { verdict: "changes", findings: [serious] }));
+  // The first read is before the send's attempt is saved, the second right before the send.
+  const held = f.holdPolls(1);
+  const pass = loop.poll();
+  await held.entered;
+  assert.notEqual(f.review().outbox?.attempted ?? null, null, "the findings' send is under way while the pass reads GitHub");
+  loop.cancel(f.builder, "nPHONE");
+  held.release();
+  await pass;
+  await loop.poll();
+  assert.equal(f.review().phase.kind, "cancelled");
+  assert.deepEqual(f.sent.map((s) => s.to), [f.review().reviewer], "the builder never got the findings");
 });
 
 test("a message that waits to be delivered is not sent once the PR merged, and a PR closed before the landing merges ends closed", async (t) => {

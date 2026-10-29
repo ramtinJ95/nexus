@@ -732,6 +732,8 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
       const gone = live ? await endedOnGitHub(r) : null;
       if (gone !== null) return gone;
       if (r.outbox.attempted === null) return { ...r, outbox: { ...r.outbox, attempted: now() } };
+      // The save would refuse a step over a land or cancel made while GitHub answered, but the message would be gone.
+      if (JSON.stringify(registry.review(r.builder)) !== JSON.stringify(r)) return r;
       if (await inbox(r.outbox.to === "builder" ? builder! : reviewer!, { id: r.outbox.id, text: r.outbox.text, sender: "review" }) === "later") return r;
       return { ...r, outbox: null, since: r.outbox.attempted };
     }
