@@ -473,7 +473,7 @@ for itself, such as API request copies, context attachments, file-history
 snapshots and the session metadata it writes again on each save (its title, tag, mode,
 agent, worktree and the like), give no entry. They are named in tables in the parser, so a new record type
 shows as a `record` rather than disappearing. Prompts are cut at 32 KiB, replies at
-64 KiB, tool inputs at 4 KiB per string and outputs at 8 KiB. A prompt's or result's `images` (`offset`, `bytes`, `sha256`, `index`) name each image block by the transcript line that holds it and its place among that line's image blocks: each top-level `image` item, then each `image` part of a `tool_result`'s list content, in order. The image route reads that line again and checks its hash, so it never serves another line's bytes. A Read of an image holds its base64 twice, so its record is about 2.7 times the image, which is why a read takes up to 4 MiB.
+64 KiB, tool inputs at 4 KiB per string and outputs at 8 KiB. A prompt's or result's `images` (`offset`, `bytes`, `sha256`, `index`) name each image block by the transcript line that holds it and its place among that line's image blocks: each top-level `image` item, then each `image` part of a `tool_result`'s list content, in order, up to 32 a line. The image route reads that line again and checks its hash, so it never serves another line's bytes. A Read of an image holds its base64 twice, so its record is about 2.7 times the image, which is why a read takes up to 4 MiB.
 
 The registry keeps what was read. `claude_transcripts` holds per thread the session it
 read, the cursor (`byte_offset` past the last complete line, `skipping` while a

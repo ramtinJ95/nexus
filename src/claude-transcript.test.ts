@@ -433,3 +433,17 @@ test("a Read of an image over a megabyte fits one record, where the old 512 KiB 
   const result = all.entries.find((e): e is Extract<ClaudeEntry, { kind: "result" }> => e.kind === "result")!;
   assert.deepEqual(await readTranscriptImage(p.open, session, result.images![0]!, p.root), shot);
 });
+
+test("a record of thousands of images shows its first 32, each read back from its own place", async (t) => {
+  const p = await projects(t);
+  const shots = Array.from({ length: 8_000 }, () => png(16));
+  const results = shots.map((shot, i) => ({ tool_use_id: `toolu_${i}`, type: "tool_result", content: [{ type: "image", source: { type: "base64", data: shot.toString("base64"), media_type: "image/png" } }] }));
+  await writeFile(p.file, `${JSON.stringify({ type: "user", timestamp: "2026-10-28T10:00:01.000Z", message: { role: "user", content: results } })}\n`);
+  const entries = (await p.read(start))!.entries.filter((e): e is Extract<ClaudeEntry, { kind: "result" }> => e.kind === "result");
+  assert.equal(entries.length, 8_000);
+  const images = entries.flatMap((e) => e.images ?? []);
+  assert.deepEqual(images.map((image) => image.index), Array.from({ length: 32 }, (_, i) => i));
+  assert.equal(entries[31]!.images?.length, 1);
+  assert.equal(entries[32]!.images, undefined);
+  assert.deepEqual(await readTranscriptImage(p.open, session, images[31]!, p.root), shots[31]);
+});

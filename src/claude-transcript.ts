@@ -181,9 +181,13 @@ export async function readTranscriptImage(open: OpenPipe, session: string, image
   return isFields(source) && source.type === "base64" && typeof source.data === "string" ? Buffer.from(source.data, "base64") : null;
 }
 
+/** A record of thousands of tiny images, which only a guest that means harm writes, shows its first few. */
+const maxRecordImages = 32;
+
 /**
  * The image blocks of a record's `message.content`, in order: each top-level image item, and each image part of a
- * tool result's list content. `item` is the content item that holds it. A block's place in this list is its index.
+ * tool result's list content, up to maxRecordImages. `item` is the content item that holds it. A block's place in this
+ * list is its index.
  */
 function recordImages(record: unknown): { item: number; block: Fields }[] {
   const content = isFields(record) && isFields(record.message) ? record.message.content : undefined;
@@ -193,7 +197,7 @@ function recordImages(record: unknown): { item: number; block: Fields }[] {
     if (part.type === "image") return [{ item, block: part }];
     if (part.type !== "tool_result" || !Array.isArray(part.content)) return [];
     return part.content.flatMap((inner: unknown) => isFields(inner) && inner.type === "image" ? [{ item, block: inner }] : []);
-  });
+  }).slice(0, maxRecordImages);
 }
 
 /** The pipe's whole output, as it reads `what`. A pipe that passes the deadline or prints past the cap is dropped. */
@@ -404,8 +408,8 @@ function userRecord(r: Fields, at: number, where: Where): ClaudeEntry[] {
   }
   // Claude's metadata for a subagent it started in the background, which tells Claude not to show it.
   const background = isFields(r.toolUseResult) && r.toolUseResult.status === "async_launched";
-  const images = recordImages(r);
-  const imagesOf = (item: number): TranscriptImage[] => images.flatMap((image, index) => image.item === item ? [{ ...where, index }] : []);
+  const located = Map.groupBy(recordImages(r).map(({ item }, index) => ({ item, image: { ...where, index } })), ({ item }) => item);
+  const imagesOf = (item: number): TranscriptImage[] => located.get(item)?.map(({ image }) => image) ?? [];
   const entries: ClaudeEntry[] = [];
   const words: string[] = [];
   const pasted: TranscriptImage[] = [];
