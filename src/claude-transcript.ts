@@ -290,7 +290,7 @@ const systems = table<Parse>({
 });
 
 const attachments = table<Parse>({
-  ...hidden("environment", "model", "deferred_tools_delta", "agent_listing_delta", "mcp_instructions_delta", "skill_listing", "auto_mode", "command_permissions", "instructions", "session_context", "date", "prompt_snapshot", "total_tokens_reminder", "deferred_tools_record", "silent_turn_reminder", "remote_session_change"),
+  ...hidden("environment", "model", "deferred_tools_delta", "agent_listing_delta", "mcp_instructions_delta", "skill_listing", "auto_mode", "command_permissions", "instructions", "session_context", "date", "prompt_snapshot", "total_tokens_reminder", "deferred_tools_record", "silent_turn_reminder", "remote_session_change", "hook_permission_decision"),
   // A prompt or a task's notification that Claude took from its queue in the middle of a turn.
   queued_command: (r, at) => {
     const queued = fields(r.attachment, "attachment");
