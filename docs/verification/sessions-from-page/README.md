@@ -1,6 +1,6 @@
 # Sessions from the thread page
 
-Verified in this thread's pylon on 2026-10-29, on branch `feat/sessions-from-page` against main at `94cf908`, with Claude Code 2.1.310 on Sonnet 5.5, Herdr 0.9.5, Node 26.12.1 and headless Chromium 143 from `@sparticuz/chromium`. No live control plane, node, image or other thread was touched.
+Verified in this thread's pylon on 2026-10-29, on branch `feat/sessions-from-page` at `0e17c27` against main at `94cf908`, with Claude Code 2.1.310 on Sonnet 5.5, Herdr 0.9.5, Node 26.12.1 and headless Chromium 143 from `@sparticuz/chromium`. No live control plane, node, image or other thread was touched.
 
 ## How to rerun
 
@@ -19,7 +19,8 @@ The driver starts a Claude worker in project `drinks`, waits for its first answe
 
 1. Presses New shell, waits for the terminal to attach, and types `echo from the page $((6 * 7))` and Enter into it.
 2. Presses Show in terminal on Claude Code's session, then on the shell's.
-3. Presses Close on the shell's session and OK in the confirm.
+3. Presses Detach, focuses Claude's pane with Herdr, and then presses Attach again and Show in terminal on the shell's session in the same task, so the focus is asked for while the new attach is under way.
+4. Presses Close on the shell's session and OK in the confirm.
 
 `timeline.txt` holds each step, each request the page sent, and which Herdr pane was focused. `guest.log` holds what the probe ran in the pylon, with the pane the attach landed in. `panes-*.txt` hold each pane's screen.
 
@@ -28,11 +29,12 @@ The driver starts a Claude worker in project `drinks`, waits for its first answe
 | Step | main, 94cf908 | this branch |
 |---|---|---|
 | The Sessions list, `01-sessions-*.png` | The sessions and the `herdr --session nexus` line. Nothing to press | New shell, New pi and New Claude, Show in terminal on Claude's session, no Close on it, and a line that says focus moves every attached terminal, `nexus attach` included |
-| New shell, `02-new-shell-desktop.png` | Not possible from the page | `POST .../sessions {"harness":"shell"}`, then the terminal attached with `attach "w2:p1"` in the pylon, the shell's pane, 0.7 s after the press |
+| New shell, `02-new-shell-desktop.png` | Not possible from the page | `POST .../sessions {"harness":"shell"}`, then the terminal attached with `attach "w2:p1"` in the pylon, the shell's pane, 0.5 s after the press |
 | A command in it, `03-shell-ran-desktop.png` | Not possible | The shell printed `from the page 42`, in the page's terminal and in Herdr's pane |
 | Show in terminal on Claude, `04-claude-shown-desktop.png` | Not possible | `POST .../sessions/w1%3Ap1/focus`, and Herdr focused `w1:p1` 0.5 s later. The terminal showed Claude Code's `READY` |
 | Show in terminal on the shell, `05-shell-shown-desktop.png` | Not possible | `POST .../sessions/w2%3Ap1/focus`, and Herdr focused `w2:p1` 0.5 s later |
-| Close on the shell, `06-shell-closed-desktop.png` | Not possible | The confirm read `Close the Shell session "shell"? Its pane closes, and what runs there ends.` OK sent `DELETE .../sessions/w2%3Ap1`. Herdr closed the pane, and the list dropped it on its next poll |
+| Show in terminal while an attach is under way, `06-show-while-attaching-desktop.png` | Not possible | The attach started in Claude's pane, `attach "w1:p1"`, and the page sent the focus 0.1 s later, once Herdr's client drew. Herdr focused `w2:p1`, and still did 3 s later |
+| Close on the shell, `07-shell-closed-desktop.png` | Not possible | The confirm read `Close the Shell session "shell"? Its pane closes, and what runs there ends.` OK sent `DELETE .../sessions/w2%3Ap1`. Herdr closed the pane, and the list dropped it on its next poll |
 
 Main, the Sessions list:
 
@@ -48,7 +50,7 @@ Branch, Show in terminal on Claude Code's session:
 
 Branch, after Close on the shell:
 
-![branch, the shell closed](branch/06-shell-closed-desktop.png)
+![branch, the shell closed](branch/07-shell-closed-desktop.png)
 
 The fonts `@sparticuz/chromium` ships have no monospace face, and this run's `fonts.conf` was not picked up for the terminal, so xterm.js spaces its letters wide in the screenshots.
 

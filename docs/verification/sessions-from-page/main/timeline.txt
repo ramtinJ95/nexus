@@ -1,15 +1,15 @@
 +   0.1s set up /home/verify from <repo>/src/../images/pylon
-+   2.4s the control plane answers after 0.0 s
-+   2.8s nexus --version -> exit 0 (cli-01-version.txt)
-+   3.3s nexus project add drinks --scratch --node node-a --cpus 1 --memory 3 --disk 5 -> exit 0 (cli-02-project-add.txt)
-+   3.7s nexus start --project drinks --title Claude thread --claude This thread only checks Nexus's dashboard. Do nothing els... --model claude-sonnet-5-5 --json -> exit 0 (cli-03-start-claude.txt)
-+  28.8s Claude has answered its prompt after 25.1 s
-+  29.4s the Claude worker runs in pane w1:p1
-+  29.4s the page sent POST /v1/threads/th-71f7ee2addc8/activity {"kind":"human"}
-+  30.4s the page sent POST /v1/threads/th-71f7ee2addc8/seen {"lastReplyAt":1793298793956}
-+  32.2s -> 01-sessions-desktop.png; focused pane w1:p1
-+  32.2s Sessions reads: Sessions 1 Claude Code Claude thread unknown w1:p1 session c889cef8-2614-44b7-a258-4e5a8f9b7f9a Attach from a shell in the pylon herdr --session nexus Copy
-+  35.3s -> 01-sessions-phone.png
-+  35.3s the Sessions list offers no New shell, Show in terminal or Close, so opening, jumping and closing take the CLI and Herdr's keys
-+  35.9s nexus show th-71f7ee2addc8 -> exit 0 (cli-04-show-claude.txt)
-+  36.5s nexus delete th-71f7ee2addc8 -> exit 0 (cli-05-delete-claude.txt)
++   2.4s the control plane answers after 0.1 s
++   3.0s nexus --version -> exit 0 (cli-01-version.txt)
++   3.5s nexus project add drinks --scratch --node node-a --cpus 1 --memory 3 --disk 5 -> exit 0 (cli-02-project-add.txt)
++   4.1s nexus start --project drinks --title Claude thread --claude This thread only checks Nexus's dashboard. Do nothing els... --model claude-sonnet-5-5 --json -> exit 0 (cli-03-start-claude.txt)
++  10.3s Claude has answered its prompt after 6.2 s
++  11.1s the Claude worker runs in pane w1:p1
++  11.3s the page sent POST /v1/threads/th-e0a4863d75eb/activity {"kind":"human"}
++  12.3s the page sent POST /v1/threads/th-e0a4863d75eb/seen {"lastReplyAt":1793299551962}
++  13.9s -> 01-sessions-desktop.png; focused pane w1:p1
++  13.9s Sessions reads: Sessions 1 Claude Code Claude thread unknown w1:p1 session 53f7dc17-0563-4b9e-8559-0891d65f216b Attach from a shell in the pylon herdr --session nexus Copy
++  16.9s -> 01-sessions-phone.png
++  16.9s the Sessions list offers no New shell, Show in terminal or Close, so opening, jumping and closing take the CLI and Herdr's keys
++  17.4s nexus show th-e0a4863d75eb -> exit 0 (cli-04-show-claude.txt)
++  17.9s nexus delete th-e0a4863d75eb -> exit 0 (cli-05-delete-claude.txt)

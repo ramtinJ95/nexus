@@ -1,1 +1,1 @@
-branch: 760876c docs(verification): a rerun script for the thread page's sessions
+branch: 0e17c27 fix(dashboard): focus a session only once the terminal's attach has landed, and close a Claude session when no worker owns it

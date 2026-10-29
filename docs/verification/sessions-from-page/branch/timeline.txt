@@ -1,43 +1,49 @@
-+   0.2s set up /home/verify from <repo>/src/../images/pylon
-+   3.3s the control plane answers after 0.0 s
-+   4.0s nexus --version -> exit 0 (cli-01-version.txt)
-+   4.6s nexus project add drinks --scratch --node node-a --cpus 1 --memory 3 --disk 5 -> exit 0 (cli-02-project-add.txt)
-+   5.1s nexus start --project drinks --title Claude thread --claude This thread only checks Nexus's dashboard. Do nothing els... --model claude-sonnet-5-5 --json -> exit 0 (cli-03-start-claude.txt)
-+  15.5s Claude has answered its prompt after 10.4 s
-+  16.0s the Claude worker runs in pane w1:p1
-+  16.1s the page sent POST /v1/threads/th-415ed39c82f7/activity {"kind":"human"}
-+  18.8s -> 01-sessions-desktop.png; focused pane w1:p1
-+  18.8s Sessions reads: Sessions 1 Claude Code Claude thread unknown w1:p1 session 7662bd58-7e87-430c-934d-e19938994a06 Show in terminal New shell New pi New Claude Show in terminal focuses the pane in Herdr, which moves every terminal attached to the pylon, nexus attach included. Attach from a shell in the pylon herdr --session nexus Copy
-+  22.0s -> 01-sessions-phone.png
-+  22.0s the page sent POST /v1/threads/th-415ed39c82f7/sessions {"harness":"shell"}
-+  22.0s pressed New shell
-+  22.6s the shell's pane is open after 0.5 s
-+  22.6s the page's terminal attaches after 0.0 s
-+  22.7s Herdr focuses the shell's pane w2:p1 after 0.1 s
-+  24.4s -> 02-new-shell-desktop.png; focused pane w2:p1
-+  24.6s typed "echo from the page $((6 * 7))" and Enter into the page's terminal
-+  24.6s the shell printed from the page 42 after 0.0 s
-+  25.2s the page's terminal shows it after 0.5 s
-+  25.9s -> 03-shell-ran-desktop.png; focused pane w2:p1
-+  26.0s herdr panes -> panes-after-shell-ran.txt
-+  27.0s the page sent POST /v1/threads/th-415ed39c82f7/sessions/w1%3Ap1/focus {}
-+  27.0s pressed Show in terminal on Claude Code's session
-+  27.5s Herdr focuses Claude's pane w1:p1 after 0.5 s
-+  27.5s the page's terminal shows Claude Code after 0.0 s
-+  29.4s -> 04-claude-shown-desktop.png; focused pane w1:p1
-+  30.4s the page sent POST /v1/threads/th-415ed39c82f7/sessions/w2%3Ap1/focus {}
-+  30.4s pressed Show in terminal on the shell's session
-+  30.9s Herdr focuses the shell's pane w2:p1 after 0.5 s
-+  30.9s the page's terminal shows the shell again after 0.0 s
-+  32.3s -> 05-shell-shown-desktop.png; focused pane w2:p1
-+  33.2s Sessions reads: Sessions 2 Claude Code Claude thread idle w1:p1 session 7662bd58-7e87-430c-934d-e19938994a06 Show in terminal Shell shell unknown w2:p1 Show in terminal Close New shell New pi New Claude Show in terminal focuses the pane in Herdr, which moves every terminal attached to the pylon, nexus attach included. Attach from a shell in the pylon herdr --session nexus Copy
-+  33.2s the page asked: "Close the Shell session \"shell\"? Its pane closes, and what runs there ends.", and the person pressed OK
-+  33.2s the page sent DELETE /v1/threads/th-415ed39c82f7/sessions/w2%3Ap1 {}
-+  33.2s pressed Close on the shell's session
-+  33.4s Herdr closed the shell's pane after 0.1 s
-+  36.4s the Sessions list drops the shell after 3.1 s
-+  37.6s -> 06-shell-closed-desktop.png; focused pane w1:p1
-+  37.6s Sessions reads: Sessions 1 Claude Code Claude thread idle w1:p1 session 7662bd58-7e87-430c-934d-e19938994a06 Show in terminal New shell New pi New Claude Show in terminal focuses the pane in Herdr, which moves every terminal attached to the pylon, nexus attach included. Attach from a shell in the pylon herdr --session nexus Copy
-+  37.6s herdr panes -> panes-after-close.txt
-+  38.3s nexus show th-415ed39c82f7 -> exit 0 (cli-04-show-claude.txt)
-+  38.8s nexus delete th-415ed39c82f7 -> exit 0 (cli-05-delete-claude.txt)
++   0.1s set up /home/verify from <repo>/src/../images/pylon
++   2.3s the control plane answers after 0.0 s
++   2.7s nexus --version -> exit 0 (cli-01-version.txt)
++   3.2s nexus project add drinks --scratch --node node-a --cpus 1 --memory 3 --disk 5 -> exit 0 (cli-02-project-add.txt)
++   3.7s nexus start --project drinks --title Claude thread --claude This thread only checks Nexus's dashboard. Do nothing els... --model claude-sonnet-5-5 --json -> exit 0 (cli-03-start-claude.txt)
++  10.7s Claude has answered its prompt after 7.0 s
++  11.1s the Claude worker runs in pane w1:p1
++  11.2s the page sent POST /v1/threads/th-a4c374a2a1bc/activity {"kind":"human"}
++  13.7s -> 01-sessions-desktop.png; focused pane w1:p1
++  13.7s Sessions reads: Sessions 1 Claude Code Claude thread unknown w1:p1 session c5cceffe-793a-43ba-889f-bc08a823c622 Show in terminal New shell New pi New Claude Show in terminal focuses the pane in Herdr, which moves every terminal attached to the pylon, nexus attach included. Attach from a shell in the pylon herdr --session nexus Copy
++  16.6s -> 01-sessions-phone.png
++  16.6s the page sent POST /v1/threads/th-a4c374a2a1bc/sessions {"harness":"shell"}
++  16.6s pressed New shell
++  17.1s the shell's pane is open after 0.5 s
++  17.1s the page's terminal attaches after 0.0 s
++  17.1s Herdr focuses the shell's pane w2:p1 after 0.0 s
++  18.8s -> 02-new-shell-desktop.png; focused pane w2:p1
++  19.1s typed "echo from the page $((6 * 7))" and Enter into the page's terminal
++  19.1s the shell printed from the page 42 after 0.0 s
++  19.6s the page's terminal shows it after 0.5 s
++  20.2s -> 03-shell-ran-desktop.png; focused pane w2:p1
++  20.4s herdr panes -> panes-after-shell-ran.txt
++  21.3s the page sent POST /v1/threads/th-a4c374a2a1bc/sessions/w1%3Ap1/focus {}
++  21.3s pressed Show in terminal on Claude Code's session
++  21.8s Herdr focuses Claude's pane w1:p1 after 0.5 s
++  21.8s the page's terminal shows Claude Code after 0.0 s
++  23.7s -> 04-claude-shown-desktop.png; focused pane w1:p1
++  24.8s the page sent POST /v1/threads/th-a4c374a2a1bc/sessions/w2%3Ap1/focus {}
++  24.8s pressed Show in terminal on the shell's session
++  25.3s Herdr focuses the shell's pane w2:p1 after 0.5 s
++  25.3s the page's terminal shows the shell again after 0.0 s
++  26.5s -> 05-shell-shown-desktop.png; focused pane w2:p1
++  26.6s the page's terminal detaches after 0.0 s
++  27.4s pressed Attach again and, before it attached, Show in terminal on the shell's session
++  27.5s the page sent POST /v1/threads/th-a4c374a2a1bc/sessions/w2%3Ap1/focus {}
++  28.0s Herdr focuses the shell's pane w2:p1 after 0.6 s
++  31.0s 3 s later Herdr's focused pane is w2:p1
++  31.2s -> 06-show-while-attaching-desktop.png; focused pane w2:p1
++  32.1s Sessions reads: Sessions 2 Claude Code Claude thread idle w1:p1 session c5cceffe-793a-43ba-889f-bc08a823c622 Show in terminal Shell shell unknown w2:p1 Show in terminal Close New shell New pi New Claude Show in terminal focuses the pane in Herdr, which moves every terminal attached to the pylon, nexus attach included. Attach from a shell in the pylon herdr --session nexus Copy
++  32.1s the page asked: "Close the Shell session \"shell\"? Its pane closes, and what runs there ends.", and the person pressed OK
++  32.1s the page sent DELETE /v1/threads/th-a4c374a2a1bc/sessions/w2%3Ap1 {}
++  32.1s pressed Close on the shell's session
++  32.8s Herdr closed the shell's pane after 0.6 s
++  36.3s the Sessions list drops the shell after 3.5 s
++  37.4s -> 07-shell-closed-desktop.png; focused pane w1:p1
++  37.5s Sessions reads: Sessions 1 Claude Code Claude thread idle w1:p1 session c5cceffe-793a-43ba-889f-bc08a823c622 Show in terminal New shell New pi New Claude Show in terminal focuses the pane in Herdr, which moves every terminal attached to the pylon, nexus attach included. Attach from a shell in the pylon herdr --session nexus Copy
++  37.5s herdr panes -> panes-after-close.txt
++  38.1s nexus show th-a4c374a2a1bc -> exit 0 (cli-04-show-claude.txt)
++  38.5s nexus delete th-a4c374a2a1bc -> exit 0 (cli-05-delete-claude.txt)

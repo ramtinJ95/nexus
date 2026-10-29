@@ -1,7 +1,7 @@
 == pane w1:p1, focused
 ● READY
 
-✻ Crunched for 5s · done 6:33 PM
+✻ Sautéed for 2s · done 6:46 PM
 
 ────────────────────────────────────────────────────────
 ❯
