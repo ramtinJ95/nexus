@@ -22,6 +22,8 @@ export async function buildDashboard(out = outdir): Promise<Metafile> {
     entryNames: "[name]",
     chunkNames: "[name]-[hash]",
     metafile: true,
+    // The terminal's stylesheet goes into the page with the chunk that needs it.
+    loader: { ".css": "text" },
     logLevel: "warning",
   });
   return metafile;
