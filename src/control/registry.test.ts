@@ -994,7 +994,7 @@ test("a turn running before turn starts were recorded has no known start", async
   const db = new DatabaseSync(path);
   const version = db.prepare("PRAGMA user_version").get()!.user_version as number;
   db.exec(`UPDATE threads SET agent_turn_running = 1; ALTER TABLE threads DROP COLUMN placement; ALTER TABLE threads DROP COLUMN setup; ALTER TABLE threads DROP COLUMN agent_turn_started_at; ALTER TABLE session_activity DROP COLUMN started_at; DROP TABLE reviews; DROP TABLE reviewed_prs;
-    ALTER TABLE claude_workers DROP COLUMN turn_session; ALTER TABLE claude_workers DROP COLUMN turn_at; ALTER TABLE session_activity DROP COLUMN message; ALTER TABLE session_order DROP COLUMN event_ids; PRAGMA user_version = ${version - 19}`);
+    ALTER TABLE claude_workers DROP COLUMN turn_session; ALTER TABLE claude_workers DROP COLUMN turn_at; ALTER TABLE session_activity DROP COLUMN message; ALTER TABLE session_order DROP COLUMN event_ids; PRAGMA user_version = ${version - 20}`);
   db.close();
   const registry = openRegistry(path, () => now);
   t.after(() => registry.close());
@@ -1352,7 +1352,7 @@ test("a Claude worker's AskUserQuestion call is a question while its dialog wait
   assert.deepEqual(asks(), [["ask-t3", null]]);
 });
 
-test("an answered ask stays answered whatever follows, and a withdrawn one stops needing a decision", (t) => {
+test("an answered ask stays answered whatever follows, and a withdrawn one stops needing a decision and is not asked again", (t) => {
   const registry = seeded(tempDb());
   t.after(() => registry.close());
   const { report, append, asks } = claudeAsking(registry);
@@ -1361,16 +1361,19 @@ test("an answered ask stays answered whatever follows, and a withdrawn one stops
   registry.answerQuestion("ask-t1", { option: "Drink: Tea", by: "nLAPTOP" as TailnetNodeId, at: 55, choices: [{ picked: ["Tea"] }] });
   append(answered("t1", 60));
   report("session.turn-ended", 70);
-  registry.withdrawQuestion("ask-t1");
+  registry.withdrawAsk("ask-t1");
   assert.deepEqual(asks(), [["ask-t1", "Drink: Tea"]]);
   assert.deepEqual(registry.question("ask-t1")!.answer!.choices, [{ picked: ["Tea"] }]);
 
   report("session.turn-started", 80);
   append(askCall("t2", 90));
   assert.equal(registry.attention(threadId), "decision");
-  registry.withdrawQuestion("ask-t2");
+  registry.withdrawAsk("ask-t2");
   assert.deepEqual(asks(), [["ask-t1", "Drink: Tea"]]);
   assert.notEqual(registry.attention(threadId), "decision");
+  append();
+  report("session.waiting", 95);
+  assert.deepEqual(asks(), [["ask-t1", "Drink: Tea"]], "though the transcript still shows no result for it");
 });
 
 test("a write waits while another process, such as a second open of the registry, holds its write lock", async (t) => {
@@ -1404,7 +1407,7 @@ test("a registry made when landing asked for a passkey keeps neither passkey tab
   const db = new DatabaseSync(path);
   const version = db.prepare("PRAGMA user_version").get()!.user_version as number;
   db.exec(`CREATE TABLE passkeys (id TEXT PRIMARY KEY, credential_id TEXT NOT NULL UNIQUE, record TEXT NOT NULL) STRICT;
-    CREATE TABLE passkey_codes (hash TEXT PRIMARY KEY, expires_at INTEGER NOT NULL, used_at INTEGER) STRICT; PRAGMA user_version = ${version - 9}`);
+    CREATE TABLE passkey_codes (hash TEXT PRIMARY KEY, expires_at INTEGER NOT NULL, used_at INTEGER) STRICT; PRAGMA user_version = ${version - 10}`);
   db.close();
   openRegistry(path).close();
   const reopened = new DatabaseSync(path);
@@ -1445,7 +1448,7 @@ test("the migration that adds pipeline items turns the pipeline on for project n
   const rewind = () => {
     const db = new DatabaseSync(path);
     const version = db.prepare("PRAGMA user_version").get()!.user_version as number;
-    db.exec(`DROP TABLE pipeline_items; PRAGMA user_version = ${version - 3}`);
+    db.exec(`DROP TABLE pipeline_items; PRAGMA user_version = ${version - 4}`);
     db.close();
   };
   rewind();
@@ -1471,7 +1474,7 @@ test("judgments begin at the newest event, so failures from before are never jud
   const rewind = () => {
     const db = new DatabaseSync(path);
     const version = db.prepare("PRAGMA user_version").get()!.user_version as number;
-    db.exec(`DROP TABLE judgments; DROP TABLE judgment_since; PRAGMA user_version = ${version - 2}`);
+    db.exec(`DROP TABLE judgments; DROP TABLE judgment_since; PRAGMA user_version = ${version - 3}`);
     db.close();
   };
   rewind();
@@ -1483,7 +1486,7 @@ test("judgments begin at the newest event, so failures from before are never jud
   upgraded.close();
   const db = new DatabaseSync(path);
   const version = db.prepare("PRAGMA user_version").get()!.user_version as number;
-  db.exec(`PRAGMA user_version = ${version - 2}`);
+  db.exec(`PRAGMA user_version = ${version - 3}`);
   db.close();
   const again = openRegistry(path);
   t.after(() => again.close());

@@ -367,6 +367,10 @@ const migrations: readonly string[] = [
   // Each planning thread's token and what the control plane read from it and told it. It touches nothing an earlier
   // migration made, so a registry rewound past it applies it again unchanged.
   `CREATE TABLE IF NOT EXISTS planning_threads (thread TEXT PRIMARY KEY REFERENCES threads (id), record TEXT NOT NULL) STRICT;`,
+  // The questions of Claude workers' AskUserQuestion calls that an answer found no hook waiting for, which the
+  // transcript cannot tell, so they are never asked again. It touches nothing an earlier migration made, so a registry
+  // rewound past it applies it again unchanged.
+  `CREATE TABLE IF NOT EXISTS withdrawn_asks (id TEXT PRIMARY KEY) STRICT;`,
 ];
 
 type Row = Record<string, unknown>;
@@ -623,7 +627,7 @@ export function openRegistry(path: string, clock = Date.now) {
    * Asks a question for each of the Claude worker's AskUserQuestion calls that waits for an answer, and withdraws each
    * unanswered one that no longer does. A call waits while it has no result, a turn of the worker's session is live or
    * waiting, and no later turn of that session started, so the call of a turn a pause killed never opens again. Other
-   * sessions' turns, such as the person's own Claude in the pylon, leave it be.
+   * sessions' turns, such as the person's own Claude in the pylon, leave it be. One withdrawAsk withdrew stays withdrawn.
    */
   function reconcileAsks(thread: ThreadId) {
     const worker = sql(`SELECT w.session, CASE WHEN w.turn_session = w.session THEN w.turn_at END AS turn_at FROM claude_workers w
@@ -636,7 +640,10 @@ export function openRegistry(path: string, clock = Date.now) {
       const questions = askedIn(entry);
       return questions === null ? [] : [askRecord(thread, { session: worker!.session as string, toolUseId: entry.id, questions }, entry.at)];
     });
-    for (const question of open) sql("INSERT OR IGNORE INTO questions (id, thread, record) VALUES (?, ?, ?)").run(question.id, thread, JSON.stringify({ ...question, answer: null }));
+    for (const question of open) {
+      sql("INSERT OR IGNORE INTO questions (id, thread, record) SELECT ?, ?, ? WHERE NOT EXISTS (SELECT 1 FROM withdrawn_asks WHERE id = ?)")
+        .run(question.id, thread, JSON.stringify({ ...question, answer: null }), question.id);
+    }
     sql(`DELETE FROM questions WHERE thread = ? AND json_extract(record, '$.ask') IS NOT NULL AND json_extract(record, '$.answer') IS NULL
       AND id NOT IN (SELECT value FROM json_each(?))`).run(thread, JSON.stringify(open.map((q) => q.id)));
   }
@@ -1063,11 +1070,13 @@ export function openRegistry(path: string, clock = Date.now) {
       });
     },
     question: (id: string): Question | null => questionRecord(id),
-    /** Withdraws a question nobody waits for an answer to any more, such as an ask its terminal answered. An answered one stays. */
-    withdrawQuestion(id: string) {
+    /** Withdraws for good an ask whose dialog no hook waits on any more, such as one its terminal answered. An answered one stays. */
+    withdrawAsk(id: string) {
       transaction(() => {
-        const thread = sql("DELETE FROM questions WHERE id = ? AND json_extract(record, '$.answer') IS NULL RETURNING thread").get(id)?.thread;
-        if (thread !== undefined) updateAttention(thread as ThreadId);
+        const thread = sql("DELETE FROM questions WHERE id = ? AND json_extract(record, '$.ask') IS NOT NULL AND json_extract(record, '$.answer') IS NULL RETURNING thread").get(id)?.thread;
+        if (thread === undefined) return;
+        sql("INSERT OR IGNORE INTO withdrawn_asks (id) VALUES (?)").run(id);
+        updateAttention(thread as ThreadId);
       });
     },
     questions: (thread: ThreadId): Question[] => sql("SELECT record FROM questions WHERE thread = ? ORDER BY json_extract(record, '$.askedAt'), id").all(thread).map((r) => json<Question>(r.record)),
