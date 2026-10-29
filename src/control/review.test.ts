@@ -13,7 +13,7 @@ import { holdRule, landingHolds } from "./policy.ts";
 import { agentReplies, humanLabel, reviewerCaller, reviewLoop, reviewPrefix, type Review } from "./review.ts";
 import { agentInbox } from "./inbox.ts";
 import { fakeHarness } from "./fake-harness.ts";
-import { transcriptStart } from "../claude-transcript.ts";
+import { transcriptStart, type ClaudeEntry } from "../claude-transcript.ts";
 import { checkCaller, verifyCaller, type CheckState } from "./gate.ts";
 import type { StartRequest } from "./threads.ts";
 import { HttpError } from "./http-error.ts";
@@ -132,12 +132,33 @@ function fixture(t: import("node:test").TestContext, options: { path?: string; r
       return { entered: entered.promise, release() { held = null; released.resolve(); } };
     },
     tick(ms: number) { clock += ms; },
+    get now() { return clock; },
     review: () => registry.review(builder)!,
     watched(state: "open" | "merged" | "closed") { registry.savePrWatch(builder, { links: [{ pr: { ...pr, state }, seen: [], failed: false }], commentWakes: 0, pending: null, error: null }); },
     attention: () => registry.events("0", { kinds: ["attention.changed"], thread: builder }).map((e) => e.payload.attention),
     /** The statuses of the builder and of the review's reviewer. */
     statuses: () => [builder, registry.review(builder)!.reviewer].map((id) => registry.thread(id)!.status),
   };
+}
+
+/** A read of the Claude builder's transcript that finds `entries`, and the pylon's reports of `kinds` for its session. */
+function claudeRead(f: ReturnType<typeof fixture>, entries: ClaudeEntry[], kinds: readonly ("session.turn-started" | "session.heartbeat")[]) {
+  const from = f.registry.claudeTranscript(f.builder)?.cursor ?? transcriptStart;
+  f.registry.appendClaudeRead(f.builder, { session: "s1", from, entries, cursor: { ...from, offset: from.offset + 1 }, reset: false, readAt: f.now });
+  for (const kind of kinds) {
+    f.registry.reportSession(node, { sequence: (f.registry.eventReceipt(node) ?? 0) + 1, time: f.now, pylon: "pylon-th-builder" as PylonId, event: { kind, session: "s1", at: f.now } });
+  }
+}
+
+/**
+ * A Claude builder's turn that ends in its transcript while a background shell keeps it working, as the pylon's Stop
+ * hook reports it with heartbeats and no turn end.
+ */
+function heldTurn(f: ReturnType<typeof fixture>, text: string) {
+  f.replies.set(f.builder, [...f.replies.get(f.builder) ?? [], text]);
+  f.tick(1_000);
+  claudeRead(f, [{ kind: "reply", at: f.now, text }, { kind: "turn", at: f.now, durationMs: 60_000 }], ["session.turn-started", "session.heartbeat"]);
+  f.tick(1_000);
 }
 
 const archive = (registry: ReturnType<typeof openRegistry>, id: ThreadId) => registry.setThreadStatus(id, "archived");
@@ -220,6 +241,111 @@ test("rounds that run out, and agents that never answer in the block, end with t
   assert.equal(g.sent.length, 3, "a reply in the old turn's shape is not answered twice");
   assert.equal((g.review().phase as { label?: unknown }).label, undefined, "only rounds that ran out label the PR");
   assert.deepEqual(g.labelCalls, []);
+});
+
+test("a Claude builder whose turn ends with a background shell running is read from its transcript, though it stays working", async (t) => {
+  const f = fixture(t);
+  const loop = f.loop();
+  await loop.start(f.builder, { land: null });
+  await loop.poll();
+  f.reply(f.review().reviewer, verdict(f.review(), { verdict: "changes", findings: [serious] }));
+  await loop.poll();
+  assert.equal(f.review().phase.kind, "fixing");
+  f.snapshot = { ...f.snapshot, detail: { ...f.snapshot.detail, head: head2 } };
+  heldTurn(f, answers(f.review(), [{ id: "F1", action: "fixed", reason: "Added a 5-minute TTL." }]));
+  assert.equal(f.registry.thread(f.builder)!.working, true, "heartbeats keep the builder working");
+  assert.equal(f.registry.thread(f.builder)!.lastReplyAt, null, "no turn end was reported");
+  await loop.poll();
+  assert.equal(f.review().phase.kind, "reviewing");
+  assert.deepEqual(f.review().rounds[0]!.answers, [{ id: "F1", action: "fixed", reason: "Added a 5-minute TTL." }]);
+  assert.match(f.sent.at(-1)!.message.text, /F1: fixed\. Added a 5-minute TTL\./);
+});
+
+test("a Claude builder whose turn ends with a background shell running and no answer gets a reminder after the grace", async (t) => {
+  const f = fixture(t);
+  const loop = f.loop();
+  await loop.start(f.builder, { land: null });
+  await loop.poll();
+  f.reply(f.review().reviewer, verdict(f.review(), { verdict: "changes", findings: [serious] }));
+  await loop.poll();
+  const sent = f.sent.length;
+  heldTurn(f, "Started the tests in the background.");
+  await loop.poll();
+  assert.equal(f.sent.length, sent, "no reminder within the grace a transcript may lag the turn's end by");
+  f.tick(60_000);
+  await loop.poll();
+  assert.equal(f.sent.length, sent + 1);
+  assert.equal(f.sent.at(-1)!.to, f.builder);
+  assert.match(f.sent.at(-1)!.message.text, /no nexus-review-answers block/);
+  assert.equal(f.review().nudges, 1);
+  assert.equal(f.registry.thread(f.builder)!.working, true);
+
+  f.tick(3 * 60 * 60_000 + 1);
+  await loop.poll();
+  assert.deepEqual((f.review().phase as { reasons: string[] }).reasons, ["The builder gave no answer Nexus could read within 3 hours in round 1."]);
+});
+
+test("a Claude builder that starts a newer turn after a held one gets no reminder until that turn ends too", async (t) => {
+  const f = fixture(t);
+  const loop = f.loop();
+  await loop.start(f.builder, { land: null });
+  await loop.poll();
+  f.reply(f.review().reviewer, verdict(f.review(), { verdict: "changes", findings: [serious] }));
+  await loop.poll();
+  const sent = f.sent.length;
+  heldTurn(f, "Started the tests in the background.");
+  claudeRead(f, [{ kind: "task", at: f.now, toolUseId: "b1", status: "completed", summary: "Background command finished", result: null }], ["session.turn-started"]);
+  f.tick(61_000);
+  await loop.poll();
+  assert.equal(f.sent.length, sent, "no reminder while the turn the finished shell started runs");
+  heldTurn(f, "The tests pass.");
+  f.tick(60_000);
+  await loop.poll();
+  assert.equal(f.sent.length, sent + 1);
+  assert.match(f.sent.at(-1)!.message.text, /no nexus-review-answers block/);
+});
+
+test("a Claude builder that answers it fixed findings in a turn that has not ended is waited on, and asks the person after the hours", async (t) => {
+  const f = fixture(t);
+  const loop = f.loop();
+  await loop.start(f.builder, { land: null });
+  await loop.poll();
+  f.reply(f.review().reviewer, verdict(f.review(), { verdict: "changes", findings: [serious] }));
+  await loop.poll();
+  const sent = f.sent.length;
+  const text = answers(f.review(), [{ id: "F1", action: "fixed", reason: "Added a 5-minute TTL." }]);
+  f.replies.set(f.builder, [text]);
+  f.tick(1_000);
+  claudeRead(f, [{ kind: "reply", at: f.now, text }], ["session.turn-started"]);
+  f.tick(20 * 60_000);
+  await loop.poll();
+  assert.equal(f.review().phase.kind, "fixing");
+  assert.equal(f.sent.length, sent, "no reminder before the turn ends");
+  f.tick(3 * 60 * 60_000);
+  await loop.poll();
+  assert.deepEqual((f.review().phase as { reasons: string[] }).reasons, ["The builder gave no answer Nexus could read within 3 hours in round 1."]);
+});
+
+test("a fixed failed check answered in a Claude builder's newer turn waits for that turn's end and push, not an earlier held turn's", async (t) => {
+  const f = fixture(t);
+  f.check = { kind: "done", passed: false, output: "1 test failed" };
+  const loop = await approved(f, null);
+  assert.equal(f.review().phase.kind, "fixing");
+  heldTurn(f, "Started the tests in the background.");
+  claudeRead(f, [{ kind: "task", at: f.now, toolUseId: "b1", status: "completed", summary: "Background command finished", result: null }], ["session.turn-started"]);
+  f.tick(11 * 60_000);
+  const text = answers(f.review(), [{ id: "CHECK", action: "fixed", reason: "Fixed the failing test." }]);
+  f.replies.set(f.builder, [...f.replies.get(f.builder) ?? [], text]);
+  claudeRead(f, [{ kind: "reply", at: f.now, text }], []);
+  f.tick(1_000);
+  await loop.poll();
+  assert.equal(f.review().phase.kind, "fixing", "the turn that answered still runs, so its push may still come");
+  f.check = { kind: "done", passed: true, output: "ok" };
+  f.snapshot = { ...f.snapshot, detail: { ...f.snapshot.detail, head: head2 } };
+  heldTurn(f, "Pushed.");
+  await loop.poll();
+  assert.equal(f.review().phase.kind, "reviewing");
+  assert.equal(f.review().rounds[1]!.head, head2);
 });
 
 test("a message the inbox cannot deliver yet is sent again under the same request ID, never twice", async (t) => {
@@ -1180,7 +1306,7 @@ test("a review that lands still sees a merge made outside it through, and a real
   await silent.poll();
   g.tick(4 * 60 * 60_000);
   await silent.poll();
-  assert.deepEqual(g.review().phase, { kind: "needs-person", reasons: ["The reviewer gave no answer within 3 hours in round 1."] });
+  assert.deepEqual(g.review().phase, { kind: "needs-person", reasons: ["The reviewer gave no answer Nexus could read within 3 hours in round 1."] });
   assert.equal(g.attention().at(-1), "decision");
 });
 
@@ -1695,7 +1821,7 @@ test("a review that stopped at approval reviews a head pushed after it in a new 
   assert.deepEqual(f.merges, []);
 });
 
-test("a held review with no round left, or one the loop gave up on, names the head pushed after it and starts no round", async (t) => {
+test("a held review with no round left, or one held with the reviewer's changes open, names the head pushed after it and starts no round", async (t) => {
   const f = fixture(t);
   f.files = [{ path: "src/control/registry.ts", previous: null, patch: "" }];
   const loop = f.loop();
@@ -1717,19 +1843,63 @@ test("a held review with no round left, or one the loop gave up on, names the he
   assert.throws(() => loop.land(f.builder, "nLAPTOP", head1), { status: 409 }, "the old head is no longer offered for landing");
 
   const g = fixture(t);
-  g.check = { kind: "done", passed: false, output: "1 test failed" };
-  const gave = await approved(g, null);
-  g.reply(g.builder, answers(g.review(), [{ id: "CHECK", action: "rejected", reason: "The test is flaky." }]));
+  const gave = g.loop();
+  await gave.start(g.builder, { land: null });
   await gave.poll();
-  const reasons = [`.nexus/check failed at ${head1}, and the builder pushed nothing for it: The test is flaky.`, "The check's output:\n1 test failed"];
+  g.reply(g.review().reviewer, verdict(g.review(), { verdict: "changes", findings: [serious] }));
+  await gave.poll();
+  g.reply(g.builder, answers(g.review(), [{ id: "F1", action: "rejected", reason: "" }]));
+  await gave.poll();
+  g.reply(g.builder, "I think the cache is fine.");
+  await gave.poll();
+  g.reply(g.builder, "Still fine.");
+  await gave.poll();
+  const reasons = ["The builder ended 3 turns in a row without an answer Nexus could read, in round 1."];
   assert.deepEqual(g.review().phase, { kind: "needs-person", reasons });
   pushed(g, head2);
   await gave.poll();
   await gave.poll();
   assert.deepEqual((g.review().phase as { reasons: string[] }).reasons, [...reasons,
-    `The pull request's head moved to ${head2} after this review was held, so none of its rounds reviewed that commit. Run nexus review ${g.builder} to review it.`]);
+    `The pull request's head moved to ${head2} after this review was held, so none of its rounds reviewed that commit. Run nexus review ${g.builder} to review it.`], "changes the reviewer requested stay the person's");
   assert.equal(g.review().rounds.length, 1);
   assert.deepEqual(g.labelCalls, []);
+});
+
+test("a review held after an approval for a conflict the builder did not rebase, or a check it pushed nothing for, reviews a head pushed after the hold", async (t) => {
+  const f = fixture(t);
+  const loop = f.loop();
+  await loop.start(f.builder, { land: "nLAPTOP" });
+  await loop.poll();
+  conflicting(f);
+  f.reply(f.review().reviewer, verdict(f.review(), {}));
+  await loop.poll();
+  f.reply(f.builder, answers(f.review(), [{ id: "CONFLICT", action: "rejected", reason: "I will rebase once main settles." }]));
+  await loop.poll();
+  assert.deepEqual(f.review().phase, { kind: "needs-person", reasons: ["The branch conflicts with main, and the builder did not rebase it: I will rebase once main settles."] });
+  pushed(f, head2);
+  await loop.poll();
+  assert.equal(f.review().phase.kind, "reviewing");
+  assert.deepEqual(f.review().rounds.map((round) => round.head), [head1, head2]);
+  assert.equal(f.sent.at(-1)!.to, f.review().reviewer);
+  assert.match(f.sent.at(-1)!.message.text, new RegExp(`git range-diff origin/main ${head1} ${head2}`));
+  f.reply(f.review().reviewer, verdict(f.review(), {}));
+  await loop.poll();
+  assert.deepEqual(f.merges, [head2], "the rebased head lands as the review asked");
+
+  const g = fixture(t);
+  g.check = { kind: "done", passed: false, output: "1 test failed" };
+  const gave = await approved(g, null);
+  g.reply(g.builder, answers(g.review(), [{ id: "CHECK", action: "rejected", reason: "The test is flaky." }]));
+  await gave.poll();
+  assert.deepEqual(g.review().phase, { kind: "needs-person", reasons: [`.nexus/check failed at ${head1}, and the builder pushed nothing for it: The test is flaky.`, "The check's output:\n1 test failed"] });
+  g.check = { kind: "done", passed: true, output: "ok" };
+  pushed(g, head2);
+  await gave.poll();
+  assert.equal(g.review().phase.kind, "reviewing");
+  g.reply(g.review().reviewer, verdict(g.review(), {}));
+  await gave.poll();
+  assert.deepEqual(g.review().phase, { kind: "approved" });
+  assert.deepEqual(g.review().rounds[1]!.check, { passed: true, output: "ok" }, "the check runs at the new head");
 });
 
 test("a review that merged and is held over its deploy stays as it is whatever the PR watch reads", async (t) => {

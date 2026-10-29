@@ -247,6 +247,13 @@ const approves = (round: Round) => round.verdict?.verdict === "approve" && !find
  */
 export const landable = (r: Review) => r.merged === null && (r.phase.kind === "approved"
   || (r.phase.kind === "needs-person" && r.phase.unreviewed === undefined && r.rounds.at(-1)!.check?.passed === true && approves(r.rounds.at(-1)!)));
+/**
+ * Whether the review is held for the person, with rounds left and no label, after an approval that a failed check, a
+ * failed live check or a conflict stopped, which a new head may answer. An approval has no blocking finding of the
+ * reviewer's, so the blocking ones are the loop's own. Changes the reviewer requested stay the person's.
+ */
+const heldForGate = (r: Review) => r.phase.kind === "needs-person" && r.phase.label === undefined && r.merged === null && roundsSpent(r) < r.maxRounds
+  && r.rounds.at(-1)!.verdict?.verdict === "approve" && findingsOf(r.rounds.at(-1)!).some(blocks);
 /** The rounds that count against the limit. One that approves again the head its previous round approved reviewed nothing new. */
 export const roundsSpent = (r: Pick<Review, "rounds">) => r.rounds.filter((round, i) => {
   const previous = r.rounds[i - 1];
@@ -398,8 +405,24 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
   const passes = singleFlight(pass);
   const poll = passes.join;
 
-  /** Whether a turn of `t` ended since its last message from the loop, the only time its replies can hold an answer. */
-  const answeredSince = (r: Review, t: Thread) => t.lastReplyAt !== null && t.lastReplyAt > r.since;
+  /**
+   * When the newest turn of `t` that ended after `since` ended, or null when none has, whether a newer turn runs, and
+   * whether a Claude worker replied since. A Claude turn that ends with a background shell or subagent running reports
+   * heartbeats rather than its end, for up to hours, and stays `working`, so a Claude worker's turn also ends where its
+   * transcript says, and a newer one runs once a prompt or a finished task follows that end there.
+   */
+  const heard = (t: Thread, since: number) => {
+    const claude = registry.agent(t).kind === "claude";
+    const entries = claude ? registry.claudeEntries(t.id) : [];
+    const ended = Math.max(t.lastReplyAt ?? -Infinity, ...entries.flatMap((e) => e.kind === "turn" ? [e.at] : []));
+    const running = t.working && (!claude || entries.some((e) => (e.kind === "prompt" || e.kind === "task") && e.at > ended));
+    return { ended: ended > since ? ended : null, running, replied: entries.some((e) => e.kind === "reply" && e.at > since) };
+  };
+  /** Whether `t` replied or ended a turn since the loop's last message to it, the only time its replies can hold an answer. */
+  const answeredSince = (r: Review, t: Thread) => {
+    const { ended, replied } = heard(t, r.since);
+    return ended !== null || replied;
+  };
   const end = (r: Review, phase: Extract<Phase, { kind: typeof endedKinds[number] }>): Review => {
     if (r.phase.kind === "checking" && r.phase.thread !== null) checks.discard(r.phase.thread);
     if (r.phase.kind === "verifying" && r.phase.thread !== null) live.discard(r.phase.thread);
@@ -465,9 +488,9 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
    * reminder saying what is `missing`, and after the last reminder, or hours of silence, the loop asks the person.
    */
   function waitOn(r: Review, t: Thread, who: "builder" | "reviewer", missing: string | null = null): Review {
-    if (now() - r.since > answerMs) return toPerson(r, `The ${who} gave no answer within ${answerMs / 3_600_000} hours in round ${r.rounds.length}.`);
-    const turnEnded = !t.working && t.lastReplyAt !== null && t.lastReplyAt > r.since && now() - t.lastReplyAt > replyGraceMs;
-    if (!turnEnded) return r;
+    if (now() - r.since > answerMs) return toPerson(r, `The ${who} gave no answer Nexus could read within ${answerMs / 3_600_000} hours in round ${r.rounds.length}.`);
+    const { ended, running } = heard(t, r.since);
+    if (ended === null || running || now() - ended <= replyGraceMs) return r;
     if (r.nudges >= maxNudges) return toPerson(r, `The ${who} ended ${maxNudges + 1} turns in a row without an answer Nexus could read, in round ${r.rounds.length}.`);
     return send(r, who, (token) => reminder(who, missing, token), r.phase, r.nudges + 1);
   }
@@ -497,7 +520,9 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
       if (snapshot.pr.state !== "open") return outside(answered, snapshot.pr.state) ?? toPerson(answered, `Pull request #${r.pr.number} was ${snapshot.pr.state} during the review.`);
       if (fixed && snapshot.detail.head === round.head) {
         // A push can land on GitHub a little after the turn that made it ends.
-        if (now() - (builder.lastReplyAt ?? 0) < pushGraceMs) return r;
+        const { ended, running } = heard(builder, r.since);
+        if (ended === null || running) return waitOn(r, builder, "builder");
+        if (now() - ended < pushGraceMs) return r;
         if (round.check?.passed !== false && !liveFailed(round)) return waitOn(r, builder, "builder", `You answered that you fixed findings, but the pull request's head is still ${round.head}. Push the fixes.`);
       }
       // The reviewer cannot change a check's result, so a failed check at an unmoved head is the person's.
@@ -643,13 +668,15 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
 
   /**
    * A head pushed after the review approved its last round or held it for the person. A review that would land gets a
-   * new round, as a landing does. One the loop gave up on stays the person's, and its reasons name the new head.
+   * new round, as a landing does, and so does one held only for a failed check, live check or conflict after an
+   * approval, which the push may answer. One the loop gave up on otherwise stays the person's, and its reasons name the
+   * new head.
    */
   function pushedAfter(r: Review, snapshot: PrSnapshot): Review | null {
     const head = pushedHead(r, { ...snapshot.pr, head: snapshot.detail.head });
     if (head === null) return null;
     const phase = r.phase;
-    if (phase.kind !== "needs-person" || landable(r)) return newHead(r, head, snapshot.detail.base, `The pull request's head moved to ${head}`);
+    if (phase.kind !== "needs-person" || landable(r) || heldForGate(r)) return newHead(r, head, snapshot.detail.base, `The pull request's head moved to ${head}`);
     const stale = (moved: string) => `The pull request's head moved to ${moved} after this review was held, so none of its rounds reviewed that commit. Run nexus review ${r.builder} to review it.`;
     return { ...r, phase: { ...phase, unreviewed: head, reasons: [...phase.reasons.filter((reason) => phase.unreviewed === undefined || reason !== stale(phase.unreviewed)), stale(head)] } };
   }

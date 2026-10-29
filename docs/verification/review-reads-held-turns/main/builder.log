@@ -1,0 +1,34 @@
+2026-10-29T16:00:31.629Z th-a60c976681b7 received rv-7b5bc823:2:
+[Nexus review — automated, not a message from the person]
+Round 1 of at most 5 on pull request #211 (https://github.com/ramtinJ95/demo/pull/211), reviewed at 2111000000000000000000000000000000000000 by a reviewer on gpt-6-astra: changes requested.
+
+F1 (P1) src/cache.ts:1: The cache never expires
+    Add a TTL.
+
+Fix each P0 to P2 finding or reject it with a reason. Push what you fix to the pull request's branch; the reviewer reviews the new commits. Then end your reply with exactly one block like this, with JSON in it:
+```nexus-review-answers
+{"token": "rv-7b5bc823:0633b552c894", "answers": [{"id": "F1", "action": "fixed" or "rejected", "reason": "what you changed, or why not"}]}
+```
+
+2026-10-29T16:00:32.633Z th-a60c976681b7 ended its turn in the transcript with a background shell running, and reports heartbeats only:
+Added a 5-minute TTL and pushed. The full suite runs in the background.
+
+```nexus-review-answers
+{"token":"rv-7b5bc823:0633b552c894","answers":[{"id":"F1","action":"fixed","reason":"Added a 5-minute TTL."}]}
+```
+
+2026-10-29T16:00:33.628Z th-fc03c61206a1 received rv-efa27277:2:
+[Nexus review — automated, not a message from the person]
+Round 1 of at most 5 on pull request #212 (https://github.com/ramtinJ95/demo/pull/212), reviewed at 2121000000000000000000000000000000000000 by a reviewer on gpt-6-astra: changes requested.
+
+F1 (P1) src/cache.ts:1: The cache never expires
+    Add a TTL.
+
+Fix each P0 to P2 finding or reject it with a reason. Push what you fix to the pull request's branch; the reviewer reviews the new commits. Then end your reply with exactly one block like this, with JSON in it:
+```nexus-review-answers
+{"token": "rv-efa27277:58fdc8ceab96", "answers": [{"id": "F1", "action": "fixed" or "rejected", "reason": "what you changed, or why not"}]}
+```
+
+2026-10-29T16:00:34.630Z th-fc03c61206a1 ended its turn in the transcript with a background shell running, and reports heartbeats only:
+Started the full test suite in the background. I will answer once it finishes.
+
