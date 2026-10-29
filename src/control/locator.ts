@@ -15,7 +15,7 @@ export function registryLocator(registry: Registry): PylonLocator {
       for (;;) {
         const pylon = registry.pylon(pylonId);
         if (pylon === undefined) throw new Error(`the registry has no pylon ${pylonId}`);
-        if (registry.thread(pylon.thread)?.status === "deleted") throw new Error(`the thread of ${pylonId} is deleted`);
+        if (registry.threadStatus(pylon.thread) === "deleted") throw new Error(`the thread of ${pylonId} is deleted`);
         const node = registry.node(pylon.node)!;
         const observed = node.observation?.pylons.find((p) => p.pylonId === pylonId);
         if (node.state === "online" && observed?.phase === "running") {

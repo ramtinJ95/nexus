@@ -117,7 +117,7 @@ export function startLoop(options: LoopOptions): Loop {
       if (observed.phase !== "running" || observed.services === null) continue;
       const pylon = registry.pylon(observed.pylonId);
       // A pylon reported by a node the registry does not place it on is an orphan there.
-      if (pylon?.node !== node || registry.thread(pylon.thread)!.status === "deleted") continue;
+      if (pylon?.node !== node || registry.threadStatus(pylon.thread) === "deleted") continue;
       const services = observed.services;
       for (const { service } of registry.previews(pylon.pylonId)) {
         if (linkedPort(service) !== null && !services.some((s) => s.name === service)) registry.releasePreview(pylon.pylonId, service);

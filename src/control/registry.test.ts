@@ -1652,3 +1652,34 @@ test("threads() reads each thread's session facts as thread() does, whichever fa
   assert.equal(of("th-reading").readingUsage, true);
   assert.equal(of("th-1").working, false);
 });
+
+test("storedThreads reads only the threads' own rows, by status and by who started them", (t) => {
+  const registry = seeded(tempDb());
+  t.after(() => registry.close());
+  const ids = sessionFactThreads(registry);
+  registry.createThread({ ...thread, id: "th-review" as ThreadId, pylonId: "pylon-th-review" as PylonId, startedBy: "nexus-review" },
+    { ...pylon, thread: "th-review", pylonId: "pylon-th-review" as PylonId, boot: { ...pylon.boot, pylonId: "pylon-th-review" as PylonId } });
+  const idsOf = (filter?: Parameters<typeof registry.storedThreads>[0]) => registry.storedThreads(filter).map((s) => s.id);
+  assert.deepEqual(idsOf(), [...ids, "th-review"].sort());
+  assert.deepEqual(idsOf({ status: ["active", "idle"] }), [...ids, "th-review"].filter((id) => id !== "th-reading" && id !== "th-deleted").sort());
+  assert.deepEqual(idsOf({ startedBy: "nexus-review" }), ["th-review"]);
+  assert.deepEqual(idsOf({ status: ["archived"], startedBy: "nLAPTOP" }), ["th-reading"]);
+  assert.deepEqual(idsOf({ status: [] }), []);
+  for (const stored of registry.storedThreads()) {
+    const { working: _w, workingSince: _ws, sessionTurnRunning: _st, sessionActiveUntil: _sa, sessionWaiting: _sw, sessionWaitingMessage: _sm, usageLimit: _u, readingUsage: _r, ...own } = registry.thread(stored.id)!;
+    assert.deepEqual(stored, own, `${stored.id} has no session facts`);
+  }
+  assert.equal(registry.threadStatus("th-reading" as ThreadId), "archived");
+  assert.equal(registry.threadStatus("th-missing" as ThreadId), undefined);
+});
+
+test("a deploy drain set to null reads back as null, as does one never set", (t) => {
+  const registry = openRegistry(":memory:");
+  t.after(() => registry.close());
+  assert.equal(registry.drain(), null);
+  assert.equal(registry.desiredRelease(), null);
+  registry.setDrain({ commit: "c".repeat(40), expiresAt: 300 });
+  assert.deepEqual(registry.drain(), { commit: "c".repeat(40), expiresAt: 300 });
+  registry.setDrain(null);
+  assert.equal(registry.drain(), null);
+});

@@ -51,14 +51,8 @@ export interface NodeRecord {
 /** A node that joined with a token rather than being named in control.json. `deployKey` is the digest of its deployer's token. */
 export interface JoinedNode extends Pick<NodeRecord, "name" | "tailnetHost" | "tailnetNodeId"> { deployKey: string; joinedAt: number }
 
-export interface Thread extends ActivityFacts {
-  sessionWaiting?: boolean;
-  /** What the most recently waiting session's report said, when it said anything. */
-  sessionWaitingMessage?: string;
-  /** A harness turn or a session's turn runs, such as a Claude worker's. */
-  working: boolean;
-  /** The earliest known start of a running harness or session turn. Absent when none runs or no start is known. */
-  workingSince?: number;
+/** A thread's own row, without what its sessions and the usage backfill say. */
+export interface StoredThread extends Pick<ActivityFacts, "status" | "agentTurnRunning" | "lastAgentActivityAt" | "lastHumanActivityAt"> {
   id: ThreadId;
   title: string;
   project: ProjectId;
@@ -70,10 +64,20 @@ export interface Thread extends ActivityFacts {
   lastReplyAt: number | null;
   /** Absent from a thread started before placements were recorded. */
   placement?: Placement;
-  /** The Claude worker's session stopped on its usage limit and no turn of a session runs since. `resetsAt` is null when Claude Code did not say when the limit resets. */
-  usageLimit?: { stoppedAt: number; resetsAt: number | null };
   /** Absent from a thread started before setups were recorded. */
   setup?: ThreadSetup;
+}
+
+export interface Thread extends StoredThread, ActivityFacts {
+  sessionWaiting?: boolean;
+  /** What the most recently waiting session's report said, when it said anything. */
+  sessionWaitingMessage?: string;
+  /** A harness turn or a session's turn runs, such as a Claude worker's. */
+  working: boolean;
+  /** The earliest known start of a running harness or session turn. Absent when none runs or no start is known. */
+  workingSince?: number;
+  /** The Claude worker's session stopped on its usage limit and no turn of a session runs since. `resetsAt` is null when Claude Code did not say when the limit resets. */
+  usageLimit?: { stoppedAt: number; resetsAt: number | null };
 }
 
 /** A Claude worker thread's worker. `session` is the Claude Code session its launch opened, null until the launch names one. */
@@ -407,7 +411,7 @@ function nodeRow(r: Row): NodeRecord {
   };
 }
 
-function threadRow(r: Row): Omit<Thread, "working"> {
+function threadRow(r: Row): StoredThread {
   return {
     id: r.id as ThreadId,
     title: r.title as string,
@@ -574,32 +578,63 @@ export function openRegistry(path: string, clock = Date.now) {
     return (sql("SELECT thread FROM pylons WHERE id = ?").get(pylonId) as Row | undefined)?.thread as ThreadId | undefined;
   }
 
-  function withSessions(row: Row): Thread {
-    const thread = threadRow(row);
-    const live = sql("SELECT max(updated_at) AS at, min(started_at) AS since FROM session_activity WHERE thread = ? AND state = 'session.turn-started' AND updated_at > ?").get(thread.id, clock() - sessionActivityTtlMs)!;
-    const working = live.at as number | null;
-    const waiting = sql("SELECT message FROM session_activity WHERE thread = ? AND state = 'session.waiting' ORDER BY updated_at DESC, rowid DESC LIMIT 1").get(thread.id);
-    const starts = [thread.agentTurnRunning ? row.agent_turn_started_at : null, live.since].filter((at): at is number => typeof at === "number");
-    const usageLimit = working === null ? usageLimitOf(thread.id) : null;
-    const readingUsage = sql("SELECT 1 FROM usage_backfill WHERE state = 'running' AND thread = ? AND phase = 'reading'").get(thread.id) !== undefined;
-    return {
-      ...thread, working: thread.agentTurnRunning || working !== null,
-      ...(working === null ? {} : { sessionTurnRunning: true, sessionActiveUntil: working + sessionActivityTtlMs }), ...(waiting === undefined ? {} : { sessionWaiting: true }),
-      ...(typeof waiting?.message === "string" ? { sessionWaitingMessage: waiting.message } : {}),
-      ...(starts.length === 0 ? {} : { workingSince: Math.min(...starts) }), ...(usageLimit === null ? {} : { usageLimit }),
-      ...(readingUsage ? { readingUsage } : {}),
-    };
+  /** The threads of `rows` with what their sessions and the usage backfill say, read in a few queries however many rows there are. */
+  function withSessions(rows: readonly Row[]): Thread[] {
+    if (rows.length === 0) return [];
+    const ids = JSON.stringify(rows.map((r) => r.id));
+    const live = new Map(sql(`SELECT thread, max(updated_at) AS at, min(started_at) AS since FROM session_activity
+      WHERE thread IN (SELECT value FROM json_each(?)) AND state = 'session.turn-started' AND updated_at > ? GROUP BY thread`)
+      .all(ids, clock() - sessionActivityTtlMs).map((r) => [r.thread as ThreadId, r]));
+    const waiting = new Map(sql(`SELECT thread, message FROM (SELECT thread, message, row_number() OVER (PARTITION BY thread ORDER BY updated_at DESC, rowid DESC) AS n
+      FROM session_activity WHERE thread IN (SELECT value FROM json_each(?)) AND state = 'session.waiting') WHERE n = 1`).all(ids).map((r) => [r.thread as ThreadId, r]));
+    const reading = sql("SELECT thread FROM usage_backfill WHERE state = 'running' AND phase = 'reading'").get()?.thread;
+    const limits = usageLimits(rows.map((r) => r.id as ThreadId).filter((id) => !live.has(id)));
+    return rows.map((row): Thread => {
+      const thread = threadRow(row);
+      const working = (live.get(thread.id)?.at ?? null) as number | null;
+      const wait = waiting.get(thread.id);
+      const starts = [thread.agentTurnRunning ? row.agent_turn_started_at : null, live.get(thread.id)?.since].filter((at): at is number => typeof at === "number");
+      const usageLimit = limits.get(thread.id);
+      return {
+        ...thread, working: thread.agentTurnRunning || working !== null,
+        ...(working === null ? {} : { sessionTurnRunning: true, sessionActiveUntil: working + sessionActivityTtlMs }), ...(wait === undefined ? {} : { sessionWaiting: true }),
+        ...(typeof wait?.message === "string" ? { sessionWaitingMessage: wait.message } : {}),
+        ...(starts.length === 0 ? {} : { workingSince: Math.min(...starts) }), ...(usageLimit === undefined ? {} : { usageLimit }),
+        ...(reading === thread.id ? { readingUsage: true } : {}),
+      };
+    });
   }
 
-  /** Derived from the newest entries rather than stored, so it holds whichever of the turn's end and the transcript's read comes first. */
-  function usageLimitOf(id: ThreadId) {
-    const worker = sql("SELECT w.turn_at FROM claude_workers w JOIN claude_transcripts t ON t.thread = w.thread AND t.session = w.session WHERE w.thread = ?").get(id);
-    if (worker === undefined) return null;
-    const entries = sql("SELECT entry FROM claude_entries WHERE thread = ? ORDER BY seq DESC LIMIT 16").all(id).map((r) => json<ClaudeEntry>(r.entry)).reverse();
-    const stop = usageLimitStop(entries);
-    // A turn that started after the stop, by the pylon's clock as the record's time is, ended it, though its prompt may not be read yet.
-    return stop !== null && (worker.turn_at === null || Number(worker.turn_at) <= stop.stoppedAt) ? stop : null;
+  function thread(id: ThreadId): Thread | undefined {
+    const row = threadRecord(id);
+    return row && withSessions([row])[0];
   }
+
+  /**
+   * The usage limit each of the Claude worker threads among `ids` stopped on. Derived from the newest entries rather
+   * than stored, so it holds whichever of the turn's end and the transcript's read comes first.
+   */
+  function usageLimits(ids: readonly ThreadId[]): Map<ThreadId, NonNullable<Thread["usageLimit"]>> {
+    const limits = new Map<ThreadId, NonNullable<Thread["usageLimit"]>>();
+    if (ids.length === 0) return limits;
+    const turns = new Map(sql(`SELECT w.thread, w.turn_at FROM claude_workers w JOIN claude_transcripts t ON t.thread = w.thread AND t.session = w.session
+      WHERE w.thread IN (SELECT value FROM json_each(?))`).all(JSON.stringify(ids)).map((r) => [r.thread as ThreadId, r.turn_at as number | null]));
+    if (turns.size === 0) return limits;
+    const entries = new Map<ThreadId, ClaudeEntry[]>();
+    for (const r of sql(`SELECT thread, entry FROM (SELECT thread, seq, entry, row_number() OVER (PARTITION BY thread ORDER BY seq DESC) AS n
+      FROM claude_entries WHERE thread IN (SELECT value FROM json_each(?))) WHERE n <= 16 ORDER BY thread, seq`).all(JSON.stringify([...turns.keys()]))) {
+      const of = r.thread as ThreadId;
+      entries.set(of, [...entries.get(of) ?? [], json<ClaudeEntry>(r.entry)]);
+    }
+    for (const [id, turnAt] of turns) {
+      const stop = usageLimitStop(entries.get(id) ?? []);
+      // A turn that started after the stop, by the pylon's clock as the record's time is, ended it, though its prompt may not be read yet.
+      if (stop !== null && (turnAt === null || turnAt <= stop.stoppedAt)) limits.set(id, stop);
+    }
+    return limits;
+  }
+
+  const threadStatus = (id: ThreadId) => sql("SELECT status FROM threads WHERE id = ?").get(id)?.status as ThreadStatus | undefined;
 
   function questionRecord(id: string): Question | null {
     return recordOf<Question>("questions", "id", id);
@@ -629,9 +664,8 @@ export function openRegistry(path: string, clock = Date.now) {
   }
 
   function updateAttention(id: ThreadId) {
-    const row = threadRecord(id);
-    if (row === undefined) return;
-    const t = withSessions(row);
+    const t = thread(id);
+    if (t === undefined) return;
     const old = sql("SELECT * FROM thread_attention WHERE thread = ?").get(id);
     const p = pylon(t.pylonId);
     const workerFailed = ["failed", "stalled"].includes(String(sql("SELECT state FROM claude_workers WHERE thread = ?").get(id)?.state));
@@ -921,8 +955,8 @@ export function openRegistry(path: string, clock = Date.now) {
             dropped = excluded.dropped, read_at = excluded.read_at`)
           .run(thread, read.session, read.cursor.offset, read.cursor.skipping ? 1 : 0, read.cursor.before, Math.max(0, total - maxEntries), read.readAt);
         // An image without the StopFailure hook reports no end to the turn a usage limit stopped, so the transcript ends it.
-        const stop = usageLimitOf(thread);
-        if (stop !== null) {
+        const stop = usageLimits([thread]).get(thread);
+        if (stop !== undefined) {
           sql("DELETE FROM session_activity WHERE thread = ? AND session = ? AND state = 'session.turn-started' AND EXISTS (SELECT 1 FROM session_order o WHERE o.thread = ? AND o.session = ? AND o.at <= ?)")
             .run(thread, read.session, thread, read.session, stop.stoppedAt);
         }
@@ -960,7 +994,7 @@ export function openRegistry(path: string, clock = Date.now) {
         sql("INSERT INTO event_receipts VALUES (?, ?) ON CONFLICT(node) DO UPDATE SET sequence = excluded.sequence").run(node, report.sequence);
         pruneSessions();
         const session = event.session ?? "default";
-        const status = threadRecord(thread)?.status;
+        const status = threadStatus(thread);
         if (status === "archived" || status === "deleted") return;
         const at = event.at ?? report.time;
         const previous = sql("SELECT at, kind, event_ids FROM session_order WHERE thread = ? AND session = ?").get(thread, session);
@@ -1059,7 +1093,7 @@ export function openRegistry(path: string, clock = Date.now) {
      */
     setWaitingAsks(thread: ThreadId, asks: readonly WaitingAsk[]): boolean {
       return transaction(() => {
-        const status = threadRecord(thread)?.status;
+        const status = threadStatus(thread);
         if (status === undefined || status === "archived" || status === "deleted") return false;
         sql("INSERT INTO waiting_asks (thread, report) VALUES (?, ?) ON CONFLICT (thread) DO UPDATE SET report = excluded.report").run(thread, JSON.stringify(asks));
         const changed = reconcileAsks(thread);
@@ -1249,11 +1283,14 @@ export function openRegistry(path: string, clock = Date.now) {
     queuedThreads: (): QueuedRecord[] => sql("SELECT record FROM queued_threads ORDER BY rowid").all().map((r) => json<QueuedRecord>(r.record)),
     queuedThread,
     saveQueued,
-    threads: (project?: ProjectId) => ((project === undefined ? sql("SELECT * FROM threads ORDER BY created_at, id").all() : sql("SELECT * FROM threads WHERE project = ? ORDER BY created_at, id").all(project)) as Row[]).map(withSessions),
-    thread(id: ThreadId): Thread | undefined {
-      const row = threadRecord(id);
-      return row && withSessions(row);
+    threads: (project?: ProjectId) => withSessions(project === undefined ? sql("SELECT * FROM threads ORDER BY created_at, id").all() : sql("SELECT * FROM threads WHERE project = ? ORDER BY created_at, id").all(project)),
+    thread,
+    /** The threads with any of the statuses and started by `startedBy`, each as its row holds it, without what its sessions say. */
+    storedThreads(filter: { status?: readonly ThreadStatus[]; startedBy?: string } = {}): StoredThread[] {
+      return sql(`SELECT * FROM threads WHERE ($statuses IS NULL OR status IN (SELECT value FROM json_each($statuses))) AND ($startedBy IS NULL OR started_by = $startedBy)
+        ORDER BY created_at, id`).all({ $statuses: filter.status === undefined ? null : JSON.stringify(filter.status), $startedBy: filter.startedBy ?? null }).map(threadRow);
     },
+    threadStatus,
     markSeen(id: ThreadId, unread: boolean, now = Date.now(), lastReplyAt?: number | null) {
       if (!unread && lastReplyAt === null) return;
       transaction(() => {
