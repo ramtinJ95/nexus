@@ -790,6 +790,22 @@ export async function startApi(options: ApiOptions): Promise<Api> {
   }
 
   /**
+   * Presses Esc in the Claude worker's pane, which interrupts its turn as Esc at its terminal does. A paused pylon runs no
+   * turn, so it is not woken. Nothing is pressed unless Claude works, so a dialog it waits at is never cancelled.
+   */
+  async function interruptClaude(t: Thread, session: string | null): Promise<void> {
+    if (session === null) throw new HttpError(409, `the Claude worker of ${t.id} has not started a session yet, so it has no turn to interrupt`);
+    const { outcome } = await whileRunning(t, (probe, pylonId) => probe.command(pylonId, { kind: "interrupt-claude", session })) as Extract<CommandResult, { kind: "interrupt-claude" }>;
+    if (outcome === "interrupted") return;
+    throw new HttpError(409, {
+      blocked: `Claude waits at a prompt in its terminal, which Esc would cancel, so nothing was pressed. Attach to the pylon (\`nexus attach ${t.id}\`) and answer it`,
+      idle: `Claude is not working, so there is no turn to interrupt, and nothing was pressed`,
+      unknown: `Herdr cannot tell yet whether Claude works or waits at a prompt, so nothing was pressed. Ask again in a moment`,
+      "not-running": `no pane runs Claude session ${session}, so there is no turn to interrupt`,
+    }[outcome]);
+  }
+
+  /**
    * Runs what a human asked for in the thread's pylon, such as a link, a session open or a checkout read. Asking is
    * human activity, as a message is, so a paused pylon is woken, but the request itself needs the pylon running and
    * is refused with a 409 until it is.
@@ -1247,7 +1263,10 @@ export async function startApi(options: ApiOptions): Promise<Api> {
     }],
     ["POST", /^\/v1\/threads\/([^/]+)\/abort$/, async (m, r) => {
       personOnly(r.caller, "abort a thread's turn");
-      await harness.abort(conversing(thread(m[1]!)).id);
+      const t = thread(m[1]!);
+      const agent = registry.agent(t);
+      if (agent.kind === "claude") await interruptClaude(refuseDeleted(t), agent.worker.session);
+      else await harness.abort(conversing(t).id);
       return noContent;
     }],
     ["POST", /^\/v1\/threads\/([^/]+)\/retry$/, async (m, r) => {

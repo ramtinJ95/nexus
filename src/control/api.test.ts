@@ -45,7 +45,7 @@ import { parseProbeConfig } from "../probe/config.ts";
 import { attachScript, checkoutDir } from "../sessions.ts";
 import { encodeMessage } from "../attach-wire.ts";
 import { terminalSize } from "../guest-terminal.ts";
-import type { ByteStream, CommandResult, JobId, NodeHealth, NodeName, NodeObservation, PausedSession, PylonCommand, PylonId, ServiceFact, StreamEnd, TailnetNodeId } from "../protocol.ts";
+import type { ByteStream, CommandResult, InterruptClaudeOutcome, JobId, NodeHealth, NodeName, NodeObservation, PausedSession, PylonCommand, PylonId, ServiceFact, StreamEnd, TailnetNodeId } from "../protocol.ts";
 
 const node = "rj-firebat" as NodeName;
 const laptop = "nLAPTOP" as TailnetNodeId;
@@ -3112,6 +3112,41 @@ test("a Claude worker thread takes no messages while archived, deleted or before
   assert.deepEqual(s.calls.filter(([call]) => call === "send" || call === "abort"), []);
 });
 
+test("a Claude worker thread's abort presses Esc in its session's pane through the probe, and says why when nothing was pressed", async (t) => {
+  const s = await withClaude(t);
+  let outcome: InterruptClaudeOutcome = "interrupted";
+  s.probeAnswers(async (command) => command.kind === "interrupt-claude" ? { kind: "interrupt-claude", outcome } : assert.fail(`unexpected ${command.kind}`));
+  const abort = () => s.call("POST", `/v1/threads/${s.thread.id}/abort`);
+  assert.equal((await abort()).status, 204);
+  assert.deepEqual(s.commands, [[s.thread.pylonId, { kind: "interrupt-claude", session: claudeSession }]]);
+  assert.deepEqual(s.calls.filter(([call]) => call === "abort"), [], "the harness aborts nothing");
+
+  const refusals: [InterruptClaudeOutcome, RegExp][] = [
+    ["blocked", new RegExp(`waits at a prompt in its terminal, which Esc would cancel, so nothing was pressed.*nexus attach ${s.thread.id}`)],
+    ["idle", /not working, so there is no turn to interrupt/],
+    ["unknown", /cannot tell yet/],
+    ["not-running", new RegExp(`no pane runs Claude session ${claudeSession}`)],
+  ];
+  for ([outcome] of refusals) {
+    const refused = await abort();
+    assert.equal(refused.status, 409, outcome);
+    assert.match(refused.body.error, refusals.find(([o]) => o === outcome)![1]);
+  }
+
+  s.commands.length = 0;
+  s.woken.length = 0;
+  observePaused(s);
+  const paused = await abort();
+  assert.equal(paused.status, 409);
+  assert.match(paused.body.error, /does not wake it/);
+  assert.deepEqual([s.commands, s.woken], [[], []], "a paused pylon runs no turn, so it is not woken to be interrupted");
+
+  const fresh = (await s.call("POST", "/v1/threads", { project: "acme", title: "Claude worker", claude: "later" })).body as Thread;
+  const early = await s.call("POST", `/v1/threads/${fresh.id}/abort`);
+  assert.equal(early.status, 409);
+  assert.match(early.body.error, /has not started a session yet, so it has no turn to interrupt/);
+});
+
 /** Records the thread's pylon stopped, as the loop would from its node's observation. */
 function observePaused(s: Awaited<ReturnType<typeof withClaude>>) {
   const capacity = { cpus: 16, committedCpus: 0, memoryGiB: 64, committedMemoryGiB: 0, diskFreeGiB: 100, committedDiskGiB: 0 };
@@ -4011,7 +4046,7 @@ test("a harness, a Claude worker and a bare thread each answer every agent route
   assert.deepEqual(await routes(threads.claude, "msg:c"), {
     detail: { claudeWorker: { model: "claude-opus-5-5", state: "pending" }, agent: null }, conversation: "200 claude view", events: noConversation(threads.claude), claudeEvents: "200 stream",
     page: "200 stream", message: `409 the Claude worker of ${threads.claude.id} has not started a session yet, so it takes no messages. Send it once it has started`,
-    abort: noConversation(threads.claude), retry: noConversation(threads.claude),
+    abort: `409 the Claude worker of ${threads.claude.id} has not started a session yet, so it has no turn to interrupt`, retry: noConversation(threads.claude),
   });
   assert.deepEqual(await routes(threads.bare, "msg:b"), {
     detail: { claudeWorker: null, agent: null }, conversation: noConversation(threads.bare), events: noConversation(threads.bare), claudeEvents: noWorker(threads.bare),

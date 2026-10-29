@@ -35,7 +35,7 @@ import type { Project, ProjectId, RemoteProject } from "../project.ts";
 import { openTerminal, terminalSize } from "../guest-terminal.ts";
 import { processStream } from "../process-stream.ts";
 import { repoInitCommand } from "../pylon-vm-backend.ts";
-import type { ByteStream, CommandResult, NodeHealth, NodeName, PylonCommand, PylonId, ServiceFact, StreamEnd, TailnetNodeId } from "../protocol.ts";
+import type { ByteStream, CommandResult, InterruptClaudeOutcome, NodeHealth, NodeName, PylonCommand, PylonId, ServiceFact, StreamEnd, TailnetNodeId } from "../protocol.ts";
 import { checkoutDir } from "../sessions.ts";
 import { claudeProjects, transcriptStart, type ClaudeEntry } from "../claude-transcript.ts";
 import { testCertificate } from "../test-certificate.ts";
@@ -1951,6 +1951,22 @@ test("conversation prints a Claude worker's transcript, and send types into its 
   assert.equal((await s.nexus(["send", thread.id, "go", "--steer"])).stdout, `Sent to Claude in ${thread.id}.\n`);
   assert.deepEqual(s.fake.calls.filter(([call]) => call === "send"), [], "the harness is sent nothing");
   assert.match((await s.nexus(["send", "--help"])).stdout, /typed into the Claude worker's session/);
+});
+
+test("abort interrupts a Claude worker's turn with Esc in its pane, and fails with exit code 5 when Claude was not working", async (t) => {
+  const s = await setup(t);
+  const { thread } = await claudeWatched(t, s);
+  let outcome: InterruptClaudeOutcome = "interrupted";
+  s.probeAnswers(async (command) => command.kind === "interrupt-claude" ? { kind: "interrupt-claude", outcome } : assert.fail(`unexpected ${command.kind}`));
+  s.commands.length = 0;
+  const done = await s.nexus(["abort", thread.id]);
+  assert.equal(done.code, 0, done.stderr);
+  assert.deepEqual(s.commands, [{ kind: "interrupt-claude", session: "s1" }]);
+  assert.deepEqual(s.fake.calls.filter(([call]) => call === "abort"), [], "the harness aborts nothing");
+  outcome = "blocked";
+  const refused = await s.nexus(["abort", thread.id]);
+  assert.equal(refused.code, 5);
+  assert.match(refused.stderr, new RegExp(`Claude waits at a prompt in its terminal, which Esc would cancel, so nothing was pressed\\. Attach to the pylon \\(\`nexus attach ${thread.id}\`\\)`));
 });
 
 test("start --request-id starts one thread and sends its first message once, however often it is run", async (t) => {
