@@ -1,0 +1,16 @@
+worker desktop: the conversation is 1281 px tall
+worker desktop: opened the fold steps-toolu_01ACFaByBTZSbDyNmLgjhznV and the call tool-toolu_01DFw7P6Py8dF6UWZiPeRDMG, whose output shows 42 lines
+worker phone: the conversation is 1713 px tall
+worker phone: opened the fold steps-toolu_01ACFaByBTZSbDyNmLgjhznV and the call tool-toolu_01DFw7P6Py8dF6UWZiPeRDMG, whose output shows 42 lines
+fixture desktop: the conversation is 4569 px tall
+fixture desktop: opened the fold steps-toolu_01S7wDMAwvUA7vjJFKi7mhf7 and the call tool-toolu_01S7wDMAwvUA7vjJFKi7mhf7, whose output shows 1 lines
+fixture phone: the conversation is 6439 px tall
+fixture phone: opened the fold steps-toolu_01S7wDMAwvUA7vjJFKi7mhf7 and the call tool-toolu_01S7wDMAwvUA7vjJFKi7mhf7, whose output shows 1 lines
+folds desktop: the conversation is 2220 px tall
+folds desktop: opened the fold steps-toolu_01UHA2t3XEHSTUL5tyh7BFSm and the call tool-toolu_01CRPJei59umoJrfonsDr1TS, whose output shows 105 lines
+folds phone: the conversation is 3458 px tall
+folds phone: opened the fold steps-toolu_01UHA2t3XEHSTUL5tyh7BFSm and the call tool-toolu_01CRPJei59umoJrfonsDr1TS, whose output shows 105 lines
+running desktop: the conversation is 900 px tall
+running desktop: opened the fold null and the call tool-r2, whose output shows 14 lines
+running phone: the conversation is 992 px tall
+running phone: opened the fold null and the call tool-r2, whose output shows 14 lines

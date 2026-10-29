@@ -22,7 +22,7 @@ import type { ConversationView, InboxState, LiveState } from "@earendil-works/pi
 import { desiredPhase, type ActualState, type DesiredPhase } from "../reconcile.ts";
 import { countedCapacity, type HerdrStatus, type NodeHealth, type NodeName } from "../protocol.ts";
 import { githubTokenGrant, linkedPort, type Project, type ProjectId } from "../project.ts";
-import { harnessNamed } from "../sessions.ts";
+import { checkoutDir, harnessNamed } from "../sessions.ts";
 import type { ThreadDetail, ThreadRow } from "./api.ts";
 import { attentions, needsPerson } from "./attention.ts";
 import type { NodeRecord, Output, Preview, Registry, Thread, ThreadAgent, ThreadId } from "./registry.ts";
@@ -208,6 +208,9 @@ const iconPaths = {
   chart: "M3 13.5h10M4.5 11V8M8 11V3.5M11.5 11V6",
   list: "M5.5 4h8M5.5 8h8M5.5 12h8M2.5 4h.01M2.5 8h.01M2.5 12h.01",
   terminal: "M2.5 3.5h11v9h-11zM5 6.5l2 1.5-2 1.5M8.5 10h2.5",
+  check: "M3.5 8.5l3 3 6-7",
+  cross: "M4.5 4.5l7 7M11.5 4.5l-7 7",
+  dash: "M5 8h6",
 } as const;
 type IconName = keyof typeof iconPaths;
 const icon = (name: IconName) => html`<svg class="i i-${name}" viewBox="0 0 16 16" aria-hidden="true"><path d="${iconPaths[name]}"/></svg>`;
@@ -1152,12 +1155,13 @@ ${s.state === "failed" && html`<p class="error s-why">It did not come back from 
 /**
  * One row of the conversation. A tool call carries its result, which the transcript holds in a later entry, and the
  * finish of a background task it started. A queued message carries what happens to it, such as that it sends after
- * the run. A note is a quiet line, such as how long a turn took.
+ * the run. A note is a quiet line, such as how long a turn took. A finished call says how long it took when its agent
+ * recorded it.
  */
 type Item =
   | { kind: "user"; text: string; queued: string | null; at: number; from: PromptFrom }
   | { kind: "agent"; text: string; streaming: boolean }
-  | { kind: "tool"; call: { id: string; name: string; arguments: Readonly<Record<string, unknown>> }; result: ToolResult; task?: Pick<Extract<ClaudeEntry, { kind: "task" }>, "status" | "summary" | "result"> }
+  | { kind: "tool"; call: { id: string; name: string; arguments: Readonly<Record<string, unknown>> }; result: ToolResult; ms: number | null; task?: Pick<Extract<ClaudeEntry, { kind: "task" }>, "status" | "summary" | "result"> }
   /** A Claude worker's AskUserQuestion call, with its question while one was asked for it. */
   | { kind: "ask"; id: string; questions: readonly AskedQuestion[]; result: ToolResult; question: Question | null }
   | { kind: "notice"; text: string; tone: Tone }
@@ -1192,7 +1196,7 @@ function conversationItems(view: ConversationView): Item[] {
       if (part.type === "text" && part.text !== "") items.push({ kind: "agent", text: part.text, streaming });
       // A streaming call's arguments are not whole yet. Its committed answer shows it.
       if (part.type === "toolCall" && !streaming) {
-        const tool: ToolItem = { kind: "tool", call: part, result: { state: "none" } };
+        const tool: ToolItem = { kind: "tool", call: part, result: { state: "none" }, ms: null };
         tools.set(part.id, tool);
         items.push(tool);
       }
@@ -1206,9 +1210,13 @@ function conversationItems(view: ConversationView): Item[] {
     if (message.role === "assistant") answer(message, false);
     if (message.role === "toolResult") {
       const result: ToolResult = { state: "done", output: contentText(message.content), isError: message.isError };
+      const ms = typeof message.durationMs === "number" ? message.durationMs : null;
       const tool = tools.get(message.toolCallId);
-      if (tool === undefined) items.push({ kind: "tool", call: { id: message.toolCallId, name: message.toolName, arguments: {} }, result });
-      else tool.result = result;
+      if (tool === undefined) items.push({ kind: "tool", call: { id: message.toolCallId, name: message.toolName, arguments: {} }, result, ms });
+      else {
+        tool.result = result;
+        tool.ms = ms;
+      }
     }
   }
   for (const slot of live?.tools ?? []) {
@@ -1235,6 +1243,7 @@ const itemsOf = (view: AgentView, questions: readonly Question[]): Item[] => vie
 function claudeItems({ entries, working }: ClaudeConversation, questions: readonly Question[]): Item[] {
   const items: Item[] = [];
   const tools = new Map<string, ToolItem>();
+  const calledAt = new Map<string, number>();
   const asks = new Map<string, AskItem>();
   const pullRequests = new Set<string>();
   let turn: ToolItem[] = [];
@@ -1250,8 +1259,9 @@ function claudeItems({ entries, working }: ClaudeConversation, questions: readon
           items.push(ask);
           break;
         }
-        const tool: ToolItem = { kind: "tool", call: { id: entry.id, name: entry.name, arguments: entry.input }, result: { state: "none" } };
+        const tool: ToolItem = { kind: "tool", call: { id: entry.id, name: entry.name, arguments: entry.input }, result: { state: "none" }, ms: null };
         tools.set(entry.id, tool);
+        calledAt.set(entry.id, entry.at);
         turn.push(tool);
         items.push(tool);
         break;
@@ -1259,8 +1269,10 @@ function claudeItems({ entries, working }: ClaudeConversation, questions: readon
       case "result": {
         const result: ToolResult = { state: "done", output: entry.output, isError: entry.isError };
         const tool = tools.get(entry.toolUseId) ?? asks.get(entry.toolUseId);
-        if (tool === undefined) items.push({ kind: "tool", call: { id: entry.toolUseId, name: "tool", arguments: {} }, result });
+        if (tool === undefined) items.push({ kind: "tool", call: { id: entry.toolUseId, name: "tool", arguments: {} }, result, ms: null });
         else tool.result = result;
+        const at = calledAt.get(entry.toolUseId);
+        if (tool?.kind === "tool" && at !== undefined && entry.at >= at) tool.ms = entry.at - at;
         break;
       }
       case "task": {
@@ -1639,11 +1651,12 @@ const actions: Record<Action, Phrase> = {
 const unknownTool = (name: string): Phrase => ({ priority: 2, one: `used ${name}`, many: (n) => `used ${name} ${n} times` });
 
 /**
- * How a tool's calls read, by its name, pi's in lower case and Claude Code's capitalized: the argument that says what
- * a call did, shown in its row, one shown whole as text, what it changes, the argument naming the file it acts on,
- * so a fold counts a file once, and the action a fold counts it under.
+ * How a tool's calls read, by its name, pi's in lower case and Claude Code's capitalized: the name its row shows, one
+ * for both agents, the argument that says what a call did, shown in its row, one shown whole as text, what it
+ * changes, the argument naming the file it acts on, so a fold counts a file once, and the action a fold counts it under.
  */
 interface ToolLook {
+  label: string;
   subject?: string;
   text?: string;
   diff?: (args: Args) => Diff | null;
@@ -1651,67 +1664,98 @@ interface ToolLook {
   action?: Action;
 }
 const toolLooks: Readonly<Record<string, ToolLook>> = {
-  read: { subject: "path", file: "path", action: "read" },
-  bash: { subject: "command", action: "command" },
-  edit: { subject: "path", file: "path", diff: editsDiff("oldText", "newText"), action: "change" },
-  write: { subject: "path", file: "path", diff: contentDiff, action: "change" },
-  grep: { subject: "pattern", action: "search" },
-  find: { subject: "pattern", action: "search" },
-  ls: { subject: "path", action: "search" },
-  Read: { subject: "file_path", file: "file_path", action: "read" },
-  Bash: { subject: "command", action: "command" },
-  Edit: { subject: "file_path", file: "file_path", diff: stringDiff, action: "change" },
-  MultiEdit: { subject: "file_path", file: "file_path", diff: editsDiff("old_string", "new_string"), action: "change" },
-  Write: { subject: "file_path", file: "file_path", diff: contentDiff, action: "change" },
-  Grep: { subject: "pattern", action: "search" },
-  Glob: { subject: "pattern", action: "search" },
-  Agent: { subject: "description", text: "prompt", action: "subagent" },
-  WebFetch: { subject: "url", action: "fetch" },
-  WebSearch: { subject: "query", action: "web" },
-  TodoWrite: { action: "todo" },
-  shell: { subject: "command", action: "command" },
+  read: { label: "Read", subject: "path", file: "path", action: "read" },
+  bash: { label: "Bash", subject: "command", action: "command" },
+  edit: { label: "Edit", subject: "path", file: "path", diff: editsDiff("oldText", "newText"), action: "change" },
+  write: { label: "Write", subject: "path", file: "path", diff: contentDiff, action: "change" },
+  grep: { label: "Grep", subject: "pattern", action: "search" },
+  find: { label: "Find", subject: "pattern", action: "search" },
+  ls: { label: "List", subject: "path", action: "search" },
+  Read: { label: "Read", subject: "file_path", file: "file_path", action: "read" },
+  Bash: { label: "Bash", subject: "command", action: "command" },
+  Edit: { label: "Edit", subject: "file_path", file: "file_path", diff: stringDiff, action: "change" },
+  MultiEdit: { label: "MultiEdit", subject: "file_path", file: "file_path", diff: editsDiff("old_string", "new_string"), action: "change" },
+  Write: { label: "Write", subject: "file_path", file: "file_path", diff: contentDiff, action: "change" },
+  Grep: { label: "Grep", subject: "pattern", action: "search" },
+  Glob: { label: "Glob", subject: "pattern", action: "search" },
+  Agent: { label: "Agent", subject: "description", text: "prompt", action: "subagent" },
+  WebFetch: { label: "Fetch", subject: "url", action: "fetch" },
+  WebSearch: { label: "Search", subject: "query", action: "web" },
+  TodoWrite: { label: "Todos", action: "todo" },
+  shell: { label: "Shell", subject: "command", action: "command" },
 };
 /** The arguments that say what a call of a tool without a look did, the first one it has. */
 const subjectKeys = ["command", "pattern", "path", "url"];
-const lookOfTool = (name: string): ToolLook => Object.hasOwn(toolLooks, name) ? toolLooks[name]! : {};
+/** A tool without a look shows its name, and an MCP server's tool, named mcp__server__tool, its own part of it. */
+const lookOfTool = (name: string): ToolLook => Object.hasOwn(toolLooks, name) ? toolLooks[name]! : { label: /^mcp__.+?__(.+)$/.exec(name)?.[1] ?? name };
 const textArg = (args: Args, key: string | undefined) => key !== undefined && typeof args[key] === "string" ? { key, value: args[key] as string } : undefined;
 const subjectOf = (call: ToolItem["call"]) => {
   const { subject } = lookOfTool(call.name);
   return textArg(call.arguments, subject ?? subjectKeys.find((k) => typeof call.arguments[k] === "string"));
 };
+/**
+ * A subject as its row shows it. Claude Code passes paths in the checkout whole and pi relative to it, so both read
+ * relative. A value of many lines, as a heredoc command, shows its first.
+ */
+const shortSubject = (value: string) => {
+  const [first, ...more] = value.split(`${checkoutDir}/`).join("").trim().split("\n");
+  return more.length === 0 ? first : `${first} …`;
+};
+/** How long a call took: 840 ms, 2.4 s, then as a clock reads it. */
+const took = (ms: number) => ms < 1000 ? `${Math.round(ms)} ms` : ms < 60_000 ? `${(ms / 1000).toFixed(1)} s` : clock(ms);
 
 const failed = ({ result }: ToolItem) => result.state === "done" && result.isError;
 /** pi's bash tool ends a failed command's output with its exit code, and Claude Code's starts with it. */
 const exitCode = (output: string) => /exited with code (\d+)|^Exit code (\d+)/.exec(output)?.slice(1).find((code) => code !== undefined);
 
+/** How a row's mark says how its call went, to the eye and to a screen reader. */
+const toolMarks = {
+  ok: { mark: icon("check"), said: "succeeded" },
+  bad: { mark: icon("cross"), said: "failed" },
+  run: { mark: html`<span class="spin"></span>`, said: "running" },
+  none: { mark: icon("dash"), said: "no result" },
+} as const;
+/** A finished call's output of more than clipOver lines shows its first clipTo, with the rest one click away. */
+const clipOver = 30;
+const clipTo = 12;
+function clipped<T>(id: string, lines: readonly T[], pre: (lines: readonly T[], part: string) => Html): Html {
+  if (lines.length <= clipOver) return pre(lines, "");
+  return html`${pre(lines.slice(0, clipTo), " t-head")}<details class="t-more" id="${id}"><summary data-more>Show all ${lines.length} lines</summary>${pre(lines.slice(clipTo), " t-rest")}</details>`;
+}
+
+/**
+ * One line per call: how it went, its tool, its subject, its size and how long it took. Its body holds the whole
+ * subject, the other arguments, the change and the output.
+ */
 function toolView(tool: ToolItem): Html {
-  const { call, result, task } = tool;
+  const { call, result, task, ms } = tool;
   const look = lookOfTool(call.name);
   const subject = subjectOf(call);
   const text = textArg(call.arguments, look.text);
   const diff = look.diff?.(call.arguments) ?? null;
   const rest = Object.fromEntries(Object.entries(call.arguments).filter(([key]) => key !== subject?.key && key !== text?.key && !diff?.keys.includes(key)));
   const output = result.state === "none" ? "" : result.output;
-  const lines = output === "" ? 0 : output.trimEnd().split("\n").length;
+  const outLines = output === "" ? [] : output.trimEnd().split("\n");
   const bad = failed(tool);
   const running = result.state === "running";
+  const state = running ? "run" : result.state === "none" ? "none" : result.isError ? "bad" : "ok";
   // Only what needs a look starts open: a failure, an edit's diff and a call still running.
   const open = bad || diff !== null || running;
   const added = diff?.lines.filter(([sign]) => sign === "+").length ?? 0;
   // A running call's line count and output grow in place, so a reader scrolled in its output keeps their place.
   const grow = (inside: Part) => running ? grows(inside) : inside;
-  const meta = diff !== null ? html`<span class="add">+${added}</span> <span class="del">−${diff.lines.length - added}</span>` : lines > 0 && `${lines} ${lines === 1 ? "line" : "lines"}`;
-  const status = running ? html`<span class="t-status run">running</span>`
-    : result.state === "none" ? html`<span class="t-status none">no result</span>`
-    : result.isError ? html`<span class="t-status bad">${exitCode(output) === undefined ? "failed" : `exit ${exitCode(output)}`}</span>`
-    : html`<span class="t-status ok" title="succeeded">✓</span>`;
+  const size = diff !== null ? html`<span class="add">+${added}</span> <span class="del">−${diff.lines.length - added}</span>` : outLines.length > 0 && `${outLines.length} ${outLines.length === 1 ? "line" : "lines"}`;
+  const exit = bad && (exitCode(output) === undefined ? "failed" : `exit ${exitCode(output)}`);
+  const { mark, said } = toolMarks[state];
   return html`<details class="tool${bad && " failed"}${running && " running"}" id="tool-${call.id}"${open && " open"}>
-<summary><span class="chev" aria-hidden="true">›</span><span class="t-name">${call.name}</span><span class="t-subj">${subject?.value}</span><span class="t-meta"${running && " data-grow"}>${grow(meta)}</span>${status}</summary>
+<summary><span class="t-mark ${state}" role="img" aria-label="${said}" title="${said}">${mark}</span><span class="t-name"${look.label.toLowerCase() !== call.name.toLowerCase() && html` title="${call.name}"`}>${look.label}</span><span class="t-subj">${subject !== undefined && shortSubject(subject.value)}</span><span class="t-meta"><span class="t-size"${running && " data-grow"}>${grow(size)}</span>${exit && html`<span class="t-exit">${exit}</span>`}</span>${ms !== null && html`<span class="t-time">${took(ms)}</span>`}<span class="chev" aria-hidden="true">›</span></summary>
 ${subject !== undefined && html`<pre class="t-full">${subject.value}</pre>`}
 ${text !== undefined && html`<div class="t-text">${prose(text.value)}</div>`}
 ${Object.keys(rest).length > 0 && html`<pre class="t-args">${JSON.stringify(rest, null, 2)}</pre>`}
-${diff !== null && html`<pre class="t-out diff">${diff.lines.map(([sign, line]) => html`<span class="d d-${sign === "+" ? "add" : "del"}">${sign === "+" ? "+" : "−"} ${line}</span>`)}</pre>`}
-${(diff === null || bad) && (output === "" ? html`<p class="t-empty">${running ? "No output yet." : "No output."}</p>` : html`<pre class="t-out"${running && " data-grow"}>${grow(output)}</pre>`)}
+${diff !== null && clipped(`more-${call.id}-diff`, diff.lines, (lines, part) => html`<pre class="t-out diff${part}">${lines.map(([sign, line]) => html`<span class="d d-${sign === "+" ? "add" : "del"}">${sign === "+" ? "+" : "−"} ${line}</span>`)}</pre>`)}
+${(diff === null || bad) && (output === "" ? html`<p class="t-empty">${running ? "No output yet." : "No output."}</p>`
+    : running ? html`<pre class="t-out" data-grow>${grows(output)}</pre>`
+    : clipped(`more-${call.id}`, outLines, (lines, part) => html`<pre class="t-out${part}">${lines.join("\n")}</pre>`))}
 ${task !== undefined && html`<p class="t-task">Background task ${task.status}: ${task.summary}</p>${task.result !== null && html`<div class="t-text">${prose(task.result)}</div>`}`}
 </details>`;
 }
@@ -1721,14 +1765,14 @@ const phrasesShown = 3;
 
 /**
  * What a run of calls did: Ran 3 commands, changed 2 files. Calls on the same path count once, so an edit and a
- * write to one file are one changed file. Each tool without a look is its own action, named as it is.
+ * write to one file are one changed file. Each tool without a look is its own action, named as its row names it.
  */
 function stepsSummary(tools: readonly ToolItem[]): string {
   const done = new Map<string, { phrase: Phrase; seen: Set<string>; names: Set<string> }>();
   for (const { call } of tools) {
     const look = lookOfTool(call.name);
     const key = look.action === undefined ? `tool ${call.name}` : look.action;
-    const action = done.get(key) ?? { phrase: look.action === undefined ? unknownTool(call.name) : actions[look.action], seen: new Set(), names: new Set() };
+    const action = done.get(key) ?? { phrase: look.action === undefined ? unknownTool(look.label) : actions[look.action], seen: new Set(), names: new Set() };
     action.seen.add(textArg(call.arguments, look.file)?.value ?? call.id);
     action.names.add(call.name);
     done.set(key, action);
@@ -1743,15 +1787,20 @@ function stepsSummary(tools: readonly ToolItem[]): string {
   return said.charAt(0).toUpperCase() + said.slice(1);
 }
 
+/** A fold of more calls than this starts closed, unless one failed or still runs. */
+const foldOver = 5;
+
 /**
- * Every run of calls folds into one line, so a busy turn does not bury the answer around it. The fold opens
- * itself when a call failed or is still running, which is when the reader needs to see it.
+ * A lone call is its own line. A run of calls folds under a line that says what they did, so a busy turn does not
+ * bury the answer around it. A long fold starts closed, and opens itself when a call failed or is still running,
+ * which is when the reader needs to see it.
  */
 function stepsView(tools: readonly ToolItem[]): Html {
+  if (tools.length === 1) return html`<div class="tools">${toolView(tools[0]!)}</div>`;
   const bad = tools.filter(failed).length;
   const running = tools.filter((t) => t.result.state === "running").length;
-  return html`<details class="steps${bad > 0 && " has-bad"}" id="steps-${tools[0]!.call.id}"${(bad > 0 || running > 0) && " open"}>
-<summary><span class="s-names">${stepsSummary(tools)}</span>${bad > 0 && html`<span class="s-bad">${bad} failed</span>`}${running > 0 && html`<span class="s-run"><span class="spin" aria-hidden="true"></span>${running} running</span>`}<span class="chev" aria-hidden="true">›</span></summary>
+  return html`<details class="steps${bad > 0 && " has-bad"}" id="steps-${tools[0]!.call.id}"${(tools.length <= foldOver || bad > 0 || running > 0) && " open"}>
+<summary><span class="s-names">${stepsSummary(tools)}</span>${bad > 0 && html`<span class="s-bad">${bad} failed</span>`}${running > 0 && html`<span class="s-run"><span class="spin" aria-hidden="true"></span>${running} running</span>`}<span class="s-count">${tools.length} calls</span><span class="chev" aria-hidden="true">›</span></summary>
 <div class="tools">${tools.map(toolView)}</div>
 </details>`;
 }
