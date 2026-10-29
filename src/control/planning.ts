@@ -13,14 +13,14 @@
  * of the thread's first message, and what the person answered since in front of each later one. What each message got
  * is stored under its request ID before it is sent, so a resend of the ID sends the same text.
  */
-import { createHash, randomBytes } from "node:crypto";
+import { createHash } from "node:crypto";
 import { z } from "zod";
 import { singleFlight } from "../single-flight.ts";
 import { HttpError } from "./http-error.ts";
 import type { ItemId, ItemRecord, Pipeline } from "./pipeline.ts";
 import type { Proposal, Question } from "./questions.ts";
 import type { Registry, Thread, ThreadId } from "./registry.ts";
-import { fencedBlocks } from "./review.ts";
+import { mint, tokenBlocks } from "./review.ts";
 
 export interface PlanningRecord {
   thread: ThreadId;
@@ -61,13 +61,9 @@ const blockSchema = z.object({
 
 /** Every block in the replies that echoes the token and reads as a plan, oldest first, each as its proposals. */
 export function planBlocks(replies: readonly string[], token: string): Proposal[][] {
-  return fencedBlocks(replies, planFence).flatMap((text) => {
-    let value: unknown;
-    try { value = JSON.parse(text); } catch { return []; }
-    const parsed = blockSchema.safeParse(value);
-    if (!parsed.success || parsed.data.token !== token) return [];
-    const block = createHash("sha256").update(JSON.stringify(parsed.data.items)).digest("hex").slice(0, 12);
-    return [parsed.data.items.map((item, i) => ({ block, index: i + 1, ...item }))];
+  return tokenBlocks(replies, planFence, blockSchema, token).map(({ items }) => {
+    const block = createHash("sha256").update(JSON.stringify(items)).digest("hex").slice(0, 12);
+    return items.map((item, i) => ({ block, index: i + 1, ...item }));
   });
 }
 
@@ -149,7 +145,7 @@ export function planning(options: { registry: Registry; pipeline: Pick<Pipeline,
     /** Marks a thread as planning, once. A repeat keeps its token. */
     begin(t: Thread): void {
       if (registry.agent(t).kind !== "harness") throw new HttpError(400, "a planning thread is a Nexus agent thread, not a Claude worker");
-      if (registry.planning(t.id) === null) registry.savePlanning({ thread: t.id, token: `${t.id}:${randomBytes(6).toString("hex")}`, read: 0, sent: [] });
+      if (registry.planning(t.id) === null) registry.savePlanning({ thread: t.id, token: mint(t.id), read: 0, sent: [] });
     },
     /**
      * The text to send to `t` under `requestId`: the guide before a planning thread's first message the harness took,

@@ -1,0 +1,12 @@
+$ nexus land th-1a850651f375
+nexus: pull request #301 is closed on GitHub outside this review, so there is nothing to land
+exit 5
+
+$ nexus land th-46fe8f6d3a50
+nexus: pull request #302 is merged on GitHub outside this review, so there is nothing to land
+exit 5
+
+$ nexus land th-c0ed8b2882a3
+Landing review rv-00000303 of PR #303: checking, round 1 of 5, reviewer th-e2efdb538c9e on gpt-6-astra, landing when approved
+no live check: 303a00000000 has no .nexus/verify, so the landing reads the pull request's statement of what could not be checked live
+exit 0

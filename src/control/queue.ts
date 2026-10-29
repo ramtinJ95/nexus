@@ -10,10 +10,11 @@
  */
 import { defaultClaudeModel } from "../claude-state.ts";
 import type { BootInputs, ProjectId } from "../project.ts";
-import { checkCaller, verifyCaller } from "./gate.ts";
+import { singleFlight } from "../single-flight.ts";
 import { HttpError } from "./http-error.ts";
 import type { Registry, StartKey, Thread, ThreadId } from "./registry.ts";
-import { checkStart, newThreadId, type StartRequest } from "./threads.ts";
+import { checkStart, newThreadId, resourcesOf, type StartRequest } from "./threads.ts";
+import { startedByNexus } from "./usage.ts";
 
 /** What the queue keeps of a thread until it starts. `request` is frozen when queued, its resources filled field by field from the project's. A request that names no node starts on the project's default when it starts, as any start does. */
 export interface QueuedRecord {
@@ -136,7 +137,6 @@ export function threadQueue(options: {
 }): ThreadQueue {
   const { registry, startThread, send, gate, log = () => {} } = options;
   const starting = new Map<ThreadId, Promise<Thread>>();
-  let running: Promise<void> | null = null;
 
   function queued(id: ThreadId): QueuedRecord {
     const record = registry.queuedThread(id);
@@ -194,6 +194,7 @@ export function threadQueue(options: {
     }
   }
 
+  const passes = singleFlight(pass);
   return {
     add(request, message, after, caller, key) {
       if (message !== null && request.claude !== undefined) throw new HttpError(400, "message is for a Nexus agent thread. A Claude worker's first prompt is its claude");
@@ -202,15 +203,11 @@ export function threadQueue(options: {
       for (const id of ids) {
         const t = registry.thread(id);
         if (t === undefined && registry.queuedThread(id) === undefined) throw new HttpError(404, `no thread ${id}`);
-        if (t !== undefined && (registry.isReviewer(id) || t.startedBy === checkCaller || t.startedBy === verifyCaller)) throw new HttpError(400, `thread ${id} is a review loop's reviewer or check thread, which merges no pull request of its own`);
+        if (t !== undefined && startedByNexus(registry, t)) throw new HttpError(400, `thread ${id} is a review loop's reviewer, check or verify thread, which merges no pull request of its own`);
       }
-      const size = request.resources ?? {};
       const record: QueuedRecord = {
         id: newThreadId(), title: request.title, project: project.id, startedBy: caller, createdAt: Date.now(), after: ids,
-        request: {
-          ...request,
-          resources: { cpus: size.cpus ?? project.resources.cpus, memoryGiB: size.memoryGiB ?? project.resources.memoryGiB, diskGiB: size.diskGiB ?? project.resources.diskGiB },
-        },
+        request: { ...request, resources: resourcesOf(request.resources, project) },
         message, status: "queued", startNow: null, lastError: null, startedAt: null, firstMessage: null,
       };
       registry.saveQueued(record, key);
@@ -230,12 +227,9 @@ export function threadQueue(options: {
       registry.saveQueued(next);
       return next;
     },
-    poll(): Promise<void> {
-      if (running === null) running = pass().finally(() => { running = null; });
-      return running;
-    },
+    poll: passes.join,
     async close() {
-      await running;
+      await passes.settled();
       await Promise.allSettled([...starting.values()]);
     },
   };

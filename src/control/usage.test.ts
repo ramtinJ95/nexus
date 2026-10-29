@@ -10,7 +10,7 @@ import { openRegistry, type Registry, type Thread, type ThreadId } from "./regis
 import { usageCounter } from "./usage-counter.ts";
 import { roleOf, tokenCount, usageFilter, type AgentCall, type Tokens } from "./usage.ts";
 import { reviewerCaller } from "./review.ts";
-import { checkCaller } from "./gate.ts";
+import { checkCaller, verifyCaller } from "./gate.ts";
 import { newPylonRecord } from "../tick.ts";
 import { processStream } from "../process-stream.ts";
 import type { ConversationId } from "../harness/host.ts";
@@ -371,7 +371,16 @@ test("each thread's role comes from who started it", () => {
   assert.equal(roleOf("nLAPTOP"), "builder");
   assert.equal(roleOf(reviewerCaller), "reviewer");
   assert.equal(roleOf(checkCaller), "check");
+  assert.equal(roleOf(verifyCaller), "verify");
   assert.equal(roleOf("something-else"), "other");
+});
+
+test("a verify pylon's calls count under the verify role", (t) => {
+  const registry = openOnline();
+  t.after(() => registry.close());
+  const verify = addThread(registry, { startedBy: verifyCaller });
+  registry.recordUsage(verify.id, [{ id: "v", agent: "claude", model: "claude-opus-5-5", at: Date.now(), input: 10, output: 1, cacheWrite: 0, cacheRead: 0 }]);
+  assert.deepEqual(registry.usageReport({ since: null, by: ["role"] }).by.role!.map((r) => [r.key, r.calls]), [["verify", 1]]);
 });
 
 test("the report groups calls by model, project, kind, role and UTC day, within the period and project asked for", (t) => {

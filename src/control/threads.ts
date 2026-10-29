@@ -41,6 +41,12 @@ export function checkStart(registry: Registry, request: StartRequest): Project {
   return project;
 }
 
+/** The size a start asks for, each field it leaves out filled from the project's. */
+export const resourcesOf = (size: StartRequest["resources"], project: Pick<Project, "resources">): BootInputs["resources"] => ({
+  cpus: size?.cpus ?? project.resources.cpus, memoryGiB: size?.memoryGiB ?? project.resources.memoryGiB, diskGiB: size?.diskGiB ?? project.resources.diskGiB,
+  ...size?.nestedVirtualization === true ? { nestedVirtualization: true as const } : {},
+});
+
 /** A shorter ID or a ref name may resolve to another commit by the time the pylon boots. */
 
 /** What the mirror read for the thread's ref, or why the thread boots fresh without a template. */
@@ -105,11 +111,7 @@ export function threadStarter(options: { registry: Registry; harness: Pick<Harne
     // Every boot pulls the dotfiles through the allowlist. A template build pulls none, so their host stays out of the setup hash.
     const network = { allowedHosts: withHttpsHosts(effectiveAllowedHosts(project), [dotfiles.repo]), secrets: bootSecrets(project) };
 
-    const size = request.resources ?? {};
-    const resources = {
-      cpus: size.cpus ?? project.resources.cpus, memoryGiB: size.memoryGiB ?? project.resources.memoryGiB, diskGiB: size.diskGiB ?? project.resources.diskGiB,
-      ...size.nestedVirtualization === true ? { nestedVirtualization: true as const } : {},
-    };
+    const resources = resourcesOf(request.resources, project);
     const id = queuedId ?? newThreadId();
     const pylonId = `pylon-${id}` as PylonId;
     const placement: Placement = named ? { how: "named", node: request.node as NodeName }

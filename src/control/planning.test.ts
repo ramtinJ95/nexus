@@ -87,6 +87,7 @@ test("a block makes each card once, read twice, by passes that overlap, or again
   const first = await fixture(t, path);
   const thread = await first.planner();
   const token = first.registry.planning(thread.id)!.token;
+  assert.match(token, new RegExp(`^${thread.id}:[0-9a-f]{12}$`), "the token is the thread's ID and random hex, as the review loop's are");
   first.plans.begin(thread);
   assert.equal(first.registry.planning(thread.id)!.token, token, "a second begin keeps the token");
   first.reply(thread, `Plan:\n${block(token, [a, b])}`);

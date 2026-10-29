@@ -200,7 +200,7 @@ An item's thread is not stored. It is the thread the start request ID `pipeline:
 
 - `input`, `output`, `cacheWrite` and `cacheRead` are token counts. For Claude Code they are `input_tokens`, `output_tokens`, `cache_creation_input_tokens` and `cache_read_input_tokens`. A call's total is their sum.
 - `model` is the model the record names. `at` is the call's time in Unix milliseconds.
-- `thread` is the thread the call was read under, and `project` its project. `role` is `reviewer` or `check` for a thread the review loop started, `builder` for one a person started from a tailnet node, and `other` for any other starter.
+- `thread` is the thread the call was read under, and `project` its project. `role` is `reviewer`, `check` or `verify` for a thread the review loop started, `builder` for one a person started from a tailnet node, and `other` for any other starter. Calls of verify pylons recorded before `verify` existed stay under `other`.
 - A call already recorded keeps its `thread`, `project`, `role` and `at`, and each count keeps the larger of the stored value and the new one. A read under another thread changes nothing, so a session copied into another pylon stays with the thread that first recorded it. Claude Code writes one record per content block, and each record carries the call's whole usage, so a call read again, read by two reads, or copied into another file by a resume or a fork counts once.
 - A call with no tokens, and Claude Code's own `<synthetic>` messages, give no record. A pylon's read is refused whole when a call's ID does not start with its own agent's prefix, `claude:` or `pi:`, or a count is over 10⁹, so a pylon cannot write a harness call or a sum SQLite cannot hold.
 

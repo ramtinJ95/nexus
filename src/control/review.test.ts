@@ -9,7 +9,7 @@ import type { LiveHash, NodeName, PylonId, TailnetNodeId } from "../protocol.ts"
 import type { AutoReview, ProjectId, SecretGrant } from "../project.ts";
 import type { ChangedFile, LabelResult, MergeResult, PrSnapshot } from "./github.ts";
 import type { AutomatedMessage } from "./inbox.ts";
-import { holdRule, landingHolds } from "./policy.ts";
+import { holdRule, landingHolds, reservedNames } from "./policy.ts";
 import { agentModelFailure, agentReplies, humanLabel, phaseNote, reviewerCaller, reviewLoop, reviewPrefix, type Review } from "./review.ts";
 import { agentInbox } from "./inbox.ts";
 import { fakeHarness } from "./fake-harness.ts";
@@ -210,6 +210,7 @@ test("a Claude builder's PR gets a harness reviewer, and findings, fixes and new
   assert.equal(f.sent[0]!.to, reviewer);
   assert.ok(f.sent[0]!.message.text.startsWith(reviewPrefix));
   assert.match(f.sent[0]!.message.text, new RegExp(`git checkout --detach ${head1}`));
+  for (const name of Object.values(reservedNames)) assert.ok(f.sent[0]!.message.text.includes(name), `the reviewer is told that ${name} need the person`);
   assert.match(f.sent[0]!.message.text, /Not checked live: the cache under real traffic/, "the description reaches the reviewer");
   assert.equal(f.sent[0]!.message.sender, "review");
   assert.equal(f.registry.isReviewer(reviewer), true);
@@ -1591,6 +1592,17 @@ test("a PR merged or closed outside a review that does not land ends it quietly,
   await fixing.poll();
   assert.deepEqual(i.review().phase, { kind: "closed" });
   assert.equal(i.sent.length, 2, "the reviewer gets no next round");
+});
+
+test("an approved review whose PR the watch reads as closed or merged outside it is not landed", async (t) => {
+  for (const state of ["closed", "merged"] as const) {
+    const f = fixture(t);
+    const loop = await approved(f, null);
+    assert.equal(f.review().phase.kind, "approved");
+    f.watched(state);
+    assert.throws(() => loop.land(f.builder, "nLAPTOP"), { status: 409, message: new RegExp(`pull request #\\d+ is ${state} on GitHub outside this review, so there is nothing to land`) });
+    assert.equal(f.review().phase.kind, "approved", `a ${state} PR starts no landing`);
+  }
 });
 
 test("a review that lands still sees a merge made outside it through, and a real failure while the PR is open still asks the person", async (t) => {

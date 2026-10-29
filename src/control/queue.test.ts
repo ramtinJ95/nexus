@@ -147,14 +147,16 @@ test("a queue record is checked as a start is, and freezes the size the project 
   refused(() => q.add(f.request({ node: "nowhere" }), null, [a], laptop), 400, /no node nowhere/);
   refused(() => q.add(f.request({ commit: "abc" }), null, [a], laptop), 400, /scratch project/);
   refused(() => q.add(f.request({ claude: "fix it" }), "Fix it.", [a], laptop), 400, /message is for a Nexus agent thread/);
-  refused(() => q.add(f.request(), null, [f.thread("th-review", reviewerCaller)], laptop), 400, /reviewer or check thread/);
-  refused(() => q.add(f.request(), null, [f.thread("th-check", checkCaller)], laptop), 400, /reviewer or check thread/);
-  refused(() => q.add(f.request(), null, [f.thread("th-verify", verifyCaller)], laptop), 400, /reviewer or check thread/);
+  refused(() => q.add(f.request(), null, [f.thread("th-review", reviewerCaller)], laptop), 400, /reviewer, check or verify thread/);
+  refused(() => q.add(f.request(), null, [f.thread("th-check", checkCaller)], laptop), 400, /reviewer, check or verify thread/);
+  refused(() => q.add(f.request(), null, [f.thread("th-verify", verifyCaller)], laptop), 400, /reviewer, check or verify thread/);
   assert.deepEqual(f.registry.queuedThreads(), [], "a refused start records nothing");
 
   const record = q.add(f.request({ resources: { cpus: 4 } }), "Fix it.", [a, a], laptop);
   assert.deepEqual(record.after, [a]);
   assert.deepEqual(record.request, { project: project.id, title: "After", resources: { cpus: 4, memoryGiB: 4, diskGiB: 10 } });
+  const nested = q.add(f.request({ resources: { nestedVirtualization: true } }), null, [a], laptop);
+  assert.deepEqual(nested.request.resources, { ...project.resources, nestedVirtualization: true }, "the queue fills a size as a start does");
   assert.match(record.id, /^th-[0-9a-f]{12}$/);
   assert.deepEqual(f.registry.queuedThread(record.id), record);
   assert.equal(queuedView(f.registry, record).node, node, "a start that names no node shows the project's default");

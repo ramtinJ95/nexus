@@ -31,7 +31,7 @@ import { agentView, type AgentView } from "./thread-agent.ts";
 import type { TailnetNodeId } from "../protocol.ts";
 import { usageLimitText, type ClaudeConversation, type ClaudeEntry, type PromptSource, type TranscriptImage } from "../claude-transcript.ts";
 import { queuedOf } from "./claude-conversation.ts";
-import { blocks as blocking, cancellable, findingsOf, landable, liveNote, phaseNote, pushedHead, roundNote, roundsSpent, type Review } from "./review.ts";
+import { blocks as blocking, cancellable, cannotLand, findingsOf, liveNote, phaseNote, pushedHead, roundNote, roundsSpent, type Review } from "./review.ts";
 import { heldBy, holdRule, reservedNames } from "./policy.ts";
 import { askedIn, askQuestionId, type AnswerRefusal, type AskedQuestion, type Question } from "./questions.ts";
 import { gib, nodePylons, overcommitted } from "./placement.ts";
@@ -572,7 +572,7 @@ function needsOf(c: Pick<Context, "registry" | "row">, detail: DashboardOptions[
     const d = detail(t);
     const nudged = c.registry.nudge(t.id);
     const needs: Need[] = [
-      ...d.review?.phase.kind === "needs-person" || (holds && landOffered(d)) ? [{ kind: "review" as const, d, since: heldSince(c.registry, d.review!) }] : [],
+      ...d.review?.phase.kind === "needs-person" || (holds && cannotLand(d.review!, d.thread, reviewedPr(d, d.review!)) === null) ? [{ kind: "review" as const, d, since: heldSince(c.registry, d.review!) }] : [],
       ...(d.questions ?? []).filter((q) => q.answer === null).map((question) => ({ kind: "question" as const, d, question, since: question.askedAt })),
       ...nudged?.state === "person" ? [{ kind: "nudge" as const, d, since: nudged.turn }] : [],
     ];
@@ -617,8 +617,8 @@ function needCard(c: Context, n: Need): [what: string, body: Html] {
   switch (n.kind) {
     case "review": {
       const card = landing(c, d, (name) => `${name}-${t.id}`);
-      if (!landOffered(d)) return ["Review needs you", html`${card}`];
-      const summary = d.pullRequests?.find((p) => p.repo === d.review!.pr.repo && p.number === d.review!.pr.number)?.summary;
+      if (cannotLand(d.review!, t, reviewedPr(d, d.review!)) !== null) return ["Review needs you", html`${card}`];
+      const summary = reviewedPr(d, d.review!)?.summary;
       const quote = d.review!.rounds.at(-1)!.verdict?.notCheckedLive ?? null;
       return [d.review!.phase.kind === "needs-person" ? "Held review" : "Approved review", html`${summary !== undefined && summary !== "" && html`<p class="need-summary">${inline(summary)}</p>`}
 <div class="need-unchecked"><h3>Not checked live</h3>${quote === null ? html`<p class="land-note">The reviewer quoted nothing.</p>` : prose(quote)}</div>
@@ -968,12 +968,9 @@ ${aq.options.map((o, j) => html`<div class="ask-opt"><label><input type="${aq.mu
 
 const short = (commit: string) => html`<code title="${commit}">${commit.slice(0, 12)}</code>`;
 
-/** Whether the review's card offers it for landing. A PR closed or merged outside the review leaves it held, but there is nothing left to land. */
-function landOffered(d: ThreadDetail): boolean {
-  const r = d.review;
-  const pr = r == null ? undefined : d.pullRequests?.find((p) => p.repo === r.pr.repo && p.number === r.pr.number);
-  return r != null && landable(r) && d.thread.status === "active" && (pr === undefined || pr.state === "open");
-}
+/** The review's PR as the PR watch last read it. */
+const reviewedPr = (d: ThreadDetail, r: Review) => d.pullRequests?.find((p) => p.repo === r.pr.repo && p.number === r.pr.number);
+
 
 /**
  * Above the composer, for a builder whose review the person can land or is landing: why it waits for them, with the
@@ -1014,8 +1011,8 @@ ${phase.kind === "checking" ? html`<p class="land-note">.nexus/check runs at ${s
 <div class="land-act need-act">${cancelReview(d.thread.id, r, "btn-ghost")}</div>`}
 </section>`;
   }
-  if (!landOffered(d)) return r.phase.kind === "needs-person" ? heldReview(c, d, r, r.phase.reasons, id) : null;
-  const pr = d.pullRequests?.find((p) => p.repo === r.pr.repo && p.number === r.pr.number);
+  const pr = reviewedPr(d, r);
+  if (cannotLand(r, d.thread, pr) !== null) return r.phase.kind === "needs-person" ? heldReview(c, d, r, r.phase.reasons, id) : null;
   const round = r.rounds.at(-1)!;
   // The PR watch can read a push before the loop's next pass starts a round on it. A stopped watch reads nothing new.
   const moved = d.prWatch?.stopped ? null : pushedHead(r, pr);
@@ -1059,7 +1056,7 @@ ${moved !== null ? html`<p class="land-note">The PR watch last read the pull req
  * then owns the pull request, and archives its reviewer.
  */
 function heldReview(c: Context, d: ThreadDetail, r: Review, reasons: readonly string[], id: (name: string) => string): Html {
-  const pr = d.pullRequests?.find((p) => p.repo === r.pr.repo && p.number === r.pr.number);
+  const pr = reviewedPr(d, r);
   const outside = pr === undefined || pr.state === "open" ? null : pr.state;
   const land = c.registry.project(d.thread.project)?.autoReview?.land === true;
   const refusal = land || c.landRefusal === "no review loop" ? c.landRefusal : null;
