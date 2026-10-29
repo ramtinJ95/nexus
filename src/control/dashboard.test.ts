@@ -986,6 +986,7 @@ test("each thread state offers only the actions and prompt box that apply", asyn
   await s.call("POST", `/v1/threads/${fix.id}/archive`);
   const archived = await state();
   assert.deepEqual(archived.actions, ["abort", "delete", "unarchive"], "an archived thread can still abort, but not retry");
+  assert.match((await s.call("GET", `/threads/${fix.id}`)).text, /<button type="button" class="tab tab-term" hidden role="tab"/, "its terminal tab waits, hidden, for an unarchive");
   assert.ok(!archived.prompt && !archived.visit);
   assert.equal(archived.chip, "parked");
   assert.equal(archived.dock, "Stuck 2 tasks hit the restart limit and hold the run. Unarchive the thread to retry them. Abort An archived thread takes no messages, because its pylon stays paused. Unarchive the thread to send one.", "nor attach, since its pylon stays paused");
@@ -1025,6 +1026,9 @@ test("the state bar says the agent waits for the person while a question is open
   const html = (await s.call("GET", `/threads/${fix.id}`)).text;
   assert.deepEqual(await bar(), { state: "waiting", text: `Waiting for you Claude needs your permission to use Bash, in the pylon's terminal. Open terminal nexus attach ${fix.id} Copy`, send: "followUp" });
   assert.match(html, /<button type="button" class="btn btn-xs" data-terminal>/, "the dialog's terminal is one click away");
+  s.registry.recordReply(fix.id, Date.now());
+  assert.equal(JSON.parse((await s.call("GET", `/v1/threads/${fix.id}`)).text).attention, "reply");
+  assert.equal((await bar()).state, "waiting", "an unread reply outranks the wait in attention, but the dialog still waits");
 });
 
 test("a paused pylon's prompt box says a message wakes it", async (t) => {

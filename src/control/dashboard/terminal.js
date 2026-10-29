@@ -39,6 +39,8 @@ export function joinTerminal(term, socket, status) {
   const encoder = new TextEncoder();
   const send = (data) => { if (!over && socket.readyState === 1) socket.send(data); };
   socket.binaryType = "arraybuffer";
+  // The terminal may be resized while the socket connects, and a resize before `attached` replaces the size it opens with.
+  socket.addEventListener("open", () => send(JSON.stringify({ type: "resize", cols: term.cols, rows: term.rows })));
   socket.addEventListener("message", ({ data }) => {
     heard = true;
     if (typeof data !== "string") return term.write(new Uint8Array(data));

@@ -710,12 +710,12 @@ function threadPage(c: Context, d: ThreadDetail, node: NodeRecord, view: AgentVi
 <span class="chip chip-${tone}">${dot(tone)}<span class="chip-label">${label}</span></span>
 ${actions.length > 0 && html`<div class="bar-actions" id="thread-actions">${actions}</div><button type="button" class="icon-btn more" data-open="actions" aria-label="Thread actions" aria-controls="thread-actions">⋯</button>`}
 </header>
-<div class="tabs" id="tabs" role="tablist" aria-label="Open views" data-thread="${t.id}"><button type="button" class="tab active" role="tab" aria-selected="true" aria-controls="scroll" data-tab="convo">${icon("chat")}<span class="tab-name">${t.title}</span></button>${open && html`<button type="button" class="tab tab-term" role="tab" aria-selected="false" aria-controls="term-view" data-tab="term" title="A terminal in the pylon, as nexus attach ${t.id} gives">${icon("terminal")}<span class="tab-name">Terminal</span></button>`}</div>
+<div class="tabs" id="tabs" role="tablist" aria-label="Open views" data-thread="${t.id}"><button type="button" class="tab active" role="tab" aria-selected="true" aria-controls="scroll" data-tab="convo">${icon("chat")}<span class="tab-name">${t.title}</span></button>${t.status !== "deleted" && html`<button type="button" class="tab tab-term"${!open && " hidden"} role="tab" aria-selected="false" aria-controls="term-view" data-tab="term" title="A terminal in the pylon, as nexus attach ${t.id} gives">${icon("terminal")}<span class="tab-name">Terminal</span></button>`}</div>
 <div class="strip" id="strip" data-live>${strip(d)}</div>
 <div id="facts" data-live hidden>${facts(d)}</div>
 <div class="scroll" id="scroll" role="tabpanel"><div class="convo" id="convo" data-rendered-reply-at="${read === null ? "" : renderedReplyAt ?? ""}"${shows !== null && html` data-shows="${shows}"`} data-live${agent !== "none" && t.status !== "deleted" && html` data-stream="/threads/${t.id}/stream"`}>${shows === null && convo(t, view, items, model, c.now)}</div></div>
 <section class="file-view" id="file-view" role="tabpanel" aria-label="File diff" hidden></section>
-${open && termView(t, agent)}
+${t.status !== "deleted" && termView(t, agent)}
 <div class="dock">
 <p id="action-error" class="error" role="alert" hidden></p>
 <p id="action-status" class="comp-note" role="status" hidden></p>
@@ -730,8 +730,9 @@ ${open && termView(t, agent)}
 }
 
 /**
- * The terminal tab, which client.js attaches on its first show, as `nexus attach` does. A Nexus agent runs on the
- * control plane, so its thread's terminal is the pylon's Herdr session and its conversation stays in the composer.
+ * The terminal tab, which client.js attaches on its first show, as `nexus attach` does, and shows while the thread is
+ * open, so an unarchive brings it back without a reload. A Nexus agent runs on the control plane, so its thread's
+ * terminal is the pylon's Herdr session and its conversation stays in the composer.
  */
 function termView(t: Thread, agent: ThreadAgent["kind"]): Html {
   return html`<section class="term-view" id="term-view" role="tabpanel" aria-label="Terminal" hidden>
@@ -1310,8 +1311,9 @@ function runOf(d: ThreadDetail, view: AgentView | null, items: readonly Item[]):
   const parked = d.agent?.parkedTasks ?? 0;
   if (parked > 0) return { kind: "parked", tasks: parked, busy };
   const open = (d.questions ?? []).filter((q) => q.answer === null);
-  const terminal = d.attention === "waiting";
-  if (terminal || open.some((q) => q.ask !== undefined) || (!busy && (open.length > 0 || d.attention === "limited"))) {
+  // Attention ranks a reply above a wait, so the session's own state says whether a dialog waits in the terminal.
+  const terminal = d.thread.sessionWaiting === true;
+  if (terminal || open.some((q) => q.ask !== undefined) || (!busy && (open.length > 0 || d.thread.usageLimit !== undefined))) {
     const why = terminal ? `${d.thread.sessionWaitingMessage ?? "It waits for input"}, in the pylon's terminal.`
       : open.length > 0 ? `${open.length === 1 ? "A question waits" : `${open.length} questions wait`} for your answer, above.`
       : `${usageLimitText(d.thread.usageLimit ?? { resetsAt: null }, Date.now())}.`;

@@ -9,7 +9,7 @@ function fakeTerm() {
     listeners[kind].push(listener);
     return { dispose: () => { listeners[kind] = listeners[kind].filter((l) => l !== listener); } };
   };
-  const term = { written: [], focused: 0, write(bytes) { term.written.push(Buffer.from(bytes).toString()); }, focus() { term.focused++; }, onData: on("data"), onBinary: on("binary"), onResize: on("resize") };
+  const term = { cols: 80, rows: 24, written: [], focused: 0, write(bytes) { term.written.push(Buffer.from(bytes).toString()); }, focus() { term.focused++; }, onData: on("data"), onBinary: on("binary"), onResize: on("resize") };
   return { term, type: (text) => listeners.data.forEach((l) => l(text)), resize: (cols, rows) => listeners.resize.forEach((l) => l({ cols, rows })) };
 }
 
@@ -18,7 +18,7 @@ function fakeSocket() {
   const socket = new EventTarget();
   Object.assign(socket, { readyState: 1, sent: [], closed: false, send(data) { socket.sent.push(typeof data === "string" ? data : Buffer.from(data).toString()); }, close() { socket.closed = true; } });
   const message = (data) => socket.dispatchEvent(Object.assign(new Event("message"), { data }));
-  return { socket, text: (value) => message(JSON.stringify(value)), bytes: (text) => message(new TextEncoder().encode(text).buffer), close: () => socket.dispatchEvent(new Event("close")) };
+  return { socket, open: () => socket.dispatchEvent(new Event("open")), text: (value) => message(JSON.stringify(value)), bytes: (text) => message(new TextEncoder().encode(text).buffer), close: () => socket.dispatchEvent(new Event("close")) };
 }
 
 test("the attach route is on the page's own host, over wss behind HTTPS, with the terminal's size", () => {
@@ -31,6 +31,10 @@ test("a joined terminal waits for the pylon, takes focus once attached, and carr
   const s = fakeSocket();
   const statuses = [];
   joinTerminal(t.term, s.socket, (status) => statuses.push(status));
+  t.term.cols = 132;
+  s.open();
+  assert.deepEqual(s.socket.sent, [JSON.stringify({ type: "resize", cols: 132, rows: 24 })], "a resize while it connected replaces the size it opens with");
+  s.socket.sent.length = 0;
   s.text({ type: "waiting", pylon: "paused" });
   assert.deepEqual(statuses, [{ text: "Waiting for the pylon, which is paused. Attaching wakes it.", over: false }]);
   assert.equal(t.term.focused, 0);

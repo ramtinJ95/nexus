@@ -127,6 +127,7 @@ function swap(regions) {
   applyFilter();
   tick();
   noticeFacts();
+  terminalFollows();
 }
 
 // While the stream is open it alone writes the conversation, so a poll that started before a frame cannot put
@@ -982,9 +983,20 @@ document.addEventListener("click", (event) => {
   if (termView !== null && event.target instanceof Element && event.target.closest("[data-terminal]") !== null) showTab(terminalTab);
 });
 
+/** The Terminal tab shows while the thread is open, so an archive hides it and an unarchive brings it back. */
+function terminalFollows() {
+  const tab = tabsBar?.querySelector('[data-tab="term"]');
+  const facts = factsNow();
+  if (tab == null || facts === null) return;
+  tab.hidden = threadClosed(facts);
+  if (tab.hidden && activeTab === terminalTab) showTab(null);
+}
+
 // The terminal tab attaches on its first show, as `nexus attach` does, and stays attached while the reader looks at
-// other tabs, so it holds the pylon awake as an attached terminal does until it is detached or the page closes.
+// other tabs, so it holds the pylon awake as an attached terminal does until it is detached or the page closes. An
+// ended terminal keeps its last screen until the next attach replaces it.
 let terminal = null;
+let lastTerminal = null;
 async function showTerminal() {
   if (terminal !== null) return terminal.then((t) => t?.focus());
   const status = document.getElementById("term-status");
@@ -998,16 +1010,17 @@ async function showTerminal() {
   };
   shown({ text: "Attaching…", over: false });
   terminal = import("./term-view.js").then(({ openTerminal }) => {
+    lastTerminal?.close();
     document.getElementById("term-host").replaceChildren();
-    return openTerminal(document.getElementById("term-host"), thread, shown);
+    lastTerminal = openTerminal(document.getElementById("term-host"), thread, shown);
+    return lastTerminal;
   }).catch((err) => {
     shown({ text: `The terminal did not load: ${err.message}`, over: true });
     return null;
   });
   const opened = await terminal;
-  const close = () => opened?.close();
-  detach.onclick = close;
-  again.onclick = () => { close(); void showTerminal(); };
+  detach.onclick = () => opened?.close();
+  again.onclick = () => { void showTerminal(); };
   opened?.focus();
 }
 
