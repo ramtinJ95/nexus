@@ -78,7 +78,7 @@ export function parseFlags(args: readonly string[]): { command: string | undefin
 function resolve(tailnet: Tailnet, flag: string, name: string, errors: string[]): Device | undefined {
   const all = [tailnet.self, ...tailnet.peers];
   const wanted = name.toLowerCase();
-  const matches = all.filter((d) => d.name === wanted || d.host === wanted);
+  const matches = all.filter((d) => d.name === wanted || d.host === wanted || d.id === name);
   if (matches.length === 1) return matches[0];
   if (matches.length === 0) errors.push(`${flag} ${name}: tailscale knows no such device. It knows ${all.map((d) => d.name).sort().join(", ")}`);
   else errors.push(`${flag} ${name}: more than one device has that name: ${matches.map((d) => d.host).join(", ")}. Give the full MagicDNS name`);
@@ -289,7 +289,7 @@ export type Facts = {
   secretNames: readonly string[];
   gitKey: boolean;
 } & (
-  | { role: "control"; port: number; signedIn: boolean; admitted: boolean; docker: Docker; dockerGroup: boolean; image: boolean }
+  | { role: "control"; signedIn: boolean; admitted: boolean; docker: Docker; dockerGroup: boolean; image: boolean }
   | { role: "node"; control: Device; digest: string }
 );
 
@@ -304,7 +304,7 @@ const addSecret = (name: string, value: string) =>
 export function left(facts: Facts): Item[] {
   const items: Item[] = [];
   const { self } = facts;
-  const control = facts.role === "control" ? { name: self.name, url: `http://${self.host}:${facts.port}` } : { name: facts.control.name, url: `http://${facts.control.host}:${controlPort}` };
+  const control = facts.role === "control" ? self : facts.control;
   const rerun = facts.role === "control" ? "sudo deploy/install.sh" : `sudo deploy/install.sh --node ${control.name}`;
   if (facts.role === "control" && !facts.signedIn) items.push({
     stage: "credentials",
@@ -330,12 +330,8 @@ export function left(facts: Facts): Item[] {
   });
   items.push({
     stage: "setup",
-    say: `Set up the nexus CLI on your Mac, in a nexus checkout with Node 26, before the steps below that run nexus there. ~/.local/bin must be on the Mac's PATH. When the Mac runs the Tailscale app rather than a SOCKS proxy on localhost:1055, add "socks": "none" to cli.json.`,
-    run: [
-      `npm ci && mkdir -p ~/.local/bin && ln -sf "$PWD/deploy/mac/nexus" ~/.local/bin/nexus`,
-      `mkdir -p ~/.config/nexus && printf '{"url":"${control.url}"}\\n' > ~/.config/nexus/cli.json`,
-      `nexus --version`,
-    ],
+    say: `Set up the nexus CLI on your Mac, in a nexus checkout with Node 26, before the steps below that run nexus there. When the Mac reaches the tailnet through a SOCKS proxy rather than the Tailscale app, add --socks localhost:1055 to nexus connect.`,
+    run: ["deploy/mac/install", `nexus connect ${control.host}`],
   });
   if (!facts.secretNames.includes("CLAUDE_CODE_OAUTH_TOKEN")) items.push({
     stage: "credentials",
@@ -476,7 +472,7 @@ async function gather(flags: Flags): Promise<Facts> {
     if (control === undefined) throw new Error(errors.join("; "));
     return { ...common, role: "node", control, digest: tokenDigest(deployer.token) };
   }
-  const config = JSON.parse(await readFile(paths.control, "utf8")) as { listen: { port: number }; callers: string[]; harness: { credentials: string } };
+  const config = JSON.parse(await readFile(paths.control, "utf8")) as { callers: string[]; harness: { credentials: string } };
   const credentials = await readFile(config.harness.credentials, "utf8").then(
     (text) => Object.keys((JSON.parse(text) as { credentials?: object }).credentials ?? {}).length > 0,
     () => false,
@@ -486,7 +482,7 @@ async function gather(flags: Flags): Promise<Facts> {
   const docker: Docker = !await succeeds(["--version"]) ? { kind: "missing" } : await succeeds(["buildx", "version"]) ? { kind: "ready" } : await dockerSource();
   const image = await readdir(paths.artifacts).then((entries) => entries.some((e) => e.startsWith("img-")), () => false);
   return {
-    ...common, role: "control", port: config.listen.port, signedIn: credentials,
+    ...common, role: "control", signedIn: credentials,
     admitted: config.callers.length > 0, docker, dockerGroup: groups.includes("docker"), image,
   };
 }

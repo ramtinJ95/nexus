@@ -213,6 +213,11 @@ test("control-only flags and this machine as --node are refused for a node insta
   assert.match(found.join("\n"), /--dotfiles is for the control machine/);
 });
 
+test("--admit takes the tailnet node ID that nexus connect prints, as well as a name", () => {
+  const written = files(run(["--admit", "nMac1CNTRL", "--dotfiles", dotfiles]));
+  assert.deepEqual(parseConfig(JSON.stringify(value(written, paths.control))).callers, ["nMac1CNTRL"]);
+});
+
 test("a name two devices share is ambiguous, and the full MagicDNS name picks one", () => {
   const shared = parseTailnet(JSON.stringify({
     ...JSON.parse(status),
@@ -225,7 +230,7 @@ test("a name two devices share is ambiguous, and the full MagicDNS name picks on
 
 const freshControl: Facts = {
   self: tailnet.self, secretNames: [], gitKey: false,
-  role: "control", port: 7470, signedIn: false, admitted: false, docker: { kind: "missing" }, dockerGroup: false, image: false,
+  role: "control", signedIn: false, admitted: false, docker: { kind: "missing" }, dockerGroup: false, image: false,
 };
 
 test("a fresh control machine is left every step: setup, then the agents' credentials, then the first image", () => {
@@ -247,9 +252,8 @@ test("a fresh control machine is left every step: setup, then the agents' creden
   assert.match(all, /ssh-keygen -t ed25519 -N '' -C nexus@rj-firebat -f \/etc\/nexus\/git_ed25519/);
   assert.match(all, /usermod --append --groups docker nexus/);
   assert.match(all, /nexus image rollout <image ID it printed> --wait/);
-  const cli = runs.findIndex((run) => run.some((command) => command.includes("~/.config/nexus/cli.json")));
-  assert.match(runs[cli]!.join("\n"), /printf '\{"url":"http:\/\/rj-firebat\.tail1234\.ts\.net:7470"\}\\n' > ~\/\.config\/nexus\/cli\.json/);
-  assert.match(runs[cli]![0]!, /mkdir -p ~\/\.local\/bin && ln -sf/, "the bin directory is made before the link");
+  const cli = runs.findIndex((run) => run.includes("deploy/mac/install"));
+  assert.deepEqual(runs[cli], ["deploy/mac/install", "nexus connect rj-firebat.tail1234.ts.net"]);
   assert.ok(runs.every((run, i) => i > cli || !run.some((command) => command.startsWith("nexus image"))), "no nexus command before the CLI is set up");
   assert.ok(runs.findIndex((run) => run.some((command) => command.startsWith("nexus image"))) > cli);
 });
@@ -293,7 +297,7 @@ test("the credentials are printed under their own heading as the next step, and 
 test("a finished control machine is left only the Mac CLI", () => {
   const items = left({ ...freshControl, secretNames: ["CLAUDE_CODE_OAUTH_TOKEN", "GH_TOKEN"], gitKey: true, signedIn: true, admitted: true, docker: { kind: "ready" }, dockerGroup: true, image: true });
   assert.equal(items.length, 1);
-  assert.match(items[0]!.run.join("\n"), /mkdir -p ~\/\.local\/bin && ln -sf "\$PWD\/deploy\/mac\/nexus" ~\/\.local\/bin\/nexus/);
+  assert.deepEqual(items[0]!.run, ["deploy/mac/install", "nexus connect rj-firebat.tail1234.ts.net"]);
 });
 
 test("a node is told how to register itself with the control plane and its peers", () => {
@@ -304,6 +308,6 @@ test("a node is told how to register itself with the control plane and its peers
   assert.match(all, /^sudo deploy\/install\.sh --node infra-testbench --peer rj-firebat$/m);
   assert.match(all, /^sudo deploy\/install\.sh --node infra-testbench --peer <other node> --peer <another node>$/m, "this node admits the other nodes too");
   assert.match(all, /^sudo deploy\/install\.sh --node infra-testbench$/m, "the git key step reruns the node install");
-  assert.match(all, /"url":"http:\/\/infra-testbench\.tail1234\.ts\.net:7470"/);
+  assert.match(all, /^nexus connect infra-testbench\.tail1234\.ts\.net$/m, "the Mac connects to the control plane, not to this node");
   assert.equal(formatLeft(items).split("\n")[0], "What is left:");
 });

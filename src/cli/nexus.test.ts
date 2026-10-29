@@ -1242,7 +1242,7 @@ test("connect says what this device may do, and the line that admits it when it 
   const s = await setup(t);
   const env = { NEXUS_URL: "", NEXUS_SOCKS: "" };
   const config = join(s.home, ".config", "nexus", "cli.json");
-  const restart = "in /etc/nexus/control.json on the control plane's machine, then run: sudo systemctl restart nexus-control";
+  const admit = "run this on the control plane's machine, in its nexus checkout: sudo deploy/install.sh --admit";
 
   s.callAs(phone);
   const person = await s.nexus(["connect", s.localUrl, "--socks", "none"], env);
@@ -1253,7 +1253,7 @@ test("connect says what this device may do, and the line that admits it when it 
     "  may read threads, projects and nodes",
     "  may start and message threads",
     "  may not deploy, land reviews and build images",
-    `To let it deploy, add "${phone}" to "deployers" ${restart}`,
+    `To let it deploy, ${admit} ${phone}`,
     "",
   ].join("\n"));
   assert.equal((await s.nexus(["threads"], env)).code, 0, "a person reads threads");
@@ -1267,8 +1267,7 @@ test("connect says what this device may do, and the line that admits it when it 
     "  may not read threads, projects and nodes",
     "  may not start and message threads",
     "  may not deploy, land reviews and build images",
-    `To let it use Nexus, add "nSTRANGER" to "callers" ${restart}`,
-    `Add it to "deployers" too to let it deploy.`,
+    `To let it use Nexus and deploy, ${admit} nSTRANGER`,
     `NEXUS_URL is set, so it overrides ${config} until you unset it.`,
     "",
   ].join("\n"));
