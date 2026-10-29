@@ -24,7 +24,7 @@ import { countedCapacity, type HerdrStatus, type NodeHealth, type NodeName } fro
 import { githubTokenGrant, linkedPort, type Project, type ProjectId } from "../project.ts";
 import { checkoutDir, harnessNamed } from "../sessions.ts";
 import type { ThreadDetail, ThreadRow } from "./api.ts";
-import { attentions, needsPerson } from "./attention.ts";
+import { attentions, needsPerson, type Attention } from "./attention.ts";
 import type { NodeRecord, Output, Preview, Registry, Thread, ThreadAgent, ThreadId } from "./registry.ts";
 import { agentView, type AgentView } from "./thread-agent.ts";
 import type { TailnetNodeId } from "../protocol.ts";
@@ -68,6 +68,8 @@ export type LandRefusal = "no review loop" | "not a deployer";
 interface Context {
   registry: Registry; row: DashboardOptions["row"]; deploys: DashboardOptions["deploys"]; now: number; caller: TailnetNodeId; landRefusal: LandRefusal | null;
   answerRefusal(question: Question): AnswerRefusal | null;
+  /** What waits on the person, which the sidebar counts and the home page lists. */
+  needs(): readonly Need[];
 }
 
 /** Returns the page for a GET of `path`, or undefined when the path is not the dashboard's. */
@@ -126,8 +128,10 @@ export function dashboard(options: DashboardOptions): (path: string, query: URLS
       // The sidebar and the home table show the same threads.
       const rows = new Map<ThreadId, ThreadRow>();
       const row = (t: Thread) => rows.get(t.id) ?? rows.set(t.id, options.row(t)).get(t.id)!;
-      return { registry, row, deploys, now: (options.now ?? Date.now)(), caller, landRefusal: options.landRefusal(caller),
-        answerRefusal: (question) => options.answerRefusal(caller, question) };
+      let needs: readonly Need[] | undefined;
+      const c: Context = { registry, row, deploys, now: (options.now ?? Date.now)(), caller, landRefusal: options.landRefusal(caller),
+        answerRefusal: (question) => options.answerRefusal(caller, question), needs: () => needs ??= needsOf(c, detail) };
+      return c;
     };
     for (const [pattern, page] of pages) {
       const m = pattern.exec(path);
@@ -211,9 +215,12 @@ const iconPaths = {
   check: "M3.5 8.5l3 3 6-7",
   cross: "M4.5 4.5l7 7M11.5 4.5l-7 7",
   dash: "M5 8h6",
+  inbox: "M2.5 9.5h3l1 1.5h3l1-1.5h3M2.5 9.5 4.3 4.2a1 1 0 0 1 .9-.7h5.6a1 1 0 0 1 .9.7l1.8 5.3v2.5a1 1 0 0 1-1 1h-9a1 1 0 0 1-1-1z",
 } as const;
 type IconName = keyof typeof iconPaths;
 const icon = (name: IconName) => html`<svg class="i i-${name}" viewBox="0 0 16 16" aria-hidden="true"><path d="${iconPaths[name]}"/></svg>`;
+/** Every page's way to the sidebar, and on a phone, where the sidebar is a drawer, to what waits on the person. */
+const menu = html`<button type="button" class="icon-btn menu" data-open="side" aria-label="Threads">☰</button><a class="icon-btn phone-only" href="/#needs-you" aria-label="Needs you" title="Needs you">${icon("inbox")}</a>`;
 /** Text a screen reader says that the page shows another way, such as with an icon or a bubble's side. */
 const unseen = (text: string) => html`<span class="vh">${text}</span>`;
 
@@ -351,7 +358,7 @@ function sidebar(c: Context, active: ThreadId | undefined, nav: Shell["nav"]): H
   return html`<aside class="side" aria-label="Threads">
 <div class="side-head"><a class="brand" href="/"><span class="brand-mark" aria-hidden="true">◆</span>nexus</a><a class="btn btn-new" href="/threads/new" data-start>New thread<kbd>N</kbd></a></div>
 <label class="filter"><span aria-hidden="true">⌕</span><input id="filter" type="search" placeholder="Filter threads" aria-label="Filter threads" autocomplete="off"></label>
-<nav class="side-nav" aria-label="Pages">${([["pipeline", "Pipeline", "list"], ["usage", "Usage", "chart"]] as const).map(([to, label, glyph]) => html`<a class="side-link${nav === to && " active"}" href="/${to}"${nav === to && html` aria-current="page"`}>${icon(glyph)}${label}</a>`)}</nav>
+<nav class="side-nav" aria-label="Pages"><a class="side-link" href="/#needs-you">${icon("inbox")}Needs you<span class="side-count" id="needs-count" data-live>${c.needs().length || ""}</span></a>${([["pipeline", "Pipeline", "list"], ["usage", "Usage", "chart"]] as const).map(([to, label, glyph]) => html`<a class="side-link${nav === to && " active"}" href="/${to}"${nav === to && html` aria-current="page"`}>${icon(glyph)}${label}</a>`)}</nav>
 <nav class="groups" id="side-threads" data-live aria-label="Threads by project">
 ${projects.length === 0 ? html`<p class="empty side-empty">No projects yet.</p>` : projects.map((p) => {
   const { open, closed } = threadsOf(c, p.id);
@@ -498,8 +505,9 @@ function home(c: Context, dialogs: Pick<Shell, "start" | "addProject">): Html {
   return layout(c, {
     title: dialogs.start !== undefined ? "Start a thread" : dialogs.addProject === true ? "New project" : "Threads",
     ...dialogs,
-    main: html`<header class="bar"><button type="button" class="icon-btn menu" data-open="side" aria-label="Threads">☰</button><div class="crumb"><h1>Threads</h1></div><div class="bar-end"><a class="btn btn-ghost" href="/projects/new" data-new-project>New project</a><a class="btn btn-new phone-only" href="/threads/new" data-start>New thread</a></div></header>
-<div class="scroll"><div class="page" id="overview" data-live>
+    main: html`<header class="bar">${menu}<div class="crumb"><h1>Threads</h1></div><div class="bar-end"><a class="btn btn-ghost" href="/projects/new" data-new-project>New project</a><a class="btn btn-new phone-only" href="/threads/new" data-start>New thread</a></div></header>
+<div class="scroll"><div class="page page-needs"><p id="action-error" class="error" role="alert" hidden></p><section class="needs" id="needs-you" aria-labelledby="needs-h" data-live>${needsList(c)}</section></div>
+<div class="page" id="overview" data-live>
 ${projects.length === 0 ? html`<div class="first-project"><p class="empty">No projects yet. A project names the repository its threads clone and the node they run on.</p>${newProjectButton}</div>` : projects.map((p) => {
   const { open, closed } = threadsOf(c, p.id);
   const queued = queuedThreadsOf(c, p.id);
@@ -522,6 +530,92 @@ ${closed.length > 0 && html`<details class="ov-closed" id="closed-${p.id}"><summ
 })}
 </div></div>`,
   });
+}
+
+/**
+ * One thing that waits on the person, for a card in the inbox: a review they can land, a question of the thread's, or
+ * the thread itself, stopped where only they move it. `since` is when it began to wait, so far as the records say.
+ */
+type Need =
+  | { kind: "land"; d: ThreadDetail; since: number }
+  | { kind: "question"; d: ThreadDetail; question: Question; since: number }
+  | { kind: "thread"; d: ThreadDetail; attention: Exclude<Attention, "reply" | "working" | null>; since: number };
+
+/**
+ * What waits on the person in the open threads, oldest first, so each card keeps its place while the person works down
+ * the list and the one that has waited longest is first. A thread whose attention needs the person gets a card for it
+ * unless its review or questions are already the decision. A new reply does not wait on the person, so it has none, but
+ * it outranks a dialog in the terminal, which the session's own state says waits.
+ */
+function needsOf(c: Pick<Context, "registry" | "row">, detail: DashboardOptions["detail"]): Need[] {
+  return c.registry.threads().filter((t) => t.status === "active" || t.status === "idle").flatMap((t): Need[] => {
+    const { attention } = c.row(t);
+    const review = c.registry.review(t.id);
+    const holds = review !== null && review.phase.kind === "approved" && heldBy(review).length > 0;
+    if (!holds && t.sessionWaiting !== true && (attention === "reply" || !needsPerson(attention))) return [];
+    const d = detail(t);
+    const needs: Need[] = [
+      ...landOffered(d) && (d.review!.phase.kind === "needs-person" || holds) ? [{ kind: "land" as const, d, since: d.review!.since }] : [],
+      ...(d.questions ?? []).filter((q) => q.answer === null).map((question) => ({ kind: "question" as const, d, question, since: question.askedAt })),
+    ];
+    const stuck = attention === "failed" || attention === "parked" || attention === "limited" ? attention
+      : attention === "decision" ? (needs.length === 0 ? "decision" : null)
+      : t.sessionWaiting === true ? "waiting" : null;
+    const since = t.usageLimit?.stoppedAt ?? (stuck === "decision" && d.review?.phase.kind === "needs-person" ? d.review.since : Math.max(t.createdAt, t.lastAgentActivityAt));
+    if (stuck !== null) needs.push({ kind: "thread", d, attention: stuck, since });
+    return needs;
+  }).sort((a, b) => a.since - b.since);
+}
+
+const needId = (n: Need) => `need-${n.d.thread.id}-${n.kind === "question" ? n.question.id : n.kind}`;
+
+/** The inbox's cards, each the card its thread's page shows where there is one, under a line that links the thread. */
+function needsList(c: Context): Html {
+  const needs = c.needs();
+  return html`<div class="ov-head"><h2 id="needs-h">Needs you</h2>${needs.length > 0 && html`<span class="count">${needs.length}</span>`}</div>
+${needs.length === 0 ? html`<p class="empty">Nothing waits on you.</p>` : html`<div class="need-list">${needs.map((n) => {
+  const t = n.d.thread;
+  const [what, body] = needCard(c, n);
+  return html`<article class="need need-${n.kind}" id="${needId(n)}" data-thread="${t.id}" data-attention="${n.kind === "thread" ? n.attention : "decision"}" tabindex="-1" aria-label="${what}: ${t.title}">
+<div class="need-head"><span class="need-what">${what}</span><a class="need-thread" href="/threads/${t.id}"><span class="dim">${t.project} /</span> ${t.title}</a><span class="need-at">${ago(n.since, c.now)}</span></div>
+${body}
+</article>`;
+})}</div>`}`;
+}
+
+/** What the card is, and what it shows: a review or question as its thread's page shows it, or what stopped the thread and the one action that gets past it. */
+function needCard(c: Context, n: Need): [what: string, body: Html] {
+  const { d } = n;
+  const t = d.thread;
+  const button = (action: string, label: string) => html`<button type="button" class="btn btn-xs" data-action="${action}" data-thread="${t.id}">${label}</button>`;
+  const fix = (why: Part, act: Part) => html`<p class="land-note">${why}</p><div class="need-act">${act}</div>`;
+  switch (n.kind) {
+    case "land": {
+      const summary = d.pullRequests?.find((p) => p.repo === d.review!.pr.repo && p.number === d.review!.pr.number)?.summary;
+      const quote = d.review!.rounds.at(-1)!.verdict?.notCheckedLive ?? null;
+      return [d.review!.phase.kind === "needs-person" ? "Held review" : "Approved review", html`${summary !== undefined && summary !== "" && html`<p class="need-summary">${inline(summary)}</p>`}
+<div class="need-unchecked"><h3>Not checked live</h3>${quote === null ? html`<p class="land-note">The reviewer quoted nothing.</p>` : prose(quote)}</div>
+${landing(c, d, (name) => `${name}-${t.id}`)}`];
+    }
+    case "question": {
+      const q = n.question;
+      const judgment = (d.judgments ?? []).filter((j) => j.question === q.id);
+      return [q.ask !== undefined ? "Claude asks" : q.proposal !== undefined ? "Proposed item" : judgment.length > 0 ? "Judgment" : "Question",
+        html`${judgment.length > 0 && judgmentCards(c, { ...d, judgments: judgment })}${questionCard(c, q)}`];
+    }
+    case "thread": switch (n.attention) {
+      case "waiting": return ["Dialog in its terminal", fix(`${t.sessionWaitingMessage ?? "A dialog waits for input"}, in the pylon's terminal.`, html`<a class="btn btn-xs" href="/threads/${t.id}#terminal">${icon("terminal")}Open terminal</a>`)];
+      case "limited": return ["Usage limit", fix(`It ${usageLimitText(t.usageLimit ?? { resetsAt: null }, c.now)}. Nexus has it continue once the limit resets, or archive it to stop it.`, button("archive", "Archive"))];
+      case "parked": return ["Stuck", fix(`${d.agent?.parkedTasks ?? 0} ${d.agent?.parkedTasks === 1 ? "task" : "tasks"} hit the restart limit and hold the run.`, button("retry", "Retry"))];
+      case "failed": {
+        const why = d.pylon.failed?.split("\n")[0] ?? d.claudeWorker?.message ?? "It failed.";
+        return ["Failed", d.pylon.failed !== null && d.pylon.retryRefused === null ? fix(`The planner gave up on its pylon: ${why}`, button("retry-pylon", "Retry"))
+          : fix(d.pylon.failed !== null ? `The planner gave up on its pylon: ${why} ${d.pylon.retryRefused}.` : `The Claude worker failed: ${why}`, button("archive", "Archive"))];
+      }
+      case "decision": return ["Needs your decision", fix(d.review?.phase.kind === "needs-person" ? d.review.phase.reasons.join(" ") : c.registry.nudge(t.id)?.state === "person" ? "It stopped short of a pull request after two nudges." : attentions.decision.label,
+        html`<a class="btn btn-xs" href="/threads/${t.id}">Open thread</a>`)];
+    }
+  }
 }
 
 /** A phone hides the wide columns of a usage table. */
@@ -565,7 +659,7 @@ function usagePage(c: Context, period: Period, project: ProjectId | null): Html 
   return layout(c, {
     title: "Usage",
     nav: "usage",
-    main: html`<header class="bar"><button type="button" class="icon-btn menu" data-open="side" aria-label="Threads">☰</button><div class="crumb"><h1>Usage</h1></div></header>
+    main: html`<header class="bar">${menu}<div class="crumb"><h1>Usage</h1></div></header>
 <div class="scroll"><div class="page usage" id="usage" data-live>
 <div class="usage-filters">
 <nav class="seg-bar usage-seg" aria-label="Period">${(Object.keys(periods) as Period[]).map((p) => seg(periods[p], href(p, project), p === period))}</nav>
@@ -604,7 +698,7 @@ function pipelinePage(c: Context): Html {
   return layout(c, {
     title: "Pipeline",
     nav: "pipeline",
-    main: html`<header class="bar"><button type="button" class="icon-btn menu" data-open="side" aria-label="Threads">☰</button><div class="crumb"><h1>Pipeline</h1></div></header>
+    main: html`<header class="bar">${menu}<div class="crumb"><h1>Pipeline</h1></div></header>
 <div class="scroll"><div class="page pipeline" id="pipeline" data-live>
 ${projects.length === 0 ? html`<p class="empty">No project runs the pipeline. <code>nexus project edit &lt;id&gt; --pipeline start</code> turns it on, and <code>nexus item add</code> lines up an item.</p>` : projects.map((p) => {
   const own = items.filter((i) => i.project === p.id);
@@ -654,7 +748,7 @@ ${health.pylons === null ? html`<p class="empty">This node's backend does not sa
 </section>`;
   return layout(c, {
     title: `Node ${name}`,
-    main: html`<header class="bar"><button type="button" class="icon-btn menu" data-open="side" aria-label="Threads">☰</button><div class="crumb"><h1>${name}</h1></div></header>
+    main: html`<header class="bar">${menu}<div class="crumb"><h1>${name}</h1></div></header>
 <div class="scroll"><div class="page" id="node-health" data-live>
 ${reading}
 ${pylons}
@@ -708,7 +802,7 @@ function threadPage(c: Context, d: ThreadDetail, node: NodeRecord, view: AgentVi
     active: t.id,
     ...(open ? { activity: t.id } : {}),
     main: html`<header class="bar" id="bar" data-live>
-<button type="button" class="icon-btn menu" data-open="side" aria-label="Threads">☰</button>
+${menu}
 <div class="crumb"><a class="crumb-p" href="/">${t.project}</a><span class="sep" aria-hidden="true">/</span><h1>${t.title}</h1>${d.planning === true && html` <span class="tag" id="planning" title="Its proposed items become cards you accept or reject">planning</span>`}</div>
 <span class="chip chip-${tone}">${dot(tone)}<span class="chip-label">${label}</span></span>
 ${actions.length > 0 && html`<div class="bar-actions" id="thread-actions">${actions}</div><button type="button" class="icon-btn more" data-open="actions" aria-label="Thread actions" aria-controls="thread-actions">⋯</button>`}
@@ -795,23 +889,25 @@ ${j.brief !== null && html`<details><summary>What the judgment was asked and ans
  * conversation instead. As with landing, the page says up front when the answer route would refuse this device.
  */
 function questionCards(c: Context, d: ThreadDetail): Html[] {
-  return (d.questions ?? []).filter((q) => q.ask === undefined || q.answer === null).map((q) => {
-    if (q.ask !== undefined) return askCard(c, q, q.ask.questions);
-    if (q.answer !== null) {
-      return html`<section class="landing question answered" data-question="${q.id}" aria-label="Answered question"><div class="question-text">${prose(q.text)}</div>
+  return (d.questions ?? []).filter((q) => q.ask === undefined || q.answer === null).map((q) => questionCard(c, q));
+}
+
+function questionCard(c: Context, q: Question): Html {
+  if (q.ask !== undefined) return askCard(c, q, q.ask.questions);
+  if (q.answer !== null) {
+    return html`<section class="landing question answered" data-question="${q.id}" aria-label="Answered question"><div class="question-text">${prose(q.text)}</div>
 <p class="land-meta">Answered "${q.answer.option}" from ${q.answer.by}, ${ago(q.answer.at, c.now)}</p></section>`;
-    }
-    const refusal = c.answerRefusal(q);
-    const buttons = q.options.map((option) => refusal === null
-      ? html`<button type="button" class="btn" data-action="answer" data-thread="${q.thread}" data-question="${q.id}" data-option="${option}" data-confirm="Answer &quot;${option}&quot;? The answer cannot be changed.">${option}</button>`
-      : html`<button type="button" class="btn" data-question="${q.id}" data-option="${option}" disabled>${option}</button>`);
-    return html`<section class="landing question" data-question="${q.id}" aria-label="Needs your decision">
+  }
+  const refusal = c.answerRefusal(q);
+  const buttons = q.options.map((option) => refusal === null
+    ? html`<button type="button" class="btn" data-action="answer" data-thread="${q.thread}" data-question="${q.id}" data-option="${option}" data-confirm="Answer &quot;${option}&quot;? The answer cannot be changed.">${option}</button>`
+    : html`<button type="button" class="btn" data-question="${q.id}" data-option="${option}" disabled>${option}</button>`);
+  return html`<section class="landing question" data-question="${q.id}" aria-label="Needs your decision">
 <div class="land-top"><h2>Needs your decision</h2>${q.reserved !== null && html`<span class="tag">reserved: ${reservedNames[q.reserved]}</span>`}</div>
 <div class="question-text">${prose(q.text)}</div>
 <p class="land-meta">Asked ${ago(q.askedAt, c.now)}. ${answerers[q.answerer]}</p>
 <div class="land-act"><div class="question-options">${buttons}</div>${refusal !== null && html`<p class="error">${answerRefusals[refusal](c.caller)}</p>`}</div>
 </section>`;
-  });
 }
 
 /**
@@ -844,12 +940,20 @@ ${aq.options.map((o, j) => html`<div class="ask-opt"><label><input type="${aq.mu
 
 const short = (commit: string) => html`<code title="${commit}">${commit.slice(0, 12)}</code>`;
 
+/** Whether the review's card offers it for landing. A PR closed or merged outside the review leaves it held, but there is nothing left to land. */
+function landOffered(d: ThreadDetail): boolean {
+  const r = d.review;
+  const pr = r == null ? undefined : d.pullRequests?.find((p) => p.repo === r.pr.repo && p.number === r.pr.number);
+  return r != null && landable(r) && d.thread.status === "active" && (pr === undefined || pr.state === "open");
+}
+
 /**
  * Above the composer, for a builder whose review the person can land or is landing: why it waits for them, with the
  * Land button, and then the landing's steps until it lands or ends for them again. The land route decides who may
- * land, and the page says so up front rather than offer a button that fails.
+ * land, and the page says so up front rather than offer a button that fails. `id` names its elements, so the inbox
+ * can show several.
  */
-function landing(c: Context, d: ThreadDetail): Html | null {
+function landing(c: Context, d: ThreadDetail, id = (name: string) => name): Html | null {
   const r = d.review;
   if (r == null) return null;
   const prLink = html`<a href="${r.pr.url}" target="_blank" rel="noreferrer">#${r.pr.number} ${r.pr.title} ↗</a>`;
@@ -864,8 +968,8 @@ function landing(c: Context, d: ThreadDetail): Html | null {
       : i < index || at.step === "landed" ? "done" : i > index ? "todo" : at.failed ? "failed" : "now";
     const title = at.step === "landed" ? "Landed" : r.phase.kind === "needs-person" ? "Merged, not deployed" : r.phase.kind === "rolling-back" ? "Rolling back" : "Landing";
     const phase = r.phase;
-    return html`<section class="landing" aria-labelledby="landing-h">
-<div class="land-top"><h2 id="landing-h">${title}</h2>${prLink}</div>
+    return html`<section class="landing" aria-labelledby="${id("landing-h")}">
+<div class="land-top"><h2 id="${id("landing-h")}">${title}</h2>${prLink}</div>
 <ol class="land-steps">${landingSteps.map(([step, label], i) => {
   const state = stateOf(step, i);
   return html`<li class="land-step land-${state}"${state === "now" && html` aria-current="step"`}>${label}${state === "skipped" && (step === "verifying" ? unverified : " (nothing to deploy)")}</li>`;
@@ -879,9 +983,8 @@ ${phase.kind === "checking" ? html`<p class="land-note">.nexus/check runs at ${s
   : phase.kind === "needs-person" && html`<ul class="error">${phase.reasons.map((reason) => html`<li>${reason}</li>`)}</ul>`}
 </section>`;
   }
-  // A PR closed or merged outside the review leaves it held, but there is nothing left to land.
+  if (!landOffered(d)) return null;
   const pr = d.pullRequests?.find((p) => p.repo === r.pr.repo && p.number === r.pr.number);
-  if (!landable(r) || d.thread.status !== "active" || (pr !== undefined && pr.state !== "open")) return null;
   const round = r.rounds.at(-1)!;
   // The PR watch can read a push before the loop's next pass starts a round on it. A stopped watch reads nothing new.
   const moved = d.prWatch?.stopped ? null : pushedHead(r, pr);
@@ -896,11 +999,11 @@ ${phase.kind === "checking" ? html`<p class="land-note">.nexus/check runs at ${s
   const confirm = waived.length === 0
     ? `Land pull request #${r.pr.number}, "${r.pr.title}", at commit ${round.head.slice(0, 12)}? Nexus checks the merge policy again, merges that commit${deploys}.`
     : `Land pull request #${r.pr.number}, "${r.pr.title}", at commit ${round.head.slice(0, 12)}, waiving ${waived.length === 1 ? "the hold" : `the ${waived.length} holds`} the merge policy reserves for you? Nexus checks everything else again, merges that commit${deploys}.`;
-  return html`<section class="landing" aria-labelledby="landing-h">
-<div class="land-top"><h2 id="landing-h">${held ? "Held for you" : "Approved, not landed"}</h2>${prLink}</div>
+  return html`<section class="landing" aria-labelledby="${id("landing-h")}">
+<div class="land-top"><h2 id="${id("landing-h")}">${held ? "Held for you" : "Approved, not landed"}</h2>${prLink}</div>
 ${roundNote(r) !== null && html`<p class="land-note">${roundNote(r)}</p>`}
 <p class="land-meta">Head ${short(round.head)} · approved by ${r.models.reviewer} (${r.reviewerKind}) in round ${roundsSpent(r)} of ${r.maxRounds} · .nexus/check passed · ${round.live === undefined ? "no live check ran" : round.live.kind === "absent" ? "no .nexus/verify, so no live check" : `live check ${round.live.passed ? "passed" : "failed"}`}</p>
-<details id="land-why" open><summary>Why it waits for you</summary>
+<details id="${id("land-why")}" open><summary>Why it waits for you</summary>
 ${reasons.length === 0 ? html`<p class="land-note">Nothing holds it. The review stopped at approval because it was started without --land.</p>`
   : html`<ul class="land-reasons">${rules.map((h) => html`<li>${h.reason} ${h.waivable ? html`<span class="tag tag-ok">you may waive</span>` : html`<span class="tag">${h.holdsAgain ? "holds again" : "not waivable"}</span>`}<br><span class="dim">${h.why}</span></li>`)}</ul>`}
 <h3>The reviewer's findings</h3>
@@ -908,13 +1011,13 @@ ${findings.length === 0 ? html`<p class="land-note">None.</p>` : html`<ul class=
   const answer = r.rounds.flatMap((rd) => rd.answers ?? []).findLast((a) => a.id === f.id);
   return html`<li><span class="tag${blocking(f) ? " tag-bad" : ""}">${f.priority}</span> <b>${f.id}</b>${f.where && html` <code>${f.where}</code>`}: ${f.summary}${answer && html` <span class="dim">(builder: ${answer.action}${answer.reason && `, ${answer.reason}`})</span>`}</li>`;
 })}</ul>`}
-${round.check !== null && html`<details id="land-check"><summary>.nexus/check ${round.check.passed ? "passed" : "failed"} at ${round.head.slice(0, 12)}</summary><pre>${round.check.output}</pre></details>`}
-${round.live?.kind === "ran" && html`<details id="land-live"><summary>The live check ${round.live.passed ? "passed" : "failed"} at ${round.head.slice(0, 12)}</summary><pre>${round.live.output}</pre></details>`}
+${round.check !== null && html`<details id="${id("land-check")}"><summary>.nexus/check ${round.check.passed ? "passed" : "failed"} at ${round.head.slice(0, 12)}</summary><pre>${round.check.output}</pre></details>`}
+${round.live?.kind === "ran" && html`<details id="${id("land-live")}"><summary>The live check ${round.live.passed ? "passed" : "failed"} at ${round.head.slice(0, 12)}</summary><pre>${round.live.output}</pre></details>`}
 </details>
 ${moved !== null ? html`<p class="land-note">The PR watch last read the pull request at ${short(moved)}, not ${short(round.head)}, so ${short(round.head)} is not offered for landing. Nexus confirms the head with GitHub, and a new head gets a new round, or holds for you when no round is left.</p>`
   : stuck ? html`<p class="land-note">Landing checks the merge policy again, and what is marked "holds again" holds every landing of this commit. Only you can get past it, by merging the pull request on GitHub${c.deploys(r) && " and deploying it with nexus deploy"}.</p>`
-  : c.landRefusal === null ? html`<div class="land-act"><button type="button" class="btn btn-primary" id="land" data-action="land" data-thread="${d.thread.id}" data-head="${round.head}"${waived.length > 0 && html` data-holds="${JSON.stringify(waived)}"`} data-confirm="${confirm}">Land #${r.pr.number}</button>${waived.length > 0 && html`<p class="land-note">Pressing Land waives what is marked "you may waive", for commit ${short(round.head)} only. Landing checks everything else again.</p>`}</div>`
-  : html`<div class="land-act"><button type="button" class="btn" id="land" disabled>Land #${r.pr.number}</button><p class="error">${landRefusals[c.landRefusal](c.caller)}</p></div>`}
+  : c.landRefusal === null ? html`<div class="land-act"><button type="button" class="btn btn-primary" id="${id("land")}" data-action="land" data-thread="${d.thread.id}" data-head="${round.head}"${waived.length > 0 && html` data-holds="${JSON.stringify(waived)}"`} data-confirm="${confirm}">Land #${r.pr.number}</button>${waived.length > 0 && html`<p class="land-note">Pressing Land waives what is marked "you may waive", for commit ${short(round.head)} only. Landing checks everything else again.</p>`}</div>`
+  : html`<div class="land-act"><button type="button" class="btn" id="${id("land")}" disabled>Land #${r.pr.number}</button><p class="error">${landRefusals[c.landRefusal](c.caller)}</p></div>`}
 </section>`;
 }
 
@@ -934,7 +1037,7 @@ function queuedPage(c: Context, q: QueuedThread): Html {
     title: q.title,
     active: q.id,
     main: html`<header class="bar" id="bar" data-live>
-<button type="button" class="icon-btn menu" data-open="side" aria-label="Threads">☰</button>
+${menu}
 <div class="crumb"><a class="crumb-p" href="/">${q.project}</a><span class="sep" aria-hidden="true">/</span><h1>${q.title}</h1></div>
 <span class="chip chip-${tone}">${dot(tone)}<span class="chip-label">${label}</span></span>
 ${actions.length > 0 && html`<div class="bar-actions" id="thread-actions">${actions}</div><button type="button" class="icon-btn more" data-open="actions" aria-label="Thread actions" aria-controls="thread-actions">⋯</button>`}
@@ -1808,7 +1911,7 @@ function stepsView(tools: readonly ToolItem[]): Html {
 function notFound(c: Context, message: string): Html {
   return layout(c, {
     title: "Not found",
-    main: html`<header class="bar"><button type="button" class="icon-btn menu" data-open="side" aria-label="Threads">☰</button><div class="crumb"><h1>Not found</h1></div></header>
+    main: html`<header class="bar">${menu}<div class="crumb"><h1>Not found</h1></div></header>
 <div class="scroll"><div class="page"><p>${message}</p><p><a class="link" href="/">All threads</a></p></div></div>`,
   });
 }

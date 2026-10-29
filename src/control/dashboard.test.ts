@@ -498,6 +498,107 @@ test("a hold the policy reserves for the person is marked waivable, and pressing
   assert.ok(!claude.includes("Land #7"));
 });
 
+/** The home page's Needs you cards as a reader takes them in: what each is, its thread, and the card's text. */
+function needsOf(page: string) {
+  const region = page.split('id="needs-you"')[1]!.split('<div class="page" id="overview"')[0]!;
+  return {
+    cards: [...region.matchAll(/<article class="need need-(\w+)" id="([^"]+)" data-thread="([^"]+)" data-attention="(\w+)"[\s\S]*?<\/article>/g)].map((m) => ({ kind: m[1], id: m[2], thread: m[3], attention: m[4], text: textOf(m[0]), html: m[0] })),
+    text: textOf(region.replace(/^[^>]*>/, "")),
+  };
+}
+const needsCount = (page: string) => /<span class="side-count" id="needs-count" data-live>([^<]*)<\/span>/.exec(page)![1];
+
+test("Needs you lists, oldest first, each held review, open question and ask, and each thread stopped where only the person moves it, with the action on its card", async (t) => {
+  const s = await seeded(t, landingOptions());
+  const empty = (await s.call("GET", "/")).text;
+  assert.equal(needsOf(empty).text, "Needs you Nothing waits on you.");
+  assert.equal(needsCount(empty), "", "the sidebar counts nothing");
+
+  const now = Date.now();
+  const reserved = "Always needs the person: changes to login or auth, as it changes src/control/api.ts.";
+  const held = await s.start("acme", "Cache the list");
+  s.registry.saveReview(approvedReview(held.id, { kind: "needs-person", reasons: ["The pull request's GitHub checks are pending.", reserved] }, { land: { requestedBy: laptop }, since: now - 50_000 }));
+  s.registry.savePrWatch(held.id, { links: [{ pr: { repo: "acme/nexus", number: 7, title: "Cache", url: "https://github.com/acme/nexus/pull/7", state: "open", checks: "pending", review: "none", conflict: false, summary: "Caches the thread list between polls." }, seen: [], failed: false }], commentWakes: 0, pending: null, error: null });
+  const asked = await s.start("acme", "Rebuild the image");
+  s.registry.askQuestion({ id: "qn-image", thread: asked.id, text: "Rebuild the pylon image?", options: ["Rebuild", "Not now"], reserved: null, answerer: "person", askedAt: now - 40_000 });
+  const claude = await claudeThread(s, [{ kind: "prompt", at: now, text: "Make me a drink", from: "person" }]);
+  s.registry.setWaitingAsks(claude.id, [waitingAsk("toolu_1", now - 30_000)]);
+  const dialog = await s.start("acme", "Run the migration");
+  s.observe(dialog);
+  s.registry.reportSession(node, { sequence: 1, pylon: dialog.pylonId, time: now, event: { kind: "session.waiting", session: "s1", at: now, message: "Claude needs your permission to use Bash" } });
+  s.registry.recordReply(dialog.id, now);
+  const failed = JSON.parse((await s.call("POST", "/v1/threads", { project: "beta", title: "Port the CLI", claude: "port it" })).text) as Thread;
+  s.registry.setClaudeWorker(failed.id, "port it", "failed", "Claude launch did not complete: executable missing");
+  const limited = JSON.parse((await s.call("POST", "/v1/threads", { project: "acme", title: "Write the docs", claude: "write them" })).text) as Thread;
+  s.registry.setClaudeWorker(limited.id, "write them", "started", undefined, "s1");
+  const resetsAt = now + 3_600_000;
+  assert.ok(s.registry.appendClaudeRead(limited.id, { session: "s1", from: transcriptStart, entries: [{ kind: "notice", at: now, tone: "error", text: "You've hit your session limit", usageLimit: { resetsAt } }], cursor: { ...transcriptStart, offset: 1 }, reset: false, readAt: now }));
+  const replied = await s.start("acme", "Answer a reply");
+  s.registry.recordReply(replied.id, now);
+  await s.start("acme", "Quiet");
+
+  const page = (await s.call("GET", "/")).text;
+  const { cards } = needsOf(page);
+  assert.deepEqual(cards.slice(0, 3).map((c) => [c.kind, c.thread, c.attention]), [["land", held.id, "decision"], ["question", asked.id, "decision"], ["question", claude.id, "decision"]], "the oldest waits first");
+  assert.deepEqual(new Set(cards.slice(3).map((c) => `${c.thread} ${c.attention}`)), new Set([`${dialog.id} waiting`, `${failed.id} failed`, `${limited.id} limited`]));
+  assert.ok(!cards.some((c) => c.thread === replied.id), "a new reply waits on no one");
+  assert.equal(needsCount(page), "6");
+  assert.equal(new Set(cards.map((c) => c.id)).size, cards.length);
+  for (const c of cards) assert.match(c.html, new RegExp(`<a class="need-thread" href="/threads/${c.thread}">`), "each card links its thread");
+
+  const land = cards[0]!;
+  assert.match(land.text, /^Held review acme \/ Cache the list 1 min ago Caches the thread list between polls\. Not checked live The cache's behaviour under load could not be checked live\. Held for you #7 Cache ↗ /);
+  assert.match(land.text, /pending\. not waivable .* src\/control\/api\.ts\. you may waive /);
+  const button = /<button [^>]*data-action="land"[^>]*>/.exec(land.html)![0];
+  assert.match(button, new RegExp(`id="land-${held.id}" data-action="land" data-thread="${held.id}" data-head="${head}"`), "the thread page's Land button, under an ID of the card's own");
+  assert.deepEqual(JSON.parse(textOf(/data-holds="([^"]*)"/.exec(button)![1]!)), [reserved], "it waives what the thread page's would");
+  assert.ok(!/id="(land|landing-h|land-why)"/.test(page), "no card takes the thread page's IDs");
+
+  assert.match(cards[1]!.text, /^Question acme \/ Rebuild the image .* Needs your decision Rebuild the pylon image\? .* Rebuild Not now$/);
+  assert.match(cards[1]!.html, /data-action="answer" data-thread="[^"]+" data-question="qn-image" data-option="Rebuild"/);
+  assert.match(cards[2]!.html, new RegExp(`<form class="ask" data-thread="${claude.id}" data-question="ask-toolu_1">`), "an ask is the thread page's form");
+  const by = (thread: ThreadId) => cards.find((c) => c.thread === thread)!;
+  assert.match(by(dialog.id).text, /^Dialog in its terminal acme \/ Run the migration .* Claude needs your permission to use Bash, in the pylon's terminal\. Open terminal$/, "a dialog shows though a reply outranks it");
+  assert.match(by(dialog.id).html, new RegExp(`href="/threads/${dialog.id}#terminal"`));
+  assert.match(by(failed.id).text, /^Failed beta \/ Port the CLI .* The Claude worker failed: Claude launch did not complete: executable missing Archive$/);
+  assert.match(by(failed.id).html, new RegExp(`data-action="archive" data-thread="${failed.id}"`));
+  assert.match(by(limited.id).text, new RegExp(`^Usage limit acme / Write the docs .* It stopped on its usage limit until ${new Date(resetsAt).toISOString().slice(11, 16)} UTC\\. Nexus has it continue once the limit resets, or archive it to stop it\\. Archive$`));
+});
+
+test("acting on a card through the route its button calls takes the card off the list and the count down", async (t) => {
+  const landed: string[] = [];
+  const s = await seeded(t, landingOptions(landed));
+  const held = await s.start("acme", "Cache the list");
+  s.registry.saveReview(approvedReview(held.id, { kind: "needs-person", reasons: ["The pull request's GitHub checks are pending."] }, { land: { requestedBy: laptop } }));
+  const asked = await s.start("acme", "Rebuild the image");
+  s.registry.askQuestion({ id: "qn-image", thread: asked.id, text: "Rebuild the pylon image?", options: ["Rebuild", "Not now"], reserved: null, answerer: "person", askedAt: Date.now() });
+  const failed = JSON.parse((await s.call("POST", "/v1/threads", { project: "acme", title: "Port the CLI", claude: "port it" })).text) as Thread;
+  s.registry.setClaudeWorker(failed.id, "port it", "failed", "Claude launch did not complete");
+  assert.equal(needsCount((await s.call("GET", "/")).text), "3");
+
+  assert.equal((await s.call("POST", "/v1/questions/qn-image/answer", { option: "Not now" })).status, 200);
+  assert.deepEqual(needsOf((await s.call("GET", "/")).text).cards.map((c) => c.thread).sort(), [held.id, failed.id].sort(), "the answered question is gone");
+  assert.equal((await s.call("POST", `/v1/threads/${failed.id}/archive`)).status, 200);
+  assert.equal((await s.call("POST", `/v1/threads/${held.id}/land`, { head })).status, 200);
+  assert.deepEqual(landed, [held.id]);
+  s.registry.saveReview(approvedReview(held.id, { kind: "checking", startedAt: Date.now(), thread: null }, { land: { requestedBy: laptop } }));
+  const after = (await s.call("GET", "/")).text;
+  assert.equal(needsOf(after).text, "Needs you Nothing waits on you.", "a landing on its way and an archived thread wait on no one");
+  assert.equal(needsCount(after), "");
+});
+
+test("every page links Needs you with its count in the sidebar, and on a phone from its bar, and no page's title counts it", async (t) => {
+  const s = await seeded(t);
+  const failed = JSON.parse((await s.call("POST", "/v1/threads", { project: "acme", title: "Port the CLI", claude: "port it" })).text) as Thread;
+  s.registry.setClaudeWorker(failed.id, "port it", "failed", "Claude launch did not complete");
+  for (const path of ["/", "/usage", "/pipeline", `/threads/${failed.id}`, "/threads/th-000000000000"]) {
+    const page = (await s.call("GET", path)).text;
+    assert.match(page, /<a class="side-link" href="\/#needs-you">[\s\S]*?Needs you<span class="side-count" id="needs-count" data-live>1<\/span><\/a>/, path);
+    assert.match(page, /<a class="icon-btn phone-only" href="\/#needs-you" aria-label="Needs you"/, path);
+    assert.doesNotMatch(/<title>([^<]*)<\/title>/.exec(page)![1]!, /\d|Needs/, path);
+  }
+});
+
 test("the dashboard has no Passkeys page and links to none", async (t) => {
   const s = await seeded(t, {});
   assert.equal((await s.call("GET", "/passkeys")).status, 404);
