@@ -116,3 +116,22 @@ test("only a turn ending records a reply, not streaming, parking or retrying", a
   assert.deepEqual(replies, [["t1", 2000]]);
   await tracker.close();
 });
+
+test("the parked state is reported at track and then only when it flips, not on every pi.live change", async () => {
+  const parked: unknown[] = [];
+  const tracker = trackActivity({ ...ignore, onParked: (id, is) => parked.push([id, is]) });
+  const live = fakeLive(busy);
+  await tracker.track(live.observer, "t1", conversationId, false, context);
+  assert.deepEqual(parked, [["t1", false]], "the first report always goes out");
+  await live.change(busy);
+  await live.change(busy);
+  assert.deepEqual(parked, [["t1", false]]);
+  tracker.park(conversationId, taskId);
+  tracker.park(conversationId, 43 as TaskId);
+  await live.change(busy);
+  assert.deepEqual(parked, [["t1", false], ["t1", true]]);
+  tracker.retried("t1");
+  await live.change(busy);
+  assert.deepEqual(parked, [["t1", false], ["t1", true], ["t1", false]]);
+  await tracker.close();
+});

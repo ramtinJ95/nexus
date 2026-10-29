@@ -44,12 +44,14 @@ export interface HarnessHostOptions {
   /** Every thread in the registry with its `Thread.conversationId`, except deleted ones, and its recorded agentTurnRunning. */
   threads: readonly { threadId: string; conversationId: ConversationId; agentTurnRunning: boolean }[];
   /**
-   * The conversations of deleted threads. Open aborts each, because a crash during a delete can leave its run
-   * unfinished, and opening resumes every unfinished run. pi-durable cannot hold one back, and an abort resumes
+   * The conversations of deleted threads whose abort is not recorded. Open aborts each, because a crash during a delete
+   * can leave its run unfinished, and opening resumes every unfinished run. pi-durable cannot hold one back, and an abort resumes
    * scheduling itself, so such a run may send one model request before its abort lands. Its tools cannot run,
    * because the control plane's locator refuses a deleted thread's pylon.
    */
   deleted: readonly ConversationId[];
+  /** A deleted thread's conversation is aborted, at open or by deleteThread, so no later open needs to abort it again. */
+  onAborted?: (conversationId: ConversationId) => void;
   /** A thread's agent facts changed, or differ at open from what `threads` says the registry holds. */
   onReply?: (threadId: string, at: number) => void;
   onParked?: (threadId: string, parked: boolean) => void;
@@ -132,6 +134,7 @@ export async function openHarnessHost(options: HarnessHostOptions): Promise<Harn
     const deleted = await harness.conversation(id, context);
     if (deleted === undefined) throw new Error(`the harness has no conversation ${id}, which a deleted thread names`);
     await deleted.abort(context);
+    options.onAborted?.(id);
   }
 
   async function conversation(threadId: string) {
@@ -225,7 +228,9 @@ export async function openHarnessHost(options: HarnessHostOptions): Promise<Harn
       await (await judgment(id)).abort(context);
     },
     async deleteThread({ threadId, pylonId }) {
-      await (await conversation(threadId)).abort(context);
+      const deleting = await conversation(threadId);
+      await deleting.abort(context);
+      options.onAborted?.(deleting.id);
       conversations.delete(threadId);
       await activity.untrack(threadId);
       envs.forget(pylonId);

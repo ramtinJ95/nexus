@@ -10,7 +10,7 @@ import { DatabaseSync } from "node:sqlite";
 import { openRegistry, type StoredPylon, type Thread, type ThreadId } from "./registry.ts";
 import type { QueuedRecord } from "./queue.ts";
 import type { PullRequest } from "./github.ts";
-import { newPylonRecord } from "../tick.ts";
+import { newPylonRecord, type PylonRecord } from "../tick.ts";
 import { trackActivity } from "../harness/activity.ts";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import type { ConversationId, DocumentObserver, LiveState, TaskId } from "@earendil-works/pi-durable";
@@ -69,7 +69,7 @@ function seeded(path: string, clock = Date.now) {
 test("records survive closing and reopening the file", async (t) => {
   const path = tempDb();
   const first = seeded(path);
-  const submitted: StoredPylon = {
+  const submitted: Omit<PylonRecord, "desired"> = {
     ...pylon, pauses: 2, failed: null,
     submitted: { jobId: "j1" as JobId, node, issuedAt: "2027-01-01T00:00:00.000Z", notAfter: "2027-01-01T00:00:30.000Z", job: { kind: "delete", pylonId } },
     attempts: { count: 1, last: { at: 5, code: "backend", message: "pylon-th-1: the controller exited" } },
@@ -452,7 +452,7 @@ test("a registry from before repository kinds reads every stored repo, booted or
   const path = tempDb();
   const first = seeded(path);
   const envelope = { jobId: "j1" as JobId, node, issuedAt: "2027-01-01T00:00:00.000Z", notAfter: "2027-01-01T00:00:30.000Z" };
-  const spawning: StoredPylon = { ...pylon, submitted: { ...envelope, job: { kind: "spawn", pylonId, boot: { ...pylon.boot, source: pylon.firstBoot }, live: pylon.live, liveHash: pylon.liveHash } } };
+  const spawning: Omit<PylonRecord, "desired"> = { ...pylon, submitted: { ...envelope, job: { kind: "spawn", pylonId, boot: { ...pylon.boot, source: pylon.firstBoot }, live: pylon.live, liveHash: pylon.liveHash } } };
   first.savePylon(spawning);
   const deleting = addPylon(first, "th-2");
   const deletion: StoredPylon = { ...first.pylon(deleting)!, submitted: { ...envelope, jobId: "j2" as JobId, job: { kind: "delete", pylonId: deleting } } };
@@ -995,7 +995,7 @@ test("a turn running before turn starts were recorded has no known start", async
   const db = new DatabaseSync(path);
   const version = db.prepare("PRAGMA user_version").get()!.user_version as number;
   db.exec(`UPDATE threads SET agent_turn_running = 1; ALTER TABLE threads DROP COLUMN placement; ALTER TABLE threads DROP COLUMN setup; ALTER TABLE threads DROP COLUMN agent_turn_started_at; ALTER TABLE session_activity DROP COLUMN started_at; DROP TABLE reviews; DROP TABLE reviewed_prs;
-    ALTER TABLE claude_workers DROP COLUMN turn_session; ALTER TABLE claude_workers DROP COLUMN turn_at; ALTER TABLE session_activity DROP COLUMN message; ALTER TABLE session_order DROP COLUMN event_ids; PRAGMA user_version = ${version - 21}`);
+    ALTER TABLE claude_workers DROP COLUMN turn_session; ALTER TABLE claude_workers DROP COLUMN turn_at; ALTER TABLE session_activity DROP COLUMN message; ALTER TABLE session_order DROP COLUMN event_ids; PRAGMA user_version = ${version - 22}`);
   db.close();
   const registry = openRegistry(path, () => now);
   t.after(() => registry.close());
@@ -1419,7 +1419,7 @@ test("a registry made when landing asked for a passkey keeps neither passkey tab
   const db = new DatabaseSync(path);
   const version = db.prepare("PRAGMA user_version").get()!.user_version as number;
   db.exec(`CREATE TABLE passkeys (id TEXT PRIMARY KEY, credential_id TEXT NOT NULL UNIQUE, record TEXT NOT NULL) STRICT;
-    CREATE TABLE passkey_codes (hash TEXT PRIMARY KEY, expires_at INTEGER NOT NULL, used_at INTEGER) STRICT; PRAGMA user_version = ${version - 11}`);
+    CREATE TABLE passkey_codes (hash TEXT PRIMARY KEY, expires_at INTEGER NOT NULL, used_at INTEGER) STRICT; PRAGMA user_version = ${version - 12}`);
   db.close();
   openRegistry(path).close();
   const reopened = new DatabaseSync(path);
@@ -1460,7 +1460,7 @@ test("the migration that adds pipeline items turns the pipeline on for project n
   const rewind = () => {
     const db = new DatabaseSync(path);
     const version = db.prepare("PRAGMA user_version").get()!.user_version as number;
-    db.exec(`DROP TABLE pipeline_items; PRAGMA user_version = ${version - 5}`);
+    db.exec(`DROP TABLE pipeline_items; PRAGMA user_version = ${version - 6}`);
     db.close();
   };
   rewind();
@@ -1486,7 +1486,7 @@ test("judgments begin at the newest event, so failures from before are never jud
   const rewind = () => {
     const db = new DatabaseSync(path);
     const version = db.prepare("PRAGMA user_version").get()!.user_version as number;
-    db.exec(`DROP TABLE judgments; DROP TABLE judgment_since; PRAGMA user_version = ${version - 4}`);
+    db.exec(`DROP TABLE judgments; DROP TABLE judgment_since; PRAGMA user_version = ${version - 5}`);
     db.close();
   };
   rewind();
@@ -1498,7 +1498,7 @@ test("judgments begin at the newest event, so failures from before are never jud
   upgraded.close();
   const db = new DatabaseSync(path);
   const version = db.prepare("PRAGMA user_version").get()!.user_version as number;
-  db.exec(`PRAGMA user_version = ${version - 4}`);
+  db.exec(`PRAGMA user_version = ${version - 5}`);
   db.close();
   const again = openRegistry(path);
   t.after(() => again.close());
@@ -1569,7 +1569,7 @@ test("a registry from before join tokens keeps its nodes as they were, with none
   before.close();
   const db = new DatabaseSync(path);
   const version = db.prepare("PRAGMA user_version").get()!.user_version as number;
-  db.exec(`DROP TABLE join_tokens; DROP TABLE joined_nodes; PRAGMA user_version = ${version - 1}`);
+  db.exec(`DROP TABLE join_tokens; DROP TABLE joined_nodes; PRAGMA user_version = ${version - 2}`);
   db.close();
   const registry = openRegistry(path);
   t.after(() => registry.close());
@@ -1591,4 +1591,176 @@ test("a join token records one node, once, before it expires", (t) => {
   assert.deepEqual(registry.joinedNodes(), [{ ...joining, joinedAt: 1_999 }]);
   assert.deepEqual(registry.joinToken("hash"), { expiresAt: 2_000, usedAt: 1_999 });
   assert.equal(registry.node(joining.name)?.state, "offline");
+});
+
+/**
+ * Threads that each take a different path through the session facts: a harness and a session turn running, a waiting
+ * session with and without a message, a Claude worker stopped on its usage limit and one a later turn ended, one the
+ * usage backfill reads, and a deleted one.
+ */
+function sessionFactThreads(registry: ReturnType<typeof seeded>) {
+  let sequence = 0;
+  const report = (id: string, kind: "session.turn-started" | "session.turn-ended" | "session.waiting", at: number, message?: string) => registry.reportSession(node, {
+    sequence: ++sequence, pylon: `pylon-${id}` as PylonId, time: 1000 + sequence, event: { kind, session: "s1", at, ...(message === undefined ? {} : { message }) },
+  });
+  const limited = (id: string) => {
+    registry.setClaudeWorker(id as ThreadId, "hello", "started", undefined, "s1");
+    report(id, "session.turn-started", 40);
+    registry.appendClaudeRead(id as ThreadId, { session: "s1", from: transcriptStart, cursor: cursorAt(10), reset: false, readAt: 10, entries: [
+      { kind: "prompt", at: 40, text: "go", from: "person" }, { kind: "notice", at: 50, tone: "error", text: "You've hit your session limit", usageLimit: { resetsAt: 9000 } },
+    ] });
+    report(id, "session.turn-ended", 55);
+  };
+  addPylon(registry, "th-live");
+  registry.recordActivity("th-live" as ThreadId, { agent: 5, agentTurnRunning: true });
+  report("th-live", "session.turn-started", 10);
+  addPylon(registry, "th-waiting");
+  report("th-waiting", "session.waiting", 10, "a dev server still runs");
+  addPylon(registry, "th-waiting-bare");
+  report("th-waiting-bare", "session.waiting", 10);
+  addPylon(registry, "th-limited");
+  limited("th-limited");
+  addPylon(registry, "th-resumed");
+  limited("th-resumed");
+  report("th-resumed", "session.turn-started", 58);
+  report("th-resumed", "session.turn-ended", 59);
+  addPylon(registry, "th-reading");
+  registry.setThreadStatus("th-reading" as ThreadId, "archived");
+  registry.startUsageBackfill(["th-reading" as ThreadId], 1_000);
+  registry.holdUsageBackfill("th-reading" as ThreadId, 1_000);
+  addPylon(registry, "th-deleted");
+  registry.setThreadStatus("th-deleted" as ThreadId, "deleted");
+  return ["th-1", "th-live", "th-waiting", "th-waiting-bare", "th-limited", "th-resumed", "th-reading", "th-deleted"] as ThreadId[];
+}
+
+test("threads() reads each thread's session facts as thread() does, whichever facts it has", (t) => {
+  const registry = seeded(tempDb());
+  t.after(() => registry.close());
+  const ids = sessionFactThreads(registry);
+  const listed = registry.threads();
+  assert.deepEqual(listed.map((l) => l.id), [...ids].sort(), "threads made in one millisecond, by ID");
+  for (const id of ids) assert.deepEqual(listed.find((l) => l.id === id), registry.thread(id), id);
+  assert.deepEqual(registry.threads(project.id), listed);
+  const of = (id: string) => registry.thread(id as ThreadId)!;
+  assert.equal(of("th-live").sessionTurnRunning, true);
+  assert.ok(of("th-live").workingSince !== undefined);
+  assert.equal(of("th-waiting").sessionWaitingMessage, "a dev server still runs");
+  assert.equal(of("th-waiting-bare").sessionWaiting, true);
+  assert.equal(of("th-waiting-bare").sessionWaitingMessage, undefined);
+  assert.deepEqual(of("th-limited").usageLimit, { stoppedAt: 50, resetsAt: 9000 });
+  assert.equal(of("th-resumed").usageLimit, undefined, "a turn that started after the stop ended it");
+  assert.equal(of("th-reading").readingUsage, true);
+  assert.equal(of("th-1").working, false);
+});
+
+test("storedThreads reads only the threads' own rows, by status and by who started them", (t) => {
+  const registry = seeded(tempDb());
+  t.after(() => registry.close());
+  const ids = sessionFactThreads(registry);
+  registry.createThread({ ...thread, id: "th-review" as ThreadId, pylonId: "pylon-th-review" as PylonId, startedBy: "nexus-review" },
+    { ...pylon, thread: "th-review", pylonId: "pylon-th-review" as PylonId, boot: { ...pylon.boot, pylonId: "pylon-th-review" as PylonId } });
+  const idsOf = (filter?: Parameters<typeof registry.storedThreads>[0]) => registry.storedThreads(filter).map((s) => s.id);
+  assert.deepEqual(idsOf(), [...ids, "th-review"].sort());
+  assert.deepEqual(idsOf({ status: ["active", "idle"] }), [...ids, "th-review"].filter((id) => id !== "th-reading" && id !== "th-deleted").sort());
+  assert.deepEqual(idsOf({ startedBy: "nexus-review" }), ["th-review"]);
+  assert.deepEqual(idsOf({ status: ["archived"], startedBy: "nLAPTOP" }), ["th-reading"]);
+  assert.deepEqual(idsOf({ status: [] }), []);
+  for (const stored of registry.storedThreads()) {
+    const { working: _w, workingSince: _ws, sessionTurnRunning: _st, sessionActiveUntil: _sa, sessionWaiting: _sw, sessionWaitingMessage: _sm, usageLimit: _u, readingUsage: _r, ...own } = registry.thread(stored.id)!;
+    assert.deepEqual(stored, own, `${stored.id} has no session facts`);
+  }
+  assert.equal(registry.threadStatus("th-reading" as ThreadId), "archived");
+  assert.equal(registry.threadStatus("th-missing" as ThreadId), undefined);
+});
+
+test("a deploy drain set to null reads back as null, as does one never set", (t) => {
+  const registry = openRegistry(":memory:");
+  t.after(() => registry.close());
+  assert.equal(registry.drain(), null);
+  assert.equal(registry.desiredRelease(), null);
+  registry.setDrain({ commit: "c".repeat(40), expiresAt: 300 });
+  assert.deepEqual(registry.drain(), { commit: "c".repeat(40), expiresAt: 300 });
+  registry.setDrain(null);
+  assert.equal(registry.drain(), null);
+});
+
+test("the harness threads at start are those whose agent is a conversation, less deleted ones whose abort is recorded", (t) => {
+  const registry = seeded(tempDb());
+  t.after(() => registry.close());
+  const start = (id: string, conversationId: string, claude?: string) => registry.createThread({ ...thread, id: id as ThreadId, pylonId: `pylon-${id}` as PylonId, conversationId },
+    { ...pylon, thread: id, pylonId: `pylon-${id}` as PylonId, boot: { ...pylon.boot, pylonId: `pylon-${id}` as PylonId } }, claude);
+  start("th-live", "1");
+  start("th-deleted", "2");
+  start("th-aborted", "3");
+  start("th-claude", "4", "hello");
+  registry.setThreadStatus("th-deleted" as ThreadId, "deleted");
+  registry.setThreadStatus("th-aborted" as ThreadId, "deleted");
+  registry.recordAborted("3");
+  const harnessIds = () => registry.harnessThreads().map((h) => [h.id, h.status, h.conversationId]);
+  for (const h of registry.harnessThreads()) assert.equal(registry.agent(h).kind, "harness");
+  assert.deepEqual(harnessIds(), [["th-deleted", "deleted", "2"], ["th-live", "active", "1"]]);
+  registry.recordAborted("2");
+  registry.recordAborted("2");
+  registry.recordAborted("1");
+  assert.deepEqual(harnessIds(), [["th-live", "active", "1"]], "a live thread stays whatever is recorded of its conversation");
+});
+
+test("a node's tallies and room count each of its pylons by what it holds, and a pylon placed elsewhere as an orphan", async (t) => {
+  const { nodePylons, roomLeft } = await import("./placement.ts");
+  const registry = seeded(tempDb());
+  t.after(() => registry.close());
+  const other = "rj-other" as NodeName;
+  registry.upsertNode({ name: other, tailnetHost: "rj-other.tail.ts.net", tailnetNodeId: "nOTHER" as TailnetNodeId });
+  const placed = (id: string, active: boolean, on = node) => {
+    const p = addPylon(registry, id, on);
+    if (active) registry.recordActivity(id as ThreadId, { human: Date.now() });
+    return p;
+  };
+  const [up, paused, waking] = [placed("th-up", true), placed("th-paused", false), placed("th-waking", true)];
+  placed("th-unseen", true);
+  const [archived, reading, crashed] = [placed("th-archived", false), placed("th-reading", false), placed("th-crashed", true)];
+  const failed = placed("th-failed", true);
+  registry.savePylon({ ...registry.pylon(failed)!, failed: "gave up" });
+  const elsewhere = placed("th-elsewhere", true, other);
+  for (const id of ["th-archived", "th-reading"]) registry.setThreadStatus(id as ThreadId, "archived");
+  registry.startUsageBackfill(["th-reading" as ThreadId], Date.now());
+  registry.holdUsageBackfill("th-reading" as ThreadId, Date.now());
+  const release = registry.reserve("pylon-th-starting" as PylonId, node, { cpus: 1, memoryGiB: 1, diskGiB: 1 });
+  t.after(release);
+  const stopped = (pylonId: PylonId) => ({ pylonId, phase: "stopped" as const, checkpoint: null, sessions: null });
+  const capacity = { cpus: 16, committedCpus: 0, memoryGiB: 64, committedMemoryGiB: 8, diskFreeGiB: 400, committedDiskGiB: 0 };
+  registry.ingested({
+    node, observedAt: "2027-01-01T00:00:00Z", probeBootId: "b", events: [], capacity, artifacts: [], jobs: [], grants: { secrets: [], gitSsh: false }, previewRoutes: [], heldSecrets: [],
+    pylons: [{ pylonId: up, phase: "booting" }, stopped(paused), stopped(waking), stopped(archived), stopped(reading),
+      { pylonId: crashed, phase: "broken", detail: "the controller exited", cause: "controller", logTail: "" },
+      { pylonId: "pylon-gone" as PylonId, phase: "booting" }, { pylonId: elsewhere, phase: "booting" }],
+  }, []);
+  const record = registry.node(node)!;
+  assert.deepEqual(nodePylons(registry, record), {
+    up: { pylons: 1, cpus: 2, memoryGiB: 4 }, paused: { pylons: 2, cpus: 4, memoryGiB: 8 }, archived: { pylons: 2, cpus: 4, memoryGiB: 8 },
+    crashed: { pylons: 1, cpus: 2, memoryGiB: 4 }, orphaned: ["pylon-gone", elsewhere],
+  });
+  assert.deepEqual(roomLeft(registry, node, record.observation!, capacity, { cpus: 1, memoryGiB: 1, diskGiB: 1 }), {
+    pending: { cpus: 7, memoryGiB: 13, diskGiB: 11 },
+    left: { cpus: 8, memoryGiB: 42, diskGiB: 388 },
+  }, "a stopped pylon about to wake or be read holds its CPUs and memory again, an unreported one all it asked for, and a start placed here what it reserved");
+});
+
+test("a usage limit reads each Claude thread's newest 16 entries, in threads() as in thread()", (t) => {
+  const registry = seeded(tempDb());
+  t.after(() => registry.close());
+  const stopped = (id: string, after: number) => {
+    addPylon(registry, id);
+    registry.setClaudeWorker(id as ThreadId, "hello", "started", undefined, "s1");
+    const bookkeeping = Array.from({ length: after }, (_, i): ClaudeEntry => ({ kind: "turn", at: 60 + i, durationMs: 1 }));
+    registry.appendClaudeRead(id as ThreadId, { session: "s1", from: transcriptStart, cursor: cursorAt(10), reset: false, readAt: 10, entries: [
+      ...Array.from({ length: 30 }, (_, i) => reply(i)), { kind: "notice", at: 50, tone: "error", text: "You've hit your session limit", usageLimit: { resetsAt: 9000 } }, ...bookkeeping,
+    ] });
+  };
+  stopped("th-15-after", 15);
+  stopped("th-16-after", 16);
+  assert.deepEqual(registry.thread("th-15-after" as ThreadId)!.usageLimit, { stoppedAt: 50, resetsAt: 9000 });
+  assert.equal(registry.thread("th-16-after" as ThreadId)!.usageLimit, undefined, "a stop older than the newest 16 entries is not read");
+  const listed = registry.threads();
+  for (const id of ["th-15-after", "th-16-after"]) assert.deepEqual(listed.find((l) => l.id === id), registry.thread(id as ThreadId), id);
 });
