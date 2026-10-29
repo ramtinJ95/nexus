@@ -28,6 +28,9 @@ const tailBytes = 6_000;
 const unfit = 125;
 /** The shell's statuses for a command it cannot run or find, which the script also gives when it cannot start the check. */
 const missing = new Set([126, 127]);
+/** EX_TEMPFAIL, which a script gives for a failure a fresh run may not hit, such as a registry that timed out. */
+const transient = 75;
+const transientRuns = 3;
 /**
  * Prints the environment Gondolin gave the guest's PID 1 from the image, its PATH and the egress proxy's CA among it,
  * which the probe's ssh pipe does not get. It is fixed at boot, before `.nexus/setup` ran, unlike /etc/profile.d.
@@ -68,9 +71,10 @@ export const checkScript = checkGate.script;
 
 /**
  * A check run's state. `waiting` while its pylon boots. `void` when this run cannot give a verdict, because its pipe was
- * lost, its pylon was unfit, or this process holds no run for the thread, so the thread goes and a fresh one starts.
- * `unrunnable` when the pylon cannot run the repository's check: its boot or `.nexus/setup` failed, it has no
- * `.nexus/check`, or a command the check needs is missing. A fresh pylon would fail the same way.
+ * lost, its pylon was unfit, the script exited 75, or this process holds no run for the thread, so the thread goes and a
+ * fresh one starts. `unrunnable` when the pylon cannot run the repository's check: its boot or `.nexus/setup` failed, it
+ * has no `.nexus/check`, a command the check needs is missing, or the script exited 75 three runs in a row at the head.
+ * A fresh pylon would fail the same way.
  */
 export type CheckState =
   | { kind: "waiting" | "running" | "void" }
@@ -96,6 +100,8 @@ export function checkRuns(options: {
 }): CheckRuns {
   const { registry, probes, startThread, wake, gate = checkGate } = options;
   const runs = new Map<ThreadId, Run>();
+  /** The transient runs in a row at each head. */
+  const transients = new Map<string, number>();
 
   function open(t: Thread, head: string, probe: Pick<ProbeClient, "stream">) {
     const run: Run = { kind: "running", output: Buffer.alloc(0) };
@@ -115,7 +121,14 @@ export function checkRuns(options: {
         for await (const chunk of stream) run.output = Buffer.concat([run.output, chunk]).subarray(-tailBytes);
         const end = await stream.done;
         const output = run.output.toString("utf8").trim();
-        if (end.kind !== "exited" || end.code === unfit) invalid(t.id, run);
+        if (end.kind !== "exited" || end.code === unfit) return invalid(t.id, run);
+        if (end.code === transient) {
+          const tries = (transients.get(head) ?? 0) + 1;
+          transients.set(head, tries);
+          if (tries < transientRuns) return invalid(t.id, run);
+        }
+        transients.delete(head);
+        if (end.code === transient) settle({ kind: "unrunnable", output: `The ${gate.pylon} exited ${transient}, a transient failure, ${transientRuns} runs in a row. The last printed:\n${output}` });
         else settle(missing.has(end.code) ? { kind: "unrunnable", output } : { kind: "done", passed: end.code === 0, output });
       } catch {
         // A pipe that failed partway, such as one closed before its EOF went out, may have run the check, so it says nothing.

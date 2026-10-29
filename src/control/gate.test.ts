@@ -195,3 +195,24 @@ test("a pipe that fails while it is consumed voids the run and deletes its check
     assert.equal(f.registry.thread(id)!.status, "deleted");
   }
 });
+
+test("a check that exits 75 is void, so it runs again in a fresh check thread, and three such runs in a row at a head are unrunnable", async (t) => {
+  const f = await fixture(t, "echo npm error code ETIMEDOUT; exit 75");
+  const runs = f.runs();
+  const run = async () => {
+    const id = await runs.start(f.builder, "feature", f.head);
+    f.running(f.registry.thread(id)!);
+    const state = await settle(() => runs.poll(id, f.head));
+    return { state, status: f.registry.thread(id)!.status };
+  };
+  assert.deepEqual(await run(), { state: { kind: "void" }, status: "deleted" }, "the first transient run says nothing of the change");
+  assert.deepEqual(await run(), { state: { kind: "void" }, status: "deleted" });
+  assert.deepEqual((await run()).state, { kind: "unrunnable", output: "The check exited 75, a transient failure, 3 runs in a row. The last printed:\nnpm error code ETIMEDOUT" });
+  assert.deepEqual((await run()).state, { kind: "void" }, "the count starts again after it went to the person");
+
+  const failing = await fixture(t, "echo 1 test failed; exit 1");
+  const failingRuns = failing.runs();
+  const id = await failingRuns.start(failing.builder, "feature", failing.head);
+  failing.running(failing.registry.thread(id)!);
+  assert.deepEqual(await settle(() => failingRuns.poll(id, failing.head)), { kind: "done", passed: false, output: "1 test failed" }, "any other failure is still a verdict");
+});
