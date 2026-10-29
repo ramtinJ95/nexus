@@ -576,4 +576,9 @@ h4.md-h { font-size: 1.07em; }
 .ov-items th:nth-child(2) { width: 34%; }
 .ov-items .ov-act { width: 150px; }
 .ov-why { display: block; color: var(--text-2); font-size: 12px; overflow-wrap: anywhere; }
+.ov-items td { white-space: normal; overflow-wrap: anywhere; }
+@media (max-width: 760px) {
+  .ov-items th:first-child { width: auto; }
+  .ov-items .ov-act { width: 84px; }
+}
 .queued section h2 { margin: 0 0 10px; font: 600 13px/1.4 var(--sans); color: var(--text); }
