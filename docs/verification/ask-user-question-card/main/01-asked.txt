@@ -1,4 +1,4 @@
-GET /threads/th-12fbfde7e5f1
+GET /threads/th-2d0de65a7582
 drinks
 /
 Ask about drinks
@@ -7,7 +7,7 @@ Archive
 Delete
 Ask about drinks
 
-th-12fbfde7e5f1 · started 1 min ago · Claude Code · claude-sonnet-5-5
+th-2d0de65a7582 · started 1 min ago · Claude Code · claude-sonnet-5-5
 
 You
 
@@ -19,8 +19,6 @@ header "Drink", question "Tea or coffee?", not multi-select, options "Tea" (desc
 header "Toppings", question "Which toppings?", multi-select, options "Milk" (description "A splash of milk"), "Sugar" (description "One spoon") and "Honey" (description "A drizzle").
 Then reply with the tool's result word for word in a code block, and end your turn.
 
-Used AskUserQuestion
-›
 claude-sonnet-5-5
 ⌘↵ to send
 Send

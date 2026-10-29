@@ -1,4 +1,4 @@
-GET /threads/th-12fbfde7e5f1
+GET /threads/th-2d0de65a7582
 drinks
 /
 Ask about drinks
@@ -7,7 +7,7 @@ Archive
 Delete
 Ask about drinks
 
-th-12fbfde7e5f1 · started 2 min ago · Claude Code · claude-sonnet-5-5
+th-2d0de65a7582 · started 1 min ago · Claude Code · claude-sonnet-5-5
 
 You
 

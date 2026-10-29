@@ -1,4 +1,4 @@
-GET /threads/th-24acb3f47f5b
+GET /threads/th-c510a57b0537
 drinks
 /
 Ask about drinks
@@ -7,7 +7,7 @@ Archive
 Delete
 Ask about drinks
 
-th-24acb3f47f5b · started just now · Claude Code · claude-sonnet-5-5
+th-c510a57b0537 · started just now · Claude Code · claude-sonnet-5-5
 
 You
 

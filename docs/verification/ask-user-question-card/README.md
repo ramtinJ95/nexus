@@ -1,6 +1,6 @@
 # Answering AskUserQuestion from the dashboard
 
-Verified in this task's pylon on 2026-10-29, on branch `feat/ask-user-question-card` against main at db5eb92, with Claude Code 2.1.310, Herdr 0.9.5, Node 26.12.1 and headless Chromium from `@sparticuz/chromium` 138. No live control plane, node, image, GitHub repository or other thread was touched.
+Verified in this task's pylon on 2026-10-29, on branch `feat/ask-user-question-card` against main at 08b05d2, with Claude Code 2.1.310, Herdr 0.9.5, Node 26.12.1 and headless Chromium from `@sparticuz/chromium` 138. No live control plane, node, image, GitHub repository or other thread was touched.
 
 ## How to rerun
 
@@ -39,7 +39,7 @@ The first version of the branch opened a card from the transcript: a call with n
 
 ## Main (`main/`) and this branch (`branch/`)
 
-| Step | main, db5eb92 | this branch |
+| Step | main, 08b05d2 | this branch |
 |---|---|---|
 | Claude asks, `04-show-asked.txt` | attention `waiting`, no question | attention `decision`, and `question ask-toolu_…: Drink: Tea or coffee?`, `needs you` |
 | The hook's files, `asks-asked.txt` | none | one `.waiting` record with the session, the call's ID and its input |
@@ -49,7 +49,7 @@ The first version of the branch opened a card from the transcript: a call with n
 | The answered card, `03-answered-*.png`, `07-show-answered.txt` | a failed tool step | the questions in the conversation with Coffee, its preview, the note, Milk and "Oat cream", "Answered from nVERIFYLAPTOP", and `answered "Drink: Coffee; Toppings: Milk, Oat cream" by nVERIFYLAPTOP` |
 | A second ask answered in the terminal, `04-second-asked-*.png`, `05-second-answered-*.png` | not run | its card shows within 4 s, goes within 1.5 s of the terminal's Enter, and the conversation's card says "Answered in the terminal." |
 
-`branch-repeats.txt` is the branch's run three times in a row. Each time both cards showed, the dashboard's answer reached Claude, and the terminal's answer withdrew its card.
+`branch-repeats.txt` is the branch's run three times in a row at 2b7180d, before the rebase onto 08b05d2. Each time both cards showed, the dashboard's answer reached Claude, and the terminal's answer withdrew its card.
 
 Branch, the card at a desktop width:
 
@@ -69,7 +69,7 @@ Main, the same moment:
 
 ## Checks
 
-`npm run typecheck` passes, and `npm test` passes 1554 of 1554 on the branch.
+`npm run typecheck` passes, and `npm test` passes 1561 of 1561 on the branch.
 
 ## Not verified
 

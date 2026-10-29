@@ -1,17 +1,17 @@
-$ nexus show th-12fbfde7e5f1 --json
+$ nexus show th-2d0de65a7582 --json
 {
   "thread": {
-    "id": "th-12fbfde7e5f1",
+    "id": "th-2d0de65a7582",
     "title": "Ask about drinks",
     "project": "drinks",
-    "pylonId": "pylon-th-12fbfde7e5f1",
+    "pylonId": "pylon-th-2d0de65a7582",
     "status": "active",
     "conversationId": null,
     "startedBy": "nVERIFYLAPTOP",
-    "createdAt": 1793236585403,
+    "createdAt": 1793244176803,
     "agentTurnRunning": false,
-    "lastAgentActivityAt": 1793236588859,
-    "lastHumanActivityAt": 1793236585403,
+    "lastAgentActivityAt": 1793244179927,
+    "lastHumanActivityAt": 1793244176803,
     "seenAt": null,
     "lastReplyAt": null,
     "placement": {
@@ -35,10 +35,10 @@ $ nexus show th-12fbfde7e5f1 --json
   "desired": "running",
   "pylon": {
     "grantsOutdated": false,
-    "id": "pylon-th-12fbfde7e5f1",
+    "id": "pylon-th-2d0de65a7582",
     "node": "node-a",
     "failed": null,
-    "observedAt": "2026-10-29T01:16:26.863Z",
+    "observedAt": "2026-10-29T03:22:57.845Z",
     "resources": {
       "cpus": 1,
       "memoryGiB": 3,
@@ -49,11 +49,11 @@ $ nexus show th-12fbfde7e5f1 --json
   },
   "sessions": [
     {
-      "pylon": "pylon-th-12fbfde7e5f1",
+      "pylon": "pylon-th-2d0de65a7582",
       "id": "w1:p1",
       "herdrPane": "w1:p1",
       "harness": "claude-code",
-      "harnessSessionId": "04de5e3d-b81a-489c-9f7d-0ca3619b9ecb",
+      "harnessSessionId": "c6a26728-fd53-434e-8277-4b048af4da99",
       "title": "Ask about drinks",
       "status": "unknown",
       "state": "running",
@@ -78,12 +78,12 @@ $ nexus show th-12fbfde7e5f1 --json
       "preview": null
     },
     {
-      "port": 35253,
+      "port": 40807,
       "service": null,
       "preview": null
     },
     {
-      "port": 43509,
+      "port": 41345,
       "service": null,
       "preview": null
     }

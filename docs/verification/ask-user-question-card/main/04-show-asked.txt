@@ -1,10 +1,10 @@
-$ nexus show th-12fbfde7e5f1
-th-12fbfde7e5f1  Ask about drinks
+$ nexus show th-2d0de65a7582
+th-2d0de65a7582  Ask about drinks
 project: drinks
 Claude worker: started, model claude-sonnet-5-5
 attention: waiting
 status: active
-pylon: pylon-th-12fbfde7e5f1 on node-a, running, observed 45s ago
+pylon: pylon-th-2d0de65a7582 on node-a, running, observed 44s ago
 size: 1 CPUs, 3 GiB memory, 5 GiB disk
 placement: node-a, the project's default node
 setup: fresh boot runs .nexus/setup, because the project is scratch, so it has no template
@@ -12,7 +12,7 @@ session: claude-code "Ask about drinks" in pane w1:p1, unknown
 port: 7470
 port: 7480
 port: 7489
-port: 35253
-port: 43509
+port: 40807
+port: 41345
 PR watch: off (no control-plane GitHub token configured)
 [exit 0]
