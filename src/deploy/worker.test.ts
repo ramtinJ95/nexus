@@ -131,6 +131,39 @@ test("polling reconciles a desired control release, reports rollback and leaves 
   assert.equal(calls.length, 0, "bad commits remain quarantined, including across polling cycles");
 });
 
+test("a rolled-back install stays quarantined by its journal after its report is cleared, without draining control", async (t) => {
+  const { reconcileRole } = await import("./worker.ts");
+  const dir = await mkdtemp(join(tmpdir(), "nexus-journal-quarantine-"));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const old = "b".repeat(40);
+  for (const path of ["etc", "units", "deployer", `releases/${old}`]) await mkdir(join(dir, path), { recursive: true });
+  await writeFile(join(dir, `releases/${old}/release-commit`), old);
+  await symlink(`releases/${old}`, join(dir, "control-current"));
+  await writeFile(join(dir, "etc/control.json"), JSON.stringify({ listen: { host: "127.0.0.1", port: 1 } }));
+  await writeFile(join(dir, "control-deploy.json"), JSON.stringify({
+    commit, previous: `releases/${old}`, target: `releases/${commit}`, state: "rolled-back", reason: "candidate API failed",
+  }));
+  const reports: any[] = [];
+  const drains: any[] = [];
+  const calls: string[] = [];
+  const api = async (path: string, body?: any) => {
+    if (path === "release") return { desired: { commit, requestedBy: "nMac", requestedAt: 0 }, nodes: [] };
+    if (path === "drain") { drains.push(body); return { idle: true, expiresAt: 0 }; }
+    if (path === "report") { reports.push(body); return { ok: true }; }
+    assert.fail(path);
+  };
+  const config = { controlUrl: "http://control/", controlNodeId: "nControl", token: "a".repeat(64), healthTimeoutMs: 1000, drainTimeoutMs: 0 };
+  const boundary = {
+    prefix: dir, etc: join(dir, "etc"), units: join(dir, "units"),
+    async checkout() { calls.push("checkout"); },
+    async run(program: string, args: readonly string[]) { calls.push(`${program} ${args.join(" ")}`); return ""; },
+  };
+  await reconcileRole("control", config, api, boundary);
+  assert.deepEqual(drains, [{ commit, release: true }]);
+  assert.deepEqual(reports.map((r) => [r.state, r.target, r.reason]), [["rolled-back", commit, "candidate API failed"]]);
+  assert.deepEqual(calls, []);
+});
+
 test("a poll leaves its report as JSON private to its owner, with no temporary file beside it, and a role without its local config is refused", async (t) => {
   const { createServer } = await import("node:http");
   const { once } = await import("node:events");
