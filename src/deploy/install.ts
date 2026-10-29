@@ -1,8 +1,9 @@
 import { execFile } from "node:child_process";
-import { mkdir, readlink, rename, symlink, unlink } from "node:fs/promises";
+import { mkdir, readFile, readlink, rename, symlink, unlink } from "node:fs/promises";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { readJson, saveJson } from "../json-file.ts";
+import { parseCommit } from "./health.ts";
 import { fullCommit } from "./model.ts";
 import type { Role } from "./plan.ts";
 
@@ -36,6 +37,24 @@ export async function checkoutMerged(directory: string, commit: string, run: Com
   await run("git", ["clean", "-ffdqx"], directory);
 }
 
+export function releaseLink(prefix: string, role: Role): string {
+  return join(prefix, role === "control" ? "control-current" : "current");
+}
+
+export async function commitAt(dir: string): Promise<string | null> {
+  try { return parseCommit(await readFile(join(dir, "release-commit"), "utf8")); }
+  catch { return null; }
+}
+
+/** Points `link` at `target` with one rename, so a reader sees the old target or the new one. */
+export async function pointLink(link: string, target: string): Promise<void> {
+  await unlink(`${link}.new`).catch((error: NodeJS.ErrnoException) => {
+    if (error.code !== "ENOENT") throw error;
+  });
+  await symlink(target, `${link}.new`);
+  await rename(`${link}.new`, link);
+}
+
 export interface Transaction {
   commit: string;
   previous: string;
@@ -61,7 +80,7 @@ export class ReleaseInstaller {
   private readonly boundary: InstallBoundary;
   constructor(prefix: string, role: Role, boundary: InstallBoundary) {
     this.boundary = boundary;
-    this.link = join(prefix, role === "control" ? "control-current" : "current");
+    this.link = releaseLink(prefix, role);
     this.journal = join(prefix, `${role}-deploy.json`);
   }
 
@@ -74,14 +93,6 @@ export class ReleaseInstaller {
     return value;
   }
 
-  private async point(target: string): Promise<void> {
-    await unlink(`${this.link}.new`).catch((error: NodeJS.ErrnoException) => {
-      if (error.code !== "ENOENT") throw error;
-    });
-    await symlink(target, `${this.link}.new`);
-    await rename(`${this.link}.new`, this.link);
-  }
-
   async install(commit: string): Promise<Transaction> {
     if (!fullCommit.test(commit)) throw new Error("release must be a full lower-case commit hash");
     if ((await this.observed())?.state === "installing") throw new Error("an unfinished install must be recovered first");
@@ -91,7 +102,7 @@ export class ReleaseInstaller {
     await this.boundary.beforeSwitch?.();
     const transaction = await this.record({ commit, previous, target, state: "installing", reason: null });
     try {
-      await this.point(target);
+      await pointLink(this.link, target);
       await this.boundary.activate?.();
       await this.boundary.restart();
       if (!await this.boundary.healthy()) throw new Error("release health check failed");
@@ -112,7 +123,7 @@ export class ReleaseInstaller {
     try { reason += `\n${(await this.boundary.journal()).slice(-16_384)}`; }
     catch { reason += "\njournal unavailable"; }
     try {
-      await this.point(transaction.previous);
+      await pointLink(this.link, transaction.previous);
       await this.boundary.restart();
       if (!await this.boundary.healthy()) throw new Error("previous release is not healthy");
     } catch (error) {

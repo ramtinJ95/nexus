@@ -251,6 +251,7 @@ for (const readiness of ["stale", "unhealthy", "unreachable"] as const) test(`pr
   assert.equal(restarts, 0);
   assert.equal(await readlink(join(dir, "current")), `releases/${old}`);
   await assert.rejects(readFile(join(dir, "probe-deploy.json")), { code: "ENOENT" });
+  await symlink("releases/interrupted", join(dir, "deployer-current.new"));
   await reconcileRole("probe", config, api, boundary);
   assert.equal(reads, 4);
   assert.deepEqual(reports, ["installing", "waiting-for-control", "installing", "healthy"]);
@@ -259,4 +260,5 @@ for (const readiness of ["stale", "unhealthy", "unreachable"] as const) test(`pr
   assert.equal(await readlink(join(dir, "current")), `releases/${commit}`);
   assert.equal(await readlink(join(dir, "control-current")), `releases/${commit}`);
   assert.equal(JSON.parse(await readFile(join(dir, "probe-deploy.json"), "utf8")).state, "healthy");
+  assert.equal(await readlink(join(dir, "deployer-current")), `releases/${commit}`, "the checked worker is promoted over a link an interrupted swap left");
 });

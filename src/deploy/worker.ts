@@ -1,9 +1,9 @@
-import { copyFile, readFile, readlink, rename, stat, symlink, writeFile } from "node:fs/promises";
+import { copyFile, readFile, readlink, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
-import { command, checkoutMerged, ReleaseInstaller, type Transaction } from "./install.ts";
+import { command, checkoutMerged, commitAt, pointLink, releaseLink, ReleaseInstaller, type Transaction } from "./install.ts";
 import { planDeploy, quarantined, type Attempt, type Role } from "./plan.ts";
-import { fullCommit, type ReleaseReport, type ReleaseView } from "./model.ts";
+import type { ReleaseReport, ReleaseView } from "./model.ts";
 import { jsonRequest } from "./http.ts";
 import { readJson, saveJson } from "../json-file.ts";
 import { localApiWhois, tailnetNodeIdPattern } from "../tailscale.ts";
@@ -28,12 +28,6 @@ export function parseWorkerConfig(value: unknown): WorkerConfig {
 
 const prefix = "/opt/nexus";
 const configPath = "/etc/nexus/deployer.json";
-async function commitAt(link: string): Promise<string | null> {
-  try {
-    const commit = (await readFile(join(link, "release-commit"), "utf8")).trim();
-    return fullCommit.test(commit) ? commit : null;
-  } catch { return null; }
-}
 
 export async function runWorker(check = false): Promise<void> {
   if (process.getuid?.() !== 0) throw new Error("deployer must run as root");
@@ -58,7 +52,7 @@ export async function reconcileRole(role: Role, config: WorkerConfig, api: Api, 
   prefix, etc: "/etc/nexus", units: "/etc/systemd/system", run: command, checkout: checkoutMerged,
 }): Promise<void> {
   const { prefix, etc, units, run, checkout } = boundary;
-  const link = join(prefix, role === "control" ? "control-current" : "current");
+  const link = releaseLink(prefix, role);
   const service = `nexus-${role}.service`;
   const unit = join(units, service);
   const savedUnit = join(prefix, `${role}-deploy.unit`);
@@ -187,13 +181,7 @@ async function promoteWorker(commit: string, repo: string, prefix: string, run: 
   if (rejected.trim() === target) return;
   try { await run(process.execPath, [join(prefix, target, "src/deploy/worker.ts"), "--check"], repo); }
   catch { await writeFile(join(prefix, "deployer", "rejected"), target); return; }
-  await symlink(target, join(prefix, "deployer-current.new")).catch(async (error: NodeJS.ErrnoException) => {
-    if (error.code !== "EEXIST") throw error;
-    const { unlink } = await import("node:fs/promises");
-    await unlink(join(prefix, "deployer-current.new"));
-    await symlink(target, join(prefix, "deployer-current.new"));
-  });
-  await rename(join(prefix, "deployer-current.new"), join(prefix, "deployer-current"));
+  await pointLink(join(prefix, "deployer-current"), target);
 }
 
 if (import.meta.main) runWorker(process.argv.includes("--check")).catch((error: unknown) => { console.error(error); process.exitCode = 1; });
