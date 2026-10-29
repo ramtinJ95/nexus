@@ -347,7 +347,7 @@ A pass every 15 seconds, beside the nudge pass, starts and moves each judgment. 
 
 The control plane reads one fenced `nexus-judgment` block from the reply, the newest whose JSON echoes the brief's random token, as the review loop reads `nexus-review`. A reply without one, a run that ends without a reply, and no answer in 15 minutes go to the person. Then it closes the conversation, counts its tokens under the builder thread, and acts, but only while the pylon still holds the failure: a person's retry from the dashboard, an archive or a delete leaves Nexus nothing to do. A failure whose event the registry's event log has dropped, which keeps the last 10,000, cannot be told from a later failure with the same reason, so Nexus does nothing for it either. A project whose pipeline was turned off while its judgment ran gets no retry or move on the verdict: the person decides on the card. A `retry` takes the API's retry path, as agent activity so the pylon is wanted. A `retry-elsewhere` moves the pylon only when its node holds nothing of it, no checkpoint, no VM it lists, no preview and no job in flight, because Nexus has no job that moves a disk. Placement then weighs every other node, and one registry transaction gives the pylon its new node, a fresh first boot and a live spec for that node, and gives the thread its new placement and a fresh setup, since templates stay on the node that built them. Nexus retries one thread's pylon at most twice on its own, a move included. After that each failure goes to the person without a judgment. The person's answer has no cap.
 
-A question for the person offers only the actions that can run then, and `Leave it failed`. When nothing but that is left, Nexus asks nothing, and the failed pylon waits for the person on the thread page. A question cannot be withdrawn, so one that the person never answers stays open after a retry from the dashboard ends the judgment, and answering it then does nothing.
+A question for the person offers only the actions that can run then, and `Leave it failed`. When nothing but that is left, Nexus asks nothing, and the failed pylon waits for the person on the thread page. A judgment's question cannot be withdrawn, so one that the person never answers stays open after a retry from the dashboard ends the judgment, and answering it then does nothing.
 
 Failures that were in the registry before judgments began are never judged. The migration that adds the `judgments` table records the newest event then in `judgment_since`, and the pass judges only failures above it, so deploying judgments never retries a pylon the person left failed.
 
@@ -356,6 +356,8 @@ Failures that were in the registry before judgments began are never judged. The 
 A question is a record the control plane owns, in the registry's `questions` table: the thread that asked it, the text, two or more options, the merge policy's reserved case it is if any, and who may answer it, a person or a deployer. It generalizes the review's hold for the person. A [failure judgment](#failure-judgments) asks one when a failed pylon is the person's to decide, a [planning thread](#planning-threads) asks one per item it proposes, and the orchestration pipeline will ask what the merge policy reserves for the person, as [the exploration](explorations/orchestration.md#asking-the-person-through-the-attention-status) describes. The asker chooses the ID, so asking again after a crash finds the question it asked.
 
 An open question makes its thread's attention `decision`, so it notifies and counts in the badge as a held review does. The thread page shows it as a card above the landing card, with the text and a button per option, each asking for a confirmation, and `nexus show` lists it. The answer is a person-only route, `POST /v1/questions/<id>/answer`, which records the option, the device that chose it and when. An answer never changes: the same option again answers with the stored record, so a retried answer is safe, and another option is refused. As the Land button does, the card asks the route's own question, and a device the route would refuse gets disabled buttons that say why. Acting on the answer is the asker's part: the judgment pass reads the answer to its question on its next pass.
+
+A Claude worker's AskUserQuestion call is a question too. It is a question the agent chose to ask, not an approval prompt, so it does not reopen [the decision against approvals](roadmap.md#not-planned): workers still run with permissions bypassed. Claude Code writes the call to its transcript before its dialog shows, so the registry finds it in the worker's stored transcript. After each transcript read, session event, archive and delete, every AskUserQuestion call among the newest 64 entries of the worker's current session that has no result, while a turn of that session is live or waiting, and that was made in that session's latest turn, is the question `ask-<call ID>`, and every unanswered ask that no longer is one is withdrawn. A call a pause or crash killed has no result, and its session's next turn makes it stale, so it never comes back, while another Claude's turn in the pylon, such as the person's own, leaves it be. The thread page shows an open ask as a form: each asked question with its options as radios, or checkboxes for a multi-select one, their previews, an answer of the person's own and notes. Answering stays person-only, through the same route with the person's choices as its body. The control plane hands the answer to Claude in the pylon first, through [the PermissionRequest hook](#event-stream-and-claude-code-thread-workers), and records it only once Claude has it, so a recorded answer is one Claude got. The terminal's dialog stays open meanwhile, and whichever answers first is the answer. An answer that finds no hook waiting, because the terminal answered, the turn ended or a pause stopped Claude, withdraws the ask for good, since the transcript cannot tell such a call from one that waits. An answered ask leaves the dock, and the conversation shows the call as a card with the choices and the device, or with Claude's result when the terminal answered it.
 
 ## Planning threads
 
@@ -512,6 +514,30 @@ which AskUserQuestion also fires, and `elicitation_dialog` report waiting. The
 event does not say which notification fired, so the control plane cannot drop an
 idle prompt without risking a real wait whose turn start was lost or late. Until
 the image is rebuilt, the old matcher's idle prompt still counts.
+
+An AskUserQuestion dialog can be answered from the dashboard, as
+[questions for the person](#questions-for-the-person) describes. Claude Code
+2.1.310 runs a PermissionRequest hook while the dialog shows, in
+`bypassPermissions` mode too, and `nexus-claude-hook ask` runs there for
+AskUserQuestion alone, with a timeout of a day. Its input has the session and
+the tool's input but no call ID, so an ask is named by the SHA-256 of the session
+and the questions' texts. The hook writes its pid to `~/.nexus/asks/<key>.waiting`
+and checks every half second for `<key>.answer`. The control plane writes that
+file through the probe with `nexus-claude-hook answer <json>`, which creates it
+whole and only once, and exits 0 and prints `delivered` when the answer is there
+or was delivered already, 20 when no live hook waits, 21 when another answer was
+written first, and 64 for an argument that is not an answer. The hook then prints
+a decision that allows the call with Claude's own input plus `answers` and
+`annotations`, which closes the dialog and gives the tool its result, and renames
+the answer to `<key>.delivered`. A picked option's preview goes in its annotation
+from the hook's own input, as the terminal puts it, since the transcript cuts
+long strings. When the terminal answers first, Claude neither stops the hook nor
+reads what it prints later, so the call's PostToolUse removes the waiting file,
+and the hook exits with nothing printed, as it also does once Claude is gone. A
+blocking PreToolUse hook would work too, but it hides the dialog while it waits,
+so the terminal could no longer answer. The hook of an image from before exits 0
+for `answer` without printing `delivered`, which the control plane takes as an
+image that cannot take answers, as it takes a missing hook's 127.
 
 Every Claude in the pylon reads the same hooks, including one a worker starts to
 verify its work, whose turn end would otherwise give the thread a reply while the

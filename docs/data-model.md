@@ -20,7 +20,7 @@ The control plane writes every record. Probes send facts in observations, and th
 | Preview | `pylon`, `service`, `httpsPort` | The control plane allocates the port, never one its node's probe still routes. Observations report when it is ready |
 | Output | `thread`, `kind`, `ref` | Observations, including outputs the agent declares with `nexus output add` |
 | NexusEvent | `id`, `time`, `thread`, `project`, `kind`, `payload` | Accepted pylon lifecycle reports and control-plane changes |
-| Question | `id`, `thread`, `text`, `options`, `reserved`, `answerer`, `askedAt`, `answer` | A failure judgment that leaves its failure to the person, or one item a planning thread proposed, and the person's answer. [Question records](#question-records) describes it |
+| Question | `id`, `thread`, `text`, `options`, `reserved`, `answerer`, `askedAt`, optional `proposal` and `ask`, `answer` | A failure judgment that leaves its failure to the person, one item a planning thread proposed, or a Claude worker's AskUserQuestion call while its dialog waits, and the person's answer. [Question records](#question-records) describes it |
 | Judgment | `failure`, `thread`, `node`, `failed`, `startedAt`, `request`, `conversation`, `reply`, `phase` | The judgment pass, for a builder's failed pylon. [Judgment records](#judgment-records) describes it |
 | Orphan | `node`, `pylonId` | Observations of a pylon the registry does not know. Only you delete it |
 | Usage record | `id`, `thread`, `project`, `role`, `agent`, `model`, `at`, `input`, `output`, `cacheWrite`, `cacheRead` | Reads of the harness and of the agents' transcripts in each pylon. [Token usage records](#token-usage-records) describes it |
@@ -139,6 +139,8 @@ A node's latest observation has `nestedVirtualization: true` from a probe whose 
 ## Question records
 
 `questions` stores each question a thread asked the person, one JSON record per question, keyed by the ID its asker chose, with its thread in a column. `Question` in `src/control/questions.ts` is the shape, and `ThreadDetail.questions` serves a thread's, ordered by `askedAt` and then ID. Asking again with an ID that exists keeps the stored record. `answer` is null until the person answers, then `{ option, by, at }`, which is never replaced, so a second answer reads the first. An unanswered question makes its thread's attention `decision`, recomputed in the transaction that asks or answers it. `answerer` is `person` or `deployer`, and [the answer route](cli.md#questions-0350) checks it against the caller.
+
+A Claude worker's AskUserQuestion call is the question `ask-<call ID>`, whose `ask` holds the call's session, ID and questions, and whose answer adds `choices`, one per asked question. The registry asks and withdraws these itself from the worker's stored transcript and session state, as [the design](design.md#questions-for-the-person) describes: an unanswered one that no longer waits is deleted. `withdrawn_asks` keeps the ID of each ask an answer found no hook waiting for, so the transcript, which cannot tell, never asks it again.
 
 ## Start request IDs
 
