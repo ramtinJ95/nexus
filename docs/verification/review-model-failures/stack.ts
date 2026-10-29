@@ -217,10 +217,13 @@ const until = async (done: () => boolean, ms = 10_000) => {
 };
 /** Moves the shared clock past the reply grace, so the loop reads the turn that just ended. */
 const pastGrace = async () => { await sleep(600); skew += 61_000; await sleep(800); };
+const failingOf = (number: number) => {
+  const phase = reviewOf(number).phase;
+  return phase.kind === "reviewing" || phase.kind === "fixing" ? phase.failing : undefined;
+};
 /** Moves the shared clock to the retry the loop scheduled, if any, or past the reply grace once more. */
 const toRetry = async (number: number) => {
-  const phase = reviewOf(number).phase;
-  const failing = phase.kind === "reviewing" || phase.kind === "fixing" ? phase.failing : undefined;
+  const failing = failingOf(number);
   if (failing !== undefined) skew += failing.retryAt - clock();
   await pastGrace();
 };
@@ -228,9 +231,11 @@ const ended = (number: number) => ["needs-person", "approved", "checking"].inclu
 
 async function run(number: number, prefix: string) {
   await reviews.start(builders.get(number)!, { land: null });
+  let captured = false;
   for (let step = 0; step < 12 && !ended(number); step++) {
     await pastGrace();
-    if (step === 0) await capture(`${prefix}-after-first-turn`, number);
+    if (!captured && failingOf(number) !== undefined) await capture(`${prefix}-while-failing`, number);
+    captured ||= failingOf(number) !== undefined;
     await toRetry(number);
   }
   await until(() => ended(number));

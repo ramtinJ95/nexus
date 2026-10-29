@@ -16,9 +16,9 @@
   ]
 }
 
-$ nexus show th-27185aea7e3f | grep -E "^review|needs you"
-review rv-2ef0981f of PR #222: needs-person, round 1 of 5, reviewer th-37435f62e5eb on gpt-6-astra
+$ nexus show th-326927fc489e | grep -E "^review|needs you"
+review rv-478e50a7 of PR #222: needs-person, round 1 of 5, reviewer th-ee4fcde11585 on gpt-6-astra
 needs you: The reviewer's model failed 5 times in a row (last: Request timed out.), in round 1. Run nexus review again once the provider recovers.
 
-The dashboard's review line on /threads/th-27185aea7e3f:
-Nexus review rv-2ef0981f: needs-person, round 1 of 5, by th-37435f62e5eb on gpt-6-astra
+The dashboard's review line on /threads/th-326927fc489e:
+Nexus review rv-478e50a7: needs-person, round 1 of 5, by th-ee4fcde11585 on gpt-6-astra

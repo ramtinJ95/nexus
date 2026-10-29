@@ -1,9 +1,6 @@
-2026-10-29T17:15:27.535Z 01-reviewer-recovers-after-first-turn: {"phase":{"kind":"reviewing"},"nudges":1,"sent":2,"rounds":[{"head":"2211000000000000000000000000000000000000","verdict":null,"answers":null}]}
-2026-10-29T17:18:35.941Z 01-reviewer-recovers-end: {"phase":{"kind":"needs-person","reasons":["The reviewer ended 3 turns in a row without an answer Nexus could read, in round 1."]},"nudges":2,"sent":3,"rounds":[{"head":"2211000000000000000000000000000000000000","verdict":null,"answers":null}]}
-2026-10-29T17:19:38.519Z 02-reviewer-keeps-failing-after-first-turn: {"phase":{"kind":"reviewing"},"nudges":1,"sent":2,"rounds":[{"head":"2221000000000000000000000000000000000000","verdict":null,"answers":null}]}
-2026-10-29T17:22:46.912Z 02-reviewer-keeps-failing-end: {"phase":{"kind":"needs-person","reasons":["The reviewer ended 3 turns in a row without an answer Nexus could read, in round 1."]},"nudges":2,"sent":3,"rounds":[{"head":"2221000000000000000000000000000000000000","verdict":null,"answers":null}]}
-2026-10-29T17:23:49.530Z 03-claude-builder-api-error-after-first-turn: {"phase":{"kind":"approved"},"nudges":0,"sent":4,"rounds":[{"head":"2231000000000000000000000000000000000000","verdict":"changes","answers":[{"id":"F1","action":"fixed","reason":"Added a 5-minute TTL."}]},{"head":"2232000000000000000000000000000000000000","verdict":"approve","answers":null}]}
-2026-10-29T17:24:53.114Z 03-claude-builder-api-error-end: {"phase":{"kind":"approved"},"nudges":0,"sent":4,"rounds":[{"head":"2231000000000000000000000000000000000000","verdict":"changes","answers":[{"id":"F1","action":"fixed","reason":"Added a 5-minute TTL."}]},{"head":"2232000000000000000000000000000000000000","verdict":"approve","answers":null}]}
-2026-10-29T17:24:53.114Z #221 messages the loop sent: 3
-2026-10-29T17:24:53.114Z #222 messages the loop sent: 3
-2026-10-29T17:24:53.114Z #223 messages the loop sent: 4
+2026-10-29T17:26:23.343Z 01-reviewer-recovers-end: {"phase":{"kind":"needs-person","reasons":["The reviewer ended 3 turns in a row without an answer Nexus could read, in round 1."]},"nudges":2,"sent":3,"rounds":[{"head":"2211000000000000000000000000000000000000","verdict":null,"answers":null}]}
+2026-10-29T17:30:34.121Z 02-reviewer-keeps-failing-end: {"phase":{"kind":"needs-person","reasons":["The reviewer ended 3 turns in a row without an answer Nexus could read, in round 1."]},"nudges":2,"sent":3,"rounds":[{"head":"2221000000000000000000000000000000000000","verdict":null,"answers":null}]}
+2026-10-29T17:32:40.111Z 03-claude-builder-api-error-end: {"phase":{"kind":"approved"},"nudges":0,"sent":4,"rounds":[{"head":"2231000000000000000000000000000000000000","verdict":"changes","answers":[{"id":"F1","action":"fixed","reason":"Added a 5-minute TTL."}]},{"head":"2232000000000000000000000000000000000000","verdict":"approve","answers":null}]}
+2026-10-29T17:32:40.111Z #221 messages the loop sent: 3
+2026-10-29T17:32:40.111Z #222 messages the loop sent: 3
+2026-10-29T17:32:40.111Z #223 messages the loop sent: 4
