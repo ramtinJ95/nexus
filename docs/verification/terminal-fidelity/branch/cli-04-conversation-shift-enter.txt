@@ -1,0 +1,14 @@
+$ nexus conversation th-99ff5980770a
+> /pstack:poteto-mode This thread only checks Nexus's dashboard. Do nothing else: read no files, write none, start no subagents, ask no reviewer, open no pull request. Reply with the single word READY and end your turn.
+
+READY
+
+[turn] 3s
+
+> This message has two lines.
+> Reply with only this link and nothing else: https://example.com/nx
+
+https://example.com/nx
+
+[turn] 3s
+[exit 0]

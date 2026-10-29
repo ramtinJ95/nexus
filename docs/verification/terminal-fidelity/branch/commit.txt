@@ -1,0 +1,1 @@
+branch: c4a09c2 docs: how the dashboard's terminal copies, makes newlines, opens links and reattaches
