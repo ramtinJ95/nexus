@@ -8,7 +8,7 @@ import { runningCommit } from "../deploy/health.ts";
 import { randomUUID } from "node:crypto";
 import { mkdir } from "node:fs/promises";
 import { once } from "node:events";
-import { createServer, STATUS_CODES, type IncomingMessage, type ServerResponse } from "node:http";
+import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import type { Duplex } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { commandPolicies, JobFailure, runCommand, runJob, type BackendPylon, type CommandPolicy, type ProbeDeps, type VmBackend } from "../backend.ts";
@@ -28,7 +28,7 @@ import { readBody } from "../request-body.ts";
 import { redact } from "./redact.ts";
 import { hostCapacity, readNodeHealth } from "./host.ts";
 import { gitFacts, gitPollMs } from "../git-facts.ts";
-import { startGateway } from "./gateway.ts";
+import { rawResponse, startGateway } from "./gateway.ts";
 import { createPylonApi } from "./pylon-api.ts";
 import { createTailscaleServe, parseServeStatus, readRoutes, type HttpsGet, type TailscaleCli } from "./serve.ts";
 import type { NodeSecrets } from "./config.ts";
@@ -694,8 +694,7 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
 
 /** An HTTP error on a socket that asked to upgrade, which has no ServerResponse. Does nothing once the socket is gone. */
 function refuse(socket: Duplex, status: number, body: string) {
-  if (socket.destroyed) return;
-  socket.end(`HTTP/1.1 ${status} ${STATUS_CODES[status]}\r\ncontent-type: text/plain; charset=utf-8\r\ncontent-length: ${Buffer.byteLength(body)}\r\nconnection: close\r\n\r\n${body}`);
+  if (!socket.destroyed) socket.end(rawResponse(status, { "content-type": "text/plain; charset=utf-8", connection: "close" }, body));
 }
 
 function send(res: ServerResponse, status: number, body: string, contentType = "text/plain; charset=utf-8") {

@@ -226,7 +226,7 @@ function sameHost(url: string, host: string): boolean {
   }
 }
 
-function rawResponse(status: number, headers: IncomingHttpHeaders | OutgoingHttpHeaders, body: string, statusMessage = STATUS_CODES[status] ?? ""): string {
+export function rawResponse(status: number, headers: IncomingHttpHeaders | OutgoingHttpHeaders, body: string, statusMessage = STATUS_CODES[status] ?? ""): string {
   const lines = [`HTTP/1.1 ${status} ${statusMessage}`];
   for (const [name, value] of Object.entries(headers)) {
     if (value === undefined) continue;
