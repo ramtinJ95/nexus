@@ -381,6 +381,9 @@ const migrations: readonly string[] = [
   // nodes control.json names. It touches nothing an earlier migration made, so a registry rewound past it applies it again unchanged.
   `CREATE TABLE IF NOT EXISTS join_tokens (hash TEXT PRIMARY KEY, expires_at INTEGER NOT NULL, used_at INTEGER, used_by TEXT) STRICT;
    CREATE TABLE IF NOT EXISTS joined_nodes (name TEXT PRIMARY KEY REFERENCES nodes (name), deploy_key TEXT NOT NULL, joined_at INTEGER NOT NULL) STRICT;`,
+  // Each deleted thread's conversation the harness aborted, so a start aborts only those a crashed delete left. It
+  // touches nothing an earlier migration made, so a registry rewound past it applies it again unchanged.
+  `CREATE TABLE IF NOT EXISTS aborted_conversations (conversation TEXT PRIMARY KEY) STRICT;`,
 ];
 
 type Row = Record<string, unknown>;
@@ -1293,6 +1296,13 @@ export function openRegistry(path: string, clock = Date.now) {
         ORDER BY created_at, id`).all({ $statuses: filter.status === undefined ? null : JSON.stringify(filter.status), $startedBy: filter.startedBy ?? null }).map(threadRow);
     },
     threadStatus,
+    /**
+     * The threads whose agent is a harness conversation, as agent() decides: a conversation ID and no Claude worker. A
+     * deleted one is left out once its conversation's abort is recorded.
+     */
+    harnessThreads: (): StoredThread[] => sql(`SELECT * FROM threads t WHERE conversation_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM claude_workers WHERE thread = t.id)
+      AND (status <> 'deleted' OR conversation_id NOT IN (SELECT conversation FROM aborted_conversations)) ORDER BY created_at, id`).all().map(threadRow),
+    recordAborted(conversationId: string) { sql("INSERT OR IGNORE INTO aborted_conversations (conversation) VALUES (?)").run(conversationId); },
     markSeen(id: ThreadId, unread: boolean, now = Date.now(), lastReplyAt?: number | null) {
       if (!unread && lastReplyAt === null) return;
       transaction(() => {

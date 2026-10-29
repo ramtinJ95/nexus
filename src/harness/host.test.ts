@@ -85,3 +85,22 @@ test("a judgment's conversation is offered no tools, needs no pylon, and has rep
   await reopened.send("th-tools", "hello", "m1", "followUp");
   assert.ok((await eventually(() => seen[2] ?? null)).tools.includes("bash"), "a thread's conversation in the same harness is offered the coding tools");
 });
+
+test("each deleted conversation aborted, by a delete or at open, is told to onAborted", async (t) => {
+  const scratch = await mkdtemp(join(tmpdir(), "nexus-host-aborted-"));
+  t.after(() => rm(scratch, { recursive: true, force: true }));
+  const aborted: ConversationId[] = [];
+  const open = (deleted: readonly ConversationId[]) => openHarnessHost({
+    storagePath: join(scratch, "harness.sqlite"), models: scriptedModels(), model: scriptedModel, tailscaled: join(scratch, "none.sock"),
+    locator: { awaitRunning: () => Promise.reject(new Error("no pylon in this test")) },
+    threads: [], deleted, onAborted: (id) => aborted.push(id), onActivity: () => {}, log: () => {},
+  });
+  const host = await open([]);
+  const [first, second] = [await host.startThread({ threadId: "th-a", pylonId: "pylon-th-a" as PylonId }), await host.startThread({ threadId: "th-b", pylonId: "pylon-th-b" as PylonId })];
+  await host.deleteThread({ threadId: "th-a", pylonId: "pylon-th-a" as PylonId });
+  assert.deepEqual(aborted, [first]);
+  await host.close();
+  const reopened = await open([first, second]);
+  t.after(() => reopened.close());
+  assert.deepEqual(aborted, [first, first, second]);
+});
