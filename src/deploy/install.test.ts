@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, readdir, readFile, readlink, rm, stat, symlink, writeFile } from "node:fs/promises";
+import { spawn } from "node:child_process";
+import { chmod, copyFile, mkdtemp, mkdir, readdir, readFile, readlink, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { test, type TestContext } from "node:test";
 import { checkoutMerged, command, ReleaseInstaller, type InstallBoundary } from "./install.ts";
 
@@ -143,4 +144,95 @@ test("a journal that is not JSON is refused rather than read as no deployment", 
   await writeFile(join(prefix, "control-deploy.json"), "{\"commit\":");
   await assert.rejects(installer.observed(), SyntaxError);
   await assert.rejects(installer.install(commit), SyntaxError);
+});
+
+/** Each file under `root`, with its bytes, mode, owner and modification time. */
+async function snapshot(root: string): Promise<Record<string, string>> {
+  const entries = await Promise.all((await readdir(root, { recursive: true })).map(async (name) => {
+    const s = await stat(join(root, name));
+    return s.isDirectory() ? [] : [[name, `${(await readFile(join(root, name))).toString("base64")} ${(s.mode & 0o777).toString(8)} ${s.uid}:${s.gid} ${s.mtimeMs}`]];
+  }));
+  return Object.fromEntries(entries.flat());
+}
+
+/**
+ * The role installers of this checkout, run as the deployer runs them, with stdin open and never written. Only what
+ * needs root is stood in for: release.sh's helpers, and every command that changes the system, which logs instead.
+ */
+async function roleInstallers(t: TestContext) {
+  const dir = await directory(t);
+  const root = join(dir, "root");
+  const etc = join(root, "etc", "nexus");
+  const checkout = join(dir, "checkout");
+  const shims = join(dir, "bin");
+  const log = join(dir, "log");
+  const real = resolve(import.meta.dirname, "../..");
+  await mkdir(join(checkout, "deploy"), { recursive: true });
+  await mkdir(join(root, "opt", "nexus", "deployer"), { recursive: true });
+  for (const name of ["install-control.sh", "install-probe.sh", "secrets.example.env", "nexus-control.service", "nexus-probe.service"]) {
+    await copyFile(join(real, "deploy", name), join(checkout, "deploy", name));
+  }
+  await writeFile(join(checkout, "deploy", "release.sh"), `. "${real}/deploy/release.sh"
+prefix="${root}/opt/nexus"
+etc="${etc}"
+install_release() { release=test; echo install_release >>"${log}"; }
+link_release() { echo "link_release $*" >>"${log}"; }
+install_unit() { echo "install_unit $2" >>"${log}"; }
+start_unit() { echo "start_unit $1" >>"${log}"; }
+make_state() { echo "make_state $1" >>"${log}"; }
+`);
+  await mkdir(shims);
+  for (const name of ["id", "useradd", "usermod", "tailscale", "install", "chown", "rm", "getent", "groupdel", "systemctl", "flock", "runuser", "node", "ssh-keygen", "ssh-keyscan", "journalctl"]) {
+    await writeFile(join(shims, name), `#!/bin/sh\necho "${name} $*" >>"${log}"\n${name === "id" ? '[ "$1" != -u ] || echo 0\n' : name === "getent" ? "exit 2\n" : ""}`, { mode: 0o755 });
+  }
+
+  const credential = async (path: string, text: string, mode: number) => {
+    await mkdir(join(path, ".."), { recursive: true });
+    await writeFile(path, text, { mode });
+    await chmod(path, mode);
+  };
+  const harness = join(root, "var", "lib", "nexus-control", "harness-credentials.json");
+  await credential(join(etc, "control.json"), `${JSON.stringify({ harness: { credentials: harness }, github: { tokenFile: join(etc, "github-token") } })}\n`, 0o644);
+  await credential(harness, `${JSON.stringify({ deviceId: "8c1c3a51-7d5e-4a8e-9a43-2b1f4c1e0d9a", credentials: { openai: { type: "oauth" } } })}\n`, 0o600);
+  await credential(join(etc, "secrets.env"), "CLAUDE_CODE_OAUTH_TOKEN=a\nGH_TOKEN=b\n", 0o640);
+  await credential(join(etc, "github-token"), "b\n", 0o640);
+  await credential(join(etc, "git_ed25519"), "a key\n", 0o400);
+  await credential(join(etc, "git_known_hosts"), "github.com ssh-ed25519 AAAA\n", 0o644);
+
+  const run = (role: "control" | "probe", prepare: boolean) => new Promise<{ code: number | null; timedOut: boolean; stderr: string }>((done) => {
+    const env = { PATH: `${shims}:${process.env.PATH}`, ...prepare ? { NEXUS_PREPARE: "1", NEXUS_COMMIT: commit } : {} };
+    const child = spawn("bash", [join(checkout, "deploy", `install-${role}.sh`)], { env, stdio: ["pipe", "ignore", "pipe"] });
+    let stderr = "";
+    child.stderr.on("data", (chunk) => { stderr += chunk; });
+    const timer = setTimeout(() => child.kill("SIGKILL"), 20_000);
+    child.on("exit", (code) => {
+      clearTimeout(timer);
+      child.stdin.destroy();
+      done({ code, timedOut: code === null, stderr });
+    });
+  });
+  return { root, etc, run, ran: async () => (await readFile(log, "utf8").catch(() => "")).trim().split("\n") };
+}
+
+test("the deployer's preparation runs both role installers without reading input, and changes no credential", async (t) => {
+  const m = await roleInstallers(t);
+  const before = await snapshot(m.root);
+  for (const role of ["control", "probe"] as const) {
+    const result = await m.run(role, true);
+    assert.deepEqual([result.code, result.timedOut], [0, false], result.stderr);
+  }
+  assert.deepEqual(await snapshot(m.root), before);
+  const ran = await m.ran();
+  assert.ok(!ran.some((line) => /^(node|runuser|ssh-keygen|ssh-keyscan|systemctl (re)?start|start_unit|link_release)\b/.test(line)), ran.join("\n"));
+  const credentials = /secrets\.env|github-token|git_ed25519|git_known_hosts|harness-credentials/;
+  assert.deepEqual(ran.filter((line) => credentials.test(line)), [`chown root:nexus ${m.etc}/secrets.env`], "only the owner secrets.env must already have");
+});
+
+test("outside preparation the same stand-ins see the role installers switch and start their services", async (t) => {
+  const m = await roleInstallers(t);
+  const result = await m.run("probe", false);
+  assert.equal(result.code, 0, result.stderr);
+  const ran = await m.ran();
+  assert.ok(ran.includes(`link_release ${m.root}/opt/nexus/current`), ran.join("\n"));
+  assert.ok(ran.includes("start_unit nexus-probe.service"), ran.join("\n"));
 });
