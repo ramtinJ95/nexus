@@ -12,13 +12,20 @@ class Scroller extends EventTarget {
   }
   get scrollTop() { return this.#top; }
   set scrollTop(value) {
-    this.#top = Math.max(0, Math.min(value, this.scrollHeight - this.clientHeight));
+    const top = Math.max(0, Math.min(value, this.scrollHeight - this.clientHeight));
+    if (top === this.#top) return;
+    this.#top = top;
     this.dispatchEvent(new Event("scroll"));
   }
   observe = (callback) => { this.#resized = callback; };
   resize(clientHeight) {
     this.clientHeight = clientHeight;
     this.#resized();
+  }
+  /** A fold inside opens, which grows the content under the reader and scrolls nothing. */
+  unfold(by) {
+    this.scrollHeight += by;
+    this.dispatchEvent(new Event("toggle"));
   }
 }
 const scroller = (scrollHeight, clientHeight) => new Scroller(scrollHeight, clientHeight);
@@ -64,4 +71,14 @@ test("a reader who left the end for a diff tab is back at it when the conversati
   el.scrollHeight = 3600;
   end.settle();
   assert.equal(fromEnd(el), 0);
+});
+
+test("a reader at the end who opens a fold reads it, rather than being taken past it by the next reply", () => {
+  const el = scroller(3000, 800);
+  const end = endFollower(el, el.observe);
+  end.toEnd();
+  el.unfold(1000);
+  el.scrollHeight += 200;
+  end.settle();
+  assert.equal(el.scrollTop, 2200);
 });
