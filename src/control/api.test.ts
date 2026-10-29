@@ -31,7 +31,8 @@ import type { AttachTiming } from "./attach.ts";
 import { agentReplies, type ReviewLoop } from "./review.ts";
 import { readEvents } from "./event-reader.ts";
 import { fakeHarness } from "./fake-harness.ts";
-import { openRegistry, type Registry, type Thread, type ThreadId } from "./registry.ts";
+import { openRegistry, type JoinedNode, type Registry, type Thread, type ThreadId } from "./registry.ts";
+import { joinTokenTtlMs, mintJoinToken } from "./join.ts";
 import { startImageRollout, type ImageRollout } from "./image-rollout.ts";
 import { usageBackfill, type UsageBackfillJob } from "./usage-backfill.ts";
 import { imageIdOf, type ImageId, type ImageRecipe } from "../images.ts";
@@ -84,6 +85,9 @@ async function setup(t: import("node:test").TestContext, options: { gitIdentity?
   let admitted = Promise.resolve();
   let asked = () => {};
   const woken: NodeName[] = [];
+  /** What `POST /v1/join` recorded, and the MagicDNS name whois gives each caller that joins. */
+  const joined: JoinedNode[] = [];
+  const hosts = new Map<TailnetNodeId, string>();
   const fake = fakeHarness({ onParked: (id, parked) => registry.recordParked(id as ThreadId, parked) });
   const { harness, calls } = fake;
   const commands: [PylonId, PylonCommand][] = [];
@@ -120,6 +124,7 @@ async function setup(t: import("node:test").TestContext, options: { gitIdentity?
     }),
     // infra-testbench is allowed as a node in control.json's callers would be, so a test can show the API still tells it from a person.
     allowed: new Set([laptop, phone, "nFIREBAT" as TailnetNodeId, "nTESTBENCH" as TailnetNodeId]),
+    joins: { whois: async () => caller === null ? null : { id: caller, host: hosts.get(caller) ?? "unnamed.tail.ts.net" }, joined: (n) => { joined.push(n); } },
     // The control plane runs on rj-firebat and deploys nothing unless a test says so. null leaves deployments off.
     ...(options.deployment === null ? {} : { deployment: options.deployment ?? { self: "nFIREBAT" as TailnetNodeId, deployers: new Set(), keys: {} } }),
     ...(options.reviews === undefined ? {} : { reviews: options.reviews }),
@@ -180,7 +185,7 @@ async function setup(t: import("node:test").TestContext, options: { gitIdentity?
     });
   }
   return {
-    registry, images, queue, plans, call, raw, woken, calls, commands, streams, reads, fake, startThread, port: api.port, get httpsPort() { return api.httpsPort; }, close: () => api.close(),
+    registry, images, queue, plans, call, raw, woken, joined, hosts, calls, commands, streams, reads, fake, startThread, port: api.port, get httpsPort() { return api.httpsPort; }, close: () => api.close(),
     callAs(id: TailnetNodeId | null) { caller = id; },
     nodeHealth(next: typeof health) { health = next; },
     /** Holds every request at whois until the returned function is called. */
@@ -244,6 +249,128 @@ test("any tailnet node may ask who it is and what it may do, under the API's nam
   assert.deepEqual(await s.call("GET", "/v1/projects"), { status: 403, body: { error: "caller is not a tailnet node this control plane allows" } }, "it opens no other route to a stranger");
   s.callAs(null);
   assert.deepEqual(await s.call("GET", "/v1/whoami"), { status: 403, body: { error: "caller is not a tailnet node" } });
+});
+
+const joinerKey = "b".repeat(64);
+const joiner = "nJOINER" as TailnetNodeId;
+
+test("a machine joins once with a token, as whois names it, whatever its request says", async (t) => {
+  const s = await setup(t);
+  const { token } = mintJoinToken(s.registry);
+  s.callAs(joiner);
+  s.hosts.set(joiner, "infra-2.tail.ts.net");
+  const forged = { token, deployKey: joinerKey, name: "rj-firebat", node: "rj-firebat", tailnetNodeId: laptop, tailnetHost: "evil.example" };
+  assert.deepEqual(await s.call("POST", "/v1/join", forged), { status: 200, body: { node: "infra-2", tailnetNodeId: joiner } });
+  const recorded = { name: "infra-2", tailnetHost: "infra-2.tail.ts.net", tailnetNodeId: joiner, deployKey: joinerKey };
+  assert.deepEqual(s.registry.joinedNodes().map(({ joinedAt: _, ...n }) => n), [recorded]);
+  assert.deepEqual(s.joined.map(({ joinedAt: _, ...n }) => n), [recorded], "the control plane is told, so it follows the new probe");
+  assert.deepEqual(s.registry.nodes().map((n) => [n.name, n.tailnetNodeId]), [["infra-2", joiner], ["rj-firebat", "nFIREBAT"]], "rj-firebat is as it was");
+
+  s.callAs("nSECOND" as TailnetNodeId);
+  s.hosts.set("nSECOND" as TailnetNodeId, "infra-3.tail.ts.net");
+  const used = await s.call("POST", "/v1/join", { token, deployKey: joinerKey });
+  assert.equal(used.status, 403);
+  assert.match(used.body.error, /^this join token was used at .*, and each joins one node\. Mint another with sudo deploy\/install\.sh --join-token/);
+  assert.deepEqual(s.registry.joinedNodes().map((n) => n.name), ["infra-2"], "a used token records nothing");
+});
+
+test("an unknown or expired token is refused with nothing recorded", async (t) => {
+  const s = await setup(t);
+  const expired = mintJoinToken(s.registry, Date.now() - joinTokenTtlMs - 1).token;
+  s.callAs(joiner);
+  s.hosts.set(joiner, "infra-2.tail.ts.net");
+  const unknown = await s.call("POST", "/v1/join", { token: "not-minted", deployKey: joinerKey });
+  assert.deepEqual(unknown, { status: 403, body: { error: "this join token is not one this control plane minted. Mint another with sudo deploy/install.sh --join-token on the control plane's machine" } });
+  const late = await s.call("POST", "/v1/join", { token: expired, deployKey: joinerKey });
+  assert.equal(late.status, 403);
+  assert.match(late.body.error, /^this join token expired at \d{4}-/);
+  assert.equal((await s.call("POST", "/v1/join", { token: expired })).status, 400, "a join names its deploy key");
+  assert.deepEqual([s.registry.joinedNodes(), s.joined, s.registry.nodes().map((n) => n.name)], [[], [], ["rj-firebat"]]);
+});
+
+test("a caller, the control plane's machine and a node of control.json never join, and a token they send stays unused", async (t) => {
+  const s = await setup(t);
+  s.registry.upsertNode({ name: "infra-testbench" as NodeName, tailnetHost: "infra-testbench.tail.ts.net", tailnetNodeId: "nBENCH" as TailnetNodeId });
+  const { token } = mintJoinToken(s.registry);
+  const attempts: [TailnetNodeId, string][] = [
+    [laptop, "laptop.tail.ts.net"],
+    ["nFIREBAT" as TailnetNodeId, "rj-firebat.tail.ts.net"],
+    ["nBENCH" as TailnetNodeId, "infra-testbench.tail.ts.net"],
+    ["nIMPOSTOR" as TailnetNodeId, "infra-testbench.tail.ts.net"],
+    ["nBENCH" as TailnetNodeId, "renamed.tail.ts.net"],
+    ["nUPPER" as TailnetNodeId, "Upper.tail.ts.net"],
+  ];
+  const answers = [];
+  for (const [id, host] of attempts) {
+    s.callAs(id);
+    s.hosts.set(id, host);
+    const reply = await s.call("POST", "/v1/join", { token, deployKey: joinerKey });
+    answers.push(`${reply.status} ${reply.body.error}`);
+  }
+  assert.deepEqual(answers, [
+    "409 laptop.tail.ts.net is the control plane's machine or a caller in control.json, which never joins as a node",
+    "409 rj-firebat.tail.ts.net is the control plane's machine or a caller in control.json, which never joins as a node",
+    "409 infra-testbench is a node in control.json, which sets its deploy key",
+    "409 a node named infra-testbench is already tailnet node nBENCH. Rename this machine in tailscale",
+    "409 this machine is already the node infra-testbench, and tailscale now names it renamed",
+    "409 tailscale names this machine Upper.tail.ts.net, whose first label is not a node name: must be a lowercase tailnet machine name of at most 63 characters",
+  ]);
+  assert.equal(s.registry.joinToken(createHash("sha256").update(token).digest("hex"))?.usedAt, null);
+  s.callAs(joiner);
+  s.hosts.set(joiner, "infra-2.tail.ts.net");
+  assert.equal((await s.call("POST", "/v1/join", { token, deployKey: joinerKey })).status, 200, "the token still joins a new machine");
+});
+
+test("a joined node joins again with a new token, which replaces its deploy key, and reports with it", async (t) => {
+  const s = await setup(t, { deployment });
+  s.callAs(joiner);
+  s.hosts.set(joiner, "infra-2.tail.ts.net");
+  const report = { role: "probe", commit: deployCommit, target: deployCommit, state: "healthy", reason: null };
+  const keyOf = (token: string) => createHash("sha256").update(token).digest("hex");
+  assert.equal((await s.call("POST", "/v1/join", { token: mintJoinToken(s.registry).token, deployKey: keyOf("first") })).status, 200);
+  assert.equal((await s.call("POST", "/v1/deployer/report", report, { authorization: "Bearer first" })).status, 200);
+  assert.equal((await s.call("POST", "/v1/join", { token: mintJoinToken(s.registry).token, deployKey: keyOf("second") })).status, 200);
+  assert.equal((await s.call("POST", "/v1/deployer/report", report, { authorization: "Bearer first" })).status, 403);
+  assert.equal((await s.call("POST", "/v1/deployer/report", report, { authorization: "Bearer second" })).status, 200);
+  assert.deepEqual((await s.call("GET", "/v1/whoami")).body, { node: joiner, allowed: false, person: false, deployer: false });
+});
+
+test("a machine neither admitted nor joined reaches only whoami and join, and a joined node only its deployer's routes", async (t) => {
+  const s = await withThread(t, { deployment });
+  const thread = s.thread.id;
+  s.callAs(joiner);
+  s.hosts.set(joiner, "infra-2.tail.ts.net");
+  const requests: [string, string, unknown?, Record<string, string>?][] = [
+    ["GET", "/"],
+    ["GET", "/threads"],
+    ["GET", `/threads/${thread}`],
+    ["GET", "/v1/projects"],
+    ["POST", "/v1/projects", project],
+    ["GET", "/v1/threads"],
+    ["POST", "/v1/threads", { project: project.id, title: "Mine" }],
+    ["GET", `/v1/threads/${thread}`],
+    ["POST", `/v1/threads/${thread}/messages`, { text: "hi" }],
+    ["GET", "/v1/nodes"],
+    ["GET", `/v1/nodes/${node}/health`],
+    ["GET", "/v1/images"],
+    ["PUT", "/v1/release", { commit: "main" }],
+    ["GET", "/v1/events"],
+    ["GET", "/v1/usage"],
+    ["GET", "/v1/health?past=admission"],
+    ["GET", "/v1/deployer/release", undefined, { authorization: "Bearer joiner" }],
+    ["POST", "/v1/deployer/report", { role: "probe", commit: deployCommit, target: deployCommit, state: "healthy", reason: null }, { authorization: "Bearer joiner" }],
+  ];
+  const sweep = async () => {
+    const statuses = [];
+    for (const [method, path, body, headers] of requests) statuses.push(`${method} ${path} ${(await s.call(method, path, body, headers)).status}`);
+    statuses.push(`attach ${(await attachTo(s.port, attachPathOf(thread)) as { status: number }).status}`);
+    return statuses;
+  };
+  const refused = [...requests.map(([method, path]) => `${method} ${path} 403`), "attach 403"];
+  assert.deepEqual(await sweep(), refused, "before it joins");
+  assert.equal((await s.call("GET", "/v1/whoami")).status, 200);
+  assert.equal((await s.call("POST", "/v1/join", { token: mintJoinToken(s.registry).token, deployKey: createHash("sha256").update("joiner").digest("hex") })).status, 200);
+  assert.deepEqual(await sweep(), [...refused.slice(0, -3), "GET /v1/deployer/release 200", "POST /v1/deployer/report 200", "attach 403"], "once it joined");
 });
 
 test("a web page on an allowed machine cannot change state", async (t) => {

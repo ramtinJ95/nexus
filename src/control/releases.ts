@@ -8,6 +8,7 @@ import { command, repository } from "../deploy/install.ts";
 export interface DeploymentOptions {
   self: TailnetNodeId;
   deployers: ReadonlySet<TailnetNodeId>;
+  /** control.json's deploy keys. A node that joined keeps its key in the registry. */
   keys: Readonly<Record<string, string>>;
   resolveMain?: () => Promise<string>;
 }
@@ -31,7 +32,8 @@ export function canDeploy(registry: Registry, options: DeploymentOptions | undef
 export function isReporter(registry: Registry, options: DeploymentOptions | undefined, caller: TailnetNodeId, authorization: string | undefined): boolean {
   if (options === undefined || !registry.nodes().some((n) => n.tailnetNodeId === caller)) return false;
   if (!authorization?.startsWith("Bearer ") || authorization.length > 256) return false;
-  return createHash("sha256").update(authorization.slice(7)).digest("hex") === options.keys[caller];
+  const key = options.keys[caller] ?? registry.joinedNodes().find((n) => n.tailnetNodeId === caller)?.deployKey;
+  return createHash("sha256").update(authorization.slice(7)).digest("hex") === key;
 }
 export function releaseView(registry: Registry, self: string | undefined, now = Date.now()): ReleaseView {
   const desired = registry.desiredRelease();

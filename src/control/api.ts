@@ -38,8 +38,9 @@ import { isImageId, type CommandResult, type NodeHealth, type NodeName, type Pro
 import type { ConversationView, EntryRecord, JsonObject } from "@earendil-works/pi-durable";
 import type { HarnessHost } from "../harness/host.ts";
 import { pinsSchema, type ImageId, type ImageManifest } from "../images.ts";
-import type { Whois } from "../tailscale.ts";
-import type { ClaudeSent, NodeRecord, Output, PortRange, Preview, Registry, Session, StartKey, Thread, ThreadId } from "./registry.ts";
+import type { Whois, WhoisNode } from "../tailscale.ts";
+import { joinNode, joinRequestSchema } from "./join.ts";
+import type { ClaudeSent, JoinedNode, NodeRecord, Output, PortRange, Preview, Registry, Session, StartKey, Thread, ThreadId } from "./registry.ts";
 import { dashboard, liveFrames } from "./dashboard.ts";
 import { attachScript, checkoutDir, claudeTextProblem, herdrSession, sessionHarnessSchema, type SessionHarness } from "../sessions.ts";
 import { claudeConversations, claudeFrames } from "./claude-conversation.ts";
@@ -85,6 +86,8 @@ export interface ApiOptions {
   port: number;
   whois: Whois;
   allowed: ReadonlySet<TailnetNodeId>;
+  /** `POST /v1/join`, the one route a machine that is no node or caller yet may call. Omitted: no machine can join. */
+  joins?: { whois: WhoisNode; joined(node: JoinedNode): void };
   /** Names the API answers to in the Host header. Any other name is a DNS rebinding page on an allowed machine. */
   hostnames: ReadonlySet<string>;
   harness: ThreadHarness;
@@ -1275,12 +1278,25 @@ export async function startApi(options: ApiOptions): Promise<Api> {
     return { node, allowed: allowed.has(node), person, deployer: person && canDeploy(registry, options.deployment, node) };
   }
 
+  /** A token only root on the control plane's machine mints is what lets a machine that is not yet admitted call this. */
+  async function join(req: IncomingMessage, joins: NonNullable<ApiOptions["joins"]>) {
+    const { remoteAddress, remotePort } = req.socket;
+    const caller = remoteAddress === undefined || remotePort === undefined ? null : await joins.whois(remoteAddress, remotePort);
+    if (caller === null) throw new HttpError(403, "caller is not a tailnet node");
+    checkHost(req);
+    if (req.headers["content-type"]?.split(";")[0]?.trim() !== "application/json") throw new HttpError(415, "requests that change state must have content-type application/json");
+    const node = joinNode(registry, allowed, caller, parse(joinRequestSchema, await readJson(req)));
+    joins.joined(node);
+    return { node: node.name, tailnetNodeId: node.tailnetNodeId };
+  }
+
   async function handle(req: IncomingMessage, res: ServerResponse) {
     if (req.method === "GET" && req.url === "/v1/health" && req.socket.remoteAddress !== undefined && req.socket.remoteAddress === req.socket.localAddress) {
       res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify(health()));
       return;
     }
     if (req.method === "GET" && req.url === "/v1/whoami") return void send(res, 200, await whoami(req));
+    if (req.method === "POST" && req.url === "/v1/join" && options.joins !== undefined) return void send(res, 200, await join(req, options.joins));
     const caller = await admit(req);
     if (req.method !== "GET" && req.headers["content-type"]?.split(";")[0]?.trim() !== "application/json") {
       throw new HttpError(415, "requests that change state must have content-type application/json");
