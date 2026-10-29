@@ -1,0 +1,3 @@
+$ nexus preview th-f86c2a27e7b8 3000
+[stderr] nexus: the verify stack's pylons run no link-port
+[exit 1]

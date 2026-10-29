@@ -1,0 +1,17 @@
+$ nexus show th-dc8d828f41ce
+th-dc8d828f41ce  Deploy slowly
+project: nexus
+Claude worker: started, model claude-opus-5-5
+attention: reply
+status: archived
+pylon: pylon-th-dc8d828f41ce on verify-node, running, observed 0s ago
+size: 1 CPUs, 1 GiB memory, 10 GiB disk
+placement: verify-node, the project's default node
+setup: fresh boot runs .nexus/setup, because the control plane could not read .nexus/setup at main: the verify stack reads no remote, so every thread boots fresh
+PR watch: on
+PR #3: Deploy slowly — merged, checks none, review none https://github.com/ramtinJ95/nexus/pull/3
+review rv-dd75cb50 of PR #3, started on its own: landed as eeee000500000000000000000000000000000000, round 1 of 5, reviewer th-4b63a7b6a0fb on gpt-6-astra, landing when approved
+no live check: cccc00040000 has no .nexus/verify, so the landing reads the pull request's statement of what could not be checked live
+output: branch origin/deploy-slowly
+output: pull-request https://github.com/ramtinJ95/nexus/pull/3
+[exit 0]

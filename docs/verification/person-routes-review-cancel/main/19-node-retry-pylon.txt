@@ -1,0 +1,3 @@
+$ nexus retry-pylon th-f86c2a27e7b8
+[stderr] nexus: pylon pylon-th-f86c2a27e7b8 has not failed
+[exit 5]

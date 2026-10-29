@@ -1,0 +1,3 @@
+$ nexus retry th-f86c2a27e7b8
+[stderr] nexus: thread th-f86c2a27e7b8 has no conversation
+[exit 5]

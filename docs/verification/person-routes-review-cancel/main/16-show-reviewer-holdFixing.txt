@@ -1,0 +1,12 @@
+$ nexus show th-f73f855440a3
+th-f73f855440a3  Review of #2: Hold in fixing
+project: nexus-review
+attention: reply
+status: active
+pylon: pylon-th-f73f855440a3 on verify-node, running, observed 0s ago
+attach: nexus attach th-f73f855440a3
+size: 1 CPUs, 1 GiB memory, 10 GiB disk
+placement: verify-node, as the start named
+setup: fresh boot runs .nexus/setup, because the control plane could not read .nexus/setup at hold-fixing: the verify stack reads no remote, so every thread boots fresh
+PR watch: on
+[exit 0]

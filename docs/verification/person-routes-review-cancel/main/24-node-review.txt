@@ -1,0 +1,3 @@
+$ nexus review th-f86c2a27e7b8
+[stderr] nexus: thread th-f86c2a27e7b8 has no open pull request that the PR watch linked
+[exit 5]

@@ -1,0 +1,10 @@
+$ nexus events --kind review.changed
+10 2026-10-29T15:55:09.679Z th-fa313f7756c4 review.changed {"review":"rv-9bec04e2","reviewer":"th-7439f989db9b","phase":{"kind":"reviewing"},"round":1}
+12 2026-10-29T15:55:09.684Z th-0e15a3c1b1a5 review.changed {"review":"rv-d17f480b","reviewer":"th-f73f855440a3","phase":{"kind":"reviewing"},"round":1}
+14 2026-10-29T15:55:09.689Z th-0ebd518d20f7 review.changed {"review":"rv-bf5e0617","reviewer":"th-9a90f270e35c","phase":{"kind":"reviewing"},"round":1}
+20 2026-10-29T15:55:10.696Z th-0e15a3c1b1a5 review.changed {"review":"rv-d17f480b","reviewer":"th-f73f855440a3","phase":{"kind":"fixing"},"round":1}
+21 2026-10-29T15:55:10.701Z th-0ebd518d20f7 review.changed {"review":"rv-bf5e0617","reviewer":"th-9a90f270e35c","phase":{"kind":"checking","startedAt":1793289310701,"thread":null},"round":1}
+22 2026-10-29T15:55:12.696Z th-0ebd518d20f7 review.changed {"review":"rv-bf5e0617","reviewer":"th-9a90f270e35c","phase":{"kind":"merging","authorized":null},"round":1}
+23 2026-10-29T15:55:12.706Z th-0ebd518d20f7 review.changed {"review":"rv-bf5e0617","reviewer":"th-9a90f270e35c","phase":{"kind":"deploying","commit":"eeee000500000000000000000000000000000000","previous":"aaaa000100000000000000000000000000000000","requested":false,"deadline":1793291112706},"round":1}
+27 2026-10-29T15:55:18.698Z th-0ebd518d20f7 review.changed {"review":"rv-bf5e0617","reviewer":"th-9a90f270e35c","phase":{"kind":"landed","commit":"eeee000500000000000000000000000000000000"},"round":1}
+[exit 0]

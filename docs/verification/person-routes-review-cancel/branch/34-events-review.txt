@@ -1,0 +1,12 @@
+$ nexus events --kind review.changed
+10 2026-10-29T15:57:34.568Z th-24d931fba307 review.changed {"review":"rv-0d8f8f93","reviewer":"th-767b5dd5c947","phase":{"kind":"reviewing"},"round":1}
+12 2026-10-29T15:57:34.577Z th-7183e5fc0340 review.changed {"review":"rv-bd203e3b","reviewer":"th-4a052d2a38ed","phase":{"kind":"reviewing"},"round":1}
+14 2026-10-29T15:57:34.586Z th-dc8d828f41ce review.changed {"review":"rv-dd75cb50","reviewer":"th-4b63a7b6a0fb","phase":{"kind":"reviewing"},"round":1}
+20 2026-10-29T15:57:35.597Z th-7183e5fc0340 review.changed {"review":"rv-bd203e3b","reviewer":"th-4a052d2a38ed","phase":{"kind":"fixing"},"round":1}
+21 2026-10-29T15:57:35.606Z th-dc8d828f41ce review.changed {"review":"rv-dd75cb50","reviewer":"th-4b63a7b6a0fb","phase":{"kind":"checking","startedAt":1793289455606,"thread":null},"round":1}
+22 2026-10-29T15:57:37.598Z th-dc8d828f41ce review.changed {"review":"rv-dd75cb50","reviewer":"th-4b63a7b6a0fb","phase":{"kind":"merging","authorized":null},"round":1}
+23 2026-10-29T15:57:37.616Z th-dc8d828f41ce review.changed {"review":"rv-dd75cb50","reviewer":"th-4b63a7b6a0fb","phase":{"kind":"deploying","commit":"eeee000500000000000000000000000000000000","previous":"aaaa000100000000000000000000000000000000","requested":false,"deadline":1793291257616},"round":1}
+25 2026-10-29T15:57:40.420Z th-24d931fba307 review.changed {"review":"rv-0d8f8f93","reviewer":"th-767b5dd5c947","phase":{"kind":"cancelled","who":"person","by":"nLAPTOP"},"round":1}
+28 2026-10-29T15:57:44.600Z th-dc8d828f41ce review.changed {"review":"rv-dd75cb50","reviewer":"th-4b63a7b6a0fb","phase":{"kind":"landed","commit":"eeee000500000000000000000000000000000000"},"round":1}
+30 2026-10-29T15:57:47.071Z th-7183e5fc0340 review.changed {"review":"rv-bd203e3b","reviewer":"th-4a052d2a38ed","phase":{"kind":"cancelled","who":"person","by":"nLAPTOP"},"round":1}
+[exit 0]

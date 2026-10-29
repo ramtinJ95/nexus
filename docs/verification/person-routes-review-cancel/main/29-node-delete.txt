@@ -1,0 +1,3 @@
+$ nexus delete th-f86c2a27e7b8
+Deleted th-f86c2a27e7b8.
+[exit 0]

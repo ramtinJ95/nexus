@@ -1,0 +1,3 @@
+$ nexus archive th-02dd5519bc18
+Archived th-02dd5519bc18.
+[exit 0]

@@ -1,0 +1,26 @@
+$ nexus start --project nexus-review --title Hold in fixing --claude push hold-fixing --json
+{
+  "id": "th-7183e5fc0340",
+  "title": "Hold in fixing",
+  "project": "nexus-review",
+  "pylonId": "pylon-th-7183e5fc0340",
+  "status": "active",
+  "conversationId": null,
+  "startedBy": "nLAPTOP",
+  "createdAt": 1793289453799,
+  "agentTurnRunning": false,
+  "working": false,
+  "lastAgentActivityAt": 0,
+  "lastHumanActivityAt": 1793289453799,
+  "seenAt": null,
+  "lastReplyAt": null,
+  "placement": {
+    "how": "default",
+    "node": "verify-node"
+  },
+  "setup": {
+    "how": "fresh",
+    "reason": "the control plane could not read .nexus/setup at main: the verify stack reads no remote, so every thread boots fresh"
+  }
+}
+[exit 0]

@@ -1,0 +1,12 @@
+2026-10-29T15:57:35.603Z typed into th-7183e5fc0340:
+[Nexus review — automated, not a message from the person]
+Round 1 of at most 5 on pull request #2 (https://github.com/ramtinJ95/nexus/pull/2), reviewed at cccc000300000000000000000000000000000000 by a reviewer on gpt-6-astra: changes requested.
+
+F1 (P1) src/greet.ts:1: The greeting is never printed
+    Print it.
+
+Fix each P0 to P2 finding or reject it with a reason. Push what you fix to the pull request's branch; the reviewer reviews the new commits. Then end your reply with exactly one block like this, with JSON in it:
+```nexus-review-answers
+{"token": "rv-bd203e3b:d6e238c87fba", "answers": [{"id": "F1", "action": "fixed" or "rejected", "reason": "what you changed, or why not"}]}
+```
+

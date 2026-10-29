@@ -1,0 +1,3 @@
+$ nexus archive th-f86c2a27e7b8
+Archived th-f86c2a27e7b8.
+[exit 0]

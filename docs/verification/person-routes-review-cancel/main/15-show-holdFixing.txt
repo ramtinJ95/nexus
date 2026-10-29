@@ -1,0 +1,17 @@
+$ nexus show th-0e15a3c1b1a5
+th-0e15a3c1b1a5  Hold in fixing
+project: nexus-review
+Claude worker: started, model claude-opus-5-5
+attention: none
+status: active
+pylon: pylon-th-0e15a3c1b1a5 on verify-node, running, observed 0s ago
+attach: nexus attach th-0e15a3c1b1a5
+size: 1 CPUs, 1 GiB memory, 10 GiB disk
+placement: verify-node, the project's default node
+setup: fresh boot runs .nexus/setup, because the control plane could not read .nexus/setup at main: the verify stack reads no remote, so every thread boots fresh
+PR watch: on
+PR #2: Hold in fixing — open, checks none, review none https://github.com/ramtinJ95/nexus/pull/2
+review rv-d17f480b of PR #2, started on its own: fixing, round 1 of 5, reviewer th-f73f855440a3 on gpt-6-astra
+output: branch origin/hold-fixing
+output: pull-request https://github.com/ramtinJ95/nexus/pull/2
+[exit 0]

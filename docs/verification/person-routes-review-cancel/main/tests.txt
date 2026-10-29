@@ -1,0 +1,13 @@
+ℹ fail 9
+ℹ pass 395
+ℹ tests 404
+✖ a pass that was stepping a review when the person cancelled it does not save over the cancel (6.099075ms)
+✖ a review needs the GitHub token's loop, and landing, at its start or later, needs a deployer (65.892619ms)
+✖ a review that authorized its merge, is deploying or rolling back, or has ended is not cancelled, and says why (7.762656ms)
+✖ a running review's line offers to cancel it behind a confirm, and one that ended or began deploying offers nothing (32.338012ms)
+✖ deploy and release use the shared release view and wait for both roles (194.803452ms)
+✖ failing tests:
+✖ only a person acts on a thread, its pylon or a project, never the control node, an infrastructure node or a pylon (26.533177ms)
+✖ only a project edit turns on reviews of its own, landing needs a deployer, and the project records who turned it on (38.664663ms)
+✖ review --cancel ends the thread's running review through its route, and prints who cancelled it (432.63068ms)
+✖ the person cancels a review that is reviewing, fixing or checking, which archives its reviewer and leaves its builder (5.725156ms)

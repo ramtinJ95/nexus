@@ -1,0 +1,26 @@
+$ nexus start --project nexus-review --title Bystander --claude look around --json
+{
+  "id": "th-f86c2a27e7b8",
+  "title": "Bystander",
+  "project": "nexus-review",
+  "pylonId": "pylon-th-f86c2a27e7b8",
+  "status": "active",
+  "conversationId": null,
+  "startedBy": "nLAPTOP",
+  "createdAt": 1793289309150,
+  "agentTurnRunning": false,
+  "working": false,
+  "lastAgentActivityAt": 0,
+  "lastHumanActivityAt": 1793289309150,
+  "seenAt": null,
+  "lastReplyAt": null,
+  "placement": {
+    "how": "default",
+    "node": "verify-node"
+  },
+  "setup": {
+    "how": "fresh",
+    "reason": "the control plane could not read .nexus/setup at main: the verify stack reads no remote, so every thread boots fresh"
+  }
+}
+[exit 0]
