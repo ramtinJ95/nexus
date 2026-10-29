@@ -1,9 +1,7 @@
 import { attentions } from "../attention.ts";
 
 const needsPerson = (row) => attentions[row.attention]?.needsPerson === true;
-export const badgeCount = (rows) => rows.filter(needsPerson).length;
 export const noticeText = (row) => attentions[row.attention].label;
-export const badgeText = (count) => count > 9 ? "9+" : String(count);
 export function notificationChannel(focused, current, id, secure, permission) {
   if (focused) return current === id ? null : "toast";
   return secure && permission === "granted" ? "system" : null;

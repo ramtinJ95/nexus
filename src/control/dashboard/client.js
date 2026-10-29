@@ -3,7 +3,7 @@
 // and polls the page to swap in each `data-live` region that changed. A thread page also follows its stream, which
 // sends the conversation region as the run streams, and reads its checkout's changes into the inspector, opening
 // each changed file's diff as a tab beside the conversation.
-import { coordinator, notificationChannel, badgeCount, badgeText, noticeText, owedSeen } from "./notifications.js";
+import { coordinator, notificationChannel, noticeText, owedSeen } from "./notifications.js";
 import { agoText } from "./ago.js";
 import { atEnd, endFollower } from "./scroll.js";
 import { afterSend, emptyReview, formatReview, kinds, linesLabel, noteOn, place, rangeOf, readReview, rowsOf } from "./review.js";
@@ -1541,10 +1541,6 @@ function showRows(rows, now) {
   // A held-back reply notifies once a read at its time finds no turn running.
   clearTimeout(due);
   if (leading && next !== null) due = setTimeout(readRows, next - Date.now());
-  const count = badgeCount(rows);
-  document.title = `${count ? `(${badgeText(count)}) ` : ""}Nexus`;
-  const favicon = document.querySelector('link[rel="icon"]');
-  favicon.href = count ? `data:image/svg+xml,${encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><rect width="32" height="32" rx="8" fill="#d44"/><text x="16" y="23" text-anchor="middle" font-size="22" fill="white">${badgeText(count)}</text></svg>`)}` : "/assets/favicon.svg";
 }
 let readingRows = false;
 let stale = false;

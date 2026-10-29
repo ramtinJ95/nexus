@@ -1,8 +1,8 @@
 export type Attention = "failed" | "decision" | "parked" | "limited" | "reply" | "working" | "waiting" | null;
 
 /**
- * How each attention shows. `needsPerson` keeps a thread's row bright, counts it in the dashboard's badge and notifies
- * on a change to it. Waiting ranks below working, but only waiting is blocked on the person.
+ * How each attention shows. `needsPerson` keeps a thread's row bright and notifies on a change to it. Waiting ranks
+ * below working, but only waiting is blocked on the person.
  */
 export const attentions = {
   failed: { label: "failed", tone: "bad", needsPerson: true },
