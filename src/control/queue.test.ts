@@ -147,9 +147,9 @@ test("a queue record is checked as a start is, and freezes the size the project 
   refused(() => q.add(f.request({ node: "nowhere" }), null, [a], laptop), 400, /no node nowhere/);
   refused(() => q.add(f.request({ commit: "abc" }), null, [a], laptop), 400, /scratch project/);
   refused(() => q.add(f.request({ claude: "fix it" }), "Fix it.", [a], laptop), 400, /message is for a Nexus agent thread/);
-  refused(() => q.add(f.request(), null, [f.thread("th-review", reviewerCaller)], laptop), 400, /reviewer or check thread/);
-  refused(() => q.add(f.request(), null, [f.thread("th-check", checkCaller)], laptop), 400, /reviewer or check thread/);
-  refused(() => q.add(f.request(), null, [f.thread("th-verify", verifyCaller)], laptop), 400, /reviewer or check thread/);
+  refused(() => q.add(f.request(), null, [f.thread("th-review", reviewerCaller)], laptop), 400, /reviewer, check or verify thread/);
+  refused(() => q.add(f.request(), null, [f.thread("th-check", checkCaller)], laptop), 400, /reviewer, check or verify thread/);
+  refused(() => q.add(f.request(), null, [f.thread("th-verify", verifyCaller)], laptop), 400, /reviewer, check or verify thread/);
   assert.deepEqual(f.registry.queuedThreads(), [], "a refused start records nothing");
 
   const record = q.add(f.request({ resources: { cpus: 4 } }), "Fix it.", [a, a], laptop);

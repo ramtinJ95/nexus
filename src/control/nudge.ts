@@ -10,12 +10,11 @@
 import type { HarnessHost } from "../harness/host.ts";
 import { gitPollMs } from "../git-facts.ts";
 import { singleFlight } from "../single-flight.ts";
-import { checkCaller, verifyCaller } from "./gate.ts";
 import { githubRepo, type GitHub } from "./github.ts";
 import type { Inbox } from "./inbox.ts";
 import type { prWatcher } from "./pr-watch.ts";
 import type { Registry, Thread, ThreadId } from "./registry.ts";
-import { reviewerCaller } from "./review.ts";
+import { startedByNexus } from "./usage.ts";
 
 export const nudgePrefix = "[Nexus nudge — automated, not a message from the person]";
 const text = `${nudgePrefix}
@@ -52,7 +51,7 @@ export function builderNudger(options: { registry: Registry; github: Pick<GitHub
   /** The repository of a builder whose project reviews its pull requests on its own, or null for any other thread. */
   function builderRepo(t: Thread): string | null {
     if (t.status !== "active" && t.status !== "idle") return null;
-    if (t.startedBy === reviewerCaller || t.startedBy === checkCaller || t.startedBy === verifyCaller || registry.isReviewer(t.id) || registry.planning(t.id) !== null) return null;
+    if (startedByNexus(registry, t) || registry.planning(t.id) !== null) return null;
     const project = registry.project(t.project);
     return project?.autoReview == null ? null : githubRepo(project.repoUrl);
   }

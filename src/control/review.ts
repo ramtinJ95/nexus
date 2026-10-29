@@ -34,6 +34,7 @@ import { checkCaller, verifyCaller, type CheckRuns } from "./gate.ts";
 import { releaseView } from "./releases.ts";
 import type { Registry, Thread, ThreadId } from "./registry.ts";
 import type { StartRequest } from "./threads.ts";
+import { startedByNexus } from "./usage.ts";
 
 /** Who starts a reviewer thread, as its `startedBy`. */
 export const reviewerCaller = "nexus-review";
@@ -927,7 +928,7 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
      */
     async auto(t: Thread, pr: Pick<PullRequest, "repo" | "number">): Promise<void> {
       const setting = registry.project(t.project)?.autoReview;
-      if (setting == null || t.startedBy === reviewerCaller || t.startedBy === checkCaller || t.startedBy === verifyCaller || registry.isReviewer(t.id)) return;
+      if (setting == null || startedByNexus(registry, t)) return;
       // Another thread on the same branch links the same PR, which has had its review, even one its builder's next replaced.
       if (registry.prReviewed(pr.repo, pr.number)) return;
       const existing = registry.review(t.id);
