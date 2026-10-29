@@ -48,6 +48,9 @@ export interface NodeRecord {
   observation: NodeObservation | null;
 }
 
+/** A node that joined with a token rather than being named in control.json. `deployKey` is the digest of its deployer's token. */
+export interface JoinedNode extends Pick<NodeRecord, "name" | "tailnetHost" | "tailnetNodeId"> { deployKey: string; joinedAt: number }
+
 export interface Thread extends ActivityFacts {
   sessionWaiting?: boolean;
   /** What the most recently waiting session's report said, when it said anything. */
@@ -370,6 +373,10 @@ const migrations: readonly string[] = [
   // The asks whose AskUserQuestion dialogs each thread's pylon last reported waiting, which open its Claude worker's
   // questions. It touches nothing an earlier migration made, so a registry rewound past it applies it again unchanged.
   `CREATE TABLE IF NOT EXISTS waiting_asks (thread TEXT PRIMARY KEY REFERENCES threads (id), report TEXT NOT NULL) STRICT;`,
+  // The join tokens root on the control plane's machine mints, hashed, and the nodes that joined with one, beside the
+  // nodes control.json names. It touches nothing an earlier migration made, so a registry rewound past it applies it again unchanged.
+  `CREATE TABLE IF NOT EXISTS join_tokens (hash TEXT PRIMARY KEY, expires_at INTEGER NOT NULL, used_at INTEGER, used_by TEXT) STRICT;
+   CREATE TABLE IF NOT EXISTS joined_nodes (name TEXT PRIMARY KEY REFERENCES nodes (name), deploy_key TEXT NOT NULL, joined_at INTEGER NOT NULL) STRICT;`,
 ];
 
 type Row = Record<string, unknown>;
@@ -1200,7 +1207,7 @@ export function openRegistry(path: string, clock = Date.now) {
       sql("INSERT INTO settings VALUES ('deploy-drain', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value").run(JSON.stringify(drain));
     },
 
-    /** Nodes come from the config file. Their state and capacity come from observations. */
+    /** Nodes come from the config file or a join. Their state and capacity come from observations. */
     upsertNode(node: Pick<NodeRecord, "name" | "tailnetHost" | "tailnetNodeId">) { q.upsertNode.run(node.name, node.tailnetHost, node.tailnetNodeId); },
     nodes: () => (q.nodes.all() as Row[]).map(nodeRow),
     node(name: NodeName): NodeRecord | undefined {
@@ -1209,6 +1216,23 @@ export function openRegistry(path: string, clock = Date.now) {
     },
     /** The loop marks a node offline when its observe link stays down. Every other node fact comes through apply. */
     markOffline(name: NodeName) { q.nodeState.run("offline", name); },
+    addJoinToken(hash: string, expiresAt: number) { sql("INSERT INTO join_tokens (hash, expires_at) VALUES (?, ?)").run(hash, expiresAt); },
+    joinToken(hash: string): { expiresAt: number; usedAt: number | null } | undefined {
+      const row = sql("SELECT expires_at, used_at FROM join_tokens WHERE hash = ?").get(hash);
+      return row === undefined ? undefined : { expiresAt: row.expires_at as number, usedAt: row.used_at as number | null };
+    },
+    /** Records the node and uses up its token, or does neither when the token was used or expired meanwhile. */
+    joinNode(hash: string, node: Omit<JoinedNode, "joinedAt">, at: number): boolean {
+      return transaction(() => {
+        if (sql("UPDATE join_tokens SET used_at = ?, used_by = ? WHERE hash = ? AND used_at IS NULL AND expires_at > ?").run(at, node.tailnetNodeId, hash, at).changes === 0) return false;
+        q.upsertNode.run(node.name, node.tailnetHost, node.tailnetNodeId);
+        sql("INSERT INTO joined_nodes VALUES (?, ?, ?) ON CONFLICT (name) DO UPDATE SET deploy_key = excluded.deploy_key, joined_at = excluded.joined_at").run(node.name, node.deployKey, at);
+        return true;
+      });
+    },
+    joinedNodes: (): JoinedNode[] => sql("SELECT nodes.*, deploy_key, joined_at FROM joined_nodes JOIN nodes USING (name) ORDER BY name").all().map((r) => ({
+      name: r.name as NodeName, tailnetHost: r.tailnet_host as string, tailnetNodeId: r.tailnet_node_id as TailnetNodeId, deployKey: r.deploy_key as string, joinedAt: r.joined_at as number,
+    })),
 
     editProject(id: ProjectId, edit: (stored: Project) => Project): Project | undefined {
       return transaction(() => {

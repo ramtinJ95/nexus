@@ -995,7 +995,7 @@ test("a turn running before turn starts were recorded has no known start", async
   const db = new DatabaseSync(path);
   const version = db.prepare("PRAGMA user_version").get()!.user_version as number;
   db.exec(`UPDATE threads SET agent_turn_running = 1; ALTER TABLE threads DROP COLUMN placement; ALTER TABLE threads DROP COLUMN setup; ALTER TABLE threads DROP COLUMN agent_turn_started_at; ALTER TABLE session_activity DROP COLUMN started_at; DROP TABLE reviews; DROP TABLE reviewed_prs;
-    ALTER TABLE claude_workers DROP COLUMN turn_session; ALTER TABLE claude_workers DROP COLUMN turn_at; ALTER TABLE session_activity DROP COLUMN message; ALTER TABLE session_order DROP COLUMN event_ids; PRAGMA user_version = ${version - 20}`);
+    ALTER TABLE claude_workers DROP COLUMN turn_session; ALTER TABLE claude_workers DROP COLUMN turn_at; ALTER TABLE session_activity DROP COLUMN message; ALTER TABLE session_order DROP COLUMN event_ids; PRAGMA user_version = ${version - 21}`);
   db.close();
   const registry = openRegistry(path, () => now);
   t.after(() => registry.close());
@@ -1419,7 +1419,7 @@ test("a registry made when landing asked for a passkey keeps neither passkey tab
   const db = new DatabaseSync(path);
   const version = db.prepare("PRAGMA user_version").get()!.user_version as number;
   db.exec(`CREATE TABLE passkeys (id TEXT PRIMARY KEY, credential_id TEXT NOT NULL UNIQUE, record TEXT NOT NULL) STRICT;
-    CREATE TABLE passkey_codes (hash TEXT PRIMARY KEY, expires_at INTEGER NOT NULL, used_at INTEGER) STRICT; PRAGMA user_version = ${version - 10}`);
+    CREATE TABLE passkey_codes (hash TEXT PRIMARY KEY, expires_at INTEGER NOT NULL, used_at INTEGER) STRICT; PRAGMA user_version = ${version - 11}`);
   db.close();
   openRegistry(path).close();
   const reopened = new DatabaseSync(path);
@@ -1460,7 +1460,7 @@ test("the migration that adds pipeline items turns the pipeline on for project n
   const rewind = () => {
     const db = new DatabaseSync(path);
     const version = db.prepare("PRAGMA user_version").get()!.user_version as number;
-    db.exec(`DROP TABLE pipeline_items; PRAGMA user_version = ${version - 4}`);
+    db.exec(`DROP TABLE pipeline_items; PRAGMA user_version = ${version - 5}`);
     db.close();
   };
   rewind();
@@ -1486,7 +1486,7 @@ test("judgments begin at the newest event, so failures from before are never jud
   const rewind = () => {
     const db = new DatabaseSync(path);
     const version = db.prepare("PRAGMA user_version").get()!.user_version as number;
-    db.exec(`DROP TABLE judgments; DROP TABLE judgment_since; PRAGMA user_version = ${version - 3}`);
+    db.exec(`DROP TABLE judgments; DROP TABLE judgment_since; PRAGMA user_version = ${version - 4}`);
     db.close();
   };
   rewind();
@@ -1498,7 +1498,7 @@ test("judgments begin at the newest event, so failures from before are never jud
   upgraded.close();
   const db = new DatabaseSync(path);
   const version = db.prepare("PRAGMA user_version").get()!.user_version as number;
-  db.exec(`PRAGMA user_version = ${version - 3}`);
+  db.exec(`PRAGMA user_version = ${version - 4}`);
   db.close();
   const again = openRegistry(path);
   t.after(() => again.close());
@@ -1560,4 +1560,35 @@ test("a move takes a failed pylon to another node with a fresh boot, and its thr
   assert.deepEqual(registry.pylon(pylonId), { ...pylon, node: other, firstBoot: to.firstBoot, live: to.live, liveHash: to.liveHash, failed: null, attempts: { count: 0, last: null }, retrying: false });
   assert.deepEqual([registry.thread(threadId)!.placement, registry.thread(threadId)!.setup], [to.placement, to.setup]);
   assert.equal(registry.attention(threadId) === "failed", false);
+});
+
+test("a registry from before join tokens keeps its nodes as they were, with none joined", (t) => {
+  const path = tempDb();
+  const before = openRegistry(path);
+  before.upsertNode({ name: node, tailnetHost: "rj-firebat.tail.ts.net", tailnetNodeId: "nFIREBAT" as TailnetNodeId });
+  before.close();
+  const db = new DatabaseSync(path);
+  const version = db.prepare("PRAGMA user_version").get()!.user_version as number;
+  db.exec(`DROP TABLE join_tokens; DROP TABLE joined_nodes; PRAGMA user_version = ${version - 1}`);
+  db.close();
+  const registry = openRegistry(path);
+  t.after(() => registry.close());
+  assert.deepEqual(registry.nodes().map((n) => [n.name, n.tailnetHost, n.tailnetNodeId]), [[node, "rj-firebat.tail.ts.net", "nFIREBAT"]]);
+  assert.deepEqual(registry.joinedNodes(), []);
+});
+
+test("a join token records one node, once, before it expires", (t) => {
+  const registry = openRegistry(":memory:");
+  t.after(() => registry.close());
+  registry.addJoinToken("hash", 2_000);
+  const joining = { name: "infra-2" as NodeName, tailnetHost: "infra-2.tail.ts.net", tailnetNodeId: "nINFRA2" as TailnetNodeId, deployKey: "a".repeat(64) };
+  assert.equal(registry.joinNode("unknown", joining, 1_000), false);
+  assert.equal(registry.joinNode("hash", joining, 2_000), false, "expired at 2000");
+  assert.deepEqual(registry.joinedNodes(), []);
+  assert.deepEqual(registry.nodes(), []);
+  assert.equal(registry.joinNode("hash", joining, 1_999), true);
+  assert.equal(registry.joinNode("hash", { ...joining, deployKey: "b".repeat(64) }, 1_999), false, "used");
+  assert.deepEqual(registry.joinedNodes(), [{ ...joining, joinedAt: 1_999 }]);
+  assert.deepEqual(registry.joinToken("hash"), { expiresAt: 2_000, usedAt: 1_999 });
+  assert.equal(registry.node(joining.name)?.state, "offline");
 });
