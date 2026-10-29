@@ -2,7 +2,7 @@
  * The attach route's WebSocket protocol, one definition for both ends: the control plane serves it, the CLI speaks
  * it, and a browser terminal on the dashboard can follow docs/cli.md, which describes the same thing.
  *
- * GET /v1/threads/<thread>/attach?cols=C&rows=R&term=T upgrades to a plain RFC 6455 WebSocket, with no subprotocol
+ * GET /v1/threads/<thread>/attach?cols=C&rows=R&term=T[&pane=P] upgrades to a plain RFC 6455 WebSocket, with no subprotocol
  * and no extensions. After the 101, binary messages carry terminal bytes both ways, and text messages carry one JSON
  * object each, whose `type` says what it is. Either end ignores a type it does not know.
  */
@@ -12,14 +12,19 @@ import type { ActualState } from "./reconcile.ts";
 
 export const defaultTerm = "xterm-256color";
 const termPattern = /^[A-Za-z0-9][A-Za-z0-9._+-]{0,63}$/;
+/** A Herdr pane's ID, such as w1:p1. */
+export const herdrPanePattern = /^w[0-9]{1,9}:p[0-9]{1,9}$/;
 
-/** The opening size and TERM of the terminal. Both go in the URL, because Herdr needs a size before it starts. */
-export interface AttachRequest { size: TerminalSize; term: string }
+/**
+ * The opening size and TERM of the terminal. Both go in the URL, because Herdr needs a size before it starts. `pane`
+ * is the pane it lands in, in place of the Claude worker's.
+ */
+export interface AttachRequest { size: TerminalSize; term: string; pane?: string }
 
 export const attachRoute = /^\/v1\/threads\/([^/]+)\/attach$/;
 
-export function attachPath(thread: string, { size, term }: AttachRequest): string {
-  return `/v1/threads/${encodeURIComponent(thread)}/attach?cols=${size.cols}&rows=${size.rows}&term=${encodeURIComponent(term)}`;
+export function attachPath(thread: string, { size, term, pane }: AttachRequest): string {
+  return `/v1/threads/${encodeURIComponent(thread)}/attach?cols=${size.cols}&rows=${size.rows}&term=${encodeURIComponent(term)}${pane === undefined ? "" : `&pane=${encodeURIComponent(pane)}`}`;
 }
 
 /** The server's side of the query. Throws a message for a 400. */
@@ -32,7 +37,9 @@ export function parseAttachQuery(query: URLSearchParams): AttachRequest {
   const size = terminalSize(side("cols"), side("rows"));
   const term = query.get("term") ?? defaultTerm;
   if (!termPattern.test(term)) throw new Error(`term must be a terminal type such as ${defaultTerm}, got ${JSON.stringify(term.slice(0, 80))}`);
-  return { size, term };
+  const pane = query.get("pane");
+  if (pane !== null && !herdrPanePattern.test(pane)) throw new Error(`pane must be a Herdr pane ID such as w1:p1, got ${JSON.stringify(pane.slice(0, 80))}`);
+  return { size, term, ...(pane === null ? {} : { pane }) };
 }
 
 /** $TERM when the guest can take it, which a terminal type name always can, and xterm-256color otherwise. */
