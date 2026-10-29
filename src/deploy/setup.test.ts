@@ -236,26 +236,29 @@ const freshControl: Facts = {
 test("a fresh control machine is left every step: setup, then the agents' credentials, then the first image", () => {
   const items = left(freshControl);
   const runs = items.map((item) => item.run);
-  assert.equal(runs.length, 9);
-  assert.deepEqual(items.map((item) => item.stage), ["setup", "setup", "setup", "setup", "credentials", "credentials", "credentials", "credentials", "image"]);
-  const login = items.find((item) => item.run.some((command) => command.includes("control/login.ts")))!;
-  assert.equal(login.stage, "credentials");
-  assert.deepEqual(login.run.slice(-1), ["sudo systemctl start nexus-control"]);
-  assert.deepEqual(items.filter((item) => item.stage === "credentials").map((item) => item.say.split(/[:,.]/)[0]), [
-    "Sign the harness in with ChatGPT", "Give pylons a Claude login", "Give pylons GitHub access", "Give pylons an SSH key for git",
-  ]);
+  assert.deepEqual(items.map((item) => item.stage), ["setup", "setup", "setup", "setup", "credentials", "image"]);
+  const credentials = items.find((item) => item.stage === "credentials")!;
+  assert.deepEqual(credentials.run, ["sudo deploy/install.sh"]);
+  for (const missing of [/the harness's login, with ChatGPT or an OpenAI API key/, /a Claude token, which `claude setup-token` prints/, /a GitHub token, fine-grained for all repositories with Administration and Contents read and write/, /a git SSH key/]) {
+    assert.match(credentials.say, missing);
+  }
   const all = runs.flat().join("\n");
   assert.match(all, /--admit <your Mac's tailnet name>/);
-  assert.match(all, /^claude setup-token$/m);
-  assert.match(all, /echo 'CLAUDE_CODE_OAUTH_TOKEN=<token>' \| sudo tee -a \/etc\/nexus\/secrets\.env/);
-  assert.match(all, /echo 'GH_TOKEN=<token>'/);
-  assert.match(all, /ssh-keygen -t ed25519 -N '' -C nexus@rj-firebat -f \/etc\/nexus\/git_ed25519/);
+  assert.doesNotMatch(all, /secrets\.env|ssh-keygen|login\.ts/, "nothing left is a credential file to edit by hand");
   assert.match(all, /usermod --append --groups docker nexus/);
   assert.match(all, /nexus image rollout <image ID it printed> --wait/);
   const cli = runs.findIndex((run) => run.includes("deploy/mac/install"));
   assert.deepEqual(runs[cli], ["deploy/mac/install", "nexus connect rj-firebat.tail1234.ts.net"]);
   assert.ok(runs.every((run, i) => i > cli || !run.some((command) => command.startsWith("nexus image"))), "no nexus command before the CLI is set up");
   assert.ok(runs.findIndex((run) => run.some((command) => command.startsWith("nexus image"))) > cli);
+});
+
+test("the credentials item names only what is missing, and an Anthropic API key counts as the Claude token", () => {
+  const say = (facts: Partial<Facts>) => left({ ...freshControl, ...facts } as Facts).find((item) => item.stage === "credentials")?.say ?? "";
+  const partly = say({ signedIn: true, secretNames: ["ANTHROPIC_API_KEY"], gitKey: true });
+  assert.match(partly, /a GitHub token/);
+  assert.doesNotMatch(partly, /harness|Claude|SSH/);
+  assert.equal(say({ signedIn: true, secretNames: ["ANTHROPIC_API_KEY", "GH_TOKEN"], gitKey: true }), "");
 });
 
 test("a host without Docker is told to install Docker with buildx and start it, before joining its group", () => {
@@ -289,8 +292,8 @@ test("a Docker without buildx is told the buildx package of its own package mana
 test("the credentials are printed under their own heading as the next step, and the image after them", () => {
   const text = formatLeft(left(freshControl));
   assert.match(text, /^What is left:\n1\. /);
-  assert.match(text, /\n\nNext, give the agents their credentials, on this machine:\n5\. Sign the harness in with ChatGPT/);
-  assert.match(text, /\n\nThen, with the control plane running:\n9\. Build the first pylon image/);
+  assert.match(text, /\n\nNext, give the agents their credentials, on this machine:\n5\. Rerun the installer in a terminal/);
+  assert.match(text, /\n\nThen, with the control plane running:\n6\. Build the first pylon image/);
   assert.doesNotMatch(formatLeft(left({ ...freshControl, secretNames: ["CLAUDE_CODE_OAUTH_TOKEN", "GH_TOKEN"], gitKey: true, signedIn: true })), /credentials/);
 });
 
@@ -307,7 +310,7 @@ test("a node is told how to register itself with the control plane and its peers
   assert.match(all, new RegExp(`^sudo deploy/install\\.sh --add-node rj-firebat=${"e".repeat(64)}$`, "m"));
   assert.match(all, /^sudo deploy\/install\.sh --node infra-testbench --peer rj-firebat$/m);
   assert.match(all, /^sudo deploy\/install\.sh --node infra-testbench --peer <other node> --peer <another node>$/m, "this node admits the other nodes too");
-  assert.match(all, /^sudo deploy\/install\.sh --node infra-testbench$/m, "the git key step reruns the node install");
+  assert.match(all, /^sudo deploy\/install\.sh --node infra-testbench$/m, "the git key is made by a rerun of the node install");
   assert.match(all, /^nexus connect infra-testbench\.tail1234\.ts\.net$/m, "the Mac connects to the control plane, not to this node");
   assert.equal(formatLeft(items).split("\n")[0], "What is left:");
 });
