@@ -109,8 +109,8 @@ export type Phase =
   /**
    * `authorized` is the head this review is about to merge, saved before the merge call, so after a restart a PR that
    * merged at it is this review's own merge, and any other merge is someone else's. `waiting` is why a review that
-   * deploys has not authorized its merge yet: another landing that deploys is under way, or a deploy drains the
-   * control plane.
+   * deploys has not authorized its merge yet: another landing that deploys is under way, a deploy drains the control
+   * plane, or the desired release is not healthy everywhere.
    */
   | { kind: "merging"; authorized: string | null; waiting?: string }
   /** `requested` once the desired release is set. `previous` is the release to roll back to, null if there was none. */
@@ -693,6 +693,10 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
       if (other.phase.kind === "rolling-back") return `${other.id} rolls back`;
       if (other.phase.kind === "merging" && other.phase.authorized !== null) return `${other.id} merges`;
     }
+    // A landing whose deploy and rollback both failed, or one with no release to roll back to, leaves its release
+    // desired, which must not become the next landing's rollback target.
+    const desired = registry.desiredRelease();
+    if (desired !== null && releaseOutcome(releaseView(registry, release.self, now()), desired.commit, now()) !== "healthy") return `not every service reports ${desired.commit.slice(0, 12)} healthy`;
     return null;
   }
 

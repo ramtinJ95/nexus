@@ -439,6 +439,15 @@ test("a harness builder gets a Claude reviewer only where the project grants a C
   assert.equal(review.outbox, null, "a Claude reviewer's request is its first prompt");
 });
 
+const healthy = (f: ReturnType<typeof fixture>, commit: string) => {
+  for (const role of ["control", "probe"] as const) f.registry.reportRelease({ node, role, commit, target: commit, state: "healthy", reason: null, observedAt: Date.now() });
+};
+/** `commit` as the desired release, which every service reports healthy. */
+const released = (f: ReturnType<typeof fixture>, commit: string) => {
+  f.registry.setDesiredRelease({ commit, requestedBy: "person", requestedAt: 1 });
+  healthy(f, commit);
+};
+
 async function approved(f: ReturnType<typeof fixture>, land: string | null) {
   const loop = f.loop();
   await loop.start(f.builder, { land });
@@ -452,7 +461,7 @@ test("a landing under the policy merges the approved head, deploys it and waits 
   const dir = await mkdtemp(join(tmpdir(), "nexus-review-")); t.after(() => rm(dir, { recursive: true }));
   const path = join(dir, "registry.db");
   const f = fixture(t, { path });
-  f.registry.setDesiredRelease({ commit: previous, requestedBy: "person", requestedAt: 1 });
+  released(f, previous);
   await approved(f, "nLAPTOP");
   assert.deepEqual(f.merges, [head1]);
   assert.equal(f.review().phase.kind, "deploying");
@@ -474,7 +483,7 @@ test("a landing under the policy merges the approved head, deploys it and waits 
 
 test("a deploy that fails rolls back to the previous release and tells the person what still needs reverting", async (t) => {
   const f = fixture(t);
-  f.registry.setDesiredRelease({ commit: previous, requestedBy: "person", requestedAt: 1 });
+  released(f, previous);
   const loop = await approved(f, "nLAPTOP");
   f.registry.reportRelease({ node, role: "control", commit: previous, target: merged, state: "rolled-back", reason: "health check failed", observedAt: Date.now() });
   await loop.poll();
@@ -508,13 +517,10 @@ async function secondBuilder(f: ReturnType<typeof fixture>, loop: ReturnType<Ret
   await loop.start(builder, { land: "nLAPTOP" });
   return builder;
 }
-const healthy = (f: ReturnType<typeof fixture>, commit: string) => {
-  for (const role of ["control", "probe"] as const) f.registry.reportRelease({ node, role, commit, target: commit, state: "healthy", reason: null, observedAt: Date.now() });
-};
 
 test("landings deploy one at a time: the second merges once the first is healthy, and rolls back to the first's commit", async (t) => {
   const f = fixture(t);
-  f.registry.setDesiredRelease({ commit: previous, requestedBy: "person", requestedAt: 1 });
+  released(f, previous);
   const loop = f.loop();
   await loop.start(f.builder, { land: "nLAPTOP" });
   const second = await secondBuilder(f, loop);
@@ -551,7 +557,7 @@ test("landings deploy one at a time: the second merges once the first is healthy
 
 test("a landing waits to merge while the control plane drains for a deploy, and while another landing rolls back", async (t) => {
   const f = fixture(t);
-  f.registry.setDesiredRelease({ commit: previous, requestedBy: "person", requestedAt: 1 });
+  released(f, previous);
   f.registry.setDrain({ commit: previous, expiresAt: Date.now() + 60_000 });
   const loop = await approved(f, "nLAPTOP");
   assert.deepEqual(f.merges, []);
@@ -574,10 +580,31 @@ test("a landing waits to merge while the control plane drains for a deploy, and 
   assert.equal((f.registry.review(second)!.phase as { previous: string }).previous, previous);
 });
 
+test("a landing waits to merge while the desired release is not healthy everywhere, as after a failed deploy with nothing to roll back to", async (t) => {
+  const f = fixture(t);
+  const loop = f.loop();
+  await loop.start(f.builder, { land: "nLAPTOP" });
+  const second = await secondBuilder(f, loop);
+  await loop.poll();
+  await loop.poll();
+  f.reply(f.review().reviewer, verdict(f.review(), {}));
+  f.reply(f.registry.review(second)!.reviewer, verdict(f.registry.review(second)!, {}));
+  await loop.poll();
+  f.registry.reportRelease({ node, role: "control", commit: null, target: merged, state: "failed", reason: "health check failed", observedAt: Date.now() });
+  await loop.poll();
+  assert.equal(f.review().phase.kind, "needs-person");
+  assert.deepEqual(f.merges, [head1], "the failed release is still desired, so it must not become the second's rollback target");
+  assert.deepEqual(f.registry.review(second)!.phase, { kind: "merging", authorized: null, waiting: `not every service reports ${merged.slice(0, 12)} healthy` });
+  released(f, previous);
+  await loop.poll();
+  assert.deepEqual(f.merges, [head1, head2]);
+  assert.equal((f.registry.review(second)!.phase as { previous: string }).previous, previous);
+});
+
 test("a review that lands archives its builder and reviewer, once, whether its PR deploys or not", async (t) => {
   for (const repo of ["ramtinJ95/nexus", "acme/shop"]) {
     const f = fixture(t, { repo });
-    f.registry.setDesiredRelease({ commit: previous, requestedBy: "person", requestedAt: 1 });
+    released(f, previous);
     const loop = await approved(f, "nLAPTOP");
     if (repo === "ramtinJ95/nexus") {
       assert.equal(f.review().phase.kind, "deploying");
@@ -596,7 +623,7 @@ test("a review that lands archives its builder and reviewer, once, whether its P
 
 test("a landing whose save fails archives nothing, so a release that supersedes it before the retry leaves both threads open", async (t) => {
   const f = fixture(t);
-  f.registry.setDesiredRelease({ commit: previous, requestedBy: "person", requestedAt: 1 });
+  released(f, previous);
   const loop = await approved(f, "nLAPTOP");
   const save = f.registry.saveReview;
   f.registry.saveReview = (review, archive, read) => {
@@ -624,7 +651,7 @@ test("a review held for the person, or one that stops at approval, archives noth
   assert.deepEqual(held.statuses(), ["active", "active"], "a landing the policy holds");
 
   const rolledBack = fixture(t);
-  rolledBack.registry.setDesiredRelease({ commit: previous, requestedBy: "person", requestedAt: 1 });
+  released(rolledBack, previous);
   const loop = await approved(rolledBack, "nLAPTOP");
   rolledBack.registry.reportRelease({ node, role: "control", commit: previous, target: merged, state: "failed", reason: "unit failed", observedAt: Date.now() });
   await loop.poll();
@@ -850,7 +877,7 @@ test("in a review stored before priorities, a reviewer's repeat approval of an u
 
 test("a landing sees its deploy through, rolling back, though its threads are archived meanwhile", async (t) => {
   const f = fixture(t);
-  f.registry.setDesiredRelease({ commit: previous, requestedBy: "person", requestedAt: 1 });
+  released(f, previous);
   const loop = await approved(f, "nLAPTOP");
   assert.equal(f.review().phase.kind, "deploying");
   archive(f.registry, f.builder);
@@ -865,7 +892,7 @@ test("a landing sees its deploy through, rolling back, though its threads are ar
 
 test("a PR that merged at another head than the approved one is not deployed", async (t) => {
   const f = fixture(t);
-  f.registry.setDesiredRelease({ commit: previous, requestedBy: "person", requestedAt: 1 });
+  released(f, previous);
   f.mergeAnswer = () => ({ kind: "refused", message: "unused" });
   const loop = f.loop();
   await loop.start(f.builder, { land: "nLAPTOP" });
@@ -1128,7 +1155,7 @@ test("a reply that came while a delivered message was not yet cleared is still r
 
 test("a PR merged outside the review is held by the policy like this review's own merge, and never deployed past a hold", async (t) => {
   const f = fixture(t, { claudeBuilder: false, secrets: [{ name: "CLAUDE_CODE_OAUTH_TOKEN", hosts: ["api.anthropic.com"] }] });
-  f.registry.setDesiredRelease({ commit: previous, requestedBy: "person", requestedAt: 1 });
+  released(f, previous);
   f.files = [{ path: "images/pylon/Dockerfile", previous: null, patch: "@@ -1 +1 @@\n-FROM a\n+FROM b" }];
   f.check = { kind: "running" };
   const loop = f.loop();
@@ -1150,7 +1177,7 @@ test("a PR merged outside the review is held by the policy like this review's ow
 
 test("a PR merged outside the review that the policy would have merged deploys", async (t) => {
   const f = fixture(t);
-  f.registry.setDesiredRelease({ commit: previous, requestedBy: "person", requestedAt: 1 });
+  released(f, previous);
   f.check = { kind: "running" };
   const loop = f.loop();
   await loop.start(f.builder, { land: "nLAPTOP" });
@@ -1167,7 +1194,7 @@ test("a PR merged outside the review that the policy would have merged deploys",
 
 test("this review's own merge, recorded before the merge call, deploys after a crash without being judged again", async (t) => {
   const f = fixture(t);
-  f.registry.setDesiredRelease({ commit: previous, requestedBy: "person", requestedAt: 1 });
+  released(f, previous);
   f.mergeAnswer = () => {
     // GitHub merged it, then the control plane crashed before it saw the answer.
     f.snapshot = { ...f.snapshot, pr: { ...f.snapshot.pr, state: "merged" }, detail: { ...f.snapshot.detail, mergeCommit: merged } };
@@ -1405,7 +1432,7 @@ test("a PR merged or closed outside a review that does not land ends it quietly,
 
 test("a review that lands still sees a merge made outside it through, and a real failure while the PR is open still asks the person", async (t) => {
   const f = fixture(t);
-  f.registry.setDesiredRelease({ commit: previous, requestedBy: "person", requestedAt: 1 });
+  released(f, previous);
   f.check = { kind: "running" };
   await approved(f, "nLAPTOP");
   f.snapshot = { ...f.snapshot, pr: { ...f.snapshot.pr, state: "merged" }, detail: { ...f.snapshot.detail, mergeCommit: merged } };
@@ -1644,7 +1671,7 @@ const rebased = (f: ReturnType<typeof fixture>) => { f.snapshot = { ...f.snapsho
 
 test("a builder's PR in a project that lands on its own is reviewed with no command and lands for whoever turned it on", async (t) => {
   const f = fixture(t, { autoReview: { land: true, enabledBy: "nLAPTOP" } });
-  f.registry.setDesiredRelease({ commit: previous, requestedBy: "person", requestedAt: 1 });
+  released(f, previous);
   const loop = f.loop();
   await loop.auto(f.registry.thread(f.builder)!, f.pr);
   assert.equal(f.review().auto, true);
@@ -1685,7 +1712,7 @@ test("nothing starts on its own without the project's setting, for a thread the 
 
 test("a branch that conflicts at landing goes back to the builder to rebase, and the rebased head is reviewed again, then lands", async (t) => {
   const f = fixture(t);
-  f.registry.setDesiredRelease({ commit: previous, requestedBy: "person", requestedAt: 1 });
+  released(f, previous);
   const loop = f.loop();
   await loop.start(f.builder, { land: "nLAPTOP" });
   await loop.poll();
@@ -2159,7 +2186,7 @@ test("a review held after an approval for a conflict the builder did not rebase,
 
 test("a review that merged and is held over its deploy stays as it is whatever the PR watch reads", async (t) => {
   const f = fixture(t);
-  f.registry.setDesiredRelease({ commit: previous, requestedBy: "person", requestedAt: 1 });
+  released(f, previous);
   const loop = await approved(f, "nLAPTOP");
   f.registry.reportRelease({ node, role: "control", commit: previous, target: merged, state: "failed", reason: "unit failed", observedAt: Date.now() });
   await loop.poll();
