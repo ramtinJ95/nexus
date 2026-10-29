@@ -61,6 +61,47 @@ link_release() {
   fi
 }
 
+# Holds the deployer's lock on fd 9 until the script exits. The deployer's supervisor and every installer take it, so
+# no two of them change releases at once.
+take_deployer_lock() {
+  install -d -o root -g root -m 0700 "$prefix/deployer"
+  exec 9>"$prefix/deployer/lock"
+  flock -x 9
+}
+
+# Runs the command $@ under the deployer's lock, which it holds only until the command exits. A script that runs the
+# role installers takes the lock this way, because each installer takes it itself.
+with_deployer_lock() {
+  install -d -o root -g root -m 0700 "$prefix/deployer"
+  flock -x "$prefix/deployer/lock" "$@"
+}
+
+# The control plane's upgrade steps from the checkout at $1, which neither switch its link nor start it. The deployer
+# runs them alone, as `NEXUS_PREPARE=1 install-control.sh`.
+prepare_control() {
+  make_state nexus-control /var/lib/nexus-control
+  install -d -o root -g root -m 0755 "$etc"
+  install_release "$1"
+  install_unit "$1/deploy/nexus-control.service" nexus-control.service
+}
+
+# The probe's upgrade steps from the checkout at $1, which neither switch its link nor start it. The deployer runs them
+# alone, as `NEXUS_PREPARE=1 install-probe.sh`.
+prepare_probe() {
+  make_state nexus /var/lib/nexus pylons artifacts
+  usermod --append --groups kvm nexus
+  # Previews are `tailscale serve` entries, which only root and the operator may change. tailscaled has one
+  # operator, so this replaces any other user's operator rights.
+  tailscale set --operator=nexus
+  install -d -o root -g root -m 0755 "$etc"
+  install_release "$1"
+  [ -e "$etc/secrets.env" ] || install -o root -g nexus -m 0640 "$1/deploy/secrets.example.env" "$etc/secrets.env"
+  install_unit "$1/deploy/nexus-probe.service" nexus-probe.service
+  # `nexus attach` goes through the control plane now. A sudo grant for the old node-side helper would outlive it.
+  rm -f /usr/local/bin/nexus-attach /etc/sudoers.d/nexus-attach
+  if getent group nexus-attach >/dev/null; then groupdel nexus-attach; fi
+}
+
 # Installs the unit file $1 as /etc/systemd/system/$2 and enables it.
 install_unit() {
   local source=$1 unit=/etc/systemd/system/$2

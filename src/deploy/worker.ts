@@ -1,9 +1,9 @@
-import { copyFile, readFile, readlink, rename, stat, symlink, writeFile } from "node:fs/promises";
+import { copyFile, readFile, readlink, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
-import { command, checkoutMerged, ReleaseInstaller } from "./install.ts";
-import { planDeploy, type Role } from "./plan.ts";
-import { fullCommit, type ReleaseReport, type ReleaseView } from "./model.ts";
+import { command, checkoutMerged, commitAt, pointLink, releaseLink, ReleaseInstaller, type Transaction } from "./install.ts";
+import { planDeploy, quarantined, type Attempt, type ReleaseHealth, type Role } from "./plan.ts";
+import type { ReleaseReport, ReleaseView } from "./model.ts";
 import { jsonRequest } from "./http.ts";
 import { readJson, saveJson } from "../json-file.ts";
 import { localApiWhois, tailnetNodeIdPattern } from "../tailscale.ts";
@@ -28,12 +28,6 @@ export function parseWorkerConfig(value: unknown): WorkerConfig {
 
 const prefix = "/opt/nexus";
 const configPath = "/etc/nexus/deployer.json";
-async function commitAt(link: string): Promise<string | null> {
-  try {
-    const commit = (await readFile(join(link, "release-commit"), "utf8")).trim();
-    return fullCommit.test(commit) ? commit : null;
-  } catch { return null; }
-}
 
 export async function runWorker(check = false): Promise<void> {
   if (process.getuid?.() !== 0) throw new Error("deployer must run as root");
@@ -48,17 +42,39 @@ export async function runWorker(check = false): Promise<void> {
     try { await stat(join(prefix, "deployer", "roles", role)); roles.push(role); }
     catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
   }
-  for (const role of roles) await reconcileRole(role, config, api);
+  await reconcileRoles(roles, config, api);
 }
 
 class WaitingForControl extends Error {}
 
 type Api = (path: string, body?: unknown) => Promise<any>;
-export async function reconcileRole(role: Role, config: WorkerConfig, api: Api, boundary = {
-  prefix, etc: "/etc/nexus", units: "/etc/systemd/system", run: command, checkout: checkoutMerged,
-}): Promise<void> {
+const nodeBoundary = { prefix, etc: "/etc/nexus", units: "/etc/systemd/system", run: command, checkout: checkoutMerged };
+
+/** What a probe plans from: control's report in the view, healthy only while fresh. */
+function controlHealth(view: ReleaseView): ReleaseHealth {
+  const control = view.nodes.find((r) => r.role === "control");
+  return { commit: control?.commit ?? null, healthy: control?.state === "healthy" && Date.now() - control.observedAt < 90_000 };
+}
+
+/** One poll. Its roles share one read of the release view, read again once control's report would change what it shows. */
+export async function reconcileRoles(roles: readonly Role[], config: WorkerConfig, api: Api, boundary = nodeBoundary): Promise<void> {
+  let view: Promise<ReleaseView> | undefined;
+  const reporting: Api = async (path, body) => {
+    const answer = await api(path, body);
+    const report = body as ReleaseReport;
+    if (path === "report" && report.role === "control" && view !== undefined) {
+      const shown = controlHealth(await view);
+      if (shown.commit !== report.commit || shown.healthy !== (report.state === "healthy")) view = undefined;
+    }
+    return answer;
+  };
+  for (const role of roles) await reconcileRole(role, config, reporting, boundary, () => view ??= api("release"));
+}
+
+export async function reconcileRole(role: Role, config: WorkerConfig, api: Api, boundary = nodeBoundary,
+  readView: () => Promise<ReleaseView> = () => api("release")): Promise<void> {
   const { prefix, etc, units, run, checkout } = boundary;
-  const link = join(prefix, role === "control" ? "control-current" : "current");
+  const link = releaseLink(prefix, role);
   const service = `nexus-${role}.service`;
   const unit = join(units, service);
   const savedUnit = join(prefix, `${role}-deploy.unit`);
@@ -79,11 +95,14 @@ export async function reconcileRole(role: Role, config: WorkerConfig, api: Api, 
     return false;
   };
   const report = async (state: ReleaseReport["state"], target: string | null, reason: string | null = null) => {
-    const value = { role, commit: await commitAt(link), target, state, reason, observedAt: Date.now() };
-    await saveJson(reportPath, value);
-    const { observedAt: _, ...wire } = value;
+    const wire = { role, commit: await commitAt(link), target, state, reason };
+    const saved = await readJson(reportPath, null).catch(() => null) as ReleaseReport | null;
+    if (saved === null || (Object.keys(wire) as (keyof typeof wire)[]).some((key) => saved[key] !== wire[key])) {
+      await saveJson(reportPath, { ...wire, observedAt: Date.now() });
+    }
     await api("report", wire).catch(() => { console.error(`could not report ${role} release; retained locally for the next poll`); });
   };
+  const settled = (result: Transaction) => report(result.state === "installing" ? "failed" : result.state, result.commit, result.reason);
   let desired: string | null = null;
   let renewal: NodeJS.Timeout | undefined;
   let drainLost = false;
@@ -131,23 +150,23 @@ export async function reconcileRole(role: Role, config: WorkerConfig, api: Api, 
     journal: () => run("journalctl", ["-u", service, "-n", "40", "--no-pager"], prefix, 5000),
   });
   // Recovery must not depend on the API whose failed upgrade may have stopped it.
-  const attempt = await installer.observed();
-  if (attempt?.state === "installing") {
-    const result = await installer.recover();
-    await report(result.state === "healthy" ? "healthy" : result.state === "rolled-back" ? "rolled-back" : "failed", result.commit, result.reason);
-  }
-  const view = await api("release") as ReleaseView;
+  const recovered = await installer.recover();
+  if (recovered !== null) await settled(recovered);
+  const view = await readView();
   desired = view.desired?.commit ?? null;
   const prior = await readJson(reportPath, null) as ReleaseReport | null;
-  if (desired !== null && prior?.target === desired && (prior.state === "failed" || prior.state === "rolled-back")) {
-    await report(prior.state, desired, prior.reason);
+  const journal = await installer.observed();
+  // The report also holds failures that never reached the journal, such as a failed build or a drain refusal.
+  const attempts: Attempt[] = [...prior === null ? [] : [{ commit: prior.target, state: prior.state, reason: prior.reason }], ...journal === null ? [] : [journal]];
+  const held = quarantined(view.desired, attempts);
+  if (held !== null) {
+    await report(held.state, desired, held.reason);
     if (role === "control") await api("drain", { commit: desired, release: true }).catch(() => {});
     return;
   }
   const current = { commit: await commitAt(link), healthy: await healthy() };
-  const control = view.nodes.find((r) => r.role === "control");
-  const observedControl = { commit: control?.commit ?? null, healthy: control?.state === "healthy" && Date.now() - control.observedAt < 90_000 };
-  const step = planDeploy({ desired: view.desired, role, current, control: observedControl, attempt: null, turnRunning: false, drainStartedAt: null, drainTimeoutMs: config.drainTimeoutMs, now: Date.now() });
+  const observedControl = controlHealth(view);
+  const step = planDeploy({ desired: view.desired, role, current, control: observedControl, attempts, turnRunning: false, drainStartedAt: null, drainTimeoutMs: config.drainTimeoutMs, now: Date.now() });
   if (step.kind === "idle" || step.kind === "healthy") {
     await report(current.healthy ? "healthy" : "failed", desired, current.healthy ? null : "running release is not healthy");
     if (role === "control" && desired !== null) await api("drain", { commit: desired, release: true }).catch(() => {});
@@ -159,7 +178,7 @@ export async function reconcileRole(role: Role, config: WorkerConfig, api: Api, 
       const start = Date.now();
       while (true) {
         const status = await drain();
-        const next = planDeploy({ desired: view.desired, role, current, control: observedControl, attempt: null, turnRunning: !status.idle, drainStartedAt: start, drainTimeoutMs: config.drainTimeoutMs, now: Date.now() });
+        const next = planDeploy({ desired: view.desired, role, current, control: observedControl, attempts, turnRunning: !status.idle, drainStartedAt: start, drainTimeoutMs: config.drainTimeoutMs, now: Date.now() });
         if (next.kind === "install") break;
         if (next.kind === "stop") throw new Error(next.reason);
         await report("waiting-for-idle", desired);
@@ -169,7 +188,7 @@ export async function reconcileRole(role: Role, config: WorkerConfig, api: Api, 
     }
     await report("installing", desired);
     const result = await installer.install(step.commit);
-    await report(result.state === "healthy" ? "healthy" : result.state === "rolled-back" ? "rolled-back" : "failed", result.commit, result.reason);
+    await settled(result);
     if (result.state === "healthy") await promoteWorker(step.commit, repo, prefix, run);
   } catch (error) {
     await report(error instanceof WaitingForControl ? "waiting-for-control" : "failed", desired, String(error).slice(-20_000));
@@ -185,13 +204,7 @@ async function promoteWorker(commit: string, repo: string, prefix: string, run: 
   if (rejected.trim() === target) return;
   try { await run(process.execPath, [join(prefix, target, "src/deploy/worker.ts"), "--check"], repo); }
   catch { await writeFile(join(prefix, "deployer", "rejected"), target); return; }
-  await symlink(target, join(prefix, "deployer-current.new")).catch(async (error: NodeJS.ErrnoException) => {
-    if (error.code !== "EEXIST") throw error;
-    const { unlink } = await import("node:fs/promises");
-    await unlink(join(prefix, "deployer-current.new"));
-    await symlink(target, join(prefix, "deployer-current.new"));
-  });
-  await rename(join(prefix, "deployer-current.new"), join(prefix, "deployer-current"));
+  await pointLink(join(prefix, "deployer-current"), target);
 }
 
 if (import.meta.main) runWorker(process.argv.includes("--check")).catch((error: unknown) => { console.error(error); process.exitCode = 1; });

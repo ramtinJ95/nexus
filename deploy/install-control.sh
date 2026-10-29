@@ -14,24 +14,12 @@ set -euo pipefail
 repo="$(cd "$(dirname "$0")/.." && pwd)"
 # shellcheck source=deploy/release.sh
 . "$repo/deploy/release.sh"
-state=/var/lib/nexus-control
-
 [ "$(id -u)" = 0 ] || fail "run as root: sudo deploy/install.sh"
 
-make_state nexus-control "$state"
-install -d -o root -g root -m 0755 "$etc"
-
-if [ "${NEXUS_PREPARE:-0}" != 1 ]; then
-  install -d -o root -g root -m 0700 "$prefix/deployer"
-  exec 9>"$prefix/deployer/lock"
-  flock -x 9
-fi
-install_release "$repo"
-[ "${NEXUS_PREPARE:-0}" = 1 ] || link_release "$prefix/control-current"
-
-install_unit "$repo/deploy/nexus-control.service" nexus-control.service
-
-[ "${NEXUS_PREPARE:-0}" != 1 ] || exit 0
+if [ "${NEXUS_PREPARE:-0}" = 1 ]; then prepare_control "$repo"; exit 0; fi
+take_deployer_lock
+prepare_control "$repo"
+link_release "$prefix/control-current"
 
 signed_in() {
   PATH=$service_path node -e '

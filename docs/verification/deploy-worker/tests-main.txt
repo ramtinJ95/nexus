@@ -1,0 +1,52 @@
+# main's code, 284305f refactor(probe): tidy preview readiness, port linking and the planner's fail codes (#315), with the branch's tests
+✔ a healthy install switches only its role's link and records the full commit
+✖ failed health rolls back, keeps journal tail, and leaves the attempt that quarantines the bad release
+✔ restart failure also restores the previous release
+✔ a failed rollback is not reported as a successful rollback
+✔ a process interrupted around the link swap recovers from its persistent transaction
+✖ an install refuses to run over an unfinished one, which only recovery may settle
+✔ a preparation failure never touches the running release
+✔ git accepts merged commits, refuses a fetched non-main commit, and rejects revisions before running git
+✔ a failed final idle fence never switches or restarts the running release
+✔ deployment child commands include the administrative paths the probe installer needs
+✔ an install leaves its journal as the transaction's JSON, private to its owner, with no temporary file beside it
+✔ a journal that is not JSON is refused rather than read as no deployment
+✔ the deployer's preparation runs both role installers without reading input, and changes no credential
+✔ outside preparation the same stand-ins see the role installers switch and start their services
+✔ release planning is idle without a desired release, and converges on healthy observations
+✔ probes require the desired control release to be healthy
+✔ control drain refuses a running turn at the deadline, but idle wins at the deadline
+✖ a failure recorded at the desired commit stops it before health or drain, and the report's reason comes first
+✔ a complete machine misses nothing, for the control plane and for a node
+✔ a fresh machine reports every miss at once, each with its fix
+✔ a node needs neither the certificate drop-in nor dotfiles
+✔ a machine that is not a systemd Linux is told so
+✔ Node older than 26 is a miss, and the fix fits the package manager
+✔ QEMU is looked for under the machine's architecture, and either binary missing is a miss
+✔ /dev/kvm outside the kvm group is a miss of its own
+✔ a logged-out tailscale is one miss, and the tailnet's settings are checked only once it runs
+✔ MagicDNS and HTTPS certificates turned off are both reported
+✔ the installer stops before changing anything when a prerequisite is missing
+✔ a complete machine writes the configs, runs each role's installer, gives the agents their credentials, then says what is left
+✔ after the credentials, a new git key rewrites the configs and reinstalls the probe, a new secret restarts the probe if it runs, and a signed-in harness installs the control plane again
+✔ a failed credentials step still restarts what its writes need, then stops before it says what is left
+✔ a join runs after the role installers and before the credentials, and a refused one stops the run
+✔ only root on a machine with a control plane mints a join token, from the control plane's release
+✔ worker config bounds drain and health and rejects credential-bearing endpoints
+✔ wait outcome requires fresh health from every role and detects rollback and supersession
+✖ the bootstrap that install-deployer.sh copies loads without the repo's node_modules
+✔ fixed supervisor falls back after a worker crashes or hangs, and accepts a later worker
+✔ activation failure rolls back through fake service executables in a temporary prefix
+✔ polling reconciles a desired control release, reports rollback and leaves the probe link alone
+✖ a rolled-back install stays quarantined by its journal after its report is cleared, without draining control
+✔ a poll leaves its report as JSON private to its owner, with no temporary file beside it, and a role without its local config is refused
+✔ probe retries when control becomes stale during preparation, without switching or quarantining
+✔ probe retries when control becomes unhealthy during preparation, without switching or quarantining
+✔ probe retries when control becomes unreachable during preparation, without switching or quarantining
+✖ a poll of two idle roles reads the release view once, and an unchanged report leaves its file alone
+✖ a control upgrade makes the probe read the release view again, so both roles upgrade in one poll
+✖ a probe a release behind reads the view again when control's unchanged report was stale there, and upgrades in the same poll
+ℹ tests 47
+ℹ pass 39
+ℹ fail 8
+✖ failing tests:
