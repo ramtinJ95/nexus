@@ -1496,18 +1496,27 @@ document.addEventListener("visibilitychange", () => {
   if (changesPane !== null && canRead(factsNow())) void readChanges();
 });
 
-/** Brings the inbox card a notice opened into view, or the inbox when that card is gone. */
-function showNeed() {
+/**
+ * Brings the inbox card a notice opened into view, or the inbox when that card is gone. A notice can come before the
+ * poll that brings its card, so the page is read once more before it settles for the inbox.
+ */
+async function showNeed() {
   const selectors = needSelectors(location.hash);
   if (selectors === null) return;
-  const card = selectors.map((s) => document.querySelector(s)).find((found) => found !== null) ?? document.getElementById("needs-you");
+  const find = () => selectors.map((s) => document.querySelector(s)).find((found) => found !== null) ?? null;
+  if (find() === null && document.getElementById("needs-you") !== null) await refreshNow();
+  const card = find() ?? document.getElementById("needs-you");
   for (const picked of document.querySelectorAll(".need.picked")) picked.classList.remove("picked");
   card?.classList.add("picked");
   card?.scrollIntoView({ block: "start" });
   card?.focus({ preventScroll: true });
 }
-showNeed();
-addEventListener("hashchange", showNeed);
+void showNeed();
+addEventListener("hashchange", () => void showNeed());
+// On a phone the link is in the drawer, which a jump within the page would leave open over the inbox.
+document.addEventListener("click", (event) => {
+  if (event.target instanceof Element && event.target.closest('a[href^="/#needs-you"]') !== null) setOpen(null);
+});
 
 const currentThread = () => /^\/threads\/([^/]+)$/.exec(location.pathname)?.[1] ?? null;
 const focused = () => document.visibilityState === "visible" && document.hasFocus();
