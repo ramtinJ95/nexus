@@ -5,16 +5,18 @@
 #   sudo deploy/install.sh --node <the control plane's tailnet name>
 #
 # It checks every prerequisite first, and stops before changing anything when one is missing. It writes
-# /etc/nexus/control.json, probe.json and deployer.json from `tailscale status --json` (src/deploy/setup.ts), then
-# runs the role installers, and ends with what is left for the person. Safe to rerun: an existing config keeps its
-# values and secrets, and gains only what is missing.
+# /etc/nexus/control.json, probe.json and deployer.json from `tailscale status --json` (src/deploy/setup.ts), runs
+# the role installers, then asks for the agents' credentials this machine lacks (src/deploy/credentials.ts), and ends
+# with what is left for the person. Without a terminal, or with --non-interactive, the credentials come from NEXUS_*
+# variables instead. Safe to rerun: an existing config keeps its values and secrets, and gains only what is missing,
+# and an existing credential is left as it is.
 set -euo pipefail
 
 repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # shellcheck source=deploy/release.sh
 . "$repo/deploy/release.sh"
 
-usage="usage: sudo deploy/install.sh [--node <control plane device>] [--admit <device>]... [--add-node <device>=<deploy key digest>]... [--peer <device>]... [--dotfiles <git URL>]"
+usage="usage: sudo deploy/install.sh [--node <control plane device>] [--admit <device>]... [--add-node <device>=<deploy key digest>]... [--peer <device>]... [--dotfiles <git URL>] [--non-interactive]"
 
 # The machine's facts, one function each, so the tests can fake a machine.
 uid() { id -u; }
@@ -109,13 +111,14 @@ check_prerequisites() {
 }
 
 main() {
-  local role=control dotfiles="" roles
+  local role=control dotfiles="" roles next failed=0
   local args=("$@")
   while [ $# -gt 0 ]; do
     case $1 in
       --node) role=node; shift 2 || fail "--node needs the control plane's tailnet name. $usage" ;;
       --dotfiles) dotfiles=${2:-}; shift 2 || fail "--dotfiles needs a git URL. $usage" ;;
       --admit|--add-node|--peer) shift 2 || fail "$1 needs a value. $usage" ;;
+      --non-interactive) shift ;;
       -h|--help) echo "$usage"; exit 0 ;;
       *) fail "unknown argument $1. $usage" ;;
     esac
@@ -140,6 +143,22 @@ main() {
   bash "$repo/deploy/install-probe.sh"
   # shellcheck disable=SC2086
   bash "$repo/deploy/install-deployer.sh" $roles
+
+  echo
+  # It runs runuser and chown, which live in the sbin directories the units' PATH lacks.
+  next=$(PATH=$service_path:$PATH node "$repo/src/deploy/setup.ts" credentials "${args[@]}") || failed=$?
+  if grep -qx watch <<<"$next"; then
+    PATH=$service_path flock -x "$prefix/deployer/lock" node "$repo/src/deploy/setup.ts" write "${args[@]}" --github-watch
+  elif grep -qx config <<<"$next"; then
+    PATH=$service_path flock -x "$prefix/deployer/lock" node "$repo/src/deploy/setup.ts" write "${args[@]}"
+  fi
+  if grep -qx config <<<"$next"; then
+    bash "$repo/deploy/install-probe.sh"
+  elif grep -qx probe <<<"$next"; then
+    systemctl try-restart nexus-probe.service
+  fi
+  if grep -qx control <<<"$next"; then bash "$repo/deploy/install-control.sh"; fi
+  [ "$failed" = 0 ] || fail "the credentials step failed, after the restarts its writes needed. Fix what it said, then rerun"
   echo
   PATH=$service_path node "$repo/src/deploy/setup.ts" left "${args[@]}"
 }

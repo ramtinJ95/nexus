@@ -42,10 +42,10 @@ This device is tailnet node nAbC123CNTRL. It
   may read threads, projects and nodes
   may start and message threads
   may not deploy, land reviews and build images
-To let it deploy, add "nAbC123CNTRL" to "deployers" in /etc/nexus/control.json on the control plane's machine, then run: sudo systemctl restart nexus-control
+To let it deploy, run this on the control plane's machine, in its nexus checkout: sudo deploy/install.sh --admit nAbC123CNTRL
 ```
 
-A device the control plane does not allow gets the line that adds it to `callers` instead. Its URL is saved all the same, so once the person adds it and restarts the control plane, every command works without connecting again. The control plane's own node and the nodes it runs pylons on may read but never act as a person, and `connect` says to use the person's own device. When `NEXUS_URL` is set, `connect` says it overrides the saved URL.
+A device the control plane does not allow gets the same line, which admits it as a caller and a deployer. Its URL is saved all the same, so once the person reruns the installer with `--admit`, every command works without connecting again. The control plane's own node and the nodes it runs pylons on may read but never act as a person, and `connect` says to use the person's own device. When `NEXUS_URL` is set, `connect` says it overrides the saved URL.
 
 `connect` exits 0 once it saved a URL, whatever the device may do, and `--json` prints `{"url", "socks", "config", "caller"}`, where `caller` is the `Whoami` below, or null from a control plane older than the route, which `connect` reaches only when it allows the device. It exits 2 when nothing answers at either port, naming each try and, without a proxy, saying how to give one. It exits 3 when the control plane answers but not to that name, because the name is not in its `listen.hostnames`, and 64 for a host that is neither a name nor a URL. A failed `connect` writes nothing.
 

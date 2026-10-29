@@ -959,16 +959,16 @@ function connectText(url: string, file: string, caller: Whoami | null): string {
   const overridden = process.env.NEXUS_URL ? [`NEXUS_URL is set, so it overrides ${file} until you unset it.`] : [];
   if (caller === null) return [head, "This control plane allows this device, and is too old to say whether it may start threads or deploy. Upgrade it, as deploy/README.md describes, and run nexus connect again.", ...overridden].join("\n");
   const may = (yes: boolean, what: string) => `  ${yes ? "may" : "may not"} ${what}`;
-  const add = (list: string, why: string) => `To let it ${why}, add "${caller.node}" to "${list}" in /etc/nexus/control.json on the control plane's machine, then run: sudo systemctl restart nexus-control`;
+  const admit = (why: string) => `To let it ${why}, run this on the control plane's machine, in its nexus checkout: sudo deploy/install.sh --admit ${caller.node}`;
   return [
     head,
     `This device is tailnet node ${caller.node}. It`,
     may(caller.allowed, "read threads, projects and nodes"),
     may(caller.person, "start and message threads"),
     may(caller.deployer, "deploy, land reviews and build images"),
-    ...!caller.allowed ? [add("callers", "use Nexus"), `Add it to "deployers" too to let it deploy.`]
+    ...!caller.allowed ? [admit("use Nexus and deploy")]
       : !caller.person ? ["It is the control plane's own node or one of its nodes, which never act as a person. Connect from your own device."]
-      : !caller.deployer ? [add("deployers", "deploy")] : [],
+      : !caller.deployer ? [admit("deploy")] : [],
     ...overridden,
   ].join("\n");
 }

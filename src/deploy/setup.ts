@@ -1,7 +1,8 @@
 /**
- * Writes /etc/nexus/{control,probe,deployer}.json for `deploy/install.sh` and says what is left for the person:
- * `node src/deploy/setup.ts write|left [--node <control device>] [--admit <device>]... [--add-node <device>=<digest>]...
- * [--peer <device>]... [--dotfiles <git url>]`. It runs as root from a checkout before `npm ci`, so it imports only
+ * Writes /etc/nexus/{control,probe,deployer}.json for `deploy/install.sh`, gives the agents their credentials
+ * (src/deploy/credentials.ts) and says what is left for the person: `node src/deploy/setup.ts write|credentials|left
+ * [--node <control device>] [--admit <device>]... [--add-node <device>=<digest>]... [--peer <device>]...
+ * [--dotfiles <git url>] [--non-interactive] [--github-watch]`. It runs as root from a checkout before `npm ci`, so it imports only
  * Node's builtins.
  */
 import { execFile } from "node:child_process";
@@ -9,6 +10,7 @@ import { createHash, randomBytes } from "node:crypto";
 import { access, chmod, mkdir, readdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import { promisify, isDeepStrictEqual, parseArgs } from "node:util";
+import { claudeNames, gitKnownHosts, locations, provision, scripted, secretNames, stores, system, terminal, type FollowUp } from "./credentials.ts";
 
 const exec = promisify(execFile);
 
@@ -16,9 +18,9 @@ export const paths = {
   control: "/etc/nexus/control.json",
   probe: "/etc/nexus/probe.json",
   deployer: "/etc/nexus/deployer.json",
-  secrets: "/etc/nexus/secrets.env",
-  gitKey: "/etc/nexus/git_ed25519",
-  gitKnownHosts: "/etc/nexus/git_known_hosts",
+  secrets: stores.claude.file,
+  gitKey: stores.gitKey.file,
+  gitKnownHosts,
   artifacts: "/var/lib/nexus/artifacts",
 } as const;
 
@@ -53,6 +55,9 @@ export interface Flags {
   addNode: readonly string[];
   peer: readonly string[];
   dotfiles?: string;
+  nonInteractive: boolean;
+  /** Names the control plane's GitHub token file as github.tokenFile, which the credentials step wrote. */
+  githubWatch: boolean;
 }
 
 export function parseFlags(args: readonly string[]): { command: string | undefined; flags: Flags } {
@@ -65,10 +70,12 @@ export function parseFlags(args: readonly string[]): { command: string | undefin
       "add-node": { type: "string", multiple: true, default: [] },
       peer: { type: "string", multiple: true, default: [] },
       dotfiles: { type: "string" },
+      "non-interactive": { type: "boolean", default: false },
+      "github-watch": { type: "boolean", default: false },
     },
   });
   const flags: Flags = {
-    admit: values.admit, addNode: values["add-node"], peer: values.peer,
+    admit: values.admit, addNode: values["add-node"], peer: values.peer, nonInteractive: values["non-interactive"], githubWatch: values["github-watch"],
     ...values.node === undefined ? {} : { node: values.node },
     ...values.dotfiles === undefined ? {} : { dotfiles: values.dotfiles },
   };
@@ -78,7 +85,7 @@ export function parseFlags(args: readonly string[]): { command: string | undefin
 function resolve(tailnet: Tailnet, flag: string, name: string, errors: string[]): Device | undefined {
   const all = [tailnet.self, ...tailnet.peers];
   const wanted = name.toLowerCase();
-  const matches = all.filter((d) => d.name === wanted || d.host === wanted);
+  const matches = all.filter((d) => d.name === wanted || d.host === wanted || d.id === name);
   if (matches.length === 1) return matches[0];
   if (matches.length === 0) errors.push(`${flag} ${name}: tailscale knows no such device. It knows ${all.map((d) => d.name).sort().join(", ")}`);
   else errors.push(`${flag} ${name}: more than one device has that name: ${matches.map((d) => d.host).join(", ")}. Give the full MagicDNS name`);
@@ -172,6 +179,7 @@ export function setup(tailnet: Tailnet, flags: Flags, existing: Existing, newTok
     if (flags.admit.length > 0) errors.push("--admit is for the control machine. Run it there, without --node");
     if (flags.addNode.length > 0) errors.push("--add-node is for the control machine. Run it there, without --node");
     if (flags.dotfiles !== undefined) errors.push("--dotfiles is for the control machine. Run it there, without --node");
+    if (flags.githubWatch) errors.push("--github-watch is for the control machine. Run it there, without --node");
   }
 
   const addNodes = flags.addNode.flatMap((raw) => {
@@ -225,9 +233,10 @@ export function setup(tailnet: Tailnet, flags: Flags, existing: Existing, newTok
       deployers: admitted.map((d) => d.id),
       deployKeys: Object.fromEntries([[self.id, tokenDigest(token)], ...addNodes.map((a) => [a.node.id, a.digest])]),
       ...flags.dotfiles === undefined ? {} : { dotfiles: { repo: flags.dotfiles, ref: "main" } },
+      ...flags.githubWatch ? { github: { tokenFile: stores.githubWatch.file } } : {},
       harness: {
         storage: "/var/lib/nexus-control/harness.sqlite",
-        credentials: "/var/lib/nexus-control/harness-credentials.json",
+        credentials: stores.harness.file,
         model: { provider: "openai", modelId: "gpt-6-astra" },
       },
     };
@@ -289,7 +298,7 @@ export type Facts = {
   secretNames: readonly string[];
   gitKey: boolean;
 } & (
-  | { role: "control"; port: number; signedIn: boolean; admitted: boolean; docker: Docker; dockerGroup: boolean; image: boolean }
+  | { role: "control"; signedIn: boolean; admitted: boolean; docker: Docker; dockerGroup: boolean; image: boolean }
   | { role: "node"; control: Device; digest: string }
 );
 
@@ -297,23 +306,12 @@ export type Facts = {
 const stages = ["setup", "credentials", "image"] as const;
 export interface Item { stage: (typeof stages)[number]; say: string; run: readonly string[] }
 
-const addSecret = (name: string, value: string) =>
-  `echo '${name}=${value}' | sudo tee -a ${paths.secrets} >/dev/null && sudo systemctl restart nexus-probe`;
-
 /** What the person still has to do on this machine and elsewhere, in the order to do it. */
 export function left(facts: Facts): Item[] {
   const items: Item[] = [];
   const { self } = facts;
-  const control = facts.role === "control" ? { name: self.name, url: `http://${self.host}:${facts.port}` } : { name: facts.control.name, url: `http://${facts.control.host}:${controlPort}` };
+  const control = facts.role === "control" ? self : facts.control;
   const rerun = facts.role === "control" ? "sudo deploy/install.sh" : `sudo deploy/install.sh --node ${control.name}`;
-  if (facts.role === "control" && !facts.signedIn) items.push({
-    stage: "credentials",
-    say: "Sign the harness in with ChatGPT, then start the control plane. The browser's last step goes to port 1455 on this machine, so when that page fails to load, paste the address it ended on.",
-    run: [
-      `sudo -u nexus-control env PATH=/usr/local/bin:/usr/bin node /opt/nexus/control-current/src/control/login.ts ${paths.control}`,
-      "sudo systemctl start nexus-control",
-    ],
-  });
   if (facts.role === "control" && !facts.admitted) items.push({
     stage: "setup",
     say: "Admit your Mac, so its nexus CLI may call the control plane.",
@@ -330,32 +328,19 @@ export function left(facts: Facts): Item[] {
   });
   items.push({
     stage: "setup",
-    say: `Set up the nexus CLI on your Mac, in a nexus checkout with Node 26, before the steps below that run nexus there. ~/.local/bin must be on the Mac's PATH. When the Mac runs the Tailscale app rather than a SOCKS proxy on localhost:1055, add "socks": "none" to cli.json.`,
-    run: [
-      `npm ci && mkdir -p ~/.local/bin && ln -sf "$PWD/deploy/mac/nexus" ~/.local/bin/nexus`,
-      `mkdir -p ~/.config/nexus && printf '{"url":"${control.url}"}\\n' > ~/.config/nexus/cli.json`,
-      `nexus --version`,
-    ],
+    say: `Set up the nexus CLI on your Mac, in a nexus checkout with Node 26, before the steps below that run nexus there. When the Mac reaches the tailnet through a SOCKS proxy rather than the Tailscale app, add --socks localhost:1055 to nexus connect.`,
+    run: ["deploy/mac/install", `nexus connect ${control.host}`],
   });
-  if (!facts.secretNames.includes("CLAUDE_CODE_OAUTH_TOKEN")) items.push({
+  const missing = [
+    ...facts.role === "control" && !facts.signedIn ? ["the harness's login, with ChatGPT or an OpenAI API key, which the control plane needs before it starts"] : [],
+    ...!claudeNames.some((name) => facts.secretNames.includes(name)) ? ["a Claude token, which `claude setup-token` prints wherever Claude Code runs with a browser, or an Anthropic API key"] : [],
+    ...!facts.secretNames.includes("GH_TOKEN") ? ["a GitHub token, fine-grained for all repositories with Administration and Contents read and write"] : [],
+    ...!facts.gitKey ? ["a git SSH key, which the installer makes here"] : [],
+  ];
+  if (missing.length > 0) items.push({
     stage: "credentials",
-    say: "Give pylons a Claude login: run the first command wherever Claude Code is installed and you can open a browser, then the second here with the token it printed.",
-    run: ["claude setup-token", addSecret("CLAUDE_CODE_OAUTH_TOKEN", "<token>")],
-  });
-  if (!facts.secretNames.includes("GH_TOKEN")) items.push({
-    stage: "credentials",
-    say: "Give pylons GitHub access: make a fine-grained token for all repositories with Administration and Contents read and write, then run this here.",
-    run: [addSecret("GH_TOKEN", "<token>")],
-  });
-  if (!facts.gitKey) items.push({
-    stage: "credentials",
-    say: `Give pylons an SSH key for git: make it, trust github.com, add the public key the third command prints to GitHub, then rerun the installer, which adds gitSsh to probe.json.`,
-    run: [
-      `sudo ssh-keygen -t ed25519 -N '' -C nexus@${self.name} -f ${paths.gitKey} && sudo chown nexus:nexus ${paths.gitKey} && sudo chmod 0400 ${paths.gitKey}`,
-      `ssh-keyscan github.com | sudo tee ${paths.gitKnownHosts} >/dev/null`,
-      `cat ${paths.gitKey}.pub`,
-      rerun,
-    ],
+    say: `Rerun the installer in a terminal, which asks for what the agents still lack: ${missing.join("; ")}.`,
+    run: [rerun],
   });
   if (facts.role === "control" && facts.docker.kind === "missing") items.push({
     stage: "setup",
@@ -464,11 +449,9 @@ async function dockerSource(): Promise<Docker> {
 
 async function gather(flags: Flags): Promise<Facts> {
   const net = await tailnet();
-  const secretNames = await readFile(paths.secrets, "utf8").then(
-    (text) => text.split(/\r?\n/).flatMap((line) => /^([A-Za-z_][A-Za-z0-9_]*)=/.exec(line)?.[1] ?? []),
-    () => [],
-  );
-  const common = { self: net.self, secretNames, gitKey: await exists(paths.gitKey) };
+  const at = await locations(system);
+  const names = await readFile(at.secrets, "utf8").then(secretNames, () => []);
+  const common = { self: net.self, secretNames: names, gitKey: await exists(at.gitKey) };
   const deployer = JSON.parse(await readFile(paths.deployer, "utf8")) as { token: string };
   if (flags.node !== undefined) {
     const errors: string[] = [];
@@ -476,7 +459,7 @@ async function gather(flags: Flags): Promise<Facts> {
     if (control === undefined) throw new Error(errors.join("; "));
     return { ...common, role: "node", control, digest: tokenDigest(deployer.token) };
   }
-  const config = JSON.parse(await readFile(paths.control, "utf8")) as { listen: { port: number }; callers: string[]; harness: { credentials: string } };
+  const config = JSON.parse(await readFile(paths.control, "utf8")) as { callers: string[]; harness: { credentials: string } };
   const credentials = await readFile(config.harness.credentials, "utf8").then(
     (text) => Object.keys((JSON.parse(text) as { credentials?: object }).credentials ?? {}).length > 0,
     () => false,
@@ -486,7 +469,7 @@ async function gather(flags: Flags): Promise<Facts> {
   const docker: Docker = !await succeeds(["--version"]) ? { kind: "missing" } : await succeeds(["buildx", "version"]) ? { kind: "ready" } : await dockerSource();
   const image = await readdir(paths.artifacts).then((entries) => entries.some((e) => e.startsWith("img-")), () => false);
   return {
-    ...common, role: "control", port: config.listen.port, signedIn: credentials,
+    ...common, role: "control", signedIn: credentials,
     admitted: config.callers.length > 0, docker, dockerGroup: groups.includes("docker"), image,
   };
 }
@@ -494,11 +477,22 @@ async function gather(flags: Flags): Promise<Facts> {
 async function main(args: readonly string[]): Promise<number> {
   const { command, flags } = parseFlags(args);
   if (command === "write") return await write(flags);
+  if (command === "credentials") {
+    if (!flags.nonInteractive && !process.stdin.isTTY) console.error("No terminal, so the credentials come from NEXUS_* variables, as deploy/README.md describes, and the rest are skipped.");
+    const answers = flags.nonInteractive || !process.stdin.isTTY ? scripted(process.env) : terminal();
+    const next = new Set<FollowUp>();
+    try {
+      await provision(flags.node === undefined ? "control" : "node", system, answers, (line) => console.error(line), next);
+    } finally {
+      for (const step of next) console.log(step);
+    }
+    return 0;
+  }
   if (command === "left") {
     console.log(formatLeft(left(await gather(flags))));
     return 0;
   }
-  console.error("usage: node src/deploy/setup.ts write|left [--node <control device>] [--admit <device>]... [--add-node <device>=<digest>]... [--peer <device>]... [--dotfiles <git url>]");
+  console.error("usage: node src/deploy/setup.ts write|credentials|left [--node <control device>] [--admit <device>]... [--add-node <device>=<digest>]... [--peer <device>]... [--dotfiles <git url>] [--non-interactive] [--github-watch]");
   return 1;
 }
 

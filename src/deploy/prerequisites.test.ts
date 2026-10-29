@@ -161,34 +161,73 @@ main --admit macbook`);
   assert.doesNotMatch(run.stderr, /^(node|bash) /m);
 });
 
-test("a complete machine writes the configs, then runs each role's installer, then says what is left", async () => {
-  const run = await bash(`. "$1/deploy/install.sh"; ${stubs(complete)}
-node() { echo "node \${*//$repo/.}"; }
-bash() { echo "bash \${*//$repo/.}"; }
+/** Stand-ins for what main runs, each saying on stderr what it ran. `setup.ts credentials` prints `next`, the installer's next steps. */
+function steps(next: readonly string[] = []): string {
+  return `
+node() { echo "node \${*//$repo/.}" >&2; [ "$2" != credentials ] || printf '%s\\n' ${next.join(" ")}; }
+bash() { echo "bash \${*//$repo/.}" >&2; }
+systemctl() { echo "systemctl $*" >&2; }
 install() { :; }
-flock() { echo "flock $1 \${2//$prefix/<prefix>}"; shift 2; "$@"; }
+flock() { echo "flock $1 \${2//$prefix/<prefix>}" >&2; shift 2; "$@"; }
+`;
+}
+const ran = (stderr: string) => stderr.trim().split("\n");
+
+test("a complete machine writes the configs, runs each role's installer, gives the agents their credentials, then says what is left", async () => {
+  const run = await bash(`. "$1/deploy/install.sh"; ${stubs(complete)} ${steps()}
 main --admit macbook --dotfiles https://github.com/example/dotfiles.git`);
   assert.equal(run.code, 0, run.stderr);
   const args = "--admit macbook --dotfiles https://github.com/example/dotfiles.git";
-  assert.deepEqual(run.stdout.trim().split("\n").filter((line) => line !== ""), [
+  assert.deepEqual(ran(run.stderr), [
     "flock -x <prefix>/deployer/lock",
     `node ./src/deploy/setup.ts write ${args}`,
     "bash ./deploy/install-control.sh",
     "bash ./deploy/install-probe.sh",
     "bash ./deploy/install-deployer.sh control probe",
+    `node ./src/deploy/setup.ts credentials ${args}`,
     `node ./src/deploy/setup.ts left ${args}`,
   ]);
-  const node = await bash(`. "$1/deploy/install.sh"; ${stubs(complete)}
-node() { echo "node \${*//$repo/.}"; }
-bash() { echo "bash \${*//$repo/.}"; }
-install() { :; }
-flock() { echo "flock $1 \${2//$prefix/<prefix>}"; shift 2; "$@"; }
-main --node firebat`);
-  assert.deepEqual(node.stdout.trim().split("\n").filter((line) => line !== ""), [
+  const node = await bash(`. "$1/deploy/install.sh"; ${stubs(complete)} ${steps()}
+main --node firebat --non-interactive`);
+  assert.equal(node.code, 0, node.stderr);
+  assert.deepEqual(ran(node.stderr), [
     "flock -x <prefix>/deployer/lock",
-    "node ./src/deploy/setup.ts write --node firebat",
+    "node ./src/deploy/setup.ts write --node firebat --non-interactive",
     "bash ./deploy/install-probe.sh",
     "bash ./deploy/install-deployer.sh probe",
-    "node ./src/deploy/setup.ts left --node firebat",
+    "node ./src/deploy/setup.ts credentials --node firebat --non-interactive",
+    "node ./src/deploy/setup.ts left --node firebat --non-interactive",
   ]);
+});
+
+test("after the credentials, a new git key rewrites the configs and reinstalls the probe, a new secret restarts the probe if it runs, and a signed-in harness installs the control plane again", async () => {
+  const after = async (next: readonly string[]) => {
+    const run = await bash(`. "$1/deploy/install.sh"; ${stubs(complete)} ${steps(next)}
+main --dotfiles https://github.com/example/dotfiles.git`);
+    assert.equal(run.code, 0, run.stderr);
+    const lines = ran(run.stderr);
+    return lines.slice(lines.findIndex((line) => line.includes("setup.ts credentials")) + 1, -1);
+  };
+  const args = "--dotfiles https://github.com/example/dotfiles.git";
+  assert.deepEqual(await after(["config", "probe", "control"]), [
+    "flock -x <prefix>/deployer/lock", `node ./src/deploy/setup.ts write ${args}`, "bash ./deploy/install-probe.sh", "bash ./deploy/install-control.sh",
+  ]);
+  assert.deepEqual(await after(["watch", "probe", "control"]), [
+    "flock -x <prefix>/deployer/lock", `node ./src/deploy/setup.ts write ${args} --github-watch`, "systemctl try-restart nexus-probe.service", "bash ./deploy/install-control.sh",
+  ], "control.json gains github.tokenFile under the deployer's lock, from the file as it is then");
+  assert.deepEqual(await after(["config", "watch"]), [
+    "flock -x <prefix>/deployer/lock", `node ./src/deploy/setup.ts write ${args} --github-watch`, "bash ./deploy/install-probe.sh",
+  ], "one config write does both");
+  assert.deepEqual(await after(["probe"]), ["systemctl try-restart nexus-probe.service"]);
+  assert.deepEqual(await after([]), [], "a run that changed no credential restarts nothing");
+});
+
+test("a failed credentials step still restarts what its writes need, then stops before it says what is left", async () => {
+  const run = await bash(`. "$1/deploy/install.sh"; ${stubs(complete)} ${steps()}
+node() { echo "node \${*//$repo/.}" >&2; [ "$2" != credentials ] || { echo probe; return 1; }; }
+main --node firebat`);
+  assert.notEqual(run.code, 0);
+  assert.ok(ran(run.stderr).includes("systemctl try-restart nexus-probe.service"), run.stderr);
+  assert.match(run.stderr, /the credentials step failed/);
+  assert.doesNotMatch(run.stderr, /setup\.ts left/);
 });

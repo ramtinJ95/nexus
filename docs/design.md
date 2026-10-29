@@ -170,6 +170,7 @@ A persistent drain lease blocks API and background PR-watch turn entry, and coun
 
 | Date | Decision |
 |---|---|
+| 2026-10-29 | An install's agent credentials are shared by the whole install by default: one harness login, and one Claude token, GitHub token and git key per node, which the installer asks for on each machine and keeps where Nexus kept them by hand. Per-person credentials may come later as an option, without migrating a shared install, as [the install exploration](explorations/install.md#per-person-credentials) describes. A node asks for its own credentials and copies none from the control plane's machine, for now. Nexus does not become multi-user yet |
 | 2026-10-28 | Nexus's next focus is the install wave: another person or a company installs Nexus on their own machines and runs remote threads fast, with the agents' credentials easy to set up, as [the install exploration](explorations/install.md) describes. The person's own install keeps working as it does and needs no migration. Maintenance comes in a later wave |
 | 2026-10-28 | A reset machine with an encrypted root unlocks over SSH at boot, from an SSH server in the initramfs. `infra-testbench`'s root is LUKS with no automatic unlock, inferred from its initramfs and kernel command line rather than a boot, so a reboot waits for its passphrase until then |
 | 2026-10-28 | Backups of the control plane stay on the control-plane host only |

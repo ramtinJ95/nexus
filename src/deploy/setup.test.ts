@@ -213,6 +213,23 @@ test("control-only flags and this machine as --node are refused for a node insta
   assert.match(found.join("\n"), /--dotfiles is for the control machine/);
 });
 
+test("--admit takes the tailnet node ID that nexus connect prints, as well as a name", () => {
+  const written = files(run(["--admit", "nMac1CNTRL", "--dotfiles", dotfiles]));
+  assert.deepEqual(parseConfig(JSON.stringify(value(written, paths.control))).callers, ["nMac1CNTRL"]);
+});
+
+test("--github-watch names the control plane's token file in the control.json on disk, keeps whatever else is there, and never replaces one it names", () => {
+  const first = onDisk(files(run(["--dotfiles", dotfiles])));
+  const admitted = { ...first, control: { ...(first.control as Record<string, Json>), callers: ["nMac1CNTRL"] } };
+  const written = files(run(["--github-watch"], admitted));
+  const control = parseConfig(JSON.stringify(value(written, paths.control)));
+  assert.deepEqual(control.github, { tokenFile: "/etc/nexus/github-token" });
+  assert.deepEqual(control.callers, ["nMac1CNTRL"], "a caller another run admitted meanwhile stays");
+  const named = { ...first, control: { ...(first.control as Record<string, Json>), github: { tokenFile: "/srv/token" } } };
+  assert.deepEqual(value(files(run(["--github-watch"], named)), paths.control).github, { tokenFile: "/srv/token" });
+  assert.match(errors(run(["--node", "rj-firebat", "--github-watch"])).join("\n"), /--github-watch is for the control machine/);
+});
+
 test("a name two devices share is ambiguous, and the full MagicDNS name picks one", () => {
   const shared = parseTailnet(JSON.stringify({
     ...JSON.parse(status),
@@ -225,33 +242,35 @@ test("a name two devices share is ambiguous, and the full MagicDNS name picks on
 
 const freshControl: Facts = {
   self: tailnet.self, secretNames: [], gitKey: false,
-  role: "control", port: 7470, signedIn: false, admitted: false, docker: { kind: "missing" }, dockerGroup: false, image: false,
+  role: "control", signedIn: false, admitted: false, docker: { kind: "missing" }, dockerGroup: false, image: false,
 };
 
 test("a fresh control machine is left every step: setup, then the agents' credentials, then the first image", () => {
   const items = left(freshControl);
   const runs = items.map((item) => item.run);
-  assert.equal(runs.length, 9);
-  assert.deepEqual(items.map((item) => item.stage), ["setup", "setup", "setup", "setup", "credentials", "credentials", "credentials", "credentials", "image"]);
-  const login = items.find((item) => item.run.some((command) => command.includes("control/login.ts")))!;
-  assert.equal(login.stage, "credentials");
-  assert.deepEqual(login.run.slice(-1), ["sudo systemctl start nexus-control"]);
-  assert.deepEqual(items.filter((item) => item.stage === "credentials").map((item) => item.say.split(/[:,.]/)[0]), [
-    "Sign the harness in with ChatGPT", "Give pylons a Claude login", "Give pylons GitHub access", "Give pylons an SSH key for git",
-  ]);
+  assert.deepEqual(items.map((item) => item.stage), ["setup", "setup", "setup", "setup", "credentials", "image"]);
+  const credentials = items.find((item) => item.stage === "credentials")!;
+  assert.deepEqual(credentials.run, ["sudo deploy/install.sh"]);
+  for (const missing of [/the harness's login, with ChatGPT or an OpenAI API key/, /a Claude token, which `claude setup-token` prints/, /a GitHub token, fine-grained for all repositories with Administration and Contents read and write/, /a git SSH key/]) {
+    assert.match(credentials.say, missing);
+  }
   const all = runs.flat().join("\n");
   assert.match(all, /--admit <your Mac's tailnet name>/);
-  assert.match(all, /^claude setup-token$/m);
-  assert.match(all, /echo 'CLAUDE_CODE_OAUTH_TOKEN=<token>' \| sudo tee -a \/etc\/nexus\/secrets\.env/);
-  assert.match(all, /echo 'GH_TOKEN=<token>'/);
-  assert.match(all, /ssh-keygen -t ed25519 -N '' -C nexus@rj-firebat -f \/etc\/nexus\/git_ed25519/);
+  assert.doesNotMatch(all, /secrets\.env|ssh-keygen|login\.ts/, "nothing left is a credential file to edit by hand");
   assert.match(all, /usermod --append --groups docker nexus/);
   assert.match(all, /nexus image rollout <image ID it printed> --wait/);
-  const cli = runs.findIndex((run) => run.some((command) => command.includes("~/.config/nexus/cli.json")));
-  assert.match(runs[cli]!.join("\n"), /printf '\{"url":"http:\/\/rj-firebat\.tail1234\.ts\.net:7470"\}\\n' > ~\/\.config\/nexus\/cli\.json/);
-  assert.match(runs[cli]![0]!, /mkdir -p ~\/\.local\/bin && ln -sf/, "the bin directory is made before the link");
+  const cli = runs.findIndex((run) => run.includes("deploy/mac/install"));
+  assert.deepEqual(runs[cli], ["deploy/mac/install", "nexus connect rj-firebat.tail1234.ts.net"]);
   assert.ok(runs.every((run, i) => i > cli || !run.some((command) => command.startsWith("nexus image"))), "no nexus command before the CLI is set up");
   assert.ok(runs.findIndex((run) => run.some((command) => command.startsWith("nexus image"))) > cli);
+});
+
+test("the credentials item names only what is missing, and an Anthropic API key counts as the Claude token", () => {
+  const say = (facts: Partial<Facts>) => left({ ...freshControl, ...facts } as Facts).find((item) => item.stage === "credentials")?.say ?? "";
+  const partly = say({ signedIn: true, secretNames: ["ANTHROPIC_API_KEY"], gitKey: true });
+  assert.match(partly, /a GitHub token/);
+  assert.doesNotMatch(partly, /harness|Claude|SSH/);
+  assert.equal(say({ signedIn: true, secretNames: ["ANTHROPIC_API_KEY", "GH_TOKEN"], gitKey: true }), "");
 });
 
 test("a host without Docker is told to install Docker with buildx and start it, before joining its group", () => {
@@ -285,15 +304,15 @@ test("a Docker without buildx is told the buildx package of its own package mana
 test("the credentials are printed under their own heading as the next step, and the image after them", () => {
   const text = formatLeft(left(freshControl));
   assert.match(text, /^What is left:\n1\. /);
-  assert.match(text, /\n\nNext, give the agents their credentials, on this machine:\n5\. Sign the harness in with ChatGPT/);
-  assert.match(text, /\n\nThen, with the control plane running:\n9\. Build the first pylon image/);
+  assert.match(text, /\n\nNext, give the agents their credentials, on this machine:\n5\. Rerun the installer in a terminal/);
+  assert.match(text, /\n\nThen, with the control plane running:\n6\. Build the first pylon image/);
   assert.doesNotMatch(formatLeft(left({ ...freshControl, secretNames: ["CLAUDE_CODE_OAUTH_TOKEN", "GH_TOKEN"], gitKey: true, signedIn: true })), /credentials/);
 });
 
 test("a finished control machine is left only the Mac CLI", () => {
   const items = left({ ...freshControl, secretNames: ["CLAUDE_CODE_OAUTH_TOKEN", "GH_TOKEN"], gitKey: true, signedIn: true, admitted: true, docker: { kind: "ready" }, dockerGroup: true, image: true });
   assert.equal(items.length, 1);
-  assert.match(items[0]!.run.join("\n"), /mkdir -p ~\/\.local\/bin && ln -sf "\$PWD\/deploy\/mac\/nexus" ~\/\.local\/bin\/nexus/);
+  assert.deepEqual(items[0]!.run, ["deploy/mac/install", "nexus connect rj-firebat.tail1234.ts.net"]);
 });
 
 test("a node is told how to register itself with the control plane and its peers", () => {
@@ -303,7 +322,7 @@ test("a node is told how to register itself with the control plane and its peers
   assert.match(all, new RegExp(`^sudo deploy/install\\.sh --add-node rj-firebat=${"e".repeat(64)}$`, "m"));
   assert.match(all, /^sudo deploy\/install\.sh --node infra-testbench --peer rj-firebat$/m);
   assert.match(all, /^sudo deploy\/install\.sh --node infra-testbench --peer <other node> --peer <another node>$/m, "this node admits the other nodes too");
-  assert.match(all, /^sudo deploy\/install\.sh --node infra-testbench$/m, "the git key step reruns the node install");
-  assert.match(all, /"url":"http:\/\/infra-testbench\.tail1234\.ts\.net:7470"/);
+  assert.match(all, /^sudo deploy\/install\.sh --node infra-testbench$/m, "the git key is made by a rerun of the node install");
+  assert.match(all, /^nexus connect infra-testbench\.tail1234\.ts\.net$/m, "the Mac connects to the control plane, not to this node");
   assert.equal(formatLeft(items).split("\n")[0], "What is left:");
 });

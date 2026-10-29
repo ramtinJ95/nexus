@@ -43,9 +43,40 @@ Then `src/deploy/setup.ts` writes the configs from `tailscale status --json`:
 | `/etc/nexus/probe.json` | This machine's name and tailnet IP, the control plane's node ID as `auth.controlPlane`, and previews on gateway port 7481. `gitSsh` is added once `/etc/nexus/git_ed25519` exists. |
 | `/etc/nexus/deployer.json` | The deployer's control plane URL and node ID, and its token. Root, mode 0600. Only the token's SHA-256 digest leaves this file. |
 
-Then it installs the release and the units with `deploy/install-control.sh`, `deploy/install-probe.sh` and `deploy/install-deployer.sh`, and starts the probe and the deployer's timer. The control plane refuses to start before its harness is signed in, so on a first install its unit is left stopped.
+Then it installs the release and the units with `deploy/install-control.sh`, `deploy/install-probe.sh` and `deploy/install-deployer.sh`, and starts the probe and the deployer's timer. The control plane refuses to start before its harness is signed in, so on a first install its unit is left stopped until the next step signs it in.
 
-The installer ends with what is left and the command for each, in the order to do them. First come the rest of the setup: admitting your Mac or registering the node, the `nexus` CLI on the Mac, and Docker with buildx for image builds and the probe's access to it. Next come the agents' credentials, which the installer does not set up: the harness's ChatGPT login, which the control plane needs before it starts, the Claude token and the GitHub token in `secrets.env`, and a git SSH key. You set these up on the machine, over SSH. Last comes the first image, which needs the control plane running. A rerun lists only what is still missing.
+### The agents' credentials
+
+Next the installer asks for each credential the machine lacks, over SSH, and keeps it where Nexus keeps it. One credential of each kind serves every thread of the install. Every prompt can be skipped, and a rerun asks again for what is still missing.
+
+| Credential | What the installer asks | Where it goes |
+| --- | --- | --- |
+| The harness's login, on the control plane's machine | Sign in with ChatGPT, an OpenAI API key, or skip. ChatGPT runs `src/control/login.ts` as `nexus-control`, as [Sign the harness in](#sign-the-harness-in) describes | `harness.credentials` in `control.json`, `/var/lib/nexus-control/harness-credentials.json` by default, `nexus-control`, mode 0600 |
+| A Claude token, from `claude setup-token`, or an Anthropic API key | Pasted with the input hidden | `CLAUDE_CODE_OAUTH_TOKEN`, or `ANTHROPIC_API_KEY` for a key that starts `sk-ant-api`, in `/etc/nexus/secrets.env` |
+| A GitHub token, as [GitHub access](#github-access-for-a-projects-agents) describes | Pasted with the input hidden | `GH_TOKEN` in `/etc/nexus/secrets.env` |
+| The control plane's GitHub token, on its machine | Whether to give it the GitHub token in `secrets.env`, for the [PR watch](#control-plane-github-pr-watch) and the review loop, on every run while `control.json` names no `github.tokenFile` | `/etc/nexus/github-token`, `root:nexus-control`, mode 0640, then named as `github.tokenFile` in `control.json` under the deployer's lock |
+| A git SSH key | Whether to make one | `/etc/nexus/git_ed25519`, made on the machine, as [Clone over SSH](#clone-over-ssh) describes |
+
+Each further machine, installed with `--node`, asks for its own Claude token, GitHub token and git key, and copies nothing from the control plane's machine. A credential that is already in place is left as it is: the installer never asks for it, never rewrites or moves it, and never changes its mode or owner, and it says what it left alone. Where `control.json` names its own `harness.credentials` or `github.tokenFile`, or `probe.json` its own `secretsFile` or `gitSsh` key, the installer looks there rather than at the paths above. A failed ChatGPT login offers the choice again. Then it restarts the probe if it runs and `secrets.env` changed, installs the probe again with `gitSsh` once it made a git key, and installs the control plane again once the harness is signed in, which starts it.
+
+Without a terminal, or with `--non-interactive`, the installer never prompts. It reads each answer from a variable, or from the file that the variable's name with `_FILE` appended names, and skips what is not given. A value that is not a token fails the run.
+
+| Variable | Answer |
+| --- | --- |
+| `NEXUS_HARNESS_LOGIN` | `api-key`, the default without a terminal, or `skip`. Sign in with ChatGPT needs a person in a terminal |
+| `NEXUS_OPENAI_API_KEY` | The harness's OpenAI API key |
+| `NEXUS_CLAUDE_TOKEN` | The Claude token or Anthropic API key |
+| `NEXUS_GH_TOKEN` | The GitHub token |
+| `NEXUS_GITHUB_WATCH` | `yes` or `no`. The default is `yes` for a GitHub token the run was given, and `no` for one already in `secrets.env` |
+| `NEXUS_GIT_KEY` | `yes`, the default, or `no` |
+
+```sh
+sudo env NEXUS_CLAUDE_TOKEN_FILE=/root/claude-token NEXUS_GH_TOKEN_FILE=/root/gh-token deploy/install.sh --node <control> --non-interactive
+```
+
+The deployer never runs this step. `nexus deploy` runs only the role installers, in preparation mode, which read no input and leave every credential alone.
+
+The installer ends with what is left and the command for each, in the order to do them. First come the rest of the setup: admitting your Mac or registering the node, the `nexus` CLI on the Mac with `deploy/mac/install` and `nexus connect`, and Docker with buildx for image builds and the probe's access to it. Next comes a rerun for any credential that was skipped. Last comes the first image, which needs the control plane running. A rerun lists only what is still missing.
 
 ### Rerun to upgrade, admit or recover
 
@@ -176,7 +207,7 @@ This does not make arbitrary merged root code safe: merged release code and npm 
 
 ## The probe
 
-`deploy/install.sh` writes `/etc/nexus/probe.json`, and installs `/etc/nexus/secrets.env` from `secrets.example.env` on the first run. Later runs never overwrite secrets.env. Restart the probe yourself after you edit it: `sudo systemctl restart nexus-probe`.
+`deploy/install.sh` writes `/etc/nexus/probe.json`, and installs `/etc/nexus/secrets.env` from `secrets.example.env` on the first run. Later runs never overwrite secrets.env or change its owner or mode. Restart the probe yourself after you edit it: `sudo systemctl restart nexus-probe`.
 
 The probe runs as the system user `nexus`. These are its paths:
 
@@ -191,7 +222,7 @@ The probe runs as the system user `nexus`. These are its paths:
 
 ### GitHub access for a project's agents
 
-A project that grants `GH_TOKEN` to `api.github.com` and `github.com`, as `nexus project add --secret GH_TOKEN:api.github.com,github.com` and the dashboard's GitHub access do, lets its agents create GitHub repositories with `gh` and push to them over HTTPS. This is how a scratch project's work is kept. Add the token to `/etc/nexus/secrets.env` on every node that runs the project's threads, and restart the probe:
+A project that grants `GH_TOKEN` to `api.github.com` and `github.com`, as `nexus project add --secret GH_TOKEN:api.github.com,github.com` and the dashboard's GitHub access do, lets its agents create GitHub repositories with `gh` and push to them over HTTPS. This is how a scratch project's work is kept. The installer asks for the token on every machine. To add it by hand on a node that runs the project's threads, append it to `/etc/nexus/secrets.env` and restart the probe:
 
 ```sh
 echo 'GH_TOKEN=github_pat_...' | sudo tee -a /etc/nexus/secrets.env
@@ -216,7 +247,7 @@ With the block, the probe reads the node's MagicDNS name from `tailscale status 
 
 ### Clone over SSH
 
-To let pylons clone and push SSH remotes, give the node a git key and rerun the installer, which adds it to the backend in `probe.json`:
+To let pylons clone and push SSH remotes, give the node a git key. The installer offers to make one when `/etc/nexus/git_ed25519` is missing. It writes github.com's host keys to `/etc/nexus/git_known_hosts` only after checking each against [GitHub's published fingerprints](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/githubs-ssh-key-fingerprints), makes the key, adds it to the backend in `probe.json`, and prints the public key with the address of GitHub's page for adding it, https://github.com/settings/ssh/new. By hand, the same is:
 
 ```sh
 sudo ssh-keygen -t ed25519 -N '' -C nexus@<node> -f /etc/nexus/git_ed25519
@@ -294,7 +325,7 @@ Probes and root deployers keep using `http://<control>:7470`. Tailnet transport 
 
 ### Sign the harness in
 
-The harness has its own ChatGPT login, kept apart from any interactive pi on the machine. A ChatGPT login reaches only the models ChatGPT offers through Codex, such as `gpt-6-astra`, so `harness.model` in `control.json` must name one of them. The control plane refuses to start with any other model, such as `gpt-5.5`, or before the harness is signed in, and its error in `journalctl -u nexus-control` lists the models the login offers. Only one process may hold the credentials file, so stop the control plane first:
+The installer offers this login when the harness has none, and starts the control plane once it succeeds. To sign in again by hand, use the commands below. The harness has its own ChatGPT login, kept apart from any interactive pi on the machine. A ChatGPT login reaches only the models ChatGPT offers through Codex, such as `gpt-6-astra`, so `harness.model` in `control.json` must name one of them. The control plane refuses to start with any other model, such as `gpt-5.5`, or before the harness is signed in, and its error in `journalctl -u nexus-control` lists the models the login offers. Only one process may hold the credentials file, so stop the control plane first:
 
 ```sh
 sudo systemctl stop nexus-control
@@ -302,7 +333,7 @@ sudo -u nexus-control env PATH=/usr/local/bin:/usr/bin node /opt/nexus/control-c
 sudo systemctl start nexus-control
 ```
 
-The login prints a URL to open in your browser. The browser's last step goes to port 1455 on `rj-firebat`, so on your laptop that page fails to load. Paste the address it ended on into the prompt. Alternatively, forward the port first with `ssh -L 1455:127.0.0.1:1455 rj-firebat`.
+The login prints a URL to open in your browser. The browser's last step goes to port 1455 on `rj-firebat`, so on your laptop that page fails to load. Paste the address it ended on into the prompt. Alternatively, forward the port first with `ssh -L 1455:127.0.0.1:1455 rj-firebat`. pi-ai's Sign in with ChatGPT, which the harness uses, offers no device code, unlike its older Codex login.
 
 ### pi's ChatGPT login in pylons
 
@@ -413,7 +444,7 @@ A="http://$IP:7470/v1"
 
 This optional reader uses the approved classic GitHub token already held as `GH_TOKEN` on rj-firebat. It needs access to the project's private repositories, pull requests, checks, commit statuses and contents (the classic token's `repo` scope). The node's grant to agents is unchanged. Do not grant the control-plane user access to the whole node secrets file.
 
-Install a separate file containing **only the token**, not `GH_TOKEN=` or shell quotes, owned by `root:nexus-control` with mode 0640. For example, on the node, an administrator can copy the existing single-line value without displaying it or putting it in shell history:
+The installer offers to write the GitHub token it asks for to this file and to name it in `control.json`, when `control.json` names no token file yet. By hand, install a separate file containing **only the token**, not `GH_TOKEN=` or shell quotes, owned by `root:nexus-control` with mode 0640. For example, on the node, an administrator can copy the existing single-line value without displaying it or putting it in shell history:
 
 ```sh
 sudo install -o root -g nexus-control -m 0640 /dev/null /etc/nexus/github-token

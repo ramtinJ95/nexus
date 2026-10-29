@@ -15,7 +15,6 @@ repo="$(cd "$(dirname "$0")/.." && pwd)"
 # shellcheck source=deploy/release.sh
 . "$repo/deploy/release.sh"
 state=/var/lib/nexus-control
-etc=/etc/nexus
 
 [ "$(id -u)" = 0 ] || fail "run as root: sudo deploy/install.sh"
 
