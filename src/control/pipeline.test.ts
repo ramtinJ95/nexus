@@ -104,6 +104,8 @@ test("an item moves through every phase its records put it in, from planned to l
   assert.equal(phase(r, a), "landing: PR #9 is approved");
   f.review(ta, { kind: "merging", authorized: "h" }, laptop);
   assert.equal(phase(r, a), "landing: PR #9 is merging");
+  f.review(ta, { kind: "merging", authorized: null, waiting: "rv-other deploys" }, laptop);
+  assert.equal(phase(r, a), "landing: PR #9 is merging, waiting while rv-other deploys");
   f.review(ta, { kind: "deploying", commit: "c".repeat(40), previous: null, requested: true, deadline: 0 }, laptop);
   assert.equal(phase(r, a), "landing: PR #9 is deploying");
   f.review(ta, { kind: "landed", commit: "c".repeat(40) }, laptop);

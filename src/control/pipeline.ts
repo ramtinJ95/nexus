@@ -14,7 +14,7 @@ import { singleFlight } from "../single-flight.ts";
 import type { ProjectId } from "../project.ts";
 import { HttpError } from "./http-error.ts";
 import { queuedView, waitOf, type ThreadQueue } from "./queue.ts";
-import { liveNote } from "./review.ts";
+import { liveNote, phaseNote } from "./review.ts";
 import type { Registry, ThreadId } from "./registry.ts";
 import { checkStart, startKey, type StartRequest } from "./threads.ts";
 
@@ -101,7 +101,7 @@ function threadPhase(registry: Registry, id: ThreadId): ItemPhase {
     case "landed": return phase("landed", `${pr} merged as ${review.phase.commit.slice(0, 12)}`);
     case "merged": return phase("landed", `${pr} merged outside its review`);
     case "needs-person": return phase("held", `its review ended for the person: ${review.phase.reasons[0] ?? "no reason given"}`);
-    case "merging": case "deploying": case "rolling-back": return phase("landing", `${pr} is ${review.phase.kind.replace("-", " ")}`);
+    case "merging": case "deploying": case "rolling-back": return phase("landing", `${pr} is ${review.phase.kind.replace("-", " ")}${phaseNote(review)}`);
     case "approved": return review.land === null ? phase("held", `${pr} is approved, and lands once the person runs nexus land ${id}`) : phase("landing", `${pr} is approved`);
     case "reviewing": case "fixing": case "checking": return phase("reviewing", `${pr}, round ${review.rounds.length}: ${review.phase.kind}`);
     case "verifying": return phase("reviewing", `${pr}, round ${review.rounds.length}: ${liveNote(review)}`);
