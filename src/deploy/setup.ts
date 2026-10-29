@@ -1,9 +1,9 @@
 /**
- * Writes /etc/nexus/{control,probe,deployer}.json for `deploy/install.sh`, gives the agents their credentials
- * (src/deploy/credentials.ts) and says what is left for the person: `node src/deploy/setup.ts write|credentials|left
- * [--node <control device>] [--admit <device>]... [--add-node <device>=<digest>]... [--peer <device>]...
- * [--dotfiles <git url>] [--non-interactive] [--github-watch]`. It runs as root from a checkout before `npm ci`, so it imports only
- * Node's builtins.
+ * Writes /etc/nexus/{control,probe,deployer}.json for `deploy/install.sh`, joins a node to its control plane with a
+ * join token, gives the agents their credentials (src/deploy/credentials.ts) and says what is left for the person:
+ * `node src/deploy/setup.ts write|join|credentials|left [--node <control device>] [--join <token>] [--admit <device>]...
+ * [--add-node <device>=<digest>]... [--peer <device>]... [--dotfiles <git url>] [--non-interactive] [--github-watch]`.
+ * It runs as root from a checkout before `npm ci`, so it imports only Node's builtins.
  */
 import { execFile } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
@@ -11,6 +11,8 @@ import { access, chmod, mkdir, readdir, readFile, rename, rm, writeFile } from "
 import { dirname } from "node:path";
 import { promisify, isDeepStrictEqual, parseArgs } from "node:util";
 import { claudeNames, gitKnownHosts, locations, provision, scripted, secretNames, stores, system, terminal, type FollowUp } from "./credentials.ts";
+import { jsonRequest } from "./http.ts";
+import { localApiWhois, type Whois } from "../tailscale.ts";
 
 const exec = promisify(execFile);
 
@@ -51,6 +53,8 @@ export function parseTailnet(statusJson: string): Tailnet {
 
 export interface Flags {
   node?: string;
+  /** A join token minted on the control plane's machine, which registers this node there. */
+  join?: string;
   admit: readonly string[];
   addNode: readonly string[];
   peer: readonly string[];
@@ -66,6 +70,7 @@ export function parseFlags(args: readonly string[]): { command: string | undefin
     allowPositionals: true,
     options: {
       node: { type: "string" },
+      join: { type: "string" },
       admit: { type: "string", multiple: true, default: [] },
       "add-node": { type: "string", multiple: true, default: [] },
       peer: { type: "string", multiple: true, default: [] },
@@ -77,6 +82,7 @@ export function parseFlags(args: readonly string[]): { command: string | undefin
   const flags: Flags = {
     admit: values.admit, addNode: values["add-node"], peer: values.peer, nonInteractive: values["non-interactive"], githubWatch: values["github-watch"],
     ...values.node === undefined ? {} : { node: values.node },
+    ...values.join === undefined ? {} : { join: values.join },
     ...values.dotfiles === undefined ? {} : { dotfiles: values.dotfiles },
   };
   return { command: positionals[0], flags };
@@ -175,6 +181,7 @@ export function setup(tailnet: Tailnet, flags: Flags, existing: Existing, newTok
 
   const control = flags.node === undefined ? undefined : resolve(tailnet, "--node", flags.node, errors);
   if (control?.id === self.id) errors.push(`--node ${flags.node}: that is this machine. Leave out --node to install the control plane here`);
+  if (flags.join !== undefined && flags.node === undefined) errors.push("--join needs --node <the control plane's tailnet name>, as --join-token printed it");
   if (flags.node !== undefined) {
     if (flags.admit.length > 0) errors.push("--admit is for the control machine. Run it there, without --node");
     if (flags.addNode.length > 0) errors.push("--add-node is for the control machine. Run it there, without --node");
@@ -299,7 +306,8 @@ export type Facts = {
   gitKey: boolean;
 } & (
   | { role: "control"; signedIn: boolean; admitted: boolean; docker: Docker; dockerGroup: boolean; image: boolean }
-  | { role: "node"; control: Device; digest: string }
+  /** `joined` when this run joined the control plane with a token. */
+  | { role: "node"; control: Device; joined: boolean }
 );
 
 /** Credentials come after the setup steps, and the first image after both, since building one needs the control plane running. */
@@ -317,14 +325,10 @@ export function left(facts: Facts): Item[] {
     say: "Admit your Mac, so its nexus CLI may call the control plane.",
     run: ["sudo deploy/install.sh --admit <your Mac's tailnet name>"],
   });
-  if (facts.role === "node") items.push({
+  if (facts.role === "node" && !facts.joined) items.push({
     stage: "setup",
-    say: `Register this node: run the first command on ${control.name}, the second on each other probe-only node, and the third here, naming each of those nodes, since probes fetch images from each other.`,
-    run: [
-      `sudo deploy/install.sh --add-node ${self.name}=${facts.digest}`,
-      `sudo deploy/install.sh --node ${control.name} --peer ${self.name}`,
-      `sudo deploy/install.sh --node ${control.name} --peer <other node> --peer <another node>`,
-    ],
+    say: `Unless this node is registered already, mint a join token on ${control.name} with the first command, then run the command it prints here. It is like the second. The control plane follows this node from then on, and tells every other node about it.`,
+    run: ["sudo deploy/install.sh --join-token", `sudo deploy/install.sh --join <token> --node ${control.name}`],
   });
   items.push({
     stage: "setup",
@@ -452,12 +456,11 @@ async function gather(flags: Flags): Promise<Facts> {
   const at = await locations(system);
   const names = await readFile(at.secrets, "utf8").then(secretNames, () => []);
   const common = { self: net.self, secretNames: names, gitKey: await exists(at.gitKey) };
-  const deployer = JSON.parse(await readFile(paths.deployer, "utf8")) as { token: string };
   if (flags.node !== undefined) {
     const errors: string[] = [];
     const control = resolve(net, "--node", flags.node, errors);
     if (control === undefined) throw new Error(errors.join("; "));
-    return { ...common, role: "node", control, digest: tokenDigest(deployer.token) };
+    return { ...common, role: "node", control, joined: flags.join !== undefined };
   }
   const config = JSON.parse(await readFile(paths.control, "utf8")) as { callers: string[]; harness: { credentials: string } };
   const credentials = await readFile(config.harness.credentials, "utf8").then(
@@ -474,9 +477,29 @@ async function gather(flags: Flags): Promise<Facts> {
   };
 }
 
+/**
+ * Sends the join token and this node's deploy key digest to the control plane deployer.json names, once tailscaled says
+ * the endpoint is that tailnet node. The control plane records this node as its own whois of the caller says.
+ */
+export async function joinControlPlane(deployer: { controlUrl: string; controlNodeId: string; token: string }, token: string, whois: Whois): Promise<string> {
+  try {
+    const joined = await jsonRequest(new URL("v1/join", deployer.controlUrl), "POST", { token, deployKey: tokenDigest(deployer.token) }, null, { id: deployer.controlNodeId, whois }) as { node: string };
+    return joined.node;
+  } catch (err) {
+    const message = (err as Error).message;
+    const refusal = /^deployment API HTTP \d+: (\{"error":.*\})$/s.exec(message)?.[1];
+    throw new Error(`the control plane at ${deployer.controlUrl} did not take the join: ${refusal === undefined ? message : (JSON.parse(refusal) as { error: string }).error}`);
+  }
+}
+
 async function main(args: readonly string[]): Promise<number> {
   const { command, flags } = parseFlags(args);
   if (command === "write") return await write(flags);
+  if (command === "join" && flags.join !== undefined) {
+    const deployer = JSON.parse(await readFile(paths.deployer, "utf8")) as { controlUrl: string; controlNodeId: string; token: string };
+    console.log(`joined the control plane as node ${await joinControlPlane(deployer, flags.join, localApiWhois())}. It follows this node's probe from now on`);
+    return 0;
+  }
   if (command === "credentials") {
     if (!flags.nonInteractive && !process.stdin.isTTY) console.error("No terminal, so the credentials come from NEXUS_* variables, as deploy/README.md describes, and the rest are skipped.");
     const answers = flags.nonInteractive || !process.stdin.isTTY ? scripted(process.env) : terminal();
@@ -492,7 +515,7 @@ async function main(args: readonly string[]): Promise<number> {
     console.log(formatLeft(left(await gather(flags))));
     return 0;
   }
-  console.error("usage: node src/deploy/setup.ts write|credentials|left [--node <control device>] [--admit <device>]... [--add-node <device>=<digest>]... [--peer <device>]... [--dotfiles <git url>] [--non-interactive] [--github-watch]");
+  console.error("usage: node src/deploy/setup.ts write|join|credentials|left [--node <control device>] [--join <token>] [--admit <device>]... [--add-node <device>=<digest>]... [--peer <device>]... [--dotfiles <git url>] [--non-interactive] [--github-watch]");
   return 1;
 }
 

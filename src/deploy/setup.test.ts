@@ -200,6 +200,7 @@ test("every control-role mistake is reported together", () => {
 
 test("a first control install needs --dotfiles, and a node cannot become a control plane by accident", () => {
   assert.match(errors(run([])).join("\n"), /--dotfiles <git url> is needed/);
+  assert.match(errors(run(["--join", "token", "--dotfiles", dotfiles])).join("\n"), /--join needs --node <the control plane's tailnet name>/);
   const nodeProbe: Existing = { gitKey: false, probe: { auth: { controlPlane: "nBench1CNTRL", peers: [] } } };
   assert.match(errors(run(["--dotfiles", dotfiles], nodeProbe)).join("\n"), /already a node of the control plane infra-testbench\. Pass --node infra-testbench/);
 });
@@ -315,14 +316,16 @@ test("a finished control machine is left only the Mac CLI", () => {
   assert.deepEqual(items[0]!.run, ["deploy/mac/install", "nexus connect rj-firebat.tail1234.ts.net"]);
 });
 
-test("a node is told how to register itself with the control plane and its peers", () => {
+test("a node is told how to join the control plane, unless this run joined it", () => {
   const control = tailnet.peers.find((p) => p.name === "infra-testbench")!;
-  const items = left({ self: tailnet.self, secretNames: ["CLAUDE_CODE_OAUTH_TOKEN", "GH_TOKEN"], gitKey: false, role: "node", control, digest: "e".repeat(64) });
+  const items = left({ self: tailnet.self, secretNames: ["CLAUDE_CODE_OAUTH_TOKEN", "GH_TOKEN"], gitKey: false, role: "node", control, joined: false });
   const all = items.flatMap((i) => i.run).join("\n");
-  assert.match(all, new RegExp(`^sudo deploy/install\\.sh --add-node rj-firebat=${"e".repeat(64)}$`, "m"));
-  assert.match(all, /^sudo deploy\/install\.sh --node infra-testbench --peer rj-firebat$/m);
-  assert.match(all, /^sudo deploy\/install\.sh --node infra-testbench --peer <other node> --peer <another node>$/m, "this node admits the other nodes too");
+  assert.match(all, /^sudo deploy\/install\.sh --join-token$/m);
+  assert.match(all, /^sudo deploy\/install\.sh --join <token> --node infra-testbench$/m);
+  assert.doesNotMatch(all, /--add-node|--peer/, "no digest to paste and no other node to rerun");
   assert.match(all, /^sudo deploy\/install\.sh --node infra-testbench$/m, "the git key is made by a rerun of the node install");
   assert.match(all, /^nexus connect infra-testbench\.tail1234\.ts\.net$/m, "the Mac connects to the control plane, not to this node");
   assert.equal(formatLeft(items).split("\n")[0], "What is left:");
+  const joined = left({ self: tailnet.self, secretNames: [], gitKey: true, role: "node", control, joined: true }).flatMap((i) => i.run).join("\n");
+  assert.doesNotMatch(joined, /--join/);
 });

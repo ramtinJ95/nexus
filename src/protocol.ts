@@ -378,6 +378,8 @@ export interface ProbeClient {
   manifest(artifact: PortableArtifactId): Promise<ArtifactManifest | null>;
   /** PUT /v1/secrets/{name}: the current value of one of heldSecrets. The probe holds it in memory and applies it to its running pylons. */
   putSecret(name: string, value: string): Promise<void>;
+  /** PUT /v1/peers: every other node, whose probes may fetch this node's images and templates and serve it theirs. */
+  putPeers(peers: readonly TailnetNodeId[]): Promise<void>;
   /** GET /v1/node-health: the node's host as the probe reads it now. It answers after sampling its pylons' CPU for a second. */
   health(): Promise<NodeHealth>;
 }
@@ -509,6 +511,10 @@ export function connectProbe(node: NodeName, tailnetHost: string, expected: Tail
       const res = await call("PUT", path, value, requestTimeoutMs, "text/plain; charset=utf-8");
       if (res.status !== 204) throw new Error(`${node}: PUT ${path}: HTTP ${res.status}: ${res.body}`);
     },
+    async putPeers(peers) {
+      const res = await call("PUT", "/v1/peers", JSON.stringify(peers));
+      if (res.status !== 204) throw new Error(`${node}: PUT /v1/peers: HTTP ${res.status}: ${res.body}`);
+    },
     stream(pylonId, argv) {
       const path = streamPath(pylonId, argv);
       return new Promise((resolve, reject) => {
@@ -599,15 +605,17 @@ export const routeAuth = {
   "/v1/pylons": "control-plane",
   "/v1/manifests": "control-plane",
   "/v1/secrets": "control-plane",
+  "/v1/peers": "control-plane",
   "/v1/node-health": "control-plane",
   "/v1/artifacts": "peer-probe", // checkpoints hold the pylon's logins, so only the other probe may read them
 } as const satisfies Record<string, CallerRole>;
 
-/** Read from /etc/nexus/probe.json on each node. */
+/** Read from /etc/nexus/probe.json on each node. `peers` holds until the control plane puts the list of every other node. */
 export interface ProbeAuthConfig {
   controlPlane: TailnetNodeId; // rj-firebat
   peers: readonly TailnetNodeId[]; // every other node
 }
+export const peersSchema = z.array(tailnetNodeIdSchema).max(1_000);
 
 // The wire encoding: JSON bodies, and newline-delimited JSON events on GET /v1/observe.
 

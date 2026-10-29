@@ -139,6 +139,22 @@ test("callers that are not the configured node get 403", async (t) => {
   assert.equal((await fetch(`${base}/v1/jobs/x`)).status, 404);
 });
 
+test("the control plane's list of peers replaces probe.json's, and only the control plane may put it", async (t) => {
+  const { base, client, callAs } = await setup(t);
+  const joined = "nJOINED" as TailnetNodeId;
+  const artifacts = `${base}/v1/artifacts/img-1?sha256=${"0".repeat(64)}`;
+  callAs(joined);
+  assert.equal((await fetch(artifacts)).status, 403, "probe.json names only peer");
+  assert.equal((await fetch(`${base}/v1/peers`, { method: "PUT", body: JSON.stringify([joined]) })).status, 403, "a node may not make itself a peer");
+  callAs(controlPlane);
+  await assert.rejects(client.putPeers(["not-a-node-id" as TailnetNodeId]), /HTTP 400/);
+  await client.putPeers([joined]);
+  callAs(joined);
+  assert.equal((await fetch(artifacts)).status, 404, "a peer now, and this node holds no img-1");
+  callAs(peer);
+  assert.equal((await fetch(artifacts)).status, 403, "the control plane's list replaced probe.json's");
+});
+
 test("the client refuses a probe that whois does not name", async (t) => {
   const { probe } = await setup(t);
   const impostor = connectProbe(node, "127.0.0.1", probeNodeId, { port: probe.port, whois: async () => "nOTHER" as TailnetNodeId });

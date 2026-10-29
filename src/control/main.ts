@@ -7,18 +7,19 @@ import { isDraining, turnGate } from "./drain.ts";
 import { readFile } from "node:fs/promises";
 import { isAbsolute } from "node:path";
 import { z } from "zod";
-import { connectProbe, nodeNameSchema, tailnetNodeIdSchema, type NodeName, type TailnetNodeId } from "../protocol.ts";
+import { connectProbe, nodeNameSchema, tailnetNodeIdSchema, type NodeName, type ProbeClient, type TailnetNodeId } from "../protocol.ts";
 import { canDeploy } from "./releases.ts";
 import { gitIdentitySchema, gitUrl } from "../project.ts";
 import { ingest } from "../reconcile.ts";
-import { linuxTailscaledSocket, localApiWhois, localApiCertificate } from "../tailscale.ts";
+import { linuxTailscaledSocket, localApiWhois, localApiWhoisNode, localApiCertificate } from "../tailscale.ts";
 import type { Models } from "@earendil-works/pi-ai/models";
 import { chatgptToken, harnessModels, openCredentials, requireModel } from "../harness/credentials.ts";
 import { openHarnessHost, type ConversationId } from "../harness/host.ts";
 import { startApi } from "./api.ts";
 import { registryLocator } from "./locator.ts";
 import { startLoop } from "./loop.ts";
-import { openRegistry, type Thread, type ThreadId } from "./registry.ts";
+import { openRegistry, type NodeRecord, type Thread, type ThreadId } from "./registry.ts";
+import { peerHandoff } from "./peers.ts";
 import { githubClient, githubRepo } from "./github.ts";
 import { agentReplies, reviewLoop } from "./review.ts";
 import { threadStarter } from "./threads.ts";
@@ -114,11 +115,14 @@ export interface ControlPlane {
   close(): Promise<void>;
 }
 
+type NodeAddress = Pick<NodeRecord, "name" | "tailnetHost" | "tailnetNodeId">;
+
 /**
  * Everything but the model login, so src/control/thread-on-node.ts runs this same wiring with a scripted model.
- * `chatgptToken` reads the token every probe is handed for the chatgpt login. Without it, probes get none.
+ * `chatgptToken` reads the token every probe is handed for the chatgpt login. Without it, probes get none. Tests pass
+ * `probe` to stand in for each node's probe.
  */
-export async function startControlPlane(config: ControlPlaneConfig, models: Models, chatgptToken?: () => Promise<string | undefined>): Promise<ControlPlane> {
+export async function startControlPlane(config: ControlPlaneConfig, models: Models, chatgptToken?: () => Promise<string | undefined>, probe?: (node: NodeAddress) => ProbeClient): Promise<ControlPlane> {
   const token = config.github ? (await readFile(config.github.tokenFile, "utf8")).trim() : null;
   if (token !== null && !/^[A-Za-z0-9_]+$/.test(token)) throw new Error("github.tokenFile must contain only a GitHub token");
   const tailscaled = config.tailscaledSocket ?? linuxTailscaledSocket;
@@ -127,13 +131,26 @@ export async function startControlPlane(config: ControlPlaneConfig, models: Mode
   for (const node of config.nodes) {
     registry.upsertNode({ name: node.name, tailnetHost: node.tailnetHost, tailnetNodeId: node.tailnetNodeId });
   }
-  const probes = config.nodes.map((n) => connectProbe(n.name, n.tailnetHost, n.tailnetNodeId, { whois }));
+  // Both grow when a node joins, and everything handed them reads them when it acts.
+  const probes: ProbeClient[] = [];
+  const probeMap = new Map<NodeName, ProbeClient>();
+  const connect = (node: NodeAddress) => {
+    const client = probe?.(node) ?? connectProbe(node.name, node.tailnetHost, node.tailnetNodeId, { whois });
+    probes.push(client);
+    probeMap.set(node.name, client);
+    return client;
+  };
+  for (const node of [...config.nodes, ...registry.joinedNodes()]) if (!probeMap.has(node.name)) connect(node);
   const handoff = chatgptToken === undefined ? null : chatgptTokenHandoff({ probes, token: chatgptToken });
+  const peers = peerHandoff({ registry, probes: probeMap });
   const loop = startLoop({
-    registry, probes, previewPorts: config.previewPorts, gitIdentity: config.gitIdentity,
-    ingest: (event, ...rest) => {
-      if (event.type === "snapshot") handoff?.observed(event.observation);
-      return ingest(event, ...rest);
+    registry, probes: [...probes], previewPorts: config.previewPorts, gitIdentity: config.gitIdentity,
+    ingest: (event, node, ...rest) => {
+      if (event.type === "snapshot") {
+        handoff?.observed(event.observation);
+        peers.observed(node);
+      }
+      return ingest(event, node, ...rest);
     },
   });
   const wakeThread = (t: Thread) => { void loop.wake(registry.pylon(t.pylonId)!.node); };
@@ -170,7 +187,6 @@ export async function startControlPlane(config: ControlPlaneConfig, models: Mode
     startJudgment: (...args) => gate.run(() => rawHarness.startJudgment(...args)),
     sendJudgment: (...args) => gate.run(() => rawHarness.sendJudgment(...args)),
   };
-  const probeMap = new Map(probes.map((probe) => [probe.node, probe]));
   const images = startImageRollout({
     registry, probes: probeMap, buildNode: (config.imageBuildNode ?? "infra-testbench") as NodeName, recipe: () => loadImageRecipe(), release: runningCommit,
   });
@@ -235,16 +251,25 @@ export async function startControlPlane(config: ControlPlaneConfig, models: Mode
     deployment,
     registry, whois, host: config.listen.host, port: config.listen.port,
     allowed: new Set([config.self.tailnetNodeId, ...config.callers]),
+    joins: {
+      whois: localApiWhoisNode(tailscaled),
+      configured: new Set(config.nodes.map((n) => n.tailnetNodeId)),
+      joined(node) {
+        if (!probeMap.has(node.name)) loop.follow(connect(node));
+        void peers.all();
+        console.error(`nexus control plane: ${node.name} joined as tailnet node ${node.tailnetNodeId}, following it`);
+      },
+    },
     hostnames: new Set(config.listen.hostnames),
     harness,
     startThread,
     wake,
-    probes: new Map(probes.map((probe) => [probe.node, probe])),
+    probes: probeMap,
     previewPorts: config.previewPorts,
     images,
     usageBackfill: backfill,
   });
-  console.error(`nexus control plane: API on ${config.listen.host}:${api.port}, following ${config.nodes.map((n) => n.name).join(", ")}`);
+  console.error(`nexus control plane: API on ${config.listen.host}:${api.port}, following ${[...probeMap.keys()].join(", ")}`);
 
   return {
     port: api.port,
@@ -260,6 +285,7 @@ export async function startControlPlane(config: ControlPlaneConfig, models: Mode
       clearInterval(handoffTimer);
       await watch.close();
       await handoff?.close();
+      await peers.close();
       await resumer?.close();
       await reviews?.close();
       await plans.close();

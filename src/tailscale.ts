@@ -10,12 +10,26 @@ import type { TailnetNodeId } from "./protocol.ts";
 
 /** Resolves to null when tailscaled knows no tailnet node at that address. Rejects when tailscaled cannot answer. */
 export type Whois = (address: string, port: number) => Promise<TailnetNodeId | null>;
+/** Whois with the node's MagicDNS name, such as infra-testbench.example.ts.net, which tailscaled reports as Node.Name. */
+export type WhoisNode = (address: string, port: number) => Promise<{ id: TailnetNodeId; host: string } | null>;
 
 export const linuxTailscaledSocket = "/var/run/tailscale/tailscaled.sock";
 
 /** LocalAPI `GET /localapi/v0/whois?addr=ip:port` over tailscaled's Unix socket. */
 export function localApiWhois(socketPath: string = linuxTailscaledSocket): Whois {
-  return (address, port) => new Promise((resolve, reject) => {
+  return async (address, port) => (await whois(socketPath, address, port))?.id ?? null;
+}
+
+export function localApiWhoisNode(socketPath: string = linuxTailscaledSocket): WhoisNode {
+  return async (address, port) => {
+    const node = await whois(socketPath, address, port);
+    if (node?.host === null) throw new Error(`tailscaled whois ${hostPort(address, port)}: response has no Node.Name`);
+    return node as { id: TailnetNodeId; host: string } | null;
+  };
+}
+
+function whois(socketPath: string, address: string, port: number): Promise<{ id: TailnetNodeId; host: string | null } | null> {
+  return new Promise((resolve, reject) => {
     const addr = hostPort(address, port);
     const req = request({
       socketPath,
@@ -31,14 +45,15 @@ export function localApiWhois(socketPath: string = linuxTailscaledSocket): Whois
       res.on("end", () => {
         if (res.statusCode === 404) return resolve(null);
         if (res.statusCode !== 200) return reject(new Error(`tailscaled whois ${addr}: HTTP ${res.statusCode}: ${body.trim()}`));
-        let stableId: unknown;
+        let node: { StableID?: unknown; Name?: unknown } | undefined;
         try {
-          stableId = (JSON.parse(body) as { Node?: { StableID?: unknown } }).Node?.StableID;
+          node = (JSON.parse(body) as { Node?: { StableID?: unknown; Name?: unknown } }).Node;
         } catch (err) {
           return reject(new Error(`tailscaled whois ${addr}: ${(err as Error).message}`));
         }
-        if (typeof stableId !== "string" || stableId === "") return reject(new Error(`tailscaled whois ${addr}: response has no Node.StableID`));
-        resolve(stableId as TailnetNodeId);
+        if (typeof node?.StableID !== "string" || node.StableID === "") return reject(new Error(`tailscaled whois ${addr}: response has no Node.StableID`));
+        const host = typeof node.Name === "string" && node.Name !== "" ? node.Name.replace(/\.$/, "") : null;
+        resolve({ id: node.StableID as TailnetNodeId, host });
       });
     });
     req.on("error", reject);

@@ -17,10 +17,10 @@ git clone https://github.com/ramtinJ95/nexus.git && cd nexus
 sudo deploy/install.sh --admit <your Mac's tailnet name> --dotfiles <dotfiles git URL>
 ```
 
-This installs the control plane, a probe and the deployer on one machine. On each further machine, install only a probe and the deployer, and name the control plane's machine:
+This installs the control plane, a probe and the deployer on one machine. On each further machine, install only a probe and the deployer, and name the control plane's machine and a join token minted there, as [Add a node](#add-a-node) describes:
 
 ```sh
-sudo deploy/install.sh --node <control plane's tailnet name>
+sudo deploy/install.sh --join <token> --node <control plane's tailnet name>
 ```
 
 A tailnet name is a device's MagicDNS name, short (`macbook`) or full (`macbook.tail1234.ts.net`), as `tailscale status` lists it.
@@ -76,7 +76,7 @@ sudo env NEXUS_CLAUDE_TOKEN_FILE=/root/claude-token NEXUS_GH_TOKEN_FILE=/root/gh
 
 The deployer never runs this step. `nexus deploy` runs only the role installers, in preparation mode, which read no input and leave every credential alone.
 
-The installer ends with what is left and the command for each, in the order to do them. First come the rest of the setup: admitting your Mac or registering the node, the `nexus` CLI on the Mac with `deploy/mac/install` and `nexus connect`, and Docker with buildx for image builds and the probe's access to it. Next comes a rerun for any credential that was skipped. Last comes the first image, which needs the control plane running. A rerun lists only what is still missing.
+The installer ends with what is left and the command for each, in the order to do them. First come the rest of the setup: admitting your Mac or joining the node, the `nexus` CLI on the Mac with `deploy/mac/install` and `nexus connect`, and Docker with buildx for image builds and the probe's access to it. Next comes a rerun for any credential that was skipped. Last comes the first image, which needs the control plane running. A rerun lists only what is still missing.
 
 ### Rerun to upgrade, admit or recover
 
@@ -84,13 +84,23 @@ Every run checks the prerequisites and installs the checkout's release, so a rer
 
 ### Add a node
 
-`sudo deploy/install.sh --node <control>` on the new machine ends by printing its deploy key digest and the command that registers it. Run that on the control plane's machine:
+Mint a join token on the control plane's machine:
 
 ```sh
-sudo deploy/install.sh --add-node <new node's tailnet name>=<digest it printed>
+sudo deploy/install.sh --join-token
 ```
 
-That adds the node to `nodes`, its digest to `deployKeys` and its ID to the control plane machine's probe `auth.peers`, and restarts the control plane. Probes fetch images from each other, and each checks the probe it fetches from against its `auth.peers`. So on every other probe-only node, add the new one as a peer with `sudo deploy/install.sh --node <control> --peer <new node's tailnet name>`, and on the new node, add each of them with `--peer` the same way.
+It prints the command to run on the new machine, from a checkout, which joins one machine within the hour:
+
+```sh
+sudo deploy/install.sh --join <token> --node <control>
+```
+
+That run checks the prerequisites, writes `probe.json` and `deployer.json` and installs a probe and the deployer, as `--node` does. Then it sends the token and its deployer's key digest to the control plane's `POST /v1/join`, after checking the control plane's tailnet identity with tailscaled, and only then asks for the node's own credentials. The control plane records the node as tailscaled's whois names the caller, its stable node ID and MagicDNS name, never as the request says. It keeps the node and its digest in the registry and follows its probe without a restart. Every probe learns its peers from the control plane within a minute, so no node needs a `--peer` rerun.
+
+Only root on the control plane's machine can mint a token, because the token's digest goes straight into the registry, which only the control plane's user can write. The join route is the only route besides `/v1/whoami` that a machine the control plane does not know may call. A used, expired or unknown token is refused, and so are the control plane's machine, a device in `callers` and a node `control.json` names, and the refusal records nothing. A node that joined may join again with a new token, which replaces its deploy key, for instance after its `deployer.json` was lost.
+
+Nodes in `control.json` stay as they are. At each start the control plane follows those nodes and every node that joined, and reads `deployKeys`, `callers` and `deployers` from the file as before. `auth.peers` in `probe.json` holds until the control plane puts its list, and a probe from before join tokens keeps it. The older way also still works: `sudo deploy/install.sh --add-node <name>=<digest>` on the control plane's machine edits `control.json` and restarts the control plane, and probe-only nodes then need `--peer` reruns. Removing a node, joined or listed, is not built.
 
 ## Deploy a merged commit
 
@@ -109,7 +119,7 @@ nexus release --json
 
 ### The deployer's identity
 
-`deploy/install.sh` installs the root `nexus-deployer.service` and its 15-second timer on every machine, records the machine's roles, and puts the SHA-256 digest of the deployer's token in the control plane's `deployKeys`. On the control plane's machine it does this itself. A node's digest arrives with `--add-node`. The plaintext token remains only in that node's root-owned, mode-0600 `deployer.json`; never put it in a project's secrets or a pylon. To read a node's digest again, run as root `node --input-type=module -e 'import{readFileSync}from"node:fs";import{createHash}from"node:crypto";console.log(createHash("sha256").update(JSON.parse(readFileSync("/etc/nexus/deployer.json")).token).digest("hex"))'`.
+`deploy/install.sh` installs the root `nexus-deployer.service` and its 15-second timer on every machine, records the machine's roles, and puts the SHA-256 digest of the deployer's token in the control plane's `deployKeys`. On the control plane's machine it does this itself. A node's digest arrives with its join, or with `--add-node`. The plaintext token remains only in that node's root-owned, mode-0600 `deployer.json`; never put it in a project's secrets or a pylon. To read a node's digest again, run as root `node --input-type=module -e 'import{readFileSync}from"node:fs";import{createHash}from"node:crypto";console.log(createHash("sha256").update(JSON.parse(readFileSync("/etc/nexus/deployer.json")).token).digest("hex"))'`.
 
 Only the `deployers` in control.json, which `--admit` sets, may change the release. `deployers` missing or empty disables release changes. Never list an infrastructure node as a deployer: the API rejects every configured node and `self` even if listed, and the installer refuses to admit one. The deployer's `controlUrl` names the control plane's tailnet IP on its own machine and its MagicDNS name on port 7470 elsewhere; that name must be in the control plane's `listen.hostnames`. The worker verifies the endpoint with tailscaled **before sending its token**. Check `nexus release` for fresh reports from every role.
 

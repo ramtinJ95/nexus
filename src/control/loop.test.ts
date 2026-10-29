@@ -193,6 +193,7 @@ function fakeNode(options: { autoFinish: boolean; node?: NodeName; reportsRoutes
     stream: () => Promise.reject(new Error("unused")),
     manifest: () => Promise.reject(new Error("unused")),
     health: () => Promise.reject(new Error("unused")),
+    putPeers: async () => {},
     async putSecret(name) {
       if (!reachable) throw Object.assign(new Error("probe unreachable"), { code: "unreachable" });
       if (!heldSecrets?.includes(name)) throw new Error(`${name} is not a secret the control plane hands over`);
@@ -1381,6 +1382,19 @@ test("a used-up port range is logged, and the services that got a port are still
   await until("web is published", () => registry.previews(thread.pylonId)[0]?.ready === true);
   assert.deepEqual(fake.lives.get(thread.pylonId)?.previews, [{ service: "web", httpsPort: 10200 }]);
   assert.ok(logged.includes(`${thread.pylonId}: no https port is free for the preview of api: pylons on ${node} hold or ${node} serves every port from 10200 to 10200`), logged.join("\n"));
+});
+
+test("a node the loop starts following while it runs comes online and runs its threads' pylons", async (t) => {
+  const registry = openRegistry(tempDb());
+  const loop = run(t, registry, []);
+  const thread = seed(registry);
+  const fake = fakeNode({ autoFinish: true });
+  assert.throws(() => loop.follow(fakeNode({ autoFinish: true, node: "unknown" as NodeName }).probe), /which the registry does not know/);
+  loop.follow(fake.probe);
+  loop.follow(fake.probe);
+  await until("the pylon runs", () => fake.pylons.get(thread.pylonId)?.phase === "running");
+  assert.equal(registry.node(node)?.state, "online");
+  assert.deepEqual(fake.submitted.map((job) => job.kind), ["spawn"], "following it twice follows it once");
 });
 
 test("a node reporting a pylon the registry places on another node gets no ports for it", async (t) => {

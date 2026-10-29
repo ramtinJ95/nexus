@@ -14,9 +14,9 @@ import { pipeline } from "node:stream/promises";
 import { commandPolicies, JobFailure, runCommand, runJob, type BackendPylon, type CommandPolicy, type ProbeDeps, type VmBackend } from "../backend.ts";
 import type { PortableArtifactId } from "../images.ts";
 import {
-  artifactHeaders, encodeProbeEvent, encodeSubmitReply, fetchArtifact, heldSecrets, isPortableArtifactId, jobDeadlineMs, probePort, jobSubject, parseJobEnvelope, parsePylonCommand, parseStreamRequest, routeAuth, serveByteStream, streamUpgradeResponse,
+  artifactHeaders, encodeProbeEvent, encodeSubmitReply, fetchArtifact, heldSecrets, isPortableArtifactId, jobDeadlineMs, probePort, jobSubject, parseJobEnvelope, parsePylonCommand, parseStreamRequest, peersSchema, routeAuth, serveByteStream, streamUpgradeResponse,
   type Job, type JobEnvelope, type JobId, type JobStatus, type LiveHash, type NodeName, type NodeObservation,
-  type DeclaredOutput, type GitFacts, type ListeningFact, type ProbeAuthConfig, type CommandResult, type ProbeEvent, type PylonCommand, type PylonId, type PylonObservation, type ServiceFact, type SessionFact, type Subject,
+  type DeclaredOutput, type GitFacts, type ListeningFact, type ProbeAuthConfig, type CommandResult, type ProbeEvent, type PylonCommand, type PylonId, type PylonObservation, type ServiceFact, type SessionFact, type Subject, type TailnetNodeId,
 } from "../protocol.ts";
 import type { ServiceName } from "../project.ts";
 import { attachedTerminals, sessionFacts } from "../sessions.ts";
@@ -92,6 +92,8 @@ const noPreviews: ProbeDeps["serve"] = {
 
 export async function startProbe(options: ProbeOptions): Promise<Probe> {
   const { node, backend, auth, whois } = options;
+  /** probe.json's peers until the control plane puts its list, which a restart forgets until the next put. */
+  let peers = auth.peers;
   const deadlines = options.jobDeadlineMs ?? jobDeadlineMs;
   const peerAddress = options.peerAddress ?? ((peer: NodeName) => ({ host: peer, port: probePort }));
   const bootId = randomUUID();
@@ -145,7 +147,7 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
       },
     },
     node,
-    fetchPeer: (from, artifact, sha256, signal) => fetchArtifact(peerAddress(from), artifact, sha256, { whois, peers: auth.peers }, signal),
+    fetchPeer: (from, artifact, sha256, signal) => fetchArtifact(peerAddress(from), artifact, sha256, { whois, peers }, signal),
   };
   const jobs = new Map<JobId, { status: JobStatus; finishedAt: number | null }>();
   const busy = new Map<Subject, JobId>();
@@ -503,7 +505,7 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
     if (remoteAddress === undefined || remotePort === undefined) return false;
     const caller = await whois(remoteAddress, remotePort);
     if (caller === null) return false;
-    return routeAuth[route] === "control-plane" ? caller === auth.controlPlane : auth.peers.includes(caller);
+    return routeAuth[route] === "control-plane" ? caller === auth.controlPlane : peers.includes(caller);
   }
 
   async function handle(req: IncomingMessage, res: ServerResponse) {
@@ -584,6 +586,18 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
       // Boots that need it wait for a snapshot that lists it.
       if (first) void publishSnapshot();
       return;
+    }
+    if (path === "/v1/peers") {
+      if (req.method !== "PUT") return send(res, 405, `${req.method} is not allowed on ${path}`);
+      let next: readonly TailnetNodeId[];
+      try {
+        next = peersSchema.parse(JSON.parse(await readBody(req)));
+      } catch (err) {
+        return send(res, 400, `the peers are a JSON array of tailnet node IDs: ${(err as Error).message}`);
+      }
+      if (next.join() !== peers.join()) log(`peers: ${next.join(", ") || "none"}, from the control plane`);
+      peers = next;
+      return void res.writeHead(204).end();
     }
     const artifactMatch = /^\/v1\/artifacts\/([^/]+)$/.exec(path);
     if (artifactMatch && req.method === "GET") {
