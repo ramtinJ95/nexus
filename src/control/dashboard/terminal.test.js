@@ -92,6 +92,8 @@ test("Shift+Enter and Option+Enter send ESC CR, a newline in Claude Code, and ot
   assert.equal(keyFor(key("Enter", { ctrlKey: true, shiftKey: true })), undefined);
   assert.equal(keyFor(key("Enter", { metaKey: true })), undefined);
   assert.equal(keyFor(key("@", { altKey: true })), undefined, "Option+2 makes @ on a Swedish layout");
+  assert.equal(keyFor(key("Enter", { shiftKey: true, isComposing: true })), undefined, "an input method's Enter confirms its composition");
+  assert.equal(keyFor(key("Enter", { shiftKey: true, keyCode: 229 })), undefined, "a keydown during composition has keyCode 229");
 });
 
 test("OSC 52 writes the clipboard but X11's primary, and a query reads nothing from it", async () => {

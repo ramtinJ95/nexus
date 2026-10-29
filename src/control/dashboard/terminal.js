@@ -69,8 +69,12 @@ export function joinTerminal(term, socket, status) {
   };
 }
 
-/** What a key sends in place of xterm.js's own bytes: Shift+Enter and Option+Enter send ESC CR, a newline in Claude Code's prompt. */
+/**
+ * What a key sends in place of xterm.js's own bytes: Shift+Enter and Option+Enter send ESC CR, a newline in Claude
+ * Code's prompt. An Enter that confirms an input method's composition stays xterm.js's.
+ */
 export function keyFor(event) {
+  if (event.isComposing || event.keyCode === 229) return undefined;
   if (event.key === "Enter" && (event.shiftKey || event.altKey) && !event.ctrlKey && !event.metaKey) return "\x1b\r";
   return undefined;
 }
