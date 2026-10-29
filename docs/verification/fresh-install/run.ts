@@ -16,7 +16,7 @@ import { execFile, spawn, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync } from "node:fs";
 import { chmod, cp, mkdir, readdir, readFile, readlink, rm, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { promisify } from "node:util";
 import { host, startTailnet, status, type Device } from "./tailnet.ts";
@@ -198,8 +198,8 @@ async function installSystemd(m: Machine): Promise<void> {
 async function installNode(m: Machine): Promise<void> {
   const { root } = m.device;
   await standIn(m.device, "apt-get", "libstdc++6", "libatomic1");
-  await cp("/usr/local/bin/node", join(root, "usr/bin/node"));
-  await cp("/usr/local/lib/node_modules/npm", join(root, "usr/lib/node_modules/npm"), { recursive: true });
+  await cp(process.execPath, join(root, "usr/bin/node"));
+  await cp(npmPackage()!, join(root, "usr/lib/node_modules/npm"), { recursive: true });
   await m.ok("ln -sf ../lib/node_modules/npm/bin/npx-cli.js /usr/bin/npx", { as: "root", quiet: true });
   if (!existsSync(egressCa)) {
     await m.ok("ln -sf ../lib/node_modules/npm/bin/npm-cli.js /usr/bin/npm", { as: "root", quiet: true });
@@ -209,6 +209,32 @@ async function installNode(m: Machine): Promise<void> {
   await mkdir(join(root, "usr/etc"), { recursive: true });
   await writeFile(join(root, "usr/etc/npmrc"), "cafile=/usr/local/share/egress-ca.pem\nfetch-retries=6\n");
   await writeFile(join(root, "usr/bin/npm"), '#!/bin/sh\nexec node --network-family-autoselection-attempt-timeout=5000 /usr/lib/node_modules/npm/bin/npm-cli.js "$@"\n', { mode: 0o755 });
+}
+
+/** npm's package beside the Node that runs this, where Node's own tarball or NodeSource's package puts it. */
+function npmPackage(): string | undefined {
+  const prefix = dirname(dirname(process.execPath));
+  return [join(prefix, "lib/node_modules/npm"), "/usr/lib/node_modules/npm", "/usr/share/nodejs/npm"].find((dir) => existsSync(join(dir, "bin/npm-cli.js")));
+}
+
+/** The Debian packages the apt-get stand-in copies into the machines, with every dependency it follows. */
+const hostPackages = ["sudo", "openssh-client", "git", "libstdc++6", "libatomic1"];
+
+/** Refuses a host the run cannot use, before it changes anything there. */
+async function preflight(): Promise<void> {
+  const missing: string[] = [];
+  for (const tool of ["git", "tar", "unshare", "nsenter", "flock", "python3", "dpkg-query", "runuser"]) {
+    if ((await exec("sh", ["-c", `command -v ${tool}`]).catch(() => null)) === null) missing.push(`the ${tool} command`);
+  }
+  if (Number(process.versions.node.split(".")[0]) < 26) missing.push(`Node 26 or newer, not ${process.version}`);
+  if (npmPackage() === undefined) missing.push(`npm's package beside ${process.execPath}`);
+  const debian = await readFile("/etc/debian_version", "utf8").catch(() => "");
+  if (!debian.startsWith("12.")) missing.push("Debian 12, whose packages the machines get");
+  else {
+    const status = await exec("dpkg-query", ["-W", "-f=${Package} ${db:Status-Status}\\n", ...hostPackages]).then((r) => r.stdout, (err: { stdout?: string }) => err.stdout ?? "");
+    for (const name of hostPackages) if (!status.split("\n").includes(`${name} installed`)) missing.push(`the Debian package ${name}`);
+  }
+  assert.equal(missing.length, 0, `this host lacks ${missing.join(", ")}. Install them, then run again`);
 }
 
 /** What the installer printed under one prerequisite it found missing, as the commands to run. */
@@ -227,6 +253,7 @@ function fixFor(output: string, missing: RegExp): string[] {
 async function main(): Promise<void> {
   assert.equal(process.getuid?.(), 0, "run as root: sudo node docs/verification/fresh-install/run.ts");
   runLocked();
+  await preflight();
   const commit = (await exec("git", ["-C", repo, "rev-parse", "HEAD"])).stdout.trim();
   const dirty = (await exec("git", ["-C", repo, "status", "--porcelain", "--untracked-files=no", "--", ".", ":!docs/verification/fresh-install/transcript.txt"])).stdout.trim() !== "";
   say(`Fresh install of Nexus at ${commit}${dirty ? ", without the checkout's uncommitted changes" : ""}`);

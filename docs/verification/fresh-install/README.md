@@ -10,7 +10,16 @@ From a checkout, on a Debian 12 host with root:
 sudo node docs/verification/fresh-install/run.ts
 ```
 
-It installs the checkout's HEAD commit, so commit what you want tested. A run takes about two minutes, once it has the Debian root filesystem. It needs `git`, `tar`, `unshare`, `nsenter`, `flock`, `python3` and `dpkg`, and the network to reach github.com and registry.npmjs.org. Everything it makes lives in `/var/tmp/nexus-fresh-install`, three loopback addresses and processes whose root is in that directory. It removes all of them at its end, pass or fail, and again at the start of the next run, so a run that was killed leaves nothing behind for long. A second run refuses to start while one holds the `flock` on `/var/cache/nexus-fresh-install/lock`. That directory also keeps the Debian root filesystem, which a run downloads once.
+It installs the checkout's HEAD commit, so commit what you want tested. A run takes about two minutes, once it has the Debian root filesystem.
+
+The host needs:
+
+- `git`, `tar`, `unshare`, `nsenter`, `flock`, `runuser`, `python3` and `dpkg`;
+- Node 26 with npm beside it, from Node's own tarball or NodeSource's package;
+- the Debian packages `sudo`, `openssh-client`, `git`, `libstdc++6` and `libatomic1`, which it copies into the machines with their dependencies;
+- the network to reach github.com and registry.npmjs.org.
+
+It checks all of these before it changes anything, and names what is missing. Everything it makes lives in `/var/tmp/nexus-fresh-install`, three loopback addresses and processes whose root is in that directory. It removes all of them at its end, pass or fail, and again at the start of the next run, so a run that was killed leaves nothing behind for long. A second run refuses to start while one holds the `flock` on `/var/cache/nexus-fresh-install/lock`. That directory also keeps the Debian root filesystem, which a run downloads once.
 
 In a Nexus pylon, the sandbox's proxy to the npm registry sometimes times out under `npm ci` even with the longer timeouts below, and the run fails with `ETIMEDOUT`. Run it again.
 
