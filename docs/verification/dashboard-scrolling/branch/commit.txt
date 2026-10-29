@@ -1,0 +1,1 @@
+branch: f99a8f0 fix(dashboard): wrap the pipeline's cells rather than cut them off
