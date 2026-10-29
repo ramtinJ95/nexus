@@ -1384,6 +1384,19 @@ test("a used-up port range is logged, and the services that got a port are still
   assert.ok(logged.includes(`${thread.pylonId}: no https port is free for the preview of api: pylons on ${node} hold or ${node} serves every port from 10200 to 10200`), logged.join("\n"));
 });
 
+test("a node the loop starts following while it runs comes online and runs its threads' pylons", async (t) => {
+  const registry = openRegistry(tempDb());
+  const loop = run(t, registry, []);
+  const thread = seed(registry);
+  const fake = fakeNode({ autoFinish: true });
+  assert.throws(() => loop.follow(fakeNode({ autoFinish: true, node: "unknown" as NodeName }).probe), /which the registry does not know/);
+  loop.follow(fake.probe);
+  loop.follow(fake.probe);
+  await until("the pylon runs", () => fake.pylons.get(thread.pylonId)?.phase === "running");
+  assert.equal(registry.node(node)?.state, "online");
+  assert.deepEqual(fake.submitted.map((job) => job.kind), ["spawn"], "following it twice follows it once");
+});
+
 test("a node reporting a pylon the registry places on another node gets no ports for it", async (t) => {
   const registry = openRegistry(tempDb());
   const thread = seed(registry);

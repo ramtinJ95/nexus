@@ -59,6 +59,8 @@ export interface LoopOptions {
 export interface Loop {
   /** Ticks every pylon on the node. Resolves once a pass that began after this call has finished. */
   wake(node: NodeName): Promise<void>;
+  /** Follows one more node's probe, such as a node that joined. A node already followed keeps its probe. */
+  follow(probe: ProbeClient): void;
   close(): Promise<void>;
 }
 
@@ -83,10 +85,14 @@ export function startLoop(options: LoopOptions): Loop {
   const listed = new Set<PylonId>();
 
   const links = new Map<NodeName, Link>();
-  for (const probe of options.probes) {
+  const followers: Promise<void>[] = [];
+  function followProbe(probe: ProbeClient) {
     if (registry.node(probe.node) === undefined) throw new Error(`probe for ${probe.node}, which the registry does not know`);
+    if (links.has(probe.node) || shutdown.signal.aborted) return;
     const link: Link = { probe, up: false, snapshots: 0, passes: singleFlight(() => pass(probe.node, link), () => shutdown.signal.aborted), offline: null };
     links.set(probe.node, link);
+    linkDown(probe.node, link);
+    followers.push(follow(probe.node, link));
   }
 
   const observation = (node: NodeName): NodeObservation | null => links.get(node)?.up ? registry.node(node)?.observation ?? null : null;
@@ -285,12 +291,12 @@ export function startLoop(options: LoopOptions): Loop {
     }
   }
 
-  for (const [node, link] of links) linkDown(node, link);
-  const followers = [...links].map(([node, link]) => follow(node, link));
+  for (const probe of options.probes) followProbe(probe);
   const timer = setInterval(() => { for (const node of links.keys()) void wake(node); }, intervalMs);
 
   return {
     wake,
+    follow: followProbe,
     async close() {
       shutdown.abort();
       clearInterval(timer);
