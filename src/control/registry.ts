@@ -13,7 +13,7 @@ import type { Drain, ReleaseReport } from "../deploy/model.ts";
  */
 import type { PrWatchState } from "./pr-watch.ts";
 import type { PlanningRecord } from "./planning.ts";
-import type { Question } from "./questions.ts";
+import { askedIn, askRecord, type Question } from "./questions.ts";
 import type { Nudge } from "./nudge.ts";
 import type { Judgment } from "./judgment.ts";
 import type { ItemId, ItemRecord } from "./pipeline.ts";
@@ -619,6 +619,28 @@ export function openRegistry(path: string, clock = Date.now) {
     return jsonOrNull<Question>(sql("SELECT record FROM questions WHERE id = ?").get(id)?.record ?? null);
   }
 
+  /**
+   * Asks a question for each of the Claude worker's AskUserQuestion calls that waits for an answer, and withdraws each
+   * unanswered one that no longer does. A call waits while it has no result, a turn of the worker's session is live or
+   * waiting, and no later turn of that session started, so the call of a turn a pause killed never opens again. Other
+   * sessions' turns, such as the person's own Claude in the pylon, leave it be.
+   */
+  function reconcileAsks(thread: ThreadId) {
+    const worker = sql(`SELECT w.session, CASE WHEN w.turn_session = w.session THEN w.turn_at END AS turn_at FROM claude_workers w
+      JOIN claude_transcripts t ON t.thread = w.thread AND t.session = w.session
+      WHERE w.thread = ? AND EXISTS (SELECT 1 FROM session_activity a WHERE a.thread = w.thread AND a.session = w.session)`).get(thread);
+    const entries = worker === undefined ? [] : sql("SELECT entry FROM claude_entries WHERE thread = ? ORDER BY seq DESC LIMIT 64").all(thread).map((r) => json<ClaudeEntry>(r.entry));
+    const results = new Set(entries.flatMap((e) => e.kind === "result" ? [e.toolUseId] : []));
+    const open = entries.flatMap((entry) => {
+      if (entry.kind !== "tool" || results.has(entry.id) || entry.at < Number(worker!.turn_at ?? 0)) return [];
+      const questions = askedIn(entry);
+      return questions === null ? [] : [askRecord(thread, { session: worker!.session as string, toolUseId: entry.id, questions }, entry.at)];
+    });
+    for (const question of open) sql("INSERT OR IGNORE INTO questions (id, thread, record) VALUES (?, ?, ?)").run(question.id, thread, JSON.stringify({ ...question, answer: null }));
+    sql(`DELETE FROM questions WHERE thread = ? AND json_extract(record, '$.ask') IS NOT NULL AND json_extract(record, '$.answer') IS NULL
+      AND id NOT IN (SELECT value FROM json_each(?))`).run(thread, JSON.stringify(open.map((q) => q.id)));
+  }
+
   function updateAttention(id: ThreadId) {
     const row = q.thread.get(id);
     if (row === undefined) return;
@@ -644,6 +666,7 @@ export function openRegistry(path: string, clock = Date.now) {
         sql("UPDATE thread_attention SET parked = 0 WHERE thread = ?").run(id);
         for (const table of ["session_order", "session_order_floor", "claude_transcripts", "claude_entries", "claude_messages"]) sql(`DELETE FROM ${table} WHERE thread = ?`).run(id);
       }
+      reconcileAsks(id);
       updateAttention(id);
     });
   }
@@ -913,6 +936,7 @@ export function openRegistry(path: string, clock = Date.now) {
           sql("DELETE FROM session_activity WHERE thread = ? AND session = ? AND state = 'session.turn-started' AND EXISTS (SELECT 1 FROM session_order o WHERE o.thread = ? AND o.session = ? AND o.at <= ?)")
             .run(thread, read.session, thread, read.session, stop.stoppedAt);
         }
+        reconcileAsks(thread);
         updateAttention(thread);
         return true;
       });
@@ -992,6 +1016,7 @@ export function openRegistry(path: string, clock = Date.now) {
         if (event.kind !== "session.waiting") q.agentActivity.run(clock(), thread);
         if (event.kind === "session.turn-ended") q.recordReply.run(clock(), thread);
         appendEvent(event.kind, thread, { at, ...(event.session === undefined ? {} : { session: event.session }), ...(event.message === undefined ? {} : { message: event.message }) });
+        reconcileAsks(thread);
         updateAttention(thread);
       });
     },
@@ -1038,6 +1063,13 @@ export function openRegistry(path: string, clock = Date.now) {
       });
     },
     question: (id: string): Question | null => questionRecord(id),
+    /** Withdraws a question nobody waits for an answer to any more, such as an ask its terminal answered. An answered one stays. */
+    withdrawQuestion(id: string) {
+      transaction(() => {
+        const thread = sql("DELETE FROM questions WHERE id = ? AND json_extract(record, '$.answer') IS NULL RETURNING thread").get(id)?.thread;
+        if (thread !== undefined) updateAttention(thread as ThreadId);
+      });
+    },
     questions: (thread: ThreadId): Question[] => sql("SELECT record FROM questions WHERE thread = ? ORDER BY json_extract(record, '$.askedAt'), id").all(thread).map((r) => json<Question>(r.record)),
     /**
      * Records the answer to an open question. An answered one keeps its first answer, which this returns. `then` runs
