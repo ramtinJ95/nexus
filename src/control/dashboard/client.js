@@ -107,11 +107,13 @@ function swap(regions) {
   const draft = document.getElementById("prompt-text");
   const saved = draft === null ? null : { value: draft.value, start: draft.selectionStart, end: draft.selectionEnd };
   const start = startState();
+  const asks = askDrafts();
   const restoreScroll = anchor();
   for (const [el, html, key] of changed) {
     el.innerHTML = html;
     served.set(el.id, key);
   }
+  restoreAskDrafts(asks);
   const prompt = document.getElementById("prompt-text");
   if (saved !== null && prompt !== null && prompt !== draft) {
     prompt.value = saved.value;
@@ -331,6 +333,68 @@ document.addEventListener("submit", async (event) => {
   } finally {
     const send = document.getElementById("send");
     if (send !== null) send.disabled = false;
+  }
+});
+
+/** What the person has filled in on each open AskUserQuestion form, by its question, so a swap of its region keeps it. */
+function askDrafts() {
+  return new Map([...document.querySelectorAll("form.ask")].map((form) => [form.dataset.question, [...form.elements].filter((f) => f.name !== "").map((f) => ({ name: f.name, value: f.value, checked: f.checked }))]));
+}
+function restoreAskDrafts(drafts) {
+  for (const form of document.querySelectorAll("form.ask")) {
+    const draft = drafts.get(form.dataset.question) ?? [];
+    for (const field of [...form.elements].filter((f) => f.name !== "")) {
+      const choosable = field.type === "radio" || field.type === "checkbox";
+      const was = draft.find((d) => d.name === field.name && (!choosable || d.value === field.value));
+      if (was === undefined) continue;
+      if (choosable) field.checked = was.checked;
+      else field.value = was.value;
+    }
+  }
+}
+
+/**
+ * An AskUserQuestion form's choices, one per question as the answer route takes them: the options picked and the
+ * person's own answer, which on a single-select question counts only while its radio is picked, and the notes.
+ */
+function askChoices(form) {
+  return [...form.querySelectorAll("fieldset.ask-q")].map((question, i) => {
+    const picked = [...question.querySelectorAll(`input[name="picked-${i}"]:checked`)].map((input) => input.value);
+    const own = form.elements[`own-${i}`].value.trim();
+    const notes = form.elements[`notes-${i}`].value.trim();
+    const ownCounts = own !== "" && (question.dataset.multi === "true" || picked.includes(""));
+    return { picked: picked.filter((label) => label !== ""), ...(ownCounts ? { own } : {}), ...(notes === "" ? {} : { notes }) };
+  });
+}
+
+// Typing an answer of one's own on a single-select question picks it.
+document.addEventListener("input", (event) => {
+  const own = event.target instanceof Element ? event.target.closest(".ask-own input[type=text]") : null;
+  const radio = own?.parentElement.querySelector("input[type=radio]");
+  if (radio != null && own.value.trim() !== "") radio.checked = true;
+});
+
+document.addEventListener("submit", async (event) => {
+  if (!event.target.matches("form.ask")) return;
+  event.preventDefault();
+  const form = event.target;
+  const choices = askChoices(form);
+  const headers = [...form.querySelectorAll("fieldset.ask-q")].map((q) => q.dataset.header);
+  const missing = choices.findIndex((c) => c.picked.length === 0 && c.own === undefined);
+  if (missing !== -1) return void showError("action-error", new Error(`Answer "${headers[missing]}" first: pick an option or write your own answer.`));
+  const summary = choices.map((c, i) => `${headers[i]}: ${[...c.picked, ...(c.own === undefined ? [] : [c.own])].join(", ")}`).join("; ");
+  if (!confirm(`Answer Claude "${summary}"? The answer cannot be changed.`)) return;
+  const submit = form.querySelector("button[type=submit]");
+  submit.disabled = true;
+  try {
+    await api("POST", `/v1/questions/${encodeURIComponent(form.dataset.question)}/answer`, { choices });
+    showError("action-error", null);
+    await refreshAfter();
+  } catch (err) {
+    showError("action-error", err);
+    submit.disabled = false;
+    // An ask nobody waits for any more is withdrawn, so the page drops its form.
+    if (err.status === 409) await refreshAfter();
   }
 });
 

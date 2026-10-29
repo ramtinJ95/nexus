@@ -67,10 +67,13 @@ export function askedIn(entry: ClaudeEntry): AskedQuestion[] | null {
   return parsed.success ? parsed.data.questions as AskedQuestion[] : null;
 }
 
-/** The question an ask is, by its call's ID, so reading the call again asks nothing new. Each line of its text is one asked question. */
+/** The ID of the question an AskUserQuestion call is, so reading the call again asks nothing new. */
+export const askQuestionId = (toolUseId: string) => `ask-${toolUseId}`;
+
+/** The question an ask is. Each line of its text is one asked question. */
 export function askRecord(thread: ThreadId, ask: ClaudeAsk, askedAt: number): Omit<Question, "answer"> {
   return {
-    id: `ask-${ask.toolUseId}`, thread, text: ask.questions.map((q) => `${q.header}: ${q.question}`).join("\n"), options: [], reserved: null,
+    id: askQuestionId(ask.toolUseId), thread, text: ask.questions.map((q) => `${q.header}: ${q.question}`).join("\n"), options: [], reserved: null,
     answerer: "person", askedAt, ask,
   };
 }

@@ -1039,7 +1039,7 @@ export async function startApi(options: ApiOptions): Promise<Api> {
         stream(res) {
           const agent = registry.agent(t);
           return agent.kind === "claude"
-            ? stream<ClaudeConversation>(res, refuseDeleted(t), () => agents.claude.watch(t), liveFrames(t, agent.worker.model))
+            ? stream<ClaudeConversation>(res, refuseDeleted(t), () => agents.claude.watch(t), liveFrames(t, agent.worker.model, Date.now, () => registry.questions(t.id)))
             : stream<ConversationView>(res, conversing(t), () => agents.harness.watch(t), liveFrames(t));
         },
       };
