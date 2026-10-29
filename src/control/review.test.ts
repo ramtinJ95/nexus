@@ -1431,6 +1431,29 @@ test("a pass that was stepping a review when the person cancelled it does not sa
   assert.deepEqual(f.registry.events("0", { kinds: ["review.changed"] }).map((e) => (e.payload.phase as { kind: string }).kind), ["reviewing", "cancelled"]);
 });
 
+test("a check thread or verify pylon a pass starts as the person cancels the review is thrown away at once", async (t) => {
+  for (const verifies of [false, true]) {
+    const f = fixture(t);
+    f.verifies = verifies;
+    const loop = f.loop();
+    await loop.start(f.builder, { land: "nLAPTOP" });
+    await loop.poll();
+    f.reply(f.review().reviewer, verdict(f.review(), {}));
+    // A check's first step reads GitHub before it starts its thread, and so does a live check's, after the check's read.
+    const held = f.holdPolls(verifies ? 1 : 0);
+    const pass = loop.poll();
+    await held.entered;
+    assert.equal(f.review().phase.kind, verifies ? "verifying" : "checking");
+    loop.cancel(f.builder, "nPHONE");
+    held.release();
+    await pass;
+    const started = verifies ? f.liveThreads : f.checkThreads;
+    assert.equal(started.length, 1, `the pass started its ${verifies ? "verify pylon" : "check thread"}`);
+    assert.deepEqual(verifies ? f.archived : f.discarded, started, "and threw it away before the pass ended");
+    assert.equal(f.review().phase.kind, "cancelled");
+  }
+});
+
 test("a message a pass was about to send when the person cancelled the review is never sent", async (t) => {
   const f = fixture(t);
   const loop = f.loop();

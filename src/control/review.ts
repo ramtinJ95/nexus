@@ -748,6 +748,7 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
    * archived in the transaction that saves it, and never later. A thread in a turn, such as one the person is talking
    * to, stays open.
    */
+  const gateThread = (r: Review) => (r.phase.kind === "checking" || r.phase.kind === "verifying") ? r.phase.thread : null;
   const finished = (...ids: ThreadId[]): Thread[] => ids.map((id) => registry.thread(id))
     .filter((t): t is Thread => t !== undefined && !t.working && t.status !== "archived" && t.status !== "deleted");
 
@@ -769,7 +770,12 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
           if (next === r) break;
           const archive = next.phase.kind === "landed" && r.phase.kind !== "landed" ? finished(next.builder, next.reviewer) : [];
           // A save made while this step ran, such as the person's land or cancel, wins, and the next pass steps from it.
-          if (!registry.saveReview(next, archive.map((t) => t.id), r)) break;
+          // A gate thread the step started is then no review's, so it goes now rather than at the next pass's sweep.
+          if (!registry.saveReview(next, archive.map((t) => t.id), r)) {
+            const started = gateThread(next);
+            if (started !== null && started !== gateThread(r)) (next.phase.kind === "checking" ? checks : live).discard(started);
+            break;
+          }
           for (const t of archive) deps.wake(t);
           r = next;
         }
