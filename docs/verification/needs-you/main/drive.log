@@ -1,0 +1,24 @@
+home page, laptop: {
+  "title": "(9+) Nexus",
+  "count": "(no Needs you in the sidebar)",
+  "cards": [],
+  "error": null
+}
+screenshot 01-home.png
+screenshot 02-home-whole.png
+a held review's own page: title "(9+) Nexus"
+screenshot 03-held-thread-page.png
+screenshot 04-phone-home.png
+screenshot 05-phone-thread-page.png
+a thread failed while a thread page was open: the toast said "Bump the Node pin: failed\nOpen\nDismiss" and opens /threads/th-b1487c1dfebd
+screenshot 12-notice.png
+the toast's Open went to http://127.0.0.1:7470/threads/th-b1487c1dfebd, where no card is picked is picked and focus is on BODY
+screenshot 13-notice-opened.png
+the failed thread was th-b1487c1dfebd; with things waiting, the tab's title is "(9+) Nexus" and its icon is data:image/svg+xml,%3Csvg%20xmlns%3D%22h
+home page, phone, at the end: {
+  "title": "(9+) Nexus",
+  "count": "(no Needs you in the sidebar)",
+  "cards": [],
+  "error": null
+}
+screenshot 14-phone-home-after.png
