@@ -4,13 +4,16 @@ export const atEnd = (el) => el.scrollHeight - el.scrollTop - el.clientHeight < 
 /**
  * Keeps a scroller at its end for as long as the reader leaves it there: while the conversation grows, and while the
  * scroller shrinks under it, as when the dock gains a card, the composer a line or a phone its keyboard. A reader who
- * scrolls up keeps their place until they scroll back to the end. `observe` calls its argument whenever the scroller
- * changes size.
+ * scrolls up, or opens a fold at the end, keeps their place until they scroll back to the end. `observe` calls its
+ * argument whenever the scroller changes size.
  */
 export function endFollower(el, observe) {
   let following = true;
   const toEnd = () => { el.scrollTop = el.scrollHeight; };
-  el.addEventListener("scroll", () => { following = atEnd(el); });
+  const read = () => { following = atEnd(el); };
+  el.addEventListener("scroll", read);
+  // A fold that opens grows the content without scrolling, and its toggle does not bubble.
+  el.addEventListener("toggle", read, true);
   observe(() => { if (following) toEnd(); });
   return {
     get following() { return following; },
