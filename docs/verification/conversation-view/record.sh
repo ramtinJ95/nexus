@@ -9,7 +9,7 @@ set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 repo=$(git -C "$here" rev-parse --show-toplevel)
 work=$(mktemp -d)
-trap 'for w in worker harness; do git -C "$repo" worktree remove --force "$work/$w" 2>/dev/null || true; done; rm -rf "$work"' EXIT
+trap 'for w in claude-worker harness-source; do git -C "$repo" worktree remove --force "$work/$w" 2>/dev/null || true; done; rm -rf "$work"' EXIT
 
 worker=(
   "agoText in src/control/dashboard/ago.js should say \"never\" for at = 0, as the server's ago() in src/control/dashboard.ts does. Work test first: read both, write src/control/dashboard/ago.test.js in the style of the other *.test.js files in that folder covering every boundary and the never case, run it with node --test and watch the never case fail, then fix ago.js and run the test again. Then run npm run typecheck. Do not commit."
