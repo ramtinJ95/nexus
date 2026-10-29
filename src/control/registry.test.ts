@@ -1592,3 +1592,63 @@ test("a join token records one node, once, before it expires", (t) => {
   assert.deepEqual(registry.joinToken("hash"), { expiresAt: 2_000, usedAt: 1_999 });
   assert.equal(registry.node(joining.name)?.state, "offline");
 });
+
+/**
+ * Threads that each take a different path through the session facts: a harness and a session turn running, a waiting
+ * session with and without a message, a Claude worker stopped on its usage limit and one a later turn ended, one the
+ * usage backfill reads, and a deleted one.
+ */
+function sessionFactThreads(registry: ReturnType<typeof seeded>) {
+  let sequence = 0;
+  const report = (id: string, kind: "session.turn-started" | "session.turn-ended" | "session.waiting", at: number, message?: string) => registry.reportSession(node, {
+    sequence: ++sequence, pylon: `pylon-${id}` as PylonId, time: 1000 + sequence, event: { kind, session: "s1", at, ...(message === undefined ? {} : { message }) },
+  });
+  const limited = (id: string) => {
+    registry.setClaudeWorker(id as ThreadId, "hello", "started", undefined, "s1");
+    report(id, "session.turn-started", 40);
+    registry.appendClaudeRead(id as ThreadId, { session: "s1", from: transcriptStart, cursor: cursorAt(10), reset: false, readAt: 10, entries: [
+      { kind: "prompt", at: 40, text: "go", from: "person" }, { kind: "notice", at: 50, tone: "error", text: "You've hit your session limit", usageLimit: { resetsAt: 9000 } },
+    ] });
+    report(id, "session.turn-ended", 55);
+  };
+  addPylon(registry, "th-live");
+  registry.recordActivity("th-live" as ThreadId, { agent: 5, agentTurnRunning: true });
+  report("th-live", "session.turn-started", 10);
+  addPylon(registry, "th-waiting");
+  report("th-waiting", "session.waiting", 10, "a dev server still runs");
+  addPylon(registry, "th-waiting-bare");
+  report("th-waiting-bare", "session.waiting", 10);
+  addPylon(registry, "th-limited");
+  limited("th-limited");
+  addPylon(registry, "th-resumed");
+  limited("th-resumed");
+  report("th-resumed", "session.turn-started", 58);
+  report("th-resumed", "session.turn-ended", 59);
+  addPylon(registry, "th-reading");
+  registry.setThreadStatus("th-reading" as ThreadId, "archived");
+  registry.startUsageBackfill(["th-reading" as ThreadId], 1_000);
+  registry.holdUsageBackfill("th-reading" as ThreadId, 1_000);
+  addPylon(registry, "th-deleted");
+  registry.setThreadStatus("th-deleted" as ThreadId, "deleted");
+  return ["th-1", "th-live", "th-waiting", "th-waiting-bare", "th-limited", "th-resumed", "th-reading", "th-deleted"] as ThreadId[];
+}
+
+test("threads() reads each thread's session facts as thread() does, whichever facts it has", (t) => {
+  const registry = seeded(tempDb());
+  t.after(() => registry.close());
+  const ids = sessionFactThreads(registry);
+  const listed = registry.threads();
+  assert.deepEqual(listed.map((l) => l.id), [...ids].sort(), "threads made in one millisecond, by ID");
+  for (const id of ids) assert.deepEqual(listed.find((l) => l.id === id), registry.thread(id), id);
+  assert.deepEqual(registry.threads(project.id), listed);
+  const of = (id: string) => registry.thread(id as ThreadId)!;
+  assert.equal(of("th-live").sessionTurnRunning, true);
+  assert.ok(of("th-live").workingSince !== undefined);
+  assert.equal(of("th-waiting").sessionWaitingMessage, "a dev server still runs");
+  assert.equal(of("th-waiting-bare").sessionWaiting, true);
+  assert.equal(of("th-waiting-bare").sessionWaitingMessage, undefined);
+  assert.deepEqual(of("th-limited").usageLimit, { stoppedAt: 50, resetsAt: 9000 });
+  assert.equal(of("th-resumed").usageLimit, undefined, "a turn that started after the stop ended it");
+  assert.equal(of("th-reading").readingUsage, true);
+  assert.equal(of("th-1").working, false);
+});
