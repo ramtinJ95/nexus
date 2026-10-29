@@ -247,6 +247,13 @@ const approves = (round: Round) => round.verdict?.verdict === "approve" && !find
  */
 export const landable = (r: Review) => r.merged === null && (r.phase.kind === "approved"
   || (r.phase.kind === "needs-person" && r.phase.unreviewed === undefined && r.rounds.at(-1)!.check?.passed === true && approves(r.rounds.at(-1)!)));
+/**
+ * Whether the review is held for the person, with rounds left and no label, after an approval that a failed check, a
+ * failed live check or a conflict stopped, which a new head may answer. An approval has no blocking finding of the
+ * reviewer's, so the blocking ones are the loop's own. Changes the reviewer requested stay the person's.
+ */
+const heldForGate = (r: Review) => r.phase.kind === "needs-person" && r.phase.label === undefined && r.merged === null && roundsSpent(r) < r.maxRounds
+  && r.rounds.at(-1)!.verdict?.verdict === "approve" && findingsOf(r.rounds.at(-1)!).some(blocks);
 /** The rounds that count against the limit. One that approves again the head its previous round approved reviewed nothing new. */
 export const roundsSpent = (r: Pick<Review, "rounds">) => r.rounds.filter((round, i) => {
   const previous = r.rounds[i - 1];
@@ -657,13 +664,15 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
 
   /**
    * A head pushed after the review approved its last round or held it for the person. A review that would land gets a
-   * new round, as a landing does. One the loop gave up on stays the person's, and its reasons name the new head.
+   * new round, as a landing does, and so does one held only for a failed check, live check or conflict after an
+   * approval, which the push may answer. One the loop gave up on otherwise stays the person's, and its reasons name the
+   * new head.
    */
   function pushedAfter(r: Review, snapshot: PrSnapshot): Review | null {
     const head = pushedHead(r, { ...snapshot.pr, head: snapshot.detail.head });
     if (head === null) return null;
     const phase = r.phase;
-    if (phase.kind !== "needs-person" || landable(r)) return newHead(r, head, snapshot.detail.base, `The pull request's head moved to ${head}`);
+    if (phase.kind !== "needs-person" || landable(r) || heldForGate(r)) return newHead(r, head, snapshot.detail.base, `The pull request's head moved to ${head}`);
     const stale = (moved: string) => `The pull request's head moved to ${moved} after this review was held, so none of its rounds reviewed that commit. Run nexus review ${r.builder} to review it.`;
     return { ...r, phase: { ...phase, unreviewed: head, reasons: [...phase.reasons.filter((reason) => phase.unreviewed === undefined || reason !== stale(phase.unreviewed)), stale(head)] } };
   }
