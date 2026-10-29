@@ -1366,9 +1366,9 @@ export async function startApi(options: ApiOptions): Promise<Api> {
   };
   const health = () => ({ commit: runningCommit, https: { ...httpsState } });
 
-  const callerOf = (req: IncomingMessage) => {
+  const callerOf = <T>(req: IncomingMessage, who: (address: string, port: number) => Promise<T | null>) => {
     const { remoteAddress, remotePort } = req.socket;
-    return remoteAddress === undefined || remotePort === undefined ? Promise.resolve(null) : whois(remoteAddress, remotePort);
+    return remoteAddress === undefined || remotePort === undefined ? Promise.resolve(null) : who(remoteAddress, remotePort);
   };
   /**
    * whois names the machine, not the program, so a web page open on an allowed laptop is that laptop too. It can
@@ -1377,14 +1377,19 @@ export async function startApi(options: ApiOptions): Promise<Api> {
    */
   function checkHost(req: IncomingMessage) {
     const host = req.headers.host;
-    const hostname = typeof host === "string" ? new URL(`http://${host}`).hostname : undefined;
+    let hostname: string | undefined;
+    try {
+      hostname = typeof host === "string" ? new URL(`http://${host}`).hostname : undefined;
+    } catch {
+      hostname = undefined;
+    }
     if (hostname === undefined || !hostnames.has(hostname)) throw new HttpError(403, `the API does not answer to host ${req.headers.host}`);
   }
 
   /** The caller, once it is allowed and asked under one of the API's names. Every request and upgrade passes here. */
   async function admit(req: IncomingMessage): Promise<TailnetNodeId> {
-    const caller = await callerOf(req);
-    const workerRoute = decodeURIComponent(new URL(req.url ?? "/", "http://nexus").pathname).startsWith("/v1/deployer/");
+    const caller = await callerOf(req, whois);
+    const workerRoute = pathOf(req.url)?.startsWith("/v1/deployer/") ?? false;
     if (caller === null || (workerRoute
       ? !isReporter(registry, options.deployment, caller, req.headers.authorization)
       : !allowed.has(caller))) throw new HttpError(403, "caller is not a tailnet node this control plane allows");
@@ -1397,7 +1402,7 @@ export async function startApi(options: ApiOptions): Promise<Api> {
    * own ID and its own access, which `tailscale status` and a refused request already tell it.
    */
   async function whoami(req: IncomingMessage): Promise<Whoami> {
-    const node = await callerOf(req);
+    const node = await callerOf(req, whois);
     if (node === null) throw new HttpError(403, "caller is not a tailnet node");
     checkHost(req);
     const person = allowed.has(node) && isPerson(registry, options.deployment, node);
@@ -1406,8 +1411,7 @@ export async function startApi(options: ApiOptions): Promise<Api> {
 
   /** A token only root on the control plane's machine mints is what lets a machine that is not yet admitted call this. */
   async function join(req: IncomingMessage, joins: NonNullable<ApiOptions["joins"]>) {
-    const { remoteAddress, remotePort } = req.socket;
-    const caller = remoteAddress === undefined || remotePort === undefined ? null : await joins.whois(remoteAddress, remotePort);
+    const caller = await callerOf(req, joins.whois);
     if (caller === null) throw new HttpError(403, "caller is not a tailnet node");
     checkHost(req);
     if (req.headers["content-type"]?.split(";")[0]?.trim() !== "application/json") throw new HttpError(415, "requests that change state must have content-type application/json");
@@ -1428,8 +1432,9 @@ export async function startApi(options: ApiOptions): Promise<Api> {
       throw new HttpError(415, "requests that change state must have content-type application/json");
     }
 
+    const path = pathOf(req.url);
+    if (path === null) throw new HttpError(400, `the request path ${JSON.stringify(req.url)} is not a valid URL path`);
     const url = new URL(req.url ?? "/", "http://nexus");
-    const path = decodeURIComponent(url.pathname);
     const view = req.method === "GET" ? await page(path, url.searchParams, caller) : undefined;
     if (view !== undefined) return void res.writeHead(view.status, view.headers).end(view.body);
     const matches = routes.flatMap(([method, pattern, route]) => {
@@ -1497,7 +1502,7 @@ export async function startApi(options: ApiOptions): Promise<Api> {
     // a preview's page could open a terminal from the browser of anyone allowed. A browser always sends Origin.
     const origin = req.headers.origin;
     if (origin !== undefined && origin !== `${req.socket instanceof TLSSocket ? "https" : "http"}://${req.headers.host}`) throw new HttpError(403, `the attach route does not answer pages from ${origin}`);
-    const t = thread(attachRoute.exec(pathOf(req.url))![1]!);
+    const t = thread(attachRoute.exec(pathOf(req.url)!)![1]!);
     let request: ReturnType<typeof parseAttachQuery>;
     try {
       request = parseAttachQuery(new URL(req.url ?? "/", "http://nexus").searchParams);
@@ -1532,7 +1537,7 @@ export async function startApi(options: ApiOptions): Promise<Api> {
   function makeServer(certificate?: Certificate) {
     const serverOptions = {
       // Only a WebSocket to the attach route upgrades. Any other request is handled as one, Upgrade header or not.
-      shouldUpgradeCallback: (req: IncomingMessage) => req.headers.upgrade?.toLowerCase() === "websocket" && attachRoute.test(pathOf(req.url)),
+      shouldUpgradeCallback: (req: IncomingMessage) => req.headers.upgrade?.toLowerCase() === "websocket" && attachRoute.test(pathOf(req.url) ?? ""),
     };
     const server = certificate ? createHttpsServer({ ...serverOptions, ...certificate }) : createServer(serverOptions);
     server.on("request", (req, res) => {
@@ -1668,12 +1673,12 @@ function imageType(bytes: Buffer): string | null {
   return null;
 }
 
-/** The path a request's URL names, decoded as `handle` matches it, or "" for one that cannot be decoded. */
-function pathOf(url: string | undefined): string {
+/** The path a request's URL names, decoded as `handle` matches it, or null for one that cannot be decoded. */
+function pathOf(url: string | undefined): string | null {
   try {
     return decodeURIComponent(new URL(url ?? "/", "http://nexus").pathname);
   } catch {
-    return "";
+    return null;
   }
 }
 

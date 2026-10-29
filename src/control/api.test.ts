@@ -232,6 +232,20 @@ test("callers off the allowlist, or unknown to tailscaled, are refused", async (
   assert.deepEqual(await s.call("GET", "/v1/projects"), { status: 200, body: [] });
 });
 
+test("a path that does not decode is a 400 to an allowed caller and a 403 to any other, and a Host that does not parse is a 403", async (t) => {
+  const s = await setup(t);
+  const bad = await s.call("GET", "/v1/%zz");
+  assert.equal(bad.status, 400);
+  assert.equal(typeof bad.body.error, "string");
+  s.callAs("nSTRANGER" as TailnetNodeId);
+  assert.deepEqual(await s.call("GET", "/v1/%zz"), { status: 403, body: { error: "caller is not a tailnet node this control plane allows" } });
+  s.callAs(laptop);
+  for (const host of ["[zz", "a b"]) {
+    assert.deepEqual(await s.call("GET", "/v1/projects", undefined, { host }), { status: 403, body: { error: `the API does not answer to host ${host}` } }, host);
+    assert.equal((await s.call("GET", "/v1/whoami", undefined, { host })).status, 403, `whoami under ${host}`);
+  }
+});
+
 test("any tailnet node may ask who it is and what it may do, under the API's names only", async (t) => {
   const s = await setup(t, { deployment });
   const asks: [string, string][] = [[laptop, "a deployer"], [phone, "a person"], ["nFIREBAT", "the control node, though listed as a deployer"], ["nSTRANGER", "a stranger"]];
