@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import { existsSync } from "node:fs";
-import { mkdtemp, mkdir, readFile, readlink, rm, symlink, writeFile } from "node:fs/promises";
+import { cp, glob, mkdtemp, mkdir, readFile, readlink, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { test } from "node:test";
 import { command, ReleaseInstaller } from "./install.ts";
 import { parseWorkerConfig } from "./worker.ts";
@@ -14,7 +14,7 @@ const supervisorLacks = ["flock", "timeout", "node"].filter((tool) => !["/usr/lo
 test("worker config bounds drain and health and rejects credential-bearing endpoints", () => {
   const config = { controlUrl: "http://control:7470/", controlNodeId: "nControl", token: "a".repeat(64), drainTimeoutMs: 300000, healthTimeoutMs: 60000 };
   assert.deepEqual(parseWorkerConfig(config), config);
-  for (const patch of [{ controlUrl: "http://user:pass@control/" }, { healthTimeoutMs: 0 }, { drainTimeoutMs: -1 }, { token: "" }]) assert.throws(() => parseWorkerConfig({ ...config, ...patch }));
+  for (const patch of [{ controlUrl: "http://user:pass@control/" }, { healthTimeoutMs: 0 }, { drainTimeoutMs: -1 }, { token: "" }, { controlNodeId: "control" }, { controlNodeId: ["nControl"] }]) assert.throws(() => parseWorkerConfig({ ...config, ...patch }));
 });
 
 test("wait outcome requires fresh health from every role and detects rollback and supersession", () => {
@@ -24,6 +24,21 @@ test("wait outcome requires fresh health from every role and detects rollback an
   assert.equal(releaseOutcome({ desired, nodes: [report] }, commit, 100_000), "pending");
   assert.equal(releaseOutcome({ desired, nodes: [{ ...report, state: "rolled-back" }] }, commit, 101), "failed");
   assert.equal(releaseOutcome({ desired: null, nodes: [report] }, commit, 101), "superseded");
+});
+
+test("the bootstrap that install-deployer.sh copies loads without the repo's node_modules", async (t) => {
+  const repo = new URL("../../", import.meta.url).pathname;
+  const dir = await mkdtemp(join(tmpdir(), "nexus-bootstrap-"));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const script = await readFile(join(repo, "deploy/install-deployer.sh"), "utf8");
+  const copied = [...script.matchAll(/"\$repo\/(src\/[^"]+)"([^\s"]*)/g)].map((m) => m[1]! + m[2]!);
+  assert.ok(copied.includes("src/deploy/*.ts"), "the copy list comes from the script");
+  for (const pattern of copied) for await (const file of glob(pattern, { cwd: repo })) {
+    await mkdir(join(dir, dirname(file)), { recursive: true });
+    await cp(join(repo, file), join(dir, file));
+  }
+  await writeFile(join(dir, "package.json"), '{"type":"module"}\n');
+  await command(process.execPath, ["--input-type=module", "-e", `await import(${JSON.stringify(join(dir, "src/deploy/worker.ts"))})`], dir);
 });
 
 test("fixed supervisor falls back after a worker crashes or hangs, and accepts a later worker", { skip: supervisorLacks.length > 0 && `the supervisor runs on Linux nodes, and its PATH here lacks ${supervisorLacks.join(" and ")}` }, async (t) => {

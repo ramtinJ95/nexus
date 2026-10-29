@@ -1318,6 +1318,52 @@ test("a deleted thread's pylon that is gone is torn down again whenever its node
   assert.equal(deletes(), 3, "once the node lets go of it again, no delete follows");
 });
 
+test("follow leaves out a deleted thread's pylon its node no longer lists, and diffs it afresh when the node lists it again", async (t) => {
+  const registry = openRegistry(tempDb());
+  const thread = seed(registry);
+  const fake = fakeNode({ autoFinish: true });
+  const snapshots: { lists: boolean; known: PylonId[]; unlisted: PylonId[] }[] = [];
+  const loop = run(t, registry, fake.probe, {
+    ingest: (event, eventNode, known, now, unlisted) => {
+      if (event.type === "snapshot") snapshots.push({ lists: event.observation.pylons.some((p) => p.pylonId === thread.pylonId), known: [...known.keys()], unlisted: [...unlisted] });
+      return realIngest(event, eventNode, known, now, unlisted);
+    },
+  });
+  await until("the pylon runs", () => fake.pylons.get(thread.pylonId)?.phase === "running");
+  registry.setThreadStatus(thread.id, "deleted");
+  await until("the pylon is gone", () => !fake.pylons.has(thread.pylonId) && registry.pylon(thread.pylonId)?.submitted === null);
+  await settled(fake, loop);
+  fake.announce();
+  await settled(fake, loop);
+  assert.deepEqual(snapshots.at(-1), { lists: false, known: [], unlisted: [] }, "a snapshot that no longer lists the pylon leaves it out");
+
+  const from = snapshots.length;
+  fake.pylons.set(thread.pylonId, { pylonId: thread.pylonId, phase: "stopped", checkpoint: null, sessions: null });
+  fake.announce();
+  await until("the listed pylon is ingested", () => snapshots.slice(from).some((s) => s.lists));
+  assert.deepEqual(snapshots.slice(from).find((s) => s.lists), { lists: true, known: [thread.pylonId], unlisted: [thread.pylonId] }, "its sessions are written again, as for a pylon never listed");
+});
+
+test("a deleted thread's pylon removed by hand while the control plane was down has its sessions cleared", async (t) => {
+  const path = tempDb();
+  const fake = fakeNode({ autoFinish: true });
+  const before = openRegistry(path);
+  const thread = seed(before);
+  const first = startLoop({ registry: before, probes: [fake.probe], ingest: realIngest, previewPorts, intervalMs: 10, reconnectMs: 10, log: assert.fail });
+  await until("the pylon runs", () => fake.pylons.get(thread.pylonId)?.phase === "running");
+  fake.setSessions(thread.pylonId, [{ id: "w1:p1", state: "running", herdrPane: "w1:p1", harness: "claude-code", harnessSessionId: "s1", status: "idle", title: "review" }]);
+  before.setThreadStatus(thread.id, "archived");
+  await until("the pause is folded in", () => before.pylon(thread.pylonId)?.pauses === 1 && before.sessions(thread.pylonId)[0]?.state === "paused");
+  await first.close();
+  before.setThreadStatus(thread.id, "deleted");
+  fake.pylons.delete(thread.pylonId);
+  before.close();
+
+  const after = openRegistry(path);
+  run(t, after, fake.probe, { ingest: realIngest });
+  await until("the paused session is cleared", () => after.sessions(thread.pylonId).length === 0);
+});
+
 test("a deleted thread's ports go back after a restart between its delete and their release", async (t) => {
   const registry = openRegistry(tempDb());
   const thread = seed(registry);

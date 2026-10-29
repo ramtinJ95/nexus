@@ -1,0 +1,13 @@
+Stream: 64 snapshot, 375 session-event, 19 preview-hit, 14 job, 7 pylon, over 2 observe connections.
+
+| follow() work                                | main | branch | change |
+|----------------------------------------------|-----:|-------:|-------:|
+| pylon ID reads, one per `known` built        | 90 | 90 | 0% |
+| `known` entries ingest read, over all events | 27900 | 666 | -98% |
+| sessions writes                              | 317 | 17 | -95% |
+| most pylons in `listed`                      | 310 | 10 | -97% |
+| pylons in `listed` at the end                | 310 | 5 | -98% |
+| BEGIN IMMEDIATE transactions                 | 504 | 504 | 0% |
+| SQL statements run                           | 20955 | 20655 | -1% |
+
+Registry state after the stream: identical. Loop log: identical.

@@ -1,0 +1,25 @@
+{
+  "events": {
+    "snapshot": 64,
+    "session-event": 375,
+    "preview-hit": 19,
+    "job": 14,
+    "pylon": 7
+  },
+  "connections": 2,
+  "calls": {
+    "node": 479,
+    "pylonIdsToTick": 90,
+    "eventReceipt": 64,
+    "ingested": 479,
+    "reportSession": 400
+  },
+  "statements": 20655,
+  "transactions": 504,
+  "observationWrites": 71,
+  "observationBytes": 2242303,
+  "knownEntries": 666,
+  "sessionsWrites": 17,
+  "listedMax": 10,
+  "listedLast": 5
+}
