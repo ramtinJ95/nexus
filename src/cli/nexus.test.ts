@@ -248,12 +248,14 @@ test("the CLI runs a thread's life through the SOCKS proxy, and --json prints th
   assert.equal(shown.thread.id, thread.id);
   assert.equal(shown.desired, "running", "a thread with fresh human activity wants its pylon running");
   assert.deepEqual(shown.pylon, { grantsOutdated: false, id: thread.pylonId, node, actualState: "unknown", failed: null, observedAt: null, retryRefused: null, resources: project.resources });
+  assert.match((await s.nexus(["show", thread.id])).stdout, new RegExp(`^attach: nexus attach ${thread.id}$`, "m"), "the line that attaches a terminal, ready to copy");
   assert.deepEqual((await s.json(["conversation", thread.id])).entries.map((e: { id: number }) => e.id), [1, 2, 3]);
   const human = await s.nexus(["conversation", thread.id]);
   assert.equal(human.stdout, "> \n>   Fix the build  \n> and run the tests\n\n> now the lint\n\n> stop that\n");
 
   assert.equal((await s.json(["archive", thread.id])).status, "archived");
   assert.equal((await s.nexus(["send", thread.id, "x"])).code, 5, "an archived thread takes no messages");
+  assert.doesNotMatch((await s.nexus(["show", thread.id])).stdout, /^attach:/m, "nor an attach, since its pylon stays paused");
   assert.equal((await s.json(["unarchive", thread.id])).status, "active");
   assert.equal(await s.json(["abort", thread.id]), null, "a route that answers 204 prints null");
   assert.equal(await s.json(["retry", thread.id]), null);
@@ -1534,7 +1536,7 @@ judgment of failure 814 on ${node}: no verdict yet\n {2}judging since 2026-10-28
 
 test("deploy and release use the shared release view and wait for both roles", async (t) => {
   const s = await setup(t);
-  assert.equal((await s.nexus(["--version"])).stdout.trim(), "nexus 0.42.0");
+  assert.equal((await s.nexus(["--version"])).stdout.trim(), "nexus 0.43.0");
   assert.equal((await s.nexus(["deploy", "bad"])).code, 64);
   const requested = await s.json(["deploy", "main"]);
   assert.equal(requested.desired.commit, "a".repeat(40));

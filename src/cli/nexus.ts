@@ -39,7 +39,7 @@ import type { WebSocket } from "ws";
 import { attachTerminal, processTty } from "./attach.ts";
 import { call, CliError, exitCodes, follow, upgrade, type Endpoint, type HostPort } from "./transport.ts";
 
-const version = "0.42.0";
+const version = "0.43.0";
 /** Where `connect` looks for the API on a host: the dashboard's HTTPS port, then the plain HTTP port. */
 const controlPorts = ["https://{host}:7443", "http://{host}:7470"];
 const configFile = () => join(homedir(), ".config", "nexus", "cli.json");
@@ -408,6 +408,7 @@ function detailText({ thread: t, pylon: p, agent, sessions, previews, ports, out
     ...t.usageLimit === undefined ? [] : [`usage limit: ${usageLimitText(t.usageLimit, Date.now())}. \`nexus send ${t.id} continue\` resumes it once the limit resets`],
     `status: ${t.status}${working(t) ? ", agent working" : ""}`,
     `pylon: ${p.id} on ${p.node}, ${p.actualState}${observed}`,
+    ...t.status === "archived" || t.status === "deleted" ? [] : [`attach: nexus attach ${t.id}`],
     // A control plane older than the size in thread detail sends none.
     ...p.resources === undefined ? [] : [`size: ${p.resources.cpus} CPUs, ${p.resources.memoryGiB} GiB memory, ${p.resources.diskGiB} GiB disk${p.resources.nestedVirtualization === true ? ", nested virtualization" : ""}`],
     ...t.placement === undefined ? [] : [`placement: ${placementText(t.placement)}`],
