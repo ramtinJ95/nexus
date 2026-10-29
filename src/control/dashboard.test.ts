@@ -719,6 +719,8 @@ test("a landing shows its steps as the review moves through them, until it lands
   assert.deepEqual(await steps({ kind: "checking", startedAt: 0, thread: null }, { rounds: [unchecked] }), {
     states: "now todo todo todo todo", text: `Landing #7 Cache ↗ Check Live check Merge Deploy Landed .nexus/check runs at ${head.slice(0, 12)}, or its kept result for that commit is read.` });
   assert.equal((await steps({ kind: "merging", authorized: head })).states, "done skipped now todo todo", "a head with no .nexus/verify skips the live check");
+  assert.equal((await steps({ kind: "merging", authorized: null, waiting: "rv-other deploys" })).text,
+    `Landing #7 Cache ↗ Check Live check (no .nexus/verify) Merge Deploy Landed Waiting while rv-other deploys, since landings deploy one at a time, then merging ${head.slice(0, 12)}.`);
   assert.deepEqual(await steps({ kind: "deploying", commit: merge, previous: "3".repeat(40), requested: true, deadline: 0 }, { merged: merge }), {
     states: "done skipped done now todo", text: `Landing #7 Cache ↗ Check Live check (no .nexus/verify) Merge Deploy Landed Deploying the merge commit ${merge.slice(0, 12)} until every service reports it healthy.` });
   assert.deepEqual(await steps({ kind: "rolling-back", commit: merge, previous: "3".repeat(40), why: "The deploy of 4444 failed: rj-firebat control failed.", requested: true, deadline: 0 }, { merged: merge }), {
