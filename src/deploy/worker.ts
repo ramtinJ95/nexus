@@ -2,7 +2,7 @@ import { copyFile, readFile, readlink, stat, writeFile } from "node:fs/promises"
 import { join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { command, checkoutMerged, commitAt, pointLink, releaseLink, ReleaseInstaller, type Transaction } from "./install.ts";
-import { planDeploy, quarantined, type Attempt, type Role } from "./plan.ts";
+import { planDeploy, quarantined, type Attempt, type ReleaseHealth, type Role } from "./plan.ts";
 import type { ReleaseReport, ReleaseView } from "./model.ts";
 import { jsonRequest } from "./http.ts";
 import { readJson, saveJson } from "../json-file.ts";
@@ -42,15 +42,37 @@ export async function runWorker(check = false): Promise<void> {
     try { await stat(join(prefix, "deployer", "roles", role)); roles.push(role); }
     catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
   }
-  for (const role of roles) await reconcileRole(role, config, api);
+  await reconcileRoles(roles, config, api);
 }
 
 class WaitingForControl extends Error {}
 
 type Api = (path: string, body?: unknown) => Promise<any>;
-export async function reconcileRole(role: Role, config: WorkerConfig, api: Api, boundary = {
-  prefix, etc: "/etc/nexus", units: "/etc/systemd/system", run: command, checkout: checkoutMerged,
-}): Promise<void> {
+const nodeBoundary = { prefix, etc: "/etc/nexus", units: "/etc/systemd/system", run: command, checkout: checkoutMerged };
+
+/** What a probe plans from: control's report in the view, healthy only while fresh. */
+function controlHealth(view: ReleaseView): ReleaseHealth {
+  const control = view.nodes.find((r) => r.role === "control");
+  return { commit: control?.commit ?? null, healthy: control?.state === "healthy" && Date.now() - control.observedAt < 90_000 };
+}
+
+/** One poll. Its roles share one read of the release view, read again once control's report would change what it shows. */
+export async function reconcileRoles(roles: readonly Role[], config: WorkerConfig, api: Api, boundary = nodeBoundary): Promise<void> {
+  let view: Promise<ReleaseView> | undefined;
+  const reporting: Api = async (path, body) => {
+    const answer = await api(path, body);
+    const report = body as ReleaseReport;
+    if (path === "report" && report.role === "control" && view !== undefined) {
+      const shown = controlHealth(await view);
+      if (shown.commit !== report.commit || shown.healthy !== (report.state === "healthy")) view = undefined;
+    }
+    return answer;
+  };
+  for (const role of roles) await reconcileRole(role, config, reporting, boundary, () => view ??= api("release"));
+}
+
+export async function reconcileRole(role: Role, config: WorkerConfig, api: Api, boundary = nodeBoundary,
+  readView: () => Promise<ReleaseView> = () => api("release")): Promise<void> {
   const { prefix, etc, units, run, checkout } = boundary;
   const link = releaseLink(prefix, role);
   const service = `nexus-${role}.service`;
@@ -73,9 +95,11 @@ export async function reconcileRole(role: Role, config: WorkerConfig, api: Api, 
     return false;
   };
   const report = async (state: ReleaseReport["state"], target: string | null, reason: string | null = null) => {
-    const value = { role, commit: await commitAt(link), target, state, reason, observedAt: Date.now() };
-    await saveJson(reportPath, value);
-    const { observedAt: _, ...wire } = value;
+    const wire = { role, commit: await commitAt(link), target, state, reason };
+    const saved = await readJson(reportPath, null).catch(() => null) as ReleaseReport | null;
+    if (saved === null || (Object.keys(wire) as (keyof typeof wire)[]).some((key) => saved[key] !== wire[key])) {
+      await saveJson(reportPath, { ...wire, observedAt: Date.now() });
+    }
     await api("report", wire).catch(() => { console.error(`could not report ${role} release; retained locally for the next poll`); });
   };
   const settled = (result: Transaction) => report(result.state === "installing" ? "failed" : result.state, result.commit, result.reason);
@@ -128,7 +152,7 @@ export async function reconcileRole(role: Role, config: WorkerConfig, api: Api, 
   // Recovery must not depend on the API whose failed upgrade may have stopped it.
   const recovered = await installer.recover();
   if (recovered !== null) await settled(recovered);
-  const view = await api("release") as ReleaseView;
+  const view = await readView();
   desired = view.desired?.commit ?? null;
   const prior = await readJson(reportPath, null) as ReleaseReport | null;
   const journal = await installer.observed();
@@ -141,8 +165,7 @@ export async function reconcileRole(role: Role, config: WorkerConfig, api: Api, 
     return;
   }
   const current = { commit: await commitAt(link), healthy: await healthy() };
-  const control = view.nodes.find((r) => r.role === "control");
-  const observedControl = { commit: control?.commit ?? null, healthy: control?.state === "healthy" && Date.now() - control.observedAt < 90_000 };
+  const observedControl = controlHealth(view);
   const step = planDeploy({ desired: view.desired, role, current, control: observedControl, attempts, turnRunning: false, drainStartedAt: null, drainTimeoutMs: config.drainTimeoutMs, now: Date.now() });
   if (step.kind === "idle" || step.kind === "healthy") {
     await report(current.healthy ? "healthy" : "failed", desired, current.healthy ? null : "running release is not healthy");

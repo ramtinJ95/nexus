@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
 import { existsSync } from "node:fs";
-import { cp, glob, mkdtemp, mkdir, readFile, readlink, rm, symlink, writeFile } from "node:fs/promises";
+import { cp, glob, mkdtemp, mkdir, readFile, readlink, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { test } from "node:test";
+import { test, type TestContext } from "node:test";
 import { command, ReleaseInstaller } from "./install.ts";
 import { parseWorkerConfig } from "./worker.ts";
 import { releaseOutcome } from "./model.ts";
@@ -261,4 +261,100 @@ for (const readiness of ["stale", "unhealthy", "unreachable"] as const) test(`pr
   assert.equal(await readlink(join(dir, "control-current")), `releases/${commit}`);
   assert.equal(JSON.parse(await readFile(join(dir, "probe-deploy.json"), "utf8")).state, "healthy");
   assert.equal(await readlink(join(dir, "deployer-current")), `releases/${commit}`, "the checked worker is promoted over a link an interrupted swap left");
+});
+
+/** Both roles on one machine, each service answering health with its own commit, against a control plane that keeps the reports it gets. */
+async function bothRoles(t: TestContext, linked: string) {
+  const { createServer } = await import("node:http");
+  const { once } = await import("node:events");
+  const dir = await mkdtemp(join(tmpdir(), "nexus-both-"));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  for (const path of ["etc", "units", "deployer", `releases/${linked}`]) await mkdir(join(dir, path), { recursive: true });
+  await writeFile(join(dir, `releases/${linked}/release-commit`), linked);
+  const running: Record<string, string> = {};
+  for (const [role, link] of [["control", "control-current"], ["probe", "current"]] as const) {
+    await symlink(`releases/${linked}`, join(dir, link));
+    await writeFile(join(dir, `units/nexus-${role}.service`), "unit");
+    running[role] = linked;
+    const server = createServer((_req, res) => res.end(JSON.stringify({ commit: running[role] }))).listen(0, "127.0.0.1");
+    await once(server, "listening");
+    t.after(() => { server.closeAllConnections(); server.close(); });
+    await writeFile(join(dir, `etc/${role}.json`), JSON.stringify({ listen: { host: "127.0.0.1", port: (server.address() as { port: number }).port } }));
+  }
+  const reports = new Map<string, any>();
+  const posted: string[] = [];
+  const control = { reads: 0, posted, reports, desired: { commit, requestedBy: "nMac", requestedAt: 0 } as object | null };
+  const api = async (path: string, body?: any) => {
+    if (path === "release") {
+      control.reads++;
+      return { desired: control.desired, nodes: [...reports.values()].map((r) => ({ node: "node", ...r })) };
+    }
+    if (path === "drain") return { idle: true, expiresAt: Date.now() + 120_000 };
+    if (path === "report") { reports.set(body.role, { ...body, observedAt: Date.now() }); posted.push(`${body.role} ${body.state}`); return { ok: true }; }
+    assert.fail(path);
+  };
+  const boundary = {
+    prefix: dir, etc: join(dir, "etc"), units: join(dir, "units"),
+    async checkout() {},
+    async run(program: string, args: readonly string[]) {
+      if (program === "env" && !args.includes("NEXUS_PREPARE=1")) {
+        await mkdir(join(dir, `releases/${commit}`), { recursive: true });
+        await writeFile(join(dir, `releases/${commit}/release-commit`), commit);
+      }
+      if (program === "systemctl" && args[0] === "restart") running[args[1]!.replace(/^nexus-|\.service$/g, "")] = commit;
+      return "";
+    },
+  };
+  const config = { controlUrl: "http://control/", controlNodeId: "nControl", token: "a".repeat(64), healthTimeoutMs: 1000, drainTimeoutMs: 0 };
+  return { dir, running, control, api, boundary, config };
+}
+
+test("a poll of two idle roles reads the release view once, and an unchanged report leaves its file alone", async (t) => {
+  const { reconcileRoles } = await import("./worker.ts");
+  const m = await bothRoles(t, commit);
+  await reconcileRoles(["control", "probe"], m.config, m.api, m.boundary);
+  const file = async (role: string) => {
+    const path = join(m.dir, `${role}-deploy-report.json`);
+    const s = await stat(path);
+    return `${await readFile(path, "utf8")} ${s.ino} ${s.mtimeMs}`;
+  };
+  const before = [await file("control"), await file("probe")];
+  m.control.reads = 0;
+  m.control.posted.length = 0;
+  await reconcileRoles(["control", "probe"], m.config, m.api, m.boundary);
+  assert.equal(m.control.reads, 1);
+  assert.deepEqual(m.control.posted, ["control healthy", "probe healthy"], "an unchanged report still reaches the control plane, which keeps it fresh");
+  assert.deepEqual([await file("control"), await file("probe")], before);
+  m.running.probe = "c".repeat(40);
+  m.control.desired = null;
+  await reconcileRoles(["control", "probe"], m.config, m.api, m.boundary);
+  const { observedAt: _, ...probe } = JSON.parse(await readFile(join(m.dir, "probe-deploy-report.json"), "utf8"));
+  assert.deepEqual(probe, { role: "probe", commit, target: null, state: "failed", reason: "running release is not healthy" });
+});
+
+test("a control upgrade makes the probe read the release view again, so both roles upgrade in one poll", async (t) => {
+  const { reconcileRoles } = await import("./worker.ts");
+  const m = await bothRoles(t, "b".repeat(40));
+  await reconcileRoles(["control", "probe"], m.config, m.api, m.boundary);
+  assert.deepEqual(m.control.posted, ["control installing", "control healthy", "probe installing", "probe healthy"]);
+  assert.equal(m.control.reads, 4, "control plans and activates, then the probe plans and checks control again before it switches");
+  assert.equal(await readlink(join(m.dir, "control-current")), `releases/${commit}`);
+  assert.equal(await readlink(join(m.dir, "current")), `releases/${commit}`);
+});
+
+test("a probe a release behind reads the view again when control's unchanged report was stale there, and upgrades in the same poll", async (t) => {
+  const { reconcileRoles } = await import("./worker.ts");
+  const m = await bothRoles(t, "b".repeat(40));
+  await mkdir(join(m.dir, `releases/${commit}`));
+  await writeFile(join(m.dir, `releases/${commit}/release-commit`), commit);
+  await rm(join(m.dir, "control-current"));
+  await symlink(`releases/${commit}`, join(m.dir, "control-current"));
+  m.running.control = commit;
+  const report = { role: "control", commit, target: commit, state: "healthy", reason: null };
+  await writeFile(join(m.dir, "control-deploy-report.json"), JSON.stringify({ ...report, observedAt: 0 }));
+  m.control.reports.set("control", { ...report, observedAt: Date.now() - 90_001 });
+  await reconcileRoles(["control", "probe"], m.config, m.api, m.boundary);
+  assert.deepEqual(m.control.posted, ["control healthy", "probe installing", "probe healthy"]);
+  assert.equal(JSON.parse(await readFile(join(m.dir, "control-deploy-report.json"), "utf8")).observedAt, 0, "control's report file was left as it was");
+  assert.equal(await readlink(join(m.dir, "current")), `releases/${commit}`);
 });
