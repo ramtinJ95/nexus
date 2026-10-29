@@ -502,9 +502,9 @@ test("a landing whose save fails archives nothing, so a release that supersedes 
   f.registry.setDesiredRelease({ commit: previous, requestedBy: "person", requestedAt: 1 });
   const loop = await approved(f, "nLAPTOP");
   const save = f.registry.saveReview;
-  f.registry.saveReview = (review, archive) => {
+  f.registry.saveReview = (review, archive, read) => {
     if (review.phase.kind === "landed") throw new Error("disk I/O error");
-    save(review, archive);
+    return save(review, archive, read);
   };
   for (const role of ["control", "probe"] as const) f.registry.reportRelease({ node, role, commit: merged, target: merged, state: "healthy", reason: null, observedAt: Date.now() });
   await loop.poll();
@@ -1341,6 +1341,86 @@ test("a builder or reviewer thread the person archives or deletes cancels the re
   await h.loop().poll();
   assert.equal(h.review().phase.kind, "cancelled");
   assert.deepEqual(h.discarded, h.checkThreads, "its check thread goes with it");
+});
+
+test("the person cancels a review that is reviewing, fixing or checking, which archives its reviewer and leaves its builder", async (t) => {
+  const f = fixture(t);
+  const loop = f.loop();
+  await loop.start(f.builder, { land: null });
+  await loop.poll();
+  const reviewer = f.review().reviewer;
+  const cancelled = loop.cancel(f.builder, "nPHONE");
+  assert.deepEqual(cancelled.phase, { kind: "cancelled", who: "person", by: "nPHONE" });
+  assert.deepEqual(f.review(), cancelled);
+  assert.deepEqual(f.statuses(), ["active", "archived"]);
+  assert.deepEqual(f.woken, [reviewer], "the reviewer's pylon pauses at once");
+  await loop.poll();
+  assert.equal(f.sent.length, 1, "a cancelled review sends nothing more");
+  assert.ok(!f.attention().includes("decision"));
+  assert.throws(() => loop.cancel(f.builder, "nPHONE"), (err: HttpError) => err.status === 409 && /already ended cancelled/.test(err.message));
+  assert.equal((await loop.start(f.builder, { land: null })).phase.kind, "reviewing", "a cancelled review makes way for a new one");
+
+  const g = fixture(t);
+  const fixing = g.loop();
+  await fixing.start(g.builder, { land: null });
+  await fixing.poll();
+  g.reply(g.review().reviewer, verdict(g.review(), { verdict: "changes", findings: [serious] }));
+  await fixing.poll();
+  assert.equal(g.review().phase.kind, "fixing");
+  assert.match(String(await fixing.start(g.builder, { land: null }).catch((err: Error) => err.message)), new RegExp(`is fixing. Cancel it with nexus review --cancel ${g.builder} to start another$`));
+  fixing.cancel(g.builder, "nPHONE");
+  assert.deepEqual(g.review().phase, { kind: "cancelled", who: "person", by: "nPHONE" });
+  assert.deepEqual(g.statuses(), ["active", "archived"]);
+
+  const h = fixture(t);
+  h.check = { kind: "running" };
+  const checking = await approved(h, "nLAPTOP");
+  assert.equal(h.review().phase.kind, "checking");
+  checking.cancel(h.builder, "nPHONE");
+  assert.equal(h.review().phase.kind, "cancelled");
+  assert.deepEqual(h.discarded, h.checkThreads, "its check thread goes with it");
+  h.check = { kind: "done", passed: true, output: "ok" };
+  await checking.poll();
+  assert.deepEqual(h.merges, [], "a cancelled landing never merges");
+});
+
+test("a review that authorized its merge, is deploying or rolling back, or has ended is not cancelled, and says why", async (t) => {
+  const f = fixture(t);
+  f.registry.setDesiredRelease({ commit: previous, requestedBy: "person", requestedAt: 1 });
+  const loop = await approved(f, "nLAPTOP");
+  assert.equal(f.review().phase.kind, "deploying");
+  const seenThrough = (err: HttpError) => err.status === 409 && /a merge or deploy that has begun is seen through, so it cannot be cancelled/.test(err.message);
+  assert.throws(() => loop.cancel(f.builder, "nPHONE"), seenThrough);
+  const deploying = f.review();
+  for (const phase of [{ kind: "merging", authorized: head1 }, { kind: "rolling-back", commit: merged, previous, why: "failed", requested: true, deadline: 0 }] as const) {
+    f.registry.saveReview({ ...deploying, phase });
+    assert.throws(() => loop.cancel(f.builder, "nPHONE"), seenThrough, phase.kind);
+  }
+  assert.deepEqual(f.statuses(), ["active", "active"], "a refused cancel archives nothing");
+  f.registry.saveReview({ ...deploying, merged: null, phase: { kind: "merging", authorized: null } });
+  assert.equal(loop.cancel(f.builder, "nPHONE").phase.kind, "cancelled", "a landing that has not authorized its merge is cancelled");
+
+  const g = fixture(t);
+  const stopped = await approved(g, null);
+  assert.equal(g.review().phase.kind, "approved");
+  assert.throws(() => stopped.cancel(g.builder, "nPHONE"), (err: HttpError) => err.status === 409 && /already ended approved, so there is nothing to cancel/.test(err.message));
+  assert.throws(() => stopped.cancel(g.add("th-other", true), "nPHONE"), (err: HttpError) => err.status === 409 && /has no review/.test(err.message));
+});
+
+test("a pass that was stepping a review when the person cancelled it does not save over the cancel", async (t) => {
+  const { f, loop } = await undelivered(t);
+  f.delivery = "delivered";
+  const held = f.holdDeliveries();
+  const pass = loop.poll();
+  await held.entered;
+  loop.cancel(f.builder, "nPHONE");
+  held.release();
+  await pass;
+  assert.deepEqual(f.review().phase, { kind: "cancelled", who: "person", by: "nPHONE" });
+  assert.equal(f.review().outbox, null);
+  await loop.poll();
+  assert.equal(f.review().phase.kind, "cancelled", "the next pass steps from the cancel");
+  assert.deepEqual(f.registry.events("0", { kinds: ["review.changed"] }).map((e) => (e.payload.phase as { kind: string }).kind), ["reviewing", "cancelled"]);
 });
 
 test("a message that waits to be delivered is not sent once the PR merged, and a PR closed before the landing merges ends closed", async (t) => {
